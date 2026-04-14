@@ -5,11 +5,11 @@ A unified E2E test orchestration platform. Discover, configure, and run Playwrig
 ## Quick Start
 
 ```bash
-git clone git@github.com:ferterahadi/canary-lab.git
-cd canary-lab
-yarn install
-npx playwright install chromium
-yarn e2e
+$ npx playwright install chromium
+$ git clone git@github.com:ferterahadi/canary-lab.git
+$ cd canary-lab
+$ yarn install
+$ yarn e2e
 ```
 
 Select `example_todo_api`, choose your terminal (iTerm or Terminal), and the example runs end-to-end.
