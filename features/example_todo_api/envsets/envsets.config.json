@@ -1,0 +1,16 @@
+{
+  "appRoots": {
+    "CANARY_LAB": "../.."
+  },
+  "slots": {
+    "example_todo_api.env": {
+      "description": "Canary Lab example_todo_api feature .env",
+      "target": "$CANARY_LAB/features/example_todo_api/.env"
+    }
+  },
+  "feature": {
+    "slots": ["example_todo_api.env"],
+    "testCommand": "yarn test:e2e",
+    "testCwd": "$CANARY_LAB/features/example_todo_api"
+  }
+}

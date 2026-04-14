@@ -1,0 +1,26 @@
+{
+  "name": "canary-lab",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Unified E2E test orchestration platform with self-healing capabilities",
+  "workspaces": [
+    "features/*"
+  ],
+  "scripts": {
+    "e2e": "tsx shared/e2e-runner/runner.ts",
+    "env:apply": "tsx shared/env-switcher/root-cli.ts --apply",
+    "env:revert": "tsx shared/env-switcher/root-cli.ts --revert",
+    "new-feature": "tsx scripts/new-feature.ts"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.54.2",
+    "@types/node": "^25.5.2",
+    "dotenv": "^16.6.1",
+    "tsx": "^4.20.3",
+    "typescript": "^5.9.2"
+  },
+  "dependencies": {
+    "axios": "^1.15.0",
+    "uuid": "^13.0.0"
+  }
+}

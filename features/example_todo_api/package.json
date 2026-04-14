@@ -1,0 +1,15 @@
+{
+  "name": "canary-lab-example_todo_api",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Example feature — TODO API CRUD tests (self-contained, no external repos)",
+  "scripts": {
+    "start": "tsx ../../shared/env-switcher/switch.ts example_todo_api",
+    "env:apply": "tsx ../../shared/env-switcher/switch.ts example_todo_api --apply",
+    "env:revert": "tsx ../../shared/env-switcher/switch.ts example_todo_api --revert",
+    "test:e2e": "playwright test",
+    "test:e2e:headed": "playwright test --headed",
+    "test:e2e:ui": "playwright test --ui",
+    "install:browsers": "playwright install chromium"
+  }
+}
