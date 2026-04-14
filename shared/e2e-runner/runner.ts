@@ -10,20 +10,22 @@ import {
 } from '../launcher/startup'
 import { openItermTabs } from '../launcher/iterm'
 import { openTerminalTabs } from '../launcher/terminal'
+import {
+  ROOT,
+  FEATURES_DIR,
+  LOGS_DIR,
+  PIDS_DIR,
+  MANIFEST_PATH,
+  SUMMARY_PATH,
+  RERUN_SIGNAL,
+  RESTART_SIGNAL,
+} from './paths'
 
 type TerminalChoice = 'iTerm' | 'Terminal'
 
-// ─── Paths ──────────────────────────────────────────────────────────────────
-const ROOT = path.resolve(__dirname, '../..')
-const FEATURES_DIR = path.join(ROOT, 'features')
-const LOGS_DIR = path.join(ROOT, 'logs')
-const PIDS_DIR = path.join(LOGS_DIR, 'pids')
-const MANIFEST_PATH = path.join(LOGS_DIR, 'manifest.json')
-const SUMMARY_PATH = path.join(LOGS_DIR, 'e2e-summary.json')
+// ─── Paths (local to runner) ────────────────────────────────────────────────
 const SWITCH_SCRIPT = path.join(__dirname, '../env-switcher/switch.ts')
 const SUMMARY_REPORTER = path.resolve(__dirname, 'summary-reporter.ts')
-const RERUN_SIGNAL = path.join(LOGS_DIR, '.rerun')
-const RESTART_SIGNAL = path.join(LOGS_DIR, '.restart')
 
 // ─── Readline helpers (same pattern as shared/launcher/index.ts) ────────────
 function prompt(rl: readline.Interface, question: string): Promise<string> {
@@ -160,7 +162,7 @@ async function launchServices(
     const pid = resolveRunningPid(svc)
     if (pid) {
       process.stdout.write(`  Stopping existing ${svc.name} (PID ${pid})... `)
-      killProcess(pid)
+      await killProcess(pid)
       console.log('stopped')
     }
   }
@@ -241,10 +243,14 @@ function portFromHealthUrl(url: string): number | null {
 
 function lookupPidByPort(port: number): number | null {
   try {
-    const output = execFileSync('lsof', ['-ti', `tcp:${port}`], {
-      encoding: 'utf-8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-    }).trim()
+    const output = execFileSync(
+      'lsof',
+      ['-ti', `tcp:${port}`, '-sTCP:LISTEN'],
+      {
+        encoding: 'utf-8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+      },
+    ).trim()
     const pid = parseInt(output.split('\n')[0]?.trim() ?? '', 10)
     return Number.isNaN(pid) ? null : pid
   } catch {
@@ -261,7 +267,21 @@ function isProcessAlive(pid: number): boolean {
   }
 }
 
-function killProcess(pid: number): void {
+function killProcessSync(pid: number): void {
+  try {
+    process.kill(pid, 'SIGTERM')
+  } catch {
+    return
+  }
+  // Best-effort sync kill for signal handlers — send SIGKILL after SIGTERM
+  try {
+    process.kill(pid, 'SIGKILL')
+  } catch {
+    // ignore
+  }
+}
+
+async function killProcess(pid: number): Promise<void> {
   try {
     process.kill(pid, 'SIGTERM')
   } catch {
@@ -270,10 +290,7 @@ function killProcess(pid: number): void {
   // Wait up to 5s for graceful shutdown
   const deadline = Date.now() + 5000
   while (Date.now() < deadline && isProcessAlive(pid)) {
-    const waitUntil = Date.now() + 200
-    while (Date.now() < waitUntil) {
-      /* spin */
-    }
+    await new Promise((r) => setTimeout(r, 200))
   }
   if (isProcessAlive(pid)) {
     try {
@@ -319,7 +336,7 @@ async function restartAllServices(
     const pid = resolveRunningPid(svc)
     if (pid) {
       process.stdout.write(`stopping PID ${pid}... `)
-      killProcess(pid)
+      await killProcess(pid)
       console.log('stopped')
     } else {
       console.log('no existing process found')
@@ -338,6 +355,8 @@ async function restartAllServices(
 }
 
 // ─── Playwright ─────────────────────────────────────────────────────────────
+const RUN_TIMEOUT = 10 * 60 * 1000 // 10 minutes — safety net for hung runs
+
 function runPlaywright(featureDir: string, headed: boolean): Promise<number> {
   return new Promise((resolve, reject) => {
     const playwrightArgs = [
@@ -353,23 +372,83 @@ function runPlaywright(featureDir: string, headed: boolean): Promise<number> {
       shell: false,
     })
 
+    const timer = setTimeout(() => {
+      console.log('\n  Playwright run timed out after 10 minutes, killing...')
+      child.kill('SIGTERM')
+      setTimeout(() => {
+        try {
+          child.kill('SIGKILL')
+        } catch {
+          // already dead
+        }
+      }, 5000)
+    }, RUN_TIMEOUT)
+
     const forwardSigInt = () => child.kill('SIGINT')
     const forwardSigTerm = () => child.kill('SIGTERM')
     process.on('SIGINT', forwardSigInt)
     process.on('SIGTERM', forwardSigTerm)
 
     child.on('error', (err) => {
+      clearTimeout(timer)
       process.off('SIGINT', forwardSigInt)
       process.off('SIGTERM', forwardSigTerm)
       reject(err)
     })
 
     child.on('exit', (code) => {
+      clearTimeout(timer)
       process.off('SIGINT', forwardSigInt)
       process.off('SIGTERM', forwardSigTerm)
       resolve(code ?? 1)
     })
   })
+}
+
+// ─── Log enrichment ─────────────────────────────────────────────────────────
+function extractLogsForTest(
+  slug: string,
+  serviceLogs: string[],
+): Record<string, string> {
+  const logs: Record<string, string> = {}
+  const openTag = `<${slug}>`
+  const closeTag = `</${slug}>`
+
+  for (const logPath of serviceLogs) {
+    if (!fs.existsSync(logPath)) continue
+    const content = fs.readFileSync(logPath, 'utf-8')
+    const openIdx = content.indexOf(openTag)
+    const closeIdx = content.indexOf(closeTag)
+    if (openIdx === -1 || closeIdx === -1 || closeIdx <= openIdx) continue
+    const snippet = content
+      .slice(openIdx + openTag.length, closeIdx)
+      .trim()
+    if (snippet.length > 0) {
+      const svcName = path.basename(logPath, '.log')
+      logs[svcName] = snippet
+    }
+  }
+  return logs
+}
+
+function enrichSummaryWithLogs(): void {
+  if (!fs.existsSync(SUMMARY_PATH) || !fs.existsSync(MANIFEST_PATH)) return
+
+  const summary = JSON.parse(fs.readFileSync(SUMMARY_PATH, 'utf-8'))
+  const manifest: { serviceLogs: string[] } = JSON.parse(
+    fs.readFileSync(MANIFEST_PATH, 'utf-8'),
+  )
+
+  if (!Array.isArray(summary.failed) || summary.failed.length === 0) return
+
+  // Enrich: replace string slugs with {name, logs} objects
+  summary.failed = summary.failed.map((entry: string | { name: string }) => {
+    const slug = typeof entry === 'string' ? entry : entry.name
+    const logs = extractLogsForTest(slug, manifest.serviceLogs)
+    return { name: slug, logs }
+  })
+
+  fs.writeFileSync(SUMMARY_PATH, JSON.stringify(summary, null, 2) + '\n')
 }
 
 // ─── Summary ────────────────────────────────────────────────────────────────
@@ -386,7 +465,8 @@ function printSummary(): void {
   console.log(`  Failed: ${summary.failed.length}`)
   if (summary.failed.length > 0) {
     console.log(`  Failures:`)
-    for (const name of summary.failed) {
+    for (const entry of summary.failed) {
+      const name = typeof entry === 'string' ? entry : entry.name
       console.log(`    - ${name}`)
     }
   }
@@ -431,6 +511,7 @@ async function watchMode(
       `\n  Re-running Playwright tests${headed ? ' (headed)' : ''}...\n`,
     )
     await runPlaywright(featureDir, headed)
+    enrichSummaryWithLogs()
     printSummary()
 
     console.log('  ──── Watch Mode ────')
@@ -461,7 +542,7 @@ async function main() {
         const pid = resolveRunningPid(svc)
         if (pid) {
           process.stdout.write(`    ${svc.name}: stopping PID ${pid}... `)
-          killProcess(pid)
+          killProcessSync(pid)
           console.log('stopped')
         }
       }
@@ -589,7 +670,8 @@ async function main() {
     console.log(`  Running Playwright tests${headed ? ' (headed)' : ''}...\n`)
     await runPlaywright(feature.featureDir, headed)
 
-    // ── 12. Print summary
+    // ── 12. Enrich summary with log snippets and print
+    enrichSummaryWithLogs()
     printSummary()
 
     // ── 13. Enter watch mode (loops forever until Ctrl+C)

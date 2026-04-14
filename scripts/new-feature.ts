@@ -94,8 +94,9 @@ const envExample = `# URL of the locally running service
 GATEWAY_URL=http://localhost:3000
 `
 
-const configTs = `import { loadFeatureEnv } from '../../shared/configs/loadEnv'
-loadFeatureEnv(__dirname + '/..')
+const configTs = `// To load .env, uncomment below (requires dotenv in root devDependencies):
+// import { loadFeatureEnv } from '../../shared/configs/loadEnv'
+// loadFeatureEnv(__dirname + '/..')
 
 export const GATEWAY_URL = process.env.GATEWAY_URL ?? 'http://localhost:3000'
 // Add more typed exports here
@@ -125,7 +126,7 @@ const envsetsConfig = JSON.stringify(
 const localEnv = `GATEWAY_URL=http://localhost:3000
 `
 
-const specFile = `import { test, expect } from '@playwright/test'
+const specFile = `import { test, expect } from '../../../shared/e2e-runner/log-marker-fixture'
 
 test.describe('${name}', () => {
   test('example test', async () => {

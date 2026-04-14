@@ -1,9 +1,6 @@
 import { test as base, expect } from '@playwright/test'
 import fs from 'fs'
-import path from 'path'
-
-const LOGS_DIR = path.resolve(__dirname, '../../logs')
-const MANIFEST_PATH = path.join(LOGS_DIR, 'manifest.json')
+import { MANIFEST_PATH } from './paths'
 
 function slugify(title: string): string {
   return title

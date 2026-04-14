@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from '../../../shared/e2e-runner/log-marker-fixture'
 import { TodoApi } from './helpers/api'
 
 const api = new TodoApi()

@@ -47,21 +47,32 @@ Read `logs/e2e-summary.json`:
 {
   "total": 20,
   "passed": 18,
-  "failed": ["test-case-send-message", "test-case-batch-timing"]
+  "failed": [
+    {
+      "name": "test-case-send-message",
+      "logs": {
+        "svc-api-server": "... relevant log lines during this test ...",
+        "svc-worker": "... relevant log lines during this test ..."
+      }
+    }
+  ]
 }
 ```
 
 If `failed` is empty, all tests pass.
 
+Each failed entry includes `logs` — per-service log snippets extracted from
+XML markers, giving you the cross-service view without running `sed` manually.
+
 ### 3. For each failing test case (max 3 retries each)
 
-#### a. Extract the failing test case's logs from ALL services
+#### a. Read the log snippets from the summary
 
+The `logs` field in each failed entry contains the relevant service output
+during that test case. If you need raw logs, you can still use:
 ```bash
 sed -n '/<test-case-slug>/,/<\/test-case-slug>/p' logs/svc-*.log
 ```
-
-This gives a cross-service view of exactly what happened during that test case.
 
 #### b. Diagnose the failure
 
@@ -115,7 +126,7 @@ logs/
 ├── manifest.json          # paths to all service log files
 ├── pids/{name}.pid        # PID files for spawned services
 ├── svc-{name}.log         # per-service stdout with XML markers
-├── e2e-summary.json       # {"total", "passed", "failed": [...]}
+├── e2e-summary.json       # {"total", "passed", "failed": [{name, logs}]}
 ├── .rerun                 # signal: rerun Playwright only
 └── .restart               # signal: restart services, then rerun
 ```

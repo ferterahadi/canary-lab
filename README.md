@@ -2,6 +2,18 @@
 
 A unified E2E test orchestration platform. Discover, configure, and run Playwright E2E tests across multiple independent services with cross-service log correlation and a self-healing loop.
 
+## Quick Start
+
+```bash
+git clone <your-fork-url> canary-lab
+cd canary-lab
+yarn install
+npx playwright install chromium
+yarn e2e
+```
+
+Select `example_todo_api`, choose your terminal (iTerm or Terminal), and the example runs end-to-end.
+
 ## Features
 
 - **Single entry point** — `yarn e2e` discovers all features, launches services, runs tests
@@ -37,18 +49,6 @@ flowchart TD
     F -- ".restart" --> B4
     F -- "Ctrl+C" --> G["Stop"]
 ```
-
-## Quick Start
-
-```bash
-git clone <your-fork-url> canary-lab
-cd canary-lab
-yarn install
-npx playwright install chromium
-yarn e2e
-```
-
-Select `example_todo_api`, choose your terminal (iTerm or Terminal), and the example runs end-to-end.
 
 ## Add Your Own Feature
 

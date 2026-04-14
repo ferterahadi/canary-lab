@@ -6,8 +6,7 @@ import type {
   TestCase,
   TestResult,
 } from '@playwright/test/reporter'
-
-const LOGS_DIR = path.resolve(__dirname, '../../logs')
+import { LOGS_DIR } from './paths'
 
 function slugify(title: string): string {
   return title
