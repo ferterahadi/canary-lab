@@ -1,26 +1,38 @@
 {
   "name": "canary-lab",
   "version": "0.1.0",
-  "private": true,
-  "description": "Unified E2E test orchestration platform with self-healing capabilities",
-  "workspaces": [
-    "features/*"
+  "description": "E2E test scaffolder and runner with agent-assisted self-fixing workflows",
+  "bin": {
+    "canary-lab": "dist/scripts/cli.js"
+  },
+  "exports": {
+    "./feature-support/playwright-base": "./dist/feature-support/playwright-base.js",
+    "./feature-support/load-env": "./dist/feature-support/load-env.js",
+    "./feature-support/log-marker-fixture": "./dist/feature-support/log-marker-fixture.js",
+    "./feature-support/types": "./dist/feature-support/types.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
   ],
   "scripts": {
-    "e2e": "tsx shared/e2e-runner/runner.ts",
-    "env:apply": "tsx shared/env-switcher/root-cli.ts --apply",
-    "env:revert": "tsx shared/env-switcher/root-cli.ts --revert",
-    "new-feature": "tsx scripts/new-feature.ts"
+    "build": "tsc -p tsconfig.build.json && node tools/prepare-assets.mjs",
+    "canary-lab:run": "node dist/scripts/cli.js run",
+    "canary-lab:env": "node dist/scripts/cli.js env",
+    "canary-lab:new-feature": "node dist/scripts/cli.js new-feature",
+    "prepack": "npm run build",
+    "pack:check": "node tools/pack-check.mjs",
+    "smoke:pack": "node tools/smoke-pack.mjs",
+    "publish:package": "node tools/publish-package.mjs"
   },
   "devDependencies": {
-    "@playwright/test": "^1.54.2",
     "@types/node": "^25.5.2",
-    "dotenv": "^16.6.1",
     "tsx": "^4.20.3",
     "typescript": "^5.9.2"
   },
   "dependencies": {
-    "axios": "^1.15.0",
-    "uuid": "^13.0.0"
+    "@playwright/test": "^1.54.2",
+    "dotenv": "^16.6.1"
   }
 }

@@ -1,8 +1,6 @@
-import type { FeatureConfig } from '../../shared/launcher/types'
-
-export const config: FeatureConfig = {
+const config = {
   name: 'example_todo_api',
-  description: 'Example feature — TODO API CRUD tests (self-contained, no external repos)',
+  description: 'Working sample feature for Canary Lab.',
   envs: ['local'],
   repos: [
     {
@@ -10,8 +8,8 @@ export const config: FeatureConfig = {
       localPath: __dirname,
       startCommands: [
         {
-          name: 'todo-api-server',
-          command: 'npx tsx scripts/server.ts',
+          name: 'example-todo-api-server',
+          command: 'node scripts/server.js',
           healthCheck: {
             url: 'http://localhost:4000/',
             timeoutMs: 3000,
@@ -22,3 +20,5 @@ export const config: FeatureConfig = {
   ],
   featureDir: __dirname,
 }
+
+module.exports = { config }
