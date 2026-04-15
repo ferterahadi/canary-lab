@@ -24,8 +24,8 @@ import {
 type TerminalChoice = 'iTerm' | 'Terminal'
 
 // ─── Paths (local to runner) ────────────────────────────────────────────────
-const SWITCH_SCRIPT = path.join(__dirname, '../env-switcher/switch.ts')
-const SUMMARY_REPORTER = path.resolve(__dirname, 'summary-reporter.ts')
+const SWITCH_SCRIPT = path.join(__dirname, '../env-switcher/switch.js')
+const SUMMARY_REPORTER = path.resolve(__dirname, 'summary-reporter.js')
 
 // ─── Readline helpers (same pattern as shared/launcher/index.ts) ────────────
 function prompt(rl: readline.Interface, question: string): Promise<string> {
@@ -56,8 +56,12 @@ function discoverFeatures(): FeatureConfig[] {
     .map((d) => d.name)
 
   for (const dir of dirs) {
-    const configPath = path.join(FEATURES_DIR, dir, 'feature.config.ts')
-    if (!fs.existsSync(configPath)) continue
+    const configPath = ['feature.config.cjs', 'feature.config.js', 'feature.config.ts']
+      .map((name) => path.join(FEATURES_DIR, dir, name))
+      .find((candidate) => fs.existsSync(candidate))
+
+    if (!configPath) continue
+
     try {
       const mod = require(configPath)
       features.push(mod.config ?? mod.default)
@@ -368,6 +372,10 @@ function runPlaywright(featureDir: string, headed: boolean): Promise<number> {
 
     const child = spawn('npx', playwrightArgs, {
       cwd: featureDir,
+      env: {
+        ...process.env,
+        CANARY_LAB_PROJECT_ROOT: ROOT,
+      },
       stdio: 'inherit',
       shell: false,
     })
@@ -520,7 +528,7 @@ async function watchMode(
 }
 
 // ─── Main ───────────────────────────────────────────────────────────────────
-async function main() {
+export async function main() {
   const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout,
@@ -549,9 +557,9 @@ async function main() {
     }
 
     if (envSetApplied) {
-      console.log('\n  Reverting env files...')
+        console.log('\n  Reverting env files...')
       try {
-        execFileSync('tsx', [SWITCH_SCRIPT, appliedFeatureDir, '--revert'], {
+        execFileSync(process.execPath, [SWITCH_SCRIPT, appliedFeatureDir, '--revert'], {
           stdio: 'inherit',
         })
       } catch {
@@ -578,7 +586,7 @@ async function main() {
     const features = discoverFeatures()
     if (features.length === 0) {
       console.error(
-        'No features found. Add a feature.config.ts to a features/<name>/ folder.',
+        'No features found. Add a feature.config.cjs to a features/<name>/ folder.',
       )
       process.exit(1)
     }
@@ -644,7 +652,7 @@ async function main() {
 
       console.log(`\n  Applying env set: ${chosenSet}`)
       execFileSync(
-        'tsx',
+        process.execPath,
         [SWITCH_SCRIPT, feature.featureDir, '--apply', chosenSet],
         { stdio: 'inherit' },
       )
@@ -682,7 +690,9 @@ async function main() {
   }
 }
 
-main().catch((err) => {
-  console.error(err)
-  process.exit(1)
-})
+if (require.main === module) {
+  main().catch((err) => {
+    console.error(err)
+    process.exit(1)
+  })
+}

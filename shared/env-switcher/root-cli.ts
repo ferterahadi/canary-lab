@@ -2,9 +2,10 @@ import fs from 'fs'
 import path from 'path'
 import readline from 'readline'
 import { execFileSync } from 'child_process'
+import { getFeaturesDir } from '../runtime/project-root'
 
-const FEATURES_DIR = path.join(__dirname, '../../features')
-const SWITCH_SCRIPT = path.join(__dirname, 'switch.ts')
+const FEATURES_DIR = getFeaturesDir()
+const SWITCH_SCRIPT = path.join(__dirname, 'switch.js')
 
 function prompt(rl: readline.Interface, question: string): Promise<string> {
   return new Promise((resolve) => rl.question(question, resolve))
@@ -37,16 +38,19 @@ function listEnvSets(featureName: string): string[] {
     .sort()
 }
 
-async function main() {
-  const mode = process.argv[2]
-  if (mode !== '--apply' && mode !== '--revert') {
-    console.error('Usage: root-cli.ts --apply | --revert')
-    process.exit(1)
-  }
-
+export async function main(args = process.argv.slice(2)) {
+  let mode = args[0]
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout })
 
   try {
+    if (mode !== '--apply' && mode !== '--revert') {
+      mode = await selectOption(rl, 'What do you want to do?', [
+        'Apply env set',
+        'Revert env files',
+      ])
+      mode = mode.startsWith('Revert') ? '--revert' : '--apply'
+    }
+
     const features = discoverFeaturesWithEnvSets()
     if (features.length === 0) {
       console.error('No features with env sets found.')
@@ -57,11 +61,10 @@ async function main() {
 
     if (mode === '--revert') {
       console.log(`\nReverting env for ${featureName}...`)
-      execFileSync('tsx', [SWITCH_SCRIPT, featureName, '--revert'], { stdio: 'inherit' })
+      execFileSync(process.execPath, [SWITCH_SCRIPT, featureName, '--revert'], { stdio: 'inherit' })
       return
     }
 
-    // --apply
     const envSets = listEnvSets(featureName)
     let chosenSet: string
 
@@ -72,13 +75,15 @@ async function main() {
       chosenSet = await selectOption(rl, `Which env set for ${featureName}?`, envSets)
     }
 
-    execFileSync('tsx', [SWITCH_SCRIPT, featureName, '--apply', chosenSet], { stdio: 'inherit' })
+    execFileSync(process.execPath, [SWITCH_SCRIPT, featureName, '--apply', chosenSet], { stdio: 'inherit' })
   } finally {
     rl.close()
   }
 }
 
-main().catch(err => {
-  console.error(err)
-  process.exit(1)
-})
+if (require.main === module) {
+  main().catch(err => {
+    console.error(err)
+    process.exit(1)
+  })
+}
