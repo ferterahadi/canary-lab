@@ -3,6 +3,7 @@ import * as path from 'path';
 import * as readline from 'readline';
 import { spawn } from 'child_process';
 import type { EnvSetsConfig, BackupRecord } from './types.js';
+import { getFeaturesDir, getProjectRoot } from '../runtime/project-root';
 
 
 function resolveVars(str: string, appRoots: Record<string, string>): string {
@@ -13,7 +14,7 @@ function getEnvSetsDir(featureName: string): string {
   if (path.isAbsolute(featureName)) {
     return path.join(featureName, 'envsets');
   }
-  return path.resolve(__dirname, `../../features/${featureName}/envsets`);
+  return path.join(getFeaturesDir(), featureName, 'envsets');
 }
 
 function loadConfig(featureName: string): EnvSetsConfig {
@@ -25,7 +26,12 @@ function loadConfig(featureName: string): EnvSetsConfig {
   }
 
   const raw = fs.readFileSync(configPath, 'utf-8');
-  return JSON.parse(raw) as EnvSetsConfig;
+  const config = JSON.parse(raw) as EnvSetsConfig;
+  config.appRoots = {
+    CANARY_LAB_PROJECT_ROOT: getProjectRoot(),
+    ...config.appRoots,
+  };
+  return config;
 }
 
 function listEnvSets(envSetsDir: string): string[] {
@@ -118,12 +124,11 @@ async function prompt(question: string): Promise<string> {
   });
 }
 
-async function main() {
-  const args = process.argv.slice(2);
+export async function main(args = process.argv.slice(2)) {
   const featureName = args[0];
 
   if (!featureName) {
-    console.error('Usage: switch.ts <feature-name> [--apply <set>|--revert]');
+    console.error('Usage: switch.js <feature-name> [--apply <set>|--revert]');
     process.exit(1);
   }
 
@@ -147,7 +152,7 @@ async function main() {
   if (args[1] === '--apply') {
     const setName = args[2];
     if (!setName) {
-      console.error('Usage: switch.ts <feature> --apply <set-name>');
+      console.error('Usage: switch.js <feature> --apply <set-name>');
       process.exit(1);
     }
     const envSets = listEnvSets(envSetsDir);
@@ -160,7 +165,7 @@ async function main() {
     backup(targets, timestamp);
     console.log(`Applying "${setName}" env set...`);
     applySet(envSetsDir, setName, targets);
-    console.log('Done. Run "npm run env:revert" to restore originals.\n');
+    console.log('Done. Run "npx canary-lab env" to revert originals when needed.\n');
     return;
   }
 
@@ -237,7 +242,9 @@ async function main() {
   });
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
+}
