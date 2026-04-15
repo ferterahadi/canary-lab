@@ -73,6 +73,77 @@ npx canary-lab env
 
 Then choose the feature and env set you want, such as `local`.
 
+### How `envsets.config.json` Works
+
+Each feature can define reusable environment setups under:
+
+```bash
+features/<feature>/envsets/
+```
+
+The main config file is `envsets.config.json`. It tells Canary Lab:
+
+- where your local apps live
+- which files it is allowed to swap
+- which of those files belong to the feature
+
+Example:
+
+```json
+{
+  "appRoots": {
+    "CANARY_LAB": "/Users/me/Documents/canary-lab",
+    "APP_A": "/Users/me/Documents/app-a",
+    "APP_B": "/Users/me/Documents/app-b",
+    "APP_C": "/Users/me/Documents/app-c"
+  },
+  "slots": {
+    "feature.env": {
+      "description": "Feature .env file",
+      "target": "$CANARY_LAB/features/sample_feature/.env"
+    },
+    "app-a.env.local": {
+      "description": "App A local env file",
+      "target": "$APP_A/.env.local"
+    },
+    "app-b.env.local": {
+      "description": "App B local env file",
+      "target": "$APP_B/.env.local"
+    },
+    "app-c.config.json": {
+      "description": "App C local config file",
+      "target": "$APP_C/config/local.json"
+    }
+  },
+  "feature": {
+    "slots": [
+      "feature.env",
+      "app-a.env.local",
+      "app-b.env.local",
+      "app-c.config.json"
+    ],
+    "testCommand": "npm run test:e2e",
+    "testCwd": "$CANARY_LAB/features/sample_feature"
+  }
+}
+```
+
+A simple way to read this:
+
+- `appRoots` defines the base folders for your local repos or apps
+- `slots` defines the real files Canary Lab is allowed to replace temporarily
+- `feature.slots` lists which of those files this feature uses
+- folders like `envsets/local/` or `envsets/debug/` contain the actual replacement files
+
+When you apply an env set, Canary Lab:
+
+1. finds the target files listed in `feature.slots`
+2. backs up the current files
+3. copies the selected env-set files into place
+4. lets you revert them later
+
+This is useful when one test flow depends on env files across multiple local apps and you want to switch them together instead of editing them by hand.
+
 ### Self-Fixing Workflow
 
 1. Run `npx canary-lab run`
