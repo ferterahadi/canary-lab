@@ -11,8 +11,9 @@ function slugify(title: string): string {
 
 /**
  * Extended Playwright `test` that writes XML markers into every service log
- * listed in logs/manifest.json.  If the manifest doesn't exist (e.g. tests
- * are run via `yarn start` instead of `yarn e2e`), the fixture is a no-op.
+ * listed in logs/manifest.json. If the manifest doesn't exist because tests
+ * are run directly with Playwright instead of `canary-lab run`, the fixture
+ * is a no-op.
  * https://playwright.dev/docs/extensibility
  */
 export const test = base.extend<{ _logMarker: void }>({

@@ -1,120 +1,210 @@
 # Canary Lab
 
-A unified E2E test orchestration platform. Discover, configure, and run Playwright E2E tests across multiple independent services with cross-service log correlation and a self-healing loop.
+Canary Lab is an npm package for end-to-end testing with Playwright, local service orchestration, and agent-assisted debugging. It scaffolds a runnable E2E project, starts dependent services, captures service logs, and provides a structured self-fixing workflow for Claude or Codex.
 
-## Quick Start
+If you are looking for a small E2E testing starter for local development, a Playwright-based test harness, or a self-fixing demo for AI coding agents, this package aims to be a useful starting point.
+
+## What It Tries To Help With
+
+- Scaffold an E2E test project quickly
+- Run Playwright tests against local services from one command
+- Capture per-service logs and a machine-readable failure summary
+- Give Claude or Codex a documented workflow for diagnosing and fixing failures
+- Keep generated projects visible while shipping package internals as compiled code
+
+## For Users
+
+Use Canary Lab when you want to bootstrap a local E2E testing project and experiment with an agent-assisted self-fixing loop.
+
+### Quick Start
 
 ```bash
-$ npx playwright install chromium
-$ git clone git@github.com:ferterahadi/canary-lab.git
-$ cd canary-lab
-$ yarn install
-$ yarn e2e
+npx canary-lab init my-lab
+cd my-lab
+npm install
+npm run install:browsers
+npx canary-lab run
 ```
 
-Select `example_todo_api`, choose your terminal (iTerm or Terminal), and the example runs end-to-end.
+### What Gets Scaffolded
 
-## Features
+The generated project includes:
 
-- **Single entry point** — `yarn e2e` discovers all features, launches services, runs tests
-- **Auto-discovery** — any folder in `features/` with a `feature.config.ts` is automatically detected
-- **Cross-service logs** — XML test markers enable per-test-case log extraction across all services
-- **Watch mode** — signal `touch logs/.rerun` or `touch logs/.restart` to iterate on fixes
-- **Self-healing loop** — Claude Code reads test results, diagnoses failures from logs, fixes code, and re-runs
-- **Environment sets** — named env configs that backup/restore across multiple repos
-- **Scaffold CLI** — `yarn new-feature` generates all boilerplate in seconds
+- `features/example_todo_api` as a working Playwright E2E sample
+- `features/broken_todo_api` as an intentionally broken sample for self-fixing
+- `CLAUDE.md` and `.claude/skills/self-fixing-loop.md` for Claude
+- `AGENTS.md` and `.codex/self-fixing-loop.md` for Codex
 
-## How It Works
+### Main Commands
+
+```bash
+npx canary-lab init <folder>
+npx canary-lab run
+npx canary-lab env
+npx canary-lab new-feature <name> "Description"
+```
+
+### Environment Switching
+
+`npx canary-lab env` helps manage temporary environment files for a feature.
+
+This is useful when you want to:
+
+- apply a known env setup before running E2E tests
+- switch between different local test configurations
+- avoid manually editing `.env` files each time
+- restore the previous env files after the run
+
+When you run `npx canary-lab env`, Canary Lab:
+
+- finds features that define env sets
+- lets you choose whether to apply or revert
+- backs up the current target env files
+- applies the selected env set
+- restores the previous files when you revert
+
+An env set is a named group of environment files for a feature, usually stored under `features/<feature>/envsets/`.
+
+Typical usage:
+
+```bash
+npx canary-lab env
+```
+
+Then choose the feature and env set you want, such as `local`.
+
+### Self-Fixing Workflow
+
+1. Run `npx canary-lab run`
+2. Choose the broken sample
+3. Leave the runner open in watch mode
+4. Open Claude or Codex in the generated project
+5. Type:
+
+```text
+self heal
+```
+
+`self heal` is a documented agent phrase, not a CLI command. It tells the agent to follow its canonical self-fixing workflow, inspect `logs/e2e-summary.json` and `logs/svc-*.log`, fix implementation only, and trigger `touch logs/.restart` or `touch logs/.rerun` as needed.
+
+### What Makes It Different
+
+Compared with a minimal E2E starter, Canary Lab also includes:
+
+- a runner that launches services and waits on health checks
+- structured failure context for agents
+- generated project guidance for both Claude and Codex
+- a built-in broken sample to exercise the workflow end to end
+
+### Observability Matters
+
+Canary Lab works best when the application under test emits useful logs.
+
+The self-fixing workflow depends on being able to correlate a failing test with the service output that happened during that test window. If a service produces little or no log output, the agent has much less context to work with, and the loop becomes correspondingly less useful.
+
+In practice, this means basic observability still matters:
+
+- services should write meaningful stdout or stderr logs
+- error paths should emit enough context to explain what failed
+- health checks and startup logs should make service state visible
+
+Canary Lab can organize and narrow the logs for a given test case, but it cannot recover context that the application never emitted.
+
+## For Contributors
+
+Use this repo when you are improving the package itself: the CLI, scaffold templates, runtime, smoke tests, or publish flow.
+
+### Local Development
+
+```bash
+npm install
+npm run build
+```
+
+### How It Works
 
 ```mermaid
 flowchart TD
-    A[yarn e2e] --> B["E2E Runner"]
-    B --> B1["1. Select feature"]
-    B1 --> B2["2. Select environment"]
-    B2 --> B2b["3. Select terminal (iTerm / Terminal)"]
-    B2b --> B3["4. Apply env sets"]
-    B3 --> B4["5. Launch services"]
-    B4 --> B5["6. Health checks"]
-    B5 --> B6["7. Run Playwright"]
-    B6 --> B7["8. Watch mode"]
-
-    B4 --> C["Terminal Tabs\n(per service)"]
-    B6 --> D["Playwright\n(tests)"]
-
-    C -- "LOG_MODE=plain\ncmd 2>&1 | tee log" --> E["logs/"]
-    D -- "XML markers" --> E
-
-    B7 -- "polls every 1s" --> F{"Signal?"}
-    F -- ".rerun" --> B6
-    F -- ".restart" --> B4
-    F -- "Ctrl+C" --> G["Stop"]
+    A["Canary Lab spawns app processes in terminal tabs"] --> B["Apps write stdout to logs/svc-*.log"]
+    B --> C["Canary Lab waits for health checks to pass"]
+    C --> D["Canary Lab runs Playwright tests"]
+    D --> E["Before each test, the runner appends &lt;test-tag&gt; to each service log"]
+    E --> F["After each test, the runner appends &lt;/test-tag&gt;"]
+    F --> G["The run writes logs/e2e-summary.json"]
+    G --> H["Agent is told: self heal"]
+    H --> I["Agent slices the matching log chunk, reads the failure, and fixes code"]
+    I --> J["Agent signals .restart or .rerun"]
+    J --> D
 ```
 
-## Add Your Own Feature
+The basic flow is:
+
+- Canary Lab starts the required apps in terminal tabs
+- those apps write stdout to `logs/svc-*.log`
+- once health checks pass, Canary Lab runs Playwright
+- before a test runs, the runner appends a `<test-tag>` marker to each service log
+- after the test finishes, the runner appends the matching `</test-tag>`
+- the run writes `logs/e2e-summary.json`
+
+After that, an agent can be told:
+
+```text
+self heal
+```
+
+At that point the agent can:
+
+- `logs/e2e-summary.json`
+- `logs/svc-*.log`
+- the canonical self-fixing workflow doc
+
+and use the tags to read the matching chunk of each service log for the failed test, fix the implementation, and signal `touch logs/.restart` or `touch logs/.rerun`.
+
+### Repository Areas
+
+- `scripts/` contains the package CLI and scaffold commands
+- `shared/` contains the runtime behind `run` and `env`
+- `templates/project/` contains the generated project files
+- `feature-support/` contains the public imports used by generated projects
+
+### Contributor Workflow
+
+Typical loop:
 
 ```bash
-yarn new-feature my_feature "Description of what this tests"
+npm run build
+npm run smoke:pack
 ```
 
-This generates all required files. Then:
-1. Edit `features/my_feature/feature.config.ts` — add your repos, start commands, and health checks
-2. Edit `features/my_feature/src/config.ts` — add feature-specific env var exports
-3. Write tests in `features/my_feature/e2e/`
-4. Run `yarn e2e`
+If you change scaffold docs, generated files, or packaging behavior, validate by scaffolding a fresh temp project from the built package.
 
-## Structure
+### Packaging and Release Checks
 
-```
-canary-lab/
-├── features/                    # Individual feature folders
-│   └── feature-name/
-│       ├── feature.config.ts    # Feature metadata, repos, env config
-│       ├── e2e/                 # Playwright tests
-│       ├── envsets/             # Environment variable sets
-│       ├── playwright.config.ts
-│       └── tsconfig.json
-├── scripts/
-│   └── new-feature.ts           # Feature scaffolding (yarn new-feature)
-├── shared/
-│   ├── configs/                 # Shared base configs
-│   │   ├── tsconfig.feature.json
-│   │   ├── playwright.base.ts
-│   │   └── loadEnv.ts
-│   ├── e2e-runner/              # E2E orchestrator
-│   │   ├── runner.ts            # Main entry (yarn e2e)
-│   │   ├── log-marker-fixture.ts
-│   │   └── summary-reporter.ts
-│   ├── launcher/                # Terminal tab management
-│   │   ├── iterm.ts             # iTerm2 launcher (AppleScript)
-│   │   ├── terminal.ts          # Terminal.app launcher (AppleScript)
-│   │   ├── startup.ts           # Health checks, path resolution
-│   │   └── types.ts
-│   └── env-switcher/            # Environment switching helpers
-└── logs/                        # (gitignored) Runtime logs & signals
+```bash
+npm run pack:check
+npm run smoke:pack
+npm run publish:package
 ```
 
-## Terminal Support
+- `pack:check` inspects the npm tarball contents
+- `smoke:pack` builds, packs, scaffolds a temp project, installs dependencies, and verifies the scaffold flow
+- `publish:package` runs build and tarball checks before `npm publish`
 
-The service launcher supports **iTerm2** and **Terminal.app** on macOS via AppleScript. You choose which terminal to use when running `yarn e2e`.
+### Local Tarball Test
 
-The `tee` command used for log capture is a standard POSIX utility that works in any terminal on any Unix-like system. Only the tab-opening mechanism is macOS-specific.
+Before publishing, prefer testing the packed tarball instead of `npm link`:
 
-## Self-Healing Loop
+```bash
+npm run build
+npm pack
+mkdir /tmp/canary-lab-smoke
+cd /tmp/canary-lab-smoke
+npm init -y
+npm install /absolute/path/to/canary-lab-0.1.0.tgz
+npx canary-lab init test-folder
+```
 
-With Claude Code (or any AI assistant), the self-healing loop works as follows:
-1. Claude reads `logs/e2e-summary.json` for pass/fail results
-2. For failures, extracts per-test logs using XML markers: `sed -n '/<test-slug>/,/<\/test-slug>/p' logs/svc-*.log`
-3. Diagnoses the root cause from cross-service logs
-4. Fixes the source code (never test files)
-5. Signals `touch logs/.rerun` or `touch logs/.restart`
-6. Repeats up to 3 times per failing test case
-
-## Contributing
-
-1. Fork the repo
-2. Create a feature branch
-3. Add your feature using `yarn new-feature`
-4. Submit a PR
+This tests the exact tarball npm would publish.
 
 ## License
 
