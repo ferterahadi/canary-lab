@@ -1,9 +1,10 @@
 <!-- managed:canary-lab:start -->
 # Canary Lab Agent Guide
 
-For the full Codex self-fixing workflow, read:
+For available Codex skills, read:
 
-- `.codex/self-fixing-loop.md`
+- `.codex/self-fixing-loop.md` — diagnose and fix failing tests
+- `.codex/env-import.md` — import env files from declared repos into envsets
 
 ## Quick Start
 
@@ -34,4 +35,12 @@ If these files exist in `logs/`, read them before starting any fix:
 - `logs/e2e-summary.json` — test results with error messages and enriched service logs
 - `logs/diagnosis-journal.json` — accumulated diagnostic context from prior fix iterations
 - `logs/signal-history.json` — runner-maintained log of every restart/rerun signal and what changed
+
+## Importing Env Files from Repos
+
+When a feature's `feature.config.cjs` declares repos, use the env-import skill to copy their config files into envsets:
+
+```text
+import env files for <feature-name>
+```
 <!-- managed:canary-lab:end -->

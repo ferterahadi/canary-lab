@@ -1,22 +1,21 @@
 # Canary Lab
 
-Canary Lab is an npm package for end-to-end testing with Playwright, local service orchestration, and agent-assisted debugging. It scaffolds a runnable E2E project, starts dependent services, captures service logs, and provides a structured self-fixing workflow for Claude or Codex.
+E2E testing with Playwright, local service orchestration, and agent-assisted debugging.
 
-If you are looking for a small E2E testing starter for local development, a Playwright-based test harness, or a self-fixing demo for AI coding agents, this package aims to be a useful starting point.
+## Capabilities
 
-## What It Tries To Help With
+| Capability | What it does |
+|-----------|-------------|
+| Project scaffolding | `canary-lab init` creates a runnable E2E project from templates |
+| Feature generator | `canary-lab new-feature` scaffolds a new test feature with config, envsets, and spec files |
+| Service orchestration | Starts declared apps in terminal tabs, waits on health checks, captures stdout to `logs/svc-*.log` |
+| Environment switching | `canary-lab env` applies/reverts named sets of env files across multiple repos |
+| Env import | Claude/Codex-guided workflow to find and copy env files from declared repos into a feature's envsets |
+| Self-fixing workflow | Claude/Codex-guided loop: read failure context, form hypothesis, fix implementation, signal runner, evaluate |
+| Log correlation | XML markers (`<test-tag>...</test-tag>`) in service logs allow per-test log slicing |
+| Managed upgrades | `canary-lab upgrade` keeps skills and docs in sync; runs automatically via postinstall hook |
 
-- Scaffold an E2E test project quickly
-- Run Playwright tests against local services from one command
-- Capture per-service logs and a machine-readable failure summary
-- Give Claude or Codex a documented workflow for diagnosing and fixing failures
-- Keep generated projects visible while shipping package internals as compiled code
-
-## For Users
-
-Use Canary Lab when you want to bootstrap a local E2E testing project and experiment with an agent-assisted self-fixing loop.
-
-### Quick Start
+## Quick Start
 
 ```bash
 npx canary-lab init my-lab
@@ -26,76 +25,38 @@ npm run install:browsers
 npx canary-lab run
 ```
 
-### What Gets Scaffolded
+## What Gets Scaffolded
 
-The generated project includes:
+- `features/example_todo_api` — working Playwright E2E sample
+- `features/broken_todo_api` — intentionally broken sample for self-fixing practice
+- `CLAUDE.md` and `.claude/skills/` for Claude
+- `AGENTS.md` and `.codex/` for Codex
 
-- `features/example_todo_api` as a working Playwright E2E sample
-- `features/broken_todo_api` as an intentionally broken sample for self-fixing
-- `CLAUDE.md` and `.claude/skills/self-fixing-loop.md` for Claude
-- `AGENTS.md` and `.codex/self-fixing-loop.md` for Codex
-
-### Main Commands
+## Commands
 
 ```bash
 npx canary-lab init <folder>
 npx canary-lab run
 npx canary-lab env
 npx canary-lab new-feature <name> "Description"
+npx canary-lab upgrade
 ```
 
-### Environment Switching
+## Environment Switching
 
-`npx canary-lab env` helps manage temporary environment files for a feature.
+`npx canary-lab env` manages temporary environment files for a feature. It backs up current env files, applies a named set, and restores the originals when you revert.
 
-This is useful when you want to:
+An env set is a named group of environment files stored under `features/<feature>/envsets/`.
 
-- apply a known env setup before running E2E tests
-- switch between different local test configurations
-- avoid manually editing `.env` files each time
-- restore the previous env files after the run
+### `envsets.config.json`
 
-When you run `npx canary-lab env`, Canary Lab:
-
-- finds features that define env sets
-- lets you choose whether to apply or revert
-- backs up the current target env files
-- applies the selected env set
-- restores the previous files when you revert
-
-An env set is a named group of environment files for a feature, usually stored under `features/<feature>/envsets/`.
-
-Typical usage:
-
-```bash
-npx canary-lab env
-```
-
-Then choose the feature and env set you want, such as `local`.
-
-### How `envsets.config.json` Works
-
-Each feature can define reusable environment setups under:
-
-```bash
-features/<feature>/envsets/
-```
-
-The main config file is `envsets.config.json`. It tells Canary Lab:
-
-- where your local apps live
-- which files it is allowed to swap
-- which of those files belong to the feature
-
-Example:
+Each feature defines its env setup in `envsets/envsets.config.json`:
 
 ```json
 {
   "appRoots": {
     "CANARY_LAB": "/Users/me/Documents/canary-lab",
-    "APP_A": "/Users/me/Documents/app-a",
-    "APP_B": "/Users/me/Documents/app-b",
-    "APP_C": "/Users/me/Documents/app-c"
+    "APP_A": "/Users/me/Documents/app-a"
   },
   "slots": {
     "feature.env": {
@@ -105,85 +66,61 @@ Example:
     "app-a.env.local": {
       "description": "App A local env file",
       "target": "$APP_A/.env.local"
-    },
-    "app-b.env.local": {
-      "description": "App B local env file",
-      "target": "$APP_B/.env.local"
-    },
-    "app-c.config.json": {
-      "description": "App C local config file",
-      "target": "$APP_C/config/local.json"
     }
   },
   "feature": {
-    "slots": [
-      "feature.env",
-      "app-a.env.local",
-      "app-b.env.local",
-      "app-c.config.json"
-    ],
+    "slots": ["feature.env", "app-a.env.local"],
     "testCommand": "npm run test:e2e",
     "testCwd": "$CANARY_LAB/features/sample_feature"
   }
 }
 ```
 
-A simple way to read this:
+- `appRoots` — base paths to local repos
+- `slots` — files that can be swapped temporarily
+- `feature.slots` — which slots this feature uses
 
-- `appRoots` defines the base folders for your local repos or apps
-- `slots` defines the real files Canary Lab is allowed to replace temporarily
-- `feature.slots` lists which of those files this feature uses
-- folders like `envsets/local/` or `envsets/debug/` contain the actual replacement files
+### Importing env files from repos
 
-When you apply an env set, Canary Lab:
+Claude and Codex can help import env files from repos declared in `feature.config.cjs`. See `.claude/skills/env-import.md` or `.codex/env-import.md` in generated projects.
 
-1. finds the target files listed in `feature.slots`
-2. backs up the current files
-3. copies the selected env-set files into place
-4. lets you revert them later
+### Environment variable safety
 
-This is useful when one test flow depends on env files across multiple local apps and you want to switch them together instead of editing them by hand.
+Envset files often contain credentials, API keys, and database passwords copied from local app configs. The default `.gitignore` ignores `features/*/envsets/*/*` to prevent accidental commits.
 
-### Self-Fixing Workflow
+If you override this or use `git add -f`, review what you are committing. Do not push env files containing real credentials to shared or public repositories.
 
-1. Run `npx canary-lab run`
-2. Choose the broken sample
-3. Leave the runner open in watch mode
-4. Open Claude or Codex in the generated project
-5. Type:
+## Self-Fixing Workflow
 
-```text
-self heal
+1. Run `npx canary-lab run` and choose the broken sample
+2. Leave the runner open in watch mode
+3. Open Claude or Codex in the generated project
+4. Type `self heal`
+
+The agent follows `.claude/skills/self-fixing-loop.md` (or `.codex/self-fixing-loop.md`): reads `logs/e2e-summary.json`, slices service logs by test markers, fixes implementation code, and signals the runner via `logs/.restart` or `logs/.rerun`.
+
+## Limitations
+
+- The self-fixing workflow depends on services writing useful log output. If a service produces little or no logs, the agent has less context to work with.
+- `canary-lab env` overwrites target files in place. If the backup/restore cycle is interrupted (e.g., kill -9), originals may not be restored. Use `canary-lab env --revert` to recover from backups.
+- Envset files are local dev config. They are not validated or checked for correctness — if you copy a stale config, tests may fail for non-obvious reasons.
+
+## How It Works
+
+```mermaid
+flowchart TD
+    A["Start apps in terminal tabs"] --> B["Apps write stdout to logs/svc-*.log"]
+    B --> C["Wait for health checks"]
+    C --> D["Run Playwright tests"]
+    D --> E["Append <test-tag> markers to service logs"]
+    E --> F["Write logs/e2e-summary.json"]
+    F --> G["Agent reads failure context"]
+    G --> H["Agent fixes implementation"]
+    H --> I["Agent signals .restart or .rerun"]
+    I --> D
 ```
 
-`self heal` is a documented agent phrase, not a CLI command. It tells the agent to follow its canonical self-fixing workflow, inspect `logs/e2e-summary.json` and `logs/svc-*.log`, fix implementation only, and trigger `touch logs/.restart` or `touch logs/.rerun` as needed.
-
-### What Makes It Different
-
-Compared with a minimal E2E starter, Canary Lab also includes:
-
-- a runner that launches services and waits on health checks
-- structured failure context for agents
-- generated project guidance for both Claude and Codex
-- a built-in broken sample to exercise the workflow end to end
-
-### Observability Matters
-
-Canary Lab works best when the application under test emits useful logs.
-
-The self-fixing workflow depends on being able to correlate a failing test with the service output that happened during that test window. If a service produces little or no log output, the agent has much less context to work with, and the loop becomes correspondingly less useful.
-
-In practice, this means basic observability still matters:
-
-- services should write meaningful stdout or stderr logs
-- error paths should emit enough context to explain what failed
-- health checks and startup logs should make service state visible
-
-Canary Lab can organize and narrow the logs for a given test case, but it cannot recover context that the application never emitted.
-
 ## For Contributors
-
-Use this repo when you are improving the package itself: the CLI, scaffold templates, runtime, smoke tests, or publish flow.
 
 ### Local Development
 
@@ -192,90 +129,29 @@ npm install
 npm run build
 ```
 
-### How It Works
+### Repository Layout
 
-```mermaid
-flowchart TD
-    A["Canary Lab spawns app processes in terminal tabs"] --> B["Apps write stdout to logs/svc-*.log"]
-    B --> C["Canary Lab waits for health checks to pass"]
-    C --> D["Canary Lab runs Playwright tests"]
-    D --> E["Before each test, the runner appends &lt;test-tag&gt; to each service log"]
-    E --> F["After each test, the runner appends &lt;/test-tag&gt;"]
-    F --> G["The run writes logs/e2e-summary.json"]
-    G --> H["Agent is told: self heal"]
-    H --> I["Agent slices the matching log chunk, reads the failure, and fixes code"]
-    I --> J["Agent signals .restart or .rerun"]
-    J --> D
-```
+- `scripts/` — CLI and scaffold commands
+- `shared/` — runtime for `run` and `env`
+- `templates/project/` — generated project files
+- `feature-support/` — public imports used by generated projects
 
-The basic flow is:
-
-- Canary Lab starts the required apps in terminal tabs
-- those apps write stdout to `logs/svc-*.log`
-- once health checks pass, Canary Lab runs Playwright
-- before a test runs, the runner appends a `<test-tag>` marker to each service log
-- after the test finishes, the runner appends the matching `</test-tag>`
-- the run writes `logs/e2e-summary.json`
-
-After that, an agent can be told:
-
-```text
-self heal
-```
-
-At that point the agent can:
-
-- `logs/e2e-summary.json`
-- `logs/svc-*.log`
-- the canonical self-fixing workflow doc
-
-and use the tags to read the matching chunk of each service log for the failed test, fix the implementation, and signal `touch logs/.restart` or `touch logs/.rerun`.
-
-### Repository Areas
-
-- `scripts/` contains the package CLI and scaffold commands
-- `shared/` contains the runtime behind `run` and `env`
-- `templates/project/` contains the generated project files
-- `feature-support/` contains the public imports used by generated projects
-
-### Contributor Workflow
-
-Typical loop:
+### Build and Test
 
 ```bash
 npm run build
 npm run smoke:pack
 ```
 
-If you change scaffold docs, generated files, or packaging behavior, validate by scaffolding a fresh temp project from the built package.
+`smoke:pack` builds, packs, scaffolds a temp project, installs dependencies, and verifies the scaffold flow. Run it after changing templates or packaging.
 
-### Packaging and Release Checks
+### Publishing
 
 ```bash
-npm run pack:check
-npm run smoke:pack
+npm run pack:check    # inspect tarball contents
+npm run smoke:pack    # end-to-end scaffold test
 npm run publish:package
 ```
-
-- `pack:check` inspects the npm tarball contents
-- `smoke:pack` builds, packs, scaffolds a temp project, installs dependencies, and verifies the scaffold flow
-- `publish:package` runs build and tarball checks before `npm publish`
-
-### Local Tarball Test
-
-Before publishing, prefer testing the packed tarball instead of `npm link`:
-
-```bash
-npm run build
-npm pack
-mkdir /tmp/canary-lab-smoke
-cd /tmp/canary-lab-smoke
-npm init -y
-npm install /absolute/path/to/canary-lab-0.1.0.tgz
-npx canary-lab init test-folder
-```
-
-This tests the exact tarball npm would publish.
 
 ## License
 
