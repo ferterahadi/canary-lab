@@ -18,6 +18,13 @@ function slugify(title: string): string {
 interface TestEntry {
   name: string
   passed: boolean
+  error?: {
+    message: string
+    snippet?: string
+  }
+  durationMs: number
+  location: string
+  retry: number
 }
 
 class SummaryReporter implements Reporter {
@@ -27,6 +34,19 @@ class SummaryReporter implements Reporter {
     this.results.push({
       name: `test-case-${slugify(test.title)}`,
       passed: result.status === 'passed',
+      ...(result.status !== 'passed' && result.error
+        ? {
+            error: {
+              message: (result.error.message ?? '').slice(0, 1000),
+              ...(result.error.snippet
+                ? { snippet: result.error.snippet.slice(0, 500) }
+                : {}),
+            },
+          }
+        : {}),
+      durationMs: result.duration,
+      location: `${test.location.file}:${test.location.line}`,
+      retry: result.retry,
     })
   }
 
@@ -34,7 +54,15 @@ class SummaryReporter implements Reporter {
     const summary = {
       total: this.results.length,
       passed: this.results.filter((r) => r.passed).length,
-      failed: this.results.filter((r) => !r.passed).map((r) => r.name),
+      failed: this.results
+        .filter((r) => !r.passed)
+        .map((r) => ({
+          name: r.name,
+          error: r.error,
+          durationMs: r.durationMs,
+          location: r.location,
+          retry: r.retry,
+        })),
     }
 
     fs.mkdirSync(LOGS_DIR, { recursive: true })

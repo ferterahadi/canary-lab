@@ -19,6 +19,7 @@ import {
   SUMMARY_PATH,
   RERUN_SIGNAL,
   RESTART_SIGNAL,
+  SIGNAL_HISTORY_PATH,
 } from './paths'
 
 type TerminalChoice = 'iTerm' | 'Terminal'
@@ -506,6 +507,30 @@ async function watchMode(
     const doRerun = fs.existsSync(RERUN_SIGNAL)
 
     if (!doRestart && !doRerun) continue
+
+    // Read signal file content before consuming (agents may write JSON context)
+    const signalPath = doRestart ? RESTART_SIGNAL : RERUN_SIGNAL
+    let signalContent: Record<string, unknown> = {}
+    try {
+      const raw = fs.readFileSync(signalPath, 'utf-8').trim()
+      if (raw) signalContent = JSON.parse(raw)
+    } catch { /* empty or non-JSON signal file is fine */ }
+
+    // Append to signal history
+    try {
+      const history: unknown[] = fs.existsSync(SIGNAL_HISTORY_PATH)
+        ? JSON.parse(fs.readFileSync(SIGNAL_HISTORY_PATH, 'utf-8'))
+        : []
+      history.push({
+        type: doRestart ? 'restart' : 'rerun',
+        timestamp: new Date().toISOString(),
+        ...signalContent,
+      })
+      fs.writeFileSync(
+        SIGNAL_HISTORY_PATH,
+        JSON.stringify(history, null, 2) + '\n',
+      )
+    } catch { /* don't let history logging break the loop */ }
 
     // Consume signal files
     try { fs.unlinkSync(RESTART_SIGNAL) } catch { /* ignore */ }
