@@ -8,7 +8,9 @@ const MARKER_END = '<!-- managed:canary-lab:end -->'
 /** Files that are fully managed — overwritten on every upgrade. */
 const FULLY_MANAGED: string[] = [
   '.claude/skills/self-fixing-loop.md',
+  '.claude/skills/env-import.md',
   '.codex/self-fixing-loop.md',
+  '.codex/env-import.md',
 ]
 
 /** Files where only the content between markers is replaced. */
