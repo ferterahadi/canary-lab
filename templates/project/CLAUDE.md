@@ -1,3 +1,4 @@
+<!-- managed:canary-lab:start -->
 # Canary Lab Project Notes
 
 For the full Claude self-fixing workflow, read:
@@ -37,3 +38,4 @@ If these files exist in `logs/`, read them before starting any fix:
 - `logs/e2e-summary.json` — test results with error messages and enriched service logs
 - `logs/diagnosis-journal.json` — accumulated diagnostic context from prior fix iterations
 - `logs/signal-history.json` — runner-maintained log of every restart/rerun signal and what changed
+<!-- managed:canary-lab:end -->

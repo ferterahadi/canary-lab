@@ -76,6 +76,7 @@ function buildPackageJson(projectName: string, packageSpec: string): string {
       version: '0.1.0',
       description: 'Canary Lab project scaffold',
       scripts: {
+        postinstall: 'canary-lab upgrade --silent',
         'canary-lab:run': 'canary-lab run',
         'canary-lab:env': 'canary-lab env',
         'canary-lab:new-feature': 'canary-lab new-feature',

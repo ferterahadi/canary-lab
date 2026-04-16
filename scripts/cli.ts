@@ -4,6 +4,7 @@ import { main as runRunner } from '../shared/e2e-runner/runner'
 import { main as runEnv } from '../shared/env-switcher/root-cli'
 import { main as createFeature } from './new-feature'
 import { main as initProject } from './init-project'
+import { main as upgradeProject } from './upgrade'
 
 function printUsage(): void {
   console.log(`Canary Lab
@@ -13,6 +14,7 @@ Usage:
   canary-lab run
   canary-lab env
   canary-lab new-feature <name> [description]
+  canary-lab upgrade [--silent]
 `)
 }
 
@@ -31,6 +33,9 @@ async function main(): Promise<void> {
       return
     case 'new-feature':
       await createFeature(args)
+      return
+    case 'upgrade':
+      await upgradeProject(args)
       return
     case '-h':
     case '--help':
