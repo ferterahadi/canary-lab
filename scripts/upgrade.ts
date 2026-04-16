@@ -17,6 +17,15 @@ const MARKER_MANAGED: string[] = [
   'AGENTS.md',
 ]
 
+/**
+ * Known first-line signatures of canary-lab-generated files from pre-marker versions.
+ * Used to detect legacy files that should be fully replaced rather than appended to.
+ */
+const LEGACY_SIGNATURES: Record<string, string> = {
+  'CLAUDE.md': '# Canary Lab Project Notes',
+  'AGENTS.md': '# Canary Lab Agent Guide',
+}
+
 function resolveFirstExisting(pathsToTry: string[]): string {
   const match = pathsToTry.find((candidate) => fs.existsSync(candidate))
   if (!match) {
@@ -44,20 +53,34 @@ function extractManagedBlock(content: string): string | null {
 }
 
 /**
- * Replace the managed block in an existing file, or append it if no markers exist.
+ * Replace the managed block in an existing file.
+ *
+ * Three cases:
+ * 1. Markers present → replace content between markers, preserve user content outside
+ * 2. No markers, but file starts with a known canary-lab signature → legacy file from
+ *    a pre-marker version. Replace the entire file with the managed block (the old
+ *    content was all canary-lab-generated anyway)
+ * 3. No markers, unknown content → append the managed block after existing content
  */
-function applyManagedBlock(existing: string, block: string): string {
+function applyManagedBlock(existing: string, block: string, relPath: string): string {
   const startIdx = existing.indexOf(MARKER_START)
   const endIdx = existing.indexOf(MARKER_END)
 
   if (startIdx !== -1 && endIdx !== -1) {
-    // Replace existing managed section
+    // Case 1: markers present — surgical replace
     const before = existing.slice(0, startIdx)
     const after = existing.slice(endIdx + MARKER_END.length)
     return before + block + after
   }
 
-  // No markers found — append the managed block
+  // Check for legacy canary-lab content (pre-marker versions)
+  const signature = LEGACY_SIGNATURES[relPath]
+  if (signature && existing.trimStart().startsWith(signature)) {
+    // Case 2: legacy file — replace entirely
+    return block + '\n'
+  }
+
+  // Case 3: unknown content — append
   const trimmed = existing.trimEnd()
   return trimmed + (trimmed.length > 0 ? '\n\n' : '') + block + '\n'
 }
@@ -128,7 +151,7 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
       ? fs.readFileSync(targetPath, 'utf-8')
       : ''
 
-    const result = applyManagedBlock(existing, managedBlock)
+    const result = applyManagedBlock(existing, managedBlock, relPath)
 
     // Skip if nothing changed
     if (result === existing) continue
@@ -136,6 +159,24 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
     fs.writeFileSync(targetPath, result)
     log(`  Updated ${relPath} (managed section)`, opts)
     updated += 1
+  }
+
+  // 3. Ensure postinstall script exists in project package.json
+  const pkgJsonPath = path.join(projectRoot, 'package.json')
+  if (fs.existsSync(pkgJsonPath)) {
+    try {
+      const pkg = JSON.parse(fs.readFileSync(pkgJsonPath, 'utf-8'))
+      const scripts = pkg.scripts ?? {}
+      if (scripts.postinstall !== 'canary-lab upgrade --silent') {
+        scripts.postinstall = 'canary-lab upgrade --silent'
+        pkg.scripts = scripts
+        fs.writeFileSync(pkgJsonPath, JSON.stringify(pkg, null, 2) + '\n')
+        log('  Updated package.json (added postinstall hook)', opts)
+        updated += 1
+      }
+    } catch {
+      /* don't break upgrade if package.json is malformed */
+    }
   }
 
   if (updated > 0) {
