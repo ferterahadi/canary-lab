@@ -83,6 +83,7 @@ function buildPackageJson(projectName: string, packageSpec: string): string {
       },
       devDependencies: {
         '@playwright/test': '^1.54.2',
+        '@types/node': '^22.0.0',
         'canary-lab': packageSpec,
       },
     },
@@ -107,7 +108,10 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
 
   copyDir(getTemplateRoot(), targetDir)
 
-  const projectName = path.basename(targetDir)
+  let projectName = path.basename(targetDir)
+  if (projectName === 'canary-lab') {
+    projectName = 'canary-lab-workspace'
+  }
   fs.writeFileSync(
     path.join(targetDir, 'package.json'),
     buildPackageJson(projectName, packageSpec),
