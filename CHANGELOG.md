@@ -2,7 +2,7 @@
 
 All notable changes to Canary Lab are listed here. We try to keep the language plain so anyone can follow along.
 
-## 0.6.0 — Unreleased
+## 0.6.0 — 2026-04-17
 
 The big theme: **when a test fails, you get help automatically**.
 

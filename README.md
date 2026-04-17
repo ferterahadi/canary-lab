@@ -2,6 +2,8 @@
 
 E2E testing with Playwright, local service orchestration, and agent-assisted debugging.
 
+See [CHANGELOG.md](CHANGELOG.md) for what's new in each release.
+
 ## Requirements
 
 - **macOS only.** The runner drives iTerm / Terminal.app via AppleScript (`osascript`) to open service and heal-agent tabs. Linux and Windows are not supported yet — there's no fallback launcher.
