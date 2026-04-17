@@ -9,7 +9,7 @@ const config = {
       startCommands: [
         {
           name: 'example-todo-api-server',
-          command: 'node scripts/server.js',
+          command: 'tsx scripts/server.ts',
           healthCheck: {
             url: 'http://localhost:4000/',
             timeoutMs: 3000,

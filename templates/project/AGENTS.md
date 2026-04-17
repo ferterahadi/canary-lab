@@ -16,6 +16,8 @@ For available Codex skills, read:
 self heal
 ```
 
+If the managed blocks or `.codex/*` skills look stale after a `canary-lab` upgrade, run `npm run upgrade` manually — `postinstall` may not fire on every `npm install` / `npm update`.
+
 ## What `self heal` Means
 
 When the user types `self heal`, follow `.codex/self-fixing-loop.md`.

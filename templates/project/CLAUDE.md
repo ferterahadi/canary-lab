@@ -20,6 +20,8 @@ Leave the runner open in watch mode, then type:
 self heal
 ```
 
+If the managed blocks or `.claude/skills/*` look stale after a `canary-lab` upgrade, run `npm run upgrade` manually — `postinstall` may not fire on every `npm install` / `npm update`.
+
 ## What `self heal` Means
 
 When the user types `self heal`, follow `.claude/skills/self-fixing-loop.md`.

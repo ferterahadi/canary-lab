@@ -77,6 +77,7 @@ function buildPackageJson(projectName: string, packageSpec: string): string {
       description: 'Canary Lab project scaffold',
       scripts: {
         postinstall: 'canary-lab upgrade --silent',
+        upgrade: 'canary-lab upgrade',
         'canary-lab:run': 'canary-lab run',
         'canary-lab:env': 'canary-lab env',
         'canary-lab:new-feature': 'canary-lab new-feature',
@@ -86,6 +87,8 @@ function buildPackageJson(projectName: string, packageSpec: string): string {
         '@playwright/test': '^1.54.2',
         '@types/node': '^22.0.0',
         'canary-lab': packageSpec,
+        dotenv: '^16.6.1',
+        tsx: '^4.20.3',
       },
     },
     null,
