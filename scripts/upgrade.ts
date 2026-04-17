@@ -9,8 +9,10 @@ const MARKER_END = '<!-- managed:canary-lab:end -->'
 const FULLY_MANAGED: string[] = [
   '.claude/skills/self-fixing-loop.md',
   '.claude/skills/env-import.md',
+  '.claude/skills/heal-loop.md',
   '.codex/self-fixing-loop.md',
   '.codex/env-import.md',
+  '.codex/heal-loop.md',
 ]
 
 /** Files where only the content between markers is replaced. */

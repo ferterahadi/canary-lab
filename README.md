@@ -2,6 +2,13 @@
 
 E2E testing with Playwright, local service orchestration, and agent-assisted debugging.
 
+## Requirements
+
+- **macOS only.** The runner drives iTerm / Terminal.app via AppleScript (`osascript`) to open service and heal-agent tabs. Linux and Windows are not supported yet — there's no fallback launcher.
+- **Node.js ≥ 20**, **npm ≥ 9**.
+- **iTerm2** (recommended) or the built-in **Terminal.app**.
+- **Optional, for headless auto-heal:** [Claude Code CLI](https://docs.claude.com/en/docs/claude-code) (`claude`) or [Codex CLI](https://github.com/openai/codex) (`codex`) on `PATH`. The interactive fallback (see [When auto-heal isn't available](#when-auto-heal-isnt-available)) works with either CLI or the Desktop apps.
+
 ## Capabilities
 
 | Capability | What it does |
@@ -29,8 +36,9 @@ npx canary-lab run
 
 - `features/example_todo_api` — working Playwright E2E sample
 - `features/broken_todo_api` — intentionally broken sample for self-fixing practice
-- `CLAUDE.md` and `.claude/skills/` for Claude
-- `AGENTS.md` and `.codex/` for Codex
+- `features/tricky_checkout_api` — a more realistic checkout API sample with a local test server
+- `CLAUDE.md` and `.claude/skills/` for Claude (`env-import`, `heal-loop`, `self-fixing-loop`)
+- `AGENTS.md` and `.codex/` for Codex (matching guides)
 
 ## Commands
 
@@ -92,12 +100,24 @@ If you override this or use `git add -f`, review what you are committing. Do not
 
 ## Self-Fixing Workflow
 
-1. Run `npx canary-lab run` and choose the broken sample
-2. Leave the runner open in watch mode
-3. Open Claude or Codex in the generated project
-4. Type `self heal`
+Two flavors, same idea:
 
-The agent follows `.claude/skills/self-fixing-loop.md` (or `.codex/self-fixing-loop.md`): reads `logs/e2e-summary.json`, slices service logs by test markers, fixes implementation code, and signals the runner via `logs/.restart` or `logs/.rerun`.
+- **Manual (`self heal`)** — you stay in the driver's seat. Run `npx canary-lab run`, leave it in watch mode, open Claude or Codex in the project, and type `self heal`. The agent follows `.claude/skills/self-fixing-loop.md` (or `.codex/self-fixing-loop.md`).
+- **Auto-heal (`heal-loop`)** — the runner itself spawns a Claude or Codex agent when a test fails, following `.claude/skills/heal-loop.md`. Output is filtered through a formatter so you see readable progress instead of raw stream-json.
+
+In both cases the agent reads `logs/e2e-summary.json`, slices service logs by `<test-tag>` markers, fixes implementation code, and signals the runner via `logs/.restart` or `logs/.rerun`.
+
+### When auto-heal isn't available
+
+If you didn't pick an auto-heal agent, or the headless agent gave up / isn't installed, you can still drive the loop by hand:
+
+1. Open a new terminal in the project folder you created with `npx canary-lab init`.
+2. Run `claude` (or `codex`) there.
+3. Send the single prompt: `self heal`.
+
+The interactive agent reads the same `.claude/skills/self-fixing-loop.md` (or `.codex/self-fixing-loop.md`) and drives the same `.rerun`/`.restart` signals, so the runner will pick up its work without any extra setup.
+
+If you picked an agent up front and it struck out after 3 cycles, the runner prints the manual options (`touch logs/.rerun`, `touch logs/.heal` to reset strikes and re-spawn, or run the agent interactively as above).
 
 ## Limitations
 
@@ -106,6 +126,8 @@ The agent follows `.claude/skills/self-fixing-loop.md` (or `.codex/self-fixing-l
 - Envset files are local dev config. They are not validated or checked for correctness — if you copy a stale config, tests may fail for non-obvious reasons.
 
 ## How It Works
+
+### Runtime flow
 
 ```mermaid
 flowchart TD
@@ -120,6 +142,116 @@ flowchart TD
     I --> D
 ```
 
+### Components involved in a test run
+
+This view focuses on what happens when you type `npx canary-lab run`. Each box is a component named by its role, with its file location underneath. Solid arrows are calls or writes; dotted arrows show when a component is triggered.
+
+```mermaid
+%%{init: {
+  "theme": "base",
+  "themeVariables": {
+    "fontFamily": "-apple-system, BlinkMacSystemFont, Segoe UI, Helvetica, Arial, sans-serif",
+    "fontSize": "13px",
+    "primaryColor": "#ffffff",
+    "primaryBorderColor": "#64748b",
+    "primaryTextColor": "#0f172a",
+    "lineColor": "#64748b",
+    "clusterBkg": "#ffffff",
+    "clusterBorder": "#64748b",
+    "titleColor": "#334155",
+    "edgeLabelBackground": "#ffffff"
+  },
+  "flowchart": { "curve": "basis", "nodeSpacing": 40, "rankSpacing": 55, "padding": 12 }
+}}%%
+flowchart TD
+    user(["<b>npx canary-lab run</b>"]):::entry
+
+    orchestrator["<b>Orchestrator</b><br/>shared/e2e-runner/runner.ts"]:::core
+
+    subgraph phase1["&nbsp;1 · Service startup&nbsp;"]
+        direction TB
+        launcher["<b>Terminal Launcher</b><br/>shared/launcher/iterm.ts<br/>shared/launcher/terminal.ts"]:::svc
+        health["<b>Health Gate</b><br/>shared/launcher/startup.ts"]:::svc
+    end
+
+    subgraph phase2["&nbsp;2 · Test execution&nbsp;"]
+        direction TB
+        pw(["<b>Playwright</b>"]):::ext
+        logMarker["<b>Per-Test Log Marker</b> · fixture<br/>shared/e2e-runner/log-marker-fixture.ts"]:::hook
+        reporter["<b>Summary Reporter</b> · reporter<br/>shared/e2e-runner/summary-reporter.ts"]:::hook
+    end
+
+    subgraph phase3["&nbsp;3 · Heal phase &nbsp;·&nbsp; on failure, if enabled&nbsp;"]
+        direction TB
+        autoHeal["<b>Auto-Heal Driver</b><br/>shared/e2e-runner/auto-heal.ts"]:::heal
+        formatter["<b>Agent Output Formatter</b><br/>heal-formatter.ts · codex-formatter.ts"]:::heal
+        agent(["<b>Coding Agent</b><br/>Claude Code · Codex CLI"]):::ext
+    end
+
+    subgraph artifacts["&nbsp;logs/&nbsp;"]
+        direction LR
+        svclog[/"svc-*.log"/]:::artifact
+        summaryjson[/"e2e-summary.json"/]:::artifact
+        signals[/".restart · .rerun"/]:::artifact
+    end
+
+    watcher["<b>Watch Mode</b><br/>runner.ts · tail loop"]:::core
+
+    user --> orchestrator
+    orchestrator --> launcher --> health
+    health ==>|services ready| pw
+    orchestrator -.-> pw
+
+    pw -.->|per test| logMarker
+    logMarker --> svclog
+    pw -.->|on each result| reporter
+    reporter --> summaryjson
+
+    pw ==>|tests fail| autoHeal
+    autoHeal --> launcher
+    autoHeal --> agent
+    agent -.->|stdout| formatter
+    agent -.->|reads| summaryjson
+    agent -.->|reads| svclog
+    agent -.->|writes| signals
+
+    orchestrator --> watcher
+    signals ==>|triggers| watcher
+    watcher -->|re-run| pw
+
+    classDef entry fill:#1e293b,color:#ffffff,stroke:#1e293b,stroke-width:1.5px,rx:14,ry:14
+    classDef core fill:#ffffff,color:#1e1b4b,stroke:#4f46e5,stroke-width:2px,rx:6,ry:6
+    classDef svc fill:#ffffff,color:#0c4a6e,stroke:#0284c7,stroke-width:2px,rx:6,ry:6
+    classDef hook fill:#ffffff,color:#064e3b,stroke:#059669,stroke-width:2px,rx:6,ry:6
+    classDef heal fill:#ffffff,color:#7c2d12,stroke:#ea580c,stroke-width:2px,rx:6,ry:6
+    classDef ext fill:#ffffff,color:#1f2937,stroke:#475569,stroke-width:1.5px,stroke-dasharray:4 3
+    classDef artifact fill:#ffffff,color:#78350f,stroke:#b45309,stroke-width:1.5px
+
+    linkStyle default stroke:#64748b,stroke-width:1.5px
+```
+
+**Legend.** Color is carried by the border: indigo = core runner, blue = service startup, green = Playwright hooks, orange = heal phase, dashed slate = external processes, amber = files in `logs/`. Solid arrows are direct calls; dotted arrows fire during a lifecycle event (per test, on failure, etc.); thick arrows are the main happy-path transitions.
+
+**When each component fires:**
+
+- **Orchestrator** (`runner.ts`) runs first, for the whole duration. It loads `feature.config.cjs`, delegates to everything below, and stays alive in watch mode.
+- **Terminal Launcher** + **Health Gate** run once per `run`, before tests start — one terminal tab per service, blocked on health checks.
+- **Playwright** is invoked once per run by the orchestrator. While it runs:
+  - **Per-Test Log Marker** fires **before and after every test**, writing `<test-tag>` boundaries into `svc-*.log` so you can slice logs by test.
+  - **Summary Reporter** fires **on every test result** (and at end-of-suite), incrementally updating `logs/e2e-summary.json`.
+- **Auto-Heal Driver** fires **only when tests fail and auto-heal is enabled**. It spawns a Claude Code or Codex CLI agent in a new terminal tab, piping its stdout through the **Agent Output Formatter**.
+- The **Coding Agent** reads `e2e-summary.json` and the marked-up `svc-*.log`, edits code, then touches `.restart` or `.rerun`.
+- **Watch Mode** (the tail end of `runner.ts`) picks up those signal files and re-invokes Playwright.
+
+**At a glance:**
+
+- `runner.ts` is the conductor: it reads each feature's `feature.config.cjs`, starts services through the macOS launcher, runs Playwright with `summary-reporter` + `log-marker-fixture` attached, then sits in watch mode reacting to `logs/.restart` / `logs/.rerun`.
+- `auto-heal.ts` spawns a Claude Code or Codex CLI process when auto-heal is on. Its raw output is filtered through `heal-formatter.ts` (Claude) or `codex-formatter.ts` (Codex) into readable progress.
+- `launcher/iterm.ts` and `launcher/terminal.ts` are interchangeable backends — both drive their app via AppleScript. `launcher/startup.ts` holds the shared health-check + command-normalization helpers.
+- `env-switcher/switch.ts` does the actual env-file swap; `root-cli.ts` is the interactive prompt wrapper.
+- `runtime/project-root.ts` is the single source of truth for "where does this project live" — everyone else asks it.
+- `feature-support/` is the only surface generated projects import from (`canary-lab/feature-support/...`). Everything under `shared/` is internal.
+
 ## For Contributors
 
 ### Local Development
@@ -131,9 +263,13 @@ npm run build
 
 ### Repository Layout
 
-- `scripts/` — CLI and scaffold commands
-- `shared/` — runtime for `run` and `env`
-- `templates/project/` — generated project files
+- `scripts/` — CLI entry and scaffold commands (`init`, `new-feature`, `upgrade`)
+- `shared/e2e-runner/` — runner, auto-heal, formatters, Playwright reporter + fixture
+- `shared/launcher/` — iTerm / Terminal.app backends and startup helpers
+- `shared/env-switcher/` — env-file apply/revert logic and interactive CLI
+- `shared/runtime/` — shared `project-root` resolver
+- `shared/configs/` — base Playwright config and env loader
+- `templates/project/` — files copied into scaffolded projects
 - `feature-support/` — public imports used by generated projects
 
 ### Build and Test

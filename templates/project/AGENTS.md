@@ -16,6 +16,10 @@ For available Codex skills, read:
 self heal
 ```
 
+## Auto-Heal Mode
+
+When `npx canary-lab run` asks "Auto-heal on test failure?", pick `Yes — Codex`. The runner will spawn `codex exec` in its own tab each time Playwright fails, pointed at `.codex/heal-loop.md`. You do not need to type `self heal` yourself. Pick **Resume** session mode to carry context across heal cycles; the runner gives up after 3 consecutive cycles on the same failure set and falls back to manual signalling.
+
 If the managed blocks or `.codex/*` skills look stale after a `canary-lab` upgrade, run `npm run upgrade` manually — `postinstall` may not fire on every `npm install` / `npm update`.
 
 ## What `self heal` Means

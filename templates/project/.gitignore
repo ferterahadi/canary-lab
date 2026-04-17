@@ -10,5 +10,7 @@ features/*/.env
 # Ignore files inside envset variant dirs (may contain secrets).
 # envsets.config.json is one level up, so it stays tracked.
 features/*/envsets/*/*
-!features/example_todo_api/envsets/local/
-!features/broken_todo_api/envsets/local/
+!features/example_todo_api/envsets/local/*
+!features/broken_todo_api/envsets/local/*
+!features/tricky_checkout_api/envsets/local/*
+!features/flaky_orders_api/envsets/local/*

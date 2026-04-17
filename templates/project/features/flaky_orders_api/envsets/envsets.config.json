@@ -1,0 +1,14 @@
+{
+  "appRoots": {},
+  "slots": {
+    "flaky_orders_api.env": {
+      "description": "Environment file for the flaky orders API sample",
+      "target": "$CANARY_LAB_PROJECT_ROOT/features/flaky_orders_api/.env"
+    }
+  },
+  "feature": {
+    "slots": ["flaky_orders_api.env"],
+    "testCommand": "npx playwright test",
+    "testCwd": "$CANARY_LAB_PROJECT_ROOT/features/flaky_orders_api"
+  }
+}

@@ -1,6 +1,6 @@
 {
   "name": "canary-lab",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "description": "E2E test scaffolder and runner with agent-assisted self-fixing workflows",
   "keywords": [
     "playwright",
@@ -57,7 +57,11 @@
     "prepack": "npm run build",
     "pack:check": "node tools/pack-check.mjs",
     "smoke:pack": "node tools/smoke-pack.mjs",
-    "publish:package": "node tools/publish-package.mjs"
+    "publish:package": "node tools/publish-package.mjs",
+    "changelog": "node tools/generate-changelog.mjs",
+    "changelog:preview": "node tools/generate-changelog.mjs --dry-run",
+    "tag": "node tools/tag-release.mjs",
+    "tag:force": "node tools/tag-release.mjs --force"
   },
   "devDependencies": {
     "@types/node": "^25.5.2",
