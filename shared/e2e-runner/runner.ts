@@ -8,8 +8,14 @@ import {
   normalizeStartCommand,
   resolvePath,
 } from '../launcher/startup'
-import { openItermTabs } from '../launcher/iterm'
-import { openTerminalTabs } from '../launcher/terminal'
+import {
+  openItermTabs,
+  closeItermSessionsByPrefix,
+} from '../launcher/iterm'
+import {
+  openTerminalTabs,
+  closeTerminalTabsByPrefix,
+} from '../launcher/terminal'
 import {
   ROOT,
   FEATURES_DIR,
@@ -19,10 +25,25 @@ import {
   SUMMARY_PATH,
   RERUN_SIGNAL,
   RESTART_SIGNAL,
+  HEAL_SIGNAL,
   SIGNAL_HISTORY_PATH,
 } from './paths'
+import {
+  spawnHealAgent,
+  isAgentCliAvailable,
+  failureSignature,
+  type HealAgent,
+  type HealSessionMode,
+} from './auto-heal'
 
 type TerminalChoice = 'iTerm' | 'Terminal'
+
+interface AutoHealConfig {
+  agent: HealAgent | null
+  sessionMode: HealSessionMode
+}
+
+const AUTO_HEAL_MAX_CYCLES = 3
 
 // ─── Paths (local to runner) ────────────────────────────────────────────────
 const SWITCH_SCRIPT = path.join(__dirname, '../env-switcher/switch.js')
@@ -149,9 +170,14 @@ function openTabs(
   tabs: Array<{ dir: string; command: string; name: string }>,
   label: string,
 ): void {
+  // Close any prior tabs for the same named services so the window doesn't
+  // accumulate stale ones across restarts.
+  const prefixes = tabs.map((t) => t.name)
   if (terminal === 'iTerm') {
+    closeItermSessionsByPrefix(prefixes)
     openItermTabs(tabs, label)
   } else {
+    closeTerminalTabsByPrefix(prefixes)
     openTerminalTabs(tabs, label)
   }
 }
@@ -483,33 +509,146 @@ function printSummary(): void {
 }
 
 // ─── Watch mode ─────────────────────────────────────────────────────────────
+function readFailureSignature(): string {
+  if (!fs.existsSync(SUMMARY_PATH)) return ''
+  try {
+    const summary = JSON.parse(fs.readFileSync(SUMMARY_PATH, 'utf-8'))
+    return failureSignature(summary.failed)
+  } catch {
+    return ''
+  }
+}
+
+interface HealCycleState {
+  spawnCount: number
+  strikeCount: number
+  lastSignature: string
+  disabled: boolean
+}
+
+function printManualOptions(autoHealConfigured: boolean): void {
+  console.log('  Options:')
+  console.log('    • fix the code yourself, then `touch logs/.rerun`')
+  if (autoHealConfigured) {
+    console.log('    • `touch logs/.heal` to reset strikes and spawn the headless agent again')
+  }
+  console.log(
+    `    • open \`claude\` or \`codex\` in ${ROOT} and send the prompt \`self heal\``,
+  )
+  console.log('    • Ctrl+C to exit')
+  console.log('')
+}
+
+async function maybeAutoHeal(
+  autoHeal: AutoHealConfig,
+  state: HealCycleState,
+  terminal: TerminalChoice,
+): Promise<void> {
+  if (autoHeal.agent === null || state.disabled) return
+
+  const signature = readFailureSignature()
+  if (signature === '') return // no failures recorded
+
+  if (signature === state.lastSignature) {
+    state.strikeCount += 1
+  } else {
+    state.strikeCount = 0
+    state.lastSignature = signature
+  }
+
+  if (state.strikeCount >= AUTO_HEAL_MAX_CYCLES) {
+    console.log(
+      `\n  Auto-heal gave up after ${AUTO_HEAL_MAX_CYCLES} cycles on the same failure set.`,
+    )
+    printManualOptions(true)
+    state.disabled = true
+    return
+  }
+
+  console.log(
+    `\n  Auto-heal: spawning ${autoHeal.agent} (strike ${state.strikeCount + 1}/${AUTO_HEAL_MAX_CYCLES})...`,
+  )
+
+  const result = await spawnHealAgent({
+    agent: autoHeal.agent,
+    sessionMode: autoHeal.sessionMode,
+    cycle: state.spawnCount,
+    terminal,
+  })
+  state.spawnCount += 1
+
+  if (result === 'signal') {
+    console.log('  Auto-heal: agent wrote a signal — re-running tests.')
+    return
+  }
+
+  if (result === 'agent_exited_no_signal') {
+    console.log(
+      '\n  Auto-heal: agent exited without writing logs/.rerun or logs/.restart.',
+    )
+  } else {
+    console.log('\n  Auto-heal: timed out waiting for agent (10 min).')
+  }
+  printManualOptions(true)
+}
+
 async function watchMode(
   services: ServiceInfo[],
   featureDir: string,
   headed: boolean,
   terminal: TerminalChoice,
+  autoHeal: AutoHealConfig,
 ): Promise<never> {
   // Clean any stale signal files
   try { fs.unlinkSync(RERUN_SIGNAL) } catch { /* ignore */ }
   try { fs.unlinkSync(RESTART_SIGNAL) } catch { /* ignore */ }
+  try { fs.unlinkSync(HEAL_SIGNAL) } catch { /* ignore */ }
 
-  console.log('  ──── Watch Mode ────')
-  console.log('  Waiting for signal...')
-  console.log('    touch logs/.rerun    — re-run tests')
-  console.log('    touch logs/.restart  — restart services + re-run')
-  console.log('    Ctrl+C               — stop everything')
-  console.log('')
+  const cycleState: HealCycleState = {
+    spawnCount: 0,
+    strikeCount: 0,
+    lastSignature: '',
+    disabled: false,
+  }
+
+  const printBanner = () => {
+    console.log('  ──── Watch Mode ────')
+    if (autoHeal.agent) {
+      console.log(
+        `  Auto-heal: ${autoHeal.agent} (${autoHeal.sessionMode === 'resume' ? 'resume session' : 'new session each cycle'})`,
+      )
+    }
+    console.log('  Waiting for signal...')
+    console.log('    touch logs/.rerun    — re-run tests')
+    console.log('    touch logs/.restart  — restart services + re-run')
+    if (autoHeal.agent) {
+      console.log('    touch logs/.heal     — re-engage auto-heal (resets strikes)')
+    }
+    console.log('    Ctrl+C               — stop everything')
+    console.log('')
+  }
+
+  printBanner()
+
+  // If we already have failures from the initial run, trigger auto-heal before polling.
+  await maybeAutoHeal(autoHeal, cycleState, terminal)
+  if (!autoHeal.agent && readFailureSignature() !== '') {
+    // Auto-heal wasn't selected; surface the manual escape hatches so the user
+    // isn't left wondering what to do with a red test board.
+    printManualOptions(false)
+  }
 
   while (true) {
     await new Promise((r) => setTimeout(r, 1000))
 
     const doRestart = fs.existsSync(RESTART_SIGNAL)
     const doRerun = fs.existsSync(RERUN_SIGNAL)
+    const doHeal = fs.existsSync(HEAL_SIGNAL)
 
-    if (!doRestart && !doRerun) continue
+    if (!doRestart && !doRerun && !doHeal) continue
 
     // Read signal file content before consuming (agents may write JSON context)
-    const signalPath = doRestart ? RESTART_SIGNAL : RERUN_SIGNAL
+    const signalPath = doRestart ? RESTART_SIGNAL : doRerun ? RERUN_SIGNAL : HEAL_SIGNAL
     let signalContent: Record<string, unknown> = {}
     try {
       const raw = fs.readFileSync(signalPath, 'utf-8').trim()
@@ -522,7 +661,7 @@ async function watchMode(
         ? JSON.parse(fs.readFileSync(SIGNAL_HISTORY_PATH, 'utf-8'))
         : []
       history.push({
-        type: doRestart ? 'restart' : 'rerun',
+        type: doRestart ? 'restart' : doRerun ? 'rerun' : 'heal',
         timestamp: new Date().toISOString(),
         ...signalContent,
       })
@@ -535,6 +674,25 @@ async function watchMode(
     // Consume signal files
     try { fs.unlinkSync(RESTART_SIGNAL) } catch { /* ignore */ }
     try { fs.unlinkSync(RERUN_SIGNAL) } catch { /* ignore */ }
+    try { fs.unlinkSync(HEAL_SIGNAL) } catch { /* ignore */ }
+
+    if (doHeal) {
+      if (!autoHeal.agent) {
+        console.log(
+          '\n  .heal signal received but no auto-heal agent is configured — ignoring.\n',
+        )
+        continue
+      }
+      console.log(
+        '\n  Heal signal received — resetting strikes and re-engaging auto-heal.\n',
+      )
+      cycleState.strikeCount = 0
+      cycleState.lastSignature = ''
+      cycleState.disabled = false
+      await maybeAutoHeal(autoHeal, cycleState, terminal)
+      printBanner()
+      continue
+    }
 
     if (doRestart) {
       await restartAllServices(services, terminal)
@@ -547,13 +705,53 @@ async function watchMode(
     enrichSummaryWithLogs()
     printSummary()
 
+    await maybeAutoHeal(autoHeal, cycleState, terminal)
+
     console.log('  ──── Watch Mode ────')
     console.log('  Waiting for signal...\n')
   }
 }
 
+// ─── Flag parsing ───────────────────────────────────────────────────────────
+interface RunFlags {
+  headed: boolean
+  terminal: TerminalChoice
+  healSession: HealSessionMode
+}
+
+function parseFlags(args: string[]): RunFlags {
+  const flags: RunFlags = { headed: false, terminal: 'iTerm', healSession: 'resume' }
+  const readValue = (arg: string, name: string, next: string | undefined): string => {
+    if (arg.startsWith(`${name}=`)) return arg.slice(name.length + 1)
+    if (next === undefined) throw new Error(`${name} requires a value`)
+    return next
+  }
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i]
+    if (arg === '--headed') {
+      flags.headed = true
+    } else if (arg === '--terminal' || arg.startsWith('--terminal=')) {
+      const value = readValue(arg, '--terminal', arg.includes('=') ? undefined : args[++i])
+      if (value !== 'iTerm' && value !== 'Terminal') {
+        throw new Error(`--terminal must be "iTerm" or "Terminal" (got "${value}")`)
+      }
+      flags.terminal = value
+    } else if (arg === '--heal-session' || arg.startsWith('--heal-session=')) {
+      const value = readValue(arg, '--heal-session', arg.includes('=') ? undefined : args[++i])
+      if (value !== 'resume' && value !== 'new') {
+        throw new Error(`--heal-session must be "resume" or "new" (got "${value}")`)
+      }
+      flags.healSession = value
+    } else {
+      throw new Error(`Unknown flag: ${arg}`)
+    }
+  }
+  return flags
+}
+
 // ─── Main ───────────────────────────────────────────────────────────────────
-export async function main() {
+export async function main(argv: string[] = []) {
+  const flags = parseFlags(argv)
   const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout,
@@ -630,20 +828,31 @@ export async function main() {
       env = await selectOption(rl, 'Which environment?', feature.envs)
     }
 
-    // ── 4. Select terminal
-    const terminalChoice = await selectOption(
-      rl,
-      'Which terminal?',
-      ['iTerm', 'Terminal'],
-    ) as TerminalChoice
+    const terminalChoice = flags.terminal
+    const headed = flags.headed
 
-    // ── 5. Headed?
-    const headedChoice = await selectOption(
+    // ── 4. Auto-heal mode?
+    const autoHealChoice = await selectOption(
       rl,
-      'Run headed (browser visible)?',
-      ['No (headless)', 'Yes (headed)'],
+      'Auto-heal on test failure?',
+      ['No (default)', 'Yes — Claude Code', 'Yes — Codex'],
     )
-    const headed = headedChoice.startsWith('Yes')
+    const autoHeal: AutoHealConfig = { agent: null, sessionMode: flags.healSession }
+    if (autoHealChoice.includes('Claude')) {
+      autoHeal.agent = 'claude'
+    } else if (autoHealChoice.includes('Codex')) {
+      autoHeal.agent = 'codex'
+    }
+    if (autoHeal.agent !== null && !isAgentCliAvailable(autoHeal.agent)) {
+      console.error(
+        `\n  \`${autoHeal.agent}\` CLI not found on PATH. Install it and re-run, or pick a different auto-heal agent.`,
+      )
+      console.error(
+        `  You can still drive the heal loop interactively: open \`claude\` or \`codex\``,
+      )
+      console.error(`  in ${ROOT} and send the prompt \`self heal\`.`)
+      process.exit(1)
+    }
 
     // ── 6. Check repos
     console.log('\n  Checking prerequisites...')
@@ -708,7 +917,7 @@ export async function main() {
     printSummary()
 
     // ── 13. Enter watch mode (loops forever until Ctrl+C)
-    await watchMode(services, feature.featureDir, headed, terminalChoice)
+    await watchMode(services, feature.featureDir, headed, terminalChoice, autoHeal)
   } catch (err) {
     cleanup()
     throw err

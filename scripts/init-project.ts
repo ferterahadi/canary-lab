@@ -1,5 +1,6 @@
 import fs from 'fs'
 import path from 'path'
+import { execFileSync } from 'child_process'
 
 function resolveFirstExisting(pathsToTry: string[]): string {
   const match = pathsToTry.find((candidate) => fs.existsSync(candidate))
@@ -120,6 +121,16 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
     path.join(targetDir, 'package.json'),
     buildPackageJson(projectName, packageSpec),
   )
+
+  // Initialize a git repo so agent tools (e.g. claude --dangerously-skip-permissions)
+  // that require a trusted/git-backed workspace can run unattended.
+  if (!fs.existsSync(path.join(targetDir, '.git'))) {
+    try {
+      execFileSync('git', ['init', '-q'], { cwd: targetDir, stdio: 'ignore' })
+    } catch {
+      /* git not installed or init failed — non-fatal */
+    }
+  }
 
   console.log(`\n  Canary Lab project created at ${targetDir}\n`)
   console.log('  Next steps:')

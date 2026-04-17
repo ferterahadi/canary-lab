@@ -6,6 +6,9 @@ node_modules/
 .env.local
 .env.*.local
 
+!templates/**/*.env
+!templates/**/.env.example
+
 # Testing
 coverage/
 .nyc_output/

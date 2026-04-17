@@ -1,0 +1,14 @@
+{
+  "appRoots": {},
+  "slots": {
+    "tricky_checkout_api.env": {
+      "description": "Environment file for the tricky checkout API sample",
+      "target": "$CANARY_LAB_PROJECT_ROOT/features/tricky_checkout_api/.env"
+    }
+  },
+  "feature": {
+    "slots": ["tricky_checkout_api.env"],
+    "testCommand": "npx playwright test",
+    "testCwd": "$CANARY_LAB_PROJECT_ROOT/features/tricky_checkout_api"
+  }
+}

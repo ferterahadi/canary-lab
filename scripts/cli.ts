@@ -11,7 +11,7 @@ function printUsage(): void {
 
 Usage:
   canary-lab init <folder> [--package-spec <spec>]
-  canary-lab run
+  canary-lab run [--headed] [--terminal iTerm|Terminal]
   canary-lab env
   canary-lab new-feature <name> [description]
   canary-lab upgrade [--silent]
@@ -26,7 +26,7 @@ async function main(): Promise<void> {
       await initProject(args)
       return
     case 'run':
-      await runRunner()
+      await runRunner(args)
       return
     case 'env':
       await runEnv(args)
