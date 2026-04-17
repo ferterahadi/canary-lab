@@ -10,5 +10,5 @@
     "types": ["node"]
   },
   "include": ["shared/**/*", "scripts/**/*"],
-  "exclude": ["node_modules", "features"]
+  "exclude": ["node_modules"]
 }

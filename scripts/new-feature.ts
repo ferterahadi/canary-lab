@@ -32,25 +32,20 @@ module.exports = { config }
 }
 
 function buildPlaywrightConfig(): string {
-  return `const { defineConfig } = require('@playwright/test')
-const { baseConfig } = require('canary-lab/feature-support/playwright-base')
+  return `import { defineConfig } from '@playwright/test'
+import { baseConfig } from 'canary-lab/feature-support/playwright-base'
 
-module.exports = defineConfig({
-  ...baseConfig,
-})
+export default defineConfig({ ...baseConfig })
 `
 }
 
-function buildFeatureConfigJs(): string {
-  return `const { loadFeatureEnv } = require('canary-lab/feature-support/load-env')
+function buildFeatureConfigTs(): string {
+  return `import path from 'node:path'
+import { config as loadDotenv } from 'dotenv'
 
-loadFeatureEnv(__dirname + '/..')
+loadDotenv({ path: path.join(__dirname, '..', '.env') })
 
-const GATEWAY_URL = process.env.GATEWAY_URL ?? 'http://localhost:3000'
-
-module.exports = {
-  GATEWAY_URL,
-}
+export const GATEWAY_URL = process.env.GATEWAY_URL ?? 'http://localhost:3000'
 `
 }
 
@@ -76,7 +71,7 @@ function buildEnvsetsConfig(name: string): string {
 }
 
 function buildSpec(name: string): string {
-  return `const { test, expect } = require('canary-lab/feature-support/log-marker-fixture')
+  return `import { test, expect } from 'canary-lab/feature-support/log-marker-fixture'
 
 test.describe('${name}', () => {
   test('example test', async () => {
@@ -110,12 +105,12 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
 
   const files: Array<[string, string]> = [
     ['feature.config.cjs', buildFeatureConfig(name, description)],
-    ['playwright.config.js', buildPlaywrightConfig()],
+    ['playwright.config.ts', buildPlaywrightConfig()],
     ['.env.example', 'GATEWAY_URL=http://localhost:3000\n'],
-    ['src/config.js', buildFeatureConfigJs()],
+    ['src/config.ts', buildFeatureConfigTs()],
     ['envsets/envsets.config.json', buildEnvsetsConfig(name)],
     [`envsets/local/${name}.env`, 'GATEWAY_URL=http://localhost:3000\n'],
-    [`e2e/${name}.spec.js`, buildSpec(name)],
+    [`e2e/${name}.spec.ts`, buildSpec(name)],
   ]
 
   for (const [relPath, content] of files) {
@@ -135,8 +130,8 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
   console.log('')
   console.log('  Next steps:')
   console.log('    1. Edit feature.config.cjs — add your repos, start commands, and health checks')
-  console.log('    2. Edit src/config.js — add feature-specific env var exports')
-  console.log(`    3. Write your tests in e2e/${name}.spec.js`)
+  console.log('    2. Edit src/config.ts — add feature-specific env var exports')
+  console.log(`    3. Write your tests in e2e/${name}.spec.ts`)
   console.log('    4. Run: npx canary-lab run')
   console.log('')
 }

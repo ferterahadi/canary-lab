@@ -9,7 +9,7 @@ const config = {
       startCommands: [
         {
           name: 'broken-todo-api-server',
-          command: 'node scripts/server.js',
+          command: 'tsx scripts/server.ts',
           healthCheck: {
             url: 'http://localhost:4100/',
             timeoutMs: 3000,
