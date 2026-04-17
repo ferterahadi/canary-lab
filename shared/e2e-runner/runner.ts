@@ -11,6 +11,7 @@ import {
 import {
   openItermTabs,
   closeItermSessionsByPrefix,
+  closeItermSessionsByIds,
 } from '../launcher/iterm'
 import {
   openTerminalTabs,
@@ -165,19 +166,32 @@ function buildTeedCommand(svc: ServiceInfo): string {
   return `LOG_MODE=plain ${svc.command} 2>&1 | tee -a ${svc.logPath}`
 }
 
+// Tracks iTerm session IDs for launched service tabs so restarts can close
+// them precisely (zsh auto-title overwrites `name of s`, so name-prefix
+// matching is unreliable across restarts).
+const itermSessionIds = new Map<string, string>()
+
 function openTabs(
   terminal: TerminalChoice,
   tabs: Array<{ dir: string; command: string; name: string }>,
   label: string,
 ): void {
-  // Close any prior tabs for the same named services so the window doesn't
-  // accumulate stale ones across restarts.
-  const prefixes = tabs.map((t) => t.name)
   if (terminal === 'iTerm') {
-    closeItermSessionsByPrefix(prefixes)
-    openItermTabs(tabs, label)
+    // Close known prior sessions (by ID — always accurate) first, then
+    // also fall back to prefix-matching for any sessions we didn't track
+    // (e.g. leftovers from a previous runner process).
+    const knownIds = tabs
+      .map((t) => itermSessionIds.get(t.name))
+      .filter((id): id is string => Boolean(id))
+    if (knownIds.length > 0) closeItermSessionsByIds(knownIds)
+    closeItermSessionsByPrefix(tabs.map((t) => t.name))
+
+    const newIds = openItermTabs(tabs, label)
+    tabs.forEach((tab, i) => {
+      if (newIds[i]) itermSessionIds.set(tab.name, newIds[i])
+    })
   } else {
-    closeTerminalTabsByPrefix(prefixes)
+    closeTerminalTabsByPrefix(tabs.map((t) => t.name))
     openTerminalTabs(tabs, label)
   }
 }
@@ -852,6 +866,11 @@ export async function main(argv: string[] = []) {
       )
       console.error(`  in ${ROOT} and send the prompt \`self heal\`.`)
       process.exit(1)
+    }
+    if (autoHeal.agent === null) {
+      console.log('\n  Auto-heal is off. If a test fails, you can drive the fix loop yourself:')
+      console.log(`    • open \`claude\` or \`codex\` in ${ROOT} and send the prompt \`self heal\``)
+      console.log('    • or fix the code and `touch logs/.rerun`')
     }
 
     // ── 6. Check repos

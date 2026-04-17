@@ -4,6 +4,7 @@ import { execFileSync } from 'child_process'
 import {
   openItermTabs,
   closeItermSessionsByPrefix,
+  closeItermSessionsByIds,
 } from '../launcher/iterm'
 import {
   openTerminalTabs,
@@ -124,6 +125,8 @@ echo "[canary-lab] you can close this tab."
   fs.writeFileSync(HEAL_SCRIPT_FILE, script, { mode: 0o755 })
 }
 
+const previousHealAgentIds: string[] = []
+
 function openTab(
   terminal: TerminalChoice,
   command: string,
@@ -137,8 +140,12 @@ function openTab(
   }
   const label = `\n  Opening ${terminal} tab for ${agent} heal agent (cycle ${cycle + 1})...`
   if (terminal === 'iTerm') {
+    if (previousHealAgentIds.length > 0) {
+      closeItermSessionsByIds(previousHealAgentIds.splice(0))
+    }
     closeItermSessionsByPrefix(['heal-agent-'])
-    openItermTabs([tab], label)
+    const ids = openItermTabs([tab], label)
+    previousHealAgentIds.push(...ids)
   } else {
     closeTerminalTabsByPrefix(['heal-agent-'])
     openTerminalTabs([tab], label)

@@ -28,7 +28,7 @@ tell application "Terminal"
     end repeat
     repeat with t in tabsToClose
       try
-        close t
+        close t saving no
       end try
     end repeat
   end repeat

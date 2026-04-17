@@ -78,7 +78,87 @@ tell application "iTerm"
     end repeat
     repeat with t in tabsToClose
       try
-        close t
+        close t saving no
+      end try
+    end repeat
+  end repeat
+end tell
+`
+  try {
+    execFileSync('osascript', ['-e', closeScript], { stdio: 'ignore' })
+  } catch {
+    /* non-fatal */
+  }
+}
+
+/**
+ * Close specific iTerm sessions by their unique session IDs. More reliable
+ * than prefix-matching since session IDs can't be overridden by the shell
+ * (whereas zsh/oh-my-zsh auto-title escape sequences overwrite `name of s`).
+ */
+export function closeItermSessionsByIds(ids: string[]): void {
+  if (ids.length === 0) return
+  const idList = ids.map((id) => `"${escape(id)}"`).join(', ')
+
+  // Phase 1: kill processes on matching sessions' ttys.
+  const collectScript = `
+tell application "iTerm"
+  set ttyList to {}
+  repeat with w in (windows as list)
+    repeat with t in (tabs of w as list)
+      repeat with s in (sessions of t as list)
+        try
+          if (id of s as string) is in {${idList}} then
+            set end of ttyList to tty of s
+          end if
+        end try
+      end repeat
+    end repeat
+  end repeat
+end tell
+set AppleScript's text item delimiters to linefeed
+return ttyList as text
+`
+  let ttys: string[] = []
+  try {
+    const out = execFileSync('osascript', ['-e', collectScript], {
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    })
+    ttys = out
+      .split('\n')
+      .map((l) => l.trim())
+      .filter((l) => l.length > 0)
+  } catch {
+    return
+  }
+
+  for (const tty of ttys) {
+    const name = tty.replace(/^\/dev\//, '')
+    try {
+      execFileSync('pkill', ['-9', '-t', name], { stdio: 'ignore' })
+    } catch {
+      /* no processes on tty — fine */
+    }
+  }
+
+  // Phase 2: close the (now empty) tabs without prompting.
+  const closeScript = `
+tell application "iTerm"
+  repeat with w in (windows as list)
+    set tabsToClose to {}
+    repeat with t in (tabs of w as list)
+      repeat with s in (sessions of t as list)
+        try
+          if (id of s as string) is in {${idList}} then
+            set end of tabsToClose to t
+          end if
+        end try
+      end repeat
+    end repeat
+    repeat with t in tabsToClose
+      try
+        close t saving no
       end try
     end repeat
   end repeat
@@ -93,11 +173,14 @@ end tell
 
 /**
  * Open tabs in iTerm. Always creates a fresh window so runs don't pile up
- * inside an existing window. Each session is named after `tab.name` so we
- * can find/close it later via `closeItermSessionsByPrefix`.
+ * inside an existing window. Returns the iTerm session IDs of the opened
+ * tabs so callers can close them precisely later (see `closeItermSessionsByIds`).
+ *
+ * We also set `name of s` for display, but zsh auto-title may overwrite it;
+ * IDs are immutable, so we return those as the source of truth.
  */
-export function openItermTabs(tabs: StartTab[], label: string): void {
-  if (tabs.length === 0) return
+export function openItermTabs(tabs: StartTab[], label: string): string[] {
+  if (tabs.length === 0) return []
 
   const sessionDecls = tabs
     .map((tab, i) => {
@@ -128,6 +211,10 @@ export function openItermTabs(tabs: StartTab[], label: string): void {
     )
     .join('\n  ')
 
+  const idReturns = tabs
+    .map((_, i) => `(id of s${i + 1} as string)`)
+    .join(', ')
+
   const script = `
 tell application "iTerm"
   ${sessionDecls}
@@ -135,9 +222,23 @@ tell application "iTerm"
   ${sessionWrites}
 
   activate
+  set idList to {${idReturns}}
 end tell
+set AppleScript's text item delimiters to linefeed
+return idList as text
 `
 
   if (label) console.log(label)
-  execFileSync('osascript', ['-e', script], { stdio: 'inherit' })
+  try {
+    const out = execFileSync('osascript', ['-e', script], {
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'inherit'],
+    })
+    return out
+      .split('\n')
+      .map((l) => l.trim())
+      .filter((l) => l.length > 0)
+  } catch {
+    return []
+  }
 }
