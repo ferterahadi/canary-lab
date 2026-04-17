@@ -23,6 +23,7 @@ Codex should run this workflow.
 - Fix the implementation, not the test
 - Do not "solve" a failure by changing the assertion
 - Stay in this session — do not tell the user to open a new session
+- Prefer **adding logs** over guessing. If the existing logs don't prove your hypothesis, instrument the code first, re-run, and read the new output before editing a fix.
 
 ---
 
@@ -48,8 +49,17 @@ Build a mental model of why the tests fail before touching any code.
 3. **Read the implementation code** the test exercises (server, API handler, etc.)
 4. **Trace the request path** end-to-end: test helper -> HTTP call -> handler -> response
 5. **Read relevant service logs** (`logs/svc-*.log`) — look for the log output between the test's XML markers (`<test-case-SLUG>...</test-case-SLUG>`)
+6. **If logs don't reveal enough, add instrumentation first** — before writing a fix, add `console.log` statements in the implementation to expose:
+   - Input values at suspected decision points
+   - Which branch was taken in conditionals
+   - Values returned from helpers, DB/HTTP calls, or parsers
+   - The shape of objects just before the line you suspect
 
-After exploring, form a hypothesis: what specific line(s) of code cause each failure and why?
+   Then signal a restart (see Phase 2) and read the new `logs/svc-*.log` output. Log first, hypothesize second. Record what you logged in the journal's `hypothesis` field so future iterations know what evidence you gathered.
+
+   **Clean up diagnostic logs** in the same iteration that lands the real fix — do not leave them in the implementation.
+
+After exploring (and instrumenting if needed), form a hypothesis: what specific line(s) of code cause each failure and why?
 
 **Write your hypothesis to `logs/diagnosis-journal.json` BEFORE making any edit:**
 
