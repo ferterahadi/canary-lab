@@ -4,7 +4,6 @@ import readline from 'readline'
 import { execFileSync } from 'child_process'
 import { getFeaturesDir } from '../runtime/project-root'
 
-const FEATURES_DIR = getFeaturesDir()
 const SWITCH_SCRIPT = path.join(__dirname, 'switch.js')
 
 function prompt(rl: readline.Interface, question: string): Promise<string> {
@@ -22,16 +21,16 @@ async function selectOption(rl: readline.Interface, label: string, options: stri
   }
 }
 
-function discoverFeaturesWithEnvSets(): string[] {
-  return fs.readdirSync(FEATURES_DIR, { withFileTypes: true })
+export function discoverFeaturesWithEnvSets(featuresDir: string = getFeaturesDir()): string[] {
+  return fs.readdirSync(featuresDir, { withFileTypes: true })
     .filter(d => d.isDirectory())
     .map(d => d.name)
-    .filter(name => fs.existsSync(path.join(FEATURES_DIR, name, 'envsets', 'envsets.config.json')))
+    .filter(name => fs.existsSync(path.join(featuresDir, name, 'envsets', 'envsets.config.json')))
     .sort()
 }
 
-function listEnvSets(featureName: string): string[] {
-  const envSetsDir = path.join(FEATURES_DIR, featureName, 'envsets')
+export function listEnvSets(featureName: string, featuresDir: string = getFeaturesDir()): string[] {
+  const envSetsDir = path.join(featuresDir, featureName, 'envsets')
   return fs.readdirSync(envSetsDir, { withFileTypes: true })
     .filter(d => d.isDirectory())
     .map(d => d.name)

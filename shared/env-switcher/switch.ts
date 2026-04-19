@@ -6,18 +6,18 @@ import type { EnvSetsConfig, BackupRecord } from './types.js';
 import { getFeaturesDir, getProjectRoot } from '../runtime/project-root';
 
 
-function resolveVars(str: string, appRoots: Record<string, string>): string {
+export function resolveVars(str: string, appRoots: Record<string, string>): string {
   return str.replace(/\$([A-Z_]+)/g, (_, key) => appRoots[key] ?? `$${key}`);
 }
 
-function getEnvSetsDir(featureName: string): string {
+export function getEnvSetsDir(featureName: string): string {
   if (path.isAbsolute(featureName)) {
     return path.join(featureName, 'envsets');
   }
   return path.join(getFeaturesDir(), featureName, 'envsets');
 }
 
-function loadConfig(featureName: string): EnvSetsConfig {
+export function loadConfig(featureName: string): EnvSetsConfig {
   const envSetsDir = getEnvSetsDir(featureName);
   const configPath = path.join(envSetsDir, 'envsets.config.json');
 
@@ -34,7 +34,7 @@ function loadConfig(featureName: string): EnvSetsConfig {
   return config;
 }
 
-function listEnvSets(envSetsDir: string): string[] {
+export function listEnvSets(envSetsDir: string): string[] {
   return fs
     .readdirSync(envSetsDir, { withFileTypes: true })
     .filter((d) => d.isDirectory())
@@ -42,12 +42,12 @@ function listEnvSets(envSetsDir: string): string[] {
     .sort();
 }
 
-function getSlotFilesInSet(envSetsDir: string, setName: string, slots: string[]): string[] {
+export function getSlotFilesInSet(envSetsDir: string, setName: string, slots: string[]): string[] {
   const setDir = path.join(envSetsDir, setName);
   return slots.filter((slot) => fs.existsSync(path.join(setDir, slot)));
 }
 
-function backup(
+export function backup(
   targets: Array<{ slot: string; targetPath: string }>,
   timestamp: number,
 ): BackupRecord[] {
@@ -62,7 +62,7 @@ function backup(
   return records;
 }
 
-function applySet(
+export function applySet(
   envSetsDir: string,
   setName: string,
   targets: Array<{ slot: string; targetPath: string }>,
@@ -77,7 +77,7 @@ function applySet(
   }
 }
 
-function restore(records: BackupRecord[]) {
+export function restore(records: BackupRecord[]) {
   for (const { originalPath, backupPath } of records) {
     if (fs.existsSync(backupPath)) {
       fs.copyFileSync(backupPath, originalPath);

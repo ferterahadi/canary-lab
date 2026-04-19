@@ -1,7 +1,7 @@
 import { execFileSync } from 'child_process'
 import type { StartTab } from './startup'
 
-function escape(s: string): string {
+export function escape(s: string): string {
   return s.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
 }
 

@@ -50,10 +50,9 @@ Build a mental model of why the tests fail before touching any code.
 
 1. **Read `logs/e2e-summary.json`** — identify which tests failed and their error messages
 2. **Read the test file** — understand what each failing test asserts (the expected behavior)
-3. **Read the implementation code** the test exercises (server, API handler, etc.)
-4. **Trace the request path** end-to-end: test helper -> HTTP call -> handler -> response
-5. **Read relevant service logs** (`logs/svc-*.log`) — look for the log output between the test's XML markers (`<test-case-SLUG>...</test-case-SLUG>`)
-6. **If logs don't reveal enough, add instrumentation first** — before writing a fix, add `console.log` statements in the implementation to expose:
+3. **Read relevant service logs** (`logs/svc-*.log`) — look for the log output between the test's XML markers (`<test-case-SLUG>...</test-case-SLUG>`). These usually pinpoint the function or branch that misbehaved and let you keep the next step surgical. The runner wipes each svc log at the start of every iteration (both `.restart` and `.rerun`), so what you read is only the current iteration's output — the XML markers still matter for scoping to a specific test case within that iteration.
+4. **Read the implementation code** — open only the function/branch the logs implicate. Trace the full request path (test helper -> HTTP call -> handler -> response) only if the logs don't localize the failure.
+5. **If logs don't reveal enough, add instrumentation first** — before writing a fix, add `console.log` statements in the implementation to expose:
    - Input values at suspected decision points
    - Which branch was taken in conditionals
    - Values returned from helpers, DB/HTTP calls, or parsers
