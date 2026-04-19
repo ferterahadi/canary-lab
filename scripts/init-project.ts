@@ -24,12 +24,20 @@ function getTemplateRoot(): string {
   ])
 }
 
+// npm pack strips `.gitignore` from published tarballs (a long-standing npm
+// behavior to prevent accidentally shipping ignore rules). The template
+// stores it as `gitignore` (no dot) and we restore the leading dot on copy.
+const TEMPLATE_RENAMES: Record<string, string> = {
+  gitignore: '.gitignore',
+}
+
 export function copyDir(sourceDir: string, targetDir: string): void {
   fs.mkdirSync(targetDir, { recursive: true })
 
   for (const entry of fs.readdirSync(sourceDir, { withFileTypes: true })) {
     const sourcePath = path.join(sourceDir, entry.name)
-    const targetPath = path.join(targetDir, entry.name)
+    const targetName = TEMPLATE_RENAMES[entry.name] ?? entry.name
+    const targetPath = path.join(targetDir, targetName)
 
     if (entry.isDirectory()) {
       copyDir(sourcePath, targetPath)

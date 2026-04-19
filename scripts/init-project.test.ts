@@ -112,6 +112,16 @@ describe('copyDir', () => {
     expect(fs.readFileSync(path.join(dst, 'a.txt'), 'utf-8')).toBe('A')
     expect(fs.readFileSync(path.join(dst, 'sub', 'b.txt'), 'utf-8')).toBe('B')
   })
+
+  it('renames `gitignore` to `.gitignore` on copy (npm strips .gitignore from tarballs)', () => {
+    const src = mkTmp()
+    const dst = path.join(mkTmp(), 'out')
+    fs.writeFileSync(path.join(src, 'gitignore'), 'node_modules\n')
+    copyDir(src, dst)
+    expect(fs.existsSync(path.join(dst, '.gitignore'))).toBe(true)
+    expect(fs.existsSync(path.join(dst, 'gitignore'))).toBe(false)
+    expect(fs.readFileSync(path.join(dst, '.gitignore'), 'utf-8')).toBe('node_modules\n')
+  })
 })
 
 describe('main (init-project orchestration)', () => {

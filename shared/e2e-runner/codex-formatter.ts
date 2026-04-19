@@ -88,6 +88,11 @@ function kindIcon(kind: string): string {
   return c('yellow', '~')
 }
 
+let totalInTokens = 0
+let totalOutTokens = 0
+let turnCount = 0
+let reasoningCount = 0
+
 function handleCompleted(item: AnyObj): void {
   const type = item.type as string | undefined
 
@@ -101,6 +106,7 @@ function handleCompleted(item: AnyObj): void {
   if (type === 'reasoning') {
     const text = String(item.text ?? '').trim()
     if (!text) return
+    reasoningCount += 1
     process.stdout.write(`${tag()} ${c('magenta', 'thinking')} ${c('dim', truncate(text.split('\n')[0], 100))}\n`)
     return
   }
@@ -156,11 +162,32 @@ function handleLine(line: string): void {
     const usage = msg.usage as AnyObj | undefined
     const inTok = Number(usage?.input_tokens ?? 0)
     const outTok = Number(usage?.output_tokens ?? 0)
+    totalInTokens += inTok
+    totalOutTokens += outTok
+    turnCount += 1
     process.stdout.write(
       `\n${tag()} ${c('green', '✓ turn done')} ${c('dim', `(${inTok} in / ${outTok} out)`)}\n`,
     )
     return
   }
+}
+
+function resetSessionState(): void {
+  totalInTokens = 0
+  totalOutTokens = 0
+  turnCount = 0
+  reasoningCount = 0
+}
+
+function writeSessionSummary(): void {
+  if (turnCount === 0 && totalInTokens === 0 && totalOutTokens === 0) return
+  const parts: string[] = [`${totalInTokens} in / ${totalOutTokens} out`]
+  if (turnCount > 0) parts.push(`${turnCount} turn${turnCount === 1 ? '' : 's'}`)
+  if (reasoningCount > 0) parts.push(`${reasoningCount} reasoning step${reasoningCount === 1 ? '' : 's'}`)
+  parts.push(`${elapsed()} total`)
+  process.stdout.write(
+    `\n${tag()} ${c('green', '✓ session done')} ${c('dim', `(${parts.join(' · ')})`)}\n`,
+  )
 }
 
 if (require.main === module) {
@@ -177,6 +204,7 @@ if (require.main === module) {
   })
   process.stdin.on('end', () => {
     if (buffer) handleLine(buffer)
+    writeSessionSummary()
   })
 }
 
@@ -192,4 +220,6 @@ export {
   kindIcon,
   handleCompleted,
   handleLine,
+  writeSessionSummary,
+  resetSessionState,
 }

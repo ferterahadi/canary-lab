@@ -186,7 +186,7 @@ flowchart TD
     subgraph phase3["&nbsp;3 · Heal phase &nbsp;·&nbsp; on failure, if enabled&nbsp;"]
         direction TB
         autoHeal["<b>Auto-Heal Driver</b><br/>shared/e2e-runner/auto-heal.ts"]:::heal
-        formatter["<b>Agent Output Formatter</b><br/>heal-formatter.ts · codex-formatter.ts"]:::heal
+        formatter["<b>Agent Output Formatter</b><br/>claude-formatter.ts · codex-formatter.ts"]:::heal
         agent(["<b>Coding Agent</b><br/>Claude Code · Codex CLI"]):::ext
     end
 
@@ -248,7 +248,7 @@ flowchart TD
 **At a glance:**
 
 - `runner.ts` is the conductor: it reads each feature's `feature.config.cjs`, starts services through the macOS launcher, runs Playwright with `summary-reporter` + `log-marker-fixture` attached, then sits in watch mode reacting to `logs/.restart` / `logs/.rerun`.
-- `auto-heal.ts` spawns a Claude Code or Codex CLI process when auto-heal is on. Its raw output is filtered through `heal-formatter.ts` (Claude) or `codex-formatter.ts` (Codex) into readable progress.
+- `auto-heal.ts` spawns a Claude Code or Codex CLI process when auto-heal is on. Its raw output is filtered through `claude-formatter.ts` (Claude) or `codex-formatter.ts` (Codex) into readable progress.
 - `launcher/iterm.ts` and `launcher/terminal.ts` are interchangeable backends — both drive their app via AppleScript. `launcher/startup.ts` holds the shared health-check + command-normalization helpers.
 - `env-switcher/switch.ts` does the actual env-file swap; `root-cli.ts` is the interactive prompt wrapper.
 - `runtime/project-root.ts` is the single source of truth for "where does this project live" — everyone else asks it.

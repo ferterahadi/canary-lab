@@ -1,80 +1,65 @@
 ---
 name: Canary Lab Self-Fixing Loop
-description: Phased Claude workflow for diagnosing and fixing failing Canary Lab tests. Triggered when the user says "self heal".
+description: Diagnose and fix failing Canary Lab tests using pre-extracted log evidence. Triggered when the user says "self heal".
 type: skill
 ---
 
 # Self-Fixing Loop
 
-## Trigger Phrase
-
-If the user types:
-
-```text
-self heal
-```
-
-follow this workflow.
-
-## Start State
-
-- The user should already have run `npx canary-lab run`
-- The runner should still be open in watch mode
-- Tests have failed and `logs/e2e-summary.json` exists
+**Trigger:** user types `self heal`.
+**Preconditions:** `npx canary-lab run` is open in watch mode and `logs/e2e-summary.json` contains failures.
 
 ## Rules (apply throughout)
 
-- Fix the implementation, not the test
-- Do not "solve" a failure by changing the assertion
-- Stay in this session — do not tell the user to open a new session
-- Prefer **adding logs** over guessing. If the existing logs don't prove your hypothesis, instrument the code first, re-run, and read the new output before editing a fix.
+- Fix the implementation, not the test. Never weaken an assertion to make it pass.
+- Stay in this session. Do not ask the user to open a new one.
+- If logs don't prove your hypothesis, instrument the code and re-run — do not guess.
+- **Never full-file Read an implementation file.** Always `grep` first, then narrow Read (±20 lines).
+- Do not `ls logs/` or `ls features/…`, do not `cat` the test spec or `feature.config.cjs` — the bug is almost never in configs.
+- Do not re-slugify test titles. `failed[].name` *is* the slug used in the log markers.
 
 ---
 
-## Phase 0 — Resume or Start Fresh
+## Step 1 — Resume check
 
-Check if prior diagnostic context exists:
+Read `logs/diagnosis-journal.json` and `logs/signal-history.json` if they exist. Summarize what was already tried and do not re-try a failed hypothesis. Then continue to Step 2.
 
-1. Read `logs/diagnosis-journal.json` (if it exists)
-2. Read `logs/signal-history.json` (if it exists)
+## Step 2 — Fast path (≈15 seconds, the default)
 
-If either file exists, summarize what was already tried and what the outcomes were. **Do NOT re-try a hypothesis that already failed.** Build on prior work.
+The runner already extracted each failing test's service log chunk into `logs/e2e-summary.json` at `failed[].logs[<svc-log-file>]`. That chunk is your primary evidence.
 
-If neither file exists, this is a fresh start — proceed to Phase 1.
+1. `Read logs/e2e-summary.json`.
+2. For each `failed` entry, look at `logs[<svc>]`. Chunks look like:
 
----
+   ```
+   <test-case-tax-rounds-to-2-decimal-places>
+   [tricky_checkout_api] summary cart=3 items=1 subtotal=1.1 tax=0.09 total=1.1900000000000002
+   </test-case-tax-rounds-to-2-decimal-places>
+   ```
 
-## Phase 1 — Explore (do NOT edit any files yet)
+   Pick a distinctive substring — a log prefix, a numeric literal, or a variable name that also appears in `error.message`.
+3. `grep -rn '<distinctive string>' features/<feature>/scripts`, then narrow Read ±20 lines around the match. Fix from there.
 
-Build a mental model of why the tests fail before touching any code.
+Only fall through to Step 3 if `failed[].logs` is empty (the test failed before emitting its opening marker) or the chunk doesn't localize the bug.
 
-1. **Read `logs/e2e-summary.json`** — identify which tests failed and their error messages
-2. **Read the test file** — understand what each failing test asserts (the expected behavior)
-3. **Read relevant service logs** (`logs/svc-*.log`) — look for the log output between the test's XML markers (`<test-case-SLUG>...</test-case-SLUG>`). These usually pinpoint the function or branch that misbehaved and let you keep the next step surgical. The runner wipes each svc log at the start of every iteration (both `.restart` and `.rerun`), so what you read is only the current iteration's output — the XML markers still matter for scoping to a specific test case within that iteration.
-4. **Read the implementation code** — open only the function/branch the logs implicate. Trace the full request path (test helper -> HTTP call -> handler -> response) only if the logs don't localize the failure.
-5. **If logs don't reveal enough, add instrumentation first** — before writing a fix, add `console.log` statements in the implementation to expose:
-   - Input values at suspected decision points
-   - Which branch was taken in conditionals
-   - Values returned from helpers, DB/HTTP calls, or parsers
-   - The shape of objects just before the line you suspect
+## Step 3 — Fallback path
 
-   Then signal a restart (see Phase 2) and read the new `logs/svc-*.log` output. Log first, hypothesize second. Record what you logged in the journal's `hypothesis` field so future iterations know what evidence you gathered.
+1. **Raw log by slug.** Run `sed -n '/<test-case-SLUG>/,/<\/test-case-SLUG>/p' logs/svc-*.log` with `SLUG` = `failed[].name`. Svc logs are wiped on every signal, so the output is this iteration only.
+2. **If `sed` is also empty — instrument first, fix second.** Read the failing test file + the handler path (narrow Reads guided by `grep`). Add `console.log` at decision points (inputs, branch taken, helper return values, object shapes near the failing line). Write `.restart` with a **gather-evidence** hypothesis. On the next iteration, re-run `sed` and decide the real fix from real evidence. Remove the diagnostic logs in the same iteration that lands the fix.
 
-   **Clean up diagnostic logs** in the same iteration that lands the real fix — do not leave them in the implementation.
+## Step 4 — Hypothesize + journal
 
-After exploring (and instrumenting if needed), form a hypothesis: what specific line(s) of code cause each failure and why?
-
-**Write your hypothesis to `logs/diagnosis-journal.json` BEFORE making any edit:**
+Before any edit, append an entry to `logs/diagnosis-journal.json` (create if missing):
 
 ```json
 {
-  "feature": "<feature-name>",
+  "feature": "<feature>",
   "iterations": [
     {
       "iteration": 1,
-      "timestamp": "<ISO timestamp>",
-      "failingTests": ["test-case-slug-here"],
-      "hypothesis": "<what you think is wrong and why>",
+      "timestamp": "<ISO>",
+      "failingTests": ["<slug>"],
+      "hypothesis": "<what is wrong and why>",
       "filesExamined": ["path/to/file.js:lines"],
       "fix": null,
       "signal": null,
@@ -84,63 +69,26 @@ After exploring (and instrumenting if needed), form a hypothesis: what specific 
 }
 ```
 
-If the journal already exists, append a new entry to the `iterations` array.
+## Step 5 — Fix + signal
 
----
-
-## Phase 2 — Fix
-
-Now edit the implementation code to address your hypothesis.
-
-1. Make the minimal fix needed
-2. Update the journal entry's `fix` field:
+Make the minimal edit. Update the journal entry's `fix` field:
 
 ```json
-"fix": {
-  "file": "path/to/file.js",
-  "description": "Brief description of what you changed"
-}
+"fix": { "file": "path/to/file.js", "description": "<what changed>" }
 ```
 
-3. Signal the runner with context — write JSON to the signal file:
-
-If running service code changed:
+Then write a signal file with JSON context:
 
 ```bash
-echo '{"hypothesis":"<your hypothesis>","filesChanged":["path/to/file.js"],"expectation":"<which test should now pass>"}' > logs/.restart
+echo '{"hypothesis":"…","filesChanged":["…"],"expectation":"<slug that should now pass>"}' > logs/.restart
 ```
 
-If no restart is needed (e.g., only test config changed):
+Use `.restart` when service code changed, `.rerun` when only the test/config changed. Set the journal entry's `signal` to `"restart"` or `"rerun"`.
 
-```bash
-echo '{"hypothesis":"<your hypothesis>","filesChanged":["path/to/file.js"],"expectation":"<which test should now pass>"}' > logs/.rerun
-```
+## Step 6 — Evaluate
 
-4. Update the journal entry's `signal` field to `"restart"` or `"rerun"`
+After the runner re-runs, read the updated `logs/e2e-summary.json` and set the journal entry's `outcome`: `"all_passed"`, `"partial"` (+ notes), `"no_change"`, or `"regression"`.
 
----
-
-## Phase 3 — Evaluate
-
-After the runner re-runs and new results appear:
-
-1. Read the updated `logs/e2e-summary.json`
-2. Update the journal entry's `outcome` field:
-   - `"all_passed"` if everything passes
-   - `"partial"` with notes on what still fails
-   - `"no_change"` if the same tests still fail
-   - `"regression"` if new tests broke
-
-3. **If all tests pass** — done. Tell the user.
-4. **If tests still fail** — return to Phase 1 with the new information. Your prior hypothesis was wrong or incomplete — the journal ensures you don't repeat it.
-5. **After 3 failed iterations** — stop and produce a detailed diagnosis report explaining what you've tried, what you've learned, and what you think the root cause is. Ask the user for guidance.
-
----
-
-## Copy-Paste Prompt
-
-```text
-Please read CLAUDE.md and .claude/skills/self-fixing-loop.md first.
-The Canary Lab runner is already in watch mode.
-Follow the phased workflow: explore the failure context, form a hypothesis, fix the implementation, and signal the runner. Check for prior diagnostic context in logs/diagnosis-journal.json before starting.
-```
+- All passed → tell the user, stop.
+- Still failing → back to Step 2 with the new evidence. Your prior hypothesis was wrong or incomplete — the journal prevents repeat attempts.
+- 3 failed iterations → stop. Produce a diagnosis report (what you tried, what you learned, suspected root cause) and ask the user for guidance.

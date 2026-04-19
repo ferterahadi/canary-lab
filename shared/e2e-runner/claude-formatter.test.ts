@@ -9,7 +9,7 @@ import {
   formatToolCall,
   formatToolResult,
   handleLine,
-} from './heal-formatter'
+} from './claude-formatter'
 
 describe('c (color)', () => {
   it('returns plain text when not a TTY', () => {
@@ -164,6 +164,40 @@ describe('handleLine', () => {
     handleLine(JSON.stringify({ type: 'result', duration_ms: 500, is_error: true }))
     const failed = spy.mock.calls.map((c) => c[0] as string).join('')
     expect(failed).toContain('✗ failed')
+    spy.mockRestore()
+  })
+
+  it('result line prints token usage + turns + cost when present', () => {
+    const spy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    handleLine(
+      JSON.stringify({
+        type: 'result',
+        duration_ms: 1000,
+        is_error: false,
+        num_turns: 3,
+        total_cost_usd: 0.0523,
+        usage: {
+          input_tokens: 120,
+          output_tokens: 80,
+          cache_creation_input_tokens: 30,
+          cache_read_input_tokens: 200,
+        },
+      }),
+    )
+    const out = spy.mock.calls.map((c) => c[0] as string).join('')
+    expect(out).toContain('120 in / 80 out')
+    expect(out).toContain('200 cache read · 30 cache created')
+    expect(out).toContain('3 turns')
+    expect(out).toContain('$0.0523')
+    spy.mockRestore()
+  })
+
+  it('result line omits token summary when no usage data is present', () => {
+    const spy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    handleLine(JSON.stringify({ type: 'result', duration_ms: 1, is_error: false }))
+    const out = spy.mock.calls.map((c) => c[0] as string).join('')
+    expect(out).not.toContain('in /')
+    expect(out).not.toContain('cache')
     spy.mockRestore()
   })
 

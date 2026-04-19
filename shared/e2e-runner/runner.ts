@@ -10,6 +10,7 @@ import {
 } from '../launcher/startup'
 import {
   openItermTabs,
+  reuseItermTabs,
   closeItermSessionsByPrefix,
   closeItermSessionsByIds,
 } from '../launcher/iterm'
@@ -28,14 +29,25 @@ import {
   RESTART_SIGNAL,
   HEAL_SIGNAL,
   SIGNAL_HISTORY_PATH,
+  ITERM_SESSION_IDS_PATH,
+  ITERM_HEAL_SESSION_IDS_PATH,
 } from './paths'
 import {
   spawnHealAgent,
   isAgentCliAvailable,
   failureSignature,
+  closeLastHealAgentTab,
   type HealAgent,
   type HealSessionMode,
 } from './auto-heal'
+
+function safeReadFile(file: string): string | null {
+  try {
+    return fs.readFileSync(file, 'utf-8')
+  } catch {
+    return null
+  }
+}
 
 type TerminalChoice = 'iTerm' | 'Terminal'
 
@@ -179,8 +191,28 @@ export function truncateServiceLogs(services: ServiceInfo[]): void {
 
 // Tracks iTerm session IDs for launched service tabs so restarts can close
 // them precisely (zsh auto-title overwrites `name of s`, so name-prefix
-// matching is unreliable across restarts).
-const itermSessionIds = new Map<string, string>()
+// matching is unreliable across restarts). Persisted to disk so a fresh
+// runner process can still close tabs from a prior process.
+const itermSessionIds = loadSessionIds(ITERM_SESSION_IDS_PATH)
+
+function loadSessionIds(file: string): Map<string, string> {
+  try {
+    const raw = fs.readFileSync(file, 'utf-8')
+    const obj = JSON.parse(raw) as Record<string, string>
+    return new Map(Object.entries(obj))
+  } catch {
+    return new Map()
+  }
+}
+
+function saveSessionIds(file: string, ids: Map<string, string>): void {
+  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true })
+    fs.writeFileSync(file, JSON.stringify(Object.fromEntries(ids), null, 2))
+  } catch {
+    /* non-fatal — persistence is best-effort */
+  }
+}
 
 function openTabs(
   terminal: TerminalChoice,
@@ -188,19 +220,29 @@ function openTabs(
   label: string,
 ): void {
   if (terminal === 'iTerm') {
-    // Close known prior sessions (by ID — always accurate) first, then
-    // also fall back to prefix-matching for any sessions we didn't track
-    // (e.g. leftovers from a previous runner process).
-    const knownIds = tabs
-      .map((t) => itermSessionIds.get(t.name))
-      .filter((id): id is string => Boolean(id))
+    // Try reuse first — if we already have tabs with matching names, send
+    // Ctrl-C + new command into them instead of closing + reopening. This
+    // preserves scrollback and avoids the close race where a tab's shell
+    // outlives the close and the next run spawns a second tab next to it.
+    const reuseIds = tabs.map((t) => itermSessionIds.get(t.name) ?? '')
+    const allMatched = reuseIds.every((id) => id.length > 0)
+    if (allMatched && reuseItermTabs(reuseIds, tabs, label)) {
+      return // IDs unchanged; on-disk cache stays valid.
+    }
+
+    // Fallback — close previously-tracked sessions (by ID — always accurate),
+    // then fall back to prefix-matching for untracked legacy tabs, and open
+    // a fresh window.
+    const knownIds = Array.from(itermSessionIds.values())
     if (knownIds.length > 0) closeItermSessionsByIds(knownIds)
+    itermSessionIds.clear()
     closeItermSessionsByPrefix(tabs.map((t) => t.name))
 
     const newIds = openItermTabs(tabs, label)
     tabs.forEach((tab, i) => {
       if (newIds[i]) itermSessionIds.set(tab.name, newIds[i])
     })
+    saveSessionIds(ITERM_SESSION_IDS_PATH, itermSessionIds)
   } else {
     closeTerminalTabsByPrefix(tabs.map((t) => t.name))
     openTerminalTabs(tabs, label)
@@ -698,6 +740,10 @@ async function watchMode(
     try { fs.unlinkSync(RERUN_SIGNAL) } catch { /* ignore */ }
     try { fs.unlinkSync(HEAL_SIGNAL) } catch { /* ignore */ }
 
+    // NOTE: do NOT close the heal tab here — the next heal cycle (if any)
+    // will reuse it. It's closed below when tests pass + no next cycle is
+    // needed, and on SIGINT via cleanup().
+
     if (doHeal) {
       if (!autoHeal.agent) {
         console.log(
@@ -732,6 +778,13 @@ async function watchMode(
     printSummary()
 
     await maybeAutoHeal(autoHeal, cycleState, terminal)
+
+    // If tests are green now, no next heal cycle will fire — close the
+    // lingering "you can close this tab" heal tab so it doesn't stick
+    // around until SIGINT.
+    if (terminal === 'iTerm' && readFailureSignature() === '') {
+      closeLastHealAgentTab()
+    }
 
     console.log('  ──── Watch Mode ────')
     console.log('  Waiting for signal...\n')
@@ -778,6 +831,7 @@ export function parseFlags(args: string[]): RunFlags {
 // ─── Main ───────────────────────────────────────────────────────────────────
 export async function main(argv: string[] = []) {
   const flags = parseFlags(argv)
+  const terminalChoice: TerminalChoice = flags.terminal
   const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout,
@@ -803,6 +857,17 @@ export async function main(argv: string[] = []) {
           console.log('stopped')
         }
       }
+    }
+
+    // Close iTerm tabs we opened so they don't linger after the runner exits.
+    // The shell inside each tab is still alive after killing the service PID;
+    // without this, tabs stack up across runs.
+    if (terminalChoice === 'iTerm') {
+      try {
+        const svcIds = Array.from(itermSessionIds.values())
+        if (svcIds.length > 0) closeItermSessionsByIds(svcIds)
+        closeLastHealAgentTab()
+      } catch { /* best-effort */ }
     }
 
     if (envSetApplied) {
@@ -854,7 +919,6 @@ export async function main(argv: string[] = []) {
       env = await selectOption(rl, 'Which environment?', feature.envs)
     }
 
-    const terminalChoice = flags.terminal
     const headed = flags.headed
 
     // ── 4. Auto-heal mode?
@@ -928,8 +992,19 @@ export async function main(argv: string[] = []) {
     rl.close()
 
     // ── 8. Prepare logs directory
+    // Preserve iTerm session ID caches across the logs wipe so we can still
+    // close tabs from a prior runner process that exited without clean
+    // shutdown (in-memory copy is re-saved later via openTabs(), but only
+    // when that code path runs — e.g. a no-heal run otherwise loses them).
+    const preservedSessionIds: Record<string, string | null> = {
+      [ITERM_SESSION_IDS_PATH]: safeReadFile(ITERM_SESSION_IDS_PATH),
+      [ITERM_HEAL_SESSION_IDS_PATH]: safeReadFile(ITERM_HEAL_SESSION_IDS_PATH),
+    }
     fs.rmSync(LOGS_DIR, { recursive: true, force: true })
     fs.mkdirSync(PIDS_DIR, { recursive: true })
+    for (const [p, content] of Object.entries(preservedSessionIds)) {
+      if (content !== null) fs.writeFileSync(p, content)
+    }
 
     // ── 9. Build service list and launch in terminal tabs (with tee to log files)
     services = buildServiceList(feature)

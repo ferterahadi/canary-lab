@@ -14,10 +14,46 @@ export function escape(s: string): string {
  * process, so we kill the shell on the session's tty first (via pkill -t),
  * then close. The dead session closes without a prompt.
  */
+/**
+ * Close any iTerm windows that no longer have any tabs. Called after
+ * session closes so stale empty windows don't linger across restarts.
+ */
+function closeEmptyItermWindows(): void {
+  const script = `
+tell application "iTerm"
+  set windowsToClose to {}
+  repeat with w in (windows as list)
+    try
+      if (count of tabs of w) is 0 then
+        set end of windowsToClose to w
+      end if
+    end try
+  end repeat
+  repeat with w in windowsToClose
+    try
+      close w saving no
+    end try
+  end repeat
+end tell
+`
+  try {
+    execFileSync('osascript', ['-e', script], { stdio: 'ignore' })
+  } catch {
+    /* non-fatal */
+  }
+}
+
 export function closeItermSessionsByPrefix(prefixes: string[]): void {
   if (prefixes.length === 0) return
+  // Match on either the legacy `name of s` (may be overwritten by zsh) OR
+  // the immutable `user.canary_lab` variable set via OSC 1337 when the
+  // tab was opened. The user var is the reliable path across process
+  // restarts; the name check is kept as a belt-and-braces fallback.
   const conds = prefixes
-    .map((p) => `name of s starts with "${escape(p)}"`)
+    .map((p) => {
+      const esc = escape(p)
+      return `(name of s starts with "${esc}") or ((variable named "user.canary_lab" of s) starts with "${esc}")`
+    })
     .join(' or ')
 
   // Phase 1: collect ttys of matching sessions and kill their processes.
@@ -89,6 +125,8 @@ end tell
   } catch {
     /* non-fatal */
   }
+
+  closeEmptyItermWindows()
 }
 
 /**
@@ -169,6 +207,102 @@ end tell
   } catch {
     /* non-fatal */
   }
+
+  closeEmptyItermWindows()
+}
+
+/**
+ * Reuse existing iTerm sessions by sending Ctrl-C (ASCII 3) to interrupt
+ * whatever's running, then writing the new `cd && command` to the same
+ * shell. Preserves scrollback + tab order across restarts and avoids the
+ * close-then-reopen race where a tab's shell outlives the close attempt.
+ *
+ * Returns true only when every provided id was found AND the script ran
+ * without error; caller should fall back to `openItermTabs` on false.
+ */
+export function reuseItermTabs(
+  ids: string[],
+  tabs: StartTab[],
+  label: string,
+): boolean {
+  if (ids.length === 0 || ids.length !== tabs.length) return false
+
+  // Phase 1: verify every id still resolves to a live session. If any are
+  // missing, bail so the caller can fall back to a fresh open.
+  const idListAS = ids.map((id) => `"${escape(id)}"`).join(', ')
+  const probeScript = `
+tell application "iTerm"
+  set n to 0
+  repeat with w in (windows as list)
+    repeat with t in (tabs of w as list)
+      repeat with s in (sessions of t as list)
+        try
+          if (id of s as string) is in {${idListAS}} then
+            set n to n + 1
+          end if
+        end try
+      end repeat
+    end repeat
+  end repeat
+  return n as text
+end tell
+`
+  let found = 0
+  try {
+    const out = execFileSync('osascript', ['-e', probeScript], {
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    })
+    found = parseInt(out.trim(), 10) || 0
+  } catch {
+    return false
+  }
+  if (found !== ids.length) return false
+
+  // Phase 2: for each session, send Ctrl-C (interrupts foreground pg, leaves
+  // zsh alive), then write the new command after a short settle delay.
+  const branches = ids
+    .map((id, i) => {
+      const tab = tabs[i]
+      const tagName = tab.name ?? `tab-${i + 1}`
+      const b64 = Buffer.from(tagName, 'utf-8').toString('base64')
+      const marker = `printf '\\033]1337;SetUserVar=canary_lab=%s\\a' ${b64}`
+      const full = `${marker} && cd ${tab.dir} && ${tab.command}`
+      return [
+        `if (id of s as string) is "${escape(id)}" then`,
+        `            tell s`,
+        `              write text (ASCII character 3) newline no`,
+        `              delay 0.8`,
+        `              set name of s to "${escape(tagName)}"`,
+        `              write text "${escape(full)}"`,
+        `            end tell`,
+        `          end if`,
+      ].join('\n          ')
+    })
+    .join('\n          ')
+
+  const runScript = `
+tell application "iTerm"
+  repeat with w in (windows as list)
+    repeat with t in (tabs of w as list)
+      repeat with s in (sessions of t as list)
+        try
+          ${branches}
+        end try
+      end repeat
+    end repeat
+  end repeat
+  activate
+end tell
+`
+
+  if (label) console.log(label)
+  try {
+    execFileSync('osascript', ['-e', runScript], { stdio: 'ignore' })
+    return true
+  } catch {
+    return false
+  }
 }
 
 /**
@@ -204,11 +338,18 @@ export function openItermTabs(tabs: StartTab[], label: string): string[] {
     })
     .join('\n\n  ')
 
+  // Prepend a printf that sets an iTerm user variable (`user.canary_lab`)
+  // via the OSC 1337 SetUserVar escape. Unlike `name of s`, user vars
+  // can't be overwritten by zsh/oh-my-zsh auto-title, so `closeItermSessionsByPrefix`
+  // can reliably match this tab across process restarts and project re-inits.
   const sessionWrites = tabs
-    .map(
-      ({ dir, command }, i) =>
-        `tell s${i + 1}\n    delay 0.3\n    write text "cd ${escape(dir)} && ${escape(command)}"\n  end tell`,
-    )
+    .map(({ dir, command, name }, i) => {
+      const tag = name ?? `tab-${i + 1}`
+      const b64 = Buffer.from(tag, 'utf-8').toString('base64')
+      const marker = `printf '\\033]1337;SetUserVar=canary_lab=%s\\a' ${b64}`
+      const full = `${marker} && cd ${dir} && ${command}`
+      return `tell s${i + 1}\n    delay 0.3\n    write text "${escape(full)}"\n  end tell`
+    })
     .join('\n  ')
 
   const idReturns = tabs
@@ -234,11 +375,20 @@ return idList as text
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'inherit'],
     })
-    return out
+    const ids = out
       .split('\n')
       .map((l) => l.trim())
       .filter((l) => l.length > 0)
-  } catch {
+    if (ids.length !== tabs.length) {
+      console.warn(
+        `  ⚠ iTerm ID capture: got ${ids.length}/${tabs.length}. Untracked tabs may accumulate — close stale ones manually.`,
+      )
+    }
+    return ids
+  } catch (err) {
+    console.warn(
+      `  ⚠ iTerm ID capture failed (${(err as Error).message ?? 'unknown'}). Tabs will not be auto-closed on restart.`,
+    )
     return []
   }
 }
