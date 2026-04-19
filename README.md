@@ -194,6 +194,7 @@ flowchart TD
         direction LR
         svclog[/"svc-*.log"/]:::artifact
         summaryjson[/"e2e-summary.json"/]:::artifact
+        journal[/"diagnosis-journal.json"/]:::artifact
         signals[/".restart · .rerun"/]:::artifact
     end
 
@@ -215,6 +216,7 @@ flowchart TD
     agent -.->|stdout| formatter
     agent -.->|reads| summaryjson
     agent -.->|reads| svclog
+    agent -.->|reads + appends| journal
     agent -.->|writes| signals
 
     orchestrator --> watcher
@@ -242,7 +244,7 @@ flowchart TD
   - **Per-Test Log Marker** fires **before and after every test**, writing `<test-tag>` boundaries into `svc-*.log` so you can slice logs by test.
   - **Summary Reporter** fires **on every test result** (and at end-of-suite), incrementally updating `logs/e2e-summary.json`.
 - **Auto-Heal Driver** fires **only when tests fail and auto-heal is enabled**. It spawns a Claude Code or Codex CLI agent in a new terminal tab, piping its stdout through the **Agent Output Formatter**.
-- The **Coding Agent** reads `e2e-summary.json` and the marked-up `svc-*.log`, edits code, then touches `.restart` or `.rerun`.
+- The **Coding Agent** reads `e2e-summary.json` and the marked-up `svc-*.log`, edits code, then touches `.restart` or `.rerun`. It also reads and appends to `diagnosis-journal.json` — a running log of hypotheses, fixes, and outcomes across cycles so it doesn't retry an approach that already failed.
 - **Watch Mode** (the tail end of `runner.ts`) picks up those signal files and re-invokes Playwright.
 
 **At a glance:**

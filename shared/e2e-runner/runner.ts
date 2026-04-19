@@ -3,6 +3,7 @@ import path from 'path'
 import readline from 'readline'
 import { execFileSync, spawn } from 'child_process'
 import type { FeatureConfig } from '../launcher/types'
+import { checkUpgradeDrift, formatDriftNotice } from '../runtime/upgrade-check'
 import {
   isHealthy,
   normalizeStartCommand,
@@ -895,6 +896,15 @@ export async function main(argv: string[] = []) {
 
   try {
     console.log('\n  Canary Lab — E2E Runner\n')
+
+    // Warn if the scaffolded files in this project were synced against an
+    // older version of canary-lab. `npm update` doesn't touch files outside
+    // node_modules/, so users can easily drift out of sync with the skills
+    // and managed doc blocks.
+    const notice = formatDriftNotice(checkUpgradeDrift(ROOT))
+    if (notice) {
+      console.log(`  ${notice.replace(/\n/g, '\n  ')}\n`)
+    }
 
     // ── 1. Discover features
     const features = discoverFeatures()
