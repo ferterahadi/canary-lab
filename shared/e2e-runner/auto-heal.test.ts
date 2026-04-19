@@ -17,18 +17,23 @@ const RERUN_SIGNAL = path.join(LOGS_DIR, '.rerun')
 const RESTART_SIGNAL = path.join(LOGS_DIR, '.restart')
 fs.mkdirSync(LOGS_DIR, { recursive: true })
 
+const ITERM_HEAL_SESSION_IDS_PATH = path.join(LOGS_DIR, 'iterm-heal-session-ids.json')
+
 vi.mock('./paths', () => ({
   ROOT: pathStubRoot,
   LOGS_DIR,
   RERUN_SIGNAL,
   RESTART_SIGNAL,
+  ITERM_HEAL_SESSION_IDS_PATH,
 }))
 
 const openItermTabs = vi.fn(() => ['SID-1'])
+const reuseItermTabs = vi.fn(() => false)
 const closeItermSessionsByPrefix = vi.fn()
 const closeItermSessionsByIds = vi.fn()
 vi.mock('../launcher/iterm', () => ({
   openItermTabs,
+  reuseItermTabs,
   closeItermSessionsByPrefix,
   closeItermSessionsByIds,
 }))
@@ -55,6 +60,8 @@ const {
 beforeEach(() => {
   openItermTabs.mockClear()
   openItermTabs.mockReturnValue(['SID-1'])
+  reuseItermTabs.mockClear()
+  reuseItermTabs.mockReturnValue(false)
   closeItermSessionsByPrefix.mockClear()
   closeItermSessionsByIds.mockClear()
   openTerminalTabs.mockClear()
@@ -102,7 +109,7 @@ describe('buildAgentCommand', () => {
     expect(cmd).toContain('--output-format=stream-json --verbose -p')
     expect(cmd).not.toContain('--continue')
     expect(cmd).toContain('"$(cat "/tmp/p.txt")"')
-    expect(cmd).toContain('heal-formatter.js')
+    expect(cmd).toContain('claude-formatter.js')
   })
 
   it('claude + resume (cycle > 0) adds --continue', () => {
@@ -269,6 +276,49 @@ describe('spawnHealAgent', () => {
     // Advance past the 5s grace window.
     await vi.advanceTimersByTimeAsync(6000)
     expect(await promise).toBe('agent_exited_no_signal')
+  })
+
+  it('reuses the previous iTerm heal tab on subsequent cycle when reuseItermTabs succeeds', async () => {
+    seedPrompt('claude')
+    vi.useFakeTimers()
+
+    openItermTabs.mockReturnValueOnce(['prev-id-999'])
+    const p1 = spawnHealAgent({
+      agent: 'claude',
+      sessionMode: 'new',
+      cycle: 0,
+      terminal: 'iTerm',
+    })
+    fs.writeFileSync(RERUN_SIGNAL, '')
+    await vi.advanceTimersByTimeAsync(1200)
+    await p1
+    fs.unlinkSync(RERUN_SIGNAL)
+
+    openItermTabs.mockClear()
+    closeItermSessionsByIds.mockClear()
+    closeItermSessionsByPrefix.mockClear()
+    reuseItermTabs.mockClear()
+    reuseItermTabs.mockReturnValueOnce(true) // reuse succeeded → fallback skipped
+
+    const p2 = spawnHealAgent({
+      agent: 'claude',
+      sessionMode: 'resume',
+      cycle: 1,
+      terminal: 'iTerm',
+    })
+    fs.writeFileSync(RERUN_SIGNAL, '')
+    await vi.advanceTimersByTimeAsync(1200)
+    await p2
+
+    expect(reuseItermTabs).toHaveBeenCalledOnce()
+    const [ids, tabs] = reuseItermTabs.mock.calls[0]
+    expect(ids).toEqual(['prev-id-999'])
+    expect(tabs).toEqual([
+      expect.objectContaining({ name: 'heal-agent-claude-2' }),
+    ])
+    expect(openItermTabs).not.toHaveBeenCalled()
+    expect(closeItermSessionsByIds).not.toHaveBeenCalled()
+    expect(closeItermSessionsByPrefix).not.toHaveBeenCalled()
   })
 
   it('closes previous iTerm session IDs on subsequent cycle', async () => {

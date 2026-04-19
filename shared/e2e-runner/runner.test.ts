@@ -31,6 +31,8 @@ vi.mock('./paths', () => ({
   RESTART_SIGNAL: path.join(LOGS_DIR, '.restart'),
   HEAL_SIGNAL: path.join(LOGS_DIR, '.heal'),
   SIGNAL_HISTORY_PATH: path.join(LOGS_DIR, 'signal-history.json'),
+  ITERM_SESSION_IDS_PATH: path.join(LOGS_DIR, 'iterm-session-ids.json'),
+  ITERM_HEAL_SESSION_IDS_PATH: path.join(LOGS_DIR, 'iterm-heal-session-ids.json'),
 }))
 
 const execFileSync = vi.fn()

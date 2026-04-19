@@ -229,6 +229,23 @@ function handleLine(line: string): void {
     const isError = msg.is_error === true
     const marker = isError ? c('red', '✗ failed') : c('green', '✓ done')
     process.stdout.write(`\n${tag()} ${marker} ${c('dim', `in ${durS}s`)}\n`)
+
+    const usage = msg.usage as AnyObj | undefined
+    const inTok = Number(usage?.input_tokens ?? 0)
+    const outTok = Number(usage?.output_tokens ?? 0)
+    const cacheRead = Number(usage?.cache_read_input_tokens ?? 0)
+    const cacheCreate = Number(usage?.cache_creation_input_tokens ?? 0)
+    const turns = Number(msg.num_turns ?? 0)
+    const cost = Number(msg.total_cost_usd ?? 0)
+    if (inTok || outTok || turns || cost) {
+      const parts: string[] = [`${inTok} in / ${outTok} out`]
+      if (cacheRead || cacheCreate) {
+        parts.push(`${cacheRead} cache read · ${cacheCreate} cache created`)
+      }
+      if (turns > 0) parts.push(`${turns} turn${turns === 1 ? '' : 's'}`)
+      if (cost > 0) parts.push(`$${cost.toFixed(4)}`)
+      process.stdout.write(`       ${c('dim', parts.join(' · '))}\n`)
+    }
     return
   }
 }

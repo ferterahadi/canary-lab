@@ -1,8 +1,0 @@
-# With `files: ["dist"]` in package.json npm only packs dist/, README, LICENSE.
-# We need .npmignore to exist so npm stops falling back to .gitignore (which
-# would otherwise strip .env files from dist/templates/**/envsets/local/).
-node_modules/
-*.log
-*.tgz
-*.bak*
-.DS_Store

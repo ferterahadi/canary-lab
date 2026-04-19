@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
 import {
   c,
   elapsed,
@@ -9,7 +9,13 @@ import {
   quote,
   kindIcon,
   handleLine,
+  writeSessionSummary,
+  resetSessionState,
 } from './codex-formatter'
+
+beforeEach(() => {
+  resetSessionState()
+})
 
 describe('c (color)', () => {
   it('returns plain text when not a TTY (test env)', () => {
@@ -124,6 +130,37 @@ describe('handleLine', () => {
     const out = (spy.mock.calls[0]?.[0] as string) ?? ''
     expect(out).toContain('turn done')
     expect(out).toContain('(10 in / 5 out)')
+    spy.mockRestore()
+  })
+
+  it('writeSessionSummary aggregates tokens + turns + reasoning across the session', () => {
+    const spy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    // Two turns + one reasoning step.
+    handleLine(
+      JSON.stringify({
+        type: 'item.completed',
+        item: { type: 'reasoning', text: 'planning a refactor' },
+      }),
+    )
+    handleLine(
+      JSON.stringify({
+        type: 'turn.completed',
+        usage: { input_tokens: 10, output_tokens: 5 },
+      }),
+    )
+    handleLine(
+      JSON.stringify({
+        type: 'turn.completed',
+        usage: { input_tokens: 20, output_tokens: 7 },
+      }),
+    )
+    spy.mockClear()
+    writeSessionSummary()
+    const out = spy.mock.calls.map((c) => c[0] as string).join('')
+    expect(out).toContain('session done')
+    expect(out).toContain('30 in / 12 out')
+    expect(out).toContain('2 turns')
+    expect(out).toContain('1 reasoning step')
     spy.mockRestore()
   })
 

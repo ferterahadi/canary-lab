@@ -3,6 +3,7 @@ import path from 'path'
 import { execFileSync } from 'child_process'
 import {
   openItermTabs,
+  reuseItermTabs,
   closeItermSessionsByPrefix,
   closeItermSessionsByIds,
 } from '../launcher/iterm'
@@ -15,6 +16,7 @@ import {
   LOGS_DIR,
   RERUN_SIGNAL,
   RESTART_SIGNAL,
+  ITERM_HEAL_SESSION_IDS_PATH,
 } from './paths'
 
 export type HealAgent = 'claude' | 'codex'
@@ -32,7 +34,7 @@ export interface SpawnHealAgentOptions {
 const HEAL_PROMPT_FILE = path.join(LOGS_DIR, '.heal-prompt.txt')
 const HEAL_SCRIPT_FILE = path.join(LOGS_DIR, '.heal-agent.sh')
 const HEAL_DONE_FILE = path.join(LOGS_DIR, '.heal-agent-done')
-const HEAL_FORMATTER_FILE = path.join(__dirname, 'heal-formatter.js')
+const CLAUDE_FORMATTER_FILE = path.join(__dirname, 'claude-formatter.js')
 const CODEX_FORMATTER_FILE = path.join(__dirname, 'codex-formatter.js')
 const AGENT_TIMEOUT_MS = 10 * 60 * 1000
 const POLL_INTERVAL_MS = 1000
@@ -89,7 +91,7 @@ export function buildAgentCommand(
     const base =
       '--dangerously-skip-permissions --output-format=stream-json --verbose -p'
     const flags = useResume ? `--continue ${base}` : base
-    const formatter = `node ${JSON.stringify(HEAL_FORMATTER_FILE)}`
+    const formatter = `node ${JSON.stringify(CLAUDE_FORMATTER_FILE)}`
     return `claude ${flags} ${promptSub} | ${formatter}`
   }
 
@@ -125,7 +127,35 @@ echo "[canary-lab] you can close this tab."
   fs.writeFileSync(HEAL_SCRIPT_FILE, script, { mode: 0o755 })
 }
 
-const previousHealAgentIds: string[] = []
+function loadHealIds(): string[] {
+  try {
+    const raw = fs.readFileSync(ITERM_HEAL_SESSION_IDS_PATH, 'utf-8')
+    const arr = JSON.parse(raw)
+    return Array.isArray(arr) ? arr.filter((x): x is string => typeof x === 'string') : []
+  } catch {
+    return []
+  }
+}
+
+function saveHealIds(ids: string[]): void {
+  try {
+    fs.mkdirSync(path.dirname(ITERM_HEAL_SESSION_IDS_PATH), { recursive: true })
+    fs.writeFileSync(ITERM_HEAL_SESSION_IDS_PATH, JSON.stringify(ids, null, 2))
+  } catch {
+    /* non-fatal */
+  }
+}
+
+const previousHealAgentIds: string[] = loadHealIds()
+
+export function closeLastHealAgentTab(): void {
+  if (previousHealAgentIds.length === 0) return
+  try {
+    closeItermSessionsByIds(previousHealAgentIds.splice(0))
+  } finally {
+    saveHealIds(previousHealAgentIds)
+  }
+}
 
 function openTab(
   terminal: TerminalChoice,
@@ -140,12 +170,22 @@ function openTab(
   }
   const label = `\n  Opening ${terminal} tab for ${agent} heal agent (cycle ${cycle + 1})...`
   if (terminal === 'iTerm') {
+    // Prior heal agent has already exited by the time we get here; reusing
+    // its tab preserves scrollback (useful for debugging the heal flow) and
+    // avoids the close+open churn.
+    if (
+      previousHealAgentIds.length === 1 &&
+      reuseItermTabs(previousHealAgentIds, [tab], label)
+    ) {
+      return
+    }
     if (previousHealAgentIds.length > 0) {
       closeItermSessionsByIds(previousHealAgentIds.splice(0))
     }
     closeItermSessionsByPrefix(['heal-agent-'])
     const ids = openItermTabs([tab], label)
     previousHealAgentIds.push(...ids)
+    saveHealIds(previousHealAgentIds)
   } else {
     closeTerminalTabsByPrefix(['heal-agent-'])
     openTerminalTabs([tab], label)

@@ -3,8 +3,13 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 const execFileSync = vi.fn()
 vi.mock('child_process', () => ({ execFileSync }))
 
-const { escape, closeItermSessionsByPrefix, closeItermSessionsByIds, openItermTabs } =
-  await import('./iterm')
+const {
+  escape,
+  closeItermSessionsByPrefix,
+  closeItermSessionsByIds,
+  openItermTabs,
+  reuseItermTabs,
+} = await import('./iterm')
 
 beforeEach(() => {
   execFileSync.mockReset()
@@ -86,7 +91,8 @@ describe('closeItermSessionsByPrefix', () => {
 
     closeItermSessionsByPrefix(['x-'])
 
-    expect(execFileSync).toHaveBeenCalledTimes(3)
+    // collect + pkill + close-tabs + closeEmptyItermWindows
+    expect(execFileSync).toHaveBeenCalledTimes(4)
     expect(execFileSync.mock.calls[2][0]).toBe('osascript')
   })
 
@@ -173,8 +179,12 @@ describe('openItermTabs', () => {
     expect(script).toContain('set name of s1 to "svc-a"')
     expect(script).toContain('set t2 to create tab with default profile')
     expect(script).toContain('set name of s2 to "svc-b"')
-    expect(script).toContain('write text "cd /a/b && npm run dev"')
-    expect(script).toContain('write text "cd /c/d && echo hi"')
+    expect(script).toContain(
+      `printf '\\\\033]1337;SetUserVar=canary_lab=%s\\\\a' ${Buffer.from('svc-a', 'utf-8').toString('base64')} && cd /a/b && npm run dev`,
+    )
+    expect(script).toContain(
+      `printf '\\\\033]1337;SetUserVar=canary_lab=%s\\\\a' ${Buffer.from('svc-b', 'utf-8').toString('base64')} && cd /c/d && echo hi`,
+    )
     expect(script).toContain('set idList to {(id of s1 as string), (id of s2 as string)}')
     expect(script).toContain('return idList as text')
     expect(opts).toMatchObject({ encoding: 'utf-8' })
@@ -199,7 +209,10 @@ describe('openItermTabs', () => {
     )
     const script = execFileSync.mock.calls[0][1][1] as string
     expect(script).toContain('set name of s1 to "bad\\"name"')
-    expect(script).toContain('write text "cd /p\\"a\\\\th && echo \\"hi\\""')
+    const b64 = Buffer.from('bad"name', 'utf-8').toString('base64')
+    expect(script).toContain(
+      `write text "printf '\\\\033]1337;SetUserVar=canary_lab=%s\\\\a' ${b64} && cd /p\\"a\\\\th && echo \\"hi\\""`,
+    )
   })
 
   it('returns [] when osascript throws', () => {
@@ -210,5 +223,113 @@ describe('openItermTabs', () => {
     expect(
       openItermTabs([{ dir: '/x', command: 'c', name: 'n' }], ''),
     ).toEqual([])
+  })
+})
+
+describe('reuseItermTabs', () => {
+  it('returns false for empty ids', () => {
+    expect(reuseItermTabs([], [], '')).toBe(false)
+    expect(execFileSync).not.toHaveBeenCalled()
+  })
+
+  it('returns false when ids/tabs lengths mismatch', () => {
+    expect(
+      reuseItermTabs(
+        ['A'],
+        [
+          { dir: '/a', command: 'c', name: 'a' },
+          { dir: '/b', command: 'c', name: 'b' },
+        ],
+        '',
+      ),
+    ).toBe(false)
+    expect(execFileSync).not.toHaveBeenCalled()
+  })
+
+  it('returns false when a probed id is missing', () => {
+    // probe returns 0 found, but ids.length is 1 → bail
+    execFileSync.mockImplementationOnce(() => '0')
+    expect(
+      reuseItermTabs(['A'], [{ dir: '/a', command: 'c', name: 'a' }], ''),
+    ).toBe(false)
+    expect(execFileSync).toHaveBeenCalledTimes(1)
+  })
+
+  it('returns false when probe osascript throws (iTerm not running)', () => {
+    execFileSync.mockImplementationOnce(() => {
+      throw new Error('iTerm not running')
+    })
+    expect(
+      reuseItermTabs(['A'], [{ dir: '/a', command: 'c', name: 'a' }], ''),
+    ).toBe(false)
+    expect(execFileSync).toHaveBeenCalledTimes(1)
+  })
+
+  it('sends Ctrl-C + writes new cd+command when all ids resolve', () => {
+    // 1st call: probe returns count === ids.length
+    // 2nd call: run script — succeeds
+    execFileSync.mockImplementationOnce(() => '2').mockImplementationOnce(() => '')
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+
+    const ok = reuseItermTabs(
+      ['SID-A', 'SID-B'],
+      [
+        { dir: '/a/b', command: 'npm run dev', name: 'svc-a' },
+        { dir: '/c/d', command: 'echo hi', name: 'svc-b' },
+      ],
+      'reusing tabs',
+    )
+
+    expect(ok).toBe(true)
+    expect(logSpy).toHaveBeenCalledWith('reusing tabs')
+    expect(execFileSync).toHaveBeenCalledTimes(2)
+
+    const runScript = execFileSync.mock.calls[1][1][1] as string
+    // Ctrl-C (ASCII 3) sent first, then a settle delay, then the new command.
+    expect(runScript).toContain('write text (ASCII character 3) newline no')
+    expect(runScript).toContain('delay 0.8')
+    expect(runScript).toContain('(id of s as string) is "SID-A"')
+    expect(runScript).toContain('(id of s as string) is "SID-B"')
+    // OSC 1337 marker + cd + command for both tabs
+    const b64a = Buffer.from('svc-a', 'utf-8').toString('base64')
+    const b64b = Buffer.from('svc-b', 'utf-8').toString('base64')
+    expect(runScript).toContain(
+      `printf '\\\\033]1337;SetUserVar=canary_lab=%s\\\\a' ${b64a} && cd /a/b && npm run dev`,
+    )
+    expect(runScript).toContain(
+      `printf '\\\\033]1337;SetUserVar=canary_lab=%s\\\\a' ${b64b} && cd /c/d && echo hi`,
+    )
+
+    logSpy.mockRestore()
+  })
+
+  it('returns false if the run osascript throws mid-execution', () => {
+    execFileSync
+      .mockImplementationOnce(() => '1')
+      .mockImplementationOnce(() => {
+        throw new Error('osascript died')
+      })
+    vi.spyOn(console, 'log').mockImplementation(() => {})
+    expect(
+      reuseItermTabs(['SID'], [{ dir: '/x', command: 'c', name: 'n' }], ''),
+    ).toBe(false)
+  })
+
+  it('escapes dir/command/name against AppleScript injection', () => {
+    execFileSync.mockImplementationOnce(() => '1').mockImplementationOnce(() => '')
+    vi.spyOn(console, 'log').mockImplementation(() => {})
+
+    reuseItermTabs(
+      ['weird"id'],
+      [{ dir: '/p"a\\th', command: 'echo "hi"', name: 'bad"name' }],
+      '',
+    )
+    const runScript = execFileSync.mock.calls[1][1][1] as string
+    expect(runScript).toContain('(id of s as string) is "weird\\"id"')
+    expect(runScript).toContain('set name of s to "bad\\"name"')
+    const b64 = Buffer.from('bad"name', 'utf-8').toString('base64')
+    expect(runScript).toContain(
+      `write text "printf '\\\\033]1337;SetUserVar=canary_lab=%s\\\\a' ${b64} && cd /p\\"a\\\\th && echo \\"hi\\""`,
+    )
   })
 })
