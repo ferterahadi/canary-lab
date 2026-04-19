@@ -286,7 +286,6 @@ npm run smoke:pack
 ### Publishing
 
 ```bash
-npm run pack:check    # inspect tarball contents
 npm run smoke:pack    # end-to-end scaffold test
 npm run publish:package
 ```
