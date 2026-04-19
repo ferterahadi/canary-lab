@@ -186,7 +186,7 @@ flowchart TD
     subgraph phase3["&nbsp;3 · Heal phase &nbsp;·&nbsp; on failure, if enabled&nbsp;"]
         direction TB
         autoHeal["<b>Auto-Heal Driver</b><br/>shared/e2e-runner/auto-heal.ts"]:::heal
-        formatter["<b>Agent Output Formatter</b><br/>heal-formatter.ts · codex-formatter.ts"]:::heal
+        formatter["<b>Agent Output Formatter</b><br/>claude-formatter.ts · codex-formatter.ts"]:::heal
         agent(["<b>Coding Agent</b><br/>Claude Code · Codex CLI"]):::ext
     end
 
@@ -194,6 +194,7 @@ flowchart TD
         direction LR
         svclog[/"svc-*.log"/]:::artifact
         summaryjson[/"e2e-summary.json"/]:::artifact
+        journal[/"diagnosis-journal.json"/]:::artifact
         signals[/".restart · .rerun"/]:::artifact
     end
 
@@ -215,6 +216,7 @@ flowchart TD
     agent -.->|stdout| formatter
     agent -.->|reads| summaryjson
     agent -.->|reads| svclog
+    agent -.->|reads + appends| journal
     agent -.->|writes| signals
 
     orchestrator --> watcher
@@ -242,13 +244,13 @@ flowchart TD
   - **Per-Test Log Marker** fires **before and after every test**, writing `<test-tag>` boundaries into `svc-*.log` so you can slice logs by test.
   - **Summary Reporter** fires **on every test result** (and at end-of-suite), incrementally updating `logs/e2e-summary.json`.
 - **Auto-Heal Driver** fires **only when tests fail and auto-heal is enabled**. It spawns a Claude Code or Codex CLI agent in a new terminal tab, piping its stdout through the **Agent Output Formatter**.
-- The **Coding Agent** reads `e2e-summary.json` and the marked-up `svc-*.log`, edits code, then touches `.restart` or `.rerun`.
+- The **Coding Agent** reads `e2e-summary.json` and the marked-up `svc-*.log`, edits code, then touches `.restart` or `.rerun`. It also reads and appends to `diagnosis-journal.json` — a running log of hypotheses, fixes, and outcomes across cycles so it doesn't retry an approach that already failed.
 - **Watch Mode** (the tail end of `runner.ts`) picks up those signal files and re-invokes Playwright.
 
 **At a glance:**
 
 - `runner.ts` is the conductor: it reads each feature's `feature.config.cjs`, starts services through the macOS launcher, runs Playwright with `summary-reporter` + `log-marker-fixture` attached, then sits in watch mode reacting to `logs/.restart` / `logs/.rerun`.
-- `auto-heal.ts` spawns a Claude Code or Codex CLI process when auto-heal is on. Its raw output is filtered through `heal-formatter.ts` (Claude) or `codex-formatter.ts` (Codex) into readable progress.
+- `auto-heal.ts` spawns a Claude Code or Codex CLI process when auto-heal is on. Its raw output is filtered through `claude-formatter.ts` (Claude) or `codex-formatter.ts` (Codex) into readable progress.
 - `launcher/iterm.ts` and `launcher/terminal.ts` are interchangeable backends — both drive their app via AppleScript. `launcher/startup.ts` holds the shared health-check + command-normalization helpers.
 - `env-switcher/switch.ts` does the actual env-file swap; `root-cli.ts` is the interactive prompt wrapper.
 - `runtime/project-root.ts` is the single source of truth for "where does this project live" — everyone else asks it.
@@ -278,15 +280,17 @@ npm run build
 
 ```bash
 npm run build
-npm run smoke:pack
+npm test              # unit tests (Vitest)
+npm run smoke:pack    # end-to-end scaffold test
 ```
+
+`npm test` runs the Vitest unit suite. Use `npm run test:watch` during development and `npm run test:coverage` for a coverage report.
 
 `smoke:pack` builds, packs, scaffolds a temp project, installs dependencies, and verifies the scaffold flow. Run it after changing templates or packaging.
 
 ### Publishing
 
 ```bash
-npm run pack:check    # inspect tarball contents
 npm run smoke:pack    # end-to-end scaffold test
 npm run publish:package
 ```

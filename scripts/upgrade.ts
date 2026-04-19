@@ -1,6 +1,7 @@
 import fs from 'fs'
 import path from 'path'
 import { getProjectRoot } from '../shared/runtime/project-root'
+import { getInstalledPackageVersion, writeStamp } from '../shared/runtime/upgrade-check'
 
 const MARKER_START = '<!-- managed:canary-lab:start -->'
 const MARKER_END = '<!-- managed:canary-lab:end -->'
@@ -49,7 +50,7 @@ function getTemplateRoot(): string {
  * Extract the managed block (including markers) from template content.
  * Returns the full block or null if markers are missing.
  */
-function extractManagedBlock(content: string): string | null {
+export function extractManagedBlock(content: string): string | null {
   const startIdx = content.indexOf(MARKER_START)
   const endIdx = content.indexOf(MARKER_END)
   if (startIdx === -1 || endIdx === -1) return null
@@ -66,7 +67,7 @@ function extractManagedBlock(content: string): string | null {
  *    content was all canary-lab-generated anyway)
  * 3. No markers, unknown content → append the managed block after existing content
  */
-function applyManagedBlock(existing: string, block: string, relPath: string): string {
+export function applyManagedBlock(existing: string, block: string, relPath: string): string {
   const startIdx = existing.indexOf(MARKER_START)
   const endIdx = existing.indexOf(MARKER_END)
 
@@ -182,6 +183,12 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
       /* don't break upgrade if package.json is malformed */
     }
   }
+
+  // Stamp the project with the installed version so `canary-lab run` can
+  // detect drift on future invocations (npm update won't trigger postinstall
+  // reliably, so the runner itself nudges users who fall behind).
+  const installedVersion = getInstalledPackageVersion()
+  if (installedVersion) writeStamp(projectRoot, installedVersion)
 
   if (updated > 0) {
     log(`\n  Canary Lab: upgraded ${updated} managed file${updated === 1 ? '' : 's'}.`, opts)

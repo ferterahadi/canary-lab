@@ -6,7 +6,7 @@ import { main as createFeature } from './new-feature'
 import { main as initProject } from './init-project'
 import { main as upgradeProject } from './upgrade'
 
-function printUsage(): void {
+export function printUsage(): void {
   console.log(`Canary Lab
 
 Usage:
@@ -18,8 +18,8 @@ Usage:
 `)
 }
 
-async function main(): Promise<void> {
-  const [command, ...args] = process.argv.slice(2)
+export async function main(argv: string[] = process.argv.slice(2)): Promise<void> {
+  const [command, ...args] = argv
 
   switch (command) {
     case 'init':
@@ -49,7 +49,9 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((err) => {
-  console.error(err)
-  process.exit(1)
-})
+if (require.main === module) {
+  main().catch((err) => {
+    console.error(err)
+    process.exit(1)
+  })
+}

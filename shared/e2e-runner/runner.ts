@@ -3,6 +3,7 @@ import path from 'path'
 import readline from 'readline'
 import { execFileSync, spawn } from 'child_process'
 import type { FeatureConfig } from '../launcher/types'
+import { checkUpgradeDrift, formatDriftNotice } from '../runtime/upgrade-check'
 import {
   isHealthy,
   normalizeStartCommand,
@@ -10,6 +11,7 @@ import {
 } from '../launcher/startup'
 import {
   openItermTabs,
+  reuseItermTabs,
   closeItermSessionsByPrefix,
   closeItermSessionsByIds,
 } from '../launcher/iterm'
@@ -28,14 +30,25 @@ import {
   RESTART_SIGNAL,
   HEAL_SIGNAL,
   SIGNAL_HISTORY_PATH,
+  ITERM_SESSION_IDS_PATH,
+  ITERM_HEAL_SESSION_IDS_PATH,
 } from './paths'
 import {
   spawnHealAgent,
   isAgentCliAvailable,
   failureSignature,
+  closeLastHealAgentTab,
   type HealAgent,
   type HealSessionMode,
 } from './auto-heal'
+
+export function safeReadFile(file: string): string | null {
+  try {
+    return fs.readFileSync(file, 'utf-8')
+  } catch {
+    return null
+  }
+}
 
 type TerminalChoice = 'iTerm' | 'Terminal'
 
@@ -44,18 +57,18 @@ interface AutoHealConfig {
   sessionMode: HealSessionMode
 }
 
-const AUTO_HEAL_MAX_CYCLES = 3
+export const AUTO_HEAL_MAX_CYCLES = 3
 
 // ─── Paths (local to runner) ────────────────────────────────────────────────
 const SWITCH_SCRIPT = path.join(__dirname, '../env-switcher/switch.js')
 const SUMMARY_REPORTER = path.resolve(__dirname, 'summary-reporter.js')
 
 // ─── Readline helpers (same pattern as shared/launcher/index.ts) ────────────
-function prompt(rl: readline.Interface, question: string): Promise<string> {
+export function prompt(rl: readline.Interface, question: string): Promise<string> {
   return new Promise((resolve) => rl.question(question, resolve))
 }
 
-async function selectOption(
+export async function selectOption(
   rl: readline.Interface,
   label: string,
   options: string[],
@@ -71,7 +84,7 @@ async function selectOption(
 }
 
 // ─── Feature discovery (same as shared/launcher/index.ts) ───────────────────
-function discoverFeatures(): FeatureConfig[] {
+export function discoverFeatures(): FeatureConfig[] {
   const features: FeatureConfig[] = []
   const dirs = fs
     .readdirSync(FEATURES_DIR, { withFileTypes: true })
@@ -96,7 +109,7 @@ function discoverFeatures(): FeatureConfig[] {
 }
 
 // ─── Repo check (same as shared/launcher/index.ts) ─────────────────────────
-function checkRepos(feature: FeatureConfig): boolean {
+export function checkRepos(feature: FeatureConfig): boolean {
   if (!feature.repos?.length) return true
   let allOk = true
   for (const repo of feature.repos) {
@@ -127,7 +140,7 @@ interface ServiceInfo {
   healthTimeout?: number
 }
 
-function buildServiceList(feature: FeatureConfig): ServiceInfo[] {
+export function buildServiceList(feature: FeatureConfig): ServiceInfo[] {
   const services: ServiceInfo[] = []
 
   for (const repo of feature.repos ?? []) {
@@ -159,44 +172,85 @@ function buildServiceList(feature: FeatureConfig): ServiceInfo[] {
   return services
 }
 
-function buildTeedCommand(svc: ServiceInfo): string {
+export function buildTeedCommand(svc: ServiceInfo): string {
   // LOG_MODE=plain tells apps to use synchronous console.log instead of async
   // loggers (e.g. Pino/sonic-boom), so XML markers land in the right position.
   // stdout+stderr go to both the iTerm tab and the log file via tee.
   return `LOG_MODE=plain ${svc.command} 2>&1 | tee -a ${svc.logPath}`
 }
 
+// Wipe each service's log file so the next iteration starts clean. Called
+// before every run signal (.restart and .rerun) so both behave identically —
+// the file contains only the current iteration's output.
+export function truncateServiceLogs(services: ServiceInfo[]): void {
+  for (const svc of services) {
+    try {
+      fs.writeFileSync(svc.logPath, '')
+    } catch { /* log file may not exist yet on first run; tee will create it */ }
+  }
+}
+
 // Tracks iTerm session IDs for launched service tabs so restarts can close
 // them precisely (zsh auto-title overwrites `name of s`, so name-prefix
-// matching is unreliable across restarts).
-const itermSessionIds = new Map<string, string>()
+// matching is unreliable across restarts). Persisted to disk so a fresh
+// runner process can still close tabs from a prior process.
+export const itermSessionIds = loadSessionIds(ITERM_SESSION_IDS_PATH)
 
-function openTabs(
+export function loadSessionIds(file: string): Map<string, string> {
+  try {
+    const raw = fs.readFileSync(file, 'utf-8')
+    const obj = JSON.parse(raw) as Record<string, string>
+    return new Map(Object.entries(obj))
+  } catch {
+    return new Map()
+  }
+}
+
+export function saveSessionIds(file: string, ids: Map<string, string>): void {
+  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true })
+    fs.writeFileSync(file, JSON.stringify(Object.fromEntries(ids), null, 2))
+  } catch {
+    /* non-fatal — persistence is best-effort */
+  }
+}
+
+export function openTabs(
   terminal: TerminalChoice,
   tabs: Array<{ dir: string; command: string; name: string }>,
   label: string,
 ): void {
   if (terminal === 'iTerm') {
-    // Close known prior sessions (by ID — always accurate) first, then
-    // also fall back to prefix-matching for any sessions we didn't track
-    // (e.g. leftovers from a previous runner process).
-    const knownIds = tabs
-      .map((t) => itermSessionIds.get(t.name))
-      .filter((id): id is string => Boolean(id))
+    // Try reuse first — if we already have tabs with matching names, send
+    // Ctrl-C + new command into them instead of closing + reopening. This
+    // preserves scrollback and avoids the close race where a tab's shell
+    // outlives the close and the next run spawns a second tab next to it.
+    const reuseIds = tabs.map((t) => itermSessionIds.get(t.name) ?? '')
+    const allMatched = reuseIds.every((id) => id.length > 0)
+    if (allMatched && reuseItermTabs(reuseIds, tabs, label)) {
+      return // IDs unchanged; on-disk cache stays valid.
+    }
+
+    // Fallback — close previously-tracked sessions (by ID — always accurate),
+    // then fall back to prefix-matching for untracked legacy tabs, and open
+    // a fresh window.
+    const knownIds = Array.from(itermSessionIds.values())
     if (knownIds.length > 0) closeItermSessionsByIds(knownIds)
+    itermSessionIds.clear()
     closeItermSessionsByPrefix(tabs.map((t) => t.name))
 
     const newIds = openItermTabs(tabs, label)
     tabs.forEach((tab, i) => {
       if (newIds[i]) itermSessionIds.set(tab.name, newIds[i])
     })
+    saveSessionIds(ITERM_SESSION_IDS_PATH, itermSessionIds)
   } else {
     closeTerminalTabsByPrefix(tabs.map((t) => t.name))
     openTerminalTabs(tabs, label)
   }
 }
 
-async function launchServices(
+export async function launchServices(
   services: ServiceInfo[],
   terminal: TerminalChoice,
 ): Promise<void> {
@@ -212,18 +266,13 @@ async function launchServices(
     }
   }
 
-  const tabs: Array<{ dir: string; command: string; name: string }> = []
+  truncateServiceLogs(services)
 
-  for (const svc of services) {
-    // Create/truncate log file for a clean run
-    fs.writeFileSync(svc.logPath, '')
-
-    tabs.push({
-      dir: svc.cwd,
-      command: buildTeedCommand(svc),
-      name: svc.name,
-    })
-  }
+  const tabs: Array<{ dir: string; command: string; name: string }> = services.map((svc) => ({
+    dir: svc.cwd,
+    command: buildTeedCommand(svc),
+    name: svc.name,
+  }))
 
   if (tabs.length === 0) {
     return
@@ -232,7 +281,7 @@ async function launchServices(
   openTabs(terminal, tabs, `  Opening ${terminal} tabs for ${tabs.length} service(s)...`)
 }
 
-async function pollHealthChecks(
+export async function pollHealthChecks(
   services: ServiceInfo[],
   timeoutMs = 120_000,
 ): Promise<void> {
@@ -261,20 +310,20 @@ async function pollHealthChecks(
   console.log('')
 }
 
-function writeManifest(services: ServiceInfo[]): void {
+export function writeManifest(services: ServiceInfo[]): void {
   const manifest = { serviceLogs: services.map((s) => s.logPath) }
   fs.writeFileSync(MANIFEST_PATH, JSON.stringify(manifest, null, 2) + '\n')
 }
 
 // ─── Restart unhealthy services ─────────────────────────────────────────────
-function readPid(safeName: string): number | null {
+export function readPid(safeName: string): number | null {
   const pidPath = path.join(PIDS_DIR, `${safeName}.pid`)
   if (!fs.existsSync(pidPath)) return null
   const pid = parseInt(fs.readFileSync(pidPath, 'utf-8').trim(), 10)
   return isNaN(pid) ? null : pid
 }
 
-function portFromHealthUrl(url: string): number | null {
+export function portFromHealthUrl(url: string): number | null {
   try {
     const parsed = new URL(url)
     if (parsed.port) {
@@ -286,7 +335,7 @@ function portFromHealthUrl(url: string): number | null {
   }
 }
 
-function lookupPidByPort(port: number): number | null {
+export function lookupPidByPort(port: number): number | null {
   try {
     const output = execFileSync(
       'lsof',
@@ -303,7 +352,7 @@ function lookupPidByPort(port: number): number | null {
   }
 }
 
-function isProcessAlive(pid: number): boolean {
+export function isProcessAlive(pid: number): boolean {
   try {
     process.kill(pid, 0)
     return true
@@ -312,7 +361,7 @@ function isProcessAlive(pid: number): boolean {
   }
 }
 
-function killProcessSync(pid: number): void {
+export function killProcessSync(pid: number): void {
   try {
     process.kill(pid, 'SIGTERM')
   } catch {
@@ -326,7 +375,7 @@ function killProcessSync(pid: number): void {
   }
 }
 
-async function killProcess(pid: number): Promise<void> {
+export async function killProcess(pid: number): Promise<void> {
   try {
     process.kill(pid, 'SIGTERM')
   } catch {
@@ -346,7 +395,7 @@ async function killProcess(pid: number): Promise<void> {
   }
 }
 
-function resolveRunningPid(svc: ServiceInfo): number | null {
+export function resolveRunningPid(svc: ServiceInfo): number | null {
   const pidFromFile = readPid(svc.safeName)
   if (pidFromFile && isProcessAlive(pidFromFile)) {
     return pidFromFile
@@ -369,7 +418,7 @@ function resolveRunningPid(svc: ServiceInfo): number | null {
   return null
 }
 
-async function restartAllServices(
+export async function restartAllServices(
   services: ServiceInfo[],
   terminal: TerminalChoice,
 ): Promise<void> {
@@ -388,6 +437,8 @@ async function restartAllServices(
     }
   }
 
+  truncateServiceLogs(services)
+
   // Re-launch all in terminal tabs with tee
   const tabs = services.map((svc) => ({
     dir: svc.cwd,
@@ -402,7 +453,7 @@ async function restartAllServices(
 // ─── Playwright ─────────────────────────────────────────────────────────────
 const RUN_TIMEOUT = 10 * 60 * 1000 // 10 minutes — safety net for hung runs
 
-function runPlaywright(featureDir: string, headed: boolean): Promise<number> {
+export function runPlaywright(featureDir: string, headed: boolean): Promise<number> {
   return new Promise((resolve, reject) => {
     const playwrightArgs = [
       'playwright',
@@ -455,7 +506,7 @@ function runPlaywright(featureDir: string, headed: boolean): Promise<number> {
 }
 
 // ─── Log enrichment ─────────────────────────────────────────────────────────
-function extractLogsForTest(
+export function extractLogsForTest(
   slug: string,
   serviceLogs: string[],
 ): Record<string, string> {
@@ -480,7 +531,7 @@ function extractLogsForTest(
   return logs
 }
 
-function enrichSummaryWithLogs(): void {
+export function enrichSummaryWithLogs(): void {
   if (!fs.existsSync(SUMMARY_PATH) || !fs.existsSync(MANIFEST_PATH)) return
 
   const summary = JSON.parse(fs.readFileSync(SUMMARY_PATH, 'utf-8'))
@@ -501,7 +552,7 @@ function enrichSummaryWithLogs(): void {
 }
 
 // ─── Summary ────────────────────────────────────────────────────────────────
-function printSummary(): void {
+export function printSummary(): void {
   if (!fs.existsSync(SUMMARY_PATH)) {
     console.log('\n  No summary file found.')
     return
@@ -523,7 +574,7 @@ function printSummary(): void {
 }
 
 // ─── Watch mode ─────────────────────────────────────────────────────────────
-function readFailureSignature(): string {
+export function readFailureSignature(): string {
   if (!fs.existsSync(SUMMARY_PATH)) return ''
   try {
     const summary = JSON.parse(fs.readFileSync(SUMMARY_PATH, 'utf-8'))
@@ -533,14 +584,14 @@ function readFailureSignature(): string {
   }
 }
 
-interface HealCycleState {
+export interface HealCycleState {
   spawnCount: number
   strikeCount: number
   lastSignature: string
   disabled: boolean
 }
 
-function printManualOptions(autoHealConfigured: boolean): void {
+export function printManualOptions(autoHealConfigured: boolean): void {
   console.log('  Options:')
   console.log('    • fix the code yourself, then `touch logs/.rerun`')
   if (autoHealConfigured) {
@@ -553,7 +604,7 @@ function printManualOptions(autoHealConfigured: boolean): void {
   console.log('')
 }
 
-async function maybeAutoHeal(
+export async function maybeAutoHeal(
   autoHeal: AutoHealConfig,
   state: HealCycleState,
   terminal: TerminalChoice,
@@ -690,6 +741,10 @@ async function watchMode(
     try { fs.unlinkSync(RERUN_SIGNAL) } catch { /* ignore */ }
     try { fs.unlinkSync(HEAL_SIGNAL) } catch { /* ignore */ }
 
+    // NOTE: do NOT close the heal tab here — the next heal cycle (if any)
+    // will reuse it. It's closed below when tests pass + no next cycle is
+    // needed, and on SIGINT via cleanup().
+
     if (doHeal) {
       if (!autoHeal.agent) {
         console.log(
@@ -710,6 +765,10 @@ async function watchMode(
 
     if (doRestart) {
       await restartAllServices(services, terminal)
+    } else if (doRerun) {
+      // Rerun keeps services running, but we still wipe their logs so each
+      // iteration's output stands alone — matching restart's behavior.
+      truncateServiceLogs(services)
     }
 
     console.log(
@@ -720,6 +779,13 @@ async function watchMode(
     printSummary()
 
     await maybeAutoHeal(autoHeal, cycleState, terminal)
+
+    // If tests are green now, no next heal cycle will fire — close the
+    // lingering "you can close this tab" heal tab so it doesn't stick
+    // around until SIGINT.
+    if (terminal === 'iTerm' && readFailureSignature() === '') {
+      closeLastHealAgentTab()
+    }
 
     console.log('  ──── Watch Mode ────')
     console.log('  Waiting for signal...\n')
@@ -733,7 +799,7 @@ interface RunFlags {
   healSession: HealSessionMode
 }
 
-function parseFlags(args: string[]): RunFlags {
+export function parseFlags(args: string[]): RunFlags {
   const flags: RunFlags = { headed: false, terminal: 'iTerm', healSession: 'resume' }
   const readValue = (arg: string, name: string, next: string | undefined): string => {
     if (arg.startsWith(`${name}=`)) return arg.slice(name.length + 1)
@@ -766,6 +832,7 @@ function parseFlags(args: string[]): RunFlags {
 // ─── Main ───────────────────────────────────────────────────────────────────
 export async function main(argv: string[] = []) {
   const flags = parseFlags(argv)
+  const terminalChoice: TerminalChoice = flags.terminal
   const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout,
@@ -791,6 +858,17 @@ export async function main(argv: string[] = []) {
           console.log('stopped')
         }
       }
+    }
+
+    // Close iTerm tabs we opened so they don't linger after the runner exits.
+    // The shell inside each tab is still alive after killing the service PID;
+    // without this, tabs stack up across runs.
+    if (terminalChoice === 'iTerm') {
+      try {
+        const svcIds = Array.from(itermSessionIds.values())
+        if (svcIds.length > 0) closeItermSessionsByIds(svcIds)
+        closeLastHealAgentTab()
+      } catch { /* best-effort */ }
     }
 
     if (envSetApplied) {
@@ -819,6 +897,15 @@ export async function main(argv: string[] = []) {
   try {
     console.log('\n  Canary Lab — E2E Runner\n')
 
+    // Warn if the scaffolded files in this project were synced against an
+    // older version of canary-lab. `npm update` doesn't touch files outside
+    // node_modules/, so users can easily drift out of sync with the skills
+    // and managed doc blocks.
+    const notice = formatDriftNotice(checkUpgradeDrift(ROOT))
+    if (notice) {
+      console.log(`  ${notice.replace(/\n/g, '\n  ')}\n`)
+    }
+
     // ── 1. Discover features
     const features = discoverFeatures()
     if (features.length === 0) {
@@ -842,7 +929,6 @@ export async function main(argv: string[] = []) {
       env = await selectOption(rl, 'Which environment?', feature.envs)
     }
 
-    const terminalChoice = flags.terminal
     const headed = flags.headed
 
     // ── 4. Auto-heal mode?
@@ -916,8 +1002,19 @@ export async function main(argv: string[] = []) {
     rl.close()
 
     // ── 8. Prepare logs directory
+    // Preserve iTerm session ID caches across the logs wipe so we can still
+    // close tabs from a prior runner process that exited without clean
+    // shutdown (in-memory copy is re-saved later via openTabs(), but only
+    // when that code path runs — e.g. a no-heal run otherwise loses them).
+    const preservedSessionIds: Record<string, string | null> = {
+      [ITERM_SESSION_IDS_PATH]: safeReadFile(ITERM_SESSION_IDS_PATH),
+      [ITERM_HEAL_SESSION_IDS_PATH]: safeReadFile(ITERM_HEAL_SESSION_IDS_PATH),
+    }
     fs.rmSync(LOGS_DIR, { recursive: true, force: true })
     fs.mkdirSync(PIDS_DIR, { recursive: true })
+    for (const [p, content] of Object.entries(preservedSessionIds)) {
+      if (content !== null) fs.writeFileSync(p, content)
+    }
 
     // ── 9. Build service list and launch in terminal tabs (with tee to log files)
     services = buildServiceList(feature)
