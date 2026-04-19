@@ -31,6 +31,7 @@ function mkTmp(): string {
   return fs.realpathSync(dir)
 }
 
+const initialSigintListeners = process.listeners('SIGINT').slice()
 afterEach(() => {
   while (tmpDirs.length) {
     const d = tmpDirs.pop()!
@@ -40,6 +41,12 @@ afterEach(() => {
   vi.restoreAllMocks()
   spawn.mockReset()
   createInterface.mockReset()
+  // Remove any SIGINT listeners leaked by main() under test.
+  for (const listener of process.listeners('SIGINT')) {
+    if (!initialSigintListeners.includes(listener)) {
+      process.removeListener('SIGINT', listener as any)
+    }
+  }
 })
 
 describe('resolveVars', () => {
@@ -345,5 +352,119 @@ describe('main (switch orchestration)', () => {
     vi.spyOn(console, 'log').mockImplementation(() => {})
     stubExit()
     await expect(main(['feat'])).rejects.toThrow('__exit__1')
+  })
+
+  it('--revert with no backup files logs "No backup files found"', async () => {
+    const root = mkTmp()
+    vi.stubEnv('CANARY_LAB_PROJECT_ROOT', root)
+    seedFeature(root, 'feat', { staging: { 'feat.env': 'x' } })
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+
+    await main(['feat', '--revert'])
+
+    const messages = logSpy.mock.calls.map((c) => String(c[0]))
+    expect(messages.some((m) => m.includes('No backup files found'))).toBe(true)
+  })
+
+  it('interactive mode: child close(code) triggers cleanup (restore) and exit(code)', async () => {
+    const root = mkTmp()
+    vi.stubEnv('CANARY_LAB_PROJECT_ROOT', root)
+    const { featureDir } = seedFeature(root, 'feat', {
+      local: { 'feat.env': 'LOCAL=1' },
+    })
+    const target = path.join(featureDir, '.env')
+    fs.writeFileSync(target, 'OLD')
+    vi.spyOn(console, 'log').mockImplementation(() => {})
+    vi.spyOn(process.stdout, 'write').mockImplementation((() => true) as any)
+
+    createInterface.mockImplementation(() => ({
+      question: (_q: string, cb: (a: string) => void) => cb('1'),
+      close: () => {},
+    }))
+    const child: any = new EventEmitter()
+    spawn.mockImplementation(() => child)
+
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
+      throw new Error(`__exit__${code}`)
+    }) as never)
+
+    await main(['feat'])
+    expect(fs.readFileSync(target, 'utf-8')).toBe('LOCAL=1')
+
+    expect(() => child.emit('close', 2)).toThrow('__exit__2')
+    expect(fs.readFileSync(target, 'utf-8')).toBe('OLD')
+
+    exitSpy.mockRestore()
+  })
+
+  it('interactive mode: child error triggers cleanup and exit 1', async () => {
+    const root = mkTmp()
+    vi.stubEnv('CANARY_LAB_PROJECT_ROOT', root)
+    const { featureDir } = seedFeature(root, 'feat', {
+      local: { 'feat.env': 'LOCAL=1' },
+    })
+    const target = path.join(featureDir, '.env')
+    fs.writeFileSync(target, 'OLD')
+    vi.spyOn(console, 'log').mockImplementation(() => {})
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    vi.spyOn(process.stdout, 'write').mockImplementation((() => true) as any)
+
+    createInterface.mockImplementation(() => ({
+      question: (_q: string, cb: (a: string) => void) => cb('1'),
+      close: () => {},
+    }))
+    const child: any = new EventEmitter()
+    spawn.mockImplementation(() => child)
+
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
+      throw new Error(`__exit__${code}`)
+    }) as never)
+
+    await main(['feat'])
+    expect(() => child.emit('error', new Error('spawn failed'))).toThrow('__exit__1')
+    expect(fs.readFileSync(target, 'utf-8')).toBe('OLD')
+
+    exitSpy.mockRestore()
+  })
+
+  it('interactive mode: SIGINT triggers cleanup and exit 130; repeat is a no-op via cleanupDone guard', async () => {
+    const root = mkTmp()
+    vi.stubEnv('CANARY_LAB_PROJECT_ROOT', root)
+    const { featureDir } = seedFeature(root, 'feat', {
+      local: { 'feat.env': 'LOCAL=1' },
+    })
+    const target = path.join(featureDir, '.env')
+    fs.writeFileSync(target, 'OLD')
+    vi.spyOn(console, 'log').mockImplementation(() => {})
+    const stdoutSpy = vi.spyOn(process.stdout, 'write').mockImplementation((() => true) as any)
+
+    createInterface.mockImplementation(() => ({
+      question: (_q: string, cb: (a: string) => void) => cb('1'),
+      close: () => {},
+    }))
+    const child: any = new EventEmitter()
+    spawn.mockImplementation(() => child)
+
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
+      throw new Error(`__exit__${code}`)
+    }) as never)
+
+    await main(['feat'])
+    expect(fs.readFileSync(target, 'utf-8')).toBe('LOCAL=1')
+
+    expect(() => process.emit('SIGINT')).toThrow('__exit__130')
+    expect(fs.readFileSync(target, 'utf-8')).toBe('OLD')
+
+    // A subsequent close firing should still exit but MUST NOT double-restore
+    // (cleanupDone guard). Count how often 'Restoring original files' was written.
+    const restoreCalls = () =>
+      stdoutSpy.mock.calls.filter((c) =>
+        String(c[0]).includes('Restoring original files'),
+      ).length
+    const firstCount = restoreCalls()
+    expect(() => child.emit('close', 0)).toThrow('__exit__0')
+    expect(restoreCalls()).toBe(firstCount)
+
+    exitSpy.mockRestore()
   })
 })

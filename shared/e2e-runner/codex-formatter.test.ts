@@ -6,6 +6,7 @@ import {
   truncate,
   summarizeOutput,
   cleanCommand,
+  parseCommand,
   quote,
   kindIcon,
   handleLine,
@@ -180,8 +181,168 @@ describe('handleLine', () => {
     const out = spy.mock.calls.map((c) => c[0] as string).join('')
     expect(out).toContain('$')
     expect(out).toContain('git status')
-    expect(out).toContain('✓')
+    expect(out).toContain('↳')
     expect(out).toContain('nothing to commit')
+    spy.mockRestore()
+  })
+
+  it('renders sed -n range reads as 📖 Read with a line range', () => {
+    const spy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    handleLine(
+      JSON.stringify({
+        type: 'item.completed',
+        item: {
+          type: 'command_execution',
+          command: `sed -n '84,149p' ${process.cwd()}/features/foo/server.ts`,
+          exit_code: 0,
+          aggregated_output: 'some line',
+        },
+      }),
+    )
+    const out = spy.mock.calls.map((c) => c[0] as string).join('')
+    expect(out).toContain('Read')
+    expect(out).toContain('features/foo/server.ts')
+    expect(out).toContain('L84-149')
+    spy.mockRestore()
+  })
+
+  it('renders a failed test -f guarded read as "not found"', () => {
+    const spy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    handleLine(
+      JSON.stringify({
+        type: 'item.completed',
+        item: {
+          type: 'command_execution',
+          command: `test -f logs/diagnosis-journal.json && sed -n '1,240p' logs/diagnosis-journal.json`,
+          exit_code: 1,
+          aggregated_output: '',
+        },
+      }),
+    )
+    const out = spy.mock.calls.map((c) => c[0] as string).join('')
+    expect(out).toContain('Read')
+    expect(out).toContain('logs/diagnosis-journal.json')
+    expect(out).toContain('not found')
+    // Must not render a scary red "exit 1" for a missing-file guard.
+    expect(out).not.toContain('exit 1')
+    spy.mockRestore()
+  })
+
+  it('renders rg as 🔍 Grep with pattern + path', () => {
+    const spy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    handleLine(
+      JSON.stringify({
+        type: 'item.completed',
+        item: {
+          type: 'command_execution',
+          command: `rg -n -F 'rejected coupon code=' features/tricky/scripts`,
+          exit_code: 0,
+          aggregated_output: 'features/tricky/scripts/server.ts:104:...',
+        },
+      }),
+    )
+    const out = spy.mock.calls.map((c) => c[0] as string).join('')
+    expect(out).toContain('Grep')
+    expect(out).toContain('rejected coupon code=')
+    expect(out).toContain('features/tricky/scripts')
+    spy.mockRestore()
+  })
+})
+
+describe('parseCommand', () => {
+  it('maps sed range reads to Read with L-range', () => {
+    const p = parseCommand(`sed -n '10,50p' features/foo/server.ts`)
+    expect(p.tool).toBe('Read')
+    expect(p.label).toContain('features/foo/server.ts')
+    expect(p.label).toContain('L10-50')
+    expect(p.guardedRead).toBe(false)
+  })
+  it('strips a leading test -f guard and marks the read as guarded', () => {
+    const p = parseCommand(`test -f logs/foo && sed -n '1,10p' logs/foo`)
+    expect(p.tool).toBe('Read')
+    expect(p.guardedRead).toBe(true)
+  })
+  it('maps sed pattern-range reads to Read', () => {
+    const p = parseCommand(`sed -n '/<start>/,/<\\/start>/p' logs/svc.log`)
+    expect(p.tool).toBe('Read')
+    expect(p.label).toContain('logs/svc.log')
+  })
+  it('maps cat / head / tail to Read', () => {
+    expect(parseCommand('cat foo.ts').tool).toBe('Read')
+    expect(parseCommand('head -n 50 foo.ts').tool).toBe('Read')
+    expect(parseCommand('tail -100 foo.ts').tool).toBe('Read')
+  })
+  it('maps rg with quoted pattern + path to Grep', () => {
+    const p = parseCommand(`rg -n 'COUPONS' features/x/scripts`)
+    expect(p.tool).toBe('Grep')
+    expect(p.label).toContain('COUPONS')
+    expect(p.label).toContain('features/x/scripts')
+  })
+  it('maps ls to List', () => {
+    const p = parseCommand('ls features/foo')
+    expect(p.tool).toBe('List')
+    expect(p.label).toBe('features/foo')
+  })
+  it('maps find to Glob', () => {
+    const p = parseCommand('find features -name "*.ts"')
+    expect(p.tool).toBe('Glob')
+  })
+  it('falls through to Bash for unrecognized commands', () => {
+    const p = parseCommand('git status')
+    expect(p.tool).toBe('Bash')
+    expect(p.label).toContain('git status')
+  })
+
+  it('emits a quoted agent_message block', () => {
+    const spy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    handleLine(
+      JSON.stringify({
+        type: 'item.completed',
+        item: { type: 'agent_message', text: 'hello\nworld' },
+      }),
+    )
+    const out = spy.mock.calls.map((c) => c[0] as string).join('')
+    expect(out).toContain('│ hello')
+    expect(out).toContain('│ world')
+    spy.mockRestore()
+  })
+
+  it('skips agent_message when text is empty or whitespace-only', () => {
+    const spy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    handleLine(
+      JSON.stringify({
+        type: 'item.completed',
+        item: { type: 'agent_message', text: '   ' },
+      }),
+    )
+    expect(spy).not.toHaveBeenCalled()
+    spy.mockRestore()
+  })
+
+  it('emits one line per change for a file_change item', () => {
+    const spy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    handleLine(
+      JSON.stringify({
+        type: 'item.completed',
+        item: {
+          type: 'file_change',
+          changes: [
+            { kind: 'add', path: `${process.cwd()}/new.ts` },
+            { kind: 'delete', path: `${process.cwd()}/old.ts` },
+            { kind: 'update', path: `${process.cwd()}/touched.ts` },
+          ],
+        },
+      }),
+    )
+    const out = spy.mock.calls.map((c) => c[0] as string).join('')
+    expect(out).toContain('new.ts')
+    expect(out).toContain('old.ts')
+    expect(out).toContain('touched.ts')
+    expect(out).toContain('Write')
+    expect(out).toContain('Edit')
+    expect(out).toContain('✓ applied')
+    // Two stdout.writes per change (tool line + result line)
+    expect(spy).toHaveBeenCalledTimes(6)
     spy.mockRestore()
   })
 })

@@ -55,6 +55,8 @@ const {
   loadPrompt,
   spawnHealAgent,
   isAgentCliAvailable,
+  healAgentBanner,
+  closeLastHealAgentTab,
 } = await import('./auto-heal')
 
 beforeEach(() => {
@@ -103,16 +105,17 @@ describe('stripFrontmatter', () => {
 })
 
 describe('buildAgentCommand', () => {
-  it('claude + new session', () => {
+  it('claude + new session does NOT pass --model (defers to user CLI profile)', () => {
     const cmd = buildAgentCommand('claude', 'new', 0, '/tmp/p.txt')
     expect(cmd).toContain('claude --dangerously-skip-permissions')
     expect(cmd).toContain('--output-format=stream-json --verbose -p')
+    expect(cmd).not.toContain('--model')
     expect(cmd).not.toContain('--continue')
     expect(cmd).toContain('"$(cat "/tmp/p.txt")"')
     expect(cmd).toContain('claude-formatter.js')
   })
 
-  it('claude + resume (cycle > 0) adds --continue', () => {
+  it('claude + resume (cycle > 0) adds --continue before the base flags', () => {
     const cmd = buildAgentCommand('claude', 'resume', 2, '/tmp/p.txt')
     expect(cmd).toContain('--continue --dangerously-skip-permissions')
   })
@@ -122,9 +125,13 @@ describe('buildAgentCommand', () => {
     expect(cmd).not.toContain('--continue')
   })
 
-  it('codex + new session', () => {
+  it('codex + new session does NOT pass -m or reasoning effort (defers to user CLI profile)', () => {
     const cmd = buildAgentCommand('codex', 'new', 0, '/tmp/p.txt')
-    expect(cmd).toContain('codex exec --skip-git-repo-check --full-auto --json')
+    expect(cmd).toContain(
+      'codex exec --skip-git-repo-check --full-auto --json',
+    )
+    expect(cmd).not.toContain('-m ')
+    expect(cmd).not.toContain('model_reasoning_effort')
     expect(cmd).not.toContain('codex exec resume')
     expect(cmd).toContain('codex-formatter.js')
   })
@@ -133,6 +140,35 @@ describe('buildAgentCommand', () => {
     const cmd = buildAgentCommand('codex', 'resume', 1, '/tmp/p.txt')
     expect(cmd).toContain('codex exec resume --skip-git-repo-check --full-auto --json')
     expect(cmd).toContain('|| codex exec --skip-git-repo-check --full-auto --json')
+  })
+
+  it('claude pipes through tee to persist raw stream-json for post-hoc inspection', () => {
+    const cmd = buildAgentCommand('claude', 'new', 0, '/tmp/p.txt')
+    expect(cmd).toMatch(/\| tee ".*heal-claude-raw-1\.jsonl" \| node /)
+  })
+
+  it('codex pipes through tee to persist raw stream for post-hoc inspection', () => {
+    const cmd = buildAgentCommand('codex', 'new', 2, '/tmp/p.txt')
+    expect(cmd).toMatch(/\| tee ".*heal-codex-raw-3\.jsonl" \| node /)
+  })
+
+  it('codex resume branch tees inside the fallback group', () => {
+    const cmd = buildAgentCommand('codex', 'resume', 1, '/tmp/p.txt')
+    expect(cmd).toMatch(/\) \| tee ".*heal-codex-raw-2\.jsonl" \| node /)
+  })
+})
+
+describe('healAgentBanner', () => {
+  it('claude banner notes CLI profile defaults are used', () => {
+    expect(healAgentBanner('claude')).toBe(
+      '[canary-lab] heal agent — claude (using your CLI profile defaults for model + reasoning)',
+    )
+  })
+
+  it('codex banner notes CLI profile defaults are used', () => {
+    expect(healAgentBanner('codex')).toBe(
+      '[canary-lab] heal agent — codex (using your CLI profile defaults for model + reasoning)',
+    )
   })
 })
 
@@ -222,6 +258,11 @@ describe('spawnHealAgent', () => {
     const script = fs.readFileSync(scriptFile, 'utf-8')
     expect(script).toContain('claude --dangerously-skip-permissions')
     expect(script).toContain('#!/bin/bash')
+    expect(script).toContain(
+      '[canary-lab] heal agent — claude (using your CLI profile defaults for model + reasoning)',
+    )
+    // Raw stream is tee'd to a per-cycle log for post-hoc inspection.
+    expect(script).toMatch(/\| tee ".*heal-claude-raw-1\.jsonl" \|/)
 
     // iTerm boundary was invoked; Terminal boundary was not.
     expect(openItermTabs).toHaveBeenCalledOnce()
@@ -353,5 +394,63 @@ describe('spawnHealAgent', () => {
     await p2
 
     expect(closeItermSessionsByIds).toHaveBeenCalledWith(['prev-id-123'])
+  })
+
+  it('returns "timeout" when deadline elapses with no signal or done file', async () => {
+    seedPrompt('claude')
+    vi.useFakeTimers()
+
+    const promise = spawnHealAgent({
+      agent: 'claude',
+      sessionMode: 'new',
+      cycle: 0,
+      terminal: 'iTerm',
+    })
+
+    // Advance past the 10 min AGENT_TIMEOUT_MS deadline.
+    await vi.advanceTimersByTimeAsync(10 * 60 * 1000 + 2000)
+    expect(await promise).toBe('timeout')
+  })
+})
+
+describe('closeLastHealAgentTab', () => {
+  it('persists cleared state to disk even when closeItermSessionsByIds throws', async () => {
+    const seedDir = path.join(pathStubRoot, '.claude', 'skills')
+    fs.mkdirSync(seedDir, { recursive: true })
+    fs.writeFileSync(path.join(seedDir, 'heal-loop.md'), '---\nname: x\n---\ngo heal\n')
+
+    vi.useFakeTimers()
+    openItermTabs.mockReturnValueOnce(['seed-sid-xyz'])
+    const p = spawnHealAgent({
+      agent: 'claude',
+      sessionMode: 'new',
+      cycle: 0,
+      terminal: 'iTerm',
+    })
+    fs.writeFileSync(RERUN_SIGNAL, '')
+    await vi.advanceTimersByTimeAsync(1200)
+    await p
+    vi.useRealTimers()
+    fs.unlinkSync(RERUN_SIGNAL)
+
+    closeItermSessionsByIds.mockClear()
+    closeItermSessionsByIds.mockImplementationOnce(() => {
+      throw new Error('boom')
+    })
+
+    // try/finally (no catch): error propagates, but saveHealIds in finally
+    // still runs after the .splice(0) cleared the in-memory state.
+    expect(() => closeLastHealAgentTab()).toThrow('boom')
+    expect(closeItermSessionsByIds).toHaveBeenCalledWith(['seed-sid-xyz'])
+
+    const saved = JSON.parse(fs.readFileSync(ITERM_HEAL_SESSION_IDS_PATH, 'utf-8'))
+    expect(saved).toEqual([])
+  })
+
+  it('no-ops silently when no previous heal tab IDs', () => {
+    // Depends on the preceding test draining module-level previousHealAgentIds via .splice(0).
+    closeItermSessionsByIds.mockClear()
+    expect(() => closeLastHealAgentTab()).not.toThrow()
+    expect(closeItermSessionsByIds).not.toHaveBeenCalled()
   })
 })

@@ -8,9 +8,13 @@ For available Codex skills, read:
 
 ## Quick Start
 
-1. Run `npx canary-lab run`
-2. Leave the runner open in watch mode
-3. In Codex, type:
+```bash
+npm install
+npm run install:browsers
+npx canary-lab run
+```
+
+Leave the runner open in watch mode, then type:
 
 ```text
 self heal

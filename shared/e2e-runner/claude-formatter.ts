@@ -102,10 +102,34 @@ function formatToolCall(name: string, input: AnyObj): string {
       const desc = input.description ? ` ${c('dim', `# ${input.description}`)}` : ''
       return `${cmd}${desc}`
     }
-    case 'Read':
-    case 'Edit':
-    case 'Write':
-      return c('bold', relPath(String(input.file_path ?? '')))
+    case 'Read': {
+      const filePath = c('bold', relPath(String(input.file_path ?? '')))
+      const offset = typeof input.offset === 'number' ? input.offset : undefined
+      const limit = typeof input.limit === 'number' ? input.limit : undefined
+      // Surfacing the line range turns "narrow Read (good)" vs "full-file Read (banned)"
+      // into a visible difference in the tab — critical for the heal-loop discipline.
+      if (offset !== undefined && limit !== undefined) {
+        return `${filePath} ${c('dim', `L${offset}-${offset + limit - 1}`)}`
+      }
+      if (offset !== undefined) return `${filePath} ${c('dim', `from L${offset}`)}`
+      if (limit !== undefined) return `${filePath} ${c('dim', `L1-${limit}`)}`
+      return filePath
+    }
+    case 'Edit': {
+      const filePath = c('bold', relPath(String(input.file_path ?? '')))
+      const oldLines = String(input.old_string ?? '').split('\n').length
+      const newLines = String(input.new_string ?? '').split('\n').length
+      const all = input.replace_all === true ? ' (all)' : ''
+      if (!input.old_string && !input.new_string) return filePath
+      return `${filePath} ${c('dim', `−${oldLines} +${newLines}${all}`)}`
+    }
+    case 'Write': {
+      const filePath = c('bold', relPath(String(input.file_path ?? '')))
+      const content = typeof input.content === 'string' ? input.content : ''
+      if (!content) return filePath
+      const lines = content.split('\n').length
+      return `${filePath} ${c('dim', `${lines}L`)}`
+    }
     case 'Glob': {
       const path = input.path ? ` in ${relPath(String(input.path))}` : ''
       return `${c('bold', String(input.pattern ?? ''))}${path}`
@@ -185,6 +209,14 @@ function handleLine(line: string): void {
         const lines = block.text.trim().split('\n')
         const quoted = lines.map((l) => `  ${c('dim', '│')} ${l}`).join('\n')
         process.stdout.write(`\n${quoted}\n`)
+      } else if (block.type === 'thinking') {
+        // Claude usually emits signature-only thinking (encrypted, text empty).
+        // Print a one-liner only when extended thinking surfaces actual text.
+        const text = typeof block.thinking === 'string' ? block.thinking.trim() : ''
+        if (!text) continue
+        const first = text.split('\n')[0]
+        const clipped = first.length > 120 ? first.slice(0, 119) + '…' : first
+        process.stdout.write(`${tag()} ${c('magenta', '💭 thinking')} ${c('dim', clipped)}\n`)
       } else if (block.type === 'tool_use') {
         const name = String(block.name ?? 'tool')
         const id = String(block.id ?? '')
@@ -193,6 +225,13 @@ function handleLine(line: string): void {
         process.stdout.write(`${tag()} ${toolLabel(name)} ${summary}\n`)
       }
     }
+    return
+  }
+
+  // Claude Code emits periodic rate-limit pings and SessionStart hook chatter.
+  // Neither is actionable for the operator watching the tab — drop silently.
+  if (type === 'rate_limit_event') return
+  if (type === 'system' && (msg.subtype === 'hook_started' || msg.subtype === 'hook_response')) {
     return
   }
 
@@ -237,13 +276,17 @@ function handleLine(line: string): void {
     const cacheCreate = Number(usage?.cache_creation_input_tokens ?? 0)
     const turns = Number(msg.num_turns ?? 0)
     const cost = Number(msg.total_cost_usd ?? 0)
+    // Pro/Max subscription users aren't billed `total_cost_usd` — it's the
+    // API-equivalent price Claude Code prints regardless of plan. Hide it by
+    // default; operators who want it can opt in with CANARY_HEAL_SHOW_COST=1.
+    const showCost = process.env.CANARY_HEAL_SHOW_COST === '1'
     if (inTok || outTok || turns || cost) {
       const parts: string[] = [`${inTok} in / ${outTok} out`]
       if (cacheRead || cacheCreate) {
         parts.push(`${cacheRead} cache read · ${cacheCreate} cache created`)
       }
       if (turns > 0) parts.push(`${turns} turn${turns === 1 ? '' : 's'}`)
-      if (cost > 0) parts.push(`$${cost.toFixed(4)}`)
+      if (cost > 0 && showCost) parts.push(`$${cost.toFixed(4)}`)
       process.stdout.write(`       ${c('dim', parts.join(' · '))}\n`)
     }
     return
