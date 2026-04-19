@@ -1,6 +1,7 @@
 import fs from 'fs'
 import path from 'path'
 import { getProjectRoot } from '../shared/runtime/project-root'
+import { getInstalledPackageVersion, writeStamp } from '../shared/runtime/upgrade-check'
 
 const MARKER_START = '<!-- managed:canary-lab:start -->'
 const MARKER_END = '<!-- managed:canary-lab:end -->'
@@ -182,6 +183,12 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
       /* don't break upgrade if package.json is malformed */
     }
   }
+
+  // Stamp the project with the installed version so `canary-lab run` can
+  // detect drift on future invocations (npm update won't trigger postinstall
+  // reliably, so the runner itself nudges users who fall behind).
+  const installedVersion = getInstalledPackageVersion()
+  if (installedVersion) writeStamp(projectRoot, installedVersion)
 
   if (updated > 0) {
     log(`\n  Canary Lab: upgraded ${updated} managed file${updated === 1 ? '' : 's'}.`, opts)
