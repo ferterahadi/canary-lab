@@ -2,7 +2,7 @@ import fs from 'fs'
 import path from 'path'
 import { execFileSync } from 'child_process'
 
-function resolveFirstExisting(pathsToTry: string[]): string {
+export function resolveFirstExisting(pathsToTry: string[]): string {
   const match = pathsToTry.find((candidate) => fs.existsSync(candidate))
   if (!match) {
     throw new Error(`Could not resolve any expected path: ${pathsToTry.join(', ')}`)
@@ -24,12 +24,20 @@ function getTemplateRoot(): string {
   ])
 }
 
-function copyDir(sourceDir: string, targetDir: string): void {
+// npm pack strips `.gitignore` from published tarballs (a long-standing npm
+// behavior to prevent accidentally shipping ignore rules). The template
+// stores it as `gitignore` (no dot) and we restore the leading dot on copy.
+const TEMPLATE_RENAMES: Record<string, string> = {
+  gitignore: '.gitignore',
+}
+
+export function copyDir(sourceDir: string, targetDir: string): void {
   fs.mkdirSync(targetDir, { recursive: true })
 
   for (const entry of fs.readdirSync(sourceDir, { withFileTypes: true })) {
     const sourcePath = path.join(sourceDir, entry.name)
-    const targetPath = path.join(targetDir, entry.name)
+    const targetName = TEMPLATE_RENAMES[entry.name] ?? entry.name
+    const targetPath = path.join(targetDir, targetName)
 
     if (entry.isDirectory()) {
       copyDir(sourcePath, targetPath)
@@ -45,7 +53,7 @@ function readPackageVersion(): string {
   return JSON.parse(fs.readFileSync(pkgPath, 'utf-8')).version
 }
 
-function parseArgs(args: string[]): { folder: string; packageSpec: string } {
+export function parseArgs(args: string[]): { folder: string; packageSpec: string } {
   const folder = args[0]
   if (!folder) {
     console.error('Usage: canary-lab init <folder> [--package-spec <spec>]')
@@ -69,7 +77,7 @@ function parseArgs(args: string[]): { folder: string; packageSpec: string } {
   return { folder, packageSpec }
 }
 
-function buildPackageJson(projectName: string, packageSpec: string): string {
+export function buildPackageJson(projectName: string, packageSpec: string): string {
   return JSON.stringify(
     {
       name: projectName,

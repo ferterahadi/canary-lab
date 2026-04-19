@@ -1,6 +1,6 @@
 {
   "name": "canary-lab",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "E2E test scaffolder and runner with agent-assisted self-fixing workflows",
   "keywords": [
     "playwright",
@@ -51,11 +51,13 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json && node tools/prepare-assets.mjs",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
     "canary-lab:run": "node dist/scripts/cli.js run",
     "canary-lab:env": "node dist/scripts/cli.js env",
     "canary-lab:new-feature": "node dist/scripts/cli.js new-feature",
     "prepack": "npm run build",
-    "pack:check": "node tools/pack-check.mjs",
     "smoke:pack": "node tools/smoke-pack.mjs",
     "publish:package": "node tools/publish-package.mjs",
     "changelog": "node tools/generate-changelog.mjs",
@@ -65,8 +67,10 @@
   },
   "devDependencies": {
     "@types/node": "^25.5.2",
+    "@vitest/coverage-v8": "^4.1.4",
     "tsx": "^4.20.3",
-    "typescript": "^5.9.2"
+    "typescript": "^5.9.2",
+    "vitest": "^4.1.4"
   },
   "dependencies": {
     "@playwright/test": "^1.54.2",

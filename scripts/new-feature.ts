@@ -2,7 +2,11 @@ import fs from 'fs'
 import path from 'path'
 import { getFeaturesDir } from '../shared/runtime/project-root'
 
-function buildFeatureConfig(name: string, description: string): string {
+export function isValidFeatureName(name: string): boolean {
+  return /^[a-z][a-z0-9_]*$/.test(name)
+}
+
+export function buildFeatureConfig(name: string, description: string): string {
   return `const config = {
   name: '${name}',
   description: '${description}',
@@ -31,7 +35,7 @@ module.exports = { config }
 `
 }
 
-function buildPlaywrightConfig(): string {
+export function buildPlaywrightConfig(): string {
   return `import { defineConfig } from '@playwright/test'
 import { baseConfig } from 'canary-lab/feature-support/playwright-base'
 
@@ -39,7 +43,7 @@ export default defineConfig({ ...baseConfig })
 `
 }
 
-function buildFeatureConfigTs(): string {
+export function buildFeatureConfigTs(): string {
   return `import path from 'node:path'
 import { config as loadDotenv } from 'dotenv'
 
@@ -49,7 +53,7 @@ export const GATEWAY_URL = process.env.GATEWAY_URL ?? 'http://localhost:3000'
 `
 }
 
-function buildEnvsetsConfig(name: string): string {
+export function buildEnvsetsConfig(name: string): string {
   return JSON.stringify(
     {
       appRoots: {},
@@ -70,7 +74,7 @@ function buildEnvsetsConfig(name: string): string {
   ) + '\n'
 }
 
-function buildSpec(name: string): string {
+export function buildSpec(name: string): string {
   return `import { test, expect } from 'canary-lab/feature-support/log-marker-fixture'
 
 test.describe('${name}', () => {
@@ -90,7 +94,7 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
     process.exit(1)
   }
 
-  if (!/^[a-z][a-z0-9_]*$/.test(name)) {
+  if (!isValidFeatureName(name)) {
     console.error(
       `Invalid feature name "${name}". Use snake_case (e.g. cns_webhooks).`,
     )

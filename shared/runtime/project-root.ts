@@ -1,7 +1,7 @@
 import fs from 'fs'
 import path from 'path'
 
-function looksLikeProjectRoot(candidate: string): boolean {
+export function looksLikeProjectRoot(candidate: string): boolean {
   return fs.existsSync(path.join(candidate, 'features'))
 }
 

@@ -1,147 +1,63 @@
 ---
 name: Canary Lab Self-Fixing Loop
-description: Phased Claude workflow for diagnosing and fixing failing Canary Lab tests. Triggered when the user says "self heal".
+description: Extension material for the auto-heal flow — fallback path, journal schema, and multi-iteration evaluation. Also the entry point when the user types "self heal" manually.
 type: skill
 ---
 
 # Self-Fixing Loop
 
-## Trigger Phrase
+This file extends `.claude/skills/heal-loop.md`. Read `heal-loop.md` first for the rules and happy-path steps; open this file only when:
 
-If the user types:
+- `failed[].logs[<svc>]` is empty for every failure, or distinctive literals don't localize the bug → **Fallback path** below.
+- You're on cycle 2+ and need the evaluation loop → **Evaluate** below.
+- The user typed `self heal` manually (no auto-heal prompt was loaded) → start here, then follow `heal-loop.md` for the happy-path steps.
 
-```text
-self heal
-```
+## Fallback path (extends Step 4 of heal-loop)
 
-follow this workflow.
+Use this only when the triangulation in `heal-loop.md` can't localize the bug.
 
-## Start State
+1. **Raw log by slug.** `sed -n '/<test-case-SLUG>/,/<\/test-case-SLUG>/p' logs/svc-*.log`, with `SLUG` = `failed[].name`. Svc logs are wiped on every signal, so output is this iteration only.
+2. **If `sed` is also empty — instrument, then fix.** `grep` to locate the handler, add `console.log` at decision points (inputs, branch taken, helper returns), write `.restart` with a `gather-evidence` hypothesis, and exit. On the next iteration, re-run `sed` and fix from real evidence. Remove the diagnostic logs in the same iteration that lands the fix.
 
-- The user should already have run `npx canary-lab run`
-- The runner should still be open in watch mode
-- Tests have failed and `logs/e2e-summary.json` exists
+## Journal schema (Step 5 of heal-loop)
 
-## Rules (apply throughout)
-
-- Fix the implementation, not the test
-- Do not "solve" a failure by changing the assertion
-- Stay in this session — do not tell the user to open a new session
-- Prefer **adding logs** over guessing. If the existing logs don't prove your hypothesis, instrument the code first, re-run, and read the new output before editing a fix.
-
----
-
-## Phase 0 — Resume or Start Fresh
-
-Check if prior diagnostic context exists:
-
-1. Read `logs/diagnosis-journal.json` (if it exists)
-2. Read `logs/signal-history.json` (if it exists)
-
-If either file exists, summarize what was already tried and what the outcomes were. **Do NOT re-try a hypothesis that already failed.** Build on prior work.
-
-If neither file exists, this is a fresh start — proceed to Phase 1.
-
----
-
-## Phase 1 — Explore (do NOT edit any files yet)
-
-Build a mental model of why the tests fail before touching any code.
-
-1. **Read `logs/e2e-summary.json`** — identify which tests failed and their error messages
-2. **Read the test file** — understand what each failing test asserts (the expected behavior)
-3. **Read the implementation code** the test exercises (server, API handler, etc.)
-4. **Trace the request path** end-to-end: test helper -> HTTP call -> handler -> response
-5. **Read relevant service logs** (`logs/svc-*.log`) — look for the log output between the test's XML markers (`<test-case-SLUG>...</test-case-SLUG>`)
-6. **If logs don't reveal enough, add instrumentation first** — before writing a fix, add `console.log` statements in the implementation to expose:
-   - Input values at suspected decision points
-   - Which branch was taken in conditionals
-   - Values returned from helpers, DB/HTTP calls, or parsers
-   - The shape of objects just before the line you suspect
-
-   Then signal a restart (see Phase 2) and read the new `logs/svc-*.log` output. Log first, hypothesize second. Record what you logged in the journal's `hypothesis` field so future iterations know what evidence you gathered.
-
-   **Clean up diagnostic logs** in the same iteration that lands the real fix — do not leave them in the implementation.
-
-After exploring (and instrumenting if needed), form a hypothesis: what specific line(s) of code cause each failure and why?
-
-**Write your hypothesis to `logs/diagnosis-journal.json` BEFORE making any edit:**
+The single entry you append to `logs/diagnosis-journal.json` (create if missing) covers *all* grouped failures:
 
 ```json
 {
-  "feature": "<feature-name>",
+  "feature": "<feature>",
   "iterations": [
     {
       "iteration": 1,
-      "timestamp": "<ISO timestamp>",
-      "failingTests": ["test-case-slug-here"],
-      "hypothesis": "<what you think is wrong and why>",
-      "filesExamined": ["path/to/file.js:lines"],
-      "fix": null,
-      "signal": null,
+      "timestamp": "<ISO>",
+      "failingTests": ["<slug-a>", "<slug-b>"],
+      "hypothesis": "<what is wrong and why>",
+      "filesExamined": ["path/to/file.ts:lines"],
+      "fix": { "file": "path/to/file.ts", "description": "<what changed>" },
+      "signal": "restart",
       "outcome": null
     }
   ]
 }
 ```
 
-If the journal already exists, append a new entry to the `iterations` array.
+`outcome` stays `null` until the next cycle evaluates it (see below).
 
----
+## Evaluate (used by heal-loop Step 2 on cycle 2+)
 
-## Phase 2 — Fix
+At the start of each auto-heal cycle, before forming a new hypothesis, read the updated `logs/e2e-summary.json` and set the **previous** iteration's `outcome`:
 
-Now edit the implementation code to address your hypothesis.
+- `"all_passed"` — every slug in the prior `expectation` now passes. Tell the user, stop.
+- `"partial"` — some of those slugs pass, others still fail. Add a short note. Continue with a new iteration for the remaining failures.
+- `"no_change"` — same failure set. Prior hypothesis was wrong; pick a different literal or handler.
+- `"regression"` — new tests are failing that weren't before. Revert or adjust.
 
-1. Make the minimal fix needed
-2. Update the journal entry's `fix` field:
+The runner stops auto-heal after 3 consecutive cycles on the same failure set. If you reach that point manually, produce a brief diagnosis report (what you tried, what you learned, suspected root cause) and ask for guidance instead of retrying.
 
-```json
-"fix": {
-  "file": "path/to/file.js",
-  "description": "Brief description of what you changed"
-}
-```
+## Manual entry (`self heal` typed in chat)
 
-3. Signal the runner with context — write JSON to the signal file:
+No auto-heal prompt was loaded, so start here:
 
-If running service code changed:
-
-```bash
-echo '{"hypothesis":"<your hypothesis>","filesChanged":["path/to/file.js"],"expectation":"<which test should now pass>"}' > logs/.restart
-```
-
-If no restart is needed (e.g., only test config changed):
-
-```bash
-echo '{"hypothesis":"<your hypothesis>","filesChanged":["path/to/file.js"],"expectation":"<which test should now pass>"}' > logs/.rerun
-```
-
-4. Update the journal entry's `signal` field to `"restart"` or `"rerun"`
-
----
-
-## Phase 3 — Evaluate
-
-After the runner re-runs and new results appear:
-
-1. Read the updated `logs/e2e-summary.json`
-2. Update the journal entry's `outcome` field:
-   - `"all_passed"` if everything passes
-   - `"partial"` with notes on what still fails
-   - `"no_change"` if the same tests still fail
-   - `"regression"` if new tests broke
-
-3. **If all tests pass** — done. Tell the user.
-4. **If tests still fail** — return to Phase 1 with the new information. Your prior hypothesis was wrong or incomplete — the journal ensures you don't repeat it.
-5. **After 3 failed iterations** — stop and produce a detailed diagnosis report explaining what you've tried, what you've learned, and what you think the root cause is. Ask the user for guidance.
-
----
-
-## Copy-Paste Prompt
-
-```text
-Please read CLAUDE.md and .claude/skills/self-fixing-loop.md first.
-The Canary Lab runner is already in watch mode.
-Follow the phased workflow: explore the failure context, form a hypothesis, fix the implementation, and signal the runner. Check for prior diagnostic context in logs/diagnosis-journal.json before starting.
-```
+1. Follow the Rules + all Steps in `.claude/skills/heal-loop.md`.
+2. If you hit the edge cases above, fall through to the Fallback path.
+3. After writing the signal file, do **not** exit the chat — the user ran you manually, so report what you did and wait for the next instruction.

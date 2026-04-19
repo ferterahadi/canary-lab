@@ -8,7 +8,7 @@ import type {
 } from '@playwright/test/reporter'
 import { LOGS_DIR } from './paths'
 
-function slugify(title: string): string {
+export function slugify(title: string): string {
   return title
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')

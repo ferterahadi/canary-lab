@@ -2,6 +2,27 @@
 
 All notable changes to Canary Lab are listed here. We try to keep the language plain so anyone can follow along.
 
+## 0.7.0 — 2026-04-19
+
+Small, targeted improvements to the auto-heal loop.
+
+> **How to apply this release to an existing project:** run `npx canary-lab upgrade` inside your project. A plain `npm install` / `npm update` won't refresh the scaffolded files (skills, `CLAUDE.md` / `AGENTS.md` blocks) — the upgrade command is what actually copies the new templates into your project.
+
+### Improvements
+
+- **Heal-agent tab reuses its iTerm tab between cycles.** Instead of closing and reopening, Canary Lab interrupts the previous run and reuses the same tab. Your scrollback stays intact.
+- **Banner in the heal-agent tab** makes it clear that model and reasoning settings come from your own Claude / Codex CLI profile — Canary Lab doesn't override them.
+- **Cleaner per-run service logs.** Each `logs/svc-*.log` is cleared at the start of every run, so it only contains the current iteration's output.
+- **Codex heal output is easier to follow.** Common shell commands (`sed`, `cat`, `rg`, `grep`, `ls`, `find`) now render the same way as Claude's output instead of raw shell lines.
+- **More reliable iTerm tab cleanup.** Canary Lab can still find and close heal-agent and service tabs after their titles change. Empty iTerm windows are closed automatically.
+- **Faster, cheaper heal cycles.** The instructions the heal agent reads are now shorter and split into a short always-on prompt plus a fallback reference, so the common case uses fewer tokens and finishes faster. The agent is also explicitly told to fix the app, not the test, and to skip cleanly when there's nothing to heal.
+
+### Fixes
+
+- Scaffolded projects now get their `.gitignore` correctly — previously it was being stripped from the published package.
+
+---
+
 ## 0.6.0 — 2026-04-17
 
 The big theme: **when a test fails, you get help automatically**.
