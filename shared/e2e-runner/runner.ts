@@ -41,7 +41,7 @@ import {
   type HealSessionMode,
 } from './auto-heal'
 
-function safeReadFile(file: string): string | null {
+export function safeReadFile(file: string): string | null {
   try {
     return fs.readFileSync(file, 'utf-8')
   } catch {
@@ -56,18 +56,18 @@ interface AutoHealConfig {
   sessionMode: HealSessionMode
 }
 
-const AUTO_HEAL_MAX_CYCLES = 3
+export const AUTO_HEAL_MAX_CYCLES = 3
 
 // ─── Paths (local to runner) ────────────────────────────────────────────────
 const SWITCH_SCRIPT = path.join(__dirname, '../env-switcher/switch.js')
 const SUMMARY_REPORTER = path.resolve(__dirname, 'summary-reporter.js')
 
 // ─── Readline helpers (same pattern as shared/launcher/index.ts) ────────────
-function prompt(rl: readline.Interface, question: string): Promise<string> {
+export function prompt(rl: readline.Interface, question: string): Promise<string> {
   return new Promise((resolve) => rl.question(question, resolve))
 }
 
-async function selectOption(
+export async function selectOption(
   rl: readline.Interface,
   label: string,
   options: string[],
@@ -108,7 +108,7 @@ export function discoverFeatures(): FeatureConfig[] {
 }
 
 // ─── Repo check (same as shared/launcher/index.ts) ─────────────────────────
-function checkRepos(feature: FeatureConfig): boolean {
+export function checkRepos(feature: FeatureConfig): boolean {
   if (!feature.repos?.length) return true
   let allOk = true
   for (const repo of feature.repos) {
@@ -193,9 +193,9 @@ export function truncateServiceLogs(services: ServiceInfo[]): void {
 // them precisely (zsh auto-title overwrites `name of s`, so name-prefix
 // matching is unreliable across restarts). Persisted to disk so a fresh
 // runner process can still close tabs from a prior process.
-const itermSessionIds = loadSessionIds(ITERM_SESSION_IDS_PATH)
+export const itermSessionIds = loadSessionIds(ITERM_SESSION_IDS_PATH)
 
-function loadSessionIds(file: string): Map<string, string> {
+export function loadSessionIds(file: string): Map<string, string> {
   try {
     const raw = fs.readFileSync(file, 'utf-8')
     const obj = JSON.parse(raw) as Record<string, string>
@@ -205,7 +205,7 @@ function loadSessionIds(file: string): Map<string, string> {
   }
 }
 
-function saveSessionIds(file: string, ids: Map<string, string>): void {
+export function saveSessionIds(file: string, ids: Map<string, string>): void {
   try {
     fs.mkdirSync(path.dirname(file), { recursive: true })
     fs.writeFileSync(file, JSON.stringify(Object.fromEntries(ids), null, 2))
@@ -214,7 +214,7 @@ function saveSessionIds(file: string, ids: Map<string, string>): void {
   }
 }
 
-function openTabs(
+export function openTabs(
   terminal: TerminalChoice,
   tabs: Array<{ dir: string; command: string; name: string }>,
   label: string,
@@ -249,7 +249,7 @@ function openTabs(
   }
 }
 
-async function launchServices(
+export async function launchServices(
   services: ServiceInfo[],
   terminal: TerminalChoice,
 ): Promise<void> {
@@ -280,7 +280,7 @@ async function launchServices(
   openTabs(terminal, tabs, `  Opening ${terminal} tabs for ${tabs.length} service(s)...`)
 }
 
-async function pollHealthChecks(
+export async function pollHealthChecks(
   services: ServiceInfo[],
   timeoutMs = 120_000,
 ): Promise<void> {
@@ -417,7 +417,7 @@ export function resolveRunningPid(svc: ServiceInfo): number | null {
   return null
 }
 
-async function restartAllServices(
+export async function restartAllServices(
   services: ServiceInfo[],
   terminal: TerminalChoice,
 ): Promise<void> {
@@ -452,7 +452,7 @@ async function restartAllServices(
 // ─── Playwright ─────────────────────────────────────────────────────────────
 const RUN_TIMEOUT = 10 * 60 * 1000 // 10 minutes — safety net for hung runs
 
-function runPlaywright(featureDir: string, headed: boolean): Promise<number> {
+export function runPlaywright(featureDir: string, headed: boolean): Promise<number> {
   return new Promise((resolve, reject) => {
     const playwrightArgs = [
       'playwright',
@@ -583,7 +583,7 @@ export function readFailureSignature(): string {
   }
 }
 
-interface HealCycleState {
+export interface HealCycleState {
   spawnCount: number
   strikeCount: number
   lastSignature: string
@@ -603,7 +603,7 @@ export function printManualOptions(autoHealConfigured: boolean): void {
   console.log('')
 }
 
-async function maybeAutoHeal(
+export async function maybeAutoHeal(
   autoHeal: AutoHealConfig,
   state: HealCycleState,
   terminal: TerminalChoice,

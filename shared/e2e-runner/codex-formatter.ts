@@ -74,6 +74,120 @@ function cleanCommand(cmd: string): string {
   return m ? m[1] : cmd
 }
 
+interface ParsedCommand {
+  icon: string
+  tool: string
+  label: string
+  // When true, a non-zero exit should be rendered as "not found" rather than a
+  // scary error. Used for `test -f ... && <read>` guarded reads where the guard
+  // failing just means the file isn't there.
+  guardedRead: boolean
+}
+
+// Map common shell invocations into Read/Grep/Glob pseudo-tools so the codex
+// stream reads like the claude stream. Anything unrecognized falls through to a
+// raw `$ <cmd>` line (same as before).
+function parseCommand(raw: string): ParsedCommand {
+  let cmd = raw.trim()
+  let guarded = false
+
+  // Drop a leading `test -f <path> && ` (or `test -e`) guard — codex uses it to
+  // avoid sed errors on missing files. The read itself is the meaningful part.
+  const guard = cmd.match(/^test\s+-[fe]\s+\S+\s+&&\s+(.+)$/s)
+  if (guard) {
+    cmd = guard[1]
+    guarded = true
+  }
+
+  // sed -n 'N,Mp' <file>  →  Read with line range
+  const sedRange = cmd.match(/^sed\s+-n\s+['"](\d+),(\d+)p['"]\s+(\S+)$/)
+  if (sedRange) {
+    const [, from, to, file] = sedRange
+    return {
+      icon: '📖',
+      tool: 'Read',
+      label: `${relPath(file)} ${c('dim', `L${from}-${to}`)}`,
+      guardedRead: guarded,
+    }
+  }
+
+  // sed -n '/PAT/,/PAT/p' <file>  →  Read (pattern slice)
+  const sedPat = cmd.match(/^sed\s+-n\s+['"]\/.+?\/,\/.+?\/p['"]\s+(.+)$/)
+  if (sedPat) {
+    return {
+      icon: '📖',
+      tool: 'Read',
+      label: `${relPath(sedPat[1])} ${c('dim', '(pattern slice)')}`,
+      guardedRead: guarded,
+    }
+  }
+
+  // cat / head / tail <file>
+  const catMatch = cmd.match(/^(cat|head|tail)(?:\s+-n?\s*\d+)?\s+(\S+)$/)
+  if (catMatch) {
+    return {
+      icon: '📖',
+      tool: 'Read',
+      label: relPath(catMatch[2]),
+      guardedRead: guarded,
+    }
+  }
+
+  // rg / grep — split flags from pattern + path.
+  const rgMatch = cmd.match(/^(rg|grep)\s+(.+)$/s)
+  if (rgMatch) {
+    const args = rgMatch[2]
+    const patMatch = args.match(/['"]([^'"]+)['"]\s+(\S+)\s*$/)
+    if (patMatch) {
+      return {
+        icon: '🔍',
+        tool: 'Grep',
+        label: `${c('bold', patMatch[1])} in ${relPath(patMatch[2])}`,
+        guardedRead: guarded,
+      }
+    }
+    return {
+      icon: '🔍',
+      tool: 'Grep',
+      label: truncate(args, 140),
+      guardedRead: guarded,
+    }
+  }
+
+  // ls <path>
+  const lsMatch = cmd.match(/^ls(?:\s+-[a-zA-Z]+)*\s+(\S+)\s*$/)
+  if (lsMatch) {
+    return {
+      icon: '📂',
+      tool: 'List',
+      label: relPath(lsMatch[1]),
+      guardedRead: guarded,
+    }
+  }
+
+  // find <path> …
+  if (/^find\s/.test(cmd)) {
+    return {
+      icon: '🔍',
+      tool: 'Glob',
+      label: truncate(cmd.slice(5), 140),
+      guardedRead: guarded,
+    }
+  }
+
+  return {
+    icon: '$',
+    tool: 'Bash',
+    label: truncate(cmd, 160),
+    guardedRead: guarded,
+  }
+}
+
+function toolLabel(tool: string, icon: string): string {
+  if (tool === 'Bash') return c('cyan', '$')
+  return `${icon} ${c('cyan', tool.padEnd(6))}`
+}
+
 function quote(text: string): string {
   return text
     .trim()
@@ -113,13 +227,26 @@ function handleCompleted(item: AnyObj): void {
 
   if (type === 'command_execution') {
     const cmd = cleanCommand(String(item.command ?? ''))
+    const parsed = parseCommand(cmd)
     const exitCode = item.exit_code as number | null | undefined
     const output = String(item.aggregated_output ?? '')
-    const statusIcon =
-      exitCode === 0 ? c('green', '✓') : exitCode != null ? c('red', `✗ (exit ${exitCode})`) : c('yellow', '…')
-    process.stdout.write(`${tag()} ${c('cyan', '$')} ${truncate(cmd, 160)}\n`)
+    process.stdout.write(`${tag()} ${toolLabel(parsed.tool, parsed.icon)} ${parsed.label}\n`)
+
+    // Guarded reads (e.g. `test -f X && sed X`) exit 1 when the file is
+    // missing — surface that as "not found" instead of a red error.
+    if (exitCode !== 0 && parsed.guardedRead && !output.trim()) {
+      process.stdout.write(`       ${c('gray', '↳')} ${c('dim', 'not found')}\n`)
+      return
+    }
+
     const summary = summarizeOutput(output, 140)
-    process.stdout.write(`       ${statusIcon} ${summary}\n`)
+    if (exitCode === 0) {
+      process.stdout.write(`       ${c('gray', '↳')} ${summary}\n`)
+    } else if (exitCode != null) {
+      process.stdout.write(`       ${c('red', `✗ (exit ${exitCode})`)} ${summary}\n`)
+    } else {
+      process.stdout.write(`       ${c('yellow', '…')} ${summary}\n`)
+    }
     return
   }
 
@@ -128,7 +255,11 @@ function handleCompleted(item: AnyObj): void {
     for (const ch of changes) {
       const kind = String(ch.kind ?? 'update')
       const path = relPath(String(ch.path ?? ''))
-      process.stdout.write(`${tag()} ${c('cyan', '✏️ ')} ${kindIcon(kind)} ${c('bold', path)}\n`)
+      const tool = kind === 'add' ? 'Write' : kind === 'delete' ? 'Delete' : 'Edit'
+      process.stdout.write(
+        `${tag()} ✏️  ${c('cyan', tool.padEnd(6))} ${kindIcon(kind)} ${c('bold', path)}\n`,
+      )
+      process.stdout.write(`       ${c('gray', '↳')} ${c('green', '✓ applied')}\n`)
     }
     return
   }
@@ -216,6 +347,8 @@ export {
   truncate,
   summarizeOutput,
   cleanCommand,
+  parseCommand,
+  toolLabel,
   quote,
   kindIcon,
   handleCompleted,

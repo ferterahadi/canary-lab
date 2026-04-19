@@ -2,6 +2,7 @@ import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
+import { EventEmitter } from 'events'
 import type { FeatureConfig } from '../launcher/types'
 
 const tmpDirs: string[] = []
@@ -36,17 +37,54 @@ vi.mock('./paths', () => ({
 }))
 
 const execFileSync = vi.fn()
-vi.mock('child_process', () => ({ execFileSync, spawn: vi.fn() }))
+const spawn = vi.fn()
+vi.mock('child_process', () => ({ execFileSync, spawn }))
 
 // Silence iterm/terminal boundaries for any test that reaches them.
+const openItermTabs = vi.fn(() => [] as string[])
+const reuseItermTabs = vi.fn(() => false)
+const closeItermSessionsByPrefix = vi.fn()
+const closeItermSessionsByIds = vi.fn()
 vi.mock('../launcher/iterm', () => ({
-  openItermTabs: vi.fn(() => []),
-  closeItermSessionsByPrefix: vi.fn(),
-  closeItermSessionsByIds: vi.fn(),
+  openItermTabs,
+  reuseItermTabs,
+  closeItermSessionsByPrefix,
+  closeItermSessionsByIds,
 }))
+const openTerminalTabs = vi.fn()
+const closeTerminalTabsByPrefix = vi.fn()
 vi.mock('../launcher/terminal', () => ({
-  openTerminalTabs: vi.fn(),
-  closeTerminalTabsByPrefix: vi.fn(),
+  openTerminalTabs,
+  closeTerminalTabsByPrefix,
+}))
+
+// Partial mock of startup — keep real normalizeStartCommand/resolvePath so the
+// existing buildServiceList tests still exercise real logic; mock only isHealthy.
+const isHealthy = vi.fn(async () => true)
+vi.mock('../launcher/startup', async () => {
+  const actual = await vi.importActual<typeof import('../launcher/startup')>(
+    '../launcher/startup',
+  )
+  return { ...actual, isHealthy }
+})
+
+// auto-heal mocks for maybeAutoHeal tests.
+const spawnHealAgent = vi.fn()
+const closeLastHealAgentTab = vi.fn()
+const isAgentCliAvailable = vi.fn(() => true)
+const failureSignatureMock = vi.fn((failed: unknown) => {
+  if (!Array.isArray(failed)) return ''
+  return failed
+    .map((e) => (typeof e === 'string' ? e : (e as { name?: string }).name ?? ''))
+    .filter(Boolean)
+    .sort()
+    .join('|')
+})
+vi.mock('./auto-heal', () => ({
+  spawnHealAgent,
+  closeLastHealAgentTab,
+  isAgentCliAvailable,
+  failureSignature: failureSignatureMock,
 }))
 
 const {
@@ -68,15 +106,46 @@ const {
   printSummary,
   readFailureSignature,
   printManualOptions,
+  safeReadFile,
+  prompt,
+  selectOption,
+  checkRepos,
+  loadSessionIds,
+  saveSessionIds,
+  openTabs,
+  launchServices,
+  pollHealthChecks,
+  restartAllServices,
+  runPlaywright,
+  maybeAutoHeal,
+  AUTO_HEAL_MAX_CYCLES,
+  itermSessionIds,
 } = await import('./runner')
 
 beforeEach(() => {
   execFileSync.mockReset()
   execFileSync.mockImplementation(() => '')
+  spawn.mockReset()
+  openItermTabs.mockReset()
+  openItermTabs.mockReturnValue([])
+  reuseItermTabs.mockReset()
+  reuseItermTabs.mockReturnValue(false)
+  closeItermSessionsByPrefix.mockReset()
+  closeItermSessionsByIds.mockReset()
+  openTerminalTabs.mockReset()
+  closeTerminalTabsByPrefix.mockReset()
+  isHealthy.mockReset()
+  isHealthy.mockResolvedValue(true)
+  spawnHealAgent.mockReset()
+  closeLastHealAgentTab.mockReset()
+  isAgentCliAvailable.mockReset()
+  isAgentCliAvailable.mockReturnValue(true)
+  itermSessionIds.clear()
 })
 
 afterEach(() => {
   vi.restoreAllMocks()
+  vi.useRealTimers()
   // Clear logs/features between tests (but keep dirs).
   for (const entry of fs.readdirSync(LOGS_DIR)) {
     fs.rmSync(path.join(LOGS_DIR, entry), { recursive: true, force: true })
@@ -241,6 +310,10 @@ describe('parseFlags', () => {
     expect(parseFlags(['--heal-session', 'new']).healSession).toBe('new')
     expect(parseFlags(['--heal-session=resume']).healSession).toBe('resume')
     expect(() => parseFlags(['--heal-session', 'maybe'])).toThrow(/--heal-session/)
+  })
+
+  it('throws on unknown flag', () => {
+    expect(() => parseFlags(['--unknown'])).toThrow(/Unknown flag/)
   })
 })
 
@@ -538,5 +611,482 @@ describe('readFailureSignature', () => {
   it('returns empty when JSON is malformed', () => {
     fs.writeFileSync(SUMMARY_PATH, 'not-json')
     expect(readFailureSignature()).toBe('')
+  })
+})
+
+describe('safeReadFile', () => {
+  it('returns file contents when readable', () => {
+    const dir = mkTmp()
+    const p = path.join(dir, 'x.txt')
+    fs.writeFileSync(p, 'hello')
+    expect(safeReadFile(p)).toBe('hello')
+  })
+
+  it('returns null when file does not exist', () => {
+    expect(safeReadFile('/tmp/__does_not_exist__.xyz')).toBeNull()
+  })
+})
+
+describe('prompt', () => {
+  it('resolves with the answer passed to rl.question', async () => {
+    const rl = {
+      question: (_q: string, cb: (a: string) => void) => cb('answer'),
+    } as any
+    await expect(prompt(rl, 'Q: ')).resolves.toBe('answer')
+  })
+})
+
+describe('selectOption', () => {
+  it('returns the chosen option on valid input', async () => {
+    vi.spyOn(console, 'log').mockImplementation(() => {})
+    const answers = ['2']
+    const rl = {
+      question: (_q: string, cb: (a: string) => void) => cb(answers.shift()!),
+    } as any
+    const result = await selectOption(rl, 'pick', ['a', 'b', 'c'])
+    expect(result).toBe('b')
+  })
+
+  it('re-prompts on out-of-range input, then accepts valid input', async () => {
+    vi.spyOn(console, 'log').mockImplementation(() => {})
+    const answers = ['9', '0', 'abc', '1']
+    const rl = {
+      question: (_q: string, cb: (a: string) => void) => cb(answers.shift()!),
+    } as any
+    const result = await selectOption(rl, 'pick', ['x', 'y'])
+    expect(result).toBe('x')
+    expect(answers).toEqual([])
+  })
+})
+
+describe('checkRepos', () => {
+  it('returns true when feature has no repos', () => {
+    expect(checkRepos({ name: 'f', repos: [] } as any)).toBe(true)
+    expect(checkRepos({ name: 'f' } as any)).toBe(true)
+  })
+
+  it('returns true when all repos exist', () => {
+    const dir = mkTmp()
+    const repoDir = path.join(dir, 'repo')
+    fs.mkdirSync(repoDir)
+    const feat = {
+      repos: [{ name: 'r', localPath: repoDir, startCommands: [] }],
+    } as any
+    expect(checkRepos(feat)).toBe(true)
+  })
+
+  it('returns false when a repo is missing and logs clone hint', () => {
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const feat = {
+      repos: [
+        {
+          name: 'missing-repo',
+          localPath: '/definitely/does/not/exist',
+          startCommands: [],
+          cloneUrl: 'git@github.com:org/missing-repo.git',
+        },
+      ],
+    } as any
+    expect(checkRepos(feat)).toBe(false)
+    const joined = errSpy.mock.calls.flat().join('\n')
+    expect(joined).toContain('Missing repo: missing-repo')
+    expect(joined).toContain('git clone git@github.com:org/missing-repo.git')
+  })
+
+  it('omits clone instructions when repo has no cloneUrl', () => {
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const feat = {
+      repos: [{ name: 'r', localPath: '/nope', startCommands: [] }],
+    } as any
+    expect(checkRepos(feat)).toBe(false)
+    expect(errSpy.mock.calls.flat().join('\n')).not.toContain('git clone')
+  })
+})
+
+describe('loadSessionIds / saveSessionIds', () => {
+  it('round-trips a Map via JSON', () => {
+    const file = path.join(mkTmp(), 'ids.json')
+    const m = new Map([['a', 'A1'], ['b', 'B1']])
+    saveSessionIds(file, m)
+    const loaded = loadSessionIds(file)
+    expect(Array.from(loaded.entries()).sort()).toEqual([
+      ['a', 'A1'],
+      ['b', 'B1'],
+    ])
+  })
+
+  it('returns an empty Map for missing or malformed files', () => {
+    expect(loadSessionIds('/tmp/__missing__ids.json').size).toBe(0)
+    const file = path.join(mkTmp(), 'ids.json')
+    fs.writeFileSync(file, 'not-json')
+    expect(loadSessionIds(file).size).toBe(0)
+  })
+
+  it('saveSessionIds is non-fatal when mkdir/write fails', () => {
+    const spy = vi.spyOn(fs, 'mkdirSync').mockImplementation(() => {
+      throw new Error('EACCES')
+    })
+    expect(() =>
+      saveSessionIds('/tmp/cl-noperms/ids.json', new Map([['a', 'A']])),
+    ).not.toThrow()
+    spy.mockRestore()
+  })
+})
+
+describe('openTabs', () => {
+  it('Terminal branch closes by prefix and opens fresh tabs', () => {
+    const tabs = [{ dir: '/', command: 'echo 1', name: 'svc' }]
+    openTabs('Terminal', tabs, 'label')
+    expect(closeTerminalTabsByPrefix).toHaveBeenCalledWith(['svc'])
+    expect(openTerminalTabs).toHaveBeenCalledWith(tabs, 'label')
+    expect(openItermTabs).not.toHaveBeenCalled()
+  })
+
+  it('iTerm fresh run closes by prefix and opens, persisting ids', () => {
+    openItermTabs.mockReturnValueOnce(['SID-A', 'SID-B'])
+    const tabs = [
+      { dir: '/', command: 'a', name: 'svc-a' },
+      { dir: '/', command: 'b', name: 'svc-b' },
+    ]
+    openTabs('iTerm', tabs, 'label')
+    expect(reuseItermTabs).not.toHaveBeenCalled() // map empty → skipped
+    expect(closeItermSessionsByIds).not.toHaveBeenCalled() // no known ids yet
+    expect(closeItermSessionsByPrefix).toHaveBeenCalledWith(['svc-a', 'svc-b'])
+    expect(openItermTabs).toHaveBeenCalledWith(tabs, 'label')
+    expect(itermSessionIds.get('svc-a')).toBe('SID-A')
+    expect(itermSessionIds.get('svc-b')).toBe('SID-B')
+  })
+
+  it('iTerm reuses tabs when all names have cached ids and reuse succeeds', () => {
+    itermSessionIds.set('svc-a', 'SID-A')
+    reuseItermTabs.mockReturnValueOnce(true)
+    const tabs = [{ dir: '/', command: 'a', name: 'svc-a' }]
+    openTabs('iTerm', tabs, 'label')
+    expect(reuseItermTabs).toHaveBeenCalledWith(['SID-A'], tabs, 'label')
+    expect(openItermTabs).not.toHaveBeenCalled()
+    expect(closeItermSessionsByIds).not.toHaveBeenCalled()
+  })
+
+  it('iTerm falls back to close+open when reuse returns false', () => {
+    itermSessionIds.set('svc-a', 'OLD-A')
+    reuseItermTabs.mockReturnValueOnce(false)
+    openItermTabs.mockReturnValueOnce(['NEW-A'])
+    const tabs = [{ dir: '/', command: 'a', name: 'svc-a' }]
+    openTabs('iTerm', tabs, 'label')
+    expect(closeItermSessionsByIds).toHaveBeenCalledWith(['OLD-A'])
+    expect(closeItermSessionsByPrefix).toHaveBeenCalledWith(['svc-a'])
+    expect(openItermTabs).toHaveBeenCalledWith(tabs, 'label')
+    expect(itermSessionIds.get('svc-a')).toBe('NEW-A')
+  })
+})
+
+describe('launchServices', () => {
+  it('is a no-op when service list is empty', async () => {
+    await launchServices([], 'iTerm')
+    expect(openItermTabs).not.toHaveBeenCalled()
+    expect(openTerminalTabs).not.toHaveBeenCalled()
+  })
+
+  it('kills existing processes, truncates logs, and opens tabs', async () => {
+    vi.useFakeTimers()
+    // A pid file exists and corresponds to an alive process.
+    fs.writeFileSync(path.join(PIDS_DIR, 'svc-a.pid'), '555')
+    const killSpy = vi
+      .spyOn(process, 'kill')
+      .mockImplementation(((_: number, sig: any) => {
+        if (sig === 0) return true // always "alive" for the isProcessAlive check
+        return true
+      }) as any)
+    vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    vi.spyOn(console, 'log').mockImplementation(() => {})
+
+    const dir = mkTmp()
+    const logPath = path.join(dir, 'svc-a.log')
+    fs.writeFileSync(logPath, 'pre-existing content')
+    const svc = {
+      name: 'svc-a',
+      safeName: 'svc-a',
+      logPath,
+      command: 'node a',
+      cwd: '/',
+    } as any
+    openItermTabs.mockReturnValueOnce(['SID-A'])
+
+    const p = launchServices([svc], 'iTerm')
+    // Drive the 5s graceful-kill wait.
+    await vi.advanceTimersByTimeAsync(5500)
+    await p
+
+    expect(killSpy).toHaveBeenCalledWith(555, 'SIGTERM')
+    expect(fs.readFileSync(logPath, 'utf-8')).toBe('')
+    expect(openItermTabs).toHaveBeenCalledOnce()
+  })
+})
+
+describe('pollHealthChecks', () => {
+  it('resolves immediately when no service has a healthUrl', async () => {
+    vi.spyOn(console, 'log').mockImplementation(() => {})
+    await expect(
+      pollHealthChecks([{ name: 'x', safeName: 'x', logPath: '/', command: '', cwd: '/' } as any]),
+    ).resolves.toBeUndefined()
+    expect(isHealthy).not.toHaveBeenCalled()
+  })
+
+  it('resolves when all services become healthy', async () => {
+    vi.spyOn(console, 'log').mockImplementation(() => {})
+    vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    isHealthy.mockResolvedValue(true)
+    await pollHealthChecks([
+      {
+        name: 's',
+        safeName: 's',
+        logPath: '/',
+        command: '',
+        cwd: '/',
+        healthUrl: 'http://localhost:3000/',
+      } as any,
+    ])
+    expect(isHealthy).toHaveBeenCalled()
+  })
+
+  it('throws a timeout error when a service stays unhealthy past the deadline', async () => {
+    vi.spyOn(console, 'log').mockImplementation(() => {})
+    vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    isHealthy.mockResolvedValue(false)
+    await expect(
+      pollHealthChecks(
+        [
+          {
+            name: 's',
+            safeName: 's',
+            logPath: '/',
+            command: '',
+            cwd: '/',
+            healthUrl: 'http://localhost:3000/',
+          } as any,
+        ],
+        10, // 10 ms deadline — shorter than the 2000 ms poll sleep
+      ),
+    ).rejects.toThrow(/Health check timed out for s/)
+  })
+})
+
+describe('restartAllServices', () => {
+  it('kills existing, truncates logs, opens tabs, polls health', async () => {
+    vi.useFakeTimers()
+    vi.spyOn(console, 'log').mockImplementation(() => {})
+    vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    vi.spyOn(process, 'kill').mockImplementation(((_: number, sig: any) => {
+      if (sig === 0) return true
+      return true
+    }) as any)
+    isHealthy.mockResolvedValue(true)
+
+    const dir = mkTmp()
+    const logPath = path.join(dir, 'svc-a.log')
+    fs.writeFileSync(logPath, 'old')
+    fs.writeFileSync(path.join(PIDS_DIR, 'svc-a.pid'), '999')
+    const svc = {
+      name: 'svc-a',
+      safeName: 'svc-a',
+      logPath,
+      command: 'node a',
+      cwd: '/',
+      healthUrl: 'http://localhost:3000/',
+    } as any
+    openItermTabs.mockReturnValueOnce(['SID-A'])
+
+    const p = restartAllServices([svc], 'iTerm')
+    await vi.advanceTimersByTimeAsync(5500)
+    await p
+
+    expect(fs.readFileSync(logPath, 'utf-8')).toBe('')
+    expect(openItermTabs).toHaveBeenCalledOnce()
+    expect(isHealthy).toHaveBeenCalled()
+  })
+
+  it('skips kill step when no existing process is found', async () => {
+    vi.spyOn(console, 'log').mockImplementation(() => {})
+    vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    vi.spyOn(process, 'kill').mockImplementation(() => {
+      throw new Error('ESRCH')
+    })
+    isHealthy.mockResolvedValue(true)
+
+    const svc = {
+      name: 's',
+      safeName: 's',
+      logPath: path.join(mkTmp(), 's.log'),
+      command: 'x',
+      cwd: '/',
+    } as any
+    openItermTabs.mockReturnValueOnce([])
+    await restartAllServices([svc], 'iTerm')
+    expect(openItermTabs).toHaveBeenCalledOnce()
+  })
+})
+
+describe('runPlaywright', () => {
+  function makeChild() {
+    const child = new EventEmitter() as EventEmitter & {
+      kill: ReturnType<typeof vi.fn>
+    }
+    child.kill = vi.fn()
+    return child
+  }
+
+  it('resolves with the child exit code on normal exit', async () => {
+    const child = makeChild()
+    spawn.mockReturnValue(child)
+    const p = runPlaywright('/feat', false)
+    child.emit('exit', 0)
+    await expect(p).resolves.toBe(0)
+  })
+
+  it('defaults to 1 when the child emits a null exit code', async () => {
+    const child = makeChild()
+    spawn.mockReturnValue(child)
+    const p = runPlaywright('/feat', true)
+    child.emit('exit', null)
+    await expect(p).resolves.toBe(1)
+  })
+
+  it('rejects when the child emits an error', async () => {
+    const child = makeChild()
+    spawn.mockReturnValue(child)
+    const p = runPlaywright('/feat', false)
+    const err = new Error('boom')
+    child.emit('error', err)
+    await expect(p).rejects.toBe(err)
+  })
+
+  it('kills the child with SIGTERM (then SIGKILL) when the 10-minute timeout fires', async () => {
+    vi.useFakeTimers()
+    vi.spyOn(console, 'log').mockImplementation(() => {})
+    const child = makeChild()
+    spawn.mockReturnValue(child)
+    const p = runPlaywright('/feat', false)
+    // Advance past the 10-min timeout.
+    await vi.advanceTimersByTimeAsync(10 * 60 * 1000 + 100)
+    expect(child.kill).toHaveBeenCalledWith('SIGTERM')
+    await vi.advanceTimersByTimeAsync(5100)
+    expect(child.kill).toHaveBeenCalledWith('SIGKILL')
+    // End the promise so the test doesn't hang.
+    child.emit('exit', 143)
+    await p
+  })
+
+  it('forwards SIGINT/SIGTERM from the parent process to the child', async () => {
+    const child = makeChild()
+    spawn.mockReturnValue(child)
+    const p = runPlaywright('/feat', false)
+    process.emit('SIGINT' as any)
+    process.emit('SIGTERM' as any)
+    expect(child.kill).toHaveBeenCalledWith('SIGINT')
+    expect(child.kill).toHaveBeenCalledWith('SIGTERM')
+    child.emit('exit', 0)
+    await p
+  })
+})
+
+describe('maybeAutoHeal', () => {
+  function freshState() {
+    return {
+      spawnCount: 0,
+      strikeCount: 0,
+      lastSignature: '',
+      disabled: false,
+    }
+  }
+
+  it('is a no-op when no agent is configured', async () => {
+    const state = freshState()
+    await maybeAutoHeal({ agent: null, sessionMode: 'resume' }, state, 'iTerm')
+    expect(spawnHealAgent).not.toHaveBeenCalled()
+    expect(state).toEqual(freshState())
+  })
+
+  it('is a no-op when state.disabled is true', async () => {
+    const state = { ...freshState(), disabled: true }
+    await maybeAutoHeal({ agent: 'claude', sessionMode: 'resume' }, state, 'iTerm')
+    expect(spawnHealAgent).not.toHaveBeenCalled()
+  })
+
+  it('is a no-op when there is no failure signature', async () => {
+    const state = freshState()
+    // No summary file → empty signature.
+    await maybeAutoHeal({ agent: 'claude', sessionMode: 'resume' }, state, 'iTerm')
+    expect(spawnHealAgent).not.toHaveBeenCalled()
+  })
+
+  it('spawns the heal agent on "signal" and increments spawnCount', async () => {
+    fs.writeFileSync(SUMMARY_PATH, JSON.stringify({ failed: [{ name: 'a' }] }))
+    spawnHealAgent.mockResolvedValueOnce('signal')
+    const state = freshState()
+    vi.spyOn(console, 'log').mockImplementation(() => {})
+
+    await maybeAutoHeal({ agent: 'claude', sessionMode: 'resume' }, state, 'iTerm')
+
+    expect(spawnHealAgent).toHaveBeenCalledWith(
+      expect.objectContaining({ agent: 'claude', sessionMode: 'resume', cycle: 0, terminal: 'iTerm' }),
+    )
+    expect(state.spawnCount).toBe(1)
+    expect(state.lastSignature).toBe('a')
+    expect(state.disabled).toBe(false)
+  })
+
+  it('increments strikeCount when the signature repeats', async () => {
+    fs.writeFileSync(SUMMARY_PATH, JSON.stringify({ failed: [{ name: 'a' }] }))
+    spawnHealAgent.mockResolvedValue('signal')
+    const state = { ...freshState(), lastSignature: 'a' }
+    vi.spyOn(console, 'log').mockImplementation(() => {})
+
+    await maybeAutoHeal({ agent: 'claude', sessionMode: 'resume' }, state, 'iTerm')
+    expect(state.strikeCount).toBe(1)
+  })
+
+  it('disables auto-heal after reaching AUTO_HEAL_MAX_CYCLES strikes', async () => {
+    fs.writeFileSync(SUMMARY_PATH, JSON.stringify({ failed: [{ name: 'a' }] }))
+    const state = {
+      spawnCount: 0,
+      strikeCount: AUTO_HEAL_MAX_CYCLES - 1,
+      lastSignature: 'a',
+      disabled: false,
+    }
+    vi.spyOn(console, 'log').mockImplementation(() => {})
+
+    await maybeAutoHeal({ agent: 'claude', sessionMode: 'resume' }, state, 'iTerm')
+
+    expect(spawnHealAgent).not.toHaveBeenCalled()
+    expect(state.disabled).toBe(true)
+  })
+
+  it('prints manual options when the agent exits without writing a signal', async () => {
+    fs.writeFileSync(SUMMARY_PATH, JSON.stringify({ failed: [{ name: 'a' }] }))
+    spawnHealAgent.mockResolvedValueOnce('agent_exited_no_signal')
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+    const state = freshState()
+
+    await maybeAutoHeal({ agent: 'codex', sessionMode: 'new' }, state, 'Terminal')
+
+    const joined = logSpy.mock.calls.flat().join('\n')
+    expect(joined).toContain('agent exited without writing')
+    expect(joined).toContain('touch logs/.heal')
+    expect(state.spawnCount).toBe(1)
+  })
+
+  it('prints manual options on agent timeout', async () => {
+    fs.writeFileSync(SUMMARY_PATH, JSON.stringify({ failed: [{ name: 'a' }] }))
+    spawnHealAgent.mockResolvedValueOnce('timeout')
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+
+    await maybeAutoHeal(
+      { agent: 'claude', sessionMode: 'resume' },
+      freshState(),
+      'iTerm',
+    )
+
+    const joined = logSpy.mock.calls.flat().join('\n')
+    expect(joined).toContain('timed out waiting for agent')
   })
 })

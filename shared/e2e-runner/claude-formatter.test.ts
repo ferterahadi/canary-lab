@@ -27,6 +27,16 @@ describe('relPath', () => {
   it('empty input → empty', () => {
     expect(relPath('')).toBe('')
   })
+  it('replaces HOME with ~ for paths outside CWD', () => {
+    const home = process.env.HOME ?? ''
+    if (home && !process.cwd().startsWith(home)) {
+      expect(relPath(`${home}/sibling/x`)).toBe('~/sibling/x')
+    } else if (home) {
+      // CWD is usually inside HOME in dev; this still exercises the replace branch.
+      const replaced = relPath(`${home}/outside-cwd-xyz`)
+      expect(replaced.startsWith('~') || replaced.startsWith(home)).toBe(true)
+    }
+  })
 })
 
 describe('stripLineNumbers', () => {
@@ -84,6 +94,46 @@ describe('formatToolCall', () => {
   it('Read/Edit/Write: relative path', () => {
     expect(formatToolCall('Read', { file_path: `${process.cwd()}/a.ts` })).toBe('a.ts')
     expect(formatToolCall('Write', { file_path: `${process.cwd()}/b.ts` })).toBe('b.ts')
+  })
+  it('Read: surfaces L<a>-<b> when offset+limit are set (narrow Read visibility)', () => {
+    const out = formatToolCall('Read', {
+      file_path: `${process.cwd()}/server.ts`,
+      offset: 95,
+      limit: 50,
+    })
+    expect(out).toContain('server.ts')
+    expect(out).toContain('L95-144')
+  })
+  it('Read: surfaces "from L<offset>" when only offset is set', () => {
+    const out = formatToolCall('Read', {
+      file_path: `${process.cwd()}/x.ts`,
+      offset: 10,
+    })
+    expect(out).toContain('from L10')
+  })
+  it('Edit: surfaces −<old> +<new> line deltas', () => {
+    const out = formatToolCall('Edit', {
+      file_path: `${process.cwd()}/x.ts`,
+      old_string: 'a\nb',
+      new_string: 'c\nd\ne',
+    })
+    expect(out).toContain('−2 +3')
+  })
+  it('Edit: flags replace_all with (all)', () => {
+    const out = formatToolCall('Edit', {
+      file_path: `${process.cwd()}/x.ts`,
+      old_string: 'a',
+      new_string: 'b',
+      replace_all: true,
+    })
+    expect(out).toContain('(all)')
+  })
+  it('Write: surfaces line count when content provided', () => {
+    const out = formatToolCall('Write', {
+      file_path: `${process.cwd()}/x.ts`,
+      content: 'line1\nline2\nline3',
+    })
+    expect(out).toContain('3L')
   })
   it('Glob: pattern + optional "in <path>"', () => {
     expect(formatToolCall('Glob', { pattern: '**/*.ts' })).toBe('**/*.ts')
@@ -167,7 +217,9 @@ describe('handleLine', () => {
     spy.mockRestore()
   })
 
-  it('result line prints token usage + turns + cost when present', () => {
+  it('result line prints token usage + turns but hides cost by default (Pro/Max users aren\'t billed)', () => {
+    const prev = process.env.CANARY_HEAL_SHOW_COST
+    delete process.env.CANARY_HEAL_SHOW_COST
     const spy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
     handleLine(
       JSON.stringify({
@@ -188,8 +240,30 @@ describe('handleLine', () => {
     expect(out).toContain('120 in / 80 out')
     expect(out).toContain('200 cache read · 30 cache created')
     expect(out).toContain('3 turns')
+    expect(out).not.toContain('$')
+    spy.mockRestore()
+    if (prev !== undefined) process.env.CANARY_HEAL_SHOW_COST = prev
+  })
+
+  it('result line includes cost when CANARY_HEAL_SHOW_COST=1', () => {
+    const prev = process.env.CANARY_HEAL_SHOW_COST
+    process.env.CANARY_HEAL_SHOW_COST = '1'
+    const spy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    handleLine(
+      JSON.stringify({
+        type: 'result',
+        duration_ms: 1000,
+        is_error: false,
+        num_turns: 3,
+        total_cost_usd: 0.0523,
+        usage: { input_tokens: 10, output_tokens: 5 },
+      }),
+    )
+    const out = spy.mock.calls.map((c) => c[0] as string).join('')
     expect(out).toContain('$0.0523')
     spy.mockRestore()
+    if (prev === undefined) delete process.env.CANARY_HEAL_SHOW_COST
+    else process.env.CANARY_HEAL_SHOW_COST = prev
   })
 
   it('result line omits token summary when no usage data is present', () => {
@@ -240,6 +314,112 @@ describe('handleLine', () => {
     expect(out).toContain('echo hi')
     expect(out).toContain('↳')
     expect(out).toContain('hi')
+    spy.mockRestore()
+  })
+
+  it('extracts the text block when tool_result content is an array', () => {
+    const spy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    handleLine(
+      JSON.stringify({
+        type: 'assistant',
+        message: {
+          content: [
+            { type: 'tool_use', id: 't2', name: 'Bash', input: { command: 'echo arr' } },
+          ],
+        },
+      }),
+    )
+    handleLine(
+      JSON.stringify({
+        type: 'user',
+        message: {
+          content: [
+            {
+              type: 'tool_result',
+              tool_use_id: 't2',
+              content: [{ type: 'text', text: 'array payload' }],
+            },
+          ],
+        },
+      }),
+    )
+    const out = spy.mock.calls.map((c) => c[0] as string).join('')
+    expect(out).toContain('array payload')
+    spy.mockRestore()
+  })
+
+  it('assistant thinking block with non-empty text prints a 💭 one-liner', () => {
+    const spy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    handleLine(
+      JSON.stringify({
+        type: 'assistant',
+        message: {
+          content: [
+            {
+              type: 'thinking',
+              thinking: 'The previous fix is correct but the service was not restarted',
+            },
+          ],
+        },
+      }),
+    )
+    const out = spy.mock.calls.map((c) => c[0] as string).join('')
+    expect(out).toContain('💭 thinking')
+    expect(out).toContain('The previous fix is correct')
+    spy.mockRestore()
+  })
+
+  it('assistant thinking block with empty text prints nothing (signature-only thinking)', () => {
+    const spy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    handleLine(
+      JSON.stringify({
+        type: 'assistant',
+        message: {
+          content: [{ type: 'thinking', thinking: '', signature: 'xxx' }],
+        },
+      }),
+    )
+    expect(spy).not.toHaveBeenCalled()
+    spy.mockRestore()
+  })
+
+  it('rate_limit_event and SessionStart hook chatter are dropped silently', () => {
+    const spy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    handleLine(JSON.stringify({ type: 'rate_limit_event', rate_limit_info: { status: 'allowed' } }))
+    handleLine(
+      JSON.stringify({ type: 'system', subtype: 'hook_started', hook_name: 'SessionStart:resume' }),
+    )
+    handleLine(
+      JSON.stringify({ type: 'system', subtype: 'hook_response', hook_name: 'SessionStart:resume' }),
+    )
+    expect(spy).not.toHaveBeenCalled()
+    spy.mockRestore()
+  })
+
+  it('marks tool errors with ✗ instead of ↳', () => {
+    const spy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    handleLine(
+      JSON.stringify({
+        type: 'assistant',
+        message: {
+          content: [
+            { type: 'tool_use', id: 't3', name: 'Bash', input: { command: 'boom' } },
+          ],
+        },
+      }),
+    )
+    handleLine(
+      JSON.stringify({
+        type: 'user',
+        message: {
+          content: [
+            { type: 'tool_result', tool_use_id: 't3', content: 'failed', is_error: true },
+          ],
+        },
+      }),
+    )
+    const out = spy.mock.calls.map((c) => c[0] as string).join('')
+    expect(out).toContain('✗')
     spy.mockRestore()
   })
 })

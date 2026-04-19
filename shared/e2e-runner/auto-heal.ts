@@ -74,6 +74,14 @@ export function loadPrompt(agent: HealAgent, promptPath: string = promptPathFor(
   return stripFrontmatter(fs.readFileSync(p, 'utf-8')).trim()
 }
 
+export function healAgentBanner(agent: HealAgent): string {
+  return `[canary-lab] heal agent — ${agent} (using your CLI profile defaults for model + reasoning)`
+}
+
+export function rawAgentLogPath(agent: HealAgent, cycle: number): string {
+  return path.join(LOGS_DIR, `heal-${agent}-raw-${cycle + 1}.jsonl`)
+}
+
 export function buildAgentCommand(
   agent: HealAgent,
   sessionMode: HealSessionMode,
@@ -82,38 +90,46 @@ export function buildAgentCommand(
 ): string {
   const useResume = sessionMode === 'resume' && cycle > 0
   const promptSub = `"$(cat ${JSON.stringify(promptFile)})"`
+  // Persist the raw agent stream alongside the formatted view so operators
+  // can replay or diff runs after the fact. `tee` preserves the stream for
+  // the formatter pipe.
+  const rawLog = JSON.stringify(rawAgentLogPath(agent, cycle))
 
   if (agent === 'claude') {
+    // Model + reasoning effort are inherited from the operator's Claude CLI
+    // profile (~/.claude settings) — we don't override here.
     // --dangerously-skip-permissions: required for headless tool use; the heal
     // agent runs unattended and cannot answer permission prompts.
     // --output-format=stream-json + our formatter: so the tab shows live
     // progress instead of sitting blank for 1-5 minutes.
-    const base =
-      '--dangerously-skip-permissions --output-format=stream-json --verbose -p'
+    const base = `--dangerously-skip-permissions --output-format=stream-json --verbose -p`
     const flags = useResume ? `--continue ${base}` : base
     const formatter = `node ${JSON.stringify(CLAUDE_FORMATTER_FILE)}`
-    return `claude ${flags} ${promptSub} | ${formatter}`
+    return `claude ${flags} ${promptSub} | tee ${rawLog} | ${formatter}`
   }
 
   // Codex exec runs autonomously by default. Resume semantics vary across
   // Codex versions; fall back to a fresh exec if the resume attempt errors.
+  // Model + reasoning effort are inherited from the operator's Codex CLI
+  // profile (~/.codex/config.toml) — we don't override here.
   // --skip-git-repo-check: scaffold may not be a git repo yet.
   // --full-auto: required for the heal agent to write files (server edits,
   // diagnosis-journal.json, .rerun/.restart). Without it, codex runs in a
   // read-only sandbox and silently fails file writes.
   // --json + formatter: raw codex output is very verbose; the formatter emits
   // a compact timeline of commands, file changes, and messages.
-  const codexBase = '--skip-git-repo-check --full-auto --json'
+  const codexBase = `--skip-git-repo-check --full-auto --json`
   const formatter = `node ${JSON.stringify(CODEX_FORMATTER_FILE)}`
   if (useResume) {
-    return `(codex exec resume ${codexBase} ${promptSub} || codex exec ${codexBase} ${promptSub}) | ${formatter}`
+    return `(codex exec resume ${codexBase} ${promptSub} || codex exec ${codexBase} ${promptSub}) | tee ${rawLog} | ${formatter}`
   }
-  return `codex exec ${codexBase} ${promptSub} | ${formatter}`
+  return `codex exec ${codexBase} ${promptSub} | tee ${rawLog} | ${formatter}`
 }
 
-function writeHealScript(agentCommand: string): void {
+function writeHealScript(agentCommand: string, banner: string): void {
   const script = `#!/bin/bash
 set +e
+echo ${JSON.stringify(banner)}
 echo "[canary-lab] starting heal agent — streaming progress below."
 echo "[canary-lab] agent will write logs/.rerun (or logs/.restart) when done."
 echo ""
@@ -240,7 +256,7 @@ export async function spawnHealAgent(
     opts.cycle,
     HEAL_PROMPT_FILE,
   )
-  writeHealScript(agentCommand)
+  writeHealScript(agentCommand, healAgentBanner(opts.agent))
 
   unlinkSafe(HEAL_DONE_FILE)
 
