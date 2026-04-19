@@ -57,7 +57,6 @@
     "canary-lab:env": "node dist/scripts/cli.js env",
     "canary-lab:new-feature": "node dist/scripts/cli.js new-feature",
     "prepack": "npm run build",
-    "pack:check": "node tools/pack-check.mjs",
     "smoke:pack": "node tools/smoke-pack.mjs",
     "publish:package": "node tools/publish-package.mjs",
     "changelog": "node tools/generate-changelog.mjs",

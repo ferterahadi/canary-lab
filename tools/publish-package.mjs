@@ -34,5 +34,5 @@ if (!allowDirty) {
 }
 
 run('npm', ['run', 'build'])
-run('npm', ['run', 'pack:check'])
+run('npm', ['pack', '--dry-run'])
 run('npm', ['publish', ...process.argv.slice(2).filter((arg) => arg !== '--allow-dirty')])

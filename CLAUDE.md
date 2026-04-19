@@ -10,7 +10,6 @@
 ## Repository Workflow
 
 - Build with `npm run build`
-- Inspect the tarball with `npm run pack:check`
 - Smoke-test the tarball with `npm run smoke:pack`
 - Publish with `npm run publish:package`
 
