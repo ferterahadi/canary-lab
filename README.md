@@ -1,5 +1,8 @@
 # Canary Lab
 
+[![npm](https://img.shields.io/npm/v/canary-lab.svg)](https://www.npmjs.com/package/canary-lab)
+[![license](https://img.shields.io/npm/l/canary-lab.svg)](LICENSE)
+
 E2E testing with Playwright, local service orchestration, and agent-assisted debugging.
 
 See [CHANGELOG.md](CHANGELOG.md) for what's new in each release.
