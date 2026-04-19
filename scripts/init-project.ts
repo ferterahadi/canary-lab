@@ -2,7 +2,7 @@ import fs from 'fs'
 import path from 'path'
 import { execFileSync } from 'child_process'
 
-function resolveFirstExisting(pathsToTry: string[]): string {
+export function resolveFirstExisting(pathsToTry: string[]): string {
   const match = pathsToTry.find((candidate) => fs.existsSync(candidate))
   if (!match) {
     throw new Error(`Could not resolve any expected path: ${pathsToTry.join(', ')}`)
@@ -24,7 +24,7 @@ function getTemplateRoot(): string {
   ])
 }
 
-function copyDir(sourceDir: string, targetDir: string): void {
+export function copyDir(sourceDir: string, targetDir: string): void {
   fs.mkdirSync(targetDir, { recursive: true })
 
   for (const entry of fs.readdirSync(sourceDir, { withFileTypes: true })) {
@@ -45,7 +45,7 @@ function readPackageVersion(): string {
   return JSON.parse(fs.readFileSync(pkgPath, 'utf-8')).version
 }
 
-function parseArgs(args: string[]): { folder: string; packageSpec: string } {
+export function parseArgs(args: string[]): { folder: string; packageSpec: string } {
   const folder = args[0]
   if (!folder) {
     console.error('Usage: canary-lab init <folder> [--package-spec <spec>]')
@@ -69,7 +69,7 @@ function parseArgs(args: string[]): { folder: string; packageSpec: string } {
   return { folder, packageSpec }
 }
 
-function buildPackageJson(projectName: string, packageSpec: string): string {
+export function buildPackageJson(projectName: string, packageSpec: string): string {
   return JSON.stringify(
     {
       name: projectName,

@@ -53,7 +53,7 @@ function promptPathFor(agent: HealAgent): string {
     : path.join(ROOT, '.codex', 'heal-loop.md')
 }
 
-function stripFrontmatter(content: string): string {
+export function stripFrontmatter(content: string): string {
   // Strip a leading `---\n...\n---\n` block if present.
   if (!content.startsWith('---')) return content
   const end = content.indexOf('\n---', 3)
@@ -62,8 +62,8 @@ function stripFrontmatter(content: string): string {
   return after === -1 ? '' : content.slice(after + 1)
 }
 
-function loadPrompt(agent: HealAgent): string {
-  const p = promptPathFor(agent)
+export function loadPrompt(agent: HealAgent, promptPath: string = promptPathFor(agent)): string {
+  const p = promptPath
   if (!fs.existsSync(p)) {
     throw new Error(
       `Heal prompt not found at ${p}. Run \`canary-lab upgrade\` to install it.`,
@@ -72,7 +72,7 @@ function loadPrompt(agent: HealAgent): string {
   return stripFrontmatter(fs.readFileSync(p, 'utf-8')).trim()
 }
 
-function buildAgentCommand(
+export function buildAgentCommand(
   agent: HealAgent,
   sessionMode: HealSessionMode,
   cycle: number,

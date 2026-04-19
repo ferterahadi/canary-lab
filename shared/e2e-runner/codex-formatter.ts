@@ -163,17 +163,33 @@ function handleLine(line: string): void {
   }
 }
 
-let buffer = ''
-process.stdin.setEncoding('utf-8')
-process.stdin.on('data', (chunk: string) => {
-  buffer += chunk
-  let idx: number
-  while ((idx = buffer.indexOf('\n')) !== -1) {
-    const line = buffer.slice(0, idx)
-    buffer = buffer.slice(idx + 1)
-    handleLine(line)
-  }
-})
-process.stdin.on('end', () => {
-  if (buffer) handleLine(buffer)
-})
+if (require.main === module) {
+  let buffer = ''
+  process.stdin.setEncoding('utf-8')
+  process.stdin.on('data', (chunk: string) => {
+    buffer += chunk
+    let idx: number
+    while ((idx = buffer.indexOf('\n')) !== -1) {
+      const line = buffer.slice(0, idx)
+      buffer = buffer.slice(idx + 1)
+      handleLine(line)
+    }
+  })
+  process.stdin.on('end', () => {
+    if (buffer) handleLine(buffer)
+  })
+}
+
+export {
+  c,
+  elapsed,
+  tag,
+  relPath,
+  truncate,
+  summarizeOutput,
+  cleanCommand,
+  quote,
+  kindIcon,
+  handleCompleted,
+  handleLine,
+}

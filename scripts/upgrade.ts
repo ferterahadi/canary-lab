@@ -49,7 +49,7 @@ function getTemplateRoot(): string {
  * Extract the managed block (including markers) from template content.
  * Returns the full block or null if markers are missing.
  */
-function extractManagedBlock(content: string): string | null {
+export function extractManagedBlock(content: string): string | null {
   const startIdx = content.indexOf(MARKER_START)
   const endIdx = content.indexOf(MARKER_END)
   if (startIdx === -1 || endIdx === -1) return null
@@ -66,7 +66,7 @@ function extractManagedBlock(content: string): string | null {
  *    content was all canary-lab-generated anyway)
  * 3. No markers, unknown content → append the managed block after existing content
  */
-function applyManagedBlock(existing: string, block: string, relPath: string): string {
+export function applyManagedBlock(existing: string, block: string, relPath: string): string {
   const startIdx = existing.indexOf(MARKER_START)
   const endIdx = existing.indexOf(MARKER_END)
 

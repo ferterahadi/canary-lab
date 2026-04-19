@@ -71,7 +71,7 @@ async function selectOption(
 }
 
 // ─── Feature discovery (same as shared/launcher/index.ts) ───────────────────
-function discoverFeatures(): FeatureConfig[] {
+export function discoverFeatures(): FeatureConfig[] {
   const features: FeatureConfig[] = []
   const dirs = fs
     .readdirSync(FEATURES_DIR, { withFileTypes: true })
@@ -127,7 +127,7 @@ interface ServiceInfo {
   healthTimeout?: number
 }
 
-function buildServiceList(feature: FeatureConfig): ServiceInfo[] {
+export function buildServiceList(feature: FeatureConfig): ServiceInfo[] {
   const services: ServiceInfo[] = []
 
   for (const repo of feature.repos ?? []) {
@@ -159,11 +159,22 @@ function buildServiceList(feature: FeatureConfig): ServiceInfo[] {
   return services
 }
 
-function buildTeedCommand(svc: ServiceInfo): string {
+export function buildTeedCommand(svc: ServiceInfo): string {
   // LOG_MODE=plain tells apps to use synchronous console.log instead of async
   // loggers (e.g. Pino/sonic-boom), so XML markers land in the right position.
   // stdout+stderr go to both the iTerm tab and the log file via tee.
   return `LOG_MODE=plain ${svc.command} 2>&1 | tee -a ${svc.logPath}`
+}
+
+// Wipe each service's log file so the next iteration starts clean. Called
+// before every run signal (.restart and .rerun) so both behave identically —
+// the file contains only the current iteration's output.
+export function truncateServiceLogs(services: ServiceInfo[]): void {
+  for (const svc of services) {
+    try {
+      fs.writeFileSync(svc.logPath, '')
+    } catch { /* log file may not exist yet on first run; tee will create it */ }
+  }
 }
 
 // Tracks iTerm session IDs for launched service tabs so restarts can close
@@ -212,18 +223,13 @@ async function launchServices(
     }
   }
 
-  const tabs: Array<{ dir: string; command: string; name: string }> = []
+  truncateServiceLogs(services)
 
-  for (const svc of services) {
-    // Create/truncate log file for a clean run
-    fs.writeFileSync(svc.logPath, '')
-
-    tabs.push({
-      dir: svc.cwd,
-      command: buildTeedCommand(svc),
-      name: svc.name,
-    })
-  }
+  const tabs: Array<{ dir: string; command: string; name: string }> = services.map((svc) => ({
+    dir: svc.cwd,
+    command: buildTeedCommand(svc),
+    name: svc.name,
+  }))
 
   if (tabs.length === 0) {
     return
@@ -261,20 +267,20 @@ async function pollHealthChecks(
   console.log('')
 }
 
-function writeManifest(services: ServiceInfo[]): void {
+export function writeManifest(services: ServiceInfo[]): void {
   const manifest = { serviceLogs: services.map((s) => s.logPath) }
   fs.writeFileSync(MANIFEST_PATH, JSON.stringify(manifest, null, 2) + '\n')
 }
 
 // ─── Restart unhealthy services ─────────────────────────────────────────────
-function readPid(safeName: string): number | null {
+export function readPid(safeName: string): number | null {
   const pidPath = path.join(PIDS_DIR, `${safeName}.pid`)
   if (!fs.existsSync(pidPath)) return null
   const pid = parseInt(fs.readFileSync(pidPath, 'utf-8').trim(), 10)
   return isNaN(pid) ? null : pid
 }
 
-function portFromHealthUrl(url: string): number | null {
+export function portFromHealthUrl(url: string): number | null {
   try {
     const parsed = new URL(url)
     if (parsed.port) {
@@ -286,7 +292,7 @@ function portFromHealthUrl(url: string): number | null {
   }
 }
 
-function lookupPidByPort(port: number): number | null {
+export function lookupPidByPort(port: number): number | null {
   try {
     const output = execFileSync(
       'lsof',
@@ -303,7 +309,7 @@ function lookupPidByPort(port: number): number | null {
   }
 }
 
-function isProcessAlive(pid: number): boolean {
+export function isProcessAlive(pid: number): boolean {
   try {
     process.kill(pid, 0)
     return true
@@ -312,7 +318,7 @@ function isProcessAlive(pid: number): boolean {
   }
 }
 
-function killProcessSync(pid: number): void {
+export function killProcessSync(pid: number): void {
   try {
     process.kill(pid, 'SIGTERM')
   } catch {
@@ -326,7 +332,7 @@ function killProcessSync(pid: number): void {
   }
 }
 
-async function killProcess(pid: number): Promise<void> {
+export async function killProcess(pid: number): Promise<void> {
   try {
     process.kill(pid, 'SIGTERM')
   } catch {
@@ -346,7 +352,7 @@ async function killProcess(pid: number): Promise<void> {
   }
 }
 
-function resolveRunningPid(svc: ServiceInfo): number | null {
+export function resolveRunningPid(svc: ServiceInfo): number | null {
   const pidFromFile = readPid(svc.safeName)
   if (pidFromFile && isProcessAlive(pidFromFile)) {
     return pidFromFile
@@ -387,6 +393,8 @@ async function restartAllServices(
       console.log('no existing process found')
     }
   }
+
+  truncateServiceLogs(services)
 
   // Re-launch all in terminal tabs with tee
   const tabs = services.map((svc) => ({
@@ -455,7 +463,7 @@ function runPlaywright(featureDir: string, headed: boolean): Promise<number> {
 }
 
 // ─── Log enrichment ─────────────────────────────────────────────────────────
-function extractLogsForTest(
+export function extractLogsForTest(
   slug: string,
   serviceLogs: string[],
 ): Record<string, string> {
@@ -480,7 +488,7 @@ function extractLogsForTest(
   return logs
 }
 
-function enrichSummaryWithLogs(): void {
+export function enrichSummaryWithLogs(): void {
   if (!fs.existsSync(SUMMARY_PATH) || !fs.existsSync(MANIFEST_PATH)) return
 
   const summary = JSON.parse(fs.readFileSync(SUMMARY_PATH, 'utf-8'))
@@ -501,7 +509,7 @@ function enrichSummaryWithLogs(): void {
 }
 
 // ─── Summary ────────────────────────────────────────────────────────────────
-function printSummary(): void {
+export function printSummary(): void {
   if (!fs.existsSync(SUMMARY_PATH)) {
     console.log('\n  No summary file found.')
     return
@@ -523,7 +531,7 @@ function printSummary(): void {
 }
 
 // ─── Watch mode ─────────────────────────────────────────────────────────────
-function readFailureSignature(): string {
+export function readFailureSignature(): string {
   if (!fs.existsSync(SUMMARY_PATH)) return ''
   try {
     const summary = JSON.parse(fs.readFileSync(SUMMARY_PATH, 'utf-8'))
@@ -540,7 +548,7 @@ interface HealCycleState {
   disabled: boolean
 }
 
-function printManualOptions(autoHealConfigured: boolean): void {
+export function printManualOptions(autoHealConfigured: boolean): void {
   console.log('  Options:')
   console.log('    • fix the code yourself, then `touch logs/.rerun`')
   if (autoHealConfigured) {
@@ -710,6 +718,10 @@ async function watchMode(
 
     if (doRestart) {
       await restartAllServices(services, terminal)
+    } else if (doRerun) {
+      // Rerun keeps services running, but we still wipe their logs so each
+      // iteration's output stands alone — matching restart's behavior.
+      truncateServiceLogs(services)
     }
 
     console.log(
@@ -733,7 +745,7 @@ interface RunFlags {
   healSession: HealSessionMode
 }
 
-function parseFlags(args: string[]): RunFlags {
+export function parseFlags(args: string[]): RunFlags {
   const flags: RunFlags = { headed: false, terminal: 'iTerm', healSession: 'resume' }
   const readValue = (arg: string, name: string, next: string | undefined): string => {
     if (arg.startsWith(`${name}=`)) return arg.slice(name.length + 1)

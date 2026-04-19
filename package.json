@@ -51,6 +51,8 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json && node tools/prepare-assets.mjs",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "canary-lab:run": "node dist/scripts/cli.js run",
     "canary-lab:env": "node dist/scripts/cli.js env",
     "canary-lab:new-feature": "node dist/scripts/cli.js new-feature",
@@ -66,7 +68,8 @@
   "devDependencies": {
     "@types/node": "^25.5.2",
     "tsx": "^4.20.3",
-    "typescript": "^5.9.2"
+    "typescript": "^5.9.2",
+    "vitest": "^4.1.4"
   },
   "dependencies": {
     "@playwright/test": "^1.54.2",
