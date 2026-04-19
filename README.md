@@ -278,8 +278,11 @@ npm run build
 
 ```bash
 npm run build
-npm run smoke:pack
+npm test              # unit tests (Vitest)
+npm run smoke:pack    # end-to-end scaffold test
 ```
+
+`npm test` runs the Vitest unit suite. Use `npm run test:watch` during development and `npm run test:coverage` for a coverage report.
 
 `smoke:pack` builds, packs, scaffolds a temp project, installs dependencies, and verifies the scaffold flow. Run it after changing templates or packaging.
 

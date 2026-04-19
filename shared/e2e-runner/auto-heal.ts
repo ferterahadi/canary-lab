@@ -78,10 +78,6 @@ export function healAgentBanner(agent: HealAgent): string {
   return `[canary-lab] heal agent — ${agent} (using your CLI profile defaults for model + reasoning)`
 }
 
-export function rawAgentLogPath(agent: HealAgent, cycle: number): string {
-  return path.join(LOGS_DIR, `heal-${agent}-raw-${cycle + 1}.jsonl`)
-}
-
 export function buildAgentCommand(
   agent: HealAgent,
   sessionMode: HealSessionMode,
@@ -90,10 +86,6 @@ export function buildAgentCommand(
 ): string {
   const useResume = sessionMode === 'resume' && cycle > 0
   const promptSub = `"$(cat ${JSON.stringify(promptFile)})"`
-  // Persist the raw agent stream alongside the formatted view so operators
-  // can replay or diff runs after the fact. `tee` preserves the stream for
-  // the formatter pipe.
-  const rawLog = JSON.stringify(rawAgentLogPath(agent, cycle))
 
   if (agent === 'claude') {
     // Model + reasoning effort are inherited from the operator's Claude CLI
@@ -105,7 +97,7 @@ export function buildAgentCommand(
     const base = `--dangerously-skip-permissions --output-format=stream-json --verbose -p`
     const flags = useResume ? `--continue ${base}` : base
     const formatter = `node ${JSON.stringify(CLAUDE_FORMATTER_FILE)}`
-    return `claude ${flags} ${promptSub} | tee ${rawLog} | ${formatter}`
+    return `claude ${flags} ${promptSub} | ${formatter}`
   }
 
   // Codex exec runs autonomously by default. Resume semantics vary across
@@ -121,9 +113,9 @@ export function buildAgentCommand(
   const codexBase = `--skip-git-repo-check --full-auto --json`
   const formatter = `node ${JSON.stringify(CODEX_FORMATTER_FILE)}`
   if (useResume) {
-    return `(codex exec resume ${codexBase} ${promptSub} || codex exec ${codexBase} ${promptSub}) | tee ${rawLog} | ${formatter}`
+    return `(codex exec resume ${codexBase} ${promptSub} || codex exec ${codexBase} ${promptSub}) | ${formatter}`
   }
-  return `codex exec ${codexBase} ${promptSub} | tee ${rawLog} | ${formatter}`
+  return `codex exec ${codexBase} ${promptSub} | ${formatter}`
 }
 
 function writeHealScript(agentCommand: string, banner: string): void {

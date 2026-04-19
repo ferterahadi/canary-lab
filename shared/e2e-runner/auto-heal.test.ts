@@ -142,19 +142,13 @@ describe('buildAgentCommand', () => {
     expect(cmd).toContain('|| codex exec --skip-git-repo-check --full-auto --json')
   })
 
-  it('claude pipes through tee to persist raw stream-json for post-hoc inspection', () => {
-    const cmd = buildAgentCommand('claude', 'new', 0, '/tmp/p.txt')
-    expect(cmd).toMatch(/\| tee ".*heal-claude-raw-1\.jsonl" \| node /)
-  })
-
-  it('codex pipes through tee to persist raw stream for post-hoc inspection', () => {
-    const cmd = buildAgentCommand('codex', 'new', 2, '/tmp/p.txt')
-    expect(cmd).toMatch(/\| tee ".*heal-codex-raw-3\.jsonl" \| node /)
-  })
-
-  it('codex resume branch tees inside the fallback group', () => {
-    const cmd = buildAgentCommand('codex', 'resume', 1, '/tmp/p.txt')
-    expect(cmd).toMatch(/\) \| tee ".*heal-codex-raw-2\.jsonl" \| node /)
+  it('does not persist the raw agent stream to disk', () => {
+    const claudeCmd = buildAgentCommand('claude', 'new', 0, '/tmp/p.txt')
+    const codexCmd = buildAgentCommand('codex', 'resume', 1, '/tmp/p.txt')
+    expect(claudeCmd).not.toContain('tee ')
+    expect(codexCmd).not.toContain('tee ')
+    expect(claudeCmd).not.toMatch(/heal-.*-raw-.*\.jsonl/)
+    expect(codexCmd).not.toMatch(/heal-.*-raw-.*\.jsonl/)
   })
 })
 
@@ -261,8 +255,6 @@ describe('spawnHealAgent', () => {
     expect(script).toContain(
       '[canary-lab] heal agent — claude (using your CLI profile defaults for model + reasoning)',
     )
-    // Raw stream is tee'd to a per-cycle log for post-hoc inspection.
-    expect(script).toMatch(/\| tee ".*heal-claude-raw-1\.jsonl" \|/)
 
     // iTerm boundary was invoked; Terminal boundary was not.
     expect(openItermTabs).toHaveBeenCalledOnce()

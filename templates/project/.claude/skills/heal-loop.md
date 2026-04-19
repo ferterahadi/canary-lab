@@ -2,45 +2,28 @@
 description: Self-heal the most recent Playwright failure
 ---
 
-The canary-lab runner just observed failing Playwright tests and launched you
-in auto-heal mode. The full workflow lives in
-`.claude/skills/self-fixing-loop.md` — read it after the first-pass triage
-below, then follow Steps 1–6 exactly.
+The canary-lab runner spawned you because Playwright just failed. Diagnose it, fix the code, signal the runner, exit. Do not wait for user input.
 
-## Hard rules (before your first tool call)
+## Rules
 
-1. **No orientation commands.** Do not `ls`, do not `Glob` the feature tree,
-   do not open `AGENTS.md` / `README.md`. The failure already tells you the
-   feature. Starting with orientation burns tokens and delays the fix.
-2. **No full-file `Read` of implementation files.** Always `Grep` a
-   distinctive literal first (from `failed[].logs[<svc>]` or the test
-   assertion), then narrow-`Read` ±20 lines at the match. No exceptions —
-   including small-looking files.
-3. **Service-log chunk is ground truth.** `error.message` tells you *what's
-   wrong*, the log chunk in `failed[].logs[<svc>]` tells you *where*. Never
-   reason from the assertion alone.
-4. **Combine root causes.** If multiple failures share evidence (same
-   feature, same log prefix), write one journal entry and one fix pass.
+- **No orientation.** Don't `ls`, don't `Glob` the tree, don't open `README.md`. The failure already names the feature.
+- **No full-file reads.** `Grep` a distinctive literal from the service-log chunk first, then `Read` ±20 lines at the match.
+- **Service-log chunk is ground truth.** `error.message` = what's wrong. `failed[].logs[<svc>]` = where. Use both.
+- **One fix per iteration.** Group failures that share evidence into one hypothesis and one edit.
+- **Fix the app/service code, not the test.** Assume the test is correct. If an assertion disagrees with service output, change the service to match the assertion — never weaken or rewrite the assertion. The only exception is an obvious test-side bug (syntax error, reference to something that doesn't exist); in that case, use `.rerun` instead of `.restart`.
 
-## Prescribed first tool calls
+## Steps
 
-Execute these in order, stop only if the previous call yields the answer:
+1. **Preflight.** If `logs/e2e-summary.json` doesn't exist, tell the user the runner hasn't produced a summary yet (is `npx canary-lab run` running?) and stop. If it exists but `failed[]` is empty and the journal has a pending iteration, set that iteration's `outcome` to `"all_passed"` and report success. Otherwise say "nothing to heal" and stop.
+2. If `logs/diagnosis-journal.json` exists, `Read` it. Skip any hypothesis already tried. **If the latest iteration has `outcome: null`, set it first** based on the current summary (`all_passed` / `partial` / `no_change` / `regression` — see `self-fixing-loop.md` Evaluate). Then continue with a new iteration for the remaining failures.
+3. `Read logs/e2e-summary.json`. For each `failed[]`, mentally pair `error.message` (expected) with `logs[<svc>]` (actual). The feature name is the first path segment of `failed[].location` after `features/`.
+4. From each actual chunk, pick a distinctive literal (a numeric value, a `[feature]` log prefix, a variable name shared with the assertion). `Grep` it inside `features/<feature>/scripts`, then `Read` ±20 lines at the match. (If the feature doesn't use `scripts/`, grep the feature root.)
+5. Make the minimal edit with `Edit`. Append one entry to `logs/diagnosis-journal.json` with `feature`, `iteration`, `timestamp`, `failingTests`, `hypothesis`, `fix.file`, `fix.description`, `signal`.
+6. Write the signal file:
+   - `logs/.restart` if service code changed, `logs/.rerun` if only test/config changed.
+   - Body (one JSON line): `{"hypothesis":"…","filesChanged":["…"],"expectation":"<slug-a>,<slug-b>"}`.
+7. Finish:
+   - **Auto-heal (spawned by the runner):** exit. The runner is polling and will re-run.
+   - **Manual `self heal` (typed in chat):** tell the user which signal file you wrote and that the runner in their other tab will re-run; don't exit the chat.
 
-1. `Read logs/diagnosis-journal.json` and `Read logs/signal-history.json`
-   (if they exist). Skip any hypothesis already tried.
-2. `Read logs/e2e-summary.json`. For each `failed[]` entry, write out:
-   `expected: <from error.message> | actual: <from logs[<svc>]>`.
-3. From each `actual` line pick a distinctive literal (a numeric value, a
-   `[feature_name]` log prefix, a variable name that also appears in the
-   assertion). `Grep` that literal inside `features/<feature>/scripts`.
-4. Narrow-`Read` ±20 lines at the `Grep` match. That is the file and
-   line-range to edit — nothing else.
-
-Only after this first pass should you read `.claude/skills/self-fixing-loop.md`
-for the full protocol (journal schema, signal files, evaluation).
-
-## Finishing
-
-When the fix is in, write `logs/.rerun` (or `logs/.restart` if services need a
-refresh) per the skill's signal protocol, then exit. Do not wait for further
-user input — the runner is already polling for the signal file.
+If `logs[<svc>]` is empty for every failure, or distinctive literals don't localize the bug, open `.claude/skills/self-fixing-loop.md` for the fallback (Step 3: sed-by-slug + instrument-first).
