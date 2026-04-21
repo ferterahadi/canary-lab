@@ -2,6 +2,7 @@ import { describe, it, expect, afterEach, vi, beforeEach } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
+import type { StartTab } from '../launcher/startup'
 
 const tmpDirs: string[] = []
 function mkTmp(): string {
@@ -27,10 +28,12 @@ vi.mock('./paths', () => ({
   ITERM_HEAL_SESSION_IDS_PATH,
 }))
 
-const openItermTabs = vi.fn(() => ['SID-1'])
-const reuseItermTabs = vi.fn(() => false)
-const closeItermSessionsByPrefix = vi.fn()
-const closeItermSessionsByIds = vi.fn()
+const openItermTabs = vi.fn((_tabs: StartTab[], _label: string) => ['SID-1'])
+const reuseItermTabs = vi.fn(
+  (_ids: string[], _tabs: StartTab[], _label: string) => false,
+)
+const closeItermSessionsByPrefix = vi.fn((_prefixes: string[]) => {})
+const closeItermSessionsByIds = vi.fn((_ids: string[]) => {})
 vi.mock('../launcher/iterm', () => ({
   openItermTabs,
   reuseItermTabs,
