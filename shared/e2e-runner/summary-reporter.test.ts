@@ -14,6 +14,8 @@ const LOGS_DIR = path.join(mkTmp(), 'logs')
 vi.mock('./paths', () => ({
   ROOT: path.dirname(LOGS_DIR),
   LOGS_DIR,
+  MANIFEST_PATH: path.join(LOGS_DIR, 'manifest.json'),
+  SUMMARY_PATH: path.join(LOGS_DIR, 'e2e-summary.json'),
   RERUN_SIGNAL: path.join(LOGS_DIR, '.rerun'),
   RESTART_SIGNAL: path.join(LOGS_DIR, '.restart'),
 }))
@@ -21,9 +23,7 @@ vi.mock('./paths', () => ({
 const { slugify, default: SummaryReporter } = await import('./summary-reporter')
 
 afterEach(() => {
-  if (fs.existsSync(path.join(LOGS_DIR, 'e2e-summary.json'))) {
-    fs.unlinkSync(path.join(LOGS_DIR, 'e2e-summary.json'))
-  }
+  fs.rmSync(LOGS_DIR, { recursive: true, force: true })
   while (tmpDirs.length > 1) fs.rmSync(tmpDirs.pop()!, { recursive: true, force: true })
 })
 
@@ -68,6 +68,7 @@ describe('SummaryReporter', () => {
     const out = JSON.parse(
       fs.readFileSync(path.join(LOGS_DIR, 'e2e-summary.json'), 'utf-8'),
     )
+    expect(out.complete).toBe(true)
     expect(out.total).toBe(2)
     expect(out.passed).toBe(1)
     expect(out.failed).toEqual([
@@ -115,7 +116,7 @@ describe('SummaryReporter', () => {
     const out = JSON.parse(
       fs.readFileSync(path.join(LOGS_DIR, 'e2e-summary.json'), 'utf-8'),
     )
-    expect(out).toEqual({ total: 2, passed: 2, failed: [] })
+    expect(out).toEqual({ complete: true, total: 2, passed: 2, failed: [] })
   })
 
   it('creates LOGS_DIR if it does not exist', () => {
@@ -123,5 +124,52 @@ describe('SummaryReporter', () => {
     const r = new SummaryReporter()
     r.onEnd({} as any)
     expect(fs.existsSync(path.join(LOGS_DIR, 'e2e-summary.json'))).toBe(true)
+  })
+
+  it('writes a partial summary after onTestEnd before onEnd runs (complete: false)', () => {
+    const r = new SummaryReporter()
+    r.onTestEnd(mkTest('first one', '/a.spec.ts', 5), mkResult())
+    const out = JSON.parse(
+      fs.readFileSync(path.join(LOGS_DIR, 'e2e-summary.json'), 'utf-8'),
+    )
+    expect(out.complete).toBe(false)
+    expect(out.total).toBe(1)
+    expect(out.passed).toBe(1)
+    expect(out.failed).toEqual([])
+  })
+
+  it('enriches failed[].logs on every write when manifest + tagged service log are present', () => {
+    fs.mkdirSync(LOGS_DIR, { recursive: true })
+    const svcLog = path.join(LOGS_DIR, 'api.log')
+    const slug = 'test-case-broken-checkout'
+    fs.writeFileSync(
+      svcLog,
+      `irrelevant prelude\n<${slug}>\nERROR boom at line 42\n</${slug}>\ntrailing noise\n`,
+    )
+    fs.writeFileSync(
+      path.join(LOGS_DIR, 'manifest.json'),
+      JSON.stringify({ serviceLogs: [svcLog] }),
+    )
+
+    const r = new SummaryReporter()
+    r.onTestEnd(
+      mkTest('broken checkout'),
+      mkResult({ status: 'failed', error: { message: 'nope' } }),
+    )
+
+    const partial = JSON.parse(
+      fs.readFileSync(path.join(LOGS_DIR, 'e2e-summary.json'), 'utf-8'),
+    )
+    expect(partial.complete).toBe(false)
+    expect(partial.failed).toHaveLength(1)
+    expect(partial.failed[0].name).toBe(slug)
+    expect(partial.failed[0].logs).toEqual({ api: 'ERROR boom at line 42' })
+
+    r.onEnd({} as any)
+    const finalOut = JSON.parse(
+      fs.readFileSync(path.join(LOGS_DIR, 'e2e-summary.json'), 'utf-8'),
+    )
+    expect(finalOut.complete).toBe(true)
+    expect(finalOut.failed[0].logs).toEqual({ api: 'ERROR boom at line 42' })
   })
 })

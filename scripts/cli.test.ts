@@ -30,6 +30,8 @@ describe('printUsage', () => {
     spy.mockRestore()
     expect(out).toContain('canary-lab init <folder>')
     expect(out).toContain('canary-lab run')
+    expect(out).toContain('--benchmark-mode canary|baseline')
+    expect(out).not.toContain('--benchmark-max-cycles')
     expect(out).toContain('canary-lab env')
     expect(out).toContain('canary-lab new-feature <name>')
     expect(out).toContain('canary-lab upgrade')

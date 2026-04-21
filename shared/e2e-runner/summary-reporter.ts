@@ -7,6 +7,7 @@ import type {
   TestResult,
 } from '@playwright/test/reporter'
 import { LOGS_DIR } from './paths'
+import { enrichSummaryWithLogs } from './log-enrichment'
 
 export function slugify(title: string): string {
   return title
@@ -48,10 +49,18 @@ class SummaryReporter implements Reporter {
       location: `${test.location.file}:${test.location.line}`,
       retry: result.retry,
     })
+    this.writeSummary(false)
+    enrichSummaryWithLogs()
   }
 
   onEnd(_result: FullResult): void {
+    this.writeSummary(true)
+    enrichSummaryWithLogs()
+  }
+
+  private writeSummary(complete: boolean): void {
     const summary = {
+      complete,
       total: this.results.length,
       passed: this.results.filter((r) => r.passed).length,
       failed: this.results
@@ -66,10 +75,10 @@ class SummaryReporter implements Reporter {
     }
 
     fs.mkdirSync(LOGS_DIR, { recursive: true })
-    fs.writeFileSync(
-      path.join(LOGS_DIR, 'e2e-summary.json'),
-      JSON.stringify(summary, null, 2) + '\n',
-    )
+    const finalPath = path.join(LOGS_DIR, 'e2e-summary.json')
+    const tmpPath = `${finalPath}.tmp`
+    fs.writeFileSync(tmpPath, JSON.stringify(summary, null, 2) + '\n')
+    fs.renameSync(tmpPath, finalPath)
   }
 }
 

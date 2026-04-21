@@ -15,9 +15,11 @@ function mkTmp(): string {
 const PATH_ROOT = mkTmp()
 const FEATURES_DIR = path.join(PATH_ROOT, 'features')
 const LOGS_DIR = path.join(PATH_ROOT, 'logs')
+const BENCHMARK_DIR = path.join(LOGS_DIR, 'benchmark')
 const PIDS_DIR = path.join(LOGS_DIR, 'pids')
 const MANIFEST_PATH = path.join(LOGS_DIR, 'manifest.json')
 const SUMMARY_PATH = path.join(LOGS_DIR, 'e2e-summary.json')
+const DIAGNOSIS_JOURNAL_PATH = path.join(LOGS_DIR, 'diagnosis-journal.json')
 fs.mkdirSync(FEATURES_DIR, { recursive: true })
 fs.mkdirSync(PIDS_DIR, { recursive: true })
 
@@ -25,9 +27,11 @@ vi.mock('./paths', () => ({
   ROOT: PATH_ROOT,
   FEATURES_DIR,
   LOGS_DIR,
+  BENCHMARK_DIR,
   PIDS_DIR,
   MANIFEST_PATH,
   SUMMARY_PATH,
+  DIAGNOSIS_JOURNAL_PATH,
   RERUN_SIGNAL: path.join(LOGS_DIR, '.rerun'),
   RESTART_SIGNAL: path.join(LOGS_DIR, '.restart'),
   HEAL_SIGNAL: path.join(LOGS_DIR, '.heal'),
@@ -101,8 +105,6 @@ const {
   resolveRunningPid,
   writeManifest,
   discoverFeatures,
-  extractLogsForTest,
-  enrichSummaryWithLogs,
   printSummary,
   readFailureSignature,
   printManualOptions,
@@ -121,6 +123,8 @@ const {
   AUTO_HEAL_MAX_CYCLES,
   itermSessionIds,
 } = await import('./runner')
+const { createBenchmarkTracker } = await import('./benchmark')
+const { extractLogsForTest, enrichSummaryWithLogs } = await import('./log-enrichment')
 
 beforeEach(() => {
   execFileSync.mockReset()
@@ -290,6 +294,8 @@ describe('parseFlags', () => {
       headed: false,
       terminal: 'iTerm',
       healSession: 'resume',
+      benchmark: false,
+      benchmarkMode: 'canary',
     })
   })
 
@@ -310,6 +316,18 @@ describe('parseFlags', () => {
     expect(parseFlags(['--heal-session', 'new']).healSession).toBe('new')
     expect(parseFlags(['--heal-session=resume']).healSession).toBe('resume')
     expect(() => parseFlags(['--heal-session', 'maybe'])).toThrow(/--heal-session/)
+  })
+
+  it('parses benchmark flags in both split and equals forms', () => {
+    expect(parseFlags(['--benchmark']).benchmark).toBe(true)
+    expect(parseFlags(['--benchmark-mode', 'baseline']).benchmarkMode).toBe('baseline')
+    expect(parseFlags(['--benchmark-mode=canary']).benchmarkMode).toBe('canary')
+  })
+
+  it('rejects invalid benchmark mode and removed benchmark flags', () => {
+    expect(() => parseFlags(['--benchmark-mode', 'full'])).toThrow(/--benchmark-mode/)
+    expect(() => parseFlags(['--benchmark-label', 'foo'])).toThrow(/Unknown flag/)
+    expect(() => parseFlags(['--benchmark-max-cycles', '3'])).toThrow(/Unknown flag/)
   })
 
   it('throws on unknown flag', () => {
@@ -1033,6 +1051,47 @@ describe('maybeAutoHeal', () => {
     expect(state.spawnCount).toBe(1)
     expect(state.lastSignature).toBe('a')
     expect(state.disabled).toBe(false)
+  })
+
+  it('writes benchmark context artifacts when benchmark mode is enabled', async () => {
+    fs.writeFileSync(
+      SUMMARY_PATH,
+      JSON.stringify({
+        failed: [{ name: 'a', logs: { 'svc-api': 'boom happened' } }],
+      }),
+    )
+    fs.writeFileSync(DIAGNOSIS_JOURNAL_PATH, JSON.stringify([{ hypothesis: 'x' }]))
+    fs.writeFileSync(MANIFEST_PATH, JSON.stringify({ serviceLogs: [] }))
+    spawnHealAgent.mockResolvedValueOnce('signal')
+    vi.spyOn(console, 'log').mockImplementation(() => {})
+
+    const tracker = createBenchmarkTracker({
+      runId: 'run-1',
+      feature: 'checkout',
+      benchmarkMode: 'canary',
+      startedAt: '2026-04-21T00:00:00.000Z',
+      modelProvider: 'claude',
+      maxCycles: 3,
+      headed: false,
+      autoHealEnabled: true,
+      healSession: 'resume',
+    })
+
+    await maybeAutoHeal(
+      { agent: 'claude', sessionMode: 'resume' },
+      freshState(),
+      'iTerm',
+      tracker,
+      'canary',
+      3,
+    )
+
+    expect(fs.existsSync(path.join(BENCHMARK_DIR, 'context', 'cycle-1.json'))).toBe(true)
+    expect(spawnHealAgent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        benchmarkUsageFile: path.join(BENCHMARK_DIR, 'usage', 'cycle-1.jsonl'),
+      }),
+    )
   })
 
   it('increments strikeCount when the signature repeats', async () => {

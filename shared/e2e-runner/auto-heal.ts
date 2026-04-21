@@ -29,6 +29,8 @@ export interface SpawnHealAgentOptions {
   sessionMode: HealSessionMode
   cycle: number
   terminal: TerminalChoice
+  promptAddendum?: string
+  benchmarkUsageFile?: string
 }
 
 const HEAL_PROMPT_FILE = path.join(LOGS_DIR, '.heal-prompt.txt')
@@ -118,14 +120,21 @@ export function buildAgentCommand(
   return `codex exec ${codexBase} ${promptSub} | ${formatter}`
 }
 
-function writeHealScript(agentCommand: string, banner: string): void {
+function writeHealScript(
+  agentCommand: string,
+  banner: string,
+  benchmarkUsageFile?: string,
+): void {
+  const benchmarkEnv = benchmarkUsageFile
+    ? `export CANARY_LAB_BENCHMARK_USAGE_FILE=${JSON.stringify(benchmarkUsageFile)}\n`
+    : ''
   const script = `#!/bin/bash
 set +e
 echo ${JSON.stringify(banner)}
 echo "[canary-lab] starting heal agent — streaming progress below."
 echo "[canary-lab] agent will write logs/.rerun (or logs/.restart) when done."
 echo ""
-${agentCommand}
+${benchmarkEnv}${benchmarkEnv ? '\n' : ''}${benchmarkUsageFile ? `mkdir -p ${JSON.stringify(path.dirname(benchmarkUsageFile))}\n` : ''}${benchmarkUsageFile ? `: > ${JSON.stringify(benchmarkUsageFile)}\n` : ''}${benchmarkUsageFile ? '\n' : ''}${agentCommand}
 status=\${PIPESTATUS[0]}
 echo "$status" > ${JSON.stringify(HEAL_DONE_FILE)}
 echo ""
@@ -239,7 +248,10 @@ export async function spawnHealAgent(
 ): Promise<HealResult> {
   fs.mkdirSync(LOGS_DIR, { recursive: true })
 
-  const prompt = loadPrompt(opts.agent)
+  const prompt = [
+    loadPrompt(opts.agent),
+    opts.promptAddendum?.trim(),
+  ].filter(Boolean).join('\n\n')
   fs.writeFileSync(HEAL_PROMPT_FILE, prompt)
 
   const agentCommand = buildAgentCommand(
@@ -248,7 +260,7 @@ export async function spawnHealAgent(
     opts.cycle,
     HEAL_PROMPT_FILE,
   )
-  writeHealScript(agentCommand, healAgentBanner(opts.agent))
+  writeHealScript(agentCommand, healAgentBanner(opts.agent), opts.benchmarkUsageFile)
 
   unlinkSafe(HEAL_DONE_FILE)
 

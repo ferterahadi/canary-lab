@@ -40,7 +40,20 @@ import {
   closeLastHealAgentTab,
   type HealAgent,
   type HealSessionMode,
+  type HealResult,
 } from './auto-heal'
+import {
+  createBenchmarkTracker,
+  finalizeBenchmarkCycle,
+  finalizeBenchmarkRun,
+  noteBenchmarkSignal,
+  startBenchmarkCycle,
+  type BenchmarkTracker,
+} from './benchmark'
+import {
+  buildBenchmarkContextSnapshot,
+  type BenchmarkMode,
+} from './context-assembler'
 
 export function safeReadFile(file: string): string | null {
   try {
@@ -55,6 +68,11 @@ type TerminalChoice = 'iTerm' | 'Terminal'
 interface AutoHealConfig {
   agent: HealAgent | null
   sessionMode: HealSessionMode
+}
+
+interface BenchmarkConfig {
+  enabled: boolean
+  mode: BenchmarkMode
 }
 
 export const AUTO_HEAL_MAX_CYCLES = 3
@@ -505,52 +523,6 @@ export function runPlaywright(featureDir: string, headed: boolean): Promise<numb
   })
 }
 
-// ─── Log enrichment ─────────────────────────────────────────────────────────
-export function extractLogsForTest(
-  slug: string,
-  serviceLogs: string[],
-): Record<string, string> {
-  const logs: Record<string, string> = {}
-  const openTag = `<${slug}>`
-  const closeTag = `</${slug}>`
-
-  for (const logPath of serviceLogs) {
-    if (!fs.existsSync(logPath)) continue
-    const content = fs.readFileSync(logPath, 'utf-8')
-    const openIdx = content.indexOf(openTag)
-    const closeIdx = content.indexOf(closeTag)
-    if (openIdx === -1 || closeIdx === -1 || closeIdx <= openIdx) continue
-    const snippet = content
-      .slice(openIdx + openTag.length, closeIdx)
-      .trim()
-    if (snippet.length > 0) {
-      const svcName = path.basename(logPath, '.log')
-      logs[svcName] = snippet
-    }
-  }
-  return logs
-}
-
-export function enrichSummaryWithLogs(): void {
-  if (!fs.existsSync(SUMMARY_PATH) || !fs.existsSync(MANIFEST_PATH)) return
-
-  const summary = JSON.parse(fs.readFileSync(SUMMARY_PATH, 'utf-8'))
-  const manifest: { serviceLogs: string[] } = JSON.parse(
-    fs.readFileSync(MANIFEST_PATH, 'utf-8'),
-  )
-
-  if (!Array.isArray(summary.failed) || summary.failed.length === 0) return
-
-  // Enrich: replace string slugs with {name, logs} objects
-  summary.failed = summary.failed.map((entry: string | { name: string }) => {
-    const slug = typeof entry === 'string' ? entry : entry.name
-    const logs = extractLogsForTest(slug, manifest.serviceLogs)
-    return { name: slug, logs }
-  })
-
-  fs.writeFileSync(SUMMARY_PATH, JSON.stringify(summary, null, 2) + '\n')
-}
-
 // ─── Summary ────────────────────────────────────────────────────────────────
 export function printSummary(): void {
   if (!fs.existsSync(SUMMARY_PATH)) {
@@ -608,11 +580,14 @@ export async function maybeAutoHeal(
   autoHeal: AutoHealConfig,
   state: HealCycleState,
   terminal: TerminalChoice,
-): Promise<void> {
-  if (autoHeal.agent === null || state.disabled) return
+  benchmark: BenchmarkTracker | null = null,
+  benchmarkMode: BenchmarkMode = 'canary',
+  maxCycles = AUTO_HEAL_MAX_CYCLES,
+): Promise<HealResult | null> {
+  if (autoHeal.agent === null || state.disabled) return null
 
   const signature = readFailureSignature()
-  if (signature === '') return // no failures recorded
+  if (signature === '') return null // no failures recorded
 
   if (signature === state.lastSignature) {
     state.strikeCount += 1
@@ -621,30 +596,46 @@ export async function maybeAutoHeal(
     state.lastSignature = signature
   }
 
-  if (state.strikeCount >= AUTO_HEAL_MAX_CYCLES) {
+  if (state.strikeCount >= maxCycles) {
     console.log(
-      `\n  Auto-heal gave up after ${AUTO_HEAL_MAX_CYCLES} cycles on the same failure set.`,
+      `\n  Auto-heal gave up after ${maxCycles} cycles on the same failure set.`,
     )
     printManualOptions(true)
     state.disabled = true
-    return
+    if (benchmark?.pending) {
+      finalizeBenchmarkCycle(benchmark, 'max_cycles_reached', false)
+    }
+    if (benchmark) {
+      finalizeBenchmarkRun(benchmark, 'max_cycles_reached', false)
+    }
+    return null
   }
 
   console.log(
-    `\n  Auto-heal: spawning ${autoHeal.agent} (strike ${state.strikeCount + 1}/${AUTO_HEAL_MAX_CYCLES})...`,
+    `\n  Auto-heal: spawning ${autoHeal.agent} (strike ${state.strikeCount + 1}/${maxCycles})...`,
   )
+
+  const cycle = state.spawnCount + 1
+  const snapshot = benchmark
+    ? buildBenchmarkContextSnapshot(benchmark.run.runId, cycle, benchmarkMode)
+    : null
+  const usageFile = benchmark && snapshot
+    ? startBenchmarkCycle(benchmark, cycle, signature, snapshot)
+    : undefined
 
   const result = await spawnHealAgent({
     agent: autoHeal.agent,
     sessionMode: autoHeal.sessionMode,
     cycle: state.spawnCount,
     terminal,
+    promptAddendum: snapshot?.promptAddendum,
+    benchmarkUsageFile: usageFile,
   })
   state.spawnCount += 1
 
   if (result === 'signal') {
     console.log('  Auto-heal: agent wrote a signal — re-running tests.')
-    return
+    return result
   }
 
   if (result === 'agent_exited_no_signal') {
@@ -655,6 +646,13 @@ export async function maybeAutoHeal(
     console.log('\n  Auto-heal: timed out waiting for agent (10 min).')
   }
   printManualOptions(true)
+  if (benchmark?.pending) {
+    finalizeBenchmarkCycle(benchmark, result, false)
+  }
+  if (benchmark) {
+    finalizeBenchmarkRun(benchmark, result, false)
+  }
+  return result
 }
 
 async function watchMode(
@@ -663,6 +661,9 @@ async function watchMode(
   headed: boolean,
   terminal: TerminalChoice,
   autoHeal: AutoHealConfig,
+  benchmark: BenchmarkTracker | null,
+  benchmarkMode: BenchmarkMode,
+  maxCycles: number,
 ): Promise<never> {
   // Clean any stale signal files
   try { fs.unlinkSync(RERUN_SIGNAL) } catch { /* ignore */ }
@@ -696,7 +697,7 @@ async function watchMode(
   printBanner()
 
   // If we already have failures from the initial run, trigger auto-heal before polling.
-  await maybeAutoHeal(autoHeal, cycleState, terminal)
+  await maybeAutoHeal(autoHeal, cycleState, terminal, benchmark, benchmarkMode, maxCycles)
   if (!autoHeal.agent && readFailureSignature() !== '') {
     // Auto-heal wasn't selected; surface the manual escape hatches so the user
     // isn't left wondering what to do with a red test board.
@@ -758,9 +759,13 @@ async function watchMode(
       cycleState.strikeCount = 0
       cycleState.lastSignature = ''
       cycleState.disabled = false
-      await maybeAutoHeal(autoHeal, cycleState, terminal)
+      await maybeAutoHeal(autoHeal, cycleState, terminal, benchmark, benchmarkMode, maxCycles)
       printBanner()
       continue
+    }
+
+    if (benchmark) {
+      noteBenchmarkSignal(benchmark, doRestart ? '.restart' : '.rerun')
     }
 
     if (doRestart) {
@@ -775,10 +780,17 @@ async function watchMode(
       `\n  Re-running Playwright tests${headed ? ' (headed)' : ''}...\n`,
     )
     await runPlaywright(featureDir, headed)
-    enrichSummaryWithLogs()
     printSummary()
 
-    await maybeAutoHeal(autoHeal, cycleState, terminal)
+    const greenAfterCycle = readFailureSignature() === ''
+    if (benchmark?.pending) {
+      finalizeBenchmarkCycle(benchmark, 'completed', greenAfterCycle)
+      if (greenAfterCycle) {
+        finalizeBenchmarkRun(benchmark, 'green', true)
+      }
+    }
+
+    await maybeAutoHeal(autoHeal, cycleState, terminal, benchmark, benchmarkMode, maxCycles)
 
     // If tests are green now, no next heal cycle will fire — close the
     // lingering "you can close this tab" heal tab so it doesn't stick
@@ -797,10 +809,18 @@ interface RunFlags {
   headed: boolean
   terminal: TerminalChoice
   healSession: HealSessionMode
+  benchmark: boolean
+  benchmarkMode: BenchmarkMode
 }
 
 export function parseFlags(args: string[]): RunFlags {
-  const flags: RunFlags = { headed: false, terminal: 'iTerm', healSession: 'resume' }
+  const flags: RunFlags = {
+    headed: false,
+    terminal: 'iTerm',
+    healSession: 'resume',
+    benchmark: false,
+    benchmarkMode: 'canary',
+  }
   const readValue = (arg: string, name: string, next: string | undefined): string => {
     if (arg.startsWith(`${name}=`)) return arg.slice(name.length + 1)
     if (next === undefined) throw new Error(`${name} requires a value`)
@@ -822,6 +842,15 @@ export function parseFlags(args: string[]): RunFlags {
         throw new Error(`--heal-session must be "resume" or "new" (got "${value}")`)
       }
       flags.healSession = value
+    } else if (arg === '--benchmark') {
+      flags.benchmark = true
+    } else if (arg === '--benchmark-mode' || arg.startsWith('--benchmark-mode=')) {
+      const value = readValue(arg, '--benchmark-mode', arg.includes('=') ? undefined : args[++i])
+      if (value !== 'canary' && value !== 'baseline') {
+        throw new Error(`--benchmark-mode must be "canary" or "baseline" (got "${value}")`)
+      }
+      flags.benchmark = true
+      flags.benchmarkMode = value
     } else {
       throw new Error(`Unknown flag: ${arg}`)
     }
@@ -841,6 +870,7 @@ export async function main(argv: string[] = []) {
   let appliedFeatureDir = ''
   let cleanedUp = false
   let services: ServiceInfo[] = []
+  let benchmarkTracker: BenchmarkTracker | null = null
 
   // Cleanup stops all launched services and reverts env sets.
   const cleanup = () => {
@@ -872,7 +902,7 @@ export async function main(argv: string[] = []) {
     }
 
     if (envSetApplied) {
-        console.log('\n  Reverting env files...')
+      console.log('\n  Reverting env files...')
       try {
         execFileSync(process.execPath, [SWITCH_SCRIPT, appliedFeatureDir, '--revert'], {
           stdio: 'inherit',
@@ -882,6 +912,10 @@ export async function main(argv: string[] = []) {
           '  Warning: env revert failed. Run `yarn env:revert` manually.',
         )
       }
+    }
+
+    if (benchmarkTracker && !benchmarkTracker.finalized) {
+      finalizeBenchmarkRun(benchmarkTracker, 'interrupted', false)
     }
   }
 
@@ -959,6 +993,25 @@ export async function main(argv: string[] = []) {
       console.log('    • or fix the code and `touch logs/.rerun`')
     }
 
+    const benchmarkConfig: BenchmarkConfig = {
+      enabled: flags.benchmark,
+      mode: flags.benchmarkMode,
+    }
+    if (benchmarkConfig.enabled) {
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-')
+      benchmarkTracker = createBenchmarkTracker({
+        runId: `${stamp}_${feature.name}_${benchmarkConfig.mode}`,
+        feature: feature.name,
+        benchmarkMode: benchmarkConfig.mode,
+        startedAt: new Date().toISOString(),
+        modelProvider: autoHeal.agent,
+        maxCycles: AUTO_HEAL_MAX_CYCLES,
+        headed,
+        autoHealEnabled: autoHeal.agent !== null,
+        healSession: autoHeal.sessionMode,
+      })
+    }
+
     // ── 6. Check repos
     console.log('\n  Checking prerequisites...')
     if (!checkRepos(feature)) {
@@ -1028,12 +1081,25 @@ export async function main(argv: string[] = []) {
     console.log(`  Running Playwright tests${headed ? ' (headed)' : ''}...\n`)
     await runPlaywright(feature.featureDir, headed)
 
-    // ── 12. Enrich summary with log snippets and print
-    enrichSummaryWithLogs()
+    // ── 12. Print summary (SummaryReporter has already enriched it)
     printSummary()
+    if (benchmarkTracker && readFailureSignature() === '') {
+      finalizeBenchmarkRun(benchmarkTracker, 'green', true)
+    } else if (benchmarkTracker && autoHeal.agent === null) {
+      finalizeBenchmarkRun(benchmarkTracker, 'manual_only', false)
+    }
 
     // ── 13. Enter watch mode (loops forever until Ctrl+C)
-    await watchMode(services, feature.featureDir, headed, terminalChoice, autoHeal)
+    await watchMode(
+      services,
+      feature.featureDir,
+      headed,
+      terminalChoice,
+      autoHeal,
+      benchmarkTracker,
+      flags.benchmarkMode,
+      AUTO_HEAL_MAX_CYCLES,
+    )
   } catch (err) {
     cleanup()
     throw err

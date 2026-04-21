@@ -11,7 +11,7 @@ export function printUsage(): void {
 
 Usage:
   canary-lab init <folder> [--package-spec <spec>]
-  canary-lab run [--headed] [--terminal iTerm|Terminal]
+  canary-lab run [--headed] [--terminal iTerm|Terminal] [--heal-session resume|new] [--benchmark] [--benchmark-mode canary|baseline]
   canary-lab env
   canary-lab new-feature <name> [description]
   canary-lab upgrade [--silent]
