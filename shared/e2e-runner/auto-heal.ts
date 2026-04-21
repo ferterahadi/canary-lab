@@ -33,6 +33,16 @@ export interface SpawnHealAgentOptions {
   promptAddendum?: string
   benchmarkUsageFile?: string
   benchmarkMode?: BenchmarkMode
+  // Directory to spawn the agent tab in. Defaults to ROOT. Baseline uses a
+  // sandbox outside the project so Claude Code / Codex don't auto-discover
+  // `.claude/skills/*` or `CLAUDE.md` / `AGENTS.md` from the repo — those
+  // would leak canary-lab methodology into a supposedly vanilla run.
+  agentCwd?: string
+  // Baseline-only overrides for absolute paths used inside the prompt (the
+  // agent works from a sandbox cwd, so relative paths won't resolve).
+  baselinePlaywrightLogPath?: string
+  baselineSignalFilePath?: string
+  baselineRepoPaths?: string[]
 }
 
 // Baseline benchmark mode runs as if canary-lab didn't exist: no heal-loop
@@ -41,13 +51,27 @@ export interface SpawnHealAgentOptions {
 // would see) and figures everything else out itself. We still reuse the
 // `.rerun` / `.restart` signal files so the runner's watch loop keeps working
 // — that's pure infra, not methodology, and it's cheap to describe inline.
-export const BASELINE_VANILLA_PROMPT = [
-  'Playwright tests just failed. The raw test output is in `logs/playwright-stdout.log` — read that file to see which tests failed and why.',
-  '',
-  'Figure out where the bug is in the codebase, fix it, and exit. Assume the tests are correct; fix the application/service code to match.',
-  '',
-  'Before you exit, write a file at `logs/.restart` (any content — a single line is fine). The runner polls for this file and will rebuild services and re-run the tests when it appears.',
-].join('\n')
+//
+// The prompt is built at runtime because baseline now sandboxes the agent cwd
+// outside the project — the agent needs absolute paths to reach the log and
+// the signal-file location inside the real workspace.
+export function buildBaselineVanillaPrompt(args: {
+  playwrightLogPath: string
+  signalFilePath: string
+  repoPaths?: string[]
+}): string {
+  const reposLine = args.repoPaths && args.repoPaths.length > 0
+    ? `\n\nRepositories you may need to edit (use absolute paths):\n${args.repoPaths.map((p) => `- ${p}`).join('\n')}`
+    : ''
+  return [
+    `Playwright tests just failed. The raw test output is at \`${args.playwrightLogPath}\` — read that file to see which tests failed and why.`,
+    '',
+    'Figure out where the bug is in the codebase, fix it, and exit. Assume the tests are correct; fix the application/service code to match.',
+    `${reposLine}`,
+    '',
+    `Before you exit, write a file at \`${args.signalFilePath}\` (any content — a single line is fine). The test runner polls for this file and will rebuild services and re-run the tests when it appears.`,
+  ].join('\n')
+}
 
 const HEAL_PROMPT_FILE = path.join(LOGS_DIR, '.heal-prompt.txt')
 const HEAL_SCRIPT_FILE = path.join(LOGS_DIR, '.heal-agent.sh')
@@ -93,8 +117,14 @@ export function loadPrompt(agent: HealAgent, promptPath: string = promptPathFor(
 }
 
 export function healAgentBanner(agent: HealAgent): string {
-  // \x1b[1;36m bold cyan, \x1b[2m dim, \x1b[0m reset
-  return `\x1b[1;36m▶ canary-lab\x1b[0m  heal agent — \x1b[1m${agent}\x1b[0m \x1b[2m(using your CLI profile defaults for model + reasoning)\x1b[0m`
+  return `[canary-lab] heal agent — ${agent} (using your CLI profile defaults for model + reasoning)`
+}
+
+// Bash ANSI-C quoted variant — used inside the generated .heal-agent.sh so the
+// tab shows a colored banner. Bash decodes \e, \033 inside $'...'; JSON escapes
+// like \u001b would NOT be decoded, so we avoid raw escape bytes here.
+function healAgentBannerBash(agent: HealAgent): string {
+  return `$'\\e[1;36m▶ canary-lab\\e[0m  heal agent — \\e[1m${agent}\\e[0m \\e[2m(using your CLI profile defaults for model + reasoning)\\e[0m'`
 }
 
 export function buildAgentCommand(
@@ -139,28 +169,32 @@ export function buildAgentCommand(
 
 function writeHealScript(
   agentCommand: string,
-  banner: string,
+  agent: HealAgent,
   benchmarkUsageFile?: string,
 ): void {
   const benchmarkEnv = benchmarkUsageFile
     ? `export CANARY_LAB_BENCHMARK_USAGE_FILE=${JSON.stringify(benchmarkUsageFile)}\n`
     : ''
+  // Bash ANSI-C quoting ($'...') decodes \e, \033. We prefer this over
+  // printf '%b' with a JSON-stringified banner because JSON encodes ESC as
+  // \uXXXX which printf %b does NOT interpret.
+  const banner = healAgentBannerBash(agent)
   const script = `#!/bin/bash
 set +e
-printf '%b\\n' ${JSON.stringify(banner)}
-printf '\\033[2m›\\033[0m starting heal agent — streaming progress below.\\n'
-printf '\\033[2m›\\033[0m agent will write \\033[36mlogs/.rerun\\033[0m (or \\033[36mlogs/.restart\\033[0m) when done.\\n'
-printf '\\n'
+echo ${banner}
+echo $'\\e[2m›\\e[0m starting heal agent — streaming progress below.'
+echo $'\\e[2m›\\e[0m agent will write \\e[36mlogs/.rerun\\e[0m (or \\e[36mlogs/.restart\\e[0m) when done.'
+echo ""
 ${benchmarkEnv}${benchmarkEnv ? '\n' : ''}${benchmarkUsageFile ? `mkdir -p ${JSON.stringify(path.dirname(benchmarkUsageFile))}\n` : ''}${benchmarkUsageFile ? `: > ${JSON.stringify(benchmarkUsageFile)}\n` : ''}${benchmarkUsageFile ? '\n' : ''}${agentCommand}
 status=\${PIPESTATUS[0]}
 echo "$status" > ${JSON.stringify(HEAL_DONE_FILE)}
-printf '\\n'
+echo ""
 if [ "$status" = "0" ]; then
-  printf '\\033[32m✓\\033[0m agent exited with status %s\\n' "$status"
+  echo $'\\e[32m✓\\e[0m agent exited with status '"$status"
 else
-  printf '\\033[31m✗\\033[0m agent exited with status %s\\n' "$status"
+  echo $'\\e[31m✗\\e[0m agent exited with status '"$status"
 fi
-printf '\\033[2mYou can close this tab.\\033[0m\\n'
+echo $'\\e[2mYou can close this tab.\\e[0m'
 `
   fs.writeFileSync(HEAL_SCRIPT_FILE, script, { mode: 0o755 })
 }
@@ -200,9 +234,10 @@ function openTab(
   command: string,
   cycle: number,
   agent: HealAgent,
+  cwd: string = ROOT,
 ): void {
   const tab = {
-    dir: ROOT,
+    dir: cwd,
     command,
     name: `heal-agent-${agent}-${cycle + 1}`,
   }
@@ -270,7 +305,11 @@ export async function spawnHealAgent(
   fs.mkdirSync(LOGS_DIR, { recursive: true })
 
   const basePrompt = opts.benchmarkMode === 'baseline'
-    ? BASELINE_VANILLA_PROMPT
+    ? buildBaselineVanillaPrompt({
+        playwrightLogPath: opts.baselinePlaywrightLogPath ?? path.join(LOGS_DIR, 'playwright-stdout.log'),
+        signalFilePath: opts.baselineSignalFilePath ?? RESTART_SIGNAL,
+        repoPaths: opts.baselineRepoPaths,
+      })
     : loadPrompt(opts.agent)
   const prompt = [
     basePrompt,
@@ -284,12 +323,12 @@ export async function spawnHealAgent(
     opts.cycle,
     HEAL_PROMPT_FILE,
   )
-  writeHealScript(agentCommand, healAgentBanner(opts.agent), opts.benchmarkUsageFile)
+  writeHealScript(agentCommand, opts.agent, opts.benchmarkUsageFile)
 
   unlinkSafe(HEAL_DONE_FILE)
 
   const tabCommand = `bash ${HEAL_SCRIPT_FILE}`
-  openTab(opts.terminal, tabCommand, opts.cycle, opts.agent)
+  openTab(opts.terminal, tabCommand, opts.cycle, opts.agent, opts.agentCwd)
 
   return waitForResult()
 }

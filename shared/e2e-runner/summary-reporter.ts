@@ -6,8 +6,8 @@ import type {
   TestCase,
   TestResult,
 } from '@playwright/test/reporter'
-import { LOGS_DIR } from './paths'
-import { enrichSummaryWithLogs } from './log-enrichment'
+import { getSummaryPath } from './paths'
+import { enrichSummaryWithLogs, writeHealIndex } from './log-enrichment'
 
 export function slugify(title: string): string {
   return title
@@ -51,7 +51,11 @@ class SummaryReporter implements Reporter {
     })
     this.writeSummary(false)
     if (process.env.CANARY_LAB_BENCHMARK_MODE !== 'baseline') {
+      // Cheap: extracts XML-scoped slices from svc logs + writes small files +
+      // builds the markdown index. Keeps mid-run heal workflows healthy (user
+      // can Ctrl+C and spawn the agent before the run finishes).
       enrichSummaryWithLogs()
+      writeHealIndex()
     }
   }
 
@@ -59,6 +63,7 @@ class SummaryReporter implements Reporter {
     this.writeSummary(true)
     if (process.env.CANARY_LAB_BENCHMARK_MODE !== 'baseline') {
       enrichSummaryWithLogs()
+      writeHealIndex()
     }
   }
 
@@ -78,8 +83,8 @@ class SummaryReporter implements Reporter {
         })),
     }
 
-    fs.mkdirSync(LOGS_DIR, { recursive: true })
-    const finalPath = path.join(LOGS_DIR, 'e2e-summary.json')
+    const finalPath = getSummaryPath()
+    fs.mkdirSync(path.dirname(finalPath), { recursive: true })
     const tmpPath = `${finalPath}.tmp`
     fs.writeFileSync(tmpPath, JSON.stringify(summary, null, 2) + '\n')
     fs.renameSync(tmpPath, finalPath)

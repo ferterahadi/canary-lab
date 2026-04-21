@@ -2,6 +2,7 @@ import fs from 'fs'
 import path from 'path'
 import {
   DIAGNOSIS_JOURNAL_PATH,
+  HEAL_INDEX_PATH,
   MANIFEST_PATH,
   PLAYWRIGHT_STDOUT_PATH,
   ROOT,
@@ -142,61 +143,78 @@ export function buildBenchmarkContextSnapshot(
     }
   }
 
-  const summaryRaw = safeRead(SUMMARY_PATH)
+  // Canary's entry point is now logs/heal-index.md — a compact markdown that
+  // references per-failure slice files under logs/failed/<slug>/. The bloated
+  // e2e-summary.json-first path is dead; that file ballooned past Claude's
+  // 256KB Read cap on real runs and forced the agent to hack around with
+  // `node -e JSON.stringify(...)`.
+  const indexRaw = safeRead(HEAL_INDEX_PATH)
   const journalRaw = safeRead(DIAGNOSIS_JOURNAL_PATH)
-  const summary = parseSummary(summaryRaw)
-  const summaryForMetrics = summaryRaw ?? ''
-  const includedLogFiles: string[] = []
-  const includedLogSlices: Record<string, number> = {}
-  let journalPath: string | null = null
-  let journalBytes = 0
+  const summary = parseSummary(safeRead(SUMMARY_PATH))
 
   const failed = Array.isArray(summary?.failed) ? summary.failed : []
+  const includedLogFiles: string[] = []
+  const includedLogSlices: Record<string, number> = {}
   for (const entry of failed) {
-    if (!entry?.logs || typeof entry.logs !== 'object') continue
-    for (const [svcName, snippet] of Object.entries(entry.logs)) {
-      if (typeof snippet !== 'string') continue
-      if (!includedLogFiles.includes(`logs/${svcName}.log`)) {
-        includedLogFiles.push(`logs/${svcName}.log`)
+    const logFiles = Array.isArray((entry as { logFiles?: unknown }).logFiles)
+      ? ((entry as { logFiles: unknown[] }).logFiles.filter((x) => typeof x === 'string') as string[])
+      : []
+    for (const rel of logFiles) {
+      if (!includedLogFiles.includes(rel)) includedLogFiles.push(rel)
+      try {
+        const size = fs.statSync(path.join(ROOT, rel)).size
+        const svcName = path.basename(rel, '.log')
+        includedLogSlices[svcName] = (includedLogSlices[svcName] ?? 0) + size
+      } catch {
+        /* slice file missing — leave it out of the byte count */
       }
-      includedLogSlices[svcName] = (includedLogSlices[svcName] ?? 0) + Buffer.byteLength(snippet, 'utf-8')
     }
   }
+
+  let journalPath: string | null = null
+  let journalBytes = 0
   if (journalRaw) {
     journalPath = DIAGNOSIS_JOURNAL_PATH
     journalBytes = byteLength(journalRaw)
   }
 
-  const summaryBytes = Buffer.byteLength(summaryForMetrics, 'utf-8')
+  const indexBytes = byteLength(indexRaw)
   const slicedLogBytes = Object.values(includedLogSlices).reduce((sum, value) => sum + value, 0)
-  const contextBytes = summaryBytes + journalBytes + slicedLogBytes
-  const contextChars = summaryForMetrics.length + (journalRaw?.length ?? 0) + slicedLogBytes
+  // indexBytes already references these; we count both so consumers comparing
+  // modes see the agent's realistic read budget (index + the slice files it's
+  // likely to drill into).
+  const contextBytes = indexBytes + slicedLogBytes
+  const contextChars = (indexRaw?.length ?? 0) + slicedLogBytes
 
+  // Supplemental reminder (not an override — the skill is the source of truth).
+  // Only fires during benchmark runs so we can measure canary's information
+  // advantage cleanly; non-benchmark runs get the same behavior from the skill.
   const promptAddendum = [
-    'Benchmark override: this is a canary benchmark run.',
-    `Read ${path.relative(ROOT, SUMMARY_PATH)} first.`,
-    'If logs/diagnosis-journal.json exists, you may read it.',
-    'Prefer the enriched failed[].logs slices already embedded in the summary before reading raw service logs.',
+    'Benchmark telemetry is on — same canary flow as usual, just reinforcing the entry points:',
+    `- Start with \`${path.relative(ROOT, HEAL_INDEX_PATH)}\` (compact markdown index of every failure, slice paths, and prior hypotheses).`,
+    '- For each failure you plan to fix, read its `logs/failed/<slug>/<svc>.log` slice (pre-capped, pre-scoped via XML markers).',
+    '- If a slice is elided in the middle, the full log is at `logs/svc-<name>.log` — drill in with `sed -n \'/<slug>/,/<\\/slug>/p\' logs/svc-<name>.log`.',
+    '- `logs/diagnosis-journal.json` has full history; the index summarizes the last 3 iterations — skip hypotheses already tried.',
   ].join('\n')
 
   return {
     runId,
     cycle,
     mode,
-    summaryPath: SUMMARY_PATH,
+    summaryPath: HEAL_INDEX_PATH,
     journalPath,
     includedLogFiles,
     includedFailedTests: failedTests(summary),
-    summaryBytes,
+    summaryBytes: indexBytes,
     journalBytes,
     includedLogSlices,
     excludedArtifacts: [],
-    filesIncluded: 1 + includedLogFiles.length + (journalPath ? 1 : 0),
+    filesIncluded: (indexRaw ? 1 : 0) + includedLogFiles.length + (journalPath ? 1 : 0),
     contextBytes,
     contextChars,
     slicedLogBytes,
     rawServiceLogBytesAvailable: sumRawServiceLogBytes(),
-    notes: 'Canary benchmark context: enriched summary with per-test log slices plus diagnosis journal when present',
+    notes: 'Canary benchmark context: heal-index.md entry point + per-failure slice files (capped, pre-scoped)',
     promptAddendum,
   }
 }
