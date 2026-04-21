@@ -1,4 +1,5 @@
 import fs from 'fs'
+import os from 'os'
 import path from 'path'
 import readline from 'readline'
 import { execFileSync, spawn } from 'child_process'
@@ -41,8 +42,8 @@ import {
   LOGS_DIR,
   PIDS_DIR,
   MANIFEST_PATH,
-  SUMMARY_PATH,
   PLAYWRIGHT_STDOUT_PATH,
+  getSummaryPath,
   RERUN_SIGNAL,
   RESTART_SIGNAL,
   HEAL_SIGNAL,
@@ -360,8 +361,23 @@ export async function pollHealthChecks(
   }
 }
 
-export function writeManifest(services: ServiceInfo[]): void {
-  const manifest = { serviceLogs: services.map((s) => s.logPath) }
+export function writeManifest(
+  services: ServiceInfo[],
+  feature?: FeatureConfig,
+): void {
+  const manifest: {
+    serviceLogs: string[]
+    featureName?: string
+    featureDir?: string
+    repoPaths?: string[]
+  } = { serviceLogs: services.map((s) => s.logPath) }
+  if (feature) {
+    manifest.featureName = feature.name
+    manifest.featureDir = feature.featureDir
+    manifest.repoPaths = (feature.repos ?? [])
+      .map((r) => resolvePath(r.localPath))
+      .filter((p) => fs.existsSync(p))
+  }
   fs.writeFileSync(MANIFEST_PATH, JSON.stringify(manifest, null, 2) + '\n')
 }
 
@@ -595,13 +611,14 @@ export function runPlaywright(
 
 // ─── Summary ────────────────────────────────────────────────────────────────
 export function printSummary(): void {
-  if (!fs.existsSync(SUMMARY_PATH)) {
+  const summaryPath = getSummaryPath()
+  if (!fs.existsSync(summaryPath)) {
     uiLine()
     warn('No summary file found.')
     return
   }
 
-  const summary = JSON.parse(fs.readFileSync(SUMMARY_PATH, 'utf-8'))
+  const summary = JSON.parse(fs.readFileSync(summaryPath, 'utf-8'))
   const failedCount = summary.failed.length
   const extras = failedCount > 0
     ? [
@@ -627,9 +644,10 @@ export function printSummary(): void {
 
 // ─── Watch mode ─────────────────────────────────────────────────────────────
 export function readFailureSignature(): string {
-  if (!fs.existsSync(SUMMARY_PATH)) return ''
+  const summaryPath = getSummaryPath()
+  if (!fs.existsSync(summaryPath)) return ''
   try {
-    const summary = JSON.parse(fs.readFileSync(SUMMARY_PATH, 'utf-8'))
+    const summary = JSON.parse(fs.readFileSync(summaryPath, 'utf-8'))
     return failureSignature(summary.failed)
   } catch {
     return ''
@@ -652,6 +670,31 @@ export function printManualOptions(autoHealConfigured: boolean): void {
   bullet(`open ${ansiC('cyan', '`claude`')} or ${ansiC('cyan', '`codex`')} in ${ansiPath(ROOT)} and send the prompt ${ansiC('cyan', '`self heal`')}`)
   bullet(`${ansiC('cyan', 'Ctrl+C')} to exit`)
   uiLine()
+}
+
+// Build a sandbox dir outside ROOT for baseline mode. Spawning the heal
+// agent with cwd here prevents Claude Code / Codex from auto-discovering
+// `.claude/skills/*`, `CLAUDE.md`, or `AGENTS.md` up the tree — those would
+// leak canary-lab methodology into a supposedly vanilla run.
+//
+// We copy playwright-stdout.log into the sandbox so the agent's "first
+// Read" lands on a local, present file. Writes (.restart) go back to the
+// real LOGS_DIR via the absolute path in the prompt.
+export function prepareBaselineSandbox(runId: string): {
+  sandboxDir: string
+  sandboxLogPath: string
+} {
+  const sandboxDir = path.join(os.tmpdir(), `canary-lab-baseline-${runId}`)
+  fs.mkdirSync(sandboxDir, { recursive: true })
+  const srcLog = PLAYWRIGHT_STDOUT_PATH
+  const sandboxLogPath = path.join(sandboxDir, 'playwright-stdout.log')
+  try {
+    fs.copyFileSync(srcLog, sandboxLogPath)
+  } catch {
+    // Source log may not exist yet on first cycle; agent will still see the
+    // absolute path and surface the miss itself.
+  }
+  return { sandboxDir, sandboxLogPath }
 }
 
 export async function maybeAutoHeal(
@@ -699,6 +742,25 @@ export async function maybeAutoHeal(
     ? startBenchmarkCycle(benchmark, cycle, signature, snapshot)
     : undefined
 
+  // Baseline must not see `.claude/`, `CLAUDE.md`, or `AGENTS.md` from the
+  // project — the CLIs auto-discover them, which leaks canary-lab into a
+  // supposedly vanilla run. Sandbox the agent cwd outside ROOT for baseline.
+  let agentCwd: string | undefined
+  let baselinePlaywrightLogPath: string | undefined
+  let baselineRepoPaths: string[] | undefined
+  if (benchmarkMode === 'baseline') {
+    const runId = benchmark?.run.runId ?? String(Date.now())
+    const { sandboxDir, sandboxLogPath } = prepareBaselineSandbox(runId)
+    agentCwd = sandboxDir
+    baselinePlaywrightLogPath = sandboxLogPath
+    try {
+      const manifest = JSON.parse(fs.readFileSync(MANIFEST_PATH, 'utf-8'))
+      if (Array.isArray(manifest.repoPaths)) {
+        baselineRepoPaths = manifest.repoPaths.filter((p: unknown): p is string => typeof p === 'string')
+      }
+    } catch { /* no manifest yet, leave undefined */ }
+  }
+
   const result = await spawnHealAgent({
     agent: autoHeal.agent,
     sessionMode: autoHeal.sessionMode,
@@ -707,6 +769,10 @@ export async function maybeAutoHeal(
     promptAddendum: snapshot?.promptAddendum,
     benchmarkUsageFile: usageFile,
     benchmarkMode,
+    agentCwd,
+    baselinePlaywrightLogPath,
+    baselineSignalFilePath: benchmarkMode === 'baseline' ? RESTART_SIGNAL : undefined,
+    baselineRepoPaths,
   })
   state.spawnCount += 1
 
@@ -994,6 +1060,15 @@ export async function main(argv: string[] = []) {
     if (benchmarkTracker && !benchmarkTracker.finalized) {
       finalizeBenchmarkRun(benchmarkTracker, 'interrupted', false)
     }
+
+    // Clean up baseline tmp dirs so we don't leave stray state in the OS
+    // tmpdir after a benchmark run. Best-effort.
+    const runnerTmp = process.env.CANARY_LAB_SUMMARY_PATH
+    if (runnerTmp && runnerTmp.includes('canary-lab-baseline-runner-')) {
+      try {
+        fs.rmSync(path.dirname(runnerTmp), { recursive: true, force: true })
+      } catch { /* best-effort */ }
+    }
   }
 
   process.on('SIGINT', () => {
@@ -1087,6 +1162,17 @@ export async function main(argv: string[] = []) {
       })
     }
 
+    // Baseline keeps LOGS_DIR clean: redirect the summary (runner-internal
+    // state the heal-loop uses for failure detection) to tmpdir so it never
+    // appears alongside playwright-stdout.log / manifest.json. Set it in
+    // process.env so both the runner and the Playwright reporter honor it.
+    if (benchmarkConfig.enabled && benchmarkConfig.mode === 'baseline') {
+      const runId = benchmarkTracker?.run.runId ?? String(Date.now())
+      const runnerTmp = path.join(os.tmpdir(), `canary-lab-baseline-runner-${runId}`)
+      fs.mkdirSync(runnerTmp, { recursive: true })
+      process.env.CANARY_LAB_SUMMARY_PATH = path.join(runnerTmp, 'e2e-summary.json')
+    }
+
     // ── 6. Check repos
     uiLine()
     info('Checking prerequisites...')
@@ -1150,7 +1236,7 @@ export async function main(argv: string[] = []) {
     // ── 9. Build service list and launch in terminal tabs (with tee to log files)
     services = buildServiceList(feature)
     await launchServices(services, terminalChoice, flags.benchmarkMode)
-    writeManifest(services)
+    writeManifest(services, feature)
 
     // ── 10. Wait for health checks
     await pollHealthChecks(services)

@@ -21,6 +21,8 @@ const MANIFEST_PATH = path.join(LOGS_DIR, 'manifest.json')
 const SUMMARY_PATH = path.join(LOGS_DIR, 'e2e-summary.json')
 const DIAGNOSIS_JOURNAL_PATH = path.join(LOGS_DIR, 'diagnosis-journal.json')
 const PLAYWRIGHT_STDOUT_PATH = path.join(LOGS_DIR, 'playwright-stdout.log')
+const HEAL_INDEX_PATH = path.join(LOGS_DIR, 'heal-index.md')
+const FAILED_DIR = path.join(LOGS_DIR, 'failed')
 fs.mkdirSync(FEATURES_DIR, { recursive: true })
 fs.mkdirSync(PIDS_DIR, { recursive: true })
 
@@ -34,12 +36,16 @@ vi.mock('./paths', () => ({
   SUMMARY_PATH,
   DIAGNOSIS_JOURNAL_PATH,
   PLAYWRIGHT_STDOUT_PATH,
+  HEAL_INDEX_PATH,
+  FAILED_DIR,
   RERUN_SIGNAL: path.join(LOGS_DIR, '.rerun'),
   RESTART_SIGNAL: path.join(LOGS_DIR, '.restart'),
   HEAL_SIGNAL: path.join(LOGS_DIR, '.heal'),
   SIGNAL_HISTORY_PATH: path.join(LOGS_DIR, 'signal-history.json'),
   ITERM_SESSION_IDS_PATH: path.join(LOGS_DIR, 'iterm-session-ids.json'),
   ITERM_HEAL_SESSION_IDS_PATH: path.join(LOGS_DIR, 'iterm-heal-session-ids.json'),
+  getSummaryPath: () =>
+    process.env.CANARY_LAB_SUMMARY_PATH ?? SUMMARY_PATH,
 }))
 
 const execFileSync = vi.fn()
@@ -559,16 +565,31 @@ describe('extractLogsForTest', () => {
       extractLogsForTest('test-case-x', [a, path.join(dir, 'missing.log')]),
     ).toEqual({})
   })
+
+  it('caps large snippets to head + tail with an elision marker', async () => {
+    const { SLICE_HALF_BYTES } = await import('./log-enrichment')
+    const dir = mkTmp()
+    const logPath = path.join(dir, 'svc-big.log')
+    const headBody = 'HEAD'.repeat(SLICE_HALF_BYTES / 4 + 500)
+    const tailBody = 'TAIL'.repeat(SLICE_HALF_BYTES / 4 + 500)
+    fs.writeFileSync(logPath, `<test-case-huge>${headBody}${tailBody}</test-case-huge>`)
+    const sliced = extractLogsForTest('test-case-huge', [logPath])['svc-big']
+    expect(sliced).toBeDefined()
+    expect(sliced.startsWith('HEAD')).toBe(true)
+    expect(sliced.endsWith('TAIL')).toBe(true)
+    expect(sliced).toContain('eliding')
+    expect(Buffer.byteLength(sliced, 'utf-8')).toBeLessThan(SLICE_HALF_BYTES * 2 + 500)
+  })
 })
 
 describe('enrichSummaryWithLogs', () => {
-  it('replaces failed[] entries with { name, logs } using extracted snippets', () => {
+  it('writes per-failure slice files and attaches logFiles paths (not embedded logs)', () => {
     fs.writeFileSync(
       SUMMARY_PATH,
       JSON.stringify({
         total: 1,
         passed: 0,
-        failed: [{ name: 'test-case-bad' }],
+        failed: [{ name: 'test-case-bad', error: { message: 'boom' } }],
       }),
     )
     const logPath = path.join(LOGS_DIR, 'svc-x.log')
@@ -578,9 +599,35 @@ describe('enrichSummaryWithLogs', () => {
     enrichSummaryWithLogs()
 
     const out = JSON.parse(fs.readFileSync(SUMMARY_PATH, 'utf-8'))
-    expect(out.failed).toEqual([
-      { name: 'test-case-bad', logs: { 'svc-x': 'log body' } },
-    ])
+    // Summary stays lean — no embedded log bodies.
+    expect(out.failed[0].logs).toBeUndefined()
+    expect(out.failed[0].error).toEqual({ message: 'boom' })
+    expect(out.failed[0].logFiles).toEqual(['logs/failed/test-case-bad/svc-x.log'])
+
+    // Per-failure slice file exists with the extracted snippet.
+    const slicePath = path.join(FAILED_DIR, 'test-case-bad', 'svc-x.log')
+    expect(fs.existsSync(slicePath)).toBe(true)
+    expect(fs.readFileSync(slicePath, 'utf-8')).toBe('log body')
+  })
+
+  it('does not attach logFiles when no slices were captured', () => {
+    fs.writeFileSync(
+      SUMMARY_PATH,
+      JSON.stringify({
+        total: 1,
+        passed: 0,
+        failed: [{ name: 'test-case-quiet' }],
+      }),
+    )
+    const logPath = path.join(LOGS_DIR, 'svc-silent.log')
+    fs.writeFileSync(logPath, 'no markers for this test')
+    fs.writeFileSync(MANIFEST_PATH, JSON.stringify({ serviceLogs: [logPath] }))
+
+    enrichSummaryWithLogs()
+
+    const out = JSON.parse(fs.readFileSync(SUMMARY_PATH, 'utf-8'))
+    expect(out.failed[0].logFiles).toBeUndefined()
+    expect(out.failed[0].logs).toBeUndefined()
   })
 
   it('no-ops when summary or manifest missing', () => {
@@ -594,6 +641,108 @@ describe('enrichSummaryWithLogs', () => {
     fs.writeFileSync(MANIFEST_PATH, JSON.stringify({ serviceLogs: [] }))
     enrichSummaryWithLogs()
     expect(fs.readFileSync(SUMMARY_PATH, 'utf-8')).toBe(body)
+  })
+})
+
+describe('writeHealIndex', () => {
+  it('writes a compact markdown index with per-failure entries and journal tail', async () => {
+    const { writeHealIndex } = await import('./log-enrichment')
+
+    // Build a realistic post-enrichment summary.
+    fs.writeFileSync(
+      SUMMARY_PATH,
+      JSON.stringify({
+        total: 2,
+        passed: 1,
+        failed: [
+          {
+            name: 'test-case-oauth-metadata',
+            error: { message: 'expected refresh_token to be advertised' },
+            location: 'features/mpass/e2e/x.spec.ts:42',
+            logFiles: ['logs/failed/test-case-oauth-metadata/svc-a.log'],
+          },
+        ],
+      }),
+    )
+    // Simulate the slice file the index references.
+    const slicePath = path.join(FAILED_DIR, 'test-case-oauth-metadata', 'svc-a.log')
+    fs.mkdirSync(path.dirname(slicePath), { recursive: true })
+    fs.writeFileSync(slicePath, 'x'.repeat(4200))
+
+    fs.writeFileSync(
+      DIAGNOSIS_JOURNAL_PATH,
+      JSON.stringify([
+        { iteration: 1, hypothesis: 'missing field', outcome: 'no_change', fix: { description: 'added field', file: 'a.java' } },
+        { iteration: 2, hypothesis: 'try PKCE check', outcome: null },
+      ]),
+    )
+
+    writeHealIndex()
+
+    const md = fs.readFileSync(HEAL_INDEX_PATH, 'utf-8')
+    expect(md).toContain('# Heal Index')
+    expect(md).toContain('1 test failed, 1 passed.')
+    expect(md).toContain('## failed[0] — test-case-oauth-metadata')
+    expect(md).toContain('expected refresh_token to be advertised')
+    expect(md).toContain('features/mpass/e2e/x.spec.ts:42')
+    expect(md).toContain('logs/failed/test-case-oauth-metadata/svc-a.log')
+    expect(md).toContain('4.1KB')
+    expect(md).toContain('## Journal (last 3 iterations)')
+    expect(md).toContain('#1')
+    expect(md).toContain('no_change')
+    expect(md).toContain('pending')
+    // The "suspects" section was removed — subprocess greps were too slow in
+    // practice. The skill tells the agent to grep for itself.
+    expect(md).not.toContain('suspects')
+    // Must be small enough for a single Read.
+    expect(Buffer.byteLength(md, 'utf-8')).toBeLessThan(10_000)
+  })
+
+  it('never spawns grep subprocesses — even with failures and repoPaths set', async () => {
+    const { writeHealIndex } = await import('./log-enrichment')
+    const repo = mkTmp()
+    fs.writeFileSync(path.join(repo, 'app.ts'), 'dummy')
+    fs.writeFileSync(
+      MANIFEST_PATH,
+      JSON.stringify({ serviceLogs: [], repoPaths: [repo] }),
+    )
+    fs.writeFileSync(
+      SUMMARY_PATH,
+      JSON.stringify({
+        total: 1,
+        passed: 0,
+        failed: [
+          {
+            name: 'test-case-metadata',
+            error: { message: 'expected grant_types_supported to contain "refresh_token"' },
+            location: 'features/x/e2e/y.spec.ts:1',
+          },
+        ],
+      }),
+    )
+
+    const grepCallsBefore = execFileSync.mock.calls.filter((c) => c[0] === 'grep').length
+    writeHealIndex()
+    const grepCallsAfter = execFileSync.mock.calls.filter((c) => c[0] === 'grep').length
+    expect(grepCallsAfter - grepCallsBefore).toBe(0)
+  })
+
+  it('no-ops when no summary exists', async () => {
+    const { writeHealIndex } = await import('./log-enrichment')
+    writeHealIndex()
+    expect(fs.existsSync(HEAL_INDEX_PATH)).toBe(false)
+  })
+
+  it('says "nothing to heal" when no failures', async () => {
+    const { writeHealIndex } = await import('./log-enrichment')
+    fs.writeFileSync(
+      SUMMARY_PATH,
+      JSON.stringify({ total: 5, passed: 5, failed: [] }),
+    )
+    writeHealIndex()
+    const md = fs.readFileSync(HEAL_INDEX_PATH, 'utf-8')
+    expect(md).toContain('0 tests failed, 5 passed.')
+    expect(md).toContain('No failures. Nothing to heal.')
   })
 })
 

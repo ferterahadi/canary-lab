@@ -10,6 +10,8 @@ const SUMMARY_PATH = path.join(LOGS_DIR, 'e2e-summary.json')
 const DIAGNOSIS_JOURNAL_PATH = path.join(LOGS_DIR, 'diagnosis-journal.json')
 const MANIFEST_PATH = path.join(LOGS_DIR, 'manifest.json')
 const PLAYWRIGHT_STDOUT_PATH = path.join(LOGS_DIR, 'playwright-stdout.log')
+const HEAL_INDEX_PATH = path.join(LOGS_DIR, 'heal-index.md')
+const FAILED_DIR = path.join(LOGS_DIR, 'failed')
 
 fs.mkdirSync(LOGS_DIR, { recursive: true })
 
@@ -21,6 +23,8 @@ vi.mock('./paths', () => ({
   DIAGNOSIS_JOURNAL_PATH,
   MANIFEST_PATH,
   PLAYWRIGHT_STDOUT_PATH,
+  HEAL_INDEX_PATH,
+  FAILED_DIR,
 }))
 
 const { buildBenchmarkContextSnapshot } = await import('./context-assembler')
@@ -31,7 +35,8 @@ afterEach(() => {
 })
 
 describe('buildBenchmarkContextSnapshot', () => {
-  it('builds canary context with enriched logs and diagnosis journal metrics', () => {
+  it('builds canary context pointing at heal-index.md with per-failure slice paths', () => {
+    // Post-enrichment summary: no embedded logs[], just logFiles paths.
     fs.writeFileSync(
       SUMMARY_PATH,
       JSON.stringify({
@@ -40,15 +45,22 @@ describe('buildBenchmarkContextSnapshot', () => {
         failed: [
           {
             name: 'checkout',
-            logs: {
-              'svc-api': 'api failed',
-              'svc-web': 'web failed',
-            },
+            logFiles: [
+              'logs/failed/checkout/svc-api.log',
+              'logs/failed/checkout/svc-web.log',
+            ],
           },
         ],
       }),
     )
+    fs.writeFileSync(HEAL_INDEX_PATH, '# Heal Index\n\n1 test failed.\n')
     fs.writeFileSync(DIAGNOSIS_JOURNAL_PATH, JSON.stringify([{ hypothesis: 'x' }]))
+
+    // Per-failure slice files + raw service log + manifest.
+    const checkoutDir = path.join(FAILED_DIR, 'checkout')
+    fs.mkdirSync(checkoutDir, { recursive: true })
+    fs.writeFileSync(path.join(checkoutDir, 'svc-api.log'), 'api slice')
+    fs.writeFileSync(path.join(checkoutDir, 'svc-web.log'), 'web slice bigger')
     const rawLog = path.join(LOGS_DIR, 'svc-api.log')
     fs.writeFileSync(rawLog, 'raw log body')
     fs.writeFileSync(MANIFEST_PATH, JSON.stringify({ serviceLogs: [rawLog] }))
@@ -56,14 +68,21 @@ describe('buildBenchmarkContextSnapshot', () => {
     const snapshot = buildBenchmarkContextSnapshot('run-1', 1, 'canary')
 
     expect(snapshot.mode).toBe('canary')
-    expect(snapshot.summaryPath).toBe(SUMMARY_PATH)
+    expect(snapshot.summaryPath).toBe(HEAL_INDEX_PATH)
     expect(snapshot.journalPath).toBe(DIAGNOSIS_JOURNAL_PATH)
     expect(snapshot.includedFailedTests).toEqual(['checkout'])
-    expect(snapshot.includedLogFiles).toContain('logs/svc-api.log')
-    expect(snapshot.includedLogSlices['svc-api']).toBeGreaterThan(0)
+    expect(snapshot.includedLogFiles).toEqual([
+      'logs/failed/checkout/svc-api.log',
+      'logs/failed/checkout/svc-web.log',
+    ])
+    expect(snapshot.includedLogSlices['svc-api']).toBe(9) // 'api slice'
+    expect(snapshot.includedLogSlices['svc-web']).toBe(16) // 'web slice bigger'
+    expect(snapshot.summaryBytes).toBeGreaterThan(0) // index bytes
     expect(snapshot.journalBytes).toBeGreaterThan(0)
     expect(snapshot.rawServiceLogBytesAvailable).toBeGreaterThan(0)
-    expect(snapshot.promptAddendum).toContain('canary benchmark run')
+    expect(snapshot.promptAddendum).toContain('Benchmark telemetry is on')
+    expect(snapshot.promptAddendum).toContain('logs/heal-index.md')
+    expect(snapshot.promptAddendum).toContain('logs/failed/<slug>/<svc>.log')
   })
 
   it('builds baseline context pointing at raw Playwright stdout, ignoring enriched summary and journal', () => {

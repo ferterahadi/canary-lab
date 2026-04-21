@@ -57,7 +57,7 @@ const {
   isAgentCliAvailable,
   healAgentBanner,
   closeLastHealAgentTab,
-  BASELINE_VANILLA_PROMPT,
+  buildBaselineVanillaPrompt,
 } = await import('./auto-heal')
 
 beforeEach(() => {
@@ -154,17 +154,15 @@ describe('buildAgentCommand', () => {
 })
 
 describe('healAgentBanner', () => {
-  const stripAnsi = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, '')
-
   it('claude banner notes CLI profile defaults are used', () => {
-    expect(stripAnsi(healAgentBanner('claude'))).toBe(
-      '▶ canary-lab  heal agent — claude (using your CLI profile defaults for model + reasoning)',
+    expect(healAgentBanner('claude')).toBe(
+      '[canary-lab] heal agent — claude (using your CLI profile defaults for model + reasoning)',
     )
   })
 
   it('codex banner notes CLI profile defaults are used', () => {
-    expect(stripAnsi(healAgentBanner('codex'))).toBe(
-      '▶ canary-lab  heal agent — codex (using your CLI profile defaults for model + reasoning)',
+    expect(healAgentBanner('codex')).toBe(
+      '[canary-lab] heal agent — codex (using your CLI profile defaults for model + reasoning)',
     )
   })
 })
@@ -255,8 +253,7 @@ describe('spawnHealAgent', () => {
     const script = fs.readFileSync(scriptFile, 'utf-8')
     expect(script).toContain('claude --dangerously-skip-permissions')
     expect(script).toContain('#!/bin/bash')
-    expect(script).toContain('heal agent')
-    expect(script).toContain('claude')
+    expect(script).toMatch(/heal agent — .*claude/)
     expect(script).toContain('using your CLI profile defaults for model + reasoning')
 
     // iTerm boundary was invoked; Terminal boundary was not.
@@ -285,6 +282,10 @@ describe('spawnHealAgent', () => {
       cycle: 0,
       terminal: 'iTerm',
       benchmarkMode: 'baseline',
+      baselinePlaywrightLogPath: '/tmp/sandbox/playwright-stdout.log',
+      baselineSignalFilePath: '/project/logs/.restart',
+      baselineRepoPaths: ['/repos/app', '/repos/svc'],
+      agentCwd: '/tmp/sandbox',
     })
 
     fs.writeFileSync(RESTART_SIGNAL, '')
@@ -292,13 +293,37 @@ describe('spawnHealAgent', () => {
     expect(await promise).toBe('signal')
 
     const prompt = fs.readFileSync(path.join(LOGS_DIR, '.heal-prompt.txt'), 'utf-8')
-    expect(prompt).toBe(BASELINE_VANILLA_PROMPT)
-    expect(prompt).toContain('logs/playwright-stdout.log')
-    expect(prompt).toContain('logs/.restart')
+    // Absolute paths so the sandboxed agent can reach the real workspace.
+    expect(prompt).toContain('/tmp/sandbox/playwright-stdout.log')
+    expect(prompt).toContain('/project/logs/.restart')
+    expect(prompt).toContain('/repos/app')
+    expect(prompt).toContain('/repos/svc')
     // Must not leak canary-lab methodology into baseline.
     expect(prompt).not.toContain('diagnosis-journal')
     expect(prompt).not.toContain('failed[].logs')
     expect(prompt).not.toContain('e2e-summary.json')
+    expect(prompt).not.toContain('heal-index')
+    // iTerm tab was opened with the sandbox cwd, not ROOT.
+    const [tabs] = openItermTabs.mock.calls[0]
+    expect(tabs[0].dir).toBe('/tmp/sandbox')
+  })
+
+  it('buildBaselineVanillaPrompt formats absolute paths and optional repo list', () => {
+    const withRepos = buildBaselineVanillaPrompt({
+      playwrightLogPath: '/abs/log.log',
+      signalFilePath: '/abs/.restart',
+      repoPaths: ['/repos/a'],
+    })
+    expect(withRepos).toContain('/abs/log.log')
+    expect(withRepos).toContain('/abs/.restart')
+    expect(withRepos).toContain('/repos/a')
+    expect(withRepos).toContain('Repositories you may need to edit')
+
+    const withoutRepos = buildBaselineVanillaPrompt({
+      playwrightLogPath: '/abs/log.log',
+      signalFilePath: '/abs/.restart',
+    })
+    expect(withoutRepos).not.toContain('Repositories you may need to edit')
   })
 
   it('appends prompt addendum and benchmark usage env when provided', async () => {
