@@ -1,9 +1,9 @@
 import fs from 'fs'
 import path from 'path'
 import {
-  BENCHMARK_DIR,
   DIAGNOSIS_JOURNAL_PATH,
   MANIFEST_PATH,
+  PLAYWRIGHT_STDOUT_PATH,
   ROOT,
   SUMMARY_PATH,
 } from './paths'
@@ -93,19 +93,12 @@ function sumRawServiceLogBytes(): number {
   }
 }
 
-function buildBaselineSummary(summary: SummaryShape | null): string {
-  const failed = Array.isArray(summary?.failed) ? summary.failed : []
-  return JSON.stringify({
-    total: summary?.total ?? failed.length,
-    passed: summary?.passed ?? 0,
-    failed: failed.map((entry) => ({
-      name: entry?.name,
-      error: entry?.error,
-      durationMs: entry?.durationMs,
-      location: entry?.location,
-      retry: entry?.retry,
-    })),
-  }, null, 2) + '\n'
+function statSizeOrZero(file: string): number {
+  try {
+    return fs.statSync(file).size
+  } catch {
+    return 0
+  }
 }
 
 export function buildBenchmarkContextSnapshot(
@@ -113,46 +106,65 @@ export function buildBenchmarkContextSnapshot(
   cycle: number,
   mode: BenchmarkMode,
 ): BenchmarkContextSnapshot {
+  if (mode === 'baseline') {
+    // Baseline hands the agent exactly what a developer would see after
+    // `npx playwright test` fails: the raw stdout log. No canary-lab-shaped
+    // summary, no journal, no service-log slices. The agent's prompt (set in
+    // auto-heal.ts) is what points it at this file, so we leave promptAddendum
+    // empty — all guidance lives in the inline baseline prompt.
+    const summaryPath = PLAYWRIGHT_STDOUT_PATH
+    const summaryBytes = statSizeOrZero(PLAYWRIGHT_STDOUT_PATH)
+    return {
+      runId,
+      cycle,
+      mode,
+      summaryPath,
+      journalPath: null,
+      includedLogFiles: [],
+      includedFailedTests: [],
+      summaryBytes,
+      journalBytes: 0,
+      includedLogSlices: {},
+      excludedArtifacts: [
+        'logs/e2e-summary.json',
+        'logs/diagnosis-journal.json',
+        'logs/svc-*.log',
+        'failed[].logs',
+        '.claude/skills/heal-loop.md',
+      ],
+      filesIncluded: summaryBytes > 0 ? 1 : 0,
+      contextBytes: summaryBytes,
+      contextChars: summaryBytes,
+      slicedLogBytes: 0,
+      rawServiceLogBytesAvailable: 0,
+      notes: 'Baseline benchmark context: raw Playwright stdout only; no skill, no canary-lab enrichment',
+      promptAddendum: '',
+    }
+  }
+
   const summaryRaw = safeRead(SUMMARY_PATH)
   const journalRaw = safeRead(DIAGNOSIS_JOURNAL_PATH)
   const summary = parseSummary(summaryRaw)
-  const contextDir = path.join(BENCHMARK_DIR, 'context')
-  const baselineSummaryPath = path.join(contextDir, `cycle-${cycle}-summary.json`)
-
-  let summaryPath = SUMMARY_PATH
-  let summaryForMetrics = summaryRaw ?? ''
+  const summaryForMetrics = summaryRaw ?? ''
   const includedLogFiles: string[] = []
   const includedLogSlices: Record<string, number> = {}
   let journalPath: string | null = null
   let journalBytes = 0
-  let excludedArtifacts: string[] = []
-  let notes = 'Structured summary only'
 
-  if (mode === 'baseline') {
-    fs.mkdirSync(contextDir, { recursive: true })
-    const playwrightOnly = buildBaselineSummary(summary)
-    fs.writeFileSync(baselineSummaryPath, playwrightOnly)
-    summaryPath = baselineSummaryPath
-    summaryForMetrics = playwrightOnly
-    excludedArtifacts = ['logs/diagnosis-journal.json', 'logs/svc-*.log', 'failed[].logs']
-    notes = 'Baseline benchmark context: Playwright failure context only; diagnosis journal and Canary-specific log enrichment excluded'
-  } else {
-    const failed = Array.isArray(summary?.failed) ? summary.failed : []
-    for (const entry of failed) {
-      if (!entry?.logs || typeof entry.logs !== 'object') continue
-      for (const [svcName, snippet] of Object.entries(entry.logs)) {
-        if (typeof snippet !== 'string') continue
-        if (!includedLogFiles.includes(`logs/${svcName}.log`)) {
-          includedLogFiles.push(`logs/${svcName}.log`)
-        }
-        includedLogSlices[svcName] = (includedLogSlices[svcName] ?? 0) + Buffer.byteLength(snippet, 'utf-8')
+  const failed = Array.isArray(summary?.failed) ? summary.failed : []
+  for (const entry of failed) {
+    if (!entry?.logs || typeof entry.logs !== 'object') continue
+    for (const [svcName, snippet] of Object.entries(entry.logs)) {
+      if (typeof snippet !== 'string') continue
+      if (!includedLogFiles.includes(`logs/${svcName}.log`)) {
+        includedLogFiles.push(`logs/${svcName}.log`)
       }
+      includedLogSlices[svcName] = (includedLogSlices[svcName] ?? 0) + Buffer.byteLength(snippet, 'utf-8')
     }
-    if (journalRaw) {
-      journalPath = DIAGNOSIS_JOURNAL_PATH
-      journalBytes = byteLength(journalRaw)
-    }
-    notes = 'Canary benchmark context: enriched summary with per-test log slices plus diagnosis journal when present'
+  }
+  if (journalRaw) {
+    journalPath = DIAGNOSIS_JOURNAL_PATH
+    journalBytes = byteLength(journalRaw)
   }
 
   const summaryBytes = Buffer.byteLength(summaryForMetrics, 'utf-8')
@@ -160,39 +172,31 @@ export function buildBenchmarkContextSnapshot(
   const contextBytes = summaryBytes + journalBytes + slicedLogBytes
   const contextChars = summaryForMetrics.length + (journalRaw?.length ?? 0) + slicedLogBytes
 
-  const promptAddendum = mode === 'baseline'
-    ? [
-        'Benchmark override: this is a baseline benchmark run.',
-        `Use only ${path.relative(ROOT, summaryPath)} as your failure context.`,
-        'Do not read logs/diagnosis-journal.json.',
-        'Do not rely on failed[].logs or any per-test sliced service logs, even if they exist elsewhere.',
-        'Treat this as Playwright failure context only and explore the codebase yourself from there.',
-      ].join('\n')
-    : [
-        'Benchmark override: this is a canary benchmark run.',
-        `Read ${path.relative(ROOT, summaryPath)} first.`,
-        'If logs/diagnosis-journal.json exists, you may read it.',
-        'Prefer the enriched failed[].logs slices already embedded in the summary before reading raw service logs.',
-      ].join('\n')
+  const promptAddendum = [
+    'Benchmark override: this is a canary benchmark run.',
+    `Read ${path.relative(ROOT, SUMMARY_PATH)} first.`,
+    'If logs/diagnosis-journal.json exists, you may read it.',
+    'Prefer the enriched failed[].logs slices already embedded in the summary before reading raw service logs.',
+  ].join('\n')
 
   return {
     runId,
     cycle,
     mode,
-    summaryPath,
+    summaryPath: SUMMARY_PATH,
     journalPath,
     includedLogFiles,
     includedFailedTests: failedTests(summary),
     summaryBytes,
     journalBytes,
     includedLogSlices,
-    excludedArtifacts,
+    excludedArtifacts: [],
     filesIncluded: 1 + includedLogFiles.length + (journalPath ? 1 : 0),
     contextBytes,
     contextChars,
     slicedLogBytes,
     rawServiceLogBytesAvailable: sumRawServiceLogBytes(),
-    notes,
+    notes: 'Canary benchmark context: enriched summary with per-test log slices plus diagnosis journal when present',
     promptAddendum,
   }
 }

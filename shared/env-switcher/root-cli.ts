@@ -3,6 +3,7 @@ import path from 'path'
 import readline from 'readline'
 import { execFileSync } from 'child_process'
 import { getFeaturesDir } from '../runtime/project-root'
+import { section, info, fail, warn, dim, c as ansiC } from '../cli-ui/ui'
 
 const SWITCH_SCRIPT = path.join(__dirname, 'switch.js')
 
@@ -11,13 +12,13 @@ function prompt(rl: readline.Interface, question: string): Promise<string> {
 }
 
 async function selectOption(rl: readline.Interface, label: string, options: string[]): Promise<string> {
-  console.log(`\n${label}`)
-  options.forEach((opt, i) => console.log(`  ${i + 1}) ${opt}`))
+  section(label)
+  options.forEach((opt, i) => console.log(`  ${ansiC('gray', `${i + 1})`)} ${opt}`))
   while (true) {
-    const answer = await prompt(rl, `Select [1-${options.length}]: `)
+    const answer = await prompt(rl, `${ansiC('cyan', '›')} Select [1-${options.length}]: `)
     const idx = parseInt(answer.trim(), 10) - 1
     if (idx >= 0 && idx < options.length) return options[idx]
-    console.log(`  Please enter a number between 1 and ${options.length}`)
+    warn(`Please enter a number between 1 and ${options.length}`)
   }
 }
 
@@ -52,14 +53,15 @@ export async function main(args = process.argv.slice(2)) {
 
     const features = discoverFeaturesWithEnvSets()
     if (features.length === 0) {
-      console.error('No features with env sets found.')
+      fail('No features with env sets found.')
       process.exit(1)
     }
 
     const featureName = await selectOption(rl, 'Which feature?', features)
 
     if (mode === '--revert') {
-      console.log(`\nReverting env for ${featureName}...`)
+      console.log('')
+      info(`Reverting env for ${featureName}...`)
       execFileSync(process.execPath, [SWITCH_SCRIPT, featureName, '--revert'], { stdio: 'inherit' })
       return
     }
@@ -69,7 +71,8 @@ export async function main(args = process.argv.slice(2)) {
 
     if (envSets.length === 1) {
       chosenSet = envSets[0]
-      console.log(`\n  Using env set: ${chosenSet}`)
+      console.log('')
+      info(`Using env set: ${chosenSet}`)
     } else {
       chosenSet = await selectOption(rl, `Which env set for ${featureName}?`, envSets)
     }
