@@ -5,6 +5,8 @@
  * users can see the agent working instead of staring at a blank terminal.
  */
 export {}
+import fs from 'fs'
+import path from 'path'
 
 interface AnyObj {
   [key: string]: unknown
@@ -179,6 +181,22 @@ interface PendingTool {
 
 const pendingTools = new Map<string, PendingTool>()
 
+function writeBenchmarkUsage(payload: {
+  inputTokens?: number
+  outputTokens?: number
+  cacheReadInputTokens?: number
+  cacheCreationInputTokens?: number
+}): void {
+  const file = process.env.CANARY_LAB_BENCHMARK_USAGE_FILE
+  if (!file) return
+  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true })
+    fs.appendFileSync(file, JSON.stringify(payload) + '\n')
+  } catch {
+    // Benchmark sidecar is best-effort only.
+  }
+}
+
 function handleLine(line: string): void {
   const trimmed = line.trim()
   if (!trimmed) return
@@ -274,6 +292,12 @@ function handleLine(line: string): void {
     const outTok = Number(usage?.output_tokens ?? 0)
     const cacheRead = Number(usage?.cache_read_input_tokens ?? 0)
     const cacheCreate = Number(usage?.cache_creation_input_tokens ?? 0)
+    writeBenchmarkUsage({
+      inputTokens: inTok,
+      outputTokens: outTok,
+      cacheReadInputTokens: cacheRead,
+      cacheCreationInputTokens: cacheCreate,
+    })
     const turns = Number(msg.num_turns ?? 0)
     const cost = Number(msg.total_cost_usd ?? 0)
     // Pro/Max subscription users aren't billed `total_cost_usd` — it's the

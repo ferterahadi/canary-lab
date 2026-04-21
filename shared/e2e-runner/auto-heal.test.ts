@@ -271,6 +271,32 @@ describe('spawnHealAgent', () => {
     expect(openTerminalTabs).not.toHaveBeenCalled()
   })
 
+  it('appends prompt addendum and benchmark usage env when provided', async () => {
+    seedPrompt('codex')
+    vi.useFakeTimers()
+    const usageFile = path.join(LOGS_DIR, 'benchmark', 'usage', 'cycle-1.jsonl')
+
+    const promise = spawnHealAgent({
+      agent: 'codex',
+      sessionMode: 'new',
+      cycle: 0,
+      terminal: 'Terminal',
+      promptAddendum: 'Benchmark override: use only the Playwright failure summary.',
+      benchmarkUsageFile: usageFile,
+    })
+
+    fs.writeFileSync(RESTART_SIGNAL, '')
+    await vi.advanceTimersByTimeAsync(1200)
+    await promise
+
+    expect(fs.readFileSync(path.join(LOGS_DIR, '.heal-prompt.txt'), 'utf-8')).toContain(
+      'Benchmark override: use only the Playwright failure summary.',
+    )
+    const script = fs.readFileSync(path.join(LOGS_DIR, '.heal-agent.sh'), 'utf-8')
+    expect(script).toContain('CANARY_LAB_BENCHMARK_USAGE_FILE')
+    expect(script).toContain(usageFile)
+  })
+
   it('returns "signal" when RESTART_SIGNAL appears', async () => {
     seedPrompt('codex')
     vi.useFakeTimers()
