@@ -50,12 +50,16 @@ class SummaryReporter implements Reporter {
       retry: result.retry,
     })
     this.writeSummary(false)
-    enrichSummaryWithLogs()
+    if (process.env.CANARY_LAB_BENCHMARK_MODE !== 'baseline') {
+      enrichSummaryWithLogs()
+    }
   }
 
   onEnd(_result: FullResult): void {
     this.writeSummary(true)
-    enrichSummaryWithLogs()
+    if (process.env.CANARY_LAB_BENCHMARK_MODE !== 'baseline') {
+      enrichSummaryWithLogs()
+    }
   }
 
   private writeSummary(complete: boolean): void {

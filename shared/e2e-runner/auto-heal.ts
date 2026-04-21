@@ -18,6 +18,7 @@ import {
   RESTART_SIGNAL,
   ITERM_HEAL_SESSION_IDS_PATH,
 } from './paths'
+import type { BenchmarkMode } from './context-assembler'
 
 export type HealAgent = 'claude' | 'codex'
 export type HealSessionMode = 'resume' | 'new'
@@ -31,7 +32,22 @@ export interface SpawnHealAgentOptions {
   terminal: TerminalChoice
   promptAddendum?: string
   benchmarkUsageFile?: string
+  benchmarkMode?: BenchmarkMode
 }
+
+// Baseline benchmark mode runs as if canary-lab didn't exist: no heal-loop
+// skill, no journal, no log enrichment guidance. The agent sees only the raw
+// Playwright stdout (what a developer running `npx playwright test` by hand
+// would see) and figures everything else out itself. We still reuse the
+// `.rerun` / `.restart` signal files so the runner's watch loop keeps working
+// — that's pure infra, not methodology, and it's cheap to describe inline.
+export const BASELINE_VANILLA_PROMPT = [
+  'Playwright tests just failed. The raw test output is in `logs/playwright-stdout.log` — read that file to see which tests failed and why.',
+  '',
+  'Figure out where the bug is in the codebase, fix it, and exit. Assume the tests are correct; fix the application/service code to match.',
+  '',
+  'Before you exit, write a file at `logs/.restart` (any content — a single line is fine). The runner polls for this file and will rebuild services and re-run the tests when it appears.',
+].join('\n')
 
 const HEAL_PROMPT_FILE = path.join(LOGS_DIR, '.heal-prompt.txt')
 const HEAL_SCRIPT_FILE = path.join(LOGS_DIR, '.heal-agent.sh')
@@ -77,7 +93,8 @@ export function loadPrompt(agent: HealAgent, promptPath: string = promptPathFor(
 }
 
 export function healAgentBanner(agent: HealAgent): string {
-  return `[canary-lab] heal agent — ${agent} (using your CLI profile defaults for model + reasoning)`
+  // \x1b[1;36m bold cyan, \x1b[2m dim, \x1b[0m reset
+  return `\x1b[1;36m▶ canary-lab\x1b[0m  heal agent — \x1b[1m${agent}\x1b[0m \x1b[2m(using your CLI profile defaults for model + reasoning)\x1b[0m`
 }
 
 export function buildAgentCommand(
@@ -130,16 +147,20 @@ function writeHealScript(
     : ''
   const script = `#!/bin/bash
 set +e
-echo ${JSON.stringify(banner)}
-echo "[canary-lab] starting heal agent — streaming progress below."
-echo "[canary-lab] agent will write logs/.rerun (or logs/.restart) when done."
-echo ""
+printf '%b\\n' ${JSON.stringify(banner)}
+printf '\\033[2m›\\033[0m starting heal agent — streaming progress below.\\n'
+printf '\\033[2m›\\033[0m agent will write \\033[36mlogs/.rerun\\033[0m (or \\033[36mlogs/.restart\\033[0m) when done.\\n'
+printf '\\n'
 ${benchmarkEnv}${benchmarkEnv ? '\n' : ''}${benchmarkUsageFile ? `mkdir -p ${JSON.stringify(path.dirname(benchmarkUsageFile))}\n` : ''}${benchmarkUsageFile ? `: > ${JSON.stringify(benchmarkUsageFile)}\n` : ''}${benchmarkUsageFile ? '\n' : ''}${agentCommand}
 status=\${PIPESTATUS[0]}
 echo "$status" > ${JSON.stringify(HEAL_DONE_FILE)}
-echo ""
-echo "[canary-lab] agent exited with status $status"
-echo "[canary-lab] you can close this tab."
+printf '\\n'
+if [ "$status" = "0" ]; then
+  printf '\\033[32m✓\\033[0m agent exited with status %s\\n' "$status"
+else
+  printf '\\033[31m✗\\033[0m agent exited with status %s\\n' "$status"
+fi
+printf '\\033[2mYou can close this tab.\\033[0m\\n'
 `
   fs.writeFileSync(HEAL_SCRIPT_FILE, script, { mode: 0o755 })
 }
@@ -248,8 +269,11 @@ export async function spawnHealAgent(
 ): Promise<HealResult> {
   fs.mkdirSync(LOGS_DIR, { recursive: true })
 
+  const basePrompt = opts.benchmarkMode === 'baseline'
+    ? BASELINE_VANILLA_PROMPT
+    : loadPrompt(opts.agent)
   const prompt = [
-    loadPrompt(opts.agent),
+    basePrompt,
     opts.promptAddendum?.trim(),
   ].filter(Boolean).join('\n\n')
   fs.writeFileSync(HEAL_PROMPT_FILE, prompt)

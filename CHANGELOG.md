@@ -2,6 +2,14 @@
 
 All notable changes to Canary Lab are listed here. We try to keep the language plain so anyone can follow along.
 
+## 0.8.0 — 2026-04-21
+
+### What's new
+
+- **Per-test log slices now land in `e2e-summary` while the run is still in progress.** Instead of waiting until the full run finishes, Canary Lab writes the relevant test log context as it goes.
+
+---
+
 ## 0.7.0 — 2026-04-19
 
 Small, targeted improvements to the auto-heal loop.

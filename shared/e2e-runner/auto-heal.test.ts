@@ -57,6 +57,7 @@ const {
   isAgentCliAvailable,
   healAgentBanner,
   closeLastHealAgentTab,
+  BASELINE_VANILLA_PROMPT,
 } = await import('./auto-heal')
 
 beforeEach(() => {
@@ -153,15 +154,17 @@ describe('buildAgentCommand', () => {
 })
 
 describe('healAgentBanner', () => {
+  const stripAnsi = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, '')
+
   it('claude banner notes CLI profile defaults are used', () => {
-    expect(healAgentBanner('claude')).toBe(
-      '[canary-lab] heal agent — claude (using your CLI profile defaults for model + reasoning)',
+    expect(stripAnsi(healAgentBanner('claude'))).toBe(
+      '▶ canary-lab  heal agent — claude (using your CLI profile defaults for model + reasoning)',
     )
   })
 
   it('codex banner notes CLI profile defaults are used', () => {
-    expect(healAgentBanner('codex')).toBe(
-      '[canary-lab] heal agent — codex (using your CLI profile defaults for model + reasoning)',
+    expect(stripAnsi(healAgentBanner('codex'))).toBe(
+      '▶ canary-lab  heal agent — codex (using your CLI profile defaults for model + reasoning)',
     )
   })
 })
@@ -252,9 +255,9 @@ describe('spawnHealAgent', () => {
     const script = fs.readFileSync(scriptFile, 'utf-8')
     expect(script).toContain('claude --dangerously-skip-permissions')
     expect(script).toContain('#!/bin/bash')
-    expect(script).toContain(
-      '[canary-lab] heal agent — claude (using your CLI profile defaults for model + reasoning)',
-    )
+    expect(script).toContain('heal agent')
+    expect(script).toContain('claude')
+    expect(script).toContain('using your CLI profile defaults for model + reasoning')
 
     // iTerm boundary was invoked; Terminal boundary was not.
     expect(openItermTabs).toHaveBeenCalledOnce()
@@ -269,6 +272,33 @@ describe('spawnHealAgent', () => {
     expect(label).toContain('iTerm')
     expect(closeItermSessionsByPrefix).toHaveBeenCalledWith(['heal-agent-'])
     expect(openTerminalTabs).not.toHaveBeenCalled()
+  })
+
+  it('uses vanilla baseline prompt (not the heal skill) when benchmarkMode is baseline', async () => {
+    // Intentionally do NOT seed .claude/skills/heal-loop.md — baseline must
+    // not depend on the skill existing or being readable.
+    vi.useFakeTimers()
+
+    const promise = spawnHealAgent({
+      agent: 'claude',
+      sessionMode: 'new',
+      cycle: 0,
+      terminal: 'iTerm',
+      benchmarkMode: 'baseline',
+    })
+
+    fs.writeFileSync(RESTART_SIGNAL, '')
+    await vi.advanceTimersByTimeAsync(1200)
+    expect(await promise).toBe('signal')
+
+    const prompt = fs.readFileSync(path.join(LOGS_DIR, '.heal-prompt.txt'), 'utf-8')
+    expect(prompt).toBe(BASELINE_VANILLA_PROMPT)
+    expect(prompt).toContain('logs/playwright-stdout.log')
+    expect(prompt).toContain('logs/.restart')
+    // Must not leak canary-lab methodology into baseline.
+    expect(prompt).not.toContain('diagnosis-journal')
+    expect(prompt).not.toContain('failed[].logs')
+    expect(prompt).not.toContain('e2e-summary.json')
   })
 
   it('appends prompt addendum and benchmark usage env when provided', async () => {

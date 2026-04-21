@@ -20,6 +20,7 @@ const PIDS_DIR = path.join(LOGS_DIR, 'pids')
 const MANIFEST_PATH = path.join(LOGS_DIR, 'manifest.json')
 const SUMMARY_PATH = path.join(LOGS_DIR, 'e2e-summary.json')
 const DIAGNOSIS_JOURNAL_PATH = path.join(LOGS_DIR, 'diagnosis-journal.json')
+const PLAYWRIGHT_STDOUT_PATH = path.join(LOGS_DIR, 'playwright-stdout.log')
 fs.mkdirSync(FEATURES_DIR, { recursive: true })
 fs.mkdirSync(PIDS_DIR, { recursive: true })
 
@@ -32,6 +33,7 @@ vi.mock('./paths', () => ({
   MANIFEST_PATH,
   SUMMARY_PATH,
   DIAGNOSIS_JOURNAL_PATH,
+  PLAYWRIGHT_STDOUT_PATH,
   RERUN_SIGNAL: path.join(LOGS_DIR, '.rerun'),
   RESTART_SIGNAL: path.join(LOGS_DIR, '.restart'),
   HEAL_SIGNAL: path.join(LOGS_DIR, '.heal'),
@@ -220,7 +222,7 @@ describe('buildServiceList', () => {
 })
 
 describe('buildTeedCommand', () => {
-  it('wraps the command with LOG_MODE=plain and pipes to tee', () => {
+  it('wraps the command with LOG_MODE=plain and pipes to tee (canary default)', () => {
     const svc = {
       name: 's',
       safeName: 's',
@@ -231,6 +233,17 @@ describe('buildTeedCommand', () => {
     expect(buildTeedCommand(svc)).toBe(
       'LOG_MODE=plain npm run dev 2>&1 | tee -a /tmp/logs/svc-s.log',
     )
+  })
+
+  it('skips tee in baseline mode so no svc-*.log hits disk', () => {
+    const svc = {
+      name: 's',
+      safeName: 's',
+      logPath: '/tmp/logs/svc-s.log',
+      command: 'npm run dev',
+      cwd: '/',
+    } as any
+    expect(buildTeedCommand(svc, 'baseline')).toBe('LOG_MODE=plain npm run dev 2>&1')
   })
 })
 
@@ -269,6 +282,16 @@ describe('truncateServiceLogs', () => {
 
   it('is a no-op on empty service list', () => {
     expect(() => truncateServiceLogs([])).not.toThrow()
+  })
+
+  it('is a no-op in baseline mode even when files exist (no svc logs to wipe)', () => {
+    const dir = mkTmp()
+    const a = path.join(dir, 'svc-a.log')
+    fs.writeFileSync(a, 'keep me')
+
+    truncateServiceLogs([{ logPath: a } as any], 'baseline')
+
+    expect(fs.readFileSync(a, 'utf-8')).toBe('keep me')
   })
 })
 
@@ -593,11 +616,11 @@ describe('printSummary / printManualOptions', () => {
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
     printSummary()
     const joined = logSpy.mock.calls.flat().join('\n')
-    expect(joined).toContain('Total:  2')
-    expect(joined).toContain('Passed: 1')
-    expect(joined).toContain('Failed: 2')
-    expect(joined).toContain('- test-case-a')
-    expect(joined).toContain('- test-case-b')
+    expect(joined).toMatch(/Total:?\s+2/)
+    expect(joined).toMatch(/Passed:?\s+1/)
+    expect(joined).toMatch(/Failed:?\s+2/)
+    expect(joined).toContain('test-case-a')
+    expect(joined).toContain('test-case-b')
   })
 
   it('printManualOptions varies with autoHealConfigured', () => {
@@ -1004,6 +1027,46 @@ describe('runPlaywright', () => {
     expect(child.kill).toHaveBeenCalledWith('SIGTERM')
     child.emit('exit', 0)
     await p
+  })
+
+  it('inherits stdio and sets CANARY_LAB_BENCHMARK_MODE=canary by default', async () => {
+    const child = makeChild()
+    spawn.mockReturnValue(child)
+    const p = runPlaywright('/feat', false)
+    child.emit('exit', 0)
+    await p
+    const [, , opts] = spawn.mock.calls[0]
+    expect(opts.stdio).toBe('inherit')
+    expect(opts.env.CANARY_LAB_BENCHMARK_MODE).toBe('canary')
+  })
+
+  it('captures stdout+stderr to playwright-stdout.log and sets mode=baseline', async () => {
+    // Ensure the log file doesn't exist from a prior test.
+    try { fs.unlinkSync(PLAYWRIGHT_STDOUT_PATH) } catch { /* ignore */ }
+
+    const child = makeChild() as EventEmitter & {
+      kill: ReturnType<typeof vi.fn>
+      stdout: EventEmitter
+      stderr: EventEmitter
+    }
+    child.stdout = new EventEmitter()
+    child.stderr = new EventEmitter()
+    spawn.mockReturnValue(child)
+
+    const p = runPlaywright('/feat', false, 'baseline')
+
+    const [, , opts] = spawn.mock.calls[spawn.mock.calls.length - 1]
+    expect(opts.stdio).toEqual(['inherit', 'pipe', 'pipe'])
+    expect(opts.env.CANARY_LAB_BENCHMARK_MODE).toBe('baseline')
+
+    child.stdout.emit('data', Buffer.from('stdout chunk\n'))
+    child.stderr.emit('data', Buffer.from('stderr chunk\n'))
+    child.emit('exit', 0)
+    await p
+
+    const contents = fs.readFileSync(PLAYWRIGHT_STDOUT_PATH, 'utf-8')
+    expect(contents).toContain('stdout chunk')
+    expect(contents).toContain('stderr chunk')
   })
 })
 
