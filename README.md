@@ -3,29 +3,58 @@
 [![npm](https://img.shields.io/npm/v/canary-lab.svg)](https://www.npmjs.com/package/canary-lab)
 [![license](https://img.shields.io/npm/l/canary-lab.svg)](LICENSE)
 
-E2E testing with Playwright, local service orchestration, and agent-assisted debugging.
+Canary Lab is a local E2E workflow layer built on top of Playwright.
+
+It is built for cases where one test depends on multiple local apps or services, not just one app in isolation. Canary Lab helps start those services, wait for health checks, run Playwright, capture service logs into `logs/svc-*.log`, write `logs/e2e-summary.json`, and optionally let Claude Code or Codex inspect a failed run and try a fix.
 
 See [CHANGELOG.md](CHANGELOG.md) for what's new in each release.
 
-## Requirements
+## What This Tool Is
 
-- **macOS only.** The runner drives iTerm / Terminal.app via AppleScript (`osascript`) to open service and heal-agent tabs. Linux and Windows are not supported yet — there's no fallback launcher.
+This is not a replacement for Playwright.
+
+Playwright already handles browser automation and test execution well. Canary Lab adds a local workflow layer around that, especially for multi-service setups.
+
+Playwright gives you:
+
+- browser automation
+- assertions, fixtures, and reporters
+- test execution and retries
+
+Canary Lab adds:
+
+- local service startup in terminal tabs
+- health-check gating before tests run
+- log capture to `logs/svc-*.log`
+- per-test log slicing via `<test-tag>` markers
+- temporary env switching across repos
+- agent-assisted debugging with `self heal` or auto-heal
+- scaffolded docs/skills that `canary-lab upgrade` can keep in sync with the current package version
+
+## Who This Is For
+
+Use this if:
+
+- your tests depend on more than one local app or service
+- you often switch env files during local testing
+- you want failure context collected in one place
+- you want Claude Code or Codex to work from logs and summaries instead of only a pasted test failure
+
+## Who This Is Not For
+
+This is probably not for you if:
+
+- you only test a single app
+- normal Playwright fixtures, reporters, and scripts are enough
+- you need Linux or Windows support today
+- you want a CI-first tool rather than a local development workflow
+
+## Current Scope
+
+- **macOS only.** The runner drives iTerm / Terminal.app via AppleScript (`osascript`) to open service and heal-agent tabs. Linux and Windows are not supported yet — there is no fallback launcher.
 - **Node.js ≥ 20**, **npm ≥ 9**.
 - **iTerm2** (recommended) or the built-in **Terminal.app**.
 - **Optional, for headless auto-heal:** [Claude Code CLI](https://docs.claude.com/en/docs/claude-code) (`claude`) or [Codex CLI](https://github.com/openai/codex) (`codex`) on `PATH`. The interactive fallback (see [When auto-heal isn't available](#when-auto-heal-isnt-available)) works with either CLI or the Desktop apps.
-
-## Capabilities
-
-| Capability | What it does |
-|-----------|-------------|
-| Project scaffolding | `canary-lab init` creates a runnable E2E project from templates |
-| Feature generator | `canary-lab new-feature` scaffolds a new test feature with config, envsets, and spec files |
-| Service orchestration | Starts declared apps in terminal tabs, waits on health checks, captures stdout to `logs/svc-*.log` |
-| Environment switching | `canary-lab env` applies/reverts named sets of env files across multiple repos |
-| Env import | Claude/Codex-guided workflow to find and copy env files from declared repos into a feature's envsets |
-| Self-fixing workflow | Claude/Codex-guided loop: read failure context, form hypothesis, fix implementation, signal runner, evaluate |
-| Log correlation | XML markers (`<test-tag>...</test-tag>`) in service logs allow per-test log slicing |
-| Managed upgrades | `canary-lab upgrade` keeps skills and docs in sync; runs automatically via postinstall hook |
 
 ## Quick Start
 
@@ -54,6 +83,36 @@ npx canary-lab env
 npx canary-lab new-feature <name> "Description"
 npx canary-lab upgrade
 ```
+
+`canary-lab upgrade` is for syncing scaffolded docs and skills in an existing project with the current package version. It is not a general dependency or repo upgrade system.
+
+## Benchmarking
+
+If you want to compare Canary Lab's structured heal loop against a more naive baseline, `canary-lab run` can record benchmark artifacts under `logs/benchmark/`.
+
+```bash
+npx canary-lab run --benchmark --benchmark-mode=canary
+npx canary-lab run --benchmark --benchmark-mode=baseline
+```
+
+Benchmark mode does not create a separate runner. Both modes use the same Canary Lab orchestrator, the same self-heal loop, and the same `logs/.rerun` / `logs/.restart` signaling. The thing being compared is the agent context, not the runner itself.
+
+Benchmark mode writes:
+
+- `logs/benchmark/run.json`
+- `logs/benchmark/cycles.jsonl`
+- `logs/benchmark/context/cycle-<n>.json`
+- `logs/benchmark/final-summary.json`
+
+`canary` mode benchmarks the normal structured context: `logs/e2e-summary.json`, enriched per-test log slices, and `logs/diagnosis-journal.json` when present.
+
+`baseline` mode keeps that exact same runtime flow, but the agent gets only Playwright-style failure context and explores the codebase on its own.
+
+Important clarification for `baseline`:
+
+- services still start through the normal orchestrator
+- service logs may still be produced on disk
+- the agent simply is not given Canary Lab's structured debugging context such as diagnosis journal or per-test sliced logs
 
 ## Environment Switching
 

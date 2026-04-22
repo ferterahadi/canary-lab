@@ -1,6 +1,7 @@
 import fs from 'fs'
 import path from 'path'
 import { getFeaturesDir } from '../shared/runtime/project-root'
+import { ok, section, step, bullet, fail, line, path as ansiPath, dim } from '../shared/cli-ui/ui'
 
 export function isValidFeatureName(name: string): boolean {
   return /^[a-z][a-z0-9_]*$/.test(name)
@@ -90,20 +91,18 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
   const description = args.slice(1).join(' ') || 'TODO: add description'
 
   if (!name) {
-    console.error('Usage: canary-lab new-feature <name> [description]')
+    fail('Usage: canary-lab new-feature <name> [description]')
     process.exit(1)
   }
 
   if (!isValidFeatureName(name)) {
-    console.error(
-      `Invalid feature name "${name}". Use snake_case (e.g. cns_webhooks).`,
-    )
+    fail(`Invalid feature name "${name}". Use snake_case (e.g. cns_webhooks).`)
     process.exit(1)
   }
 
   const featureDir = path.join(getFeaturesDir(), name)
   if (fs.existsSync(featureDir)) {
-    console.error(`Feature "${name}" already exists at ${featureDir}`)
+    fail(`Feature "${name}" already exists at ${featureDir}`)
     process.exit(1)
   }
 
@@ -125,19 +124,18 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
 
   fs.mkdirSync(path.join(featureDir, 'e2e/helpers'), { recursive: true })
 
-  console.log(`\n  Feature "${name}" created at features/${name}/\n`)
-  console.log('  Created files:')
+  ok(`Feature "${name}" created at ${ansiPath(`features/${name}/`)}`)
+  section('Created files')
   for (const [relPath] of files) {
-    console.log(`    features/${name}/${relPath}`)
+    bullet(dim(`features/${name}/`) + relPath)
   }
-  console.log(`    features/${name}/e2e/helpers/`)
-  console.log('')
-  console.log('  Next steps:')
-  console.log('    1. Edit feature.config.cjs — add your repos, start commands, and health checks')
-  console.log('    2. Edit src/config.ts — add feature-specific env var exports')
-  console.log(`    3. Write your tests in e2e/${name}.spec.ts`)
-  console.log('    4. Run: npx canary-lab run')
-  console.log('')
+  bullet(dim(`features/${name}/`) + 'e2e/helpers/')
+  section('Next steps')
+  step(1, `Edit ${ansiPath('feature.config.cjs')} — add your repos, start commands, and health checks`)
+  step(2, `Edit ${ansiPath('src/config.ts')} — add feature-specific env var exports`)
+  step(3, `Write your tests in ${ansiPath(`e2e/${name}.spec.ts`)}`)
+  step(4, 'Run: npx canary-lab run')
+  line()
 }
 
 if (require.main === module) {

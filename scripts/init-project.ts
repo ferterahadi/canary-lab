@@ -1,6 +1,8 @@
 import fs from 'fs'
 import path from 'path'
 import { execFileSync } from 'child_process'
+import { ok, section, step, line, path as ansiPath } from '../shared/cli-ui/ui'
+import { fail } from '../shared/cli-ui/ui'
 
 export function resolveFirstExisting(pathsToTry: string[]): string {
   const match = pathsToTry.find((candidate) => fs.existsSync(candidate))
@@ -56,7 +58,7 @@ function readPackageVersion(): string {
 export function parseArgs(args: string[]): { folder: string; packageSpec: string } {
   const folder = args[0]
   if (!folder) {
-    console.error('Usage: canary-lab init <folder> [--package-spec <spec>]')
+    fail('Usage: canary-lab init <folder> [--package-spec <spec>]')
     process.exit(1)
   }
 
@@ -70,7 +72,7 @@ export function parseArgs(args: string[]): { folder: string; packageSpec: string
   }
 
   if (!packageSpec) {
-    console.error('Missing value for --package-spec')
+    fail('Missing value for --package-spec')
     process.exit(1)
   }
 
@@ -112,7 +114,7 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
   if (fs.existsSync(targetDir)) {
     const entries = fs.readdirSync(targetDir)
     if (entries.length > 0) {
-      console.error(`Target directory is not empty: ${targetDir}`)
+      fail(`Target directory is not empty: ${targetDir}`)
       process.exit(1)
     }
   } else {
@@ -140,13 +142,13 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
     }
   }
 
-  console.log(`\n  Canary Lab project created at ${targetDir}\n`)
-  console.log('  Next steps:')
-  console.log(`    1. cd ${folder}`)
-  console.log('    2. npm install')
-  console.log('    3. npm run install:browsers')
-  console.log('    4. npx canary-lab run')
-  console.log('')
+  ok(`Canary Lab project created at ${ansiPath(targetDir)}`)
+  section('Next steps')
+  step(1, `cd ${folder}`)
+  step(2, 'npm install')
+  step(3, 'npm run install:browsers')
+  step(4, 'npx canary-lab run')
+  line()
 }
 
 if (require.main === module) {

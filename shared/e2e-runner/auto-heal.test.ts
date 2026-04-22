@@ -2,6 +2,7 @@ import { describe, it, expect, afterEach, vi, beforeEach } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
+import type { StartTab } from '../launcher/startup'
 
 const tmpDirs: string[] = []
 function mkTmp(): string {
@@ -27,10 +28,12 @@ vi.mock('./paths', () => ({
   ITERM_HEAL_SESSION_IDS_PATH,
 }))
 
-const openItermTabs = vi.fn(() => ['SID-1'])
-const reuseItermTabs = vi.fn(() => false)
-const closeItermSessionsByPrefix = vi.fn()
-const closeItermSessionsByIds = vi.fn()
+const openItermTabs = vi.fn((_tabs: StartTab[], _label: string) => ['SID-1'])
+const reuseItermTabs = vi.fn(
+  (_ids: string[], _tabs: StartTab[], _label: string) => false,
+)
+const closeItermSessionsByPrefix = vi.fn((_prefixes: string[]) => {})
+const closeItermSessionsByIds = vi.fn((_ids: string[]) => {})
 vi.mock('../launcher/iterm', () => ({
   openItermTabs,
   reuseItermTabs,
@@ -57,6 +60,7 @@ const {
   isAgentCliAvailable,
   healAgentBanner,
   closeLastHealAgentTab,
+  buildBaselineVanillaPrompt,
 } = await import('./auto-heal')
 
 beforeEach(() => {
@@ -252,9 +256,8 @@ describe('spawnHealAgent', () => {
     const script = fs.readFileSync(scriptFile, 'utf-8')
     expect(script).toContain('claude --dangerously-skip-permissions')
     expect(script).toContain('#!/bin/bash')
-    expect(script).toContain(
-      '[canary-lab] heal agent — claude (using your CLI profile defaults for model + reasoning)',
-    )
+    expect(script).toMatch(/heal agent — .*claude/)
+    expect(script).toContain('using your CLI profile defaults for model + reasoning')
 
     // iTerm boundary was invoked; Terminal boundary was not.
     expect(openItermTabs).toHaveBeenCalledOnce()
@@ -269,6 +272,87 @@ describe('spawnHealAgent', () => {
     expect(label).toContain('iTerm')
     expect(closeItermSessionsByPrefix).toHaveBeenCalledWith(['heal-agent-'])
     expect(openTerminalTabs).not.toHaveBeenCalled()
+  })
+
+  it('uses vanilla baseline prompt (not the heal skill) when benchmarkMode is baseline', async () => {
+    // Intentionally do NOT seed .claude/skills/heal-loop.md — baseline must
+    // not depend on the skill existing or being readable.
+    vi.useFakeTimers()
+
+    const promise = spawnHealAgent({
+      agent: 'claude',
+      sessionMode: 'new',
+      cycle: 0,
+      terminal: 'iTerm',
+      benchmarkMode: 'baseline',
+      baselinePlaywrightLogPath: '/tmp/sandbox/playwright-stdout.log',
+      baselineSignalFilePath: '/project/logs/.restart',
+      baselineRepoPaths: ['/repos/app', '/repos/svc'],
+      agentCwd: '/tmp/sandbox',
+    })
+
+    fs.writeFileSync(RESTART_SIGNAL, '')
+    await vi.advanceTimersByTimeAsync(1200)
+    expect(await promise).toBe('signal')
+
+    const prompt = fs.readFileSync(path.join(LOGS_DIR, '.heal-prompt.txt'), 'utf-8')
+    // Absolute paths so the sandboxed agent can reach the real workspace.
+    expect(prompt).toContain('/tmp/sandbox/playwright-stdout.log')
+    expect(prompt).toContain('/project/logs/.restart')
+    expect(prompt).toContain('/repos/app')
+    expect(prompt).toContain('/repos/svc')
+    // Must not leak canary-lab methodology into baseline.
+    expect(prompt).not.toContain('diagnosis-journal')
+    expect(prompt).not.toContain('failed[].logs')
+    expect(prompt).not.toContain('e2e-summary.json')
+    expect(prompt).not.toContain('heal-index')
+    // iTerm tab was opened with the sandbox cwd, not ROOT.
+    const [tabs] = openItermTabs.mock.calls[0]
+    expect(tabs[0].dir).toBe('/tmp/sandbox')
+  })
+
+  it('buildBaselineVanillaPrompt formats absolute paths and optional repo list', () => {
+    const withRepos = buildBaselineVanillaPrompt({
+      playwrightLogPath: '/abs/log.log',
+      signalFilePath: '/abs/.restart',
+      repoPaths: ['/repos/a'],
+    })
+    expect(withRepos).toContain('/abs/log.log')
+    expect(withRepos).toContain('/abs/.restart')
+    expect(withRepos).toContain('/repos/a')
+    expect(withRepos).toContain('Repositories you may need to edit')
+
+    const withoutRepos = buildBaselineVanillaPrompt({
+      playwrightLogPath: '/abs/log.log',
+      signalFilePath: '/abs/.restart',
+    })
+    expect(withoutRepos).not.toContain('Repositories you may need to edit')
+  })
+
+  it('appends prompt addendum and benchmark usage env when provided', async () => {
+    seedPrompt('codex')
+    vi.useFakeTimers()
+    const usageFile = path.join(LOGS_DIR, 'benchmark', 'usage', 'cycle-1.jsonl')
+
+    const promise = spawnHealAgent({
+      agent: 'codex',
+      sessionMode: 'new',
+      cycle: 0,
+      terminal: 'Terminal',
+      promptAddendum: 'Benchmark override: use only the Playwright failure summary.',
+      benchmarkUsageFile: usageFile,
+    })
+
+    fs.writeFileSync(RESTART_SIGNAL, '')
+    await vi.advanceTimersByTimeAsync(1200)
+    await promise
+
+    expect(fs.readFileSync(path.join(LOGS_DIR, '.heal-prompt.txt'), 'utf-8')).toContain(
+      'Benchmark override: use only the Playwright failure summary.',
+    )
+    const script = fs.readFileSync(path.join(LOGS_DIR, '.heal-agent.sh'), 'utf-8')
+    expect(script).toContain('CANARY_LAB_BENCHMARK_USAGE_FILE')
+    expect(script).toContain(usageFile)
   })
 
   it('returns "signal" when RESTART_SIGNAL appears', async () => {

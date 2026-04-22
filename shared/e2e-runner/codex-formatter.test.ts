@@ -1,4 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import fs from 'fs'
+import os from 'os'
+import path from 'path'
 import {
   c,
   elapsed,
@@ -16,6 +19,10 @@ import {
 
 beforeEach(() => {
   resetSessionState()
+})
+
+afterEach(() => {
+  delete process.env.CANARY_LAB_BENCHMARK_USAGE_FILE
 })
 
 describe('c (color)', () => {
@@ -132,6 +139,20 @@ describe('handleLine', () => {
     expect(out).toContain('turn done')
     expect(out).toContain('(10 in / 5 out)')
     spy.mockRestore()
+  })
+
+  it('writes benchmark usage sidecar on turn.completed when configured', () => {
+    const file = path.join(os.tmpdir(), `codex-usage-${Date.now()}.jsonl`)
+    process.env.CANARY_LAB_BENCHMARK_USAGE_FILE = file
+    handleLine(
+      JSON.stringify({
+        type: 'turn.completed',
+        usage: { input_tokens: 10, output_tokens: 5 },
+      }),
+    )
+    const usage = JSON.parse(fs.readFileSync(file, 'utf-8').trim())
+    expect(usage).toEqual({ inputTokens: 10, outputTokens: 5 })
+    fs.rmSync(file, { force: true })
   })
 
   it('writeSessionSummary aggregates tokens + turns + reasoning across the session', () => {

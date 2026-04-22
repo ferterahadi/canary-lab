@@ -1,7 +1,24 @@
 import fs from 'fs'
+import os from 'os'
 import path from 'path'
 import readline from 'readline'
 import { execFileSync, spawn } from 'child_process'
+import {
+  banner,
+  section,
+  step,
+  bullet,
+  ok,
+  fail,
+  warn,
+  info,
+  line as uiLine,
+  dim,
+  muted,
+  path as ansiPath,
+  summaryBox,
+  c as ansiC,
+} from '../cli-ui/ui'
 import type { FeatureConfig } from '../launcher/types'
 import { checkUpgradeDrift, formatDriftNotice } from '../runtime/upgrade-check'
 import {
@@ -25,7 +42,8 @@ import {
   LOGS_DIR,
   PIDS_DIR,
   MANIFEST_PATH,
-  SUMMARY_PATH,
+  PLAYWRIGHT_STDOUT_PATH,
+  getSummaryPath,
   RERUN_SIGNAL,
   RESTART_SIGNAL,
   HEAL_SIGNAL,
@@ -40,7 +58,20 @@ import {
   closeLastHealAgentTab,
   type HealAgent,
   type HealSessionMode,
+  type HealResult,
 } from './auto-heal'
+import {
+  createBenchmarkTracker,
+  finalizeBenchmarkCycle,
+  finalizeBenchmarkRun,
+  noteBenchmarkSignal,
+  startBenchmarkCycle,
+  type BenchmarkTracker,
+} from './benchmark'
+import {
+  buildBenchmarkContextSnapshot,
+  type BenchmarkMode,
+} from './context-assembler'
 
 export function safeReadFile(file: string): string | null {
   try {
@@ -55,6 +86,11 @@ type TerminalChoice = 'iTerm' | 'Terminal'
 interface AutoHealConfig {
   agent: HealAgent | null
   sessionMode: HealSessionMode
+}
+
+interface BenchmarkConfig {
+  enabled: boolean
+  mode: BenchmarkMode
 }
 
 export const AUTO_HEAL_MAX_CYCLES = 3
@@ -73,13 +109,13 @@ export async function selectOption(
   label: string,
   options: string[],
 ): Promise<string> {
-  console.log(`\n${label}`)
-  options.forEach((opt, i) => console.log(`  ${i + 1}) ${opt}`))
+  section(label)
+  options.forEach((opt, i) => console.log(`  ${ansiC('gray', `${i + 1})`)} ${opt}`))
   while (true) {
-    const answer = await prompt(rl, `Select [1-${options.length}]: `)
+    const answer = await prompt(rl, `${ansiC('cyan', '›')} Select [1-${options.length}]: `)
     const idx = parseInt(answer.trim(), 10) - 1
     if (idx >= 0 && idx < options.length) return options[idx]
-    console.log(`  Please enter a number between 1 and ${options.length}`)
+    warn(`Please enter a number between 1 and ${options.length}`)
   }
 }
 
@@ -115,12 +151,12 @@ export function checkRepos(feature: FeatureConfig): boolean {
   for (const repo of feature.repos) {
     const resolved = resolvePath(repo.localPath)
     if (!fs.existsSync(resolved)) {
-      console.error(`\n  Missing repo: ${repo.name}`)
-      console.error(`  Expected at: ${resolved}`)
+      uiLine()
+      fail(`Missing repo: ${repo.name}`)
+      console.error(`  ${dim('expected at:')} ${resolved}`)
       if (repo.cloneUrl) {
-        console.error(
-          `  Clone it with:\n    git clone ${repo.cloneUrl} ${resolved}`,
-        )
+        console.error(`  ${dim('clone it with:')}`)
+        console.error(`    git clone ${repo.cloneUrl} ${resolved}`)
       }
       allOk = false
     }
@@ -172,17 +208,29 @@ export function buildServiceList(feature: FeatureConfig): ServiceInfo[] {
   return services
 }
 
-export function buildTeedCommand(svc: ServiceInfo): string {
+export function buildTeedCommand(
+  svc: ServiceInfo,
+  benchmarkMode: BenchmarkMode = 'canary',
+): string {
   // LOG_MODE=plain tells apps to use synchronous console.log instead of async
   // loggers (e.g. Pino/sonic-boom), so XML markers land in the right position.
-  // stdout+stderr go to both the iTerm tab and the log file via tee.
+  // Canary: stdout+stderr go to both the iTerm tab and the log file via tee.
+  // Baseline: no tee — nothing hits disk, so the heal agent can't be tempted
+  // (or accidentally pointed) at canary-lab-specific service logs.
+  if (benchmarkMode === 'baseline') {
+    return `LOG_MODE=plain ${svc.command} 2>&1`
+  }
   return `LOG_MODE=plain ${svc.command} 2>&1 | tee -a ${svc.logPath}`
 }
 
 // Wipe each service's log file so the next iteration starts clean. Called
 // before every run signal (.restart and .rerun) so both behave identically —
 // the file contains only the current iteration's output.
-export function truncateServiceLogs(services: ServiceInfo[]): void {
+export function truncateServiceLogs(
+  services: ServiceInfo[],
+  benchmarkMode: BenchmarkMode = 'canary',
+): void {
+  if (benchmarkMode === 'baseline') return
   for (const svc of services) {
     try {
       fs.writeFileSync(svc.logPath, '')
@@ -253,6 +301,7 @@ export function openTabs(
 export async function launchServices(
   services: ServiceInfo[],
   terminal: TerminalChoice,
+  benchmarkMode: BenchmarkMode = 'canary',
 ): Promise<void> {
   // Always kill existing processes so we own the tee pipe and capture all logs.
   // Without this, externally-started services have no log file and XML markers
@@ -260,17 +309,17 @@ export async function launchServices(
   for (const svc of services) {
     const pid = resolveRunningPid(svc)
     if (pid) {
-      process.stdout.write(`  Stopping existing ${svc.name} (PID ${pid})... `)
+      process.stdout.write(`  ${ansiC('gray', '›')} Stopping existing ${svc.name} ${dim(`(PID ${pid})`)}... `)
       await killProcess(pid)
-      console.log('stopped')
+      console.log(ansiC('green', 'stopped'))
     }
   }
 
-  truncateServiceLogs(services)
+  truncateServiceLogs(services, benchmarkMode)
 
   const tabs: Array<{ dir: string; command: string; name: string }> = services.map((svc) => ({
     dir: svc.cwd,
-    command: buildTeedCommand(svc),
+    command: buildTeedCommand(svc, benchmarkMode),
     name: svc.name,
   }))
 
@@ -278,7 +327,9 @@ export async function launchServices(
     return
   }
 
-  openTabs(terminal, tabs, `  Opening ${terminal} tabs for ${tabs.length} service(s)...`)
+  uiLine()
+  info(`Opening ${terminal} tabs for ${tabs.length} service(s)...`)
+  openTabs(terminal, tabs, '')
 }
 
 export async function pollHealthChecks(
@@ -288,30 +339,45 @@ export async function pollHealthChecks(
   const checksNeeded = services.filter((s) => s.healthUrl)
   if (checksNeeded.length === 0) return
 
-  console.log('\n  Waiting for health checks...')
+  uiLine()
+  info('Waiting for health checks...')
   const deadline = Date.now() + timeoutMs
 
   for (const svc of checksNeeded) {
-    process.stdout.write(`    ${svc.name}: `)
+    process.stdout.write(`    ${ansiC('gray', '•')} ${svc.name} ${dim('…')} `)
     while (Date.now() < deadline) {
       if (await isHealthy(svc.healthUrl!, svc.healthTimeout)) {
-        console.log('healthy')
+        console.log(ansiC('green', 'healthy'))
         break
       }
       await new Promise((r) => setTimeout(r, 2000))
     }
     if (Date.now() >= deadline) {
-      console.log('TIMEOUT')
+      console.log(ansiC('red', 'TIMEOUT'))
       throw new Error(
         `Health check timed out for ${svc.name} at ${svc.healthUrl}`,
       )
     }
   }
-  console.log('')
 }
 
-export function writeManifest(services: ServiceInfo[]): void {
-  const manifest = { serviceLogs: services.map((s) => s.logPath) }
+export function writeManifest(
+  services: ServiceInfo[],
+  feature?: FeatureConfig,
+): void {
+  const manifest: {
+    serviceLogs: string[]
+    featureName?: string
+    featureDir?: string
+    repoPaths?: string[]
+  } = { serviceLogs: services.map((s) => s.logPath) }
+  if (feature) {
+    manifest.featureName = feature.name
+    manifest.featureDir = feature.featureDir
+    manifest.repoPaths = (feature.repos ?? [])
+      .map((r) => resolvePath(r.localPath))
+      .filter((p) => fs.existsSync(p))
+  }
   fs.writeFileSync(MANIFEST_PATH, JSON.stringify(manifest, null, 2) + '\n')
 }
 
@@ -421,31 +487,35 @@ export function resolveRunningPid(svc: ServiceInfo): number | null {
 export async function restartAllServices(
   services: ServiceInfo[],
   terminal: TerminalChoice,
+  benchmarkMode: BenchmarkMode = 'canary',
 ): Promise<void> {
-  console.log('\n  Restarting all configured services...')
+  uiLine()
+  info('Restarting all configured services...')
 
   // Kill all running services first
   for (const svc of services) {
-    process.stdout.write(`    ${svc.name}: `)
+    process.stdout.write(`    ${ansiC('gray', '•')} ${svc.name} ${dim('…')} `)
     const pid = resolveRunningPid(svc)
     if (pid) {
-      process.stdout.write(`stopping PID ${pid}... `)
+      process.stdout.write(`${dim(`stopping PID ${pid}`)} `)
       await killProcess(pid)
-      console.log('stopped')
+      console.log(ansiC('green', 'stopped'))
     } else {
-      console.log('no existing process found')
+      console.log(dim('no existing process'))
     }
   }
 
-  truncateServiceLogs(services)
+  truncateServiceLogs(services, benchmarkMode)
 
   // Re-launch all in terminal tabs with tee
   const tabs = services.map((svc) => ({
     dir: svc.cwd,
-    command: buildTeedCommand(svc),
+    command: buildTeedCommand(svc, benchmarkMode),
     name: svc.name,
   }))
-  openTabs(terminal, tabs, `  Re-opening ${terminal} tabs for ${tabs.length} service(s)...`)
+  uiLine()
+  info(`Re-opening ${terminal} tabs for ${tabs.length} service(s)...`)
+  openTabs(terminal, tabs, '')
 
   await pollHealthChecks(services)
 }
@@ -453,7 +523,11 @@ export async function restartAllServices(
 // ─── Playwright ─────────────────────────────────────────────────────────────
 const RUN_TIMEOUT = 10 * 60 * 1000 // 10 minutes — safety net for hung runs
 
-export function runPlaywright(featureDir: string, headed: boolean): Promise<number> {
+export function runPlaywright(
+  featureDir: string,
+  headed: boolean,
+  benchmarkMode: BenchmarkMode = 'canary',
+): Promise<number> {
   return new Promise((resolve, reject) => {
     const playwrightArgs = [
       'playwright',
@@ -462,18 +536,42 @@ export function runPlaywright(featureDir: string, headed: boolean): Promise<numb
       ...(headed ? ['--headed'] : []),
     ]
 
+    // Baseline: capture stdout+stderr to logs/playwright-stdout.log so the
+    // vanilla heal agent has exactly one file to read — the raw Playwright
+    // output a developer would see in their terminal. Still forward to the
+    // parent process so the user sees progress live.
+    const captureStdout = benchmarkMode === 'baseline'
+    let stdoutFile: fs.WriteStream | null = null
+    if (captureStdout) {
+      fs.mkdirSync(path.dirname(PLAYWRIGHT_STDOUT_PATH), { recursive: true })
+      stdoutFile = fs.createWriteStream(PLAYWRIGHT_STDOUT_PATH, { flags: 'w' })
+    }
+
     const child = spawn('npx', playwrightArgs, {
       cwd: featureDir,
       env: {
         ...process.env,
         CANARY_LAB_PROJECT_ROOT: ROOT,
+        CANARY_LAB_BENCHMARK_MODE: benchmarkMode,
       },
-      stdio: 'inherit',
+      stdio: captureStdout ? ['inherit', 'pipe', 'pipe'] : 'inherit',
       shell: false,
     })
 
+    if (captureStdout && stdoutFile && child.stdout && child.stderr) {
+      child.stdout.on('data', (chunk: Buffer) => {
+        process.stdout.write(chunk)
+        stdoutFile!.write(chunk)
+      })
+      child.stderr.on('data', (chunk: Buffer) => {
+        process.stderr.write(chunk)
+        stdoutFile!.write(chunk)
+      })
+    }
+
     const timer = setTimeout(() => {
-      console.log('\n  Playwright run timed out after 10 minutes, killing...')
+      uiLine()
+      warn('Playwright run timed out after 10 minutes, killing...')
       child.kill('SIGTERM')
       setTimeout(() => {
         try {
@@ -489,95 +587,67 @@ export function runPlaywright(featureDir: string, headed: boolean): Promise<numb
     process.on('SIGINT', forwardSigInt)
     process.on('SIGTERM', forwardSigTerm)
 
+    const closeStdoutFile = (): Promise<void> =>
+      new Promise((res) => {
+        if (!stdoutFile) return res()
+        stdoutFile.end(() => res())
+      })
+
     child.on('error', (err) => {
       clearTimeout(timer)
       process.off('SIGINT', forwardSigInt)
       process.off('SIGTERM', forwardSigTerm)
-      reject(err)
+      closeStdoutFile().then(() => reject(err))
     })
 
     child.on('exit', (code) => {
       clearTimeout(timer)
       process.off('SIGINT', forwardSigInt)
       process.off('SIGTERM', forwardSigTerm)
-      resolve(code ?? 1)
+      closeStdoutFile().then(() => resolve(code ?? 1))
     })
   })
 }
 
-// ─── Log enrichment ─────────────────────────────────────────────────────────
-export function extractLogsForTest(
-  slug: string,
-  serviceLogs: string[],
-): Record<string, string> {
-  const logs: Record<string, string> = {}
-  const openTag = `<${slug}>`
-  const closeTag = `</${slug}>`
-
-  for (const logPath of serviceLogs) {
-    if (!fs.existsSync(logPath)) continue
-    const content = fs.readFileSync(logPath, 'utf-8')
-    const openIdx = content.indexOf(openTag)
-    const closeIdx = content.indexOf(closeTag)
-    if (openIdx === -1 || closeIdx === -1 || closeIdx <= openIdx) continue
-    const snippet = content
-      .slice(openIdx + openTag.length, closeIdx)
-      .trim()
-    if (snippet.length > 0) {
-      const svcName = path.basename(logPath, '.log')
-      logs[svcName] = snippet
-    }
-  }
-  return logs
-}
-
-export function enrichSummaryWithLogs(): void {
-  if (!fs.existsSync(SUMMARY_PATH) || !fs.existsSync(MANIFEST_PATH)) return
-
-  const summary = JSON.parse(fs.readFileSync(SUMMARY_PATH, 'utf-8'))
-  const manifest: { serviceLogs: string[] } = JSON.parse(
-    fs.readFileSync(MANIFEST_PATH, 'utf-8'),
-  )
-
-  if (!Array.isArray(summary.failed) || summary.failed.length === 0) return
-
-  // Enrich: replace string slugs with {name, logs} objects
-  summary.failed = summary.failed.map((entry: string | { name: string }) => {
-    const slug = typeof entry === 'string' ? entry : entry.name
-    const logs = extractLogsForTest(slug, manifest.serviceLogs)
-    return { name: slug, logs }
-  })
-
-  fs.writeFileSync(SUMMARY_PATH, JSON.stringify(summary, null, 2) + '\n')
-}
-
 // ─── Summary ────────────────────────────────────────────────────────────────
 export function printSummary(): void {
-  if (!fs.existsSync(SUMMARY_PATH)) {
-    console.log('\n  No summary file found.')
+  const summaryPath = getSummaryPath()
+  if (!fs.existsSync(summaryPath)) {
+    uiLine()
+    warn('No summary file found.')
     return
   }
 
-  const summary = JSON.parse(fs.readFileSync(SUMMARY_PATH, 'utf-8'))
-  console.log('\n  ──── E2E Summary ────')
-  console.log(`  Total:  ${summary.total}`)
-  console.log(`  Passed: ${summary.passed}`)
-  console.log(`  Failed: ${summary.failed.length}`)
-  if (summary.failed.length > 0) {
-    console.log(`  Failures:`)
-    for (const entry of summary.failed) {
-      const name = typeof entry === 'string' ? entry : entry.name
-      console.log(`    - ${name}`)
-    }
-  }
-  console.log('')
+  const summary = JSON.parse(fs.readFileSync(summaryPath, 'utf-8'))
+  const failedCount = summary.failed.length
+  const extras = failedCount > 0
+    ? [
+        '',
+        ansiC('red', 'Failures:'),
+        ...summary.failed.map((entry: unknown) => {
+          const name = typeof entry === 'string' ? entry : (entry as { name: string }).name
+          return `  ${ansiC('red', '✗')} ${name}`
+        }),
+      ]
+    : []
+  summaryBox(
+    'E2E Summary',
+    [
+      { label: 'Total', value: summary.total },
+      { label: 'Passed', value: summary.passed, tone: 'good' },
+      { label: 'Failed', value: failedCount, tone: failedCount > 0 ? 'bad' : 'default' },
+    ],
+    extras,
+  )
+  uiLine()
 }
 
 // ─── Watch mode ─────────────────────────────────────────────────────────────
 export function readFailureSignature(): string {
-  if (!fs.existsSync(SUMMARY_PATH)) return ''
+  const summaryPath = getSummaryPath()
+  if (!fs.existsSync(summaryPath)) return ''
   try {
-    const summary = JSON.parse(fs.readFileSync(SUMMARY_PATH, 'utf-8'))
+    const summary = JSON.parse(fs.readFileSync(summaryPath, 'utf-8'))
     return failureSignature(summary.failed)
   } catch {
     return ''
@@ -592,27 +662,53 @@ export interface HealCycleState {
 }
 
 export function printManualOptions(autoHealConfigured: boolean): void {
-  console.log('  Options:')
-  console.log('    • fix the code yourself, then `touch logs/.rerun`')
+  section('Options')
+  bullet(`fix the code yourself, then ${ansiC('cyan', '`touch logs/.rerun`')}`)
   if (autoHealConfigured) {
-    console.log('    • `touch logs/.heal` to reset strikes and spawn the headless agent again')
+    bullet(`${ansiC('cyan', '`touch logs/.heal`')} to reset strikes and spawn the headless agent again`)
   }
-  console.log(
-    `    • open \`claude\` or \`codex\` in ${ROOT} and send the prompt \`self heal\``,
-  )
-  console.log('    • Ctrl+C to exit')
-  console.log('')
+  bullet(`open ${ansiC('cyan', '`claude`')} or ${ansiC('cyan', '`codex`')} in ${ansiPath(ROOT)} and send the prompt ${ansiC('cyan', '`self heal`')}`)
+  bullet(`${ansiC('cyan', 'Ctrl+C')} to exit`)
+  uiLine()
+}
+
+// Build a sandbox dir outside ROOT for baseline mode. Spawning the heal
+// agent with cwd here prevents Claude Code / Codex from auto-discovering
+// `.claude/skills/*`, `CLAUDE.md`, or `AGENTS.md` up the tree — those would
+// leak canary-lab methodology into a supposedly vanilla run.
+//
+// We copy playwright-stdout.log into the sandbox so the agent's "first
+// Read" lands on a local, present file. Writes (.restart) go back to the
+// real LOGS_DIR via the absolute path in the prompt.
+export function prepareBaselineSandbox(runId: string): {
+  sandboxDir: string
+  sandboxLogPath: string
+} {
+  const sandboxDir = path.join(os.tmpdir(), `canary-lab-baseline-${runId}`)
+  fs.mkdirSync(sandboxDir, { recursive: true })
+  const srcLog = PLAYWRIGHT_STDOUT_PATH
+  const sandboxLogPath = path.join(sandboxDir, 'playwright-stdout.log')
+  try {
+    fs.copyFileSync(srcLog, sandboxLogPath)
+  } catch {
+    // Source log may not exist yet on first cycle; agent will still see the
+    // absolute path and surface the miss itself.
+  }
+  return { sandboxDir, sandboxLogPath }
 }
 
 export async function maybeAutoHeal(
   autoHeal: AutoHealConfig,
   state: HealCycleState,
   terminal: TerminalChoice,
-): Promise<void> {
-  if (autoHeal.agent === null || state.disabled) return
+  benchmark: BenchmarkTracker | null = null,
+  benchmarkMode: BenchmarkMode = 'canary',
+  maxCycles = AUTO_HEAL_MAX_CYCLES,
+): Promise<HealResult | null> {
+  if (autoHeal.agent === null || state.disabled) return null
 
   const signature = readFailureSignature()
-  if (signature === '') return // no failures recorded
+  if (signature === '') return null // no failures recorded
 
   if (signature === state.lastSignature) {
     state.strikeCount += 1
@@ -621,40 +717,84 @@ export async function maybeAutoHeal(
     state.lastSignature = signature
   }
 
-  if (state.strikeCount >= AUTO_HEAL_MAX_CYCLES) {
-    console.log(
-      `\n  Auto-heal gave up after ${AUTO_HEAL_MAX_CYCLES} cycles on the same failure set.`,
-    )
+  if (state.strikeCount >= maxCycles) {
+    uiLine()
+    warn(`Auto-heal gave up after ${maxCycles} cycles on the same failure set.`)
     printManualOptions(true)
     state.disabled = true
-    return
+    if (benchmark?.pending) {
+      finalizeBenchmarkCycle(benchmark, 'max_cycles_reached', false)
+    }
+    if (benchmark) {
+      finalizeBenchmarkRun(benchmark, 'max_cycles_reached', false)
+    }
+    return null
   }
 
-  console.log(
-    `\n  Auto-heal: spawning ${autoHeal.agent} (strike ${state.strikeCount + 1}/${AUTO_HEAL_MAX_CYCLES})...`,
-  )
+  uiLine()
+  info(`Auto-heal: spawning ${ansiC('bold', autoHeal.agent)} ${dim(`(strike ${state.strikeCount + 1}/${maxCycles})`)}...`)
+
+  const cycle = state.spawnCount + 1
+  const snapshot = benchmark
+    ? buildBenchmarkContextSnapshot(benchmark.run.runId, cycle, benchmarkMode)
+    : null
+  const usageFile = benchmark && snapshot
+    ? startBenchmarkCycle(benchmark, cycle, signature, snapshot)
+    : undefined
+
+  // Baseline must not see `.claude/`, `CLAUDE.md`, or `AGENTS.md` from the
+  // project — the CLIs auto-discover them, which leaks canary-lab into a
+  // supposedly vanilla run. Sandbox the agent cwd outside ROOT for baseline.
+  let agentCwd: string | undefined
+  let baselinePlaywrightLogPath: string | undefined
+  let baselineRepoPaths: string[] | undefined
+  if (benchmarkMode === 'baseline') {
+    const runId = benchmark?.run.runId ?? String(Date.now())
+    const { sandboxDir, sandboxLogPath } = prepareBaselineSandbox(runId)
+    agentCwd = sandboxDir
+    baselinePlaywrightLogPath = sandboxLogPath
+    try {
+      const manifest = JSON.parse(fs.readFileSync(MANIFEST_PATH, 'utf-8'))
+      if (Array.isArray(manifest.repoPaths)) {
+        baselineRepoPaths = manifest.repoPaths.filter((p: unknown): p is string => typeof p === 'string')
+      }
+    } catch { /* no manifest yet, leave undefined */ }
+  }
 
   const result = await spawnHealAgent({
     agent: autoHeal.agent,
     sessionMode: autoHeal.sessionMode,
     cycle: state.spawnCount,
     terminal,
+    promptAddendum: snapshot?.promptAddendum,
+    benchmarkUsageFile: usageFile,
+    benchmarkMode,
+    agentCwd,
+    baselinePlaywrightLogPath,
+    baselineSignalFilePath: benchmarkMode === 'baseline' ? RESTART_SIGNAL : undefined,
+    baselineRepoPaths,
   })
   state.spawnCount += 1
 
   if (result === 'signal') {
-    console.log('  Auto-heal: agent wrote a signal — re-running tests.')
-    return
+    info('Auto-heal: agent wrote a signal — re-running tests.')
+    return result
   }
 
+  uiLine()
   if (result === 'agent_exited_no_signal') {
-    console.log(
-      '\n  Auto-heal: agent exited without writing logs/.rerun or logs/.restart.',
-    )
+    warn('Auto-heal: agent exited without writing logs/.rerun or logs/.restart.')
   } else {
-    console.log('\n  Auto-heal: timed out waiting for agent (10 min).')
+    warn('Auto-heal: timed out waiting for agent (10 min).')
   }
   printManualOptions(true)
+  if (benchmark?.pending) {
+    finalizeBenchmarkCycle(benchmark, result, false)
+  }
+  if (benchmark) {
+    finalizeBenchmarkRun(benchmark, result, false)
+  }
+  return result
 }
 
 async function watchMode(
@@ -663,6 +803,9 @@ async function watchMode(
   headed: boolean,
   terminal: TerminalChoice,
   autoHeal: AutoHealConfig,
+  benchmark: BenchmarkTracker | null,
+  benchmarkMode: BenchmarkMode,
+  maxCycles: number,
 ): Promise<never> {
   // Clean any stale signal files
   try { fs.unlinkSync(RERUN_SIGNAL) } catch { /* ignore */ }
@@ -677,26 +820,26 @@ async function watchMode(
   }
 
   const printBanner = () => {
-    console.log('  ──── Watch Mode ────')
+    banner('Watch Mode')
     if (autoHeal.agent) {
       console.log(
-        `  Auto-heal: ${autoHeal.agent} (${autoHeal.sessionMode === 'resume' ? 'resume session' : 'new session each cycle'})`,
+        `  ${dim('Auto-heal:')} ${ansiC('bold', autoHeal.agent)} ${dim(`(${autoHeal.sessionMode === 'resume' ? 'resume session' : 'new session each cycle'})`)}`,
       )
     }
-    console.log('  Waiting for signal...')
-    console.log('    touch logs/.rerun    — re-run tests')
-    console.log('    touch logs/.restart  — restart services + re-run')
+    section('Waiting for signal')
+    bullet(`${ansiC('cyan', 'touch logs/.rerun')}    ${dim('— re-run tests')}`)
+    bullet(`${ansiC('cyan', 'touch logs/.restart')}  ${dim('— restart services + re-run')}`)
     if (autoHeal.agent) {
-      console.log('    touch logs/.heal     — re-engage auto-heal (resets strikes)')
+      bullet(`${ansiC('cyan', 'touch logs/.heal')}     ${dim('— re-engage auto-heal (resets strikes)')}`)
     }
-    console.log('    Ctrl+C               — stop everything')
-    console.log('')
+    bullet(`${ansiC('cyan', 'Ctrl+C')}                ${dim('— stop everything')}`)
+    uiLine()
   }
 
   printBanner()
 
   // If we already have failures from the initial run, trigger auto-heal before polling.
-  await maybeAutoHeal(autoHeal, cycleState, terminal)
+  await maybeAutoHeal(autoHeal, cycleState, terminal, benchmark, benchmarkMode, maxCycles)
   if (!autoHeal.agent && readFailureSignature() !== '') {
     // Auto-heal wasn't selected; surface the manual escape hatches so the user
     // isn't left wondering what to do with a red test board.
@@ -747,38 +890,49 @@ async function watchMode(
 
     if (doHeal) {
       if (!autoHeal.agent) {
-        console.log(
-          '\n  .heal signal received but no auto-heal agent is configured — ignoring.\n',
-        )
+        uiLine()
+        warn('.heal signal received but no auto-heal agent is configured — ignoring.')
+        uiLine()
         continue
       }
-      console.log(
-        '\n  Heal signal received — resetting strikes and re-engaging auto-heal.\n',
-      )
+      uiLine()
+      info('Heal signal received — resetting strikes and re-engaging auto-heal.')
+      uiLine()
       cycleState.strikeCount = 0
       cycleState.lastSignature = ''
       cycleState.disabled = false
-      await maybeAutoHeal(autoHeal, cycleState, terminal)
+      await maybeAutoHeal(autoHeal, cycleState, terminal, benchmark, benchmarkMode, maxCycles)
       printBanner()
       continue
     }
 
+    if (benchmark) {
+      noteBenchmarkSignal(benchmark, doRestart ? '.restart' : '.rerun')
+    }
+
     if (doRestart) {
-      await restartAllServices(services, terminal)
+      await restartAllServices(services, terminal, benchmarkMode)
     } else if (doRerun) {
       // Rerun keeps services running, but we still wipe their logs so each
       // iteration's output stands alone — matching restart's behavior.
-      truncateServiceLogs(services)
+      truncateServiceLogs(services, benchmarkMode)
     }
 
-    console.log(
-      `\n  Re-running Playwright tests${headed ? ' (headed)' : ''}...\n`,
-    )
-    await runPlaywright(featureDir, headed)
-    enrichSummaryWithLogs()
+    uiLine()
+    info(`Re-running Playwright tests${headed ? dim(' (headed)') : ''}...`)
+    uiLine()
+    await runPlaywright(featureDir, headed, benchmarkMode)
     printSummary()
 
-    await maybeAutoHeal(autoHeal, cycleState, terminal)
+    const greenAfterCycle = readFailureSignature() === ''
+    if (benchmark?.pending) {
+      finalizeBenchmarkCycle(benchmark, 'completed', greenAfterCycle)
+      if (greenAfterCycle) {
+        finalizeBenchmarkRun(benchmark, 'green', true)
+      }
+    }
+
+    await maybeAutoHeal(autoHeal, cycleState, terminal, benchmark, benchmarkMode, maxCycles)
 
     // If tests are green now, no next heal cycle will fire — close the
     // lingering "you can close this tab" heal tab so it doesn't stick
@@ -787,8 +941,9 @@ async function watchMode(
       closeLastHealAgentTab()
     }
 
-    console.log('  ──── Watch Mode ────')
-    console.log('  Waiting for signal...\n')
+    banner('Watch Mode')
+    muted('  Waiting for signal...')
+    uiLine()
   }
 }
 
@@ -797,10 +952,18 @@ interface RunFlags {
   headed: boolean
   terminal: TerminalChoice
   healSession: HealSessionMode
+  benchmark: boolean
+  benchmarkMode: BenchmarkMode
 }
 
 export function parseFlags(args: string[]): RunFlags {
-  const flags: RunFlags = { headed: false, terminal: 'iTerm', healSession: 'resume' }
+  const flags: RunFlags = {
+    headed: false,
+    terminal: 'iTerm',
+    healSession: 'resume',
+    benchmark: false,
+    benchmarkMode: 'canary',
+  }
   const readValue = (arg: string, name: string, next: string | undefined): string => {
     if (arg.startsWith(`${name}=`)) return arg.slice(name.length + 1)
     if (next === undefined) throw new Error(`${name} requires a value`)
@@ -822,6 +985,15 @@ export function parseFlags(args: string[]): RunFlags {
         throw new Error(`--heal-session must be "resume" or "new" (got "${value}")`)
       }
       flags.healSession = value
+    } else if (arg === '--benchmark') {
+      flags.benchmark = true
+    } else if (arg === '--benchmark-mode' || arg.startsWith('--benchmark-mode=')) {
+      const value = readValue(arg, '--benchmark-mode', arg.includes('=') ? undefined : args[++i])
+      if (value !== 'canary' && value !== 'baseline') {
+        throw new Error(`--benchmark-mode must be "canary" or "baseline" (got "${value}")`)
+      }
+      flags.benchmark = true
+      flags.benchmarkMode = value
     } else {
       throw new Error(`Unknown flag: ${arg}`)
     }
@@ -841,6 +1013,7 @@ export async function main(argv: string[] = []) {
   let appliedFeatureDir = ''
   let cleanedUp = false
   let services: ServiceInfo[] = []
+  let benchmarkTracker: BenchmarkTracker | null = null
 
   // Cleanup stops all launched services and reverts env sets.
   const cleanup = () => {
@@ -849,13 +1022,14 @@ export async function main(argv: string[] = []) {
 
     // Stop service processes
     if (services.length > 0) {
-      console.log('\n  Stopping services...')
+      uiLine()
+      info('Stopping services...')
       for (const svc of services) {
         const pid = resolveRunningPid(svc)
         if (pid) {
-          process.stdout.write(`    ${svc.name}: stopping PID ${pid}... `)
+          process.stdout.write(`    ${ansiC('gray', '•')} ${svc.name} ${dim(`(PID ${pid})`)} … `)
           killProcessSync(pid)
-          console.log('stopped')
+          console.log(ansiC('green', 'stopped'))
         }
       }
     }
@@ -872,16 +1046,28 @@ export async function main(argv: string[] = []) {
     }
 
     if (envSetApplied) {
-        console.log('\n  Reverting env files...')
+      uiLine()
+      info('Reverting env files...')
       try {
         execFileSync(process.execPath, [SWITCH_SCRIPT, appliedFeatureDir, '--revert'], {
           stdio: 'inherit',
         })
       } catch {
-        console.error(
-          '  Warning: env revert failed. Run `yarn env:revert` manually.',
-        )
+        warn('env revert failed. Run `yarn env:revert` manually.')
       }
+    }
+
+    if (benchmarkTracker && !benchmarkTracker.finalized) {
+      finalizeBenchmarkRun(benchmarkTracker, 'interrupted', false)
+    }
+
+    // Clean up baseline tmp dirs so we don't leave stray state in the OS
+    // tmpdir after a benchmark run. Best-effort.
+    const runnerTmp = process.env.CANARY_LAB_SUMMARY_PATH
+    if (runnerTmp && runnerTmp.includes('canary-lab-baseline-runner-')) {
+      try {
+        fs.rmSync(path.dirname(runnerTmp), { recursive: true, force: true })
+      } catch { /* best-effort */ }
     }
   }
 
@@ -895,7 +1081,7 @@ export async function main(argv: string[] = []) {
   })
 
   try {
-    console.log('\n  Canary Lab — E2E Runner\n')
+    banner('Canary Lab — E2E Runner')
 
     // Warn if the scaffolded files in this project were synced against an
     // older version of canary-lab. `npm update` doesn't touch files outside
@@ -903,15 +1089,14 @@ export async function main(argv: string[] = []) {
     // and managed doc blocks.
     const notice = formatDriftNotice(checkUpgradeDrift(ROOT))
     if (notice) {
-      console.log(`  ${notice.replace(/\n/g, '\n  ')}\n`)
+      uiLine()
+      warn(notice.replace(/\n/g, '\n  '))
     }
 
     // ── 1. Discover features
     const features = discoverFeatures()
     if (features.length === 0) {
-      console.error(
-        'No features found. Add a feature.config.cjs to a features/<name>/ folder.',
-      )
+      fail('No features found. Add a feature.config.cjs to a features/<name>/ folder.')
       process.exit(1)
     }
 
@@ -924,7 +1109,8 @@ export async function main(argv: string[] = []) {
     let env: string
     if (feature.envs.length === 1) {
       env = feature.envs[0]
-      console.log(`\n  Environment: ${env}`)
+      uiLine()
+      console.log(`${dim('Environment:')} ${ansiC('bold', env)}`)
     } else {
       env = await selectOption(rl, 'Which environment?', feature.envs)
     }
@@ -944,28 +1130,58 @@ export async function main(argv: string[] = []) {
       autoHeal.agent = 'codex'
     }
     if (autoHeal.agent !== null && !isAgentCliAvailable(autoHeal.agent)) {
-      console.error(
-        `\n  \`${autoHeal.agent}\` CLI not found on PATH. Install it and re-run, or pick a different auto-heal agent.`,
-      )
-      console.error(
-        `  You can still drive the heal loop interactively: open \`claude\` or \`codex\``,
-      )
-      console.error(`  in ${ROOT} and send the prompt \`self heal\`.`)
+      uiLine()
+      fail(`\`${autoHeal.agent}\` CLI not found on PATH. Install it and re-run, or pick a different auto-heal agent.`)
+      console.error(`  ${dim('You can still drive the heal loop interactively: open')} \`claude\` ${dim('or')} \`codex\``)
+      console.error(`  ${dim('in')} ${ansiPath(ROOT)} ${dim('and send the prompt')} \`self heal\`.`)
       process.exit(1)
     }
     if (autoHeal.agent === null) {
-      console.log('\n  Auto-heal is off. If a test fails, you can drive the fix loop yourself:')
-      console.log(`    • open \`claude\` or \`codex\` in ${ROOT} and send the prompt \`self heal\``)
-      console.log('    • or fix the code and `touch logs/.rerun`')
+      uiLine()
+      info('Auto-heal is off. If a test fails, you can drive the fix loop yourself:')
+      bullet(`open ${ansiC('cyan', '`claude`')} or ${ansiC('cyan', '`codex`')} in ${ansiPath(ROOT)} and send the prompt ${ansiC('cyan', '`self heal`')}`)
+      bullet(`or fix the code and ${ansiC('cyan', '`touch logs/.rerun`')}`)
+    }
+
+    const benchmarkConfig: BenchmarkConfig = {
+      enabled: flags.benchmark,
+      mode: flags.benchmarkMode,
+    }
+    if (benchmarkConfig.enabled) {
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-')
+      benchmarkTracker = createBenchmarkTracker({
+        runId: `${stamp}_${feature.name}_${benchmarkConfig.mode}`,
+        feature: feature.name,
+        benchmarkMode: benchmarkConfig.mode,
+        startedAt: new Date().toISOString(),
+        modelProvider: autoHeal.agent,
+        maxCycles: AUTO_HEAL_MAX_CYCLES,
+        headed,
+        autoHealEnabled: autoHeal.agent !== null,
+        healSession: autoHeal.sessionMode,
+      })
+    }
+
+    // Baseline keeps LOGS_DIR clean: redirect the summary (runner-internal
+    // state the heal-loop uses for failure detection) to tmpdir so it never
+    // appears alongside playwright-stdout.log / manifest.json. Set it in
+    // process.env so both the runner and the Playwright reporter honor it.
+    if (benchmarkConfig.enabled && benchmarkConfig.mode === 'baseline') {
+      const runId = benchmarkTracker?.run.runId ?? String(Date.now())
+      const runnerTmp = path.join(os.tmpdir(), `canary-lab-baseline-runner-${runId}`)
+      fs.mkdirSync(runnerTmp, { recursive: true })
+      process.env.CANARY_LAB_SUMMARY_PATH = path.join(runnerTmp, 'e2e-summary.json')
     }
 
     // ── 6. Check repos
-    console.log('\n  Checking prerequisites...')
+    uiLine()
+    info('Checking prerequisites...')
     if (!checkRepos(feature)) {
-      console.error('\n  Please clone the missing repos and try again.')
+      uiLine()
+      fail('Please clone the missing repos and try again.')
       process.exit(1)
     }
-    console.log('  All repos present.')
+    ok('All repos present.')
 
     // ── 7. Apply env sets
     const envSetsDir = path.join(feature.featureDir, 'envsets')
@@ -989,7 +1205,8 @@ export async function main(argv: string[] = []) {
         )
       }
 
-      console.log(`\n  Applying env set: ${chosenSet}`)
+      uiLine()
+      info(`Applying env set: ${ansiC('bold', chosenSet)}`)
       execFileSync(
         process.execPath,
         [SWITCH_SCRIPT, feature.featureDir, '--apply', chosenSet],
@@ -1018,22 +1235,37 @@ export async function main(argv: string[] = []) {
 
     // ── 9. Build service list and launch in terminal tabs (with tee to log files)
     services = buildServiceList(feature)
-    await launchServices(services, terminalChoice)
-    writeManifest(services)
+    await launchServices(services, terminalChoice, flags.benchmarkMode)
+    writeManifest(services, feature)
 
     // ── 10. Wait for health checks
     await pollHealthChecks(services)
 
     // ── 11. Run Playwright
-    console.log(`  Running Playwright tests${headed ? ' (headed)' : ''}...\n`)
-    await runPlaywright(feature.featureDir, headed)
+    uiLine()
+    info(`Running Playwright tests${headed ? dim(' (headed)') : ''}...`)
+    uiLine()
+    await runPlaywright(feature.featureDir, headed, flags.benchmarkMode)
 
-    // ── 12. Enrich summary with log snippets and print
-    enrichSummaryWithLogs()
+    // ── 12. Print summary (SummaryReporter has already enriched it)
     printSummary()
+    if (benchmarkTracker && readFailureSignature() === '') {
+      finalizeBenchmarkRun(benchmarkTracker, 'green', true)
+    } else if (benchmarkTracker && autoHeal.agent === null) {
+      finalizeBenchmarkRun(benchmarkTracker, 'manual_only', false)
+    }
 
     // ── 13. Enter watch mode (loops forever until Ctrl+C)
-    await watchMode(services, feature.featureDir, headed, terminalChoice, autoHeal)
+    await watchMode(
+      services,
+      feature.featureDir,
+      headed,
+      terminalChoice,
+      autoHeal,
+      benchmarkTracker,
+      flags.benchmarkMode,
+      AUTO_HEAL_MAX_CYCLES,
+    )
   } catch (err) {
     cleanup()
     throw err

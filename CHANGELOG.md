@@ -2,6 +2,28 @@
 
 All notable changes to Canary Lab are listed here. We try to keep the language plain so anyone can follow along.
 
+## 0.8.0 — 2026-04-22
+
+> Run `npx canary-lab upgrade` to pick up the new scaffolded skills and `CLAUDE.md` / `AGENTS.md` blocks.
+
+### Added
+
+- `logs/heal-index.md` — a markdown index the heal agent reads first. Lists each failure, its log-snippet paths, the failing line of the test with surrounding code, and a summary of the last 3 diagnosis-journal iterations.
+- Per-failure log snippets at `logs/failed/<test>/<service>.log`, size-capped with head + tail.
+
+### Changed
+
+- `logs/e2e-summary.json` no longer embeds log excerpts; it points at the per-failure snippet files.
+- Heal-loop skills (`.claude/skills/heal-loop.md`, `.codex/heal-loop.md`) read `logs/heal-index.md` first and open snippets on demand.
+- Index and snippet files are written as tests complete, so a mid-run Ctrl+C still leaves the heal agent with fresh inputs.
+- UI improvements across the runner and heal-agent tab: section headers, colored actions and paths, summary box, and ✓ / ✗ status at exit.
+
+### Fixed
+
+- `logs/e2e-summary.json` no longer exceeds Claude's file-read limit on large runs.
+
+---
+
 ## 0.7.0 — 2026-04-19
 
 Small, targeted improvements to the auto-heal loop.

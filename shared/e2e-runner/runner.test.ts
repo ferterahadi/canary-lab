@@ -15,9 +15,14 @@ function mkTmp(): string {
 const PATH_ROOT = mkTmp()
 const FEATURES_DIR = path.join(PATH_ROOT, 'features')
 const LOGS_DIR = path.join(PATH_ROOT, 'logs')
+const BENCHMARK_DIR = path.join(LOGS_DIR, 'benchmark')
 const PIDS_DIR = path.join(LOGS_DIR, 'pids')
 const MANIFEST_PATH = path.join(LOGS_DIR, 'manifest.json')
 const SUMMARY_PATH = path.join(LOGS_DIR, 'e2e-summary.json')
+const DIAGNOSIS_JOURNAL_PATH = path.join(LOGS_DIR, 'diagnosis-journal.json')
+const PLAYWRIGHT_STDOUT_PATH = path.join(LOGS_DIR, 'playwright-stdout.log')
+const HEAL_INDEX_PATH = path.join(LOGS_DIR, 'heal-index.md')
+const FAILED_DIR = path.join(LOGS_DIR, 'failed')
 fs.mkdirSync(FEATURES_DIR, { recursive: true })
 fs.mkdirSync(PIDS_DIR, { recursive: true })
 
@@ -25,15 +30,22 @@ vi.mock('./paths', () => ({
   ROOT: PATH_ROOT,
   FEATURES_DIR,
   LOGS_DIR,
+  BENCHMARK_DIR,
   PIDS_DIR,
   MANIFEST_PATH,
   SUMMARY_PATH,
+  DIAGNOSIS_JOURNAL_PATH,
+  PLAYWRIGHT_STDOUT_PATH,
+  HEAL_INDEX_PATH,
+  FAILED_DIR,
   RERUN_SIGNAL: path.join(LOGS_DIR, '.rerun'),
   RESTART_SIGNAL: path.join(LOGS_DIR, '.restart'),
   HEAL_SIGNAL: path.join(LOGS_DIR, '.heal'),
   SIGNAL_HISTORY_PATH: path.join(LOGS_DIR, 'signal-history.json'),
   ITERM_SESSION_IDS_PATH: path.join(LOGS_DIR, 'iterm-session-ids.json'),
   ITERM_HEAL_SESSION_IDS_PATH: path.join(LOGS_DIR, 'iterm-heal-session-ids.json'),
+  getSummaryPath: () =>
+    process.env.CANARY_LAB_SUMMARY_PATH ?? SUMMARY_PATH,
 }))
 
 const execFileSync = vi.fn()
@@ -101,8 +113,6 @@ const {
   resolveRunningPid,
   writeManifest,
   discoverFeatures,
-  extractLogsForTest,
-  enrichSummaryWithLogs,
   printSummary,
   readFailureSignature,
   printManualOptions,
@@ -121,6 +131,8 @@ const {
   AUTO_HEAL_MAX_CYCLES,
   itermSessionIds,
 } = await import('./runner')
+const { createBenchmarkTracker } = await import('./benchmark')
+const { extractLogsForTest, enrichSummaryWithLogs } = await import('./log-enrichment')
 
 beforeEach(() => {
   execFileSync.mockReset()
@@ -216,7 +228,7 @@ describe('buildServiceList', () => {
 })
 
 describe('buildTeedCommand', () => {
-  it('wraps the command with LOG_MODE=plain and pipes to tee', () => {
+  it('wraps the command with LOG_MODE=plain and pipes to tee (canary default)', () => {
     const svc = {
       name: 's',
       safeName: 's',
@@ -227,6 +239,17 @@ describe('buildTeedCommand', () => {
     expect(buildTeedCommand(svc)).toBe(
       'LOG_MODE=plain npm run dev 2>&1 | tee -a /tmp/logs/svc-s.log',
     )
+  })
+
+  it('skips tee in baseline mode so no svc-*.log hits disk', () => {
+    const svc = {
+      name: 's',
+      safeName: 's',
+      logPath: '/tmp/logs/svc-s.log',
+      command: 'npm run dev',
+      cwd: '/',
+    } as any
+    expect(buildTeedCommand(svc, 'baseline')).toBe('LOG_MODE=plain npm run dev 2>&1')
   })
 })
 
@@ -266,6 +289,16 @@ describe('truncateServiceLogs', () => {
   it('is a no-op on empty service list', () => {
     expect(() => truncateServiceLogs([])).not.toThrow()
   })
+
+  it('is a no-op in baseline mode even when files exist (no svc logs to wipe)', () => {
+    const dir = mkTmp()
+    const a = path.join(dir, 'svc-a.log')
+    fs.writeFileSync(a, 'keep me')
+
+    truncateServiceLogs([{ logPath: a } as any], 'baseline')
+
+    expect(fs.readFileSync(a, 'utf-8')).toBe('keep me')
+  })
 })
 
 describe('portFromHealthUrl', () => {
@@ -290,6 +323,8 @@ describe('parseFlags', () => {
       headed: false,
       terminal: 'iTerm',
       healSession: 'resume',
+      benchmark: false,
+      benchmarkMode: 'canary',
     })
   })
 
@@ -310,6 +345,18 @@ describe('parseFlags', () => {
     expect(parseFlags(['--heal-session', 'new']).healSession).toBe('new')
     expect(parseFlags(['--heal-session=resume']).healSession).toBe('resume')
     expect(() => parseFlags(['--heal-session', 'maybe'])).toThrow(/--heal-session/)
+  })
+
+  it('parses benchmark flags in both split and equals forms', () => {
+    expect(parseFlags(['--benchmark']).benchmark).toBe(true)
+    expect(parseFlags(['--benchmark-mode', 'baseline']).benchmarkMode).toBe('baseline')
+    expect(parseFlags(['--benchmark-mode=canary']).benchmarkMode).toBe('canary')
+  })
+
+  it('rejects invalid benchmark mode and removed benchmark flags', () => {
+    expect(() => parseFlags(['--benchmark-mode', 'full'])).toThrow(/--benchmark-mode/)
+    expect(() => parseFlags(['--benchmark-label', 'foo'])).toThrow(/Unknown flag/)
+    expect(() => parseFlags(['--benchmark-max-cycles', '3'])).toThrow(/Unknown flag/)
   })
 
   it('throws on unknown flag', () => {
@@ -518,16 +565,31 @@ describe('extractLogsForTest', () => {
       extractLogsForTest('test-case-x', [a, path.join(dir, 'missing.log')]),
     ).toEqual({})
   })
+
+  it('caps large snippets to head + tail with an elision marker', async () => {
+    const { SLICE_HALF_BYTES } = await import('./log-enrichment')
+    const dir = mkTmp()
+    const logPath = path.join(dir, 'svc-big.log')
+    const headBody = 'HEAD'.repeat(SLICE_HALF_BYTES / 4 + 500)
+    const tailBody = 'TAIL'.repeat(SLICE_HALF_BYTES / 4 + 500)
+    fs.writeFileSync(logPath, `<test-case-huge>${headBody}${tailBody}</test-case-huge>`)
+    const sliced = extractLogsForTest('test-case-huge', [logPath])['svc-big']
+    expect(sliced).toBeDefined()
+    expect(sliced.startsWith('HEAD')).toBe(true)
+    expect(sliced.endsWith('TAIL')).toBe(true)
+    expect(sliced).toContain('eliding')
+    expect(Buffer.byteLength(sliced, 'utf-8')).toBeLessThan(SLICE_HALF_BYTES * 2 + 500)
+  })
 })
 
 describe('enrichSummaryWithLogs', () => {
-  it('replaces failed[] entries with { name, logs } using extracted snippets', () => {
+  it('writes per-failure slice files and attaches logFiles paths (not embedded logs)', () => {
     fs.writeFileSync(
       SUMMARY_PATH,
       JSON.stringify({
         total: 1,
         passed: 0,
-        failed: [{ name: 'test-case-bad' }],
+        failed: [{ name: 'test-case-bad', error: { message: 'boom' } }],
       }),
     )
     const logPath = path.join(LOGS_DIR, 'svc-x.log')
@@ -537,9 +599,35 @@ describe('enrichSummaryWithLogs', () => {
     enrichSummaryWithLogs()
 
     const out = JSON.parse(fs.readFileSync(SUMMARY_PATH, 'utf-8'))
-    expect(out.failed).toEqual([
-      { name: 'test-case-bad', logs: { 'svc-x': 'log body' } },
-    ])
+    // Summary stays lean — no embedded log bodies.
+    expect(out.failed[0].logs).toBeUndefined()
+    expect(out.failed[0].error).toEqual({ message: 'boom' })
+    expect(out.failed[0].logFiles).toEqual(['logs/failed/test-case-bad/svc-x.log'])
+
+    // Per-failure slice file exists with the extracted snippet.
+    const slicePath = path.join(FAILED_DIR, 'test-case-bad', 'svc-x.log')
+    expect(fs.existsSync(slicePath)).toBe(true)
+    expect(fs.readFileSync(slicePath, 'utf-8')).toBe('log body')
+  })
+
+  it('does not attach logFiles when no slices were captured', () => {
+    fs.writeFileSync(
+      SUMMARY_PATH,
+      JSON.stringify({
+        total: 1,
+        passed: 0,
+        failed: [{ name: 'test-case-quiet' }],
+      }),
+    )
+    const logPath = path.join(LOGS_DIR, 'svc-silent.log')
+    fs.writeFileSync(logPath, 'no markers for this test')
+    fs.writeFileSync(MANIFEST_PATH, JSON.stringify({ serviceLogs: [logPath] }))
+
+    enrichSummaryWithLogs()
+
+    const out = JSON.parse(fs.readFileSync(SUMMARY_PATH, 'utf-8'))
+    expect(out.failed[0].logFiles).toBeUndefined()
+    expect(out.failed[0].logs).toBeUndefined()
   })
 
   it('no-ops when summary or manifest missing', () => {
@@ -553,6 +641,108 @@ describe('enrichSummaryWithLogs', () => {
     fs.writeFileSync(MANIFEST_PATH, JSON.stringify({ serviceLogs: [] }))
     enrichSummaryWithLogs()
     expect(fs.readFileSync(SUMMARY_PATH, 'utf-8')).toBe(body)
+  })
+})
+
+describe('writeHealIndex', () => {
+  it('writes a compact markdown index with per-failure entries and journal tail', async () => {
+    const { writeHealIndex } = await import('./log-enrichment')
+
+    // Build a realistic post-enrichment summary.
+    fs.writeFileSync(
+      SUMMARY_PATH,
+      JSON.stringify({
+        total: 2,
+        passed: 1,
+        failed: [
+          {
+            name: 'test-case-oauth-metadata',
+            error: { message: 'expected refresh_token to be advertised' },
+            location: 'features/mpass/e2e/x.spec.ts:42',
+            logFiles: ['logs/failed/test-case-oauth-metadata/svc-a.log'],
+          },
+        ],
+      }),
+    )
+    // Simulate the slice file the index references.
+    const slicePath = path.join(FAILED_DIR, 'test-case-oauth-metadata', 'svc-a.log')
+    fs.mkdirSync(path.dirname(slicePath), { recursive: true })
+    fs.writeFileSync(slicePath, 'x'.repeat(4200))
+
+    fs.writeFileSync(
+      DIAGNOSIS_JOURNAL_PATH,
+      JSON.stringify([
+        { iteration: 1, hypothesis: 'missing field', outcome: 'no_change', fix: { description: 'added field', file: 'a.java' } },
+        { iteration: 2, hypothesis: 'try PKCE check', outcome: null },
+      ]),
+    )
+
+    writeHealIndex()
+
+    const md = fs.readFileSync(HEAL_INDEX_PATH, 'utf-8')
+    expect(md).toContain('# Heal Index')
+    expect(md).toContain('1 test failed, 1 passed.')
+    expect(md).toContain('## failed[0] — test-case-oauth-metadata')
+    expect(md).toContain('expected refresh_token to be advertised')
+    expect(md).toContain('features/mpass/e2e/x.spec.ts:42')
+    expect(md).toContain('logs/failed/test-case-oauth-metadata/svc-a.log')
+    expect(md).toContain('4.1KB')
+    expect(md).toContain('## Journal (last 3 iterations)')
+    expect(md).toContain('#1')
+    expect(md).toContain('no_change')
+    expect(md).toContain('pending')
+    // The "suspects" section was removed — subprocess greps were too slow in
+    // practice. The skill tells the agent to grep for itself.
+    expect(md).not.toContain('suspects')
+    // Must be small enough for a single Read.
+    expect(Buffer.byteLength(md, 'utf-8')).toBeLessThan(10_000)
+  })
+
+  it('never spawns grep subprocesses — even with failures and repoPaths set', async () => {
+    const { writeHealIndex } = await import('./log-enrichment')
+    const repo = mkTmp()
+    fs.writeFileSync(path.join(repo, 'app.ts'), 'dummy')
+    fs.writeFileSync(
+      MANIFEST_PATH,
+      JSON.stringify({ serviceLogs: [], repoPaths: [repo] }),
+    )
+    fs.writeFileSync(
+      SUMMARY_PATH,
+      JSON.stringify({
+        total: 1,
+        passed: 0,
+        failed: [
+          {
+            name: 'test-case-metadata',
+            error: { message: 'expected grant_types_supported to contain "refresh_token"' },
+            location: 'features/x/e2e/y.spec.ts:1',
+          },
+        ],
+      }),
+    )
+
+    const grepCallsBefore = execFileSync.mock.calls.filter((c) => c[0] === 'grep').length
+    writeHealIndex()
+    const grepCallsAfter = execFileSync.mock.calls.filter((c) => c[0] === 'grep').length
+    expect(grepCallsAfter - grepCallsBefore).toBe(0)
+  })
+
+  it('no-ops when no summary exists', async () => {
+    const { writeHealIndex } = await import('./log-enrichment')
+    writeHealIndex()
+    expect(fs.existsSync(HEAL_INDEX_PATH)).toBe(false)
+  })
+
+  it('says "nothing to heal" when no failures', async () => {
+    const { writeHealIndex } = await import('./log-enrichment')
+    fs.writeFileSync(
+      SUMMARY_PATH,
+      JSON.stringify({ total: 5, passed: 5, failed: [] }),
+    )
+    writeHealIndex()
+    const md = fs.readFileSync(HEAL_INDEX_PATH, 'utf-8')
+    expect(md).toContain('0 tests failed, 5 passed.')
+    expect(md).toContain('No failures. Nothing to heal.')
   })
 })
 
@@ -575,11 +765,11 @@ describe('printSummary / printManualOptions', () => {
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
     printSummary()
     const joined = logSpy.mock.calls.flat().join('\n')
-    expect(joined).toContain('Total:  2')
-    expect(joined).toContain('Passed: 1')
-    expect(joined).toContain('Failed: 2')
-    expect(joined).toContain('- test-case-a')
-    expect(joined).toContain('- test-case-b')
+    expect(joined).toMatch(/Total:?\s+2/)
+    expect(joined).toMatch(/Passed:?\s+1/)
+    expect(joined).toMatch(/Failed:?\s+2/)
+    expect(joined).toContain('test-case-a')
+    expect(joined).toContain('test-case-b')
   })
 
   it('printManualOptions varies with autoHealConfigured', () => {
@@ -987,6 +1177,46 @@ describe('runPlaywright', () => {
     child.emit('exit', 0)
     await p
   })
+
+  it('inherits stdio and sets CANARY_LAB_BENCHMARK_MODE=canary by default', async () => {
+    const child = makeChild()
+    spawn.mockReturnValue(child)
+    const p = runPlaywright('/feat', false)
+    child.emit('exit', 0)
+    await p
+    const [, , opts] = spawn.mock.calls[0]
+    expect(opts.stdio).toBe('inherit')
+    expect(opts.env.CANARY_LAB_BENCHMARK_MODE).toBe('canary')
+  })
+
+  it('captures stdout+stderr to playwright-stdout.log and sets mode=baseline', async () => {
+    // Ensure the log file doesn't exist from a prior test.
+    try { fs.unlinkSync(PLAYWRIGHT_STDOUT_PATH) } catch { /* ignore */ }
+
+    const child = makeChild() as EventEmitter & {
+      kill: ReturnType<typeof vi.fn>
+      stdout: EventEmitter
+      stderr: EventEmitter
+    }
+    child.stdout = new EventEmitter()
+    child.stderr = new EventEmitter()
+    spawn.mockReturnValue(child)
+
+    const p = runPlaywright('/feat', false, 'baseline')
+
+    const [, , opts] = spawn.mock.calls[spawn.mock.calls.length - 1]
+    expect(opts.stdio).toEqual(['inherit', 'pipe', 'pipe'])
+    expect(opts.env.CANARY_LAB_BENCHMARK_MODE).toBe('baseline')
+
+    child.stdout.emit('data', Buffer.from('stdout chunk\n'))
+    child.stderr.emit('data', Buffer.from('stderr chunk\n'))
+    child.emit('exit', 0)
+    await p
+
+    const contents = fs.readFileSync(PLAYWRIGHT_STDOUT_PATH, 'utf-8')
+    expect(contents).toContain('stdout chunk')
+    expect(contents).toContain('stderr chunk')
+  })
 })
 
 describe('maybeAutoHeal', () => {
@@ -1033,6 +1263,47 @@ describe('maybeAutoHeal', () => {
     expect(state.spawnCount).toBe(1)
     expect(state.lastSignature).toBe('a')
     expect(state.disabled).toBe(false)
+  })
+
+  it('writes benchmark context artifacts when benchmark mode is enabled', async () => {
+    fs.writeFileSync(
+      SUMMARY_PATH,
+      JSON.stringify({
+        failed: [{ name: 'a', logs: { 'svc-api': 'boom happened' } }],
+      }),
+    )
+    fs.writeFileSync(DIAGNOSIS_JOURNAL_PATH, JSON.stringify([{ hypothesis: 'x' }]))
+    fs.writeFileSync(MANIFEST_PATH, JSON.stringify({ serviceLogs: [] }))
+    spawnHealAgent.mockResolvedValueOnce('signal')
+    vi.spyOn(console, 'log').mockImplementation(() => {})
+
+    const tracker = createBenchmarkTracker({
+      runId: 'run-1',
+      feature: 'checkout',
+      benchmarkMode: 'canary',
+      startedAt: '2026-04-21T00:00:00.000Z',
+      modelProvider: 'claude',
+      maxCycles: 3,
+      headed: false,
+      autoHealEnabled: true,
+      healSession: 'resume',
+    })
+
+    await maybeAutoHeal(
+      { agent: 'claude', sessionMode: 'resume' },
+      freshState(),
+      'iTerm',
+      tracker,
+      'canary',
+      3,
+    )
+
+    expect(fs.existsSync(path.join(BENCHMARK_DIR, 'context', 'cycle-1.json'))).toBe(true)
+    expect(spawnHealAgent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        benchmarkUsageFile: path.join(BENCHMARK_DIR, 'usage', 'cycle-1.jsonl'),
+      }),
+    )
   })
 
   it('increments strikeCount when the signature repeats', async () => {

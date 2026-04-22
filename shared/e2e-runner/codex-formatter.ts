@@ -5,31 +5,17 @@
  * isn't a wall of raw event JSON.
  */
 export {}
+import fs from 'fs'
+import path from 'path'
 
 interface AnyObj {
   [key: string]: unknown
 }
 
-const useColor = process.stdout.isTTY && !process.env.NO_COLOR
+import { c } from '../cli-ui/colors'
+
 const CWD = process.cwd()
 const START = Date.now()
-
-const ansi = {
-  reset: '\x1b[0m',
-  dim: '\x1b[2m',
-  bold: '\x1b[1m',
-  gray: '\x1b[90m',
-  cyan: '\x1b[36m',
-  green: '\x1b[32m',
-  yellow: '\x1b[33m',
-  red: '\x1b[31m',
-  magenta: '\x1b[35m',
-}
-
-function c(color: keyof typeof ansi, text: string): string {
-  if (!useColor) return text
-  return `${ansi[color]}${text}${ansi.reset}`
-}
 
 function elapsed(): string {
   const s = Math.floor((Date.now() - START) / 1000)
@@ -207,6 +193,17 @@ let totalOutTokens = 0
 let turnCount = 0
 let reasoningCount = 0
 
+function writeBenchmarkUsage(payload: { inputTokens?: number; outputTokens?: number }): void {
+  const file = process.env.CANARY_LAB_BENCHMARK_USAGE_FILE
+  if (!file) return
+  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true })
+    fs.appendFileSync(file, JSON.stringify(payload) + '\n')
+  } catch {
+    // Benchmark sidecar is best-effort only.
+  }
+}
+
 function handleCompleted(item: AnyObj): void {
   const type = item.type as string | undefined
 
@@ -296,6 +293,7 @@ function handleLine(line: string): void {
     totalInTokens += inTok
     totalOutTokens += outTok
     turnCount += 1
+    writeBenchmarkUsage({ inputTokens: inTok, outputTokens: outTok })
     process.stdout.write(
       `\n${tag()} ${c('green', '✓ turn done')} ${c('dim', `(${inTok} in / ${outTok} out)`)}\n`,
     )
