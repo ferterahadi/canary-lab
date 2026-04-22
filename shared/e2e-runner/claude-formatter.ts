@@ -5,32 +5,17 @@
  * users can see the agent working instead of staring at a blank terminal.
  */
 export {}
+import fs from 'fs'
+import path from 'path'
 
 interface AnyObj {
   [key: string]: unknown
 }
 
-const useColor = process.stdout.isTTY && !process.env.NO_COLOR
+import { c } from '../cli-ui/colors'
+
 const CWD = process.cwd()
 const START = Date.now()
-
-const ansi = {
-  reset: '\x1b[0m',
-  dim: '\x1b[2m',
-  bold: '\x1b[1m',
-  gray: '\x1b[90m',
-  cyan: '\x1b[36m',
-  green: '\x1b[32m',
-  yellow: '\x1b[33m',
-  red: '\x1b[31m',
-  blue: '\x1b[34m',
-  magenta: '\x1b[35m',
-}
-
-function c(color: keyof typeof ansi, text: string): string {
-  if (!useColor) return text
-  return `${ansi[color]}${text}${ansi.reset}`
-}
 
 function elapsed(): string {
   const s = Math.floor((Date.now() - START) / 1000)
@@ -179,6 +164,22 @@ interface PendingTool {
 
 const pendingTools = new Map<string, PendingTool>()
 
+function writeBenchmarkUsage(payload: {
+  inputTokens?: number
+  outputTokens?: number
+  cacheReadInputTokens?: number
+  cacheCreationInputTokens?: number
+}): void {
+  const file = process.env.CANARY_LAB_BENCHMARK_USAGE_FILE
+  if (!file) return
+  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true })
+    fs.appendFileSync(file, JSON.stringify(payload) + '\n')
+  } catch {
+    // Benchmark sidecar is best-effort only.
+  }
+}
+
 function handleLine(line: string): void {
   const trimmed = line.trim()
   if (!trimmed) return
@@ -274,6 +275,12 @@ function handleLine(line: string): void {
     const outTok = Number(usage?.output_tokens ?? 0)
     const cacheRead = Number(usage?.cache_read_input_tokens ?? 0)
     const cacheCreate = Number(usage?.cache_creation_input_tokens ?? 0)
+    writeBenchmarkUsage({
+      inputTokens: inTok,
+      outputTokens: outTok,
+      cacheReadInputTokens: cacheRead,
+      cacheCreationInputTokens: cacheCreate,
+    })
     const turns = Number(msg.num_turns ?? 0)
     const cost = Number(msg.total_cost_usd ?? 0)
     // Pro/Max subscription users aren't billed `total_cost_usd` — it's the

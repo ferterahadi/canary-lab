@@ -14,16 +14,21 @@ const LOGS_DIR = path.join(mkTmp(), 'logs')
 vi.mock('./paths', () => ({
   ROOT: path.dirname(LOGS_DIR),
   LOGS_DIR,
+  MANIFEST_PATH: path.join(LOGS_DIR, 'manifest.json'),
+  SUMMARY_PATH: path.join(LOGS_DIR, 'e2e-summary.json'),
+  DIAGNOSIS_JOURNAL_PATH: path.join(LOGS_DIR, 'diagnosis-journal.json'),
+  HEAL_INDEX_PATH: path.join(LOGS_DIR, 'heal-index.md'),
+  FAILED_DIR: path.join(LOGS_DIR, 'failed'),
   RERUN_SIGNAL: path.join(LOGS_DIR, '.rerun'),
   RESTART_SIGNAL: path.join(LOGS_DIR, '.restart'),
+  getSummaryPath: () =>
+    process.env.CANARY_LAB_SUMMARY_PATH ?? path.join(LOGS_DIR, 'e2e-summary.json'),
 }))
 
 const { slugify, default: SummaryReporter } = await import('./summary-reporter')
 
 afterEach(() => {
-  if (fs.existsSync(path.join(LOGS_DIR, 'e2e-summary.json'))) {
-    fs.unlinkSync(path.join(LOGS_DIR, 'e2e-summary.json'))
-  }
+  fs.rmSync(LOGS_DIR, { recursive: true, force: true })
   while (tmpDirs.length > 1) fs.rmSync(tmpDirs.pop()!, { recursive: true, force: true })
 })
 
@@ -68,6 +73,7 @@ describe('SummaryReporter', () => {
     const out = JSON.parse(
       fs.readFileSync(path.join(LOGS_DIR, 'e2e-summary.json'), 'utf-8'),
     )
+    expect(out.complete).toBe(true)
     expect(out.total).toBe(2)
     expect(out.passed).toBe(1)
     expect(out.failed).toEqual([
@@ -115,7 +121,7 @@ describe('SummaryReporter', () => {
     const out = JSON.parse(
       fs.readFileSync(path.join(LOGS_DIR, 'e2e-summary.json'), 'utf-8'),
     )
-    expect(out).toEqual({ total: 2, passed: 2, failed: [] })
+    expect(out).toEqual({ complete: true, total: 2, passed: 2, failed: [] })
   })
 
   it('creates LOGS_DIR if it does not exist', () => {
@@ -123,5 +129,98 @@ describe('SummaryReporter', () => {
     const r = new SummaryReporter()
     r.onEnd({} as any)
     expect(fs.existsSync(path.join(LOGS_DIR, 'e2e-summary.json'))).toBe(true)
+  })
+
+  it('writes a partial summary after onTestEnd before onEnd runs (complete: false)', () => {
+    const r = new SummaryReporter()
+    r.onTestEnd(mkTest('first one', '/a.spec.ts', 5), mkResult())
+    const out = JSON.parse(
+      fs.readFileSync(path.join(LOGS_DIR, 'e2e-summary.json'), 'utf-8'),
+    )
+    expect(out.complete).toBe(false)
+    expect(out.total).toBe(1)
+    expect(out.passed).toBe(1)
+    expect(out.failed).toEqual([])
+  })
+
+  it('attaches logFiles paths (not embedded logs) and writes per-failure slice files + heal-index', () => {
+    fs.mkdirSync(LOGS_DIR, { recursive: true })
+    const svcLog = path.join(LOGS_DIR, 'api.log')
+    const slug = 'test-case-broken-checkout'
+    fs.writeFileSync(
+      svcLog,
+      `irrelevant prelude\n<${slug}>\nERROR boom at line 42\n</${slug}>\ntrailing noise\n`,
+    )
+    fs.writeFileSync(
+      path.join(LOGS_DIR, 'manifest.json'),
+      JSON.stringify({ serviceLogs: [svcLog] }),
+    )
+
+    const r = new SummaryReporter()
+    r.onTestEnd(
+      mkTest('broken checkout'),
+      mkResult({ status: 'failed', error: { message: 'nope' } }),
+    )
+
+    const partial = JSON.parse(
+      fs.readFileSync(path.join(LOGS_DIR, 'e2e-summary.json'), 'utf-8'),
+    )
+    expect(partial.complete).toBe(false)
+    expect(partial.failed).toHaveLength(1)
+    expect(partial.failed[0].name).toBe(slug)
+    // Summary stays lean — no embedded log bodies.
+    expect(partial.failed[0].logs).toBeUndefined()
+    expect(partial.failed[0].logFiles).toEqual([`logs/failed/${slug}/api.log`])
+
+    // Per-failure slice file exists with the extracted snippet.
+    const slicePath = path.join(LOGS_DIR, 'failed', slug, 'api.log')
+    expect(fs.readFileSync(slicePath, 'utf-8')).toBe('ERROR boom at line 42')
+
+    // heal-index.md is the agent's entry point — written on every onTestEnd
+    // so mid-run heal works if the user Ctrl+Cs. Cheap: no subprocesses.
+    const indexPath = path.join(LOGS_DIR, 'heal-index.md')
+    expect(fs.existsSync(indexPath)).toBe(true)
+    const md = fs.readFileSync(indexPath, 'utf-8')
+    expect(md).toContain('# Heal Index')
+    expect(md).toContain(`logs/failed/${slug}/api.log`)
+
+    r.onEnd({} as any)
+    const finalOut = JSON.parse(
+      fs.readFileSync(path.join(LOGS_DIR, 'e2e-summary.json'), 'utf-8'),
+    )
+    expect(finalOut.complete).toBe(true)
+    expect(finalOut.failed[0].logFiles).toEqual([`logs/failed/${slug}/api.log`])
+  })
+
+  it('skips enrichment and heal-index when running in baseline benchmark mode', () => {
+    fs.mkdirSync(LOGS_DIR, { recursive: true })
+    const svcLog = path.join(LOGS_DIR, 'api.log')
+    fs.writeFileSync(svcLog, '<test-case-x>x</test-case-x>')
+    fs.writeFileSync(
+      path.join(LOGS_DIR, 'manifest.json'),
+      JSON.stringify({ serviceLogs: [svcLog] }),
+    )
+
+    const original = process.env.CANARY_LAB_BENCHMARK_MODE
+    process.env.CANARY_LAB_BENCHMARK_MODE = 'baseline'
+    try {
+      const r = new SummaryReporter()
+      r.onTestEnd(mkTest('x'), mkResult({ status: 'failed' }))
+      r.onEnd({} as any)
+    } finally {
+      if (original === undefined) {
+        delete process.env.CANARY_LAB_BENCHMARK_MODE
+      } else {
+        process.env.CANARY_LAB_BENCHMARK_MODE = original
+      }
+    }
+
+    expect(fs.existsSync(path.join(LOGS_DIR, 'heal-index.md'))).toBe(false)
+    expect(fs.existsSync(path.join(LOGS_DIR, 'failed'))).toBe(false)
+    const out = JSON.parse(
+      fs.readFileSync(path.join(LOGS_DIR, 'e2e-summary.json'), 'utf-8'),
+    )
+    expect(out.failed[0].logFiles).toBeUndefined()
+    expect(out.failed[0].logs).toBeUndefined()
   })
 })

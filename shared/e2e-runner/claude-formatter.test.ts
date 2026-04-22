@@ -1,4 +1,7 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, afterEach } from 'vitest'
+import fs from 'fs'
+import os from 'os'
+import path from 'path'
 import {
   c,
   relPath,
@@ -10,6 +13,10 @@ import {
   formatToolResult,
   handleLine,
 } from './claude-formatter'
+
+afterEach(() => {
+  delete process.env.CANARY_LAB_BENCHMARK_USAGE_FILE
+})
 
 describe('c (color)', () => {
   it('returns plain text when not a TTY', () => {
@@ -242,6 +249,38 @@ describe('handleLine', () => {
     expect(out).toContain('3 turns')
     expect(out).not.toContain('$')
     spy.mockRestore()
+    if (prev !== undefined) process.env.CANARY_HEAL_SHOW_COST = prev
+  })
+
+  it('writes benchmark usage sidecar on result events when configured', () => {
+    const prev = process.env.CANARY_HEAL_SHOW_COST
+    delete process.env.CANARY_HEAL_SHOW_COST
+    const file = path.join(os.tmpdir(), `claude-usage-${Date.now()}.jsonl`)
+    process.env.CANARY_LAB_BENCHMARK_USAGE_FILE = file
+
+    handleLine(
+      JSON.stringify({
+        type: 'result',
+        duration_ms: 1000,
+        is_error: false,
+        usage: {
+          input_tokens: 120,
+          output_tokens: 80,
+          cache_creation_input_tokens: 30,
+          cache_read_input_tokens: 200,
+        },
+      }),
+    )
+
+    const usage = JSON.parse(fs.readFileSync(file, 'utf-8').trim())
+    expect(usage).toEqual({
+      inputTokens: 120,
+      outputTokens: 80,
+      cacheReadInputTokens: 200,
+      cacheCreationInputTokens: 30,
+    })
+
+    fs.rmSync(file, { force: true })
     if (prev !== undefined) process.env.CANARY_HEAL_SHOW_COST = prev
   })
 
