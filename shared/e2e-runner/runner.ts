@@ -484,15 +484,47 @@ export function resolveRunningPid(svc: ServiceInfo): number | null {
   return null
 }
 
-export async function restartAllServices(
+// Returns null when we should fall back to restarting all services
+// (missing filesChanged, or any path doesn't map to a known repo).
+export function selectServicesToRestart(
+  services: ServiceInfo[],
+  filesChanged: unknown,
+): ServiceInfo[] | null {
+  if (!Array.isArray(filesChanged) || filesChanged.length === 0) return null
+
+  // Longest-prefix first so nested repos match their deeper path.
+  const repoDirs = Array.from(new Set(services.map((s) => s.cwd)))
+    .sort((a, b) => b.length - a.length)
+
+  const matchedDirs = new Set<string>()
+  for (const raw of filesChanged) {
+    if (typeof raw !== 'string' || !raw.trim()) continue
+    const abs = path.resolve(ROOT, resolvePath(raw))
+    const match = repoDirs.find(
+      (dir) => abs === dir || abs.startsWith(dir + path.sep),
+    )
+    if (!match) {
+      warn(
+        `filesChanged path did not match any repo — falling back to restart all: ${raw}`,
+      )
+      return null
+    }
+    matchedDirs.add(match)
+  }
+
+  if (matchedDirs.size === 0) return null
+  return services.filter((s) => matchedDirs.has(s.cwd))
+}
+
+export async function restartServices(
   services: ServiceInfo[],
   terminal: TerminalChoice,
   benchmarkMode: BenchmarkMode = 'canary',
 ): Promise<void> {
   uiLine()
-  info('Restarting all configured services...')
+  info(`Restarting ${services.length} service(s)...`)
 
-  // Kill all running services first
+  // Kill running services first
   for (const svc of services) {
     process.stdout.write(`    ${ansiC('gray', '•')} ${svc.name} ${dim('…')} `)
     const pid = resolveRunningPid(svc)
@@ -507,7 +539,7 @@ export async function restartAllServices(
 
   truncateServiceLogs(services, benchmarkMode)
 
-  // Re-launch all in terminal tabs with tee
+  // Re-launch in terminal tabs with tee
   const tabs = services.map((svc) => ({
     dir: svc.cwd,
     command: buildTeedCommand(svc, benchmarkMode),
@@ -518,6 +550,14 @@ export async function restartAllServices(
   openTabs(terminal, tabs, '')
 
   await pollHealthChecks(services)
+}
+
+export async function restartAllServices(
+  services: ServiceInfo[],
+  terminal: TerminalChoice,
+  benchmarkMode: BenchmarkMode = 'canary',
+): Promise<void> {
+  return restartServices(services, terminal, benchmarkMode)
 }
 
 // ─── Playwright ─────────────────────────────────────────────────────────────
@@ -911,7 +951,16 @@ async function watchMode(
     }
 
     if (doRestart) {
-      await restartAllServices(services, terminal, benchmarkMode)
+      const selected = selectServicesToRestart(
+        services,
+        (signalContent as { filesChanged?: unknown }).filesChanged,
+      )
+      if (selected === null) {
+        await restartAllServices(services, terminal, benchmarkMode)
+      } else {
+        info(`Selective restart: ${selected.map((s) => s.name).join(', ')}`)
+        await restartServices(selected, terminal, benchmarkMode)
+      }
     } else if (doRerun) {
       // Rerun keeps services running, but we still wipe their logs so each
       // iteration's output stands alone — matching restart's behavior.

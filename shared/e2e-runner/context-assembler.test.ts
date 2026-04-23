@@ -7,7 +7,7 @@ const tmpRoot = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-contex
 const LOGS_DIR = path.join(tmpRoot, 'logs')
 const BENCHMARK_DIR = path.join(LOGS_DIR, 'benchmark')
 const SUMMARY_PATH = path.join(LOGS_DIR, 'e2e-summary.json')
-const DIAGNOSIS_JOURNAL_PATH = path.join(LOGS_DIR, 'diagnosis-journal.json')
+const DIAGNOSIS_JOURNAL_PATH = path.join(LOGS_DIR, 'diagnosis-journal.md')
 const MANIFEST_PATH = path.join(LOGS_DIR, 'manifest.json')
 const PLAYWRIGHT_STDOUT_PATH = path.join(LOGS_DIR, 'playwright-stdout.log')
 const HEAL_INDEX_PATH = path.join(LOGS_DIR, 'heal-index.md')
@@ -114,7 +114,7 @@ describe('buildBenchmarkContextSnapshot', () => {
     expect(snapshot.excludedArtifacts).toEqual(
       expect.arrayContaining([
         'logs/e2e-summary.json',
-        'logs/diagnosis-journal.json',
+        'logs/diagnosis-journal.md',
         'logs/svc-*.log',
         'failed[].logs',
         '.claude/skills/heal-loop.md',

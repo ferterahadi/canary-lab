@@ -49,7 +49,7 @@ describe('benchmark tracker', () => {
       cycle: 1,
       mode: 'canary',
       summaryPath: path.join(LOGS_DIR, 'e2e-summary.json'),
-      journalPath: path.join(LOGS_DIR, 'diagnosis-journal.json'),
+      journalPath: path.join(LOGS_DIR, 'diagnosis-journal.md'),
       includedLogFiles: ['logs/svc-api.log'],
       includedFailedTests: ['checkout'],
       summaryBytes: 100,
