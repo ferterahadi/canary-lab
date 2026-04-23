@@ -141,29 +141,61 @@ interface JournalEntry {
   signal?: string
 }
 
+// Parse the Markdown journal format:
+//
+//   ## Iteration 1 — 2026-04-22T01:20:11Z
+//
+//   - feature: mpass_oauth
+//   - hypothesis: refresh_token missing from metadata
+//   - fix.file: /path/to/a.java
+//   - fix.description: Added field.
+//   - signal: .restart
+//   - outcome: no_change
+//
+// Markdown is what both Claude and Codex read most fluidly — much better than
+// the old JSON array for the agent's read-and-append workflow.
+export function parseJournalMarkdown(raw: string): JournalEntry[] {
+  const headingRe = /^##\s+Iteration\s+(\d+)\s+[—-]\s+(.+?)\s*$/
+  const fieldRe = /^\s*-\s+([\w.-]+):\s*(.*)$/
+
+  const lines = raw.split('\n')
+  const entries: JournalEntry[] = []
+  let current: JournalEntry | null = null
+
+  for (const line of lines) {
+    const heading = headingRe.exec(line)
+    if (heading) {
+      if (current) entries.push(current)
+      current = {
+        iteration: parseInt(heading[1], 10),
+        timestamp: heading[2].trim(),
+      }
+      continue
+    }
+    if (!current) continue
+    const field = fieldRe.exec(line)
+    if (!field) continue
+    const key = field[1]
+    const value = field[2].trim()
+    if (key === 'hypothesis') current.hypothesis = value
+    else if (key === 'outcome') {
+      current.outcome = value === 'pending' || value === 'null' || value === '' ? null : value
+    }
+    else if (key === 'signal') current.signal = value
+    else if (key === 'fix.file') current.fix = { ...(current.fix ?? {}), file: value }
+    else if (key === 'fix.description') current.fix = { ...(current.fix ?? {}), description: value }
+  }
+  if (current) entries.push(current)
+  return entries
+}
+
 function readJournalTail(limit = 3): JournalEntry[] {
   try {
     const raw = fs.readFileSync(DIAGNOSIS_JOURNAL_PATH, 'utf-8')
-    const parsed = JSON.parse(raw)
-    if (!Array.isArray(parsed)) return []
-    return parsed.slice(-limit)
+    return parseJournalMarkdown(raw).slice(-limit)
   } catch {
     return []
   }
-}
-
-function fileSizeOrZero(rel: string): number {
-  try {
-    return fs.statSync(path.join(ROOT, rel)).size
-  } catch {
-    return 0
-  }
-}
-
-function formatBytes(n: number): string {
-  if (n < 1024) return `${n}B`
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)}KB`
-  return `${(n / 1024 / 1024).toFixed(1)}MB`
 }
 
 function truncateOneLine(s: string, max = 200): string {
@@ -171,46 +203,26 @@ function truncateOneLine(s: string, max = 200): string {
   return flat.length <= max ? flat : `${flat.slice(0, max - 1)}…`
 }
 
-// Read ±N lines of the spec file at `location` (format: "path:line"). Returns
-// a compact code fence the agent can eyeball without a separate Read round-trip.
-export function readSpecSnippet(
-  location: string | undefined,
-  linesAround = 8,
-): { text: string; lang: string } | null {
-  if (!location) return null
-  const m = location.match(/^(.+):(\d+)(?::\d+)?$/)
-  if (!m) return null
-  const [, file, lineStr] = m
-  const abs = path.isAbsolute(file) ? file : path.join(ROOT, file)
-  let raw: string
-  try {
-    raw = fs.readFileSync(abs, 'utf-8')
-  } catch {
-    return null
-  }
-  const lineNum = parseInt(lineStr, 10)
-  const allLines = raw.split('\n')
-  const start = Math.max(0, lineNum - 1 - linesAround)
-  const end = Math.min(allLines.length, lineNum + linesAround)
-  const widthOf = String(end).length
-  const snippet = allLines
-    .slice(start, end)
-    .map((text, i) => {
-      const n = start + i + 1
-      const marker = n === lineNum ? '→' : ' '
-      return `${marker} ${String(n).padStart(widthOf)}  ${text}`
-    })
-    .join('\n')
-  const ext = path.extname(file).replace(/^\./, '')
-  return { text: snippet, lang: ext || 'text' }
+interface Manifest {
+  serviceLogs?: string[]
+  featureName?: string
+  featureDir?: string
+  repoPaths?: string[]
 }
 
-// Write a compact markdown entry point for the heal agent: error, slice
-// paths, inline spec snippet, and a journal tail. Intentionally does NOT
-// pre-compute grep "suspects" — subprocess-based greps across declared
-// repo paths were too slow in practice (minutes added on large Java/Node
-// trees). The agent does its own targeted grep from the error literals,
-// which is fast once it has the spec snippet in front of it.
+function readManifest(): Manifest {
+  try {
+    return JSON.parse(fs.readFileSync(MANIFEST_PATH, 'utf-8')) as Manifest
+  } catch {
+    return {}
+  }
+}
+
+// Write a compact map (not a script) for the heal agent: where the feature
+// lives, which repos to edit, what failed, where deeper evidence is. The
+// agent navigates freely from there — no prescriptive step list, no inlined
+// spec code, no file-size annotations. Previous drafts pre-digested too
+// aggressively and the index itself became the biggest file in the run.
 export function writeHealIndex(): void {
   const summaryPath = getSummaryPath()
   if (!fs.existsSync(summaryPath)) return
@@ -221,66 +233,51 @@ export function writeHealIndex(): void {
   }
 
   const failed = Array.isArray(summary.failed) ? summary.failed : []
-
+  const manifest = readManifest()
   const lines: string[] = []
+
   lines.push(`# Heal Index — ${new Date().toISOString()}`)
   lines.push('')
-  lines.push(
-    `${failed.length} test${failed.length === 1 ? '' : 's'} failed, ${summary.passed ?? 0} passed.`,
-  )
+  if (manifest.featureDir) {
+    lines.push(`Feature: ${path.relative(ROOT, manifest.featureDir) || manifest.featureDir}`)
+  } else if (manifest.featureName) {
+    lines.push(`Feature: ${manifest.featureName}`)
+  }
+  if (manifest.repoPaths && manifest.repoPaths.length > 0) {
+    lines.push(`Repos:   ${manifest.repoPaths.join(', ')}`)
+  }
+  lines.push(`Status:  ${failed.length} failed, ${summary.passed ?? 0} passed`)
   lines.push('')
 
   if (failed.length === 0) {
     lines.push('No failures. Nothing to heal.')
   } else {
-    failed.forEach((entry, i) => {
-      lines.push(`## failed[${i}] — ${entry.name}`)
+    lines.push('## Failures')
+    lines.push('')
+    for (const entry of failed) {
+      lines.push(`- **${entry.name}**`)
       if (entry.error?.message) {
-        lines.push(`- error: ${truncateOneLine(entry.error.message, 300)}`)
+        lines.push(`  - error: ${truncateOneLine(entry.error.message, 240)}`)
+      }
+      if (entry.location) {
+        lines.push(`  - test:  ${entry.location}`)
       }
       if (entry.logFiles && entry.logFiles.length > 0) {
-        lines.push('- logs:')
-        for (const rel of entry.logFiles) {
-          lines.push(`  - ${rel}  (${formatBytes(fileSizeOrZero(rel))})`)
-        }
-      } else {
-        lines.push('- logs: _none captured — grep `logs/svc-*.log` for the slug manually_')
+        lines.push(`  - slice: ${entry.logFiles.join(', ')}`)
       }
-
-      // Inline spec snippet — ±8 lines around the assertion. Saves a full
-      // Read of the spec file.
-      const snippet = readSpecSnippet(entry.location)
-      if (snippet) {
-        lines.push(`- assertion (${entry.location}):`)
-        lines.push('')
-        lines.push('  ```' + snippet.lang)
-        for (const ln of snippet.text.split('\n')) {
-          lines.push(`  ${ln}`)
-        }
-        lines.push('  ```')
-      } else if (entry.location) {
-        lines.push(`- location: ${entry.location}`)
-      }
-      lines.push('')
-    })
+    }
+    lines.push('')
   }
 
   const journalTail = readJournalTail()
   if (journalTail.length > 0) {
-    lines.push('## Journal (last 3 iterations)')
-    lines.push(
-      `See \`logs/diagnosis-journal.json\` for full history. Skip hypotheses already tried.`,
-    )
-    lines.push('')
-    for (const entry of journalTail) {
-      const iter = entry.iteration !== undefined ? `#${entry.iteration}` : ''
-      const outcome = entry.outcome === null || entry.outcome === undefined ? 'pending' : entry.outcome
-      const hyp = entry.hypothesis ? truncateOneLine(entry.hypothesis, 200) : '(no hypothesis)'
-      lines.push(`- ${iter} ${hyp} → **${outcome}**`)
-      if (entry.fix?.description) {
-        lines.push(`  - fix: ${truncateOneLine(entry.fix.description, 160)}${entry.fix.file ? ` (\`${entry.fix.file}\`)` : ''}`)
-      }
-    }
+    const parts = journalTail.map((e) => {
+      const iter = e.iteration !== undefined ? `#${e.iteration}` : ''
+      const outcome = e.outcome === null || e.outcome === undefined ? 'pending' : e.outcome
+      const hyp = e.hypothesis ? truncateOneLine(e.hypothesis, 100) : '(no hypothesis)'
+      return `${iter} ${hyp} → ${outcome}`.trim()
+    })
+    lines.push(`Journal: ${parts.join('; ')}.  Full history: \`logs/diagnosis-journal.md\`.`)
     lines.push('')
   }
 

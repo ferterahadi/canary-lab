@@ -16,7 +16,7 @@ vi.mock('./paths', () => ({
   LOGS_DIR,
   MANIFEST_PATH: path.join(LOGS_DIR, 'manifest.json'),
   SUMMARY_PATH: path.join(LOGS_DIR, 'e2e-summary.json'),
-  DIAGNOSIS_JOURNAL_PATH: path.join(LOGS_DIR, 'diagnosis-journal.json'),
+  DIAGNOSIS_JOURNAL_PATH: path.join(LOGS_DIR, 'diagnosis-journal.md'),
   HEAL_INDEX_PATH: path.join(LOGS_DIR, 'heal-index.md'),
   FAILED_DIR: path.join(LOGS_DIR, 'failed'),
   RERUN_SIGNAL: path.join(LOGS_DIR, '.rerun'),

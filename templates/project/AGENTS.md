@@ -45,7 +45,7 @@ If these files exist in `logs/`, read them in this order when starting a fix:
 - `logs/heal-index.md` — **start here.** Compact markdown index: every failure, its pre-scoped log-slice paths, and a summary of the last 3 journal iterations. One read call, everything you need to plan from.
 - `logs/failed/<slug>/<svc>.log` — per-failure service log slices referenced by the index. Already scoped via XML markers and capped (~20KB). Read only the ones for the failure you're fixing.
 - `logs/e2e-summary.json` — raw Playwright results (name, error, location, retry). The index is derived from this; read it only if the index is missing.
-- `logs/diagnosis-journal.json` — full prior-iteration history. The index summarizes the tail; only read the full file if you need older context.
+- `logs/diagnosis-journal.md` — full prior-iteration history (Markdown, one `## Iteration <N>` section per cycle). The index summarizes the tail; only read the full file if you need older context. Append a new section for each new iteration.
 - `logs/signal-history.json` — runner-maintained log of every restart/rerun signal and what changed.
 - `logs/svc-<name>.log` — full raw service logs. Reach for these only if a slice in `logs/failed/` is elided in the middle and you need more; use `sed -n '/<slug>/,/<\/slug>/p' logs/svc-<name>.log`.
 

@@ -19,7 +19,7 @@ export const FAILED_DIR = path.join(LOGS_DIR, 'failed')
 export function getSummaryPath(): string {
   return process.env.CANARY_LAB_SUMMARY_PATH ?? SUMMARY_PATH
 }
-export const DIAGNOSIS_JOURNAL_PATH = path.join(LOGS_DIR, 'diagnosis-journal.json')
+export const DIAGNOSIS_JOURNAL_PATH = path.join(LOGS_DIR, 'diagnosis-journal.md')
 export const RERUN_SIGNAL = path.join(LOGS_DIR, '.rerun')
 export const RESTART_SIGNAL = path.join(LOGS_DIR, '.restart')
 export const HEAL_SIGNAL = path.join(LOGS_DIR, '.heal')

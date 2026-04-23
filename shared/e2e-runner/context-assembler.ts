@@ -128,7 +128,7 @@ export function buildBenchmarkContextSnapshot(
       includedLogSlices: {},
       excludedArtifacts: [
         'logs/e2e-summary.json',
-        'logs/diagnosis-journal.json',
+        'logs/diagnosis-journal.md',
         'logs/svc-*.log',
         'failed[].logs',
         '.claude/skills/heal-loop.md',
@@ -194,7 +194,7 @@ export function buildBenchmarkContextSnapshot(
     `- Start with \`${path.relative(ROOT, HEAL_INDEX_PATH)}\` (compact markdown index of every failure, slice paths, and prior hypotheses).`,
     '- For each failure you plan to fix, read its `logs/failed/<slug>/<svc>.log` slice (pre-capped, pre-scoped via XML markers).',
     '- If a slice is elided in the middle, the full log is at `logs/svc-<name>.log` — drill in with `sed -n \'/<slug>/,/<\\/slug>/p\' logs/svc-<name>.log`.',
-    '- `logs/diagnosis-journal.json` has full history; the index summarizes the last 3 iterations — skip hypotheses already tried.',
+    '- `logs/diagnosis-journal.md` has full history; the index summarizes the last 3 iterations — skip hypotheses already tried.',
   ].join('\n')
 
   return {

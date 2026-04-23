@@ -19,7 +19,7 @@ const BENCHMARK_DIR = path.join(LOGS_DIR, 'benchmark')
 const PIDS_DIR = path.join(LOGS_DIR, 'pids')
 const MANIFEST_PATH = path.join(LOGS_DIR, 'manifest.json')
 const SUMMARY_PATH = path.join(LOGS_DIR, 'e2e-summary.json')
-const DIAGNOSIS_JOURNAL_PATH = path.join(LOGS_DIR, 'diagnosis-journal.json')
+const DIAGNOSIS_JOURNAL_PATH = path.join(LOGS_DIR, 'diagnosis-journal.md')
 const PLAYWRIGHT_STDOUT_PATH = path.join(LOGS_DIR, 'playwright-stdout.log')
 const HEAL_INDEX_PATH = path.join(LOGS_DIR, 'heal-index.md')
 const FAILED_DIR = path.join(LOGS_DIR, 'failed')
@@ -126,6 +126,8 @@ const {
   launchServices,
   pollHealthChecks,
   restartAllServices,
+  restartServices,
+  selectServicesToRestart,
   runPlaywright,
   maybeAutoHeal,
   AUTO_HEAL_MAX_CYCLES,
@@ -645,10 +647,19 @@ describe('enrichSummaryWithLogs', () => {
 })
 
 describe('writeHealIndex', () => {
-  it('writes a compact markdown index with per-failure entries and journal tail', async () => {
+  it('writes a compact map: feature + repos + failure list + one-line journal', async () => {
     const { writeHealIndex } = await import('./log-enrichment')
 
-    // Build a realistic post-enrichment summary.
+    const repo = mkTmp()
+    fs.writeFileSync(
+      MANIFEST_PATH,
+      JSON.stringify({
+        serviceLogs: [],
+        featureName: 'mpass',
+        featureDir: path.join(PATH_ROOT, 'features', 'mpass'),
+        repoPaths: [repo],
+      }),
+    )
     fs.writeFileSync(
       SUMMARY_PATH,
       JSON.stringify({
@@ -664,41 +675,63 @@ describe('writeHealIndex', () => {
         ],
       }),
     )
-    // Simulate the slice file the index references.
-    const slicePath = path.join(FAILED_DIR, 'test-case-oauth-metadata', 'svc-a.log')
-    fs.mkdirSync(path.dirname(slicePath), { recursive: true })
-    fs.writeFileSync(slicePath, 'x'.repeat(4200))
-
     fs.writeFileSync(
       DIAGNOSIS_JOURNAL_PATH,
-      JSON.stringify([
-        { iteration: 1, hypothesis: 'missing field', outcome: 'no_change', fix: { description: 'added field', file: 'a.java' } },
-        { iteration: 2, hypothesis: 'try PKCE check', outcome: null },
-      ]),
+      [
+        '# Diagnosis Journal',
+        '',
+        '## Iteration 1 — 2026-04-22T00:00:00Z',
+        '',
+        '- hypothesis: missing field',
+        '- fix.file: a.java',
+        '- fix.description: added field',
+        '- outcome: no_change',
+        '',
+        '## Iteration 2 — 2026-04-22T00:10:00Z',
+        '',
+        '- hypothesis: try PKCE check',
+        '- outcome: pending',
+        '',
+      ].join('\n'),
     )
 
     writeHealIndex()
 
     const md = fs.readFileSync(HEAL_INDEX_PATH, 'utf-8')
+
+    // Map header — feature dir, repo paths, status line.
     expect(md).toContain('# Heal Index')
-    expect(md).toContain('1 test failed, 1 passed.')
-    expect(md).toContain('## failed[0] — test-case-oauth-metadata')
+    expect(md).toContain('Feature:')
+    expect(md).toContain('Repos:')
+    expect(md).toContain(repo)
+    expect(md).toContain('Status:  1 failed, 1 passed')
+
+    // Failures list — flat bullets, no "## failed[N]" ceremony.
+    expect(md).toContain('## Failures')
+    expect(md).toContain('**test-case-oauth-metadata**')
     expect(md).toContain('expected refresh_token to be advertised')
     expect(md).toContain('features/mpass/e2e/x.spec.ts:42')
     expect(md).toContain('logs/failed/test-case-oauth-metadata/svc-a.log')
-    expect(md).toContain('4.1KB')
-    expect(md).toContain('## Journal (last 3 iterations)')
+
+    // Journal condensed to a single line.
+    expect(md).toContain('Journal:')
     expect(md).toContain('#1')
     expect(md).toContain('no_change')
     expect(md).toContain('pending')
-    // The "suspects" section was removed — subprocess greps were too slow in
-    // practice. The skill tells the agent to grep for itself.
+    expect(md).not.toContain('## Journal')
+
+    // Removed from earlier drafts.
     expect(md).not.toContain('suspects')
-    // Must be small enough for a single Read.
-    expect(Buffer.byteLength(md, 'utf-8')).toBeLessThan(10_000)
+    expect(md).not.toContain('## failed[0]')
+    expect(md).not.toContain('assertion (')
+    expect(md).not.toContain('```ts')
+    expect(md).not.toMatch(/\d+(\.\d+)?KB/)
+
+    // Keep the whole thing under ~2KB for a tiny, fast read.
+    expect(Buffer.byteLength(md, 'utf-8')).toBeLessThan(2_000)
   })
 
-  it('never spawns grep subprocesses — even with failures and repoPaths set', async () => {
+  it('never spawns grep subprocesses', async () => {
     const { writeHealIndex } = await import('./log-enrichment')
     const repo = mkTmp()
     fs.writeFileSync(path.join(repo, 'app.ts'), 'dummy')
@@ -741,7 +774,7 @@ describe('writeHealIndex', () => {
     )
     writeHealIndex()
     const md = fs.readFileSync(HEAL_INDEX_PATH, 'utf-8')
-    expect(md).toContain('0 tests failed, 5 passed.')
+    expect(md).toContain('Status:  0 failed, 5 passed')
     expect(md).toContain('No failures. Nothing to heal.')
   })
 })
@@ -1061,6 +1094,158 @@ describe('pollHealthChecks', () => {
   })
 })
 
+describe('selectServicesToRestart', () => {
+  const makeSvc = (over: Partial<{ name: string; cwd: string }> = {}) =>
+    ({
+      name: over.name ?? 's',
+      safeName: over.name ?? 's',
+      logPath: '/tmp/s.log',
+      command: 'x',
+      cwd: over.cwd ?? '/repos/api',
+    } as any)
+
+  it('returns null when filesChanged is missing, empty, or non-array', () => {
+    const svcs = [makeSvc()]
+    expect(selectServicesToRestart(svcs, undefined)).toBeNull()
+    expect(selectServicesToRestart(svcs, null)).toBeNull()
+    expect(selectServicesToRestart(svcs, [])).toBeNull()
+    expect(selectServicesToRestart(svcs, 'string')).toBeNull()
+    expect(selectServicesToRestart(svcs, { a: 1 })).toBeNull()
+  })
+
+  it('returns only the service whose repo matched an absolute path', () => {
+    const apiRepo = mkTmp()
+    const webRepo = mkTmp()
+    const api = makeSvc({ name: 'api', cwd: apiRepo })
+    const web = makeSvc({ name: 'web', cwd: webRepo })
+    const result = selectServicesToRestart(
+      [api, web],
+      [path.join(apiRepo, 'src', 'index.ts')],
+    )
+    expect(result?.map((s) => s.name)).toEqual(['api'])
+  })
+
+  it('groups all services sharing a repo (multi-startCommand repo restarts together)', () => {
+    const repo = mkTmp()
+    const webSrv = makeSvc({ name: 'web', cwd: repo })
+    const worker = makeSvc({ name: 'worker', cwd: repo })
+    const result = selectServicesToRestart(
+      [webSrv, worker],
+      [path.join(repo, 'pkg', 'a.ts')],
+    )
+    expect(result?.map((s) => s.name).sort()).toEqual(['web', 'worker'])
+  })
+
+  it('returns services from multiple repos when files span both', () => {
+    const a = mkTmp()
+    const b = mkTmp()
+    const svcA = makeSvc({ name: 'a', cwd: a })
+    const svcB = makeSvc({ name: 'b', cwd: b })
+    const result = selectServicesToRestart(
+      [svcA, svcB],
+      [path.join(a, 'x.ts'), path.join(b, 'y.ts')],
+    )
+    expect(result?.map((s) => s.name).sort()).toEqual(['a', 'b'])
+  })
+
+  it('warns and returns null when any path is outside every repo', () => {
+    const warnSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+    const writeSpy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    const repo = mkTmp()
+    const svc = makeSvc({ name: 'api', cwd: repo })
+    const result = selectServicesToRestart(
+      [svc],
+      [path.join(repo, 'src', 'a.ts'), '/tmp/__elsewhere__/x.ts'],
+    )
+    expect(result).toBeNull()
+    void warnSpy
+    void logSpy
+    void writeSpy
+  })
+
+  it('resolves relative paths against ROOT', () => {
+    const repoDir = path.join(PATH_ROOT, 'my-repo')
+    fs.mkdirSync(repoDir, { recursive: true })
+    const svc = makeSvc({ name: 'api', cwd: repoDir })
+    const result = selectServicesToRestart([svc], ['my-repo/src/a.ts'])
+    expect(result?.map((s) => s.name)).toEqual(['api'])
+  })
+
+  it('expands ~/... paths via resolvePath', () => {
+    const home = os.homedir()
+    const repoDir = path.join(home, '.canary-lab-test-fake-repo')
+    const svc = makeSvc({ name: 'api', cwd: repoDir })
+    const result = selectServicesToRestart(
+      [svc],
+      ['~/.canary-lab-test-fake-repo/src/a.ts'],
+    )
+    expect(result?.map((s) => s.name)).toEqual(['api'])
+  })
+
+  it('prefers the deepest repo when one repo is nested inside another', () => {
+    const outer = mkTmp()
+    const inner = path.join(outer, 'packages', 'inner')
+    fs.mkdirSync(inner, { recursive: true })
+    const outerSvc = makeSvc({ name: 'outer', cwd: outer })
+    const innerSvc = makeSvc({ name: 'inner', cwd: inner })
+    const result = selectServicesToRestart(
+      [outerSvc, innerSvc],
+      [path.join(inner, 'src', 'a.ts')],
+    )
+    expect(result?.map((s) => s.name)).toEqual(['inner'])
+  })
+
+  it('ignores blank / non-string entries without failing the whole match', () => {
+    const repo = mkTmp()
+    const svc = makeSvc({ name: 'api', cwd: repo })
+    const result = selectServicesToRestart(
+      [svc],
+      [path.join(repo, 'src', 'a.ts'), '', '   '],
+    )
+    expect(result?.map((s) => s.name)).toEqual(['api'])
+  })
+})
+
+describe('restartServices', () => {
+  it('restarts only the passed subset', async () => {
+    vi.useFakeTimers()
+    vi.spyOn(console, 'log').mockImplementation(() => {})
+    vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    vi.spyOn(process, 'kill').mockImplementation(((_: number, sig: any) => {
+      if (sig === 0) return true
+      return true
+    }) as any)
+    isHealthy.mockResolvedValue(true)
+
+    const dir = mkTmp()
+    const logA = path.join(dir, 'svc-a.log')
+    const logB = path.join(dir, 'svc-b.log')
+    fs.writeFileSync(logA, 'old-a')
+    fs.writeFileSync(logB, 'old-b')
+    const svcA = {
+      name: 'svc-a', safeName: 'svc-a', logPath: logA,
+      command: 'node a', cwd: '/',
+    } as any
+    const svcB = {
+      name: 'svc-b', safeName: 'svc-b', logPath: logB,
+      command: 'node b', cwd: '/',
+    } as any
+    openItermTabs.mockReturnValueOnce(['SID-A'])
+
+    const p = restartServices([svcA], 'iTerm')
+    await vi.advanceTimersByTimeAsync(5500)
+    await p
+
+    // Only A's log got wiped.
+    expect(fs.readFileSync(logA, 'utf-8')).toBe('')
+    expect(fs.readFileSync(logB, 'utf-8')).toBe('old-b')
+    // Only one tab opened.
+    const tabsArg = openItermTabs.mock.calls[0][0] as Array<{ name: string }>
+    expect(tabsArg.map((t) => t.name)).toEqual(['svc-a'])
+  })
+})
+
 describe('restartAllServices', () => {
   it('kills existing, truncates logs, opens tabs, polls health', async () => {
     vi.useFakeTimers()
@@ -1272,7 +1457,7 @@ describe('maybeAutoHeal', () => {
         failed: [{ name: 'a', logs: { 'svc-api': 'boom happened' } }],
       }),
     )
-    fs.writeFileSync(DIAGNOSIS_JOURNAL_PATH, JSON.stringify([{ hypothesis: 'x' }]))
+    fs.writeFileSync(DIAGNOSIS_JOURNAL_PATH, '## Iteration 1 — 2026-04-22T00:00:00Z\n\n- hypothesis: x\n- outcome: pending\n')
     fs.writeFileSync(MANIFEST_PATH, JSON.stringify({ serviceLogs: [] }))
     spawnHealAgent.mockResolvedValueOnce('signal')
     vi.spyOn(console, 'log').mockImplementation(() => {})

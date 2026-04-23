@@ -155,7 +155,7 @@ export function buildAgentCommand(
   // profile (~/.codex/config.toml) — we don't override here.
   // --skip-git-repo-check: scaffold may not be a git repo yet.
   // --full-auto: required for the heal agent to write files (server edits,
-  // diagnosis-journal.json, .rerun/.restart). Without it, codex runs in a
+  // diagnosis-journal.md, .rerun/.restart). Without it, codex runs in a
   // read-only sandbox and silently fails file writes.
   // --json + formatter: raw codex output is very verbose; the formatter emits
   // a compact timeline of commands, file changes, and messages.
