@@ -1,5 +1,3 @@
-import { GATEWAY_URL } from '../../src/config'
-
 export interface Item {
   sku: string
   qty: number
@@ -33,7 +31,7 @@ async function jsonCall<T>(url: string, init: RequestInit = {}): Promise<Respons
 }
 
 export class CheckoutApi {
-  baseUrl = GATEWAY_URL
+  baseUrl = process.env.GATEWAY_URL ?? 'http://localhost:4200'
 
   createCart = () =>
     jsonCall<{ cartId: string }>(`${this.baseUrl}/cart`, { method: 'POST' })

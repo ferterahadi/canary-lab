@@ -131,7 +131,7 @@ export function buildBenchmarkContextSnapshot(
         'logs/diagnosis-journal.md',
         'logs/svc-*.log',
         'failed[].logs',
-        '.claude/skills/heal-loop.md',
+        'CLAUDE.md heal-prompt section',
       ],
       filesIncluded: summaryBytes > 0 ? 1 : 0,
       contextBytes: summaryBytes,
@@ -186,9 +186,10 @@ export function buildBenchmarkContextSnapshot(
   const contextBytes = indexBytes + slicedLogBytes
   const contextChars = (indexRaw?.length ?? 0) + slicedLogBytes
 
-  // Supplemental reminder (not an override — the skill is the source of truth).
-  // Only fires during benchmark runs so we can measure canary's information
-  // advantage cleanly; non-benchmark runs get the same behavior from the skill.
+  // Supplemental reminder (not an override — the CLAUDE.md heal-prompt section
+  // is the source of truth). Only fires during benchmark runs so we can measure
+  // canary's information advantage cleanly; non-benchmark runs get the same
+  // behavior from the heal-prompt block.
   const promptAddendum = [
     'Benchmark telemetry is on — same canary flow as usual, just reinforcing the entry points:',
     `- Start with \`${path.relative(ROOT, HEAL_INDEX_PATH)}\` (compact markdown index of every failure, slice paths, and prior hypotheses).`,

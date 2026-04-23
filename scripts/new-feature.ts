@@ -37,20 +37,14 @@ module.exports = { config }
 }
 
 export function buildPlaywrightConfig(): string {
-  return `import { defineConfig } from '@playwright/test'
-import { baseConfig } from 'canary-lab/feature-support/playwright-base'
-
-export default defineConfig({ ...baseConfig })
-`
-}
-
-export function buildFeatureConfigTs(): string {
   return `import path from 'node:path'
 import { config as loadDotenv } from 'dotenv'
+import { defineConfig } from '@playwright/test'
+import { baseConfig } from 'canary-lab/feature-support/playwright-base'
 
-loadDotenv({ path: path.join(__dirname, '..', '.env') })
+loadDotenv({ path: path.join(__dirname, '.env') })
 
-export const GATEWAY_URL = process.env.GATEWAY_URL ?? 'http://localhost:3000'
+export default defineConfig({ ...baseConfig })
 `
 }
 
@@ -110,7 +104,6 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
     ['feature.config.cjs', buildFeatureConfig(name, description)],
     ['playwright.config.ts', buildPlaywrightConfig()],
     ['.env.example', 'GATEWAY_URL=http://localhost:3000\n'],
-    ['src/config.ts', buildFeatureConfigTs()],
     ['envsets/envsets.config.json', buildEnvsetsConfig(name)],
     [`envsets/local/${name}.env`, 'GATEWAY_URL=http://localhost:3000\n'],
     [`e2e/${name}.spec.ts`, buildSpec(name)],
@@ -132,8 +125,8 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
   bullet(dim(`features/${name}/`) + 'e2e/helpers/')
   section('Next steps')
   step(1, `Edit ${ansiPath('feature.config.cjs')} — add your repos, start commands, and health checks`)
-  step(2, `Edit ${ansiPath('src/config.ts')} — add feature-specific env var exports`)
-  step(3, `Write your tests in ${ansiPath(`e2e/${name}.spec.ts`)}`)
+  step(2, `Edit ${ansiPath('.env.example')} and ${ansiPath(`envsets/local/${name}.env`)} — add any env vars your feature needs`)
+  step(3, `Write your tests in ${ansiPath(`e2e/${name}.spec.ts`)} (read env with ${ansiPath('process.env.VAR_NAME')} in helpers)`)
   step(4, 'Run: npx canary-lab run')
   line()
 }

@@ -837,7 +837,7 @@ export async function maybeAutoHeal(
   return result
 }
 
-async function watchMode(
+export async function watchMode(
   services: ServiceInfo[],
   featureDir: string,
   headed: boolean,

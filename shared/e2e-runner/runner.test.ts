@@ -52,6 +52,17 @@ const execFileSync = vi.fn()
 const spawn = vi.fn()
 vi.mock('child_process', () => ({ execFileSync, spawn }))
 
+// readline is mocked so main()'s interactive prompts can be scripted.
+const readlineAnswers: string[] = []
+const rlMock = {
+  question: (_q: string, cb: (answer: string) => void) => cb(readlineAnswers.shift() ?? '1'),
+  close: vi.fn(),
+}
+vi.mock('readline', () => ({
+  default: { createInterface: () => rlMock },
+  createInterface: () => rlMock,
+}))
+
 // Silence iterm/terminal boundaries for any test that reaches them.
 const openItermTabs = vi.fn(() => [] as string[])
 const reuseItermTabs = vi.fn(() => false)
@@ -132,6 +143,8 @@ const {
   maybeAutoHeal,
   AUTO_HEAL_MAX_CYCLES,
   itermSessionIds,
+  watchMode,
+  main,
 } = await import('./runner')
 const { createBenchmarkTracker } = await import('./benchmark')
 const { extractLogsForTest, enrichSummaryWithLogs } = await import('./log-enrichment')
@@ -155,6 +168,7 @@ beforeEach(() => {
   isAgentCliAvailable.mockReset()
   isAgentCliAvailable.mockReturnValue(true)
   itermSessionIds.clear()
+  readlineAnswers.length = 0
 })
 
 afterEach(() => {
@@ -1544,5 +1558,234 @@ describe('maybeAutoHeal', () => {
 
     const joined = logSpy.mock.calls.flat().join('\n')
     expect(joined).toContain('timed out waiting for agent')
+  })
+})
+
+describe('watchMode', () => {
+  const RERUN_SIGNAL = path.join(LOGS_DIR, '.rerun')
+  const RESTART_SIGNAL = path.join(LOGS_DIR, '.restart')
+  const HEAL_SIGNAL = path.join(LOGS_DIR, '.heal')
+  const SIGNAL_HISTORY_PATH = path.join(LOGS_DIR, 'signal-history.json')
+
+  function makeChild() {
+    const child = new EventEmitter() as EventEmitter & {
+      kill: ReturnType<typeof vi.fn>
+      stdout: null
+      stderr: null
+    }
+    child.kill = vi.fn()
+    child.stdout = null
+    child.stderr = null
+    return child
+  }
+
+  it('removes stale signal files on entry before polling', async () => {
+    fs.writeFileSync(RERUN_SIGNAL, '')
+    fs.writeFileSync(RESTART_SIGNAL, '')
+    fs.writeFileSync(HEAL_SIGNAL, '')
+    vi.spyOn(console, 'log').mockImplementation(() => {})
+    vi.useFakeTimers()
+
+    watchMode([], '/feat', false, 'Terminal', { agent: null, sessionMode: 'new' }, null, 'canary', 3)
+      .catch(() => {}) // Swallow abandonment when test ends.
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(fs.existsSync(RERUN_SIGNAL)).toBe(false)
+    expect(fs.existsSync(RESTART_SIGNAL)).toBe(false)
+    expect(fs.existsSync(HEAL_SIGNAL)).toBe(false)
+  })
+
+  it('warns and appends to signal history when .heal fires without an agent', async () => {
+    vi.useFakeTimers()
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    watchMode([], '/feat', false, 'Terminal', { agent: null, sessionMode: 'new' }, null, 'canary', 3)
+      .catch(() => {})
+    // Let printBanner + initial maybeAutoHeal settle.
+    await vi.advanceTimersByTimeAsync(0)
+    await Promise.resolve()
+
+    fs.writeFileSync(HEAL_SIGNAL, '')
+    // Poll tick.
+    await vi.advanceTimersByTimeAsync(1100)
+    await vi.advanceTimersByTimeAsync(100)
+
+    const allOutput = [...logSpy.mock.calls, ...errSpy.mock.calls].flat().join('\n')
+    expect(allOutput).toContain('.heal signal received but no auto-heal agent is configured')
+
+    // History was appended.
+    const history = JSON.parse(fs.readFileSync(SIGNAL_HISTORY_PATH, 'utf-8'))
+    expect(history).toHaveLength(1)
+    expect(history[0].type).toBe('heal')
+    // Heal signal was consumed.
+    expect(fs.existsSync(HEAL_SIGNAL)).toBe(false)
+  })
+
+  it('on .rerun truncates service logs and re-runs Playwright', async () => {
+    vi.useFakeTimers()
+    vi.spyOn(console, 'log').mockImplementation(() => {})
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    const svcLogDir = mkTmp()
+    const svcLogPath = path.join(svcLogDir, 'svc-web.log')
+    fs.writeFileSync(svcLogPath, 'old output')
+    const services = [
+      { name: 'web', safeName: 'web', logPath: svcLogPath, command: 'x', cwd: '/' } as any,
+    ]
+
+    // Playwright child resolves immediately on exit 0.
+    const child = makeChild()
+    spawn.mockReturnValue(child)
+
+    const promise = watchMode(
+      services,
+      '/feat',
+      false,
+      'Terminal',
+      { agent: null, sessionMode: 'new' },
+      null,
+      'canary',
+      3,
+    ).catch(() => {})
+
+    await Promise.resolve()
+    fs.writeFileSync(RERUN_SIGNAL, JSON.stringify({ filesChanged: [] }))
+    // Trigger poll + signal handling.
+    await vi.advanceTimersByTimeAsync(1100)
+    // Let runPlaywright start spawning.
+    await Promise.resolve()
+    // Fake child exits.
+    child.emit('exit', 0)
+    await vi.advanceTimersByTimeAsync(50)
+
+    // Service log was truncated.
+    expect(fs.readFileSync(svcLogPath, 'utf-8')).toBe('')
+    // spawn called (runPlaywright).
+    expect(spawn).toHaveBeenCalled()
+    // Signal history recorded.
+    const history = JSON.parse(fs.readFileSync(SIGNAL_HISTORY_PATH, 'utf-8'))
+    expect(history[0].type).toBe('rerun')
+    void promise
+  })
+
+  it('main() exits with code 1 when no features exist', async () => {
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
+      throw new Error(`process.exit(${code})`)
+    }) as any)
+    vi.spyOn(console, 'log').mockImplementation(() => {})
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    await expect(main([])).rejects.toThrow('process.exit(1)')
+    expect(exitSpy).toHaveBeenCalledWith(1)
+  })
+
+  it('main() exits with code 1 when checkRepos fails (repo missing)', async () => {
+    // Seed a feature with a repo that points to a non-existent path.
+    const featDir = path.join(FEATURES_DIR, 'f1')
+    fs.mkdirSync(featDir, { recursive: true })
+    fs.writeFileSync(
+      path.join(featDir, 'feature.config.cjs'),
+      `module.exports = { config: {
+        name: 'f1',
+        description: 'test',
+        envs: ['dev'],
+        repos: [{ name: 'missing', localPath: '/does/not/exist/here', startCommands: ['x'] }],
+        featureDir: ${JSON.stringify(featDir)},
+      } }`,
+    )
+
+    // Select feature "1" then auto-heal "1" (None).
+    readlineAnswers.push('1', '1')
+
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
+      throw new Error(`process.exit(${code})`)
+    }) as any)
+    vi.spyOn(console, 'log').mockImplementation(() => {})
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    await expect(main([])).rejects.toThrow('process.exit(1)')
+    expect(exitSpy).toHaveBeenCalledWith(1)
+  })
+
+  it('sets CANARY_LAB_SUMMARY_PATH to a tmpdir when --benchmark-mode=baseline is passed', async () => {
+    // Seed a minimal feature with no repos so launch is a no-op.
+    const featDir = path.join(FEATURES_DIR, 'baseline-feat')
+    fs.mkdirSync(featDir, { recursive: true })
+    fs.writeFileSync(
+      path.join(featDir, 'feature.config.cjs'),
+      `module.exports = { config: {
+        name: 'baseline-feat',
+        description: 'test',
+        envs: ['dev'],
+        repos: [],
+        featureDir: ${JSON.stringify(featDir)},
+      } }`,
+    )
+
+    // Answers: feature "1", auto-heal "1" (None).
+    readlineAnswers.push('1', '1')
+
+    // Playwright child resolves fast.
+    const child = new EventEmitter() as any
+    child.kill = vi.fn()
+    child.stdout = null
+    child.stderr = null
+    spawn.mockImplementation(() => {
+      setImmediate(() => child.emit('exit', 0))
+      return child
+    })
+
+    vi.spyOn(console, 'log').mockImplementation(() => {})
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    const runPromise = main(['--benchmark', '--benchmark-mode=baseline']).catch((e) => e)
+    // Let main work through its setup up to the point where it sets env.
+    for (let i = 0; i < 20; i++) await new Promise((r) => setImmediate(r))
+
+    expect(process.env.CANARY_LAB_SUMMARY_PATH ?? '').toContain('canary-lab-baseline-runner-')
+
+    delete process.env.CANARY_LAB_SUMMARY_PATH
+    void runPromise
+  })
+
+  it('on .heal with an agent configured resets strikes and re-engages auto-heal', async () => {
+    // Seed a failure so maybeAutoHeal has something to react to.
+    fs.writeFileSync(
+      SUMMARY_PATH,
+      JSON.stringify({ total: 1, passed: 0, failed: [{ name: 'checkout' }] }),
+    )
+    spawnHealAgent.mockResolvedValue('signal')
+    vi.spyOn(console, 'log').mockImplementation(() => {})
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    vi.useFakeTimers()
+
+    watchMode(
+      [],
+      '/feat',
+      false,
+      'Terminal',
+      { agent: 'claude', sessionMode: 'new' },
+      null,
+      'canary',
+      3,
+    ).catch(() => {})
+
+    // Let the initial maybeAutoHeal call run.
+    await vi.advanceTimersByTimeAsync(0)
+    await Promise.resolve()
+    await Promise.resolve()
+    spawnHealAgent.mockClear()
+
+    // Now fire the .heal signal.
+    fs.writeFileSync(HEAL_SIGNAL, '')
+    await vi.advanceTimersByTimeAsync(1100)
+    await Promise.resolve()
+    await Promise.resolve()
+
+    // Heal was consumed and a second auto-heal was spawned.
+    expect(fs.existsSync(HEAL_SIGNAL)).toBe(false)
+    expect(spawnHealAgent).toHaveBeenCalled()
   })
 })

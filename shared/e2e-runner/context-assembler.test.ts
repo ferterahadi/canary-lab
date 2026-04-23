@@ -117,7 +117,7 @@ describe('buildBenchmarkContextSnapshot', () => {
         'logs/diagnosis-journal.md',
         'logs/svc-*.log',
         'failed[].logs',
-        '.claude/skills/heal-loop.md',
+        'CLAUDE.md heal-prompt section',
       ]),
     )
     expect(snapshot.promptAddendum).toBe('')
@@ -131,5 +131,33 @@ describe('buildBenchmarkContextSnapshot', () => {
     expect(snapshot.summaryBytes).toBe(0)
     expect(snapshot.filesIncluded).toBe(0)
     expect(snapshot.contextBytes).toBe(0)
+  })
+
+  it('tolerates a malformed summary file and returns no failing tests', () => {
+    fs.writeFileSync(SUMMARY_PATH, '{ this is not json')
+    fs.writeFileSync(HEAL_INDEX_PATH, '# Heal Index\n')
+    const snapshot = buildBenchmarkContextSnapshot('run-4', 1, 'canary')
+    expect(snapshot.includedFailedTests).toEqual([])
+    expect(snapshot.includedLogFiles).toEqual([])
+  })
+
+  it('falls back to 0 raw-log bytes when manifest is malformed or log files are missing', () => {
+    fs.writeFileSync(HEAL_INDEX_PATH, '# Heal Index\n')
+    fs.writeFileSync(
+      SUMMARY_PATH,
+      JSON.stringify({ total: 1, passed: 0, failed: [] }),
+    )
+    // 1) malformed manifest JSON
+    fs.writeFileSync(MANIFEST_PATH, '{ not json')
+    let snapshot = buildBenchmarkContextSnapshot('run-5a', 1, 'canary')
+    expect(snapshot.rawServiceLogBytesAvailable).toBe(0)
+
+    // 2) manifest references a missing file — stat throws, log is skipped
+    fs.writeFileSync(
+      MANIFEST_PATH,
+      JSON.stringify({ serviceLogs: [path.join(LOGS_DIR, 'does-not-exist.log')] }),
+    )
+    snapshot = buildBenchmarkContextSnapshot('run-5b', 2, 'canary')
+    expect(snapshot.rawServiceLogBytesAvailable).toBe(0)
   })
 })

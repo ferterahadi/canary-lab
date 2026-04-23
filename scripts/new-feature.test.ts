@@ -6,7 +6,6 @@ import {
   isValidFeatureName,
   buildFeatureConfig,
   buildPlaywrightConfig,
-  buildFeatureConfigTs,
   buildEnvsetsConfig,
   buildSpec,
   main,
@@ -80,24 +79,14 @@ describe('buildFeatureConfig', () => {
 describe('buildPlaywrightConfig', () => {
   it('returns stable content', () => {
     expect(buildPlaywrightConfig()).toMatchInlineSnapshot(`
-      "import { defineConfig } from '@playwright/test'
-      import { baseConfig } from 'canary-lab/feature-support/playwright-base'
-
-      export default defineConfig({ ...baseConfig })
-      "
-    `)
-  })
-})
-
-describe('buildFeatureConfigTs', () => {
-  it('returns stable content', () => {
-    expect(buildFeatureConfigTs()).toMatchInlineSnapshot(`
       "import path from 'node:path'
       import { config as loadDotenv } from 'dotenv'
+      import { defineConfig } from '@playwright/test'
+      import { baseConfig } from 'canary-lab/feature-support/playwright-base'
 
-      loadDotenv({ path: path.join(__dirname, '..', '.env') })
+      loadDotenv({ path: path.join(__dirname, '.env') })
 
-      export const GATEWAY_URL = process.env.GATEWAY_URL ?? 'http://localhost:3000'
+      export default defineConfig({ ...baseConfig })
       "
     `)
   })
@@ -147,7 +136,6 @@ describe("main (new-feature orchestration)", () => {
       "feature.config.cjs",
       "playwright.config.ts",
       ".env.example",
-      "src/config.ts",
       "envsets/envsets.config.json",
       "envsets/local/cns_webhooks.env",
       "e2e/cns_webhooks.spec.ts",
@@ -156,6 +144,7 @@ describe("main (new-feature orchestration)", () => {
       expect(fs.existsSync(path.join(featDir, rel))).toBe(true)
     }
     expect(fs.existsSync(path.join(featDir, "e2e", "helpers"))).toBe(true)
+    expect(fs.existsSync(path.join(featDir, "src"))).toBe(false)
 
     // feature.config.cjs embeds description verbatim
     const cfg = fs.readFileSync(path.join(featDir, "feature.config.cjs"), "utf-8")
