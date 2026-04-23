@@ -52,7 +52,7 @@ const execFileSync = vi.fn()
 vi.mock('child_process', () => ({ execFileSync }))
 
 const {
-  stripFrontmatter,
+  extractHealPrompt,
   buildAgentCommand,
   failureSignature,
   loadPrompt,
@@ -89,22 +89,27 @@ afterEach(() => {
   while (tmpDirs.length > 1) fs.rmSync(tmpDirs.pop()!, { recursive: true, force: true })
 })
 
-describe('stripFrontmatter', () => {
-  it('strips a leading --- ... --- block', () => {
-    const src = '---\nname: x\ndesc: y\n---\nbody line 1\nbody line 2\n'
-    expect(stripFrontmatter(src)).toBe('body line 1\nbody line 2\n')
+describe('extractHealPrompt', () => {
+  const START = '<!-- heal-prompt:start -->'
+  const END = '<!-- heal-prompt:end -->'
+
+  it('returns the content between markers, trimmed', () => {
+    const src = `# Project Notes\n\n${START}\n\nhello world\n\n${END}\n\nother stuff`
+    expect(extractHealPrompt(src)).toBe('hello world')
   })
 
-  it('returns content unchanged when no leading frontmatter', () => {
-    expect(stripFrontmatter('# heading\nbody')).toBe('# heading\nbody')
+  it('returns null when either marker is missing', () => {
+    expect(extractHealPrompt('no markers at all')).toBeNull()
+    expect(extractHealPrompt(`only ${START} here`)).toBeNull()
+    expect(extractHealPrompt(`only ${END} here`)).toBeNull()
   })
 
-  it('returns content unchanged when opening --- has no closing', () => {
-    expect(stripFrontmatter('---\nunterminated')).toBe('---\nunterminated')
+  it('returns null when end precedes start', () => {
+    expect(extractHealPrompt(`${END}\nbody\n${START}`)).toBeNull()
   })
 
-  it('returns empty when frontmatter is the entire file', () => {
-    expect(stripFrontmatter('---\na: b\n---')).toBe('')
+  it('handles an empty body between markers', () => {
+    expect(extractHealPrompt(`${START}${END}`)).toBe('')
   })
 })
 
@@ -196,15 +201,25 @@ describe('failureSignature', () => {
 })
 
 describe('loadPrompt', () => {
-  it('reads and strips frontmatter, trimmed', () => {
+  it('extracts content between <!-- heal-prompt:start/end --> markers, trimmed', () => {
     const dir = mkTmp()
-    const p = path.join(dir, 'prompt.md')
-    fs.writeFileSync(p, '---\nname: x\n---\n\nhello\n\n')
+    const p = path.join(dir, 'CLAUDE.md')
+    fs.writeFileSync(
+      p,
+      '# Project Notes\n\n<!-- heal-prompt:start -->\n\nhello\n\n<!-- heal-prompt:end -->\n\nmore stuff\n',
+    )
     expect(loadPrompt('claude', p)).toBe('hello')
   })
 
-  it('throws a helpful error when prompt file missing', () => {
-    expect(() => loadPrompt('claude', '/does/not/exist.md')).toThrow(/Heal prompt not found/)
+  it('throws a helpful error when the source file is missing', () => {
+    expect(() => loadPrompt('claude', '/does/not/exist.md')).toThrow(/Heal prompt source not found/)
+  })
+
+  it('throws when markers are missing from the source file', () => {
+    const dir = mkTmp()
+    const p = path.join(dir, 'CLAUDE.md')
+    fs.writeFileSync(p, '# Project Notes\n\nno markers here\n')
+    expect(() => loadPrompt('claude', p)).toThrow(/Heal prompt markers/)
   })
 })
 
@@ -225,11 +240,13 @@ describe('isAgentCliAvailable', () => {
 
 describe('spawnHealAgent', () => {
   function seedPrompt(agent: 'claude' | 'codex') {
-    const dir = agent === 'claude'
-      ? path.join(pathStubRoot, '.claude', 'skills')
-      : path.join(pathStubRoot, '.codex')
-    fs.mkdirSync(dir, { recursive: true })
-    fs.writeFileSync(path.join(dir, 'heal-loop.md'), '---\nname: x\n---\ngo heal\n')
+    const file = agent === 'claude'
+      ? path.join(pathStubRoot, 'CLAUDE.md')
+      : path.join(pathStubRoot, 'AGENTS.md')
+    fs.writeFileSync(
+      file,
+      '# Project Notes\n\n<!-- heal-prompt:start -->\ngo heal\n<!-- heal-prompt:end -->\n',
+    )
   }
 
   it('writes prompt + heal script to LOGS_DIR, opens iTerm tab, returns "signal" when RERUN_SIGNAL appears', async () => {
@@ -275,8 +292,8 @@ describe('spawnHealAgent', () => {
   })
 
   it('uses vanilla baseline prompt (not the heal skill) when benchmarkMode is baseline', async () => {
-    // Intentionally do NOT seed .claude/skills/heal-loop.md — baseline must
-    // not depend on the skill existing or being readable.
+    // Intentionally do NOT seed CLAUDE.md heal-prompt markers — baseline must
+    // not depend on the canary-lab heal workflow existing or being readable.
     vi.useFakeTimers()
 
     const promise = spawnHealAgent({
@@ -309,6 +326,27 @@ describe('spawnHealAgent', () => {
     // iTerm tab was opened with the sandbox cwd, not ROOT.
     const [tabs] = openItermTabs.mock.calls[0]
     expect(tabs[0].dir).toBe('/tmp/sandbox')
+  })
+
+  it('falls back to default playwright log path and restart signal when baseline options are omitted', async () => {
+    vi.useFakeTimers()
+
+    const promise = spawnHealAgent({
+      agent: 'claude',
+      sessionMode: 'new',
+      cycle: 0,
+      terminal: 'iTerm',
+      benchmarkMode: 'baseline',
+    })
+
+    fs.writeFileSync(RESTART_SIGNAL, '')
+    await vi.advanceTimersByTimeAsync(1200)
+    await promise
+
+    const prompt = fs.readFileSync(path.join(LOGS_DIR, '.heal-prompt.txt'), 'utf-8')
+    // Defaults: playwright-stdout.log inside LOGS_DIR and RESTART_SIGNAL.
+    expect(prompt).toContain(path.join(LOGS_DIR, 'playwright-stdout.log'))
+    expect(prompt).toContain(RESTART_SIGNAL)
   })
 
   it('buildBaselineVanillaPrompt formats absolute paths and optional repo list', () => {
@@ -491,9 +529,10 @@ describe('spawnHealAgent', () => {
 
 describe('closeLastHealAgentTab', () => {
   it('persists cleared state to disk even when closeItermSessionsByIds throws', async () => {
-    const seedDir = path.join(pathStubRoot, '.claude', 'skills')
-    fs.mkdirSync(seedDir, { recursive: true })
-    fs.writeFileSync(path.join(seedDir, 'heal-loop.md'), '---\nname: x\n---\ngo heal\n')
+    fs.writeFileSync(
+      path.join(pathStubRoot, 'CLAUDE.md'),
+      '# Project Notes\n\n<!-- heal-prompt:start -->\ngo heal\n<!-- heal-prompt:end -->\n',
+    )
 
     vi.useFakeTimers()
     openItermTabs.mockReturnValueOnce(['seed-sid-xyz'])

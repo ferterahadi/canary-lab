@@ -91,29 +91,37 @@ export function isAgentCliAvailable(agent: HealAgent): boolean {
   }
 }
 
+const HEAL_PROMPT_START = '<!-- heal-prompt:start -->'
+const HEAL_PROMPT_END = '<!-- heal-prompt:end -->'
+
 function promptPathFor(agent: HealAgent): string {
   return agent === 'claude'
-    ? path.join(ROOT, '.claude', 'skills', 'heal-loop.md')
-    : path.join(ROOT, '.codex', 'heal-loop.md')
+    ? path.join(ROOT, 'CLAUDE.md')
+    : path.join(ROOT, 'AGENTS.md')
 }
 
-export function stripFrontmatter(content: string): string {
-  // Strip a leading `---\n...\n---\n` block if present.
-  if (!content.startsWith('---')) return content
-  const end = content.indexOf('\n---', 3)
-  if (end === -1) return content
-  const after = content.indexOf('\n', end + 4)
-  return after === -1 ? '' : content.slice(after + 1)
+export function extractHealPrompt(content: string): string | null {
+  const startIdx = content.indexOf(HEAL_PROMPT_START)
+  if (startIdx === -1) return null
+  const endIdx = content.indexOf(HEAL_PROMPT_END, startIdx + HEAL_PROMPT_START.length)
+  if (endIdx === -1) return null
+  return content.slice(startIdx + HEAL_PROMPT_START.length, endIdx).trim()
 }
 
 export function loadPrompt(agent: HealAgent, promptPath: string = promptPathFor(agent)): string {
-  const p = promptPath
-  if (!fs.existsSync(p)) {
+  if (!fs.existsSync(promptPath)) {
     throw new Error(
-      `Heal prompt not found at ${p}. Run \`canary-lab upgrade\` to install it.`,
+      `Heal prompt source not found at ${promptPath}. Run \`canary-lab upgrade\` to install it.`,
     )
   }
-  return stripFrontmatter(fs.readFileSync(p, 'utf-8')).trim()
+  const content = fs.readFileSync(promptPath, 'utf-8')
+  const prompt = extractHealPrompt(content)
+  if (!prompt) {
+    throw new Error(
+      `Heal prompt markers (${HEAL_PROMPT_START} / ${HEAL_PROMPT_END}) not found in ${promptPath}. Run \`canary-lab upgrade\` to refresh the managed block.`,
+    )
+  }
+  return prompt
 }
 
 export function healAgentBanner(agent: HealAgent): string {

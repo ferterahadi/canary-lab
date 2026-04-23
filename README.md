@@ -71,8 +71,8 @@ npx canary-lab run
 - `features/example_todo_api` — working Playwright E2E sample
 - `features/broken_todo_api` — intentionally broken sample for self-fixing practice
 - `features/tricky_checkout_api` — a more realistic checkout API sample with a local test server
-- `CLAUDE.md` and `.claude/skills/` for Claude (`env-import`, `heal-loop`, `self-fixing-loop`)
-- `AGENTS.md` and `.codex/` for Codex (matching guides)
+- `CLAUDE.md` for Claude (contains the `Self-Heal Workflow` inline, plus `.claude/skills/env-import.md` for importing env files from repos)
+- `AGENTS.md` for Codex (matching guide; env-import skill at `.codex/env-import.md`)
 
 ## Commands
 
@@ -166,8 +166,8 @@ If you override this or use `git add -f`, review what you are committing. Do not
 
 Two flavors, same idea:
 
-- **Manual (`self heal`)** — you stay in the driver's seat. Run `npx canary-lab run`, leave it in watch mode, open Claude or Codex in the project, and type `self heal`. The agent follows `.claude/skills/self-fixing-loop.md` (or `.codex/self-fixing-loop.md`).
-- **Auto-heal (`heal-loop`)** — the runner itself spawns a Claude or Codex agent when a test fails, following `.claude/skills/heal-loop.md`. Output is filtered through a formatter so you see readable progress instead of raw stream-json.
+- **Manual (`self heal`)** — you stay in the driver's seat. Run `npx canary-lab run`, leave it in watch mode, open Claude or Codex in the project, and type `self heal`. The agent follows the `Self-Heal Workflow` section in `CLAUDE.md` (or `AGENTS.md` for Codex), which is already loaded into its context.
+- **Auto-heal** — the runner itself spawns a Claude or Codex agent when a test fails. It reads the same `Self-Heal Workflow` block from `CLAUDE.md` / `AGENTS.md` (the content between `<!-- heal-prompt:start -->` and `<!-- heal-prompt:end -->`) and passes it as the prompt. Output is filtered through a formatter so you see readable progress instead of raw stream-json.
 
 In both cases the agent reads `logs/e2e-summary.json`, slices service logs by `<test-tag>` markers, fixes implementation code, and signals the runner via `logs/.restart` or `logs/.rerun`.
 
@@ -179,7 +179,7 @@ If you didn't pick an auto-heal agent, or the headless agent gave up / isn't ins
 2. Run `claude` (or `codex`) there.
 3. Send the single prompt: `self heal`.
 
-The interactive agent reads the same `.claude/skills/self-fixing-loop.md` (or `.codex/self-fixing-loop.md`) and drives the same `.rerun`/`.restart` signals, so the runner will pick up its work without any extra setup.
+The interactive agent reads the same `Self-Heal Workflow` section in `CLAUDE.md` (or `AGENTS.md`) and drives the same `.rerun`/`.restart` signals, so the runner will pick up its work without any extra setup.
 
 If you picked an agent up front and it struck out after 3 cycles, the runner prints the manual options (`touch logs/.rerun`, `touch logs/.heal` to reset strikes and re-spawn, or run the agent interactively as above).
 

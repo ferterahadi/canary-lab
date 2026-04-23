@@ -1,5 +1,3 @@
-import { GATEWAY_URL } from '../../src/config'
-
 export interface Item {
   sku: string
   qty: number
@@ -33,7 +31,7 @@ async function jsonCall<T>(url: string, init: RequestInit = {}): Promise<Respons
 }
 
 export class OrdersApi {
-  baseUrl = GATEWAY_URL
+  baseUrl = process.env.GATEWAY_URL ?? 'http://localhost:4300'
 
   createOrder = () =>
     jsonCall<{ orderId: string }>(`${this.baseUrl}/order`, { method: 'POST' })

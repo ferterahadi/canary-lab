@@ -3,8 +3,9 @@ import fs from 'fs'
 import dotenv from 'dotenv'
 
 /**
- * Load .env file from a feature directory. Call this at the top of
- * your feature's src/config.ts before exporting typed constants.
+ * Load a feature's `.env` file. Optional helper — the scaffold loads dotenv
+ * directly from `playwright.config.ts` using raw `dotenv`, but this helper is
+ * available for users who want the no-throw-when-missing behavior.
  */
 export function loadFeatureEnv(featureDir: string): void {
   const envFile = path.join(featureDir, '.env')
