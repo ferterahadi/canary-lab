@@ -4,7 +4,7 @@ All notable changes to Canary Lab are listed here. We try to keep the language p
 
 ## 0.9.0 — 2026-04-24
 
-> Run `npx canary-lab upgrade` to apply this release. Existing projects will have their stale `heal-loop.md` / `self-fixing-loop.md` files removed automatically.
+> Run `npx canary-lab upgrade` to apply the managed-file changes (CLAUDE.md / AGENTS.md refresh and deprecated skill-file cleanup). Per-feature directories are user-owned, so their new shape — described under [Feature layout](#feature-layout) below — does not auto-apply.
 
 ### Added
 
@@ -20,6 +20,40 @@ All notable changes to Canary Lab are listed here. We try to keep the language p
 
 - `.claude/skills/heal-loop.md`, `.claude/skills/self-fixing-loop.md`, `.codex/heal-loop.md`, `.codex/self-fixing-loop.md` — content consolidated into `CLAUDE.md` / `AGENTS.md`. `canary-lab upgrade` removes these files from existing installs.
 - `features/<name>/src/config.ts` (and the empty `src/` dir) in all scaffolded features.
+
+### Feature layout
+
+The per-feature boilerplate is smaller in 0.9.0. The new shape of a scaffolded `features/<name>/` directory:
+
+- `playwright.config.ts` loads the feature's `.env` directly:
+
+  ```ts
+  import path from 'node:path'
+  import { config as loadDotenv } from 'dotenv'
+  import { defineConfig } from '@playwright/test'
+  import { baseConfig } from 'canary-lab/feature-support/playwright-base'
+
+  loadDotenv({ path: path.join(__dirname, '.env') })
+
+  export default defineConfig({ ...baseConfig })
+  ```
+
+- Helpers under `e2e/helpers/*.ts` read env values inline instead of importing a typed constant:
+
+  ```diff
+  -import { GATEWAY_URL } from '../../src/config'
+  -
+  -export class Api {
+  -  baseUrl = GATEWAY_URL
+  -}
+  +export class Api {
+  +  baseUrl = process.env.GATEWAY_URL ?? 'http://localhost:4000'
+  +}
+  ```
+
+- `src/config.ts` and the `src/` directory are no longer part of the scaffold.
+
+Projects scaffolded by 0.8.x keep the old shape — the shift is descriptive, not enforced by `canary-lab upgrade`.
 
 ## 0.8.0 — 2026-04-22
 
