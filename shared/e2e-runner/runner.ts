@@ -1284,6 +1284,10 @@ export async function main(argv: string[] = []) {
     if (cleanedUp) return
     cleanedUp = true
 
+    // Close readline so stdin no longer holds the event loop open and any
+    // pending rl.question() rejections resolve cleanly.
+    try { rl.close() } catch { /* already closed */ }
+
     // Stop service processes
     if (services.length > 0) {
       uiLine()
@@ -1480,7 +1484,9 @@ export async function main(argv: string[] = []) {
       appliedFeatureDir = feature.featureDir
     }
 
-    rl.close()
+    // NOTE: don't `rl.close()` here. Later phases (health-check failure
+    // recovery, future interactive prompts) may still need stdin. The
+    // readline is closed inside cleanup() so it lives for the whole run.
 
     // ── 8. Prepare logs directory
     // Preserve iTerm session ID caches across the logs wipe so we can still

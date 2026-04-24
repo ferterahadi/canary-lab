@@ -114,14 +114,11 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
     fs.writeFileSync(fullPath, content)
   }
 
-  fs.mkdirSync(path.join(featureDir, 'e2e/helpers'), { recursive: true })
-
   ok(`Feature "${name}" created at ${ansiPath(`features/${name}/`)}`)
   section('Created files')
   for (const [relPath] of files) {
     bullet(dim(`features/${name}/`) + relPath)
   }
-  bullet(dim(`features/${name}/`) + 'e2e/helpers/')
   section('Next steps')
   step(1, `Edit ${ansiPath('feature.config.cjs')} — add your repos, start commands, and health checks`)
   step(2, `Edit ${ansiPath(`envsets/local/${name}.env`)} — add any env vars your feature needs`)
