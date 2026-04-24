@@ -81,8 +81,9 @@ describe('buildBenchmarkContextSnapshot', () => {
     expect(snapshot.journalBytes).toBeGreaterThan(0)
     expect(snapshot.rawServiceLogBytesAvailable).toBeGreaterThan(0)
     expect(snapshot.promptAddendum).toContain('Benchmark telemetry is on')
-    expect(snapshot.promptAddendum).toContain('logs/heal-index.md')
-    expect(snapshot.promptAddendum).toContain('logs/failed/<slug>/<svc>.log')
+    expect(snapshot.promptAddendum).toContain('same heal-prompt workflow')
+    expect(snapshot.promptAddendum).not.toContain('logs/heal-index.md')
+    expect(snapshot.promptAddendum).not.toContain('logs/failed/<slug>/<svc>.log')
   })
 
   it('builds baseline context pointing at raw Playwright stdout, ignoring enriched summary and journal', () => {
