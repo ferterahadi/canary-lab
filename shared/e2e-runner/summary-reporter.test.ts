@@ -103,6 +103,32 @@ describe('SummaryReporter', () => {
     expect(out.failed[0].error.snippet).toHaveLength(500)
   })
 
+  it('strips ANSI escape codes before writing e2e-summary.json', () => {
+    const r = new SummaryReporter()
+    r.onTestEnd(
+      mkTest('ANSI fail'),
+      mkResult({
+        status: 'failed',
+        error: {
+          message:
+            'Error: \x1b[2mexpect(\x1b[22m\x1b[31mreceived\x1b[39m\x1b[2m).toBe(\x1b[22m\x1b[32mexpected\x1b[39m\x1b[2m)\x1b[22m Expected: [32m400[39m Received: [31m200[39m',
+          snippet: '\x1b[31mreceived\x1b[39m [32mexpected[39m',
+        },
+      }),
+    )
+    r.onEnd({} as any)
+
+    const out = JSON.parse(
+      fs.readFileSync(path.join(LOGS_DIR, 'e2e-summary.json'), 'utf-8'),
+    )
+    expect(out.failed[0].error.message).toBe(
+      'Error: expect(received).toBe(expected) Expected: 400 Received: 200',
+    )
+    expect(out.failed[0].error.snippet).toBe('received expected')
+    expect(JSON.stringify(out)).not.toMatch(/\x1b\[/)
+    expect(JSON.stringify(out)).not.toMatch(/\[\d+m/)
+  })
+
   it('omits `error` when a failed test has no .error attached', () => {
     const r = new SummaryReporter()
     r.onTestEnd(mkTest('flaky'), mkResult({ status: 'failed' }))
@@ -182,7 +208,10 @@ describe('SummaryReporter', () => {
     expect(fs.existsSync(indexPath)).toBe(true)
     const md = fs.readFileSync(indexPath, 'utf-8')
     expect(md).toContain('# Heal Index')
-    expect(md).toContain(`logs/failed/${slug}/api.log`)
+    expect(md).toContain(slug)
+    expect(md).toContain(`slice: logs/failed/${slug}/api.log`)
+    expect(md).not.toContain('target service:')
+    expect(md).not.toContain('### Cluster')
 
     r.onEnd({} as any)
     const finalOut = JSON.parse(

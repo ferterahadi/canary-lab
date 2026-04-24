@@ -2,6 +2,16 @@
 
 All notable changes to Canary Lab are listed here. We try to keep the language plain so anyone can follow along.
 
+## 0.9.1 — 2026-04-25
+
+### Fixed
+
+- **Cleaner heal index.** Failure messages in `logs/heal-index.md` no longer include terminal color codes like `[2m` or `[31m]`. The index keeps the simple list format that worked well for the heal agent, just without the visual noise.
+
+### Benchmark note
+
+- The cleaned-up heal index gives the agent a clearer starting point during benchmarked self-heal runs. This does not add a new workflow; it simply removes noise from the same failure map the agent already reads first.
+
 ## 0.9.0 — 2026-04-24
 
 > Run `npx canary-lab upgrade` to apply the managed-file changes (CLAUDE.md / AGENTS.md refresh and deprecated skill-file cleanup). Per-feature directories are user-owned, so their new shape — described under [Feature layout](#feature-layout) below — does not auto-apply.
