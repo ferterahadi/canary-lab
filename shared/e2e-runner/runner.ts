@@ -3,6 +3,7 @@ import os from 'os'
 import path from 'path'
 import readline from 'readline'
 import { execFileSync, spawn } from 'child_process'
+import { runAsScript } from '../../scripts/run-as-script'
 import {
   banner,
   section,
@@ -73,6 +74,7 @@ import {
   buildBenchmarkContextSnapshot,
   type BenchmarkMode,
 } from './context-assembler'
+import { appendJournalIteration } from './log-enrichment'
 
 export function safeReadFile(file: string): string | null {
   try {
@@ -1118,6 +1120,31 @@ export async function watchMode(
       if (raw) signalContent = JSON.parse(raw)
     } catch { /* empty or non-JSON signal file is fine */ }
 
+    // Runner-side journal append. The agent supplies hypothesis + filesChanged
+    // in the signal body; the runner fills in feature, failingTests, timestamp,
+    // iteration, outcome. Keeps journal ceremony out of the agent's token
+    // budget. Only fires for .restart/.rerun (not .heal) and only in canary
+    // mode — baseline runs must remain harness-free.
+    if ((doRestart || doRerun) && benchmarkMode !== 'baseline') {
+      const hypothesis = typeof signalContent.hypothesis === 'string'
+        ? signalContent.hypothesis
+        : undefined
+      const filesChanged = Array.isArray(signalContent.filesChanged)
+        ? (signalContent.filesChanged.filter((f) => typeof f === 'string') as string[])
+        : undefined
+      const fixDescription = typeof signalContent.fixDescription === 'string'
+        ? signalContent.fixDescription
+        : undefined
+      try {
+        appendJournalIteration({
+          signal: doRestart ? '.restart' : '.rerun',
+          hypothesis,
+          filesChanged,
+          fixDescription,
+        })
+      } catch { /* don't let journal write break the loop */ }
+    }
+
     // Append to signal history
     try {
       const history: unknown[] = fs.existsSync(SIGNAL_HISTORY_PATH)
@@ -1559,9 +1586,4 @@ export async function main(argv: string[] = []) {
   }
 }
 
-if (require.main === module) {
-  main().catch((err) => {
-    console.error(err)
-    process.exit(1)
-  })
-}
+runAsScript(module, main)
