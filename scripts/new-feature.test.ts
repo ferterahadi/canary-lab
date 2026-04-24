@@ -142,7 +142,7 @@ describe("main (new-feature orchestration)", () => {
     for (const rel of expected) {
       expect(fs.existsSync(path.join(featDir, rel))).toBe(true)
     }
-    expect(fs.existsSync(path.join(featDir, "e2e", "helpers"))).toBe(true)
+    expect(fs.existsSync(path.join(featDir, "e2e", "helpers"))).toBe(false)
     expect(fs.existsSync(path.join(featDir, "src"))).toBe(false)
 
     // feature.config.cjs embeds description verbatim
