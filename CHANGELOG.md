@@ -2,7 +2,7 @@
 
 All notable changes to Canary Lab are listed here. We try to keep the language plain so anyone can follow along.
 
-## 0.9.1 — 2026-04-25
+## 0.9.2 — 2026-04-25
 
 > Run `npx canary-lab upgrade` inside existing projects to refresh the managed `CLAUDE.md` / `AGENTS.md` heal prompt.
 
