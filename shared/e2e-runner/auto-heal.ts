@@ -43,6 +43,33 @@ export interface SpawnHealAgentOptions {
   baselinePlaywrightLogPath?: string
   baselineSignalFilePath?: string
   baselineRepoPaths?: string[]
+  // Replaces the base prompt (normally loaded from CLAUDE.md / AGENTS.md
+  // heal-prompt markers). Used for startup-failure healing, which has a
+  // different shape than Playwright-failure healing. Ignored when
+  // benchmarkMode === 'baseline' (baseline builds its own prompt).
+  basePromptOverride?: string
+}
+
+// Startup-failure prompt, built at runtime when a service fails its initial
+// health check and the user chooses to auto-heal. The Playwright-failure
+// heal-prompt in CLAUDE.md / AGENTS.md doesn't fit this case — the agent
+// needs to read the service log, not logs/heal-index.md.
+export function buildStartupFailurePrompt(args: {
+  serviceName: string
+  healthUrl: string
+  logPath: string
+  repoPath: string
+  restartSignalPath: string
+}): string {
+  return [
+    `Service \`${args.serviceName}\` failed its startup health check at \`${args.healthUrl}\`. The process is still running but not responding as expected — the runner hasn't reached Playwright yet.`,
+    '',
+    `Read the service log at \`${args.logPath}\` — focus on errors, stack traces, or the "listening on" message that never arrived. The service repo is at \`${args.repoPath}\`.`,
+    '',
+    'Diagnose why the service won\'t pass its health check. Fix the repo code — never canary-lab test/config. Do not kill the service process; the runner will restart it after you signal done.',
+    '',
+    `When you've committed a fix, write a single JSON line to \`${args.restartSignalPath}\`: \`{"hypothesis":"…","filesChanged":["<absolute path>"]}\`. The \`filesChanged\` list lets the runner restart only the affected service(s). Exit after writing the signal — the runner is polling.`,
+  ].join('\n')
 }
 
 // Baseline benchmark mode runs as if canary-lab didn't exist: no heal-loop
@@ -91,29 +118,37 @@ export function isAgentCliAvailable(agent: HealAgent): boolean {
   }
 }
 
+const HEAL_PROMPT_START = '<!-- heal-prompt:start -->'
+const HEAL_PROMPT_END = '<!-- heal-prompt:end -->'
+
 function promptPathFor(agent: HealAgent): string {
   return agent === 'claude'
-    ? path.join(ROOT, '.claude', 'skills', 'heal-loop.md')
-    : path.join(ROOT, '.codex', 'heal-loop.md')
+    ? path.join(ROOT, 'CLAUDE.md')
+    : path.join(ROOT, 'AGENTS.md')
 }
 
-export function stripFrontmatter(content: string): string {
-  // Strip a leading `---\n...\n---\n` block if present.
-  if (!content.startsWith('---')) return content
-  const end = content.indexOf('\n---', 3)
-  if (end === -1) return content
-  const after = content.indexOf('\n', end + 4)
-  return after === -1 ? '' : content.slice(after + 1)
+export function extractHealPrompt(content: string): string | null {
+  const startIdx = content.indexOf(HEAL_PROMPT_START)
+  if (startIdx === -1) return null
+  const endIdx = content.indexOf(HEAL_PROMPT_END, startIdx + HEAL_PROMPT_START.length)
+  if (endIdx === -1) return null
+  return content.slice(startIdx + HEAL_PROMPT_START.length, endIdx).trim()
 }
 
 export function loadPrompt(agent: HealAgent, promptPath: string = promptPathFor(agent)): string {
-  const p = promptPath
-  if (!fs.existsSync(p)) {
+  if (!fs.existsSync(promptPath)) {
     throw new Error(
-      `Heal prompt not found at ${p}. Run \`canary-lab upgrade\` to install it.`,
+      `Heal prompt source not found at ${promptPath}. Run \`canary-lab upgrade\` to install it.`,
     )
   }
-  return stripFrontmatter(fs.readFileSync(p, 'utf-8')).trim()
+  const content = fs.readFileSync(promptPath, 'utf-8')
+  const prompt = extractHealPrompt(content)
+  if (!prompt) {
+    throw new Error(
+      `Heal prompt markers (${HEAL_PROMPT_START} / ${HEAL_PROMPT_END}) not found in ${promptPath}. Run \`canary-lab upgrade\` to refresh the managed block.`,
+    )
+  }
+  return prompt
 }
 
 export function healAgentBanner(agent: HealAgent): string {
@@ -155,7 +190,7 @@ export function buildAgentCommand(
   // profile (~/.codex/config.toml) — we don't override here.
   // --skip-git-repo-check: scaffold may not be a git repo yet.
   // --full-auto: required for the heal agent to write files (server edits,
-  // diagnosis-journal.json, .rerun/.restart). Without it, codex runs in a
+  // diagnosis-journal.md, .rerun/.restart). Without it, codex runs in a
   // read-only sandbox and silently fails file writes.
   // --json + formatter: raw codex output is very verbose; the formatter emits
   // a compact timeline of commands, file changes, and messages.
@@ -310,7 +345,7 @@ export async function spawnHealAgent(
         signalFilePath: opts.baselineSignalFilePath ?? RESTART_SIGNAL,
         repoPaths: opts.baselineRepoPaths,
       })
-    : loadPrompt(opts.agent)
+    : opts.basePromptOverride ?? loadPrompt(opts.agent)
   const prompt = [
     basePrompt,
     opts.promptAddendum?.trim(),

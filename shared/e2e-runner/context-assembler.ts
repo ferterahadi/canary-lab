@@ -128,10 +128,10 @@ export function buildBenchmarkContextSnapshot(
       includedLogSlices: {},
       excludedArtifacts: [
         'logs/e2e-summary.json',
-        'logs/diagnosis-journal.json',
+        'logs/diagnosis-journal.md',
         'logs/svc-*.log',
         'failed[].logs',
-        '.claude/skills/heal-loop.md',
+        'CLAUDE.md heal-prompt section',
       ],
       filesIncluded: summaryBytes > 0 ? 1 : 0,
       contextBytes: summaryBytes,
@@ -186,15 +186,16 @@ export function buildBenchmarkContextSnapshot(
   const contextBytes = indexBytes + slicedLogBytes
   const contextChars = (indexRaw?.length ?? 0) + slicedLogBytes
 
-  // Supplemental reminder (not an override — the skill is the source of truth).
-  // Only fires during benchmark runs so we can measure canary's information
-  // advantage cleanly; non-benchmark runs get the same behavior from the skill.
+  // Supplemental reminder (not an override — the CLAUDE.md heal-prompt section
+  // is the source of truth). Only fires during benchmark runs so we can measure
+  // canary's information advantage cleanly; non-benchmark runs get the same
+  // behavior from the heal-prompt block.
   const promptAddendum = [
     'Benchmark telemetry is on — same canary flow as usual, just reinforcing the entry points:',
     `- Start with \`${path.relative(ROOT, HEAL_INDEX_PATH)}\` (compact markdown index of every failure, slice paths, and prior hypotheses).`,
     '- For each failure you plan to fix, read its `logs/failed/<slug>/<svc>.log` slice (pre-capped, pre-scoped via XML markers).',
     '- If a slice is elided in the middle, the full log is at `logs/svc-<name>.log` — drill in with `sed -n \'/<slug>/,/<\\/slug>/p\' logs/svc-<name>.log`.',
-    '- `logs/diagnosis-journal.json` has full history; the index summarizes the last 3 iterations — skip hypotheses already tried.',
+    '- `logs/diagnosis-journal.md` has full history; the index summarizes the last 3 iterations — skip hypotheses already tried.',
   ].join('\n')
 
   return {

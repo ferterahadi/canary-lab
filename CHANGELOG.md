@@ -2,6 +2,64 @@
 
 All notable changes to Canary Lab are listed here. We try to keep the language plain so anyone can follow along.
 
+## 0.9.0 — 2026-04-24
+
+> Run `npx canary-lab upgrade` to apply the managed-file changes (CLAUDE.md / AGENTS.md refresh and deprecated skill-file cleanup). Per-feature directories are user-owned, so their new shape — described under [Feature layout](#feature-layout) below — does not auto-apply.
+
+### Added
+
+- **Selective service restart on heal.** When the heal agent writes `logs/.restart` with a `filesChanged` list, the runner now restarts only the services whose repo actually owns one of those files — untouched services keep running, which is faster and keeps their logs intact. If `filesChanged` is missing or a path falls outside every known repo (e.g. a shared package or test file), the runner warns and falls back to restarting everything, so behaviour stays safe when impact is unclear.
+
+### Changed
+
+- **Heal workflow moved into `CLAUDE.md` / `AGENTS.md`.** The merged Self-Heal Workflow now lives between `<!-- heal-prompt:start -->` and `<!-- heal-prompt:end -->` markers inside the managed block. Both the manual `self heal` flow and the auto-heal runner read from the same source — one workflow, one source of truth.
+- **`auto-heal` runner reads from `CLAUDE.md` / `AGENTS.md`** (claude / codex respectively) and extracts the heal-prompt section as its prompt.
+- **Per-feature `src/config.ts` removed.** Features now load `.env` directly from `playwright.config.ts` and read `process.env.GATEWAY_URL` (with an inline default) in helpers. One fewer layer of indirection for scaffold readers to follow.
+
+### Fixed
+
+- **Service startup failure no longer kills everything.** When a service fails its health check, the runner now asks what you want to do: stop, self-heal manually, or hand it to Claude or Codex. Services and env files stay in place while you decide, so you can actually look at the logs.
+
+### Removed
+
+- `.claude/skills/heal-loop.md`, `.claude/skills/self-fixing-loop.md`, `.codex/heal-loop.md`, `.codex/self-fixing-loop.md` — content consolidated into `CLAUDE.md` / `AGENTS.md`. `canary-lab upgrade` removes these files from existing installs.
+- `features/<name>/src/config.ts` (and the empty `src/` dir) in all scaffolded features.
+- `features/<name>/.env.example` in all scaffolded features. The same values already live in `envsets/local/<name>.env`, and `canary-lab new-feature` no longer emits an example file.
+
+### Feature layout
+
+The per-feature boilerplate is smaller in 0.9.0. The new shape of a scaffolded `features/<name>/` directory:
+
+- `playwright.config.ts` loads the feature's `.env` directly:
+
+  ```ts
+  import path from 'node:path'
+  import { config as loadDotenv } from 'dotenv'
+  import { defineConfig } from '@playwright/test'
+  import { baseConfig } from 'canary-lab/feature-support/playwright-base'
+
+  loadDotenv({ path: path.join(__dirname, '.env') })
+
+  export default defineConfig({ ...baseConfig })
+  ```
+
+- Helpers under `e2e/helpers/*.ts` read env values inline instead of importing a typed constant:
+
+  ```diff
+  -import { GATEWAY_URL } from '../../src/config'
+  -
+  -export class Api {
+  -  baseUrl = GATEWAY_URL
+  -}
+  +export class Api {
+  +  baseUrl = process.env.GATEWAY_URL ?? 'http://localhost:4000'
+  +}
+  ```
+
+- `src/config.ts` and the `src/` directory are no longer part of the scaffold.
+
+Projects scaffolded by 0.8.x keep the old shape — the shift is descriptive, not enforced by `canary-lab upgrade`.
+
 ## 0.8.0 — 2026-04-22
 
 > Run `npx canary-lab upgrade` to pick up the new scaffolded skills and `CLAUDE.md` / `AGENTS.md` blocks.

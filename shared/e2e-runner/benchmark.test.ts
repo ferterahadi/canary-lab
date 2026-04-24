@@ -49,7 +49,7 @@ describe('benchmark tracker', () => {
       cycle: 1,
       mode: 'canary',
       summaryPath: path.join(LOGS_DIR, 'e2e-summary.json'),
-      journalPath: path.join(LOGS_DIR, 'diagnosis-journal.json'),
+      journalPath: path.join(LOGS_DIR, 'diagnosis-journal.md'),
       includedLogFiles: ['logs/svc-api.log'],
       includedFailedTests: ['checkout'],
       summaryBytes: 100,
@@ -127,5 +127,118 @@ describe('benchmark tracker', () => {
     expect(summary.finalStatus).toBe('agent_exited_no_signal')
     expect(summary.totalInputTokens).toBeUndefined()
     expect(summary.totalContextBytes).toBe(80)
+  })
+
+  it('no-ops when there is no pending cycle', () => {
+    const tracker = createBenchmarkTracker({
+      runId: 'run-3',
+      feature: 'checkout',
+      benchmarkMode: 'canary',
+      startedAt: '2026-04-21T00:00:00.000Z',
+      modelProvider: 'claude',
+      maxCycles: 3,
+      headed: false,
+      autoHealEnabled: true,
+      healSession: 'new',
+    })
+
+    expect(() => noteBenchmarkSignal(tracker, '.rerun')).not.toThrow()
+    expect(finalizeBenchmarkCycle(tracker, 'completed', false)).toBeNull()
+  })
+
+  it('returns null when finalizing an already-finalized run', () => {
+    const tracker = createBenchmarkTracker({
+      runId: 'run-4',
+      feature: 'checkout',
+      benchmarkMode: 'canary',
+      startedAt: '2026-04-21T00:00:00.000Z',
+      modelProvider: 'claude',
+      maxCycles: 3,
+      headed: false,
+      autoHealEnabled: true,
+      healSession: 'new',
+    })
+    finalizeBenchmarkRun(tracker, 'green', true)
+    expect(finalizeBenchmarkRun(tracker, 'green', true)).toBeNull()
+  })
+
+  it('tolerates malformed usage JSONL and skips partial records without token data', () => {
+    const tracker = createBenchmarkTracker({
+      runId: 'run-5',
+      feature: 'checkout',
+      benchmarkMode: 'canary',
+      startedAt: '2026-04-21T00:00:00.000Z',
+      modelProvider: 'claude',
+      maxCycles: 3,
+      headed: false,
+      autoHealEnabled: true,
+      healSession: 'new',
+    })
+
+    const usagePath = startBenchmarkCycle(tracker, 1, 'sig', {
+      runId: 'run-5',
+      cycle: 1,
+      mode: 'canary',
+      summaryPath: '/x',
+      journalPath: null,
+      includedLogFiles: [],
+      includedFailedTests: [],
+      summaryBytes: 0,
+      journalBytes: 0,
+      includedLogSlices: {},
+      excludedArtifacts: [],
+      filesIncluded: 0,
+      contextBytes: 0,
+      contextChars: 0,
+      slicedLogBytes: 0,
+      rawServiceLogBytesAvailable: 0,
+      notes: '',
+      promptAddendum: '',
+    })
+    // Malformed JSON — sumUsage must return {} via its catch.
+    fs.writeFileSync(usagePath, '{ broken\n')
+    const record = finalizeBenchmarkCycle(tracker, 'completed', false)
+    expect(record?.inputTokens).toBeUndefined()
+    expect(record?.outputTokens).toBeUndefined()
+    expect(record?.totalTokens).toBeUndefined()
+  })
+
+  it('records only inputTokens when outputTokens is missing from usage lines', () => {
+    const tracker = createBenchmarkTracker({
+      runId: 'run-6',
+      feature: 'checkout',
+      benchmarkMode: 'canary',
+      startedAt: '2026-04-21T00:00:00.000Z',
+      modelProvider: 'claude',
+      maxCycles: 3,
+      headed: false,
+      autoHealEnabled: true,
+      healSession: 'new',
+    })
+    const usagePath = startBenchmarkCycle(tracker, 1, 'sig', {
+      runId: 'run-6',
+      cycle: 1,
+      mode: 'canary',
+      summaryPath: '/x',
+      journalPath: null,
+      includedLogFiles: [],
+      includedFailedTests: [],
+      summaryBytes: 0,
+      journalBytes: 0,
+      includedLogSlices: {},
+      excludedArtifacts: [],
+      filesIncluded: 0,
+      contextBytes: 0,
+      contextChars: 0,
+      slicedLogBytes: 0,
+      rawServiceLogBytesAvailable: 0,
+      notes: '',
+      promptAddendum: '',
+    })
+    fs.writeFileSync(usagePath, JSON.stringify({ inputTokens: 3 }) + '\n')
+    const record = finalizeBenchmarkCycle(tracker, 'completed', false)
+    expect(record?.inputTokens).toBe(3)
+    expect(record?.outputTokens).toBeUndefined()
+    expect(record?.totalTokens).toBe(3)
   })
 })

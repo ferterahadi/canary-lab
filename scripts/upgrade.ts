@@ -8,12 +8,20 @@ const MARKER_END = '<!-- managed:canary-lab:end -->'
 
 /** Files that are fully managed — overwritten on every upgrade. */
 const FULLY_MANAGED: string[] = [
-  '.claude/skills/self-fixing-loop.md',
   '.claude/skills/env-import.md',
-  '.claude/skills/heal-loop.md',
-  '.codex/self-fixing-loop.md',
   '.codex/env-import.md',
+]
+
+/**
+ * Files that used to ship with canary-lab but no longer do. Removed on upgrade
+ * so projects scaffolded from older versions don't carry stale copies. Safe to
+ * append to; never remove entries (they're how we clean up past installs).
+ */
+const DEPRECATED: string[] = [
+  '.claude/skills/heal-loop.md',
+  '.claude/skills/self-fixing-loop.md',
   '.codex/heal-loop.md',
+  '.codex/self-fixing-loop.md',
 ]
 
 /** Files where only the content between markers is replaced. */
@@ -166,7 +174,17 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
     updated += 1
   }
 
-  // 3. Ensure postinstall script exists in project package.json
+  // 3. Remove files that used to ship but don't anymore.
+  for (const relPath of DEPRECATED) {
+    const target = path.join(projectRoot, relPath)
+    if (fs.existsSync(target)) {
+      fs.unlinkSync(target)
+      log(`  Removed deprecated ${relPath}`, opts)
+      updated += 1
+    }
+  }
+
+  // 4. Ensure postinstall script exists in project package.json
   const pkgJsonPath = path.join(projectRoot, 'package.json')
   if (fs.existsSync(pkgJsonPath)) {
     try {

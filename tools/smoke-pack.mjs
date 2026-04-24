@@ -46,14 +46,33 @@ for (const relPath of [
   'package.json',
   'AGENTS.md',
   'CLAUDE.md',
-  '.claude/skills/self-fixing-loop.md',
-  '.codex/self-fixing-loop.md',
+  '.claude/skills/env-import.md',
+  '.codex/env-import.md',
   'features/example_todo_api/feature.config.cjs',
   'features/broken_todo_api/feature.config.cjs',
 ]) {
   const fullPath = path.join(projectDir, relPath)
   if (!fs.existsSync(fullPath)) {
     throw new Error(`Smoke test failed: missing ${relPath}`)
+  }
+}
+
+for (const mdFile of ['CLAUDE.md', 'AGENTS.md']) {
+  const content = fs.readFileSync(path.join(projectDir, mdFile), 'utf-8')
+  if (!content.includes('<!-- heal-prompt:start -->') || !content.includes('<!-- heal-prompt:end -->')) {
+    throw new Error(`Smoke test failed: ${mdFile} missing heal-prompt markers`)
+  }
+}
+
+for (const relPath of [
+  '.claude/skills/heal-loop.md',
+  '.claude/skills/self-fixing-loop.md',
+  '.codex/heal-loop.md',
+  '.codex/self-fixing-loop.md',
+  'features/example_todo_api/src/config.ts',
+]) {
+  if (fs.existsSync(path.join(projectDir, relPath))) {
+    throw new Error(`Smoke test failed: deprecated path still present: ${relPath}`)
   }
 }
 
