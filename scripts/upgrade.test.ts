@@ -96,16 +96,20 @@ describe("main (upgrade orchestration)", () => {
 
     await main([])
 
-    expect(fs.existsSync(path.join(root, ".claude/skills/self-fixing-loop.md"))).toBe(true)
     expect(fs.existsSync(path.join(root, ".claude/skills/env-import.md"))).toBe(true)
-    expect(fs.existsSync(path.join(root, ".claude/skills/heal-loop.md"))).toBe(true)
-    expect(fs.existsSync(path.join(root, ".codex/self-fixing-loop.md"))).toBe(true)
     expect(fs.existsSync(path.join(root, ".codex/env-import.md"))).toBe(true)
-    expect(fs.existsSync(path.join(root, ".codex/heal-loop.md"))).toBe(true)
+    // Heal skill files are no longer shipped — the workflow lives inline in
+    // CLAUDE.md / AGENTS.md between <!-- heal-prompt:start/end --> markers.
+    expect(fs.existsSync(path.join(root, ".claude/skills/self-fixing-loop.md"))).toBe(false)
+    expect(fs.existsSync(path.join(root, ".claude/skills/heal-loop.md"))).toBe(false)
+    expect(fs.existsSync(path.join(root, ".codex/self-fixing-loop.md"))).toBe(false)
+    expect(fs.existsSync(path.join(root, ".codex/heal-loop.md"))).toBe(false)
 
     const claudeMd = fs.readFileSync(path.join(root, "CLAUDE.md"), "utf-8")
     expect(claudeMd).toContain("<!-- managed:canary-lab:start -->")
     expect(claudeMd).toContain("<!-- managed:canary-lab:end -->")
+    expect(claudeMd).toContain("<!-- heal-prompt:start -->")
+    expect(claudeMd).toContain("<!-- heal-prompt:end -->")
 
     const pkg = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf-8"))
     expect(pkg.scripts.postinstall).toBe("canary-lab upgrade --silent")
@@ -117,12 +121,37 @@ describe("main (upgrade orchestration)", () => {
     vi.spyOn(console, "log").mockImplementation(() => {})
 
     await main([])
-    const target = path.join(root, ".claude/skills/self-fixing-loop.md")
+    const target = path.join(root, ".claude/skills/env-import.md")
     const mtime1 = fs.statSync(target).mtimeMs
     await new Promise((r) => setTimeout(r, 10))
     await main([])
     const mtime2 = fs.statSync(target).mtimeMs
     expect(mtime2).toBe(mtime1)
+  })
+
+  it("removes deprecated heal skill files from projects scaffolded by older canary-lab versions", async () => {
+    const root = mkProjectRoot()
+    vi.stubEnv("CANARY_LAB_PROJECT_ROOT", root)
+    vi.spyOn(console, "log").mockImplementation(() => {})
+
+    // Simulate a 0.9.x install: the four heal skill files are present on disk.
+    const deprecated = [
+      ".claude/skills/heal-loop.md",
+      ".claude/skills/self-fixing-loop.md",
+      ".codex/heal-loop.md",
+      ".codex/self-fixing-loop.md",
+    ]
+    for (const rel of deprecated) {
+      const p = path.join(root, rel)
+      fs.mkdirSync(path.dirname(p), { recursive: true })
+      fs.writeFileSync(p, "stale content from a previous version")
+    }
+
+    await main([])
+
+    for (const rel of deprecated) {
+      expect(fs.existsSync(path.join(root, rel))).toBe(false)
+    }
   })
 
   it("preserves user content around markers across upgrades (surgical replace)", async () => {

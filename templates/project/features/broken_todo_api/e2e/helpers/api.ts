@@ -1,5 +1,3 @@
-import { GATEWAY_URL } from '../../src/config'
-
 export interface Todo {
   id: string
   title: string
@@ -21,7 +19,7 @@ const jsonRequest = async <T>(url: string, init: RequestInit = {}): Promise<T | 
 }
 
 export class TodoApi {
-  baseUrl = GATEWAY_URL
+  baseUrl = process.env.GATEWAY_URL ?? 'http://localhost:4100'
 
   create = (title: string) =>
     jsonRequest<Todo>(`${this.baseUrl}/todos`, {

@@ -12,6 +12,7 @@ export default defineConfig({
       exclude: [
         '**/*.test.ts',
         '**/*.d.ts',
+        'shared/**/types.ts',
         'shared/configs/**',
         'shared/runtime/**',
       ],

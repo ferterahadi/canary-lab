@@ -186,6 +186,44 @@ describe('handleLine', () => {
     spy.mockRestore()
   })
 
+  it('renders a red ✗ marker for a command that exited non-zero', () => {
+    const spy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    handleLine(
+      JSON.stringify({
+        type: 'item.completed',
+        item: {
+          type: 'command_execution',
+          command: 'git status',
+          exit_code: 2,
+          aggregated_output: 'fatal: not a git repo',
+        },
+      }),
+    )
+    const out = spy.mock.calls.map((c) => c[0] as string).join('')
+    expect(out).toContain('exit 2')
+    expect(out).toContain('fatal: not a git repo')
+    spy.mockRestore()
+  })
+
+  it('renders a yellow … marker when exit_code is null (still running)', () => {
+    const spy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    handleLine(
+      JSON.stringify({
+        type: 'item.completed',
+        item: {
+          type: 'command_execution',
+          command: 'npm test',
+          exit_code: null,
+          aggregated_output: 'running...',
+        },
+      }),
+    )
+    const out = spy.mock.calls.map((c) => c[0] as string).join('')
+    expect(out).toContain('…')
+    expect(out).toContain('running...')
+    spy.mockRestore()
+  })
+
   it('emits command execution summary on item.completed command_execution', () => {
     const spy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
     handleLine(
@@ -234,7 +272,7 @@ describe('handleLine', () => {
         type: 'item.completed',
         item: {
           type: 'command_execution',
-          command: `test -f logs/diagnosis-journal.json && sed -n '1,240p' logs/diagnosis-journal.json`,
+          command: `test -f logs/diagnosis-journal.md && sed -n '1,240p' logs/diagnosis-journal.md`,
           exit_code: 1,
           aggregated_output: '',
         },
@@ -242,7 +280,7 @@ describe('handleLine', () => {
     )
     const out = spy.mock.calls.map((c) => c[0] as string).join('')
     expect(out).toContain('Read')
-    expect(out).toContain('logs/diagnosis-journal.json')
+    expect(out).toContain('logs/diagnosis-journal.md')
     expect(out).toContain('not found')
     // Must not render a scary red "exit 1" for a missing-file guard.
     expect(out).not.toContain('exit 1')
@@ -312,6 +350,12 @@ describe('parseCommand', () => {
     const p = parseCommand('git status')
     expect(p.tool).toBe('Bash')
     expect(p.label).toContain('git status')
+  })
+
+  it('falls back to truncated args for rg/grep without a quoted pattern', () => {
+    const p = parseCommand('rg foo')
+    expect(p.tool).toBe('Grep')
+    expect(p.label).toContain('foo')
   })
 
   it('emits a quoted agent_message block', () => {
