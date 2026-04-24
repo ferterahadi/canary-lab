@@ -103,11 +103,22 @@ const failureSignatureMock = vi.fn((failed: unknown) => {
     .sort()
     .join('|')
 })
+const buildStartupFailurePrompt = vi.fn(
+  (args: {
+    serviceName: string
+    healthUrl: string
+    logPath: string
+    repoPath: string
+    restartSignalPath: string
+  }) =>
+    `MOCK STARTUP PROMPT for ${args.serviceName} at ${args.healthUrl}`,
+)
 vi.mock('./auto-heal', () => ({
   spawnHealAgent,
   closeLastHealAgentTab,
   isAgentCliAvailable,
   failureSignature: failureSignatureMock,
+  buildStartupFailurePrompt,
 }))
 
 const {
@@ -145,6 +156,8 @@ const {
   itermSessionIds,
   watchMode,
   main,
+  HealthCheckTimeoutError,
+  handleHealthCheckFailure,
 } = await import('./runner')
 const { createBenchmarkTracker } = await import('./benchmark')
 const { extractLogsForTest, enrichSummaryWithLogs } = await import('./log-enrichment')
@@ -1787,5 +1800,221 @@ describe('watchMode', () => {
     // Heal was consumed and a second auto-heal was spawned.
     expect(fs.existsSync(HEAL_SIGNAL)).toBe(false)
     expect(spawnHealAgent).toHaveBeenCalled()
+  })
+})
+
+// ─── Startup-failure recovery ──────────────────────────────────────────────
+
+describe('HealthCheckTimeoutError', () => {
+  it('carries serviceName + healthUrl and is an Error instance', () => {
+    const err = new HealthCheckTimeoutError('svc-a', 'http://localhost:9999/health')
+    expect(err).toBeInstanceOf(Error)
+    expect(err).toBeInstanceOf(HealthCheckTimeoutError)
+    expect(err.name).toBe('HealthCheckTimeoutError')
+    expect(err.serviceName).toBe('svc-a')
+    expect(err.healthUrl).toBe('http://localhost:9999/health')
+    expect(err.message).toBe('Health check timed out for svc-a at http://localhost:9999/health')
+  })
+
+  it('is thrown by pollHealthChecks when a service never becomes healthy', async () => {
+    isHealthy.mockResolvedValue(false)
+    const services = [
+      {
+        name: 'svc-a',
+        safeName: 'svc-a',
+        logPath: '/tmp/svc-a.log',
+        command: 'run',
+        cwd: '/tmp/repo',
+        healthUrl: 'http://localhost:9999/health',
+        healthTimeout: 10,
+      },
+    ]
+    // Use a tiny timeout so the test is fast.
+    await expect(pollHealthChecks(services, 20)).rejects.toBeInstanceOf(
+      HealthCheckTimeoutError,
+    )
+  })
+})
+
+describe('handleHealthCheckFailure', () => {
+  const makeService = (name: string, port: number, repoPath = '/repo/app') => ({
+    name,
+    safeName: name,
+    logPath: `${LOGS_DIR}/svc-${name}.log`,
+    command: 'npm start',
+    cwd: repoPath,
+    healthUrl: `http://localhost:${port}/health`,
+    healthTimeout: 10,
+  })
+
+  const makeFeature = (): FeatureConfig =>
+    ({
+      name: 'feat',
+      description: 'test',
+      envs: ['local'],
+      repos: [],
+      featureDir: '/feat',
+    }) as any
+
+  it('returns false when the user picks "Stop services and exit"', async () => {
+    const select = vi.fn(async (_rl: any, _label: string, options: string[]) => options[0])
+    const spawnAgent = vi.fn()
+    const waitForSignal = vi.fn()
+
+    const result = await handleHealthCheckFailure({
+      rl: rlMock as any,
+      failingServiceName: 'svc-a',
+      services: [makeService('svc-a', 3000)],
+      feature: makeFeature(),
+      terminal: 'iTerm',
+      benchmarkMode: 'canary',
+      healSession: 'new',
+      selectChoice: select,
+      spawnAgent,
+      waitForSignal,
+      agentCliAvailable: () => true,
+    })
+
+    expect(result).toBe(false)
+    expect(spawnAgent).not.toHaveBeenCalled()
+    expect(waitForSignal).not.toHaveBeenCalled()
+  })
+
+  it('spawns the agent with buildStartupFailurePrompt content when Claude option is chosen', async () => {
+    // Pick "Claude" on first prompt (index 2 → label).
+    const select = vi.fn(async (_rl: any, _label: string, options: string[]) => {
+      const claudeOpt = options.find((o) => o.includes('Claude'))
+      expect(claudeOpt).toBeDefined()
+      return claudeOpt!
+    })
+    // Agent returns 'signal', runner restarts, health check passes.
+    const spawnAgent = vi.fn(async () => 'signal')
+    const restartSelected = vi.fn(async () => {})
+    const restartAll = vi.fn(async () => {})
+
+    // Seed a .restart signal so consumeSignalAndReadFilesChanged sees it.
+    fs.writeFileSync(
+      path.join(LOGS_DIR, '.restart'),
+      JSON.stringify({ hypothesis: 'bad port', filesChanged: ['/repo/app/src/server.ts'] }),
+    )
+
+    const result = await handleHealthCheckFailure({
+      rl: rlMock as any,
+      failingServiceName: 'svc-a',
+      services: [makeService('svc-a', 3000, '/repo/app')],
+      feature: makeFeature(),
+      terminal: 'iTerm',
+      benchmarkMode: 'canary',
+      healSession: 'resume',
+      selectChoice: select,
+      spawnAgent: spawnAgent as any,
+      agentCliAvailable: () => true,
+      restartSelected,
+      restartAll,
+    })
+
+    expect(result).toBe(true)
+    expect(spawnAgent).toHaveBeenCalledOnce()
+    const spawnArgs = spawnAgent.mock.calls[0][0] as any
+    expect(spawnArgs.agent).toBe('claude')
+    expect(spawnArgs.basePromptOverride).toContain('MOCK STARTUP PROMPT for svc-a')
+    // Selective restart (filesChanged mapped to /repo/app).
+    expect(restartSelected).toHaveBeenCalledOnce()
+    expect(restartAll).not.toHaveBeenCalled()
+    // Signal files were consumed.
+    expect(fs.existsSync(path.join(LOGS_DIR, '.restart'))).toBe(false)
+  })
+
+  it('omits auto-heal options when neither CLI is available', async () => {
+    let presentedOptions: string[] | null = null
+    const select = vi.fn(async (_rl: any, _label: string, options: string[]) => {
+      presentedOptions = options
+      return options[0] // Stop
+    })
+
+    await handleHealthCheckFailure({
+      rl: rlMock as any,
+      failingServiceName: 'svc-a',
+      services: [makeService('svc-a', 3000)],
+      feature: makeFeature(),
+      terminal: 'iTerm',
+      benchmarkMode: 'canary',
+      healSession: 'new',
+      selectChoice: select,
+      agentCliAvailable: () => false,
+    })
+
+    expect(presentedOptions).not.toBeNull()
+    expect(presentedOptions).toHaveLength(2) // Stop + manual only
+    expect(presentedOptions!.some((o) => o.includes('Claude'))).toBe(false)
+    expect(presentedOptions!.some((o) => o.includes('Codex'))).toBe(false)
+  })
+
+  it('uses manual self-heal path and restarts when the user writes .rerun', async () => {
+    const select = vi.fn(async (_rl: any, _label: string, options: string[]) =>
+      options.find((o) => o.includes('manually'))!,
+    )
+    const waitForSignal = vi.fn(async () => 'signal' as const)
+    const restartAll = vi.fn(async () => {})
+
+    fs.writeFileSync(path.join(LOGS_DIR, '.rerun'), '')
+
+    const result = await handleHealthCheckFailure({
+      rl: rlMock as any,
+      failingServiceName: 'svc-a',
+      services: [makeService('svc-a', 3000)],
+      feature: makeFeature(),
+      terminal: 'iTerm',
+      benchmarkMode: 'canary',
+      healSession: 'new',
+      selectChoice: select,
+      waitForSignal,
+      agentCliAvailable: () => false,
+      restartAll,
+    })
+
+    expect(result).toBe(true)
+    expect(waitForSignal).toHaveBeenCalled()
+    // No filesChanged → full restart.
+    expect(restartAll).toHaveBeenCalledOnce()
+    expect(fs.existsSync(path.join(LOGS_DIR, '.rerun'))).toBe(false)
+  })
+
+  it('re-prompts after 3 failing cycles instead of bailing out silently', async () => {
+    let promptCount = 0
+    const select = vi.fn(async (_rl: any, _label: string, options: string[]) => {
+      promptCount += 1
+      // First prompt: pick Claude. Second prompt: pick Stop.
+      if (promptCount === 1) return options.find((o) => o.includes('Claude'))!
+      return options[0] // Stop
+    })
+
+    // Agent succeeds in writing a signal each cycle, but restart keeps failing
+    // health check, so we loop the full 3 cycles then re-prompt.
+    const spawnAgent = vi.fn(async () => {
+      fs.writeFileSync(path.join(LOGS_DIR, '.restart'), '')
+      return 'signal'
+    })
+    const restartAll = vi.fn(async () => {
+      throw new HealthCheckTimeoutError('svc-a', 'http://localhost:3000/health')
+    })
+
+    const result = await handleHealthCheckFailure({
+      rl: rlMock as any,
+      failingServiceName: 'svc-a',
+      services: [makeService('svc-a', 3000)],
+      feature: makeFeature(),
+      terminal: 'iTerm',
+      benchmarkMode: 'canary',
+      healSession: 'new',
+      selectChoice: select,
+      spawnAgent: spawnAgent as any,
+      agentCliAvailable: () => true,
+      restartAll,
+    })
+
+    expect(promptCount).toBe(2)
+    expect(spawnAgent).toHaveBeenCalledTimes(3)
+    expect(result).toBe(false) // second prompt returned Stop
   })
 })

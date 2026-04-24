@@ -61,6 +61,7 @@ const {
   healAgentBanner,
   closeLastHealAgentTab,
   buildBaselineVanillaPrompt,
+  buildStartupFailurePrompt,
 } = await import('./auto-heal')
 
 beforeEach(() => {
@@ -347,6 +348,67 @@ describe('spawnHealAgent', () => {
     // Defaults: playwright-stdout.log inside LOGS_DIR and RESTART_SIGNAL.
     expect(prompt).toContain(path.join(LOGS_DIR, 'playwright-stdout.log'))
     expect(prompt).toContain(RESTART_SIGNAL)
+  })
+
+  it('buildStartupFailurePrompt embeds the service, URL, log, repo, and signal paths', () => {
+    const prompt = buildStartupFailurePrompt({
+      serviceName: 'swc-coverage-3003',
+      healthUrl: 'http://localhost:3003/en_SG/trace-test',
+      logPath: '/abs/logs/svc-swc-coverage-3003.log',
+      repoPath: '/abs/repos/nextjs-logger-research',
+      restartSignalPath: '/abs/logs/.restart',
+    })
+    expect(prompt).toContain('swc-coverage-3003')
+    expect(prompt).toContain('http://localhost:3003/en_SG/trace-test')
+    expect(prompt).toContain('/abs/logs/svc-swc-coverage-3003.log')
+    expect(prompt).toContain('/abs/repos/nextjs-logger-research')
+    expect(prompt).toContain('/abs/logs/.restart')
+    // Must steer the agent away from test/config edits and process-killing.
+    expect(prompt).toContain('never canary-lab test/config')
+    expect(prompt).toContain('Do not kill the service process')
+    expect(prompt).toContain('filesChanged')
+  })
+
+  it('uses basePromptOverride instead of reading CLAUDE.md when set', async () => {
+    // Intentionally do NOT seed CLAUDE.md — the override must be used instead.
+    vi.useFakeTimers()
+
+    const promise = spawnHealAgent({
+      agent: 'claude',
+      sessionMode: 'new',
+      cycle: 0,
+      terminal: 'iTerm',
+      basePromptOverride: 'STARTUP FAILURE PROMPT — use me, not CLAUDE.md',
+    })
+
+    fs.writeFileSync(RESTART_SIGNAL, '')
+    await vi.advanceTimersByTimeAsync(1200)
+    await promise
+
+    const prompt = fs.readFileSync(path.join(LOGS_DIR, '.heal-prompt.txt'), 'utf-8')
+    expect(prompt).toBe('STARTUP FAILURE PROMPT — use me, not CLAUDE.md')
+  })
+
+  it('basePromptOverride is ignored when benchmarkMode is baseline', async () => {
+    vi.useFakeTimers()
+
+    const promise = spawnHealAgent({
+      agent: 'claude',
+      sessionMode: 'new',
+      cycle: 0,
+      terminal: 'iTerm',
+      benchmarkMode: 'baseline',
+      basePromptOverride: 'should not appear',
+    })
+
+    fs.writeFileSync(RESTART_SIGNAL, '')
+    await vi.advanceTimersByTimeAsync(1200)
+    await promise
+
+    const prompt = fs.readFileSync(path.join(LOGS_DIR, '.heal-prompt.txt'), 'utf-8')
+    expect(prompt).not.toContain('should not appear')
+    // Baseline prompt still written.
+    expect(prompt).toContain('Playwright tests just failed')
   })
 
   it('buildBaselineVanillaPrompt formats absolute paths and optional repo list', () => {

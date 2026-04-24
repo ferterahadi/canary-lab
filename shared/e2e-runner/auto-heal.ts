@@ -43,6 +43,33 @@ export interface SpawnHealAgentOptions {
   baselinePlaywrightLogPath?: string
   baselineSignalFilePath?: string
   baselineRepoPaths?: string[]
+  // Replaces the base prompt (normally loaded from CLAUDE.md / AGENTS.md
+  // heal-prompt markers). Used for startup-failure healing, which has a
+  // different shape than Playwright-failure healing. Ignored when
+  // benchmarkMode === 'baseline' (baseline builds its own prompt).
+  basePromptOverride?: string
+}
+
+// Startup-failure prompt, built at runtime when a service fails its initial
+// health check and the user chooses to auto-heal. The Playwright-failure
+// heal-prompt in CLAUDE.md / AGENTS.md doesn't fit this case — the agent
+// needs to read the service log, not logs/heal-index.md.
+export function buildStartupFailurePrompt(args: {
+  serviceName: string
+  healthUrl: string
+  logPath: string
+  repoPath: string
+  restartSignalPath: string
+}): string {
+  return [
+    `Service \`${args.serviceName}\` failed its startup health check at \`${args.healthUrl}\`. The process is still running but not responding as expected — the runner hasn't reached Playwright yet.`,
+    '',
+    `Read the service log at \`${args.logPath}\` — focus on errors, stack traces, or the "listening on" message that never arrived. The service repo is at \`${args.repoPath}\`.`,
+    '',
+    'Diagnose why the service won\'t pass its health check. Fix the repo code — never canary-lab test/config. Do not kill the service process; the runner will restart it after you signal done.',
+    '',
+    `When you've committed a fix, write a single JSON line to \`${args.restartSignalPath}\`: \`{"hypothesis":"…","filesChanged":["<absolute path>"]}\`. The \`filesChanged\` list lets the runner restart only the affected service(s). Exit after writing the signal — the runner is polling.`,
+  ].join('\n')
 }
 
 // Baseline benchmark mode runs as if canary-lab didn't exist: no heal-loop
@@ -318,7 +345,7 @@ export async function spawnHealAgent(
         signalFilePath: opts.baselineSignalFilePath ?? RESTART_SIGNAL,
         repoPaths: opts.baselineRepoPaths,
       })
-    : loadPrompt(opts.agent)
+    : opts.basePromptOverride ?? loadPrompt(opts.agent)
   const prompt = [
     basePrompt,
     opts.promptAddendum?.trim(),

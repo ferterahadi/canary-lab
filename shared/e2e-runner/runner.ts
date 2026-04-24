@@ -56,6 +56,7 @@ import {
   isAgentCliAvailable,
   failureSignature,
   closeLastHealAgentTab,
+  buildStartupFailurePrompt,
   type HealAgent,
   type HealSessionMode,
   type HealResult,
@@ -332,6 +333,22 @@ export async function launchServices(
   openTabs(terminal, tabs, '')
 }
 
+// Thrown by pollHealthChecks when a service's initial health check exceeds
+// the deadline. Typed so callers can distinguish startup failures from other
+// runtime errors and offer the user recovery options instead of tearing
+// everything down.
+export class HealthCheckTimeoutError extends Error {
+  readonly serviceName: string
+  readonly healthUrl: string
+
+  constructor(serviceName: string, healthUrl: string) {
+    super(`Health check timed out for ${serviceName} at ${healthUrl}`)
+    this.name = 'HealthCheckTimeoutError'
+    this.serviceName = serviceName
+    this.healthUrl = healthUrl
+  }
+}
+
 export async function pollHealthChecks(
   services: ServiceInfo[],
   timeoutMs = 120_000,
@@ -354,10 +371,208 @@ export async function pollHealthChecks(
     }
     if (Date.now() >= deadline) {
       console.log(ansiC('red', 'TIMEOUT'))
-      throw new Error(
-        `Health check timed out for ${svc.name} at ${svc.healthUrl}`,
-      )
+      throw new HealthCheckTimeoutError(svc.name, svc.healthUrl!)
     }
+  }
+}
+
+// ─── Startup-failure recovery ──────────────────────────────────────────────
+
+const STARTUP_HEAL_MAX_CYCLES = 3
+const STARTUP_SIGNAL_POLL_INTERVAL_MS = 1000
+const STARTUP_MANUAL_TIMEOUT_MS = 30 * 60 * 1000 // 30 min cap for manual self-heal
+
+export type StartupRecoveryChoice = 'stop' | 'manual' | 'claude' | 'codex'
+
+async function waitForRestartOrRerunSignal(
+  timeoutMs = STARTUP_MANUAL_TIMEOUT_MS,
+): Promise<'signal' | 'timeout'> {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, STARTUP_SIGNAL_POLL_INTERVAL_MS))
+    if (fs.existsSync(RESTART_SIGNAL) || fs.existsSync(RERUN_SIGNAL)) {
+      return 'signal'
+    }
+  }
+  return 'timeout'
+}
+
+function consumeSignalAndReadFilesChanged(): unknown {
+  const signalPath = fs.existsSync(RESTART_SIGNAL)
+    ? RESTART_SIGNAL
+    : fs.existsSync(RERUN_SIGNAL)
+      ? RERUN_SIGNAL
+      : null
+  let filesChanged: unknown = undefined
+  if (signalPath) {
+    try {
+      const raw = fs.readFileSync(signalPath, 'utf-8').trim()
+      if (raw) {
+        const parsed = JSON.parse(raw) as { filesChanged?: unknown }
+        filesChanged = parsed.filesChanged
+      }
+    } catch { /* empty / non-JSON is fine */ }
+  }
+  try { fs.unlinkSync(RESTART_SIGNAL) } catch { /* ignore */ }
+  try { fs.unlinkSync(RERUN_SIGNAL) } catch { /* ignore */ }
+  return filesChanged
+}
+
+export interface HandleHealthCheckFailureOptions {
+  rl: readline.Interface
+  failingServiceName: string
+  services: ServiceInfo[]
+  feature: FeatureConfig
+  terminal: TerminalChoice
+  benchmarkMode: BenchmarkMode
+  healSession: HealSessionMode
+  // Injection points for tests.
+  spawnAgent?: typeof spawnHealAgent
+  agentCliAvailable?: (agent: HealAgent) => boolean
+  selectChoice?: (
+    rl: readline.Interface,
+    label: string,
+    options: string[],
+  ) => Promise<string>
+  waitForSignal?: (timeoutMs?: number) => Promise<'signal' | 'timeout'>
+  restartSelected?: (services: ServiceInfo[]) => Promise<void>
+  restartAll?: (services: ServiceInfo[]) => Promise<void>
+}
+
+/**
+ * Prompt the user when a service fails its initial health check. Returns
+ * `true` if the user recovered (services are healthy and the caller should
+ * proceed to Playwright), `false` if the user chose to stop (caller should
+ * re-throw so the outer catch runs cleanup).
+ *
+ * Mirrors the existing "Auto-heal on test failure?" UX, but for startup.
+ */
+export async function handleHealthCheckFailure(
+  opts: HandleHealthCheckFailureOptions,
+): Promise<boolean> {
+  const spawn = opts.spawnAgent ?? spawnHealAgent
+  const cliAvailable = opts.agentCliAvailable ?? isAgentCliAvailable
+  const select = opts.selectChoice ?? selectOption
+  const wait = opts.waitForSignal ?? waitForRestartOrRerunSignal
+  const restartSelectedFn =
+    opts.restartSelected ??
+    ((svcs: ServiceInfo[]) => restartServices(svcs, opts.terminal, opts.benchmarkMode))
+  const restartAllFn =
+    opts.restartAll ??
+    ((svcs: ServiceInfo[]) => restartAllServices(svcs, opts.terminal, opts.benchmarkMode))
+
+  let failingName = opts.failingServiceName
+
+  while (true) {
+    const failing = opts.services.find((s) => s.name === failingName)
+    if (!failing) {
+      // Shouldn't happen — service disappeared from the list. Escalate.
+      return false
+    }
+
+    uiLine()
+    warn(`Service \`${failing.name}\` failed its startup health check at ${failing.healthUrl}`)
+    bullet(`service log: ${ansiPath(failing.logPath)}`)
+    bullet(`repo: ${ansiPath(failing.cwd)}`)
+
+    const claudeAvailable = cliAvailable('claude')
+    const codexAvailable = cliAvailable('codex')
+
+    const optionDefs: Array<{ label: string; choice: StartupRecoveryChoice }> = [
+      { label: 'Stop services and exit (default)', choice: 'stop' },
+      { label: 'Keep services running — self heal manually', choice: 'manual' },
+    ]
+    if (claudeAvailable) {
+      optionDefs.push({
+        label: 'Keep services running — Claude Code auto-heal',
+        choice: 'claude',
+      })
+    }
+    if (codexAvailable) {
+      optionDefs.push({
+        label: 'Keep services running — Codex auto-heal',
+        choice: 'codex',
+      })
+    }
+
+    const picked = await select(
+      opts.rl,
+      'Service failed to start. What now?',
+      optionDefs.map((o) => o.label),
+    )
+    const choice = optionDefs.find((o) => o.label === picked)?.choice ?? 'stop'
+
+    if (choice === 'stop') return false
+
+    // Recovery loop.
+    for (let cycle = 0; cycle < STARTUP_HEAL_MAX_CYCLES; cycle++) {
+      if (choice === 'claude' || choice === 'codex') {
+        const prompt = buildStartupFailurePrompt({
+          serviceName: failing.name,
+          healthUrl: failing.healthUrl!,
+          logPath: failing.logPath,
+          repoPath: failing.cwd,
+          restartSignalPath: RESTART_SIGNAL,
+        })
+        const result = await spawn({
+          agent: choice,
+          sessionMode: cycle === 0 ? 'new' : opts.healSession,
+          cycle,
+          terminal: opts.terminal,
+          benchmarkMode: opts.benchmarkMode,
+          basePromptOverride: prompt,
+        })
+        if (result !== 'signal') {
+          uiLine()
+          warn(
+            `Auto-heal agent exited without writing ${ansiPath('logs/.restart')} — cycle ${cycle + 1} of ${STARTUP_HEAL_MAX_CYCLES}`,
+          )
+          continue
+        }
+      } else {
+        // Manual self-heal.
+        uiLine()
+        info('Services are still running. In another terminal, run `claude` or `codex` in this project')
+        info(`and send the prompt ${ansiC('cyan', '`self heal`')}, or fix the code yourself and:`)
+        bullet(`${ansiC('cyan', 'touch logs/.restart')} ${dim('— with a JSON body listing filesChanged to restart only the affected service(s)')}`)
+        bullet(`${ansiC('cyan', 'touch logs/.rerun')}   ${dim('— just re-poll health without restarting')}`)
+        uiLine()
+        info(`Waiting for ${ansiPath('logs/.restart')} or ${ansiPath('logs/.rerun')}…`)
+        const waitResult = await wait()
+        if (waitResult === 'timeout') {
+          uiLine()
+          warn('Timed out waiting for a heal signal.')
+          // Fall through to the outer prompt.
+          break
+        }
+      }
+
+      // Signal detected (or manual .rerun/.restart appeared). Consume + act.
+      const filesChanged = consumeSignalAndReadFilesChanged()
+      try {
+        const selected = selectServicesToRestart(opts.services, filesChanged)
+        if (selected === null) {
+          await restartAllFn(opts.services)
+        } else {
+          uiLine()
+          info(`Selective restart: ${selected.map((s) => s.name).join(', ')}`)
+          await restartSelectedFn(selected)
+        }
+        // restartServices re-polls health at the end — if we got here, healthy.
+        return true
+      } catch (err) {
+        if (err instanceof HealthCheckTimeoutError) {
+          failingName = err.serviceName
+          continue // next cycle within the same choice
+        }
+        throw err
+      }
+    }
+
+    // Exhausted 3 cycles (or manual wait timed out). Re-prompt so the user
+    // can escalate to a different agent, keep trying manually, or stop.
+    uiLine()
+    warn(`Startup heal exhausted after ${STARTUP_HEAL_MAX_CYCLES} cycle(s).`)
   }
 }
 
@@ -1288,7 +1503,24 @@ export async function main(argv: string[] = []) {
     writeManifest(services, feature)
 
     // ── 10. Wait for health checks
-    await pollHealthChecks(services)
+    try {
+      await pollHealthChecks(services)
+    } catch (err) {
+      if (err instanceof HealthCheckTimeoutError) {
+        const recovered = await handleHealthCheckFailure({
+          rl,
+          failingServiceName: err.serviceName,
+          services,
+          feature,
+          terminal: terminalChoice,
+          benchmarkMode: flags.benchmarkMode,
+          healSession: autoHeal.sessionMode,
+        })
+        if (!recovered) throw err
+      } else {
+        throw err
+      }
+    }
 
     // ── 11. Run Playwright
     uiLine()
