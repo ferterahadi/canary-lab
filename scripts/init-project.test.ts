@@ -99,6 +99,14 @@ describe('parseArgs', () => {
     }) as never)
     expect(() => parseArgs([])).toThrow('__exit__1')
   })
+
+  it('errors and exits when --package-spec has no following value', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    vi.spyOn(process, 'exit').mockImplementation(((c?: number) => {
+      throw new Error(`__exit__${c}`)
+    }) as never)
+    expect(() => parseArgs(['folder', '--package-spec'])).toThrow('__exit__1')
+  })
 })
 
 describe('copyDir', () => {
