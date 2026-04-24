@@ -736,7 +736,7 @@ describe('enrichSummaryWithLogs', () => {
 })
 
 describe('writeHealIndex', () => {
-  it('writes a compact map: feature + repos + failure list + one-line journal', async () => {
+  it('writes a flat map: feature + repos + failures with exact slice paths + one-line journal', async () => {
     const { writeHealIndex } = await import('./log-enrichment')
 
     const repo = mkTmp()
@@ -788,22 +788,22 @@ describe('writeHealIndex', () => {
 
     const md = fs.readFileSync(HEAL_INDEX_PATH, 'utf-8')
 
-    // Map header — feature dir, repo paths. No status / timestamp; those
-    // added noise without helping the agent pick a fix.
+    // Map header — feature dir, repo paths. No status / timestamp.
     expect(md).toContain('# Heal Index')
     expect(md).toContain('Feature:')
     expect(md).toContain('Repos:')
     expect(md).toContain(repo)
     expect(md).not.toContain('Status:')
-    expect(md).not.toMatch(/# Heal Index —/)
 
-    // Failures list — flat bullets, no "## failed[N]" ceremony.
+    // Flat failure shape.
     expect(md).toContain('## Failures')
-    expect(md).toContain('**test-case-oauth-metadata**')
+    expect(md).not.toContain('## Failures —')
+    expect(md).not.toContain('### Cluster')
+    expect(md).toContain('- **test-case-oauth-metadata**')
     expect(md).toContain('expected refresh_token to be advertised')
-    expect(md).toContain('logs/failed/test-case-oauth-metadata/svc-a.log')
-    // Test-location pointer is NOT in the index — it pulls agents into
-    // unnecessary spec reads. Accessible via e2e-summary.json if needed.
+    expect(md).toContain('slice: logs/failed/test-case-oauth-metadata/svc-a.log')
+
+    // Test-location pointer is NOT in the index.
     expect(md).not.toContain('features/mpass/e2e/x.spec.ts:42')
 
     // Journal condensed to a single line.
@@ -813,15 +813,143 @@ describe('writeHealIndex', () => {
     expect(md).toContain('pending')
     expect(md).not.toContain('## Journal')
 
-    // Removed from earlier drafts.
+    // Removed from earlier drafts / format iterations.
     expect(md).not.toContain('suspects')
     expect(md).not.toContain('## failed[0]')
-    expect(md).not.toContain('assertion (')
     expect(md).not.toContain('```ts')
     expect(md).not.toMatch(/\d+(\.\d+)?KB/)
+    expect(md).not.toContain('target service:')
+    expect(md).not.toContain('target services (in every slice):')
+    expect(md).not.toContain('source:')
+    expect(md).not.toContain('likely handler:')
+    expect(md).not.toContain('slice services:')
 
-    // Keep the whole thing under ~2KB for a tiny, fast read.
+    // Keep it tight.
     expect(Buffer.byteLength(md, 'utf-8')).toBeLessThan(2_000)
+  })
+
+  it('strips ANSI escape codes from error messages', async () => {
+    const { writeHealIndex } = await import('./log-enrichment')
+    fs.writeFileSync(MANIFEST_PATH, JSON.stringify({ serviceLogs: [] }))
+    fs.writeFileSync(
+      SUMMARY_PATH,
+      JSON.stringify({
+        failed: [
+          {
+            name: 'test-case-ansi',
+            // Both escape forms: the real ESC prefix and the bracketed-only
+            // form Playwright writes in some reporter modes.
+            error: {
+              message:
+                'Error: \x1b[2mexpect(\x1b[22m\x1b[31mreceived\x1b[39m\x1b[2m).toBe(\x1b[22m\x1b[32mexpected\x1b[39m\x1b[2m)\x1b[22m ' +
+                'Expected: [32m400[39m Received: [31m200[39m',
+            },
+            logFiles: ['logs/failed/test-case-ansi/svc-api.log'],
+          },
+        ],
+      }),
+    )
+
+    writeHealIndex()
+    const md = fs.readFileSync(HEAL_INDEX_PATH, 'utf-8')
+
+    expect(md).toContain('Error: expect(received).toBe(expected) Expected: 400 Received: 200')
+    // No raw ANSI leaked.
+    expect(md).not.toMatch(/\x1b\[/)
+    expect(md).not.toMatch(/\[\d+m/)
+  })
+
+  it('renders one bullet per failed entry without retry dedupe', async () => {
+    const { writeHealIndex } = await import('./log-enrichment')
+    fs.writeFileSync(MANIFEST_PATH, JSON.stringify({ serviceLogs: [] }))
+    fs.writeFileSync(
+      SUMMARY_PATH,
+      JSON.stringify({
+        failed: [
+          {
+            name: 'test-case-pkce-claude',
+            error: { message: 'Expected: 400 Received: 200' },
+            retry: 0,
+            logFiles: ['logs/failed/test-case-pkce-claude/svc-api.log'],
+          },
+          {
+            name: 'test-case-pkce-claude',
+            error: { message: 'Expected: 400 Received: 200' },
+            retry: 1,
+            logFiles: ['logs/failed/test-case-pkce-claude/svc-api.log'],
+          },
+          {
+            name: 'test-case-pkce-cursor',
+            error: { message: 'Expected: 400 Received: 200' },
+            retry: 0,
+            logFiles: ['logs/failed/test-case-pkce-cursor/svc-api.log'],
+          },
+          {
+            name: 'test-case-introspect',
+            error: { message: 'Expected active:false Received active:true' },
+            retry: 0,
+            logFiles: ['logs/failed/test-case-introspect/svc-api.log'],
+          },
+        ],
+      }),
+    )
+
+    writeHealIndex()
+    const md = fs.readFileSync(HEAL_INDEX_PATH, 'utf-8')
+
+    expect(md).not.toContain('(×2)')
+    expect((md.match(/- \*\*test-case-pkce-claude\*\*/g) ?? []).length).toBe(2)
+    expect(md).toContain('slice: logs/failed/test-case-pkce-claude/svc-api.log')
+    expect(md).toMatch(/- \*\*test-case-pkce-cursor\*\*/)
+    expect(md).toContain('slice: logs/failed/test-case-pkce-cursor/svc-api.log')
+    expect(md).toContain('- **test-case-introspect**')
+    expect(md).toContain('Expected active:false Received active:true')
+    expect(md).not.toContain('### Cluster')
+    expect(md).not.toContain('target service:')
+    expect(md).not.toContain('slice services:')
+  })
+
+  it('does not render inferred target, source, handler, or service-frequency hints', async () => {
+    const { writeHealIndex } = await import('./log-enrichment')
+    const repo = mkTmp()
+    const repoBase = path.basename(repo)
+    fs.writeFileSync(MANIFEST_PATH, JSON.stringify({ serviceLogs: [] }))
+    fs.writeFileSync(
+      SUMMARY_PATH,
+      JSON.stringify({
+        failed: [
+          {
+            name: 'test-case-a',
+            error: { message: 'same error' },
+            logFiles: [
+              `logs/failed/test-case-a/svc-${repoBase}-oddle-service.log`,
+              'logs/failed/test-case-a/svc-super-admin-portal.log',
+            ],
+          },
+          {
+            name: 'test-case-b',
+            error: { message: 'same error' },
+            logFiles: ['logs/failed/test-case-b/svc-super-admin-portal.log'],
+          },
+          {
+            name: 'test-case-c',
+            error: { message: 'other error' },
+            logFiles: ['logs/failed/test-case-c/svc-super-admin-portal.log'],
+          },
+        ],
+      }),
+    )
+
+    writeHealIndex()
+    const md = fs.readFileSync(HEAL_INDEX_PATH, 'utf-8')
+
+    expect(md).toContain(`slice: logs/failed/test-case-a/svc-${repoBase}-oddle-service.log, logs/failed/test-case-a/svc-super-admin-portal.log`)
+    expect(md).toContain('slice: logs/failed/test-case-b/svc-super-admin-portal.log')
+    expect(md).not.toContain('target service:')
+    expect(md).not.toContain('target services (in every slice):')
+    expect(md).not.toContain('source:')
+    expect(md).not.toContain('likely handler:')
+    expect(md).not.toContain('slice services:')
   })
 
   it('never spawns grep subprocesses', async () => {

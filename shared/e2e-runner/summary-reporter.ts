@@ -7,7 +7,7 @@ import type {
   TestResult,
 } from '@playwright/test/reporter'
 import { getSummaryPath } from './paths'
-import { enrichSummaryWithLogs, writeHealIndex } from './log-enrichment'
+import { enrichSummaryWithLogs, stripAnsi, writeHealIndex } from './log-enrichment'
 
 export function slugify(title: string): string {
   return title
@@ -38,9 +38,9 @@ class SummaryReporter implements Reporter {
       ...(result.status !== 'passed' && result.error
         ? {
             error: {
-              message: (result.error.message ?? '').slice(0, 1000),
+              message: stripAnsi(result.error.message ?? '').slice(0, 1000),
               ...(result.error.snippet
-                ? { snippet: result.error.snippet.slice(0, 500) }
+                ? { snippet: stripAnsi(result.error.snippet).slice(0, 500) }
                 : {}),
             },
           }

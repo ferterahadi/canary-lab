@@ -218,11 +218,26 @@ function readManifest(): Manifest {
   }
 }
 
+// Strip ANSI color escape sequences from a string. Playwright emits them in
+// error messages, and some reporters also emit the bracketed form without
+// the escape prefix (`[2m`, `[22m`). Both forms are noise in a markdown file
+// consumed by an agent.
+export function stripAnsi(s: string): string {
+  return s
+    // eslint-disable-next-line no-control-regex
+    .replace(/\x1b\[[0-9;]*m/g, '')
+    .replace(/\[\d+(?:;\d+)*m/g, '')
+}
+
+function normalizeErrorKey(raw: string): string {
+  const cleaned = stripAnsi(raw).replace(/\s+/g, ' ').trim()
+  return cleaned || '(no error)'
+}
+
 // Write a compact map (not a script) for the heal agent: where the feature
-// lives, which repos to edit, what failed, where deeper evidence is. The
-// agent navigates freely from there — no prescriptive step list, no inlined
-// spec code, no file-size annotations. Previous drafts pre-digested too
-// aggressively and the index itself became the biggest file in the run.
+// lives, which repos to edit, what failed, and the exact slice files to read.
+// Keep this literal; inferred target-service hints can mislead when a shared
+// frontend/proxy appears in every slice but the real bug lives downstream.
 export function writeHealIndex(): void {
   const summaryPath = getSummaryPath()
   if (!fs.existsSync(summaryPath)) return
@@ -256,10 +271,8 @@ export function writeHealIndex(): void {
     for (const entry of failed) {
       lines.push(`- **${entry.name}**`)
       if (entry.error?.message) {
-        // Keep the full `expected … received …` literal — a longer but complete
-        // error message is cheaper than a truncated one that pushes the agent
-        // into a spec-file read to recover the missing context.
-        lines.push(`  - error: ${truncateOneLine(entry.error.message, 400)}`)
+        const errorMessage = normalizeErrorKey(entry.error.message)
+        lines.push(`  - error: ${truncateOneLine(errorMessage, 400)}`)
       }
       if (entry.logFiles && entry.logFiles.length > 0) {
         lines.push(`  - slice: ${entry.logFiles.join(', ')}`)
