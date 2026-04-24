@@ -5,7 +5,7 @@
 
 Canary Lab is a local E2E workflow layer built on top of Playwright.
 
-It is built for cases where one test depends on multiple local apps or services, not just one app in isolation. Canary Lab helps start those services, wait for health checks, run Playwright, capture service logs into `logs/svc-*.log`, write `logs/e2e-summary.json`, and optionally let Claude Code or Codex inspect a failed run and try a fix.
+It is built for cases where one test depends on multiple local apps or services, not just one app in isolation. Canary Lab starts those services in terminal tabs, gates tests on health checks, runs Playwright with per-test service-log slicing, and — on failure — hands the agent (Claude Code or Codex) a structured map of what broke so it can diagnose, fix, and signal a re-run.
 
 See [CHANGELOG.md](CHANGELOG.md) for what's new in each release.
 
@@ -23,13 +23,10 @@ Playwright gives you:
 
 Canary Lab adds:
 
-- local service startup in terminal tabs
-- health-check gating before tests run
-- log capture to `logs/svc-*.log`
-- per-test log slicing via `<test-tag>` markers
-- temporary env switching across repos
-- agent-assisted debugging with `self heal` or auto-heal
-- scaffolded docs/skills that `canary-lab upgrade` can keep in sync with the current package version
+- multi-service orchestration: startup in terminal tabs, health gating, log capture
+- per-test log slicing so failures map directly to the service output that produced them
+- an agent-driven self-heal loop (structured failure index → diagnosis → `.restart`/`.rerun` → re-run)
+- temporary env-file switching across repos
 
 ## Who This Is For
 
@@ -69,8 +66,9 @@ npx canary-lab run
 ## What Gets Scaffolded
 
 - `features/example_todo_api` — working Playwright E2E sample
-- `features/broken_todo_api` — intentionally broken sample for self-fixing practice
-- `features/tricky_checkout_api` — a more realistic checkout API sample with a local test server
+- `features/broken_todo_api` — CRUD API with intentional handler bugs; a warm-up for the self-heal workflow
+- `features/tricky_checkout_api` — checkout API with subtle pricing/calculation bugs
+- `features/flaky_orders_api` — orders API with env-driven config and subtle coupon/tax bugs
 - `CLAUDE.md` for Claude (contains the `Self-Heal Workflow` inline, plus `.claude/skills/env-import.md` for importing env files from repos)
 - `AGENTS.md` for Codex (matching guide; env-import skill at `.codex/env-import.md`)
 
@@ -169,7 +167,7 @@ Two flavors, same idea:
 - **Manual (`self heal`)** — you stay in the driver's seat. Run `npx canary-lab run`, leave it in watch mode, open Claude or Codex in the project, and type `self heal`. The agent follows the `Self-Heal Workflow` section in `CLAUDE.md` (or `AGENTS.md` for Codex), which is already loaded into its context.
 - **Auto-heal** — the runner itself spawns a Claude or Codex agent when a test fails. It reads the same `Self-Heal Workflow` block from `CLAUDE.md` / `AGENTS.md` (the content between `<!-- heal-prompt:start -->` and `<!-- heal-prompt:end -->`) and passes it as the prompt. Output is filtered through a formatter so you see readable progress instead of raw stream-json.
 
-In both cases the agent reads `logs/e2e-summary.json`, slices service logs by `<test-tag>` markers, fixes implementation code, and signals the runner via `logs/.restart` or `logs/.rerun`.
+In both cases the agent starts from `logs/heal-index.md` (a compact index over each failure, pointing at pre-sliced service logs under `logs/failed/<slug>/`), falls back to `logs/e2e-summary.json` if the index is missing, fixes implementation code, and signals the runner via `logs/.restart` or `logs/.rerun`.
 
 ### When auto-heal isn't available
 
@@ -255,6 +253,7 @@ flowchart TD
     subgraph artifacts["&nbsp;logs/&nbsp;"]
         direction LR
         svclog[/"svc-*.log"/]:::artifact
+        healindex[/"heal-index.md"/]:::artifact
         summaryjson[/"e2e-summary.json"/]:::artifact
         journal[/"diagnosis-journal.md"/]:::artifact
         signals[/".restart · .rerun"/]:::artifact
@@ -276,6 +275,7 @@ flowchart TD
     autoHeal --> launcher
     autoHeal --> agent
     agent -.->|stdout| formatter
+    agent -.->|reads| healindex
     agent -.->|reads| summaryjson
     agent -.->|reads| svclog
     agent -.->|reads + appends| journal
@@ -306,7 +306,7 @@ flowchart TD
   - **Per-Test Log Marker** fires **before and after every test**, writing `<test-tag>` boundaries into `svc-*.log` so you can slice logs by test.
   - **Summary Reporter** fires **on every test result** (and at end-of-suite), incrementally updating `logs/e2e-summary.json`.
 - **Auto-Heal Driver** fires **only when tests fail and auto-heal is enabled**. It spawns a Claude Code or Codex CLI agent in a new terminal tab, piping its stdout through the **Agent Output Formatter**.
-- The **Coding Agent** reads `e2e-summary.json` and the marked-up `svc-*.log`, edits code, then touches `.restart` or `.rerun`. It also reads and appends to `diagnosis-journal.md` — a running log of hypotheses, fixes, and outcomes across cycles so it doesn't retry an approach that already failed.
+- The **Coding Agent** starts at `heal-index.md` (with `e2e-summary.json` as a fallback) to pick which failure to tackle, drills into the pre-sliced service logs under `logs/failed/<slug>/`, edits code, then touches `.restart` or `.rerun`. It also reads and appends to `diagnosis-journal.md` — a running log of hypotheses, fixes, and outcomes across cycles so it doesn't retry an approach that already failed.
 - **Watch Mode** (the tail end of `runner.ts`) picks up those signal files and re-invokes Playwright.
 
 **At a glance:**
