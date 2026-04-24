@@ -20,7 +20,6 @@ Useful only when needed:
 Rules:
 - Do not read the test spec unless the failure cannot be understood from the index and logs.
 - Prefer exact slice paths from `heal-index.md` before broad repo search.
-- Avoid broad repo grep when the index or slice already points to a likely file or service.
 - After fixing, write `logs/.restart` for service/app changes or `logs/.rerun` for test/config-only changes.
 - Signal body: `{"hypothesis":"…","filesChanged":["<abs-path>", …]}`.
 <!-- heal-prompt:end -->
