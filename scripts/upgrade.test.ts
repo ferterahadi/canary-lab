@@ -117,7 +117,7 @@ describe("main (upgrade orchestration)", () => {
       expect(content).toContain("logs/.restart")
       expect(content).toContain("logs/.rerun")
       expect(content).toContain("Prefer exact slice paths from `heal-index.md` before broad repo search.")
-      expect(content).toContain("Avoid broad repo grep when the index or slice already points to a likely file or service.")
+      expect(content).not.toContain("Avoid broad repo grep")
       expect(content).not.toContain("Before editing, group related failures by file")
       expect(content).not.toContain("## Quick Start")
       expect(content).not.toContain("## Context Files")

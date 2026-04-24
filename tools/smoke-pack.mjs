@@ -70,13 +70,12 @@ for (const mdFile of ['CLAUDE.md', 'AGENTS.md']) {
     'logs/.restart',
     'logs/.rerun',
     'Prefer exact slice paths from `heal-index.md` before broad repo search.',
-    'Avoid broad repo grep when the index or slice already points to a likely file or service.',
   ]) {
     if (!content.includes(expected)) {
       throw new Error(`Smoke test failed: ${mdFile} missing ${expected}`)
     }
   }
-  for (const removed of ['## Quick Start', '## Context Files', '## Importing Env Files', 'Before editing, group related failures by file']) {
+  for (const removed of ['## Quick Start', '## Context Files', '## Importing Env Files', 'Before editing, group related failures by file', 'Avoid broad repo grep']) {
     if (content.includes(removed)) {
       throw new Error(`Smoke test failed: ${mdFile} still includes ${removed}`)
     }
