@@ -103,7 +103,6 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
   const files: Array<[string, string]> = [
     ['feature.config.cjs', buildFeatureConfig(name, description)],
     ['playwright.config.ts', buildPlaywrightConfig()],
-    ['.env.example', 'GATEWAY_URL=http://localhost:3000\n'],
     ['envsets/envsets.config.json', buildEnvsetsConfig(name)],
     [`envsets/local/${name}.env`, 'GATEWAY_URL=http://localhost:3000\n'],
     [`e2e/${name}.spec.ts`, buildSpec(name)],
@@ -125,7 +124,7 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
   bullet(dim(`features/${name}/`) + 'e2e/helpers/')
   section('Next steps')
   step(1, `Edit ${ansiPath('feature.config.cjs')} — add your repos, start commands, and health checks`)
-  step(2, `Edit ${ansiPath('.env.example')} and ${ansiPath(`envsets/local/${name}.env`)} — add any env vars your feature needs`)
+  step(2, `Edit ${ansiPath(`envsets/local/${name}.env`)} — add any env vars your feature needs`)
   step(3, `Write your tests in ${ansiPath(`e2e/${name}.spec.ts`)} (read env with ${ansiPath('process.env.VAR_NAME')} in helpers)`)
   step(4, 'Run: npx canary-lab run')
   line()

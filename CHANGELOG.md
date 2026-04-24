@@ -16,10 +16,15 @@ All notable changes to Canary Lab are listed here. We try to keep the language p
 - **`auto-heal` runner reads from `CLAUDE.md` / `AGENTS.md`** (claude / codex respectively) and extracts the heal-prompt section as its prompt.
 - **Per-feature `src/config.ts` removed.** Features now load `.env` directly from `playwright.config.ts` and read `process.env.GATEWAY_URL` (with an inline default) in helpers. One fewer layer of indirection for scaffold readers to follow.
 
+### Fixed
+
+- **Service startup failure no longer kills everything.** When a service fails its health check, the runner now asks what you want to do: stop, self-heal manually, or hand it to Claude or Codex. Services and env files stay in place while you decide, so you can actually look at the logs.
+
 ### Removed
 
 - `.claude/skills/heal-loop.md`, `.claude/skills/self-fixing-loop.md`, `.codex/heal-loop.md`, `.codex/self-fixing-loop.md` — content consolidated into `CLAUDE.md` / `AGENTS.md`. `canary-lab upgrade` removes these files from existing installs.
 - `features/<name>/src/config.ts` (and the empty `src/` dir) in all scaffolded features.
+- `features/<name>/.env.example` in all scaffolded features. The same values already live in `envsets/local/<name>.env`, and `canary-lab new-feature` no longer emits an example file.
 
 ### Feature layout
 

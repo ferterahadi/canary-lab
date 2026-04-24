@@ -135,7 +135,6 @@ describe("main (new-feature orchestration)", () => {
     const expected = [
       "feature.config.cjs",
       "playwright.config.ts",
-      ".env.example",
       "envsets/envsets.config.json",
       "envsets/local/cns_webhooks.env",
       "e2e/cns_webhooks.spec.ts",
