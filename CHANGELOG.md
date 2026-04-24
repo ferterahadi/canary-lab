@@ -4,6 +4,8 @@ All notable changes to Canary Lab are listed here. We try to keep the language p
 
 ## 0.9.1 — 2026-04-25
 
+> Run `npx canary-lab upgrade` inside existing projects to refresh the managed `CLAUDE.md` / `AGENTS.md` heal prompt.
+
 ### Fixed
 
 - **Cleaner heal index.** Failure messages in `logs/heal-index.md` no longer include terminal color codes like `[2m` or `[31m]`. The index keeps the simple list format that worked well for the heal agent, just without the visual noise.

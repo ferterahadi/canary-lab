@@ -59,8 +59,27 @@ for (const relPath of [
 
 for (const mdFile of ['CLAUDE.md', 'AGENTS.md']) {
   const content = fs.readFileSync(path.join(projectDir, mdFile), 'utf-8')
-  if (!content.includes('<!-- heal-prompt:start -->') || !content.includes('<!-- heal-prompt:end -->')) {
-    throw new Error(`Smoke test failed: ${mdFile} missing heal-prompt markers`)
+  for (const expected of [
+    '<!-- managed:canary-lab:start -->',
+    '<!-- managed:canary-lab:end -->',
+    '<!-- heal-prompt:start -->',
+    '<!-- heal-prompt:end -->',
+    'When the user says `self heal`, follow the `heal-prompt` block below.',
+    'logs/heal-index.md',
+    'logs/e2e-summary.json',
+    'logs/.restart',
+    'logs/.rerun',
+    'Prefer exact slice paths from `heal-index.md` before broad repo search.',
+    'Avoid broad repo grep when the index or slice already points to a likely file or service.',
+  ]) {
+    if (!content.includes(expected)) {
+      throw new Error(`Smoke test failed: ${mdFile} missing ${expected}`)
+    }
+  }
+  for (const removed of ['## Quick Start', '## Context Files', '## Importing Env Files', 'Before editing, group related failures by file']) {
+    if (content.includes(removed)) {
+      throw new Error(`Smoke test failed: ${mdFile} still includes ${removed}`)
+    }
   }
 }
 

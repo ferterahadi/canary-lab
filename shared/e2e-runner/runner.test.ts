@@ -1148,6 +1148,8 @@ describe('buildHealAddendum', () => {
     expect(out).toContain('Cycle 1')
     expect(out).toContain('Failing tests: test-foo')
     expect(out).toContain('Do NOT Read the test spec')
+    expect(out).not.toContain('grep the distinctive literal')
+    expect(out).not.toContain('one grouped edit')
     expect(out).toContain('runner appends an iteration entry automatically')
     expect(out).not.toContain('outcome')
     expect(out).not.toContain('Skip hypotheses already tried')

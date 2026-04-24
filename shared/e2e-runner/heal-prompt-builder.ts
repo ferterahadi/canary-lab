@@ -48,7 +48,7 @@ export function buildHealAddendum(input: HealAddendumInput): string {
   )
 
   parts.push(
-    'Do NOT Read the test spec file. Fix service/app code only — grep the distinctive literal from the error message inside the repos listed in `logs/heal-index.md` to localize the bug.',
+    'Do NOT Read the test spec file. Use the heal-prompt resource map above and fix service/app code only.',
   )
 
   parts.push(
