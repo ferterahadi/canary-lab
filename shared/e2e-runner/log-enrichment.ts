@@ -236,7 +236,7 @@ export function writeHealIndex(): void {
   const manifest = readManifest()
   const lines: string[] = []
 
-  lines.push(`# Heal Index — ${new Date().toISOString()}`)
+  lines.push('# Heal Index')
   lines.push('')
   if (manifest.featureDir) {
     lines.push(`Feature: ${path.relative(ROOT, manifest.featureDir) || manifest.featureDir}`)
@@ -246,7 +246,6 @@ export function writeHealIndex(): void {
   if (manifest.repoPaths && manifest.repoPaths.length > 0) {
     lines.push(`Repos:   ${manifest.repoPaths.join(', ')}`)
   }
-  lines.push(`Status:  ${failed.length} failed, ${summary.passed ?? 0} passed`)
   lines.push('')
 
   if (failed.length === 0) {
@@ -257,10 +256,10 @@ export function writeHealIndex(): void {
     for (const entry of failed) {
       lines.push(`- **${entry.name}**`)
       if (entry.error?.message) {
-        lines.push(`  - error: ${truncateOneLine(entry.error.message, 240)}`)
-      }
-      if (entry.location) {
-        lines.push(`  - test:  ${entry.location}`)
+        // Keep the full `expected … received …` literal — a longer but complete
+        // error message is cheaper than a truncated one that pushes the agent
+        // into a spec-file read to recover the missing context.
+        lines.push(`  - error: ${truncateOneLine(entry.error.message, 400)}`)
       }
       if (entry.logFiles && entry.logFiles.length > 0) {
         lines.push(`  - slice: ${entry.logFiles.join(', ')}`)
@@ -285,4 +284,78 @@ export function writeHealIndex(): void {
   const tmp = `${HEAL_INDEX_PATH}.tmp`
   fs.writeFileSync(tmp, lines.join('\n'))
   fs.renameSync(tmp, HEAL_INDEX_PATH)
+}
+
+// ─── Journal append (runner-side) ───────────────────────────────────────────
+//
+// The runner pre-seeds the iteration heading and the fields it already knows
+// (feature, failingTests, timestamp, signal, fix.file, outcome: pending) so
+// the agent doesn't have to spend tokens writing ceremony boilerplate. The
+// agent only supplies `hypothesis` (and optionally `fix.description`) in the
+// signal-body JSON it wrote to `.restart` / `.rerun`.
+
+export interface JournalAppendInput {
+  signal: '.restart' | '.rerun'
+  hypothesis?: string
+  filesChanged?: string[]
+  fixDescription?: string
+}
+
+function nextIterationNumber(): number {
+  try {
+    const raw = fs.readFileSync(DIAGNOSIS_JOURNAL_PATH, 'utf-8')
+    const entries = parseJournalMarkdown(raw)
+    const max = entries.reduce(
+      (m, e) => (typeof e.iteration === 'number' && e.iteration > m ? e.iteration : m),
+      0,
+    )
+    return max + 1
+  } catch {
+    return 1
+  }
+}
+
+export function appendJournalIteration(input: JournalAppendInput): void {
+  const hypothesis = input.hypothesis?.trim()
+  if (!hypothesis) return // Nothing meaningful to record — skip.
+
+  const manifest = readManifest()
+  const summaryPath = getSummaryPath()
+  let failingTests = ''
+  try {
+    const summary = JSON.parse(fs.readFileSync(summaryPath, 'utf-8')) as {
+      failed?: FailedEntry[]
+    }
+    const failed = Array.isArray(summary.failed) ? summary.failed : []
+    failingTests = failed
+      .map((f) => f.name)
+      .filter((n): n is string => typeof n === 'string' && n.length > 0)
+      .join(', ')
+  } catch {
+    /* no summary — leave failingTests empty */
+  }
+
+  const fixFile = Array.isArray(input.filesChanged)
+    ? input.filesChanged.filter((f) => typeof f === 'string').join(', ')
+    : ''
+
+  const section: string[] = []
+  section.push(`## Iteration ${nextIterationNumber()} — ${new Date().toISOString()}`)
+  section.push('')
+  if (manifest.featureName) section.push(`- feature: ${manifest.featureName}`)
+  if (failingTests) section.push(`- failingTests: ${failingTests}`)
+  section.push(`- hypothesis: ${truncateOneLine(hypothesis, 400)}`)
+  if (fixFile) section.push(`- fix.file: ${fixFile}`)
+  if (input.fixDescription) {
+    section.push(`- fix.description: ${truncateOneLine(input.fixDescription, 400)}`)
+  }
+  section.push(`- signal: ${input.signal}`)
+  section.push('- outcome: pending')
+  section.push('')
+
+  fs.mkdirSync(LOGS_DIR, { recursive: true })
+  const header = fs.existsSync(DIAGNOSIS_JOURNAL_PATH)
+    ? ''
+    : '# Diagnosis Journal\n\n'
+  fs.appendFileSync(DIAGNOSIS_JOURNAL_PATH, header + section.join('\n'))
 }

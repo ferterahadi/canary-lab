@@ -20,12 +20,18 @@ fs.mkdirSync(LOGS_DIR, { recursive: true })
 
 const ITERM_HEAL_SESSION_IDS_PATH = path.join(LOGS_DIR, 'iterm-heal-session-ids.json')
 
+const SUMMARY_PATH = path.join(LOGS_DIR, 'e2e-summary.json')
+const DIAGNOSIS_JOURNAL_PATH = path.join(LOGS_DIR, 'diagnosis-journal.md')
+
 vi.mock('./paths', () => ({
   ROOT: pathStubRoot,
   LOGS_DIR,
   RERUN_SIGNAL,
   RESTART_SIGNAL,
   ITERM_HEAL_SESSION_IDS_PATH,
+  SUMMARY_PATH,
+  DIAGNOSIS_JOURNAL_PATH,
+  getSummaryPath: () => SUMMARY_PATH,
 }))
 
 const openItermTabs = vi.fn((_tabs: StartTab[], _label: string) => ['SID-1'])
@@ -267,10 +273,14 @@ describe('spawnHealAgent', () => {
     await vi.advanceTimersByTimeAsync(1200)
     expect(await promise).toBe('signal')
 
-    // Prompt + script files were written.
+    // Prompt + script files were written. The static core is preserved; the
+    // state addendum (cycle number + forbid-spec rule) is appended after it.
     const promptFile = path.join(LOGS_DIR, '.heal-prompt.txt')
     const scriptFile = path.join(LOGS_DIR, '.heal-agent.sh')
-    expect(fs.readFileSync(promptFile, 'utf-8')).toBe('go heal')
+    const promptBody = fs.readFileSync(promptFile, 'utf-8')
+    expect(promptBody.startsWith('go heal')).toBe(true)
+    expect(promptBody).toContain('Cycle 1')
+    expect(promptBody).toContain('Do NOT Read the test spec')
     const script = fs.readFileSync(scriptFile, 'utf-8')
     expect(script).toContain('claude --dangerously-skip-permissions')
     expect(script).toContain('#!/bin/bash')
