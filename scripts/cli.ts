@@ -6,6 +6,7 @@ import { main as createFeature } from './new-feature'
 import { main as initProject } from './init-project'
 import { main as upgradeProject } from './upgrade'
 import { banner, section, dim, fail, line } from '../shared/cli-ui/ui'
+import { runAsScript } from './run-as-script'
 
 export function printUsage(): void {
   banner('Canary Lab')
@@ -50,9 +51,4 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
   }
 }
 
-if (require.main === module) {
-  main().catch((err) => {
-    console.error(err)
-    process.exit(1)
-  })
-}
+runAsScript(module, main)

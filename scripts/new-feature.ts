@@ -2,6 +2,7 @@ import fs from 'fs'
 import path from 'path'
 import { getFeaturesDir } from '../shared/runtime/project-root'
 import { ok, section, step, bullet, fail, line, path as ansiPath, dim } from '../shared/cli-ui/ui'
+import { runAsScript } from './run-as-script'
 
 export function isValidFeatureName(name: string): boolean {
   return /^[a-z][a-z0-9_]*$/.test(name)
@@ -127,9 +128,4 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
   line()
 }
 
-if (require.main === module) {
-  main().catch((err) => {
-    console.error(err)
-    process.exit(1)
-  })
-}
+runAsScript(module, main)
