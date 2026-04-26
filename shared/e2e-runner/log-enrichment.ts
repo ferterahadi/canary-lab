@@ -31,29 +31,41 @@ export function capSlice(
   return head + marker + tail
 }
 
-export function extractLogsForTest(
-  slug: string,
-  serviceLogs: string[],
-): Record<string, string> {
-  const logs: Record<string, string> = {}
-  const openTag = `<${slug}>`
-  const closeTag = `</${slug}>`
+// Read each service log once and extract per-test slices for every requested
+// slug in a single pass. With N failures × M service logs, the naive approach
+// reads each log N times; this collapses it to M reads per enrichment cycle.
+export function extractAllSlices(
+  slugs: readonly string[],
+  serviceLogs: readonly string[],
+): Map<string, Record<string, string>> {
+  const result = new Map<string, Record<string, string>>()
+  for (const slug of slugs) result.set(slug, {})
+  if (slugs.length === 0) return result
 
   for (const logPath of serviceLogs) {
     if (!fs.existsSync(logPath)) continue
     const content = fs.readFileSync(logPath, 'utf-8')
-    const openIdx = content.indexOf(openTag)
-    const closeIdx = content.indexOf(closeTag)
-    if (openIdx === -1 || closeIdx === -1 || closeIdx <= openIdx) continue
-    const snippet = content
-      .slice(openIdx + openTag.length, closeIdx)
-      .trim()
-    if (snippet.length === 0) continue
     const svcName = path.basename(logPath, '.log')
     const relFullPath = path.relative(ROOT, logPath)
-    logs[svcName] = capSlice(snippet, relFullPath)
+    for (const slug of slugs) {
+      const openTag = `<${slug}>`
+      const openIdx = content.indexOf(openTag)
+      if (openIdx === -1) continue
+      const closeIdx = content.indexOf(`</${slug}>`, openIdx + openTag.length)
+      if (closeIdx === -1) continue
+      const snippet = content.slice(openIdx + openTag.length, closeIdx).trim()
+      if (snippet.length === 0) continue
+      result.get(slug)![svcName] = capSlice(snippet, relFullPath)
+    }
   }
-  return logs
+  return result
+}
+
+export function extractLogsForTest(
+  slug: string,
+  serviceLogs: string[],
+): Record<string, string> {
+  return extractAllSlices([slug], serviceLogs).get(slug) ?? {}
 }
 
 // Write per-failure slice files under logs/failed/<slug>/<svc>.log and return
@@ -68,7 +80,13 @@ export function writeFailureSlices(
   slug: string,
   serviceLogs: string[],
 ): PerFailureSlices {
-  const slices = extractLogsForTest(slug, serviceLogs)
+  return writeSlicesToDisk(slug, extractLogsForTest(slug, serviceLogs))
+}
+
+function writeSlicesToDisk(
+  slug: string,
+  slices: Record<string, string>,
+): PerFailureSlices {
   const dir = path.join(FAILED_DIR, slug)
   const logFiles: string[] = []
   const bytesByPath: Record<string, number> = {}
@@ -98,24 +116,40 @@ interface FailedEntry {
   [key: string]: unknown
 }
 
+interface EnrichedSummary {
+  total?: number
+  passed?: number
+  failed?: FailedEntry[]
+  complete?: boolean
+}
+
 // Rewrite e2e-summary.json so each failed[] entry carries logFiles (paths)
 // instead of logs (full embedded snippets). Keeps the summary small enough to
 // Read in one call — previously it ballooned past Claude's 256KB Read cap.
-export function enrichSummaryWithLogs(): void {
+//
+// Returns the parsed manifest + summary so a follow-up writeHealIndex() in the
+// same tick can reuse them instead of re-reading + re-parsing the same files.
+export function enrichSummaryWithLogs(): { manifest: Manifest; summary: EnrichedSummary } | null {
   const summaryPath = getSummaryPath()
-  if (!fs.existsSync(summaryPath) || !fs.existsSync(MANIFEST_PATH)) return
+  if (!fs.existsSync(summaryPath) || !fs.existsSync(MANIFEST_PATH)) return null
 
-  const summary = JSON.parse(fs.readFileSync(summaryPath, 'utf-8'))
-  const manifest: { serviceLogs: string[] } = JSON.parse(
-    fs.readFileSync(MANIFEST_PATH, 'utf-8'),
-  )
+  const summary = JSON.parse(fs.readFileSync(summaryPath, 'utf-8')) as EnrichedSummary
+  const manifest = JSON.parse(fs.readFileSync(MANIFEST_PATH, 'utf-8')) as Manifest
 
-  if (!Array.isArray(summary.failed) || summary.failed.length === 0) return
+  if (!Array.isArray(summary.failed) || summary.failed.length === 0) {
+    return { manifest, summary }
+  }
+
+  const slugs = summary.failed
+    .map((e) => (typeof e === 'string' ? e : e.name))
+    .filter((n): n is string => typeof n === 'string' && n.length > 0)
+  const slicesBySlug = extractAllSlices(slugs, manifest.serviceLogs ?? [])
 
   summary.failed = summary.failed.map(
     (entry: string | FailedEntry): FailedEntry => {
       const base: FailedEntry = typeof entry === 'string' ? { name: entry } : { ...entry }
-      const { logFiles } = writeFailureSlices(base.name, manifest.serviceLogs)
+      const slices = slicesBySlug.get(base.name) ?? {}
+      const { logFiles } = writeSlicesToDisk(base.name, slices)
       // Never carry embedded `logs` forward — the per-failure files replace it.
       delete (base as { logs?: unknown }).logs
       if (logFiles.length > 0) {
@@ -128,6 +162,7 @@ export function enrichSummaryWithLogs(): void {
   const tmpPath = `${summaryPath}.tmp`
   fs.writeFileSync(tmpPath, JSON.stringify(summary, null, 2) + '\n')
   fs.renameSync(tmpPath, summaryPath)
+  return { manifest, summary }
 }
 
 // ─── Heal Index ─────────────────────────────────────────────────────────────
@@ -238,17 +273,23 @@ function normalizeErrorKey(raw: string): string {
 // lives, which repos to edit, what failed, and the exact slice files to read.
 // Keep this literal; inferred target-service hints can mislead when a shared
 // frontend/proxy appears in every slice but the real bug lives downstream.
-export function writeHealIndex(): void {
-  const summaryPath = getSummaryPath()
-  if (!fs.existsSync(summaryPath)) return
-  const summary = JSON.parse(fs.readFileSync(summaryPath, 'utf-8')) as {
-    total?: number
-    passed?: number
-    failed?: FailedEntry[]
+export function writeHealIndex(parsed?: {
+  manifest: Manifest
+  summary: EnrichedSummary
+}): void {
+  let summary: EnrichedSummary
+  let manifest: Manifest
+  if (parsed) {
+    summary = parsed.summary
+    manifest = parsed.manifest
+  } else {
+    const summaryPath = getSummaryPath()
+    if (!fs.existsSync(summaryPath)) return
+    summary = JSON.parse(fs.readFileSync(summaryPath, 'utf-8')) as EnrichedSummary
+    manifest = readManifest()
   }
 
   const failed = Array.isArray(summary.failed) ? summary.failed : []
-  const manifest = readManifest()
   const lines: string[] = []
 
   lines.push('# Heal Index')
