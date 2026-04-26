@@ -19,6 +19,7 @@ import {
   ITERM_HEAL_SESSION_IDS_PATH,
 } from './paths'
 import type { BenchmarkMode } from './context-assembler'
+import { buildHealAddendum } from './heal-prompt-builder'
 
 export type HealAgent = 'claude' | 'codex'
 export type HealSessionMode = 'resume' | 'new'
@@ -346,8 +347,19 @@ export async function spawnHealAgent(
         repoPaths: opts.baselineRepoPaths,
       })
     : opts.basePromptOverride ?? loadPrompt(opts.agent)
+
+  // State-aware addendum: cycle number, failing slugs, forbid-spec rule, and
+  // journal guidance conditional on whether a journal exists. Skipped for
+  // baseline (which stays harness-free) and for startup-failure healing
+  // (`basePromptOverride`) where the shape is different.
+  const stateAddendum =
+    opts.benchmarkMode !== 'baseline' && !opts.basePromptOverride
+      ? buildHealAddendum({ cycle: opts.cycle + 1 })
+      : ''
+
   const prompt = [
     basePrompt,
+    stateAddendum,
     opts.promptAddendum?.trim(),
   ].filter(Boolean).join('\n\n')
   fs.writeFileSync(HEAL_PROMPT_FILE, prompt)

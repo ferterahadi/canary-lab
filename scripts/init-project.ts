@@ -3,6 +3,7 @@ import path from 'path'
 import { execFileSync } from 'child_process'
 import { ok, section, step, line, path as ansiPath } from '../shared/cli-ui/ui'
 import { fail } from '../shared/cli-ui/ui'
+import { runAsScript } from './run-as-script'
 
 export function resolveFirstExisting(pathsToTry: string[]): string {
   const match = pathsToTry.find((candidate) => fs.existsSync(candidate))
@@ -151,9 +152,4 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
   line()
 }
 
-if (require.main === module) {
-  main().catch((err) => {
-    console.error(err)
-    process.exit(1)
-  })
-}
+runAsScript(module, main)
