@@ -257,10 +257,18 @@ export function loadSessionIds(file: string): Map<string, string> {
   }
 }
 
+// Cache the last serialized payload so we no-op when nothing changed (the
+// ids file rewrites on every cycle otherwise — small file, but it's pure I/O
+// churn). Keyed by file path so multiple stores stay independent.
+const lastSerializedSessionIds = new Map<string, string>()
+
 export function saveSessionIds(file: string, ids: Map<string, string>): void {
+  const serialized = JSON.stringify(Object.fromEntries(ids), null, 2)
+  if (lastSerializedSessionIds.get(file) === serialized) return
   try {
     fs.mkdirSync(path.dirname(file), { recursive: true })
-    fs.writeFileSync(file, JSON.stringify(Object.fromEntries(ids), null, 2))
+    fs.writeFileSync(file, serialized)
+    lastSerializedSessionIds.set(file, serialized)
   } catch {
     /* non-fatal — persistence is best-effort */
   }
@@ -362,20 +370,22 @@ export async function pollHealthChecks(
   info('Waiting for health checks...')
   const deadline = Date.now() + timeoutMs
 
-  for (const svc of checksNeeded) {
-    process.stdout.write(`    ${ansiC('gray', '•')} ${svc.name} ${dim('…')} `)
-    while (Date.now() < deadline) {
-      if (await isHealthy(svc.healthUrl!, svc.healthTimeout)) {
-        console.log(ansiC('green', 'healthy'))
-        break
+  // Poll all services in parallel. Sequential polling stacks each service's
+  // warmup time end-to-end (3 services × 5 s warmup = 15 s); parallel collapses
+  // it to max(warmups). Each service prints its own status line as it resolves.
+  await Promise.all(
+    checksNeeded.map(async (svc) => {
+      while (Date.now() < deadline) {
+        if (await isHealthy(svc.healthUrl!, svc.healthTimeout)) {
+          console.log(`    ${ansiC('gray', '•')} ${svc.name} ${ansiC('green', 'healthy')}`)
+          return
+        }
+        await new Promise((r) => setTimeout(r, 2000))
       }
-      await new Promise((r) => setTimeout(r, 2000))
-    }
-    if (Date.now() >= deadline) {
-      console.log(ansiC('red', 'TIMEOUT'))
+      console.log(`    ${ansiC('gray', '•')} ${svc.name} ${ansiC('red', 'TIMEOUT')}`)
       throw new HealthCheckTimeoutError(svc.name, svc.healthUrl!)
-    }
-  }
+    }),
+  )
 }
 
 // ─── Startup-failure recovery ──────────────────────────────────────────────
