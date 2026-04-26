@@ -2,6 +2,24 @@
 
 All notable changes to Canary Lab are listed here. We try to keep the language plain so anyone can follow along.
 
+## 0.9.3 — 2026-04-27
+
+> Pure speed-up release. No new commands, no changes to how you use Canary Lab. Just less waiting between runs.
+
+### Changed
+
+- **Tests run faster overall.** The runner used to do bookkeeping work after every single test (extracting log slices, rebuilding the heal map) — even when nothing failed. Now it only does that work when there's actually a failure to heal, and skips the duplicate pass at the end of the run.
+- **Service startup is parallel, not one-at-a-time.** When your project has multiple services (say an API, a worker, and a frontend), the runner now waits on all their health checks at the same time instead of in sequence. If each service takes ~5 seconds to warm up, you save ~10 seconds per run on a 3-service setup.
+- **Less file thrash inside `logs/`.** Each service log is now read once per run no matter how many tests failed (used to be re-read per failure). The iTerm session-id cache file no longer rewrites itself when nothing changed.
+
+### Removed
+
+- **Dead `logs/pids/` code path.** Old code wrote `.pid` files for each service so restarts could find them. Nothing has actually written those files in a long time — the runner already locates services by checking which port they're listening on. We deleted the leftover reader code and the `logs/pids/` directory it created. No behaviour change; just less to read when you're poking around the codebase.
+
+### Benchmark note
+
+- Wall-time savings depend heavily on your project shape. Single-service projects with no failures save ~half a second per cycle. Multi-service projects with several failures can save several seconds per cycle, mostly from the parallel health checks.
+
 ## 0.9.2 — 2026-04-25
 
 > Run `npx canary-lab upgrade` inside existing projects to refresh the managed `CLAUDE.md` / `AGENTS.md` heal prompt.
