@@ -16,7 +16,6 @@ const PATH_ROOT = mkTmp()
 const FEATURES_DIR = path.join(PATH_ROOT, 'features')
 const LOGS_DIR = path.join(PATH_ROOT, 'logs')
 const BENCHMARK_DIR = path.join(LOGS_DIR, 'benchmark')
-const PIDS_DIR = path.join(LOGS_DIR, 'pids')
 const MANIFEST_PATH = path.join(LOGS_DIR, 'manifest.json')
 const SUMMARY_PATH = path.join(LOGS_DIR, 'e2e-summary.json')
 const DIAGNOSIS_JOURNAL_PATH = path.join(LOGS_DIR, 'diagnosis-journal.md')
@@ -24,14 +23,13 @@ const PLAYWRIGHT_STDOUT_PATH = path.join(LOGS_DIR, 'playwright-stdout.log')
 const HEAL_INDEX_PATH = path.join(LOGS_DIR, 'heal-index.md')
 const FAILED_DIR = path.join(LOGS_DIR, 'failed')
 fs.mkdirSync(FEATURES_DIR, { recursive: true })
-fs.mkdirSync(PIDS_DIR, { recursive: true })
+fs.mkdirSync(LOGS_DIR, { recursive: true })
 
 vi.mock('./paths', () => ({
   ROOT: PATH_ROOT,
   FEATURES_DIR,
   LOGS_DIR,
   BENCHMARK_DIR,
-  PIDS_DIR,
   MANIFEST_PATH,
   SUMMARY_PATH,
   DIAGNOSIS_JOURNAL_PATH,
@@ -134,7 +132,6 @@ const {
   truncateServiceLogs,
   portFromHealthUrl,
   parseFlags,
-  readPid,
   lookupPidByPort,
   isProcessAlive,
   killProcessSync,
@@ -209,7 +206,6 @@ afterEach(() => {
   for (const entry of fs.readdirSync(LOGS_DIR)) {
     fs.rmSync(path.join(LOGS_DIR, entry), { recursive: true, force: true })
   }
-  fs.mkdirSync(PIDS_DIR, { recursive: true })
   for (const entry of fs.readdirSync(FEATURES_DIR)) {
     fs.rmSync(path.join(FEATURES_DIR, entry), { recursive: true, force: true })
   }
@@ -411,22 +407,6 @@ describe('parseFlags', () => {
   })
 })
 
-describe('readPid', () => {
-  it('returns null when pid file missing', () => {
-    expect(readPid('missing')).toBeNull()
-  })
-
-  it('returns parsed int from pid file, trimming whitespace', () => {
-    fs.writeFileSync(path.join(PIDS_DIR, 'svc.pid'), '  12345  \n')
-    expect(readPid('svc')).toBe(12345)
-  })
-
-  it('returns null when pid file contains non-numeric content', () => {
-    fs.writeFileSync(path.join(PIDS_DIR, 'svc.pid'), 'not-a-pid')
-    expect(readPid('svc')).toBeNull()
-  })
-})
-
 describe('lookupPidByPort', () => {
   it('calls `lsof -ti tcp:<port> -sTCP:LISTEN` and parses first PID', () => {
     execFileSync.mockImplementation(() => '4242\n7777\n')
@@ -524,43 +504,23 @@ describe('resolveRunningPid', () => {
     ...over,
   })
 
-  it('returns pid from .pid file when that process is alive', () => {
-    fs.writeFileSync(path.join(PIDS_DIR, 's.pid'), '100')
+  it('returns the lsof pid when healthUrl is set and the process is alive', () => {
     vi.spyOn(process, 'kill').mockImplementation(() => true as any)
-    expect(resolveRunningPid(makeSvc() as any)).toBe(100)
-  })
-
-  it('falls back to lsof when pid file dead and healthUrl is set', () => {
-    fs.writeFileSync(path.join(PIDS_DIR, 's.pid'), '100')
-    const killSpy = vi.spyOn(process, 'kill').mockImplementation(((pid: number) => {
-      if (pid === 100) throw new Error('ESRCH')
-      return true as any
-    }) as any)
     execFileSync.mockImplementation(() => '555\n')
     expect(
       resolveRunningPid(
         makeSvc({ healthUrl: 'http://localhost:3000/' }) as any,
       ),
     ).toBe(555)
-    void killSpy
   })
 
   it('returns null when healthUrl is malformed (portFromHealthUrl → null)', () => {
-    fs.writeFileSync(path.join(PIDS_DIR, 's.pid'), '100')
-    vi.spyOn(process, 'kill').mockImplementation(() => {
-      throw new Error('ESRCH')
-    })
     expect(
-      resolveRunningPid(
-        makeSvc({ healthUrl: 'not a url' }) as any,
-      ),
+      resolveRunningPid(makeSvc({ healthUrl: 'not a url' }) as any),
     ).toBeNull()
   })
 
-  it('returns null when both file pid and lsof pid are dead/absent', () => {
-    vi.spyOn(process, 'kill').mockImplementation(() => {
-      throw new Error('ESRCH')
-    })
+  it('returns null when lsof finds no listener', () => {
     execFileSync.mockImplementation(() => '')
     expect(
       resolveRunningPid(
@@ -569,7 +529,19 @@ describe('resolveRunningPid', () => {
     ).toBeNull()
   })
 
-  it('returns null when no pid file and no healthUrl', () => {
+  it('returns null when the lsof pid is dead', () => {
+    vi.spyOn(process, 'kill').mockImplementation(() => {
+      throw new Error('ESRCH')
+    })
+    execFileSync.mockImplementation(() => '555\n')
+    expect(
+      resolveRunningPid(
+        makeSvc({ healthUrl: 'http://localhost:3000/' }) as any,
+      ),
+    ).toBeNull()
+  })
+
+  it('returns null when no healthUrl is configured', () => {
     expect(resolveRunningPid(makeSvc() as any)).toBeNull()
   })
 })
@@ -1442,8 +1414,8 @@ describe('launchServices', () => {
 
   it('kills existing processes, truncates logs, and opens tabs', async () => {
     vi.useFakeTimers()
-    // A pid file exists and corresponds to an alive process.
-    fs.writeFileSync(path.join(PIDS_DIR, 'svc-a.pid'), '555')
+    // lsof reports a listener pid for the service's health-check port.
+    execFileSync.mockImplementation(() => '555\n')
     const killSpy = vi
       .spyOn(process, 'kill')
       .mockImplementation(((_: number, sig: any) => {
@@ -1462,6 +1434,7 @@ describe('launchServices', () => {
       logPath,
       command: 'node a',
       cwd: '/',
+      healthUrl: 'http://localhost:3000/',
     } as any
     openItermTabs.mockReturnValueOnce(['SID-A'])
 
@@ -1690,7 +1663,7 @@ describe('restartAllServices', () => {
     const dir = mkTmp()
     const logPath = path.join(dir, 'svc-a.log')
     fs.writeFileSync(logPath, 'old')
-    fs.writeFileSync(path.join(PIDS_DIR, 'svc-a.pid'), '999')
+    execFileSync.mockImplementation(() => '999\n')
     const svc = {
       name: 'svc-a',
       safeName: 'svc-a',
@@ -2854,7 +2827,7 @@ describe('watchMode', () => {
         name: 'cleanup-feat',
         description: 't',
         envs: ['dev'],
-        repos: [{ name: 'app', localPath: ${JSON.stringify(repoDir)}, startCommands: ['npm run dev'] }],
+        repos: [{ name: 'app', localPath: ${JSON.stringify(repoDir)}, startCommands: [{ command: 'npm run dev', healthCheck: { url: 'http://localhost:3000/' } }] }],
         featureDir: ${JSON.stringify(featDir)},
       } }`,
     )
@@ -2862,19 +2835,21 @@ describe('watchMode', () => {
     // Answers: feature "1", auto-heal "1" (None).
     readlineAnswers.push('1', '1')
 
-    // buildServiceList() derives safeName from the command — 'app-cmd-1'.
-    // main() wipes logs/ at step 8 and re-mkdirs PIDS_DIR, so we write the pid
-    // file via the mocked openTerminalTabs (invoked from launchServices, which
-    // runs AFTER step 8).
-    const safeName = 'app-cmd-1'
+    // openTerminalTabs runs AFTER the initial launchServices kill loop. Flip
+    // a "started" flag here so the first lookupPidByPort returns null
+    // (skipping killProcess + its 5s poll) and the cleanup-time lookup
+    // returns the pid so killProcessSync gets exercised.
+    let serviceStarted = false
     openTerminalTabs.mockImplementation(() => {
-      fs.writeFileSync(path.join(PIDS_DIR, `${safeName}.pid`), '12345')
+      serviceStarted = true
     })
 
-    // execFileSync is used twice: once for env --apply (success), once for
-    // env --revert inside cleanup (we throw → hits the warn branch).
+    // execFileSync is used for: env --apply (success), env --revert (throws,
+    // hits warn branch), and lsof (returns the listener pid only after the
+    // service has been "started").
     let applyCalled = false
-    execFileSync.mockImplementation((_cmd: any, args: any) => {
+    execFileSync.mockImplementation((cmd: any, args: any) => {
+      if (cmd === 'lsof') return serviceStarted ? '12345\n' : ''
       if (Array.isArray(args) && args.includes('--revert')) {
         throw new Error('revert fail')
       }
@@ -2890,6 +2865,9 @@ describe('watchMode', () => {
       if (sig === 0) return true as any // alive
       return true as any
     }) as any)
+
+    // Health check passes so main() reaches the spawn step instead of hanging.
+    isHealthy.mockResolvedValue(true)
 
     // spawn (Playwright) — make it throw so main() hits its catch → cleanup().
     spawn.mockImplementationOnce(() => {

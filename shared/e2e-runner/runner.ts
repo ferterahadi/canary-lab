@@ -41,7 +41,6 @@ import {
   ROOT,
   FEATURES_DIR,
   LOGS_DIR,
-  PIDS_DIR,
   MANIFEST_PATH,
   PLAYWRIGHT_STDOUT_PATH,
   getSummaryPath,
@@ -257,10 +256,18 @@ export function loadSessionIds(file: string): Map<string, string> {
   }
 }
 
+// Cache the last serialized payload so we no-op when nothing changed (the
+// ids file rewrites on every cycle otherwise — small file, but it's pure I/O
+// churn). Keyed by file path so multiple stores stay independent.
+const lastSerializedSessionIds = new Map<string, string>()
+
 export function saveSessionIds(file: string, ids: Map<string, string>): void {
+  const serialized = JSON.stringify(Object.fromEntries(ids), null, 2)
+  if (lastSerializedSessionIds.get(file) === serialized) return
   try {
     fs.mkdirSync(path.dirname(file), { recursive: true })
-    fs.writeFileSync(file, JSON.stringify(Object.fromEntries(ids), null, 2))
+    fs.writeFileSync(file, serialized)
+    lastSerializedSessionIds.set(file, serialized)
   } catch {
     /* non-fatal — persistence is best-effort */
   }
@@ -362,20 +369,22 @@ export async function pollHealthChecks(
   info('Waiting for health checks...')
   const deadline = Date.now() + timeoutMs
 
-  for (const svc of checksNeeded) {
-    process.stdout.write(`    ${ansiC('gray', '•')} ${svc.name} ${dim('…')} `)
-    while (Date.now() < deadline) {
-      if (await isHealthy(svc.healthUrl!, svc.healthTimeout)) {
-        console.log(ansiC('green', 'healthy'))
-        break
+  // Poll all services in parallel. Sequential polling stacks each service's
+  // warmup time end-to-end (3 services × 5 s warmup = 15 s); parallel collapses
+  // it to max(warmups). Each service prints its own status line as it resolves.
+  await Promise.all(
+    checksNeeded.map(async (svc) => {
+      while (Date.now() < deadline) {
+        if (await isHealthy(svc.healthUrl!, svc.healthTimeout)) {
+          console.log(`    ${ansiC('gray', '•')} ${svc.name} ${ansiC('green', 'healthy')}`)
+          return
+        }
+        await new Promise((r) => setTimeout(r, 2000))
       }
-      await new Promise((r) => setTimeout(r, 2000))
-    }
-    if (Date.now() >= deadline) {
-      console.log(ansiC('red', 'TIMEOUT'))
+      console.log(`    ${ansiC('gray', '•')} ${svc.name} ${ansiC('red', 'TIMEOUT')}`)
       throw new HealthCheckTimeoutError(svc.name, svc.healthUrl!)
-    }
-  }
+    }),
+  )
 }
 
 // ─── Startup-failure recovery ──────────────────────────────────────────────
@@ -599,13 +608,6 @@ export function writeManifest(
 }
 
 // ─── Restart unhealthy services ─────────────────────────────────────────────
-export function readPid(safeName: string): number | null {
-  const pidPath = path.join(PIDS_DIR, `${safeName}.pid`)
-  if (!fs.existsSync(pidPath)) return null
-  const pid = parseInt(fs.readFileSync(pidPath, 'utf-8').trim(), 10)
-  return isNaN(pid) ? null : pid
-}
-
 export function portFromHealthUrl(url: string): number | null {
   try {
     const parsed = new URL(url)
@@ -679,25 +681,11 @@ export async function killProcess(pid: number): Promise<void> {
 }
 
 export function resolveRunningPid(svc: ServiceInfo): number | null {
-  const pidFromFile = readPid(svc.safeName)
-  if (pidFromFile && isProcessAlive(pidFromFile)) {
-    return pidFromFile
-  }
-
-  if (!svc.healthUrl) {
-    return null
-  }
-
+  if (!svc.healthUrl) return null
   const port = portFromHealthUrl(svc.healthUrl)
-  if (!port) {
-    return null
-  }
-
+  if (!port) return null
   const pidFromPort = lookupPidByPort(port)
-  if (pidFromPort && isProcessAlive(pidFromPort)) {
-    return pidFromPort
-  }
-
+  if (pidFromPort && isProcessAlive(pidFromPort)) return pidFromPort
   return null
 }
 
@@ -1525,7 +1513,7 @@ export async function main(argv: string[] = []) {
       [ITERM_HEAL_SESSION_IDS_PATH]: safeReadFile(ITERM_HEAL_SESSION_IDS_PATH),
     }
     fs.rmSync(LOGS_DIR, { recursive: true, force: true })
-    fs.mkdirSync(PIDS_DIR, { recursive: true })
+    fs.mkdirSync(LOGS_DIR, { recursive: true })
     for (const [p, content] of Object.entries(preservedSessionIds)) {
       if (content !== null) fs.writeFileSync(p, content)
     }
