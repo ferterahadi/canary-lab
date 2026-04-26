@@ -41,7 +41,6 @@ import {
   ROOT,
   FEATURES_DIR,
   LOGS_DIR,
-  PIDS_DIR,
   MANIFEST_PATH,
   PLAYWRIGHT_STDOUT_PATH,
   getSummaryPath,
@@ -609,13 +608,6 @@ export function writeManifest(
 }
 
 // ─── Restart unhealthy services ─────────────────────────────────────────────
-export function readPid(safeName: string): number | null {
-  const pidPath = path.join(PIDS_DIR, `${safeName}.pid`)
-  if (!fs.existsSync(pidPath)) return null
-  const pid = parseInt(fs.readFileSync(pidPath, 'utf-8').trim(), 10)
-  return isNaN(pid) ? null : pid
-}
-
 export function portFromHealthUrl(url: string): number | null {
   try {
     const parsed = new URL(url)
@@ -689,25 +681,11 @@ export async function killProcess(pid: number): Promise<void> {
 }
 
 export function resolveRunningPid(svc: ServiceInfo): number | null {
-  const pidFromFile = readPid(svc.safeName)
-  if (pidFromFile && isProcessAlive(pidFromFile)) {
-    return pidFromFile
-  }
-
-  if (!svc.healthUrl) {
-    return null
-  }
-
+  if (!svc.healthUrl) return null
   const port = portFromHealthUrl(svc.healthUrl)
-  if (!port) {
-    return null
-  }
-
+  if (!port) return null
   const pidFromPort = lookupPidByPort(port)
-  if (pidFromPort && isProcessAlive(pidFromPort)) {
-    return pidFromPort
-  }
-
+  if (pidFromPort && isProcessAlive(pidFromPort)) return pidFromPort
   return null
 }
 
@@ -1535,7 +1513,7 @@ export async function main(argv: string[] = []) {
       [ITERM_HEAL_SESSION_IDS_PATH]: safeReadFile(ITERM_HEAL_SESSION_IDS_PATH),
     }
     fs.rmSync(LOGS_DIR, { recursive: true, force: true })
-    fs.mkdirSync(PIDS_DIR, { recursive: true })
+    fs.mkdirSync(LOGS_DIR, { recursive: true })
     for (const [p, content] of Object.entries(preservedSessionIds)) {
       if (content !== null) fs.writeFileSync(p, content)
     }
