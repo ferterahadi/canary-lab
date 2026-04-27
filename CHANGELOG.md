@@ -2,6 +2,12 @@
 
 All notable changes to Canary Lab are listed here. We try to keep the language plain so anyone can follow along.
 
+## 0.9.4 — 2026-04-27
+
+### Added
+
+- **New skill so Claude knows where tests go.** Run `npx canary-lab upgrade` to pick it up. When you ask Claude to add a Playwright test in a canary-lab project, it now reads a built-in guide that explains the feature folder layout, the right imports, and where files belong — instead of guessing and putting things in the wrong place.
+
 ## 0.9.3 — 2026-04-27
 
 > Pure speed-up release. No new commands, no changes to how you use Canary Lab. Just less waiting between runs.
