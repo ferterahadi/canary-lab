@@ -9,7 +9,9 @@ const MARKER_END = '<!-- managed:canary-lab:end -->'
 /** Files that are fully managed — overwritten on every upgrade. */
 const FULLY_MANAGED: string[] = [
   '.claude/skills/env-import.md',
+  '.claude/skills/canary-lab-feature.md',
   '.codex/env-import.md',
+  '.codex/canary-lab-feature.md',
 ]
 
 /**

@@ -47,7 +47,9 @@ for (const relPath of [
   'AGENTS.md',
   'CLAUDE.md',
   '.claude/skills/env-import.md',
+  '.claude/skills/canary-lab-feature.md',
   '.codex/env-import.md',
+  '.codex/canary-lab-feature.md',
   'features/example_todo_api/feature.config.cjs',
   'features/broken_todo_api/feature.config.cjs',
 ]) {
