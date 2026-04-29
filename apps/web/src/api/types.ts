@@ -88,6 +88,71 @@ export interface RunDetail {
   summary?: RunSummary
 }
 
+export interface SkillSummary {
+  id: string
+  name: string
+  description: string
+  source: string
+  path: string
+}
+
+export interface SkillRecommendation {
+  skillId: string
+  score: number
+  matchedTerms: string[]
+  reasoning: string
+}
+
+export type DraftStatus =
+  | 'created'
+  | 'recommending'
+  | 'planning'
+  | 'plan-ready'
+  | 'generating'
+  | 'spec-ready'
+  | 'accepted'
+  | 'rejected'
+  | 'error'
+
+export interface PlanStep {
+  step: string
+  actions: string[]
+  expectedOutcome: string
+}
+
+export interface DraftRepo {
+  name: string
+  localPath: string
+}
+
+export interface DraftRecord {
+  draftId: string
+  prdText: string
+  repos: DraftRepo[]
+  skills: string[]
+  featureName?: string
+  status: DraftStatus
+  createdAt: string
+  updatedAt: string
+  plan?: PlanStep[]
+  generatedFiles?: string[]
+  errorMessage?: string
+  planAgentLogTail?: string
+  specAgentLogTail?: string
+}
+
+export interface CreateDraftPayload {
+  prdText: string
+  repos: DraftRepo[]
+  skills?: string[]
+  featureName?: string
+}
+
+export interface CreateDraftResponse {
+  draftId: string
+  status: DraftStatus
+}
+
 export interface JournalEntry {
   iteration: number | null
   timestamp: string | null

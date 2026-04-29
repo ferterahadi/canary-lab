@@ -1,14 +1,22 @@
 import { describe, it, expect, vi } from 'vitest'
 import {
   ApiError,
-  listFeatures,
+  acceptPlan,
+  acceptSpec,
+  createDraft,
+  deleteDraft,
+  deleteJournalEntry,
+  getDraft,
   getFeatureTests,
-  listRuns,
   getRunDetail,
+  listFeatures,
+  listJournal,
+  listRuns,
+  listSkills,
+  recommendSkills,
+  rejectDraft,
   startRun,
   stopRun,
-  listJournal,
-  deleteJournalEntry,
 } from './client'
 
 const ok = (body: unknown, status = 200): Response =>
@@ -131,6 +139,92 @@ describe('api client', () => {
   it('deleteJournalEntry throws ApiError on 404', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(fail(404, { error: 'iteration not found' }))
     await expect(deleteJournalEntry(99, { fetchImpl })).rejects.toBeInstanceOf(ApiError)
+  })
+
+  it('listSkills GETs /api/skills', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(ok([{ id: 'a', name: 'A', description: 'd', source: 'user', path: '/x' }]))
+    const out = await listSkills({ fetchImpl })
+    expect(out[0].id).toBe('a')
+    expect(fetchImpl).toHaveBeenCalledWith('/api/skills', { method: 'GET' })
+  })
+
+  it('recommendSkills POSTs PRD body', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(ok([{ skillId: 's', score: 1, matchedTerms: ['x'], reasoning: 'r' }]))
+    const out = await recommendSkills({ prdText: 'hello', topN: 5 }, { fetchImpl })
+    expect(out[0].skillId).toBe('s')
+    expect(fetchImpl).toHaveBeenCalledWith('/api/skills/recommend', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ prdText: 'hello', topN: 5 }),
+    })
+  })
+
+  it('recommendSkills throws ApiError on 400', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(fail(400, { error: 'prd required' }))
+    await expect(recommendSkills({ prdText: '' }, { fetchImpl })).rejects.toBeInstanceOf(ApiError)
+  })
+
+  it('createDraft POSTs payload, returns 201 body', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(ok({ draftId: 'd1', status: 'planning' }, 201))
+    const out = await createDraft(
+      { prdText: 'p', repos: [{ name: 'r', localPath: '/r' }], skills: ['s1'] },
+      { fetchImpl },
+    )
+    expect(out).toEqual({ draftId: 'd1', status: 'planning' })
+    const call = (fetchImpl.mock.calls[0] as [string, RequestInit])
+    expect(call[0]).toBe('/api/tests/draft')
+    expect(call[1].method).toBe('POST')
+  })
+
+  it('getDraft URL-encodes the id', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(ok({ draftId: 'a/b', status: 'created' }))
+    await getDraft('a/b', { fetchImpl })
+    expect(fetchImpl).toHaveBeenCalledWith('/api/tests/draft/a%2Fb', { method: 'GET' })
+  })
+
+  it('acceptPlan posts plan when provided', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(ok({ draftId: 'd', status: 'generating' }, 202))
+    await acceptPlan('d', [{ step: 's', actions: ['a'], expectedOutcome: 'e' }], { fetchImpl })
+    const body = JSON.parse((fetchImpl.mock.calls[0] as [string, RequestInit])[1].body as string)
+    expect(body.plan).toBeDefined()
+  })
+
+  it('acceptPlan posts empty body when no plan supplied', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(ok({ draftId: 'd', status: 'generating' }, 202))
+    await acceptPlan('d', undefined, { fetchImpl })
+    const body = JSON.parse((fetchImpl.mock.calls[0] as [string, RequestInit])[1].body as string)
+    expect(body).toEqual({})
+  })
+
+  it('acceptSpec posts featureName when given', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(ok({ draftId: 'd', status: 'accepted', featureDir: '/x' }))
+    await acceptSpec('d', 'my-feat', { fetchImpl })
+    const body = JSON.parse((fetchImpl.mock.calls[0] as [string, RequestInit])[1].body as string)
+    expect(body).toEqual({ featureName: 'my-feat' })
+  })
+
+  it('acceptSpec posts empty body when no featureName supplied', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(ok({ draftId: 'd', status: 'accepted', featureDir: '/x' }))
+    await acceptSpec('d', undefined, { fetchImpl })
+    const body = JSON.parse((fetchImpl.mock.calls[0] as [string, RequestInit])[1].body as string)
+    expect(body).toEqual({})
+  })
+
+  it('rejectDraft POSTs and resolves on 204', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(null, { status: 204 }))
+    await expect(rejectDraft('d', { fetchImpl })).resolves.toBeUndefined()
+    expect(fetchImpl).toHaveBeenCalledWith('/api/tests/draft/d/reject', { method: 'POST' })
+  })
+
+  it('deleteDraft DELETEs and resolves on 204', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(null, { status: 204 }))
+    await expect(deleteDraft('d', { fetchImpl })).resolves.toBeUndefined()
+    expect(fetchImpl).toHaveBeenCalledWith('/api/tests/draft/d', { method: 'DELETE' })
+  })
+
+  it('deleteDraft throws ApiError on 404', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(fail(404, { error: 'draft not found' }))
+    await expect(deleteDraft('missing', { fetchImpl })).rejects.toBeInstanceOf(ApiError)
   })
 
   it('uses globalThis.fetch by default when no fetchImpl provided', async () => {
