@@ -22,6 +22,7 @@ import {
 import type { PtyFactory, PtyHandle } from './pty-spawner'
 import { HealCycleState, AUTO_HEAL_MAX_CYCLES } from './heal-cycle'
 import { appendJournalIteration } from './log-enrichment'
+import type { RunnerLog } from './runner-log'
 import {
   resolveMcpOutputDir,
   ensureMcpOutputDir,
@@ -70,6 +71,10 @@ export interface OrchestratorOptions {
   healSignalPollMs?: number
   // Cap on how long we wait for an agent to write a signal after exit.
   healAgentTimeoutMs?: number
+  // Optional runner-log sink. When present, the orchestrator subscribes to its
+  // own lifecycle events on construction and tees a human-readable line for
+  // each into `runner.log`. Both CLI and web entrypoints provide one.
+  runnerLog?: RunnerLog
 }
 
 export type OrchestratorEventMap = {
@@ -155,6 +160,7 @@ export class RunOrchestrator extends EventEmitter {
   private readonly autoHeal?: AutoHealConfig
   private readonly healSignalPollMs: number
   private readonly healAgentTimeoutMs: number
+  private readonly runnerLog?: RunnerLog
   private lastDetectedSignal: { kind: 'restart' | 'rerun' | 'heal'; body: Record<string, unknown> } | null = null
 
   private status: RunManifest['status'] = 'running'
@@ -182,6 +188,30 @@ export class RunOrchestrator extends EventEmitter {
     this.autoHeal = opts.autoHeal
     this.healSignalPollMs = opts.healSignalPollMs ?? this.healthPollIntervalMs
     this.healAgentTimeoutMs = opts.healAgentTimeoutMs ?? 10 * 60 * 1000
+    this.runnerLog = opts.runnerLog
+    if (this.runnerLog) this.attachRunnerLog(this.runnerLog)
+  }
+
+  // Subscribe the runner-log to every lifecycle event it cares about. Done
+  // once at construction so neither caller (CLI shim, web-server) has to wire
+  // listeners themselves.
+  private attachRunnerLog(log: RunnerLog): void {
+    const events: (keyof OrchestratorEventMap)[] = [
+      'service-started',
+      'service-exit',
+      'health-check',
+      'playwright-started',
+      'playwright-exit',
+      'agent-started',
+      'agent-exit',
+      'heal-cycle-started',
+      'signal-detected',
+      'run-status',
+      'run-complete',
+    ]
+    for (const ev of events) {
+      this.on(ev, (payload) => log.recordEvent(ev, payload as never))
+    }
   }
 
   emit<K extends keyof OrchestratorEventMap>(

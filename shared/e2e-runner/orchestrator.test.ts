@@ -10,8 +10,9 @@ import {
 } from './orchestrator'
 import type { PtyFactory, PtyHandle, PtySpawnOptions } from './pty-spawner'
 import type { FeatureConfig } from '../launcher/types'
-import { runDirFor } from './run-paths'
+import { runDirFor, buildRunPaths } from './run-paths'
 import { readManifest, readRunsIndex } from './manifest'
+import { RunnerLog } from './runner-log'
 
 interface FakeProcess {
   pid: number
@@ -771,6 +772,41 @@ describe('readSummary / extractFailedSlugs / defaultPlaywrightSpawner / defaultH
     expect(inv.command).toContain('playwright test')
     expect(inv.cwd).toBe(f.featureDir)
     expect(defaultHealCommand({ cycle: 2, outputDir: '/x' })).toContain('cycle=2')
+  })
+})
+
+describe('RunOrchestrator + RunnerLog integration', () => {
+  it('writes lifecycle events to runner.log when one is supplied', async () => {
+    const { factory, spawned } = makeFakeFactory()
+    const paths = buildRunPaths(runDir)
+    const runnerLog = new RunnerLog(paths.runnerLogPath)
+    const orch = new RunOrchestrator({
+      feature: makeFeature(),
+      runId: RUN_ID,
+      runDir,
+      ptyFactory: factory,
+      healthCheck: async () => true,
+      delay: async () => undefined,
+      runnerLog,
+      playwrightSpawner: () => ({ command: 'fake-pw', cwd: tmpDir }),
+    })
+
+    await orch.start()
+    const exitPromise = orch.runPlaywright()
+    spawned[spawned.length - 1].emitExit(0)
+    await exitPromise
+    await orch.stop('passed')
+
+    const body = fs.readFileSync(paths.runnerLogPath, 'utf-8')
+    expect(body).toContain('Service started: api')
+    expect(body).toContain('Health check passed: api')
+    expect(body).toContain('Running Playwright tests: fake-pw')
+    expect(body).toContain('Playwright exited: code=0')
+    expect(body).toContain('Run complete: status=passed')
+    // ANSI-free + timestamped format.
+    for (const line of body.trim().split('\n')) {
+      expect(line).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z (INFO|WARN|ERROR) /)
+    }
   })
 })
 

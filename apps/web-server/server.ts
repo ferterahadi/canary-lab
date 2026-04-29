@@ -9,8 +9,9 @@ import { createRegistry, type OrchestratorRegistry, type OrchestratorLike } from
 import { PaneBroker } from './lib/pane-broker'
 import { loadFeatures } from './lib/feature-loader'
 import { generateRunId } from '../../shared/e2e-runner/run-id'
-import { runDirFor } from '../../shared/e2e-runner/run-paths'
+import { runDirFor, buildRunPaths } from '../../shared/e2e-runner/run-paths'
 import { RunOrchestrator } from '../../shared/e2e-runner/orchestrator'
+import { RunnerLog } from '../../shared/e2e-runner/runner-log'
 import { realPtyFactory } from '../../shared/e2e-runner/pty-spawner'
 
 // Bootstrap glue. Excluded from coverage — the testable logic lives under
@@ -52,11 +53,14 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
       if (!feature) throw new Error(`feature not found: ${featureName}`)
       const runId = generateRunId()
       const runDir = runDirFor(logsDir, runId)
+      const runnerLog = new RunnerLog(buildRunPaths(runDir).runnerLogPath)
+      runnerLog.info(`Run started: feature=${feature.name} runId=${runId}`)
       const orch = new RunOrchestrator({
         feature,
         runId,
         runDir,
         ptyFactory: realPtyFactory(),
+        runnerLog,
       })
       const broker = new PaneBroker()
       brokers.set(runId, broker)

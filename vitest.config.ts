@@ -27,6 +27,7 @@ export default defineConfig({
         'shared/e2e-runner/retention.ts',
         'shared/e2e-runner/heal-cycle.ts',
         'shared/e2e-runner/playwright-mcp-artifacts.ts',
+        'shared/e2e-runner/runner-log.ts',
         'shared/launcher/foreground-pty.ts',
         // Web-server business logic. Bootstrap (server.ts), WebSocket
         // wiring (ws/), and CLI glue (scripts/ui-command.ts) are excluded
