@@ -5,12 +5,14 @@ const runEnv = vi.fn(async () => {})
 const createFeature = vi.fn(async () => {})
 const initProject = vi.fn(async () => {})
 const upgradeProject = vi.fn(async () => {})
+const runUi = vi.fn(async () => {})
 
 vi.mock('../shared/e2e-runner/runner', () => ({ main: runRunner }))
 vi.mock('../shared/env-switcher/root-cli', () => ({ main: runEnv }))
 vi.mock('./new-feature', () => ({ main: createFeature }))
 vi.mock('./init-project', () => ({ main: initProject }))
 vi.mock('./upgrade', () => ({ main: upgradeProject }))
+vi.mock('./ui-command', () => ({ runUi }))
 
 const { main, printUsage } = await import('./cli')
 
@@ -20,6 +22,7 @@ beforeEach(() => {
   createFeature.mockClear()
   initProject.mockClear()
   upgradeProject.mockClear()
+  runUi.mockClear()
 })
 
 describe('printUsage', () => {
@@ -30,6 +33,7 @@ describe('printUsage', () => {
     spy.mockRestore()
     expect(out).toContain('canary-lab init <folder>')
     expect(out).toContain('canary-lab run')
+    expect(out).toContain('canary-lab ui')
     expect(out).toContain('--heal-session')
     expect(out).not.toContain('--terminal')
     expect(out).not.toContain('--benchmark')
@@ -48,6 +52,11 @@ describe('main (cli routing)', () => {
   it('routes "run" and forwards remaining args', async () => {
     await main(['run', '--headed', '--heal-session', 'new'])
     expect(runRunner).toHaveBeenCalledExactlyOnceWith(['--headed', '--heal-session', 'new'])
+  })
+
+  it('routes "ui" and forwards remaining args', async () => {
+    await main(['ui', '--port', '8080'])
+    expect(runUi).toHaveBeenCalledExactlyOnceWith(['--port', '8080'])
   })
 
   it('routes "env"', async () => {

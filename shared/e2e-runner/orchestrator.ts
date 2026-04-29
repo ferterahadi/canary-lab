@@ -20,6 +20,13 @@ import {
   type ServiceManifestEntry,
 } from './manifest'
 import type { PtyFactory, PtyHandle } from './pty-spawner'
+import { HealCycleState, AUTO_HEAL_MAX_CYCLES } from './heal-cycle'
+import { appendJournalIteration } from './log-enrichment'
+import {
+  resolveMcpOutputDir,
+  ensureMcpOutputDir,
+  capArtifacts,
+} from './playwright-mcp-artifacts'
 
 // Headless event-emitting orchestrator for a single feature run. Wraps the
 // existing health-check / signal-file semantics behind a clean API the future
@@ -52,6 +59,17 @@ export interface OrchestratorOptions {
   healthDeadlineMs?: number
   // Override for `setTimeout`-based delays in tests.
   delay?: (ms: number) => Promise<void>
+  // Builds the Playwright invocation. The orchestrator spawns it via
+  // ptyFactory so tests can inject a fake. Defaults to the standard
+  // `npx playwright test` command rooted at the feature dir.
+  playwrightSpawner?: PlaywrightSpawner
+  // Auto-heal configuration. Omit to disable the heal loop.
+  autoHeal?: AutoHealConfig
+  // Polling interval for the heal-cycle signal-wait loop. Defaults to
+  // healthPollIntervalMs.
+  healSignalPollMs?: number
+  // Cap on how long we wait for an agent to write a signal after exit.
+  healAgentTimeoutMs?: number
 }
 
 export type OrchestratorEventMap = {
@@ -62,7 +80,10 @@ export type OrchestratorEventMap = {
   'playwright-output': { chunk: string }
   'playwright-started': { command: string }
   'playwright-exit': { exitCode: number }
+  'agent-started': { cycle: number; command: string }
   'agent-output': { chunk: string }
+  'agent-exit': { exitCode: number }
+  'heal-cycle-started': { cycle: number; failureSignature: string }
   'signal-detected': {
     kind: 'restart' | 'rerun' | 'heal'
     body: Record<string, unknown>
@@ -70,6 +91,27 @@ export type OrchestratorEventMap = {
   'run-status': { status: RunManifest['status'] }
   'run-complete': { status: RunManifest['status'] }
 }
+
+export type AutoHealAgent = 'claude' | 'codex'
+
+export interface AutoHealConfig {
+  agent: AutoHealAgent
+  // 1-based cap on heal cycles. Default = AUTO_HEAL_MAX_CYCLES.
+  maxCycles?: number
+  // Optional override of the agent command. Production wires
+  // `buildAgentCommand` from auto-heal.ts; tests pass a no-op echo.
+  buildCommand?: (args: { cycle: number; outputDir: string }) => string
+}
+
+export interface PlaywrightInvocation {
+  command: string
+  cwd: string
+}
+
+export type PlaywrightSpawner = (args: {
+  feature: FeatureConfig
+  paths: RunPaths
+}) => PlaywrightInvocation
 
 export function buildServiceSpecs(feature: FeatureConfig, runDir: string): ServiceSpec[] {
   const out: ServiceSpec[] = []
@@ -109,6 +151,11 @@ export class RunOrchestrator extends EventEmitter {
   private readonly healthDeadlineMs: number
   private readonly delay: (ms: number) => Promise<void>
   private readonly logsRoot: string
+  private readonly playwrightSpawner: PlaywrightSpawner
+  private readonly autoHeal?: AutoHealConfig
+  private readonly healSignalPollMs: number
+  private readonly healAgentTimeoutMs: number
+  private lastDetectedSignal: { kind: 'restart' | 'rerun' | 'heal'; body: Record<string, unknown> } | null = null
 
   private status: RunManifest['status'] = 'running'
   private healCycles = 0
@@ -131,6 +178,10 @@ export class RunOrchestrator extends EventEmitter {
     this.healthDeadlineMs = opts.healthDeadlineMs ?? 60_000
     this.delay = opts.delay ?? ((ms) => new Promise((r) => setTimeout(r, ms)))
     this.logsRoot = path.dirname(path.dirname(opts.runDir))
+    this.playwrightSpawner = opts.playwrightSpawner ?? defaultPlaywrightSpawner
+    this.autoHeal = opts.autoHeal
+    this.healSignalPollMs = opts.healSignalPollMs ?? this.healthPollIntervalMs
+    this.healAgentTimeoutMs = opts.healAgentTimeoutMs ?? 10 * 60 * 1000
   }
 
   emit<K extends keyof OrchestratorEventMap>(
@@ -265,6 +316,7 @@ export class RunOrchestrator extends EventEmitter {
           if (raw) body = JSON.parse(raw) as Record<string, unknown>
         } catch { /* tolerate empty/non-JSON */ }
         try { fs.unlinkSync(t.file) } catch { /* race with caller is fine */ }
+        this.lastDetectedSignal = { kind: t.kind, body }
         this.emit('signal-detected', { kind: t.kind, body })
       }
     }, this.healthPollIntervalMs)
@@ -293,6 +345,183 @@ export class RunOrchestrator extends EventEmitter {
       const p = this.paths.serviceLog(svc.safeName)
       try { fs.writeFileSync(p, '') } catch { /* may not exist yet */ }
     }
+  }
+
+  // ─── Playwright + heal loop ────────────────────────────────────────────────
+  //
+  // Spawns Playwright through the same ptyFactory used for services so tests
+  // inject a fake. Returns the exit code after the pty exits.
+  async runPlaywright(): Promise<number> {
+    const inv = this.playwrightSpawner({ feature: this.feature, paths: this.paths })
+    this.emit('playwright-started', { command: inv.command })
+    const pty = this.ptyFactory({
+      command: inv.command,
+      cwd: inv.cwd,
+      env: {
+        CANARY_LAB_PROJECT_ROOT: this.feature.featureDir,
+        CANARY_LAB_SUMMARY_PATH: this.paths.summaryPath,
+      },
+    })
+    fs.mkdirSync(path.dirname(this.paths.playwrightStdoutPath), { recursive: true })
+    fs.writeFileSync(this.paths.playwrightStdoutPath, '')
+    pty.onData((chunk) => {
+      try { fs.appendFileSync(this.paths.playwrightStdoutPath, chunk) } catch { /* ignore */ }
+      this.emit('playwright-output', { chunk })
+    })
+    return new Promise<number>((resolve) => {
+      pty.onExit(({ exitCode }) => {
+        this.emit('playwright-exit', { exitCode })
+        resolve(exitCode)
+      })
+    })
+  }
+
+  // Block until a signal lands or we time out. Returns `null` on timeout. The
+  // signal watcher already records lastDetectedSignal, so we just poll that.
+  async waitForHealSignal(timeoutMs: number = this.healAgentTimeoutMs): Promise<
+    { kind: 'restart' | 'rerun' | 'heal'; body: Record<string, unknown> } | null
+  > {
+    const deadline = Date.now() + timeoutMs
+    // Always yield to the macrotask queue here — this loop runs concurrently
+    // with the signal-watcher setInterval, and a microtask-only delay would
+    // starve the timer queue.
+    const yieldOnce = (ms: number) =>
+      new Promise<void>((resolve) => setTimeout(resolve, ms))
+    while (Date.now() < deadline) {
+      if (this.stopped) return null
+      if (this.lastDetectedSignal) {
+        const sig = this.lastDetectedSignal
+        this.lastDetectedSignal = null
+        return sig
+      }
+      await yieldOnce(Math.max(1, this.healSignalPollMs))
+    }
+    return null
+  }
+
+  async runHealAgent(args: {
+    cycle: number
+    failedSlugs: readonly string[]
+  }): Promise<{ exitCode: number; signal: { kind: 'restart' | 'rerun' | 'heal'; body: Record<string, unknown> } | null }> {
+    const cfg = this.autoHeal
+    if (!cfg) throw new Error('autoHeal not configured')
+
+    const target = resolveMcpOutputDir({
+      runDir: this.runDir,
+      failedSlugs: args.failedSlugs,
+    })
+    ensureMcpOutputDir(target.dir)
+
+    const command = (cfg.buildCommand ?? defaultHealCommand)({
+      cycle: args.cycle,
+      outputDir: target.dir,
+    })
+    this.emit('agent-started', { cycle: args.cycle, command })
+
+    const transcriptPath = this.paths.agentTranscriptPath
+    fs.mkdirSync(path.dirname(transcriptPath), { recursive: true })
+    if (!fs.existsSync(transcriptPath)) fs.writeFileSync(transcriptPath, '')
+
+    const pty = this.ptyFactory({
+      command,
+      cwd: this.runDir,
+      env: { CANARY_LAB_PROJECT_ROOT: this.feature.featureDir },
+    })
+    pty.onData((chunk) => {
+      try { fs.appendFileSync(transcriptPath, chunk) } catch { /* ignore */ }
+      this.emit('agent-output', { chunk })
+    })
+
+    const exitCode = await new Promise<number>((resolve) => {
+      pty.onExit(({ exitCode: code }) => {
+        this.emit('agent-exit', { exitCode: code })
+        resolve(code)
+      })
+    })
+
+    // Apply the artifact cap once the agent exits — the agent has finished
+    // writing into the MCP output dir at this point.
+    try {
+      capArtifacts(target.dir)
+    } catch { /* best-effort */ }
+
+    // Give the signal watcher a few ticks to pick up a signal that may have
+    // landed right before exit.
+    const sig = await this.waitForHealSignal(Math.min(this.healAgentTimeoutMs, 5000))
+    return { exitCode, signal: sig }
+  }
+
+  // Top-level "do the whole thing" entry. Boots services, runs Playwright,
+  // and—if autoHeal is enabled—loops through heal cycles until one of:
+  // tests pass, the cap is hit, the agent gives up without signaling, or the
+  // failure set stops changing. Updates manifest status throughout.
+  async runFullCycle(): Promise<RunManifest['status']> {
+    await this.start()
+    let exitCode = await this.runPlaywright()
+    let finalStatus: RunManifest['status'] = exitCode === 0 ? 'passed' : 'failed'
+    this.setStatus(finalStatus)
+
+    if (exitCode === 0 || !this.autoHeal) return finalStatus
+
+    const heal = new HealCycleState({
+      maxCycles: this.autoHeal.maxCycles ?? AUTO_HEAL_MAX_CYCLES,
+    })
+
+    while (true) {
+      const summary = readSummary(this.paths.summaryPath)
+      const failedSlugs = extractFailedSlugs(summary)
+      const signature = failedSlugs.slice().sort().join('|')
+      const decision = heal.observeFailures(signature)
+      if (!decision.shouldHeal) break
+
+      const cycleNum = heal.beginCycle() + 1
+      this.emit('heal-cycle-started', { cycle: cycleNum, failureSignature: signature })
+      this.setStatus('healing')
+      this.noteHealCycle()
+
+      const { signal } = await this.runHealAgent({ cycle: cycleNum, failedSlugs })
+
+      if (!signal) {
+        finalStatus = 'failed'
+        this.setStatus(finalStatus)
+        break
+      }
+
+      // Append a journal entry from the signal body so the next iteration's
+      // heal agent has cumulative context.
+      try {
+        if (signal.kind === 'restart' || signal.kind === 'rerun') {
+          appendJournalIteration({
+            signal: signal.kind === 'restart' ? '.restart' : '.rerun',
+            hypothesis: typeof signal.body.hypothesis === 'string' ? signal.body.hypothesis : undefined,
+            filesChanged: Array.isArray(signal.body.filesChanged)
+              ? (signal.body.filesChanged.filter((f): f is string => typeof f === 'string'))
+              : undefined,
+            fixDescription: typeof signal.body.fixDescription === 'string' ? signal.body.fixDescription : undefined,
+            runId: this.runId,
+            manifestPath: this.paths.manifestPath,
+            summaryPath: this.paths.summaryPath,
+          })
+        }
+      } catch { /* journal write is best-effort */ }
+
+      const action = heal.actionForSignal(signal.kind === 'heal' ? 'rerun' : signal.kind)
+      // actionForSignal can only return restart-and-rerun or rerun-only here;
+      // the give-up case is reached via `actionForNoSignal` (handled above
+      // when `signal` is null).
+      if (action.kind === 'restart-and-rerun') {
+        await this.restart()
+      } else {
+        await this.rerun()
+      }
+
+      exitCode = await this.runPlaywright()
+      finalStatus = exitCode === 0 ? 'passed' : 'failed'
+      this.setStatus(finalStatus)
+      if (exitCode === 0) break
+    }
+
+    return finalStatus
   }
 
   setStatus(status: RunManifest['status']): void {
@@ -340,4 +569,46 @@ export class RunOrchestrator extends EventEmitter {
     })
     this.emit('run-complete', { status: finalStatus })
   }
+}
+
+// ─── Module helpers ─────────────────────────────────────────────────────────
+
+interface SummaryShape {
+  failed?: Array<{ name?: unknown; endTime?: unknown }>
+}
+
+export function readSummary(summaryPath: string): SummaryShape {
+  try {
+    return JSON.parse(fs.readFileSync(summaryPath, 'utf-8')) as SummaryShape
+  } catch {
+    return {}
+  }
+}
+
+export function extractFailedSlugs(summary: SummaryShape): string[] {
+  const failed = Array.isArray(summary.failed) ? summary.failed : []
+  return failed
+    .map((f) => (typeof f?.name === 'string' ? (f.name as string) : ''))
+    .filter((n) => n.length > 0)
+}
+
+const SUMMARY_REPORTER_PATH = path.resolve(__dirname, 'summary-reporter.js')
+
+// Production Playwright invocation. Uses `npx playwright test` with our custom
+// summary reporter, rooted at the feature dir. Tests inject their own.
+export const defaultPlaywrightSpawner: PlaywrightSpawner = ({ feature, paths: _paths }) => {
+  const reporter = SUMMARY_REPORTER_PATH
+  return {
+    command: `npx playwright test --reporter=${JSON.stringify(reporter)},list`,
+    cwd: feature.featureDir,
+  }
+}
+
+// Production heal-agent command builder. The web-server / CLI entry points
+// pass a richer one that wires `buildAgentCommand` from auto-heal.ts; this
+// default is intentionally minimal so it never silently runs in tests.
+export function defaultHealCommand(args: { cycle: number; outputDir: string }): string {
+  // Clamp to a no-op if no override is provided. The real wiring lives in
+  // auto-heal.ts and is composed at the call site (CLI / web-server).
+  return `echo "[heal-agent placeholder cycle=${args.cycle} mcp-out=${args.outputDir}]"`
 }

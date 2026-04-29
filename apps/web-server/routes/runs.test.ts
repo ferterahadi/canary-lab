@@ -1,0 +1,168 @@
+import { describe, it, expect, beforeEach } from 'vitest'
+import fs from 'fs'
+import os from 'os'
+import path from 'path'
+import Fastify from 'fastify'
+import { runsRoutes } from './runs'
+import { createRegistry, type OrchestratorLike } from '../lib/run-store'
+import { writeManifest, writeRunsIndex } from '../../../shared/e2e-runner/manifest'
+import { runDirFor } from '../../../shared/e2e-runner/run-paths'
+
+let tmpDir: string
+let logsDir: string
+let featuresDir: string
+
+beforeEach(() => {
+  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-rroutes-')))
+  logsDir = path.join(tmpDir, 'logs')
+  featuresDir = path.join(tmpDir, 'features')
+  fs.mkdirSync(logsDir, { recursive: true })
+  fs.mkdirSync(featuresDir, { recursive: true })
+})
+
+function makeStub(runId: string): OrchestratorLike & { stopped: boolean } {
+  let stopped = false
+  return {
+    runId,
+    stop: async () => { stopped = true },
+    get stopped() { return stopped },
+  } as OrchestratorLike & { stopped: boolean }
+}
+
+function writeManifestForRun(runId: string, feature = 'foo'): void {
+  const dir = runDirFor(logsDir, runId)
+  fs.mkdirSync(dir, { recursive: true })
+  writeManifest(path.join(dir, 'manifest.json'), {
+    runId,
+    feature,
+    startedAt: 'now',
+    status: 'passed',
+    healCycles: 0,
+    services: [],
+  })
+}
+
+function writeFeature(name: string): void {
+  const dir = path.join(featuresDir, name)
+  fs.mkdirSync(dir, { recursive: true })
+  fs.writeFileSync(
+    path.join(dir, 'feature.config.cjs'),
+    `module.exports = { config: { name: ${JSON.stringify(name)}, description: 'd', envs: [], featureDir: __dirname } }`,
+  )
+}
+
+async function build(opts: { startRun?: (f: string) => Promise<OrchestratorLike> } = {}) {
+  const registry = createRegistry()
+  const app = Fastify()
+  await app.register(runsRoutes, {
+    logsDir,
+    featuresDir,
+    registry,
+    startRun: opts.startRun ?? (async () => { throw new Error('not configured') }),
+  })
+  return { app, registry }
+}
+
+describe('GET /api/runs', () => {
+  it('lists runs newest first', async () => {
+    writeRunsIndex(logsDir, [
+      { runId: 'a', feature: 'foo', startedAt: '2026-01-01T00:00:00Z', status: 'passed' },
+      { runId: 'b', feature: 'foo', startedAt: '2026-02-01T00:00:00Z', status: 'failed' },
+    ])
+    const { app } = await build()
+    const res = await app.inject({ method: 'GET', url: '/api/runs' })
+    expect(res.json().map((r: { runId: string }) => r.runId)).toEqual(['b', 'a'])
+  })
+
+  it('filters by feature', async () => {
+    writeRunsIndex(logsDir, [
+      { runId: 'a', feature: 'foo', startedAt: '2026-01-01T00:00:00Z', status: 'passed' },
+      { runId: 'b', feature: 'bar', startedAt: '2026-02-01T00:00:00Z', status: 'failed' },
+    ])
+    const { app } = await build()
+    const res = await app.inject({ method: 'GET', url: '/api/runs?feature=bar' })
+    expect(res.json().map((r: { runId: string }) => r.runId)).toEqual(['b'])
+  })
+})
+
+describe('GET /api/runs/:runId', () => {
+  it('returns the manifest', async () => {
+    writeManifestForRun('r1')
+    const { app } = await build()
+    const res = await app.inject({ method: 'GET', url: '/api/runs/r1' })
+    expect(res.statusCode).toBe(200)
+    expect(res.json().runId).toBe('r1')
+  })
+
+  it('404s on unknown', async () => {
+    const { app } = await build()
+    const res = await app.inject({ method: 'GET', url: '/api/runs/none' })
+    expect(res.statusCode).toBe(404)
+  })
+})
+
+describe('POST /api/runs', () => {
+  it('400s when feature missing from body', async () => {
+    const { app } = await build()
+    const res = await app.inject({ method: 'POST', url: '/api/runs', payload: {} })
+    expect(res.statusCode).toBe(400)
+  })
+
+  it('404s when feature is unknown', async () => {
+    const { app } = await build()
+    const res = await app.inject({ method: 'POST', url: '/api/runs', payload: { feature: 'ghost' } })
+    expect(res.statusCode).toBe(404)
+  })
+
+  it('starts a run via the injected factory and registers it', async () => {
+    writeFeature('foo')
+    const stub = makeStub('run-1')
+    const { app, registry } = await build({ startRun: async () => stub })
+    const res = await app.inject({ method: 'POST', url: '/api/runs', payload: { feature: 'foo' } })
+    expect(res.statusCode).toBe(201)
+    expect(res.json()).toEqual({ runId: 'run-1' })
+    expect(registry.get('run-1')).toBe(stub)
+  })
+
+  it('500s when factory throws', async () => {
+    writeFeature('foo')
+    const { app } = await build({ startRun: async () => { throw new Error('boom') } })
+    const res = await app.inject({ method: 'POST', url: '/api/runs', payload: { feature: 'foo' } })
+    expect(res.statusCode).toBe(500)
+    expect(res.json().error).toContain('boom')
+  })
+})
+
+describe('DELETE /api/runs/:runId', () => {
+  it('stops a registered orchestrator and 204s', async () => {
+    const stub = makeStub('r2')
+    const { app, registry } = await build()
+    registry.set('r2', stub)
+    const res = await app.inject({ method: 'DELETE', url: '/api/runs/r2' })
+    expect(res.statusCode).toBe(204)
+    expect(stub.stopped).toBe(true)
+    expect(registry.get('r2')).toBeUndefined()
+  })
+
+  it('204s when not registered but manifest exists (archived run)', async () => {
+    writeManifestForRun('r3')
+    const { app } = await build()
+    const res = await app.inject({ method: 'DELETE', url: '/api/runs/r3' })
+    expect(res.statusCode).toBe(204)
+  })
+
+  it('404s when run unknown entirely', async () => {
+    const { app } = await build()
+    const res = await app.inject({ method: 'DELETE', url: '/api/runs/ghost' })
+    expect(res.statusCode).toBe(404)
+  })
+
+  it('still 204s if stop() throws (best-effort)', async () => {
+    const failing: OrchestratorLike = { runId: 'r4', stop: async () => { throw new Error('nope') } }
+    const { app, registry } = await build()
+    registry.set('r4', failing)
+    const res = await app.inject({ method: 'DELETE', url: '/api/runs/r4' })
+    expect(res.statusCode).toBe(204)
+    expect(registry.get('r4')).toBeUndefined()
+  })
+})

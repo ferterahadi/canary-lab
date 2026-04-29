@@ -282,6 +282,11 @@ export async function main(argv: string[] = []) {
       runDir,
       ptyFactory: realPtyFactory(),
     })
+    // NOTE: the CLI shim drives Playwright + heal-agent itself (below) via the
+    // legacy `runPlaywright` / `spawnHealAgent` helpers so the existing
+    // foreground-pty UX stays intact. The web-server entry point uses
+    // `orchestrator.runFullCycle()` instead, which drives the same lifecycle
+    // through node-pty + the new heal-cycle state machine.
 
     uiLine()
     info(`Starting run ${ansiC('bold', runId)} → ${ansiPath(runDir)}`)
