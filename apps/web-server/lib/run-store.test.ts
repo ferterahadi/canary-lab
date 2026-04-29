@@ -6,6 +6,7 @@ import {
   createRegistry,
   listRuns,
   getRunDetail,
+  readRunSummary,
 } from './run-store'
 import { writeManifest, writeRunsIndex } from '../../../shared/e2e-runner/manifest'
 import { runDirFor } from '../../../shared/e2e-runner/run-paths'
@@ -86,5 +87,55 @@ describe('getRunDetail', () => {
     const d = getRunDetail(tmpDir, 'r1')
     expect(d?.runId).toBe('r1')
     expect(d?.manifest.feature).toBe('foo')
+    expect(d?.summary).toBeUndefined()
+  })
+
+  it('includes summary when e2e-summary.json exists alongside manifest', () => {
+    const dir = runDirFor(tmpDir, 'r-sum')
+    fs.mkdirSync(dir, { recursive: true })
+    writeManifest(path.join(dir, 'manifest.json'), {
+      runId: 'r-sum',
+      feature: 'foo',
+      startedAt: 'now',
+      status: 'failed',
+      healCycles: 0,
+      services: [],
+    })
+    fs.writeFileSync(
+      path.join(dir, 'e2e-summary.json'),
+      JSON.stringify({
+        complete: true,
+        total: 2,
+        passed: 1,
+        failed: [{ name: 'test-case-x', error: { message: 'boom' } }],
+      }),
+    )
+    const d = getRunDetail(tmpDir, 'r-sum')
+    expect(d?.summary?.complete).toBe(true)
+    expect(d?.summary?.failed[0].name).toBe('test-case-x')
+  })
+})
+
+describe('readRunSummary', () => {
+  it('returns undefined when summary file missing', () => {
+    expect(readRunSummary(tmpDir)).toBeUndefined()
+  })
+
+  it('returns undefined when summary file is unparseable', () => {
+    fs.writeFileSync(path.join(tmpDir, 'e2e-summary.json'), '{not json')
+    expect(readRunSummary(tmpDir)).toBeUndefined()
+  })
+
+  it('returns undefined when summary parses to a non-object', () => {
+    fs.writeFileSync(path.join(tmpDir, 'e2e-summary.json'), 'null')
+    expect(readRunSummary(tmpDir)).toBeUndefined()
+  })
+
+  it('returns parsed summary on a valid file', () => {
+    fs.writeFileSync(
+      path.join(tmpDir, 'e2e-summary.json'),
+      JSON.stringify({ complete: false, total: 0, passed: 0, failed: [] }),
+    )
+    expect(readRunSummary(tmpDir)).toEqual({ complete: false, total: 0, passed: 0, failed: [] })
   })
 })

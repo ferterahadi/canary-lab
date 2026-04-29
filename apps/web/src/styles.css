@@ -1,0 +1,13 @@
+@import "tailwindcss";
+
+/* xterm.js base CSS — imported directly so we don't ship a separate sheet. */
+@import "@xterm/xterm/css/xterm.css";
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+}

@@ -34,6 +34,10 @@ export default defineConfig({
         // below — they're thin I/O wrappers around the modules covered here.
         'apps/web-server/lib/**/*.ts',
         'apps/web-server/routes/**/*.ts',
+        // Frontend pure modules. React components are excluded — only the
+        // API client, WebSocket wrapper, and pure utilities are gated.
+        'apps/web/src/api/**/*.ts',
+        'apps/web/src/lib/**/*.ts',
       ],
       exclude: [
         '**/*.test.ts',
@@ -49,6 +53,13 @@ export default defineConfig({
         'apps/web-server/server.ts',
         'apps/web-server/ws/**',
         'apps/web-server/lib/wizard-agent-runner.ts',
+        'apps/web/src/components/**',
+        'apps/web/src/pages/**',
+        'apps/web/src/main.tsx',
+        'apps/web/src/App.tsx',
+        'apps/web/vite.config.ts',
+        'apps/web/dist/**',
+        'apps/web/src/api/types.ts',
         'dist/**',
         'templates/**',
       ],

@@ -2,6 +2,7 @@ import path from 'path'
 import fs from 'fs'
 import Fastify, { type FastifyInstance } from 'fastify'
 import websocketPlugin from '@fastify/websocket'
+import fastifyStatic from '@fastify/static'
 import { featuresRoutes } from './routes/features'
 import { runsRoutes } from './routes/runs'
 import { journalRoutes } from './routes/journal'
@@ -159,6 +160,38 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
   await app.register(draftAgentStreamRoutes, {
     brokerForDraft: (draftId) => draftBrokers.get(draftId) ?? null,
   })
+
+  // Serve the built React frontend if it exists. In development the dist dir
+  // is missing — fall back to a placeholder so `GET /` still returns something
+  // meaningful instead of crashing the server boot.
+  const webDist = path.resolve(__dirname, '..', 'web', 'dist')
+  const indexHtmlPath = path.join(webDist, 'index.html')
+  if (fs.existsSync(indexHtmlPath)) {
+    await app.register(fastifyStatic, {
+      root: webDist,
+      prefix: '/',
+      wildcard: false,
+      decorateReply: false,
+    })
+    // SPA fallback for unknown non-API GETs — serve index.html so client-side
+    // routes resolve. Restricted to GET; api/ws prefixes already match earlier
+    // handlers because Fastify routes are matched in registration order and
+    // these wildcards don't shadow specific routes.
+    app.setNotFoundHandler((req, reply) => {
+      if (req.method === 'GET' && !req.url.startsWith('/api') && !req.url.startsWith('/ws')) {
+        reply.type('text/html').send(fs.readFileSync(indexHtmlPath))
+        return
+      }
+      reply.code(404).send({ error: 'not found' })
+    })
+  } else {
+    app.get('/', async (_req, reply) => {
+      reply.type('text/html').send(
+        '<!doctype html><title>Canary Lab</title><h1>Frontend not built yet</h1>'
+        + '<p>Run <code>npm run build:web</code> to produce <code>apps/web/dist/</code>.</p>',
+      )
+    })
+  }
 
   return { app, registry, brokers, draftBrokers }
 }
