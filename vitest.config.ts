@@ -48,6 +48,7 @@ export default defineConfig({
         'scripts/ui-command.ts',
         'apps/web-server/server.ts',
         'apps/web-server/ws/**',
+        'apps/web-server/lib/wizard-agent-runner.ts',
         'dist/**',
         'templates/**',
       ],
