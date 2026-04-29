@@ -68,6 +68,17 @@ export function App(): JSX.Element {
             setSelectedFeature(name)
             setSelectedRunId(null)
           }}
+          onFeaturesChanged={(acceptedFeature) => {
+            // Refresh after the wizard creates a new feature so it appears
+            // in the sidebar; auto-select it if provided.
+            api.listFeatures().then((data) => {
+              setFeatures(data)
+              if (acceptedFeature && data.some((f) => f.name === acceptedFeature)) {
+                setSelectedFeature(acceptedFeature)
+                setSelectedRunId(null)
+              }
+            }).catch(() => { /* keep prior list on error */ })
+          }}
         />
       </aside>
       <section className="w-[320px] shrink-0 border-r border-zinc-800 overflow-y-auto">

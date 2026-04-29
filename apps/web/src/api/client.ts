@@ -8,6 +8,12 @@ import type {
   RunIndexEntry,
   RunDetail,
   JournalEntry,
+  SkillSummary,
+  SkillRecommendation,
+  CreateDraftPayload,
+  CreateDraftResponse,
+  DraftRecord,
+  PlanStep,
 } from './types'
 
 export class ApiError extends Error {
@@ -115,6 +121,104 @@ export async function deleteJournalEntry(
   const { baseUrl, fetchImpl } = defaultOpts(opts)
   await request<unknown>(
     `${baseUrl}/api/journal/${encodeURIComponent(String(iteration))}`,
+    { method: 'DELETE' },
+    fetchImpl,
+  )
+}
+
+export function listSkills(opts?: ClientOptions): Promise<SkillSummary[]> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<SkillSummary[]>(`${baseUrl}/api/skills`, { method: 'GET' }, fetchImpl)
+}
+
+export function recommendSkills(
+  body: { prdText: string; topN?: number },
+  opts?: ClientOptions,
+): Promise<SkillRecommendation[]> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<SkillRecommendation[]>(
+    `${baseUrl}/api/skills/recommend`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    },
+    fetchImpl,
+  )
+}
+
+export function createDraft(
+  payload: CreateDraftPayload,
+  opts?: ClientOptions,
+): Promise<CreateDraftResponse> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<CreateDraftResponse>(
+    `${baseUrl}/api/tests/draft`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
+    },
+    fetchImpl,
+  )
+}
+
+export function getDraft(id: string, opts?: ClientOptions): Promise<DraftRecord> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<DraftRecord>(
+    `${baseUrl}/api/tests/draft/${encodeURIComponent(id)}`,
+    { method: 'GET' },
+    fetchImpl,
+  )
+}
+
+export function acceptPlan(
+  id: string,
+  plan?: PlanStep[],
+  opts?: ClientOptions,
+): Promise<{ draftId: string; status: string }> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<{ draftId: string; status: string }>(
+    `${baseUrl}/api/tests/draft/${encodeURIComponent(id)}/accept-plan`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(plan ? { plan } : {}),
+    },
+    fetchImpl,
+  )
+}
+
+export function acceptSpec(
+  id: string,
+  featureName?: string,
+  opts?: ClientOptions,
+): Promise<{ draftId: string; status: string; featureDir: string }> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<{ draftId: string; status: string; featureDir: string }>(
+    `${baseUrl}/api/tests/draft/${encodeURIComponent(id)}/accept-spec`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(featureName ? { featureName } : {}),
+    },
+    fetchImpl,
+  )
+}
+
+export async function rejectDraft(id: string, opts?: ClientOptions): Promise<void> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  await request<unknown>(
+    `${baseUrl}/api/tests/draft/${encodeURIComponent(id)}/reject`,
+    { method: 'POST' },
+    fetchImpl,
+  )
+}
+
+export async function deleteDraft(id: string, opts?: ClientOptions): Promise<void> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  await request<unknown>(
+    `${baseUrl}/api/tests/draft/${encodeURIComponent(id)}`,
     { method: 'DELETE' },
     fetchImpl,
   )

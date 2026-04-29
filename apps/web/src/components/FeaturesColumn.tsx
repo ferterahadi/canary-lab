@@ -1,17 +1,25 @@
 import { useEffect, useState } from 'react'
 import * as api from '../api/client'
 import type { Feature, FeatureTests } from '../api/types'
+import { AddTestWizard } from './AddTestWizard'
 
 interface Props {
   features: Feature[]
   selectedFeature: string | null
   onSelectFeature: (name: string) => void
+  onFeaturesChanged?: (acceptedFeature?: string) => void
 }
 
-// Column 1 — features tree. Each feature expands into its tests on click. Test
-// rows are display-only in 6a; selection state for tests lands in 6b.
-export function FeaturesColumn({ features, selectedFeature, onSelectFeature }: Props): JSX.Element {
+// Column 1 — features tree. Each feature expands into its tests on click.
+// The "+ Add new test" button opens the full-screen wizard (slice 6c).
+export function FeaturesColumn({
+  features,
+  selectedFeature,
+  onSelectFeature,
+  onFeaturesChanged,
+}: Props): JSX.Element {
   const [tests, setTests] = useState<Record<string, FeatureTests>>({})
+  const [wizardOpen, setWizardOpen] = useState(false)
 
   useEffect(() => {
     if (!selectedFeature || tests[selectedFeature]) return
@@ -24,9 +32,8 @@ export function FeaturesColumn({ features, selectedFeature, onSelectFeature }: P
     <div className="flex flex-col gap-1 p-2">
       <button
         type="button"
-        disabled
-        title="Coming in 6c"
-        className="rounded border border-zinc-800 bg-zinc-900 px-3 py-2 text-left text-xs text-zinc-500 disabled:cursor-not-allowed"
+        onClick={() => setWizardOpen(true)}
+        className="rounded border border-zinc-800 bg-zinc-900 px-3 py-2 text-left text-xs text-zinc-300 hover:bg-zinc-800"
       >
         + Add new test
       </button>
@@ -69,6 +76,16 @@ export function FeaturesColumn({ features, selectedFeature, onSelectFeature }: P
             </div>
           )
         })
+      )}
+
+      {wizardOpen && (
+        <AddTestWizard
+          features={features}
+          onClose={({ acceptedFeature }) => {
+            setWizardOpen(false)
+            if (acceptedFeature) onFeaturesChanged?.(acceptedFeature)
+          }}
+        />
       )}
     </div>
   )
