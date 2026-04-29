@@ -30,8 +30,9 @@ describe('printUsage', () => {
     spy.mockRestore()
     expect(out).toContain('canary-lab init <folder>')
     expect(out).toContain('canary-lab run')
-    expect(out).toContain('--benchmark-mode canary|baseline')
-    expect(out).not.toContain('--benchmark-max-cycles')
+    expect(out).toContain('--heal-session')
+    expect(out).not.toContain('--terminal')
+    expect(out).not.toContain('--benchmark')
     expect(out).toContain('canary-lab env')
     expect(out).toContain('canary-lab new-feature <name>')
     expect(out).toContain('canary-lab upgrade')
@@ -45,8 +46,8 @@ describe('main (cli routing)', () => {
   })
 
   it('routes "run" and forwards remaining args', async () => {
-    await main(['run', '--headed', '--terminal', 'Terminal'])
-    expect(runRunner).toHaveBeenCalledExactlyOnceWith(['--headed', '--terminal', 'Terminal'])
+    await main(['run', '--headed', '--heal-session', 'new'])
+    expect(runRunner).toHaveBeenCalledExactlyOnceWith(['--headed', '--heal-session', 'new'])
   })
 
   it('routes "env"', async () => {
