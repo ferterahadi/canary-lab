@@ -174,6 +174,9 @@ interface JournalEntry {
   outcome?: string | null
   fix?: { description?: string; file?: string }
   signal?: string
+  run?: string
+  feature?: string
+  failingTests?: string
 }
 
 // Parse the Markdown journal format:
@@ -217,6 +220,9 @@ export function parseJournalMarkdown(raw: string): JournalEntry[] {
       current.outcome = value === 'pending' || value === 'null' || value === '' ? null : value
     }
     else if (key === 'signal') current.signal = value
+    else if (key === 'run') current.run = value
+    else if (key === 'feature') current.feature = value
+    else if (key === 'failingTests') current.failingTests = value
     else if (key === 'fix.file') current.fix = { ...(current.fix ?? {}), file: value }
     else if (key === 'fix.description') current.fix = { ...(current.fix ?? {}), description: value }
   }
@@ -353,11 +359,18 @@ export interface JournalAppendInput {
   hypothesis?: string
   filesChanged?: string[]
   fixDescription?: string
+  runId?: string
+  // When provided, overrides the global manifest/summary lookup so the
+  // orchestrator can append from a per-run dir without the runner-side
+  // singletons getting in the way.
+  manifestPath?: string
+  summaryPath?: string
+  journalPath?: string
 }
 
-function nextIterationNumber(): number {
+export function nextIterationNumber(journalPath: string = DIAGNOSIS_JOURNAL_PATH): number {
   try {
-    const raw = fs.readFileSync(DIAGNOSIS_JOURNAL_PATH, 'utf-8')
+    const raw = fs.readFileSync(journalPath, 'utf-8')
     const entries = parseJournalMarkdown(raw)
     const max = entries.reduce(
       (m, e) => (typeof e.iteration === 'number' && e.iteration > m ? e.iteration : m),
@@ -369,12 +382,40 @@ function nextIterationNumber(): number {
   }
 }
 
+interface ManifestForJournal {
+  featureName?: string
+}
+
+function readManifestFrom(file: string): ManifestForJournal {
+  try {
+    return JSON.parse(fs.readFileSync(file, 'utf-8')) as ManifestForJournal
+  } catch {
+    return {}
+  }
+}
+
 export function appendJournalIteration(input: JournalAppendInput): void {
   const hypothesis = input.hypothesis?.trim()
   if (!hypothesis) return // Nothing meaningful to record — skip.
 
-  const manifest = readManifest()
-  const summaryPath = getSummaryPath()
+  const manifestPath = input.manifestPath ?? MANIFEST_PATH
+  const summaryPath = input.summaryPath ?? getSummaryPath()
+  const journalPath = input.journalPath ?? DIAGNOSIS_JOURNAL_PATH
+
+  // Per-run manifests carry `feature` (the new orchestrator shape); legacy
+  // top-level manifests carry `featureName`. Try both so the journal entry's
+  // feature field stays populated either way.
+  let featureName: string | undefined
+  try {
+    const raw = JSON.parse(fs.readFileSync(manifestPath, 'utf-8')) as {
+      feature?: string
+      featureName?: string
+    }
+    featureName = raw.feature ?? raw.featureName
+  } catch {
+    featureName = readManifestFrom(manifestPath).featureName
+  }
+
   let failingTests = ''
   try {
     const summary = JSON.parse(fs.readFileSync(summaryPath, 'utf-8')) as {
@@ -394,9 +435,10 @@ export function appendJournalIteration(input: JournalAppendInput): void {
     : ''
 
   const section: string[] = []
-  section.push(`## Iteration ${nextIterationNumber()} — ${new Date().toISOString()}`)
+  section.push(`## Iteration ${nextIterationNumber(journalPath)} — ${new Date().toISOString()}`)
   section.push('')
-  if (manifest.featureName) section.push(`- feature: ${manifest.featureName}`)
+  if (input.runId) section.push(`- run: ${input.runId}`)
+  if (featureName) section.push(`- feature: ${featureName}`)
   if (failingTests) section.push(`- failingTests: ${failingTests}`)
   section.push(`- hypothesis: ${truncateOneLine(hypothesis, 400)}`)
   if (fixFile) section.push(`- fix.file: ${fixFile}`)
@@ -407,9 +449,9 @@ export function appendJournalIteration(input: JournalAppendInput): void {
   section.push('- outcome: pending')
   section.push('')
 
-  fs.mkdirSync(LOGS_DIR, { recursive: true })
-  const header = fs.existsSync(DIAGNOSIS_JOURNAL_PATH)
+  fs.mkdirSync(path.dirname(journalPath), { recursive: true })
+  const header = fs.existsSync(journalPath)
     ? ''
     : '# Diagnosis Journal\n\n'
-  fs.appendFileSync(DIAGNOSIS_JOURNAL_PATH, header + section.join('\n'))
+  fs.appendFileSync(journalPath, header + section.join('\n'))
 }

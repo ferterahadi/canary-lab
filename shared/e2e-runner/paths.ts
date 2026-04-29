@@ -18,10 +18,11 @@ export const FAILED_DIR = path.join(LOGS_DIR, 'failed')
 export function getSummaryPath(): string {
   return process.env.CANARY_LAB_SUMMARY_PATH ?? SUMMARY_PATH
 }
+// Diagnosis journal lives at the repo root (`<root>/logs/diagnosis-journal.md`)
+// and is intentionally NOT inside any per-run dir — it's persistent cross-run
+// memory the heal agent reads + appends to.
 export const DIAGNOSIS_JOURNAL_PATH = path.join(LOGS_DIR, 'diagnosis-journal.md')
 export const RERUN_SIGNAL = path.join(LOGS_DIR, '.rerun')
 export const RESTART_SIGNAL = path.join(LOGS_DIR, '.restart')
 export const HEAL_SIGNAL = path.join(LOGS_DIR, '.heal')
 export const SIGNAL_HISTORY_PATH = path.join(LOGS_DIR, 'signal-history.json')
-export const ITERM_SESSION_IDS_PATH = path.join(LOGS_DIR, 'iterm-session-ids.json')
-export const ITERM_HEAL_SESSION_IDS_PATH = path.join(LOGS_DIR, 'iterm-heal-session-ids.json')
