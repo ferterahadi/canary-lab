@@ -21,6 +21,7 @@ describe('buildRunPaths', () => {
     expect(p.summaryPath).toBe(path.join(runDir, 'e2e-summary.json'))
     expect(p.playwrightStdoutPath).toBe(path.join(runDir, 'playwright.log'))
     expect(p.agentTranscriptPath).toBe(path.join(runDir, 'agent-transcript.log'))
+    expect(p.runnerLogPath).toBe(path.join(runDir, 'runner.log'))
     expect(p.healIndexPath).toBe(path.join(runDir, 'heal-index.md'))
     expect(p.failedDir).toBe(path.join(runDir, 'failed'))
   })

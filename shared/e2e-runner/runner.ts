@@ -23,7 +23,9 @@ import {
   dim,
   path as ansiPath,
   c as ansiC,
+  setActiveRunnerLog,
 } from '../cli-ui/ui'
+import { RunnerLog } from './runner-log'
 import type { FeatureConfig } from '../launcher/types'
 import { ForegroundLauncher } from '../launcher/foreground-pty'
 import { realPtyFactory } from './pty-spawner'
@@ -34,7 +36,7 @@ import {
   LOGS_DIR,
 } from './paths'
 import { generateRunId } from './run-id'
-import { runDirFor } from './run-paths'
+import { buildRunPaths, runDirFor } from './run-paths'
 import { pruneRuns } from './retention'
 import { RunOrchestrator } from './orchestrator'
 import {
@@ -180,6 +182,7 @@ export async function main(argv: string[] = []) {
     if (cleanedUp) return
     cleanedUp = true
     try { rl.close() } catch { /* ignore */ }
+    setActiveRunnerLog(null)
     if (orchestrator) {
       await orchestrator.stop('aborted')
     }
@@ -275,12 +278,18 @@ export async function main(argv: string[] = []) {
     const runDir = runDirFor(LOGS_DIR, runId)
     fs.mkdirSync(runDir, { recursive: true })
 
+    const runPaths = buildRunPaths(runDir)
+    const runnerLog = new RunnerLog(runPaths.runnerLogPath)
+    setActiveRunnerLog(runnerLog)
+    runnerLog.info(`Run started: feature=${feature.name} runId=${runId}`)
+
     const launcher = new ForegroundLauncher({ ptyFactory: realPtyFactory() })
     orchestrator = new RunOrchestrator({
       feature,
       runId,
       runDir,
       ptyFactory: realPtyFactory(),
+      runnerLog,
     })
     // NOTE: the CLI shim drives Playwright + heal-agent itself (below) via the
     // legacy `runPlaywright` / `spawnHealAgent` helpers so the existing

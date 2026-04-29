@@ -11,6 +11,7 @@ export interface RunPaths {
   summaryPath: string
   playwrightStdoutPath: string
   agentTranscriptPath: string
+  runnerLogPath: string
   healIndexPath: string
   failedDir: string
   signalsDir: string
@@ -28,6 +29,7 @@ export function buildRunPaths(runDir: string): RunPaths {
     summaryPath: path.join(runDir, 'e2e-summary.json'),
     playwrightStdoutPath: path.join(runDir, 'playwright.log'),
     agentTranscriptPath: path.join(runDir, 'agent-transcript.log'),
+    runnerLogPath: path.join(runDir, 'runner.log'),
     healIndexPath: path.join(runDir, 'heal-index.md'),
     failedDir: path.join(runDir, 'failed'),
     signalsDir,
