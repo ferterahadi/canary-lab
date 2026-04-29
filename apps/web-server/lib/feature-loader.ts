@@ -1,0 +1,49 @@
+import fs from 'fs'
+import path from 'path'
+import type { FeatureConfig } from '../../../shared/launcher/types'
+
+// Discover features by scanning <featuresDir>/<feature>/feature.config.{cjs,js,ts}.
+// Mirrors `discoverFeatures` in shared/e2e-runner/runner.ts but takes an
+// explicit featuresDir so tests can point at a fixture tree.
+
+export function loadFeatures(featuresDir: string): FeatureConfig[] {
+  if (!fs.existsSync(featuresDir)) return []
+  const out: FeatureConfig[] = []
+  const dirs = fs
+    .readdirSync(featuresDir, { withFileTypes: true })
+    .filter((d) => d.isDirectory())
+    .map((d) => d.name)
+  for (const dir of dirs) {
+    const candidate = ['feature.config.cjs', 'feature.config.js', 'feature.config.ts']
+      .map((name) => path.join(featuresDir, dir, name))
+      .find((p) => fs.existsSync(p))
+    if (!candidate) continue
+    try {
+      // Bust the require cache so tests can rewrite a fixture and re-load.
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      delete require.cache[require.resolve(candidate)]
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const mod = require(candidate)
+      const cfg = (mod.config ?? mod.default) as FeatureConfig | undefined
+      if (cfg && typeof cfg === 'object' && typeof cfg.name === 'string') {
+        out.push(cfg)
+      }
+    } catch {
+      /* skip malformed config */
+    }
+  }
+  return out
+}
+
+// Find a spec file glob result for a feature. Returns absolute paths.
+export function listSpecFiles(featureDir: string): string[] {
+  const e2eDir = path.join(featureDir, 'e2e')
+  if (!fs.existsSync(e2eDir)) return []
+  const out: string[] = []
+  for (const entry of fs.readdirSync(e2eDir, { withFileTypes: true })) {
+    if (entry.isFile() && entry.name.endsWith('.spec.ts')) {
+      out.push(path.join(e2eDir, entry.name))
+    }
+  }
+  return out.sort()
+}

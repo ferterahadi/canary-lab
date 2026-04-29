@@ -5,6 +5,7 @@ import { main as runEnv } from '../shared/env-switcher/root-cli'
 import { main as createFeature } from './new-feature'
 import { main as initProject } from './init-project'
 import { main as upgradeProject } from './upgrade'
+import { runUi } from './ui-command'
 import { banner, section, dim, fail, line } from '../shared/cli-ui/ui'
 import { runAsScript } from './run-as-script'
 
@@ -13,6 +14,7 @@ export function printUsage(): void {
   section('Usage')
   console.log(`  canary-lab init <folder> ${dim('[--package-spec <spec>]')}`)
   console.log(`  canary-lab run ${dim('[--headed] [--heal-session resume|new]')}`)
+  console.log(`  canary-lab ui ${dim('[--port <n>]')}`)
   console.log(`  canary-lab env`)
   console.log(`  canary-lab new-feature <name> ${dim('[description]')}`)
   console.log(`  canary-lab upgrade ${dim('[--silent]')}`)
@@ -28,6 +30,9 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
       return
     case 'run':
       await runRunner(args)
+      return
+    case 'ui':
+      await runUi(args)
       return
     case 'env':
       await runEnv(args)

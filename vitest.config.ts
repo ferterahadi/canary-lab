@@ -2,7 +2,11 @@ import { defineConfig } from 'vitest/config'
 
 export default defineConfig({
   test: {
-    include: ['scripts/**/*.test.ts', 'shared/**/*.test.ts'],
+    include: [
+      'scripts/**/*.test.ts',
+      'shared/**/*.test.ts',
+      'apps/**/*.test.ts',
+    ],
     environment: 'node',
     coverage: {
       provider: 'v8',
@@ -21,7 +25,14 @@ export default defineConfig({
         'shared/e2e-runner/run-paths.ts',
         'shared/e2e-runner/manifest.ts',
         'shared/e2e-runner/retention.ts',
+        'shared/e2e-runner/heal-cycle.ts',
+        'shared/e2e-runner/playwright-mcp-artifacts.ts',
         'shared/launcher/foreground-pty.ts',
+        // Web-server business logic. Bootstrap (server.ts), WebSocket
+        // wiring (ws/), and CLI glue (scripts/ui-command.ts) are excluded
+        // below — they're thin I/O wrappers around the modules covered here.
+        'apps/web-server/lib/**/*.ts',
+        'apps/web-server/routes/**/*.ts',
       ],
       exclude: [
         '**/*.test.ts',
@@ -33,7 +44,9 @@ export default defineConfig({
         'shared/e2e-runner/auto-heal.ts',
         'shared/e2e-runner/pty-spawner.ts',
         'scripts/cli.ts',
-        'apps/**',
+        'scripts/ui-command.ts',
+        'apps/web-server/server.ts',
+        'apps/web-server/ws/**',
         'dist/**',
         'templates/**',
       ],
