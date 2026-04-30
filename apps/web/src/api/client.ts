@@ -105,6 +105,24 @@ export function startRun(feature: string, opts?: ClientOptions): Promise<{ runId
   )
 }
 
+// Mid-Run Heal: ask the server to interrupt a running test and start the heal
+// agent immediately. Resolves with `{ status, failureCount }` on a 202;
+// throws ApiError on 409 (the body's `reason` describes which precondition
+// failed) or 404 (run not active).
+export interface PauseHealSuccess {
+  status: 'healing'
+  failureCount: number
+}
+
+export function pauseHealRun(runId: string, opts?: ClientOptions): Promise<PauseHealSuccess> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<PauseHealSuccess>(
+    `${baseUrl}/api/runs/${encodeURIComponent(runId)}/pause-heal`,
+    { method: 'POST' },
+    fetchImpl,
+  )
+}
+
 export async function stopRun(runId: string, opts?: ClientOptions): Promise<void> {
   const { baseUrl, fetchImpl } = defaultOpts(opts)
   await request<unknown>(
@@ -159,6 +177,29 @@ export function createDraft(
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(payload),
     },
+    fetchImpl,
+  )
+}
+
+export interface DraftFile {
+  path: string
+  content: string
+  mime: string
+}
+
+// Fetch a single generated file inside a draft for the wizard's Spec Review
+// step. The server enforces path-traversal hardening; this client just
+// percent-encodes each segment so slashes remain in the URL.
+export function getDraftFile(
+  id: string,
+  filePath: string,
+  opts?: ClientOptions,
+): Promise<DraftFile> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  const safe = filePath.split('/').map(encodeURIComponent).join('/')
+  return request<DraftFile>(
+    `${baseUrl}/api/tests/draft/${encodeURIComponent(id)}/files/${safe}`,
+    { method: 'GET' },
     fetchImpl,
   )
 }

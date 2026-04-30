@@ -19,7 +19,11 @@ beforeEach(() => {
 describe('createRegistry', () => {
   it('round-trips orchestrator-like values', () => {
     const reg = createRegistry()
-    const stub = { runId: 'r1', stop: async () => {} }
+    const stub = {
+      runId: 'r1',
+      stop: async () => {},
+      pauseAndHeal: async () => ({ ok: true as const, failureCount: 0 }),
+    }
     reg.set('r1', stub)
     expect(reg.get('r1')).toBe(stub)
     expect(reg.list()).toEqual([stub])

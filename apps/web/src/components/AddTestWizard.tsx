@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import * as api from '../api/client'
-import type { DraftRecord, Feature } from '../api/types'
+import type { DraftRecord, Feature, PlanStep } from '../api/types'
 import { isPollingForStep, isTerminalDraft, nextStepForStatus, type WizardStep } from '../lib/wizard-state'
 import { slugifyFeatureName } from '../lib/wizard-validation'
 import { ConfigureStep, type ConfigureSubmit } from './wizard/ConfigureStep'
@@ -81,11 +81,11 @@ export function AddTestWizard({ features, onClose }: Props): JSX.Element {
     }
   }, [])
 
-  const handleAcceptPlan = useCallback(async (): Promise<void> => {
+  const handleAcceptPlan = useCallback(async (editedPlan?: PlanStep[]): Promise<void> => {
     if (!draft) return
     setActing(true)
     try {
-      await api.acceptPlan(draft.draftId)
+      await api.acceptPlan(draft.draftId, editedPlan)
       const fresh = await api.getDraft(draft.draftId)
       setDraft(fresh)
     } catch (e) {

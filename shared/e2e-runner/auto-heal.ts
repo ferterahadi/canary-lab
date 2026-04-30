@@ -27,6 +27,10 @@ export interface SpawnHealAgentOptions {
   baselineSignalFilePath?: string
   baselineRepoPaths?: string[]
   basePromptOverride?: string
+  // When set, registers `@playwright/mcp` in the spawned `claude` agent's
+  // MCP config with `--output-dir <mcpOutputDir>`. Resolved by the
+  // orchestrator via `resolveMcpOutputDir` and passed through.
+  mcpOutputDir?: string
   // Test injection points.
   launcher?: ForegroundLauncher
   out?: NodeJS.WritableStream
@@ -120,18 +124,36 @@ export function loadPrompt(agent: HealAgent, promptPath: string = promptPathFor(
   return prompt
 }
 
+// Build a transient `--mcp-config` JSON snippet to pass to `claude`. The
+// snippet registers `@playwright/mcp` with `--output-dir <outputDir>` so any
+// browser snapshots/console logs the agent captures land in the per-failure
+// dir under `failed/<slug>/playwright-mcp/`. Pure formatter — no I/O.
+export function buildClaudeMcpConfigArg(outputDir: string): string {
+  const cfg = {
+    mcpServers: {
+      playwright: {
+        command: 'npx',
+        args: ['-y', '@playwright/mcp@latest', '--output-dir', outputDir],
+      },
+    },
+  }
+  return `--mcp-config ${JSON.stringify(JSON.stringify(cfg))}`
+}
+
 export function buildAgentCommand(
   agent: HealAgent,
   sessionMode: HealSessionMode,
   cycle: number,
   promptFile: string,
+  mcpOutputDir?: string,
 ): string {
   const useResume = sessionMode === 'resume' && cycle > 0
   const promptSub = `"$(cat ${JSON.stringify(promptFile)})"`
 
   if (agent === 'claude') {
     const base = `--dangerously-skip-permissions --output-format=stream-json --verbose -p`
-    const flags = useResume ? `--continue ${base}` : base
+    const mcpFlag = mcpOutputDir ? ` ${buildClaudeMcpConfigArg(mcpOutputDir)}` : ''
+    const flags = useResume ? `--continue ${base}${mcpFlag}` : `${base}${mcpFlag}`
     const formatter = `node ${JSON.stringify(CLAUDE_FORMATTER_FILE)}`
     return `claude ${flags} ${promptSub} | ${formatter}`
   }
@@ -205,6 +227,7 @@ export async function spawnHealAgent(
     opts.sessionMode,
     opts.cycle,
     HEAL_PROMPT_FILE,
+    opts.mcpOutputDir,
   )
 
   // Wrap so we capture exit status and so a benchmark usage file can be

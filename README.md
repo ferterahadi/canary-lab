@@ -5,7 +5,9 @@
 
 Canary Lab is a local E2E workflow layer built on top of Playwright.
 
-It is built for cases where one test depends on multiple local apps or services, not just one app in isolation. Canary Lab starts those services in terminal tabs, gates tests on health checks, runs Playwright with per-test service-log slicing, and — on failure — hands the agent (Claude Code or Codex) a structured map of what broke so it can diagnose, fix, and signal a re-run.
+It is built for cases where one test depends on multiple local apps or services, not just one app in isolation. Canary Lab starts those services, gates tests on health checks, runs Playwright with per-test service-log slicing, and — on failure — hands the agent (Claude Code or Codex) a structured map of what broke so it can diagnose, fix, and signal a re-run.
+
+As of 0.10.0, the primary surface is a local web UI (`canary-lab ui`) — a 3-column Finder-style view of features, runs, and live logs, with a built-in journal viewer and an Add Test wizard. The legacy iTerm/Terminal-tab CLI flow (`canary-lab run`) is still around but deprecated and will be removed in 0.11.0.
 
 See [CHANGELOG.md](CHANGELOG.md) for what's new in each release.
 
@@ -23,9 +25,12 @@ Playwright gives you:
 
 Canary Lab adds:
 
-- multi-service orchestration: startup in terminal tabs, health gating, log capture
+- multi-service orchestration: parallel startup, health gating, log capture (each service runs in its own pseudo-terminal, streamed to the web UI)
 - per-test log slicing so failures map directly to the service output that produced them
-- an agent-driven self-heal loop (structured failure index → diagnosis → `.restart`/`.rerun` → re-run)
+- a local web UI for selecting features, watching runs live, and browsing per-run history
+- an agent-driven self-heal loop (structured failure index → diagnosis → `.restart`/`.rerun` → re-run), driven from the web UI
+- a persistent cross-run diagnosis journal so the agent doesn't repeat hypotheses between cycles
+- an Add Test wizard (PRD → skill recommender → plan → spec generation) for guided test authoring
 - temporary env-file switching across repos
 
 ## Who This Is For
@@ -48,10 +53,10 @@ This is probably not for you if:
 
 ## Current Scope
 
-- **macOS only.** The runner drives iTerm / Terminal.app via AppleScript (`osascript`) to open service and heal-agent tabs. Linux and Windows are not supported yet — there is no fallback launcher.
+- **Cross-platform.** Services and the heal agent run inside `node-pty` pseudo-terminals owned by Canary Lab — no AppleScript, no iTerm, no Terminal.app. The web UI streams those PTYs into your browser.
 - **Node.js ≥ 20**, **npm ≥ 9**.
-- **iTerm2** (recommended) or the built-in **Terminal.app**.
-- **Optional, for headless auto-heal:** [Claude Code CLI](https://docs.claude.com/en/docs/claude-code) (`claude`) or [Codex CLI](https://github.com/openai/codex) (`codex`) on `PATH`. The interactive fallback (see [When auto-heal isn't available](#when-auto-heal-isnt-available)) works with either CLI or the Desktop apps.
+- A modern browser (Chrome / Firefox / Safari) for the local UI on `http://localhost:7421`.
+- **Optional, for headless auto-heal:** [Claude Code CLI](https://docs.claude.com/en/docs/claude-code) (`claude`) or [Codex CLI](https://github.com/openai/codex) (`codex`) on `PATH`.
 
 ## Quick Start
 
@@ -60,8 +65,16 @@ npx canary-lab init my-lab
 cd my-lab
 npm install
 npm run install:browsers
-npx canary-lab run
+npx canary-lab ui
 ```
+
+`canary-lab ui` boots a local Fastify server on `http://localhost:7421` and opens it in your default browser. The UI is a 3-column Finder-style layout:
+
+1. **Features** — every `features/<name>/` discovered in the project, with a "Run" button per feature.
+2. **Runs** — the last 20 runs preserved under `logs/runs/<runId>/`, each with status, timing, and per-test results.
+3. **Logs** — live PTY output from services + Playwright + the heal agent, plus a journal viewer for `logs/diagnosis-journal.md` (cross-run, tagged by `run:`).
+
+Pass `--no-open` to suppress the browser auto-launch (useful over SSH or in CI). Pass `--port <n>` to bind a different port.
 
 ## What Gets Scaffolded
 
@@ -76,7 +89,8 @@ npx canary-lab run
 
 ```bash
 npx canary-lab init <folder>
-npx canary-lab run
+npx canary-lab ui                                 # primary surface (web UI)
+npx canary-lab run                                # legacy CLI; deprecated, removed in 0.11.0
 npx canary-lab env
 npx canary-lab new-feature <name> "Description"
 npx canary-lab upgrade
@@ -164,14 +178,14 @@ If you override this or use `git add -f`, review what you are committing. Do not
 
 Two flavors, same idea:
 
-- **Manual (`self heal`)** — you stay in the driver's seat. Run `npx canary-lab run`, leave it in watch mode, open Claude or Codex in the project, and type `self heal`. The agent follows the `Self-Heal Workflow` section in `CLAUDE.md` (or `AGENTS.md` for Codex), which is already loaded into its context.
-- **Auto-heal** — the runner itself spawns a Claude or Codex agent when a test fails. It reads the same `Self-Heal Workflow` block from `CLAUDE.md` / `AGENTS.md` (the content between `<!-- heal-prompt:start -->` and `<!-- heal-prompt:end -->`) and passes it as the prompt. Output is filtered through a formatter so you see readable progress instead of raw stream-json.
+- **Manual (`self heal`)** — you stay in the driver's seat. Start a run from the web UI, leave it open, open Claude or Codex in the project folder, and type `self heal`. The agent follows the `Self-Heal Workflow` section in `CLAUDE.md` (or `AGENTS.md` for Codex), which is already loaded into its context.
+- **Auto-heal** — the runner itself spawns a Claude or Codex agent when a test fails. The agent runs in its own PTY tab inside the web UI. It reads the same `Self-Heal Workflow` block from `CLAUDE.md` / `AGENTS.md` (the content between `<!-- heal-prompt:start -->` and `<!-- heal-prompt:end -->`) and passes it as the prompt. Output is filtered through a formatter so you see readable progress instead of raw stream-json.
 
 In both cases the agent starts from `logs/heal-index.md` (a compact index over each failure, pointing at pre-sliced service logs under `logs/failed/<slug>/`), falls back to `logs/e2e-summary.json` if the index is missing, fixes implementation code, and signals the runner via `logs/.restart` or `logs/.rerun`.
 
 ### When auto-heal isn't available
 
-If you didn't pick an auto-heal agent, or the headless agent gave up / isn't installed, you can still drive the loop by hand:
+If the headless agent gave up or isn't installed, you can still drive the loop by hand:
 
 1. Open a new terminal in the project folder you created with `npx canary-lab init`.
 2. Run `claude` (or `codex`) there.
@@ -179,7 +193,7 @@ If you didn't pick an auto-heal agent, or the headless agent gave up / isn't ins
 
 The interactive agent reads the same `Self-Heal Workflow` section in `CLAUDE.md` (or `AGENTS.md`) and drives the same `.rerun`/`.restart` signals, so the runner will pick up its work without any extra setup.
 
-If you picked an agent up front and it struck out after 3 cycles, the runner prints the manual options (`touch logs/.rerun`, `touch logs/.heal` to reset strikes and re-spawn, or run the agent interactively as above).
+If the agent struck out after 3 cycles, the runner gives up on auto-heal — `touch logs/.rerun` to retry, or run the agent interactively as above.
 
 ## Limitations
 

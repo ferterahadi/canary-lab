@@ -17,6 +17,7 @@ import {
   extractGeneratedFiles,
   extractPlan,
 } from '../lib/wizard-output-parser'
+import { resolveDraftFile } from '../lib/draft-file-resolver'
 
 // Wizard pipeline ports. The agent spawners are injected — production wires
 // them to real `claude -p` pty invocations; tests pass synchronous stubs.
@@ -176,6 +177,35 @@ export async function testsDraftRoutes(
     reply.code(204)
     return null
   })
+
+  // Read a single generated file from a draft for the wizard's Spec Review
+  // step. Path-traversal hardening lives in `draft-file-resolver`.
+  app.get<{ Params: { id: string; '*': string } }>(
+    '/api/tests/draft/:id/files/*',
+    async (req, reply) => {
+      const rec = readDraft(deps.logsDir, req.params.id)
+      if (!rec) {
+        reply.code(404)
+        return { error: 'draft not found' }
+      }
+      const requestPath = (req.params as { '*': string })['*'] ?? ''
+      const resolved = resolveDraftFile(deps.logsDir, req.params.id, requestPath)
+      if (!resolved.ok) {
+        if (resolved.reason === 'invalid-path') {
+          reply.code(400)
+          return { error: 'invalid path' }
+        }
+        if (resolved.reason === 'outside-draft') {
+          reply.code(400)
+          return { error: 'path resolves outside draft' }
+        }
+        reply.code(404)
+        return { error: 'file not found' }
+      }
+      const content = fs.readFileSync(resolved.absolute, 'utf-8')
+      return { path: requestPath, content, mime: 'text/plain' }
+    },
+  )
 
   app.delete<{ Params: { id: string } }>('/api/tests/draft/:id', async (req, reply) => {
     const removed = deleteDraft(deps.logsDir, req.params.id)

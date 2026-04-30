@@ -8,9 +8,17 @@ import { runDirFor } from '../../../shared/e2e-runner/run-paths'
 // layer takes any compatible implementation — production uses the real one,
 // tests pass a stub).
 
+// PauseResult is structurally compatible with RunOrchestrator.PauseResult —
+// duplicated here so the route layer doesn't need to import the orchestrator
+// concrete class.
+export type OrchestratorPauseResult =
+  | { ok: true; failureCount: number }
+  | { ok: false; reason: 'already-healing' | 'no-playwright-running' | 'no-failures-yet' }
+
 export interface OrchestratorLike {
   runId: string
   stop(finalStatus?: RunManifest['status']): Promise<void>
+  pauseAndHeal(): Promise<OrchestratorPauseResult>
 }
 
 export interface OrchestratorRegistry {
