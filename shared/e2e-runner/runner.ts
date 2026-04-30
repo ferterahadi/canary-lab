@@ -47,6 +47,7 @@ import {
   type HealSessionMode,
 } from './auto-heal'
 import { appendJournalIteration } from './log-enrichment'
+import { resolveMcpOutputDir, ensureMcpOutputDir } from './playwright-mcp-artifacts'
 
 const SWITCH_SCRIPT = path.join(__dirname, '../env-switcher/switch.js')
 const SUMMARY_REPORTER = path.resolve(__dirname, 'summary-reporter.js')
@@ -204,6 +205,9 @@ export async function main(argv: string[] = []) {
 
   try {
     banner('Canary Lab — E2E Runner')
+    warn('`canary-lab run` is deprecated. Use `canary-lab ui` for the new web UI.')
+    console.log(dim('    The legacy CLI flow will be removed in 0.11.0.'))
+    uiLine()
 
     const features = discoverFeatures()
     if (features.length === 0) {
@@ -337,11 +341,26 @@ export async function main(argv: string[] = []) {
     if (exitCode !== 0 && autoHeal.agent) {
       orchestrator.setStatus('healing')
       orchestrator.noteHealCycle()
+      // Resolve where Playwright MCP should write its artifacts for this
+      // heal cycle. When exactly one test failed, scope by slug; otherwise
+      // share a per-run dir.
+      const summaryRaw = (() => {
+        try { return JSON.parse(fs.readFileSync(orchestrator.paths.summaryPath, 'utf-8')) }
+        catch { return {} }
+      })()
+      const failedSlugs = Array.isArray(summaryRaw?.failed)
+        ? (summaryRaw.failed as Array<{ name?: unknown }>)
+            .map((f) => (typeof f?.name === 'string' ? f.name : ''))
+            .filter((n) => n.length > 0)
+        : []
+      const mcpTarget = resolveMcpOutputDir({ runDir, failedSlugs })
+      ensureMcpOutputDir(mcpTarget.dir)
       try {
         await spawnHealAgent({
           agent: autoHeal.agent,
           sessionMode: autoHeal.sessionMode,
           cycle: 0,
+          mcpOutputDir: mcpTarget.dir,
         })
       } catch (err) {
         warn(`Auto-heal failed: ${(err as Error).message}`)

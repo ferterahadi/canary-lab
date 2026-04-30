@@ -25,6 +25,7 @@ function makeStub(runId: string): OrchestratorLike & { stopped: boolean } {
   return {
     runId,
     stop: async () => { stopped = true },
+    pauseAndHeal: async () => ({ ok: true, failureCount: 0 }),
     get stopped() { return stopped },
   } as OrchestratorLike & { stopped: boolean }
 }
@@ -133,6 +134,44 @@ describe('POST /api/runs', () => {
   })
 })
 
+describe('POST /api/runs/:runId/pause-heal', () => {
+  it('404s when run not in registry', async () => {
+    const { app } = await build()
+    const res = await app.inject({ method: 'POST', url: '/api/runs/ghost/pause-heal' })
+    expect(res.statusCode).toBe(404)
+  })
+
+  it('202s with failureCount on success', async () => {
+    const stub: OrchestratorLike = {
+      runId: 'rp1',
+      stop: async () => { /* noop */ },
+      pauseAndHeal: async () => ({ ok: true, failureCount: 3 }),
+    }
+    const { app, registry } = await build()
+    registry.set('rp1', stub)
+    const res = await app.inject({ method: 'POST', url: '/api/runs/rp1/pause-heal' })
+    expect(res.statusCode).toBe(202)
+    expect(res.json()).toEqual({ status: 'healing', failureCount: 3 })
+  })
+
+  it.each([
+    ['already-healing'],
+    ['no-playwright-running'],
+    ['no-failures-yet'],
+  ] as const)('409s with reason=%s', async (reason) => {
+    const stub: OrchestratorLike = {
+      runId: 'rp2',
+      stop: async () => { /* noop */ },
+      pauseAndHeal: async () => ({ ok: false, reason }),
+    }
+    const { app, registry } = await build()
+    registry.set('rp2', stub)
+    const res = await app.inject({ method: 'POST', url: '/api/runs/rp2/pause-heal' })
+    expect(res.statusCode).toBe(409)
+    expect(res.json()).toEqual({ reason })
+  })
+})
+
 describe('DELETE /api/runs/:runId', () => {
   it('stops a registered orchestrator and 204s', async () => {
     const stub = makeStub('r2')
@@ -158,7 +197,11 @@ describe('DELETE /api/runs/:runId', () => {
   })
 
   it('still 204s if stop() throws (best-effort)', async () => {
-    const failing: OrchestratorLike = { runId: 'r4', stop: async () => { throw new Error('nope') } }
+    const failing: OrchestratorLike = {
+      runId: 'r4',
+      stop: async () => { throw new Error('nope') },
+      pauseAndHeal: async () => ({ ok: true, failureCount: 0 }),
+    }
     const { app, registry } = await build()
     registry.set('r4', failing)
     const res = await app.inject({ method: 'DELETE', url: '/api/runs/r4' })

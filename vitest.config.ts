@@ -53,6 +53,7 @@ export default defineConfig({
         'apps/web-server/server.ts',
         'apps/web-server/ws/**',
         'apps/web-server/lib/wizard-agent-runner.ts',
+        'apps/web-server/lib/open-browser-spawner.ts',
         'apps/web/src/components/**',
         'apps/web/src/pages/**',
         'apps/web/src/main.tsx',

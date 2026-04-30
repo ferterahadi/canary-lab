@@ -1,6 +1,6 @@
 {
   "name": "canary-lab",
-  "version": "0.9.4",
+  "version": "0.10.0",
   "description": "E2E test scaffolder and runner with agent-assisted self-fixing workflows",
   "keywords": [
     "playwright",
@@ -88,8 +88,12 @@
     "vitest": "^4.1.4"
   },
   "dependencies": {
+    "@dnd-kit/core": "^6.3.1",
+    "@dnd-kit/sortable": "^10.0.0",
+    "@dnd-kit/utilities": "^3.2.2",
     "@fastify/static": "^9.1.3",
     "@fastify/websocket": "^11.2.0",
+    "@playwright/mcp": "^0.0.71",
     "@playwright/test": "^1.54.2",
     "dotenv": "^16.6.1",
     "fastify": "^5.8.5",

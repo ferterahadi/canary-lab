@@ -48,6 +48,25 @@ export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Pro
     }
   })
 
+  // Mid-Run Heal: manual interruption. Looks up the orchestrator in the
+  // registry, asks it to SIGTERM Playwright + jump into the heal cycle.
+  // 404 when unknown, 409 with a reason when pausing is meaningless,
+  // 202 + status payload on success.
+  app.post<{ Params: { runId: string } }>('/api/runs/:runId/pause-heal', async (req, reply) => {
+    const orch = deps.registry.get(req.params.runId)
+    if (!orch) {
+      reply.code(404)
+      return { error: 'run not active' }
+    }
+    const result = await orch.pauseAndHeal()
+    if (!result.ok) {
+      reply.code(409)
+      return { reason: result.reason }
+    }
+    reply.code(202)
+    return { status: 'healing', failureCount: result.failureCount }
+  })
+
   app.delete<{ Params: { runId: string } }>('/api/runs/:runId', async (req, reply) => {
     const runId = req.params.runId
     const orch = deps.registry.get(runId)

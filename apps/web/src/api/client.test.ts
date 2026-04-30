@@ -7,6 +7,7 @@ import {
   deleteDraft,
   deleteJournalEntry,
   getDraft,
+  getDraftFile,
   getFeatureTests,
   getRunDetail,
   listFeatures,
@@ -17,6 +18,7 @@ import {
   rejectDraft,
   startRun,
   stopRun,
+  pauseHealRun,
 } from './client'
 
 const ok = (body: unknown, status = 200): Response =>
@@ -115,6 +117,31 @@ describe('api client', () => {
     await expect(stopRun('missing', { fetchImpl })).rejects.toMatchObject({ status: 404 })
   })
 
+  it('pauseHealRun resolves with the success body on 202', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ status: 'healing', failureCount: 2 }), {
+        status: 202,
+        headers: { 'content-type': 'application/json' },
+      }),
+    )
+    const result = await pauseHealRun('r9', { baseUrl: '', fetchImpl })
+    expect(result).toEqual({ status: 'healing', failureCount: 2 })
+    expect(fetchImpl).toHaveBeenCalledWith('/api/runs/r9/pause-heal', { method: 'POST' })
+  })
+
+  it('pauseHealRun throws ApiError on 409 with the reason in the body', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(fail(409, { reason: 'no-failures-yet' }))
+    await expect(pauseHealRun('r10', { fetchImpl })).rejects.toMatchObject({
+      status: 409,
+      body: { reason: 'no-failures-yet' },
+    })
+  })
+
+  it('pauseHealRun throws ApiError on 404', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(fail(404, { error: 'run not active' }))
+    await expect(pauseHealRun('ghost', { fetchImpl })).rejects.toMatchObject({ status: 404 })
+  })
+
   it('listJournal sends both feature and run query params when set', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(ok([]))
     await listJournal({ feature: 'f', run: 'r' }, { fetchImpl })
@@ -180,6 +207,18 @@ describe('api client', () => {
     const fetchImpl = vi.fn().mockResolvedValue(ok({ draftId: 'a/b', status: 'created' }))
     await getDraft('a/b', { fetchImpl })
     expect(fetchImpl).toHaveBeenCalledWith('/api/tests/draft/a%2Fb', { method: 'GET' })
+  })
+
+  it('getDraftFile encodes path segments but keeps slashes', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      ok({ path: 'tests/x.ts', content: 'hi', mime: 'text/plain' }),
+    )
+    const r = await getDraftFile('d1', 'tests/login spec.ts', { fetchImpl })
+    expect(fetchImpl).toHaveBeenCalledWith(
+      '/api/tests/draft/d1/files/tests/login%20spec.ts',
+      { method: 'GET' },
+    )
+    expect(r.content).toBe('hi')
   })
 
   it('acceptPlan posts plan when provided', async () => {

@@ -249,6 +249,12 @@ interface Manifest {
   featureName?: string
   featureDir?: string
   repoPaths?: string[]
+  stoppedEarly?: {
+    reason: 'max-failures' | 'user-pause'
+    failuresAtStop: number
+    suiteTotal: number
+  }
+  healCycleHistory?: Array<{ cycle: number; restarted: string[]; kept: string[] }>
 }
 
 function readManifest(): Manifest {
@@ -300,6 +306,13 @@ export function writeHealIndex(parsed?: {
 
   lines.push('# Heal Index')
   lines.push('')
+  if (manifest.stoppedEarly) {
+    const { reason, failuresAtStop, suiteTotal } = manifest.stoppedEarly
+    lines.push(
+      `> Stopped early: ${reason} after ${failuresAtStop} failure${failuresAtStop === 1 ? '' : 's'} (suite has ${suiteTotal} test${suiteTotal === 1 ? '' : 's'}; remaining unrun)`,
+    )
+    lines.push('')
+  }
   if (manifest.featureDir) {
     lines.push(`Feature: ${path.relative(ROOT, manifest.featureDir) || manifest.featureDir}`)
   } else if (manifest.featureName) {
@@ -337,6 +350,17 @@ export function writeHealIndex(parsed?: {
       return `${iter} ${hyp} → ${outcome}`.trim()
     })
     lines.push(`Journal: ${parts.join('; ')}.  Full history: \`logs/diagnosis-journal.md\`.`)
+    lines.push('')
+  }
+
+  // Surface the most recent heal-cycle's selective-restart bookkeeping so the
+  // next heal agent knows which services were left warm (no restart, no log
+  // truncation) vs restarted from scratch.
+  const lastCycle = manifest.healCycleHistory?.[manifest.healCycleHistory.length - 1]
+  if (lastCycle && (lastCycle.kept.length > 0 || lastCycle.restarted.length > 0)) {
+    const restarted = lastCycle.restarted.length > 0 ? lastCycle.restarted.join(', ') : '(none)'
+    const kept = lastCycle.kept.length > 0 ? lastCycle.kept.join(', ') : '(none)'
+    lines.push(`Previous cycle #${lastCycle.cycle}: restarted ${restarted}; kept warm: ${kept}.`)
     lines.push('')
   }
 

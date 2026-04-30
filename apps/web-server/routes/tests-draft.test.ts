@@ -530,3 +530,70 @@ describe('reject and delete', () => {
     await app.close()
   })
 })
+
+describe('GET /api/tests/draft/:id/files/*', () => {
+  async function seedDraftWithFile(
+    app: ReturnType<typeof Fastify>,
+    deps: TestsDraftRouteDeps,
+  ): Promise<string> {
+    const post = await app.inject({
+      method: 'POST',
+      url: '/api/tests/draft',
+      payload: { prdText: 'X', repos: [{ name: 'a', localPath: '/' }] },
+    })
+    const id = post.json().draftId
+    const gen = path.join(deps.logsDir, 'drafts', id, 'generated', 'tests')
+    fs.mkdirSync(gen, { recursive: true })
+    fs.writeFileSync(path.join(gen, 'login.spec.ts'), 'test("ok",()=>{})')
+    return id
+  }
+
+  it('returns 200 with file content for a valid path', async () => {
+    const deps = makeDeps()
+    const app = await makeApp(deps)
+    const id = await seedDraftWithFile(app, deps)
+    const r = await app.inject({
+      method: 'GET',
+      url: `/api/tests/draft/${id}/files/tests/login.spec.ts`,
+    })
+    expect(r.statusCode).toBe(200)
+    const body = r.json()
+    expect(body.content).toBe('test("ok",()=>{})')
+    expect(body.mime).toBe('text/plain')
+    expect(body.path).toBe('tests/login.spec.ts')
+    await app.close()
+  })
+
+  it('404s on unknown draft', async () => {
+    const app = await makeApp(makeDeps())
+    const r = await app.inject({ method: 'GET', url: '/api/tests/draft/nope/files/x.ts' })
+    expect(r.statusCode).toBe(404)
+    await app.close()
+  })
+
+  it('404s on missing file inside draft', async () => {
+    const deps = makeDeps()
+    const app = await makeApp(deps)
+    const id = await seedDraftWithFile(app, deps)
+    const r = await app.inject({
+      method: 'GET',
+      url: `/api/tests/draft/${id}/files/does/not/exist.ts`,
+    })
+    expect(r.statusCode).toBe(404)
+    await app.close()
+  })
+
+  it('400s on traversal (percent-encoded so URL parser does not normalise)', async () => {
+    const deps = makeDeps()
+    const app = await makeApp(deps)
+    const id = await seedDraftWithFile(app, deps)
+    // Inject with a fully encoded `..` so neither HTTP nor Fastify collapses
+    // the segment before our handler sees it.
+    const r = await app.inject({
+      method: 'GET',
+      url: `/api/tests/draft/${id}/files/sub/%2E%2E%2F%2E%2E%2Fetc%2Fpasswd`,
+    })
+    expect(r.statusCode).toBe(400)
+    await app.close()
+  })
+})

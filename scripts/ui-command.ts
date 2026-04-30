@@ -5,6 +5,7 @@
 import path from 'path'
 import { createServer } from '../apps/web-server/server'
 import { getProjectRoot } from '../shared/runtime/project-root'
+import { openBrowser } from '../apps/web-server/lib/open-browser'
 
 export interface UiCommandOptions {
   port?: number
@@ -17,11 +18,16 @@ export async function runUi(argv: string[], opts: UiCommandOptions = {}): Promis
   const log = opts.log ?? ((m: string) => console.log(m))
   const portFromArgs = parsePort(argv)
   const port = portFromArgs ?? opts.port ?? 7421
+  const noOpen = argv.includes('--no-open')
   const projectRoot = opts.projectRoot ?? getProjectRoot()
   const { app } = await createServer({ projectRoot })
   await app.listen({ port, host: '127.0.0.1' })
-  log(`Open http://localhost:${port}`)
+  const url = `http://localhost:${port}`
+  log(`Open ${url}`)
   log(`Project root: ${path.relative(process.cwd(), projectRoot) || '.'}`)
+  if (!noOpen) {
+    openBrowser(url)
+  }
 }
 
 function parsePort(argv: string[]): number | undefined {

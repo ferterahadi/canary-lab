@@ -16,6 +16,7 @@ import {
 } from './log-enrichment'
 import {
   DIAGNOSIS_JOURNAL_PATH as REAL_JOURNAL,
+  HEAL_INDEX_PATH as REAL_HEAL_INDEX,
   LOGS_DIR as REAL_LOGS,
   MANIFEST_PATH as REAL_MANIFEST,
   SUMMARY_PATH as REAL_SUMMARY,
@@ -298,6 +299,80 @@ describe('writeHealIndex with journal tail and various manifest shapes', () => {
         summary: { failed: [{ name: 'orphan' }] },
       }),
     ).not.toThrow()
+  })
+})
+
+describe('writeHealIndex partial-suite header (stoppedEarly)', () => {
+  it('omits the stoppedEarly note when manifest does not carry one', () => {
+    expect(() =>
+      writeHealIndex({
+        manifest: { featureName: 'demo' },
+        summary: { failed: [{ name: 'a' }] },
+      }),
+    ).not.toThrow()
+  })
+
+  it('renders a one-line note for max-failures stops', () => {
+    // We can't easily inspect the on-disk file without touching real paths,
+    // but we can assert the function tolerates the field. The pluralisation
+    // branches below cover the actual rendered text via a temp HEAL_INDEX.
+    expect(() =>
+      writeHealIndex({
+        manifest: {
+          featureName: 'demo',
+          stoppedEarly: { reason: 'max-failures', failuresAtStop: 1, suiteTotal: 11 },
+        },
+        summary: { failed: [{ name: 'a' }] },
+      }),
+    ).not.toThrow()
+  })
+
+  it('renders a one-line note for user-pause stops with plural failure counts', () => {
+    expect(() =>
+      writeHealIndex({
+        manifest: {
+          featureName: 'demo',
+          stoppedEarly: { reason: 'user-pause', failuresAtStop: 3, suiteTotal: 7 },
+        },
+        summary: { failed: [{ name: 'a' }, { name: 'b' }, { name: 'c' }] },
+      }),
+    ).not.toThrow()
+  })
+
+  it('writes the note text to disk and toggles plural forms', () => {
+    // Drive writeHealIndex against the real LOGS_DIR (the module hard-codes
+    // HEAL_INDEX_PATH). Snapshot + restore so the test is hermetic.
+    let createdLogs = false
+    if (!fs.existsSync(REAL_LOGS)) {
+      fs.mkdirSync(REAL_LOGS, { recursive: true })
+      createdLogs = true
+    }
+    const prior = fs.existsSync(REAL_HEAL_INDEX) ? fs.readFileSync(REAL_HEAL_INDEX, 'utf-8') : null
+    try {
+      writeHealIndex({
+        manifest: {
+          featureName: 'demo',
+          stoppedEarly: { reason: 'max-failures', failuresAtStop: 1, suiteTotal: 1 },
+        },
+        summary: { failed: [{ name: 'a' }] },
+      })
+      const oneOne = fs.readFileSync(REAL_HEAL_INDEX, 'utf-8')
+      expect(oneOne).toMatch(/Stopped early: max-failures after 1 failure \(suite has 1 test;/)
+
+      writeHealIndex({
+        manifest: {
+          featureName: 'demo',
+          stoppedEarly: { reason: 'user-pause', failuresAtStop: 2, suiteTotal: 11 },
+        },
+        summary: { failed: [{ name: 'a' }, { name: 'b' }] },
+      })
+      const plural = fs.readFileSync(REAL_HEAL_INDEX, 'utf-8')
+      expect(plural).toMatch(/Stopped early: user-pause after 2 failures \(suite has 11 tests;/)
+    } finally {
+      if (prior !== null) fs.writeFileSync(REAL_HEAL_INDEX, prior)
+      else { try { fs.unlinkSync(REAL_HEAL_INDEX) } catch { /* ignore */ } }
+      if (createdLogs) { try { fs.rmdirSync(REAL_LOGS) } catch { /* ignore */ } }
+    }
   })
 })
 

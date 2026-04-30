@@ -13,6 +13,7 @@ Start here:
 
 Useful only when needed:
 - `logs/failed/<slug>/<svc>.log` — pre-sliced service logs referenced by `heal-index.md`.
+- `logs/failed/<slug>/playwright-mcp/` — when present, console logs / DOM snapshots / network captures the Playwright MCP server recorded for this failure. Inspect when the service log alone doesn't explain the bug.
 - `logs/svc-<name>.log` — full service log. Use only if a slice is missing or too short.
 - `logs/diagnosis-journal.md` — prior heal attempts. Use only when the current prompt or index says prior iterations exist.
 - `logs/signal-history.json` — signal history. Rarely needed.

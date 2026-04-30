@@ -284,13 +284,105 @@ describe('RunOrchestrator.restart / rerun / status', () => {
     spawned[0].emitData('first\n')
     await new Promise((r) => setTimeout(r, 5))
 
-    await orch.restart(['/x'])
+    // No filesChanged → legacy "restart all" semantics.
+    await orch.restart()
     expect(spawned).toHaveLength(2)
     expect(spawned[0].killed).toBe('SIGTERM')
 
     const logBody = fs.readFileSync(path.join(runDir, 'svc-api.log'), 'utf-8')
     expect(logBody).toBe('')
 
+    await orch.stop('passed')
+  })
+
+  it('selective restart only respawns services matching filesChanged', async () => {
+    const { factory, spawned } = makeFakeFactory()
+    const repoA = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-orc-a-'))
+    const repoB = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-orc-b-'))
+    const orch = new RunOrchestrator({
+      feature: makeFeature({
+        repos: [
+          { name: 'a', localPath: repoA, startCommands: [{ command: 'echo a', name: 'svcA', healthCheck: { url: 'http://a' } }] },
+          { name: 'b', localPath: repoB, startCommands: [{ command: 'echo b', name: 'svcB', healthCheck: { url: 'http://b' } }] },
+        ],
+      }),
+      runId: RUN_ID,
+      runDir,
+      ptyFactory: factory,
+      healthCheck: async () => true,
+      delay: async () => undefined,
+    })
+    const planEvents: { toRestart: string[]; toKeep: string[]; noMatch: boolean }[] = []
+    const skipEvents: string[] = []
+    orch.on('restart-planned', (e) => planEvents.push(e))
+    orch.on('service-restart-skipped', (e) => skipEvents.push(e.service.safeName))
+
+    await orch.start()
+    expect(spawned).toHaveLength(2) // two services started
+
+    // Only repoA's file changed → only svcA restarts.
+    await orch.restart([path.join(repoA, 'src/x.ts')])
+    expect(spawned).toHaveLength(3) // one new spawn (svcA)
+    expect(spawned[0].killed).toBe('SIGTERM') // svcA killed
+    expect(spawned[1].killed).toBe(null) // svcB kept warm
+    expect(planEvents[0].toRestart).toEqual(['svca'])
+    expect(planEvents[0].toKeep).toEqual(['svcb'])
+    expect(skipEvents).toEqual(['svcb'])
+
+    await orch.stop('passed')
+  })
+
+  it('selective restart with no matches keeps all services warm and emits noMatch', async () => {
+    const { factory, spawned } = makeFakeFactory()
+    const repoA = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-orc-a-'))
+    const orch = new RunOrchestrator({
+      feature: makeFeature({
+        repos: [
+          { name: 'a', localPath: repoA, startCommands: [{ command: 'echo a', name: 'svcA', healthCheck: { url: 'http://a' } }] },
+        ],
+      }),
+      runId: RUN_ID,
+      runDir,
+      ptyFactory: factory,
+      healthCheck: async () => true,
+      delay: async () => undefined,
+    })
+    const planEvents: { noMatch: boolean }[] = []
+    orch.on('restart-planned', (e) => planEvents.push(e))
+
+    await orch.start()
+    expect(spawned).toHaveLength(1)
+
+    await orch.restart(['/somewhere/totally/different.ts'])
+    expect(spawned).toHaveLength(1) // no new spawn
+    expect(spawned[0].killed).toBe(null)
+    expect(planEvents[0].noMatch).toBe(true)
+
+    await orch.stop('passed')
+  })
+
+  it('selective restart with full match restarts everything', async () => {
+    const { factory, spawned } = makeFakeFactory()
+    const repoA = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-orc-a-'))
+    const repoB = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-orc-b-'))
+    const orch = new RunOrchestrator({
+      feature: makeFeature({
+        repos: [
+          { name: 'a', localPath: repoA, startCommands: [{ command: 'echo a', name: 'svcA', healthCheck: { url: 'http://a' } }] },
+          { name: 'b', localPath: repoB, startCommands: [{ command: 'echo b', name: 'svcB', healthCheck: { url: 'http://b' } }] },
+        ],
+      }),
+      runId: RUN_ID,
+      runDir,
+      ptyFactory: factory,
+      healthCheck: async () => true,
+      delay: async () => undefined,
+    })
+    await orch.start()
+    await orch.restart([path.join(repoA, 'a.ts'), path.join(repoB, 'b.ts')])
+    expect(spawned).toHaveLength(4) // 2 original + 2 respawned
+    expect(spawned[0].killed).toBe('SIGTERM')
+    expect(spawned[1].killed).toBe('SIGTERM')
     await orch.stop('passed')
   })
 
@@ -690,9 +782,11 @@ describe('RunOrchestrator.runFullCycle', () => {
     await new Promise((r) => setTimeout(r, 10))
     f.spawned[1].emitExit(1)
     while (f.spawned.length < 3) await new Promise((r) => setTimeout(r, 5))
+    // Use a path under tmpDir (the feature's repo localPath) so the selective
+    // restart matches and respawns the service.
     fs.writeFileSync(orch.paths.restartSignal, JSON.stringify({
       hypothesis: 'fix the thing',
-      filesChanged: ['/tmp/a.ts', '/tmp/b.ts', 42], // non-string entries filtered
+      filesChanged: [path.join(tmpDir, 'a.ts'), path.join(tmpDir, 'b.ts'), 42], // non-string entries filtered
       fixDescription: 'patched the handler',
     }))
     f.spawned[2].emitExit(0)
@@ -701,6 +795,12 @@ describe('RunOrchestrator.runFullCycle', () => {
     const status = await promise
     expect(status).toBe('failed')
     expect(f.spawned.length).toBeGreaterThanOrEqual(5)
+    // healCycleHistory should record the restart.
+    const m = readManifest(orch.paths.manifestPath)!
+    expect((m as { healCycleHistory?: unknown[] }).healCycleHistory).toBeTruthy()
+    const history = (m as { healCycleHistory: Array<{ cycle: number; restarted: string[]; kept: string[] }> }).healCycleHistory
+    expect(history[0].cycle).toBe(1)
+    expect(history[0].restarted).toEqual(['api'])
     await orch.stop('failed')
   }, 15000)
 
@@ -807,6 +907,257 @@ describe('RunOrchestrator + RunnerLog integration', () => {
     for (const line of body.trim().split('\n')) {
       expect(line).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z (INFO|WARN|ERROR) /)
     }
+  })
+})
+
+describe('RunOrchestrator.markStoppedEarly + stoppedEarly serialization', () => {
+  it('persists stoppedEarly on the manifest', async () => {
+    const { factory } = makeFakeFactory()
+    const orch = new RunOrchestrator({
+      feature: makeFeature(),
+      runId: RUN_ID,
+      runDir,
+      ptyFactory: factory,
+      healthCheck: async () => true,
+      delay: async () => undefined,
+    })
+    await orch.start()
+    orch.markStoppedEarly('user-pause', 2, 11)
+    const m = readManifest(orch.paths.manifestPath)!
+    expect(m.stoppedEarly).toEqual({
+      reason: 'user-pause',
+      failuresAtStop: 2,
+      suiteTotal: 11,
+    })
+    await orch.stop('aborted')
+  })
+})
+
+describe('RunOrchestrator.pauseAndHeal', () => {
+  function bootForPause(): {
+    factory: PtyFactory
+    spawned: ReturnType<typeof makeFakeFactory>['spawned']
+    orch: RunOrchestrator
+  } {
+    const { factory, spawned } = makeFakeFactory()
+    const orch = new RunOrchestrator({
+      feature: makeFeature(),
+      runId: RUN_ID,
+      runDir,
+      ptyFactory: factory,
+      healthCheck: async () => true,
+      delay: async () => undefined,
+      healthPollIntervalMs: 5,
+      playwrightSpawner: () => ({ command: 'pw', cwd: tmpDir }),
+    })
+    return { factory, spawned, orch }
+  }
+
+  it('returns no-playwright-running when nothing is in flight', async () => {
+    const { orch } = bootForPause()
+    await orch.start()
+    expect(await orch.pauseAndHeal()).toEqual({ ok: false, reason: 'no-playwright-running' })
+    await orch.stop('passed')
+  })
+
+  it('returns already-healing when status is healing', async () => {
+    const { orch } = bootForPause()
+    await orch.start()
+    orch.setStatus('healing')
+    expect(await orch.pauseAndHeal()).toEqual({ ok: false, reason: 'already-healing' })
+    await orch.stop('aborted')
+  })
+
+  it('returns no-failures-yet when SIGTERM lands but summary is empty', async () => {
+    const { spawned, orch } = bootForPause()
+    await orch.start()
+    const exitPromise = orch.runPlaywright()
+    // Drive in parallel: pauseAndHeal SIGTERMs the pty, fake factory records
+    // the signal, we manually fire the exit so waitForPlaywrightExit resolves.
+    const pausePromise = orch.pauseAndHeal()
+    await new Promise((r) => setTimeout(r, 5))
+    const pwPty = spawned[spawned.length - 1]
+    expect(pwPty.killed).toBe('SIGTERM')
+    pwPty.emitExit(143)
+    await exitPromise
+    expect(await pausePromise).toEqual({ ok: false, reason: 'no-failures-yet' })
+    await orch.stop('aborted')
+  })
+
+  it('SIGTERMs Playwright, marks stoppedEarly=user-pause, returns ok with failureCount', async () => {
+    const { spawned, orch } = bootForPause()
+    await orch.start()
+    fs.writeFileSync(
+      orch.paths.summaryPath,
+      JSON.stringify({ failed: [{ name: 'a' }, { name: 'b' }], total: 11, passed: 0 }),
+    )
+    const exitPromise = orch.runPlaywright()
+    const pausePromise = orch.pauseAndHeal()
+    await new Promise((r) => setTimeout(r, 5))
+    const pwPty = spawned[spawned.length - 1]
+    expect(pwPty.killed).toBe('SIGTERM')
+    pwPty.emitExit(143)
+    await exitPromise
+    const result = await pausePromise
+    expect(result).toEqual({ ok: true, failureCount: 2 })
+    const m = readManifest(orch.paths.manifestPath)!
+    expect(m.stoppedEarly).toEqual({
+      reason: 'user-pause',
+      failuresAtStop: 2,
+      suiteTotal: 11,
+    })
+    await orch.stop('aborted')
+  })
+
+  it('falls back to SIGKILL when SIGTERM is ignored past the 5s deadline', async () => {
+    vi.useFakeTimers()
+    const { spawned, orch } = bootForPause()
+    await orch.start()
+    fs.writeFileSync(
+      orch.paths.summaryPath,
+      JSON.stringify({ failed: [{ name: 'a' }] }),
+    )
+    void orch.runPlaywright()
+    // Advance microtasks so spawn completes.
+    await Promise.resolve()
+    const pwPty = spawned[spawned.length - 1]
+    const pausePromise = orch.pauseAndHeal()
+    await Promise.resolve()
+    expect(pwPty.killed).toBe('SIGTERM')
+    // Push past the 5s graceful deadline without firing an exit.
+    await vi.advanceTimersByTimeAsync(5001)
+    expect(pwPty.killed).toBe('SIGKILL')
+    // Push past the secondary 1s deadline so the fallback wait resolves.
+    await vi.advanceTimersByTimeAsync(1001)
+    const result = await pausePromise
+    expect(result).toEqual({ ok: true, failureCount: 1 })
+    vi.useRealTimers()
+    pwPty.emitExit(137)
+    await orch.stop('aborted')
+  })
+
+  it('emits paused-by-user with the failure count', async () => {
+    const { spawned, orch } = bootForPause()
+    await orch.start()
+    fs.writeFileSync(
+      orch.paths.summaryPath,
+      JSON.stringify({ failed: [{ name: 'x' }], total: 3, passed: 0 }),
+    )
+    const events: number[] = []
+    orch.on('paused-by-user', (e) => events.push(e.failureCount))
+    const exitPromise = orch.runPlaywright()
+    const pausePromise = orch.pauseAndHeal()
+    await new Promise((r) => setTimeout(r, 5))
+    const pwPty = spawned[spawned.length - 1]
+    pwPty.emitExit(143)
+    await exitPromise
+    await pausePromise
+    expect(events).toEqual([1])
+    await orch.stop('aborted')
+  })
+})
+
+describe('RunOrchestrator runFullCycle stoppedEarly', () => {
+  it('marks stoppedEarly=max-failures when threshold is hit before heal cycle', async () => {
+    const f = makeFakeFactory()
+    const feature = makeFeature({ healOnFailureThreshold: 1 })
+    let pwIdx = 0
+    let healIdx = 0
+    const orch = new RunOrchestrator({
+      feature,
+      runId: RUN_ID,
+      runDir,
+      ptyFactory: f.factory,
+      healthCheck: async () => true,
+      delay: async () => undefined,
+      healthPollIntervalMs: 5,
+      healSignalPollMs: 1,
+      healAgentTimeoutMs: 1000,
+      playwrightSpawner: () => ({ command: `pw-${pwIdx++}`, cwd: tmpDir }),
+      autoHeal: { agent: 'claude', maxCycles: 1, buildCommand: () => `heal-${healIdx++}` },
+    })
+    fs.mkdirSync(runDir, { recursive: true })
+    fs.writeFileSync(
+      orch.paths.summaryPath,
+      JSON.stringify({ failed: [{ name: 'a' }], total: 11, passed: 0 }),
+    )
+    const promise = orch.runFullCycle()
+    await new Promise((r) => setTimeout(r, 5))
+    f.spawned[1].emitExit(1)
+    while (f.spawned.length < 3) await new Promise((r) => setTimeout(r, 5))
+    f.spawned[2].emitExit(0) // agent gives up — we just need the stoppedEarly stamp
+    await promise
+    const m = readManifest(orch.paths.manifestPath)!
+    expect(m.stoppedEarly?.reason).toBe('max-failures')
+    expect(m.stoppedEarly?.failuresAtStop).toBe(1)
+    expect(m.stoppedEarly?.suiteTotal).toBe(11)
+    await orch.stop('failed')
+  })
+
+  it('does not overwrite a prior user-pause stoppedEarly stamp', async () => {
+    const f = makeFakeFactory()
+    const orch = new RunOrchestrator({
+      feature: makeFeature(),
+      runId: RUN_ID,
+      runDir,
+      ptyFactory: f.factory,
+      healthCheck: async () => true,
+      delay: async () => undefined,
+      healthPollIntervalMs: 5,
+      healSignalPollMs: 1,
+      healAgentTimeoutMs: 500,
+      playwrightSpawner: () => ({ command: 'pw', cwd: tmpDir }),
+      autoHeal: { agent: 'claude', maxCycles: 1, buildCommand: () => 'heal' },
+    })
+    fs.mkdirSync(runDir, { recursive: true })
+    fs.writeFileSync(
+      orch.paths.summaryPath,
+      JSON.stringify({ failed: [{ name: 'a' }], total: 7, passed: 0 }),
+    )
+    const promise = orch.runFullCycle()
+    await new Promise((r) => setTimeout(r, 5))
+    // Pre-stamp user-pause before pw exits non-zero.
+    orch.markStoppedEarly('user-pause', 1, 7)
+    f.spawned[1].emitExit(1)
+    while (f.spawned.length < 3) await new Promise((r) => setTimeout(r, 5))
+    f.spawned[2].emitExit(0)
+    await promise
+    const m = readManifest(orch.paths.manifestPath)!
+    expect(m.stoppedEarly?.reason).toBe('user-pause')
+    await orch.stop('failed')
+  })
+})
+
+describe('defaultPlaywrightSpawner --max-failures', () => {
+  it('appends --max-failures with feature threshold', async () => {
+    const { defaultPlaywrightSpawner } = await import('./orchestrator')
+    const f = makeFeature({ healOnFailureThreshold: 3 })
+    const inv = defaultPlaywrightSpawner({ feature: f, paths: {} as never })
+    expect(inv.command).toContain('--max-failures=3')
+  })
+
+  it('defaults --max-failures=1 when threshold is unset', async () => {
+    const { defaultPlaywrightSpawner } = await import('./orchestrator')
+    const f = makeFeature()
+    const inv = defaultPlaywrightSpawner({ feature: f, paths: {} as never })
+    expect(inv.command).toContain('--max-failures=1')
+  })
+})
+
+describe('stoppedEarlyReasonOf / countPassed', () => {
+  it('returns undefined for a missing manifest', async () => {
+    const { stoppedEarlyReasonOf, countPassed } = await import('./orchestrator')
+    expect(stoppedEarlyReasonOf(path.join(tmpDir, 'nope.json'))).toBeUndefined()
+    expect(countPassed({})).toBe(0)
+    expect(countPassed({ passed: 4 })).toBe(4)
+    expect(countPassed({ passed: 'oops' as unknown as number })).toBe(0)
+  })
+
+  it('returns the persisted reason', async () => {
+    const file = path.join(tmpDir, 'm.json')
+    fs.writeFileSync(file, JSON.stringify({ stoppedEarly: { reason: 'user-pause' } }))
+    const { stoppedEarlyReasonOf } = await import('./orchestrator')
+    expect(stoppedEarlyReasonOf(file)).toBe('user-pause')
   })
 })
 

@@ -16,6 +16,18 @@ export interface ServiceManifestEntry {
 
 export type RunStatus = 'running' | 'passed' | 'failed' | 'healing' | 'aborted'
 
+// Mid-Run Heal: populated when Playwright was halted before completing the
+// suite — either by `--max-failures=<N>` (auto-fast-fail) or by an explicit
+// user-invoked Pause & Heal. Heal-index rendering uses this so the agent
+// doesn't assume the suite size from the partial summary.
+export type StoppedEarlyReason = 'max-failures' | 'user-pause'
+
+export interface StoppedEarlyInfo {
+  reason: StoppedEarlyReason
+  failuresAtStop: number
+  suiteTotal: number
+}
+
 export interface RunManifest {
   runId: string
   feature: string
@@ -26,6 +38,14 @@ export interface RunManifest {
   healCycles: number
   services: ServiceManifestEntry[]
   repoPaths?: string[]
+  stoppedEarly?: StoppedEarlyInfo
+  /**
+   * Per heal-cycle record of which services were restarted vs kept warm.
+   * Populated when the orchestrator processes a `.restart` signal whose body
+   * carries a non-empty `filesChanged`. The heal-index footer surfaces the
+   * most recent entry to the next agent invocation.
+   */
+  healCycleHistory?: Array<{ cycle: number; restarted: string[]; kept: string[] }>
 }
 
 function atomicWrite(file: string, body: string): void {
