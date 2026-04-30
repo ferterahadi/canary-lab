@@ -7,7 +7,7 @@ import type { Feature, RunIndexEntry } from './api/types'
 
 // Three-column Finder-style shell. Each column owns its own data fetching;
 // the App component just tracks the selection state.
-export function App(): JSX.Element {
+export function App() {
   const [features, setFeatures] = useState<Feature[]>([])
   const [selectedFeature, setSelectedFeature] = useState<string | null>(null)
   const [runs, setRuns] = useState<RunIndexEntry[]>([])
@@ -63,7 +63,7 @@ export function App(): JSX.Element {
 
   return (
     <div className="flex h-full w-full overflow-hidden">
-      <aside className="w-[240px] shrink-0 border-r border-zinc-800 overflow-y-auto">
+      <aside className="w-[240px] shrink-0 border-r border-zinc-200 overflow-hidden dark:border-zinc-800">
         <FeaturesColumn
           features={features}
           selectedFeature={selectedFeature}
@@ -84,7 +84,7 @@ export function App(): JSX.Element {
           }}
         />
       </aside>
-      <section className="w-[320px] shrink-0 border-r border-zinc-800 overflow-y-auto">
+      <section className="w-[320px] shrink-0 border-r border-zinc-200 overflow-y-auto dark:border-zinc-800">
         <RunsColumn
           feature={selectedFeature}
           envs={selectedFeatureEnvs}

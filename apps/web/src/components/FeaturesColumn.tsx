@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import * as api from '../api/client'
 import type { Feature, FeatureTests } from '../api/types'
 import { AddTestWizard } from './AddTestWizard'
+import { ThemeToggle } from './ThemeToggle'
 
 interface Props {
   features: Feature[]
@@ -17,7 +18,7 @@ export function FeaturesColumn({
   selectedFeature,
   onSelectFeature,
   onFeaturesChanged,
-}: Props): JSX.Element {
+}: Props) {
   const [tests, setTests] = useState<Record<string, FeatureTests>>({})
   const [wizardOpen, setWizardOpen] = useState(false)
 
@@ -29,11 +30,12 @@ export function FeaturesColumn({
   }, [selectedFeature, tests])
 
   return (
-    <div className="flex flex-col gap-1 p-2">
+    <div className="flex h-full flex-col">
+    <div className="flex flex-1 min-h-0 flex-col gap-1 overflow-y-auto p-2">
       <button
         type="button"
         onClick={() => setWizardOpen(true)}
-        className="rounded border border-zinc-800 bg-zinc-900 px-3 py-2 text-left text-xs text-zinc-300 hover:bg-zinc-800"
+        className="rounded border border-zinc-200 bg-zinc-50 px-3 py-2 text-left text-xs text-zinc-700 hover:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
       >
         + Add new test
       </button>
@@ -50,18 +52,20 @@ export function FeaturesColumn({
                 type="button"
                 onClick={() => onSelectFeature(f.name)}
                 className={`w-full rounded px-2 py-1.5 text-left text-sm ${
-                  isSelected ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-300 hover:bg-zinc-900'
+                  isSelected
+                    ? 'bg-zinc-200 text-zinc-900 dark:bg-zinc-800 dark:text-zinc-100'
+                    : 'text-zinc-700 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-900'
                 }`}
               >
                 {f.name}
               </button>
               {isSelected && featureTests && (
-                <ul className="ml-3 mt-1 border-l border-zinc-800 pl-2">
+                <ul className="ml-3 mt-1 border-l border-zinc-200 pl-2 dark:border-zinc-800">
                   {featureTests.flatMap((spec) =>
                     spec.tests.map((t) => (
                       <li
                         key={`${spec.file}:${t.line}`}
-                        className="truncate py-1 text-xs text-zinc-400 hover:text-zinc-200"
+                        className="truncate py-1 text-xs text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-200"
                         title={t.name}
                       >
                         {t.name}
@@ -69,7 +73,7 @@ export function FeaturesColumn({
                     )),
                   )}
                   {featureTests.every((spec) => spec.tests.length === 0) && (
-                    <li className="py-1 text-xs italic text-zinc-600">No tests defined</li>
+                    <li className="py-1 text-xs italic text-zinc-400 dark:text-zinc-600">No tests defined</li>
                   )}
                 </ul>
               )}
@@ -87,6 +91,10 @@ export function FeaturesColumn({
           }}
         />
       )}
+    </div>
+      <div className="border-t border-zinc-200 p-2 dark:border-zinc-800">
+        <ThemeToggle />
+      </div>
     </div>
   )
 }

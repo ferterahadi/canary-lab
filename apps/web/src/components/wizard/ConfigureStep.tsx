@@ -34,7 +34,7 @@ export function ConfigureStep({
   onCancel,
   submitting,
   errorMessage,
-}: Props): JSX.Element {
+}: Props) {
   const [prdText, setPrdText] = useState(initial?.prdText ?? '')
   const [repoKeys, setRepoKeys] = useState<Set<string>>(
     () => new Set((initial?.repos ?? []).map((r) => repoKey(r))),
@@ -151,7 +151,7 @@ export function ConfigureStep({
       <div className="flex-1 min-h-0 overflow-y-auto p-6">
         <div className="mx-auto max-w-3xl space-y-6">
           <section>
-            <label className="block text-xs font-medium uppercase tracking-wide text-zinc-400" htmlFor="prd">
+            <label className="block text-xs font-medium uppercase tracking-wide text-zinc-600 dark:text-zinc-400" htmlFor="prd">
               PRD / Description
             </label>
             <p className="mt-1 text-xs text-zinc-500">
@@ -163,7 +163,7 @@ export function ConfigureStep({
               value={prdText}
               onChange={(e) => setPrdText(e.target.value)}
               placeholder="As a user I want to…"
-              className="mt-2 w-full resize-y rounded border border-zinc-700 bg-zinc-950 p-2 font-mono text-xs text-zinc-100 focus:border-zinc-500 focus:outline-none"
+              className="mt-2 w-full resize-y rounded border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 p-2 font-mono text-xs text-zinc-900 dark:text-zinc-100 focus:border-zinc-500 focus:outline-none"
             />
             {validation.errors.prdText && (
               <div className="mt-1 text-xs text-rose-400">{validation.errors.prdText}</div>
@@ -171,7 +171,7 @@ export function ConfigureStep({
           </section>
 
           <section>
-            <div className="text-xs font-medium uppercase tracking-wide text-zinc-400">Repos</div>
+            <div className="text-xs font-medium uppercase tracking-wide text-zinc-600 dark:text-zinc-400">Repos</div>
             <p className="mt-1 text-xs text-zinc-500">
               Pick the repos this test should cover.
             </p>
@@ -184,7 +184,7 @@ export function ConfigureStep({
                   return (
                     <label
                       key={key}
-                      className="flex items-center gap-2 rounded border border-zinc-800 bg-zinc-900/60 px-2 py-1.5 text-xs text-zinc-200"
+                      className="flex items-center gap-2 rounded border border-zinc-200 dark:border-zinc-800 bg-zinc-100/60 dark:bg-zinc-900/60 px-2 py-1.5 text-xs text-zinc-800 dark:text-zinc-200"
                     >
                       <input
                         type="checkbox"
@@ -192,7 +192,7 @@ export function ConfigureStep({
                         onChange={() => toggleRepo(key)}
                       />
                       <span className="font-medium">{repo.name}</span>
-                      <span className="text-zinc-600">({feature})</span>
+                      <span className="text-zinc-400 dark:text-zinc-600">({feature})</span>
                       <span className="ml-auto truncate font-mono text-[10px] text-zinc-500">
                         {repo.localPath}
                       </span>
@@ -208,7 +208,7 @@ export function ConfigureStep({
 
           <section>
             <div className="flex items-center justify-between">
-              <div className="text-xs font-medium uppercase tracking-wide text-zinc-400">Skills</div>
+              <div className="text-xs font-medium uppercase tracking-wide text-zinc-600 dark:text-zinc-400">Skills</div>
               <div className="flex items-center gap-1 text-xs">
                 <ModeButton active={skillMode === 'auto'} onClick={() => setSkillMode('auto')}>
                   Auto
@@ -234,7 +234,7 @@ export function ConfigureStep({
                     return (
                       <label
                         key={rec.skillId}
-                        className="flex items-start gap-2 rounded border border-zinc-800 bg-zinc-900/60 p-2 text-xs"
+                        className="flex items-start gap-2 rounded border border-zinc-200 dark:border-zinc-800 bg-zinc-100/60 dark:bg-zinc-900/60 p-2 text-xs"
                       >
                         <input
                           type="checkbox"
@@ -243,13 +243,13 @@ export function ConfigureStep({
                           onChange={() => toggleSkill(rec.skillId)}
                         />
                         <div className="flex-1">
-                          <div className="font-medium text-zinc-100">
+                          <div className="font-medium text-zinc-900 dark:text-zinc-100">
                             {meta?.name ?? rec.skillId}
                             <span className="ml-2 font-mono text-[10px] text-zinc-500">
                               score {rec.score}
                             </span>
                           </div>
-                          <div className="text-zinc-400">{rec.reasoning}</div>
+                          <div className="text-zinc-600 dark:text-zinc-400">{rec.reasoning}</div>
                         </div>
                       </label>
                     )
@@ -265,19 +265,19 @@ export function ConfigureStep({
                         .catch(() => {/* surfaced via empty list */})
                         .finally(() => setRecLoading(false))
                     }}
-                    className="mt-1 rounded border border-zinc-700 px-2 py-1 text-[11px] text-zinc-300 hover:bg-zinc-800"
+                    className="mt-1 rounded border border-zinc-300 dark:border-zinc-700 px-2 py-1 text-[11px] text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-800"
                   >
                     Run again
                   </button>
                 )}
               </div>
             ) : (
-              <div className="mt-2 max-h-72 space-y-1 overflow-y-auto rounded border border-zinc-800 p-2">
+              <div className="mt-2 max-h-72 space-y-1 overflow-y-auto rounded border border-zinc-200 dark:border-zinc-800 p-2">
                 {allSkills.length === 0 ? (
                   <div className="text-xs text-zinc-500">No skills available.</div>
                 ) : (
                   allSkills.map((s) => (
-                    <label key={s.id} className="flex items-start gap-2 text-xs text-zinc-200">
+                    <label key={s.id} className="flex items-start gap-2 text-xs text-zinc-800 dark:text-zinc-200">
                       <input
                         type="checkbox"
                         className="mt-0.5"
@@ -303,7 +303,7 @@ export function ConfigureStep({
           </section>
 
           <section>
-            <label className="block text-xs font-medium uppercase tracking-wide text-zinc-400" htmlFor="featureName">
+            <label className="block text-xs font-medium uppercase tracking-wide text-zinc-600 dark:text-zinc-400" htmlFor="featureName">
               Feature name (optional)
             </label>
             <input
@@ -312,7 +312,7 @@ export function ConfigureStep({
               value={featureName}
               onChange={(e) => setFeatureName(e.target.value)}
               placeholder={featureNamePlaceholder}
-              className="mt-2 w-full rounded border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-100 focus:border-zinc-500 focus:outline-none"
+              className="mt-2 w-full rounded border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 px-2 py-1.5 text-xs text-zinc-900 dark:text-zinc-100 focus:border-zinc-500 focus:outline-none"
             />
             {validation.errors.featureName && (
               <div className="mt-1 text-xs text-rose-400">{validation.errors.featureName}</div>
@@ -327,11 +327,11 @@ export function ConfigureStep({
         </div>
       </div>
 
-      <div className="flex items-center justify-end gap-2 border-t border-zinc-800 px-6 py-3">
+      <div className="flex items-center justify-end gap-2 border-t border-zinc-200 dark:border-zinc-800 px-6 py-3">
         <button
           type="button"
           onClick={onCancel}
-          className="rounded border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800"
+          className="rounded border border-zinc-300 dark:border-zinc-700 px-3 py-1.5 text-xs text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-800"
         >
           Cancel
         </button>
@@ -356,15 +356,15 @@ function ModeButton({
   active: boolean
   onClick: () => void
   children: React.ReactNode
-}): JSX.Element {
+}) {
   return (
     <button
       type="button"
       onClick={onClick}
       className={`rounded border px-2 py-0.5 text-[11px] ${
         active
-          ? 'border-zinc-500 bg-zinc-800 text-zinc-100'
-          : 'border-zinc-800 text-zinc-400 hover:bg-zinc-900'
+          ? 'border-zinc-500 bg-zinc-200 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100'
+          : 'border-zinc-200 dark:border-zinc-800 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-900'
       }`}
     >
       {children}

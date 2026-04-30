@@ -16,7 +16,7 @@ interface Props {
 // Journal tab — shows diagnosis-journal.md entries scoped to the selected
 // run by default, with a checkbox to drop the run filter and see the full
 // feature history (useful for spotting prior wrong hypotheses).
-export function JournalTab({ feature, runId }: Props): JSX.Element {
+export function JournalTab({ feature, runId }: Props) {
   const [showAllRuns, setShowAllRuns] = useState(false)
   const [entries, setEntries] = useState<JournalEntry[] | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -60,8 +60,8 @@ export function JournalTab({ feature, runId }: Props): JSX.Element {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center gap-3 border-b border-zinc-800 px-4 py-2 text-xs">
-        <label className="flex items-center gap-1.5 text-zinc-400">
+      <div className="flex items-center gap-3 border-b border-zinc-200 dark:border-zinc-800 px-4 py-2 text-xs">
+        <label className="flex items-center gap-1.5 text-zinc-600 dark:text-zinc-400">
           <input
             type="checkbox"
             checked={showAllRuns}
@@ -70,11 +70,11 @@ export function JournalTab({ feature, runId }: Props): JSX.Element {
           />
           Show all runs (cross-run journal)
         </label>
-        <span className="text-zinc-600">·</span>
+        <span className="text-zinc-400 dark:text-zinc-600">·</span>
         <span className="text-zinc-500">Feature: {feature}</span>
         {!showAllRuns && (
           <>
-            <span className="text-zinc-600">·</span>
+            <span className="text-zinc-400 dark:text-zinc-600">·</span>
             <span className="font-mono text-zinc-500">Run: {runId}</span>
           </>
         )}
@@ -115,19 +115,19 @@ export function JournalTab({ feature, runId }: Props): JSX.Element {
   )
 }
 
-function EntryCard({ entry, onDelete }: { entry: JournalEntry; onDelete: () => void }): JSX.Element {
+function EntryCard({ entry, onDelete }: { entry: JournalEntry; onDelete: () => void }) {
   const [expanded, setExpanded] = useState(false)
   const fields = parseBodyFields(entry.body)
   const outcome = classifyOutcome(entry.outcome)
   return (
-    <li className="rounded border border-zinc-800 bg-zinc-900/50 p-3">
+    <li className="rounded border border-zinc-200 dark:border-zinc-800 bg-zinc-100/60 dark:bg-zinc-900/50 p-3">
       <header className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
-          <span className="font-mono text-xs text-zinc-300">
+          <span className="font-mono text-xs text-zinc-700 dark:text-zinc-300">
             Iteration {entry.iteration ?? '?'}
           </span>
           {entry.timestamp && (
-            <span className="font-mono text-[10px] text-zinc-600">{entry.timestamp}</span>
+            <span className="font-mono text-[10px] text-zinc-400 dark:text-zinc-600">{entry.timestamp}</span>
           )}
           <span className={`rounded border px-1.5 py-0.5 text-[10px] uppercase tracking-wide ${outcomeBadgeClass(outcome)}`}>
             {outcome}
@@ -152,12 +152,12 @@ function EntryCard({ entry, onDelete }: { entry: JournalEntry; onDelete: () => v
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)}
-        className="mt-2 text-[11px] text-zinc-500 hover:text-zinc-300"
+        className="mt-2 text-[11px] text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
       >
         {expanded ? 'Hide raw markdown' : 'Show raw markdown'}
       </button>
       {expanded && (
-        <pre className="mt-1.5 overflow-x-auto rounded bg-zinc-950 p-2 font-mono text-[11px] text-zinc-300">
+        <pre className="mt-1.5 overflow-x-auto rounded bg-white dark:bg-zinc-950 p-2 font-mono text-[11px] text-zinc-700 dark:text-zinc-300">
           {entry.body}
         </pre>
       )}
@@ -165,11 +165,11 @@ function EntryCard({ entry, onDelete }: { entry: JournalEntry; onDelete: () => v
   )
 }
 
-function FieldRow({ field }: { field: { key: string; value: string } }): JSX.Element {
+function FieldRow({ field }: { field: { key: string; value: string } }) {
   return (
     <>
       <dt className="font-mono text-zinc-500">{field.key}</dt>
-      <dd className="break-all text-zinc-200">{field.value}</dd>
+      <dd className="break-all text-zinc-800 dark:text-zinc-200">{field.value}</dd>
     </>
   )
 }
@@ -184,12 +184,12 @@ function ConfirmDeleteDialog({
   error: string | null
   onCancel: () => void
   onConfirm: () => void
-}): JSX.Element {
+}) {
   return (
     <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/60">
-      <div className="w-[420px] rounded border border-zinc-700 bg-zinc-900 p-4 shadow-xl">
-        <h2 className="text-sm font-medium text-zinc-100">Delete iteration {entry.iteration}?</h2>
-        <p className="mt-2 text-xs text-zinc-400">
+      <div className="w-[420px] rounded border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-4 shadow-xl">
+        <h2 className="text-sm font-medium text-zinc-900 dark:text-zinc-100">Delete iteration {entry.iteration}?</h2>
+        <p className="mt-2 text-xs text-zinc-600 dark:text-zinc-400">
           This permanently removes it from <span className="font-mono">logs/diagnosis-journal.md</span>.
         </p>
         {error && (
@@ -201,7 +201,7 @@ function ConfirmDeleteDialog({
           <button
             type="button"
             onClick={onCancel}
-            className="rounded border border-zinc-700 px-3 py-1 text-zinc-300 hover:bg-zinc-800"
+            className="rounded border border-zinc-300 dark:border-zinc-700 px-3 py-1 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-800"
           >
             Cancel
           </button>

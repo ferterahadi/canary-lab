@@ -11,7 +11,7 @@ interface Props {
 // Lightweight monospace live-stream panel for wizard agent stdout. Not xterm
 // — we don't need PTY semantics here, just append-only chunks. Auto-scrolls
 // while the user is at the bottom; if they scroll up we leave them put.
-export function AgentLogPanel({ draftId, initialBuffer }: Props): JSX.Element {
+export function AgentLogPanel({ draftId, initialBuffer }: Props) {
   const [text, setText] = useState(initialBuffer ?? '')
   const containerRef = useRef<HTMLPreElement | null>(null)
   const stickToBottomRef = useRef(true)
@@ -54,9 +54,9 @@ export function AgentLogPanel({ draftId, initialBuffer }: Props): JSX.Element {
     <pre
       ref={containerRef}
       onScroll={handleScroll}
-      className="h-64 overflow-auto rounded border border-zinc-800 bg-zinc-950 p-3 font-mono text-[11px] leading-snug text-zinc-300 whitespace-pre-wrap"
+      className="h-64 overflow-auto rounded border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 p-3 font-mono text-[11px] leading-snug text-zinc-700 dark:text-zinc-300 whitespace-pre-wrap"
     >
-      {text || <span className="text-zinc-600">Waiting for agent output…</span>}
+      {text || <span className="text-zinc-400 dark:text-zinc-600">Waiting for agent output…</span>}
     </pre>
   )
 }

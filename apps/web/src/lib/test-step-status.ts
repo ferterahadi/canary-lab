@@ -58,6 +58,6 @@ export function colorClassForStatus(status: StepStatus): string {
       return 'border-amber-500/50 bg-amber-500/5'
     case 'pending':
     default:
-      return 'border-zinc-700 bg-zinc-900/30'
+      return 'border-zinc-300 bg-zinc-100/30 dark:border-zinc-700 dark:bg-zinc-900/30'
   }
 }

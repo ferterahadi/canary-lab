@@ -83,6 +83,6 @@ export function outcomeBadgeClass(outcome: OutcomeBadge): string {
       return 'border-sky-500/40 text-sky-300 bg-sky-500/10'
     case 'unknown':
     default:
-      return 'border-zinc-700 text-zinc-400 bg-zinc-800/40'
+      return 'border-zinc-300 text-zinc-600 bg-zinc-200/40 dark:border-zinc-700 dark:text-zinc-400 dark:bg-zinc-800/40'
   }
 }

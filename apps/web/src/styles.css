@@ -3,6 +3,8 @@
 /* xterm.js base CSS — imported directly so we don't ship a separate sheet. */
 @import "@xterm/xterm/css/xterm.css";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
 html, body, #root {
   height: 100%;
   margin: 0;
