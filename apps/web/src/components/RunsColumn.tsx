@@ -15,7 +15,7 @@ interface Props {
 
 // Column 2 — runs for the selected feature, newest first. The list refreshes
 // upstream on a 5s timer so this component stays purely presentational.
-export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRun, onStartRun }: Props): JSX.Element {
+export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRun, onStartRun }: Props) {
   // Track only an explicit user override; fall back to the first declared env.
   // Avoids a useEffect that resets state when feature/envs change.
   const [envOverride, setEnvOverride] = useState<string | null>(null)
@@ -56,7 +56,7 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center justify-between border-b border-zinc-800 px-3 py-2">
+      <div className="flex items-center justify-between border-b border-zinc-200 dark:border-zinc-800 px-3 py-2">
         <div className="text-[10px] uppercase tracking-wide text-zinc-500">
           {feature ? `Runs · ${feature}` : 'Runs'}
         </div>
@@ -66,7 +66,7 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
               value={selectedEnv}
               onChange={(e) => setEnvOverride(e.target.value)}
               disabled={!feature}
-              className="rounded border border-zinc-700 bg-zinc-900 px-1.5 py-1 text-xs text-zinc-200 focus:outline-none focus:ring-1 focus:ring-emerald-500/40 disabled:cursor-not-allowed disabled:opacity-50"
+              className="rounded border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900 px-1.5 py-1 text-xs text-zinc-800 dark:text-zinc-200 focus:outline-none focus:ring-1 focus:ring-emerald-500/40 disabled:cursor-not-allowed disabled:opacity-50"
               aria-label="Environment"
             >
               {envs.map((e) => (
@@ -78,7 +78,7 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
             type="button"
             disabled={!feature}
             onClick={() => onStartRun(selectedEnv || undefined)}
-            className="rounded bg-emerald-600/80 px-2 py-1 text-xs font-medium text-white hover:bg-emerald-600 disabled:cursor-not-allowed disabled:bg-zinc-800 disabled:text-zinc-500"
+            className="rounded bg-emerald-600/80 px-2 py-1 text-xs font-medium text-white hover:bg-emerald-600 disabled:cursor-not-allowed disabled:bg-zinc-200 dark:disabled:bg-zinc-800 disabled:text-zinc-500"
           >
             Run Now
           </button>
@@ -99,12 +99,12 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
                   <button
                     type="button"
                     onClick={() => onSelectRun(r.runId)}
-                    className={`flex w-full flex-col items-start gap-1 border-b border-zinc-900 px-3 py-2 text-left ${
-                      isSelected ? 'bg-zinc-900' : 'hover:bg-zinc-900/50'
+                    className={`flex w-full flex-col items-start gap-1 border-b border-zinc-100 dark:border-zinc-900 px-3 py-2 text-left ${
+                      isSelected ? 'bg-zinc-100 dark:bg-zinc-900' : 'hover:bg-zinc-100/60 dark:hover:bg-zinc-900/50'
                     }`}
                   >
                     <div className="flex w-full items-center justify-between">
-                      <span className="font-mono text-xs text-zinc-400">{shortTime(r.startedAt)}</span>
+                      <span className="font-mono text-xs text-zinc-600 dark:text-zinc-400">{shortTime(r.startedAt)}</span>
                       <div className="flex items-center gap-1.5">
                         {canPauseHeal(r.status) && (
                           <span
@@ -172,19 +172,19 @@ function ConfirmPauseDialog({
   run: RunIndexEntry
   onCancel: () => void
   onConfirm: () => void
-}): JSX.Element {
+}) {
   return (
     <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/60">
-      <div className="w-[420px] rounded border border-zinc-700 bg-zinc-900 p-4 shadow-xl">
-        <h2 className="text-sm font-medium text-zinc-100">Pause and start heal?</h2>
-        <p className="mt-2 text-xs text-zinc-400">
+      <div className="w-[420px] rounded border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-4 shadow-xl">
+        <h2 className="text-sm font-medium text-zinc-900 dark:text-zinc-100">Pause and start heal?</h2>
+        <p className="mt-2 text-xs text-zinc-600 dark:text-zinc-400">
           Playwright will be terminated for run <span className="font-mono">{run.runId}</span>. Pending tests are skipped, and the heal agent starts immediately on whatever has failed so far.
         </p>
         <div className="mt-4 flex justify-end gap-2 text-xs">
           <button
             type="button"
             onClick={onCancel}
-            className="rounded border border-zinc-700 px-3 py-1 text-zinc-300 hover:bg-zinc-800"
+            className="rounded border border-zinc-300 dark:border-zinc-700 px-3 py-1 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-800"
           >
             Cancel
           </button>

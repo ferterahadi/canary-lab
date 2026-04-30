@@ -18,7 +18,7 @@ interface Props {
 // we use a fixed-positioned overlay instead — same UX, smaller dependency
 // footprint. The wizard owns the draft id and the polling loop; each step
 // component receives the current draft + a small set of callbacks.
-export function AddTestWizard({ features, onClose }: Props): JSX.Element {
+export function AddTestWizard({ features, onClose }: Props) {
   const [step, setStep] = useState<WizardStep>('configure')
   const [draft, setDraft] = useState<DraftRecord | null>(null)
   const [configureInput, setConfigureInput] = useState<ConfigureSubmit | null>(null)
@@ -171,13 +171,13 @@ export function AddTestWizard({ features, onClose }: Props): JSX.Element {
           : ''
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-zinc-950">
-      <header className="flex items-center justify-between border-b border-zinc-800 px-6 py-3">
-        <div className="text-sm font-medium text-zinc-100">Add test</div>
+    <div className="fixed inset-0 z-50 flex flex-col bg-white dark:bg-zinc-950">
+      <header className="flex items-center justify-between border-b border-zinc-200 dark:border-zinc-800 px-6 py-3">
+        <div className="text-sm font-medium text-zinc-900 dark:text-zinc-100">Add test</div>
         <button
           type="button"
           onClick={requestCancel}
-          className="rounded border border-zinc-800 px-2 py-1 text-xs text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200"
+          className="rounded border border-zinc-200 dark:border-zinc-800 px-2 py-1 text-xs text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-900 hover:text-zinc-900 dark:hover:text-zinc-200"
         >
           Close
         </button>
@@ -224,16 +224,16 @@ export function AddTestWizard({ features, onClose }: Props): JSX.Element {
 
       {confirmCancel && (
         <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/60">
-          <div className="w-[360px] rounded border border-zinc-700 bg-zinc-900 p-4 shadow-xl">
-            <div className="text-sm font-medium text-zinc-100">Discard this draft?</div>
-            <p className="mt-2 text-xs text-zinc-400">
+          <div className="w-[360px] rounded border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-4 shadow-xl">
+            <div className="text-sm font-medium text-zinc-900 dark:text-zinc-100">Discard this draft?</div>
+            <p className="mt-2 text-xs text-zinc-600 dark:text-zinc-400">
               The in-progress draft will be rejected and removed.
             </p>
             <div className="mt-4 flex justify-end gap-2 text-xs">
               <button
                 type="button"
                 onClick={() => setConfirmCancel(false)}
-                className="rounded border border-zinc-700 px-3 py-1 text-zinc-300 hover:bg-zinc-800"
+                className="rounded border border-zinc-300 dark:border-zinc-700 px-3 py-1 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-800"
               >
                 Keep editing
               </button>

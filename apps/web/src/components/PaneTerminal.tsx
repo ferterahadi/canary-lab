@@ -2,6 +2,12 @@ import { useEffect, useRef } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { connectPane, type PaneConnection } from '../api/pane-socket'
+import { currentResolvedTheme, subscribeTheme, type ResolvedTheme } from '../lib/theme'
+
+const TERM_THEMES: Record<ResolvedTheme, { background: string; foreground: string }> = {
+  dark: { background: '#09090b', foreground: '#e4e4e7' },
+  light: { background: '#ffffff', foreground: '#18181b' },
+}
 
 interface Props {
   runId: string
@@ -11,7 +17,7 @@ interface Props {
 // Renders a single xterm.js terminal bound to one pane. Re-mounts when
 // runId/paneId change. Buffer replay is handled server-side, so a fresh
 // Terminal per mount is fine.
-export function PaneTerminal({ runId, paneId }: Props): JSX.Element {
+export function PaneTerminal({ runId, paneId }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
@@ -21,7 +27,10 @@ export function PaneTerminal({ runId, paneId }: Props): JSX.Element {
       convertEol: true,
       fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
       fontSize: 12,
-      theme: { background: '#09090b', foreground: '#e4e4e7' },
+      theme: TERM_THEMES[currentResolvedTheme()],
+    })
+    const unsubscribeTheme = subscribeTheme((next) => {
+      term.options.theme = TERM_THEMES[next]
     })
     const fit = new FitAddon()
     term.loadAddon(fit)
@@ -40,10 +49,11 @@ export function PaneTerminal({ runId, paneId }: Props): JSX.Element {
     window.addEventListener('resize', handleResize)
     return () => {
       window.removeEventListener('resize', handleResize)
+      unsubscribeTheme()
       conn.close()
       term.dispose()
     }
   }, [runId, paneId])
 
-  return <div ref={containerRef} className="h-full w-full bg-zinc-950 p-2" />
+  return <div ref={containerRef} className="h-full w-full bg-white p-2 dark:bg-zinc-950" />
 }

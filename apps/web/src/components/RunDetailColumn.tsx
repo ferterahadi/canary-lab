@@ -11,7 +11,7 @@ type Tab = 'overview' | 'services' | 'playwright' | 'agent' | 'steps' | 'journal
 const TERMINAL_STATUSES = new Set(['passed', 'failed', 'aborted'])
 
 // Column 3 — detail tabs for the selected run.
-export function RunDetailColumn({ runId }: Props): JSX.Element {
+export function RunDetailColumn({ runId }: Props) {
   const [detail, setDetail] = useState<RunDetail | null>(null)
   const [tab, setTab] = useState<Tab>('overview')
   const [serviceIdx, setServiceIdx] = useState(0)
@@ -66,9 +66,9 @@ export function RunDetailColumn({ runId }: Props): JSX.Element {
 
   return (
     <div className="relative flex h-full flex-col">
-      <header className="border-b border-zinc-800 px-4 py-2">
+      <header className="border-b border-zinc-200 dark:border-zinc-800 px-4 py-2">
         <div className="flex items-center gap-3">
-          <span className="font-mono text-sm text-zinc-300">{m.runId}</span>
+          <span className="font-mono text-sm text-zinc-700 dark:text-zinc-300">{m.runId}</span>
           <span
             className={`rounded border px-1.5 py-0.5 text-[10px] uppercase tracking-wide ${statusBadgeClass(m.status)}`}
           >
@@ -107,10 +107,10 @@ export function RunDetailColumn({ runId }: Props): JSX.Element {
             ) : (
               <ul className="text-xs">
                 {services.map((s) => (
-                  <li key={s.safeName} className="border-b border-zinc-900 py-1">
-                    <div className="font-medium text-zinc-200">{s.name}</div>
+                  <li key={s.safeName} className="border-b border-zinc-100 dark:border-zinc-900 py-1">
+                    <div className="font-medium text-zinc-800 dark:text-zinc-200">{s.name}</div>
                     <div className="font-mono text-[11px] text-zinc-500">{s.command}</div>
-                    <div className="font-mono text-[11px] text-zinc-600">{s.logPath}</div>
+                    <div className="font-mono text-[11px] text-zinc-400 dark:text-zinc-600">{s.logPath}</div>
                   </li>
                 ))}
               </ul>
@@ -119,13 +119,13 @@ export function RunDetailColumn({ runId }: Props): JSX.Element {
         )}
         {tab === 'services' && services.length > 0 && (
           <div className="flex h-full flex-col">
-            <div className="flex gap-1 border-b border-zinc-800 px-3 py-1 text-xs">
+            <div className="flex gap-1 border-b border-zinc-200 dark:border-zinc-800 px-3 py-1 text-xs">
               {services.map((s, i) => (
                 <button
                   key={s.safeName}
                   type="button"
                   onClick={() => setServiceIdx(i)}
-                  className={`rounded px-2 py-1 ${i === serviceIdx ? 'bg-zinc-800' : 'hover:bg-zinc-900'}`}
+                  className={`rounded px-2 py-1 ${i === serviceIdx ? 'bg-zinc-200 dark:bg-zinc-800' : 'hover:bg-zinc-100 dark:hover:bg-zinc-900'}`}
                 >
                   {s.name}
                 </button>
@@ -159,7 +159,7 @@ interface Props {
   runId: string | null
 }
 
-function TabButton(props: { active: boolean; disabled?: boolean; onClick: () => void; children: React.ReactNode }): JSX.Element {
+function TabButton(props: { active: boolean; disabled?: boolean; onClick: () => void; children: React.ReactNode }) {
   const { active, disabled, onClick, children } = props
   return (
     <button
@@ -167,7 +167,7 @@ function TabButton(props: { active: boolean; disabled?: boolean; onClick: () => 
       disabled={disabled}
       onClick={onClick}
       className={`rounded px-2 py-1 ${
-        active ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-400 hover:bg-zinc-900 disabled:cursor-not-allowed disabled:text-zinc-700'
+        active ? 'bg-zinc-200 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100' : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-900 disabled:cursor-not-allowed disabled:text-zinc-300 dark:disabled:text-zinc-700'
       }`}
     >
       {children}

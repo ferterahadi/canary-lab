@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import * as api from '../../api/client'
 import type { DraftRecord } from '../../api/types'
 import { AgentLogPanel } from './AgentLogPanel'
+import { useTheme } from '../../lib/theme'
 
 interface Props {
   draft: DraftRecord
@@ -21,7 +22,7 @@ export function SpecReviewStep({
   onAccept,
   onReject,
   acting,
-}: Props): JSX.Element {
+}: Props) {
   const { status } = draft
 
   return (
@@ -30,7 +31,7 @@ export function SpecReviewStep({
         <div className="mx-auto max-w-3xl space-y-4">
           {status === 'generating' && (
             <>
-              <div className="rounded border border-zinc-800 bg-zinc-900/60 p-3 text-xs text-zinc-300">
+              <div className="rounded border border-zinc-200 bg-zinc-50/60 p-3 text-xs text-zinc-700 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-300">
                 Agent is generating the spec files…
               </div>
               <AgentLogPanel draftId={draft.draftId} initialBuffer={draft.specAgentLogTail} />
@@ -46,7 +47,7 @@ export function SpecReviewStep({
 
           {(status === 'spec-ready' || status === 'accepted') && (
             <div>
-              <div className="mb-2 text-xs font-medium uppercase tracking-wide text-zinc-400">
+              <div className="mb-2 text-xs font-medium uppercase tracking-wide text-zinc-600 dark:text-zinc-400">
                 Generated files
               </div>
               <p className="mb-2 text-xs text-zinc-500">
@@ -61,8 +62,8 @@ export function SpecReviewStep({
           )}
 
           {(status === 'spec-ready' || status === 'accepted') && (
-            <details className="rounded border border-zinc-800">
-              <summary className="cursor-pointer px-3 py-2 text-xs text-zinc-400">
+            <details className="rounded border border-zinc-200 dark:border-zinc-800">
+              <summary className="cursor-pointer px-3 py-2 text-xs text-zinc-600 dark:text-zinc-400">
                 Agent output
               </summary>
               <div className="px-3 pb-3">
@@ -73,12 +74,12 @@ export function SpecReviewStep({
         </div>
       </div>
 
-      <div className="flex items-center justify-end gap-2 border-t border-zinc-800 px-6 py-3">
+      <div className="flex items-center justify-end gap-2 border-t border-zinc-200 px-6 py-3 dark:border-zinc-800">
         <button
           type="button"
           onClick={onReject}
           disabled={acting}
-          className="rounded border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800 disabled:opacity-50"
+          className="rounded border border-zinc-300 px-3 py-1.5 text-xs text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800 disabled:opacity-50"
         >
           Reject
         </button>
@@ -103,7 +104,7 @@ function FileList({
   draftId: string
   files: string[]
   featureName: string
-}): JSX.Element {
+}) {
   if (files.length === 0) {
     return <div className="text-xs italic text-zinc-500">No files generated.</div>
   }
@@ -124,14 +125,14 @@ function FileItem({
   draftId: string
   path: string
   featureName: string
-}): JSX.Element {
+}) {
   const [open, setOpen] = useState(false)
   return (
-    <li className="rounded border border-zinc-800 bg-zinc-900/40">
+    <li className="rounded border border-zinc-200 bg-zinc-50/60 dark:border-zinc-800 dark:bg-zinc-900/40">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center justify-between px-3 py-2 text-left font-mono text-[11px] text-zinc-300 hover:bg-zinc-900/80"
+        className="flex w-full items-center justify-between px-3 py-2 text-left font-mono text-[11px] text-zinc-700 hover:bg-zinc-100/80 dark:text-zinc-300 dark:hover:bg-zinc-900/80"
       >
         <span>features/{featureName}/{path}</span>
         <span className="text-[10px] text-zinc-500">{open ? '▾' : '▸'}</span>
@@ -141,7 +142,8 @@ function FileItem({
   )
 }
 
-function FilePreview({ draftId, path }: { draftId: string; path: string }): JSX.Element {
+function FilePreview({ draftId, path }: { draftId: string; path: string }) {
+  const { resolved } = useTheme()
   const [content, setContent] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [html, setHtml] = useState<string | null>(null)
@@ -171,11 +173,12 @@ function FilePreview({ draftId, path }: { draftId: string; path: string }): JSX.
       setHtml(null)
       return
     }
+    const themeName = resolved === 'dark' ? 'github-dark' : 'github-light'
     getHighlighter()
       .then((hl) => {
         if (cancelled) return
         try {
-          setHtml(hl.codeToHtml(content, { lang, theme: 'github-dark' }))
+          setHtml(hl.codeToHtml(content, { lang, theme: themeName }))
         } catch {
           setHtml(null)
         }
@@ -186,7 +189,7 @@ function FilePreview({ draftId, path }: { draftId: string; path: string }): JSX.
     return () => {
       cancelled = true
     }
-  }, [content, path])
+  }, [content, path, resolved])
 
   if (error) {
     return <div className="px-3 py-2 text-[11px] text-rose-300">Failed to load: {error}</div>
@@ -204,7 +207,7 @@ function FilePreview({ draftId, path }: { draftId: string; path: string }): JSX.
     )
   }
   return (
-    <pre className="overflow-x-auto px-3 py-2 font-mono text-[11px] text-zinc-300">
+    <pre className="overflow-x-auto px-3 py-2 font-mono text-[11px] text-zinc-700 dark:text-zinc-300">
       <code>{content}</code>
     </pre>
   )
@@ -230,15 +233,16 @@ let highlighterPromise: Promise<Highlighter> | null = null
 function getHighlighter(): Promise<Highlighter> {
   if (!highlighterPromise) {
     highlighterPromise = (async () => {
-      const [{ createHighlighterCore }, { createOnigurumaEngine }, ts, dark, wasm] = await Promise.all([
+      const [{ createHighlighterCore }, { createOnigurumaEngine }, ts, dark, light, wasm] = await Promise.all([
         import('shiki/core'),
         import('shiki/engine/oniguruma'),
         import('shiki/langs/typescript.mjs'),
         import('shiki/themes/github-dark.mjs'),
+        import('shiki/themes/github-light.mjs'),
         import('shiki/wasm'),
       ])
       const hl = await createHighlighterCore({
-        themes: [dark.default],
+        themes: [dark.default, light.default],
         langs: [ts.default],
         engine: createOnigurumaEngine(wasm.default),
       })

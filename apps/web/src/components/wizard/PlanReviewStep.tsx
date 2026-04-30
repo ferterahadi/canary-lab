@@ -41,7 +41,7 @@ interface Props {
 // react-dnd for smaller bundle footprint), delete, or append a new step.
 // Accept passes the edited plan back; the original prop receives the full
 // updated array.
-export function PlanReviewStep({ draft, onAccept, onReject, onRetry, acting }: Props): JSX.Element {
+export function PlanReviewStep({ draft, onAccept, onReject, onRetry, acting }: Props) {
   const { status } = draft
   const seedPlan = useMemo(
     () => ((draft.plan as PlanStep[] | undefined) ?? []),
@@ -90,7 +90,7 @@ export function PlanReviewStep({ draft, onAccept, onReject, onRetry, acting }: P
         <div className="mx-auto max-w-3xl space-y-4">
           {status === 'planning' && (
             <>
-              <div className="rounded border border-zinc-800 bg-zinc-900/60 p-3 text-xs text-zinc-300">
+              <div className="rounded border border-zinc-200 dark:border-zinc-800 bg-zinc-100/60 dark:bg-zinc-900/60 p-3 text-xs text-zinc-700 dark:text-zinc-300">
                 Agent is drafting the test plan…
               </div>
               <AgentLogPanel draftId={draft.draftId} initialBuffer={draft.planAgentLogTail} />
@@ -107,14 +107,14 @@ export function PlanReviewStep({ draft, onAccept, onReject, onRetry, acting }: P
           {(status === 'plan-ready' || status === 'generating' || status === 'spec-ready' || status === 'accepted') && (
             <div>
               <div className="mb-2 flex items-center justify-between">
-                <span className="text-xs font-medium uppercase tracking-wide text-zinc-400">
+                <span className="text-xs font-medium uppercase tracking-wide text-zinc-600 dark:text-zinc-400">
                   Generated plan
                 </span>
                 {editable && (
                   <button
                     type="button"
                     onClick={handleAppend}
-                    className="rounded border border-zinc-700 px-2 py-1 text-[11px] text-zinc-300 hover:bg-zinc-800"
+                    className="rounded border border-zinc-300 dark:border-zinc-700 px-2 py-1 text-[11px] text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-800"
                   >
                     + Add step
                   </button>
@@ -152,7 +152,7 @@ export function PlanReviewStep({ draft, onAccept, onReject, onRetry, acting }: P
         </div>
       </div>
 
-      <div className="flex items-center justify-end gap-2 border-t border-zinc-800 px-6 py-3">
+      <div className="flex items-center justify-end gap-2 border-t border-zinc-200 dark:border-zinc-800 px-6 py-3">
         {status === 'error' ? (
           <button
             type="button"
@@ -168,7 +168,7 @@ export function PlanReviewStep({ draft, onAccept, onReject, onRetry, acting }: P
               type="button"
               onClick={onReject}
               disabled={acting}
-              className="rounded border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800 disabled:opacity-50"
+              className="rounded border border-zinc-300 dark:border-zinc-700 px-3 py-1.5 text-xs text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-800 disabled:opacity-50"
             >
               Reject
             </button>
@@ -199,7 +199,7 @@ function SortablePlanItem({
   item: PlanStep
   onPatch: (i: number, patch: Partial<PlanStep>) => void
   onRemove: (i: number) => void
-}): JSX.Element {
+}) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id })
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -213,12 +213,12 @@ function SortablePlanItem({
     <li
       ref={setNodeRef}
       style={style}
-      className="flex gap-2 rounded border border-zinc-800 bg-zinc-900/60 p-3 text-xs"
+      className="flex gap-2 rounded border border-zinc-200 dark:border-zinc-800 bg-zinc-100/60 dark:bg-zinc-900/60 p-3 text-xs"
     >
       <button
         type="button"
         aria-label="Drag to reorder"
-        className="cursor-grab self-start text-zinc-500 hover:text-zinc-300"
+        className="cursor-grab self-start text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
         {...attributes}
         {...listeners}
       >
@@ -234,13 +234,13 @@ function SortablePlanItem({
               if (e.key === 'Enter') { onPatch(index, { step: (e.target as HTMLInputElement).value.trim() }); setEditingStep(false) }
               if (e.key === 'Escape') setEditingStep(false)
             }}
-            className="w-full rounded border border-zinc-700 bg-zinc-950 px-2 py-1 font-medium text-zinc-100"
+            className="w-full rounded border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 px-2 py-1 font-medium text-zinc-900 dark:text-zinc-100"
           />
         ) : (
           <button
             type="button"
             onClick={() => setEditingStep(true)}
-            className="block w-full text-left font-medium text-zinc-100 hover:text-emerald-300"
+            className="block w-full text-left font-medium text-zinc-900 dark:text-zinc-100 hover:text-emerald-300"
           >
             {item.step || <span className="italic text-zinc-500">(empty)</span>}
           </button>
@@ -252,7 +252,7 @@ function SortablePlanItem({
             value={renderActionsTextarea(item.actions)}
             onChange={(e) => onPatch(index, { actions: parseActionsTextarea(e.target.value) })}
             rows={Math.max(2, item.actions.length + 1)}
-            className="w-full rounded border border-zinc-800 bg-zinc-950 px-2 py-1 font-mono text-[11px] text-zinc-300"
+            className="w-full rounded border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 px-2 py-1 font-mono text-[11px] text-zinc-700 dark:text-zinc-300"
             placeholder="One action per line"
           />
         </div>
@@ -266,15 +266,15 @@ function SortablePlanItem({
               if (e.key === 'Enter') { onPatch(index, { expectedOutcome: (e.target as HTMLInputElement).value }); setEditingOutcome(false) }
               if (e.key === 'Escape') setEditingOutcome(false)
             }}
-            className="w-full rounded border border-zinc-700 bg-zinc-950 px-2 py-1 italic text-zinc-300"
+            className="w-full rounded border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 px-2 py-1 italic text-zinc-700 dark:text-zinc-300"
           />
         ) : (
           <button
             type="button"
             onClick={() => setEditingOutcome(true)}
-            className="block w-full text-left italic text-zinc-400 hover:text-emerald-300"
+            className="block w-full text-left italic text-zinc-600 dark:text-zinc-400 hover:text-emerald-300"
           >
-            {item.expectedOutcome || <span className="text-zinc-600">(no expected outcome)</span>}
+            {item.expectedOutcome || <span className="text-zinc-400 dark:text-zinc-600">(no expected outcome)</span>}
           </button>
         )}
       </div>
@@ -290,23 +290,23 @@ function SortablePlanItem({
   )
 }
 
-function PlanList({ plan }: { plan: PlanStep[] }): JSX.Element {
+function PlanList({ plan }: { plan: PlanStep[] }) {
   if (plan.length === 0) {
     return <div className="text-xs italic text-zinc-500">Plan is empty.</div>
   }
   return (
     <ol className="space-y-3">
       {plan.map((item, i) => (
-        <li key={i} className="rounded border border-zinc-800 bg-zinc-900/60 p-3 text-xs">
-          <div className="font-medium text-zinc-100">{item.step}</div>
+        <li key={i} className="rounded border border-zinc-200 dark:border-zinc-800 bg-zinc-100/60 dark:bg-zinc-900/60 p-3 text-xs">
+          <div className="font-medium text-zinc-900 dark:text-zinc-100">{item.step}</div>
           {item.actions.length > 0 && (
-            <ul className="mt-2 list-disc space-y-0.5 pl-4 text-zinc-300">
+            <ul className="mt-2 list-disc space-y-0.5 pl-4 text-zinc-700 dark:text-zinc-300">
               {item.actions.map((a, j) => (
                 <li key={j}>{a}</li>
               ))}
             </ul>
           )}
-          <div className="mt-2 italic text-zinc-400">{item.expectedOutcome}</div>
+          <div className="mt-2 italic text-zinc-600 dark:text-zinc-400">{item.expectedOutcome}</div>
         </li>
       ))}
     </ol>

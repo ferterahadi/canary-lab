@@ -8,7 +8,7 @@ interface Props {
 // Step 4: success state. The feature has been written into `features/<name>/`
 // and the wizard offers a one-click "Run it now" that triggers POST /api/runs
 // for the new feature and closes the wizard.
-export function DoneStep({ featureName, onRunNow, onClose, starting }: Props): JSX.Element {
+export function DoneStep({ featureName, onRunNow, onClose, starting }: Props) {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex-1 min-h-0 overflow-y-auto p-6">
@@ -21,18 +21,18 @@ export function DoneStep({ featureName, onRunNow, onClose, starting }: Props): J
             </div>
           </div>
 
-          <div className="text-xs text-zinc-400">
+          <div className="text-xs text-zinc-600 dark:text-zinc-400">
             You can run the new feature now to verify it loads, or close and pick it from the
             features sidebar.
           </div>
         </div>
       </div>
 
-      <div className="flex items-center justify-end gap-2 border-t border-zinc-800 px-6 py-3">
+      <div className="flex items-center justify-end gap-2 border-t border-zinc-200 dark:border-zinc-800 px-6 py-3">
         <button
           type="button"
           onClick={onClose}
-          className="rounded border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800"
+          className="rounded border border-zinc-300 dark:border-zinc-700 px-3 py-1.5 text-xs text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-800"
         >
           Close
         </button>
