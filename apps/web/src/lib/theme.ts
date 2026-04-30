@@ -11,7 +11,7 @@ export function getStoredChoice(): ThemeChoice {
     const v = localStorage.getItem(STORAGE_KEY)
     if (v === 'light' || v === 'dark' || v === 'system') return v
   } catch { /* localStorage may be unavailable */ }
-  return 'system'
+  return 'dark'
 }
 
 function setStoredChoice(choice: ThemeChoice): void {
@@ -46,11 +46,25 @@ export function useTheme(): {
   const [choice, setChoiceState] = useState<ThemeChoice>(() => getStoredChoice())
   const [resolved, setResolved] = useState<ResolvedTheme>(() => resolveTheme(getStoredChoice()))
 
+  // Subscribe to the global theme-change event so every consumer of
+  // useTheme() stays in sync regardless of which component triggered the
+  // change. Without this, a toggle inside one component would leave other
+  // components (e.g. ShikiCode) with stale local state.
+  useEffect(() => {
+    const unsubscribe = subscribeTheme((next) => {
+      setResolved(next)
+      // Sync `choice` with storage in case the change came from elsewhere
+      // (system mode flipping, or another part of the tree).
+      setChoiceState(getStoredChoice())
+    })
+    return unsubscribe
+  }, [])
+
   // Re-resolve when the OS theme changes and the user is in 'system' mode.
   useEffect(() => {
     if (choice !== 'system') return
     const mq = window.matchMedia('(prefers-color-scheme: dark)')
-    const onChange = (): void => { setResolved(applyTheme('system')) }
+    const onChange = (): void => { applyTheme('system') }
     mq.addEventListener('change', onChange)
     return () => { mq.removeEventListener('change', onChange) }
   }, [choice])
@@ -58,7 +72,9 @@ export function useTheme(): {
   const setChoice = (next: ThemeChoice): void => {
     setStoredChoice(next)
     setChoiceState(next)
-    setResolved(applyTheme(next))
+    // applyTheme dispatches the cl:theme event; the subscription above
+    // updates `resolved`, so we don't need to setResolved here.
+    applyTheme(next)
   }
 
   return { choice, resolved, setChoice }

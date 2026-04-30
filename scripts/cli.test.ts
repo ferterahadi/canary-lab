@@ -71,7 +71,10 @@ describe('main (cli routing)', () => {
 
   it('routes "upgrade"', async () => {
     await main(['upgrade', '--silent'])
-    expect(upgradeProject).toHaveBeenCalledExactlyOnceWith(['--silent'])
+    expect(upgradeProject).toHaveBeenCalledExactlyOnceWith(
+      ['--silent'],
+      expect.objectContaining({ confirm: expect.any(Function) }),
+    )
   })
 
   it('prints usage for -h / --help / no command', async () => {

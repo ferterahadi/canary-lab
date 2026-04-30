@@ -18,6 +18,7 @@ export interface ExtractedStep {
 export interface ExtractedTest {
   name: string
   line: number
+  bodySource: string
   steps: ExtractedStep[]
 }
 
@@ -49,12 +50,13 @@ function getCalleeChain(expr: ts.Expression): string[] {
 }
 
 function isTestCall(call: ts.CallExpression): boolean {
-  // Match `test(...)`, `test.only(...)`, `test.skip(...)` — but NOT `test.step(...)`.
+  // Match `test(...)`, `test.only(...)`, `test.skip(...)` — but NOT `test.step(...)`
+  // (those are inner steps) and NOT `test.describe(...)` (those are grouping
+  // wrappers, not tests themselves).
   const chain = getCalleeChain(call.expression)
   if (chain.length === 0 || chain[0] !== 'test') return false
   if (chain.length === 1) return true
-  // test.only, test.skip, test.fixme, test.fail are still tests; test.step is not.
-  if (chain[1] === 'step') return false
+  if (chain[1] === 'step' || chain[1] === 'describe') return false
   return true
 }
 
@@ -115,8 +117,12 @@ export function extractTestsFromSource(file: string, source: string): ExtractRes
           tests.push({
             name,
             line: lineFor(n, src),
+            bodySource: body ? bodySourceFor(body, src) : '',
             steps: body ? extractStepsFrom(body, src) : [],
           })
+          // Don't double-recurse into the test body — its inner test.step
+          // calls are already collected via extractStepsFrom.
+          return
         }
       }
       n.forEachChild(visit)

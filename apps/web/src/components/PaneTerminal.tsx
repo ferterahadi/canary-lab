@@ -5,8 +5,8 @@ import { connectPane, type PaneConnection } from '../api/pane-socket'
 import { currentResolvedTheme, subscribeTheme, type ResolvedTheme } from '../lib/theme'
 
 const TERM_THEMES: Record<ResolvedTheme, { background: string; foreground: string }> = {
-  dark: { background: '#09090b', foreground: '#e4e4e7' },
-  light: { background: '#ffffff', foreground: '#18181b' },
+  dark: { background: '#282c34', foreground: '#abb2bf' },
+  light: { background: '#fafafa', foreground: '#383a42' },
 }
 
 interface Props {
@@ -25,7 +25,7 @@ export function PaneTerminal({ runId, paneId }: Props) {
     if (!container) return
     const term = new Terminal({
       convertEol: true,
-      fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+      fontFamily: "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace",
       fontSize: 12,
       theme: TERM_THEMES[currentResolvedTheme()],
     })
@@ -55,5 +55,5 @@ export function PaneTerminal({ runId, paneId }: Props) {
     }
   }, [runId, paneId])
 
-  return <div ref={containerRef} className="h-full w-full bg-white p-2 dark:bg-zinc-950" />
+  return <div ref={containerRef} className="h-full w-full p-2" style={{ background: 'var(--bg-base)' }} />
 }

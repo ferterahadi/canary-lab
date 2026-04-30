@@ -50,14 +50,14 @@ export function statusForTest(testName: string, summary: RunSummary | undefined)
 export function colorClassForStatus(status: StepStatus): string {
   switch (status) {
     case 'passed':
-      return 'border-emerald-500/50 bg-emerald-500/5'
+      return 'border-emerald-500/40 bg-emerald-500/5 dark:border-emerald-500/50'
     case 'failed':
-      return 'border-rose-500/60 bg-rose-500/5'
+      return 'border-rose-500/50 bg-rose-500/5 dark:border-rose-500/60'
     case 'timedout':
     case 'skipped':
-      return 'border-amber-500/50 bg-amber-500/5'
+      return 'border-amber-500/40 bg-amber-500/5 dark:border-amber-500/50'
     case 'pending':
     default:
-      return 'border-zinc-300 bg-zinc-100/30 dark:border-zinc-700 dark:bg-zinc-900/30'
+      return 'border-zinc-300 bg-zinc-50/40 dark:border-zinc-700 dark:bg-zinc-900/30'
   }
 }

@@ -38,6 +38,9 @@ export default defineConfig({
         // API client, WebSocket wrapper, and pure utilities are gated.
         'apps/web/src/api/**/*.ts',
         'apps/web/src/lib/**/*.ts',
+        // 0.9.x → 0.10.x migration: pure detection + report rendering.
+        'scripts/upgrade-migration.ts',
+        'scripts/upgrade-known-prompts.ts',
       ],
       exclude: [
         '**/*.test.ts',
