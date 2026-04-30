@@ -29,7 +29,7 @@ import { RunnerLog } from './runner-log'
 import type { FeatureConfig } from '../launcher/types'
 import { ForegroundLauncher } from '../launcher/foreground-pty'
 import { realPtyFactory } from './pty-spawner'
-import { resolvePath } from '../launcher/startup'
+import { enabledForEnv, normalizeStartCommand, resolvePath } from '../launcher/startup'
 import {
   ROOT,
   FEATURES_DIR,
@@ -93,10 +93,15 @@ export function discoverFeatures(): FeatureConfig[] {
   return features
 }
 
-export function checkRepos(feature: FeatureConfig): boolean {
+export function checkRepos(feature: FeatureConfig, env?: string): boolean {
   if (!feature.repos?.length) return true
   let allOk = true
   for (const repo of feature.repos) {
+    if (!enabledForEnv(repo.envs, env)) continue
+    const cmds = repo.startCommands ?? []
+    if (cmds.length > 0 && !cmds.some((c, i) =>
+      enabledForEnv(normalizeStartCommand(c, `${repo.name}-cmd-${i + 1}`).envs, env),
+    )) continue
     const resolved = resolvePath(repo.localPath)
     if (!fs.existsSync(resolved)) {
       uiLine()
@@ -245,7 +250,7 @@ export async function main(argv: string[] = []) {
       process.exit(1)
     }
 
-    if (!checkRepos(feature)) {
+    if (!checkRepos(feature, env)) {
       uiLine()
       fail('Please clone the missing repos and try again.')
       process.exit(1)
@@ -290,6 +295,7 @@ export async function main(argv: string[] = []) {
     const launcher = new ForegroundLauncher({ ptyFactory: realPtyFactory() })
     orchestrator = new RunOrchestrator({
       feature,
+      env,
       runId,
       runDir,
       ptyFactory: realPtyFactory(),

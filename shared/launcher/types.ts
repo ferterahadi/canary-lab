@@ -5,6 +5,10 @@ export interface RepoPrerequisite {
   // Each entry opens one iTerm tab in this repo's directory.
   // Use multiple entries when one repo needs multiple running processes.
   startCommands?: Array<string | StartCommand>
+  // Whitelist of envs in which this repo's services should boot. Omit to
+  // boot in every env. Use this to skip local services when running tests
+  // against a remote URL (e.g. envs: ['local']).
+  envs?: string[]
 }
 
 export interface HealthCheck {
@@ -16,6 +20,9 @@ export interface StartCommand {
   command: string
   name?: string
   healthCheck?: HealthCheck
+  // Whitelist of envs in which this command should boot. Omit to boot in
+  // every env. Per-command override of the repo-level `envs` field.
+  envs?: string[]
 }
 
 export interface NgrokTunnel {

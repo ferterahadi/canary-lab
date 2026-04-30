@@ -23,6 +23,30 @@ import { runDirFor, buildRunPaths } from '../../shared/e2e-runner/run-paths'
 import { RunOrchestrator } from '../../shared/e2e-runner/orchestrator'
 import { RunnerLog } from '../../shared/e2e-runner/runner-log'
 import { realPtyFactory, type PtyFactory } from '../../shared/e2e-runner/pty-spawner'
+import {
+  applySet,
+  backup,
+  getEnvSetsDir,
+  loadConfig,
+  resolveVars,
+  restore,
+} from '../../shared/env-switcher/switch'
+import type { BackupRecord } from '../../shared/env-switcher/types'
+
+// Apply a feature's envset in-process and return the backups to revert later.
+// Returns null when the feature has no envsets configured (silent skip).
+function applyFeatureEnvset(featureDir: string, setName: string): BackupRecord[] | null {
+  const envSetsDir = getEnvSetsDir(featureDir)
+  if (!fs.existsSync(path.join(envSetsDir, 'envsets.config.json'))) return null
+  const config = loadConfig(featureDir)
+  const targets = config.feature.slots.map((slot) => ({
+    slot,
+    targetPath: resolveVars(config.slots[slot].target, config.appRoots),
+  }))
+  const backups = backup(targets, Date.now())
+  applySet(envSetsDir, setName, targets)
+  return backups
+}
 
 // Bootstrap glue. Excluded from coverage — the testable logic lives under
 // routes/ and lib/.
@@ -46,6 +70,10 @@ export interface CreateServerResult {
   app: FastifyInstance
   registry: OrchestratorRegistry
   brokers: Map<string, PaneBroker>
+  // Reverts every still-applied envset. Entry points should invoke on
+  // SIGINT/SIGTERM so a crashed/killed run doesn't leave the user's `.env`
+  // pointing at production.
+  revertAllEnvsets: () => void
   draftBrokers: Map<string, PaneBroker>
 }
 
@@ -60,6 +88,9 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
   const registry = createRegistry()
   const brokers = new Map<string, PaneBroker>()
   const draftBrokers = new Map<string, PaneBroker>()
+  // Tracks runs with an active envset so we can revert on run-complete or on
+  // process termination. Cleared as runs finish.
+  const activeEnvsets = new Map<string, BackupRecord[]>()
 
   await app.register(featuresRoutes, { featuresDir })
   await app.register(journalRoutes, { journalPath })
@@ -113,21 +144,57 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
     logsDir,
     featuresDir,
     registry,
-    startRun: async (featureName: string): Promise<OrchestratorLike> => {
+    startRun: async (featureName: string, env?: string): Promise<OrchestratorLike> => {
       const features = loadFeatures(featuresDir)
       const feature = features.find((f) => f.name === featureName)
       if (!feature) throw new Error(`feature not found: ${featureName}`)
       const runId = generateRunId()
       const runDir = runDirFor(logsDir, runId)
       const runnerLog = new RunnerLog(buildRunPaths(runDir).runnerLogPath)
-      runnerLog.info(`Run started: feature=${feature.name} runId=${runId}`)
-      const orch = new RunOrchestrator({
-        feature,
-        runId,
-        runDir,
-        ptyFactory: realPtyFactory(),
-        runnerLog,
-      })
+      runnerLog.info(
+        `Run started: feature=${feature.name}${env ? ` env=${env}` : ''} runId=${runId}`,
+      )
+
+      let backups: BackupRecord[] | null = null
+      if (env) {
+        try {
+          backups = applyFeatureEnvset(feature.featureDir, env)
+          if (backups) runnerLog.info(`Applied envset "${env}" for ${feature.name}`)
+        } catch (err) {
+          runnerLog.warn(`envset apply failed: ${(err as Error).message}`)
+          throw err
+        }
+      }
+
+      let orch: RunOrchestrator
+      try {
+        orch = new RunOrchestrator({
+          feature,
+          env,
+          runId,
+          runDir,
+          ptyFactory: realPtyFactory(),
+          runnerLog,
+        })
+      } catch (err) {
+        if (backups) restore(backups)
+        throw err
+      }
+
+      if (backups) {
+        activeEnvsets.set(runId, backups)
+        orch.once('run-complete', () => {
+          const records = activeEnvsets.get(runId)
+          if (!records) return
+          activeEnvsets.delete(runId)
+          try {
+            restore(records)
+            runnerLog.info(`Reverted envset for ${feature.name}`)
+          } catch (err) {
+            runnerLog.warn(`envset revert failed: ${(err as Error).message}`)
+          }
+        })
+      }
       const broker = new PaneBroker()
       brokers.set(runId, broker)
       orch.on('service-output', ({ service, chunk }) => {
@@ -193,5 +260,12 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
     })
   }
 
-  return { app, registry, brokers, draftBrokers }
+  const revertAllEnvsets = (): void => {
+    for (const [runId, records] of activeEnvsets) {
+      try { restore(records) } catch { /* best-effort */ }
+      activeEnvsets.delete(runId)
+    }
+  }
+
+  return { app, registry, brokers, draftBrokers, revertAllEnvsets }
 }

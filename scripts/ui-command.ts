@@ -20,7 +20,21 @@ export async function runUi(argv: string[], opts: UiCommandOptions = {}): Promis
   const port = portFromArgs ?? opts.port ?? 7421
   const noOpen = argv.includes('--no-open')
   const projectRoot = opts.projectRoot ?? getProjectRoot()
-  const { app } = await createServer({ projectRoot })
+  const { app, revertAllEnvsets } = await createServer({ projectRoot })
+
+  // Revert any in-flight envset swaps if the user kills the server before
+  // their runs finish — without this their feature `.env` stays pointing at
+  // production until they manually `canary-lab env --revert`.
+  let cleanedUp = false
+  const cleanup = (): void => {
+    if (cleanedUp) return
+    cleanedUp = true
+    revertAllEnvsets()
+  }
+  process.once('SIGINT', () => { cleanup(); process.exit(130) })
+  process.once('SIGTERM', () => { cleanup(); process.exit(143) })
+  process.once('beforeExit', cleanup)
+
   await app.listen({ port, host: '127.0.0.1' })
   const url = `http://localhost:${port}`
   log(`Open ${url}`)

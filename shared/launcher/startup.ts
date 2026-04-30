@@ -13,6 +13,13 @@ export function resolvePath(p: string): string {
   return p.startsWith('~/') ? p.replace('~', os.homedir()) : p
 }
 
+// Whether a repo or startCommand with an `envs` whitelist is active in the
+// selected env. Absent whitelist = active everywhere; absent selected env =
+// no filtering (legacy callers that don't pass env).
+export function enabledForEnv(envs: string[] | undefined, selected: string | undefined): boolean {
+  return !selected || !envs || envs.includes(selected)
+}
+
 export function normalizeStartCommand(
   command: string | StartCommand,
   fallbackName: string,
