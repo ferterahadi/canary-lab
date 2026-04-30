@@ -35,7 +35,9 @@ export function resolveDraftFile(
     return { ok: false, reason: 'outside-draft' }
   }
 
-  if (!fs.existsSync(candidate) || !fs.statSync(candidate).isFile()) {
+  try {
+    if (!fs.statSync(candidate).isFile()) return { ok: false, reason: 'not-found' }
+  } catch {
     return { ok: false, reason: 'not-found' }
   }
   return { ok: true, absolute: candidate }

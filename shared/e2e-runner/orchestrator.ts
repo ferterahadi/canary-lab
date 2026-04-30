@@ -171,7 +171,6 @@ export class RunOrchestrator extends EventEmitter {
   private readonly healAgentTimeoutMs: number
   private readonly runnerLog?: RunnerLog
   private lastDetectedSignal: { kind: 'restart' | 'rerun' | 'heal'; body: Record<string, unknown> } | null = null
-  private lastRestartPlan: { restarted: string[]; kept: string[] } | null = null
   private healCycleHistory: Array<{ cycle: number; restarted: string[]; kept: string[] }> = []
 
   private status: RunManifest['status'] = 'running'
@@ -184,8 +183,8 @@ export class RunOrchestrator extends EventEmitter {
   // Mid-Run Heal: tracked while a Playwright pty is in flight so
   // pauseAndHeal() can SIGTERM it. Cleared on exit.
   private playwrightPty: PtyHandle | null = null
-  private playwrightExitWaiters: Array<(value: { exitCode: number; signal?: number }) => void> = []
-  private healingActive = false
+  private playwrightExitWaiter: ((value: { exitCode: number; signal?: number }) => void) | null = null
+  private stoppedEarlyReason: StoppedEarlyReason | undefined
 
   constructor(opts: OrchestratorOptions) {
     super()
@@ -375,30 +374,29 @@ export class RunOrchestrator extends EventEmitter {
   // and skip the restart entirely (rather than restarting everything) — the
   // heal-agent's claim is wrong but losing warm services to that mistake is
   // costlier than the rerun seeing the same failure.
-  async restart(filesChanged?: readonly string[]): Promise<void> {
+  async restart(filesChanged?: readonly string[]): Promise<{ restarted: string[]; kept: string[] }> {
     const plan = planRestart(filesChanged ?? [], this.services)
     this.emit('restart-planned', {
       toRestart: plan.toRestart,
       toKeep: plan.toKeep,
       noMatch: plan.noMatch,
     })
-    this.lastRestartPlan = { restarted: plan.toRestart, kept: plan.toKeep }
 
     if (plan.noMatch) {
       // Non-empty filesChanged but nothing matched: keep all services warm.
       for (const svc of this.services) {
         this.emit('service-restart-skipped', { service: svc, reason: 'no-files-changed-here' })
       }
-      return
+      return { restarted: [], kept: plan.toKeep }
     }
 
     const filesProvided = (filesChanged ?? []).length > 0
-    const targets = filesProvided
-      ? this.services.filter((s) => plan.toRestart.includes(s.safeName))
-      : this.services
-
+    const restartSet = new Set(plan.toRestart)
+    const targets: ServiceSpec[] = []
     for (const svc of this.services) {
-      if (filesProvided && !plan.toRestart.includes(svc.safeName)) {
+      if (!filesProvided || restartSet.has(svc.safeName)) {
+        targets.push(svc)
+      } else {
         this.emit('service-restart-skipped', { service: svc, reason: 'no-files-changed-here' })
       }
     }
@@ -415,6 +413,7 @@ export class RunOrchestrator extends EventEmitter {
     }
     for (const svc of targets) this.spawnService(svc)
     if (targets.length > 0) await this.waitForHealth()
+    return { restarted: plan.toRestart, kept: plan.toKeep }
   }
 
   // Re-run is a no-op at the orchestrator level beyond truncating logs — the
@@ -452,9 +451,9 @@ export class RunOrchestrator extends EventEmitter {
       pty.onExit(({ exitCode, signal }) => {
         this.playwrightPty = null
         this.emit('playwright-exit', { exitCode })
-        const waiters = this.playwrightExitWaiters
-        this.playwrightExitWaiters = []
-        for (const w of waiters) w({ exitCode, signal })
+        const waiter = this.playwrightExitWaiter
+        this.playwrightExitWaiter = null
+        if (waiter) waiter({ exitCode, signal })
         resolve(exitCode)
       })
     })
@@ -467,21 +466,20 @@ export class RunOrchestrator extends EventEmitter {
     if (!this.playwrightPty) return Promise.resolve(null)
     return new Promise((resolve) => {
       const timer = setTimeout(() => {
-        const idx = this.playwrightExitWaiters.indexOf(handler)
-        if (idx !== -1) this.playwrightExitWaiters.splice(idx, 1)
+        if (this.playwrightExitWaiter) this.playwrightExitWaiter = null
         resolve(null)
       }, timeoutMs)
-      const handler = (info: { exitCode: number; signal?: number }): void => {
+      this.playwrightExitWaiter = (info) => {
         clearTimeout(timer)
         resolve(info)
       }
-      this.playwrightExitWaiters.push(handler)
     })
   }
 
   // Persist a `stoppedEarly` reason on the manifest. Surfaced to the heal-index
   // so the agent knows it's looking at a partial suite.
   markStoppedEarly(reason: StoppedEarlyReason, failuresAtStop: number, suiteTotal: number): void {
+    this.stoppedEarlyReason = reason
     updateManifest(this.paths.manifestPath, {
       stoppedEarly: { reason, failuresAtStop, suiteTotal },
     })
@@ -491,7 +489,7 @@ export class RunOrchestrator extends EventEmitter {
   // after 5s), then jump straight to a heal cycle if we have failures to chew
   // on. Returns a discriminated result the route handler maps to 202/409.
   async pauseAndHeal(): Promise<PauseResult> {
-    if (this.healingActive || this.status === 'healing') {
+    if (this.status === 'healing') {
       return { ok: false, reason: 'already-healing' }
     }
     if (!this.playwrightPty) {
@@ -506,16 +504,12 @@ export class RunOrchestrator extends EventEmitter {
       await this.waitForPlaywrightExit(1000)
     }
 
-    const summary = readSummary(this.paths.summaryPath)
-    const failed = extractFailedSlugs(summary)
+    const { failed, total } = summarizeFailures(this.paths.summaryPath)
     if (failed.length === 0) {
       return { ok: false, reason: 'no-failures-yet' }
     }
 
-    const suiteTotal = typeof (summary as { total?: unknown }).total === 'number'
-      ? ((summary as { total: number }).total)
-      : failed.length
-    this.markStoppedEarly('user-pause', failed.length, suiteTotal)
+    this.markStoppedEarly('user-pause', failed.length, total)
     this.emit('paused-by-user', { failureCount: failed.length })
 
     return { ok: true, failureCount: failed.length }
@@ -617,12 +611,8 @@ export class RunOrchestrator extends EventEmitter {
     // Skip when pauseAndHeal already stamped 'user-pause' — that's a stronger
     // claim about why the suite was cut short.
     const threshold = this.feature.healOnFailureThreshold ?? 1
-    if (!stoppedEarlyReasonOf(this.paths.manifestPath)) {
-      const summary0 = readSummary(this.paths.summaryPath)
-      const failed0 = extractFailedSlugs(summary0)
-      const total0 = typeof (summary0 as { total?: unknown }).total === 'number'
-        ? ((summary0 as { total: number }).total)
-        : failed0.length
+    if (!this.stoppedEarlyReason) {
+      const { failed: failed0, total: total0 } = summarizeFailures(this.paths.summaryPath)
       if (failed0.length >= threshold) {
         this.markStoppedEarly('max-failures', failed0.length, total0)
       }
@@ -638,11 +628,9 @@ export class RunOrchestrator extends EventEmitter {
       const cycleNum = heal.beginCycle() + 1
       this.emit('heal-cycle-started', { cycle: cycleNum, failureSignature: signature })
       this.setStatus('healing')
-      this.healingActive = true
       this.noteHealCycle()
 
       const { signal } = await this.runHealAgent({ cycle: cycleNum, failedSlugs })
-      this.healingActive = false
 
       if (!signal) {
         finalStatus = 'failed'
@@ -676,12 +664,8 @@ export class RunOrchestrator extends EventEmitter {
         const filesChanged = Array.isArray(signal.body.filesChanged)
           ? signal.body.filesChanged.filter((f): f is string => typeof f === 'string')
           : []
-        await this.restart(filesChanged)
-        this.healCycleHistory.push({
-          cycle: cycleNum,
-          restarted: this.lastRestartPlan?.restarted ?? [],
-          kept: this.lastRestartPlan?.kept ?? [],
-        })
+        const { restarted, kept } = await this.restart(filesChanged)
+        this.healCycleHistory.push({ cycle: cycleNum, restarted, kept })
         updateManifest(this.paths.manifestPath, {
           healCycleHistory: this.healCycleHistory,
         })
@@ -785,6 +769,13 @@ export function extractFailedSlugs(summary: SummaryShape): string[] {
   return failed
     .map((f) => (typeof f?.name === 'string' ? (f.name as string) : ''))
     .filter((n) => n.length > 0)
+}
+
+export function summarizeFailures(summaryPath: string): { failed: string[]; total: number } {
+  const summary = readSummary(summaryPath)
+  const failed = extractFailedSlugs(summary)
+  const total = typeof summary.total === 'number' ? summary.total : failed.length
+  return { failed, total }
 }
 
 const SUMMARY_REPORTER_PATH = path.resolve(__dirname, 'summary-reporter.js')

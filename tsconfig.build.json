@@ -6,6 +6,6 @@
     "rootDir": ".",
     "declaration": true
   },
-  "include": ["shared/**/*", "scripts/**/*", "feature-support/**/*"],
+  "include": ["shared/**/*", "scripts/**/*"],
   "exclude": ["node_modules", "dist", "templates", "tools", "**/*.test.ts"]
 }

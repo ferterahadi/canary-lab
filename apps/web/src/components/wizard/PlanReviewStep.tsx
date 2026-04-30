@@ -10,7 +10,6 @@ import {
 } from '@dnd-kit/core'
 import {
   SortableContext,
-  arrayMove,
   sortableKeyboardCoordinates,
   useSortable,
   verticalListSortingStrategy,
@@ -69,10 +68,7 @@ export function PlanReviewStep({ draft, onAccept, onReject, onRetry, acting }: P
     if (!over || active.id === over.id) return
     const from = Number(active.id)
     const to = Number(over.id)
-    setPlan((current) => {
-      const next = reorderStep(current, from, to)
-      return next === current ? arrayMove(current, from, to) : next
-    })
+    setPlan((current) => reorderStep(current, from, to))
   }
 
   const handleRemove = (index: number): void => {
