@@ -9,7 +9,7 @@ export interface RunsRouteDeps {
   // Factory: given a feature name, build + start an orchestrator. Returns the
   // runId synchronously after `start()` is in flight (the factory awaits the
   // initial spawn but not test completion). Injected so tests can stub it.
-  startRun(feature: string): Promise<OrchestratorLike>
+  startRun(feature: string, env?: string): Promise<OrchestratorLike>
 }
 
 export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Promise<void> {
@@ -26,19 +26,28 @@ export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Pro
     return detail
   })
 
-  app.post<{ Body: { feature?: string } }>('/api/runs', async (req, reply) => {
+  app.post<{ Body: { feature?: string; env?: string } }>('/api/runs', async (req, reply) => {
     const feature = req.body?.feature
     if (typeof feature !== 'string' || feature.length === 0) {
       reply.code(400)
       return { error: 'feature required' }
     }
     const features = loadFeatures(deps.featuresDir)
-    if (!features.some((f) => f.name === feature)) {
+    const featureCfg = features.find((f) => f.name === feature)
+    if (!featureCfg) {
       reply.code(404)
       return { error: 'feature not found' }
     }
+    // env is optional only when the feature didn't declare any. Otherwise it
+    // must be one of feature.envs (default: first entry).
+    const declared = featureCfg.envs ?? []
+    const env = declared.length > 0 ? (req.body?.env ?? declared[0]) : undefined
+    if (declared.length > 0 && (typeof env !== 'string' || !declared.includes(env))) {
+      reply.code(400)
+      return { error: `env must be one of: ${declared.join(', ')}` }
+    }
     try {
-      const orch = await deps.startRun(feature)
+      const orch = await deps.startRun(feature, env)
       deps.registry.set(orch.runId, orch)
       reply.code(201)
       return { runId: orch.runId }

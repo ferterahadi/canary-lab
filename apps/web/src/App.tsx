@@ -46,10 +46,10 @@ export function App(): JSX.Element {
     }
   }, [selectedFeature])
 
-  const handleStartRun = useCallback(async (): Promise<void> => {
+  const handleStartRun = useCallback(async (env?: string): Promise<void> => {
     if (!selectedFeature) return
     try {
-      const { runId } = await api.startRun(selectedFeature)
+      const { runId } = await api.startRun(selectedFeature, env ? { env } : undefined)
       setSelectedRunId(runId)
       const data = await api.listRuns({ feature: selectedFeature })
       setRuns(data)
@@ -57,6 +57,9 @@ export function App(): JSX.Element {
       /* surfaced via UI later */
     }
   }, [selectedFeature])
+
+  const selectedFeatureEnvs =
+    features.find((f) => f.name === selectedFeature)?.envs ?? []
 
   return (
     <div className="flex h-full w-full overflow-hidden">
@@ -84,6 +87,7 @@ export function App(): JSX.Element {
       <section className="w-[320px] shrink-0 border-r border-zinc-800 overflow-y-auto">
         <RunsColumn
           feature={selectedFeature}
+          envs={selectedFeatureEnvs}
           runs={runs}
           selectedRunId={selectedRunId}
           onSelectRun={setSelectedRunId}

@@ -120,6 +120,52 @@ describe('buildServiceSpecs', () => {
     const f = makeFeature({ repos: undefined })
     expect(buildServiceSpecs(f, runDir)).toEqual([])
   })
+
+  it('includes commands with no envs whitelist regardless of selected env', () => {
+    const f = makeFeature({
+      repos: [{
+        name: 'r',
+        localPath: tmpDir,
+        startCommands: [{ command: 'a', name: 'apiA' }],
+      }],
+    })
+    expect(buildServiceSpecs(f, runDir, 'production')).toHaveLength(1)
+  })
+
+  it('skips commands whose envs whitelist excludes the selected env', () => {
+    const f = makeFeature({
+      repos: [{
+        name: 'r',
+        localPath: tmpDir,
+        startCommands: [
+          { command: 'a', name: 'apiLocal', envs: ['local'] },
+          { command: 'b', name: 'apiAll' },
+        ],
+      }],
+    })
+    const specs = buildServiceSpecs(f, runDir, 'production')
+    expect(specs.map((s) => s.name)).toEqual(['apiAll'])
+  })
+
+  it('skips an entire repo when its repo-level envs excludes the selected env', () => {
+    const f = makeFeature({
+      repos: [
+        {
+          name: 'localOnly',
+          localPath: tmpDir,
+          envs: ['local'],
+          startCommands: [{ command: 'a', name: 'apiA' }],
+        },
+        {
+          name: 'always',
+          localPath: tmpDir,
+          startCommands: [{ command: 'b', name: 'apiB' }],
+        },
+      ],
+    })
+    const specs = buildServiceSpecs(f, runDir, 'production')
+    expect(specs.map((s) => s.name)).toEqual(['apiB'])
+  })
 })
 
 describe('RunOrchestrator.start', () => {

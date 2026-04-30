@@ -92,14 +92,18 @@ export function getRunDetail(runId: string, opts?: ClientOptions): Promise<RunDe
   )
 }
 
-export function startRun(feature: string, opts?: ClientOptions): Promise<{ runId: string }> {
+export function startRun(
+  feature: string,
+  opts?: ClientOptions & { env?: string },
+): Promise<{ runId: string }> {
   const { baseUrl, fetchImpl } = defaultOpts(opts)
+  const body = opts?.env ? { feature, env: opts.env } : { feature }
   return request<{ runId: string }>(
     `${baseUrl}/api/runs`,
     {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ feature }),
+      body: JSON.stringify(body),
     },
     fetchImpl,
   )

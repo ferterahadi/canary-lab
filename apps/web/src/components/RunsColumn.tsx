@@ -6,15 +6,20 @@ import { ApiError, pauseHealRun } from '../api/client'
 
 interface Props {
   feature: string | null
+  envs?: string[]
   runs: RunIndexEntry[]
   selectedRunId: string | null
   onSelectRun: (runId: string) => void
-  onStartRun: () => void
+  onStartRun: (env?: string) => void
 }
 
 // Column 2 — runs for the selected feature, newest first. The list refreshes
 // upstream on a 5s timer so this component stays purely presentational.
-export function RunsColumn({ feature, runs, selectedRunId, onSelectRun, onStartRun }: Props): JSX.Element {
+export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRun, onStartRun }: Props): JSX.Element {
+  // Track only an explicit user override; fall back to the first declared env.
+  // Avoids a useEffect that resets state when feature/envs change.
+  const [envOverride, setEnvOverride] = useState<string | null>(null)
+  const selectedEnv = envOverride && envs.includes(envOverride) ? envOverride : envs[0] ?? ''
   const [pendingPause, setPendingPause] = useState<RunIndexEntry | null>(null)
   const [pausingId, setPausingId] = useState<string | null>(null)
   const [pauseError, setPauseError] = useState<{ runId: string; message: string } | null>(null)
@@ -55,14 +60,29 @@ export function RunsColumn({ feature, runs, selectedRunId, onSelectRun, onStartR
         <div className="text-[10px] uppercase tracking-wide text-zinc-500">
           {feature ? `Runs · ${feature}` : 'Runs'}
         </div>
-        <button
-          type="button"
-          disabled={!feature}
-          onClick={onStartRun}
-          className="rounded bg-emerald-600/80 px-2 py-1 text-xs font-medium text-white hover:bg-emerald-600 disabled:cursor-not-allowed disabled:bg-zinc-800 disabled:text-zinc-500"
-        >
-          Run Now
-        </button>
+        <div className="flex items-center gap-1.5">
+          {envs.length > 1 && (
+            <select
+              value={selectedEnv}
+              onChange={(e) => setEnvOverride(e.target.value)}
+              disabled={!feature}
+              className="rounded border border-zinc-700 bg-zinc-900 px-1.5 py-1 text-xs text-zinc-200 focus:outline-none focus:ring-1 focus:ring-emerald-500/40 disabled:cursor-not-allowed disabled:opacity-50"
+              aria-label="Environment"
+            >
+              {envs.map((e) => (
+                <option key={e} value={e}>{e}</option>
+              ))}
+            </select>
+          )}
+          <button
+            type="button"
+            disabled={!feature}
+            onClick={() => onStartRun(selectedEnv || undefined)}
+            className="rounded bg-emerald-600/80 px-2 py-1 text-xs font-medium text-white hover:bg-emerald-600 disabled:cursor-not-allowed disabled:bg-zinc-800 disabled:text-zinc-500"
+          >
+            Run Now
+          </button>
+        </div>
       </div>
       <div className="flex-1 overflow-y-auto">
         {!feature ? (

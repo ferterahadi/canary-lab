@@ -3,6 +3,7 @@ import path from 'path'
 import { EventEmitter } from 'events'
 import type { FeatureConfig } from '../launcher/types'
 import {
+  enabledForEnv,
   isHealthy,
   normalizeStartCommand,
   resolvePath,
@@ -77,6 +78,10 @@ export interface OrchestratorOptions {
   // own lifecycle events on construction and tees a human-readable line for
   // each into `runner.log`. Both CLI and web entrypoints provide one.
   runnerLog?: RunnerLog
+  // Selected env (e.g. 'local', 'production'). Used to filter
+  // repos/startCommands whose `envs` whitelist excludes it — letting a feature
+  // skip booting local services when running tests against a remote URL.
+  env?: string
 }
 
 export type PauseResult =
@@ -127,13 +132,19 @@ export type PlaywrightSpawner = (args: {
   paths: RunPaths
 }) => PlaywrightInvocation
 
-export function buildServiceSpecs(feature: FeatureConfig, runDir: string): ServiceSpec[] {
+export function buildServiceSpecs(
+  feature: FeatureConfig,
+  runDir: string,
+  env?: string,
+): ServiceSpec[] {
   const out: ServiceSpec[] = []
   for (const repo of feature.repos ?? []) {
+    if (!enabledForEnv(repo.envs, env)) continue
     const dir = resolvePath(repo.localPath)
     const commands = repo.startCommands ?? []
     for (let i = 0; i < commands.length; i++) {
       const normalized = normalizeStartCommand(commands[i], `${repo.name}-cmd-${i + 1}`)
+      if (!enabledForEnv(normalized.envs, env)) continue
       const safeName = normalized.name!.replace(/[^a-z0-9]+/gi, '-').toLowerCase()
       out.push({
         name: normalized.name!,
@@ -156,6 +167,7 @@ export class RunOrchestrator extends EventEmitter {
   readonly runId: string
   readonly runDir: string
   readonly feature: FeatureConfig
+  readonly env?: string
   readonly paths: RunPaths
   readonly services: ServiceSpec[]
 
@@ -189,10 +201,11 @@ export class RunOrchestrator extends EventEmitter {
   constructor(opts: OrchestratorOptions) {
     super()
     this.feature = opts.feature
+    this.env = opts.env
     this.runId = opts.runId
     this.runDir = opts.runDir
     this.paths = buildRunPaths(opts.runDir)
-    this.services = buildServiceSpecs(opts.feature, opts.runDir)
+    this.services = buildServiceSpecs(opts.feature, opts.runDir, opts.env)
     this.ptyFactory = opts.ptyFactory
     this.healthCheck = opts.healthCheck ?? isHealthy
     this.healthPollIntervalMs = opts.healthPollIntervalMs ?? 1000
