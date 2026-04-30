@@ -54,6 +54,26 @@ describe('extractTestsFromSource', () => {
     expect(parent.children[0].bodySource).toContain('x++')
   })
 
+  it('captures the test bodySource', () => {
+    const src = `
+      test('with body', async () => { const x = 1; expect(x).toBe(1) })
+    `
+    const r = extractTestsFromSource('a.spec.ts', src)
+    expect(r.tests[0].bodySource).toContain('const x = 1')
+    expect(r.tests[0].bodySource).toContain('expect(x).toBe(1)')
+  })
+
+  it('ignores test.describe groups but extracts inner tests', () => {
+    const src = `
+      test.describe('group', () => {
+        test('inner1', async () => { x++ })
+        test('inner2', async () => { y++ })
+      })
+    `
+    const r = extractTestsFromSource('a.spec.ts', src)
+    expect(r.tests.map((t) => t.name)).toEqual(['inner1', 'inner2'])
+  })
+
   it('handles test.only and test.skip but ignores test.step at top level', () => {
     const src = `
       test.only('focused', async () => { await test.step('a', async () => {}) })

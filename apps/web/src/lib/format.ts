@@ -7,17 +7,17 @@ import type { RunStatus } from '../api/types'
 export function statusBadgeClass(status: RunStatus): string {
   switch (status) {
     case 'passed':
-      return 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+      return 'bg-emerald-500/15 text-emerald-700 border-emerald-500/40 dark:text-emerald-300'
     case 'failed':
-      return 'bg-rose-500/20 text-rose-300 border-rose-500/40'
+      return 'bg-rose-500/15 text-rose-700 border-rose-500/40 dark:text-rose-300'
     case 'running':
-      return 'bg-sky-500/20 text-sky-300 border-sky-500/40'
+      return 'bg-sky-500/15 text-sky-700 border-sky-500/40 dark:text-sky-300'
     case 'healing':
-      return 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+      return 'bg-amber-500/15 text-amber-700 border-amber-500/40 dark:text-amber-300'
     case 'aborted':
-      return 'bg-zinc-500/20 text-zinc-300 border-zinc-500/40'
+      return 'bg-zinc-500/15 text-zinc-700 border-zinc-500/40 dark:text-zinc-300'
     default:
-      return 'bg-zinc-500/20 text-zinc-300 border-zinc-500/40'
+      return 'bg-zinc-500/15 text-zinc-700 border-zinc-500/40 dark:text-zinc-300'
   }
 }
 

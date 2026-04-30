@@ -1,69 +1,111 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { FeaturesColumn } from './components/FeaturesColumn'
+import { TestCasesColumn } from './components/TestCasesColumn'
 import { RunsColumn } from './components/RunsColumn'
 import { RunDetailColumn } from './components/RunDetailColumn'
+import { ResizablePanels } from './components/ResizablePanels'
+import { VerticalSplit } from './components/VerticalSplit'
+import { GlobalStatusBar } from './components/GlobalStatusBar'
 import * as api from './api/client'
-import type { Feature, RunIndexEntry } from './api/types'
+import type { Feature, RunIndexEntry, RunDetail, RunSummary } from './api/types'
 
-// Three-column Finder-style shell. Each column owns its own data fetching;
-// the App component just tracks the selection state.
 export function App() {
   const [features, setFeatures] = useState<Feature[]>([])
   const [selectedFeature, setSelectedFeature] = useState<string | null>(null)
-  const [runs, setRuns] = useState<RunIndexEntry[]>([])
+  const [allRuns, setAllRuns] = useState<RunIndexEntry[]>([])
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
+  const [activeRunSummary, setActiveRunSummary] = useState<RunSummary | undefined>(undefined)
+  const [activeRunDetail, setActiveRunDetail] = useState<RunDetail | null>(null)
 
-  // Initial load of features.
+  // Initial features load + auto-select first feature.
   useEffect(() => {
     let cancelled = false
     api.listFeatures().then((data) => {
       if (cancelled) return
       setFeatures(data)
       if (data.length > 0 && !selectedFeature) setSelectedFeature(data[0].name)
-    }).catch(() => { /* swallow — surfaced via empty state */ })
+    }).catch(() => {})
     return () => { cancelled = true }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Refresh runs whenever the selected feature changes; poll every 5s.
+  // Single source of truth: poll ALL runs globally. Per-feature filtering
+  // happens in render; the active-run lookup also reads from this list.
   useEffect(() => {
-    if (!selectedFeature) {
-      setRuns([])
-      return
-    }
     let cancelled = false
     const fetchRuns = (): void => {
-      api.listRuns({ feature: selectedFeature }).then((data) => {
+      api.listRuns().then((data) => {
         if (cancelled) return
-        setRuns(data)
-      }).catch(() => { /* keep last data on error */ })
+        setAllRuns(data)
+      }).catch(() => {})
     }
     fetchRuns()
     const id = setInterval(fetchRuns, 5000)
-    return () => {
-      cancelled = true
-      clearInterval(id)
+    return () => { cancelled = true; clearInterval(id) }
+  }, [])
+
+  // Globally-active run (running OR healing). At most one at a time — used
+  // to drive the global status bar AND to disable Run Now while it's busy.
+  const globalActiveRun = useMemo(
+    () => allRuns.find((r) => r.status === 'running' || r.status === 'healing') ?? null,
+    [allRuns],
+  )
+
+  // Poll the active run's detail (manifest + summary). Drives the status bar
+  // and the column-2 test status pills (when the active run matches the
+  // selected feature).
+  useEffect(() => {
+    if (!globalActiveRun) {
+      setActiveRunSummary(undefined)
+      setActiveRunDetail(null)
+      return
     }
-  }, [selectedFeature])
+    let cancelled = false
+    const tick = (): void => {
+      api.getRunDetail(globalActiveRun.runId).then((data) => {
+        if (cancelled) return
+        setActiveRunSummary(data.summary)
+        setActiveRunDetail(data)
+      }).catch(() => {})
+    }
+    tick()
+    const id = setInterval(tick, 3000)
+    return () => { cancelled = true; clearInterval(id) }
+  }, [globalActiveRun])
+
+  // Column 3 lists runs scoped to the currently-selected feature.
+  const featureRuns = useMemo(
+    () => allRuns.filter((r) => r.feature === selectedFeature),
+    [allRuns, selectedFeature],
+  )
+
+  // Column 2 only shows live status pills when the active run matches the
+  // selected feature; otherwise tests for an unrelated feature would appear
+  // "passed" or "failed" based on a different run's summary.
+  const summaryForSelectedFeature: RunSummary | undefined =
+    globalActiveRun && globalActiveRun.feature === selectedFeature ? activeRunSummary : undefined
 
   const handleStartRun = useCallback(async (env?: string): Promise<void> => {
     if (!selectedFeature) return
+    if (globalActiveRun) return // single-run constraint
     try {
       const { runId } = await api.startRun(selectedFeature, env ? { env } : undefined)
       setSelectedRunId(runId)
-      const data = await api.listRuns({ feature: selectedFeature })
-      setRuns(data)
-    } catch {
-      /* surfaced via UI later */
-    }
-  }, [selectedFeature])
+      const data = await api.listRuns()
+      setAllRuns(data)
+    } catch { /* surfaced via UI */ }
+  }, [selectedFeature, globalActiveRun])
 
   const selectedFeatureEnvs =
     features.find((f) => f.name === selectedFeature)?.envs ?? []
 
-  return (
-    <div className="flex h-full w-full overflow-hidden">
-      <aside className="w-[240px] shrink-0 border-r border-zinc-200 overflow-hidden dark:border-zinc-800">
+  const panels = [
+    {
+      id: 'features',
+      minWidth: 180,
+      defaultWidth: 220,
+      collapsible: true,
+      content: (
         <FeaturesColumn
           features={features}
           selectedFeature={selectedFeature}
@@ -72,31 +114,68 @@ export function App() {
             setSelectedRunId(null)
           }}
           onFeaturesChanged={(acceptedFeature) => {
-            // Refresh after the wizard creates a new feature so it appears
-            // in the sidebar; auto-select it if provided.
             api.listFeatures().then((data) => {
               setFeatures(data)
               if (acceptedFeature && data.some((f) => f.name === acceptedFeature)) {
                 setSelectedFeature(acceptedFeature)
                 setSelectedRunId(null)
               }
-            }).catch(() => { /* keep prior list on error */ })
+            }).catch(() => {})
           }}
         />
-      </aside>
-      <section className="w-[320px] shrink-0 border-r border-zinc-200 overflow-y-auto dark:border-zinc-800">
-        <RunsColumn
+      ),
+    },
+    {
+      id: 'tests',
+      minWidth: 280,
+      defaultWidth: 360,
+      collapsible: true,
+      content: (
+        <TestCasesColumn
           feature={selectedFeature}
-          envs={selectedFeatureEnvs}
-          runs={runs}
-          selectedRunId={selectedRunId}
-          onSelectRun={setSelectedRunId}
-          onStartRun={handleStartRun}
+          activeRunSummary={summaryForSelectedFeature}
         />
-      </section>
-      <main className="flex-1 min-w-0 overflow-hidden">
-        <RunDetailColumn runId={selectedRunId} />
-      </main>
+      ),
+    },
+    {
+      id: 'runs',
+      minWidth: 400,
+      defaultWidth: 500,
+      collapsible: false,
+      content: (
+        <VerticalSplit
+          storageKey="canary-lab.runs-detail-split"
+          defaultTopPercent={42}
+          minTopPx={120}
+          minBottomPx={160}
+          top={(
+            <RunsColumn
+              feature={selectedFeature}
+              envs={selectedFeatureEnvs}
+              runs={featureRuns}
+              selectedRunId={selectedRunId}
+              onSelectRun={setSelectedRunId}
+              onStartRun={handleStartRun}
+              runDisabled={Boolean(globalActiveRun)}
+              runDisabledReason={
+                globalActiveRun
+                  ? `Another run is ${globalActiveRun.status} (${globalActiveRun.feature}). Stop it first.`
+                  : undefined
+              }
+            />
+          )}
+          bottom={<RunDetailColumn runId={selectedRunId} />}
+        />
+      ),
+    },
+  ]
+
+  return (
+    <div className="flex h-full w-full flex-col">
+      <GlobalStatusBar activeRunDetail={activeRunDetail} />
+      <div className="min-h-0 flex-1">
+        <ResizablePanels panels={panels} />
+      </div>
     </div>
   )
 }

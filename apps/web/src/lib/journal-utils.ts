@@ -72,15 +72,15 @@ export function classifyOutcome(outcome: string | null | undefined): OutcomeBadg
 export function outcomeBadgeClass(outcome: OutcomeBadge): string {
   switch (outcome) {
     case 'all_passed':
-      return 'border-emerald-500/40 text-emerald-300 bg-emerald-500/10'
+      return 'border-emerald-500/40 text-emerald-700 bg-emerald-500/10 dark:text-emerald-300'
     case 'partial':
-      return 'border-amber-500/40 text-amber-300 bg-amber-500/10'
+      return 'border-amber-500/50 text-amber-700 bg-amber-500/10 dark:text-amber-300'
     case 'no_change':
-      return 'border-rose-500/40 text-rose-300 bg-rose-500/10'
+      return 'border-rose-500/40 text-rose-700 bg-rose-500/10 dark:text-rose-300'
     case 'regression':
-      return 'border-rose-600/50 text-rose-200 bg-rose-600/15'
+      return 'border-rose-600/50 text-rose-800 bg-rose-600/15 dark:text-rose-200'
     case 'pending':
-      return 'border-sky-500/40 text-sky-300 bg-sky-500/10'
+      return 'border-sky-500/40 text-sky-700 bg-sky-500/10 dark:text-sky-300'
     case 'unknown':
     default:
       return 'border-zinc-300 text-zinc-600 bg-zinc-200/40 dark:border-zinc-700 dark:text-zinc-400 dark:bg-zinc-800/40'

@@ -24,6 +24,7 @@ export interface ExtractedStep {
 export interface ExtractedTest {
   name: string
   line: number
+  bodySource: string
   steps: ExtractedStep[]
 }
 

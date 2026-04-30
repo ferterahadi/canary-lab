@@ -27,7 +27,7 @@ export default defineConfig({
     },
   },
   build: {
-    outDir: path.resolve(__dirname, 'dist'),
+    outDir: path.resolve(__dirname, '../../dist/apps/web/dist'),
     emptyOutDir: true,
   },
 })

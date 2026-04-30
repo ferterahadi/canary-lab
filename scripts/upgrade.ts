@@ -2,6 +2,13 @@ import fs from 'fs'
 import path from 'path'
 import { getProjectRoot } from '../shared/runtime/project-root'
 import { getInstalledPackageVersion, writeStamp } from '../shared/runtime/upgrade-check'
+import {
+  detectMigrations,
+  applyArchive,
+  renderReport,
+  hasPendingMigrations,
+  type MigrationReport,
+} from './upgrade-migration'
 
 const MARKER_START = '<!-- managed:canary-lab:start -->'
 const MARKER_END = '<!-- managed:canary-lab:end -->'
@@ -102,16 +109,55 @@ export function applyManagedBlock(existing: string, block: string, relPath: stri
 
 interface UpgradeOptions {
   silent: boolean
+  check: boolean
+  forceArchive: boolean
+}
+
+export interface MainExtras {
+  /** Injected confirm — called only when there are orphaned logs and
+   * `--force-archive` was not passed. Async to support readline prompts. */
+  confirm?: (orphanCount: number) => Promise<boolean> | boolean
 }
 
 function log(msg: string, opts: UpgradeOptions): void {
   if (!opts.silent) console.log(msg)
 }
 
-export async function main(args = process.argv.slice(2)): Promise<void> {
+/**
+ * Run the migration pass before the docs/skills sync.
+ * Detection is pure; archive is gated by `--force-archive` or `confirm`.
+ */
+export async function runMigration(
+  projectRoot: string,
+  opts: UpgradeOptions,
+  confirm: (orphanCount: number) => Promise<boolean> | boolean,
+): Promise<{ report: MigrationReport; pending: boolean }> {
+  const report = detectMigrations(projectRoot)
+  const pending = hasPendingMigrations(report)
+
+  if (opts.check) {
+    log(renderReport(report), opts)
+    return { report, pending }
+  }
+
+  if (report.orphanedLogs.length > 0) {
+    const ok = opts.forceArchive ? true : await confirm(report.orphanedLogs.length)
+    if (ok) applyArchive(report, projectRoot)
+  }
+  log(renderReport(report), opts)
+  return { report, pending }
+}
+
+export async function main(
+  args = process.argv.slice(2),
+  extras: MainExtras = {},
+): Promise<void> {
   const opts: UpgradeOptions = {
     silent: args.includes('--silent'),
+    check: args.includes('--check'),
+    forceArchive: args.includes('--force-archive'),
   }
+  const confirm = extras.confirm ?? (() => false)
 
   let projectRoot: string
   try {
@@ -124,6 +170,15 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
   // Verify this looks like a canary-lab project
   if (!fs.existsSync(path.join(projectRoot, 'features'))) {
     log('  Not a Canary Lab project (no features/ directory). Skipping upgrade.', opts)
+    return
+  }
+
+  // 0. 0.9.x → 0.10.x migration pass — detect orphaned logs, lint
+  // feature.config.cjs, diff heal-prompt, surface CI hints. Runs before the
+  // docs/skills sync so the user sees the report up-front.
+  const migration = await runMigration(projectRoot, opts, confirm)
+  if (opts.check) {
+    if (migration.pending) process.exitCode = 1
     return
   }
 

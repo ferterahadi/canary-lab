@@ -3,15 +3,13 @@ import * as api from '../api/client'
 import type { RunDetail } from '../api/types'
 import { statusBadgeClass, formatDuration, durationBetween } from '../lib/format'
 import { PaneTerminal } from './PaneTerminal'
-import { TestStepsTab } from './TestStepsTab'
 import { JournalTab } from './JournalTab'
 
-type Tab = 'overview' | 'services' | 'playwright' | 'agent' | 'steps' | 'journal'
+type Tab = 'overview' | 'services' | 'playwright' | 'agent' | 'journal'
 
 const TERMINAL_STATUSES = new Set(['passed', 'failed', 'aborted'])
 
-// Column 3 — detail tabs for the selected run.
-export function RunDetailColumn({ runId }: Props) {
+export function RunDetailColumn({ runId }: { runId: string | null }) {
   const [detail, setDetail] = useState<RunDetail | null>(null)
   const [tab, setTab] = useState<Tab>('overview')
   const [serviceIdx, setServiceIdx] = useState(0)
@@ -28,9 +26,6 @@ export function RunDetailColumn({ runId }: Props) {
         if (cancelled) return
         setDetail(data)
         const isTerminal = TERMINAL_STATUSES.has(data.manifest.status)
-        // Poll faster (3s) while running so the test-steps tab can refresh
-        // its coloring as soon as the summary is written. Slow back to 5s
-        // once the run reaches a terminal state.
         const next = isTerminal ? 5000 : 3000
         timer = setTimeout(tick, next)
       }).catch(() => {
@@ -47,15 +42,15 @@ export function RunDetailColumn({ runId }: Props) {
 
   if (!runId) {
     return (
-      <div className="flex h-full items-center justify-center text-sm text-zinc-500">
-        Select a run.
+      <div className="flex h-full items-center justify-center text-sm" style={{ color: 'var(--text-muted)' }}>
+        Select a run
       </div>
     )
   }
   if (!detail) {
     return (
-      <div className="flex h-full items-center justify-center text-sm text-zinc-500">
-        Loading run…
+      <div className="flex h-full items-center justify-center text-sm" style={{ color: 'var(--text-muted)' }}>
+        Loading...
       </div>
     )
   }
@@ -66,51 +61,46 @@ export function RunDetailColumn({ runId }: Props) {
 
   return (
     <div className="relative flex h-full flex-col">
-      <header className="border-b border-zinc-200 dark:border-zinc-800 px-4 py-2">
-        <div className="flex items-center gap-3">
-          <span className="font-mono text-sm text-zinc-700 dark:text-zinc-300">{m.runId}</span>
-          <span
-            className={`rounded border px-1.5 py-0.5 text-[10px] uppercase tracking-wide ${statusBadgeClass(m.status)}`}
-          >
+      <header className="px-4 py-3" style={{ borderBottom: '1px solid var(--border-default)' }}>
+        <div className="flex min-w-0 items-center gap-2">
+          <span className={`shrink-0 rounded-md border px-1.5 py-0.5 text-[10px] uppercase tracking-wide ${statusBadgeClass(m.status)}`}>
             {m.status}
           </span>
-          <span className="text-xs text-zinc-500">{m.feature}</span>
+          <span className="min-w-0 flex-1 truncate text-sm" style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }} title={m.runId}>{m.runId}</span>
+          <span className="shrink-0 truncate text-xs" style={{ color: 'var(--text-muted)' }} title={m.feature}>{m.feature}</span>
         </div>
-        <nav className="mt-2 flex gap-1 text-xs">
+        <nav className="mt-2 -mx-1 flex gap-1 overflow-x-auto px-1 text-xs scrollbar-thin">
           <TabButton active={tab === 'overview'} onClick={() => setTab('overview')}>Overview</TabButton>
-          <TabButton active={tab === 'services'} onClick={() => setTab('services')} disabled={services.length === 0}>
-            Services
-          </TabButton>
+          <TabButton active={tab === 'services'} onClick={() => setTab('services')} disabled={services.length === 0}>Services</TabButton>
           <TabButton active={tab === 'playwright'} onClick={() => setTab('playwright')}>Playwright</TabButton>
           <TabButton active={tab === 'agent'} onClick={() => setTab('agent')}>Heal agent</TabButton>
-          <TabButton active={tab === 'steps'} onClick={() => setTab('steps')}>Test steps</TabButton>
           <TabButton active={tab === 'journal'} onClick={() => setTab('journal')}>Journal</TabButton>
         </nav>
       </header>
       <div className="flex-1 min-h-0 overflow-hidden">
         {tab === 'overview' && (
           <div className="overflow-y-auto p-4 text-sm">
-            <dl className="grid grid-cols-[140px_1fr] gap-y-1 text-xs">
-              <dt className="text-zinc-500">Feature</dt><dd>{m.feature}</dd>
-              <dt className="text-zinc-500">Started</dt><dd className="font-mono">{m.startedAt}</dd>
-              <dt className="text-zinc-500">Ended</dt><dd className="font-mono">{m.endedAt ?? '—'}</dd>
-              <dt className="text-zinc-500">Duration</dt>
-              <dd>{(() => {
+            <dl className="grid grid-cols-[140px_1fr] gap-y-2 text-xs">
+              <dt style={{ color: 'var(--text-muted)' }}>Feature</dt><dd style={{ color: 'var(--text-primary)' }}>{m.feature}</dd>
+              <dt style={{ color: 'var(--text-muted)' }}>Started</dt><dd style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }}>{m.startedAt}</dd>
+              <dt style={{ color: 'var(--text-muted)' }}>Ended</dt><dd style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }}>{m.endedAt ?? '—'}</dd>
+              <dt style={{ color: 'var(--text-muted)' }}>Duration</dt>
+              <dd style={{ color: 'var(--text-secondary)' }}>{(() => {
                 const d = durationBetween(m.startedAt, m.endedAt)
                 return d == null ? 'in progress' : formatDuration(d)
               })()}</dd>
-              <dt className="text-zinc-500">Heal cycles</dt><dd>{m.healCycles}</dd>
+              <dt style={{ color: 'var(--text-muted)' }}>Heal cycles</dt><dd style={{ color: 'var(--text-secondary)' }}>{m.healCycles}</dd>
             </dl>
-            <h3 className="mt-4 mb-1 text-[10px] uppercase tracking-wide text-zinc-500">Services</h3>
+            <h3 className="mt-4 mb-1 text-[10px] uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Services</h3>
             {services.length === 0 ? (
-              <div className="text-xs text-zinc-500">No services configured.</div>
+              <div className="text-xs" style={{ color: 'var(--text-muted)' }}>No services configured.</div>
             ) : (
               <ul className="text-xs">
                 {services.map((s) => (
-                  <li key={s.safeName} className="border-b border-zinc-100 dark:border-zinc-900 py-1">
-                    <div className="font-medium text-zinc-800 dark:text-zinc-200">{s.name}</div>
-                    <div className="font-mono text-[11px] text-zinc-500">{s.command}</div>
-                    <div className="font-mono text-[11px] text-zinc-400 dark:text-zinc-600">{s.logPath}</div>
+                  <li key={s.safeName} className="py-1.5" style={{ borderBottom: '1px solid var(--border-default)' }}>
+                    <div className="font-medium" style={{ color: 'var(--text-primary)' }}>{s.name}</div>
+                    <div className="text-[11px]" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{s.command}</div>
+                    <div className="text-[11px]" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{s.logPath}</div>
                   </li>
                 ))}
               </ul>
@@ -119,13 +109,17 @@ export function RunDetailColumn({ runId }: Props) {
         )}
         {tab === 'services' && services.length > 0 && (
           <div className="flex h-full flex-col">
-            <div className="flex gap-1 border-b border-zinc-200 dark:border-zinc-800 px-3 py-1 text-xs">
+            <div className="flex gap-1 px-3 py-1.5 text-xs" style={{ borderBottom: '1px solid var(--border-default)' }}>
               {services.map((s, i) => (
                 <button
                   key={s.safeName}
                   type="button"
                   onClick={() => setServiceIdx(i)}
-                  className={`rounded px-2 py-1 ${i === serviceIdx ? 'bg-zinc-200 dark:bg-zinc-800' : 'hover:bg-zinc-100 dark:hover:bg-zinc-900'}`}
+                  className="rounded-md px-2 py-1 transition-colors duration-150"
+                  style={{
+                    background: i === serviceIdx ? 'var(--bg-elevated)' : 'transparent',
+                    color: i === serviceIdx ? 'var(--text-primary)' : 'var(--text-secondary)',
+                  }}
                 >
                   {s.name}
                 </button>
@@ -144,19 +138,12 @@ export function RunDetailColumn({ runId }: Props) {
         {tab === 'agent' && (
           <PaneTerminal runId={m.runId} paneId="agent" />
         )}
-        {tab === 'steps' && (
-          <TestStepsTab feature={m.feature} summary={detail.summary} />
-        )}
         {tab === 'journal' && (
           <JournalTab feature={m.feature} runId={m.runId} />
         )}
       </div>
     </div>
   )
-}
-
-interface Props {
-  runId: string | null
 }
 
 function TabButton(props: { active: boolean; disabled?: boolean; onClick: () => void; children: React.ReactNode }) {
@@ -166,9 +153,12 @@ function TabButton(props: { active: boolean; disabled?: boolean; onClick: () => 
       type="button"
       disabled={disabled}
       onClick={onClick}
-      className={`rounded px-2 py-1 ${
-        active ? 'bg-zinc-200 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100' : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-900 disabled:cursor-not-allowed disabled:text-zinc-300 dark:disabled:text-zinc-700'
-      }`}
+      className="shrink-0 whitespace-nowrap rounded-md px-2.5 py-1 transition-colors duration-150"
+      style={{
+        background: active ? 'var(--bg-elevated)' : 'transparent',
+        color: active ? 'var(--text-primary)' : disabled ? 'var(--text-muted)' : 'var(--text-secondary)',
+        cursor: disabled ? 'not-allowed' : 'pointer',
+      }}
     >
       {children}
     </button>

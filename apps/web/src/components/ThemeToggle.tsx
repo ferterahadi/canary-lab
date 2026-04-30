@@ -39,7 +39,8 @@ export function ThemeToggle() {
     <div
       role="radiogroup"
       aria-label="Theme"
-      className="flex items-center gap-0.5 rounded border border-zinc-200 bg-zinc-50 p-0.5 dark:border-zinc-800 dark:bg-zinc-900"
+      className="flex items-center gap-0.5 rounded-md p-0.5"
+      style={{ border: '1px solid var(--border-default)', background: 'var(--bg-base)' }}
     >
       {OPTIONS.map((opt) => {
         const active = choice === opt.value
@@ -51,11 +52,11 @@ export function ThemeToggle() {
             aria-checked={active}
             title={opt.label}
             onClick={() => setChoice(opt.value)}
-            className={`flex flex-1 items-center justify-center rounded px-2 py-1 text-zinc-500 transition-colors ${
-              active
-                ? 'bg-white text-zinc-900 shadow-sm dark:bg-zinc-700 dark:text-zinc-100'
-                : 'hover:text-zinc-900 dark:hover:text-zinc-200'
-            }`}
+            className="flex flex-1 items-center justify-center rounded-md px-2 py-1 transition-colors duration-150"
+            style={{
+              color: active ? 'var(--text-primary)' : 'var(--text-muted)',
+              background: active ? 'var(--bg-elevated)' : 'transparent',
+            }}
           >
             {opt.icon}
           </button>
