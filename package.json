@@ -36,10 +36,10 @@
     "canary-lab": "dist/scripts/cli.js"
   },
   "exports": {
-    "./feature-support/playwright-base": "./dist/feature-support/playwright-base.js",
-    "./feature-support/load-env": "./dist/feature-support/load-env.js",
-    "./feature-support/log-marker-fixture": "./dist/feature-support/log-marker-fixture.js",
-    "./feature-support/types": "./dist/feature-support/types.js"
+    "./feature-support/playwright-base": "./dist/shared/configs/playwright.base.js",
+    "./feature-support/load-env": "./dist/shared/configs/loadEnv.js",
+    "./feature-support/log-marker-fixture": "./dist/shared/e2e-runner/log-marker-fixture.js",
+    "./feature-support/types": "./dist/shared/launcher/types.js"
   },
   "files": [
     "dist",

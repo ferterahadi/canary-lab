@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { RunIndexEntry } from '../api/types'
 import { statusBadgeClass, formatDuration, durationBetween, shortTime } from '../lib/format'
 import { canPauseHeal } from '../lib/run-actions'
@@ -18,6 +18,11 @@ export function RunsColumn({ feature, runs, selectedRunId, onSelectRun, onStartR
   const [pendingPause, setPendingPause] = useState<RunIndexEntry | null>(null)
   const [pausingId, setPausingId] = useState<string | null>(null)
   const [pauseError, setPauseError] = useState<{ runId: string; message: string } | null>(null)
+  const pauseErrorTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => () => {
+    if (pauseErrorTimer.current) clearTimeout(pauseErrorTimer.current)
+  }, [])
 
   const confirmPause = async (): Promise<void> => {
     if (!pendingPause) return
@@ -35,7 +40,8 @@ export function RunsColumn({ feature, runs, selectedRunId, onSelectRun, onStartR
         message = err instanceof Error ? err.message : String(err)
       }
       setPauseError({ runId: target.runId, message })
-      setTimeout(() => {
+      if (pauseErrorTimer.current) clearTimeout(pauseErrorTimer.current)
+      pauseErrorTimer.current = setTimeout(() => {
         setPauseError((cur) => (cur && cur.runId === target.runId ? null : cur))
       }, 3000)
     } finally {

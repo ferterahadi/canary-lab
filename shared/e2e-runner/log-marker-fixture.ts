@@ -1,4 +1,4 @@
-import { test as base, expect } from '@playwright/test'
+import { test as base } from '@playwright/test'
 import fs from 'fs'
 import { MANIFEST_PATH } from './paths'
 
@@ -55,5 +55,4 @@ export const test = base.extend<{ _logMarker: void }>({
   ],
 })
 
-export { expect }
-export type { APIRequestContext, Page } from '@playwright/test'
+export { expect, type APIRequestContext, type Page } from '@playwright/test'
