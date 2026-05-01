@@ -232,6 +232,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
   await app.register(paneStreamRoutes, {
     registry,
     brokerFor: (runId) => brokers.get(runId) ?? null,
+    logsDir,
   })
   await app.register(draftAgentStreamRoutes, {
     brokerForDraft: (draftId) => draftBrokers.get(draftId) ?? null,

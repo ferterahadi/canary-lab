@@ -34,8 +34,12 @@ function loadRealFactory(): PtyFactory {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const pty = require('node-pty') as typeof import('node-pty')
   cachedRealFactory = (opts: PtySpawnOptions): PtyHandle => {
-    const shell = opts.shell ?? '/bin/bash'
-    const proc = pty.spawn(shell, ['-c', opts.command], {
+    // Respect the user's $SHELL so commands run with the same config as
+    // their terminal (zsh + .zshrc, bash + .bashrc, etc.). `-i` makes the
+    // shell interactive so .zshrc / .bashrc is sourced — services often
+    // depend on PATH mutations from asdf/nvm/oh-my-zsh.
+    const shell = opts.shell ?? process.env.SHELL ?? '/bin/bash'
+    const proc = pty.spawn(shell, ['-i', '-c', opts.command], {
       name: 'xterm-256color',
       cols: opts.cols ?? 120,
       rows: opts.rows ?? 30,

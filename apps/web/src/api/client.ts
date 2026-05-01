@@ -136,6 +136,14 @@ export async function stopRun(runId: string, opts?: ClientOptions): Promise<void
   )
 }
 
+// Same endpoint as stopRun, but invoked when the run is in a terminal status —
+// the server removes the index entry and recursively deletes the run dir.
+// Kept as a separate exported name so callers can pick the verb that matches
+// their intent at the call site.
+export async function deleteRun(runId: string, opts?: ClientOptions): Promise<void> {
+  return stopRun(runId, opts)
+}
+
 export async function deleteJournalEntry(
   iteration: number,
   opts?: ClientOptions,

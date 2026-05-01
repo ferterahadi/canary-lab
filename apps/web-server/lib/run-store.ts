@@ -1,6 +1,6 @@
 import fs from 'fs'
 import path from 'path'
-import { readManifest, readRunsIndex, updateManifest, upsertRunsIndexEntry, type RunIndexEntry, type RunManifest } from '../../../shared/e2e-runner/manifest'
+import { readManifest, readRunsIndex, updateManifest, upsertRunsIndexEntry, writeRunsIndex, type RunIndexEntry, type RunManifest } from '../../../shared/e2e-runner/manifest'
 import { runDirFor } from '../../../shared/e2e-runner/run-paths'
 
 /** A run is considered stale if its heartbeat is older than this (ms). */
@@ -85,6 +85,29 @@ export async function reapStaleRuns(
     updateManifest(manifestPath, { status: 'aborted', endedAt })
     upsertRunsIndexEntry(logsDir, { ...entry, status: 'aborted', endedAt })
   }
+}
+
+/**
+ * Remove a run from history: drop its entry from `runs/index.json` and
+ * recursively delete the run directory. Returns `true` when something was
+ * actually removed (entry existed or directory existed), `false` when
+ * neither did. Caller is responsible for verifying the run is in a terminal
+ * state — this does NOT stop a running orchestrator.
+ */
+export function removeRunFromHistory(logsDir: string, runId: string): boolean {
+  let changed = false
+  const entries = readRunsIndex(logsDir)
+  const next = entries.filter((e) => e.runId !== runId)
+  if (next.length !== entries.length) {
+    writeRunsIndex(logsDir, next)
+    changed = true
+  }
+  const dir = runDirFor(logsDir, runId)
+  if (fs.existsSync(dir)) {
+    fs.rmSync(dir, { recursive: true, force: true })
+    changed = true
+  }
+  return changed
 }
 
 export interface RunSummaryFailedEntry {

@@ -1,33 +1,64 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { RunIndexEntry } from '../api/types'
-import { statusBadgeClass, formatDuration, durationBetween, shortTime } from '../lib/format'
-import { canPauseHeal, canStop } from '../lib/run-actions'
-import { ApiError, pauseHealRun, stopRun } from '../api/client'
+import { formatDuration, durationBetween, shortTime } from '../lib/format'
+import { canPauseHeal, canStop, canDelete } from '../lib/run-actions'
+import { ApiError, pauseHealRun, stopRun, deleteRun } from '../api/client'
+import { RunStatusIndicator } from './RunStatusIndicator'
 
 interface Props {
   feature: string | null
   envs?: string[]
   runs: RunIndexEntry[]
   selectedRunId: string | null
-  onSelectRun: (runId: string) => void
+  onSelectRun: (runId: string | null) => void
   onStartRun: (env?: string) => void
   runDisabled?: boolean
   runDisabledReason?: string
+  /**
+   * Optimistic-delete hook. When provided, the parent owns the runs list and
+   * is told to remove a runId immediately on confirm; we'll fall back to a
+   * full refetch if the API call fails. Lets the row vanish in the same
+   * frame as the click instead of waiting for the next 5s poll.
+   */
+  onOptimisticDelete?: (runId: string) => void
+  /** Refresh hook used to roll back an optimistic delete on API failure. */
+  onRefreshRuns?: () => void
 }
+
+// Inline SVG icons (no new dependency). Sizes are tuned to align with the
+// 10 px text on the action buttons.
+const ICON_TRASH = (
+  <svg viewBox="0 0 16 16" width="11" height="11" fill="currentColor" aria-hidden="true">
+    <path d="M5.5 2h5l.5 1H14v1H2V3h3l.5-1zM3.5 5h9l-.7 8.2a1.5 1.5 0 0 1-1.5 1.3H5.7a1.5 1.5 0 0 1-1.5-1.3L3.5 5zm2.5 2v6h1V7H6zm3 0v6h1V7H9z" />
+  </svg>
+)
+const ICON_STOP = (
+  <svg viewBox="0 0 16 16" width="10" height="10" fill="currentColor" aria-hidden="true">
+    <rect x="3" y="3" width="10" height="10" rx="1.5" />
+  </svg>
+)
+const ICON_PAUSE = (
+  <svg viewBox="0 0 16 16" width="10" height="10" fill="currentColor" aria-hidden="true">
+    <rect x="3" y="3" width="3" height="10" rx="1" />
+    <rect x="10" y="3" width="3" height="10" rx="1" />
+  </svg>
+)
 
 // Below this width the per-run action chips (Stop / Pause & Heal / status)
 // stop fitting on a single line, so we collapse them into a kebab menu that
 // pops over with the same options.
 const COMPACT_THRESHOLD_PX = 360
 
-export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRun, onStartRun, runDisabled, runDisabledReason }: Props) {
+export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRun, onStartRun, runDisabled, runDisabledReason, onOptimisticDelete, onRefreshRuns }: Props) {
   const [envOverride, setEnvOverride] = useState<string | null>(null)
   const selectedEnv = envOverride && envs.includes(envOverride) ? envOverride : envs[0] ?? ''
   const [pendingPause, setPendingPause] = useState<RunIndexEntry | null>(null)
   const [pendingStop, setPendingStop] = useState<RunIndexEntry | null>(null)
+  const [pendingDelete, setPendingDelete] = useState<RunIndexEntry | null>(null)
   const [pausingId, setPausingId] = useState<string | null>(null)
   const [stoppingId, setStoppingId] = useState<string | null>(null)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
   const [actionError, setActionError] = useState<{ runId: string; message: string } | null>(null)
   const [openMenuRunId, setOpenMenuRunId] = useState<string | null>(null)
   const [runPopoverOpen, setRunPopoverOpen] = useState(false)
@@ -124,6 +155,31 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
     }
   }
 
+  const confirmDelete = async (): Promise<void> => {
+    if (!pendingDelete) return
+    const target = pendingDelete
+    setPendingDelete(null)
+    setDeletingId(target.runId)
+    // Optimistic: tell the parent to drop the row immediately so it vanishes
+    // in the same frame as the click. We still keep `deletingId` set in case
+    // the parent doesn't own the list (no `onOptimisticDelete` prop) — then
+    // the in-flight overlay below kicks in until the next poll.
+    if (onOptimisticDelete) onOptimisticDelete(target.runId)
+    // Clear selection eagerly so the right pane doesn't briefly 404 against
+    // a runId we're already removing.
+    if (selectedRunId === target.runId) onSelectRun(null)
+    try {
+      await deleteRun(target.runId)
+      setActionError(null)
+    } catch (err) {
+      showError(target.runId, err)
+      // Roll back the optimistic removal by refetching the canonical list.
+      if (onRefreshRuns) onRefreshRuns()
+    } finally {
+      setDeletingId(null)
+    }
+  }
+
   return (
     <div ref={containerRef} className="flex h-full flex-col">
       <div className="flex items-center gap-3 px-4 py-3" style={{ borderBottom: '1px solid var(--border-default)' }}>
@@ -191,6 +247,42 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
             {runs.map((r) => {
               const dur = durationBetween(r.startedAt, r.endedAt)
               const isSelected = r.runId === selectedRunId
+              const isDeleting = deletingId === r.runId
+              if (isDeleting) {
+                // In-flight overlay: row is greyed out, inert, and shows a
+                // pulsing "… deleting …" indicator. Only visible if the
+                // optimistic remove didn't already strip the row from the
+                // list (i.e., the parent is on an older client that doesn't
+                // pass `onOptimisticDelete`, OR the API takes long enough to
+                // matter).
+                return (
+                  <li key={r.runId}>
+                    <div
+                      aria-busy="true"
+                      aria-live="polite"
+                      className="pointer-events-none flex w-full flex-col items-start gap-1.5 px-4 py-3 text-left"
+                      style={{
+                        borderBottom: '1px solid var(--border-default)',
+                        background: 'transparent',
+                        borderLeft: '2px solid transparent',
+                        opacity: 0.55,
+                      }}
+                    >
+                      <div className="flex w-full items-center justify-between gap-2">
+                        <span className="shrink-0 text-xs" style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>{shortTime(r.startedAt)}</span>
+                        <span className="inline-flex items-center gap-1.5 text-[10px] uppercase tracking-[0.12em] text-rose-500/80 dark:text-rose-400/80 animate-pulse">
+                          <span className="inline-flex h-1.5 w-1.5 rounded-full bg-rose-500/80" />
+                          … deleting …
+                        </span>
+                      </div>
+                      <div className="flex w-full items-center justify-between text-[11px]" style={{ color: 'var(--text-muted)' }}>
+                        <span className="h-2 w-32 rounded bg-rose-500/10 animate-pulse" />
+                        {dur != null && <span className="opacity-50">{formatDuration(dur)}</span>}
+                      </div>
+                    </div>
+                  </li>
+                )
+              }
               return (
                 <li key={r.runId}>
                   <button
@@ -205,49 +297,71 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
                   >
                     <div className="flex w-full items-center justify-between gap-2">
                       <span className="shrink-0 text-xs" style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>{shortTime(r.startedAt)}</span>
-                      {compact ? (
-                        <RunActionsKebab
-                          run={r}
-                          open={openMenuRunId === r.runId}
-                          onOpenToggle={(e) => {
+                      <div className="flex items-center gap-1">
+                        {compact ? (
+                          <RunActionsKebab
+                            run={r}
+                            open={openMenuRunId === r.runId}
+                            onOpenToggle={(e) => {
+                              e.stopPropagation()
+                              setOpenMenuRunId((cur) => (cur === r.runId ? null : r.runId))
+                            }}
+                            onClose={() => setOpenMenuRunId(null)}
+                            stoppingId={stoppingId}
+                            pausingId={pausingId}
+                            onStop={() => { setOpenMenuRunId(null); setPendingStop(r) }}
+                            onPause={() => { setOpenMenuRunId(null); setPendingPause(r) }}
+                          />
+                        ) : (
+                          <>
+                            {canStop(r.status) && (
+                              <ActionButton
+                                label={stoppingId === r.runId ? 'Stopping' : 'Stop'}
+                                icon={ICON_STOP}
+                                disabled={stoppingId === r.runId}
+                                variant="danger"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  if (stoppingId !== r.runId) setPendingStop(r)
+                                }}
+                              />
+                            )}
+                            {canPauseHeal(r.status) && (
+                              <ActionButton
+                                label={pausingId === r.runId ? 'Pausing' : 'Pause'}
+                                icon={ICON_PAUSE}
+                                disabled={pausingId === r.runId}
+                                variant="warning"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  if (pausingId !== r.runId) setPendingPause(r)
+                                }}
+                              />
+                            )}
+                            <span className="ml-1 inline-flex items-center">
+                              <RunStatusIndicator status={r.status} />
+                            </span>
+                          </>
+                        )}
+                        {/* Delete is always rendered as an icon-only button
+                            to the right of the status indicator, regardless
+                            of compact mode. It's blocked (visible but
+                            disabled) while the run is still running/healing
+                            so the user understands the constraint instead
+                            of wondering where the delete went. */}
+                        <DeleteIconButton
+                          disabled={!canDelete(r.status) || deletingId === r.runId}
+                          disabledReason={
+                            !canDelete(r.status)
+                              ? 'Stop the run before deleting'
+                              : 'Deleting…'
+                          }
+                          onClick={(e) => {
                             e.stopPropagation()
-                            setOpenMenuRunId((cur) => (cur === r.runId ? null : r.runId))
+                            if (canDelete(r.status) && deletingId !== r.runId) setPendingDelete(r)
                           }}
-                          onClose={() => setOpenMenuRunId(null)}
-                          stoppingId={stoppingId}
-                          pausingId={pausingId}
-                          onStop={() => { setOpenMenuRunId(null); setPendingStop(r) }}
-                          onPause={() => { setOpenMenuRunId(null); setPendingPause(r) }}
                         />
-                      ) : (
-                        <div className="flex items-center gap-1.5">
-                          {canStop(r.status) && (
-                            <ActionButton
-                              label={stoppingId === r.runId ? 'Stopping...' : 'Stop'}
-                              disabled={stoppingId === r.runId}
-                              variant="danger"
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                if (stoppingId !== r.runId) setPendingStop(r)
-                              }}
-                            />
-                          )}
-                          {canPauseHeal(r.status) && (
-                            <ActionButton
-                              label={pausingId === r.runId ? 'Pausing...' : 'Pause & Heal'}
-                              disabled={pausingId === r.runId}
-                              variant="warning"
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                if (pausingId !== r.runId) setPendingPause(r)
-                              }}
-                            />
-                          )}
-                          <span className={`rounded-md border px-1.5 py-0.5 text-[10px] uppercase tracking-wide ${statusBadgeClass(r.status)}`}>
-                            {r.status}
-                          </span>
-                        </div>
-                      )}
+                      </div>
                     </div>
                     <div className="flex w-full items-center justify-between text-[11px]" style={{ color: 'var(--text-muted)' }}>
                       <span className="truncate" style={{ fontFamily: 'var(--font-mono)' }}>{r.runId}</span>
@@ -283,6 +397,16 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
           variant="danger"
           onCancel={() => setPendingStop(null)}
           onConfirm={confirmStop}
+        />
+      )}
+      {pendingDelete && (
+        <ConfirmDialog
+          title="Delete this run?"
+          description={`Run ${pendingDelete.runId} and all its logs will be permanently removed from disk. This cannot be undone.`}
+          confirmLabel="Delete Run"
+          variant="danger"
+          onCancel={() => setPendingDelete(null)}
+          onConfirm={confirmDelete}
         />
       )}
     </div>
@@ -445,6 +569,10 @@ function RunActionsKebab({
 }) {
   const stopAvailable = canStop(run.status)
   const pauseAvailable = canPauseHeal(run.status)
+  // NOTE: Delete is intentionally NOT in this menu; it's rendered as a
+  // dedicated icon button next to the status indicator at all viewport
+  // widths. Keeping it out of the kebab is what guarantees the user sees
+  // Delete on the right of the status, regardless of compact mode.
   const hasActions = stopAvailable || pauseAvailable
   const POPOVER_WIDTH = 180
   const buttonRef = useRef<HTMLButtonElement>(null)
@@ -452,9 +580,7 @@ function RunActionsKebab({
   return (
     <div className="shrink-0" data-run-menu>
       <div className="flex items-center gap-1.5">
-        <span className={`rounded-md border px-1.5 py-0.5 text-[10px] uppercase tracking-wide ${statusBadgeClass(run.status)}`}>
-          {run.status}
-        </span>
+        <RunStatusIndicator status={run.status} />
         {hasActions && (
           <button
             ref={buttonRef}
@@ -559,20 +685,28 @@ function MenuItem({
   )
 }
 
+// Ghost icon-button. Stays calm at rest (no border, no fill); hover reveals
+// a tinted fill so the affordance is clear. The leading icon disambiguates
+// from the bare-text status indicator next to it.
+//
+// Rendered as `<span role="button">` because the parent row is itself a
+// `<button>` and HTML disallows nesting.
 function ActionButton({
   label,
+  icon,
   disabled,
   variant,
   onClick,
 }: {
   label: string
+  icon: React.ReactNode
   disabled: boolean
   variant: 'warning' | 'danger'
   onClick: (e: React.MouseEvent) => void
 }) {
-  const colors = variant === 'danger'
-    ? 'border-rose-500/40 bg-rose-500/10 text-rose-700 hover:bg-rose-500/20 dark:text-rose-300'
-    : 'border-amber-500/50 bg-amber-500/10 text-amber-700 hover:bg-amber-500/20 dark:text-amber-300'
+  const tone = variant === 'danger'
+    ? 'text-rose-600/80 hover:bg-rose-500/12 hover:text-rose-600 dark:text-rose-400/80 dark:hover:text-rose-300'
+    : 'text-amber-600/80 hover:bg-amber-500/15 hover:text-amber-700 dark:text-amber-400/80 dark:hover:text-amber-300'
   return (
     <span
       role="button"
@@ -582,9 +716,56 @@ function ActionButton({
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); onClick(e as unknown as React.MouseEvent) }
       }}
-      className={`cursor-pointer rounded-md border px-1.5 py-0.5 text-[10px] uppercase tracking-wide transition-colors duration-150 ${colors} ${disabled ? 'cursor-not-allowed opacity-50' : ''}`}
+      className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] uppercase tracking-wide transition-colors duration-150 ${tone} ${disabled ? 'cursor-not-allowed opacity-40' : 'cursor-pointer'}`}
     >
+      <span aria-hidden="true" className="inline-flex h-3 w-3 items-center justify-center">{icon}</span>
       {label}
+    </span>
+  )
+}
+
+// Icon-only ghost trash button. Square hover surface (16×16 visual / 20×20
+// hit area) keeps the row dense; hover reveals a soft rose fill so the
+// affordance is unmistakable. When `disabled`, it shows at low opacity with
+// a tooltip explaining why — the user always sees that delete *exists*,
+// just not whether it's currently available. Rendered as `<span role="button">`
+// because the surrounding row is itself a `<button>`.
+function DeleteIconButton({
+  disabled,
+  disabledReason,
+  onClick,
+}: {
+  disabled: boolean
+  disabledReason?: string
+  onClick: (e: React.MouseEvent) => void
+}) {
+  return (
+    <span
+      role="button"
+      tabIndex={disabled ? -1 : 0}
+      aria-disabled={disabled}
+      aria-label={disabled ? (disabledReason ?? 'Delete unavailable') : 'Delete run'}
+      title={disabled ? (disabledReason ?? 'Delete unavailable') : 'Delete run'}
+      onClick={(e) => {
+        if (disabled) { e.stopPropagation(); return }
+        onClick(e)
+      }}
+      onKeyDown={(e) => {
+        if (disabled) return
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault(); e.stopPropagation()
+          onClick(e as unknown as React.MouseEvent)
+        }
+      }}
+      className={`ml-0.5 inline-flex h-5 w-5 items-center justify-center rounded-md transition-colors duration-150 ${
+        disabled
+          ? 'cursor-not-allowed text-zinc-400/50 dark:text-zinc-500/50'
+          : 'cursor-pointer text-rose-600/70 hover:bg-rose-500/12 hover:text-rose-600 dark:text-rose-400/70 dark:hover:text-rose-300'
+      }`}
+    >
+      <svg viewBox="0 0 16 16" width="11" height="11" fill="currentColor" aria-hidden="true">
+        <path d="M5.5 2h5l.5 1H14v1H2V3h3l.5-1zM3.5 5h9l-.7 8.2a1.5 1.5 0 0 1-1.5 1.3H5.7a1.5 1.5 0 0 1-1.5-1.3L3.5 5zm2.5 2v6h1V7H6zm3 0v6h1V7H9z" />
+      </svg>
     </span>
   )
 }

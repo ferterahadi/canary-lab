@@ -5,7 +5,7 @@ export default defineConfig({
     include: [
       'scripts/**/*.test.ts',
       'shared/**/*.test.ts',
-      'apps/**/*.test.ts',
+      'apps/**/*.test.{ts,tsx}',
       'tools/**/*.test.ts',
     ],
     environment: 'node',

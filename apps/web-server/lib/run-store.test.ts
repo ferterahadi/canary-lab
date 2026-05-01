@@ -6,6 +6,7 @@ import {
   createRegistry,
   listRuns,
   reapStaleRuns,
+  removeRunFromHistory,
   getRunDetail,
   readRunSummary,
 } from './run-store'
@@ -210,6 +211,44 @@ describe('reapStaleRuns', () => {
     expect(listRuns(tmpDir)[0].status).toBe('running')
     expect(stopped).toBe(false)
     expect(reg.get('alive-1')).toBe(stub)
+  })
+})
+
+describe('removeRunFromHistory', () => {
+  it('drops the index entry and recursively deletes the run dir', () => {
+    const dir = runDirFor(tmpDir, 'r-rm-1')
+    fs.mkdirSync(dir, { recursive: true })
+    fs.writeFileSync(path.join(dir, 'svc-foo.log'), 'x')
+    writeManifest(path.join(dir, 'manifest.json'), {
+      runId: 'r-rm-1', feature: 'foo', startedAt: 'now', status: 'passed', healCycles: 0, services: [],
+    })
+    writeRunsIndex(tmpDir, [
+      { runId: 'r-rm-1', feature: 'foo', startedAt: 'now', status: 'passed' },
+      { runId: 'keep', feature: 'foo', startedAt: 'now', status: 'passed' },
+    ])
+    expect(removeRunFromHistory(tmpDir, 'r-rm-1')).toBe(true)
+    expect(fs.existsSync(dir)).toBe(false)
+    const remaining = listRuns(tmpDir).map((e) => e.runId)
+    expect(remaining).toEqual(['keep'])
+  })
+
+  it('returns false when nothing matches', () => {
+    expect(removeRunFromHistory(tmpDir, 'no-such')).toBe(false)
+  })
+
+  it('returns true when only the dir exists (no index entry)', () => {
+    const dir = runDirFor(tmpDir, 'orphan-dir')
+    fs.mkdirSync(dir, { recursive: true })
+    expect(removeRunFromHistory(tmpDir, 'orphan-dir')).toBe(true)
+    expect(fs.existsSync(dir)).toBe(false)
+  })
+
+  it('returns true when only the index entry exists (no dir)', () => {
+    writeRunsIndex(tmpDir, [
+      { runId: 'orphan-idx', feature: 'foo', startedAt: 'now', status: 'passed' },
+    ])
+    expect(removeRunFromHistory(tmpDir, 'orphan-idx')).toBe(true)
+    expect(listRuns(tmpDir)).toEqual([])
   })
 })
 

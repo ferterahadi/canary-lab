@@ -183,11 +183,41 @@ describe('DELETE /api/runs/:runId', () => {
     expect(registry.get('r2')).toBeUndefined()
   })
 
-  it('204s when not registered but manifest exists (archived run)', async () => {
-    writeManifestForRun('r3')
+  it('removes a terminal run from history (index entry + run dir) and 204s', async () => {
+    writeManifestForRun('r3') // status: 'passed'
+    writeRunsIndex(logsDir, [
+      { runId: 'r3', feature: 'foo', startedAt: 'now', status: 'passed' },
+    ])
     const { app } = await build()
     const res = await app.inject({ method: 'DELETE', url: '/api/runs/r3' })
     expect(res.statusCode).toBe(204)
+    expect(fs.existsSync(runDirFor(logsDir, 'r3'))).toBe(false)
+    const list = await app.inject({ method: 'GET', url: '/api/runs' })
+    expect((list.json() as Array<{ runId: string }>).find((r) => r.runId === 'r3')).toBeUndefined()
+  })
+
+  it('preserves the run when an active orchestrator is stopped', async () => {
+    writeManifestForRun('r3b') // baseline manifest exists
+    const stub = makeStub('r3b')
+    const { app, registry } = await build()
+    registry.set('r3b', stub)
+    const res = await app.inject({ method: 'DELETE', url: '/api/runs/r3b' })
+    expect(res.statusCode).toBe(204)
+    expect(stub.stopped).toBe(true)
+    // History is preserved so the user can still audit logs.
+    expect(fs.existsSync(runDirFor(logsDir, 'r3b'))).toBe(true)
+  })
+
+  it('409s when the manifest still claims running but no orch is registered', async () => {
+    const dir = runDirFor(logsDir, 'r3c')
+    fs.mkdirSync(dir, { recursive: true })
+    writeManifest(path.join(dir, 'manifest.json'), {
+      runId: 'r3c', feature: 'foo', startedAt: 'now', status: 'running', healCycles: 0, services: [],
+    })
+    const { app } = await build()
+    const res = await app.inject({ method: 'DELETE', url: '/api/runs/r3c' })
+    expect(res.statusCode).toBe(409)
+    expect(fs.existsSync(dir)).toBe(true)
   })
 
   it('404s when run unknown entirely', async () => {
