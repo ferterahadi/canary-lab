@@ -1,7 +1,10 @@
 import fs from 'fs'
 import path from 'path'
-import { readManifest, readRunsIndex, type RunIndexEntry, type RunManifest } from '../../../shared/e2e-runner/manifest'
+import { readManifest, readRunsIndex, updateManifest, upsertRunsIndexEntry, type RunIndexEntry, type RunManifest } from '../../../shared/e2e-runner/manifest'
 import { runDirFor } from '../../../shared/e2e-runner/run-paths'
+
+/** A run is considered stale if its heartbeat is older than this (ms). */
+const HEARTBEAT_STALE_MS = 15_000
 
 // Read-side helpers for the run history. The in-memory orchestrator map is
 // kept in `OrchestratorRegistry` (defined here as an interface so the route
@@ -45,8 +48,43 @@ export interface ListRunsOptions {
 export function listRuns(logsDir: string, opts: ListRunsOptions = {}): RunIndexEntry[] {
   const all = readRunsIndex(logsDir)
   const filtered = opts.feature ? all.filter((e) => e.feature === opts.feature) : all
-  // Newest first by startedAt (ISO strings sort lexicographically).
   return [...filtered].sort((a, b) => (a.startedAt < b.startedAt ? 1 : a.startedAt > b.startedAt ? -1 : 0))
+}
+
+/**
+ * One-shot cleanup for runs left in `running`/`healing` state by a previous
+ * server process that crashed without writing a final status. Intended to run
+ * once at server boot — never on a hot read path. A run is reaped only when
+ * its manifest carries a `heartbeatAt` older than `HEARTBEAT_STALE_MS`; runs
+ * with no `heartbeatAt` (legacy manifests written before the field existed)
+ * are left untouched.
+ */
+export async function reapStaleRuns(
+  logsDir: string,
+  registry?: OrchestratorRegistry,
+): Promise<void> {
+  const all = readRunsIndex(logsDir)
+  const now = Date.now()
+
+  for (const entry of all) {
+    if (entry.status !== 'running' && entry.status !== 'healing') continue
+    const manifestPath = path.join(runDirFor(logsDir, entry.runId), 'manifest.json')
+    const manifest = readManifest(manifestPath)
+    if (!manifest) continue
+    if (!manifest.heartbeatAt) continue
+    const heartbeat = new Date(manifest.heartbeatAt).getTime()
+    if (Number.isNaN(heartbeat) || now - heartbeat <= HEARTBEAT_STALE_MS) continue
+
+    const orch = registry?.get(entry.runId)
+    if (orch) {
+      await orch.stop('aborted').catch(() => {})
+      registry!.delete(entry.runId)
+    }
+
+    const endedAt = manifest.heartbeatAt
+    updateManifest(manifestPath, { status: 'aborted', endedAt })
+    upsertRunsIndexEntry(logsDir, { ...entry, status: 'aborted', endedAt })
+  }
 }
 
 export interface RunSummaryFailedEntry {

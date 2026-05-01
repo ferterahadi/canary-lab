@@ -1,10 +1,14 @@
 import type { FastifyInstance } from 'fastify'
 import fs from 'fs'
 import { loadFeatures, listSpecFiles } from '../lib/feature-loader'
-import { extractTestsFromSource } from '../lib/ast-extractor'
+import { extractTestsFromSource, type ExtractedTest } from '../lib/ast-extractor'
+import { listPlaywrightTests, type PlaywrightListSpawner } from '../lib/playwright-list'
 
 export interface FeaturesRouteDeps {
   featuresDir: string
+  // Optional override so tests can stub the Playwright `--list` invocation
+  // without spawning a real `npx playwright test`.
+  playwrightListSpawner?: PlaywrightListSpawner
 }
 
 export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDeps): Promise<void> {
@@ -26,14 +30,73 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
       return { error: 'feature not found' }
     }
     const specFiles = listSpecFiles(feature.featureDir)
-    return specFiles.map((file) => {
+
+    // 1. Run AST over each spec to gather (line -> { bodySource, steps }) for
+    //    enrichment. This is the single source of body/step extraction.
+    const astByFile = new Map<string, ReturnType<typeof extractTestsFromSource>>()
+    for (const file of specFiles) {
       let source = ''
       try { source = fs.readFileSync(file, 'utf-8') } catch { /* unreadable */ }
-      const result = extractTestsFromSource(file, source)
+      astByFile.set(file, extractTestsFromSource(file, source))
+    }
+
+    // 2. Ask Playwright to enumerate the resolved test list (loops expanded,
+    //    `${var}` substituted). On failure, fall back to AST-only output.
+    const pwList = await listPlaywrightTests(feature.featureDir, {
+      spawner: deps.playwrightListSpawner,
+    })
+
+    if (pwList === null) {
+      return specFiles.map((file) => {
+        const result = astByFile.get(file) ?? { file, tests: [] as ExtractedTest[] }
+        return {
+          file,
+          tests: result.tests,
+          ...(result.parseError ? { parseError: result.parseError } : {}),
+        }
+      })
+    }
+
+    // 3. Group Playwright entries by spec file, then emit one ExtractedTest
+    //    per resolved entry. Body/steps come from the AST entry whose `line`
+    //    matches the call site (multiple loop iterations share the same body).
+    const pwByFile = new Map<string, typeof pwList>()
+    for (const entry of pwList) {
+      const arr = pwByFile.get(entry.file) ?? []
+      arr.push(entry)
+      pwByFile.set(entry.file, arr)
+    }
+
+    return specFiles.map((file) => {
+      const ast = astByFile.get(file)
+      const astByLine = new Map<number, ExtractedTest>()
+      for (const t of ast?.tests ?? []) astByLine.set(t.line, t)
+
+      const pwEntries = pwByFile.get(file)
+      if (!pwEntries || pwEntries.length === 0) {
+        return {
+          file,
+          tests: ast?.tests ?? [],
+          ...(ast?.parseError ? { parseError: ast.parseError } : {}),
+        }
+      }
+
+      const tests: ExtractedTest[] = pwEntries
+        .slice()
+        .sort((a, b) => a.line - b.line || a.title.localeCompare(b.title))
+        .map((entry) => {
+          const fromAst = astByLine.get(entry.line)
+          return {
+            name: entry.title,
+            line: entry.line,
+            bodySource: fromAst?.bodySource ?? '',
+            steps: fromAst?.steps ?? [],
+          }
+        })
       return {
         file,
-        tests: result.tests,
-        ...(result.parseError ? { parseError: result.parseError } : {}),
+        tests,
+        ...(ast?.parseError ? { parseError: ast.parseError } : {}),
       }
     })
   })

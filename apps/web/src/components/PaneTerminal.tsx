@@ -5,7 +5,7 @@ import { connectPane, type PaneConnection } from '../api/pane-socket'
 import { currentResolvedTheme, subscribeTheme, type ResolvedTheme } from '../lib/theme'
 
 const TERM_THEMES: Record<ResolvedTheme, { background: string; foreground: string }> = {
-  dark: { background: '#282c34', foreground: '#abb2bf' },
+  dark: { background: '#14161a', foreground: '#d4d7de' },
   light: { background: '#fafafa', foreground: '#383a42' },
 }
 

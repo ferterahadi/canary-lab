@@ -46,6 +46,9 @@ export interface RunManifest {
    * most recent entry to the next agent invocation.
    */
   healCycleHistory?: Array<{ cycle: number; restarted: string[]; kept: string[] }>
+  /** ISO timestamp updated every few seconds while the orchestrator is alive.
+   *  Consumers compare against `Date.now()` to detect stale/orphaned runs. */
+  heartbeatAt?: string
 }
 
 function atomicWrite(file: string, body: string): void {

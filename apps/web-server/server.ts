@@ -10,7 +10,7 @@ import { skillsRoutes } from './routes/skills'
 import { testsDraftRoutes, type TestsDraftRouteDeps } from './routes/tests-draft'
 import { paneStreamRoutes } from './ws/pane-stream'
 import { draftAgentStreamRoutes } from './ws/draft-agent-stream'
-import { createRegistry, type OrchestratorRegistry, type OrchestratorLike } from './lib/run-store'
+import { createRegistry, reapStaleRuns, type OrchestratorRegistry, type OrchestratorLike } from './lib/run-store'
 import { PaneBroker } from './lib/pane-broker'
 import { loadFeatures } from './lib/feature-loader'
 import { loadSkills, type SkillRecord } from './lib/skill-loader'
@@ -86,6 +86,10 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
   await app.register(websocketPlugin)
 
   const registry = createRegistry()
+  // One-shot cleanup: any 'running'/'healing' entry in runs/index.json from a
+  // previous server process whose heartbeat is older than the staleness window
+  // gets flipped to 'aborted'. Runs without heartbeatAt (legacy) are left alone.
+  await reapStaleRuns(logsDir, registry)
   const brokers = new Map<string, PaneBroker>()
   const draftBrokers = new Map<string, PaneBroker>()
   // Tracks runs with an active envset so we can revert on run-complete or on
@@ -212,11 +216,16 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
       orch.on('agent-output', ({ chunk }) => {
         broker.push('agent', chunk)
       })
-      // Fire-and-forget the full lifecycle — services + Playwright + heal
-      // loop all drive through here. Failures surface via WebSocket events.
-      orch.runFullCycle().catch((err) => {
-        broker.push('agent', `\n[orchestrator error] ${String(err)}\n`)
-      })
+      orch.runFullCycle()
+        .then(async (status) => {
+          await orch.stop(status).catch(() => {})
+          registry.delete(orch.runId)
+        })
+        .catch(async (err) => {
+          broker.push('agent', `\n[orchestrator error] ${String(err)}\n`)
+          await orch.stop('aborted').catch(() => {})
+          registry.delete(orch.runId)
+        })
       return orch
     },
   })

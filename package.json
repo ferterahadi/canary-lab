@@ -43,6 +43,7 @@
   },
   "files": [
     "dist",
+    "tools/fix-node-pty-permissions.mjs",
     "README.md",
     "LICENSE"
   ],
@@ -59,6 +60,7 @@
     "canary-lab:run": "node dist/scripts/cli.js run",
     "canary-lab:env": "node dist/scripts/cli.js env",
     "canary-lab:new-feature": "node dist/scripts/cli.js new-feature",
+    "postinstall": "node tools/fix-node-pty-permissions.mjs",
     "prepack": "npm run build",
     "smoke:pack": "node tools/smoke-pack.mjs",
     "publish:package": "node tools/publish-package.mjs",

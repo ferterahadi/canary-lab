@@ -50,7 +50,7 @@ export function TestCasesColumn({ feature, activeRunSummary }: Props) {
           <RunningIndicator summary={activeRunSummary} />
         )}
       </div>
-      <div className="flex-1 min-h-0 overflow-y-auto p-3">
+      <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin p-3">
         {!specs ? (
           <div className="text-xs" style={{ color: 'var(--text-muted)' }}>Loading...</div>
         ) : specs.length === 0 ? (
@@ -59,7 +59,7 @@ export function TestCasesColumn({ feature, activeRunSummary }: Props) {
           <div className="space-y-1.5">
             {specs.flatMap((spec) =>
               spec.tests.map((t) => {
-                const key = `${spec.file}:${t.line}`
+                const key = `${spec.file}:${t.line}:${t.name}`
                 const isExpanded = expandedTest === key
                 return (
                   <TestCard

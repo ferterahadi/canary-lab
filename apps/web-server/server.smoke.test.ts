@@ -4,6 +4,8 @@ import os from 'os'
 import path from 'path'
 import { createServer } from './server'
 import type { TestsDraftRouteDeps } from './routes/tests-draft'
+import { writeManifest, writeRunsIndex, readManifest } from '../../shared/e2e-runner/manifest'
+import { runDirFor } from '../../shared/e2e-runner/run-paths'
 
 // Smoke test: exercises createServer() against the real templates/project
 // tree, hitting every read-side endpoint via inject(). Lives next to the
@@ -89,6 +91,102 @@ describe('createServer smoke (templates/project)', () => {
         url: '/api/features/nope/tests',
       })
       expect(unknownFeature.statusCode).toBe(404)
+    } finally {
+      await app.close()
+    }
+  })
+})
+
+describe('createServer boot-time stale run cleanup', () => {
+  let logsDir: string
+
+  beforeEach(() => {
+    logsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-boot-reap-')))
+  })
+
+  afterEach(() => {
+    fs.rmSync(logsDir, { recursive: true, force: true })
+  })
+
+  it('reaps a stale running entry from a previous process at startup', async () => {
+    const runId = 'stale-prev-run'
+    const dir = runDirFor(logsDir, runId)
+    fs.mkdirSync(dir, { recursive: true })
+    writeManifest(path.join(dir, 'manifest.json'), {
+      runId,
+      feature: 'example_todo_api',
+      startedAt: '2026-01-01T00:00:00Z',
+      status: 'running',
+      healCycles: 0,
+      services: [],
+      heartbeatAt: new Date(Date.now() - 60_000).toISOString(),
+    })
+    writeRunsIndex(logsDir, [
+      { runId, feature: 'example_todo_api', startedAt: '2026-01-01T00:00:00Z', status: 'running' },
+    ])
+
+    const projectRoot = path.resolve(__dirname, '..', '..', 'templates', 'project')
+    const { app } = await createServer({ projectRoot, logsDir, listSkills: () => [] })
+    try {
+      const manifest = readManifest(path.join(dir, 'manifest.json'))
+      expect(manifest?.status).toBe('aborted')
+      expect(manifest?.endedAt).toBeDefined()
+
+      const runs = await app.inject({ method: 'GET', url: '/api/runs' })
+      const json = runs.json() as Array<{ runId: string; status: string }>
+      expect(json.find((r) => r.runId === runId)?.status).toBe('aborted')
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('leaves a fresh-heartbeat running entry alone at startup', async () => {
+    const runId = 'fresh-prev-run'
+    const dir = runDirFor(logsDir, runId)
+    fs.mkdirSync(dir, { recursive: true })
+    writeManifest(path.join(dir, 'manifest.json'), {
+      runId,
+      feature: 'example_todo_api',
+      startedAt: '2026-01-01T00:00:00Z',
+      status: 'running',
+      healCycles: 0,
+      services: [],
+      heartbeatAt: new Date().toISOString(),
+    })
+    writeRunsIndex(logsDir, [
+      { runId, feature: 'example_todo_api', startedAt: '2026-01-01T00:00:00Z', status: 'running' },
+    ])
+
+    const projectRoot = path.resolve(__dirname, '..', '..', 'templates', 'project')
+    const { app } = await createServer({ projectRoot, logsDir, listSkills: () => [] })
+    try {
+      expect(readManifest(path.join(dir, 'manifest.json'))?.status).toBe('running')
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('leaves a legacy manifest with no heartbeatAt alone at startup', async () => {
+    const runId = 'legacy-prev-run'
+    const dir = runDirFor(logsDir, runId)
+    fs.mkdirSync(dir, { recursive: true })
+    writeManifest(path.join(dir, 'manifest.json'), {
+      runId,
+      feature: 'example_todo_api',
+      startedAt: '2026-01-01T00:00:00Z',
+      status: 'running',
+      healCycles: 0,
+      services: [],
+      // no heartbeatAt — pre-feature manifest
+    })
+    writeRunsIndex(logsDir, [
+      { runId, feature: 'example_todo_api', startedAt: '2026-01-01T00:00:00Z', status: 'running' },
+    ])
+
+    const projectRoot = path.resolve(__dirname, '..', '..', 'templates', 'project')
+    const { app } = await createServer({ projectRoot, logsDir, listSkills: () => [] })
+    try {
+      expect(readManifest(path.join(dir, 'manifest.json'))?.status).toBe('running')
     } finally {
       await app.close()
     }

@@ -19,15 +19,15 @@
 
 /* Atom One Dark Pro palette */
 .dark {
-  --bg-base: #282c34;
-  --bg-surface: #21252b;
-  --bg-elevated: #2c313a;
-  --bg-overlay: #353b45;
-  --border-default: #3e4451;
-  --border-focus: #61afef;
-  --text-primary: #abb2bf;
-  --text-secondary: #828997;
-  --text-muted: #5c6370;
+  --bg-base: #14161a;
+  --bg-surface: #1a1d23;
+  --bg-elevated: #22262e;
+  --bg-overlay: #2a2f38;
+  --border-default: #333842;
+  --border-focus: #528bff;
+  --text-primary: #d4d7de;
+  --text-secondary: #9da5b4;
+  --text-muted: #636d83;
 }
 
 html, body, #root {
@@ -41,6 +41,29 @@ body {
 
 .font-mono, code, pre, [class*="font-mono"] {
   font-family: var(--font-mono);
+}
+
+/* Thin auto-hiding scrollbars */
+.scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+.scrollbar-thin:hover {
+  scrollbar-color: var(--border-default) transparent;
+}
+.scrollbar-thin::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 4px;
+}
+.scrollbar-thin:hover::-webkit-scrollbar-thumb {
+  background: var(--border-default);
 }
 
 .resize-handle {
