@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import * as api from '../api/client'
 import type { RunDetail } from '../api/types'
-import { statusBadgeClass, formatDuration, durationBetween } from '../lib/format'
+import { formatDuration, durationBetween } from '../lib/format'
+import { RunStatusIndicator } from './RunStatusIndicator'
 import { PaneTerminal } from './PaneTerminal'
 import { JournalTab } from './JournalTab'
 
@@ -63,8 +64,8 @@ export function RunDetailColumn({ runId }: { runId: string | null }) {
     <div className="relative flex h-full flex-col">
       <header className="px-4 py-3" style={{ borderBottom: '1px solid var(--border-default)' }}>
         <div className="flex min-w-0 items-center gap-2">
-          <span className={`shrink-0 rounded-md border px-1.5 py-0.5 text-[10px] uppercase tracking-wide ${statusBadgeClass(m.status)}`}>
-            {m.status}
+          <span className="shrink-0">
+            <RunStatusIndicator status={m.status} />
           </span>
           <span className="min-w-0 flex-1 truncate text-sm" style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }} title={m.runId}>{m.runId}</span>
           <span className="shrink-0 truncate text-xs" style={{ color: 'var(--text-muted)' }} title={m.feature}>{m.feature}</span>

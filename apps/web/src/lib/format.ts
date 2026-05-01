@@ -2,8 +2,13 @@
 
 import type { RunStatus } from '../api/types'
 
-// Tailwind class string per status. Picked once here so the badge component
-// stays trivial and the mapping is testable.
+/**
+ * @deprecated Use the `<RunStatusIndicator status={...} />` component instead.
+ * The bordered-pill style this returns is no longer used in the UI — it
+ * collided visually with destructive action buttons (Stop / Delete). Kept
+ * exported only to avoid breaking any external consumer; new call sites
+ * should not be added.
+ */
 export function statusBadgeClass(status: RunStatus): string {
   switch (status) {
     case 'passed':

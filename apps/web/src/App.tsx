@@ -156,6 +156,15 @@ export function App() {
               selectedRunId={selectedRunId}
               onSelectRun={setSelectedRunId}
               onStartRun={handleStartRun}
+              onOptimisticDelete={(runId) => {
+                // Strip the row from `allRuns` immediately so it disappears
+                // in the same frame as the click. RunsColumn will refetch
+                // via `onRefreshRuns` if the API call fails.
+                setAllRuns((prev) => prev.filter((r) => r.runId !== runId))
+              }}
+              onRefreshRuns={() => {
+                api.listRuns().then((data) => setAllRuns(data)).catch(() => {})
+              }}
               runDisabled={Boolean(globalActiveRun)}
               runDisabledReason={
                 globalActiveRun

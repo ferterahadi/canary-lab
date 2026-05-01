@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify'
-import { listRuns, getRunDetail, type OrchestratorRegistry, type OrchestratorLike } from '../lib/run-store'
+import { listRuns, getRunDetail, removeRunFromHistory, type OrchestratorRegistry, type OrchestratorLike } from '../lib/run-store'
 import { loadFeatures } from '../lib/feature-loader'
 
 export interface RunsRouteDeps {
@@ -76,20 +76,35 @@ export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Pro
     return { status: 'healing', failureCount: result.failureCount }
   })
 
+  // DELETE /api/runs/:runId has two semantics, picked based on current state:
+  //   - Active run (in registry, or manifest reports running/healing) → stop
+  //     the orchestrator. Run is preserved in history so the user can audit
+  //     the logs after.
+  //   - Terminal run (passed/failed/aborted) → remove from history: drop the
+  //     index entry and recursively delete the run directory.
+  // 404 when nothing matches the runId at all.
   app.delete<{ Params: { runId: string } }>('/api/runs/:runId', async (req, reply) => {
     const runId = req.params.runId
     const orch = deps.registry.get(runId)
     if (orch) {
       try { await orch.stop('aborted') } catch { /* best-effort */ }
       deps.registry.delete(runId)
-    } else {
-      // Confirm at least the manifest exists so we can 404 unknown ids.
-      const detail = getRunDetail(deps.logsDir, runId)
-      if (!detail) {
-        reply.code(404)
-        return { error: 'run not found' }
-      }
+      reply.code(204)
+      return ''
     }
+    const detail = getRunDetail(deps.logsDir, runId)
+    if (!detail) {
+      reply.code(404)
+      return { error: 'run not found' }
+    }
+    const status = detail.manifest.status
+    if (status === 'running' || status === 'healing') {
+      // Manifest claims active but no orch — stale. Refuse so the next
+      // boot-time reaper or a fresh run can resolve the discrepancy.
+      reply.code(409)
+      return { error: 'run is still active; reap or stop first' }
+    }
+    removeRunFromHistory(deps.logsDir, runId)
     reply.code(204)
     return ''
   })
