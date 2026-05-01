@@ -191,6 +191,7 @@ export class RunOrchestrator extends EventEmitter {
   private servicePtys = new Map<string, PtyHandle>()
   private logFiles = new Set<string>()
   private signalWatcher: NodeJS.Timeout | null = null
+  private heartbeatTimer: NodeJS.Timeout | null = null
   private stopped = false
   // Mid-Run Heal: tracked while a Playwright pty is in flight so
   // pauseAndHeal() can SIGTERM it. Cleared on exit.
@@ -267,6 +268,7 @@ export class RunOrchestrator extends EventEmitter {
 
     this.writeInitialManifest()
     this.startSignalWatcher()
+    this.startHeartbeat()
 
     for (const svc of this.services) {
       this.spawnService(svc)
@@ -296,6 +298,7 @@ export class RunOrchestrator extends EventEmitter {
         .filter((p) => {
           try { return fs.existsSync(p) } catch { return false }
         }),
+      heartbeatAt: new Date().toISOString(),
     }
     writeManifest(this.paths.manifestPath, manifest)
     upsertRunsIndexEntry(this.logsRoot, {
@@ -695,6 +698,25 @@ export class RunOrchestrator extends EventEmitter {
     return finalStatus
   }
 
+  /** Write a heartbeat timestamp to the manifest every 5 seconds so consumers
+   *  can detect orphaned runs whose orchestrator crashed without cleaning up. */
+  private startHeartbeat(): void {
+    const tick = (): void => {
+      if (this.stopped) return
+      updateManifest(this.paths.manifestPath, { heartbeatAt: new Date().toISOString() })
+    }
+    this.heartbeatTimer = setInterval(tick, 5_000)
+    // Don't keep the process alive just for heartbeats.
+    this.heartbeatTimer.unref()
+  }
+
+  private stopHeartbeat(): void {
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer)
+      this.heartbeatTimer = null
+    }
+  }
+
   setStatus(status: RunManifest['status']): void {
     this.status = status
     this.emit('run-status', { status })
@@ -719,6 +741,7 @@ export class RunOrchestrator extends EventEmitter {
       clearInterval(this.signalWatcher)
       this.signalWatcher = null
     }
+    this.stopHeartbeat()
     for (const [name, pty] of this.servicePtys) {
       try { pty.kill('SIGTERM') } catch { /* ignore */ }
       this.servicePtys.delete(name)

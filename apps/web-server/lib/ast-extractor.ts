@@ -28,11 +28,21 @@ export interface ExtractResult {
   parseError?: string
 }
 
-function getStringArg(node: ts.CallExpression): string | null {
+function getStringArg(node: ts.CallExpression, src?: ts.SourceFile): string | null {
   const arg = node.arguments[0]
   if (!arg) return null
   if (ts.isStringLiteralLike(arg)) return arg.text
   if (ts.isNoSubstitutionTemplateLiteral(arg)) return arg.text
+  // Template literal with substitutions, e.g. `redeems ${key} voucher`.
+  // Reconstruct the raw template text with `${expr}` placeholders preserved
+  // so loop-generated tests at least surface a recognisable name when the
+  // Playwright `--list` enrichment isn't available.
+  if (ts.isTemplateExpression(arg) && src) {
+    const raw = arg.getText(src)
+    // Strip surrounding backticks; keep `${...}` segments verbatim.
+    if (raw.startsWith('`') && raw.endsWith('`')) return raw.slice(1, -1)
+    return raw
+  }
   return null
 }
 
@@ -85,7 +95,7 @@ function extractStepsFrom(node: ts.Node, src: ts.SourceFile): ExtractedStep[] {
   const out: ExtractedStep[] = []
   function visit(n: ts.Node, collector: ExtractedStep[]): void {
     if (ts.isCallExpression(n) && isTestStepCall(n)) {
-      const label = getStringArg(n)
+      const label = getStringArg(n, src)
       if (label !== null) {
         const body = getStepBody(n)
         const step: ExtractedStep = {
@@ -111,7 +121,7 @@ export function extractTestsFromSource(file: string, source: string): ExtractRes
     const tests: ExtractedTest[] = []
     function visit(n: ts.Node): void {
       if (ts.isCallExpression(n) && isTestCall(n)) {
-        const name = getStringArg(n)
+        const name = getStringArg(n, src)
         if (name !== null) {
           const body = getStepBody(n)
           tests.push({

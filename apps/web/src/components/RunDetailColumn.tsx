@@ -77,9 +77,9 @@ export function RunDetailColumn({ runId }: { runId: string | null }) {
           <TabButton active={tab === 'journal'} onClick={() => setTab('journal')}>Journal</TabButton>
         </nav>
       </header>
-      <div className="flex-1 min-h-0 overflow-hidden">
+      <div className="flex-1 min-h-0 overflow-hidden mt-2">
         {tab === 'overview' && (
-          <div className="overflow-y-auto p-4 text-sm">
+          <div className="overflow-y-auto scrollbar-thin p-4 text-sm">
             <dl className="grid grid-cols-[140px_1fr] gap-y-2 text-xs">
               <dt style={{ color: 'var(--text-muted)' }}>Feature</dt><dd style={{ color: 'var(--text-primary)' }}>{m.feature}</dd>
               <dt style={{ color: 'var(--text-muted)' }}>Started</dt><dd style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }}>{m.startedAt}</dd>
@@ -109,7 +109,7 @@ export function RunDetailColumn({ runId }: { runId: string | null }) {
         )}
         {tab === 'services' && services.length > 0 && (
           <div className="flex h-full flex-col">
-            <div className="flex gap-1 px-3 py-1.5 text-xs" style={{ borderBottom: '1px solid var(--border-default)' }}>
+            <div className="flex gap-1 px-3 py-1.5 text-xs overflow-x-auto scrollbar-thin" style={{ borderBottom: '1px solid var(--border-default)' }}>
               {services.map((s, i) => (
                 <button
                   key={s.safeName}

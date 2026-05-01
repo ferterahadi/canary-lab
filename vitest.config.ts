@@ -6,6 +6,7 @@ export default defineConfig({
       'scripts/**/*.test.ts',
       'shared/**/*.test.ts',
       'apps/**/*.test.ts',
+      'tools/**/*.test.ts',
     ],
     environment: 'node',
     coverage: {

@@ -2,25 +2,29 @@ import type { RunDetail } from '../api/types'
 
 interface Props {
   activeRunDetail: RunDetail | null
+  onNavigateToRun?: (feature: string, runId: string) => void
 }
 
 // Always-visible top bar showing whether any run is currently active across
 // all features. Single source of truth for "is something running right now?"
 // — used to gate the Run Now button so we don't spawn concurrent runs that
 // would saturate local resources.
-export function GlobalStatusBar({ activeRunDetail }: Props) {
+export function GlobalStatusBar({ activeRunDetail, onNavigateToRun }: Props) {
   const status = activeRunDetail?.manifest.status
+
+  // Guard: only treat 'running' and 'healing' as truly active. The runs
+  // index can become stale if the orchestrator crashes, so double-check the
+  // manifest status from the detail endpoint.
+  const isActive = status === 'running' || status === 'healing'
   const services = activeRunDetail?.manifest.services ?? []
 
-  const playwrightState: 'running' | 'paused' | 'idle' = !status
+  const playwrightState: 'running' | 'paused' | 'idle' = !isActive
     ? 'idle'
     : status === 'running'
       ? 'running'
-      : status === 'healing'
-        ? 'paused'
-        : 'idle'
+      : 'paused'
 
-  const servicesActive = status === 'running' || status === 'healing'
+  const servicesActive = isActive
 
   return (
     <div
@@ -43,17 +47,23 @@ export function GlobalStatusBar({ activeRunDetail }: Props) {
           />
         </div>
       )}
-      {activeRunDetail && (
-        <div
-          className="ml-auto flex items-center gap-2 text-[11px] min-w-0"
+      {activeRunDetail && isActive && (
+        <button
+          type="button"
+          onClick={() => onNavigateToRun?.(activeRunDetail.manifest.feature, activeRunDetail.manifest.runId)}
+          className="ml-auto flex items-center gap-2 text-[11px] min-w-0 rounded-md px-2 py-0.5 transition-colors duration-150"
           style={{ color: 'var(--text-secondary)' }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-elevated)' }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
+          title="Go to active run"
         >
           <span className="shrink-0" style={{ color: 'var(--text-muted)' }}>Active run:</span>
           <span className="truncate" style={{ color: 'var(--text-primary)' }}>{activeRunDetail.manifest.feature}</span>
           <span className="truncate" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
             {activeRunDetail.manifest.runId}
           </span>
-        </div>
+          <span className="shrink-0" style={{ color: 'var(--text-muted)' }}>→</span>
+        </button>
       )}
     </div>
   )

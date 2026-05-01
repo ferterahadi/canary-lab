@@ -5,10 +5,11 @@ import path from 'path'
 import {
   createRegistry,
   listRuns,
+  reapStaleRuns,
   getRunDetail,
   readRunSummary,
 } from './run-store'
-import { writeManifest, writeRunsIndex } from '../../../shared/e2e-runner/manifest'
+import { readManifest, writeManifest, writeRunsIndex } from '../../../shared/e2e-runner/manifest'
 import { runDirFor } from '../../../shared/e2e-runner/run-paths'
 
 let tmpDir: string
@@ -62,6 +63,153 @@ describe('listRuns', () => {
     ])
     const ids = listRuns(tmpDir).map((e) => e.runId)
     expect(ids.sort()).toEqual(['a', 'b'])
+  })
+
+  it('does not mutate manifests for stale running entries (cleanup is reapStaleRuns'
+    + "'s job)", () => {
+    const dir = runDirFor(tmpDir, 'stale-untouched')
+    fs.mkdirSync(dir, { recursive: true })
+    writeManifest(path.join(dir, 'manifest.json'), {
+      runId: 'stale-untouched',
+      feature: 'foo',
+      startedAt: '2026-01-01T00:00:00Z',
+      status: 'running',
+      healCycles: 0,
+      services: [],
+      heartbeatAt: new Date(Date.now() - 60_000).toISOString(),
+    })
+    writeRunsIndex(tmpDir, [
+      { runId: 'stale-untouched', feature: 'foo', startedAt: '2026-01-01T00:00:00Z', status: 'running' },
+    ])
+    const result = listRuns(tmpDir)
+    expect(result[0].status).toBe('running')
+    expect(readManifest(path.join(dir, 'manifest.json'))?.status).toBe('running')
+  })
+})
+
+describe('reapStaleRuns', () => {
+  it('marks stale running entry as aborted when no registry', async () => {
+    const dir = runDirFor(tmpDir, 'stale-1')
+    fs.mkdirSync(dir, { recursive: true })
+    writeManifest(path.join(dir, 'manifest.json'), {
+      runId: 'stale-1',
+      feature: 'foo',
+      startedAt: '2026-01-01T00:00:00Z',
+      status: 'running',
+      healCycles: 0,
+      services: [],
+      heartbeatAt: new Date(Date.now() - 60_000).toISOString(),
+    })
+    writeRunsIndex(tmpDir, [
+      { runId: 'stale-1', feature: 'foo', startedAt: '2026-01-01T00:00:00Z', status: 'running' },
+    ])
+    await reapStaleRuns(tmpDir)
+    const manifest = readManifest(path.join(dir, 'manifest.json'))
+    expect(manifest?.status).toBe('aborted')
+    const indexed = listRuns(tmpDir)
+    expect(indexed[0].status).toBe('aborted')
+    expect(indexed[0].endedAt).toBeDefined()
+  })
+
+  it('leaves running entry alone when heartbeat is fresh', async () => {
+    const dir = runDirFor(tmpDir, 'fresh-1')
+    fs.mkdirSync(dir, { recursive: true })
+    writeManifest(path.join(dir, 'manifest.json'), {
+      runId: 'fresh-1',
+      feature: 'foo',
+      startedAt: '2026-01-01T00:00:00Z',
+      status: 'running',
+      healCycles: 0,
+      services: [],
+      heartbeatAt: new Date().toISOString(),
+    })
+    writeRunsIndex(tmpDir, [
+      { runId: 'fresh-1', feature: 'foo', startedAt: '2026-01-01T00:00:00Z', status: 'running' },
+    ])
+    await reapStaleRuns(tmpDir)
+    expect(listRuns(tmpDir)[0].status).toBe('running')
+  })
+
+  it('leaves entry alone when manifest has no heartbeatAt (legacy manifest)', async () => {
+    const dir = runDirFor(tmpDir, 'legacy-1')
+    fs.mkdirSync(dir, { recursive: true })
+    writeManifest(path.join(dir, 'manifest.json'), {
+      runId: 'legacy-1',
+      feature: 'foo',
+      startedAt: '2026-01-01T00:00:00Z',
+      status: 'running',
+      healCycles: 0,
+      services: [],
+      // intentionally no heartbeatAt
+    })
+    writeRunsIndex(tmpDir, [
+      { runId: 'legacy-1', feature: 'foo', startedAt: '2026-01-01T00:00:00Z', status: 'running' },
+    ])
+    await reapStaleRuns(tmpDir)
+    expect(listRuns(tmpDir)[0].status).toBe('running')
+    expect(readManifest(path.join(dir, 'manifest.json'))?.status).toBe('running')
+  })
+
+  it('stops and removes dead orchestrator from registry when heartbeat is stale', async () => {
+    const reg = createRegistry()
+    let stopped = false
+    const stub = {
+      runId: 'dead-1',
+      stop: async () => { stopped = true },
+      pauseAndHeal: async () => ({ ok: true as const, failureCount: 0 }),
+    }
+    reg.set('dead-1', stub)
+
+    const dir = runDirFor(tmpDir, 'dead-1')
+    fs.mkdirSync(dir, { recursive: true })
+    writeManifest(path.join(dir, 'manifest.json'), {
+      runId: 'dead-1',
+      feature: 'foo',
+      startedAt: '2026-01-01T00:00:00Z',
+      status: 'running',
+      healCycles: 0,
+      services: [],
+      heartbeatAt: new Date(Date.now() - 60_000).toISOString(),
+    })
+    writeRunsIndex(tmpDir, [
+      { runId: 'dead-1', feature: 'foo', startedAt: '2026-01-01T00:00:00Z', status: 'running' },
+    ])
+
+    await reapStaleRuns(tmpDir, reg)
+    expect(listRuns(tmpDir)[0].status).toBe('aborted')
+    expect(stopped).toBe(true)
+    expect(reg.get('dead-1')).toBeUndefined()
+  })
+
+  it('does not stop orchestrator from registry when heartbeat is fresh', async () => {
+    const reg = createRegistry()
+    let stopped = false
+    const stub = {
+      runId: 'alive-1',
+      stop: async () => { stopped = true },
+      pauseAndHeal: async () => ({ ok: true as const, failureCount: 0 }),
+    }
+    reg.set('alive-1', stub)
+
+    const dir = runDirFor(tmpDir, 'alive-1')
+    fs.mkdirSync(dir, { recursive: true })
+    writeManifest(path.join(dir, 'manifest.json'), {
+      runId: 'alive-1',
+      feature: 'foo',
+      startedAt: '2026-01-01T00:00:00Z',
+      status: 'running',
+      healCycles: 0,
+      services: [],
+      heartbeatAt: new Date().toISOString(),
+    })
+    writeRunsIndex(tmpDir, [
+      { runId: 'alive-1', feature: 'foo', startedAt: '2026-01-01T00:00:00Z', status: 'running' },
+    ])
+
+    await reapStaleRuns(tmpDir, reg)
+    expect(listRuns(tmpDir)[0].status).toBe('running')
+    expect(stopped).toBe(false)
+    expect(reg.get('alive-1')).toBe(stub)
   })
 })
 

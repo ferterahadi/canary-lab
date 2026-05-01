@@ -181,7 +181,7 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
           )}
         </div>
       </div>
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 overflow-y-auto scrollbar-thin">
         {!feature ? (
           <div className="px-4 py-6 text-xs" style={{ color: 'var(--text-muted)' }}>Select a feature.</div>
         ) : runs.length === 0 ? (

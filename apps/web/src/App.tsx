@@ -172,7 +172,13 @@ export function App() {
 
   return (
     <div className="flex h-full w-full flex-col">
-      <GlobalStatusBar activeRunDetail={activeRunDetail} />
+      <GlobalStatusBar
+        activeRunDetail={activeRunDetail}
+        onNavigateToRun={(feature, runId) => {
+          setSelectedFeature(feature)
+          setSelectedRunId(runId)
+        }}
+      />
       <div className="min-h-0 flex-1">
         <ResizablePanels panels={panels} />
       </div>
