@@ -59,7 +59,8 @@ describe('renderEvent', () => {
     })
   })
 
-  it('renders health-check (healthy/unhealthy)', () => {
+  it('renders health-check (healthy/unhealthy) with optional transport tag', () => {
+    // No transport (skipped probe / legacy event) → no tag.
     expect(renderEvent('health-check', { service: svc, healthy: true })).toEqual({
       level: 'INFO',
       message: 'Health check passed: shop',
@@ -67,6 +68,15 @@ describe('renderEvent', () => {
     expect(renderEvent('health-check', { service: svc, healthy: false })).toEqual({
       level: 'ERROR',
       message: 'Health check failed: shop',
+    })
+    // Transport-tagged events.
+    expect(renderEvent('health-check', { service: svc, healthy: true, transport: 'http' })).toEqual({
+      level: 'INFO',
+      message: 'Health check passed (http): shop',
+    })
+    expect(renderEvent('health-check', { service: svc, healthy: false, transport: 'tcp' })).toEqual({
+      level: 'ERROR',
+      message: 'Health check failed (tcp): shop',
     })
   })
 

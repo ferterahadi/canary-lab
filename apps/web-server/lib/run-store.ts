@@ -18,10 +18,18 @@ export type OrchestratorPauseResult =
   | { ok: true; failureCount: number }
   | { ok: false; reason: 'already-healing' | 'no-playwright-running' | 'no-failures-yet' }
 
+export type OrchestratorCancelHealResult =
+  | { ok: true }
+  | { ok: false; reason: 'not-healing' | 'no-agent-running' }
+
 export interface OrchestratorLike {
   runId: string
   stop(finalStatus?: RunManifest['status']): Promise<void>
   pauseAndHeal(): Promise<OrchestratorPauseResult>
+  cancelHeal(): Promise<OrchestratorCancelHealResult>
+  /** Live interject — write data to the running heal agent's stdin. Returns
+   *  false when there is no agent currently running for this run. */
+  writeToHealAgent?(data: string): boolean
 }
 
 export interface OrchestratorRegistry {
@@ -123,6 +131,10 @@ export interface RunSummary {
   complete: boolean
   total: number
   passed: number
+  /** Names of tests that have actually passed. Distinct from `passed` (count)
+   *  so the UI can mark only-run tests as passed without falsely turning
+   *  unrun tests green when the suite stops early (pause / max-failures). */
+  passedNames?: string[]
   failed: RunSummaryFailedEntry[]
 }
 

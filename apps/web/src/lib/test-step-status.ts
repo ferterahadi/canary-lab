@@ -23,26 +23,25 @@ export function summaryEntryName(testName: string): string {
   return `test-case-${slugify(testName)}`
 }
 
-// Map a Playwright test's final state from the summary. Returns 'pending'
-// when the summary hasn't been written yet, the test isn't represented, or
-// when `complete` is false and no failure entry exists for it (i.e. the test
-// hasn't finished running).
+// Map a Playwright test's status from the summary. A test is only marked as
+// passed/failed/timedout when Playwright actually reported on it — tests that
+// never ran (because the suite was paused / stopped / hit max-failures)
+// stay pending. This requires the summary to expose `passedNames`; older
+// summaries without that field fall back to the legacy "complete ⇒ passed"
+// heuristic for back-compat.
 export function statusForTest(testName: string, summary: RunSummary | undefined): StepStatus {
   if (!summary) return 'pending'
   const expected = summaryEntryName(testName)
   const failed = summary.failed.find((f) => f.name === expected)
   if (failed) {
-    // Distinguish timed-out from generic failure when the error message
-    // mentions a Playwright timeout (`Test timeout of …`). The summary
-    // reporter doesn't separate them today, so this is heuristic. Skipped
-    // tests don't appear in `failed` at all.
     const msg = failed.error?.message ?? ''
     if (/Test timeout of/i.test(msg)) return 'timedout'
     return 'failed'
   }
-  // Not in failed[]. If the run is complete it must have passed (skipped
-  // tests are not currently emitted by the reporter; reserve 'skipped' for
-  // when that lands).
+  if (summary.passedNames) {
+    return summary.passedNames.includes(expected) ? 'passed' : 'pending'
+  }
+  // Legacy fallback for summaries written before passedNames existed.
   if (summary.complete) return 'passed'
   return 'pending'
 }

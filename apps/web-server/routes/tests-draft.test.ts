@@ -583,6 +583,19 @@ describe('GET /api/tests/draft/:id/files/*', () => {
     await app.close()
   })
 
+  it('400s when the request path is empty', async () => {
+    const deps = makeDeps()
+    const app = await makeApp(deps)
+    const id = await seedDraftWithFile(app, deps)
+    const r = await app.inject({
+      method: 'GET',
+      url: `/api/tests/draft/${id}/files/`,
+    })
+    expect(r.statusCode).toBe(400)
+    expect(r.json().error).toContain('invalid path')
+    await app.close()
+  })
+
   it('400s on traversal (percent-encoded so URL parser does not normalise)', async () => {
     const deps = makeDeps()
     const app = await makeApp(deps)

@@ -22,10 +22,15 @@ export function buildFeatureConfig(name: string, description: string): string {
     //     {
     //       name: 'your-repo dev server',
     //       command: 'npm run dev',
-    //       healthCheck: {
-    //         url: 'http://localhost:3000/',
-    //         timeoutMs: 2000,
-    //       },
+    //       // Readiness probe — declare exactly one transport per probe.
+    //       //   { http: { url, timeoutMs?, deadlineMs? } }
+    //       //   { tcp:  { port, host?, timeoutMs?, deadlineMs? } }
+    //       // For multi-env features, use an env-keyed map:
+    //       //   healthCheck: {
+    //       //     local: { tcp:  { port: 3000 } },
+    //       //     beta:  { http: { url: 'https://beta.example.com' } },
+    //       //   }
+    //       healthCheck: { http: { url: 'http://localhost:3000/', timeoutMs: 2000 } },
     //     },
     //   ],
     // },

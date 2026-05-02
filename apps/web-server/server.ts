@@ -4,6 +4,8 @@ import Fastify, { type FastifyInstance } from 'fastify'
 import websocketPlugin from '@fastify/websocket'
 import fastifyStatic from '@fastify/static'
 import { featuresRoutes } from './routes/features'
+import { featureConfigRoutes } from './routes/feature-config'
+import { projectConfigRoutes } from './routes/project-config'
 import { runsRoutes } from './routes/runs'
 import { journalRoutes } from './routes/journal'
 import { skillsRoutes } from './routes/skills'
@@ -21,6 +23,12 @@ import {
 import { generateRunId } from '../../shared/e2e-runner/run-id'
 import { runDirFor, buildRunPaths } from '../../shared/e2e-runner/run-paths'
 import { RunOrchestrator } from '../../shared/e2e-runner/orchestrator'
+import {
+  buildOrchestratorHealCommand,
+  pickAvailableHealAgent,
+  type HealAgent,
+} from '../../shared/e2e-runner/auto-heal'
+import { loadProjectConfig } from '../../shared/launcher/project-config'
 import { RunnerLog } from '../../shared/e2e-runner/runner-log'
 import { realPtyFactory, type PtyFactory } from '../../shared/e2e-runner/pty-spawner'
 import {
@@ -97,6 +105,8 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
   const activeEnvsets = new Map<string, BackupRecord[]>()
 
   await app.register(featuresRoutes, { featuresDir })
+  await app.register(featureConfigRoutes, { featuresDir })
+  await app.register(projectConfigRoutes, { projectRoot: opts.projectRoot })
   await app.register(journalRoutes, { journalPath })
   await app.register(skillsRoutes, { listSkills: opts.listSkills })
 
@@ -170,6 +180,40 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
         }
       }
 
+      // Wire the heal loop based on the project's heal-agent setting:
+      //   - 'auto' (default) → prefer claude, fall back to codex.
+      //   - 'claude' / 'codex' → require that exact CLI on PATH.
+      //   - 'manual' → skip auto-heal entirely; the orchestrator's signal
+      //     polling handles the user's hand-driven fix instead.
+      // If the chosen CLI isn't available, autoHeal stays undefined and the
+      // run still works without the self-fixing cycle.
+      const projectConfig = loadProjectConfig(opts.projectRoot)
+      let autoHeal: { agent: HealAgent; buildCommand: (args: { cycle: number; outputDir: string }) => string } | undefined
+      const agentChoice = projectConfig.healAgent === 'manual'
+        ? null
+        : projectConfig.healAgent === 'auto'
+          ? pickAvailableHealAgent()
+          : pickAvailableHealAgent(projectConfig.healAgent)
+      if (projectConfig.healAgent === 'manual') {
+        runnerLog.info('Auto-heal disabled: project config is set to "manual" — the run will pause for hand-driven fixes.')
+      }
+      if (agentChoice) {
+        try {
+          autoHeal = {
+            agent: agentChoice,
+            buildCommand: buildOrchestratorHealCommand({
+              agent: agentChoice,
+              projectRoot: opts.projectRoot,
+              runDir,
+            }),
+          }
+        } catch (err) {
+          runnerLog.warn(`Auto-heal disabled: ${(err as Error).message}`)
+        }
+      } else {
+        runnerLog.warn('Auto-heal disabled: no `claude` or `codex` CLI on PATH (set CANARY_LAB_HEAL_AGENT=claude|codex to override).')
+      }
+
       let orch: RunOrchestrator
       try {
         orch = new RunOrchestrator({
@@ -179,6 +223,8 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
           runDir,
           ptyFactory: realPtyFactory(),
           runnerLog,
+          autoHeal,
+          manualHeal: projectConfig.healAgent === 'manual',
         })
       } catch (err) {
         if (backups) restore(backups)
@@ -207,14 +253,29 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
       orch.on('service-exit', ({ service, exitCode }) => {
         broker.markExit(`service:${service.safeName}`, exitCode)
       })
+      // Reset the playwright/agent panes whenever a NEW pty is about to be
+      // spawned. The orchestrator emits `playwright-started` once per
+      // Playwright invocation (initial run + each heal-cycle rerun) and
+      // `agent-started` once per heal-cycle agent. Without resetting, a
+      // subscriber that connects after the first exit replays the stale
+      // `[pane exited]` and never sees the new stream.
+      orch.on('playwright-started', () => {
+        broker.resetPane('playwright')
+      })
       orch.on('playwright-output', ({ chunk }) => {
         broker.push('playwright', chunk)
       })
       orch.on('playwright-exit', ({ exitCode }) => {
         broker.markExit('playwright', exitCode)
       })
+      orch.on('agent-started', () => {
+        broker.resetPane('agent')
+      })
       orch.on('agent-output', ({ chunk }) => {
         broker.push('agent', chunk)
+      })
+      orch.on('agent-exit', ({ exitCode }) => {
+        broker.markExit('agent', exitCode)
       })
       orch.runFullCycle()
         .then(async (status) => {

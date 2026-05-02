@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react'
 import * as api from '../api/client'
-import type { RunDetail } from '../api/types'
+import type { RunDetail, ServiceStatus } from '../api/types'
 import { formatDuration, durationBetween } from '../lib/format'
 import { RunStatusIndicator } from './RunStatusIndicator'
 import { PaneTerminal } from './PaneTerminal'
 import { JournalTab } from './JournalTab'
+import { ManualHealBanner } from './ManualHealBanner'
+import { AgentInputBar } from './AgentInputBar'
 
 type Tab = 'overview' | 'services' | 'playwright' | 'agent' | 'journal'
 
@@ -80,7 +82,7 @@ export function RunDetailColumn({ runId }: { runId: string | null }) {
       </header>
       <div className="flex-1 min-h-0 overflow-hidden mt-2">
         {tab === 'overview' && (
-          <div className="overflow-y-auto scrollbar-thin p-4 text-sm">
+          <div className="h-full overflow-y-auto scrollbar-thin p-4 text-sm">
             <dl className="grid grid-cols-[140px_1fr] gap-y-2 text-xs">
               <dt style={{ color: 'var(--text-muted)' }}>Feature</dt><dd style={{ color: 'var(--text-primary)' }}>{m.feature}</dd>
               <dt style={{ color: 'var(--text-muted)' }}>Started</dt><dd style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }}>{m.startedAt}</dd>
@@ -116,12 +118,13 @@ export function RunDetailColumn({ runId }: { runId: string | null }) {
                   key={s.safeName}
                   type="button"
                   onClick={() => setServiceIdx(i)}
-                  className="rounded-md px-2 py-1 transition-colors duration-150"
+                  className="flex items-center gap-1.5 rounded-md px-2 py-1 transition-colors duration-150"
                   style={{
                     background: i === serviceIdx ? 'var(--bg-elevated)' : 'transparent',
                     color: i === serviceIdx ? 'var(--text-primary)' : 'var(--text-secondary)',
                   }}
                 >
+                  <ServiceStatusDot status={s.status} />
                   {s.name}
                 </button>
               ))}
@@ -137,13 +140,40 @@ export function RunDetailColumn({ runId }: { runId: string | null }) {
           <PaneTerminal runId={m.runId} paneId="playwright" />
         )}
         {tab === 'agent' && (
-          <PaneTerminal runId={m.runId} paneId="agent" />
+          <div className="flex h-full flex-col">
+            {m.healMode === 'manual' && m.status === 'healing' && m.signalPaths && (
+              <ManualHealBanner runId={m.runId} signalPaths={m.signalPaths} />
+            )}
+            <div className="flex-1 min-h-0">
+              <PaneTerminal runId={m.runId} paneId="agent" />
+            </div>
+            {m.status === 'healing' && m.healMode !== 'manual' && (
+              <AgentInputBar runId={m.runId} />
+            )}
+          </div>
         )}
         {tab === 'journal' && (
           <JournalTab feature={m.feature} runId={m.runId} />
         )}
       </div>
     </div>
+  )
+}
+
+function ServiceStatusDot({ status }: { status?: ServiceStatus }) {
+  // Fixed 6×6 slot reserved regardless of status, so the chip text never
+  // shifts when the dot appears/disappears (e.g. on `stopped`).
+  const color =
+    status === 'ready' ? '#22c55e'      // green
+    : status === 'starting' ? '#eab308' // yellow (pulses)
+    : status === 'timeout' ? '#ef4444'  // red
+    : 'transparent'                     // stopped or undefined
+  return (
+    <span
+      aria-label={status ? `service ${status}` : undefined}
+      className={`inline-block h-1.5 w-1.5 rounded-full shrink-0${status === 'starting' ? ' canary-pulse' : ''}`}
+      style={{ background: color }}
+    />
   )
 }
 

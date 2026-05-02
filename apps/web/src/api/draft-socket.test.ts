@@ -159,6 +159,86 @@ describe('connectDraftAgent', () => {
     }
   })
 
+  it('exit frame without numeric code falls through (no onExit)', () => {
+    reset()
+    const onExit = vi.fn()
+    connectDraftAgent({
+      draftId: 'd',
+      onData: () => {},
+      onExit,
+      WebSocketImpl: FakeSocket as unknown as typeof WebSocket,
+      wsBase: 'ws://x',
+    })
+    FakeSocket.instances[0].fire({ type: 'exit' })
+    expect(onExit).not.toHaveBeenCalled()
+  })
+
+  it('defaults to ws:// under http location', () => {
+    reset()
+    const orig = (globalThis as { location?: Location }).location
+    ;(globalThis as { location?: { protocol: string; host: string } }).location = {
+      protocol: 'http:',
+      host: 'plain.example',
+    }
+    try {
+      connectDraftAgent({
+        draftId: 'd',
+        onData: () => {},
+        WebSocketImpl: FakeSocket as unknown as typeof WebSocket,
+      })
+      expect(FakeSocket.instances[0].url.startsWith('ws://plain.example')).toBe(true)
+    } finally {
+      ;(globalThis as { location?: Location | undefined }).location = orig
+    }
+  })
+
+  it('falls back to local ws when location is undefined', () => {
+    reset()
+    const orig = (globalThis as { location?: Location }).location
+    delete (globalThis as { location?: Location }).location
+    try {
+      connectDraftAgent({
+        draftId: 'd',
+        onData: () => {},
+        WebSocketImpl: FakeSocket as unknown as typeof WebSocket,
+      })
+      expect(FakeSocket.instances[0].url.startsWith('ws://127.0.0.1:7421')).toBe(true)
+    } finally {
+      ;(globalThis as { location?: Location | undefined }).location = orig
+    }
+  })
+
+  it('ignores non-string payloads', () => {
+    reset()
+    const onData = vi.fn()
+    connectDraftAgent({
+      draftId: 'd',
+      onData,
+      WebSocketImpl: FakeSocket as unknown as typeof WebSocket,
+      wsBase: 'ws://x',
+    })
+    FakeSocket.instances[0].onmessage?.({ data: new ArrayBuffer(4) } as unknown as MessageEvent)
+    expect(onData).not.toHaveBeenCalled()
+  })
+
+  it('close() swallows errors from underlying socket.close', () => {
+    reset()
+    const orig = FakeSocket.prototype.close
+    FakeSocket.prototype.close = function () { throw new Error('already gone') }
+    try {
+      const conn = connectDraftAgent({
+        draftId: 'd',
+        onData: () => {},
+        WebSocketImpl: FakeSocket as unknown as typeof WebSocket,
+        wsBase: 'ws://x',
+      })
+      FakeSocket.instances[0].readyState = 1
+      expect(() => conn.close()).not.toThrow()
+    } finally {
+      FakeSocket.prototype.close = orig
+    }
+  })
+
   it('uses default wsBase from globalThis.location when not provided', () => {
     reset()
     const orig = (globalThis as { location?: Location }).location

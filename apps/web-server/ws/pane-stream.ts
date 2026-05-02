@@ -46,6 +46,22 @@ export async function paneStreamRoutes(
           },
         }
         const unsub = broker.subscribe(paneId as PaneId, sub)
+        // Live interject: forward `agent-input` frames on the agent pane to
+        // the heal-agent pty's stdin. Other paneIds ignore the message.
+        if (paneId === 'agent') {
+          socket.on('message', (raw) => {
+            let parsed: unknown
+            try { parsed = JSON.parse(raw.toString()) } catch { return }
+            if (
+              parsed && typeof parsed === 'object'
+              && (parsed as { type?: unknown }).type === 'agent-input'
+              && typeof (parsed as { data?: unknown }).data === 'string'
+            ) {
+              const orch = deps.registry.get(runId)
+              orch?.writeToHealAgent?.((parsed as { data: string }).data)
+            }
+          })
+        }
         socket.on('close', () => unsub())
         return
       }

@@ -147,7 +147,13 @@ describe('SummaryReporter', () => {
     const out = JSON.parse(
       fs.readFileSync(path.join(LOGS_DIR, 'e2e-summary.json'), 'utf-8'),
     )
-    expect(out).toEqual({ complete: true, total: 2, passed: 2, failed: [] })
+    expect(out).toEqual({
+      complete: true,
+      total: 2,
+      passed: 2,
+      passedNames: ['test-case-a', 'test-case-b'],
+      failed: [],
+    })
   })
 
   it('creates LOGS_DIR if it does not exist', () => {

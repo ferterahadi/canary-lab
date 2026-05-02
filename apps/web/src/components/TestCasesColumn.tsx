@@ -39,6 +39,8 @@ export function TestCasesColumn({ feature, activeRunSummary }: Props) {
     )
   }
 
+  const totalTests = specs?.reduce((acc, s) => acc + s.tests.length, 0) ?? 0
+
   return (
     <div className="flex h-full flex-col">
       <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom: '1px solid var(--border-default)' }}>
@@ -47,7 +49,7 @@ export function TestCasesColumn({ feature, activeRunSummary }: Props) {
           <span className="text-xs font-medium" style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>{feature}</span>
         </div>
         {activeRunSummary && (
-          <RunningIndicator summary={activeRunSummary} />
+          <RunningIndicator summary={activeRunSummary} totalTests={totalTests} />
         )}
       </div>
       <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin p-3">
@@ -132,8 +134,12 @@ function TestCard({
   )
 }
 
-function RunningIndicator({ summary }: { summary: RunSummary }) {
-  const total = summary.total
+function RunningIndicator({ summary, totalTests }: { summary: RunSummary; totalTests: number }) {
+  // Denominator should reflect the *static* test count parsed from the spec
+  // files, not `summary.total` — Playwright's reporter emits a partial total
+  // until the suite enumeration completes (especially when filtered/retried),
+  // which would briefly read "1/1" while 14 tests are actually queued.
+  const total = totalTests > 0 ? totalTests : summary.total
   const done = summary.passed + summary.failed.length
   return (
     <div className="flex items-center gap-2 text-[10px]" style={{ color: 'var(--text-secondary)' }}>

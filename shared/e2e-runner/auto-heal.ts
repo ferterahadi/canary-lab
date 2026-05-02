@@ -124,11 +124,16 @@ export function loadPrompt(agent: HealAgent, promptPath: string = promptPathFor(
   return prompt
 }
 
-// Build a transient `--mcp-config` JSON snippet to pass to `claude`. The
-// snippet registers `@playwright/mcp` with `--output-dir <outputDir>` so any
-// browser snapshots/console logs the agent captures land in the per-failure
-// dir under `failed/<slug>/playwright-mcp/`. Pure formatter — no I/O.
-export function buildClaudeMcpConfigArg(outputDir: string): string {
+// Build a transient `--mcp-config` argument for `claude`. Writes the MCP
+// servers JSON (registering `@playwright/mcp` with `--output-dir <outputDir>`
+// so the agent's browser snapshots land in the per-failure dir) to
+// `configFilePath`, and returns `--mcp-config "<configFilePath>"`.
+//
+// Why a file and not inline JSON: current `claude` versions try to `open()`
+// the value as a path before falling back to JSON parsing. A multi-hundred-
+// byte JSON literal trips ENAMETOOLONG (PATH_MAX is ~1024 on macOS) and the
+// agent never starts. A file path always works.
+export function buildClaudeMcpConfigArg(outputDir: string, configFilePath: string): string {
   const cfg = {
     mcpServers: {
       playwright: {
@@ -137,7 +142,9 @@ export function buildClaudeMcpConfigArg(outputDir: string): string {
       },
     },
   }
-  return `--mcp-config ${JSON.stringify(JSON.stringify(cfg))}`
+  fs.mkdirSync(path.dirname(configFilePath), { recursive: true })
+  fs.writeFileSync(configFilePath, JSON.stringify(cfg, null, 2))
+  return `--mcp-config ${JSON.stringify(configFilePath)}`
 }
 
 export function buildAgentCommand(
@@ -151,9 +158,20 @@ export function buildAgentCommand(
   const promptSub = `"$(cat ${JSON.stringify(promptFile)})"`
 
   if (agent === 'claude') {
-    const base = `--dangerously-skip-permissions --output-format=stream-json --verbose -p`
-    const mcpFlag = mcpOutputDir ? ` ${buildClaudeMcpConfigArg(mcpOutputDir)}` : ''
-    const flags = useResume ? `--continue ${base}${mcpFlag}` : `${base}${mcpFlag}`
+    // Order matters: `--mcp-config` is variadic and would otherwise greedily
+    // swallow the positional prompt argument as another config file (which
+    // claude then `open()`s, tripping ENAMETOOLONG). Putting `-p` LAST means
+    // the prompt sits cleanly behind it and `--mcp-config` is terminated
+    // by the next flag.
+    const baseFlags = `--dangerously-skip-permissions --output-format=stream-json --verbose`
+    // The MCP config file lives next to the prompt file. This works for
+    // both call sites (CLI's HEAL_PROMPT_FILE under <LOGS_DIR>/heal/, and
+    // the web orchestrator's <runDir>/heal-prompt.md).
+    const mcpConfigFile = path.join(path.dirname(promptFile), 'mcp-config.json')
+    const mcpFlag = mcpOutputDir ? ` ${buildClaudeMcpConfigArg(mcpOutputDir, mcpConfigFile)}` : ''
+    const trailing = `-p`
+    const head = useResume ? `--continue ${baseFlags}` : baseFlags
+    const flags = `${head}${mcpFlag} ${trailing}`
     const formatter = `node ${JSON.stringify(CLAUDE_FORMATTER_FILE)}`
     return `claude ${flags} ${promptSub} | ${formatter}`
   }
@@ -273,4 +291,77 @@ export function failureSignature(failed: unknown): string {
 // with their parent process so there's no separate tab to close.
 export function closeLastHealAgentTab(): void {
   /* no-op in foreground pty mode */
+}
+
+/**
+ * Pick which agent CLI to use for healing in the web orchestrator.
+ *
+ * - When `envOverride` is `'claude'` or `'codex'`, that exact agent is
+ *   required — returns null when its CLI isn't on PATH.
+ * - When `envOverride` is set to anything else (typo guard), returns null.
+ * - When `envOverride` is unset, auto-detects: prefers claude when present,
+ *   falls back to codex, returns null when neither is on PATH.
+ */
+export function pickAvailableHealAgent(
+  envOverride: string | undefined = process.env.CANARY_LAB_HEAL_AGENT,
+): HealAgent | null {
+  if (envOverride === 'claude' || envOverride === 'codex') {
+    return isAgentCliAvailable(envOverride) ? envOverride : null
+  }
+  if (envOverride !== undefined && envOverride !== '') {
+    // Set but unrecognised — refuse to silently fall through, so a typoed
+    // value like `clauude` doesn't pretend to work.
+    return null
+  }
+  if (isAgentCliAvailable('claude')) return 'claude'
+  if (isAgentCliAvailable('codex')) return 'codex'
+  return null
+}
+
+export interface OrchestratorAutoHealFactoryOptions {
+  agent: HealAgent
+  /** Project root where CLAUDE.md / AGENTS.md lives. Used for prompt loading. */
+  projectRoot: string
+  /** Per-run dir — the prompt file is written under <runDir>/heal-prompt.md. */
+  runDir: string
+  /** Defaults to 'new'. `resume` is mostly useful for the CLI; web runs are short-lived. */
+  sessionMode?: HealSessionMode
+  /** Override prompt path resolution (tests). */
+  promptPath?: string
+}
+
+/**
+ * Build a `buildCommand` function compatible with `AutoHealConfig.buildCommand`.
+ * This is what wires the rich `buildAgentCommand` (claude/codex CLI invocation
+ * with prompt file, MCP config, formatter pipeline) into the web-server's
+ * orchestrator. Throws synchronously when the prompt source is missing or
+ * malformed so the caller can decide to disable heal silently rather than
+ * advertising a broken loop.
+ */
+export function buildOrchestratorHealCommand(opts: OrchestratorAutoHealFactoryOptions): (args: { cycle: number; outputDir: string }) => string {
+  const sessionMode: HealSessionMode = opts.sessionMode ?? 'new'
+  const promptPath = opts.promptPath
+    ?? (opts.agent === 'claude'
+      ? path.join(opts.projectRoot, 'CLAUDE.md')
+      : path.join(opts.projectRoot, 'AGENTS.md'))
+  // Eagerly load + extract the prompt block so a missing/malformed file
+  // surfaces at config time, not on the first heal cycle.
+  const basePrompt = loadPrompt(opts.agent, promptPath)
+  const promptFile = path.join(opts.runDir, 'heal-prompt.md')
+  // Per-run signal paths injected so the agent doesn't have to guess. The
+  // shipped CLAUDE.md / AGENTS.md tells the agent to look for this header.
+  const signalsDir = path.join(opts.runDir, 'signals')
+  const pathsHeader = [
+    `Signal paths for this run:`,
+    `- Test/config-only fix → write \`${path.join(signalsDir, '.rerun')}\``,
+    `- Service/app fix → write \`${path.join(signalsDir, '.restart')}\``,
+  ].join('\n')
+
+  return ({ cycle, outputDir }) => {
+    const stateAddendum = buildHealAddendum({ cycle: cycle + 1 })
+    const fullPrompt = [pathsHeader, basePrompt, stateAddendum].filter(Boolean).join('\n\n')
+    fs.mkdirSync(path.dirname(promptFile), { recursive: true })
+    fs.writeFileSync(promptFile, fullPrompt)
+    return buildAgentCommand(opts.agent, sessionMode, cycle, promptFile, outputDir)
+  }
 }

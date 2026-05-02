@@ -5,6 +5,8 @@ import { runDirFor, runsIndexPath, runsRoot } from './run-paths'
 // Per-run manifest written at start and updated at finish. Kept narrow and
 // JSON-shaped so the future server can read it without parsing logs.
 
+export type ServiceStatus = 'starting' | 'ready' | 'timeout' | 'stopped'
+
 export interface ServiceManifestEntry {
   name: string
   safeName: string
@@ -12,6 +14,7 @@ export interface ServiceManifestEntry {
   cwd: string
   logPath: string
   healthUrl?: string
+  status?: ServiceStatus
 }
 
 export type RunStatus = 'running' | 'passed' | 'failed' | 'healing' | 'aborted'
@@ -20,7 +23,7 @@ export type RunStatus = 'running' | 'passed' | 'failed' | 'healing' | 'aborted'
 // suite — either by `--max-failures=<N>` (auto-fast-fail) or by an explicit
 // user-invoked Pause & Heal. Heal-index rendering uses this so the agent
 // doesn't assume the suite size from the partial summary.
-export type StoppedEarlyReason = 'max-failures' | 'user-pause'
+export type StoppedEarlyReason = 'max-failures' | 'user-pause' | 'user-cancel-heal'
 
 export interface StoppedEarlyInfo {
   reason: StoppedEarlyReason
@@ -49,6 +52,13 @@ export interface RunManifest {
   /** ISO timestamp updated every few seconds while the orchestrator is alive.
    *  Consumers compare against `Date.now()` to detect stale/orphaned runs. */
   heartbeatAt?: string
+  /** Per-run signal file paths surfaced to the UI so the manual heal banner
+   *  can show the user exactly where to write `.rerun` / `.restart`. */
+  signalPaths?: { rerun: string; restart: string }
+  /** When the run is heal-paused under manual mode, the UI renders a banner
+   *  pointing the user at the signal paths above. Only set during the heal
+   *  phase of a manual run; cleared when the run leaves the heal state. */
+  healMode?: 'auto' | 'manual'
 }
 
 function atomicWrite(file: string, body: string): void {
@@ -77,6 +87,33 @@ export function updateManifest(
   const current = readManifest(manifestPath)
   if (!current) return null
   const next = { ...current, ...patch }
+  writeManifest(manifestPath, next)
+  return next
+}
+
+export function updateServiceStatus(
+  manifestPath: string,
+  safeName: string,
+  status: ServiceStatus,
+): RunManifest | null {
+  const current = readManifest(manifestPath)
+  if (!current) return null
+  const services = current.services.map((s) =>
+    s.safeName === safeName ? { ...s, status } : s,
+  )
+  const next = { ...current, services }
+  writeManifest(manifestPath, next)
+  return next
+}
+
+export function updateAllServicesStatus(
+  manifestPath: string,
+  status: ServiceStatus,
+): RunManifest | null {
+  const current = readManifest(manifestPath)
+  if (!current) return null
+  const services = current.services.map((s) => ({ ...s, status }))
+  const next = { ...current, services }
   writeManifest(manifestPath, next)
   return next
 }

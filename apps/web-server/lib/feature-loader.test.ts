@@ -48,6 +48,20 @@ describe('loadFeatures', () => {
     expect(loadFeatures(path.join(tmpDir, 'features'))).toEqual([])
   })
 
+  it('rethrows validation errors for invalid healthCheck', () => {
+    writeFeature(
+      'broken-hc',
+      `module.exports = { config: {
+        name: 'broken-hc',
+        description: 'd',
+        envs: [],
+        featureDir: __dirname,
+        repos: [{ name: 'r', localPath: __dirname, startCommands: [{ name: 'svc', command: 'echo', healthCheck: { type: 'http' } }] }],
+      } }`,
+    )
+    expect(() => loadFeatures(path.join(tmpDir, 'features'))).toThrow(/healthCheck/)
+  })
+
   it('accepts default export shape', () => {
     writeFeature(
       'beta',

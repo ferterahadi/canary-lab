@@ -76,6 +76,49 @@ export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Pro
     return { status: 'healing', failureCount: result.failureCount }
   })
 
+  // Cancel an in-flight heal cycle. SIGTERMs the agent pty, breaks the heal
+  // loop, appends a journal entry. 404 when unknown, 409 with a reason when
+  // there's nothing to cancel, 202 on success.
+  app.post<{ Params: { runId: string } }>('/api/runs/:runId/cancel-heal', async (req, reply) => {
+    const orch = deps.registry.get(req.params.runId)
+    if (!orch) {
+      reply.code(404)
+      return { error: 'run not active' }
+    }
+    const result = await orch.cancelHeal()
+    if (!result.ok) {
+      reply.code(409)
+      return { reason: result.reason }
+    }
+    reply.code(202)
+    return { status: 'cancelled' }
+  })
+
+  // Live interject — pipe a line of text to the running heal agent's stdin
+  // so the user can guide the agent without restarting the cycle. 404 when
+  // unknown, 409 when there's no agent running for this run.
+  app.post<{ Params: { runId: string }; Body: { data: string } }>(
+    '/api/runs/:runId/agent-input',
+    async (req, reply) => {
+      const orch = deps.registry.get(req.params.runId)
+      if (!orch) {
+        reply.code(404)
+        return { error: 'run not active' }
+      }
+      if (typeof req.body?.data !== 'string') {
+        reply.code(400)
+        return { error: 'data must be a string' }
+      }
+      const wrote = orch.writeToHealAgent?.(req.body.data) ?? false
+      if (!wrote) {
+        reply.code(409)
+        return { reason: 'no-agent-running' }
+      }
+      reply.code(202)
+      return { status: 'sent' }
+    },
+  )
+
   // DELETE /api/runs/:runId has two semantics, picked based on current state:
   //   - Active run (in registry, or manifest reports running/healing) → stop
   //     the orchestrator. Run is preserved in history so the user can audit

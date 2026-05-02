@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { canPauseHeal, canStop, canDelete } from './run-actions'
+import { canCancelHeal, canDelete, canPauseHeal, canStop } from './run-actions'
 
 describe('canPauseHeal', () => {
   it('is true only when status is running', () => {
@@ -14,6 +14,18 @@ describe('canPauseHeal', () => {
   ] as const)('is false when status is %s', (status) => {
     expect(canPauseHeal(status)).toBe(false)
   })
+})
+
+describe('canCancelHeal', () => {
+  it('is true only while healing', () => {
+    expect(canCancelHeal('healing')).toBe(true)
+  })
+  it.each([['running'], ['passed'], ['failed'], ['aborted']] as const)(
+    'is false when status is %s',
+    (s) => {
+      expect(canCancelHeal(s)).toBe(false)
+    },
+  )
 })
 
 describe('canStop', () => {

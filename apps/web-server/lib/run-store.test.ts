@@ -25,6 +25,7 @@ describe('createRegistry', () => {
       runId: 'r1',
       stop: async () => {},
       pauseAndHeal: async () => ({ ok: true as const, failureCount: 0 }),
+      cancelHeal: async () => ({ ok: true as const }),
     }
     reg.set('r1', stub)
     expect(reg.get('r1')).toBe(stub)
@@ -158,6 +159,7 @@ describe('reapStaleRuns', () => {
       runId: 'dead-1',
       stop: async () => { stopped = true },
       pauseAndHeal: async () => ({ ok: true as const, failureCount: 0 }),
+      cancelHeal: async () => ({ ok: true as const }),
     }
     reg.set('dead-1', stub)
 
@@ -182,6 +184,69 @@ describe('reapStaleRuns', () => {
     expect(reg.get('dead-1')).toBeUndefined()
   })
 
+  it('skips entries that are not running or healing', async () => {
+    writeRunsIndex(tmpDir, [
+      { runId: 'done', feature: 'foo', startedAt: '2026-01-01T00:00:00Z', status: 'passed' },
+    ])
+    await reapStaleRuns(tmpDir)
+    expect(listRuns(tmpDir)[0].status).toBe('passed')
+  })
+
+  it('skips entries whose manifest cannot be read', async () => {
+    // Index entry exists but no manifest file on disk → readManifest returns null.
+    writeRunsIndex(tmpDir, [
+      { runId: 'no-manifest', feature: 'foo', startedAt: '2026-01-01T00:00:00Z', status: 'running' },
+    ])
+    await reapStaleRuns(tmpDir)
+    expect(listRuns(tmpDir)[0].status).toBe('running')
+  })
+
+  it('skips entries with non-parseable heartbeatAt', async () => {
+    const dir = runDirFor(tmpDir, 'nan-1')
+    fs.mkdirSync(dir, { recursive: true })
+    writeManifest(path.join(dir, 'manifest.json'), {
+      runId: 'nan-1',
+      feature: 'foo',
+      startedAt: '2026-01-01T00:00:00Z',
+      status: 'running',
+      healCycles: 0,
+      services: [],
+      heartbeatAt: 'not-a-real-date',
+    })
+    writeRunsIndex(tmpDir, [
+      { runId: 'nan-1', feature: 'foo', startedAt: '2026-01-01T00:00:00Z', status: 'running' },
+    ])
+    await reapStaleRuns(tmpDir)
+    expect(listRuns(tmpDir)[0].status).toBe('running')
+  })
+
+  it('swallows errors thrown by orchestrator.stop', async () => {
+    const reg = createRegistry()
+    reg.set('boom-1', {
+      runId: 'boom-1',
+      stop: async () => { throw new Error('stop failed') },
+      pauseAndHeal: async () => ({ ok: true as const, failureCount: 0 }),
+      cancelHeal: async () => ({ ok: true as const }),
+    })
+    const dir = runDirFor(tmpDir, 'boom-1')
+    fs.mkdirSync(dir, { recursive: true })
+    writeManifest(path.join(dir, 'manifest.json'), {
+      runId: 'boom-1',
+      feature: 'foo',
+      startedAt: '2026-01-01T00:00:00Z',
+      status: 'healing',
+      healCycles: 0,
+      services: [],
+      heartbeatAt: new Date(Date.now() - 60_000).toISOString(),
+    })
+    writeRunsIndex(tmpDir, [
+      { runId: 'boom-1', feature: 'foo', startedAt: '2026-01-01T00:00:00Z', status: 'healing' },
+    ])
+    await reapStaleRuns(tmpDir, reg)
+    expect(listRuns(tmpDir)[0].status).toBe('aborted')
+    expect(reg.get('boom-1')).toBeUndefined()
+  })
+
   it('does not stop orchestrator from registry when heartbeat is fresh', async () => {
     const reg = createRegistry()
     let stopped = false
@@ -189,6 +254,7 @@ describe('reapStaleRuns', () => {
       runId: 'alive-1',
       stop: async () => { stopped = true },
       pauseAndHeal: async () => ({ ok: true as const, failureCount: 0 }),
+      cancelHeal: async () => ({ ok: true as const }),
     }
     reg.set('alive-1', stub)
 

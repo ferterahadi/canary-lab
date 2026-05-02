@@ -99,6 +99,7 @@ class SummaryReporter implements Reporter {
       complete,
       total: this.results.length,
       passed: this.results.filter((r) => r.passed).length,
+      passedNames: this.results.filter((r) => r.passed).map((r) => r.name),
       failed: this.results
         .filter((r) => !r.passed)
         .map((r) => ({

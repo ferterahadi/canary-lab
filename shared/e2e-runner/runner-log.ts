@@ -51,9 +51,10 @@ export function renderEvent<K extends keyof OrchestratorEventMap>(
     }
     case 'health-check': {
       const p = payload as OrchestratorEventMap['health-check']
+      const tag = p.transport ? ` (${p.transport})` : ''
       return p.healthy
-        ? { level: 'INFO', message: `Health check passed: ${p.service.name}` }
-        : { level: 'ERROR', message: `Health check failed: ${p.service.name}` }
+        ? { level: 'INFO', message: `Health check passed${tag}: ${p.service.name}` }
+        : { level: 'ERROR', message: `Health check failed${tag}: ${p.service.name}` }
     }
     case 'playwright-started': {
       const p = payload as OrchestratorEventMap['playwright-started']

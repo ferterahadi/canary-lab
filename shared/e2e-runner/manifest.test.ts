@@ -7,6 +7,7 @@ import {
   readRunsIndex,
   setCurrentRunSymlink,
   updateManifest,
+  updateServiceStatus,
   upsertRunsIndexEntry,
   writeManifest,
   writeRunsIndex,
@@ -129,6 +130,29 @@ describe('setCurrentRunSymlink', () => {
     fs.writeFileSync(path.join(tmpDir, 'current'), 'stale-pointer')
     setCurrentRunSymlink(tmpDir, 'one')
     expect(fs.readFileSync(path.join(tmpDir, 'current', 'who'), 'utf-8')).toBe('one')
+  })
+
+  it('updateServiceStatus updates the matching service and persists', () => {
+    const manifestPath = path.join(tmpDir, 'manifest.json')
+    writeManifest(
+      manifestPath,
+      makeManifest({
+        services: [
+          { name: 'api', safeName: 'api', status: 'starting' },
+          { name: 'web', safeName: 'web', status: 'starting' },
+        ],
+      }),
+    )
+    const next = updateServiceStatus(manifestPath, 'api', 'healthy')
+    expect(next?.services.find((s) => s.safeName === 'api')?.status).toBe('healthy')
+    expect(next?.services.find((s) => s.safeName === 'web')?.status).toBe('starting')
+    expect(readManifest(manifestPath)?.services.find((s) => s.safeName === 'api')?.status).toBe(
+      'healthy',
+    )
+  })
+
+  it('updateServiceStatus returns null when manifest is missing', () => {
+    expect(updateServiceStatus(path.join(tmpDir, 'nope.json'), 'api', 'healthy')).toBeNull()
   })
 
   it('falls back to writing a pointer file when symlinkSync throws', () => {

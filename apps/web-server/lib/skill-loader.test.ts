@@ -94,6 +94,11 @@ describe('loadSkills', () => {
     const out = loadSkills({ roots: [{ dir: root, source: 'user' }] })
     expect(out.length).toBe(1)
   })
+  it('skips skill roots whose directory does not exist', () => {
+    const out = loadSkills({ roots: [{ dir: path.join(tmp, 'never-existed'), source: 'user' }] })
+    expect(out).toEqual([])
+  })
+
   it('survives unreadable files (silently skips them)', () => {
     const root = path.join(tmp, 'user')
     writeSkill(root, 'good.md', fm('good', 'desc'))

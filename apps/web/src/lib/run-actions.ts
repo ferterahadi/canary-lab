@@ -4,6 +4,11 @@ export function canPauseHeal(status: RunStatus): boolean {
   return status === 'running'
 }
 
+// Cancel-heal is only valid while the heal agent is actually running.
+export function canCancelHeal(status: RunStatus): boolean {
+  return status === 'healing'
+}
+
 export function canStop(status: RunStatus): boolean {
   return status === 'running' || status === 'healing'
 }

@@ -79,11 +79,40 @@ export function App() {
     [allRuns, selectedFeature],
   )
 
-  // Column 2 only shows live status pills when the active run matches the
-  // selected feature; otherwise tests for an unrelated feature would appear
-  // "passed" or "failed" based on a different run's summary.
-  const summaryForSelectedFeature: RunSummary | undefined =
-    globalActiveRun && globalActiveRun.feature === selectedFeature ? activeRunSummary : undefined
+  // Latest run for the selected feature — running, healing, OR terminal.
+  // Used to drive Column 2's per-test status pills so they persist past the
+  // run's end (passed/failed/timedout stays visible until the user kicks
+  // off another run for the same feature).
+  const latestRunForFeature = featureRuns[0] ?? null
+
+  // Latest summary for the selected feature, with persistent semantics:
+  //   - Live runs: poll detail every 3 s (in step with the active-run poll
+  //     above when the run also happens to be globally active).
+  //   - Terminal runs: fetch detail once when the runId changes.
+  // The cached summary survives a status transition from running → terminal
+  // because we only OVERWRITE on a successful fetch, never reset.
+  const [latestSummaryForFeature, setLatestSummaryForFeature] = useState<RunSummary | undefined>(undefined)
+  useEffect(() => {
+    setLatestSummaryForFeature(undefined) // clear when feature/run changes
+    if (!latestRunForFeature) return
+    let cancelled = false
+    let timer: ReturnType<typeof setTimeout> | null = null
+    const tick = (): void => {
+      api.getRunDetail(latestRunForFeature.runId).then((data) => {
+        if (cancelled) return
+        if (data.summary) setLatestSummaryForFeature(data.summary)
+        const isActive = data.manifest.status === 'running' || data.manifest.status === 'healing'
+        if (isActive) timer = setTimeout(tick, 3000)
+      }).catch(() => {
+        if (cancelled) return
+        timer = setTimeout(tick, 5000)
+      })
+    }
+    tick()
+    return () => { cancelled = true; if (timer) clearTimeout(timer) }
+  }, [latestRunForFeature?.runId])
+
+  const summaryForSelectedFeature: RunSummary | undefined = latestSummaryForFeature
 
   const handleStartRun = useCallback(async (env?: string): Promise<void> => {
     if (!selectedFeature) return
@@ -105,6 +134,7 @@ export function App() {
       minWidth: 180,
       defaultWidth: 220,
       collapsible: true,
+      collapseButtonY: 'top' as const,
       content: (
         <FeaturesColumn
           features={features}
@@ -130,6 +160,7 @@ export function App() {
       minWidth: 280,
       defaultWidth: 360,
       collapsible: true,
+      collapseButtonY: 'bottom' as const,
       content: (
         <TestCasesColumn
           feature={selectedFeature}

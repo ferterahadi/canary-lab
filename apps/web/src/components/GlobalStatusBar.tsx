@@ -18,11 +18,14 @@ export function GlobalStatusBar({ activeRunDetail, onNavigateToRun }: Props) {
   const isActive = status === 'running' || status === 'healing'
   const services = activeRunDetail?.manifest.services ?? []
 
-  const playwrightState: 'running' | 'paused' | 'idle' = !isActive
+  // While healing, Playwright is NOT running (it's been killed) — but the
+  // run as a whole is mid-cycle. Reflect that with a dedicated 'healing'
+  // chip rather than showing "Paused", which implies a resumable Playwright.
+  const playwrightState: 'running' | 'healing' | 'idle' = !isActive
     ? 'idle'
     : status === 'running'
       ? 'running'
-      : 'paused'
+      : 'healing'
 
   const servicesActive = isActive
 
@@ -69,15 +72,15 @@ export function GlobalStatusBar({ activeRunDetail, onNavigateToRun }: Props) {
   )
 }
 
-function StatusDot({ label, state }: { label: string; state: 'running' | 'paused' | 'idle' }) {
+function StatusDot({ label, state }: { label: string; state: 'running' | 'healing' | 'idle' }) {
   const dotColor =
     state === 'running' ? 'bg-emerald-500'
-    : state === 'paused' ? 'bg-amber-500'
+    : state === 'healing' ? 'bg-amber-500'
     : 'bg-zinc-400 dark:bg-zinc-600'
 
   const dotGlow =
     state === 'running' ? 'bg-emerald-400'
-    : state === 'paused' ? 'bg-amber-400'
+    : state === 'healing' ? 'bg-amber-400'
     : ''
 
   return (

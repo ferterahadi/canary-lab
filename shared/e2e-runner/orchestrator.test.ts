@@ -108,7 +108,8 @@ describe('buildServiceSpecs', () => {
     expect(specs).toHaveLength(3)
     expect(specs[0].name).toBe('r-cmd-1')
     expect(specs[1].name).toBe('apiA')
-    expect(specs[2].healthUrl).toBe('http://b')
+    // Legacy bare-url shape coerced to tagged http probe.
+    expect(specs[2].healthProbe).toEqual({ http: { url: 'http://b', timeoutMs: undefined } })
   })
 
   it('handles repos without startCommands', () => {
@@ -276,7 +277,114 @@ describe('RunOrchestrator.start', () => {
       ptyFactory: factory,
       delay: async () => undefined,
     })
+    const warnings: string[] = []
+    orch.on('agent-output', (e) => warnings.push(e.chunk))
     await orch.start()
+    expect(warnings.join('')).toMatch(/no readiness probe/)
+    await orch.stop('passed')
+  })
+
+  it('dispatches a tcp probe — resolves once the port is listening', async () => {
+    const net = await import('net')
+    const server = net.createServer().listen(0, '127.0.0.1')
+    await new Promise<void>((r) => server.once('listening', () => r()))
+    const port = (server.address() as { port: number }).port
+    try {
+      const { factory } = makeFakeFactory()
+      const f = makeFeature({
+        repos: [{
+          name: 'r',
+          localPath: tmpDir,
+          startCommands: [{
+            command: 'svc',
+            name: 'svc',
+            healthCheck: { tcp: { port, timeoutMs: 200 } },
+          }],
+        }],
+      })
+      const orch = new RunOrchestrator({
+        feature: f,
+        runId: RUN_ID,
+        runDir,
+        ptyFactory: factory,
+        delay: async () => undefined,
+        healthPollIntervalMs: 1,
+        healthDeadlineMs: 1000,
+      })
+      const events: { healthy: boolean; transport?: string }[] = []
+      orch.on('health-check', (e) => events.push({ healthy: e.healthy, transport: e.transport }))
+      await orch.start()
+      expect(events.at(-1)).toEqual({ healthy: true, transport: 'tcp' })
+      await orch.stop('passed')
+    } finally {
+      server.close()
+    }
+  })
+
+  it('picks the per-env probe from a HealthCheck env-map (tagged shape)', async () => {
+    const { factory } = makeFakeFactory()
+    const f = makeFeature({
+      envs: ['local', 'beta'],
+      repos: [{
+        name: 'r',
+        localPath: tmpDir,
+        startCommands: [{
+          command: 'next dev',
+          name: 'next',
+          healthCheck: {
+            local: { http: { url: 'http://local.example' } },
+            beta:  { http: { url: 'http://beta.example' } },
+          },
+        }],
+      }],
+    })
+    let calledWith: string | null = null
+    const orch = new RunOrchestrator({
+      feature: f,
+      env: 'local',
+      runId: RUN_ID,
+      runDir,
+      ptyFactory: factory,
+      healthCheck: async (url) => { calledWith = url; return true },
+      delay: async () => undefined,
+      healthPollIntervalMs: 1,
+      healthDeadlineMs: 500,
+    })
+    await orch.start()
+    expect(calledWith).toBe('http://local.example')
+    await orch.stop('passed')
+  })
+
+  it('back-compat: accepts the legacy `{ url }` shape and dispatches an http probe', async () => {
+    const { factory } = makeFakeFactory()
+    const f = makeFeature({
+      repos: [{
+        name: 'r',
+        localPath: tmpDir,
+        startCommands: [{
+          command: 'svc',
+          name: 'svc',
+          // Legacy bare-url probe — coerced to { http: { url, timeoutMs } }.
+          healthCheck: { url: 'http://legacy.example', timeoutMs: 1234 },
+        }],
+      }],
+    })
+    let calledWith: { url: string; timeoutMs?: number } | null = null
+    const orch = new RunOrchestrator({
+      feature: f,
+      runId: RUN_ID,
+      runDir,
+      ptyFactory: factory,
+      healthCheck: async (url, timeoutMs) => { calledWith = { url, timeoutMs }; return true },
+      delay: async () => undefined,
+      healthPollIntervalMs: 1,
+      healthDeadlineMs: 500,
+    })
+    const events: { healthy: boolean; transport?: string }[] = []
+    orch.on('health-check', (e) => events.push({ healthy: e.healthy, transport: e.transport }))
+    await orch.start()
+    expect(calledWith).toEqual({ url: 'http://legacy.example', timeoutMs: 1234 })
+    expect(events.at(-1)).toEqual({ healthy: true, transport: 'http' })
     await orch.stop('passed')
   })
 })
@@ -661,6 +769,7 @@ describe('RunOrchestrator.runFullCycle', () => {
     spawned: { factory: PtyFactory; spawned: ReturnType<typeof makeFakeFactory>['spawned'] }
     pwExitCodes: number[]
     autoHeal?: boolean
+    manualHeal?: boolean
   }) {
     let pwIdx = 0
     let healIdx = 0
@@ -682,6 +791,7 @@ describe('RunOrchestrator.runFullCycle', () => {
             buildCommand: ({ cycle }) => `heal-${cycle}-${healIdx++}`,
           }
         : undefined,
+      manualHeal: opts.manualHeal,
     })
     return orch
   }
@@ -707,6 +817,82 @@ describe('RunOrchestrator.runFullCycle', () => {
     const status = await promise
     expect(status).toBe('failed')
     await orch.stop('failed')
+  })
+
+  it('manual heal mode: waits for signal, restarts services, reruns Playwright', async () => {
+    const f = makeFakeFactory()
+    const orch = bootForFullCycle({
+      spawned: f,
+      pwExitCodes: [1, 0],
+      manualHeal: true,
+    })
+    fs.mkdirSync(runDir, { recursive: true })
+    fs.writeFileSync(orch.paths.summaryPath, JSON.stringify({ failed: [{ name: 't' }] }))
+
+    const promise = orch.runFullCycle()
+    const waitFor = async (n: number) => {
+      const start = Date.now()
+      while (f.spawned.length < n) {
+        if (Date.now() - start > 3000) throw new Error(`stuck: spawned=${f.spawned.length}`)
+        await new Promise((r) => setTimeout(r, 5))
+      }
+    }
+    await waitFor(2)
+    f.spawned[1].emitExit(1) // first playwright fails — orchestrator enters manual heal
+
+    // Give the manual loop a tick to set status to 'healing', then drop a
+    // .restart signal as if the user fixed the code by hand.
+    await new Promise((r) => setTimeout(r, 30))
+    fs.writeFileSync(orch.paths.restartSignal, JSON.stringify({ hypothesis: 'manual' }))
+
+    // Services re-spawn (svc at idx 2), then second playwright at idx 3.
+    await waitFor(4)
+    f.spawned[3].emitExit(0)
+
+    const status = await promise
+    expect(status).toBe('passed')
+    await orch.stop('passed')
+  }, 15000)
+
+  it('manual heal mode: gives up if user cancels via cancelHeal()', async () => {
+    const f = makeFakeFactory()
+    const orch = bootForFullCycle({
+      spawned: f,
+      pwExitCodes: [1],
+      manualHeal: true,
+    })
+    fs.mkdirSync(runDir, { recursive: true })
+    fs.writeFileSync(orch.paths.summaryPath, JSON.stringify({ failed: [{ name: 't' }] }))
+
+    const promise = orch.runFullCycle()
+    await new Promise((r) => setTimeout(r, 10))
+    f.spawned[1].emitExit(1)
+    // Wait for the orchestrator to enter the manual heal loop, then mimic
+    // a user-cancel by writing the same flag the manual loop watches.
+    await new Promise((r) => setTimeout(r, 30))
+    // Manual mode has no agent pty so cancelHeal returns no-agent-running.
+    // Instead, stop() races the loop's signal-wait and resolves it as
+    // 'aborted'.
+    await orch.stop('aborted')
+    const status = await promise
+    expect(['failed', 'aborted']).toContain(status)
+  }, 15000)
+
+  it('writes signalPaths and healMode to the manifest in manual mode', () => {
+    const f = makeFakeFactory()
+    const orch = bootForFullCycle({ spawned: f, pwExitCodes: [0], manualHeal: true })
+    // Trigger initial manifest write by booting a run.
+    return (async () => {
+      const promise = orch.runFullCycle()
+      await new Promise((r) => setTimeout(r, 5))
+      f.spawned[1].emitExit(0)
+      await promise
+      const m = JSON.parse(fs.readFileSync(orch.paths.manifestPath, 'utf-8'))
+      expect(m.healMode).toBe('manual')
+      expect(m.signalPaths.rerun).toBe(orch.paths.rerunSignal)
+      expect(m.signalPaths.restart).toBe(orch.paths.restartSignal)
+      await orch.stop('passed')
+    })()
   })
 
   it('runs heal cycle on failure and recovers via .restart signal', async () => {
@@ -945,7 +1131,7 @@ describe('RunOrchestrator + RunnerLog integration', () => {
 
     const body = fs.readFileSync(paths.runnerLogPath, 'utf-8')
     expect(body).toContain('Service started: api')
-    expect(body).toContain('Health check passed: api')
+    expect(body).toContain('Health check passed (http): api')
     expect(body).toContain('Running Playwright tests: fake-pw')
     expect(body).toContain('Playwright exited: code=0')
     expect(body).toContain('Run complete: status=passed')
@@ -1014,19 +1200,21 @@ describe('RunOrchestrator.pauseAndHeal', () => {
     await orch.stop('aborted')
   })
 
-  it('returns no-failures-yet when SIGTERM lands but summary is empty', async () => {
+  it('returns no-failures-yet WITHOUT killing Playwright when summary is empty', async () => {
+    // Regression: previous behaviour SIGTERM'd Playwright then bailed with
+    // no-failures-yet, leaving the run to be marked "passed" by runFullCycle.
+    // The new contract is check-then-commit — no kill until we have failures.
     const { spawned, orch } = bootForPause()
     await orch.start()
     const exitPromise = orch.runPlaywright()
-    // Drive in parallel: pauseAndHeal SIGTERMs the pty, fake factory records
-    // the signal, we manually fire the exit so waitForPlaywrightExit resolves.
     const pausePromise = orch.pauseAndHeal()
     await new Promise((r) => setTimeout(r, 5))
     const pwPty = spawned[spawned.length - 1]
-    expect(pwPty.killed).toBe('SIGTERM')
-    pwPty.emitExit(143)
-    await exitPromise
+    expect(pwPty.killed).toBeNull()
     expect(await pausePromise).toEqual({ ok: false, reason: 'no-failures-yet' })
+    // Playwright is still alive — clean up by emitting its exit explicitly.
+    pwPty.emitExit(0)
+    await exitPromise
     await orch.stop('aborted')
   })
 
@@ -1103,6 +1291,73 @@ describe('RunOrchestrator.pauseAndHeal', () => {
   })
 })
 
+describe('RunOrchestrator.cancelHeal', () => {
+  it('returns not-healing when status is not healing', async () => {
+    const f = makeFakeFactory()
+    const orch = new RunOrchestrator({
+      feature: makeFeature(),
+      runId: RUN_ID,
+      runDir,
+      ptyFactory: f.factory,
+      delay: async () => undefined,
+    })
+    expect(await orch.cancelHeal()).toEqual({ ok: false, reason: 'not-healing' })
+  })
+
+  it('returns no-agent-running when healing but no agent pty is tracked', async () => {
+    const f = makeFakeFactory()
+    const orch = new RunOrchestrator({
+      feature: makeFeature(),
+      runId: RUN_ID,
+      runDir,
+      ptyFactory: f.factory,
+      delay: async () => undefined,
+    })
+    orch.setStatus('healing')
+    expect(await orch.cancelHeal()).toEqual({ ok: false, reason: 'no-agent-running' })
+  })
+
+  it('SIGTERMs the heal-agent pty, breaks the loop, and stops the run as failed', async () => {
+    fs.mkdirSync(runDir, { recursive: true })
+    const f = makeFakeFactory()
+    let pwIdx = 0
+    let healIdx = 0
+    const orch = new RunOrchestrator({
+      feature: makeFeature({ healOnFailureThreshold: 1 }),
+      runId: RUN_ID,
+      runDir,
+      ptyFactory: f.factory,
+      healthCheck: async () => true,
+      delay: async () => undefined,
+      healthPollIntervalMs: 5,
+      healSignalPollMs: 1,
+      healAgentTimeoutMs: 200,
+      playwrightSpawner: () => ({ command: `pw-${pwIdx++}`, cwd: tmpDir }),
+      autoHeal: { agent: 'claude', maxCycles: 5, buildCommand: () => `heal-${healIdx++}` },
+    })
+    fs.writeFileSync(
+      orch.paths.summaryPath,
+      JSON.stringify({ failed: [{ name: 'a' }], total: 3, passed: 0 }),
+    )
+    const promise = orch.runFullCycle()
+    // Drive the lifecycle: services + Playwright spawn → fail → heal agent
+    // spawns → user cancels mid-cycle.
+    await new Promise((r) => setTimeout(r, 5))
+    f.spawned[1].emitExit(1) // Playwright fails
+    while (f.spawned.length < 3) await new Promise((r) => setTimeout(r, 5))
+    const agentPty = f.spawned[2]
+    const result = await orch.cancelHeal()
+    expect(result).toEqual({ ok: true })
+    expect(agentPty.killed).toBe('SIGTERM')
+    agentPty.emitExit(143)
+    const finalStatus = await promise
+    expect(finalStatus).toBe('failed')
+    const m = readManifest(orch.paths.manifestPath)!
+    expect(m.stoppedEarly?.reason).toBe('user-cancel-heal')
+    await orch.stop('failed')
+  })
+})
+
 describe('RunOrchestrator runFullCycle stoppedEarly', () => {
   it('marks stoppedEarly=max-failures when threshold is hit before heal cycle', async () => {
     const f = makeFakeFactory()
@@ -1137,6 +1392,47 @@ describe('RunOrchestrator runFullCycle stoppedEarly', () => {
     expect(m.stoppedEarly?.reason).toBe('max-failures')
     expect(m.stoppedEarly?.failuresAtStop).toBe(1)
     expect(m.stoppedEarly?.suiteTotal).toBe(11)
+    await orch.stop('failed')
+  })
+
+  it('treats Playwright exit code 0 as failed when user-pause was stamped', async () => {
+    // Regression for the "Pause & Heal flips run to PASSED" bug. When the
+    // user pauses, Playwright is SIGTERM'd and may exit cleanly (code 0).
+    // runFullCycle must NOT mark the run "passed" in that case — the stamp
+    // is the source of truth for "the user wanted to heal."
+    const f = makeFakeFactory()
+    const orch = new RunOrchestrator({
+      feature: makeFeature(),
+      runId: RUN_ID,
+      runDir,
+      ptyFactory: f.factory,
+      healthCheck: async () => true,
+      delay: async () => undefined,
+      healthPollIntervalMs: 5,
+      healSignalPollMs: 1,
+      healAgentTimeoutMs: 500,
+      playwrightSpawner: () => ({ command: 'pw', cwd: tmpDir }),
+      autoHeal: { agent: 'claude', maxCycles: 1, buildCommand: () => 'heal' },
+    })
+    fs.mkdirSync(runDir, { recursive: true })
+    fs.writeFileSync(
+      orch.paths.summaryPath,
+      JSON.stringify({ failed: [{ name: 'a' }], total: 5, passed: 0 }),
+    )
+    const statuses: string[] = []
+    orch.on('run-status', (e) => statuses.push(e.status))
+    const promise = orch.runFullCycle()
+    await new Promise((r) => setTimeout(r, 5))
+    // Stamp BEFORE Playwright exits cleanly — simulating the pause flow.
+    orch.markStoppedEarly('user-pause', 1, 5)
+    f.spawned[1].emitExit(0) // Playwright exits cleanly post-SIGTERM
+    while (f.spawned.length < 3) await new Promise((r) => setTimeout(r, 5))
+    f.spawned[2].emitExit(0) // agent gives up — heal loop terminates
+    const result = await promise
+    // Final status is 'failed', NOT 'passed', because user-pause overrides.
+    expect(result).toBe('failed')
+    // We should also have entered healing at some point.
+    expect(statuses).toContain('healing')
     await orch.stop('failed')
   })
 
