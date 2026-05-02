@@ -3,7 +3,9 @@ import os from 'os'
 import http from 'http'
 import https from 'https'
 import { EventEmitter } from 'events'
-import { resolvePath, normalizeStartCommand, isHealthy } from './startup'
+import net from 'net'
+import { resolvePath, normalizeStartCommand, isHealthy, isTcpListening, resolveHealthProbe, validateHealthCheck } from './startup'
+import type { HealthCheck } from './types'
 
 function mockHttpGet(
   mod: typeof http | typeof https,
@@ -136,5 +138,143 @@ describe('isHealthy', () => {
   it('resolves false on request error', async () => {
     mockHttpGet(http, 'error')
     await expect(isHealthy('http://x/')).resolves.toBe(false)
+  })
+})
+
+
+describe('resolveHealthProbe', () => {
+  it('returns null when check is undefined', () => {
+    expect(resolveHealthProbe(undefined, 'local')).toBeNull()
+  })
+
+  it('returns null for an empty config (defensive)', () => {
+    expect(resolveHealthProbe({} as HealthCheck, 'local')).toBeNull()
+  })
+
+  it('returns the tagged http probe as-is, regardless of env', () => {
+    const probe: HealthCheck = { http: { url: 'http://localhost:3000', timeoutMs: 1500 } }
+    expect(resolveHealthProbe(probe, 'local')).toEqual(probe)
+    expect(resolveHealthProbe(probe, 'beta')).toEqual(probe)
+    expect(resolveHealthProbe(probe, undefined)).toEqual(probe)
+  })
+
+  it('returns the tagged tcp probe as-is', () => {
+    const probe: HealthCheck = { tcp: { port: 3000 } }
+    expect(resolveHealthProbe(probe, 'local')).toEqual(probe)
+  })
+
+  it('coerces the legacy bare-url shape to a tagged http probe (back-compat)', () => {
+    const legacy: HealthCheck = { url: 'http://localhost:4000', timeoutMs: 2500 }
+    expect(resolveHealthProbe(legacy, 'local')).toEqual({
+      http: { url: 'http://localhost:4000', timeoutMs: 2500 },
+    })
+  })
+
+  it('picks the entry matching env from a per-env map (mixed shapes ok)', () => {
+    const m: HealthCheck = {
+      local: { tcp: { port: 3000 } },
+      beta:  { http: { url: 'http://beta.example', timeoutMs: 2000 } },
+    }
+    expect(resolveHealthProbe(m, 'local')).toEqual({ tcp: { port: 3000 } })
+    expect(resolveHealthProbe(m, 'beta')).toEqual({ http: { url: 'http://beta.example', timeoutMs: 2000 } })
+  })
+
+  it('coerces a legacy entry inside a per-env map', () => {
+    const m: HealthCheck = {
+      local: { url: 'http://localhost', timeoutMs: 1000 },
+      beta:  { http: { url: 'http://beta' } },
+    }
+    expect(resolveHealthProbe(m, 'local')).toEqual({
+      http: { url: 'http://localhost', timeoutMs: 1000 },
+    })
+  })
+
+  it('falls back to the default key when env is unknown', () => {
+    const m: HealthCheck = {
+      default: { http: { url: 'http://fallback' } },
+      local: { tcp: { port: 3000 } },
+    }
+    expect(resolveHealthProbe(m, 'staging')).toEqual({ http: { url: 'http://fallback' } })
+  })
+
+  it('returns null when neither env nor default match', () => {
+    const m: HealthCheck = { local: { http: { url: 'http://l' } } }
+    expect(resolveHealthProbe(m, 'beta')).toBeNull()
+  })
+})
+
+describe('validateHealthCheck', () => {
+  const ctx = { feature: 'feat', command: 'cmd' }
+
+  it('accepts a tagged http probe', () => {
+    expect(() => validateHealthCheck({ http: { url: 'http://x' } }, ctx)).not.toThrow()
+  })
+
+  it('accepts a tagged tcp probe', () => {
+    expect(() => validateHealthCheck({ tcp: { port: 3000 } }, ctx)).not.toThrow()
+  })
+
+  it('accepts the legacy bare-url shape (back-compat)', () => {
+    expect(() => validateHealthCheck({ url: 'http://x' }, ctx)).not.toThrow()
+  })
+
+  it('accepts a per-env map with mixed shapes', () => {
+    expect(() => validateHealthCheck({
+      local: { tcp: { port: 3000 } },
+      beta:  { http: { url: 'http://b' } },
+      legacy: { url: 'http://l' },
+    }, ctx)).not.toThrow()
+  })
+
+  it('rejects a probe with both http and tcp keys', () => {
+    expect(() => validateHealthCheck({
+      http: { url: 'http://x' },
+      tcp:  { port: 3000 },
+    } as unknown as HealthCheck, ctx)).toThrow(/exactly one transport/)
+  })
+
+  it('rejects an empty config object', () => {
+    expect(() => validateHealthCheck({} as HealthCheck, ctx)).toThrow(/empty/)
+  })
+
+  it('rejects http with missing url', () => {
+    expect(() => validateHealthCheck({ http: {} as never }, ctx)).toThrow(/http\.url/)
+  })
+
+  it('rejects tcp with missing port', () => {
+    expect(() => validateHealthCheck({ tcp: {} as never }, ctx)).toThrow(/tcp\.port/)
+  })
+
+  it('rejects tcp with non-positive port', () => {
+    expect(() => validateHealthCheck({ tcp: { port: 0 } }, ctx)).toThrow(/tcp\.port/)
+  })
+
+  it('error message names the feature, command, and env when applicable', () => {
+    let caught: Error | null = null
+    try {
+      validateHealthCheck({ local: { http: { url: '' } } }, { feature: 'F', command: 'C' })
+    } catch (e) { caught = e as Error }
+    expect(caught?.message).toMatch(/Feature "F"/)
+    expect(caught?.message).toMatch(/command "C"/)
+    expect(caught?.message).toMatch(/env "local"/)
+  })
+})
+
+describe('isTcpListening', () => {
+  it('returns true for a port currently in LISTEN', async () => {
+    const server = net.createServer().listen(0, '127.0.0.1')
+    await new Promise<void>((r) => server.once('listening', () => r()))
+    const port = (server.address() as { port: number }).port
+    try {
+      await expect(isTcpListening(port, '127.0.0.1', 500)).resolves.toBe(true)
+    } finally {
+      server.close()
+    }
+  })
+
+  it('returns false for a port nothing is listening on', async () => {
+    // Port 1 is virtually never bound on a normal machine; if it is, this
+    // test will be flaky — pick another reserved-ish port.
+    await expect(isTcpListening(1, '127.0.0.1', 200)).resolves.toBe(false)
   })
 })

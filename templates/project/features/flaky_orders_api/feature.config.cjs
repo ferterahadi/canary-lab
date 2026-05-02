@@ -10,10 +10,7 @@ const config = {
         {
           name: 'flaky-orders-api-server',
           command: 'npx tsx scripts/server.ts',
-          healthCheck: {
-            url: 'http://localhost:4300/',
-            timeoutMs: 3000,
-          },
+          healthCheck: { http: { url: 'http://localhost:4300/', timeoutMs: 3000 } },
         },
       ],
     },

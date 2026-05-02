@@ -300,6 +300,53 @@ describe('writeHealIndex with journal tail and various manifest shapes', () => {
       }),
     ).not.toThrow()
   })
+
+  it('renders the previous heal-cycle note when history has restarts/keeps', () => {
+    expect(() =>
+      writeHealIndex({
+        manifest: {
+          featureName: 'demo',
+          healCycleHistory: [
+            { cycle: 1, kept: ['svc-a'], restarted: ['svc-b', 'svc-c'] },
+          ],
+        },
+        summary: { failed: [{ name: 'a' }] },
+      }),
+    ).not.toThrow()
+  })
+
+  it('renders kept-only and restarted-only history with (none) placeholders', () => {
+    expect(() =>
+      writeHealIndex({
+        manifest: {
+          featureName: 'demo',
+          healCycleHistory: [{ cycle: 2, kept: ['k'], restarted: [] }],
+        },
+        summary: { failed: [] },
+      }),
+    ).not.toThrow()
+    expect(() =>
+      writeHealIndex({
+        manifest: {
+          featureName: 'demo',
+          healCycleHistory: [{ cycle: 3, kept: [], restarted: ['r'] }],
+        },
+        summary: { failed: [] },
+      }),
+    ).not.toThrow()
+  })
+
+  it('skips the heal-cycle note when both kept and restarted are empty', () => {
+    expect(() =>
+      writeHealIndex({
+        manifest: {
+          featureName: 'demo',
+          healCycleHistory: [{ cycle: 4, kept: [], restarted: [] }],
+        },
+        summary: { failed: [] },
+      }),
+    ).not.toThrow()
+  })
 })
 
 describe('writeHealIndex partial-suite header (stoppedEarly)', () => {

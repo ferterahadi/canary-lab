@@ -46,6 +46,8 @@ export interface RunIndexEntry {
   endedAt?: string
 }
 
+export type ServiceStatus = 'starting' | 'ready' | 'timeout' | 'stopped'
+
 export interface ServiceManifestEntry {
   name: string
   safeName: string
@@ -53,6 +55,7 @@ export interface ServiceManifestEntry {
   cwd: string
   logPath: string
   healthUrl?: string
+  status?: ServiceStatus
 }
 
 export interface RunManifest {
@@ -65,6 +68,8 @@ export interface RunManifest {
   healCycles: number
   services: ServiceManifestEntry[]
   repoPaths?: string[]
+  signalPaths?: { rerun: string; restart: string }
+  healMode?: 'auto' | 'manual'
 }
 
 export interface RunSummaryFailedEntry {
@@ -80,6 +85,7 @@ export interface RunSummary {
   complete: boolean
   total: number
   passed: number
+  passedNames?: string[]
   failed: RunSummaryFailedEntry[]
 }
 

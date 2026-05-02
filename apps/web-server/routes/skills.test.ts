@@ -24,6 +24,15 @@ describe('GET /api/skills', () => {
     expect(body).toHaveLength(3)
     await app.close()
   })
+
+  it('falls back to the default skill loader when no provider is injected', async () => {
+    const app = Fastify()
+    await skillsRoutes(app)
+    const r = await app.inject({ method: 'GET', url: '/api/skills' })
+    expect(r.statusCode).toBe(200)
+    expect(Array.isArray(r.json())).toBe(true)
+    await app.close()
+  })
 })
 
 describe('POST /api/skills/recommend', () => {

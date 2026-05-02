@@ -111,6 +111,15 @@ body {
   transition: all 150ms ease;
   opacity: 0;
 }
+.panel-collapse-btn--top {
+  top: 10%;
+  transform: translate(-50%, 0);
+}
+.panel-collapse-btn--bottom {
+  top: auto;
+  bottom: 10%;
+  transform: translate(-50%, 0);
+}
 
 .resize-handle:hover .panel-collapse-btn,
 .panel-collapse-btn:hover,
@@ -166,4 +175,21 @@ body {
 .vertical-resize-handle:hover::after,
 .vertical-resize-handle.dragging::after {
   background: var(--border-focus);
+}
+
+@keyframes canary-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+.canary-pulse {
+  animation: canary-pulse 1.1s ease-in-out infinite;
+}
+
+.feature-row__cog {
+  opacity: 0;
+  transition: opacity 150ms ease;
+}
+.feature-row:hover .feature-row__cog,
+.feature-row__cog:focus-visible {
+  opacity: 1;
 }

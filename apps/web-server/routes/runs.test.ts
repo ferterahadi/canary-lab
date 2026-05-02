@@ -26,6 +26,7 @@ function makeStub(runId: string): OrchestratorLike & { stopped: boolean } {
     runId,
     stop: async () => { stopped = true },
     pauseAndHeal: async () => ({ ok: true, failureCount: 0 }),
+    cancelHeal: async () => ({ ok: true }),
     get stopped() { return stopped },
   } as OrchestratorLike & { stopped: boolean }
 }
@@ -125,6 +126,66 @@ describe('POST /api/runs', () => {
     expect(registry.get('run-1')).toBe(stub)
   })
 
+  it('400s when env is not in feature.envs', async () => {
+    const dir = path.join(featuresDir, 'foo')
+    fs.mkdirSync(dir, { recursive: true })
+    fs.writeFileSync(
+      path.join(dir, 'feature.config.cjs'),
+      `module.exports = { config: { name: 'foo', description: 'd', envs: ['local','production'], featureDir: __dirname } }`,
+    )
+    const stub = makeStub('rx')
+    const { app } = await build({ startRun: async () => stub })
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/runs',
+      payload: { feature: 'foo', env: 'staging' },
+    })
+    expect(res.statusCode).toBe(400)
+    expect(res.json().error).toContain('env must be one of')
+  })
+
+  it('accepts a valid env from feature.envs', async () => {
+    const dir = path.join(featuresDir, 'foo')
+    fs.mkdirSync(dir, { recursive: true })
+    fs.writeFileSync(
+      path.join(dir, 'feature.config.cjs'),
+      `module.exports = { config: { name: 'foo', description: 'd', envs: ['local','production'], featureDir: __dirname } }`,
+    )
+    const stub = makeStub('ry')
+    const { app } = await build({ startRun: async () => stub })
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/runs',
+      payload: { feature: 'foo', env: 'production' },
+    })
+    expect(res.statusCode).toBe(201)
+  })
+
+  it('runs without env when feature declares no envs', async () => {
+    const dir = path.join(featuresDir, 'noenv')
+    fs.mkdirSync(dir, { recursive: true })
+    fs.writeFileSync(
+      path.join(dir, 'feature.config.cjs'),
+      `module.exports = { config: { name: 'noenv', description: 'd', featureDir: __dirname } }`,
+    )
+    const stub = makeStub('rno')
+    let receivedEnv: string | undefined = 'untouched'
+    const { app } = await build({
+      startRun: async (_f, env) => { receivedEnv = env; return stub },
+    })
+    const res = await app.inject({ method: 'POST', url: '/api/runs', payload: { feature: 'noenv' } })
+    expect(res.statusCode).toBe(201)
+    expect(receivedEnv).toBeUndefined()
+  })
+
+  it('500s with stringified non-Error rejection', async () => {
+    writeFeature('foo')
+    const { app } = await build({ startRun: async () => { throw 'plain string' } })
+    const res = await app.inject({ method: 'POST', url: '/api/runs', payload: { feature: 'foo' } })
+    expect(res.statusCode).toBe(500)
+    expect(res.json().error).toBe('plain string')
+  })
+
   it('500s when factory throws', async () => {
     writeFeature('foo')
     const { app } = await build({ startRun: async () => { throw new Error('boom') } })
@@ -146,6 +207,7 @@ describe('POST /api/runs/:runId/pause-heal', () => {
       runId: 'rp1',
       stop: async () => { /* noop */ },
       pauseAndHeal: async () => ({ ok: true, failureCount: 3 }),
+      cancelHeal: async () => ({ ok: true }),
     }
     const { app, registry } = await build()
     registry.set('rp1', stub)
@@ -163,10 +225,47 @@ describe('POST /api/runs/:runId/pause-heal', () => {
       runId: 'rp2',
       stop: async () => { /* noop */ },
       pauseAndHeal: async () => ({ ok: false, reason }),
+      cancelHeal: async () => ({ ok: true }),
     }
     const { app, registry } = await build()
     registry.set('rp2', stub)
     const res = await app.inject({ method: 'POST', url: '/api/runs/rp2/pause-heal' })
+    expect(res.statusCode).toBe(409)
+    expect(res.json()).toEqual({ reason })
+  })
+})
+
+describe('POST /api/runs/:runId/cancel-heal', () => {
+  it('404s when run not in registry', async () => {
+    const { app } = await build()
+    const res = await app.inject({ method: 'POST', url: '/api/runs/ghost/cancel-heal' })
+    expect(res.statusCode).toBe(404)
+  })
+
+  it('202s with status=cancelled on success', async () => {
+    const stub: OrchestratorLike = {
+      runId: 'rc1',
+      stop: async () => { /* noop */ },
+      pauseAndHeal: async () => ({ ok: true, failureCount: 1 }),
+      cancelHeal: async () => ({ ok: true }),
+    }
+    const { app, registry } = await build()
+    registry.set('rc1', stub)
+    const res = await app.inject({ method: 'POST', url: '/api/runs/rc1/cancel-heal' })
+    expect(res.statusCode).toBe(202)
+    expect(res.json()).toEqual({ status: 'cancelled' })
+  })
+
+  it.each([['not-healing'], ['no-agent-running']] as const)('409s with reason=%s', async (reason) => {
+    const stub: OrchestratorLike = {
+      runId: 'rc2',
+      stop: async () => { /* noop */ },
+      pauseAndHeal: async () => ({ ok: true, failureCount: 0 }),
+      cancelHeal: async () => ({ ok: false, reason }),
+    }
+    const { app, registry } = await build()
+    registry.set('rc2', stub)
+    const res = await app.inject({ method: 'POST', url: '/api/runs/rc2/cancel-heal' })
     expect(res.statusCode).toBe(409)
     expect(res.json()).toEqual({ reason })
   })
@@ -231,6 +330,7 @@ describe('DELETE /api/runs/:runId', () => {
       runId: 'r4',
       stop: async () => { throw new Error('nope') },
       pauseAndHeal: async () => ({ ok: true, failureCount: 0 }),
+    cancelHeal: async () => ({ ok: true }),
     }
     const { app, registry } = await build()
     registry.set('r4', failing)

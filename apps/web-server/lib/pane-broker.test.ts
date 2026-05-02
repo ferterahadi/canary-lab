@@ -92,6 +92,25 @@ describe('PaneBroker', () => {
     expect(b.subscriberCount('nope')).toBe(0)
   })
 
+  it('resetPane clears buffer and closes subscribers', () => {
+    const b = new PaneBroker()
+    b.push('x', 'first')
+    const r = recorder()
+    b.subscribe('x', r)
+    b.resetPane('x')
+    expect(r.closed).toBe(true)
+    expect(b.snapshot('x')).toBe('')
+    // Subscribing again starts from a clean slate.
+    const r2 = recorder()
+    b.subscribe('x', r2)
+    expect(r2.msgs).toEqual([])
+  })
+
+  it('resetPane on unknown pane is a no-op', () => {
+    const b = new PaneBroker()
+    expect(() => b.resetPane('missing')).not.toThrow()
+  })
+
   it('after-exit subscribe path returns a no-op unsubscribe', () => {
     const b = new PaneBroker()
     b.markExit('p', 0)

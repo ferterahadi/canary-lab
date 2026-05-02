@@ -57,9 +57,31 @@ describe('statusForTest', () => {
     ).toBe('passed')
   })
 
+  it('treats a failure without an error object as failed (not timedout)', () => {
+    const summary: RunSummary = {
+      complete: true,
+      total: 1,
+      passed: 0,
+      failed: [{ name: 'test-case-creates-a-todo' }],
+    }
+    expect(statusForTest('Creates a TODO', summary)).toBe('failed')
+  })
+
   it('returns pending when run is in-flight and test has not failed', () => {
     const inflight: RunSummary = { complete: false, total: 0, passed: 0, failed: [] }
     expect(statusForTest('Creates a TODO', inflight)).toBe('pending')
+  })
+
+  it('uses passedNames to distinguish passed vs pending', () => {
+    const summary: RunSummary = {
+      complete: false,
+      total: 2,
+      passed: 1,
+      failed: [],
+      passedNames: ['test-case-creates-a-todo'],
+    }
+    expect(statusForTest('Creates a TODO', summary)).toBe('passed')
+    expect(statusForTest('Other test', summary)).toBe('pending')
   })
 })
 

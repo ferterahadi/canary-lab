@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify'
 import fs from 'fs'
+import path from 'path'
 import { loadFeatures, listSpecFiles } from '../lib/feature-loader'
 import { extractTestsFromSource, type ExtractedTest } from '../lib/ast-extractor'
 import { listPlaywrightTests, type PlaywrightListSpawner } from '../lib/playwright-list'
@@ -20,6 +21,29 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
       repos: (f.repos ?? []).map((r) => ({ name: r.name, localPath: r.localPath })),
       envs: f.envs ?? [],
     }))
+  })
+
+  app.get<{ Params: { name: string } }>('/api/features/:name/config', async (req, reply) => {
+    const features = loadFeatures(deps.featuresDir)
+    const feature = features.find((f) => f.name === req.params.name)
+    if (!feature || !feature.featureDir) {
+      reply.code(404)
+      return { error: 'feature not found' }
+    }
+    const candidates: Array<{ name: string; format: 'cjs' | 'js' | 'ts' }> = [
+      { name: 'feature.config.cjs', format: 'cjs' },
+      { name: 'feature.config.js', format: 'js' },
+      { name: 'feature.config.ts', format: 'ts' },
+    ]
+    for (const c of candidates) {
+      const p = path.join(feature.featureDir, c.name)
+      if (fs.existsSync(p)) {
+        const content = fs.readFileSync(p, 'utf-8')
+        return { path: p, content, format: c.format }
+      }
+    }
+    reply.code(404)
+    return { error: 'config file not found' }
   })
 
   app.get<{ Params: { name: string } }>('/api/features/:name/tests', async (req, reply) => {

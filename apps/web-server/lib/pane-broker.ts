@@ -72,6 +72,25 @@ export class PaneBroker {
     return () => { entry.subs.delete(sub) }
   }
 
+  /**
+   * Wipe a pane's buffer + exit info AND close its current subscribers so
+   * they reconnect to a fresh stream. Called when a fresh pty is about to
+   * be spawned for the same paneId — e.g. Playwright restarting after a
+   * heal cycle, or the heal agent starting a new attempt. Without this, a
+   * subscriber that joins after the FIRST exit will replay the old
+   * `[pane exited code=N]` and immediately close, never seeing the new
+   * stream's data.
+   */
+  resetPane(id: PaneId): void {
+    const entry = this.panes.get(id)
+    if (!entry) return
+    entry.buffer.clear()
+    for (const sub of entry.subs) {
+      try { sub.close() } catch { /* ignore */ }
+    }
+    entry.subs.clear()
+  }
+
   paneIds(): PaneId[] {
     return [...this.panes.keys()]
   }

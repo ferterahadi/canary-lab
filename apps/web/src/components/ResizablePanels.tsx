@@ -5,6 +5,9 @@ export interface PanelConfig {
   minWidth: number
   defaultWidth: number
   collapsible: boolean
+  /** Vertical placement of the collapse button on this panel's right-side
+   *  handle. Defaults to 'center'. */
+  collapseButtonY?: 'top' | 'center' | 'bottom'
   content: ReactNode
 }
 
@@ -144,7 +147,7 @@ export function ResizablePanels({ panels }: { panels: PanelConfig[] }) {
                 {panel.collapsible && (
                   <button
                     type="button"
-                    className="panel-collapse-btn"
+                    className={`panel-collapse-btn panel-collapse-btn--${panel.collapseButtonY ?? 'center'}`}
                     onClick={(e) => {
                       e.stopPropagation()
                       toggleCollapse(i)

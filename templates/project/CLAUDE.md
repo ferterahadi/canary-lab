@@ -21,7 +21,7 @@ Useful only when needed:
 Rules:
 - Do not read the test spec unless the failure cannot be understood from the index and logs.
 - Prefer exact slice paths from `heal-index.md` before broad repo search.
-- After fixing, write `logs/.restart` for service/app changes or `logs/.rerun` for test/config-only changes.
+- After fixing, write the per-run signal file. Canary Lab tells you the exact paths each run — they live under `logs/runs/<run-id>/signals/`. Use `.restart` for service/app changes or `.rerun` for test/config-only changes. Look for the "Signal paths for this run" line near the top of this prompt.
 - Signal body: `{"hypothesis":"…","filesChanged":["<abs-path>", …]}`.
 <!-- heal-prompt:end -->
 <!-- managed:canary-lab:end -->

@@ -98,6 +98,12 @@ describe('filterSections / newestFirst', () => {
     expect(n.map((x) => x.iteration)).toEqual([3, 2, 1])
   })
 
+  it('newestFirst handles two null iterations equally', () => {
+    const a = { iteration: null, timestamp: null, feature: null, run: null, outcome: null, hypothesis: null, body: '' }
+    const b = { iteration: null, timestamp: null, feature: null, run: null, outcome: null, hypothesis: null, body: '' }
+    expect(newestFirst([a, b])).toHaveLength(2)
+  })
+
   it('newestFirst sinks null iterations to bottom', () => {
     const a = { iteration: null, timestamp: null, feature: null, run: null, outcome: null, hypothesis: null, body: '' }
     const b = { iteration: 5, timestamp: null, feature: null, run: null, outcome: null, hypothesis: null, body: '' }

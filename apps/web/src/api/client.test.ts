@@ -3,22 +3,39 @@ import {
   ApiError,
   acceptPlan,
   acceptSpec,
+  cancelHealRun,
   createDraft,
   deleteDraft,
   deleteJournalEntry,
+  deleteRun,
   getDraft,
   getDraftFile,
+  getEnvsetSlot,
+  getEnvsetsIndex,
+  getFeatureConfig,
+  getFeatureConfigDoc,
   getFeatureTests,
+  getPlaywrightConfig,
   getRunDetail,
   listFeatures,
   listJournal,
   listRuns,
   listSkills,
+  listWorkspaceDirs,
+  putEnvsetSlot,
+  putFeatureConfigDoc,
+  putPlaywrightConfig,
   recommendSkills,
   rejectDraft,
   startRun,
   stopRun,
   pauseHealRun,
+  createEnvset,
+  deleteEnvset,
+  getProjectConfig,
+  putProjectConfig,
+  openAgentApp,
+  sendAgentInput,
 } from './client'
 
 const ok = (body: unknown, status = 200): Response =>
@@ -264,6 +281,121 @@ describe('api client', () => {
   it('deleteDraft throws ApiError on 404', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(fail(404, { error: 'draft not found' }))
     await expect(deleteDraft('missing', { fetchImpl })).rejects.toBeInstanceOf(ApiError)
+  })
+
+  it('getFeatureConfig returns the raw config doc', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(ok({ path: '/p', content: 'x', format: 'cjs' }))
+    const r = await getFeatureConfig('a', { fetchImpl })
+    expect(r.format).toBe('cjs')
+    expect(fetchImpl).toHaveBeenCalledWith('/api/features/a/config', { method: 'GET' })
+  })
+
+  it('getFeatureConfigDoc + putFeatureConfigDoc round-trip', async () => {
+    const doc = { path: '/p', content: 'c', format: 'cjs', parsed: { value: { name: 'a' }, complexFields: [] } }
+    const fetchImpl = vi.fn().mockImplementation(async () => ok(doc))
+    expect(await getFeatureConfigDoc('a', { fetchImpl })).toEqual(doc)
+    await putFeatureConfigDoc('a', { name: 'b' }, { fetchImpl })
+    const init = fetchImpl.mock.calls[1][1] as RequestInit
+    expect(init.method).toBe('PUT')
+    expect(JSON.parse(init.body as string)).toEqual({ value: { name: 'b' } })
+  })
+
+  it('getPlaywrightConfig + putPlaywrightConfig', async () => {
+    const doc = { path: '/p', content: 'c', format: 'ts', parsed: { value: { testDir: './e2e' }, complexFields: [] } }
+    const fetchImpl = vi.fn().mockImplementation(async () => ok(doc))
+    expect(await getPlaywrightConfig('a', { fetchImpl })).toEqual(doc)
+    await putPlaywrightConfig('a', { testDir: './t' }, { fetchImpl })
+    const init = fetchImpl.mock.calls[1][1] as RequestInit
+    expect(init.method).toBe('PUT')
+  })
+
+  it('getEnvsetsIndex / getEnvsetSlot / putEnvsetSlot', async () => {
+    const idx = { envs: [], slotDescriptions: {} }
+    const slot = { path: '/p', content: '', entries: [], unparsedLines: [] }
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(ok(idx))
+      .mockResolvedValueOnce(ok(slot))
+      .mockResolvedValueOnce(ok(slot))
+    expect(await getEnvsetsIndex('a', { fetchImpl })).toEqual(idx)
+    expect(await getEnvsetSlot('a', 'local', 'app.env', { fetchImpl })).toEqual(slot)
+    await putEnvsetSlot('a', 'local', 'app.env', [{ key: 'X', value: '1' }], { fetchImpl })
+    const init = fetchImpl.mock.calls[2][1] as RequestInit
+    expect(init.method).toBe('PUT')
+    expect(JSON.parse(init.body as string)).toEqual({ entries: [{ key: 'X', value: '1' }] })
+  })
+
+  it('listWorkspaceDirs encodes the at param', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(ok({ root: '/r', at: 'sub', dirs: ['a'] }))
+    const r = await listWorkspaceDirs('sub dir', { fetchImpl })
+    expect(r.dirs).toEqual(['a'])
+    expect(fetchImpl.mock.calls[0][0]).toContain('at=')
+  })
+
+  it('listWorkspaceDirs without `at` omits the query param', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(ok({ root: '/r', at: '', dirs: [] }))
+    await listWorkspaceDirs(undefined, { fetchImpl })
+    expect(fetchImpl.mock.calls[0][0]).not.toContain('at=')
+  })
+
+  it('cancelHealRun POSTs to the cancel endpoint', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(ok({ status: 'cancelled' }))
+    await cancelHealRun('r1', { fetchImpl })
+    expect(fetchImpl).toHaveBeenCalledWith('/api/runs/r1/cancel-heal', { method: 'POST' })
+  })
+
+  it('deleteRun delegates to stopRun', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(null, { status: 204 }))
+    await deleteRun('r1', { fetchImpl })
+    expect(fetchImpl).toHaveBeenCalledWith('/api/runs/r1', { method: 'DELETE' })
+  })
+
+  it('createEnvset POSTs the env name', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(ok({ env: 'staging' }))
+    const r = await createEnvset('alpha', 'staging', { fetchImpl })
+    expect(r).toEqual({ env: 'staging' })
+    const [url, init] = fetchImpl.mock.calls[0]
+    expect(url).toBe('/api/features/alpha/envsets')
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(init.body as string)).toEqual({ env: 'staging' })
+  })
+
+  it('deleteEnvset DELETEs the env folder', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(null, { status: 204 }))
+    await deleteEnvset('alpha', 'staging', { fetchImpl })
+    expect(fetchImpl).toHaveBeenCalledWith('/api/features/alpha/envsets/staging', { method: 'DELETE' })
+  })
+
+  it('getProjectConfig GETs /api/project-config', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(ok({ healAgent: 'auto' }))
+    const r = await getProjectConfig({ fetchImpl })
+    expect(r).toEqual({ healAgent: 'auto' })
+    expect(fetchImpl).toHaveBeenCalledWith('/api/project-config', { method: 'GET' })
+  })
+
+  it('putProjectConfig sends the partial config as JSON', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(ok({ healAgent: 'manual' }))
+    await putProjectConfig({ healAgent: 'manual' }, { fetchImpl })
+    const [url, init] = fetchImpl.mock.calls[0]
+    expect(url).toBe('/api/project-config')
+    expect(init.method).toBe('PUT')
+    expect(JSON.parse(init.body as string)).toEqual({ healAgent: 'manual' })
+  })
+
+  it('openAgentApp POSTs the agent name', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(ok({ opened: true }))
+    await openAgentApp('claude', { fetchImpl })
+    const [url, init] = fetchImpl.mock.calls[0]
+    expect(url).toBe('/api/open-agent')
+    expect(JSON.parse(init.body as string)).toEqual({ agent: 'claude' })
+  })
+
+  it('sendAgentInput POSTs the data string', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(ok({ status: 'sent' }))
+    await sendAgentInput('r1', 'hello\n', { fetchImpl })
+    const [url, init] = fetchImpl.mock.calls[0]
+    expect(url).toBe('/api/runs/r1/agent-input')
+    expect(JSON.parse(init.body as string)).toEqual({ data: 'hello\n' })
   })
 
   it('uses globalThis.fetch by default when no fetchImpl provided', async () => {

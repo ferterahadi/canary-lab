@@ -2,8 +2,8 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { RunIndexEntry } from '../api/types'
 import { formatDuration, durationBetween, shortTime } from '../lib/format'
-import { canPauseHeal, canStop, canDelete } from '../lib/run-actions'
-import { ApiError, pauseHealRun, stopRun, deleteRun } from '../api/client'
+import { canPauseHeal, canStop, canDelete, canCancelHeal } from '../lib/run-actions'
+import { ApiError, pauseHealRun, stopRun, deleteRun, cancelHealRun } from '../api/client'
 import { RunStatusIndicator } from './RunStatusIndicator'
 
 interface Props {
@@ -56,9 +56,11 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
   const [pendingPause, setPendingPause] = useState<RunIndexEntry | null>(null)
   const [pendingStop, setPendingStop] = useState<RunIndexEntry | null>(null)
   const [pendingDelete, setPendingDelete] = useState<RunIndexEntry | null>(null)
+  const [pendingCancelHeal, setPendingCancelHeal] = useState<RunIndexEntry | null>(null)
   const [pausingId, setPausingId] = useState<string | null>(null)
   const [stoppingId, setStoppingId] = useState<string | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [cancellingHealId, setCancellingHealId] = useState<string | null>(null)
   const [actionError, setActionError] = useState<{ runId: string; message: string } | null>(null)
   const [openMenuRunId, setOpenMenuRunId] = useState<string | null>(null)
   const [runPopoverOpen, setRunPopoverOpen] = useState(false)
@@ -152,6 +154,21 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
       showError(target.runId, err)
     } finally {
       setStoppingId(null)
+    }
+  }
+
+  const confirmCancelHeal = async (): Promise<void> => {
+    if (!pendingCancelHeal) return
+    const target = pendingCancelHeal
+    setPendingCancelHeal(null)
+    setCancellingHealId(target.runId)
+    try {
+      await cancelHealRun(target.runId)
+      setActionError(null)
+    } catch (err) {
+      showError(target.runId, err)
+    } finally {
+      setCancellingHealId(null)
     }
   }
 
@@ -338,6 +355,18 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
                                 }}
                               />
                             )}
+                            {canCancelHeal(r.status) && (
+                              <ActionButton
+                                label={cancellingHealId === r.runId ? 'Cancelling' : 'Stop Heal'}
+                                icon={ICON_STOP}
+                                disabled={cancellingHealId === r.runId}
+                                variant="danger"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  if (cancellingHealId !== r.runId) setPendingCancelHeal(r)
+                                }}
+                              />
+                            )}
                             <span className="ml-1 inline-flex items-center">
                               <RunStatusIndicator status={r.status} />
                             </span>
@@ -407,6 +436,16 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
           variant="danger"
           onCancel={() => setPendingDelete(null)}
           onConfirm={confirmDelete}
+        />
+      )}
+      {pendingCancelHeal && (
+        <ConfirmDialog
+          title="Stop the heal cycle?"
+          description={`The heal agent for ${pendingCancelHeal.runId} will be terminated. The run will be marked failed and a journal entry will record the cancellation.`}
+          confirmLabel="Stop Heal"
+          variant="danger"
+          onCancel={() => setPendingCancelHeal(null)}
+          onConfirm={confirmCancelHeal}
         />
       )}
     </div>

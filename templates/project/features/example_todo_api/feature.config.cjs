@@ -14,9 +14,14 @@ const config = {
           // `production` skips startup and the production envset points
           // GATEWAY_URL at the remote URL instead.
           envs: ['local'],
+          // Per-env readiness probe. Exactly one transport per probe:
+          //   http: { url, timeoutMs?, deadlineMs? }
+          //   tcp:  { port, host?, timeoutMs?, deadlineMs? }
+          // Production skips the local boot entirely (see `envs` above) but
+          // we still declare a remote http probe for parity.
           healthCheck: {
-            url: 'http://localhost:4000/',
-            timeoutMs: 3000,
+            local:      { http: { url: 'http://localhost:4000/', timeoutMs: 3000 } },
+            production: { http: { url: 'https://example.com/healthz', timeoutMs: 3000 } },
           },
         },
       ],

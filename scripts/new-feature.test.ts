@@ -46,33 +46,38 @@ describe('buildFeatureConfig', () => {
   it('snapshots output for a typical input', () => {
     expect(buildFeatureConfig('cns_webhooks', 'CNS webhook flows'))
       .toMatchInlineSnapshot(`
-      "const config = {
-        name: 'cns_webhooks',
-        description: 'CNS webhook flows',
-        envs: ['local'],
-        repos: [
-          // {
-          //   name: 'your-repo',
-          //   localPath: '/absolute/path/to/your-repo',
-          //   cloneUrl: 'git@github.com:your-org/your-repo.git',
-          //   startCommands: [
-          //     {
-          //       name: 'your-repo dev server',
-          //       command: 'npm run dev',
-          //       healthCheck: {
-          //         url: 'http://localhost:3000/',
-          //         timeoutMs: 2000,
-          //       },
-          //     },
-          //   ],
-          // },
-        ],
-        featureDir: __dirname,
-      }
+        "const config = {
+          name: 'cns_webhooks',
+          description: 'CNS webhook flows',
+          envs: ['local'],
+          repos: [
+            // {
+            //   name: 'your-repo',
+            //   localPath: '/absolute/path/to/your-repo',
+            //   cloneUrl: 'git@github.com:your-org/your-repo.git',
+            //   startCommands: [
+            //     {
+            //       name: 'your-repo dev server',
+            //       command: 'npm run dev',
+            //       // Readiness probe — declare exactly one transport per probe.
+            //       //   { http: { url, timeoutMs?, deadlineMs? } }
+            //       //   { tcp:  { port, host?, timeoutMs?, deadlineMs? } }
+            //       // For multi-env features, use an env-keyed map:
+            //       //   healthCheck: {
+            //       //     local: { tcp:  { port: 3000 } },
+            //       //     beta:  { http: { url: 'https://beta.example.com' } },
+            //       //   }
+            //       healthCheck: { http: { url: 'http://localhost:3000/', timeoutMs: 2000 } },
+            //     },
+            //   ],
+            // },
+          ],
+          featureDir: __dirname,
+        }
 
-      module.exports = { config }
-      "
-    `)
+        module.exports = { config }
+        "
+      `)
   })
 })
 

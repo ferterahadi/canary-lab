@@ -103,6 +103,13 @@ describe('listDrafts', () => {
     fs.writeFileSync(path.join(tmp, 'drafts', 'random.txt'), 'not a draft', 'utf8')
     expect(listDrafts(tmp)).toEqual([])
   })
+
+  it('skips draft directories whose record file is missing', () => {
+    // A directory under drafts/ without the expected draft.json — readDraft
+    // returns null and listDrafts should silently skip the entry.
+    fs.mkdirSync(path.join(tmp, 'drafts', 'orphan'), { recursive: true })
+    expect(listDrafts(tmp)).toEqual([])
+  })
 })
 
 describe('canTransition', () => {
