@@ -5,7 +5,7 @@ import https from 'https'
 import { EventEmitter } from 'events'
 import net from 'net'
 import { resolvePath, normalizeStartCommand, isHealthy, isTcpListening, resolveHealthProbe, validateHealthCheck } from './startup'
-import type { HealthCheck } from './types'
+import type { HealthCheck } from '../../../../../shared/launcher/types'
 
 function mockHttpGet(
   mod: typeof http | typeof https,

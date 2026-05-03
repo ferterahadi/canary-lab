@@ -12,7 +12,7 @@ interface AnyObj {
   [key: string]: unknown
 }
 
-import { c } from '../cli-ui/colors'
+import { c } from '../../../../shared/cli-ui/colors'
 
 const CWD = process.cwd()
 const START = Date.now()

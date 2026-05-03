@@ -11,9 +11,9 @@ import {
   type RunIndexEntry,
   type RunManifest,
   type ServiceStatus,
-} from '../../../shared/e2e-runner/manifest'
-import { runDirFor } from '../../../shared/e2e-runner/run-paths'
-import { FileRunStateSink, type RunStateSink } from '../../../shared/e2e-runner/run-state-sink'
+} from './runtime/manifest'
+import { runDirFor } from './runtime/run-paths'
+import { FileRunStateSink, type RunStateSink } from './runtime/run-state-sink'
 
 // `RunStore` is the single mutator for everything the runs feature persists:
 // `logs/<runId>/manifest.json`, `logs/runs-index.json`, the per-run dirs, and
@@ -232,7 +232,7 @@ export interface AbortResult {
  * polling.
  *
  * The class is composed of a `FileRunStateSink` (the actual file writes,
- * defined in shared/e2e-runner/) plus an EventEmitter and the operational
+ * defined in lib/runtime/) plus an EventEmitter and the operational
  * methods (abort/delete/reapStale) that need access to the orchestrator
  * registry. It satisfies the `RunStateSink` interface so it can be passed
  * directly into the orchestrator constructor.
@@ -374,4 +374,4 @@ export class RunStore extends EventEmitter implements RunStateSink {
 
 // Re-export the manifest types most callers will want alongside RunStore so
 // they don't need a second import.
-export type { RunIndexEntry, RunManifest, ServiceManifestEntry } from '../../../shared/e2e-runner/manifest'
+export type { RunIndexEntry, RunManifest, ServiceManifestEntry } from './runtime/manifest'

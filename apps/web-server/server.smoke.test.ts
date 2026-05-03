@@ -4,8 +4,8 @@ import os from 'os'
 import path from 'path'
 import { createServer } from './server'
 import type { TestsDraftRouteDeps } from './routes/tests-draft'
-import { writeManifest, writeRunsIndex, readManifest } from '../../shared/e2e-runner/manifest'
-import { runDirFor } from '../../shared/e2e-runner/run-paths'
+import { writeManifest, writeRunsIndex, readManifest } from './lib/runtime/manifest'
+import { runDirFor } from './lib/runtime/run-paths'
 
 // Smoke test: exercises createServer() against the real templates/project
 // tree, hitting every read-side endpoint via inject(). Lives next to the

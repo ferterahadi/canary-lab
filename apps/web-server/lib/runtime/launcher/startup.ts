@@ -2,7 +2,7 @@ import http from 'http'
 import https from 'https'
 import net from 'net'
 import os from 'os'
-import type { HealthCheck, HealthProbe, HttpProbe, LegacyHealthProbe, StartCommand, TcpProbe } from './types'
+import type { HealthCheck, HealthProbe, HttpProbe, LegacyHealthProbe, StartCommand, TcpProbe } from '../../../../../shared/launcher/types'
 
 export interface StartTab {
   dir: string

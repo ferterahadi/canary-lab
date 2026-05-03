@@ -1,5 +1,5 @@
 import path from 'path'
-import { getProjectRoot, getFeaturesDir } from '../runtime/project-root'
+import { getProjectRoot, getFeaturesDir } from '../../../../shared/runtime/project-root'
 
 export const ROOT = getProjectRoot()
 export const FEATURES_DIR = getFeaturesDir()

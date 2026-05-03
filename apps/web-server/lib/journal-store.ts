@@ -1,6 +1,6 @@
 import fs from 'fs'
 import path from 'path'
-import { parseJournalMarkdown } from '../../../shared/e2e-runner/log-enrichment'
+import { parseJournalMarkdown } from './runtime/log-enrichment'
 
 // Pure-ish business logic for the journal viewer. The Fastify route layer
 // owns the request shape; this module owns the markdown parsing, filtering,

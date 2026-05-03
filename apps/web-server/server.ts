@@ -21,18 +21,18 @@ import {
   spawnPlanAgent as makePlanAgentSpawner,
   spawnSpecAgent as makeSpecAgentSpawner,
 } from './lib/wizard-agent-runner'
-import { generateRunId } from '../../shared/e2e-runner/run-id'
-import { runDirFor, buildRunPaths } from '../../shared/e2e-runner/run-paths'
-import { RunOrchestrator } from '../../shared/e2e-runner/orchestrator'
+import { generateRunId } from './lib/runtime/run-id'
+import { runDirFor, buildRunPaths } from './lib/runtime/run-paths'
+import { RunOrchestrator } from './lib/runtime/orchestrator'
 import {
   buildOrchestratorHealCommand,
   buildOrchestratorInterjectCommand,
   pickAvailableHealAgent,
   type HealAgent,
-} from '../../shared/e2e-runner/auto-heal'
-import { loadProjectConfig } from '../../shared/launcher/project-config'
-import { RunnerLog } from '../../shared/e2e-runner/runner-log'
-import { realPtyFactory, type PtyFactory } from '../../shared/e2e-runner/pty-spawner'
+} from './lib/runtime/auto-heal'
+import { loadProjectConfig } from './lib/runtime/launcher/project-config'
+import { RunnerLog } from './lib/runtime/runner-log'
+import { realPtyFactory, type PtyFactory } from './lib/runtime/pty-spawner'
 import {
   applySet,
   backup,
@@ -40,8 +40,8 @@ import {
   loadConfig,
   resolveVars,
   restore,
-} from '../../shared/env-switcher/switch'
-import type { BackupRecord } from '../../shared/env-switcher/types'
+} from './lib/runtime/env-switcher/switch'
+import type { BackupRecord } from './lib/runtime/env-switcher/types'
 
 // Apply a feature's envset in-process and return the backups to revert later.
 // Returns null when the feature has no envsets configured (silent skip).

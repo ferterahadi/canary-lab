@@ -1,6 +1,6 @@
 import fs from 'fs'
 import path from 'path'
-import { parseDotenv } from '../lib/dotenv-edit'
+import { parseDotenv } from '../../../../../shared/lib/dotenv-edit'
 
 export interface TokenCtx {
   envName: string | undefined
