@@ -12,7 +12,7 @@ import {
 } from '../lib/config-ast'
 import { parseDotenv, writeDotenv, type KvEntry } from '../lib/dotenv-edit'
 import { loadFeatures } from '../lib/feature-loader'
-import { resolveVars } from '../../../shared/env-switcher/switch'
+import { resolveVars } from '../lib/runtime/env-switcher/switch'
 import { getProjectRoot } from '../../../shared/runtime/project-root'
 
 export interface FeatureConfigRouteDeps {

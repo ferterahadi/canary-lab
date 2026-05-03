@@ -12,8 +12,8 @@ import {
   RunStore,
   type RunStoreEvent,
 } from './run-store'
-import { readManifest, writeManifest, writeRunsIndex, readRunsIndex } from '../../../shared/e2e-runner/manifest'
-import { runDirFor } from '../../../shared/e2e-runner/run-paths'
+import { readManifest, writeManifest, writeRunsIndex, readRunsIndex } from './runtime/manifest'
+import { runDirFor } from './runtime/run-paths'
 
 let tmpDir: string
 beforeEach(() => {

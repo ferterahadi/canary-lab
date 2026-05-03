@@ -1,7 +1,7 @@
 import fs from 'fs'
 import path from 'path'
 import { EventEmitter } from 'events'
-import type { FeatureConfig, HealthProbe, HttpProbe, TcpProbe } from '../launcher/types'
+import type { FeatureConfig, HealthProbe, HttpProbe, TcpProbe } from '../../../../shared/launcher/types'
 import {
   enabledForEnv,
   isHealthy,
@@ -9,7 +9,7 @@ import {
   normalizeStartCommand,
   resolveHealthProbe,
   resolvePath,
-} from '../launcher/startup'
+} from './launcher/startup'
 import {
   buildRunPaths,
   type RunPaths,
@@ -30,7 +30,7 @@ import {
   capArtifacts,
 } from './playwright-mcp-artifacts'
 import { planRestart } from './restart-planner'
-import { interpolateConfigTokens, makeTokenCache } from '../launcher/interpolate'
+import { interpolateConfigTokens, makeTokenCache } from './launcher/interpolate'
 
 // Headless event-emitting orchestrator for a single feature run. Wraps the
 // existing health-check / signal-file semantics behind a clean API the future

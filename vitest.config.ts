@@ -13,32 +13,21 @@ export default defineConfig({
       provider: 'v8',
       reporter: ['text', 'html', 'lcov'],
       reportsDirectory: 'coverage',
-      // Coverage threshold scope is intentionally narrow: the new
-      // business-logic modules introduced (or modified) in the orchestrator
-      // refactor. The CLI shim (`runner.ts`), the AppleScript-free auto-heal
-      // glue (`auto-heal.ts`), and the node-pty wrapper (`pty-spawner.ts`)
-      // are excluded — they're thin I/O glue and can't be exercised
-      // deterministically without a real TTY/native binding.
+      // Coverage threshold scope is intentionally narrow: server runtime
+      // business logic + the web-server's own lib/routes layer + the
+      // frontend's pure API/util modules. Thin I/O glue (`server.ts`,
+      // `ws/`, the formatter scripts, the node-pty wrapper) and the CLI
+      // shims are excluded below.
       include: [
-        'shared/e2e-runner/orchestrator.ts',
-        'shared/e2e-runner/log-enrichment.ts',
-        'shared/e2e-runner/run-id.ts',
-        'shared/e2e-runner/run-paths.ts',
-        'shared/e2e-runner/manifest.ts',
-        'shared/e2e-runner/retention.ts',
-        'shared/e2e-runner/heal-cycle.ts',
-        'shared/e2e-runner/playwright-mcp-artifacts.ts',
-        'shared/e2e-runner/runner-log.ts',
-        'shared/launcher/foreground-pty.ts',
-        // Web-server business logic. Bootstrap (server.ts), WebSocket
-        // wiring (ws/), and CLI glue (scripts/ui-command.ts) are excluded
-        // below — they're thin I/O wrappers around the modules covered here.
+        // Web-server runtime — was `shared/e2e-runner/...` until the
+        // 0.11 cleanup; now lives next to its only consumer.
         'apps/web-server/lib/**/*.ts',
         'apps/web-server/routes/**/*.ts',
         // Frontend pure modules. React components are excluded — only the
         // API client, WebSocket wrapper, and pure utilities are gated.
         'apps/web/src/api/**/*.ts',
         'apps/web/src/lib/**/*.ts',
+        'apps/web/src/state/**/*.ts',
         // 0.9.x → 0.10.x migration: pure detection + report rendering.
         'scripts/upgrade-migration.ts',
         'scripts/upgrade-known-prompts.ts',
@@ -46,12 +35,7 @@ export default defineConfig({
       exclude: [
         '**/*.test.ts',
         '**/*.d.ts',
-        'shared/**/types.ts',
-        'shared/configs/**',
-        'shared/runtime/**',
-        'shared/e2e-runner/runner.ts',
-        'shared/e2e-runner/auto-heal.ts',
-        'shared/e2e-runner/pty-spawner.ts',
+        'shared/**',
         'scripts/cli.ts',
         'scripts/ui-command.ts',
         'apps/web-server/server.ts',
@@ -62,6 +46,14 @@ export default defineConfig({
         // shared/lib/dotenv-edit and is exercised through the routes that
         // import this module.
         'apps/web-server/lib/dotenv-edit.ts',
+        // Thin I/O glue inside the runtime: subprocess scripts (formatters)
+        // and the node-pty wrapper can't be exercised deterministically
+        // without a real TTY / native binding.
+        'apps/web-server/lib/runtime/claude-formatter.ts',
+        'apps/web-server/lib/runtime/codex-formatter.ts',
+        'apps/web-server/lib/runtime/auto-heal.ts',
+        'apps/web-server/lib/runtime/pty-spawner.ts',
+        'apps/web-server/lib/runtime/**/types.ts',
         'apps/web/src/components/**',
         'apps/web/src/pages/**',
         'apps/web/src/main.tsx',

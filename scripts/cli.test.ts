@@ -1,14 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
-const runRunner = vi.fn(async () => {})
-const runEnv = vi.fn(async () => {})
 const createFeature = vi.fn(async () => {})
 const initProject = vi.fn(async () => {})
 const upgradeProject = vi.fn(async () => {})
 const runUi = vi.fn(async () => {})
 
-vi.mock('../shared/e2e-runner/runner', () => ({ main: runRunner }))
-vi.mock('../shared/env-switcher/root-cli', () => ({ main: runEnv }))
 vi.mock('./new-feature', () => ({ main: createFeature }))
 vi.mock('./init-project', () => ({ main: initProject }))
 vi.mock('./upgrade', () => ({ main: upgradeProject }))
@@ -17,8 +13,6 @@ vi.mock('./ui-command', () => ({ runUi }))
 const { main, printUsage } = await import('./cli')
 
 beforeEach(() => {
-  runRunner.mockClear()
-  runEnv.mockClear()
   createFeature.mockClear()
   initProject.mockClear()
   upgradeProject.mockClear()
@@ -32,14 +26,12 @@ describe('printUsage', () => {
     const out = spy.mock.calls.map((c) => c[0]).join('\n')
     spy.mockRestore()
     expect(out).toContain('canary-lab init <folder>')
-    expect(out).toContain('canary-lab run')
     expect(out).toContain('canary-lab ui')
-    expect(out).toContain('--heal-session')
-    expect(out).not.toContain('--terminal')
-    expect(out).not.toContain('--benchmark')
-    expect(out).toContain('canary-lab env')
     expect(out).toContain('canary-lab new-feature <name>')
     expect(out).toContain('canary-lab upgrade')
+    // Removed in 0.11 — both subcommands now redirect to the web UI.
+    expect(out).not.toContain('canary-lab run')
+    expect(out).not.toContain('canary-lab env')
   })
 })
 
@@ -49,19 +41,9 @@ describe('main (cli routing)', () => {
     expect(initProject).toHaveBeenCalledExactlyOnceWith(['myproj', '--package-spec', '^1.0.0'])
   })
 
-  it('routes "run" and forwards remaining args', async () => {
-    await main(['run', '--headed', '--heal-session', 'new'])
-    expect(runRunner).toHaveBeenCalledExactlyOnceWith(['--headed', '--heal-session', 'new'])
-  })
-
   it('routes "ui" and forwards remaining args', async () => {
     await main(['ui', '--port', '8080'])
     expect(runUi).toHaveBeenCalledExactlyOnceWith(['--port', '8080'])
-  })
-
-  it('routes "env"', async () => {
-    await main(['env', '--apply'])
-    expect(runEnv).toHaveBeenCalledExactlyOnceWith(['--apply'])
   })
 
   it('routes "new-feature"', async () => {
@@ -77,6 +59,19 @@ describe('main (cli routing)', () => {
     )
   })
 
+  it.each([['run'], ['env']] as const)('"%s" prints a migration hint and exits 1', async (cmd) => {
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const exitSpy = vi
+      .spyOn(process, 'exit')
+      .mockImplementation(((code?: number) => {
+        throw new Error(`__exit__${code}`)
+      }) as never)
+    await expect(main([cmd])).rejects.toThrow('__exit__1')
+    expect(errSpy).toHaveBeenCalledWith(expect.stringContaining('canary-lab ui'))
+    errSpy.mockRestore()
+    exitSpy.mockRestore()
+  })
+
   it('prints usage for -h / --help / no command', async () => {
     const spy = vi.spyOn(console, 'log').mockImplementation(() => {})
     await main(['-h'])
@@ -84,7 +79,6 @@ describe('main (cli routing)', () => {
     await main([])
     spy.mockRestore()
     expect(initProject).not.toHaveBeenCalled()
-    expect(runRunner).not.toHaveBeenCalled()
   })
 
   it('unknown command prints error + usage + exits 1', async () => {

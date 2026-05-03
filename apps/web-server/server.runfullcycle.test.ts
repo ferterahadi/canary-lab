@@ -4,10 +4,10 @@ import os from 'os'
 import path from 'path'
 import { EventEmitter } from 'events'
 import { createServer } from './server'
-import { RunOrchestrator } from '../../shared/e2e-runner/orchestrator'
-import { generateRunId } from '../../shared/e2e-runner/run-id'
-import { runDirFor } from '../../shared/e2e-runner/run-paths'
-import type { PtyFactory, PtyHandle, PtySpawnOptions } from '../../shared/e2e-runner/pty-spawner'
+import { RunOrchestrator } from './lib/runtime/orchestrator'
+import { generateRunId } from './lib/runtime/run-id'
+import { runDirFor } from './lib/runtime/run-paths'
+import type { PtyFactory, PtyHandle, PtySpawnOptions } from './lib/runtime/pty-spawner'
 
 // End-to-end check: POST /api/runs against the broken_todo_api fixture, drive
 // the orchestrator with a fake ptyFactory so we don't need real Playwright,

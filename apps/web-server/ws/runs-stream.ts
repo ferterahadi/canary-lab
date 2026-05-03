@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify'
 import type { RunStore, RunStoreEvent, RunDetail } from '../lib/run-store'
-import type { RunIndexEntry } from '../../../shared/e2e-runner/manifest'
+import type { RunIndexEntry } from '../lib/runtime/manifest'
 
 // `/ws/runs` — push channel that replaces the browser's polling. On connect,
 // sends a single `snapshot` frame with the runs index. Subsequent mutations

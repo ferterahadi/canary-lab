@@ -3,7 +3,7 @@ import * as path from 'path';
 import * as readline from 'readline';
 import { spawn } from 'child_process';
 import type { EnvSetsConfig, BackupRecord } from './types.js';
-import { getFeaturesDir, getProjectRoot } from '../runtime/project-root';
+import { getFeaturesDir, getProjectRoot } from '../../../../../shared/runtime/project-root';
 
 
 export function resolveVars(str: string, appRoots: Record<string, string>): string {

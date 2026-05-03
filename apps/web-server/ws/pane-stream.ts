@@ -3,8 +3,8 @@ import path from 'path'
 import type { FastifyInstance } from 'fastify'
 import type { PaneBroker, PaneId, PaneSubscriber } from '../lib/pane-broker'
 import type { OrchestratorRegistry } from '../lib/run-store'
-import { readManifest } from '../../../shared/e2e-runner/manifest'
-import { buildRunPaths, runDirFor } from '../../../shared/e2e-runner/run-paths'
+import { readManifest } from '../lib/runtime/manifest'
+import { buildRunPaths, runDirFor } from '../lib/runtime/run-paths'
 
 // Wires Fastify's WebSocket plugin to the per-run PaneBroker. Coverage is
 // excluded for this module — the wire-up is too thin to test deterministically

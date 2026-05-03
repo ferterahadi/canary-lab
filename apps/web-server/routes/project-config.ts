@@ -5,7 +5,7 @@ import {
   saveProjectConfig,
   type HealAgentChoice,
   type ProjectConfig,
-} from '../../../shared/launcher/project-config'
+} from '../lib/runtime/launcher/project-config'
 
 export interface ProjectConfigRouteDeps {
   projectRoot: string

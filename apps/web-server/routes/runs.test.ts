@@ -5,8 +5,8 @@ import path from 'path'
 import Fastify from 'fastify'
 import { runsRoutes } from './runs'
 import { createRegistry, RunStore, type OrchestratorLike } from '../lib/run-store'
-import { writeManifest, writeRunsIndex } from '../../../shared/e2e-runner/manifest'
-import { runDirFor } from '../../../shared/e2e-runner/run-paths'
+import { writeManifest, writeRunsIndex } from '../lib/runtime/manifest'
+import { runDirFor } from '../lib/runtime/run-paths'
 
 let tmpDir: string
 let logsDir: string

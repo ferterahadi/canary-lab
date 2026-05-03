@@ -9,7 +9,7 @@ import {
   type ServiceSpec,
 } from './orchestrator'
 import type { PtyFactory, PtyHandle, PtySpawnOptions } from './pty-spawner'
-import type { FeatureConfig } from '../launcher/types'
+import type { FeatureConfig } from '../../../../shared/launcher/types'
 import { runDirFor, buildRunPaths } from './run-paths'
 import { readManifest, readRunsIndex } from './manifest'
 import { RunnerLog } from './runner-log'

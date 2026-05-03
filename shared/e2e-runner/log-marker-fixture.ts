@@ -1,6 +1,13 @@
 import { test as base } from '@playwright/test'
 import fs from 'fs'
-import { MANIFEST_PATH } from './paths'
+import path from 'path'
+import { getProjectRoot } from '../runtime/project-root'
+
+// Resolved at module load — same shape as the (now-moved) constant the
+// web-server's runtime uses, just inlined here so this published fixture
+// has no dependency on apps/web-server/. The published file ships to user
+// templates via `canary-lab/feature-support/log-marker-fixture`.
+const MANIFEST_PATH = path.join(getProjectRoot(), 'logs', 'manifest.json')
 
 export function slugify(title: string): string {
   return title

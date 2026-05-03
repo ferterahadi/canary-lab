@@ -3,8 +3,8 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { resolveLogPath } from './pane-stream'
-import { writeManifest } from '../../../shared/e2e-runner/manifest'
-import { runDirFor, buildRunPaths } from '../../../shared/e2e-runner/run-paths'
+import { writeManifest } from '../lib/runtime/manifest'
+import { runDirFor, buildRunPaths } from '../lib/runtime/run-paths'
 
 let logsDir: string
 const runId = 'r-pane-test'

@@ -3,7 +3,7 @@ import type {
   SpecAgentInput,
 } from '../routes/tests-draft'
 import type { PaneBroker } from './pane-broker'
-import type { PtyFactory } from '../../../shared/e2e-runner/pty-spawner'
+import type { PtyFactory } from './runtime/pty-spawner'
 import {
   buildClaudeCommand,
   buildPlanPrompt,

@@ -1,11 +1,10 @@
 import fs from 'fs'
 import path from 'path'
 import type { FeatureConfig } from '../../../shared/launcher/types'
-import { normalizeStartCommand, validateHealthCheck } from '../../../shared/launcher/startup'
+import { normalizeStartCommand, validateHealthCheck } from './runtime/launcher/startup'
 
 // Discover features by scanning <featuresDir>/<feature>/feature.config.{cjs,js,ts}.
-// Mirrors `discoverFeatures` in shared/e2e-runner/runner.ts but takes an
-// explicit featuresDir so tests can point at a fixture tree.
+// Takes an explicit featuresDir so tests can point at a fixture tree.
 
 export function loadFeatures(featuresDir: string): FeatureConfig[] {
   if (!fs.existsSync(featuresDir)) return []
