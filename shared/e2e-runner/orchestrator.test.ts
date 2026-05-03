@@ -841,6 +841,29 @@ describe('RunOrchestrator.runFullCycle', () => {
     await orch.stop('passed')
   })
 
+  it('abort during auto-heal-eligible run does NOT spawn a heal agent', async () => {
+    // Regression: with autoHeal configured, after stop() killed the
+    // Playwright pty, runFullCycle would fall through into the heal loop
+    // and spawn a fresh heal agent — the user had no way to stop it
+    // because the manifest already said 'aborted' and the UI's Stop
+    // button was gone. Guards inside runFullCycle now bail out as soon as
+    // `this.stopped` is true.
+    const f = makeFakeFactory()
+    const orch = bootForFullCycle({ spawned: f, pwExitCodes: [1], autoHeal: true })
+    const promise = orch.runFullCycle()
+    await new Promise((r) => setTimeout(r, 5))
+    // f.spawned: [0]=service, [1]=playwright. Abort while pw is running.
+    await orch.stop('aborted')
+    // Killed pw resolves with a "fail" exit code that, pre-fix, would
+    // satisfy the auto-heal entry condition.
+    f.spawned[1].emitExit(1)
+    await promise
+    // Only the service + playwright ptys should have been spawned. A heal
+    // agent pty would be index [2] — its absence is the regression check.
+    expect(f.spawned).toHaveLength(2)
+    expect(readManifest(orch.paths.manifestPath)?.status).toBe('aborted')
+  })
+
   it('abort mid-run keeps manifest=aborted regardless of the pty exit code', async () => {
     // Regression: clicking Abort while runPlaywright is in flight used to
     // race the playwright pty's exit code. The exit-code branch in

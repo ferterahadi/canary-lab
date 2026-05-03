@@ -888,6 +888,12 @@ export class RunOrchestrator extends EventEmitter {
   async runFullCycle(): Promise<RunManifest['status']> {
     await this.start()
     let exitCode = await this.runPlaywright()
+    // If the user clicked Abort while Playwright was running, bail out
+    // immediately — don't compute a finalStatus from the killed pty's
+    // exit code, and don't fall through into the heal loop where a fresh
+    // heal agent would otherwise be spawned. `stop()` has already written
+    // 'aborted' to the manifest; honor it.
+    if (this.stopped) return this.status
     let finalStatus: RunManifest['status'] = exitCode === 0 ? 'passed' : 'failed'
     // If the user clicked Pause & Heal, Playwright was killed on purpose —
     // a graceful exitCode 0 must NOT mark the run "passed". The
@@ -949,6 +955,11 @@ export class RunOrchestrator extends EventEmitter {
           await this.rerun()
         }
         exitCode = await this.runPlaywright()
+        // Manual-heal mirror of the auto-heal abort guard: the top of the
+        // loop already checks `stopped`, but the killed Playwright pty's
+        // exit code arrives after the abort flips the flag — don't
+        // compute a finalStatus from it.
+        if (this.stopped) return this.status
         finalStatus = exitCode === 0 ? 'passed' : 'failed'
         this.setStatus(finalStatus)
         if (exitCode === 0) break
@@ -957,6 +968,12 @@ export class RunOrchestrator extends EventEmitter {
     }
 
     if (!this.autoHeal) return finalStatus
+
+    // Same abort guard as above: if the user aborted between Playwright
+    // exiting and the heal-loop entry, never spawn a heal agent. Without
+    // this, auto-heal would race past stop() and start a fresh heal pty
+    // the user has no way to interrupt (the row is already 'aborted').
+    if (this.stopped) return this.status
 
     const heal = new HealCycleState({
       maxCycles: this.autoHeal.maxCycles ?? AUTO_HEAL_MAX_CYCLES,
@@ -975,6 +992,9 @@ export class RunOrchestrator extends EventEmitter {
     }
 
     while (true) {
+      // Abort wins over everything else: if stop() ran while we were
+      // between iterations, exit before spawning the next heal agent.
+      if (this.stopped) return this.status
       const summary = readSummary(this.paths.summaryPath)
       const failedSlugs = extractFailedSlugs(summary)
       const signature = failedSlugs.slice().sort().join('|')
@@ -987,6 +1007,12 @@ export class RunOrchestrator extends EventEmitter {
       this.noteHealCycle()
 
       const { signal } = await this.runHealAgent({ cycle: cycleNum, failedSlugs })
+
+      // Abort during the heal agent run — stop() already killed the agent
+      // pty and wrote 'aborted'. Don't fall through to the failure branch
+      // (which would call setStatus('failed'), no-op, but we'd still
+      // return 'failed' from this function — confusing for callers).
+      if (this.stopped) return this.status
 
       // User cancelled mid-cycle (cancelHeal()) — terminate the loop without
       // re-running Playwright, regardless of whether a signal landed first.
@@ -1038,6 +1064,10 @@ export class RunOrchestrator extends EventEmitter {
       }
 
       exitCode = await this.runPlaywright()
+      // Abort during the post-heal Playwright rerun — same reasoning as
+      // the earlier guards: don't compute a finalStatus from the killed
+      // pty and don't loop further.
+      if (this.stopped) return this.status
       finalStatus = exitCode === 0 ? 'passed' : 'failed'
       this.setStatus(finalStatus)
       if (exitCode === 0) break
