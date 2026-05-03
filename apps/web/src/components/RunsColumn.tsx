@@ -16,13 +16,13 @@ interface Props {
   runDisabled?: boolean
   runDisabledReason?: string
   /**
-   * Optimistic-delete hook. When provided, the parent owns the runs list and
-   * is told to remove a runId immediately on confirm; we'll fall back to a
-   * full refetch if the API call fails. Lets the row vanish in the same
-   * frame as the click instead of waiting for the next 5s poll.
+   * Refresh hook called once the server confirms a delete (or a stop) so
+   * the row leaves the list promptly without waiting for the next 5s
+   * poll. Intentionally NOT used for optimistic updates — the row stays
+   * visible (with a "DELETING" overlay) until the server confirms, so a
+   * disrupted connection or a 409 from the backend doesn't silently
+   * remove a run from the user's view.
    */
-  onOptimisticDelete?: (runId: string) => void
-  /** Refresh hook used to roll back an optimistic delete on API failure. */
   onRefreshRuns?: () => void
 }
 
@@ -50,7 +50,17 @@ const ICON_PAUSE = (
 // pops over with the same options.
 const COMPACT_THRESHOLD_PX = 360
 
-export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRun, onStartRun, runDisabled, runDisabledReason, onOptimisticDelete, onRefreshRuns }: Props) {
+// `fetch` rejects with a TypeError when the connection itself fails (server
+// down, network drop, DNS, CORS). The browser doesn't expose a structured
+// error code, so we sniff the message — Chrome/Firefox/Safari all use some
+// variant of "Failed to fetch" / "NetworkError" / "Load failed".
+function isNetworkError(err: unknown): boolean {
+  if (!(err instanceof TypeError)) return false
+  const msg = err.message.toLowerCase()
+  return msg.includes('fetch') || msg.includes('network') || msg.includes('load failed')
+}
+
+export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRun, onStartRun, runDisabled, runDisabledReason, onRefreshRuns }: Props) {
   const [envOverride, setEnvOverride] = useState<string | null>(null)
   const selectedEnv = envOverride && envs.includes(envOverride) ? envOverride : envs[0] ?? ''
   const [pendingPause, setPendingPause] = useState<RunIndexEntry | null>(null)
@@ -115,8 +125,23 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
 
   const showError = (runId: string, err: unknown): void => {
     let message: string
-    if (err instanceof ApiError && err.body && typeof err.body === 'object' && 'reason' in err.body) {
-      message = String((err.body as { reason: unknown }).reason)
+    if (err instanceof ApiError) {
+      // Server responded with a non-2xx. Prefer the structured `reason`
+      // from a 409 body, then fall back to `error`, then the generic
+      // `HTTP <status>` message.
+      const body = err.body
+      if (body && typeof body === 'object' && 'reason' in body) {
+        message = String((body as { reason: unknown }).reason)
+      } else if (body && typeof body === 'object' && 'error' in body) {
+        message = String((body as { error: unknown }).error)
+      } else {
+        message = err.message
+      }
+    } else if (isNetworkError(err)) {
+      // fetch() throws `TypeError: Failed to fetch` on connection drop /
+      // server gone. Surface it as something the user can act on rather
+      // than a JS-y stack-trace word salad.
+      message = 'Lost connection to server. Check that the server is running.'
     } else {
       message = err instanceof Error ? err.message : String(err)
     }
@@ -124,7 +149,7 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
     if (errorTimer.current) clearTimeout(errorTimer.current)
     errorTimer.current = setTimeout(() => {
       setActionError((cur) => (cur && cur.runId === runId ? null : cur))
-    }, 3000)
+    }, 5000)
   }
 
   const confirmPause = async (): Promise<void> => {
@@ -150,6 +175,10 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
     try {
       await stopRun(target.runId)
       setActionError(null)
+      // Refresh so the row's status flips from 'aborting' (transient) to
+      // 'aborted' (persisted) quickly. Without this we'd wait up to 5s
+      // for the next poll while the badge sits on the transient state.
+      if (onRefreshRuns) onRefreshRuns()
     } catch (err) {
       showError(target.runId, err)
     } finally {
@@ -177,21 +206,22 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
     const target = pendingDelete
     setPendingDelete(null)
     setDeletingId(target.runId)
-    // Optimistic: tell the parent to drop the row immediately so it vanishes
-    // in the same frame as the click. We still keep `deletingId` set in case
-    // the parent doesn't own the list (no `onOptimisticDelete` prop) — then
-    // the in-flight overlay below kicks in until the next poll.
-    if (onOptimisticDelete) onOptimisticDelete(target.runId)
-    // Clear selection eagerly so the right pane doesn't briefly 404 against
-    // a runId we're already removing.
-    if (selectedRunId === target.runId) onSelectRun(null)
     try {
       await deleteRun(target.runId)
       setActionError(null)
-    } catch (err) {
-      showError(target.runId, err)
-      // Roll back the optimistic removal by refetching the canonical list.
+      // Server confirmed the delete — clear selection (the right pane
+      // would otherwise 404 against a runId that no longer exists) and
+      // refresh the list so the row leaves immediately rather than at
+      // the next 5s poll.
+      if (selectedRunId === target.runId) onSelectRun(null)
       if (onRefreshRuns) onRefreshRuns()
+    } catch (err) {
+      // No optimistic update to roll back. The row simply stays visible
+      // and the error chip explains why (409 from the server, network
+      // drop, etc.). A background refresh would mask a transient failure
+      // if the server actually did delete it — the next 5s poll handles
+      // that case naturally.
+      showError(target.runId, err)
     } finally {
       setDeletingId(null)
     }
@@ -275,12 +305,12 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
                 : null
               const displayStatus = deriveDisplayStatus(r.status, transient)
               if (isDeleting) {
-                // In-flight overlay: row is greyed out, inert, and shows a
-                // pulsing "… deleting …" indicator. Only visible if the
-                // optimistic remove didn't already strip the row from the
-                // list (i.e., the parent is on an older client that doesn't
-                // pass `onOptimisticDelete`, OR the API takes long enough to
-                // matter).
+                // In-flight overlay: row is greyed out, inert, and the
+                // `DELETING` badge from the indicator pulses next to the
+                // run id. The row stays mounted until the server confirms
+                // the delete (no optimistic removal) so a network drop or
+                // 409 leaves the user with something to see + recover
+                // from, rather than a row that silently vanished.
                 return (
                   <li key={r.runId}>
                     <div
@@ -291,19 +321,16 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
                         borderBottom: '1px solid var(--border-default)',
                         background: 'transparent',
                         borderLeft: '2px solid transparent',
-                        opacity: 0.55,
+                        opacity: 0.6,
                       }}
                     >
                       <div className="flex w-full items-center justify-between gap-2">
                         <span className="shrink-0 text-xs" style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>{shortTime(r.startedAt)}</span>
-                        <span className="inline-flex items-center gap-1.5 text-[10px] uppercase tracking-[0.12em] text-rose-500/80 dark:text-rose-400/80 animate-pulse">
-                          <span className="inline-flex h-1.5 w-1.5 rounded-full bg-rose-500/80" />
-                          … deleting …
-                        </span>
+                        <RunStatusIndicator status={displayStatus} />
                       </div>
                       <div className="flex w-full items-center justify-between text-[11px]" style={{ color: 'var(--text-muted)' }}>
-                        <span className="h-2 w-32 rounded bg-rose-500/10 animate-pulse" />
-                        {dur != null && <span className="opacity-50">{formatDuration(dur)}</span>}
+                        <span className="truncate" style={{ fontFamily: 'var(--font-mono)' }}>{r.runId}</span>
+                        {dur != null && <span className="opacity-60">{formatDuration(dur)}</span>}
                       </div>
                     </div>
                   </li>
