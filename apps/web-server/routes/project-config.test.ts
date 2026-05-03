@@ -144,6 +144,50 @@ describe('POST /api/open-agent', () => {
     }
   })
 
+  it('uses cmd /c start on win32', async () => {
+    spawnMock.mockClear()
+    const orig = process.platform
+    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true })
+    try {
+      const app = await makeApp()
+      try {
+        const r = await app.inject({
+          method: 'POST',
+          url: '/api/open-agent',
+          payload: { agent: 'claude' },
+        })
+        expect(r.statusCode).toBe(200)
+        expect(spawnMock.mock.calls[0][0]).toBe('cmd')
+      } finally {
+        await app.close()
+      }
+    } finally {
+      Object.defineProperty(process, 'platform', { value: orig, configurable: true })
+    }
+  })
+
+  it('falls back to lowercased binary on linux', async () => {
+    spawnMock.mockClear()
+    const orig = process.platform
+    Object.defineProperty(process, 'platform', { value: 'linux', configurable: true })
+    try {
+      const app = await makeApp()
+      try {
+        const r = await app.inject({
+          method: 'POST',
+          url: '/api/open-agent',
+          payload: { agent: 'codex' },
+        })
+        expect(r.statusCode).toBe(200)
+        expect(spawnMock.mock.calls[0][0]).toBe('codex')
+      } finally {
+        await app.close()
+      }
+    } finally {
+      Object.defineProperty(process, 'platform', { value: orig, configurable: true })
+    }
+  })
+
   it('handles spawn throwing as a 500', async () => {
     spawnMock.mockImplementationOnce(() => { throw new Error('boom') })
     const app = await makeApp()

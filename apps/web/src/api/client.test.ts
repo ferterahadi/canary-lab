@@ -3,9 +3,14 @@ import {
   ApiError,
   acceptPlan,
   acceptSpec,
+  addEnvsetSlot,
+  browseDir,
   cancelHealRun,
+  checkPathExists,
+  cloneRepository,
   createDraft,
   deleteDraft,
+  deleteEnvsetSlot,
   deleteJournalEntry,
   deleteRun,
   getDraft,
@@ -15,6 +20,7 @@ import {
   getFeatureConfig,
   getFeatureConfigDoc,
   getFeatureTests,
+  getGitRemote,
   getPlaywrightConfig,
   getRunDetail,
   listFeatures,
@@ -396,6 +402,79 @@ describe('api client', () => {
     const [url, init] = fetchImpl.mock.calls[0]
     expect(url).toBe('/api/runs/r1/agent-input')
     expect(JSON.parse(init.body as string)).toEqual({ data: 'hello\n' })
+  })
+
+  it('addEnvsetSlot POSTs the body', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(ok({ slot: 'app.env' }, 201))
+    const r = await addEnvsetSlot(
+      'alpha',
+      { sourcePath: '/x/app.env', slotName: 'app.env', target: '/abs', description: 'd' },
+      { fetchImpl },
+    )
+    expect(r).toEqual({ slot: 'app.env' })
+    const [url, init] = fetchImpl.mock.calls[0]
+    expect(url).toBe('/api/features/alpha/envsets/slots')
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(init.body as string)).toMatchObject({ sourcePath: '/x/app.env' })
+  })
+
+  it('deleteEnvsetSlot DELETEs and resolves on 204', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(null, { status: 204 }))
+    await deleteEnvsetSlot('alpha', 'app.env', { fetchImpl })
+    expect(fetchImpl).toHaveBeenCalledWith(
+      '/api/features/alpha/envsets/slots/app.env',
+      { method: 'DELETE' },
+    )
+  })
+
+  it('browseDir GETs with the dir query param', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(ok({ dir: '/x', parent: '/', entries: [] }))
+    await browseDir('/x y', { fetchImpl })
+    expect(fetchImpl.mock.calls[0][0]).toBe('/api/fs/browse?dir=%2Fx%20y')
+  })
+
+  it('browseDir omits ?dir= when path is empty', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(ok({ dir: '/', parent: null, entries: [] }))
+    await browseDir('', { fetchImpl })
+    expect(fetchImpl.mock.calls[0][0]).toBe('/api/fs/browse')
+  })
+
+  it('getGitRemote sends the path query param', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(ok({ cloneUrl: 'git@x:o/r.git' }))
+    const r = await getGitRemote('/abs/path', { fetchImpl })
+    expect(r.cloneUrl).toBe('git@x:o/r.git')
+    expect(fetchImpl.mock.calls[0][0]).toBe('/api/workspace/git-remote?path=%2Fabs%2Fpath')
+  })
+
+  it('checkPathExists sends the path query param', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(ok({ exists: true }))
+    const r = await checkPathExists('/abs/path', { fetchImpl })
+    expect(r.exists).toBe(true)
+    expect(fetchImpl.mock.calls[0][0]).toBe('/api/workspace/path-exists?path=%2Fabs%2Fpath')
+  })
+
+  it('cloneRepository POSTs body and returns localPath', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(ok({ localPath: '/x/repo' }))
+    const r = await cloneRepository(
+      { cloneUrl: 'git@x:o/r.git', parentDir: '/x', repoName: 'repo' },
+      { fetchImpl },
+    )
+    expect(r).toEqual({ localPath: '/x/repo' })
+    const [url, init] = fetchImpl.mock.calls[0]
+    expect(url).toBe('/api/workspace/clone')
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(init.body as string)).toEqual({
+      cloneUrl: 'git@x:o/r.git',
+      parentDir: '/x',
+      repoName: 'repo',
+    })
+  })
+
+  it('startRun includes env when provided', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(ok({ runId: 'r-env' }, 201))
+    await startRun('feat-x', { fetchImpl, env: 'production' })
+    const init = fetchImpl.mock.calls[0][1] as RequestInit
+    expect(JSON.parse(init.body as string)).toEqual({ feature: 'feat-x', env: 'production' })
   })
 
   it('uses globalThis.fetch by default when no fetchImpl provided', async () => {
