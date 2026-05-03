@@ -1,9 +1,24 @@
 import { useEffect, useState } from 'react'
 import * as api from '../../api/client'
-import { FieldRow, IconButton, PlusIcon, SectionHeader, Select, TextInput, TrashIcon } from './atoms'
+import { ConfirmModal, FieldRow, FolderIcon, HintIcon, IconButton, Modal, PlusIcon, SectionHeader, TextInput, TrashIcon } from './atoms'
 import { SaveBar } from './SaveBar'
 
+const NEW_ENV_SENTINEL = '__new_env__'
+const NEW_SLOT_SENTINEL = '__new_slot__'
+
+const inlineSelectStyle = {
+  backgroundColor: 'var(--bg-elevated)',
+  border: '1px solid var(--border-default)',
+  color: 'var(--text-primary)',
+  fontFamily: 'var(--font-mono)',
+} as const
+
 interface KvEntry { key: string; value: string }
+
+function stripFeaturePrefix(slot: string, feature: string): string {
+  return slot.startsWith(`${feature}.`) ? slot.slice(feature.length + 1) : slot
+}
+
 
 export function EnvsetsTab({ feature }: { feature: string }) {
   const [index, setIndex] = useState<api.EnvsetIndex | null>(null)
@@ -13,6 +28,9 @@ export function EnvsetsTab({ feature }: { feature: string }) {
   const [adding, setAdding] = useState(false)
   const [newEnvName, setNewEnvName] = useState('')
   const [busy, setBusy] = useState(false)
+  const [confirmDeleteEnv, setConfirmDeleteEnv] = useState<string | null>(null)
+  const [confirmDeleteSlot, setConfirmDeleteSlot] = useState<string | null>(null)
+  const [addSlotOpen, setAddSlotOpen] = useState(false)
 
   const refresh = (): Promise<void> =>
     api.getEnvsetsIndex(feature)
@@ -60,7 +78,6 @@ export function EnvsetsTab({ feature }: { feature: string }) {
   }
 
   const onDeleteEnv = async (name: string): Promise<void> => {
-    if (!confirm(`Delete env "${name}"? This removes the folder and all its slot files.`)) return
     setBusy(true)
     setError(null)
     try {
@@ -72,7 +89,32 @@ export function EnvsetsTab({ feature }: { feature: string }) {
       setError(e instanceof Error ? e.message : 'Delete failed')
     } finally {
       setBusy(false)
+      setConfirmDeleteEnv(null)
     }
+  }
+
+  const onDeleteSlot = async (slotName: string): Promise<void> => {
+    setBusy(true)
+    setError(null)
+    try {
+      await api.deleteEnvsetSlot(feature, slotName)
+      const fresh = await api.getEnvsetsIndex(feature)
+      setIndex(fresh)
+      const currentEnv = fresh.envs.find((e) => e.name === env) ?? fresh.envs[0]
+      setSlot(currentEnv?.slots[0] ?? null)
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Delete failed')
+    } finally {
+      setBusy(false)
+      setConfirmDeleteSlot(null)
+    }
+  }
+
+  const onSlotAdded = async (slotName: string): Promise<void> => {
+    const fresh = await api.getEnvsetsIndex(feature)
+    setIndex(fresh)
+    setAddSlotOpen(false)
+    setSlot(slotName)
   }
 
   if (error && !index) {
@@ -85,87 +127,127 @@ export function EnvsetsTab({ feature }: { feature: string }) {
   const envObj = index.envs.find((e) => e.name === env) ?? index.envs[0]
   const slotName = envObj && slot && envObj.slots.includes(slot) ? slot : envObj?.slots[0]
 
+  const slotTarget = slotName ? index.slotTargets?.[slotName] : undefined
+
   return (
     <div className="flex h-full flex-col">
       <div
-        className="flex flex-wrap items-center gap-3 px-4 py-2.5"
+        className="px-4 py-2 text-[11px]"
+        style={{ color: 'var(--text-muted)', borderBottom: '1px solid var(--border-default)' }}
+      >
+        Envsets temporarily replace environment files in the linked repos during a run. Pick an env, then edit each slot's values.
+      </div>
+      <div
+        className="flex flex-col gap-1 px-4 py-3"
         style={{ borderBottom: '1px solid var(--border-default)' }}
       >
-        {index.envs.length > 0 && envObj ? (
+        {index.envs.length === 0 || !envObj ? (
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
+              No envs yet. Create one to get started.
+            </span>
+            <NewEnvControl
+              adding={adding}
+              busy={busy}
+              newEnvName={newEnvName}
+              setNewEnvName={setNewEnvName}
+              setAdding={setAdding}
+              onAddEnv={onAddEnv}
+            />
+          </div>
+        ) : (
           <>
             <FieldRow label="Env" layout="inline">
-              <div className="flex items-center gap-1.5">
-                <Select
-                  value={envObj.name}
-                  onChange={(v) => {
-                    setEnv(v)
-                    const next = index.envs.find((e) => e.name === v)
-                    setSlot(next?.slots[0] ?? null)
-                  }}
-                  options={index.envs.map((e) => ({ value: e.name, label: e.name }))}
-                />
+              <div className="flex items-center justify-between gap-1.5">
+                {adding ? (
+                  <NewEnvControl
+                    adding={adding}
+                    busy={busy}
+                    newEnvName={newEnvName}
+                    setNewEnvName={setNewEnvName}
+                    setAdding={setAdding}
+                    onAddEnv={onAddEnv}
+                  />
+                ) : (
+                  <select
+                    value={envObj.name}
+                    onChange={(e) => {
+                      const v = e.target.value
+                      if (v === NEW_ENV_SENTINEL) {
+                        setAdding(true)
+                        return
+                      }
+                      setEnv(v)
+                      const next = index.envs.find((e2) => e2.name === v)
+                      setSlot(next?.slots[0] ?? null)
+                    }}
+                    className="themed-select w-44 rounded-md py-1.5 pl-2.5 pr-8 text-xs outline-none"
+                    style={inlineSelectStyle}
+                  >
+                    {index.envs.map((e) => (
+                      <option key={e.name} value={e.name}>{e.name}</option>
+                    ))}
+                    <option disabled>──────────</option>
+                    <option value={NEW_ENV_SENTINEL}>+ New env…</option>
+                  </select>
+                )}
                 <IconButton
                   ariaLabel="Delete env"
                   variant="danger"
-                  onClick={() => { if (!busy) onDeleteEnv(envObj.name) }}
+                  onClick={() => { if (!busy) setConfirmDeleteEnv(envObj.name) }}
                 >
                   <TrashIcon />
                 </IconButton>
               </div>
             </FieldRow>
-            {slotName ? (
-              <FieldRow label="Slot" layout="inline" hint={index.slotDescriptions[slotName]}>
-                <Select
-                  value={slotName}
-                  onChange={(v) => setSlot(v)}
-                  options={envObj.slots.map((s) => ({ value: s, label: s }))}
-                />
-              </FieldRow>
-            ) : null}
-          </>
-        ) : (
-          <div className="text-xs" style={{ color: 'var(--text-muted)' }}>
-            No envs yet. Add one to get started.
-          </div>
-        )}
-        <div className="ml-auto">
-          {adding ? (
-            <div className="flex items-center gap-1.5">
-              <TextInput
-                value={newEnvName}
-                onChange={setNewEnvName}
-                placeholder="e.g. production"
-              />
-              <button
-                type="button"
-                onClick={onAddEnv}
-                disabled={busy || !newEnvName.trim()}
-                className="rounded-md px-2 py-1 text-[10px] uppercase tracking-wider"
-                style={{ color: 'var(--text-primary)', border: '1px solid var(--border-default)' }}
-              >
-                Add
-              </button>
-              <button
-                type="button"
-                onClick={() => { setAdding(false); setNewEnvName('') }}
-                className="rounded-md px-2 py-1 text-[10px] uppercase tracking-wider"
-                style={{ color: 'var(--text-muted)' }}
-              >
-                Cancel
-              </button>
-            </div>
-          ) : (
-            <button
-              type="button"
-              onClick={() => setAdding(true)}
-              className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[10px] uppercase tracking-wider"
-              style={{ color: 'var(--text-muted)', border: '1px dashed var(--border-default)' }}
+            <FieldRow
+              label="Slot"
+              layout="inline"
+              hint={slotName ? index.slotDescriptions[slotName] : undefined}
             >
-              <PlusIcon />
-              New env
-            </button>
-          )}
-        </div>
+              <div className="flex items-center justify-between gap-1.5">
+                <div className="flex items-center gap-2">
+                  <select
+                    value={slotName ?? ''}
+                    onChange={(e) => {
+                      const v = e.target.value
+                      if (v === NEW_SLOT_SENTINEL) {
+                        setAddSlotOpen(true)
+                        return
+                      }
+                      setSlot(v)
+                    }}
+                    className="themed-select w-44 rounded-md py-1.5 pl-2.5 pr-8 text-xs outline-none"
+                    style={inlineSelectStyle}
+                  >
+                    {!slotName && <option value="" disabled>No slots yet</option>}
+                    {envObj.slots.map((s) => (
+                      <option key={s} value={s}>{stripFeaturePrefix(s, feature)}</option>
+                    ))}
+                    {envObj.slots.length > 0 && <option disabled>──────────</option>}
+                    <option value={NEW_SLOT_SENTINEL}>+ New slot…</option>
+                  </select>
+                  {slotTarget ? (
+                    <HintIcon
+                      label="Replaces path"
+                      hint={`Replaces: ${slotTarget}`}
+                      icon={<FolderIcon />}
+                    />
+                  ) : null}
+                </div>
+                {slotName ? (
+                  <IconButton
+                    ariaLabel="Delete slot"
+                    variant="danger"
+                    onClick={() => { if (!busy) setConfirmDeleteSlot(slotName) }}
+                  >
+                    <TrashIcon />
+                  </IconButton>
+                ) : null}
+              </div>
+            </FieldRow>
+          </>
+        )}
       </div>
       {error && (
         <div className="px-4 py-1.5 text-xs" style={{ color: '#ef4444' }}>{error}</div>
@@ -175,7 +257,223 @@ export function EnvsetsTab({ feature }: { feature: string }) {
       ) : envObj ? (
         <div className="p-4 text-xs" style={{ color: 'var(--text-muted)' }}>No slots in this env.</div>
       ) : null}
+      <ConfirmModal
+        open={confirmDeleteEnv !== null}
+        title="Delete env"
+        message={
+          <>
+            Delete env <code style={{ fontFamily: 'var(--font-mono)' }}>{confirmDeleteEnv}</code>?
+            This removes the folder and all its slot files. This cannot be undone.
+          </>
+        }
+        confirmLabel="Delete"
+        variant="danger"
+        busy={busy}
+        onCancel={() => setConfirmDeleteEnv(null)}
+        onConfirm={() => { if (confirmDeleteEnv) onDeleteEnv(confirmDeleteEnv) }}
+      />
+      <ConfirmModal
+        open={confirmDeleteSlot !== null}
+        title="Delete slot"
+        message={
+          <>
+            Delete slot <code style={{ fontFamily: 'var(--font-mono)' }}>{confirmDeleteSlot}</code>?
+            This removes the file from every env and from <code>envsets.config.json</code>.
+          </>
+        }
+        confirmLabel="Delete"
+        variant="danger"
+        busy={busy}
+        onCancel={() => setConfirmDeleteSlot(null)}
+        onConfirm={() => { if (confirmDeleteSlot) onDeleteSlot(confirmDeleteSlot) }}
+      />
+      {addSlotOpen && (
+        <AddSlotModal
+          feature={feature}
+          envCount={index.envs.length}
+          onClose={() => setAddSlotOpen(false)}
+          onAdded={onSlotAdded}
+        />
+      )}
     </div>
+  )
+}
+
+function AddSlotModal({
+  feature,
+  envCount,
+  onClose,
+  onAdded,
+}: {
+  feature: string
+  envCount: number
+  onClose: () => void
+  onAdded: (slot: string) => void | Promise<void>
+}) {
+  const [stage, setStage] = useState<'pick' | 'confirm'>('pick')
+  const [browse, setBrowse] = useState<api.FsBrowseResponse | null>(null)
+  const [pathInput, setPathInput] = useState('')
+  const [picked, setPicked] = useState<string | null>(null)
+  const [slotName, setSlotName] = useState('')
+  const [target, setTarget] = useState('')
+  const [description, setDescription] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+
+  const loadDir = async (dir: string): Promise<void> => {
+    setError(null)
+    try {
+      const res = await api.browseDir(dir)
+      setBrowse(res)
+      setPathInput(res.dir)
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Browse failed')
+    }
+  }
+
+  useEffect(() => { loadDir('') }, [])
+
+  const onPickFile = (name: string): void => {
+    if (!browse) return
+    const full = `${browse.dir}/${name}`.replace(/\/+/g, '/')
+    setPicked(full)
+    setSlotName(name)
+    setTarget(full)
+    setStage('confirm')
+  }
+
+  const onSubmit = async (): Promise<void> => {
+    if (!picked) return
+    setBusy(true)
+    setError(null)
+    try {
+      const res = await api.addEnvsetSlot(feature, {
+        sourcePath: picked,
+        slotName: slotName.trim() || undefined,
+        target: target.trim() || undefined,
+        description: description.trim() || undefined,
+      })
+      await onAdded(res.slot)
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Add slot failed')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Modal open={true} onClose={onClose} title="Add slot" width={600}>
+      {envCount === 0 ? (
+        <div className="px-4 py-4 text-xs" style={{ color: 'var(--text-muted)' }}>
+          Create at least one env first, then add a slot.
+        </div>
+      ) : stage === 'pick' ? (
+        <div className="flex flex-col">
+          <div className="px-4 py-2 text-[11px]" style={{ color: 'var(--text-muted)' }}>
+            Pick the file you want to track. Any file type works (.env, .properties, .json — anything).
+            Its content will be copied into every existing env ({envCount} env{envCount === 1 ? '' : 's'}); you can edit each env's copy independently afterward.
+          </div>
+          <div className="flex items-center gap-1.5 px-4 pb-2">
+            <TextInput
+              value={pathInput}
+              onChange={setPathInput}
+              placeholder="/absolute/path or ~/path"
+            />
+            <button
+              type="button"
+              onClick={() => loadDir(pathInput)}
+              className="rounded-md px-2 py-1 text-[10px] uppercase tracking-wider"
+              style={{ color: 'var(--text-primary)', border: '1px solid var(--border-default)' }}
+            >
+              Go
+            </button>
+          </div>
+          <div
+            className="mx-4 mb-3 max-h-[50vh] min-h-[260px] overflow-y-auto scrollbar-thin rounded-md"
+            style={{ border: '1px solid var(--border-default)' }}
+          >
+            {browse?.parent && (
+              <button
+                type="button"
+                onClick={() => loadDir(browse.parent!)}
+                className="block w-full truncate px-3 py-1.5 text-left text-xs"
+                style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}
+              >
+                ../
+              </button>
+            )}
+            {browse?.entries.map((e) => (
+              <button
+                key={e.name}
+                type="button"
+                onClick={() => e.isDir ? loadDir(`${browse.dir}/${e.name}`.replace(/\/+/g, '/')) : onPickFile(e.name)}
+                className="block w-full truncate px-3 py-1.5 text-left text-xs hover:opacity-80"
+                style={{
+                  color: e.isDir ? 'var(--text-primary)' : 'var(--text-secondary)',
+                  fontFamily: 'var(--font-mono)',
+                }}
+              >
+                {e.isDir ? `${e.name}/` : e.name}
+              </button>
+            ))}
+            {browse && browse.entries.length === 0 && (
+              <div className="px-3 py-2 text-xs" style={{ color: 'var(--text-muted)' }}>Empty directory.</div>
+            )}
+          </div>
+          {error && <div className="px-4 pb-2 text-xs" style={{ color: '#ef4444' }}>{error}</div>}
+        </div>
+      ) : (
+        <div className="flex flex-col gap-3 px-4 py-3">
+          <FieldRow label="Source">
+            <div
+              className="rounded-md px-2.5 py-1.5 text-xs truncate"
+              style={{
+                background: 'var(--bg-elevated)',
+                border: '1px solid var(--border-default)',
+                color: 'var(--text-muted)',
+                fontFamily: 'var(--font-mono)',
+              }}
+              title={picked ?? ''}
+            >
+              {picked}
+            </div>
+          </FieldRow>
+          <FieldRow label="Slot name" hint="Filename used inside envsets/<env>/">
+            <TextInput value={slotName} onChange={setSlotName} />
+          </FieldRow>
+          <FieldRow label="Replaces" hint="Absolute path on this machine that the slot replaces at apply time">
+            <TextInput value={target} onChange={setTarget} />
+          </FieldRow>
+          <FieldRow label="Description (optional)">
+            <TextInput value={description} onChange={setDescription} />
+          </FieldRow>
+          <div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
+            The picked file's content will be copied into every existing env ({envCount}). Edit per-env afterward.
+          </div>
+          {error && <div className="text-xs" style={{ color: '#ef4444' }}>{error}</div>}
+          <div className="flex justify-end gap-2 pt-2" style={{ borderTop: '1px solid var(--border-default)' }}>
+            <button
+              type="button"
+              onClick={() => { setStage('pick'); setError(null) }}
+              disabled={busy}
+              className="rounded-md px-3 py-1 text-[11px] uppercase tracking-wider"
+              style={{ color: 'var(--text-muted)', border: '1px solid var(--border-default)' }}
+            >
+              Back
+            </button>
+            <button
+              type="button"
+              onClick={onSubmit}
+              disabled={busy || !slotName.trim() || !target.trim()}
+              className="rounded-md px-3 py-1 text-[11px] uppercase tracking-wider"
+              style={{ color: 'var(--text-primary)', border: '1px solid var(--border-default)' }}
+            >
+              {busy ? '…' : 'Add slot'}
+            </button>
+          </div>
+        </div>
+      )}
+    </Modal>
   )
 }
 
@@ -231,7 +529,7 @@ function SlotEditor({
         <SectionHeader>{slot}</SectionHeader>
         <div className="px-4 py-3 flex flex-col gap-1.5">
           {draft.map((entry, i) => (
-            <div key={i} className="flex items-center gap-1.5">
+            <div key={i} className="group flex items-center gap-1.5">
               <input
                 type="text"
                 value={entry.key}
@@ -246,19 +544,30 @@ function SlotEditor({
                 }}
               />
               <span style={{ color: 'var(--text-muted)' }}>=</span>
-              <div className="flex-1">
-                <TextInput
+              <div className="relative flex-1">
+                <input
+                  type="text"
                   value={entry.value}
-                  onChange={(value) => setDraft(draft.map((x, j) => j === i ? { ...x, value } : x))}
+                  onChange={(e) => setDraft(draft.map((x, j) => j === i ? { ...x, value: e.target.value } : x))}
+                  className="w-full rounded-md py-1.5 pl-2.5 pr-8 text-xs outline-none focus:ring-1"
+                  style={{
+                    backgroundColor: 'var(--bg-elevated)',
+                    border: '1px solid var(--border-default)',
+                    color: 'var(--text-primary)',
+                    fontFamily: 'var(--font-mono)',
+                  }}
                 />
+                <button
+                  type="button"
+                  aria-label="Remove key"
+                  title="Remove key"
+                  onClick={() => setDraft(draft.filter((_, j) => j !== i))}
+                  className="absolute right-1.5 top-1/2 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md opacity-0 transition-opacity duration-150 group-hover:opacity-100 focus:opacity-100"
+                  style={{ color: '#ef4444' }}
+                >
+                  <TrashIcon />
+                </button>
               </div>
-              <IconButton
-                ariaLabel="Remove key"
-                variant="danger"
-                onClick={() => setDraft(draft.filter((_, j) => j !== i))}
-              >
-                <TrashIcon />
-              </IconButton>
             </div>
           ))}
           <button
@@ -288,3 +597,58 @@ function SlotEditor({
     </div>
   )
 }
+
+function NewEnvControl({
+  adding,
+  busy,
+  newEnvName,
+  setNewEnvName,
+  setAdding,
+  onAddEnv,
+}: {
+  adding: boolean
+  busy: boolean
+  newEnvName: string
+  setNewEnvName: (v: string) => void
+  setAdding: (v: boolean) => void
+  onAddEnv: () => void
+}) {
+  if (adding) {
+    return (
+      <div className="flex items-center gap-1.5">
+        <div className="w-44">
+          <TextInput value={newEnvName} onChange={setNewEnvName} placeholder="e.g. production" />
+        </div>
+        <button
+          type="button"
+          onClick={onAddEnv}
+          disabled={busy || !newEnvName.trim()}
+          className="rounded-md px-2 py-1 text-[10px] uppercase tracking-wider"
+          style={{ color: 'var(--text-primary)', border: '1px solid var(--border-default)' }}
+        >
+          Add
+        </button>
+        <button
+          type="button"
+          onClick={() => { setAdding(false); setNewEnvName('') }}
+          className="rounded-md px-2 py-1 text-[10px] uppercase tracking-wider"
+          style={{ color: 'var(--text-muted)' }}
+        >
+          Cancel
+        </button>
+      </div>
+    )
+  }
+  return (
+    <button
+      type="button"
+      onClick={() => setAdding(true)}
+      className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[10px] uppercase tracking-wider"
+      style={{ color: 'var(--text-muted)', border: '1px dashed var(--border-default)' }}
+    >
+      <PlusIcon />
+      Env
+    </button>
+  )
+}
+

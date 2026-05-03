@@ -63,7 +63,8 @@ export function GeneralTab({ feature }: { feature: string }) {
           </FieldRow>
           <FieldRow label="Description">
             <Textarea
-              rows={2}
+              minRows={2}
+              maxRows={6}
               value={ed.draft.description}
               onChange={(description) => ed.setDraft((d) => ({ ...d, description }))}
             />

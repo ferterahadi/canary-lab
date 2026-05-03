@@ -259,7 +259,7 @@ describe('envsets endpoints', () => {
     try {
       const r = await app.inject({ method: 'GET', url: '/api/features/a/envsets' })
       expect(r.statusCode).toBe(200)
-      expect(r.json()).toEqual({ envs: [], slotDescriptions: {} })
+      expect(r.json()).toEqual({ envs: [], slotDescriptions: {}, slotTargets: {} })
     } finally {
       await app.close()
     }

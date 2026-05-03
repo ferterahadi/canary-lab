@@ -35,6 +35,7 @@ import {
   capArtifacts,
 } from './playwright-mcp-artifacts'
 import { planRestart } from './restart-planner'
+import { interpolateConfigTokens, makeTokenCache } from '../launcher/interpolate'
 
 // Headless event-emitting orchestrator for a single feature run. Wraps the
 // existing health-check / signal-file semantics behind a clean API the future
@@ -151,6 +152,12 @@ export function buildServiceSpecs(
   env?: string,
 ): ServiceSpec[] {
   const out: ServiceSpec[] = []
+  // ${slot.key} tokens in feature.config values resolve from the chosen env's
+  // envset slot files at boot time. The cache shares parsed slot files across
+  // every value in this build pass.
+  const tokenCtx = { envName: env, envsetsDir: path.join(feature.featureDir, 'envsets') }
+  const tokenCache = makeTokenCache()
+  const interp = <T,>(node: T): T => interpolateConfigTokens(node, tokenCtx, tokenCache)
   for (const repo of feature.repos ?? []) {
     if (!enabledForEnv(repo.envs, env)) continue
     const dir = resolvePath(repo.localPath)
@@ -163,9 +170,9 @@ export function buildServiceSpecs(
       out.push({
         name: normalized.name!,
         safeName,
-        command: normalized.command,
+        command: interp(normalized.command),
         cwd: dir,
-        healthProbe: probe ?? undefined,
+        healthProbe: probe ? interp(probe) : undefined,
         // Service log path is implied by runDir; consumers can derive via buildRunPaths.
       })
     }

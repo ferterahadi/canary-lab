@@ -167,6 +167,8 @@ export function putPlaywrightConfig(
 export interface EnvsetIndex {
   envs: { name: string; slots: string[] }[]
   slotDescriptions: Record<string, string>
+  slotTargets?: Record<string, string>
+  slotTargetsRaw?: Record<string, string>
 }
 
 export interface EnvsetSlotDoc {
@@ -225,6 +227,52 @@ export async function deleteEnvset(
   await request<unknown>(
     `${baseUrl}/api/features/${encodeURIComponent(name)}/envsets/${encodeURIComponent(env)}`,
     { method: 'DELETE' },
+    fetchImpl,
+  )
+}
+
+export function addEnvsetSlot(
+  name: string,
+  body: { sourcePath: string; slotName?: string; target?: string; description?: string },
+  opts?: ClientOptions,
+): Promise<{ slot: string }> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<{ slot: string }>(
+    `${baseUrl}/api/features/${encodeURIComponent(name)}/envsets/slots`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    },
+    fetchImpl,
+  )
+}
+
+export async function deleteEnvsetSlot(
+  name: string,
+  slot: string,
+  opts?: ClientOptions,
+): Promise<void> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  await request<unknown>(
+    `${baseUrl}/api/features/${encodeURIComponent(name)}/envsets/slots/${encodeURIComponent(slot)}`,
+    { method: 'DELETE' },
+    fetchImpl,
+  )
+}
+
+export interface FsBrowseResponse {
+  dir: string
+  parent: string | null
+  entries: Array<{ name: string; isDir: boolean }>
+}
+
+export function browseDir(dir: string, opts?: ClientOptions): Promise<FsBrowseResponse> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  const qs = dir ? `?dir=${encodeURIComponent(dir)}` : ''
+  return request<FsBrowseResponse>(
+    `${baseUrl}/api/fs/browse${qs}`,
+    { method: 'GET' },
     fetchImpl,
   )
 }

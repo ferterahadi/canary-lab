@@ -5,6 +5,7 @@ import {
   ChevronRightIcon,
   ComplexValueBadge,
   FieldRow,
+  HintIcon,
   IconButton,
   NumberInput,
   PlusIcon,
@@ -15,6 +16,7 @@ import {
 } from './atoms'
 import { FolderPicker, FolderPickerModal } from './FolderPicker'
 import { SaveBar } from './SaveBar'
+import { TemplatedInput } from './TemplatedInput'
 import { useEditableSlice } from './useEditableSlice'
 
 /** Derive a repo's display name from its localPath basename, falling back
@@ -254,6 +256,7 @@ export function ReposTab({ feature }: { feature: string }) {
           {repos.map((repo, i) => (
             <RepoCard
               key={i}
+              feature={feature}
               repo={repo}
               rootEnvs={rootEnvs}
               onChange={(next) => ed.setDraft((d) => ({
@@ -295,11 +298,13 @@ export function ReposTab({ feature }: { feature: string }) {
 // ─── repo card ────────────────────────────────────────────────────────────
 
 function RepoCard({
+  feature,
   repo,
   rootEnvs,
   onChange,
   onRemove,
 }: {
+  feature: string
   repo: RepoSlice
   rootEnvs: string[]
   onChange: (next: RepoSlice) => void
@@ -457,15 +462,12 @@ function RepoCard({
             {repo.startCommands.map((cmd, i) => (
               <CommandCard
                 key={i}
+                feature={feature}
                 cmd={cmd}
                 rootEnvs={rootEnvs}
                 onChange={(next) => onChange({
                   ...repo,
                   startCommands: repo.startCommands.map((c, j) => j === i ? next : c),
-                })}
-                onRemove={() => onChange({
-                  ...repo,
-                  startCommands: repo.startCommands.filter((_, j) => j !== i),
                 })}
               />
             ))}
@@ -477,37 +479,32 @@ function RepoCard({
 }
 
 function CommandCard({
+  feature,
   cmd,
   rootEnvs,
   onChange,
-  onRemove,
 }: {
+  feature: string
   cmd: CommandSlice
   rootEnvs: string[]
   onChange: (next: CommandSlice) => void
-  onRemove: () => void
 }) {
   return (
     <div
       className="rounded-md p-2.5"
       style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-default)' }}
     >
-      <FieldRow label="Command" hint="Runs in the repo's local path. Chain with && for multiple steps.">
-        <div className="flex items-center gap-2">
-          <div className="flex-1">
-            <TextInput
-              value={cmd.command}
-              placeholder="npx tsx scripts/server.ts"
-              onChange={(command) => onChange({ ...cmd, command })}
-            />
-          </div>
-          <IconButton ariaLabel="Remove command" variant="danger" onClick={onRemove}>
-            <TrashIcon />
-          </IconButton>
-        </div>
+      <FieldRow label="Command" hint="Runs in the repo's local path. Chain with && for multiple steps. Use ${slot.key} to reference envset values.">
+        <TemplatedInput
+          value={cmd.command}
+          feature={feature}
+          placeholder="npx tsx scripts/server.ts"
+          onChange={(command) => onChange({ ...cmd, command })}
+        />
       </FieldRow>
       <div className="mt-2">
         <HealthEditor
+          feature={feature}
           health={cmd.health}
           rootEnvs={rootEnvs}
           onChange={(health) => onChange({ ...cmd, health })}
@@ -520,10 +517,12 @@ function CommandCard({
 // ─── health-check editor ─────────────────────────────────────────────────
 
 function HealthEditor({
+  feature,
   health,
   rootEnvs,
   onChange,
 }: {
+  feature: string
   health: Health
   rootEnvs: string[]
   onChange: (next: Health) => void
@@ -553,7 +552,13 @@ function HealthEditor({
   return (
     <div className="rounded-md" style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border-default)' }}>
       <div className="flex items-center gap-2 px-2.5 py-1.5" style={{ borderBottom: health.mode === 'none' ? 'none' : '1px solid var(--border-default)' }}>
-        <span className="text-[10px] uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>health check</span>
+        <span className="inline-flex items-center gap-1.5 text-[10px] uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
+          health check
+          <HintIcon
+            label="What is health check?"
+            hint="A probe the runner uses to decide when this service is ready. Playwright tests start only after every health check passes; if a probe fails before its deadline, the run aborts."
+          />
+        </span>
         <Select<Health['mode']>
           value={health.mode}
           onChange={setMode}
@@ -562,7 +567,7 @@ function HealthEditor({
       </div>
       {health.mode === 'single' && (
         <div className="px-2.5 py-2">
-          <ProbeEditor probe={health.probe} onChange={(probe) => onChange({ mode: 'single', probe })} />
+          <ProbeEditor feature={feature} probe={health.probe} onChange={(probe) => onChange({ mode: 'single', probe })} />
         </div>
       )}
       {health.mode === 'per-env' && (
@@ -573,6 +578,7 @@ function HealthEditor({
                 {env}
               </div>
               <ProbeEditor
+                feature={feature}
                 probe={p}
                 onChange={(probe) => onChange({
                   mode: 'per-env',
@@ -588,9 +594,11 @@ function HealthEditor({
 }
 
 function ProbeEditor({
+  feature,
   probe,
   onChange,
 }: {
+  feature: string
   probe: Probe
   onChange: (next: Probe) => void
 }) {
@@ -620,21 +628,32 @@ function ProbeEditor({
       {probe.type === 'http' ? (
         <div className="flex flex-col gap-1.5">
           <FieldRow label="URL" layout="inline">
-            <TextInput
+            <TemplatedInput
               value={probe.http.url}
+              feature={feature}
               placeholder="http://localhost:4000/"
               onChange={(url) => onChange({ ...probe, http: { ...probe.http, url } })}
             />
           </FieldRow>
-          <FieldRow label="Timeout (ms)" layout="inline">
+          <FieldRow
+            label="Timeout (ms)"
+            layout="inline"
+            hint="How long to wait for a single probe attempt before treating it as failed. Lower = fail-fast per try."
+          >
             <NumberInput
               value={probe.http.timeoutMs ?? 1500}
+              min={0}
               onChange={(n) => onChange({ ...probe, http: { ...probe.http, timeoutMs: n } })}
             />
           </FieldRow>
-          <FieldRow label="Deadline (ms)" layout="inline">
+          <FieldRow
+            label="Deadline (ms)"
+            layout="inline"
+            hint="Total budget to keep retrying the probe until it succeeds. If the service isn't ready by then, the run aborts."
+          >
             <NumberInput
               value={probe.http.deadlineMs ?? 60000}
+              min={0}
               onChange={(n) => onChange({ ...probe, http: { ...probe.http, deadlineMs: n } })}
             />
           </FieldRow>
@@ -644,19 +663,27 @@ function ProbeEditor({
           <FieldRow label="Port" layout="inline">
             <NumberInput
               value={probe.tcp.port}
+              min={1}
+              max={65535}
               onChange={(port) => onChange({ ...probe, tcp: { ...probe.tcp, port } })}
             />
           </FieldRow>
           <FieldRow label="Host" layout="inline">
-            <TextInput
+            <TemplatedInput
               value={probe.tcp.host ?? ''}
+              feature={feature}
               placeholder="127.0.0.1"
               onChange={(host) => onChange({ ...probe, tcp: { ...probe.tcp, host: host || undefined } })}
             />
           </FieldRow>
-          <FieldRow label="Timeout (ms)" layout="inline">
+          <FieldRow
+            label="Timeout (ms)"
+            layout="inline"
+            hint="How long to wait for a single TCP connect attempt before treating it as failed."
+          >
             <NumberInput
               value={probe.tcp.timeoutMs ?? 1500}
+              min={0}
               onChange={(n) => onChange({ ...probe, tcp: { ...probe.tcp, timeoutMs: n } })}
             />
           </FieldRow>

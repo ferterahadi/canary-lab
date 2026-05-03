@@ -148,6 +148,39 @@ describe('buildServiceSpecs', () => {
     expect(specs.map((s) => s.name)).toEqual(['apiAll'])
   })
 
+  it('substitutes ${slot.key} tokens in command and probe url from envset slot files', () => {
+    const featureDir = path.join(tmpDir, 'features', 'demo')
+    fs.mkdirSync(path.join(featureDir, 'envsets', 'local'), { recursive: true })
+    fs.writeFileSync(path.join(featureDir, 'envsets', 'local', 'api'), 'PORT=3030\nHOST=api.local\n')
+    const f = makeFeature({
+      repos: [{
+        name: 'r',
+        localPath: tmpDir,
+        startCommands: [{
+          command: 'serve --port ${api.PORT}',
+          name: 'svc',
+          healthCheck: { http: { url: 'http://${api.HOST}:${api.PORT}/health' } },
+        }],
+      }],
+    })
+    const specs = buildServiceSpecs(f, runDir, 'local')
+    expect(specs).toHaveLength(1)
+    expect(specs[0].command).toBe('serve --port 3030')
+    expect(specs[0].healthProbe).toEqual({ http: { url: 'http://api.local:3030/health' } })
+  })
+
+  it('leaves unresolvable tokens literal so misconfig is visible at runtime', () => {
+    const f = makeFeature({
+      repos: [{
+        name: 'r',
+        localPath: tmpDir,
+        startCommands: [{ command: 'echo ${ghost.X}', name: 'svc' }],
+      }],
+    })
+    const specs = buildServiceSpecs(f, runDir, 'local')
+    expect(specs[0].command).toBe('echo ${ghost.X}')
+  })
+
   it('skips an entire repo when its repo-level envs excludes the selected env', () => {
     const f = makeFeature({
       repos: [

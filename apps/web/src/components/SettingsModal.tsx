@@ -56,6 +56,7 @@ export function SettingsModal({ onClose }: Props) {
       const next = await api.putProjectConfig(draft)
       setConfig(next)
       setDraft(next)
+      onClose()
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Save failed')
     } finally {

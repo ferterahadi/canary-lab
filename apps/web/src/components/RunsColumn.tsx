@@ -202,9 +202,6 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
       <div className="flex items-center gap-3 px-4 py-3" style={{ borderBottom: '1px solid var(--border-default)' }}>
         <div className="flex min-w-0 flex-1 items-center gap-2">
           <span className="shrink-0 text-[10px] uppercase tracking-wider font-medium" style={{ color: 'var(--text-muted)' }}>Runs</span>
-          {feature && !compact && (
-            <span className="truncate text-xs" style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>{feature}</span>
-          )}
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
           {compact ? (

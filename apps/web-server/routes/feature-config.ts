@@ -12,6 +12,8 @@ import {
 } from '../lib/config-ast'
 import { parseDotenv, writeDotenv, type KvEntry } from '../lib/dotenv-edit'
 import { loadFeatures } from '../lib/feature-loader'
+import { resolveVars } from '../../../shared/env-switcher/switch'
+import { getProjectRoot } from '../../../shared/runtime/project-root'
 
 export interface FeatureConfigRouteDeps {
   featuresDir: string
@@ -67,6 +69,45 @@ function syncEnvsInConfig(featureDir: string): void {
 function isWithin(root: string, target: string): boolean {
   const relative = path.relative(root, target)
   return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative))
+}
+
+interface EnvsetsConfigJson {
+  appRoots?: Record<string, string>
+  slots?: Record<string, { description?: string; target?: string }>
+  feature?: { slots?: string[]; testCommand?: string; testCwd?: string }
+}
+
+function readEnvsetsConfig(envsetsDir: string): EnvsetsConfigJson {
+  const cfgPath = path.join(envsetsDir, 'envsets.config.json')
+  if (!fs.existsSync(cfgPath)) return {}
+  try {
+    return JSON.parse(fs.readFileSync(cfgPath, 'utf-8')) as EnvsetsConfigJson
+  } catch {
+    return {}
+  }
+}
+
+function writeEnvsetsConfig(envsetsDir: string, cfg: EnvsetsConfigJson): void {
+  fs.mkdirSync(envsetsDir, { recursive: true })
+  const cfgPath = path.join(envsetsDir, 'envsets.config.json')
+  fs.writeFileSync(cfgPath, JSON.stringify(cfg, null, 2) + '\n')
+}
+
+function buildAppRoots(cfg: EnvsetsConfigJson): Record<string, string> {
+  const root = getProjectRoot()
+  return {
+    CANARY_LAB_PROJECT_ROOT: root,
+    CANARY_LAB: root,
+    ...(cfg.appRoots ?? {}),
+  }
+}
+
+function shortenHome(p: string): string {
+  const home = os.homedir()
+  if (home && (p === home || p.startsWith(home + path.sep))) {
+    return '~' + p.slice(home.length)
+  }
+  return p
 }
 
 export async function featureConfigRoutes(
@@ -193,7 +234,7 @@ export async function featureConfigRoutes(
     }
     const envsetsDir = path.join(feature.featureDir, 'envsets')
     if (!fs.existsSync(envsetsDir)) {
-      return { envs: [], slotDescriptions: {} }
+      return { envs: [], slotDescriptions: {}, slotTargets: {} }
     }
     const envs = fs
       .readdirSync(envsetsDir, { withFileTypes: true })
@@ -205,21 +246,23 @@ export async function featureConfigRoutes(
           .filter((f) => f.isFile())
           .map((f) => f.name),
       }))
-    let slotDescriptions: Record<string, string> = {}
-    const cfgPath = path.join(envsetsDir, 'envsets.config.json')
-    if (fs.existsSync(cfgPath)) {
-      try {
-        const json = JSON.parse(fs.readFileSync(cfgPath, 'utf-8'))
-        if (json && typeof json === 'object' && json.slots && typeof json.slots === 'object') {
-          for (const [k, v] of Object.entries(json.slots as Record<string, { description?: string }>)) {
-            if (v && typeof v === 'object' && typeof v.description === 'string') {
-              slotDescriptions[k] = v.description
-            }
+    const slotDescriptions: Record<string, string> = {}
+    const slotTargets: Record<string, string> = {}
+    const slotTargetsRaw: Record<string, string> = {}
+    const cfg = readEnvsetsConfig(envsetsDir)
+    const appRoots = buildAppRoots(cfg)
+    if (cfg.slots) {
+      for (const [k, v] of Object.entries(cfg.slots)) {
+        if (v && typeof v === 'object') {
+          if (typeof v.description === 'string') slotDescriptions[k] = v.description
+          if (typeof v.target === 'string') {
+            slotTargetsRaw[k] = v.target
+            slotTargets[k] = shortenHome(resolveVars(v.target, appRoots))
           }
         }
-      } catch { /* ignore malformed */ }
+      }
     }
-    return { envs, slotDescriptions }
+    return { envs, slotDescriptions, slotTargets, slotTargetsRaw }
   })
 
   app.post<{ Params: { name: string }; Body: { env: string } }>(
@@ -343,6 +386,155 @@ export async function featureConfigRoutes(
       return { path: slotPath, content: next, ...parsed }
     },
   )
+
+  // ─── feature-scoped slot management ────────────────────────────────────
+  //
+  // Slots are defined per-feature in envsets.config.json (`slots` object +
+  // `feature.slots[]`). Each env folder under envsets/<env>/ holds a copy of
+  // each slot file. Adding a slot replicates its initial content into every
+  // env; deleting a slot wipes it from every env.
+
+  app.post<{
+    Params: { name: string }
+    Body: { sourcePath: string; slotName?: string; target?: string; description?: string }
+  }>('/api/features/:name/envsets/slots', async (req, reply) => {
+    const features = loadFeatures(deps.featuresDir)
+    const feature = features.find((f) => f.name === req.params.name)
+    if (!feature?.featureDir) {
+      reply.code(404)
+      return { error: 'feature not found' }
+    }
+    const sourceRaw = (req.body?.sourcePath ?? '').trim()
+    if (!sourceRaw) {
+      reply.code(400)
+      return { error: 'sourcePath required' }
+    }
+    const home = os.homedir()
+    const sourcePath = sourceRaw.startsWith('~/') || sourceRaw === '~'
+      ? path.join(home, sourceRaw.slice(1))
+      : sourceRaw
+    if (!path.isAbsolute(sourcePath)) {
+      reply.code(400)
+      return { error: 'sourcePath must be absolute or start with ~' }
+    }
+    if (!fs.existsSync(sourcePath) || !fs.statSync(sourcePath).isFile()) {
+      reply.code(400)
+      return { error: 'sourcePath is not a file' }
+    }
+    const slotName = (req.body?.slotName ?? path.basename(sourcePath)).trim()
+    if (!/^[a-zA-Z0-9._-]+$/.test(slotName)) {
+      reply.code(400)
+      return { error: 'slotName must match /^[a-zA-Z0-9._-]+$/' }
+    }
+    const envsetsDir = path.join(feature.featureDir, 'envsets')
+    const envs = listEnvFolders(feature.featureDir)
+    if (envs.length === 0) {
+      reply.code(400)
+      return { error: 'create at least one env first' }
+    }
+    const cfg = readEnvsetsConfig(envsetsDir)
+    if (cfg.slots && cfg.slots[slotName]) {
+      reply.code(409)
+      return { error: 'slot already exists' }
+    }
+    const target = (req.body?.target ?? sourcePath).trim() || sourcePath
+    const description = (req.body?.description ?? '').trim()
+    let content: string
+    try {
+      content = fs.readFileSync(sourcePath, 'utf-8')
+    } catch (err) {
+      reply.code(400)
+      return { error: `cannot read sourcePath: ${(err as Error).message}` }
+    }
+    for (const env of envs) {
+      const slotPath = path.join(envsetsDir, env, slotName)
+      if (!isWithin(envsetsDir, slotPath)) continue
+      fs.writeFileSync(slotPath, content)
+    }
+    const nextCfg: EnvsetsConfigJson = {
+      ...cfg,
+      slots: { ...(cfg.slots ?? {}), [slotName]: { description, target } },
+      feature: {
+        ...(cfg.feature ?? {}),
+        slots: Array.from(new Set([...(cfg.feature?.slots ?? []), slotName])),
+      },
+    }
+    writeEnvsetsConfig(envsetsDir, nextCfg)
+    reply.code(201)
+    return { slot: slotName }
+  })
+
+  app.delete<{ Params: { name: string; slot: string } }>(
+    '/api/features/:name/envsets/slots/:slot',
+    async (req, reply) => {
+      const features = loadFeatures(deps.featuresDir)
+      const feature = features.find((f) => f.name === req.params.name)
+      if (!feature?.featureDir) {
+        reply.code(404)
+        return { error: 'feature not found' }
+      }
+      const slotName = req.params.slot
+      if (!/^[a-zA-Z0-9._-]+$/.test(slotName)) {
+        reply.code(400)
+        return { error: 'invalid slot name' }
+      }
+      const envsetsDir = path.join(feature.featureDir, 'envsets')
+      const envs = listEnvFolders(feature.featureDir)
+      for (const env of envs) {
+        const slotPath = path.join(envsetsDir, env, slotName)
+        if (!isWithin(envsetsDir, slotPath)) continue
+        if (fs.existsSync(slotPath)) fs.rmSync(slotPath, { force: true })
+      }
+      const cfg = readEnvsetsConfig(envsetsDir)
+      if (cfg.slots) delete cfg.slots[slotName]
+      if (cfg.feature?.slots) {
+        cfg.feature.slots = cfg.feature.slots.filter((s) => s !== slotName)
+      }
+      if (fs.existsSync(envsetsDir)) writeEnvsetsConfig(envsetsDir, cfg)
+      reply.code(204)
+      return null
+    },
+  )
+
+  // ─── generic filesystem browser ────────────────────────────────────────
+  //
+  // Lists files and folders at an absolute path. Used by the add-slot file
+  // picker. canary-lab is a local-only dev tool, so the endpoint can read
+  // anywhere the server process can; this is intentional.
+
+  app.get<{ Querystring: { dir?: string } }>('/api/fs/browse', async (req) => {
+    const home = os.homedir()
+    const raw = (req.query.dir ?? '').trim()
+    const expanded = raw.startsWith('~/') || raw === '~'
+      ? path.join(home, raw.slice(1))
+      : raw
+    const target = expanded === ''
+      ? home
+      : path.isAbsolute(expanded)
+        ? expanded
+        : path.resolve(home, expanded)
+    if (!fs.existsSync(target) || !fs.statSync(target).isDirectory()) {
+      return { dir: home, parent: null, entries: [] }
+    }
+    let entries: Array<{ name: string; isDir: boolean }> = []
+    try {
+      entries = fs
+        .readdirSync(target, { withFileTypes: true })
+        .map((d) => ({ name: d.name, isDir: d.isDirectory() }))
+        .sort((a, b) => {
+          if (a.isDir !== b.isDir) return a.isDir ? -1 : 1
+          return a.name.localeCompare(b.name)
+        })
+    } catch {
+      // Permission denied — return empty entries.
+    }
+    const parent = path.dirname(target)
+    return {
+      dir: target,
+      parent: parent === target ? null : parent,
+      entries,
+    }
+  })
 
   // ─── workspace dir picker ─────────────────────────────────────────────
   //

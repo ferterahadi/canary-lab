@@ -310,7 +310,7 @@ describe('api client', () => {
   })
 
   it('getEnvsetsIndex / getEnvsetSlot / putEnvsetSlot', async () => {
-    const idx = { envs: [], slotDescriptions: {} }
+    const idx = { envs: [], slotDescriptions: {}, slotTargets: {} }
     const slot = { path: '/p', content: '', entries: [], unparsedLines: [] }
     const fetchImpl = vi
       .fn()
