@@ -305,7 +305,7 @@ describe('POST /api/runs/:runId/agent-input', () => {
       stop: async () => { /* noop */ },
       pauseAndHeal: async () => ({ ok: true, failureCount: 0 }),
       cancelHeal: async () => ({ ok: true }),
-      writeToHealAgent: () => false,
+      interjectHealAgent: async () => ({ ok: false, reason: 'no-agent-running' }),
     }
     const { app, registry } = await build()
     registry.set('ai2', stub)
@@ -318,7 +318,26 @@ describe('POST /api/runs/:runId/agent-input', () => {
     expect(res.json()).toEqual({ reason: 'no-agent-running' })
   })
 
-  it('409s when writeToHealAgent is undefined (manual mode)', async () => {
+  it('409s with no-session-id when the agent init frame has not arrived', async () => {
+    const stub: OrchestratorLike = {
+      runId: 'ai2b',
+      stop: async () => { /* noop */ },
+      pauseAndHeal: async () => ({ ok: true, failureCount: 0 }),
+      cancelHeal: async () => ({ ok: true }),
+      interjectHealAgent: async () => ({ ok: false, reason: 'no-session-id' }),
+    }
+    const { app, registry } = await build()
+    registry.set('ai2b', stub)
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/runs/ai2b/agent-input',
+      payload: { data: 'hello\n' },
+    })
+    expect(res.statusCode).toBe(409)
+    expect(res.json()).toEqual({ reason: 'no-session-id' })
+  })
+
+  it('409s when interjectHealAgent is undefined (manual mode)', async () => {
     const stub: OrchestratorLike = {
       runId: 'ai3',
       stop: async () => { /* noop */ },
@@ -342,7 +361,7 @@ describe('POST /api/runs/:runId/agent-input', () => {
       stop: async () => { /* noop */ },
       pauseAndHeal: async () => ({ ok: true, failureCount: 0 }),
       cancelHeal: async () => ({ ok: true }),
-      writeToHealAgent: (d: string) => { received = d; return true },
+      interjectHealAgent: async (text: string) => { received = text; return { ok: true } },
     }
     const { app, registry } = await build()
     registry.set('ai4', stub)
@@ -357,17 +376,51 @@ describe('POST /api/runs/:runId/agent-input', () => {
   })
 })
 
-describe('DELETE /api/runs/:runId', () => {
+describe('POST /api/runs/:runId/abort', () => {
   it('stops a registered orchestrator and 204s', async () => {
     const stub = makeStub('r2')
     const { app, registry } = await build()
     registry.set('r2', stub)
-    const res = await app.inject({ method: 'DELETE', url: '/api/runs/r2' })
+    const res = await app.inject({ method: 'POST', url: '/api/runs/r2/abort' })
     expect(res.statusCode).toBe(204)
     expect(stub.stopped).toBe(true)
     expect(registry.get('r2')).toBeUndefined()
   })
 
+  it('preserves the run dir/history when an active orchestrator is aborted', async () => {
+    writeManifestForRun('r2b') // baseline manifest exists
+    const stub = makeStub('r2b')
+    const { app, registry } = await build()
+    registry.set('r2b', stub)
+    const res = await app.inject({ method: 'POST', url: '/api/runs/r2b/abort' })
+    expect(res.statusCode).toBe(204)
+    expect(stub.stopped).toBe(true)
+    // History is preserved so the user can still audit logs.
+    expect(fs.existsSync(runDirFor(logsDir, 'r2b'))).toBe(true)
+  })
+
+  it('404s when run is not active', async () => {
+    const { app } = await build()
+    const res = await app.inject({ method: 'POST', url: '/api/runs/ghost/abort' })
+    expect(res.statusCode).toBe(404)
+  })
+
+  it('still 204s if stop() throws (best-effort)', async () => {
+    const failing: OrchestratorLike = {
+      runId: 'r4',
+      stop: async () => { throw new Error('nope') },
+      pauseAndHeal: async () => ({ ok: true, failureCount: 0 }),
+      cancelHeal: async () => ({ ok: true }),
+    }
+    const { app, registry } = await build()
+    registry.set('r4', failing)
+    const res = await app.inject({ method: 'POST', url: '/api/runs/r4/abort' })
+    expect(res.statusCode).toBe(204)
+    expect(registry.get('r4')).toBeUndefined()
+  })
+})
+
+describe('DELETE /api/runs/:runId', () => {
   it('removes a terminal run from history (index entry + run dir) and 204s', async () => {
     writeManifestForRun('r3') // status: 'passed'
     writeRunsIndex(logsDir, [
@@ -381,15 +434,14 @@ describe('DELETE /api/runs/:runId', () => {
     expect((list.json() as Array<{ runId: string }>).find((r) => r.runId === 'r3')).toBeUndefined()
   })
 
-  it('preserves the run when an active orchestrator is stopped', async () => {
-    writeManifestForRun('r3b') // baseline manifest exists
+  it('409s and preserves the run when an orchestrator is still registered', async () => {
+    writeManifestForRun('r3b')
     const stub = makeStub('r3b')
     const { app, registry } = await build()
     registry.set('r3b', stub)
     const res = await app.inject({ method: 'DELETE', url: '/api/runs/r3b' })
-    expect(res.statusCode).toBe(204)
-    expect(stub.stopped).toBe(true)
-    // History is preserved so the user can still audit logs.
+    expect(res.statusCode).toBe(409)
+    expect(stub.stopped).toBe(false)
     expect(fs.existsSync(runDirFor(logsDir, 'r3b'))).toBe(true)
   })
 
@@ -409,19 +461,5 @@ describe('DELETE /api/runs/:runId', () => {
     const { app } = await build()
     const res = await app.inject({ method: 'DELETE', url: '/api/runs/ghost' })
     expect(res.statusCode).toBe(404)
-  })
-
-  it('still 204s if stop() throws (best-effort)', async () => {
-    const failing: OrchestratorLike = {
-      runId: 'r4',
-      stop: async () => { throw new Error('nope') },
-      pauseAndHeal: async () => ({ ok: true, failureCount: 0 }),
-    cancelHeal: async () => ({ ok: true }),
-    }
-    const { app, registry } = await build()
-    registry.set('r4', failing)
-    const res = await app.inject({ method: 'DELETE', url: '/api/runs/r4' })
-    expect(res.statusCode).toBe(204)
-    expect(registry.get('r4')).toBeUndefined()
   })
 })

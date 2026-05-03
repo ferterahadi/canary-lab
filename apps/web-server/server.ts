@@ -25,6 +25,7 @@ import { runDirFor, buildRunPaths } from '../../shared/e2e-runner/run-paths'
 import { RunOrchestrator } from '../../shared/e2e-runner/orchestrator'
 import {
   buildOrchestratorHealCommand,
+  buildOrchestratorInterjectCommand,
   pickAvailableHealAgent,
   type HealAgent,
 } from '../../shared/e2e-runner/auto-heal'
@@ -188,7 +189,11 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
       // If the chosen CLI isn't available, autoHeal stays undefined and the
       // run still works without the self-fixing cycle.
       const projectConfig = loadProjectConfig(opts.projectRoot)
-      let autoHeal: { agent: HealAgent; buildCommand: (args: { cycle: number; outputDir: string }) => string } | undefined
+      let autoHeal: {
+        agent: HealAgent
+        buildCommand: (args: { cycle: number; outputDir: string }) => string
+        buildInterjectCommand: (args: { sessionId: string; text: string; outputDir?: string }) => string
+      } | undefined
       const agentChoice = projectConfig.healAgent === 'manual'
         ? null
         : projectConfig.healAgent === 'auto'
@@ -202,6 +207,11 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
           autoHeal = {
             agent: agentChoice,
             buildCommand: buildOrchestratorHealCommand({
+              agent: agentChoice,
+              projectRoot: opts.projectRoot,
+              runDir,
+            }),
+            buildInterjectCommand: buildOrchestratorInterjectCommand({
               agent: agentChoice,
               projectRoot: opts.projectRoot,
               runDir,

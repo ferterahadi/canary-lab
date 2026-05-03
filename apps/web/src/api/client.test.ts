@@ -128,11 +128,11 @@ describe('api client', () => {
     await expect(startRun('', { fetchImpl })).rejects.toBeInstanceOf(ApiError)
   })
 
-  it('stopRun resolves on 204 (empty body)', async () => {
+  it('stopRun POSTs to /abort and resolves on 204 (empty body)', async () => {
     // Response disallows status 204 with a body — pass `null` body explicitly.
     const fetchImpl = vi.fn().mockResolvedValue(new Response(null, { status: 204 }))
     await expect(stopRun('r3', { fetchImpl })).resolves.toBeUndefined()
-    expect(fetchImpl).toHaveBeenCalledWith('/api/runs/r3', { method: 'DELETE' })
+    expect(fetchImpl).toHaveBeenCalledWith('/api/runs/r3/abort', { method: 'POST' })
   })
 
   it('stopRun throws ApiError on 404', async () => {
@@ -350,7 +350,7 @@ describe('api client', () => {
     expect(fetchImpl).toHaveBeenCalledWith('/api/runs/r1/cancel-heal', { method: 'POST' })
   })
 
-  it('deleteRun delegates to stopRun', async () => {
+  it('deleteRun DELETEs /api/runs/:runId (terminal-only on the server)', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(new Response(null, { status: 204 }))
     await deleteRun('r1', { fetchImpl })
     expect(fetchImpl).toHaveBeenCalledWith('/api/runs/r1', { method: 'DELETE' })

@@ -22,14 +22,19 @@ export type OrchestratorCancelHealResult =
   | { ok: true }
   | { ok: false; reason: 'not-healing' | 'no-agent-running' }
 
+export type OrchestratorInterjectResult =
+  | { ok: true }
+  | { ok: false; reason: 'no-agent-running' | 'no-session-id' | 'spawn-failed' }
+
 export interface OrchestratorLike {
   runId: string
   stop(finalStatus?: RunManifest['status']): Promise<void>
   pauseAndHeal(): Promise<OrchestratorPauseResult>
   cancelHeal(): Promise<OrchestratorCancelHealResult>
-  /** Live interject — write data to the running heal agent's stdin. Returns
-   *  false when there is no agent currently running for this run. */
-  writeToHealAgent?(data: string): boolean
+  /** Interject — kill the running heal agent and resume it with a new prompt
+   *  built from `text`. Returns a structured failure when there's no agent or
+   *  the agent's session id hasn't been captured yet. */
+  interjectHealAgent?(text: string): Promise<OrchestratorInterjectResult>
 }
 
 export interface OrchestratorRegistry {

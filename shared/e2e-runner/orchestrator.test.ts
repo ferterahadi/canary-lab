@@ -841,6 +841,26 @@ describe('RunOrchestrator.runFullCycle', () => {
     await orch.stop('passed')
   })
 
+  it('abort mid-run keeps manifest=aborted regardless of the pty exit code', async () => {
+    // Regression: clicking Abort while runPlaywright is in flight used to
+    // race the playwright pty's exit code. The exit-code branch in
+    // runFullCycle would call setStatus('passed' | 'failed') AFTER stop()
+    // had already written 'aborted', overwriting the terminal status. The
+    // setStatus guard (`if (this.stopped) return`) makes that branch a
+    // no-op so the persisted manifest stays 'aborted'.
+    const f = makeFakeFactory()
+    const orch = bootForFullCycle({ spawned: f, pwExitCodes: [0] })
+    const promise = orch.runFullCycle()
+    await new Promise((r) => setTimeout(r, 5))
+    // User clicks Abort while Playwright is still in flight.
+    await orch.stop('aborted')
+    // Playwright pty resolves with a "success" exit code after the abort.
+    f.spawned[1].emitExit(0)
+    await promise
+    expect(readManifest(orch.paths.manifestPath)?.status).toBe('aborted')
+    expect(readRunsIndex(path.join(tmpDir, 'logs'))[0].status).toBe('aborted')
+  })
+
   it('skips heal loop when autoHeal disabled and tests fail', async () => {
     const f = makeFakeFactory()
     const orch = bootForFullCycle({ spawned: f, pwExitCodes: [1] })
@@ -1387,6 +1407,160 @@ describe('RunOrchestrator.cancelHeal', () => {
     expect(finalStatus).toBe('failed')
     const m = readManifest(orch.paths.manifestPath)!
     expect(m.stoppedEarly?.reason).toBe('user-cancel-heal')
+    await orch.stop('failed')
+  })
+
+  it('killTree sends SIGTERM to the process group (negative pid) before falling back', async () => {
+    fs.mkdirSync(runDir, { recursive: true })
+    const f = makeFakeFactory()
+    let pwIdx = 0
+    let healIdx = 0
+    const orch = new RunOrchestrator({
+      feature: makeFeature({ healOnFailureThreshold: 1 }),
+      runId: RUN_ID,
+      runDir,
+      ptyFactory: f.factory,
+      healthCheck: async () => true,
+      delay: async () => undefined,
+      healthPollIntervalMs: 5,
+      healSignalPollMs: 1,
+      healAgentTimeoutMs: 200,
+      playwrightSpawner: () => ({ command: `pw-${pwIdx++}`, cwd: tmpDir }),
+      autoHeal: { agent: 'claude', maxCycles: 5, buildCommand: () => `heal-${healIdx++}` },
+    })
+    fs.writeFileSync(
+      orch.paths.summaryPath,
+      JSON.stringify({ failed: [{ name: 'a' }], total: 3, passed: 0 }),
+    )
+    const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => {
+      throw Object.assign(new Error('ESRCH'), { code: 'ESRCH' })
+    })
+    const promise = orch.runFullCycle()
+    await new Promise((r) => setTimeout(r, 5))
+    f.spawned[1].emitExit(1)
+    while (f.spawned.length < 3) await new Promise((r) => setTimeout(r, 5))
+    const agentPty = f.spawned[2]
+    await orch.cancelHeal()
+    // Negative pid → process-group kill of the agent's pty.
+    expect(killSpy).toHaveBeenCalledWith(-agentPty.pid, 'SIGTERM')
+    // Fallback path also fired (fake pty's kill recorded the signal).
+    expect(agentPty.killed).toBe('SIGTERM')
+    killSpy.mockRestore()
+    agentPty.emitExit(143)
+    await promise
+    await orch.stop('failed')
+  })
+})
+
+describe('RunOrchestrator.interjectHealAgent', () => {
+  it('returns no-agent-running when no heal pty is in flight', async () => {
+    const f = makeFakeFactory()
+    const orch = new RunOrchestrator({
+      feature: makeFeature(),
+      runId: RUN_ID,
+      runDir,
+      ptyFactory: f.factory,
+      delay: async () => undefined,
+    })
+    const result = await orch.interjectHealAgent('nudge')
+    expect(result).toEqual({ ok: false, reason: 'no-agent-running' })
+  })
+
+  it('returns no-session-id when the agent init frame has not arrived', async () => {
+    fs.mkdirSync(runDir, { recursive: true })
+    const f = makeFakeFactory()
+    let pwIdx = 0
+    let healIdx = 0
+    const orch = new RunOrchestrator({
+      feature: makeFeature({ healOnFailureThreshold: 1 }),
+      runId: RUN_ID,
+      runDir,
+      ptyFactory: f.factory,
+      healthCheck: async () => true,
+      delay: async () => undefined,
+      healthPollIntervalMs: 5,
+      healSignalPollMs: 1,
+      healAgentTimeoutMs: 200,
+      playwrightSpawner: () => ({ command: `pw-${pwIdx++}`, cwd: tmpDir }),
+      autoHeal: {
+        agent: 'claude',
+        maxCycles: 1,
+        buildCommand: () => `heal-${healIdx++}`,
+        buildInterjectCommand: ({ sessionId, text }) => `claude --resume ${sessionId} -p ${JSON.stringify(text)}`,
+      },
+    })
+    fs.writeFileSync(
+      orch.paths.summaryPath,
+      JSON.stringify({ failed: [{ name: 'a' }], total: 3, passed: 0 }),
+    )
+    const promise = orch.runFullCycle()
+    await new Promise((r) => setTimeout(r, 5))
+    f.spawned[1].emitExit(1)
+    while (f.spawned.length < 3) await new Promise((r) => setTimeout(r, 5))
+    const agentPty = f.spawned[2]
+    // Agent emits non-init noise before any session_id frame.
+    agentPty.emitData('warming up...\n')
+    const result = await orch.interjectHealAgent('please retry')
+    expect(result).toEqual({ ok: false, reason: 'no-session-id' })
+    agentPty.emitExit(0)
+    await promise
+    await orch.stop('failed')
+  })
+
+  it('captures the session id, kills the old pty, and spawns claude --resume <sid>', async () => {
+    fs.mkdirSync(runDir, { recursive: true })
+    const f = makeFakeFactory()
+    let pwIdx = 0
+    const orch = new RunOrchestrator({
+      feature: makeFeature({ healOnFailureThreshold: 1 }),
+      runId: RUN_ID,
+      runDir,
+      ptyFactory: f.factory,
+      healthCheck: async () => true,
+      delay: async () => undefined,
+      healthPollIntervalMs: 5,
+      healSignalPollMs: 1,
+      healAgentTimeoutMs: 200,
+      playwrightSpawner: () => ({ command: `pw-${pwIdx++}`, cwd: tmpDir }),
+      autoHeal: {
+        agent: 'claude',
+        maxCycles: 1,
+        buildCommand: () => `claude -p initial`,
+        buildInterjectCommand: ({ sessionId, text }) =>
+          `claude --resume ${sessionId} -p ${JSON.stringify(text)}`,
+      },
+    })
+    fs.writeFileSync(
+      orch.paths.summaryPath,
+      JSON.stringify({ failed: [{ name: 'a' }], total: 3, passed: 0 }),
+    )
+    const promise = orch.runFullCycle()
+    await new Promise((r) => setTimeout(r, 5))
+    f.spawned[1].emitExit(1)
+    while (f.spawned.length < 3) await new Promise((r) => setTimeout(r, 5))
+    const oldAgent = f.spawned[2]
+    // Stream-json init frame — exactly the shape claude emits.
+    oldAgent.emitData('{"type":"system","subtype":"init","session_id":"sess-abc-123","model":"claude"}\n')
+
+    const result = await orch.interjectHealAgent('nudge fix')
+    expect(result).toEqual({ ok: true })
+    expect(f.spawned.length).toBe(4)
+    const newAgent = f.spawned[3]
+    expect(newAgent.options.command).toContain('--resume sess-abc-123')
+    expect(newAgent.options.command).toContain('"nudge fix"')
+
+    // Old pty was signaled; emit its exit so the heal loop swaps onto the new pty.
+    expect(oldAgent.killed === 'SIGTERM' || oldAgent.killed === null).toBe(true)
+    oldAgent.emitExit(143)
+
+    // Final status arrives only when the NEW pty exits — proves the
+    // runHealAgent loop swapped onto it instead of returning early.
+    let resolved = false
+    promise.then(() => { resolved = true })
+    await new Promise((r) => setTimeout(r, 20))
+    expect(resolved).toBe(false)
+    newAgent.emitExit(0)
+    await promise
     await orch.stop('failed')
   })
 })

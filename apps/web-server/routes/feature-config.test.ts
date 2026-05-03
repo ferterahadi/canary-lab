@@ -1182,6 +1182,62 @@ describe('GET /api/fs/browse', () => {
   })
 })
 
+describe('GET /api/fs/read-dotenv', () => {
+  it('parses an absolute .env file into entries', async () => {
+    const filePath = path.join(tmpDir, 'sample.env')
+    fs.writeFileSync(filePath, 'FOO=bar\n# comment\nBAZ=qux\n')
+    const app = await makeApp()
+    try {
+      const r = await app.inject({
+        method: 'GET',
+        url: `/api/fs/read-dotenv?path=${encodeURIComponent(filePath)}`,
+      })
+      expect(r.statusCode).toBe(200)
+      const body = r.json() as { path: string; entries: { key: string; value: string }[] }
+      expect(body.path).toBe(filePath)
+      expect(body.entries).toEqual([
+        { key: 'FOO', value: 'bar' },
+        { key: 'BAZ', value: 'qux' },
+      ])
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('400 when path missing', async () => {
+    const app = await makeApp()
+    try {
+      const r = await app.inject({ method: 'GET', url: '/api/fs/read-dotenv' })
+      expect(r.statusCode).toBe(400)
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('404 when file does not exist', async () => {
+    const app = await makeApp()
+    try {
+      const r = await app.inject({
+        method: 'GET',
+        url: `/api/fs/read-dotenv?path=${encodeURIComponent('/does/not/exist.env')}`,
+      })
+      expect(r.statusCode).toBe(404)
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('400 when path is not absolute', async () => {
+    const app = await makeApp()
+    try {
+      const r = await app.inject({ method: 'GET', url: '/api/fs/read-dotenv?path=relative/path.env' })
+      expect(r.statusCode).toBe(400)
+    } finally {
+      await app.close()
+    }
+  })
+})
+
 describe('envset CRUD + envs sync', () => {
   it('POST creates a new env folder, seeded from existing env', async () => {
     buildFeature('alpha', {

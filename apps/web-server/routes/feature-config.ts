@@ -502,6 +502,32 @@ export async function featureConfigRoutes(
   // picker. canary-lab is a local-only dev tool, so the endpoint can read
   // anywhere the server process can; this is intentional.
 
+  // Read an absolute file path and return parsed dotenv entries. Used by the
+  // SlotEditor "Copy from… → From file" flow. Local-only dev tool — same posture
+  // as /api/fs/browse.
+  app.get<{ Querystring: { path?: string } }>('/api/fs/read-dotenv', async (req, reply) => {
+    const home = os.homedir()
+    const raw = (req.query.path ?? '').trim()
+    if (!raw) {
+      reply.code(400)
+      return { error: 'path required' }
+    }
+    const expanded = raw.startsWith('~/') || raw === '~'
+      ? path.join(home, raw.slice(1))
+      : raw
+    if (!path.isAbsolute(expanded)) {
+      reply.code(400)
+      return { error: 'path must be absolute or start with ~' }
+    }
+    if (!fs.existsSync(expanded) || !fs.statSync(expanded).isFile()) {
+      reply.code(404)
+      return { error: 'file not found' }
+    }
+    const content = fs.readFileSync(expanded, 'utf-8')
+    const parsed = parseDotenv(content)
+    return { path: expanded, entries: parsed.entries, unparsedLines: parsed.unparsedLines }
+  })
+
   app.get<{ Querystring: { dir?: string } }>('/api/fs/browse', async (req) => {
     const home = os.homedir()
     const raw = (req.query.dir ?? '').trim()
