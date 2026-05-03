@@ -1,11 +1,12 @@
 import type { FastifyInstance } from 'fastify'
-import { listRuns, getRunDetail, removeRunFromHistory, type OrchestratorRegistry, type OrchestratorLike } from '../lib/run-store'
+import type { RunStore, OrchestratorLike } from '../lib/run-store'
 import { loadFeatures } from '../lib/feature-loader'
 
 export interface RunsRouteDeps {
-  logsDir: string
   featuresDir: string
-  registry: OrchestratorRegistry
+  /** Single source of truth for run state. Routes read + mutate exclusively
+   *  through this — no direct manifest/index file access. */
+  store: RunStore
   // Factory: given a feature name, build + start an orchestrator. Returns the
   // runId synchronously after `start()` is in flight (the factory awaits the
   // initial spawn but not test completion). Injected so tests can stub it.
@@ -14,11 +15,11 @@ export interface RunsRouteDeps {
 
 export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Promise<void> {
   app.get<{ Querystring: { feature?: string } }>('/api/runs', async (req) => {
-    return listRuns(deps.logsDir, { feature: req.query.feature })
+    return deps.store.list({ feature: req.query.feature })
   })
 
   app.get<{ Params: { runId: string } }>('/api/runs/:runId', async (req, reply) => {
-    const detail = getRunDetail(deps.logsDir, req.params.runId)
+    const detail = deps.store.get(req.params.runId)
     if (!detail) {
       reply.code(404)
       return { error: 'run not found' }
@@ -48,7 +49,7 @@ export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Pro
     }
     try {
       const orch = await deps.startRun(feature, env)
-      deps.registry.set(orch.runId, orch)
+      deps.store.registry.set(orch.runId, orch)
       reply.code(201)
       return { runId: orch.runId }
     } catch (err) {
@@ -62,7 +63,7 @@ export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Pro
   // 404 when unknown, 409 with a reason when pausing is meaningless,
   // 202 + status payload on success.
   app.post<{ Params: { runId: string } }>('/api/runs/:runId/pause-heal', async (req, reply) => {
-    const orch = deps.registry.get(req.params.runId)
+    const orch = deps.store.registry.get(req.params.runId)
     if (!orch) {
       reply.code(404)
       return { error: 'run not active' }
@@ -80,7 +81,7 @@ export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Pro
   // loop, appends a journal entry. 404 when unknown, 409 with a reason when
   // there's nothing to cancel, 202 on success.
   app.post<{ Params: { runId: string } }>('/api/runs/:runId/cancel-heal', async (req, reply) => {
-    const orch = deps.registry.get(req.params.runId)
+    const orch = deps.store.registry.get(req.params.runId)
     if (!orch) {
       reply.code(404)
       return { error: 'run not active' }
@@ -100,7 +101,7 @@ export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Pro
   app.post<{ Params: { runId: string }; Body: { data: string } }>(
     '/api/runs/:runId/agent-input',
     async (req, reply) => {
-      const orch = deps.registry.get(req.params.runId)
+      const orch = deps.store.registry.get(req.params.runId)
       if (!orch) {
         reply.code(404)
         return { error: 'run not active' }
@@ -128,44 +129,33 @@ export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Pro
   // marks the manifest 'aborted'. The run is preserved in history so the
   // user can audit the logs after. 404 when not active, 204 on success.
   app.post<{ Params: { runId: string } }>('/api/runs/:runId/abort', async (req, reply) => {
-    const runId = req.params.runId
-    const orch = deps.registry.get(runId)
-    if (!orch) {
+    const result = await deps.store.abort(req.params.runId)
+    if (!result.ok) {
       reply.code(404)
       return { error: 'run not active' }
     }
-    try { await orch.stop('aborted') } catch { /* best-effort */ }
-    deps.registry.delete(runId)
     reply.code(204)
     return ''
   })
 
-  // DELETE /api/runs/:runId — hard-remove a terminal run (passed/failed/
-  // aborted) from history: drop the index entry and recursively delete the
-  // run directory. Refuses (409) if the run is still active — callers must
-  // hit POST /abort first. 404 when nothing matches the runId at all.
+  // DELETE /api/runs/:runId — hard-remove a terminal run from history.
+  // The action-matrix policy (active runs must be aborted first) lives in
+  // `RunStore.delete`; the route just maps the structured failure into HTTP
+  // status codes.
   app.delete<{ Params: { runId: string } }>('/api/runs/:runId', async (req, reply) => {
-    const runId = req.params.runId
-    if (deps.registry.get(runId)) {
-      // Run is currently being orchestrated — refuse so the action matrix
-      // is honored end-to-end (delete is for terminal runs only).
+    const result = deps.store.delete(req.params.runId)
+    if (!result.ok) {
+      if (result.reason === 'not-found') {
+        reply.code(404)
+        return { error: 'run not found' }
+      }
       reply.code(409)
-      return { error: 'run is still active; abort it first' }
+      return {
+        error: result.reason === 'active'
+          ? 'run is still active; abort it first'
+          : 'run is still active; reap or abort first',
+      }
     }
-    const detail = getRunDetail(deps.logsDir, runId)
-    if (!detail) {
-      reply.code(404)
-      return { error: 'run not found' }
-    }
-    const status = detail.manifest.status
-    if (status === 'running' || status === 'healing') {
-      // Manifest claims active but no orch — stale (e.g. server crash).
-      // Refuse so the next boot-time reaper or a fresh run can resolve
-      // the discrepancy; same response shape as the in-registry case.
-      reply.code(409)
-      return { error: 'run is still active; reap or abort first' }
-    }
-    removeRunFromHistory(deps.logsDir, runId)
     reply.code(204)
     return ''
   })

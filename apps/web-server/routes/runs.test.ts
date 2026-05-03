@@ -4,7 +4,7 @@ import os from 'os'
 import path from 'path'
 import Fastify from 'fastify'
 import { runsRoutes } from './runs'
-import { createRegistry, type OrchestratorLike } from '../lib/run-store'
+import { createRegistry, RunStore, type OrchestratorLike } from '../lib/run-store'
 import { writeManifest, writeRunsIndex } from '../../../shared/e2e-runner/manifest'
 import { runDirFor } from '../../../shared/e2e-runner/run-paths'
 
@@ -55,14 +55,14 @@ function writeFeature(name: string): void {
 
 async function build(opts: { startRun?: (f: string) => Promise<OrchestratorLike> } = {}) {
   const registry = createRegistry()
+  const store = new RunStore(logsDir, registry)
   const app = Fastify()
   await app.register(runsRoutes, {
-    logsDir,
     featuresDir,
-    registry,
+    store,
     startRun: opts.startRun ?? (async () => { throw new Error('not configured') }),
   })
-  return { app, registry }
+  return { app, registry, store }
 }
 
 describe('GET /api/runs', () => {

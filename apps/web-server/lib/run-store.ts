@@ -1,15 +1,34 @@
 import fs from 'fs'
 import path from 'path'
-import { readManifest, readRunsIndex, updateManifest, upsertRunsIndexEntry, writeRunsIndex, type RunIndexEntry, type RunManifest } from '../../../shared/e2e-runner/manifest'
+import { EventEmitter } from 'events'
+import {
+  readManifest,
+  readRunsIndex,
+  updateManifest,
+  upsertRunsIndexEntry,
+  writeManifest,
+  writeRunsIndex,
+  type RunIndexEntry,
+  type RunManifest,
+  type ServiceStatus,
+} from '../../../shared/e2e-runner/manifest'
 import { runDirFor } from '../../../shared/e2e-runner/run-paths'
+import { FileRunStateSink, type RunStateSink } from '../../../shared/e2e-runner/run-state-sink'
+
+// `RunStore` is the single mutator for everything the runs feature persists:
+// `logs/<runId>/manifest.json`, `logs/runs-index.json`, the per-run dirs, and
+// the `logs/current` symlink. Routes and the orchestrator both go through it
+// so:
+//   1. invariants (e.g. "writes drop on a stopped orchestrator") live in one
+//      place,
+//   2. every mutation emits a `change` event the WebSocket layer (Phase 2)
+//      forwards to subscribed browsers — no polling needed.
+// The standalone helpers (`listRuns`, `getRunDetail`, `removeRunFromHistory`,
+// `reapStaleRuns`, `readRunSummary`) remain exported so legacy callers and the
+// existing tests keep working; the class wraps them and emits events.
 
 /** A run is considered stale if its heartbeat is older than this (ms). */
 const HEARTBEAT_STALE_MS = 15_000
-
-// Read-side helpers for the run history. The in-memory orchestrator map is
-// kept in `OrchestratorRegistry` (defined here as an interface so the route
-// layer takes any compatible implementation — production uses the real one,
-// tests pass a stub).
 
 // PauseResult is structurally compatible with RunOrchestrator.PauseResult —
 // duplicated here so the route layer doesn't need to import the orchestrator
@@ -58,6 +77,9 @@ export interface ListRunsOptions {
   feature?: string
 }
 
+// Standalone helper kept for backwards compatibility (existing tests + the
+// reapStaleRuns export below). Production code should prefer
+// `RunStore.list()`.
 export function listRuns(logsDir: string, opts: ListRunsOptions = {}): RunIndexEntry[] {
   const all = readRunsIndex(logsDir)
   const filtered = opts.feature ? all.filter((e) => e.feature === opts.feature) : all
@@ -177,3 +199,179 @@ export function getRunDetail(logsDir: string, runId: string): RunDetail | null {
   const summary = readRunSummary(dir)
   return summary ? { runId, manifest: m, summary } : { runId, manifest: m }
 }
+
+// ─── RunStore ────────────────────────────────────────────────────────────
+
+export interface RunStoreEvent {
+  /** What kind of mutation happened. Subscribers can use this to decide
+   *  whether to refetch a single run or the whole list:
+   *   - `bootstrap` / `changed` / `finalized` — single-run change
+   *   - `removed` — single-run history removal
+   *   - `index-changed` — list-level (e.g. reaper) */
+  kind: 'bootstrap' | 'changed' | 'finalized' | 'removed' | 'index-changed'
+  runId?: string
+}
+
+export type RunStoreEventListener = (e: RunStoreEvent) => void
+
+export interface DeleteResult {
+  ok: boolean
+  reason?: 'active' | 'not-found' | 'stale'
+}
+
+export interface AbortResult {
+  ok: boolean
+  reason?: 'not-active'
+}
+
+/**
+ * Single owner of `logs/` mutations. Routes and the orchestrator both go
+ * through this class — no other code should call `updateManifest` /
+ * `upsertRunsIndexEntry` / `removeRunFromHistory` directly. Every mutation
+ * emits an `event` so subscribers (the WS endpoint) can push updates without
+ * polling.
+ *
+ * The class is composed of a `FileRunStateSink` (the actual file writes,
+ * defined in shared/e2e-runner/) plus an EventEmitter and the operational
+ * methods (abort/delete/reapStale) that need access to the orchestrator
+ * registry. It satisfies the `RunStateSink` interface so it can be passed
+ * directly into the orchestrator constructor.
+ */
+export class RunStore extends EventEmitter implements RunStateSink {
+  private readonly sink: FileRunStateSink
+
+  constructor(
+    public readonly logsDir: string,
+    public readonly registry: OrchestratorRegistry,
+  ) {
+    super()
+    this.sink = new FileRunStateSink(logsDir)
+  }
+
+  /** Typed `on`/`off` for the single `event` channel we publish.
+   *  Inheriting `EventEmitter`'s loose `(...args: any[])` signature would
+   *  accept the listener but lose the `RunStoreEvent` type at call sites
+   *  — these wrappers preserve it. */
+  onEvent(listener: RunStoreEventListener): this {
+    super.on('event', listener)
+    return this
+  }
+
+  offEvent(listener: RunStoreEventListener): this {
+    super.off('event', listener)
+    return this
+  }
+
+  // ─── reads ──────────────────────────────────────────────────────────
+
+  list(opts: ListRunsOptions = {}): RunIndexEntry[] {
+    return listRuns(this.logsDir, opts)
+  }
+
+  get(runId: string): RunDetail | null {
+    return getRunDetail(this.logsDir, runId)
+  }
+
+  // ─── path helpers ───────────────────────────────────────────────────
+
+  manifestPath(runId: string): string {
+    return this.sink.manifestPath(runId)
+  }
+
+  // ─── writes (RunStateSink + emit) ───────────────────────────────────
+
+  bootstrap(manifest: RunManifest): void {
+    fs.mkdirSync(path.dirname(this.manifestPath(manifest.runId)), { recursive: true })
+    this.sink.bootstrap(manifest)
+    this.emitEvent({ kind: 'bootstrap', runId: manifest.runId })
+  }
+
+  patchManifest(runId: string, patch: Partial<RunManifest>): void {
+    this.sink.patchManifest(runId, patch)
+    this.emitEvent({ kind: 'changed', runId })
+  }
+
+  setStatus(runId: string, status: RunManifest['status'], healCycles?: number): void {
+    this.sink.setStatus(runId, status, healCycles)
+    this.emitEvent({ kind: 'changed', runId })
+  }
+
+  finalize(
+    runId: string,
+    status: RunManifest['status'],
+    endedAt: string,
+    healCycles: number,
+  ): void {
+    this.sink.finalize(runId, status, endedAt, healCycles)
+    this.emitEvent({ kind: 'finalized', runId })
+  }
+
+  setServiceStatus(runId: string, safeName: string, status: ServiceStatus): void {
+    this.sink.setServiceStatus(runId, safeName, status)
+    this.emitEvent({ kind: 'changed', runId })
+  }
+
+  /** Append a heartbeat. Intentionally does NOT emit — heartbeats fire every
+   *  5 s and would flood subscribers with no useful information. The next
+   *  real status change carries the up-to-date heartbeat anyway. */
+  recordHeartbeat(runId: string): void {
+    this.sink.recordHeartbeat(runId)
+  }
+
+  // ─── operations ─────────────────────────────────────────────────────
+
+  /** Abort an active run. Calls `orch.stop('aborted')` (which routes its own
+   *  manifest writes back through this store) and removes the orchestrator
+   *  from the registry. */
+  async abort(runId: string): Promise<AbortResult> {
+    const orch = this.registry.get(runId)
+    if (!orch) return { ok: false, reason: 'not-active' }
+    try { await orch.stop('aborted') } catch { /* best-effort */ }
+    this.registry.delete(runId)
+    return { ok: true }
+  }
+
+  /** Hard-delete a terminal run from history. Refuses (`reason: 'active'`)
+   *  if an orchestrator is still registered, refuses (`reason: 'stale'`) if
+   *  the manifest still claims active without a registered orchestrator. */
+  delete(runId: string): DeleteResult {
+    if (this.registry.get(runId)) return { ok: false, reason: 'active' }
+    const detail = this.get(runId)
+    if (!detail) return { ok: false, reason: 'not-found' }
+    const status = detail.manifest.status
+    if (status === 'running' || status === 'healing') {
+      return { ok: false, reason: 'stale' }
+    }
+    const removed = removeRunFromHistory(this.logsDir, runId)
+    if (removed) this.emitEvent({ kind: 'removed', runId })
+    return { ok: true }
+  }
+
+  /** Remove a run from history without policy checks. The reaper uses this
+   *  on stale entries; production callers should prefer `delete()`. */
+  removeFromHistory(runId: string): boolean {
+    const ok = removeRunFromHistory(this.logsDir, runId)
+    if (ok) this.emitEvent({ kind: 'removed', runId })
+    return ok
+  }
+
+  /** Boot-time cleanup. Mirrors the standalone `reapStaleRuns` but routes
+   *  every write through this store so subscribers see the resulting state
+   *  flips. Only emits `index-changed` once at the end (per-run emits would
+   *  fire before the WS endpoint is subscribed at boot, so they'd be
+   *  invisible anyway). */
+  async reapStale(): Promise<void> {
+    const before = readRunsIndex(this.logsDir).map((e) => `${e.runId}:${e.status}`).join('|')
+    await reapStaleRuns(this.logsDir, this.registry)
+    const after = readRunsIndex(this.logsDir).map((e) => `${e.runId}:${e.status}`).join('|')
+    if (before !== after) this.emitEvent({ kind: 'index-changed' })
+  }
+
+  private emitEvent(event: RunStoreEvent): void {
+    this.emit('event', event)
+  }
+}
+
+// Re-export the manifest types most callers will want alongside RunStore so
+// they don't need a second import.
+export type { RunIndexEntry, RunManifest, ServiceManifestEntry } from '../../../shared/e2e-runner/manifest'

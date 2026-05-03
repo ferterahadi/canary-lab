@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react'
-import * as api from '../api/client'
-import type { RunDetail, ServiceStatus } from '../api/types'
+import { useState } from 'react'
+import type { ServiceStatus } from '../api/types'
 import { formatDuration, durationBetween } from '../lib/format'
+import { useRun } from '../state/RunsContext'
 import { RunStatusIndicator } from './RunStatusIndicator'
 import { PaneTerminal } from './PaneTerminal'
 import { JournalTab } from './JournalTab'
@@ -10,38 +10,17 @@ import { AgentInputBar } from './AgentInputBar'
 
 type Tab = 'overview' | 'services' | 'playwright' | 'agent' | 'journal'
 
-const TERMINAL_STATUSES = new Set(['passed', 'failed', 'aborted'])
-
 export function RunDetailColumn({ runId }: { runId: string | null }) {
-  const [detail, setDetail] = useState<RunDetail | null>(null)
   const [tab, setTab] = useState<Tab>('overview')
   const [serviceIdx, setServiceIdx] = useState(0)
 
-  useEffect(() => {
-    if (!runId) {
-      setDetail(null)
-      return
-    }
-    let cancelled = false
-    let timer: ReturnType<typeof setTimeout> | null = null
-    const tick = (): void => {
-      api.getRunDetail(runId).then((data) => {
-        if (cancelled) return
-        setDetail(data)
-        const isTerminal = TERMINAL_STATUSES.has(data.manifest.status)
-        const next = isTerminal ? 5000 : 3000
-        timer = setTimeout(tick, next)
-      }).catch(() => {
-        if (cancelled) return
-        timer = setTimeout(tick, 5000)
-      })
-    }
-    tick()
-    return () => {
-      cancelled = true
-      if (timer) clearTimeout(timer)
-    }
-  }, [runId])
+  // Detail comes from the WebSocket-backed RunsContext. No polling here —
+  // the same `state.details[runId]` populated for the runs list is reused,
+  // so the header badge flips status the instant the server pushes the
+  // next `update` frame. The transient action (e.g. user clicked Stop in
+  // the runs list) is overlaid into `displayStatus` so this header shows
+  // `ABORTING` mid-action instead of stale `RUNNING`.
+  const { detail, displayStatus } = useRun(runId)
 
   if (!runId) {
     return (
@@ -67,7 +46,7 @@ export function RunDetailColumn({ runId }: { runId: string | null }) {
       <header className="px-4 py-3" style={{ borderBottom: '1px solid var(--border-default)' }}>
         <div className="flex min-w-0 items-center gap-2">
           <span className="shrink-0">
-            <RunStatusIndicator status={m.status} />
+            <RunStatusIndicator status={displayStatus ?? m.status} />
           </span>
           <span className="min-w-0 flex-1 truncate text-sm" style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }} title={m.runId}>{m.runId}</span>
           <span className="shrink-0 truncate text-xs" style={{ color: 'var(--text-muted)' }} title={m.feature}>{m.feature}</span>

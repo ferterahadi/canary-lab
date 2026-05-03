@@ -1,4 +1,5 @@
 import type { RunDetail } from '../api/types'
+import { useRuns } from '../state/RunsContext'
 
 interface Props {
   activeRunDetail: RunDetail | null
@@ -9,7 +10,13 @@ interface Props {
 // all features. Single source of truth for "is something running right now?"
 // — used to gate the Run Now button so we don't spawn concurrent runs that
 // would saturate local resources.
+//
+// Also surfaces the WebSocket connection state ("connecting" / "live" /
+// "reconnecting" / "disconnected"). Push frames keep run state in sync;
+// when the channel drops, the user sees a banner so they know the data
+// they're looking at may be stale until the socket reconnects.
 export function GlobalStatusBar({ activeRunDetail, onNavigateToRun }: Props) {
+  const { connection } = useRuns()
   const status = activeRunDetail?.manifest.status
 
   // Guard: only treat 'running' and 'healing' as truly active. The runs
@@ -41,6 +48,8 @@ export function GlobalStatusBar({ activeRunDetail, onNavigateToRun }: Props) {
         Canary Lab
       </span>
       <span className="shrink-0" style={{ color: 'var(--border-default)' }}>|</span>
+      <ConnectionBadge state={connection} />
+      <span className="shrink-0" style={{ color: 'var(--border-default)' }}>|</span>
       <div className="shrink-0"><StatusDot label="Playwright" state={playwrightState} /></div>
       {services.length > 0 && (
         <div className="shrink-0">
@@ -68,6 +77,38 @@ export function GlobalStatusBar({ activeRunDetail, onNavigateToRun }: Props) {
           <span className="shrink-0" style={{ color: 'var(--text-muted)' }}>→</span>
         </button>
       )}
+    </div>
+  )
+}
+
+// Compact pill: green = WS open, amber pulse = reconnecting/connecting,
+// rose = disconnected. Sits left of the Playwright/services chips so the
+// user sees data freshness at a glance without cluttering the bar.
+function ConnectionBadge({
+  state,
+}: {
+  state: 'connecting' | 'live' | 'reconnecting' | 'disconnected'
+}) {
+  const palette = {
+    live:          { dot: 'bg-emerald-500',  text: 'text-emerald-700/90 dark:text-emerald-300/90', label: 'live',         pulse: false },
+    connecting:    { dot: 'bg-amber-500',    text: 'text-amber-700/90 dark:text-amber-300/90',     label: 'connecting',   pulse: true },
+    reconnecting:  { dot: 'bg-amber-500',    text: 'text-amber-700/90 dark:text-amber-300/90',     label: 'reconnecting', pulse: true },
+    disconnected:  { dot: 'bg-rose-500',     text: 'text-rose-700/90 dark:text-rose-300/90',       label: 'offline',      pulse: false },
+  }[state]
+  return (
+    <div
+      data-testid="runs-connection-badge"
+      data-state={state}
+      className={`flex shrink-0 items-center gap-1.5 text-[10px] uppercase tracking-wide ${palette.text}`}
+      title={`Runs stream: ${palette.label}`}
+    >
+      <span className="relative flex h-2 w-2">
+        {palette.pulse && (
+          <span className={`absolute inline-flex h-full w-full animate-ping rounded-full ${palette.dot} opacity-75`} />
+        )}
+        <span className={`relative inline-flex h-2 w-2 rounded-full ${palette.dot}`} />
+      </span>
+      <span>{palette.label}</span>
     </div>
   )
 }

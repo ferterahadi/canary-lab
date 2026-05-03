@@ -1,9 +1,9 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import type { RunIndexEntry, TransientAction } from '../api/types'
+import type { RunIndexEntry } from '../api/types'
 import { formatDuration, durationBetween, shortTime } from '../lib/format'
 import { canPauseHeal, canStop, canDelete, canCancelHeal, deriveDisplayStatus } from '../lib/run-actions'
-import { ApiError, pauseHealRun, stopRun, deleteRun, cancelHealRun } from '../api/client'
+import { useRuns } from '../state/RunsContext'
 import { RunStatusIndicator } from './RunStatusIndicator'
 
 interface Props {
@@ -15,24 +15,10 @@ interface Props {
   onStartRun: (env?: string) => void
   runDisabled?: boolean
   runDisabledReason?: string
-  /**
-   * Refresh hook called once the server confirms a delete (or a stop) so
-   * the row leaves the list promptly without waiting for the next 5s
-   * poll. Intentionally NOT used for optimistic updates — the row stays
-   * visible (with a "DELETING" overlay) until the server confirms, so a
-   * disrupted connection or a 409 from the backend doesn't silently
-   * remove a run from the user's view.
-   */
-  onRefreshRuns?: () => void
 }
 
 // Inline SVG icons (no new dependency). Sizes are tuned to align with the
 // 10 px text on the action buttons.
-const ICON_TRASH = (
-  <svg viewBox="0 0 16 16" width="11" height="11" fill="currentColor" aria-hidden="true">
-    <path d="M5.5 2h5l.5 1H14v1H2V3h3l.5-1zM3.5 5h9l-.7 8.2a1.5 1.5 0 0 1-1.5 1.3H5.7a1.5 1.5 0 0 1-1.5-1.3L3.5 5zm2.5 2v6h1V7H6zm3 0v6h1V7H9z" />
-  </svg>
-)
 const ICON_STOP = (
   <svg viewBox="0 0 16 16" width="10" height="10" fill="currentColor" aria-hidden="true">
     <rect x="3" y="3" width="10" height="10" rx="1.5" />
@@ -50,37 +36,23 @@ const ICON_PAUSE = (
 // pops over with the same options.
 const COMPACT_THRESHOLD_PX = 360
 
-// `fetch` rejects with a TypeError when the connection itself fails (server
-// down, network drop, DNS, CORS). The browser doesn't expose a structured
-// error code, so we sniff the message — Chrome/Firefox/Safari all use some
-// variant of "Failed to fetch" / "NetworkError" / "Load failed".
-function isNetworkError(err: unknown): boolean {
-  if (!(err instanceof TypeError)) return false
-  const msg = err.message.toLowerCase()
-  return msg.includes('fetch') || msg.includes('network') || msg.includes('load failed')
-}
-
-export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRun, onStartRun, runDisabled, runDisabledReason, onRefreshRuns }: Props) {
+export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRun, onStartRun, runDisabled, runDisabledReason }: Props) {
   const [envOverride, setEnvOverride] = useState<string | null>(null)
   const selectedEnv = envOverride && envs.includes(envOverride) ? envOverride : envs[0] ?? ''
   const [pendingPause, setPendingPause] = useState<RunIndexEntry | null>(null)
   const [pendingStop, setPendingStop] = useState<RunIndexEntry | null>(null)
   const [pendingDelete, setPendingDelete] = useState<RunIndexEntry | null>(null)
   const [pendingCancelHeal, setPendingCancelHeal] = useState<RunIndexEntry | null>(null)
-  const [pausingId, setPausingId] = useState<string | null>(null)
-  const [stoppingId, setStoppingId] = useState<string | null>(null)
-  const [deletingId, setDeletingId] = useState<string | null>(null)
-  const [cancellingHealId, setCancellingHealId] = useState<string | null>(null)
-  const [actionError, setActionError] = useState<{ runId: string; message: string } | null>(null)
   const [openMenuRunId, setOpenMenuRunId] = useState<string | null>(null)
   const [runPopoverOpen, setRunPopoverOpen] = useState(false)
   const [compact, setCompact] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
-  const errorTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  useEffect(() => () => {
-    if (errorTimer.current) clearTimeout(errorTimer.current)
-  }, [])
+  // Single source of truth for action state — transient flags + per-run
+  // errors come from the WS-backed RunsContext, not local state. Action
+  // dispatchers (abort/delete/etc.) handle the API call + error capture
+  // internally, so the component just decides WHEN to call them.
+  const { transients, errors, abort, delete: deleteAction, pauseHeal, cancelHeal, clearError } = useRuns()
 
   useEffect(() => {
     const el = containerRef.current
@@ -123,108 +95,41 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
     if (!compact) setRunPopoverOpen(false)
   }, [compact])
 
-  const showError = (runId: string, err: unknown): void => {
-    let message: string
-    if (err instanceof ApiError) {
-      // Server responded with a non-2xx. Prefer the structured `reason`
-      // from a 409 body, then fall back to `error`, then the generic
-      // `HTTP <status>` message.
-      const body = err.body
-      if (body && typeof body === 'object' && 'reason' in body) {
-        message = String((body as { reason: unknown }).reason)
-      } else if (body && typeof body === 'object' && 'error' in body) {
-        message = String((body as { error: unknown }).error)
-      } else {
-        message = err.message
-      }
-    } else if (isNetworkError(err)) {
-      // fetch() throws `TypeError: Failed to fetch` on connection drop /
-      // server gone. Surface it as something the user can act on rather
-      // than a JS-y stack-trace word salad.
-      message = 'Lost connection to server. Check that the server is running.'
-    } else {
-      message = err instanceof Error ? err.message : String(err)
-    }
-    setActionError({ runId, message })
-    if (errorTimer.current) clearTimeout(errorTimer.current)
-    errorTimer.current = setTimeout(() => {
-      setActionError((cur) => (cur && cur.runId === runId ? null : cur))
-    }, 5000)
-  }
-
+  // Confirm-dialog handlers. Action mechanics (transient flag, API call,
+  // error capture) live in RunsContext — these just dispatch and clear
+  // the dialog. The post-success "row vanishes" beat is handled by the WS
+  // `removed` frame patching the store.
   const confirmPause = async (): Promise<void> => {
     if (!pendingPause) return
     const target = pendingPause
     setPendingPause(null)
-    setPausingId(target.runId)
-    try {
-      await pauseHealRun(target.runId)
-      setActionError(null)
-    } catch (err) {
-      showError(target.runId, err)
-    } finally {
-      setPausingId(null)
-    }
+    await pauseHeal(target.runId)
   }
 
   const confirmStop = async (): Promise<void> => {
     if (!pendingStop) return
     const target = pendingStop
     setPendingStop(null)
-    setStoppingId(target.runId)
-    try {
-      await stopRun(target.runId)
-      setActionError(null)
-      // Refresh so the row's status flips from 'aborting' (transient) to
-      // 'aborted' (persisted) quickly. Without this we'd wait up to 5s
-      // for the next poll while the badge sits on the transient state.
-      if (onRefreshRuns) onRefreshRuns()
-    } catch (err) {
-      showError(target.runId, err)
-    } finally {
-      setStoppingId(null)
-    }
+    await abort(target.runId)
   }
 
   const confirmCancelHeal = async (): Promise<void> => {
     if (!pendingCancelHeal) return
     const target = pendingCancelHeal
     setPendingCancelHeal(null)
-    setCancellingHealId(target.runId)
-    try {
-      await cancelHealRun(target.runId)
-      setActionError(null)
-    } catch (err) {
-      showError(target.runId, err)
-    } finally {
-      setCancellingHealId(null)
-    }
+    await cancelHeal(target.runId)
   }
 
   const confirmDelete = async (): Promise<void> => {
     if (!pendingDelete) return
     const target = pendingDelete
     setPendingDelete(null)
-    setDeletingId(target.runId)
-    try {
-      await deleteRun(target.runId)
-      setActionError(null)
-      // Server confirmed the delete — clear selection (the right pane
-      // would otherwise 404 against a runId that no longer exists) and
-      // refresh the list so the row leaves immediately rather than at
-      // the next 5s poll.
-      if (selectedRunId === target.runId) onSelectRun(null)
-      if (onRefreshRuns) onRefreshRuns()
-    } catch (err) {
-      // No optimistic update to roll back. The row simply stays visible
-      // and the error chip explains why (409 from the server, network
-      // drop, etc.). A background refresh would mask a transient failure
-      // if the server actually did delete it — the next 5s poll handles
-      // that case naturally.
-      showError(target.runId, err)
-    } finally {
-      setDeletingId(null)
-    }
+    // Clear selection eagerly so the right pane doesn't 404 against the
+    // runId we're about to remove. Safe even on failure — the user can
+    // re-select; the row stays in the list until the WS `removed` frame
+    // arrives.
+    if (selectedRunId === target.runId) onSelectRun(null)
+    await deleteAction(target.runId)
   }
 
   return (
@@ -291,18 +196,18 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
             {runs.map((r) => {
               const dur = durationBetween(r.startedAt, r.endedAt)
               const isSelected = r.runId === selectedRunId
-              const isDeleting = deletingId === r.runId
-              // Derive the row's transient action — first non-null wins.
-              // Used to overlay 'ABORTING'/'PAUSING'/'CANCELLING' on the
-              // status badge while the corresponding async action is in
-              // flight, so the user sees their click acknowledged
-              // immediately instead of a stale 'RUNNING'/'HEALING' label.
-              const transient: TransientAction | null =
-                stoppingId === r.runId ? 'aborting'
-                : pausingId === r.runId ? 'pausing'
-                : cancellingHealId === r.runId ? 'cancelling-heal'
-                : isDeleting ? 'deleting'
-                : null
+              // Per-row transient + error sourced from the WS-backed
+              // RunsContext — single source of truth across this column,
+              // RunDetailColumn, and GlobalStatusBar. The badge overlay
+              // ('ABORTING' / 'DELETING' / etc.) acknowledges the user's
+              // click immediately, then resolves to the persisted status
+              // when the server pushes the next `update` frame.
+              const transient = transients[r.runId] ?? null
+              const isDeleting = transient === 'deleting'
+              const isStopping = transient === 'aborting'
+              const isPausing = transient === 'pausing'
+              const isCancellingHeal = transient === 'cancelling-heal'
+              const rowError = errors[r.runId] ?? null
               const displayStatus = deriveDisplayStatus(r.status, transient)
               if (isDeleting) {
                 // In-flight overlay: row is greyed out, inert, and the
@@ -361,8 +266,8 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
                               setOpenMenuRunId((cur) => (cur === r.runId ? null : r.runId))
                             }}
                             onClose={() => setOpenMenuRunId(null)}
-                            stoppingId={stoppingId}
-                            pausingId={pausingId}
+                            isStopping={isStopping}
+                            isPausing={isPausing}
                             onStop={() => { setOpenMenuRunId(null); setPendingStop(r) }}
                             onPause={() => { setOpenMenuRunId(null); setPendingPause(r) }}
                           />
@@ -370,37 +275,37 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
                           <>
                             {canStop(r.status) && (
                               <ActionButton
-                                label={stoppingId === r.runId ? 'Stopping' : 'Stop'}
+                                label={isStopping ? 'Stopping' : 'Stop'}
                                 icon={ICON_STOP}
-                                disabled={stoppingId === r.runId}
+                                disabled={isStopping}
                                 variant="danger"
                                 onClick={(e) => {
                                   e.stopPropagation()
-                                  if (stoppingId !== r.runId) setPendingStop(r)
+                                  if (!isStopping) setPendingStop(r)
                                 }}
                               />
                             )}
                             {canPauseHeal(r.status) && (
                               <ActionButton
-                                label={pausingId === r.runId ? 'Pausing' : 'Pause'}
+                                label={isPausing ? 'Pausing' : 'Pause'}
                                 icon={ICON_PAUSE}
-                                disabled={pausingId === r.runId}
+                                disabled={isPausing}
                                 variant="warning"
                                 onClick={(e) => {
                                   e.stopPropagation()
-                                  if (pausingId !== r.runId) setPendingPause(r)
+                                  if (!isPausing) setPendingPause(r)
                                 }}
                               />
                             )}
                             {canCancelHeal(r.status) && (
                               <ActionButton
-                                label={cancellingHealId === r.runId ? 'Cancelling' : 'Stop Heal'}
+                                label={isCancellingHeal ? 'Cancelling' : 'Stop Heal'}
                                 icon={ICON_STOP}
-                                disabled={cancellingHealId === r.runId}
+                                disabled={isCancellingHeal}
                                 variant="danger"
                                 onClick={(e) => {
                                   e.stopPropagation()
-                                  if (cancellingHealId !== r.runId) setPendingCancelHeal(r)
+                                  if (!isCancellingHeal) setPendingCancelHeal(r)
                                 }}
                               />
                             )}
@@ -416,7 +321,7 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
                             so the user understands the constraint instead
                             of wondering where the delete went. */}
                         <DeleteIconButton
-                          disabled={!canDelete(r.status) || deletingId === r.runId}
+                          disabled={!canDelete(r.status) || isDeleting}
                           disabledReason={
                             !canDelete(r.status)
                               ? 'Stop the run before deleting'
@@ -424,7 +329,7 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
                           }
                           onClick={(e) => {
                             e.stopPropagation()
-                            if (canDelete(r.status) && deletingId !== r.runId) setPendingDelete(r)
+                            if (canDelete(r.status) && !isDeleting) setPendingDelete(r)
                           }}
                         />
                       </div>
@@ -433,9 +338,20 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
                       <span className="truncate" style={{ fontFamily: 'var(--font-mono)' }}>{r.runId}</span>
                       {dur != null && <span>{formatDuration(dur)}</span>}
                     </div>
-                    {actionError && actionError.runId === r.runId && (
-                      <div className="mt-1 w-full rounded-md border border-rose-500/40 bg-rose-500/10 px-2 py-1 text-[10px] text-rose-700 dark:text-rose-300">
-                        {actionError.message}
+                    {rowError && (
+                      <div
+                        className="mt-1 flex w-full items-center justify-between gap-2 rounded-md border border-rose-500/40 bg-rose-500/10 px-2 py-1 text-[10px] text-rose-700 dark:text-rose-300"
+                        role="alert"
+                      >
+                        <span className="truncate">{rowError}</span>
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); clearError(r.runId) }}
+                          aria-label="Dismiss error"
+                          className="shrink-0 rounded px-1 text-[10px] uppercase tracking-wide opacity-70 hover:opacity-100"
+                        >
+                          dismiss
+                        </button>
                       </div>
                     )}
                   </button>
@@ -630,8 +546,8 @@ function RunActionsKebab({
   open,
   onOpenToggle,
   onClose,
-  stoppingId,
-  pausingId,
+  isStopping,
+  isPausing,
   onStop,
   onPause,
 }: {
@@ -640,8 +556,8 @@ function RunActionsKebab({
   open: boolean
   onOpenToggle: (e: React.MouseEvent) => void
   onClose: () => void
-  stoppingId: string | null
-  pausingId: string | null
+  isStopping: boolean
+  isPausing: boolean
   onStop: () => void
   onPause: () => void
 }) {
@@ -701,9 +617,9 @@ function RunActionsKebab({
         >
           {stopAvailable && (
             <MenuItem
-              label={stoppingId === run.runId ? 'Stopping...' : 'Stop'}
+              label={isStopping ? 'Stopping...' : 'Stop'}
               variant="danger"
-              disabled={stoppingId === run.runId}
+              disabled={isStopping}
               icon={(
                 <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
                   <rect x="3" y="3" width="10" height="10" rx="1.5" />
@@ -714,9 +630,9 @@ function RunActionsKebab({
           )}
           {pauseAvailable && (
             <MenuItem
-              label={pausingId === run.runId ? 'Pausing...' : 'Pause & Heal'}
+              label={isPausing ? 'Pausing...' : 'Pause & Heal'}
               variant="warning"
-              disabled={pausingId === run.runId}
+              disabled={isPausing}
               icon={(
                 <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
                   <rect x="3" y="3" width="3" height="10" rx="1" />

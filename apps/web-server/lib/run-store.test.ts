@@ -9,8 +9,10 @@ import {
   removeRunFromHistory,
   getRunDetail,
   readRunSummary,
+  RunStore,
+  type RunStoreEvent,
 } from './run-store'
-import { readManifest, writeManifest, writeRunsIndex } from '../../../shared/e2e-runner/manifest'
+import { readManifest, writeManifest, writeRunsIndex, readRunsIndex } from '../../../shared/e2e-runner/manifest'
 import { runDirFor } from '../../../shared/e2e-runner/run-paths'
 
 let tmpDir: string
@@ -394,5 +396,192 @@ describe('readRunSummary', () => {
       JSON.stringify({ complete: false, total: 0, passed: 0, failed: [] }),
     )
     expect(readRunSummary(tmpDir)).toEqual({ complete: false, total: 0, passed: 0, failed: [] })
+  })
+})
+
+describe('RunStore', () => {
+  // Helper: create a run dir + manifest + index entry so the store has
+  // something to read/mutate.
+  function seedRun(runId: string, overrides: Partial<{ status: 'running' | 'passed' | 'failed' | 'aborted' | 'healing'; feature: string; healCycles: number }> = {}): string {
+    const dir = runDirFor(tmpDir, runId)
+    fs.mkdirSync(dir, { recursive: true })
+    writeManifest(path.join(dir, 'manifest.json'), {
+      runId,
+      feature: overrides.feature ?? 'foo',
+      startedAt: '2026-01-01T00:00:00Z',
+      status: overrides.status ?? 'running',
+      healCycles: overrides.healCycles ?? 0,
+      services: [],
+    })
+    writeRunsIndex(tmpDir, [
+      { runId, feature: overrides.feature ?? 'foo', startedAt: '2026-01-01T00:00:00Z', status: overrides.status ?? 'running' },
+    ])
+    return dir
+  }
+
+  it('list and get delegate to standalone helpers', () => {
+    seedRun('r1', { status: 'passed' })
+    const store = new RunStore(tmpDir, createRegistry())
+    expect(store.list().map((e) => e.runId)).toEqual(['r1'])
+    expect(store.get('r1')?.manifest.status).toBe('passed')
+    expect(store.get('missing')).toBeNull()
+  })
+
+  it('bootstrap writes manifest, index, and current symlink, then emits', () => {
+    const store = new RunStore(tmpDir, createRegistry())
+    const events: RunStoreEvent[] = []
+    store.on('event', (e) => events.push(e))
+    store.bootstrap({
+      runId: 'rb1',
+      feature: 'foo',
+      startedAt: '2026-01-01T00:00:00Z',
+      status: 'running',
+      healCycles: 0,
+      services: [],
+    })
+    const dir = runDirFor(tmpDir, 'rb1')
+    expect(fs.existsSync(path.join(dir, 'manifest.json'))).toBe(true)
+    expect(readRunsIndex(tmpDir).find((e) => e.runId === 'rb1')?.status).toBe('running')
+    expect(events).toEqual([{ kind: 'bootstrap', runId: 'rb1' }])
+  })
+
+  it('setStatus mirrors status into both manifest and index, and emits changed', () => {
+    seedRun('r1', { status: 'running' })
+    const store = new RunStore(tmpDir, createRegistry())
+    const events: RunStoreEvent[] = []
+    store.on('event', (e) => events.push(e))
+    store.setStatus('r1', 'healing', 2)
+    expect(readManifest(store.manifestPath('r1'))?.status).toBe('healing')
+    expect(readManifest(store.manifestPath('r1'))?.healCycles).toBe(2)
+    expect(readRunsIndex(tmpDir).find((e) => e.runId === 'r1')?.status).toBe('healing')
+    expect(events).toEqual([{ kind: 'changed', runId: 'r1' }])
+  })
+
+  it('finalize flips services to stopped, writes endedAt, and emits finalized', () => {
+    const dir = seedRun('r1', { status: 'running' })
+    // Add a service entry so updateAllServicesStatus has something to flip.
+    writeManifest(path.join(dir, 'manifest.json'), {
+      runId: 'r1',
+      feature: 'foo',
+      startedAt: '2026-01-01T00:00:00Z',
+      status: 'running',
+      healCycles: 1,
+      services: [{ name: 'api', safeName: 'api', command: 'x', cwd: '/', status: 'ready', logPath: '/x.log' }],
+    })
+    const store = new RunStore(tmpDir, createRegistry())
+    const events: RunStoreEvent[] = []
+    store.on('event', (e) => events.push(e))
+    store.finalize('r1', 'aborted', '2026-01-01T00:05:00Z', 1)
+    const m = readManifest(store.manifestPath('r1'))!
+    expect(m.status).toBe('aborted')
+    expect(m.endedAt).toBe('2026-01-01T00:05:00Z')
+    expect(m.services[0].status).toBe('stopped')
+    const indexed = readRunsIndex(tmpDir).find((e) => e.runId === 'r1')!
+    expect(indexed.status).toBe('aborted')
+    expect(indexed.endedAt).toBe('2026-01-01T00:05:00Z')
+    expect(events).toEqual([{ kind: 'finalized', runId: 'r1' }])
+  })
+
+  it('recordHeartbeat writes the timestamp WITHOUT emitting (would flood subscribers)', () => {
+    seedRun('r1')
+    const store = new RunStore(tmpDir, createRegistry())
+    const events: RunStoreEvent[] = []
+    store.on('event', (e) => events.push(e))
+    store.recordHeartbeat('r1')
+    expect(readManifest(store.manifestPath('r1'))?.heartbeatAt).toBeTruthy()
+    expect(events).toEqual([])
+  })
+
+  it('abort calls orch.stop and removes from registry; 404s when not active', async () => {
+    const reg = createRegistry()
+    let stopped = false
+    reg.set('r1', {
+      runId: 'r1',
+      stop: async () => { stopped = true },
+      pauseAndHeal: async () => ({ ok: true as const, failureCount: 0 }),
+      cancelHeal: async () => ({ ok: true as const }),
+    })
+    const store = new RunStore(tmpDir, reg)
+    expect(await store.abort('r1')).toEqual({ ok: true })
+    expect(stopped).toBe(true)
+    expect(reg.get('r1')).toBeUndefined()
+    expect(await store.abort('ghost')).toEqual({ ok: false, reason: 'not-active' })
+  })
+
+  it('delete refuses active runs (registered) and stale-active manifests', () => {
+    const reg = createRegistry()
+    reg.set('active', {
+      runId: 'active',
+      stop: async () => {},
+      pauseAndHeal: async () => ({ ok: true as const, failureCount: 0 }),
+      cancelHeal: async () => ({ ok: true as const }),
+    })
+    seedRun('active', { status: 'running' })
+    seedRun('stale', { status: 'running' })
+    seedRun('done', { status: 'passed' })
+    const store = new RunStore(tmpDir, reg)
+    expect(store.delete('active')).toEqual({ ok: false, reason: 'active' })
+    expect(store.delete('stale')).toEqual({ ok: false, reason: 'stale' })
+    expect(store.delete('ghost')).toEqual({ ok: false, reason: 'not-found' })
+    const events: RunStoreEvent[] = []
+    store.on('event', (e) => events.push(e))
+    expect(store.delete('done')).toEqual({ ok: true })
+    expect(fs.existsSync(runDirFor(tmpDir, 'done'))).toBe(false)
+    expect(events).toEqual([{ kind: 'removed', runId: 'done' }])
+  })
+
+  it('reapStale flips stale entries to aborted and emits index-changed exactly once', async () => {
+    const dir = runDirFor(tmpDir, 'stale')
+    fs.mkdirSync(dir, { recursive: true })
+    writeManifest(path.join(dir, 'manifest.json'), {
+      runId: 'stale',
+      feature: 'foo',
+      startedAt: '2026-01-01T00:00:00Z',
+      status: 'running',
+      healCycles: 0,
+      services: [],
+      heartbeatAt: new Date(Date.now() - 60_000).toISOString(),
+    })
+    writeRunsIndex(tmpDir, [
+      { runId: 'stale', feature: 'foo', startedAt: '2026-01-01T00:00:00Z', status: 'running' },
+    ])
+    const store = new RunStore(tmpDir, createRegistry())
+    const events: RunStoreEvent[] = []
+    store.on('event', (e) => events.push(e))
+    await store.reapStale()
+    expect(readRunsIndex(tmpDir)[0].status).toBe('aborted')
+    expect(events).toEqual([{ kind: 'index-changed' }])
+  })
+
+  it('reapStale does not emit when nothing changes', async () => {
+    seedRun('healthy', { status: 'passed' })
+    const store = new RunStore(tmpDir, createRegistry())
+    const events: RunStoreEvent[] = []
+    store.on('event', (e) => events.push(e))
+    await store.reapStale()
+    expect(events).toEqual([])
+  })
+
+  it('setServiceStatus mutates the named service and emits changed', () => {
+    const dir = runDirFor(tmpDir, 'r1')
+    fs.mkdirSync(dir, { recursive: true })
+    writeManifest(path.join(dir, 'manifest.json'), {
+      runId: 'r1',
+      feature: 'foo',
+      startedAt: '2026-01-01T00:00:00Z',
+      status: 'running',
+      healCycles: 0,
+      services: [{ name: 'api', safeName: 'api', command: 'x', cwd: '/', status: 'starting', logPath: '/x.log' }],
+    })
+    writeRunsIndex(tmpDir, [
+      { runId: 'r1', feature: 'foo', startedAt: '2026-01-01T00:00:00Z', status: 'running' },
+    ])
+    const store = new RunStore(tmpDir, createRegistry())
+    const events: RunStoreEvent[] = []
+    store.on('event', (e) => events.push(e))
+    store.setServiceStatus('r1', 'api', 'ready')
+    const m = readManifest(store.manifestPath('r1'))!
+    expect(m.services[0].status).toBe('ready')
+    expect(events).toEqual([{ kind: 'changed', runId: 'r1' }])
   })
 })
