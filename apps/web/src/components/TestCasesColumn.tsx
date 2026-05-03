@@ -46,7 +46,6 @@ export function TestCasesColumn({ feature, activeRunSummary }: Props) {
       <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom: '1px solid var(--border-default)' }}>
         <div className="flex items-center gap-2">
           <span className="text-[10px] uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Tests</span>
-          <span className="text-xs font-medium" style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>{feature}</span>
         </div>
         {activeRunSummary && (
           <RunningIndicator summary={activeRunSummary} totalTests={totalTests} />
@@ -105,7 +104,7 @@ function TestCard({
         <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
           {expanded ? '▾' : '▸'}
         </span>
-        <div className="flex-1 min-w-0 truncate text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
+        <div className="flex-1 min-w-0 truncate text-sm font-medium" title={test.name} style={{ color: 'var(--text-primary)' }}>
           {test.name}
         </div>
         <span className="shrink-0 text-[10px]" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>

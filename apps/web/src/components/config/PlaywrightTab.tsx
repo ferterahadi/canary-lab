@@ -99,6 +99,8 @@ export function PlaywrightTab({ feature }: { feature: string }) {
     hint: string | undefined,
     value: number | { $expr: string } | undefined,
     onChange: (next: number | { $expr: string } | undefined) => void,
+    defaultIfUnset = 0,
+    min?: number,
   ) => (
     <FieldRow label={label} hint={hint} layout="inline">
       {value && typeof value === 'object' ? (
@@ -106,7 +108,7 @@ export function PlaywrightTab({ feature }: { feature: string }) {
           <ComplexValueBadge source={value.$expr} />
           <button
             type="button"
-            onClick={() => onChange(0)}
+            onClick={() => onChange(defaultIfUnset)}
             className="rounded-md px-2 py-1 text-[10px] uppercase tracking-wider"
             style={{ color: 'var(--text-muted)', border: '1px solid var(--border-default)' }}
           >
@@ -115,7 +117,8 @@ export function PlaywrightTab({ feature }: { feature: string }) {
         </div>
       ) : (
         <NumberInput
-          value={typeof value === 'number' ? value : 0}
+          value={typeof value === 'number' ? value : defaultIfUnset}
+          min={min}
           onChange={onChange}
         />
       )}
@@ -138,18 +141,24 @@ export function PlaywrightTab({ feature }: { feature: string }) {
             'Concurrent worker processes',
             ed.draft.workers,
             (workers) => ed.setDraft((d) => ({ ...d, workers })),
+            1,
+            1,
           )}
           {numberOrExprField(
             'Retries',
             'Retries per failed test',
             ed.draft.retries,
             (retries) => ed.setDraft((d) => ({ ...d, retries })),
+            0,
+            0,
           )}
           {numberOrExprField(
             'Timeout (ms)',
             'Per-test timeout',
             ed.draft.timeout,
             (timeout) => ed.setDraft((d) => ({ ...d, timeout })),
+            0,
+            0,
           )}
         </div>
 

@@ -60,6 +60,7 @@ export function FeaturesColumn({
                 <button
                   type="button"
                   onClick={() => onSelectFeature(f.name)}
+                  title={f.name}
                   className="min-w-0 flex-1 truncate px-4 py-2 text-left"
                   style={{ color: 'inherit', fontWeight: 'inherit' }}
                 >
