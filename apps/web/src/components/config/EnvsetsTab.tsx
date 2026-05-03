@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import * as api from '../../api/client'
 import { ConfirmModal, FieldRow, FolderIcon, HintIcon, IconButton, Modal, PlusIcon, SectionHeader, TextInput, TrashIcon } from './atoms'
 import { SaveBar } from './SaveBar'
@@ -17,6 +17,31 @@ interface KvEntry { key: string; value: string }
 
 function stripFeaturePrefix(slot: string, feature: string): string {
   return slot.startsWith(`${feature}.`) ? slot.slice(feature.length + 1) : slot
+}
+
+interface KvDiff {
+  matching: { key: string; sourceValue: string; currentValue: string }[]
+  onlyInSource: { key: string; value: string }[]
+  onlyInCurrent: { key: string; value: string }[]
+}
+
+function diffKvEntries(source: KvEntry[], current: KvEntry[]): KvDiff {
+  const sourceMap = new Map(source.map((e) => [e.key, e.value]))
+  const currentKeys = new Set(current.map((e) => e.key))
+  const matching: KvDiff['matching'] = []
+  const onlyInCurrent: KvDiff['onlyInCurrent'] = []
+  for (const entry of current) {
+    if (!entry.key) continue
+    if (sourceMap.has(entry.key)) {
+      matching.push({ key: entry.key, sourceValue: sourceMap.get(entry.key)!, currentValue: entry.value })
+    } else {
+      onlyInCurrent.push({ key: entry.key, value: entry.value })
+    }
+  }
+  const onlyInSource: KvDiff['onlyInSource'] = source
+    .filter((e) => e.key && !currentKeys.has(e.key))
+    .map((e) => ({ key: e.key, value: e.value }))
+  return { matching, onlyInSource, onlyInCurrent }
 }
 
 
@@ -253,7 +278,13 @@ export function EnvsetsTab({ feature }: { feature: string }) {
         <div className="px-4 py-1.5 text-xs" style={{ color: '#ef4444' }}>{error}</div>
       )}
       {envObj && slotName ? (
-        <SlotEditor key={`${envObj.name}/${slotName}`} feature={feature} env={envObj.name} slot={slotName} />
+        <SlotEditor
+          key={`${envObj.name}/${slotName}`}
+          feature={feature}
+          env={envObj.name}
+          slot={slotName}
+          siblingEnvs={index.envs.filter((e) => e.name !== envObj.name && e.slots.includes(slotName)).map((e) => e.name)}
+        />
       ) : envObj ? (
         <div className="p-4 text-xs" style={{ color: 'var(--text-muted)' }}>No slots in this env.</div>
       ) : null}
@@ -481,16 +512,19 @@ function SlotEditor({
   feature,
   env,
   slot,
+  siblingEnvs,
 }: {
   feature: string
   env: string
   slot: string
+  siblingEnvs: string[]
 }) {
   const [doc, setDoc] = useState<api.EnvsetSlotDoc | null>(null)
   const [draft, setDraft] = useState<KvEntry[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [savedAt, setSavedAt] = useState<number | null>(null)
+  const [copyOpen, setCopyOpen] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -570,15 +604,26 @@ function SlotEditor({
               </div>
             </div>
           ))}
-          <button
-            type="button"
-            onClick={() => setDraft([...draft, { key: '', value: '' }])}
-            className="self-start mt-1 inline-flex items-center gap-1 rounded-md px-2 py-1 text-[10px] uppercase tracking-wider"
-            style={{ color: 'var(--text-muted)', border: '1px dashed var(--border-default)' }}
-          >
-            <PlusIcon />
-            Add entry
-          </button>
+          <div className="mt-1 flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => setDraft([...draft, { key: '', value: '' }])}
+              className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[10px] uppercase tracking-wider"
+              style={{ color: 'var(--text-muted)', border: '1px dashed var(--border-default)' }}
+            >
+              <PlusIcon />
+              Add entry
+            </button>
+            <button
+              type="button"
+              onClick={() => setCopyOpen(true)}
+              title="Seed values from another env or a file"
+              className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[10px] uppercase tracking-wider"
+              style={{ color: 'var(--text-muted)', border: '1px dashed var(--border-default)' }}
+            >
+              Copy from…
+            </button>
+          </div>
           {doc.unparsedLines.length > 0 && (
             <div className="mt-3 text-[10px]" style={{ color: '#eab308' }}>
               {doc.unparsedLines.length} line(s) couldn't be parsed and will be preserved verbatim.
@@ -594,6 +639,357 @@ function SlotEditor({
         onSave={onSave}
         onDiscard={() => setDraft(doc.entries)}
       />
+      {copyOpen && (
+        <CopyFromModal
+          feature={feature}
+          targetEnv={env}
+          slot={slot}
+          siblingEnvs={siblingEnvs}
+          current={draft}
+          onClose={() => setCopyOpen(false)}
+          onApply={(merged) => { setDraft(merged); setCopyOpen(false) }}
+        />
+      )}
+    </div>
+  )
+}
+
+function CopyFromModal({
+  feature,
+  targetEnv,
+  slot,
+  siblingEnvs,
+  current,
+  onClose,
+  onApply,
+}: {
+  feature: string
+  targetEnv: string
+  slot: string
+  siblingEnvs: string[]
+  current: KvEntry[]
+  onClose: () => void
+  onApply: (merged: KvEntry[]) => void
+}) {
+  const [mode, setMode] = useState<'env' | 'file'>(siblingEnvs.length > 0 ? 'env' : 'file')
+  const [sourceEnv, setSourceEnv] = useState<string | null>(siblingEnvs[0] ?? null)
+  const [filePath, setFilePath] = useState('')
+  const [browse, setBrowse] = useState<api.FsBrowseResponse | null>(null)
+  const [sourceEntries, setSourceEntries] = useState<KvEntry[] | null>(null)
+  const [sourceLabel, setSourceLabel] = useState<string>('')
+  const [error, setError] = useState<string | null>(null)
+  const [stage, setStage] = useState<'pick' | 'review'>('pick')
+  const [overwrite, setOverwrite] = useState<Record<string, boolean>>({})
+  const [addNew, setAddNew] = useState<Record<string, boolean>>({})
+  const [keepExtra, setKeepExtra] = useState<Record<string, boolean>>({})
+  const [busy, setBusy] = useState(false)
+
+  const loadDir = async (dir: string): Promise<void> => {
+    setError(null)
+    try {
+      const res = await api.browseDir(dir)
+      setBrowse(res)
+      setFilePath(res.dir)
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Browse failed')
+    }
+  }
+
+  useEffect(() => {
+    if (mode === 'file' && !browse) loadDir('')
+  }, [mode])
+
+  const applyEntries = (entries: KvEntry[], label: string): void => {
+    setSourceEntries(entries)
+    setSourceLabel(label)
+    const diff = diffKvEntries(entries, current)
+    setOverwrite(Object.fromEntries(diff.matching.map((m) => [m.key, true])))
+    setAddNew(Object.fromEntries(diff.onlyInSource.map((m) => [m.key, true])))
+    setKeepExtra(Object.fromEntries(diff.onlyInCurrent.map((m) => [m.key, true])))
+    setStage('review')
+  }
+
+  const onLoadEnv = async (): Promise<void> => {
+    if (!sourceEnv) return
+    setBusy(true)
+    setError(null)
+    try {
+      const doc = await api.getEnvsetSlot(feature, sourceEnv, slot)
+      applyEntries(doc.entries, sourceEnv)
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Load failed')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const onLoadFile = async (full: string): Promise<void> => {
+    setBusy(true)
+    setError(null)
+    try {
+      const res = await api.readDotenvFile(full)
+      applyEntries(res.entries, full)
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Read failed')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const diff = sourceEntries ? diffKvEntries(sourceEntries, current) : null
+
+  const onConfirm = (): void => {
+    if (!diff) return
+    const matchValue = new Map(diff.matching.map((m) => [m.key, m]))
+    const merged: KvEntry[] = []
+    for (const entry of current) {
+      if (!entry.key) { merged.push(entry); continue }
+      const m = matchValue.get(entry.key)
+      if (m) {
+        merged.push({ key: entry.key, value: overwrite[entry.key] ? m.sourceValue : entry.value })
+      } else if (keepExtra[entry.key]) {
+        merged.push(entry)
+      }
+    }
+    for (const e of diff.onlyInSource) {
+      if (addNew[e.key]) merged.push({ key: e.key, value: e.value })
+    }
+    onApply(merged)
+  }
+
+  return (
+    <Modal open={true} onClose={onClose} title={`Copy from… → ${targetEnv}`} width={640}>
+      {stage === 'pick' ? (
+        <div className="flex flex-col gap-3 px-4 py-3">
+          <div className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
+            Pick a source to seed values from — another env in this feature, or any .env file on disk. Keys will be compared and you'll review the diff before anything is written into this editor's draft.
+          </div>
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => { if (siblingEnvs.length > 0) setMode('env') }}
+              disabled={siblingEnvs.length === 0}
+              className="rounded-md px-2 py-1 text-[10px] uppercase tracking-wider"
+              style={{
+                color: mode === 'env' ? 'var(--text-primary)' : 'var(--text-muted)',
+                border: `1px solid ${mode === 'env' ? 'var(--text-primary)' : 'var(--border-default)'}`,
+                opacity: siblingEnvs.length === 0 ? 0.4 : 1,
+              }}
+            >
+              From env
+            </button>
+            <button
+              type="button"
+              onClick={() => setMode('file')}
+              className="rounded-md px-2 py-1 text-[10px] uppercase tracking-wider"
+              style={{
+                color: mode === 'file' ? 'var(--text-primary)' : 'var(--text-muted)',
+                border: `1px solid ${mode === 'file' ? 'var(--text-primary)' : 'var(--border-default)'}`,
+              }}
+            >
+              From file
+            </button>
+          </div>
+          {mode === 'env' ? (
+            <FieldRow label="Source env">
+              <select
+                value={sourceEnv ?? ''}
+                onChange={(e) => setSourceEnv(e.target.value)}
+                className="themed-select w-full rounded-md py-1.5 pl-2.5 pr-8 text-xs outline-none"
+                style={inlineSelectStyle}
+              >
+                {siblingEnvs.map((n) => (
+                  <option key={n} value={n}>{n}</option>
+                ))}
+              </select>
+            </FieldRow>
+          ) : (
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center gap-1.5">
+                <TextInput
+                  value={filePath}
+                  onChange={setFilePath}
+                  placeholder="/absolute/path/to/.env or ~/path"
+                />
+                <button
+                  type="button"
+                  onClick={() => loadDir(filePath)}
+                  className="rounded-md px-2 py-1 text-[10px] uppercase tracking-wider"
+                  style={{ color: 'var(--text-primary)', border: '1px solid var(--border-default)' }}
+                >
+                  Go
+                </button>
+              </div>
+              <div
+                className="max-h-[40vh] min-h-[200px] overflow-y-auto scrollbar-thin rounded-md"
+                style={{ border: '1px solid var(--border-default)' }}
+              >
+                {browse?.parent && (
+                  <button
+                    type="button"
+                    onClick={() => loadDir(browse.parent!)}
+                    className="block w-full truncate px-3 py-1.5 text-left text-xs"
+                    style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}
+                  >
+                    ../
+                  </button>
+                )}
+                {browse?.entries.map((e) => (
+                  <button
+                    key={e.name}
+                    type="button"
+                    onClick={() => {
+                      const full = `${browse.dir}/${e.name}`.replace(/\/+/g, '/')
+                      if (e.isDir) loadDir(full)
+                      else onLoadFile(full)
+                    }}
+                    className="block w-full truncate px-3 py-1.5 text-left text-xs hover:opacity-80"
+                    style={{
+                      color: e.isDir ? 'var(--text-primary)' : 'var(--text-secondary)',
+                      fontFamily: 'var(--font-mono)',
+                    }}
+                  >
+                    {e.isDir ? `${e.name}/` : e.name}
+                  </button>
+                ))}
+                {browse && browse.entries.length === 0 && (
+                  <div className="px-3 py-2 text-xs" style={{ color: 'var(--text-muted)' }}>Empty directory.</div>
+                )}
+              </div>
+              <div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
+                Click a file to load it. Anything parseable as <code>KEY=VALUE</code> works.
+              </div>
+            </div>
+          )}
+          {error && <div className="text-xs" style={{ color: '#ef4444' }}>{error}</div>}
+          <div className="flex justify-end gap-2 pt-2" style={{ borderTop: '1px solid var(--border-default)' }}>
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-md px-3 py-1 text-[11px] uppercase tracking-wider"
+              style={{ color: 'var(--text-muted)' }}
+            >
+              Cancel
+            </button>
+            {mode === 'env' && (
+              <button
+                type="button"
+                onClick={onLoadEnv}
+                disabled={busy || !sourceEnv}
+                className="rounded-md px-3 py-1 text-[11px] uppercase tracking-wider"
+                style={{ color: 'var(--text-primary)', border: '1px solid var(--border-default)' }}
+              >
+                {busy ? '…' : 'Compare'}
+              </button>
+            )}
+          </div>
+        </div>
+      ) : (
+        <div className="flex max-h-[70vh] flex-col">
+          <div className="px-4 py-2 text-[11px]" style={{ color: 'var(--text-muted)' }}>
+            Comparing <code style={{ fontFamily: 'var(--font-mono)' }}>{sourceLabel}</code> → <code style={{ fontFamily: 'var(--font-mono)' }}>{targetEnv}</code>. Toggle which keys to apply, then confirm. Nothing is saved to disk until you hit SAVE.
+          </div>
+          <div className="flex-1 overflow-y-auto scrollbar-thin px-4 pb-3">
+            <DiffSection
+              title={`Matching keys (${diff?.matching.length ?? 0})`}
+              hint={`Overwrite current values from ${sourceLabel}`}
+              empty="No keys exist in both envs."
+              rows={(diff?.matching ?? []).map((m) => ({
+                key: m.key,
+                checked: !!overwrite[m.key],
+                onToggle: () => setOverwrite((s) => ({ ...s, [m.key]: !s[m.key] })),
+                detail: (
+                  <span className="text-[10px]" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+                    <span style={{ color: '#ef4444' }}>{m.currentValue || '∅'}</span>
+                    {' → '}
+                    <span style={{ color: '#22c55e' }}>{m.sourceValue || '∅'}</span>
+                  </span>
+                ),
+              }))}
+            />
+            <DiffSection
+              title={`Only in source (${diff?.onlyInSource.length ?? 0})`}
+              hint={`Add to ${targetEnv}?`}
+              empty="No keys exclusive to source."
+              rows={(diff?.onlyInSource ?? []).map((e) => ({
+                key: e.key,
+                checked: !!addNew[e.key],
+                onToggle: () => setAddNew((s) => ({ ...s, [e.key]: !s[e.key] })),
+                detail: (
+                  <span className="text-[10px]" style={{ color: '#22c55e', fontFamily: 'var(--font-mono)' }}>
+                    {e.value || '∅'}
+                  </span>
+                ),
+              }))}
+            />
+            <DiffSection
+              title={`Only in ${targetEnv} (${diff?.onlyInCurrent.length ?? 0})`}
+              hint={`Not present in ${sourceLabel} — is this expected? Uncheck to drop.`}
+              empty={`No keys exclusive to ${targetEnv}.`}
+              rows={(diff?.onlyInCurrent ?? []).map((e) => ({
+                key: e.key,
+                checked: !!keepExtra[e.key],
+                onToggle: () => setKeepExtra((s) => ({ ...s, [e.key]: !s[e.key] })),
+                detail: (
+                  <span className="text-[10px]" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+                    {e.value || '∅'}
+                  </span>
+                ),
+              }))}
+            />
+          </div>
+          <div className="flex justify-end gap-2 px-4 py-2" style={{ borderTop: '1px solid var(--border-default)' }}>
+            <button
+              type="button"
+              onClick={() => setStage('pick')}
+              className="rounded-md px-3 py-1 text-[11px] uppercase tracking-wider"
+              style={{ color: 'var(--text-muted)', border: '1px solid var(--border-default)' }}
+            >
+              Back
+            </button>
+            <button
+              type="button"
+              onClick={onConfirm}
+              className="rounded-md px-3 py-1 text-[11px] uppercase tracking-wider"
+              style={{ color: 'var(--text-primary)', border: '1px solid var(--border-default)' }}
+            >
+              Apply
+            </button>
+          </div>
+        </div>
+      )}
+    </Modal>
+  )
+}
+
+function DiffSection({
+  title,
+  hint,
+  empty,
+  rows,
+}: {
+  title: string
+  hint: string
+  empty: string
+  rows: { key: string; checked: boolean; onToggle: () => void; detail: ReactNode }[]
+}) {
+  return (
+    <div className="mt-3">
+      <div className="flex items-baseline justify-between">
+        <span className="text-[10px] uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>{title}</span>
+        <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>{hint}</span>
+      </div>
+      <div className="mt-1 rounded-md" style={{ border: '1px solid var(--border-default)' }}>
+        {rows.length === 0 ? (
+          <div className="px-3 py-2 text-[11px]" style={{ color: 'var(--text-muted)' }}>{empty}</div>
+        ) : rows.map((r) => (
+          <label key={r.key} className="flex items-center gap-2 px-3 py-1.5 text-xs cursor-pointer" style={{ borderBottom: '1px solid var(--border-default)' }}>
+            <input type="checkbox" checked={r.checked} onChange={r.onToggle} />
+            <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }}>{r.key}</span>
+            <span className="ml-auto truncate max-w-[55%]">{r.detail}</span>
+          </label>
+        ))}
+      </div>
     </div>
   )
 }

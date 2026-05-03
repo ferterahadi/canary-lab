@@ -1,8 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import type { RunIndexEntry } from '../api/types'
+import type { RunIndexEntry, TransientAction } from '../api/types'
 import { formatDuration, durationBetween, shortTime } from '../lib/format'
-import { canPauseHeal, canStop, canDelete, canCancelHeal } from '../lib/run-actions'
+import { canPauseHeal, canStop, canDelete, canCancelHeal, deriveDisplayStatus } from '../lib/run-actions'
 import { ApiError, pauseHealRun, stopRun, deleteRun, cancelHealRun } from '../api/client'
 import { RunStatusIndicator } from './RunStatusIndicator'
 
@@ -262,6 +262,18 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
               const dur = durationBetween(r.startedAt, r.endedAt)
               const isSelected = r.runId === selectedRunId
               const isDeleting = deletingId === r.runId
+              // Derive the row's transient action — first non-null wins.
+              // Used to overlay 'ABORTING'/'PAUSING'/'CANCELLING' on the
+              // status badge while the corresponding async action is in
+              // flight, so the user sees their click acknowledged
+              // immediately instead of a stale 'RUNNING'/'HEALING' label.
+              const transient: TransientAction | null =
+                stoppingId === r.runId ? 'aborting'
+                : pausingId === r.runId ? 'pausing'
+                : cancellingHealId === r.runId ? 'cancelling-heal'
+                : isDeleting ? 'deleting'
+                : null
+              const displayStatus = deriveDisplayStatus(r.status, transient)
               if (isDeleting) {
                 // In-flight overlay: row is greyed out, inert, and shows a
                 // pulsing "… deleting …" indicator. Only visible if the
@@ -315,6 +327,7 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
                         {compact ? (
                           <RunActionsKebab
                             run={r}
+                            displayStatus={displayStatus}
                             open={openMenuRunId === r.runId}
                             onOpenToggle={(e) => {
                               e.stopPropagation()
@@ -365,7 +378,7 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
                               />
                             )}
                             <span className="ml-1 inline-flex items-center">
-                              <RunStatusIndicator status={r.status} />
+                              <RunStatusIndicator status={displayStatus} />
                             </span>
                           </>
                         )}
@@ -586,6 +599,7 @@ function RunPopoverButton({
 
 function RunActionsKebab({
   run,
+  displayStatus,
   open,
   onOpenToggle,
   onClose,
@@ -595,6 +609,7 @@ function RunActionsKebab({
   onPause,
 }: {
   run: RunIndexEntry
+  displayStatus: import('../api/types').DisplayStatus
   open: boolean
   onOpenToggle: (e: React.MouseEvent) => void
   onClose: () => void
@@ -616,7 +631,7 @@ function RunActionsKebab({
   return (
     <div className="shrink-0" data-run-menu>
       <div className="flex items-center gap-1.5">
-        <RunStatusIndicator status={run.status} />
+        <RunStatusIndicator status={displayStatus} />
         {hasActions && (
           <button
             ref={buttonRef}

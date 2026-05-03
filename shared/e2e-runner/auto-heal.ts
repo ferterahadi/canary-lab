@@ -147,14 +147,23 @@ export function buildClaudeMcpConfigArg(outputDir: string, configFilePath: strin
   return `--mcp-config ${JSON.stringify(configFilePath)}`
 }
 
+export interface BuildAgentCommandOptions {
+  /** Pin the resumed session/thread id explicitly. When set, overrides the
+   *  cycle-driven `useResume` heuristic and pins to a known conversation.
+   *  Required for interject. */
+  resumeSessionId?: string
+}
+
 export function buildAgentCommand(
   agent: HealAgent,
   sessionMode: HealSessionMode,
   cycle: number,
   promptFile: string,
   mcpOutputDir?: string,
+  opts: BuildAgentCommandOptions = {},
 ): string {
-  const useResume = sessionMode === 'resume' && cycle > 0
+  const explicitResume = !!opts.resumeSessionId
+  const useResume = explicitResume || (sessionMode === 'resume' && cycle > 0)
   const promptSub = `"$(cat ${JSON.stringify(promptFile)})"`
 
   if (agent === 'claude') {
@@ -170,7 +179,14 @@ export function buildAgentCommand(
     const mcpConfigFile = path.join(path.dirname(promptFile), 'mcp-config.json')
     const mcpFlag = mcpOutputDir ? ` ${buildClaudeMcpConfigArg(mcpOutputDir, mcpConfigFile)}` : ''
     const trailing = `-p`
-    const head = useResume ? `--continue ${baseFlags}` : baseFlags
+    let head: string
+    if (explicitResume) {
+      head = `--resume ${JSON.stringify(opts.resumeSessionId)} ${baseFlags}`
+    } else if (useResume) {
+      head = `--continue ${baseFlags}`
+    } else {
+      head = baseFlags
+    }
     const flags = `${head}${mcpFlag} ${trailing}`
     const formatter = `node ${JSON.stringify(CLAUDE_FORMATTER_FILE)}`
     return `claude ${flags} ${promptSub} | ${formatter}`
@@ -178,6 +194,11 @@ export function buildAgentCommand(
 
   const codexBase = `--skip-git-repo-check --full-auto --json`
   const formatter = `node ${JSON.stringify(CODEX_FORMATTER_FILE)}`
+  if (explicitResume) {
+    // Fail loudly when the pinned id is bad — falling back to a fresh
+    // session would silently lose conversation context.
+    return `codex exec resume ${JSON.stringify(opts.resumeSessionId)} ${codexBase} ${promptSub} | ${formatter}`
+  }
   if (useResume) {
     return `(codex exec resume ${codexBase} ${promptSub} || codex exec ${codexBase} ${promptSub}) | ${formatter}`
   }
@@ -363,5 +384,32 @@ export function buildOrchestratorHealCommand(opts: OrchestratorAutoHealFactoryOp
     fs.mkdirSync(path.dirname(promptFile), { recursive: true })
     fs.writeFileSync(promptFile, fullPrompt)
     return buildAgentCommand(opts.agent, sessionMode, cycle, promptFile, outputDir)
+  }
+}
+
+/**
+ * Companion to `buildOrchestratorHealCommand`: builds the resume invocation
+ * used by `RunOrchestrator.interjectHealAgent`. Writes the user's interject
+ * text to a dedicated prompt file so it doesn't clobber the cycle's main
+ * heal prompt, then composes `claude --resume <sid> -p "<text>"` (or the
+ * codex equivalent).
+ */
+export function buildOrchestratorInterjectCommand(
+  opts: OrchestratorAutoHealFactoryOptions,
+): (args: { sessionId: string; text: string; outputDir?: string }) => string {
+  const interjectPromptFile = path.join(opts.runDir, 'heal-interject-prompt.md')
+  return ({ sessionId, text, outputDir }) => {
+    fs.mkdirSync(path.dirname(interjectPromptFile), { recursive: true })
+    fs.writeFileSync(interjectPromptFile, text)
+    // cycle is irrelevant when explicit resume id is set; pass 1 to satisfy
+    // the signature.
+    return buildAgentCommand(
+      opts.agent,
+      'resume',
+      1,
+      interjectPromptFile,
+      outputDir,
+      { resumeSessionId: sessionId },
+    )
   }
 }

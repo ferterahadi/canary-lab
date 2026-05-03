@@ -277,6 +277,21 @@ export function browseDir(dir: string, opts?: ClientOptions): Promise<FsBrowseRe
   )
 }
 
+export interface ReadDotenvResponse {
+  path: string
+  entries: { key: string; value: string }[]
+  unparsedLines: number[]
+}
+
+export function readDotenvFile(filePath: string, opts?: ClientOptions): Promise<ReadDotenvResponse> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<ReadDotenvResponse>(
+    `${baseUrl}/api/fs/read-dotenv?path=${encodeURIComponent(filePath)}`,
+    { method: 'GET' },
+    fetchImpl,
+  )
+}
+
 export function putEnvsetSlot(
   name: string,
   env: string,
@@ -483,21 +498,28 @@ export function sendAgentInput(
   )
 }
 
+// Abort an active run. POSTs to the abort endpoint which kills Playwright,
+// the heal agent, and any service ptys, then marks the manifest 'aborted'.
+// History is preserved — use `deleteRun` afterwards to hard-remove the logs.
 export async function stopRun(runId: string, opts?: ClientOptions): Promise<void> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  await request<unknown>(
+    `${baseUrl}/api/runs/${encodeURIComponent(runId)}/abort`,
+    { method: 'POST' },
+    fetchImpl,
+  )
+}
+
+// Hard-remove a terminal run from history: drops the index entry and
+// recursively deletes the run directory. Server returns 409 if the run is
+// still active — callers must abort first.
+export async function deleteRun(runId: string, opts?: ClientOptions): Promise<void> {
   const { baseUrl, fetchImpl } = defaultOpts(opts)
   await request<unknown>(
     `${baseUrl}/api/runs/${encodeURIComponent(runId)}`,
     { method: 'DELETE' },
     fetchImpl,
   )
-}
-
-// Same endpoint as stopRun, but invoked when the run is in a terminal status —
-// the server removes the index entry and recursively deletes the run dir.
-// Kept as a separate exported name so callers can pick the verb that matches
-// their intent at the call site.
-export async function deleteRun(runId: string, opts?: ClientOptions): Promise<void> {
-  return stopRun(runId, opts)
 }
 
 export async function deleteJournalEntry(

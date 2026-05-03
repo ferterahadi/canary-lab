@@ -83,31 +83,42 @@ export function RunDetailColumn({ runId }: { runId: string | null }) {
       <div className="flex-1 min-h-0 overflow-hidden mt-2">
         {tab === 'overview' && (
           <div className="h-full overflow-y-auto scrollbar-thin p-4 text-sm">
-            <dl className="grid grid-cols-[140px_1fr] gap-y-2 text-xs">
-              <dt style={{ color: 'var(--text-muted)' }}>Feature</dt><dd style={{ color: 'var(--text-primary)' }}>{m.feature}</dd>
-              <dt style={{ color: 'var(--text-muted)' }}>Started</dt><dd style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }}>{m.startedAt}</dd>
-              <dt style={{ color: 'var(--text-muted)' }}>Ended</dt><dd style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }}>{m.endedAt ?? '—'}</dd>
-              <dt style={{ color: 'var(--text-muted)' }}>Duration</dt>
-              <dd style={{ color: 'var(--text-secondary)' }}>{(() => {
-                const d = durationBetween(m.startedAt, m.endedAt)
-                return d == null ? 'in progress' : formatDuration(d)
-              })()}</dd>
-              <dt style={{ color: 'var(--text-muted)' }}>Heal cycles</dt><dd style={{ color: 'var(--text-secondary)' }}>{m.healCycles}</dd>
+            <SectionHeader>Run</SectionHeader>
+            <dl className="grid grid-cols-[110px_minmax(0,1fr)] gap-y-1.5 text-xs">
+                <dt style={{ color: 'var(--text-muted)' }}>Feature</dt>
+                <dd className="truncate" style={{ color: 'var(--text-primary)' }} title={m.feature}>{m.feature}</dd>
+                <dt style={{ color: 'var(--text-muted)' }}>Duration</dt>
+                <dd style={{ color: 'var(--text-primary)' }}>{(() => {
+                  const d = durationBetween(m.startedAt, m.endedAt)
+                  return d == null ? 'in progress' : formatDuration(d)
+                })()}</dd>
+                <dt style={{ color: 'var(--text-muted)' }}>Started</dt>
+                <dd className="truncate" style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }} title={m.startedAt}>{m.startedAt}</dd>
+                {m.endedAt && (
+                  <>
+                    <dt style={{ color: 'var(--text-muted)' }}>Ended</dt>
+                    <dd className="truncate" style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }} title={m.endedAt}>{m.endedAt}</dd>
+                  </>
+                )}
+                {m.healCycles > 0 && (
+                  <>
+                    <dt style={{ color: 'var(--text-muted)' }}>Heal cycles</dt>
+                    <dd style={{ color: 'var(--text-secondary)' }}>{m.healCycles}</dd>
+                  </>
+                )}
             </dl>
-            <h3 className="mt-4 mb-1 text-[10px] uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Services</h3>
-            {services.length === 0 ? (
-              <div className="text-xs" style={{ color: 'var(--text-muted)' }}>No services configured.</div>
-            ) : (
-              <ul className="text-xs">
-                {services.map((s) => (
-                  <li key={s.safeName} className="py-1.5" style={{ borderBottom: '1px solid var(--border-default)' }}>
-                    <div className="font-medium" style={{ color: 'var(--text-primary)' }}>{s.name}</div>
-                    <div className="text-[11px]" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{s.command}</div>
-                    <div className="text-[11px]" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{s.logPath}</div>
-                  </li>
-                ))}
-              </ul>
-            )}
+            <div className="mt-4">
+              <SectionHeader>Services</SectionHeader>
+              {services.length === 0 ? (
+                <div className="text-xs" style={{ color: 'var(--text-muted)' }}>No services configured.</div>
+              ) : (
+                <ul className="space-y-2">
+                  {services.map((s) => (
+                    <ServiceCard key={s.safeName} service={s} />
+                  ))}
+                </ul>
+              )}
+            </div>
           </div>
         )}
         {tab === 'services' && services.length > 0 && (
@@ -157,6 +168,96 @@ export function RunDetailColumn({ runId }: { runId: string | null }) {
         )}
       </div>
     </div>
+  )
+}
+
+function SectionHeader({ children }: { children: React.ReactNode }) {
+  return (
+    <h2 className="mb-2 text-[11px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-secondary)' }}>
+      {children}
+    </h2>
+  )
+}
+
+const STATUS_COLOR: Record<ServiceStatus, string> = {
+  ready: '#22c55e',
+  starting: '#eab308',
+  timeout: '#ef4444',
+  stopped: 'var(--text-muted)',
+}
+
+function ServiceCard({ service }: { service: { name: string; command: string; cwd: string; logPath: string; healthUrl?: string; status?: ServiceStatus } }) {
+  return (
+    <li className="rounded-md p-3" style={{ border: '1px solid var(--border-default)' }}>
+      <div className="flex items-center gap-2">
+        <div className="min-w-0 flex-1 truncate text-xs font-medium" style={{ color: 'var(--text-primary)' }}>{service.name}</div>
+        {service.status && (
+          <span
+            className="shrink-0 rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wider"
+            style={{ background: 'var(--bg-elevated)', color: STATUS_COLOR[service.status] }}
+          >
+            {service.status}
+          </span>
+        )}
+      </div>
+      <div className="mt-2 grid grid-cols-[36px_minmax(0,1fr)_auto] items-center gap-x-2 gap-y-1">
+        <ServiceField label="cmd" value={service.command} />
+        <ServiceField label="cwd" value={service.cwd} />
+        <ServiceField label="log" value={service.logPath} />
+        {service.healthUrl && <ServiceField label="url" value={service.healthUrl} href={service.healthUrl} />}
+      </div>
+    </li>
+  )
+}
+
+function ServiceField({ label, value, href }: { label: string; value: string; href?: string }) {
+  const onCopy = () => {
+    void navigator.clipboard?.writeText(value)
+  }
+  return (
+    <>
+      <span className="text-[10px] uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>{label}</span>
+      <span
+        className="min-w-0 truncate text-[11px]"
+        style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }}
+        title={value}
+      >
+        {value}
+      </span>
+      <span className="flex shrink-0 items-center gap-1">
+        {href && (
+          <a
+            href={href}
+            target="_blank"
+            rel="noreferrer"
+            aria-label={`Open ${label}`}
+            className="inline-flex h-5 w-5 items-center justify-center rounded hover:bg-[var(--bg-elevated)]"
+            style={{ color: 'var(--text-muted)' }}
+          >
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M14 3h7v7" />
+              <path d="M10 14L21 3" />
+              <path d="M21 14v7H3V3h7" />
+            </svg>
+          </a>
+        )}
+        {!href && (
+          <button
+            type="button"
+            onClick={onCopy}
+            aria-label={`Copy ${label}`}
+            title={`Copy ${label}`}
+            className="inline-flex h-5 w-5 items-center justify-center rounded hover:bg-[var(--bg-elevated)]"
+            style={{ color: 'var(--text-muted)' }}
+          >
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+            </svg>
+          </button>
+        )}
+      </span>
+    </>
   )
 }
 

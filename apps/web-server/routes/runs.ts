@@ -109,31 +109,48 @@ export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Pro
         reply.code(400)
         return { error: 'data must be a string' }
       }
-      const wrote = orch.writeToHealAgent?.(req.body.data) ?? false
-      if (!wrote) {
+      if (!orch.interjectHealAgent) {
         reply.code(409)
         return { reason: 'no-agent-running' }
+      }
+      const result = await orch.interjectHealAgent(req.body.data)
+      if (!result.ok) {
+        reply.code(result.reason === 'spawn-failed' ? 500 : 409)
+        return { reason: result.reason }
       }
       reply.code(202)
       return { status: 'sent' }
     },
   )
 
-  // DELETE /api/runs/:runId has two semantics, picked based on current state:
-  //   - Active run (in registry, or manifest reports running/healing) → stop
-  //     the orchestrator. Run is preserved in history so the user can audit
-  //     the logs after.
-  //   - Terminal run (passed/failed/aborted) → remove from history: drop the
-  //     index entry and recursively delete the run directory.
-  // 404 when nothing matches the runId at all.
-  app.delete<{ Params: { runId: string } }>('/api/runs/:runId', async (req, reply) => {
+  // POST /api/runs/:runId/abort — explicit abort of an active run. Stops
+  // the orchestrator (kills Playwright + heal agent + service ptys) and
+  // marks the manifest 'aborted'. The run is preserved in history so the
+  // user can audit the logs after. 404 when not active, 204 on success.
+  app.post<{ Params: { runId: string } }>('/api/runs/:runId/abort', async (req, reply) => {
     const runId = req.params.runId
     const orch = deps.registry.get(runId)
-    if (orch) {
-      try { await orch.stop('aborted') } catch { /* best-effort */ }
-      deps.registry.delete(runId)
-      reply.code(204)
-      return ''
+    if (!orch) {
+      reply.code(404)
+      return { error: 'run not active' }
+    }
+    try { await orch.stop('aborted') } catch { /* best-effort */ }
+    deps.registry.delete(runId)
+    reply.code(204)
+    return ''
+  })
+
+  // DELETE /api/runs/:runId — hard-remove a terminal run (passed/failed/
+  // aborted) from history: drop the index entry and recursively delete the
+  // run directory. Refuses (409) if the run is still active — callers must
+  // hit POST /abort first. 404 when nothing matches the runId at all.
+  app.delete<{ Params: { runId: string } }>('/api/runs/:runId', async (req, reply) => {
+    const runId = req.params.runId
+    if (deps.registry.get(runId)) {
+      // Run is currently being orchestrated — refuse so the action matrix
+      // is honored end-to-end (delete is for terminal runs only).
+      reply.code(409)
+      return { error: 'run is still active; abort it first' }
     }
     const detail = getRunDetail(deps.logsDir, runId)
     if (!detail) {
@@ -142,10 +159,11 @@ export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Pro
     }
     const status = detail.manifest.status
     if (status === 'running' || status === 'healing') {
-      // Manifest claims active but no orch — stale. Refuse so the next
-      // boot-time reaper or a fresh run can resolve the discrepancy.
+      // Manifest claims active but no orch — stale (e.g. server crash).
+      // Refuse so the next boot-time reaper or a fresh run can resolve
+      // the discrepancy; same response shape as the in-registry case.
       reply.code(409)
-      return { error: 'run is still active; reap or stop first' }
+      return { error: 'run is still active; reap or abort first' }
     }
     removeRunFromHistory(deps.logsDir, runId)
     reply.code(204)

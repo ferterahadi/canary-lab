@@ -58,7 +58,10 @@ export async function paneStreamRoutes(
               && typeof (parsed as { data?: unknown }).data === 'string'
             ) {
               const orch = deps.registry.get(runId)
-              orch?.writeToHealAgent?.((parsed as { data: string }).data)
+              // Fire-and-forget — the WS path has no client-visible response
+              // channel for the structured failure; the HTTP route is the
+              // canonical interject API.
+              void orch?.interjectHealAgent?.((parsed as { data: string }).data)
             }
           })
         }

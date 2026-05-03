@@ -38,6 +38,15 @@ export type FeatureTests = FeatureSpecFile[]
 
 export type RunStatus = 'running' | 'passed' | 'failed' | 'healing' | 'aborted'
 
+// Transient UI-only states layered over the persisted RunStatus while an
+// async action is in flight. Never written to the manifest — they exist
+// purely so the row's badge can reflect the user's last click ("ABORTING")
+// instead of the stale persisted value ("RUNNING") during the request
+// roundtrip. Resolves back to a RunStatus once the server responds.
+export type TransientAction = 'aborting' | 'deleting' | 'cancelling-heal' | 'pausing'
+
+export type DisplayStatus = RunStatus | TransientAction
+
 export interface RunIndexEntry {
   runId: string
   feature: string

@@ -102,6 +102,10 @@ export type CancelHealResult =
   | { ok: true }
   | { ok: false; reason: 'not-healing' | 'no-agent-running' }
 
+export type InterjectResult =
+  | { ok: true }
+  | { ok: false; reason: 'no-agent-running' | 'no-session-id' | 'spawn-failed' }
+
 export type OrchestratorEventMap = {
   'service-started': { service: ServiceSpec; pid: number }
   'service-output': { service: ServiceSpec; chunk: string }
@@ -134,6 +138,14 @@ export interface AutoHealConfig {
   // Optional override of the agent command. Production wires
   // `buildAgentCommand` from auto-heal.ts; tests pass a no-op echo.
   buildCommand?: (args: { cycle: number; outputDir: string }) => string
+  // Builds the resume invocation used by `interjectHealAgent` — given the
+  // captured session id and the user's interject text, returns the shell
+  // command to spawn (claude --resume <sid> -p "<text>" / codex equivalent).
+  buildInterjectCommand?: (args: {
+    sessionId: string
+    text: string
+    outputDir?: string
+  }) => string
 }
 
 export interface PlaywrightInvocation {
@@ -221,6 +233,14 @@ export class RunOrchestrator extends EventEmitter {
   // Tracked while a heal-agent pty is in flight so cancelHeal() can SIGTERM it.
   // Cleared on agent exit.
   private healAgentPty: PtyHandle | null = null
+  // Most recent agent-output mcp dir. Captured so interject can re-spawn with
+  // the same MCP config without recomputing failed-slug routing.
+  private healAgentMcpOutputDir: string | undefined
+  // Captured from the agent's first stream-json frame (claude `system/init`
+  // session_id, codex `thread.started` thread_id). Used by interject to call
+  // `--resume <id>` on the same conversation.
+  private healAgentSessionId: string | null = null
+  private healAgentSessionBuf = ''
   // Set by cancelHeal() so the heal loop in runFullCycle bails out instead of
   // racing toward another Playwright rerun.
   private healCancelled = false
@@ -671,25 +691,107 @@ export class RunOrchestrator extends EventEmitter {
       })
     } catch { /* journal append is best-effort */ }
 
-    try { this.healAgentPty.kill('SIGTERM') } catch { /* already dead */ }
+    killTree(this.healAgentPty, 'SIGTERM')
     // Don't wait here — the heal loop's existing `await new Promise<...> pty.onExit`
     // will resolve when the kill lands and the loop checks `healCancelled` to
-    // break out.
+    // break out. Schedule a SIGKILL fallback so a wedged child still dies.
+    scheduleSigkillFallback(this.healAgentPty)
     return { ok: true }
   }
 
-  /** Live interject — pipe `data` into the running heal agent's stdin so the
-   *  user can guide the agent without restarting the cycle. Returns false
-   *  when no agent pty is currently in flight (e.g. between cycles or in
-   *  manual mode). */
-  writeToHealAgent(data: string): boolean {
-    if (!this.healAgentPty) return false
+  /**
+   * Interject — kill the running heal agent and re-spawn it with
+   * `--resume <sessionId> -p "<text>"` so the new prompt continues the same
+   * conversation. The `runHealAgent` loop swaps onto the new pty and resumes
+   * its normal exit/signal handling.
+   *
+   *   - `no-agent-running`: nothing to interject (between cycles, manual mode).
+   *   - `no-session-id`: agent hasn't emitted its init frame yet — the user
+   *     should retry in a moment, or we have no resume target (e.g. a custom
+   *     buildCommand that bypasses claude/codex).
+   *   - `spawn-failed`: ptyFactory threw on the new spawn.
+   */
+  async interjectHealAgent(text: string): Promise<InterjectResult> {
+    const oldPty = this.healAgentPty
+    if (!oldPty) return { ok: false, reason: 'no-agent-running' }
+    const sid = this.healAgentSessionId
+    if (!sid) return { ok: false, reason: 'no-session-id' }
+    const cfg = this.autoHeal
+    if (!cfg?.buildInterjectCommand) return { ok: false, reason: 'no-session-id' }
+
+    const command = cfg.buildInterjectCommand({
+      sessionId: sid,
+      text,
+      outputDir: this.healAgentMcpOutputDir,
+    })
+
+    // Best-effort journal note so the interject is part of run history.
     try {
-      this.healAgentPty.write(data)
-      return true
+      const truncated = text.length > 200 ? text.slice(0, 200) + '…' : text
+      appendJournalIteration({
+        signal: '.rerun',
+        hypothesis: `User interjected mid-heal: ${truncated}`,
+        fixDescription: `Resumed agent session ${sid.slice(0, 8)} with new prompt.`,
+        runId: this.runId,
+        manifestPath: this.paths.manifestPath,
+        summaryPath: this.paths.summaryPath,
+      })
+    } catch { /* journal append is best-effort */ }
+
+    // Kill the old agent and wait for it to actually exit before spawning the
+    // resume — claude can refuse to resume a session that still has an active
+    // process holding it.
+    const exitWait = new Promise<void>((resolve) => {
+      oldPty.onExit(() => resolve())
+    })
+    killTree(oldPty, 'SIGTERM')
+    scheduleSigkillFallback(oldPty)
+    await Promise.race([exitWait, new Promise<void>((r) => setTimeout(r, 3000))])
+
+    let newPty: PtyHandle
+    try {
+      newPty = this.ptyFactory({
+        command,
+        cwd: this.runDir,
+        env: { CANARY_LAB_PROJECT_ROOT: this.feature.featureDir },
+      })
     } catch {
-      return false
+      return { ok: false, reason: 'spawn-failed' }
     }
+
+    this.healAgentSessionId = null
+    this.healAgentSessionBuf = ''
+    this.attachAgentDataHandlers(newPty, cfg.agent)
+    this.healAgentPty = newPty
+    this.emit('agent-started', { cycle: this.healCycles, command })
+    return { ok: true }
+  }
+
+  // Pipe agent output into the transcript file, fan it out via the
+  // `agent-output` event, AND parse the first JSON frame for the session id
+  // (claude: type=system/subtype=init/session_id; codex: type=thread.started
+  // /thread_id). Once we've captured an id we stop parsing — keeps the hot
+  // path cheap.
+  private attachAgentDataHandlers(pty: PtyHandle, agent: AutoHealAgent): void {
+    const transcriptPath = this.paths.agentTranscriptPath
+    pty.onData((chunk) => {
+      try { fs.appendFileSync(transcriptPath, chunk) } catch { /* ignore */ }
+      this.emit('agent-output', { chunk })
+      if (this.healAgentSessionId) return
+      this.healAgentSessionBuf += chunk
+      let nl = this.healAgentSessionBuf.indexOf('\n')
+      while (nl !== -1 && !this.healAgentSessionId) {
+        const line = this.healAgentSessionBuf.slice(0, nl).trim()
+        this.healAgentSessionBuf = this.healAgentSessionBuf.slice(nl + 1)
+        const id = parseSessionIdLine(line, agent)
+        if (id) this.healAgentSessionId = id
+        nl = this.healAgentSessionBuf.indexOf('\n')
+      }
+      // Cap the buffer so a non-JSON formatter pipeline can't blow memory.
+      if (this.healAgentSessionBuf.length > 64 * 1024) {
+        this.healAgentSessionBuf = this.healAgentSessionBuf.slice(-4 * 1024)
+      }
+    })
   }
 
   // Block until a signal lands or we time out. Returns `null` on timeout. The
@@ -738,24 +840,34 @@ export class RunOrchestrator extends EventEmitter {
     fs.mkdirSync(path.dirname(transcriptPath), { recursive: true })
     if (!fs.existsSync(transcriptPath)) fs.writeFileSync(transcriptPath, '')
 
-    const pty = this.ptyFactory({
+    this.healAgentSessionId = null
+    this.healAgentSessionBuf = ''
+    this.healAgentMcpOutputDir = target.dir
+
+    let pty = this.ptyFactory({
       command,
       cwd: this.runDir,
       env: { CANARY_LAB_PROJECT_ROOT: this.feature.featureDir },
     })
     this.healAgentPty = pty
-    pty.onData((chunk) => {
-      try { fs.appendFileSync(transcriptPath, chunk) } catch { /* ignore */ }
-      this.emit('agent-output', { chunk })
-    })
+    this.attachAgentDataHandlers(pty, cfg.agent)
 
-    const exitCode = await new Promise<number>((resolve) => {
-      pty.onExit(({ exitCode: code }) => {
-        this.healAgentPty = null
-        this.emit('agent-exit', { exitCode: code })
-        resolve(code)
+    // Loop so `interjectHealAgent` can swap `this.healAgentPty` mid-flight:
+    // the old pty resolves on exit (kill), we detect the swap, and re-await
+    // the new pty's exit instead of returning early.
+    let exitCode = 0
+    while (true) {
+      exitCode = await new Promise<number>((resolve) => {
+        pty.onExit(({ exitCode: code }) => resolve(code))
       })
-    })
+      if (this.healAgentPty && this.healAgentPty !== pty) {
+        pty = this.healAgentPty
+        continue
+      }
+      this.healAgentPty = null
+      this.emit('agent-exit', { exitCode })
+      break
+    }
 
     // Apply the artifact cap once the agent exits — the agent has finished
     // writing into the MCP output dir at this point.
@@ -954,6 +1066,12 @@ export class RunOrchestrator extends EventEmitter {
   }
 
   setStatus(status: RunManifest['status']): void {
+    // Once the run has been stopped (e.g. user clicked Abort), drop any
+    // further status writes coming from the in-flight runFullCycle /
+    // heal-loop. Without this guard the killed Playwright pty's exit code
+    // would race the abort and overwrite `aborted` with `passed`/`failed`.
+    // `stop()` is the single authority for the terminal manifest write.
+    if (this.stopped) return
     this.status = status
     this.emit('run-status', { status })
     updateManifest(this.paths.manifestPath, { status, healCycles: this.healCycles })
@@ -978,8 +1096,23 @@ export class RunOrchestrator extends EventEmitter {
       this.signalWatcher = null
     }
     this.stopHeartbeat()
+    // Kill any in-flight Playwright + heal-agent ptys before services so the
+    // user's abort actually stops the visible processes — not just the
+    // services they happen to depend on. `killTree` targets the process group
+    // (negative pid) so children of the shell pipeline (claude, formatter)
+    // also receive the signal; bare `pty.kill` only signals the shell.
+    if (this.playwrightPty) {
+      killTree(this.playwrightPty, 'SIGTERM')
+      scheduleSigkillFallback(this.playwrightPty)
+      this.playwrightPty = null
+    }
+    if (this.healAgentPty) {
+      killTree(this.healAgentPty, 'SIGTERM')
+      scheduleSigkillFallback(this.healAgentPty)
+      this.healAgentPty = null
+    }
     for (const [name, pty] of this.servicePtys) {
-      try { pty.kill('SIGTERM') } catch { /* ignore */ }
+      killTree(pty, 'SIGTERM')
       this.servicePtys.delete(name)
     }
     this.logFiles.clear()
@@ -1062,6 +1195,57 @@ export const defaultPlaywrightSpawner: PlaywrightSpawner = ({ feature, paths: _p
     command: `npx playwright test --reporter=${JSON.stringify(reporter)},list --max-failures=${threshold}`,
     cwd: feature.featureDir,
   }
+}
+
+// Send `signal` to the entire process group of `pty`. node-pty spawns its
+// child in a fresh session, so the pty's pid is the pgid — `process.kill(-pid, ...)`
+// hits the shell AND its pipeline children (claude, formatter). Falls back to
+// the pty's own kill (which only signals the shell) if pgkill fails — better
+// than nothing.
+function killTree(pty: PtyHandle, signal: NodeJS.Signals | number): void {
+  try {
+    process.kill(-pty.pid, signal)
+    return
+  } catch { /* fall through */ }
+  try { pty.kill(typeof signal === 'string' ? signal : undefined) } catch { /* already dead */ }
+}
+
+// SIGTERM gives the agent time to flush. If it's still alive 2s later, SIGKILL
+// the group so a wedged child doesn't outlive the run.
+function scheduleSigkillFallback(pty: PtyHandle, ms = 2000): void {
+  setTimeout(() => {
+    try { process.kill(-pty.pid, 'SIGKILL') } catch { /* already dead */ }
+  }, ms).unref?.()
+}
+
+// Best-effort session-id parser. Claude stream-json:
+//   {"type":"system","subtype":"init","session_id":"..."}
+// Codex JSON output:
+//   {"type":"thread.started","thread_id":"..."}
+// Returns null if the line isn't the init/started frame we're looking for.
+function parseSessionIdLine(line: string, agent: AutoHealAgent): string | null {
+  if (!line || (line[0] !== '{' && line.indexOf('{') === -1)) return null
+  // The formatter pipes through, so the line may be a plain JSON object OR
+  // already-rendered ANSI text. Find the first `{` and try to parse from there.
+  const start = line.indexOf('{')
+  if (start === -1) return null
+  let msg: { type?: unknown; subtype?: unknown; session_id?: unknown; thread_id?: unknown }
+  try {
+    msg = JSON.parse(line.slice(start))
+  } catch {
+    return null
+  }
+  if (agent === 'claude') {
+    if (msg.type === 'system' && msg.subtype === 'init' && typeof msg.session_id === 'string') {
+      return msg.session_id
+    }
+    return null
+  }
+  // codex
+  if (msg.type === 'thread.started' && typeof msg.thread_id === 'string') {
+    return msg.thread_id
+  }
+  return null
 }
 
 // Production heal-agent command builder. The web-server / CLI entry points

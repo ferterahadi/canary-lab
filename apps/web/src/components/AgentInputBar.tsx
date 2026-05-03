@@ -1,5 +1,16 @@
 import { useState, type FormEvent } from 'react'
 import * as api from '../api/client'
+import { ApiError } from '../api/client'
+
+function formatInterjectError(e: unknown): string {
+  if (e instanceof ApiError) {
+    const reason = (e.body as { reason?: unknown })?.reason
+    if (reason === 'no-session-id') return 'Agent still starting — try again in a moment.'
+    if (reason === 'no-agent-running') return 'No heal agent is running right now.'
+    if (reason === 'spawn-failed') return 'Failed to resume the agent. Check the run logs.'
+  }
+  return e instanceof Error ? e.message : 'Send failed'
+}
 
 interface Props {
   runId: string
@@ -16,10 +27,10 @@ export function AgentInputBar({ runId }: Props) {
     setSending(true)
     setErr(null)
     try {
-      await api.sendAgentInput(runId, text + '\n')
+      await api.sendAgentInput(runId, text)
       setText('')
     } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : 'Send failed')
+      setErr(formatInterjectError(e))
     } finally {
       setSending(false)
     }
