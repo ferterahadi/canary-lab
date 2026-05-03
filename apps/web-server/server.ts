@@ -11,8 +11,9 @@ import { journalRoutes } from './routes/journal'
 import { skillsRoutes } from './routes/skills'
 import { testsDraftRoutes, type TestsDraftRouteDeps } from './routes/tests-draft'
 import { paneStreamRoutes } from './ws/pane-stream'
+import { runsStreamRoutes } from './ws/runs-stream'
 import { draftAgentStreamRoutes } from './ws/draft-agent-stream'
-import { createRegistry, reapStaleRuns, type OrchestratorRegistry, type OrchestratorLike } from './lib/run-store'
+import { createRegistry, RunStore, type OrchestratorRegistry, type OrchestratorLike } from './lib/run-store'
 import { PaneBroker } from './lib/pane-broker'
 import { loadFeatures } from './lib/feature-loader'
 import { loadSkills, type SkillRecord } from './lib/skill-loader'
@@ -78,6 +79,9 @@ export interface CreateServerOptions {
 export interface CreateServerResult {
   app: FastifyInstance
   registry: OrchestratorRegistry
+  /** Single mutator for run-state persistence. Phase 2 wires its `event`
+   *  emitter to the runs WebSocket so the browser doesn't poll. */
+  runStore: RunStore
   brokers: Map<string, PaneBroker>
   // Reverts every still-applied envset. Entry points should invoke on
   // SIGINT/SIGTERM so a crashed/killed run doesn't leave the user's `.env`
@@ -95,10 +99,11 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
   await app.register(websocketPlugin)
 
   const registry = createRegistry()
+  const runStore = new RunStore(logsDir, registry)
   // One-shot cleanup: any 'running'/'healing' entry in runs/index.json from a
   // previous server process whose heartbeat is older than the staleness window
   // gets flipped to 'aborted'. Runs without heartbeatAt (legacy) are left alone.
-  await reapStaleRuns(logsDir, registry)
+  await runStore.reapStale()
   const brokers = new Map<string, PaneBroker>()
   const draftBrokers = new Map<string, PaneBroker>()
   // Tracks runs with an active envset so we can revert on run-complete or on
@@ -156,9 +161,8 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
   await app.register(testsDraftRoutes, testsDraftDeps)
 
   await app.register(runsRoutes, {
-    logsDir,
     featuresDir,
-    registry,
+    store: runStore,
     startRun: async (featureName: string, env?: string): Promise<OrchestratorLike> => {
       const features = loadFeatures(featuresDir)
       const feature = features.find((f) => f.name === featureName)
@@ -235,6 +239,10 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
           runnerLog,
           autoHeal,
           manualHeal: projectConfig.healAgent === 'manual',
+          // Route every manifest/index write through RunStore so its event
+          // emitter sees the mutation. Phase 2 attaches the WS endpoint to
+          // these events.
+          runStateSink: runStore,
         })
       } catch (err) {
         if (backups) restore(backups)
@@ -305,6 +313,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
     brokerFor: (runId) => brokers.get(runId) ?? null,
     logsDir,
   })
+  await app.register(runsStreamRoutes, { store: runStore })
   await app.register(draftAgentStreamRoutes, {
     brokerForDraft: (draftId) => draftBrokers.get(draftId) ?? null,
   })
@@ -348,5 +357,5 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
     }
   }
 
-  return { app, registry, brokers, draftBrokers, revertAllEnvsets }
+  return { app, registry, runStore, brokers, draftBrokers, revertAllEnvsets }
 }

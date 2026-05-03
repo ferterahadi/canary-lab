@@ -15,16 +15,11 @@ import {
   type RunPaths,
 } from './run-paths'
 import {
-  setCurrentRunSymlink,
-  upsertRunsIndexEntry,
-  writeManifest,
-  updateManifest,
   type RunManifest,
   type ServiceManifestEntry,
-  updateServiceStatus,
-  updateAllServicesStatus,
   type StoppedEarlyReason,
 } from './manifest'
+import { FileRunStateSink, type RunStateSink } from './run-state-sink'
 import type { PtyFactory, PtyHandle } from './pty-spawner'
 import { HealCycleState, AUTO_HEAL_MAX_CYCLES } from './heal-cycle'
 import { appendJournalIteration } from './log-enrichment'
@@ -92,6 +87,11 @@ export interface OrchestratorOptions {
   // repos/startCommands whose `envs` whitelist excludes it — letting a feature
   // skip booting local services when running tests against a remote URL.
   env?: string
+  // Single mutator for manifest.json + runs-index.json. Defaults to a
+  // file-only sink that writes the same files directly; production wires
+  // the web-server's `RunStore` here so mutations also emit events that
+  // drive the WS push channel.
+  runStateSink?: RunStateSink
 }
 
 export type PauseResult =
@@ -215,6 +215,7 @@ export class RunOrchestrator extends EventEmitter {
   private readonly healSignalPollMs: number
   private readonly healAgentTimeoutMs: number
   private readonly runnerLog?: RunnerLog
+  private readonly stateSink: RunStateSink
   private lastDetectedSignal: { kind: 'restart' | 'rerun' | 'heal'; body: Record<string, unknown> } | null = null
   private healCycleHistory: Array<{ cycle: number; restarted: string[]; kept: string[] }> = []
 
@@ -266,6 +267,9 @@ export class RunOrchestrator extends EventEmitter {
     this.healSignalPollMs = opts.healSignalPollMs ?? this.healthPollIntervalMs
     this.healAgentTimeoutMs = opts.healAgentTimeoutMs ?? 10 * 60 * 1000
     this.runnerLog = opts.runnerLog
+    // Default to a file-only sink so unit tests + the CLI shim don't have
+    // to know about `RunStore`. Production wires RunStore in via opts.
+    this.stateSink = opts.runStateSink ?? new FileRunStateSink(this.logsRoot)
     if (this.runnerLog) this.attachRunnerLog(this.runnerLog)
   }
 
@@ -357,14 +361,7 @@ export class RunOrchestrator extends EventEmitter {
       healMode: this.autoHeal ? 'auto' : this.manualHeal ? 'manual' : undefined,
       heartbeatAt: new Date().toISOString(),
     }
-    writeManifest(this.paths.manifestPath, manifest)
-    upsertRunsIndexEntry(this.logsRoot, {
-      runId: this.runId,
-      feature: this.feature.name,
-      startedAt: this.startedAt,
-      status: this.status,
-    })
-    setCurrentRunSymlink(this.logsRoot, this.runId)
+    this.stateSink.bootstrap(manifest)
   }
 
   private ensureLogFile(target: string): void {
@@ -410,7 +407,7 @@ export class RunOrchestrator extends EventEmitter {
       const msg = `Service "${svc.name}" has no readiness probe${envHint}; Playwright may race the boot. Add healthCheck.http or healthCheck.tcp.`
       this.runnerLog?.warn(msg)
       this.emit('agent-output', { chunk: `\n[warning] ${msg}\n` })
-      updateServiceStatus(this.paths.manifestPath, svc.safeName, 'ready')
+      this.stateSink.setServiceStatus(this.runId, svc.safeName, 'ready')
       this.emit('health-check', { service: svc, healthy: true })
       return
     }
@@ -456,13 +453,13 @@ export class RunOrchestrator extends EventEmitter {
     while (Date.now() < deadline) {
       if (this.stopped) return
       if (await attempt()) {
-        updateServiceStatus(this.paths.manifestPath, svc.safeName, 'ready')
+        this.stateSink.setServiceStatus(this.runId, svc.safeName, 'ready')
         this.emit('health-check', { service: svc, healthy: true, transport })
         return
       }
       await this.delay(this.healthPollIntervalMs)
     }
-    updateServiceStatus(this.paths.manifestPath, svc.safeName, 'timeout')
+    this.stateSink.setServiceStatus(this.runId, svc.safeName, 'timeout')
     this.emit('health-check', { service: svc, healthy: false, transport })
     const detail = transport === 'http'
       ? `url=${(probe as { http: HttpProbe }).http.url}`
@@ -540,7 +537,7 @@ export class RunOrchestrator extends EventEmitter {
       try { fs.writeFileSync(p, '') } catch { /* may not exist yet */ }
     }
     for (const svc of targets) {
-      updateServiceStatus(this.paths.manifestPath, svc.safeName, 'starting')
+      this.stateSink.setServiceStatus(this.runId, svc.safeName, 'starting')
       this.spawnService(svc)
     }
     if (targets.length > 0) await this.waitForHealth()
@@ -611,7 +608,7 @@ export class RunOrchestrator extends EventEmitter {
   // so the agent knows it's looking at a partial suite.
   markStoppedEarly(reason: StoppedEarlyReason, failuresAtStop: number, suiteTotal: number): void {
     this.stoppedEarlyReason = reason
-    updateManifest(this.paths.manifestPath, {
+    this.stateSink.patchManifest(this.runId, {
       stoppedEarly: { reason, failuresAtStop, suiteTotal },
     })
   }
@@ -1056,7 +1053,7 @@ export class RunOrchestrator extends EventEmitter {
           : []
         const { restarted, kept } = await this.restart(filesChanged)
         this.healCycleHistory.push({ cycle: cycleNum, restarted, kept })
-        updateManifest(this.paths.manifestPath, {
+        this.stateSink.patchManifest(this.runId, {
           healCycleHistory: this.healCycleHistory,
         })
       } else {
@@ -1081,7 +1078,7 @@ export class RunOrchestrator extends EventEmitter {
   private startHeartbeat(): void {
     const tick = (): void => {
       if (this.stopped) return
-      updateManifest(this.paths.manifestPath, { heartbeatAt: new Date().toISOString() })
+      this.stateSink.recordHeartbeat(this.runId)
     }
     this.heartbeatTimer = setInterval(tick, 5_000)
     // Don't keep the process alive just for heartbeats.
@@ -1104,18 +1101,12 @@ export class RunOrchestrator extends EventEmitter {
     if (this.stopped) return
     this.status = status
     this.emit('run-status', { status })
-    updateManifest(this.paths.manifestPath, { status, healCycles: this.healCycles })
-    upsertRunsIndexEntry(this.logsRoot, {
-      runId: this.runId,
-      feature: this.feature.name,
-      startedAt: this.startedAt,
-      status,
-    })
+    this.stateSink.setStatus(this.runId, status, this.healCycles)
   }
 
   noteHealCycle(): void {
     this.healCycles += 1
-    updateManifest(this.paths.manifestPath, { healCycles: this.healCycles })
+    this.stateSink.patchManifest(this.runId, { healCycles: this.healCycles })
   }
 
   async stop(finalStatus: RunManifest['status'] = 'aborted'): Promise<void> {
@@ -1146,21 +1137,13 @@ export class RunOrchestrator extends EventEmitter {
       this.servicePtys.delete(name)
     }
     this.logFiles.clear()
-    updateAllServicesStatus(this.paths.manifestPath, 'stopped')
     const endedAt = new Date().toISOString()
     this.status = finalStatus
-    updateManifest(this.paths.manifestPath, {
-      status: finalStatus,
-      endedAt,
-      healCycles: this.healCycles,
-    })
-    upsertRunsIndexEntry(this.logsRoot, {
-      runId: this.runId,
-      feature: this.feature.name,
-      startedAt: this.startedAt,
-      status: finalStatus,
-      endedAt,
-    })
+    // Single terminal write — services flipped to 'stopped', status +
+    // endedAt + healCycles persisted, runs-index mirrored. The sink is the
+    // only writer at this point; no other path can race because
+    // `this.stopped = true` already gates `setStatus`.
+    this.stateSink.finalize(this.runId, finalStatus, endedAt, this.healCycles)
     this.emit('run-complete', { status: finalStatus })
   }
 }
