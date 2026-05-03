@@ -602,6 +602,584 @@ describe('workspace clone endpoint', () => {
       await app.close()
     }
   })
+
+  it('400 when parentDir is relative', async () => {
+    const app = await makeApp()
+    try {
+      const r = await app.inject({
+        method: 'POST',
+        url: '/api/workspace/clone',
+        payload: { cloneUrl: 'git@x:o/r.git', parentDir: 'rel/path', repoName: 'r' },
+      })
+      expect(r.statusCode).toBe(400)
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('400 when parentDir does not exist', async () => {
+    const app = await makeApp()
+    try {
+      const r = await app.inject({
+        method: 'POST',
+        url: '/api/workspace/clone',
+        payload: { cloneUrl: 'git@x:o/r.git', parentDir: '/does/not/exist/zzz', repoName: 'r' },
+      })
+      expect(r.statusCode).toBe(400)
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('500 when git clone fails (uses fake git on PATH)', async () => {
+    // Stub PATH so `git` resolves to a script that always fails. This
+    // exercises the close-with-nonzero-code branch deterministically.
+    const fakeBin = path.join(tmpDir, 'fakebin')
+    fs.mkdirSync(fakeBin, { recursive: true })
+    const fakeGit = path.join(fakeBin, 'git')
+    fs.writeFileSync(fakeGit, '#!/bin/sh\necho "fatal: nope" 1>&2\nexit 1\n')
+    fs.chmodSync(fakeGit, 0o755)
+    const origPath = process.env.PATH
+    process.env.PATH = `${fakeBin}:${origPath ?? ''}`
+    const app = await makeApp()
+    try {
+      const r = await app.inject({
+        method: 'POST',
+        url: '/api/workspace/clone',
+        payload: { cloneUrl: 'git@x:o/r.git', parentDir: tmpDir, repoName: 'newrepo' },
+      })
+      expect(r.statusCode).toBe(500)
+      expect((r.json() as { error: string }).error).toContain('git clone failed')
+    } finally {
+      process.env.PATH = origPath
+      await app.close()
+    }
+  })
+
+  it('200 success when git clone succeeds (fake git creates target)', async () => {
+    const fakeBin = path.join(tmpDir, 'fakebin2')
+    fs.mkdirSync(fakeBin, { recursive: true })
+    const fakeGit = path.join(fakeBin, 'git')
+    // Create the target dir so the post-clone caller sees a real folder.
+    fs.writeFileSync(fakeGit, '#!/bin/sh\nmkdir -p "$3"\nexit 0\n')
+    fs.chmodSync(fakeGit, 0o755)
+    const origPath = process.env.PATH
+    process.env.PATH = `${fakeBin}:${origPath ?? ''}`
+    const app = await makeApp()
+    try {
+      const r = await app.inject({
+        method: 'POST',
+        url: '/api/workspace/clone',
+        payload: { cloneUrl: 'git@x:o/r.git', parentDir: tmpDir, repoName: 'cloned' },
+      })
+      expect(r.statusCode).toBe(200)
+      expect((r.json() as { localPath: string }).localPath).toBe(path.join(tmpDir, 'cloned'))
+    } finally {
+      process.env.PATH = origPath
+      await app.close()
+    }
+  })
+})
+
+describe('workspace error branches', () => {
+  it('git-remote 400 when path is relative', async () => {
+    const app = await makeApp()
+    try {
+      const r = await app.inject({
+        method: 'GET',
+        url: `/api/workspace/git-remote?path=${encodeURIComponent('rel/path')}`,
+      })
+      expect(r.statusCode).toBe(400)
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('path-exists 400 when path missing', async () => {
+    const app = await makeApp()
+    try {
+      const r = await app.inject({ method: 'GET', url: '/api/workspace/path-exists' })
+      expect(r.statusCode).toBe(400)
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('path-exists 400 when path is relative', async () => {
+    const app = await makeApp()
+    try {
+      const r = await app.inject({
+        method: 'GET',
+        url: `/api/workspace/path-exists?path=${encodeURIComponent('relative')}`,
+      })
+      expect(r.statusCode).toBe(400)
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('path-exists handles ~/ expansion', async () => {
+    const app = await makeApp()
+    try {
+      const r = await app.inject({
+        method: 'GET',
+        url: '/api/workspace/path-exists?path=~',
+      })
+      expect(r.statusCode).toBe(200)
+      expect(r.json()).toEqual({ exists: true })
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('git-remote returns null when [remote "origin"] has no url=', async () => {
+    const repoDir = path.join(tmpDir, 'no-url')
+    fs.mkdirSync(path.join(repoDir, '.git'), { recursive: true })
+    fs.writeFileSync(
+      path.join(repoDir, '.git', 'config'),
+      `[core]\n\trepositoryformatversion = 0\n[remote "upstream"]\n\turl = git@x:o/u.git\n`,
+    )
+    const app = await makeApp()
+    try {
+      const r = await app.inject({
+        method: 'GET',
+        url: `/api/workspace/git-remote?path=${encodeURIComponent(repoDir)}`,
+      })
+      expect(r.statusCode).toBe(200)
+      expect(r.json()).toEqual({ cloneUrl: null })
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('git-remote returns null when .git/config is unreadable', async () => {
+    const repoDir = path.join(tmpDir, 'no-read')
+    fs.mkdirSync(path.join(repoDir, '.git'), { recursive: true })
+    const cfgFile = path.join(repoDir, '.git', 'config')
+    fs.writeFileSync(cfgFile, '[core]\n')
+    fs.chmodSync(cfgFile, 0o000)
+    const app = await makeApp()
+    try {
+      const r = await app.inject({
+        method: 'GET',
+        url: `/api/workspace/git-remote?path=${encodeURIComponent(repoDir)}`,
+      })
+      expect(r.statusCode).toBe(200)
+      expect(r.json()).toEqual({ cloneUrl: null })
+    } finally {
+      fs.chmodSync(cfgFile, 0o644)
+      await app.close()
+    }
+  })
+
+  it('git-remote ~/ expansion returns null when no .git/config', async () => {
+    const app = await makeApp()
+    try {
+      const r = await app.inject({
+        method: 'GET',
+        url: '/api/workspace/git-remote?path=~',
+      })
+      expect(r.statusCode).toBe(200)
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('clone 400 when fields missing entirely', async () => {
+    const app = await makeApp()
+    try {
+      const r = await app.inject({ method: 'POST', url: '/api/workspace/clone', payload: {} })
+      expect(r.statusCode).toBe(400)
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('workspace dirs handles ~/ expansion', async () => {
+    const app = await makeApp()
+    try {
+      const r = await app.inject({ method: 'GET', url: '/api/workspace/dirs?at=~' })
+      expect(r.statusCode).toBe(200)
+      const body = r.json() as { absolute: string }
+      expect(body.absolute).toBe(os.homedir())
+    } finally {
+      await app.close()
+    }
+  })
+})
+
+describe('envsets index with slotTargets', () => {
+  it('shortens $HOME-prefixed targets to ~/', async () => {
+    const home = os.homedir()
+    buildFeature('hh', {
+      envsets: { local: { 'feature.env': '' } },
+      envsetsConfig: JSON.stringify({
+        slots: { 'feature.env': { description: '', target: path.join(home, 'somewhere/.env') } },
+      }),
+    })
+    const app = await makeApp()
+    try {
+      const r = await app.inject({ method: 'GET', url: '/api/features/hh/envsets' })
+      expect(r.statusCode).toBe(200)
+      const body = r.json() as { slotTargets: Record<string, string> }
+      expect(body.slotTargets['feature.env']).toBe('~/somewhere/.env')
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('resolves $-vars in slot targets', async () => {
+    buildFeature('alpha', {
+      envsets: { local: { 'feature.env': '' } },
+      envsetsConfig: JSON.stringify({
+        appRoots: { MYAPP: '/abs/myapp' },
+        slots: {
+          'feature.env': { description: 'main', target: '$MYAPP/.env.local' },
+        },
+      }),
+    })
+    const app = await makeApp()
+    try {
+      const r = await app.inject({ method: 'GET', url: '/api/features/alpha/envsets' })
+      expect(r.statusCode).toBe(200)
+      const body = r.json() as {
+        slotTargets: Record<string, string>
+        slotTargetsRaw: Record<string, string>
+      }
+      expect(body.slotTargetsRaw['feature.env']).toBe('$MYAPP/.env.local')
+      expect(body.slotTargets['feature.env']).toBe('/abs/myapp/.env.local')
+    } finally {
+      await app.close()
+    }
+  })
+})
+
+describe('envset slot management', () => {
+  it('POST creates a slot, replicating into every env', async () => {
+    buildFeature('alpha', {
+      envsets: { local: { 'feature.env': '' }, prod: { 'feature.env': '' } },
+    })
+    const seedFile = path.join(tmpDir, 'seed.env')
+    fs.writeFileSync(seedFile, 'NEW_SLOT=hello\n')
+    const app = await makeApp()
+    try {
+      const r = await app.inject({
+        method: 'POST',
+        url: '/api/features/alpha/envsets/slots',
+        payload: {
+          sourcePath: seedFile,
+          slotName: 'extra.env',
+          target: '/abs/extra.env',
+          description: 'an extra slot',
+        },
+      })
+      expect(r.statusCode).toBe(201)
+      for (const env of ['local', 'prod']) {
+        const slotPath = path.join(featuresDir, 'alpha', 'envsets', env, 'extra.env')
+        expect(fs.existsSync(slotPath)).toBe(true)
+        expect(fs.readFileSync(slotPath, 'utf-8')).toContain('NEW_SLOT=hello')
+      }
+      const cfg = JSON.parse(
+        fs.readFileSync(
+          path.join(featuresDir, 'alpha', 'envsets', 'envsets.config.json'),
+          'utf-8',
+        ),
+      ) as { slots: Record<string, { description: string; target: string }>; feature: { slots: string[] } }
+      expect(cfg.slots['extra.env']).toEqual({ description: 'an extra slot', target: '/abs/extra.env' })
+      expect(cfg.feature.slots).toContain('extra.env')
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('POST defaults slotName to sourcePath basename and target to sourcePath', async () => {
+    buildFeature('alpha', { envsets: { local: { 'feature.env': '' } } })
+    const seedFile = path.join(tmpDir, 'app.env')
+    fs.writeFileSync(seedFile, '')
+    const app = await makeApp()
+    try {
+      const r = await app.inject({
+        method: 'POST',
+        url: '/api/features/alpha/envsets/slots',
+        payload: { sourcePath: seedFile },
+      })
+      expect(r.statusCode).toBe(201)
+      expect(r.json()).toEqual({ slot: 'app.env' })
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('POST 404 unknown feature', async () => {
+    const app = await makeApp()
+    try {
+      const r = await app.inject({
+        method: 'POST',
+        url: '/api/features/missing/envsets/slots',
+        payload: { sourcePath: '/x' },
+      })
+      expect(r.statusCode).toBe(404)
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('POST 400 when sourcePath missing', async () => {
+    buildFeature('alpha', { envsets: { local: { 'feature.env': '' } } })
+    const app = await makeApp()
+    try {
+      const r = await app.inject({
+        method: 'POST',
+        url: '/api/features/alpha/envsets/slots',
+        payload: {},
+      })
+      expect(r.statusCode).toBe(400)
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('POST 400 when sourcePath is relative', async () => {
+    buildFeature('alpha', { envsets: { local: { 'feature.env': '' } } })
+    const app = await makeApp()
+    try {
+      const r = await app.inject({
+        method: 'POST',
+        url: '/api/features/alpha/envsets/slots',
+        payload: { sourcePath: 'relative/path.env' },
+      })
+      expect(r.statusCode).toBe(400)
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('POST 400 when sourcePath is not a file', async () => {
+    buildFeature('alpha', { envsets: { local: { 'feature.env': '' } } })
+    const app = await makeApp()
+    try {
+      const r = await app.inject({
+        method: 'POST',
+        url: '/api/features/alpha/envsets/slots',
+        payload: { sourcePath: tmpDir },
+      })
+      expect(r.statusCode).toBe(400)
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('POST 400 when slotName has invalid chars', async () => {
+    buildFeature('alpha', { envsets: { local: { 'feature.env': '' } } })
+    const seedFile = path.join(tmpDir, 'seed.env')
+    fs.writeFileSync(seedFile, '')
+    const app = await makeApp()
+    try {
+      const r = await app.inject({
+        method: 'POST',
+        url: '/api/features/alpha/envsets/slots',
+        payload: { sourcePath: seedFile, slotName: '../escape' },
+      })
+      expect(r.statusCode).toBe(400)
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('POST 400 when feature has no envs yet', async () => {
+    buildFeature('alpha')
+    const seedFile = path.join(tmpDir, 'seed.env')
+    fs.writeFileSync(seedFile, '')
+    const app = await makeApp()
+    try {
+      const r = await app.inject({
+        method: 'POST',
+        url: '/api/features/alpha/envsets/slots',
+        payload: { sourcePath: seedFile, slotName: 'extra.env' },
+      })
+      expect(r.statusCode).toBe(400)
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('POST 409 when slot already exists', async () => {
+    buildFeature('alpha', {
+      envsets: { local: { 'feature.env': '' } },
+      envsetsConfig: JSON.stringify({ slots: { 'extra.env': { description: '' } } }),
+    })
+    const seedFile = path.join(tmpDir, 'seed.env')
+    fs.writeFileSync(seedFile, '')
+    const app = await makeApp()
+    try {
+      const r = await app.inject({
+        method: 'POST',
+        url: '/api/features/alpha/envsets/slots',
+        payload: { sourcePath: seedFile, slotName: 'extra.env' },
+      })
+      expect(r.statusCode).toBe(409)
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('POST 400 when sourcePath is unreadable', async () => {
+    buildFeature('alpha', { envsets: { local: { 'feature.env': '' } } })
+    const seedFile = path.join(tmpDir, 'unreadable.env')
+    fs.writeFileSync(seedFile, '')
+    fs.chmodSync(seedFile, 0o000)
+    const app = await makeApp()
+    try {
+      const r = await app.inject({
+        method: 'POST',
+        url: '/api/features/alpha/envsets/slots',
+        payload: { sourcePath: seedFile, slotName: 'unreadable.env' },
+      })
+      // Either 400 (read error caught) or proceed if running as root.
+      expect([400, 201]).toContain(r.statusCode)
+    } finally {
+      fs.chmodSync(seedFile, 0o644)
+      await app.close()
+    }
+  })
+
+  it('POST expands ~/ in sourcePath', async () => {
+    buildFeature('alpha', { envsets: { local: { 'feature.env': '' } } })
+    // We can't reliably write into $HOME in tests — just assert that the
+    // ~-expansion path branch is hit by giving an unresolvable ~/ path.
+    const app = await makeApp()
+    try {
+      const r = await app.inject({
+        method: 'POST',
+        url: '/api/features/alpha/envsets/slots',
+        payload: { sourcePath: '~/__nope_does_not_exist__.env' },
+      })
+      expect(r.statusCode).toBe(400)
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('DELETE removes the slot from every env and config', async () => {
+    buildFeature('alpha', {
+      envsets: {
+        local: { 'feature.env': '', 'extra.env': 'A=1' },
+        prod: { 'feature.env': '', 'extra.env': 'A=2' },
+      },
+      envsetsConfig: JSON.stringify({
+        slots: { 'extra.env': { description: '' } },
+        feature: { slots: ['extra.env'] },
+      }),
+    })
+    const app = await makeApp()
+    try {
+      const r = await app.inject({
+        method: 'DELETE',
+        url: '/api/features/alpha/envsets/slots/extra.env',
+      })
+      expect(r.statusCode).toBe(204)
+      for (const env of ['local', 'prod']) {
+        const slotPath = path.join(featuresDir, 'alpha', 'envsets', env, 'extra.env')
+        expect(fs.existsSync(slotPath)).toBe(false)
+      }
+      const cfg = JSON.parse(
+        fs.readFileSync(
+          path.join(featuresDir, 'alpha', 'envsets', 'envsets.config.json'),
+          'utf-8',
+        ),
+      ) as { slots: Record<string, unknown>; feature: { slots: string[] } }
+      expect(cfg.slots['extra.env']).toBeUndefined()
+      expect(cfg.feature.slots).not.toContain('extra.env')
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('DELETE 404 unknown feature', async () => {
+    const app = await makeApp()
+    try {
+      const r = await app.inject({
+        method: 'DELETE',
+        url: '/api/features/missing/envsets/slots/x.env',
+      })
+      expect(r.statusCode).toBe(404)
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('DELETE 400 invalid slot name', async () => {
+    buildFeature('alpha', { envsets: { local: { 'feature.env': '' } } })
+    const app = await makeApp()
+    try {
+      const r = await app.inject({
+        method: 'DELETE',
+        url: '/api/features/alpha/envsets/slots/' + encodeURIComponent('../escape'),
+      })
+      expect(r.statusCode).toBe(400)
+    } finally {
+      await app.close()
+    }
+  })
+})
+
+describe('GET /api/fs/browse', () => {
+  it('lists directories first, then files', async () => {
+    fs.mkdirSync(path.join(tmpDir, 'sub'))
+    fs.writeFileSync(path.join(tmpDir, 'a.txt'), '')
+    const app = await makeApp()
+    try {
+      const r = await app.inject({
+        method: 'GET',
+        url: `/api/fs/browse?dir=${encodeURIComponent(tmpDir)}`,
+      })
+      expect(r.statusCode).toBe(200)
+      const body = r.json() as { dir: string; parent: string | null; entries: { name: string; isDir: boolean }[] }
+      expect(body.dir).toBe(tmpDir)
+      expect(body.entries[0].isDir).toBe(true)
+      expect(body.entries.find((e) => e.name === 'a.txt')?.isDir).toBe(false)
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('defaults to home when dir empty', async () => {
+    const app = await makeApp()
+    try {
+      const r = await app.inject({ method: 'GET', url: '/api/fs/browse' })
+      expect(r.statusCode).toBe(200)
+      const body = r.json() as { dir: string }
+      expect(body.dir).toBe(os.homedir())
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('returns empty entries for non-existent dir', async () => {
+    const app = await makeApp()
+    try {
+      const r = await app.inject({
+        method: 'GET',
+        url: `/api/fs/browse?dir=${encodeURIComponent('/does/not/exist/xyz')}`,
+      })
+      expect(r.statusCode).toBe(200)
+      expect((r.json() as { entries: unknown[] }).entries).toEqual([])
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('expands ~/ relative to home', async () => {
+    const app = await makeApp()
+    try {
+      const r = await app.inject({ method: 'GET', url: '/api/fs/browse?dir=~' })
+      expect(r.statusCode).toBe(200)
+      const body = r.json() as { dir: string }
+      expect(body.dir).toBe(os.homedir())
+    } finally {
+      await app.close()
+    }
+  })
 })
 
 describe('envset CRUD + envs sync', () => {

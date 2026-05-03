@@ -271,6 +271,92 @@ describe('POST /api/runs/:runId/cancel-heal', () => {
   })
 })
 
+describe('POST /api/runs/:runId/agent-input', () => {
+  it('404s when run not in registry', async () => {
+    const { app } = await build()
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/runs/ghost/agent-input',
+      payload: { data: 'hi\n' },
+    })
+    expect(res.statusCode).toBe(404)
+  })
+
+  it('400s when data is missing or not a string', async () => {
+    const stub: OrchestratorLike = {
+      runId: 'ai1',
+      stop: async () => { /* noop */ },
+      pauseAndHeal: async () => ({ ok: true, failureCount: 0 }),
+      cancelHeal: async () => ({ ok: true }),
+    }
+    const { app, registry } = await build()
+    registry.set('ai1', stub)
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/runs/ai1/agent-input',
+      payload: { data: 123 },
+    })
+    expect(res.statusCode).toBe(400)
+  })
+
+  it('409s when no agent is running', async () => {
+    const stub: OrchestratorLike = {
+      runId: 'ai2',
+      stop: async () => { /* noop */ },
+      pauseAndHeal: async () => ({ ok: true, failureCount: 0 }),
+      cancelHeal: async () => ({ ok: true }),
+      writeToHealAgent: () => false,
+    }
+    const { app, registry } = await build()
+    registry.set('ai2', stub)
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/runs/ai2/agent-input',
+      payload: { data: 'hello\n' },
+    })
+    expect(res.statusCode).toBe(409)
+    expect(res.json()).toEqual({ reason: 'no-agent-running' })
+  })
+
+  it('409s when writeToHealAgent is undefined (manual mode)', async () => {
+    const stub: OrchestratorLike = {
+      runId: 'ai3',
+      stop: async () => { /* noop */ },
+      pauseAndHeal: async () => ({ ok: true, failureCount: 0 }),
+      cancelHeal: async () => ({ ok: true }),
+    }
+    const { app, registry } = await build()
+    registry.set('ai3', stub)
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/runs/ai3/agent-input',
+      payload: { data: 'hello\n' },
+    })
+    expect(res.statusCode).toBe(409)
+  })
+
+  it('202s with status=sent on success', async () => {
+    let received = ''
+    const stub: OrchestratorLike = {
+      runId: 'ai4',
+      stop: async () => { /* noop */ },
+      pauseAndHeal: async () => ({ ok: true, failureCount: 0 }),
+      cancelHeal: async () => ({ ok: true }),
+      writeToHealAgent: (d: string) => { received = d; return true },
+    }
+    const { app, registry } = await build()
+    registry.set('ai4', stub)
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/runs/ai4/agent-input',
+      payload: { data: 'hi\n' },
+    })
+    expect(res.statusCode).toBe(202)
+    expect(res.json()).toEqual({ status: 'sent' })
+    expect(received).toBe('hi\n')
+  })
+})
+
 describe('DELETE /api/runs/:runId', () => {
   it('stops a registered orchestrator and 204s', async () => {
     const stub = makeStub('r2')

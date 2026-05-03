@@ -58,6 +58,10 @@ export default defineConfig({
         'apps/web-server/ws/**',
         'apps/web-server/lib/wizard-agent-runner.ts',
         'apps/web-server/lib/open-browser-spawner.ts',
+        // Pure re-export shim — the underlying implementation lives in
+        // shared/lib/dotenv-edit and is exercised through the routes that
+        // import this module.
+        'apps/web-server/lib/dotenv-edit.ts',
         'apps/web/src/components/**',
         'apps/web/src/pages/**',
         'apps/web/src/main.tsx',
@@ -69,10 +73,10 @@ export default defineConfig({
         'templates/**',
       ],
       thresholds: {
-        statements: 92,
+        statements: 95,
         branches: 92,
-        functions: 92,
-        lines: 92,
+        functions: 95,
+        lines: 95,
       },
     },
   },
