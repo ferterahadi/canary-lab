@@ -4,7 +4,7 @@ import os from 'os'
 import path from 'path'
 import { createServer } from './server'
 import type { TestsDraftRouteDeps } from './routes/tests-draft'
-import { writeManifest, writeRunsIndex, readManifest } from './lib/runtime/manifest'
+import { writeManifest, writeRunsIndex, readManifest, readRunsIndex } from './lib/runtime/manifest'
 import { runDirFor } from './lib/runtime/run-paths'
 
 // Smoke test: exercises createServer() against the real templates/project
@@ -97,7 +97,7 @@ describe('createServer smoke (templates/project)', () => {
   })
 })
 
-describe('createServer boot-time stale run cleanup', () => {
+describe('createServer boot-time active-orphan cleanup', () => {
   let logsDir: string
 
   beforeEach(() => {
@@ -140,7 +140,7 @@ describe('createServer boot-time stale run cleanup', () => {
     }
   })
 
-  it('leaves a fresh-heartbeat running entry alone at startup', async () => {
+  it('aborts a fresh-heartbeat running entry from a previous process at startup', async () => {
     const runId = 'fresh-prev-run'
     const dir = runDirFor(logsDir, runId)
     fs.mkdirSync(dir, { recursive: true })
@@ -160,13 +160,16 @@ describe('createServer boot-time stale run cleanup', () => {
     const projectRoot = path.resolve(__dirname, '..', '..', 'templates', 'project')
     const { app } = await createServer({ projectRoot, logsDir, listSkills: () => [] })
     try {
-      expect(readManifest(path.join(dir, 'manifest.json'))?.status).toBe('running')
+      const manifest = readManifest(path.join(dir, 'manifest.json'))
+      expect(manifest?.status).toBe('aborted')
+      expect(manifest?.endedAt).toBeDefined()
+      expect(readRunsIndex(logsDir).find((r) => r.runId === runId)?.status).toBe('aborted')
     } finally {
       await app.close()
     }
   })
 
-  it('leaves a legacy manifest with no heartbeatAt alone at startup', async () => {
+  it('aborts a legacy active manifest with no heartbeatAt at startup', async () => {
     const runId = 'legacy-prev-run'
     const dir = runDirFor(logsDir, runId)
     fs.mkdirSync(dir, { recursive: true })
@@ -186,7 +189,48 @@ describe('createServer boot-time stale run cleanup', () => {
     const projectRoot = path.resolve(__dirname, '..', '..', 'templates', 'project')
     const { app } = await createServer({ projectRoot, logsDir, listSkills: () => [] })
     try {
-      expect(readManifest(path.join(dir, 'manifest.json'))?.status).toBe('running')
+      const manifest = readManifest(path.join(dir, 'manifest.json'))
+      expect(manifest?.status).toBe('aborted')
+      expect(manifest?.endedAt).toBeDefined()
+      expect(readRunsIndex(logsDir).find((r) => r.runId === runId)?.status).toBe('aborted')
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('leaves terminal runs unchanged at startup', async () => {
+    const runId = 'done-prev-run'
+    const dir = runDirFor(logsDir, runId)
+    fs.mkdirSync(dir, { recursive: true })
+    writeManifest(path.join(dir, 'manifest.json'), {
+      runId,
+      feature: 'example_todo_api',
+      startedAt: '2026-01-01T00:00:00Z',
+      endedAt: '2026-01-01T00:00:05Z',
+      status: 'passed',
+      healCycles: 0,
+      services: [],
+      heartbeatAt: new Date().toISOString(),
+    })
+    writeRunsIndex(logsDir, [
+      {
+        runId,
+        feature: 'example_todo_api',
+        startedAt: '2026-01-01T00:00:00Z',
+        status: 'passed',
+        endedAt: '2026-01-01T00:00:05Z',
+      },
+    ])
+
+    const projectRoot = path.resolve(__dirname, '..', '..', 'templates', 'project')
+    const { app } = await createServer({ projectRoot, logsDir, listSkills: () => [] })
+    try {
+      const manifest = readManifest(path.join(dir, 'manifest.json'))
+      expect(manifest?.status).toBe('passed')
+      expect(manifest?.endedAt).toBe('2026-01-01T00:00:05Z')
+      const indexed = readRunsIndex(logsDir).find((r) => r.runId === runId)
+      expect(indexed?.status).toBe('passed')
+      expect(indexed?.endedAt).toBe('2026-01-01T00:00:05Z')
     } finally {
       await app.close()
     }

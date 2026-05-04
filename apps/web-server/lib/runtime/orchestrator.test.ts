@@ -921,6 +921,78 @@ describe('RunOrchestrator.runFullCycle', () => {
     expect(readRunsIndex(path.join(tmpDir, 'logs'))[0].status).toBe('aborted')
   })
 
+  it('abort during service startup does not launch Playwright afterward', async () => {
+    const f = makeFakeFactory()
+    let resolveHealth!: (ok: boolean) => void
+    const orch = new RunOrchestrator({
+      feature: makeFeature(),
+      runId: RUN_ID,
+      runDir,
+      ptyFactory: f.factory,
+      healthCheck: async () => new Promise<boolean>((resolve) => { resolveHealth = resolve }),
+      delay: async () => undefined,
+      healthPollIntervalMs: 1,
+      playwrightSpawner: () => ({ command: 'pw-after-abort', cwd: tmpDir }),
+    })
+
+    const promise = orch.runFullCycle()
+    while (f.spawned.length < 1) await new Promise((r) => setTimeout(r, 5))
+
+    await orch.stop('aborted')
+    resolveHealth(true)
+    const status = await promise
+
+    expect(status).toBe('aborted')
+    expect(f.spawned).toHaveLength(1)
+    expect(f.spawned[0].killed).toBe('SIGTERM')
+    const manifest = readManifest(orch.paths.manifestPath)!
+    expect(manifest.status).toBe('aborted')
+    expect(manifest.services[0].status).toBe('stopped')
+    expect(readRunsIndex(path.join(tmpDir, 'logs'))[0].status).toBe('aborted')
+  })
+
+  it('abort during service restart does not launch the post-restart Playwright rerun', async () => {
+    const f = makeFakeFactory()
+    let healthChecks = 0
+    let resolveRestartHealth!: (ok: boolean) => void
+    const orch = new RunOrchestrator({
+      feature: makeFeature(),
+      runId: RUN_ID,
+      runDir,
+      ptyFactory: f.factory,
+      healthCheck: async () => {
+        healthChecks += 1
+        if (healthChecks === 1) return true
+        return new Promise<boolean>((resolve) => { resolveRestartHealth = resolve })
+      },
+      delay: async () => undefined,
+      healthPollIntervalMs: 1,
+      healSignalPollMs: 1,
+      healAgentTimeoutMs: 1000,
+      playwrightSpawner: () => ({ command: 'pw', cwd: tmpDir }),
+      autoHeal: { agent: 'claude', maxCycles: 1, buildCommand: () => 'heal' },
+    })
+    fs.mkdirSync(runDir, { recursive: true })
+    fs.writeFileSync(orch.paths.summaryPath, JSON.stringify({ failed: [{ name: 'test-case-broken' }] }))
+
+    const promise = orch.runFullCycle()
+    while (f.spawned.length < 2) await new Promise((r) => setTimeout(r, 5))
+    f.spawned[1].emitExit(1)
+    while (f.spawned.length < 3) await new Promise((r) => setTimeout(r, 5))
+    fs.writeFileSync(orch.paths.restartSignal, JSON.stringify({ hypothesis: 'restart service' }))
+    f.spawned[2].emitExit(0)
+    while (f.spawned.length < 4) await new Promise((r) => setTimeout(r, 5))
+
+    await orch.stop('aborted')
+    resolveRestartHealth(true)
+    const status = await promise
+
+    expect(status).toBe('aborted')
+    expect(f.spawned).toHaveLength(4)
+    expect(readManifest(orch.paths.manifestPath)?.status).toBe('aborted')
+    expect(readRunsIndex(path.join(tmpDir, 'logs'))[0].status).toBe('aborted')
+  }, 15000)
+
   it('skips heal loop when autoHeal disabled and tests fail', async () => {
     const f = makeFakeFactory()
     const orch = bootForFullCycle({ spawned: f, pwExitCodes: [1] })

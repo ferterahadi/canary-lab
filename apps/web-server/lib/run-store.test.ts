@@ -402,19 +402,27 @@ describe('readRunSummary', () => {
 describe('RunStore', () => {
   // Helper: create a run dir + manifest + index entry so the store has
   // something to read/mutate.
-  function seedRun(runId: string, overrides: Partial<{ status: 'running' | 'passed' | 'failed' | 'aborted' | 'healing'; feature: string; healCycles: number }> = {}): string {
+  function seedRun(runId: string, overrides: Partial<{
+    status: 'running' | 'passed' | 'failed' | 'aborted' | 'healing'
+    feature: string
+    healCycles: number
+    services: NonNullable<ReturnType<typeof readManifest>>['services']
+  }> = {}): string {
     const dir = runDirFor(tmpDir, runId)
     fs.mkdirSync(dir, { recursive: true })
+    const status = overrides.status ?? 'running'
+    const feature = overrides.feature ?? 'foo'
     writeManifest(path.join(dir, 'manifest.json'), {
       runId,
-      feature: overrides.feature ?? 'foo',
+      feature,
       startedAt: '2026-01-01T00:00:00Z',
-      status: overrides.status ?? 'running',
+      status,
       healCycles: overrides.healCycles ?? 0,
-      services: [],
+      services: overrides.services ?? [],
     })
     writeRunsIndex(tmpDir, [
-      { runId, feature: overrides.feature ?? 'foo', startedAt: '2026-01-01T00:00:00Z', status: overrides.status ?? 'running' },
+      ...readRunsIndex(tmpDir).filter((e) => e.runId !== runId),
+      { runId, feature, startedAt: '2026-01-01T00:00:00Z', status },
     ])
     return dir
   }
@@ -506,6 +514,72 @@ describe('RunStore', () => {
     expect(stopped).toBe(true)
     expect(reg.get('r1')).toBeUndefined()
     expect(await store.abort('ghost')).toEqual({ ok: false, reason: 'not-active' })
+  })
+
+  it('abort finalizes a registered run when the orchestrator stop path does not', async () => {
+    const reg = createRegistry()
+    seedRun('r1', {
+      status: 'running',
+      services: [{ name: 'api', safeName: 'api', command: 'x', cwd: '/', status: 'ready', logPath: '/x.log' }],
+    })
+    reg.set('r1', {
+      runId: 'r1',
+      stop: async () => {},
+      pauseAndHeal: async () => ({ ok: true as const, failureCount: 0 }),
+      cancelHeal: async () => ({ ok: true as const }),
+    })
+    const store = new RunStore(tmpDir, reg)
+    expect(await store.abort('r1')).toEqual({ ok: true })
+    const manifest = readManifest(store.manifestPath('r1'))!
+    expect(manifest.status).toBe('aborted')
+    expect(manifest.endedAt).toBeTruthy()
+    expect(manifest.services[0].status).toBe('stopped')
+    expect(readRunsIndex(tmpDir)[0].status).toBe('aborted')
+  })
+
+  it('abort finalizes an orphaned persisted running run and emits finalized', async () => {
+    seedRun('orphan', {
+      status: 'running',
+      services: [{ name: 'api', safeName: 'api', command: 'x', cwd: '/', status: 'ready', logPath: '/x.log' }],
+    })
+    const store = new RunStore(tmpDir, createRegistry())
+    const events: RunStoreEvent[] = []
+    store.on('event', (e) => events.push(e))
+
+    expect(await store.abort('orphan')).toEqual({ ok: true })
+
+    const manifest = readManifest(store.manifestPath('orphan'))!
+    expect(manifest.status).toBe('aborted')
+    expect(manifest.endedAt).toBeTruthy()
+    expect(manifest.services[0].status).toBe('stopped')
+    const indexed = readRunsIndex(tmpDir).find((e) => e.runId === 'orphan')!
+    expect(indexed.status).toBe('aborted')
+    expect(indexed.endedAt).toBe(manifest.endedAt)
+    expect(events).toEqual([{ kind: 'finalized', runId: 'orphan' }])
+  })
+
+  it('abortAllActiveOrStale stops registered runs and finalizes orphaned active rows', async () => {
+    const reg = createRegistry()
+    const stopped: string[] = []
+    seedRun('registered', { status: 'running' })
+    seedRun('orphan', { status: 'healing' })
+    seedRun('done', { status: 'passed' })
+    reg.set('registered', {
+      runId: 'registered',
+      stop: async () => { stopped.push('registered') },
+      pauseAndHeal: async () => ({ ok: true as const, failureCount: 0 }),
+      cancelHeal: async () => ({ ok: true as const }),
+    })
+    const store = new RunStore(tmpDir, reg)
+
+    const result = await store.abortAllActiveOrStale()
+
+    expect(result.aborted.sort()).toEqual(['orphan', 'registered'])
+    expect(stopped).toEqual(['registered'])
+    expect(reg.get('registered')).toBeUndefined()
+    expect(readManifest(store.manifestPath('registered'))?.status).toBe('aborted')
+    expect(readManifest(store.manifestPath('orphan'))?.status).toBe('aborted')
+    expect(readManifest(store.manifestPath('done'))?.status).toBe('passed')
   })
 
   it('delete refuses active runs (registered) and stale-active manifests', () => {
