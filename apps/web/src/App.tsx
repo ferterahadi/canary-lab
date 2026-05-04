@@ -74,6 +74,10 @@ export function App() {
   // Run 1 / Run 2 updates the test status pills to that run's result.
   const statusRunDetail = useRun(statusRunId)
   const summaryForSelectedFeature = statusRunDetail.detail?.summary
+  const statusForSelectedFeature =
+    statusRunDetail.detail?.manifest.status
+    ?? selectedRunForFeature?.status
+    ?? latestRunForFeature?.status
 
   const handleStartRun = useCallback(async (env?: string): Promise<void> => {
     if (!selectedFeature) return
@@ -127,6 +131,7 @@ export function App() {
         <TestCasesColumn
           feature={selectedFeature}
           activeRunSummary={summaryForSelectedFeature}
+          activeRunStatus={statusForSelectedFeature}
         />
       ),
     },

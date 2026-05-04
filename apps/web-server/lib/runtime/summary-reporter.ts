@@ -113,6 +113,8 @@ class SummaryReporter implements Reporter {
   }
 
   onEnd(_result: FullResult): void {
+    this.running = null
+    this.stepStack = []
     this.writeSummary(true)
     if (
       this.failureCount > 0 &&
