@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { FeaturesColumn } from './components/FeaturesColumn'
 import { TestCasesColumn } from './components/TestCasesColumn'
 import { RunsColumn } from './components/RunsColumn'
@@ -14,6 +14,7 @@ export function App() {
   const [features, setFeatures] = useState<Feature[]>([])
   const [selectedFeature, setSelectedFeature] = useState<string | null>(null)
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
+  const pendingRunSelectionRef = useRef<string | null>(null)
 
   // Initial features load + auto-select first feature.
   useEffect(() => {
@@ -40,20 +41,46 @@ export function App() {
   )
 
   // Latest run for the selected feature — running, healing, OR terminal.
-  // Used to drive Column 2's per-test status pills so they persist past the
-  // run's end.
+  // Used as the default test-status source only until the user explicitly
+  // selects a run from the runs column.
   const latestRunForFeature = featureRuns[0] ?? null
+  const selectedRunForFeature = selectedRunId
+    ? featureRuns.find((r) => r.runId === selectedRunId) ?? null
+    : null
+  const statusRunId = selectedRunForFeature?.runId ?? latestRunForFeature?.runId ?? null
 
-  // The detail (and therefore the summary) for the latest run lives in the
-  // shared store, populated by WS push frames. No separate poll.
-  const latestDetail = useRun(latestRunForFeature?.runId ?? null)
-  const summaryForSelectedFeature = latestDetail.detail?.summary
+  useEffect(() => {
+    if (!selectedFeature) {
+      pendingRunSelectionRef.current = null
+      if (selectedRunId !== null) setSelectedRunId(null)
+      return
+    }
+
+    if (selectedRunForFeature) {
+      if (pendingRunSelectionRef.current === selectedRunForFeature.runId) {
+        pendingRunSelectionRef.current = null
+      }
+      return
+    }
+
+    if (selectedRunId && pendingRunSelectionRef.current === selectedRunId) return
+
+    const nextRunId = latestRunForFeature?.runId ?? null
+    if (selectedRunId !== nextRunId) setSelectedRunId(nextRunId)
+  }, [latestRunForFeature?.runId, selectedFeature, selectedRunForFeature, selectedRunId])
+
+  // The detail (and therefore the summary) for Column 2 lives in the shared
+  // run store. It is scoped to the selected run when there is one, so clicking
+  // Run 1 / Run 2 updates the test status pills to that run's result.
+  const statusRunDetail = useRun(statusRunId)
+  const summaryForSelectedFeature = statusRunDetail.detail?.summary
 
   const handleStartRun = useCallback(async (env?: string): Promise<void> => {
     if (!selectedFeature) return
     if (globalActiveRunEntry) return // single-run constraint
     try {
       const runId = await startRunAction(selectedFeature, env)
+      pendingRunSelectionRef.current = runId
       setSelectedRunId(runId)
     } catch { /* surfaced via UI */ }
   }, [selectedFeature, globalActiveRunEntry, startRunAction])
@@ -73,15 +100,17 @@ export function App() {
           features={features}
           selectedFeature={selectedFeature}
           onSelectFeature={(name) => {
+            pendingRunSelectionRef.current = null
             setSelectedFeature(name)
-            setSelectedRunId(null)
+            setSelectedRunId(allRuns.find((r) => r.feature === name)?.runId ?? null)
           }}
           onFeaturesChanged={(acceptedFeature) => {
             api.listFeatures().then((data) => {
               setFeatures(data)
               if (acceptedFeature && data.some((f) => f.name === acceptedFeature)) {
+                pendingRunSelectionRef.current = null
                 setSelectedFeature(acceptedFeature)
-                setSelectedRunId(null)
+                setSelectedRunId(allRuns.find((r) => r.feature === acceptedFeature)?.runId ?? null)
               }
             }).catch(() => {})
           }}
@@ -139,6 +168,7 @@ export function App() {
       <GlobalStatusBar
         activeRunDetail={activeRunDetail}
         onNavigateToRun={(feature, runId) => {
+          pendingRunSelectionRef.current = null
           setSelectedFeature(feature)
           setSelectedRunId(runId)
         }}

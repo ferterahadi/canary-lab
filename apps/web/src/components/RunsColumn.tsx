@@ -128,7 +128,9 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
     // runId we're about to remove. Safe even on failure — the user can
     // re-select; the row stays in the list until the WS `removed` frame
     // arrives.
-    if (selectedRunId === target.runId) onSelectRun(null)
+    if (selectedRunId === target.runId) {
+      onSelectRun(runs.find((r) => r.runId !== target.runId)?.runId ?? null)
+    }
     await deleteAction(target.runId)
   }
 

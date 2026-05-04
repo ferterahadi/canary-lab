@@ -286,4 +286,57 @@ describe('GET /api/features/:name/tests', () => {
     expect(body[0].tests).toHaveLength(1)
     expect(body[0].tests[0].name).toBe('runs ${key} case')
   })
+
+  it('passes the first feature envset into Playwright list without applying files', async () => {
+    const dir = writeFeature('alpha', {
+      spec: "test('placeholder', async () => {})\n",
+    })
+    const specFile = path.join(dir, 'e2e', 'a.spec.ts')
+    const envsetsDir = path.join(dir, 'envsets')
+    fs.mkdirSync(path.join(envsetsDir, 'local'), { recursive: true })
+    fs.writeFileSync(
+      path.join(envsetsDir, 'envsets.config.json'),
+      JSON.stringify({
+        appRoots: { ROOT: tmpDir },
+        slots: {
+          'feature.env': {
+            description: 'feature env',
+            target: '$ROOT/features/alpha/.env',
+          },
+        },
+        feature: {
+          slots: ['feature.env'],
+          testCommand: 'yarn test:e2e',
+          testCwd: '$ROOT/features/alpha',
+        },
+      }),
+    )
+    fs.writeFileSync(path.join(envsetsDir, 'local', 'feature.env'), 'SHOP_TEST_PRODUCT_ID=expanded-from-envset\n')
+    fs.writeFileSync(path.join(dir, '.env'), 'SHOP_TEST_PRODUCT_ID=stale-on-disk\n')
+
+    const spawner: PlaywrightListSpawner = (featureDir) => ({
+      command: 'node',
+      args: ['-e', `
+        process.stdout.write(JSON.stringify({
+          config: { rootDir: ${JSON.stringify(dir)} },
+          suites: [{
+            file: ${JSON.stringify(specFile)},
+            specs: [{
+              title: process.env.SHOP_TEST_PRODUCT_ID,
+              file: ${JSON.stringify(specFile)},
+              line: 1
+            }]
+          }]
+        }))
+      `],
+      cwd: featureDir,
+    })
+
+    const app = await build({ spawner })
+    const res = await app.inject({ method: 'GET', url: '/api/features/alpha/tests' })
+    expect(res.statusCode).toBe(200)
+    const body = res.json() as Array<{ tests: Array<{ name: string }> }>
+    expect(body[0].tests[0].name).toBe('expanded-from-envset')
+    expect(fs.readFileSync(path.join(dir, '.env'), 'utf-8')).toBe('SHOP_TEST_PRODUCT_ID=stale-on-disk\n')
+  })
 })

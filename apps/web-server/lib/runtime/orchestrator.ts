@@ -980,8 +980,8 @@ export class RunOrchestrator extends EventEmitter {
     // before the first heal cycle so the heal-index header carries the note.
     // Skip when pauseAndHeal already stamped 'user-pause' — that's a stronger
     // claim about why the suite was cut short.
-    const threshold = this.feature.healOnFailureThreshold ?? 1
-    if (!this.stoppedEarlyReason) {
+    const threshold = this.feature.healOnFailureThreshold
+    if (typeof threshold === 'number' && threshold > 0 && !this.stoppedEarlyReason) {
       const { failed: failed0, total: total0 } = summarizeFailures(this.paths.summaryPath)
       if (failed0.length >= threshold) {
         this.markStoppedEarly('max-failures', failed0.length, total0)
@@ -1163,7 +1163,7 @@ export function countPassed(summary: SummaryShape): number {
 // Read just the `stoppedEarly.reason` field from a manifest on disk. Returns
 // undefined if the manifest is missing, unparseable, or doesn't carry the
 // field. Used by the heal loop to avoid clobbering an explicit 'user-pause'
-// stamp with the default 'max-failures' attribution.
+// stamp with the automatic 'max-failures' attribution.
 export function stoppedEarlyReasonOf(manifestPath: string): StoppedEarlyReason | undefined {
   try {
     const m = JSON.parse(fs.readFileSync(manifestPath, 'utf-8')) as {
@@ -1203,9 +1203,12 @@ const SUMMARY_REPORTER_PATH = path.resolve(__dirname, 'summary-reporter.js')
 // summary reporter, rooted at the feature dir. Tests inject their own.
 export const defaultPlaywrightSpawner: PlaywrightSpawner = ({ feature, paths: _paths }) => {
   const reporter = SUMMARY_REPORTER_PATH
-  const threshold = feature.healOnFailureThreshold ?? 1
+  const threshold = feature.healOnFailureThreshold
+  const maxFailures = typeof threshold === 'number' && threshold > 0
+    ? ` --max-failures=${threshold}`
+    : ''
   return {
-    command: `npx playwright test --reporter=${JSON.stringify(reporter)},list --max-failures=${threshold}`,
+    command: `npx playwright test --reporter=${JSON.stringify(reporter)},list${maxFailures}`,
     cwd: feature.featureDir,
   }
 }

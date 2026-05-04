@@ -154,6 +154,13 @@ export interface RunSummaryFailedEntry {
   logFiles?: string[]
 }
 
+export interface RunSummaryRunningStep {
+  title: string
+  category: string
+  location?: string
+  locations?: string[]
+}
+
 export interface RunSummary {
   complete: boolean
   total: number
@@ -162,6 +169,9 @@ export interface RunSummary {
    *  so the UI can mark only-run tests as passed without falsely turning
    *  unrun tests green when the suite stops early (pause / max-failures). */
   passedNames?: string[]
+  /** Currently-running Playwright test, emitted by the reporter on
+   *  onTestBegin. Cleared when the matching onTestEnd lands. */
+  running?: { name: string; location: string; step?: RunSummaryRunningStep }
   failed: RunSummaryFailedEntry[]
 }
 

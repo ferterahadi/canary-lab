@@ -90,6 +90,6 @@ export interface FeatureConfig {
   featureDir: string                   // absolute path to feature folder
   // Mid-Run Heal: when set, Playwright is invoked with --max-failures=<N> so
   // the heal loop fires as soon as N tests fail rather than waiting for the
-  // whole suite to finish. Defaults to 1 when omitted.
+  // whole suite to finish. Omit to let the full suite finish before healing.
   healOnFailureThreshold?: number
 }

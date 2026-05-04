@@ -6,6 +6,6 @@
     "rootDir": ".",
     "declaration": true
   },
-  "include": ["shared/**/*", "scripts/**/*"],
+  "include": ["shared/**/*", "scripts/**/*", "apps/web-server/lib/runtime/**/*.ts"],
   "exclude": ["node_modules", "dist", "templates", "tools", "**/*.test.ts"]
 }

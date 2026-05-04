@@ -1,6 +1,6 @@
 import * as api from '../../api/client'
 import type { ConfigValue, ParsedConfigDoc } from '../../api/client'
-import { FieldRow, NumberInput, SectionHeader, TextInput, Textarea } from './atoms'
+import { FieldRow, NumberInput, SectionHeader, TextInput, Textarea, Toggle } from './atoms'
 import { SaveBar } from './SaveBar'
 import { useEditableSlice } from './useEditableSlice'
 
@@ -75,13 +75,21 @@ export function GeneralTab({ feature }: { feature: string }) {
         <div className="px-4 py-3">
           <FieldRow
             label="Stop & heal after"
-            hint="Stops the test run once N tests have failed, then triggers the auto-heal flow. Default 1 (stop on first failure)."
+            hint="When enabled, stops the test run once N tests have failed, then triggers the auto-heal flow."
             layout="inline"
           >
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-3">
+              <Toggle
+                value={ed.draft.healOnFailureThreshold != null}
+                onChange={(enabled) => ed.setDraft((d) => ({
+                  ...d,
+                  healOnFailureThreshold: enabled ? (d.healOnFailureThreshold ?? 1) : undefined,
+                }))}
+              />
               <NumberInput
                 min={1}
                 value={ed.draft.healOnFailureThreshold ?? 1}
+                disabled={ed.draft.healOnFailureThreshold == null}
                 onChange={(n) => ed.setDraft((d) => ({ ...d, healOnFailureThreshold: n }))}
               />
               <span className="text-xs" style={{ color: 'var(--text-muted)' }}>failure(s)</span>

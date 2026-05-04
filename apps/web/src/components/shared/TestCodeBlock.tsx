@@ -32,7 +32,7 @@ function getHighlighter(): Promise<Highlighter> {
 // Renders syntax-highlighted code using Shiki. The `source` prop comes from
 // the feature's own spec files (server-side AST extraction), not untrusted
 // user input, so innerHTML is safe here.
-export function ShikiCode({ source }: { source: string }) {
+export function ShikiCode({ source, activeLine }: { source: string; activeLine?: number | null }) {
   const { resolved } = useTheme()
   const [html, setHtml] = useState<string | null>(null)
   useEffect(() => {
@@ -56,13 +56,24 @@ export function ShikiCode({ source }: { source: string }) {
       </pre>
     )
   }
+
   return (
     <div
       className="shiki-block overflow-hidden rounded text-[11px]"
       // eslint-disable-next-line react/no-danger
-      dangerouslySetInnerHTML={{ __html: html }}
+      dangerouslySetInnerHTML={{ __html: highlightShikiLine(html, activeLine) }}
     />
   )
+}
+
+function highlightShikiLine(html: string, activeLine?: number | null): string {
+  if (!activeLine) return html
+  let lineNo = 0
+  return html.replace(/<span class="line"/g, (match) => {
+    lineNo += 1
+    if (lineNo !== activeLine) return match
+    return '<span class="line" data-active-line="true" style="display:block;margin:0 -0.5rem;padding:0 0.5rem;background:rgba(14, 165, 233, 0.18);box-shadow:inset 2px 0 0 rgb(14, 165, 233)"'
+  })
 }
 
 export function StatusPill({ status }: { status: StepStatus }) {

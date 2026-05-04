@@ -198,6 +198,14 @@ describe('extractAllSlices / extractLogsForTest', () => {
     expect(slices.get('missing')).toEqual({})
   })
 
+  it('skips unterminated and empty XML-marked slices', () => {
+    const log = path.join(tmpDir, 'svc-api.log')
+    fs.writeFileSync(log, '<unterminated>BODY\n<empty>   </empty>')
+    const slices = extractAllSlices(['unterminated', 'empty'], [log])
+    expect(slices.get('unterminated')).toEqual({})
+    expect(slices.get('empty')).toEqual({})
+  })
+
   it('extractLogsForTest is a single-slug shortcut', () => {
     const log = path.join(tmpDir, 'svc-api.log')
     fs.writeFileSync(log, '<a>x</a>')

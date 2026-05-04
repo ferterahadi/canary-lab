@@ -90,11 +90,19 @@ export interface RunSummaryFailedEntry {
   logFiles?: string[]
 }
 
+export interface RunSummaryRunningStep {
+  title: string
+  category: string
+  location?: string
+  locations?: string[]
+}
+
 export interface RunSummary {
   complete: boolean
   total: number
   passed: number
   passedNames?: string[]
+  running?: { name: string; location: string; step?: RunSummaryRunningStep }
   failed: RunSummaryFailedEntry[]
 }
 
