@@ -537,6 +537,39 @@ describe('RunStore', () => {
     expect(readRunsIndex(tmpDir)[0].status).toBe('aborted')
   })
 
+  it('clears stale running state from the summary when abort finalizes a run', async () => {
+    const reg = createRegistry()
+    const dir = seedRun('r1', { status: 'running' })
+    fs.writeFileSync(
+      path.join(dir, 'e2e-summary.json'),
+      JSON.stringify({
+        complete: false,
+        total: 2,
+        passed: 1,
+        passedNames: ['test-case-a'],
+        running: { name: 'test-case-b', location: '/b.spec.ts:10' },
+        failed: [],
+      }, null, 2),
+    )
+    reg.set('r1', {
+      runId: 'r1',
+      stop: async () => {},
+      pauseAndHeal: async () => ({ ok: true as const, failureCount: 0 }),
+      cancelHeal: async () => ({ ok: true as const }),
+    })
+
+    const store = new RunStore(tmpDir, reg)
+    expect(await store.abort('r1')).toEqual({ ok: true })
+
+    expect(readRunSummary(dir)).toEqual({
+      complete: false,
+      total: 2,
+      passed: 1,
+      passedNames: ['test-case-a'],
+      failed: [],
+    })
+  })
+
   it('abort finalizes an orphaned persisted running run and emits finalized', async () => {
     seedRun('orphan', {
       status: 'running',

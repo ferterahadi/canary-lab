@@ -29,7 +29,11 @@ export function summaryEntryName(testName: string): string {
 // stay pending. This requires the summary to expose `passedNames`; older
 // summaries without that field fall back to the legacy "complete ⇒ passed"
 // heuristic for back-compat.
-export function statusForTest(testName: string, summary: RunSummary | undefined): StepStatus {
+export function statusForTest(
+  testName: string,
+  summary: RunSummary | undefined,
+  isRunActivelyTesting = true,
+): StepStatus {
   if (!summary) return 'pending'
   const expected = summaryEntryName(testName)
   const failed = summary.failed.find((f) => f.name === expected)
@@ -38,7 +42,7 @@ export function statusForTest(testName: string, summary: RunSummary | undefined)
     if (/Test timeout of/i.test(msg)) return 'timedout'
     return 'failed'
   }
-  if (summary.running?.name === expected) return 'testing'
+  if (isRunActivelyTesting && summary.running?.name === expected) return 'testing'
   if (summary.passedNames) {
     return summary.passedNames.includes(expected) ? 'passed' : 'pending'
   }

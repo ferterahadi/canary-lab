@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import * as api from '../api/client'
-import type { ExtractedTest, FeatureSpecFile } from '../api/types'
+import type { ExtractedTest, FeatureSpecFile, RunStatus } from '../api/types'
 import { activeBodyLineForTest, colorClassForStatus, statusForTest, summaryEntryName, type StepStatus } from '../lib/test-step-status'
 import type { RunSummary, RunSummaryRunningStep } from '../api/types'
 import { ShikiCode, StatusPill, StepBlock } from './shared/TestCodeBlock'
@@ -8,9 +8,10 @@ import { ShikiCode, StatusPill, StepBlock } from './shared/TestCodeBlock'
 interface Props {
   feature: string | null
   activeRunSummary: RunSummary | undefined
+  activeRunStatus: RunStatus | undefined
 }
 
-export function TestCasesColumn({ feature, activeRunSummary }: Props) {
+export function TestCasesColumn({ feature, activeRunSummary, activeRunStatus }: Props) {
   const [specs, setSpecs] = useState<FeatureSpecFile[] | null>(null)
   const [expandedTest, setExpandedTest] = useState<string | null>(null)
 
@@ -40,6 +41,7 @@ export function TestCasesColumn({ feature, activeRunSummary }: Props) {
   }
 
   const totalTests = specs?.reduce((acc, s) => acc + s.tests.length, 0) ?? 0
+  const isRunActivelyTesting = activeRunStatus === 'running'
 
   return (
     <div className="flex h-full flex-col">
@@ -47,7 +49,12 @@ export function TestCasesColumn({ feature, activeRunSummary }: Props) {
         <div className="flex items-center gap-2">
           <span className="text-[10px] uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Tests</span>
         </div>
-        <TestsHeaderIndicator summary={activeRunSummary} totalTests={totalTests} specsLoaded={Boolean(specs)} />
+        <TestsHeaderIndicator
+          summary={activeRunSummary}
+          totalTests={totalTests}
+          specsLoaded={Boolean(specs)}
+          isRunActivelyTesting={isRunActivelyTesting}
+        />
       </div>
       <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin p-3">
         {!specs ? (
@@ -61,23 +68,23 @@ export function TestCasesColumn({ feature, activeRunSummary }: Props) {
                 const key = `${spec.file}:${t.line}:${t.name}`
                 const isExpanded = expandedTest === key
                 const entryName = summaryEntryName(t.name)
-                const runningLocation = activeRunSummary?.running?.name === entryName
+                const runningLocation = isRunActivelyTesting && activeRunSummary?.running?.name === entryName
                   ? activeRunSummary.running.location
                   : undefined
                 const activeLine = activeBodyLineForTest({
                   testName: t.name,
                   testLine: t.line,
                   bodySource: t.bodySource,
-                  summary: activeRunSummary,
+                  summary: isRunActivelyTesting ? activeRunSummary : undefined,
                 })
                 return (
                   <TestCard
                     key={key}
                     sourceFile={spec.file}
                     test={t}
-                    status={statusForTest(t.name, activeRunSummary)}
+                    status={statusForTest(t.name, activeRunSummary, isRunActivelyTesting)}
                     runningLocation={runningLocation}
-                    runningStep={activeRunSummary?.running?.name === entryName ? activeRunSummary.running.step : undefined}
+                    runningStep={isRunActivelyTesting && activeRunSummary?.running?.name === entryName ? activeRunSummary.running.step : undefined}
                     activeLine={activeLine}
                     expanded={isExpanded}
                     onToggle={() => setExpandedTest(isExpanded ? null : key)}
@@ -178,12 +185,14 @@ function TestsHeaderIndicator({
   summary,
   totalTests,
   specsLoaded,
+  isRunActivelyTesting,
 }: {
   summary: RunSummary | undefined
   totalTests: number
   specsLoaded: boolean
+  isRunActivelyTesting: boolean
 }) {
-  if (summary) return <RunningIndicator summary={summary} totalTests={totalTests} />
+  if (summary) return <RunningIndicator summary={summary} totalTests={totalTests} isRunActivelyTesting={isRunActivelyTesting} />
   if (!specsLoaded || totalTests <= 0) return null
   return (
     <div className="text-[10px]" style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>
@@ -192,14 +201,22 @@ function TestsHeaderIndicator({
   )
 }
 
-function RunningIndicator({ summary, totalTests }: { summary: RunSummary; totalTests: number }) {
+function RunningIndicator({
+  summary,
+  totalTests,
+  isRunActivelyTesting,
+}: {
+  summary: RunSummary
+  totalTests: number
+  isRunActivelyTesting: boolean
+}) {
   // Denominator should reflect the *static* test count parsed from the spec
   // files, not `summary.total` — Playwright's reporter emits a partial total
   // until the suite enumeration completes (especially when filtered/retried),
   // which would briefly read "1/1" while 14 tests are actually queued.
   const total = totalTests > 0 ? totalTests : summary.total
   const done = summary.passed + summary.failed.length
-  const isTestRunning = Boolean(summary.running)
+  const isTestRunning = isRunActivelyTesting && Boolean(summary.running)
   return (
     <div className="flex items-center gap-2 text-[10px]" style={{ color: 'var(--text-secondary)' }}>
       {isTestRunning && (

@@ -1,3 +1,4 @@
+import fs from 'fs'
 import path from 'path'
 import {
   setCurrentRunSymlink,
@@ -102,6 +103,7 @@ export class FileRunStateSink implements RunStateSink {
     const mp = this.manifestPath(runId)
     updateAllServicesStatus(mp, 'stopped')
     updateManifest(mp, { status, endedAt, healCycles })
+    clearRunningFromSummary(path.join(runDirFor(this.logsDir, runId), 'e2e-summary.json'))
     const m = readManifest(mp)
     if (m) {
       upsertRunsIndexEntry(this.logsDir, {
@@ -125,4 +127,27 @@ export class FileRunStateSink implements RunStateSink {
   patchManifest(runId: string, patch: Partial<RunManifest>): void {
     updateManifest(this.manifestPath(runId), patch)
   }
+}
+
+function clearRunningFromSummary(summaryPath: string): void {
+  let raw: string
+  try {
+    raw = fs.readFileSync(summaryPath, 'utf-8')
+  } catch {
+    return
+  }
+
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return
+  }
+  if (typeof parsed !== 'object' || parsed === null || !('running' in parsed)) return
+
+  const summary = { ...(parsed as Record<string, unknown>) }
+  delete summary.running
+  const tmpPath = `${summaryPath}.tmp`
+  fs.writeFileSync(tmpPath, JSON.stringify(summary, null, 2) + '\n')
+  fs.renameSync(tmpPath, summaryPath)
 }

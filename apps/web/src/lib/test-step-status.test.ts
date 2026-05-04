@@ -85,6 +85,17 @@ describe('statusForTest', () => {
     expect(statusForTest('Creates a TODO', inflight)).toBe('testing')
   })
 
+  it('ignores stale running entries when the selected run is not actively testing', () => {
+    const aborted: RunSummary = {
+      complete: false,
+      total: 2,
+      passed: 1,
+      failed: [],
+      running: { name: 'test-case-creates-a-todo', location: '/todo.spec.ts:12' },
+    }
+    expect(statusForTest('Creates a TODO', aborted, false)).toBe('pending')
+  })
+
   it('uses passedNames to distinguish passed vs pending', () => {
     const summary: RunSummary = {
       complete: false,

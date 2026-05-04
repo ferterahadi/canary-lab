@@ -140,6 +140,21 @@ describe('SummaryReporter', () => {
     expect(readSummary().running).toBeUndefined()
   })
 
+  it('clears the running test when the run ends without a matching test end', () => {
+    const reporter = new SummaryReporter()
+    reporter.onTestBegin(mkTest('Interrupted', '/specs/busy.spec.ts', 7))
+
+    reporter.onEnd({} as any)
+
+    expect(readSummary()).toEqual({
+      complete: true,
+      total: 0,
+      passed: 0,
+      passedNames: [],
+      failed: [],
+    })
+  })
+
   it('writes the currently running step location and keeps the test running when the step ends', () => {
     const reporter = new SummaryReporter()
     const test = mkTest('Currently busy', '/specs/busy.spec.ts', 7)
