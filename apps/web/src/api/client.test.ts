@@ -41,6 +41,7 @@ import {
   getProjectConfig,
   putProjectConfig,
   openAgentApp,
+  openEditor,
   sendAgentInput,
 } from './client'
 
@@ -373,19 +374,19 @@ describe('api client', () => {
   })
 
   it('getProjectConfig GETs /api/project-config', async () => {
-    const fetchImpl = vi.fn().mockResolvedValue(ok({ healAgent: 'auto' }))
+    const fetchImpl = vi.fn().mockResolvedValue(ok({ healAgent: 'auto', editor: 'auto' }))
     const r = await getProjectConfig({ fetchImpl })
-    expect(r).toEqual({ healAgent: 'auto' })
+    expect(r).toEqual({ healAgent: 'auto', editor: 'auto' })
     expect(fetchImpl).toHaveBeenCalledWith('/api/project-config', { method: 'GET' })
   })
 
   it('putProjectConfig sends the partial config as JSON', async () => {
-    const fetchImpl = vi.fn().mockResolvedValue(ok({ healAgent: 'manual' }))
-    await putProjectConfig({ healAgent: 'manual' }, { fetchImpl })
+    const fetchImpl = vi.fn().mockResolvedValue(ok({ healAgent: 'manual', editor: 'cursor' }))
+    await putProjectConfig({ healAgent: 'manual', editor: 'cursor' }, { fetchImpl })
     const [url, init] = fetchImpl.mock.calls[0]
     expect(url).toBe('/api/project-config')
     expect(init.method).toBe('PUT')
-    expect(JSON.parse(init.body as string)).toEqual({ healAgent: 'manual' })
+    expect(JSON.parse(init.body as string)).toEqual({ healAgent: 'manual', editor: 'cursor' })
   })
 
   it('openAgentApp POSTs the agent name', async () => {
@@ -394,6 +395,20 @@ describe('api client', () => {
     const [url, init] = fetchImpl.mock.calls[0]
     expect(url).toBe('/api/open-agent')
     expect(JSON.parse(init.body as string)).toEqual({ agent: 'claude' })
+  })
+
+  it('openEditor POSTs the editor target', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(ok({ opened: true, editor: 'cursor' }))
+    await openEditor({ file: '/tmp/a.spec.ts', line: 12, column: 3, editor: 'cursor' }, { fetchImpl })
+    const [url, init] = fetchImpl.mock.calls[0]
+    expect(url).toBe('/api/open-editor')
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(init.body as string)).toEqual({
+      file: '/tmp/a.spec.ts',
+      line: 12,
+      column: 3,
+      editor: 'cursor',
+    })
   })
 
   it('sendAgentInput POSTs the data string', async () => {

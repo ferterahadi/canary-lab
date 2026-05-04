@@ -47,9 +47,7 @@ export function TestCasesColumn({ feature, activeRunSummary }: Props) {
         <div className="flex items-center gap-2">
           <span className="text-[10px] uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Tests</span>
         </div>
-        {activeRunSummary && (
-          <RunningIndicator summary={activeRunSummary} totalTests={totalTests} />
-        )}
+        <TestsHeaderIndicator summary={activeRunSummary} totalTests={totalTests} specsLoaded={Boolean(specs)} />
       </div>
       <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin p-3">
         {!specs ? (
@@ -75,6 +73,7 @@ export function TestCasesColumn({ feature, activeRunSummary }: Props) {
                 return (
                   <TestCard
                     key={key}
+                    sourceFile={spec.file}
                     test={t}
                     status={statusForTest(t.name, activeRunSummary)}
                     runningLocation={runningLocation}
@@ -94,6 +93,7 @@ export function TestCasesColumn({ feature, activeRunSummary }: Props) {
 }
 
 function TestCard({
+  sourceFile,
   test,
   status,
   runningLocation,
@@ -102,6 +102,7 @@ function TestCard({
   expanded,
   onToggle,
 }: {
+  sourceFile: string
   test: ExtractedTest
   status: StepStatus
   runningLocation?: string
@@ -143,11 +144,15 @@ function TestCard({
           {test.steps.length > 0 ? (
             <ul className="space-y-1.5 pl-3" style={{ borderLeft: '1px solid var(--border-default)' }}>
               {test.steps.map((s, i) => (
-                <StepBlock key={`${s.line}:${i}`} step={s} status={status} depth={0} />
+                <StepBlock key={`${s.line}:${i}`} step={s} status={status} depth={0} sourceFile={sourceFile} />
               ))}
             </ul>
           ) : test.bodySource ? (
-            <ShikiCode source={test.bodySource} activeLine={activeLine} />
+            <ShikiCode
+              source={test.bodySource}
+              activeLine={activeLine}
+              sourceLocation={{ file: sourceFile, startLine: test.line }}
+            />
           ) : (
             <div className="text-xs" style={{ color: 'var(--text-muted)' }}>
               No test body available.
@@ -169,6 +174,24 @@ function shortLocation(location: string): string {
   return parts.slice(-2).join('/')
 }
 
+function TestsHeaderIndicator({
+  summary,
+  totalTests,
+  specsLoaded,
+}: {
+  summary: RunSummary | undefined
+  totalTests: number
+  specsLoaded: boolean
+}) {
+  if (summary) return <RunningIndicator summary={summary} totalTests={totalTests} />
+  if (!specsLoaded || totalTests <= 0) return null
+  return (
+    <div className="text-[10px]" style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>
+      {totalTests}
+    </div>
+  )
+}
+
 function RunningIndicator({ summary, totalTests }: { summary: RunSummary; totalTests: number }) {
   // Denominator should reflect the *static* test count parsed from the spec
   // files, not `summary.total` — Playwright's reporter emits a partial total
@@ -176,9 +199,10 @@ function RunningIndicator({ summary, totalTests }: { summary: RunSummary; totalT
   // which would briefly read "1/1" while 14 tests are actually queued.
   const total = totalTests > 0 ? totalTests : summary.total
   const done = summary.passed + summary.failed.length
+  const isTestRunning = Boolean(summary.running)
   return (
     <div className="flex items-center gap-2 text-[10px]" style={{ color: 'var(--text-secondary)' }}>
-      {!summary.complete && (
+      {isTestRunning && (
         <span className="relative flex h-2 w-2">
           <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-sky-400 opacity-75" />
           <span className="relative inline-flex h-2 w-2 rounded-full bg-sky-500" />

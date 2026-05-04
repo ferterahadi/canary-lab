@@ -1,12 +1,25 @@
 import { useEffect, useRef } from 'react'
-import { Terminal } from '@xterm/xterm'
+import { Terminal, type ITheme } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { connectPane, type PaneConnection } from '../api/pane-socket'
 import { currentResolvedTheme, subscribeTheme, type ResolvedTheme } from '../lib/theme'
+import { paneTerminalNotice } from '../lib/pane-terminal-message'
 
-const TERM_THEMES: Record<ResolvedTheme, { background: string; foreground: string }> = {
-  dark: { background: '#14161a', foreground: '#d4d7de' },
-  light: { background: '#fafafa', foreground: '#383a42' },
+const TERM_THEMES: Record<ResolvedTheme, ITheme> = {
+  dark: {
+    background: '#14161a',
+    foreground: '#d4d7de',
+    selectionBackground: '#2b5b9f',
+    selectionForeground: '#ffffff',
+    selectionInactiveBackground: '#263a59',
+  },
+  light: {
+    background: '#fafafa',
+    foreground: '#383a42',
+    selectionBackground: '#bfdbfe',
+    selectionForeground: '#111827',
+    selectionInactiveBackground: '#dbeafe',
+  },
 }
 
 interface Props {
@@ -19,10 +32,12 @@ interface Props {
 // Terminal per mount is fine.
 export function PaneTerminal({ runId, paneId }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null)
+  const noticeKeysRef = useRef<Set<string>>(new Set())
 
   useEffect(() => {
     const container = containerRef.current
     if (!container) return
+    noticeKeysRef.current = new Set()
     const term = new Terminal({
       convertEol: true,
       fontFamily: "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace",
@@ -41,8 +56,17 @@ export function PaneTerminal({ runId, paneId }: Props) {
       runId,
       paneId,
       onData: (chunk) => term.write(chunk),
-      onExit: (code) => term.writeln(`\r\n[pane exited code=${code}]`),
-      onError: (err) => term.writeln(`\r\n[error: ${err}]`),
+      onExit: (code) => term.writeln(`\r\nPane exited code=${code}`),
+      onError: (err) => {
+        const notice = paneTerminalNotice(paneId, err)
+        if (noticeKeysRef.current.has(notice.key)) return
+        noticeKeysRef.current.add(notice.key)
+        const [title, ...details] = notice.lines
+        term.writeln(`\r\n${title}`)
+        for (const detail of details) {
+          term.writeln(`\x1b[2m${detail}\x1b[22m`)
+        }
+      },
     })
 
     const handleResize = (): void => { try { fit.fit() } catch { /* ignore */ } }

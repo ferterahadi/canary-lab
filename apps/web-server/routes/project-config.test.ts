@@ -5,9 +5,10 @@ import path from 'path'
 import Fastify, { type FastifyInstance } from 'fastify'
 
 const spawnMock = vi.fn(() => ({ unref: vi.fn() }))
+const spawnSyncMock = vi.fn(() => ({ status: 1 }))
 vi.mock('child_process', async (importOriginal) => {
   const actual = await importOriginal<typeof import('child_process')>()
-  return { ...actual, spawn: spawnMock }
+  return { ...actual, spawn: spawnMock, spawnSync: spawnSyncMock }
 })
 
 const { projectConfigRoutes } = await import('./project-config')
@@ -25,6 +26,9 @@ async function makeApp(): Promise<FastifyInstance> {
 
 beforeEach(() => {
   projectRoot = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-pcfg-')))
+  spawnMock.mockClear()
+  spawnSyncMock.mockClear()
+  spawnSyncMock.mockReturnValue({ status: 1 })
 })
 
 afterEach(() => {
@@ -38,7 +42,7 @@ describe('GET /api/project-config', () => {
     try {
       const r = await app.inject({ method: 'GET', url: '/api/project-config' })
       expect(r.statusCode).toBe(200)
-      expect(r.json()).toEqual({ healAgent: 'auto' })
+      expect(r.json()).toEqual({ healAgent: 'auto', editor: 'auto' })
     } finally {
       await app.close()
     }
@@ -52,7 +56,7 @@ describe('GET /api/project-config', () => {
     const app = await makeApp()
     try {
       const r = await app.inject({ method: 'GET', url: '/api/project-config' })
-      expect(r.json()).toEqual({ healAgent: 'manual' })
+      expect(r.json()).toEqual({ healAgent: 'manual', editor: 'auto' })
     } finally {
       await app.close()
     }
@@ -72,7 +76,7 @@ describe('PUT /api/project-config', () => {
       const written = JSON.parse(
         fs.readFileSync(path.join(projectRoot, 'canary-lab.config.json'), 'utf-8'),
       )
-      expect(written).toEqual({ healAgent: 'claude' })
+      expect(written).toEqual({ healAgent: 'claude', editor: 'auto' })
     } finally {
       await app.close()
     }
@@ -91,7 +95,7 @@ describe('PUT /api/project-config', () => {
         payload: {},
       })
       expect(r.statusCode).toBe(200)
-      expect(r.json()).toEqual({ healAgent: 'codex' })
+      expect(r.json()).toEqual({ healAgent: 'codex', editor: 'auto' })
     } finally {
       await app.close()
     }
@@ -104,6 +108,39 @@ describe('PUT /api/project-config', () => {
         method: 'PUT',
         url: '/api/project-config',
         payload: { healAgent: 'gpt' },
+      })
+      expect(r.statusCode).toBe(400)
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('writes and preserves the editor preference', async () => {
+    const app = await makeApp()
+    try {
+      const r = await app.inject({
+        method: 'PUT',
+        url: '/api/project-config',
+        payload: { editor: 'cursor' },
+      })
+      expect(r.statusCode).toBe(200)
+      expect(r.json()).toEqual({ healAgent: 'auto', editor: 'cursor' })
+      const written = JSON.parse(
+        fs.readFileSync(path.join(projectRoot, 'canary-lab.config.json'), 'utf-8'),
+      )
+      expect(written).toEqual({ healAgent: 'auto', editor: 'cursor' })
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('rejects an invalid editor value', async () => {
+    const app = await makeApp()
+    try {
+      const r = await app.inject({
+        method: 'PUT',
+        url: '/api/project-config',
+        payload: { editor: 'vim' },
       })
       expect(r.statusCode).toBe(400)
     } finally {
@@ -198,6 +235,150 @@ describe('POST /api/open-agent', () => {
         payload: { agent: 'codex' },
       })
       expect(r.statusCode).toBe(500)
+    } finally {
+      await app.close()
+    }
+  })
+})
+
+describe('POST /api/open-editor', () => {
+  function writeSpec(name = 'a.spec.ts'): string {
+    const file = path.join(projectRoot, name)
+    fs.writeFileSync(file, "test('a', async () => {})\n")
+    return file
+  }
+
+  it('rejects relative paths', async () => {
+    const app = await makeApp()
+    try {
+      const r = await app.inject({
+        method: 'POST',
+        url: '/api/open-editor',
+        payload: { file: 'a.spec.ts' },
+      })
+      expect(r.statusCode).toBe(400)
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('rejects paths outside the project root', async () => {
+    const outside = path.join(fs.realpathSync(os.tmpdir()), `outside-${Date.now()}.spec.ts`)
+    fs.writeFileSync(outside, "test('outside', async () => {})\n")
+    const app = await makeApp()
+    try {
+      const r = await app.inject({
+        method: 'POST',
+        url: '/api/open-editor',
+        payload: { file: outside },
+      })
+      expect(r.statusCode).toBe(400)
+    } finally {
+      fs.rmSync(outside, { force: true })
+      await app.close()
+    }
+  })
+
+  it('rejects missing files', async () => {
+    const app = await makeApp()
+    try {
+      const r = await app.inject({
+        method: 'POST',
+        url: '/api/open-editor',
+        payload: { file: path.join(projectRoot, 'missing.spec.ts') },
+      })
+      expect(r.statusCode).toBe(404)
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('uses cursor -g when editor is cursor', async () => {
+    const file = writeSpec()
+    const app = await makeApp()
+    try {
+      const r = await app.inject({
+        method: 'POST',
+        url: '/api/open-editor',
+        payload: { file, line: 12, column: 3, editor: 'cursor' },
+      })
+      expect(r.statusCode).toBe(200)
+      expect(r.json()).toEqual({ opened: true, editor: 'cursor' })
+      expect(spawnMock).toHaveBeenCalledWith('cursor', ['-g', `${file}:12:3`], expect.any(Object))
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('uses code -g when editor is vscode', async () => {
+    const file = writeSpec()
+    const app = await makeApp()
+    try {
+      const r = await app.inject({
+        method: 'POST',
+        url: '/api/open-editor',
+        payload: { file, line: 2, editor: 'vscode' },
+      })
+      expect(r.statusCode).toBe(200)
+      expect(r.json()).toEqual({ opened: true, editor: 'vscode' })
+      expect(spawnMock).toHaveBeenCalledWith('code', ['-g', `${file}:2:1`], expect.any(Object))
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('falls back to the platform opener for system', async () => {
+    const file = writeSpec()
+    const orig = process.platform
+    Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true })
+    const app = await makeApp()
+    try {
+      const r = await app.inject({
+        method: 'POST',
+        url: '/api/open-editor',
+        payload: { file, line: 2, editor: 'system' },
+      })
+      expect(r.statusCode).toBe(200)
+      expect(r.json()).toEqual({ opened: true, editor: 'system' })
+      expect(spawnMock).toHaveBeenCalledWith('open', [file], expect.any(Object))
+    } finally {
+      Object.defineProperty(process, 'platform', { value: orig, configurable: true })
+      await app.close()
+    }
+  })
+
+  it('auto-detects cursor before vscode', async () => {
+    const file = writeSpec()
+    spawnSyncMock.mockImplementation((command, args) => ({
+      status: command === 'which' && args[0] === 'cursor' ? 0 : 1,
+    }))
+    const app = await makeApp()
+    try {
+      const r = await app.inject({
+        method: 'POST',
+        url: '/api/open-editor',
+        payload: { file, editor: 'auto' },
+      })
+      expect(r.statusCode).toBe(200)
+      expect(r.json()).toEqual({ opened: true, editor: 'cursor' })
+      expect(spawnMock.mock.calls[0][0]).toBe('cursor')
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('returns 500 when spawning the editor throws', async () => {
+    const file = writeSpec()
+    spawnMock.mockImplementationOnce(() => { throw new Error('boom') })
+    const app = await makeApp()
+    try {
+      const r = await app.inject({
+        method: 'POST',
+        url: '/api/open-editor',
+        payload: { file, editor: 'cursor' },
+      })
+      expect(r.statusCode).toBe(500)
+      expect(r.json()).toEqual({ error: 'boom' })
     } finally {
       await app.close()
     }
