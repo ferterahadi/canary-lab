@@ -234,6 +234,10 @@ export interface AbortResult {
   reason?: 'not-active'
 }
 
+export interface AbortAllResult {
+  aborted: string[]
+}
+
 /**
  * Single owner of `logs/` mutations. Routes and the orchestrator both go
  * through this class — no other code should call `updateManifest` /
@@ -330,15 +334,38 @@ export class RunStore extends EventEmitter implements RunStateSink {
 
   // ─── operations ─────────────────────────────────────────────────────
 
-  /** Abort an active run. Calls `orch.stop('aborted')` (which routes its own
-   *  manifest writes back through this store) and removes the orchestrator
-   *  from the registry. */
+  /** Abort an active or orphaned-active run. Registered orchestrators get the
+   *  normal stop path; persisted running/healing rows without a registry entry
+   *  are finalized directly so the UI can recover from a dead server process. */
   async abort(runId: string): Promise<AbortResult> {
     const orch = this.registry.get(runId)
-    if (!orch) return { ok: false, reason: 'not-active' }
-    try { await orch.stop('aborted') } catch { /* best-effort */ }
-    this.registry.delete(runId)
-    return { ok: true }
+    if (orch) {
+      try { await orch.stop('aborted') } catch { /* best-effort */ }
+      this.registry.delete(runId)
+      // Test doubles and failed stop paths may not write terminal state. If
+      // the persisted row still claims active, finalize it here.
+      this.finalizePersistedActiveRun(runId)
+      return { ok: true }
+    }
+    return this.finalizePersistedActiveRun(runId)
+      ? { ok: true }
+      : { ok: false, reason: 'not-active' }
+  }
+
+  /** Abort every active orchestrator, then repair any remaining persisted
+   *  running/healing rows. Used by `canary-lab ui` SIGINT/SIGTERM cleanup. */
+  async abortAllActiveOrStale(): Promise<AbortAllResult> {
+    const aborted = new Set<string>()
+    for (const orch of this.registry.list()) {
+      const result = await this.abort(orch.runId)
+      if (result.ok) aborted.add(orch.runId)
+    }
+    for (const entry of this.list()) {
+      if (entry.status !== 'running' && entry.status !== 'healing') continue
+      const result = await this.abort(entry.runId)
+      if (result.ok) aborted.add(entry.runId)
+    }
+    return { aborted: [...aborted] }
   }
 
   /** Hard-delete a terminal run from history. Refuses (`reason: 'active'`)
@@ -379,6 +406,20 @@ export class RunStore extends EventEmitter implements RunStateSink {
 
   private emitEvent(event: RunStoreEvent): void {
     this.emit('event', event)
+  }
+
+  private finalizePersistedActiveRun(runId: string): boolean {
+    const detail = this.get(runId)
+    if (!detail) return false
+    const status = detail.manifest.status
+    if (status !== 'running' && status !== 'healing') return false
+    this.finalize(
+      runId,
+      'aborted',
+      new Date().toISOString(),
+      detail.manifest.healCycles,
+    )
+    return true
   }
 }
 

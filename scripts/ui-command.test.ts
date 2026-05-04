@@ -44,20 +44,8 @@ afterEach(() => {
 describe('runUi signal cleanup', () => {
   it('stops active runs before reverting envsets and exiting on SIGINT', async () => {
     const events: string[] = []
-    const orchA = {
-      runId: 'run-a',
-      stop: vi.fn(async () => { events.push('stop-a') }),
-    }
-    const orchB = {
-      runId: 'run-b',
-      stop: vi.fn(async () => { events.push('stop-b') }),
-    }
-    const registry = {
-      list: vi.fn(() => [orchA, orchB]),
-      delete: vi.fn((runId: string) => {
-        events.push(`delete-${runId}`)
-        return true
-      }),
+    const runStore = {
+      abortAllActiveOrStale: vi.fn(async () => { events.push('abort-all') }),
     }
     const app = {
       listen: vi.fn(async () => {}),
@@ -68,9 +56,9 @@ describe('runUi signal cleanup', () => {
 
     mocks.createServer.mockResolvedValue({
       app,
-      registry,
+      registry: {},
       revertAllEnvsets,
-      runStore: {},
+      runStore,
       brokers: new Map(),
       draftBrokers: new Map(),
     })
@@ -84,18 +72,12 @@ describe('runUi signal cleanup', () => {
     process.emit('SIGINT')
     await new Promise((resolve) => setTimeout(resolve, 0))
 
-    expect(orchA.stop).toHaveBeenCalledExactlyOnceWith('aborted')
-    expect(orchB.stop).toHaveBeenCalledExactlyOnceWith('aborted')
-    expect(registry.delete).toHaveBeenCalledWith('run-a')
-    expect(registry.delete).toHaveBeenCalledWith('run-b')
+    expect(runStore.abortAllActiveOrStale).toHaveBeenCalledOnce()
     expect(revertAllEnvsets).toHaveBeenCalledOnce()
     expect(app.close).toHaveBeenCalledOnce()
     expect(exit).toHaveBeenCalledExactlyOnceWith(130)
     expect(events).toEqual([
-      'stop-a',
-      'delete-run-a',
-      'stop-b',
-      'delete-run-b',
+      'abort-all',
       'revert',
       'close',
       'exit-130',

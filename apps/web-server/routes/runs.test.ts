@@ -5,7 +5,7 @@ import path from 'path'
 import Fastify from 'fastify'
 import { runsRoutes } from './runs'
 import { createRegistry, RunStore, type OrchestratorLike } from '../lib/run-store'
-import { writeManifest, writeRunsIndex } from '../lib/runtime/manifest'
+import { readManifest, readRunsIndex, writeManifest, writeRunsIndex } from '../lib/runtime/manifest'
 import { runDirFor } from '../lib/runtime/run-paths'
 
 let tmpDir: string
@@ -403,6 +403,30 @@ describe('POST /api/runs/:runId/abort', () => {
     const { app } = await build()
     const res = await app.inject({ method: 'POST', url: '/api/runs/ghost/abort' })
     expect(res.statusCode).toBe(404)
+  })
+
+  it('aborts an orphaned persisted active run instead of 404ing', async () => {
+    const dir = runDirFor(logsDir, 'orphan')
+    fs.mkdirSync(dir, { recursive: true })
+    writeManifest(path.join(dir, 'manifest.json'), {
+      runId: 'orphan',
+      feature: 'foo',
+      startedAt: 'now',
+      status: 'running',
+      healCycles: 0,
+      services: [{ name: 'api', safeName: 'api', command: 'x', cwd: '/', status: 'ready', logPath: '/x.log' }],
+    })
+    writeRunsIndex(logsDir, [
+      { runId: 'orphan', feature: 'foo', startedAt: 'now', status: 'running' },
+    ])
+    const { app } = await build()
+
+    const res = await app.inject({ method: 'POST', url: '/api/runs/orphan/abort' })
+
+    expect(res.statusCode).toBe(204)
+    expect(readManifest(path.join(dir, 'manifest.json'))?.status).toBe('aborted')
+    expect(readManifest(path.join(dir, 'manifest.json'))?.services[0].status).toBe('stopped')
+    expect(readRunsIndex(logsDir)[0].status).toBe('aborted')
   })
 
   it('still 204s if stop() throws (best-effort)', async () => {

@@ -452,7 +452,9 @@ export class RunOrchestrator extends EventEmitter {
 
     while (Date.now() < deadline) {
       if (this.stopped) return
-      if (await attempt()) {
+      const ready = await attempt()
+      if (this.stopped) return
+      if (ready) {
         this.stateSink.setServiceStatus(this.runId, svc.safeName, 'ready')
         this.emit('health-check', { service: svc, healthy: true, transport })
         return
@@ -884,6 +886,7 @@ export class RunOrchestrator extends EventEmitter {
   // failure set stops changing. Updates manifest status throughout.
   async runFullCycle(): Promise<RunManifest['status']> {
     await this.start()
+    if (this.stopped) return this.status
     let exitCode = await this.runPlaywright()
     // If the user clicked Abort while Playwright was running, bail out
     // immediately — don't compute a finalStatus from the killed pty's
@@ -951,6 +954,7 @@ export class RunOrchestrator extends EventEmitter {
         } else {
           await this.rerun()
         }
+        if (this.stopped) return this.status
         exitCode = await this.runPlaywright()
         // Manual-heal mirror of the auto-heal abort guard: the top of the
         // loop already checks `stopped`, but the killed Playwright pty's
@@ -1052,6 +1056,7 @@ export class RunOrchestrator extends EventEmitter {
           ? signal.body.filesChanged.filter((f): f is string => typeof f === 'string')
           : []
         const { restarted, kept } = await this.restart(filesChanged)
+        if (this.stopped) return this.status
         this.healCycleHistory.push({ cycle: cycleNum, restarted, kept })
         this.stateSink.patchManifest(this.runId, {
           healCycleHistory: this.healCycleHistory,
@@ -1059,6 +1064,7 @@ export class RunOrchestrator extends EventEmitter {
       } else {
         await this.rerun()
       }
+      if (this.stopped) return this.status
 
       exitCode = await this.runPlaywright()
       // Abort during the post-heal Playwright rerun — same reasoning as

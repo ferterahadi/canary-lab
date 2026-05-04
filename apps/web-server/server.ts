@@ -100,10 +100,11 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
 
   const registry = createRegistry()
   const runStore = new RunStore(logsDir, registry)
-  // One-shot cleanup: any 'running'/'healing' entry in runs/index.json from a
-  // previous server process whose heartbeat is older than the staleness window
-  // gets flipped to 'aborted'. Runs without heartbeatAt (legacy) are left alone.
-  await runStore.reapStale()
+  // One-shot cleanup: a fresh UI server starts with an empty registry, so any
+  // persisted 'running'/'healing' row is from a previous server process and is
+  // not controllable by this process. Finalize it immediately instead of
+  // waiting for the heartbeat staleness window or requiring a manual Stop.
+  await runStore.abortAllActiveOrStale()
   const brokers = new Map<string, PaneBroker>()
   const draftBrokers = new Map<string, PaneBroker>()
   // Tracks runs with an active envset so we can revert on run-complete or on
