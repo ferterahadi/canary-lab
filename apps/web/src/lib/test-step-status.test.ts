@@ -6,6 +6,7 @@ import {
   statusForTest,
   colorClassForStatus,
 } from './test-step-status'
+import { sourceLineForBodyLine } from './editor-location'
 import type { RunSummary } from '../api/types'
 
 const completeWithFailure = (msg: string): RunSummary => ({
@@ -204,5 +205,11 @@ describe('activeBodyLineForTest', () => {
       bodySource: '{\n  await page.goto(\"/\")\n}',
       summary,
     })).toBeNull()
+  })
+})
+
+describe('sourceLineForBodyLine', () => {
+  it('maps a displayed snippet body line back to the source file line', () => {
+    expect(sourceLineForBodyLine(61, 4)).toBe(64)
   })
 })

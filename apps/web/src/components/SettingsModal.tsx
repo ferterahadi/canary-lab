@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import * as api from '../api/client'
-import type { HealAgentChoice, ProjectConfig } from '../api/client'
+import type { EditorChoice, HealAgentChoice, ProjectConfig } from '../api/client'
 
 const HEAL_AGENT_OPTIONS: { value: HealAgentChoice; label: string; description: string }[] = [
   {
@@ -25,6 +25,29 @@ const HEAL_AGENT_OPTIONS: { value: HealAgentChoice; label: string; description: 
   },
 ]
 
+const EDITOR_OPTIONS: { value: EditorChoice; label: string; description: string }[] = [
+  {
+    value: 'auto',
+    label: 'Auto-detect',
+    description: 'Prefer Cursor, then VS Code, then the system default.',
+  },
+  {
+    value: 'cursor',
+    label: 'Cursor',
+    description: 'Open files with `cursor -g`.',
+  },
+  {
+    value: 'vscode',
+    label: 'VS Code',
+    description: 'Open files with `code -g`.',
+  },
+  {
+    value: 'system',
+    label: 'System default',
+    description: 'Open files with the operating system default app.',
+  },
+]
+
 interface Props {
   onClose: () => void
 }
@@ -46,7 +69,8 @@ export function SettingsModal({ onClose }: Props) {
     return () => { cancelled = true }
   }, [])
 
-  const dirty = draft != null && config != null && draft.healAgent !== config.healAgent
+  const dirty = draft != null && config != null
+    && (draft.healAgent !== config.healAgent || draft.editor !== config.editor)
 
   const onSave = async (): Promise<void> => {
     if (!draft) return
@@ -117,6 +141,33 @@ export function SettingsModal({ onClose }: Props) {
                       value={opt.value}
                       checked={draft.healAgent === opt.value}
                       onChange={() => setDraft({ ...draft, healAgent: opt.value })}
+                      className="mt-1"
+                    />
+                    <div className="flex-1">
+                      <div className="text-sm" style={{ color: 'var(--text-primary)' }}>{opt.label}</div>
+                      <div className="text-xs" style={{ color: 'var(--text-muted)' }}>{opt.description}</div>
+                    </div>
+                  </label>
+                ))}
+              </div>
+              <div className="mt-4 text-[10px] uppercase tracking-wider mb-2" style={{ color: 'var(--text-muted)' }}>
+                Editor
+              </div>
+              <div className="flex flex-col gap-1.5">
+                {EDITOR_OPTIONS.map((opt) => (
+                  <label
+                    key={opt.value}
+                    className="flex items-start gap-2 cursor-pointer rounded-md px-2 py-1.5"
+                    style={{
+                      background: draft.editor === opt.value ? 'var(--bg-elevated)' : 'transparent',
+                    }}
+                  >
+                    <input
+                      type="radio"
+                      name="editor"
+                      value={opt.value}
+                      checked={draft.editor === opt.value}
+                      onChange={() => setDraft({ ...draft, editor: opt.value })}
                       className="mt-1"
                     />
                     <div className="flex-1">

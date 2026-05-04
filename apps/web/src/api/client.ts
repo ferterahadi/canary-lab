@@ -314,9 +314,11 @@ export function putEnvsetSlot(
 // ─── project config ───────────────────────────────────────────────────────
 
 export type HealAgentChoice = 'auto' | 'claude' | 'codex' | 'manual'
+export type EditorChoice = 'auto' | 'vscode' | 'cursor' | 'system'
 
 export interface ProjectConfig {
   healAgent: HealAgentChoice
+  editor: EditorChoice
 }
 
 export function getProjectConfig(opts?: ClientOptions): Promise<ProjectConfig> {
@@ -348,6 +350,22 @@ export function openAgentApp(agent: 'claude' | 'codex', opts?: ClientOptions): P
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ agent }),
+    },
+    fetchImpl,
+  )
+}
+
+export function openEditor(
+  target: { file: string; line?: number; column?: number; editor?: EditorChoice },
+  opts?: ClientOptions,
+): Promise<{ opened: boolean; editor: EditorChoice }> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<{ opened: boolean; editor: EditorChoice }>(
+    `${baseUrl}/api/open-editor`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(target),
     },
     fetchImpl,
   )
