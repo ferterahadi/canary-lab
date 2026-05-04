@@ -6,7 +6,7 @@
 
 import type { RunSummary } from '../api/types'
 
-export type StepStatus = 'pending' | 'passed' | 'failed' | 'skipped' | 'timedout'
+export type StepStatus = 'pending' | 'testing' | 'passed' | 'failed' | 'skipped' | 'timedout'
 
 // Slugify the test name the same way the summary reporter does
 // (shared/e2e-runner/summary-reporter.ts). The summary entry is then
@@ -38,6 +38,7 @@ export function statusForTest(testName: string, summary: RunSummary | undefined)
     if (/Test timeout of/i.test(msg)) return 'timedout'
     return 'failed'
   }
+  if (summary.running?.name === expected) return 'testing'
   if (summary.passedNames) {
     return summary.passedNames.includes(expected) ? 'passed' : 'pending'
   }
@@ -46,10 +47,38 @@ export function statusForTest(testName: string, summary: RunSummary | undefined)
   return 'pending'
 }
 
+export function activeBodyLineForTest(input: {
+  testName: string
+  testLine: number
+  bodySource: string
+  summary: RunSummary | undefined
+}): number | null {
+  const running = input.summary?.running
+  if (!running || running.name !== summaryEntryName(input.testName)) return null
+  const bodyLineCount = input.bodySource.split('\n').length
+  const locations = running.step?.locations ?? (running.step?.location ? [running.step.location] : [])
+  for (const location of locations) {
+    const absoluteLine = lineFromLocation(location)
+    if (absoluteLine == null) continue
+    const relativeLine = absoluteLine - input.testLine + 1
+    if (relativeLine >= 1 && relativeLine <= bodyLineCount) return relativeLine
+  }
+  return null
+}
+
+function lineFromLocation(location: string): number | null {
+  const match = location.match(/:(\d+)(?::\d+)?$/)
+  if (!match) return null
+  const line = Number(match[1])
+  return Number.isFinite(line) ? line : null
+}
+
 export function colorClassForStatus(status: StepStatus): string {
   switch (status) {
     case 'passed':
       return 'border-emerald-500/40 bg-emerald-500/5 dark:border-emerald-500/50'
+    case 'testing':
+      return 'border-sky-500/50 bg-sky-500/10 dark:border-sky-500/60'
     case 'failed':
       return 'border-rose-500/50 bg-rose-500/5 dark:border-rose-500/60'
     case 'timedout':

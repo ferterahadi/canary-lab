@@ -39,6 +39,10 @@ interface RunsContextValue {
    *  with the run's initial detail, so the row appears immediately. Returns
    *  the new runId, or throws on failure. */
   startRun: (feature: string, env?: string) => Promise<string>
+  /** Lazily hydrate a run detail that was omitted from the initial WS
+   *  snapshot. Terminal runs use this path so selecting historical rows does
+   *  not leave the detail pane waiting forever. */
+  loadRunDetail: (runId: string) => Promise<void>
   /** Action helpers — set the transient flag, call the API, clear the flag
    *  on success/failure. Errors land in `state.errors[runId]`. */
   abort: (runId: string) => Promise<void>
@@ -71,6 +75,7 @@ export function RunsProvider({ children, wsUrl, WebSocketImpl }: RunsProviderPro
   // closure isn't stale across re-renders. Same trick as react-redux'.
   const dispatchRef = useRef(dispatch)
   dispatchRef.current = dispatch
+  const detailLoadsRef = useRef<Set<string>>(new Set())
 
   // ── WebSocket lifecycle ───────────────────────────────────────────
   useEffect(() => {
@@ -186,6 +191,20 @@ export function RunsProvider({ children, wsUrl, WebSocketImpl }: RunsProviderPro
     return runId
   }, [refresh, state.connection])
 
+  const loadRunDetail = useCallback(async (runId: string): Promise<void> => {
+    if (detailLoadsRef.current.has(runId)) return
+    detailLoadsRef.current.add(runId)
+    try {
+      const detail = await api.getRunDetail(runId)
+      dispatch({ type: 'http-detail', runId, detail })
+    } catch {
+      // Missing detail is non-fatal for the global run store. The list row
+      // remains usable, and a future WS update can still hydrate the detail.
+    } finally {
+      detailLoadsRef.current.delete(runId)
+    }
+  }, [])
+
   const abort = useCallback((runId: string) => runAction(runId, 'aborting', () => api.stopRun(runId)), [runAction])
   const deleteRun = useCallback((runId: string) => runAction(runId, 'deleting', () => api.deleteRun(runId)), [runAction])
   const pauseHeal = useCallback((runId: string) => runAction(runId, 'pausing', () => api.pauseHealRun(runId)), [runAction])
@@ -199,12 +218,13 @@ export function RunsProvider({ children, wsUrl, WebSocketImpl }: RunsProviderPro
     state,
     refresh,
     startRun,
+    loadRunDetail,
     abort,
     delete: deleteRun,
     pauseHeal,
     cancelHeal,
     clearError,
-  }), [state, refresh, startRun, abort, deleteRun, pauseHeal, cancelHeal, clearError])
+  }), [state, refresh, startRun, loadRunDetail, abort, deleteRun, pauseHeal, cancelHeal, clearError])
 
   return <RunsContext.Provider value={value}>{children}</RunsContext.Provider>
 }
@@ -278,14 +298,25 @@ export interface UseRunResult {
 
 export function useRun(runId: string | null | undefined): UseRunResult {
   const ctx = useRunsContext()
+  // The list entry is the cheap fallback for status when detail hasn't
+  // arrived yet — keeps row badges from flickering empty during reconnect.
+  const detail = runId ? ctx.state.details[runId] : undefined
+  const indexed = runId ? ctx.state.runs.find((r) => r.runId === runId) : undefined
+  const status = detail?.manifest.status ?? indexed?.status
+  useEffect(() => {
+    if (!runId || !indexed) return
+    if (!detail) {
+      void ctx.loadRunDetail(runId)
+    }
+    if (status !== 'running' && status !== 'healing') return
+    const timer = setInterval(() => {
+      void ctx.loadRunDetail(runId)
+    }, 1000)
+    return () => clearInterval(timer)
+  }, [ctx.loadRunDetail, detail, indexed, runId, status])
   if (!runId) {
     return { detail: undefined, status: undefined, transient: null, displayStatus: undefined, error: null }
   }
-  // The list entry is the cheap fallback for status when detail hasn't
-  // arrived yet — keeps row badges from flickering empty during reconnect.
-  const detail = ctx.state.details[runId]
-  const indexed = ctx.state.runs.find((r) => r.runId === runId)
-  const status = detail?.manifest.status ?? indexed?.status
   const transient = ctx.state.transients[runId] ?? null
   const displayStatus = status ? deriveDisplayStatus(status, transient) : undefined
   const error = ctx.state.errors[runId] ?? null

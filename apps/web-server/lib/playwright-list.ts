@@ -40,6 +40,7 @@ export interface PlaywrightListSpawn {
   command: string
   args: string[]
   cwd: string
+  env?: NodeJS.ProcessEnv
 }
 
 export type PlaywrightListSpawner = (featureDir: string) => PlaywrightListSpawn
@@ -92,6 +93,7 @@ function collectSpecs(suites: PwSuite[] | undefined, rootDir: string, out: Playw
 export interface ListPlaywrightTestsOpts {
   spawner?: PlaywrightListSpawner
   timeoutMs?: number
+  env?: NodeJS.ProcessEnv
 }
 
 export async function listPlaywrightTests(
@@ -110,7 +112,10 @@ export async function listPlaywrightTests(
     let out = ''
     let err = ''
     let settled = false
-    const child = spawn(inv.command, inv.args, { cwd: inv.cwd, env: process.env })
+    const child = spawn(inv.command, inv.args, {
+      cwd: inv.cwd,
+      env: { ...process.env, ...(opts.env ?? {}), ...(inv.env ?? {}) },
+    })
     const timer = setTimeout(() => {
       if (settled) return
       settled = true

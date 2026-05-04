@@ -4,6 +4,11 @@ import path from 'path'
 import { loadFeatures, listSpecFiles } from '../lib/feature-loader'
 import { extractTestsFromSource, type ExtractedTest } from '../lib/ast-extractor'
 import { listPlaywrightTests, type PlaywrightListSpawner } from '../lib/playwright-list'
+import { parseDotenv } from '../lib/dotenv-edit'
+import {
+  getEnvSetsDir,
+  loadConfig,
+} from '../lib/runtime/env-switcher/switch'
 
 export interface FeaturesRouteDeps {
   featuresDir: string
@@ -68,6 +73,7 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
     //    `${var}` substituted). On failure, fall back to AST-only output.
     const pwList = await listPlaywrightTests(feature.featureDir, {
       spawner: deps.playwrightListSpawner,
+      env: envsetProcessEnv(feature.featureDir, feature.envs?.[0]),
     })
 
     if (pwList === null) {
@@ -124,4 +130,30 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
       }
     })
   })
+}
+
+function envsetProcessEnv(featureDir: string, envName: string | undefined): NodeJS.ProcessEnv {
+  if (!envName) return {}
+  const envSetsDir = getEnvSetsDir(featureDir)
+  if (!fs.existsSync(path.join(envSetsDir, 'envsets.config.json'))) return {}
+
+  let config: ReturnType<typeof loadConfig>
+  try {
+    config = loadConfig(featureDir)
+  } catch {
+    return {}
+  }
+
+  const env: NodeJS.ProcessEnv = {}
+  for (const slot of config.feature.slots) {
+    const sourcePath = path.join(envSetsDir, envName, slot)
+    if (!fs.existsSync(sourcePath)) continue
+    try {
+      const parsed = parseDotenv(fs.readFileSync(sourcePath, 'utf-8'))
+      for (const entry of parsed.entries) {
+        env[entry.key] = entry.value
+      }
+    } catch { /* ignore unreadable envset slots */ }
+  }
+  return env
 }

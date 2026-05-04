@@ -5,6 +5,18 @@ export function looksLikeProjectRoot(candidate: string): boolean {
   return fs.existsSync(path.join(candidate, 'features'))
 }
 
+function looksLikeCanaryLabPackage(candidate: string): boolean {
+  const packageJson = path.join(candidate, 'package.json')
+  if (!fs.existsSync(packageJson)) return false
+
+  try {
+    const parsed = JSON.parse(fs.readFileSync(packageJson, 'utf-8')) as { name?: string }
+    return parsed.name === 'canary-lab'
+  } catch {
+    return false
+  }
+}
+
 export function getProjectRoot(): string {
   const explicitRoot = process.env.CANARY_LAB_PROJECT_ROOT
   if (explicitRoot) {
@@ -15,6 +27,10 @@ export function getProjectRoot(): string {
 
   while (true) {
     if (looksLikeProjectRoot(current)) {
+      return current
+    }
+
+    if (looksLikeCanaryLabPackage(current)) {
       return current
     }
 
@@ -29,4 +45,3 @@ export function getProjectRoot(): string {
 export function getFeaturesDir(): string {
   return path.join(getProjectRoot(), 'features')
 }
-

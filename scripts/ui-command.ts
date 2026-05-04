@@ -12,28 +12,39 @@ export interface UiCommandOptions {
   projectRoot?: string
   // Injected for tests / future programmatic use.
   log?: (msg: string) => void
+  exit?: (code: number) => void
 }
 
 export async function runUi(argv: string[], opts: UiCommandOptions = {}): Promise<void> {
   const log = opts.log ?? ((m: string) => console.log(m))
+  const exit = opts.exit ?? ((code: number) => { process.exit(code) })
   const portFromArgs = parsePort(argv)
   const port = portFromArgs ?? opts.port ?? 7421
   const noOpen = argv.includes('--no-open')
   const projectRoot = opts.projectRoot ?? getProjectRoot()
-  const { app, revertAllEnvsets } = await createServer({ projectRoot })
+  const { app, registry, revertAllEnvsets } = await createServer({ projectRoot })
 
-  // Revert any in-flight envset swaps if the user kills the server before
-  // their runs finish — without this their feature `.env` stays pointing at
-  // production until they manually `canary-lab env --revert`.
+  // Stop active runs and revert any in-flight envset swaps if the user kills
+  // the UI server before their runs finish. `orch.stop()` owns the process
+  // cleanup path for service PTYs, Playwright, and heal agents.
   let cleanedUp = false
-  const cleanup = (): void => {
+  const cleanup = async (): Promise<void> => {
     if (cleanedUp) return
     cleanedUp = true
+    for (const orch of registry.list()) {
+      try { await orch.stop('aborted') } catch { /* best-effort shutdown */ }
+      registry.delete(orch.runId)
+    }
     revertAllEnvsets()
   }
-  process.once('SIGINT', () => { cleanup(); process.exit(130) })
-  process.once('SIGTERM', () => { cleanup(); process.exit(143) })
-  process.once('beforeExit', cleanup)
+  const shutdown = async (code: number): Promise<void> => {
+    await cleanup()
+    try { await app.close() } catch { /* already closed or never fully opened */ }
+    exit(code)
+  }
+  process.once('SIGINT', () => { void shutdown(130) })
+  process.once('SIGTERM', () => { void shutdown(143) })
+  process.once('beforeExit', () => { void cleanup() })
 
   await app.listen({ port, host: '127.0.0.1' })
   const url = `http://localhost:${port}`

@@ -4,7 +4,16 @@ import http from 'http'
 import https from 'https'
 import { EventEmitter } from 'events'
 import net from 'net'
-import { resolvePath, normalizeStartCommand, isHealthy, isTcpListening, resolveHealthProbe, validateHealthCheck } from './startup'
+import {
+  coerceProbe,
+  enabledForEnv,
+  resolvePath,
+  normalizeStartCommand,
+  isHealthy,
+  isTcpListening,
+  resolveHealthProbe,
+  validateHealthCheck,
+} from './startup'
 import type { HealthCheck } from '../../../../../shared/launcher/types'
 
 function mockHttpGet(
@@ -81,6 +90,18 @@ describe('normalizeStartCommand', () => {
       name: 'svc',
       healthCheck: { url: 'http://a', timeoutMs: 10 },
     })
+  })
+})
+
+describe('enabledForEnv', () => {
+  it('keeps legacy callers and commands without env filters enabled', () => {
+    expect(enabledForEnv(['local'], undefined)).toBe(true)
+    expect(enabledForEnv(undefined, 'beta')).toBe(true)
+  })
+
+  it('checks env whitelists when an env is selected', () => {
+    expect(enabledForEnv(['local', 'beta'], 'beta')).toBe(true)
+    expect(enabledForEnv(['local'], 'beta')).toBe(false)
   })
 })
 
@@ -201,10 +222,26 @@ describe('resolveHealthProbe', () => {
     const m: HealthCheck = { local: { http: { url: 'http://l' } } }
     expect(resolveHealthProbe(m, 'beta')).toBeNull()
   })
+
+  it('rejects malformed probe shapes during coercion', () => {
+    expect(() => coerceProbe({ timeoutMs: 100 } as never)).toThrow(/declare one transport/)
+  })
 })
 
 describe('validateHealthCheck', () => {
   const ctx = { feature: 'feat', command: 'cmd' }
+
+  it('allows undefined checks', () => {
+    expect(() => validateHealthCheck(undefined, ctx)).not.toThrow()
+  })
+
+  it('rejects non-object checks', () => {
+    expect(() => validateHealthCheck('http://x' as never, ctx)).toThrow(/must be an object/)
+  })
+
+  it('rejects invalid env-map entries', () => {
+    expect(() => validateHealthCheck({ local: null } as never, ctx)).toThrow(/env entry/)
+  })
 
   it('accepts a tagged http probe', () => {
     expect(() => validateHealthCheck({ http: { url: 'http://x' } }, ctx)).not.toThrow()
@@ -247,6 +284,10 @@ describe('validateHealthCheck', () => {
 
   it('rejects tcp with non-positive port', () => {
     expect(() => validateHealthCheck({ tcp: { port: 0 } }, ctx)).toThrow(/tcp\.port/)
+  })
+
+  it('rejects legacy probes with missing url', () => {
+    expect(() => validateHealthCheck({ url: '' }, ctx)).toThrow(/legacy healthCheck\.url/)
   })
 
   it('error message names the feature, command, and env when applicable', () => {
