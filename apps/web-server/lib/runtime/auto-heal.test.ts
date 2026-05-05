@@ -105,45 +105,46 @@ describe('buildOrchestratorHealCommand', () => {
     projectRoot = path.join(tmp, 'project')
     fs.mkdirSync(runDir, { recursive: true })
     fs.mkdirSync(projectRoot, { recursive: true })
-    // Plant a CLAUDE.md with the heal-prompt block so loadPrompt succeeds.
-    fs.writeFileSync(
-      path.join(projectRoot, 'CLAUDE.md'),
-      `before\n<!-- heal-prompt:start -->\nFix the failing tests.\n<!-- heal-prompt:end -->\nafter`,
-    )
   })
 
   afterEach(() => {
     fs.rmSync(tmp, { recursive: true, force: true })
   })
 
-  it('throws synchronously when prompt file is missing (caller can degrade)', () => {
-    expect(() => buildOrchestratorHealCommand({
-      agent: 'claude',
-      projectRoot: '/no/such/dir',
-      runDir,
-    })).toThrow(/Heal prompt source not found/)
-  })
-
-  it('throws synchronously when prompt markers are missing', () => {
-    fs.writeFileSync(path.join(projectRoot, 'CLAUDE.md'), 'no markers here')
+  it('throws synchronously when the packaged prompt template is missing', () => {
     expect(() => buildOrchestratorHealCommand({
       agent: 'claude',
       projectRoot,
       runDir,
-    })).toThrow(/Heal prompt markers/)
+      promptPath: path.join(tmp, 'missing.md'),
+    })).toThrow(/Heal prompt template not found/)
   })
 
-  it('returns a buildCommand that writes the prompt and includes claude flags', () => {
+  it('returns a buildCommand that writes the rendered run-scoped prompt and includes claude flags', () => {
     const build = buildOrchestratorHealCommand({ agent: 'claude', projectRoot, runDir })
     const cmd = build({ cycle: 0, outputDir: path.join(runDir, 'out') })
     // Prompt file was written under runDir.
     const promptPath = path.join(runDir, 'heal-prompt.md')
     expect(fs.existsSync(promptPath)).toBe(true)
     const promptBody = fs.readFileSync(promptPath, 'utf-8')
-    expect(promptBody).toContain('Fix the failing tests.')
+    expect(promptBody).toContain(`Run directory:\n- \`${runDir}\` (\`../run\` from the project root)`)
+    expect(promptBody).toContain(path.join(runDir, 'heal-index.md'))
+    expect(promptBody).toContain(path.join(runDir, 'e2e-summary.json'))
+    expect(promptBody).toContain(path.join(runDir, 'failed'))
+    expect(promptBody).toContain(path.join(runDir, 'signals', '.restart'))
+    expect(promptBody).toContain(path.join(runDir, 'signals', '.rerun'))
+    expect(promptBody).not.toContain('{{')
     // Command starts with the claude CLI invocation and embeds the prompt path.
     expect(cmd).toMatch(/^claude /)
     expect(cmd).toContain(JSON.stringify(promptPath))
+  })
+
+  it('auto-heal does not depend on project CLAUDE.md / AGENTS.md', () => {
+    fs.writeFileSync(path.join(projectRoot, 'CLAUDE.md'), 'custom user notes without markers')
+    fs.writeFileSync(path.join(projectRoot, 'AGENTS.md'), 'custom codex notes without markers')
+
+    expect(() => buildOrchestratorHealCommand({ agent: 'claude', projectRoot, runDir })).not.toThrow()
+    expect(() => buildOrchestratorHealCommand({ agent: 'codex', projectRoot, runDir })).not.toThrow()
   })
 
   it('uses --continue on cycle > 0 when sessionMode=resume', () => {
@@ -160,13 +161,11 @@ describe('buildOrchestratorHealCommand', () => {
   })
 
   it('codex agent: builds the codex CLI command when claude is not requested', () => {
-    fs.writeFileSync(
-      path.join(projectRoot, 'AGENTS.md'),
-      `<!-- heal-prompt:start -->\nFix the failing tests.\n<!-- heal-prompt:end -->`,
-    )
     const build = buildOrchestratorHealCommand({ agent: 'codex', projectRoot, runDir })
     const cmd = build({ cycle: 0, outputDir: path.join(runDir, 'out') })
     expect(cmd).toContain('codex exec')
     expect(cmd.includes('--mcp-config')).toBe(false) // codex doesn't use claude's mcp flag
+    const promptBody = fs.readFileSync(path.join(runDir, 'heal-prompt.md'), 'utf-8')
+    expect(promptBody).toContain(path.join(runDir, 'signals', '.restart'))
   })
 })

@@ -43,6 +43,12 @@ describe('planRestart', () => {
     expect(plan.toRestart).toEqual(['api'])
   })
 
+  it('matches service cwd values that already end with a path separator', () => {
+    const ss = [svc('api', `/repos/api${path.sep}`)]
+    const plan = planRestart(['/repos/api/src/server.ts'], ss)
+    expect(plan.toRestart).toEqual(['api'])
+  })
+
   it('returns noMatch=true when filesChanged points outside every service', () => {
     const plan = planRestart(['/elsewhere/x.ts'], services)
     expect(plan.toRestart).toEqual([])

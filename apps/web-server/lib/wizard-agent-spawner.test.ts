@@ -6,13 +6,13 @@ import { PaneBroker } from './pane-broker'
 import {
   STAGE1_TEMPLATE,
   STAGE2_TEMPLATE,
-  REFINE_TEMPLATE,
   buildClaudeArgs,
   buildClaudeCommand,
+  buildClaudeResumeArgs,
   buildCodexArgs,
   buildCodexCommand,
+  buildCodexResumeArgs,
   buildPlanPrompt,
-  buildRefinePrompt,
   buildSpecPrompt,
   buildWizardCommand,
   createTeeSink,
@@ -111,38 +111,17 @@ describe('loadTemplate', () => {
 
   it('reads stage 2 prompt template', () => {
     const t = loadTemplate(STAGE2_TEMPLATE)
+    expect(t).toContain('{{featureName}}')
     expect(t).toContain('{{plan}}')
     expect(t).toContain('{{skills}}')
-    expect(t).toContain('test.step')
+    expect(t).toContain("test('<plan step>'")
+    expect(t).toContain('Do not wrap a generated test body in a same-named')
+    expect(t).toContain('playwright.config.cjs')
+    expect(t).toContain('<dev-dependencies>')
+    expect(t).toContain('"appRoots"')
+    expect(t).toContain('"slots"')
+    expect(t).toContain('"feature"')
     expect(t).toContain('<file path=')
-  })
-
-  it('reads refine prompt template', () => {
-    const t = loadTemplate(REFINE_TEMPLATE)
-    expect(t).toContain('{{selectedText}}')
-    expect(t).toContain('{{suggestion}}')
-    expect(t).toContain('<file path=')
-  })
-})
-
-describe('buildRefinePrompt', () => {
-  it('substitutes file context and suggestion', () => {
-    const out = buildRefinePrompt({
-      prdText: 'PRD',
-      plan: [{ step: 'open' }],
-      repos: [{ name: 'app', localPath: '/p' }],
-      filePath: 'e2e/a.spec.ts',
-      fileContent: 'test code',
-      selectedText: 'selected code',
-      suggestion: 'make it stronger',
-      template: 'P={{prdText}}|PLAN={{plan}}|R={{repos}}|F={{filePath}}|C={{fileContent}}|S={{selectedText}}|G={{suggestion}}',
-    })
-    expect(out).toContain('PRD')
-    expect(out).toContain('"step": "open"')
-    expect(out).toContain('- app (/p)')
-    expect(out).toContain('e2e/a.spec.ts')
-    expect(out).toContain('selected code')
-    expect(out).toContain('make it stronger')
   })
 })
 
@@ -171,24 +150,35 @@ describe('buildPlanPrompt', () => {
 describe('buildSpecPrompt', () => {
   it('substitutes plan, skills, and repos', () => {
     const out = buildSpecPrompt({
+      featureName: 'login_flow',
       plan: [{ step: 'open page' }],
       skills: [{ id: 'user:s1', content: 'rule body' }],
       repos: [{ name: 'app', localPath: '/p' }],
-      template: 'P={{plan}}|S={{skills}}|R={{repos}}',
+      template: 'F={{featureName}}|P={{plan}}|S={{skills}}|R={{repos}}',
     })
+    expect(out).toContain('login_flow')
     expect(out).toContain('"step": "open page"')
     expect(out).toContain('user:s1')
     expect(out).toContain('rule body')
     expect(out).toContain('- app (/p)')
   })
 
-  it('works against the real stage 2 template (rule preserved)', () => {
+  it('works against the real stage 2 template (direct test structure preserved)', () => {
     const out = buildSpecPrompt({
+      featureName: 'login_flow',
       plan: [],
       skills: [],
       repos: [],
     })
-    expect(out).toContain('test.step')
+    expect(out).toContain('login_flow')
+    expect(out).toContain("test('<plan step>'")
+    expect(out).toContain('Do not wrap a generated test body in a same-named')
+    expect(out).toContain("test('Open the login page'")
+    expect(out).not.toContain("test.step('Open the login page'")
+    expect(out).toContain('<dev-dependencies>')
+    expect(out).toContain('"appRoots"')
+    expect(out).toContain('"slots": ["login_flow.env"]')
+    expect(out).toContain('$CANARY_LAB_PROJECT_ROOT/features/login_flow/.env')
     expect(out).toContain('<file path=')
   })
 })
@@ -206,7 +196,23 @@ describe('shellQuote / buildClaudeArgs / buildClaudeCommand', () => {
     expect(buildClaudeArgs('hi')).toEqual([
       '--dangerously-skip-permissions',
       '--output-format=stream-json',
+      '--include-partial-messages',
       '--verbose',
+      '-p',
+      'hi',
+    ])
+    expect(buildClaudeArgs('hi')).not.toContain('--resume')
+    expect(buildClaudeArgs('hi')).not.toContain('--continue')
+  })
+
+  it('builds claude resume args for spec generation', () => {
+    expect(buildClaudeResumeArgs('hi', 'sess-123')).toEqual([
+      '--dangerously-skip-permissions',
+      '--output-format=stream-json',
+      '--include-partial-messages',
+      '--verbose',
+      '--resume',
+      'sess-123',
       '-p',
       'hi',
     ])
@@ -226,11 +232,29 @@ describe('shellQuote / buildClaudeArgs / buildClaudeCommand', () => {
     const cmd = buildClaudeCommand('hi', '/opt/bin/claude')
     expect(cmd.startsWith('set -o pipefail; /opt/bin/claude ')).toBe(true)
   })
+
+  it('builds a claude resume command when a session id is supplied', () => {
+    const cmd = buildClaudeCommand('hi', 'claude', 'sess-123')
+    expect(cmd).toContain(`'--resume' 'sess-123'`)
+    expect(cmd).not.toContain('--no-session-persistence')
+  })
 })
 
 describe('buildCodexArgs / buildCodexCommand / buildWizardCommand', () => {
   it('builds codex exec args', () => {
     expect(buildCodexArgs('hi')).toEqual(['exec', '--skip-git-repo-check', '--full-auto', '--json', 'hi'])
+  })
+
+  it('builds codex resume args for spec generation', () => {
+    expect(buildCodexResumeArgs('hi', 'thread-123')).toEqual([
+      'exec',
+      'resume',
+      '--skip-git-repo-check',
+      '--full-auto',
+      '--json',
+      'thread-123',
+      'hi',
+    ])
   })
 
   it('builds a bash-safe codex command line', () => {
@@ -246,11 +270,23 @@ describe('buildCodexArgs / buildCodexCommand / buildWizardCommand', () => {
     expect(buildWizardCommand('claude', 'hi')).toMatch(/^set -o pipefail; claude /)
     expect(buildWizardCommand('codex', 'hi')).toMatch(/^set -o pipefail; codex /)
   })
+
+  it('dispatches resume by agent', () => {
+    expect(buildWizardCommand('claude', 'hi', { resumeSessionId: 'sess-123' }))
+      .toContain(`'--resume' 'sess-123'`)
+    expect(buildWizardCommand('codex', 'hi', { resumeSessionId: 'thread-123' }))
+      .toContain(`'exec' 'resume'`)
+  })
 })
 
 describe('paneIdForDraft', () => {
-  it('namespaces draft pane ids', () => {
-    expect(paneIdForDraft('d-1')).toBe('draft:d-1')
+  it('namespaces draft pane ids by stage', () => {
+    expect(paneIdForDraft('d-1', 'planning')).toBe('draft:d-1:planning')
+    expect(paneIdForDraft('d-1', 'generating')).toBe('draft:d-1:generating')
+  })
+
+  it('defaults to planning for compatibility', () => {
+    expect(paneIdForDraft('d-1')).toBe('draft:d-1:planning')
   })
 })
 

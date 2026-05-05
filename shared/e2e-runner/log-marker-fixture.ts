@@ -7,7 +7,8 @@ import { getProjectRoot } from '../runtime/project-root'
 // web-server's runtime uses, just inlined here so this published fixture
 // has no dependency on apps/web-server/. The published file ships to user
 // templates via `canary-lab/feature-support/log-marker-fixture`.
-const MANIFEST_PATH = path.join(getProjectRoot(), 'logs', 'manifest.json')
+const MANIFEST_PATH = process.env.CANARY_LAB_MANIFEST_PATH
+  ?? path.join(getProjectRoot(), 'logs', 'manifest.json')
 
 export function slugify(title: string): string {
   return title
@@ -26,27 +27,35 @@ export async function withLogMarkers(
     return
   }
 
-  const manifest: { serviceLogs: string[] } = JSON.parse(
+  const manifest: { serviceLogs?: string[]; services?: Array<{ logPath?: string }> } = JSON.parse(
     fs.readFileSync(manifestPath, 'utf-8'),
   )
+  const serviceLogs = [
+    ...(Array.isArray(manifest.serviceLogs) ? manifest.serviceLogs : []),
+    ...(Array.isArray(manifest.services)
+      ? manifest.services
+          .map((s) => s.logPath)
+          .filter((p): p is string => typeof p === 'string' && p.length > 0)
+      : []),
+  ]
   const slug = slugify(title)
   const openTag = `<test-case-${slug}>\n`
   const closeTag = `</test-case-${slug}>\n`
 
-  for (const logPath of manifest.serviceLogs) {
+  for (const logPath of serviceLogs) {
     fs.appendFileSync(logPath, openTag)
   }
 
   await run()
 
-  for (const logPath of manifest.serviceLogs) {
+  for (const logPath of serviceLogs) {
     fs.appendFileSync(logPath, closeTag)
   }
 }
 
 /**
  * Extended Playwright `test` that writes XML markers into every service log
- * listed in logs/manifest.json. If the manifest doesn't exist because tests
+ * listed in the active run manifest. If the manifest doesn't exist because tests
  * are run directly with Playwright instead of `canary-lab run`, the fixture
  * is a no-op.
  * https://playwright.dev/docs/extensibility

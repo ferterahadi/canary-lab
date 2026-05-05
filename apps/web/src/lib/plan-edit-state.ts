@@ -69,3 +69,64 @@ export function parseActionsTextarea(text: string): string[] {
 export function renderActionsTextarea(actions: readonly string[]): string {
   return actions.join('\n')
 }
+
+export function renderPlanStepMarkdown(step: PlanStep): string {
+  const title = step.step?.trim() || 'New step'
+  const actions = step.actions.length > 0 ? step.actions : ['']
+  const expectations = step.expectedOutcome.trim()
+    ? step.expectedOutcome.split('\n').map((line) => line.trimEnd()).filter((line) => line.length > 0)
+    : ['']
+
+  return [
+    `# ${title}`,
+    '',
+    '## Action',
+    ...actions.map((action, index) => `${index + 1}. ${action}`),
+    '',
+    '## Expectation',
+    ...expectations.map((expectation, index) => `${index + 1}. ${expectation}`),
+  ].join('\n')
+}
+
+export function parsePlanStepMarkdown(markdown: string): PlanStep {
+  const lines = markdown.split('\n')
+  let step = ''
+  let section: 'action' | 'expectation' | null = null
+  const actionLines: string[] = []
+  const expectationLines: string[] = []
+
+  for (const rawLine of lines) {
+    const line = rawLine.trimEnd()
+    const titleMatch = line.match(/^#\s+(.+)$/)
+    if (titleMatch && !step) {
+      step = titleMatch[1].trim()
+      continue
+    }
+
+    const sectionMatch = line.match(/^##\s+(.+)$/)
+    if (sectionMatch) {
+      const label = sectionMatch[1].trim().toLowerCase()
+      section = label.startsWith('action')
+        ? 'action'
+        : label.startsWith('expect')
+          ? 'expectation'
+          : null
+      continue
+    }
+
+    if (section === 'action') actionLines.push(line)
+    if (section === 'expectation') expectationLines.push(line)
+  }
+
+  return {
+    step,
+    actions: compactMarkdownList(actionLines),
+    expectedOutcome: compactMarkdownList(expectationLines).join('\n'),
+  }
+}
+
+function compactMarkdownList(lines: readonly string[]): string[] {
+  return lines
+    .map((line) => line.replace(/^\s*(?:[-*]|\d+[.)])\s*/, '').trimEnd())
+    .filter((line) => line.trim().length > 0)
+}

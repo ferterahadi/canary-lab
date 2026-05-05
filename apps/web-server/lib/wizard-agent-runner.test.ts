@@ -4,7 +4,7 @@ import path from 'path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { PaneBroker } from './pane-broker'
 import type { PtyFactory, PtyHandle } from './runtime/pty-spawner'
-import { spawnPlanAgent } from './wizard-agent-runner'
+import { spawnPlanAgent, spawnSpecAgent } from './wizard-agent-runner'
 import { WizardAgentCancelledError, WizardAgentRegistry } from './wizard-agent-registry'
 
 class FakePty implements PtyHandle {
@@ -56,6 +56,7 @@ describe('wizard agent runner cancellation', () => {
     const factory: PtyFactory = () => pty
     const registry = new WizardAgentRegistry()
     const broker = new PaneBroker()
+    broker.push('draft:d1:planning', 'stale output')
     const run = spawnPlanAgent({
       ptyFactory: factory,
       registry,
@@ -77,7 +78,8 @@ describe('wizard agent runner cancellation', () => {
     expect(registry.has('d1')).toBe(false)
     expect(fs.readFileSync(path.join(tmp, 'agent.log'), 'utf8')).toContain('<plan-output>')
     expect(fs.readFileSync(path.join(tmp, 'agent.log'), 'utf8')).toContain('claude plan agent started')
-    expect(broker.snapshot('draft:d1')).toContain('<plan-output>')
+    expect(broker.snapshot('draft:d1:planning')).toContain('<plan-output>')
+    expect(broker.snapshot('draft:d1:planning')).not.toContain('stale output')
     fs.rmSync(tmp, { recursive: true, force: true })
   })
 
@@ -129,6 +131,79 @@ describe('wizard agent runner cancellation', () => {
     pty.emitData('bad output')
     pty.emitExit(2)
     await expect(run).rejects.toThrow(/wizard agent exited with code 2/)
+    fs.rmSync(tmp, { recursive: true, force: true })
+  })
+
+  it('hides misleading restored-session notices from planning output', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'wizard-runner-'))
+    const pty = new FakePty()
+    const run = spawnPlanAgent({
+      ptyFactory: () => pty,
+      planTemplate: writePlanTemplate(tmp),
+    })({
+      draftId: 'd4',
+      agent: 'claude',
+      prdText: 'Login',
+      repos: [{ name: 'app', localPath: '/app' }],
+      draftDir: tmp,
+      agentLogPath: path.join(tmp, 'agent.log'),
+    })
+
+    pty.emitData('Restored session: Wed 6 May 2026\n<plan-output>[]</plan-output>')
+    pty.emitExit(0)
+    await expect(run).resolves.not.toContain('Restored session')
+    expect(fs.readFileSync(path.join(tmp, 'agent.log'), 'utf8')).not.toContain('Restored session')
+    fs.rmSync(tmp, { recursive: true, force: true })
+  })
+
+  it('hides misleading restored-session notices from spec output', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'wizard-runner-'))
+    const pty = new FakePty()
+    const run = spawnSpecAgent({
+      ptyFactory: () => pty,
+      specTemplate: 'Feature {{featureName}} {{plan}} {{skills}} {{repos}}',
+    })({
+      draftId: 'd5',
+      agent: 'claude',
+      featureName: 'login',
+      plan: [],
+      skills: [],
+      repos: [{ name: 'app', localPath: '/app' }],
+      draftDir: tmp,
+      agentLogPath: path.join(tmp, 'agent.log'),
+      resumeSessionId: 'sess-123',
+    })
+
+    pty.emitData('Restored session: Wed 6 May 2026\n<file path="x.ts">x</file>')
+    pty.emitExit(0)
+    await expect(run).resolves.not.toContain('Restored session')
+    expect(fs.readFileSync(path.join(tmp, 'agent.log'), 'utf8')).not.toContain('Restored session')
+    fs.rmSync(tmp, { recursive: true, force: true })
+  })
+
+  it('prints a waiting heartbeat when an agent produces no output for a while', async () => {
+    vi.useFakeTimers()
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'wizard-runner-'))
+    const pty = new FakePty()
+    const run = spawnSpecAgent({
+      ptyFactory: () => pty,
+      specTemplate: 'Feature {{featureName}} {{plan}} {{skills}} {{repos}}',
+    })({
+      draftId: 'd6',
+      agent: 'claude',
+      featureName: 'login',
+      plan: [],
+      skills: [],
+      repos: [{ name: 'app', localPath: '/app' }],
+      draftDir: tmp,
+      agentLogPath: path.join(tmp, 'agent.log'),
+    })
+
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(fs.readFileSync(path.join(tmp, 'agent.log'), 'utf8')).toContain('waiting for agent output')
+    pty.emitData('<file path="x.ts">x</file>')
+    pty.emitExit(0)
+    await expect(run).resolves.toContain('<file path="x.ts">')
     fs.rmSync(tmp, { recursive: true, force: true })
   })
 })

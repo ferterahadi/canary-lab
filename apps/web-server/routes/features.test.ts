@@ -188,6 +188,29 @@ describe('GET /api/features/:name/tests', () => {
     expect(body[0].tests).toEqual([])
   })
 
+  it('ignores malformed envset config and still returns spec tests', async () => {
+    const dir = writeFeature('badenv', {
+      spec: `
+        test('env shape does not block listing', async () => {
+          await test.step('visible step', async () => {})
+        })
+      `,
+    })
+    fs.mkdirSync(path.join(dir, 'envsets'), { recursive: true })
+    fs.writeFileSync(
+      path.join(dir, 'envsets', 'envsets.config.json'),
+      JSON.stringify({ envsets: { local: { files: ['envsets/local/badenv.env'] } } }),
+    )
+
+    const app = await build()
+    const res = await app.inject({ method: 'GET', url: '/api/features/badenv/tests' })
+    expect(res.statusCode).toBe(200)
+    const body = res.json()
+    expect(body).toHaveLength(1)
+    expect(body[0].tests[0].name).toBe('env shape does not block listing')
+    expect(body[0].tests[0].steps.map((s: { label: string }) => s.label)).toEqual(['visible step'])
+  })
+
   it('falls back to AST-only tests when Playwright list returns no entries for the spec', async () => {
     writeFeature('emptylist', {
       spec: "test('only', async () => {})\n",

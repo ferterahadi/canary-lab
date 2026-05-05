@@ -148,7 +148,7 @@ describe('POST /api/tests/draft/:id/cancel-generation', () => {
     await app.close()
   })
 
-  it('cancels generating and refining statuses', async () => {
+  it('cancels generating status', async () => {
     const cancelGeneration = vi.fn()
     const app = await makeApp(makeDeps({
       cancelGeneration,
@@ -165,11 +165,6 @@ describe('POST /api/tests/draft/:id/cancel-generation', () => {
     writeDraft(logsDir, { ...rec, status: 'generating' })
     const generating = await app.inject({ method: 'POST', url: `/api/tests/draft/${id}/cancel-generation` })
     expect(generating.statusCode).toBe(200)
-    expect(readDraft(logsDir, id)!.status).toBe('cancelled')
-
-    writeDraft(logsDir, { ...rec, status: 'refining' })
-    const refining = await app.inject({ method: 'POST', url: `/api/tests/draft/${id}/cancel-generation` })
-    expect(refining.statusCode).toBe(200)
     expect(readDraft(logsDir, id)!.status).toBe('cancelled')
     await app.close()
   })
@@ -239,6 +234,31 @@ describe('runPlanStage', () => {
     await app.close()
   })
 
+  it('stores the plan agent session id when the formatter exposes one', async () => {
+    const deps = makeDeps({
+      spawnPlanAgent: async () => `[[canary-lab:wizard-session agent=claude id=sess-plan-123]]
+<plan-output>[
+  {"step":"Open","actions":["go"],"expectedOutcome":"visible"}
+]</plan-output>`,
+    })
+    const app = await makeApp(deps)
+    await app.inject({
+      method: 'POST',
+      url: '/api/tests/draft',
+      payload: {
+        prdText: 'Login',
+        repos: [{ name: 'app', localPath: '/p' }],
+      },
+    })
+    const id = fs.readdirSync(path.join(logsDir, 'drafts'))[0]
+    await new Promise((r) => setTimeout(r, 10))
+    const rec = readDraft(logsDir, id)!
+    expect(rec.status).toBe('plan-ready')
+    expect(rec.planAgentSessionId).toBe('sess-plan-123')
+    expect(rec.planAgentSessionKind).toBe('claude')
+    await app.close()
+  })
+
   it('transitions to error on parse failure', async () => {
     const deps = makeDeps({
       spawnPlanAgent: async () => 'no markers here',
@@ -291,81 +311,6 @@ describe('runPlanStage', () => {
   })
 })
 
-describe('POST /api/tests/draft/:id/refine-file', () => {
-  it('runs refine agent and updates only the draft generated file', async () => {
-    const deps = makeDeps({
-      spawnPlanAgent: async () => `<plan-output>[
-        {"coverageType":"happy-path","step":"Open","actions":["go"],"expectedOutcome":"visible"}
-      ]</plan-output>`,
-      spawnSpecAgent: async () => `<file path="feature.config.cjs">module.exports={}</file>
-<file path="e2e/a.spec.ts">old assertion</file>`,
-      spawnRefineAgent: async (input) => {
-        expect(input.agent).toBe('claude')
-        expect(input.filePath).toBe('e2e/a.spec.ts')
-        expect(input.selectedText).toBe('old assertion')
-        return `<file path="e2e/a.spec.ts">strong assertion</file>`
-      },
-    })
-    const app = await makeApp(deps)
-    const created = await app.inject({
-      method: 'POST',
-      url: '/api/tests/draft',
-      payload: {
-        prdText: 'Login',
-        repos: [{ name: 'app', localPath: '/p' }],
-        skills: ['s1'],
-      },
-    })
-    const id = created.json().draftId
-    await new Promise((r) => setTimeout(r, 10))
-    await app.inject({ method: 'POST', url: `/api/tests/draft/${id}/accept-plan`, payload: {} })
-    await new Promise((r) => setTimeout(r, 10))
-    const res = await app.inject({
-      method: 'POST',
-      url: `/api/tests/draft/${id}/refine-file`,
-      payload: {
-        path: 'e2e/a.spec.ts',
-        selectedText: 'old assertion',
-        suggestion: 'make this assertion stronger',
-      },
-    })
-    expect(res.statusCode).toBe(202)
-    await new Promise((r) => setTimeout(r, 10))
-    const spec = fs.readFileSync(path.join(logsDir, 'drafts', id, 'generated', 'e2e', 'a.spec.ts'), 'utf8')
-    expect(spec).toBe('strong assertion')
-    const config = fs.readFileSync(path.join(logsDir, 'drafts', id, 'generated', 'feature.config.cjs'), 'utf8')
-    expect(config).toBe('module.exports={}')
-    expect(readDraft(logsDir, id)!.status).toBe('spec-ready')
-    await app.close()
-  })
-
-  it('rejects path traversal', async () => {
-    const app = await makeApp(makeDeps())
-    const post = await app.inject({
-      method: 'POST',
-      url: '/api/tests/draft',
-      payload: { prdText: 'X', repos: [{ name: 'a', localPath: '/' }] },
-    })
-    const id = post.json().draftId
-    const rec = readDraft(logsDir, id)!
-    fs.mkdirSync(path.join(logsDir, 'drafts', id, 'generated'), { recursive: true })
-    fs.writeFileSync(path.join(logsDir, 'drafts', id, 'generated', 'x.ts'), 'x')
-    // Force a spec-ready record without relying on an agent.
-    writeDraft(logsDir, {
-      ...rec,
-      status: 'spec-ready',
-      generatedFiles: ['x.ts'],
-    })
-    const r = await app.inject({
-      method: 'POST',
-      url: `/api/tests/draft/${id}/refine-file`,
-      payload: { path: '../x.ts', selectedText: 'x', suggestion: 'y' },
-    })
-    expect(r.statusCode).toBe(400)
-    await app.close()
-  })
-})
-
 describe('GET /api/tests/draft/:id', () => {
   it('404s on unknown id', async () => {
     const app = await makeApp(makeDeps())
@@ -396,6 +341,66 @@ describe('GET /api/tests/draft/:id', () => {
   })
 })
 
+describe('GET /api/tests/draft/:id/agent-log', () => {
+  it('returns the full agent log for a draft stage', async () => {
+    const app = await makeApp(makeDeps())
+    const post = await app.inject({
+      method: 'POST',
+      url: '/api/tests/draft',
+      payload: {
+        prdText: 'X',
+        repos: [{ name: 'app', localPath: '/p' }],
+      },
+    })
+    const id = post.json().draftId
+    const content = `start\n${'x'.repeat(5000)}\nend`
+    fs.writeFileSync(path.join(logsDir, 'drafts', id, 'plan-agent.log'), content, 'utf8')
+
+    const r = await app.inject({ method: 'GET', url: `/api/tests/draft/${id}/agent-log?stage=planning` })
+    expect(r.statusCode).toBe(200)
+    expect(r.json()).toEqual({ content })
+    await app.close()
+  })
+
+  it('rejects unknown stages', async () => {
+    const app = await makeApp(makeDeps())
+    const post = await app.inject({
+      method: 'POST',
+      url: '/api/tests/draft',
+      payload: {
+        prdText: 'X',
+        repos: [{ name: 'app', localPath: '/p' }],
+      },
+    })
+    const id = post.json().draftId
+
+    const r = await app.inject({ method: 'GET', url: `/api/tests/draft/${id}/agent-log?stage=refining` })
+    expect(r.statusCode).toBe(400)
+    expect(r.json()).toEqual({ error: 'unknown draft stage' })
+    await app.close()
+  })
+
+  it('404s unknown drafts and missing logs', async () => {
+    const app = await makeApp(makeDeps())
+    const missingDraft = await app.inject({ method: 'GET', url: '/api/tests/draft/nope/agent-log?stage=planning' })
+    expect(missingDraft.statusCode).toBe(404)
+
+    const post = await app.inject({
+      method: 'POST',
+      url: '/api/tests/draft',
+      payload: {
+        prdText: 'X',
+        repos: [{ name: 'app', localPath: '/p' }],
+      },
+    })
+    const id = post.json().draftId
+    const missingLog = await app.inject({ method: 'GET', url: `/api/tests/draft/${id}/agent-log?stage=generating` })
+    expect(missingLog.statusCode).toBe(404)
+    expect(missingLog.json()).toEqual({ error: 'agent log not found' })
+    await app.close()
+  })
+})
+
 describe('GET /api/tests/draft (list)', () => {
   it('returns all drafts newest first', async () => {
     const app = await makeApp(makeDeps())
@@ -420,8 +425,9 @@ describe('POST /api/tests/draft/:id/accept-plan', () => {
   it('starts spec stage and returns 202', async () => {
     let specCalled = 0
     const deps = makeDeps({
-      spawnSpecAgent: async () => {
+      spawnSpecAgent: async (input) => {
         specCalled++
+        expect(input.resumeSessionId).toBeUndefined()
         return '<file path="feature.config.cjs">module.exports={};</file>'
       },
     })
@@ -448,6 +454,79 @@ describe('POST /api/tests/draft/:id/accept-plan', () => {
     expect(specCalled).toBe(1)
     const rec = readDraft(logsDir, id)!
     expect(rec.status).toBe('spec-ready')
+    await app.close()
+  })
+
+  it('resumes the matching plan agent session and still uses the accepted edited plan', async () => {
+    let specInput: Parameters<TestsDraftRouteDeps['spawnSpecAgent']>[0] | undefined
+    const editedPlan = [
+      { step: 'Edited step', actions: ['edited action'], expectedOutcome: 'edited outcome' },
+    ]
+    const deps = makeDeps({
+      pickAgent: () => ({ ok: true, agent: 'claude' }),
+      spawnPlanAgent: async () => `[[canary-lab:wizard-session agent=claude id=sess-plan-123]]
+<plan-output>[
+  {"step":"Original","actions":["go"],"expectedOutcome":"visible"}
+]</plan-output>`,
+      spawnSpecAgent: async (input) => {
+        specInput = input
+        return '<file path="feature.config.cjs">module.exports={};</file>'
+      },
+    })
+    const app = await makeApp(deps)
+    const post = await app.inject({
+      method: 'POST',
+      url: '/api/tests/draft',
+      payload: {
+        prdText: 'X',
+        repos: [{ name: 'app', localPath: '/p' }],
+      },
+    })
+    const id = post.json().draftId
+    await new Promise((r) => setTimeout(r, 10))
+    const r = await app.inject({
+      method: 'POST',
+      url: `/api/tests/draft/${id}/accept-plan`,
+      payload: { plan: editedPlan },
+    })
+    expect(r.statusCode).toBe(202)
+    await new Promise((r) => setTimeout(r, 10))
+    expect(specInput?.resumeSessionId).toBe('sess-plan-123')
+    expect(specInput?.plan).toEqual(editedPlan)
+    await app.close()
+  })
+
+  it('falls back to a fresh spec agent when the saved plan session belongs to another agent', async () => {
+    let specInput: Parameters<TestsDraftRouteDeps['spawnSpecAgent']>[0] | undefined
+    const deps = makeDeps({
+      pickAgent: () => ({ ok: true, agent: 'codex' }),
+      spawnPlanAgent: async () => `[[canary-lab:wizard-session agent=claude id=sess-plan-123]]
+<plan-output>[
+  {"step":"Original","actions":["go"],"expectedOutcome":"visible"}
+]</plan-output>`,
+      spawnSpecAgent: async (input) => {
+        specInput = input
+        return '<file path="feature.config.cjs">module.exports={};</file>'
+      },
+    })
+    const app = await makeApp(deps)
+    const post = await app.inject({
+      method: 'POST',
+      url: '/api/tests/draft',
+      payload: {
+        prdText: 'X',
+        repos: [{ name: 'app', localPath: '/p' }],
+      },
+    })
+    const id = post.json().draftId
+    await new Promise((r) => setTimeout(r, 10))
+    await app.inject({
+      method: 'POST',
+      url: `/api/tests/draft/${id}/accept-plan`,
+      payload: {},
+    })
+    await new Promise((r) => setTimeout(r, 10))
+    expect(specInput?.resumeSessionId).toBeUndefined()
     await app.close()
   })
 
@@ -484,13 +563,31 @@ describe('POST /api/tests/draft/:id/accept-spec', () => {
       spawnPlanAgent: async () => `<plan-output>[
         {"step":"Open","actions":["go"],"expectedOutcome":"visible"}
       ]</plan-output>`,
-      spawnSpecAgent: async () => `<file path="feature.config.cjs">
-module.exports = { name: 'login' };
+      spawnSpecAgent: async (input) => {
+        expect(input.featureName).toBe('login')
+        return `<file path="feature.config.cjs">
+const config = {
+  name: 'login',
+  description: 'Login flow',
+  envs: ['local'],
+  repos: [],
+  featureDir: __dirname,
+}
+module.exports = { config }
+</file>
+<file path="playwright.config.cjs">
+const path = require('node:path')
+const { config: loadDotenv } = require('dotenv')
+const { defineConfig } = require('@playwright/test')
+const { baseConfig } = require('canary-lab/feature-support/playwright-base')
+loadDotenv({ path: path.join(__dirname, '.env') })
+module.exports = defineConfig({ ...baseConfig })
 </file>
 <file path="e2e/login.spec.ts">
-import { test } from '@playwright/test';
+import { test } from 'canary-lab/feature-support/log-marker-fixture';
 test('x', async () => {});
-</file>`,
+</file>`
+      },
     })
     const app = await makeApp(deps)
     const post = await app.inject({
@@ -519,10 +616,88 @@ test('x', async () => {});
     expect(r.statusCode).toBe(200)
     const featureDir = path.join(projectRoot, 'features', 'login')
     expect(fs.readFileSync(path.join(featureDir, 'feature.config.cjs'), 'utf8')).toContain("name: 'login'")
+    expect(fs.readFileSync(path.join(featureDir, 'playwright.config.cjs'), 'utf8')).toContain('baseConfig')
     expect(fs.readFileSync(path.join(featureDir, 'e2e/login.spec.ts'), 'utf8')).toContain("test('x'")
     expect(fs.readFileSync(path.join(featureDir, '.canary-lab-draft-id'), 'utf8')).toBe(id)
     const rec = readDraft(logsDir, id)!
     expect(rec.status).toBe('accepted')
+    await app.close()
+  })
+
+  it('merges generated dev dependencies into root package.json on accept', async () => {
+    fs.writeFileSync(path.join(projectRoot, 'package.json'), JSON.stringify({
+      name: 'proj',
+      dependencies: { mysql2: '^3.0.0' },
+      devDependencies: { 'canary-lab': '^1.0.0' },
+    }, null, 2))
+    const deps = makeDeps({
+      spawnPlanAgent: async () => `<plan-output>[
+        {"step":"Open","actions":["go"],"expectedOutcome":"visible"}
+      ]</plan-output>`,
+      spawnSpecAgent: async () => `<file path="feature.config.cjs">module.exports = { config: { name: 'deps' } }</file>
+<file path="playwright.config.cjs">module.exports = {}</file>
+<file path="e2e/deps.spec.ts">import amqplib from 'amqplib'</file>
+<dev-dependencies>
+["amqplib","mysql2"]
+</dev-dependencies>`,
+    })
+    const app = await makeApp(deps)
+    const post = await app.inject({
+      method: 'POST',
+      url: '/api/tests/draft',
+      payload: {
+        prdText: 'Deps flow',
+        repos: [{ name: 'app', localPath: '/p' }],
+        skills: ['s1'],
+        featureName: 'deps',
+      },
+    })
+    const id = post.json().draftId
+    await new Promise((r) => setTimeout(r, 20))
+    await app.inject({ method: 'POST', url: `/api/tests/draft/${id}/accept-plan`, payload: {} })
+    await new Promise((r) => setTimeout(r, 20))
+
+    const ready = readDraft(logsDir, id)!
+    expect(ready.devDependencies).toEqual(['amqplib', 'mysql2'])
+    const r = await app.inject({ method: 'POST', url: `/api/tests/draft/${id}/accept-spec`, payload: {} })
+    expect(r.statusCode).toBe(200)
+    expect(r.json().devDependenciesAdded).toEqual(['amqplib'])
+    const pkg = JSON.parse(fs.readFileSync(path.join(projectRoot, 'package.json'), 'utf8'))
+    expect(pkg.dependencies).toEqual({ mysql2: '^3.0.0' })
+    expect(pkg.devDependencies).toEqual({ 'canary-lab': '^1.0.0', amqplib: 'latest' })
+    await app.close()
+  })
+
+  it('returns a clear error and writes no feature when package.json is malformed', async () => {
+    fs.writeFileSync(path.join(projectRoot, 'package.json'), 'not-json')
+    const deps = makeDeps({
+      spawnPlanAgent: async () => `<plan-output>[
+        {"step":"Open","actions":["go"],"expectedOutcome":"visible"}
+      ]</plan-output>`,
+      spawnSpecAgent: async () => `<file path="feature.config.cjs">x</file>
+<dev-dependencies>["mysql2"]</dev-dependencies>`,
+    })
+    const app = await makeApp(deps)
+    const post = await app.inject({
+      method: 'POST',
+      url: '/api/tests/draft',
+      payload: {
+        prdText: 'Bad package',
+        repos: [{ name: 'app', localPath: '/p' }],
+        skills: ['s1'],
+        featureName: 'badpkg',
+      },
+    })
+    const id = post.json().draftId
+    await new Promise((r) => setTimeout(r, 20))
+    await app.inject({ method: 'POST', url: `/api/tests/draft/${id}/accept-plan`, payload: {} })
+    await new Promise((r) => setTimeout(r, 20))
+
+    const r = await app.inject({ method: 'POST', url: `/api/tests/draft/${id}/accept-spec`, payload: {} })
+    expect(r.statusCode).toBe(400)
+    expect(r.json().error).toBe('package-json-invalid')
+    expect(fs.readFileSync(path.join(projectRoot, 'package.json'), 'utf8')).toBe('not-json')
+    expect(fs.existsSync(path.join(projectRoot, 'features', 'badpkg'))).toBe(false)
     await app.close()
   })
 

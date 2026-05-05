@@ -505,44 +505,40 @@ describe('enrichSummaryWithLogs', () => {
   })
 
   it('rewrites failed entries with logFiles', () => {
-    let createdLogs = false
-    if (!fs.existsSync(REAL_LOGS)) {
-      fs.mkdirSync(REAL_LOGS, { recursive: true })
-      createdLogs = true
-    }
-    const wroteSummary = !fs.existsSync(REAL_SUMMARY)
-    const wroteManifest = !fs.existsSync(REAL_MANIFEST)
-    const prevSummary = wroteSummary ? null : fs.readFileSync(REAL_SUMMARY, 'utf-8')
-    const prevManifest = wroteManifest ? null : fs.readFileSync(REAL_MANIFEST, 'utf-8')
-
-    const svcLog = path.join(REAL_LOGS, 'svc-test-x.log')
-    const wroteSvc = !fs.existsSync(svcLog)
+    const runId = `test-${Date.now()}`
+    const runDir = path.join(REAL_LOGS, 'runs', runId)
+    fs.mkdirSync(runDir, { recursive: true })
+    const summaryPath = path.join(runDir, 'e2e-summary.json')
+    const manifestPath = path.join(runDir, 'manifest.json')
+    const svcLog = path.join(runDir, 'svc-api.log')
     fs.writeFileSync(svcLog, '<a-test>BODY</a-test>')
-    fs.writeFileSync(REAL_SUMMARY, JSON.stringify({
+    fs.writeFileSync(summaryPath, JSON.stringify({
       failed: [{ name: 'a-test' }, 'b-test'],
     }))
-    fs.writeFileSync(REAL_MANIFEST, JSON.stringify({
-      serviceLogs: [svcLog],
-      featureName: 'x',
+    fs.writeFileSync(manifestPath, JSON.stringify({
+      services: [{ logPath: svcLog }],
+      feature: 'x',
     }))
 
     const prevEnv = process.env.CANARY_LAB_SUMMARY_PATH
-    process.env.CANARY_LAB_SUMMARY_PATH = REAL_SUMMARY
+    process.env.CANARY_LAB_SUMMARY_PATH = summaryPath
     try {
       const result = enrichSummaryWithLogs()
       expect(result).not.toBeNull()
       const failed = result!.summary.failed!
-      expect(failed[0].logFiles?.length).toBeGreaterThan(0)
+      expect(failed[0].logFiles).toEqual([
+        path.join('logs', 'runs', runId, 'failed', 'a-test', 'svc-api.log'),
+      ])
+      expect(fs.readFileSync(path.join(runDir, 'failed', 'a-test', 'svc-api.log'), 'utf-8')).toBe('BODY')
+
+      writeHealIndex(result ?? undefined)
+      expect(fs.readFileSync(path.join(runDir, 'heal-index.md'), 'utf-8')).toContain(
+        path.join('logs', 'runs', runId, 'failed', 'a-test', 'svc-api.log'),
+      )
     } finally {
       if (prevEnv === undefined) delete process.env.CANARY_LAB_SUMMARY_PATH
       else process.env.CANARY_LAB_SUMMARY_PATH = prevEnv
-      try { fs.rmSync(path.join(REAL_LOGS, 'failed'), { recursive: true, force: true }) } catch { /* ignore */ }
-      if (wroteSvc) { try { fs.unlinkSync(svcLog) } catch { /* ignore */ } }
-      if (wroteSummary) { try { fs.unlinkSync(REAL_SUMMARY) } catch { /* ignore */ } }
-      else if (prevSummary !== null) fs.writeFileSync(REAL_SUMMARY, prevSummary)
-      if (wroteManifest) { try { fs.unlinkSync(REAL_MANIFEST) } catch { /* ignore */ } }
-      else if (prevManifest !== null) fs.writeFileSync(REAL_MANIFEST, prevManifest)
-      if (createdLogs) { try { fs.rmdirSync(REAL_LOGS) } catch { /* ignore */ } }
+      try { fs.rmSync(runDir, { recursive: true, force: true }) } catch { /* ignore */ }
     }
   })
 })

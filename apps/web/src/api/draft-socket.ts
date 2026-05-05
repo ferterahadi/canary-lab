@@ -10,8 +10,11 @@ export interface DraftSocketMessage {
   error?: string
 }
 
+export type DraftAgentStage = 'planning' | 'generating'
+
 export interface ConnectDraftAgentOptions {
   draftId: string
+  stage?: DraftAgentStage
   onData: (chunk: string) => void
   onExit?: (code: number) => void
   onError?: (err: string) => void
@@ -36,7 +39,8 @@ export function connectDraftAgent(opts: ConnectDraftAgentOptions): DraftAgentCon
     throw new Error('WebSocket implementation not available')
   }
   const base = opts.wsBase ?? defaultWsBase()
-  const url = `${base}/ws/draft/${encodeURIComponent(opts.draftId)}/agent`
+  const stage = opts.stage ?? 'planning'
+  const url = `${base}/ws/draft/${encodeURIComponent(opts.draftId)}/agent?stage=${encodeURIComponent(stage)}`
   const maxReconnects = opts.maxReconnects ?? 1
 
   let closed = false

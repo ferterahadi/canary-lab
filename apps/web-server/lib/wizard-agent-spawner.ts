@@ -19,9 +19,11 @@ export const PROMPTS_DIR = path.resolve(__dirname, '..', 'prompts')
 
 export const STAGE1_TEMPLATE = path.join(PROMPTS_DIR, 'stage1-plan.md')
 export const STAGE2_TEMPLATE = path.join(PROMPTS_DIR, 'stage2-spec.md')
-export const REFINE_TEMPLATE = path.join(PROMPTS_DIR, 'stage3-refine.md')
 export const WIZARD_CLAUDE_FORMATTER_FILE = path.join(__dirname, 'runtime', 'wizard-claude-formatter.js')
 export const WIZARD_CODEX_FORMATTER_FILE = path.join(__dirname, 'runtime', 'wizard-codex-formatter.js')
+
+export type WizardAgentStage = 'planning' | 'generating'
+export type WizardAgentKind = 'claude' | 'codex'
 
 export function loadTemplate(file: string): string {
   return fs.readFileSync(file, 'utf8')
@@ -74,6 +76,7 @@ export function buildPlanPrompt(input: {
 }
 
 export function buildSpecPrompt(input: {
+  featureName: string
   plan: unknown
   skills: { id: string; content: string }[]
   repos: RepoSummary[]
@@ -81,31 +84,10 @@ export function buildSpecPrompt(input: {
 }): string {
   const template = input.template ?? loadTemplate(STAGE2_TEMPLATE)
   return substitute(template, {
+    featureName: input.featureName,
     plan: formatPlan(input.plan),
     skills: formatSkills(input.skills),
     repos: formatRepos(input.repos),
-  })
-}
-
-export function buildRefinePrompt(input: {
-  prdText: string
-  plan: unknown
-  repos: RepoSummary[]
-  filePath: string
-  fileContent: string
-  selectedText: string
-  suggestion: string
-  template?: string
-}): string {
-  const template = input.template ?? loadTemplate(REFINE_TEMPLATE)
-  return substitute(template, {
-    prdText: input.prdText,
-    plan: formatPlan(input.plan),
-    repos: formatRepos(input.repos),
-    filePath: input.filePath,
-    fileContent: input.fileContent,
-    selectedText: input.selectedText,
-    suggestion: input.suggestion,
   })
 }
 
@@ -154,7 +136,27 @@ export function createTeeSink(opts: {
 // pipes that JSON through a formatter so users see progress immediately while
 // the final assistant text remains parseable by the draft output parser.
 export function buildClaudeArgs(prompt: string): string[] {
-  return ['--dangerously-skip-permissions', '--output-format=stream-json', '--verbose', '-p', prompt]
+  return [
+    '--dangerously-skip-permissions',
+    '--output-format=stream-json',
+    '--include-partial-messages',
+    '--verbose',
+    '-p',
+    prompt,
+  ]
+}
+
+export function buildClaudeResumeArgs(prompt: string, sessionId: string): string[] {
+  return [
+    '--dangerously-skip-permissions',
+    '--output-format=stream-json',
+    '--include-partial-messages',
+    '--verbose',
+    '--resume',
+    sessionId,
+    '-p',
+    prompt,
+  ]
 }
 
 // Shell-escape a single argument for /bin/bash. The pty wrapper invokes
@@ -165,28 +167,38 @@ export function shellQuote(arg: string): string {
   return `'${arg.replace(/'/g, `'\\''`)}'`
 }
 
-export function buildClaudeCommand(prompt: string, claudeBin = 'claude'): string {
-  return `set -o pipefail; ${claudeBin} ${buildClaudeArgs(prompt).map(shellQuote).join(' ')} | node ${shellQuote(WIZARD_CLAUDE_FORMATTER_FILE)}`
+export function buildClaudeCommand(prompt: string, claudeBin = 'claude', resumeSessionId?: string): string {
+  const args = resumeSessionId
+    ? buildClaudeResumeArgs(prompt, resumeSessionId)
+    : buildClaudeArgs(prompt)
+  return `set -o pipefail; ${claudeBin} ${args.map(shellQuote).join(' ')} | node ${shellQuote(WIZARD_CLAUDE_FORMATTER_FILE)}`
 }
 
 export function buildCodexArgs(prompt: string): string[] {
   return ['exec', '--skip-git-repo-check', '--full-auto', '--json', prompt]
 }
 
-export function buildCodexCommand(prompt: string, codexBin = 'codex'): string {
-  return `set -o pipefail; ${codexBin} ${buildCodexArgs(prompt).map(shellQuote).join(' ')} | node ${shellQuote(WIZARD_CODEX_FORMATTER_FILE)}`
+export function buildCodexResumeArgs(prompt: string, sessionId: string): string[] {
+  return ['exec', 'resume', '--skip-git-repo-check', '--full-auto', '--json', sessionId, prompt]
+}
+
+export function buildCodexCommand(prompt: string, codexBin = 'codex', resumeSessionId?: string): string {
+  const args = resumeSessionId
+    ? buildCodexResumeArgs(prompt, resumeSessionId)
+    : buildCodexArgs(prompt)
+  return `set -o pipefail; ${codexBin} ${args.map(shellQuote).join(' ')} | node ${shellQuote(WIZARD_CODEX_FORMATTER_FILE)}`
 }
 
 export function buildWizardCommand(
-  agent: 'claude' | 'codex',
+  agent: WizardAgentKind,
   prompt: string,
-  bins: { claudeBin?: string; codexBin?: string } = {},
+  bins: { claudeBin?: string; codexBin?: string; resumeSessionId?: string } = {},
 ): string {
   return agent === 'claude'
-    ? buildClaudeCommand(prompt, bins.claudeBin)
-    : buildCodexCommand(prompt, bins.codexBin)
+    ? buildClaudeCommand(prompt, bins.claudeBin, bins.resumeSessionId)
+    : buildCodexCommand(prompt, bins.codexBin, bins.resumeSessionId)
 }
 
-export function paneIdForDraft(draftId: string): string {
-  return `draft:${draftId}`
+export function paneIdForDraft(draftId: string, stage: WizardAgentStage = 'planning'): string {
+  return `draft:${draftId}:${stage}`
 }

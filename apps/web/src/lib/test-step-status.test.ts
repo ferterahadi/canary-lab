@@ -5,6 +5,8 @@ import {
   summaryEntryName,
   statusForTest,
   colorClassForStatus,
+  statusLabel,
+  statusPillClassForStatus,
 } from './test-step-status'
 import { sourceLineForBodyLine } from './editor-location'
 import type { RunSummary } from '../api/types'
@@ -130,6 +132,38 @@ describe('colorClassForStatus', () => {
   })
 })
 
+describe('statusPillClassForStatus', () => {
+  it.each([
+    ['testing', 'sky'],
+    ['failed', 'rose'],
+    ['passed', 'emerald'],
+    ['timedout', 'amber'],
+    ['skipped', 'amber'],
+  ] as const)('uses the requested chip color for %s', (status, hue) => {
+    const className = statusPillClassForStatus(status)
+    expect(className).toContain(hue)
+    expect(className).toContain('border-')
+    expect(className).toContain('dark:')
+  })
+
+  it('keeps pending neutral and outlined', () => {
+    const className = statusPillClassForStatus('pending')
+    expect(className).toContain('zinc')
+    expect(className).toContain('bg-transparent')
+  })
+})
+
+describe('statusLabel', () => {
+  it('maps runtime names to user-facing chip labels', () => {
+    expect(statusLabel('testing')).toBe('running')
+    expect(statusLabel('passed')).toBe('succeed')
+    expect(statusLabel('failed')).toBe('failed')
+    expect(statusLabel('timedout')).toBe('timedout')
+    expect(statusLabel('pending')).toBe('pending')
+    expect(statusLabel('skipped')).toBe('skipped')
+  })
+})
+
 describe('activeBodyLineForTest', () => {
   const summary: RunSummary = {
     complete: false,
@@ -215,6 +249,32 @@ describe('activeBodyLineForTest', () => {
       testLine: 10,
       bodySource: '{\n  await page.goto(\"/\")\n}',
       summary,
+    })).toBeNull()
+  })
+
+  it('returns null when no test is running or the location has no line number', () => {
+    expect(activeBodyLineForTest({
+      testName: 'Creates a TODO',
+      testLine: 10,
+      bodySource: '{\n  await page.goto(\"/\")\n}',
+      summary: { complete: false, total: 0, passed: 0, failed: [] },
+    })).toBeNull()
+
+    expect(activeBodyLineForTest({
+      testName: 'Creates a TODO',
+      testLine: 10,
+      bodySource: '{\n  await page.goto(\"/\")\n}',
+      summary: {
+        complete: false,
+        total: 0,
+        passed: 0,
+        failed: [],
+        running: {
+          name: 'test-case-creates-a-todo',
+          location: '/todo.spec.ts',
+          step: { title: 'setup', category: 'fixture', location: '/todo.spec.ts' },
+        },
+      },
     })).toBeNull()
   })
 })

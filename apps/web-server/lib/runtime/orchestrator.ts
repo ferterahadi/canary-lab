@@ -567,6 +567,7 @@ export class RunOrchestrator extends EventEmitter {
       cwd: inv.cwd,
       env: {
         CANARY_LAB_PROJECT_ROOT: this.feature.featureDir,
+        CANARY_LAB_MANIFEST_PATH: this.paths.manifestPath,
         CANARY_LAB_SUMMARY_PATH: this.paths.summaryPath,
       },
     })

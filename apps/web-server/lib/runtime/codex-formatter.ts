@@ -170,8 +170,7 @@ function parseCommand(raw: string): ParsedCommand {
 }
 
 function toolLabel(tool: string, icon: string): string {
-  if (tool === 'Bash') return c('cyan', '$')
-  return `${icon} ${c('cyan', tool.padEnd(6))}`
+  return `${icon} ${c('cyan', tool)}`
 }
 
 function quote(text: string): string {
@@ -254,7 +253,7 @@ function handleCompleted(item: AnyObj): void {
       const path = relPath(String(ch.path ?? ''))
       const tool = kind === 'add' ? 'Write' : kind === 'delete' ? 'Delete' : 'Edit'
       process.stdout.write(
-        `${tag()} ✏️  ${c('cyan', tool.padEnd(6))} ${kindIcon(kind)} ${c('bold', path)}\n`,
+        `${tag()} ✏️ ${c('cyan', tool)} ${kindIcon(kind)} ${c('bold', path)}\n`,
       )
       process.stdout.write(`       ${c('gray', '↳')} ${c('green', '✓ applied')}\n`)
     }
@@ -319,6 +318,7 @@ function writeSessionSummary(): void {
   )
 }
 
+/* v8 ignore next -- CLI stdin wiring is exercised through the exported line handler. */
 if (require.main === module) {
   let buffer = ''
   process.stdin.setEncoding('utf-8')

@@ -13,22 +13,28 @@ interface Props {
 
 export function TestCasesColumn({ feature, activeRunSummary, activeRunStatus }: Props) {
   const [specs, setSpecs] = useState<FeatureSpecFile[] | null>(null)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [expandedTest, setExpandedTest] = useState<string | null>(null)
 
   useEffect(() => {
     if (!feature) {
       setSpecs(null)
+      setLoadError(null)
       return
     }
     let cancelled = false
     setSpecs(null)
+    setLoadError(null)
     setExpandedTest(null)
     api.getFeatureTests(feature)
       .then((data) => {
         if (cancelled) return
         setSpecs(data)
       })
-      .catch(() => { /* leave null */ })
+      .catch((err) => {
+        if (cancelled) return
+        setLoadError(formatLoadError(err))
+      })
     return () => { cancelled = true }
   }, [feature])
 
@@ -57,7 +63,11 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunStatus }: 
         />
       </div>
       <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin p-3">
-        {!specs ? (
+        {loadError ? (
+          <div className="rounded-md border px-3 py-2 text-xs" style={{ color: 'var(--text-secondary)', borderColor: 'var(--border-default)', background: 'var(--bg-muted)' }}>
+            {loadError}
+          </div>
+        ) : !specs ? (
           <div className="text-xs" style={{ color: 'var(--text-muted)' }}>Loading...</div>
         ) : specs.length === 0 ? (
           <div className="text-xs" style={{ color: 'var(--text-muted)' }}>No spec files found.</div>
@@ -97,6 +107,13 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunStatus }: 
       </div>
     </div>
   )
+}
+
+function formatLoadError(err: unknown): string {
+  if (err instanceof api.ApiError) {
+    return `Unable to load tests for this feature. Server returned HTTP ${err.status}.`
+  }
+  return 'Unable to load tests for this feature.'
 }
 
 function TestCard({

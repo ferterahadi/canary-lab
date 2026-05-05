@@ -83,10 +83,9 @@ describe('summarizeResult', () => {
 })
 
 describe('toolLabel', () => {
-  it('includes an icon and the padded tool name', () => {
-    const label = toolLabel('Read')
-    expect(label).toContain('📖')
-    expect(label).toMatch(/Read\s/)
+  it('includes one space between the icon and tool name', () => {
+    expect(toolLabel('Read')).toBe('📖 Read')
+    expect(toolLabel('Bash')).toBe('$ Bash')
   })
   it('uses bullet for unknown tools', () => {
     expect(toolLabel('Unknown')).toContain('•')

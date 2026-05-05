@@ -5,7 +5,7 @@ import {
 } from './paths'
 
 // Builds the state-aware addendum that gets appended to the static heal
-// prompt from CLAUDE.md / AGENTS.md. The static core describes the always-
+// prompt from apps/web-server/prompts/heal-agent.md. The static core describes the always-
 // true workflow (read heal-index, fix service code, write signal); the
 // addendum injects what changes per cycle:
 //
@@ -21,11 +21,13 @@ import {
 export interface HealAddendumInput {
   cycle: number // 1-based: the cycle about to run
   maxCycles?: number
+  summaryPath?: string
+  journalPath?: string
 }
 
-function readFailingSlugs(): string[] {
+function readFailingSlugs(summaryPath: string = getSummaryPath()): string[] {
   try {
-    const raw = fs.readFileSync(getSummaryPath(), 'utf-8')
+    const raw = fs.readFileSync(summaryPath, 'utf-8')
     const summary = JSON.parse(raw) as { failed?: Array<{ name?: unknown }> }
     const failed = Array.isArray(summary.failed) ? summary.failed : []
     return failed
@@ -37,8 +39,8 @@ function readFailingSlugs(): string[] {
 }
 
 export function buildHealAddendum(input: HealAddendumInput): string {
-  const slugs = readFailingSlugs()
-  const journalExists = fs.existsSync(DIAGNOSIS_JOURNAL_PATH)
+  const slugs = readFailingSlugs(input.summaryPath)
+  const journalExists = fs.existsSync(input.journalPath ?? DIAGNOSIS_JOURNAL_PATH)
 
   const parts: string[] = []
 

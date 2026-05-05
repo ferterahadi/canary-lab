@@ -19,7 +19,6 @@ import { loadFeatures } from './lib/feature-loader'
 import { loadSkills, type SkillRecord } from './lib/skill-loader'
 import {
   spawnPlanAgent as makePlanAgentSpawner,
-  spawnRefineAgent as makeRefineAgentSpawner,
   spawnSpecAgent as makeSpecAgentSpawner,
 } from './lib/wizard-agent-runner'
 import { WizardAgentRegistry } from './lib/wizard-agent-registry'
@@ -170,10 +169,6 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
     spawnSpecAgent: async (input) => {
       const broker = ensureDraftBroker(input.draftId)
       return makeSpecAgentSpawner({ ptyFactory, broker, registry: wizardAgents })(input)
-    },
-    spawnRefineAgent: async (input) => {
-      const broker = ensureDraftBroker(input.draftId)
-      return makeRefineAgentSpawner({ ptyFactory, broker, registry: wizardAgents })(input)
     },
     cancelGeneration: (draftId: string) => wizardAgents.cancel(draftId),
     loadSkillContent: (id: string) => {

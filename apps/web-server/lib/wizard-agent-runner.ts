@@ -1,6 +1,5 @@
 import type {
   PlanAgentInput,
-  RefineAgentInput,
   SpecAgentInput,
 } from '../routes/tests-draft'
 import type { PaneBroker } from './pane-broker'
@@ -10,7 +9,6 @@ import {
   type WizardAgentRegistry,
 } from './wizard-agent-registry'
 import {
-  buildRefinePrompt,
   buildWizardCommand,
   buildPlanPrompt,
   buildSpecPrompt,
@@ -38,7 +36,6 @@ export interface SpawnAgentDeps {
   // Override prompt template paths (tests).
   planTemplate?: string
   specTemplate?: string
-  refineTemplate?: string
 }
 
 function runAgent(opts: {
@@ -51,7 +48,10 @@ function runAgent(opts: {
   paneId: string
   registry?: WizardAgentRegistry | null
   label: string
+  hideRestoreNotice?: boolean
+  heartbeatMs?: number
 }): Promise<string> {
+  opts.broker?.resetPane(opts.paneId)
   const sink = createTeeSink({
     logPath: opts.agentLogPath,
     broker: opts.broker,
@@ -59,10 +59,26 @@ function runAgent(opts: {
   })
   sink.push(`[wizard] ${opts.label}\n`)
   return new Promise<string>((resolve, reject) => {
+    let settled = false
+    let seenAgentData = false
+    let heartbeat: NodeJS.Timeout | undefined
+    const clearHeartbeat = (): void => {
+      if (heartbeat) clearTimeout(heartbeat)
+      heartbeat = undefined
+    }
+    if (opts.heartbeatMs && opts.heartbeatMs > 0) {
+      heartbeat = setTimeout(() => {
+        if (!settled && !seenAgentData) {
+          sink.push('[wizard] waiting for agent output...\n')
+        }
+      }, opts.heartbeatMs)
+    }
     let pty
     try {
       pty = opts.ptyFactory({ command: opts.command, cwd: opts.cwd })
     } catch (e) {
+      settled = true
+      clearHeartbeat()
       reject(new Error(`pty spawn failed: ${(e as Error).message}`))
       return
     }
@@ -73,8 +89,17 @@ function runAgent(opts: {
       broker: opts.broker,
       paneId: opts.paneId,
     })
-    pty.onData((chunk) => sink.push(chunk))
+    pty.onData((chunk) => {
+      const next = opts.hideRestoreNotice ? stripRestoreNotice(chunk) : chunk
+      if (next) {
+        seenAgentData = true
+        clearHeartbeat()
+        sink.push(next)
+      }
+    })
     pty.onExit(({ exitCode }) => {
+      settled = true
+      clearHeartbeat()
       const cancelled = lease?.isCancelled() ?? false
       lease?.clear()
       if (cancelled) {
@@ -114,9 +139,11 @@ export function spawnPlanAgent(
       agentLogPath: input.agentLogPath,
       ptyFactory: deps.ptyFactory,
       broker: deps.broker ?? null,
-      paneId: paneIdForDraft(input.draftId),
+      paneId: paneIdForDraft(input.draftId, 'planning'),
       registry: deps.registry ?? null,
       label: `${input.agent} plan agent started`,
+      hideRestoreNotice: true,
+      heartbeatMs: 5000,
     })
   }
 }
@@ -126,6 +153,7 @@ export function spawnSpecAgent(
 ): (input: SpecAgentInput) => Promise<string> {
   return async (input) => {
     const prompt = buildSpecPrompt({
+      featureName: input.featureName,
       plan: input.plan,
       skills: input.skills,
       repos: input.repos,
@@ -134,6 +162,7 @@ export function spawnSpecAgent(
     const command = buildWizardCommand(input.agent, prompt, {
       claudeBin: deps.claudeBin,
       codexBin: deps.codexBin,
+      resumeSessionId: input.resumeSessionId,
     })
     return runAgent({
       draftId: input.draftId,
@@ -142,41 +171,15 @@ export function spawnSpecAgent(
       agentLogPath: input.agentLogPath,
       ptyFactory: deps.ptyFactory,
       broker: deps.broker ?? null,
-      paneId: paneIdForDraft(input.draftId),
+      paneId: paneIdForDraft(input.draftId, 'generating'),
       registry: deps.registry ?? null,
       label: `${input.agent} spec agent started`,
+      hideRestoreNotice: true,
+      heartbeatMs: 5000,
     })
   }
 }
 
-export function spawnRefineAgent(
-  deps: SpawnAgentDeps,
-): (input: RefineAgentInput) => Promise<string> {
-  return async (input) => {
-    const prompt = buildRefinePrompt({
-      prdText: input.prdText,
-      plan: input.plan,
-      repos: input.repos,
-      filePath: input.filePath,
-      fileContent: input.fileContent,
-      selectedText: input.selectedText,
-      suggestion: input.suggestion,
-      template: deps.refineTemplate ? loadTemplate(deps.refineTemplate) : undefined,
-    })
-    const command = buildWizardCommand(input.agent, prompt, {
-      claudeBin: deps.claudeBin,
-      codexBin: deps.codexBin,
-    })
-    return runAgent({
-      draftId: input.draftId,
-      command,
-      cwd: deps.cwd ?? input.draftDir,
-      agentLogPath: input.agentLogPath,
-      ptyFactory: deps.ptyFactory,
-      broker: deps.broker ?? null,
-      paneId: paneIdForDraft(input.draftId),
-      registry: deps.registry ?? null,
-      label: `${input.agent} refinement agent started`,
-    })
-  }
+function stripRestoreNotice(chunk: string): string {
+  return chunk.replace(/^Restored session:.*(?:\r?\n)?/gm, '')
 }
