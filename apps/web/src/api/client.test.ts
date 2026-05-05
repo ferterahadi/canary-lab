@@ -9,6 +9,7 @@ import {
   checkPathExists,
   cloneRepository,
   createDraft,
+  cancelDraftGeneration,
   deleteDraft,
   deleteEnvsetSlot,
   deleteJournalEntry,
@@ -225,6 +226,13 @@ describe('api client', () => {
     const call = (fetchImpl.mock.calls[0] as [string, RequestInit])
     expect(call[0]).toBe('/api/tests/draft')
     expect(call[1].method).toBe('POST')
+  })
+
+  it('cancelDraftGeneration POSTs to cancel endpoint', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(ok({ draftId: 'd', status: 'cancelled' }))
+    const out = await cancelDraftGeneration('d', { fetchImpl })
+    expect(out.status).toBe('cancelled')
+    expect(fetchImpl).toHaveBeenCalledWith('/api/tests/draft/d/cancel-generation', { method: 'POST' })
   })
 
   it('getDraft URL-encodes the id', async () => {

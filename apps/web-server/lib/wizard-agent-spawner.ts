@@ -19,6 +19,7 @@ export const PROMPTS_DIR = path.resolve(__dirname, '..', 'prompts')
 
 export const STAGE1_TEMPLATE = path.join(PROMPTS_DIR, 'stage1-plan.md')
 export const STAGE2_TEMPLATE = path.join(PROMPTS_DIR, 'stage2-spec.md')
+export const REFINE_TEMPLATE = path.join(PROMPTS_DIR, 'stage3-refine.md')
 
 export function loadTemplate(file: string): string {
   return fs.readFileSync(file, 'utf8')
@@ -84,6 +85,28 @@ export function buildSpecPrompt(input: {
   })
 }
 
+export function buildRefinePrompt(input: {
+  prdText: string
+  plan: unknown
+  repos: RepoSummary[]
+  filePath: string
+  fileContent: string
+  selectedText: string
+  suggestion: string
+  template?: string
+}): string {
+  const template = input.template ?? loadTemplate(REFINE_TEMPLATE)
+  return substitute(template, {
+    prdText: input.prdText,
+    plan: formatPlan(input.plan),
+    repos: formatRepos(input.repos),
+    filePath: input.filePath,
+    fileContent: input.fileContent,
+    selectedText: input.selectedText,
+    suggestion: input.suggestion,
+  })
+}
+
 // Tee reducer: every chunk produced by the pty is appended to `logPath` and
 // optionally pushed to a PaneBroker keyed by `paneId`. Returned object exposes
 // the accumulated stream so the route layer can parse it once the agent exits.
@@ -143,6 +166,24 @@ export function shellQuote(arg: string): string {
 
 export function buildClaudeCommand(prompt: string, claudeBin = 'claude'): string {
   return `${claudeBin} ${buildClaudeArgs(prompt).map(shellQuote).join(' ')}`
+}
+
+export function buildCodexArgs(prompt: string): string[] {
+  return ['exec', '--skip-git-repo-check', '--full-auto', prompt]
+}
+
+export function buildCodexCommand(prompt: string, codexBin = 'codex'): string {
+  return `${codexBin} ${buildCodexArgs(prompt).map(shellQuote).join(' ')}`
+}
+
+export function buildWizardCommand(
+  agent: 'claude' | 'codex',
+  prompt: string,
+  bins: { claudeBin?: string; codexBin?: string } = {},
+): string {
+  return agent === 'claude'
+    ? buildClaudeCommand(prompt, bins.claudeBin)
+    : buildCodexCommand(prompt, bins.codexBin)
 }
 
 export function paneIdForDraft(draftId: string): string {

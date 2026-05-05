@@ -10,6 +10,7 @@ export type ParseResult<T> =
   | { ok: false; error: string }
 
 export interface PlanStep {
+  coverageType?: string
   step: string
   actions: string[]
   expectedOutcome: string
@@ -37,14 +38,18 @@ export function extractPlan(stream: string): ParseResult<PlanStep[]> {
     const item = parsed[i] as Record<string, unknown> | null
     if (!item || typeof item !== 'object') return { ok: false, error: `plan[${i}] is not an object` }
     const step = item.step
+    const coverageType = item.coverageType
     const actions = item.actions
     const expectedOutcome = item.expectedOutcome
+    if (coverageType !== undefined && typeof coverageType !== 'string') {
+      return { ok: false, error: `plan[${i}].coverageType must be a string` }
+    }
     if (typeof step !== 'string' || !step.trim()) return { ok: false, error: `plan[${i}].step missing` }
     if (!Array.isArray(actions) || !actions.every((a) => typeof a === 'string')) {
       return { ok: false, error: `plan[${i}].actions must be string[]` }
     }
     if (typeof expectedOutcome !== 'string') return { ok: false, error: `plan[${i}].expectedOutcome missing` }
-    out.push({ step, actions: actions as string[], expectedOutcome })
+    out.push({ coverageType, step, actions: actions as string[], expectedOutcome })
   }
   return { ok: true, value: out }
 }

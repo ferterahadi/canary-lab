@@ -22,7 +22,7 @@ export async function runUi(argv: string[], opts: UiCommandOptions = {}): Promis
   const port = portFromArgs ?? opts.port ?? 7421
   const noOpen = argv.includes('--no-open')
   const projectRoot = opts.projectRoot ?? getProjectRoot()
-  const { app, runStore, revertAllEnvsets } = await createServer({ projectRoot })
+  const { app, runStore, revertAllEnvsets, cancelAllWizardAgents } = await createServer({ projectRoot })
 
   // Stop active runs and revert any in-flight envset swaps if the user kills
   // the UI server before their runs finish. `orch.stop()` owns the process
@@ -31,6 +31,7 @@ export async function runUi(argv: string[], opts: UiCommandOptions = {}): Promis
   const cleanup = async (): Promise<void> => {
     if (cleanedUp) return
     cleanedUp = true
+    cancelAllWizardAgents()
     await runStore.abortAllActiveOrStale()
     revertAllEnvsets()
   }

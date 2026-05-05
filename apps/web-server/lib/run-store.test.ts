@@ -69,6 +69,15 @@ describe('listRuns', () => {
     expect(ids.sort()).toEqual(['a', 'b'])
   })
 
+  it('keeps already-newer entries before older entries', () => {
+    writeRunsIndex(tmpDir, [
+      { runId: 'newer', feature: 'foo', startedAt: '2026-02-01T00:00:00Z', status: 'passed' },
+      { runId: 'older', feature: 'foo', startedAt: '2026-01-01T00:00:00Z', status: 'failed' },
+    ])
+    expect(listRuns(tmpDir).map((e) => e.runId)).toEqual(['newer', 'older'])
+  })
+
+
   it('does not mutate manifests for stale running entries (cleanup is reapStaleRuns'
     + "'s job)", () => {
     const dir = runDirFor(tmpDir, 'stale-untouched')
@@ -453,6 +462,41 @@ describe('RunStore', () => {
     expect(events).toEqual([{ kind: 'bootstrap', runId: 'rb1' }])
   })
 
+  it('onEvent and offEvent subscribe and unsubscribe typed event listeners', () => {
+    const store = new RunStore(tmpDir, createRegistry())
+    const events: RunStoreEvent[] = []
+    const listener = (event: RunStoreEvent) => events.push(event)
+
+    expect(store.onEvent(listener)).toBe(store)
+    store.bootstrap({
+      runId: 'r-on-off-1',
+      feature: 'foo',
+      startedAt: '2026-01-01T00:00:00Z',
+      status: 'running',
+      healCycles: 0,
+      services: [],
+    })
+    expect(events).toEqual([{ kind: 'bootstrap', runId: 'r-on-off-1' }])
+
+    expect(store.offEvent(listener)).toBe(store)
+    store.setStatus('r-on-off-1', 'passed')
+    expect(events).toEqual([{ kind: 'bootstrap', runId: 'r-on-off-1' }])
+  })
+
+  it('patchManifest applies partial manifest updates and emits changed', () => {
+    seedRun('r-patch-1', { status: 'running' })
+    const store = new RunStore(tmpDir, createRegistry())
+    const events: RunStoreEvent[] = []
+    store.onEvent((event) => events.push(event))
+
+    store.patchManifest('r-patch-1', { status: 'healing', healCycles: 3 })
+
+    const manifest = readManifest(store.manifestPath('r-patch-1'))!
+    expect(manifest.status).toBe('healing')
+    expect(manifest.healCycles).toBe(3)
+    expect(events).toEqual([{ kind: 'changed', runId: 'r-patch-1' }])
+  })
+
   it('setStatus mirrors status into both manifest and index, and emits changed', () => {
     seedRun('r1', { status: 'running' })
     const store = new RunStore(tmpDir, createRegistry())
@@ -615,6 +659,16 @@ describe('RunStore', () => {
     expect(readManifest(store.manifestPath('done'))?.status).toBe('passed')
   })
 
+  it('abortAllActiveOrStale skips indexed active rows that no longer have detail', async () => {
+    writeRunsIndex(tmpDir, [
+      { runId: 'missing-detail', feature: 'foo', startedAt: '2026-01-01T00:00:00Z', status: 'running' },
+    ])
+    const store = new RunStore(tmpDir, createRegistry())
+
+    expect(await store.abortAllActiveOrStale()).toEqual({ aborted: [] })
+    expect(readRunsIndex(tmpDir)[0].status).toBe('running')
+  })
+
   it('delete refuses active runs (registered) and stale-active manifests', () => {
     const reg = createRegistry()
     reg.set('active', {
@@ -635,6 +689,26 @@ describe('RunStore', () => {
     expect(store.delete('done')).toEqual({ ok: true })
     expect(fs.existsSync(runDirFor(tmpDir, 'done'))).toBe(false)
     expect(events).toEqual([{ kind: 'removed', runId: 'done' }])
+  })
+
+  it('removeFromHistory returns false without emitting when no run is removed', () => {
+    const store = new RunStore(tmpDir, createRegistry())
+    const events: RunStoreEvent[] = []
+    store.onEvent((event) => events.push(event))
+
+    expect(store.removeFromHistory('missing')).toBe(false)
+    expect(events).toEqual([])
+  })
+
+  it('removeFromHistory emits removed when a run is removed', () => {
+    seedRun('remove-direct', { status: 'failed' })
+    const store = new RunStore(tmpDir, createRegistry())
+    const events: RunStoreEvent[] = []
+    store.onEvent((event) => events.push(event))
+
+    expect(store.removeFromHistory('remove-direct')).toBe(true)
+    expect(fs.existsSync(runDirFor(tmpDir, 'remove-direct'))).toBe(false)
+    expect(events).toEqual([{ kind: 'removed', runId: 'remove-direct' }])
   })
 
   it('reapStale flips stale entries to aborted and emits index-changed exactly once', async () => {

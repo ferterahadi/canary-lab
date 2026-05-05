@@ -134,11 +134,14 @@ export type DraftStatus =
   | 'plan-ready'
   | 'generating'
   | 'spec-ready'
+  | 'refining'
   | 'accepted'
   | 'rejected'
+  | 'cancelled'
   | 'error'
 
 export interface PlanStep {
+  coverageType?: string
   step: string
   actions: string[]
   expectedOutcome: string
@@ -152,9 +155,12 @@ export interface DraftRepo {
 export interface DraftRecord {
   draftId: string
   prdText: string
+  prdDocuments: DraftPrdDocument[]
   repos: DraftRepo[]
   skills: string[]
   featureName?: string
+  wizardAgent?: 'claude' | 'codex'
+  activeAgentStage?: 'planning' | 'generating' | 'refining'
   status: DraftStatus
   createdAt: string
   updatedAt: string
@@ -163,10 +169,18 @@ export interface DraftRecord {
   errorMessage?: string
   planAgentLogTail?: string
   specAgentLogTail?: string
+  refineAgentLogTail?: string
+}
+
+export interface DraftPrdDocument {
+  filename: string
+  contentType: string
+  characters: number
 }
 
 export interface CreateDraftPayload {
   prdText: string
+  prdDocuments?: DraftPrdDocument[]
   repos: DraftRepo[]
   skills?: string[]
   featureName?: string

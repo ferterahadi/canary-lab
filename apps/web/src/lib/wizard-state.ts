@@ -12,8 +12,10 @@ export type DraftStatus =
   | 'plan-ready'
   | 'generating'
   | 'spec-ready'
+  | 'refining'
   | 'accepted'
   | 'rejected'
+  | 'cancelled'
   | 'error'
 
 export type WizardStep = 'configure' | 'plan' | 'spec' | 'done'
@@ -31,9 +33,11 @@ export function nextStepForStatus(status: DraftStatus): WizardStep {
       return 'plan'
     case 'generating':
     case 'spec-ready':
+    case 'refining':
       return 'spec'
     case 'accepted':
       return 'done'
+    case 'cancelled':
     case 'rejected':
     case 'error':
       // Stay on whatever step we were on; caller decides whether to bail.
@@ -45,10 +49,10 @@ export function nextStepForStatus(status: DraftStatus): WizardStep {
 // polling should stop. `error` is included so the UI surfaces the message
 // instead of spinning forever.
 const TERMINAL_BY_STEP: Record<WizardStep, DraftStatus[]> = {
-  configure: ['created', 'plan-ready', 'spec-ready', 'accepted', 'rejected', 'error'],
-  plan: ['plan-ready', 'spec-ready', 'accepted', 'rejected', 'error'],
-  spec: ['spec-ready', 'accepted', 'rejected', 'error'],
-  done: ['accepted', 'rejected', 'error'],
+  configure: ['created', 'plan-ready', 'spec-ready', 'accepted', 'rejected', 'cancelled', 'error'],
+  plan: ['plan-ready', 'spec-ready', 'accepted', 'rejected', 'cancelled', 'error'],
+  spec: ['spec-ready', 'accepted', 'rejected', 'cancelled', 'error'],
+  done: ['accepted', 'rejected', 'cancelled', 'error'],
 }
 
 export function terminalForStep(step: WizardStep, status: DraftStatus): boolean {
@@ -59,7 +63,7 @@ export function terminalForStep(step: WizardStep, status: DraftStatus): boolean 
 // poll while this is true, stop when it flips false.
 export function isPollingForStep(step: WizardStep, status: DraftStatus): boolean {
   if (step === 'plan') return status === 'planning'
-  if (step === 'spec') return status === 'generating'
+  if (step === 'spec') return status === 'generating' || status === 'refining'
   if (step === 'configure') return status === 'recommending'
   return false
 }
@@ -72,5 +76,5 @@ export function canAdvance(status: DraftStatus, currentStep: WizardStep): boolea
 }
 
 export function isTerminalDraft(status: DraftStatus): boolean {
-  return status === 'accepted' || status === 'rejected' || status === 'error'
+  return status === 'accepted' || status === 'rejected' || status === 'cancelled' || status === 'error'
 }

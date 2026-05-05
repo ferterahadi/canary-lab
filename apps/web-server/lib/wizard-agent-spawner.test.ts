@@ -6,10 +6,15 @@ import { PaneBroker } from './pane-broker'
 import {
   STAGE1_TEMPLATE,
   STAGE2_TEMPLATE,
+  REFINE_TEMPLATE,
   buildClaudeArgs,
   buildClaudeCommand,
+  buildCodexArgs,
+  buildCodexCommand,
   buildPlanPrompt,
+  buildRefinePrompt,
   buildSpecPrompt,
+  buildWizardCommand,
   createTeeSink,
   paneIdForDraft,
   formatPlan,
@@ -111,6 +116,34 @@ describe('loadTemplate', () => {
     expect(t).toContain('test.step')
     expect(t).toContain('<file path=')
   })
+
+  it('reads refine prompt template', () => {
+    const t = loadTemplate(REFINE_TEMPLATE)
+    expect(t).toContain('{{selectedText}}')
+    expect(t).toContain('{{suggestion}}')
+    expect(t).toContain('<file path=')
+  })
+})
+
+describe('buildRefinePrompt', () => {
+  it('substitutes file context and suggestion', () => {
+    const out = buildRefinePrompt({
+      prdText: 'PRD',
+      plan: [{ step: 'open' }],
+      repos: [{ name: 'app', localPath: '/p' }],
+      filePath: 'e2e/a.spec.ts',
+      fileContent: 'test code',
+      selectedText: 'selected code',
+      suggestion: 'make it stronger',
+      template: 'P={{prdText}}|PLAN={{plan}}|R={{repos}}|F={{filePath}}|C={{fileContent}}|S={{selectedText}}|G={{suggestion}}',
+    })
+    expect(out).toContain('PRD')
+    expect(out).toContain('"step": "open"')
+    expect(out).toContain('- app (/p)')
+    expect(out).toContain('e2e/a.spec.ts')
+    expect(out).toContain('selected code')
+    expect(out).toContain('make it stronger')
+  })
 })
 
 describe('buildPlanPrompt', () => {
@@ -184,6 +217,24 @@ describe('shellQuote / buildClaudeArgs / buildClaudeCommand', () => {
   it('honors a custom claude binary path', () => {
     const cmd = buildClaudeCommand('hi', '/opt/bin/claude')
     expect(cmd.startsWith('/opt/bin/claude ')).toBe(true)
+  })
+})
+
+describe('buildCodexArgs / buildCodexCommand / buildWizardCommand', () => {
+  it('builds codex exec args', () => {
+    expect(buildCodexArgs('hi')).toEqual(['exec', '--skip-git-repo-check', '--full-auto', 'hi'])
+  })
+
+  it('builds a bash-safe codex command line', () => {
+    const cmd = buildCodexCommand(`hello it's me`)
+    expect(cmd.startsWith('codex ')).toBe(true)
+    expect(cmd).toContain(`'exec'`)
+    expect(cmd).toContain(`'\\''`)
+  })
+
+  it('dispatches by agent', () => {
+    expect(buildWizardCommand('claude', 'hi')).toMatch(/^claude /)
+    expect(buildWizardCommand('codex', 'hi')).toMatch(/^codex /)
   })
 })
 

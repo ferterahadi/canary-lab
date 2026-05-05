@@ -18,19 +18,23 @@ export type DraftStatus =
   | 'plan-ready'
   | 'generating'
   | 'spec-ready'
+  | 'refining'
   | 'accepted'
   | 'rejected'
+  | 'cancelled'
   | 'error'
 
 const ALLOWED_TRANSITIONS: Record<DraftStatus, DraftStatus[]> = {
-  created: ['recommending', 'planning', 'rejected', 'error'],
-  recommending: ['planning', 'rejected', 'error'],
-  planning: ['plan-ready', 'rejected', 'error'],
+  created: ['recommending', 'planning', 'rejected', 'cancelled', 'error'],
+  recommending: ['planning', 'rejected', 'cancelled', 'error'],
+  planning: ['plan-ready', 'rejected', 'cancelled', 'error'],
   'plan-ready': ['generating', 'rejected', 'error'],
-  generating: ['spec-ready', 'rejected', 'error'],
-  'spec-ready': ['accepted', 'rejected', 'error'],
+  generating: ['spec-ready', 'rejected', 'cancelled', 'error'],
+  'spec-ready': ['refining', 'accepted', 'rejected', 'error'],
+  refining: ['spec-ready', 'rejected', 'cancelled', 'error'],
   accepted: [],
   rejected: [],
+  cancelled: ['rejected'],
   error: ['rejected'],
 }
 
@@ -39,12 +43,21 @@ export interface DraftRepo {
   localPath: string
 }
 
+export interface DraftPrdDocument {
+  filename: string
+  contentType: string
+  characters: number
+}
+
 export interface DraftRecord {
   draftId: string
   prdText: string
+  prdDocuments: DraftPrdDocument[]
   repos: DraftRepo[]
   skills: string[]
   featureName?: string
+  wizardAgent?: 'claude' | 'codex'
+  activeAgentStage?: 'planning' | 'generating' | 'refining'
   status: DraftStatus
   createdAt: string
   updatedAt: string
@@ -60,6 +73,7 @@ export interface DraftPaths {
   planJson: string
   planAgentLog: string
   specAgentLog: string
+  refineAgentLog: string
   generatedDir: string
 }
 
@@ -72,6 +86,7 @@ export function paths(logsDir: string, draftId: string): DraftPaths {
     planJson: path.join(draftDir, 'plan.json'),
     planAgentLog: path.join(draftDir, 'plan-agent.log'),
     specAgentLog: path.join(draftDir, 'spec-agent.log'),
+    refineAgentLog: path.join(draftDir, 'refine-agent.log'),
     generatedDir: path.join(draftDir, 'generated'),
   }
 }
@@ -79,6 +94,7 @@ export function paths(logsDir: string, draftId: string): DraftPaths {
 export interface CreateDraftInput {
   draftId: string
   prdText: string
+  prdDocuments?: DraftPrdDocument[]
   repos: DraftRepo[]
   skills?: string[]
   featureName?: string
@@ -93,6 +109,7 @@ export function createDraft(logsDir: string, input: CreateDraftInput): DraftReco
   const record: DraftRecord = {
     draftId: input.draftId,
     prdText: input.prdText,
+    prdDocuments: input.prdDocuments ?? [],
     repos: input.repos,
     skills: input.skills ?? [],
     featureName: input.featureName,
@@ -148,6 +165,8 @@ export interface TransitionPatch {
   plan?: unknown
   generatedFiles?: string[]
   featureName?: string
+  wizardAgent?: 'claude' | 'codex'
+  activeAgentStage?: 'planning' | 'generating' | 'refining'
   errorMessage?: string
 }
 

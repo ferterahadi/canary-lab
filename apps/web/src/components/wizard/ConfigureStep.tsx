@@ -1,15 +1,17 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import * as api from '../../api/client'
 import type {
+  DraftPrdDocument,
   DraftRepo,
   Feature,
-  SkillRecommendation,
-  SkillSummary,
 } from '../../api/types'
 import { slugifyFeatureName, validateConfigure } from '../../lib/wizard-validation'
+import { FolderPicker } from '../config/FolderPicker'
 
 export interface ConfigureSubmit {
   prdText: string
+  agentPrdText?: string
+  prdDocuments?: DraftPrdDocument[]
   repos: DraftRepo[]
   skills: string[]
   featureName?: string
@@ -18,15 +20,14 @@ export interface ConfigureSubmit {
 interface Props {
   features: Feature[]
   initial?: Partial<ConfigureSubmit>
-  onSubmit: (payload: ConfigureSubmit) => void
+  onSubmit: (payload: ConfigureSubmit) => void | Promise<void>
   onCancel: () => void
   submitting: boolean
   errorMessage?: string | null
 }
 
-// Step 1: gather PRD, repos, skills, optional feature name. The recommender
-// fires once the PRD crosses the 30-char threshold; the user can switch to
-// manual mode and pick from the full skill list.
+// Step 1: gather optional PRD context, repos, and optional feature name.
+// The generation harness is built in; users do not need to choose prompt skills.
 export function ConfigureStep({
   features,
   initial,
@@ -36,17 +37,17 @@ export function ConfigureStep({
   errorMessage,
 }: Props) {
   const [prdText, setPrdText] = useState(initial?.prdText ?? '')
+  const [prdDocuments, setPrdDocuments] = useState<DraftPrdDocument[]>(initial?.prdDocuments ?? [])
+  const [prdFiles, setPrdFiles] = useState<File[]>([])
+  const [extracting, setExtracting] = useState(false)
+  const [extractError, setExtractError] = useState<string | null>(null)
   const [repoKeys, setRepoKeys] = useState<Set<string>>(
     () => new Set((initial?.repos ?? []).map((r) => repoKey(r))),
   )
+  const [repoPathDraft, setRepoPathDraft] = useState('')
+  const [repoAddError, setRepoAddError] = useState<string | null>(null)
+  const [repoAdding, setRepoAdding] = useState(false)
   const [featureName, setFeatureName] = useState(initial?.featureName ?? '')
-  const [skillMode, setSkillMode] = useState<'auto' | 'manual'>('auto')
-  const [allSkills, setAllSkills] = useState<SkillSummary[]>([])
-  const [recommendations, setRecommendations] = useState<SkillRecommendation[]>([])
-  const [recLoading, setRecLoading] = useState(false)
-  const [selectedSkills, setSelectedSkills] = useState<Set<string>>(
-    () => new Set(initial?.skills ?? []),
-  )
 
   // Flatten all repos across features into the multiselect list, deduped by
   // (name, localPath).
@@ -61,15 +62,6 @@ export function ConfigureStep({
     return [...seen.values()]
   }, [features])
 
-  // Load full skill catalog once.
-  useEffect(() => {
-    let cancelled = false
-    api.listSkills().then((s) => {
-      if (!cancelled) setAllSkills(s)
-    }).catch(() => {/* swallow — manual mode shows empty list */})
-    return () => { cancelled = true }
-  }, [])
-
   const repoList = [...repoKeys]
     .map((k) => parseRepoKey(k))
     .filter((r): r is DraftRepo => r !== null)
@@ -77,40 +69,8 @@ export function ConfigureStep({
   const validation = validateConfigure({
     prdText,
     repos: repoList,
-    skills: [...selectedSkills],
     featureName: featureName || undefined,
   })
-
-  // Auto-fire recommender when PRD is long enough, debounced.
-  useEffect(() => {
-    if (skillMode !== 'auto') return
-    if (!validation.recommenderReady) {
-      setRecommendations([])
-      return
-    }
-    let cancelled = false
-    setRecLoading(true)
-    const handle = setTimeout(() => {
-      api.recommendSkills({ prdText, topN: 5 })
-        .then((recs) => {
-          if (cancelled) return
-          setRecommendations(recs)
-          // Pre-select recommended skills the first time we get them. The
-          // user can uncheck to override.
-          setSelectedSkills((prev) => {
-            const next = new Set(prev)
-            for (const r of recs) next.add(r.skillId)
-            return next
-          })
-        })
-        .catch(() => { /* leave list empty on error */ })
-        .finally(() => { if (!cancelled) setRecLoading(false) })
-    }, 400)
-    return () => {
-      cancelled = true
-      clearTimeout(handle)
-    }
-  }, [prdText, skillMode, validation.recommenderReady])
 
   const toggleRepo = (key: string): void => {
     setRepoKeys((prev) => {
@@ -121,206 +81,264 @@ export function ConfigureStep({
     })
   }
 
-  const toggleSkill = (id: string): void => {
-    setSelectedSkills((prev) => {
-      const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
-    })
+  const addRepoPath = async (pathOverride?: string): Promise<void> => {
+    const localPath = (pathOverride ?? repoPathDraft).trim()
+    if (!localPath) {
+      setRepoAddError('Choose or paste a repository folder')
+      return
+    }
+    setRepoAdding(true)
+    setRepoAddError(null)
+    try {
+      const exists = await api.checkPathExists(localPath)
+      if (!exists.exists) {
+        setRepoAddError('That folder does not exist')
+        return
+      }
+      const name = repoNameFromPath(localPath).trim()
+      if (!name) {
+        setRepoAddError('Repository name is required')
+        return
+      }
+      setRepoKeys((prev) => {
+        const next = new Set(prev)
+        next.add(repoKey({ name, localPath }))
+        return next
+      })
+      setRepoPathDraft('')
+    } catch (e) {
+      setRepoAddError(e instanceof Error ? e.message : 'Failed to add repository')
+    } finally {
+      setRepoAdding(false)
+    }
   }
 
-  const submit = (): void => {
+  const addFiles = (files: FileList | File[]): void => {
+    const incoming = Array.from(files).filter((file) => isSupportedPrdFile(file))
+    if (incoming.length === 0) return
+    setExtractError(null)
+    setPrdFiles((prev) => [...prev, ...incoming])
+  }
+
+  const removeFile = (index: number): void => {
+    setPrdFiles((prev) => prev.filter((_, i) => i !== index))
+  }
+
+  const submit = async (): Promise<void> => {
     if (!validation.ok) return
-    onSubmit({
-      prdText: prdText.trim(),
-      repos: repoList,
-      skills: [...selectedSkills],
-      featureName: featureName.trim() || undefined,
-    })
+    setExtracting(true)
+    setExtractError(null)
+    try {
+      const notesText = prdText.trim()
+      let agentPrdText = notesText
+      let finalDocuments = prdDocuments
+      if (prdFiles.length > 0) {
+        const extracted = await api.extractPrdDocuments({ prdText, files: prdFiles })
+        agentPrdText = extracted.prdText
+        finalDocuments = extracted.documents
+        setPrdDocuments(extracted.documents)
+      }
+      await onSubmit({
+        prdText: notesText,
+        agentPrdText,
+        prdDocuments: finalDocuments,
+        repos: repoList,
+        skills: [],
+        featureName: featureName.trim() || undefined,
+      })
+    } catch (e) {
+      setExtractError(e instanceof Error ? e.message : 'Failed to extract PRD documents')
+    } finally {
+      setExtracting(false)
+    }
   }
 
   const featureNamePlaceholder = prdText.trim()
     ? slugifyFeatureName(prdText)
-    : 'auto-derived from PRD'
-
-  const recIds = new Set(recommendations.map((r) => r.skillId))
+    : repoList[0]
+      ? `${repoNameFromPath(repoList[0].localPath)}-e2e`
+      : 'auto-derived from selected repo'
 
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex-1 min-h-0 overflow-y-auto p-6">
-        <div className="mx-auto max-w-3xl space-y-6">
-          <section>
-            <label className="block text-xs font-medium uppercase tracking-wide text-zinc-600 dark:text-zinc-400" htmlFor="prd">
-              PRD / Description
-            </label>
-            <p className="mt-1 text-xs text-zinc-500">
-              Describe the feature, user flow, and the assertion you want covered.
-            </p>
-            <textarea
-              id="prd"
-              rows={12}
-              value={prdText}
-              onChange={(e) => setPrdText(e.target.value)}
-              placeholder="As a user I want to…"
-              className="mt-2 w-full resize-y rounded border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 p-2 font-mono text-xs text-zinc-900 dark:text-zinc-100 focus:border-zinc-500 focus:outline-none"
-            />
-            {validation.errors.prdText && (
-              <div className="mt-1 text-xs text-rose-400">{validation.errors.prdText}</div>
-            )}
-          </section>
-
-          <section>
-            <div className="text-xs font-medium uppercase tracking-wide text-zinc-600 dark:text-zinc-400">Repos</div>
-            <p className="mt-1 text-xs text-zinc-500">
-              Pick the repos this test should cover.
-            </p>
-            <div className="mt-2 space-y-1">
-              {allRepos.length === 0 ? (
-                <div className="text-xs text-zinc-500">No repos detected in any feature.</div>
-              ) : (
-                allRepos.map(({ repo, feature }) => {
-                  const key = repoKey(repo)
-                  return (
-                    <label
-                      key={key}
-                      className="flex items-center gap-2 rounded border border-zinc-200 dark:border-zinc-800 bg-zinc-100/60 dark:bg-zinc-900/60 px-2 py-1.5 text-xs text-zinc-800 dark:text-zinc-200"
-                    >
-                      <input
-                        type="checkbox"
-                        checked={repoKeys.has(key)}
-                        onChange={() => toggleRepo(key)}
-                      />
-                      <span className="font-medium">{repo.name}</span>
-                      <span className="text-zinc-400 dark:text-zinc-600">({feature})</span>
-                      <span className="ml-auto truncate font-mono text-[10px] text-zinc-500">
-                        {repo.localPath}
-                      </span>
-                    </label>
-                  )
-                })
-              )}
-            </div>
-            {validation.errors.repos && (
-              <div className="mt-1 text-xs text-rose-400">{validation.errors.repos}</div>
-            )}
-          </section>
-
-          <section>
-            <div className="flex items-center justify-between">
-              <div className="text-xs font-medium uppercase tracking-wide text-zinc-600 dark:text-zinc-400">Skills</div>
-              <div className="flex items-center gap-1 text-xs">
-                <ModeButton active={skillMode === 'auto'} onClick={() => setSkillMode('auto')}>
-                  Auto
-                </ModeButton>
-                <ModeButton active={skillMode === 'manual'} onClick={() => setSkillMode('manual')}>
-                  Manual
-                </ModeButton>
+        <div className="mx-auto grid max-w-6xl gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(360px,440px)]">
+          <div className="space-y-4">
+            <section className="rounded-lg border border-zinc-200 bg-white/70 p-4 dark:border-zinc-800 dark:bg-zinc-950/40">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <div className="text-xs font-semibold uppercase tracking-wide text-zinc-700 dark:text-zinc-300">1. Optional context</div>
+                  <p className="mt-1 text-xs text-zinc-500">Add PRDs, notes, or acceptance criteria if you have them. If this is blank, Canary Lab infers coverage from the selected repos.</p>
+                </div>
+                {prdFiles.length > 0 && <span className="rounded bg-sky-500/10 px-2 py-1 text-[11px] text-sky-500">{prdFiles.length} queued</span>}
               </div>
-            </div>
-            {skillMode === 'auto' ? (
-              <div className="mt-2 space-y-1">
-                {!validation.recommenderReady ? (
-                  <div className="text-xs text-zinc-500">
-                    Write at least 30 characters of PRD to get recommendations.
+              <div
+                className="mt-3 rounded-lg border border-dashed border-zinc-300 bg-zinc-50 p-4 text-xs text-zinc-600 dark:border-zinc-700 dark:bg-zinc-900/40 dark:text-zinc-400"
+                onDragOver={(e) => {
+                  e.preventDefault()
+                  e.dataTransfer.dropEffect = 'copy'
+                }}
+                onDrop={(e) => {
+                  e.preventDefault()
+                  addFiles(e.dataTransfer.files)
+                }}
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="font-medium text-zinc-800 dark:text-zinc-200">Drop docs here</div>
+                    <div className="mt-0.5">Supports .txt, .md, .pdf, and .docx.</div>
                   </div>
-                ) : recLoading ? (
-                  <div className="text-xs text-zinc-500">Scoring skills…</div>
-                ) : recommendations.length === 0 ? (
-                  <div className="text-xs text-zinc-500">No matches yet.</div>
-                ) : (
-                  recommendations.map((rec) => {
-                    const meta = allSkills.find((s) => s.id === rec.skillId)
-                    return (
-                      <label
-                        key={rec.skillId}
-                        className="flex items-start gap-2 rounded border border-zinc-200 dark:border-zinc-800 bg-zinc-100/60 dark:bg-zinc-900/60 p-2 text-xs"
-                      >
-                        <input
-                          type="checkbox"
-                          className="mt-0.5"
-                          checked={selectedSkills.has(rec.skillId)}
-                          onChange={() => toggleSkill(rec.skillId)}
-                        />
-                        <div className="flex-1">
-                          <div className="font-medium text-zinc-900 dark:text-zinc-100">
-                            {meta?.name ?? rec.skillId}
-                            <span className="ml-2 font-mono text-[10px] text-zinc-500">
-                              score {rec.score}
-                            </span>
-                          </div>
-                          <div className="text-zinc-600 dark:text-zinc-400">{rec.reasoning}</div>
-                        </div>
-                      </label>
-                    )
-                  })
+                  <label className="shrink-0 cursor-pointer rounded border border-zinc-300 px-2 py-1 text-[11px] text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-900">
+                    Browse files
+                    <input
+                      type="file"
+                      multiple
+                      accept=".txt,.md,.markdown,.pdf,.docx,text/plain,text/markdown,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                      className="hidden"
+                      onChange={(e) => {
+                        if (e.target.files) addFiles(e.target.files)
+                        e.currentTarget.value = ''
+                      }}
+                    />
+                  </label>
+                </div>
+                {prdFiles.length > 0 && (
+                  <ul className="mt-3 space-y-1">
+                    {prdFiles.map((file, i) => (
+                      <li key={`${file.name}:${i}`} className="flex items-center gap-2 rounded bg-white px-2 py-1 font-mono text-[11px] dark:bg-zinc-950">
+                        <span className="min-w-0 flex-1 truncate">{file.name}</span>
+                        <span className="text-zinc-400">{formatBytes(file.size)}</span>
+                        <button type="button" onClick={() => removeFile(i)} className="text-zinc-500 hover:text-rose-400">Remove</button>
+                      </li>
+                    ))}
+                  </ul>
                 )}
-                {validation.recommenderReady && (
+                {prdDocuments.length > 0 && prdFiles.length === 0 && (
+                  <div className="mt-2 text-[11px] text-zinc-500">
+                    Extracted {prdDocuments.length} document{prdDocuments.length === 1 ? '' : 's'}.
+                  </div>
+                )}
+                {extractError && <div className="mt-2 text-[11px] text-rose-400">{extractError}</div>}
+              </div>
+              <label className="mt-4 block text-xs font-medium uppercase tracking-wide text-zinc-600 dark:text-zinc-400" htmlFor="prd">
+                Additional notes only
+              </label>
+              <textarea
+                id="prd"
+                rows={10}
+                value={prdText}
+                onChange={(e) => setPrdText(e.target.value)}
+                placeholder="Paste extra requirements, links, user flows, acceptance criteria, or edge cases. Uploaded docs stay attached above and will not be copied here."
+                className="mt-2 w-full resize-y rounded border border-zinc-300 bg-white p-3 font-mono text-xs text-zinc-900 focus:border-zinc-500 focus:outline-none dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100"
+              />
+            </section>
+          </div>
+
+          <aside className="space-y-4">
+            <section className="rounded-lg border border-zinc-200 bg-white/70 p-4 dark:border-zinc-800 dark:bg-zinc-950/40">
+              <div className="text-xs font-semibold uppercase tracking-wide text-zinc-700 dark:text-zinc-300">2. Repositories under test</div>
+              <p className="mt-1 text-xs text-zinc-500">Select known repos or add any local folder. Canary Lab does not assume repos live in `~/Documents`.</p>
+
+              <div className="mt-3 rounded border border-zinc-200 p-3 dark:border-zinc-800">
+                <div className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">Add a repo folder</div>
+                <div className="mt-2">
+                  <FolderPicker
+                    value={repoPathDraft}
+                    onChange={(p) => {
+                      void addRepoPath(p)
+                    }}
+                    placeholder="Choose any local repository folder..."
+                    title="Select repository folder"
+                    confirmLabel="Use repository"
+                  />
+                </div>
+                <input
+                  value={repoPathDraft}
+                  onChange={(e) => {
+                    setRepoPathDraft(e.target.value)
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') void addRepoPath()
+                  }}
+                  placeholder="/absolute/path/to/repo or ~/path/to/repo"
+                  className="mt-2 w-full rounded border border-zinc-300 bg-white px-2 py-1.5 font-mono text-[11px] text-zinc-900 focus:border-zinc-500 focus:outline-none dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100"
+                />
+                <div className="mt-2 flex justify-end">
                   <button
                     type="button"
-                    onClick={() => {
-                      setRecLoading(true)
-                      api.recommendSkills({ prdText, topN: 5 })
-                        .then(setRecommendations)
-                        .catch(() => {/* surfaced via empty list */})
-                        .finally(() => setRecLoading(false))
-                    }}
-                    className="mt-1 rounded border border-zinc-300 dark:border-zinc-700 px-2 py-1 text-[11px] text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-800"
+                    onClick={() => void addRepoPath()}
+                    disabled={repoAdding}
+                    className="rounded bg-sky-600 px-3 py-1.5 text-xs text-white hover:bg-sky-500 disabled:opacity-50"
                   >
-                    Run again
+                    {repoAdding ? 'Adding...' : 'Add pasted path'}
                   </button>
-                )}
+                </div>
+                {repoAddError && <div className="mt-2 text-[11px] text-rose-400">{repoAddError}</div>}
               </div>
-            ) : (
-              <div className="mt-2 max-h-72 space-y-1 overflow-y-auto rounded border border-zinc-200 dark:border-zinc-800 p-2">
-                {allSkills.length === 0 ? (
-                  <div className="text-xs text-zinc-500">No skills available.</div>
-                ) : (
-                  allSkills.map((s) => (
-                    <label key={s.id} className="flex items-start gap-2 text-xs text-zinc-800 dark:text-zinc-200">
-                      <input
-                        type="checkbox"
-                        className="mt-0.5"
-                        checked={selectedSkills.has(s.id)}
-                        onChange={() => toggleSkill(s.id)}
-                      />
-                      <div className="flex-1">
-                        <div className="font-medium">
-                          {s.name}
-                          {recIds.has(s.id) && (
-                            <span className="ml-2 rounded bg-emerald-500/15 px-1 text-[10px] text-emerald-400">
-                              recommended
-                            </span>
-                          )}
-                        </div>
-                        <div className="text-zinc-500">{s.description}</div>
-                      </div>
-                    </label>
-                  ))
-                )}
-              </div>
-            )}
-          </section>
 
-          <section>
-            <label className="block text-xs font-medium uppercase tracking-wide text-zinc-600 dark:text-zinc-400" htmlFor="featureName">
-              Feature name (optional)
-            </label>
-            <input
-              id="featureName"
-              type="text"
-              value={featureName}
-              onChange={(e) => setFeatureName(e.target.value)}
-              placeholder={featureNamePlaceholder}
-              className="mt-2 w-full rounded border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 px-2 py-1.5 text-xs text-zinc-900 dark:text-zinc-100 focus:border-zinc-500 focus:outline-none"
-            />
-            {validation.errors.featureName && (
-              <div className="mt-1 text-xs text-rose-400">{validation.errors.featureName}</div>
-            )}
-          </section>
+              {repoList.length > 0 && (
+                <div className="mt-3">
+                  <div className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">Selected</div>
+                  <div className="mt-2 space-y-1">
+                    {repoList.map((repo) => {
+                      const key = repoKey(repo)
+                      return (
+                        <div key={key} className="flex items-center gap-2 rounded border border-emerald-500/30 bg-emerald-500/10 px-2 py-1.5 text-xs">
+                          <span className="min-w-0 flex-1 truncate font-medium text-zinc-800 dark:text-zinc-200">{repo.name}</span>
+                          <span className="min-w-0 flex-[1.6] truncate font-mono text-[10px] text-zinc-500">{repo.localPath}</span>
+                          <button type="button" onClick={() => toggleRepo(key)} className="text-zinc-500 hover:text-rose-400">Remove</button>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
+
+              <div className="mt-3">
+                <div className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">Known from existing features</div>
+                <div className="mt-2 max-h-72 space-y-1 overflow-y-auto">
+                  {allRepos.length === 0 ? (
+                    <div className="text-xs text-zinc-500">No existing feature repos yet. Add a folder above.</div>
+                  ) : (
+                    allRepos.map(({ repo, feature }) => {
+                      const key = repoKey(repo)
+                      const selected = repoKeys.has(key)
+                      return (
+                        <label
+                          key={key}
+                          className={`flex items-center gap-2 rounded border px-2 py-1.5 text-xs ${selected ? 'border-emerald-500/30 bg-emerald-500/10' : 'border-zinc-200 bg-zinc-100/60 dark:border-zinc-800 dark:bg-zinc-900/60'} text-zinc-800 dark:text-zinc-200`}
+                        >
+                          <input type="checkbox" checked={selected} onChange={() => toggleRepo(key)} />
+                          <span className="min-w-0 flex-1 truncate font-medium">{repo.name}</span>
+                          <span className="truncate text-zinc-400 dark:text-zinc-600">from {feature}</span>
+                        </label>
+                      )
+                    })
+                  )}
+                </div>
+              </div>
+              {validation.errors.repos && <div className="mt-2 text-xs text-rose-400">{validation.errors.repos}</div>}
+            </section>
+
+            <section className="rounded-lg border border-zinc-200 bg-white/70 p-4 dark:border-zinc-800 dark:bg-zinc-950/40">
+              <label className="block text-xs font-semibold uppercase tracking-wide text-zinc-700 dark:text-zinc-300" htmlFor="featureName">
+                Feature name
+              </label>
+              <p className="mt-1 text-xs text-zinc-500">Optional folder name for the generated Canary Lab feature.</p>
+              <input
+                id="featureName"
+                type="text"
+                value={featureName}
+                onChange={(e) => setFeatureName(e.target.value)}
+                placeholder={featureNamePlaceholder}
+                className="mt-2 w-full rounded border border-zinc-300 bg-white px-2 py-1.5 text-xs text-zinc-900 focus:border-zinc-500 focus:outline-none dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100"
+              />
+              {validation.errors.featureName && <div className="mt-1 text-xs text-rose-400">{validation.errors.featureName}</div>}
+            </section>
+          </aside>
 
           {errorMessage && (
-            <div className="rounded border border-rose-500/40 bg-rose-500/10 p-2 text-xs text-rose-300">
+            <div className="lg:col-span-2 rounded border border-rose-500/40 bg-rose-500/10 p-2 text-xs text-rose-300">
               {errorMessage}
             </div>
           )}
@@ -338,38 +356,29 @@ export function ConfigureStep({
         <button
           type="button"
           onClick={submit}
-          disabled={!validation.ok || submitting}
+          disabled={!validation.ok || submitting || extracting}
           className="rounded bg-emerald-600 px-3 py-1.5 text-xs text-zinc-50 hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {submitting ? 'Creating draft…' : 'Generate plan'}
+          {submitting || extracting ? 'Starting harness…' : 'Run E2E harness'}
         </button>
       </div>
     </div>
   )
 }
 
-function ModeButton({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean
-  onClick: () => void
-  children: React.ReactNode
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`rounded border px-2 py-0.5 text-[11px] ${
-        active
-          ? 'border-zinc-500 bg-zinc-200 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100'
-          : 'border-zinc-200 dark:border-zinc-800 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-900'
-      }`}
-    >
-      {children}
-    </button>
-  )
+function isSupportedPrdFile(file: File): boolean {
+  const name = file.name.toLowerCase()
+  return name.endsWith('.txt')
+    || name.endsWith('.md')
+    || name.endsWith('.markdown')
+    || name.endsWith('.pdf')
+    || name.endsWith('.docx')
+}
+
+function formatBytes(size: number): string {
+  if (size < 1024) return `${size} B`
+  if (size < 1024 * 1024) return `${Math.round(size / 1024)} KB`
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`
 }
 
 function repoKey(r: DraftRepo): string {
@@ -386,4 +395,10 @@ function parseRepoKey(k: string): DraftRepo | null {
   } catch {
     return null
   }
+}
+
+function repoNameFromPath(localPath: string): string {
+  const trimmed = localPath.replace(/[\\/]+$/g, '')
+  const parts = trimmed.split(/[\\/]+/)
+  return parts[parts.length - 1] || 'repo'
 }

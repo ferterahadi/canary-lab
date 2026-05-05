@@ -19,8 +19,10 @@ import { loadFeatures } from './lib/feature-loader'
 import { loadSkills, type SkillRecord } from './lib/skill-loader'
 import {
   spawnPlanAgent as makePlanAgentSpawner,
+  spawnRefineAgent as makeRefineAgentSpawner,
   spawnSpecAgent as makeSpecAgentSpawner,
 } from './lib/wizard-agent-runner'
+import { WizardAgentRegistry } from './lib/wizard-agent-registry'
 import { generateRunId } from './lib/runtime/run-id'
 import { runDirFor, buildRunPaths } from './lib/runtime/run-paths'
 import { RunOrchestrator } from './lib/runtime/orchestrator'
@@ -88,6 +90,7 @@ export interface CreateServerResult {
   // pointing at production.
   revertAllEnvsets: () => void
   draftBrokers: Map<string, PaneBroker>
+  cancelAllWizardAgents: () => void
 }
 
 export async function createServer(opts: CreateServerOptions): Promise<CreateServerResult> {
@@ -107,6 +110,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
   await runStore.abortAllActiveOrStale()
   const brokers = new Map<string, PaneBroker>()
   const draftBrokers = new Map<string, PaneBroker>()
+  const wizardAgents = new WizardAgentRegistry()
   // Tracks runs with an active envset so we can revert on run-complete or on
   // process termination. Cleared as runs finish.
   const activeEnvsets = new Map<string, BackupRecord[]>()
@@ -135,15 +139,43 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
   const productionTestsDraftDeps: TestsDraftRouteDeps = {
     logsDir,
     projectRoot: opts.projectRoot,
-    newDraftId: () => generateRunId(),
+    newDraftId: () => {
+      const id = generateRunId()
+      ensureDraftBroker(id)
+      return id
+    },
+    pickAgent: () => {
+      const projectConfig = loadProjectConfig(opts.projectRoot)
+      if (projectConfig.healAgent === 'manual') {
+        return {
+          ok: false,
+          error: 'Add Test generation requires Claude, Codex, or Auto. Project settings are currently set to Manual.',
+        }
+      }
+      const agent = projectConfig.healAgent === 'auto'
+        ? pickAvailableHealAgent()
+        : pickAvailableHealAgent(projectConfig.healAgent)
+      if (!agent) {
+        return {
+          ok: false,
+          error: 'No configured wizard agent is available on PATH. Choose Auto, Claude, or Codex in settings and install the matching CLI.',
+        }
+      }
+      return { ok: true, agent }
+    },
     spawnPlanAgent: async (input) => {
       const broker = ensureDraftBroker(input.draftId)
-      return makePlanAgentSpawner({ ptyFactory, broker })(input)
+      return makePlanAgentSpawner({ ptyFactory, broker, registry: wizardAgents })(input)
     },
     spawnSpecAgent: async (input) => {
       const broker = ensureDraftBroker(input.draftId)
-      return makeSpecAgentSpawner({ ptyFactory, broker })(input)
+      return makeSpecAgentSpawner({ ptyFactory, broker, registry: wizardAgents })(input)
     },
+    spawnRefineAgent: async (input) => {
+      const broker = ensureDraftBroker(input.draftId)
+      return makeRefineAgentSpawner({ ptyFactory, broker, registry: wizardAgents })(input)
+    },
+    cancelGeneration: (draftId: string) => wizardAgents.cancel(draftId),
     loadSkillContent: (id: string) => {
       const rec = skillById(id)
       if (!rec) return ''
@@ -358,5 +390,10 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
     }
   }
 
-  return { app, registry, runStore, brokers, draftBrokers, revertAllEnvsets }
+  const cancelAllWizardAgents = (): void => {
+    wizardAgents.cancelAll()
+    for (const broker of draftBrokers.values()) broker.destroy()
+  }
+
+  return { app, registry, runStore, brokers, draftBrokers, revertAllEnvsets, cancelAllWizardAgents }
 }
