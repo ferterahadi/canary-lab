@@ -135,10 +135,10 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
   }
 
   return (
-    <div ref={containerRef} className="flex h-full flex-col">
-      <div className="flex items-center gap-3 px-4 py-3" style={{ borderBottom: '1px solid var(--border-default)' }}>
+    <div ref={containerRef} className="cl-panel flex h-full flex-col">
+      <div className="cl-panel-header flex items-center gap-3 px-4 py-3">
         <div className="flex min-w-0 flex-1 items-center gap-2">
-          <span className="shrink-0 text-[10px] uppercase tracking-wider font-medium" style={{ color: 'var(--text-muted)' }}>Runs</span>
+          <span className="cl-kicker shrink-0">Runs</span>
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
           {compact ? (
@@ -161,11 +161,11 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
                   value={selectedEnv}
                   onChange={(e) => setEnvOverride(e.target.value)}
                   disabled={!feature}
-                  className="appearance-none rounded-md pl-2 pr-6 py-1 text-xs focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+                  className="cl-input appearance-none rounded-md py-1 pl-2 pr-6 text-xs disabled:cursor-not-allowed disabled:opacity-50"
                   style={{
-                    background: `var(--bg-elevated) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' fill='none'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%23888' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 6px center`,
-                    border: '1px solid var(--border-default)',
-                    color: 'var(--text-primary)',
+                    backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' fill='none'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%23888' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")`,
+                    backgroundRepeat: 'no-repeat',
+                    backgroundPosition: 'right 6px center',
                     fontFamily: 'var(--font-mono)',
                   }}
                   aria-label="Environment"
@@ -180,7 +180,7 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
                 disabled={!feature || runDisabled}
                 title={runDisabled ? runDisabledReason : undefined}
                 onClick={() => onStartRun(selectedEnv || undefined)}
-                className="rounded-md bg-emerald-600/80 px-3 py-1.5 text-xs font-medium text-white transition-colors duration-150 hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-40"
+                className="cl-button-primary px-3 py-1.5 text-xs font-semibold"
               >
                 Run Now
               </button>
@@ -225,8 +225,8 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
                       aria-live="polite"
                       className="pointer-events-none flex w-full flex-col items-start gap-1.5 px-4 py-3 text-left"
                       style={{
-                        borderBottom: '1px solid var(--border-default)',
-                        background: 'transparent',
+                        borderBottom: '1px solid var(--border-subtle)',
+                        background: 'var(--bg-hover)',
                         borderLeft: '2px solid transparent',
                         opacity: 0.6,
                       }}
@@ -248,11 +248,9 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
                   <button
                     type="button"
                     onClick={() => onSelectRun(r.runId)}
-                    className="flex w-full flex-col items-start gap-1.5 px-4 py-3 text-left transition-colors duration-150"
+                    className={`flex w-full flex-col items-start gap-1.5 px-4 py-3 text-left ${isSelected ? 'cl-row-selected' : 'cl-row'}`}
                     style={{
-                      borderBottom: '1px solid var(--border-default)',
-                      background: isSelected ? 'var(--bg-elevated)' : 'transparent',
-                      borderLeft: isSelected ? '2px solid var(--border-focus)' : '2px solid transparent',
+                      borderLeft: isSelected ? '2px solid var(--accent)' : '2px solid transparent',
                     }}
                   >
                     <div className="flex w-full items-center justify-between gap-2">
@@ -478,8 +476,7 @@ function RunPopoverButton({
         aria-label="Run a test"
         title={disabled && disabledReason ? disabledReason : 'Run'}
         data-run-popover
-        className="flex h-7 w-7 items-center justify-center rounded-md text-white transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-40"
-        style={{ background: disabled ? 'var(--bg-elevated)' : 'rgb(5 150 105 / 0.85)' }}
+        className="cl-button-primary flex h-7 w-7 items-center justify-center disabled:cursor-not-allowed disabled:opacity-40"
       >
         <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
           <path d="M5 3.2v9.6a.6.6 0 0 0 .92.508l7.2-4.8a.6.6 0 0 0 0-1.016l-7.2-4.8A.6.6 0 0 0 5 3.2z" />
@@ -490,16 +487,13 @@ function RunPopoverButton({
           role="menu"
           data-run-popover
           onClick={(e) => e.stopPropagation()}
-          className="overflow-hidden rounded-lg p-3 text-xs shadow-xl"
+          className="cl-popover overflow-hidden rounded-lg p-3 text-xs"
           style={{
             position: 'fixed',
             top: pos.top,
             left: pos.left,
             width: POPOVER_WIDTH,
             zIndex: 1000,
-            background: 'var(--bg-surface)',
-            border: '1px solid var(--border-default)',
-            boxShadow: '0 8px 24px rgba(0, 0, 0, 0.18), 0 2px 4px rgba(0, 0, 0, 0.08)',
           }}
         >
           {envs.length > 1 && (
@@ -508,11 +502,11 @@ function RunPopoverButton({
               <select
                 value={selectedEnv}
                 onChange={(e) => onSelectEnv(e.target.value)}
-                className="w-full appearance-none rounded-md pl-2 pr-6 py-1.5 text-xs focus:outline-none"
+                className="cl-input w-full appearance-none rounded-md py-1.5 pl-2 pr-6 text-xs"
                 style={{
-                  background: `var(--bg-elevated) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' fill='none'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%23888' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 6px center`,
-                  border: '1px solid var(--border-default)',
-                  color: 'var(--text-primary)',
+                  backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' fill='none'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%23888' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")`,
+                  backgroundRepeat: 'no-repeat',
+                  backgroundPosition: 'right 6px center',
                   fontFamily: 'var(--font-mono)',
                 }}
               >
@@ -527,7 +521,7 @@ function RunPopoverButton({
             disabled={disabled}
             onClick={onStartRun}
             title={disabled ? disabledReason : undefined}
-            className="w-full rounded-md bg-emerald-600/85 px-3 py-1.5 text-xs font-medium text-white transition-colors duration-150 hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-40"
+            className="cl-button-primary w-full px-3 py-1.5 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-40"
           >
             Run Now
           </button>
@@ -605,16 +599,13 @@ function RunActionsKebab({
           role="menu"
           data-run-menu
           onClick={(e) => e.stopPropagation()}
-          className="overflow-hidden rounded-lg py-1 text-xs shadow-xl"
+          className="cl-popover overflow-hidden rounded-lg py-1 text-xs"
           style={{
             position: 'fixed',
             top: pos.top,
             left: pos.left,
             width: POPOVER_WIDTH,
             zIndex: 1000,
-            background: 'var(--bg-surface)',
-            border: '1px solid var(--border-default)',
-            boxShadow: '0 8px 24px rgba(0, 0, 0, 0.18), 0 2px 4px rgba(0, 0, 0, 0.08)',
           }}
         >
           {stopAvailable && (
@@ -785,8 +776,8 @@ function ConfirmDialog({
     ? 'border-rose-500/40 bg-rose-500/10 text-rose-700 hover:bg-rose-500/20 dark:text-rose-300'
     : 'border-amber-500/50 bg-amber-500/10 text-amber-700 hover:bg-amber-500/20 dark:text-amber-300'
   return (
-    <div className="absolute inset-0 z-50 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.6)' }}>
-      <div className="w-[420px] rounded-lg p-4 shadow-2xl" style={{ background: 'var(--bg-overlay)', border: '1px solid var(--border-default)' }}>
+    <div className="cl-modal-backdrop absolute inset-0 z-50 flex items-center justify-center">
+      <div className="cl-modal w-[420px] rounded-lg p-4">
         <h2 className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>{title}</h2>
         <p className="mt-2 text-xs" style={{ color: 'var(--text-secondary)' }}>{description}</p>
         <div className="mt-4 flex justify-end gap-2 text-xs">

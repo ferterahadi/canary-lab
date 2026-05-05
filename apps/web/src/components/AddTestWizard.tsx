@@ -171,13 +171,13 @@ export function AddTestWizard({ features, onClose }: Props) {
           : ''
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-white dark:bg-zinc-950">
-      <header className="flex items-center justify-between border-b border-zinc-200 dark:border-zinc-800 px-6 py-3">
-        <div className="text-sm font-medium text-zinc-900 dark:text-zinc-100">Add test</div>
+    <div className="cl-panel fixed inset-0 z-50 flex flex-col">
+      <header className="cl-shell-bar flex items-center justify-between px-6 py-3">
+        <div className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>Add test</div>
         <button
           type="button"
           onClick={requestCancel}
-          className="rounded border border-zinc-200 dark:border-zinc-800 px-2 py-1 text-xs text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-900 hover:text-zinc-900 dark:hover:text-zinc-200"
+          className="cl-button px-2 py-1 text-xs"
         >
           Close
         </button>
@@ -223,24 +223,24 @@ export function AddTestWizard({ features, onClose }: Props) {
       </div>
 
       {confirmCancel && (
-        <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/60">
-          <div className="w-[360px] rounded border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-4 shadow-xl">
-            <div className="text-sm font-medium text-zinc-900 dark:text-zinc-100">Discard this draft?</div>
-            <p className="mt-2 text-xs text-zinc-600 dark:text-zinc-400">
+        <div className="cl-modal-backdrop absolute inset-0 z-50 flex items-center justify-center">
+          <div className="cl-modal w-[360px] rounded-lg p-4">
+            <div className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>Discard this draft?</div>
+            <p className="mt-2 text-xs" style={{ color: 'var(--text-secondary)' }}>
               The in-progress draft will be rejected and removed.
             </p>
             <div className="mt-4 flex justify-end gap-2 text-xs">
               <button
                 type="button"
                 onClick={() => setConfirmCancel(false)}
-                className="rounded border border-zinc-300 dark:border-zinc-700 px-3 py-1 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-800"
+                className="cl-button px-3 py-1"
               >
                 Keep editing
               </button>
               <button
                 type="button"
                 onClick={() => { setConfirmCancel(false); void handleRejectAndClose() }}
-                className="rounded bg-rose-600 px-3 py-1 text-zinc-50 hover:bg-rose-500"
+                className="rounded-md border border-rose-500/40 bg-rose-500/10 px-3 py-1 text-rose-700 hover:bg-rose-500/20 dark:text-rose-300"
               >
                 Discard
               </button>

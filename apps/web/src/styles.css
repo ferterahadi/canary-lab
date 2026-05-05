@@ -3,31 +3,59 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
-/* Atom One Light palette */
+/* Quiet Pro Light palette */
 :root {
-  --bg-base: #fafafa;
+  --bg-base: #f4f7fb;
   --bg-surface: #ffffff;
-  --bg-elevated: #f0f0f1;
-  --bg-overlay: #f5f5f6;
-  --border-default: #e1e4e8;
-  --border-focus: #4078f2;
-  --text-primary: #383a42;
-  --text-secondary: #696c77;
-  --text-muted: #a0a1a7;
+  --bg-elevated: #eef4fa;
+  --bg-overlay: #f8fbfd;
+  --bg-input: #ffffff;
+  --bg-hover: #f1f7fc;
+  --bg-selected: #e6f2fb;
+  --border-default: #d8e1ea;
+  --border-strong: #bcc9d6;
+  --border-subtle: #e7eef5;
+  --border-focus: #2186b9;
+  --accent: #2186b9;
+  --accent-soft: color-mix(in srgb, var(--accent) 10%, transparent);
+  --accent-strong: #0f668f;
+  --success: #17825a;
+  --warning: #b7791f;
+  --danger: #d33f49;
+  --text-primary: #17202a;
+  --text-secondary: #445463;
+  --text-muted: #7a8a99;
+  --shadow-popover: 0 18px 42px rgba(27, 39, 51, 0.16), 0 4px 12px rgba(27, 39, 51, 0.08);
+  --shadow-panel: 0 1px 2px rgba(27, 39, 51, 0.04);
+  --overlay-backdrop: rgba(15, 23, 42, 0.42);
   --font-mono: 'JetBrains Mono', ui-monospace, monospace;
 }
 
-/* Atom One Dark Pro palette */
+/* Quiet Pro Dark palette */
 .dark {
-  --bg-base: #14161a;
-  --bg-surface: #1a1d23;
-  --bg-elevated: #22262e;
-  --bg-overlay: #2a2f38;
-  --border-default: #333842;
-  --border-focus: #528bff;
-  --text-primary: #d4d7de;
-  --text-secondary: #9da5b4;
-  --text-muted: #636d83;
+  --bg-base: #0d1117;
+  --bg-surface: #111821;
+  --bg-elevated: #172232;
+  --bg-overlay: #1c2838;
+  --bg-input: #0f1620;
+  --bg-hover: #162130;
+  --bg-selected: #102d3f;
+  --border-default: #263241;
+  --border-strong: #344355;
+  --border-subtle: #1b2633;
+  --border-focus: #38a6d9;
+  --accent: #38a6d9;
+  --accent-soft: color-mix(in srgb, var(--accent) 14%, transparent);
+  --accent-strong: #7dd3fc;
+  --success: #34d399;
+  --warning: #f0b45d;
+  --danger: #fb7185;
+  --text-primary: #e6edf3;
+  --text-secondary: #a7b4c2;
+  --text-muted: #728195;
+  --shadow-popover: 0 22px 52px rgba(0, 0, 0, 0.42), 0 5px 14px rgba(0, 0, 0, 0.28);
+  --shadow-panel: 0 1px 0 rgba(255, 255, 255, 0.02);
+  --overlay-backdrop: rgba(3, 7, 18, 0.66);
 }
 
 html, body, #root {
@@ -37,6 +65,8 @@ html, body, #root {
 
 body {
   font-family: 'Geist', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  background: var(--bg-base);
+  color: var(--text-primary);
 }
 
 .font-mono, code, pre, [class*="font-mono"] {
@@ -130,7 +160,8 @@ body {
 .panel-collapse-btn:hover {
   color: var(--text-primary);
   border-color: var(--border-focus);
-  background: var(--bg-elevated);
+  background: var(--bg-selected);
+  box-shadow: var(--shadow-panel);
 }
 
 .panel-collapse-btn svg {
@@ -212,4 +243,175 @@ body {
   background-repeat: no-repeat;
   background-position: right 10px center;
   background-size: 12px 12px;
+}
+
+.cl-shell-bar {
+  background: color-mix(in srgb, var(--bg-surface) 94%, var(--bg-elevated));
+  border-bottom: 1px solid var(--border-default);
+  box-shadow: var(--shadow-panel);
+}
+
+.cl-panel {
+  background: var(--bg-surface);
+  color: var(--text-primary);
+}
+
+.cl-panel-header {
+  background: color-mix(in srgb, var(--bg-surface) 88%, var(--bg-base));
+  border-bottom: 1px solid var(--border-default);
+}
+
+.cl-panel-footer {
+  background: color-mix(in srgb, var(--bg-surface) 88%, var(--bg-base));
+  border-top: 1px solid var(--border-default);
+}
+
+.cl-kicker {
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.cl-divider {
+  color: var(--border-strong);
+}
+
+.cl-icon-button {
+  align-items: center;
+  border-radius: 0.375rem;
+  color: var(--text-muted);
+  display: inline-flex;
+  justify-content: center;
+  transition: background 150ms ease, border-color 150ms ease, color 150ms ease, box-shadow 150ms ease;
+}
+
+.cl-icon-button:hover,
+.cl-icon-button:focus-visible {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  outline: none;
+}
+
+.cl-button {
+  border: 1px solid var(--border-default);
+  border-radius: 0.375rem;
+  color: var(--text-secondary);
+  transition: background 150ms ease, border-color 150ms ease, color 150ms ease, box-shadow 150ms ease;
+}
+
+.cl-button:hover,
+.cl-button:focus-visible {
+  background: var(--bg-hover);
+  border-color: var(--border-strong);
+  color: var(--text-primary);
+  outline: none;
+}
+
+.cl-button-primary {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 94%, white 6%), var(--accent));
+  border: 1px solid color-mix(in srgb, var(--accent) 68%, black 12%);
+  border-radius: 0.375rem;
+  color: #ffffff;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14);
+  transition: background 150ms ease, border-color 150ms ease, opacity 150ms ease, transform 150ms ease;
+}
+
+.cl-button-primary:hover,
+.cl-button-primary:focus-visible {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--accent-strong) 82%, white 8%), var(--accent-strong));
+  outline: none;
+}
+
+.cl-button-primary:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.cl-row {
+  border-bottom: 1px solid var(--border-subtle);
+  transition: background 150ms ease, color 150ms ease, border-color 150ms ease;
+}
+
+.cl-row:hover {
+  background: var(--bg-hover);
+}
+
+.cl-row-selected {
+  background: var(--bg-selected);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.cl-card {
+  background: color-mix(in srgb, var(--bg-surface) 94%, var(--bg-base));
+  border: 1px solid var(--border-default);
+  border-radius: 0.5rem;
+  box-shadow: var(--shadow-panel);
+}
+
+.cl-card-hover {
+  transition: background 150ms ease, border-color 150ms ease, box-shadow 150ms ease;
+}
+
+.cl-card-hover:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-strong);
+}
+
+.cl-tab {
+  border-radius: 0.375rem;
+  color: var(--text-secondary);
+  transition: background 150ms ease, color 150ms ease;
+}
+
+.cl-tab:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.cl-tab-active {
+  background: var(--bg-selected);
+  color: var(--text-primary);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.cl-input {
+  background: var(--bg-input);
+  border: 1px solid var(--border-default);
+  color: var(--text-primary);
+}
+
+.cl-input:focus,
+.cl-input:focus-visible {
+  border-color: var(--border-focus);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 16%, transparent);
+  outline: none;
+}
+
+.cl-popover {
+  background: var(--bg-overlay);
+  border: 1px solid var(--border-default);
+  box-shadow: var(--shadow-popover);
+}
+
+.cl-modal-backdrop {
+  background: var(--overlay-backdrop);
+  backdrop-filter: blur(8px);
+}
+
+.cl-modal {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  box-shadow: var(--shadow-popover);
+}
+
+.cl-code-shell {
+  background: color-mix(in srgb, var(--bg-base) 78%, var(--bg-surface));
+  border: 1px solid var(--border-default);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--bg-surface) 80%, transparent);
+}
+
+.dark .cl-button-primary {
+  color: #06111a;
 }

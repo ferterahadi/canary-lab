@@ -40,7 +40,7 @@ export function ThemeToggle() {
       role="radiogroup"
       aria-label="Theme"
       className="flex items-center gap-0.5 rounded-md p-0.5"
-      style={{ border: '1px solid var(--border-default)', background: 'var(--bg-base)' }}
+      style={{ border: '1px solid var(--border-default)', background: 'var(--bg-input)' }}
     >
       {OPTIONS.map((opt) => {
         const active = choice === opt.value
@@ -55,7 +55,8 @@ export function ThemeToggle() {
             className="flex flex-1 items-center justify-center rounded-md px-2 py-1 transition-colors duration-150"
             style={{
               color: active ? 'var(--text-primary)' : 'var(--text-muted)',
-              background: active ? 'var(--bg-elevated)' : 'transparent',
+              background: active ? 'var(--bg-selected)' : 'transparent',
+              boxShadow: active ? 'inset 0 0 0 1px color-mix(in srgb, var(--accent) 16%, transparent)' : 'none',
             }}
           >
             {opt.icon}

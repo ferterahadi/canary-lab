@@ -42,8 +42,8 @@ export function RunDetailColumn({ runId }: { runId: string | null }) {
   const activeService = services[serviceIdx]
 
   return (
-    <div className="relative flex h-full flex-col">
-      <header className="px-4 py-3" style={{ borderBottom: '1px solid var(--border-default)' }}>
+    <div className="cl-panel relative flex h-full flex-col">
+      <header className="cl-panel-header px-4 py-3">
         <div className="flex min-w-0 items-center gap-2">
           <span className="shrink-0">
             <RunStatusIndicator status={displayStatus ?? m.status} />
@@ -102,15 +102,14 @@ export function RunDetailColumn({ runId }: { runId: string | null }) {
         )}
         {tab === 'services' && services.length > 0 && (
           <div className="flex h-full flex-col">
-            <div className="flex gap-1 px-3 py-1.5 text-xs overflow-x-auto scrollbar-thin" style={{ borderBottom: '1px solid var(--border-default)' }}>
+            <div className="cl-panel-header flex gap-1 overflow-x-auto px-3 py-1.5 text-xs scrollbar-thin">
               {services.map((s, i) => (
                 <button
                   key={s.safeName}
                   type="button"
                   onClick={() => setServiceIdx(i)}
-                  className="flex items-center gap-1.5 rounded-md px-2 py-1 transition-colors duration-150"
+                  className={`cl-tab flex items-center gap-1.5 px-2 py-1 ${i === serviceIdx ? 'cl-tab-active' : ''}`}
                   style={{
-                    background: i === serviceIdx ? 'var(--bg-elevated)' : 'transparent',
                     color: i === serviceIdx ? 'var(--text-primary)' : 'var(--text-secondary)',
                   }}
                 >
@@ -167,13 +166,13 @@ const STATUS_COLOR: Record<ServiceStatus, string> = {
 
 function ServiceCard({ service }: { service: { name: string; command: string; cwd: string; logPath: string; healthUrl?: string; status?: ServiceStatus } }) {
   return (
-    <li className="rounded-md p-3" style={{ border: '1px solid var(--border-default)' }}>
+    <li className="cl-card p-3">
       <div className="flex items-center gap-2">
         <div className="min-w-0 flex-1 truncate text-xs font-medium" style={{ color: 'var(--text-primary)' }}>{service.name}</div>
         {service.status && (
           <span
             className="shrink-0 rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wider"
-            style={{ background: 'var(--bg-elevated)', color: STATUS_COLOR[service.status] }}
+            style={{ background: 'var(--bg-selected)', color: STATUS_COLOR[service.status] }}
           >
             {service.status}
           </span>
@@ -210,7 +209,7 @@ function ServiceField({ label, value, href }: { label: string; value: string; hr
             target="_blank"
             rel="noreferrer"
             aria-label={`Open ${label}`}
-            className="inline-flex h-5 w-5 items-center justify-center rounded hover:bg-[var(--bg-elevated)]"
+            className="cl-icon-button h-5 w-5"
             style={{ color: 'var(--text-muted)' }}
           >
             <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -226,7 +225,7 @@ function ServiceField({ label, value, href }: { label: string; value: string; hr
             onClick={onCopy}
             aria-label={`Copy ${label}`}
             title={`Copy ${label}`}
-            className="inline-flex h-5 w-5 items-center justify-center rounded hover:bg-[var(--bg-elevated)]"
+            className="cl-icon-button h-5 w-5"
             style={{ color: 'var(--text-muted)' }}
           >
             <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -264,9 +263,8 @@ function TabButton(props: { active: boolean; disabled?: boolean; onClick: () => 
       type="button"
       disabled={disabled}
       onClick={onClick}
-      className="shrink-0 whitespace-nowrap rounded-md px-2.5 py-1 transition-colors duration-150"
+      className={`cl-tab shrink-0 whitespace-nowrap px-2.5 py-1 ${active ? 'cl-tab-active' : ''}`}
       style={{
-        background: active ? 'var(--bg-elevated)' : 'transparent',
         color: active ? 'var(--text-primary)' : disabled ? 'var(--text-muted)' : 'var(--text-secondary)',
         cursor: disabled ? 'not-allowed' : 'pointer',
       }}
