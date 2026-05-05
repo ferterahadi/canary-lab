@@ -29,11 +29,11 @@ Emit one or more `<file path="...">...</file>` blocks. Each block writes a singl
 You must emit at minimum:
 
 1. `feature.config.cjs` — exports the feature's runtime config (services, health checks, etc.). If the repos don't require services, emit an empty `services: []` array. Use CommonJS (`module.exports = { ... }`).
-2. `e2e/<plan-name>.spec.ts` — the Playwright spec implementing the plan. **Exactly one `test(...)` block per plan**, with one `test.step(...)` block per plan item.
+2. One or more `e2e/*.spec.ts` files implementing the accepted plan. Use multiple `test(...)` blocks and multiple spec files when that is the clearest way to cover happy paths, sad paths, edge cases, validation failures, permission/state boundaries, and regression-risk cases.
 
 ## Hard rules — the `test.step` rule
 
-**Every meaningful interaction or assertion MUST live inside a `test.step('<plain-English label>', async () => { ... })` block.** The label is the `step` text from the corresponding plan item, copied verbatim. Each plan item maps 1:1 to one `test.step` block, in the same order as the plan.
+**Every meaningful interaction or assertion MUST live inside a `test.step('<plain-English label>', async () => { ... })` block.** The label is the `step` text from the corresponding plan item, copied verbatim. Each plan item maps 1:1 to one `test.step` block.
 
 Do not nest `test.step` blocks. Do not split one plan item across multiple steps. Do not put any meaningful Playwright call (`.click()`, `.fill()`, `expect(...)`, `.goto()`) outside a `test.step`.
 
@@ -45,7 +45,9 @@ This is the core invariant the canary-lab UI relies on to render the test as a h
 2. **Import from `@playwright/test`** — `import { test, expect } from '@playwright/test'`.
 3. Prefer **role-based locators** (`page.getByRole`, `page.getByLabel`) over CSS selectors when the skills don't specify otherwise.
 4. Keep `expect(...)` assertions **inside** the same `test.step` as the action they verify, matching the plan item's `expectedOutcome`.
-5. Do not write README files, helper modules, or fixtures unless a selected skill explicitly tells you to.
+5. Assert durable behavior: user-visible copy, final URL, persisted data, API payloads/responses, emitted events, disabled/enabled state, or domain-specific side effects. Do not stop at `expect(res.status()).toBe(200)` unless the PRD only asks for health.
+6. Use negative and edge-case tests when the plan includes them; do not collapse them into comments or TODOs.
+7. Do not write README files, helper modules, or fixtures unless a selected skill explicitly tells you to.
 
 ## Output format example
 

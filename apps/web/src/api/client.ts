@@ -14,6 +14,7 @@ import type {
   CreateDraftResponse,
   DraftRecord,
   PlanStep,
+  DraftPrdDocument,
 } from './types'
 
 export class ApiError extends Error {
@@ -589,6 +590,21 @@ export function createDraft(
   )
 }
 
+export function extractPrdDocuments(
+  payload: { prdText?: string; files: File[] },
+  opts?: ClientOptions,
+): Promise<{ prdText: string; documents: DraftPrdDocument[] }> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  const form = new FormData()
+  if (payload.prdText) form.append('prdText', payload.prdText)
+  for (const file of payload.files) form.append('files', file)
+  return request<{ prdText: string; documents: DraftPrdDocument[] }>(
+    `${baseUrl}/api/tests/prd-documents`,
+    { method: 'POST', body: form },
+    fetchImpl,
+  )
+}
+
 export interface DraftFile {
   path: string
   content: string
@@ -617,6 +633,35 @@ export function getDraft(id: string, opts?: ClientOptions): Promise<DraftRecord>
   return request<DraftRecord>(
     `${baseUrl}/api/tests/draft/${encodeURIComponent(id)}`,
     { method: 'GET' },
+    fetchImpl,
+  )
+}
+
+export function refineDraftFile(
+  id: string,
+  body: { path: string; selectedText: string; suggestion: string },
+  opts?: ClientOptions,
+): Promise<{ draftId: string; status: DraftRecord['status'] }> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<{ draftId: string; status: DraftRecord['status'] }>(
+    `${baseUrl}/api/tests/draft/${encodeURIComponent(id)}/refine-file`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    },
+    fetchImpl,
+  )
+}
+
+export function cancelDraftGeneration(
+  id: string,
+  opts?: ClientOptions,
+): Promise<{ draftId: string; status: DraftRecord['status'] }> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<{ draftId: string; status: DraftRecord['status'] }>(
+    `${baseUrl}/api/tests/draft/${encodeURIComponent(id)}/cancel-generation`,
+    { method: 'POST' },
     fetchImpl,
   )
 }

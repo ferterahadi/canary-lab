@@ -42,4 +42,14 @@ describe('buildHealAddendum', () => {
     expect(addendum).toContain('Cycle 2 of 3. Failing tests: test-case-a, test-case-b.')
     expect(addendum).toContain('Prior iterations exist')
   })
+
+  it('ignores summaries without a failed array', () => {
+    fs.mkdirSync(logsDir, { recursive: true })
+    fs.writeFileSync(summaryPath, JSON.stringify({ failed: 'not-an-array' }))
+
+    const addendum = buildHealAddendum({ cycle: 1, maxCycles: 2 })
+
+    expect(addendum).toContain('Cycle 1 of 2.')
+    expect(addendum).not.toContain('Failing tests:')
+  })
 })

@@ -54,7 +54,7 @@ export function AddTestWizard({ features, onClose }: Props) {
     const next = nextStepForStatus(draft.status)
     // Don't yank the user back to configure on rejected/error — keep them
     // on the current step so they can act (retry / cancel).
-    if (draft.status === 'rejected' || draft.status === 'error') return
+    if (draft.status === 'rejected' || draft.status === 'cancelled' || draft.status === 'error') return
     if (next !== step) setStep(next)
   }, [draft, step])
 
@@ -63,17 +63,30 @@ export function AddTestWizard({ features, onClose }: Props) {
     setSubmitting(true)
     setErrorMessage(null)
     try {
-      const { draftId } = await api.createDraft({
-        prdText: input.prdText,
+      const createPayload = {
+        prdText: input.agentPrdText ?? input.prdText,
+        prdDocuments: input.prdDocuments,
         repos: input.repos,
         skills: input.skills,
         featureName: input.featureName,
-      })
+      }
+      const { draftId } = await api.createDraft(createPayload)
       setConfigureInput(input)
-      const fresh = await api.getDraft(draftId)
-      setDraft(fresh)
-      // The backend transitions to `planning` immediately when skills are
-      // supplied — let the polling effect drive UI from there.
+      const now = new Date().toISOString()
+      setDraft({
+        draftId,
+        prdText: createPayload.prdText,
+        prdDocuments: createPayload.prdDocuments ?? [],
+        repos: createPayload.repos,
+        skills: createPayload.skills ?? [],
+        featureName: createPayload.featureName,
+        status: 'planning',
+        activeAgentStage: 'planning',
+        createdAt: now,
+        updatedAt: now,
+      })
+      setStep('plan')
+      void api.getDraft(draftId).then(setDraft).catch(() => { /* polling will retry */ })
     } catch (e) {
       setErrorMessage(e instanceof Error ? e.message : 'Failed to create draft')
     } finally {
@@ -110,6 +123,36 @@ export function AddTestWizard({ features, onClose }: Props) {
     }
   }, [draft, configureInput])
 
+  const handleRefineFile = useCallback(async (input: { path: string; selectedText: string; suggestion: string }): Promise<void> => {
+    if (!draft) return
+    setActing(true)
+    setErrorMessage(null)
+    try {
+      await api.refineDraftFile(draft.draftId, input)
+      const fresh = await api.getDraft(draft.draftId)
+      setDraft(fresh)
+    } catch (e) {
+      setErrorMessage(e instanceof Error ? e.message : 'Refine failed')
+    } finally {
+      setActing(false)
+    }
+  }, [draft])
+
+  const handleCancelGeneration = useCallback(async (): Promise<void> => {
+    if (!draft) return
+    setActing(true)
+    setErrorMessage(null)
+    try {
+      await api.cancelDraftGeneration(draft.draftId)
+      const fresh = await api.getDraft(draft.draftId)
+      setDraft(fresh)
+    } catch (e) {
+      setErrorMessage(e instanceof Error ? e.message : 'Stop generation failed')
+    } finally {
+      setActing(false)
+    }
+  }, [draft])
+
   const handleRejectAndClose = useCallback(async (): Promise<void> => {
     if (draft) {
       try { await api.rejectDraft(draft.draftId) } catch { /* may already be rejected */ }
@@ -124,14 +167,29 @@ export function AddTestWizard({ features, onClose }: Props) {
     try {
       try { await api.rejectDraft(draft.draftId) } catch { /* noop */ }
       try { await api.deleteDraft(draft.draftId) } catch { /* noop */ }
-      const { draftId } = await api.createDraft({
-        prdText: configureInput.prdText,
+      const createPayload = {
+        prdText: configureInput.agentPrdText ?? configureInput.prdText,
+        prdDocuments: configureInput.prdDocuments,
         repos: configureInput.repos,
         skills: configureInput.skills,
         featureName: configureInput.featureName,
+      }
+      const { draftId } = await api.createDraft(createPayload)
+      const now = new Date().toISOString()
+      setDraft({
+        draftId,
+        prdText: createPayload.prdText,
+        prdDocuments: createPayload.prdDocuments ?? [],
+        repos: createPayload.repos,
+        skills: createPayload.skills ?? [],
+        featureName: createPayload.featureName,
+        status: 'planning',
+        activeAgentStage: 'planning',
+        createdAt: now,
+        updatedAt: now,
       })
-      const fresh = await api.getDraft(draftId)
-      setDraft(fresh)
+      setStep('plan')
+      void api.getDraft(draftId).then(setDraft).catch(() => { /* polling will retry */ })
     } catch (e) {
       setErrorMessage(e instanceof Error ? e.message : 'Retry failed')
     } finally {
@@ -200,6 +258,7 @@ export function AddTestWizard({ features, onClose }: Props) {
             onAccept={handleAcceptPlan}
             onReject={handleRejectAndClose}
             onRetry={handleRetry}
+            onCancelGeneration={handleCancelGeneration}
             acting={acting}
           />
         )}
@@ -208,7 +267,10 @@ export function AddTestWizard({ features, onClose }: Props) {
             draft={draft}
             featureName={featureNameForStep}
             onAccept={handleAcceptSpec}
+            onRefine={handleRefineFile}
             onReject={handleRejectAndClose}
+            onRetry={handleRetry}
+            onCancelGeneration={handleCancelGeneration}
             acting={acting}
           />
         )}

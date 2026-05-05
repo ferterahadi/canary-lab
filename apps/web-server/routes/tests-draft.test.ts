@@ -2,8 +2,8 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import Fastify from 'fastify'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { readDraft } from '../lib/draft-store'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { readDraft, writeDraft } from '../lib/draft-store'
 import {
   runPlanStage,
   runSpecStage,
@@ -43,26 +43,26 @@ async function makeApp(deps: TestsDraftRouteDeps): Promise<ReturnType<typeof Fas
 }
 
 describe('POST /api/tests/draft', () => {
-  it('creates a draft without skills (status created)', async () => {
+  it('creates a draft and starts planning without skills or PRD text', async () => {
     const deps = makeDeps()
     const app = await makeApp(deps)
     const r = await app.inject({
       method: 'POST',
       url: '/api/tests/draft',
-      payload: { prdText: 'Login flow', repos: [{ name: 'app', localPath: '/p' }] },
+      payload: { prdText: '', repos: [{ name: 'app', localPath: '/p' }] },
     })
     expect(r.statusCode).toBe(201)
-    expect(r.json().status).toBe('created')
+    expect(r.json().status).toBe('planning')
     await app.close()
   })
 
-  it('400s on missing prdText', async () => {
+  it('400s when prdText is not a string', async () => {
     const deps = makeDeps()
     const app = await makeApp(deps)
     const r = await app.inject({
       method: 'POST',
       url: '/api/tests/draft',
-      payload: { repos: [{ name: 'app', localPath: '/p' }] },
+      payload: { prdText: null, repos: [{ name: 'app', localPath: '/p' }] },
     })
     expect(r.statusCode).toBe(400)
     await app.close()
@@ -102,7 +102,117 @@ describe('POST /api/tests/draft', () => {
   })
 })
 
+describe('POST /api/tests/draft/:id/cancel-generation', () => {
+  it('cancels planning and does not parse late plan output', async () => {
+    let releasePlan!: (value: string) => void
+    const cancelGeneration = vi.fn()
+    const deps = makeDeps({
+      cancelGeneration,
+      spawnPlanAgent: async () => new Promise<string>((resolve) => { releasePlan = resolve }),
+    })
+    const app = await makeApp(deps)
+    const post = await app.inject({
+      method: 'POST',
+      url: '/api/tests/draft',
+      payload: { prdText: 'X', repos: [{ name: 'app', localPath: '/p' }] },
+    })
+    const id = post.json().draftId
+    const r = await app.inject({ method: 'POST', url: `/api/tests/draft/${id}/cancel-generation` })
+    expect(r.statusCode).toBe(200)
+    expect(r.json()).toEqual({ draftId: id, status: 'cancelled' })
+    expect(cancelGeneration).toHaveBeenCalledExactlyOnceWith(id)
+
+    releasePlan('<plan-output>[{"step":"late","actions":["x"],"expectedOutcome":"y"}]</plan-output>')
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(readDraft(logsDir, id)!.status).toBe('cancelled')
+    expect(fs.existsSync(path.join(logsDir, 'drafts', id, 'plan.json'))).toBe(false)
+    await app.close()
+  })
+
+  it('moves transient drafts to cancelled even when no pty is registered', async () => {
+    const deps = makeDeps({
+      spawnPlanAgent: async () => new Promise<string>(() => {}),
+    })
+    const app = await makeApp(deps)
+    const post = await app.inject({
+      method: 'POST',
+      url: '/api/tests/draft',
+      payload: { prdText: 'X', repos: [{ name: 'app', localPath: '/p' }] },
+    })
+    const id = post.json().draftId
+    const r = await app.inject({ method: 'POST', url: `/api/tests/draft/${id}/cancel-generation` })
+    expect(r.statusCode).toBe(200)
+    const rec = readDraft(logsDir, id)!
+    expect(rec.status).toBe('cancelled')
+    expect(rec.errorMessage).toBe('Generation cancelled by user')
+    await app.close()
+  })
+
+  it('cancels generating and refining statuses', async () => {
+    const cancelGeneration = vi.fn()
+    const app = await makeApp(makeDeps({
+      cancelGeneration,
+      spawnPlanAgent: async () => new Promise<string>(() => {}),
+    }))
+    const post = await app.inject({
+      method: 'POST',
+      url: '/api/tests/draft',
+      payload: { prdText: 'X', repos: [{ name: 'app', localPath: '/p' }] },
+    })
+    const id = post.json().draftId
+    const rec = readDraft(logsDir, id)!
+
+    writeDraft(logsDir, { ...rec, status: 'generating' })
+    const generating = await app.inject({ method: 'POST', url: `/api/tests/draft/${id}/cancel-generation` })
+    expect(generating.statusCode).toBe(200)
+    expect(readDraft(logsDir, id)!.status).toBe('cancelled')
+
+    writeDraft(logsDir, { ...rec, status: 'refining' })
+    const refining = await app.inject({ method: 'POST', url: `/api/tests/draft/${id}/cancel-generation` })
+    expect(refining.statusCode).toBe(200)
+    expect(readDraft(logsDir, id)!.status).toBe('cancelled')
+    await app.close()
+  })
+
+  it('409s for non-transient drafts', async () => {
+    const app = await makeApp(makeDeps())
+    const post = await app.inject({
+      method: 'POST',
+      url: '/api/tests/draft',
+      payload: { prdText: 'X', repos: [{ name: 'app', localPath: '/p' }] },
+    })
+    const id = post.json().draftId
+    const rec = readDraft(logsDir, id)!
+    writeDraft(logsDir, { ...rec, status: 'plan-ready' })
+    const r = await app.inject({ method: 'POST', url: `/api/tests/draft/${id}/cancel-generation` })
+    expect(r.statusCode).toBe(409)
+    await app.close()
+  })
+})
+
 describe('runPlanStage', () => {
+  it('transitions to error when wizard agent is unavailable', async () => {
+    const deps = makeDeps({
+      pickAgent: () => ({ ok: false, error: 'manual mode' }),
+    })
+    const app = await makeApp(deps)
+    await app.inject({
+      method: 'POST',
+      url: '/api/tests/draft',
+      payload: {
+        prdText: 'Login',
+        repos: [{ name: 'app', localPath: '/p' }],
+        skills: ['s1'],
+      },
+    })
+    const id = fs.readdirSync(path.join(logsDir, 'drafts'))[0]
+    await new Promise((r) => setTimeout(r, 10))
+    const rec = readDraft(logsDir, id)!
+    expect(rec.status).toBe('error')
+    expect(rec.errorMessage).toBe('manual mode')
+    await app.close()
+  })
+
   it('writes plan.json and transitions to plan-ready', async () => {
     const deps = makeDeps({
       spawnPlanAgent: async () => `<plan-output>[
@@ -178,6 +288,81 @@ describe('runPlanStage', () => {
     const deps = makeDeps()
     await runPlanStage(deps, 'does-not-exist')
     // No throw; nothing changed.
+  })
+})
+
+describe('POST /api/tests/draft/:id/refine-file', () => {
+  it('runs refine agent and updates only the draft generated file', async () => {
+    const deps = makeDeps({
+      spawnPlanAgent: async () => `<plan-output>[
+        {"coverageType":"happy-path","step":"Open","actions":["go"],"expectedOutcome":"visible"}
+      ]</plan-output>`,
+      spawnSpecAgent: async () => `<file path="feature.config.cjs">module.exports={}</file>
+<file path="e2e/a.spec.ts">old assertion</file>`,
+      spawnRefineAgent: async (input) => {
+        expect(input.agent).toBe('claude')
+        expect(input.filePath).toBe('e2e/a.spec.ts')
+        expect(input.selectedText).toBe('old assertion')
+        return `<file path="e2e/a.spec.ts">strong assertion</file>`
+      },
+    })
+    const app = await makeApp(deps)
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/tests/draft',
+      payload: {
+        prdText: 'Login',
+        repos: [{ name: 'app', localPath: '/p' }],
+        skills: ['s1'],
+      },
+    })
+    const id = created.json().draftId
+    await new Promise((r) => setTimeout(r, 10))
+    await app.inject({ method: 'POST', url: `/api/tests/draft/${id}/accept-plan`, payload: {} })
+    await new Promise((r) => setTimeout(r, 10))
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/tests/draft/${id}/refine-file`,
+      payload: {
+        path: 'e2e/a.spec.ts',
+        selectedText: 'old assertion',
+        suggestion: 'make this assertion stronger',
+      },
+    })
+    expect(res.statusCode).toBe(202)
+    await new Promise((r) => setTimeout(r, 10))
+    const spec = fs.readFileSync(path.join(logsDir, 'drafts', id, 'generated', 'e2e', 'a.spec.ts'), 'utf8')
+    expect(spec).toBe('strong assertion')
+    const config = fs.readFileSync(path.join(logsDir, 'drafts', id, 'generated', 'feature.config.cjs'), 'utf8')
+    expect(config).toBe('module.exports={}')
+    expect(readDraft(logsDir, id)!.status).toBe('spec-ready')
+    await app.close()
+  })
+
+  it('rejects path traversal', async () => {
+    const app = await makeApp(makeDeps())
+    const post = await app.inject({
+      method: 'POST',
+      url: '/api/tests/draft',
+      payload: { prdText: 'X', repos: [{ name: 'a', localPath: '/' }] },
+    })
+    const id = post.json().draftId
+    const rec = readDraft(logsDir, id)!
+    fs.mkdirSync(path.join(logsDir, 'drafts', id, 'generated'), { recursive: true })
+    fs.writeFileSync(path.join(logsDir, 'drafts', id, 'generated', 'x.ts'), 'x')
+    // Force a spec-ready record without relying on an agent.
+    writeDraft(logsDir, {
+      ...rec,
+      status: 'spec-ready',
+      generatedFiles: ['x.ts'],
+    })
+    const r = await app.inject({
+      method: 'POST',
+      url: `/api/tests/draft/${id}/refine-file`,
+      payload: { path: '../x.ts', selectedText: 'x', suggestion: 'y' },
+    })
+    expect(r.statusCode).toBe(400)
+    await app.close()
   })
 })
 
@@ -274,6 +459,8 @@ describe('POST /api/tests/draft/:id/accept-plan', () => {
       payload: { prdText: 'X', repos: [{ name: 'a', localPath: '/' }] },
     })
     const id = post.json().draftId
+    const rec = readDraft(logsDir, id)!
+    writeDraft(logsDir, { ...rec, status: 'accepted' })
     const r = await app.inject({
       method: 'POST',
       url: `/api/tests/draft/${id}/accept-plan`,

@@ -32,6 +32,7 @@ interface Props {
   onAccept: (editedPlan?: PlanStep[]) => void
   onReject: () => void
   onRetry: () => void
+  onCancelGeneration: () => void
   acting: boolean
 }
 
@@ -41,7 +42,7 @@ interface Props {
 // react-dnd for smaller bundle footprint), delete, or append a new step.
 // Accept passes the edited plan back; the original prop receives the full
 // updated array.
-export function PlanReviewStep({ draft, onAccept, onReject, onRetry, acting }: Props) {
+export function PlanReviewStep({ draft, onAccept, onReject, onRetry, onCancelGeneration, acting }: Props) {
   const { status } = draft
   const seedPlan = useMemo(
     () => ((draft.plan as PlanStep[] | undefined) ?? []),
@@ -90,10 +91,25 @@ export function PlanReviewStep({ draft, onAccept, onReject, onRetry, acting }: P
         <div className="mx-auto max-w-3xl space-y-4">
           {status === 'planning' && (
             <>
-              <div className="rounded border border-zinc-200 dark:border-zinc-800 bg-zinc-100/60 dark:bg-zinc-900/60 p-3 text-xs text-zinc-700 dark:text-zinc-300">
-                Agent is drafting the test plan…
+              <div className="flex items-center justify-between gap-3 rounded border border-zinc-200 dark:border-zinc-800 bg-zinc-100/60 dark:bg-zinc-900/60 p-3 text-xs text-zinc-700 dark:text-zinc-300">
+                <span>Agent is drafting the test plan…</span>
+                <button
+                  type="button"
+                  onClick={onCancelGeneration}
+                  disabled={acting}
+                  className="rounded border border-rose-500/40 px-2 py-1 text-[11px] text-rose-600 hover:bg-rose-500/10 disabled:opacity-50 dark:text-rose-300"
+                >
+                  {acting ? 'Stopping…' : 'Stop generation'}
+                </button>
               </div>
-              <AgentLogPanel draftId={draft.draftId} initialBuffer={draft.planAgentLogTail} />
+              <AgentLogPanel
+                draftId={draft.draftId}
+                initialBuffer={draft.planAgentLogTail}
+                agent={draft.wizardAgent}
+                phase="planning"
+                status="running"
+                compact
+              />
             </>
           )}
 
@@ -102,6 +118,23 @@ export function PlanReviewStep({ draft, onAccept, onReject, onRetry, acting }: P
               <div className="mb-2 font-medium">Plan generation failed.</div>
               <div className="font-mono text-[11px]">{draft.errorMessage ?? 'Unknown error'}</div>
             </div>
+          )}
+
+          {status === 'cancelled' && (
+            <>
+              <div className="rounded border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-800 dark:text-amber-200">
+                <div className="mb-2 font-medium">Generation stopped.</div>
+                <div>{draft.errorMessage ?? 'Generation cancelled by user'}</div>
+              </div>
+              <AgentLogPanel
+                draftId={draft.draftId}
+                initialBuffer={draft.planAgentLogTail}
+                agent={draft.wizardAgent}
+                phase="planning"
+                status="idle"
+                compact
+              />
+            </>
           )}
 
           {(status === 'plan-ready' || status === 'generating' || status === 'spec-ready' || status === 'accepted') && (
@@ -153,15 +186,27 @@ export function PlanReviewStep({ draft, onAccept, onReject, onRetry, acting }: P
       </div>
 
       <div className="flex items-center justify-end gap-2 border-t border-zinc-200 dark:border-zinc-800 px-6 py-3">
-        {status === 'error' ? (
-          <button
-            type="button"
-            onClick={onRetry}
-            disabled={acting}
-            className="rounded bg-emerald-600 px-3 py-1.5 text-xs text-zinc-50 hover:bg-emerald-500 disabled:opacity-50"
-          >
-            Retry
-          </button>
+        {status === 'error' || status === 'cancelled' ? (
+          <>
+            {status === 'cancelled' && (
+              <button
+                type="button"
+                onClick={onReject}
+                disabled={acting}
+                className="rounded border border-zinc-300 dark:border-zinc-700 px-3 py-1.5 text-xs text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-800 disabled:opacity-50"
+              >
+                Close
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={onRetry}
+              disabled={acting}
+              className="rounded bg-emerald-600 px-3 py-1.5 text-xs text-zinc-50 hover:bg-emerald-500 disabled:opacity-50"
+            >
+              Retry
+            </button>
+          </>
         ) : (
           <>
             <button

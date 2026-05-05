@@ -56,6 +56,12 @@ describe('resolveDraftFile', () => {
     if (!r.ok) expect(r.reason).toBe('not-found')
   })
 
+  it('returns not-found for a normalized path to the generated root', () => {
+    const r = resolveDraftFile(logsDir, DRAFT_ID, '.')
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.reason).toBe('not-found')
+  })
+
   it('rejects directory path (not a file)', () => {
     const r = resolveDraftFile(logsDir, DRAFT_ID, 'tests')
     expect(r.ok).toBe(false)

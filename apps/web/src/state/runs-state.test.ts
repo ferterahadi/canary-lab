@@ -61,6 +61,22 @@ describe('runsReducer', () => {
     expect(next.details.new.runId).toBe('new')
   })
 
+  it('keeps equal startedAt values in the sorted run list', () => {
+    const start: RunsState = {
+      ...initialRunsState,
+      runs: [entry({ runId: 'a', startedAt: '2026-01-01T00:00:00Z' })],
+    }
+    const next = runsReducer(start, {
+      type: 'update',
+      runId: 'b',
+      detail: detail({ runId: 'b', startedAt: '2026-01-01T00:00:00Z' }),
+    })
+    expect(next.runs.map((r) => r.startedAt)).toEqual([
+      '2026-01-01T00:00:00Z',
+      '2026-01-01T00:00:00Z',
+    ])
+  })
+
   it('update replaces an existing entry rather than duplicating it', () => {
     const start: RunsState = {
       ...initialRunsState,

@@ -248,6 +248,35 @@ describe('POST /api/open-editor', () => {
     return file
   }
 
+  it('rejects missing files in the request body', async () => {
+    const app = await makeApp()
+    try {
+      const r = await app.inject({
+        method: 'POST',
+        url: '/api/open-editor',
+        payload: {},
+      })
+      expect(r.statusCode).toBe(400)
+      expect(r.json()).toEqual({ error: 'file is required' })
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('rejects a missing request body', async () => {
+    const app = await makeApp()
+    try {
+      const r = await app.inject({
+        method: 'POST',
+        url: '/api/open-editor',
+      })
+      expect(r.statusCode).toBe(400)
+      expect(r.json()).toEqual({ error: 'file is required' })
+    } finally {
+      await app.close()
+    }
+  })
+
   it('rejects relative paths', async () => {
     const app = await makeApp()
     try {
@@ -288,6 +317,37 @@ describe('POST /api/open-editor', () => {
         payload: { file: path.join(projectRoot, 'missing.spec.ts') },
       })
       expect(r.statusCode).toBe(404)
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('rejects directories inside the project root', async () => {
+    const app = await makeApp()
+    try {
+      const r = await app.inject({
+        method: 'POST',
+        url: '/api/open-editor',
+        payload: { file: projectRoot },
+      })
+      expect(r.statusCode).toBe(400)
+      expect(r.json()).toEqual({ error: 'file must be a file' })
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('rejects invalid editor values', async () => {
+    const file = writeSpec()
+    const app = await makeApp()
+    try {
+      const r = await app.inject({
+        method: 'POST',
+        url: '/api/open-editor',
+        payload: { file, editor: 'vim' },
+      })
+      expect(r.statusCode).toBe(400)
+      expect(r.json()).toEqual({ error: 'editor must be one of: auto, vscode, cursor, system' })
     } finally {
       await app.close()
     }
@@ -347,6 +407,46 @@ describe('POST /api/open-editor', () => {
     }
   })
 
+  it('uses cmd start for the system opener on windows', async () => {
+    const file = writeSpec()
+    const orig = process.platform
+    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true })
+    const app = await makeApp()
+    try {
+      const r = await app.inject({
+        method: 'POST',
+        url: '/api/open-editor',
+        payload: { file, editor: 'system' },
+      })
+      expect(r.statusCode).toBe(200)
+      expect(r.json()).toEqual({ opened: true, editor: 'system' })
+      expect(spawnMock).toHaveBeenCalledWith('cmd', ['/c', 'start', '', file], expect.any(Object))
+    } finally {
+      Object.defineProperty(process, 'platform', { value: orig, configurable: true })
+      await app.close()
+    }
+  })
+
+  it('uses xdg-open for the system opener on linux', async () => {
+    const file = writeSpec()
+    const orig = process.platform
+    Object.defineProperty(process, 'platform', { value: 'linux', configurable: true })
+    const app = await makeApp()
+    try {
+      const r = await app.inject({
+        method: 'POST',
+        url: '/api/open-editor',
+        payload: { file, editor: 'system' },
+      })
+      expect(r.statusCode).toBe(200)
+      expect(r.json()).toEqual({ opened: true, editor: 'system' })
+      expect(spawnMock).toHaveBeenCalledWith('xdg-open', [file], expect.any(Object))
+    } finally {
+      Object.defineProperty(process, 'platform', { value: orig, configurable: true })
+      await app.close()
+    }
+  })
+
   it('auto-detects cursor before vscode', async () => {
     const file = writeSpec()
     spawnSyncMock.mockImplementation((command, args) => ({
@@ -363,6 +463,91 @@ describe('POST /api/open-editor', () => {
       expect(r.json()).toEqual({ opened: true, editor: 'cursor' })
       expect(spawnMock.mock.calls[0][0]).toBe('cursor')
     } finally {
+      await app.close()
+    }
+  })
+
+  it('uses the configured editor when the request omits one', async () => {
+    const file = writeSpec()
+    fs.writeFileSync(
+      path.join(projectRoot, 'canary-lab.config.json'),
+      JSON.stringify({ editor: 'cursor' }),
+    )
+    const app = await makeApp()
+    try {
+      const r = await app.inject({
+        method: 'POST',
+        url: '/api/open-editor',
+        payload: { file },
+      })
+      expect(r.statusCode).toBe(200)
+      expect(r.json()).toEqual({ opened: true, editor: 'cursor' })
+      expect(spawnMock.mock.calls[0][0]).toBe('cursor')
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('auto-detects vscode when cursor is unavailable', async () => {
+    const file = writeSpec()
+    spawnSyncMock.mockImplementation((command, args) => ({
+      status: command === 'which' && args[0] === 'code' ? 0 : 1,
+    }))
+    const app = await makeApp()
+    try {
+      const r = await app.inject({
+        method: 'POST',
+        url: '/api/open-editor',
+        payload: { file, editor: 'auto' },
+      })
+      expect(r.statusCode).toBe(200)
+      expect(r.json()).toEqual({ opened: true, editor: 'vscode' })
+      expect(spawnMock.mock.calls[0][0]).toBe('code')
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('auto-detects the system opener when cli editors are unavailable', async () => {
+    const file = writeSpec()
+    const orig = process.platform
+    Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true })
+    spawnSyncMock.mockReturnValue({ status: 1 })
+    const app = await makeApp()
+    try {
+      const r = await app.inject({
+        method: 'POST',
+        url: '/api/open-editor',
+        payload: { file, editor: 'auto' },
+      })
+      expect(r.statusCode).toBe(200)
+      expect(r.json()).toEqual({ opened: true, editor: 'system' })
+      expect(spawnMock).toHaveBeenCalledWith('open', [file], expect.any(Object))
+    } finally {
+      Object.defineProperty(process, 'platform', { value: orig, configurable: true })
+      await app.close()
+    }
+  })
+
+  it('uses where for auto-detection on windows', async () => {
+    const file = writeSpec()
+    const orig = process.platform
+    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true })
+    spawnSyncMock.mockImplementation((command, args) => ({
+      status: command === 'where' && args[0] === 'cursor' ? 0 : 1,
+    }))
+    const app = await makeApp()
+    try {
+      const r = await app.inject({
+        method: 'POST',
+        url: '/api/open-editor',
+        payload: { file, editor: 'auto' },
+      })
+      expect(r.statusCode).toBe(200)
+      expect(r.json()).toEqual({ opened: true, editor: 'cursor' })
+      expect(spawnSyncMock.mock.calls[0][0]).toBe('where')
+    } finally {
+      Object.defineProperty(process, 'platform', { value: orig, configurable: true })
       await app.close()
     }
   })

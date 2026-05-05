@@ -18,6 +18,7 @@ const ALL: DraftStatus[] = [
   'spec-ready',
   'accepted',
   'rejected',
+  'cancelled',
   'error',
 ]
 
@@ -37,8 +38,9 @@ describe('nextStepForStatus', () => {
   it('done for accepted', () => {
     expect(nextStepForStatus('accepted')).toBe('done')
   })
-  it('falls back to configure for rejected/error', () => {
+  it('falls back to configure for rejected/cancelled/error', () => {
     expect(nextStepForStatus('rejected')).toBe('configure')
+    expect(nextStepForStatus('cancelled')).toBe('configure')
     expect(nextStepForStatus('error')).toBe('configure')
   })
 })
@@ -76,9 +78,10 @@ describe('terminalForStep', () => {
     expect(terminalForStep('configure', 'created')).toBe(true)
     expect(terminalForStep('configure', 'recommending')).toBe(false)
   })
-  it('done is terminal only at accepted/rejected/error', () => {
+  it('done is terminal only at accepted/rejected/cancelled/error', () => {
     expect(terminalForStep('done', 'accepted')).toBe(true)
     expect(terminalForStep('done', 'rejected')).toBe(true)
+    expect(terminalForStep('done', 'cancelled')).toBe(true)
     expect(terminalForStep('done', 'planning')).toBe(false)
   })
 })
@@ -107,9 +110,10 @@ describe('canAdvance', () => {
 })
 
 describe('isTerminalDraft', () => {
-  it('flags accepted/rejected/error', () => {
+  it('flags accepted/rejected/cancelled/error', () => {
     expect(isTerminalDraft('accepted')).toBe(true)
     expect(isTerminalDraft('rejected')).toBe(true)
+    expect(isTerminalDraft('cancelled')).toBe(true)
     expect(isTerminalDraft('error')).toBe(true)
   })
   it('returns false for in-progress states', () => {

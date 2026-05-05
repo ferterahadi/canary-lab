@@ -115,6 +115,8 @@ describe('listDrafts', () => {
 describe('canTransition', () => {
   it('allows valid transitions', () => {
     expect(canTransition('created', 'recommending')).toBe(true)
+    expect(canTransition('planning', 'cancelled')).toBe(true)
+    expect(canTransition('cancelled', 'rejected')).toBe(true)
     expect(canTransition('plan-ready', 'generating')).toBe(true)
     expect(canTransition('spec-ready', 'accepted')).toBe(true)
     expect(canTransition('error', 'rejected')).toBe(true)

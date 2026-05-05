@@ -5,30 +5,21 @@
 export interface ConfigureInput {
   prdText: string
   repos: { name: string; localPath: string }[]
-  skills: string[]
   featureName?: string
 }
 
 export interface ConfigureValidation {
   ok: boolean
   errors: {
-    prdText?: string
     repos?: string
     featureName?: string
   }
-  // Whether the PRD is long enough to call the recommender. Decoupled from
-  // form validity — the user can submit with no skills, but the recommender
-  // needs ≥30 chars to give useful results.
-  recommenderReady: boolean
 }
 
-const MIN_PRD_FOR_RECOMMEND = 30
 const FEATURE_NAME_RE = /^[a-zA-Z0-9_-]+$/
 
 export function validateConfigure(input: ConfigureInput): ConfigureValidation {
   const errors: ConfigureValidation['errors'] = {}
-  const prd = input.prdText.trim()
-  if (!prd) errors.prdText = 'PRD text is required'
   if (input.repos.length === 0) errors.repos = 'Pick at least one repo'
   const fname = input.featureName?.trim()
   if (fname && !FEATURE_NAME_RE.test(fname)) {
@@ -37,7 +28,6 @@ export function validateConfigure(input: ConfigureInput): ConfigureValidation {
   return {
     ok: Object.keys(errors).length === 0,
     errors,
-    recommenderReady: prd.length >= MIN_PRD_FOR_RECOMMEND,
   }
 }
 

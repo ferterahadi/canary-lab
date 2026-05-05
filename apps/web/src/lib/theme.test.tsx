@@ -14,8 +14,32 @@ import {
 
 const STORAGE_KEY = 'canary-lab.theme'
 
+function createStorage(): Storage {
+  const data = new Map<string, string>()
+  return {
+    get length() { return data.size },
+    clear: () => data.clear(),
+    getItem: (key) => data.get(key) ?? null,
+    key: (index) => Array.from(data.keys())[index] ?? null,
+    removeItem: (key) => { data.delete(key) },
+    setItem: (key, value) => { data.set(key, value) },
+  }
+}
+
+function installStorage(storage: Storage): void {
+  Object.defineProperty(window, 'localStorage', {
+    configurable: true,
+    value: storage,
+  })
+  Object.defineProperty(globalThis, 'localStorage', {
+    configurable: true,
+    value: storage,
+  })
+}
+
 beforeEach(() => {
   document.documentElement.className = ''
+  installStorage(createStorage())
   localStorage.clear()
   // Default matchMedia stub: prefers dark.
   window.matchMedia = (q: string) =>
@@ -49,15 +73,19 @@ describe('getStoredChoice', () => {
   })
 
   it('falls back to dark when localStorage throws', () => {
-    const orig = Object.getOwnPropertyDescriptor(window, 'localStorage')!
-    Object.defineProperty(window, 'localStorage', {
+    const windowOrig = Object.getOwnPropertyDescriptor(window, 'localStorage')!
+    const globalOrig = Object.getOwnPropertyDescriptor(globalThis, 'localStorage')!
+    const throwingStorage = {
       configurable: true,
       get() { throw new Error('blocked') },
-    })
+    }
+    Object.defineProperty(window, 'localStorage', throwingStorage)
+    Object.defineProperty(globalThis, 'localStorage', throwingStorage)
     try {
       expect(getStoredChoice()).toBe('dark')
     } finally {
-      Object.defineProperty(window, 'localStorage', orig)
+      Object.defineProperty(window, 'localStorage', windowOrig)
+      Object.defineProperty(globalThis, 'localStorage', globalOrig)
     }
   })
 })

@@ -30,4 +30,11 @@ describe('paneTerminalNotice', () => {
     expect(notice.lines).toEqual(['Pane message: unknown issue'])
     expect(notice.lines.join('\n').toLowerCase()).not.toContain('error')
   })
+
+  it('uses unknown fallbacks for blank pane messages', () => {
+    expect(paneTerminalNotice('playwright', '   ')).toEqual({
+      key: 'pane-message:unknown',
+      lines: ['Pane message: unknown issue'],
+    })
+  })
 })

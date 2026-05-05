@@ -44,6 +44,9 @@ run(
 
 for (const relPath of [
   'package.json',
+  'node_modules/canary-lab/dist/apps/web-server/prompts/stage1-plan.md',
+  'node_modules/canary-lab/dist/apps/web-server/prompts/stage2-spec.md',
+  'node_modules/canary-lab/dist/apps/web-server/prompts/stage3-refine.md',
   'AGENTS.md',
   'CLAUDE.md',
   '.claude/skills/env-import.md',

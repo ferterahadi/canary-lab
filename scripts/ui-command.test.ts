@@ -52,12 +52,14 @@ describe('runUi signal cleanup', () => {
       close: vi.fn(async () => { events.push('close') }),
     }
     const revertAllEnvsets = vi.fn(() => { events.push('revert') })
+    const cancelAllWizardAgents = vi.fn(() => { events.push('cancel-wizard') })
     const exit = vi.fn((code: number) => { events.push(`exit-${code}`) })
 
     mocks.createServer.mockResolvedValue({
       app,
       registry: {},
       revertAllEnvsets,
+      cancelAllWizardAgents,
       runStore,
       brokers: new Map(),
       draftBrokers: new Map(),
@@ -72,11 +74,13 @@ describe('runUi signal cleanup', () => {
     process.emit('SIGINT')
     await new Promise((resolve) => setTimeout(resolve, 0))
 
+    expect(cancelAllWizardAgents).toHaveBeenCalledOnce()
     expect(runStore.abortAllActiveOrStale).toHaveBeenCalledOnce()
     expect(revertAllEnvsets).toHaveBeenCalledOnce()
     expect(app.close).toHaveBeenCalledOnce()
     expect(exit).toHaveBeenCalledExactlyOnceWith(130)
     expect(events).toEqual([
+      'cancel-wizard',
       'abort-all',
       'revert',
       'close',

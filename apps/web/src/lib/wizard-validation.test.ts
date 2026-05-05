@@ -4,20 +4,20 @@ import { slugifyFeatureName, validateConfigure } from './wizard-validation'
 describe('validateConfigure', () => {
   const repo = { name: 'r1', localPath: '/r1' }
 
-  it('reports prdText error when blank', () => {
-    const v = validateConfigure({ prdText: '   ', repos: [repo], skills: [] })
-    expect(v.ok).toBe(false)
-    expect(v.errors.prdText).toBeDefined()
+  it('allows blank PRD text when a repo is selected', () => {
+    const v = validateConfigure({ prdText: '   ', repos: [repo] })
+    expect(v.ok).toBe(true)
+    expect(v.errors).toEqual({})
   })
 
   it('reports repos error when none chosen', () => {
-    const v = validateConfigure({ prdText: 'add a thing', repos: [], skills: [] })
+    const v = validateConfigure({ prdText: 'add a thing', repos: [] })
     expect(v.ok).toBe(false)
     expect(v.errors.repos).toBeDefined()
   })
 
   it('passes with prd + at least one repo, no skills required', () => {
-    const v = validateConfigure({ prdText: 'add x', repos: [repo], skills: [] })
+    const v = validateConfigure({ prdText: 'add x', repos: [repo] })
     expect(v.ok).toBe(true)
     expect(v.errors).toEqual({})
   })
@@ -26,7 +26,6 @@ describe('validateConfigure', () => {
     const v = validateConfigure({
       prdText: 'p',
       repos: [repo],
-      skills: [],
       featureName: 'has spaces',
     })
     expect(v.ok).toBe(false)
@@ -37,25 +36,13 @@ describe('validateConfigure', () => {
     const v = validateConfigure({
       prdText: 'p',
       repos: [repo],
-      skills: [],
       featureName: 'my-feature_1',
     })
     expect(v.ok).toBe(true)
   })
 
-  it('flags recommenderReady once PRD ≥ 30 chars', () => {
-    const short = validateConfigure({ prdText: 'short', repos: [repo], skills: [] })
-    expect(short.recommenderReady).toBe(false)
-    const long = validateConfigure({
-      prdText: 'this is a long enough PRD body for the recommender to fire',
-      repos: [repo],
-      skills: [],
-    })
-    expect(long.recommenderReady).toBe(true)
-  })
-
   it('treats undefined featureName as valid', () => {
-    const v = validateConfigure({ prdText: 'p', repos: [repo], skills: [] })
+    const v = validateConfigure({ prdText: 'p', repos: [repo] })
     expect(v.errors.featureName).toBeUndefined()
   })
 
@@ -63,7 +50,6 @@ describe('validateConfigure', () => {
     const v = validateConfigure({
       prdText: 'p',
       repos: [repo],
-      skills: [],
       featureName: '   ',
     })
     expect(v.errors.featureName).toBeUndefined()
