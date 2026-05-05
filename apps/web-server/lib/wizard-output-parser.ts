@@ -36,11 +36,19 @@ const PLAN_CLOSE = '</plan-output>'
 
 export function extractPlan(stream: string): ParseResult<PlanStep[]> {
   const open = stream.indexOf(PLAN_OPEN)
-  if (open < 0) return { ok: false, error: 'plan-output marker not found' }
+  if (open < 0) {
+    const fallback = extractUnmarkedPlan(stream)
+    if (fallback.ok) return fallback
+    return { ok: false, error: 'plan-output marker not found' }
+  }
   const close = stream.indexOf(PLAN_CLOSE, open + PLAN_OPEN.length)
   if (close < 0) return { ok: false, error: 'plan-output close marker not found' }
   const body = stream.slice(open + PLAN_OPEN.length, close).trim()
   if (!body) return { ok: false, error: 'plan-output body empty' }
+  return parsePlanJson(body)
+}
+
+function parsePlanJson(body: string): ParseResult<PlanStep[]> {
   let parsed: unknown
   try {
     parsed = JSON.parse(body)
@@ -67,6 +75,61 @@ export function extractPlan(stream: string): ParseResult<PlanStep[]> {
     out.push({ coverageType, step, actions: actions as string[], expectedOutcome })
   }
   return { ok: true, value: out }
+}
+
+function extractUnmarkedPlan(stream: string): ParseResult<PlanStep[]> {
+  for (const candidate of planJsonCandidates(stream)) {
+    const parsed = parsePlanJson(candidate)
+    if (parsed.ok) return parsed
+  }
+  return { ok: false, error: 'plan-output marker not found' }
+}
+
+function planJsonCandidates(stream: string): string[] {
+  const out: string[] = []
+  const fenced = /```(?:json)?\s*([\s\S]*?)```/gi
+  for (const match of stream.matchAll(fenced)) {
+    const body = match[1].trim()
+    if (body.startsWith('[')) out.push(body)
+  }
+
+  for (let i = 0; i < stream.length; i++) {
+    if (stream[i] !== '[') continue
+    const candidate = balancedJsonArrayAt(stream, i)
+    if (candidate) out.push(candidate)
+  }
+
+  return [...new Set(out)]
+}
+
+function balancedJsonArrayAt(text: string, start: number): string | null {
+  let depth = 0
+  let inString = false
+  let escaped = false
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i]
+    if (inString) {
+      if (escaped) {
+        escaped = false
+      } else if (ch === '\\') {
+        escaped = true
+      } else if (ch === '"') {
+        inString = false
+      }
+      continue
+    }
+    if (ch === '"') {
+      inString = true
+      continue
+    }
+    if (ch === '[') depth++
+    if (ch === ']') {
+      depth--
+      if (depth === 0) return text.slice(start, i + 1).trim()
+      if (depth < 0) return null
+    }
+  }
+  return null
 }
 
 export interface GeneratedFile {

@@ -52,6 +52,43 @@ chatter after`
     expect(r.error).toMatch(/marker not found/)
   })
 
+  it('accepts a valid unmarked plan array when the agent omits markers', () => {
+    const r = extractPlan(`assistant final answer:
+[
+  {
+    "coverageType": "happy-path",
+    "step": "Open login page",
+    "actions": ["Navigate to /login"],
+    "expectedOutcome": "The login form is visible."
+  }
+]`)
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.value[0].step).toBe('Open login page')
+  })
+
+  it('accepts an unmarked plan array inside a JSON fence', () => {
+    const r = extractPlan(`Here is the plan:
+\`\`\`json
+[
+  {
+    "step": "Submit valid credentials",
+    "actions": ["Fill the email field", "Fill the password field"],
+    "expectedOutcome": "The dashboard is shown."
+  }
+]
+\`\`\``)
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.value[0].actions).toEqual(['Fill the email field', 'Fill the password field'])
+  })
+
+  it('does not treat unrelated JSON arrays as plans', () => {
+    const r = extractPlan('[\"react\", \"vite\"]')
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.error).toMatch(/marker not found/)
+  })
+
   it('fails when close marker is missing', () => {
     const r = extractPlan('<plan-output>[]')
     expect(r.ok).toBe(false)
