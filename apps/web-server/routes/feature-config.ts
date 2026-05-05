@@ -169,6 +169,31 @@ export async function featureConfigRoutes(
     },
   )
 
+  app.delete<{ Params: { name: string }; Body: { confirmName?: string } }>(
+    '/api/features/:name',
+    async (req, reply) => {
+      const features = loadFeatures(deps.featuresDir)
+      const feature = features.find((f) => f.name === req.params.name)
+      if (!feature?.featureDir) {
+        reply.code(404)
+        return { error: 'feature not found' }
+      }
+      if (req.body?.confirmName !== feature.name) {
+        reply.code(400)
+        return { error: 'confirmName must match the feature name' }
+      }
+      const featuresRoot = path.resolve(deps.featuresDir)
+      const featureDir = path.resolve(feature.featureDir)
+      if (featureDir === featuresRoot || !isWithin(featuresRoot, featureDir)) {
+        reply.code(400)
+        return { error: 'feature directory is outside the features root' }
+      }
+      fs.rmSync(featureDir, { recursive: true, force: true })
+      reply.code(204)
+      return null
+    },
+  )
+
   // ─── playwright.config.{ts,js,cjs} ────────────────────────────────────
 
   app.get<{ Params: { name: string } }>('/api/features/:name/playwright', async (req, reply) => {

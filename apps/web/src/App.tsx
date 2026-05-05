@@ -108,13 +108,18 @@ export function App() {
             setSelectedFeature(name)
             setSelectedRunId(allRuns.find((r) => r.feature === name)?.runId ?? null)
           }}
-          onFeaturesChanged={(acceptedFeature) => {
+          onFeaturesChanged={(preferredFeature) => {
             api.listFeatures().then((data) => {
               setFeatures(data)
-              if (acceptedFeature && data.some((f) => f.name === acceptedFeature)) {
+              if (preferredFeature && data.some((f) => f.name === preferredFeature)) {
                 pendingRunSelectionRef.current = null
-                setSelectedFeature(acceptedFeature)
-                setSelectedRunId(allRuns.find((r) => r.feature === acceptedFeature)?.runId ?? null)
+                setSelectedFeature(preferredFeature)
+                setSelectedRunId(allRuns.find((r) => r.feature === preferredFeature)?.runId ?? null)
+              } else if (!selectedFeature || !data.some((f) => f.name === selectedFeature)) {
+                const nextFeature = data[0]?.name ?? null
+                pendingRunSelectionRef.current = null
+                setSelectedFeature(nextFeature)
+                setSelectedRunId(nextFeature ? allRuns.find((r) => r.feature === nextFeature)?.runId ?? null : null)
               }
             }).catch(() => {})
           }}

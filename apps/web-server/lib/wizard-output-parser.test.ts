@@ -83,6 +83,20 @@ chatter after`
     expect(r.value[0].actions).toEqual(['Fill the email field', 'Fill the password field'])
   })
 
+  it('finds an unmarked plan after bracket-like content inside a string', () => {
+    const r = extractPlan(`debug payload: ["not a plan with an escaped quote: \\""]
+[
+  {
+    "step": "Open settings",
+    "actions": ["Click the settings item with text \\"[beta]\\""],
+    "expectedOutcome": "Settings is visible."
+  }
+]`)
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.value[0].actions[0]).toContain('[beta]')
+  })
+
   it('does not treat unrelated JSON arrays as plans', () => {
     const r = extractPlan('[\"react\", \"vite\"]')
     expect(r.ok).toBe(false)

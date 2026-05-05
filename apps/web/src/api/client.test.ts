@@ -11,6 +11,7 @@ import {
   createDraft,
   cancelDraftGeneration,
   deleteDraft,
+  deleteFeature,
   deleteEnvsetSlot,
   deleteJournalEntry,
   deleteRun,
@@ -33,6 +34,7 @@ import {
   putEnvsetSlot,
   putFeatureConfigDoc,
   putPlaywrightConfig,
+  readDotenvFile,
   recommendSkills,
   rejectDraft,
   startRun,
@@ -45,6 +47,7 @@ import {
   openAgentApp,
   openEditor,
   sendAgentInput,
+  extractPrdDocuments,
 } from './client'
 
 const ok = (body: unknown, status = 200): Response =>
@@ -239,6 +242,31 @@ describe('api client', () => {
     expect(call[1].method).toBe('POST')
   })
 
+  it('extractPrdDocuments builds multipart form data with optional text and files', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(ok({ prdText: 'combined', documents: [] }))
+    const file = new File(['hello'], 'prd.md', { type: 'text/markdown' })
+
+    await extractPrdDocuments({ prdText: 'notes', files: [file] }, { fetchImpl })
+
+    const [url, init] = fetchImpl.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('/api/tests/prd-documents')
+    expect(init.method).toBe('POST')
+    expect(init.body).toBeInstanceOf(FormData)
+    const form = init.body as FormData
+    expect(form.get('prdText')).toBe('notes')
+    expect(form.getAll('files')).toEqual([file])
+  })
+
+  it('extractPrdDocuments omits empty optional PRD text', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(ok({ prdText: '', documents: [] }))
+
+    await extractPrdDocuments({ files: [] }, { fetchImpl })
+
+    const form = (fetchImpl.mock.calls[0] as [string, RequestInit])[1].body as FormData
+    expect(form.has('prdText')).toBe(false)
+    expect(form.getAll('files')).toEqual([])
+  })
+
   it('cancelDraftGeneration POSTs to cancel endpoint', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(ok({ draftId: 'd', status: 'cancelled' }))
     const out = await cancelDraftGeneration('d', { fetchImpl })
@@ -324,6 +352,16 @@ describe('api client', () => {
     const init = fetchImpl.mock.calls[1][1] as RequestInit
     expect(init.method).toBe('PUT')
     expect(JSON.parse(init.body as string)).toEqual({ value: { name: 'b' } })
+  })
+
+  it('deleteFeature DELETEs with the typed confirmation name', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(null, { status: 204 }))
+    await expect(deleteFeature('a/b', 'a/b', { fetchImpl })).resolves.toBeUndefined()
+    expect(fetchImpl).toHaveBeenCalledWith('/api/features/a%2Fb', {
+      method: 'DELETE',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ confirmName: 'a/b' }),
+    })
   })
 
   it('getPlaywrightConfig + putPlaywrightConfig', async () => {
@@ -471,6 +509,15 @@ describe('api client', () => {
     const fetchImpl = vi.fn().mockResolvedValue(ok({ dir: '/', parent: null, entries: [] }))
     await browseDir('', { fetchImpl })
     expect(fetchImpl.mock.calls[0][0]).toBe('/api/fs/browse')
+  })
+
+  it('readDotenvFile GETs the encoded dotenv path', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(ok({ path: '/repo/.env.local', entries: [], unparsedLines: [] }))
+    await readDotenvFile('/repo/.env local', { fetchImpl })
+    expect(fetchImpl).toHaveBeenCalledWith(
+      '/api/fs/read-dotenv?path=%2Frepo%2F.env%20local',
+      { method: 'GET' },
+    )
   })
 
   it('getGitRemote sends the path query param', async () => {

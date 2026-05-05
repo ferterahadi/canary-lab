@@ -3,22 +3,50 @@ import { GeneralTab } from './config/GeneralTab'
 import { ReposTab } from './config/ReposTab'
 import { EnvsetsTab } from './config/EnvsetsTab'
 import { PlaywrightTab } from './config/PlaywrightTab'
+import { ConfirmModal } from './config/atoms'
+import * as api from '../api/client'
 
 type Tab = 'general' | 'repos' | 'envsets' | 'playwright'
 
 interface Props {
   feature: string
   onClose: () => void
+  onDeleted?: (feature: string) => void
 }
 
-export function FeatureConfigEditor({ feature, onClose }: Props) {
+export function FeatureConfigEditor({ feature, onClose, onDeleted }: Props) {
   const [tab, setTab] = useState<Tab>('general')
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const [confirmName, setConfirmName] = useState('')
+  const [deleting, setDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => { if (e.key === 'Escape') onClose() }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
+
+  const closeDeleteConfirm = (): void => {
+    if (deleting) return
+    setConfirmDelete(false)
+    setConfirmName('')
+    setDeleteError(null)
+  }
+
+  const deleteCurrentFeature = async (): Promise<void> => {
+    if (confirmName !== feature || deleting) return
+    setDeleting(true)
+    setDeleteError(null)
+    try {
+      await api.deleteFeature(feature, confirmName)
+      onDeleted?.(feature)
+      onClose()
+    } catch (err: unknown) {
+      setDeleteError(err instanceof Error ? err.message : 'Delete failed')
+      setDeleting(false)
+    }
+  }
 
   return (
     <div
@@ -40,6 +68,22 @@ export function FeatureConfigEditor({ feature, onClose }: Props) {
               {feature}
             </div>
           </div>
+          <button
+            type="button"
+            onClick={() => {
+              setConfirmDelete(true)
+              setConfirmName('')
+              setDeleteError(null)
+            }}
+            aria-label={`Delete ${feature}`}
+            title="Delete feature"
+            className="cl-icon-button h-7 w-7 shrink-0"
+            style={{ border: '1px solid color-mix(in srgb, var(--danger) 36%, var(--border-default))', color: 'var(--danger)' }}
+          >
+            <svg viewBox="0 0 16 16" width="13" height="13" fill="currentColor" aria-hidden="true">
+              <path d="M5.5 2h5l.5 1H14v1H2V3h3l.5-1zM3.5 5h9l-.7 8.2a1.5 1.5 0 0 1-1.5 1.3H5.7a1.5 1.5 0 0 1-1.5-1.3L3.5 5zm2.5 2v6h1V7H6zm3 0v6h1V7H9z" />
+            </svg>
+          </button>
           <button
             type="button"
             onClick={onClose}
@@ -69,6 +113,35 @@ export function FeatureConfigEditor({ feature, onClose }: Props) {
           {tab === 'envsets' && <EnvsetsTab feature={feature} />}
           {tab === 'playwright' && <PlaywrightTab feature={feature} />}
         </div>
+        <ConfirmModal
+          open={confirmDelete}
+          title="Delete feature"
+          message={
+            <div className="space-y-3">
+              <p>
+                This permanently deletes <code style={{ fontFamily: 'var(--font-mono)' }}>{feature}</code> from the features folder, including its config, Playwright tests, envsets, and helper files.
+              </p>
+              <p style={{ color: 'var(--danger)' }}>
+                This cannot be undone. Type the feature name to confirm.
+              </p>
+              <input
+                value={confirmName}
+                onChange={(e) => setConfirmName(e.target.value)}
+                className="cl-input w-full rounded-md px-2 py-1.5 text-xs"
+                style={{ fontFamily: 'var(--font-mono)' }}
+                autoFocus
+                placeholder={feature}
+              />
+              {deleteError && <p style={{ color: 'var(--danger)' }}>{deleteError}</p>}
+            </div>
+          }
+          confirmLabel="Delete Feature"
+          variant="danger"
+          busy={deleting}
+          confirmDisabled={confirmName !== feature}
+          onCancel={closeDeleteConfirm}
+          onConfirm={deleteCurrentFeature}
+        />
       </div>
     </div>
   )
