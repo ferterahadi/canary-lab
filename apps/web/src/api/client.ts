@@ -637,19 +637,15 @@ export function getDraft(id: string, opts?: ClientOptions): Promise<DraftRecord>
   )
 }
 
-export function refineDraftFile(
+export function getDraftAgentLog(
   id: string,
-  body: { path: string; selectedText: string; suggestion: string },
+  stage: 'planning' | 'generating',
   opts?: ClientOptions,
-): Promise<{ draftId: string; status: DraftRecord['status'] }> {
+): Promise<{ content: string }> {
   const { baseUrl, fetchImpl } = defaultOpts(opts)
-  return request<{ draftId: string; status: DraftRecord['status'] }>(
-    `${baseUrl}/api/tests/draft/${encodeURIComponent(id)}/refine-file`,
-    {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(body),
-    },
+  return request<{ content: string }>(
+    `${baseUrl}/api/tests/draft/${encodeURIComponent(id)}/agent-log?stage=${encodeURIComponent(stage)}`,
+    { method: 'GET' },
     fetchImpl,
   )
 }
@@ -687,9 +683,9 @@ export function acceptSpec(
   id: string,
   featureName?: string,
   opts?: ClientOptions,
-): Promise<{ draftId: string; status: string; featureDir: string }> {
+): Promise<{ draftId: string; status: string; featureDir: string; devDependenciesAdded?: string[] }> {
   const { baseUrl, fetchImpl } = defaultOpts(opts)
-  return request<{ draftId: string; status: string; featureDir: string }>(
+  return request<{ draftId: string; status: string; featureDir: string; devDependenciesAdded?: string[] }>(
     `${baseUrl}/api/tests/draft/${encodeURIComponent(id)}/accept-spec`,
     {
       method: 'POST',

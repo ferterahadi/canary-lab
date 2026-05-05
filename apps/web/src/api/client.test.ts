@@ -15,6 +15,7 @@ import {
   deleteJournalEntry,
   deleteRun,
   getDraft,
+  getDraftAgentLog,
   getDraftFile,
   getEnvsetSlot,
   getEnvsetsIndex,
@@ -92,6 +93,16 @@ describe('api client', () => {
       status: 404,
       body: 'not found',
     })
+  })
+
+  it('getDraftAgentLog fetches the full draft agent log by stage', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(ok({ content: 'full log' }))
+    const out = await getDraftAgentLog('d/1', 'generating', { baseUrl: 'http://x', fetchImpl })
+    expect(out).toEqual({ content: 'full log' })
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'http://x/api/tests/draft/d%2F1/agent-log?stage=generating',
+      { method: 'GET' },
+    )
   })
 
   it('listRuns sends ?feature= when filter provided', async () => {

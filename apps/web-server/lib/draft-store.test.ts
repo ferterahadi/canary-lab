@@ -9,10 +9,12 @@ import {
   deleteDraft,
   IllegalTransitionError,
   listDrafts,
+  mergeRootDevDependencies,
   paths,
   readDraft,
   slugifyFeatureName,
   transition,
+  validateFeatureTarget,
   writeDraft,
 } from './draft-store'
 
@@ -214,6 +216,102 @@ describe('applyToProject', () => {
     expect(r.ok).toBe(false)
     if (r.ok) return
     expect(r.error).toBe('invalid-name')
+  })
+})
+
+describe('validateFeatureTarget', () => {
+  it('returns the target feature directory when it is available', () => {
+    const r = validateFeatureTarget(tmp, 'checkout_flow')
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.featureDir).toBe(path.join(tmp, 'features', 'checkout_flow'))
+  })
+
+  it('checks feature name and existing directory without writing files', () => {
+    expect(validateFeatureTarget(tmp, 'bad name').ok).toBe(false)
+    fs.mkdirSync(path.join(tmp, 'features', 'login'), { recursive: true })
+    const existing = validateFeatureTarget(tmp, 'login')
+    expect(existing.ok).toBe(false)
+    if (existing.ok) return
+    expect(existing.error).toBe('feature-exists')
+  })
+})
+
+describe('mergeRootDevDependencies', () => {
+  it('returns early when no dependencies are requested', () => {
+    expect(mergeRootDevDependencies(tmp, [])).toEqual({ ok: true, added: [] })
+  })
+
+  it('reports a missing package.json', () => {
+    const r = mergeRootDevDependencies(tmp, ['@playwright/test'])
+    expect(r.ok).toBe(false)
+    if (r.ok) return
+    expect(r.error).toBe('package-json-missing')
+    expect(r.packageJsonPath).toBe(path.join(tmp, 'package.json'))
+  })
+
+  it('creates devDependencies when absent', () => {
+    const pkg = path.join(tmp, 'package.json')
+    fs.writeFileSync(pkg, JSON.stringify({ name: 'p' }), 'utf8')
+    const r = mergeRootDevDependencies(tmp, ['mysql2'])
+    expect(r).toMatchObject({ ok: true, added: ['mysql2'] })
+    const saved = JSON.parse(fs.readFileSync(pkg, 'utf8'))
+    expect(saved.devDependencies.mysql2).toBe('latest')
+  })
+
+  it('reports invalid package.json syntax and non-object JSON', () => {
+    const pkg = path.join(tmp, 'package.json')
+    fs.writeFileSync(pkg, '{bad json', 'utf8')
+    const invalid = mergeRootDevDependencies(tmp, ['x'])
+    expect(invalid.ok).toBe(false)
+    if (!invalid.ok) expect(invalid.error).toBe('package-json-invalid')
+
+    fs.writeFileSync(pkg, '[]', 'utf8')
+    const nonObject = mergeRootDevDependencies(tmp, ['x'])
+    expect(nonObject.ok).toBe(false)
+    if (!nonObject.ok) expect(nonObject.error).toBe('package-json-not-object')
+  })
+
+  it('reports invalid dependency maps', () => {
+    const pkg = path.join(tmp, 'package.json')
+    fs.writeFileSync(pkg, JSON.stringify({ dependencies: { x: 1 } }), 'utf8')
+    const badDeps = mergeRootDevDependencies(tmp, ['new-dep'])
+    expect(badDeps.ok).toBe(false)
+    if (!badDeps.ok) expect(badDeps.error).toBe('package-json-invalid')
+
+    fs.writeFileSync(pkg, JSON.stringify({ devDependencies: ['x'] }), 'utf8')
+    const badDevDeps = mergeRootDevDependencies(tmp, ['new-dep'])
+    expect(badDevDeps.ok).toBe(false)
+    if (!badDevDeps.ok) expect(badDevDeps.error).toBe('package-json-invalid')
+  })
+
+  it('adds only missing dev dependencies and preserves existing dependency owners', () => {
+    const pkg = path.join(tmp, 'package.json')
+    fs.writeFileSync(
+      pkg,
+      JSON.stringify({
+        dependencies: { react: '^19.0.0' },
+        devDependencies: { vitest: '^4.0.0' },
+      }),
+      'utf8',
+    )
+
+    const r = mergeRootDevDependencies(tmp, ['react', 'vitest', '@playwright/test'])
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.added).toEqual(['@playwright/test'])
+    const saved = JSON.parse(fs.readFileSync(pkg, 'utf8'))
+    expect(saved.dependencies.react).toBe('^19.0.0')
+    expect(saved.devDependencies.vitest).toBe('^4.0.0')
+    expect(saved.devDependencies['@playwright/test']).toBe('latest')
+  })
+
+  it('does not rewrite package.json when every dependency already exists', () => {
+    const pkg = path.join(tmp, 'package.json')
+    fs.writeFileSync(pkg, JSON.stringify({ dependencies: { react: '^19.0.0' } }), 'utf8')
+    const r = mergeRootDevDependencies(tmp, ['react'])
+    expect(r).toEqual({ ok: true, packageJsonPath: pkg, added: [] })
+    expect(JSON.parse(fs.readFileSync(pkg, 'utf8')).dependencies.react).toBe('^19.0.0')
   })
 })
 

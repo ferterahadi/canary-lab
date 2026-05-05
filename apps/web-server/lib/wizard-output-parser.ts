@@ -16,6 +16,21 @@ export interface PlanStep {
   expectedOutcome: string
 }
 
+export type WizardSessionKind = 'claude' | 'codex'
+
+export interface WizardSessionRef {
+  kind: WizardSessionKind
+  id: string
+}
+
+const SESSION_RE = /\[\[canary-lab:wizard-session agent=(claude|codex) id=([^\]\s]+)\]\]/
+
+export function extractWizardSessionRef(stream: string): WizardSessionRef | null {
+  const match = SESSION_RE.exec(stream)
+  if (!match) return null
+  return { kind: match[1] as WizardSessionKind, id: match[2] }
+}
+
 const PLAN_OPEN = '<plan-output>'
 const PLAN_CLOSE = '</plan-output>'
 
@@ -59,11 +74,18 @@ export interface GeneratedFile {
   content: string
 }
 
+export interface GeneratedSpecOutput {
+  files: GeneratedFile[]
+  devDependencies: string[]
+}
+
 // Block matcher that tolerates triple-backtick fences inside the file body —
 // we only require `<file path="…">` … `</file>` to bookend each file and
 // that paths be relative + free of `..` segments. Uses matchAll for cleaner
 // iteration than RegExp state.
 const FILE_BLOCK_RE = /<file\s+path="([^"]+)"\s*>([\s\S]*?)<\/file>/g
+const DEV_DEPS_BLOCK_RE = /<dev-dependencies\s*>([\s\S]*?)<\/dev-dependencies>/g
+const PACKAGE_NAME_RE = /^(?:@[a-z0-9._~-]+\/)?[a-z0-9._~-]+$/i
 
 export function extractGeneratedFiles(stream: string): ParseResult<GeneratedFile[]> {
   const out: GeneratedFile[] = []
@@ -84,4 +106,42 @@ export function extractGeneratedFiles(stream: string): ParseResult<GeneratedFile
   }
   if (out.length === 0) return { ok: false, error: 'no <file> blocks found' }
   return { ok: true, value: out }
+}
+
+export function extractDevDependencies(stream: string): ParseResult<string[]> {
+  const matches = [...stream.matchAll(DEV_DEPS_BLOCK_RE)]
+  if (matches.length === 0) return { ok: true, value: [] }
+  if (matches.length > 1) return { ok: false, error: 'multiple dev-dependencies blocks found' }
+
+  const body = matches[0][1].trim()
+  if (!body) return { ok: false, error: 'dev-dependencies body empty' }
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(body)
+  } catch (e) {
+    return { ok: false, error: `dev-dependencies JSON parse failed: ${(e as Error).message}` }
+  }
+  if (!Array.isArray(parsed)) return { ok: false, error: 'dev-dependencies must be a JSON array' }
+
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (let i = 0; i < parsed.length; i++) {
+    const value = parsed[i]
+    if (typeof value !== 'string') return { ok: false, error: `devDependencies[${i}] must be a string` }
+    const name = value.trim()
+    if (!name) return { ok: false, error: `devDependencies[${i}] is empty` }
+    if (!PACKAGE_NAME_RE.test(name)) return { ok: false, error: `invalid package name "${name}"` }
+    if (seen.has(name)) return { ok: false, error: `duplicate dev dependency "${name}"` }
+    seen.add(name)
+    out.push(name)
+  }
+  return { ok: true, value: out }
+}
+
+export function extractGeneratedSpecOutput(stream: string): ParseResult<GeneratedSpecOutput> {
+  const files = extractGeneratedFiles(stream)
+  if (!files.ok) return files
+  const devDependencies = extractDevDependencies(stream)
+  if (!devDependencies.ok) return devDependencies
+  return { ok: true, value: { files: files.value, devDependencies: devDependencies.value } }
 }

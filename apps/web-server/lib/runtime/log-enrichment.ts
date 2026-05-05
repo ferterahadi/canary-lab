@@ -2,9 +2,7 @@ import fs from 'fs'
 import path from 'path'
 import {
   DIAGNOSIS_JOURNAL_PATH,
-  FAILED_DIR,
   HEAL_INDEX_PATH,
-  LOGS_DIR,
   MANIFEST_PATH,
   ROOT,
   getSummaryPath,
@@ -68,26 +66,28 @@ export function extractLogsForTest(
   return extractAllSlices([slug], serviceLogs).get(slug) ?? {}
 }
 
-// Write per-failure slice files under logs/failed/<slug>/<svc>.log and return
+// Write per-failure slice files under <runDir>/failed/<slug>/<svc>.log and return
 // the list of relative paths + byte counts so callers can reference them from
 // the summary and the index.
 export interface PerFailureSlices {
-  logFiles: string[]        // repo-relative paths, e.g. "logs/failed/foo/svc-api.log"
+  logFiles: string[]        // repo-relative paths, e.g. "logs/runs/<run-id>/failed/foo/svc-api.log"
   bytesByPath: Record<string, number>
 }
 
 export function writeFailureSlices(
   slug: string,
   serviceLogs: string[],
+  failedDir?: string,
 ): PerFailureSlices {
-  return writeSlicesToDisk(slug, extractLogsForTest(slug, serviceLogs))
+  return writeSlicesToDisk(slug, extractLogsForTest(slug, serviceLogs), failedDir)
 }
 
 function writeSlicesToDisk(
   slug: string,
   slices: Record<string, string>,
+  failedDir: string = path.join(path.dirname(getSummaryPath()), 'failed'),
 ): PerFailureSlices {
-  const dir = path.join(FAILED_DIR, slug)
+  const dir = path.join(failedDir, slug)
   const logFiles: string[] = []
   const bytesByPath: Record<string, number> = {}
 
@@ -123,33 +123,65 @@ interface EnrichedSummary {
   complete?: boolean
 }
 
+interface ManifestService {
+  logPath?: string
+}
+
+function summaryPathToRunDir(summaryPath: string): string {
+  return path.dirname(summaryPath)
+}
+
+function manifestPathForSummary(summaryPath: string): string {
+  return path.join(summaryPathToRunDir(summaryPath), 'manifest.json')
+}
+
+function failedDirForSummary(summaryPath: string): string {
+  return path.join(summaryPathToRunDir(summaryPath), 'failed')
+}
+
+function healIndexPathForSummary(summaryPath: string): string {
+  return path.join(summaryPathToRunDir(summaryPath), 'heal-index.md')
+}
+
+function serviceLogsFromManifest(manifest: Manifest): string[] {
+  const legacy = Array.isArray(manifest.serviceLogs) ? manifest.serviceLogs : []
+  const current = Array.isArray(manifest.services)
+    ? manifest.services
+        .map((s) => s.logPath)
+        .filter((p): p is string => typeof p === 'string' && p.length > 0)
+    : []
+  return [...legacy, ...current]
+}
+
 // Rewrite e2e-summary.json so each failed[] entry carries logFiles (paths)
 // instead of logs (full embedded snippets). Keeps the summary small enough to
 // Read in one call — previously it ballooned past Claude's 256KB Read cap.
 //
 // Returns the parsed manifest + summary so a follow-up writeHealIndex() in the
 // same tick can reuse them instead of re-reading + re-parsing the same files.
-export function enrichSummaryWithLogs(): { manifest: Manifest; summary: EnrichedSummary } | null {
+export function enrichSummaryWithLogs(): { manifest: Manifest; summary: EnrichedSummary; summaryPath: string; healIndexPath: string } | null {
   const summaryPath = getSummaryPath()
-  if (!fs.existsSync(summaryPath) || !fs.existsSync(MANIFEST_PATH)) return null
+  const manifestPath = manifestPathForSummary(summaryPath)
+  if (!fs.existsSync(summaryPath) || !fs.existsSync(manifestPath)) return null
 
   const summary = JSON.parse(fs.readFileSync(summaryPath, 'utf-8')) as EnrichedSummary
-  const manifest = JSON.parse(fs.readFileSync(MANIFEST_PATH, 'utf-8')) as Manifest
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8')) as Manifest
 
   if (!Array.isArray(summary.failed) || summary.failed.length === 0) {
-    return { manifest, summary }
+    return { manifest, summary, summaryPath, healIndexPath: healIndexPathForSummary(summaryPath) }
   }
 
   const slugs = summary.failed
     .map((e) => (typeof e === 'string' ? e : e.name))
     .filter((n): n is string => typeof n === 'string' && n.length > 0)
-  const slicesBySlug = extractAllSlices(slugs, manifest.serviceLogs ?? [])
+  const slicesBySlug = extractAllSlices(slugs, serviceLogsFromManifest(manifest))
+  const failedDir = failedDirForSummary(summaryPath)
 
   summary.failed = summary.failed.map(
     (entry: string | FailedEntry): FailedEntry => {
       const base: FailedEntry = typeof entry === 'string' ? { name: entry } : { ...entry }
       const slices = slicesBySlug.get(base.name) ?? {}
-      const { logFiles } = writeSlicesToDisk(base.name, slices)
+      const { logFiles } = writeSlicesToDisk(base.name, slices, failedDir)
       // Never carry embedded `logs` forward — the per-failure files replace it.
       delete (base as { logs?: unknown }).logs
       if (logFiles.length > 0) {
@@ -162,7 +194,7 @@ export function enrichSummaryWithLogs(): { manifest: Manifest; summary: Enriched
   const tmpPath = `${summaryPath}.tmp`
   fs.writeFileSync(tmpPath, JSON.stringify(summary, null, 2) + '\n')
   fs.renameSync(tmpPath, summaryPath)
-  return { manifest, summary }
+  return { manifest, summary, summaryPath, healIndexPath: healIndexPathForSummary(summaryPath) }
 }
 
 // ─── Heal Index ─────────────────────────────────────────────────────────────
@@ -246,7 +278,9 @@ function truncateOneLine(s: string, max = 200): string {
 
 interface Manifest {
   serviceLogs?: string[]
+  services?: ManifestService[]
   featureName?: string
+  feature?: string
   featureDir?: string
   repoPaths?: string[]
   stoppedEarly?: {
@@ -257,9 +291,9 @@ interface Manifest {
   healCycleHistory?: Array<{ cycle: number; restarted: string[]; kept: string[] }>
 }
 
-function readManifest(): Manifest {
+function readManifest(file: string = MANIFEST_PATH): Manifest {
   try {
-    return JSON.parse(fs.readFileSync(MANIFEST_PATH, 'utf-8')) as Manifest
+    return JSON.parse(fs.readFileSync(file, 'utf-8')) as Manifest
   } catch {
     return {}
   }
@@ -288,17 +322,21 @@ function normalizeErrorKey(raw: string): string {
 export function writeHealIndex(parsed?: {
   manifest: Manifest
   summary: EnrichedSummary
+  healIndexPath?: string
 }): void {
   let summary: EnrichedSummary
   let manifest: Manifest
+  let healIndexPath = HEAL_INDEX_PATH
   if (parsed) {
     summary = parsed.summary
     manifest = parsed.manifest
+    healIndexPath = parsed.healIndexPath ?? healIndexPath
   } else {
     const summaryPath = getSummaryPath()
     if (!fs.existsSync(summaryPath)) return
     summary = JSON.parse(fs.readFileSync(summaryPath, 'utf-8')) as EnrichedSummary
-    manifest = readManifest()
+    manifest = readManifest(manifestPathForSummary(summaryPath))
+    healIndexPath = healIndexPathForSummary(summaryPath)
   }
 
   const failed = Array.isArray(summary.failed) ? summary.failed : []
@@ -315,8 +353,12 @@ export function writeHealIndex(parsed?: {
   }
   if (manifest.featureDir) {
     lines.push(`Feature: ${path.relative(ROOT, manifest.featureDir) || manifest.featureDir}`)
-  } else if (manifest.featureName) {
-    lines.push(`Feature: ${manifest.featureName}`)
+  } else if (manifest.feature ?? manifest.featureName) {
+    if (manifest.feature) {
+      lines.push(`Feature: ${manifest.feature}`)
+    } else if (manifest.featureName) {
+      lines.push(`Feature: ${manifest.featureName}`)
+    }
   }
   if (manifest.repoPaths && manifest.repoPaths.length > 0) {
     lines.push(`Repos:   ${manifest.repoPaths.join(', ')}`)
@@ -364,10 +406,10 @@ export function writeHealIndex(parsed?: {
     lines.push('')
   }
 
-  fs.mkdirSync(LOGS_DIR, { recursive: true })
-  const tmp = `${HEAL_INDEX_PATH}.tmp`
+  fs.mkdirSync(path.dirname(healIndexPath), { recursive: true })
+  const tmp = `${healIndexPath}.tmp`
   fs.writeFileSync(tmp, lines.join('\n'))
-  fs.renameSync(tmp, HEAL_INDEX_PATH)
+  fs.renameSync(tmp, healIndexPath)
 }
 
 // ─── Journal append (runner-side) ───────────────────────────────────────────

@@ -34,8 +34,8 @@ Each array item has exactly four fields:
 3. **Cover the feature, not just the sunny day.** Include happy paths, sad paths, edge cases, validation failures, permission/state boundaries, and regression-risk cases that are actually implied by the PRD/repositories.
 4. **No selectors in `step`.** Selectors / locators belong in `actions`.
 5. **No shallow assertions.** Expected outcomes must name durable observable behavior, data state, error copy, navigation, emitted request, or persisted result. Avoid vague outcomes like "it works" or "status is OK".
-6. **Group by test intent.** It is fine to produce 10-30 items when the inferred behavior warrants it, but each item must map to a meaningful `test.step` in the generated specs.
-7. **Design for generated Playwright specs.** Every item should be specific enough for the Spec agent to create durable `test.step(...)` blocks, strong assertions, and realistic setup/teardown inside a Canary Lab feature.
+6. **Group by test intent.** It is fine to produce 10-30 items when the inferred behavior warrants it, but each item must map to a meaningful top-level Playwright `test(...)` in the generated specs.
+7. **Design for generated Playwright specs.** Every item should be specific enough for the Spec agent to create durable test titles, strong assertions, and realistic setup/teardown inside a Canary Lab feature.
 8. **Output exactly one `<plan-output>...</plan-output>` block.** Anything else (preamble, reasoning, postscript) is fine outside the markers, but the markers themselves must appear once and contain valid JSON.
 
 ## Example output

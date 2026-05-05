@@ -93,3 +93,31 @@ export function colorClassForStatus(status: StepStatus): string {
       return 'border-zinc-300 bg-zinc-50/40 dark:border-zinc-700 dark:bg-zinc-900/30'
   }
 }
+
+export function statusPillClassForStatus(status: StepStatus): string {
+  switch (status) {
+    case 'passed':
+      return 'border-emerald-500/60 bg-emerald-50 text-emerald-700 dark:border-emerald-400/60 dark:bg-emerald-400/10 dark:text-emerald-300'
+    case 'testing':
+      return 'border-sky-500/60 bg-sky-50 text-sky-700 dark:border-sky-400/60 dark:bg-sky-400/10 dark:text-sky-300'
+    case 'failed':
+      return 'border-rose-500/60 bg-rose-50 text-rose-700 dark:border-rose-400/60 dark:bg-rose-400/10 dark:text-rose-300'
+    case 'timedout':
+    case 'skipped':
+      return 'border-amber-500/60 bg-amber-50 text-amber-700 dark:border-amber-400/60 dark:bg-amber-400/10 dark:text-amber-300'
+    case 'pending':
+    default:
+      return 'border-zinc-400/70 bg-transparent text-zinc-600 dark:border-zinc-500/70 dark:text-zinc-300'
+  }
+}
+
+export function statusLabel(status: StepStatus): string {
+  switch (status) {
+    case 'passed':
+      return 'succeed'
+    case 'testing':
+      return 'running'
+    default:
+      return status
+  }
+}

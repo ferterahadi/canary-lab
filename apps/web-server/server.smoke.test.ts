@@ -266,17 +266,32 @@ describe('Add Test wizard end-to-end (mocked claude -p)', () => {
       },
     ])
     const specStream = `<file path="feature.config.cjs">
-module.exports = { name: 'login_flow', services: [] }
+const config = {
+  name: 'login_flow',
+  description: 'Login flow',
+  envs: ['local'],
+  repos: [],
+  featureDir: __dirname,
+}
+module.exports = { config }
+</file>
+<file path="playwright.config.cjs">
+const path = require('node:path')
+const { config: loadDotenv } = require('dotenv')
+const { defineConfig } = require('@playwright/test')
+const { baseConfig } = require('canary-lab/feature-support/playwright-base')
+loadDotenv({ path: path.join(__dirname, '.env') })
+module.exports = defineConfig({ ...baseConfig })
 </file>
 <file path="e2e/login.spec.ts">
-import { test, expect } from '@playwright/test'
-test('login', async ({ page }) => {
-  await test.step('Open the login page', async () => {
-    await page.goto('/login')
-  })
-  await test.step('Submit credentials', async () => {
-    await expect(page).toHaveURL(/dashboard/)
-  })
+import { test, expect } from 'canary-lab/feature-support/log-marker-fixture'
+test('Open the login page', async ({ page }) => {
+  await page.goto('/login')
+  await expect(page.getByLabel('Email')).toBeVisible()
+})
+test('Submit credentials', async ({ page }) => {
+  await page.goto('/login')
+  await expect(page).toHaveURL(/dashboard/)
 })
 </file>`
 
@@ -289,6 +304,7 @@ test('login', async ({ page }) => {
         return `<plan-output>${planJson}</plan-output>`
       },
       spawnSpecAgent: async (input) => {
+        expect(input.featureName).toBe('login_flow')
         fs.mkdirSync(path.dirname(input.agentLogPath), { recursive: true })
         fs.writeFileSync(input.agentLogPath, 'spec agent ran', 'utf8')
         return specStream
@@ -334,7 +350,7 @@ test('login', async ({ page }) => {
 
       const specReady = await waitForStatus(app, draftId, 'spec-ready')
       expect(specReady.generatedFiles).toEqual(
-        expect.arrayContaining(['feature.config.cjs', 'e2e/login.spec.ts']),
+        expect.arrayContaining(['feature.config.cjs', 'playwright.config.cjs', 'e2e/login.spec.ts']),
       )
 
       // Accept the spec — files materialize under features/<name>/.
@@ -349,11 +365,14 @@ test('login', async ({ page }) => {
 
       const featureDir = path.join(projectRoot, 'features', 'login_flow')
       expect(fs.existsSync(path.join(featureDir, 'feature.config.cjs'))).toBe(true)
+      expect(fs.existsSync(path.join(featureDir, 'playwright.config.cjs'))).toBe(true)
       expect(fs.existsSync(path.join(featureDir, 'e2e', 'login.spec.ts'))).toBe(true)
       const spec = fs.readFileSync(path.join(featureDir, 'e2e', 'login.spec.ts'), 'utf8')
-      // Plan-step rule: each plan label appears verbatim as a test.step label.
-      expect(spec).toContain(`test.step('Open the login page'`)
-      expect(spec).toContain(`test.step('Submit credentials'`)
+      // Plan items should be top-level test titles, not duplicate inner steps.
+      expect(spec).toContain(`test('Open the login page'`)
+      expect(spec).toContain(`test('Submit credentials'`)
+      expect(spec).not.toContain(`test.step('Open the login page'`)
+      expect(spec).not.toContain(`test.step('Submit credentials'`)
     } finally {
       await app.close()
     }

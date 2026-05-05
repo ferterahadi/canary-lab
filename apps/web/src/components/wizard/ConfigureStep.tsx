@@ -270,7 +270,7 @@ export function ConfigureStep({
                     disabled={repoAdding}
                     className="rounded bg-sky-600 px-3 py-1.5 text-xs text-white hover:bg-sky-500 disabled:opacity-50"
                   >
-                    {repoAdding ? 'Adding...' : 'Add pasted path'}
+                    {repoAdding ? 'Adding...' : 'Add path'}
                   </button>
                 </div>
                 {repoAddError && <div className="mt-2 text-[11px] text-rose-400">{repoAddError}</div>}
@@ -359,7 +359,7 @@ export function ConfigureStep({
           disabled={!validation.ok || submitting || extracting}
           className="rounded bg-emerald-600 px-3 py-1.5 text-xs text-zinc-50 hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {submitting || extracting ? 'Starting harness…' : 'Run E2E harness'}
+          {submitting || extracting ? 'Starting draft...' : 'Draft test plan'}
         </button>
       </div>
     </div>

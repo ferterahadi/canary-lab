@@ -8,13 +8,26 @@
  * events are summarized.
  */
 export {}
+import {
+  c,
+  formatToolCall,
+  formatToolResult,
+  toolLabel,
+} from './claude-formatter'
 
 interface AnyObj {
   [key: string]: unknown
 }
 
 const START = Date.now()
-const pendingTools = new Map<string, string>()
+interface PendingTool {
+  name: string
+}
+
+const pendingTools = new Map<string, PendingTool>()
+const SESSION_MARKER = '[[canary-lab:wizard-session'
+const announcedPartialFiles = new Set<string>()
+let announcedDrafting = false
 
 function elapsed(): string {
   const s = Math.floor((Date.now() - START) / 1000)
@@ -24,7 +37,7 @@ function elapsed(): string {
 }
 
 function tag(): string {
-  return `[${elapsed()}]`
+  return c('gray', `[${elapsed()}]`)
 }
 
 function truncate(text: string, max = 140): string {
@@ -61,6 +74,35 @@ function resultSummary(raw: unknown): string {
   return first ? truncate(first.trim()) : ''
 }
 
+function isPartialAssistantMessage(msg: AnyObj): boolean {
+  const message = msg.message as AnyObj | undefined
+  return msg.partial === true
+    || msg.is_partial === true
+    || message?.partial === true
+    || (
+      message !== undefined
+      && Object.prototype.hasOwnProperty.call(message, 'stop_reason')
+      && message.stop_reason == null
+    )
+}
+
+function emitPartialProgress(text: string): void {
+  const matches = [...text.matchAll(/<file\s+path="([^"]+)"/g)]
+  if (matches.length === 0) {
+    if (!announcedDrafting && text.trim()) {
+      announcedDrafting = true
+      process.stdout.write(`${tag()} ${c('magenta', 'drafting')} ${c('dim', 'spec output...')}\n`)
+    }
+    return
+  }
+  for (const match of matches) {
+    const filePath = match[1]
+    if (!filePath || announcedPartialFiles.has(filePath)) continue
+    announcedPartialFiles.add(filePath)
+    process.stdout.write(`${tag()} ${c('magenta', 'writing')} ${c('dim', filePath)}\n`)
+  }
+}
+
 function handleLine(line: string): void {
   const trimmed = line.trim()
   if (!trimmed) return
@@ -74,9 +116,15 @@ function handleLine(line: string): void {
   const type = msg.type as string | undefined
 
   if (type === 'system' && msg.subtype === 'init') {
-    const sid = String(msg.session_id ?? '').slice(0, 8)
+    const fullSid = typeof msg.session_id === 'string' ? msg.session_id : ''
+    const sid = fullSid.slice(0, 8)
     const model = String(msg.model ?? 'unknown')
-    process.stdout.write(`${tag()} session ${sid || 'started'} (${model})\n`)
+    if (fullSid) {
+      process.stdout.write(`${SESSION_MARKER} agent=claude id=${fullSid}]]\n`)
+    }
+    process.stdout.write(
+      `${tag()} ${c('magenta', 'session')} ${c('bold', sid || 'started')} ${c('dim', `(${model})`)}\n\n`,
+    )
     return
   }
 
@@ -84,21 +132,26 @@ function handleLine(line: string): void {
     const message = msg.message as AnyObj | undefined
     const content = message?.content as Array<AnyObj> | undefined
     if (!Array.isArray(content)) return
+    const partial = isPartialAssistantMessage(msg)
     for (const block of content) {
       if (block.type === 'text' && typeof block.text === 'string' && block.text.trim()) {
+        if (partial) {
+          emitPartialProgress(block.text)
+          continue
+        }
         process.stdout.write(`${block.text.trimEnd()}\n`)
         continue
       }
       if (block.type === 'thinking') {
         const text = typeof block.thinking === 'string' ? block.thinking.trim() : ''
-        if (text) process.stdout.write(`${tag()} thinking ${truncate(text.split('\n')[0])}\n`)
+        if (text) process.stdout.write(`${tag()} ${c('magenta', 'thinking')} ${c('dim', truncate(text.split('\n')[0]))}\n`)
         continue
       }
       if (block.type === 'tool_use') {
         const name = String(block.name ?? 'tool')
         const id = String(block.id ?? '')
-        if (id) pendingTools.set(id, name)
-        process.stdout.write(`${tag()} ${name} ${toolSummary(name, block.input as AnyObj)}\n`)
+        if (id) pendingTools.set(id, { name })
+        process.stdout.write(`${tag()} ${toolLabel(name)} ${formatToolCall(name, block.input as AnyObj)}\n`)
       }
     }
     return
@@ -111,10 +164,21 @@ function handleLine(line: string): void {
     for (const block of content) {
       if (block.type !== 'tool_result') continue
       const id = String(block.tool_use_id ?? '')
-      const name = pendingTools.get(id) ?? 'tool'
+      const pending = pendingTools.get(id)
       pendingTools.delete(id)
-      const summary = resultSummary(block.content)
-      if (summary) process.stdout.write(`${tag()} ${name} -> ${summary}\n`)
+      const name = pending?.name ?? 'tool'
+      const raw = block.content
+      const text =
+        typeof raw === 'string'
+          ? raw
+          : Array.isArray(raw)
+            ? (raw.find((item: AnyObj) => item.type === 'text') as AnyObj | undefined)?.text ?? ''
+            : ''
+      if (typeof text !== 'string') continue
+      const summary = formatToolResult(name, text)
+      if (!summary) continue
+      const prefix = block.is_error === true ? c('red', '       x') : c('gray', '       ->')
+      process.stdout.write(`${prefix} ${summary}\n`)
     }
     return
   }
@@ -122,12 +186,13 @@ function handleLine(line: string): void {
   if (type === 'result') {
     const durationMs = Number(msg.duration_ms ?? 0)
     const isError = msg.is_error === true
-    const label = isError ? 'failed' : 'done'
+    const label = isError ? c('red', 'failed') : c('green', 'done')
     const dur = durationMs > 0 ? ` in ${(durationMs / 1000).toFixed(1)}s` : ''
-    process.stdout.write(`${tag()} ${label}${dur}\n`)
+    process.stdout.write(`\n${tag()} ${label}${c('dim', dur)}\n`)
   }
 }
 
+/* v8 ignore next -- CLI stdin wiring is exercised through the exported line handler. */
 if (require.main === module) {
   let buffer = ''
   process.stdin.setEncoding('utf-8')

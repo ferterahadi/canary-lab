@@ -9,6 +9,7 @@ import {
   getEnvSetsDir,
   loadConfig,
 } from '../lib/runtime/env-switcher/switch'
+import type { EnvSetsConfig } from '../lib/runtime/env-switcher/types'
 
 export interface FeaturesRouteDeps {
   featuresDir: string
@@ -73,7 +74,9 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
     //    `${var}` substituted). On failure, fall back to AST-only output.
     const pwList = await listPlaywrightTests(feature.featureDir, {
       spawner: deps.playwrightListSpawner,
-      env: envsetProcessEnv(feature.featureDir, feature.envs?.[0]),
+      env: envsetProcessEnv(feature.featureDir, feature.envs?.[0], (err) => {
+        app.log.warn({ err, feature: feature.name }, 'ignoring invalid feature envset config while listing tests')
+      }),
     })
 
     if (pwList === null) {
@@ -132,15 +135,24 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
   })
 }
 
-function envsetProcessEnv(featureDir: string, envName: string | undefined): NodeJS.ProcessEnv {
+function envsetProcessEnv(
+  featureDir: string,
+  envName: string | undefined,
+  warn: (err: unknown) => void = () => {},
+): NodeJS.ProcessEnv {
   if (!envName) return {}
   const envSetsDir = getEnvSetsDir(featureDir)
   if (!fs.existsSync(path.join(envSetsDir, 'envsets.config.json'))) return {}
 
-  let config: ReturnType<typeof loadConfig>
+  let config: EnvSetsConfig
   try {
     config = loadConfig(featureDir)
-  } catch {
+    if (!isEnvSetsConfig(config)) {
+      warn(new Error('envsets.config.json is missing required feature.slots or slots fields'))
+      return {}
+    }
+  } catch (err) {
+    warn(err)
     return {}
   }
 
@@ -156,4 +168,16 @@ function envsetProcessEnv(featureDir: string, envName: string | undefined): Node
     } catch { /* ignore unreadable envset slots */ }
   }
   return env
+}
+
+function isEnvSetsConfig(config: unknown): config is EnvSetsConfig {
+  if (!config || typeof config !== 'object') return false
+  const value = config as Partial<EnvSetsConfig>
+  return Boolean(value.feature)
+    && typeof value.feature === 'object'
+    && Array.isArray(value.feature.slots)
+    && value.feature.slots.every((slot) => typeof slot === 'string')
+    && Boolean(value.slots)
+    && typeof value.slots === 'object'
+    && !Array.isArray(value.slots)
 }

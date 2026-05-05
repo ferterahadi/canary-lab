@@ -35,15 +35,27 @@ class FakeSocket {
 const reset = (): void => { FakeSocket.instances = [] }
 
 describe('connectDraftAgent', () => {
-  it('builds URL with draftId encoded under /ws/draft', () => {
+  it('builds URL with draftId encoded under /ws/draft and stage query', () => {
     reset()
     connectDraftAgent({
       draftId: 'd/1',
+      stage: 'generating',
       onData: () => {},
       WebSocketImpl: FakeSocket as unknown as typeof WebSocket,
       wsBase: 'ws://test',
     })
-    expect(FakeSocket.instances[0].url).toBe('ws://test/ws/draft/d%2F1/agent')
+    expect(FakeSocket.instances[0].url).toBe('ws://test/ws/draft/d%2F1/agent?stage=generating')
+  })
+
+  it('defaults the stream stage to planning', () => {
+    reset()
+    connectDraftAgent({
+      draftId: 'd',
+      onData: () => {},
+      WebSocketImpl: FakeSocket as unknown as typeof WebSocket,
+      wsBase: 'ws://test',
+    })
+    expect(FakeSocket.instances[0].url).toBe('ws://test/ws/draft/d/agent?stage=planning')
   })
 
   it('forwards data chunks to onData', () => {
@@ -252,7 +264,7 @@ describe('connectDraftAgent', () => {
         onData: () => {},
         WebSocketImpl: FakeSocket as unknown as typeof WebSocket,
       })
-      expect(FakeSocket.instances[0].url).toBe('wss://example.com/ws/draft/d/agent')
+      expect(FakeSocket.instances[0].url).toBe('wss://example.com/ws/draft/d/agent?stage=planning')
     } finally {
       ;(globalThis as { location?: Location | undefined }).location = orig
     }

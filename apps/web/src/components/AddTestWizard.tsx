@@ -123,21 +123,6 @@ export function AddTestWizard({ features, onClose }: Props) {
     }
   }, [draft, configureInput])
 
-  const handleRefineFile = useCallback(async (input: { path: string; selectedText: string; suggestion: string }): Promise<void> => {
-    if (!draft) return
-    setActing(true)
-    setErrorMessage(null)
-    try {
-      await api.refineDraftFile(draft.draftId, input)
-      const fresh = await api.getDraft(draft.draftId)
-      setDraft(fresh)
-    } catch (e) {
-      setErrorMessage(e instanceof Error ? e.message : 'Refine failed')
-    } finally {
-      setActing(false)
-    }
-  }, [draft])
-
   const handleCancelGeneration = useCallback(async (): Promise<void> => {
     if (!draft) return
     setActing(true)
@@ -271,7 +256,6 @@ export function AddTestWizard({ features, onClose }: Props) {
             draft={draft}
             featureName={featureNameForStep}
             onAccept={handleAcceptSpec}
-            onRefine={handleRefineFile}
             onReject={handleRejectAndClose}
             onRetry={handleRetry}
             onCancelGeneration={handleCancelGeneration}

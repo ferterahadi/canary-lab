@@ -65,7 +65,7 @@ const TOOL_ICONS: Record<string, string> = {
   Read: '📖',
   Edit: '✏️ ',
   Write: '✏️ ',
-  Bash: '$ ',
+  Bash: '$',
   Glob: '🔍',
   Grep: '🔍',
   TodoWrite: '📋',
@@ -76,7 +76,7 @@ const TOOL_ICONS: Record<string, string> = {
 
 function toolLabel(name: string): string {
   const icon = TOOL_ICONS[name] ?? '•'
-  return `${icon} ${c('cyan', name.padEnd(6))}`
+  return `${icon} ${c('cyan', name)}`
 }
 
 function formatToolCall(name: string, input: AnyObj): string {
@@ -300,6 +300,7 @@ function handleLine(line: string): void {
   }
 }
 
+/* v8 ignore next -- CLI stdin wiring is exercised through the exported line handler. */
 if (require.main === module) {
   let buffer = ''
   process.stdin.setEncoding('utf-8')

@@ -82,8 +82,8 @@ Pass `--no-open` to suppress the browser auto-launch (useful over SSH or in CI).
 - `features/broken_todo_api` — CRUD API with intentional handler bugs; a warm-up for the self-heal workflow
 - `features/tricky_checkout_api` — checkout API with subtle pricing/calculation bugs
 - `features/flaky_orders_api` — orders API with env-driven config and subtle coupon/tax bugs
-- `CLAUDE.md` for Claude (contains the `Self-Heal Workflow` inline, plus `.claude/skills/env-import.md` for importing env files from repos)
-- `AGENTS.md` for Codex (matching guide; env-import skill at `.codex/env-import.md`)
+- `CLAUDE.md` for Claude (manual `self heal` guide using `logs/current/...`, plus `.claude/skills/env-import.md` for importing env files from repos)
+- `AGENTS.md` for Codex (matching manual guide; env-import skill at `.codex/env-import.md`)
 
 ## Commands
 
@@ -107,7 +107,7 @@ npx canary-lab run --benchmark --benchmark-mode=canary
 npx canary-lab run --benchmark --benchmark-mode=baseline
 ```
 
-Benchmark mode does not create a separate runner. Both modes use the same Canary Lab orchestrator, the same self-heal loop, and the same `logs/.rerun` / `logs/.restart` signaling. The thing being compared is the agent context, not the runner itself.
+Benchmark mode does not create a separate runner. Both modes use the same Canary Lab orchestrator, the same self-heal loop, and the same per-run `signals/.rerun` / `signals/.restart` signaling. The thing being compared is the agent context, not the runner itself.
 
 Benchmark mode writes:
 
@@ -116,7 +116,7 @@ Benchmark mode writes:
 - `logs/benchmark/context/cycle-<n>.json`
 - `logs/benchmark/final-summary.json`
 
-`canary` mode benchmarks the normal structured context: `logs/e2e-summary.json`, enriched per-test log slices, and `logs/diagnosis-journal.md` when present.
+`canary` mode benchmarks the normal structured context: the active run's `e2e-summary.json`, enriched per-test log slices, and `logs/diagnosis-journal.md` when present.
 
 `baseline` mode keeps that exact same runtime flow, but the agent gets only Playwright-style failure context and explores the codebase on its own.
 
@@ -178,10 +178,10 @@ If you override this or use `git add -f`, review what you are committing. Do not
 
 Two flavors, same idea:
 
-- **Manual (`self heal`)** — you stay in the driver's seat. Start a run from the web UI, leave it open, open Claude or Codex in the project folder, and type `self heal`. The agent follows the `Self-Heal Workflow` section in `CLAUDE.md` (or `AGENTS.md` for Codex), which is already loaded into its context.
-- **Auto-heal** — the runner itself spawns a Claude or Codex agent when a test fails. The agent runs in its own PTY tab inside the web UI. It reads the same `Self-Heal Workflow` block from `CLAUDE.md` / `AGENTS.md` (the content between `<!-- heal-prompt:start -->` and `<!-- heal-prompt:end -->`) and passes it as the prompt. Output is filtered through a formatter so you see readable progress instead of raw stream-json.
+- **Manual (`self heal`)** — you stay in the driver's seat. Start a run from the web UI, leave it open, open Claude or Codex in the project folder, and type `self heal`. The agent follows the managed `heal-prompt` section in `CLAUDE.md` (or `AGENTS.md` for Codex), which points at `logs/current/...`.
+- **Auto-heal** — the runner itself spawns a Claude or Codex agent when a test fails. The agent runs in its own PTY tab inside the web UI. Canary Lab renders its packaged `apps/web-server/prompts/heal-agent.md` template with the active run's exact file paths and passes that prompt to the agent. Output is filtered through a formatter so you see readable progress instead of raw stream-json.
 
-In both cases the agent starts from `logs/heal-index.md` (a compact index over each failure, pointing at pre-sliced service logs under `logs/failed/<slug>/`), falls back to `logs/e2e-summary.json` if the index is missing, fixes implementation code, and signals the runner via `logs/.restart` or `logs/.rerun`.
+In both cases the agent starts from the active run's `heal-index.md` (a compact index over each failure, pointing at pre-sliced service logs under `failed/<slug>/`), falls back to that run's `e2e-summary.json` if the index is missing, fixes implementation code, and signals the runner via that run's `signals/.restart` or `signals/.rerun`.
 
 ### When auto-heal isn't available
 
@@ -191,9 +191,9 @@ If the headless agent gave up or isn't installed, you can still drive the loop b
 2. Run `claude` (or `codex`) there.
 3. Send the single prompt: `self heal`.
 
-The interactive agent reads the same `Self-Heal Workflow` section in `CLAUDE.md` (or `AGENTS.md`) and drives the same `.rerun`/`.restart` signals, so the runner will pick up its work without any extra setup.
+The interactive agent reads the managed `heal-prompt` section in `CLAUDE.md` (or `AGENTS.md`) and drives the active run's `.rerun`/`.restart` signals, so the runner will pick up its work without any extra setup.
 
-If the agent struck out after 3 cycles, the runner gives up on auto-heal — `touch logs/.rerun` to retry, or run the agent interactively as above.
+If the agent struck out after 3 cycles, the runner gives up on auto-heal — write `logs/current/signals/.rerun` to retry, or run the agent interactively as above.
 
 ## Limitations
 
@@ -207,11 +207,11 @@ If the agent struck out after 3 cycles, the runner gives up on auto-heal — `to
 
 ```mermaid
 flowchart TD
-    A["Start apps in terminal tabs"] --> B["Apps write stdout to logs/svc-*.log"]
+    A["Start apps in terminal tabs"] --> B["Apps write stdout to logs/runs/<runId>/svc-*.log"]
     B --> C["Wait for health checks"]
     C --> D["Run Playwright tests"]
     D --> E["Append <test-tag> markers to service logs"]
-    E --> F["Write logs/e2e-summary.json"]
+    E --> F["Write logs/runs/<runId>/e2e-summary.json"]
     F --> G["Agent reads failure context"]
     G --> H["Agent fixes implementation"]
     H --> I["Agent signals .restart or .rerun"]
@@ -266,11 +266,11 @@ flowchart TD
 
     subgraph artifacts["&nbsp;logs/&nbsp;"]
         direction LR
-        svclog[/"svc-*.log"/]:::artifact
+        svclog[/"runs/<runId>/svc-*.log"/]:::artifact
         healindex[/"heal-index.md"/]:::artifact
         summaryjson[/"e2e-summary.json"/]:::artifact
         journal[/"diagnosis-journal.md"/]:::artifact
-        signals[/".restart · .rerun"/]:::artifact
+        signals[/"runs/<runId>/signals/.restart · .rerun"/]:::artifact
     end
 
     watcher["<b>Watch Mode</b><br/>runner.ts · tail loop"]:::core
@@ -317,15 +317,15 @@ flowchart TD
 - **Orchestrator** (`runner.ts`) runs first, for the whole duration. It loads `feature.config.cjs`, delegates to everything below, and stays alive in watch mode.
 - **Terminal Launcher** + **Health Gate** run once per `run`, before tests start — one terminal tab per service, blocked on health checks.
 - **Playwright** is invoked once per run by the orchestrator. While it runs:
-  - **Per-Test Log Marker** fires **before and after every test**, writing `<test-tag>` boundaries into `svc-*.log` so you can slice logs by test.
-  - **Summary Reporter** fires **on every test result** (and at end-of-suite), incrementally updating `logs/e2e-summary.json`.
+  - **Per-Test Log Marker** fires **before and after every test**, writing `<test-tag>` boundaries into per-run `svc-*.log` files so you can slice logs by test.
+  - **Summary Reporter** fires **on every test result** (and at end-of-suite), incrementally updating `logs/runs/<runId>/e2e-summary.json`.
 - **Auto-Heal Driver** fires **only when tests fail and auto-heal is enabled**. It spawns a Claude Code or Codex CLI agent in a new terminal tab, piping its stdout through the **Agent Output Formatter**.
-- The **Coding Agent** starts at `heal-index.md` (with `e2e-summary.json` as a fallback) to pick which failure to tackle, drills into the pre-sliced service logs under `logs/failed/<slug>/`, edits code, then touches `.restart` or `.rerun`. It also reads and appends to `diagnosis-journal.md` — a running log of hypotheses, fixes, and outcomes across cycles so it doesn't retry an approach that already failed.
+- The **Coding Agent** starts at the run-scoped `heal-index.md` (with that run's `e2e-summary.json` as a fallback) to pick which failure to tackle, drills into the pre-sliced service logs under `logs/runs/<runId>/failed/<slug>/`, edits code, then writes `.restart` or `.rerun` under `logs/runs/<runId>/signals/`. The runner appends `logs/diagnosis-journal.md` entries from those signal bodies.
 - **Watch Mode** (the tail end of `runner.ts`) picks up those signal files and re-invokes Playwright.
 
 **At a glance:**
 
-- `runner.ts` is the conductor: it reads each feature's `feature.config.cjs`, starts services through the macOS launcher, runs Playwright with `summary-reporter` + `log-marker-fixture` attached, then sits in watch mode reacting to `logs/.restart` / `logs/.rerun`.
+- `runner.ts` is the conductor: it reads each feature's `feature.config.cjs`, starts services through the runtime launcher, runs Playwright with `summary-reporter` + `log-marker-fixture` attached, then sits in watch mode reacting to the active run's `.restart` / `.rerun` signal files.
 - `auto-heal.ts` spawns a Claude Code or Codex CLI process when auto-heal is on. Its raw output is filtered through `claude-formatter.ts` (Claude) or `codex-formatter.ts` (Codex) into readable progress.
 - `launcher/iterm.ts` and `launcher/terminal.ts` are interchangeable backends — both drive their app via AppleScript. `launcher/startup.ts` holds the shared health-check + command-normalization helpers.
 - `env-switcher/switch.ts` does the actual env-file swap; `root-cli.ts` is the interactive prompt wrapper.

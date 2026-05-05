@@ -2,8 +2,10 @@ import { describe, it, expect } from 'vitest'
 import {
   appendStep,
   parseActionsTextarea,
+  parsePlanStepMarkdown,
   removeStep,
   renderActionsTextarea,
+  renderPlanStepMarkdown,
   reorderStep,
   updateStep,
   validatePlan,
@@ -100,5 +102,85 @@ describe('actions textarea round-trip', () => {
   })
   it('drops blank lines', () => {
     expect(parseActionsTextarea('a\n\nb\n')).toEqual(['a', 'b'])
+  })
+})
+
+describe('plan step markdown round-trip', () => {
+  it('renders a step as editable markdown', () => {
+    expect(renderPlanStepMarkdown(seed[1])).toBe([
+      '# b',
+      '',
+      '## Action',
+      '1. b1',
+      '2. b2',
+      '',
+      '## Expectation',
+      '1. ob',
+    ].join('\n'))
+  })
+
+  it('renders fallback title, action, and expectation placeholders', () => {
+    expect(renderPlanStepMarkdown({ step: '  ', actions: [], expectedOutcome: '  ' })).toBe([
+      '# New step',
+      '',
+      '## Action',
+      '1. ',
+      '',
+      '## Expectation',
+      '1. ',
+    ].join('\n'))
+  })
+
+  it('renders multi-line expectations while dropping blank expectation lines', () => {
+    expect(renderPlanStepMarkdown({
+      step: 'Checkout',
+      actions: ['open cart'],
+      expectedOutcome: 'summary visible\n\nvoucher visible  ',
+    })).toContain('1. summary visible\n2. voucher visible')
+  })
+
+  it('parses markdown back into a plan step', () => {
+    const parsed = parsePlanStepMarkdown([
+      '# Open checkout',
+      '',
+      '## Action',
+      '1. Sign in',
+      '2. Open checkout',
+      '',
+      '## Expectation',
+      '1. Order summary renders',
+      '2. Voucher section is visible',
+    ].join('\n'))
+
+    expect(parsed).toEqual({
+      step: 'Open checkout',
+      actions: ['Sign in', 'Open checkout'],
+      expectedOutcome: 'Order summary renders\nVoucher section is visible',
+    })
+  })
+
+  it('treats blank bullets as empty content', () => {
+    expect(parsePlanStepMarkdown('# Title\n\n## Action\n1. \n\n## Expectation\n1. ')).toEqual({
+      step: 'Title',
+      actions: [],
+      expectedOutcome: '',
+    })
+  })
+
+  it('ignores unknown sections and keeps the first title', () => {
+    expect(parsePlanStepMarkdown([
+      '# First title',
+      '# Ignored title',
+      '## Notes',
+      '1. ignored',
+      '## Action',
+      '1. Click pay',
+      '## Expectation',
+      '1. Payment succeeds',
+    ].join('\n'))).toEqual({
+      step: 'First title',
+      actions: ['Click pay'],
+      expectedOutcome: 'Payment succeeds',
+    })
   })
 })

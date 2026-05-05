@@ -18,12 +18,10 @@ import { CSS } from '@dnd-kit/utilities'
 import type { DraftRecord, PlanStep } from '../../api/types'
 import { AgentLogPanel } from './AgentLogPanel'
 import {
-  appendStep,
-  parseActionsTextarea,
   removeStep,
-  renderActionsTextarea,
+  parsePlanStepMarkdown,
+  renderPlanStepMarkdown,
   reorderStep,
-  updateStep,
   validatePlan,
 } from '../../lib/plan-edit-state'
 
@@ -49,15 +47,18 @@ export function PlanReviewStep({ draft, onAccept, onReject, onRetry, onCancelGen
     [draft.plan],
   )
   const [plan, setPlan] = useState<PlanStep[]>(seedPlan)
+  const [planMarkdown, setPlanMarkdown] = useState<string[]>(() => seedPlan.map(renderPlanStepMarkdown))
 
   // Re-seed when the upstream plan reference changes (new fetch / poll).
   useEffect(() => {
     setPlan(seedPlan)
+    setPlanMarkdown(seedPlan.map(renderPlanStepMarkdown))
   }, [seedPlan])
 
   const editable = status === 'plan-ready'
-  const generationActive = status === 'planning' || status === 'generating' || status === 'refining'
-  const errors = validatePlan(plan)
+  const generationActive = status === 'planning' || status === 'generating'
+  const editedPlan = editable ? planMarkdown.map(parsePlanStepMarkdown) : plan
+  const errors = validatePlan(editedPlan)
   const hasErrors = errors.length > 0
 
   const sensors = useSensors(
@@ -71,25 +72,29 @@ export function PlanReviewStep({ draft, onAccept, onReject, onRetry, onCancelGen
     const from = Number(active.id)
     const to = Number(over.id)
     setPlan((current) => reorderStep(current, from, to))
+    setPlanMarkdown((current) => reorderString(current, from, to))
   }
 
   const handleRemove = (index: number): void => {
     if (typeof window !== 'undefined' && !window.confirm('Remove this step?')) return
     setPlan((current) => removeStep(current, index))
-  }
-
-  const handlePatch = (index: number, patch: Partial<PlanStep>): void => {
-    setPlan((current) => updateStep(current, index, patch))
+    setPlanMarkdown((current) => current.filter((_, i) => i !== index))
   }
 
   const handleAppend = (): void => {
-    setPlan((current) => appendStep(current))
+    const newStep = { step: 'New step', actions: [], expectedOutcome: '' }
+    setPlan((current) => [newStep, ...current])
+    setPlanMarkdown((current) => [renderPlanStepMarkdown(newStep), ...current])
+  }
+
+  const handleMarkdownChange = (index: number, value: string): void => {
+    setPlanMarkdown((current) => current.map((markdown, i) => (i === index ? value : markdown)))
   }
 
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex-1 min-h-0 overflow-y-auto p-6">
-        <div className="mx-auto max-w-3xl space-y-4">
+        <div className={`mx-auto max-w-3xl ${status === 'planning' ? 'flex h-full min-h-0 flex-col gap-4' : 'space-y-4'}`}>
           {status === 'planning' && (
             <>
               <div className="flex items-center justify-between gap-3 rounded border border-zinc-200 dark:border-zinc-800 bg-zinc-100/60 dark:bg-zinc-900/60 p-3 text-xs text-zinc-700 dark:text-zinc-300">
@@ -110,6 +115,7 @@ export function PlanReviewStep({ draft, onAccept, onReject, onRetry, onCancelGen
                 phase="planning"
                 status="running"
                 compact
+                className="flex-1"
               />
             </>
           )}
@@ -134,6 +140,7 @@ export function PlanReviewStep({ draft, onAccept, onReject, onRetry, onCancelGen
                 phase="planning"
                 status="idle"
                 compact
+                className="min-h-[24rem]"
               />
             </>
           )}
@@ -163,8 +170,8 @@ export function PlanReviewStep({ draft, onAccept, onReject, onRetry, onCancelGen
                           key={i}
                           id={String(i)}
                           index={i}
-                          item={item}
-                          onPatch={handlePatch}
+                          markdown={planMarkdown[i] ?? renderPlanStepMarkdown(item)}
+                          onChange={handleMarkdownChange}
                           onRemove={handleRemove}
                         />
                       ))}
@@ -177,7 +184,7 @@ export function PlanReviewStep({ draft, onAccept, onReject, onRetry, onCancelGen
               {editable && hasErrors && (
                 <div className="mt-2 text-[11px] text-rose-300">
                   {errors.map((e, i) => (
-                    <div key={i}>Step #{e.index + 1}: {e.message}</div>
+                    <div key={i}>Card #{e.index + 1}: {e.message}</div>
                   ))}
                 </div>
               )}
@@ -220,7 +227,7 @@ export function PlanReviewStep({ draft, onAccept, onReject, onRetry, onCancelGen
             </button>
             <button
               type="button"
-              onClick={() => onAccept(plan)}
+              onClick={() => onAccept(editedPlan)}
               disabled={acting || status !== 'plan-ready' || hasErrors}
               className="rounded bg-emerald-600 px-3 py-1.5 text-xs text-zinc-50 hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
             >
@@ -236,14 +243,14 @@ export function PlanReviewStep({ draft, onAccept, onReject, onRetry, onCancelGen
 function SortablePlanItem({
   id,
   index,
-  item,
-  onPatch,
+  markdown,
+  onChange,
   onRemove,
 }: {
   id: string
   index: number
-  item: PlanStep
-  onPatch: (i: number, patch: Partial<PlanStep>) => void
+  markdown: string
+  onChange: (i: number, value: string) => void
   onRemove: (i: number) => void
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id })
@@ -252,14 +259,12 @@ function SortablePlanItem({
     transition,
     opacity: isDragging ? 0.6 : 1,
   }
-  const [editingStep, setEditingStep] = useState(false)
-  const [editingOutcome, setEditingOutcome] = useState(false)
 
   return (
     <li
       ref={setNodeRef}
       style={style}
-      className="flex gap-2 rounded border border-zinc-200 dark:border-zinc-800 bg-zinc-100/60 dark:bg-zinc-900/60 p-3 text-xs"
+      className="flex gap-2 rounded border border-zinc-200 bg-white p-3 text-xs shadow-sm dark:border-zinc-800 dark:bg-zinc-950"
     >
       <button
         type="button"
@@ -270,60 +275,13 @@ function SortablePlanItem({
       >
         ⋮⋮
       </button>
-      <div className="flex-1 space-y-2">
-        {editingStep ? (
-          <input
-            autoFocus
-            defaultValue={item.step}
-            onBlur={(e) => { onPatch(index, { step: e.target.value.trim() }); setEditingStep(false) }}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') { onPatch(index, { step: (e.target as HTMLInputElement).value.trim() }); setEditingStep(false) }
-              if (e.key === 'Escape') setEditingStep(false)
-            }}
-            className="w-full rounded border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 px-2 py-1 font-medium text-zinc-900 dark:text-zinc-100"
-          />
-        ) : (
-          <button
-            type="button"
-            onClick={() => setEditingStep(true)}
-            className="block w-full text-left font-medium text-zinc-900 dark:text-zinc-100 hover:text-emerald-300"
-          >
-            {item.step || <span className="italic text-zinc-500">(empty)</span>}
-          </button>
-        )}
-
-        <div>
-          <div className="mb-1 text-[10px] uppercase tracking-wide text-zinc-500">Actions</div>
-          <textarea
-            value={renderActionsTextarea(item.actions)}
-            onChange={(e) => onPatch(index, { actions: parseActionsTextarea(e.target.value) })}
-            rows={Math.max(2, item.actions.length + 1)}
-            className="w-full rounded border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 px-2 py-1 font-mono text-[11px] text-zinc-700 dark:text-zinc-300"
-            placeholder="One action per line"
-          />
-        </div>
-
-        {editingOutcome ? (
-          <input
-            autoFocus
-            defaultValue={item.expectedOutcome}
-            onBlur={(e) => { onPatch(index, { expectedOutcome: e.target.value }); setEditingOutcome(false) }}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') { onPatch(index, { expectedOutcome: (e.target as HTMLInputElement).value }); setEditingOutcome(false) }
-              if (e.key === 'Escape') setEditingOutcome(false)
-            }}
-            className="w-full rounded border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 px-2 py-1 italic text-zinc-700 dark:text-zinc-300"
-          />
-        ) : (
-          <button
-            type="button"
-            onClick={() => setEditingOutcome(true)}
-            className="block w-full text-left italic text-zinc-600 dark:text-zinc-400 hover:text-emerald-300"
-          >
-            {item.expectedOutcome || <span className="text-zinc-400 dark:text-zinc-600">(no expected outcome)</span>}
-          </button>
-        )}
-      </div>
+      <textarea
+        value={markdown}
+        onChange={(e) => onChange(index, e.target.value)}
+        rows={12}
+        className="max-h-[28rem] min-h-56 flex-1 resize-y overflow-y-auto rounded border border-zinc-200 bg-zinc-50 px-3 py-2 font-mono text-[11px] leading-5 text-zinc-800 outline-none focus:border-emerald-500 focus:bg-white dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200 dark:focus:bg-zinc-950"
+        spellCheck={false}
+      />
       <button
         type="button"
         aria-label="Delete step"
@@ -343,18 +301,26 @@ function PlanList({ plan }: { plan: PlanStep[] }) {
   return (
     <ol className="space-y-3">
       {plan.map((item, i) => (
-        <li key={i} className="rounded border border-zinc-200 dark:border-zinc-800 bg-zinc-100/60 dark:bg-zinc-900/60 p-3 text-xs">
-          <div className="font-medium text-zinc-900 dark:text-zinc-100">{item.step}</div>
-          {item.actions.length > 0 && (
-            <ul className="mt-2 list-disc space-y-0.5 pl-4 text-zinc-700 dark:text-zinc-300">
-              {item.actions.map((a, j) => (
-                <li key={j}>{a}</li>
-              ))}
-            </ul>
-          )}
-          <div className="mt-2 italic text-zinc-600 dark:text-zinc-400">{item.expectedOutcome}</div>
+        <li key={i} className="rounded border border-zinc-200 bg-white p-3 text-xs shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+          <textarea
+            value={renderPlanStepMarkdown(item)}
+            readOnly
+            rows={12}
+            className="max-h-[28rem] min-h-56 w-full resize-y overflow-y-auto rounded border border-zinc-200 bg-zinc-50 px-3 py-2 font-mono text-[11px] leading-5 text-zinc-800 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200"
+            spellCheck={false}
+          />
         </li>
       ))}
     </ol>
   )
+}
+
+function reorderString(items: string[], fromIndex: number, toIndex: number): string[] {
+  if (fromIndex === toIndex) return items
+  if (fromIndex < 0 || fromIndex >= items.length) return items
+  if (toIndex < 0 || toIndex >= items.length) return items
+  const next = items.slice()
+  const [moved] = next.splice(fromIndex, 1)
+  next.splice(toIndex, 0, moved)
+  return next
 }

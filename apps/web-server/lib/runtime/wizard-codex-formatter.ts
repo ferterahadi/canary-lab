@@ -10,6 +10,7 @@ interface AnyObj {
 }
 
 const START = Date.now()
+const SESSION_MARKER = '[[canary-lab:wizard-session'
 
 function elapsed(): string {
   const s = Math.floor((Date.now() - START) / 1000)
@@ -81,7 +82,11 @@ function handleLine(line: string): void {
 
   const type = msg.type as string | undefined
   if (type === 'thread.started') {
-    const id = String(msg.thread_id ?? '').slice(0, 8)
+    const fullId = typeof msg.thread_id === 'string' ? msg.thread_id : ''
+    const id = fullId.slice(0, 8)
+    if (fullId) {
+      process.stdout.write(`${SESSION_MARKER} agent=codex id=${fullId}]]\n`)
+    }
     process.stdout.write(`${tag()} thread ${id || 'started'}\n`)
     return
   }
@@ -98,6 +103,7 @@ function handleLine(line: string): void {
   }
 }
 
+/* v8 ignore next -- CLI stdin wiring is exercised through the exported line handler. */
 if (require.main === module) {
   let buffer = ''
   process.stdin.setEncoding('utf-8')

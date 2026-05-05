@@ -134,7 +134,6 @@ export type DraftStatus =
   | 'plan-ready'
   | 'generating'
   | 'spec-ready'
-  | 'refining'
   | 'accepted'
   | 'rejected'
   | 'cancelled'
@@ -160,16 +159,18 @@ export interface DraftRecord {
   skills: string[]
   featureName?: string
   wizardAgent?: 'claude' | 'codex'
-  activeAgentStage?: 'planning' | 'generating' | 'refining'
+  activeAgentStage?: 'planning' | 'generating'
+  planAgentSessionId?: string
+  planAgentSessionKind?: 'claude' | 'codex'
   status: DraftStatus
   createdAt: string
   updatedAt: string
   plan?: PlanStep[]
   generatedFiles?: string[]
+  devDependencies?: string[]
   errorMessage?: string
   planAgentLogTail?: string
   specAgentLogTail?: string
-  refineAgentLogTail?: string
 }
 
 export interface DraftPrdDocument {

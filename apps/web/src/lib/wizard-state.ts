@@ -12,7 +12,6 @@ export type DraftStatus =
   | 'plan-ready'
   | 'generating'
   | 'spec-ready'
-  | 'refining'
   | 'accepted'
   | 'rejected'
   | 'cancelled'
@@ -33,7 +32,6 @@ export function nextStepForStatus(status: DraftStatus): WizardStep {
       return 'plan'
     case 'generating':
     case 'spec-ready':
-    case 'refining':
       return 'spec'
     case 'accepted':
       return 'done'
@@ -63,7 +61,7 @@ export function terminalForStep(step: WizardStep, status: DraftStatus): boolean 
 // poll while this is true, stop when it flips false.
 export function isPollingForStep(step: WizardStep, status: DraftStatus): boolean {
   if (step === 'plan') return status === 'planning'
-  if (step === 'spec') return status === 'generating' || status === 'refining'
+  if (step === 'spec') return status === 'generating'
   if (step === 'configure') return status === 'recommending'
   return false
 }
@@ -80,5 +78,5 @@ export function isTerminalDraft(status: DraftStatus): boolean {
 }
 
 export function isGenerationActive(status: DraftStatus): boolean {
-  return status === 'planning' || status === 'generating' || status === 'refining'
+  return status === 'planning' || status === 'generating'
 }

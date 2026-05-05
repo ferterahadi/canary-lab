@@ -55,6 +55,23 @@ describe('withLogMarkers', () => {
     )
   })
 
+  it('supports current run manifests with services[].logPath', async () => {
+    const dir = mkTmp()
+    const log = path.join(dir, 'svc-api.log')
+    fs.writeFileSync(log, 'pre\n')
+    const manifestPath = path.join(dir, 'manifest.json')
+    fs.writeFileSync(manifestPath, JSON.stringify({ services: [{ logPath: log }] }))
+
+    await withLogMarkers('My Case', manifestPath, async () => {
+      fs.appendFileSync(log, 'during\n')
+    })
+
+    expect(fs.readFileSync(log, 'utf-8')).toBe(
+      'pre\n<test-case-my-case>\nduring\n</test-case-my-case>\n',
+    )
+  })
+
+
   it('skips close tag when run() throws (current behavior — no try/finally)', async () => {
     const dir = mkTmp()
     const log = path.join(dir, 's.log')

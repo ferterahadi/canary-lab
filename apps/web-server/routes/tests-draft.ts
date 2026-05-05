@@ -4,6 +4,7 @@ import type { FastifyInstance } from 'fastify'
 import multipart from '@fastify/multipart'
 import {
   applyToProject,
+  mergeRootDevDependencies,
   writeDraft,
   createDraft,
   deleteDraft,
@@ -12,13 +13,15 @@ import {
   readDraft,
   slugifyFeatureName,
   transition,
+  validateFeatureTarget,
   type DraftRecord,
   type DraftPrdDocument,
   type DraftRepo,
 } from '../lib/draft-store'
 import {
-  extractGeneratedFiles,
+  extractGeneratedSpecOutput,
   extractPlan,
+  extractWizardSessionRef,
 } from '../lib/wizard-output-parser'
 import { resolveDraftFile } from '../lib/draft-file-resolver'
 import { combinePrdText, extractPrdDocument } from '../lib/prd-document-extractor'
@@ -42,25 +45,13 @@ export interface PlanAgentInput {
 export interface SpecAgentInput {
   draftId: string
   agent: 'claude' | 'codex'
+  featureName: string
   plan: unknown
   skills: { id: string; content: string }[]
   repos: DraftRepo[]
   draftDir: string
   agentLogPath: string
-}
-
-export interface RefineAgentInput {
-  draftId: string
-  agent: 'claude' | 'codex'
-  prdText: string
-  plan: unknown
-  repos: DraftRepo[]
-  draftDir: string
-  agentLogPath: string
-  filePath: string
-  fileContent: string
-  selectedText: string
-  suggestion: string
+  resumeSessionId?: string
 }
 
 export interface TestsDraftRouteDeps {
@@ -70,7 +61,6 @@ export interface TestsDraftRouteDeps {
   pickAgent?(): { ok: true; agent: 'claude' | 'codex' } | { ok: false; error: string }
   spawnPlanAgent(input: PlanAgentInput): Promise<string>
   spawnSpecAgent(input: SpecAgentInput): Promise<string>
-  spawnRefineAgent?(input: RefineAgentInput): Promise<string>
   cancelGeneration?(draftId: string): boolean
   // Optional skill content loader for stage-2 — tests stub it.
   loadSkillContent?(skillId: string): string
@@ -183,8 +173,30 @@ export async function testsDraftRoutes(
       ...rec,
       planAgentLogTail: tailIfExists(p.planAgentLog),
       specAgentLogTail: tailIfExists(p.specAgentLog),
-      refineAgentLogTail: tailIfExists(p.refineAgentLog),
     }
+  })
+
+  app.get<{
+    Params: { id: string }
+    Querystring: { stage?: string }
+  }>('/api/tests/draft/:id/agent-log', async (req, reply) => {
+    const rec = readDraft(deps.logsDir, req.params.id)
+    if (!rec) {
+      reply.code(404)
+      return { error: 'draft not found' }
+    }
+    const stage = req.query.stage
+    if (stage !== 'planning' && stage !== 'generating') {
+      reply.code(400)
+      return { error: 'unknown draft stage' }
+    }
+    const p = draftPaths(deps.logsDir, rec.draftId)
+    const logPath = stage === 'planning' ? p.planAgentLog : p.specAgentLog
+    if (!fs.existsSync(logPath)) {
+      reply.code(404)
+      return { error: 'agent log not found' }
+    }
+    return { content: fs.readFileSync(logPath, 'utf8') }
   })
 
   app.post<{ Params: { id: string }; Body: { plan?: unknown } }>(
@@ -221,6 +233,16 @@ export async function testsDraftRoutes(
       }
       const featureName = req.body?.featureName ?? rec.featureName ?? defaultFeatureName(rec)
       const generated = readGeneratedFiles(deps.logsDir, rec.draftId)
+      const validation = validateFeatureTarget(deps.projectRoot, featureName)
+      if (!validation.ok) {
+        reply.code(validation.error === 'feature-exists' ? 409 : 400)
+        return { error: validation.error, featureDir: validation.featureDir }
+      }
+      const packageResult = mergeRootDevDependencies(deps.projectRoot, rec.devDependencies ?? [])
+      if (!packageResult.ok) {
+        reply.code(400)
+        return { error: packageResult.error, packageJsonPath: packageResult.packageJsonPath }
+      }
       const result = applyToProject({
         draftId: rec.draftId,
         featureName,
@@ -234,54 +256,16 @@ export async function testsDraftRoutes(
       transition(deps.logsDir, rec.draftId, 'accepted', {
         featureName,
         generatedFiles: result.written,
+        devDependencies: rec.devDependencies,
       })
-      return { draftId: rec.draftId, status: 'accepted', featureDir: result.featureDir }
+      return {
+        draftId: rec.draftId,
+        status: 'accepted',
+        featureDir: result.featureDir,
+        devDependenciesAdded: packageResult.added,
+      }
     },
   )
-
-  app.post<{
-    Params: { id: string }
-    Body: { path?: unknown; selectedText?: unknown; suggestion?: unknown }
-  }>('/api/tests/draft/:id/refine-file', async (req, reply) => {
-    const rec = readDraft(deps.logsDir, req.params.id)
-    if (!rec) {
-      reply.code(404)
-      return { error: 'draft not found' }
-    }
-    if (rec.status !== 'spec-ready') {
-      reply.code(409)
-      return { error: `cannot refine-file from status ${rec.status}` }
-    }
-    const filePath = req.body?.path
-    const selectedText = req.body?.selectedText
-    const suggestion = req.body?.suggestion
-    if (typeof filePath !== 'string' || !filePath.trim()) {
-      reply.code(400)
-      return { error: 'path required' }
-    }
-    if (typeof selectedText !== 'string' || !selectedText.trim()) {
-      reply.code(400)
-      return { error: 'selectedText required' }
-    }
-    if (typeof suggestion !== 'string' || !suggestion.trim()) {
-      reply.code(400)
-      return { error: 'suggestion required' }
-    }
-    const resolved = resolveDraftFile(deps.logsDir, rec.draftId, filePath)
-    if (!resolved.ok) {
-      reply.code(resolved.reason === 'not-found' ? 404 : 400)
-      return { error: resolved.reason }
-    }
-    transition(deps.logsDir, rec.draftId, 'refining', { activeAgentStage: 'refining' })
-    runRefineStage(deps, rec.draftId, {
-      filePath,
-      fileContent: fs.readFileSync(resolved.absolute, 'utf8'),
-      selectedText,
-      suggestion,
-    }).catch(() => {/* logged via draft.errorMessage */})
-    reply.code(202)
-    return { draftId: rec.draftId, status: 'refining' }
-  })
 
   app.post<{ Params: { id: string } }>('/api/tests/draft/:id/reject', async (req, reply) => {
     const rec = readDraft(deps.logsDir, req.params.id)
@@ -393,7 +377,14 @@ async function runPlanStage(deps: TestsDraftRouteDeps, draftId: string): Promise
     return
   }
   fs.writeFileSync(p.planJson, JSON.stringify(parsed.value, null, 2), 'utf8')
-  transition(deps.logsDir, draftId, 'plan-ready', { plan: parsed.value, activeAgentStage: undefined })
+  const sessionRef = extractWizardSessionRef(stream)
+  transition(deps.logsDir, draftId, 'plan-ready', {
+    plan: parsed.value,
+    activeAgentStage: undefined,
+    ...(sessionRef
+      ? { planAgentSessionId: sessionRef.id, planAgentSessionKind: sessionRef.kind }
+      : {}),
+  })
 }
 
 async function runSpecStage(deps: TestsDraftRouteDeps, draftId: string): Promise<void> {
@@ -416,15 +407,20 @@ async function runSpecStage(deps: TestsDraftRouteDeps, draftId: string): Promise
     content: deps.loadSkillContent ? deps.loadSkillContent(id) : '',
   }))
   let stream: string
+  const resumeSessionId = rec.planAgentSessionKind === picked.agent
+    ? rec.planAgentSessionId
+    : undefined
   try {
     stream = await deps.spawnSpecAgent({
       draftId,
       agent: picked.agent,
+      featureName: rec.featureName ?? defaultFeatureName(rec),
       plan: rec.plan,
       skills: skillContents,
       repos: rec.repos,
       draftDir: p.draftDir,
       agentLogPath: p.specAgentLog,
+      resumeSessionId,
     })
   } catch (e) {
     if (isCancelled(deps.logsDir, draftId)) return
@@ -434,86 +430,20 @@ async function runSpecStage(deps: TestsDraftRouteDeps, draftId: string): Promise
     return
   }
   if (isCancelled(deps.logsDir, draftId)) return
-  const parsed = extractGeneratedFiles(stream)
+  const parsed = extractGeneratedSpecOutput(stream)
   if (!parsed.ok) {
     transition(deps.logsDir, draftId, 'error', { errorMessage: parsed.error })
     return
   }
   fs.mkdirSync(p.generatedDir, { recursive: true })
-  for (const file of parsed.value) {
+  for (const file of parsed.value.files) {
     const target = path.join(p.generatedDir, file.path)
     fs.mkdirSync(path.dirname(target), { recursive: true })
     fs.writeFileSync(target, file.content, 'utf8')
   }
   transition(deps.logsDir, draftId, 'spec-ready', {
-    generatedFiles: parsed.value.map((f) => f.path),
-    activeAgentStage: undefined,
-  })
-}
-
-async function runRefineStage(
-  deps: TestsDraftRouteDeps,
-  draftId: string,
-  input: { filePath: string; fileContent: string; selectedText: string; suggestion: string },
-): Promise<void> {
-  const rec = readDraft(deps.logsDir, draftId)
-  if (!rec) return
-  if (rec.status !== 'refining') return
-  if (!deps.spawnRefineAgent) {
-    transition(deps.logsDir, draftId, 'error', { errorMessage: 'refine agent is not configured' })
-    return
-  }
-  const picked = pickWizardAgent(deps)
-  if (!picked.ok) {
-    transition(deps.logsDir, draftId, 'error', { errorMessage: picked.error })
-    return
-  }
-  patchDraft(deps.logsDir, draftId, {
-    wizardAgent: picked.agent,
-    activeAgentStage: 'refining',
-  })
-  if (!isStageCurrent(deps.logsDir, draftId, 'refining')) return
-  const p = draftPaths(deps.logsDir, draftId)
-  let stream: string
-  try {
-    stream = await deps.spawnRefineAgent({
-      draftId,
-      agent: picked.agent,
-      prdText: rec.prdText,
-      plan: rec.plan,
-      repos: rec.repos,
-      draftDir: p.draftDir,
-      agentLogPath: p.refineAgentLog,
-      ...input,
-    })
-  } catch (e) {
-    if (isCancelled(deps.logsDir, draftId)) return
-    transition(deps.logsDir, draftId, 'error', {
-      errorMessage: `refine agent failed: ${(e as Error).message}`,
-    })
-    return
-  }
-  if (isCancelled(deps.logsDir, draftId)) return
-  const parsed = extractGeneratedFiles(stream)
-  if (!parsed.ok) {
-    transition(deps.logsDir, draftId, 'error', { errorMessage: parsed.error })
-    return
-  }
-  const replacement = parsed.value.find((f) => f.path === input.filePath)
-  if (!replacement) {
-    transition(deps.logsDir, draftId, 'error', {
-      errorMessage: `refine output must include ${input.filePath}`,
-    })
-    return
-  }
-  const resolved = resolveDraftFile(deps.logsDir, draftId, input.filePath)
-  if (!resolved.ok) {
-    transition(deps.logsDir, draftId, 'error', { errorMessage: `draft file missing: ${input.filePath}` })
-    return
-  }
-  fs.writeFileSync(resolved.absolute, replacement.content, 'utf8')
-  transition(deps.logsDir, draftId, 'spec-ready', {
-    generatedFiles: readGeneratedFiles(deps.logsDir, draftId).map((f) => f.path),
+    generatedFiles: parsed.value.files.map((f) => f.path),
+    devDependencies: parsed.value.devDependencies,
     activeAgentStage: undefined,
   })
 }
@@ -539,7 +469,7 @@ function pickWizardAgent(deps: TestsDraftRouteDeps): { ok: true; agent: 'claude'
 }
 
 function isTransientGenerationStatus(status: DraftRecord['status']): boolean {
-  return status === 'planning' || status === 'generating' || status === 'refining'
+  return status === 'planning' || status === 'generating'
 }
 
 function isCancelled(logsDir: string, draftId: string): boolean {
@@ -596,4 +526,4 @@ function walk(root: string, dir: string): { path: string; content: string }[] {
 
 // `runPlanStage` and `runSpecStage` are exported for tests so they can be
 // awaited explicitly — the route handlers fire-and-forget them.
-export { runPlanStage, runSpecStage, runRefineStage }
+export { runPlanStage, runSpecStage }

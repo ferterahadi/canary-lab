@@ -240,16 +240,18 @@ describe('SummaryReporter', () => {
   })
 
   it('writes log slices and heal-index for failures', () => {
-    fs.mkdirSync(LOGS_DIR, { recursive: true })
-    const svcLog = path.join(LOGS_DIR, 'api.log')
+    const runDir = path.join(LOGS_DIR, 'runs', 'run-1')
+    fs.mkdirSync(runDir, { recursive: true })
+    process.env.CANARY_LAB_SUMMARY_PATH = path.join(runDir, 'e2e-summary.json')
+    const svcLog = path.join(runDir, 'svc-api.log')
     const slug = 'test-case-broken-checkout'
     fs.writeFileSync(
       svcLog,
       `before\n<${slug}>\nERROR boom\n</${slug}>\nafter\n`,
     )
     fs.writeFileSync(
-      path.join(LOGS_DIR, 'manifest.json'),
-      JSON.stringify({ serviceLogs: [svcLog], featureName: 'checkout' }),
+      path.join(runDir, 'manifest.json'),
+      JSON.stringify({ services: [{ logPath: svcLog }], feature: 'checkout' }),
     )
 
     const reporter = new SummaryReporter()
@@ -258,12 +260,12 @@ describe('SummaryReporter', () => {
       mkResult({ status: 'failed', error: { message: 'nope' } }),
     )
 
-    const out = readSummary()
-    expect(out.failed[0].logFiles).toEqual([`logs/failed/${slug}/api.log`])
-    expect(fs.readFileSync(path.join(LOGS_DIR, 'failed', slug, 'api.log'), 'utf-8')).toBe(
+    const out = JSON.parse(fs.readFileSync(path.join(runDir, 'e2e-summary.json'), 'utf-8'))
+    expect(out.failed[0].logFiles).toEqual([`logs/runs/run-1/failed/${slug}/svc-api.log`])
+    expect(fs.readFileSync(path.join(runDir, 'failed', slug, 'svc-api.log'), 'utf-8')).toBe(
       'ERROR boom',
     )
-    expect(fs.readFileSync(path.join(LOGS_DIR, 'heal-index.md'), 'utf-8')).toContain(slug)
+    expect(fs.readFileSync(path.join(runDir, 'heal-index.md'), 'utf-8')).toContain(slug)
   })
 
   it('writes a failed entry without error details when Playwright omits error', () => {

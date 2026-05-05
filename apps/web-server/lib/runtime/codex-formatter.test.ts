@@ -10,6 +10,7 @@ import {
   summarizeOutput,
   cleanCommand,
   parseCommand,
+  toolLabel,
   quote,
   kindIcon,
   handleLine,
@@ -105,6 +106,13 @@ describe('kindIcon', () => {
     expect(kindIcon('delete')).toBe('-')
     expect(kindIcon('update')).toBe('~')
     expect(kindIcon('whatever')).toBe('~')
+  })
+})
+
+describe('toolLabel', () => {
+  it('includes one space between the icon and tool name', () => {
+    expect(toolLabel('Read', '📖')).toBe('📖 Read')
+    expect(toolLabel('Bash', '$')).toBe('$ Bash')
   })
 })
 

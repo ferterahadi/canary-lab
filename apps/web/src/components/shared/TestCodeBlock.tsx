@@ -4,7 +4,7 @@ import { useTheme } from '../../lib/theme'
 import type { ExtractedStep } from '../../api/types'
 import * as api from '../../api/client'
 import { sourceLineForBodyLine } from '../../lib/editor-location'
-import { colorClassForStatus, type StepStatus } from '../../lib/test-step-status'
+import { colorClassForStatus, statusLabel, statusPillClassForStatus, type StepStatus } from '../../lib/test-step-status'
 
 type Highlighter = { codeToHtml: (code: string, opts: { lang: string; theme: string }) => string }
 let highlighterPromise: Promise<Highlighter> | null = null
@@ -153,8 +153,11 @@ function decorateShikiLines(html: string, activeLine?: number | null, startLine?
 
 export function StatusPill({ status }: { status: StepStatus }) {
   return (
-    <span className="rounded border border-current px-1.5 py-0.5 text-[9px] uppercase tracking-wide opacity-80" style={{ fontFamily: 'var(--font-mono)' }}>
-      {status}
+    <span
+      className={`rounded border px-1.5 py-0.5 text-[9px] uppercase tracking-wide ${statusPillClassForStatus(status)}`}
+      style={{ fontFamily: 'var(--font-mono)' }}
+    >
+      {statusLabel(status)}
     </span>
   )
 }

@@ -828,6 +828,10 @@ describe('RunOrchestrator.runPlaywright', () => {
     expect(events[0]).toBe('start:fake-pw')
     expect(events).toContain('out:1 passed')
     expect(events.at(-1)).toBe('exit:0')
+    expect(pwPty.options.env).toMatchObject({
+      CANARY_LAB_MANIFEST_PATH: orch.paths.manifestPath,
+      CANARY_LAB_SUMMARY_PATH: orch.paths.summaryPath,
+    })
     const log = fs.readFileSync(orch.paths.playwrightStdoutPath, 'utf-8')
     expect(log).toContain('1 passed')
     await orch.stop('passed')

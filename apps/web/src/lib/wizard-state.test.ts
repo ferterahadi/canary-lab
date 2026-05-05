@@ -17,7 +17,6 @@ const ALL: DraftStatus[] = [
   'plan-ready',
   'generating',
   'spec-ready',
-  'refining',
   'accepted',
   'rejected',
   'cancelled',
@@ -53,9 +52,8 @@ describe('isPollingForStep', () => {
     expect(isPollingForStep('plan', 'plan-ready')).toBe(false)
     expect(isPollingForStep('plan', 'error')).toBe(false)
   })
-  it('spec polls while generating or refining', () => {
+  it('spec polls while generating', () => {
     expect(isPollingForStep('spec', 'generating')).toBe(true)
-    expect(isPollingForStep('spec', 'refining')).toBe(true)
     expect(isPollingForStep('spec', 'spec-ready')).toBe(false)
   })
   it('configure polls only while recommending', () => {
@@ -130,7 +128,6 @@ describe('isGenerationActive', () => {
   it('flags statuses backed by an active wizard agent', () => {
     expect(isGenerationActive('planning')).toBe(true)
     expect(isGenerationActive('generating')).toBe(true)
-    expect(isGenerationActive('refining')).toBe(true)
   })
 
   it('returns false once the user can close safely', () => {

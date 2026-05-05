@@ -1,8 +1,9 @@
 import fs from 'fs'
 import path from 'path'
 import { execFileSync } from 'child_process'
-import { ROOT } from './paths'
+import { DIAGNOSIS_JOURNAL_PATH } from './paths'
 import { buildHealAddendum } from './heal-prompt-builder'
+import { buildRunPaths } from './run-paths'
 
 // Heal-agent command builders for the web-server orchestrator. The legacy
 // CLI test runner (`canary-lab run`) used to live next to this file and
@@ -22,37 +23,19 @@ export function isAgentCliAvailable(agent: HealAgent): boolean {
   }
 }
 
-const HEAL_PROMPT_START = '<!-- heal-prompt:start -->'
-const HEAL_PROMPT_END = '<!-- heal-prompt:end -->'
+const HEAL_PROMPT_TEMPLATE_PATH = path.join(__dirname, '../../prompts/heal-agent.md')
 
-function promptPathFor(agent: HealAgent): string {
-  return agent === 'claude'
-    ? path.join(ROOT, 'CLAUDE.md')
-    : path.join(ROOT, 'AGENTS.md')
-}
-
-function extractHealPrompt(content: string): string | null {
-  const startIdx = content.indexOf(HEAL_PROMPT_START)
-  if (startIdx === -1) return null
-  const endIdx = content.indexOf(HEAL_PROMPT_END, startIdx + HEAL_PROMPT_START.length)
-  if (endIdx === -1) return null
-  return content.slice(startIdx + HEAL_PROMPT_START.length, endIdx).trim()
-}
-
-function loadPrompt(agent: HealAgent, promptPath: string = promptPathFor(agent)): string {
+function loadPromptTemplate(promptPath: string = HEAL_PROMPT_TEMPLATE_PATH): string {
   if (!fs.existsSync(promptPath)) {
     throw new Error(
-      `Heal prompt source not found at ${promptPath}. Run \`canary-lab upgrade\` to install it.`,
+      `Heal prompt template not found at ${promptPath}. Rebuild or reinstall canary-lab.`,
     )
   }
-  const content = fs.readFileSync(promptPath, 'utf-8')
-  const prompt = extractHealPrompt(content)
-  if (!prompt) {
-    throw new Error(
-      `Heal prompt markers (${HEAL_PROMPT_START} / ${HEAL_PROMPT_END}) not found in ${promptPath}. Run \`canary-lab upgrade\` to refresh the managed block.`,
-    )
-  }
-  return prompt
+  return fs.readFileSync(promptPath, 'utf-8').trim()
+}
+
+function renderPromptTemplate(template: string, values: Record<string, string>): string {
+  return template.replace(/\{\{(\w+)\}\}/g, (match, key: string) => values[key] ?? match)
 }
 
 const CLAUDE_FORMATTER_FILE = path.join(__dirname, 'claude-formatter.js')
@@ -165,13 +148,13 @@ export function pickAvailableHealAgent(
 
 export interface OrchestratorAutoHealFactoryOptions {
   agent: HealAgent
-  /** Project root where CLAUDE.md / AGENTS.md lives. Used for prompt loading. */
+  /** Project root used to render repo-relative run paths in the prompt. */
   projectRoot: string
   /** Per-run dir — the prompt file is written under <runDir>/heal-prompt.md. */
   runDir: string
   /** Defaults to 'new'. `resume` is mostly useful for the CLI; web runs are short-lived. */
   sessionMode?: HealSessionMode
-  /** Override prompt path resolution (tests). */
+  /** Override prompt template path resolution (tests). */
   promptPath?: string
 }
 
@@ -179,32 +162,36 @@ export interface OrchestratorAutoHealFactoryOptions {
  * Build a `buildCommand` function compatible with `AutoHealConfig.buildCommand`.
  * This is what wires the rich `buildAgentCommand` (claude/codex CLI invocation
  * with prompt file, MCP config, formatter pipeline) into the web-server's
- * orchestrator. Throws synchronously when the prompt source is missing or
- * malformed so the caller can decide to disable heal silently rather than
- * advertising a broken loop.
+ * orchestrator. The prompt is rendered from Canary Lab's packaged template,
+ * not from project CLAUDE.md / AGENTS.md, so auto-heal is not affected by
+ * user-edited agent guide files.
  */
 export function buildOrchestratorHealCommand(opts: OrchestratorAutoHealFactoryOptions): (args: { cycle: number; outputDir: string }) => string {
   const sessionMode: HealSessionMode = opts.sessionMode ?? 'new'
-  const promptPath = opts.promptPath
-    ?? (opts.agent === 'claude'
-      ? path.join(opts.projectRoot, 'CLAUDE.md')
-      : path.join(opts.projectRoot, 'AGENTS.md'))
-  // Eagerly load + extract the prompt block so a missing/malformed file
-  // surfaces at config time, not on the first heal cycle.
-  const basePrompt = loadPrompt(opts.agent, promptPath)
+  // Eagerly load the packaged template so a missing asset surfaces at config
+  // time, not on the first heal cycle.
+  const promptTemplate = loadPromptTemplate(opts.promptPath)
   const promptFile = path.join(opts.runDir, 'heal-prompt.md')
-  // Per-run signal paths injected so the agent doesn't have to guess. The
-  // shipped CLAUDE.md / AGENTS.md tells the agent to look for this header.
-  const signalsDir = path.join(opts.runDir, 'signals')
-  const pathsHeader = [
-    `Signal paths for this run:`,
-    `- Test/config-only fix → write \`${path.join(signalsDir, '.rerun')}\``,
-    `- Service/app fix → write \`${path.join(signalsDir, '.restart')}\``,
-  ].join('\n')
+  const paths = buildRunPaths(opts.runDir)
+  const runDirRel = path.relative(opts.projectRoot, opts.runDir) || opts.runDir
+  const basePrompt = renderPromptTemplate(promptTemplate, {
+    runDir: opts.runDir,
+    runDirRel,
+    healIndexPath: paths.healIndexPath,
+    summaryPath: paths.summaryPath,
+    failedDir: paths.failedDir,
+    journalPath: DIAGNOSIS_JOURNAL_PATH,
+    restartSignal: paths.restartSignal,
+    rerunSignal: paths.rerunSignal,
+  })
 
   return ({ cycle, outputDir }) => {
-    const stateAddendum = buildHealAddendum({ cycle: cycle + 1 })
-    const fullPrompt = [pathsHeader, basePrompt, stateAddendum].filter(Boolean).join('\n\n')
+    const stateAddendum = buildHealAddendum({
+      cycle: cycle + 1,
+      summaryPath: paths.summaryPath,
+      journalPath: DIAGNOSIS_JOURNAL_PATH,
+    })
+    const fullPrompt = [basePrompt, stateAddendum].filter(Boolean).join('\n\n')
     fs.mkdirSync(path.dirname(promptFile), { recursive: true })
     fs.writeFileSync(promptFile, fullPrompt)
     return buildAgentCommand(opts.agent, sessionMode, cycle, promptFile, outputDir)

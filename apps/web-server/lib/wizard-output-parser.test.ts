@@ -1,5 +1,31 @@
 import { describe, expect, it } from 'vitest'
-import { extractGeneratedFiles, extractPlan } from './wizard-output-parser'
+import {
+  extractDevDependencies,
+  extractGeneratedFiles,
+  extractGeneratedSpecOutput,
+  extractPlan,
+  extractWizardSessionRef,
+} from './wizard-output-parser'
+
+describe('extractWizardSessionRef', () => {
+  it('extracts a claude wizard session marker', () => {
+    expect(extractWizardSessionRef('x\n[[canary-lab:wizard-session agent=claude id=sess-123]]\ny')).toEqual({
+      kind: 'claude',
+      id: 'sess-123',
+    })
+  })
+
+  it('extracts a codex wizard thread marker', () => {
+    expect(extractWizardSessionRef('[[canary-lab:wizard-session agent=codex id=thread-123]]')).toEqual({
+      kind: 'codex',
+      id: 'thread-123',
+    })
+  })
+
+  it('returns null when no marker is present', () => {
+    expect(extractWizardSessionRef('<plan-output>[]</plan-output>')).toBeNull()
+  })
+})
 
 describe('extractPlan', () => {
   it('parses a valid plan between markers', () => {
@@ -84,6 +110,17 @@ chatter after`
     const r = extractPlan('<plan-output>[{"step":"  ","actions":[],"expectedOutcome":"y"}]</plan-output>')
     expect(r.ok).toBe(false)
   })
+
+  it('accepts string coverageType and rejects non-string coverageType', () => {
+    const valid = extractPlan('<plan-output>[{"coverageType":"api","step":"x","actions":[],"expectedOutcome":"y"}]</plan-output>')
+    expect(valid.ok).toBe(true)
+    if (!valid.ok) return
+    expect(valid.value[0].coverageType).toBe('api')
+
+    const invalid = extractPlan('<plan-output>[{"coverageType":1,"step":"x","actions":[],"expectedOutcome":"y"}]</plan-output>')
+    expect(invalid.ok).toBe(false)
+    if (!invalid.ok) expect(invalid.error).toMatch(/coverageType/)
+  })
 })
 
 describe('extractGeneratedFiles', () => {
@@ -154,5 +191,86 @@ const x = 1;
     expect(r.ok).toBe(false)
     if (r.ok) return
     expect(r.error).toMatch(/empty/)
+  })
+})
+
+describe('extractDevDependencies', () => {
+  it('returns an empty list when the block is omitted', () => {
+    const r = extractDevDependencies('<file path="x.ts">x</file>')
+    expect(r).toEqual({ ok: true, value: [] })
+  })
+
+  it('parses package names from a dependency block', () => {
+    const r = extractDevDependencies('<dev-dependencies>["amqplib","@types/node","mysql2"]</dev-dependencies>')
+    expect(r).toEqual({ ok: true, value: ['amqplib', '@types/node', 'mysql2'] })
+  })
+
+  it('rejects invalid JSON', () => {
+    const r = extractDevDependencies('<dev-dependencies>not json</dev-dependencies>')
+    expect(r.ok).toBe(false)
+    if (r.ok) return
+    expect(r.error).toMatch(/parse failed/)
+  })
+
+  it('rejects non-array blocks', () => {
+    const r = extractDevDependencies('<dev-dependencies>{"mysql2":"latest"}</dev-dependencies>')
+    expect(r.ok).toBe(false)
+    if (r.ok) return
+    expect(r.error).toMatch(/array/)
+  })
+
+  it('rejects duplicate packages', () => {
+    const r = extractDevDependencies('<dev-dependencies>["mysql2","mysql2"]</dev-dependencies>')
+    expect(r.ok).toBe(false)
+    if (r.ok) return
+    expect(r.error).toMatch(/duplicate/)
+  })
+
+  it('rejects paths, URLs, and shell fragments', () => {
+    for (const name of ['../mysql2', 'https://example.com/pkg', 'mysql2; rm -rf /']) {
+      const r = extractDevDependencies(`<dev-dependencies>${JSON.stringify([name])}</dev-dependencies>`)
+      expect(r.ok).toBe(false)
+    }
+  })
+
+  it('rejects multiple, empty, non-string, and blank dependency entries', () => {
+    const multiple = extractDevDependencies('<dev-dependencies>["a"]</dev-dependencies><dev-dependencies>["b"]</dev-dependencies>')
+    expect(multiple.ok).toBe(false)
+    if (!multiple.ok) expect(multiple.error).toMatch(/multiple/)
+
+    const emptyBody = extractDevDependencies('<dev-dependencies>   </dev-dependencies>')
+    expect(emptyBody.ok).toBe(false)
+    if (!emptyBody.ok) expect(emptyBody.error).toMatch(/empty/)
+
+    const nonString = extractDevDependencies('<dev-dependencies>[1]</dev-dependencies>')
+    expect(nonString.ok).toBe(false)
+    if (!nonString.ok) expect(nonString.error).toMatch(/must be a string/)
+
+    const blank = extractDevDependencies('<dev-dependencies>["  "]</dev-dependencies>')
+    expect(blank.ok).toBe(false)
+    if (!blank.ok) expect(blank.error).toMatch(/is empty/)
+  })
+})
+
+describe('extractGeneratedSpecOutput', () => {
+  it('extracts files and dependency metadata together', () => {
+    const r = extractGeneratedSpecOutput(`<file path="e2e/a.spec.ts">x</file>
+<dev-dependencies>
+["amqplib"]
+</dev-dependencies>`)
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.value.files[0].path).toBe('e2e/a.spec.ts')
+    expect(r.value.devDependencies).toEqual(['amqplib'])
+  })
+
+  it('returns file and dev dependency parse failures', () => {
+    const noFiles = extractGeneratedSpecOutput('<dev-dependencies>["amqplib"]</dev-dependencies>')
+    expect(noFiles.ok).toBe(false)
+    if (!noFiles.ok) expect(noFiles.error).toMatch(/no .file. blocks/)
+
+    const badDeps = extractGeneratedSpecOutput('<file path="x.ts">x</file><dev-dependencies>bad</dev-dependencies>')
+    expect(badDeps.ok).toBe(false)
+    if (!badDeps.ok) expect(badDeps.error).toMatch(/parse failed/)
   })
 })

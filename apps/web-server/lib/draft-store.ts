@@ -18,7 +18,6 @@ export type DraftStatus =
   | 'plan-ready'
   | 'generating'
   | 'spec-ready'
-  | 'refining'
   | 'accepted'
   | 'rejected'
   | 'cancelled'
@@ -30,8 +29,7 @@ const ALLOWED_TRANSITIONS: Record<DraftStatus, DraftStatus[]> = {
   planning: ['plan-ready', 'rejected', 'cancelled', 'error'],
   'plan-ready': ['generating', 'rejected', 'error'],
   generating: ['spec-ready', 'rejected', 'cancelled', 'error'],
-  'spec-ready': ['refining', 'accepted', 'rejected', 'error'],
-  refining: ['spec-ready', 'rejected', 'cancelled', 'error'],
+  'spec-ready': ['accepted', 'rejected', 'error'],
   accepted: [],
   rejected: [],
   cancelled: ['rejected'],
@@ -57,12 +55,15 @@ export interface DraftRecord {
   skills: string[]
   featureName?: string
   wizardAgent?: 'claude' | 'codex'
-  activeAgentStage?: 'planning' | 'generating' | 'refining'
+  activeAgentStage?: 'planning' | 'generating'
+  planAgentSessionId?: string
+  planAgentSessionKind?: 'claude' | 'codex'
   status: DraftStatus
   createdAt: string
   updatedAt: string
   plan?: unknown
   generatedFiles?: string[]
+  devDependencies?: string[]
   errorMessage?: string
 }
 
@@ -73,7 +74,6 @@ export interface DraftPaths {
   planJson: string
   planAgentLog: string
   specAgentLog: string
-  refineAgentLog: string
   generatedDir: string
 }
 
@@ -86,7 +86,6 @@ export function paths(logsDir: string, draftId: string): DraftPaths {
     planJson: path.join(draftDir, 'plan.json'),
     planAgentLog: path.join(draftDir, 'plan-agent.log'),
     specAgentLog: path.join(draftDir, 'spec-agent.log'),
-    refineAgentLog: path.join(draftDir, 'refine-agent.log'),
     generatedDir: path.join(draftDir, 'generated'),
   }
 }
@@ -164,9 +163,12 @@ export function canTransition(from: DraftStatus, to: DraftStatus): boolean {
 export interface TransitionPatch {
   plan?: unknown
   generatedFiles?: string[]
+  devDependencies?: string[]
   featureName?: string
   wizardAgent?: 'claude' | 'codex'
-  activeAgentStage?: 'planning' | 'generating' | 'refining'
+  activeAgentStage?: 'planning' | 'generating'
+  planAgentSessionId?: string
+  planAgentSessionKind?: 'claude' | 'codex'
   errorMessage?: string
 }
 
@@ -203,12 +205,27 @@ export type ApplyToProjectResult =
   | { ok: true; featureDir: string; written: string[] }
   | { ok: false; error: 'feature-exists' | 'invalid-name'; featureDir?: string }
 
+export type ValidateFeatureTargetResult =
+  | { ok: true; featureDir: string }
+  | { ok: false; error: 'feature-exists' | 'invalid-name'; featureDir?: string }
+
+export type MergeDevDependenciesResult =
+  | { ok: true; packageJsonPath?: string; added: string[] }
+  | { ok: false; error: 'package-json-missing' | 'package-json-invalid' | 'package-json-not-object'; packageJsonPath: string }
+
 const FEATURE_NAME_RE = /^[a-zA-Z0-9_-]+$/
 
-export function applyToProject(input: ApplyToProjectInput): ApplyToProjectResult {
-  if (!FEATURE_NAME_RE.test(input.featureName)) return { ok: false, error: 'invalid-name' }
-  const featureDir = path.join(input.projectRoot, 'features', input.featureName)
+export function validateFeatureTarget(projectRoot: string, featureName: string): ValidateFeatureTargetResult {
+  if (!FEATURE_NAME_RE.test(featureName)) return { ok: false, error: 'invalid-name' }
+  const featureDir = path.join(projectRoot, 'features', featureName)
   if (fs.existsSync(featureDir)) return { ok: false, error: 'feature-exists', featureDir }
+  return { ok: true, featureDir }
+}
+
+export function applyToProject(input: ApplyToProjectInput): ApplyToProjectResult {
+  const validation = validateFeatureTarget(input.projectRoot, input.featureName)
+  if (!validation.ok) return validation
+  const featureDir = validation.featureDir
   fs.mkdirSync(featureDir, { recursive: true })
   const written: string[] = []
   for (const f of input.generated) {
@@ -219,6 +236,54 @@ export function applyToProject(input: ApplyToProjectInput): ApplyToProjectResult
   }
   fs.writeFileSync(path.join(featureDir, '.canary-lab-draft-id'), input.draftId, 'utf8')
   return { ok: true, featureDir, written }
+}
+
+export function mergeRootDevDependencies(projectRoot: string, devDependencies: string[]): MergeDevDependenciesResult {
+  if (devDependencies.length === 0) return { ok: true, added: [] }
+  const packageJsonPath = path.join(projectRoot, 'package.json')
+  if (!fs.existsSync(packageJsonPath)) {
+    return { ok: false, error: 'package-json-missing', packageJsonPath }
+  }
+  let pkg: unknown
+  try {
+    pkg = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'))
+  } catch {
+    return { ok: false, error: 'package-json-invalid', packageJsonPath }
+  }
+  if (!pkg || typeof pkg !== 'object' || Array.isArray(pkg)) {
+    return { ok: false, error: 'package-json-not-object', packageJsonPath }
+  }
+
+  const record = pkg as Record<string, unknown>
+  if (record.dependencies !== undefined && !isPackageDependencyMap(record.dependencies)) {
+    return { ok: false, error: 'package-json-invalid', packageJsonPath }
+  }
+  if (record.devDependencies !== undefined && !isPackageDependencyMap(record.devDependencies)) {
+    return { ok: false, error: 'package-json-invalid', packageJsonPath }
+  }
+  const dependencies = isPackageDependencyMap(record.dependencies) ? record.dependencies : {}
+  const existingDev = isPackageDependencyMap(record.devDependencies) ? record.devDependencies : {}
+  const nextDev = { ...existingDev }
+  const added: string[] = []
+
+  for (const name of devDependencies) {
+    if (Object.prototype.hasOwnProperty.call(existingDev, name)) continue
+    if (Object.prototype.hasOwnProperty.call(dependencies, name)) continue
+    nextDev[name] = 'latest'
+    added.push(name)
+  }
+
+  if (added.length === 0) return { ok: true, packageJsonPath, added }
+  record.devDependencies = nextDev
+  fs.writeFileSync(packageJsonPath, JSON.stringify(record, null, 2) + '\n', 'utf8')
+  return { ok: true, packageJsonPath, added }
+}
+
+function isPackageDependencyMap(value: unknown): value is Record<string, string> {
+  return Boolean(value)
+    && typeof value === 'object'
+    && !Array.isArray(value)
+    && Object.values(value as Record<string, unknown>).every((v) => typeof v === 'string')
 }
 
 // Slugify a string into a feature name candidate. Used as a fallback when the
