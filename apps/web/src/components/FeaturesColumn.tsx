@@ -9,7 +9,7 @@ interface Props {
   features: Feature[]
   selectedFeature: string | null
   onSelectFeature: (name: string) => void
-  onFeaturesChanged?: (acceptedFeature?: string) => void
+  onFeaturesChanged?: (preferredFeature?: string | null) => void
 }
 
 export function FeaturesColumn({
@@ -106,7 +106,14 @@ export function FeaturesColumn({
       )}
 
       {configFor && (
-        <FeatureConfigEditor feature={configFor} onClose={() => setConfigFor(null)} />
+        <FeatureConfigEditor
+          feature={configFor}
+          onClose={() => setConfigFor(null)}
+          onDeleted={(deletedFeature) => {
+            setConfigFor(null)
+            onFeaturesChanged?.(selectedFeature === deletedFeature ? null : selectedFeature)
+          }}
+        />
       )}
     </div>
   )

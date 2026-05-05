@@ -137,6 +137,23 @@ export function putFeatureConfigDoc(
   )
 }
 
+export async function deleteFeature(
+  name: string,
+  confirmName: string,
+  opts?: ClientOptions,
+): Promise<void> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  await request<unknown>(
+    `${baseUrl}/api/features/${encodeURIComponent(name)}`,
+    {
+      method: 'DELETE',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ confirmName }),
+    },
+    fetchImpl,
+  )
+}
+
 export function getPlaywrightConfig(name: string, opts?: ClientOptions): Promise<ParsedConfigDoc> {
   const { baseUrl, fetchImpl } = defaultOpts(opts)
   return request<ParsedConfigDoc>(

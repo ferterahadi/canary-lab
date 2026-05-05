@@ -492,6 +492,7 @@ export function ConfirmModal({
   onConfirm,
   onCancel,
   busy = false,
+  confirmDisabled = false,
 }: {
   open: boolean
   title: string
@@ -502,6 +503,7 @@ export function ConfirmModal({
   onConfirm: () => void
   onCancel: () => void
   busy?: boolean
+  confirmDisabled?: boolean
 }) {
   return (
     <Modal open={open} onClose={onCancel} title={title} width={420}>
@@ -524,12 +526,14 @@ export function ConfirmModal({
         <button
           type="button"
           onClick={onConfirm}
-          disabled={busy}
+          disabled={busy || confirmDisabled}
           className="rounded-md px-3 py-1 text-[11px] uppercase tracking-wider"
           style={{
             color: variant === 'danger' ? '#fff' : 'var(--text-primary)',
             background: variant === 'danger' ? '#ef4444' : 'transparent',
             border: variant === 'danger' ? '1px solid #ef4444' : '1px solid var(--border-default)',
+            opacity: busy || confirmDisabled ? 0.45 : 1,
+            cursor: busy || confirmDisabled ? 'not-allowed' : 'pointer',
           }}
         >
           {busy ? '…' : confirmLabel}

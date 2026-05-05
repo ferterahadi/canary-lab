@@ -28,6 +28,7 @@ const pendingTools = new Map<string, PendingTool>()
 const SESSION_MARKER = '[[canary-lab:wizard-session'
 const announcedPartialFiles = new Set<string>()
 let announcedDrafting = false
+let lastRawAssistantText = ''
 
 function elapsed(): string {
   const s = Math.floor((Date.now() - START) / 1000)
@@ -139,7 +140,9 @@ function handleLine(line: string): void {
           emitPartialProgress(block.text)
           continue
         }
-        process.stdout.write(`${block.text.trimEnd()}\n`)
+        const text = block.text.trimEnd()
+        process.stdout.write(`${text}\n`)
+        lastRawAssistantText = text.trim()
         continue
       }
       if (block.type === 'thinking') {
@@ -184,6 +187,11 @@ function handleLine(line: string): void {
   }
 
   if (type === 'result') {
+    const finalText = typeof msg.result === 'string' ? msg.result.trim() : ''
+    if (finalText && finalText !== lastRawAssistantText) {
+      process.stdout.write(`${finalText}\n`)
+      lastRawAssistantText = finalText
+    }
     const durationMs = Number(msg.duration_ms ?? 0)
     const isError = msg.is_error === true
     const label = isError ? c('red', 'failed') : c('green', 'done')

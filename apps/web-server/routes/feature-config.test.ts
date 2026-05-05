@@ -148,6 +148,77 @@ describe('feature.config endpoints', () => {
   })
 })
 
+describe('feature deletion endpoint', () => {
+  it('deletes the whole feature directory when the confirmation name matches', async () => {
+    const featureDir = buildFeature('gone', {
+      playwright: `module.exports = { testDir: './e2e' }`,
+      envsets: { local: { 'feature.env': 'A=1\n' } },
+    })
+    const app = await makeApp()
+    try {
+      const r = await app.inject({
+        method: 'DELETE',
+        url: '/api/features/gone',
+        payload: { confirmName: 'gone' },
+      })
+      expect(r.statusCode).toBe(204)
+      expect(fs.existsSync(featureDir)).toBe(false)
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('rejects deletion unless the confirmation name exactly matches', async () => {
+    const featureDir = buildFeature('keep')
+    const app = await makeApp()
+    try {
+      const r = await app.inject({
+        method: 'DELETE',
+        url: '/api/features/keep',
+        payload: { confirmName: 'nope' },
+      })
+      expect(r.statusCode).toBe(400)
+      expect(fs.existsSync(featureDir)).toBe(true)
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('returns 404 for unknown features', async () => {
+    const app = await makeApp()
+    try {
+      const r = await app.inject({
+        method: 'DELETE',
+        url: '/api/features/missing',
+        payload: { confirmName: 'missing' },
+      })
+      expect(r.statusCode).toBe(404)
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('refuses to delete when the config points outside the features root', async () => {
+    const outsideDir = path.join(tmpDir, 'outside-feature')
+    fs.mkdirSync(outsideDir, { recursive: true })
+    buildFeature('external', {
+      config: `module.exports = { config: { name: 'external', description: 'd', repos: [], featureDir: ${JSON.stringify(outsideDir)} } }`,
+    })
+    const app = await makeApp()
+    try {
+      const r = await app.inject({
+        method: 'DELETE',
+        url: '/api/features/external',
+        payload: { confirmName: 'external' },
+      })
+      expect(r.statusCode).toBe(400)
+      expect(fs.existsSync(outsideDir)).toBe(true)
+    } finally {
+      await app.close()
+    }
+  })
+})
+
 describe('playwright.config endpoints', () => {
   it('GET returns parsed playwright config', async () => {
     buildFeature('alpha', {

@@ -192,4 +192,39 @@ describe('wizard claude formatter', () => {
     expect(out).toContain('in 1.2s')
     expect(out).toContain('failed')
   })
+
+  it('emits final result text raw when Claude only streams partial assistant text', () => {
+    handleLine(JSON.stringify({
+      type: 'assistant',
+      message: {
+        stop_reason: null,
+        content: [{ type: 'text', text: '<plan-output>\n[' }],
+      },
+    }))
+    handleLine(JSON.stringify({
+      type: 'result',
+      duration_ms: 1000,
+      is_error: false,
+      result: '<plan-output>\n[{"step":"Login","actions":[],"expectedOutcome":"ok"}]\n</plan-output>',
+    }))
+    const out = writes.join('')
+    expect(out).toContain('<plan-output>')
+    expect(out).toContain('</plan-output>')
+  })
+
+  it('does not duplicate result text after a final assistant message was emitted', () => {
+    const finalText = '<plan-output>\n[]\n</plan-output>'
+    handleLine(JSON.stringify({
+      type: 'assistant',
+      message: { content: [{ type: 'text', text: finalText }] },
+    }))
+    handleLine(JSON.stringify({
+      type: 'result',
+      duration_ms: 1000,
+      is_error: false,
+      result: finalText,
+    }))
+    const out = writes.join('')
+    expect(out.match(/<plan-output>/g)).toHaveLength(1)
+  })
 })
