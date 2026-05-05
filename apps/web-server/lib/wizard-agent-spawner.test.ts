@@ -203,12 +203,20 @@ describe('shellQuote / buildClaudeArgs / buildClaudeCommand', () => {
   })
 
   it('passes prompt as positional arg with -p', () => {
-    expect(buildClaudeArgs('hi')).toEqual(['-p', 'hi'])
+    expect(buildClaudeArgs('hi')).toEqual([
+      '--dangerously-skip-permissions',
+      '--output-format=stream-json',
+      '--verbose',
+      '-p',
+      'hi',
+    ])
   })
 
   it('builds a bash-safe command line', () => {
     const cmd = buildClaudeCommand(`hello "world" it's me`)
-    expect(cmd.startsWith('claude ')).toBe(true)
+    expect(cmd.startsWith('set -o pipefail; claude ')).toBe(true)
+    expect(cmd).toContain(`--output-format=stream-json`)
+    expect(cmd).toContain(`wizard-claude-formatter.js`)
     expect(cmd).toContain(`'-p'`)
     // Embedded single quote must be escaped via the standard close/escape/open trick.
     expect(cmd).toContain(`'\\''`)
@@ -216,25 +224,27 @@ describe('shellQuote / buildClaudeArgs / buildClaudeCommand', () => {
 
   it('honors a custom claude binary path', () => {
     const cmd = buildClaudeCommand('hi', '/opt/bin/claude')
-    expect(cmd.startsWith('/opt/bin/claude ')).toBe(true)
+    expect(cmd.startsWith('set -o pipefail; /opt/bin/claude ')).toBe(true)
   })
 })
 
 describe('buildCodexArgs / buildCodexCommand / buildWizardCommand', () => {
   it('builds codex exec args', () => {
-    expect(buildCodexArgs('hi')).toEqual(['exec', '--skip-git-repo-check', '--full-auto', 'hi'])
+    expect(buildCodexArgs('hi')).toEqual(['exec', '--skip-git-repo-check', '--full-auto', '--json', 'hi'])
   })
 
   it('builds a bash-safe codex command line', () => {
     const cmd = buildCodexCommand(`hello it's me`)
-    expect(cmd.startsWith('codex ')).toBe(true)
+    expect(cmd.startsWith('set -o pipefail; codex ')).toBe(true)
     expect(cmd).toContain(`'exec'`)
+    expect(cmd).toContain(`'--json'`)
+    expect(cmd).toContain(`wizard-codex-formatter.js`)
     expect(cmd).toContain(`'\\''`)
   })
 
   it('dispatches by agent', () => {
-    expect(buildWizardCommand('claude', 'hi')).toMatch(/^claude /)
-    expect(buildWizardCommand('codex', 'hi')).toMatch(/^codex /)
+    expect(buildWizardCommand('claude', 'hi')).toMatch(/^set -o pipefail; claude /)
+    expect(buildWizardCommand('codex', 'hi')).toMatch(/^set -o pipefail; codex /)
   })
 })
 

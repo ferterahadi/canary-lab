@@ -56,6 +56,7 @@ export function PlanReviewStep({ draft, onAccept, onReject, onRetry, onCancelGen
   }, [seedPlan])
 
   const editable = status === 'plan-ready'
+  const generationActive = status === 'planning' || status === 'generating' || status === 'refining'
   const errors = validatePlan(plan)
   const hasErrors = errors.length > 0
 
@@ -212,7 +213,7 @@ export function PlanReviewStep({ draft, onAccept, onReject, onRetry, onCancelGen
             <button
               type="button"
               onClick={onReject}
-              disabled={acting}
+              disabled={acting || generationActive}
               className="rounded border border-zinc-300 dark:border-zinc-700 px-3 py-1.5 text-xs text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-800 disabled:opacity-50"
             >
               Reject

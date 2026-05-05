@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import * as api from '../api/client'
 import type { DraftRecord, Feature, PlanStep } from '../api/types'
-import { isPollingForStep, isTerminalDraft, nextStepForStatus, type WizardStep } from '../lib/wizard-state'
+import { isGenerationActive, isPollingForStep, isTerminalDraft, nextStepForStatus, type WizardStep } from '../lib/wizard-state'
 import { slugifyFeatureName } from '../lib/wizard-validation'
 import { ConfigureStep, type ConfigureSubmit } from './wizard/ConfigureStep'
 import { PlanReviewStep } from './wizard/PlanReviewStep'
@@ -212,6 +212,7 @@ export function AddTestWizard({ features, onClose }: Props) {
   }, [draft, configureInput, onClose])
 
   const requestCancel = (): void => {
+    if (draft && isGenerationActive(draft.status)) return
     if (!draft || isTerminalDraft(draft.status)) {
       onClose({})
       return
@@ -227,6 +228,7 @@ export function AddTestWizard({ features, onClose }: Props) {
         : draft
           ? slugifyFeatureName(draft.prdText)
           : ''
+  const closeDisabled = draft ? isGenerationActive(draft.status) : false
 
   return (
     <div className="cl-panel fixed inset-0 z-50 flex flex-col">
@@ -235,7 +237,9 @@ export function AddTestWizard({ features, onClose }: Props) {
         <button
           type="button"
           onClick={requestCancel}
-          className="cl-button px-2 py-1 text-xs"
+          disabled={closeDisabled}
+          title={closeDisabled ? 'Stop generation before closing this wizard.' : undefined}
+          className="cl-button px-2 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-50"
         >
           Close
         </button>

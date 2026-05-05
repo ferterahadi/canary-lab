@@ -50,12 +50,14 @@ function runAgent(opts: {
   broker?: PaneBroker | null
   paneId: string
   registry?: WizardAgentRegistry | null
+  label: string
 }): Promise<string> {
   const sink = createTeeSink({
     logPath: opts.agentLogPath,
     broker: opts.broker,
     paneId: opts.paneId,
   })
+  sink.push(`[wizard] ${opts.label}\n`)
   return new Promise<string>((resolve, reject) => {
     let pty
     try {
@@ -114,6 +116,7 @@ export function spawnPlanAgent(
       broker: deps.broker ?? null,
       paneId: paneIdForDraft(input.draftId),
       registry: deps.registry ?? null,
+      label: `${input.agent} plan agent started`,
     })
   }
 }
@@ -141,6 +144,7 @@ export function spawnSpecAgent(
       broker: deps.broker ?? null,
       paneId: paneIdForDraft(input.draftId),
       registry: deps.registry ?? null,
+      label: `${input.agent} spec agent started`,
     })
   }
 }
@@ -172,6 +176,7 @@ export function spawnRefineAgent(
       broker: deps.broker ?? null,
       paneId: paneIdForDraft(input.draftId),
       registry: deps.registry ?? null,
+      label: `${input.agent} refinement agent started`,
     })
   }
 }

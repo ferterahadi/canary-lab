@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   canAdvance,
+  isGenerationActive,
   isPollingForStep,
   isTerminalDraft,
   nextStepForStatus,
@@ -16,6 +17,7 @@ const ALL: DraftStatus[] = [
   'plan-ready',
   'generating',
   'spec-ready',
+  'refining',
   'accepted',
   'rejected',
   'cancelled',
@@ -51,8 +53,9 @@ describe('isPollingForStep', () => {
     expect(isPollingForStep('plan', 'plan-ready')).toBe(false)
     expect(isPollingForStep('plan', 'error')).toBe(false)
   })
-  it('spec polls only while generating', () => {
+  it('spec polls while generating or refining', () => {
     expect(isPollingForStep('spec', 'generating')).toBe(true)
+    expect(isPollingForStep('spec', 'refining')).toBe(true)
     expect(isPollingForStep('spec', 'spec-ready')).toBe(false)
   })
   it('configure polls only while recommending', () => {
@@ -120,5 +123,19 @@ describe('isTerminalDraft', () => {
     expect(isTerminalDraft('created')).toBe(false)
     expect(isTerminalDraft('planning')).toBe(false)
     expect(isTerminalDraft('spec-ready')).toBe(false)
+  })
+})
+
+describe('isGenerationActive', () => {
+  it('flags statuses backed by an active wizard agent', () => {
+    expect(isGenerationActive('planning')).toBe(true)
+    expect(isGenerationActive('generating')).toBe(true)
+    expect(isGenerationActive('refining')).toBe(true)
+  })
+
+  it('returns false once the user can close safely', () => {
+    expect(isGenerationActive('cancelled')).toBe(false)
+    expect(isGenerationActive('error')).toBe(false)
+    expect(isGenerationActive('spec-ready')).toBe(false)
   })
 })
