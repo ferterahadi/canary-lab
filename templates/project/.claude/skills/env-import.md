@@ -8,6 +8,8 @@ type: skill
 
 Import existing environment/config files from the repos declared in a feature's `feature.config.cjs` into its `envsets/` directory.
 
+Canary Lab's UI is the primary surface for switching envs and running tests, but it uses the same `envsets/envsets.config.json` contract described here.
+
 ## When to Use
 
 When a feature has repos declared in `feature.config.cjs` but the envsets are not yet configured — or when adding a new repo to an existing feature.
@@ -148,7 +150,6 @@ Results in envsets.config.json:
 
 ## Script Locations
 
-- Env switcher: `shared/env-switcher/switch.ts`
-- Env switcher CLI: `shared/env-switcher/root-cli.ts`
-- Env switcher types: `shared/env-switcher/types.ts`
+- Env switcher: `apps/web-server/lib/runtime/env-switcher/switch.ts`
+- Env switcher types: `apps/web-server/lib/runtime/env-switcher/types.ts`
 - Feature config types: `shared/launcher/types.ts`

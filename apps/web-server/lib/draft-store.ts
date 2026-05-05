@@ -234,7 +234,6 @@ export function applyToProject(input: ApplyToProjectInput): ApplyToProjectResult
     fs.writeFileSync(target, f.content, 'utf8')
     written.push(target)
   }
-  fs.writeFileSync(path.join(featureDir, '.canary-lab-draft-id'), input.draftId, 'utf8')
   return { ok: true, featureDir, written }
 }
 
