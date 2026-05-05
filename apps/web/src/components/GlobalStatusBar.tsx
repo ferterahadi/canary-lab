@@ -38,18 +38,16 @@ export function GlobalStatusBar({ activeRunDetail, onNavigateToRun }: Props) {
 
   return (
     <div
-      className="flex items-center gap-4 px-4 py-2 overflow-hidden"
-      style={{ borderBottom: '1px solid var(--border-default)', background: 'var(--bg-surface)' }}
+      className="cl-shell-bar flex items-center gap-4 px-4 py-2 overflow-hidden"
     >
       <span
-        className="shrink-0 text-[10px] uppercase tracking-wider font-medium"
-        style={{ color: 'var(--text-muted)' }}
+        className="cl-kicker shrink-0"
       >
         Canary Lab
       </span>
-      <span className="shrink-0" style={{ color: 'var(--border-default)' }}>|</span>
+      <span className="cl-divider shrink-0">|</span>
       <ConnectionBadge state={connection} />
-      <span className="shrink-0" style={{ color: 'var(--border-default)' }}>|</span>
+      <span className="cl-divider shrink-0">|</span>
       <div className="shrink-0"><StatusDot label="Playwright" state={playwrightState} /></div>
       {services.length > 0 && (
         <div className="shrink-0">
@@ -63,10 +61,8 @@ export function GlobalStatusBar({ activeRunDetail, onNavigateToRun }: Props) {
         <button
           type="button"
           onClick={() => onNavigateToRun?.(activeRunDetail.manifest.feature, activeRunDetail.manifest.runId)}
-          className="ml-auto flex items-center gap-2 text-[11px] min-w-0 rounded-md px-2 py-0.5 transition-colors duration-150"
+          className="cl-button ml-auto flex min-w-0 items-center gap-2 px-2 py-0.5 text-[11px]"
           style={{ color: 'var(--text-secondary)' }}
-          onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-elevated)' }}
-          onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
           title="Go to active run"
         >
           <span className="shrink-0" style={{ color: 'var(--text-muted)' }}>Active run:</span>
@@ -117,7 +113,7 @@ function StatusDot({ label, state }: { label: string; state: 'running' | 'healin
   const dotColor =
     state === 'running' ? 'bg-emerald-500'
     : state === 'healing' ? 'bg-amber-500'
-    : 'bg-zinc-400 dark:bg-zinc-600'
+    : 'bg-slate-400 dark:bg-slate-600'
 
   const dotGlow =
     state === 'running' ? 'bg-emerald-400'

@@ -23,19 +23,15 @@ export function FeaturesColumn({
   const [settingsOpen, setSettingsOpen] = useState(false)
 
   return (
-    <div className="flex h-full flex-col">
-      <div className="px-4 py-3" style={{ borderBottom: '1px solid var(--border-default)' }}>
+    <div className="cl-panel flex h-full flex-col">
+      <div className="cl-panel-header px-4 py-3">
         <div className="flex items-center justify-between">
-          <span className="text-[10px] uppercase tracking-wider font-medium" style={{ color: 'var(--text-muted)' }}>Features</span>
+          <span className="cl-kicker">Features</span>
           <button
             type="button"
             onClick={() => setWizardOpen(true)}
-            className="rounded-md px-2 py-1 text-[10px] font-medium uppercase tracking-wide transition-colors duration-150"
-            style={{
-              color: 'var(--border-focus)',
-              border: '1px solid color-mix(in srgb, var(--border-focus) 40%, transparent)',
-              background: 'color-mix(in srgb, var(--border-focus) 8%, transparent)',
-            }}
+            className="cl-button px-2 py-1 text-[10px] font-semibold uppercase tracking-wide"
+            style={{ color: 'var(--accent)' }}
           >
             + New
           </button>
@@ -50,11 +46,10 @@ export function FeaturesColumn({
             return (
               <div
                 key={f.name}
-                className="feature-row group flex w-full items-center text-sm transition-colors duration-150"
+                className={`feature-row group flex w-full items-center text-sm ${isSelected ? 'cl-row-selected' : 'cl-row'}`}
                 style={{
                   color: isSelected ? 'var(--text-primary)' : 'var(--text-secondary)',
                   fontWeight: isSelected ? 500 : 400,
-                  background: isSelected ? 'var(--bg-elevated)' : 'transparent',
                 }}
               >
                 <button
@@ -71,10 +66,7 @@ export function FeaturesColumn({
                   onClick={() => setConfigFor(f.name)}
                   aria-label={`Configure ${f.name}`}
                   title="View feature config"
-                  className="feature-row__cog mr-2 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md transition-colors duration-150"
-                  style={{ color: 'var(--text-muted)' }}
-                  onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--text-primary)' }}
-                  onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-muted)' }}
+                  className="feature-row__cog cl-icon-button mr-2 h-6 w-6 shrink-0"
                 >
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                     <circle cx="12" cy="12" r="3" />
@@ -86,17 +78,14 @@ export function FeaturesColumn({
           })
         )}
       </div>
-      <div className="flex items-center justify-between p-2" style={{ borderTop: '1px solid var(--border-default)' }}>
+      <div className="cl-panel-footer flex items-center justify-between p-2">
         <ThemeToggle />
         <button
           type="button"
           onClick={() => setSettingsOpen(true)}
           aria-label="Open settings"
           title="Settings"
-          className="inline-flex h-6 w-6 items-center justify-center rounded-md transition-colors duration-150"
-          style={{ color: 'var(--text-muted)' }}
-          onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--text-primary)' }}
-          onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-muted)' }}
+          className="cl-icon-button h-7 w-7"
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <circle cx="12" cy="12" r="3" />

@@ -44,10 +44,10 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunStatus }: 
   const isRunActivelyTesting = activeRunStatus === 'running'
 
   return (
-    <div className="flex h-full flex-col">
-      <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom: '1px solid var(--border-default)' }}>
+    <div className="cl-panel flex h-full flex-col">
+      <div className="cl-panel-header flex items-center justify-between px-4 py-3">
         <div className="flex items-center gap-2">
-          <span className="text-[10px] uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Tests</span>
+          <span className="cl-kicker">Tests</span>
         </div>
         <TestsHeaderIndicator
           summary={activeRunSummary}
@@ -120,8 +120,8 @@ function TestCard({
 }) {
   return (
     <div
-      className={`rounded-lg border transition-all duration-150 ${colorClassForStatus(status)}`}
-      style={{ background: expanded ? 'var(--bg-elevated)' : undefined }}
+      className={`cl-card cl-card-hover transition-all duration-150 ${colorClassForStatus(status)}`}
+      style={{ background: expanded ? 'var(--bg-selected)' : undefined }}
     >
       <button
         type="button"
@@ -142,7 +142,7 @@ function TestCard({
       {expanded && (
         <div className="space-y-2 px-3 pb-3">
           {runningLocation && (
-            <div className="rounded border border-sky-500/40 bg-sky-500/10 px-2 py-1 text-[10px]" style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>
+            <div className="rounded-md border px-2 py-1 text-[10px]" style={{ color: 'var(--text-secondary)', borderColor: 'color-mix(in srgb, var(--accent) 40%, transparent)', background: 'var(--accent-soft)', fontFamily: 'var(--font-mono)' }}>
               {runningStep?.location
                 ? `Running line ${lineLabel(runningStep.location)} · ${runningStep.category}`
                 : `Running from ${shortLocation(runningLocation)}`}

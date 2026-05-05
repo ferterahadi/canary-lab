@@ -79,7 +79,7 @@ export function ShikiCode({
   if (html === null) {
     return (
       <CodeShell sourceLocation={sourceLocation} openError={openError} onOpenStart={() => openAt(sourceLocation?.startLine ?? 1)}>
-        <pre className="overflow-hidden whitespace-pre-wrap break-words rounded p-2 text-[11px]" style={{ background: 'var(--bg-elevated)', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>
+        <pre className="cl-code-shell overflow-hidden whitespace-pre-wrap break-words rounded-md p-2 text-[11px]" style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>
           <code>{source}</code>
         </pre>
       </CodeShell>
@@ -89,7 +89,7 @@ export function ShikiCode({
   return (
     <CodeShell sourceLocation={sourceLocation} openError={openError} onOpenStart={() => openAt(sourceLocation?.startLine ?? 1)}>
       <div
-        className={`shiki-block overflow-hidden rounded text-[11px] ${sourceLocation ? '[&_span.line]:cursor-pointer [&_span.line:hover]:bg-sky-500/10' : ''}`}
+        className={`shiki-block cl-code-shell overflow-hidden rounded-md text-[11px] ${sourceLocation ? '[&_span.line]:cursor-pointer [&_span.line:hover]:bg-sky-500/10' : ''}`}
         onClick={(e) => {
           const line = (e.target as HTMLElement).closest<HTMLElement>('[data-source-line]')?.dataset.sourceLine
           if (line) void openAt(Number(line))
@@ -121,12 +121,11 @@ function CodeShell({
           title="Open in editor"
           aria-label="Open in editor"
           onClick={onOpenStart}
-          className="absolute right-1 top-1 z-10 inline-flex h-6 w-6 items-center justify-center rounded-md text-[12px] transition-colors duration-150 hover:bg-[var(--bg-elevated)]"
+          className="cl-icon-button absolute right-1 top-1 z-10 h-6 w-6 text-[12px]"
           style={{
-            color: 'var(--text-muted)',
             border: '1px solid var(--border-default)',
-            background: 'color-mix(in srgb, var(--bg-base) 92%, transparent)',
-            boxShadow: '0 1px 4px rgba(0,0,0,0.12)',
+            background: 'color-mix(in srgb, var(--bg-surface) 92%, transparent)',
+            boxShadow: 'var(--shadow-panel)',
           }}
         >
           ↗
@@ -173,7 +172,7 @@ export function StepBlock({
 }) {
   const [expanded, setExpanded] = useState(false)
   return (
-    <li className={`rounded border ${colorClassForStatus(status)} p-1.5`}>
+    <li className={`rounded-md border ${colorClassForStatus(status)} bg-[var(--bg-surface)] p-1.5`}>
       <button
         type="button"
         className="flex w-full items-center gap-2 text-left text-xs"

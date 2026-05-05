@@ -134,7 +134,7 @@ export function ResizablePanels({ panels }: { panels: PanelConfig[] }) {
                 minWidth: isCollapsed ? 0 : undefined,
               }}
             >
-              <div className="h-full overflow-hidden" style={{ background: 'var(--bg-surface)' }}>
+              <div className="cl-panel h-full overflow-hidden">
                 {panel.content}
               </div>
             </div>

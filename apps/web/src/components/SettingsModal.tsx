@@ -90,28 +90,22 @@ export function SettingsModal({ onClose }: Props) {
 
   return (
     <div
-      className="fixed inset-0 z-40 flex items-center justify-center"
-      style={{ background: 'rgba(0,0,0,0.5)' }}
+      className="cl-modal-backdrop fixed inset-0 z-40 flex items-center justify-center"
       onClick={onClose}
     >
       <div
-        className="relative w-[480px] rounded-md"
-        style={{
-          background: 'var(--bg-base)',
-          border: '1px solid var(--border-default)',
-        }}
+        className="cl-modal relative w-[480px] rounded-lg"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom: '1px solid var(--border-default)' }}>
-          <span className="text-[10px] uppercase tracking-wider font-medium" style={{ color: 'var(--text-muted)' }}>
+        <div className="cl-panel-header flex items-center justify-between px-4 py-3">
+          <span className="cl-kicker">
             Settings
           </span>
           <button
             type="button"
             aria-label="Close settings"
             onClick={onClose}
-            className="text-xs"
-            style={{ color: 'var(--text-muted)' }}
+            className="cl-icon-button h-7 w-7 text-xs"
           >
             ✕
           </button>
@@ -130,9 +124,9 @@ export function SettingsModal({ onClose }: Props) {
                 {HEAL_AGENT_OPTIONS.map((opt) => (
                   <label
                     key={opt.value}
-                    className="flex items-start gap-2 cursor-pointer rounded-md px-2 py-1.5"
+                    className="cl-card-hover flex cursor-pointer items-start gap-2 rounded-md px-2 py-1.5"
                     style={{
-                      background: draft.healAgent === opt.value ? 'var(--bg-elevated)' : 'transparent',
+                      background: draft.healAgent === opt.value ? 'var(--bg-selected)' : 'transparent',
                     }}
                   >
                     <input
@@ -157,9 +151,9 @@ export function SettingsModal({ onClose }: Props) {
                 {EDITOR_OPTIONS.map((opt) => (
                   <label
                     key={opt.value}
-                    className="flex items-start gap-2 cursor-pointer rounded-md px-2 py-1.5"
+                    className="cl-card-hover flex cursor-pointer items-start gap-2 rounded-md px-2 py-1.5"
                     style={{
-                      background: draft.editor === opt.value ? 'var(--bg-elevated)' : 'transparent',
+                      background: draft.editor === opt.value ? 'var(--bg-selected)' : 'transparent',
                     }}
                   >
                     <input
@@ -183,13 +177,12 @@ export function SettingsModal({ onClose }: Props) {
             </>
           )}
         </div>
-        <div className="flex items-center justify-end gap-2 px-4 py-3" style={{ borderTop: '1px solid var(--border-default)' }}>
+        <div className="cl-panel-footer flex items-center justify-end gap-2 px-4 py-3">
           {error && <span className="mr-auto text-xs" style={{ color: '#ef4444' }}>{error}</span>}
           <button
             type="button"
             onClick={onClose}
-            className="rounded-md px-3 py-1 text-xs"
-            style={{ color: 'var(--text-muted)' }}
+            className="cl-button px-3 py-1 text-xs"
           >
             Close
           </button>
@@ -197,7 +190,7 @@ export function SettingsModal({ onClose }: Props) {
             type="button"
             onClick={onSave}
             disabled={!dirty || saving}
-            className="rounded-md px-3 py-1 text-xs"
+            className="cl-button px-3 py-1 text-xs"
             style={{
               color: dirty ? 'var(--border-focus)' : 'var(--text-muted)',
               border: '1px solid',

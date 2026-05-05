@@ -7,18 +7,18 @@ import { paneTerminalNotice } from '../lib/pane-terminal-message'
 
 const TERM_THEMES: Record<ResolvedTheme, ITheme> = {
   dark: {
-    background: '#14161a',
-    foreground: '#d4d7de',
-    selectionBackground: '#2b5b9f',
+    background: '#0d1117',
+    foreground: '#d7e1ea',
+    selectionBackground: '#164a63',
     selectionForeground: '#ffffff',
-    selectionInactiveBackground: '#263a59',
+    selectionInactiveBackground: '#1d3344',
   },
   light: {
-    background: '#fafafa',
-    foreground: '#383a42',
-    selectionBackground: '#bfdbfe',
-    selectionForeground: '#111827',
-    selectionInactiveBackground: '#dbeafe',
+    background: '#f4f7fb',
+    foreground: '#17202a',
+    selectionBackground: '#b9e2f5',
+    selectionForeground: '#17202a',
+    selectionInactiveBackground: '#d9edf7',
   },
 }
 
