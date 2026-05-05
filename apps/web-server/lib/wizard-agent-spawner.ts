@@ -20,6 +20,8 @@ export const PROMPTS_DIR = path.resolve(__dirname, '..', 'prompts')
 export const STAGE1_TEMPLATE = path.join(PROMPTS_DIR, 'stage1-plan.md')
 export const STAGE2_TEMPLATE = path.join(PROMPTS_DIR, 'stage2-spec.md')
 export const REFINE_TEMPLATE = path.join(PROMPTS_DIR, 'stage3-refine.md')
+export const WIZARD_CLAUDE_FORMATTER_FILE = path.join(__dirname, 'runtime', 'wizard-claude-formatter.js')
+export const WIZARD_CODEX_FORMATTER_FILE = path.join(__dirname, 'runtime', 'wizard-codex-formatter.js')
 
 export function loadTemplate(file: string): string {
   return fs.readFileSync(file, 'utf8')
@@ -148,12 +150,11 @@ export function createTeeSink(opts: {
   }
 }
 
-// Build the argv used to invoke `claude -p`. `claude` takes the prompt as a
-// positional argument; `-p` enables print-and-exit mode. Verified against
-// `claude --help` (Anthropic CLI). We intentionally do not use any other
-// flags — keeps the spawn deterministic and easy to mock.
+// Build the argv used to invoke Claude in streaming JSON mode. The wizard
+// pipes that JSON through a formatter so users see progress immediately while
+// the final assistant text remains parseable by the draft output parser.
 export function buildClaudeArgs(prompt: string): string[] {
-  return ['-p', prompt]
+  return ['--dangerously-skip-permissions', '--output-format=stream-json', '--verbose', '-p', prompt]
 }
 
 // Shell-escape a single argument for /bin/bash. The pty wrapper invokes
@@ -165,15 +166,15 @@ export function shellQuote(arg: string): string {
 }
 
 export function buildClaudeCommand(prompt: string, claudeBin = 'claude'): string {
-  return `${claudeBin} ${buildClaudeArgs(prompt).map(shellQuote).join(' ')}`
+  return `set -o pipefail; ${claudeBin} ${buildClaudeArgs(prompt).map(shellQuote).join(' ')} | node ${shellQuote(WIZARD_CLAUDE_FORMATTER_FILE)}`
 }
 
 export function buildCodexArgs(prompt: string): string[] {
-  return ['exec', '--skip-git-repo-check', '--full-auto', prompt]
+  return ['exec', '--skip-git-repo-check', '--full-auto', '--json', prompt]
 }
 
 export function buildCodexCommand(prompt: string, codexBin = 'codex'): string {
-  return `${codexBin} ${buildCodexArgs(prompt).map(shellQuote).join(' ')}`
+  return `set -o pipefail; ${codexBin} ${buildCodexArgs(prompt).map(shellQuote).join(' ')} | node ${shellQuote(WIZARD_CODEX_FORMATTER_FILE)}`
 }
 
 export function buildWizardCommand(

@@ -30,6 +30,7 @@ export function SpecReviewStep({
   acting,
 }: Props) {
   const { status } = draft
+  const generationActive = status === 'planning' || status === 'generating' || status === 'refining'
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -127,7 +128,7 @@ export function SpecReviewStep({
             <button
               type="button"
               onClick={onReject}
-              disabled={acting}
+              disabled={acting || generationActive}
               className="rounded border border-zinc-300 px-3 py-1.5 text-xs text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800 disabled:opacity-50"
             >
               Close

@@ -78,3 +78,7 @@ export function canAdvance(status: DraftStatus, currentStep: WizardStep): boolea
 export function isTerminalDraft(status: DraftStatus): boolean {
   return status === 'accepted' || status === 'rejected' || status === 'cancelled' || status === 'error'
 }
+
+export function isGenerationActive(status: DraftStatus): boolean {
+  return status === 'planning' || status === 'generating' || status === 'refining'
+}
