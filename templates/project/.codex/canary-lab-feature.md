@@ -22,7 +22,7 @@ If `features/*/feature.config.cjs` does not exist, this is not a canary-lab repo
    import { test, expect } from 'canary-lab/feature-support/log-marker-fixture'
    ```
    Do **not** import from `@playwright/test` directly — the log-marker fixture is what lets the runner slice service logs per test.
-5. Read service URLs from env with a default that matches the feature's `healthCheck.url`:
+5. Read service URLs from the selected feature env/envset, with a local default that matches the service's readiness probe:
    ```ts
    baseUrl = process.env.GATEWAY_URL ?? 'http://localhost:4000'
    ```
@@ -72,10 +72,8 @@ const config = {
         {
           name: '<service-name>',
           command: 'npx tsx scripts/server.ts',
-          healthCheck: {
-            url: 'http://localhost:4000/',
-            timeoutMs: 3000,
-          },
+          // Readiness probe — declare exactly one transport per probe.
+          healthCheck: { http: { url: 'http://localhost:4000/', timeoutMs: 3000 } },
         },
       ],
     },
@@ -87,7 +85,7 @@ module.exports = { config }
 ```
 
 - One repo entry per repo the feature spans. `localPath: __dirname` means "this feature owns the service code"; an external path means "we exercise an existing repo on disk".
-- `healthCheck.url` must respond before the runner starts the test suite — keep it cheap (e.g. `/` or `/health`).
+- The readiness probe must respond before the runner starts the test suite. Prefer the tagged shape (`healthCheck: { http: { ... } }` or `{ tcp: { ... } }`) and keep it cheap (e.g. `/` or `/health`).
 - `featureDir: __dirname` is required.
 
 ## `playwright.config.ts` Rule
@@ -109,7 +107,7 @@ If you need to override one field (e.g. `timeout`), spread first and override la
 
 ## Envsets in One Paragraph
 
-`envsets/envsets.config.json` declares `appRoots` (named pointers to repo directories on disk) and `slots` (config files within those repos that the runner swaps in for each env). The `feature` block lists which slots apply, the `testCommand`, and `testCwd` (`$CANARY_LAB_PROJECT_ROOT/features/<name>`). For wiring `.env` files from external repos into slots, use the `Env Import` skill (`.claude/skills/env-import.md`) — don't re-derive that procedure here.
+`envsets/envsets.config.json` declares `appRoots` (named pointers to repo directories on disk) and `slots` (config files within those repos that the runner swaps in for each env). The `feature` block lists which slots apply, the `testCommand`, and `testCwd` (`$CANARY_LAB_PROJECT_ROOT/features/<name>`). For wiring `.env` files from external repos into slots, use the Env Import guide (`.codex/env-import.md`) — don't re-derive that procedure here.
 
 ## Test Conventions
 
@@ -119,7 +117,7 @@ If you need to override one field (e.g. `timeout`), spread first and override la
 - A spec reads like a usage scenario: `describe(featureName) { test(behavior) }`.
 - No mocks for services declared in `feature.config.cjs`. They're already running.
 
-Reference: [features/example_todo_api/e2e/todo-api.spec.ts](../../features/example_todo_api/e2e/todo-api.spec.ts) and [features/example_todo_api/e2e/helpers/api.ts](../../features/example_todo_api/e2e/helpers/api.ts).
+Reference: [features/example_todo_api/e2e/todo-api.spec.ts](../features/example_todo_api/e2e/todo-api.spec.ts) and [features/example_todo_api/e2e/helpers/api.ts](../features/example_todo_api/e2e/helpers/api.ts).
 
 ## Don'ts
 
@@ -135,7 +133,7 @@ Reference: [features/example_todo_api/e2e/todo-api.spec.ts](../../features/examp
 After authoring, run from the project root:
 
 ```bash
-npx canary-lab run
+npx canary-lab ui
 ```
 
-Pick the feature and confirm: services come up, the new spec runs, log slices land under `logs/`. If the runner can't find the feature, re-check `feature.config.cjs` (`name`, `featureDir`) and that the dir is directly under `features/`.
+Open the local UI, pick the feature, and confirm: services come up, the new spec runs, and log slices land under `logs/current/`. If the UI can't find the feature, re-check `feature.config.cjs` (`name`, `featureDir`) and that the dir is directly under `features/`.

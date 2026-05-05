@@ -30,6 +30,16 @@ The user picked these canary-lab skills. Their bodies are inlined below - follow
 {{repos}}
 ```
 
+Before writing files, inspect the selected repositories closely enough to infer
+how the local app is started and when it is ready. Use local evidence such as
+README startup instructions, package scripts, framework conventions, existing
+Playwright configs, route/page files, API server bootstrap code, and declared
+dev-server ports. Prefer local-only commands and readiness probes. Do not use
+production URLs, do not invent credentials or secrets, and do not point a
+health check at a production service. Prefer an HTTP readiness URL when the app
+has a root page, health route, or stable local route; use a TCP probe only when
+that is the defensible local readiness signal.
+
 ## Output format
 
 Emit one or more `<file path="...">...</file>` blocks. Each block writes a single file relative to the new feature's directory. Anything outside `<file>` blocks is ignored.
@@ -104,7 +114,7 @@ module.exports = { config }
 ```
 
 - Use the exact repository names and paths from "Repositories under test".
-- Only include `startCommands` when the command and health check are known from the plan, skills, or repository summary. Otherwise leave `startCommands: []` for that repo.
+- Include the best evidence-backed inferred `startCommands` and `healthCheck` for each selected repo. Use `startCommands: []` only when no defensible local command or readiness probe can be inferred from the plan, selected skills, repository contents, or local conventions.
 - `featureDir: __dirname` is required.
 - Do not use the stale shape `module.exports = { name, services, playwright }`.
 
@@ -138,6 +148,8 @@ Only override `baseConfig` fields when the accepted plan or selected skills requ
 
 ## Test structure rules
 
+Choose the spec-file split yourself. Group tests by user journey, domain area, setup/fixture needs, or failure class. For broad plans, emit multiple focused `e2e/*.spec.ts` files instead of cramming unrelated scenarios into one large file. Keep each file cohesive and name it after the behavior it covers, such as `e2e/voucher-validation.spec.ts` or `e2e/order-placement.spec.ts`.
+
 Each accepted plan item should become a top-level Playwright `test('<plan step>', async (...) => { ... })` unless multiple plan items are clearly parts of one scenario and the plan already groups them that way. Do not wrap a generated test body in a same-named `await test.step(...)`; the test title already carries the scenario label.
 
 Generated specs should use direct Playwright actions and assertions inside the `test(...)` body. Use `test.step(...)` only when a hand-authored nested sub-step adds real readability beyond the test title; never generate a single inner step that duplicates the outer test name.
@@ -161,7 +173,13 @@ const config = {
     {
       name: 'app',
       localPath: '~/Documents/app',
-      startCommands: [],
+      startCommands: [
+        {
+          name: 'web',
+          command: 'npm run dev -- --port 3000',
+          healthCheck: { http: { url: 'http://localhost:3000/login', timeoutMs: 3000 } },
+        },
+      ],
     },
   ],
   featureDir: __dirname,

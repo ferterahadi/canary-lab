@@ -44,6 +44,12 @@ function writePlanTemplate(dir: string): string {
   return file
 }
 
+function writeSpecTemplate(dir: string): string {
+  const file = path.join(dir, 'spec-template.md')
+  fs.writeFileSync(file, 'Feature {{featureName}} {{plan}} {{skills}} {{repos}}', 'utf8')
+  return file
+}
+
 afterEach(() => {
   vi.useRealTimers()
   vi.restoreAllMocks()
@@ -161,7 +167,7 @@ describe('wizard agent runner cancellation', () => {
     const pty = new FakePty()
     const run = spawnSpecAgent({
       ptyFactory: () => pty,
-      specTemplate: 'Feature {{featureName}} {{plan}} {{skills}} {{repos}}',
+      specTemplate: writeSpecTemplate(tmp),
     })({
       draftId: 'd5',
       agent: 'claude',
@@ -187,7 +193,7 @@ describe('wizard agent runner cancellation', () => {
     const pty = new FakePty()
     const run = spawnSpecAgent({
       ptyFactory: () => pty,
-      specTemplate: 'Feature {{featureName}} {{plan}} {{skills}} {{repos}}',
+      specTemplate: writeSpecTemplate(tmp),
     })({
       draftId: 'd6',
       agent: 'claude',

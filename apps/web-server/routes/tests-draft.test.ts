@@ -618,7 +618,7 @@ test('x', async () => {});
     expect(fs.readFileSync(path.join(featureDir, 'feature.config.cjs'), 'utf8')).toContain("name: 'login'")
     expect(fs.readFileSync(path.join(featureDir, 'playwright.config.cjs'), 'utf8')).toContain('baseConfig')
     expect(fs.readFileSync(path.join(featureDir, 'e2e/login.spec.ts'), 'utf8')).toContain("test('x'")
-    expect(fs.readFileSync(path.join(featureDir, '.canary-lab-draft-id'), 'utf8')).toBe(id)
+    expect(fs.existsSync(path.join(featureDir, '.canary-lab-draft-id'))).toBe(false)
     const rec = readDraft(logsDir, id)!
     expect(rec.status).toBe('accepted')
     await app.close()

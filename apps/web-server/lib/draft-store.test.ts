@@ -187,7 +187,7 @@ describe('applyToProject', () => {
     if (!r.ok) return
     expect(fs.readFileSync(path.join(r.featureDir, 'feature.config.cjs'), 'utf8')).toBe('a')
     expect(fs.readFileSync(path.join(r.featureDir, 'e2e/login.spec.ts'), 'utf8')).toBe('b')
-    expect(fs.readFileSync(path.join(r.featureDir, '.canary-lab-draft-id'), 'utf8')).toBe('d1')
+    expect(fs.existsSync(path.join(r.featureDir, '.canary-lab-draft-id'))).toBe(false)
     fs.rmSync(projectRoot, { recursive: true, force: true })
   })
 
