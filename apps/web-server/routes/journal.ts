@@ -28,10 +28,17 @@ export async function journalRoutes(app: FastifyInstance, deps: JournalRouteDeps
       const journalPath = resolveJournalPath(req.query.run)
       if (!journalPath) return []
       const { sections } = readJournal(journalPath)
-      const filtered = filterSections(sections, {
+      let filtered = filterSections(sections, {
         feature: req.query.feature,
         run: req.query.run,
       })
+      if (filtered.length === 0 && req.query.run && deps.journalPath) {
+        const legacy = readJournal(deps.journalPath)
+        filtered = filterSections(legacy.sections, {
+          feature: req.query.feature,
+          run: req.query.run,
+        })
+      }
       return newestFirst(filtered)
     },
   )
@@ -49,7 +56,15 @@ export async function journalRoutes(app: FastifyInstance, deps: JournalRouteDeps
         reply.code(400)
         return { error: 'run is required' }
       }
-      const removed = deleteIterationSection(journalPath, iter)
+      let removed = deleteIterationSection(journalPath, iter)
+      if (!removed && req.query.run && deps.journalPath) {
+        const legacy = readJournal(deps.journalPath)
+        const matchingLegacyEntry = filterSections(legacy.sections, { run: req.query.run })
+          .some((section) => section.iteration === iter)
+        if (matchingLegacyEntry) {
+          removed = deleteIterationSection(deps.journalPath, iter)
+        }
+      }
       if (!removed) {
         reply.code(404)
         return { error: 'iteration not found' }

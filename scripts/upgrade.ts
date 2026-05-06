@@ -259,7 +259,7 @@ export async function main(
     }
   }
 
-  // Stamp the project with the installed version so `canary-lab run` can
+  // Stamp the project with the installed version so the UI can
   // detect drift on future invocations (npm update won't trigger postinstall
   // reliably, so the runner itself nudges users who fall behind).
   const installedVersion = getInstalledPackageVersion()

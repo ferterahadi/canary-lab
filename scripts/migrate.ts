@@ -248,7 +248,7 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
 
   if (!opts.dryRun && migrated > 0) {
     line()
-    info('Run `npx canary-lab run` to verify the migrated features still pass.')
+    info('Run `npx canary-lab ui` to verify the migrated features still pass.')
   }
   if (skipped > 0) {
     line()

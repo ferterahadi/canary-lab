@@ -4,6 +4,7 @@ import path from 'path'
 import type { RunStore, OrchestratorLike } from '../lib/run-store'
 import { loadFeatures } from '../lib/feature-loader'
 import { buildRunPaths, runDirFor } from '../lib/runtime/run-paths'
+import { createAssertionMarkdown } from '../lib/test-review-export'
 
 export interface RunsRouteDeps {
   featuresDir: string
@@ -28,6 +29,24 @@ export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Pro
       return { error: 'run not found' }
     }
     return detail
+  })
+
+  app.get<{ Params: { runId: string } }>('/api/runs/:runId/assertion.md', async (req, reply) => {
+    const detail = deps.store.get(req.params.runId)
+    if (!detail) {
+      reply.code(404)
+      return { error: 'run not found' }
+    }
+    if (!isTerminalRun(detail.manifest.status)) {
+      reply.code(409)
+      return { error: 'assertion export is available after the run finishes' }
+    }
+    const markdown = createAssertionMarkdown(detail)
+    const filename = `canary-lab-assertion-${safeFilename(detail.manifest.feature)}-${safeFilename(detail.runId)}.md`
+    reply
+      .type('text/markdown; charset=utf-8')
+      .header('content-disposition', `attachment; filename="${filename}"`)
+    return reply.send(markdown)
   })
 
   app.get<{ Params: { runId: string; '*': string } }>('/api/runs/:runId/artifacts/*', async (req, reply) => {
@@ -199,4 +218,12 @@ function contentTypeFor(filePath: string): string {
   if (ext === '.mp4') return 'video/mp4'
   if (ext === '.zip') return 'application/zip'
   return 'application/octet-stream'
+}
+
+function isTerminalRun(status: string): boolean {
+  return status === 'passed' || status === 'failed' || status === 'aborted'
+}
+
+function safeFilename(input: string): string {
+  return input.replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'run'
 }

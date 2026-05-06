@@ -46,6 +46,12 @@ async function build() {
   return app
 }
 
+async function buildWithoutLegacyJournal() {
+  const app = Fastify()
+  await app.register(journalRoutes, { logsDir })
+  return app
+}
+
 describe('GET /api/journal', () => {
   it('returns sections newest first', async () => {
     const app = await build()
@@ -68,17 +74,24 @@ describe('GET /api/journal', () => {
     expect((res.json() as Array<{ iteration: number }>).map((b) => b.iteration)).toEqual([2])
   })
 
-  it('reads the selected run journal without falling back to the root journal', async () => {
+  it('falls back to the legacy root journal when the selected run journal is missing', async () => {
     const app = await build()
     fs.rmSync(runJournalPath, { force: true })
     const res = await app.inject({ method: 'GET', url: '/api/journal?run=r-bbbb' })
     expect(res.statusCode).toBe(200)
-    expect(res.json()).toEqual([])
+    expect((res.json() as Array<{ iteration: number }>).map((b) => b.iteration)).toEqual([2])
   })
 
   it('rejects path-like run ids without reading the root journal', async () => {
     const app = await build()
     const res = await app.inject({ method: 'GET', url: '/api/journal?run=..%2Fsecret' })
+    expect(res.statusCode).toBe(200)
+    expect(res.json()).toEqual([])
+  })
+
+  it('returns an empty list when no run or legacy journal is selected', async () => {
+    const app = await buildWithoutLegacyJournal()
+    const res = await app.inject({ method: 'GET', url: '/api/journal' })
     expect(res.statusCode).toBe(200)
     expect(res.json()).toEqual([])
   })
@@ -93,10 +106,27 @@ describe('DELETE /api/journal/:iteration', () => {
     expect(fs.readFileSync(journalPath, 'utf-8')).toContain('## Iteration 1')
   })
 
+  it('removes a matching legacy root section when the selected run journal is missing', async () => {
+    const app = await build()
+    fs.rmSync(runJournalPath, { force: true })
+    const res = await app.inject({ method: 'DELETE', url: '/api/journal/2?run=r-bbbb' })
+    expect(res.statusCode).toBe(204)
+    expect(fs.existsSync(runJournalPath)).toBe(false)
+    expect(fs.readFileSync(journalPath, 'utf-8')).not.toContain('## Iteration 2')
+    expect(fs.readFileSync(journalPath, 'utf-8')).toContain('## Iteration 1')
+  })
+
   it('400s on non-numeric iteration', async () => {
     const app = await build()
     const res = await app.inject({ method: 'DELETE', url: '/api/journal/abc' })
     expect(res.statusCode).toBe(400)
+  })
+
+  it('400s when deleting without a run and no legacy journal is configured', async () => {
+    const app = await buildWithoutLegacyJournal()
+    const res = await app.inject({ method: 'DELETE', url: '/api/journal/1' })
+    expect(res.statusCode).toBe(400)
+    expect(res.json()).toEqual({ error: 'run is required' })
   })
 
   it('404s when iteration not present', async () => {

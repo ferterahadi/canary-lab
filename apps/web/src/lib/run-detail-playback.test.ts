@@ -65,7 +65,7 @@ describe('playbackTests', () => {
         durationMs: 40,
         retry: 1,
         error: undefined,
-        steps: [{ title: 'Navigate /login', category: 'pw:api', ended: true }],
+        steps: [{ title: 'Opened /login', category: 'pw:api', ended: true }],
       },
     ])
   })
@@ -104,7 +104,7 @@ describe('playbackTests', () => {
     ])
   })
 
-  it('compacts common Playwright step titles and limits visible steps', () => {
+  it('compacts common Playwright step titles and keeps the full browser action trace', () => {
     const events: PlaywrightPlaybackEvent[] = [
       {
         type: 'test-begin',
@@ -120,11 +120,14 @@ describe('playbackTests', () => {
         'Navigate',
         'Click "Submit"',
         'Fill "Email"',
+        'Fill "98981122" locator(\'#iframeFEOP iframe\').contentFrame().getByRole(\'textbox\', { name: \'Phone Number\' }).first()',
         'Press "Enter"',
         'Select "Singapore"',
         'Check "Terms"',
         'Expect "Success"',
         'page screenshot',
+        'Click "Continue"',
+        'Expect "Order confirmed"',
       ].map((title) => ({
         type: 'step-begin' as const,
         time: '2026-01-01T00:00:01.000Z',
@@ -143,14 +146,17 @@ describe('playbackTests', () => {
     ]
 
     expect(playbackTests(events)[0].steps.map((step) => step.title)).toEqual([
-      'Navigate',
-      'Click Submit',
-      'Fill Email',
-      'Press Enter',
-      'Select Singapore',
-      'Check Terms',
-      'Expect Success',
+      'Opened page',
+      'Clicked Submit',
+      'Entered Email',
+      'Entered 98981122 in Phone Number',
+      'Pressed Enter',
+      'Selected Singapore',
+      'Checked Terms',
+      'Verified Success',
       'page screenshot',
+      'Clicked Continue',
+      'Verified Order confirmed',
     ])
   })
 
@@ -177,12 +183,56 @@ describe('playbackTests', () => {
     ]
 
     expect(playbackTests(events)[0].steps.map((step) => step.title)).toEqual([
-      'Click',
-      'Fill',
-      'Press',
-      'Select',
-      'Check',
-      'Expect',
+      'Clicked page element',
+      'Filled field',
+      'Pressed key',
+      'Selected option',
+      'Checked option',
+      'Verified expectation',
+    ])
+  })
+
+  it('turns Playwright locators into reviewer-readable browser actions', () => {
+    const events: PlaywrightPlaybackEvent[] = [
+      {
+        type: 'test-begin',
+        time: '2026-01-01T00:00:00.000Z',
+        test: { name: 'localized', title: 'Localized', location: 'localized.spec.ts:1' },
+      },
+      ...[
+        'Fill "" locator(\'#iframeFEOP iframe\').contentFrame().getByRole(\'textbox\', { name: \'Phone Number\' }).first()',
+        'Fill "98981122" locator(\'#iframeFEOP iframe\').contentFrame().getByRole(\'textbox\', { name: \'Phone Number\' }).first()',
+        'Click locator(\'#iframeFEOP iframe\')',
+        'Click locator(\'#iframeFEOP\')',
+        'Click getByRole(\'button\', { name: \'Place Order\' })',
+        'Click getByLabel(\'Email Address\')',
+        'Click getByPlaceholder(\'Search shops\')',
+        'Click getByText(\'Apply voucher\')',
+        'Click getByTestId(\'checkout-submit\')',
+        'Click locator(\'#submit-order\')',
+        'Click locator(\'.toast-message\')',
+        'Click locator(\'[data-state="open"]\')',
+      ].map((title) => ({
+        type: 'step-begin' as const,
+        time: '2026-01-01T00:00:01.000Z',
+        test: { name: 'localized', title: 'Localized' },
+        step: { title, category: 'pw:api' },
+      })),
+    ]
+
+    expect(playbackTests(events)[0].steps.map((step) => step.title)).toEqual([
+      'Cleared Phone Number',
+      'Entered 98981122 in Phone Number',
+      'Clicked embedded login frame',
+      'Clicked embedded login frame',
+      'Clicked Place Order',
+      'Clicked Email Address',
+      'Clicked Search shops',
+      'Clicked Apply voucher',
+      'Clicked checkout-submit control',
+      'Clicked submit-order element',
+      'Clicked toast-message element',
+      'Clicked page element',
     ])
   })
 })
@@ -262,6 +312,45 @@ describe('artifactsForPlayback', () => {
       trace: 'off',
     }).screenshots).toEqual([artifact('screenshot', 'newer.png', 3)])
   })
+
+  it('keeps screenshot ordering stable when mtimes are missing', () => {
+    const groupsWithoutMtime: PlaywrightArtifactGroup[] = [
+      {
+        testName: 'auth.spec.ts:login',
+        artifacts: [
+          artifact('screenshot', 'first.png', undefined),
+          artifact('screenshot', 'second.png', undefined),
+        ],
+      },
+    ]
+
+    expect(artifactsForPlayback('auth.spec.ts:login', groupsWithoutMtime, {
+      screenshot: 'on',
+      video: 'off',
+      trace: 'off',
+    }).screenshots).toEqual([artifact('screenshot', 'first.png', undefined)])
+  })
+
+  it('prefers the deterministic final-page screenshot over attachment duplicates', () => {
+    const groupsWithAttachmentDuplicate: PlaywrightArtifactGroup[] = [
+      {
+        testName: 'auth.spec.ts:login',
+        artifacts: [
+          artifact('screenshot', 'canary-lab-final-page-hash.png', 5, 'case/attachments/canary-lab-final-page-hash.png'),
+          artifact('screenshot', 'canary-lab-final-page-login.png', 2, 'case/canary-lab-final-page-login.png'),
+          artifact('screenshot', 'test-finished-1.png', 6, 'case/test-finished-1.png'),
+        ],
+      },
+    ]
+
+    expect(artifactsForPlayback('auth.spec.ts:login', groupsWithAttachmentDuplicate, {
+      screenshot: 'on',
+      video: 'off',
+      trace: 'off',
+    }).screenshots).toEqual([
+      artifact('screenshot', 'canary-lab-final-page-login.png', 2, 'case/canary-lab-final-page-login.png'),
+    ])
+  })
 })
 
 describe('branch helpers', () => {
@@ -276,6 +365,11 @@ describe('branch helpers', () => {
     expect(branchForService(service('/workspace/apps/shop/web'), branches)).toEqual(repo('/workspace/apps/shop', 'checkout'))
     expect(branchForService(service('/workspace/api'), branches)).toEqual(repo('/workspace', 'main'))
     expect(branchForService(service('/missing'), branches)).toBeNull()
+    expect(branchForService(service('////'), [repo('/', 'root')])).toEqual(repo('/', 'root'))
+    expect(branchForService(service('/workspace/apps/shop/web'), [
+      repo('/workspace/apps/shop', 'checkout'),
+      repo('/workspace', 'main'),
+    ])).toEqual(repo('/workspace/apps/shop', 'checkout'))
   })
 
   it('formats branch labels and tooltips', () => {
@@ -306,11 +400,11 @@ describe('branch helpers', () => {
   })
 })
 
-function artifact(kind: PlaywrightArtifactGroup['artifacts'][number]['kind'], name: string, mtimeMs = 0): PlaywrightArtifactGroup['artifacts'][number] {
+function artifact(kind: PlaywrightArtifactGroup['artifacts'][number]['kind'], name: string, mtimeMs: number | undefined = 0, artifactPath = `/tmp/${name}`): PlaywrightArtifactGroup['artifacts'][number] {
   return {
     name,
     kind,
-    path: `/tmp/${name}`,
+    path: artifactPath,
     url: `/artifacts/${name}`,
     sizeBytes: 1,
     mtimeMs,

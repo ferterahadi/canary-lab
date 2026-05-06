@@ -7,7 +7,7 @@ Canary Lab is a local E2E workflow layer built on top of Playwright.
 
 It is built for cases where one test depends on multiple local apps or services, not just one app in isolation. Canary Lab starts those services, gates tests on health checks, runs Playwright with per-test service-log slicing, and — on failure — hands the agent (Claude Code or Codex) a structured map of what broke so it can diagnose, fix, and signal a re-run.
 
-As of 0.10.0, the primary surface is a local web UI (`canary-lab ui`) — a 3-column Finder-style view of features, runs, and live logs, with a built-in journal viewer and an Add Test wizard. The legacy iTerm/Terminal-tab CLI flow (`canary-lab run`) is still around but deprecated and will be removed in 0.11.0.
+As of 1.0.0, the primary surface is a local web UI (`canary-lab ui`) — a 3-column Finder-style view of features, runs, and run details, with built-in envset editing, Playwright playback, a diagnosis journal, and an Add Test wizard.
 
 See [CHANGELOG.md](CHANGELOG.md) for what's new in each release.
 
@@ -31,7 +31,7 @@ Canary Lab adds:
 - an agent-driven self-heal loop (structured failure index → diagnosis → `.restart`/`.rerun` → re-run), driven from the web UI
 - a persistent cross-run diagnosis journal so the agent doesn't repeat hypotheses between cycles
 - an Add Test wizard (PRD → skill recommender → plan → spec generation) for guided test authoring
-- temporary env-file switching across repos
+- UI-managed env-file switching across repos
 
 ## Who This Is For
 
@@ -72,9 +72,15 @@ npx canary-lab ui
 
 1. **Features** — every `features/<name>/` discovered in the project, with a "Run" button per feature.
 2. **Runs** — the last 20 runs preserved under `logs/runs/<runId>/`, each with status, timing, and per-test results.
-3. **Logs** — live PTY output from services + Playwright + the heal agent, plus a journal viewer for the selected run's `diagnosis-journal.md`.
+3. **Run detail** — overview, service PTYs, Playwright terminal/playback, heal-agent output, and the selected run's diagnosis journal.
 
 Pass `--no-open` to suppress the browser auto-launch (useful over SSH or in CI). Pass `--port <n>` to bind a different port.
+
+## Walkthrough
+
+[![Canary Lab UI walkthrough](docs/assets/canary-lab-ui-walkthrough.png)](docs/assets/canary-lab-ui-walkthrough.webm)
+
+The walkthrough was recorded from a fresh disposable workspace and shows the 1.0.0 UI flow: pick a feature, start a run, inspect run history, review Playwright playback, open raw terminal logs, and check the diagnosis journal.
 
 ## What Gets Scaffolded
 
@@ -90,45 +96,14 @@ Pass `--no-open` to suppress the browser auto-launch (useful over SSH or in CI).
 ```bash
 npx canary-lab init <folder>
 npx canary-lab ui                                 # primary surface (web UI)
-npx canary-lab run                                # legacy CLI; deprecated, removed in 0.11.0
-npx canary-lab env
-npx canary-lab new-feature <name> "Description"
 npx canary-lab upgrade
 ```
 
 `canary-lab upgrade` is for syncing scaffolded docs and skills in an existing project with the current package version. It is not a general dependency or repo upgrade system.
 
-## Benchmarking
-
-If you want to compare Canary Lab's structured heal loop against a more naive baseline, `canary-lab run` can record benchmark artifacts under `logs/benchmark/`.
-
-```bash
-npx canary-lab run --benchmark --benchmark-mode=canary
-npx canary-lab run --benchmark --benchmark-mode=baseline
-```
-
-Benchmark mode does not create a separate runner. Both modes use the same Canary Lab orchestrator, the same self-heal loop, and the same per-run `signals/.rerun` / `signals/.restart` signaling. The thing being compared is the agent context, not the runner itself.
-
-Benchmark mode writes:
-
-- `logs/benchmark/run.json`
-- `logs/benchmark/cycles.jsonl`
-- `logs/benchmark/context/cycle-<n>.json`
-- `logs/benchmark/final-summary.json`
-
-`canary` mode benchmarks the normal structured context: the active run's `e2e-summary.json`, enriched per-test log slices, and `logs/current/diagnosis-journal.md` when present.
-
-`baseline` mode keeps that exact same runtime flow, but the agent gets only Playwright-style failure context and explores the codebase on its own.
-
-Important clarification for `baseline`:
-
-- services still start through the normal orchestrator
-- service logs may still be produced on disk
-- the agent simply is not given Canary Lab's structured debugging context such as diagnosis journal or per-test sliced logs
-
 ## Environment Switching
 
-`npx canary-lab env` manages temporary environment files for a feature. It backs up current env files, applies a named set, and restores the originals when you revert.
+The web UI manages temporary environment files for a feature. Open a feature's configuration, pick an envset, edit slot values, and start the run from the same UI. Canary Lab backs up current target files, applies the selected envset for the run, and restores the originals afterward.
 
 An env set is a named group of environment files stored under `features/<feature>/envsets/`.
 
@@ -198,7 +173,7 @@ If the agent struck out after 3 cycles, the runner gives up on auto-heal — wri
 ## Limitations
 
 - The self-fixing workflow depends on services writing useful log output. If a service produces little or no logs, the agent has less context to work with.
-- `canary-lab env` overwrites target files in place. If the backup/restore cycle is interrupted (e.g., kill -9), originals may not be restored. Use `canary-lab env --revert` to recover from backups.
+- Envset runs overwrite target files in place while the run is active. If the backup/restore cycle is interrupted (e.g., kill -9), originals may not be restored automatically. Re-open the UI and use the envset controls to recover from backups.
 - Envset files are local dev config. They are not validated or checked for correctness — if you copy a stale config, tests may fail for non-obvious reasons.
 
 ## How It Works
@@ -207,20 +182,31 @@ If the agent struck out after 3 cycles, the runner gives up on auto-heal — wri
 
 ```mermaid
 flowchart TD
-    A["Start apps in terminal tabs"] --> B["Apps write stdout to logs/runs/<runId>/svc-*.log"]
+    A["Start a run from the web UI"] --> B["Start services in node-pty panes"]
     B --> C["Wait for health checks"]
-    C --> D["Run Playwright tests"]
-    D --> E["Append <test-tag> markers to service logs"]
-    E --> F["Write logs/runs/<runId>/e2e-summary.json"]
-    F --> G["Agent reads failure context"]
-    G --> H["Agent fixes implementation"]
-    H --> I["Agent signals .restart or .rerun"]
-    I --> D
+    C --> D["Run Playwright"]
+    D --> E["Write per-run logs, events, artifacts, and summary"]
+    E --> F["Render run detail in the UI"]
+    F --> G{"Failure?"}
+    G -->|No| H["Keep run history for review"]
+    G -->|Yes| I["Manual or auto-heal agent reads failure context"]
+    I --> J["Agent fixes implementation"]
+    J --> K["Agent signals .restart or .rerun"]
+    K --> D
 ```
+
+### Playwright Review
+
+The Playwright tab has two views:
+
+- **Playback** — the default review surface when structured Playwright events exist. It groups tests, shows the final page screenshot when retained, links trace downloads, opens retained videos inline, and keeps browser actions collapsed until you need them.
+- **Terminal** — the raw Playwright PTY output. Use it for older runs, missing structured events, or details that are easier to read in the original terminal stream.
+
+Artifact visibility follows the selected feature's Playwright config. If screenshots or videos are disabled or not retained, the UI says so and points you to the Playwright artifact controls in feature configuration.
 
 ### Components involved in a test run
 
-This view focuses on what happens when you type `npx canary-lab run`. Each box is a component named by its role, with its file location underneath. Solid arrows are calls or writes; dotted arrows show when a component is triggered.
+This view focuses on what happens when you start a run from the web UI. Each box is a component named by its role, with its file location underneath. Solid arrows are calls or writes; dotted arrows show when a component is triggered.
 
 ```mermaid
 %%{init: {
@@ -240,26 +226,26 @@ This view focuses on what happens when you type `npx canary-lab run`. Each box i
   "flowchart": { "curve": "basis", "nodeSpacing": 40, "rankSpacing": 55, "padding": 12 }
 }}%%
 flowchart TD
-    user(["<b>npx canary-lab run</b>"]):::entry
-
-    orchestrator["<b>Orchestrator</b><br/>shared/e2e-runner/runner.ts"]:::core
+    user(["<b>Run button in canary-lab ui</b>"]):::entry
+    server["<b>Web Server</b><br/>apps/web-server/server.ts"]:::core
+    orchestrator["<b>Orchestrator</b><br/>apps/web-server/lib/runtime/orchestrator.ts"]:::core
 
     subgraph phase1["&nbsp;1 · Service startup&nbsp;"]
         direction TB
-        launcher["<b>Terminal Launcher</b><br/>shared/launcher/iterm.ts<br/>shared/launcher/terminal.ts"]:::svc
-        health["<b>Health Gate</b><br/>shared/launcher/startup.ts"]:::svc
+        launcher["<b>PTY Launcher</b><br/>apps/web-server/lib/runtime/pty-spawner.ts"]:::svc
+        health["<b>Health Gate</b><br/>runtime/launcher/startup.ts"]:::svc
     end
 
     subgraph phase2["&nbsp;2 · Test execution&nbsp;"]
         direction TB
         pw(["<b>Playwright</b>"]):::ext
-        logMarker["<b>Per-Test Log Marker</b> · fixture<br/>shared/e2e-runner/log-marker-fixture.ts"]:::hook
-        reporter["<b>Summary Reporter</b> · reporter<br/>shared/e2e-runner/summary-reporter.ts"]:::hook
+        logMarker["<b>Per-Test Log Marker</b><br/>shared/e2e-runner/log-marker-fixture.ts"]:::hook
+        reporter["<b>Summary Reporter</b><br/>apps/web-server/lib/runtime/summary-reporter.ts"]:::hook
     end
 
-    subgraph phase3["&nbsp;3 · Heal phase &nbsp;·&nbsp; on failure, if enabled&nbsp;"]
+    subgraph phase3["&nbsp;3 · Heal phase &nbsp;·&nbsp; on failure&nbsp;"]
         direction TB
-        autoHeal["<b>Auto-Heal Driver</b><br/>shared/e2e-runner/auto-heal.ts"]:::heal
+        autoHeal["<b>Auto-Heal Driver</b><br/>apps/web-server/lib/runtime/auto-heal.ts"]:::heal
         formatter["<b>Agent Output Formatter</b><br/>claude-formatter.ts · codex-formatter.ts"]:::heal
         agent(["<b>Coding Agent</b><br/>Claude Code · Codex CLI"]):::ext
     end
@@ -267,15 +253,15 @@ flowchart TD
     subgraph artifacts["&nbsp;logs/&nbsp;"]
         direction LR
         svclog[/"runs/<runId>/svc-*.log"/]:::artifact
+        events[/"runs/<runId>/playwright-events.jsonl"/]:::artifact
+        pwartifacts[/"runs/<runId>/playwright-artifacts/"/]:::artifact
         healindex[/"runs/<runId>/heal-index.md"/]:::artifact
         summaryjson[/"runs/<runId>/e2e-summary.json"/]:::artifact
         journal[/"runs/<runId>/diagnosis-journal.md"/]:::artifact
         signals[/"runs/<runId>/signals/.restart · .rerun"/]:::artifact
     end
 
-    watcher["<b>Watch Mode</b><br/>runner.ts · tail loop"]:::core
-
-    user --> orchestrator
+    user --> server --> orchestrator
     orchestrator --> launcher --> health
     health ==>|services ready| pw
     orchestrator -.-> pw
@@ -284,9 +270,10 @@ flowchart TD
     logMarker --> svclog
     pw -.->|on each result| reporter
     reporter --> summaryjson
+    reporter --> events
+    pw --> pwartifacts
 
     pw ==>|tests fail| autoHeal
-    autoHeal --> launcher
     autoHeal --> agent
     agent -.->|stdout| formatter
     agent -.->|reads| healindex
@@ -294,10 +281,7 @@ flowchart TD
     agent -.->|reads| svclog
     agent -.->|reads + appends| journal
     agent -.->|writes| signals
-
-    orchestrator --> watcher
-    signals ==>|triggers| watcher
-    watcher -->|re-run| pw
+    signals ==>|triggers| orchestrator
 
     classDef entry fill:#1e293b,color:#ffffff,stroke:#1e293b,stroke-width:1.5px,rx:14,ry:14
     classDef core fill:#ffffff,color:#1e1b4b,stroke:#4f46e5,stroke-width:2px,rx:6,ry:6
@@ -310,27 +294,21 @@ flowchart TD
     linkStyle default stroke:#64748b,stroke-width:1.5px
 ```
 
-**Legend.** Color is carried by the border: indigo = core runner, blue = service startup, green = Playwright hooks, orange = heal phase, dashed slate = external processes, amber = files in `logs/`. Solid arrows are direct calls; dotted arrows fire during a lifecycle event (per test, on failure, etc.); thick arrows are the main happy-path transitions.
-
 **When each component fires:**
 
-- **Orchestrator** (`runner.ts`) runs first, for the whole duration. It loads `feature.config.cjs`, delegates to everything below, and stays alive in watch mode.
-- **Terminal Launcher** + **Health Gate** run once per `run`, before tests start — one terminal tab per service, blocked on health checks.
-- **Playwright** is invoked once per run by the orchestrator. While it runs:
-  - **Per-Test Log Marker** fires **before and after every test**, writing `<test-tag>` boundaries into per-run `svc-*.log` files so you can slice logs by test.
-  - **Summary Reporter** fires **on every test result** (and at end-of-suite), incrementally updating `logs/runs/<runId>/e2e-summary.json`.
-- **Auto-Heal Driver** fires **only when tests fail and auto-heal is enabled**. It spawns a Claude Code or Codex CLI agent in a new terminal tab, piping its stdout through the **Agent Output Formatter**.
-- The **Coding Agent** starts at the run-scoped `heal-index.md` (with that run's `e2e-summary.json` as a fallback) to pick which failure to tackle, drills into the pre-sliced service logs under `logs/runs/<runId>/failed/<slug>/`, edits code, then writes `.restart` or `.rerun` under `logs/runs/<runId>/signals/`. The runner appends `logs/runs/<runId>/diagnosis-journal.md` entries from those signal bodies.
-- **Watch Mode** (the tail end of `runner.ts`) picks up those signal files and re-invokes Playwright.
+- **Web Server** owns the UI, API routes, WebSocket streams, envset edits, and run history.
+- **Orchestrator** runs for the lifetime of a selected feature run. It loads `feature.config.cjs`, applies the selected envset, starts services, invokes Playwright, and reacts to `.restart` / `.rerun` signal files.
+- **PTY Launcher** starts each service, Playwright, and heal agent in a `node-pty` process streamed back to the browser.
+- **Summary Reporter** writes `e2e-summary.json` and `playwright-events.jsonl` as tests run, which powers the run detail and Playwright Playback views.
+- **Auto-Heal Driver** fires only when tests fail and auto-heal is enabled. It spawns Claude Code or Codex CLI, formats the agent stream, and lets the agent signal the next run action.
 
 **At a glance:**
 
-- `runner.ts` is the conductor: it reads each feature's `feature.config.cjs`, starts services through the runtime launcher, runs Playwright with `summary-reporter` + `log-marker-fixture` attached, then sits in watch mode reacting to the active run's `.restart` / `.rerun` signal files.
-- `auto-heal.ts` spawns a Claude Code or Codex CLI process when auto-heal is on. Its raw output is filtered through `claude-formatter.ts` (Claude) or `codex-formatter.ts` (Codex) into readable progress.
-- `launcher/iterm.ts` and `launcher/terminal.ts` are interchangeable backends — both drive their app via AppleScript. `launcher/startup.ts` holds the shared health-check + command-normalization helpers.
-- `env-switcher/switch.ts` does the actual env-file swap; `root-cli.ts` is the interactive prompt wrapper.
-- `runtime/project-root.ts` is the single source of truth for "where does this project live" — everyone else asks it.
-- `feature-support/` is the only surface generated projects import from (`canary-lab/feature-support/...`). Everything under `shared/` is internal.
+- `server.ts` wires the local Fastify app, UI assets, routes, and WebSocket streams.
+- `orchestrator.ts` is the conductor for a run: service startup, health checks, Playwright invocation, run manifest updates, envset cleanup, and heal-loop signaling.
+- `run-store.ts` indexes per-run manifests, summaries, Playwright events, and retained artifacts for the UI.
+- `env-switcher/switch.ts` still performs the low-level env-file apply/revert work; the UI is the public way to drive it.
+- `feature-support/` is the public import surface generated projects use (`canary-lab/feature-support/...`). Everything under `apps/`, `scripts/`, and `shared/` is internal.
 
 ## For Contributors
 
@@ -343,12 +321,12 @@ npm run build
 
 ### Repository Layout
 
-- `scripts/` — CLI entry and scaffold commands (`init`, `new-feature`, `upgrade`)
-- `shared/e2e-runner/` — runner, auto-heal, formatters, Playwright reporter + fixture
-- `shared/launcher/` — iTerm / Terminal.app backends and startup helpers
-- `shared/env-switcher/` — env-file apply/revert logic and interactive CLI
-- `shared/runtime/` — shared `project-root` resolver
+- `scripts/` — CLI entry and scaffold/upgrade commands
+- `apps/web-server/` — local server, API routes, runtime orchestrator, run store, and PTY streams
+- `apps/web/` — React UI for features, runs, playback, journals, and configuration
+- `shared/e2e-runner/` — Playwright fixture support used by generated projects
 - `shared/configs/` — base Playwright config and env loader
+- `shared/runtime/` — shared `project-root` resolver
 - `templates/project/` — files copied into scaffolded projects
 - `feature-support/` — public imports used by generated projects
 

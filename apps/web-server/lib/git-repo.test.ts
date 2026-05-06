@@ -148,6 +148,13 @@ describe('git-repo helpers', () => {
   it('validates happy path and skips repos without branch or string localPath', async () => {
     const repo = tmpRepo()
     await expect(validateConfiguredRepoBranches({
+      name: 'empty',
+      description: 'd',
+      envs: [],
+      featureDir: repo,
+    })).resolves.toBeUndefined()
+
+    await expect(validateConfiguredRepoBranches({
       name: 'demo',
       description: 'd',
       envs: [],

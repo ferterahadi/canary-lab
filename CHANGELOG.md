@@ -2,7 +2,7 @@
 
 All notable changes to Canary Lab are listed here. We try to keep the language plain so anyone can follow along.
 
-## 0.10.0 — 2026-04-30
+## 1.0.0 — 2026-04-30
 
 > The headline change: Canary Lab is now driven from a local web UI (`canary-lab ui`) instead of a stack of iTerm tabs. Run `npx canary-lab upgrade` after upgrading to refresh the managed `CLAUDE.md` / `AGENTS.md` blocks.
 
@@ -13,18 +13,20 @@ All notable changes to Canary Lab are listed here. We try to keep the language p
 - **Run-scoped diagnosis journal.** New heal iterations are written to `logs/runs/<runId>/diagnosis-journal.md`, with `logs/current/diagnosis-journal.md` as the manual-agent path for the active run. Existing root-level journals are left in place as legacy history.
 - **`runner.log` per run.** The orchestrator now writes its own progress (lifecycle events, signal handling, restart decisions) to `logs/runs/<runId>/runner.log` — so you can audit what *the runner* did, separately from what each service or the agent did.
 - **Add Test wizard.** A guided flow inside the UI: PRD draft → skill recommender → plan → spec generation. The wizard streams Claude / Codex output live and lands a ready-to-run Playwright spec into the chosen feature.
+- **Playwright Playback.** Run detail now has a structured playback view with final screenshots, trace downloads, inline retained video, collapsed browser actions, and the raw Playwright terminal as a fallback.
 - **`.playwright-mcp` artifact capture.** When Playwright's MCP integration emits artifacts during a failure, they're collected into the per-failure folder under `logs/failed/<slug>/.playwright-mcp/` so the heal agent can find them next to the sliced service logs.
 - **Coverage gate.** Business-logic modules are gated at ≥92% on all four metrics (statements, branches, functions, lines). Enforced in CI; no `/* v8 ignore */` pragmas anywhere — exclusions live at the config level.
 
 ### Changed
 
-- **Default workflow is now the web UI, not iTerm tabs.** The Quick Start in the README is `npm install && npm run install:browsers && npx canary-lab ui`. The legacy `canary-lab run` still works but prints a deprecation notice and will be removed in 0.11.0.
+- **Default workflow is now the web UI, not iTerm tabs.** The Quick Start in the README is `npm install && npm run install:browsers && npx canary-lab ui`. Test execution, envset edits, run review, and heal controls now live in the UI.
 - **macOS-only is no longer a hard constraint.** Services and the heal agent run inside `node-pty` pseudo-terminals owned by Canary Lab — no AppleScript, no iTerm, no Terminal.app. Linux support is now in reach (the runner itself is cross-platform; only auto-launching the browser falls back to `xdg-open` / `cmd start`).
 
 ### Removed
 
+- **Legacy workflow commands.** `canary-lab run`, `canary-lab env`, and `canary-lab new-feature` are no longer public commands. Use `canary-lab ui` for runs, envsets, and feature configuration.
 - **iTerm / Terminal.app AppleScript launchers.** The `shared/launcher/iterm.ts` and `shared/launcher/terminal.ts` backends are gone, along with their AppleScript shims and tab-cleanup logic. Everything runs through `node-pty` now.
-- **Readline-prompted "Auto-heal on test failure?" flow.** The legacy `canary-lab run` no longer prompts for a heal agent up-front — that decision moves into the web UI. The CLI shim is kept for backward compat but is deprecated.
+- **Readline-prompted "Auto-heal on test failure?" flow.** The old terminal prompt is gone. Heal mode is selected and controlled from the web UI.
 
 ### Breaking changes
 
@@ -89,7 +91,7 @@ All notable changes to Canary Lab are listed here. We try to keep the language p
 
 - `.claude/skills/heal-loop.md`, `.claude/skills/self-fixing-loop.md`, `.codex/heal-loop.md`, `.codex/self-fixing-loop.md` — content consolidated into `CLAUDE.md` / `AGENTS.md`. `canary-lab upgrade` removes these files from existing installs.
 - `features/<name>/src/config.ts` (and the empty `src/` dir) in all scaffolded features.
-- `features/<name>/.env.example` in all scaffolded features. The same values already live in `envsets/local/<name>.env`, and `canary-lab new-feature` no longer emits an example file.
+- `features/<name>/.env.example` in all scaffolded features. The same values already live in `envsets/local/<name>.env`.
 
 ### Feature layout
 

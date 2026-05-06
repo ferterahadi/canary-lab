@@ -165,7 +165,7 @@ export async function main(args = process.argv.slice(2)) {
     backup(targets, timestamp);
     console.log(`Applying "${setName}" env set...`);
     applySet(envSetsDir, setName, targets);
-    console.log('Done. Run "npx canary-lab env" to revert originals when needed.\n');
+    console.log('Done. Open "npx canary-lab ui" to manage or revert envsets when needed.\n');
     return;
   }
 

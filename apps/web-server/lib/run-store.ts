@@ -278,6 +278,7 @@ export function indexPlaywrightArtifacts(
   const seen = new Set<string>()
   const seenRel = new Set<string>()
   const titleByName = new Map<string, string>()
+  const testNameByArtifactDir = new Map<string, string>()
   for (const event of events ?? []) {
     if ('test' in event && event.test?.title) titleByName.set(event.test.name, event.test.title)
   }
@@ -289,6 +290,8 @@ export function indexPlaywrightArtifacts(
     if (!fs.existsSync(resolved) || !fs.statSync(resolved).isFile()) return
     const key = `${testName}:${rel}`
     if (seen.has(key) || seenRel.has(rel)) return
+    const firstSegment = rel.split(path.sep)[0]
+    testNameByArtifactDir.set(firstSegment, testName)
     seen.add(key)
     seenRel.add(rel)
     const group = groups.get(testName) ?? {
@@ -318,8 +321,8 @@ export function indexPlaywrightArtifacts(
 
   for (const filePath of listFiles(artifactsDir)) {
     const rel = path.relative(artifactsDir, filePath)
-    const firstSegment = rel.split(path.sep)[0] || 'unmatched'
-    if (!seenRel.has(rel)) add(firstSegment, filePath)
+    const firstSegment = rel.split(path.sep)[0]
+    if (!seenRel.has(rel)) add(testNameByArtifactDir.get(firstSegment) ?? firstSegment, filePath)
   }
 
   const indexed = [...groups.values()]
