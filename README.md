@@ -7,11 +7,7 @@ Playwright tells you what failed. Canary Lab preserves the local system context 
 
 Canary Lab is a local control plane for Playwright-based E2E work. It starts the services a feature depends on, applies the selected envset, gates the run on health checks, runs Playwright, and writes run-scoped evidence: service logs, Playwright events, screenshots/videos/traces, summaries, and diagnosis notes. When a run fails, a human or agent can work from exact file paths instead of pasted terminal output.
 
-As of 1.0.0, the primary surface is a local web UI (`canary-lab ui`) for running features, editing envsets, reviewing Playwright evidence, reading the diagnosis journal, and handing failures to Claude Code or Codex.
-
 [![Canary Lab UI walkthrough](docs/assets/canary-lab-ui-walkthrough.png)](docs/assets/canary-lab-ui-walkthrough.webm)
-
-The walkthrough shows the normal 1.0.0 review path: pick a feature, inspect run history, open Playwright Playback, use retained evidence, fall back to raw terminal output, review the heal-agent transcript, and check the diagnosis journal.
 
 See [CHANGELOG.md](CHANGELOG.md) for what's new in each release.
 
@@ -86,7 +82,7 @@ Pass `--no-open` to suppress the browser auto-launch (useful over SSH or in CI).
 
 ```bash
 npx canary-lab init <folder>
-npx canary-lab ui                                 # primary surface (web UI)
+npx canary-lab ui # primary surface (web UI)
 npx canary-lab upgrade
 ```
 
