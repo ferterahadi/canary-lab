@@ -3,35 +3,40 @@
 [![npm](https://img.shields.io/npm/v/canary-lab.svg)](https://www.npmjs.com/package/canary-lab)
 [![license](https://img.shields.io/npm/l/canary-lab.svg)](LICENSE)
 
-Canary Lab is a local E2E workflow layer built on top of Playwright.
+Playwright tells you what failed. Canary Lab preserves the local system context needed to fix it.
 
-It is built for cases where one test depends on multiple local apps or services, not just one app in isolation. Canary Lab starts those services, gates tests on health checks, runs Playwright with per-test service-log slicing, and — on failure — hands the agent (Claude Code or Codex) a structured map of what broke so it can diagnose, fix, and signal a re-run.
+Canary Lab is a local control plane for Playwright-based E2E work. It starts the services a feature depends on, applies the selected envset, gates the run on health checks, runs Playwright, and writes run-scoped evidence: service logs, Playwright events, screenshots/videos/traces, summaries, and diagnosis notes. When a run fails, a human or agent can work from exact file paths instead of pasted terminal output.
 
-As of 1.0.0, the primary surface is a local web UI (`canary-lab ui`) — a 3-column Finder-style view of features, runs, and run details, with built-in envset editing, Playwright playback, a diagnosis journal, and an Add Test wizard.
+As of 1.0.0, the primary surface is a local web UI (`canary-lab ui`) for running features, editing envsets, reviewing Playwright evidence, reading the diagnosis journal, and handing failures to Claude Code or Codex.
 
 See [CHANGELOG.md](CHANGELOG.md) for what's new in each release.
 
-## What This Tool Is
+## Mental Model
 
-This is not a replacement for Playwright.
+Playwright remains the test runner. Canary Lab is the local workflow layer around it.
 
-Playwright already handles browser automation and test execution well. Canary Lab adds a local workflow layer around that, especially for multi-service setups.
+The run pipeline is deliberately plain:
 
-Playwright gives you:
+```text
+feature.config.cjs
+  -> selected envset
+  -> service PTYs + health gates
+  -> Playwright
+  -> run-scoped logs, events, and artifacts
+  -> review in the UI
+  -> manual or agent-driven heal loop
+```
 
-- browser automation
-- assertions, fixtures, and reporters
-- test execution and retries
+Canary Lab adds the parts Playwright intentionally does not own:
 
-Canary Lab adds:
+- multi-service startup, health gating, and teardown from one feature config
+- run-scoped service logs streamed into the browser and kept on disk
+- per-test log boundaries so failures point at the relevant service output
+- retained Playwright screenshots, videos, traces, and structured event playback
+- a diagnosis journal and `.rerun` / `.restart` signals for human or agent-driven repair
+- UI-managed envset application across local repos
 
-- multi-service orchestration: parallel startup, health gating, log capture (each service runs in its own pseudo-terminal, streamed to the web UI)
-- per-test log slicing so failures map directly to the service output that produced them
-- a local web UI for selecting features, watching runs live, and browsing per-run history
-- an agent-driven self-heal loop (structured failure index → diagnosis → `.restart`/`.rerun` → re-run), driven from the web UI
-- a persistent cross-run diagnosis journal so the agent doesn't repeat hypotheses between cycles
-- an Add Test wizard (PRD → skill recommender → plan → spec generation) for guided test authoring
-- UI-managed env-file switching across repos
+The important distinction: Canary Lab does not hide Playwright. It keeps the raw Playwright terminal output available, then adds the system context around it.
 
 ## Who This Is For
 
@@ -76,11 +81,13 @@ npx canary-lab ui
 
 Pass `--no-open` to suppress the browser auto-launch (useful over SSH or in CI). Pass `--port <n>` to bind a different port.
 
-## Walkthrough
+## Run Review From A Fresh Workspace
 
 [![Canary Lab UI walkthrough](docs/assets/canary-lab-ui-walkthrough.png)](docs/assets/canary-lab-ui-walkthrough.webm)
 
-The walkthrough was recorded from a fresh disposable workspace and shows the 1.0.0 UI flow: pick a feature, start a run, inspect run history, review Playwright playback, open raw terminal logs, and check the diagnosis journal.
+This walkthrough was recorded from a fresh disposable workspace. The checkout page uses generated demo imagery so the retained Playwright screenshot communicates the kind of evidence Canary Lab preserves; the Canary Lab UI and run artifacts shown here are from the recorded run.
+
+The recording shows the normal 1.0.0 review path: pick a feature, inspect run history, open Playwright Playback, use retained evidence, fall back to raw terminal output, review the heal-agent transcript, and check the diagnosis journal.
 
 ## What Gets Scaffolded
 
@@ -149,6 +156,21 @@ Envset files often contain credentials, API keys, and database passwords copied 
 
 If you override this or use `git add -f`, review what you are committing. Do not push env files containing real credentials to shared or public repositories.
 
+## What Gets Written Per Run
+
+Every run is isolated under `logs/runs/<runId>/`. The files are intentionally boring and inspectable:
+
+- `manifest.json` — run metadata, selected feature, services, status, and signal paths
+- `runner.log` — orchestration events, health checks, restart decisions, and cleanup
+- `svc-*.log` — captured stdout/stderr for each started service
+- `playwright-events.jsonl` — structured test and browser-action events for Playback
+- `playwright-artifacts/` — retained screenshots, videos, traces, and Playwright attachments
+- `e2e-summary.json` — current test state, failed tests, and sliced failure context
+- `diagnosis-journal.md` — prior hypotheses, changes, outcomes, and follow-up signals
+- `signals/` — `.rerun` and `.restart` files used to continue a run after a fix
+
+`logs/current/` points at the active run so manual agents can work from stable paths while the UI keeps the full run history.
+
 ## Self-Fixing Workflow
 
 Two flavors, same idea:
@@ -157,6 +179,16 @@ Two flavors, same idea:
 - **Auto-heal** — the runner itself spawns a Claude or Codex agent when a test fails. The agent runs in its own PTY tab inside the web UI. Canary Lab renders its packaged `apps/web-server/prompts/heal-agent.md` template with the active run's exact file paths and passes that prompt to the agent. Output is filtered through a formatter so you see readable progress instead of raw stream-json.
 
 In both cases the agent starts from the active run's `heal-index.md` (a compact index over each failure, pointing at pre-sliced service logs under `failed/<slug>/`), falls back to that run's `e2e-summary.json` if the index is missing, fixes implementation code, and signals the runner via that run's `signals/.restart` or `signals/.rerun`.
+
+### Why this works for agents
+
+Agents are most useful when the run state is already structured. Canary Lab gives them:
+
+- exact file paths for the active run, failed tests, service logs, and retained artifacts
+- failure-specific log slices instead of whole-service scrollback
+- current test state from `e2e-summary.json` and Playwright events
+- prior hypotheses from `diagnosis-journal.md`
+- explicit `.rerun` and `.restart` signals so the runner, not the agent, owns the next cycle
 
 ### When auto-heal isn't available
 
