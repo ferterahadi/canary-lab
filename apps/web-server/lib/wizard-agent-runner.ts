@@ -123,10 +123,11 @@ export function spawnPlanAgent(
   deps: SpawnAgentDeps,
 ): (input: PlanAgentInput) => Promise<string> {
   return async (input) => {
+    const templatePath = input.planTemplatePath ?? deps.planTemplate
     const prompt = buildPlanPrompt({
       prdText: input.prdText,
       repos: input.repos,
-      template: deps.planTemplate ? loadTemplate(deps.planTemplate) : undefined,
+      template: templatePath ? loadTemplate(templatePath) : undefined,
     })
     const command = buildWizardCommand(input.agent, prompt, {
       claudeBin: deps.claudeBin,

@@ -32,6 +32,7 @@ import {
   type HealAgent,
 } from './lib/runtime/auto-heal'
 import { loadProjectConfig } from './lib/runtime/launcher/project-config'
+import { collectRepoBranchSnapshots, validateConfiguredRepoBranches } from './lib/git-repo'
 import { RunnerLog } from './lib/runtime/runner-log'
 import { realPtyFactory, type PtyFactory } from './lib/runtime/pty-spawner'
 import {
@@ -115,9 +116,14 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
   const activeEnvsets = new Map<string, BackupRecord[]>()
 
   await app.register(featuresRoutes, { featuresDir })
-  await app.register(featureConfigRoutes, { featuresDir })
+  await app.register(featureConfigRoutes, {
+    featuresDir,
+    isRepoActive: (featureName) => runStore
+      .list({ feature: featureName })
+      .some((run) => run.status === 'running' || run.status === 'healing'),
+  })
   await app.register(projectConfigRoutes, { projectRoot: opts.projectRoot })
-  await app.register(journalRoutes, { journalPath })
+  await app.register(journalRoutes, { logsDir, journalPath })
   await app.register(skillsRoutes, { listSkills: opts.listSkills })
 
   // Wizard route deps. Production: real claude -p via node-pty + on-demand
@@ -202,6 +208,9 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
         `Run started: feature=${feature.name}${env ? ` env=${env}` : ''} runId=${runId}`,
       )
 
+      await validateConfiguredRepoBranches(feature)
+      const repoBranchSnapshots = await collectRepoBranchSnapshots(feature)
+
       let backups: BackupRecord[] | null = null
       if (env) {
         try {
@@ -267,6 +276,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
           runnerLog,
           autoHeal,
           manualHeal: projectConfig.healAgent === 'manual',
+          repoBranchSnapshots,
           // Route every manifest/index write through RunStore so its event
           // emitter sees the mutation. Phase 2 attaches the WS endpoint to
           // these events.

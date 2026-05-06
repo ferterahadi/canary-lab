@@ -114,6 +114,7 @@ describe("main (upgrade orchestration)", () => {
       expect(content).toContain("When the user says `self heal`, follow the `heal-prompt` block below. The `logs/current` pointer tracks the active run.")
       expect(content).toContain("logs/current/heal-index.md")
       expect(content).toContain("logs/current/e2e-summary.json")
+      expect(content).toContain("logs/current/diagnosis-journal.md")
       expect(content).toContain("`.restart`")
       expect(content).toContain("`.rerun`")
       expect(content).toContain("logs/current/signals/")

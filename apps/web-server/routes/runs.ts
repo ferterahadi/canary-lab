@@ -1,6 +1,9 @@
 import type { FastifyInstance } from 'fastify'
+import fs from 'fs'
+import path from 'path'
 import type { RunStore, OrchestratorLike } from '../lib/run-store'
 import { loadFeatures } from '../lib/feature-loader'
+import { buildRunPaths, runDirFor } from '../lib/runtime/run-paths'
 
 export interface RunsRouteDeps {
   featuresDir: string
@@ -25,6 +28,29 @@ export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Pro
       return { error: 'run not found' }
     }
     return detail
+  })
+
+  app.get<{ Params: { runId: string; '*': string } }>('/api/runs/:runId/artifacts/*', async (req, reply) => {
+    const runDir = runDirFor(deps.store.logsDir, req.params.runId)
+    const artifactsDir = buildRunPaths(runDir).playwrightArtifactsDir
+    const requested = path.resolve(artifactsDir, req.params['*'])
+    const rel = path.relative(artifactsDir, requested)
+    if (rel.startsWith('..') || path.isAbsolute(rel)) {
+      reply.code(400)
+      return { error: 'invalid artifact path' }
+    }
+    try {
+      const stat = fs.statSync(requested)
+      if (!stat.isFile()) {
+        reply.code(404)
+        return { error: 'artifact not found' }
+      }
+    } catch {
+      reply.code(404)
+      return { error: 'artifact not found' }
+    }
+    reply.type(contentTypeFor(requested))
+    return reply.send(fs.createReadStream(requested))
   })
 
   app.post<{ Body: { feature?: string; env?: string } }>('/api/runs', async (req, reply) => {
@@ -53,7 +79,10 @@ export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Pro
       reply.code(201)
       return { runId: orch.runId }
     } catch (err) {
-      reply.code(500)
+      const code = typeof (err as { statusCode?: unknown }).statusCode === 'number'
+        ? (err as { statusCode: number }).statusCode
+        : 500
+      reply.code(code)
       return { error: err instanceof Error ? err.message : String(err) }
     }
   })
@@ -159,4 +188,15 @@ export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Pro
     reply.code(204)
     return ''
   })
+}
+
+function contentTypeFor(filePath: string): string {
+  const ext = path.extname(filePath).toLowerCase()
+  if (ext === '.png') return 'image/png'
+  if (ext === '.jpg' || ext === '.jpeg') return 'image/jpeg'
+  if (ext === '.webp') return 'image/webp'
+  if (ext === '.webm') return 'video/webm'
+  if (ext === '.mp4') return 'video/mp4'
+  if (ext === '.zip') return 'application/zip'
+  return 'application/octet-stream'
 }

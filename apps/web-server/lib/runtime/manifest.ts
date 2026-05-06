@@ -17,6 +17,24 @@ export interface ServiceManifestEntry {
   status?: ServiceStatus
 }
 
+export interface RepoBranchSnapshot {
+  name: string
+  path: string
+  branch: string | null
+  expectedBranch?: string
+  detached: boolean
+  dirty: boolean
+}
+
+export type PlaywrightScreenshotMode = 'off' | 'on' | 'only-on-failure'
+export type PlaywrightRetainedArtifactMode = 'off' | 'on' | 'on-first-retry' | 'retain-on-failure'
+
+export interface PlaywrightArtifactPolicy {
+  screenshot: PlaywrightScreenshotMode
+  video: PlaywrightRetainedArtifactMode
+  trace: PlaywrightRetainedArtifactMode
+}
+
 export type RunStatus = 'running' | 'passed' | 'failed' | 'healing' | 'aborted'
 
 // Mid-Run Heal: populated when Playwright was halted before completing the
@@ -41,6 +59,8 @@ export interface RunManifest {
   healCycles: number
   services: ServiceManifestEntry[]
   repoPaths?: string[]
+  repoBranches?: RepoBranchSnapshot[]
+  playwrightArtifacts?: PlaywrightArtifactPolicy
   stoppedEarly?: StoppedEarlyInfo
   /**
    * Per heal-cycle record of which services were restarted vs kept warm.

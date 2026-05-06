@@ -67,6 +67,24 @@ export interface ServiceManifestEntry {
   status?: ServiceStatus
 }
 
+export interface RepoBranchSnapshot {
+  name: string
+  path: string
+  branch: string | null
+  expectedBranch?: string
+  detached: boolean
+  dirty: boolean
+}
+
+export type PlaywrightScreenshotMode = 'off' | 'on' | 'only-on-failure'
+export type PlaywrightRetainedArtifactMode = 'off' | 'on' | 'on-first-retry' | 'retain-on-failure'
+
+export interface PlaywrightArtifactPolicy {
+  screenshot: PlaywrightScreenshotMode
+  video: PlaywrightRetainedArtifactMode
+  trace: PlaywrightRetainedArtifactMode
+}
+
 export interface RunManifest {
   runId: string
   feature: string
@@ -77,6 +95,8 @@ export interface RunManifest {
   healCycles: number
   services: ServiceManifestEntry[]
   repoPaths?: string[]
+  repoBranches?: RepoBranchSnapshot[]
+  playwrightArtifacts?: PlaywrightArtifactPolicy
   signalPaths?: { rerun: string; restart: string }
   healMode?: 'auto' | 'manual'
 }
@@ -106,10 +126,54 @@ export interface RunSummary {
   failed: RunSummaryFailedEntry[]
 }
 
+export type PlaywrightPlaybackEvent =
+  | {
+      type: 'test-begin'
+      time: string
+      test: { name: string; title: string; location: string }
+    }
+  | {
+      type: 'step-begin' | 'step-end'
+      time: string
+      test: { name: string; title: string }
+      step: RunSummaryRunningStep
+    }
+  | {
+      type: 'test-end'
+      time: string
+      test: { name: string; title: string; location: string }
+      status: string
+      passed: boolean
+      durationMs: number
+      retry: number
+      error?: { message: string; snippet?: string }
+      attachments?: Array<{ name: string; contentType?: string; path?: string }>
+    }
+
+export type PlaywrightArtifactKind = 'screenshot' | 'trace' | 'video' | 'other'
+
+export interface PlaywrightArtifact {
+  name: string
+  kind: PlaywrightArtifactKind
+  path: string
+  url: string
+  contentType?: string
+  sizeBytes: number
+  mtimeMs: number
+}
+
+export interface PlaywrightArtifactGroup {
+  testName: string
+  testTitle?: string
+  artifacts: PlaywrightArtifact[]
+}
+
 export interface RunDetail {
   runId: string
   manifest: RunManifest
   summary?: RunSummary
+  playbackEvents?: PlaywrightPlaybackEvent[]
+  playwrightArtifacts?: PlaywrightArtifactGroup[]
 }
 
 export interface SkillSummary {

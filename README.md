@@ -72,7 +72,7 @@ npx canary-lab ui
 
 1. **Features** — every `features/<name>/` discovered in the project, with a "Run" button per feature.
 2. **Runs** — the last 20 runs preserved under `logs/runs/<runId>/`, each with status, timing, and per-test results.
-3. **Logs** — live PTY output from services + Playwright + the heal agent, plus a journal viewer for `logs/diagnosis-journal.md` (cross-run, tagged by `run:`).
+3. **Logs** — live PTY output from services + Playwright + the heal agent, plus a journal viewer for the selected run's `diagnosis-journal.md`.
 
 Pass `--no-open` to suppress the browser auto-launch (useful over SSH or in CI). Pass `--port <n>` to bind a different port.
 
@@ -116,7 +116,7 @@ Benchmark mode writes:
 - `logs/benchmark/context/cycle-<n>.json`
 - `logs/benchmark/final-summary.json`
 
-`canary` mode benchmarks the normal structured context: the active run's `e2e-summary.json`, enriched per-test log slices, and `logs/diagnosis-journal.md` when present.
+`canary` mode benchmarks the normal structured context: the active run's `e2e-summary.json`, enriched per-test log slices, and `logs/current/diagnosis-journal.md` when present.
 
 `baseline` mode keeps that exact same runtime flow, but the agent gets only Playwright-style failure context and explores the codebase on its own.
 
@@ -267,9 +267,9 @@ flowchart TD
     subgraph artifacts["&nbsp;logs/&nbsp;"]
         direction LR
         svclog[/"runs/<runId>/svc-*.log"/]:::artifact
-        healindex[/"heal-index.md"/]:::artifact
-        summaryjson[/"e2e-summary.json"/]:::artifact
-        journal[/"diagnosis-journal.md"/]:::artifact
+        healindex[/"runs/<runId>/heal-index.md"/]:::artifact
+        summaryjson[/"runs/<runId>/e2e-summary.json"/]:::artifact
+        journal[/"runs/<runId>/diagnosis-journal.md"/]:::artifact
         signals[/"runs/<runId>/signals/.restart · .rerun"/]:::artifact
     end
 
@@ -320,7 +320,7 @@ flowchart TD
   - **Per-Test Log Marker** fires **before and after every test**, writing `<test-tag>` boundaries into per-run `svc-*.log` files so you can slice logs by test.
   - **Summary Reporter** fires **on every test result** (and at end-of-suite), incrementally updating `logs/runs/<runId>/e2e-summary.json`.
 - **Auto-Heal Driver** fires **only when tests fail and auto-heal is enabled**. It spawns a Claude Code or Codex CLI agent in a new terminal tab, piping its stdout through the **Agent Output Formatter**.
-- The **Coding Agent** starts at the run-scoped `heal-index.md` (with that run's `e2e-summary.json` as a fallback) to pick which failure to tackle, drills into the pre-sliced service logs under `logs/runs/<runId>/failed/<slug>/`, edits code, then writes `.restart` or `.rerun` under `logs/runs/<runId>/signals/`. The runner appends `logs/diagnosis-journal.md` entries from those signal bodies.
+- The **Coding Agent** starts at the run-scoped `heal-index.md` (with that run's `e2e-summary.json` as a fallback) to pick which failure to tackle, drills into the pre-sliced service logs under `logs/runs/<runId>/failed/<slug>/`, edits code, then writes `.restart` or `.rerun` under `logs/runs/<runId>/signals/`. The runner appends `logs/runs/<runId>/diagnosis-journal.md` entries from those signal bodies.
 - **Watch Mode** (the tail end of `runner.ts`) picks up those signal files and re-invokes Playwright.
 
 **At a glance:**

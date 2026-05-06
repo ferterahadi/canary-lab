@@ -15,6 +15,7 @@ import {
   type RunPaths,
 } from './run-paths'
 import {
+  type RepoBranchSnapshot,
   type RunManifest,
   type ServiceManifestEntry,
   type StoppedEarlyReason,
@@ -31,6 +32,7 @@ import {
 } from './playwright-mcp-artifacts'
 import { planRestart } from './restart-planner'
 import { interpolateConfigTokens, makeTokenCache } from './launcher/interpolate'
+import { readPlaywrightArtifactPolicy } from './playwright-artifact-policy'
 
 // Headless event-emitting orchestrator for a single feature run. Wraps the
 // existing health-check / signal-file semantics behind a clean API the future
@@ -92,6 +94,7 @@ export interface OrchestratorOptions {
   // the web-server's `RunStore` here so mutations also emit events that
   // drive the WS push channel.
   runStateSink?: RunStateSink
+  repoBranchSnapshots?: RepoBranchSnapshot[]
 }
 
 export type PauseResult =
@@ -156,6 +159,7 @@ export interface PlaywrightInvocation {
 export type PlaywrightSpawner = (args: {
   feature: FeatureConfig
   paths: RunPaths
+  rerunTargets?: readonly string[]
 }) => PlaywrightInvocation
 
 export function buildServiceSpecs(
@@ -216,6 +220,7 @@ export class RunOrchestrator extends EventEmitter {
   private readonly healAgentTimeoutMs: number
   private readonly runnerLog?: RunnerLog
   private readonly stateSink: RunStateSink
+  private readonly repoBranchSnapshots?: RepoBranchSnapshot[]
   private lastDetectedSignal: { kind: 'restart' | 'rerun' | 'heal'; body: Record<string, unknown> } | null = null
   private healCycleHistory: Array<{ cycle: number; restarted: string[]; kept: string[] }> = []
 
@@ -270,6 +275,7 @@ export class RunOrchestrator extends EventEmitter {
     // Default to a file-only sink so unit tests + the CLI shim don't have
     // to know about `RunStore`. Production wires RunStore in via opts.
     this.stateSink = opts.runStateSink ?? new FileRunStateSink(this.logsRoot)
+    this.repoBranchSnapshots = opts.repoBranchSnapshots
     if (this.runnerLog) this.attachRunnerLog(this.runnerLog)
   }
 
@@ -354,6 +360,8 @@ export class RunOrchestrator extends EventEmitter {
         .filter((p) => {
           try { return fs.existsSync(p) } catch { return false }
         }),
+      repoBranches: this.repoBranchSnapshots,
+      playwrightArtifacts: readPlaywrightArtifactPolicy(this.feature.featureDir),
       signalPaths: {
         rerun: this.paths.rerunSignal,
         restart: this.paths.restartSignal,
@@ -559,8 +567,8 @@ export class RunOrchestrator extends EventEmitter {
   //
   // Spawns Playwright through the same ptyFactory used for services so tests
   // inject a fake. Returns the exit code after the pty exits.
-  async runPlaywright(): Promise<number> {
-    const inv = this.playwrightSpawner({ feature: this.feature, paths: this.paths })
+  async runPlaywright(rerunTargets?: readonly string[]): Promise<number> {
+    const inv = this.playwrightSpawner({ feature: this.feature, paths: this.paths, rerunTargets })
     this.emit('playwright-started', { command: inv.command })
     const pty = this.ptyFactory({
       command: inv.command,
@@ -588,6 +596,17 @@ export class RunOrchestrator extends EventEmitter {
         resolve(exitCode)
       })
     })
+  }
+
+  private rerunTargetsForSummary(summary: SummaryShape): string[] | undefined {
+    const failedSlugs = extractFailedSlugs(summary)
+    if (failedSlugs.length === 0) return undefined
+    const locations = extractFailedLocations(summary)
+    if (locations.length > 0) return locations
+    const msg = 'Post-heal rerun has failed tests without usable file:line locations; running the full Playwright suite.'
+    this.runnerLog?.warn(msg)
+    this.emit('playwright-output', { chunk: `\n[warning] ${msg}\n` })
+    return undefined
   }
 
   // Wait for the in-flight Playwright pty to exit. Resolves immediately when
@@ -688,6 +707,7 @@ export class RunOrchestrator extends EventEmitter {
         runId: this.runId,
         manifestPath: this.paths.manifestPath,
         summaryPath: this.paths.summaryPath,
+        journalPath: this.paths.diagnosisJournalPath,
       })
     } catch { /* journal append is best-effort */ }
 
@@ -735,6 +755,7 @@ export class RunOrchestrator extends EventEmitter {
         runId: this.runId,
         manifestPath: this.paths.manifestPath,
         summaryPath: this.paths.summaryPath,
+        journalPath: this.paths.diagnosisJournalPath,
       })
     } catch { /* journal append is best-effort */ }
 
@@ -944,9 +965,12 @@ export class RunOrchestrator extends EventEmitter {
               runId: this.runId,
               manifestPath: this.paths.manifestPath,
               summaryPath: this.paths.summaryPath,
+              journalPath: this.paths.diagnosisJournalPath,
             })
           }
         } catch { /* journal is best-effort */ }
+        const rerunTargets = this.rerunTargetsForSummary(readSummary(this.paths.summaryPath))
+        this.setStatus('running')
         if (signal.kind === 'restart') {
           const filesChanged = Array.isArray(signal.body.filesChanged)
             ? signal.body.filesChanged.filter((f): f is string => typeof f === 'string')
@@ -956,7 +980,7 @@ export class RunOrchestrator extends EventEmitter {
           await this.rerun()
         }
         if (this.stopped) return this.status
-        exitCode = await this.runPlaywright()
+        exitCode = await this.runPlaywright(rerunTargets)
         // Manual-heal mirror of the auto-heal abort guard: the top of the
         // loop already checks `stopped`, but the killed Playwright pty's
         // exit code arrives after the abort flips the flag — don't
@@ -1044,9 +1068,13 @@ export class RunOrchestrator extends EventEmitter {
             runId: this.runId,
             manifestPath: this.paths.manifestPath,
             summaryPath: this.paths.summaryPath,
+            journalPath: this.paths.diagnosisJournalPath,
           })
         }
       } catch { /* journal write is best-effort */ }
+
+      const rerunTargets = this.rerunTargetsForSummary(summary)
+      this.setStatus('running')
 
       const action = heal.actionForSignal(signal.kind === 'heal' ? 'rerun' : signal.kind)
       // actionForSignal can only return restart-and-rerun or rerun-only here;
@@ -1067,7 +1095,7 @@ export class RunOrchestrator extends EventEmitter {
       }
       if (this.stopped) return this.status
 
-      exitCode = await this.runPlaywright()
+      exitCode = await this.runPlaywright(rerunTargets)
       // Abort during the post-heal Playwright rerun — same reasoning as
       // the earlier guards: don't compute a finalStatus from the killed
       // pty and don't loop further.
@@ -1158,7 +1186,7 @@ export class RunOrchestrator extends EventEmitter {
 // ─── Module helpers ─────────────────────────────────────────────────────────
 
 interface SummaryShape {
-  failed?: Array<{ name?: unknown; endTime?: unknown }>
+  failed?: Array<{ name?: unknown; endTime?: unknown; location?: unknown }>
   passed?: unknown
   total?: unknown
 }
@@ -1197,6 +1225,20 @@ export function extractFailedSlugs(summary: SummaryShape): string[] {
     .filter((n) => n.length > 0)
 }
 
+export function extractFailedLocations(summary: SummaryShape): string[] {
+  const failed = Array.isArray(summary.failed) ? summary.failed : []
+  const out: string[] = []
+  const seen = new Set<string>()
+  for (const entry of failed) {
+    const location = typeof entry?.location === 'string' ? entry.location.trim() : ''
+    if (!/:\d+(?::\d+)?$/.test(location)) continue
+    if (seen.has(location)) continue
+    seen.add(location)
+    out.push(location)
+  }
+  return out
+}
+
 export function summarizeFailures(summaryPath: string): { failed: string[]; total: number } {
   const summary = readSummary(summaryPath)
   const failed = extractFailedSlugs(summary)
@@ -1208,14 +1250,17 @@ const SUMMARY_REPORTER_PATH = path.resolve(__dirname, 'summary-reporter.js')
 
 // Production Playwright invocation. Uses `npx playwright test` with our custom
 // summary reporter, rooted at the feature dir. Tests inject their own.
-export const defaultPlaywrightSpawner: PlaywrightSpawner = ({ feature, paths: _paths }) => {
+export const defaultPlaywrightSpawner: PlaywrightSpawner = ({ feature, paths, rerunTargets }) => {
   const reporter = SUMMARY_REPORTER_PATH
   const threshold = feature.healOnFailureThreshold
   const maxFailures = typeof threshold === 'number' && threshold > 0
     ? ` --max-failures=${threshold}`
     : ''
+  const targets = rerunTargets && rerunTargets.length > 0
+    ? ` ${rerunTargets.map((target) => JSON.stringify(target)).join(' ')}`
+    : ''
   return {
-    command: `npx playwright test --reporter=${JSON.stringify(reporter)},list${maxFailures}`,
+    command: `npx playwright test${targets} --output=${JSON.stringify(paths.playwrightArtifactsDir)} --reporter=${JSON.stringify(reporter)},list${maxFailures}`,
     cwd: feature.featureDir,
   }
 }

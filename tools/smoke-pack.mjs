@@ -72,6 +72,7 @@ for (const mdFile of ['CLAUDE.md', 'AGENTS.md']) {
     'When the user says `self heal`, follow the `heal-prompt` block below. The `logs/current` pointer tracks the active run.',
     'logs/current/heal-index.md',
     'logs/current/e2e-summary.json',
+    'logs/current/diagnosis-journal.md',
     'logs/current/signals/',
     'Prefer exact slice paths from `heal-index.md` before broad repo search.',
   ]) {

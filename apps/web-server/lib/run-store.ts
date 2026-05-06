@@ -12,7 +12,7 @@ import {
   type RunManifest,
   type ServiceStatus,
 } from './runtime/manifest'
-import { runDirFor } from './runtime/run-paths'
+import { buildRunPaths, runDirFor } from './runtime/run-paths'
 import { FileRunStateSink, type RunStateSink } from './runtime/run-state-sink'
 
 // `RunStore` is the single mutator for everything the runs feature persists:
@@ -175,10 +175,54 @@ export interface RunSummary {
   failed: RunSummaryFailedEntry[]
 }
 
+export type PlaywrightPlaybackEvent =
+  | {
+      type: 'test-begin'
+      time: string
+      test: { name: string; title: string; location: string }
+    }
+  | {
+      type: 'step-begin' | 'step-end'
+      time: string
+      test: { name: string; title: string }
+      step: RunSummaryRunningStep
+    }
+  | {
+      type: 'test-end'
+      time: string
+      test: { name: string; title: string; location: string }
+      status: string
+      passed: boolean
+      durationMs: number
+      retry: number
+      error?: { message: string; snippet?: string }
+      attachments?: Array<{ name: string; contentType?: string; path?: string }>
+    }
+
+export type PlaywrightArtifactKind = 'screenshot' | 'trace' | 'video' | 'other'
+
+export interface PlaywrightArtifact {
+  name: string
+  kind: PlaywrightArtifactKind
+  path: string
+  url: string
+  contentType?: string
+  sizeBytes: number
+  mtimeMs: number
+}
+
+export interface PlaywrightArtifactGroup {
+  testName: string
+  testTitle?: string
+  artifacts: PlaywrightArtifact[]
+}
+
 export interface RunDetail {
   runId: string
   manifest: RunManifest
   summary?: RunSummary
+  playbackEvents?: PlaywrightPlaybackEvent[]
+  playwrightArtifacts?: PlaywrightArtifactGroup[]
 }
 
 // Read e2e-summary.json if present. Returns undefined when absent or
@@ -200,6 +244,93 @@ export function readRunSummary(runDir: string): RunSummary | undefined {
   }
 }
 
+export function readPlaywrightPlaybackEvents(runDir: string): PlaywrightPlaybackEvent[] | undefined {
+  const p = buildRunPaths(runDir).playwrightEventsPath
+  let raw: string
+  try {
+    raw = fs.readFileSync(p, 'utf-8')
+  } catch {
+    return undefined
+  }
+  const out: PlaywrightPlaybackEvent[] = []
+  for (const line of raw.split('\n')) {
+    const trimmed = line.trim()
+    if (!trimmed) continue
+    try {
+      const parsed = JSON.parse(trimmed) as PlaywrightPlaybackEvent
+      if (parsed && typeof parsed === 'object' && typeof parsed.type === 'string') out.push(parsed)
+    } catch {
+      // Ignore corrupt partial lines; the terminal log remains authoritative.
+    }
+  }
+  return out
+}
+
+export function indexPlaywrightArtifacts(
+  runId: string,
+  runDir: string,
+  events: PlaywrightPlaybackEvent[] | undefined,
+): PlaywrightArtifactGroup[] | undefined {
+  const artifactsDir = buildRunPaths(runDir).playwrightArtifactsDir
+  if (!fs.existsSync(artifactsDir)) return undefined
+
+  const groups = new Map<string, PlaywrightArtifactGroup>()
+  const seen = new Set<string>()
+  const seenRel = new Set<string>()
+  const titleByName = new Map<string, string>()
+  for (const event of events ?? []) {
+    if ('test' in event && event.test?.title) titleByName.set(event.test.name, event.test.title)
+  }
+
+  const add = (testName: string, filePath: string, name?: string, contentType?: string): void => {
+    const resolved = path.resolve(filePath)
+    const rel = path.relative(artifactsDir, resolved)
+    if (rel.startsWith('..') || path.isAbsolute(rel)) return
+    if (!fs.existsSync(resolved) || !fs.statSync(resolved).isFile()) return
+    const key = `${testName}:${rel}`
+    if (seen.has(key) || seenRel.has(rel)) return
+    seen.add(key)
+    seenRel.add(rel)
+    const group = groups.get(testName) ?? {
+      testName,
+      ...(titleByName.has(testName) ? { testTitle: titleByName.get(testName) } : {}),
+      artifacts: [],
+    }
+    const stat = fs.statSync(resolved)
+    group.artifacts.push({
+      name: name || path.basename(resolved),
+      kind: classifyArtifact(resolved, name, contentType),
+      path: rel,
+      url: artifactUrl(runId, rel),
+      ...(contentType ? { contentType } : {}),
+      sizeBytes: stat.size,
+      mtimeMs: stat.mtimeMs,
+    })
+    groups.set(testName, group)
+  }
+
+  for (const event of events ?? []) {
+    if (event.type !== 'test-end') continue
+    for (const attachment of event.attachments ?? []) {
+      if (attachment.path) add(event.test.name, attachment.path, attachment.name, attachment.contentType)
+    }
+  }
+
+  for (const filePath of listFiles(artifactsDir)) {
+    const rel = path.relative(artifactsDir, filePath)
+    const firstSegment = rel.split(path.sep)[0] || 'unmatched'
+    if (!seenRel.has(rel)) add(firstSegment, filePath)
+  }
+
+  const indexed = [...groups.values()]
+    .map((g) => ({
+      ...g,
+      artifacts: g.artifacts.sort((a, b) => a.kind.localeCompare(b.kind) || a.path.localeCompare(b.path)),
+    }))
+    .sort((a, b) => a.testName.localeCompare(b.testName))
+  return indexed.length > 0 ? indexed : undefined
+}
+
 export function getRunDetail(logsDir: string, runId: string): RunDetail | null {
   const dir = runDirFor(logsDir, runId)
   const manifestPath = path.join(dir, 'manifest.json')
@@ -207,7 +338,40 @@ export function getRunDetail(logsDir: string, runId: string): RunDetail | null {
   const m = readManifest(manifestPath)
   if (!m) return null
   const summary = readRunSummary(dir)
-  return summary ? { runId, manifest: m, summary } : { runId, manifest: m }
+  const playbackEvents = readPlaywrightPlaybackEvents(dir)
+  const playwrightArtifacts = indexPlaywrightArtifacts(runId, dir, playbackEvents)
+  return {
+    runId,
+    manifest: m,
+    ...(summary ? { summary } : {}),
+    ...(playbackEvents?.length ? { playbackEvents } : {}),
+    ...(playwrightArtifacts?.length ? { playwrightArtifacts } : {}),
+  }
+}
+
+function classifyArtifact(filePath: string, name?: string, contentType?: string): PlaywrightArtifactKind {
+  const label = `${name ?? ''} ${contentType ?? ''} ${path.basename(filePath)}`.toLowerCase()
+  if (label.includes('image/') || /\.(png|jpe?g|webp)$/.test(label)) return 'screenshot'
+  if (label.includes('trace') || label.includes('application/zip') || /\.zip$/.test(label)) return 'trace'
+  if (label.includes('video') || label.includes('video/') || /\.(webm|mp4)$/.test(label)) return 'video'
+  return 'other'
+}
+
+function artifactUrl(runId: string, relPath: string): string {
+  return `/api/runs/${encodeURIComponent(runId)}/artifacts/${relPath.split(path.sep).map(encodeURIComponent).join('/')}`
+}
+
+function listFiles(root: string): string[] {
+  const out: string[] = []
+  const visit = (dir: string): void => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name)
+      if (entry.isDirectory()) visit(full)
+      else if (entry.isFile()) out.push(full)
+    }
+  }
+  visit(root)
+  return out
 }
 
 // ─── RunStore ────────────────────────────────────────────────────────────

@@ -10,9 +10,12 @@ export interface RunPaths {
   manifestPath: string
   summaryPath: string
   playwrightStdoutPath: string
+  playwrightEventsPath: string
+  playwrightArtifactsDir: string
   agentTranscriptPath: string
   runnerLogPath: string
   healIndexPath: string
+  diagnosisJournalPath: string
   failedDir: string
   signalsDir: string
   restartSignal: string
@@ -28,9 +31,12 @@ export function buildRunPaths(runDir: string): RunPaths {
     manifestPath: path.join(runDir, 'manifest.json'),
     summaryPath: path.join(runDir, 'e2e-summary.json'),
     playwrightStdoutPath: path.join(runDir, 'playwright.log'),
+    playwrightEventsPath: path.join(runDir, 'playwright-events.jsonl'),
+    playwrightArtifactsDir: path.join(runDir, 'playwright-artifacts'),
     agentTranscriptPath: path.join(runDir, 'agent-transcript.log'),
     runnerLogPath: path.join(runDir, 'runner.log'),
     healIndexPath: path.join(runDir, 'heal-index.md'),
+    diagnosisJournalPath: path.join(runDir, 'diagnosis-journal.md'),
     failedDir: path.join(runDir, 'failed'),
     signalsDir,
     restartSignal: path.join(signalsDir, '.restart'),

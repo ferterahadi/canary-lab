@@ -8,6 +8,8 @@ import {
   reapStaleRuns,
   removeRunFromHistory,
   getRunDetail,
+  indexPlaywrightArtifacts,
+  readPlaywrightPlaybackEvents,
   readRunSummary,
   RunStore,
   type RunStoreEvent,
@@ -382,6 +384,57 @@ describe('getRunDetail', () => {
     expect(d?.summary?.complete).toBe(true)
     expect(d?.summary?.failed[0].name).toBe('test-case-x')
   })
+
+  it('includes playback events and grouped Playwright artifacts', () => {
+    const dir = runDirFor(tmpDir, 'r-artifacts')
+    const artifactsDir = path.join(dir, 'playwright-artifacts', 'visual-checkout')
+    fs.mkdirSync(artifactsDir, { recursive: true })
+    const screenshot = path.join(artifactsDir, 'test-failed-1.png')
+    const trace = path.join(artifactsDir, 'trace.zip')
+    fs.writeFileSync(screenshot, 'png')
+    fs.writeFileSync(trace, 'zip')
+    writeManifest(path.join(dir, 'manifest.json'), {
+      runId: 'r-artifacts',
+      feature: 'foo',
+      startedAt: 'now',
+      status: 'failed',
+      healCycles: 0,
+      services: [],
+    })
+    fs.writeFileSync(
+      path.join(dir, 'playwright-events.jsonl'),
+      [
+        JSON.stringify({ type: 'test-begin', time: 't', test: { name: 'test-case-visual-checkout', title: 'Visual checkout', location: '/x:1' } }),
+        JSON.stringify({
+          type: 'test-end',
+          time: 't',
+          test: { name: 'test-case-visual-checkout', title: 'Visual checkout', location: '/x:1' },
+          status: 'failed',
+          passed: false,
+          durationMs: 12,
+          retry: 0,
+          attachments: [
+            { name: 'screenshot', contentType: 'image/png', path: screenshot },
+            { name: 'trace', contentType: 'application/zip', path: trace },
+          ],
+        }),
+      ].join('\n') + '\n',
+    )
+
+    const d = getRunDetail(tmpDir, 'r-artifacts')
+    expect(d?.playbackEvents).toHaveLength(2)
+    expect(d?.playwrightArtifacts).toEqual([
+      {
+        testName: 'test-case-visual-checkout',
+        testTitle: 'Visual checkout',
+        artifacts: [
+          expect.objectContaining({ kind: 'screenshot', path: 'visual-checkout/test-failed-1.png' }),
+          expect.objectContaining({ kind: 'trace', path: 'visual-checkout/trace.zip' }),
+        ],
+      },
+    ])
+    expect(d?.playwrightArtifacts?.[0].artifacts[0].url).toBe('/api/runs/r-artifacts/artifacts/visual-checkout/test-failed-1.png')
+  })
 })
 
 describe('readRunSummary', () => {
@@ -405,6 +458,108 @@ describe('readRunSummary', () => {
       JSON.stringify({ complete: false, total: 0, passed: 0, failed: [] }),
     )
     expect(readRunSummary(tmpDir)).toEqual({ complete: false, total: 0, passed: 0, failed: [] })
+  })
+})
+
+describe('readPlaywrightPlaybackEvents / indexPlaywrightArtifacts', () => {
+  it('tolerates missing events and artifacts', () => {
+    expect(readPlaywrightPlaybackEvents(tmpDir)).toBeUndefined()
+    expect(indexPlaywrightArtifacts('r1', tmpDir, undefined)).toBeUndefined()
+  })
+
+  it('ignores corrupt event lines and events without a type', () => {
+    fs.mkdirSync(path.join(tmpDir, 'playwright-artifacts'), { recursive: true })
+    fs.writeFileSync(
+      path.join(tmpDir, 'playwright-events.jsonl'),
+      [
+        '',
+        '{not json',
+        JSON.stringify({ test: { name: 'missing-type', title: 'Missing type' } }),
+        JSON.stringify({ type: 'test-begin', test: { name: 'case-a', title: 'Case A' } }),
+      ].join('\n'),
+    )
+
+    expect(readPlaywrightPlaybackEvents(tmpDir)).toEqual([
+      { type: 'test-begin', test: { name: 'case-a', title: 'Case A' } },
+    ])
+  })
+
+  it('indexes attached artifacts defensively and discovers unmatched files', () => {
+    const artifactsDir = path.join(tmpDir, 'playwright-artifacts')
+    const caseDir = path.join(artifactsDir, 'case-a')
+    fs.mkdirSync(caseDir, { recursive: true })
+    const screenshot = path.join(caseDir, 'screen.png')
+    const video = path.join(caseDir, 'recording.webm')
+    const notes = path.join(caseDir, 'notes.txt')
+    fs.writeFileSync(screenshot, 'png')
+    fs.writeFileSync(video, 'webm')
+    fs.writeFileSync(notes, 'notes')
+
+    const result = indexPlaywrightArtifacts('r 1', tmpDir, [
+      { type: 'test-begin', time: 't', test: { name: 'case-a', title: 'Case A', location: 'x:1' } },
+      {
+        type: 'step-begin',
+        time: 't',
+        test: { name: 'case-a', title: 'Case A' },
+        step: { title: 'page.goto', category: 'pw:api' },
+      },
+      {
+        type: 'test-end',
+        time: 't',
+        test: { name: 'case-a', title: 'Case A', location: 'x:1' },
+        status: 'failed',
+        passed: false,
+        durationMs: 1,
+        retry: 0,
+        attachments: [
+          { name: 'screenshot', contentType: 'image/png', path: screenshot },
+          { name: 'duplicate-screenshot', contentType: 'image/png', path: screenshot },
+          { name: 'outside', contentType: 'text/plain', path: path.join(tmpDir, 'outside.txt') },
+          { name: 'missing', contentType: 'text/plain', path: path.join(caseDir, 'missing.txt') },
+          { name: 'no-path', contentType: 'text/plain' },
+        ],
+      },
+    ])
+
+    expect(result).toEqual([
+      {
+        testName: 'case-a',
+        testTitle: 'Case A',
+        artifacts: [
+          expect.objectContaining({ kind: 'other', path: 'case-a/notes.txt', name: 'notes.txt' }),
+          expect.objectContaining({ kind: 'screenshot', path: 'case-a/screen.png', name: 'screenshot' }),
+          expect.objectContaining({ kind: 'video', path: 'case-a/recording.webm', name: 'recording.webm' }),
+        ],
+      },
+    ])
+    expect(result?.[0].artifacts[1].url).toBe('/api/runs/r%201/artifacts/case-a/screen.png')
+  })
+
+  it('returns undefined for an empty artifacts directory and skips non-file entries', () => {
+    const artifactsDir = path.join(tmpDir, 'playwright-artifacts')
+    fs.mkdirSync(path.join(artifactsDir, 'empty-dir'), { recursive: true })
+    fs.symlinkSync(path.join(artifactsDir, 'missing-target'), path.join(artifactsDir, 'link'))
+
+    expect(indexPlaywrightArtifacts('r-empty', tmpDir, undefined)).toBeUndefined()
+  })
+
+  it('indexes discovered files without playback events', () => {
+    const file = path.join(tmpDir, 'playwright-artifacts', 'unmatched', 'trace.zip')
+    fs.mkdirSync(path.dirname(file), { recursive: true })
+    fs.writeFileSync(file, 'zip')
+
+    expect(indexPlaywrightArtifacts('r-unmatched', tmpDir, undefined)).toEqual([
+      {
+        testName: 'unmatched',
+        artifacts: [
+          expect.objectContaining({
+            name: 'trace.zip',
+            kind: 'trace',
+            path: 'unmatched/trace.zip',
+          }),
+        ],
+      },
+    ])
   })
 })
 

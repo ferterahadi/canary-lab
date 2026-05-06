@@ -71,14 +71,19 @@ describe('wizard codex formatter', () => {
   })
 
   it('skips blank agent messages and prints reasoning text', () => {
+    handleCompleted({ type: 'agent_message' })
     handleCompleted({ type: 'agent_message', text: '   ' })
     handleCompleted({ type: 'reasoning', text: 'thinking about a fix\nmore detail' })
+    handleCompleted({ type: 'reasoning' })
     handleCompleted({ type: 'reasoning', text: '' })
     const out = writes.join('')
     expect(out).toContain('thinking thinking about a fix')
   })
 
   it('prints command states and output summaries', () => {
+    handleCompleted({
+      type: 'command_execution',
+    })
     handleCompleted({
       type: 'command_execution',
       command: "/bin/zsh -lc 'npm run test'",
@@ -98,6 +103,7 @@ describe('wizard codex formatter', () => {
       aggregated_output: 'lint failed',
     })
     const out = writes.join('')
+    expect(out).toContain('command  (running)')
     expect(out).toContain('command npm run test (ok)')
     expect(out).toContain('output pass')
     expect(out).toContain('command npm run dev (running)')
@@ -115,6 +121,7 @@ describe('wizard codex formatter', () => {
       ],
     })
     handleCompleted({ type: 'file_change', changes: 'not-array' })
+    handleCompleted({ type: 'unknown' })
     const out = writes.join('')
     expect(out).toContain('file add new.ts')
     expect(out).toContain('file update updated.ts')

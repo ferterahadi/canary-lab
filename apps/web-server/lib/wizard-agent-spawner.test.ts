@@ -4,6 +4,7 @@ import path from 'path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { PaneBroker } from './pane-broker'
 import {
+  STAGE1_DIFF_TEMPLATE,
   STAGE1_TEMPLATE,
   STAGE2_TEMPLATE,
   buildClaudeArgs,
@@ -114,6 +115,19 @@ describe('loadTemplate', () => {
     expect(t).toContain('spec-file boundaries')
   })
 
+  it('reads stage 1 diff-only prompt template', () => {
+    const t = loadTemplate(STAGE1_DIFF_TEMPLATE)
+    expect(t).toContain('{{prdText}}')
+    expect(t).toContain('{{repos}}')
+    expect(t).toContain('<plan-output>')
+    expect(t).toContain('The `<plan-output>` wrapper is mandatory')
+    expect(t).toContain('plan-output marker not found')
+    expect(t).toContain('branch + worktree diff')
+    expect(t).toContain('Prefer the local parent branch')
+    expect(t.indexOf('local parent')).toBeLessThan(t.indexOf('origin/main'))
+    expect(t).toContain('Regression safety first')
+  })
+
   it('reads stage 2 prompt template', () => {
     const t = loadTemplate(STAGE2_TEMPLATE)
     expect(t).toContain('{{featureName}}')
@@ -157,6 +171,18 @@ describe('buildPlanPrompt', () => {
       template: 'PRD={{prdText}};REPOS={{repos}}',
     })
     expect(out).toBe('PRD=X;REPOS=(none)')
+  })
+
+  it('substitutes prdText and repos into the diff-only template', () => {
+    const out = buildPlanPrompt({
+      prdText: '',
+      repos: [{ name: 'app', localPath: '/p/app' }],
+      template: loadTemplate(STAGE1_DIFF_TEMPLATE),
+    })
+    expect(out).toContain('- app (/p/app)')
+    expect(out).toContain('diff-only planning')
+    expect(out).not.toContain('{{prdText}}')
+    expect(out).not.toContain('{{repos}}')
   })
 })
 

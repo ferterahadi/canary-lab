@@ -103,6 +103,59 @@ describe('GET /api/runs/:runId', () => {
   })
 })
 
+describe('GET /api/runs/:runId/artifacts/*', () => {
+  it('serves files from the run-local Playwright artifact directory', async () => {
+    writeManifestForRun('r1')
+    const file = path.join(runDirFor(logsDir, 'r1'), 'playwright-artifacts', 'case-a', 'test-failed-1.png')
+    fs.mkdirSync(path.dirname(file), { recursive: true })
+    fs.writeFileSync(file, 'PNGDATA')
+    const { app } = await build()
+
+    const res = await app.inject({ method: 'GET', url: '/api/runs/r1/artifacts/case-a/test-failed-1.png' })
+
+    expect(res.statusCode).toBe(200)
+    expect(res.headers['content-type']).toContain('image/png')
+    expect(res.body).toBe('PNGDATA')
+  })
+
+  it('rejects artifact path traversal', async () => {
+    writeManifestForRun('r1')
+    const { app } = await build()
+    const res = await app.inject({ method: 'GET', url: '/api/runs/r1/artifacts/..%2Fmanifest.json' })
+    expect(res.statusCode).toBe(400)
+  })
+
+  it('404s when artifact path is missing or points to a directory', async () => {
+    writeManifestForRun('r1')
+    const dir = path.join(runDirFor(logsDir, 'r1'), 'playwright-artifacts', 'case-a')
+    fs.mkdirSync(dir, { recursive: true })
+    const { app } = await build()
+
+    expect((await app.inject({ method: 'GET', url: '/api/runs/r1/artifacts/missing.png' })).statusCode).toBe(404)
+    expect((await app.inject({ method: 'GET', url: '/api/runs/r1/artifacts/case-a' })).statusCode).toBe(404)
+  })
+
+  it.each([
+    ['case.jpg', 'image/jpeg'],
+    ['case.jpeg', 'image/jpeg'],
+    ['case.webp', 'image/webp'],
+    ['case.webm', 'video/webm'],
+    ['case.mp4', 'video/mp4'],
+    ['trace.zip', 'application/zip'],
+    ['raw.bin', 'application/octet-stream'],
+  ])('serves %s with %s', async (name, contentType) => {
+    writeManifestForRun('r1')
+    const file = path.join(runDirFor(logsDir, 'r1'), 'playwright-artifacts', name)
+    fs.mkdirSync(path.dirname(file), { recursive: true })
+    fs.writeFileSync(file, 'data')
+    const { app } = await build()
+
+    const res = await app.inject({ method: 'GET', url: `/api/runs/r1/artifacts/${name}` })
+    expect(res.statusCode).toBe(200)
+    expect(res.headers['content-type']).toContain(contentType)
+  })
+})
+
 describe('POST /api/runs', () => {
   it('400s when feature missing from body', async () => {
     const { app } = await build()
@@ -152,13 +205,30 @@ describe('POST /api/runs', () => {
       `module.exports = { config: { name: 'foo', description: 'd', envs: ['local','production'], featureDir: __dirname } }`,
     )
     const stub = makeStub('ry')
-    const { app } = await build({ startRun: async () => stub })
+    let receivedEnv = ''
+    const { app } = await build({ startRun: async (_feature, env) => { receivedEnv = env ?? ''; return stub } })
     const res = await app.inject({
       method: 'POST',
       url: '/api/runs',
       payload: { feature: 'foo', env: 'production' },
     })
     expect(res.statusCode).toBe(201)
+    expect(receivedEnv).toBe('production')
+  })
+
+  it('defaults to the first declared env', async () => {
+    const dir = path.join(featuresDir, 'foo')
+    fs.mkdirSync(dir, { recursive: true })
+    fs.writeFileSync(
+      path.join(dir, 'feature.config.cjs'),
+      `module.exports = { config: { name: 'foo', description: 'd', envs: ['local','production'], featureDir: __dirname } }`,
+    )
+    const stub = makeStub('rz')
+    let receivedEnv = ''
+    const { app } = await build({ startRun: async (_feature, env) => { receivedEnv = env ?? ''; return stub } })
+    const res = await app.inject({ method: 'POST', url: '/api/runs', payload: { feature: 'foo' } })
+    expect(res.statusCode).toBe(201)
+    expect(receivedEnv).toBe('local')
   })
 
   it('runs without env when feature declares no envs', async () => {
@@ -192,6 +262,15 @@ describe('POST /api/runs', () => {
     const res = await app.inject({ method: 'POST', url: '/api/runs', payload: { feature: 'foo' } })
     expect(res.statusCode).toBe(500)
     expect(res.json().error).toContain('boom')
+  })
+
+  it('preserves typed startRun failure status codes', async () => {
+    writeFeature('foo')
+    const err = Object.assign(new Error('Repo branch check failed'), { statusCode: 409 })
+    const { app } = await build({ startRun: async () => { throw err } })
+    const res = await app.inject({ method: 'POST', url: '/api/runs', payload: { feature: 'foo' } })
+    expect(res.statusCode).toBe(409)
+    expect(res.json().error).toContain('Repo branch check failed')
   })
 })
 
@@ -337,6 +416,25 @@ describe('POST /api/runs/:runId/agent-input', () => {
     expect(res.json()).toEqual({ reason: 'no-session-id' })
   })
 
+  it('500s when interjecting into the heal agent fails at spawn time', async () => {
+    const stub: OrchestratorLike = {
+      runId: 'ai2c',
+      stop: async () => { /* noop */ },
+      pauseAndHeal: async () => ({ ok: true, failureCount: 0 }),
+      cancelHeal: async () => ({ ok: true }),
+      interjectHealAgent: async () => ({ ok: false, reason: 'spawn-failed' }),
+    }
+    const { app, registry } = await build()
+    registry.set('ai2c', stub)
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/runs/ai2c/agent-input',
+      payload: { data: 'hello\n' },
+    })
+    expect(res.statusCode).toBe(500)
+    expect(res.json()).toEqual({ reason: 'spawn-failed' })
+  })
+
   it('409s when interjectHealAgent is undefined (manual mode)', async () => {
     const stub: OrchestratorLike = {
       runId: 'ai3',
@@ -478,6 +576,7 @@ describe('DELETE /api/runs/:runId', () => {
     const { app } = await build()
     const res = await app.inject({ method: 'DELETE', url: '/api/runs/r3c' })
     expect(res.statusCode).toBe(409)
+    expect(res.json()).toEqual({ error: 'run is still active; reap or abort first' })
     expect(fs.existsSync(dir)).toBe(true)
   })
 

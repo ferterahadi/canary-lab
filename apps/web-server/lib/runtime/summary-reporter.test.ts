@@ -53,6 +53,14 @@ function readSummary(): any {
   return JSON.parse(fs.readFileSync(path.join(LOGS_DIR, 'e2e-summary.json'), 'utf-8'))
 }
 
+function readEvents(runDir = LOGS_DIR): any[] {
+  return fs.readFileSync(path.join(runDir, 'playwright-events.jsonl'), 'utf-8')
+    .trim()
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => JSON.parse(line))
+}
+
 describe('slugify', () => {
   it('normalizes test titles into summary slugs', () => {
     expect(slugify('A sad Checkout!')).toBe('a-sad-checkout')
@@ -237,6 +245,47 @@ describe('SummaryReporter', () => {
       location: '/helpers/voucher.ts:8',
       locations: ['/helpers/voucher.ts:8', '/specs/nested.spec.ts:25'],
     })
+  })
+
+  it('writes structured playback events with attachments', () => {
+    const reporter = new SummaryReporter()
+    const test = mkTest('Visual checkout', '/specs/checkout.spec.ts', 12)
+    const step = mkStep('page.click', 'pw:api', '/specs/checkout.spec.ts', 18)
+
+    reporter.onTestBegin(test)
+    reporter.onStepBegin(test, mkResult(), step)
+    reporter.onStepEnd(test, mkResult(), step)
+    reporter.onTestEnd(
+      test,
+      mkResult({
+        status: 'failed',
+        duration: 123,
+        retry: 1,
+        error: { message: 'boom' },
+        attachments: [
+          { name: 'screenshot', contentType: 'image/png', path: '/tmp/run/playwright-artifacts/a/test-failed-1.png' },
+          { name: 'trace', contentType: 'application/zip', path: '/tmp/run/playwright-artifacts/a/trace.zip' },
+        ],
+      }),
+    )
+
+    expect(readEvents()).toMatchObject([
+      { type: 'test-begin', test: { name: 'test-case-visual-checkout', title: 'Visual checkout' } },
+      { type: 'step-begin', step: { title: 'page.click', category: 'pw:api' } },
+      { type: 'step-end', step: { title: 'page.click', category: 'pw:api' } },
+      {
+        type: 'test-end',
+        test: { name: 'test-case-visual-checkout', title: 'Visual checkout' },
+        status: 'failed',
+        passed: false,
+        durationMs: 123,
+        retry: 1,
+        attachments: [
+          { name: 'screenshot', contentType: 'image/png', path: '/tmp/run/playwright-artifacts/a/test-failed-1.png' },
+          { name: 'trace', contentType: 'application/zip', path: '/tmp/run/playwright-artifacts/a/trace.zip' },
+        ],
+      },
+    ])
   })
 
   it('writes log slices and heal-index for failures', () => {

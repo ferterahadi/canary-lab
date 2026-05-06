@@ -143,6 +143,10 @@ function healIndexPathForSummary(summaryPath: string): string {
   return path.join(summaryPathToRunDir(summaryPath), 'heal-index.md')
 }
 
+function journalPathForSummary(summaryPath: string): string {
+  return path.join(summaryPathToRunDir(summaryPath), 'diagnosis-journal.md')
+}
+
 function serviceLogsFromManifest(manifest: Manifest): string[] {
   const legacy = Array.isArray(manifest.serviceLogs) ? manifest.serviceLogs : []
   const current = Array.isArray(manifest.services)
@@ -159,7 +163,7 @@ function serviceLogsFromManifest(manifest: Manifest): string[] {
 //
 // Returns the parsed manifest + summary so a follow-up writeHealIndex() in the
 // same tick can reuse them instead of re-reading + re-parsing the same files.
-export function enrichSummaryWithLogs(): { manifest: Manifest; summary: EnrichedSummary; summaryPath: string; healIndexPath: string } | null {
+export function enrichSummaryWithLogs(): { manifest: Manifest; summary: EnrichedSummary; summaryPath: string; healIndexPath: string; journalPath: string } | null {
   const summaryPath = getSummaryPath()
   const manifestPath = manifestPathForSummary(summaryPath)
   if (!fs.existsSync(summaryPath) || !fs.existsSync(manifestPath)) return null
@@ -168,7 +172,13 @@ export function enrichSummaryWithLogs(): { manifest: Manifest; summary: Enriched
   const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8')) as Manifest
 
   if (!Array.isArray(summary.failed) || summary.failed.length === 0) {
-    return { manifest, summary, summaryPath, healIndexPath: healIndexPathForSummary(summaryPath) }
+    return {
+      manifest,
+      summary,
+      summaryPath,
+      healIndexPath: healIndexPathForSummary(summaryPath),
+      journalPath: journalPathForSummary(summaryPath),
+    }
   }
 
   const slugs = summary.failed
@@ -194,7 +204,13 @@ export function enrichSummaryWithLogs(): { manifest: Manifest; summary: Enriched
   const tmpPath = `${summaryPath}.tmp`
   fs.writeFileSync(tmpPath, JSON.stringify(summary, null, 2) + '\n')
   fs.renameSync(tmpPath, summaryPath)
-  return { manifest, summary, summaryPath, healIndexPath: healIndexPathForSummary(summaryPath) }
+  return {
+    manifest,
+    summary,
+    summaryPath,
+    healIndexPath: healIndexPathForSummary(summaryPath),
+    journalPath: journalPathForSummary(summaryPath),
+  }
 }
 
 // ─── Heal Index ─────────────────────────────────────────────────────────────
@@ -262,9 +278,9 @@ export function parseJournalMarkdown(raw: string): JournalEntry[] {
   return entries
 }
 
-function readJournalTail(limit = 3): JournalEntry[] {
+function readJournalTail(journalPath: string, limit = 3): JournalEntry[] {
   try {
-    const raw = fs.readFileSync(DIAGNOSIS_JOURNAL_PATH, 'utf-8')
+    const raw = fs.readFileSync(journalPath, 'utf-8')
     return parseJournalMarkdown(raw).slice(-limit)
   } catch {
     return []
@@ -323,20 +339,25 @@ export function writeHealIndex(parsed?: {
   manifest: Manifest
   summary: EnrichedSummary
   healIndexPath?: string
+  summaryPath?: string
+  journalPath?: string
 }): void {
   let summary: EnrichedSummary
   let manifest: Manifest
   let healIndexPath = HEAL_INDEX_PATH
+  let journalPath = DIAGNOSIS_JOURNAL_PATH
   if (parsed) {
     summary = parsed.summary
     manifest = parsed.manifest
     healIndexPath = parsed.healIndexPath ?? healIndexPath
+    journalPath = parsed.journalPath ?? (parsed.summaryPath ? journalPathForSummary(parsed.summaryPath) : journalPath)
   } else {
     const summaryPath = getSummaryPath()
     if (!fs.existsSync(summaryPath)) return
     summary = JSON.parse(fs.readFileSync(summaryPath, 'utf-8')) as EnrichedSummary
     manifest = readManifest(manifestPathForSummary(summaryPath))
     healIndexPath = healIndexPathForSummary(summaryPath)
+    journalPath = journalPathForSummary(summaryPath)
   }
 
   const failed = Array.isArray(summary.failed) ? summary.failed : []
@@ -383,7 +404,7 @@ export function writeHealIndex(parsed?: {
     lines.push('')
   }
 
-  const journalTail = readJournalTail()
+  const journalTail = readJournalTail(journalPath)
   if (journalTail.length > 0) {
     const parts = journalTail.map((e) => {
       const iter = e.iteration !== undefined ? `#${e.iteration}` : ''
@@ -391,7 +412,7 @@ export function writeHealIndex(parsed?: {
       const hyp = e.hypothesis ? truncateOneLine(e.hypothesis, 100) : '(no hypothesis)'
       return `${iter} ${hyp} → ${outcome}`.trim()
     })
-    lines.push(`Journal: ${parts.join('; ')}.  Full history: \`logs/diagnosis-journal.md\`.`)
+    lines.push(`Journal: ${parts.join('; ')}.  Full history: \`${path.relative(ROOT, journalPath) || journalPath}\`.`)
     lines.push('')
   }
 

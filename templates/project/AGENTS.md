@@ -15,7 +15,7 @@ Useful only when needed:
 - `logs/current/failed/<slug>/<svc>.log` — pre-sliced service logs referenced by `heal-index.md`.
 - `logs/current/failed/<slug>/playwright-mcp/` — when present, console logs / DOM snapshots / network captures the Playwright MCP server recorded for this failure. Inspect when the service log alone doesn't explain the bug.
 - `logs/current/svc-<safeName>.log` — full service log. Use only if a slice is missing or too short.
-- `logs/diagnosis-journal.md` — prior heal attempts. Use only when the current prompt or index says prior iterations exist.
+- `logs/current/diagnosis-journal.md` — prior heal attempts for the active run. Use only when the current prompt or index says prior iterations exist.
 
 Rules:
 - Do not read the test spec unless the failure cannot be understood from the index and logs.

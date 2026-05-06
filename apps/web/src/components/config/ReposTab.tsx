@@ -18,6 +18,7 @@ import { FolderPicker, FolderPickerModal } from './FolderPicker'
 import { SaveBar } from './SaveBar'
 import { TemplatedInput } from './TemplatedInput'
 import { useEditableSlice } from './useEditableSlice'
+import { useRuns } from '../../state/RunsContext'
 
 /** Derive a repo's display name from its localPath basename, falling back
  *  to the cloneUrl basename (strip `.git`). Returns '' if neither yields one. */
@@ -59,6 +60,7 @@ interface RepoSlice {
   name: string
   localPath: ProbePath
   cloneUrl?: string
+  branch?: string
   envs?: string[]
   startCommands: CommandSlice[]
 }
@@ -140,6 +142,7 @@ function parseRepo(v: ConfigValue): RepoSlice | null {
     name: typeof obj.name === 'string' ? obj.name : '',
     localPath,
     cloneUrl: typeof obj.cloneUrl === 'string' ? obj.cloneUrl : undefined,
+    branch: typeof obj.branch === 'string' ? obj.branch : undefined,
     envs: Array.isArray(obj.envs)
       ? obj.envs.filter((x): x is string => typeof x === 'string')
       : undefined,
@@ -188,6 +191,7 @@ function serializeRepo(r: RepoSlice): ConfigValue {
     localPath: r.localPath as ConfigValue,
   }
   if (r.cloneUrl) out.cloneUrl = r.cloneUrl
+  if (r.branch) out.branch = r.branch
   if (r.envs && r.envs.length > 0) out.envs = r.envs
   if (r.startCommands.length > 0) out.startCommands = r.startCommands.map(serializeCommand)
   return out
@@ -201,6 +205,9 @@ interface Slice {
 }
 
 export function ReposTab({ feature }: { feature: string }) {
+  const { runs } = useRuns()
+  const activeRun = runs.some((run) =>
+    run.feature === feature && (run.status === 'running' || run.status === 'healing'))
   const ed = useEditableSlice<ParsedConfigDoc, Slice>({
     load: () => api.getFeatureConfigDoc(feature),
     extract: (doc) => {
@@ -259,6 +266,7 @@ export function ReposTab({ feature }: { feature: string }) {
               feature={feature}
               repo={repo}
               rootEnvs={rootEnvs}
+              activeRun={activeRun}
               onChange={(next) => ed.setDraft((d) => ({
                 ...d,
                 repos: d.repos.map((r, j) => j === i ? next : r),
@@ -301,12 +309,14 @@ function RepoCard({
   feature,
   repo,
   rootEnvs,
+  activeRun,
   onChange,
   onRemove,
 }: {
   feature: string
   repo: RepoSlice
   rootEnvs: string[]
+  activeRun: boolean
   onChange: (next: RepoSlice) => void
   onRemove: () => void
 }) {
@@ -409,6 +419,15 @@ function RepoCard({
             )}
           </FieldRow>
 
+          <BranchControl
+            feature={feature}
+            repo={repo}
+            localPathStr={localPathStr}
+            isExpr={isExpr}
+            activeRun={activeRun}
+            onChange={onChange}
+          />
+
           {pathExists === false && repo.cloneUrl && !isExpr && (
             <div
               className="mt-1 mb-2 flex items-center gap-2 rounded-md px-2.5 py-2 text-[11px]"
@@ -475,6 +494,211 @@ function RepoCard({
         </div>
       )}
     </div>
+  )
+}
+
+function BranchControl({
+  feature,
+  repo,
+  localPathStr,
+  isExpr,
+  activeRun,
+  onChange,
+}: {
+  feature: string
+  repo: RepoSlice
+  localPathStr: string
+  isExpr: boolean
+  activeRun: boolean
+  onChange: (next: RepoSlice) => void
+}) {
+  const [status, setStatus] = useState<api.GitRepoStatus | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [switching, setSwitching] = useState(false)
+  const [suggestionsOpen, setSuggestionsOpen] = useState(false)
+  const repoName = repo.name || deriveRepoName(repo.localPath, repo.cloneUrl)
+  const target = repo.branch ?? ''
+
+  const loadStatus = (): void => {
+    if (!repoName || isExpr || !localPathStr) {
+      setStatus(null)
+      setError(null)
+      return
+    }
+    api.getRepoGitStatus(feature, repoName)
+      .then((next) => {
+        setStatus(next)
+        setError(null)
+      })
+      .catch((e: unknown) => {
+        setStatus(null)
+        setError(e instanceof Error ? e.message : 'Failed to load git status')
+      })
+  }
+
+  useEffect(() => {
+    let cancelled = false
+    if (!repoName || isExpr || !localPathStr) {
+      setStatus(null)
+      setError(null)
+      return
+    }
+    api.getRepoGitStatus(feature, repoName)
+      .then((next) => {
+        if (cancelled) return
+        setStatus(next)
+        setError(null)
+      })
+      .catch((e: unknown) => {
+        if (cancelled) return
+        setStatus(null)
+        setError(e instanceof Error ? e.message : 'Failed to load git status')
+      })
+    return () => { cancelled = true }
+  }, [feature, repoName, isExpr, localPathStr])
+
+  const doCheckout = async (): Promise<void> => {
+    const branch = target.trim()
+    if (!repoName || !branch) return
+    setSwitching(true)
+    setError(null)
+    try {
+      const next = await api.checkoutRepoBranch(feature, repoName, branch)
+      setStatus(next)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Checkout failed')
+    } finally {
+      setSwitching(false)
+    }
+  }
+
+  const branches = [
+    ...(status?.localBranches ?? []),
+    ...(status?.remoteBranches ?? []),
+  ].filter((branch, index, arr) => arr.indexOf(branch) === index)
+  const normalizedTarget = target.trim().toLowerCase()
+  const visibleBranches = branches
+    .filter((branch) => !normalizedTarget || branch.toLowerCase().includes(normalizedTarget))
+    .slice(0, 80)
+
+  const canSwitch = Boolean(repoName && target.trim())
+    && status?.isGitRepo === true
+    && !status.dirty
+    && !activeRun
+    && !switching
+    && status.currentBranch !== target.trim()
+
+  return (
+    <FieldRow label="Branch" hint="Optional branch Canary Lab expects before starting this repo's services.">
+      <div className="flex flex-col gap-1.5">
+        <div className="flex flex-wrap items-center gap-2">
+          <span
+            className="inline-flex max-w-[220px] items-center rounded-md px-2 py-1 text-[10px]"
+            style={{
+              background: 'var(--bg-surface)',
+              border: '1px solid var(--border-default)',
+              color: status?.isGitRepo ? 'var(--text-secondary)' : 'var(--text-muted)',
+              fontFamily: 'var(--font-mono)',
+            }}
+            title={status?.isGitRepo ? status.currentBranch ?? 'detached HEAD' : 'Not a git repository'}
+          >
+            <span className="truncate">
+              {status?.isGitRepo ? status.currentBranch ?? 'detached HEAD' : 'No git status'}
+            </span>
+          </span>
+          {status?.dirty && (
+            <span className="text-[10px]" style={{ color: '#f59e0b' }}>
+              Dirty worktree
+            </span>
+          )}
+          {activeRun && (
+            <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
+              Switch disabled while this feature is running
+            </span>
+          )}
+        </div>
+        <div className="flex items-start gap-2">
+          <div className="relative min-w-0 flex-1">
+            <input
+              type="text"
+              value={target}
+              placeholder={status?.currentBranch ?? 'feature/my-branch'}
+              onFocus={() => setSuggestionsOpen(true)}
+              onClick={() => setSuggestionsOpen(true)}
+              onBlur={() => window.setTimeout(() => setSuggestionsOpen(false), 120)}
+              onChange={(e) => {
+                setSuggestionsOpen(true)
+                onChange({ ...repo, branch: e.target.value || undefined })
+              }}
+              className="w-full rounded-md px-2.5 py-1.5 text-xs outline-none"
+              style={{
+                backgroundColor: 'var(--bg-elevated)',
+                border: '1px solid var(--border-default)',
+                color: 'var(--text-primary)',
+                fontFamily: 'var(--font-mono)',
+              }}
+            />
+            {suggestionsOpen && visibleBranches.length > 0 && (
+              <div
+                className="absolute left-0 right-0 top-[calc(100%+4px)] z-50 max-h-44 overflow-y-auto rounded-md py-1 text-xs shadow-lg scrollbar-thin"
+                style={{
+                  background: 'var(--bg-elevated)',
+                  border: '1px solid var(--border-default)',
+                  color: 'var(--text-secondary)',
+                  fontFamily: 'var(--font-mono)',
+                }}
+              >
+                {visibleBranches.map((branch) => (
+                  <button
+                    key={branch}
+                    type="button"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => {
+                      onChange({ ...repo, branch })
+                      setSuggestionsOpen(false)
+                    }}
+                    className="block w-full truncate px-2.5 py-1.5 text-left"
+                    style={{
+                      color: branch === target ? 'var(--text-primary)' : 'var(--text-secondary)',
+                      background: branch === target ? 'var(--bg-selected)' : 'transparent',
+                    }}
+                  >
+                    {branch}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          <button
+            type="button"
+            disabled={!canSwitch}
+            onClick={doCheckout}
+            className="shrink-0 rounded-md px-2.5 py-1.5 text-[10px] uppercase tracking-wider"
+            style={{
+              color: canSwitch ? 'var(--text-primary)' : 'var(--text-muted)',
+              border: '1px solid var(--border-default)',
+              opacity: canSwitch ? 1 : 0.55,
+            }}
+          >
+            {switching ? 'Switching…' : 'Switch'}
+          </button>
+          <button
+            type="button"
+            onClick={loadStatus}
+            className="shrink-0 rounded-md px-2.5 py-1.5 text-[10px] uppercase tracking-wider"
+            style={{ color: 'var(--text-muted)', border: '1px solid var(--border-default)' }}
+          >
+            Refresh
+          </button>
+        </div>
+        {status?.dirty && status.dirtyFiles.length > 0 && (
+          <div className="text-[10px]" style={{ color: '#f59e0b', fontFamily: 'var(--font-mono)' }}>
+            {status.dirtyFiles.length} uncommitted {status.dirtyFiles.length === 1 ? 'file' : 'files'}
+          </div>
+        )}
+        {error && <div className="text-[10px]" style={{ color: '#ef4444' }}>{error}</div>}
+      </div>
+    </FieldRow>
   )
 }
 

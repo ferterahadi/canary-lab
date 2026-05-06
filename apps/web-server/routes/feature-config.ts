@@ -14,9 +14,11 @@ import { parseDotenv, writeDotenv, type KvEntry } from '../lib/dotenv-edit'
 import { loadFeatures } from '../lib/feature-loader'
 import { resolveVars } from '../lib/runtime/env-switcher/switch'
 import { getProjectRoot } from '../../../shared/runtime/project-root'
+import { checkoutBranch, findRepo, getGitStatus, resolveRepoPath } from '../lib/git-repo'
 
 export interface FeatureConfigRouteDeps {
   featuresDir: string
+  isRepoActive?: (feature: string, repo: string) => boolean
 }
 
 const FEATURE_CONFIG_NAMES = ['feature.config.cjs', 'feature.config.js', 'feature.config.ts']
@@ -166,6 +168,69 @@ export async function featureConfigRoutes(
       fs.writeFileSync(cfg.path, next)
       const parsed = readFeatureConfig(next)
       return { path: cfg.path, format: cfg.format, content: next, parsed }
+    },
+  )
+
+  app.get<{ Params: { name: string; repo: string } }>(
+    '/api/features/:name/repos/:repo/git',
+    async (req, reply) => {
+      const features = loadFeatures(deps.featuresDir)
+      const feature = features.find((f) => f.name === req.params.name)
+      if (!feature) {
+        reply.code(404)
+        return { error: 'feature not found' }
+      }
+      const repo = findRepo(feature, req.params.repo)
+      if (!repo) {
+        reply.code(404)
+        return { error: 'repo not found' }
+      }
+      const status = await getGitStatus(repo.localPath)
+      return {
+        ...status,
+        path: resolveRepoPath(repo.localPath),
+        expectedBranch: repo.branch ?? null,
+      }
+    },
+  )
+
+  app.post<{ Params: { name: string; repo: string }; Body: { branch?: string } }>(
+    '/api/features/:name/repos/:repo/checkout',
+    async (req, reply) => {
+      const features = loadFeatures(deps.featuresDir)
+      const feature = features.find((f) => f.name === req.params.name)
+      if (!feature) {
+        reply.code(404)
+        return { error: 'feature not found' }
+      }
+      const repo = findRepo(feature, req.params.repo)
+      if (!repo) {
+        reply.code(404)
+        return { error: 'repo not found' }
+      }
+      if (deps.isRepoActive?.(feature.name, repo.name)) {
+        reply.code(409)
+        return { error: 'repo has an active service run' }
+      }
+      const branch = req.body?.branch
+      if (typeof branch !== 'string' || branch.trim().length === 0) {
+        reply.code(400)
+        return { error: 'branch required' }
+      }
+      try {
+        const status = await checkoutBranch(repo.localPath, branch.trim())
+        return {
+          ...status,
+          path: resolveRepoPath(repo.localPath),
+          expectedBranch: repo.branch ?? null,
+        }
+      } catch (err) {
+        const code = typeof (err as { statusCode?: unknown }).statusCode === 'number'
+          ? (err as { statusCode: number }).statusCode
+          : 500
+        reply.code(code)
+        return { error: err instanceof Error ? err.message : String(err) }
+      }
     },
   )
 

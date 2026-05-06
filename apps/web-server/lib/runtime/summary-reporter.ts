@@ -37,6 +37,30 @@ interface RunningStep {
   locations?: string[]
 }
 
+type PlaybackEvent =
+  | {
+      type: 'test-begin'
+      time: string
+      test: { name: string; title: string; location: string }
+    }
+  | {
+      type: 'step-begin' | 'step-end'
+      time: string
+      test: { name: string; title: string }
+      step: RunningStep
+    }
+  | {
+      type: 'test-end'
+      time: string
+      test: { name: string; title: string; location: string }
+      status: string
+      passed: boolean
+      durationMs: number
+      retry: number
+      error?: { message: string; snippet?: string }
+      attachments?: Array<{ name: string; contentType?: string; path?: string }>
+    }
+
 class SummaryReporter implements Reporter {
   private results: TestEntry[] = []
   private running: { name: string; location: string; step?: RunningStep } | null = null
@@ -50,6 +74,15 @@ class SummaryReporter implements Reporter {
       name: `test-case-${slugify(test.title)}`,
       location: `${test.location.file}:${test.location.line}`,
     }
+    this.writePlaybackEvent({
+      type: 'test-begin',
+      time: new Date().toISOString(),
+      test: {
+        name: this.running.name,
+        title: test.title,
+        location: this.running.location,
+      },
+    })
     this.writeSummary(false)
   }
 
@@ -64,6 +97,12 @@ class SummaryReporter implements Reporter {
     const runningStep = stepToRunningStep(step)
     this.stepStack.push(runningStep)
     this.running = { ...this.running, step: runningStep }
+    this.writePlaybackEvent({
+      type: 'step-begin',
+      time: new Date().toISOString(),
+      test: { name, title: test.title },
+      step: runningStep,
+    })
     this.writeSummary(false)
   }
 
@@ -77,6 +116,12 @@ class SummaryReporter implements Reporter {
     this.running = current
       ? { ...this.running, step: current }
       : { name: this.running.name, location: this.running.location }
+    this.writePlaybackEvent({
+      type: 'step-end',
+      time: new Date().toISOString(),
+      test: { name, title: test.title },
+      step: ended,
+    })
     this.writeSummary(false)
   }
 
@@ -88,22 +133,44 @@ class SummaryReporter implements Reporter {
       this.stepStack = []
     }
     if (!passed) this.failureCount++
+    const error = !passed && result.error
+      ? {
+          message: stripAnsi(result.error.message ?? '').slice(0, 1000),
+          ...(result.error.snippet
+            ? { snippet: stripAnsi(result.error.snippet).slice(0, 500) }
+            : {}),
+        }
+      : undefined
     this.results.push({
       name,
       passed,
-      ...(!passed && result.error
-        ? {
-            error: {
-              message: stripAnsi(result.error.message ?? '').slice(0, 1000),
-              ...(result.error.snippet
-                ? { snippet: stripAnsi(result.error.snippet).slice(0, 500) }
-                : {}),
-            },
-          }
-        : {}),
+      ...(error ? { error } : {}),
       durationMs: result.duration,
       location: `${test.location.file}:${test.location.line}`,
       retry: result.retry,
+    })
+    this.writePlaybackEvent({
+      type: 'test-end',
+      time: new Date().toISOString(),
+      test: {
+        name,
+        title: test.title,
+        location: `${test.location.file}:${test.location.line}`,
+      },
+      status: result.status,
+      passed,
+      durationMs: result.duration,
+      retry: result.retry,
+      ...(error ? { error } : {}),
+      ...(result.attachments?.length
+        ? {
+            attachments: result.attachments.map((a) => ({
+              name: a.name,
+              ...(a.contentType ? { contentType: a.contentType } : {}),
+              ...(a.path ? { path: a.path } : {}),
+            })),
+          }
+        : {}),
     })
     this.writeSummary(false)
 
@@ -165,6 +232,13 @@ class SummaryReporter implements Reporter {
     const tmpPath = `${finalPath}.tmp`
     fs.writeFileSync(tmpPath, JSON.stringify(summary, null, 2) + '\n')
     fs.renameSync(tmpPath, finalPath)
+  }
+
+  private writePlaybackEvent(event: PlaybackEvent): void {
+    const summaryPath = getSummaryPath()
+    const eventPath = path.join(path.dirname(summaryPath), 'playwright-events.jsonl')
+    fs.mkdirSync(path.dirname(eventPath), { recursive: true })
+    fs.appendFileSync(eventPath, JSON.stringify(event) + '\n')
   }
 }
 

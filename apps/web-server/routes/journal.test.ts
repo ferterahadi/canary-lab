@@ -4,9 +4,12 @@ import os from 'os'
 import path from 'path'
 import Fastify from 'fastify'
 import { journalRoutes } from './journal'
+import { buildRunPaths, runDirFor } from '../lib/runtime/run-paths'
 
 let tmpDir: string
+let logsDir: string
 let journalPath: string
+let runJournalPath: string
 
 const SAMPLE = `# Diagnosis Journal
 
@@ -29,13 +32,17 @@ const SAMPLE = `# Diagnosis Journal
 
 beforeEach(() => {
   tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-jroutes-')))
+  logsDir = path.join(tmpDir, 'logs')
   journalPath = path.join(tmpDir, 'diagnosis-journal.md')
   fs.writeFileSync(journalPath, SAMPLE)
+  runJournalPath = buildRunPaths(runDirFor(logsDir, 'r-bbbb')).diagnosisJournalPath
+  fs.mkdirSync(path.dirname(runJournalPath), { recursive: true })
+  fs.writeFileSync(runJournalPath, SAMPLE)
 })
 
 async function build() {
   const app = Fastify()
-  await app.register(journalRoutes, { journalPath })
+  await app.register(journalRoutes, { logsDir, journalPath })
   return app
 }
 
@@ -60,14 +67,30 @@ describe('GET /api/journal', () => {
     const res = await app.inject({ method: 'GET', url: '/api/journal?run=r-bbbb' })
     expect((res.json() as Array<{ iteration: number }>).map((b) => b.iteration)).toEqual([2])
   })
+
+  it('reads the selected run journal without falling back to the root journal', async () => {
+    const app = await build()
+    fs.rmSync(runJournalPath, { force: true })
+    const res = await app.inject({ method: 'GET', url: '/api/journal?run=r-bbbb' })
+    expect(res.statusCode).toBe(200)
+    expect(res.json()).toEqual([])
+  })
+
+  it('rejects path-like run ids without reading the root journal', async () => {
+    const app = await build()
+    const res = await app.inject({ method: 'GET', url: '/api/journal?run=..%2Fsecret' })
+    expect(res.statusCode).toBe(200)
+    expect(res.json()).toEqual([])
+  })
 })
 
 describe('DELETE /api/journal/:iteration', () => {
   it('removes the section atomically and 204s', async () => {
     const app = await build()
-    const res = await app.inject({ method: 'DELETE', url: '/api/journal/1' })
+    const res = await app.inject({ method: 'DELETE', url: '/api/journal/1?run=r-bbbb' })
     expect(res.statusCode).toBe(204)
-    expect(fs.readFileSync(journalPath, 'utf-8')).not.toContain('## Iteration 1')
+    expect(fs.readFileSync(runJournalPath, 'utf-8')).not.toContain('## Iteration 1')
+    expect(fs.readFileSync(journalPath, 'utf-8')).toContain('## Iteration 1')
   })
 
   it('400s on non-numeric iteration', async () => {

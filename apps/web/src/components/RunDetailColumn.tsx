@@ -1,6 +1,22 @@
 import { useState } from 'react'
-import type { ServiceStatus } from '../api/types'
+import type {
+  PlaywrightArtifact,
+  PlaywrightArtifactGroup,
+  PlaywrightArtifactPolicy,
+  PlaywrightPlaybackEvent,
+  RepoBranchSnapshot,
+  ServiceManifestEntry,
+  ServiceStatus,
+} from '../api/types'
 import { formatDuration, durationBetween } from '../lib/format'
+import {
+  artifactsForPlayback,
+  branchForService,
+  branchLabel,
+  branchTooltip,
+  playbackTests,
+  type PlaybackTest,
+} from '../lib/run-detail-playback'
 import { useRun } from '../state/RunsContext'
 import { RunStatusIndicator } from './RunStatusIndicator'
 import { PaneTerminal } from './PaneTerminal'
@@ -9,10 +25,12 @@ import { ManualHealBanner } from './ManualHealBanner'
 import { AgentInputBar } from './AgentInputBar'
 
 type Tab = 'overview' | 'services' | 'playwright' | 'agent' | 'journal'
+type PlaywrightView = 'terminal' | 'playback'
 
 export function RunDetailColumn({ runId }: { runId: string | null }) {
   const [tab, setTab] = useState<Tab>('overview')
   const [serviceIdx, setServiceIdx] = useState(0)
+  const [playwrightView, setPlaywrightView] = useState<PlaywrightView>('playback')
 
   // Detail comes from the WebSocket-backed RunsContext. No polling here —
   // the same `state.details[runId]` populated for the runs list is reused,
@@ -39,6 +57,7 @@ export function RunDetailColumn({ runId }: { runId: string | null }) {
 
   const m = detail.manifest
   const services = m.services
+  const repoBranches = m.repoBranches ?? []
   const activeService = services[serviceIdx]
 
   return (
@@ -86,6 +105,16 @@ export function RunDetailColumn({ runId }: { runId: string | null }) {
                   </>
                 )}
             </dl>
+            {repoBranches.length > 0 && (
+              <div className="mt-4">
+                <SectionHeader>Branches</SectionHeader>
+                <ul className="space-y-2">
+                  {repoBranches.map((repo) => (
+                    <BranchCard key={`${repo.name}:${repo.path}`} repo={repo} />
+                  ))}
+                </ul>
+              </div>
+            )}
             <div className="mt-4">
               <SectionHeader>Services</SectionHeader>
               {services.length === 0 ? (
@@ -104,18 +133,13 @@ export function RunDetailColumn({ runId }: { runId: string | null }) {
           <div className="flex h-full flex-col">
             <div className="cl-panel-header flex gap-1 overflow-x-auto px-3 py-1.5 text-xs scrollbar-thin">
               {services.map((s, i) => (
-                <button
+                <ServiceTabButton
                   key={s.safeName}
-                  type="button"
+                  service={s}
+                  branch={branchForService(s, repoBranches)}
+                  active={i === serviceIdx}
                   onClick={() => setServiceIdx(i)}
-                  className={`cl-tab flex items-center gap-1.5 px-2 py-1 ${i === serviceIdx ? 'cl-tab-active' : ''}`}
-                  style={{
-                    color: i === serviceIdx ? 'var(--text-primary)' : 'var(--text-secondary)',
-                  }}
-                >
-                  <ServiceStatusDot status={s.status} />
-                  {s.name}
-                </button>
+                />
               ))}
             </div>
             <div className="flex-1 min-h-0">
@@ -126,7 +150,14 @@ export function RunDetailColumn({ runId }: { runId: string | null }) {
           </div>
         )}
         {tab === 'playwright' && (
-          <PaneTerminal runId={m.runId} paneId="playwright" />
+          <PlaywrightPanel
+            runId={m.runId}
+            view={playwrightView}
+            onViewChange={setPlaywrightView}
+            events={detail.playbackEvents}
+            artifactGroups={detail.playwrightArtifacts}
+            artifactPolicy={m.playwrightArtifacts}
+          />
         )}
         {tab === 'agent' && (
           <div className="flex h-full flex-col">
@@ -136,7 +167,7 @@ export function RunDetailColumn({ runId }: { runId: string | null }) {
             <div className="flex-1 min-h-0">
               <PaneTerminal runId={m.runId} paneId="agent" />
             </div>
-            {m.status === 'healing' && m.healMode !== 'manual' && (
+            {shouldShowAgentInputBar(m.status, m.healMode) && (
               <AgentInputBar runId={m.runId} />
             )}
           </div>
@@ -146,6 +177,227 @@ export function RunDetailColumn({ runId }: { runId: string | null }) {
         )}
       </div>
     </div>
+  )
+}
+
+export function shouldShowAgentInputBar(
+  status: string,
+  healMode?: 'auto' | 'manual',
+): boolean {
+  return status === 'healing' && healMode !== 'manual'
+}
+
+function PlaywrightPanel({
+  runId,
+  view,
+  onViewChange,
+  events,
+  artifactGroups,
+  artifactPolicy,
+}: {
+  runId: string
+  view: PlaywrightView
+  onViewChange: (view: PlaywrightView) => void
+  events?: PlaywrightPlaybackEvent[]
+  artifactGroups?: PlaywrightArtifactGroup[]
+  artifactPolicy?: PlaywrightArtifactPolicy
+}) {
+  return (
+    <div className="flex h-full flex-col">
+      <div className="cl-panel-header flex gap-1 px-3 py-1.5 text-xs">
+        <SegmentButton active={view === 'terminal'} onClick={() => onViewChange('terminal')}>Terminal</SegmentButton>
+        <SegmentButton active={view === 'playback'} onClick={() => onViewChange('playback')}>Playback</SegmentButton>
+      </div>
+      <div className="flex-1 min-h-0">
+        {view === 'terminal' && <PaneTerminal runId={runId} paneId="playwright" />}
+        {view === 'playback' && <PlaywrightPlayback events={events} artifactGroups={artifactGroups} artifactPolicy={artifactPolicy} />}
+      </div>
+    </div>
+  )
+}
+
+function SegmentButton(props: { active: boolean; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      type="button"
+      onClick={props.onClick}
+      className={`cl-tab shrink-0 whitespace-nowrap px-2.5 py-1 ${props.active ? 'cl-tab-active' : ''}`}
+      style={{ color: props.active ? 'var(--text-primary)' : 'var(--text-secondary)' }}
+    >
+      {props.children}
+    </button>
+  )
+}
+
+function PlaywrightPlayback({
+  events,
+  artifactGroups,
+  artifactPolicy,
+}: {
+  events?: PlaywrightPlaybackEvent[]
+  artifactGroups?: PlaywrightArtifactGroup[]
+  artifactPolicy?: PlaywrightArtifactPolicy
+}) {
+  const tests = playbackTests(events)
+  if (tests.length === 0) {
+    return <EmptyPane title="No playback events captured yet." body="Use Terminal for older runs or runs that ended before structured Playwright events were written." />
+  }
+  return (
+    <div className="h-full overflow-y-auto p-3 text-xs scrollbar-thin" style={{ background: 'var(--bg-base)' }}>
+      <div className="space-y-2">
+        {tests.map((test) => {
+          const playbackArtifacts = artifactsForPlayback(test.name, artifactGroups, artifactPolicy)
+          return (
+            <div key={`${test.name}:${test.retry ?? 0}:${test.startedAt ?? ''}`} className="cl-card p-3">
+              <div className="flex min-w-0 items-center gap-2">
+                <StatusPill passed={test.passed} status={test.status} />
+                <div className="min-w-0 flex-1 truncate font-medium" style={{ color: 'var(--text-primary)' }} title={test.title}>
+                  {test.title}
+                </div>
+                {typeof test.retry === 'number' && test.retry > 0 && (
+                  <span className="shrink-0" style={{ color: 'var(--text-muted)' }}>retry {test.retry}</span>
+                )}
+                {typeof test.durationMs === 'number' && (
+                  <span className="shrink-0" style={{ color: 'var(--text-muted)' }}>{formatDuration(test.durationMs)}</span>
+                )}
+              </div>
+              {test.error?.message && (
+                <pre className="mt-2 max-h-28 overflow-auto whitespace-pre-wrap rounded-md p-2 scrollbar-thin" style={{ background: 'var(--bg-selected)', color: '#ef4444', fontFamily: 'var(--font-mono)' }}>
+                  {test.error.message}
+                </pre>
+              )}
+              <ScreenshotPanel artifacts={playbackArtifacts.screenshots} mode={playbackArtifacts.screenshotMode} />
+              {test.steps.length > 0 && (
+                <ol className="mt-3 flex flex-wrap gap-1.5">
+                  {test.steps.map((step, idx) => (
+                    <li key={`${step.title}:${idx}`} className="inline-flex max-w-full items-center gap-1 rounded px-1.5 py-0.5" style={{ background: 'var(--bg-selected)', color: 'var(--text-secondary)' }}>
+                      <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: step.ended ? '#22c55e' : '#eab308' }} />
+                      <span className="truncate" title={step.title}>{step.title}</span>
+                    </li>
+                  ))}
+                </ol>
+              )}
+              {playbackArtifacts.links.length > 0 && (
+                <ArtifactLinks artifacts={playbackArtifacts.links} />
+              )}
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+function ScreenshotPanel({ artifacts, mode }: { artifacts: PlaywrightArtifact[]; mode: string }) {
+  if (mode === 'off') {
+    return (
+      <div className="mt-3 rounded-md px-2 py-1.5 text-[11px]" style={{ background: 'var(--bg-selected)', color: 'var(--text-muted)' }}>
+        Screenshots disabled by Playwright config.
+      </div>
+    )
+  }
+  if (artifacts.length === 0) {
+    return (
+      <div className="mt-3 rounded-md px-2 py-1.5 text-[11px]" style={{ background: 'var(--bg-selected)', color: 'var(--text-muted)' }}>
+        No screenshots retained for this test ({mode}).
+      </div>
+    )
+  }
+  return (
+    <div className="mt-3 grid grid-cols-1 gap-2">
+      {artifacts.map((artifact) => (
+        <a key={artifact.path} href={artifact.url} target="_blank" rel="noreferrer" className="block overflow-hidden rounded-md" style={{ border: '1px solid var(--border-default)', background: 'var(--bg-surface)' }}>
+          <img src={artifact.url} alt={artifact.name} className="max-h-[360px] w-full object-contain" />
+          <div className="truncate border-t px-2 py-1 text-[10px]" style={{ borderColor: 'var(--border-default)', color: 'var(--text-muted)' }} title={artifact.path}>
+            {artifact.name}
+          </div>
+        </a>
+      ))}
+    </div>
+  )
+}
+
+function EmptyPane({ title, body }: { title: string; body: string }) {
+  return (
+    <div className="flex h-full items-center justify-center p-6 text-center text-xs" style={{ background: 'var(--bg-base)', color: 'var(--text-muted)' }}>
+      <div>
+        <div className="font-medium" style={{ color: 'var(--text-secondary)' }}>{title}</div>
+        <div className="mt-1 max-w-[360px]">{body}</div>
+      </div>
+    </div>
+  )
+}
+
+function ArtifactLinks({ artifacts }: { artifacts: PlaywrightArtifact[] }) {
+  return (
+    <div className="mt-2 flex flex-wrap gap-1">
+      {artifacts.map((artifact) => (
+        <a
+          key={artifact.path}
+          href={artifact.url}
+          target="_blank"
+          rel="noreferrer"
+          className="rounded px-1.5 py-0.5"
+          style={{ background: 'var(--bg-selected)', color: 'var(--accent)' }}
+        >
+          {artifact.kind}
+        </a>
+      ))}
+    </div>
+  )
+}
+
+function StatusPill({ passed, status }: { passed?: boolean; status?: string }) {
+  const label = status ?? (passed ? 'passed' : 'running')
+  const color = passed === true ? '#22c55e' : passed === false ? '#ef4444' : '#eab308'
+  return (
+    <span className="shrink-0 rounded px-1.5 py-0.5 text-[10px] uppercase" style={{ color, background: 'var(--bg-selected)' }}>
+      {label}
+    </span>
+  )
+}
+
+function BranchCard({ repo }: { repo: RepoBranchSnapshot }) {
+  const branch = repo.detached ? 'detached HEAD' : repo.branch ?? 'unknown'
+  const mismatch = repo.expectedBranch && repo.branch !== repo.expectedBranch
+  return (
+    <li className="cl-card p-3">
+      <div className="flex items-center gap-2">
+        <div className="min-w-0 flex-1 truncate text-xs font-medium" style={{ color: 'var(--text-primary)' }}>
+          {repo.name}
+        </div>
+        {repo.dirty && (
+          <span className="shrink-0 rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wider" style={{ background: 'var(--bg-selected)', color: '#f59e0b' }}>
+            dirty
+          </span>
+        )}
+        {mismatch && (
+          <span className="shrink-0 rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wider" style={{ background: 'var(--bg-selected)', color: '#f59e0b' }}>
+            mismatch
+          </span>
+        )}
+      </div>
+      <div className="mt-2 grid grid-cols-[58px_minmax(0,1fr)] gap-x-2 gap-y-1">
+        <BranchField label="branch" value={branch} />
+        {repo.expectedBranch && <BranchField label="expected" value={repo.expectedBranch} />}
+        <BranchField label="path" value={repo.path} />
+      </div>
+    </li>
+  )
+}
+
+function BranchField({ label, value }: { label: string; value: string }) {
+  return (
+    <>
+      <span className="text-[10px] uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>{label}</span>
+      <span
+        className="min-w-0 truncate text-[11px]"
+        style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }}
+        title={value}
+      >
+        {value}
+      </span>
+    </>
   )
 }
 
@@ -162,6 +414,39 @@ const STATUS_COLOR: Record<ServiceStatus, string> = {
   starting: '#eab308',
   timeout: '#ef4444',
   stopped: 'var(--text-muted)',
+}
+
+function ServiceTabButton({
+  service,
+  branch,
+  active,
+  onClick,
+}: {
+  service: ServiceManifestEntry
+  branch: RepoBranchSnapshot | null
+  active: boolean
+  onClick: () => void
+}) {
+  const label = branch ? branchLabel(branch) : null
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={branch ? branchTooltip(service, branch) : service.name}
+      className={`cl-tab flex min-w-0 shrink-0 items-center gap-1.5 px-2 py-1 ${active ? 'cl-tab-active' : ''}`}
+      style={{
+        color: active ? 'var(--text-primary)' : 'var(--text-secondary)',
+      }}
+    >
+      <ServiceStatusDot status={service.status} />
+      <span className="max-w-[150px] truncate">{service.name}</span>
+      {label && (
+        <span className="max-w-[120px] truncate rounded px-1 py-0.5 text-[10px]" style={{ background: 'var(--bg-selected)', color: branch?.dirty ? '#f59e0b' : 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+          @ {label}
+        </span>
+      )}
+    </button>
+  )
 }
 
 function ServiceCard({ service }: { service: { name: string; command: string; cwd: string; logPath: string; healthUrl?: string; status?: ServiceStatus } }) {
