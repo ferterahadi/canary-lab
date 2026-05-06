@@ -531,10 +531,21 @@ describe('enrichSummaryWithLogs', () => {
       ])
       expect(fs.readFileSync(path.join(runDir, 'failed', 'a-test', 'svc-api.log'), 'utf-8')).toBe('BODY')
 
+      fs.writeFileSync(path.join(runDir, 'diagnosis-journal.md'), `# Diagnosis Journal
+
+## Iteration 1 — t1
+
+- hypothesis: run-local
+- signal: .restart
+- outcome: pending
+`)
       writeHealIndex(result ?? undefined)
-      expect(fs.readFileSync(path.join(runDir, 'heal-index.md'), 'utf-8')).toContain(
+      const healIndex = fs.readFileSync(path.join(runDir, 'heal-index.md'), 'utf-8')
+      expect(healIndex).toContain(
         path.join('logs', 'runs', runId, 'failed', 'a-test', 'svc-api.log'),
       )
+      expect(healIndex).toContain('run-local')
+      expect(healIndex).toContain(path.join('logs', 'runs', runId, 'diagnosis-journal.md'))
     } finally {
       if (prevEnv === undefined) delete process.env.CANARY_LAB_SUMMARY_PATH
       else process.env.CANARY_LAB_SUMMARY_PATH = prevEnv

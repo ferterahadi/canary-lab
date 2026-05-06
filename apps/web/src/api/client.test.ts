@@ -7,6 +7,7 @@ import {
   browseDir,
   cancelHealRun,
   checkPathExists,
+  checkoutRepoBranch,
   cloneRepository,
   createDraft,
   cancelDraftGeneration,
@@ -24,6 +25,7 @@ import {
   getFeatureConfigDoc,
   getFeatureTests,
   getGitRemote,
+  getRepoGitStatus,
   getPlaywrightConfig,
   getRunDetail,
   listFeatures,
@@ -198,13 +200,13 @@ describe('api client', () => {
 
   it('deleteJournalEntry DELETEs the iteration and resolves on 204', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(new Response(null, { status: 204 }))
-    await expect(deleteJournalEntry(7, { fetchImpl })).resolves.toBeUndefined()
-    expect(fetchImpl).toHaveBeenCalledWith('/api/journal/7', { method: 'DELETE' })
+    await expect(deleteJournalEntry(7, { run: 'r1' }, { fetchImpl })).resolves.toBeUndefined()
+    expect(fetchImpl).toHaveBeenCalledWith('/api/journal/7?run=r1', { method: 'DELETE' })
   })
 
   it('deleteJournalEntry throws ApiError on 404', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(fail(404, { error: 'iteration not found' }))
-    await expect(deleteJournalEntry(99, { fetchImpl })).rejects.toBeInstanceOf(ApiError)
+    await expect(deleteJournalEntry(99, { run: 'r1' }, { fetchImpl })).rejects.toBeInstanceOf(ApiError)
   })
 
   it('listSkills GETs /api/skills', async () => {
@@ -352,6 +354,30 @@ describe('api client', () => {
     const init = fetchImpl.mock.calls[1][1] as RequestInit
     expect(init.method).toBe('PUT')
     expect(JSON.parse(init.body as string)).toEqual({ value: { name: 'b' } })
+  })
+
+  it('getRepoGitStatus and checkoutRepoBranch use feature repo endpoints', async () => {
+    const status = {
+      path: '/repo',
+      expectedBranch: 'main',
+      isGitRepo: true,
+      currentBranch: 'main',
+      detached: false,
+      dirty: false,
+      dirtyFiles: [],
+      localBranches: ['main'],
+      remoteBranches: [],
+    }
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(ok(status))
+      .mockResolvedValueOnce(ok(status))
+    expect(await getRepoGitStatus('feat/a', 'repo/b', { fetchImpl })).toEqual(status)
+    await checkoutRepoBranch('feat/a', 'repo/b', 'main', { fetchImpl })
+    expect(fetchImpl.mock.calls[0][0]).toBe('/api/features/feat%2Fa/repos/repo%2Fb/git')
+    const [url, init] = fetchImpl.mock.calls[1]
+    expect(url).toBe('/api/features/feat%2Fa/repos/repo%2Fb/checkout')
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(init.body as string)).toEqual({ branch: 'main' })
   })
 
   it('deleteFeature DELETEs with the typed confirmation name', async () => {

@@ -1,7 +1,6 @@
 import fs from 'fs'
 import path from 'path'
 import { execFileSync } from 'child_process'
-import { DIAGNOSIS_JOURNAL_PATH } from './paths'
 import { buildHealAddendum } from './heal-prompt-builder'
 import { buildRunPaths } from './run-paths'
 
@@ -180,7 +179,7 @@ export function buildOrchestratorHealCommand(opts: OrchestratorAutoHealFactoryOp
     healIndexPath: paths.healIndexPath,
     summaryPath: paths.summaryPath,
     failedDir: paths.failedDir,
-    journalPath: DIAGNOSIS_JOURNAL_PATH,
+    journalPath: paths.diagnosisJournalPath,
     restartSignal: paths.restartSignal,
     rerunSignal: paths.rerunSignal,
   })
@@ -189,7 +188,7 @@ export function buildOrchestratorHealCommand(opts: OrchestratorAutoHealFactoryOp
     const stateAddendum = buildHealAddendum({
       cycle: cycle + 1,
       summaryPath: paths.summaryPath,
-      journalPath: DIAGNOSIS_JOURNAL_PATH,
+      journalPath: paths.diagnosisJournalPath,
     })
     const fullPrompt = [basePrompt, stateAddendum].filter(Boolean).join('\n\n')
     fs.mkdirSync(path.dirname(promptFile), { recursive: true })

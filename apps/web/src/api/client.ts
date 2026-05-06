@@ -452,6 +452,49 @@ export function cloneRepository(
   )
 }
 
+export interface GitRepoStatus {
+  path: string
+  expectedBranch: string | null
+  isGitRepo: boolean
+  currentBranch: string | null
+  detached: boolean
+  dirty: boolean
+  dirtyFiles: string[]
+  localBranches: string[]
+  remoteBranches: string[]
+}
+
+export function getRepoGitStatus(
+  feature: string,
+  repo: string,
+  opts?: ClientOptions,
+): Promise<GitRepoStatus> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<GitRepoStatus>(
+    `${baseUrl}/api/features/${encodeURIComponent(feature)}/repos/${encodeURIComponent(repo)}/git`,
+    { method: 'GET' },
+    fetchImpl,
+  )
+}
+
+export function checkoutRepoBranch(
+  feature: string,
+  repo: string,
+  branch: string,
+  opts?: ClientOptions,
+): Promise<GitRepoStatus> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<GitRepoStatus>(
+    `${baseUrl}/api/features/${encodeURIComponent(feature)}/repos/${encodeURIComponent(repo)}/checkout`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ branch }),
+    },
+    fetchImpl,
+  )
+}
+
 export function listRuns(
   query: { feature?: string } = {},
   opts?: ClientOptions,
@@ -560,11 +603,15 @@ export async function deleteRun(runId: string, opts?: ClientOptions): Promise<vo
 
 export async function deleteJournalEntry(
   iteration: number,
+  query: { run?: string } = {},
   opts?: ClientOptions,
 ): Promise<void> {
   const { baseUrl, fetchImpl } = defaultOpts(opts)
+  const params = new URLSearchParams()
+  if (query.run) params.set('run', query.run)
+  const qs = params.toString() ? `?${params.toString()}` : ''
   await request<unknown>(
-    `${baseUrl}/api/journal/${encodeURIComponent(String(iteration))}`,
+    `${baseUrl}/api/journal/${encodeURIComponent(String(iteration))}${qs}`,
     { method: 'DELETE' },
     fetchImpl,
   )

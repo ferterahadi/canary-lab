@@ -280,7 +280,7 @@ describe('handleLine', () => {
         type: 'item.completed',
         item: {
           type: 'command_execution',
-          command: `test -f logs/diagnosis-journal.md && sed -n '1,240p' logs/diagnosis-journal.md`,
+          command: `test -f logs/current/diagnosis-journal.md && sed -n '1,240p' logs/current/diagnosis-journal.md`,
           exit_code: 1,
           aggregated_output: '',
         },
@@ -288,7 +288,7 @@ describe('handleLine', () => {
     )
     const out = spy.mock.calls.map((c) => c[0] as string).join('')
     expect(out).toContain('Read')
-    expect(out).toContain('logs/diagnosis-journal.md')
+    expect(out).toContain('logs/current/diagnosis-journal.md')
     expect(out).toContain('not found')
     // Must not render a scary red "exit 1" for a missing-file guard.
     expect(out).not.toContain('exit 1')

@@ -227,6 +227,14 @@ describe('RunOrchestrator.start', () => {
       ptyFactory: factory,
       healthCheck: async () => true,
       delay: async () => undefined,
+      repoBranchSnapshots: [{
+        name: 'api',
+        path: tmpDir,
+        branch: 'main',
+        expectedBranch: 'main',
+        detached: false,
+        dirty: false,
+      }],
     })
 
     const started: ServiceSpec[] = []
@@ -241,6 +249,19 @@ describe('RunOrchestrator.start', () => {
     expect(manifest.feature).toBe('demo')
     expect(manifest.services[0].safeName).toBe('api')
     expect(manifest.services[0].logPath.endsWith('svc-api.log')).toBe(true)
+    expect(manifest.repoBranches).toEqual([{
+      name: 'api',
+      path: tmpDir,
+      branch: 'main',
+      expectedBranch: 'main',
+      detached: false,
+      dirty: false,
+    }])
+    expect(manifest.playwrightArtifacts).toEqual({
+      screenshot: 'only-on-failure',
+      video: 'off',
+      trace: 'retain-on-failure',
+    })
 
     const index = readRunsIndex(path.join(tmpDir, 'logs'))
     expect(index.find((e) => e.runId === RUN_ID)?.feature).toBe('demo')
@@ -857,7 +878,10 @@ describe('RunOrchestrator.runFullCycle', () => {
       healthPollIntervalMs: 5,
       healSignalPollMs: 1,
       healAgentTimeoutMs: 1000,
-      playwrightSpawner: () => ({ command: `pw-${pwIdx++}`, cwd: tmpDir }),
+      playwrightSpawner: ({ rerunTargets }) => ({
+        command: `pw-${pwIdx++}${rerunTargets?.length ? ` ${rerunTargets.join(' ')}` : ''}`,
+        cwd: tmpDir,
+      }),
       autoHeal: opts.autoHeal
         ? {
             agent: 'claude',
@@ -1016,7 +1040,9 @@ describe('RunOrchestrator.runFullCycle', () => {
       manualHeal: true,
     })
     fs.mkdirSync(runDir, { recursive: true })
-    fs.writeFileSync(orch.paths.summaryPath, JSON.stringify({ failed: [{ name: 't' }] }))
+    fs.writeFileSync(orch.paths.summaryPath, JSON.stringify({ failed: [{ name: 't', location: 'tests/demo.spec.ts:41' }] }))
+    const statuses: string[] = []
+    orch.on('run-status', (e) => statuses.push(e.status))
 
     const promise = orch.runFullCycle()
     const waitFor = async (n: number) => {
@@ -1036,6 +1062,10 @@ describe('RunOrchestrator.runFullCycle', () => {
 
     // Services re-spawn (svc at idx 2), then second playwright at idx 3.
     await waitFor(4)
+    expect(readManifest(orch.paths.manifestPath)?.status).toBe('running')
+    expect(statuses).toContain('healing')
+    expect(statuses.at(-1)).toBe('running')
+    expect(f.spawned[3].options.command).toContain('tests/demo.spec.ts:41')
     f.spawned[3].emitExit(0)
 
     const status = await promise
@@ -1091,11 +1121,13 @@ describe('RunOrchestrator.runFullCycle', () => {
     fs.mkdirSync(runDir, { recursive: true })
     fs.writeFileSync(
       orch.paths.summaryPath,
-      JSON.stringify({ failed: [{ name: 'test-case-broken', endTime: 100 }] }),
+      JSON.stringify({ failed: [{ name: 'test-case-broken', endTime: 100, location: 'e2e/broken.spec.ts:12' }] }),
     )
 
     const heal: { cycle: number; failureSignature: string }[] = []
+    const statuses: string[] = []
     orch.on('heal-cycle-started', (e) => heal.push(e))
+    orch.on('run-status', (e) => statuses.push(e.status))
 
     const promise = orch.runFullCycle()
     const waitFor = async (n: number, label: string) => {
@@ -1117,6 +1149,10 @@ describe('RunOrchestrator.runFullCycle', () => {
 
     // After restart-and-rerun: services re-spawn (svc spawn at idx 3) + new playwright (idx 4).
     await waitFor(5, 'second playwright')
+    expect(readManifest(orch.paths.manifestPath)?.status).toBe('running')
+    expect(statuses).toEqual(expect.arrayContaining(['failed', 'healing', 'running']))
+    expect(statuses.at(-1)).toBe('running')
+    expect(f.spawned[4].options.command).toContain('e2e/broken.spec.ts:12')
     f.spawned[4].emitExit(0) // pw passes
 
     const status = await promise
@@ -1132,8 +1168,10 @@ describe('RunOrchestrator.runFullCycle', () => {
     fs.mkdirSync(runDir, { recursive: true })
     fs.writeFileSync(
       orch.paths.summaryPath,
-      JSON.stringify({ failed: [{ name: 'a' }] }),
+      JSON.stringify({ failed: [{ name: 'a', location: 'e2e/a.spec.ts:9' }] }),
     )
+    const statuses: string[] = []
+    orch.on('run-status', (e) => statuses.push(e.status))
 
     const promise = orch.runFullCycle()
     await new Promise((r) => setTimeout(r, 10))
@@ -1222,6 +1260,10 @@ describe('RunOrchestrator.runFullCycle', () => {
     const history = (m as { healCycleHistory: Array<{ cycle: number; restarted: string[]; kept: string[] }> }).healCycleHistory
     expect(history[0].cycle).toBe(1)
     expect(history[0].restarted).toEqual(['api'])
+    const journal = fs.readFileSync(orch.paths.diagnosisJournalPath, 'utf-8')
+    expect(journal).toContain('- hypothesis: fix the thing')
+    expect(journal).toContain(`- fix.file: ${path.join(tmpDir, 'a.ts')}, ${path.join(tmpDir, 'b.ts')}`)
+    expect(fs.existsSync(path.join(tmpDir, 'logs', 'diagnosis-journal.md'))).toBe(false)
     await orch.stop('failed')
   }, 15000)
 
@@ -1231,8 +1273,10 @@ describe('RunOrchestrator.runFullCycle', () => {
     fs.mkdirSync(runDir, { recursive: true })
     fs.writeFileSync(
       orch.paths.summaryPath,
-      JSON.stringify({ failed: [{ name: 'a' }] }),
+      JSON.stringify({ failed: [{ name: 'a', location: 'e2e/a.spec.ts:9' }] }),
     )
+    const statuses: string[] = []
+    orch.on('run-status', (e) => statuses.push(e.status))
 
     const promise = orch.runFullCycle()
     await new Promise((r) => setTimeout(r, 10))
@@ -1242,9 +1286,38 @@ describe('RunOrchestrator.runFullCycle', () => {
     f.spawned[2].emitExit(0)
 
     while (f.spawned.length < 4) await new Promise((r) => setTimeout(r, 5))
+    expect(readManifest(orch.paths.manifestPath)?.status).toBe('running')
+    expect(statuses.at(-1)).toBe('running')
+    expect(f.spawned[3].options.command).toContain('e2e/a.spec.ts:9')
     f.spawned[3].emitExit(0)
     const status = await promise
     expect(status).toBe('passed')
+    await orch.stop('passed')
+  })
+
+  it('falls back to full-suite post-heal rerun when failed entries have no location', async () => {
+    const f = makeFakeFactory()
+    const orch = bootForFullCycle({ spawned: f, pwExitCodes: [1, 0], autoHeal: true })
+    fs.mkdirSync(runDir, { recursive: true })
+    fs.writeFileSync(
+      orch.paths.summaryPath,
+      JSON.stringify({ failed: [{ name: 'a' }] }),
+    )
+    const chunks: string[] = []
+    orch.on('playwright-output', (e) => chunks.push(e.chunk))
+
+    const promise = orch.runFullCycle()
+    await new Promise((r) => setTimeout(r, 10))
+    f.spawned[1].emitExit(1)
+    while (f.spawned.length < 3) await new Promise((r) => setTimeout(r, 5))
+    fs.writeFileSync(orch.paths.rerunSignal, '')
+    f.spawned[2].emitExit(0)
+
+    while (f.spawned.length < 4) await new Promise((r) => setTimeout(r, 5))
+    expect(f.spawned[3].options.command).toBe('pw-1')
+    expect(chunks.join('')).toContain('running the full Playwright suite')
+    f.spawned[3].emitExit(0)
+    expect(await promise).toBe('passed')
     await orch.stop('passed')
   })
 
@@ -1319,15 +1392,29 @@ describe('RunOrchestrator.runHealAgent', () => {
 
 describe('readSummary / extractFailedSlugs / defaultPlaywrightSpawner / defaultHealCommand', () => {
   it('readSummary tolerates missing file', async () => {
-    const { readSummary, extractFailedSlugs, defaultPlaywrightSpawner, defaultHealCommand } =
+    const { readSummary, extractFailedSlugs, extractFailedLocations, defaultPlaywrightSpawner, defaultHealCommand } =
       await import('./orchestrator')
     expect(readSummary(path.join(tmpDir, 'nope.json'))).toEqual({})
     expect(extractFailedSlugs({ failed: [{ name: 'a' }, { name: '' }, {}] })).toEqual(['a'])
     expect(extractFailedSlugs({})).toEqual([])
+    expect(extractFailedLocations({
+      failed: [
+        { name: 'a', location: 'e2e/a.spec.ts:10' },
+        { name: 'b', location: 'e2e/a.spec.ts:10' },
+        { name: 'c', location: 'not-a-playwright-location' },
+      ],
+    })).toEqual(['e2e/a.spec.ts:10'])
     const f = makeFeature()
-    const inv = defaultPlaywrightSpawner({ feature: f, paths: {} as never })
+    const inv = defaultPlaywrightSpawner({ feature: f, paths: buildRunPaths(runDir) })
     expect(inv.command).toContain('playwright test')
+    expect(inv.command).toContain(`--output=${JSON.stringify(path.join(runDir, 'playwright-artifacts'))}`)
     expect(inv.cwd).toBe(f.featureDir)
+    const targeted = defaultPlaywrightSpawner({
+      feature: f,
+      paths: buildRunPaths(runDir),
+      rerunTargets: ['e2e/a.spec.ts:10', 'e2e/b spec.ts:20'],
+    })
+    expect(targeted.command).toContain(`${JSON.stringify('e2e/a.spec.ts:10')} ${JSON.stringify('e2e/b spec.ts:20')}`)
     expect(defaultHealCommand({ cycle: 2, outputDir: '/x' })).toContain('cycle=2')
   })
 })
@@ -1945,14 +2032,14 @@ describe('defaultPlaywrightSpawner --max-failures', () => {
   it('appends --max-failures with feature threshold', async () => {
     const { defaultPlaywrightSpawner } = await import('./orchestrator')
     const f = makeFeature({ healOnFailureThreshold: 3 })
-    const inv = defaultPlaywrightSpawner({ feature: f, paths: {} as never })
+    const inv = defaultPlaywrightSpawner({ feature: f, paths: buildRunPaths(runDir) })
     expect(inv.command).toContain('--max-failures=3')
   })
 
   it('omits --max-failures when threshold is unset', async () => {
     const { defaultPlaywrightSpawner } = await import('./orchestrator')
     const f = makeFeature()
-    const inv = defaultPlaywrightSpawner({ feature: f, paths: {} as never })
+    const inv = defaultPlaywrightSpawner({ feature: f, paths: buildRunPaths(runDir) })
     expect(inv.command).not.toContain('--max-failures=')
   })
 })

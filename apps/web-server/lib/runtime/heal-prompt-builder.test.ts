@@ -40,7 +40,17 @@ describe('buildHealAddendum', () => {
     const addendum = buildHealAddendum({ cycle: 2, maxCycles: 3 })
 
     expect(addendum).toContain('Cycle 2 of 3. Failing tests: test-case-a, test-case-b.')
-    expect(addendum).toContain('Prior iterations exist')
+    expect(addendum).toContain('Prior iterations exist in this run')
+  })
+
+  it('uses an explicit run-local journal path for prior-iteration guidance', () => {
+    const runJournalPath = path.join(logsDir, 'runs', 'r1', 'diagnosis-journal.md')
+    fs.mkdirSync(path.dirname(runJournalPath), { recursive: true })
+    fs.writeFileSync(runJournalPath, '# Diagnosis Journal\n')
+
+    const addendum = buildHealAddendum({ cycle: 2, journalPath: runJournalPath })
+
+    expect(addendum).toContain('Prior iterations exist in this run')
   })
 
   it('ignores summaries without a failed array', () => {

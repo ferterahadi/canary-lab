@@ -1,4 +1,4 @@
-import { test as base } from '@playwright/test'
+import { test as base, type Page, type TestInfo } from '@playwright/test'
 import fs from 'fs'
 import path from 'path'
 import { getProjectRoot } from '../runtime/project-root'
@@ -53,6 +53,29 @@ export async function withLogMarkers(
   }
 }
 
+export function shouldCaptureFinalPageScreenshot(testInfo: Pick<TestInfo, 'project' | 'status' | 'expectedStatus'>): boolean {
+  const mode = (testInfo.project.use as { screenshot?: unknown }).screenshot
+  if (mode === 'off') return false
+  if (mode === 'only-on-failure') return testInfo.status !== testInfo.expectedStatus
+  return mode === 'on'
+}
+
+export async function captureFinalPageScreenshot(page: Page, testInfo: TestInfo): Promise<void> {
+  if (!shouldCaptureFinalPageScreenshot(testInfo)) return
+  const filename = `canary-lab-final-page-${slugify(testInfo.title)}.png`
+  const screenshotPath = testInfo.outputPath(filename)
+  try {
+    await page.screenshot({ path: screenshotPath, fullPage: true })
+    await testInfo.attach('canary-lab-final-page', {
+      path: screenshotPath,
+      contentType: 'image/png',
+    })
+  } catch {
+    // Best-effort visual aid only. The raw Playwright terminal remains the
+    // source of truth if the page has already closed or crashed.
+  }
+}
+
 /**
  * Extended Playwright `test` that writes XML markers into every service log
  * listed in the active run manifest. If the manifest doesn't exist because tests
@@ -61,6 +84,10 @@ export async function withLogMarkers(
  * https://playwright.dev/docs/extensibility
  */
 export const test = base.extend<{ _logMarker: void }>({
+  page: async ({ page }, use, testInfo) => {
+    await use(page)
+    await captureFinalPageScreenshot(page, testInfo)
+  },
   _logMarker: [
     async ({}, use, testInfo) => {
       await withLogMarkers(testInfo.title, MANIFEST_PATH, async () => {

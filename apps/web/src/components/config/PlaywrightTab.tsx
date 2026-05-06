@@ -179,7 +179,7 @@ export function PlaywrightTab({ feature }: { feature: string }) {
           </FieldRow>
           <FieldRow label="Trace" layout="inline">
             <Select<string>
-              value={ed.draft.use.trace ?? 'off'}
+              value={ed.draft.use.trace ?? 'retain-on-failure'}
               onChange={(v) => ed.setDraft((d) => ({ ...d, use: { ...d.use, trace: v } }))}
               options={TRACE_OPTIONS.map((v) => ({ value: v, label: v }))}
             />

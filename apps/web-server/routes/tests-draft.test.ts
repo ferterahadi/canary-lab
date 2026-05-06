@@ -7,9 +7,14 @@ import { readDraft, writeDraft } from '../lib/draft-store'
 import {
   runPlanStage,
   runSpecStage,
+  selectPlanTemplate,
   testsDraftRoutes,
   type TestsDraftRouteDeps,
 } from './tests-draft'
+import {
+  STAGE1_DIFF_TEMPLATE,
+  STAGE1_TEMPLATE,
+} from '../lib/wizard-agent-spawner'
 
 let logsDir: string
 let projectRoot: string
@@ -53,6 +58,70 @@ describe('POST /api/tests/draft', () => {
     })
     expect(r.statusCode).toBe(201)
     expect(r.json().status).toBe('planning')
+    await app.close()
+  })
+
+  it('starts diff-only planning when no documents or notes are provided', async () => {
+    const spawnPlanAgent = vi.fn(async () => '<plan-output>[]</plan-output>')
+    const deps = makeDeps({ spawnPlanAgent })
+    const app = await makeApp(deps)
+    const r = await app.inject({
+      method: 'POST',
+      url: '/api/tests/draft',
+      payload: { prdText: '   ', prdDocuments: [], repos: [{ name: 'app', localPath: '/p' }] },
+    })
+    expect(r.statusCode).toBe(201)
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(spawnPlanAgent).toHaveBeenCalled()
+    expect(spawnPlanAgent.mock.calls[0][0]).toMatchObject({
+      prdText: '   ',
+      planMode: 'diff-only',
+      planTemplatePath: STAGE1_DIFF_TEMPLATE,
+    })
+    await app.close()
+  })
+
+  it('keeps context planning when notes are provided', async () => {
+    const spawnPlanAgent = vi.fn(async () => '<plan-output>[]</plan-output>')
+    const deps = makeDeps({ spawnPlanAgent })
+    const app = await makeApp(deps)
+    const r = await app.inject({
+      method: 'POST',
+      url: '/api/tests/draft',
+      payload: { prdText: 'Login flow', prdDocuments: [], repos: [{ name: 'app', localPath: '/p' }] },
+    })
+    expect(r.statusCode).toBe(201)
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(spawnPlanAgent).toHaveBeenCalled()
+    expect(spawnPlanAgent.mock.calls[0][0]).toMatchObject({
+      prdText: 'Login flow',
+      planMode: 'context',
+      planTemplatePath: STAGE1_TEMPLATE,
+    })
+    await app.close()
+  })
+
+  it('keeps context planning when documents are provided', async () => {
+    const spawnPlanAgent = vi.fn(async () => '<plan-output>[]</plan-output>')
+    const deps = makeDeps({ spawnPlanAgent })
+    const app = await makeApp(deps)
+    const r = await app.inject({
+      method: 'POST',
+      url: '/api/tests/draft',
+      payload: {
+        prdText: '',
+        prdDocuments: [{ filename: 'prd.md', contentType: 'text/markdown', characters: 10 }],
+        repos: [{ name: 'app', localPath: '/p' }],
+      },
+    })
+    expect(r.statusCode).toBe(201)
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(spawnPlanAgent).toHaveBeenCalled()
+    expect(spawnPlanAgent.mock.calls[0][0]).toMatchObject({
+      prdText: '',
+      planMode: 'context',
+      planTemplatePath: STAGE1_TEMPLATE,
+    })
     await app.close()
   })
 
@@ -186,6 +255,40 @@ describe('POST /api/tests/draft/:id/cancel-generation', () => {
 })
 
 describe('runPlanStage', () => {
+  it('selects diff-only planning for drafts without documents or notes', () => {
+    expect(selectPlanTemplate({ prdText: '   ', prdDocuments: [] })).toEqual({
+      mode: 'diff-only',
+      templatePath: STAGE1_DIFF_TEMPLATE,
+    })
+  })
+
+  it('selects context planning when documents are present', () => {
+    expect(selectPlanTemplate({
+      prdText: '',
+      prdDocuments: [{ filename: 'prd.md', contentType: 'text/markdown', characters: 10 }],
+    })).toEqual({
+      mode: 'context',
+      templatePath: STAGE1_TEMPLATE,
+    })
+  })
+
+  it('selects context planning when notes are present', () => {
+    expect(selectPlanTemplate({ prdText: 'checkout acceptance criteria', prdDocuments: [] })).toEqual({
+      mode: 'context',
+      templatePath: STAGE1_TEMPLATE,
+    })
+  })
+
+  it('selects context planning when documents and notes are present', () => {
+    expect(selectPlanTemplate({
+      prdText: 'checkout acceptance criteria',
+      prdDocuments: [{ filename: 'prd.md', contentType: 'text/markdown', characters: 10 }],
+    })).toEqual({
+      mode: 'context',
+      templatePath: STAGE1_TEMPLATE,
+    })
+  })
+
   it('transitions to error when wizard agent is unavailable', async () => {
     const deps = makeDeps({
       pickAgent: () => ({ ok: false, error: 'manual mode' }),

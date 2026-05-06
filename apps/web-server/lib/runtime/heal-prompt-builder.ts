@@ -54,12 +54,12 @@ export function buildHealAddendum(input: HealAddendumInput): string {
   )
 
   parts.push(
-    'You do not need to write to `logs/diagnosis-journal.md`. The runner appends an iteration entry automatically from your signal body. Put your hypothesis and filesChanged into the `.restart` / `.rerun` JSON body: `{"hypothesis":"…","filesChanged":["…"]}`.',
+    'You do not need to write to this run\'s `diagnosis-journal.md`. The runner appends an iteration entry automatically from your signal body. Put your hypothesis and filesChanged into the `.restart` / `.rerun` JSON body: `{"hypothesis":"…","filesChanged":["…"]}`.',
   )
 
   if (journalExists && input.cycle >= 2) {
     parts.push(
-      'Prior iterations exist in `logs/diagnosis-journal.md`. Before forming a new hypothesis, set the previous iteration\'s outcome by editing its `- outcome: pending` line in that file. Values: `all_passed` | `partial` | `no_change` | `regression`. Skip hypotheses already tried.',
+      'Prior iterations exist in this run\'s `diagnosis-journal.md`. Before forming a new hypothesis, set the previous iteration\'s outcome by editing its `- outcome: pending` line in that file. Values: `all_passed` | `partial` | `no_change` | `regression`. Skip hypotheses already tried.',
     )
   }
 

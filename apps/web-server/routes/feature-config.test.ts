@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { execFileSync } from 'child_process'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -40,10 +41,25 @@ function buildFeature(name: string, opts: {
   return dir
 }
 
-async function makeApp(): Promise<FastifyInstance> {
+function buildGitRepo(name: string): string {
+  const dir = path.join(tmpDir, name)
+  fs.mkdirSync(dir, { recursive: true })
+  const git = (args: string[]): void => { execFileSync('git', args, { cwd: dir, stdio: 'ignore' }) }
+  git(['init', '-b', 'main'])
+  git(['config', 'user.email', 'test@example.com'])
+  git(['config', 'user.name', 'Test User'])
+  fs.writeFileSync(path.join(dir, 'README.md'), 'hello\n')
+  git(['add', 'README.md'])
+  git(['commit', '-m', 'init'])
+  git(['checkout', '-b', 'feature/demo'])
+  git(['checkout', 'main'])
+  return dir
+}
+
+async function makeApp(opts: { isRepoActive?: (feature: string, repo: string) => boolean } = {}): Promise<FastifyInstance> {
   const app = Fastify()
   await app.register(async (a) => {
-    await featureConfigRoutes(a, { featuresDir })
+    await featureConfigRoutes(a, { featuresDir, isRepoActive: opts.isRepoActive })
   })
   await app.ready()
   return app
@@ -68,6 +84,85 @@ describe('feature.config endpoints', () => {
       expect(r.statusCode).toBe(200)
       const body = r.json() as { parsed: { value: { name: string } } }
       expect(body.parsed.value.name).toBe('alpha')
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('returns git status for a configured repo', async () => {
+    const repo = buildGitRepo('repo-a')
+    buildFeature('branchy', {
+      config: `module.exports = { config: { name: 'branchy', description: 'd', envs: [], repos: [{ name: 'app', localPath: ${JSON.stringify(repo)}, branch: 'feature/demo' }], featureDir: __dirname } }`,
+    })
+    const app = await makeApp()
+    try {
+      const r = await app.inject({ method: 'GET', url: '/api/features/branchy/repos/app/git' })
+      expect(r.statusCode).toBe(200)
+      expect(r.json()).toMatchObject({
+        isGitRepo: true,
+        currentBranch: 'main',
+        expectedBranch: 'feature/demo',
+        dirty: false,
+      })
+      expect(r.json().localBranches).toContain('feature/demo')
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('refuses checkout when the configured repo is dirty', async () => {
+    const repo = buildGitRepo('repo-b')
+    fs.writeFileSync(path.join(repo, 'dirty.txt'), 'dirty\n')
+    buildFeature('branchy-dirty', {
+      config: `module.exports = { config: { name: 'branchy-dirty', description: 'd', envs: [], repos: [{ name: 'app', localPath: ${JSON.stringify(repo)} }], featureDir: __dirname } }`,
+    })
+    const app = await makeApp()
+    try {
+      const r = await app.inject({
+        method: 'POST',
+        url: '/api/features/branchy-dirty/repos/app/checkout',
+        payload: { branch: 'feature/demo' },
+      })
+      expect(r.statusCode).toBe(409)
+      expect(r.json().error).toContain('uncommitted changes')
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('refuses checkout when the repo has an active run', async () => {
+    const repo = buildGitRepo('repo-active')
+    buildFeature('branchy-active', {
+      config: `module.exports = { config: { name: 'branchy-active', description: 'd', envs: [], repos: [{ name: 'app', localPath: ${JSON.stringify(repo)} }], featureDir: __dirname } }`,
+    })
+    const app = await makeApp({ isRepoActive: () => true })
+    try {
+      const r = await app.inject({
+        method: 'POST',
+        url: '/api/features/branchy-active/repos/app/checkout',
+        payload: { branch: 'feature/demo' },
+      })
+      expect(r.statusCode).toBe(409)
+      expect(r.json().error).toContain('active service run')
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('checks out a clean configured repo', async () => {
+    const repo = buildGitRepo('repo-c')
+    buildFeature('branchy-clean', {
+      config: `module.exports = { config: { name: 'branchy-clean', description: 'd', envs: [], repos: [{ name: 'app', localPath: ${JSON.stringify(repo)} }], featureDir: __dirname } }`,
+    })
+    const app = await makeApp()
+    try {
+      const r = await app.inject({
+        method: 'POST',
+        url: '/api/features/branchy-clean/repos/app/checkout',
+        payload: { branch: 'feature/demo' },
+      })
+      expect(r.statusCode).toBe(200)
+      expect(r.json().currentBranch).toBe('feature/demo')
     } finally {
       await app.close()
     }

@@ -2,6 +2,8 @@ export interface RepoPrerequisite {
   name: string
   localPath: string      // absolute or ~/... path
   cloneUrl?: string      // shown if repo is missing
+  /** Optional expected local branch for this repo before a run starts. */
+  branch?: string
   // Each entry opens one iTerm tab in this repo's directory.
   // Use multiple entries when one repo needs multiple running processes.
   startCommands?: Array<string | StartCommand>

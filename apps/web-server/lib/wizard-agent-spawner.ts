@@ -18,6 +18,7 @@ import type { PaneBroker } from './pane-broker'
 export const PROMPTS_DIR = path.resolve(__dirname, '..', 'prompts')
 
 export const STAGE1_TEMPLATE = path.join(PROMPTS_DIR, 'stage1-plan.md')
+export const STAGE1_DIFF_TEMPLATE = path.join(PROMPTS_DIR, 'stage1-diff-plan.md')
 export const STAGE2_TEMPLATE = path.join(PROMPTS_DIR, 'stage2-spec.md')
 export const WIZARD_CLAUDE_FORMATTER_FILE = path.join(__dirname, 'runtime', 'wizard-claude-formatter.js')
 export const WIZARD_CODEX_FORMATTER_FILE = path.join(__dirname, 'runtime', 'wizard-codex-formatter.js')

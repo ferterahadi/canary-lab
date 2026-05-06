@@ -131,6 +131,7 @@ describe('buildOrchestratorHealCommand', () => {
     expect(promptBody).toContain(path.join(runDir, 'heal-index.md'))
     expect(promptBody).toContain(path.join(runDir, 'e2e-summary.json'))
     expect(promptBody).toContain(path.join(runDir, 'failed'))
+    expect(promptBody).toContain(path.join(runDir, 'diagnosis-journal.md'))
     expect(promptBody).toContain(path.join(runDir, 'signals', '.restart'))
     expect(promptBody).toContain(path.join(runDir, 'signals', '.rerun'))
     expect(promptBody).not.toContain('{{')

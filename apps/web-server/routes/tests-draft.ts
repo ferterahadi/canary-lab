@@ -23,6 +23,10 @@ import {
   extractPlan,
   extractWizardSessionRef,
 } from '../lib/wizard-output-parser'
+import {
+  STAGE1_DIFF_TEMPLATE,
+  STAGE1_TEMPLATE,
+} from '../lib/wizard-agent-spawner'
 import { resolveDraftFile } from '../lib/draft-file-resolver'
 import { combinePrdText, extractPrdDocument } from '../lib/prd-document-extractor'
 
@@ -37,10 +41,14 @@ export interface PlanAgentInput {
   draftId: string
   agent: 'claude' | 'codex'
   prdText: string
+  planMode?: PlanMode
+  planTemplatePath?: string
   repos: DraftRepo[]
   draftDir: string
   agentLogPath: string
 }
+
+export type PlanMode = 'context' | 'diff-only'
 
 export interface SpecAgentInput {
   draftId: string
@@ -353,12 +361,15 @@ async function runPlanStage(deps: TestsDraftRouteDeps, draftId: string): Promise
   })
   if (!isStageCurrent(deps.logsDir, draftId, 'planning')) return
   const p = draftPaths(deps.logsDir, draftId)
+  const planTemplate = selectPlanTemplate(rec)
   let stream: string
   try {
     stream = await deps.spawnPlanAgent({
       draftId,
       agent: picked.agent,
       prdText: rec.prdText,
+      planMode: planTemplate.mode,
+      planTemplatePath: planTemplate.templatePath,
       repos: rec.repos,
       draftDir: p.draftDir,
       agentLogPath: p.planAgentLog,
@@ -385,6 +396,19 @@ async function runPlanStage(deps: TestsDraftRouteDeps, draftId: string): Promise
       ? { planAgentSessionId: sessionRef.id, planAgentSessionKind: sessionRef.kind }
       : {}),
   })
+}
+
+export function hasUserContext(rec: Pick<DraftRecord, 'prdText' | 'prdDocuments'>): boolean {
+  return rec.prdText.trim().length > 0 || rec.prdDocuments.length > 0
+}
+
+export function selectPlanTemplate(rec: Pick<DraftRecord, 'prdText' | 'prdDocuments'>): {
+  mode: PlanMode
+  templatePath: string
+} {
+  return hasUserContext(rec)
+    ? { mode: 'context', templatePath: STAGE1_TEMPLATE }
+    : { mode: 'diff-only', templatePath: STAGE1_DIFF_TEMPLATE }
 }
 
 async function runSpecStage(deps: TestsDraftRouteDeps, draftId: string): Promise<void> {

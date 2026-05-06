@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { slugify, withLogMarkers } from './log-marker-fixture'
+import { shouldCaptureFinalPageScreenshot, slugify, withLogMarkers } from './log-marker-fixture'
 
 const tmpDirs: string[] = []
 function mkTmp(): string {
@@ -86,5 +86,26 @@ describe('withLogMarkers', () => {
     ).rejects.toThrow('boom')
 
     expect(fs.readFileSync(log, 'utf-8')).toBe('<test-case-oops>\n')
+  })
+})
+
+describe('shouldCaptureFinalPageScreenshot', () => {
+  const info = (screenshot: unknown, status = 'passed', expectedStatus = 'passed') => ({
+    project: { use: { screenshot } },
+    status,
+    expectedStatus,
+  }) as never
+
+  it('captures when screenshot mode is on', () => {
+    expect(shouldCaptureFinalPageScreenshot(info('on'))).toBe(true)
+  })
+
+  it('does not capture when screenshot mode is off', () => {
+    expect(shouldCaptureFinalPageScreenshot(info('off'))).toBe(false)
+  })
+
+  it('captures only unexpected outcomes for only-on-failure', () => {
+    expect(shouldCaptureFinalPageScreenshot(info('only-on-failure'))).toBe(false)
+    expect(shouldCaptureFinalPageScreenshot(info('only-on-failure', 'failed', 'passed'))).toBe(true)
   })
 })

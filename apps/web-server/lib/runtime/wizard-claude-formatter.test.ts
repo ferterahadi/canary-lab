@@ -40,6 +40,7 @@ describe('wizard claude formatter', () => {
     expect(resultSummary('\nfirst\nsecond')).toBe('first')
     expect(resultSummary([{ type: 'text', text: 'array first\narray second' }])).toBe('array first')
     expect(resultSummary([{ type: 'image', source: 'ignored' }])).toBe('')
+    expect(resultSummary(123)).toBe('')
     const circular: Record<string, unknown> = {}
     circular.self = circular
     expect(toolSummary('Other', circular)).toBe('')
@@ -88,6 +89,13 @@ describe('wizard claude formatter', () => {
   it('turns partial assistant text into progress without raw file blocks', () => {
     handleLine(JSON.stringify({
       type: 'assistant',
+      partial: true,
+      message: {
+        content: [{ type: 'text', text: '<file path="top-level-partial.spec.ts">\n' }],
+      },
+    }))
+    handleLine(JSON.stringify({
+      type: 'assistant',
       message: {
         stop_reason: null,
         content: [{
@@ -97,6 +105,7 @@ describe('wizard claude formatter', () => {
       },
     }))
     const out = writes.join('')
+    expect(out).toContain('top-level-partial.spec.ts')
     expect(out).toContain('writing')
     expect(out).toContain('feature.config.cjs')
     expect(out).not.toContain('<file path="feature.config.cjs">')
@@ -162,7 +171,10 @@ describe('wizard claude formatter', () => {
       message: {
         content: [
           { type: 'thinking', thinking: '   ' },
+          { type: 'thinking' },
+          { type: 'tool_use' },
           { type: 'tool_use', id: '', name: 'Custom', input: { payload: 'value' } },
+          { type: 'unknown' },
         ],
       },
     }))
@@ -171,6 +183,8 @@ describe('wizard claude formatter', () => {
       message: {
         content: [
           { type: 'tool_result', tool_use_id: '', content: [{ type: 'text', text: 'failed text' }], is_error: true },
+          { type: 'tool_result', content: 'no id text' },
+          { type: 'tool_result', tool_use_id: '', content: [{ type: 'text', text: 123 }] },
           { type: 'tool_result', tool_use_id: 'missing', content: [{ type: 'image', source: 'ignored' }] },
           { type: 'ignored', content: 'skip me' },
         ],
@@ -187,6 +201,7 @@ describe('wizard claude formatter', () => {
   it('prints result status with optional duration', () => {
     handleLine(JSON.stringify({ type: 'result', duration_ms: 1234, is_error: false }))
     handleLine(JSON.stringify({ type: 'result', duration_ms: 0, is_error: true }))
+    handleLine(JSON.stringify({ type: 'result', result: 123 }))
     const out = writes.join('')
     expect(out).toContain('done')
     expect(out).toContain('in 1.2s')
