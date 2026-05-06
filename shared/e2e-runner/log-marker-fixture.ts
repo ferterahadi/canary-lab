@@ -79,7 +79,7 @@ export async function captureFinalPageScreenshot(page: Page, testInfo: TestInfo)
 /**
  * Extended Playwright `test` that writes XML markers into every service log
  * listed in the active run manifest. If the manifest doesn't exist because tests
- * are run directly with Playwright instead of `canary-lab run`, the fixture
+ * are run directly with Playwright instead of the Canary Lab UI, the fixture
  * is a no-op.
  * https://playwright.dev/docs/extensibility
  */

@@ -61,9 +61,6 @@ describe('buildPackageJson', () => {
     expect(parsed.scripts).toEqual({
       postinstall: 'canary-lab upgrade --silent',
       upgrade: 'canary-lab upgrade',
-      'canary-lab:run': 'canary-lab run',
-      'canary-lab:env': 'canary-lab env',
-      'canary-lab:new-feature': 'canary-lab new-feature',
       'install:browsers': 'playwright install chromium',
     })
     expect(parsed.devDependencies).toEqual({
@@ -154,6 +151,19 @@ describe('main (init-project orchestration)', () => {
       ['init', '-q'],
       expect.objectContaining({ cwd: target, stdio: 'ignore' }),
     )
+  })
+
+  it('scaffolds gitignore rules that keep feature envset values out of git', async () => {
+    const workspace = mkTmp()
+    process.chdir(workspace)
+    vi.spyOn(console, 'log').mockImplementation(() => {})
+
+    await main(['my-project', '--package-spec', '^9.9.9'])
+
+    const gitignore = fs.readFileSync(path.join(workspace, 'my-project', '.gitignore'), 'utf-8')
+    expect(gitignore).toContain('features/*/envsets/*/*')
+    expect(gitignore).toContain('!features/example_todo_api/envsets/local/*')
+    expect(gitignore).not.toContain('!features/*/envsets/*/*')
   })
 
   it('renames project name from "canary-lab" to "canary-lab-workspace"', async () => {

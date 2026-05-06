@@ -76,4 +76,14 @@ describe('TestCasesColumn', () => {
     expect(container.textContent).toContain('Unable to load tests for this feature. Server returned HTTP 500.')
     expect(container.textContent).not.toContain('Loading...')
   })
+
+  it('does not render the assertion export in the tests pane', async () => {
+    vi.mocked(getFeatureTests).mockResolvedValue([])
+
+    await act(async () => {
+      root.render(<TestCasesColumn feature="alpha beta" activeRunSummary={undefined} activeRunStatus="passed" />)
+    })
+
+    expect(container.textContent).not.toContain('Export Assertion')
+  })
 })

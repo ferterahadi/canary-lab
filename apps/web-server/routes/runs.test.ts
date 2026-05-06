@@ -31,14 +31,14 @@ function makeStub(runId: string): OrchestratorLike & { stopped: boolean } {
   } as OrchestratorLike & { stopped: boolean }
 }
 
-function writeManifestForRun(runId: string, feature = 'foo'): void {
+function writeManifestForRun(runId: string, feature = 'foo', status: 'running' | 'passed' | 'failed' | 'healing' | 'aborted' = 'passed'): void {
   const dir = runDirFor(logsDir, runId)
   fs.mkdirSync(dir, { recursive: true })
   writeManifest(path.join(dir, 'manifest.json'), {
     runId,
     feature,
     startedAt: 'now',
-    status: 'passed',
+    status,
     healCycles: 0,
     services: [],
   })
@@ -153,6 +153,43 @@ describe('GET /api/runs/:runId/artifacts/*', () => {
     const res = await app.inject({ method: 'GET', url: `/api/runs/r1/artifacts/${name}` })
     expect(res.statusCode).toBe(200)
     expect(res.headers['content-type']).toContain(contentType)
+  })
+})
+
+describe('GET /api/runs/:runId/assertion.md', () => {
+  it('exports a completed run as assertion markdown', async () => {
+    writeManifestForRun('r-review', 'checkout', 'passed')
+    fs.writeFileSync(path.join(runDirFor(logsDir, 'r-review'), 'e2e-summary.json'), JSON.stringify({
+      complete: true,
+      total: 1,
+      passed: 1,
+      passedNames: ['test-case-passes-checkout'],
+      failed: [],
+    }))
+    const { app } = await build()
+
+    const res = await app.inject({ method: 'GET', url: '/api/runs/r-review/assertion.md' })
+
+    expect(res.statusCode).toBe(200)
+    expect(res.headers['content-type']).toContain('text/markdown')
+    expect(res.headers['content-disposition']).toContain('canary-lab-assertion-checkout-r-review.md')
+    expect(res.body).toContain('# Assertion Review: checkout')
+    expect(res.body).toContain('## Test Cases')
+    expect(res.body).not.toContain('test-review.json')
+  })
+
+  it('404s when the run is unknown', async () => {
+    const { app } = await build()
+    const res = await app.inject({ method: 'GET', url: '/api/runs/missing/assertion.md' })
+    expect(res.statusCode).toBe(404)
+  })
+
+  it('409s while the run is still active', async () => {
+    writeManifestForRun('r-active', 'checkout', 'running')
+    const { app } = await build()
+    const res = await app.inject({ method: 'GET', url: '/api/runs/r-active/assertion.md' })
+    expect(res.statusCode).toBe(409)
+    expect(res.json().error).toContain('after the run finishes')
   })
 })
 

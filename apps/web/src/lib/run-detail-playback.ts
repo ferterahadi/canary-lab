@@ -115,15 +115,20 @@ function compactPlaybackSteps(steps: PlaybackTest['steps']): PlaybackTest['steps
     const title = compactStepTitle(step.title)
     return title ? [{ ...step, title }] : []
   })
-  return compacted.slice(0, 8)
+  return compacted
 }
 
 function preferredScreenshots(artifacts: PlaywrightArtifact[]): PlaywrightArtifact[] {
   const screenshots = artifacts
     .filter((a) => a.kind === 'screenshot')
     .sort((a, b) => (b.mtimeMs ?? 0) - (a.mtimeMs ?? 0))
-  const final = screenshots.find((a) => /canary-lab-final-page/i.test(`${a.name} ${a.path}`))
+  const finalScreenshots = screenshots.filter((a) => /canary-lab-final-page/i.test(`${a.name} ${a.path}`))
+  const final = finalScreenshots.find((a) => !isAttachmentPath(a.path)) ?? finalScreenshots[0]
   return (final ? [final] : screenshots.slice(0, 1))
+}
+
+function isAttachmentPath(pathLabel: string): boolean {
+  return pathLabel.split(/[\\/]+/).includes('attachments')
 }
 
 function compactStepTitle(title: string): string | null {
@@ -137,14 +142,68 @@ function compactStepTitle(title: string): string | null {
   ) return null
 
   const quoted = title.match(/['"]([^'"]{1,80})['"]/)?.[1]
-  if (lower.includes('navigate')) return quoted ? `Navigate ${quoted}` : 'Navigate'
-  if (lower.includes('click')) return quoted ? `Click ${quoted}` : 'Click'
-  if (lower.includes('fill')) return quoted ? `Fill ${quoted}` : 'Fill'
-  if (lower.includes('press')) return quoted ? `Press ${quoted}` : 'Press'
-  if (lower.includes('select')) return quoted ? `Select ${quoted}` : 'Select'
-  if (lower.includes('check')) return quoted ? `Check ${quoted}` : 'Check'
-  if (lower.includes('expect')) return quoted ? `Expect ${quoted}` : 'Expect'
+  if (lower.includes('navigate')) return quoted ? `Opened ${quoted}` : 'Opened page'
+  if (lower.includes('click')) return `Clicked ${describeActionTarget(title, quoted) ?? 'page element'}`
+  if (lower.includes('fill')) return describeFillAction(title) ?? 'Filled field'
+  if (lower.includes('press')) return quoted ? `Pressed ${quoted}` : 'Pressed key'
+  if (lower.includes('select')) return quoted ? `Selected ${friendlyTarget(quoted)}` : 'Selected option'
+  if (lower.includes('check')) return `Checked ${describeActionTarget(title, quoted) ?? 'option'}`
+  if (lower.includes('expect')) return `Verified ${describeActionTarget(title, quoted) ?? 'expectation'}`
   return isBrowserAction(title) ? title.replace(/\s+/g, ' ').slice(0, 80) : null
+}
+
+function friendlyTarget(target: string): string {
+  return target.trim()
+    .replace(/^Button$/i, 'button')
+    .replace(/^Locator$/i, 'field')
+}
+
+function describeFillAction(title: string): string | null {
+  const value = firstActionValue(title)
+  const target = describeActionTarget(title.slice(value?.raw.length ?? 0), undefined)
+  if (value && value.text.length > 0 && target) return `Entered ${value.text} in ${target}`
+  if (value && value.text.length > 0) return `Entered ${value.text}`
+  if (target) return `Cleared ${target}`
+  return null
+}
+
+function firstActionValue(title: string): { text: string; raw: string } | null {
+  const match = title.match(/(['"])(.*?)\1/)
+  return match ? { text: match[2], raw: match[0] } : null
+}
+
+function describeActionTarget(title: string, quoted: string | undefined): string | null {
+  const roleName = title.match(/getByRole\([^)]*name:\s*['"]([^'"]+)['"]/i)?.[1]
+  if (roleName) return roleName
+
+  const label = title.match(/getByLabel\(['"]([^'"]+)['"]/i)?.[1]
+  if (label) return label
+
+  const placeholder = title.match(/getByPlaceholder\(['"]([^'"]+)['"]/i)?.[1]
+  if (placeholder) return placeholder
+
+  const text = title.match(/getByText\(['"]([^'"]+)['"]/i)?.[1]
+  if (text) return text
+
+  const testId = title.match(/getByTestId\(['"]([^'"]+)['"]/i)?.[1]
+  if (testId) return `${testId} control`
+
+  const locator = title.match(/locator\(['"]([^'"]+)['"]/i)?.[1]
+  if (locator) return friendlyLocator(locator)
+
+  if (quoted && !looksLikeSelector(quoted)) return friendlyTarget(quoted)
+  return null
+}
+
+function friendlyLocator(locator: string): string {
+  if (/iframe/i.test(locator)) return 'embedded login frame'
+  if (/^#[\w-]+$/.test(locator)) return `${locator.slice(1)} element`
+  if (/^\.[\w-]+$/.test(locator)) return `${locator.slice(1)} element`
+  return 'page element'
+}
+
+function looksLikeSelector(value: string): boolean {
+  return /^(?:#|\.|locator\(|css=|xpath=|\[|\/\/)/i.test(value.trim())
 }
 
 function isBrowserAction(title: string): boolean {

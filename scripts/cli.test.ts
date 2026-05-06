@@ -1,11 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
-const createFeature = vi.fn(async () => {})
 const initProject = vi.fn(async () => {})
 const upgradeProject = vi.fn(async () => {})
 const runUi = vi.fn(async () => {})
 
-vi.mock('./new-feature', () => ({ main: createFeature }))
 vi.mock('./init-project', () => ({ main: initProject }))
 vi.mock('./upgrade', () => ({ main: upgradeProject }))
 vi.mock('./ui-command', () => ({ runUi }))
@@ -13,7 +11,6 @@ vi.mock('./ui-command', () => ({ runUi }))
 const { main, printUsage } = await import('./cli')
 
 beforeEach(() => {
-  createFeature.mockClear()
   initProject.mockClear()
   upgradeProject.mockClear()
   runUi.mockClear()
@@ -27,11 +24,10 @@ describe('printUsage', () => {
     spy.mockRestore()
     expect(out).toContain('canary-lab init <folder>')
     expect(out).toContain('canary-lab ui')
-    expect(out).toContain('canary-lab new-feature <name>')
     expect(out).toContain('canary-lab upgrade')
-    // Removed in 0.11 — both subcommands now redirect to the web UI.
     expect(out).not.toContain('canary-lab run')
     expect(out).not.toContain('canary-lab env')
+    expect(out).not.toContain('canary-lab new-feature')
   })
 })
 
@@ -46,11 +42,6 @@ describe('main (cli routing)', () => {
     expect(runUi).toHaveBeenCalledExactlyOnceWith(['--port', '8080'])
   })
 
-  it('routes "new-feature"', async () => {
-    await main(['new-feature', 'cns_webhooks', 'desc'])
-    expect(createFeature).toHaveBeenCalledExactlyOnceWith(['cns_webhooks', 'desc'])
-  })
-
   it('routes "upgrade"', async () => {
     await main(['upgrade', '--silent'])
     expect(upgradeProject).toHaveBeenCalledExactlyOnceWith(
@@ -59,7 +50,7 @@ describe('main (cli routing)', () => {
     )
   })
 
-  it.each([['run'], ['env']] as const)('"%s" prints a migration hint and exits 1', async (cmd) => {
+  it.each([['run'], ['env'], ['new-feature']] as const)('"%s" prints a migration hint and exits 1', async (cmd) => {
     const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
     const exitSpy = vi
       .spyOn(process, 'exit')

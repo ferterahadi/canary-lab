@@ -128,6 +128,19 @@ describe('SummaryReporter', () => {
     expect(JSON.stringify(out)).not.toMatch(/\x1b\[/)
   })
 
+  it('falls back to an empty error message when Playwright omits message text', () => {
+    const reporter = new SummaryReporter()
+    reporter.onTestEnd(
+      mkTest('message-less fail'),
+      mkResult({
+        status: 'failed',
+        error: {},
+      }),
+    )
+
+    expect(readSummary().failed[0].error).toEqual({ message: '' })
+  })
+
   it('writes the currently running test on begin and clears it on end', () => {
     const reporter = new SummaryReporter()
     reporter.onTestBegin(mkTest('Currently busy', '/specs/busy.spec.ts', 7))
@@ -286,6 +299,23 @@ describe('SummaryReporter', () => {
         ],
       },
     ])
+  })
+
+  it('keeps attachment entries when Playwright only provides a name', () => {
+    const reporter = new SummaryReporter()
+    reporter.onTestBegin(mkTest('Minimal attachment', '/specs/min.spec.ts', 8))
+    reporter.onTestEnd(
+      mkTest('Minimal attachment', '/specs/min.spec.ts', 8),
+      mkResult({
+        status: 'failed',
+        attachments: [{ name: 'stdout' }],
+      }),
+    )
+
+    expect(readEvents().at(-1)).toMatchObject({
+      type: 'test-end',
+      attachments: [{ name: 'stdout' }],
+    })
   })
 
   it('writes log slices and heal-index for failures', () => {

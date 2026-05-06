@@ -5,7 +5,7 @@ import { buildHealAddendum } from './heal-prompt-builder'
 import { buildRunPaths } from './run-paths'
 
 // Heal-agent command builders for the web-server orchestrator. The legacy
-// CLI test runner (`canary-lab run`) used to live next to this file and
+// The old CLI test runner used to live next to this file and
 // drove `spawnHealAgent` directly via a foreground pty. That path was
 // removed in 0.11 — the web orchestrator now invokes these commands via
 // `RunOrchestrator`'s pty factory and streams output through PaneBroker.

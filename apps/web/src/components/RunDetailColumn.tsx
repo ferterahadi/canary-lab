@@ -81,7 +81,21 @@ export function RunDetailColumn({ runId }: { runId: string | null }) {
       <div className="flex-1 min-h-0 overflow-hidden mt-2">
         {tab === 'overview' && (
           <div className="h-full overflow-y-auto scrollbar-thin p-4 text-sm">
-            <SectionHeader>Run</SectionHeader>
+            <div className="mb-2 flex items-center justify-between gap-3">
+              <h2 className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-secondary)' }}>
+                Run
+              </h2>
+              {isAssertionExportable(m.status) && (
+                <a
+                  href={`/api/runs/${encodeURIComponent(m.runId)}/assertion.md`}
+                  download={assertionFilename(m.feature, m.runId)}
+                  className="shrink-0 rounded px-2.5 py-1 text-[11px] font-medium"
+                  style={{ background: 'var(--bg-selected)', color: 'var(--accent)' }}
+                >
+                  Export Assertion
+                </a>
+              )}
+            </div>
             <dl className="grid grid-cols-[110px_minmax(0,1fr)] gap-y-1.5 text-xs">
                 <dt style={{ color: 'var(--text-muted)' }}>Feature</dt>
                 <dd className="truncate" style={{ color: 'var(--text-primary)' }} title={m.feature}>{m.feature}</dd>
@@ -187,6 +201,18 @@ export function shouldShowAgentInputBar(
   return status === 'healing' && healMode !== 'manual'
 }
 
+export function isAssertionExportable(status: string): boolean {
+  return status === 'passed' || status === 'failed' || status === 'aborted'
+}
+
+export function assertionFilename(feature: string, runId: string): string {
+  return `canary-lab-assertion-${safeFilename(feature)}-${safeFilename(runId)}.md`
+}
+
+function safeFilename(input: string): string {
+  return input.replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'run'
+}
+
 function PlaywrightPanel({
   runId,
   view,
@@ -229,7 +255,7 @@ function SegmentButton(props: { active: boolean; onClick: () => void; children: 
   )
 }
 
-function PlaywrightPlayback({
+export function PlaywrightPlayback({
   events,
   artifactGroups,
   artifactPolicy,
@@ -249,37 +275,19 @@ function PlaywrightPlayback({
           const playbackArtifacts = artifactsForPlayback(test.name, artifactGroups, artifactPolicy)
           return (
             <div key={`${test.name}:${test.retry ?? 0}:${test.startedAt ?? ''}`} className="cl-card p-3">
-              <div className="flex min-w-0 items-center gap-2">
-                <StatusPill passed={test.passed} status={test.status} />
-                <div className="min-w-0 flex-1 truncate font-medium" style={{ color: 'var(--text-primary)' }} title={test.title}>
-                  {test.title}
-                </div>
-                {typeof test.retry === 'number' && test.retry > 0 && (
-                  <span className="shrink-0" style={{ color: 'var(--text-muted)' }}>retry {test.retry}</span>
-                )}
-                {typeof test.durationMs === 'number' && (
-                  <span className="shrink-0" style={{ color: 'var(--text-muted)' }}>{formatDuration(test.durationMs)}</span>
-                )}
-              </div>
-              {test.error?.message && (
+              <PlaybackHeader test={test} />
+              {test.error?.message ? (
                 <pre className="mt-2 max-h-28 overflow-auto whitespace-pre-wrap rounded-md p-2 scrollbar-thin" style={{ background: 'var(--bg-selected)', color: '#ef4444', fontFamily: 'var(--font-mono)' }}>
                   {test.error.message}
                 </pre>
+              ) : (
+                <div className="mt-2 text-[11px]" style={{ color: 'var(--text-muted)' }}>
+                  {test.passed === true ? 'Completed without a Playwright error.' : test.status ? `Status: ${test.status}` : 'Still running.'}
+                </div>
               )}
               <ScreenshotPanel artifacts={playbackArtifacts.screenshots} mode={playbackArtifacts.screenshotMode} />
-              {test.steps.length > 0 && (
-                <ol className="mt-3 flex flex-wrap gap-1.5">
-                  {test.steps.map((step, idx) => (
-                    <li key={`${step.title}:${idx}`} className="inline-flex max-w-full items-center gap-1 rounded px-1.5 py-0.5" style={{ background: 'var(--bg-selected)', color: 'var(--text-secondary)' }}>
-                      <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: step.ended ? '#22c55e' : '#eab308' }} />
-                      <span className="truncate" title={step.title}>{step.title}</span>
-                    </li>
-                  ))}
-                </ol>
-              )}
-              {playbackArtifacts.links.length > 0 && (
-                <ArtifactLinks artifacts={playbackArtifacts.links} />
-              )}
+              <ArtifactActions artifacts={playbackArtifacts.links} videoMode={artifactPolicy?.video ?? 'off'} />
+              <BrowserActions steps={test.steps} />
             </div>
           )
         })}
@@ -288,17 +296,34 @@ function PlaywrightPlayback({
   )
 }
 
+function PlaybackHeader({ test }: { test: PlaybackTest }) {
+  return (
+    <div className="flex min-w-0 items-start gap-2">
+      <StatusPill passed={test.passed} status={test.status} />
+      <div className="min-w-0 flex-1">
+        <div className="truncate font-medium" style={{ color: 'var(--text-primary)' }} title={test.title}>
+          {test.title}
+        </div>
+        <div className="mt-0.5 flex flex-wrap gap-x-3 gap-y-1 text-[11px]" style={{ color: 'var(--text-muted)' }}>
+          {typeof test.durationMs === 'number' && <span>{formatDuration(test.durationMs)}</span>}
+          {typeof test.retry === 'number' && test.retry > 0 && <span>retry {test.retry}</span>}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function ScreenshotPanel({ artifacts, mode }: { artifacts: PlaywrightArtifact[]; mode: string }) {
   if (mode === 'off') {
     return (
-      <div className="mt-3 rounded-md px-2 py-1.5 text-[11px]" style={{ background: 'var(--bg-selected)', color: 'var(--text-muted)' }}>
+      <div className="mt-3 rounded-md px-3 py-8 text-center text-[11px]" style={{ background: 'var(--bg-selected)', color: 'var(--text-muted)' }}>
         Screenshots disabled by Playwright config.
       </div>
     )
   }
   if (artifacts.length === 0) {
     return (
-      <div className="mt-3 rounded-md px-2 py-1.5 text-[11px]" style={{ background: 'var(--bg-selected)', color: 'var(--text-muted)' }}>
+      <div className="mt-3 rounded-md px-3 py-8 text-center text-[11px]" style={{ background: 'var(--bg-selected)', color: 'var(--text-muted)' }}>
         No screenshots retained for this test ({mode}).
       </div>
     )
@@ -306,13 +331,41 @@ function ScreenshotPanel({ artifacts, mode }: { artifacts: PlaywrightArtifact[];
   return (
     <div className="mt-3 grid grid-cols-1 gap-2">
       {artifacts.map((artifact) => (
-        <a key={artifact.path} href={artifact.url} target="_blank" rel="noreferrer" className="block overflow-hidden rounded-md" style={{ border: '1px solid var(--border-default)', background: 'var(--bg-surface)' }}>
-          <img src={artifact.url} alt={artifact.name} className="max-h-[360px] w-full object-contain" />
-          <div className="truncate border-t px-2 py-1 text-[10px]" style={{ borderColor: 'var(--border-default)', color: 'var(--text-muted)' }} title={artifact.path}>
-            {artifact.name}
-          </div>
-        </a>
+        <ScreenshotPreview key={artifact.path} artifact={artifact} />
       ))}
+    </div>
+  )
+}
+
+function ScreenshotPreview({ artifact }: { artifact: PlaywrightArtifact }) {
+  const [failed, setFailed] = useState(false)
+  if (failed) {
+    return (
+      <div className="overflow-hidden rounded-md" style={{ border: '1px solid var(--border-default)', background: 'var(--bg-selected)' }}>
+        <div className="px-3 py-8 text-center text-[11px]" style={{ color: 'var(--text-muted)' }}>
+          Screenshot could not be rendered.
+        </div>
+        <ArtifactCaption artifact={artifact} />
+      </div>
+    )
+  }
+  return (
+    <a href={artifact.url} target="_blank" rel="noreferrer" className="block overflow-hidden rounded-md" style={{ border: '1px solid var(--border-default)', background: 'var(--bg-surface)' }}>
+      <img
+        src={artifact.url}
+        alt="Final page screenshot"
+        className="max-h-[520px] min-h-[220px] w-full object-contain"
+        onError={() => setFailed(true)}
+      />
+      <ArtifactCaption artifact={artifact} />
+    </a>
+  )
+}
+
+function ArtifactCaption({ artifact }: { artifact: PlaywrightArtifact }) {
+  return (
+    <div className="truncate border-t px-2 py-1 text-[10px]" style={{ borderColor: 'var(--border-default)', color: 'var(--text-muted)' }} title={artifact.path}>
+      {artifact.name}
     </div>
   )
 }
@@ -328,21 +381,89 @@ function EmptyPane({ title, body }: { title: string; body: string }) {
   )
 }
 
-function ArtifactLinks({ artifacts }: { artifacts: PlaywrightArtifact[] }) {
+function ArtifactActions({ artifacts, videoMode }: { artifacts: PlaywrightArtifact[]; videoMode: string }) {
+  const traces = artifacts.filter((artifact) => artifact.kind === 'trace')
+  const videos = artifacts.filter((artifact) => artifact.kind === 'video')
+  const [openVideoPath, setOpenVideoPath] = useState<string | null>(null)
+  const openVideo = videos.find((artifact) => artifact.path === openVideoPath) ?? null
+  const showVideoHint = videos.length === 0
+  if (traces.length === 0 && videos.length === 0 && !showVideoHint) return null
   return (
-    <div className="mt-2 flex flex-wrap gap-1">
-      {artifacts.map((artifact) => (
-        <a
-          key={artifact.path}
-          href={artifact.url}
-          target="_blank"
-          rel="noreferrer"
-          className="rounded px-1.5 py-0.5"
-          style={{ background: 'var(--bg-selected)', color: 'var(--accent)' }}
-        >
-          {artifact.kind}
-        </a>
-      ))}
+    <div className="mt-3">
+      <div className="flex flex-wrap gap-2">
+        {videos.map((artifact) => (
+          <button
+            key={artifact.path}
+            type="button"
+            onClick={() => setOpenVideoPath(openVideoPath === artifact.path ? null : artifact.path)}
+            className="rounded px-2.5 py-1 text-[11px] font-medium"
+            style={{ background: 'var(--bg-selected)', color: 'var(--accent)' }}
+          >
+            {openVideoPath === artifact.path ? 'Hide video' : 'Open video'}
+          </button>
+        ))}
+        {traces.map((artifact) => (
+          <a
+            key={artifact.path}
+            href={artifact.url}
+            target="_blank"
+            rel="noreferrer"
+            download={artifact.name}
+            className="rounded px-2.5 py-1 text-[11px] font-medium"
+            style={{ background: 'var(--bg-selected)', color: 'var(--accent)' }}
+          >
+            Download trace
+          </a>
+        ))}
+      </div>
+      {showVideoHint && (
+        <div className="mt-2 rounded-md px-3 py-2 text-[11px]" style={{ background: 'var(--bg-selected)', color: 'var(--text-muted)' }}>
+          {videoGuidance(videoMode)}
+        </div>
+      )}
+      {openVideo && (
+        <div className="mt-2 overflow-hidden rounded-md" style={{ border: '1px solid var(--border-default)', background: 'var(--bg-surface)' }}>
+          <video src={openVideo.url} controls className="block max-h-[360px] w-full" />
+          <ArtifactCaption artifact={openVideo} />
+        </div>
+      )}
+    </div>
+  )
+}
+
+function videoGuidance(mode: string): string {
+  const location = 'Feature Configuration > Playwright > Browser & Artifacts > Video'
+  if (mode === 'off') return `Video is disabled. To capture one on the next run, open ${location} and set Video to on.`
+  return `No video was retained for this test. To always capture one, open ${location} and set Video to on.`
+}
+
+function BrowserActions({ steps }: { steps: PlaybackTest['steps'] }) {
+  const [expanded, setExpanded] = useState(false)
+  if (steps.length === 0) return null
+  return (
+    <div className="mt-3 rounded-md px-2 py-1.5" style={{ background: 'var(--bg-selected)' }}>
+      <button
+        type="button"
+        onClick={() => setExpanded((current) => !current)}
+        className="text-[11px] font-medium"
+        style={{ color: 'var(--text-secondary)' }}
+      >
+        <span aria-hidden="true">{expanded ? '▾' : '▸'} </span>
+        Browser actions ({steps.length})
+      </button>
+      {expanded && (
+        <ol className="mt-2 space-y-1.5">
+          {steps.map((step, idx) => (
+            <li key={`${step.title}:${idx}`} className="grid grid-cols-[18px_minmax(0,1fr)] gap-2 text-[11px]" style={{ color: 'var(--text-secondary)' }}>
+              <span className="text-right" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{idx + 1}</span>
+              <span className="min-w-0 truncate" title={step.title}>
+                {step.title}
+                {!step.ended && <span style={{ color: '#eab308' }}> (running)</span>}
+              </span>
+            </li>
+          ))}
+        </ol>
+      )}
     </div>
   )
 }

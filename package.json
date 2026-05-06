@@ -1,6 +1,6 @@
 {
   "name": "canary-lab",
-  "version": "0.10.0",
+  "version": "1.0.0",
   "description": "E2E test scaffolder and runner with agent-assisted self-fixing workflows",
   "keywords": [
     "playwright",
@@ -51,15 +51,12 @@
     "access": "public"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json && node tools/prepare-assets.mjs && vite build --config apps/web/vite.config.ts",
+    "build": "node tools/clean-dist.mjs && tsc -p tsconfig.build.json && node tools/prepare-assets.mjs && vite build --config apps/web/vite.config.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "build:web": "vite build --config apps/web/vite.config.ts",
     "dev:web": "vite --config apps/web/vite.config.ts",
-    "canary-lab:run": "node dist/scripts/cli.js run",
-    "canary-lab:env": "node dist/scripts/cli.js env",
-    "canary-lab:new-feature": "node dist/scripts/cli.js new-feature",
     "postinstall": "node tools/fix-node-pty-permissions.mjs",
     "prepack": "npm run build",
     "smoke:pack": "node tools/smoke-pack.mjs",

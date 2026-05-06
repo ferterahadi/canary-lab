@@ -142,6 +142,19 @@ describe('isHealthy', () => {
     await expect(isHealthy('http://x/')).resolves.toBe(false)
   })
 
+  it('treats responses without a status code as reachable', async () => {
+    vi.spyOn(http, 'get').mockImplementation(((...args: any[]) => {
+      const cb = args[args.length - 1] as (res: any) => void
+      const req: any = new EventEmitter()
+      req.destroy = vi.fn()
+      const res: any = new EventEmitter()
+      res.resume = vi.fn()
+      setImmediate(() => cb(res))
+      return req
+    }) as any)
+    await expect(isHealthy('http://x/')).resolves.toBe(true)
+  })
+
   it('resolves false when the request times out (and destroys the request)', async () => {
     let destroyed = false
     vi.spyOn(http, 'get').mockImplementation(((...args: any[]) => {
@@ -317,5 +330,21 @@ describe('isTcpListening', () => {
     // Port 1 is virtually never bound on a normal machine; if it is, this
     // test will be flaky — pick another reserved-ish port.
     await expect(isTcpListening(1, '127.0.0.1', 200)).resolves.toBe(false)
+  })
+
+  it('ignores late socket events after a TCP probe has settled', async () => {
+    const socket: any = new EventEmitter()
+    socket.destroy = vi.fn()
+    const createConnection = vi.spyOn(net, 'createConnection').mockReturnValue(socket)
+    try {
+      const result = isTcpListening(1234, '127.0.0.1', 200)
+      socket.emit('connect')
+      socket.emit('error', new Error('late'))
+
+      await expect(result).resolves.toBe(true)
+      expect(createConnection).toHaveBeenCalledWith({ port: 1234, host: '127.0.0.1' })
+    } finally {
+      createConnection.mockRestore()
+    }
   })
 })

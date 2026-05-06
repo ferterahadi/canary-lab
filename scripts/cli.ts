@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 
-import { main as createFeature } from './new-feature'
 import { main as initProject } from './init-project'
 import { main as upgradeProject } from './upgrade'
 import { runUi } from './ui-command'
@@ -26,7 +25,6 @@ export function printUsage(): void {
   section('Usage')
   console.log(`  canary-lab init <folder> ${dim('[--package-spec <spec>]')}`)
   console.log(`  canary-lab ui ${dim('[--port <n>]')}`)
-  console.log(`  canary-lab new-feature <name> ${dim('[description]')}`)
   console.log(`  canary-lab upgrade ${dim('[--silent] [--check] [--force-archive]')}`)
   line()
 }
@@ -41,18 +39,15 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
     case 'ui':
       await runUi(args)
       return
-    case 'new-feature':
-      await createFeature(args)
-      return
     case 'upgrade':
       await upgradeProject(args, { confirm: confirmYn })
       return
-    // `run` and `env` were removed in 0.11. Test execution + env switching
-    // now live in the web UI (`canary-lab ui`). Surface a hint so users on
-    // the old workflow get redirected instead of a generic "Unknown command".
+    // Test execution, env switching, and feature editing now live in the web
+    // UI. Surface a direct migration hint for removed workflow commands.
     case 'run':
     case 'env':
-      fail(`\`canary-lab ${command}\` was removed. Use \`canary-lab ui\` to run tests and switch envs from the web UI.`)
+    case 'new-feature':
+      fail(`\`canary-lab ${command}\` was removed. Use \`canary-lab ui\` to run tests, edit envsets, and manage feature config from the web UI.`)
       process.exit(1)
       return
     case '-h':

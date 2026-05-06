@@ -165,7 +165,7 @@ function ConfirmDeleteDialog({
       <div className="w-[420px] rounded-lg p-4 shadow-2xl" style={{ background: 'var(--bg-overlay)', border: '1px solid var(--border-default)' }}>
         <h2 className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>Delete iteration {entry.iteration}?</h2>
         <p className="mt-2 text-xs" style={{ color: 'var(--text-secondary)' }}>
-          This permanently removes it from <span style={{ fontFamily: 'var(--font-mono)' }}>logs/current/diagnosis-journal.md</span>.
+          This permanently removes only this iteration section from the diagnosis journal. The rest of the journal file stays intact.
         </p>
         {error && (
           <div className="mt-2 rounded-md border border-rose-500/40 bg-rose-500/10 p-2 text-xs text-rose-700 dark:text-rose-300">
