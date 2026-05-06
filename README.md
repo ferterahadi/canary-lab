@@ -7,7 +7,7 @@ Playwright tells you what failed. Canary Lab preserves the local system context 
 
 Canary Lab is a local control plane for Playwright-based E2E work. It starts the services a feature depends on, applies the selected envset, gates the run on health checks, runs Playwright, and writes run-scoped evidence: service logs, Playwright events, screenshots/videos/traces, summaries, and diagnosis notes. When a run fails, a human or agent can work from exact file paths instead of pasted terminal output.
 
-[![Canary Lab UI walkthrough](docs/assets/canary-lab-ui-walkthrough.png)](docs/assets/canary-lab-ui-walkthrough.webm)
+![Canary Lab UI walkthrough](docs/assets/canary-lab-ui-walkthrough.gif)
 
 See [CHANGELOG.md](CHANGELOG.md) for what's new in each release.
 
