@@ -213,66 +213,37 @@ This diagram shows the code path for a run started from `canary-lab ui`. It is i
 %%{init: {"theme": "base", "themeVariables": {"fontFamily": "Inter, ui-sans-serif, system-ui, sans-serif", "primaryTextColor": "#0f172a", "lineColor": "#64748b", "clusterBkg": "#ffffff", "clusterBorder": "#cbd5e1"}}}%%
 flowchart TD
     user(["Run button in canary-lab ui"])
-    server["Web Server<br/>apps/web-server/server.ts"]
-    store["Run Store<br/>apps/web-server/lib/run-store.ts"]
-    orchestrator["Run Orchestrator<br/>apps/web-server/lib/runtime/orchestrator.ts"]
-    paths["Run Paths<br/>apps/web-server/lib/runtime/run-paths.ts"]
-    envswitch["Env Switcher<br/>apps/web-server/lib/runtime/env-switcher/switch.ts"]
-    pty["PTY Spawner<br/>apps/web-server/lib/runtime/pty-spawner.ts"]
-    probe["Health Probe Config<br/>apps/web-server/lib/runtime/launcher/startup.ts"]
+    web["Web server + run store<br/>server.ts · run-store.ts"]
+    runtime["Run orchestrator<br/>orchestrator.ts · run-paths.ts"]
+    setup["Env + service startup<br/>env-switcher/switch.ts · pty-spawner.ts · launcher/startup.ts"]
     playwright(["Playwright"])
-    marker["Per-Test Log Marker<br/>shared/e2e-runner/log-marker-fixture.ts"]
-    reporter["Summary Reporter<br/>apps/web-server/lib/runtime/summary-reporter.ts"]
-    autoheal["Auto-Heal Command Builder<br/>apps/web-server/lib/runtime/auto-heal.ts"]
-    formatter["Agent Stream Formatters<br/>claude-formatter.ts · codex-formatter.ts"]
+    capture["Run capture<br/>log-marker-fixture.ts · summary-reporter.ts"]
+    autoheal["Auto-heal command + formatters<br/>auto-heal.ts · claude/codex formatter.ts"]
     agent(["Claude Code or Codex CLI"])
 
-    subgraph runDir["logs/runs/<runId>/"]
-        manifest[/"manifest.json"/]
-        runnerlog[/"runner.log"/]
-        svclogs[/"svc-*.log"/]
-        pwlog[/"playwright.log"/]
-        events[/"playwright-events.jsonl"/]
-        artifacts[/"playwright-artifacts/"/]
-        summary[/"e2e-summary.json"/]
-        failed[/"failed/<slug>/"/]
-        healindex[/"heal-index.md"/]
-        journal[/"diagnosis-journal.md"/]
+    subgraph runDir["logs/runs/{{runId}}/"]
+        state[/"manifest.json · runner.log"/]
+        logs[/"svc-*.log · playwright.log"/]
+        evidence[/"playwright-events.jsonl · playwright-artifacts/ · e2e-summary.json"/]
+        healctx[/"failed/<slug>/ · heal-index.md · diagnosis-journal.md"/]
         transcript[/"agent-transcript.log"/]
         signals[/"signals/.heal · .rerun · .restart"/]
     end
 
-    user --> server
-    server --> store
-    server --> orchestrator
-    orchestrator --> paths
-    orchestrator --> envswitch
-    orchestrator --> pty
-    orchestrator --> probe
-    orchestrator --> manifest
-    orchestrator --> runnerlog
-    pty --> svclogs
-    pty --> playwright
-    playwright --> pwlog
-    playwright -.-> marker
-    marker --> svclogs
-    playwright -.-> reporter
-    reporter --> events
-    reporter --> summary
-    reporter --> failed
-    reporter --> healindex
-    playwright --> artifacts
-    summary --> autoheal
+    user --> web --> runtime --> setup --> playwright
+    runtime --> state
+    setup --> logs
+    playwright --> logs
+    playwright --> capture
+    capture --> evidence
+    capture --> healctx
+    evidence --> autoheal
+    healctx -.-> autoheal
     autoheal --> agent
-    agent --> formatter
     agent --> transcript
-    agent -.-> healindex
-    agent -.-> summary
-    agent -.-> failed
-    agent -.-> journal
+    agent -.-> healctx
     agent --> signals
-    signals --> orchestrator
-    store --> manifest
+    signals --> runtime
 
     classDef entry fill:#e0f2fe,stroke:#0284c7,color:#0c4a6e,stroke-width:2px
     classDef core fill:#eef2ff,stroke:#4f46e5,color:#312e81,stroke-width:2px
@@ -282,11 +253,11 @@ flowchart TD
     classDef artifact fill:#f8fafc,stroke:#64748b,color:#334155,stroke-width:1.5px
 
     class user entry
-    class server,store core
-    class orchestrator,paths,envswitch,pty,probe runtime
-    class playwright,marker,reporter test
-    class autoheal,formatter,agent heal
-    class manifest,runnerlog,svclogs,pwlog,events,artifacts,summary,failed,healindex,journal,transcript,signals artifact
+    class web core
+    class runtime,setup runtime
+    class playwright,capture test
+    class autoheal,agent heal
+    class state,logs,evidence,healctx,transcript,signals artifact
 ```
 
 ### Local Development
