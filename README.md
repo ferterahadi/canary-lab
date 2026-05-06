@@ -213,21 +213,21 @@ This diagram shows the code path for a run started from `canary-lab ui`. It is i
 %%{init: {"theme": "base", "themeVariables": {"fontFamily": "Inter, ui-sans-serif, system-ui, sans-serif", "primaryTextColor": "#0f172a", "lineColor": "#64748b", "clusterBkg": "#ffffff", "clusterBorder": "#cbd5e1"}}}%%
 flowchart TD
     user(["Run button in canary-lab ui"])
-    web["Web server + run store<br/>server.ts · run-store.ts"]
-    runtime["Run orchestrator<br/>orchestrator.ts · run-paths.ts"]
-    setup["Env + service startup<br/>env-switcher/switch.ts · pty-spawner.ts · launcher/startup.ts"]
+    web["Web server + run store<br/>server.ts + run-store.ts"]
+    runtime["Run orchestrator<br/>orchestrator.ts + run-paths.ts"]
+    setup["Env + service startup<br/>env-switcher/switch.ts + pty-spawner.ts + launcher/startup.ts"]
     playwright(["Playwright"])
-    capture["Run capture<br/>log-marker-fixture.ts · summary-reporter.ts"]
-    autoheal["Auto-heal command + formatters<br/>auto-heal.ts · claude/codex formatter.ts"]
+    capture["Run capture<br/>log-marker-fixture.ts + summary-reporter.ts"]
+    autoheal["Auto-heal command + formatters<br/>auto-heal.ts + claude/codex formatter.ts"]
     agent(["Claude Code or Codex CLI"])
 
     subgraph runDir["logs/runs/{{runId}}/"]
-        state[/"manifest.json · runner.log"/]
-        logs[/"svc-*.log · playwright.log"/]
-        evidence[/"playwright-events.jsonl · playwright-artifacts/ · e2e-summary.json"/]
-        healctx[/"failed/<slug>/ · heal-index.md · diagnosis-journal.md"/]
+        state[/"manifest.json + runner.log"/]
+        logs[/"svc-*.log + playwright.log"/]
+        evidence[/"playwright-events.jsonl + playwright-artifacts/ + e2e-summary.json"/]
+        healctx[/"failed/{{slug}}/ + heal-index.md + diagnosis-journal.md"/]
         transcript[/"agent-transcript.log"/]
-        signals[/"signals/.heal · .rerun · .restart"/]
+        signals[/"signals/.heal + .rerun + .restart"/]
     end
 
     user --> web --> runtime --> setup --> playwright
