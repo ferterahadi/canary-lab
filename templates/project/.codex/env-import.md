@@ -4,6 +4,17 @@ Import existing environment/config files from the repos declared in a feature's 
 
 Canary Lab's UI is the primary surface for switching envs and running tests, but it uses the same `envsets/envsets.config.json` contract described here.
 
+This guide supports envset discovery and file copying. The final generated feature still has to satisfy Canary Lab's shared scaffold validation: `envsets/envsets.config.json` must use top-level `appRoots`, `slots`, and `feature`, not a stale wrapper shape.
+
+Use deterministic CLI commands when an agent needs to apply or revert envsets:
+
+```bash
+npx canary-lab env apply <feature> <set>
+npx canary-lab env revert <feature>
+```
+
+The procedure below is only for discovering/copying env files and updating `envsets.config.json`.
+
 ## When to Use
 
 When a feature has repos declared in `feature.config.cjs` but the envsets are not yet configured — or when adding a new repo to an existing feature.

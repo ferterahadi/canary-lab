@@ -1,5 +1,10 @@
 import fs from 'fs'
 import path from 'path'
+import {
+  applyFeatureScaffold,
+  validateFeatureTarget as validateScaffoldTarget,
+  type ApplyFeatureScaffoldResult,
+} from '../../../shared/feature-scaffold'
 
 // Draft storage for the Add Test wizard. Each draft lives at
 // `<logsDir>/drafts/<draftId>/` with a JSON state file plus the raw PRD,
@@ -203,7 +208,7 @@ export interface ApplyToProjectInput {
 
 export type ApplyToProjectResult =
   | { ok: true; featureDir: string; written: string[] }
-  | { ok: false; error: 'feature-exists' | 'invalid-name'; featureDir?: string }
+  | { ok: false; error: 'feature-exists' | 'invalid-name' | 'invalid-scaffold'; featureDir?: string; details?: string }
 
 export type ValidateFeatureTargetResult =
   | { ok: true; featureDir: string }
@@ -213,28 +218,19 @@ export type MergeDevDependenciesResult =
   | { ok: true; packageJsonPath?: string; added: string[] }
   | { ok: false; error: 'package-json-missing' | 'package-json-invalid' | 'package-json-not-object'; packageJsonPath: string }
 
-const FEATURE_NAME_RE = /^[a-zA-Z0-9_-]+$/
-
 export function validateFeatureTarget(projectRoot: string, featureName: string): ValidateFeatureTargetResult {
-  if (!FEATURE_NAME_RE.test(featureName)) return { ok: false, error: 'invalid-name' }
-  const featureDir = path.join(projectRoot, 'features', featureName)
-  if (fs.existsSync(featureDir)) return { ok: false, error: 'feature-exists', featureDir }
-  return { ok: true, featureDir }
+  const result = validateScaffoldTarget(projectRoot, featureName)
+  if (result.ok) return { ok: true, featureDir: result.featureDir }
+  if (result.error === 'invalid-scaffold') return { ok: false, error: 'invalid-name' }
+  return { ok: false, error: result.error, featureDir: result.featureDir }
 }
 
 export function applyToProject(input: ApplyToProjectInput): ApplyToProjectResult {
-  const validation = validateFeatureTarget(input.projectRoot, input.featureName)
-  if (!validation.ok) return validation
-  const featureDir = validation.featureDir
-  fs.mkdirSync(featureDir, { recursive: true })
-  const written: string[] = []
-  for (const f of input.generated) {
-    const target = path.join(featureDir, f.path)
-    fs.mkdirSync(path.dirname(target), { recursive: true })
-    fs.writeFileSync(target, f.content, 'utf8')
-    written.push(target)
-  }
-  return { ok: true, featureDir, written }
+  return applyFeatureScaffold({
+    featureName: input.featureName,
+    files: input.generated,
+    projectRoot: input.projectRoot,
+  }) as ApplyFeatureScaffoldResult
 }
 
 export function mergeRootDevDependencies(projectRoot: string, devDependencies: string[]): MergeDevDependenciesResult {

@@ -17,6 +17,7 @@ import {
   validateFeatureTarget,
   writeDraft,
 } from './draft-store'
+import { buildFeatureScaffold } from '../../../shared/feature-scaffold'
 
 let tmp: string
 beforeEach(() => {
@@ -177,16 +178,13 @@ describe('applyToProject', () => {
     const r = applyToProject({
       draftId: 'd1',
       featureName: 'login',
-      generated: [
-        { path: 'feature.config.cjs', content: 'a' },
-        { path: 'e2e/login.spec.ts', content: 'b' },
-      ],
+      generated: buildFeatureScaffold({ featureName: 'login', description: 'Login' }),
       projectRoot,
     })
     expect(r.ok).toBe(true)
     if (!r.ok) return
-    expect(fs.readFileSync(path.join(r.featureDir, 'feature.config.cjs'), 'utf8')).toBe('a')
-    expect(fs.readFileSync(path.join(r.featureDir, 'e2e/login.spec.ts'), 'utf8')).toBe('b')
+    expect(fs.readFileSync(path.join(r.featureDir, 'feature.config.cjs'), 'utf8')).toContain("name: 'login'")
+    expect(fs.readFileSync(path.join(r.featureDir, 'e2e/login.spec.ts'), 'utf8')).toContain("test.describe('login'")
     expect(fs.existsSync(path.join(r.featureDir, '.canary-lab-draft-id'))).toBe(false)
     fs.rmSync(projectRoot, { recursive: true, force: true })
   })
@@ -197,7 +195,7 @@ describe('applyToProject', () => {
     const r = applyToProject({
       draftId: 'd1',
       featureName: 'login',
-      generated: [{ path: 'x.ts', content: 'a' }],
+      generated: buildFeatureScaffold({ featureName: 'login' }),
       projectRoot,
     })
     expect(r.ok).toBe(false)
@@ -216,6 +214,22 @@ describe('applyToProject', () => {
     expect(r.ok).toBe(false)
     if (r.ok) return
     expect(r.error).toBe('invalid-name')
+  })
+
+  it('rejects invalid generated scaffolds before writing', () => {
+    const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'apply-'))
+    const r = applyToProject({
+      draftId: 'd1',
+      featureName: 'login',
+      generated: [{ path: 'feature.config.cjs', content: 'x' }],
+      projectRoot,
+    })
+    expect(r.ok).toBe(false)
+    if (r.ok) return
+    expect(r.error).toBe('invalid-scaffold')
+    expect(r.details).toContain('missing required file')
+    expect(fs.existsSync(path.join(projectRoot, 'features', 'login'))).toBe(false)
+    fs.rmSync(projectRoot, { recursive: true, force: true })
   })
 })
 

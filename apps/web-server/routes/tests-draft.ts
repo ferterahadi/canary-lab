@@ -27,6 +27,7 @@ import {
   STAGE1_DIFF_TEMPLATE,
   STAGE1_TEMPLATE,
 } from '../lib/wizard-agent-spawner'
+import { validateGeneratedFeatureFiles } from '../../../shared/feature-scaffold'
 import { resolveDraftFile } from '../lib/draft-file-resolver'
 import { combinePrdText, extractPrdDocument } from '../lib/prd-document-extractor'
 
@@ -246,6 +247,11 @@ export async function testsDraftRoutes(
         reply.code(validation.error === 'feature-exists' ? 409 : 400)
         return { error: validation.error, featureDir: validation.featureDir }
       }
+      const scaffold = validateGeneratedFeatureFiles(featureName, generated)
+      if (!scaffold.ok) {
+        reply.code(400)
+        return { error: 'invalid-scaffold', details: scaffold.error }
+      }
       const packageResult = mergeRootDevDependencies(deps.projectRoot, rec.devDependencies ?? [])
       if (!packageResult.ok) {
         reply.code(400)
@@ -259,7 +265,7 @@ export async function testsDraftRoutes(
       })
       if (!result.ok) {
         reply.code(result.error === 'feature-exists' ? 409 : 400)
-        return { error: result.error, featureDir: result.featureDir }
+        return { error: result.error, details: result.details, featureDir: result.featureDir }
       }
       transition(deps.logsDir, rec.draftId, 'accepted', {
         featureName,

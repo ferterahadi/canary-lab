@@ -47,10 +47,12 @@ Emit one or more `<file path="...">...</file>` blocks. Each block writes a singl
 You must emit at minimum:
 
 1. `feature.config.cjs`
-2. `playwright.config.cjs`
+2. `playwright.config.ts`
 3. One or more `e2e/*.spec.ts` files implementing the accepted plan.
+4. `envsets/envsets.config.json`
+5. `envsets/local/{{featureName}}.env`
 
-Also emit `envsets/envsets.config.json` and `envsets/local/{{featureName}}.env` when envset wiring is inferable without guessing secrets. If a needed value is unknown, leave a placeholder key with an empty value or a safe local default only when the PRD or selected skill justifies it. Never invent credentials, tokens, customer identifiers, or production-only values.
+If a needed env value is unknown, leave a placeholder key with an empty value or a safe local default only when the PRD or selected skill justifies it. Never invent credentials, tokens, customer identifiers, or production-only values.
 
 `envsets/envsets.config.json` must use the current Canary Lab envset schema with top-level `appRoots`, `slots`, and `feature` objects. Do not use the stale `{ "envsets": { ... } }` shape. For a feature-owned env file, use a slot named `{{featureName}}.env` and target `$CANARY_LAB_PROJECT_ROOT/features/{{featureName}}/.env`.
 
@@ -118,17 +120,17 @@ module.exports = { config }
 - `featureDir: __dirname` is required.
 - Do not use the stale shape `module.exports = { name, services, playwright }`.
 
-`playwright.config.cjs` must use CommonJS and spread Canary Lab's base config:
+`playwright.config.ts` must spread Canary Lab's base config:
 
-```js
-const path = require('node:path')
-const { config: loadDotenv } = require('dotenv')
-const { defineConfig } = require('@playwright/test')
-const { baseConfig } = require('canary-lab/feature-support/playwright-base')
+```ts
+import path from 'node:path'
+import { config as loadDotenv } from 'dotenv'
+import { defineConfig } from '@playwright/test'
+import { baseConfig } from 'canary-lab/feature-support/playwright-base'
 
 loadDotenv({ path: path.join(__dirname, '.env') })
 
-module.exports = defineConfig({ ...baseConfig })
+export default defineConfig({ ...baseConfig })
 ```
 
 Only override `baseConfig` fields when the accepted plan or selected skills require it.
@@ -187,15 +189,34 @@ const config = {
 
 module.exports = { config }
 </file>
-<file path="playwright.config.cjs">
-const path = require('node:path')
-const { config: loadDotenv } = require('dotenv')
-const { defineConfig } = require('@playwright/test')
-const { baseConfig } = require('canary-lab/feature-support/playwright-base')
+<file path="playwright.config.ts">
+import path from 'node:path'
+import { config as loadDotenv } from 'dotenv'
+import { defineConfig } from '@playwright/test'
+import { baseConfig } from 'canary-lab/feature-support/playwright-base'
 
 loadDotenv({ path: path.join(__dirname, '.env') })
 
-module.exports = defineConfig({ ...baseConfig })
+export default defineConfig({ ...baseConfig })
+</file>
+<file path="envsets/envsets.config.json">
+{
+  "appRoots": {},
+  "slots": {
+    "{{featureName}}.env": {
+      "description": "Canary Lab {{featureName}} feature .env",
+      "target": "$CANARY_LAB_PROJECT_ROOT/features/{{featureName}}/.env"
+    }
+  },
+  "feature": {
+    "slots": ["{{featureName}}.env"],
+    "testCommand": "npx playwright test",
+    "testCwd": "$CANARY_LAB_PROJECT_ROOT/features/{{featureName}}"
+  }
+}
+</file>
+<file path="envsets/local/{{featureName}}.env">
+GATEWAY_URL=http://localhost:3000
 </file>
 <file path="e2e/login.spec.ts">
 import { test, expect } from 'canary-lab/feature-support/log-marker-fixture'

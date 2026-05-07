@@ -15,6 +15,7 @@ import {
   STAGE1_DIFF_TEMPLATE,
   STAGE1_TEMPLATE,
 } from '../lib/wizard-agent-spawner'
+import { buildFeatureScaffold, canonicalScaffoldPaths, type GeneratedFeatureFile } from '../../../shared/feature-scaffold'
 
 let logsDir: string
 let projectRoot: string
@@ -45,6 +46,10 @@ async function makeApp(deps: TestsDraftRouteDeps): Promise<ReturnType<typeof Fas
   const app = Fastify()
   await testsDraftRoutes(app, deps)
   return app
+}
+
+function fileBlocks(files: GeneratedFeatureFile[]): string {
+  return files.map((file) => `<file path="${file.path}">\n${file.content}</file>`).join('\n')
 }
 
 describe('POST /api/tests/draft', () => {
@@ -668,28 +673,11 @@ describe('POST /api/tests/draft/:id/accept-spec', () => {
       ]</plan-output>`,
       spawnSpecAgent: async (input) => {
         expect(input.featureName).toBe('login')
-        return `<file path="feature.config.cjs">
-const config = {
-  name: 'login',
-  description: 'Login flow',
-  envs: ['local'],
-  repos: [],
-  featureDir: __dirname,
-}
-module.exports = { config }
-</file>
-<file path="playwright.config.cjs">
-const path = require('node:path')
-const { config: loadDotenv } = require('dotenv')
-const { defineConfig } = require('@playwright/test')
-const { baseConfig } = require('canary-lab/feature-support/playwright-base')
-loadDotenv({ path: path.join(__dirname, '.env') })
-module.exports = defineConfig({ ...baseConfig })
-</file>
-<file path="e2e/login.spec.ts">
-import { test } from 'canary-lab/feature-support/log-marker-fixture';
-test('x', async () => {});
-</file>`
+        return fileBlocks(buildFeatureScaffold({ featureName: 'login', description: 'Login flow' }).map((file) => (
+          file.path === 'e2e/login.spec.ts'
+            ? { ...file, content: "import { test } from 'canary-lab/feature-support/log-marker-fixture';\ntest('x', async () => {});\n" }
+            : file
+        )))
       },
     })
     const app = await makeApp(deps)
@@ -719,8 +707,9 @@ test('x', async () => {});
     expect(r.statusCode).toBe(200)
     const featureDir = path.join(projectRoot, 'features', 'login')
     expect(fs.readFileSync(path.join(featureDir, 'feature.config.cjs'), 'utf8')).toContain("name: 'login'")
-    expect(fs.readFileSync(path.join(featureDir, 'playwright.config.cjs'), 'utf8')).toContain('baseConfig')
+    expect(fs.readFileSync(path.join(featureDir, 'playwright.config.ts'), 'utf8')).toContain('baseConfig')
     expect(fs.readFileSync(path.join(featureDir, 'e2e/login.spec.ts'), 'utf8')).toContain("test('x'")
+    expect(walkRelative(featureDir)).toEqual([...canonicalScaffoldPaths('login')].sort())
     expect(fs.existsSync(path.join(featureDir, '.canary-lab-draft-id'))).toBe(false)
     const rec = readDraft(logsDir, id)!
     expect(rec.status).toBe('accepted')
@@ -737,9 +726,11 @@ test('x', async () => {});
       spawnPlanAgent: async () => `<plan-output>[
         {"step":"Open","actions":["go"],"expectedOutcome":"visible"}
       ]</plan-output>`,
-      spawnSpecAgent: async () => `<file path="feature.config.cjs">module.exports = { config: { name: 'deps' } }</file>
-<file path="playwright.config.cjs">module.exports = {}</file>
-<file path="e2e/deps.spec.ts">import amqplib from 'amqplib'</file>
+      spawnSpecAgent: async () => `${fileBlocks(buildFeatureScaffold({ featureName: 'deps' }).map((file) => (
+        file.path === 'e2e/deps.spec.ts'
+          ? { ...file, content: "import { test } from 'canary-lab/feature-support/log-marker-fixture'\nimport amqplib from 'amqplib'\ntest('x', async () => { void amqplib })\n" }
+          : file
+      )))}
 <dev-dependencies>
 ["amqplib","mysql2"]
 </dev-dependencies>`,
@@ -777,7 +768,7 @@ test('x', async () => {});
       spawnPlanAgent: async () => `<plan-output>[
         {"step":"Open","actions":["go"],"expectedOutcome":"visible"}
       ]</plan-output>`,
-      spawnSpecAgent: async () => `<file path="feature.config.cjs">x</file>
+      spawnSpecAgent: async () => `${fileBlocks(buildFeatureScaffold({ featureName: 'badpkg' }))}
 <dev-dependencies>["mysql2"]</dev-dependencies>`,
     })
     const app = await makeApp(deps)
@@ -801,6 +792,39 @@ test('x', async () => {});
     expect(r.json().error).toBe('package-json-invalid')
     expect(fs.readFileSync(path.join(projectRoot, 'package.json'), 'utf8')).toBe('not-json')
     expect(fs.existsSync(path.join(projectRoot, 'features', 'badpkg'))).toBe(false)
+    await app.close()
+  })
+
+  it('rejects malformed scaffold output before writing feature files', async () => {
+    const deps = makeDeps({
+      spawnPlanAgent: async () => `<plan-output>[
+        {"step":"Open","actions":["go"],"expectedOutcome":"visible"}
+      ]</plan-output>`,
+      spawnSpecAgent: async () => `<file path="feature.config.cjs">
+const config = { name: 'badscaffold' }
+module.exports = { config }
+</file>`,
+    })
+    const app = await makeApp(deps)
+    const post = await app.inject({
+      method: 'POST',
+      url: '/api/tests/draft',
+      payload: {
+        prdText: 'Bad scaffold',
+        repos: [{ name: 'app', localPath: '/p' }],
+        skills: ['s1'],
+        featureName: 'badscaffold',
+      },
+    })
+    const id = post.json().draftId
+    await new Promise((r) => setTimeout(r, 20))
+    await app.inject({ method: 'POST', url: `/api/tests/draft/${id}/accept-plan`, payload: {} })
+    await new Promise((r) => setTimeout(r, 20))
+
+    const r = await app.inject({ method: 'POST', url: `/api/tests/draft/${id}/accept-spec`, payload: {} })
+    expect(r.statusCode).toBe(400)
+    expect(r.json().error).toBe('invalid-scaffold')
+    expect(fs.existsSync(path.join(projectRoot, 'features', 'badscaffold'))).toBe(false)
     await app.close()
   })
 
@@ -860,6 +884,22 @@ test('x', async () => {});
     await app.close()
   })
 })
+
+function walkRelative(root: string): string[] {
+  const out: string[] = []
+  const visit = (dir: string): void => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name)
+      if (entry.isDirectory()) {
+        visit(full)
+      } else {
+        out.push(path.relative(root, full))
+      }
+    }
+  }
+  visit(root)
+  return out.sort()
+}
 
 describe('runSpecStage error paths', () => {
   it('error on agent throw', async () => {

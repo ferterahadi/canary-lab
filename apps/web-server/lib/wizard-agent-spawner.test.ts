@@ -141,7 +141,7 @@ describe('loadTemplate', () => {
     expect(t).toContain('Use `startCommands: []` only when no defensible local command or readiness probe can be inferred')
     expect(t).toContain('Choose the spec-file split yourself')
     expect(t).toContain('multiple focused `e2e/*.spec.ts` files')
-    expect(t).toContain('playwright.config.cjs')
+    expect(t).toContain('playwright.config.ts')
     expect(t).toContain('<dev-dependencies>')
     expect(t).toContain('"appRoots"')
     expect(t).toContain('"slots"')
