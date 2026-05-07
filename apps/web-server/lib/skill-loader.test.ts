@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -13,6 +13,10 @@ let tmp: string
 
 beforeEach(() => {
   tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-skills-')))
+})
+
+afterEach(() => {
+  vi.restoreAllMocks()
 })
 
 function writeSkill(rootDir: string, rel: string, body: string): string {
@@ -102,11 +106,27 @@ describe('loadSkills', () => {
   it('survives unreadable files (silently skips them)', () => {
     const root = path.join(tmp, 'user')
     writeSkill(root, 'good.md', fm('good', 'desc'))
-    // Simulate readFileSync failure by pointing at a directory named *.md.
-    const dirAsMd = path.join(root, 'weird.md')
-    fs.mkdirSync(dirAsMd)
+    const unreadable = writeSkill(root, 'unreadable.md', fm('bad', 'desc'))
+    const originalReadFileSync = fs.readFileSync.bind(fs)
+    vi.spyOn(fs, 'readFileSync').mockImplementation(((file, ...args) => {
+      if (file === unreadable) throw new Error('permission denied')
+      return originalReadFileSync(file as any, ...args as [any]) as any
+    }) as typeof fs.readFileSync)
+
     const out = loadSkills({ roots: [{ dir: root, source: 'user' }] })
     expect(out.map((s) => s.name)).toEqual(['good'])
+  })
+
+  it('survives root directories that cannot be read', () => {
+    const root = path.join(tmp, 'user')
+    fs.mkdirSync(root, { recursive: true })
+    const originalReadDir = fs.readdirSync
+    vi.spyOn(fs, 'readdirSync').mockImplementation(((dir, ...args) => {
+      if (dir === root) throw new Error('permission denied')
+      return originalReadDir(dir as any, ...args as [any]) as any
+    }) as typeof fs.readdirSync)
+
+    expect(loadSkills({ roots: [{ dir: root, source: 'user' }] })).toEqual([])
   })
 })
 
@@ -116,6 +136,7 @@ describe('defaultSkillRoots', () => {
     fs.mkdirSync(path.join(home, '.claude', 'skills'), { recursive: true })
     fs.mkdirSync(path.join(home, '.claude', 'plugins', 'cache', 'pluginA', 'skills'), { recursive: true })
     fs.mkdirSync(path.join(home, '.claude', 'plugins', 'cache', 'pluginB'), { recursive: true })
+    fs.writeFileSync(path.join(home, '.claude', 'plugins', 'cache', 'README.md'), 'not a plugin dir')
     // pluginB has no skills/ subdir → should be skipped
     const roots = defaultSkillRoots(home)
     expect(roots[0].source).toBe('user')

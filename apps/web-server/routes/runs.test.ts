@@ -37,6 +37,7 @@ function writeManifestForRun(runId: string, feature = 'foo', status: 'running' |
   writeManifest(path.join(dir, 'manifest.json'), {
     runId,
     feature,
+    featureDir: path.join(featuresDir, feature),
     startedAt: 'now',
     status,
     healCycles: 0,
@@ -156,8 +157,8 @@ describe('GET /api/runs/:runId/artifacts/*', () => {
   })
 })
 
-describe('GET /api/runs/:runId/assertion.md', () => {
-  it('exports a completed run as assertion markdown', async () => {
+describe('GET /api/runs/:runId/assertion.html', () => {
+  it('exports a completed run as assertion html with flowcharts in a zip', async () => {
     writeManifestForRun('r-review', 'checkout', 'passed')
     fs.writeFileSync(path.join(runDirFor(logsDir, 'r-review'), 'e2e-summary.json'), JSON.stringify({
       complete: true,
@@ -168,26 +169,82 @@ describe('GET /api/runs/:runId/assertion.md', () => {
     }))
     const { app } = await build()
 
-    const res = await app.inject({ method: 'GET', url: '/api/runs/r-review/assertion.md' })
+    const res = await app.inject({ method: 'GET', url: '/api/runs/r-review/assertion.html' })
 
     expect(res.statusCode).toBe(200)
-    expect(res.headers['content-type']).toContain('text/markdown')
-    expect(res.headers['content-disposition']).toContain('canary-lab-assertion-checkout-r-review.md')
-    expect(res.body).toContain('# Assertion Review: checkout')
-    expect(res.body).toContain('## Test Cases')
-    expect(res.body).not.toContain('test-review.json')
+    expect(res.headers['content-type']).toContain('application/zip')
+    expect(res.headers['content-disposition']).toContain('canary-lab-assertion-checkout-r-review.zip')
+    const body = res.rawPayload.toString('latin1')
+    expect(body).toContain('assertion.html')
+    expect(body).toContain('flowcharts/1-test-case-passes-checkout.svg')
+    expect(body).toContain('<p class="eyebrow">Assertion Review</p>')
+    expect(body).toContain('<h1 id="assertion-review">Checkout</h1>')
+    expect(body).toContain('Test Cases')
+    expect(body).toContain('<img src="flowcharts/1-test-case-passes-checkout.svg"')
+    expect(body).not.toContain('test-review.json')
+  })
+
+  it('exports assertion html and retained videos together as a zip', async () => {
+    writeManifestForRun('r-review:video', 'checkout', 'passed')
+    const spec = path.join(featuresDir, 'checkout', 'e2e', 'checkout.spec.ts')
+    fs.mkdirSync(path.dirname(spec), { recursive: true })
+    fs.writeFileSync(spec, `import { test, expect } from '@playwright/test'
+
+test('passes checkout', async ({ page }) => {
+  await expect(page.getByText('Checkout')).toBeVisible()
+})
+`)
+    fs.writeFileSync(path.join(runDirFor(logsDir, 'r-review:video'), 'e2e-summary.json'), JSON.stringify({
+      complete: true,
+      total: 1,
+      passed: 1,
+      passedNames: ['test-case-passes-checkout'],
+      failed: [],
+    }))
+    const video = path.join(runDirFor(logsDir, 'r-review:video'), 'playwright-artifacts', 'case-a', 'recording.webm')
+    fs.mkdirSync(path.dirname(video), { recursive: true })
+    fs.writeFileSync(video, 'WEBM')
+    fs.writeFileSync(
+      path.join(runDirFor(logsDir, 'r-review:video'), 'playwright-events.jsonl'),
+      JSON.stringify({
+        type: 'test-end',
+        time: 't',
+        test: { name: 'test-case-passes-checkout', title: 'passes checkout', location: `${spec}:3` },
+        status: 'passed',
+        passed: true,
+        durationMs: 12,
+        retry: 0,
+        attachments: [{ name: 'video', contentType: 'video/webm', path: video }],
+      }) + '\n',
+    )
+    const { app } = await build()
+
+    const res = await app.inject({ method: 'GET', url: '/api/runs/r-review%3Avideo/assertion.html' })
+
+    expect(res.statusCode).toBe(200)
+    expect(res.headers['content-type']).toContain('application/zip')
+    expect(res.headers['content-disposition']).toContain('canary-lab-assertion-checkout-r-review-video.zip')
+    const body = res.rawPayload.toString('latin1')
+    expect(body).toContain('assertion.html')
+    expect(body).toContain('flowcharts/1-passes-checkout.svg')
+    expect(body).toContain('r-review-video.webm')
+    expect(body).toContain('<img src="flowcharts/1-passes-checkout.svg"')
+    expect(body).toContain('<h3>Video</h3>')
+    expect(body).toContain('<video controls preload="metadata" src="r-review-video.webm"></video>')
+    expect(body.indexOf('<h3>Assertions</h3>')).toBeLessThan(body.indexOf('<h3>Video</h3>'))
+    expect(body).toContain('WEBM')
   })
 
   it('404s when the run is unknown', async () => {
     const { app } = await build()
-    const res = await app.inject({ method: 'GET', url: '/api/runs/missing/assertion.md' })
+    const res = await app.inject({ method: 'GET', url: '/api/runs/missing/assertion.html' })
     expect(res.statusCode).toBe(404)
   })
 
   it('409s while the run is still active', async () => {
     writeManifestForRun('r-active', 'checkout', 'running')
     const { app } = await build()
-    const res = await app.inject({ method: 'GET', url: '/api/runs/r-active/assertion.md' })
+    const res = await app.inject({ method: 'GET', url: '/api/runs/r-active/assertion.html' })
     expect(res.statusCode).toBe(409)
     expect(res.json().error).toContain('after the run finishes')
   })

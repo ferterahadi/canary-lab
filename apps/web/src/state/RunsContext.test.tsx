@@ -278,17 +278,23 @@ describe('RunsProvider', () => {
 
   it('exposes per-run action callbacks', async () => {
     const captured = renderProbe('r-actions')
+    vi.mocked(api.stopRun).mockResolvedValue(undefined)
     vi.mocked(api.deleteRun).mockResolvedValue(undefined)
     vi.mocked(api.pauseHealRun).mockResolvedValue({ status: 'healing', failureCount: 1 })
     vi.mocked(api.cancelHealRun).mockResolvedValue({ status: 'cancelled' })
     vi.mocked(api.listRuns).mockResolvedValue([])
 
     await act(async () => {
+      await captured.actions?.abort()
       await captured.actions?.delete()
       await captured.actions?.pauseHeal()
       await captured.actions?.cancelHeal()
     })
+    act(() => {
+      captured.actions?.clearError()
+    })
 
+    expect(api.stopRun).toHaveBeenCalledWith('r-actions')
     expect(api.deleteRun).toHaveBeenCalledWith('r-actions')
     expect(api.pauseHealRun).toHaveBeenCalledWith('r-actions')
     expect(api.cancelHealRun).toHaveBeenCalledWith('r-actions')

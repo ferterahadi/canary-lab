@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { assertionFilename, isAssertionExportable, shouldShowAgentInputBar } from './RunDetailColumn'
+import { assertionFilename, assertionHref, isAssertionExportable, shouldShowAgentInputBar } from './RunDetailColumn'
 
 describe('shouldShowAgentInputBar', () => {
   it('is only shown while an auto heal agent is active', () => {
@@ -25,9 +25,10 @@ describe('assertion export helpers', () => {
     expect(isAssertionExportable('healing')).toBe(false)
   })
 
-  it('builds a markdown download filename from feature and run id', () => {
+  it('builds a zip download filename from feature and run id', () => {
     expect(assertionFilename('shop redeeming', '2026:05:06 run')).toBe(
-      'canary-lab-assertion-shop-redeeming-2026-05-06-run.md',
+      'canary-lab-assertion-shop-redeeming-2026-05-06-run.zip',
     )
+    expect(assertionHref('2026:05:06 run')).toBe('/api/runs/2026%3A05%3A06%20run/assertion.html')
   })
 })

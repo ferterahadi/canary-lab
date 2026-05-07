@@ -1,10 +1,11 @@
 import type { FastifyInstance } from 'fastify'
 import fs from 'fs'
 import path from 'path'
+import type { PlaywrightArtifact } from '../lib/run-store'
 import type { RunStore, OrchestratorLike } from '../lib/run-store'
 import { loadFeatures } from '../lib/feature-loader'
 import { buildRunPaths, runDirFor } from '../lib/runtime/run-paths'
-import { createAssertionMarkdown } from '../lib/test-review-export'
+import { createAssertionExport } from '../lib/test-review-export'
 
 export interface RunsRouteDeps {
   featuresDir: string
@@ -31,7 +32,7 @@ export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Pro
     return detail
   })
 
-  app.get<{ Params: { runId: string } }>('/api/runs/:runId/assertion.md', async (req, reply) => {
+  app.get<{ Params: { runId: string } }>('/api/runs/:runId/assertion.html', async (req, reply) => {
     const detail = deps.store.get(req.params.runId)
     if (!detail) {
       reply.code(404)
@@ -41,12 +42,22 @@ export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Pro
       reply.code(409)
       return { error: 'assertion export is available after the run finishes' }
     }
-    const markdown = createAssertionMarkdown(detail)
-    const filename = `canary-lab-assertion-${safeFilename(detail.manifest.feature)}-${safeFilename(detail.runId)}.md`
+    const videos = assertionVideos(
+      detail.playwrightArtifacts,
+      buildRunPaths(runDirFor(deps.store.logsDir, detail.runId)).playwrightArtifactsDir,
+      detail.runId,
+    )
+    const archiveBase = `canary-lab-assertion-${safeFilename(detail.manifest.feature)}-${safeFilename(detail.runId)}`
+    const exported = await createAssertionExport(detail, { videoLinksByTestName: videoLinksByTestName(videos) })
+    const zip = createZip([
+      { filename: 'assertion.html', data: Buffer.from(exported.html, 'utf8') },
+      ...exported.assets,
+      ...videos.map((video) => ({ filename: video.filename, data: fs.readFileSync(video.path) })),
+    ])
     reply
-      .type('text/markdown; charset=utf-8')
-      .header('content-disposition', `attachment; filename="${filename}"`)
-    return reply.send(markdown)
+      .type('application/zip')
+      .header('content-disposition', `attachment; filename="${archiveBase}.zip"`)
+    return reply.send(zip)
   })
 
   app.get<{ Params: { runId: string; '*': string } }>('/api/runs/:runId/artifacts/*', async (req, reply) => {
@@ -226,4 +237,105 @@ function isTerminalRun(status: string): boolean {
 
 function safeFilename(input: string): string {
   return input.replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'run'
+}
+
+function assertionVideos(
+  groups: Array<{ testName: string; artifacts: PlaywrightArtifact[] }> | undefined,
+  artifactsDir: string,
+  runId: string,
+): Array<{ filename: string; path: string; testName: string }> {
+  const videos = (groups ?? [])
+    .flatMap((group) => group.artifacts.map((artifact) => ({ artifact, testName: group.testName })))
+    .map(({ artifact, testName }) => {
+      const filePath = path.resolve(artifactsDir, artifact.path)
+      const rel = path.relative(artifactsDir, filePath)
+      return { artifact, filePath, testName, valid: !rel.startsWith('..') && !path.isAbsolute(rel) }
+    })
+    .filter(({ artifact, filePath, valid }) =>
+      valid && artifact.kind === 'video' && fs.existsSync(filePath) && fs.statSync(filePath).isFile())
+  const used = new Set<string>()
+  return videos.map(({ artifact, filePath, testName }, idx) => {
+    const ext = path.extname(filePath) || extensionForContentType(artifact.contentType) || '.webm'
+    const suffix = videos.length === 1 ? '' : `-${idx + 1}`
+    let filename = `${safeFilename(runId)}${suffix}${ext}`
+    let dedupe = 2
+    while (used.has(filename)) {
+      filename = `${safeFilename(runId)}${suffix}-${dedupe}${ext}`
+      dedupe += 1
+    }
+    used.add(filename)
+    return { filename, path: filePath, testName }
+  })
+}
+
+function videoLinksByTestName(videos: Array<{ filename: string; testName: string }>): Record<string, string[]> {
+  const out: Record<string, string[]> = {}
+  for (const video of videos) out[video.testName] = [...(out[video.testName] ?? []), video.filename]
+  return out
+}
+
+function extensionForContentType(contentType: string | undefined): string | undefined {
+  if (contentType === 'video/mp4') return '.mp4'
+  if (contentType === 'video/webm') return '.webm'
+  return undefined
+}
+
+interface ZipEntry {
+  filename: string
+  data: Buffer
+}
+
+function createZip(entries: ZipEntry[]): Buffer {
+  const fileRecords: Buffer[] = []
+  const centralRecords: Buffer[] = []
+  let offset = 0
+  for (const entry of entries) {
+    const name = Buffer.from(entry.filename, 'utf8')
+    const crc = crc32(entry.data)
+    const local = Buffer.alloc(30)
+    local.writeUInt32LE(0x04034b50, 0)
+    local.writeUInt16LE(20, 4)
+    local.writeUInt16LE(0x0800, 6)
+    local.writeUInt16LE(0, 8)
+    local.writeUInt32LE(0, 10)
+    local.writeUInt32LE(crc, 14)
+    local.writeUInt32LE(entry.data.length, 18)
+    local.writeUInt32LE(entry.data.length, 22)
+    local.writeUInt16LE(name.length, 26)
+    const fileRecord = Buffer.concat([local, name, entry.data])
+    fileRecords.push(fileRecord)
+
+    const central = Buffer.alloc(46)
+    central.writeUInt32LE(0x02014b50, 0)
+    central.writeUInt16LE(20, 4)
+    central.writeUInt16LE(20, 6)
+    central.writeUInt16LE(0x0800, 8)
+    central.writeUInt16LE(0, 10)
+    central.writeUInt32LE(0, 12)
+    central.writeUInt32LE(crc, 16)
+    central.writeUInt32LE(entry.data.length, 20)
+    central.writeUInt32LE(entry.data.length, 24)
+    central.writeUInt16LE(name.length, 28)
+    central.writeUInt32LE(offset, 42)
+    centralRecords.push(Buffer.concat([central, name]))
+    offset += fileRecord.length
+  }
+  const centralOffset = offset
+  const centralDirectory = Buffer.concat(centralRecords)
+  const end = Buffer.alloc(22)
+  end.writeUInt32LE(0x06054b50, 0)
+  end.writeUInt16LE(entries.length, 8)
+  end.writeUInt16LE(entries.length, 10)
+  end.writeUInt32LE(centralDirectory.length, 12)
+  end.writeUInt32LE(centralOffset, 16)
+  return Buffer.concat([...fileRecords, centralDirectory, end])
+}
+
+function crc32(buffer: Buffer): number {
+  let crc = 0xffffffff
+  for (const byte of buffer) {
+    crc ^= byte
+    for (let i = 0; i < 8; i += 1) crc = (crc >>> 1) ^ (0xedb88320 & -(crc & 1))
+  }
+  return (crc ^ 0xffffffff) >>> 0
 }
