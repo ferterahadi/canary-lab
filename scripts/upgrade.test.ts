@@ -2,7 +2,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { extractManagedBlock, applyManagedBlock, main } from './upgrade'
+import { extractManagedBlock, applyManagedBlock, applyGitignoreRules, main } from './upgrade'
 
 const tmpDirs: string[] = []
 function mkProjectRoot(): string {
@@ -78,6 +78,36 @@ describe('applyManagedBlock', () => {
   })
 })
 
+describe('applyGitignoreRules', () => {
+  it('appends missing envset value rules while preserving existing content', () => {
+    const existing = 'node_modules/\n.env\n'
+
+    expect(applyGitignoreRules(existing)).toBe(
+      [
+        'node_modules/',
+        '.env',
+        '',
+        '# Canary Lab envset values may contain secrets.',
+        '# envsets.config.json files are outside these patterns, so they stay trackable.',
+        'envsets/*/*',
+        'features/*/envsets/*/*',
+        '',
+      ].join('\n'),
+    )
+  })
+
+  it('does not rewrite when both envset value rules already exist', () => {
+    const existing = [
+      'node_modules/',
+      'envsets/*/*',
+      'features/*/envsets/*/*',
+      '',
+    ].join('\n')
+
+    expect(applyGitignoreRules(existing)).toBe(existing)
+  })
+})
+
 describe("main (upgrade orchestration)", () => {
   it("exits silently when no project root (no features/ anywhere)", async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "cl-up-noroot-"))
@@ -128,6 +158,22 @@ describe("main (upgrade orchestration)", () => {
 
     const pkg = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf-8"))
     expect(pkg.scripts.postinstall).toBe("canary-lab upgrade --silent")
+  })
+
+  it("adds envset value rules to an existing project .gitignore", async () => {
+    const root = mkProjectRoot()
+    vi.stubEnv("CANARY_LAB_PROJECT_ROOT", root)
+    fs.writeFileSync(path.join(root, ".gitignore"), "node_modules/\n")
+    vi.spyOn(console, "log").mockImplementation(() => {})
+
+    await main([])
+
+    const gitignore = fs.readFileSync(path.join(root, ".gitignore"), "utf-8")
+    expect(gitignore).toContain("node_modules/")
+    expect(gitignore).toContain("envsets/*/*")
+    expect(gitignore).toContain("features/*/envsets/*/*")
+    expect(gitignore).not.toContain("!envsets/*/*")
+    expect(gitignore).not.toContain("!features/*/envsets/*/*")
   })
 
   it("does not rewrite FULLY_MANAGED file if content already matches template", async () => {

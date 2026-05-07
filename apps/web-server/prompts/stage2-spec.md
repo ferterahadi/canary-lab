@@ -38,7 +38,9 @@ dev-server ports. Prefer local-only commands and readiness probes. Do not use
 production URLs, do not invent credentials or secrets, and do not point a
 health check at a production service. Prefer an HTTP readiness URL when the app
 has a root page, health route, or stable local route; use a TCP probe only when
-that is the defensible local readiness signal.
+that is the defensible local readiness signal. Do not omit `healthCheck` for a
+service with a start command unless repo inspection finds no defensible local
+endpoint or port.
 
 ## Output format
 
@@ -55,6 +57,17 @@ You must emit at minimum:
 If a needed env value is unknown, leave a placeholder key with an empty value or a safe local default only when the PRD or selected skill justifies it. Never invent credentials, tokens, customer identifiers, or production-only values.
 
 `envsets/envsets.config.json` must use the current Canary Lab envset schema with top-level `appRoots`, `slots`, and `feature` objects. Do not use the stale `{ "envsets": { ... } }` shape. For a feature-owned env file, use a slot named `{{featureName}}.env` and target `$CANARY_LAB_PROJECT_ROOT/features/{{featureName}}/.env`.
+
+Envsets are named runtime environments, not source filename buckets. If repo
+inspection finds different env values for different runtime modes, create one
+envset per environment, such as `envsets/dev/` and `envsets/prod/`, and keep
+the same slot names across those envsets. Treat filename markers like
+`prod-mode`, `staging`, or similar as environment clues, not as final slot
+names. Normalize copied files to the target filenames Canary Lab applies:
+`env` for dev values can become `envsets/dev/.env`, `env.prod-mode` for prod
+values can become `envsets/prod/.env`, `foo.env.dev` can become
+`envsets/dev/foo.env.dev`, and `foo.env.dev.prod-mode` can become
+`envsets/prod/foo.env.dev`.
 
 Example envset config shape:
 

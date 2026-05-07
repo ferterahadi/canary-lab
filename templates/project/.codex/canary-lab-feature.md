@@ -122,6 +122,15 @@ module.exports = { config }
 - The readiness probe must respond before the runner starts the test suite. Prefer the tagged shape (`healthCheck: { http: { ... } }` or `{ tcp: { ... } }`) and keep it cheap (e.g. `/` or `/health`).
 - `featureDir: __dirname` is required.
 
+### Healthcheck Inference
+
+Before finalizing `startCommands`, inspect the target repo closely enough to infer how the local service starts and when it is ready. Check README startup notes, package scripts, framework bootstrap files, route/controller files, env files, Docker/dev-compose files, and local port conventions.
+
+- Prefer an HTTP readiness probe when the repo exposes a local root page or health route such as `/health`, `/healthz`, `/actuator/health`, `/ready`, or `/readiness`.
+- Use a TCP probe only when there is no defensible HTTP readiness route but a local service port is known.
+- Do not omit `healthCheck` for a service with a start command unless repo inspection finds no defensible local endpoint or port.
+- Never point a health check at a production URL or a remote shared environment. The probe must match the local service started for this feature.
+
 ## `playwright.config.ts` Rule
 
 Spread `baseConfig`. Don't hand-roll reporters, retries, projects, or output dirs — the runner depends on them.
