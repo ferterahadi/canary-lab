@@ -161,8 +161,10 @@ describe('main (init-project orchestration)', () => {
     await main(['my-project', '--package-spec', '^9.9.9'])
 
     const gitignore = fs.readFileSync(path.join(workspace, 'my-project', '.gitignore'), 'utf-8')
+    expect(gitignore).toContain('envsets/*/*')
     expect(gitignore).toContain('features/*/envsets/*/*')
     expect(gitignore).toContain('!features/example_todo_api/envsets/local/*')
+    expect(gitignore).not.toContain('!envsets/*/*')
     expect(gitignore).not.toContain('!features/*/envsets/*/*')
   })
 

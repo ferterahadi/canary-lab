@@ -13,6 +13,15 @@ import {
 const MARKER_START = '<!-- managed:canary-lab:start -->'
 const MARKER_END = '<!-- managed:canary-lab:end -->'
 
+const GITIGNORE_HEADER: string[] = [
+  '# Canary Lab envset values may contain secrets.',
+  '# envsets.config.json files are outside these patterns, so they stay trackable.',
+]
+const GITIGNORE_PATTERNS: string[] = [
+  'envsets/*/*',
+  'features/*/envsets/*/*',
+]
+
 /** Files that are fully managed — overwritten on every upgrade. */
 const FULLY_MANAGED: string[] = [
   '.claude/skills/env-import.md',
@@ -105,6 +114,15 @@ export function applyManagedBlock(existing: string, block: string, relPath: stri
   // Case 3: unknown content — append
   const trimmed = existing.trimEnd()
   return trimmed + (trimmed.length > 0 ? '\n\n' : '') + block + '\n'
+}
+
+export function applyGitignoreRules(existing: string): string {
+  const lines = existing.split(/\r?\n/)
+  const missingPatterns = GITIGNORE_PATTERNS.filter((rule) => !lines.includes(rule))
+  if (missingPatterns.length === 0) return existing
+
+  const trimmed = existing.trimEnd()
+  return trimmed + (trimmed.length > 0 ? '\n\n' : '') + [...GITIGNORE_HEADER, ...missingPatterns].join('\n') + '\n'
 }
 
 interface UpgradeOptions {
@@ -241,7 +259,20 @@ export async function main(
     }
   }
 
-  // 4. Ensure postinstall script exists in project package.json
+  // 4. Ensure the envset secret-protection rules exist without replacing
+  // user-owned ignore rules.
+  const gitignorePath = path.join(projectRoot, '.gitignore')
+  const existingGitignore = fs.existsSync(gitignorePath)
+    ? fs.readFileSync(gitignorePath, 'utf-8')
+    : ''
+  const nextGitignore = applyGitignoreRules(existingGitignore)
+  if (nextGitignore !== existingGitignore) {
+    fs.writeFileSync(gitignorePath, nextGitignore)
+    log('  Updated .gitignore (envset value rules)', opts)
+    updated += 1
+  }
+
+  // 5. Ensure postinstall script exists in project package.json
   const pkgJsonPath = path.join(projectRoot, 'package.json')
   if (fs.existsSync(pkgJsonPath)) {
     try {

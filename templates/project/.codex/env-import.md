@@ -61,15 +61,30 @@ Show the user what was found per repo:
 
 Ask the user to confirm which files to import. Respect the user's choices — they know their stack.
 
-### Step 5 — Copy files to envsets
+### Step 5 — Model envsets by environment intent
 
-For each confirmed file, copy it into `features/<feature>/envsets/local/` using these naming conventions:
+Envsets are named runtime environments, not a flat list of source files. If the source repo has different values for different runtime modes, create one envset directory per environment, such as `features/<feature>/envsets/dev/` and `features/<feature>/envsets/prod/`.
+
+Keep slot names stable across envsets. A slot represents the target file Canary Lab temporarily replaces in the repo; source filename markers such as `prod-mode`, `staging`, or similar are clues for environment grouping, not final slot names.
+
+For each confirmed file, copy it into the envset directory that matches its environment intent using these naming conventions:
 
 | Source pattern | Slot name example |
 |---------------|-------------------|
-| Root-level `.env.local` in a repo | `{repo-name}.env.local` |
+| Root-level `.env`, `.env.local`, or `env` in a repo | `.env` or `{repo-name}.env.local` |
 | Monorepo sub-app `apps/{app}/.env.local` | `{app}.env.local` |
 | Spring Boot `{module}/src/main/resources/application-local.properties` | `{repo-name}-application-local.properties` |
+
+Generic examples:
+
+| Source file | Envset copy |
+|-------------|-------------|
+| `env` for dev values | `envsets/dev/.env` |
+| `env.prod-mode` for prod values | `envsets/prod/.env` |
+| `foo.env.dev` for dev values | `envsets/dev/foo.env.dev` |
+| `foo.env.dev.prod-mode` for prod values | `envsets/prod/foo.env.dev` |
+| `bar.local.env` for dev values | `envsets/dev/bar.local.env` |
+| `bar.local.env.prod` for prod values | `envsets/prod/bar.local.env` |
 
 **appRoot variable name**: uppercase the repo name and replace hyphens with underscores.
 - `my-backend` → `MY_BACKEND`
@@ -83,6 +98,7 @@ Read the existing `features/<feature>/envsets/envsets.config.json`. Merge in the
 - Add new `slots` entries. Each slot needs `description` and `target` (using `$APPROOT_VAR/relative/path`).
 - Append new slot names to `feature.slots` (do not duplicate existing entries).
 - Preserve the existing `feature.testCommand` and `feature.testCwd`.
+- Do not add source variant names like `foo.env.dev.prod-mode` as slots. The slot name should be the actual target file name, such as `foo.env.dev`, with different values stored under separate envset directories.
 
 **Do not** add `CANARY_LAB_PROJECT_ROOT` to `appRoots` — it is injected automatically at runtime.
 
@@ -140,7 +156,7 @@ Results in envsets.config.json:
 
 ## Safety Rules
 
-- **Copy files verbatim.** Never modify, reformat, or "clean up" env file contents during import. The file in `envsets/local/` must be byte-identical to the source.
+- **Copy files verbatim.** Never modify, reformat, or "clean up" env file contents during import. The file inside the chosen envset directory must be byte-identical to the source.
 - **Never generate or guess config values.** If a value is missing or looks wrong, flag it to the user — do not fill it in.
 - **Do not write to the source repos.** This skill only reads from external repos and writes to the feature's `envsets/` directory.
 - **Show the user what will be written before writing.** List the exact file paths and slot names before copying or editing `envsets.config.json`.
@@ -152,6 +168,7 @@ Results in envsets.config.json:
 - **Feature's own `.env` slot already exists**: Preserve it — the import only handles external repo files.
 - **File contains secrets**: Still copy it. The values are local dev config. Note it to the user so they can review.
 - **Multiple config files in one repo**: Present all of them and let the user choose.
+- **Different values for dev/prod or other modes**: Create separate envsets and reuse the same slot names across them. Do not model each source variant as a separate slot.
 
 ## Script Locations
 
