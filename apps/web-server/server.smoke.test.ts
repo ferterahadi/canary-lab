@@ -275,13 +275,32 @@ const config = {
 }
 module.exports = { config }
 </file>
-<file path="playwright.config.cjs">
-const path = require('node:path')
-const { config: loadDotenv } = require('dotenv')
-const { defineConfig } = require('@playwright/test')
-const { baseConfig } = require('canary-lab/feature-support/playwright-base')
+<file path="playwright.config.ts">
+import path from 'node:path'
+import { config as loadDotenv } from 'dotenv'
+import { defineConfig } from '@playwright/test'
+import { baseConfig } from 'canary-lab/feature-support/playwright-base'
 loadDotenv({ path: path.join(__dirname, '.env') })
-module.exports = defineConfig({ ...baseConfig })
+export default defineConfig({ ...baseConfig })
+</file>
+<file path="envsets/envsets.config.json">
+{
+  "appRoots": {},
+  "slots": {
+    "login_flow.env": {
+      "description": "Canary Lab login_flow feature .env",
+      "target": "$CANARY_LAB_PROJECT_ROOT/features/login_flow/.env"
+    }
+  },
+  "feature": {
+    "slots": ["login_flow.env"],
+    "testCommand": "npx playwright test",
+    "testCwd": "$CANARY_LAB_PROJECT_ROOT/features/login_flow"
+  }
+}
+</file>
+<file path="envsets/local/login_flow.env">
+GATEWAY_URL=http://localhost:3000
 </file>
 <file path="e2e/login.spec.ts">
 import { test, expect } from 'canary-lab/feature-support/log-marker-fixture'
@@ -350,7 +369,7 @@ test('Submit credentials', async ({ page }) => {
 
       const specReady = await waitForStatus(app, draftId, 'spec-ready')
       expect(specReady.generatedFiles).toEqual(
-        expect.arrayContaining(['feature.config.cjs', 'playwright.config.cjs', 'e2e/login.spec.ts']),
+        expect.arrayContaining(['feature.config.cjs', 'playwright.config.ts', 'e2e/login.spec.ts']),
       )
 
       // Accept the spec — files materialize under features/<name>/.
@@ -365,7 +384,7 @@ test('Submit credentials', async ({ page }) => {
 
       const featureDir = path.join(projectRoot, 'features', 'login_flow')
       expect(fs.existsSync(path.join(featureDir, 'feature.config.cjs'))).toBe(true)
-      expect(fs.existsSync(path.join(featureDir, 'playwright.config.cjs'))).toBe(true)
+      expect(fs.existsSync(path.join(featureDir, 'playwright.config.ts'))).toBe(true)
       expect(fs.existsSync(path.join(featureDir, 'e2e', 'login.spec.ts'))).toBe(true)
       const spec = fs.readFileSync(path.join(featureDir, 'e2e', 'login.spec.ts'), 'utf8')
       // Plan items should be top-level test titles, not duplicate inner steps.

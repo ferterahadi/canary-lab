@@ -83,8 +83,13 @@ Pass `--no-open` to suppress the browser auto-launch (useful over SSH or in CI).
 ```bash
 npx canary-lab init <folder>
 npx canary-lab ui # primary surface (web UI)
+npx canary-lab new feature <name> --description "..."
+npx canary-lab env apply <feature> <set>
+npx canary-lab env revert <feature>
 npx canary-lab upgrade
 ```
+
+The `new feature` and `env` commands are deterministic wrappers for agents and scripts. The web UI remains the primary human workflow for creating features, editing envsets, running tests, and reviewing results.
 
 `canary-lab upgrade` is for syncing scaffolded docs and skills in an existing project with the current package version. It is not a general dependency or repo upgrade system.
 

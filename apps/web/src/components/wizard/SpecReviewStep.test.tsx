@@ -16,7 +16,7 @@ function draft(overrides: Partial<DraftRecord> = {}): DraftRecord {
     updatedAt: '2026-05-06T00:00:00.000Z',
     generatedFiles: [
       'feature.config.cjs',
-      'playwright.config.cjs',
+      'playwright.config.ts',
       'envsets/envsets.config.json',
       'e2e/login.spec.ts',
       'e2e/login-helper.ts',
@@ -43,7 +43,7 @@ describe('SpecReviewStep', () => {
     expect(html).toContain('features/login_flow/e2e/login.spec.ts')
     expect(html).toContain('features/login_flow/e2e/logout.spec.ts')
     expect(html).not.toContain('feature.config.cjs')
-    expect(html).not.toContain('playwright.config.cjs')
+    expect(html).not.toContain('playwright.config.ts')
     expect(html).not.toContain('envsets.config.json')
     expect(html).not.toContain('login-helper.ts')
   })
