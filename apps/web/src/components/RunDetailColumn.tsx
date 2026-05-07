@@ -87,7 +87,7 @@ export function RunDetailColumn({ runId }: { runId: string | null }) {
               </h2>
               {isAssertionExportable(m.status) && (
                 <a
-                  href={`/api/runs/${encodeURIComponent(m.runId)}/assertion.md`}
+                  href={assertionHref(m.runId)}
                   download={assertionFilename(m.feature, m.runId)}
                   className="shrink-0 rounded px-2.5 py-1 text-[11px] font-medium"
                   style={{ background: 'var(--bg-selected)', color: 'var(--accent)' }}
@@ -206,7 +206,15 @@ export function isAssertionExportable(status: string): boolean {
 }
 
 export function assertionFilename(feature: string, runId: string): string {
-  return `canary-lab-assertion-${safeFilename(feature)}-${safeFilename(runId)}.md`
+  return `canary-lab-assertion-${safeFilename(feature)}-${safeFilename(runId)}.zip`
+}
+
+export function assertionHref(runId: string): string {
+  return `/api/runs/${encodeURIComponent(runId)}/assertion.html`
+}
+
+export function hasAssertionVideos(groups: PlaywrightArtifactGroup[] | undefined): boolean {
+  return groups?.some((group) => group.artifacts.some((artifact) => artifact.kind === 'video')) ?? false
 }
 
 function safeFilename(input: string): string {

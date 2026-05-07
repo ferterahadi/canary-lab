@@ -2,7 +2,7 @@ import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { buildTestReviewPacket, createAssertionMarkdown } from './test-review-export'
+import { buildTestReviewPacket, createAssertionExport, createAssertionHtml } from './test-review-export'
 import type { RunDetail } from './run-store'
 
 let tmpDir: string
@@ -86,13 +86,121 @@ function clickToolbarButton(page) {
     }))
   })
 
-  it('creates deterministic assertion review markdown', () => {
-    const body = createAssertionMarkdown(detail({ featureDir: tmpDir }))
+  it('creates deterministic assertion review html', async () => {
+    const body = await createAssertionHtml(detail({ featureDir: tmpDir }))
 
-    expect(body).toContain('# Assertion Review: checkout')
-    expect(body).toContain('- Scope: local codebase helper implementations are inlined once below')
-    expect(body).toContain('## Test Cases')
+    expect(body).toContain('<p class="eyebrow">Assertion Review</p>')
+    expect(body).toContain('<h1 id="assertion-review">Checkout</h1>')
+    expect(body).toContain('<div class="summary-strip">')
+    expect(body).toContain('<nav class="toc" aria-label="Table of contents">')
+    expect(body).toContain('<a href="#assertion-review" data-section-id="assertion-review" aria-current="true">Checkout</a>')
+    expect(body).toContain('<a href="#test-cases" data-section-id="test-cases">Test Cases</a>')
+    expect(body).toContain('<section class="test-case" id="1-passes-checkout">')
+    expect(body).toContain('<li class="toc-level-2"><a href="#test-cases" data-section-id="test-cases">Test Cases</a></li>')
+    expect(body).toContain('<li class="toc-level-3"><a href="#1-passes-checkout" data-section-id="1-passes-checkout">1. passes checkout</a></li>')
+    expect(body).toContain('IntersectionObserver')
+    expect(body).toContain("link.setAttribute('aria-current', 'true')")
+    expect(body).toContain('<h3>Assertion Flow</h3>')
+    expect(body).toContain('<img src="flowcharts/1-passes-checkout.svg" alt="Assertion flow for passes checkout">')
+    expect(body).toContain('Local codebase helper implementations are inlined once below')
+    expect(body).toContain('Test Cases')
+    expect(body).toContain('<!doctype html>')
     expect(body).not.toContain('test-review.json')
+  })
+
+  it('title-cases feature slugs in the report chrome', async () => {
+    const body = await createAssertionHtml(detail({ featureDir: tmpDir, feature: 'shop_redeeming_eats_voucher' }))
+
+    expect(body).toContain('<h1 id="assertion-review">Shop Redeeming Eats Voucher</h1>')
+    expect(body).toContain('<a href="#assertion-review" data-section-id="assertion-review" aria-current="true">Shop Redeeming Eats Voucher</a>')
+  })
+
+  it('creates external flowchart svg assets for each test case', async () => {
+    const exported = await createAssertionExport(detail({ featureDir: tmpDir }))
+
+    expect(exported.html).toContain('<img src="flowcharts/1-passes-checkout.svg"')
+    expect(exported.assets).toEqual([
+      expect.objectContaining({ filename: 'flowcharts/1-passes-checkout.svg' }),
+    ])
+    const svg = exported.assets[0].data.toString('utf8')
+    expect(svg).toContain('<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="186"')
+    expect(svg).toContain('class="connector"')
+    expect(svg).toContain('filter="url(#nodeShadow)"')
+    expect(svg).toContain('text-anchor="middle"')
+    expect(svg).not.toContain('text-anchor="end" font-size="10"')
+    expect(svg).toContain('font-family:ui-sans-serif')
+    expect(svg).toContain('stroke="#64748b"')
+    expect(svg).toContain('stroke="#16a34a"')
+    expect(svg).toContain('Source unavailable')
+    expect(svg).toContain('Result: passed')
+    expect(svg).not.toContain('height="368"')
+  })
+
+  it('renders per-test video links after assertions', async () => {
+    const featureDir = path.join(tmpDir, 'video-feature')
+    fs.mkdirSync(path.join(featureDir, 'e2e'), { recursive: true })
+    const spec = path.join(featureDir, 'e2e', 'checkout.spec.ts')
+    const specSource = `import { test, expect } from '@playwright/test'
+
+test('records checkout video', async ({ page }) => {
+  await expect(page.getByText('Checkout')).toBeVisible()
+})
+`
+    fs.writeFileSync(spec, specSource)
+
+    const body = await createAssertionHtml(detail({
+      featureDir,
+      eventLocation: `${spec}:${lineOf(specSource, "test('records")}`,
+      title: 'records checkout video',
+    }), {
+      videoLinksByTestName: {
+        'test-case-records-checkout-video': ['run-1.webm'],
+      },
+    })
+
+    expect(body).toContain('<h3>Video</h3>')
+    expect(body).toContain('<video controls preload="metadata" src="run-1.webm"></video>')
+    expect(body.indexOf('<h3>Assertion Flow</h3>')).toBeLessThan(body.indexOf('<h3>Test Body</h3>'))
+    expect(body.indexOf('<h3>Test Body</h3>')).toBeLessThan(body.indexOf('<h3>Assertions</h3>'))
+    expect(body.indexOf('<h3>Assertions</h3>')).toBeLessThan(body.indexOf('<h3>Video</h3>'))
+  })
+
+  it('escapes dynamic html while preserving highlighted code blocks', async () => {
+    const featureDir = path.join(tmpDir, 'escape-feature')
+    fs.mkdirSync(path.join(featureDir, 'e2e'), { recursive: true })
+    const spec = path.join(featureDir, 'e2e', 'escape.spec.ts')
+    const specSource = `import { test, expect } from '@playwright/test'
+test('<script>alert("checkout")</script>', async ({ page }) => {
+  await expect(page.getByText('<Checkout>')).toBeVisible()
+})
+`
+    fs.writeFileSync(spec, specSource)
+    const body = await createAssertionHtml(detail({
+      featureDir,
+      eventLocation: `${spec}:${lineOf(specSource, "test('<script>")}`,
+      title: '<script>alert("checkout")</script>',
+    }), {
+      videoLinksByTestName: {
+        'test-case-script-alert-checkout-script': ['run" onclick="x.webm'],
+      },
+    })
+
+    expect(body).toContain('&lt;script&gt;alert(&quot;checkout&quot;)&lt;/script&gt;')
+    expect(body).not.toContain('<script>alert("checkout")</script>')
+    expect(body).toContain('src="run&quot; onclick=&quot;x.webm"')
+    expect(body).toContain('class="shiki')
+
+    const exported = await createAssertionExport(detail({
+      featureDir,
+      eventLocation: `${spec}:${lineOf(specSource, "test('<script>")}`,
+      title: '<script>alert("checkout")</script>',
+    }))
+    const svg = exported.assets[0].data.toString('utf8')
+    expect(svg).toContain('&lt;script&gt;alert(&quot;checkout&quot;)&lt;/script&gt;')
+    expect(svg).toContain('&lt;Checkou')
+    expect(svg).toContain('t&gt;')
+    expect(svg).not.toContain('<Checkout>')
+    expect(svg).toContain('<polygon')
   })
 
   it('falls back to computed totals and unknown assertions when no summary or source match is available', () => {
@@ -137,7 +245,7 @@ function clickToolbarButton(page) {
     }))
   })
 
-  it('renders test bodies, helper calls, nested helper assertions, imports, and deduped helpers', () => {
+  it('renders test bodies, nested helper assertions, imports, and deduped helpers', async () => {
     const featureDir = path.join(tmpDir, 'render-feature')
     const helperDir = path.join(featureDir, 'e2e', 'helpers')
     fs.mkdirSync(helperDir, { recursive: true })
@@ -181,7 +289,7 @@ const sharedCheck = (page) => {
       title: 'renders checkout review',
       durationMs: 250,
     }))
-    const markdown = createAssertionMarkdown(detail({
+    const html = await createAssertionHtml(detail({
       featureDir,
       eventLocation: `${spec}:${lineOf(specSource, "test('renders checkout review'")}`,
       title: 'renders checkout review',
@@ -199,15 +307,20 @@ const sharedCheck = (page) => {
       expect.objectContaining({ label: 'toBeTruthy', quality: 'unknown' }),
       expect.objectContaining({ helperName: 'expectReadyAlias', quality: 'strict' }),
     ]))
-    expect(markdown).toContain('### Test Body')
-    expect(markdown).toContain('### Helper Calls')
-    expect(markdown).toContain('## Local Codebase Implementations')
-    expect(markdown).toContain('helper: `expectReadyAlias`')
-    expect(markdown).toContain('nested strict:')
-    expect(markdown).toContain('External imports preserved from the original files:')
-    expect(markdown).toContain('### expectCheckoutReady')
-    expect(markdown.match(/### expectCheckoutReady/g)).toHaveLength(1)
-    expect(markdown).toContain('- Result: passed (250ms)')
+    expect(html).toContain('<h3>Test Body</h3>')
+    expect(html).toContain('<h3>Assertion Flow</h3>')
+    expect(html).toContain('<img src="flowcharts/1-renders-checkout-review.svg"')
+    expect(html).not.toContain('<h3>Helper Calls</h3>')
+    expect(html).toContain('Local Codebase Implementations')
+    expect(html).toContain('<a href="#local-codebase-implementations" data-section-id="local-codebase-implementations">Local Codebase Implementations</a>')
+    expect(html).toContain('helper: <code>expectReadyAlias</code>')
+    expect(html).toContain('nested strict:')
+    expect(html).not.toContain('<h3>External Imports</h3>')
+    expect(html).not.toContain('<h3>expectCheckoutReady</h3>')
+    expect(html).toContain('@playwright/test')
+    expect(html).toContain('expectCheckoutReady')
+    expect(html).toContain('localDefault')
+    expect(html).toContain('passed</span> <span class="muted">(250ms)</span>')
   })
 
   it('handles local helpers, template titles, skipped callback bodies, unresolved imports, and read failures', () => {
@@ -277,7 +390,7 @@ test('blocked read', async ({ page }) => {
     }
   })
 
-  it('covers side-effect imports, namespace imports, skipped suite calls, function callbacks, and shared helper rendering', () => {
+  it('covers side-effect imports, namespace imports, skipped suite calls, function callbacks, and shared helper rendering', async () => {
     const featureDir = path.join(tmpDir, 'branch-feature')
     const helperDir = path.join(featureDir, 'e2e', 'helpers')
     fs.mkdirSync(helperDir, { recursive: true })
@@ -353,7 +466,7 @@ test('second shared helper', async ({ page }) => {
         eventLocation: `${spec}:${secondLine}`,
         title: 'second shared helper',
       })).tests)
-      const markdown = createAssertionMarkdown({
+      const html = await createAssertionHtml({
         ...detail({
           featureDir,
           eventLocation: `${spec}:${firstLine}`,
@@ -393,13 +506,13 @@ test('second shared helper', async ({ page }) => {
         helperName: 'expectFlag',
         quality: 'unknown',
       }))
-      expect(markdown.match(/### expectShared/g)).toHaveLength(1)
+      expect(html).toContain('expectShared')
     } finally {
       readSpy.mockRestore()
     }
   })
 
-  it('renders local helpers without an external import section', () => {
+  it('renders local helpers without an external import section', async () => {
     const featureDir = path.join(tmpDir, 'local-only-feature')
     const e2eDir = path.join(featureDir, 'e2e')
     fs.mkdirSync(e2eDir, { recursive: true })
@@ -414,20 +527,21 @@ function expectLocalOnly(page) {
 `
     fs.writeFileSync(spec, specSource)
 
-    const markdown = createAssertionMarkdown(detail({
+    const html = await createAssertionHtml(detail({
       featureDir,
       eventLocation: `${spec}:${lineOf(specSource, "test('local helper only'")}`,
       title: 'local helper only',
     }))
 
-    expect(markdown).toContain('## Local Codebase Implementations')
-    expect(markdown).toContain('### expectLocalOnly')
-    expect(markdown).not.toContain('External imports preserved from the original files:')
+    expect(html).toContain('Local Codebase Implementations')
+    expect(html).toContain('expectLocalOnly')
+    expect(html).not.toContain('<h3>External Imports</h3>')
   })
 })
 
 function detail(opts: {
   featureDir: string
+  feature?: string
   eventLocation?: string
   title?: string
   durationMs?: number
@@ -438,7 +552,7 @@ function detail(opts: {
     runId: 'run-1',
     manifest: {
       runId: 'run-1',
-      feature: 'checkout',
+      feature: opts.feature ?? 'checkout',
       featureDir: opts.featureDir,
       startedAt: '2026-01-01T00:00:00.000Z',
       endedAt: '2026-01-01T00:00:05.000Z',
