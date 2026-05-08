@@ -3,6 +3,7 @@ import path from 'path'
 import { execFileSync } from 'child_process'
 import { buildHealAddendum } from './heal-prompt-builder'
 import { buildRunPaths } from './run-paths'
+import { renderPersonalWikiMap } from '../../../../shared/runtime/personal-wiki'
 
 // Heal-agent command builders for the web-server orchestrator. The legacy
 // The old CLI test runner used to live next to this file and
@@ -151,6 +152,8 @@ export interface OrchestratorAutoHealFactoryOptions {
   projectRoot: string
   /** Per-run dir — the prompt file is written under <runDir>/heal-prompt.md. */
   runDir: string
+  /** Optional local personal wiki folder for distilled cross-session context. */
+  personalWikiPath?: string | null
   /** Defaults to 'new'. `resume` is mostly useful for the CLI; web runs are short-lived. */
   sessionMode?: HealSessionMode
   /** Override prompt template path resolution (tests). */
@@ -165,7 +168,7 @@ export interface OrchestratorAutoHealFactoryOptions {
  * not from project CLAUDE.md / AGENTS.md, so auto-heal is not affected by
  * user-edited agent guide files.
  */
-export function buildOrchestratorHealCommand(opts: OrchestratorAutoHealFactoryOptions): (args: { cycle: number; outputDir: string }) => string {
+export function buildOrchestratorHealCommand(opts: OrchestratorAutoHealFactoryOptions): (args: { cycle: number; outputDir: string; userGuidance?: string }) => string {
   const sessionMode: HealSessionMode = opts.sessionMode ?? 'new'
   // Eagerly load the packaged template so a missing asset surfaces at config
   // time, not on the first heal cycle.
@@ -182,15 +185,19 @@ export function buildOrchestratorHealCommand(opts: OrchestratorAutoHealFactoryOp
     journalPath: paths.diagnosisJournalPath,
     restartSignal: paths.restartSignal,
     rerunSignal: paths.rerunSignal,
+    personalWikiMap: renderPersonalWikiMap(opts.personalWikiPath),
   })
 
-  return ({ cycle, outputDir }) => {
+  return ({ cycle, outputDir, userGuidance }) => {
     const stateAddendum = buildHealAddendum({
       cycle: cycle + 1,
       summaryPath: paths.summaryPath,
       journalPath: paths.diagnosisJournalPath,
     })
-    const fullPrompt = [basePrompt, stateAddendum].filter(Boolean).join('\n\n')
+    const guidance = userGuidance?.trim()
+      ? `User guidance for this restarted heal cycle:\n\n${userGuidance.trim()}`
+      : ''
+    const fullPrompt = [basePrompt, stateAddendum, guidance].filter(Boolean).join('\n\n')
     fs.mkdirSync(path.dirname(promptFile), { recursive: true })
     fs.writeFileSync(promptFile, fullPrompt)
     return buildAgentCommand(opts.agent, sessionMode, cycle, promptFile, outputDir)

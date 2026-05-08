@@ -194,6 +194,55 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
   }
   await app.register(testsDraftRoutes, testsDraftDeps)
 
+  const attachRunStreams = (
+    orch: RunOrchestrator,
+    runnerLog: RunnerLog,
+    featureName: string,
+    backups: BackupRecord[] | null,
+  ): void => {
+    const runId = orch.runId
+    if (backups) {
+      activeEnvsets.set(runId, backups)
+      orch.once('run-complete', () => {
+        const records = activeEnvsets.get(runId)
+        if (!records) return
+        activeEnvsets.delete(runId)
+        try {
+          restore(records)
+          runnerLog.info(`Reverted envset for ${featureName}`)
+        } catch (err) {
+          runnerLog.warn(`envset revert failed: ${(err as Error).message}`)
+        }
+      })
+    }
+    const broker = brokers.get(runId) ?? new PaneBroker()
+    brokers.set(runId, broker)
+    orch.on('service-output', ({ service, chunk }) => {
+      broker.push(`service:${service.safeName}`, chunk)
+    })
+    orch.on('service-exit', ({ service, exitCode }) => {
+      broker.markExit(`service:${service.safeName}`, exitCode)
+    })
+    orch.on('playwright-started', () => {
+      broker.resetPane('playwright')
+    })
+    orch.on('playwright-output', ({ chunk }) => {
+      broker.push('playwright', chunk)
+    })
+    orch.on('playwright-exit', ({ exitCode }) => {
+      broker.markExit('playwright', exitCode)
+    })
+    orch.on('agent-started', () => {
+      broker.resetPane('agent')
+    })
+    orch.on('agent-output', ({ chunk }) => {
+      broker.push('agent', chunk)
+    })
+    orch.on('agent-exit', ({ exitCode }) => {
+      broker.markExit('agent', exitCode)
+    })
+  }
+
   await app.register(runsRoutes, {
     featuresDir,
     store: runStore,
@@ -232,7 +281,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
       const projectConfig = loadProjectConfig(opts.projectRoot)
       let autoHeal: {
         agent: HealAgent
-        buildCommand: (args: { cycle: number; outputDir: string }) => string
+        buildCommand: (args: { cycle: number; outputDir: string; userGuidance?: string }) => string
         buildInterjectCommand: (args: { sessionId: string; text: string; outputDir?: string }) => string
       } | undefined
       const agentChoice = projectConfig.healAgent === 'manual'
@@ -251,6 +300,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
               agent: agentChoice,
               projectRoot: opts.projectRoot,
               runDir,
+              personalWikiPath: projectConfig.personalWikiPath,
             }),
             buildInterjectCommand: buildOrchestratorInterjectCommand({
               agent: agentChoice,
@@ -287,52 +337,8 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
         throw err
       }
 
-      if (backups) {
-        activeEnvsets.set(runId, backups)
-        orch.once('run-complete', () => {
-          const records = activeEnvsets.get(runId)
-          if (!records) return
-          activeEnvsets.delete(runId)
-          try {
-            restore(records)
-            runnerLog.info(`Reverted envset for ${feature.name}`)
-          } catch (err) {
-            runnerLog.warn(`envset revert failed: ${(err as Error).message}`)
-          }
-        })
-      }
-      const broker = new PaneBroker()
-      brokers.set(runId, broker)
-      orch.on('service-output', ({ service, chunk }) => {
-        broker.push(`service:${service.safeName}`, chunk)
-      })
-      orch.on('service-exit', ({ service, exitCode }) => {
-        broker.markExit(`service:${service.safeName}`, exitCode)
-      })
-      // Reset the playwright/agent panes whenever a NEW pty is about to be
-      // spawned. The orchestrator emits `playwright-started` once per
-      // Playwright invocation (initial run + each heal-cycle rerun) and
-      // `agent-started` once per heal-cycle agent. Without resetting, a
-      // subscriber that connects after the first exit replays the stale
-      // `[pane exited]` and never sees the new stream.
-      orch.on('playwright-started', () => {
-        broker.resetPane('playwright')
-      })
-      orch.on('playwright-output', ({ chunk }) => {
-        broker.push('playwright', chunk)
-      })
-      orch.on('playwright-exit', ({ exitCode }) => {
-        broker.markExit('playwright', exitCode)
-      })
-      orch.on('agent-started', () => {
-        broker.resetPane('agent')
-      })
-      orch.on('agent-output', ({ chunk }) => {
-        broker.push('agent', chunk)
-      })
-      orch.on('agent-exit', ({ exitCode }) => {
-        broker.markExit('agent', exitCode)
-      })
+      attachRunStreams(orch, runnerLog, feature.name, backups)
+      const broker = brokers.get(runId)!
       orch.runFullCycle()
         .then(async (status) => {
           await orch.stop(status).catch(() => {})
@@ -342,8 +348,107 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
           broker.push('agent', `\n[orchestrator error] ${String(err)}\n`)
           await orch.stop('aborted').catch(() => {})
           registry.delete(orch.runId)
-        })
+      })
       return orch
+    },
+    restartHeal: async (runId: string, text: string) => {
+      const detail = runStore.get(runId)
+      if (!detail) return { ok: false, reason: 'run-not-found' as const }
+      const manifest = detail.manifest
+      if (manifest.status !== 'failed') return { ok: false, reason: 'not-restartable' as const }
+      if (manifest.healMode === 'manual') return { ok: false, reason: 'manual-mode' as const }
+
+      const features = loadFeatures(featuresDir)
+      const feature = features.find((f) => f.name === manifest.feature)
+      if (!feature) return { ok: false, reason: 'not-restartable' as const }
+
+      const runDir = runDirFor(logsDir, runId)
+      const runnerLog = new RunnerLog(buildRunPaths(runDir).runnerLogPath)
+      const projectConfig = loadProjectConfig(opts.projectRoot)
+      if (projectConfig.healAgent === 'manual') {
+        runnerLog.info('Heal restart rejected: project config is set to "manual".')
+        return { ok: false, reason: 'manual-mode' as const }
+      }
+      const agentChoice = projectConfig.healAgent === 'auto'
+        ? pickAvailableHealAgent()
+        : pickAvailableHealAgent(projectConfig.healAgent)
+      if (!agentChoice) {
+        runnerLog.warn('Heal restart failed: no `claude` or `codex` CLI on PATH.')
+        return { ok: false, reason: 'spawn-failed' as const }
+      }
+
+      const env = manifest.env ?? feature.envs?.[0]
+      if (!manifest.env && env) {
+        runnerLog.warn(`Restarting heal for legacy run without persisted env; defaulting to "${env}".`)
+      }
+      let backups: BackupRecord[] | null = null
+      if (env) {
+        try {
+          backups = applyFeatureEnvset(feature.featureDir, env)
+          if (backups) runnerLog.info(`Applied envset "${env}" for restarted heal ${feature.name}`)
+        } catch (err) {
+          runnerLog.warn(`envset apply failed: ${(err as Error).message}`)
+          return { ok: false, reason: 'spawn-failed' as const }
+        }
+      }
+
+      let repoBranchSnapshots
+      try {
+        await validateConfiguredRepoBranches(feature)
+        repoBranchSnapshots = await collectRepoBranchSnapshots(feature)
+      } catch (err) {
+        if (backups) restore(backups)
+        runnerLog.warn(`Heal restart rejected: ${(err as Error).message}`)
+        return { ok: false, reason: 'not-restartable' as const }
+      }
+
+      let orch: RunOrchestrator
+      try {
+        orch = new RunOrchestrator({
+          feature,
+          env,
+          runId,
+          runDir,
+          ptyFactory: realPtyFactory(),
+          runnerLog,
+          autoHeal: {
+            agent: agentChoice,
+            buildCommand: buildOrchestratorHealCommand({
+              agent: agentChoice,
+              projectRoot: opts.projectRoot,
+              runDir,
+              personalWikiPath: projectConfig.personalWikiPath,
+            }),
+            buildInterjectCommand: buildOrchestratorInterjectCommand({
+              agent: agentChoice,
+              projectRoot: opts.projectRoot,
+              runDir,
+            }),
+          },
+          repoBranchSnapshots,
+          initialHealCycles: manifest.healCycles,
+          runStateSink: runStore,
+        })
+      } catch (err) {
+        if (backups) restore(backups)
+        runnerLog.warn(`Heal restart failed: ${(err as Error).message}`)
+        return { ok: false, reason: 'spawn-failed' as const }
+      }
+
+      attachRunStreams(orch, runnerLog, feature.name, backups)
+      const broker = brokers.get(runId)!
+      registry.set(runId, orch)
+      orch.restartHealFromFailure(text)
+        .then(async (status) => {
+          await orch.stop(status).catch(() => {})
+          registry.delete(orch.runId)
+        })
+        .catch(async (err) => {
+          broker.push('agent', `\n[orchestrator error] ${String(err)}\n`)
+          await orch.stop('aborted').catch(() => {})
+          registry.delete(orch.runId)
+        })
+      return { ok: true as const }
     },
   })
   await app.register(paneStreamRoutes, {

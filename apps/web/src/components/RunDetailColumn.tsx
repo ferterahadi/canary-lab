@@ -182,7 +182,10 @@ export function RunDetailColumn({ runId }: { runId: string | null }) {
               <PaneTerminal runId={m.runId} paneId="agent" />
             </div>
             {shouldShowAgentInputBar(m.status, m.healMode) && (
-              <AgentInputBar runId={m.runId} />
+              <AgentInputBar
+                runId={m.runId}
+                mode={m.status === 'failed' ? 'restart' : 'send'}
+              />
             )}
           </div>
         )}
@@ -198,7 +201,8 @@ export function shouldShowAgentInputBar(
   status: string,
   healMode?: 'auto' | 'manual',
 ): boolean {
-  return status === 'healing' && healMode !== 'manual'
+  if (status === 'healing') return healMode !== 'manual'
+  return status === 'failed' && healMode === 'auto'
 }
 
 export function isAssertionExportable(status: string): boolean {

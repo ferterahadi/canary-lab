@@ -70,7 +70,11 @@ export function SettingsModal({ onClose }: Props) {
   }, [])
 
   const dirty = draft != null && config != null
-    && (draft.healAgent !== config.healAgent || draft.editor !== config.editor)
+    && (
+      draft.healAgent !== config.healAgent
+      || draft.editor !== config.editor
+      || (draft.personalWikiPath ?? '') !== (config.personalWikiPath ?? '')
+    )
 
   const onSave = async (): Promise<void> => {
     if (!draft) return
@@ -170,6 +174,25 @@ export function SettingsModal({ onClose }: Props) {
                     </div>
                   </label>
                 ))}
+              </div>
+              <div className="mt-4 text-[10px] uppercase tracking-wider mb-2" style={{ color: 'var(--text-muted)' }}>
+                Personal wiki
+              </div>
+              <input
+                type="text"
+                value={draft.personalWikiPath ?? ''}
+                onChange={(e) => setDraft({ ...draft, personalWikiPath: e.target.value.trim() ? e.target.value : null })}
+                placeholder="~/Documents/wiki"
+                className="w-full rounded-md px-2.5 py-1.5 text-xs outline-none"
+                style={{
+                  background: 'var(--bg-elevated)',
+                  border: '1px solid var(--border-default)',
+                  color: 'var(--text-primary)',
+                  fontFamily: 'var(--font-mono)',
+                }}
+              />
+              <div className="mt-1 text-xs" style={{ color: 'var(--text-muted)' }}>
+                Optional Karpathy-style personal wiki folder for distilled agent notes. Auto-heal receives the path and reads only relevant notes.
               </div>
               <div className="mt-2 text-[10px]" style={{ color: 'var(--text-muted)' }}>
                 Stored in <code>canary-lab.config.json</code> at the project root.

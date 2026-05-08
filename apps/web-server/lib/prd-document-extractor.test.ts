@@ -60,6 +60,18 @@ describe('extractPrdDocument', () => {
     expect(parserMocks.pdfDestroy).toHaveBeenCalledTimes(1)
   })
 
+  it('treats missing pdf text as empty extracted text', async () => {
+    parserMocks.pdfDestroy.mockClear()
+    parserMocks.pdfText = undefined as unknown as string
+
+    await expect(extractPrdDocument({
+      filename: 'empty.pdf',
+      contentType: 'application/pdf',
+      buffer: Buffer.from('%PDF'),
+    })).rejects.toThrow(/No extractable text/)
+    expect(parserMocks.pdfDestroy).toHaveBeenCalledTimes(1)
+  })
+
   it('extracts docx files by content type', async () => {
     parserMocks.docxText = 'DOCX body'
 
@@ -70,6 +82,16 @@ describe('extractPrdDocument', () => {
     })
 
     expect(doc.text).toBe('DOCX body')
+  })
+
+  it('treats missing docx raw text as empty extracted text', async () => {
+    parserMocks.docxText = undefined as unknown as string
+
+    await expect(extractPrdDocument({
+      filename: 'empty.docx',
+      contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      buffer: Buffer.from('docx'),
+    })).rejects.toThrow(/No extractable text/)
   })
 
   it('rejects unsupported files', async () => {

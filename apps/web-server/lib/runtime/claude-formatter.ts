@@ -180,6 +180,17 @@ function writeBenchmarkUsage(payload: {
   }
 }
 
+function writeAgentSessionId(id: string): void {
+  const file = process.env.CANARY_LAB_AGENT_SESSION_ID_FILE
+  if (!file || !id) return
+  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true })
+    fs.writeFileSync(file, id)
+  } catch {
+    // Sidecar is best-effort; the visible transcript remains authoritative.
+  }
+}
+
 function handleLine(line: string): void {
   const trimmed = line.trim()
   if (!trimmed) return
@@ -193,7 +204,9 @@ function handleLine(line: string): void {
   const type = msg.type as string | undefined
 
   if (type === 'system' && msg.subtype === 'init') {
-    const sid = String(msg.session_id ?? '').slice(0, 8)
+    const fullSid = typeof msg.session_id === 'string' ? msg.session_id : ''
+    writeAgentSessionId(fullSid)
+    const sid = fullSid.slice(0, 8)
     const model = String(msg.model ?? 'unknown')
     process.stdout.write(
       `${tag()} ${c('magenta', 'session')} ${c('bold', sid)} ${c('dim', `(${model})`)}\n\n`,

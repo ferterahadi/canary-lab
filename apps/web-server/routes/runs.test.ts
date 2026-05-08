@@ -4,7 +4,7 @@ import os from 'os'
 import path from 'path'
 import Fastify from 'fastify'
 import { runsRoutes } from './runs'
-import { createRegistry, RunStore, type OrchestratorLike } from '../lib/run-store'
+import { createRegistry, RunStore, type OrchestratorLike, type RestartHealResult } from '../lib/run-store'
 import { readManifest, readRunsIndex, writeManifest, writeRunsIndex } from '../lib/runtime/manifest'
 import { runDirFor } from '../lib/runtime/run-paths'
 
@@ -54,7 +54,10 @@ function writeFeature(name: string): void {
   )
 }
 
-async function build(opts: { startRun?: (f: string) => Promise<OrchestratorLike> } = {}) {
+async function build(opts: {
+  startRun?: (f: string) => Promise<OrchestratorLike>
+  restartHeal?: (runId: string, text: string) => Promise<RestartHealResult>
+} = {}) {
   const registry = createRegistry()
   const store = new RunStore(logsDir, registry)
   const app = Fastify()
@@ -62,6 +65,7 @@ async function build(opts: { startRun?: (f: string) => Promise<OrchestratorLike>
     featuresDir,
     store,
     startRun: opts.startRun ?? (async () => { throw new Error('not configured') }),
+    restartHeal: opts.restartHeal,
   })
   return { app, registry, store }
 }
@@ -445,14 +449,15 @@ describe('POST /api/runs/:runId/cancel-heal', () => {
 })
 
 describe('POST /api/runs/:runId/agent-input', () => {
-  it('404s when run not in registry', async () => {
+  it('409s when run is not active and cannot restart heal', async () => {
     const { app } = await build()
     const res = await app.inject({
       method: 'POST',
       url: '/api/runs/ghost/agent-input',
       payload: { data: 'hi\n' },
     })
-    expect(res.statusCode).toBe(404)
+    expect(res.statusCode).toBe(409)
+    expect(res.json()).toEqual({ reason: 'no-agent-running' })
   })
 
   it('400s when data is missing or not a string', async () => {
@@ -489,6 +494,24 @@ describe('POST /api/runs/:runId/agent-input', () => {
     })
     expect(res.statusCode).toBe(409)
     expect(res.json()).toEqual({ reason: 'no-agent-running' })
+  })
+
+  it('202s with status=restarted when a failed stopped run can restart heal', async () => {
+    let received = { runId: '', text: '' }
+    const { app } = await build({
+      restartHeal: async (runId, text) => {
+        received = { runId, text }
+        return { ok: true }
+      },
+    })
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/runs/old-failed/agent-input',
+      payload: { data: 'try this' },
+    })
+    expect(res.statusCode).toBe(202)
+    expect(res.json()).toEqual({ status: 'restarted' })
+    expect(received).toEqual({ runId: 'old-failed', text: 'try this' })
   })
 
   it('409s with no-session-id when the agent init frame has not arrived', async () => {

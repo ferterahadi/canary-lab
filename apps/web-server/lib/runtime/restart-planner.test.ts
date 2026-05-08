@@ -49,6 +49,12 @@ describe('planRestart', () => {
     expect(plan.toRestart).toEqual(['api'])
   })
 
+  it('matches files under a root cwd without appending another separator', () => {
+    const plan = planRestart([path.join(path.sep, 'tmp', 'changed.ts')], [svc('root', path.sep)])
+    expect(plan.toRestart).toEqual(['root'])
+    expect(plan.noMatch).toBe(false)
+  })
+
   it('returns noMatch=true when filesChanged points outside every service', () => {
     const plan = planRestart(['/elsewhere/x.ts'], services)
     expect(plan.toRestart).toEqual([])

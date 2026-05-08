@@ -53,6 +53,7 @@ export interface RunManifest {
   runId: string
   feature: string
   featureDir?: string
+  env?: string
   startedAt: string
   endedAt?: string
   status: RunStatus

@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import fs from 'fs'
 import path from 'path'
 import type { PlaywrightArtifact } from '../lib/run-store'
-import type { RunStore, OrchestratorLike } from '../lib/run-store'
+import type { RunStore, OrchestratorLike, RestartHealResult } from '../lib/run-store'
 import { loadFeatures } from '../lib/feature-loader'
 import { buildRunPaths, runDirFor } from '../lib/runtime/run-paths'
 import { createAssertionExport } from '../lib/test-review-export'
@@ -16,6 +16,7 @@ export interface RunsRouteDeps {
   // runId synchronously after `start()` is in flight (the factory awaits the
   // initial spawn but not test completion). Injected so tests can stub it.
   startRun(feature: string, env?: string): Promise<OrchestratorLike>
+  restartHeal?(runId: string, text: string): Promise<RestartHealResult>
 }
 
 export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Promise<void> {
@@ -160,14 +161,19 @@ export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Pro
   app.post<{ Params: { runId: string }; Body: { data: string } }>(
     '/api/runs/:runId/agent-input',
     async (req, reply) => {
-      const orch = deps.store.registry.get(req.params.runId)
-      if (!orch) {
-        reply.code(404)
-        return { error: 'run not active' }
-      }
       if (typeof req.body?.data !== 'string') {
         reply.code(400)
         return { error: 'data must be a string' }
+      }
+      const orch = deps.store.registry.get(req.params.runId)
+      if (!orch) {
+        const restarted = await deps.restartHeal?.(req.params.runId, req.body.data)
+        if (restarted?.ok) {
+          reply.code(202)
+          return { status: 'restarted' }
+        }
+        reply.code(restarted?.reason === 'spawn-failed' ? 500 : 409)
+        return { reason: restarted?.reason ?? 'no-agent-running' }
       }
       if (!orch.interjectHealAgent) {
         reply.code(409)
@@ -175,6 +181,13 @@ export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Pro
       }
       const result = await orch.interjectHealAgent(req.body.data)
       if (!result.ok) {
+        if (result.reason === 'no-agent-running') {
+          const restarted = await deps.restartHeal?.(req.params.runId, req.body.data)
+          if (restarted?.ok) {
+            reply.code(202)
+            return { status: 'restarted' }
+          }
+        }
         reply.code(result.reason === 'spawn-failed' ? 500 : 409)
         return { reason: result.reason }
       }

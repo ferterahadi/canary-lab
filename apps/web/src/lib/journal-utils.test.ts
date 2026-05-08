@@ -30,6 +30,14 @@ describe('newestFirst', () => {
     expect(out.map((e) => e.iteration)).toEqual([5, null])
   })
 
+  it('treats missing iteration like null when sorting', () => {
+    const missingIteration = entry({}) as JournalEntry
+    delete (missingIteration as { iteration?: number | null }).iteration
+
+    const out = newestFirst([missingIteration, entry({ iteration: 2 })])
+    expect(out.map((e) => e.iteration ?? null)).toEqual([2, null])
+  })
+
   it('treats equal iterations as stable (returns 0)', () => {
     const out = newestFirst([
       entry({ iteration: 2, hypothesis: 'a' }),

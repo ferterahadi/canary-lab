@@ -337,6 +337,7 @@ export type EditorChoice = 'auto' | 'vscode' | 'cursor' | 'system'
 export interface ProjectConfig {
   healAgent: HealAgentChoice
   editor: EditorChoice
+  personalWikiPath: string | null
 }
 
 export function getProjectConfig(opts?: ClientOptions): Promise<ProjectConfig> {
@@ -564,9 +565,9 @@ export function sendAgentInput(
   runId: string,
   data: string,
   opts?: ClientOptions,
-): Promise<{ status: 'sent' }> {
+): Promise<{ status: 'sent' | 'restarted' }> {
   const { baseUrl, fetchImpl } = defaultOpts(opts)
-  return request<{ status: 'sent' }>(
+  return request<{ status: 'sent' | 'restarted' }>(
     `${baseUrl}/api/runs/${encodeURIComponent(runId)}/agent-input`,
     {
       method: 'POST',

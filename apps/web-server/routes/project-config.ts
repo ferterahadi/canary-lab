@@ -4,11 +4,13 @@ import path from 'path'
 import { spawn, spawnSync } from 'child_process'
 import {
   loadProjectConfig,
+  normalizePersonalWikiPath,
   saveProjectConfig,
   type EditorChoice,
   type HealAgentChoice,
   type ProjectConfig,
 } from '../lib/runtime/launcher/project-config'
+import { syncPersonalWikiAgentDocs } from '../../../shared/runtime/personal-wiki'
 
 export interface ProjectConfigRouteDeps {
   projectRoot: string
@@ -28,6 +30,7 @@ export async function projectConfigRoutes(
   app.put<{ Body: Partial<ProjectConfig> }>('/api/project-config', async (req, reply) => {
     const incomingHealAgent = req.body?.healAgent
     const incomingEditor = req.body?.editor
+    const incomingPersonalWikiPath = req.body?.personalWikiPath
     if (incomingHealAgent !== undefined && !HEAL_AGENT_VALUES.includes(incomingHealAgent)) {
       reply.code(400)
       return { error: `healAgent must be one of: ${HEAL_AGENT_VALUES.join(', ')}` }
@@ -36,12 +39,23 @@ export async function projectConfigRoutes(
       reply.code(400)
       return { error: `editor must be one of: ${EDITOR_VALUES.join(', ')}` }
     }
+    const personalWikiPath = normalizeIncomingPersonalWikiPath(incomingPersonalWikiPath)
+    if (personalWikiPath === undefined && incomingPersonalWikiPath !== undefined) {
+      reply.code(400)
+      return { error: 'personalWikiPath must be an existing directory path, null, or empty string' }
+    }
     const current = loadProjectConfig(deps.projectRoot)
     const next: ProjectConfig = {
       healAgent: incomingHealAgent ?? current.healAgent,
       editor: incomingEditor ?? current.editor,
+      personalWikiPath: incomingPersonalWikiPath !== undefined
+        ? personalWikiPath!
+        : current.personalWikiPath,
     }
     saveProjectConfig(deps.projectRoot, next)
+    if (incomingPersonalWikiPath !== undefined) {
+      syncPersonalWikiAgentDocs(deps.projectRoot, next.personalWikiPath)
+    }
     return next
   })
 
@@ -123,6 +137,14 @@ export async function projectConfigRoutes(
       return { error: (err as Error).message }
     }
   })
+}
+
+function normalizeIncomingPersonalWikiPath(value: unknown): string | null | undefined {
+  if (value === undefined) return undefined
+  if (value === null) return null
+  if (typeof value !== 'string') return undefined
+  if (value.trim() === '') return null
+  return normalizePersonalWikiPath(value) ?? undefined
 }
 
 function normalPositiveInt(value: unknown, fallback: number): number {

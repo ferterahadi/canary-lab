@@ -12,6 +12,7 @@ Useful only when needed:
 - `{{failedDir}}/<slug>/playwright-mcp/` — when present, console logs / DOM snapshots / network captures the Playwright MCP server recorded for this failure. Inspect when the service log alone does not explain the bug.
 - `{{runDir}}/svc-<safeName>.log` — full service log. Use only if a slice is missing or too short.
 - `{{journalPath}}` — prior heal attempts. Use only when the current prompt or index says prior iterations exist.
+{{personalWikiMap}}
 
 Rules:
 - Do not read the test spec unless the failure cannot be understood from the index and logs.
