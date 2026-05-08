@@ -34,6 +34,9 @@ import {
 import { planRestart } from './restart-planner'
 import { interpolateConfigTokens, makeTokenCache } from './launcher/interpolate'
 import { readPlaywrightArtifactPolicy } from './playwright-artifact-policy'
+import { slugify } from './summary-reporter'
+import { listSpecFiles } from '../feature-loader'
+import { extractTestsFromSource } from '../ast-extractor'
 
 // Headless event-emitting orchestrator for a single feature run. Wraps the
 // existing health-check / signal-file semantics behind a clean API the future
@@ -620,13 +623,25 @@ export class RunOrchestrator extends EventEmitter {
   }
 
   private rerunTargetsForSummary(summary: SummaryShape): string[] | undefined {
-    const failedSlugs = extractFailedSlugs(summary)
-    if (failedSlugs.length === 0) return undefined
-    const locations = extractFailedLocations(summary)
-    if (locations.length > 0) return locations
-    const msg = 'Post-heal rerun has failed tests without usable file:line locations; running the full Playwright suite.'
-    this.runnerLog?.warn(msg)
-    this.emit('playwright-output', { chunk: `\n[warning] ${msg}\n` })
+    const computed = computeNonPassedTargets(this.feature.featureDir, summary)
+    if (computed.kind === 'targeted') {
+      this.runnerLog?.info(`Targeted re-run: ${computed.locations.length} failed/pending of ${computed.total} total tests`)
+      return computed.locations
+    }
+    if (computed.kind === 'no-passed-yet') return undefined
+    if (computed.kind === 'all-passed') return undefined
+    if (computed.kind === 'extraction-failed') {
+      // Fall back to legacy failed-only targeting if we couldn't enumerate the
+      // suite (no spec files found, or AST parse blew up everywhere).
+      const failedSlugs = extractFailedSlugs(summary)
+      if (failedSlugs.length === 0) return undefined
+      const locations = extractFailedLocations(summary)
+      if (locations.length > 0) return locations
+      const msg = 'Post-heal rerun has failed tests without usable file:line locations; running the full Playwright suite.'
+      this.runnerLog?.warn(msg)
+      this.emit('playwright-output', { chunk: `\n[warning] ${msg}\n` })
+      return undefined
+    }
     return undefined
   }
 
@@ -1430,6 +1445,7 @@ export class RunOrchestrator extends EventEmitter {
 interface SummaryShape {
   failed?: Array<{ name?: unknown; endTime?: unknown; location?: unknown }>
   passed?: unknown
+  passedNames?: unknown
   total?: unknown
 }
 
@@ -1458,6 +1474,60 @@ export function readSummary(summaryPath: string): SummaryShape {
   } catch {
     return {}
   }
+}
+
+export type NonPassedTargetsResult =
+  | { kind: 'targeted'; locations: string[]; total: number }
+  | { kind: 'all-passed'; total: number }
+  | { kind: 'no-passed-yet'; total: number }
+  | { kind: 'extraction-failed' }
+
+// Compute file:line locations for every test that has NOT yet passed in the
+// given summary — i.e. the union of failed + pending. Used on heal restart so
+// the agent re-runs everything still outstanding, not just the ones that
+// failed last cycle. Returns a discriminated result so the caller can decide
+// whether to skip the targeted rerun (full-suite is equivalent or no work to
+// do) or fall back to legacy failed-only targeting on enumeration failure.
+export function computeNonPassedTargets(
+  featureDir: string,
+  summary: SummaryShape,
+): NonPassedTargetsResult {
+  const files = listSpecFiles(featureDir)
+  if (files.length === 0) return { kind: 'extraction-failed' }
+
+  const allTests: Array<{ location: string; slug: string }> = []
+  let parsedAny = false
+  for (const file of files) {
+    let source = ''
+    try { source = fs.readFileSync(file, 'utf-8') } catch { continue }
+    const result = extractTestsFromSource(file, source)
+    if (result.parseError && result.tests.length === 0) continue
+    parsedAny = true
+    for (const t of result.tests) {
+      allTests.push({
+        location: `${file}:${t.line}`,
+        slug: `test-case-${slugify(t.name)}`,
+      })
+    }
+  }
+  if (!parsedAny || allTests.length === 0) return { kind: 'extraction-failed' }
+
+  const passedRaw = Array.isArray(summary.passedNames) ? summary.passedNames : []
+  const passed = new Set(passedRaw.filter((n): n is string => typeof n === 'string'))
+
+  if (passed.size === 0) return { kind: 'no-passed-yet', total: allTests.length }
+
+  const seen = new Set<string>()
+  const locations: string[] = []
+  for (const t of allTests) {
+    if (passed.has(t.slug)) continue
+    if (seen.has(t.location)) continue
+    seen.add(t.location)
+    locations.push(t.location)
+  }
+
+  if (locations.length === 0) return { kind: 'all-passed', total: allTests.length }
+  return { kind: 'targeted', locations, total: allTests.length }
 }
 
 export function extractFailedSlugs(summary: SummaryShape): string[] {
