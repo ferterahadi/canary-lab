@@ -168,6 +168,47 @@ describe('feature.config endpoints', () => {
     }
   })
 
+  it('returns git status for an arbitrary workspace repo path', async () => {
+    const repo = buildGitRepo('workspace-repo')
+    const app = await makeApp()
+    try {
+      const r = await app.inject({
+        method: 'GET',
+        url: `/api/workspace/git-status?path=${encodeURIComponent(repo)}`,
+      })
+      expect(r.statusCode).toBe(200)
+      expect(r.json()).toMatchObject({
+        path: repo,
+        expectedBranch: null,
+        isGitRepo: true,
+        currentBranch: 'main',
+      })
+      expect(r.json().localBranches).toContain('feature/demo')
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('checks out an arbitrary clean workspace repo path', async () => {
+    const repo = buildGitRepo('workspace-checkout-repo')
+    const app = await makeApp()
+    try {
+      const r = await app.inject({
+        method: 'POST',
+        url: '/api/workspace/checkout',
+        payload: { path: repo, branch: 'feature/demo' },
+      })
+      expect(r.statusCode).toBe(200)
+      expect(r.json()).toMatchObject({
+        path: repo,
+        expectedBranch: null,
+        currentBranch: 'feature/demo',
+      })
+    } finally {
+      await app.close()
+    }
+  })
+
   it('GET 404 for unknown feature', async () => {
     const app = await makeApp()
     try {

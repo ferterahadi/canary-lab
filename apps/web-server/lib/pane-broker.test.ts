@@ -92,12 +92,17 @@ describe('PaneBroker', () => {
     expect(b.subscriberCount('nope')).toBe(0)
   })
 
-  it('resetPane clears buffer and closes subscribers', () => {
+  it('resetPane sends `reset` to live subscribers, clears buffer, and closes them', () => {
     const b = new PaneBroker()
     b.push('x', 'first')
     const r = recorder()
     b.subscribe('x', r)
+    // The replay of `first` arrived during subscribe — capture the count
+    // so we can assert the additional `reset` message lands cleanly on top.
+    const beforeReset = r.msgs.length
     b.resetPane('x')
+    expect(r.msgs.length).toBe(beforeReset + 1)
+    expect(r.msgs.at(-1)).toEqual({ type: 'reset' })
     expect(r.closed).toBe(true)
     expect(b.snapshot('x')).toBe('')
     // Subscribing again starts from a clean slate.

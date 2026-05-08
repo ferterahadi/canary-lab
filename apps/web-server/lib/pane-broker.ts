@@ -11,6 +11,11 @@ export const DEFAULT_PANE_BYTES = 100 * 1024 // ~100 KB replay window per pane.
 export type PaneMessage =
   | { type: 'data'; chunk: string }
   | { type: 'exit'; code: number }
+  // Sent by `resetPane` so live subscribers can clear their view (e.g.
+  // xterm.clear()) before the buffer is wiped and the connection forced
+  // closed. Without this the UI would carry the previous run's transcript
+  // into the new one until the next data chunk arrived.
+  | { type: 'reset' }
 
 export interface PaneSubscriber {
   send(msg: PaneMessage): void
@@ -73,19 +78,22 @@ export class PaneBroker {
   }
 
   /**
-   * Wipe a pane's buffer + exit info AND close its current subscribers so
-   * they reconnect to a fresh stream. Called when a fresh pty is about to
-   * be spawned for the same paneId — e.g. Playwright restarting after a
-   * heal cycle, or the heal agent starting a new attempt. Without this, a
-   * subscriber that joins after the FIRST exit will replay the old
-   * `[pane exited code=N]` and immediately close, never seeing the new
-   * stream's data.
+   * Wipe a pane's buffer + exit info, signal live subscribers to clear
+   * their UI, AND close their connections so they reconnect to a fresh
+   * stream. Called when a fresh pty is about to be spawned for the same
+   * paneId — e.g. Playwright restarting after a heal cycle, or the heal
+   * agent starting a new attempt. Without the close, a subscriber that
+   * joins after the FIRST exit will replay the old `[pane exited code=N]`
+   * and immediately close, never seeing the new stream's data. Without
+   * the `reset` push, the existing subscriber's view (xterm) keeps the
+   * previous transcript on screen until the next data chunk overwrites it.
    */
   resetPane(id: PaneId): void {
     const entry = this.panes.get(id)
     if (!entry) return
     entry.buffer.clear()
     for (const sub of entry.subs) {
+      try { sub.send({ type: 'reset' }) } catch { /* ignore */ }
       try { sub.close() } catch { /* ignore */ }
     }
     entry.subs.clear()

@@ -26,8 +26,8 @@ import { generateRunId } from './lib/runtime/run-id'
 import { runDirFor, buildRunPaths } from './lib/runtime/run-paths'
 import { RunOrchestrator } from './lib/runtime/orchestrator'
 import {
-  buildOrchestratorHealCommand,
-  buildOrchestratorInterjectCommand,
+  buildAgentSpawnCommand,
+  buildOrchestratorHealPrompt,
   pickAvailableHealAgent,
   type HealAgent,
 } from './lib/runtime/auto-heal'
@@ -232,8 +232,8 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
     orch.on('playwright-exit', ({ exitCode }) => {
       broker.markExit('playwright', exitCode)
     })
-    orch.on('agent-started', () => {
-      broker.resetPane('agent')
+    orch.on('agent-started', ({ redirect }) => {
+      if (!redirect) broker.resetPane('agent')
     })
     orch.on('agent-output', ({ chunk }) => {
       broker.push('agent', chunk)
@@ -281,8 +281,8 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
       const projectConfig = loadProjectConfig(opts.projectRoot)
       let autoHeal: {
         agent: HealAgent
-        buildCommand: (args: { cycle: number; outputDir: string; userGuidance?: string }) => string
-        buildInterjectCommand: (args: { sessionId: string; text: string; outputDir?: string }) => string
+        buildSpawnCommand: (args: { sessionId?: string; mcpOutputDir?: string; promptFile?: string }) => string
+        buildCyclePrompt: (args: { cycle: number; outputDir: string; userGuidance?: string }) => string
       } | undefined
       const agentChoice = projectConfig.healAgent === 'manual'
         ? null
@@ -296,16 +296,17 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
         try {
           autoHeal = {
             agent: agentChoice,
-            buildCommand: buildOrchestratorHealCommand({
+            buildSpawnCommand: ({ sessionId, mcpOutputDir, promptFile }) => buildAgentSpawnCommand(agentChoice, {
+              sessionId,
+              mcpOutputDir,
+              mcpConfigFile: path.join(runDir, 'mcp-config.json'),
+              promptFile,
+            }),
+            buildCyclePrompt: buildOrchestratorHealPrompt({
               agent: agentChoice,
               projectRoot: opts.projectRoot,
               runDir,
               personalWikiPath: projectConfig.personalWikiPath,
-            }),
-            buildInterjectCommand: buildOrchestratorInterjectCommand({
-              agent: agentChoice,
-              projectRoot: opts.projectRoot,
-              runDir,
             }),
           }
         } catch (err) {
@@ -413,16 +414,17 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
           runnerLog,
           autoHeal: {
             agent: agentChoice,
-            buildCommand: buildOrchestratorHealCommand({
+            buildSpawnCommand: ({ sessionId, mcpOutputDir, promptFile }) => buildAgentSpawnCommand(agentChoice, {
+              sessionId,
+              mcpOutputDir,
+              mcpConfigFile: path.join(runDir, 'mcp-config.json'),
+              promptFile,
+            }),
+            buildCyclePrompt: buildOrchestratorHealPrompt({
               agent: agentChoice,
               projectRoot: opts.projectRoot,
               runDir,
               personalWikiPath: projectConfig.personalWikiPath,
-            }),
-            buildInterjectCommand: buildOrchestratorInterjectCommand({
-              agent: agentChoice,
-              projectRoot: opts.projectRoot,
-              runDir,
             }),
           },
           repoBranchSnapshots,
@@ -437,6 +439,11 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
 
       attachRunStreams(orch, runnerLog, feature.name, backups)
       const broker = brokers.get(runId)!
+      // Clear the previous heal session's pane buffer (and signal live
+      // subscribers via `reset`) so the new REPL streams into an empty
+      // pane instead of below the dead-agent transcript. The transcript
+      // file itself is also truncated below.
+      broker.resetPane('agent')
       registry.set(runId, orch)
       orch.restartHealFromFailure(text)
         .then(async (status) => {

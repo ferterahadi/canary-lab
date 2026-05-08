@@ -8,14 +8,18 @@ class FakeSocket {
   url: string
   readyState = 0
   onmessage: ((ev: MessageEvent) => void) | null = null
+  onopen: (() => void) | null = null
   onclose: (() => void) | null = null
   onerror: (() => void) | null = null
   closeCalls = 0
+  sent: string[] = []
   constructor(url: string) {
     this.url = url
     FakeSocket.instances.push(this)
   }
-  send(): void { /* not used */ }
+  send(payload: string): void {
+    this.sent.push(payload)
+  }
   close(): void {
     this.closeCalls += 1
     this.readyState = 3
@@ -29,6 +33,10 @@ class FakeSocket {
   fireClose(): void {
     this.readyState = 3
     this.onclose?.()
+  }
+  fireOpen(): void {
+    this.readyState = 1
+    this.onopen?.()
   }
   fireError(): void {
     this.onerror?.()
@@ -62,6 +70,36 @@ describe('connectPane', () => {
     })
     FakeSocket.instances[0].fire({ type: 'data', chunk: 'hello' })
     expect(onData).toHaveBeenCalledWith('hello')
+  })
+
+  it('notifies when the socket opens', () => {
+    reset()
+    const onOpen = vi.fn()
+    connectPane({
+      runId: 'r1',
+      paneId: 'p',
+      onData: () => {},
+      onOpen,
+      WebSocketImpl: FakeSocket as unknown as typeof WebSocket,
+      wsBase: 'ws://x',
+    })
+    FakeSocket.instances[0].fireOpen()
+    expect(onOpen).toHaveBeenCalledOnce()
+  })
+
+  it('forwards reset frames', () => {
+    reset()
+    const onReset = vi.fn()
+    connectPane({
+      runId: 'r1',
+      paneId: 'p',
+      onData: () => {},
+      onReset,
+      WebSocketImpl: FakeSocket as unknown as typeof WebSocket,
+      wsBase: 'ws://x',
+    })
+    FakeSocket.instances[0].fire({ type: 'reset' })
+    expect(onReset).toHaveBeenCalledOnce()
   })
 
   it('calls onExit and stops reconnecting after exit message', () => {
@@ -129,6 +167,20 @@ describe('connectPane', () => {
     FakeSocket.instances[0].fireClose()
     expect(FakeSocket.instances.length).toBe(1)
     expect(FakeSocket.instances[0].closeCalls).toBe(1)
+  })
+
+  it('does not close a socket that is already closing or closed', () => {
+    reset()
+    const conn = connectPane({
+      runId: 'r1',
+      paneId: 'p',
+      onData: () => {},
+      WebSocketImpl: FakeSocket as unknown as typeof WebSocket,
+      wsBase: 'ws://x',
+    })
+    FakeSocket.instances[0].readyState = 2
+    conn.close()
+    expect(FakeSocket.instances[0].closeCalls).toBe(0)
   })
 
   it('ignores malformed JSON frames silently', () => {
@@ -254,6 +306,66 @@ describe('connectPane', () => {
       expect(() => conn.close()).not.toThrow()
     } finally {
       FakeSocket.prototype.close = orig
+    }
+  })
+
+  it('sends terminal input only while the socket is open', () => {
+    reset()
+    const conn = connectPane({
+      runId: 'r',
+      paneId: 'p',
+      onData: () => {},
+      WebSocketImpl: FakeSocket as unknown as typeof WebSocket,
+      wsBase: 'ws://x',
+    })
+    conn.sendInput('before-open')
+    FakeSocket.instances[0].fireOpen()
+    conn.sendInput('a')
+    conn.close()
+    conn.sendInput('after-close')
+    expect(FakeSocket.instances[0].sent).toEqual([
+      JSON.stringify({ type: 'pty-input', chunk: 'a' }),
+    ])
+  })
+
+  it('sends sanitized terminal resize messages only while the socket is open', () => {
+    reset()
+    const conn = connectPane({
+      runId: 'r',
+      paneId: 'p',
+      onData: () => {},
+      WebSocketImpl: FakeSocket as unknown as typeof WebSocket,
+      wsBase: 'ws://x',
+    })
+    conn.sendResize(80, 24)
+    FakeSocket.instances[0].fireOpen()
+    conn.sendResize(Number.NaN, 24)
+    conn.sendResize(80, Number.POSITIVE_INFINITY)
+    conn.sendResize(0, 24)
+    conn.sendResize(80, -1)
+    conn.sendResize(120, 30)
+    expect(FakeSocket.instances[0].sent).toEqual([
+      JSON.stringify({ type: 'pty-resize', cols: 120, rows: 30 }),
+    ])
+  })
+
+  it('swallows send failures for terminal input and resize', () => {
+    reset()
+    const orig = FakeSocket.prototype.send
+    FakeSocket.prototype.send = function () { throw new Error('socket closed') }
+    try {
+      const conn = connectPane({
+        runId: 'r',
+        paneId: 'p',
+        onData: () => {},
+        WebSocketImpl: FakeSocket as unknown as typeof WebSocket,
+        wsBase: 'ws://x',
+      })
+      FakeSocket.instances[0].fireOpen()
+      expect(() => conn.sendInput('a')).not.toThrow()
+      expect(() => conn.sendResize(120, 30)).not.toThrow()
+    } finally {
+      FakeSocket.prototype.send = orig
     }
   })
 

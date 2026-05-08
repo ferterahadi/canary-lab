@@ -5,6 +5,7 @@
 export interface FeatureRepo {
   name: string
   localPath: string
+  branch?: string
 }
 
 export interface Feature {
@@ -214,6 +215,7 @@ export interface PlanStep {
 export interface DraftRepo {
   name: string
   localPath: string
+  branch?: string
 }
 
 export interface DraftRecord {

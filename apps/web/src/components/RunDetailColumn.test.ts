@@ -1,24 +1,29 @@
 import { describe, expect, it } from 'vitest'
-import { assertionFilename, assertionHref, isAssertionExportable, shouldShowAgentInputBar } from './RunDetailColumn'
+import { assertionFilename, assertionHref, isAssertionExportable, shouldShowRestartHealButton } from './RunDetailColumn'
 
-describe('shouldShowAgentInputBar', () => {
-  it('is only shown while an auto heal agent is active', () => {
-    expect(shouldShowAgentInputBar('healing', 'auto')).toBe(true)
-    expect(shouldShowAgentInputBar('healing', undefined)).toBe(true)
+describe('shouldShowRestartHealButton', () => {
+  // The button only appears after the heal-agent REPL has stopped. While the
+  // agent is healing, the user types directly into the xterm pane — no
+  // button needed. While the run is back to `running` (post-signal Playwright
+  // rerun), the orchestrator is mid-cycle and a restart isn't meaningful.
+  it('is hidden while the REPL is alive (healing)', () => {
+    expect(shouldShowRestartHealButton('healing', 'auto')).toBe(false)
+    expect(shouldShowRestartHealButton('healing', undefined)).toBe(false)
   })
 
-  it('is hidden once the signal handoff returns the run to running', () => {
-    expect(shouldShowAgentInputBar('running', 'auto')).toBe(false)
+  it('is hidden during the post-heal Playwright rerun', () => {
+    expect(shouldShowRestartHealButton('running', 'auto')).toBe(false)
   })
 
-  it('is shown on failed auto-heal runs so heal can be restarted', () => {
-    expect(shouldShowAgentInputBar('failed', 'auto')).toBe(true)
-    expect(shouldShowAgentInputBar('failed', undefined)).toBe(false)
+  it('is shown only after a failed auto-heal run — REPL has been cleaned up', () => {
+    expect(shouldShowRestartHealButton('failed', 'auto')).toBe(true)
+    // Without auto-heal configured, restart isn't an option (no agent CLI).
+    expect(shouldShowRestartHealButton('failed', undefined)).toBe(false)
   })
 
-  it('is hidden for manual heal mode', () => {
-    expect(shouldShowAgentInputBar('healing', 'manual')).toBe(false)
-    expect(shouldShowAgentInputBar('failed', 'manual')).toBe(false)
+  it('is hidden for manual heal mode (no agent CLI to restart)', () => {
+    expect(shouldShowRestartHealButton('healing', 'manual')).toBe(false)
+    expect(shouldShowRestartHealButton('failed', 'manual')).toBe(false)
   })
 })
 

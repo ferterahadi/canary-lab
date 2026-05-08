@@ -24,6 +24,7 @@ afterEach(() => {
   fs.rmSync(LOGS_DIR, { recursive: true, force: true })
   delete process.env.CANARY_LAB_SUMMARY_PATH
   delete process.env.CANARY_LAB_BENCHMARK_MODE
+  delete process.env.CANARY_LAB_TARGETED_RERUN
 })
 
 function mkTest(title: string, file = '/spec.ts', line = 1): any {
@@ -159,6 +160,224 @@ describe('SummaryReporter', () => {
 
     reporter.onTestEnd(mkTest('Currently busy', '/specs/busy.spec.ts', 7), mkResult())
     expect(readSummary().running).toBeUndefined()
+  })
+
+  it('preserves existing results while a targeted rerun is running', () => {
+    process.env.CANARY_LAB_TARGETED_RERUN = '1'
+    fs.mkdirSync(LOGS_DIR, { recursive: true })
+    fs.writeFileSync(
+      path.join(LOGS_DIR, 'e2e-summary.json'),
+      JSON.stringify({
+        complete: false,
+        total: 2,
+        passed: 1,
+        passedNames: ['test-case-happy-path'],
+        failed: [
+          {
+            name: 'test-case-sad-path',
+            error: { message: 'old fail' },
+            durationMs: 12,
+            location: '/specs/sad.spec.ts:9',
+            retry: 0,
+            logFiles: ['logs/runs/run-1/failed/test-case-sad-path/svc-api.log'],
+          },
+        ],
+      }),
+    )
+
+    const reporter = new SummaryReporter()
+    reporter.onTestBegin(mkTest('Sad path', '/specs/sad.spec.ts', 9))
+
+    expect(readSummary()).toMatchObject({
+      complete: false,
+      total: 2,
+      passed: 1,
+      passedNames: ['test-case-happy-path'],
+      running: {
+        name: 'test-case-sad-path',
+        location: '/specs/sad.spec.ts:9',
+      },
+      failed: [
+        {
+          name: 'test-case-sad-path',
+          error: { message: 'old fail' },
+          durationMs: 12,
+          location: '/specs/sad.spec.ts:9',
+          retry: 0,
+          logFiles: ['logs/runs/run-1/failed/test-case-sad-path/svc-api.log'],
+        },
+      ],
+    })
+  })
+
+  it('merges a targeted rerun pass without resetting non-rerun statuses', () => {
+    process.env.CANARY_LAB_TARGETED_RERUN = '1'
+    fs.mkdirSync(LOGS_DIR, { recursive: true })
+    fs.writeFileSync(
+      path.join(LOGS_DIR, 'e2e-summary.json'),
+      JSON.stringify({
+        complete: false,
+        total: 2,
+        passed: 1,
+        passedNames: ['test-case-happy-path'],
+        failed: [{ name: 'test-case-sad-path', error: { message: 'old fail' }, durationMs: 12, location: '/specs/sad.spec.ts:9', retry: 0 }],
+      }),
+    )
+
+    const reporter = new SummaryReporter()
+    reporter.onTestBegin(mkTest('Sad path', '/specs/sad.spec.ts', 9))
+    reporter.onTestEnd(mkTest('Sad path', '/specs/sad.spec.ts', 9), mkResult({ status: 'passed', duration: 22 }))
+    reporter.onEnd({} as any)
+
+    expect(readSummary()).toEqual({
+      complete: true,
+      total: 2,
+      passed: 2,
+      passedNames: ['test-case-happy-path', 'test-case-sad-path'],
+      failed: [],
+    })
+  })
+
+  it('updates only the rerun failure while preserving unrelated targeted-rerun statuses', () => {
+    process.env.CANARY_LAB_TARGETED_RERUN = '1'
+    fs.mkdirSync(LOGS_DIR, { recursive: true })
+    fs.writeFileSync(
+      path.join(LOGS_DIR, 'e2e-summary.json'),
+      JSON.stringify({
+        complete: false,
+        total: 3,
+        passed: 1,
+        passedNames: ['test-case-happy-path'],
+        failed: [
+          {
+            name: 'test-case-still-broken',
+            error: { message: 'old still broken' },
+            durationMs: 10,
+            location: '/specs/still.spec.ts:4',
+            retry: 0,
+            logFiles: ['logs/runs/run-1/failed/test-case-still-broken/svc.log'],
+          },
+          {
+            name: 'test-case-sad-path',
+            error: { message: 'old sad fail' },
+            durationMs: 12,
+            location: '/specs/sad.spec.ts:9',
+            retry: 0,
+            logFiles: ['logs/runs/run-1/failed/test-case-sad-path/old.log'],
+          },
+        ],
+      }),
+    )
+
+    const reporter = new SummaryReporter()
+    reporter.onTestEnd(
+      mkTest('Sad path', '/specs/sad.spec.ts', 9),
+      mkResult({ status: 'failed', duration: 33, retry: 1, error: { message: 'new sad fail' } }),
+    )
+
+    expect(readSummary()).toEqual({
+      complete: false,
+      total: 3,
+      passed: 1,
+      passedNames: ['test-case-happy-path'],
+      failed: [
+        {
+          name: 'test-case-still-broken',
+          error: { message: 'old still broken' },
+          durationMs: 10,
+          location: '/specs/still.spec.ts:4',
+          retry: 0,
+          logFiles: ['logs/runs/run-1/failed/test-case-still-broken/svc.log'],
+        },
+        {
+          name: 'test-case-sad-path',
+          error: { message: 'new sad fail' },
+          durationMs: 33,
+          location: '/specs/sad.spec.ts:9',
+          retry: 1,
+        },
+      ],
+    })
+  })
+
+  it('does not merge an existing summary during a full-suite run', () => {
+    fs.mkdirSync(LOGS_DIR, { recursive: true })
+    fs.writeFileSync(
+      path.join(LOGS_DIR, 'e2e-summary.json'),
+      JSON.stringify({
+        complete: true,
+        total: 1,
+        passed: 1,
+        passedNames: ['test-case-old-pass'],
+        failed: [],
+      }),
+    )
+
+    const reporter = new SummaryReporter()
+    reporter.onTestEnd(mkTest('New pass'), mkResult())
+
+    expect(readSummary()).toEqual({
+      complete: false,
+      total: 1,
+      passed: 1,
+      passedNames: ['test-case-new-pass'],
+      failed: [],
+    })
+  })
+
+  it('ignores unreadable targeted-rerun summaries', () => {
+    process.env.CANARY_LAB_TARGETED_RERUN = '1'
+    fs.mkdirSync(LOGS_DIR, { recursive: true })
+    fs.writeFileSync(path.join(LOGS_DIR, 'e2e-summary.json'), '{not-json')
+
+    const reporter = new SummaryReporter()
+    reporter.onTestEnd(mkTest('New pass'), mkResult())
+
+    expect(readSummary()).toEqual({
+      complete: false,
+      total: 1,
+      passed: 1,
+      passedNames: ['test-case-new-pass'],
+      failed: [],
+    })
+  })
+
+  it('filters malformed entries from targeted-rerun summaries', () => {
+    process.env.CANARY_LAB_TARGETED_RERUN = '1'
+    fs.mkdirSync(LOGS_DIR, { recursive: true })
+    fs.writeFileSync(
+      path.join(LOGS_DIR, 'e2e-summary.json'),
+      JSON.stringify({
+        passedNames: [
+          'test-case-existing-pass',
+          '',
+          123,
+          'test-case-existing-pass',
+        ],
+        failed: [
+          null,
+          42,
+          { name: '' },
+          { name: 'test-case-existing-pass', error: { message: 'duplicate' } },
+          { name: 'test-case-bad-error', error: { message: 123 }, logFiles: [1, false] },
+          { name: 'test-case-good-error', error: { message: 'boom', snippet: 'line' }, logFiles: ['a.log', 1] },
+        ],
+      }),
+    )
+
+    const reporter = new SummaryReporter()
+    reporter.onEnd({} as any)
+
+    expect(readSummary()).toEqual({
+      complete: true,
+      total: 3,
+      passed: 1,
+      passedNames: ['test-case-existing-pass'],
+      failed: [
+        { name: 'test-case-bad-error', logFiles: [] },
+        { name: 'test-case-good-error', error: { message: 'boom', snippet: 'line' }, logFiles: ['a.log'] },
+      ],
+    })
   })
 
   it('clears the running test when the run ends without a matching test end', () => {
@@ -370,5 +589,28 @@ describe('SummaryReporter', () => {
 
     expect(fs.existsSync(path.join(LOGS_DIR, 'heal-index.md'))).toBe(false)
     expect(readSummary().failed[0].logFiles).toBeUndefined()
+  })
+
+  it('runs final enrichment when failures were not enriched earlier', () => {
+    process.env.CANARY_LAB_BENCHMARK_MODE = 'baseline'
+    const runDir = path.join(LOGS_DIR, 'runs', 'run-final')
+    fs.mkdirSync(runDir, { recursive: true })
+    process.env.CANARY_LAB_SUMMARY_PATH = path.join(runDir, 'e2e-summary.json')
+    const svcLog = path.join(runDir, 'svc-api.log')
+    const slug = 'test-case-final-fail'
+    fs.writeFileSync(svcLog, `before\n<${slug}>\nlate boom\n</${slug}>\nafter\n`)
+    fs.writeFileSync(
+      path.join(runDir, 'manifest.json'),
+      JSON.stringify({ services: [{ logPath: svcLog }], feature: 'checkout' }),
+    )
+
+    const reporter = new SummaryReporter()
+    reporter.onTestEnd(mkTest('final fail'), mkResult({ status: 'failed', error: { message: 'late' } }))
+    delete process.env.CANARY_LAB_BENCHMARK_MODE
+    reporter.onEnd({} as any)
+
+    const out = JSON.parse(fs.readFileSync(path.join(runDir, 'e2e-summary.json'), 'utf-8'))
+    expect(out.failed[0].logFiles).toEqual([`logs/runs/run-final/failed/${slug}/svc-api.log`])
+    expect(fs.readFileSync(path.join(runDir, 'heal-index.md'), 'utf-8')).toContain(slug)
   })
 })

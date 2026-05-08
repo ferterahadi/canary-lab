@@ -5,7 +5,7 @@
 // reconnect. After that, give up — the caller can re-invoke connectPane().
 
 export interface PaneSocketMessage {
-  type: 'data' | 'exit' | 'error'
+  type: 'data' | 'exit' | 'error' | 'reset'
   chunk?: string
   code?: number
   error?: string
@@ -17,6 +17,13 @@ export interface ConnectPaneOptions {
   onData: (chunk: string) => void
   onExit?: (code: number) => void
   onError?: (err: string) => void
+  // Fires when the server signals a pane reset (e.g. Restart Heal kicked
+  // off a fresh orchestrator). The agent pane uses this to `term.clear()`
+  // so the new REPL streams into an empty xterm.
+  onReset?: () => void
+  // Fires once the WebSocket transitions to OPEN. The agent pane uses this
+  // to send its initial cols/rows so the REPL renders at the correct width.
+  onOpen?: () => void
   // Optional override — defaults to `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}`.
   // Tests inject a deterministic base.
   wsBase?: string
@@ -28,6 +35,15 @@ export interface ConnectPaneOptions {
 
 export interface PaneConnection {
   close(): void
+  // Forward raw keystrokes from xterm.js to the server-side pty stdin. Used
+  // by the agent pane to type directly into a long-lived REPL (claude/codex).
+  // No-ops until the socket is OPEN; never throws.
+  sendInput(chunk: string): void
+  // Forward terminal dimensions (xterm.js cols/rows) to the server-side pty.
+  // Without this, claude's TUI renders at the pty's spawn-time defaults
+  // (120×30) regardless of the actual pane width — status bars and
+  // box-drawing wrap mid-word. No-ops until the socket is OPEN.
+  sendResize(cols: number, rows: number): void
 }
 
 const defaultWsBase = (): string => {
@@ -65,9 +81,14 @@ export function connectPane(opts: ConnectPaneOptions): PaneConnection {
       } else if (msg.type === 'exit' && typeof msg.code === 'number') {
         exited = true
         opts.onExit?.(msg.code)
+      } else if (msg.type === 'reset') {
+        opts.onReset?.()
       } else if (msg.type === 'error') {
         opts.onError?.(msg.error ?? 'unknown error')
       }
+    }
+    ws.onopen = (): void => {
+      opts.onOpen?.()
     }
     ws.onclose = (): void => {
       socket = null
@@ -95,6 +116,26 @@ export function connectPane(opts: ConnectPaneOptions): PaneConnection {
         }
       }
       socket = null
+    },
+    sendInput(chunk: string): void {
+      if (closed || !socket || socket.readyState !== 1) return
+      try {
+        socket.send(JSON.stringify({ type: 'pty-input', chunk }))
+      } catch {
+        /* socket may have just closed */
+      }
+    },
+    sendResize(cols: number, rows: number): void {
+      if (closed || !socket || socket.readyState !== 1) return
+      // Sanitize at the edge — node-pty refuses NaN / 0 / negatives, and
+      // letting them flow through would just be a wasted round-trip.
+      if (!Number.isFinite(cols) || !Number.isFinite(rows)) return
+      if (cols < 1 || rows < 1) return
+      try {
+        socket.send(JSON.stringify({ type: 'pty-resize', cols, rows }))
+      } catch {
+        /* socket may have just closed */
+      }
     },
   }
 }

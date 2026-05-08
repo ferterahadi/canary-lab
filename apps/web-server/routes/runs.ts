@@ -188,7 +188,7 @@ export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Pro
             return { status: 'restarted' }
           }
         }
-        reply.code(result.reason === 'spawn-failed' ? 500 : 409)
+        reply.code(409)
         return { reason: result.reason }
       }
       reply.code(202)

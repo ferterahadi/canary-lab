@@ -43,7 +43,7 @@ export type OrchestratorCancelHealResult =
 
 export type OrchestratorInterjectResult =
   | { ok: true }
-  | { ok: false; reason: 'no-agent-running' | 'no-session-id' | 'spawn-failed' }
+  | { ok: false; reason: 'no-agent-running' }
 
 export type RestartHealResult =
   | { ok: true }
@@ -54,10 +54,18 @@ export interface OrchestratorLike {
   stop(finalStatus?: RunManifest['status']): Promise<void>
   pauseAndHeal(): Promise<OrchestratorPauseResult>
   cancelHeal(): Promise<OrchestratorCancelHealResult>
-  /** Interject — kill the running heal agent and resume it with a new prompt
-   *  built from `text`. Returns a structured failure when there's no agent or
-   *  the agent's session id hasn't been captured yet. */
+  /** Interject — drop the user's text into the live REPL's stdin (Esc-then-
+   *  text-then-Enter). Used by the HTTP fallback route. The bidirectional
+   *  pane bypasses this and goes through `writeToHealAgent` instead. */
   interjectHealAgent?(text: string): Promise<OrchestratorInterjectResult>
+  /** Raw pty-stdin write for the heal agent. Used by the WS pane handler to
+   *  forward keystrokes from xterm.js straight into the running REPL. No-op
+   *  when no pty is attached. */
+  writeToHealAgent?(chunk: string): void
+  /** Push xterm dimensions into the heal agent pty so claude's TUI renders
+   *  at the actual pane width. No-op when no pty is attached or when
+   *  cols/rows aren't sane positive integers. */
+  resizeHealAgent?(cols: number, rows: number): void
 }
 
 export interface OrchestratorRegistry {

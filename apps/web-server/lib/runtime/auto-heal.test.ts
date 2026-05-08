@@ -2,7 +2,12 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { buildAgentCommand, buildClaudeMcpConfigArg, buildOrchestratorHealCommand, pickAvailableHealAgent } from './auto-heal'
+import {
+  buildAgentSpawnCommand,
+  buildClaudeMcpConfigArg,
+  buildOrchestratorHealPrompt,
+  pickAvailableHealAgent,
+} from './auto-heal'
 import { renderPersonalWikiMap } from '../../../../shared/runtime/personal-wiki'
 
 describe('buildClaudeMcpConfigArg', () => {
@@ -26,18 +31,25 @@ describe('buildClaudeMcpConfigArg', () => {
   })
 })
 
-describe('buildAgentCommand wires MCP config when outputDir given', () => {
-  it('claude path: writes the MCP config next to the prompt file and references the path', () => {
-    const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-cmd-')))
+describe('buildAgentSpawnCommand', () => {
+  it('claude REPL: pins --session-id and wires MCP, but does NOT bypass permissions', () => {
+    const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-spawn-')))
     try {
-      const promptFile = path.join(tmp, 'prompt.md')
-      fs.writeFileSync(promptFile, 'noop')
-      const cmd = buildAgentCommand('claude', 'new', 0, promptFile, '/tmp/out')
       const cfgPath = path.join(tmp, 'mcp-config.json')
-      // Inline JSON would have shown up in the command; the path form does not.
-      expect(cmd).not.toMatch(/--mcp-config ['"]?\{/)
+      const cmd = buildAgentSpawnCommand('claude', {
+        sessionId: 'abc-123',
+        mcpOutputDir: '/tmp/out',
+        mcpConfigFile: cfgPath,
+      })
+      expect(cmd).toContain('claude')
+      expect(cmd).toContain('--session-id "abc-123"')
       expect(cmd).toContain(`--mcp-config ${JSON.stringify(cfgPath)}`)
-      // And the file actually exists with the expected `--output-dir` arg.
+      // Permissions stay interactive — the user is in the REPL pane and can
+      // approve / deny tool calls (and see MCP auth prompts).
+      expect(cmd.includes('--dangerously-skip-permissions')).toBe(false)
+      // No `-p` (REPL mode — prompt arrives via stdin).
+      expect(cmd.includes(' -p ')).toBe(false)
+      // The MCP config file actually exists with the playwright server entry.
       const written = JSON.parse(fs.readFileSync(cfgPath, 'utf-8'))
       expect(written.mcpServers.playwright.args).toContain('/tmp/out')
     } finally {
@@ -45,40 +57,78 @@ describe('buildAgentCommand wires MCP config when outputDir given', () => {
     }
   })
 
-  it('claude path omits --mcp-config when outputDir is missing', () => {
-    const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-no-')))
-    try {
-      const promptFile = path.join(tmp, 'prompt.md')
-      fs.writeFileSync(promptFile, 'noop')
-      const cmd = buildAgentCommand('claude', 'new', 0, promptFile)
-      expect(cmd.includes('--mcp-config')).toBe(false)
-    } finally {
-      fs.rmSync(tmp, { recursive: true, force: true })
-    }
-  })
-
-  it('codex path is unaffected by outputDir', () => {
-    const cmd = buildAgentCommand('codex', 'new', 0, '/tmp/p.txt', '/tmp/out')
+  it('claude REPL: omits --mcp-config when mcpOutputDir is missing', () => {
+    const cmd = buildAgentSpawnCommand('claude', { sessionId: 'x' })
     expect(cmd.includes('--mcp-config')).toBe(false)
   })
 
-  it('claude path: `-p` is the LAST flag so the variadic --mcp-config does not slurp the prompt', () => {
-    // Regression: when `--mcp-config` came AFTER `-p`, claude treated the
-    // prompt's `$(cat ...)` arg as another config file and tripped
-    // ENAMETOOLONG. Lock the ordering so this doesn't drift.
-    const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-order-')))
+  it('claude REPL: throws when mcpOutputDir is set but mcpConfigFile is not', () => {
+    expect(() => buildAgentSpawnCommand('claude', { mcpOutputDir: '/tmp/out' }))
+      .toThrow(/mcpConfigFile is required/)
+  })
+
+  it('claude REPL: omits --session-id when no UUID is supplied', () => {
+    const cmd = buildAgentSpawnCommand('claude', {})
+    expect(cmd.includes('--session-id')).toBe(false)
+  })
+
+  it('codex REPL: skip-git only — no --full-auto / --mcp-config / --session-id', () => {
+    const cmd = buildAgentSpawnCommand('codex', { sessionId: 'ignored', mcpOutputDir: '/tmp/out' })
+    expect(cmd).toContain('codex')
+    expect(cmd).toContain('--skip-git-repo-check')
+    // --full-auto is gone for the same reason claude drops bypass-permissions:
+    // the user is in the REPL and approves tool calls interactively.
+    expect(cmd.includes('--full-auto')).toBe(false)
+    expect(cmd.includes('--mcp-config')).toBe(false)
+    expect(cmd.includes('--session-id')).toBe(false)
+  })
+
+  it('claude / codex: appends `-- "@<promptFile>"` as a positional arg when promptFile is set', () => {
+    // Cycle-1 prompt is delivered via claude's `@<path>` syntax instead of
+    // stdin paste — sidesteps the REPL's input editor (which doesn't
+    // reliably submit multi-line content) and produces clean output.
+    const claudeCmd = buildAgentSpawnCommand('claude', { promptFile: '/tmp/run/heal-prompt.md' })
+    expect(claudeCmd).toContain('-- "@/tmp/run/heal-prompt.md"')
+    expect(claudeCmd.endsWith('-- "@/tmp/run/heal-prompt.md"')).toBe(true)
+
+    const codexCmd = buildAgentSpawnCommand('codex', { promptFile: '/tmp/run/heal-prompt.md' })
+    expect(codexCmd).toContain('-- "@/tmp/run/heal-prompt.md"')
+    expect(codexCmd.endsWith('-- "@/tmp/run/heal-prompt.md"')).toBe(true)
+  })
+
+  it('uses `--` so --mcp-config does not slurp the positional @<promptFile>', () => {
+    // Regression: `--mcp-config <configs...>` is variadic. Without a `--`
+    // separator before the positional, claude treats `"@<promptFile>"` as
+    // another config file path — opens it, fails JSON parse, exits with
+    // `Invalid MCP configuration: MCP config file not found: <cwd>/@<path>`.
+    // The POSIX `--` end-of-options marker terminates flag parsing.
+    const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-prompt-')))
     try {
-      const promptFile = path.join(tmp, 'prompt.md')
-      fs.writeFileSync(promptFile, 'noop')
-      const cmd = buildAgentCommand('claude', 'new', 0, promptFile, '/tmp/out')
+      const cfgPath = path.join(tmp, 'mcp-config.json')
+      const cmd = buildAgentSpawnCommand('claude', {
+        sessionId: 'abc-123',
+        mcpOutputDir: '/tmp/out',
+        mcpConfigFile: cfgPath,
+        promptFile: '/tmp/run/heal-prompt.md',
+      })
+      // The `--` must appear AFTER --mcp-config and BEFORE the @-prefixed
+      // positional. Anything else means the variadic collector wins.
       const mcpIdx = cmd.indexOf('--mcp-config')
-      const pIdx = cmd.indexOf(' -p ')
+      const sepIdx = cmd.indexOf(' -- ')
+      const promptIdx = cmd.indexOf('"@/tmp/run/heal-prompt.md"')
       expect(mcpIdx).toBeGreaterThan(0)
-      expect(pIdx).toBeGreaterThan(0)
-      expect(mcpIdx).toBeLessThan(pIdx)
+      expect(sepIdx).toBeGreaterThan(mcpIdx)
+      expect(promptIdx).toBeGreaterThan(sepIdx)
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true })
     }
+  })
+
+  it('omits the `@<promptFile>` arg when promptFile is not set', () => {
+    const cmd = buildAgentSpawnCommand('claude', { sessionId: 'x' })
+    expect(cmd.includes('@')).toBe(false)
+    // No `--` separator either when there's no positional to protect.
+    expect(cmd.includes(' -- ')).toBe(false)
   })
 })
 
@@ -95,7 +145,7 @@ describe('pickAvailableHealAgent', () => {
   // is covered by isAgentCliAvailable + the explicit override branches.
 })
 
-describe('buildOrchestratorHealCommand', () => {
+describe('buildOrchestratorHealPrompt', () => {
   let tmp: string
   let runDir: string
   let projectRoot: string
@@ -113,7 +163,7 @@ describe('buildOrchestratorHealCommand', () => {
   })
 
   it('throws synchronously when the packaged prompt template is missing', () => {
-    expect(() => buildOrchestratorHealCommand({
+    expect(() => buildOrchestratorHealPrompt({
       agent: 'claude',
       projectRoot,
       runDir,
@@ -121,9 +171,9 @@ describe('buildOrchestratorHealCommand', () => {
     })).toThrow(/Heal prompt template not found/)
   })
 
-  it('returns a buildCommand that writes the rendered run-scoped prompt and includes claude flags', () => {
-    const build = buildOrchestratorHealCommand({ agent: 'claude', projectRoot, runDir })
-    const cmd = build({ cycle: 0, outputDir: path.join(runDir, 'out') })
+  it('returns a buildCyclePrompt that writes the rendered run-scoped prompt', () => {
+    const build = buildOrchestratorHealPrompt({ agent: 'claude', projectRoot, runDir })
+    const prompt = build({ cycle: 0, outputDir: path.join(runDir, 'out') })
     // Prompt file was written under runDir.
     const promptPath = path.join(runDir, 'heal-prompt.md')
     expect(fs.existsSync(promptPath)).toBe(true)
@@ -136,21 +186,20 @@ describe('buildOrchestratorHealCommand', () => {
     expect(promptBody).toContain(path.join(runDir, 'signals', '.restart'))
     expect(promptBody).toContain(path.join(runDir, 'signals', '.rerun'))
     expect(promptBody).not.toContain('{{')
-    // Command starts with the claude CLI invocation and embeds the prompt path.
-    expect(cmd).toMatch(/^claude /)
-    expect(cmd).toContain(JSON.stringify(promptPath))
+    // Returned prompt is the same content the orchestrator pty.write()s.
+    expect(prompt).toBe(promptBody)
   })
 
   it('auto-heal does not depend on project CLAUDE.md / AGENTS.md', () => {
     fs.writeFileSync(path.join(projectRoot, 'CLAUDE.md'), 'custom user notes without markers')
     fs.writeFileSync(path.join(projectRoot, 'AGENTS.md'), 'custom codex notes without markers')
 
-    expect(() => buildOrchestratorHealCommand({ agent: 'claude', projectRoot, runDir })).not.toThrow()
-    expect(() => buildOrchestratorHealCommand({ agent: 'codex', projectRoot, runDir })).not.toThrow()
+    expect(() => buildOrchestratorHealPrompt({ agent: 'claude', projectRoot, runDir })).not.toThrow()
+    expect(() => buildOrchestratorHealPrompt({ agent: 'codex', projectRoot, runDir })).not.toThrow()
   })
 
   it('appends restart user guidance to the rendered heal prompt', () => {
-    const build = buildOrchestratorHealCommand({ agent: 'codex', projectRoot, runDir })
+    const build = buildOrchestratorHealPrompt({ agent: 'codex', projectRoot, runDir })
     build({ cycle: 0, outputDir: path.join(runDir, 'out'), userGuidance: 'focus on the webhook fallback' })
     const promptBody = fs.readFileSync(path.join(runDir, 'heal-prompt.md'), 'utf-8')
     expect(promptBody).toContain('User guidance for this restarted heal cycle')
@@ -159,7 +208,7 @@ describe('buildOrchestratorHealCommand', () => {
 
   it('includes configured personal wiki context in the rendered heal prompt', () => {
     const wiki = path.join(tmp, 'wiki')
-    const build = buildOrchestratorHealCommand({
+    const build = buildOrchestratorHealPrompt({
       agent: 'codex',
       projectRoot,
       runDir,
@@ -173,33 +222,21 @@ describe('buildOrchestratorHealCommand', () => {
   })
 
   it('omits personal wiki context when no wiki path is configured', () => {
-    const build = buildOrchestratorHealCommand({ agent: 'codex', projectRoot, runDir })
+    const build = buildOrchestratorHealPrompt({ agent: 'codex', projectRoot, runDir })
     build({ cycle: 0, outputDir: path.join(runDir, 'out') })
     const promptBody = fs.readFileSync(path.join(runDir, 'heal-prompt.md'), 'utf-8')
     expect(promptBody).not.toContain('Karpathy-style personal wiki')
     expect(promptBody).not.toContain('{{personalWikiMap}}')
   })
 
-  it('uses --continue on cycle > 0 when sessionMode=resume', () => {
-    const build = buildOrchestratorHealCommand({
-      agent: 'claude',
-      projectRoot,
-      runDir,
-      sessionMode: 'resume',
-    })
-    const c0 = build({ cycle: 0, outputDir: path.join(runDir, 'out') })
-    const c1 = build({ cycle: 1, outputDir: path.join(runDir, 'out') })
-    expect(c0.includes('--continue')).toBe(false)
-    expect(c1).toContain('--continue')
-  })
-
-  it('codex agent: builds the codex CLI command when claude is not requested', () => {
-    const build = buildOrchestratorHealCommand({ agent: 'codex', projectRoot, runDir })
-    const cmd = build({ cycle: 0, outputDir: path.join(runDir, 'out') })
-    expect(cmd).toContain('codex exec')
-    expect(cmd.includes('--mcp-config')).toBe(false) // codex doesn't use claude's mcp flag
-    const promptBody = fs.readFileSync(path.join(runDir, 'heal-prompt.md'), 'utf-8')
-    expect(promptBody).toContain(path.join(runDir, 'signals', '.restart'))
+  it('agent-agnostic: rendered prompt body is the same for claude and codex', () => {
+    // The prompt is the conversation content; the agent flag only controls
+    // the spawn command. Renderers must not branch on agent.
+    const buildC = buildOrchestratorHealPrompt({ agent: 'claude', projectRoot, runDir })
+    const promptC = buildC({ cycle: 0, outputDir: path.join(runDir, 'out') })
+    const buildX = buildOrchestratorHealPrompt({ agent: 'codex', projectRoot, runDir })
+    const promptX = buildX({ cycle: 0, outputDir: path.join(runDir, 'out') })
+    expect(promptC).toBe(promptX)
   })
 })
 

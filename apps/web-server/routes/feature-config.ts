@@ -745,6 +745,53 @@ export async function featureConfigRoutes(
     return { exists }
   })
 
+  app.get<{ Querystring: { path?: string } }>('/api/workspace/git-status', async (req, reply) => {
+    const raw = req.query.path
+    if (!raw) {
+      reply.code(400)
+      return { error: 'path query required' }
+    }
+    const target = resolveRepoPath(raw)
+    if (!path.isAbsolute(target)) {
+      reply.code(400)
+      return { error: 'path must be absolute or start with ~' }
+    }
+    const status = await getGitStatus(target)
+    return {
+      ...status,
+      path: target,
+      expectedBranch: null,
+    }
+  })
+
+  app.post<{ Body: { path?: string; branch?: string } }>('/api/workspace/checkout', async (req, reply) => {
+    const raw = req.body?.path
+    const branch = req.body?.branch
+    if (!raw || !branch) {
+      reply.code(400)
+      return { error: 'path and branch required' }
+    }
+    const target = resolveRepoPath(raw)
+    if (!path.isAbsolute(target)) {
+      reply.code(400)
+      return { error: 'path must be absolute or start with ~' }
+    }
+    try {
+      const status = await checkoutBranch(target, branch.trim())
+      return {
+        ...status,
+        path: target,
+        expectedBranch: null,
+      }
+    } catch (err) {
+      const code = typeof (err as { statusCode?: unknown }).statusCode === 'number'
+        ? (err as { statusCode: number }).statusCode
+        : 500
+      reply.code(code)
+      return { error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
   // Clone a repo into <parentDir>/<repoName> via `git clone`. Uses spawn
   // with array args (no shell) so cloneUrl/repoName can't inject commands.
   app.post<{ Body: { cloneUrl?: string; parentDir?: string; repoName?: string } }>(

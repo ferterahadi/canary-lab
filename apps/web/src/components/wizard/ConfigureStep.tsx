@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import * as api from '../../api/client'
 import type {
   DraftPrdDocument,
@@ -41,8 +41,8 @@ export function ConfigureStep({
   const [prdFiles, setPrdFiles] = useState<File[]>([])
   const [extracting, setExtracting] = useState(false)
   const [extractError, setExtractError] = useState<string | null>(null)
-  const [repoKeys, setRepoKeys] = useState<Set<string>>(
-    () => new Set((initial?.repos ?? []).map((r) => repoKey(r))),
+  const [selectedRepos, setSelectedRepos] = useState<Map<string, DraftRepo>>(
+    () => new Map((initial?.repos ?? []).map((r) => [repoKey(r), r])),
   )
   const [repoPathDraft, setRepoPathDraft] = useState('')
   const [repoAddError, setRepoAddError] = useState<string | null>(null)
@@ -62,9 +62,7 @@ export function ConfigureStep({
     return [...seen.values()]
   }, [features])
 
-  const repoList = [...repoKeys]
-    .map((k) => parseRepoKey(k))
-    .filter((r): r is DraftRepo => r !== null)
+  const repoList = [...selectedRepos.values()]
 
   const validation = validateConfigure({
     prdText,
@@ -72,11 +70,20 @@ export function ConfigureStep({
     featureName: featureName || undefined,
   })
 
-  const toggleRepo = (key: string): void => {
-    setRepoKeys((prev) => {
-      const next = new Set(prev)
+  const toggleRepo = (repo: DraftRepo): void => {
+    setSelectedRepos((prev) => {
+      const key = repoKey(repo)
+      const next = new Map(prev)
       if (next.has(key)) next.delete(key)
-      else next.add(key)
+      else next.set(key, repo)
+      return next
+    })
+  }
+
+  const updateSelectedRepo = (repo: DraftRepo): void => {
+    setSelectedRepos((prev) => {
+      const next = new Map(prev)
+      next.set(repoKey(repo), repo)
       return next
     })
   }
@@ -100,9 +107,10 @@ export function ConfigureStep({
         setRepoAddError('Repository name is required')
         return
       }
-      setRepoKeys((prev) => {
-        const next = new Set(prev)
-        next.add(repoKey({ name, localPath }))
+      setSelectedRepos((prev) => {
+        const next = new Map(prev)
+        const repo = { name, localPath }
+        next.set(repoKey(repo), repo)
         return next
       })
       setRepoPathDraft('')
@@ -283,10 +291,13 @@ export function ConfigureStep({
                     {repoList.map((repo) => {
                       const key = repoKey(repo)
                       return (
-                        <div key={key} className="flex items-center gap-2 rounded border border-emerald-500/30 bg-emerald-500/10 px-2 py-1.5 text-xs">
-                          <span className="min-w-0 flex-1 truncate font-medium text-zinc-800 dark:text-zinc-200">{repo.name}</span>
-                          <span className="min-w-0 flex-[1.6] truncate font-mono text-[10px] text-zinc-500">{repo.localPath}</span>
-                          <button type="button" onClick={() => toggleRepo(key)} className="text-zinc-500 hover:text-rose-400">Remove</button>
+                        <div key={key} className="rounded border border-emerald-500/30 bg-emerald-500/10 px-2 py-1.5 text-xs">
+                          <div className="flex items-center gap-2">
+                            <span className="min-w-0 flex-1 truncate font-medium text-zinc-800 dark:text-zinc-200">{repo.name}</span>
+                            <span className="min-w-0 flex-[1.6] truncate font-mono text-[10px] text-zinc-500">{repo.localPath}</span>
+                            <button type="button" onClick={() => toggleRepo(repo)} className="text-zinc-500 hover:text-rose-400">Remove</button>
+                          </div>
+                          <RepoBranchPicker repo={repo} onChange={updateSelectedRepo} />
                         </div>
                       )
                     })}
@@ -302,14 +313,19 @@ export function ConfigureStep({
                   ) : (
                     allRepos.map(({ repo, feature }) => {
                       const key = repoKey(repo)
-                      const selected = repoKeys.has(key)
+                      const selected = selectedRepos.has(key)
                       return (
                         <label
                           key={key}
                           className={`flex items-center gap-2 rounded border px-2 py-1.5 text-xs ${selected ? 'border-emerald-500/30 bg-emerald-500/10' : 'border-zinc-200 bg-zinc-100/60 dark:border-zinc-800 dark:bg-zinc-900/60'} text-zinc-800 dark:text-zinc-200`}
                         >
-                          <input type="checkbox" checked={selected} onChange={() => toggleRepo(key)} />
+                          <input type="checkbox" checked={selected} onChange={() => toggleRepo(repo)} />
                           <span className="min-w-0 flex-1 truncate font-medium">{repo.name}</span>
+                          {repo.branch && (
+                            <span className="max-w-[110px] truncate font-mono text-[10px] text-zinc-500" title={repo.branch}>
+                              {repo.branch}
+                            </span>
+                          )}
                           <span className="truncate text-zinc-400 dark:text-zinc-600">from {feature}</span>
                         </label>
                       )
@@ -381,20 +397,155 @@ function formatBytes(size: number): string {
   return `${(size / (1024 * 1024)).toFixed(1)} MB`
 }
 
-function repoKey(r: DraftRepo): string {
-  return JSON.stringify([r.name, r.localPath])
+function RepoBranchPicker({
+  repo,
+  onChange,
+}: {
+  repo: DraftRepo
+  onChange: (repo: DraftRepo) => void
+}) {
+  const [status, setStatus] = useState<api.GitRepoStatus | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [switching, setSwitching] = useState(false)
+  const [suggestionsOpen, setSuggestionsOpen] = useState(false)
+  const target = repo.branch ?? ''
+
+  const loadStatus = (): void => {
+    api.getWorkspaceGitStatus(repo.localPath)
+      .then((next) => {
+        setStatus(next)
+        setError(null)
+      })
+      .catch((e: unknown) => {
+        setStatus(null)
+        setError(e instanceof Error ? e.message : 'Failed to load git status')
+      })
+  }
+
+  useEffect(() => {
+    let cancelled = false
+    api.getWorkspaceGitStatus(repo.localPath)
+      .then((next) => {
+        if (cancelled) return
+        setStatus(next)
+        setError(null)
+      })
+      .catch((e: unknown) => {
+        if (cancelled) return
+        setStatus(null)
+        setError(e instanceof Error ? e.message : 'Failed to load git status')
+      })
+    return () => { cancelled = true }
+  }, [repo.localPath])
+
+  const branches = [
+    ...(status?.localBranches ?? []),
+    ...(status?.remoteBranches ?? []),
+  ].filter((branch, index, arr) => arr.indexOf(branch) === index)
+  const normalizedTarget = target.trim().toLowerCase()
+  const visibleBranches = branches
+    .filter((branch) => !normalizedTarget || branch.toLowerCase().includes(normalizedTarget))
+    .slice(0, 60)
+
+  const canSwitch = Boolean(target.trim())
+    && status?.isGitRepo === true
+    && !status.dirty
+    && !switching
+    && status.currentBranch !== target.trim()
+
+  const doCheckout = async (): Promise<void> => {
+    const branch = target.trim()
+    if (!branch) return
+    setSwitching(true)
+    setError(null)
+    try {
+      const next = await api.checkoutWorkspaceBranch(repo.localPath, branch)
+      setStatus(next)
+      onChange({ ...repo, branch })
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Checkout failed')
+    } finally {
+      setSwitching(false)
+    }
+  }
+
+  return (
+    <div className="mt-2 rounded border border-zinc-200/70 bg-white/50 p-2 dark:border-zinc-800/80 dark:bg-zinc-950/30">
+      <div className="flex flex-wrap items-center gap-2">
+        <span
+          className="inline-flex max-w-[180px] items-center rounded px-2 py-1 font-mono text-[10px]"
+          title={status?.isGitRepo ? status.currentBranch ?? 'detached HEAD' : 'Not a git repository'}
+          style={{
+            border: '1px solid var(--border-default)',
+            color: status?.isGitRepo ? 'var(--text-secondary)' : 'var(--text-muted)',
+          }}
+        >
+          <span className="truncate">
+            {status?.isGitRepo ? status.currentBranch ?? 'detached HEAD' : 'No git status'}
+          </span>
+        </span>
+        {status?.dirty && (
+          <span className="text-[10px] text-amber-500">
+            Dirty worktree
+          </span>
+        )}
+      </div>
+      <div className="mt-2 flex items-start gap-2">
+        <div className="relative min-w-0 flex-1">
+          <input
+            value={target}
+            onFocus={() => setSuggestionsOpen(true)}
+            onClick={() => setSuggestionsOpen(true)}
+            onBlur={() => window.setTimeout(() => setSuggestionsOpen(false), 120)}
+            onChange={(e) => {
+              setSuggestionsOpen(true)
+              onChange({ ...repo, branch: e.target.value || undefined })
+            }}
+            placeholder={status?.currentBranch ?? 'feature/my-branch'}
+            className="w-full rounded border border-zinc-300 bg-white px-2 py-1.5 font-mono text-[11px] text-zinc-900 focus:border-zinc-500 focus:outline-none dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100"
+          />
+          {suggestionsOpen && visibleBranches.length > 0 && (
+            <div className="absolute left-0 right-0 top-[calc(100%+4px)] z-50 max-h-40 overflow-y-auto rounded border border-zinc-300 bg-white py-1 font-mono text-[11px] shadow-lg dark:border-zinc-700 dark:bg-zinc-950">
+              {visibleBranches.map((branch) => (
+                <button
+                  key={branch}
+                  type="button"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => {
+                    onChange({ ...repo, branch })
+                    setSuggestionsOpen(false)
+                  }}
+                  className={`block w-full truncate px-2 py-1.5 text-left ${branch === target ? 'bg-sky-500/10 text-zinc-900 dark:text-zinc-100' : 'text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-900'}`}
+                >
+                  {branch}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+        <button
+          type="button"
+          onClick={doCheckout}
+          disabled={!canSwitch}
+          className="shrink-0 rounded border border-zinc-300 px-2 py-1.5 text-[10px] uppercase tracking-wide text-zinc-600 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-900"
+        >
+          {switching ? 'Switching...' : 'Switch'}
+        </button>
+        <button
+          type="button"
+          onClick={loadStatus}
+          className="shrink-0 rounded border border-zinc-300 px-2 py-1.5 text-[10px] uppercase tracking-wide text-zinc-600 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-900"
+        >
+          Refresh
+        </button>
+      </div>
+      {error && <div className="mt-1 text-[10px] text-rose-400">{error}</div>}
+    </div>
+  )
 }
 
-function parseRepoKey(k: string): DraftRepo | null {
-  try {
-    const arr = JSON.parse(k) as unknown
-    if (!Array.isArray(arr) || arr.length !== 2) return null
-    const [name, localPath] = arr
-    if (typeof name !== 'string' || typeof localPath !== 'string') return null
-    return { name, localPath }
-  } catch {
-    return null
-  }
+function repoKey(r: DraftRepo): string {
+  return JSON.stringify([r.name, r.localPath])
 }
 
 function repoNameFromPath(localPath: string): string {
