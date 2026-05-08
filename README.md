@@ -72,13 +72,7 @@ npx canary-lab ui
 
 Pass `--no-open` to suppress the browser auto-launch (useful over SSH or in CI). Pass `--port <n>` to bind a different port.
 
-## What Gets Scaffolded
-
-- `features/example_todo_api` — working Playwright E2E sample
-- `features/broken_todo_api` — CRUD API with intentional handler bugs; a warm-up for the self-heal workflow
-- `features/tricky_checkout_api` — checkout API with subtle pricing/calculation bugs
-- `features/flaky_orders_api` — orders API with env-driven config and subtle coupon/tax bugs
-- `CLAUDE.md` and `AGENTS.md` — managed `self heal` guidance using `logs/current/...`
+`canary-lab init` scaffolds four sample features (`example_todo_api`, `broken_todo_api`, `tricky_checkout_api`, `flaky_orders_api`) so you can try the heal workflow before bringing your own services.
 
 ## Commands
 
@@ -97,17 +91,13 @@ The `new feature` and `env` commands are deterministic wrappers for agents and s
 
 ## Environment Switching
 
-The web UI manages temporary environment files for a feature. In the Envsets tab, create an env, add the files that should be swapped during a run, edit their values, and start the run from the UI.
+The web UI manages temporary environment files for a feature. In the Envsets tab, create an env, add the files that should be swapped during a run, edit their values, and start the run from the UI. Canary Lab stores envsets under `features/<feature>/envsets/`, backs up the target files at the start of each run, and restores them afterward.
 
-Canary Lab stores those envsets under `features/<feature>/envsets/`. The UI keeps `envsets.config.json` in sync with the files it manages, including which local file each slot replaces. During a run, Canary Lab backs up current target files, applies the selected envset, and restores the originals afterward.
-
-If you need to inspect the config directly, `envsets/envsets.config.json` uses three main fields: `appRoots` for named local repo paths, `slots` for files Canary Lab can temporarily replace, and `feature.slots` for the slots applied by that feature.
+If setting envsets up by hand feels tedious, the scaffolded project ships an `Env Import` skill (`.claude/skills/env-import.md`). Ask Claude or Codex to "import env files for [feature]" and the agent copies the relevant `.env` files from the repos declared in `feature.config.cjs` into the feature's envsets.
 
 ### Environment variable safety
 
-Envset files often contain credentials, API keys, and database passwords copied from local app configs. The default `.gitignore` ignores `features/*/envsets/*/*` to prevent accidental commits.
-
-If you override this or use `git add -f`, review what you are committing. Do not push env files containing real credentials to shared or public repositories.
+Envset files often contain credentials, API keys, and database passwords copied from local app configs. The default `.gitignore` ignores `features/*/envsets/*/*` to prevent accidental commits. If you override this or use `git add -f`, review what you are committing — don't push real credentials to shared or public repositories.
 
 ## What Gets Written Per Run
 
@@ -130,37 +120,33 @@ Outside the run directory, `logs/runs/index.json` tracks run history and `logs/c
 
 ## Self-Fixing Workflow
 
-Two flavors, same idea:
+When a test fails, an agent fixes the code. The scaffolded project ships with `CLAUDE.md` and `AGENTS.md` containing the managed `heal-prompt` section both flavors point at `logs/current/...`. After a fix, the agent writes one of the active run's signal files: `signals/.restart` for service or app changes, `signals/.rerun` for test/config-only changes.
 
-- **Manual (`self heal`)** — you stay in the driver's seat. Start a run from the web UI, leave it open, open Claude or Codex in the project folder, and type `self heal`. The agent follows the managed `heal-prompt` section in `CLAUDE.md` (or `AGENTS.md` for Codex), which points at `logs/current/...`.
-- **Auto-heal** — the runner itself spawns a Claude or Codex agent when a test fails. The agent runs in its own PTY tab inside the web UI. Canary Lab renders its packaged `apps/web-server/prompts/heal-agent.md` template with the active run's exact file paths and passes that prompt to the agent. Output is filtered through a formatter so you see readable progress instead of raw stream-json.
+### Auto-heal
 
-In both cases the agent starts from the active run's `heal-index.md` (a compact index over each failure, pointing at pre-sliced service logs under `failed/<slug>/`), falls back to that run's `e2e-summary.json` if the index is missing, fixes implementation code, and signals the runner via `logs/current/signals/.restart` or `logs/current/signals/.rerun`.
+The runner spawns a Claude or Codex agent in its own PTY tab inside the web UI when a test fails. Canary Lab renders its packaged `apps/web-server/prompts/heal-agent.md` template with the active run's exact file paths and passes that prompt to the agent. Output is filtered through a formatter so you see readable progress instead of raw stream-json.
+
+Auto-heal is capped by the runner — the current default is 3 heal cycles. If auto-heal gives up, exits without a signal, or no Claude/Codex CLI is available, the run finishes as failed; start another run or switch the project to Manual before retrying the hand-driven loop.
+
+### Manual heal
+
+Set the project heal agent to **Manual** when you want to drive the fix yourself. A failing run stays in the healing state and waits for a signal file.
+
+1. Open a new terminal in the project folder you created with `npx canary-lab init`.
+2. Run `claude` (or `codex`) there.
+3. Send the single prompt: `self heal`.
+
+The interactive agent reads the managed `heal-prompt` section in `CLAUDE.md` (or `AGENTS.md`) and writes the same `.restart` / `.rerun` signal files described above.
 
 ### Why this works for agents
 
-The agent is not asked to reconstruct the run from terminal scrollback. Canary Lab gives it:
+The agent is not asked to reconstruct the run from terminal scrollback. In both flavors, it starts from the active run's `heal-index.md` (a compact index over each failure, pointing at pre-sliced service logs under `failed/<slug>/`) and falls back to `e2e-summary.json` if the index is missing. Canary Lab gives it:
 
 - `logs/current/heal-index.md` as the first stop when failures have been enriched
 - failure-specific files under `logs/current/failed/<slug>/` instead of whole-service scrollback
 - `logs/current/e2e-summary.json` and `logs/current/playwright-events.jsonl` for the current Playwright state
 - `logs/current/diagnosis-journal.md` when prior heal cycles exist
 - `logs/current/signals/.rerun` and `logs/current/signals/.restart` so the runner owns the next Playwright pass and service restart
-
-### Manual heal
-
-Set the project heal agent to **Manual** when you want to drive the fix yourself. In manual mode, a failing run stays in the healing state and waits for a signal file.
-
-1. Open a new terminal in the project folder you created with `npx canary-lab init`.
-2. Run `claude` (or `codex`) there.
-3. Send the single prompt: `self heal`.
-
-The interactive agent reads the managed `heal-prompt` section in `CLAUDE.md` (or `AGENTS.md`). After a fix, it writes one of the active run's signal files:
-
-- `logs/current/signals/.restart` for service or app changes
-- `logs/current/signals/.rerun` for test/config-only changes
-
-Auto-heal uses the same signal contract, but it is capped by the runner. The current default is 3 heal cycles. If auto-heal gives up, exits without a signal, or no Claude/Codex CLI is available, the run finishes as failed; start another run or switch the project to Manual before retrying the hand-driven loop.
 
 ## Limitations
 
