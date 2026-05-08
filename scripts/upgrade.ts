@@ -9,6 +9,8 @@ import {
   hasPendingMigrations,
   type MigrationReport,
 } from './upgrade-migration'
+import { loadProjectConfig } from '../apps/web-server/lib/runtime/launcher/project-config'
+import { applyPersonalWikiBlock } from '../shared/runtime/personal-wiki'
 
 const MARKER_START = '<!-- managed:canary-lab:start -->'
 const MARKER_END = '<!-- managed:canary-lab:end -->'
@@ -201,6 +203,7 @@ export async function main(
   }
 
   const templateRoot = getTemplateRoot()
+  const projectConfig = loadProjectConfig(projectRoot)
   let updated = 0
 
   // 1. Fully-managed files: overwrite from templates
@@ -239,7 +242,10 @@ export async function main(
       ? fs.readFileSync(targetPath, 'utf-8')
       : ''
 
-    const result = applyManagedBlock(existing, managedBlock, relPath)
+    const result = applyPersonalWikiBlock(
+      applyManagedBlock(existing, managedBlock, relPath),
+      projectConfig.personalWikiPath,
+    )
 
     // Skip if nothing changed
     if (result === existing) continue

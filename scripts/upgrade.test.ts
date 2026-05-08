@@ -141,6 +141,8 @@ describe("main (upgrade orchestration)", () => {
       expect(content).toContain("<!-- managed:canary-lab:end -->")
       expect(content).toContain("<!-- heal-prompt:start -->")
       expect(content).toContain("<!-- heal-prompt:end -->")
+      expect(content).toContain("<!-- personal-wiki:start -->")
+      expect(content).toContain("<!-- personal-wiki:end -->")
       expect(content).toContain("When the user says `self heal`, follow the `heal-prompt` block below. The `logs/current` pointer tracks the active run.")
       expect(content).toContain("logs/current/heal-index.md")
       expect(content).toContain("logs/current/e2e-summary.json")
@@ -155,6 +157,9 @@ describe("main (upgrade orchestration)", () => {
       expect(content).not.toContain("## Context Files")
       expect(content).not.toContain("## Importing Env Files")
     }
+    expect(fs.readFileSync(path.join(root, "CLAUDE.md"), "utf-8")).toBe(
+      fs.readFileSync(path.join(root, "AGENTS.md"), "utf-8"),
+    )
 
     const pkg = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf-8"))
     expect(pkg.scripts.postinstall).toBe("canary-lab upgrade --silent")
@@ -230,6 +235,30 @@ describe("main (upgrade orchestration)", () => {
     const after = fs.readFileSync(claudePath, "utf-8")
     expect(after).toContain("# My notes")
     expect(after).toContain("custom stuff")
+  })
+
+  it("re-renders personal wiki blocks from canary-lab.config.json on upgrade", async () => {
+    const root = mkProjectRoot()
+    const wiki = path.join(root, "wiki")
+    fs.mkdirSync(wiki)
+    vi.stubEnv("CANARY_LAB_PROJECT_ROOT", root)
+    fs.writeFileSync(
+      path.join(root, "canary-lab.config.json"),
+      JSON.stringify({ personalWikiPath: wiki }, null, 2) + "\n",
+    )
+    vi.spyOn(console, "log").mockImplementation(() => {})
+
+    await main([])
+
+    for (const mdFile of ["CLAUDE.md", "AGENTS.md"]) {
+      const content = fs.readFileSync(path.join(root, mdFile), "utf-8")
+      expect(content).toContain("<!-- personal-wiki:start -->")
+      expect(content).toContain(`- \`${fs.realpathSync(wiki)}\` — Karpathy-style personal wiki`)
+      expect(content).toContain("<!-- personal-wiki:end -->")
+    }
+    expect(fs.readFileSync(path.join(root, "CLAUDE.md"), "utf-8")).toBe(
+      fs.readFileSync(path.join(root, "AGENTS.md"), "utf-8"),
+    )
   })
 
   it("does not crash on malformed package.json", async () => {

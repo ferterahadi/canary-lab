@@ -3,6 +3,7 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { buildAgentCommand, buildClaudeMcpConfigArg, buildOrchestratorHealCommand, pickAvailableHealAgent } from './auto-heal'
+import { renderPersonalWikiMap } from '../../../../shared/runtime/personal-wiki'
 
 describe('buildClaudeMcpConfigArg', () => {
   it('writes the MCP config to disk and returns `--mcp-config "<file>"`', () => {
@@ -148,6 +149,37 @@ describe('buildOrchestratorHealCommand', () => {
     expect(() => buildOrchestratorHealCommand({ agent: 'codex', projectRoot, runDir })).not.toThrow()
   })
 
+  it('appends restart user guidance to the rendered heal prompt', () => {
+    const build = buildOrchestratorHealCommand({ agent: 'codex', projectRoot, runDir })
+    build({ cycle: 0, outputDir: path.join(runDir, 'out'), userGuidance: 'focus on the webhook fallback' })
+    const promptBody = fs.readFileSync(path.join(runDir, 'heal-prompt.md'), 'utf-8')
+    expect(promptBody).toContain('User guidance for this restarted heal cycle')
+    expect(promptBody).toContain('focus on the webhook fallback')
+  })
+
+  it('includes configured personal wiki context in the rendered heal prompt', () => {
+    const wiki = path.join(tmp, 'wiki')
+    const build = buildOrchestratorHealCommand({
+      agent: 'codex',
+      projectRoot,
+      runDir,
+      personalWikiPath: wiki,
+    })
+    build({ cycle: 0, outputDir: path.join(runDir, 'out') })
+    const promptBody = fs.readFileSync(path.join(runDir, 'heal-prompt.md'), 'utf-8')
+    expect(promptBody).toContain(`- \`${wiki}\``)
+    expect(promptBody).toContain('Karpathy-style personal wiki')
+    expect(promptBody).toContain('Useful for finding extra context when the current failure seems related to prior work.')
+  })
+
+  it('omits personal wiki context when no wiki path is configured', () => {
+    const build = buildOrchestratorHealCommand({ agent: 'codex', projectRoot, runDir })
+    build({ cycle: 0, outputDir: path.join(runDir, 'out') })
+    const promptBody = fs.readFileSync(path.join(runDir, 'heal-prompt.md'), 'utf-8')
+    expect(promptBody).not.toContain('Karpathy-style personal wiki')
+    expect(promptBody).not.toContain('{{personalWikiMap}}')
+  })
+
   it('uses --continue on cycle > 0 when sessionMode=resume', () => {
     const build = buildOrchestratorHealCommand({
       agent: 'claude',
@@ -168,5 +200,12 @@ describe('buildOrchestratorHealCommand', () => {
     expect(cmd.includes('--mcp-config')).toBe(false) // codex doesn't use claude's mcp flag
     const promptBody = fs.readFileSync(path.join(runDir, 'heal-prompt.md'), 'utf-8')
     expect(promptBody).toContain(path.join(runDir, 'signals', '.restart'))
+  })
+})
+
+describe('buildPersonalWikiMap', () => {
+  it('returns an empty section for unset paths', () => {
+    expect(renderPersonalWikiMap(null)).toBe('')
+    expect(renderPersonalWikiMap('')).toBe('')
   })
 })

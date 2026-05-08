@@ -1801,16 +1801,18 @@ describe('RunOrchestrator.interjectHealAgent', () => {
     // Stream-json init frame — exactly the shape claude emits.
     oldAgent.emitData('{"type":"system","subtype":"init","session_id":"sess-abc-123","model":"claude"}\n')
 
-    const result = await orch.interjectHealAgent('nudge fix')
+    const interjectPromise = orch.interjectHealAgent('nudge fix')
+    oldAgent.emitExit(143)
+    const result = await interjectPromise
     expect(result).toEqual({ ok: true })
     expect(f.spawned.length).toBe(4)
     const newAgent = f.spawned[3]
     expect(newAgent.options.command).toContain('--resume sess-abc-123')
     expect(newAgent.options.command).toContain('"nudge fix"')
 
-    // Old pty was signaled; emit its exit so the heal loop swaps onto the new pty.
+    // Old pty was signaled; the heal loop must swap onto the new pty instead
+    // of finalizing the cycle as failed.
     expect(oldAgent.killed === 'SIGTERM' || oldAgent.killed === null).toBe(true)
-    oldAgent.emitExit(143)
 
     // Final status arrives only when the NEW pty exits — proves the
     // runHealAgent loop swapped onto it instead of returning early.
@@ -1818,7 +1820,54 @@ describe('RunOrchestrator.interjectHealAgent', () => {
     promise.then(() => { resolved = true })
     await new Promise((r) => setTimeout(r, 20))
     expect(resolved).toBe(false)
+    await new Promise((r) => setTimeout(r, 50))
     newAgent.emitExit(0)
+    await promise
+    await orch.stop('failed')
+  })
+
+  it('uses the formatter session-id sidecar when raw JSON is not visible to the orchestrator', async () => {
+    fs.mkdirSync(runDir, { recursive: true })
+    const f = makeFakeFactory()
+    let pwIdx = 0
+    const orch = new RunOrchestrator({
+      feature: makeFeature({ healOnFailureThreshold: 1 }),
+      runId: RUN_ID,
+      runDir,
+      ptyFactory: f.factory,
+      healthCheck: async () => true,
+      delay: async () => undefined,
+      healthPollIntervalMs: 5,
+      healSignalPollMs: 1,
+      healAgentTimeoutMs: 200,
+      playwrightSpawner: () => ({ command: `pw-${pwIdx++}`, cwd: tmpDir }),
+      autoHeal: {
+        agent: 'claude',
+        maxCycles: 1,
+        buildCommand: () => `claude -p initial | formatter`,
+        buildInterjectCommand: ({ sessionId, text }) =>
+          `claude --resume ${sessionId} -p ${JSON.stringify(text)}`,
+      },
+    })
+    fs.writeFileSync(
+      orch.paths.summaryPath,
+      JSON.stringify({ failed: [{ name: 'a' }], total: 3, passed: 0 }),
+    )
+    const promise = orch.runFullCycle()
+    await new Promise((r) => setTimeout(r, 5))
+    f.spawned[1].emitExit(1)
+    while (f.spawned.length < 3) await new Promise((r) => setTimeout(r, 5))
+    const oldAgent = f.spawned[2]
+    fs.writeFileSync(orch.paths.agentSessionIdPath, 'sidecar-session-999')
+
+    const interjectPromise = orch.interjectHealAgent('nudge via sidecar')
+    oldAgent.emitExit(143)
+    const result = await interjectPromise
+    expect(result).toEqual({ ok: true })
+    expect(f.spawned[3].options.command).toContain('--resume sidecar-session-999')
+
+    await new Promise((r) => setTimeout(r, 50))
+    f.spawned[3].emitExit(0)
     await promise
     await orch.stop('failed')
   })
@@ -1864,6 +1913,7 @@ describe('RunOrchestrator.interjectHealAgent', () => {
     const newAgent = f.spawned[3]
     expect(newAgent.options.command).toContain('thread-123')
 
+    await new Promise((r) => setTimeout(r, 50))
     newAgent.emitExit(0)
     await promise
     await orch.stop('failed')
@@ -1912,6 +1962,46 @@ describe('RunOrchestrator.interjectHealAgent', () => {
     const result = await interjectPromise
     expect(result).toEqual({ ok: false, reason: 'spawn-failed' })
     await promise
+    await orch.stop('failed')
+  })
+})
+
+describe('RunOrchestrator.restartHealFromFailure', () => {
+  it('starts the heal agent without a fresh Playwright run and passes user guidance into the command builder', async () => {
+    const f = makeFakeFactory()
+    let receivedGuidance: string | undefined
+    const orch = new RunOrchestrator({
+      feature: makeFeature({ repos: [], healOnFailureThreshold: 1 }),
+      runId: RUN_ID,
+      runDir,
+      ptyFactory: f.factory,
+      delay: async () => undefined,
+      healSignalPollMs: 1,
+      healAgentTimeoutMs: 20,
+      playwrightSpawner: () => ({ command: 'pw-should-not-run', cwd: tmpDir }),
+      autoHeal: {
+        agent: 'codex',
+        maxCycles: 1,
+        buildCommand: ({ userGuidance }) => {
+          receivedGuidance = userGuidance
+          return 'codex heal restart'
+        },
+        buildInterjectCommand: ({ sessionId }) => `codex resume ${sessionId}`,
+      },
+    })
+    fs.mkdirSync(runDir, { recursive: true })
+    fs.writeFileSync(
+      orch.paths.summaryPath,
+      JSON.stringify({ failed: [{ name: 'a' }], total: 1, passed: 0 }),
+    )
+
+    const promise = orch.restartHealFromFailure('look at fallback country mapping')
+    while (f.spawned.length < 1) await new Promise((r) => setTimeout(r, 5))
+    expect(f.spawned[0].options.command).toBe('codex heal restart')
+    expect(receivedGuidance).toBe('look at fallback country mapping')
+    f.spawned[0].emitExit(0)
+
+    expect(await promise).toBe('failed')
     await orch.stop('failed')
   })
 })

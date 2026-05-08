@@ -45,6 +45,10 @@ export type OrchestratorInterjectResult =
   | { ok: true }
   | { ok: false; reason: 'no-agent-running' | 'no-session-id' | 'spawn-failed' }
 
+export type RestartHealResult =
+  | { ok: true }
+  | { ok: false; reason: 'run-not-found' | 'not-restartable' | 'manual-mode' | 'spawn-failed' }
+
 export interface OrchestratorLike {
   runId: string
   stop(finalStatus?: RunManifest['status']): Promise<void>

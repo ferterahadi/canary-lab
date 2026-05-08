@@ -5,7 +5,7 @@ import { ApiError } from '../api/client'
 function formatInterjectError(e: unknown): string {
   if (e instanceof ApiError) {
     const reason = (e.body as { reason?: unknown })?.reason
-    if (reason === 'no-session-id') return 'Agent still starting — try again in a moment.'
+    if (reason === 'no-session-id') return 'Agent session is initializing; sending will retry briefly.'
     if (reason === 'no-agent-running') return 'No heal agent is running right now.'
     if (reason === 'spawn-failed') return 'Failed to resume the agent. Check the run logs.'
   }
@@ -14,9 +14,10 @@ function formatInterjectError(e: unknown): string {
 
 interface Props {
   runId: string
+  mode?: 'send' | 'restart'
 }
 
-export function AgentInputBar({ runId }: Props) {
+export function AgentInputBar({ runId, mode = 'send' }: Props) {
   const [text, setText] = useState('')
   const [sending, setSending] = useState(false)
   const [err, setErr] = useState<string | null>(null)
@@ -66,7 +67,7 @@ export function AgentInputBar({ runId }: Props) {
           opacity: !text.trim() || sending ? 0.5 : 1,
         }}
       >
-        {sending ? 'Sending…' : 'Send'}
+        {sending ? 'Sending…' : mode === 'restart' ? 'Restart Heal' : 'Send'}
       </button>
       {err && <span className="text-[11px]" style={{ color: '#ef4444' }}>{err}</span>}
     </form>

@@ -11,8 +11,14 @@ describe('shouldShowAgentInputBar', () => {
     expect(shouldShowAgentInputBar('running', 'auto')).toBe(false)
   })
 
+  it('is shown on failed auto-heal runs so heal can be restarted', () => {
+    expect(shouldShowAgentInputBar('failed', 'auto')).toBe(true)
+    expect(shouldShowAgentInputBar('failed', undefined)).toBe(false)
+  })
+
   it('is hidden for manual heal mode', () => {
     expect(shouldShowAgentInputBar('healing', 'manual')).toBe(false)
+    expect(shouldShowAgentInputBar('failed', 'manual')).toBe(false)
   })
 })
 

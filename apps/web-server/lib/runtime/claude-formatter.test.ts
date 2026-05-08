@@ -16,6 +16,7 @@ import {
 
 afterEach(() => {
   delete process.env.CANARY_LAB_BENCHMARK_USAGE_FILE
+  delete process.env.CANARY_LAB_AGENT_SESSION_ID_FILE
 })
 
 describe('c (color)', () => {
@@ -207,6 +208,27 @@ describe('handleLine', () => {
     expect(out).toContain('abcd1234')
     expect(out).toContain('claude-sonnet')
     spy.mockRestore()
+  })
+
+  it('writes the full session id to the sidecar file', () => {
+    const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-claude-session-')))
+    const file = path.join(tmp, 'session.txt')
+    const spy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    try {
+      process.env.CANARY_LAB_AGENT_SESSION_ID_FILE = file
+      handleLine(
+        JSON.stringify({
+          type: 'system',
+          subtype: 'init',
+          session_id: 'abcd1234efgh-full',
+          model: 'claude-sonnet',
+        }),
+      )
+      expect(fs.readFileSync(file, 'utf-8')).toBe('abcd1234efgh-full')
+    } finally {
+      spy.mockRestore()
+      fs.rmSync(tmp, { recursive: true, force: true })
+    }
   })
 
   it('result line prints duration and done/failed marker', () => {

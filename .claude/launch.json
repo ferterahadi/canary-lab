@@ -6,6 +6,12 @@
       "runtimeExecutable": "npx",
       "runtimeArgs": ["vite", "--config", "apps/web/vite.config.ts", "--port", "5173"],
       "port": 5173
+    },
+    {
+      "name": "docs",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "5174", "--directory", "docs"],
+      "port": 5174
     }
   ]
 }

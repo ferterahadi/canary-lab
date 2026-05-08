@@ -457,19 +457,19 @@ describe('api client', () => {
   })
 
   it('getProjectConfig GETs /api/project-config', async () => {
-    const fetchImpl = vi.fn().mockResolvedValue(ok({ healAgent: 'auto', editor: 'auto' }))
+    const fetchImpl = vi.fn().mockResolvedValue(ok({ healAgent: 'auto', editor: 'auto', personalWikiPath: null }))
     const r = await getProjectConfig({ fetchImpl })
-    expect(r).toEqual({ healAgent: 'auto', editor: 'auto' })
+    expect(r).toEqual({ healAgent: 'auto', editor: 'auto', personalWikiPath: null })
     expect(fetchImpl).toHaveBeenCalledWith('/api/project-config', { method: 'GET' })
   })
 
   it('putProjectConfig sends the partial config as JSON', async () => {
-    const fetchImpl = vi.fn().mockResolvedValue(ok({ healAgent: 'manual', editor: 'cursor' }))
-    await putProjectConfig({ healAgent: 'manual', editor: 'cursor' }, { fetchImpl })
+    const fetchImpl = vi.fn().mockResolvedValue(ok({ healAgent: 'manual', editor: 'cursor', personalWikiPath: '/tmp/wiki' }))
+    await putProjectConfig({ healAgent: 'manual', editor: 'cursor', personalWikiPath: '/tmp/wiki' }, { fetchImpl })
     const [url, init] = fetchImpl.mock.calls[0]
     expect(url).toBe('/api/project-config')
     expect(init.method).toBe('PUT')
-    expect(JSON.parse(init.body as string)).toEqual({ healAgent: 'manual', editor: 'cursor' })
+    expect(JSON.parse(init.body as string)).toEqual({ healAgent: 'manual', editor: 'cursor', personalWikiPath: '/tmp/wiki' })
   })
 
   it('openAgentApp POSTs the agent name', async () => {

@@ -13,6 +13,7 @@ export interface RunPaths {
   playwrightEventsPath: string
   playwrightArtifactsDir: string
   agentTranscriptPath: string
+  agentSessionIdPath: string
   runnerLogPath: string
   healIndexPath: string
   diagnosisJournalPath: string
@@ -34,6 +35,7 @@ export function buildRunPaths(runDir: string): RunPaths {
     playwrightEventsPath: path.join(runDir, 'playwright-events.jsonl'),
     playwrightArtifactsDir: path.join(runDir, 'playwright-artifacts'),
     agentTranscriptPath: path.join(runDir, 'agent-transcript.log'),
+    agentSessionIdPath: path.join(runDir, 'agent-session-id.txt'),
     runnerLogPath: path.join(runDir, 'runner.log'),
     healIndexPath: path.join(runDir, 'heal-index.md'),
     diagnosisJournalPath: path.join(runDir, 'diagnosis-journal.md'),

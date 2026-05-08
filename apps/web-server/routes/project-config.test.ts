@@ -42,7 +42,7 @@ describe('GET /api/project-config', () => {
     try {
       const r = await app.inject({ method: 'GET', url: '/api/project-config' })
       expect(r.statusCode).toBe(200)
-      expect(r.json()).toEqual({ healAgent: 'auto', editor: 'auto' })
+      expect(r.json()).toEqual({ healAgent: 'auto', editor: 'auto', personalWikiPath: null })
     } finally {
       await app.close()
     }
@@ -56,7 +56,7 @@ describe('GET /api/project-config', () => {
     const app = await makeApp()
     try {
       const r = await app.inject({ method: 'GET', url: '/api/project-config' })
-      expect(r.json()).toEqual({ healAgent: 'manual', editor: 'auto' })
+      expect(r.json()).toEqual({ healAgent: 'manual', editor: 'auto', personalWikiPath: null })
     } finally {
       await app.close()
     }
@@ -76,7 +76,7 @@ describe('PUT /api/project-config', () => {
       const written = JSON.parse(
         fs.readFileSync(path.join(projectRoot, 'canary-lab.config.json'), 'utf-8'),
       )
-      expect(written).toEqual({ healAgent: 'claude', editor: 'auto' })
+      expect(written).toEqual({ healAgent: 'claude', editor: 'auto', personalWikiPath: null })
     } finally {
       await app.close()
     }
@@ -95,7 +95,7 @@ describe('PUT /api/project-config', () => {
         payload: {},
       })
       expect(r.statusCode).toBe(200)
-      expect(r.json()).toEqual({ healAgent: 'codex', editor: 'auto' })
+      expect(r.json()).toEqual({ healAgent: 'codex', editor: 'auto', personalWikiPath: null })
     } finally {
       await app.close()
     }
@@ -124,11 +124,11 @@ describe('PUT /api/project-config', () => {
         payload: { editor: 'cursor' },
       })
       expect(r.statusCode).toBe(200)
-      expect(r.json()).toEqual({ healAgent: 'auto', editor: 'cursor' })
+      expect(r.json()).toEqual({ healAgent: 'auto', editor: 'cursor', personalWikiPath: null })
       const written = JSON.parse(
         fs.readFileSync(path.join(projectRoot, 'canary-lab.config.json'), 'utf-8'),
       )
-      expect(written).toEqual({ healAgent: 'auto', editor: 'cursor' })
+      expect(written).toEqual({ healAgent: 'auto', editor: 'cursor', personalWikiPath: null })
     } finally {
       await app.close()
     }
@@ -143,6 +143,123 @@ describe('PUT /api/project-config', () => {
         payload: { editor: 'vim' },
       })
       expect(r.statusCode).toBe(400)
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('writes a normalized personal wiki directory path', async () => {
+    const wiki = path.join(projectRoot, 'wiki')
+    fs.mkdirSync(wiki)
+    const app = await makeApp()
+    try {
+      const r = await app.inject({
+        method: 'PUT',
+        url: '/api/project-config',
+        payload: { personalWikiPath: wiki },
+      })
+      expect(r.statusCode).toBe(200)
+      expect(r.json()).toEqual({
+        healAgent: 'auto',
+        editor: 'auto',
+        personalWikiPath: fs.realpathSync(wiki),
+      })
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('updates CLAUDE.md and AGENTS.md when personal wiki path is set', async () => {
+    const wiki = path.join(projectRoot, 'wiki')
+    fs.mkdirSync(wiki)
+    const app = await makeApp()
+    try {
+      const r = await app.inject({
+        method: 'PUT',
+        url: '/api/project-config',
+        payload: { personalWikiPath: wiki },
+      })
+      expect(r.statusCode).toBe(200)
+      for (const mdFile of ['CLAUDE.md', 'AGENTS.md']) {
+        const content = fs.readFileSync(path.join(projectRoot, mdFile), 'utf-8')
+        expect(content).toContain('<!-- personal-wiki:start -->')
+        expect(content).toContain(`- \`${fs.realpathSync(wiki)}\` — Karpathy-style personal wiki`)
+        expect(content).toContain('<!-- personal-wiki:end -->')
+      }
+      expect(fs.readFileSync(path.join(projectRoot, 'CLAUDE.md'), 'utf-8')).toBe(
+        fs.readFileSync(path.join(projectRoot, 'AGENTS.md'), 'utf-8'),
+      )
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('expands ~ for personal wiki path input', async () => {
+    const app = await makeApp()
+    try {
+      const r = await app.inject({
+        method: 'PUT',
+        url: '/api/project-config',
+        payload: { personalWikiPath: '~' },
+      })
+      expect(r.statusCode).toBe(200)
+      expect(r.json().personalWikiPath).toBe(fs.realpathSync(os.homedir()))
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('clears the personal wiki path with null or empty string', async () => {
+    const wiki = path.join(projectRoot, 'wiki')
+    fs.mkdirSync(wiki)
+    fs.writeFileSync(
+      path.join(projectRoot, 'canary-lab.config.json'),
+      JSON.stringify({ personalWikiPath: wiki }),
+    )
+    const app = await makeApp()
+    try {
+      const r1 = await app.inject({
+        method: 'PUT',
+        url: '/api/project-config',
+        payload: { personalWikiPath: null },
+      })
+      expect(r1.statusCode).toBe(200)
+      expect(r1.json().personalWikiPath).toBe(null)
+      for (const mdFile of ['CLAUDE.md', 'AGENTS.md']) {
+        const content = fs.readFileSync(path.join(projectRoot, mdFile), 'utf-8')
+        expect(content).toContain('<!-- personal-wiki:start -->\n<!-- personal-wiki:end -->')
+        expect(content).not.toContain('Karpathy-style personal wiki')
+      }
+
+      const r2 = await app.inject({
+        method: 'PUT',
+        url: '/api/project-config',
+        payload: { personalWikiPath: '' },
+      })
+      expect(r2.statusCode).toBe(200)
+      expect(r2.json().personalWikiPath).toBe(null)
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('rejects missing, relative, and non-directory personal wiki paths', async () => {
+    const file = path.join(projectRoot, 'note.md')
+    fs.writeFileSync(file, 'x')
+    fs.writeFileSync(path.join(projectRoot, 'CLAUDE.md'), 'original claude')
+    fs.writeFileSync(path.join(projectRoot, 'AGENTS.md'), 'original agents')
+    const app = await makeApp()
+    try {
+      for (const personalWikiPath of [path.join(projectRoot, 'missing'), 'relative/wiki', file]) {
+        const r = await app.inject({
+          method: 'PUT',
+          url: '/api/project-config',
+          payload: { personalWikiPath },
+        })
+        expect(r.statusCode).toBe(400)
+      }
+      expect(fs.readFileSync(path.join(projectRoot, 'CLAUDE.md'), 'utf-8')).toBe('original claude')
+      expect(fs.readFileSync(path.join(projectRoot, 'AGENTS.md'), 'utf-8')).toBe('original agents')
     } finally {
       await app.close()
     }

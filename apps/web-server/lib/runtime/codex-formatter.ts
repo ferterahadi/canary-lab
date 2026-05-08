@@ -203,6 +203,17 @@ function writeBenchmarkUsage(payload: { inputTokens?: number; outputTokens?: num
   }
 }
 
+function writeAgentSessionId(id: string): void {
+  const file = process.env.CANARY_LAB_AGENT_SESSION_ID_FILE
+  if (!file || !id) return
+  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true })
+    fs.writeFileSync(file, id)
+  } catch {
+    // Sidecar is best-effort; the visible transcript remains authoritative.
+  }
+}
+
 function handleCompleted(item: AnyObj): void {
   const type = item.type as string | undefined
 
@@ -274,7 +285,9 @@ function handleLine(line: string): void {
   const type = msg.type as string | undefined
 
   if (type === 'thread.started') {
-    const id = String(msg.thread_id ?? '').slice(0, 8)
+    const fullId = typeof msg.thread_id === 'string' ? msg.thread_id : ''
+    writeAgentSessionId(fullId)
+    const id = fullId.slice(0, 8)
     process.stdout.write(`${tag()} ${c('magenta', 'thread')} ${c('bold', id)}\n\n`)
     return
   }
