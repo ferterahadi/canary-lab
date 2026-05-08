@@ -34,7 +34,7 @@ The user picked these canary-lab skills. Their bodies are inlined below — foll
 
 Stage 1 has already designed scenarios. You inspect repos for the implementation details Stage 1 deliberately omits — locators, env vars, fixture values, persisted shapes, and how to start the app locally. **Do not modify any files.**
 
-Inspect for two purposes:
+Inspect for three purposes:
 
 1. **App startup and readiness** — for `feature.config.cjs`. Use README startup instructions, package scripts, framework conventions, existing Playwright configs, route/page files, API server bootstrap code, and declared dev-server ports. Prefer local-only commands. Do not use production URLs, do not invent credentials or secrets, and do not point a health check at a production service. Prefer an HTTP readiness URL when the app has a root page, health route, or stable local route; use a TCP probe only when that is the defensible local readiness signal. Do not omit `healthCheck` for a service with a start command unless repo inspection finds no defensible local endpoint or port.
 
@@ -43,6 +43,21 @@ Inspect for two purposes:
    - **Test data**: read fixture files, seed scripts, factories, and existing test specs to find values the app will accept. Reuse them.
    - **Env vars**: scan for `process.env.*` reads in app code and existing tests to learn which variables your specs may need.
    - **Persisted shapes**: read schemas/models/OpenAPI specs when an `expectedOutcome` asserts on a persisted row or API payload.
+
+3. **Existing `.env` discovery** — for the feature's envset slot. Recursively scan each repo under "Repositories under test" for dotenv files: `.env`, `.env.local`, `.env.development`, `.env.development.local`, `.env.test`, `.env.example`, `.env.sample`, `.env.template`, plus any app-scoped variants such as `apps/<name>/.env*`. Skip `node_modules`, `.git`, `dist`, `build`, `.next`, `.turbo`. Catalogue the keys and values you find — they are the source of truth for what the running services expect and what the test needs to reach them. These flow into `envsets/<env>/{{featureName}}.env` per "Populating the envset slot" below.
+
+## Real services only
+
+These tests are end-to-end. The feature boots the actual repos under test (per `feature.config.cjs`) and the spec drives them through their real interfaces — UI, HTTP APIs, databases, message queues, anything the plan touches. Connect to real services. Do not mock, stub, intercept, or fake them.
+
+Concretely, do not:
+- Call `page.route(...)` / `route.fulfill(...)` to intercept network requests the app makes.
+- Patch `window.fetch`, `globalThis.fetch`, `XMLHttpRequest`, or any client transport.
+- Register MSW, nock, msw/node, or similar request handlers.
+- Add a `webServer` override in `playwright.config.ts` that swaps in a fake.
+- Replace a real database/queue/cache with an in-memory shim inside the test process.
+
+If a plan item asserts on a database row, query the same database the running app writes to (read connection details from env — see "Populating the envset slot" below). If a plan item asserts on a third-party SaaS that genuinely cannot be exercised locally, leave the assertion in place with a `// TODO:` comment naming the gap and the value that would satisfy it. Do not paper over it with a mock.
 
 ## Output format
 
@@ -56,7 +71,15 @@ You must emit at minimum:
 4. `envsets/envsets.config.json`
 5. `envsets/local/{{featureName}}.env`
 
-If a needed env value is unknown, leave a placeholder key with an empty value or a safe local default only when the PRD or selected skill justifies it. Never invent credentials, tokens, customer identifiers, or production-only values.
+The feature's `.env` slot is integral. Canary Lab copies it into the feature directory before each run, and `playwright.config.ts` loads it via `dotenv` (`loadDotenv({ path: path.join(__dirname, '.env') })`). The spec uses these values to find the running services (base URLs, ports), to read persisted state (database URLs, message broker URLs), and to authenticate against real endpoints. Always emit a populated `envsets/<env>/{{featureName}}.env` containing every variable the spec or `playwright.config.ts` reads, plus any service connection details from "Existing `.env` discovery" that the test will need.
+
+**Populating the envset slot:**
+
+- For every `process.env.*` read in the generated spec or `playwright.config.ts`, emit a key in the slot file.
+- When repo inspection found that key in a discovered `.env` file with a local-only value (URLs against `localhost`, default ports, feature toggles, fixture identifiers, public test data), copy the value verbatim. Cite the source path in a brief comment above the key when it isn't obvious.
+- When the discovered value looks like a secret — key name ending in `_SECRET`, `_KEY`, `_TOKEN`, `_PASSWORD`, `_PRIVATE`, OAuth client secrets, signing keys, third-party API keys — emit the key with an empty value and a `# TODO:` comment naming what the user should provide and why. Do not paste real secrets into generated output.
+- When a needed key was not found in any discovered file, emit it with an empty value and a `# TODO:` comment.
+- Never invent realistic-looking literals (`alice@example.com`, `Acme Corp`, `+1-555-0100`, fake-but-plausible URLs) in place of values you couldn't find.
 
 `envsets/envsets.config.json` must use the current Canary Lab envset schema with top-level `appRoots`, `slots`, and `feature` objects. Do not use the stale `{ "envsets": { ... } }` shape. For a feature-owned env file, use a slot named `{{featureName}}.env` and target `$CANARY_LAB_PROJECT_ROOT/features/{{featureName}}/.env`.
 
@@ -185,8 +208,7 @@ Tests within a single spec file run serially; spec files run in parallel. Do not
    ```
    Do **not** import from `@playwright/test` directly. The log-marker fixture is required for per-test log slicing in Canary Lab.
 4. Prefer role-based locators (`page.getByRole`, `page.getByLabel`) over CSS selectors when the skills don't specify otherwise. Use `data-testid` only when the source code already exposes one for the element.
-5. Do not mock services declared in `feature.config.cjs`.
-6. For navigation against the feature's main service, use **relative paths** (`page.goto('/login')`) — `baseURL` from `baseConfig` resolves them. Hardcode `http://localhost:PORT` only when targeting a *different* service declared in `feature.config.cjs`, and read its URL from env with a local default that matches that service's healthcheck.
+5. For navigation against the feature's main service, use **relative paths** (`page.goto('/login')`) — `baseURL` from `baseConfig` resolves them. Hardcode `http://localhost:PORT` only when targeting a *different* service declared in `feature.config.cjs`, and read its URL from env with a local default that matches that service's healthcheck.
 
 ## Test structure rules
 
@@ -261,6 +283,16 @@ export default defineConfig({ ...baseConfig })
 }
 </file>
 <file path="envsets/local/{{featureName}}.env">
+# Used by the test to reach the locally-running app (see feature.config.cjs)
+APP_BASE_URL=http://localhost:3000
+
+# Connection the test reads to assert on persisted orders
+# Sourced from app/.env (local-only Postgres)
+DATABASE_URL=postgres://app:app@localhost:5432/app_dev
+
+# TODO: provide a seeded test customer — see app/seeds/customers.ts
+TEST_CUSTOMER_EMAIL=
+TEST_CUSTOMER_PASSWORD=
 </file>
 <file path="e2e/checkout.spec.ts">
 import { test, expect } from 'canary-lab/feature-support/log-marker-fixture'

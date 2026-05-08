@@ -54,6 +54,50 @@ describe('validateConfigure', () => {
     })
     expect(v.errors.featureName).toBeUndefined()
   })
+
+  it('rejects a typed featureName that matches an existing feature', () => {
+    const v = validateConfigure(
+      { prdText: 'p', repos: [repo], featureName: 'taken' },
+      ['other', 'taken'],
+    )
+    expect(v.ok).toBe(false)
+    expect(v.errors.featureName).toContain('already exists')
+  })
+
+  it('matches existing feature names case-insensitively', () => {
+    const v = validateConfigure(
+      { prdText: 'p', repos: [repo], featureName: 'Taken' },
+      ['taken'],
+    )
+    expect(v.ok).toBe(false)
+    expect(v.errors.featureName).toContain('already exists')
+  })
+
+  it('rejects a derived featureName that matches an existing feature when input is blank', () => {
+    const v = validateConfigure(
+      { prdText: 'p', repos: [repo], derivedFeatureName: 'taken' },
+      ['taken'],
+    )
+    expect(v.ok).toBe(false)
+    expect(v.errors.featureName).toContain('already exists')
+  })
+
+  it('does not flag a derived featureName that does not collide', () => {
+    const v = validateConfigure(
+      { prdText: 'p', repos: [repo], derivedFeatureName: 'fresh' },
+      ['taken'],
+    )
+    expect(v.ok).toBe(true)
+    expect(v.errors.featureName).toBeUndefined()
+  })
+
+  it('skips conflict check when the typed featureName has invalid format', () => {
+    const v = validateConfigure(
+      { prdText: 'p', repos: [repo], featureName: 'has spaces' },
+      ['has spaces'],
+    )
+    expect(v.errors.featureName).toMatch(/alphanumeric/)
+  })
 })
 
 describe('slugifyFeatureName', () => {
