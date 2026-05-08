@@ -6,6 +6,9 @@ export interface ConfigureInput {
   prdText: string
   repos: { name: string; localPath: string }[]
   featureName?: string
+  // The name the backend would auto-derive if `featureName` is blank — used so
+  // conflict checks fire even when the user leaves the field empty.
+  derivedFeatureName?: string
 }
 
 export interface ConfigureValidation {
@@ -18,12 +21,25 @@ export interface ConfigureValidation {
 
 const FEATURE_NAME_RE = /^[a-zA-Z0-9_-]+$/
 
-export function validateConfigure(input: ConfigureInput): ConfigureValidation {
+export function validateConfigure(
+  input: ConfigureInput,
+  existingFeatureNames: string[] = [],
+): ConfigureValidation {
   const errors: ConfigureValidation['errors'] = {}
   if (input.repos.length === 0) errors.repos = 'Pick at least one repo'
   const fname = input.featureName?.trim()
   if (fname && !FEATURE_NAME_RE.test(fname)) {
     errors.featureName = 'Feature name must be alphanumeric, dashes, or underscores'
+  } else {
+    const effectiveName = fname || input.derivedFeatureName?.trim() || ''
+    if (effectiveName) {
+      const taken = existingFeatureNames.some(
+        (n) => n.toLowerCase() === effectiveName.toLowerCase(),
+      )
+      if (taken) {
+        errors.featureName = `A feature named "${effectiveName}" already exists`
+      }
+    }
   }
   return {
     ok: Object.keys(errors).length === 0,

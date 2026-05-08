@@ -64,11 +64,21 @@ export function ConfigureStep({
 
   const repoList = [...selectedRepos.values()]
 
-  const validation = validateConfigure({
-    prdText,
-    repos: repoList,
-    featureName: featureName || undefined,
-  })
+  const derivedFeatureName = prdText.trim()
+    ? slugifyFeatureName(prdText)
+    : repoList[0]
+      ? `${repoNameFromPath(repoList[0].localPath)}-e2e`
+      : ''
+
+  const validation = validateConfigure(
+    {
+      prdText,
+      repos: repoList,
+      featureName: featureName || undefined,
+      derivedFeatureName: derivedFeatureName || undefined,
+    },
+    features.map((f) => f.name),
+  )
 
   const toggleRepo = (repo: DraftRepo): void => {
     setSelectedRepos((prev) => {
@@ -161,11 +171,7 @@ export function ConfigureStep({
     }
   }
 
-  const featureNamePlaceholder = prdText.trim()
-    ? slugifyFeatureName(prdText)
-    : repoList[0]
-      ? `${repoNameFromPath(repoList[0].localPath)}-e2e`
-      : 'auto-derived from selected repo'
+  const featureNamePlaceholder = derivedFeatureName || 'auto-derived from selected repo'
 
   return (
     <div className="flex h-full min-h-0 flex-col">
