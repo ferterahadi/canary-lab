@@ -217,15 +217,16 @@ describe('buildOrchestratorHealPrompt', () => {
     build({ cycle: 0, outputDir: path.join(runDir, 'out') })
     const promptBody = fs.readFileSync(path.join(runDir, 'heal-prompt.md'), 'utf-8')
     expect(promptBody).toContain(`- \`${wiki}\``)
-    expect(promptBody).toContain('Karpathy-style personal wiki')
-    expect(promptBody).toContain('Useful for finding extra context when the current failure seems related to prior work.')
+    expect(promptBody).toContain('cross-linked markdown')
+    expect(promptBody).toContain('follow links rather than re-grepping')
+    expect(promptBody).toContain('Consult when the current failure seems related to prior work.')
   })
 
   it('omits personal wiki context when no wiki path is configured', () => {
     const build = buildOrchestratorHealPrompt({ agent: 'codex', projectRoot, runDir })
     build({ cycle: 0, outputDir: path.join(runDir, 'out') })
     const promptBody = fs.readFileSync(path.join(runDir, 'heal-prompt.md'), 'utf-8')
-    expect(promptBody).not.toContain('Karpathy-style personal wiki')
+    expect(promptBody).not.toContain('cross-linked markdown')
     expect(promptBody).not.toContain('{{personalWikiMap}}')
   })
 

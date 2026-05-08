@@ -17,7 +17,7 @@ const AGENT_DOCS = ['CLAUDE.md', 'AGENTS.md']
 export function renderPersonalWikiMap(personalWikiPath?: string | null): string {
   const wikiPath = personalWikiPath?.trim()
   if (!wikiPath) return ''
-  return `- \`${wikiPath}\` — Karpathy-style personal wiki with distilled prior agent conversations and debugging notes. Useful for finding extra context when the current failure seems related to prior work.`
+  return `- \`${wikiPath}\` — Karpathy-style personal wiki: distilled prior agent sessions as cross-linked markdown, LLM-curated and append-only. Look for an index/home/readme file at the root as a TOC; notes use \`[[wikilinks]]\` — follow links rather than re-grepping. Consult when the current failure seems related to prior work.`
 }
 
 export function renderPersonalWikiBlock(personalWikiPath?: string | null): string {
