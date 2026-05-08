@@ -1793,6 +1793,8 @@ describe('RunOrchestrator.interjectHealAgent', () => {
       orch.paths.summaryPath,
       JSON.stringify({ failed: [{ name: 'a' }], total: 3, passed: 0 }),
     )
+    const agentChunks: string[] = []
+    orch.on('agent-output', ({ chunk }) => agentChunks.push(chunk))
     const promise = orch.runFullCycle()
     await new Promise((r) => setTimeout(r, 5))
     f.spawned[1].emitExit(1)
@@ -1809,6 +1811,12 @@ describe('RunOrchestrator.interjectHealAgent', () => {
     const newAgent = f.spawned[3]
     expect(newAgent.options.command).toContain('--resume sess-abc-123')
     expect(newAgent.options.command).toContain('"nudge fix"')
+    const echoed = agentChunks.join('')
+    expect(echoed).toContain('user interject')
+    expect(echoed).toContain('  │ nudge fix')
+    const transcript = fs.readFileSync(orch.paths.agentTranscriptPath, 'utf-8')
+    expect(transcript).toContain('user interject')
+    expect(transcript).toContain('  │ nudge fix')
 
     // Old pty was signaled; the heal loop must swap onto the new pty instead
     // of finalizing the cycle as failed.
@@ -1822,6 +1830,57 @@ describe('RunOrchestrator.interjectHealAgent', () => {
     expect(resolved).toBe(false)
     await new Promise((r) => setTimeout(r, 50))
     newAgent.emitExit(0)
+    await promise
+    await orch.stop('failed')
+  })
+
+  it('preserves multi-line user interject text in the pane and transcript', async () => {
+    fs.mkdirSync(runDir, { recursive: true })
+    const f = makeFakeFactory()
+    let pwIdx = 0
+    const orch = new RunOrchestrator({
+      feature: makeFeature({ healOnFailureThreshold: 1 }),
+      runId: RUN_ID,
+      runDir,
+      ptyFactory: f.factory,
+      healthCheck: async () => true,
+      delay: async () => undefined,
+      healthPollIntervalMs: 5,
+      healSignalPollMs: 1,
+      healAgentTimeoutMs: 200,
+      playwrightSpawner: () => ({ command: `pw-${pwIdx++}`, cwd: tmpDir }),
+      autoHeal: {
+        agent: 'claude',
+        maxCycles: 1,
+        buildCommand: () => 'claude -p initial',
+        buildInterjectCommand: ({ sessionId, text }) =>
+          `claude --resume ${sessionId} -p ${JSON.stringify(text)}`,
+      },
+    })
+    fs.writeFileSync(
+      orch.paths.summaryPath,
+      JSON.stringify({ failed: [{ name: 'a' }], total: 3, passed: 0 }),
+    )
+    const agentChunks: string[] = []
+    orch.on('agent-output', ({ chunk }) => agentChunks.push(chunk))
+    const promise = orch.runFullCycle()
+    await new Promise((r) => setTimeout(r, 5))
+    f.spawned[1].emitExit(1)
+    while (f.spawned.length < 3) await new Promise((r) => setTimeout(r, 5))
+    const oldAgent = f.spawned[2]
+    oldAgent.emitData('{"type":"system","subtype":"init","session_id":"sess-multi","model":"claude"}\n')
+
+    const interjectPromise = orch.interjectHealAgent('first line\nsecond line\nthird line')
+    oldAgent.emitExit(143)
+    expect(await interjectPromise).toEqual({ ok: true })
+    expect(f.spawned).toHaveLength(4)
+    const echoed = agentChunks.join('')
+    expect(echoed).toContain('  │ first line\n  │ second line\n  │ third line')
+    const transcript = fs.readFileSync(orch.paths.agentTranscriptPath, 'utf-8')
+    expect(transcript).toContain('  │ first line\n  │ second line\n  │ third line')
+
+    await new Promise((r) => setTimeout(r, 50))
+    f.spawned[3].emitExit(0)
     await promise
     await orch.stop('failed')
   })

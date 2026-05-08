@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Canary Lab in the Field — A Tooling Landscape</title>
+  <title>Where Canary Lab fits</title>
   <style>
     :root {
       --bg: #fafafa;
@@ -17,26 +17,6 @@
       --canary-fg: #78350f;
       --canary-border: #d97706;
 
-      --entry-bg: #e0f2fe;
-      --entry-fg: #0c4a6e;
-      --entry-border: #0284c7;
-
-      --service-bg: #f0fdf4;
-      --service-fg: #14532d;
-      --service-border: #16a34a;
-
-      --heal-bg: #fee2e2;
-      --heal-fg: #7f1d1d;
-      --heal-border: #dc2626;
-
-      --artifact-bg: #f3e8ff;
-      --artifact-fg: #581c87;
-      --artifact-border: #9333ea;
-
-      --good: #16a34a;
-      --partial: #d97706;
-      --none: #94a3b8;
-
       --shadow: 0 1px 2px rgba(15,23,42,0.04), 0 4px 12px rgba(15,23,42,0.06);
     }
 
@@ -46,7 +26,7 @@
       font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
       background: var(--bg);
       color: var(--text);
-      line-height: 1.55;
+      line-height: 1.6;
       -webkit-font-smoothing: antialiased;
       font-feature-settings: "ss01", "cv11";
     }
@@ -87,13 +67,11 @@
     .hero p {
       font-size: clamp(15px, 1.6vw, 18px);
       color: var(--muted);
-      max-width: 640px;
+      max-width: 680px;
       margin: 0 auto;
     }
 
-    section {
-      margin-bottom: 72px;
-    }
+    section { margin-bottom: 72px; }
     section h2 {
       font-size: 14px;
       letter-spacing: 0.14em;
@@ -112,24 +90,61 @@
       color: var(--muted);
       margin: 0 0 28px;
       font-size: 15px;
-      max-width: 720px;
+      max-width: 760px;
     }
 
     .card {
       background: var(--surface);
       border: 1px solid var(--line);
       border-radius: 16px;
-      padding: 28px;
+      padding: 28px 32px;
       box-shadow: var(--shadow);
     }
-    .card.tight { padding: 20px; }
+    .card p { margin: 0 0 12px; }
+    .card p:last-child { margin-bottom: 0; }
+    .card code {
+      background: #f1f5f9;
+      padding: 1px 6px;
+      border-radius: 4px;
+      font-size: 0.92em;
+      font-family: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    }
 
-    /* Mermaid containers */
+    .plain-list, .boundary-list, .example-list {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+    }
+    .plain-list li, .example-list li {
+      padding: 8px 0 8px 22px;
+      position: relative;
+      color: var(--text);
+      font-size: 15px;
+    }
+    .plain-list li::before, .example-list li::before {
+      content: "";
+      position: absolute;
+      left: 4px;
+      top: 16px;
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      background: var(--canary-border);
+    }
+    .boundary-list li {
+      padding: 10px 0;
+      border-bottom: 1px dashed var(--line);
+      font-size: 15px;
+    }
+    .boundary-list li:last-child { border-bottom: none; }
+    .boundary-list li strong { color: var(--text); }
+
+    /* Mermaid */
     .mermaid-wrap {
       background: var(--surface);
       border: 1px solid var(--line);
       border-radius: 16px;
-      padding: 24px;
+      padding: 32px 24px;
       box-shadow: var(--shadow);
       overflow-x: auto;
     }
@@ -137,98 +152,63 @@
       display: flex;
       justify-content: center;
       align-items: center;
-      min-height: 300px;
+      min-height: 220px;
       font-family: inherit !important;
     }
     .mermaid svg { max-width: 100%; height: auto; }
 
-    /* Tables */
-    .table-wrap { overflow-x: auto; border-radius: 16px; border: 1px solid var(--line); background: var(--surface); box-shadow: var(--shadow); }
-    table { width: 100%; border-collapse: collapse; font-size: 14px; }
-    th, td {
-      padding: 14px 16px;
-      text-align: left;
-      border-bottom: 1px solid var(--line);
-      vertical-align: middle;
-    }
-    thead th {
-      background: #f8fafc;
-      font-weight: 600;
-      font-size: 12px;
-      text-transform: uppercase;
-      letter-spacing: 0.06em;
+    .caption {
       color: var(--muted);
+      font-size: 14px;
+      max-width: 760px;
+      margin: 16px auto 0;
+      text-align: center;
     }
-    tbody tr:last-child td { border-bottom: none; }
-    .feature-table th, .feature-table td { text-align: center; }
-    .feature-table th:first-child, .feature-table td:first-child { text-align: left; font-weight: 500; }
 
-    .pill {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      width: 28px;
-      height: 28px;
-      border-radius: 999px;
-      font-size: 13px;
+    /* Neighbors grid */
+    .neighbor-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 16px;
+    }
+    @media (min-width: 820px) {
+      .neighbor-grid { grid-template-columns: 1fr 1fr; }
+    }
+    .neighbor-card {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 22px 24px;
+      box-shadow: var(--shadow);
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .neighbor-card h4 {
+      margin: 0;
+      font-size: 17px;
       font-weight: 700;
+      letter-spacing: -0.005em;
     }
-    .pill.yes { background: rgba(22,163,74,0.12); color: var(--good); }
-    .pill.partial { background: rgba(217,119,6,0.14); color: var(--partial); }
-    .pill.no { background: rgba(148,163,184,0.18); color: var(--none); }
-
-    /* Repairs section */
-    .repairs-grid {
-      display: grid;
-      grid-template-columns: 1fr;
-      gap: 12px;
-    }
-    .repair-row {
-      display: grid;
-      grid-template-columns: 200px 1fr;
-      gap: 16px;
-      padding: 16px 20px;
-      background: var(--surface);
-      border: 1px solid var(--line);
-      border-radius: 12px;
-      align-items: center;
-    }
-    .repair-row .name { font-weight: 600; display: flex; align-items: center; gap: 8px; }
-    .repair-row .icon { font-size: 18px; }
-    .repair-row .what { color: var(--muted); font-size: 14px; }
-
-    /* Verdicts */
-    .verdict-grid {
-      display: grid;
-      grid-template-columns: 1fr;
-      gap: 12px;
-    }
-    .verdict {
-      background: var(--surface);
-      border: 1px solid var(--line);
-      border-left: 4px solid var(--line-strong);
-      border-radius: 12px;
-      padding: 16px 20px;
-      display: grid;
-      grid-template-columns: 220px 100px 1fr;
-      gap: 16px;
-      align-items: center;
-    }
-    .verdict .name { font-weight: 600; }
-    .verdict .stance {
-      font-size: 12px;
-      letter-spacing: 0.05em;
-      font-weight: 600;
+    .neighbor-card .tools {
+      margin: 0;
+      font-size: 13px;
+      color: var(--canary-fg);
+      background: var(--canary-bg);
       padding: 4px 10px;
       border-radius: 999px;
-      text-align: center;
-      white-space: nowrap;
+      align-self: flex-start;
+      font-weight: 500;
     }
-    .verdict .desc { color: var(--muted); font-size: 14px; }
+    .neighbor-card p:not(.tools) {
+      margin: 4px 0 0;
+      font-size: 14px;
+      color: #334155;
+      line-height: 1.6;
+    }
+    .neighbor-card em { color: var(--text); font-style: normal; font-weight: 600; }
 
-    .stance.neutral { background: rgba(148,163,184,0.16); color: #334155; }
-
-    /* About / honesty card */
+    /* About */
     .about-section { margin-bottom: 48px; }
     .about-card {
       background: linear-gradient(180deg, #fafaf9 0%, #f5f5f4 100%);
@@ -247,7 +227,7 @@
     .about-card .about-text {
       color: var(--muted);
       font-size: 14px;
-      line-height: 1.65;
+      line-height: 1.7;
       margin: 0;
     }
 
@@ -259,26 +239,19 @@
       font-size: 13px;
       text-align: center;
     }
-    footer a { color: var(--muted); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; }
-
-    .legend {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 16px;
-      margin-top: 14px;
-      font-size: 13px;
+    footer a {
       color: var(--muted);
+      text-decoration: underline;
+      text-decoration-thickness: 1px;
+      text-underline-offset: 3px;
     }
-    .legend .item { display: inline-flex; align-items: center; gap: 6px; }
+    footer p { margin: 0; max-width: 900px; margin: 0 auto; line-height: 1.9; }
 
     /* Mobile */
     @media (max-width: 768px) {
       main { padding: 24px 16px 56px; }
       section { margin-bottom: 56px; }
-      .repair-row { grid-template-columns: 1fr; gap: 6px; }
-      .verdict { grid-template-columns: 1fr; gap: 8px; }
-      .verdict .stance { justify-self: start; }
-      th, td { padding: 10px 12px; font-size: 13px; }
+      .card { padding: 20px 22px; }
       .hero { padding: 32px 8px 28px; margin-bottom: 32px; }
       .about-card { padding: 24px 20px; }
     }
@@ -288,242 +261,142 @@
   <main>
 
     <header class="hero">
-      <span class="eyebrow">May 2026 · Compiled from public docs</span>
-      <h1>A Field Map of <span class="accent">E2E Testing</span> in 2026</h1>
-      <p>A survey of how today's E2E testing tools fit together — Playwright agents, cloud dashboards, AI test SaaS, local orchestrators. Compiled while working on Canary Lab; shared in case it's useful to anyone mapping the same space.</p>
+      <span class="eyebrow">May 2026 · Compiled from public docs with AI assistance</span>
+      <h1>Where <span class="accent">Canary Lab</span> fits</h1>
+      <p>Canary Lab is one piece of a workflow that usually involves a test runner, sometimes a CI dashboard, and a coding agent. This page is a map of where it sits and what it pairs with — not a feature contest.</p>
     </header>
 
-    <!-- ① Positioning -->
-    <section id="positioning">
-      <h2>① Positioning</h2>
-      <h3>Where AI shows up × where tools run</h3>
-      <p class="subtitle">Tools cluster in different places depending on when AI is applied (creating tests vs debugging failures) and how they're hosted (cloud vs local).</p>
+    <!-- ① What it is -->
+    <section id="what-it-is">
+      <h2>① What it is</h2>
+      <h3>A local orchestrator wrapped around a Playwright run</h3>
+      <p class="subtitle">Canary Lab owns the lifecycle around a local E2E run: starting the services a feature depends on, applying environment files, running Playwright, and writing per-run logs and artifacts to a stable directory. When a test fails, it prepares a structured failure context that an external coding agent — Claude Code or Codex — can read and act on.</p>
+
+      <div class="card">
+        <ul class="plain-list">
+          <li>Starts the services a feature needs and waits for health checks before tests run</li>
+          <li>Swaps environment files (envsets) for the duration of a run, then restores them</li>
+          <li>Runs Playwright and captures stdout, events, screenshots, videos, and traces under <code>logs/runs/&lt;runId&gt;/</code></li>
+          <li>Slices service logs per failed test so the relevant window is findable without scrollback</li>
+          <li>Optionally hands the failure context to a coding agent and watches for restart/rerun signals</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- ② What it isn't -->
+    <section id="what-it-isnt">
+      <h2>② What it isn't</h2>
+      <h3>The boundaries</h3>
+      <p class="subtitle">Canary Lab fills a specific gap. Several other tools cover stages it explicitly does not, and that's intentional — the value is in pairing well, not in covering everything.</p>
+
+      <div class="card">
+        <ul class="boundary-list">
+          <li><strong>Not the test runner.</strong> Playwright is. Canary Lab invokes it.</li>
+          <li><strong>Not the coding agent.</strong> Claude Code, Codex, or another CLI is. Canary Lab supplies context and signal files.</li>
+          <li><strong>Not a test healer.</strong> It doesn't rewrite selectors, waits, or assertions in test files.</li>
+          <li><strong>Not a CI dashboard.</strong> It doesn't aggregate runs across a team or expose hosted history.</li>
+          <li><strong>Not cloud SaaS.</strong> It runs locally on a single developer's machine.</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- ③ Lifecycle map -->
+    <section id="lifecycle">
+      <h2>③ The lifecycle</h2>
+      <h3>Where Canary Lab sits in the loop</h3>
+      <p class="subtitle">A typical E2E workflow has six stages. Canary Lab covers the highlighted three — the gap between running a test locally and handing the failure to something that can fix it. It's also the part of the loop where context is most often lost.</p>
+
       <div class="mermaid-wrap">
         <pre class="mermaid">
-quadrantChart
-    title Tool positioning
-    x-axis "Test creation" --> "Failure debugging"
-    y-axis "Cloud-first" --> "Local-first"
-    quadrant-1 "Local + Failure debug"
-    quadrant-2 "Local + Test creation"
-    quadrant-3 "Cloud + Test creation"
-    quadrant-4 "Cloud + Failure debug"
-    "Canary Lab": [0.92, 0.95]
-    "Playwright Healer": [0.85, 0.72]
-    "Tilt": [0.10, 0.90]
-    "Octomind": [0.25, 0.45]
-    "Mabl": [0.30, 0.15]
-    "QA Wolf": [0.40, 0.12]
-    "Currents.dev": [0.60, 0.22]
-    "Replay.io": [0.78, 0.35]
+flowchart LR
+    A["Author tests"] --> B["Run locally"]
+    B --> C["Run in CI"]
+    C --> D["Capture results"]
+    D --> E["Surface failure"]
+    E --> F["Fix code"]
+    F -.->|next iteration| B
+
+    classDef cl fill:#fef3c7,stroke:#d97706,stroke-width:3px,color:#78350f
+    classDef other fill:#f8fafc,stroke:#94a3b8,color:#334155
+
+    class B,D,E cl
+    class A,C,F other
         </pre>
       </div>
+      <p class="caption">No single tool covers every stage. A working setup typically combines a test runner, an orchestrator for the local debug loop, and a coding agent for the fix.</p>
     </section>
 
-    <!-- ② Repairs -->
-    <section id="repairs">
-      <h2>② Unit of repair</h2>
-      <h3>What does each tool actually fix?</h3>
-      <p class="subtitle">Tools that claim "self-healing" often mean different things. Here's what each one actually patches.</p>
+    <!-- ④ The neighbors -->
+    <section id="neighbors">
+      <h2>④ The neighbors</h2>
+      <h3>How each tool relates</h3>
+      <p class="subtitle">Grouped by what they're for. None of these are competitors to Canary Lab — they cover different stages of the lifecycle, operate at different scales, or address different audiences. Most can coexist with Canary Lab on the same project.</p>
 
-      <div class="repairs-grid">
-        <div class="repair-row">
-          <div class="name"><span class="icon">🔧</span>Canary Lab</div>
-          <div class="what">Service code · application logic · configs</div>
+      <div class="neighbor-grid">
+
+        <div class="neighbor-card">
+          <h4>Test runners &amp; test healers</h4>
+          <p class="tools">Playwright · Playwright Healer</p>
+          <p>Playwright is the runner Canary Lab invokes — there's no overlap, just a hand-off. Playwright Healer is a layer on top of Playwright that patches test code (selectors, waits, assertions) using DOM, console, and network signals from a replay. Canary Lab works in the opposite direction: it leaves test files alone and instead surfaces the system state behind the failure so an agent can fix the implementation. The two could coexist on the same project — Healer for selector drift, Canary Lab for app-level bugs.</p>
         </div>
-        <div class="repair-row">
-          <div class="name"><span class="icon">🩹</span>Playwright Healer</div>
-          <div class="what">Selectors · waits · assertions in test files</div>
+
+        <div class="neighbor-card">
+          <h4>Test-authoring SaaS</h4>
+          <p class="tools">Octomind · Mabl · QA Wolf</p>
+          <p>These are vendor-managed services that generate and maintain tests for you, often with their own AI in the loop. They cover the <em>authoring</em> stage and run the tests on the vendor's hosted runner. Canary Lab assumes you already write your tests in Playwright and care about what happens locally during a failing run. Different operating model, different stage in the lifecycle.</p>
         </div>
-        <div class="repair-row">
-          <div class="name"><span class="icon">🩹</span>Octomind</div>
-          <div class="what">Selectors · flows in generated tests</div>
+
+        <div class="neighbor-card">
+          <h4>Test history &amp; CI dashboards</h4>
+          <p class="tools">Currents.dev</p>
+          <p>Currents is a cloud service for aggregating Playwright runs across a team's CI: history, flakiness analytics, retry tracking, parallelisation. It sits on the CI side of the lifecycle. Canary Lab sits on the local-dev side. They're complementary — a team could run Currents in CI and Canary Lab on each developer's machine without conflict.</p>
         </div>
-        <div class="repair-row">
-          <div class="name"><span class="icon">🩹</span>Mabl / QA Wolf</div>
-          <div class="what">Test steps · locators (vendor-managed cloud)</div>
+
+        <div class="neighbor-card">
+          <h4>Local stack orchestrators</h4>
+          <p class="tools">Tilt · Skaffold</p>
+          <p>Tilt brings up a Kubernetes-based dev stack with hot reload. It's adjacent to Canary Lab in that both "boot local services," but the runtimes and goals differ — Tilt for ongoing development against a K8s stack, Canary Lab for per-run process lifecycle around a Playwright invocation. A project using Tilt for dev could still use Canary Lab for the test loop.</p>
         </div>
-        <div class="repair-row">
-          <div class="name"><span class="icon">📊</span>Currents.dev</div>
-          <div class="what">Nothing — observability and history only</div>
+
+        <div class="neighbor-card">
+          <h4>Coding agents</h4>
+          <p class="tools">Claude Code · Codex · Goose</p>
+          <p>These are the <em>other half</em> of Canary Lab's heal loop. Canary Lab doesn't write code; it produces a structured failure context (sliced logs, <code>heal-index.md</code>, signal files) that one of these agents can act on. Claude Code and Codex are already wired up; Goose follows the same general pattern and could be added. The complement is direct: agents are good at editing code, Canary Lab is good at handing them the right context to edit it from.</p>
         </div>
-        <div class="repair-row">
-          <div class="name"><span class="icon">🐳</span>Tilt</div>
-          <div class="what">Nothing — local stack orchestrator, not a test tool</div>
+
+        <div class="neighbor-card">
+          <h4>Agent envelopes at other scales</h4>
+          <p class="tools">Stripe Minions</p>
+          <p>Stripe's Minions is internal-only tooling: a fork of Goose extended with "blueprints" (deterministic workflow scaffolds), 400+ MCP tool integrations, and pre-warmed devboxes, used to autonomously produce ~1,300 PRs per week. The interesting connection is that <em>Canary Lab is the same pattern at a much smaller scale</em> — both wrap a coding agent with scaffolding and context to make it more reliable on a constrained kind of task. Stripe's scope is "any small bounded engineering task across the company"; Canary Lab's is "fix the local app code that broke this Playwright run." Same shape, very different blast radius.</p>
         </div>
+
+        <div class="neighbor-card">
+          <h4>Chat clients with code access</h4>
+          <p class="tools">Claude Desktop</p>
+          <p>Claude Desktop is the Anthropic chat app for Mac and Windows. With MCP, it can read files and call tools, but it's interactive-first and not designed to be driven headlessly from a runner. It's adjacent to Canary Lab — a developer might use it to ask questions about a captured run — but it isn't a substitute for Claude Code or Codex in the auto-heal slot.</p>
+        </div>
+
       </div>
     </section>
 
-    <!-- ③ Heatmap -->
-    <section id="heatmap">
-      <h2>③ Feature coverage</h2>
-      <h3>What's first-class, partial, or out of scope</h3>
-      <p class="subtitle">Capability presence across five tools, as of public docs in May 2026.</p>
+    <!-- ⑤ Worked example -->
+    <section id="example">
+      <h2>⑤ A worked example</h2>
+      <h3>How the tools tile</h3>
+      <p class="subtitle">A concrete picture of where Canary Lab sits in a real workflow.</p>
 
-      <div class="table-wrap">
-        <table class="feature-table">
-          <thead>
-            <tr>
-              <th>Feature</th>
-              <th class="canary-col">Canary Lab</th>
-              <th>PW Healer</th>
-              <th>Octomind</th>
-              <th>Currents</th>
-              <th>Tilt</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td>Runs Playwright</td>
-              <td class="canary-col"><span class="pill yes">✓</span></td>
-              <td><span class="pill yes">✓</span></td>
-              <td><span class="pill yes">✓</span></td>
-              <td><span class="pill partial">~</span></td>
-              <td><span class="pill no">−</span></td>
-            </tr>
-            <tr>
-              <td>Starts multi-service stack</td>
-              <td class="canary-col"><span class="pill yes">✓</span></td>
-              <td><span class="pill no">−</span></td>
-              <td><span class="pill no">−</span></td>
-              <td><span class="pill no">−</span></td>
-              <td><span class="pill yes">✓</span></td>
-            </tr>
-            <tr>
-              <td>Health-checks before run</td>
-              <td class="canary-col"><span class="pill yes">✓</span></td>
-              <td><span class="pill no">−</span></td>
-              <td><span class="pill no">−</span></td>
-              <td><span class="pill no">−</span></td>
-              <td><span class="pill yes">✓</span></td>
-            </tr>
-            <tr>
-              <td>Env-file swap (envsets)</td>
-              <td class="canary-col"><span class="pill yes">✓</span></td>
-              <td><span class="pill no">−</span></td>
-              <td><span class="pill no">−</span></td>
-              <td><span class="pill no">−</span></td>
-              <td><span class="pill no">−</span></td>
-            </tr>
-            <tr>
-              <td>Per-run sliced log dir</td>
-              <td class="canary-col"><span class="pill yes">✓</span></td>
-              <td><span class="pill no">−</span></td>
-              <td><span class="pill partial">~</span></td>
-              <td><span class="pill yes">✓</span></td>
-              <td><span class="pill no">−</span></td>
-            </tr>
-            <tr>
-              <td>AI heals tests</td>
-              <td class="canary-col"><span class="pill partial">~</span></td>
-              <td><span class="pill yes">✓</span></td>
-              <td><span class="pill yes">✓</span></td>
-              <td><span class="pill no">−</span></td>
-              <td><span class="pill no">−</span></td>
-            </tr>
-            <tr>
-              <td>AI heals services / app</td>
-              <td class="canary-col"><span class="pill yes">✓</span></td>
-              <td><span class="pill no">−</span></td>
-              <td><span class="pill no">−</span></td>
-              <td><span class="pill no">−</span></td>
-              <td><span class="pill no">−</span></td>
-            </tr>
-            <tr>
-              <td>Cloud history / dashboard</td>
-              <td class="canary-col"><span class="pill no">−</span></td>
-              <td><span class="pill no">−</span></td>
-              <td><span class="pill yes">✓</span></td>
-              <td><span class="pill yes">✓</span></td>
-              <td><span class="pill no">−</span></td>
-            </tr>
-            <tr>
-              <td>Team / CI focus</td>
-              <td class="canary-col"><span class="pill no">−</span></td>
-              <td><span class="pill partial">~</span></td>
-              <td><span class="pill yes">✓</span></td>
-              <td><span class="pill yes">✓</span></td>
-              <td><span class="pill no">−</span></td>
-            </tr>
-            <tr>
-              <td>BYO agent (Claude / Codex)</td>
-              <td class="canary-col"><span class="pill yes">✓</span></td>
-              <td><span class="pill no">−</span></td>
-              <td><span class="pill no">−</span></td>
-              <td><span class="pill no">−</span></td>
-              <td><span class="pill no">−</span></td>
-            </tr>
-            <tr>
-              <td>Free + open source</td>
-              <td class="canary-col"><span class="pill yes">✓</span></td>
-              <td><span class="pill yes">✓</span></td>
-              <td><span class="pill partial">~</span></td>
-              <td><span class="pill no">−</span></td>
-              <td><span class="pill yes">✓</span></td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-      <div class="legend">
-        <span class="item"><span class="pill yes">✓</span> first-class</span>
-        <span class="item"><span class="pill partial">~</span> partial</span>
-        <span class="item"><span class="pill no">−</span> out of scope</span>
-      </div>
-    </section>
+      <div class="card">
+        <p>Suppose you're working on a 3-service local stack — a frontend, an API, and a worker — with Playwright tests that exercise the whole thing. A test fails in the checkout flow.</p>
 
-    <!-- ④ Decision flow -->
-    <section id="decision">
-      <h2>④ Decision flow</h2>
-      <h3>Which tool answers which question</h3>
-      <p class="subtitle">A rough map from question to tool. Several tools may overlap on each question; this picks the one most directly aimed at it.</p>
-      <div class="mermaid-wrap">
-        <pre class="mermaid">
-flowchart TD
-    Start{"What do I actually need?"}
-    Start -->|Generate tests from a spec| Gen["Octomind · QA Wolf · Mabl"]
-    Start -->|Auto-fix flaky selectors| Heal["Playwright Healer"]
-    Start -->|Track team flakiness across CI| Obs["Currents.dev"]
-    Start -->|Bring my K8s stack up locally| Orch["Tilt · Skaffold"]
-    Start -->|Fix system-level bugs<br/>during local dev loop| CL["Canary Lab"]
+        <ul class="example-list">
+          <li><strong>Run the test locally.</strong> Canary Lab boots the three services, applies the right envset, runs Playwright, and captures logs, traces, and the failure under <code>logs/runs/&lt;runId&gt;/</code>.</li>
+          <li><strong>See what broke.</strong> The Canary Lab UI shows per-test logs, the Playwright trace, and a sliced view of the relevant service log window. No terminal scrollback to dig through.</li>
+          <li><strong>Hand it to an agent.</strong> Claude Code or Codex reads <code>heal-index.md</code> and the failure slice, edits the API handler, and writes a <code>.rerun</code> signal.</li>
+          <li><strong>Track flakiness over time.</strong> If the team also runs Playwright in CI, Currents collects the cross-team history independently — Canary Lab doesn't replace that.</li>
+          <li><strong>Maintain the tests themselves.</strong> If selector drift is the recurring problem, Playwright Healer or Octomind handle that — Canary Lab leaves test files alone.</li>
+        </ul>
 
-    classDef neutral fill:#f8fafc,stroke:#94a3b8,color:#334155,stroke-width:1.5px
-    class CL,Gen,Heal,Obs,Orch neutral
-        </pre>
-      </div>
-    </section>
-
-    <!-- ⑤ Notes on each tool -->
-    <section id="verdicts">
-      <h2>⑤ Notes</h2>
-      <h3>How the tools relate</h3>
-      <p class="subtitle">Brief observations on how each tool sits relative to Canary Lab and to each other. The author's read of public docs as of May 2026; not vendor statements.</p>
-
-      <div class="verdict-grid">
-        <div class="verdict">
-          <div class="name">Playwright Healer</div>
-          <div class="stance neutral">Different layer</div>
-          <div class="desc">Healer patches test code — selectors, assertions, waits — using DOM, console, and network signals from a replay. Canary Lab doesn't patch tests; it captures system context so an external coding agent can work on the implementation.</div>
-        </div>
-        <div class="verdict">
-          <div class="name">Currents.dev</div>
-          <div class="stance neutral">Different audience</div>
-          <div class="desc">Cloud-side history and flakiness analytics for teams running Playwright in CI. Canary Lab focuses on the single-developer local loop. Both can coexist in the same project.</div>
-        </div>
-        <div class="verdict">
-          <div class="name">Octomind</div>
-          <div class="stance neutral">Different timing</div>
-          <div class="desc">Octomind generates and maintains tests at authoring time. Canary Lab adds run-time context at failure time. The two cover different phases of the test lifecycle.</div>
-        </div>
-        <div class="verdict">
-          <div class="name">Mabl / QA Wolf</div>
-          <div class="stance neutral">Different operating model</div>
-          <div class="desc">Vendor-managed cloud SaaS where the vendor (or the vendor's AI) writes and maintains tests. Canary Lab is OSS, local, and assumes you write the tests.</div>
-        </div>
-        <div class="verdict">
-          <div class="name">Tilt</div>
-          <div class="stance neutral">Adjacent space</div>
-          <div class="desc">Tilt orchestrates Kubernetes services for the dev loop with hot reload. Canary Lab orchestrates plain processes for the test loop with per-run lifecycle. Same verb, different runtime assumptions.</div>
-        </div>
+        <p>Each tool has a stage. Canary Lab fills the local debug stage and the agent hand-off, which is the gap most other tools don't directly target.</p>
       </div>
     </section>
 
@@ -531,12 +404,22 @@ flowchart TD
     <section id="about" class="about-section">
       <div class="about-card">
         <h2>About this document</h2>
-        <p class="about-text">Researched from public web sources and compiled with AI assistance, May 2026. A contribution to the field, not a competitive analysis. Please verify anything here before relying on it — don't take it at face value.</p>
+        <p class="about-text">Researched from public web sources and compiled with AI assistance, May 2026. Intended as a map of where Canary Lab sits relative to its neighbours, not a competitive analysis. Several characterisations of other tools are based on public docs and blog posts and may be out of date — please verify anything here before relying on it. If something is wrong or unfair, open an issue or PR.</p>
       </div>
     </section>
 
     <footer>
-      <p>Sources: <a href="https://playwright.dev/docs/test-agents">Playwright Test Agents</a> · <a href="https://currents.dev/playwright">Currents.dev</a> · <a href="https://octomind.dev/">Octomind</a> · <a href="https://docs.tilt.dev/">Tilt</a> · <a href="https://www.qawolf.com/blog/the-12-best-ai-testing-tools-in-2026">QA Wolf — 2026 AI testing landscape</a></p>
+      <p>Sources:
+        <a href="https://playwright.dev/docs/test-agents">Playwright Test Agents</a> ·
+        <a href="https://currents.dev/playwright">Currents.dev</a> ·
+        <a href="https://octomind.dev/">Octomind</a> ·
+        <a href="https://docs.tilt.dev/">Tilt</a> ·
+        <a href="https://www.qawolf.com/blog/the-12-best-ai-testing-tools-in-2026">QA Wolf — 2026 AI testing landscape</a> ·
+        <a href="https://stripe.dev/blog/minions-stripes-one-shot-end-to-end-coding-agents">Stripe Minions</a> ·
+        <a href="https://github.com/block/goose">Goose</a> ·
+        <a href="https://docs.claude.com/en/docs/claude-code">Claude Code</a> ·
+        <a href="https://github.com/openai/codex">Codex CLI</a>
+      </p>
     </footer>
 
   </main>
@@ -548,25 +431,10 @@ flowchart TD
       theme: 'base',
       themeVariables: {
         fontFamily: '-apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif',
-        primaryColor: '#e0f2fe',
+        primaryColor: '#f8fafc',
         primaryTextColor: '#0f172a',
-        primaryBorderColor: '#0284c7',
-        lineColor: '#64748b',
-        secondaryColor: '#f0fdf4',
-        tertiaryColor: '#fef3c7',
-        quadrant1Fill: '#fef3c7',
-        quadrant2Fill: '#f0fdf4',
-        quadrant3Fill: '#f1f5f9',
-        quadrant4Fill: '#e0f2fe',
-        quadrant1TextFill: '#78350f',
-        quadrant2TextFill: '#14532d',
-        quadrant3TextFill: '#334155',
-        quadrant4TextFill: '#0c4a6e',
-        quadrantPointFill: '#0f172a',
-        quadrantPointTextFill: '#0f172a',
-        quadrantTitleFill: '#0f172a',
-        quadrantXAxisTextFill: '#475569',
-        quadrantYAxisTextFill: '#475569'
+        primaryBorderColor: '#94a3b8',
+        lineColor: '#64748b'
       }
     });
   </script>

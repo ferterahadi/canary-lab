@@ -790,6 +790,7 @@ export class RunOrchestrator extends EventEmitter {
     this.healAgentSessionId = null
     this.healAgentSessionBuf = ''
     try { fs.rmSync(this.paths.agentSessionIdPath, { force: true }) } catch { /* ignore */ }
+    this.echoUserInterject(text)
     this.attachAgentDataHandlers(newPty, cfg.agent)
     this.healAgentPty = newPty
     this.healAgentReplacementPending = false
@@ -822,6 +823,17 @@ export class RunOrchestrator extends EventEmitter {
         this.healAgentSessionBuf = this.healAgentSessionBuf.slice(-4 * 1024)
       }
     })
+  }
+
+  private echoUserInterject(text: string): void {
+    const block = formatUserInterjectBlock(text, this.startedAt)
+    try {
+      fs.mkdirSync(path.dirname(this.paths.agentTranscriptPath), { recursive: true })
+      fs.appendFileSync(this.paths.agentTranscriptPath, block)
+    } catch {
+      // Transcript echo is best-effort; the live pane still gets the message.
+    }
+    this.emit('agent-output', { chunk: block })
   }
 
   private agentPtyEnv(): Record<string, string> {
@@ -1370,6 +1382,21 @@ function parseSessionIdLine(line: string, agent: AutoHealAgent): string | null {
     return msg.thread_id
   }
   return null
+}
+
+function formatUserInterjectBlock(text: string, startedAt: string, now: Date = new Date()): string {
+  const tag = formatElapsedTag(startedAt, now)
+  const body = text.split(/\r?\n/).map((line) => `  │ ${line}`).join('\n')
+  return `\n${tag} user interject\n${body}\n\n`
+}
+
+function formatElapsedTag(startedAt: string, now: Date): string {
+  const started = new Date(startedAt).getTime()
+  const elapsedMs = Number.isFinite(started) ? Math.max(0, now.getTime() - started) : 0
+  const s = Math.floor(elapsedMs / 1000)
+  const mm = Math.floor(s / 60)
+  const ss = (s % 60).toString().padStart(2, '0')
+  return `[${mm}:${ss}]`
 }
 
 // Production heal-agent command builder. The web-server / CLI entry points
