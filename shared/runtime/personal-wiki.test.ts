@@ -10,7 +10,7 @@ import {
 describe('personal wiki rendering', () => {
   it('renders a concise map entry for configured wiki paths', () => {
     expect(renderPersonalWikiMap('/Users/oddle/Documents/wiki')).toBe(
-      '- `/Users/oddle/Documents/wiki` — Karpathy-style personal wiki with distilled prior agent conversations and debugging notes. Useful for finding extra context when the current failure seems related to prior work.',
+      '- `/Users/oddle/Documents/wiki` — Karpathy-style personal wiki: distilled prior agent sessions as cross-linked markdown, LLM-curated and append-only. Look for an index/home/readme file at the root as a TOC; notes use `[[wikilinks]]` — follow links rather than re-grepping. Consult when the current failure seems related to prior work.',
     )
   })
 
@@ -32,7 +32,7 @@ describe('personal wiki rendering', () => {
     expect(applyPersonalWikiBlock(existing, '/tmp/wiki')).toBe([
       'before',
       PERSONAL_WIKI_START,
-      '- `/tmp/wiki` — Karpathy-style personal wiki with distilled prior agent conversations and debugging notes. Useful for finding extra context when the current failure seems related to prior work.',
+      '- `/tmp/wiki` — Karpathy-style personal wiki: distilled prior agent sessions as cross-linked markdown, LLM-curated and append-only. Look for an index/home/readme file at the root as a TOC; notes use `[[wikilinks]]` — follow links rather than re-grepping. Consult when the current failure seems related to prior work.',
       PERSONAL_WIKI_END,
       'after',
     ].join('\n'))

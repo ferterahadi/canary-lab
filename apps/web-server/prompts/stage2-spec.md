@@ -18,7 +18,7 @@ Use this exact feature name in generated config values:
 
 ### Selected skills
 
-The user picked these canary-lab skills. Their bodies are inlined below - follow them as authoritative guidance for feature layout, fixtures, selectors, envsets, and test organization.
+The user picked these canary-lab skills. Their bodies are inlined below — follow them as authoritative guidance for feature layout, fixtures, selectors, envsets, and test organization. If a skill conflicts with a rule below, the skill wins for the area it covers; otherwise the rules below apply.
 
 ```
 {{skills}}
@@ -30,17 +30,19 @@ The user picked these canary-lab skills. Their bodies are inlined below - follow
 {{repos}}
 ```
 
-Before writing files, inspect the selected repositories closely enough to infer
-how the local app is started and when it is ready. Use local evidence such as
-README startup instructions, package scripts, framework conventions, existing
-Playwright configs, route/page files, API server bootstrap code, and declared
-dev-server ports. Prefer local-only commands and readiness probes. Do not use
-production URLs, do not invent credentials or secrets, and do not point a
-health check at a production service. Prefer an HTTP readiness URL when the app
-has a root page, health route, or stable local route; use a TCP probe only when
-that is the defensible local readiness signal. Do not omit `healthCheck` for a
-service with a start command unless repo inspection finds no defensible local
-endpoint or port.
+## Repository inspection
+
+Stage 1 has already designed scenarios. You inspect repos for the implementation details Stage 1 deliberately omits — locators, env vars, fixture values, persisted shapes, and how to start the app locally. **Do not modify any files.**
+
+Inspect for two purposes:
+
+1. **App startup and readiness** — for `feature.config.cjs`. Use README startup instructions, package scripts, framework conventions, existing Playwright configs, route/page files, API server bootstrap code, and declared dev-server ports. Prefer local-only commands. Do not use production URLs, do not invent credentials or secrets, and do not point a health check at a production service. Prefer an HTTP readiness URL when the app has a root page, health route, or stable local route; use a TCP probe only when that is the defensible local readiness signal. Do not omit `healthCheck` for a service with a start command unless repo inspection finds no defensible local endpoint or port.
+
+2. **Spec authoring inputs** — for `e2e/*.spec.ts`:
+   - **Locators**: read the route/page/component files implied by the plan's `actions`. Pull real `aria-label`, `role`, button/link text, `data-testid`, and form field labels from the source. Do not invent selectors. If a plan item names "the 'Sign in' button" but the source renders `<button>Log in</button>`, use `Log in` — the plan's quoted text is a hint, not a contract.
+   - **Test data**: read fixture files, seed scripts, factories, and existing test specs to find values the app will accept. Reuse them.
+   - **Env vars**: scan for `process.env.*` reads in app code and existing tests to learn which variables your specs may need.
+   - **Persisted shapes**: read schemas/models/OpenAPI specs when an `expectedOutcome` asserts on a persisted row or API payload.
 
 ## Output format
 
@@ -58,16 +60,7 @@ If a needed env value is unknown, leave a placeholder key with an empty value or
 
 `envsets/envsets.config.json` must use the current Canary Lab envset schema with top-level `appRoots`, `slots`, and `feature` objects. Do not use the stale `{ "envsets": { ... } }` shape. For a feature-owned env file, use a slot named `{{featureName}}.env` and target `$CANARY_LAB_PROJECT_ROOT/features/{{featureName}}/.env`.
 
-Envsets are named runtime environments, not source filename buckets. If repo
-inspection finds different env values for different runtime modes, create one
-envset per environment, such as `envsets/dev/` and `envsets/prod/`, and keep
-the same slot names across those envsets. Treat filename markers like
-`prod-mode`, `staging`, or similar as environment clues, not as final slot
-names. Normalize copied files to the target filenames Canary Lab applies:
-`env` for dev values can become `envsets/dev/.env`, `env.prod-mode` for prod
-values can become `envsets/prod/.env`, `foo.env.dev` can become
-`envsets/dev/foo.env.dev`, and `foo.env.dev.prod-mode` can become
-`envsets/prod/foo.env.dev`.
+Envsets are named runtime environments, not source filename buckets. If repo inspection finds different env values for different runtime modes, create one envset per environment, such as `envsets/dev/` and `envsets/prod/`, and keep the same slot names across those envsets. Treat filename markers like `prod-mode`, `staging`, or similar as environment clues, not as final slot names. Normalize copied files to the target filenames Canary Lab applies: `env` for dev values can become `envsets/dev/.env`, `env.prod-mode` for prod values can become `envsets/prod/.env`, `foo.env.dev` can become `envsets/dev/foo.env.dev`, and `foo.env.dev.prod-mode` can become `envsets/prod/foo.env.dev`.
 
 Example envset config shape:
 
@@ -146,7 +139,41 @@ loadDotenv({ path: path.join(__dirname, '.env') })
 export default defineConfig({ ...baseConfig })
 ```
 
-Only override `baseConfig` fields when the accepted plan or selected skills require it.
+`baseConfig` provides a sensible local `baseURL`. Only override `baseConfig` fields when the accepted plan or selected skills require it.
+
+## Mapping plan items to tests
+
+Every plan item maps to exactly one top-level Playwright `test(...)`. Do not skip items, do not invent extra tests, do not collapse two items into one.
+
+| Plan field | Becomes |
+|---|---|
+| `step` | The `test(...)` title, **verbatim**. Do not paraphrase, prefix, or suffix. |
+| `actions` | Playwright statements inside the test body, in the same order. Each action becomes one or more `await page.*` or `await request.*` calls. |
+| `expectedOutcome` | An `expect(...)` assertion placed immediately after the action that produces it. The assertion target must match the outcome category named in the plan: visible copy → `toHaveText` / `toBeVisible` on the named text; URL → `toHaveURL`; API response → `toBe(<status>)` + `toMatchObject(...)`; persisted value → API/DB read + shape assertion; role/state → `toBeDisabled`/`toBeChecked`/etc. |
+| `coverageType` | Optional tag via the test options object: `test('...', { tag: '@happy-path' }, async (...) => ...)`. Add only when it improves filtering; omit otherwise. |
+
+When `actions` reference a label or button in quoted text, treat it as a hint — confirm against the source. If the source renders different text, use the source's text and let the plan's hint serve only as a clue.
+
+## Test data resolution
+
+Resolve every concrete value referenced by `actions` in this order. Stop at the first that fits:
+
+1. **Existing fixtures, seeds, or factories** in the inspected repos. Reuse directly. If the value lives in a JSON/YAML/TS fixture, import it; if it's a CLI seed, hardcode the seed's known value at the top of the spec with a comment naming the seed source.
+2. **A top-of-spec constant** when the value must be deterministic but no fixture defines it. Name for what it is (`TEST_CUSTOMER_EMAIL`, not `email1`).
+3. **An env var read** only when existing app code or tests already read the same var. Match their default behavior.
+4. **A generated value** (e.g., `crypto.randomUUID()`) only when the test requires uniqueness per run. Choose obviously synthetic shapes.
+
+Never invent realistic-looking literals (`alice@example.com`, `Acme Corp`, `+1-555-0100`). If you cannot resolve a value through the four rules above, emit a clearly-named placeholder constant with `// TODO: provide <value> — <why>` and continue. Do not fabricate.
+
+## Preconditions and shared setup
+
+If multiple tests in a spec share the same precondition (logged-in user, seeded cart, feature flag), implement it once via `test.beforeEach` in that spec file. Keep helpers inline in the spec unless a selected skill specifies a shared location.
+
+- **Auth**: prefer programmatic login (call the app's existing login API, then attach cookies or storage) over driving the UI in `beforeEach`. Drive the UI for login *only* when a plan item is itself about login.
+- **Seed data**: prefer fixtures or factories already present in the repo. Do not author new seed scripts.
+- **`storageState`**: do not configure global `storageState` unless a selected skill explicitly requires it. Per-spec `beforeEach` is the default.
+
+Tests within a single spec file run serially; spec files run in parallel. Do not write tests that depend on shared mutable state across spec files. If a plan implies a singleton resource (e.g., a configured tenant), set it up inside that spec's `beforeEach`, not at module scope.
 
 ## Spec file rules
 
@@ -157,13 +184,13 @@ Only override `baseConfig` fields when the accepted plan or selected skills requ
    import { test, expect } from 'canary-lab/feature-support/log-marker-fixture'
    ```
    Do **not** import from `@playwright/test` directly. The log-marker fixture is required for per-test log slicing in Canary Lab.
-4. Prefer role-based locators (`page.getByRole`, `page.getByLabel`) over CSS selectors when the skills don't specify otherwise.
+4. Prefer role-based locators (`page.getByRole`, `page.getByLabel`) over CSS selectors when the skills don't specify otherwise. Use `data-testid` only when the source code already exposes one for the element.
 5. Do not mock services declared in `feature.config.cjs`.
-6. Read service URLs from env with a local default that matches the feature health check when such a default is known.
+6. For navigation against the feature's main service, use **relative paths** (`page.goto('/login')`) — `baseURL` from `baseConfig` resolves them. Hardcode `http://localhost:PORT` only when targeting a *different* service declared in `feature.config.cjs`, and read its URL from env with a local default that matches that service's healthcheck.
 
 ## Test structure rules
 
-Choose the spec-file split yourself. Group tests by user journey, domain area, setup/fixture needs, or failure class. For broad plans, emit multiple focused `e2e/*.spec.ts` files instead of cramming unrelated scenarios into one large file. Keep each file cohesive and name it after the behavior it covers, such as `e2e/voucher-validation.spec.ts` or `e2e/order-placement.spec.ts`.
+Choose the spec-file split yourself. Group consecutive plan items that share a domain (auth, checkout, voucher validation, permissions, persistence) into one spec file, using `step` text and plan ordering as the grouping signal. For broad plans, emit multiple focused `e2e/*.spec.ts` files instead of cramming unrelated scenarios into one large file. Name each file after the behavior it covers, such as `e2e/voucher-validation.spec.ts` or `e2e/order-placement.spec.ts`.
 
 Each accepted plan item should become a top-level Playwright `test('<plan step>', async (...) => { ... })` unless multiple plan items are clearly parts of one scenario and the plan already groups them that way. Do not wrap a generated test body in a same-named `await test.step(...)`; the test title already carries the scenario label.
 
@@ -173,8 +200,13 @@ Generated specs should use direct Playwright actions and assertions inside the `
 
 1. Keep `expect(...)` assertions near the action they verify, matching the plan item's `expectedOutcome`.
 2. Assert durable behavior: user-visible copy, final URL, persisted data, API payloads/responses, emitted events, disabled/enabled state, or domain-specific side effects.
-3. Do not stop at `expect(res.status()).toBe(200)` unless the PRD only asks for health.
-4. Use negative and edge-case tests when the plan includes them; do not collapse them into comments or TODOs.
+3. Use negative and edge-case tests when the plan includes them; do not collapse them into comments or TODOs.
+
+**Stale assertion shapes to avoid:**
+- `expect(res.status()).toBe(200)` as the only assertion (unless the plan only asks for health).
+- `expect(page).toHaveURL(/.*/)` or any regex that matches anything.
+- `await page.waitForTimeout(...)` as a substitute for an assertion.
+- Asserting only on element existence when the plan named specific copy or a specific value — assert the value too.
 
 ## Example
 
@@ -182,7 +214,7 @@ Generated specs should use direct Playwright actions and assertions inside the `
 <file path="feature.config.cjs">
 const config = {
   name: '{{featureName}}',
-  description: 'Login flow coverage',
+  description: 'Checkout coverage',
   envs: ['local'],
   repos: [
     {
@@ -192,7 +224,7 @@ const config = {
         {
           name: 'web',
           command: 'npm run dev -- --port 3000',
-          healthCheck: { http: { url: 'http://localhost:3000/login', timeoutMs: 3000 } },
+          healthCheck: { http: { url: 'http://localhost:3000/health', timeoutMs: 3000 } },
         },
       ],
     },
@@ -229,15 +261,36 @@ export default defineConfig({ ...baseConfig })
 }
 </file>
 <file path="envsets/local/{{featureName}}.env">
-GATEWAY_URL=http://localhost:3000
 </file>
-<file path="e2e/login.spec.ts">
+<file path="e2e/checkout.spec.ts">
 import { test, expect } from 'canary-lab/feature-support/log-marker-fixture'
 
-test.describe('{{featureName}}', () => {
-  test('Open the login page', async ({ page }) => {
-    await page.goto('/login')
-    await expect(page.getByLabel('Email')).toBeVisible()
+// Sourced from app/seeds/customers.ts — fixture: "stocked-customer"
+const TEST_CUSTOMER = { email: 'stocked-customer@seed.local', password: 'seed-pw' }
+
+test.beforeEach(async ({ page, request }) => {
+  const res = await request.post('/api/login', { data: TEST_CUSTOMER })
+  expect(res.ok()).toBe(true)
+  const { cookies } = await request.storageState()
+  await page.context().addCookies(cookies)
+})
+
+test('Open the cart', async ({ page }) => {
+  await page.goto('/cart')
+  await expect(page.getByRole('heading', { name: 'Your cart' })).toBeVisible()
+})
+
+test('Place the order with the seeded payment method', async ({ page, request }) => {
+  await page.goto('/cart')
+  await page.getByRole('button', { name: 'Place order' }).click()
+  await expect(page).toHaveURL(/\/orders\/[a-z0-9-]+$/i)
+
+  const orderId = page.url().split('/').pop()!
+  const order = await request.get(`/api/orders/${orderId}`)
+  expect(order.status()).toBe(200)
+  expect(await order.json()).toMatchObject({
+    status: 'confirmed',
+    customerEmail: TEST_CUSTOMER.email,
   })
 })
 </file>
