@@ -1503,6 +1503,78 @@ describe('readSummary / extractFailedSlugs / defaultPlaywrightSpawner / defaultS
   })
 })
 
+describe('computeNonPassedTargets', () => {
+  function writeSpec(featureDir: string, name: string, body: string): string {
+    const dir = path.join(featureDir, 'e2e')
+    fs.mkdirSync(dir, { recursive: true })
+    const file = path.join(dir, name)
+    fs.writeFileSync(file, body)
+    return file
+  }
+
+  it('returns failed + pending tests, skipping the ones already passed', async () => {
+    const { computeNonPassedTargets } = await import('./orchestrator')
+    const featureDir = path.join(tmpDir, 'features', 'demo')
+    fs.mkdirSync(featureDir, { recursive: true })
+    const specA = writeSpec(featureDir, 'a.spec.ts',
+      "import { test } from '@playwright/test'\n" +
+      "test('a happy path', async () => {})\n" +
+      "test('b sad path', async () => {})\n",
+    )
+    const specB = writeSpec(featureDir, 'b.spec.ts',
+      "import { test } from '@playwright/test'\n" +
+      "test('c never ran', async () => {})\n",
+    )
+
+    const result = computeNonPassedTargets(featureDir, {
+      passedNames: ['test-case-a-happy-path'],
+      failed: [{ name: 'test-case-b-sad-path', location: `${specA}:3` }],
+    })
+
+    expect(result.kind).toBe('targeted')
+    if (result.kind !== 'targeted') return
+    expect(result.total).toBe(3)
+    // Failed (b) at line 3 of spec A + pending (c) at line 2 of spec B; the
+    // already-passed (a) at line 2 of spec A must NOT appear.
+    expect(result.locations.sort()).toEqual([`${specA}:3`, `${specB}:2`].sort())
+    expect(result.locations).not.toContain(`${specA}:2`)
+  })
+
+  it('returns no-passed-yet on a fresh run with no passedNames', async () => {
+    const { computeNonPassedTargets } = await import('./orchestrator')
+    const featureDir = path.join(tmpDir, 'features', 'demo')
+    fs.mkdirSync(featureDir, { recursive: true })
+    writeSpec(featureDir, 'a.spec.ts',
+      "import { test } from '@playwright/test'\n" +
+      "test('a', async () => {})\n",
+    )
+    const result = computeNonPassedTargets(featureDir, {})
+    expect(result.kind).toBe('no-passed-yet')
+  })
+
+  it('returns all-passed when every test is in passedNames', async () => {
+    const { computeNonPassedTargets } = await import('./orchestrator')
+    const featureDir = path.join(tmpDir, 'features', 'demo')
+    fs.mkdirSync(featureDir, { recursive: true })
+    writeSpec(featureDir, 'a.spec.ts',
+      "import { test } from '@playwright/test'\n" +
+      "test('only one', async () => {})\n",
+    )
+    const result = computeNonPassedTargets(featureDir, {
+      passedNames: ['test-case-only-one'],
+    })
+    expect(result.kind).toBe('all-passed')
+  })
+
+  it('returns extraction-failed when no spec files exist', async () => {
+    const { computeNonPassedTargets } = await import('./orchestrator')
+    const featureDir = path.join(tmpDir, 'features', 'empty')
+    fs.mkdirSync(featureDir, { recursive: true })
+    const result = computeNonPassedTargets(featureDir, { passedNames: ['x'] })
+    expect(result.kind).toBe('extraction-failed')
+  })
+})
+
 describe('RunOrchestrator + RunnerLog integration', () => {
   it('writes lifecycle events to runner.log when one is supplied', async () => {
     const { factory, spawned } = makeFakeFactory()
