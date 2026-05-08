@@ -59,7 +59,10 @@ For each selected repository:
    - **Commit messages** since the base (`git log --format=%s%n%b <base>..HEAD`). Read titles and bodies; conventional-commit prefixes (`fix:`, `feat:`, `refactor:`, `chore:`) are strong intent signals.
    - **Modified test files in the diff.** A test file changed in this diff *is the new spec for the change*. Read both old and new versions (`git show <base>:<path>` vs current). When the new test asserts X, X is the intended behavior — promote it to a plan item rather than guessing.
    - **Schema/contract changes.** Removed fields, removed routes, narrowed types are likely contract breaks even if the diff compiles; new optional fields are extensions.
-4. **Identify blast radius.** Walk outward from changed lines through exports, imports, call sites, routes, schemas, configuration, shared state, side effects, tests, and downstream consumers until the affected functionality and contracts are clear.
+   - **Restored / re-added code.** Lines re-introduced after a prior deletion — guard clauses, validation branches, error paths, post-mutation update hooks, side-effect callbacks. A re-addition is a strong "this used to be a bug — pin it" signal. Detect by inspecting blame and log on touched lines (`git log -S '<symbol>' <path>`) and looking for hunks that reverse a previous removal.
+   - **Edits to code that runs *after* a successful mutation.** Anything the codebase invokes once a write succeeds: client-side cache writes, store/state updates, subscription notifications, in-memory model patches, optimistic-then-reconcile flows, derived-state recomputations, downstream event emissions. The user-visible failure mode is **stale or inconsistent UI/data after a successful request** — a network-level assertion will not catch it. Whatever the stack, identify the post-success update site and trace what UI or downstream consumer reads from it.
+   - **Edits to the inputs of a tracked/derived computation.** Dependency arrays, watcher source lists, computed-property reads, reactive-block triggers, observable inputs, decorator-tracked fields, selector inputs — any mechanism the project uses to declare *"recompute when these change."* The failure mode is silent staleness: a value that should re-derive when a tracked input changes does not. Plan items should pick an input the new declaration claims to track and assert the resulting UI/output actually updates.
+4. **Identify blast radius.** Walk outward from changed lines through exports, imports, call sites, routes, schemas, configuration, shared state, side effects, tests, and downstream consumers — and explicitly include **any client-side cache, store slice, or subscription layer** that downstream renders or consumers read from, plus **derived/computed values** whose tracked inputs are touched by the diff. Whenever a project keeps client-side state, the UI can disagree with the server even after a successful call; that gap is part of the blast radius and must be reachable in the plan.
 5. **Reconstruct prior behavior** from the base snapshot, blame on touched lines, existing tests, and fixtures. This is your ground-truth oracle.
 6. **Classify each affected behavior:**
    - **Intentional + positive** (commit message + modified tests both confirm): plan an item that validates the new behavior.
@@ -87,9 +90,11 @@ This stage is *only* scenario design. The Spec agent owns env values, ports, hea
 3. **Mark uncertainty, don't hide it.** When you cannot tell whether a behavior change is intentional, write the regression item against prior behavior and append `(prior behavior — confirm if change is intentional)` (or equivalent) to `expectedOutcome`. The user will triage. Silently asserting the new behavior locks in a possible bug.
 4. **Treat modified tests as authoritative.** If the diff changes a test from asserting X to asserting Y, plan items should assert Y, not X.
 5. **Plain English first.** A product manager should be able to read the `step` labels in order. No selectors, URLs, file paths, git commands, or commit hashes in `step`.
-6. **Strong, specific outcomes.** `expectedOutcome` must name one of: user-visible copy, final URL/navigation, API response status + shape, persisted row or field value, emitted event or webhook, disabled/enabled or role state, or domain-specific side effect. Avoid "it works", "status is OK", "no error", or "behavior is preserved" without naming what behavior.
-7. **Calibrate plan size.** Small diff (a few files, one behavior): 3–6 items. Medium diff (one feature area): 6–12. Large diff (multiple areas or refactor): 12–20. More items rarely improve coverage and inflate downstream noise.
-8. **Group by test intent.** Order related items so the Spec agent can infer sensible spec-file boundaries (e.g., voucher-validation regressions, checkout regressions, permission regressions). Do not blur unrelated journeys into one undifferentiated list.
+6. **Observe the consequence, not just the request.** When the diff touches a mutation or any post-success update path, observe a *user-visible downstream effect* of that mutation (refreshed list item, updated badge, dialog dismissal, removed-row absence, re-rendered count), not only the request firing. If the only assertion is on the API call shape, a regression that drops the post-success update — cache write, store patch, subscription notify, derived re-compute — will pass silently. When the touched code lives in a client-side cache, store, or subscription layer, the `expectedOutcome` must name the UI element that re-derives, not the call that triggered it.
+7. **Enumerate preserved branches.** When a preserved flow has multiple user-visible arms inside the blast radius (toggle states, dialog modes, conditional renders, switch arms, prop-gated branches like `skipIntro`-style flags), emit one item *per arm that could regress*, not a single "flow still works" item. An item that only asserts the entry point of a multi-arm flow is a coverage hole. Reuse the same `step` prefix so reviewers see the arms grouped (e.g. "QR dialog — By Brand arm", "QR dialog — By Store arm").
+8. **Strong, specific outcomes.** `expectedOutcome` must name one of: user-visible copy, final URL/navigation, API response status + shape, persisted row or field value, emitted event or webhook, disabled/enabled or role state, **post-mutation UI refresh** (a list/badge/field reflects the new state without a manual reload), **cache-derived consistency** (re-opening the same view shows the saved value), **dependency-driven re-render** (changing the input the new declaration claims to track produces the corresponding UI change), or domain-specific side effect. Avoid "it works", "status is OK", "no error", or "behavior is preserved" without naming what behavior.
+9. **Calibrate plan size.** Small diff (a few files, one behavior): 3–6 items. Medium diff (one feature area): 6–12. Large diff (multiple areas or refactor): 12–20. More items rarely improve coverage and inflate downstream noise.
+10. **Group by test intent.** Order related items so the Spec agent can infer sensible spec-file boundaries (e.g., voucher-validation regressions, checkout regressions, permission regressions). Do not blur unrelated journeys into one undifferentiated list.
 
 ## Example
 
@@ -123,6 +128,43 @@ This stage is *only* scenario design. The Spec agent owns env values, ports, hea
       "Read the confirmation page"
     ],
     "expectedOutcome": "The browser navigates to /orders/<id> and the persisted order's voucher field equals the applied voucher code."
+  }
+]
+</plan-output>
+```
+
+A second worked example, showing items that pin a post-success update path and a tracked-input recomputation (the kinds of regressions a request-only assertion silently misses):
+
+```
+<plan-output>
+[
+  {
+    "coverageType": "happy-path",
+    "step": "Save updated store hours",
+    "actions": [
+      "Open the store settings page",
+      "Edit the closing time to a new value",
+      "Click 'Save'"
+    ],
+    "expectedOutcome": "A success toast 'Hours updated' appears and the save request returns 200."
+  },
+  {
+    "coverageType": "regression-risk",
+    "step": "See saved hours without a manual reload",
+    "actions": [
+      "After the save toast, do not refresh the page",
+      "Read the closing time displayed in the page header"
+    ],
+    "expectedOutcome": "The header closing time updates to the newly-saved value in place, without a page reload (pins the post-success update path; would fail if the cache/store update is dropped)."
+  },
+  {
+    "coverageType": "regression-risk",
+    "step": "Recompute open-store count when stores list changes",
+    "actions": [
+      "On a brand with multiple stores, toggle one store's enabled flag off and save",
+      "Read the 'Open stores' summary badge in the same view"
+    ],
+    "expectedOutcome": "The 'Open stores' badge decrements by one immediately (pins the derived value's tracked input; would fail if the dependency declaration excludes the touched field)."
   }
 ]
 </plan-output>

@@ -118,6 +118,16 @@ Each run gets its own directory under `logs/runs/<runId>/`. The exact contents d
 
 Outside the run directory, `logs/runs/index.json` tracks run history and `logs/current/` points at the active run so manual agents can use stable paths while the UI keeps the full run history.
 
+## Assertion Review
+
+Each completed run can export a single-page **Assertion Review** for the feature it ran — the "Export Assertion" button in the run detail Overview tab. The download is a `.zip` containing one HTML file, per-test flowchart SVGs, and any captured videos.
+
+![Assertion Review sample](docs/assets/assertion-review.png)
+
+Each test case lists its body, the helpers it calls (with local helper definitions inlined once), and every assertion. Each assertion is graded **strict / moderate / shallow / unknown** by static analysis — a string-equality check on a business-critical field grades strict; `toBeVisible()` grades moderate; an existence-or-count check grades shallow.
+
+The intended use is PR review. A green run says the suite passed; the assertion review says what it actually proved. Attach it to a PR so the reviewer — human or agent — can decide whether the assertions match what the change is supposed to deliver.
+
 ## Self-Fixing Workflow
 
 When a test fails, an agent fixes the code. The scaffolded project ships with `CLAUDE.md` and `AGENTS.md` containing the managed `heal-prompt` section both flavors point at `logs/current/...`. After a fix, the agent writes one of the active run's signal files: `signals/.restart` for service or app changes, `signals/.rerun` for test/config-only changes.
