@@ -3,9 +3,11 @@
 [![npm](https://img.shields.io/npm/v/canary-lab.svg)](https://www.npmjs.com/package/canary-lab)
 [![license](https://img.shields.io/npm/l/canary-lab.svg)](LICENSE)
 
-Playwright tells you what failed. Canary Lab preserves the local system context needed to fix it.
+Canary Lab is a local harness I built around Playwright so I can hand a failing test to Claude or Codex and walk away.
 
-Canary Lab is a local control plane for Playwright-based E2E work. It starts the services a feature depends on, applies the selected envset, gates the run on health checks, runs Playwright, and writes run-scoped evidence: service logs, Playwright events, screenshots/videos/traces, summaries, and diagnosis notes. When a run fails, a human or agent can work from exact file paths instead of pasted terminal output.
+I wanted an inner loop where I describe a feature, the tests run, an agent reads the failure, fixes the code, and tries again — without me in the middle. Playwright already tells me what failed; the agent already knows how to fix things. Canary Lab is the plumbing in between.
+
+It only works because three other things keep getting better. Playwright keeps catching things I'd miss. Claude and Codex keep getting better at reading evidence and editing code. node-pty and the surrounding ecosystem make the orchestration boring. I didn't build the hard parts — I'm assembling them.
 
 [![Canary Lab UI walkthrough](docs/assets/canary-lab-ui-walkthrough.png)](docs/assets/canary-lab-ui-walkthrough.gif)
 
