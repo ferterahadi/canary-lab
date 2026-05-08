@@ -46,22 +46,44 @@ export async function paneStreamRoutes(
           },
         }
         const unsub = broker.subscribe(paneId as PaneId, sub)
-        // Live interject: forward `agent-input` frames on the agent pane to
-        // the heal-agent pty's stdin. Other paneIds ignore the message.
+        // Live input: forward keystrokes / interject text from the agent pane
+        // to the heal-agent pty's stdin. Other paneIds ignore the message.
+        //   - `pty-input` carries raw keystrokes from xterm.js (one frame per
+        //     keypress) and goes straight to pty.write — this is the path
+        //     used when typing into the REPL.
+        //   - `agent-input` is a legacy line-level message kept as fallback
+        //     for HTTP-driven interject; the orchestrator routes it the same
+        //     way (raw write into the live pty).
         if (paneId === 'agent') {
           socket.on('message', (raw) => {
             let parsed: unknown
             try { parsed = JSON.parse(raw.toString()) } catch { return }
+            if (!parsed || typeof parsed !== 'object') return
+            const msg = parsed as {
+              type?: unknown
+              chunk?: unknown
+              data?: unknown
+              cols?: unknown
+              rows?: unknown
+            }
+            const orch = deps.registry.get(runId)
+            if (msg.type === 'pty-input' && typeof msg.chunk === 'string') {
+              orch?.writeToHealAgent?.(msg.chunk)
+              return
+            }
             if (
-              parsed && typeof parsed === 'object'
-              && (parsed as { type?: unknown }).type === 'agent-input'
-              && typeof (parsed as { data?: unknown }).data === 'string'
+              msg.type === 'pty-resize'
+              && typeof msg.cols === 'number'
+              && typeof msg.rows === 'number'
             ) {
-              const orch = deps.registry.get(runId)
+              orch?.resizeHealAgent?.(msg.cols, msg.rows)
+              return
+            }
+            if (msg.type === 'agent-input' && typeof msg.data === 'string') {
               // Fire-and-forget — the WS path has no client-visible response
               // channel for the structured failure; the HTTP route is the
               // canonical interject API.
-              void orch?.interjectHealAgent?.((parsed as { data: string }).data)
+              void orch?.interjectHealAgent?.(msg.data)
             }
           })
         }

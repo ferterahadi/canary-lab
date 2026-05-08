@@ -24,9 +24,9 @@ interface TestEntry {
     message: string
     snippet?: string
   }
-  durationMs: number
-  location: string
-  retry: number
+  durationMs?: number
+  location?: string
+  retry?: number
   logFiles?: string[]
 }
 
@@ -67,6 +67,11 @@ class SummaryReporter implements Reporter {
   private stepStack: RunningStep[] = []
   private failureCount = 0
   private lastEnrichedFailureCount = -1
+  private readonly mergeExistingSummary = process.env.CANARY_LAB_TARGETED_RERUN === '1'
+
+  constructor() {
+    if (this.mergeExistingSummary) this.seedFromExistingSummary()
+  }
 
   onTestBegin(test: TestCase): void {
     this.stepStack = []
@@ -132,7 +137,7 @@ class SummaryReporter implements Reporter {
       this.running = null
       this.stepStack = []
     }
-    if (!passed) this.failureCount++
+    this.removeResult(name)
     const error = !passed && result.error
       ? {
           message: stripAnsi(result.error.message ?? '').slice(0, 1000),
@@ -141,14 +146,16 @@ class SummaryReporter implements Reporter {
             : {}),
         }
       : undefined
-    this.results.push({
+    const entry: TestEntry = {
       name,
       passed,
       ...(error ? { error } : {}),
       durationMs: result.duration,
       location: `${test.location.file}:${test.location.line}`,
       retry: result.retry,
-    })
+    }
+    this.results.push(entry)
+    if (!passed) this.failureCount++
     this.writePlaybackEvent({
       type: 'test-end',
       time: new Date().toISOString(),
@@ -209,20 +216,21 @@ class SummaryReporter implements Reporter {
   }
 
   private writeSummary(complete: boolean): void {
+    const passedResults = this.results.filter((r) => r.passed)
     const summary = {
       complete,
       total: this.results.length,
-      passed: this.results.filter((r) => r.passed).length,
-      passedNames: this.results.filter((r) => r.passed).map((r) => r.name),
+      passed: passedResults.length,
+      passedNames: passedResults.map((r) => r.name),
       ...(this.running ? { running: this.running } : {}),
       failed: this.results
         .filter((r) => !r.passed)
         .map((r) => ({
           name: r.name,
-          error: r.error,
-          durationMs: r.durationMs,
-          location: r.location,
-          retry: r.retry,
+          ...(r.error ? { error: r.error } : {}),
+          ...(typeof r.durationMs === 'number' ? { durationMs: r.durationMs } : {}),
+          ...(typeof r.location === 'string' ? { location: r.location } : {}),
+          ...(typeof r.retry === 'number' ? { retry: r.retry } : {}),
           ...(r.logFiles ? { logFiles: r.logFiles } : {}),
         })),
     }
@@ -234,12 +242,67 @@ class SummaryReporter implements Reporter {
     fs.renameSync(tmpPath, finalPath)
   }
 
+  private seedFromExistingSummary(): void {
+    let parsed: ExistingSummary
+    try {
+      parsed = JSON.parse(fs.readFileSync(getSummaryPath(), 'utf-8')) as ExistingSummary
+    } catch {
+      return
+    }
+    if (!parsed || typeof parsed !== 'object') return
+
+    const seen = new Set<string>()
+    const passedNames = Array.isArray(parsed.passedNames) ? parsed.passedNames : []
+    for (const name of passedNames) {
+      if (typeof name !== 'string' || !name || seen.has(name)) continue
+      seen.add(name)
+      this.results.push({ name, passed: true })
+    }
+
+    const failed = Array.isArray(parsed.failed) ? parsed.failed : []
+    for (const entry of failed) {
+      if (!entry || typeof entry !== 'object') continue
+      const name = typeof entry.name === 'string' ? entry.name : ''
+      if (!name || seen.has(name)) continue
+      seen.add(name)
+      this.results.push({
+        name,
+        passed: false,
+        ...(isErrorShape(entry.error) ? { error: entry.error } : {}),
+        ...(typeof entry.durationMs === 'number' ? { durationMs: entry.durationMs } : {}),
+        ...(typeof entry.location === 'string' ? { location: entry.location } : {}),
+        ...(typeof entry.retry === 'number' ? { retry: entry.retry } : {}),
+        ...(Array.isArray(entry.logFiles) ? { logFiles: entry.logFiles.filter((f: unknown): f is string => typeof f === 'string') } : {}),
+      })
+    }
+    this.failureCount = this.results.filter((r) => !r.passed).length
+    this.lastEnrichedFailureCount = this.failureCount
+  }
+
+  private removeResult(name: string): void {
+    const idx = this.results.findIndex((r) => r.name === name)
+    if (idx < 0) return
+    const [removed] = this.results.splice(idx, 1)
+    if (removed && !removed.passed) this.failureCount = Math.max(0, this.failureCount - 1)
+  }
+
   private writePlaybackEvent(event: PlaybackEvent): void {
     const summaryPath = getSummaryPath()
     const eventPath = path.join(path.dirname(summaryPath), 'playwright-events.jsonl')
     fs.mkdirSync(path.dirname(eventPath), { recursive: true })
     fs.appendFileSync(eventPath, JSON.stringify(event) + '\n')
   }
+}
+
+interface ExistingSummary {
+  passedNames?: unknown
+  failed?: unknown
+}
+
+function isErrorShape(value: unknown): value is { message: string; snippet?: string } {
+  if (!value || typeof value !== 'object') return false
+  const err = value as { message?: unknown; snippet?: unknown }
+  return typeof err.message === 'string' && (err.snippet === undefined || typeof err.snippet === 'string')
 }
 
 function stepToRunningStep(step: TestStep): RunningStep {

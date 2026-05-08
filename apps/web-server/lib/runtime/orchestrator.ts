@@ -1,5 +1,6 @@
 import fs from 'fs'
 import path from 'path'
+import { randomUUID } from 'crypto'
 import { EventEmitter } from 'events'
 import type { FeatureConfig, HealthProbe, HttpProbe, TcpProbe } from '../../../../shared/launcher/types'
 import {
@@ -108,7 +109,7 @@ export type CancelHealResult =
 
 export type InterjectResult =
   | { ok: true }
-  | { ok: false; reason: 'no-agent-running' | 'no-session-id' | 'spawn-failed' }
+  | { ok: false; reason: 'no-agent-running' }
 
 export type OrchestratorEventMap = {
   'service-started': { service: ServiceSpec; pid: number }
@@ -120,7 +121,7 @@ export type OrchestratorEventMap = {
   'playwright-output': { chunk: string }
   'playwright-started': { command: string }
   'playwright-exit': { exitCode: number }
-  'agent-started': { cycle: number; command: string }
+  'agent-started': { cycle: number; command: string; redirect?: boolean }
   'agent-output': { chunk: string }
   'agent-exit': { exitCode: number }
   'heal-cycle-started': { cycle: number; failureSignature: string }
@@ -139,17 +140,20 @@ export interface AutoHealConfig {
   agent: AutoHealAgent
   // 1-based cap on heal cycles. Default = AUTO_HEAL_MAX_CYCLES.
   maxCycles?: number
-  // Optional override of the agent command. Production wires
-  // `buildAgentCommand` from auto-heal.ts; tests pass a no-op echo.
-  buildCommand?: (args: { cycle: number; outputDir: string; userGuidance?: string }) => string
-  // Builds the resume invocation used by `interjectHealAgent` — given the
-  // captured session id and the user's interject text, returns the shell
-  // command to spawn (claude --resume <sid> -p "<text>" / codex equivalent).
-  buildInterjectCommand?: (args: {
-    sessionId: string
-    text: string
-    outputDir?: string
-  }) => string
+  // Returns the spawn command for the long-lived REPL — just the binary +
+  // flags. Production wires `buildAgentSpawnCommand` from auto-heal.ts; tests
+  // pass a no-op script that stays alive (e.g. `cat`). The orchestrator
+  // generates `sessionId` (UUID), computes `mcpOutputDir`, and passes the
+  // path to the cycle-1 prompt file (`<runDir>/heal-prompt.md`); the
+  // production builder appends `"@<promptFile>"` as a positional arg so
+  // claude reads the file at startup and processes its content as the
+  // first user message — bypassing the REPL's input editor.
+  buildSpawnCommand?: (args: { sessionId?: string; mcpOutputDir?: string; promptFile?: string }) => string
+  // Returns the prompt text to write to the REPL's stdin for cycle N.
+  // Production wires `buildOrchestratorHealPrompt`; tests pass a stub that
+  // returns a deterministic string. The orchestrator pty.write()s the result
+  // followed by a newline.
+  buildCyclePrompt?: (args: { cycle: number; outputDir: string; userGuidance?: string }) => string
 }
 
 export interface PlaywrightInvocation {
@@ -238,17 +242,20 @@ export class RunOrchestrator extends EventEmitter {
   private playwrightPty: PtyHandle | null = null
   private playwrightExitWaiter: ((value: { exitCode: number; signal?: number }) => void) | null = null
   // Tracked while a heal-agent pty is in flight so cancelHeal() can SIGTERM it.
-  // Cleared on agent exit.
+  // The REPL is spawned ONCE per heal session and persists across cycles —
+  // the orchestrator drives cycle handoffs by writing to its stdin instead
+  // of respawning. Cleared on cleanup.
   private healAgentPty: PtyHandle | null = null
-  // Most recent agent-output mcp dir. Captured so interject can re-spawn with
-  // the same MCP config without recomputing failed-slug routing.
+  // MCP artifact dir for the live REPL. Pinned at spawn time from cycle-1's
+  // failed slugs and held until the heal loop exits, since claude's
+  // `--mcp-config` is set once at process boot. Read by the bidirectional
+  // pane handler when it needs to associate input with a heal session.
   private healAgentMcpOutputDir: string | undefined
-  // Captured from the agent's first stream-json frame (claude `system/init`
-  // session_id, codex `thread.started` thread_id). Used by interject to call
-  // `--resume <id>` on the same conversation.
+  // Pinned at spawn time via `--session-id <uuid>` for claude (codex has no
+  // equivalent flag and leaves this null). Persisted to
+  // `paths.agentSessionIdPath` so external tools can correlate the run with
+  // the conversation log under `~/.claude/projects/`.
   private healAgentSessionId: string | null = null
-  private healAgentSessionBuf = ''
-  private healAgentReplacementPending = false
   // Set by cancelHeal() so the heal loop in runFullCycle bails out instead of
   // racing toward another Playwright rerun.
   private healCancelled = false
@@ -323,21 +330,30 @@ export class RunOrchestrator extends EventEmitter {
   // caller drives Playwright via runPlaywright(), which lets the future
   // server show "services up" before tests start.
   async start(): Promise<void> {
+    this.prepareRun('starting')
+    await this.ensureServicesRunning()
+  }
+
+  private prepareRun(serviceStatus: ServiceManifestEntry['status']): void {
     this.startedAt = new Date().toISOString()
     fs.mkdirSync(this.runDir, { recursive: true })
     fs.mkdirSync(this.paths.signalsDir, { recursive: true })
 
-    this.writeInitialManifest()
+    this.writeInitialManifest(serviceStatus)
     this.startSignalWatcher()
     this.startHeartbeat()
-
-    for (const svc of this.services) {
-      this.spawnService(svc)
-    }
-    await this.waitForHealth()
   }
 
-  private writeInitialManifest(): void {
+  private async ensureServicesRunning(): Promise<void> {
+    const toStart = this.services.filter((svc) => !this.servicePtys.has(svc.name))
+    for (const svc of toStart) {
+      this.stateSink.setServiceStatus(this.runId, svc.safeName, 'starting')
+      this.spawnService(svc)
+    }
+    if (this.services.length > 0) await this.waitForHealth()
+  }
+
+  private writeInitialManifest(serviceStatus: ServiceManifestEntry['status'] = 'starting'): void {
     const services: ServiceManifestEntry[] = this.services.map((s) => ({
       name: s.name,
       safeName: s.safeName,
@@ -348,7 +364,7 @@ export class RunOrchestrator extends EventEmitter {
       // probes don't have a URL; left undefined so older manifest readers
       // still work for the http case.
       healthUrl: s.healthProbe && 'http' in s.healthProbe ? s.healthProbe.http.url : undefined,
-      status: 'starting',
+      status: serviceStatus,
     }))
     const manifest: RunManifest = {
       runId: this.runId,
@@ -581,6 +597,7 @@ export class RunOrchestrator extends EventEmitter {
         CANARY_LAB_PROJECT_ROOT: this.feature.featureDir,
         CANARY_LAB_MANIFEST_PATH: this.paths.manifestPath,
         CANARY_LAB_SUMMARY_PATH: this.paths.summaryPath,
+        ...(rerunTargets && rerunTargets.length > 0 ? { CANARY_LAB_TARGETED_RERUN: '1' } : {}),
       },
     })
     this.playwrightPty = pty
@@ -681,18 +698,30 @@ export class RunOrchestrator extends EventEmitter {
   }
 
   /**
-   * Manually abort an in-flight heal cycle. SIGTERMs the agent pty, sets a
-   * cancellation flag so `runFullCycle`'s heal loop bails out instead of
-   * spawning another Playwright rerun, and appends a journal entry so the
-   * stop is part of the diagnosis history.
+   * Manually abort an in-flight heal session. Sets a cancellation flag so
+   * `runAutoHealLoop` bails out (instead of spawning another Playwright
+   * rerun or feeding another prompt to the REPL), appends a journal entry,
+   * and SIGTERMs whichever pty is currently active (heal agent OR the
+   * post-heal Playwright rerun).
    *
-   * Returns `409 not-healing` when the run isn't currently in the heal phase
-   * and `409 no-agent-running` when status is healing but no agent pty is
-   * tracked (e.g. the loop is between cycles).
+   * Accepted in two states:
+   *   - `status === 'healing'`: the heal agent is processing.
+   *   - `status === 'running' && healCycles > 0`: a post-heal Playwright
+   *     rerun is in flight between cycles. Without this branch the user's
+   *     click is silently 409'd until the cycle wraps back to 'healing'.
+   *
+   * Cancel succeeds even when no pty is attached — claude's REPL can exit
+   * on its own (user typed `/exit`, crash) and leave the orchestrator
+   * polling for a signal file that will never come. In that case the
+   * cancel flag is what unwedges the loop.
+   *
+   * Returns `409 not-healing` only when the run isn't inside the heal loop
+   * at all (initial Playwright phase, terminal status). Use Abort there.
    */
   async cancelHeal(): Promise<CancelHealResult> {
-    if (this.status !== 'healing') return { ok: false, reason: 'not-healing' }
-    if (!this.healAgentPty) return { ok: false, reason: 'no-agent-running' }
+    const inHealLoop = this.status === 'healing'
+      || (this.status === 'running' && this.healCycles > 0)
+    if (!inHealLoop) return { ok: false, reason: 'not-healing' }
 
     this.healCancelled = true
     this.markStoppedEarly('user-cancel-heal', 0, 0)
@@ -715,39 +744,76 @@ export class RunOrchestrator extends EventEmitter {
       })
     } catch { /* journal append is best-effort */ }
 
-    killTree(this.healAgentPty, 'SIGTERM')
-    // Don't wait here — the heal loop's existing `await new Promise<...> pty.onExit`
-    // will resolve when the kill lands and the loop checks `healCancelled` to
-    // break out. Schedule a SIGKILL fallback so a wedged child still dies.
-    scheduleSigkillFallback(this.healAgentPty)
+    // Kill whichever pty is currently in flight. The loop is awaiting either
+    // `waitForHealSignal` (REPL alive, healCancelled check unwedges) or
+    // `runPlaywright` (kills the pw pty so the await resolves, then the
+    // post-Playwright healCancelled check breaks the loop).
+    if (this.healAgentPty) {
+      killTree(this.healAgentPty, 'SIGTERM')
+      scheduleSigkillFallback(this.healAgentPty)
+    }
+    if (this.playwrightPty) {
+      killTree(this.playwrightPty, 'SIGTERM')
+      scheduleSigkillFallback(this.playwrightPty)
+    }
     return { ok: true }
   }
 
   /**
-   * Interject — kill the running heal agent and re-spawn it with
-   * `--resume <sessionId> -p "<text>"` so the new prompt continues the same
-   * conversation. The `runHealAgent` loop swaps onto the new pty and resumes
-   * its normal exit/signal handling.
+   * Raw write to the heal-agent pty's stdin. Used by the bidirectional pane
+   * (every keystroke from xterm.js becomes a chunk) so users can type
+   * directly into the live claude/codex REPL — slash commands, Esc to
+   * interrupt, etc. — without going through the higher-level interject path.
    *
-   *   - `no-agent-running`: nothing to interject (between cycles, manual mode).
-   *   - `no-session-id`: agent hasn't emitted its init frame yet — the user
-   *     should retry in a moment, or we have no resume target (e.g. a custom
-   *     buildCommand that bypasses claude/codex).
-   *   - `spawn-failed`: ptyFactory threw on the new spawn.
+   * No-op when no agent pty is in flight (between cycles, manual mode, or
+   * after cancel).
+   */
+  writeToHealAgent(chunk: string): void {
+    if (!chunk) return
+    const pty = this.healAgentPty
+    if (!pty) return
+    try { pty.write(chunk) } catch { /* pty closed mid-frame */ }
+  }
+
+  /**
+   * Push the user's xterm dimensions into the heal-agent pty so claude's
+   * TUI redraws at the correct width. Without this, the pty stays at its
+   * spawn-time defaults (120×30) and claude wraps box-drawing / status
+   * bars to whatever it thinks the terminal is, not what the pane is.
+   *
+   * No-op when no agent pty is in flight, or when cols/rows are nonsense.
+   */
+  resizeHealAgent(cols: number, rows: number): void {
+    const pty = this.healAgentPty
+    if (!pty) return
+    if (!Number.isFinite(cols) || !Number.isFinite(rows)) return
+    if (cols < 1 || rows < 1) return
+    // Cap at sane upper bounds — node-pty accepts huge values but claude's
+    // renderer can chew CPU on absurd sizes (e.g., 100k cols).
+    const c = Math.min(Math.floor(cols), 1000)
+    const r = Math.min(Math.floor(rows), 1000)
+    try { pty.resize(c, r) } catch { /* pty closed mid-frame */ }
+  }
+
+  /**
+   * Interrupt & Redirect — drop the user's correction into the live REPL's
+   * stdin. The agent absorbs it like any other typed message: Esc interrupts
+   * any in-flight generation, then the text is sent followed by Enter. The
+   * run stays in `healing` throughout; verification does not begin until the
+   * agent writes a `.rerun` / `.restart` / `.heal` signal.
+   *
+   * No respawn, no session-id race — the REPL is alive across cycles, and
+   * everything we'd previously rebuild from `--resume <sid>` is just the
+   * existing conversation.
+   *
+   *   - `no-agent-running`: REPL hasn't spawned (cycle 0) or has exited
+   *     (cancel, crash, manual mode).
    */
   async interjectHealAgent(text: string): Promise<InterjectResult> {
-    const oldPty = this.healAgentPty
-    if (!oldPty) return { ok: false, reason: 'no-agent-running' }
-    const sid = await this.waitForAgentSessionId()
-    if (!sid) return { ok: false, reason: 'no-session-id' }
-    const cfg = this.autoHeal
-    if (!cfg?.buildInterjectCommand) return { ok: false, reason: 'no-session-id' }
+    const pty = this.healAgentPty
+    if (!pty) return { ok: false, reason: 'no-agent-running' }
 
-    const command = cfg.buildInterjectCommand({
-      sessionId: sid,
-      text,
-      outputDir: this.healAgentMcpOutputDir,
-    })
+    this.echoUserInterject(text)
 
     // Best-effort journal note so the interject is part of run history.
     try {
@@ -755,7 +821,7 @@ export class RunOrchestrator extends EventEmitter {
       appendJournalIteration({
         signal: '.rerun',
         hypothesis: `User interjected mid-heal: ${truncated}`,
-        fixDescription: `Resumed agent session ${sid.slice(0, 8)} with new prompt.`,
+        fixDescription: `Sent text to live REPL stdin.`,
         runId: this.runId,
         manifestPath: this.paths.manifestPath,
         summaryPath: this.paths.summaryPath,
@@ -763,65 +829,30 @@ export class RunOrchestrator extends EventEmitter {
       })
     } catch { /* journal append is best-effort */ }
 
-    this.healAgentReplacementPending = true
-
-    // Kill the old agent and wait for it to actually exit before spawning the
-    // resume — claude can refuse to resume a session that still has an active
-    // process holding it.
-    const exitWait = new Promise<void>((resolve) => {
-      oldPty.onExit(() => resolve())
-    })
-    killTree(oldPty, 'SIGTERM')
-    scheduleSigkillFallback(oldPty)
-    await Promise.race([exitWait, new Promise<void>((r) => setTimeout(r, 3000))])
-
-    let newPty: PtyHandle
+    // Esc first to interrupt any in-flight generation, then the text as a
+    // bracketed paste followed by Enter. Bracketed paste keeps the REPL's
+    // input editor from re-rendering the text word-by-word — same reason
+    // `runHealAgent` uses it for cycle prompts. Esc is harmless when idle;
+    // claude/codex treat it as "cancel current generation".
     try {
-      newPty = this.ptyFactory({
-        command,
-        cwd: this.runDir,
-        env: this.agentPtyEnv(),
-      })
+      pty.write('')
+      pty.write(BRACKETED_PASTE_BEGIN + text + BRACKETED_PASTE_END + '\r')
     } catch {
-      this.healAgentReplacementPending = false
-      return { ok: false, reason: 'spawn-failed' }
+      return { ok: false, reason: 'no-agent-running' }
     }
-
-    this.healAgentSessionId = null
-    this.healAgentSessionBuf = ''
-    try { fs.rmSync(this.paths.agentSessionIdPath, { force: true }) } catch { /* ignore */ }
-    this.echoUserInterject(text)
-    this.attachAgentDataHandlers(newPty, cfg.agent)
-    this.healAgentPty = newPty
-    this.healAgentReplacementPending = false
-    this.emit('agent-started', { cycle: this.healCycles, command })
+    this.emit('agent-started', { cycle: this.healCycles, command: '<repl-redirect>', redirect: true })
     return { ok: true }
   }
 
-  // Pipe agent output into the transcript file, fan it out via the
-  // `agent-output` event, AND parse the first JSON frame for the session id
-  // (claude: type=system/subtype=init/session_id; codex: type=thread.started
-  // /thread_id). Once we've captured an id we stop parsing — keeps the hot
-  // path cheap.
-  private attachAgentDataHandlers(pty: PtyHandle, agent: AutoHealAgent): void {
+  // Pipe raw REPL output (ANSI from xterm.js's perspective) into the
+  // transcript file and the `agent-output` event. No JSON parsing — claude's
+  // session id is pinned at spawn via `--session-id <uuid>`, and codex has
+  // no equivalent so we just don't track one for codex.
+  private attachAgentDataHandlers(pty: PtyHandle): void {
     const transcriptPath = this.paths.agentTranscriptPath
     pty.onData((chunk) => {
       try { fs.appendFileSync(transcriptPath, chunk) } catch { /* ignore */ }
       this.emit('agent-output', { chunk })
-      if (this.healAgentSessionId) return
-      this.healAgentSessionBuf += chunk
-      let nl = this.healAgentSessionBuf.indexOf('\n')
-      while (nl !== -1 && !this.healAgentSessionId) {
-        const line = this.healAgentSessionBuf.slice(0, nl).trim()
-        this.healAgentSessionBuf = this.healAgentSessionBuf.slice(nl + 1)
-        const id = parseSessionIdLine(line, agent)
-        if (id) this.healAgentSessionId = id
-        nl = this.healAgentSessionBuf.indexOf('\n')
-      }
-      // Cap the buffer so a non-JSON formatter pipeline can't blow memory.
-      if (this.healAgentSessionBuf.length > 64 * 1024) {
-        this.healAgentSessionBuf = this.healAgentSessionBuf.slice(-4 * 1024)
-      }
     })
   }
 
@@ -836,48 +867,32 @@ export class RunOrchestrator extends EventEmitter {
     this.emit('agent-output', { chunk: block })
   }
 
+  private emitAgentSystemMessage(message: string): void {
+    const block = `\n[orchestrator] ${message}\n`
+    try {
+      fs.mkdirSync(path.dirname(this.paths.agentTranscriptPath), { recursive: true })
+      fs.appendFileSync(this.paths.agentTranscriptPath, block)
+    } catch { /* transcript message is best-effort */ }
+    this.emit('agent-output', { chunk: block })
+  }
+
   private agentPtyEnv(): Record<string, string> {
     return {
       CANARY_LAB_PROJECT_ROOT: this.feature.featureDir,
+      // Kept as a hint for tools or shell rc files that want to surface the
+      // session id — the orchestrator writes the UUID to this path itself
+      // (no formatter sidecar in REPL mode).
       CANARY_LAB_AGENT_SESSION_ID_FILE: this.paths.agentSessionIdPath,
     }
   }
 
-  private readAgentSessionId(): string | null {
-    if (this.healAgentSessionId) return this.healAgentSessionId
-    try {
-      const sid = fs.readFileSync(this.paths.agentSessionIdPath, 'utf-8').trim()
-      if (sid) {
-        this.healAgentSessionId = sid
-        return sid
-      }
-    } catch {
-      // Session sidecar is written asynchronously by the formatter.
-    }
-    return null
-  }
-
-  private async waitForAgentSessionId(timeoutMs = 1500): Promise<string | null> {
-    const deadline = Date.now() + timeoutMs
-    while (Date.now() <= deadline) {
-      const sid = this.readAgentSessionId()
-      if (sid) return sid
-      await this.delay(50)
-    }
-    return null
-  }
-
-  private async waitForHealAgentReplacement(oldPty: PtyHandle): Promise<PtyHandle | null> {
-    while (this.healAgentReplacementPending && !this.stopped) {
-      if (this.healAgentPty && this.healAgentPty !== oldPty) return this.healAgentPty
-      await new Promise<void>((resolve) => setTimeout(resolve, 25))
-    }
-    if (this.healAgentPty && this.healAgentPty !== oldPty) return this.healAgentPty
-    return null
-  }
-
-  // Block until a signal lands or we time out. Returns `null` on timeout. The
-  // signal watcher already records lastDetectedSignal, so we just poll that.
+  // Block until a signal lands or we time out. Returns `null` on timeout, on
+  // user-cancel-heal, on full abort, or when the heal-agent pty has died
+  // (REPL exited cleanly via `/exit`, crashed, or got SIGKILLed) — without
+  // the pty check the loop would otherwise sit on a dead pipe waiting for
+  // a signal file that the now-gone agent will never write, until the full
+  // `healAgentTimeoutMs` elapses (10 min default). The signal watcher
+  // populates `lastDetectedSignal`; we just poll that.
   async waitForHealSignal(timeoutMs: number = this.healAgentTimeoutMs): Promise<
     { kind: 'restart' | 'rerun' | 'heal'; body: Record<string, unknown> } | null
   > {
@@ -887,18 +902,50 @@ export class RunOrchestrator extends EventEmitter {
     // starve the timer queue.
     const yieldOnce = (ms: number) =>
       new Promise<void>((resolve) => setTimeout(resolve, ms))
-    while (Date.now() < deadline) {
+    const deadlineCap = deadline
+    // When the pty dies before we've seen a signal, give the signal-watcher
+    // a short grace window to surface any `.heal`/`.rerun`/`.restart` file
+    // the agent wrote just before exiting. Without this, the wait races the
+    // watcher's polling and bails immediately, losing signals from agents
+    // that write-then-exit. 1s is plenty — the watcher polls at
+    // `healSignalPollMs` (≤1s in production).
+    let postExitDeadline: number | null = null
+    while (Date.now() < deadlineCap) {
       if (this.stopped) return null
+      if (this.healCancelled) return null
       if (this.lastDetectedSignal) {
         const sig = this.lastDetectedSignal
         this.lastDetectedSignal = null
         return sig
+      }
+      if (!this.healAgentPty) {
+        if (postExitDeadline === null) {
+          postExitDeadline = Date.now() + 1000
+        } else if (Date.now() >= postExitDeadline) {
+          return null
+        }
       }
       await yieldOnce(Math.max(1, this.healSignalPollMs))
     }
     return null
   }
 
+  /**
+   * Run one heal cycle inside the persistent REPL.
+   *
+   * - On the first call (or after a cancel/crash), spawns the long-lived
+   *   `claude` / `codex` REPL with `--session-id <uuid>` (claude) and the
+   *   playwright MCP wired up.
+   * - Renders the cycle prompt and writes it to the REPL's stdin —
+   *   subsequent cycles all flow through the same conversation, so the
+   *   agent retains context from prior cycles.
+   * - Awaits a `.heal` / `.rerun` / `.restart` signal file (or cancel /
+   *   timeout / full abort). Returns the signal the caller will interpret.
+   *
+   * `exitCode` in the return is 0 when the REPL is still alive when we
+   * resolve, 1 when it died during the cycle (crash or kill). The auto-heal
+   * loop uses it only to surface unexpected exits in the transcript.
+   */
   async runHealAgent(args: {
     cycle: number
     failedSlugs: readonly string[]
@@ -907,70 +954,159 @@ export class RunOrchestrator extends EventEmitter {
     const cfg = this.autoHeal
     if (!cfg) throw new Error('autoHeal not configured')
 
-    const target = resolveMcpOutputDir({
-      runDir: this.runDir,
-      failedSlugs: args.failedSlugs,
-    })
-    ensureMcpOutputDir(target.dir)
-
-    const command = (cfg.buildCommand ?? defaultHealCommand)({
+    // Write the cycle prompt to `<runDir>/heal-prompt.md` BEFORE we spawn
+    // (or before we ask the live REPL to re-read). The wired
+    // `buildOrchestratorHealPrompt` writes the file as a side effect and
+    // returns the rendered text; we keep the text only for transcript
+    // echo bookkeeping — claude reads the file directly via `@<path>`.
+    void (cfg.buildCyclePrompt ?? defaultHealPrompt)({
       cycle: args.cycle,
-      outputDir: target.dir,
+      outputDir: this.healAgentMcpOutputDir ?? this.runDir,
       userGuidance: args.userGuidance,
     })
-    this.emit('agent-started', { cycle: args.cycle, command })
+
+    const isFirstSpawn = !this.healAgentPty
+    if (isFirstSpawn) {
+      this.spawnHealAgentRepl(args.failedSlugs)
+    }
+    const pty = this.healAgentPty
+    if (!pty) {
+      // spawn failed; spawnHealAgentRepl already surfaced the error.
+      return { exitCode: 1, signal: null }
+    }
+
+    if (args.userGuidance) this.echoUserInterject(args.userGuidance)
+
+    this.emit('agent-started', { cycle: args.cycle, command: `<repl ${cfg.agent} cycle=${args.cycle}>` })
+
+    // Cycle 1 has the prompt already wired into the spawn command's argv
+    // (`claude … "@<promptFile>"`), so claude reads it at startup with no
+    // stdin write. Cycle 2+ needs to re-prompt the alive REPL: write the
+    // updated prompt body to the same file (already done above) and tell
+    // claude to re-read it via the `@<path>` reference. Single-line input
+    // submits cleanly on `\r`; no input-editor multi-line ambiguity.
+    if (!isFirstSpawn) {
+      try {
+        pty.write(`@${this.healPromptFile}\r`)
+      } catch {
+        return { exitCode: 1, signal: null }
+      }
+    }
+
+    const sig = await this.waitForHealSignal(this.healAgentTimeoutMs)
+    const exitCode = this.healAgentPty ? 0 : 1
+    return { exitCode, signal: sig }
+  }
+
+  /** Absolute path to the heal-prompt file written by `buildCyclePrompt`.
+   *  Stable across cycles — each cycle overwrites it with that cycle's
+   *  prompt body, then references it via claude's `@<path>` syntax. */
+  private get healPromptFile(): string {
+    return path.join(this.runDir, 'heal-prompt.md')
+  }
+
+  /**
+   * Spawn the long-lived heal-agent REPL. Idempotent-ish — if a pty is
+   * already attached, no-ops. The MCP output dir is pinned at this call
+   * (from cycle-1's failed slugs) since claude reads `--mcp-config` once at
+   * boot and we don't recompose it across cycles.
+   */
+  private spawnHealAgentRepl(failedSlugs: readonly string[]): void {
+    if (this.healAgentPty) return
+    const cfg = this.autoHeal
+    if (!cfg) throw new Error('autoHeal not configured')
+
+    const target = resolveMcpOutputDir({
+      runDir: this.runDir,
+      failedSlugs,
+    })
+    ensureMcpOutputDir(target.dir)
+    this.healAgentMcpOutputDir = target.dir
+
+    // claude pins via `--session-id <uuid>` so we know the conversation id
+    // without parsing init frames. codex has no equivalent; leave null.
+    const sessionId = cfg.agent === 'claude' ? randomUUID() : undefined
+    this.healAgentSessionId = sessionId ?? null
+    try {
+      fs.mkdirSync(path.dirname(this.paths.agentSessionIdPath), { recursive: true })
+      if (sessionId) fs.writeFileSync(this.paths.agentSessionIdPath, sessionId)
+      else fs.rmSync(this.paths.agentSessionIdPath, { force: true })
+    } catch { /* sidecar write is informational */ }
+
+    let command: string
+    try {
+      command = (cfg.buildSpawnCommand ?? defaultSpawnCommand)({
+        sessionId,
+        mcpOutputDir: target.dir,
+        // The cycle-1 prompt was already written to this file by the
+        // caller (`runHealAgent`); the wired spawn-command builder
+        // appends `"@<promptFile>"` so claude reads it on startup.
+        promptFile: this.healPromptFile,
+      })
+    } catch (err) {
+      this.emitAgentSystemMessage(`Failed to build heal-agent spawn command: ${(err as Error).message}`)
+      throw err
+    }
 
     const transcriptPath = this.paths.agentTranscriptPath
     fs.mkdirSync(path.dirname(transcriptPath), { recursive: true })
     if (!fs.existsSync(transcriptPath)) fs.writeFileSync(transcriptPath, '')
 
-    this.healAgentSessionId = null
-    this.healAgentSessionBuf = ''
-    this.healAgentMcpOutputDir = target.dir
-    try { fs.rmSync(this.paths.agentSessionIdPath, { force: true }) } catch { /* ignore */ }
-
-    let pty = this.ptyFactory({
-      command,
-      cwd: this.runDir,
-      env: this.agentPtyEnv(),
-    })
-    this.healAgentPty = pty
-    this.attachAgentDataHandlers(pty, cfg.agent)
-
-    // Loop so `interjectHealAgent` can swap `this.healAgentPty` mid-flight:
-    // the old pty resolves on exit (kill), we detect the swap, and re-await
-    // the new pty's exit instead of returning early.
-    let exitCode = 0
-    while (true) {
-      exitCode = await new Promise<number>((resolve) => {
-        pty.onExit(({ exitCode: code }) => resolve(code))
+    let pty: PtyHandle
+    try {
+      pty = this.ptyFactory({
+        command,
+        cwd: this.runDir,
+        env: this.agentPtyEnv(),
       })
-      if (this.healAgentPty && this.healAgentPty !== pty) {
-        pty = this.healAgentPty
-        continue
-      }
-      if (this.healAgentReplacementPending) {
-        const replacement = await this.waitForHealAgentReplacement(pty)
-        if (replacement) {
-          pty = replacement
-          continue
-        }
-      }
+    } catch (err) {
+      this.emitAgentSystemMessage(`Failed to spawn heal agent: ${(err as Error).message}`)
+      throw err
+    }
+    this.healAgentPty = pty
+    this.attachAgentDataHandlers(pty)
+
+    // When the REPL exits — either intentionally (cleanup writes /exit then
+    // SIGTERM) or unexpectedly (crash) — drop the pty handle so the next
+    // cycle's runHealAgent sees no PTY and can decide to bail. Skip if
+    // cleanupHealAgentPty already cleared the field — it'll emit agent-exit
+    // itself in that path.
+    pty.onExit(({ exitCode }) => {
+      if (this.healAgentPty !== pty) return
       this.healAgentPty = null
       this.emit('agent-exit', { exitCode })
-      break
-    }
+    })
 
-    // Apply the artifact cap once the agent exits — the agent has finished
-    // writing into the MCP output dir at this point.
+    // Note: `agent-started` is emitted by runHealAgent per-cycle (with the
+    // cycle number). The spawn itself is recorded via the manifest +
+    // transcript; we don't fire a second agent-started here so consumers see
+    // one event per cycle, matching the headless flow.
+    void command
+  }
+
+  /**
+   * Tear down the persistent REPL. Sends Esc + `/exit\r` first to give the
+   * agent a chance to flush, then SIGTERMs the pty (with SIGKILL fallback).
+   * Idempotent — no-op when no pty is attached.
+   */
+  private cleanupHealAgentPty(): void {
+    const pty = this.healAgentPty
+    if (!pty) return
+    // Clear the field first so the onExit handler in spawnHealAgentRepl
+    // sees `this.healAgentPty !== pty` and skips re-emitting agent-exit.
+    this.healAgentPty = null
     try {
-      capArtifacts(target.dir)
-    } catch { /* best-effort */ }
-
-    // Give the signal watcher a few ticks to pick up a signal that may have
-    // landed right before exit.
-    const sig = await this.waitForHealSignal(Math.min(this.healAgentTimeoutMs, 5000))
-    return { exitCode, signal: sig }
+      pty.write('')
+      pty.write('/exit\r')
+    } catch { /* already gone */ }
+    killTree(pty, 'SIGTERM')
+    scheduleSigkillFallback(pty)
+    this.emit('agent-exit', { exitCode: 0 })
+    if (this.healAgentMcpOutputDir) {
+      try { capArtifacts(this.healAgentMcpOutputDir) } catch { /* best-effort */ }
+    }
+    this.healAgentMcpOutputDir = undefined
+    this.healAgentSessionId = null
   }
 
   // Top-level "do the whole thing" entry. Boots services, runs Playwright,
@@ -1077,9 +1213,16 @@ export class RunOrchestrator extends EventEmitter {
 
   async restartHealFromFailure(userGuidance: string): Promise<RunManifest['status']> {
     if (!this.autoHeal) return 'failed'
-    await this.start()
+    this.prepareRun('stopped')
     if (this.stopped) return this.status
-    this.setStatus('failed')
+    // Truncate the previous heal session's transcript so the new REPL
+    // starts on a clean file. The pane broker clears its in-memory buffer
+    // separately (see `restartHeal` in server.ts) — this handles the
+    // on-disk side that survives reconnects and historical reads.
+    try {
+      fs.mkdirSync(path.dirname(this.paths.agentTranscriptPath), { recursive: true })
+      fs.writeFileSync(this.paths.agentTranscriptPath, '')
+    } catch { /* truncate is best-effort */ }
     return await this.runAutoHealLoop(userGuidance)
   }
 
@@ -1099,80 +1242,112 @@ export class RunOrchestrator extends EventEmitter {
     }
 
     let userGuidance = initialUserGuidance
-    while (true) {
-      if (this.stopped) return this.status
-      const summary = readSummary(this.paths.summaryPath)
-      const failedSlugs = extractFailedSlugs(summary)
-      const signature = failedSlugs.slice().sort().join('|')
-      const decision = heal.observeFailures(signature)
-      if (!decision.shouldHeal) break
-
-      const cycleNum = heal.beginCycle() + 1
-      this.emit('heal-cycle-started', { cycle: cycleNum, failureSignature: signature })
-      this.setStatus('healing')
-      this.noteHealCycle()
-
-      const { signal } = await this.runHealAgent({ cycle: cycleNum, failedSlugs, userGuidance })
-      userGuidance = undefined
-
-      if (this.stopped) return this.status
-
-      if (this.healCancelled) {
-        finalStatus = 'failed'
-        this.setStatus(finalStatus)
-        break
-      }
-
-      if (!signal) {
-        finalStatus = 'failed'
-        this.setStatus(finalStatus)
-        break
-      }
-
-      try {
-        if (signal.kind === 'restart' || signal.kind === 'rerun') {
-          appendJournalIteration({
-            signal: signal.kind === 'restart' ? '.restart' : '.rerun',
-            hypothesis: typeof signal.body.hypothesis === 'string' ? signal.body.hypothesis : undefined,
-            filesChanged: Array.isArray(signal.body.filesChanged)
-              ? (signal.body.filesChanged.filter((f): f is string => typeof f === 'string'))
-              : undefined,
-            fixDescription: typeof signal.body.fixDescription === 'string' ? signal.body.fixDescription : undefined,
-            runId: this.runId,
-            manifestPath: this.paths.manifestPath,
-            summaryPath: this.paths.summaryPath,
-            journalPath: this.paths.diagnosisJournalPath,
-          })
-        }
-      } catch { /* journal write is best-effort */ }
-
-      const rerunTargets = this.rerunTargetsForSummary(summary)
-      this.setStatus('running')
-
-      const action = heal.actionForSignal(signal.kind === 'heal' ? 'rerun' : signal.kind)
-      if (action.kind === 'restart-and-rerun') {
-        const filesChanged = Array.isArray(signal.body.filesChanged)
-          ? signal.body.filesChanged.filter((f): f is string => typeof f === 'string')
-          : []
-        const { restarted, kept } = await this.restart(filesChanged)
+    try {
+      while (true) {
         if (this.stopped) return this.status
-        this.healCycleHistory.push({ cycle: cycleNum, restarted, kept })
-        this.stateSink.patchManifest(this.runId, {
-          healCycleHistory: this.healCycleHistory,
-        })
-      } else {
-        await this.rerun()
+        // Cancel observed at the loop top means the user clicked Stop Heal
+        // between cycles (or just before the next cycle starts). Bail out
+        // before incrementing the cycle counter.
+        if (this.healCancelled) {
+          finalStatus = 'failed'
+          this.setStatus(finalStatus)
+          break
+        }
+        const summary = readSummary(this.paths.summaryPath)
+        const failedSlugs = extractFailedSlugs(summary)
+        const signature = failedSlugs.slice().sort().join('|')
+        const decision = heal.observeFailures(signature)
+        if (!decision.shouldHeal) break
+
+        const cycleNum = heal.beginCycle() + 1
+        this.emit('heal-cycle-started', { cycle: cycleNum, failureSignature: signature })
+        this.setStatus('healing')
+        this.noteHealCycle()
+
+        const { exitCode: agentExitCode, signal } = await this.runHealAgent({ cycle: cycleNum, failedSlugs, userGuidance })
+        userGuidance = undefined
+
+        if (this.stopped) return this.status
+
+        if (this.healCancelled) {
+          finalStatus = 'failed'
+          this.setStatus(finalStatus)
+          break
+        }
+
+        // REPL died unexpectedly mid-cycle (crash or external kill). Don't
+        // try to respawn — surface in transcript and end the loop.
+        if (agentExitCode !== 0 && !signal) {
+          this.emitAgentSystemMessage('Heal agent exited unexpectedly. Ending the heal loop.')
+          finalStatus = 'failed'
+          this.setStatus(finalStatus)
+          break
+        }
+
+        if (!signal) {
+          finalStatus = 'failed'
+          this.setStatus(finalStatus)
+          break
+        }
+
+        try {
+          if (signal.kind === 'restart' || signal.kind === 'rerun') {
+            appendJournalIteration({
+              signal: signal.kind === 'restart' ? '.restart' : '.rerun',
+              hypothesis: typeof signal.body.hypothesis === 'string' ? signal.body.hypothesis : undefined,
+              filesChanged: Array.isArray(signal.body.filesChanged)
+                ? (signal.body.filesChanged.filter((f): f is string => typeof f === 'string'))
+                : undefined,
+              fixDescription: typeof signal.body.fixDescription === 'string' ? signal.body.fixDescription : undefined,
+              runId: this.runId,
+              manifestPath: this.paths.manifestPath,
+              summaryPath: this.paths.summaryPath,
+              journalPath: this.paths.diagnosisJournalPath,
+            })
+          }
+        } catch { /* journal write is best-effort */ }
+
+        const rerunTargets = this.rerunTargetsForSummary(summary)
+        this.setStatus('running')
+
+        const action = heal.actionForSignal(signal.kind === 'heal' ? 'rerun' : signal.kind)
+        if (action.kind === 'restart-and-rerun') {
+          const filesChanged = Array.isArray(signal.body.filesChanged)
+            ? signal.body.filesChanged.filter((f): f is string => typeof f === 'string')
+            : []
+          const { restarted, kept } = await this.restart(filesChanged)
+          if (this.stopped) return this.status
+          this.healCycleHistory.push({ cycle: cycleNum, restarted, kept })
+          this.stateSink.patchManifest(this.runId, {
+            healCycleHistory: this.healCycleHistory,
+          })
+        } else {
+          await this.rerun()
+        }
+        if (this.stopped) return this.status
+        await this.ensureServicesRunning()
+
+        const exitCode = await this.runPlaywright(rerunTargets)
+        if (this.stopped) return this.status
+        // User cancelled mid-Playwright (cancelHeal SIGTERM'd the pw pty).
+        // Don't read into the killed pty's exit code — finalize as failed.
+        if (this.healCancelled) {
+          finalStatus = 'failed'
+          this.setStatus(finalStatus)
+          break
+        }
+        finalStatus = exitCode === 0 ? 'passed' : 'failed'
+        this.setStatus(finalStatus)
+        if (exitCode === 0) break
       }
-      if (this.stopped) return this.status
 
-      const exitCode = await this.runPlaywright(rerunTargets)
-      if (this.stopped) return this.status
-      finalStatus = exitCode === 0 ? 'passed' : 'failed'
-      this.setStatus(finalStatus)
-      if (exitCode === 0) break
+      return finalStatus
+    } finally {
+      // Drop the persistent REPL however the loop terminated — clean break,
+      // failure, cancel, threshold, or thrown error. `stop()` also nukes the
+      // pty during a full abort, so the second cleanup here is a no-op.
+      this.cleanupHealAgentPty()
     }
-
-    return finalStatus
   }
 
   /** Write a heartbeat timestamp to the manifest every 5 seconds so consumers
@@ -1234,7 +1409,6 @@ export class RunOrchestrator extends EventEmitter {
       scheduleSigkillFallback(this.healAgentPty)
       this.healAgentPty = null
     }
-    this.healAgentReplacementPending = false
     for (const [name, pty] of this.servicePtys) {
       killTree(pty, 'SIGTERM')
       this.servicePtys.delete(name)
@@ -1316,6 +1490,16 @@ export function summarizeFailures(summaryPath: string): { failed: string[]; tota
 
 const SUMMARY_REPORTER_PATH = path.resolve(__dirname, 'summary-reporter.js')
 
+// Bracketed-paste sequences. Modern TUIs (claude REPL included) toggle
+// `\x1b[?2004h` on init to opt into "this is a paste" framing — text
+// between the markers is inserted into the input field as a single block
+// instead of being processed by the line editor character-by-character.
+// Without these wrappers, every word the orchestrator writes via
+// `pty.write` shows up in the transcript as `<word>\x1b[1C<word>...`,
+// producing messy output and ballooning the log size.
+const BRACKETED_PASTE_BEGIN = '\x1b[200~'
+const BRACKETED_PASTE_END = '\x1b[201~'
+
 // Production Playwright invocation. Uses `npx playwright test` with our custom
 // summary reporter, rooted at the feature dir. Tests inject their own.
 export const defaultPlaywrightSpawner: PlaywrightSpawner = ({ feature, paths, rerunTargets }) => {
@@ -1354,36 +1538,6 @@ function scheduleSigkillFallback(pty: PtyHandle, ms = 2000): void {
   }, ms).unref?.()
 }
 
-// Best-effort session-id parser. Claude stream-json:
-//   {"type":"system","subtype":"init","session_id":"..."}
-// Codex JSON output:
-//   {"type":"thread.started","thread_id":"..."}
-// Returns null if the line isn't the init/started frame we're looking for.
-function parseSessionIdLine(line: string, agent: AutoHealAgent): string | null {
-  if (!line || (line[0] !== '{' && line.indexOf('{') === -1)) return null
-  // The formatter pipes through, so the line may be a plain JSON object OR
-  // already-rendered ANSI text. Find the first `{` and try to parse from there.
-  const start = line.indexOf('{')
-  if (start === -1) return null
-  let msg: { type?: unknown; subtype?: unknown; session_id?: unknown; thread_id?: unknown }
-  try {
-    msg = JSON.parse(line.slice(start))
-  } catch {
-    return null
-  }
-  if (agent === 'claude') {
-    if (msg.type === 'system' && msg.subtype === 'init' && typeof msg.session_id === 'string') {
-      return msg.session_id
-    }
-    return null
-  }
-  // codex
-  if (msg.type === 'thread.started' && typeof msg.thread_id === 'string') {
-    return msg.thread_id
-  }
-  return null
-}
-
 function formatUserInterjectBlock(text: string, startedAt: string, now: Date = new Date()): string {
   const tag = formatElapsedTag(startedAt, now)
   const body = text.split(/\r?\n/).map((line) => `  │ ${line}`).join('\n')
@@ -1399,11 +1553,17 @@ function formatElapsedTag(startedAt: string, now: Date): string {
   return `[${mm}:${ss}]`
 }
 
-// Production heal-agent command builder. The web-server / CLI entry points
-// pass a richer one that wires `buildAgentCommand` from auto-heal.ts; this
-// default is intentionally minimal so it never silently runs in tests.
-export function defaultHealCommand(args: { cycle: number; outputDir: string }): string {
-  // Clamp to a no-op if no override is provided. The real wiring lives in
-  // auto-heal.ts and is composed at the call site (CLI / web-server).
-  return `echo "[heal-agent placeholder cycle=${args.cycle} mcp-out=${args.outputDir}]"`
+// Production wires `buildAgentSpawnCommand` / `buildOrchestratorHealPrompt`
+// from auto-heal.ts; these defaults are intentionally minimal so unit tests
+// never silently run a real claude/codex REPL when an override is missing.
+export function defaultSpawnCommand(_args: { sessionId?: string; mcpOutputDir?: string; promptFile?: string }): string {
+  // A `cat` keeps the pty alive (so the orchestrator can write prompts to
+  // its stdin and pty.onExit doesn't fire mid-loop) and echoes everything we
+  // type, which is enough for assertions about prompt content in tests.
+  return 'cat'
+}
+
+export function defaultHealPrompt(args: { cycle: number; outputDir: string; userGuidance?: string }): string {
+  const guidance = args.userGuidance ? ` guidance="${args.userGuidance}"` : ''
+  return `[heal-agent placeholder cycle=${args.cycle} mcp-out=${args.outputDir}${guidance}]`
 }

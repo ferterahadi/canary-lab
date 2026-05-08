@@ -44,11 +44,14 @@ export function substitute(
 export interface RepoSummary {
   name: string
   localPath: string
+  branch?: string
 }
 
 export function formatRepos(repos: RepoSummary[]): string {
   if (repos.length === 0) return '(none)'
-  return repos.map((r) => `- ${r.name} (${r.localPath})`).join('\n')
+  return repos
+    .map((r) => `- ${r.name} (${r.localPath})${r.branch ? ` branch=${r.branch}` : ''}`)
+    .join('\n')
 }
 
 export function formatPlan(plan: unknown): string {

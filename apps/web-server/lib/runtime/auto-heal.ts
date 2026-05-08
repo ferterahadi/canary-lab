@@ -5,14 +5,13 @@ import { buildHealAddendum } from './heal-prompt-builder'
 import { buildRunPaths } from './run-paths'
 import { renderPersonalWikiMap } from '../../../../shared/runtime/personal-wiki'
 
-// Heal-agent command builders for the web-server orchestrator. The legacy
-// The old CLI test runner used to live next to this file and
-// drove `spawnHealAgent` directly via a foreground pty. That path was
-// removed in 0.11 — the web orchestrator now invokes these commands via
-// `RunOrchestrator`'s pty factory and streams output through PaneBroker.
+// Heal-agent command builders for the web-server orchestrator. The orchestrator
+// runs claude / codex as a long-lived interactive REPL (no `-p`, no formatter
+// pipe). The shell command produced here is just the binary + flags — the
+// per-cycle prompt is written to the pty's stdin by `RunOrchestrator` after
+// spawn, which lets users type into the same session for smooth interjects.
 
 export type HealAgent = 'claude' | 'codex'
-export type HealSessionMode = 'resume' | 'new'
 
 export function isAgentCliAvailable(agent: HealAgent): boolean {
   try {
@@ -38,9 +37,6 @@ function renderPromptTemplate(template: string, values: Record<string, string>):
   return template.replace(/\{\{(\w+)\}\}/g, (match, key: string) => values[key] ?? match)
 }
 
-const CLAUDE_FORMATTER_FILE = path.join(__dirname, 'claude-formatter.js')
-const CODEX_FORMATTER_FILE = path.join(__dirname, 'codex-formatter.js')
-
 // Build a transient `--mcp-config` argument for `claude`. Writes the MCP
 // servers JSON (registering `@playwright/mcp` with `--output-dir <outputDir>`
 // so the agent's browser snapshots land in the per-failure dir) to
@@ -64,61 +60,76 @@ export function buildClaudeMcpConfigArg(outputDir: string, configFilePath: strin
   return `--mcp-config ${JSON.stringify(configFilePath)}`
 }
 
-export interface BuildAgentCommandOptions {
-  /** Pin the resumed session/thread id explicitly. When set, overrides the
-   *  cycle-driven `useResume` heuristic and pins to a known conversation.
-   *  Required for interject. */
-  resumeSessionId?: string
+export interface AgentSpawnArgs {
+  /** Pin claude's session UUID. Lets the orchestrator know the id without
+   *  parsing init frames; ignored by codex (no equivalent flag). */
+  sessionId?: string
+  /** Where Playwright MCP should write artifacts. When set, claude is spawned
+   *  with `--mcp-config` pointing at a JSON file we write to `mcpConfigFile`
+   *  describing the playwright server with `--output-dir <mcpOutputDir>`.
+   *  When omitted, no `--mcp-config` flag is added. */
+  mcpOutputDir?: string
+  /** Path the MCP config JSON should be written to. Required when
+   *  `mcpOutputDir` is set. Conventionally `<runDir>/mcp-config.json`. */
+  mcpConfigFile?: string
+  /** Path to the cycle-1 heal prompt. When set, the spawn command appends
+   *  `"@<promptFile>"` as a positional argument so claude reads the file
+   *  and processes its content as the first user message — bypassing the
+   *  REPL's input editor entirely. The orchestrator writes the prompt
+   *  body to this path BEFORE spawning. */
+  promptFile?: string
 }
 
-export function buildAgentCommand(
-  agent: HealAgent,
-  sessionMode: HealSessionMode,
-  cycle: number,
-  promptFile: string,
-  mcpOutputDir?: string,
-  opts: BuildAgentCommandOptions = {},
-): string {
-  const explicitResume = !!opts.resumeSessionId
-  const useResume = explicitResume || (sessionMode === 'resume' && cycle > 0)
-  const promptSub = `"$(cat ${JSON.stringify(promptFile)})"`
+/**
+ * Build the spawn command for a long-lived REPL. Returns just the binary +
+ * flags — the orchestrator writes the per-cycle prompt to the pty's stdin
+ * after spawn, so this command does not include any `-p`/positional prompt.
+ *
+ * Permissions are intentionally NOT bypassed here. With the headless `-p`
+ * flow we passed `--dangerously-skip-permissions` (resp. codex `--full-auto`)
+ * because there was no human to approve tool calls. In REPL mode the user
+ * is right there in the pane and can approve / deny each tool — bypassing
+ * also hides MCP auth prompts the user needs to see.
+ *
+ * - claude: `claude [--session-id <uuid>] [--mcp-config <path>]`
+ * - codex:  `codex --skip-git-repo-check`
+ */
+export function buildAgentSpawnCommand(agent: HealAgent, args: AgentSpawnArgs = {}): string {
+  // Positional `@<promptFile>` arg — claude reads the file at startup and
+  // processes its content as the first user message. This sidesteps the
+  // REPL's input editor entirely, which doesn't reliably submit multi-line
+  // content sent via stdin paste. Writing the prompt body to disk first is
+  // the orchestrator's responsibility.
+  //
+  // CRITICAL: the standalone `--` separator before the positional. Without
+  // it, claude's variadic `--mcp-config <configs...>` would greedily slurp
+  // the positional as another config file path (the file then doesn't
+  // exist as JSON, claude reports `MCP config file not found`, and the
+  // REPL exits before processing any prompt). `--` is the POSIX
+  // end-of-options marker — commander.js (claude / codex's argv parser)
+  // honors it.
+  const promptArg = args.promptFile ? ` -- ${JSON.stringify(`@${args.promptFile}`)}` : ''
 
   if (agent === 'claude') {
-    // Order matters: `--mcp-config` is variadic and would otherwise greedily
-    // swallow the positional prompt argument as another config file (which
-    // claude then `open()`s, tripping ENAMETOOLONG). Putting `-p` LAST means
-    // the prompt sits cleanly behind it and `--mcp-config` is terminated
-    // by the next flag.
-    const baseFlags = `--dangerously-skip-permissions --output-format=stream-json --verbose`
-    // The MCP config file lives next to the prompt file (i.e. under the
-    // per-run heal directory).
-    const mcpConfigFile = path.join(path.dirname(promptFile), 'mcp-config.json')
-    const mcpFlag = mcpOutputDir ? ` ${buildClaudeMcpConfigArg(mcpOutputDir, mcpConfigFile)}` : ''
-    const trailing = `-p`
-    let head: string
-    if (explicitResume) {
-      head = `--resume ${JSON.stringify(opts.resumeSessionId)} ${baseFlags}`
-    } else if (useResume) {
-      head = `--continue ${baseFlags}`
-    } else {
-      head = baseFlags
+    const sid = args.sessionId ? ` --session-id ${JSON.stringify(args.sessionId)}` : ''
+    let mcp = ''
+    if (args.mcpOutputDir) {
+      if (!args.mcpConfigFile) {
+        throw new Error('buildAgentSpawnCommand: mcpConfigFile is required when mcpOutputDir is set')
+      }
+      mcp = ` ${buildClaudeMcpConfigArg(args.mcpOutputDir, args.mcpConfigFile)}`
     }
-    const flags = `${head}${mcpFlag} ${trailing}`
-    const formatter = `node ${JSON.stringify(CLAUDE_FORMATTER_FILE)}`
-    return `claude ${flags} ${promptSub} | ${formatter}`
+    // No `--dangerously-skip-permissions` — REPL hands tool approval back
+    // to the user.
+    return `claude${sid}${mcp}${promptArg}`
   }
-
-  const codexBase = `--skip-git-repo-check --full-auto --json`
-  const formatter = `node ${JSON.stringify(CODEX_FORMATTER_FILE)}`
-  if (explicitResume) {
-    // Fail loudly when the pinned id is bad — falling back to a fresh
-    // session would silently lose conversation context.
-    return `codex exec resume ${JSON.stringify(opts.resumeSessionId)} ${codexBase} ${promptSub} | ${formatter}`
-  }
-  if (useResume) {
-    return `(codex exec resume ${codexBase} ${promptSub} || codex exec ${codexBase} ${promptSub}) | ${formatter}`
-  }
-  return `codex exec ${codexBase} ${promptSub} | ${formatter}`
+  // codex interactive REPL — `--skip-git-repo-check` keeps codex from
+  // bailing on a non-git canary-lab-workspace. No `--full-auto`: tool
+  // approvals stay interactive in the pane. Codex has no `--session-id`
+  // analogue; the orchestrator doesn't track a session id for codex (the
+  // REPL stays alive across cycles so we never need to resume mid-run).
+  // Codex accepts a positional prompt the same way as claude.
+  return `codex --skip-git-repo-check${promptArg}`
 }
 
 /**
@@ -154,22 +165,19 @@ export interface OrchestratorAutoHealFactoryOptions {
   runDir: string
   /** Optional local personal wiki folder for distilled cross-session context. */
   personalWikiPath?: string | null
-  /** Defaults to 'new'. `resume` is mostly useful for the CLI; web runs are short-lived. */
-  sessionMode?: HealSessionMode
   /** Override prompt template path resolution (tests). */
   promptPath?: string
 }
 
 /**
- * Build a `buildCommand` function compatible with `AutoHealConfig.buildCommand`.
- * This is what wires the rich `buildAgentCommand` (claude/codex CLI invocation
- * with prompt file, MCP config, formatter pipeline) into the web-server's
- * orchestrator. The prompt is rendered from Canary Lab's packaged template,
- * not from project CLAUDE.md / AGENTS.md, so auto-heal is not affected by
- * user-edited agent guide files.
+ * Build a prompt-rendering function compatible with `AutoHealConfig.buildCyclePrompt`.
+ * Returns the raw prompt text to write into the REPL's stdin — the orchestrator
+ * pty.write()s it. The text is also persisted to `<runDir>/heal-prompt.md`
+ * for debugging/forensics.
  */
-export function buildOrchestratorHealCommand(opts: OrchestratorAutoHealFactoryOptions): (args: { cycle: number; outputDir: string; userGuidance?: string }) => string {
-  const sessionMode: HealSessionMode = opts.sessionMode ?? 'new'
+export function buildOrchestratorHealPrompt(
+  opts: OrchestratorAutoHealFactoryOptions,
+): (args: { cycle: number; outputDir: string; userGuidance?: string }) => string {
   // Eagerly load the packaged template so a missing asset surfaces at config
   // time, not on the first heal cycle.
   const promptTemplate = loadPromptTemplate(opts.promptPath)
@@ -188,7 +196,7 @@ export function buildOrchestratorHealCommand(opts: OrchestratorAutoHealFactoryOp
     personalWikiMap: renderPersonalWikiMap(opts.personalWikiPath),
   })
 
-  return ({ cycle, outputDir, userGuidance }) => {
+  return ({ cycle, userGuidance }) => {
     const stateAddendum = buildHealAddendum({
       cycle: cycle + 1,
       summaryPath: paths.summaryPath,
@@ -200,33 +208,6 @@ export function buildOrchestratorHealCommand(opts: OrchestratorAutoHealFactoryOp
     const fullPrompt = [basePrompt, stateAddendum, guidance].filter(Boolean).join('\n\n')
     fs.mkdirSync(path.dirname(promptFile), { recursive: true })
     fs.writeFileSync(promptFile, fullPrompt)
-    return buildAgentCommand(opts.agent, sessionMode, cycle, promptFile, outputDir)
-  }
-}
-
-/**
- * Companion to `buildOrchestratorHealCommand`: builds the resume invocation
- * used by `RunOrchestrator.interjectHealAgent`. Writes the user's interject
- * text to a dedicated prompt file so it doesn't clobber the cycle's main
- * heal prompt, then composes `claude --resume <sid> -p "<text>"` (or the
- * codex equivalent).
- */
-export function buildOrchestratorInterjectCommand(
-  opts: OrchestratorAutoHealFactoryOptions,
-): (args: { sessionId: string; text: string; outputDir?: string }) => string {
-  const interjectPromptFile = path.join(opts.runDir, 'heal-interject-prompt.md')
-  return ({ sessionId, text, outputDir }) => {
-    fs.mkdirSync(path.dirname(interjectPromptFile), { recursive: true })
-    fs.writeFileSync(interjectPromptFile, text)
-    // cycle is irrelevant when explicit resume id is set; pass 1 to satisfy
-    // the signature.
-    return buildAgentCommand(
-      opts.agent,
-      'resume',
-      1,
-      interjectPromptFile,
-      outputDir,
-      { resumeSessionId: sessionId },
-    )
+    return fullPrompt
   }
 }

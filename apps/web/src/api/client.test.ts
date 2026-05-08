@@ -8,6 +8,7 @@ import {
   cancelHealRun,
   checkPathExists,
   checkoutRepoBranch,
+  checkoutWorkspaceBranch,
   cloneRepository,
   createDraft,
   cancelDraftGeneration,
@@ -26,6 +27,7 @@ import {
   getFeatureTests,
   getGitRemote,
   getRepoGitStatus,
+  getWorkspaceGitStatus,
   getPlaywrightConfig,
   getRunDetail,
   listFeatures,
@@ -378,6 +380,30 @@ describe('api client', () => {
     expect(url).toBe('/api/features/feat%2Fa/repos/repo%2Fb/checkout')
     expect(init.method).toBe('POST')
     expect(JSON.parse(init.body as string)).toEqual({ branch: 'main' })
+  })
+
+  it('getWorkspaceGitStatus and checkoutWorkspaceBranch use path-based workspace endpoints', async () => {
+    const status = {
+      path: '/repo',
+      expectedBranch: null,
+      isGitRepo: true,
+      currentBranch: 'main',
+      detached: false,
+      dirty: false,
+      dirtyFiles: [],
+      localBranches: ['main'],
+      remoteBranches: [],
+    }
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(ok(status))
+      .mockResolvedValueOnce(ok(status))
+    expect(await getWorkspaceGitStatus('/repo path', { fetchImpl })).toEqual(status)
+    await checkoutWorkspaceBranch('/repo path', 'main', { fetchImpl })
+    expect(fetchImpl.mock.calls[0][0]).toBe('/api/workspace/git-status?path=%2Frepo%20path')
+    const [url, init] = fetchImpl.mock.calls[1]
+    expect(url).toBe('/api/workspace/checkout')
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(init.body as string)).toEqual({ path: '/repo path', branch: 'main' })
   })
 
   it('deleteFeature DELETEs with the typed confirmation name', async () => {

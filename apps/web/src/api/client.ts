@@ -437,6 +437,35 @@ export function checkPathExists(
   )
 }
 
+export function getWorkspaceGitStatus(
+  absolutePath: string,
+  opts?: ClientOptions,
+): Promise<GitRepoStatus> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<GitRepoStatus>(
+    `${baseUrl}/api/workspace/git-status?path=${encodeURIComponent(absolutePath)}`,
+    { method: 'GET' },
+    fetchImpl,
+  )
+}
+
+export function checkoutWorkspaceBranch(
+  absolutePath: string,
+  branch: string,
+  opts?: ClientOptions,
+): Promise<GitRepoStatus> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<GitRepoStatus>(
+    `${baseUrl}/api/workspace/checkout`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ path: absolutePath, branch }),
+    },
+    fetchImpl,
+  )
+}
+
 export function cloneRepository(
   body: { cloneUrl: string; parentDir: string; repoName: string },
   opts?: ClientOptions,

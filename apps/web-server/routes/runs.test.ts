@@ -239,6 +239,60 @@ test('passes checkout', async ({ page }) => {
     expect(body).toContain('WEBM')
   })
 
+  it('exports videos using content-type extensions and ignores unsafe artifact paths', async () => {
+    writeManifestForRun('r-videos', 'checkout', 'passed')
+    const runDir = runDirFor(logsDir, 'r-videos')
+    const artifactsDir = path.join(runDir, 'playwright-artifacts')
+    const spec = path.join(featuresDir, 'checkout', 'e2e', 'checkout.spec.ts')
+    fs.mkdirSync(path.dirname(spec), { recursive: true })
+    fs.writeFileSync(spec, `import { test, expect } from '@playwright/test'
+
+test('records checkout', async ({ page }) => {
+  await expect(page.getByText('Checkout')).toBeVisible()
+})
+`)
+    fs.writeFileSync(path.join(runDir, 'e2e-summary.json'), JSON.stringify({
+      complete: true,
+      total: 1,
+      passed: 1,
+      passedNames: ['test-case-records-checkout'],
+      failed: [],
+    }))
+    for (const rel of ['case-a/recording', 'case-b/recording', 'case-c/raw']) {
+      const file = path.join(artifactsDir, rel)
+      fs.mkdirSync(path.dirname(file), { recursive: true })
+      fs.writeFileSync(file, rel)
+    }
+    fs.writeFileSync(
+      path.join(runDir, 'playwright-events.jsonl'),
+      JSON.stringify({
+        type: 'test-end',
+        time: 't',
+        test: { name: 'test-case-records-checkout', title: 'records checkout', location: `${spec}:3` },
+        status: 'passed',
+        passed: true,
+        durationMs: 12,
+        retry: 0,
+        attachments: [
+          { name: 'video', contentType: 'video/mp4', path: path.join(artifactsDir, 'case-a/recording') },
+          { name: 'video', contentType: 'video/webm', path: path.join(artifactsDir, 'case-b/recording') },
+          { name: 'video', path: path.join(artifactsDir, 'case-c/raw') },
+          { name: 'video', contentType: 'video/webm', path: '../outside.webm' },
+        ],
+      }) + '\n',
+    )
+    const { app } = await build()
+
+    const res = await app.inject({ method: 'GET', url: '/api/runs/r-videos/assertion.html' })
+
+    expect(res.statusCode).toBe(200)
+    const body = res.rawPayload.toString('latin1')
+    expect(body).toContain('r-videos-1.mp4')
+    expect(body).toContain('r-videos-2.webm')
+    expect(body).toContain('r-videos-3.webm')
+    expect(body).not.toContain('outside.webm')
+  })
+
   it('404s when the run is unknown', async () => {
     const { app } = await build()
     const res = await app.inject({ method: 'GET', url: '/api/runs/missing/assertion.html' })
@@ -514,43 +568,9 @@ describe('POST /api/runs/:runId/agent-input', () => {
     expect(received).toEqual({ runId: 'old-failed', text: 'try this' })
   })
 
-  it('409s with no-session-id when the agent init frame has not arrived', async () => {
-    const stub: OrchestratorLike = {
-      runId: 'ai2b',
-      stop: async () => { /* noop */ },
-      pauseAndHeal: async () => ({ ok: true, failureCount: 0 }),
-      cancelHeal: async () => ({ ok: true }),
-      interjectHealAgent: async () => ({ ok: false, reason: 'no-session-id' }),
-    }
-    const { app, registry } = await build()
-    registry.set('ai2b', stub)
-    const res = await app.inject({
-      method: 'POST',
-      url: '/api/runs/ai2b/agent-input',
-      payload: { data: 'hello\n' },
-    })
-    expect(res.statusCode).toBe(409)
-    expect(res.json()).toEqual({ reason: 'no-session-id' })
-  })
-
-  it('500s when interjecting into the heal agent fails at spawn time', async () => {
-    const stub: OrchestratorLike = {
-      runId: 'ai2c',
-      stop: async () => { /* noop */ },
-      pauseAndHeal: async () => ({ ok: true, failureCount: 0 }),
-      cancelHeal: async () => ({ ok: true }),
-      interjectHealAgent: async () => ({ ok: false, reason: 'spawn-failed' }),
-    }
-    const { app, registry } = await build()
-    registry.set('ai2c', stub)
-    const res = await app.inject({
-      method: 'POST',
-      url: '/api/runs/ai2c/agent-input',
-      payload: { data: 'hello\n' },
-    })
-    expect(res.statusCode).toBe(500)
-    expect(res.json()).toEqual({ reason: 'spawn-failed' })
-  })
+  // The old `no-session-id` and `spawn-failed` cases came from kill+respawn
+  // interject. With the bidirectional REPL, interject is just a stdin write,
+  // so the only structured failure left is `no-agent-running`.
 
   it('409s when interjectHealAgent is undefined (manual mode)', async () => {
     const stub: OrchestratorLike = {

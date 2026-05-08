@@ -39,3 +39,7 @@ logs/
 
 results
 
+# Local-only agent notes
+CLAUDE.local.md
+AGENTS.local.md
+

@@ -70,9 +70,9 @@ describe('formatRepos', () => {
   it('joins multiple repos with newlines', () => {
     const out = formatRepos([
       { name: 'a', localPath: '/p/a' },
-      { name: 'b', localPath: '/p/b' },
+      { name: 'b', localPath: '/p/b', branch: 'feature/demo' },
     ])
-    expect(out).toBe('- a (/p/a)\n- b (/p/b)')
+    expect(out).toBe('- a (/p/a)\n- b (/p/b) branch=feature/demo')
   })
 })
 

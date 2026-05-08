@@ -22,7 +22,7 @@ import { RunStatusIndicator } from './RunStatusIndicator'
 import { PaneTerminal } from './PaneTerminal'
 import { JournalTab } from './JournalTab'
 import { ManualHealBanner } from './ManualHealBanner'
-import { AgentInputBar } from './AgentInputBar'
+import { RestartHealButton } from './RestartHealButton'
 
 type Tab = 'overview' | 'services' | 'playwright' | 'agent' | 'journal'
 type PlaywrightView = 'terminal' | 'playback'
@@ -181,11 +181,8 @@ export function RunDetailColumn({ runId }: { runId: string | null }) {
             <div className="flex-1 min-h-0">
               <PaneTerminal runId={m.runId} paneId="agent" />
             </div>
-            {shouldShowAgentInputBar(m.status, m.healMode) && (
-              <AgentInputBar
-                runId={m.runId}
-                mode={m.status === 'failed' ? 'restart' : 'send'}
-              />
+            {shouldShowRestartHealButton(m.status, m.healMode) && (
+              <RestartHealButton runId={m.runId} />
             )}
           </div>
         )}
@@ -197,11 +194,17 @@ export function RunDetailColumn({ runId }: { runId: string | null }) {
   )
 }
 
-export function shouldShowAgentInputBar(
+// The agent pane is a bidirectional REPL: while the heal agent is running,
+// the user types directly into the xterm — there's no separate input bar.
+// Once the REPL has stopped (`status === 'failed'` for an auto-heal run, the
+// orchestrator's finally clause has run `cleanupHealAgentPty` and the
+// registry entry is gone), we render the Restart Heal button so the user
+// can spin up a fresh orchestrator + REPL. The new REPL takes input
+// directly; no other input UI is needed.
+export function shouldShowRestartHealButton(
   status: string,
   healMode?: 'auto' | 'manual',
 ): boolean {
-  if (status === 'healing') return healMode !== 'manual'
   return status === 'failed' && healMode === 'auto'
 }
 

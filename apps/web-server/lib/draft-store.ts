@@ -44,6 +44,7 @@ const ALLOWED_TRANSITIONS: Record<DraftStatus, DraftStatus[]> = {
 export interface DraftRepo {
   name: string
   localPath: string
+  branch?: string
 }
 
 export interface DraftPrdDocument {
