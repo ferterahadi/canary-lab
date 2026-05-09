@@ -49,7 +49,7 @@ This is probably not for you if:
 
 ## Current Scope
 
-- **Cross-platform.** Services and the heal agent run inside `node-pty` pseudo-terminals owned by Canary Lab — no AppleScript, no iTerm, no Terminal.app. The web UI streams those PTYs into your browser.
+- **Cross-platform.** Services and the heal agent run inside `node-pty` — no AppleScript, no iTerm, no Terminal.app. The web UI streams those PTYs into your browser.
 - **Node.js ≥ 20**, **npm ≥ 9**.
 - A modern browser (Chrome / Firefox / Safari) for the local UI on `http://localhost:7421`.
 - **Optional, for headless auto-heal:** [Claude Code CLI](https://docs.claude.com/en/docs/claude-code) (`claude`) or [Codex CLI](https://github.com/openai/codex) (`codex`) on `PATH`.
