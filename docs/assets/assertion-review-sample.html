@@ -1,0 +1,532 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Assertion Review: Recipe Servings Adjuster</title>
+  <style>
+:root {
+  color-scheme: light;
+  --bg: #f7f8fb;
+  --surface: #ffffff;
+  --surface-muted: #f8fafc;
+  --border: #d9e0ea;
+  --border-strong: #b9c4d4;
+  --text: #111827;
+  --muted: #64748b;
+  --accent: #0f766e;
+  --danger: #b42318;
+  --ok: #16794c;
+  --warn: #a16207;
+  --code-border: #d7dde7;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 13px/1.5 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+main {
+  min-width: 0;
+  padding: 28px 0 48px;
+}
+.page-shell {
+  display: grid;
+  grid-template-columns: 232px minmax(0, 1180px);
+  gap: 22px;
+  width: min(1450px, calc(100vw - 28px));
+  margin: 0 auto;
+}
+h1, h2, h3, p { margin-top: 0; }
+.page-header, .test-case, .implementations {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.05);
+}
+.page-header { padding: 24px; margin-bottom: 18px; }
+.implementations { padding: 18px; margin-top: 14px; }
+.toc {
+  position: sticky;
+  top: 14px;
+  align-self: start;
+  max-height: calc(100vh - 28px);
+  overflow: auto;
+  padding: 14px;
+  margin-top: 28px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.05);
+}
+.toc h2 { margin-bottom: 10px; font-size: 11px; color: var(--text); font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em; }
+.toc ol { list-style: none; margin: 0; padding: 0; }
+.toc li { margin: 3px 0; }
+.toc a {
+  display: block;
+  color: var(--muted);
+  text-decoration: none;
+  overflow-wrap: anywhere;
+  border-radius: 6px;
+  padding: 6px 8px;
+  border-left: 3px solid transparent;
+  font-weight: 600;
+}
+.toc a:hover { color: var(--text); background: var(--surface-muted); }
+.toc a[aria-current="true"] {
+  color: var(--accent);
+  background: #ecfdf5;
+  border-left-color: var(--accent);
+  font-weight: 700;
+}
+.toc-level-1 a { color: var(--text); font-size: 15px; font-weight: 850; line-height: 1.35; }
+.toc-level-2 { padding-left: 6px; margin-top: 10px !important; }
+.toc-level-2 a { color: var(--text); font-size: 14px; font-weight: 850; line-height: 1.3; }
+.toc-level-3 { padding-left: 14px; font-size: 11px; }
+.toc-level-3 a { padding: 4px 8px; font-size: 11px; font-weight: 650; line-height: 1.35; }
+.eyebrow {
+  margin-bottom: 4px;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+h1 { font-size: 28px; line-height: 1.15; margin-bottom: 16px; }
+.summary-strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.summary-strip div {
+  padding: 10px 12px;
+  background: linear-gradient(180deg, #ffffff, #f8fafc);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.summary-value { display: block; font-size: 18px; line-height: 1.15; font-weight: 800; color: var(--text); }
+.summary-label { display: block; margin-top: 2px; font-size: 10px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+.section-title { font-size: 18px; margin: 20px 0 10px; }
+.test-case { padding: 18px; margin-bottom: 14px; }
+.test-case > h2 { font-size: 17px; margin-bottom: 10px; }
+.subsection { margin-top: 14px; }
+.subsection h3 { font-size: 12px; margin-bottom: 7px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+.run-meta, .case-meta {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+.run-meta div, .case-meta div {
+  min-width: 0;
+  padding: 8px 10px;
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+dt { color: var(--muted); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; }
+dd { margin: 2px 0 0; overflow-wrap: anywhere; }
+.scope { margin: 18px 0 0; color: var(--muted); }
+.muted { color: var(--muted); }
+.status, .quality {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 12px;
+  font-weight: 700;
+  border: 1px solid currentColor;
+}
+.status-passed, .quality-strict { color: var(--ok); background: #e8f7ef; }
+.status-failed, .quality-unknown { color: var(--danger); background: #fff0ee; }
+.status-aborted, .quality-shallow { color: var(--warn); background: #fff8e6; }
+.quality-moderate { color: #1d4ed8; background: #eff6ff; }
+a { color: var(--accent); }
+.assertions { padding-left: 20px; }
+.assertions li { margin: 8px 0; }
+.assertions code, dd code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 4px;
+}
+.helper-ref { margin-top: 4px; color: var(--muted); }
+.fallback-code {
+  border: 1px solid var(--code-border);
+  border-radius: 7px;
+  overflow: auto;
+  padding: 10px !important;
+  margin: 0 !important;
+  font-size: 12px;
+  line-height: 1.55;
+  background: #fafafa;
+  color: #383A42;
+}
+.fallback-code code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+}
+@media (max-width: 900px) {
+  .page-shell { display: block; width: min(100vw - 20px, 1120px); }
+  main { padding-top: 18px; }
+  .toc { position: static; max-height: none; margin: 18px 0 0; }
+  .summary-strip { grid-template-columns: 1fr; }
+  .page-header, .test-case { padding: 16px; }
+  h1 { font-size: 24px; }
+}
+  </style>
+</head>
+<body>
+  <div class="page-shell">
+    <nav class="toc" aria-label="Table of contents">
+      <h2>Contents</h2>
+      <ol>
+        <li class="toc-level-1"><a href="#assertion-review" aria-current="true">Recipe Servings Adjuster</a></li>
+        <li class="toc-level-2"><a href="#test-cases">Test Cases</a></li>
+        <li class="toc-level-3"><a href="#tc-1">1. Render recipe card with default servings</a></li>
+        <li class="toc-level-3"><a href="#tc-2">2. Increase servings via the plus button</a></li>
+        <li class="toc-level-3"><a href="#tc-3">3. Recompute ingredient quantities for new servings</a></li>
+        <li class="toc-level-3"><a href="#tc-4">4. Disable minus button at minimum servings</a></li>
+        <li class="toc-level-3"><a href="#tc-5">5. Persist servings across page reload</a></li>
+        <li class="toc-level-3"><a href="#tc-6">6. Show step-by-step instructions section</a></li>
+        <li class="toc-level-3"><a href="#tc-7">7. Format fractional ingredient amounts</a></li>
+        <li class="toc-level-3"><a href="#tc-8">8. Switch units between metric and imperial</a></li>
+        <li class="toc-level-2"><a href="#local-codebase-implementations">Local Codebase Implementations</a></li>
+      </ol>
+    </nav>
+    <main>
+      <header class="page-header">
+        <p class="eyebrow">Assertion Review</p>
+        <h1 id="assertion-review">Recipe Servings Adjuster</h1>
+        <div class="summary-strip">
+          <div><span class="summary-value">8/8</span><span class="summary-label">passed</span></div>
+          <div><span class="summary-value">passed</span><span class="summary-label">run status</span></div>
+          <div><span class="summary-value">8</span><span class="summary-label">test cases</span></div>
+        </div>
+        <dl class="run-meta">
+          <div><dt>Run</dt><dd><code>2026-05-09T0900-r3c5</code></dd></div>
+          <div><dt>Status</dt><dd><span class="status status-passed">passed</span></dd></div>
+          <div><dt>Result</dt><dd>8/8 passed</dd></div>
+          <div><dt>Started</dt><dd>2026-05-09T09:00:14.221Z</dd></div>
+          <div><dt>Ended</dt><dd>2026-05-09T09:06:48.903Z</dd></div>
+        </dl>
+        <p class="scope">Local codebase helper implementations are inlined once below; external package imports are left as imports in the original source.</p>
+      </header>
+
+      <h2 class="section-title" id="test-cases">Test Cases</h2>
+
+      <section class="test-case" id="tc-1">
+        <h2>1. Render recipe card with default servings</h2>
+        <dl class="case-meta">
+          <div><dt>Result</dt><dd><span class="status status-passed">passed</span> <span class="muted">(2.4s)</span></dd></div>
+          <div><dt>Assertion profile</dt><dd>2 strict, 1 moderate, 1 shallow, 1 unknown</dd></div>
+        </dl>
+        <section class="subsection test-body">
+          <h3>Test Body</h3>
+          <pre class="fallback-code"><code>{
+    await openRecipeCard(page, 'lemon-tart')
+
+    await expect(page.getByTestId('servings-value')).toHaveText('4')
+    await expect(page.getByRole('heading', { name: 'Lemon Tart' })).toBeVisible()
+    await expect(page.getByTestId('total-time')).toHaveText('1h 25m')
+    await expect(page.locator('[data-ingredient]')).toHaveCount(6)
+    await expect(recipeMetadataFor(page)).resolves.toHaveProperty('source', 'cms')
+  }</code></pre>
+        </section>
+        <section class="subsection">
+          <h3>Assertions</h3>
+          <ul class="assertions">
+            <li>
+              <div><span class="quality quality-strict">strict</span> Asserts an exact text value on a deterministic UI element.</div>
+              <code>expect(page.getByTestId('servings-value')).toHaveText('4')</code>
+            </li>
+            <li>
+              <div><span class="quality quality-moderate">moderate</span> Checks a meaningful UI condition, but the static evidence is indirect.</div>
+              <code>expect(page.getByRole('heading', { name: 'Lemon Tart' })).toBeVisible()</code>
+            </li>
+            <li>
+              <div><span class="quality quality-strict">strict</span> Asserts an exact text value on a deterministic UI element.</div>
+              <code>expect(page.getByTestId('total-time')).toHaveText('1h 25m')</code>
+            </li>
+            <li>
+              <div><span class="quality quality-shallow">shallow</span> Checks weak existence or quantity evidence without proving the business outcome.</div>
+              <code>expect(page.locator('[data-ingredient]')).toHaveCount(6)</code>
+            </li>
+            <li>
+              <div><span class="quality quality-unknown">unknown</span> Helper implementation could not be resolved statically, so strictness is unknown.</div>
+              <code>expect(recipeMetadataFor(page)).resolves.toHaveProperty('source', 'cms')</code>
+              <div class="helper-ref">via helper <code>recipeMetadataFor</code> — not declared in this feature's local helpers</div>
+            </li>
+          </ul>
+        </section>
+      </section>
+
+      <section class="test-case" id="tc-2">
+        <h2>2. Increase servings via the plus button</h2>
+        <dl class="case-meta">
+          <div><dt>Result</dt><dd><span class="status status-passed">passed</span> <span class="muted">(1.8s)</span></dd></div>
+          <div><dt>Assertion profile</dt><dd>1 strict, 2 moderate</dd></div>
+        </dl>
+        <section class="subsection test-body">
+          <h3>Test Body</h3>
+          <pre class="fallback-code"><code>{
+    await openRecipeCard(page, 'lemon-tart')
+    await page.getByRole('button', { name: 'Increase servings' }).click()
+
+    await expect(page.getByTestId('servings-value')).toHaveText('5')
+    await expect(page.getByRole('button', { name: 'Decrease servings' })).toBeEnabled()
+    await expect(page.getByTestId('serving-warning')).toBeHidden()
+  }</code></pre>
+        </section>
+        <section class="subsection">
+          <h3>Assertions</h3>
+          <ul class="assertions">
+            <li>
+              <div><span class="quality quality-strict">strict</span> Asserts an exact text value on a deterministic UI element.</div>
+              <code>expect(page.getByTestId('servings-value')).toHaveText('5')</code>
+            </li>
+            <li>
+              <div><span class="quality quality-moderate">moderate</span> Checks a meaningful UI condition, but the static evidence is indirect.</div>
+              <code>expect(page.getByRole('button', { name: 'Decrease servings' })).toBeEnabled()</code>
+            </li>
+            <li>
+              <div><span class="quality quality-moderate">moderate</span> Checks a meaningful UI condition, but the static evidence is indirect.</div>
+              <code>expect(page.getByTestId('serving-warning')).toBeHidden()</code>
+            </li>
+          </ul>
+        </section>
+      </section>
+
+      <section class="test-case" id="tc-3">
+        <h2>3. Recompute ingredient quantities for new servings</h2>
+        <dl class="case-meta">
+          <div><dt>Result</dt><dd><span class="status status-passed">passed</span> <span class="muted">(2.1s)</span></dd></div>
+          <div><dt>Assertion profile</dt><dd>3 strict</dd></div>
+        </dl>
+        <section class="subsection test-body">
+          <h3>Test Body</h3>
+          <pre class="fallback-code"><code>{
+    await openRecipeCard(page, 'lemon-tart')
+    await setServings(page, 8)
+
+    await expect(page.getByTestId('ingredient-flour')).toHaveText('500 g flour')
+    await expect(page.getByTestId('ingredient-butter')).toHaveText('240 g butter')
+    await expect(page.getByTestId('ingredient-eggs')).toHaveText('6 eggs')
+  }</code></pre>
+        </section>
+        <section class="subsection">
+          <h3>Assertions</h3>
+          <ul class="assertions">
+            <li>
+              <div><span class="quality quality-strict">strict</span> Asserts an exact text value on a deterministic UI element.</div>
+              <code>expect(page.getByTestId('ingredient-flour')).toHaveText('500 g flour')</code>
+            </li>
+            <li>
+              <div><span class="quality quality-strict">strict</span> Asserts an exact text value on a deterministic UI element.</div>
+              <code>expect(page.getByTestId('ingredient-butter')).toHaveText('240 g butter')</code>
+            </li>
+            <li>
+              <div><span class="quality quality-strict">strict</span> Asserts an exact text value on a deterministic UI element.</div>
+              <code>expect(page.getByTestId('ingredient-eggs')).toHaveText('6 eggs')</code>
+            </li>
+          </ul>
+        </section>
+      </section>
+
+      <section class="test-case" id="tc-4">
+        <h2>4. Disable minus button at minimum servings</h2>
+        <dl class="case-meta">
+          <div><dt>Result</dt><dd><span class="status status-passed">passed</span> <span class="muted">(1.3s)</span></dd></div>
+          <div><dt>Assertion profile</dt><dd>2 moderate</dd></div>
+        </dl>
+        <section class="subsection test-body">
+          <h3>Test Body</h3>
+          <pre class="fallback-code"><code>{
+    await openRecipeCard(page, 'lemon-tart')
+    await setServings(page, 1)
+
+    await expect(page.getByRole('button', { name: 'Decrease servings' })).toBeDisabled()
+    await expect(page.getByRole('button', { name: 'Increase servings' })).toBeEnabled()
+  }</code></pre>
+        </section>
+        <section class="subsection">
+          <h3>Assertions</h3>
+          <ul class="assertions">
+            <li>
+              <div><span class="quality quality-moderate">moderate</span> Checks a meaningful UI condition, but the static evidence is indirect.</div>
+              <code>expect(page.getByRole('button', { name: 'Decrease servings' })).toBeDisabled()</code>
+            </li>
+            <li>
+              <div><span class="quality quality-moderate">moderate</span> Checks a meaningful UI condition, but the static evidence is indirect.</div>
+              <code>expect(page.getByRole('button', { name: 'Increase servings' })).toBeEnabled()</code>
+            </li>
+          </ul>
+        </section>
+      </section>
+
+      <section class="test-case" id="tc-5">
+        <h2>5. Persist servings across page reload</h2>
+        <dl class="case-meta">
+          <div><dt>Result</dt><dd><span class="status status-passed">passed</span> <span class="muted">(3.0s)</span></dd></div>
+          <div><dt>Assertion profile</dt><dd>1 strict, 1 unknown</dd></div>
+        </dl>
+        <section class="subsection test-body">
+          <h3>Test Body</h3>
+          <pre class="fallback-code"><code>{
+    await openRecipeCard(page, 'lemon-tart')
+    await setServings(page, 6)
+    await page.reload()
+
+    await expect(persistedServingsAfter(page)).resolves.toEqual(6)
+    await expect(page.getByTestId('servings-value')).toHaveText('6')
+  }</code></pre>
+        </section>
+        <section class="subsection">
+          <h3>Assertions</h3>
+          <ul class="assertions">
+            <li>
+              <div><span class="quality quality-unknown">unknown</span> Helper implementation could not be resolved statically, so strictness is unknown.</div>
+              <code>expect(persistedServingsAfter(page)).resolves.toEqual(6)</code>
+              <div class="helper-ref">via helper <code>persistedServingsAfter</code> — not declared in this feature's local helpers</div>
+            </li>
+            <li>
+              <div><span class="quality quality-strict">strict</span> Asserts an exact text value on a deterministic UI element.</div>
+              <code>expect(page.getByTestId('servings-value')).toHaveText('6')</code>
+            </li>
+          </ul>
+        </section>
+      </section>
+
+      <section class="test-case" id="tc-6">
+        <h2>6. Show step-by-step instructions section</h2>
+        <dl class="case-meta">
+          <div><dt>Result</dt><dd><span class="status status-passed">passed</span> <span class="muted">(0.9s)</span></dd></div>
+          <div><dt>Assertion profile</dt><dd>2 shallow, 1 moderate</dd></div>
+        </dl>
+        <section class="subsection test-body">
+          <h3>Test Body</h3>
+          <pre class="fallback-code"><code>{
+    await openRecipeCard(page, 'lemon-tart')
+
+    await expect(page.locator('[data-step]')).toHaveCount(7)
+    await expect(page.getByRole('list', { name: 'Instructions' })).toBeVisible()
+    await expect(page.locator('[data-step] img')).toHaveCount(7)
+  }</code></pre>
+        </section>
+        <section class="subsection">
+          <h3>Assertions</h3>
+          <ul class="assertions">
+            <li>
+              <div><span class="quality quality-shallow">shallow</span> Checks weak existence or quantity evidence without proving the business outcome.</div>
+              <code>expect(page.locator('[data-step]')).toHaveCount(7)</code>
+            </li>
+            <li>
+              <div><span class="quality quality-moderate">moderate</span> Checks a meaningful UI condition, but the static evidence is indirect.</div>
+              <code>expect(page.getByRole('list', { name: 'Instructions' })).toBeVisible()</code>
+            </li>
+            <li>
+              <div><span class="quality quality-shallow">shallow</span> Checks weak existence or quantity evidence without proving the business outcome.</div>
+              <code>expect(page.locator('[data-step] img')).toHaveCount(7)</code>
+            </li>
+          </ul>
+        </section>
+      </section>
+
+      <section class="test-case" id="tc-7">
+        <h2>7. Format fractional ingredient amounts</h2>
+        <dl class="case-meta">
+          <div><dt>Result</dt><dd><span class="status status-passed">passed</span> <span class="muted">(1.6s)</span></dd></div>
+          <div><dt>Assertion profile</dt><dd>2 strict</dd></div>
+        </dl>
+        <section class="subsection test-body">
+          <h3>Test Body</h3>
+          <pre class="fallback-code"><code>{
+    await openRecipeCard(page, 'pancakes')
+    await setServings(page, 3)
+
+    await expect(page.getByTestId('ingredient-milk')).toHaveText('¾ cup milk')
+    await expect(page.getByTestId('ingredient-sugar')).toHaveText('1½ tbsp sugar')
+  }</code></pre>
+        </section>
+        <section class="subsection">
+          <h3>Assertions</h3>
+          <ul class="assertions">
+            <li>
+              <div><span class="quality quality-strict">strict</span> Asserts an exact text value on a deterministic UI element.</div>
+              <code>expect(page.getByTestId('ingredient-milk')).toHaveText('¾ cup milk')</code>
+            </li>
+            <li>
+              <div><span class="quality quality-strict">strict</span> Asserts an exact text value on a deterministic UI element.</div>
+              <code>expect(page.getByTestId('ingredient-sugar')).toHaveText('1½ tbsp sugar')</code>
+            </li>
+          </ul>
+        </section>
+      </section>
+
+      <section class="test-case" id="tc-8">
+        <h2>8. Switch units between metric and imperial</h2>
+        <dl class="case-meta">
+          <div><dt>Result</dt><dd><span class="status status-passed">passed</span> <span class="muted">(1.4s)</span></dd></div>
+          <div><dt>Assertion profile</dt><dd>2 strict, 1 moderate</dd></div>
+        </dl>
+        <section class="subsection test-body">
+          <h3>Test Body</h3>
+          <pre class="fallback-code"><code>{
+    await openRecipeCard(page, 'lemon-tart')
+
+    await expect(page.getByTestId('ingredient-flour')).toHaveText('250 g flour')
+    await page.getByRole('switch', { name: 'Imperial units' }).click()
+    await expect(page.getByTestId('ingredient-flour')).toHaveText('2 cups flour')
+    await expect(page.getByRole('switch', { name: 'Imperial units' })).toBeChecked()
+  }</code></pre>
+        </section>
+        <section class="subsection">
+          <h3>Assertions</h3>
+          <ul class="assertions">
+            <li>
+              <div><span class="quality quality-strict">strict</span> Asserts an exact text value on a deterministic UI element.</div>
+              <code>expect(page.getByTestId('ingredient-flour')).toHaveText('250 g flour')</code>
+            </li>
+            <li>
+              <div><span class="quality quality-strict">strict</span> Asserts an exact text value on a deterministic UI element.</div>
+              <code>expect(page.getByTestId('ingredient-flour')).toHaveText('2 cups flour')</code>
+            </li>
+            <li>
+              <div><span class="quality quality-moderate">moderate</span> Checks a meaningful UI condition, but the static evidence is indirect.</div>
+              <code>expect(page.getByRole('switch', { name: 'Imperial units' })).toBeChecked()</code>
+            </li>
+          </ul>
+        </section>
+      </section>
+
+      <section class="implementations" id="local-codebase-implementations">
+        <h2 class="section-title" style="margin-top:0">Local Codebase Implementations</h2>
+        <p class="muted">Local helpers referenced by the tests above. Each helper appears once even when called from multiple cases.</p>
+
+        <section class="subsection">
+          <h3>openRecipeCard(page, slug)</h3>
+          <pre class="fallback-code"><code>export async function openRecipeCard(page: Page, slug: string) {
+  await page.goto(`/recipes/${slug}`)
+  await page.waitForSelector('[data-recipe-loaded="true"]')
+}</code></pre>
+        </section>
+
+        <section class="subsection">
+          <h3>setServings(page, value)</h3>
+          <pre class="fallback-code"><code>export async function setServings(page: Page, value: number) {
+  await page.getByTestId('servings-input').fill(String(value))
+  await page.getByTestId('servings-input').press('Enter')
+  await page.waitForFunction(
+    (v) => document.querySelector('[data-testid="servings-value"]')?.textContent === String(v),
+    value,
+  )
+}</code></pre>
+        </section>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

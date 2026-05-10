@@ -90,9 +90,6 @@ export function buildPackageJson(projectName: string, packageSpec: string): stri
       scripts: {
         postinstall: 'canary-lab upgrade --silent',
         upgrade: 'canary-lab upgrade',
-        'canary-lab:run': 'canary-lab run',
-        'canary-lab:env': 'canary-lab env',
-        'canary-lab:new-feature': 'canary-lab new-feature',
         'install:browsers': 'playwright install chromium',
       },
       devDependencies: {
@@ -148,7 +145,7 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
   step(1, `cd ${folder}`)
   step(2, 'npm install')
   step(3, 'npm run install:browsers')
-  step(4, 'npx canary-lab run')
+  step(4, 'npx canary-lab ui')
   line()
 }
 

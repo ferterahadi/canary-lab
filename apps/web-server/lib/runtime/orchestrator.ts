@@ -1,0 +1,1639 @@
+import fs from 'fs'
+import path from 'path'
+import { randomUUID } from 'crypto'
+import { EventEmitter } from 'events'
+import type { FeatureConfig, HealthProbe, HttpProbe, TcpProbe } from '../../../../shared/launcher/types'
+import {
+  enabledForEnv,
+  isHealthy,
+  isTcpListening,
+  normalizeStartCommand,
+  resolveHealthProbe,
+  resolvePath,
+} from './launcher/startup'
+import {
+  buildRunPaths,
+  type RunPaths,
+} from './run-paths'
+import {
+  type RepoBranchSnapshot,
+  type RunManifest,
+  type ServiceManifestEntry,
+  type StoppedEarlyReason,
+} from './manifest'
+import { FileRunStateSink, type RunStateSink } from './run-state-sink'
+import type { PtyFactory, PtyHandle } from './pty-spawner'
+import { HealCycleState, AUTO_HEAL_MAX_CYCLES } from './heal-cycle'
+import { appendJournalIteration } from './log-enrichment'
+import type { RunnerLog } from './runner-log'
+import {
+  resolveMcpOutputDir,
+  ensureMcpOutputDir,
+  capArtifacts,
+} from './playwright-mcp-artifacts'
+import { planRestart } from './restart-planner'
+import { interpolateConfigTokens, makeTokenCache } from './launcher/interpolate'
+import { readPlaywrightArtifactPolicy } from './playwright-artifact-policy'
+import { slugify } from './summary-reporter'
+import { listSpecFiles } from '../feature-loader'
+import { extractTestsFromSource } from '../ast-extractor'
+
+// Headless event-emitting orchestrator for a single feature run. Wraps the
+// existing health-check / signal-file semantics behind a clean API the future
+// Fastify server can drive without inheriting any readline / iTerm cruft.
+
+export interface ServiceSpec {
+  name: string
+  safeName: string
+  command: string
+  cwd: string
+  /** Resolved per-env readiness probe (single transport). */
+  healthProbe?: HealthProbe
+}
+
+export interface OrchestratorOptions {
+  feature: FeatureConfig
+  runId: string
+  runDir: string
+  // Repo root where the diagnosis journal lives (independent of the run dir).
+  projectRoot?: string
+  // Injected pty factory — production code passes the real one; tests pass a
+  // fake. Required so unit tests can run without a TTY or node-pty native.
+  ptyFactory: PtyFactory
+  // Health-check function — defaulted to the real HTTP poller, but injectable
+  // for tests.
+  healthCheck?: (url: string, timeoutMs?: number) => Promise<boolean>
+  // Default polling cadence; overridable for tests to keep them fast.
+  healthPollIntervalMs?: number
+  // Default deadline for an entire health-check phase (per service).
+  healthDeadlineMs?: number
+  // Override for `setTimeout`-based delays in tests.
+  delay?: (ms: number) => Promise<void>
+  // Builds the Playwright invocation. The orchestrator spawns it via
+  // ptyFactory so tests can inject a fake. Defaults to the standard
+  // `npx playwright test` command rooted at the feature dir.
+  playwrightSpawner?: PlaywrightSpawner
+  // Auto-heal configuration. Omit to disable the heal loop.
+  autoHeal?: AutoHealConfig
+  // Manual heal mode: when true and `autoHeal` is omitted, a failing run
+  // transitions to 'healing' and waits for the user to write the signal
+  // file by hand (no agent process spawned). When false (default), failing
+  // tests with no autoHeal short-circuit to 'failed' immediately.
+  manualHeal?: boolean
+  // Polling interval for the heal-cycle signal-wait loop. Defaults to
+  // healthPollIntervalMs.
+  healSignalPollMs?: number
+  // Cap on how long we wait for an agent to write a signal after exit.
+  healAgentTimeoutMs?: number
+  // Optional runner-log sink. When present, the orchestrator subscribes to its
+  // own lifecycle events on construction and tees a human-readable line for
+  // each into `runner.log`. Both CLI and web entrypoints provide one.
+  runnerLog?: RunnerLog
+  // Selected env (e.g. 'local', 'production'). Used to filter
+  // repos/startCommands whose `envs` whitelist excludes it — letting a feature
+  // skip booting local services when running tests against a remote URL.
+  env?: string
+  // Single mutator for manifest.json + runs-index.json. Defaults to a
+  // file-only sink that writes the same files directly; production wires
+  // the web-server's `RunStore` here so mutations also emit events that
+  // drive the WS push channel.
+  runStateSink?: RunStateSink
+  repoBranchSnapshots?: RepoBranchSnapshot[]
+  initialHealCycles?: number
+}
+
+export type PauseResult =
+  | { ok: true; failureCount: number }
+  | { ok: false; reason: 'already-healing' | 'no-playwright-running' | 'no-failures-yet' }
+
+export type CancelHealResult =
+  | { ok: true }
+  | { ok: false; reason: 'not-healing' | 'no-agent-running' }
+
+export type InterjectResult =
+  | { ok: true }
+  | { ok: false; reason: 'no-agent-running' }
+
+export type OrchestratorEventMap = {
+  'service-started': { service: ServiceSpec; pid: number }
+  'service-output': { service: ServiceSpec; chunk: string }
+  'service-exit': { service: ServiceSpec; exitCode: number; signal?: number }
+  'service-restart-skipped': { service: ServiceSpec; reason: 'no-files-changed-here' }
+  'restart-planned': { toRestart: string[]; toKeep: string[]; noMatch: boolean }
+  'health-check': { service: ServiceSpec; healthy: boolean; transport?: 'http' | 'tcp' }
+  'playwright-output': { chunk: string }
+  'playwright-started': { command: string }
+  'playwright-exit': { exitCode: number }
+  'agent-started': { cycle: number; command: string; redirect?: boolean }
+  'agent-output': { chunk: string }
+  'agent-exit': { exitCode: number }
+  'heal-cycle-started': { cycle: number; failureSignature: string }
+  'signal-detected': {
+    kind: 'restart' | 'rerun' | 'heal'
+    body: Record<string, unknown>
+  }
+  'run-status': { status: RunManifest['status'] }
+  'run-complete': { status: RunManifest['status'] }
+  'paused-by-user': { failureCount: number }
+}
+
+export type AutoHealAgent = 'claude' | 'codex'
+
+export interface AutoHealConfig {
+  agent: AutoHealAgent
+  // 1-based cap on heal cycles. Default = AUTO_HEAL_MAX_CYCLES.
+  maxCycles?: number
+  // Returns the spawn command for the long-lived REPL — just the binary +
+  // flags. Production wires `buildAgentSpawnCommand` from auto-heal.ts; tests
+  // pass a no-op script that stays alive (e.g. `cat`). The orchestrator
+  // generates `sessionId` (UUID), computes `mcpOutputDir`, and passes the
+  // path to the cycle-1 prompt file (`<runDir>/heal-prompt.md`); the
+  // production builder appends `"@<promptFile>"` as a positional arg so
+  // claude reads the file at startup and processes its content as the
+  // first user message — bypassing the REPL's input editor.
+  buildSpawnCommand?: (args: { sessionId?: string; mcpOutputDir?: string; promptFile?: string }) => string
+  // Returns the prompt text to write to the REPL's stdin for cycle N.
+  // Production wires `buildOrchestratorHealPrompt`; tests pass a stub that
+  // returns a deterministic string. The orchestrator pty.write()s the result
+  // followed by a newline.
+  buildCyclePrompt?: (args: { cycle: number; outputDir: string; userGuidance?: string }) => string
+}
+
+export interface PlaywrightInvocation {
+  command: string
+  cwd: string
+}
+
+export type PlaywrightSpawner = (args: {
+  feature: FeatureConfig
+  paths: RunPaths
+  rerunTargets?: readonly string[]
+}) => PlaywrightInvocation
+
+export function buildServiceSpecs(
+  feature: FeatureConfig,
+  runDir: string,
+  env?: string,
+): ServiceSpec[] {
+  const out: ServiceSpec[] = []
+  // ${slot.key} tokens in feature.config values resolve from the chosen env's
+  // envset slot files at boot time. The cache shares parsed slot files across
+  // every value in this build pass.
+  const tokenCtx = { envName: env, envsetsDir: path.join(feature.featureDir, 'envsets') }
+  const tokenCache = makeTokenCache()
+  const interp = <T,>(node: T): T => interpolateConfigTokens(node, tokenCtx, tokenCache)
+  for (const repo of feature.repos ?? []) {
+    if (!enabledForEnv(repo.envs, env)) continue
+    const dir = resolvePath(repo.localPath)
+    const commands = repo.startCommands ?? []
+    for (let i = 0; i < commands.length; i++) {
+      const normalized = normalizeStartCommand(commands[i], `${repo.name}-cmd-${i + 1}`)
+      if (!enabledForEnv(normalized.envs, env)) continue
+      const safeName = normalized.name!.replace(/[^a-z0-9]+/gi, '-').toLowerCase()
+      const probe = resolveHealthProbe(normalized.healthCheck, env)
+      out.push({
+        name: normalized.name!,
+        safeName,
+        command: interp(normalized.command),
+        cwd: dir,
+        healthProbe: probe ? interp(probe) : undefined,
+        // Service log path is implied by runDir; consumers can derive via buildRunPaths.
+      })
+    }
+  }
+  // Annotate with per-service log paths to keep downstream consumers simple.
+  return out.map((s) => ({
+    ...s,
+  }))
+}
+
+export class RunOrchestrator extends EventEmitter {
+  readonly runId: string
+  readonly runDir: string
+  readonly feature: FeatureConfig
+  readonly env?: string
+  readonly paths: RunPaths
+  readonly services: ServiceSpec[]
+
+  private readonly ptyFactory: PtyFactory
+  private readonly healthCheck: (url: string, timeoutMs?: number) => Promise<boolean>
+  private readonly healthPollIntervalMs: number
+  private readonly healthDeadlineMs: number
+  private readonly delay: (ms: number) => Promise<void>
+  private readonly logsRoot: string
+  private readonly playwrightSpawner: PlaywrightSpawner
+  private readonly autoHeal?: AutoHealConfig
+  private readonly manualHeal: boolean
+  private readonly healSignalPollMs: number
+  private readonly healAgentTimeoutMs: number
+  private readonly runnerLog?: RunnerLog
+  private readonly stateSink: RunStateSink
+  private readonly repoBranchSnapshots?: RepoBranchSnapshot[]
+  private lastDetectedSignal: { kind: 'restart' | 'rerun' | 'heal'; body: Record<string, unknown> } | null = null
+  private healCycleHistory: Array<{ cycle: number; restarted: string[]; kept: string[] }> = []
+
+  private status: RunManifest['status'] = 'running'
+  private healCycles = 0
+  private startedAt = ''
+  private servicePtys = new Map<string, PtyHandle>()
+  private logFiles = new Set<string>()
+  private signalWatcher: NodeJS.Timeout | null = null
+  private heartbeatTimer: NodeJS.Timeout | null = null
+  private stopped = false
+  // Mid-Run Heal: tracked while a Playwright pty is in flight so
+  // pauseAndHeal() can SIGTERM it. Cleared on exit.
+  private playwrightPty: PtyHandle | null = null
+  private playwrightExitWaiter: ((value: { exitCode: number; signal?: number }) => void) | null = null
+  // Tracked while a heal-agent pty is in flight so cancelHeal() can SIGTERM it.
+  // The REPL is spawned ONCE per heal session and persists across cycles —
+  // the orchestrator drives cycle handoffs by writing to its stdin instead
+  // of respawning. Cleared on cleanup.
+  private healAgentPty: PtyHandle | null = null
+  // MCP artifact dir for the live REPL. Pinned at spawn time from cycle-1's
+  // failed slugs and held until the heal loop exits, since claude's
+  // `--mcp-config` is set once at process boot. Read by the bidirectional
+  // pane handler when it needs to associate input with a heal session.
+  private healAgentMcpOutputDir: string | undefined
+  // Pinned at spawn time via `--session-id <uuid>` for claude (codex has no
+  // equivalent flag and leaves this null). Persisted to
+  // `paths.agentSessionIdPath` so external tools can correlate the run with
+  // the conversation log under `~/.claude/projects/`.
+  private healAgentSessionId: string | null = null
+  // Set by cancelHeal() so the heal loop in runFullCycle bails out instead of
+  // racing toward another Playwright rerun.
+  private healCancelled = false
+  private stoppedEarlyReason: StoppedEarlyReason | undefined
+
+  constructor(opts: OrchestratorOptions) {
+    super()
+    this.feature = opts.feature
+    this.env = opts.env
+    this.runId = opts.runId
+    this.runDir = opts.runDir
+    this.paths = buildRunPaths(opts.runDir)
+    this.services = buildServiceSpecs(opts.feature, opts.runDir, opts.env)
+    this.ptyFactory = opts.ptyFactory
+    this.healthCheck = opts.healthCheck ?? isHealthy
+    this.healthPollIntervalMs = opts.healthPollIntervalMs ?? 1000
+    this.healthDeadlineMs = opts.healthDeadlineMs ?? 60_000
+    this.delay = opts.delay ?? ((ms) => new Promise((r) => setTimeout(r, ms)))
+    this.logsRoot = path.dirname(path.dirname(opts.runDir))
+    this.playwrightSpawner = opts.playwrightSpawner ?? defaultPlaywrightSpawner
+    this.autoHeal = opts.autoHeal
+    this.manualHeal = opts.manualHeal ?? false
+    this.healSignalPollMs = opts.healSignalPollMs ?? this.healthPollIntervalMs
+    this.healAgentTimeoutMs = opts.healAgentTimeoutMs ?? 10 * 60 * 1000
+    this.runnerLog = opts.runnerLog
+    // Default to a file-only sink so unit tests + the CLI shim don't have
+    // to know about `RunStore`. Production wires RunStore in via opts.
+    this.stateSink = opts.runStateSink ?? new FileRunStateSink(this.logsRoot)
+    this.repoBranchSnapshots = opts.repoBranchSnapshots
+    this.healCycles = opts.initialHealCycles ?? 0
+    if (this.runnerLog) this.attachRunnerLog(this.runnerLog)
+  }
+
+  // Subscribe the runner-log to every lifecycle event it cares about. Done
+  // once at construction so neither caller (CLI shim, web-server) has to wire
+  // listeners themselves.
+  private attachRunnerLog(log: RunnerLog): void {
+    const events: (keyof OrchestratorEventMap)[] = [
+      'service-started',
+      'service-exit',
+      'health-check',
+      'playwright-started',
+      'playwright-exit',
+      'agent-started',
+      'agent-exit',
+      'heal-cycle-started',
+      'signal-detected',
+      'run-status',
+      'run-complete',
+    ]
+    for (const ev of events) {
+      this.on(ev, (payload) => log.recordEvent(ev, payload as never))
+    }
+  }
+
+  emit<K extends keyof OrchestratorEventMap>(
+    event: K,
+    payload: OrchestratorEventMap[K],
+  ): boolean {
+    return super.emit(event, payload)
+  }
+
+  on<K extends keyof OrchestratorEventMap>(
+    event: K,
+    listener: (payload: OrchestratorEventMap[K]) => void,
+  ): this {
+    return super.on(event, listener)
+  }
+
+  // Top-level entry point. Spawns services + waits for health + streams
+  // signals to the consumer. Does NOT block on Playwright by itself — the
+  // caller drives Playwright via runPlaywright(), which lets the future
+  // server show "services up" before tests start.
+  async start(): Promise<void> {
+    this.prepareRun('starting')
+    await this.ensureServicesRunning()
+  }
+
+  private prepareRun(serviceStatus: ServiceManifestEntry['status']): void {
+    this.startedAt = new Date().toISOString()
+    fs.mkdirSync(this.runDir, { recursive: true })
+    fs.mkdirSync(this.paths.signalsDir, { recursive: true })
+
+    this.writeInitialManifest(serviceStatus)
+    this.startSignalWatcher()
+    this.startHeartbeat()
+  }
+
+  private async ensureServicesRunning(): Promise<void> {
+    const toStart = this.services.filter((svc) => !this.servicePtys.has(svc.name))
+    for (const svc of toStart) {
+      this.stateSink.setServiceStatus(this.runId, svc.safeName, 'starting')
+      this.spawnService(svc)
+    }
+    if (this.services.length > 0) await this.waitForHealth()
+  }
+
+  private writeInitialManifest(serviceStatus: ServiceManifestEntry['status'] = 'starting'): void {
+    const services: ServiceManifestEntry[] = this.services.map((s) => ({
+      name: s.name,
+      safeName: s.safeName,
+      command: s.command,
+      cwd: s.cwd,
+      logPath: this.paths.serviceLog(s.safeName),
+      // Manifest carries the http URL only when the probe is http. tcp
+      // probes don't have a URL; left undefined so older manifest readers
+      // still work for the http case.
+      healthUrl: s.healthProbe && 'http' in s.healthProbe ? s.healthProbe.http.url : undefined,
+      status: serviceStatus,
+    }))
+    const manifest: RunManifest = {
+      runId: this.runId,
+      feature: this.feature.name,
+      featureDir: this.feature.featureDir,
+      env: this.env,
+      startedAt: this.startedAt,
+      status: this.status,
+      healCycles: this.healCycles,
+      services,
+      repoPaths: (this.feature.repos ?? [])
+        .map((r) => resolvePath(r.localPath))
+        .filter((p) => {
+          try { return fs.existsSync(p) } catch { return false }
+        }),
+      repoBranches: this.repoBranchSnapshots,
+      playwrightArtifacts: readPlaywrightArtifactPolicy(this.feature.featureDir),
+      signalPaths: {
+        rerun: this.paths.rerunSignal,
+        restart: this.paths.restartSignal,
+      },
+      healMode: this.autoHeal ? 'auto' : this.manualHeal ? 'manual' : undefined,
+      heartbeatAt: new Date().toISOString(),
+    }
+    this.stateSink.bootstrap(manifest)
+  }
+
+  private ensureLogFile(target: string): void {
+    if (this.logFiles.has(target)) return
+    fs.mkdirSync(path.dirname(target), { recursive: true })
+    if (!fs.existsSync(target)) fs.writeFileSync(target, '')
+    this.logFiles.add(target)
+  }
+
+  private spawnService(svc: ServiceSpec): void {
+    const logPath = this.paths.serviceLog(svc.safeName)
+    this.ensureLogFile(logPath)
+    const pty = this.ptyFactory({
+      command: `LOG_MODE=plain ${svc.command}`,
+      cwd: svc.cwd,
+      env: { LOG_MODE: 'plain' },
+    })
+    this.servicePtys.set(svc.name, pty)
+    this.emit('service-started', { service: svc, pid: pty.pid })
+
+    pty.onData((chunk) => {
+      try { fs.appendFileSync(logPath, chunk) } catch { /* ignore */ }
+      this.emit('service-output', { service: svc, chunk })
+    })
+    pty.onExit(({ exitCode, signal }) => {
+      this.emit('service-exit', { service: svc, exitCode, signal })
+    })
+  }
+
+  // Readiness probe — block until every spawned service is ready. Each
+  // service has *one* probe with one transport (`http` or `tcp`); we
+  // dispatch by transport. Services with no probe emit a loud warning and
+  // are skipped (Playwright still races the boot, but the user knows why).
+  private async waitForHealth(): Promise<void> {
+    if (this.services.length === 0) return
+    await Promise.all(this.services.map((svc) => this.waitForServiceReady(svc)))
+  }
+
+  private async waitForServiceReady(svc: ServiceSpec): Promise<void> {
+    const probe = svc.healthProbe
+    if (!probe) {
+      const envHint = this.env ? ` for env "${this.env}"` : ''
+      const msg = `Service "${svc.name}" has no readiness probe${envHint}; Playwright may race the boot. Add healthCheck.http or healthCheck.tcp.`
+      this.runnerLog?.warn(msg)
+      this.emit('agent-output', { chunk: `\n[warning] ${msg}\n` })
+      this.stateSink.setServiceStatus(this.runId, svc.safeName, 'ready')
+      this.emit('health-check', { service: svc, healthy: true })
+      return
+    }
+
+    if ('http' in probe) {
+      await this.pollUntilReady(svc, 'http', () => this.attemptHttp(probe.http))
+      return
+    }
+    if ('tcp' in probe) {
+      await this.pollUntilReady(svc, 'tcp', () => isTcpListening(
+        probe.tcp.port,
+        probe.tcp.host ?? '127.0.0.1',
+        probe.tcp.timeoutMs,
+      ))
+      return
+    }
+    // Exhaustiveness: TS proves this is unreachable; the validator already
+    // rejects malformed shapes at config-load time.
+    throw new Error(`Unknown probe shape for ${svc.name}: ${JSON.stringify(probe)}`)
+  }
+
+  /** One HTTP attempt — wraps the existing `isHealthy` so tests can stub it. */
+  private async attemptHttp(p: HttpProbe): Promise<boolean> {
+    return this.healthCheck(p.url, p.timeoutMs)
+  }
+
+  /**
+   * Poll a single async attempter until it returns true, or until the
+   * probe-specific deadline elapses. The transport label is folded into
+   * every emitted event and the timeout error so logs stay specific.
+   */
+  private async pollUntilReady(
+    svc: ServiceSpec,
+    transport: 'http' | 'tcp',
+    attempt: () => Promise<boolean>,
+  ): Promise<void> {
+    const probe = svc.healthProbe!
+    const deadlineMs = (transport === 'http'
+      ? (probe as { http: HttpProbe }).http.deadlineMs
+      : (probe as { tcp: TcpProbe }).tcp.deadlineMs) ?? this.healthDeadlineMs
+    const deadline = Date.now() + deadlineMs
+
+    while (Date.now() < deadline) {
+      if (this.stopped) return
+      const ready = await attempt()
+      if (this.stopped) return
+      if (ready) {
+        this.stateSink.setServiceStatus(this.runId, svc.safeName, 'ready')
+        this.emit('health-check', { service: svc, healthy: true, transport })
+        return
+      }
+      await this.delay(this.healthPollIntervalMs)
+    }
+    this.stateSink.setServiceStatus(this.runId, svc.safeName, 'timeout')
+    this.emit('health-check', { service: svc, healthy: false, transport })
+    const detail = transport === 'http'
+      ? `url=${(probe as { http: HttpProbe }).http.url}`
+      : `port=${(probe as { tcp: TcpProbe }).tcp.port}`
+    throw new Error(`Health check timed out for ${svc.name} (${transport}, ${detail})`)
+  }
+
+  // Polls the per-run signals dir. The future server (and externally-spawned
+  // heal agents) write here; the orchestrator translates them into events the
+  // consumer can react to (re-run Playwright, restart services, etc.).
+  private startSignalWatcher(): void {
+    if (this.signalWatcher) return
+    this.signalWatcher = setInterval(() => {
+      const tries: Array<{ kind: 'restart' | 'rerun' | 'heal'; file: string }> = [
+        { kind: 'restart', file: this.paths.restartSignal },
+        { kind: 'rerun', file: this.paths.rerunSignal },
+        { kind: 'heal', file: this.paths.healSignal },
+      ]
+      for (const t of tries) {
+        if (!fs.existsSync(t.file)) continue
+        let body: Record<string, unknown> = {}
+        try {
+          const raw = fs.readFileSync(t.file, 'utf-8').trim()
+          if (raw) body = JSON.parse(raw) as Record<string, unknown>
+        } catch { /* tolerate empty/non-JSON */ }
+        try { fs.unlinkSync(t.file) } catch { /* race with caller is fine */ }
+        this.lastDetectedSignal = { kind: t.kind, body }
+        this.emit('signal-detected', { kind: t.kind, body })
+      }
+    }, this.healthPollIntervalMs)
+  }
+
+  // Manually fire a restart. When `filesChanged` is supplied and non-empty,
+  // restart only the services whose `cwd` covers at least one changed file.
+  // Empty / undefined → legacy "restart all" semantics. If no service matches
+  // a non-empty `filesChanged` we emit `restart-planned` with `noMatch: true`
+  // and skip the restart entirely (rather than restarting everything) — the
+  // heal-agent's claim is wrong but losing warm services to that mistake is
+  // costlier than the rerun seeing the same failure.
+  async restart(filesChanged?: readonly string[]): Promise<{ restarted: string[]; kept: string[] }> {
+    const plan = planRestart(filesChanged ?? [], this.services)
+    this.emit('restart-planned', {
+      toRestart: plan.toRestart,
+      toKeep: plan.toKeep,
+      noMatch: plan.noMatch,
+    })
+
+    if (plan.noMatch) {
+      // Non-empty filesChanged but nothing matched: keep all services warm.
+      for (const svc of this.services) {
+        this.emit('service-restart-skipped', { service: svc, reason: 'no-files-changed-here' })
+      }
+      return { restarted: [], kept: plan.toKeep }
+    }
+
+    const filesProvided = (filesChanged ?? []).length > 0
+    const restartSet = new Set(plan.toRestart)
+    const targets: ServiceSpec[] = []
+    for (const svc of this.services) {
+      if (!filesProvided || restartSet.has(svc.safeName)) {
+        targets.push(svc)
+      } else {
+        this.emit('service-restart-skipped', { service: svc, reason: 'no-files-changed-here' })
+      }
+    }
+
+    for (const svc of targets) {
+      const pty = this.servicePtys.get(svc.name)
+      if (pty) {
+        try { pty.kill('SIGTERM') } catch { /* already dead */ }
+        this.servicePtys.delete(svc.name)
+      }
+      this.logFiles.delete(this.paths.serviceLog(svc.safeName))
+      const p = this.paths.serviceLog(svc.safeName)
+      try { fs.writeFileSync(p, '') } catch { /* may not exist yet */ }
+    }
+    for (const svc of targets) {
+      this.stateSink.setServiceStatus(this.runId, svc.safeName, 'starting')
+      this.spawnService(svc)
+    }
+    if (targets.length > 0) await this.waitForHealth()
+    return { restarted: plan.toRestart, kept: plan.toKeep }
+  }
+
+  // Re-run is a no-op at the orchestrator level beyond truncating logs — the
+  // consumer reruns Playwright on top.
+  async rerun(): Promise<void> {
+    for (const svc of this.services) {
+      const p = this.paths.serviceLog(svc.safeName)
+      try { fs.writeFileSync(p, '') } catch { /* may not exist yet */ }
+    }
+  }
+
+  // ─── Playwright + heal loop ────────────────────────────────────────────────
+  //
+  // Spawns Playwright through the same ptyFactory used for services so tests
+  // inject a fake. Returns the exit code after the pty exits.
+  async runPlaywright(rerunTargets?: readonly string[]): Promise<number> {
+    const inv = this.playwrightSpawner({ feature: this.feature, paths: this.paths, rerunTargets })
+    this.emit('playwright-started', { command: inv.command })
+    const pty = this.ptyFactory({
+      command: inv.command,
+      cwd: inv.cwd,
+      env: {
+        CANARY_LAB_PROJECT_ROOT: this.feature.featureDir,
+        CANARY_LAB_MANIFEST_PATH: this.paths.manifestPath,
+        CANARY_LAB_SUMMARY_PATH: this.paths.summaryPath,
+        ...(rerunTargets && rerunTargets.length > 0 ? { CANARY_LAB_TARGETED_RERUN: '1' } : {}),
+      },
+    })
+    this.playwrightPty = pty
+    fs.mkdirSync(path.dirname(this.paths.playwrightStdoutPath), { recursive: true })
+    fs.writeFileSync(this.paths.playwrightStdoutPath, '')
+    pty.onData((chunk) => {
+      try { fs.appendFileSync(this.paths.playwrightStdoutPath, chunk) } catch { /* ignore */ }
+      this.emit('playwright-output', { chunk })
+    })
+    return new Promise<number>((resolve) => {
+      pty.onExit(({ exitCode, signal }) => {
+        this.playwrightPty = null
+        this.emit('playwright-exit', { exitCode })
+        const waiter = this.playwrightExitWaiter
+        this.playwrightExitWaiter = null
+        if (waiter) waiter({ exitCode, signal })
+        resolve(exitCode)
+      })
+    })
+  }
+
+  private rerunTargetsForSummary(summary: SummaryShape): string[] | undefined {
+    const computed = computeNonPassedTargets(this.feature.featureDir, summary)
+    if (computed.kind === 'targeted') {
+      this.runnerLog?.info(`Targeted re-run: ${computed.locations.length} failed/pending of ${computed.total} total tests`)
+      return computed.locations
+    }
+    if (computed.kind === 'no-passed-yet') return undefined
+    if (computed.kind === 'all-passed') return undefined
+    if (computed.kind === 'extraction-failed') {
+      // Fall back to legacy failed-only targeting if we couldn't enumerate the
+      // suite (no spec files found, or AST parse blew up everywhere).
+      const failedSlugs = extractFailedSlugs(summary)
+      if (failedSlugs.length === 0) return undefined
+      const locations = extractFailedLocations(summary)
+      if (locations.length > 0) return locations
+      const msg = 'Post-heal rerun has failed tests without usable file:line locations; running the full Playwright suite.'
+      this.runnerLog?.warn(msg)
+      this.emit('playwright-output', { chunk: `\n[warning] ${msg}\n` })
+      return undefined
+    }
+    return undefined
+  }
+
+  // Wait for the in-flight Playwright pty to exit. Resolves immediately when
+  // there is no Playwright running. Used by pauseAndHeal() after issuing
+  // SIGTERM so we can fall back to SIGKILL on timeout.
+  private waitForPlaywrightExit(timeoutMs: number): Promise<{ exitCode: number; signal?: number } | null> {
+    if (!this.playwrightPty) return Promise.resolve(null)
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        if (this.playwrightExitWaiter) this.playwrightExitWaiter = null
+        resolve(null)
+      }, timeoutMs)
+      this.playwrightExitWaiter = (info) => {
+        clearTimeout(timer)
+        resolve(info)
+      }
+    })
+  }
+
+  // Persist a `stoppedEarly` reason on the manifest. Surfaced to the heal-index
+  // so the agent knows it's looking at a partial suite.
+  markStoppedEarly(reason: StoppedEarlyReason, failuresAtStop: number, suiteTotal: number): void {
+    this.stoppedEarlyReason = reason
+    this.stateSink.patchManifest(this.runId, {
+      stoppedEarly: { reason, failuresAtStop, suiteTotal },
+    })
+  }
+
+  // Manual interruption: check the failure summary FIRST, and only kill the
+  // in-flight Playwright pty when we're actually committing to a heal cycle.
+  // This avoids the previous footgun where pressing Pause before any test had
+  // failed would still SIGTERM Playwright, let it exit cleanly with code 0,
+  // and then `runFullCycle` would mark the whole run "passed".
+  //
+  // Returns a discriminated result the route handler maps to 202 (committed)
+  // or 409 (no-op — try again later). On success, the kill is graceful first
+  // (SIGTERM, 5 s wait) then forced (SIGKILL).
+  async pauseAndHeal(): Promise<PauseResult> {
+    if (this.status === 'healing') {
+      return { ok: false, reason: 'already-healing' }
+    }
+    if (!this.playwrightPty) {
+      return { ok: false, reason: 'no-playwright-running' }
+    }
+
+    // Check failures BEFORE killing — no failures yet → no-op, Playwright
+    // keeps running and the user can retry later when something has failed.
+    const { failed, total } = summarizeFailures(this.paths.summaryPath)
+    if (failed.length === 0) {
+      return { ok: false, reason: 'no-failures-yet' }
+    }
+
+    // Commit: stamp the reason BEFORE killing so `runFullCycle` can treat
+    // the impending Playwright exit as a heal trigger regardless of whether
+    // Playwright exits cleanly (code 0) or via signal.
+    this.markStoppedEarly('user-pause', failed.length, total)
+    this.emit('paused-by-user', { failureCount: failed.length })
+
+    const pty = this.playwrightPty
+    try { pty.kill('SIGTERM') } catch { /* already dead */ }
+    const exited = await this.waitForPlaywrightExit(5000)
+    if (!exited && this.playwrightPty) {
+      try { this.playwrightPty.kill('SIGKILL') } catch { /* already dead */ }
+      await this.waitForPlaywrightExit(1000)
+    }
+
+    return { ok: true, failureCount: failed.length }
+  }
+
+  /**
+   * Manually abort an in-flight heal session. Sets a cancellation flag so
+   * `runAutoHealLoop` bails out (instead of spawning another Playwright
+   * rerun or feeding another prompt to the REPL), appends a journal entry,
+   * and SIGTERMs whichever pty is currently active (heal agent OR the
+   * post-heal Playwright rerun).
+   *
+   * Accepted in two states:
+   *   - `status === 'healing'`: the heal agent is processing.
+   *   - `status === 'running' && healCycles > 0`: a post-heal Playwright
+   *     rerun is in flight between cycles. Without this branch the user's
+   *     click is silently 409'd until the cycle wraps back to 'healing'.
+   *
+   * Cancel succeeds even when no pty is attached — claude's REPL can exit
+   * on its own (user typed `/exit`, crash) and leave the orchestrator
+   * polling for a signal file that will never come. In that case the
+   * cancel flag is what unwedges the loop.
+   *
+   * Returns `409 not-healing` only when the run isn't inside the heal loop
+   * at all (initial Playwright phase, terminal status). Use Abort there.
+   */
+  async cancelHeal(): Promise<CancelHealResult> {
+    const inHealLoop = this.status === 'healing'
+      || (this.status === 'running' && this.healCycles > 0)
+    if (!inHealLoop) return { ok: false, reason: 'not-healing' }
+
+    this.healCancelled = true
+    this.markStoppedEarly('user-cancel-heal', 0, 0)
+
+    // Best-effort journal note BEFORE we tear down the pty so the entry
+    // lands even if the user-cancel races a fast agent exit.
+    try {
+      appendJournalIteration({
+        // Logged as a `.rerun`-shaped entry for journal-parser compatibility,
+        // even though no rerun actually happens. Hypothesis text makes the
+        // intent explicit for downstream readers (heal-index, future agent
+        // contexts).
+        signal: '.rerun',
+        hypothesis: 'User cancelled the heal cycle mid-run. No fix applied.',
+        fixDescription: 'Cancelled by user — no changes were made.',
+        runId: this.runId,
+        manifestPath: this.paths.manifestPath,
+        summaryPath: this.paths.summaryPath,
+        journalPath: this.paths.diagnosisJournalPath,
+      })
+    } catch { /* journal append is best-effort */ }
+
+    // Kill whichever pty is currently in flight. The loop is awaiting either
+    // `waitForHealSignal` (REPL alive, healCancelled check unwedges) or
+    // `runPlaywright` (kills the pw pty so the await resolves, then the
+    // post-Playwright healCancelled check breaks the loop).
+    if (this.healAgentPty) {
+      killTree(this.healAgentPty, 'SIGTERM')
+      scheduleSigkillFallback(this.healAgentPty)
+    }
+    if (this.playwrightPty) {
+      killTree(this.playwrightPty, 'SIGTERM')
+      scheduleSigkillFallback(this.playwrightPty)
+    }
+    return { ok: true }
+  }
+
+  /**
+   * Raw write to the heal-agent pty's stdin. Used by the bidirectional pane
+   * (every keystroke from xterm.js becomes a chunk) so users can type
+   * directly into the live claude/codex REPL — slash commands, Esc to
+   * interrupt, etc. — without going through the higher-level interject path.
+   *
+   * No-op when no agent pty is in flight (between cycles, manual mode, or
+   * after cancel).
+   */
+  writeToHealAgent(chunk: string): void {
+    if (!chunk) return
+    const pty = this.healAgentPty
+    if (!pty) return
+    try { pty.write(chunk) } catch { /* pty closed mid-frame */ }
+  }
+
+  /**
+   * Push the user's xterm dimensions into the heal-agent pty so claude's
+   * TUI redraws at the correct width. Without this, the pty stays at its
+   * spawn-time defaults (120×30) and claude wraps box-drawing / status
+   * bars to whatever it thinks the terminal is, not what the pane is.
+   *
+   * No-op when no agent pty is in flight, or when cols/rows are nonsense.
+   */
+  resizeHealAgent(cols: number, rows: number): void {
+    const pty = this.healAgentPty
+    if (!pty) return
+    if (!Number.isFinite(cols) || !Number.isFinite(rows)) return
+    if (cols < 1 || rows < 1) return
+    // Cap at sane upper bounds — node-pty accepts huge values but claude's
+    // renderer can chew CPU on absurd sizes (e.g., 100k cols).
+    const c = Math.min(Math.floor(cols), 1000)
+    const r = Math.min(Math.floor(rows), 1000)
+    try { pty.resize(c, r) } catch { /* pty closed mid-frame */ }
+  }
+
+  /**
+   * Interrupt & Redirect — drop the user's correction into the live REPL's
+   * stdin. The agent absorbs it like any other typed message: Esc interrupts
+   * any in-flight generation, then the text is sent followed by Enter. The
+   * run stays in `healing` throughout; verification does not begin until the
+   * agent writes a `.rerun` / `.restart` / `.heal` signal.
+   *
+   * No respawn, no session-id race — the REPL is alive across cycles, and
+   * everything we'd previously rebuild from `--resume <sid>` is just the
+   * existing conversation.
+   *
+   *   - `no-agent-running`: REPL hasn't spawned (cycle 0) or has exited
+   *     (cancel, crash, manual mode).
+   */
+  async interjectHealAgent(text: string): Promise<InterjectResult> {
+    const pty = this.healAgentPty
+    if (!pty) return { ok: false, reason: 'no-agent-running' }
+
+    this.echoUserInterject(text)
+
+    // Best-effort journal note so the interject is part of run history.
+    try {
+      const truncated = text.length > 200 ? text.slice(0, 200) + '…' : text
+      appendJournalIteration({
+        signal: '.rerun',
+        hypothesis: `User interjected mid-heal: ${truncated}`,
+        fixDescription: `Sent text to live REPL stdin.`,
+        runId: this.runId,
+        manifestPath: this.paths.manifestPath,
+        summaryPath: this.paths.summaryPath,
+        journalPath: this.paths.diagnosisJournalPath,
+      })
+    } catch { /* journal append is best-effort */ }
+
+    // Esc first to interrupt any in-flight generation, then the text as a
+    // bracketed paste followed by Enter. Bracketed paste keeps the REPL's
+    // input editor from re-rendering the text word-by-word — same reason
+    // `runHealAgent` uses it for cycle prompts. Esc is harmless when idle;
+    // claude/codex treat it as "cancel current generation".
+    try {
+      pty.write('')
+      pty.write(BRACKETED_PASTE_BEGIN + text + BRACKETED_PASTE_END + '\r')
+    } catch {
+      return { ok: false, reason: 'no-agent-running' }
+    }
+    this.emit('agent-started', { cycle: this.healCycles, command: '<repl-redirect>', redirect: true })
+    return { ok: true }
+  }
+
+  // Pipe raw REPL output (ANSI from xterm.js's perspective) into the
+  // transcript file and the `agent-output` event. No JSON parsing — claude's
+  // session id is pinned at spawn via `--session-id <uuid>`, and codex has
+  // no equivalent so we just don't track one for codex.
+  private attachAgentDataHandlers(pty: PtyHandle): void {
+    const transcriptPath = this.paths.agentTranscriptPath
+    pty.onData((chunk) => {
+      try { fs.appendFileSync(transcriptPath, chunk) } catch { /* ignore */ }
+      this.emit('agent-output', { chunk })
+    })
+  }
+
+  private echoUserInterject(text: string): void {
+    const block = formatUserInterjectBlock(text, this.startedAt)
+    try {
+      fs.mkdirSync(path.dirname(this.paths.agentTranscriptPath), { recursive: true })
+      fs.appendFileSync(this.paths.agentTranscriptPath, block)
+    } catch {
+      // Transcript echo is best-effort; the live pane still gets the message.
+    }
+    this.emit('agent-output', { chunk: block })
+  }
+
+  private emitAgentSystemMessage(message: string): void {
+    const block = `\n[orchestrator] ${message}\n`
+    try {
+      fs.mkdirSync(path.dirname(this.paths.agentTranscriptPath), { recursive: true })
+      fs.appendFileSync(this.paths.agentTranscriptPath, block)
+    } catch { /* transcript message is best-effort */ }
+    this.emit('agent-output', { chunk: block })
+  }
+
+  private agentPtyEnv(): Record<string, string> {
+    return {
+      CANARY_LAB_PROJECT_ROOT: this.feature.featureDir,
+      // Kept as a hint for tools or shell rc files that want to surface the
+      // session id — the orchestrator writes the UUID to this path itself
+      // (no formatter sidecar in REPL mode).
+      CANARY_LAB_AGENT_SESSION_ID_FILE: this.paths.agentSessionIdPath,
+    }
+  }
+
+  // Block until a signal lands or we time out. Returns `null` on timeout, on
+  // user-cancel-heal, on full abort, or when the heal-agent pty has died
+  // (REPL exited cleanly via `/exit`, crashed, or got SIGKILLed) — without
+  // the pty check the loop would otherwise sit on a dead pipe waiting for
+  // a signal file that the now-gone agent will never write, until the full
+  // `healAgentTimeoutMs` elapses (10 min default). The signal watcher
+  // populates `lastDetectedSignal`; we just poll that.
+  async waitForHealSignal(timeoutMs: number = this.healAgentTimeoutMs): Promise<
+    { kind: 'restart' | 'rerun' | 'heal'; body: Record<string, unknown> } | null
+  > {
+    const deadline = Date.now() + timeoutMs
+    // Always yield to the macrotask queue here — this loop runs concurrently
+    // with the signal-watcher setInterval, and a microtask-only delay would
+    // starve the timer queue.
+    const yieldOnce = (ms: number) =>
+      new Promise<void>((resolve) => setTimeout(resolve, ms))
+    const deadlineCap = deadline
+    // When the pty dies before we've seen a signal, give the signal-watcher
+    // a short grace window to surface any `.heal`/`.rerun`/`.restart` file
+    // the agent wrote just before exiting. Without this, the wait races the
+    // watcher's polling and bails immediately, losing signals from agents
+    // that write-then-exit. 1s is plenty — the watcher polls at
+    // `healSignalPollMs` (≤1s in production).
+    let postExitDeadline: number | null = null
+    while (Date.now() < deadlineCap) {
+      if (this.stopped) return null
+      if (this.healCancelled) return null
+      if (this.lastDetectedSignal) {
+        const sig = this.lastDetectedSignal
+        this.lastDetectedSignal = null
+        return sig
+      }
+      if (!this.healAgentPty) {
+        if (postExitDeadline === null) {
+          postExitDeadline = Date.now() + 1000
+        } else if (Date.now() >= postExitDeadline) {
+          return null
+        }
+      }
+      await yieldOnce(Math.max(1, this.healSignalPollMs))
+    }
+    return null
+  }
+
+  /**
+   * Run one heal cycle inside the persistent REPL.
+   *
+   * - On the first call (or after a cancel/crash), spawns the long-lived
+   *   `claude` / `codex` REPL with `--session-id <uuid>` (claude) and the
+   *   playwright MCP wired up.
+   * - Renders the cycle prompt and writes it to the REPL's stdin —
+   *   subsequent cycles all flow through the same conversation, so the
+   *   agent retains context from prior cycles.
+   * - Awaits a `.heal` / `.rerun` / `.restart` signal file (or cancel /
+   *   timeout / full abort). Returns the signal the caller will interpret.
+   *
+   * `exitCode` in the return is 0 when the REPL is still alive when we
+   * resolve, 1 when it died during the cycle (crash or kill). The auto-heal
+   * loop uses it only to surface unexpected exits in the transcript.
+   */
+  async runHealAgent(args: {
+    cycle: number
+    failedSlugs: readonly string[]
+    userGuidance?: string
+  }): Promise<{ exitCode: number; signal: { kind: 'restart' | 'rerun' | 'heal'; body: Record<string, unknown> } | null }> {
+    const cfg = this.autoHeal
+    if (!cfg) throw new Error('autoHeal not configured')
+
+    // Write the cycle prompt to `<runDir>/heal-prompt.md` BEFORE we spawn
+    // (or before we ask the live REPL to re-read). The wired
+    // `buildOrchestratorHealPrompt` writes the file as a side effect and
+    // returns the rendered text; we keep the text only for transcript
+    // echo bookkeeping — claude reads the file directly via `@<path>`.
+    void (cfg.buildCyclePrompt ?? defaultHealPrompt)({
+      cycle: args.cycle,
+      outputDir: this.healAgentMcpOutputDir ?? this.runDir,
+      userGuidance: args.userGuidance,
+    })
+
+    const isFirstSpawn = !this.healAgentPty
+    if (isFirstSpawn) {
+      this.spawnHealAgentRepl(args.failedSlugs)
+    }
+    const pty = this.healAgentPty
+    if (!pty) {
+      // spawn failed; spawnHealAgentRepl already surfaced the error.
+      return { exitCode: 1, signal: null }
+    }
+
+    if (args.userGuidance) this.echoUserInterject(args.userGuidance)
+
+    this.emit('agent-started', { cycle: args.cycle, command: `<repl ${cfg.agent} cycle=${args.cycle}>` })
+
+    // Cycle 1 has the prompt already wired into the spawn command's argv
+    // (`claude … "@<promptFile>"`), so claude reads it at startup with no
+    // stdin write. Cycle 2+ needs to re-prompt the alive REPL: write the
+    // updated prompt body to the same file (already done above) and tell
+    // claude to re-read it via the `@<path>` reference. Single-line input
+    // submits cleanly on `\r`; no input-editor multi-line ambiguity.
+    if (!isFirstSpawn) {
+      try {
+        pty.write(`@${this.healPromptFile}\r`)
+      } catch {
+        return { exitCode: 1, signal: null }
+      }
+    }
+
+    const sig = await this.waitForHealSignal(this.healAgentTimeoutMs)
+    const exitCode = this.healAgentPty ? 0 : 1
+    return { exitCode, signal: sig }
+  }
+
+  /** Absolute path to the heal-prompt file written by `buildCyclePrompt`.
+   *  Stable across cycles — each cycle overwrites it with that cycle's
+   *  prompt body, then references it via claude's `@<path>` syntax. */
+  private get healPromptFile(): string {
+    return path.join(this.runDir, 'heal-prompt.md')
+  }
+
+  /**
+   * Spawn the long-lived heal-agent REPL. Idempotent-ish — if a pty is
+   * already attached, no-ops. The MCP output dir is pinned at this call
+   * (from cycle-1's failed slugs) since claude reads `--mcp-config` once at
+   * boot and we don't recompose it across cycles.
+   */
+  private spawnHealAgentRepl(failedSlugs: readonly string[]): void {
+    if (this.healAgentPty) return
+    const cfg = this.autoHeal
+    if (!cfg) throw new Error('autoHeal not configured')
+
+    const target = resolveMcpOutputDir({
+      runDir: this.runDir,
+      failedSlugs,
+    })
+    ensureMcpOutputDir(target.dir)
+    this.healAgentMcpOutputDir = target.dir
+
+    // claude pins via `--session-id <uuid>` so we know the conversation id
+    // without parsing init frames. codex has no equivalent; leave null.
+    const sessionId = cfg.agent === 'claude' ? randomUUID() : undefined
+    this.healAgentSessionId = sessionId ?? null
+    try {
+      fs.mkdirSync(path.dirname(this.paths.agentSessionIdPath), { recursive: true })
+      if (sessionId) fs.writeFileSync(this.paths.agentSessionIdPath, sessionId)
+      else fs.rmSync(this.paths.agentSessionIdPath, { force: true })
+    } catch { /* sidecar write is informational */ }
+
+    let command: string
+    try {
+      command = (cfg.buildSpawnCommand ?? defaultSpawnCommand)({
+        sessionId,
+        mcpOutputDir: target.dir,
+        // The cycle-1 prompt was already written to this file by the
+        // caller (`runHealAgent`); the wired spawn-command builder
+        // appends `"@<promptFile>"` so claude reads it on startup.
+        promptFile: this.healPromptFile,
+      })
+    } catch (err) {
+      this.emitAgentSystemMessage(`Failed to build heal-agent spawn command: ${(err as Error).message}`)
+      throw err
+    }
+
+    const transcriptPath = this.paths.agentTranscriptPath
+    fs.mkdirSync(path.dirname(transcriptPath), { recursive: true })
+    if (!fs.existsSync(transcriptPath)) fs.writeFileSync(transcriptPath, '')
+
+    let pty: PtyHandle
+    try {
+      pty = this.ptyFactory({
+        command,
+        cwd: this.runDir,
+        env: this.agentPtyEnv(),
+      })
+    } catch (err) {
+      this.emitAgentSystemMessage(`Failed to spawn heal agent: ${(err as Error).message}`)
+      throw err
+    }
+    this.healAgentPty = pty
+    this.attachAgentDataHandlers(pty)
+
+    // When the REPL exits — either intentionally (cleanup writes /exit then
+    // SIGTERM) or unexpectedly (crash) — drop the pty handle so the next
+    // cycle's runHealAgent sees no PTY and can decide to bail. Skip if
+    // cleanupHealAgentPty already cleared the field — it'll emit agent-exit
+    // itself in that path.
+    pty.onExit(({ exitCode }) => {
+      if (this.healAgentPty !== pty) return
+      this.healAgentPty = null
+      this.emit('agent-exit', { exitCode })
+    })
+
+    // Note: `agent-started` is emitted by runHealAgent per-cycle (with the
+    // cycle number). The spawn itself is recorded via the manifest +
+    // transcript; we don't fire a second agent-started here so consumers see
+    // one event per cycle, matching the headless flow.
+    void command
+  }
+
+  /**
+   * Tear down the persistent REPL. Sends Esc + `/exit\r` first to give the
+   * agent a chance to flush, then SIGTERMs the pty (with SIGKILL fallback).
+   * Idempotent — no-op when no pty is attached.
+   */
+  private cleanupHealAgentPty(): void {
+    const pty = this.healAgentPty
+    if (!pty) return
+    // Clear the field first so the onExit handler in spawnHealAgentRepl
+    // sees `this.healAgentPty !== pty` and skips re-emitting agent-exit.
+    this.healAgentPty = null
+    try {
+      pty.write('')
+      pty.write('/exit\r')
+    } catch { /* already gone */ }
+    killTree(pty, 'SIGTERM')
+    scheduleSigkillFallback(pty)
+    this.emit('agent-exit', { exitCode: 0 })
+    if (this.healAgentMcpOutputDir) {
+      try { capArtifacts(this.healAgentMcpOutputDir) } catch { /* best-effort */ }
+    }
+    this.healAgentMcpOutputDir = undefined
+    this.healAgentSessionId = null
+  }
+
+  // Top-level "do the whole thing" entry. Boots services, runs Playwright,
+  // and—if autoHeal is enabled—loops through heal cycles until one of:
+  // tests pass, the cap is hit, the agent gives up without signaling, or the
+  // failure set stops changing. Updates manifest status throughout.
+  async runFullCycle(): Promise<RunManifest['status']> {
+    await this.start()
+    if (this.stopped) return this.status
+    let exitCode = await this.runPlaywright()
+    // If the user clicked Abort while Playwright was running, bail out
+    // immediately — don't compute a finalStatus from the killed pty's
+    // exit code, and don't fall through into the heal loop where a fresh
+    // heal agent would otherwise be spawned. `stop()` has already written
+    // 'aborted' to the manifest; honor it.
+    if (this.stopped) return this.status
+    let finalStatus: RunManifest['status'] = exitCode === 0 ? 'passed' : 'failed'
+    // If the user clicked Pause & Heal, Playwright was killed on purpose —
+    // a graceful exitCode 0 must NOT mark the run "passed". The
+    // `markStoppedEarly('user-pause')` call inside `pauseAndHeal` is what
+    // we key off here. We override to 'failed' so the heal-loop entry
+    // condition below is satisfied.
+    if (this.stoppedEarlyReason === 'user-pause') {
+      finalStatus = 'failed'
+    }
+    this.setStatus(finalStatus)
+
+    if (finalStatus === 'passed') return finalStatus
+
+    // Manual heal mode: no agent CLI configured but the user explicitly
+    // asked for manual mode. Transition to 'healing' and wait for the user
+    // to fix the code by hand and write the signal file. Loops until tests
+    // pass, the user cancels, or the signal-poll timeout (24h) is hit.
+    // Signal watcher (already running) populates `lastDetectedSignal` for
+    // `waitForHealSignal` to consume.
+    if (!this.autoHeal && this.manualHeal) {
+      const MANUAL_TIMEOUT_MS = 24 * 60 * 60 * 1000
+      while (true) {
+        this.setStatus('healing')
+        this.noteHealCycle()
+        this.emit('agent-started', { cycle: this.healCycles, command: '<manual>' })
+        const signal = await this.waitForHealSignal(MANUAL_TIMEOUT_MS)
+        this.emit('agent-exit', { exitCode: 0 })
+        if (this.healCancelled || this.stopped) {
+          finalStatus = 'failed'
+          this.setStatus(finalStatus)
+          break
+        }
+        if (!signal) {
+          finalStatus = 'failed'
+          this.setStatus(finalStatus)
+          break
+        }
+        try {
+          if (signal.kind === 'restart' || signal.kind === 'rerun') {
+            appendJournalIteration({
+              signal: signal.kind === 'restart' ? '.restart' : '.rerun',
+              hypothesis: typeof signal.body.hypothesis === 'string' ? signal.body.hypothesis : undefined,
+              filesChanged: Array.isArray(signal.body.filesChanged)
+                ? (signal.body.filesChanged.filter((f): f is string => typeof f === 'string'))
+                : undefined,
+              fixDescription: typeof signal.body.fixDescription === 'string' ? signal.body.fixDescription : undefined,
+              runId: this.runId,
+              manifestPath: this.paths.manifestPath,
+              summaryPath: this.paths.summaryPath,
+              journalPath: this.paths.diagnosisJournalPath,
+            })
+          }
+        } catch { /* journal is best-effort */ }
+        const rerunTargets = this.rerunTargetsForSummary(readSummary(this.paths.summaryPath))
+        this.setStatus('running')
+        if (signal.kind === 'restart') {
+          const filesChanged = Array.isArray(signal.body.filesChanged)
+            ? signal.body.filesChanged.filter((f): f is string => typeof f === 'string')
+            : []
+          await this.restart(filesChanged)
+        } else {
+          await this.rerun()
+        }
+        if (this.stopped) return this.status
+        exitCode = await this.runPlaywright(rerunTargets)
+        // Manual-heal mirror of the auto-heal abort guard: the top of the
+        // loop already checks `stopped`, but the killed Playwright pty's
+        // exit code arrives after the abort flips the flag — don't
+        // compute a finalStatus from it.
+        if (this.stopped) return this.status
+        finalStatus = exitCode === 0 ? 'passed' : 'failed'
+        this.setStatus(finalStatus)
+        if (exitCode === 0) break
+      }
+      return finalStatus
+    }
+
+    if (!this.autoHeal) return finalStatus
+
+    // Same abort guard as above: if the user aborted between Playwright
+    // exiting and the heal-loop entry, never spawn a heal agent. Without
+    // this, auto-heal would race past stop() and start a fresh heal pty
+    // the user has no way to interrupt (the row is already 'aborted').
+    if (this.stopped) return this.status
+
+    return await this.runAutoHealLoop()
+  }
+
+  async restartHealFromFailure(userGuidance: string): Promise<RunManifest['status']> {
+    if (!this.autoHeal) return 'failed'
+    this.prepareRun('stopped')
+    if (this.stopped) return this.status
+    // Truncate the previous heal session's transcript so the new REPL
+    // starts on a clean file. The pane broker clears its in-memory buffer
+    // separately (see `restartHeal` in server.ts) — this handles the
+    // on-disk side that survives reconnects and historical reads.
+    try {
+      fs.mkdirSync(path.dirname(this.paths.agentTranscriptPath), { recursive: true })
+      fs.writeFileSync(this.paths.agentTranscriptPath, '')
+    } catch { /* truncate is best-effort */ }
+    return await this.runAutoHealLoop(userGuidance)
+  }
+
+  private async runAutoHealLoop(initialUserGuidance?: string): Promise<RunManifest['status']> {
+    if (!this.autoHeal) return 'failed'
+    let finalStatus: RunManifest['status'] = 'failed'
+    const heal = new HealCycleState({
+      maxCycles: this.autoHeal.maxCycles ?? AUTO_HEAL_MAX_CYCLES,
+    })
+
+    const threshold = this.feature.healOnFailureThreshold
+    if (typeof threshold === 'number' && threshold > 0 && !this.stoppedEarlyReason) {
+      const { failed: failed0, total: total0 } = summarizeFailures(this.paths.summaryPath)
+      if (failed0.length >= threshold) {
+        this.markStoppedEarly('max-failures', failed0.length, total0)
+      }
+    }
+
+    let userGuidance = initialUserGuidance
+    try {
+      while (true) {
+        if (this.stopped) return this.status
+        // Cancel observed at the loop top means the user clicked Stop Heal
+        // between cycles (or just before the next cycle starts). Bail out
+        // before incrementing the cycle counter.
+        if (this.healCancelled) {
+          finalStatus = 'failed'
+          this.setStatus(finalStatus)
+          break
+        }
+        const summary = readSummary(this.paths.summaryPath)
+        const failedSlugs = extractFailedSlugs(summary)
+        const signature = failedSlugs.slice().sort().join('|')
+        const decision = heal.observeFailures(signature)
+        if (!decision.shouldHeal) break
+
+        const cycleNum = heal.beginCycle() + 1
+        this.emit('heal-cycle-started', { cycle: cycleNum, failureSignature: signature })
+        this.setStatus('healing')
+        this.noteHealCycle()
+
+        const { exitCode: agentExitCode, signal } = await this.runHealAgent({ cycle: cycleNum, failedSlugs, userGuidance })
+        userGuidance = undefined
+
+        if (this.stopped) return this.status
+
+        if (this.healCancelled) {
+          finalStatus = 'failed'
+          this.setStatus(finalStatus)
+          break
+        }
+
+        // REPL died unexpectedly mid-cycle (crash or external kill). Don't
+        // try to respawn — surface in transcript and end the loop.
+        if (agentExitCode !== 0 && !signal) {
+          this.emitAgentSystemMessage('Heal agent exited unexpectedly. Ending the heal loop.')
+          finalStatus = 'failed'
+          this.setStatus(finalStatus)
+          break
+        }
+
+        if (!signal) {
+          finalStatus = 'failed'
+          this.setStatus(finalStatus)
+          break
+        }
+
+        try {
+          if (signal.kind === 'restart' || signal.kind === 'rerun') {
+            appendJournalIteration({
+              signal: signal.kind === 'restart' ? '.restart' : '.rerun',
+              hypothesis: typeof signal.body.hypothesis === 'string' ? signal.body.hypothesis : undefined,
+              filesChanged: Array.isArray(signal.body.filesChanged)
+                ? (signal.body.filesChanged.filter((f): f is string => typeof f === 'string'))
+                : undefined,
+              fixDescription: typeof signal.body.fixDescription === 'string' ? signal.body.fixDescription : undefined,
+              runId: this.runId,
+              manifestPath: this.paths.manifestPath,
+              summaryPath: this.paths.summaryPath,
+              journalPath: this.paths.diagnosisJournalPath,
+            })
+          }
+        } catch { /* journal write is best-effort */ }
+
+        const rerunTargets = this.rerunTargetsForSummary(summary)
+        this.setStatus('running')
+
+        const action = heal.actionForSignal(signal.kind === 'heal' ? 'rerun' : signal.kind)
+        if (action.kind === 'restart-and-rerun') {
+          const filesChanged = Array.isArray(signal.body.filesChanged)
+            ? signal.body.filesChanged.filter((f): f is string => typeof f === 'string')
+            : []
+          const { restarted, kept } = await this.restart(filesChanged)
+          if (this.stopped) return this.status
+          this.healCycleHistory.push({ cycle: cycleNum, restarted, kept })
+          this.stateSink.patchManifest(this.runId, {
+            healCycleHistory: this.healCycleHistory,
+          })
+        } else {
+          await this.rerun()
+        }
+        if (this.stopped) return this.status
+        await this.ensureServicesRunning()
+
+        const exitCode = await this.runPlaywright(rerunTargets)
+        if (this.stopped) return this.status
+        // User cancelled mid-Playwright (cancelHeal SIGTERM'd the pw pty).
+        // Don't read into the killed pty's exit code — finalize as failed.
+        if (this.healCancelled) {
+          finalStatus = 'failed'
+          this.setStatus(finalStatus)
+          break
+        }
+        finalStatus = exitCode === 0 ? 'passed' : 'failed'
+        this.setStatus(finalStatus)
+        if (exitCode === 0) break
+      }
+
+      return finalStatus
+    } finally {
+      // Drop the persistent REPL however the loop terminated — clean break,
+      // failure, cancel, threshold, or thrown error. `stop()` also nukes the
+      // pty during a full abort, so the second cleanup here is a no-op.
+      this.cleanupHealAgentPty()
+    }
+  }
+
+  /** Write a heartbeat timestamp to the manifest every 5 seconds so consumers
+   *  can detect orphaned runs whose orchestrator crashed without cleaning up. */
+  private startHeartbeat(): void {
+    const tick = (): void => {
+      if (this.stopped) return
+      this.stateSink.recordHeartbeat(this.runId)
+    }
+    this.heartbeatTimer = setInterval(tick, 5_000)
+    // Don't keep the process alive just for heartbeats.
+    this.heartbeatTimer.unref()
+  }
+
+  private stopHeartbeat(): void {
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer)
+      this.heartbeatTimer = null
+    }
+  }
+
+  setStatus(status: RunManifest['status']): void {
+    // Once the run has been stopped (e.g. user clicked Abort), drop any
+    // further status writes coming from the in-flight runFullCycle /
+    // heal-loop. Without this guard the killed Playwright pty's exit code
+    // would race the abort and overwrite `aborted` with `passed`/`failed`.
+    // `stop()` is the single authority for the terminal manifest write.
+    if (this.stopped) return
+    this.status = status
+    this.emit('run-status', { status })
+    this.stateSink.setStatus(this.runId, status, this.healCycles)
+  }
+
+  noteHealCycle(): void {
+    this.healCycles += 1
+    this.stateSink.patchManifest(this.runId, { healCycles: this.healCycles })
+  }
+
+  async stop(finalStatus: RunManifest['status'] = 'aborted'): Promise<void> {
+    if (this.stopped) return
+    this.stopped = true
+    if (this.signalWatcher) {
+      clearInterval(this.signalWatcher)
+      this.signalWatcher = null
+    }
+    this.stopHeartbeat()
+    // Kill any in-flight Playwright + heal-agent ptys before services so the
+    // user's abort actually stops the visible processes — not just the
+    // services they happen to depend on. `killTree` targets the process group
+    // (negative pid) so children of the shell pipeline (claude, formatter)
+    // also receive the signal; bare `pty.kill` only signals the shell.
+    if (this.playwrightPty) {
+      killTree(this.playwrightPty, 'SIGTERM')
+      scheduleSigkillFallback(this.playwrightPty)
+      this.playwrightPty = null
+    }
+    if (this.healAgentPty) {
+      killTree(this.healAgentPty, 'SIGTERM')
+      scheduleSigkillFallback(this.healAgentPty)
+      this.healAgentPty = null
+    }
+    for (const [name, pty] of this.servicePtys) {
+      killTree(pty, 'SIGTERM')
+      this.servicePtys.delete(name)
+    }
+    this.logFiles.clear()
+    const endedAt = new Date().toISOString()
+    this.status = finalStatus
+    // Single terminal write — services flipped to 'stopped', status +
+    // endedAt + healCycles persisted, runs-index mirrored. The sink is the
+    // only writer at this point; no other path can race because
+    // `this.stopped = true` already gates `setStatus`.
+    this.stateSink.finalize(this.runId, finalStatus, endedAt, this.healCycles)
+    this.emit('run-complete', { status: finalStatus })
+  }
+}
+
+// ─── Module helpers ─────────────────────────────────────────────────────────
+
+interface SummaryShape {
+  failed?: Array<{ name?: unknown; endTime?: unknown; location?: unknown }>
+  passed?: unknown
+  passedNames?: unknown
+  total?: unknown
+}
+
+export function countPassed(summary: SummaryShape): number {
+  return typeof summary.passed === 'number' ? summary.passed : 0
+}
+
+// Read just the `stoppedEarly.reason` field from a manifest on disk. Returns
+// undefined if the manifest is missing, unparseable, or doesn't carry the
+// field. Used by the heal loop to avoid clobbering an explicit 'user-pause'
+// stamp with the automatic 'max-failures' attribution.
+export function stoppedEarlyReasonOf(manifestPath: string): StoppedEarlyReason | undefined {
+  try {
+    const m = JSON.parse(fs.readFileSync(manifestPath, 'utf-8')) as {
+      stoppedEarly?: { reason?: StoppedEarlyReason }
+    }
+    return m.stoppedEarly?.reason
+  } catch {
+    return undefined
+  }
+}
+
+export function readSummary(summaryPath: string): SummaryShape {
+  try {
+    return JSON.parse(fs.readFileSync(summaryPath, 'utf-8')) as SummaryShape
+  } catch {
+    return {}
+  }
+}
+
+export type NonPassedTargetsResult =
+  | { kind: 'targeted'; locations: string[]; total: number }
+  | { kind: 'all-passed'; total: number }
+  | { kind: 'no-passed-yet'; total: number }
+  | { kind: 'extraction-failed' }
+
+// Compute file:line locations for every test that has NOT yet passed in the
+// given summary — i.e. the union of failed + pending. Used on heal restart so
+// the agent re-runs everything still outstanding, not just the ones that
+// failed last cycle. Returns a discriminated result so the caller can decide
+// whether to skip the targeted rerun (full-suite is equivalent or no work to
+// do) or fall back to legacy failed-only targeting on enumeration failure.
+export function computeNonPassedTargets(
+  featureDir: string,
+  summary: SummaryShape,
+): NonPassedTargetsResult {
+  const files = listSpecFiles(featureDir)
+  if (files.length === 0) return { kind: 'extraction-failed' }
+
+  const allTests: Array<{ location: string; slug: string }> = []
+  let parsedAny = false
+  for (const file of files) {
+    let source = ''
+    try { source = fs.readFileSync(file, 'utf-8') } catch { continue }
+    const result = extractTestsFromSource(file, source)
+    if (result.parseError && result.tests.length === 0) continue
+    parsedAny = true
+    for (const t of result.tests) {
+      allTests.push({
+        location: `${file}:${t.line}`,
+        slug: `test-case-${slugify(t.name)}`,
+      })
+    }
+  }
+  if (!parsedAny || allTests.length === 0) return { kind: 'extraction-failed' }
+
+  const passedRaw = Array.isArray(summary.passedNames) ? summary.passedNames : []
+  const passed = new Set(passedRaw.filter((n): n is string => typeof n === 'string'))
+
+  if (passed.size === 0) return { kind: 'no-passed-yet', total: allTests.length }
+
+  const seen = new Set<string>()
+  const locations: string[] = []
+  for (const t of allTests) {
+    if (passed.has(t.slug)) continue
+    if (seen.has(t.location)) continue
+    seen.add(t.location)
+    locations.push(t.location)
+  }
+
+  if (locations.length === 0) return { kind: 'all-passed', total: allTests.length }
+  return { kind: 'targeted', locations, total: allTests.length }
+}
+
+export function extractFailedSlugs(summary: SummaryShape): string[] {
+  const failed = Array.isArray(summary.failed) ? summary.failed : []
+  return failed
+    .map((f) => (typeof f?.name === 'string' ? (f.name as string) : ''))
+    .filter((n) => n.length > 0)
+}
+
+export function extractFailedLocations(summary: SummaryShape): string[] {
+  const failed = Array.isArray(summary.failed) ? summary.failed : []
+  const out: string[] = []
+  const seen = new Set<string>()
+  for (const entry of failed) {
+    const location = typeof entry?.location === 'string' ? entry.location.trim() : ''
+    if (!/:\d+(?::\d+)?$/.test(location)) continue
+    if (seen.has(location)) continue
+    seen.add(location)
+    out.push(location)
+  }
+  return out
+}
+
+export function summarizeFailures(summaryPath: string): { failed: string[]; total: number } {
+  const summary = readSummary(summaryPath)
+  const failed = extractFailedSlugs(summary)
+  const total = typeof summary.total === 'number' ? summary.total : failed.length
+  return { failed, total }
+}
+
+const SUMMARY_REPORTER_PATH = path.resolve(__dirname, 'summary-reporter.js')
+
+// Bracketed-paste sequences. Modern TUIs (claude REPL included) toggle
+// `\x1b[?2004h` on init to opt into "this is a paste" framing — text
+// between the markers is inserted into the input field as a single block
+// instead of being processed by the line editor character-by-character.
+// Without these wrappers, every word the orchestrator writes via
+// `pty.write` shows up in the transcript as `<word>\x1b[1C<word>...`,
+// producing messy output and ballooning the log size.
+const BRACKETED_PASTE_BEGIN = '\x1b[200~'
+const BRACKETED_PASTE_END = '\x1b[201~'
+
+// Production Playwright invocation. Uses `npx playwright test` with our custom
+// summary reporter, rooted at the feature dir. Tests inject their own.
+export const defaultPlaywrightSpawner: PlaywrightSpawner = ({ feature, paths, rerunTargets }) => {
+  const reporter = SUMMARY_REPORTER_PATH
+  const threshold = feature.healOnFailureThreshold
+  const maxFailures = typeof threshold === 'number' && threshold > 0
+    ? ` --max-failures=${threshold}`
+    : ''
+  const targets = rerunTargets && rerunTargets.length > 0
+    ? ` ${rerunTargets.map((target) => JSON.stringify(target)).join(' ')}`
+    : ''
+  return {
+    command: `npx playwright test${targets} --output=${JSON.stringify(paths.playwrightArtifactsDir)} --reporter=${JSON.stringify(reporter)},list${maxFailures}`,
+    cwd: feature.featureDir,
+  }
+}
+
+// Send `signal` to the entire process group of `pty`. node-pty spawns its
+// child in a fresh session, so the pty's pid is the pgid — `process.kill(-pid, ...)`
+// hits the shell AND its pipeline children (claude, formatter). Falls back to
+// the pty's own kill (which only signals the shell) if pgkill fails — better
+// than nothing.
+function killTree(pty: PtyHandle, signal: NodeJS.Signals | number): void {
+  try {
+    process.kill(-pty.pid, signal)
+    return
+  } catch { /* fall through */ }
+  try { pty.kill(typeof signal === 'string' ? signal : undefined) } catch { /* already dead */ }
+}
+
+// SIGTERM gives the agent time to flush. If it's still alive 2s later, SIGKILL
+// the group so a wedged child doesn't outlive the run.
+function scheduleSigkillFallback(pty: PtyHandle, ms = 2000): void {
+  setTimeout(() => {
+    try { process.kill(-pty.pid, 'SIGKILL') } catch { /* already dead */ }
+  }, ms).unref?.()
+}
+
+function formatUserInterjectBlock(text: string, startedAt: string, now: Date = new Date()): string {
+  const tag = formatElapsedTag(startedAt, now)
+  const body = text.split(/\r?\n/).map((line) => `  │ ${line}`).join('\n')
+  return `\n${tag} user interject\n${body}\n\n`
+}
+
+function formatElapsedTag(startedAt: string, now: Date): string {
+  const started = new Date(startedAt).getTime()
+  const elapsedMs = Number.isFinite(started) ? Math.max(0, now.getTime() - started) : 0
+  const s = Math.floor(elapsedMs / 1000)
+  const mm = Math.floor(s / 60)
+  const ss = (s % 60).toString().padStart(2, '0')
+  return `[${mm}:${ss}]`
+}
+
+// Production wires `buildAgentSpawnCommand` / `buildOrchestratorHealPrompt`
+// from auto-heal.ts; these defaults are intentionally minimal so unit tests
+// never silently run a real claude/codex REPL when an override is missing.
+export function defaultSpawnCommand(_args: { sessionId?: string; mcpOutputDir?: string; promptFile?: string }): string {
+  // A `cat` keeps the pty alive (so the orchestrator can write prompts to
+  // its stdin and pty.onExit doesn't fire mid-loop) and echoes everything we
+  // type, which is enough for assertions about prompt content in tests.
+  return 'cat'
+}
+
+export function defaultHealPrompt(args: { cycle: number; outputDir: string; userGuidance?: string }): string {
+  const guidance = args.userGuidance ? ` guidance="${args.userGuidance}"` : ''
+  return `[heal-agent placeholder cycle=${args.cycle} mcp-out=${args.outputDir}${guidance}]`
+}

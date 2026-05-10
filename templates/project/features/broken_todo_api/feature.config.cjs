@@ -10,10 +10,10 @@ const config = {
         {
           name: 'broken-todo-api-server',
           command: 'npx tsx scripts/server.ts',
-          healthCheck: {
-            url: 'http://localhost:4100/',
-            timeoutMs: 3000,
-          },
+          // Single-env feature — pick one transport. `http` is best when
+          // the service has a usable root URL; switch to
+          // `{ tcp: { port: 4100 } }` for raw TCP servers.
+          healthCheck: { http: { url: 'http://localhost:4100/', timeoutMs: 3000 } },
         },
       ],
     },
