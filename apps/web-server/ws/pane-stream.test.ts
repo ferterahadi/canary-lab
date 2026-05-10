@@ -89,8 +89,9 @@ describe('shouldPreferLogReplay', () => {
 })
 
 describe('formatHistoricalPaneReplay', () => {
-  it('strips terminal controls from historical agent replay', () => {
-    expect(formatHistoricalPaneReplay('agent', '\x1b[2J\x1b[31mred\x1b[0m\rnext\x1b]0;title\x07')).toBe('red\nnext')
+  it('keeps historical agent replay raw so xterm can render colors and cursor redraws', () => {
+    const raw = '\x1b[2J\x1b[31mred\x1b[0m\rnext\x1b]0;title\x07'
+    expect(formatHistoricalPaneReplay('agent', raw)).toBe(raw)
   })
 
   it('keeps non-agent pane replay raw so colors and terminal behavior are preserved', () => {

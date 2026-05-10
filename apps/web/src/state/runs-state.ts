@@ -66,10 +66,14 @@ export function runsReducer(state: RunsState, action: RunsAction): RunsState {
         endedAt: m.endedAt,
       }
       const others = state.runs.filter((r) => r.runId !== action.runId)
+      const transients = isTerminalStatus(entry.status)
+        ? omitRun(state.transients, action.runId)
+        : state.transients
       return {
         ...state,
         runs: [entry, ...others].sort(byStartedDesc),
         details: { ...state.details, [action.runId]: action.detail },
+        transients,
       }
     }
     case 'removed': {
@@ -85,7 +89,7 @@ export function runsReducer(state: RunsState, action: RunsAction): RunsState {
       }
     }
     case 'list-changed':
-      return { ...state, runs: action.runs }
+      return { ...state, runs: action.runs, transients: pruneTerminalTransients(state.transients, action.runs) }
     case 'connection':
       return { ...state, connection: action.status }
     case 'transient-set':
@@ -109,6 +113,27 @@ export function runsReducer(state: RunsState, action: RunsAction): RunsState {
 
 function byStartedDesc(a: RunIndexEntry, b: RunIndexEntry): number {
   return a.startedAt < b.startedAt ? 1 : a.startedAt > b.startedAt ? -1 : 0
+}
+
+function isTerminalStatus(status: RunIndexEntry['status']): boolean {
+  return status === 'passed' || status === 'failed' || status === 'aborted'
+}
+
+function omitRun<T>(values: Record<string, T>, runId: string): Record<string, T> {
+  const { [runId]: _dropped, ...rest } = values
+  return rest
+}
+
+function pruneTerminalTransients(
+  transients: Record<string, TransientAction>,
+  runs: RunIndexEntry[],
+): Record<string, TransientAction> {
+  let next = transients
+  for (const run of runs) {
+    if (!isTerminalStatus(run.status) || next[run.runId] == null) continue
+    next = omitRun(next, run.runId)
+  }
+  return next
 }
 
 /** Translate an incoming WS frame into a reducer action. Centralised so

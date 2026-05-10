@@ -268,8 +268,10 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
                             onClose={() => setOpenMenuRunId(null)}
                             isStopping={isStopping}
                             isPausing={isPausing}
+                            isCancellingHeal={isCancellingHeal}
                             onStop={() => { setOpenMenuRunId(null); setPendingStop(r) }}
                             onPause={() => { setOpenMenuRunId(null); setPendingPause(r) }}
+                            onCancelHeal={() => { setOpenMenuRunId(null); setPendingCancelHeal(r) }}
                           />
                         ) : (
                           <>
@@ -544,8 +546,10 @@ function RunActionsKebab({
   onClose,
   isStopping,
   isPausing,
+  isCancellingHeal,
   onStop,
   onPause,
+  onCancelHeal,
 }: {
   run: RunIndexEntry
   displayStatus: import('../api/types').DisplayStatus
@@ -554,16 +558,19 @@ function RunActionsKebab({
   onClose: () => void
   isStopping: boolean
   isPausing: boolean
+  isCancellingHeal: boolean
   onStop: () => void
   onPause: () => void
+  onCancelHeal: () => void
 }) {
   const stopAvailable = canStop(run.status)
   const pauseAvailable = canPauseHeal(run.status)
+  const cancelHealAvailable = canCancelHeal(run.status)
   // NOTE: Delete is intentionally NOT in this menu; it's rendered as a
   // dedicated icon button next to the status indicator at all viewport
   // widths. Keeping it out of the kebab is what guarantees the user sees
   // Delete on the right of the status, regardless of compact mode.
-  const hasActions = stopAvailable || pauseAvailable
+  const hasActions = stopAvailable || pauseAvailable || cancelHealAvailable
   const POPOVER_WIDTH = 180
   const buttonRef = useRef<HTMLButtonElement>(null)
   const pos = useAnchoredPosition(buttonRef, open && hasActions, POPOVER_WIDTH)
@@ -633,6 +640,19 @@ function RunActionsKebab({
                 </svg>
               )}
               onClick={() => { onPause(); onClose() }}
+            />
+          )}
+          {cancelHealAvailable && (
+            <MenuItem
+              label={isCancellingHeal ? 'Cancelling...' : 'Stop Heal'}
+              variant="danger"
+              disabled={isCancellingHeal}
+              icon={(
+                <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                  <rect x="3" y="3" width="10" height="10" rx="1.5" />
+                </svg>
+              )}
+              onClick={() => { onCancelHeal(); onClose() }}
             />
           )}
         </div>,

@@ -444,6 +444,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
       // pane instead of below the dead-agent transcript. The transcript
       // file itself is also truncated below.
       broker.resetPane('agent')
+      broker.push('agent', `\n[orchestrator] Restarting heal with ${agentChoice}...\n`)
       registry.set(runId, orch)
       orch.restartHealFromFailure(text)
         .then(async (status) => {

@@ -37,6 +37,7 @@ export function RunDetailColumn({
   const [tab, setTab] = useState<Tab>('overview')
   const [serviceIdx, setServiceIdx] = useState(0)
   const [playwrightView, setPlaywrightView] = useState<PlaywrightView>('playback')
+  const [agentPaneRestartKey, setAgentPaneRestartKey] = useState(0)
 
   // Detail comes from the WebSocket-backed RunsContext. No polling here —
   // the same `state.details[runId]` populated for the runs list is reused,
@@ -186,10 +187,13 @@ export function RunDetailColumn({
               <ManualHealBanner runId={m.runId} signalPaths={m.signalPaths} />
             )}
             <div className="min-h-0 flex-1 overflow-hidden">
-              <PaneTerminal runId={m.runId} paneId="agent" />
+              <PaneTerminal key={`${m.runId}:agent:${agentPaneRestartKey}`} runId={m.runId} paneId="agent" />
             </div>
             {canRestartHeal(m.status) && (
-              <RestartHealButton runId={m.runId} />
+              <RestartHealButton
+                runId={m.runId}
+                onRestarted={() => setAgentPaneRestartKey((key) => key + 1)}
+              />
             )}
           </div>
         )}
