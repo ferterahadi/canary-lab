@@ -11,22 +11,47 @@ const terminalState = vi.hoisted(() => ({
   writes: [] as string[],
   resets: 0,
   options: [] as Record<string, unknown>[],
+  scrollToBottoms: 0,
+  instances: [] as Array<{
+    buffer: { active: { viewportY: number; baseY: number } }
+    emitScroll: (viewportY: number, baseY?: number) => void
+  }>,
 }))
 
 vi.mock('@xterm/xterm', () => ({
   Terminal: class {
     options: Record<string, unknown>
+    buffer = { active: { viewportY: 0, baseY: 0 } }
+    private scrollHandlers: Array<() => void> = []
     constructor(opts: Record<string, unknown>) {
       this.options = opts
       terminalState.options.push(opts)
+      terminalState.instances.push(this)
     }
     loadAddon(): void {}
     open(): void {}
+    onScroll(handler: () => void): { dispose: () => void } {
+      this.scrollHandlers.push(handler)
+      return {
+        dispose: () => {
+          this.scrollHandlers = this.scrollHandlers.filter((current) => current !== handler)
+        },
+      }
+    }
     write(text: string): void {
       terminalState.writes.push(text)
     }
     reset(): void {
       terminalState.resets += 1
+    }
+    scrollToBottom(): void {
+      terminalState.scrollToBottoms += 1
+      this.buffer.active.viewportY = this.buffer.active.baseY
+    }
+    emitScroll(viewportY: number, baseY = this.buffer.active.baseY): void {
+      this.buffer.active.viewportY = viewportY
+      this.buffer.active.baseY = baseY
+      this.scrollHandlers.forEach((handler) => handler())
     }
     dispose(): void {}
   },
@@ -57,6 +82,8 @@ beforeEach(() => {
   terminalState.writes = []
   terminalState.resets = 0
   terminalState.options = []
+  terminalState.scrollToBottoms = 0
+  terminalState.instances = []
   container = document.createElement('div')
   document.body.appendChild(container)
   root = createRoot(container)
@@ -67,6 +94,15 @@ beforeEach(() => {
       observe(): void {}
       disconnect(): void {}
     } as typeof ResizeObserver
+  }
+  if (!('requestAnimationFrame' in window)) {
+    window.requestAnimationFrame = ((callback: FrameRequestCallback) => {
+      callback(0)
+      return 0
+    }) as typeof window.requestAnimationFrame
+  }
+  if (!('cancelAnimationFrame' in window)) {
+    window.cancelAnimationFrame = (() => {}) as typeof window.cancelAnimationFrame
   }
 })
 
@@ -150,6 +186,103 @@ describe('AgentLogPanel', () => {
 
     expect(terminalState.writes.join('')).toContain('full log')
     expect(terminalState.writes.join('')).toContain('live chunk')
+  })
+
+  it('buffers live websocket chunks while the user is browsing earlier output', async () => {
+    vi.mocked(getDraftAgentLog).mockResolvedValue({ content: 'full log\n' })
+
+    await act(async () => {
+      root.render(<AgentLogPanel draftId="d1" phase="planning" status="running" />)
+    })
+
+    const term = terminalState.instances[0]
+    act(() => {
+      term.emitScroll(4, 12)
+    })
+    const before = terminalState.writes.join('')
+    const opts = vi.mocked(connectDraftAgent).mock.calls[0][0] as ConnectDraftAgentOptions
+    act(() => {
+      opts.onData('hidden live line 1\nhidden live line 2\n')
+    })
+
+    expect(terminalState.writes.join('')).toBe(before)
+    expect(container.textContent).toContain('2 new lines')
+    expect(container.textContent).toContain('Jump latest')
+  })
+
+  it('flushes buffered live chunks when Jump latest is clicked', async () => {
+    vi.mocked(getDraftAgentLog).mockResolvedValue({ content: 'full log\n' })
+
+    await act(async () => {
+      root.render(<AgentLogPanel draftId="d1" phase="planning" status="running" />)
+    })
+
+    const term = terminalState.instances[0]
+    act(() => {
+      term.emitScroll(4, 12)
+    })
+    const opts = vi.mocked(connectDraftAgent).mock.calls[0][0] as ConnectDraftAgentOptions
+    act(() => {
+      opts.onData('buffered line\n')
+    })
+
+    const button = Array.from(container.querySelectorAll('button'))
+      .find((candidate) => candidate.textContent?.includes('Jump latest'))
+    expect(button).toBeTruthy()
+    act(() => {
+      button?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+
+    expect(terminalState.writes.join('')).toContain('buffered line')
+    expect(terminalState.scrollToBottoms).toBeGreaterThan(0)
+    expect(container.textContent).not.toContain('Jump latest')
+  })
+
+  it('flushes buffered chunks when the user scrolls back to the bottom', async () => {
+    vi.mocked(getDraftAgentLog).mockResolvedValue({ content: 'full log\n' })
+
+    await act(async () => {
+      root.render(<AgentLogPanel draftId="d1" phase="planning" status="running" />)
+    })
+
+    const term = terminalState.instances[0]
+    const opts = vi.mocked(connectDraftAgent).mock.calls[0][0] as ConnectDraftAgentOptions
+    act(() => {
+      term.emitScroll(4, 12)
+      opts.onData('buffered by scroll\n')
+    })
+    expect(terminalState.writes.join('')).not.toContain('buffered by scroll')
+
+    act(() => {
+      term.emitScroll(12, 12)
+    })
+
+    expect(terminalState.writes.join('')).toContain('buffered by scroll')
+    expect(container.textContent).not.toContain('Jump latest')
+  })
+
+  it('keeps stopped output bounded after live browse buffering', async () => {
+    vi.mocked(getDraftAgentLog).mockResolvedValue({ content: 'full log\n' })
+
+    await act(async () => {
+      root.render(<AgentLogPanel draftId="d1" phase="planning" status="running" variant="fill" />)
+    })
+
+    const term = terminalState.instances[0]
+    const opts = vi.mocked(connectDraftAgent).mock.calls[0][0] as ConnectDraftAgentOptions
+    act(() => {
+      term.emitScroll(4, 12)
+      opts.onData('buffered while running\n')
+    })
+
+    await act(async () => {
+      root.render(<AgentLogPanel draftId="d1" phase="planning" status="idle" variant="bounded" />)
+    })
+
+    expect(container.innerHTML).toContain('max-h-')
+    expect(container.innerHTML).toContain('h-[min(52vh,34rem)]')
+    expect(container.textContent).not.toContain('Jump latest')
+    expect(terminalState.writes.join('')).toContain('buffered while running')
   })
 
   it('drops the websocket replay chunk when it duplicates the full log', async () => {

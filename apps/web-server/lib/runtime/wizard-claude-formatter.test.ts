@@ -1,12 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   elapsed,
+  formatToolCall,
   handleLine,
+  relPath,
   resultSummary,
   tag,
+  toolLabel,
   toolSummary,
   formatFullToolResult,
   inspectionSummary,
+  isBashReadInspection,
   splitShellPipes,
   toolResultText,
   truncate,
@@ -47,6 +51,10 @@ describe('wizard claude formatter', () => {
     expect(toolResultText([{ type: 'text', text: 'array first' }, { type: 'text', text: 'array second' }]))
       .toBe('array first\narray second')
     expect(formatFullToolResult('first\nsecond')).toContain('second')
+    expect(isBashReadInspection('head -40 ~/Documents/tiktok-portal/api/jobs/index.ts')).toBe(true)
+    expect(isBashReadInspection('cat ~/Documents/tiktok-portal/api/approvals/\\[token\\].ts')).toBe(true)
+    expect(isBashReadInspection('tail -20 logs/run.log')).toBe(true)
+    expect(isBashReadInspection("sed -n '1,40p' app.ts")).toBe(true)
     expect(splitShellPipes('grep -E "className|id=|type=" app.ts | head -50'))
       .toEqual(['grep -E "className|id=|type=" app.ts', 'head -50'])
     expect(inspectionSummary({ name: 'Read', input: {} }, 'abc')).toBe('Number of characters: 3')
@@ -55,6 +63,8 @@ describe('wizard claude formatter', () => {
     expect(inspectionSummary({ name: 'Bash', input: { command: 'ls apps' } }, 'a\nb\n')).toBe('Number of files: 2')
     expect(inspectionSummary({ name: 'Bash', input: { command: 'rg "needle" apps | head -50' } }, 'a\nb\n')).toBe('Number of matches: 2')
     expect(inspectionSummary({ name: 'Bash', input: { command: 'grep needle apps/a.ts | wc -l' } }, '12\n')).toBe('Number of matches: 12')
+    expect(inspectionSummary({ name: 'Bash', input: { command: 'head -40 ~/Documents/tiktok-portal/api/jobs/index.ts' } }, 'import x')).toBe('Number of characters: 8')
+    expect(inspectionSummary({ name: 'Bash', input: { command: 'cat ~/Documents/tiktok-portal/api/approvals/\\[token\\].ts' } }, 'export default {}')).toBe('Number of characters: 17')
     expect(inspectionSummary({ name: 'Bash', input: { command: 'grep needle apps/a.ts | awk \'{print $1}\'' } }, 'secret')).toBe('Content read.')
     expect(inspectionSummary({ name: 'Bash', input: { command: 'if test -d apps; then find apps -type f; fi' } }, 'apps/a.ts')).toBe('Content read.')
     expect(inspectionSummary({ name: 'Bash', input: { command: 'npm test' } }, 'ok')).toBeNull()
@@ -311,6 +321,92 @@ describe('wizard claude formatter', () => {
     expect(out).not.toContain('secret-token')
   })
 
+  it('summarizes Bash head and cat file reads without displaying source lines', () => {
+    handleLine(JSON.stringify({
+      type: 'assistant',
+      message: {
+        content: [
+          {
+            type: 'tool_use',
+            id: 'bash-head',
+            name: 'Bash',
+            input: { command: 'head -40 ~/Documents/tiktok-portal/api/jobs/index.ts' },
+          },
+          {
+            type: 'tool_use',
+            id: 'bash-cat',
+            name: 'Bash',
+            input: { command: 'cat ~/Documents/tiktok-portal/api/approvals/\\[token\\].ts' },
+          },
+        ],
+      },
+    }))
+    handleLine(JSON.stringify({
+      type: 'user',
+      message: {
+        content: [
+          {
+            type: 'tool_result',
+            tool_use_id: 'bash-head',
+            content: [
+              'import { requireN8nAuth } from "../../lib/auth";',
+              'export default {',
+              '  async fetch(request: Request): Promise<Response> {',
+            ].join('\n'),
+          },
+          {
+            type: 'tool_result',
+            tool_use_id: 'bash-cat',
+            content: [
+              'import { approvePost, getApproval } from "../../lib/service";',
+              'export default {',
+              '  async fetch(request: Request): Promise<Response> {',
+            ].join('\n'),
+          },
+        ],
+      },
+    }))
+
+    const out = writes.join('')
+    expect(out).toContain('head -40')
+    expect(out).toContain('cat ~/Documents/tiktok-portal/api/approvals/\\[token\\].ts')
+    expect(out.match(/Number of characters:/g)).toHaveLength(2)
+    expect(out).not.toContain('requireN8nAuth')
+    expect(out).not.toContain('approvePost')
+    expect(out).not.toContain('async fetch')
+  })
+
+  it('keeps failed Bash file-read errors visible', () => {
+    handleLine(JSON.stringify({
+      type: 'assistant',
+      message: {
+        content: [
+          {
+            type: 'tool_use',
+            id: 'bash-head-error',
+            name: 'Bash',
+            input: { command: 'head -40 ~/Documents/tiktok-portal/api/approvals/[token].ts' },
+          },
+        ],
+      },
+    }))
+    handleLine(JSON.stringify({
+      type: 'user',
+      message: {
+        content: [{
+          type: 'tool_result',
+          tool_use_id: 'bash-head-error',
+          content: '(eval):1: no matches found: /Users/fernandi/Documents/tiktok-portal/api/approvals/[token].ts',
+          is_error: true,
+        }],
+      },
+    }))
+
+    const out = writes.join('')
+    expect(out).toContain('no matches found')
+    expect(out).toContain('/Users/fernandi/Documents/tiktok-portal/api/approvals/[token].ts')
+  })
+
   it('keeps Read errors visible', () => {
     handleLine(JSON.stringify({
       type: 'assistant',
@@ -412,5 +508,109 @@ describe('wizard claude formatter', () => {
     }))
     const out = writes.join('')
     expect(out.match(/<plan-output>/g)).toHaveLength(1)
+  })
+})
+
+describe('relPath', () => {
+  it('strips CWD prefix', () => {
+    expect(relPath(`${process.cwd()}/a/b`)).toBe('a/b')
+  })
+  it('returns "." for CWD', () => {
+    expect(relPath(process.cwd())).toBe('.')
+  })
+  it('empty input → empty', () => {
+    expect(relPath('')).toBe('')
+  })
+  it('replaces HOME with ~ for paths outside CWD', () => {
+    const home = process.env.HOME ?? ''
+    if (home && !process.cwd().startsWith(home)) {
+      expect(relPath(`${home}/sibling/x`)).toBe('~/sibling/x')
+    } else if (home) {
+      // CWD is usually inside HOME in dev; this still exercises the replace branch.
+      const replaced = relPath(`${home}/outside-cwd-xyz`)
+      expect(replaced.startsWith('~') || replaced.startsWith(home)).toBe(true)
+    }
+  })
+})
+
+describe('toolLabel', () => {
+  it('includes one space between the icon and tool name', () => {
+    expect(toolLabel('Read')).toBe('📖 Read')
+    expect(toolLabel('Bash')).toBe('$ Bash')
+  })
+  it('uses bullet for unknown tools', () => {
+    expect(toolLabel('Unknown')).toContain('•')
+  })
+})
+
+describe('formatToolCall', () => {
+  it('Bash: command + optional description', () => {
+    expect(formatToolCall('Bash', { command: 'ls' })).toBe('ls')
+    expect(formatToolCall('Bash', { command: 'ls', description: 'list' })).toContain('# list')
+  })
+  it('Read/Edit/Write: relative path', () => {
+    expect(formatToolCall('Read', { file_path: `${process.cwd()}/a.ts` })).toBe('a.ts')
+    expect(formatToolCall('Write', { file_path: `${process.cwd()}/b.ts` })).toBe('b.ts')
+  })
+  it('Read: surfaces L<a>-<b> when offset+limit are set (narrow Read visibility)', () => {
+    const out = formatToolCall('Read', {
+      file_path: `${process.cwd()}/server.ts`,
+      offset: 95,
+      limit: 50,
+    })
+    expect(out).toContain('server.ts')
+    expect(out).toContain('L95-144')
+  })
+  it('Read: surfaces "from L<offset>" when only offset is set', () => {
+    const out = formatToolCall('Read', {
+      file_path: `${process.cwd()}/x.ts`,
+      offset: 10,
+    })
+    expect(out).toContain('from L10')
+  })
+  it('Edit: surfaces −<old> +<new> line deltas', () => {
+    const out = formatToolCall('Edit', {
+      file_path: `${process.cwd()}/x.ts`,
+      old_string: 'a\nb',
+      new_string: 'c\nd\ne',
+    })
+    expect(out).toContain('−2 +3')
+  })
+  it('Edit: flags replace_all with (all)', () => {
+    const out = formatToolCall('Edit', {
+      file_path: `${process.cwd()}/x.ts`,
+      old_string: 'a',
+      new_string: 'b',
+      replace_all: true,
+    })
+    expect(out).toContain('(all)')
+  })
+  it('Write: surfaces line count when content provided', () => {
+    const out = formatToolCall('Write', {
+      file_path: `${process.cwd()}/x.ts`,
+      content: 'line1\nline2\nline3',
+    })
+    expect(out).toContain('3L')
+  })
+  it('Glob: pattern + optional "in <path>"', () => {
+    expect(formatToolCall('Glob', { pattern: '**/*.ts' })).toBe('**/*.ts')
+    expect(formatToolCall('Glob', { pattern: '*.ts', path: `${process.cwd()}/src` })).toContain(' in src')
+  })
+  it('Grep: pattern + optional path + glob', () => {
+    const out = formatToolCall('Grep', { pattern: 'foo', glob: '*.ts' })
+    expect(out).toContain('foo')
+    expect(out).toContain('(*.ts)')
+  })
+  it('TodoWrite: count with singular/plural', () => {
+    expect(formatToolCall('TodoWrite', { todos: [{ a: 1 }] })).toBe('1 todo')
+    expect(formatToolCall('TodoWrite', { todos: [1, 2, 3] })).toBe('3 todos')
+    expect(formatToolCall('TodoWrite', { todos: [] })).toBe('0 todos')
+  })
+  it('default: JSON-truncated', () => {
+    const out = formatToolCall('Other', { a: 1 })
+    expect(out).toContain('{"a":1}')
+  })
+  it('returns empty string for non-object input', () => {
+    expect(formatToolCall('Bash', null as any)).toBe('')
   })
 })

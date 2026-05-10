@@ -226,7 +226,7 @@ flowchart TD
     setup["Env + service startup<br/>env-switcher/switch.ts + pty-spawner.ts + launcher/startup.ts"]
     playwright(["Playwright"])
     capture["Run capture<br/>log-marker-fixture.ts + summary-reporter.ts"]
-    autoheal["Auto-heal command + formatters<br/>auto-heal.ts + claude/codex formatter.ts"]
+    autoheal["Auto-heal command builder<br/>auto-heal.ts"]
     agent(["Claude Code or Codex CLI"])
 
     subgraph runDir["logs/runs/{{runId}}/"]
@@ -284,7 +284,8 @@ npm run build
 - `shared/configs/` — base Playwright config and env loader
 - `shared/runtime/` — shared `project-root` resolver
 - `templates/project/` — files copied into scaffolded projects
-- `feature-support/` — public imports used by generated projects
+
+The package exposes a `canary-lab/feature-support/...` import surface to generated projects via the `exports` field in `package.json`; it maps to compiled files under `dist/shared/configs/`.
 
 ### Build and Test
 
@@ -298,12 +299,9 @@ npm run smoke:pack    # end-to-end scaffold test
 
 `smoke:pack` builds, packs, scaffolds a temp project, installs dependencies, and verifies the scaffold flow. Run it after changing templates or packaging.
 
-### Publishing
+### Contributing
 
-```bash
-npm run smoke:pack    # end-to-end scaffold test
-npm run publish:package
-```
+Open a pull request against `main`.
 
 ## License
 

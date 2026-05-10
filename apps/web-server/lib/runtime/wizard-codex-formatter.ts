@@ -46,7 +46,7 @@ function formatCommandOutput(text: string): string | null {
     .join('\n')
 }
 
-type InspectionKind = 'Read' | 'List' | 'Glob' | 'Grep'
+type InspectionKind = 'Read' | 'List' | 'Glob' | 'Grep' | 'Inspect'
 
 interface InspectionCommand {
   kind: InspectionKind
@@ -64,6 +64,7 @@ function formatMetric(label: string, count: number): string {
 function inspectionSummary(kind: InspectionKind, text: string): string {
   if (kind === 'Read') return formatMetric('Number of characters', text.length)
   if (kind === 'Grep') return formatMetric('Number of matches', countNonEmptyLines(text))
+  if (kind === 'Inspect') return 'Content read.'
   return formatMetric('Number of files', countNonEmptyLines(text))
 }
 
@@ -100,6 +101,10 @@ function parseInspectionCommand(raw: string): InspectionCommand | null {
   const grep = cmd.match(/^(rg|grep)\s+(.+)$/s)
   if (grep) {
     return { kind: 'Grep', label: truncate(grep[2].trim(), 140) }
+  }
+
+  if (/(?:^|[\s;&()])(cat|head|tail|sed|grep|rg|ls|find)(?:\s|$)/.test(cmd)) {
+    return { kind: 'Inspect', label: truncate(cmd, 140) }
   }
 
   return null

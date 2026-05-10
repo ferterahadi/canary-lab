@@ -50,6 +50,7 @@ describe('wizard codex formatter', () => {
     expect(inspectionSummary('List', 'a\nb\n')).toBe('Number of files: 2')
     expect(inspectionSummary('Glob', 'a\nb\n')).toBe('Number of files: 2')
     expect(inspectionSummary('Grep', 'a:1\nb:2\n')).toBe('Number of matches: 2')
+    expect(inspectionSummary('Inspect', 'source body')).toBe('Content read.')
   })
 
   it('ignores empty, invalid, and incomplete payloads', () => {
@@ -163,6 +164,65 @@ describe('wizard codex formatter', () => {
     expect(out).not.toContain('const secret')
     expect(out).not.toContain('"private"')
     expect(out).not.toContain('last log line')
+  })
+
+  it('summarizes Bash head and cat file reads without displaying source lines', () => {
+    handleCompleted({
+      type: 'command_execution',
+      command: 'head -40 ~/Documents/tiktok-portal/api/jobs/index.ts',
+      exit_code: 0,
+      aggregated_output: [
+        'import { requireN8nAuth } from "../../lib/auth";',
+        'export default {',
+        '  async fetch(request: Request): Promise<Response> {',
+      ].join('\n'),
+    })
+    handleCompleted({
+      type: 'command_execution',
+      command: 'cat ~/Documents/tiktok-portal/api/approvals/\\[token\\].ts',
+      exit_code: 0,
+      aggregated_output: [
+        'import { approvePost, getApproval } from "../../lib/service";',
+        'export default {',
+        '  async fetch(request: Request): Promise<Response> {',
+      ].join('\n'),
+    })
+
+    const out = writes.join('')
+    expect(out).toContain('Read ~/Documents/tiktok-portal/api/jobs/index.ts (ok)')
+    expect(out).toContain('Read ~/Documents/tiktok-portal/api/approvals/\\[token\\].ts (ok)')
+    expect(out.match(/Number of characters:/g)).toHaveLength(2)
+    expect(out).not.toContain('requireN8nAuth')
+    expect(out).not.toContain('approvePost')
+    expect(out).not.toContain('async fetch')
+  })
+
+  it('keeps failed Bash file-read errors visible', () => {
+    handleCompleted({
+      type: 'command_execution',
+      command: 'head -40 ~/Documents/tiktok-portal/api/approvals/[token].ts',
+      exit_code: 1,
+      aggregated_output: '(eval):1: no matches found: /Users/fernandi/Documents/tiktok-portal/api/approvals/[token].ts',
+    })
+
+    const out = writes.join('')
+    expect(out).toContain('Read ~/Documents/tiktok-portal/api/approvals/[token].ts (exit 1)')
+    expect(out).toContain('no matches found')
+    expect(out).toContain('/Users/fernandi/Documents/tiktok-portal/api/approvals/[token].ts')
+  })
+
+  it('uses the fallback summary for unknown inspection-style Codex commands', () => {
+    handleCompleted({
+      type: 'command_execution',
+      command: 'if test -d apps; then find apps -type f; fi',
+      exit_code: 0,
+      aggregated_output: 'apps/web/src/main.tsx\napps/web/src/App.tsx',
+    })
+
+    const out = writes.join('')
+    expect(out).toContain('Inspect if test -d apps; then find apps -type f; fi (ok)')
+    expect(out).toContain('Content read.')
+    expect(out).not.toContain('apps/web/src/main.tsx')
   })
 
   it('summarizes listing and grep output without displaying its contents', () => {

@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Terminal, type ITheme } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { getDraftAgentLog } from '../../api/client'
@@ -45,6 +45,53 @@ export function AgentLogPanel({ draftId, initialBuffer, agent, phase, status = '
   const rawTextRef = useRef(initialBuffer ?? '')
   const persistedLogRef = useRef('')
   const duplicateReplayRemainingRef = useRef(0)
+  const statusRef = useRef(status)
+  const followingLatestRef = useRef(true)
+  const bufferedVisualChunksRef = useRef<string[]>([])
+  const bufferedLineCountRef = useRef(0)
+  const [bufferedLineCount, setBufferedLineCount] = useState(0)
+
+  const clearBufferedVisualOutput = useCallback(() => {
+    bufferedVisualChunksRef.current = []
+    bufferedLineCountRef.current = 0
+    setBufferedLineCount(0)
+  }, [])
+
+  const flushBufferedVisualOutput = useCallback((scrollToBottom = true) => {
+    const term = terminalRef.current
+    const chunks = bufferedVisualChunksRef.current
+    if (!term || chunks.length === 0) return
+    bufferedVisualChunksRef.current = []
+    bufferedLineCountRef.current = 0
+    setBufferedLineCount(0)
+    term.write(chunks.join(''))
+    if (scrollToBottom) term.scrollToBottom()
+    followingLatestRef.current = true
+  }, [])
+
+  const resetTerminalOutput = useCallback((raw: string) => {
+    clearBufferedVisualOutput()
+    followingLatestRef.current = true
+    const term = terminalRef.current
+    if (!term) return
+    term.reset()
+    term.write(stripWizardSessionMarkers(raw) || 'Waiting for agent output...')
+    term.scrollToBottom()
+  }, [clearBufferedVisualOutput])
+
+  const writeVisualChunk = useCallback((chunk: string) => {
+    const text = stripWizardSessionMarkers(chunk)
+    if (!text) return
+    const term = terminalRef.current
+    if (!term) return
+    if (statusRef.current === 'running' && !followingLatestRef.current) {
+      bufferedVisualChunksRef.current.push(text)
+      bufferedLineCountRef.current += countDisplayLines(text)
+      setBufferedLineCount(bufferedLineCountRef.current)
+      return
+    }
+    term.write(text)
+  }, [])
 
   useEffect(() => {
     const raw = initialBuffer ?? ''
@@ -53,9 +100,8 @@ export function AgentLogPanel({ draftId, initialBuffer, agent, phase, status = '
     textRef.current = clean
     persistedLogRef.current = ''
     duplicateReplayRemainingRef.current = 0
-    terminalRef.current?.reset()
-    terminalRef.current?.write(stripWizardSessionMarkers(raw) || 'Waiting for agent output...')
-  }, [initialBuffer])
+    resetTerminalOutput(raw)
+  }, [initialBuffer, resetTerminalOutput])
 
   useEffect(() => {
     let cancelled = false
@@ -67,15 +113,14 @@ export function AgentLogPanel({ draftId, initialBuffer, agent, phase, status = '
         duplicateReplayRemainingRef.current = content.length
         rawTextRef.current = content
         textRef.current = stripTerminalControls(content)
-        terminalRef.current?.reset()
-        terminalRef.current?.write(stripWizardSessionMarkers(content) || 'Waiting for agent output...')
+        resetTerminalOutput(content)
       })
       .catch(() => {
         // The tail passed through the draft record remains the fallback for
         // drafts whose log file has not been created yet or older servers.
       })
     return () => { cancelled = true }
-  }, [draftId, phase])
+  }, [draftId, phase, resetTerminalOutput])
 
   useEffect(() => {
     let cancelled = false
@@ -89,15 +134,26 @@ export function AgentLogPanel({ draftId, initialBuffer, agent, phase, status = '
         const hadText = textRef.current.trim().length > 0
         textRef.current = appendCleanTerminalText(textRef.current, cleanChunk)
         rawTextRef.current += chunk
-        if (!hadText && terminalRef.current) terminalRef.current.reset()
-        terminalRef.current?.write(stripWizardSessionMarkers(chunk))
+        if (!hadText && terminalRef.current) {
+          terminalRef.current.reset()
+          followingLatestRef.current = true
+        }
+        writeVisualChunk(chunk)
       },
     })
     return () => {
       cancelled = true
       conn.close()
     }
-  }, [draftId, phase])
+  }, [draftId, phase, writeVisualChunk])
+
+  useEffect(() => {
+    statusRef.current = status
+    if (status !== 'running') {
+      clearBufferedVisualOutput()
+      followingLatestRef.current = true
+    }
+  }, [clearBufferedVisualOutput, status])
 
   useEffect(() => {
     const container = containerRef.current
@@ -119,19 +175,35 @@ export function AgentLogPanel({ draftId, initialBuffer, agent, phase, status = '
     term.loadAddon(fit)
     term.open(container)
     term.write(stripWizardSessionMarkers(rawTextRef.current) || 'Waiting for agent output...')
-    try { fit.fit() } catch { /* container not measured yet */ }
-    const handleResize = (): void => { try { fit.fit() } catch { /* ignore */ } }
+    let frame: number | null = null
+    const fitNow = (): void => { try { fit.fit() } catch { /* container not measured yet */ } }
+    const scheduleFit = (): void => {
+      if (frame !== null) window.cancelAnimationFrame(frame)
+      frame = window.requestAnimationFrame(() => {
+        frame = null
+        fitNow()
+      })
+    }
+    scheduleFit()
+    const scrollDisposable = term.onScroll(() => {
+      if (statusRef.current !== 'running') return
+      followingLatestRef.current = isAtTerminalBottom(term)
+      if (followingLatestRef.current) flushBufferedVisualOutput(true)
+    })
+    const handleResize = (): void => { scheduleFit() }
     window.addEventListener('resize', handleResize)
     const resizeObserver = new ResizeObserver(handleResize)
     resizeObserver.observe(container)
     return () => {
+      if (frame !== null) window.cancelAnimationFrame(frame)
       window.removeEventListener('resize', handleResize)
       resizeObserver.disconnect()
+      scrollDisposable.dispose()
       unsubscribeTheme()
       terminalRef.current = null
       term.dispose()
     }
-  }, [draftId, status])
+  }, [draftId, flushBufferedVisualOutput, status])
 
   const phaseLabel = phase === 'planning'
     ? 'Plan generation'
@@ -155,11 +227,20 @@ export function AgentLogPanel({ draftId, initialBuffer, agent, phase, status = '
         <span className="font-medium text-zinc-800 dark:text-zinc-200">{phaseLabel}</span>
         {agent && <span className="rounded bg-zinc-100 px-1.5 py-0.5 font-mono text-[10px] uppercase text-zinc-500 dark:bg-zinc-900">{agent}</span>}
         <span className="min-w-0 flex-1" />
-        {status === 'running' && (
+        {status === 'running' && bufferedLineCount === 0 && (
           <span className="inline-flex items-center gap-1.5 rounded bg-emerald-500/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-emerald-700 dark:text-emerald-300">
             <span className="h-1.5 w-1.5 animate-ping rounded-full bg-emerald-500" />
             Running
           </span>
+        )}
+        {status === 'running' && bufferedLineCount > 0 && (
+          <button
+            type="button"
+            onClick={() => flushBufferedVisualOutput(true)}
+            className="rounded bg-sky-500/10 px-2 py-0.5 text-[10px] font-medium text-sky-700 hover:bg-sky-500/20 dark:text-sky-300"
+          >
+            {bufferedLineCount.toLocaleString('en-US')} new {bufferedLineCount === 1 ? 'line' : 'lines'} · Jump latest
+          </button>
         )}
       </div>
       <div
@@ -169,6 +250,16 @@ export function AgentLogPanel({ draftId, initialBuffer, agent, phase, status = '
       />
     </div>
   )
+}
+
+function countDisplayLines(text: string): number {
+  const lines = text.split('\n').filter((line) => line.length > 0)
+  return Math.max(1, lines.length)
+}
+
+function isAtTerminalBottom(term: Terminal): boolean {
+  const { active } = term.buffer
+  return active.viewportY >= active.baseY - 1
 }
 
 function stripWizardSessionMarkers(text: string): string {
