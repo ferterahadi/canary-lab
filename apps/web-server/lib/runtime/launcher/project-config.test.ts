@@ -94,6 +94,11 @@ describe('project config', () => {
     expect(normalizePersonalWikiPath('~')).toBe(fs.realpathSync(os.homedir()))
   })
 
+  it('expands ~/ personal wiki paths', () => {
+    const documents = path.join(os.homedir(), 'Documents')
+    expect(normalizePersonalWikiPath('~/Documents')).toBe(fs.realpathSync(documents))
+  })
+
   it('loads missing or invalid stored personal wiki paths as null', () => {
     const projectRoot = mkProject()
     fs.writeFileSync(projectConfigPath(projectRoot), JSON.stringify({ personalWikiPath: path.join(projectRoot, 'missing') }))
