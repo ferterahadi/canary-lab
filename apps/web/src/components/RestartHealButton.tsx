@@ -18,9 +18,10 @@ function formatRestartError(e: unknown): string {
 
 interface Props {
   runId: string
+  onRestarted?: () => void
 }
 
-export function RestartHealButton({ runId }: Props) {
+export function RestartHealButton({ runId, onRestarted }: Props) {
   const [sending, setSending] = useState(false)
   const [err, setErr] = useState<string | null>(null)
 
@@ -30,6 +31,7 @@ export function RestartHealButton({ runId }: Props) {
     setErr(null)
     try {
       await api.sendAgentInput(runId, '')
+      onRestarted?.()
     } catch (e: unknown) {
       setErr(formatRestartError(e))
     } finally {

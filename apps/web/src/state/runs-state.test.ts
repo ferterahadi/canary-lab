@@ -94,6 +94,21 @@ describe('runsReducer', () => {
     expect(next.details.r1.manifest.status).toBe('passed')
   })
 
+  it('update clears transient action when the server marks the run terminal', () => {
+    const start: RunsState = {
+      ...initialRunsState,
+      runs: [entry({ runId: 'r1', status: 'healing' })],
+      transients: { r1: 'cancelling-heal' },
+    }
+    const next = runsReducer(start, {
+      type: 'update',
+      runId: 'r1',
+      detail: detail({ status: 'failed', endedAt: '2026-01-01T00:05:00Z' }),
+    })
+    expect(next.runs[0].status).toBe('failed')
+    expect(next.transients).toEqual({})
+  })
+
   it('removed drops the run from runs, details, transients, and errors', () => {
     const start: RunsState = {
       runs: [entry({ runId: 'r1' }), entry({ runId: 'r2' })],
@@ -121,6 +136,21 @@ describe('runsReducer', () => {
     })
     expect(next.runs.map((r) => r.runId)).toEqual(['fresh'])
     expect(next.details.old).toBeDefined()
+  })
+
+  it('list-changed clears transient actions for terminal runs', () => {
+    const start: RunsState = {
+      ...initialRunsState,
+      transients: { r1: 'cancelling-heal', r2: 'aborting' },
+    }
+    const next = runsReducer(start, {
+      type: 'list-changed',
+      runs: [
+        entry({ runId: 'r1', status: 'failed' }),
+        entry({ runId: 'r2', status: 'running' }),
+      ],
+    })
+    expect(next.transients).toEqual({ r2: 'aborting' })
   })
 
   it('connection updates only the connection field', () => {

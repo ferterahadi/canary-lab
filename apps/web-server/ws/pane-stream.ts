@@ -143,27 +143,9 @@ function replayLogFile(
   return true
 }
 
-const ESC = '\u001b'
-const TERMINAL_CONTROL_PATTERNS = [
-  new RegExp(`${ESC}\\[[0-?]*[ -/]*[@-~]`, 'g'),
-  new RegExp(`${ESC}\\][^\\u0007]*(?:\\u0007|${ESC}\\\\)`, 'g'),
-  new RegExp(`${ESC}[PX^_][\\s\\S]*?${ESC}\\\\`, 'g'),
-  new RegExp(`${ESC}[@-_]`, 'g'),
-]
-
 export function formatHistoricalPaneReplay(paneId: string, raw: string): string {
-  if (paneId !== 'agent') return raw
-  let output = raw
-  for (const pattern of TERMINAL_CONTROL_PATTERNS) {
-    output = output.replace(pattern, '')
-  }
-  return output
-    .replace(/\r(?!\n)/g, '\n')
-    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '')
-    .replace(/\[(?:\?|>|<)[0-9;]*[A-Za-z]/g, '')
-    .replace(/\][0-9]+;[^\n\r]*/g, '')
-    .replace(/[ \t]+\n/g, '\n')
-    .replace(/\n{4,}/g, '\n\n\n')
+  void paneId
+  return raw
 }
 
 /**
