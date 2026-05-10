@@ -1001,9 +1001,28 @@ describe('reject and delete', () => {
       payload: { prdText: 'X', repos: [{ name: 'a', localPath: '/' }] },
     })
     const id = post.json().draftId
+    const rec = readDraft(logsDir, id)!
+    writeDraft(logsDir, { ...rec, status: 'plan-ready' })
     const r = await app.inject({ method: 'POST', url: `/api/tests/draft/${id}/reject` })
     expect(r.statusCode).toBe(204)
     expect(readDraft(logsDir, id)?.status).toBe('rejected')
+    await app.close()
+  })
+
+  it('does not reject while generation is active', async () => {
+    const app = await makeApp(makeDeps({
+      spawnPlanAgent: async () => new Promise<string>(() => {}),
+    }))
+    const post = await app.inject({
+      method: 'POST',
+      url: '/api/tests/draft',
+      payload: { prdText: 'X', repos: [{ name: 'a', localPath: '/' }] },
+    })
+    const id = post.json().draftId
+    const r = await app.inject({ method: 'POST', url: `/api/tests/draft/${id}/reject` })
+    expect(r.statusCode).toBe(409)
+    expect(r.json().error).toContain('stop generation first')
+    expect(readDraft(logsDir, id)?.status).toBe('planning')
     await app.close()
   })
 

@@ -5,6 +5,9 @@ import {
   resultSummary,
   tag,
   toolSummary,
+  formatFullToolResult,
+  inspectionSummary,
+  toolResultText,
   truncate,
 } from './wizard-claude-formatter'
 
@@ -40,6 +43,14 @@ describe('wizard claude formatter', () => {
     expect(resultSummary('\nfirst\nsecond')).toBe('first')
     expect(resultSummary([{ type: 'text', text: 'array first\narray second' }])).toBe('array first')
     expect(resultSummary([{ type: 'image', source: 'ignored' }])).toBe('')
+    expect(toolResultText([{ type: 'text', text: 'array first' }, { type: 'text', text: 'array second' }]))
+      .toBe('array first\narray second')
+    expect(formatFullToolResult('first\nsecond')).toContain('second')
+    expect(inspectionSummary({ name: 'Read', input: {} }, 'abc')).toBe('Number of characters: 3')
+    expect(inspectionSummary({ name: 'Glob', input: {} }, 'a.ts\nb.ts\n')).toBe('Number of files: 2')
+    expect(inspectionSummary({ name: 'Grep', input: {} }, 'a:1\nb:2\n')).toBe('Number of matches: 2')
+    expect(inspectionSummary({ name: 'Bash', input: { command: 'ls apps' } }, 'a\nb\n')).toBe('Number of files: 2')
+    expect(inspectionSummary({ name: 'Bash', input: { command: 'npm test' } }, 'ok')).toBeNull()
     expect(resultSummary(123)).toBe('')
     const circular: Record<string, unknown> = {}
     circular.self = circular
@@ -140,7 +151,7 @@ describe('wizard claude formatter', () => {
     expect(out.match(/spec output/g)).toHaveLength(1)
   })
 
-  it('prints thinking and tool progress, then summarizes successful tool results', () => {
+  it('prints thinking and tool progress, then prints full successful tool results', () => {
     handleLine(JSON.stringify({
       type: 'assistant',
       message: {
@@ -163,6 +174,89 @@ describe('wizard claude formatter', () => {
     expect(out).toContain('echo ok')
     expect(out).toContain('->')
     expect(out).toContain('ok')
+    expect(out).toContain('second line')
+    expect(out).not.toContain('more lines')
+  })
+
+  it('summarizes successful Read tool result content while keeping the file path visible', () => {
+    handleLine(JSON.stringify({
+      type: 'assistant',
+      message: {
+        content: [
+          { type: 'tool_use', id: 'tool-read', name: 'Read', input: { file_path: 'README.md' } },
+        ],
+      },
+    }))
+    handleLine(JSON.stringify({
+      type: 'user',
+      message: {
+        content: [{
+          type: 'tool_result',
+          tool_use_id: 'tool-read',
+          content: '1\t# Secret read body\n2\tDo not display this line',
+        }],
+      },
+    }))
+    const out = writes.join('')
+    expect(out).toContain('Read')
+    expect(out).toContain('README.md')
+    expect(out).toContain('Number of characters:')
+    expect(out).not.toContain('Secret read body')
+    expect(out).not.toContain('Do not display this line')
+  })
+
+  it('summarizes Glob, Grep, and Bash ls results without displaying their contents', () => {
+    handleLine(JSON.stringify({
+      type: 'assistant',
+      message: {
+        content: [
+          { type: 'tool_use', id: 'glob-1', name: 'Glob', input: { pattern: '**/*.ts' } },
+          { type: 'tool_use', id: 'grep-1', name: 'Grep', input: { pattern: 'secret' } },
+          { type: 'tool_use', id: 'bash-1', name: 'Bash', input: { command: 'ls apps/web' } },
+        ],
+      },
+    }))
+    handleLine(JSON.stringify({
+      type: 'user',
+      message: {
+        content: [
+          { type: 'tool_result', tool_use_id: 'glob-1', content: 'apps/web/a.ts\napps/web/b.ts\n' },
+          { type: 'tool_result', tool_use_id: 'grep-1', content: 'apps/web/a.ts:secret\napps/web/b.ts:secret\n' },
+          { type: 'tool_result', tool_use_id: 'bash-1', content: 'src\nvite.config.ts\n' },
+        ],
+      },
+    }))
+    const out = writes.join('')
+    expect(out).toContain('Number of files: 2')
+    expect(out).toContain('Number of matches: 2')
+    expect(out).not.toContain('apps/web/a.ts')
+    expect(out).not.toContain('apps/web/b.ts:secret')
+    expect(out).not.toContain('vite.config.ts')
+  })
+
+  it('keeps Read errors visible', () => {
+    handleLine(JSON.stringify({
+      type: 'assistant',
+      message: {
+        content: [
+          { type: 'tool_use', id: 'tool-read-error', name: 'Read', input: { file_path: 'missing.md' } },
+        ],
+      },
+    }))
+    handleLine(JSON.stringify({
+      type: 'user',
+      message: {
+        content: [{
+          type: 'tool_result',
+          tool_use_id: 'tool-read-error',
+          content: 'file not found',
+          is_error: true,
+        }],
+      },
+    }))
+    const out = writes.join('')
+    expect(out).toContain('missing.md')
+    expect(out).toContain('file not found')
   })
 
   it('handles empty thinking, array tool results, unknown tools, and tool errors', () => {

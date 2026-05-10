@@ -109,7 +109,7 @@ export function ConfigureStep({
     try {
       const exists = await api.checkPathExists(localPath)
       if (!exists.exists) {
-        setRepoAddError('That folder does not exist')
+        setRepoAddError('Path not found')
         return
       }
       const name = repoNameFromPath(localPath).trim()
@@ -125,7 +125,7 @@ export function ConfigureStep({
       })
       setRepoPathDraft('')
     } catch (e) {
-      setRepoAddError(e instanceof Error ? e.message : 'Failed to add repository')
+      setRepoAddError(repoPathAddErrorMessage(e))
     } finally {
       setRepoAdding(false)
     }
@@ -558,4 +558,20 @@ function repoNameFromPath(localPath: string): string {
   const trimmed = localPath.replace(/[\\/]+$/g, '')
   const parts = trimmed.split(/[\\/]+/)
   return parts[parts.length - 1] || 'repo'
+}
+
+export function repoPathAddErrorMessage(err: unknown): string {
+  if (err instanceof api.ApiError) {
+    if (err.status === 400 || err.status === 404) return 'Path not found'
+    const serverMessage = apiErrorBodyMessage(err.body)
+    if (serverMessage) return serverMessage
+  }
+  return err instanceof Error ? err.message : 'Failed to add repository'
+}
+
+function apiErrorBodyMessage(body: unknown): string | null {
+  if (!body || typeof body !== 'object') return null
+  const maybeMessage = (body as { error?: unknown; reason?: unknown }).error
+    ?? (body as { error?: unknown; reason?: unknown }).reason
+  return typeof maybeMessage === 'string' && maybeMessage.trim() ? maybeMessage : null
 }

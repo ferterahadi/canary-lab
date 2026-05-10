@@ -221,7 +221,7 @@ export function PlanReviewStep({ draft, onAccept, onReject, onRetry, onCancelGen
               type="button"
               onClick={onReject}
               disabled={acting || generationActive}
-              className="rounded border border-zinc-300 dark:border-zinc-700 px-3 py-1.5 text-xs text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-800 disabled:opacity-50"
+              className="rounded border border-zinc-300 dark:border-zinc-700 px-3 py-1.5 text-xs text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50"
             >
               Reject
             </button>

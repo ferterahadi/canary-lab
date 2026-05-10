@@ -2,8 +2,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   cleanCommand,
   elapsed,
+  formatCommandOutput,
   handleCompleted,
   handleLine,
+  inspectionSummary,
+  parseInspectionCommand,
+  parseReadCommand,
   summarizeOutput,
   tag,
   truncate,
@@ -34,6 +38,18 @@ describe('wizard codex formatter', () => {
     expect(cleanCommand('git status')).toBe('git status')
     expect(summarizeOutput('')).toBe('(no output)')
     expect(summarizeOutput('\nfirst\nsecond')).toBe('first')
+    expect(formatCommandOutput('first\nsecond')).toContain('second')
+    expect(formatCommandOutput('   ')).toBeNull()
+    expect(parseReadCommand('cat README.md')?.label).toBe('README.md')
+    expect(parseReadCommand("sed -n '10,20p' apps/web/server.ts")?.label).toBe('apps/web/server.ts L10-20')
+    expect(parseInspectionCommand('ls apps/web')).toEqual({ kind: 'List', label: 'apps/web' })
+    expect(parseInspectionCommand('find apps -name "*.ts"')?.kind).toBe('Glob')
+    expect(parseInspectionCommand('rg "secret" apps')?.kind).toBe('Grep')
+    expect(parseReadCommand('npm test')).toBeNull()
+    expect(inspectionSummary('Read', 'abc')).toBe('Number of characters: 3')
+    expect(inspectionSummary('List', 'a\nb\n')).toBe('Number of files: 2')
+    expect(inspectionSummary('Glob', 'a\nb\n')).toBe('Number of files: 2')
+    expect(inspectionSummary('Grep', 'a:1\nb:2\n')).toBe('Number of matches: 2')
   })
 
   it('ignores empty, invalid, and incomplete payloads', () => {
@@ -80,7 +96,7 @@ describe('wizard codex formatter', () => {
     expect(out).toContain('thinking thinking about a fix')
   })
 
-  it('prints command states and output summaries', () => {
+  it('prints command states and full output', () => {
     handleCompleted({
       type: 'command_execution',
     })
@@ -106,9 +122,98 @@ describe('wizard codex formatter', () => {
     expect(out).toContain('command  (running)')
     expect(out).toContain('command npm run test (ok)')
     expect(out).toContain('output pass')
+    expect(out).toContain('second line')
     expect(out).toContain('command npm run dev (running)')
     expect(out).toContain('command npm run lint (exit 2)')
     expect(out).toContain('lint failed')
+  })
+
+  it('summarizes successful read-like command output while keeping the read target visible', () => {
+    handleCompleted({
+      type: 'command_execution',
+      command: 'cat README.md',
+      exit_code: 0,
+      aggregated_output: '# Secret read body\nDo not display this line',
+    })
+    handleCompleted({
+      type: 'command_execution',
+      command: "sed -n '10,20p' apps/web/server.ts",
+      exit_code: 0,
+      aggregated_output: 'const secret = true',
+    })
+    handleCompleted({
+      type: 'command_execution',
+      command: 'head -n 5 package.json',
+      exit_code: 0,
+      aggregated_output: '{ "private": true }',
+    })
+    handleCompleted({
+      type: 'command_execution',
+      command: 'tail -20 logs/run.log',
+      exit_code: 0,
+      aggregated_output: 'last log line',
+    })
+    const out = writes.join('')
+    expect(out).toContain('Read README.md (ok)')
+    expect(out).toContain('Read apps/web/server.ts L10-20 (ok)')
+    expect(out).toContain('Read package.json (ok)')
+    expect(out).toContain('Read logs/run.log (ok)')
+    expect(out.match(/Number of characters:/g)).toHaveLength(4)
+    expect(out).not.toContain('Secret read body')
+    expect(out).not.toContain('const secret')
+    expect(out).not.toContain('"private"')
+    expect(out).not.toContain('last log line')
+  })
+
+  it('summarizes listing and grep output without displaying its contents', () => {
+    handleCompleted({
+      type: 'command_execution',
+      command: 'ls apps/web',
+      exit_code: 0,
+      aggregated_output: 'src\nvite.config.ts',
+    })
+    handleCompleted({
+      type: 'command_execution',
+      command: 'find apps -name "*.ts"',
+      exit_code: 0,
+      aggregated_output: 'apps/a.ts\napps/b.ts',
+    })
+    handleCompleted({
+      type: 'command_execution',
+      command: 'rg "secret" apps',
+      exit_code: 0,
+      aggregated_output: 'apps/a.ts:secret\napps/b.ts:secret',
+    })
+    const out = writes.join('')
+    expect(out).toContain('List apps/web (ok)')
+    expect(out).toContain('Glob apps -name "*.ts" (ok)')
+    expect(out).toContain('Grep "secret" apps (ok)')
+    expect(out).toContain('Number of files: 2')
+    expect(out).toContain('Number of matches: 2')
+    expect(out).not.toContain('vite.config.ts')
+    expect(out).not.toContain('apps/a.ts')
+    expect(out).not.toContain('apps/a.ts:secret')
+  })
+
+  it('keeps ordinary command output visible and inspection errors visible', () => {
+    handleCompleted({
+      type: 'command_execution',
+      command: 'npm run test',
+      exit_code: 0,
+      aggregated_output: 'pass\nsecond line',
+    })
+    handleCompleted({
+      type: 'command_execution',
+      command: 'cat missing.md',
+      exit_code: 1,
+      aggregated_output: 'cat: missing.md: No such file or directory',
+    })
+    const out = writes.join('')
+    expect(out).toContain('command npm run test (ok)')
+    expect(out).toContain('pass')
+    expect(out).toContain('second line')
+    expect(out).toContain('Read missing.md (exit 1)')
+    expect(out).toContain('No such file or directory')
   })
 
   it('prints file changes and defaults missing fields', () => {

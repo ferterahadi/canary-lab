@@ -8,7 +8,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('../apps/web-server/server', () => ({ createServer: mocks.createServer }))
 vi.mock('../apps/web-server/lib/open-browser', () => ({ openBrowser: mocks.openBrowser }))
 
-const { runUi } = await import('./ui-command')
+const { parsePort, runUi } = await import('./ui-command')
 
 const originalBeforeExitListeners = process.listeners('beforeExit')
 const originalSigintListeners = process.listeners('SIGINT')
@@ -42,7 +42,20 @@ afterEach(() => {
 })
 
 describe('runUi signal cleanup', () => {
-  it('stops active runs before reverting envsets and exiting on SIGINT', async () => {
+  it('does not start the server when the requested port is invalid', async () => {
+    const exit = vi.fn()
+
+    await runUi(['--port', '12abc'], {
+      projectRoot: '/tmp/canary-lab-workspace',
+      log: () => {},
+      exit,
+    })
+
+    expect(exit).toHaveBeenCalledExactlyOnceWith(1)
+    expect(mocks.createServer).not.toHaveBeenCalled()
+  })
+
+  it('asks for confirmation before stopping active runs on SIGINT', async () => {
     const events: string[] = []
     const runStore = {
       abortAllActiveOrStale: vi.fn(async () => { events.push('abort-all') }),
@@ -69,6 +82,10 @@ describe('runUi signal cleanup', () => {
       projectRoot: '/tmp/canary-lab-workspace',
       log: () => {},
       exit,
+      confirmShutdown: async () => {
+        events.push('confirm')
+        return true
+      },
     })
 
     process.emit('SIGINT')
@@ -80,11 +97,82 @@ describe('runUi signal cleanup', () => {
     expect(app.close).toHaveBeenCalledOnce()
     expect(exit).toHaveBeenCalledExactlyOnceWith(130)
     expect(events).toEqual([
+      'confirm',
       'cancel-wizard',
       'abort-all',
       'revert',
       'close',
       'exit-130',
+    ])
+  })
+
+  it('keeps the UI running when SIGINT shutdown is cancelled', async () => {
+    const messages: string[] = []
+    const runStore = {
+      abortAllActiveOrStale: vi.fn(),
+    }
+    const app = {
+      listen: vi.fn(async () => {}),
+      close: vi.fn(),
+    }
+    const revertAllEnvsets = vi.fn()
+    const cancelAllWizardAgents = vi.fn()
+    const exit = vi.fn()
+
+    mocks.createServer.mockResolvedValue({
+      app,
+      registry: {},
+      revertAllEnvsets,
+      cancelAllWizardAgents,
+      runStore,
+      brokers: new Map(),
+      draftBrokers: new Map(),
+    })
+
+    await runUi(['--no-open'], {
+      projectRoot: '/tmp/canary-lab-workspace',
+      log: (msg) => { messages.push(msg) },
+      exit,
+      confirmShutdown: async () => false,
+    })
+
+    process.emit('SIGINT')
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(cancelAllWizardAgents).not.toHaveBeenCalled()
+    expect(runStore.abortAllActiveOrStale).not.toHaveBeenCalled()
+    expect(revertAllEnvsets).not.toHaveBeenCalled()
+    expect(app.close).not.toHaveBeenCalled()
+    expect(exit).not.toHaveBeenCalled()
+    expect(messages).toContain('Shutdown cancelled. Canary Lab is still running.')
+  })
+})
+
+describe('parsePort', () => {
+  it('parses --port and --port=<n>', () => {
+    expect(parsePort(['--port', '8123'])).toBe(8123)
+    expect(parsePort(['--port=8124'])).toBe(8124)
+  })
+
+  it('rejects missing, non-numeric, partial, and out-of-range ports', () => {
+    const messages: string[] = []
+    const exit = vi.fn()
+    const opts = {
+      log: (msg: string) => { messages.push(msg) },
+      exit,
+    }
+
+    expect(parsePort(['--port'], opts)).toBeUndefined()
+    expect(parsePort(['--port', '12abc'], opts)).toBeUndefined()
+    expect(parsePort(['--port=0'], opts)).toBeUndefined()
+    expect(parsePort(['--port=65536'], opts)).toBeUndefined()
+
+    expect(exit).toHaveBeenCalledTimes(4)
+    expect(messages).toEqual([
+      'Usage: canary-lab ui [--port <n>] [--no-open]',
+      'Invalid port "12abc". Use a number between 1 and 65535.',
+      'Invalid port "0". Use a number between 1 and 65535.',
+      'Invalid port "65536". Use a number between 1 and 65535.',
     ])
   })
 })
