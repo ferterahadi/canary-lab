@@ -101,6 +101,65 @@ function formatMetric(label: string, count: number): string {
   return `${label}: ${count.toLocaleString('en-US')}`
 }
 
+function splitShellPipes(command: string): string[] {
+  const segments: string[] = []
+  let current = ''
+  let quote: '"' | "'" | null = null
+  let escaped = false
+
+  for (const ch of command) {
+    if (escaped) {
+      current += ch
+      escaped = false
+      continue
+    }
+    if (ch === '\\') {
+      current += ch
+      escaped = true
+      continue
+    }
+    if (quote) {
+      if (ch === quote) quote = null
+      current += ch
+      continue
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch
+      current += ch
+      continue
+    }
+    if (ch === '|') {
+      segments.push(current.trim())
+      current = ''
+      continue
+    }
+    current += ch
+  }
+  segments.push(current.trim())
+  return segments.filter(Boolean)
+}
+
+function bashInspectionSummary(command: string, text: string): string | null {
+  if (/^(ls|find)(?:\s|$)/.test(command)) {
+    return formatMetric('Number of files', countNonEmptyLines(text))
+  }
+
+  const segments = splitShellPipes(command)
+  const [inspection, ...pipes] = segments
+  const inspectionLike = segments.some((segment) => /(?:^|[\s;&()])(grep|rg|ls|find)(?:\s|$)/.test(segment))
+  if (!inspection || !/^(grep|rg)(?:\s|$)/.test(inspection)) {
+    return inspectionLike ? 'Content read.' : null
+  }
+  if (!pipes.every((pipe) => /^(head|sort|wc)(?:\s|$)/.test(pipe))) return 'Content read.'
+
+  const wcLineCount = pipes.some((pipe) => /^wc(?:\s|$)/.test(pipe) && /(?:^|\s)-l(?:\s|$)/.test(pipe))
+  if (wcLineCount) {
+    const match = text.trim().match(/^(\d+)/)
+    if (match) return formatMetric('Number of matches', Number(match[1]))
+  }
+  return formatMetric('Number of matches', countNonEmptyLines(text))
+}
+
 function inspectionSummary(tool: PendingTool | undefined, text: string): string | null {
   if (!tool) return null
   if (tool.name === 'Read') return formatMetric('Number of characters', text.length)
@@ -109,10 +168,7 @@ function inspectionSummary(tool: PendingTool | undefined, text: string): string 
   if (tool.name !== 'Bash') return null
 
   const command = String(tool.input.command ?? '').trim()
-  if (/^(ls|find)(?:\s|$)/.test(command)) {
-    return formatMetric('Number of files', countNonEmptyLines(text))
-  }
-  return null
+  return bashInspectionSummary(command, text)
 }
 
 function isPartialAssistantMessage(msg: AnyObj): boolean {
@@ -267,6 +323,7 @@ export {
   toolResultText,
   formatFullToolResult,
   countNonEmptyLines,
+  splitShellPipes,
   inspectionSummary,
   handleLine,
 }

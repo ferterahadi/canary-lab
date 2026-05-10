@@ -88,15 +88,28 @@ describe('AgentLogPanel', () => {
     expect(terminalState.options[0]?.scrollback).toBe(100_000)
   })
 
+  it('fills available wizard space while generation is running', async () => {
+    vi.mocked(getDraftAgentLog).mockResolvedValue({ content: 'full log\n' })
+
+    await act(async () => {
+      root.render(<AgentLogPanel draftId="d1" phase="planning" status="running" variant="fill" />)
+    })
+
+    expect(container.innerHTML).toContain('h-full')
+    expect(container.innerHTML).toContain('flex-1')
+    expect(container.innerHTML).toContain('overflow-hidden')
+    expect(container.innerHTML).not.toContain('h-[min(52vh,34rem)]')
+  })
+
   it('caps the visible log panel height so stopped output scrolls internally', async () => {
     vi.mocked(getDraftAgentLog).mockResolvedValue({ content: 'full log\n' })
 
     await act(async () => {
-      root.render(<AgentLogPanel draftId="d1" phase="generating" status="idle" />)
+      root.render(<AgentLogPanel draftId="d1" phase="generating" status="idle" variant="bounded" />)
     })
 
     expect(container.innerHTML).toContain('max-h-')
-    expect(container.innerHTML).toContain('h-')
+    expect(container.innerHTML).toContain('h-[min(52vh,34rem)]')
     expect(container.innerHTML).toContain('overflow-hidden')
   })
 

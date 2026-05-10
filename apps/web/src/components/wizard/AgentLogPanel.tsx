@@ -31,14 +31,14 @@ interface Props {
   agent?: 'claude' | 'codex'
   phase?: 'planning' | 'generating'
   status?: 'running' | 'failed' | 'idle'
-  compact?: boolean
+  variant?: 'fill' | 'bounded'
   className?: string
 }
 
 // Terminal-like live stream for wizard agent stdout. Keep a cleaned shadow
 // buffer for readiness checks, but write raw chunks to xterm so formatter ANSI
 // styling survives.
-export function AgentLogPanel({ draftId, initialBuffer, agent, phase, status = 'running', className = '' }: Props) {
+export function AgentLogPanel({ draftId, initialBuffer, agent, phase, status = 'running', variant, className = '' }: Props) {
   const terminalRef = useRef<Terminal | null>(null)
   const containerRef = useRef<HTMLDivElement | null>(null)
   const textRef = useRef(stripTerminalControls(initialBuffer ?? ''))
@@ -138,9 +138,16 @@ export function AgentLogPanel({ draftId, initialBuffer, agent, phase, status = '
     : phase === 'generating'
       ? 'Spec generation'
       : 'Agent output'
+  const layoutVariant = variant ?? (status === 'running' ? 'fill' : 'bounded')
+  const panelClassName = layoutVariant === 'fill'
+    ? 'flex h-full min-h-0 flex-1 flex-col overflow-hidden rounded border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950'
+    : 'flex min-h-0 max-h-[min(70vh,44rem)] flex-col overflow-hidden rounded border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950'
+  const terminalClassName = layoutVariant === 'fill'
+    ? 'min-h-0 flex-1 overflow-hidden p-2'
+    : 'h-[min(52vh,34rem)] min-h-[18rem] flex-1 overflow-hidden p-2'
 
   return (
-    <div className={`flex min-h-0 max-h-[min(70vh,44rem)] flex-col rounded border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950 ${className}`}>
+    <div className={`${panelClassName} ${className}`}>
       <div className="flex items-center gap-2 border-b border-zinc-200 px-3 py-2 text-xs dark:border-zinc-800">
         {status === 'running' && <span className="h-2 w-2 animate-pulse rounded-full bg-emerald-500" />}
         {status === 'failed' && <span className="h-2 w-2 rounded-full bg-rose-500" />}
@@ -157,7 +164,7 @@ export function AgentLogPanel({ draftId, initialBuffer, agent, phase, status = '
       </div>
       <div
         ref={containerRef}
-        className="h-[min(52vh,34rem)] min-h-[18rem] flex-1 overflow-hidden p-2"
+        className={terminalClassName}
         style={{ background: 'var(--bg-base)' }}
       />
     </div>

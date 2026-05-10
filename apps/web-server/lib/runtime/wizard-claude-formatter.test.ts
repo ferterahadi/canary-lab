@@ -7,6 +7,7 @@ import {
   toolSummary,
   formatFullToolResult,
   inspectionSummary,
+  splitShellPipes,
   toolResultText,
   truncate,
 } from './wizard-claude-formatter'
@@ -46,10 +47,16 @@ describe('wizard claude formatter', () => {
     expect(toolResultText([{ type: 'text', text: 'array first' }, { type: 'text', text: 'array second' }]))
       .toBe('array first\narray second')
     expect(formatFullToolResult('first\nsecond')).toContain('second')
+    expect(splitShellPipes('grep -E "className|id=|type=" app.ts | head -50'))
+      .toEqual(['grep -E "className|id=|type=" app.ts', 'head -50'])
     expect(inspectionSummary({ name: 'Read', input: {} }, 'abc')).toBe('Number of characters: 3')
     expect(inspectionSummary({ name: 'Glob', input: {} }, 'a.ts\nb.ts\n')).toBe('Number of files: 2')
     expect(inspectionSummary({ name: 'Grep', input: {} }, 'a:1\nb:2\n')).toBe('Number of matches: 2')
     expect(inspectionSummary({ name: 'Bash', input: { command: 'ls apps' } }, 'a\nb\n')).toBe('Number of files: 2')
+    expect(inspectionSummary({ name: 'Bash', input: { command: 'rg "needle" apps | head -50' } }, 'a\nb\n')).toBe('Number of matches: 2')
+    expect(inspectionSummary({ name: 'Bash', input: { command: 'grep needle apps/a.ts | wc -l' } }, '12\n')).toBe('Number of matches: 12')
+    expect(inspectionSummary({ name: 'Bash', input: { command: 'grep needle apps/a.ts | awk \'{print $1}\'' } }, 'secret')).toBe('Content read.')
+    expect(inspectionSummary({ name: 'Bash', input: { command: 'if test -d apps; then find apps -type f; fi' } }, 'apps/a.ts')).toBe('Content read.')
     expect(inspectionSummary({ name: 'Bash', input: { command: 'npm test' } }, 'ok')).toBeNull()
     expect(resultSummary(123)).toBe('')
     const circular: Record<string, unknown> = {}
@@ -232,6 +239,76 @@ describe('wizard claude formatter', () => {
     expect(out).not.toContain('apps/web/a.ts')
     expect(out).not.toContain('apps/web/b.ts:secret')
     expect(out).not.toContain('vite.config.ts')
+  })
+
+  it('summarizes Bash grep pipelines without displaying matching source lines', () => {
+    handleLine(JSON.stringify({
+      type: 'assistant',
+      message: {
+        content: [
+          {
+            type: 'tool_use',
+            id: 'bash-grep-1',
+            name: 'Bash',
+            input: {
+              command: 'grep -E "className|id=|placeholder|type=" /Users/fernandi/Documents/tiktok-portal/src/main.tsx | head -50',
+            },
+          },
+        ],
+      },
+    }))
+    handleLine(JSON.stringify({
+      type: 'user',
+      message: {
+        content: [{
+          type: 'tool_result',
+          tool_use_id: 'bash-grep-1',
+          content: [
+            '    <footer className="footer-links">',
+            '      <main className={narrow ? "shell narrow" : "shell"}>',
+            '        <section className="panel">',
+            '        <button className="primary" type="button">Refresh tokens</button>',
+          ].join('\n'),
+        }],
+      },
+    }))
+
+    const out = writes.join('')
+    expect(out).toContain('Bash')
+    expect(out).toContain('grep -E')
+    expect(out).toContain('Number of matches: 4')
+    expect(out).not.toContain('<section className="panel">')
+    expect(out).not.toContain('Refresh tokens')
+  })
+
+  it('hides successful inspection-like Bash output even when the pipeline is unknown', () => {
+    handleLine(JSON.stringify({
+      type: 'assistant',
+      message: {
+        content: [
+          {
+            type: 'tool_use',
+            id: 'bash-grep-awk',
+            name: 'Bash',
+            input: { command: 'grep "secret" apps/web/a.ts | awk \'{print $1}\'' },
+          },
+        ],
+      },
+    }))
+    handleLine(JSON.stringify({
+      type: 'user',
+      message: {
+        content: [{
+          type: 'tool_result',
+          tool_use_id: 'bash-grep-awk',
+          content: 'apps/web/a.ts:secret-token',
+        }],
+      },
+    }))
+
+    const out = writes.join('')
+    expect(out).toContain('Content read.')
+    expect(out).not.toContain('secret-token')
   })
 
   it('keeps Read errors visible', () => {
