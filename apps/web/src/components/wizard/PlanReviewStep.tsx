@@ -60,6 +60,9 @@ export function PlanReviewStep({ draft, onAccept, onReject, onRetry, onCancelGen
   const editedPlan = editable ? planMarkdown.map(parsePlanStepMarkdown) : plan
   const errors = validatePlan(editedPlan)
   const hasErrors = errors.length > 0
+  const bodyClassName = status === 'planning'
+    ? 'flex-1 min-h-0 overflow-hidden p-6'
+    : 'flex-1 min-h-0 overflow-y-auto p-6'
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
@@ -93,7 +96,7 @@ export function PlanReviewStep({ draft, onAccept, onReject, onRetry, onCancelGen
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex-1 min-h-0 overflow-y-auto p-6">
+      <div className={bodyClassName}>
         <div className={`mx-auto max-w-3xl ${status === 'planning' ? 'flex h-full min-h-0 flex-col gap-4' : 'space-y-4'}`}>
           {status === 'planning' && (
             <>
@@ -114,7 +117,7 @@ export function PlanReviewStep({ draft, onAccept, onReject, onRetry, onCancelGen
                 agent={draft.wizardAgent}
                 phase="planning"
                 status="running"
-                compact
+                variant="fill"
                 className="flex-1"
               />
             </>
@@ -139,7 +142,7 @@ export function PlanReviewStep({ draft, onAccept, onReject, onRetry, onCancelGen
                 agent={draft.wizardAgent}
                 phase="planning"
                 status="idle"
-                compact
+                variant="bounded"
                 className="min-h-[24rem]"
               />
             </>

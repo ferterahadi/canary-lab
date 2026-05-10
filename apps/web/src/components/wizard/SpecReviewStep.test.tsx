@@ -81,6 +81,27 @@ describe('SpecReviewStep', () => {
     const reject = buttonByText(html, 'Reject')
     expect(reject?.hasAttribute('disabled')).toBe(true)
     expect(reject?.className).toContain('disabled:cursor-not-allowed')
+    expect(html).toContain('overflow-hidden p-6')
+    expect(html).toContain('flex h-full min-h-0 flex-1 flex-col overflow-hidden')
+    expect(html).not.toContain('max-h-[min(70vh,44rem)]')
+  })
+
+  it('keeps cancelled spec output bounded in a scrollable body', () => {
+    const html = renderToStaticMarkup(
+      <SpecReviewStep
+        draft={draft({ status: 'cancelled' })}
+        featureName="login_flow"
+        onAccept={vi.fn()}
+        onReject={vi.fn()}
+        onRetry={vi.fn()}
+        onCancelGeneration={vi.fn()}
+        acting={false}
+      />,
+    )
+
+    expect(html).toContain('overflow-y-auto p-6')
+    expect(html).toContain('max-h-[min(70vh,44rem)]')
+    expect(html).toContain('h-[min(52vh,34rem)]')
   })
 
   it('leaves reject enabled once spec files are ready', () => {

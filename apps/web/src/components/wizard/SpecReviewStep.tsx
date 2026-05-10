@@ -30,10 +30,13 @@ export function SpecReviewStep({
   const { status } = draft
   const generationActive = status === 'planning' || status === 'generating'
   const visibleFiles = (draft.generatedFiles ?? []).filter((file) => file.endsWith('.spec.ts'))
+  const bodyClassName = status === 'generating'
+    ? 'flex-1 min-h-0 overflow-hidden p-6'
+    : 'flex-1 min-h-0 overflow-y-auto p-6'
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex-1 min-h-0 overflow-y-auto p-6">
+      <div className={bodyClassName}>
         <div className={`mx-auto max-w-3xl ${status === 'generating' ? 'flex h-full min-h-0 flex-col gap-4' : 'space-y-4'}`}>
           {status === 'generating' && (
             <>
@@ -54,7 +57,7 @@ export function SpecReviewStep({
                 agent={draft.wizardAgent}
                 phase="generating"
                 status="running"
-                compact
+                variant="fill"
                 className="flex-1"
               />
             </>
@@ -79,7 +82,7 @@ export function SpecReviewStep({
                 agent={draft.wizardAgent}
                 phase={draft.activeAgentStage ?? 'generating'}
                 status="idle"
-                compact
+                variant="bounded"
                 className="min-h-[24rem]"
               />
             </>
