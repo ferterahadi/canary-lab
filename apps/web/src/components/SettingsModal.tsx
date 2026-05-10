@@ -94,11 +94,11 @@ export function SettingsModal({ onClose }: Props) {
 
   return (
     <div
-      className="cl-modal-backdrop fixed inset-0 z-40 flex items-center justify-center"
+      className="cl-modal-backdrop fixed inset-0 z-40 flex items-center justify-center p-4"
       onClick={onClose}
     >
       <div
-        className="cl-modal relative w-[480px] rounded-lg"
+        className="cl-modal relative flex max-h-[calc(100vh-2rem)] w-[min(480px,100%)] flex-col overflow-hidden rounded-lg"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="cl-panel-header flex items-center justify-between px-4 py-3">
@@ -114,7 +114,7 @@ export function SettingsModal({ onClose }: Props) {
             ✕
           </button>
         </div>
-        <div className="px-4 py-3">
+        <div className="min-h-0 overflow-y-auto px-4 py-3">
           {!draft ? (
             <div className="text-xs" style={{ color: 'var(--text-muted)' }}>
               {error ?? 'Loading…'}
@@ -122,6 +122,25 @@ export function SettingsModal({ onClose }: Props) {
           ) : (
             <>
               <div className="text-[10px] uppercase tracking-wider mb-2" style={{ color: 'var(--text-muted)' }}>
+                Personal wiki
+              </div>
+              <input
+                type="text"
+                value={draft.personalWikiPath ?? ''}
+                onChange={(e) => setDraft({ ...draft, personalWikiPath: e.target.value.trim() ? e.target.value : null })}
+                placeholder="~/Documents/wiki"
+                className="w-full rounded-md px-2.5 py-1.5 text-xs outline-none"
+                style={{
+                  background: 'var(--bg-elevated)',
+                  border: '1px solid var(--border-default)',
+                  color: 'var(--text-primary)',
+                  fontFamily: 'var(--font-mono)',
+                }}
+              />
+              <div className="mt-1 text-xs" style={{ color: 'var(--text-muted)' }}>
+                Optional Karpathy-style personal wiki folder for distilled agent notes. Auto-heal receives the path and reads only relevant notes.
+              </div>
+              <div className="mt-4 text-[10px] uppercase tracking-wider mb-2" style={{ color: 'var(--text-muted)' }}>
                 Heal agent
               </div>
               <div className="flex flex-col gap-1.5">
@@ -174,28 +193,6 @@ export function SettingsModal({ onClose }: Props) {
                     </div>
                   </label>
                 ))}
-              </div>
-              <div className="mt-4 text-[10px] uppercase tracking-wider mb-2" style={{ color: 'var(--text-muted)' }}>
-                Personal wiki
-              </div>
-              <input
-                type="text"
-                value={draft.personalWikiPath ?? ''}
-                onChange={(e) => setDraft({ ...draft, personalWikiPath: e.target.value.trim() ? e.target.value : null })}
-                placeholder="~/Documents/wiki"
-                className="w-full rounded-md px-2.5 py-1.5 text-xs outline-none"
-                style={{
-                  background: 'var(--bg-elevated)',
-                  border: '1px solid var(--border-default)',
-                  color: 'var(--text-primary)',
-                  fontFamily: 'var(--font-mono)',
-                }}
-              />
-              <div className="mt-1 text-xs" style={{ color: 'var(--text-muted)' }}>
-                Optional Karpathy-style personal wiki folder for distilled agent notes. Auto-heal receives the path and reads only relevant notes.
-              </div>
-              <div className="mt-2 text-[10px]" style={{ color: 'var(--text-muted)' }}>
-                Stored in <code>canary-lab.config.json</code> at the project root.
               </div>
             </>
           )}

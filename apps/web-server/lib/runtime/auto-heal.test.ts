@@ -72,10 +72,10 @@ describe('buildAgentSpawnCommand', () => {
     expect(cmd.includes('--session-id')).toBe(false)
   })
 
-  it('codex REPL: skip-git only — no --full-auto / --mcp-config / --session-id', () => {
+  it('codex REPL: no exec-only flags / --full-auto / --mcp-config / --session-id', () => {
     const cmd = buildAgentSpawnCommand('codex', { sessionId: 'ignored', mcpOutputDir: '/tmp/out' })
     expect(cmd).toContain('codex')
-    expect(cmd).toContain('--skip-git-repo-check')
+    expect(cmd).not.toContain('--skip-git-repo-check')
     // --full-auto is gone for the same reason claude drops bypass-permissions:
     // the user is in the REPL and approves tool calls interactively.
     expect(cmd.includes('--full-auto')).toBe(false)

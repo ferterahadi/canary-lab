@@ -90,10 +90,10 @@
   dependencies:
     tslib "^2.4.0"
 
-"@esbuild/darwin-arm64@0.27.7":
+"@esbuild/darwin-x64@0.27.7":
   version "0.27.7"
-  resolved "https://registry.npmjs.org/@esbuild/darwin-arm64/-/darwin-arm64-0.27.7.tgz"
-  integrity sha512-5lckdqeuBPlKUwvoCXIgI2D9/ABmPq3Rdp7IfL70393YgaASt7tbju3Ac+ePVi3KDH6N2RqePfHnXkaDtY9fkw==
+  resolved "https://registry.npmjs.org/@esbuild/darwin-x64/-/darwin-x64-0.27.7.tgz"
+  integrity sha512-rYnXrKcXuT7Z+WL5K980jVFdvVKhCHhUwid+dDYQpH+qu+TefcomiMAJpIiC2EM3Rjtq0sO3StMV/+3w3MyyqQ==
 
 "@fastify/accept-negotiator@^2.0.0":
   version "2.0.1"
@@ -233,10 +233,10 @@
   resolved "https://registry.npmjs.org/@lukeed/ms/-/ms-2.0.2.tgz"
   integrity sha512-9I2Zn6+NJLfaGoz9jN3lpwDgAYvfGeNYdbAIjJOqzs4Tpc+VU3Jqq4IofSUBKajiDS8k9fZIg18/z13mpk1bsA==
 
-"@napi-rs/canvas-darwin-arm64@0.1.80":
+"@napi-rs/canvas-darwin-x64@0.1.80":
   version "0.1.80"
-  resolved "https://registry.npmjs.org/@napi-rs/canvas-darwin-arm64/-/canvas-darwin-arm64-0.1.80.tgz"
-  integrity sha512-O64APRTXRUiAz0P8gErkfEr3lipLJgM6pjATwavZ22ebhjYl/SUbpgM0xcWPQBNMP1n29afAC/Us5PX1vg+JNQ==
+  resolved "https://registry.npmjs.org/@napi-rs/canvas-darwin-x64/-/canvas-darwin-x64-0.1.80.tgz"
+  integrity sha512-FqqSU7qFce0Cp3pwnTjVkKjjOtxMqRe6lmINxpIZYaZNnVI0H5FtsaraZJ36SiTHNjZlUB69/HhxNDT1Aaa9vA==
 
 "@napi-rs/canvas@^0.1.80", "@napi-rs/canvas@0.1.80":
   version "0.1.80"
@@ -279,10 +279,10 @@
   dependencies:
     playwright "1.59.1"
 
-"@rolldown/binding-darwin-arm64@1.0.0-rc.17":
+"@rolldown/binding-darwin-x64@1.0.0-rc.17":
   version "1.0.0-rc.17"
-  resolved "https://registry.npmjs.org/@rolldown/binding-darwin-arm64/-/binding-darwin-arm64-1.0.0-rc.17.tgz"
-  integrity sha512-4ksWc9n0mhlZpZ9PMZgTGjeOPRu8MB1Z3Tz0Mo02eWfWCHMW1zN82Qz/pL/rC+yQa+8ZnutMF0JjJe7PjwasYw==
+  resolved "https://registry.npmjs.org/@rolldown/binding-darwin-x64/-/binding-darwin-x64-1.0.0-rc.17.tgz"
+  integrity sha512-SUSDOI6WwUVNcWxd02QEBjLdY1VPHvlEkw6T/8nYG322iYWCTxRb1vzk4E+mWWYehTp7ERibq54LSJGjmouOsw==
 
 "@rolldown/pluginutils@1.0.0-rc.17":
   version "1.0.0-rc.17"
@@ -376,10 +376,10 @@
     source-map-js "^1.2.1"
     tailwindcss "4.2.4"
 
-"@tailwindcss/oxide-darwin-arm64@4.2.4":
+"@tailwindcss/oxide-darwin-x64@4.2.4":
   version "4.2.4"
-  resolved "https://registry.npmjs.org/@tailwindcss/oxide-darwin-arm64/-/oxide-darwin-arm64-4.2.4.tgz"
-  integrity sha512-tSC/Kbqpz/5/o/C2sG7QvOxAKqyd10bq+ypZNf+9Fi2TvbVbv1zNpcEptcsU7DPROaSbVgUXmrzKhurFvo5eDg==
+  resolved "https://registry.npmjs.org/@tailwindcss/oxide-darwin-x64/-/oxide-darwin-x64-4.2.4.tgz"
+  integrity sha512-yPyUXn3yO/ufR6+Kzv0t4fCg2qNr90jxXc5QqBpjlPNd0NqyDXcmQb/6weunH/MEDXW5dhyEi+agTDiqa3WsGg==
 
 "@tailwindcss/oxide@4.2.4":
   version "4.2.4"
@@ -1162,10 +1162,10 @@ light-my-request@^6.0.0:
     process-warning "^4.0.0"
     set-cookie-parser "^2.6.0"
 
-lightningcss-darwin-arm64@1.32.0:
+lightningcss-darwin-x64@1.32.0:
   version "1.32.0"
-  resolved "https://registry.npmjs.org/lightningcss-darwin-arm64/-/lightningcss-darwin-arm64-1.32.0.tgz"
-  integrity sha512-RzeG9Ju5bag2Bv1/lwlVJvBE3q6TtXskdZLLCyfg5pt+HLz9BqlICO7LZM7VHNTTn/5PRhHFBSjk5lc4cmscPQ==
+  resolved "https://registry.npmjs.org/lightningcss-darwin-x64/-/lightningcss-darwin-x64-1.32.0.tgz"
+  integrity sha512-U+QsBp2m/s2wqpUYT/6wnlagdZbtZdndSmut/NJqlCcMLTWp5muCrID+K5UJ6jqD2BFshejCYXniPDbNh73V8w==
 
 lightningcss@^1.32.0, lightningcss@1.32.0:
   version "1.32.0"

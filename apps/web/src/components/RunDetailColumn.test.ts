@@ -1,29 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import { assertionFilename, assertionHref, isAssertionExportable, shouldShowRestartHealButton } from './RunDetailColumn'
+import { assertionFilename, assertionHref, canRestartHeal, isAssertionExportable } from './RunDetailColumn'
 
-describe('shouldShowRestartHealButton', () => {
-  // The button only appears after the heal-agent REPL has stopped. While the
-  // agent is healing, the user types directly into the xterm pane — no
-  // button needed. While the run is back to `running` (post-signal Playwright
-  // rerun), the orchestrator is mid-cycle and a restart isn't meaningful.
-  it('is hidden while the REPL is alive (healing)', () => {
-    expect(shouldShowRestartHealButton('healing', 'auto')).toBe(false)
-    expect(shouldShowRestartHealButton('healing', undefined)).toBe(false)
-  })
-
-  it('is hidden during the post-heal Playwright rerun', () => {
-    expect(shouldShowRestartHealButton('running', 'auto')).toBe(false)
-  })
-
-  it('is shown only after a failed auto-heal run — REPL has been cleaned up', () => {
-    expect(shouldShowRestartHealButton('failed', 'auto')).toBe(true)
-    // Without auto-heal configured, restart isn't an option (no agent CLI).
-    expect(shouldShowRestartHealButton('failed', undefined)).toBe(false)
-  })
-
-  it('is hidden for manual heal mode (no agent CLI to restart)', () => {
-    expect(shouldShowRestartHealButton('healing', 'manual')).toBe(false)
-    expect(shouldShowRestartHealButton('failed', 'manual')).toBe(false)
+describe('canRestartHeal', () => {
+  it('is enabled only for terminal runs that can be restarted', () => {
+    expect(canRestartHeal('failed')).toBe(true)
+    expect(canRestartHeal('aborted')).toBe(true)
+    expect(canRestartHeal('running')).toBe(false)
+    expect(canRestartHeal('healing')).toBe(false)
+    expect(canRestartHeal('passed')).toBe(false)
   })
 })
 
