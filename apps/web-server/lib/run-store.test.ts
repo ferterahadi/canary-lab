@@ -1,0 +1,961 @@
+import { describe, it, expect, beforeEach } from 'vitest'
+import fs from 'fs'
+import os from 'os'
+import path from 'path'
+import {
+  createRegistry,
+  listRuns,
+  reapStaleRuns,
+  removeRunFromHistory,
+  getRunDetail,
+  indexPlaywrightArtifacts,
+  readPlaywrightPlaybackEvents,
+  readRunSummary,
+  RunStore,
+  type RunStoreEvent,
+} from './run-store'
+import { readManifest, writeManifest, writeRunsIndex, readRunsIndex } from './runtime/manifest'
+import { runDirFor } from './runtime/run-paths'
+
+let tmpDir: string
+beforeEach(() => {
+  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-rs-')))
+})
+
+describe('createRegistry', () => {
+  it('round-trips orchestrator-like values', () => {
+    const reg = createRegistry()
+    const stub = {
+      runId: 'r1',
+      stop: async () => {},
+      pauseAndHeal: async () => ({ ok: true as const, failureCount: 0 }),
+      cancelHeal: async () => ({ ok: true as const }),
+    }
+    reg.set('r1', stub)
+    expect(reg.get('r1')).toBe(stub)
+    expect(reg.list()).toEqual([stub])
+    expect(reg.delete('r1')).toBe(true)
+    expect(reg.get('r1')).toBeUndefined()
+    expect(reg.delete('r1')).toBe(false)
+  })
+})
+
+describe('listRuns', () => {
+  it('returns [] when index missing', () => {
+    expect(listRuns(tmpDir)).toEqual([])
+  })
+
+  it('returns entries newest first', () => {
+    writeRunsIndex(tmpDir, [
+      { runId: 'a', feature: 'foo', startedAt: '2026-01-01T00:00:00Z', status: 'passed' },
+      { runId: 'b', feature: 'bar', startedAt: '2026-02-01T00:00:00Z', status: 'failed' },
+      { runId: 'c', feature: 'foo', startedAt: '2026-03-01T00:00:00Z', status: 'running' },
+    ])
+    expect(listRuns(tmpDir).map((e) => e.runId)).toEqual(['c', 'b', 'a'])
+  })
+
+  it('filters by feature', () => {
+    writeRunsIndex(tmpDir, [
+      { runId: 'a', feature: 'foo', startedAt: '2026-01-01T00:00:00Z', status: 'passed' },
+      { runId: 'b', feature: 'bar', startedAt: '2026-02-01T00:00:00Z', status: 'failed' },
+    ])
+    expect(listRuns(tmpDir, { feature: 'bar' }).map((e) => e.runId)).toEqual(['b'])
+  })
+
+  it('treats equal startedAt deterministically', () => {
+    writeRunsIndex(tmpDir, [
+      { runId: 'a', feature: 'foo', startedAt: '2026-01-01T00:00:00Z', status: 'passed' },
+      { runId: 'b', feature: 'foo', startedAt: '2026-01-01T00:00:00Z', status: 'failed' },
+    ])
+    const ids = listRuns(tmpDir).map((e) => e.runId)
+    expect(ids.sort()).toEqual(['a', 'b'])
+  })
+
+  it('keeps already-newer entries before older entries', () => {
+    writeRunsIndex(tmpDir, [
+      { runId: 'newer', feature: 'foo', startedAt: '2026-02-01T00:00:00Z', status: 'passed' },
+      { runId: 'older', feature: 'foo', startedAt: '2026-01-01T00:00:00Z', status: 'failed' },
+    ])
+    expect(listRuns(tmpDir).map((e) => e.runId)).toEqual(['newer', 'older'])
+  })
+
+
+  it('does not mutate manifests for stale running entries (cleanup is reapStaleRuns'
+    + "'s job)", () => {
+    const dir = runDirFor(tmpDir, 'stale-untouched')
+    fs.mkdirSync(dir, { recursive: true })
+    writeManifest(path.join(dir, 'manifest.json'), {
+      runId: 'stale-untouched',
+      feature: 'foo',
+      startedAt: '2026-01-01T00:00:00Z',
+      status: 'running',
+      healCycles: 0,
+      services: [],
+      heartbeatAt: new Date(Date.now() - 60_000).toISOString(),
+    })
+    writeRunsIndex(tmpDir, [
+      { runId: 'stale-untouched', feature: 'foo', startedAt: '2026-01-01T00:00:00Z', status: 'running' },
+    ])
+    const result = listRuns(tmpDir)
+    expect(result[0].status).toBe('running')
+    expect(readManifest(path.join(dir, 'manifest.json'))?.status).toBe('running')
+  })
+})
+
+describe('reapStaleRuns', () => {
+  it('marks stale running entry as aborted when no registry', async () => {
+    const dir = runDirFor(tmpDir, 'stale-1')
+    fs.mkdirSync(dir, { recursive: true })
+    writeManifest(path.join(dir, 'manifest.json'), {
+      runId: 'stale-1',
+      feature: 'foo',
+      startedAt: '2026-01-01T00:00:00Z',
+      status: 'running',
+      healCycles: 0,
+      services: [],
+      heartbeatAt: new Date(Date.now() - 60_000).toISOString(),
+    })
+    writeRunsIndex(tmpDir, [
+      { runId: 'stale-1', feature: 'foo', startedAt: '2026-01-01T00:00:00Z', status: 'running' },
+    ])
+    await reapStaleRuns(tmpDir)
+    const manifest = readManifest(path.join(dir, 'manifest.json'))
+    expect(manifest?.status).toBe('aborted')
+    const indexed = listRuns(tmpDir)
+    expect(indexed[0].status).toBe('aborted')
+    expect(indexed[0].endedAt).toBeDefined()
+  })
+
+  it('leaves running entry alone when heartbeat is fresh', async () => {
+    const dir = runDirFor(tmpDir, 'fresh-1')
+    fs.mkdirSync(dir, { recursive: true })
+    writeManifest(path.join(dir, 'manifest.json'), {
+      runId: 'fresh-1',
+      feature: 'foo',
+      startedAt: '2026-01-01T00:00:00Z',
+      status: 'running',
+      healCycles: 0,
+      services: [],
+      heartbeatAt: new Date().toISOString(),
+    })
+    writeRunsIndex(tmpDir, [
+      { runId: 'fresh-1', feature: 'foo', startedAt: '2026-01-01T00:00:00Z', status: 'running' },
+    ])
+    await reapStaleRuns(tmpDir)
+    expect(listRuns(tmpDir)[0].status).toBe('running')
+  })
+
+  it('leaves entry alone when manifest has no heartbeatAt (legacy manifest)', async () => {
+    const dir = runDirFor(tmpDir, 'legacy-1')
+    fs.mkdirSync(dir, { recursive: true })
+    writeManifest(path.join(dir, 'manifest.json'), {
+      runId: 'legacy-1',
+      feature: 'foo',
+      startedAt: '2026-01-01T00:00:00Z',
+      status: 'running',
+      healCycles: 0,
+      services: [],
+      // intentionally no heartbeatAt
+    })
+    writeRunsIndex(tmpDir, [
+      { runId: 'legacy-1', feature: 'foo', startedAt: '2026-01-01T00:00:00Z', status: 'running' },
+    ])
+    await reapStaleRuns(tmpDir)
+    expect(listRuns(tmpDir)[0].status).toBe('running')
+    expect(readManifest(path.join(dir, 'manifest.json'))?.status).toBe('running')
+  })
+
+  it('stops and removes dead orchestrator from registry when heartbeat is stale', async () => {
+    const reg = createRegistry()
+    let stopped = false
+    const stub = {
+      runId: 'dead-1',
+      stop: async () => { stopped = true },
+      pauseAndHeal: async () => ({ ok: true as const, failureCount: 0 }),
+      cancelHeal: async () => ({ ok: true as const }),
+    }
+    reg.set('dead-1', stub)
+
+    const dir = runDirFor(tmpDir, 'dead-1')
+    fs.mkdirSync(dir, { recursive: true })
+    writeManifest(path.join(dir, 'manifest.json'), {
+      runId: 'dead-1',
+      feature: 'foo',
+      startedAt: '2026-01-01T00:00:00Z',
+      status: 'running',
+      healCycles: 0,
+      services: [],
+      heartbeatAt: new Date(Date.now() - 60_000).toISOString(),
+    })
+    writeRunsIndex(tmpDir, [
+      { runId: 'dead-1', feature: 'foo', startedAt: '2026-01-01T00:00:00Z', status: 'running' },
+    ])
+
+    await reapStaleRuns(tmpDir, reg)
+    expect(listRuns(tmpDir)[0].status).toBe('aborted')
+    expect(stopped).toBe(true)
+    expect(reg.get('dead-1')).toBeUndefined()
+  })
+
+  it('skips entries that are not running or healing', async () => {
+    writeRunsIndex(tmpDir, [
+      { runId: 'done', feature: 'foo', startedAt: '2026-01-01T00:00:00Z', status: 'passed' },
+    ])
+    await reapStaleRuns(tmpDir)
+    expect(listRuns(tmpDir)[0].status).toBe('passed')
+  })
+
+  it('skips entries whose manifest cannot be read', async () => {
+    // Index entry exists but no manifest file on disk → readManifest returns null.
+    writeRunsIndex(tmpDir, [
+      { runId: 'no-manifest', feature: 'foo', startedAt: '2026-01-01T00:00:00Z', status: 'running' },
+    ])
+    await reapStaleRuns(tmpDir)
+    expect(listRuns(tmpDir)[0].status).toBe('running')
+  })
+
+  it('skips entries with non-parseable heartbeatAt', async () => {
+    const dir = runDirFor(tmpDir, 'nan-1')
+    fs.mkdirSync(dir, { recursive: true })
+    writeManifest(path.join(dir, 'manifest.json'), {
+      runId: 'nan-1',
+      feature: 'foo',
+      startedAt: '2026-01-01T00:00:00Z',
+      status: 'running',
+      healCycles: 0,
+      services: [],
+      heartbeatAt: 'not-a-real-date',
+    })
+    writeRunsIndex(tmpDir, [
+      { runId: 'nan-1', feature: 'foo', startedAt: '2026-01-01T00:00:00Z', status: 'running' },
+    ])
+    await reapStaleRuns(tmpDir)
+    expect(listRuns(tmpDir)[0].status).toBe('running')
+  })
+
+  it('swallows errors thrown by orchestrator.stop', async () => {
+    const reg = createRegistry()
+    reg.set('boom-1', {
+      runId: 'boom-1',
+      stop: async () => { throw new Error('stop failed') },
+      pauseAndHeal: async () => ({ ok: true as const, failureCount: 0 }),
+      cancelHeal: async () => ({ ok: true as const }),
+    })
+    const dir = runDirFor(tmpDir, 'boom-1')
+    fs.mkdirSync(dir, { recursive: true })
+    writeManifest(path.join(dir, 'manifest.json'), {
+      runId: 'boom-1',
+      feature: 'foo',
+      startedAt: '2026-01-01T00:00:00Z',
+      status: 'healing',
+      healCycles: 0,
+      services: [],
+      heartbeatAt: new Date(Date.now() - 60_000).toISOString(),
+    })
+    writeRunsIndex(tmpDir, [
+      { runId: 'boom-1', feature: 'foo', startedAt: '2026-01-01T00:00:00Z', status: 'healing' },
+    ])
+    await reapStaleRuns(tmpDir, reg)
+    expect(listRuns(tmpDir)[0].status).toBe('aborted')
+    expect(reg.get('boom-1')).toBeUndefined()
+  })
+
+  it('does not stop orchestrator from registry when heartbeat is fresh', async () => {
+    const reg = createRegistry()
+    let stopped = false
+    const stub = {
+      runId: 'alive-1',
+      stop: async () => { stopped = true },
+      pauseAndHeal: async () => ({ ok: true as const, failureCount: 0 }),
+      cancelHeal: async () => ({ ok: true as const }),
+    }
+    reg.set('alive-1', stub)
+
+    const dir = runDirFor(tmpDir, 'alive-1')
+    fs.mkdirSync(dir, { recursive: true })
+    writeManifest(path.join(dir, 'manifest.json'), {
+      runId: 'alive-1',
+      feature: 'foo',
+      startedAt: '2026-01-01T00:00:00Z',
+      status: 'running',
+      healCycles: 0,
+      services: [],
+      heartbeatAt: new Date().toISOString(),
+    })
+    writeRunsIndex(tmpDir, [
+      { runId: 'alive-1', feature: 'foo', startedAt: '2026-01-01T00:00:00Z', status: 'running' },
+    ])
+
+    await reapStaleRuns(tmpDir, reg)
+    expect(listRuns(tmpDir)[0].status).toBe('running')
+    expect(stopped).toBe(false)
+    expect(reg.get('alive-1')).toBe(stub)
+  })
+})
+
+describe('removeRunFromHistory', () => {
+  it('drops the index entry and recursively deletes the run dir', () => {
+    const dir = runDirFor(tmpDir, 'r-rm-1')
+    fs.mkdirSync(dir, { recursive: true })
+    fs.writeFileSync(path.join(dir, 'svc-foo.log'), 'x')
+    writeManifest(path.join(dir, 'manifest.json'), {
+      runId: 'r-rm-1', feature: 'foo', startedAt: 'now', status: 'passed', healCycles: 0, services: [],
+    })
+    writeRunsIndex(tmpDir, [
+      { runId: 'r-rm-1', feature: 'foo', startedAt: 'now', status: 'passed' },
+      { runId: 'keep', feature: 'foo', startedAt: 'now', status: 'passed' },
+    ])
+    expect(removeRunFromHistory(tmpDir, 'r-rm-1')).toBe(true)
+    expect(fs.existsSync(dir)).toBe(false)
+    const remaining = listRuns(tmpDir).map((e) => e.runId)
+    expect(remaining).toEqual(['keep'])
+  })
+
+  it('returns false when nothing matches', () => {
+    expect(removeRunFromHistory(tmpDir, 'no-such')).toBe(false)
+  })
+
+  it('returns true when only the dir exists (no index entry)', () => {
+    const dir = runDirFor(tmpDir, 'orphan-dir')
+    fs.mkdirSync(dir, { recursive: true })
+    expect(removeRunFromHistory(tmpDir, 'orphan-dir')).toBe(true)
+    expect(fs.existsSync(dir)).toBe(false)
+  })
+
+  it('returns true when only the index entry exists (no dir)', () => {
+    writeRunsIndex(tmpDir, [
+      { runId: 'orphan-idx', feature: 'foo', startedAt: 'now', status: 'passed' },
+    ])
+    expect(removeRunFromHistory(tmpDir, 'orphan-idx')).toBe(true)
+    expect(listRuns(tmpDir)).toEqual([])
+  })
+})
+
+describe('getRunDetail', () => {
+  it('returns null when run dir missing', () => {
+    expect(getRunDetail(tmpDir, 'nonsuch')).toBeNull()
+  })
+
+  it('returns null when manifest unreadable', () => {
+    const dir = runDirFor(tmpDir, 'corrupt')
+    fs.mkdirSync(dir, { recursive: true })
+    fs.writeFileSync(path.join(dir, 'manifest.json'), '{not json')
+    expect(getRunDetail(tmpDir, 'corrupt')).toBeNull()
+  })
+
+  it('reads a valid manifest', () => {
+    const dir = runDirFor(tmpDir, 'r1')
+    fs.mkdirSync(dir, { recursive: true })
+    writeManifest(path.join(dir, 'manifest.json'), {
+      runId: 'r1',
+      feature: 'foo',
+      startedAt: 'now',
+      status: 'passed',
+      healCycles: 0,
+      services: [],
+    })
+    const d = getRunDetail(tmpDir, 'r1')
+    expect(d?.runId).toBe('r1')
+    expect(d?.manifest.feature).toBe('foo')
+    expect(d?.summary).toBeUndefined()
+  })
+
+  it('includes summary when e2e-summary.json exists alongside manifest', () => {
+    const dir = runDirFor(tmpDir, 'r-sum')
+    fs.mkdirSync(dir, { recursive: true })
+    writeManifest(path.join(dir, 'manifest.json'), {
+      runId: 'r-sum',
+      feature: 'foo',
+      startedAt: 'now',
+      status: 'failed',
+      healCycles: 0,
+      services: [],
+    })
+    fs.writeFileSync(
+      path.join(dir, 'e2e-summary.json'),
+      JSON.stringify({
+        complete: true,
+        total: 2,
+        passed: 1,
+        failed: [{ name: 'test-case-x', error: { message: 'boom' } }],
+      }),
+    )
+    const d = getRunDetail(tmpDir, 'r-sum')
+    expect(d?.summary?.complete).toBe(true)
+    expect(d?.summary?.failed[0].name).toBe('test-case-x')
+  })
+
+  it('includes playback events and grouped Playwright artifacts', () => {
+    const dir = runDirFor(tmpDir, 'r-artifacts')
+    const artifactsDir = path.join(dir, 'playwright-artifacts', 'visual-checkout')
+    fs.mkdirSync(artifactsDir, { recursive: true })
+    const screenshot = path.join(artifactsDir, 'test-failed-1.png')
+    const trace = path.join(artifactsDir, 'trace.zip')
+    fs.writeFileSync(screenshot, 'png')
+    fs.writeFileSync(trace, 'zip')
+    writeManifest(path.join(dir, 'manifest.json'), {
+      runId: 'r-artifacts',
+      feature: 'foo',
+      startedAt: 'now',
+      status: 'failed',
+      healCycles: 0,
+      services: [],
+    })
+    fs.writeFileSync(
+      path.join(dir, 'playwright-events.jsonl'),
+      [
+        JSON.stringify({ type: 'test-begin', time: 't', test: { name: 'test-case-visual-checkout', title: 'Visual checkout', location: '/x:1' } }),
+        JSON.stringify({
+          type: 'test-end',
+          time: 't',
+          test: { name: 'test-case-visual-checkout', title: 'Visual checkout', location: '/x:1' },
+          status: 'failed',
+          passed: false,
+          durationMs: 12,
+          retry: 0,
+          attachments: [
+            { name: 'screenshot', contentType: 'image/png', path: screenshot },
+            { name: 'trace', contentType: 'application/zip', path: trace },
+          ],
+        }),
+      ].join('\n') + '\n',
+    )
+
+    const d = getRunDetail(tmpDir, 'r-artifacts')
+    expect(d?.playbackEvents).toHaveLength(2)
+    expect(d?.playwrightArtifacts).toEqual([
+      {
+        testName: 'test-case-visual-checkout',
+        testTitle: 'Visual checkout',
+        artifacts: [
+          expect.objectContaining({ kind: 'screenshot', path: 'visual-checkout/test-failed-1.png' }),
+          expect.objectContaining({ kind: 'trace', path: 'visual-checkout/trace.zip' }),
+        ],
+      },
+    ])
+    expect(d?.playwrightArtifacts?.[0].artifacts[0].url).toBe('/api/runs/r-artifacts/artifacts/visual-checkout/test-failed-1.png')
+  })
+})
+
+describe('readRunSummary', () => {
+  it('returns undefined when summary file missing', () => {
+    expect(readRunSummary(tmpDir)).toBeUndefined()
+  })
+
+  it('returns undefined when summary file is unparseable', () => {
+    fs.writeFileSync(path.join(tmpDir, 'e2e-summary.json'), '{not json')
+    expect(readRunSummary(tmpDir)).toBeUndefined()
+  })
+
+  it('returns undefined when summary parses to a non-object', () => {
+    fs.writeFileSync(path.join(tmpDir, 'e2e-summary.json'), 'null')
+    expect(readRunSummary(tmpDir)).toBeUndefined()
+  })
+
+  it('returns parsed summary on a valid file', () => {
+    fs.writeFileSync(
+      path.join(tmpDir, 'e2e-summary.json'),
+      JSON.stringify({ complete: false, total: 0, passed: 0, failed: [] }),
+    )
+    expect(readRunSummary(tmpDir)).toEqual({ complete: false, total: 0, passed: 0, failed: [] })
+  })
+})
+
+describe('readPlaywrightPlaybackEvents / indexPlaywrightArtifacts', () => {
+  it('tolerates missing events and artifacts', () => {
+    expect(readPlaywrightPlaybackEvents(tmpDir)).toBeUndefined()
+    expect(indexPlaywrightArtifacts('r1', tmpDir, undefined)).toBeUndefined()
+  })
+
+  it('ignores corrupt event lines and events without a type', () => {
+    fs.mkdirSync(path.join(tmpDir, 'playwright-artifacts'), { recursive: true })
+    fs.writeFileSync(
+      path.join(tmpDir, 'playwright-events.jsonl'),
+      [
+        '',
+        '{not json',
+        JSON.stringify({ test: { name: 'missing-type', title: 'Missing type' } }),
+        JSON.stringify({ type: 'test-begin', test: { name: 'case-a', title: 'Case A' } }),
+      ].join('\n'),
+    )
+
+    expect(readPlaywrightPlaybackEvents(tmpDir)).toEqual([
+      { type: 'test-begin', test: { name: 'case-a', title: 'Case A' } },
+    ])
+  })
+
+  it('indexes attached artifacts defensively and discovers unmatched files', () => {
+    const artifactsDir = path.join(tmpDir, 'playwright-artifacts')
+    const caseDir = path.join(artifactsDir, 'case-a')
+    const attachmentsDir = path.join(caseDir, 'attachments')
+    fs.mkdirSync(caseDir, { recursive: true })
+    fs.mkdirSync(attachmentsDir, { recursive: true })
+    const screenshot = path.join(caseDir, 'screen.png')
+    const attachedScreenshot = path.join(attachmentsDir, 'screen-hash.png')
+    const video = path.join(caseDir, 'recording.webm')
+    const notes = path.join(caseDir, 'notes.txt')
+    fs.writeFileSync(screenshot, 'png')
+    fs.writeFileSync(attachedScreenshot, 'png')
+    fs.writeFileSync(video, 'webm')
+    fs.writeFileSync(notes, 'notes')
+
+    const result = indexPlaywrightArtifacts('r 1', tmpDir, [
+      { type: 'test-begin', time: 't', test: { name: 'case-a', title: 'Case A', location: 'x:1' } },
+      {
+        type: 'step-begin',
+        time: 't',
+        test: { name: 'case-a', title: 'Case A' },
+        step: { title: 'page.goto', category: 'pw:api' },
+      },
+      {
+        type: 'test-end',
+        time: 't',
+        test: { name: 'case-a', title: 'Case A', location: 'x:1' },
+        status: 'failed',
+        passed: false,
+        durationMs: 1,
+        retry: 0,
+        attachments: [
+          { name: 'screenshot', contentType: 'image/png', path: attachedScreenshot },
+          { name: 'duplicate-screenshot', contentType: 'image/png', path: attachedScreenshot },
+          { name: 'outside', contentType: 'text/plain', path: path.join(tmpDir, 'outside.txt') },
+          { name: 'missing', contentType: 'text/plain', path: path.join(caseDir, 'missing.txt') },
+          { name: 'no-path', contentType: 'text/plain' },
+        ],
+      },
+    ])
+
+    expect(result).toEqual([
+      {
+        testName: 'case-a',
+        testTitle: 'Case A',
+        artifacts: [
+          expect.objectContaining({ kind: 'other', path: 'case-a/notes.txt', name: 'notes.txt' }),
+          expect.objectContaining({ kind: 'screenshot', path: 'case-a/attachments/screen-hash.png', name: 'screenshot' }),
+          expect.objectContaining({ kind: 'screenshot', path: 'case-a/screen.png', name: 'screen.png' }),
+          expect.objectContaining({ kind: 'video', path: 'case-a/recording.webm', name: 'recording.webm' }),
+        ],
+      },
+    ])
+    expect(result?.[0].artifacts[2].url).toBe('/api/runs/r%201/artifacts/case-a/screen.png')
+  })
+
+  it('indexes test-end events without attachments and empty artifact path segments', () => {
+    const artifactsDir = path.join(tmpDir, 'playwright-artifacts')
+    const caseDir = path.join(artifactsDir, 'case-b')
+    fs.mkdirSync(caseDir, { recursive: true })
+    fs.writeFileSync(path.join(caseDir, 'trace.zip'), 'zip')
+
+    const result = indexPlaywrightArtifacts('r2', tmpDir, [
+      {
+        type: 'test-begin',
+        time: 't',
+        test: { name: 'case-b', title: '', location: 'x:1' },
+      },
+      {
+        type: 'test-end',
+        time: 't',
+        test: { name: 'case-b', title: '', location: 'x:1' },
+        status: 'passed',
+        passed: true,
+        durationMs: 1,
+        retry: 0,
+      },
+    ])
+
+    expect(result).toEqual([
+      {
+        testName: 'case-b',
+        artifacts: [
+          expect.objectContaining({ kind: 'trace', path: 'case-b/trace.zip' }),
+        ],
+      },
+    ])
+  })
+
+  it('returns undefined for an empty artifacts directory and skips non-file entries', () => {
+    const artifactsDir = path.join(tmpDir, 'playwright-artifacts')
+    fs.mkdirSync(path.join(artifactsDir, 'empty-dir'), { recursive: true })
+    fs.symlinkSync(path.join(artifactsDir, 'missing-target'), path.join(artifactsDir, 'link'))
+
+    expect(indexPlaywrightArtifacts('r-empty', tmpDir, undefined)).toBeUndefined()
+  })
+
+  it('indexes discovered files without playback events', () => {
+    const file = path.join(tmpDir, 'playwright-artifacts', 'unmatched', 'trace.zip')
+    fs.mkdirSync(path.dirname(file), { recursive: true })
+    fs.writeFileSync(file, 'zip')
+
+    expect(indexPlaywrightArtifacts('r-unmatched', tmpDir, undefined)).toEqual([
+      {
+        testName: 'unmatched',
+        artifacts: [
+          expect.objectContaining({
+            name: 'trace.zip',
+            kind: 'trace',
+            path: 'unmatched/trace.zip',
+          }),
+        ],
+      },
+    ])
+  })
+})
+
+describe('RunStore', () => {
+  // Helper: create a run dir + manifest + index entry so the store has
+  // something to read/mutate.
+  function seedRun(runId: string, overrides: Partial<{
+    status: 'running' | 'passed' | 'failed' | 'aborted' | 'healing'
+    feature: string
+    healCycles: number
+    services: NonNullable<ReturnType<typeof readManifest>>['services']
+  }> = {}): string {
+    const dir = runDirFor(tmpDir, runId)
+    fs.mkdirSync(dir, { recursive: true })
+    const status = overrides.status ?? 'running'
+    const feature = overrides.feature ?? 'foo'
+    writeManifest(path.join(dir, 'manifest.json'), {
+      runId,
+      feature,
+      startedAt: '2026-01-01T00:00:00Z',
+      status,
+      healCycles: overrides.healCycles ?? 0,
+      services: overrides.services ?? [],
+    })
+    writeRunsIndex(tmpDir, [
+      ...readRunsIndex(tmpDir).filter((e) => e.runId !== runId),
+      { runId, feature, startedAt: '2026-01-01T00:00:00Z', status },
+    ])
+    return dir
+  }
+
+  it('list and get delegate to standalone helpers', () => {
+    seedRun('r1', { status: 'passed' })
+    const store = new RunStore(tmpDir, createRegistry())
+    expect(store.list().map((e) => e.runId)).toEqual(['r1'])
+    expect(store.get('r1')?.manifest.status).toBe('passed')
+    expect(store.get('missing')).toBeNull()
+  })
+
+  it('bootstrap writes manifest, index, and current symlink, then emits', () => {
+    const store = new RunStore(tmpDir, createRegistry())
+    const events: RunStoreEvent[] = []
+    store.on('event', (e) => events.push(e))
+    store.bootstrap({
+      runId: 'rb1',
+      feature: 'foo',
+      startedAt: '2026-01-01T00:00:00Z',
+      status: 'running',
+      healCycles: 0,
+      services: [],
+    })
+    const dir = runDirFor(tmpDir, 'rb1')
+    expect(fs.existsSync(path.join(dir, 'manifest.json'))).toBe(true)
+    expect(readRunsIndex(tmpDir).find((e) => e.runId === 'rb1')?.status).toBe('running')
+    expect(events).toEqual([{ kind: 'bootstrap', runId: 'rb1' }])
+  })
+
+  it('onEvent and offEvent subscribe and unsubscribe typed event listeners', () => {
+    const store = new RunStore(tmpDir, createRegistry())
+    const events: RunStoreEvent[] = []
+    const listener = (event: RunStoreEvent) => events.push(event)
+
+    expect(store.onEvent(listener)).toBe(store)
+    store.bootstrap({
+      runId: 'r-on-off-1',
+      feature: 'foo',
+      startedAt: '2026-01-01T00:00:00Z',
+      status: 'running',
+      healCycles: 0,
+      services: [],
+    })
+    expect(events).toEqual([{ kind: 'bootstrap', runId: 'r-on-off-1' }])
+
+    expect(store.offEvent(listener)).toBe(store)
+    store.setStatus('r-on-off-1', 'passed')
+    expect(events).toEqual([{ kind: 'bootstrap', runId: 'r-on-off-1' }])
+  })
+
+  it('patchManifest applies partial manifest updates and emits changed', () => {
+    seedRun('r-patch-1', { status: 'running' })
+    const store = new RunStore(tmpDir, createRegistry())
+    const events: RunStoreEvent[] = []
+    store.onEvent((event) => events.push(event))
+
+    store.patchManifest('r-patch-1', { status: 'healing', healCycles: 3 })
+
+    const manifest = readManifest(store.manifestPath('r-patch-1'))!
+    expect(manifest.status).toBe('healing')
+    expect(manifest.healCycles).toBe(3)
+    expect(events).toEqual([{ kind: 'changed', runId: 'r-patch-1' }])
+  })
+
+  it('setStatus mirrors status into both manifest and index, and emits changed', () => {
+    seedRun('r1', { status: 'running' })
+    const store = new RunStore(tmpDir, createRegistry())
+    const events: RunStoreEvent[] = []
+    store.on('event', (e) => events.push(e))
+    store.setStatus('r1', 'healing', 2)
+    expect(readManifest(store.manifestPath('r1'))?.status).toBe('healing')
+    expect(readManifest(store.manifestPath('r1'))?.healCycles).toBe(2)
+    expect(readRunsIndex(tmpDir).find((e) => e.runId === 'r1')?.status).toBe('healing')
+    expect(events).toEqual([{ kind: 'changed', runId: 'r1' }])
+  })
+
+  it('finalize flips services to stopped, writes endedAt, and emits finalized', () => {
+    const dir = seedRun('r1', { status: 'running' })
+    // Add a service entry so updateAllServicesStatus has something to flip.
+    writeManifest(path.join(dir, 'manifest.json'), {
+      runId: 'r1',
+      feature: 'foo',
+      startedAt: '2026-01-01T00:00:00Z',
+      status: 'running',
+      healCycles: 1,
+      services: [{ name: 'api', safeName: 'api', command: 'x', cwd: '/', status: 'ready', logPath: '/x.log' }],
+    })
+    const store = new RunStore(tmpDir, createRegistry())
+    const events: RunStoreEvent[] = []
+    store.on('event', (e) => events.push(e))
+    store.finalize('r1', 'aborted', '2026-01-01T00:05:00Z', 1)
+    const m = readManifest(store.manifestPath('r1'))!
+    expect(m.status).toBe('aborted')
+    expect(m.endedAt).toBe('2026-01-01T00:05:00Z')
+    expect(m.services[0].status).toBe('stopped')
+    const indexed = readRunsIndex(tmpDir).find((e) => e.runId === 'r1')!
+    expect(indexed.status).toBe('aborted')
+    expect(indexed.endedAt).toBe('2026-01-01T00:05:00Z')
+    expect(events).toEqual([{ kind: 'finalized', runId: 'r1' }])
+  })
+
+  it('recordHeartbeat writes the timestamp WITHOUT emitting (would flood subscribers)', () => {
+    seedRun('r1')
+    const store = new RunStore(tmpDir, createRegistry())
+    const events: RunStoreEvent[] = []
+    store.on('event', (e) => events.push(e))
+    store.recordHeartbeat('r1')
+    expect(readManifest(store.manifestPath('r1'))?.heartbeatAt).toBeTruthy()
+    expect(events).toEqual([])
+  })
+
+  it('abort calls orch.stop and removes from registry; 404s when not active', async () => {
+    const reg = createRegistry()
+    let stopped = false
+    reg.set('r1', {
+      runId: 'r1',
+      stop: async () => { stopped = true },
+      pauseAndHeal: async () => ({ ok: true as const, failureCount: 0 }),
+      cancelHeal: async () => ({ ok: true as const }),
+    })
+    const store = new RunStore(tmpDir, reg)
+    expect(await store.abort('r1')).toEqual({ ok: true })
+    expect(stopped).toBe(true)
+    expect(reg.get('r1')).toBeUndefined()
+    expect(await store.abort('ghost')).toEqual({ ok: false, reason: 'not-active' })
+  })
+
+  it('abort finalizes a registered run when the orchestrator stop path does not', async () => {
+    const reg = createRegistry()
+    seedRun('r1', {
+      status: 'running',
+      services: [{ name: 'api', safeName: 'api', command: 'x', cwd: '/', status: 'ready', logPath: '/x.log' }],
+    })
+    reg.set('r1', {
+      runId: 'r1',
+      stop: async () => {},
+      pauseAndHeal: async () => ({ ok: true as const, failureCount: 0 }),
+      cancelHeal: async () => ({ ok: true as const }),
+    })
+    const store = new RunStore(tmpDir, reg)
+    expect(await store.abort('r1')).toEqual({ ok: true })
+    const manifest = readManifest(store.manifestPath('r1'))!
+    expect(manifest.status).toBe('aborted')
+    expect(manifest.endedAt).toBeTruthy()
+    expect(manifest.services[0].status).toBe('stopped')
+    expect(readRunsIndex(tmpDir)[0].status).toBe('aborted')
+  })
+
+  it('clears stale running state from the summary when abort finalizes a run', async () => {
+    const reg = createRegistry()
+    const dir = seedRun('r1', { status: 'running' })
+    fs.writeFileSync(
+      path.join(dir, 'e2e-summary.json'),
+      JSON.stringify({
+        complete: false,
+        total: 2,
+        passed: 1,
+        passedNames: ['test-case-a'],
+        running: { name: 'test-case-b', location: '/b.spec.ts:10' },
+        failed: [],
+      }, null, 2),
+    )
+    reg.set('r1', {
+      runId: 'r1',
+      stop: async () => {},
+      pauseAndHeal: async () => ({ ok: true as const, failureCount: 0 }),
+      cancelHeal: async () => ({ ok: true as const }),
+    })
+
+    const store = new RunStore(tmpDir, reg)
+    expect(await store.abort('r1')).toEqual({ ok: true })
+
+    expect(readRunSummary(dir)).toEqual({
+      complete: false,
+      total: 2,
+      passed: 1,
+      passedNames: ['test-case-a'],
+      failed: [],
+    })
+  })
+
+  it('abort finalizes an orphaned persisted running run and emits finalized', async () => {
+    seedRun('orphan', {
+      status: 'running',
+      services: [{ name: 'api', safeName: 'api', command: 'x', cwd: '/', status: 'ready', logPath: '/x.log' }],
+    })
+    const store = new RunStore(tmpDir, createRegistry())
+    const events: RunStoreEvent[] = []
+    store.on('event', (e) => events.push(e))
+
+    expect(await store.abort('orphan')).toEqual({ ok: true })
+
+    const manifest = readManifest(store.manifestPath('orphan'))!
+    expect(manifest.status).toBe('aborted')
+    expect(manifest.endedAt).toBeTruthy()
+    expect(manifest.services[0].status).toBe('stopped')
+    const indexed = readRunsIndex(tmpDir).find((e) => e.runId === 'orphan')!
+    expect(indexed.status).toBe('aborted')
+    expect(indexed.endedAt).toBe(manifest.endedAt)
+    expect(events).toEqual([{ kind: 'finalized', runId: 'orphan' }])
+  })
+
+  it('abortAllActiveOrStale stops registered runs and finalizes orphaned active rows', async () => {
+    const reg = createRegistry()
+    const stopped: string[] = []
+    seedRun('registered', { status: 'running' })
+    seedRun('orphan', { status: 'healing' })
+    seedRun('done', { status: 'passed' })
+    reg.set('registered', {
+      runId: 'registered',
+      stop: async () => { stopped.push('registered') },
+      pauseAndHeal: async () => ({ ok: true as const, failureCount: 0 }),
+      cancelHeal: async () => ({ ok: true as const }),
+    })
+    const store = new RunStore(tmpDir, reg)
+
+    const result = await store.abortAllActiveOrStale()
+
+    expect(result.aborted.sort()).toEqual(['orphan', 'registered'])
+    expect(stopped).toEqual(['registered'])
+    expect(reg.get('registered')).toBeUndefined()
+    expect(readManifest(store.manifestPath('registered'))?.status).toBe('aborted')
+    expect(readManifest(store.manifestPath('orphan'))?.status).toBe('aborted')
+    expect(readManifest(store.manifestPath('done'))?.status).toBe('passed')
+  })
+
+  it('abortAllActiveOrStale skips indexed active rows that no longer have detail', async () => {
+    writeRunsIndex(tmpDir, [
+      { runId: 'missing-detail', feature: 'foo', startedAt: '2026-01-01T00:00:00Z', status: 'running' },
+    ])
+    const store = new RunStore(tmpDir, createRegistry())
+
+    expect(await store.abortAllActiveOrStale()).toEqual({ aborted: [] })
+    expect(readRunsIndex(tmpDir)[0].status).toBe('running')
+  })
+
+  it('delete refuses active runs (registered) and stale-active manifests', () => {
+    const reg = createRegistry()
+    reg.set('active', {
+      runId: 'active',
+      stop: async () => {},
+      pauseAndHeal: async () => ({ ok: true as const, failureCount: 0 }),
+      cancelHeal: async () => ({ ok: true as const }),
+    })
+    seedRun('active', { status: 'running' })
+    seedRun('stale', { status: 'running' })
+    seedRun('done', { status: 'passed' })
+    const store = new RunStore(tmpDir, reg)
+    expect(store.delete('active')).toEqual({ ok: false, reason: 'active' })
+    expect(store.delete('stale')).toEqual({ ok: false, reason: 'stale' })
+    expect(store.delete('ghost')).toEqual({ ok: false, reason: 'not-found' })
+    const events: RunStoreEvent[] = []
+    store.on('event', (e) => events.push(e))
+    expect(store.delete('done')).toEqual({ ok: true })
+    expect(fs.existsSync(runDirFor(tmpDir, 'done'))).toBe(false)
+    expect(events).toEqual([{ kind: 'removed', runId: 'done' }])
+  })
+
+  it('removeFromHistory returns false without emitting when no run is removed', () => {
+    const store = new RunStore(tmpDir, createRegistry())
+    const events: RunStoreEvent[] = []
+    store.onEvent((event) => events.push(event))
+
+    expect(store.removeFromHistory('missing')).toBe(false)
+    expect(events).toEqual([])
+  })
+
+  it('removeFromHistory emits removed when a run is removed', () => {
+    seedRun('remove-direct', { status: 'failed' })
+    const store = new RunStore(tmpDir, createRegistry())
+    const events: RunStoreEvent[] = []
+    store.onEvent((event) => events.push(event))
+
+    expect(store.removeFromHistory('remove-direct')).toBe(true)
+    expect(fs.existsSync(runDirFor(tmpDir, 'remove-direct'))).toBe(false)
+    expect(events).toEqual([{ kind: 'removed', runId: 'remove-direct' }])
+  })
+
+  it('reapStale flips stale entries to aborted and emits index-changed exactly once', async () => {
+    const dir = runDirFor(tmpDir, 'stale')
+    fs.mkdirSync(dir, { recursive: true })
+    writeManifest(path.join(dir, 'manifest.json'), {
+      runId: 'stale',
+      feature: 'foo',
+      startedAt: '2026-01-01T00:00:00Z',
+      status: 'running',
+      healCycles: 0,
+      services: [],
+      heartbeatAt: new Date(Date.now() - 60_000).toISOString(),
+    })
+    writeRunsIndex(tmpDir, [
+      { runId: 'stale', feature: 'foo', startedAt: '2026-01-01T00:00:00Z', status: 'running' },
+    ])
+    const store = new RunStore(tmpDir, createRegistry())
+    const events: RunStoreEvent[] = []
+    store.on('event', (e) => events.push(e))
+    await store.reapStale()
+    expect(readRunsIndex(tmpDir)[0].status).toBe('aborted')
+    expect(events).toEqual([{ kind: 'index-changed' }])
+  })
+
+  it('reapStale does not emit when nothing changes', async () => {
+    seedRun('healthy', { status: 'passed' })
+    const store = new RunStore(tmpDir, createRegistry())
+    const events: RunStoreEvent[] = []
+    store.on('event', (e) => events.push(e))
+    await store.reapStale()
+    expect(events).toEqual([])
+  })
+
+  it('setServiceStatus mutates the named service and emits changed', () => {
+    const dir = runDirFor(tmpDir, 'r1')
+    fs.mkdirSync(dir, { recursive: true })
+    writeManifest(path.join(dir, 'manifest.json'), {
+      runId: 'r1',
+      feature: 'foo',
+      startedAt: '2026-01-01T00:00:00Z',
+      status: 'running',
+      healCycles: 0,
+      services: [{ name: 'api', safeName: 'api', command: 'x', cwd: '/', status: 'starting', logPath: '/x.log' }],
+    })
+    writeRunsIndex(tmpDir, [
+      { runId: 'r1', feature: 'foo', startedAt: '2026-01-01T00:00:00Z', status: 'running' },
+    ])
+    const store = new RunStore(tmpDir, createRegistry())
+    const events: RunStoreEvent[] = []
+    store.on('event', (e) => events.push(e))
+    store.setServiceStatus('r1', 'api', 'ready')
+    const m = readManifest(store.manifestPath('r1'))!
+    expect(m.services[0].status).toBe('ready')
+    expect(events).toEqual([{ kind: 'changed', runId: 'r1' }])
+  })
+})

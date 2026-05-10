@@ -2,7 +2,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { extractManagedBlock, applyManagedBlock, main } from './upgrade'
+import { extractManagedBlock, applyManagedBlock, applyGitignoreRules, main } from './upgrade'
 
 const tmpDirs: string[] = []
 function mkProjectRoot(): string {
@@ -78,6 +78,36 @@ describe('applyManagedBlock', () => {
   })
 })
 
+describe('applyGitignoreRules', () => {
+  it('appends missing envset value rules while preserving existing content', () => {
+    const existing = 'node_modules/\n.env\n'
+
+    expect(applyGitignoreRules(existing)).toBe(
+      [
+        'node_modules/',
+        '.env',
+        '',
+        '# Canary Lab envset values may contain secrets.',
+        '# envsets.config.json files are outside these patterns, so they stay trackable.',
+        'envsets/*/*',
+        'features/*/envsets/*/*',
+        '',
+      ].join('\n'),
+    )
+  })
+
+  it('does not rewrite when both envset value rules already exist', () => {
+    const existing = [
+      'node_modules/',
+      'envsets/*/*',
+      'features/*/envsets/*/*',
+      '',
+    ].join('\n')
+
+    expect(applyGitignoreRules(existing)).toBe(existing)
+  })
+})
+
 describe("main (upgrade orchestration)", () => {
   it("exits silently when no project root (no features/ anywhere)", async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "cl-up-noroot-"))
@@ -111,11 +141,15 @@ describe("main (upgrade orchestration)", () => {
       expect(content).toContain("<!-- managed:canary-lab:end -->")
       expect(content).toContain("<!-- heal-prompt:start -->")
       expect(content).toContain("<!-- heal-prompt:end -->")
-      expect(content).toContain("When the user says `self heal`, follow the `heal-prompt` block below.")
-      expect(content).toContain("logs/heal-index.md")
-      expect(content).toContain("logs/e2e-summary.json")
-      expect(content).toContain("logs/.restart")
-      expect(content).toContain("logs/.rerun")
+      expect(content).toContain("<!-- personal-wiki:start -->")
+      expect(content).toContain("<!-- personal-wiki:end -->")
+      expect(content).toContain("When the user says `self heal`, follow the `heal-prompt` block below. The `logs/current` pointer tracks the active run.")
+      expect(content).toContain("logs/current/heal-index.md")
+      expect(content).toContain("logs/current/e2e-summary.json")
+      expect(content).toContain("logs/current/diagnosis-journal.md")
+      expect(content).toContain("`.restart`")
+      expect(content).toContain("`.rerun`")
+      expect(content).toContain("logs/current/signals/")
       expect(content).toContain("Prefer exact slice paths from `heal-index.md` before broad repo search.")
       expect(content).not.toContain("Avoid broad repo grep")
       expect(content).not.toContain("Before editing, group related failures by file")
@@ -123,9 +157,28 @@ describe("main (upgrade orchestration)", () => {
       expect(content).not.toContain("## Context Files")
       expect(content).not.toContain("## Importing Env Files")
     }
+    expect(fs.readFileSync(path.join(root, "CLAUDE.md"), "utf-8")).toBe(
+      fs.readFileSync(path.join(root, "AGENTS.md"), "utf-8"),
+    )
 
     const pkg = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf-8"))
     expect(pkg.scripts.postinstall).toBe("canary-lab upgrade --silent")
+  })
+
+  it("adds envset value rules to an existing project .gitignore", async () => {
+    const root = mkProjectRoot()
+    vi.stubEnv("CANARY_LAB_PROJECT_ROOT", root)
+    fs.writeFileSync(path.join(root, ".gitignore"), "node_modules/\n")
+    vi.spyOn(console, "log").mockImplementation(() => {})
+
+    await main([])
+
+    const gitignore = fs.readFileSync(path.join(root, ".gitignore"), "utf-8")
+    expect(gitignore).toContain("node_modules/")
+    expect(gitignore).toContain("envsets/*/*")
+    expect(gitignore).toContain("features/*/envsets/*/*")
+    expect(gitignore).not.toContain("!envsets/*/*")
+    expect(gitignore).not.toContain("!features/*/envsets/*/*")
   })
 
   it("does not rewrite FULLY_MANAGED file if content already matches template", async () => {
@@ -182,6 +235,30 @@ describe("main (upgrade orchestration)", () => {
     const after = fs.readFileSync(claudePath, "utf-8")
     expect(after).toContain("# My notes")
     expect(after).toContain("custom stuff")
+  })
+
+  it("re-renders personal wiki blocks from canary-lab.config.json on upgrade", async () => {
+    const root = mkProjectRoot()
+    const wiki = path.join(root, "wiki")
+    fs.mkdirSync(wiki)
+    vi.stubEnv("CANARY_LAB_PROJECT_ROOT", root)
+    fs.writeFileSync(
+      path.join(root, "canary-lab.config.json"),
+      JSON.stringify({ personalWikiPath: wiki }, null, 2) + "\n",
+    )
+    vi.spyOn(console, "log").mockImplementation(() => {})
+
+    await main([])
+
+    for (const mdFile of ["CLAUDE.md", "AGENTS.md"]) {
+      const content = fs.readFileSync(path.join(root, mdFile), "utf-8")
+      expect(content).toContain("<!-- personal-wiki:start -->")
+      expect(content).toContain(`- \`${fs.realpathSync(wiki)}\` — Karpathy-style personal wiki`)
+      expect(content).toContain("<!-- personal-wiki:end -->")
+    }
+    expect(fs.readFileSync(path.join(root, "CLAUDE.md"), "utf-8")).toBe(
+      fs.readFileSync(path.join(root, "AGENTS.md"), "utf-8"),
+    )
   })
 
   it("does not crash on malformed package.json", async () => {

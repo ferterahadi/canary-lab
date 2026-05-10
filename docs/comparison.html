@@ -1,0 +1,442 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Where Canary Lab fits</title>
+  <style>
+    :root {
+      --bg: #fafafa;
+      --surface: #ffffff;
+      --text: #0f172a;
+      --muted: #64748b;
+      --line: #e2e8f0;
+      --line-strong: #cbd5e1;
+
+      --canary-bg: #fef3c7;
+      --canary-fg: #78350f;
+      --canary-border: #d97706;
+
+      --shadow: 0 1px 2px rgba(15,23,42,0.04), 0 4px 12px rgba(15,23,42,0.06);
+    }
+
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+      font-feature-settings: "ss01", "cv11";
+    }
+
+    main {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 48px 24px 80px;
+    }
+
+    .hero {
+      text-align: center;
+      padding: 56px 16px 40px;
+      border-bottom: 1px solid var(--line);
+      margin-bottom: 56px;
+    }
+    .hero .eyebrow {
+      display: inline-block;
+      font-size: 12px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 16px;
+    }
+    .hero h1 {
+      font-size: clamp(32px, 5vw, 52px);
+      line-height: 1.1;
+      margin: 0 0 16px;
+      letter-spacing: -0.02em;
+      font-weight: 700;
+    }
+    .hero h1 .accent {
+      background: linear-gradient(135deg, var(--canary-border) 0%, #b45309 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .hero p {
+      font-size: clamp(15px, 1.6vw, 18px);
+      color: var(--muted);
+      max-width: 680px;
+      margin: 0 auto;
+    }
+
+    section { margin-bottom: 72px; }
+    section h2 {
+      font-size: 14px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin: 0 0 8px;
+      font-weight: 600;
+    }
+    section h3 {
+      font-size: clamp(22px, 3vw, 30px);
+      margin: 0 0 8px;
+      letter-spacing: -0.01em;
+      font-weight: 700;
+    }
+    section .subtitle {
+      color: var(--muted);
+      margin: 0 0 28px;
+      font-size: 15px;
+      max-width: 760px;
+    }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 28px 32px;
+      box-shadow: var(--shadow);
+    }
+    .card p { margin: 0 0 12px; }
+    .card p:last-child { margin-bottom: 0; }
+    .card code {
+      background: #f1f5f9;
+      padding: 1px 6px;
+      border-radius: 4px;
+      font-size: 0.92em;
+      font-family: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    }
+
+    .plain-list, .boundary-list, .example-list {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+    }
+    .plain-list li, .example-list li {
+      padding: 8px 0 8px 22px;
+      position: relative;
+      color: var(--text);
+      font-size: 15px;
+    }
+    .plain-list li::before, .example-list li::before {
+      content: "";
+      position: absolute;
+      left: 4px;
+      top: 16px;
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      background: var(--canary-border);
+    }
+    .boundary-list li {
+      padding: 10px 0;
+      border-bottom: 1px dashed var(--line);
+      font-size: 15px;
+    }
+    .boundary-list li:last-child { border-bottom: none; }
+    .boundary-list li strong { color: var(--text); }
+
+    /* Mermaid */
+    .mermaid-wrap {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 32px 24px;
+      box-shadow: var(--shadow);
+      overflow-x: auto;
+    }
+    .mermaid {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 220px;
+      font-family: inherit !important;
+    }
+    .mermaid svg { max-width: 100%; height: auto; }
+
+    .caption {
+      color: var(--muted);
+      font-size: 14px;
+      max-width: 760px;
+      margin: 16px auto 0;
+      text-align: center;
+    }
+
+    /* Neighbors grid */
+    .neighbor-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 16px;
+    }
+    @media (min-width: 820px) {
+      .neighbor-grid { grid-template-columns: 1fr 1fr; }
+    }
+    .neighbor-card {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 22px 24px;
+      box-shadow: var(--shadow);
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .neighbor-card h4 {
+      margin: 0;
+      font-size: 17px;
+      font-weight: 700;
+      letter-spacing: -0.005em;
+    }
+    .neighbor-card .tools {
+      margin: 0;
+      font-size: 13px;
+      color: var(--canary-fg);
+      background: var(--canary-bg);
+      padding: 4px 10px;
+      border-radius: 999px;
+      align-self: flex-start;
+      font-weight: 500;
+    }
+    .neighbor-card p:not(.tools) {
+      margin: 4px 0 0;
+      font-size: 14px;
+      color: #334155;
+      line-height: 1.6;
+    }
+    .neighbor-card em { color: var(--text); font-style: normal; font-weight: 600; }
+
+    /* About */
+    .about-section { margin-bottom: 48px; }
+    .about-card {
+      background: linear-gradient(180deg, #fafaf9 0%, #f5f5f4 100%);
+      border: 1px solid var(--line-strong);
+      border-radius: 16px;
+      padding: 32px 36px;
+    }
+    .about-card h2 {
+      font-size: 18px;
+      letter-spacing: -0.005em;
+      text-transform: none;
+      color: var(--text);
+      font-weight: 700;
+      margin: 0 0 8px;
+    }
+    .about-card .about-text {
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.7;
+      margin: 0;
+    }
+
+    footer {
+      border-top: 1px solid var(--line);
+      padding-top: 32px;
+      margin-top: 24px;
+      color: var(--muted);
+      font-size: 13px;
+      text-align: center;
+    }
+    footer a {
+      color: var(--muted);
+      text-decoration: underline;
+      text-decoration-thickness: 1px;
+      text-underline-offset: 3px;
+    }
+    footer p { margin: 0; max-width: 900px; margin: 0 auto; line-height: 1.9; }
+
+    /* Mobile */
+    @media (max-width: 768px) {
+      main { padding: 24px 16px 56px; }
+      section { margin-bottom: 56px; }
+      .card { padding: 20px 22px; }
+      .hero { padding: 32px 8px 28px; margin-bottom: 32px; }
+      .about-card { padding: 24px 20px; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+
+    <header class="hero">
+      <span class="eyebrow">May 2026 · Compiled from public docs with AI assistance</span>
+      <h1>Where <span class="accent">Canary Lab</span> fits</h1>
+      <p>Canary Lab is one piece of a workflow that usually involves a test runner, sometimes a CI dashboard, and a coding agent. This page is a map of where it sits and what it pairs with — not a feature contest.</p>
+    </header>
+
+    <!-- ① What it is -->
+    <section id="what-it-is">
+      <h2>① What it is</h2>
+      <h3>A local orchestrator wrapped around a Playwright run</h3>
+      <p class="subtitle">Canary Lab owns the lifecycle around a local E2E run: starting the services a feature depends on, applying environment files, running Playwright, and writing per-run logs and artifacts to a stable directory. When a test fails, it prepares a structured failure context that an external coding agent — Claude Code or Codex — can read and act on.</p>
+
+      <div class="card">
+        <ul class="plain-list">
+          <li>Starts the services a feature needs and waits for health checks before tests run</li>
+          <li>Swaps environment files (envsets) for the duration of a run, then restores them</li>
+          <li>Runs Playwright and captures stdout, events, screenshots, videos, and traces under <code>logs/runs/&lt;runId&gt;/</code></li>
+          <li>Slices service logs per failed test so the relevant window is findable without scrollback</li>
+          <li>Optionally hands the failure context to a coding agent and watches for restart/rerun signals</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- ② What it isn't -->
+    <section id="what-it-isnt">
+      <h2>② What it isn't</h2>
+      <h3>The boundaries</h3>
+      <p class="subtitle">Canary Lab fills a specific gap. Several other tools cover stages it explicitly does not, and that's intentional — the value is in pairing well, not in covering everything.</p>
+
+      <div class="card">
+        <ul class="boundary-list">
+          <li><strong>Not the test runner.</strong> Playwright is. Canary Lab invokes it.</li>
+          <li><strong>Not the coding agent.</strong> Claude Code, Codex, or another CLI is. Canary Lab supplies context and signal files.</li>
+          <li><strong>Not a test healer.</strong> It doesn't rewrite selectors, waits, or assertions in test files.</li>
+          <li><strong>Not a CI dashboard.</strong> It doesn't aggregate runs across a team or expose hosted history.</li>
+          <li><strong>Not cloud SaaS.</strong> It runs locally on a single developer's machine.</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- ③ Lifecycle map -->
+    <section id="lifecycle">
+      <h2>③ The lifecycle</h2>
+      <h3>Where Canary Lab sits in the loop</h3>
+      <p class="subtitle">A typical E2E workflow has six stages. Canary Lab covers the highlighted three — the gap between running a test locally and handing the failure to something that can fix it. It's also the part of the loop where context is most often lost.</p>
+
+      <div class="mermaid-wrap">
+        <pre class="mermaid">
+flowchart LR
+    A["Author tests"] --> B["Run locally"]
+    B --> C["Run in CI"]
+    C --> D["Capture results"]
+    D --> E["Surface failure"]
+    E --> F["Fix code"]
+    F -.->|next iteration| B
+
+    classDef cl fill:#fef3c7,stroke:#d97706,stroke-width:3px,color:#78350f
+    classDef other fill:#f8fafc,stroke:#94a3b8,color:#334155
+
+    class B,D,E cl
+    class A,C,F other
+        </pre>
+      </div>
+      <p class="caption">No single tool covers every stage. A working setup typically combines a test runner, an orchestrator for the local debug loop, and a coding agent for the fix.</p>
+    </section>
+
+    <!-- ④ The neighbors -->
+    <section id="neighbors">
+      <h2>④ The neighbors</h2>
+      <h3>How each tool relates</h3>
+      <p class="subtitle">Grouped by what they're for. None of these are competitors to Canary Lab — they cover different stages of the lifecycle, operate at different scales, or address different audiences. Most can coexist with Canary Lab on the same project.</p>
+
+      <div class="neighbor-grid">
+
+        <div class="neighbor-card">
+          <h4>Test runners &amp; test healers</h4>
+          <p class="tools">Playwright · Playwright Healer</p>
+          <p>Playwright is the runner Canary Lab invokes — there's no overlap, just a hand-off. Playwright Healer is a layer on top of Playwright that patches test code (selectors, waits, assertions) using DOM, console, and network signals from a replay. Canary Lab works in the opposite direction: it leaves test files alone and instead surfaces the system state behind the failure so an agent can fix the implementation. The two could coexist on the same project — Healer for selector drift, Canary Lab for app-level bugs.</p>
+        </div>
+
+        <div class="neighbor-card">
+          <h4>Test-authoring SaaS</h4>
+          <p class="tools">Octomind · Mabl · QA Wolf</p>
+          <p>These are vendor-managed services that generate and maintain tests for you, often with their own AI in the loop. They cover the <em>authoring</em> stage and run the tests on the vendor's hosted runner. Canary Lab assumes you already write your tests in Playwright and care about what happens locally during a failing run. Different operating model, different stage in the lifecycle.</p>
+        </div>
+
+        <div class="neighbor-card">
+          <h4>Test history &amp; CI dashboards</h4>
+          <p class="tools">Currents.dev</p>
+          <p>Currents is a cloud service for aggregating Playwright runs across a team's CI: history, flakiness analytics, retry tracking, parallelisation. It sits on the CI side of the lifecycle. Canary Lab sits on the local-dev side. They're complementary — a team could run Currents in CI and Canary Lab on each developer's machine without conflict.</p>
+        </div>
+
+        <div class="neighbor-card">
+          <h4>Local stack orchestrators</h4>
+          <p class="tools">Tilt · Skaffold</p>
+          <p>Tilt brings up a Kubernetes-based dev stack with hot reload. It's adjacent to Canary Lab in that both "boot local services," but the runtimes and goals differ — Tilt for ongoing development against a K8s stack, Canary Lab for per-run process lifecycle around a Playwright invocation. A project using Tilt for dev could still use Canary Lab for the test loop.</p>
+        </div>
+
+        <div class="neighbor-card">
+          <h4>Coding agents</h4>
+          <p class="tools">Claude Code · Codex · Goose</p>
+          <p>These are the <em>other half</em> of Canary Lab's heal loop. Canary Lab doesn't write code; it produces a structured failure context (sliced logs, <code>heal-index.md</code>, signal files) that one of these agents can act on. Claude Code and Codex are already wired up; Goose follows the same general pattern and could be added. The complement is direct: agents are good at editing code, Canary Lab is good at handing them the right context to edit it from.</p>
+        </div>
+
+        <div class="neighbor-card">
+          <h4>Agent envelopes at other scales</h4>
+          <p class="tools">Stripe Minions</p>
+          <p>Stripe's Minions is internal-only tooling: a fork of Goose extended with "blueprints" (deterministic workflow scaffolds), 400+ MCP tool integrations, and pre-warmed devboxes, used to autonomously produce ~1,300 PRs per week. The interesting connection is that <em>Canary Lab is the same pattern at a much smaller scale</em> — both wrap a coding agent with scaffolding and context to make it more reliable on a constrained kind of task. Stripe's scope is "any small bounded engineering task across the company"; Canary Lab's is "fix the local app code that broke this Playwright run." Same shape, very different blast radius.</p>
+        </div>
+
+        <div class="neighbor-card">
+          <h4>Chat clients with code access</h4>
+          <p class="tools">Claude Desktop</p>
+          <p>Claude Desktop is the Anthropic chat app for Mac and Windows. With MCP, it can read files and call tools, but it's interactive-first and not designed to be driven headlessly from a runner. It's adjacent to Canary Lab — a developer might use it to ask questions about a captured run — but it isn't a substitute for Claude Code or Codex in the auto-heal slot.</p>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- ⑤ Worked example -->
+    <section id="example">
+      <h2>⑤ A worked example</h2>
+      <h3>How the tools tile</h3>
+      <p class="subtitle">A concrete picture of where Canary Lab sits in a real workflow.</p>
+
+      <div class="card">
+        <p>Suppose you're working on a 3-service local stack — a frontend, an API, and a worker — with Playwright tests that exercise the whole thing. A test fails in the checkout flow.</p>
+
+        <ul class="example-list">
+          <li><strong>Run the test locally.</strong> Canary Lab boots the three services, applies the right envset, runs Playwright, and captures logs, traces, and the failure under <code>logs/runs/&lt;runId&gt;/</code>.</li>
+          <li><strong>See what broke.</strong> The Canary Lab UI shows per-test logs, the Playwright trace, and a sliced view of the relevant service log window. No terminal scrollback to dig through.</li>
+          <li><strong>Hand it to an agent.</strong> Claude Code or Codex reads <code>heal-index.md</code> and the failure slice, edits the API handler, and writes a <code>.rerun</code> signal.</li>
+          <li><strong>Track flakiness over time.</strong> If the team also runs Playwright in CI, Currents collects the cross-team history independently — Canary Lab doesn't replace that.</li>
+          <li><strong>Maintain the tests themselves.</strong> If selector drift is the recurring problem, Playwright Healer or Octomind handle that — Canary Lab leaves test files alone.</li>
+        </ul>
+
+        <p>Each tool has a stage. Canary Lab fills the local debug stage and the agent hand-off, which is the gap most other tools don't directly target.</p>
+      </div>
+    </section>
+
+    <!-- About -->
+    <section id="about" class="about-section">
+      <div class="about-card">
+        <h2>About this document</h2>
+        <p class="about-text">Researched from public web sources and compiled with AI assistance, May 2026. Intended as a map of where Canary Lab sits relative to its neighbours, not a competitive analysis. Several characterisations of other tools are based on public docs and blog posts and may be out of date — please verify anything here before relying on it. If something is wrong or unfair, open an issue or PR.</p>
+      </div>
+    </section>
+
+    <footer>
+      <p>Sources:
+        <a href="https://playwright.dev/docs/test-agents">Playwright Test Agents</a> ·
+        <a href="https://currents.dev/playwright">Currents.dev</a> ·
+        <a href="https://octomind.dev/">Octomind</a> ·
+        <a href="https://docs.tilt.dev/">Tilt</a> ·
+        <a href="https://www.qawolf.com/blog/the-12-best-ai-testing-tools-in-2026">QA Wolf — 2026 AI testing landscape</a> ·
+        <a href="https://stripe.dev/blog/minions-stripes-one-shot-end-to-end-coding-agents">Stripe Minions</a> ·
+        <a href="https://github.com/block/goose">Goose</a> ·
+        <a href="https://docs.claude.com/en/docs/claude-code">Claude Code</a> ·
+        <a href="https://github.com/openai/codex">Codex CLI</a>
+      </p>
+    </footer>
+
+  </main>
+
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+    mermaid.initialize({
+      startOnLoad: true,
+      theme: 'base',
+      themeVariables: {
+        fontFamily: '-apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif',
+        primaryColor: '#f8fafc',
+        primaryTextColor: '#0f172a',
+        primaryBorderColor: '#94a3b8',
+        lineColor: '#64748b'
+      }
+    });
+  </script>
+</body>
+</html>

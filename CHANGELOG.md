@@ -2,6 +2,37 @@
 
 All notable changes to Canary Lab are listed here. We try to keep the language plain so anyone can follow along.
 
+## 1.0.0 — 2026-04-30
+
+> The headline change: Canary Lab is now driven from a local web UI (`canary-lab ui`) instead of a stack of iTerm tabs. Run `npx canary-lab upgrade` after upgrading to refresh the managed `CLAUDE.md` / `AGENTS.md` blocks.
+
+### Added
+
+- **New web UI (`canary-lab ui`).** Boots a local Fastify server on `http://localhost:7421` and opens it in your default browser. Three-column Finder-style layout: features on the left, run history in the middle, live PTY logs and journal viewer on the right. Pass `--no-open` to suppress the auto-launch (useful over SSH or in CI), `--port <n>` to bind a different port.
+- **Run history.** The last 20 runs are preserved under `logs/runs/<runId>/` — each with its own service logs, summary JSON, heal index, and `runner.log`. Older runs roll off automatically. You can browse, compare, and re-open them from the UI without re-running.
+- **Run-scoped diagnosis journal.** New heal iterations are written to `logs/runs/<runId>/diagnosis-journal.md`, with `logs/current/diagnosis-journal.md` as the manual-agent path for the active run. Existing root-level journals are left in place as legacy history.
+- **`runner.log` per run.** The orchestrator now writes its own progress (lifecycle events, signal handling, restart decisions) to `logs/runs/<runId>/runner.log` — so you can audit what *the runner* did, separately from what each service or the agent did.
+- **Add Test wizard.** A guided flow inside the UI: PRD draft → skill recommender → plan → spec generation. The wizard streams Claude / Codex output live and lands a ready-to-run Playwright spec into the chosen feature.
+- **Playwright Playback.** Run detail now has a structured playback view with final screenshots, trace downloads, inline retained video, collapsed browser actions, and the raw Playwright terminal as a fallback.
+- **`.playwright-mcp` artifact capture.** When Playwright's MCP integration emits artifacts during a failure, they're collected into the per-failure folder under `logs/failed/<slug>/.playwright-mcp/` so the heal agent can find them next to the sliced service logs.
+- **Coverage gate.** Business-logic modules are gated at ≥92% on all four metrics (statements, branches, functions, lines). Enforced in CI; no `/* v8 ignore */` pragmas anywhere — exclusions live at the config level.
+
+### Changed
+
+- **Default workflow is now the web UI, not iTerm tabs.** The Quick Start in the README is `npm install && npm run install:browsers && npx canary-lab ui`. Test execution, envset edits, run review, and heal controls now live in the UI.
+- **macOS-only is no longer a hard constraint.** Services and the heal agent run inside `node-pty` pseudo-terminals owned by Canary Lab — no AppleScript, no iTerm, no Terminal.app. Linux support is now in reach (the runner itself is cross-platform; only auto-launching the browser falls back to `xdg-open` / `cmd start`).
+
+### Removed
+
+- **Legacy workflow commands.** `canary-lab run`, `canary-lab env`, and `canary-lab new-feature` are no longer public commands. Use `canary-lab ui` for runs, envsets, and feature configuration.
+- **iTerm / Terminal.app AppleScript launchers.** The `shared/launcher/iterm.ts` and `shared/launcher/terminal.ts` backends are gone, along with their AppleScript shims and tab-cleanup logic. Everything runs through `node-pty` now.
+- **Readline-prompted "Auto-heal on test failure?" flow.** The old terminal prompt is gone. Heal mode is selected and controlled from the web UI.
+
+### Breaking changes
+
+- **`logs/` layout changed.** Per-run artifacts now live under `logs/runs/<runId>/` rather than at the top of `logs/`. Symlinks at `logs/svc-*.log` etc. point at the latest run for backward-compat with skill files, but anything reading absolute paths under `logs/` will need to follow the new structure.
+- **iTerm-tab-based scripts are gone.** If you had wrapper scripts that grepped iTerm window titles or relied on AppleScript-driven cleanup, they will no longer find anything to act on.
+
 ## 0.9.4 — 2026-04-27
 
 ### Added
@@ -60,7 +91,7 @@ All notable changes to Canary Lab are listed here. We try to keep the language p
 
 - `.claude/skills/heal-loop.md`, `.claude/skills/self-fixing-loop.md`, `.codex/heal-loop.md`, `.codex/self-fixing-loop.md` — content consolidated into `CLAUDE.md` / `AGENTS.md`. `canary-lab upgrade` removes these files from existing installs.
 - `features/<name>/src/config.ts` (and the empty `src/` dir) in all scaffolded features.
-- `features/<name>/.env.example` in all scaffolded features. The same values already live in `envsets/local/<name>.env`, and `canary-lab new-feature` no longer emits an example file.
+- `features/<name>/.env.example` in all scaffolded features. The same values already live in `envsets/local/<name>.env`.
 
 ### Feature layout
 

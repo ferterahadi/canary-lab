@@ -2,9 +2,27 @@ import fs from 'fs'
 import path from 'path'
 import { getProjectRoot } from '../shared/runtime/project-root'
 import { getInstalledPackageVersion, writeStamp } from '../shared/runtime/upgrade-check'
+import {
+  detectMigrations,
+  applyArchive,
+  renderReport,
+  hasPendingMigrations,
+  type MigrationReport,
+} from './upgrade-migration'
+import { loadProjectConfig } from '../apps/web-server/lib/runtime/launcher/project-config'
+import { applyPersonalWikiBlock } from '../shared/runtime/personal-wiki'
 
 const MARKER_START = '<!-- managed:canary-lab:start -->'
 const MARKER_END = '<!-- managed:canary-lab:end -->'
+
+const GITIGNORE_HEADER: string[] = [
+  '# Canary Lab envset values may contain secrets.',
+  '# envsets.config.json files are outside these patterns, so they stay trackable.',
+]
+const GITIGNORE_PATTERNS: string[] = [
+  'envsets/*/*',
+  'features/*/envsets/*/*',
+]
 
 /** Files that are fully managed — overwritten on every upgrade. */
 const FULLY_MANAGED: string[] = [
@@ -100,18 +118,66 @@ export function applyManagedBlock(existing: string, block: string, relPath: stri
   return trimmed + (trimmed.length > 0 ? '\n\n' : '') + block + '\n'
 }
 
+export function applyGitignoreRules(existing: string): string {
+  const lines = existing.split(/\r?\n/)
+  const missingPatterns = GITIGNORE_PATTERNS.filter((rule) => !lines.includes(rule))
+  if (missingPatterns.length === 0) return existing
+
+  const trimmed = existing.trimEnd()
+  return trimmed + (trimmed.length > 0 ? '\n\n' : '') + [...GITIGNORE_HEADER, ...missingPatterns].join('\n') + '\n'
+}
+
 interface UpgradeOptions {
   silent: boolean
+  check: boolean
+  forceArchive: boolean
+}
+
+export interface MainExtras {
+  /** Injected confirm — called only when there are orphaned logs and
+   * `--force-archive` was not passed. Async to support readline prompts. */
+  confirm?: (orphanCount: number) => Promise<boolean> | boolean
 }
 
 function log(msg: string, opts: UpgradeOptions): void {
   if (!opts.silent) console.log(msg)
 }
 
-export async function main(args = process.argv.slice(2)): Promise<void> {
+/**
+ * Run the migration pass before the docs/skills sync.
+ * Detection is pure; archive is gated by `--force-archive` or `confirm`.
+ */
+export async function runMigration(
+  projectRoot: string,
+  opts: UpgradeOptions,
+  confirm: (orphanCount: number) => Promise<boolean> | boolean,
+): Promise<{ report: MigrationReport; pending: boolean }> {
+  const report = detectMigrations(projectRoot)
+  const pending = hasPendingMigrations(report)
+
+  if (opts.check) {
+    log(renderReport(report), opts)
+    return { report, pending }
+  }
+
+  if (report.orphanedLogs.length > 0) {
+    const ok = opts.forceArchive ? true : await confirm(report.orphanedLogs.length)
+    if (ok) applyArchive(report, projectRoot)
+  }
+  log(renderReport(report), opts)
+  return { report, pending }
+}
+
+export async function main(
+  args = process.argv.slice(2),
+  extras: MainExtras = {},
+): Promise<void> {
   const opts: UpgradeOptions = {
     silent: args.includes('--silent'),
+    check: args.includes('--check'),
+    forceArchive: args.includes('--force-archive'),
   }
+  const confirm = extras.confirm ?? (() => false)
 
   let projectRoot: string
   try {
@@ -127,7 +193,17 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
     return
   }
 
+  // 0. 0.9.x → 0.10.x migration pass — detect orphaned logs, lint
+  // feature.config.cjs, diff heal-prompt, surface CI hints. Runs before the
+  // docs/skills sync so the user sees the report up-front.
+  const migration = await runMigration(projectRoot, opts, confirm)
+  if (opts.check) {
+    if (migration.pending) process.exitCode = 1
+    return
+  }
+
   const templateRoot = getTemplateRoot()
+  const projectConfig = loadProjectConfig(projectRoot)
   let updated = 0
 
   // 1. Fully-managed files: overwrite from templates
@@ -166,7 +242,10 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
       ? fs.readFileSync(targetPath, 'utf-8')
       : ''
 
-    const result = applyManagedBlock(existing, managedBlock, relPath)
+    const result = applyPersonalWikiBlock(
+      applyManagedBlock(existing, managedBlock, relPath),
+      projectConfig.personalWikiPath,
+    )
 
     // Skip if nothing changed
     if (result === existing) continue
@@ -186,7 +265,20 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
     }
   }
 
-  // 4. Ensure postinstall script exists in project package.json
+  // 4. Ensure the envset secret-protection rules exist without replacing
+  // user-owned ignore rules.
+  const gitignorePath = path.join(projectRoot, '.gitignore')
+  const existingGitignore = fs.existsSync(gitignorePath)
+    ? fs.readFileSync(gitignorePath, 'utf-8')
+    : ''
+  const nextGitignore = applyGitignoreRules(existingGitignore)
+  if (nextGitignore !== existingGitignore) {
+    fs.writeFileSync(gitignorePath, nextGitignore)
+    log('  Updated .gitignore (envset value rules)', opts)
+    updated += 1
+  }
+
+  // 5. Ensure postinstall script exists in project package.json
   const pkgJsonPath = path.join(projectRoot, 'package.json')
   if (fs.existsSync(pkgJsonPath)) {
     try {
@@ -204,7 +296,7 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
     }
   }
 
-  // Stamp the project with the installed version so `canary-lab run` can
+  // Stamp the project with the installed version so the UI can
   // detect drift on future invocations (npm update won't trigger postinstall
   // reliably, so the runner itself nudges users who fall behind).
   const installedVersion = getInstalledPackageVersion()

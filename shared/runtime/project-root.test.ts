@@ -57,6 +57,20 @@ describe('getProjectRoot', () => {
     vi.spyOn(process, 'cwd').mockReturnValue(nested)
     expect(getProjectRoot()).toBe(path.resolve(nested))
   })
+
+  it('does not walk above the Canary Lab package checkout', () => {
+    const home = mkTmp()
+    const checkout = path.join(home, 'Documents', 'canary-lab')
+    fs.mkdirSync(path.join(home, 'features'), { recursive: true })
+    fs.mkdirSync(checkout, { recursive: true })
+    fs.writeFileSync(
+      path.join(checkout, 'package.json'),
+      JSON.stringify({ name: 'canary-lab' }),
+    )
+    vi.stubEnv('CANARY_LAB_PROJECT_ROOT', '')
+    vi.spyOn(process, 'cwd').mockReturnValue(checkout)
+    expect(getProjectRoot()).toBe(checkout)
+  })
 })
 
 describe('getFeaturesDir', () => {
