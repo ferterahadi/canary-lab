@@ -64,4 +64,50 @@ describe('SpecReviewStep', () => {
     expect(html).not.toContain('Agent output')
     expect(html).not.toContain('Suggest an adjustment')
   })
+
+  it('disables reject while spec generation is still running', () => {
+    const html = renderToStaticMarkup(
+      <SpecReviewStep
+        draft={draft({ status: 'generating' })}
+        featureName="login_flow"
+        onAccept={vi.fn()}
+        onReject={vi.fn()}
+        onRetry={vi.fn()}
+        onCancelGeneration={vi.fn()}
+        acting={false}
+      />,
+    )
+
+    const reject = buttonByText(html, 'Reject')
+    expect(reject?.hasAttribute('disabled')).toBe(true)
+    expect(reject?.className).toContain('disabled:cursor-not-allowed')
+  })
+
+  it('leaves reject enabled once spec files are ready', () => {
+    const html = renderToStaticMarkup(
+      <SpecReviewStep
+        draft={draft({ status: 'spec-ready' })}
+        featureName="login_flow"
+        onAccept={vi.fn()}
+        onReject={vi.fn()}
+        onRetry={vi.fn()}
+        onCancelGeneration={vi.fn()}
+        acting={false}
+      />,
+    )
+
+    const reject = buttonByText(html, 'Reject')
+    expect(reject?.hasAttribute('disabled')).toBe(false)
+  })
 })
+
+function buttonByText(html: string, text: string): HTMLButtonElement | null {
+  const button = html
+    .match(/<button\b[^>]*>[\s\S]*?<\/button>/g)
+    ?.find((candidate) => candidate.replace(/<[^>]+>/g, '').trim() === text)
+  if (!button) return null
+  return {
+    className: button.match(/\bclass="([^"]*)"/)?.[1] ?? '',
+    hasAttribute: (name: string) => new RegExp(`\\s${name}(?:=|\\s|>)`).test(button),
+  } as HTMLButtonElement
+}

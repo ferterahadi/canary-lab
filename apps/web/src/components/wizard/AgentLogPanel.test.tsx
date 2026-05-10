@@ -10,6 +10,7 @@ import { AgentLogPanel } from './AgentLogPanel'
 const terminalState = vi.hoisted(() => ({
   writes: [] as string[],
   resets: 0,
+  options: [] as Record<string, unknown>[],
 }))
 
 vi.mock('@xterm/xterm', () => ({
@@ -17,6 +18,7 @@ vi.mock('@xterm/xterm', () => ({
     options: Record<string, unknown>
     constructor(opts: Record<string, unknown>) {
       this.options = opts
+      terminalState.options.push(opts)
     }
     loadAddon(): void {}
     open(): void {}
@@ -54,6 +56,7 @@ let root: Root
 beforeEach(() => {
   terminalState.writes = []
   terminalState.resets = 0
+  terminalState.options = []
   container = document.createElement('div')
   document.body.appendChild(container)
   root = createRoot(container)
@@ -75,6 +78,28 @@ afterEach(() => {
 })
 
 describe('AgentLogPanel', () => {
+  it('keeps a large terminal scrollback for full wizard output review', async () => {
+    vi.mocked(getDraftAgentLog).mockResolvedValue({ content: 'full log\n' })
+
+    await act(async () => {
+      root.render(<AgentLogPanel draftId="d1" phase="planning" />)
+    })
+
+    expect(terminalState.options[0]?.scrollback).toBe(100_000)
+  })
+
+  it('caps the visible log panel height so stopped output scrolls internally', async () => {
+    vi.mocked(getDraftAgentLog).mockResolvedValue({ content: 'full log\n' })
+
+    await act(async () => {
+      root.render(<AgentLogPanel draftId="d1" phase="generating" status="idle" />)
+    })
+
+    expect(container.innerHTML).toContain('max-h-')
+    expect(container.innerHTML).toContain('h-')
+    expect(container.innerHTML).toContain('overflow-hidden')
+  })
+
   it('fetches and writes the full persisted agent log', async () => {
     vi.mocked(getDraftAgentLog).mockResolvedValue({ content: `line 1\n${'x'.repeat(5000)}\nline end` })
 

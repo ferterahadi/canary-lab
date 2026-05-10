@@ -37,6 +37,79 @@ function summarizeOutput(text: string): string {
   return first ? truncate(first.trim()) : '(no output)'
 }
 
+function formatCommandOutput(text: string): string | null {
+  const cleaned = text.trimEnd()
+  if (!cleaned.trim()) return null
+  return cleaned
+    .split('\n')
+    .map((line, idx) => `${tag()} ${idx === 0 ? 'output' : '      '} ${line}`)
+    .join('\n')
+}
+
+type InspectionKind = 'Read' | 'List' | 'Glob' | 'Grep'
+
+interface InspectionCommand {
+  kind: InspectionKind
+  label: string
+}
+
+function countNonEmptyLines(text: string): number {
+  return text.split('\n').filter((line) => line.trim().length > 0).length
+}
+
+function formatMetric(label: string, count: number): string {
+  return `${label}: ${count.toLocaleString('en-US')}`
+}
+
+function inspectionSummary(kind: InspectionKind, text: string): string {
+  if (kind === 'Read') return formatMetric('Number of characters', text.length)
+  if (kind === 'Grep') return formatMetric('Number of matches', countNonEmptyLines(text))
+  return formatMetric('Number of files', countNonEmptyLines(text))
+}
+
+function parseInspectionCommand(raw: string): InspectionCommand | null {
+  let cmd = raw.trim()
+  const guard = cmd.match(/^test\s+-[fe]\s+\S+\s+&&\s+(.+)$/s)
+  if (guard) cmd = guard[1].trim()
+
+  const sedRange = cmd.match(/^sed\s+-n\s+['"](\d+),(\d+)p['"]\s+(\S+)$/)
+  if (sedRange) {
+    const [, from, to, file] = sedRange
+    return { kind: 'Read', label: `${file} L${from}-${to}` }
+  }
+
+  const sedPattern = cmd.match(/^sed\s+-n\s+['"]\/.+?\/,\/.+?\/p['"]\s+(.+)$/)
+  if (sedPattern) {
+    return { kind: 'Read', label: `${sedPattern[1]} (pattern slice)` }
+  }
+
+  const fileRead = cmd.match(/^(cat|head|tail)(?:\s+(?:-n\s*)?-?\d+)?\s+(\S+)$/)
+  if (fileRead) {
+    return { kind: 'Read', label: fileRead[2] }
+  }
+
+  const list = cmd.match(/^ls(?:\s+-[a-zA-Z]+)*\s+(\S+)\s*$/)
+  if (list) {
+    return { kind: 'List', label: list[1] }
+  }
+
+  if (/^find\s/.test(cmd)) {
+    return { kind: 'Glob', label: truncate(cmd.slice(5).trim(), 140) }
+  }
+
+  const grep = cmd.match(/^(rg|grep)\s+(.+)$/s)
+  if (grep) {
+    return { kind: 'Grep', label: truncate(grep[2].trim(), 140) }
+  }
+
+  return null
+}
+
+function parseReadCommand(raw: string): InspectionCommand | null {
+  const parsed = parseInspectionCommand(raw)
+  return parsed?.kind === 'Read' ? parsed : null
+}
+
 function handleCompleted(item: AnyObj): void {
   const type = item.type as string | undefined
 
@@ -57,8 +130,20 @@ function handleCompleted(item: AnyObj): void {
     const exitCode = item.exit_code as number | null | undefined
     const output = String(item.aggregated_output ?? '')
     const state = exitCode === 0 ? 'ok' : exitCode == null ? 'running' : `exit ${exitCode}`
+    const inspection = parseInspectionCommand(cmd)
+    if (inspection) {
+      process.stdout.write(`${tag()} ${inspection.kind} ${truncate(inspection.label, 160)} (${state})\n`)
+      if (exitCode === 0 && output.trim()) {
+        process.stdout.write(`${tag()} output ${inspectionSummary(inspection.kind, output)}\n`)
+      } else if (exitCode !== 0) {
+        const formattedOutput = formatCommandOutput(output)
+        if (formattedOutput) process.stdout.write(`${formattedOutput}\n`)
+      }
+      return
+    }
     process.stdout.write(`${tag()} command ${truncate(cmd, 160)} (${state})\n`)
-    if (output.trim()) process.stdout.write(`${tag()} output ${summarizeOutput(output)}\n`)
+    const formattedOutput = formatCommandOutput(output)
+    if (formattedOutput) process.stdout.write(`${formattedOutput}\n`)
     return
   }
 
@@ -121,4 +206,17 @@ if (require.main === module) {
   })
 }
 
-export { elapsed, tag, truncate, cleanCommand, summarizeOutput, handleCompleted, handleLine }
+export {
+  elapsed,
+  tag,
+  truncate,
+  cleanCommand,
+  summarizeOutput,
+  formatCommandOutput,
+  countNonEmptyLines,
+  inspectionSummary,
+  parseInspectionCommand,
+  parseReadCommand,
+  handleCompleted,
+  handleLine,
+}

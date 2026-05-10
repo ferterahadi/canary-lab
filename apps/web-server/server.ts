@@ -132,7 +132,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
   const ensureDraftBroker = (draftId: string): PaneBroker => {
     let b = draftBrokers.get(draftId)
     if (!b) {
-      b = new PaneBroker()
+      b = new PaneBroker(Number.POSITIVE_INFINITY)
       draftBrokers.set(draftId, b)
     }
     return b

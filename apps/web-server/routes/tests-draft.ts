@@ -287,6 +287,10 @@ export async function testsDraftRoutes(
       reply.code(404)
       return { error: 'draft not found' }
     }
+    if (isTransientGenerationStatus(rec.status)) {
+      reply.code(409)
+      return { error: `cannot reject while ${rec.status}; stop generation first` }
+    }
     transition(deps.logsDir, rec.draftId, 'rejected')
     reply.code(204)
     return null

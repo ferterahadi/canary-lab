@@ -108,6 +108,7 @@ export function AgentLogPanel({ draftId, initialBuffer, agent, phase, status = '
       disableStdin: true,
       fontFamily: "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace",
       fontSize: 11,
+      scrollback: 100_000,
       theme: TERM_THEMES[currentResolvedTheme()],
     })
     terminalRef.current = term
@@ -139,7 +140,7 @@ export function AgentLogPanel({ draftId, initialBuffer, agent, phase, status = '
       : 'Agent output'
 
   return (
-    <div className={`flex min-h-0 flex-col rounded border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950 ${className}`}>
+    <div className={`flex min-h-0 max-h-[min(70vh,44rem)] flex-col rounded border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950 ${className}`}>
       <div className="flex items-center gap-2 border-b border-zinc-200 px-3 py-2 text-xs dark:border-zinc-800">
         {status === 'running' && <span className="h-2 w-2 animate-pulse rounded-full bg-emerald-500" />}
         {status === 'failed' && <span className="h-2 w-2 rounded-full bg-rose-500" />}
@@ -156,7 +157,7 @@ export function AgentLogPanel({ draftId, initialBuffer, agent, phase, status = '
       </div>
       <div
         ref={containerRef}
-        className="min-h-[24rem] flex-1 overflow-hidden p-2"
+        className="h-[min(52vh,34rem)] min-h-[18rem] flex-1 overflow-hidden p-2"
         style={{ background: 'var(--bg-base)' }}
       />
     </div>

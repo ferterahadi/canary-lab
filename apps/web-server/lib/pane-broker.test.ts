@@ -78,6 +78,13 @@ describe('PaneBroker', () => {
     expect(b.snapshot('x')).toBe('abc')
   })
 
+  it('can keep an unbounded replay buffer for draft agent panes', () => {
+    const b = new PaneBroker(Number.POSITIVE_INFINITY)
+    b.push('draft:d:planning', 'a'.repeat(2048))
+    b.push('draft:d:planning', 'b'.repeat(2048))
+    expect(b.snapshot('draft:d:planning')).toHaveLength(4096)
+  })
+
   it('destroy closes all subs and clears state', () => {
     const b = new PaneBroker()
     const r = recorder()

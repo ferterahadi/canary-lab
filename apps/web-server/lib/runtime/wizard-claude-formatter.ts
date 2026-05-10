@@ -11,7 +11,6 @@ export {}
 import {
   c,
   formatToolCall,
-  formatToolResult,
   toolLabel,
 } from './claude-formatter'
 
@@ -22,6 +21,7 @@ interface AnyObj {
 const START = Date.now()
 interface PendingTool {
   name: string
+  input: AnyObj
 }
 
 const pendingTools = new Map<string, PendingTool>()
@@ -73,6 +73,46 @@ function resultSummary(raw: unknown): string {
         : ''
   const first = text.trim().split('\n').find((line) => line.trim().length > 0)
   return first ? truncate(first.trim()) : ''
+}
+
+function toolResultText(raw: unknown): string {
+  if (typeof raw === 'string') return raw
+  if (!Array.isArray(raw)) return ''
+  return raw
+    .map((item: AnyObj) => item.type === 'text' && typeof item.text === 'string' ? item.text : '')
+    .filter((text) => text.length > 0)
+    .join('\n')
+}
+
+function formatFullToolResult(text: string): string | null {
+  const cleaned = text.trimEnd()
+  if (!cleaned.trim()) return null
+  return cleaned
+    .split('\n')
+    .map((line, idx) => `${idx === 0 ? c('gray', '       ->') : c('gray', '         ')} ${line}`)
+    .join('\n')
+}
+
+function countNonEmptyLines(text: string): number {
+  return text.split('\n').filter((line) => line.trim().length > 0).length
+}
+
+function formatMetric(label: string, count: number): string {
+  return `${label}: ${count.toLocaleString('en-US')}`
+}
+
+function inspectionSummary(tool: PendingTool | undefined, text: string): string | null {
+  if (!tool) return null
+  if (tool.name === 'Read') return formatMetric('Number of characters', text.length)
+  if (tool.name === 'Glob') return formatMetric('Number of files', countNonEmptyLines(text))
+  if (tool.name === 'Grep') return formatMetric('Number of matches', countNonEmptyLines(text))
+  if (tool.name !== 'Bash') return null
+
+  const command = String(tool.input.command ?? '').trim()
+  if (/^(ls|find)(?:\s|$)/.test(command)) {
+    return formatMetric('Number of files', countNonEmptyLines(text))
+  }
+  return null
 }
 
 function isPartialAssistantMessage(msg: AnyObj): boolean {
@@ -153,7 +193,7 @@ function handleLine(line: string): void {
       if (block.type === 'tool_use') {
         const name = String(block.name ?? 'tool')
         const id = String(block.id ?? '')
-        if (id) pendingTools.set(id, { name })
+        if (id) pendingTools.set(id, { name, input: block.input as AnyObj })
         process.stdout.write(`${tag()} ${toolLabel(name)} ${formatToolCall(name, block.input as AnyObj)}\n`)
       }
     }
@@ -169,19 +209,19 @@ function handleLine(line: string): void {
       const id = String(block.tool_use_id ?? '')
       const pending = pendingTools.get(id)
       pendingTools.delete(id)
-      const name = pending?.name ?? 'tool'
-      const raw = block.content
-      const text =
-        typeof raw === 'string'
-          ? raw
-          : Array.isArray(raw)
-            ? (raw.find((item: AnyObj) => item.type === 'text') as AnyObj | undefined)?.text ?? ''
-            : ''
-      if (typeof text !== 'string') continue
-      const summary = formatToolResult(name, text)
-      if (!summary) continue
-      const prefix = block.is_error === true ? c('red', '       x') : c('gray', '       ->')
-      process.stdout.write(`${prefix} ${summary}\n`)
+      const text = toolResultText(block.content)
+      const summary = block.is_error === true ? null : inspectionSummary(pending, text)
+      if (summary) {
+        process.stdout.write(`${c('gray', '       ->')} ${c('dim', summary)}\n`)
+        continue
+      }
+      const formatted = formatFullToolResult(text)
+      if (!formatted) continue
+      if (block.is_error === true) {
+        process.stdout.write(formatted.replace(c('gray', '       ->'), c('red', '       x')) + '\n')
+      } else {
+        process.stdout.write(`${formatted}\n`)
+      }
     }
     return
   }
@@ -218,4 +258,15 @@ if (require.main === module) {
   })
 }
 
-export { elapsed, tag, truncate, toolSummary, resultSummary, handleLine }
+export {
+  elapsed,
+  tag,
+  truncate,
+  toolSummary,
+  resultSummary,
+  toolResultText,
+  formatFullToolResult,
+  countNonEmptyLines,
+  inspectionSummary,
+  handleLine,
+}

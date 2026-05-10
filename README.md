@@ -70,7 +70,11 @@ npx canary-lab ui
 2. **Runs** — the last 20 runs preserved under `logs/runs/<runId>/`, each with status, timing, and per-test results.
 3. **Run detail** — overview, service PTYs, Playwright terminal/playback, heal-agent output, and the selected run's diagnosis journal.
 
-Pass `--no-open` to suppress the browser auto-launch (useful over SSH or in CI). Pass `--port <n>` to bind a different port.
+Pass `--no-open` to suppress the browser auto-launch (useful over SSH or in CI). Pass `--port <n>` to bind a different port:
+
+```bash
+npx canary-lab ui --port 8123
+```
 
 `canary-lab init` scaffolds four sample features (`example_todo_api`, `broken_todo_api`, `tricky_checkout_api`, `flaky_orders_api`) so you can try the heal workflow before bringing your own services.
 
@@ -79,6 +83,7 @@ Pass `--no-open` to suppress the browser auto-launch (useful over SSH or in CI).
 ```bash
 npx canary-lab init <folder>
 npx canary-lab ui # primary surface (web UI)
+npx canary-lab ui --port 8123 # use a custom UI port
 npx canary-lab new feature <name> --description "..."
 npx canary-lab env apply <feature> <set>
 npx canary-lab env revert <feature>
