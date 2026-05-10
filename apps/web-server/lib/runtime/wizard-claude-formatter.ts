@@ -3,20 +3,17 @@
  * Wizard-specific Claude stream formatter.
  *
  * The Add Test wizard needs live progress, but its parser still expects the
- * final <plan-output>/<file> blocks to be present exactly as text. Unlike the
- * heal-agent formatter, assistant text is emitted raw and only tool/progress
- * events are summarized.
+ * final <plan-output>/<file> blocks to be present exactly as text. Assistant
+ * text is emitted raw and only tool/progress events are summarized.
  */
 export {}
-import {
-  c,
-  formatToolCall,
-  toolLabel,
-} from './claude-formatter'
+import { c } from '../../../../shared/cli-ui/colors'
 
 interface AnyObj {
   [key: string]: unknown
 }
+
+const CWD = process.cwd()
 
 const START = Date.now()
 interface PendingTool {
@@ -43,6 +40,85 @@ function tag(): string {
 
 function truncate(text: string, max = 140): string {
   return text.length > max ? text.slice(0, max - 1) + '...' : text
+}
+
+function relPath(p: string): string {
+  if (!p) return ''
+  if (p.startsWith(CWD + '/')) return p.slice(CWD.length + 1)
+  if (p === CWD) return '.'
+  return p.replace(process.env.HOME ?? '', '~')
+}
+
+const TOOL_ICONS: Record<string, string> = {
+  Read: '📖',
+  Edit: '✏️ ',
+  Write: '✏️ ',
+  Bash: '$',
+  Glob: '🔍',
+  Grep: '🔍',
+  TodoWrite: '📋',
+  Task: '🤖',
+  WebFetch: '🌐',
+  WebSearch: '🌐',
+}
+
+function toolLabel(name: string): string {
+  const icon = TOOL_ICONS[name] ?? '•'
+  return `${icon} ${c('cyan', name)}`
+}
+
+function formatToolCall(name: string, input: AnyObj): string {
+  if (!input || typeof input !== 'object') return ''
+  switch (name) {
+    case 'Bash': {
+      const cmd = String(input.command ?? '')
+      const desc = input.description ? ` ${c('dim', `# ${input.description}`)}` : ''
+      return `${cmd}${desc}`
+    }
+    case 'Read': {
+      const filePath = c('bold', relPath(String(input.file_path ?? '')))
+      const offset = typeof input.offset === 'number' ? input.offset : undefined
+      const limit = typeof input.limit === 'number' ? input.limit : undefined
+      // Surfacing the line range turns "narrow Read (good)" vs "full-file Read (banned)"
+      // into a visible difference in the tab — critical for the heal-loop discipline.
+      if (offset !== undefined && limit !== undefined) {
+        return `${filePath} ${c('dim', `L${offset}-${offset + limit - 1}`)}`
+      }
+      if (offset !== undefined) return `${filePath} ${c('dim', `from L${offset}`)}`
+      if (limit !== undefined) return `${filePath} ${c('dim', `L1-${limit}`)}`
+      return filePath
+    }
+    case 'Edit': {
+      const filePath = c('bold', relPath(String(input.file_path ?? '')))
+      const oldLines = String(input.old_string ?? '').split('\n').length
+      const newLines = String(input.new_string ?? '').split('\n').length
+      const all = input.replace_all === true ? ' (all)' : ''
+      if (!input.old_string && !input.new_string) return filePath
+      return `${filePath} ${c('dim', `−${oldLines} +${newLines}${all}`)}`
+    }
+    case 'Write': {
+      const filePath = c('bold', relPath(String(input.file_path ?? '')))
+      const content = typeof input.content === 'string' ? input.content : ''
+      if (!content) return filePath
+      const lines = content.split('\n').length
+      return `${filePath} ${c('dim', `${lines}L`)}`
+    }
+    case 'Glob': {
+      const path = input.path ? ` in ${relPath(String(input.path))}` : ''
+      return `${c('bold', String(input.pattern ?? ''))}${path}`
+    }
+    case 'Grep': {
+      const p = input.path ? ` in ${relPath(String(input.path))}` : ''
+      const glob = input.glob ? ` ${c('dim', `(${input.glob})`)}` : ''
+      return `${c('bold', String(input.pattern ?? ''))}${p}${glob}`
+    }
+    case 'TodoWrite': {
+      const todos = Array.isArray(input.todos) ? input.todos : []
+      return c('dim', `${todos.length} todo${todos.length === 1 ? '' : 's'}`)
+    }
+    default:
+      return c('dim', truncate(JSON.stringify(input), 100))
+  }
 }
 
 function compact(value: unknown): string {
@@ -101,6 +177,11 @@ function formatMetric(label: string, count: number): string {
   return `${label}: ${count.toLocaleString('en-US')}`
 }
 
+function isBashReadInspection(command: string): boolean {
+  if (/^(cat|head|tail)(?:\s|$)/.test(command)) return true
+  return /^sed\s+-n\s+(['"])(?:\d+,\d+p|\/.+?\/,\/.+?\/p)\1\s+\S+/.test(command)
+}
+
 function splitShellPipes(command: string): string[] {
   const segments: string[] = []
   let current = ''
@@ -140,13 +221,16 @@ function splitShellPipes(command: string): string[] {
 }
 
 function bashInspectionSummary(command: string, text: string): string | null {
+  if (isBashReadInspection(command)) {
+    return formatMetric('Number of characters', text.length)
+  }
   if (/^(ls|find)(?:\s|$)/.test(command)) {
     return formatMetric('Number of files', countNonEmptyLines(text))
   }
 
   const segments = splitShellPipes(command)
   const [inspection, ...pipes] = segments
-  const inspectionLike = segments.some((segment) => /(?:^|[\s;&()])(grep|rg|ls|find)(?:\s|$)/.test(segment))
+  const inspectionLike = segments.some((segment) => /(?:^|[\s;&()])(cat|head|tail|sed|grep|rg|ls|find)(?:\s|$)/.test(segment))
   if (!inspection || !/^(grep|rg)(?:\s|$)/.test(inspection)) {
     return inspectionLike ? 'Content read.' : null
   }
@@ -318,11 +402,15 @@ export {
   elapsed,
   tag,
   truncate,
+  relPath,
+  toolLabel,
+  formatToolCall,
   toolSummary,
   resultSummary,
   toolResultText,
   formatFullToolResult,
   countNonEmptyLines,
+  isBashReadInspection,
   splitShellPipes,
   inspectionSummary,
   handleLine,

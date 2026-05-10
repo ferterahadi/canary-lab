@@ -60,8 +60,6 @@ export default defineConfig({
         // Thin I/O glue inside the runtime: subprocess scripts (formatters)
         // and the node-pty wrapper can't be exercised deterministically
         // without a real TTY / native binding.
-        'apps/web-server/lib/runtime/claude-formatter.ts',
-        'apps/web-server/lib/runtime/codex-formatter.ts',
         'apps/web-server/lib/runtime/auto-heal.ts',
         'apps/web-server/lib/runtime/pty-spawner.ts',
         'apps/web-server/lib/runtime/**/types.ts',
