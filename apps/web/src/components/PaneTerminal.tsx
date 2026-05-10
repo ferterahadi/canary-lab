@@ -43,6 +43,7 @@ export function PaneTerminal({ runId, paneId }: Props) {
       convertEol: true,
       fontFamily: "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace",
       fontSize: 12,
+      scrollback: 20000,
       theme: TERM_THEMES[currentResolvedTheme()],
     })
     const unsubscribeTheme = subscribeTheme((next) => {

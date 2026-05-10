@@ -356,7 +356,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
       const detail = runStore.get(runId)
       if (!detail) return { ok: false, reason: 'run-not-found' as const }
       const manifest = detail.manifest
-      if (manifest.status !== 'failed') return { ok: false, reason: 'not-restartable' as const }
+      if (manifest.status !== 'failed' && manifest.status !== 'aborted') return { ok: false, reason: 'not-restartable' as const }
       if (manifest.healMode === 'manual') return { ok: false, reason: 'manual-mode' as const }
 
       const features = loadFeatures(featuresDir)

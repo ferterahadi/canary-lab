@@ -27,7 +27,13 @@ import { RestartHealButton } from './RestartHealButton'
 type Tab = 'overview' | 'services' | 'playwright' | 'agent' | 'journal'
 type PlaywrightView = 'terminal' | 'playback'
 
-export function RunDetailColumn({ runId }: { runId: string | null }) {
+export function RunDetailColumn({
+  runId,
+  onOpenPlaywrightSettings,
+}: {
+  runId: string | null
+  onOpenPlaywrightSettings?: (feature: string) => void
+}) {
   const [tab, setTab] = useState<Tab>('overview')
   const [serviceIdx, setServiceIdx] = useState(0)
   const [playwrightView, setPlaywrightView] = useState<PlaywrightView>('playback')
@@ -171,17 +177,18 @@ export function RunDetailColumn({ runId }: { runId: string | null }) {
             events={detail.playbackEvents}
             artifactGroups={detail.playwrightArtifacts}
             artifactPolicy={m.playwrightArtifacts}
+            onOpenArtifactSettings={() => onOpenPlaywrightSettings?.(m.feature)}
           />
         )}
         {tab === 'agent' && (
-          <div className="flex h-full flex-col">
+          <div className="flex h-full min-h-0 flex-col overflow-hidden">
             {m.healMode === 'manual' && m.status === 'healing' && m.signalPaths && (
               <ManualHealBanner runId={m.runId} signalPaths={m.signalPaths} />
             )}
-            <div className="flex-1 min-h-0">
+            <div className="min-h-0 flex-1 overflow-hidden">
               <PaneTerminal runId={m.runId} paneId="agent" />
             </div>
-            {shouldShowRestartHealButton(m.status, m.healMode) && (
+            {canRestartHeal(m.status) && (
               <RestartHealButton runId={m.runId} />
             )}
           </div>
@@ -194,18 +201,8 @@ export function RunDetailColumn({ runId }: { runId: string | null }) {
   )
 }
 
-// The agent pane is a bidirectional REPL: while the heal agent is running,
-// the user types directly into the xterm — there's no separate input bar.
-// Once the REPL has stopped (`status === 'failed'` for an auto-heal run, the
-// orchestrator's finally clause has run `cleanupHealAgentPty` and the
-// registry entry is gone), we render the Restart Heal button so the user
-// can spin up a fresh orchestrator + REPL. The new REPL takes input
-// directly; no other input UI is needed.
-export function shouldShowRestartHealButton(
-  status: string,
-  healMode?: 'auto' | 'manual',
-): boolean {
-  return status === 'failed' && healMode === 'auto'
+export function canRestartHeal(status: string): boolean {
+  return status === 'failed' || status === 'aborted'
 }
 
 export function isAssertionExportable(status: string): boolean {
@@ -235,6 +232,7 @@ function PlaywrightPanel({
   events,
   artifactGroups,
   artifactPolicy,
+  onOpenArtifactSettings,
 }: {
   runId: string
   view: PlaywrightView
@@ -242,6 +240,7 @@ function PlaywrightPanel({
   events?: PlaywrightPlaybackEvent[]
   artifactGroups?: PlaywrightArtifactGroup[]
   artifactPolicy?: PlaywrightArtifactPolicy
+  onOpenArtifactSettings?: () => void
 }) {
   return (
     <div className="flex h-full flex-col">
@@ -251,7 +250,7 @@ function PlaywrightPanel({
       </div>
       <div className="flex-1 min-h-0">
         {view === 'terminal' && <PaneTerminal runId={runId} paneId="playwright" />}
-        {view === 'playback' && <PlaywrightPlayback events={events} artifactGroups={artifactGroups} artifactPolicy={artifactPolicy} />}
+        {view === 'playback' && <PlaywrightPlayback events={events} artifactGroups={artifactGroups} artifactPolicy={artifactPolicy} onOpenArtifactSettings={onOpenArtifactSettings} />}
       </div>
     </div>
   )
@@ -274,10 +273,12 @@ export function PlaywrightPlayback({
   events,
   artifactGroups,
   artifactPolicy,
+  onOpenArtifactSettings,
 }: {
   events?: PlaywrightPlaybackEvent[]
   artifactGroups?: PlaywrightArtifactGroup[]
   artifactPolicy?: PlaywrightArtifactPolicy
+  onOpenArtifactSettings?: () => void
 }) {
   const tests = playbackTests(events)
   if (tests.length === 0) {
@@ -288,9 +289,16 @@ export function PlaywrightPlayback({
       <div className="space-y-2">
         {tests.map((test) => {
           const playbackArtifacts = artifactsForPlayback(test.name, artifactGroups, artifactPolicy)
+          const traceArtifacts = playbackArtifacts.links.filter((artifact) => artifact.kind === 'trace')
+          const videoArtifacts = playbackArtifacts.links.filter((artifact) => artifact.kind === 'video')
           return (
             <div key={`${test.name}:${test.retry ?? 0}:${test.startedAt ?? ''}`} className="cl-card p-3">
-              <PlaybackHeader test={test} />
+              <div className="flex min-w-0 items-start gap-3">
+                <div className="min-w-0 flex-1">
+                  <PlaybackHeader test={test} />
+                </div>
+                <TraceActions artifacts={traceArtifacts} />
+              </div>
               {test.error?.message ? (
                 <pre className="mt-2 max-h-28 overflow-auto whitespace-pre-wrap rounded-md p-2 scrollbar-thin" style={{ background: 'var(--bg-selected)', color: '#ef4444', fontFamily: 'var(--font-mono)' }}>
                   {test.error.message}
@@ -300,13 +308,34 @@ export function PlaywrightPlayback({
                   {test.passed === true ? 'Completed without a Playwright error.' : test.status ? `Status: ${test.status}` : 'Still running.'}
                 </div>
               )}
-              <ScreenshotPanel artifacts={playbackArtifacts.screenshots} mode={playbackArtifacts.screenshotMode} />
-              <ArtifactActions artifacts={playbackArtifacts.links} videoMode={artifactPolicy?.video ?? 'off'} />
+              <ScreenshotPanel artifacts={playbackArtifacts.screenshots} mode={playbackArtifacts.screenshotMode} onOpenSettings={onOpenArtifactSettings} />
+              <ArtifactActions artifacts={videoArtifacts} videoMode={artifactPolicy?.video ?? 'off'} onOpenSettings={onOpenArtifactSettings} />
               <BrowserActions steps={test.steps} />
             </div>
           )
         })}
       </div>
+    </div>
+  )
+}
+
+function TraceActions({ artifacts }: { artifacts: PlaywrightArtifact[] }) {
+  if (artifacts.length === 0) return null
+  return (
+    <div className="flex shrink-0 flex-wrap justify-end gap-2">
+      {artifacts.map((artifact) => (
+        <a
+          key={artifact.path}
+          href={artifact.url}
+          target="_blank"
+          rel="noreferrer"
+          download={artifact.name}
+          className="rounded px-2.5 py-1 text-[11px] font-medium"
+          style={{ background: 'var(--bg-selected)', color: 'var(--accent)' }}
+        >
+          Download trace
+        </a>
+      ))}
     </div>
   )
 }
@@ -328,27 +357,41 @@ function PlaybackHeader({ test }: { test: PlaybackTest }) {
   )
 }
 
-function ScreenshotPanel({ artifacts, mode }: { artifacts: PlaywrightArtifact[]; mode: string }) {
-  if (mode === 'off') {
-    return (
-      <div className="mt-3 rounded-md px-3 py-8 text-center text-[11px]" style={{ background: 'var(--bg-selected)', color: 'var(--text-muted)' }}>
-        Screenshots disabled by Playwright config.
-      </div>
-    )
-  }
-  if (artifacts.length === 0) {
-    return (
-      <div className="mt-3 rounded-md px-3 py-8 text-center text-[11px]" style={{ background: 'var(--bg-selected)', color: 'var(--text-muted)' }}>
-        No screenshots retained for this test ({mode}).
-      </div>
-    )
-  }
+function ScreenshotPanel({
+  artifacts,
+  mode,
+  onOpenSettings,
+}: {
+  artifacts: PlaywrightArtifact[]
+  mode: string
+  onOpenSettings?: () => void
+}) {
+  const [expanded, setExpanded] = useState(false)
+  const summary = mode === 'off'
+    ? 'Disabled'
+    : artifacts.length === 0
+      ? 'No screenshot retained'
+      : `${artifacts.length} retained`
   return (
-    <div className="mt-3 grid grid-cols-1 gap-2">
-      {artifacts.map((artifact) => (
-        <ScreenshotPreview key={artifact.path} artifact={artifact} />
-      ))}
-    </div>
+    <EvidenceSection
+      title="Screenshot"
+      summary={summary}
+      expanded={expanded}
+      onToggle={() => setExpanded((current) => !current)}
+      onOpenSettings={onOpenSettings}
+    >
+      {mode === 'off' ? (
+        <EmptyArtifactMessage>Screenshot disabled.</EmptyArtifactMessage>
+      ) : artifacts.length === 0 ? (
+        <EmptyArtifactMessage>No screenshot retained.</EmptyArtifactMessage>
+      ) : (
+        <div className="grid grid-cols-1 gap-2">
+          {artifacts.map((artifact) => (
+            <ScreenshotPreview key={artifact.path} artifact={artifact} />
+          ))}
+        </div>
+      )}
+    </EvidenceSection>
   )
 }
 
@@ -396,15 +439,88 @@ function EmptyPane({ title, body }: { title: string; body: string }) {
   )
 }
 
-function ArtifactActions({ artifacts, videoMode }: { artifacts: PlaywrightArtifact[]; videoMode: string }) {
-  const traces = artifacts.filter((artifact) => artifact.kind === 'trace')
+function EvidenceSection({
+  title,
+  summary,
+  expanded,
+  onToggle,
+  onOpenSettings,
+  children,
+}: {
+  title: string
+  summary: string
+  expanded: boolean
+  onToggle: () => void
+  onOpenSettings?: () => void
+  children: React.ReactNode
+}) {
+  return (
+    <div className="mt-3 rounded-md px-2 py-1.5" style={{ background: 'var(--bg-selected)' }}>
+      <div className="flex min-w-0 items-center gap-2">
+        <button
+          type="button"
+          onClick={onToggle}
+          className="min-w-0 flex-1 text-left text-[11px] font-medium"
+          style={{ color: 'var(--text-secondary)' }}
+        >
+          <span aria-hidden="true">{expanded ? '▾' : '▸'} </span>
+          {title}
+          <span className="ml-2 font-normal" style={{ color: 'var(--text-muted)' }}>{summary}</span>
+        </button>
+        {onOpenSettings && (
+          <button
+            type="button"
+            onClick={onOpenSettings}
+            className="shrink-0 rounded px-2 py-0.5 text-[10px] font-medium"
+            style={{ border: '1px solid var(--border-default)', color: 'var(--accent)' }}
+          >
+            Settings
+          </button>
+        )}
+      </div>
+      {expanded && (
+        <div className="mt-2">
+          {children}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function EmptyArtifactMessage({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="rounded-md px-3 py-4 text-center text-[11px]" style={{ background: 'var(--bg-surface)', color: 'var(--text-muted)' }}>
+      {children}
+    </div>
+  )
+}
+
+function ArtifactActions({
+  artifacts,
+  videoMode,
+  onOpenSettings,
+}: {
+  artifacts: PlaywrightArtifact[]
+  videoMode: string
+  onOpenSettings?: () => void
+}) {
   const videos = artifacts.filter((artifact) => artifact.kind === 'video')
   const [openVideoPath, setOpenVideoPath] = useState<string | null>(null)
+  const [expanded, setExpanded] = useState(false)
   const openVideo = videos.find((artifact) => artifact.path === openVideoPath) ?? null
-  const showVideoHint = videos.length === 0
-  if (traces.length === 0 && videos.length === 0 && !showVideoHint) return null
+  const summary = videos.length > 0
+    ? `${videos.length} retained`
+    : videoMode === 'off'
+      ? 'Disabled'
+      : 'No video retained'
   return (
-    <div className="mt-3">
+    <EvidenceSection
+      title="Video"
+      summary={summary}
+      expanded={expanded}
+      onToggle={() => setExpanded((current) => !current)}
+      onOpenSettings={onOpenSettings}
+    >
       <div className="flex flex-wrap gap-2">
         {videos.map((artifact) => (
           <button
@@ -417,24 +533,9 @@ function ArtifactActions({ artifacts, videoMode }: { artifacts: PlaywrightArtifa
             {openVideoPath === artifact.path ? 'Hide video' : 'Open video'}
           </button>
         ))}
-        {traces.map((artifact) => (
-          <a
-            key={artifact.path}
-            href={artifact.url}
-            target="_blank"
-            rel="noreferrer"
-            download={artifact.name}
-            className="rounded px-2.5 py-1 text-[11px] font-medium"
-            style={{ background: 'var(--bg-selected)', color: 'var(--accent)' }}
-          >
-            Download trace
-          </a>
-        ))}
       </div>
-      {showVideoHint && (
-        <div className="mt-2 rounded-md px-3 py-2 text-[11px]" style={{ background: 'var(--bg-selected)', color: 'var(--text-muted)' }}>
-          {videoGuidance(videoMode)}
-        </div>
+      {videos.length === 0 && (
+        <EmptyArtifactMessage>{videoGuidance(videoMode)}</EmptyArtifactMessage>
       )}
       {openVideo && (
         <div className="mt-2 overflow-hidden rounded-md" style={{ border: '1px solid var(--border-default)', background: 'var(--bg-surface)' }}>
@@ -442,14 +543,13 @@ function ArtifactActions({ artifacts, videoMode }: { artifacts: PlaywrightArtifa
           <ArtifactCaption artifact={openVideo} />
         </div>
       )}
-    </div>
+    </EvidenceSection>
   )
 }
 
 function videoGuidance(mode: string): string {
-  const location = 'Feature Configuration > Playwright > Browser & Artifacts > Video'
-  if (mode === 'off') return `Video is disabled. To capture one on the next run, open ${location} and set Video to on.`
-  return `No video was retained for this test. To always capture one, open ${location} and set Video to on.`
+  if (mode === 'off') return 'Video disabled.'
+  return 'No video retained.'
 }
 
 function BrowserActions({ steps }: { steps: PlaybackTest['steps'] }) {

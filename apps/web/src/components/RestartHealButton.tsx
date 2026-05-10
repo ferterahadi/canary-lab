@@ -39,14 +39,14 @@ export function RestartHealButton({ runId }: Props) {
 
   return (
     <div
-      className="flex items-center gap-2 px-3 py-2"
+      className="flex min-h-[48px] shrink-0 items-center gap-2 px-3 py-2"
       style={{ borderTop: '1px solid var(--border-default)', background: 'var(--bg-base)' }}
     >
       <button
         type="button"
         onClick={onClick}
         disabled={sending}
-        className="rounded-md px-3 py-1.5 text-xs"
+        className="shrink-0 rounded-md px-3 py-1.5 text-xs"
         style={{
           color: 'var(--border-focus)',
           border: '1px solid color-mix(in srgb, var(--border-focus) 40%, transparent)',

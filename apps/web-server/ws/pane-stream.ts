@@ -26,6 +26,8 @@ export interface PaneStreamDeps {
   logsDir: string
 }
 
+const TERMINAL_RUN_STATUSES = new Set(['passed', 'failed', 'aborted'])
+
 export async function paneStreamRoutes(
   app: FastifyInstance,
   deps: PaneStreamDeps,
@@ -36,7 +38,13 @@ export async function paneStreamRoutes(
     (socket, req) => {
       const { runId, paneId } = req.params
       const broker = deps.brokerFor(runId)
+      const hasActiveOrchestrator = Boolean(deps.registry.get(runId))
+
       if (broker) {
+        if (shouldPreferLogReplay(deps.logsDir, runId, hasActiveOrchestrator) && replayLogFile(socket, deps.logsDir, runId, paneId)) {
+          return
+        }
+
         const sub: PaneSubscriber = {
           send: (msg) => {
             try { socket.send(JSON.stringify(msg)) } catch { /* socket closed */ }
@@ -92,25 +100,70 @@ export async function paneStreamRoutes(
       }
 
       // Fallback: replay the on-disk log file for finished/historical runs.
-      const filePath = resolveLogPath(deps.logsDir, runId, paneId)
-      if (!filePath) {
+      if (!replayLogFile(socket, deps.logsDir, runId, paneId)) {
         socket.send(JSON.stringify({ type: 'error', error: 'unknown pane' }))
-        socket.close()
-        return
-      }
-      try {
-        const chunk = fs.readFileSync(filePath, 'utf-8')
-        if (chunk.length > 0) {
-          socket.send(JSON.stringify({ type: 'data', chunk }))
-        }
-        socket.send(JSON.stringify({ type: 'exit', code: 0 }))
-      } catch {
-        socket.send(JSON.stringify({ type: 'error', error: 'log not available' }))
-      } finally {
         socket.close()
       }
     },
   )
+}
+
+export function shouldReplayLogFile(logsDir: string, runId: string): boolean {
+  const manifest = readManifest(path.join(runDirFor(logsDir, runId), 'manifest.json'))
+  return manifest ? TERMINAL_RUN_STATUSES.has(manifest.status) : false
+}
+
+export function shouldPreferLogReplay(
+  logsDir: string,
+  runId: string,
+  hasActiveOrchestrator: boolean,
+): boolean {
+  return !hasActiveOrchestrator && shouldReplayLogFile(logsDir, runId)
+}
+
+function replayLogFile(
+  socket: { send: (message: string) => void; close: () => void },
+  logsDir: string,
+  runId: string,
+  paneId: string,
+): boolean {
+  const filePath = resolveLogPath(logsDir, runId, paneId)
+  if (!filePath) return false
+  try {
+    const chunk = formatHistoricalPaneReplay(paneId, fs.readFileSync(filePath, 'utf-8'))
+    if (chunk.length > 0) {
+      socket.send(JSON.stringify({ type: 'data', chunk }))
+    }
+    socket.send(JSON.stringify({ type: 'exit', code: 0 }))
+  } catch {
+    socket.send(JSON.stringify({ type: 'error', error: 'log not available' }))
+  } finally {
+    socket.close()
+  }
+  return true
+}
+
+const ESC = '\u001b'
+const TERMINAL_CONTROL_PATTERNS = [
+  new RegExp(`${ESC}\\[[0-?]*[ -/]*[@-~]`, 'g'),
+  new RegExp(`${ESC}\\][^\\u0007]*(?:\\u0007|${ESC}\\\\)`, 'g'),
+  new RegExp(`${ESC}[PX^_][\\s\\S]*?${ESC}\\\\`, 'g'),
+  new RegExp(`${ESC}[@-_]`, 'g'),
+]
+
+export function formatHistoricalPaneReplay(paneId: string, raw: string): string {
+  if (paneId !== 'agent') return raw
+  let output = raw
+  for (const pattern of TERMINAL_CONTROL_PATTERNS) {
+    output = output.replace(pattern, '')
+  }
+  return output
+    .replace(/\r(?!\n)/g, '\n')
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '')
+    .replace(/\[(?:\?|>|<)[0-9;]*[A-Za-z]/g, '')
+    .replace(/\][0-9]+;[^\n\r]*/g, '')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{4,}/g, '\n\n\n')
 }
 
 /**

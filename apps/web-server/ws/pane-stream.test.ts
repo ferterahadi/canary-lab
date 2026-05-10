@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { resolveLogPath } from './pane-stream'
+import { formatHistoricalPaneReplay, resolveLogPath, shouldPreferLogReplay, shouldReplayLogFile } from './pane-stream'
 import { writeManifest } from '../lib/runtime/manifest'
 import { runDirFor, buildRunPaths } from '../lib/runtime/run-paths'
 
@@ -56,5 +56,44 @@ describe('resolveLogPath', () => {
 
   it('returns null for unknown paneId', () => {
     expect(resolveLogPath(logsDir, runId, 'random')).toBeNull()
+  })
+})
+
+describe('shouldReplayLogFile', () => {
+  it('uses on-disk logs for terminal runs so replay is not capped by the live broker buffer', () => {
+    expect(shouldReplayLogFile(logsDir, runId)).toBe(true)
+  })
+
+  it('keeps active runs on the live broker', () => {
+    writeManifest(path.join(runDirFor(logsDir, runId), 'manifest.json'), {
+      runId,
+      feature: 'foo',
+      startedAt: '2026-01-01T00:00:00Z',
+      status: 'healing',
+      healCycles: 1,
+      services: [],
+    })
+
+    expect(shouldReplayLogFile(logsDir, runId)).toBe(false)
+  })
+})
+
+describe('shouldPreferLogReplay', () => {
+  it('does not replay the historical log while a restarted heal orchestrator is active', () => {
+    expect(shouldPreferLogReplay(logsDir, runId, true)).toBe(false)
+  })
+
+  it('replays the historical log for terminal runs with no active orchestrator', () => {
+    expect(shouldPreferLogReplay(logsDir, runId, false)).toBe(true)
+  })
+})
+
+describe('formatHistoricalPaneReplay', () => {
+  it('strips terminal controls from historical agent replay', () => {
+    expect(formatHistoricalPaneReplay('agent', '\x1b[2J\x1b[31mred\x1b[0m\rnext\x1b]0;title\x07')).toBe('red\nnext')
+  })
+
+  it('keeps non-agent pane replay raw so colors and terminal behavior are preserved', () => {
+    expect(formatHistoricalPaneReplay('playwright', '\x1b[31mred\x1b[0m')).toBe('\x1b[31mred\x1b[0m')
   })
 })

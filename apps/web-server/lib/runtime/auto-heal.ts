@@ -92,7 +92,7 @@ export interface AgentSpawnArgs {
  * also hides MCP auth prompts the user needs to see.
  *
  * - claude: `claude [--session-id <uuid>] [--mcp-config <path>]`
- * - codex:  `codex --skip-git-repo-check`
+ * - codex:  `codex`
  */
 export function buildAgentSpawnCommand(agent: HealAgent, args: AgentSpawnArgs = {}): string {
   // Positional `@<promptFile>` arg — claude reads the file at startup and
@@ -123,13 +123,12 @@ export function buildAgentSpawnCommand(agent: HealAgent, args: AgentSpawnArgs = 
     // to the user.
     return `claude${sid}${mcp}${promptArg}`
   }
-  // codex interactive REPL — `--skip-git-repo-check` keeps codex from
-  // bailing on a non-git canary-lab-workspace. No `--full-auto`: tool
+  // codex interactive REPL. No `--full-auto`: tool
   // approvals stay interactive in the pane. Codex has no `--session-id`
   // analogue; the orchestrator doesn't track a session id for codex (the
   // REPL stays alive across cycles so we never need to resume mid-run).
   // Codex accepts a positional prompt the same way as claude.
-  return `codex --skip-git-repo-check${promptArg}`
+  return `codex${promptArg}`
 }
 
 /**

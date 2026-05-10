@@ -3,6 +3,7 @@ import { FeaturesColumn } from './components/FeaturesColumn'
 import { TestCasesColumn } from './components/TestCasesColumn'
 import { RunsColumn } from './components/RunsColumn'
 import { RunDetailColumn } from './components/RunDetailColumn'
+import { FeatureConfigEditor } from './components/FeatureConfigEditor'
 import { ResizablePanels } from './components/ResizablePanels'
 import { VerticalSplit } from './components/VerticalSplit'
 import { GlobalStatusBar } from './components/GlobalStatusBar'
@@ -14,6 +15,7 @@ export function App() {
   const [features, setFeatures] = useState<Feature[]>([])
   const [selectedFeature, setSelectedFeature] = useState<string | null>(null)
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
+  const [configFor, setConfigFor] = useState<string | null>(null)
   const pendingRunSelectionRef = useRef<string | null>(null)
 
   // Initial features load + auto-select first feature.
@@ -167,7 +169,7 @@ export function App() {
               }
             />
           )}
-          bottom={<RunDetailColumn runId={selectedRunId} />}
+          bottom={<RunDetailColumn runId={selectedRunId} onOpenPlaywrightSettings={setConfigFor} />}
         />
       ),
     },
@@ -186,6 +188,25 @@ export function App() {
       <div className="min-h-0 flex-1">
         <ResizablePanels panels={panels} />
       </div>
+      {configFor && (
+        <FeatureConfigEditor
+          feature={configFor}
+          initialTab="playwright"
+          onClose={() => setConfigFor(null)}
+          onDeleted={(deletedFeature) => {
+            setConfigFor(null)
+            api.listFeatures().then((data) => {
+              setFeatures(data)
+              if (selectedFeature === deletedFeature) {
+                const nextFeature = data[0]?.name ?? null
+                pendingRunSelectionRef.current = null
+                setSelectedFeature(nextFeature)
+                setSelectedRunId(nextFeature ? allRuns.find((r) => r.feature === nextFeature)?.runId ?? null : null)
+              }
+            }).catch(() => {})
+          }}
+        />
+      )}
     </div>
   )
 }

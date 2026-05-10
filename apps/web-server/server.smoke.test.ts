@@ -316,6 +316,7 @@ test('Submit credentials', async ({ page }) => {
 
     const overrides: Partial<TestsDraftRouteDeps> = {
       newDraftId: () => `d-${++counter}`,
+      pickAgent: () => ({ ok: true, agent: 'claude' }),
       spawnPlanAgent: async (input) => {
         // Write something to the agent log so the route's tail helpers exercise.
         fs.mkdirSync(path.dirname(input.agentLogPath), { recursive: true })

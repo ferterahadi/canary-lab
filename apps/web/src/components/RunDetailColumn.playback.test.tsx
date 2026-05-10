@@ -2,7 +2,7 @@
 
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { PlaywrightArtifactGroup, PlaywrightArtifactPolicy, PlaywrightPlaybackEvent } from '../api/types'
 import { PlaywrightPlayback } from './RunDetailColumn'
 
@@ -23,20 +23,46 @@ afterEach(() => {
 })
 
 describe('PlaywrightPlayback', () => {
-  it('renders the review evidence before collapsed browser actions', () => {
+  it('renders trace in the card header and keeps evidence collapsed', () => {
     renderPlayback()
 
     expect(container.textContent).toContain('passed checkout')
     expect(container.textContent).toContain('Completed without a Playwright error.')
-    expect(container.querySelector('img')?.getAttribute('alt')).toBe('Final page screenshot')
     expect(container.querySelector('a[download="trace.zip"]')?.textContent).toBe('Download trace')
+    expect(container.querySelector('.cl-card')?.firstElementChild?.querySelector('a[download="trace.zip"]')?.textContent).toBe('Download trace')
+    expect(container.textContent).toContain('Screenshot')
+    expect(container.textContent).toContain('Video')
+    expect(container.querySelector('img')).toBeNull()
+    expect(container.textContent).not.toContain('Open video')
     expect(container.textContent).toContain('Browser actions (2)')
     expect(container.textContent).not.toContain('Opened /en_SG')
     expect(container.textContent).not.toContain('Clicked Redeem')
   })
 
+  it('expands retained screenshots only when requested', () => {
+    renderPlayback()
+
+    const button = [...container.querySelectorAll('button')]
+      .find((candidate) => candidate.textContent?.includes('Screenshot'))
+    expect(button).toBeTruthy()
+
+    act(() => {
+      button?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+
+    expect(container.querySelector('img')?.getAttribute('alt')).toBe('Final page screenshot')
+  })
+
   it('opens retained video inline from an explicit action', () => {
     renderPlayback()
+
+    const videoSection = [...container.querySelectorAll('button')]
+      .find((candidate) => candidate.textContent?.includes('Video'))
+    expect(videoSection).toBeTruthy()
+
+    act(() => {
+      videoSection?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
 
     const button = [...container.querySelectorAll('button')]
       .find((candidate) => candidate.textContent === 'Open video')
@@ -92,23 +118,36 @@ describe('PlaywrightPlayback', () => {
       ],
     })
 
-    expect(container.textContent).toContain('No screenshots retained for this test')
-    expect(container.textContent).toContain('Open video')
+    expect(container.textContent).toContain('No screenshot retained')
     expect(container.textContent).toContain('Download trace')
+    expect(container.textContent).not.toContain('Open video')
   })
 
-  it('guides reviewers to enable video when no video artifact is retained', () => {
+  it('uses short artifact guidance and opens Playwright settings', () => {
+    const onOpenArtifactSettings = vi.fn()
     renderPlayback({
       artifacts: [
         artifact('screenshot', 'canary-lab-final-page-checkout.png'),
         artifact('trace', 'trace.zip'),
       ],
       policy: { screenshot: 'on', trace: 'on', video: 'off' },
+      onOpenArtifactSettings,
     })
 
-    expect(container.textContent).toContain('Video is disabled.')
-    expect(container.textContent).toContain('Feature Configuration > Playwright > Browser & Artifacts > Video')
+    expect(container.textContent).toContain('Video')
+    expect(container.textContent).toContain('Disabled')
+    expect(container.textContent).not.toContain('Feature Configuration > Playwright > Browser & Artifacts > Video')
     expect(container.textContent).toContain('Download trace')
+
+    const settingsButton = [...container.querySelectorAll('button')]
+      .find((candidate) => candidate.textContent === 'Settings')
+    expect(settingsButton).toBeTruthy()
+
+    act(() => {
+      settingsButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+
+    expect(onOpenArtifactSettings).toHaveBeenCalledTimes(1)
   })
 })
 
@@ -120,10 +159,12 @@ function renderPlayback({
   ],
   policy = { screenshot: 'on', trace: 'on', video: 'on' },
   events: playbackEvents = events,
+  onOpenArtifactSettings,
 }: {
   artifacts?: PlaywrightArtifactGroup['artifacts']
   policy?: PlaywrightArtifactPolicy
   events?: PlaywrightPlaybackEvent[]
+  onOpenArtifactSettings?: () => void
 } = {}) {
   act(() => {
     root.render(
@@ -131,6 +172,7 @@ function renderPlayback({
         events={playbackEvents}
         artifactGroups={[{ testName: 'checkout', artifacts }]}
         artifactPolicy={policy}
+        onOpenArtifactSettings={onOpenArtifactSettings}
       />,
     )
   })

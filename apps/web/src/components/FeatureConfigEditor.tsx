@@ -12,10 +12,11 @@ interface Props {
   feature: string
   onClose: () => void
   onDeleted?: (feature: string) => void
+  initialTab?: Tab
 }
 
-export function FeatureConfigEditor({ feature, onClose, onDeleted }: Props) {
-  const [tab, setTab] = useState<Tab>('general')
+export function FeatureConfigEditor({ feature, onClose, onDeleted, initialTab = 'general' }: Props) {
+  const [tab, setTab] = useState<Tab>(initialTab)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [confirmName, setConfirmName] = useState('')
   const [deleting, setDeleting] = useState(false)
