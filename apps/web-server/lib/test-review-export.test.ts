@@ -165,6 +165,38 @@ test('records checkout video', async ({ page }) => {
     expect(body.indexOf('<h3>Assertions</h3>')).toBeLessThan(body.indexOf('<h3>Video</h3>'))
   })
 
+  it('keeps duplicate test titles addressable in the assertion review table of contents', async () => {
+    const featureDir = path.join(tmpDir, 'duplicate-title-feature')
+    fs.mkdirSync(path.join(featureDir, 'e2e'), { recursive: true })
+    const spec = path.join(featureDir, 'e2e', 'duplicate.spec.ts')
+    const specSource = `import { test, expect } from '@playwright/test'
+
+test('same title', async ({ page }) => {
+  await expect(page.getByText('One')).toBeVisible()
+})
+
+test('same title', async ({ page }) => {
+  await expect(page.getByText('Two')).toBeVisible()
+})
+`
+    fs.writeFileSync(spec, specSource)
+    const first = lineOf(specSource, "test('same title'")
+    const second = specSource.slice(0, specSource.lastIndexOf("test('same title'")).split('\n').length
+
+    const body = await createAssertionHtml({
+      ...detail({ featureDir, eventLocation: `${spec}:${first}`, title: 'same title' }),
+      playbackEvents: [
+        detail({ featureDir, eventLocation: `${spec}:${first}`, title: 'same title' }).playbackEvents[0],
+        detail({ featureDir, eventLocation: `${spec}:${second}`, title: 'same title' }).playbackEvents[0],
+      ],
+    })
+
+    expect(body).toContain('<section class="test-case" id="1-same-title">')
+    expect(body).toContain('<section class="test-case" id="2-same-title">')
+    expect(body).toContain('<a href="#1-same-title" data-section-id="1-same-title">1. same title</a>')
+    expect(body).toContain('<a href="#2-same-title" data-section-id="2-same-title">2. same title</a>')
+  })
+
   it('escapes dynamic html while preserving highlighted code blocks', async () => {
     const featureDir = path.join(tmpDir, 'escape-feature')
     fs.mkdirSync(path.join(featureDir, 'e2e'), { recursive: true })

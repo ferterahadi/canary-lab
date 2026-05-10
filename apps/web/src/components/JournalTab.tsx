@@ -19,25 +19,30 @@ export function JournalTab({ feature, runId }: Props) {
   const [pendingDelete, setPendingDelete] = useState<JournalEntry | null>(null)
   const [deleteError, setDeleteError] = useState<string | null>(null)
 
-  const refresh = useCallback(() => {
-    let cancelled = false
+  const refresh = useCallback((isCancelled: () => boolean = () => false) => {
     api.listJournal({ feature, run: runId })
       .then((data) => {
-        if (cancelled) return
+        if (isCancelled()) return
         setEntries(newestFirst(data))
         setError(null)
       })
       .catch((err: unknown) => {
-        if (cancelled) return
+        if (isCancelled()) return
         setError(err instanceof Error ? err.message : String(err))
       })
-    return () => { cancelled = true }
   }, [feature, runId])
 
   useEffect(() => {
-    const cleanup = refresh()
-    return cleanup
+    let cancelled = false
+    refresh(() => cancelled)
+    return () => { cancelled = true }
   }, [refresh])
+
+  useEffect(() => {
+    if (!entries?.some((entry) => classifyOutcome(entry.outcome) === 'pending')) return
+    const id = window.setInterval(() => refresh(), 2000)
+    return () => window.clearInterval(id)
+  }, [entries, refresh])
 
   const handleConfirmDelete = useCallback(async () => {
     if (!pendingDelete || pendingDelete.iteration == null) return

@@ -248,6 +248,30 @@ describe('RunsProvider', () => {
     expect(captured.run?.detail?.runId).toBe('lazy-r1')
   })
 
+  it('polls running run details while the run remains active', async () => {
+    vi.useFakeTimers()
+    vi.mocked(api.getRunDetail).mockResolvedValue(detail({ runId: 'poll-r1', status: 'running' }))
+    const captured = renderProbe('poll-r1')
+
+    act(() => {
+      FakeWebSocket.instances[0].onmessage?.({
+        data: JSON.stringify({
+          type: 'snapshot',
+          runs: [entry({ runId: 'poll-r1', status: 'running' })],
+          details: { 'poll-r1': detail({ runId: 'poll-r1', status: 'running' }) },
+        }),
+      })
+    })
+
+    await act(async () => {
+      vi.advanceTimersByTime(1000)
+      await Promise.resolve()
+    })
+
+    expect(api.getRunDetail).toHaveBeenCalledWith('poll-r1')
+    expect(captured.run?.status).toBe('running')
+  })
+
   it('surfaces action errors, clears them, and refreshes while disconnected', async () => {
     const captured = renderProbe('r-action')
     vi.mocked(api.stopRun).mockRejectedValue(new Error('stop failed'))

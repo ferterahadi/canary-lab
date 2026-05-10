@@ -455,6 +455,81 @@ export interface JournalAppendInput {
   journalPath?: string
 }
 
+export type JournalOutcome = 'all_passed' | 'partial' | 'no_change' | 'regression'
+
+export interface SummaryForJournalOutcome {
+  failed?: Array<{ name?: unknown }>
+}
+
+function failedNamesFromSummary(summary: SummaryForJournalOutcome): string[] {
+  return Array.isArray(summary.failed)
+    ? summary.failed
+        .map((f) => f.name)
+        .filter((n): n is string => typeof n === 'string' && n.length > 0)
+    : []
+}
+
+export function classifyJournalOutcome(
+  before: SummaryForJournalOutcome,
+  after: SummaryForJournalOutcome,
+): JournalOutcome {
+  const beforeNames = new Set(failedNamesFromSummary(before))
+  const afterNames = new Set(failedNamesFromSummary(after))
+  if (afterNames.size === 0) return 'all_passed'
+
+  let fixed = 0
+  for (const name of beforeNames) {
+    if (!afterNames.has(name)) fixed += 1
+  }
+  let introduced = 0
+  for (const name of afterNames) {
+    if (!beforeNames.has(name)) introduced += 1
+  }
+
+  if (introduced > 0 || afterNames.size > beforeNames.size) return 'regression'
+  if (fixed > 0) return 'partial'
+  return 'no_change'
+}
+
+export interface JournalOutcomeUpdateInput {
+  journalPath: string
+  runId?: string
+  outcome: JournalOutcome
+}
+
+export function updateLatestPendingJournalOutcome(input: JournalOutcomeUpdateInput): boolean {
+  let raw: string
+  try {
+    raw = fs.readFileSync(input.journalPath, 'utf-8')
+  } catch {
+    return false
+  }
+
+  const lines = raw.split('\n')
+  const sectionStarts: number[] = []
+  const headingRe = /^##\s+Iteration\s+\d+\s+[—-]\s+.+?\s*$/
+  for (let i = 0; i < lines.length; i++) {
+    if (headingRe.test(lines[i])) sectionStarts.push(i)
+  }
+
+  for (let s = sectionStarts.length - 1; s >= 0; s--) {
+    const start = sectionStarts[s]
+    const end = sectionStarts[s + 1] ?? lines.length
+    const section = lines.slice(start, end)
+    if (input.runId && !section.some((line) => line.trim() === `- run: ${input.runId}`)) {
+      continue
+    }
+    const outcomeOffset = section.findIndex((line) => /^\s*-\s+outcome:\s*(pending|null)?\s*$/.test(line))
+    if (outcomeOffset === -1) continue
+    lines[start + outcomeOffset] = `- outcome: ${input.outcome}`
+    const tmpPath = `${input.journalPath}.tmp`
+    fs.writeFileSync(tmpPath, lines.join('\n'))
+    fs.renameSync(tmpPath, input.journalPath)
+    return true
+  }
+  return false
+}
+
 export function nextIterationNumber(journalPath: string = DIAGNOSIS_JOURNAL_PATH): number {
   try {
     const raw = fs.readFileSync(journalPath, 'utf-8')

@@ -5,12 +5,14 @@ import path from 'path'
 import {
   appendJournalIteration,
   capSlice,
+  classifyJournalOutcome,
   enrichSummaryWithLogs,
   extractAllSlices,
   extractLogsForTest,
   nextIterationNumber,
   parseJournalMarkdown,
   stripAnsi,
+  updateLatestPendingJournalOutcome,
   writeFailureSlices,
   writeHealIndex,
 } from './log-enrichment'
@@ -168,6 +170,82 @@ describe('appendJournalIteration', () => {
       signal: '.restart', hypothesis: 'h', journalPath, manifestPath, summaryPath,
     })
     expect(fs.readFileSync(journalPath, 'utf-8')).toContain('- hypothesis: h')
+  })
+})
+
+describe('classifyJournalOutcome', () => {
+  it('marks a clean verification rerun as all_passed', () => {
+    expect(classifyJournalOutcome(
+      { failed: [{ name: 'a' }] },
+      { failed: [] },
+    )).toBe('all_passed')
+  })
+
+  it('distinguishes partial, no_change, and regression outcomes', () => {
+    expect(classifyJournalOutcome(
+      { failed: [{ name: 'a' }, { name: 'b' }] },
+      { failed: [{ name: 'b' }] },
+    )).toBe('partial')
+    expect(classifyJournalOutcome(
+      { failed: [{ name: 'a' }] },
+      { failed: [{ name: 'a' }] },
+    )).toBe('no_change')
+    expect(classifyJournalOutcome(
+      { failed: [{ name: 'a' }] },
+      { failed: [{ name: 'a' }, { name: 'b' }] },
+    )).toBe('regression')
+  })
+})
+
+describe('updateLatestPendingJournalOutcome', () => {
+  it('updates the newest pending section for the selected run', () => {
+    const journalPath = path.join(tmpDir, 'j.md')
+    fs.writeFileSync(journalPath, `# Diagnosis Journal
+
+## Iteration 1 — t1
+
+- run: run-a
+- hypothesis: old
+- outcome: pending
+
+## Iteration 2 — t2
+
+- run: run-b
+- hypothesis: other
+- outcome: pending
+
+## Iteration 3 — t3
+
+- run: run-a
+- hypothesis: latest
+- outcome: pending
+`)
+
+    expect(updateLatestPendingJournalOutcome({
+      journalPath,
+      runId: 'run-a',
+      outcome: 'all_passed',
+    })).toBe(true)
+
+    const body = fs.readFileSync(journalPath, 'utf-8')
+    expect(body).toContain('## Iteration 1 — t1\n\n- run: run-a\n- hypothesis: old\n- outcome: pending')
+    expect(body).toContain('## Iteration 2 — t2\n\n- run: run-b\n- hypothesis: other\n- outcome: pending')
+    expect(body).toContain('## Iteration 3 — t3\n\n- run: run-a\n- hypothesis: latest\n- outcome: all_passed')
+  })
+
+  it('returns false when no pending section matches', () => {
+    const journalPath = path.join(tmpDir, 'j.md')
+    fs.writeFileSync(journalPath, `## Iteration 1 — t1
+
+- run: run-a
+- outcome: no_change
+`)
+
+    expect(updateLatestPendingJournalOutcome({
+      journalPath,
+      runId: 'run-a',
+      outcome: 'all_passed',
+    })).toBe(false)
   })
 })
 

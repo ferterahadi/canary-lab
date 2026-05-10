@@ -206,6 +206,12 @@ describe('api client', () => {
     expect(fetchImpl).toHaveBeenCalledWith('/api/journal/7?run=r1', { method: 'DELETE' })
   })
 
+  it('deleteJournalEntry omits the query string when no run filter is provided', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(null, { status: 204 }))
+    await expect(deleteJournalEntry(7, {}, { fetchImpl })).resolves.toBeUndefined()
+    expect(fetchImpl).toHaveBeenCalledWith('/api/journal/7', { method: 'DELETE' })
+  })
+
   it('deleteJournalEntry throws ApiError on 404', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(fail(404, { error: 'iteration not found' }))
     await expect(deleteJournalEntry(99, { run: 'r1' }, { fetchImpl })).rejects.toBeInstanceOf(ApiError)

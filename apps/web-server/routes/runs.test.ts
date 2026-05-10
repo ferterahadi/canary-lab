@@ -550,6 +550,34 @@ describe('POST /api/runs/:runId/agent-input', () => {
     expect(res.json()).toEqual({ reason: 'no-agent-running' })
   })
 
+  it('restarts heal when an active orchestrator reports no running agent', async () => {
+    const stub: OrchestratorLike = {
+      runId: 'ai2b',
+      stop: async () => { /* noop */ },
+      pauseAndHeal: async () => ({ ok: true, failureCount: 0 }),
+      cancelHeal: async () => ({ ok: true }),
+      interjectHealAgent: async () => ({ ok: false, reason: 'no-agent-running' }),
+    }
+    let received = { runId: '', text: '' }
+    const { app, registry } = await build({
+      restartHeal: async (runId, text) => {
+        received = { runId, text }
+        return { ok: true }
+      },
+    })
+    registry.set('ai2b', stub)
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/runs/ai2b/agent-input',
+      payload: { data: 'resume work' },
+    })
+
+    expect(res.statusCode).toBe(202)
+    expect(res.json()).toEqual({ status: 'restarted' })
+    expect(received).toEqual({ runId: 'ai2b', text: 'resume work' })
+  })
+
   it('202s with status=restarted when a failed stopped run can restart heal', async () => {
     let received = { runId: '', text: '' }
     const { app } = await build({
@@ -568,9 +596,24 @@ describe('POST /api/runs/:runId/agent-input', () => {
     expect(received).toEqual({ runId: 'old-failed', text: 'try this' })
   })
 
-  // The old `no-session-id` and `spawn-failed` cases came from kill+respawn
-  // interject. With the bidirectional REPL, interject is just a stdin write,
-  // so the only structured failure left is `no-agent-running`.
+  it('500s when a stopped run heal restart fails to spawn', async () => {
+    const { app } = await build({
+      restartHeal: async () => ({ ok: false, reason: 'spawn-failed' }),
+    })
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/runs/spawn-failed/agent-input',
+      payload: { data: 'try again' },
+    })
+
+    expect(res.statusCode).toBe(500)
+    expect(res.json()).toEqual({ reason: 'spawn-failed' })
+  })
+
+  // The old `no-session-id` case came from kill+respawn interject. With the
+  // bidirectional REPL, active-run interject is just a stdin write, so the only
+  // structured active-agent failure left is `no-agent-running`.
 
   it('409s when interjectHealAgent is undefined (manual mode)', async () => {
     const stub: OrchestratorLike = {

@@ -6,6 +6,7 @@ import { createServer } from './server'
 import type { TestsDraftRouteDeps } from './routes/tests-draft'
 import { writeManifest, writeRunsIndex, readManifest, readRunsIndex } from './lib/runtime/manifest'
 import { runDirFor } from './lib/runtime/run-paths'
+import type { PtyFactory } from './lib/runtime/pty-spawner'
 
 // Smoke test: exercises createServer() against the real templates/project
 // tree, hitting every read-side endpoint via inject(). Lives next to the
@@ -13,10 +14,19 @@ import { runDirFor } from './lib/runtime/run-paths'
 // `npx vitest run apps/web-server/server.smoke.test.ts` is the closest we
 // can get to a real boot inside the sandbox.
 
+const inertPtyFactory: PtyFactory = () => ({
+  pid: 0,
+  onData: () => ({ dispose: () => { /* noop */ } }),
+  onExit: () => ({ dispose: () => { /* noop */ } }),
+  write: () => { /* noop */ },
+  resize: () => { /* noop */ },
+  kill: () => { /* noop */ },
+})
+
 describe('createServer smoke (templates/project)', () => {
   it('binds to a real port and answers a request over HTTP', async () => {
     const projectRoot = path.resolve(__dirname, '..', '..', 'templates', 'project')
-    const { app } = await createServer({ projectRoot, listSkills: () => [] })
+    const { app } = await createServer({ projectRoot, ptyFactory: inertPtyFactory, listSkills: () => [] })
     try {
       const address = await app.listen({ port: 0, host: '127.0.0.1' })
       // Fastify returns "http://127.0.0.1:<port>".
@@ -35,6 +45,7 @@ describe('createServer smoke (templates/project)', () => {
     const projectRoot = path.resolve(__dirname, '..', '..', 'templates', 'project')
     const { app } = await createServer({
       projectRoot,
+      ptyFactory: inertPtyFactory,
       listSkills: () => [
         { id: 'user:demo', name: 'demo', description: 'a test skill', source: 'user', path: '/nope' },
       ],
@@ -94,7 +105,7 @@ describe('createServer smoke (templates/project)', () => {
     } finally {
       await app.close()
     }
-  })
+  }, 15_000)
 })
 
 describe('createServer boot-time active-orphan cleanup', () => {
@@ -126,7 +137,7 @@ describe('createServer boot-time active-orphan cleanup', () => {
     ])
 
     const projectRoot = path.resolve(__dirname, '..', '..', 'templates', 'project')
-    const { app } = await createServer({ projectRoot, logsDir, listSkills: () => [] })
+    const { app } = await createServer({ projectRoot, logsDir, ptyFactory: inertPtyFactory, listSkills: () => [] })
     try {
       const manifest = readManifest(path.join(dir, 'manifest.json'))
       expect(manifest?.status).toBe('aborted')
@@ -158,7 +169,7 @@ describe('createServer boot-time active-orphan cleanup', () => {
     ])
 
     const projectRoot = path.resolve(__dirname, '..', '..', 'templates', 'project')
-    const { app } = await createServer({ projectRoot, logsDir, listSkills: () => [] })
+    const { app } = await createServer({ projectRoot, logsDir, ptyFactory: inertPtyFactory, listSkills: () => [] })
     try {
       const manifest = readManifest(path.join(dir, 'manifest.json'))
       expect(manifest?.status).toBe('aborted')
@@ -187,7 +198,7 @@ describe('createServer boot-time active-orphan cleanup', () => {
     ])
 
     const projectRoot = path.resolve(__dirname, '..', '..', 'templates', 'project')
-    const { app } = await createServer({ projectRoot, logsDir, listSkills: () => [] })
+    const { app } = await createServer({ projectRoot, logsDir, ptyFactory: inertPtyFactory, listSkills: () => [] })
     try {
       const manifest = readManifest(path.join(dir, 'manifest.json'))
       expect(manifest?.status).toBe('aborted')
@@ -223,7 +234,7 @@ describe('createServer boot-time active-orphan cleanup', () => {
     ])
 
     const projectRoot = path.resolve(__dirname, '..', '..', 'templates', 'project')
-    const { app } = await createServer({ projectRoot, logsDir, listSkills: () => [] })
+    const { app } = await createServer({ projectRoot, logsDir, ptyFactory: inertPtyFactory, listSkills: () => [] })
     try {
       const manifest = readManifest(path.join(dir, 'manifest.json'))
       expect(manifest?.status).toBe('passed')
@@ -335,6 +346,7 @@ test('Submit credentials', async ({ page }) => {
     const { app } = await createServer({
       projectRoot,
       logsDir,
+      ptyFactory: inertPtyFactory,
       listSkills: () => [],
       testsDraftDepsOverride: overrides,
     })
