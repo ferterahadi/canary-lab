@@ -7,7 +7,14 @@ import type {
   TestResult,
   TestStep,
 } from '@playwright/test/reporter'
-import { enrichSummaryWithLogs, stripAnsi, writeHealIndex } from './log-enrichment'
+import {
+  classifyJournalOutcome,
+  enrichSummaryWithLogs,
+  stripAnsi,
+  updateLatestPendingJournalOutcome,
+  writeHealIndex,
+  type SummaryForJournalOutcome,
+} from './log-enrichment'
 import { getSummaryPath } from './paths'
 
 export function slugify(title: string): string {
@@ -68,6 +75,7 @@ class SummaryReporter implements Reporter {
   private failureCount = 0
   private lastEnrichedFailureCount = -1
   private readonly mergeExistingSummary = process.env.CANARY_LAB_TARGETED_RERUN === '1'
+  private readonly initialSummary = readExistingSummary()
 
   constructor() {
     if (this.mergeExistingSummary) this.seedFromExistingSummary()
@@ -190,6 +198,7 @@ class SummaryReporter implements Reporter {
     this.running = null
     this.stepStack = []
     this.writeSummary(true)
+    this.reconcileJournalOutcome()
     if (
       this.failureCount > 0 &&
       this.failureCount !== this.lastEnrichedFailureCount &&
@@ -292,11 +301,50 @@ class SummaryReporter implements Reporter {
     fs.mkdirSync(path.dirname(eventPath), { recursive: true })
     fs.appendFileSync(eventPath, JSON.stringify(event) + '\n')
   }
+
+  private reconcileJournalOutcome(): void {
+    const finalSummary = readExistingSummary()
+    if (!finalSummary) return
+    try {
+      updateLatestPendingJournalOutcome({
+        journalPath: journalPathForSummary(),
+        runId: runIdForSummary(),
+        outcome: classifyJournalOutcome(this.initialSummary ?? { failed: [] }, finalSummary),
+      })
+    } catch {
+      // Summary writing is the reporter's primary job; journal outcome
+      // reconciliation is best-effort when the file is absent or mid-edit.
+    }
+  }
 }
 
 interface ExistingSummary {
   passedNames?: unknown
   failed?: unknown
+}
+
+function readExistingSummary(): (ExistingSummary & SummaryForJournalOutcome) | null {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(getSummaryPath(), 'utf-8')) as ExistingSummary & SummaryForJournalOutcome
+    return parsed && typeof parsed === 'object' ? parsed : null
+  } catch {
+    return null
+  }
+}
+
+function journalPathForSummary(): string {
+  return path.join(path.dirname(getSummaryPath()), 'diagnosis-journal.md')
+}
+
+function runIdForSummary(): string | undefined {
+  const manifestPath = process.env.CANARY_LAB_MANIFEST_PATH
+    ?? path.join(path.dirname(getSummaryPath()), 'manifest.json')
+  try {
+    const parsed = JSON.parse(fs.readFileSync(manifestPath, 'utf-8')) as { runId?: unknown }
+    return typeof parsed.runId === 'string' ? parsed.runId : undefined
+  } catch {
+    return undefined
+  }
 }
 
 function isErrorShape(value: unknown): value is { message: string; snippet?: string } {

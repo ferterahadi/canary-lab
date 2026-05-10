@@ -24,11 +24,7 @@ import {
 import { FileRunStateSink, type RunStateSink } from './run-state-sink'
 import type { PtyFactory, PtyHandle } from './pty-spawner'
 import { HealCycleState, AUTO_HEAL_MAX_CYCLES } from './heal-cycle'
-import {
-  appendJournalIteration,
-  classifyJournalOutcome,
-  updateLatestPendingJournalOutcome,
-} from './log-enrichment'
+import { appendJournalIteration } from './log-enrichment'
 import type { RunnerLog } from './runner-log'
 import {
   resolveMcpOutputDir,
@@ -1195,8 +1191,7 @@ export class RunOrchestrator extends EventEmitter {
             })
           }
         } catch { /* journal is best-effort */ }
-        const summary = readSummary(this.paths.summaryPath)
-        const rerunTargets = this.rerunTargetsForSummary(summary)
+        const rerunTargets = this.rerunTargetsForSummary(readSummary(this.paths.summaryPath))
         this.setStatus('running')
         if (signal.kind === 'restart') {
           const filesChanged = Array.isArray(signal.body.filesChanged)
@@ -1213,7 +1208,6 @@ export class RunOrchestrator extends EventEmitter {
         // exit code arrives after the abort flips the flag — don't
         // compute a finalStatus from it.
         if (this.stopped) return this.status
-        this.finalizeLatestJournalOutcome(summary, readSummary(this.paths.summaryPath))
         finalStatus = exitCode === 0 ? 'passed' : 'failed'
         this.setStatus(finalStatus)
         if (exitCode === 0) break
@@ -1357,7 +1351,6 @@ export class RunOrchestrator extends EventEmitter {
           this.setStatus(finalStatus)
           break
         }
-        this.finalizeLatestJournalOutcome(summary, readSummary(this.paths.summaryPath))
         finalStatus = exitCode === 0 ? 'passed' : 'failed'
         this.setStatus(finalStatus)
         if (exitCode === 0) break
@@ -1406,19 +1399,6 @@ export class RunOrchestrator extends EventEmitter {
   noteHealCycle(): void {
     this.healCycles += 1
     this.stateSink.patchManifest(this.runId, { healCycles: this.healCycles })
-  }
-
-  private finalizeLatestJournalOutcome(before: SummaryShape, after: SummaryShape): void {
-    try {
-      updateLatestPendingJournalOutcome({
-        journalPath: this.paths.diagnosisJournalPath,
-        runId: this.runId,
-        outcome: classifyJournalOutcome(before, after),
-      })
-    } catch {
-      // Journal outcome reconciliation is best-effort; run status remains
-      // authoritative if the markdown file is temporarily unavailable.
-    }
   }
 
   async stop(finalStatus: RunManifest['status'] = 'aborted'): Promise<void> {

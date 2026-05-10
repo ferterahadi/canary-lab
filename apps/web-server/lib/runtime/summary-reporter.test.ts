@@ -23,6 +23,7 @@ const { slugify, default: SummaryReporter } = await import('./summary-reporter')
 afterEach(() => {
   fs.rmSync(LOGS_DIR, { recursive: true, force: true })
   delete process.env.CANARY_LAB_SUMMARY_PATH
+  delete process.env.CANARY_LAB_MANIFEST_PATH
   delete process.env.CANARY_LAB_BENCHMARK_MODE
   delete process.env.CANARY_LAB_TARGETED_RERUN
 })
@@ -236,6 +237,84 @@ describe('SummaryReporter', () => {
       passedNames: ['test-case-happy-path', 'test-case-sad-path'],
       failed: [],
     })
+  })
+
+  it('updates the latest pending journal outcome on a successful targeted rerun end', () => {
+    process.env.CANARY_LAB_TARGETED_RERUN = '1'
+    fs.mkdirSync(LOGS_DIR, { recursive: true })
+    fs.writeFileSync(path.join(LOGS_DIR, 'manifest.json'), JSON.stringify({ runId: 'run-1' }))
+    fs.writeFileSync(
+      path.join(LOGS_DIR, 'diagnosis-journal.md'),
+      `# Diagnosis Journal
+
+## Iteration 1 — t1
+
+- run: run-1
+- hypothesis: fix sad path
+- outcome: pending
+`,
+    )
+    fs.writeFileSync(
+      path.join(LOGS_DIR, 'e2e-summary.json'),
+      JSON.stringify({
+        complete: false,
+        total: 1,
+        passed: 0,
+        passedNames: [],
+        failed: [{ name: 'test-case-sad-path', error: { message: 'old fail' } }],
+      }),
+    )
+
+    const reporter = new SummaryReporter()
+    reporter.onTestEnd(mkTest('Sad path'), mkResult({ status: 'passed' }))
+    reporter.onEnd({} as any)
+
+    expect(fs.readFileSync(path.join(LOGS_DIR, 'diagnosis-journal.md'), 'utf-8'))
+      .toContain('- outcome: all_passed')
+  })
+
+  it('updates the latest pending journal outcome on a failed targeted rerun end', () => {
+    process.env.CANARY_LAB_TARGETED_RERUN = '1'
+    fs.mkdirSync(LOGS_DIR, { recursive: true })
+    fs.writeFileSync(path.join(LOGS_DIR, 'manifest.json'), JSON.stringify({ runId: 'run-1' }))
+    fs.writeFileSync(
+      path.join(LOGS_DIR, 'diagnosis-journal.md'),
+      `# Diagnosis Journal
+
+## Iteration 1 — t1
+
+- run: run-1
+- hypothesis: old
+- outcome: pending
+
+## Iteration 2 — t2
+
+- run: run-1
+- hypothesis: latest
+- outcome: pending
+`,
+    )
+    fs.writeFileSync(
+      path.join(LOGS_DIR, 'e2e-summary.json'),
+      JSON.stringify({
+        complete: false,
+        total: 2,
+        passed: 0,
+        passedNames: [],
+        failed: [
+          { name: 'test-case-sad-path', error: { message: 'old sad fail' } },
+          { name: 'test-case-other-path', error: { message: 'old other fail' } },
+        ],
+      }),
+    )
+
+    const reporter = new SummaryReporter()
+    reporter.onTestEnd(mkTest('Sad path'), mkResult({ status: 'passed' }))
+    reporter.onEnd({} as any)
+
+    const journal = fs.readFileSync(path.join(LOGS_DIR, 'diagnosis-journal.md'), 'utf-8')
+    expect(journal).toContain('## Iteration 1 — t1\n\n- run: run-1\n- hypothesis: old\n- outcome: pending')
+    expect(journal).toContain('## Iteration 2 — t2\n\n- run: run-1\n- hypothesis: latest\n- outcome: partial')
   })
 
   it('updates only the rerun failure while preserving unrelated targeted-rerun statuses', () => {
