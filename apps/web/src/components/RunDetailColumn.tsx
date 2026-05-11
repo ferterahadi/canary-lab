@@ -21,6 +21,7 @@ import { statusFromPlaybackResult, statusLabel, statusPillClassForStatus } from 
 import { useRun } from '../state/RunsContext'
 import { RunStatusIndicator } from './RunStatusIndicator'
 import { PaneTerminal } from './PaneTerminal'
+import { AgentSessionView } from './AgentSessionView'
 import { JournalTab } from './JournalTab'
 import { ManualHealBanner } from './ManualHealBanner'
 import { RestartHealButton } from './RestartHealButton'
@@ -188,7 +189,15 @@ export function RunDetailColumn({
               <ManualHealBanner runId={m.runId} signalPaths={m.signalPaths} />
             )}
             <div className="min-h-0 flex-1 overflow-hidden">
-              <PaneTerminal key={`${m.runId}:agent:${agentPaneRestartKey}`} runId={m.runId} paneId="agent" />
+              {isTerminalRunStatus(m.status) ? (
+                <AgentSessionView runId={m.runId} />
+              ) : (
+                <PaneTerminal
+                  key={`${m.runId}:agent:${agentPaneRestartKey}`}
+                  runId={m.runId}
+                  paneId="agent"
+                />
+              )}
             </div>
             {canRestartHeal(m.status) && (
               <RestartHealButton
@@ -208,6 +217,13 @@ export function RunDetailColumn({
 
 export function canRestartHeal(status: string): boolean {
   return status === 'failed' || status === 'aborted'
+}
+
+// Run has reached a terminal state — the agent pty is gone, so the live
+// xterm pane has nothing to subscribe to. Switch to the structured-view
+// historical replay (which reads the agent CLI's own JSONL session log).
+export function isTerminalRunStatus(status: string): boolean {
+  return status === 'passed' || status === 'failed' || status === 'aborted'
 }
 
 export function isAssertionExportable(status: string): boolean {

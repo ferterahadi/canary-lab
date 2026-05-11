@@ -35,9 +35,8 @@ describe('resolveLogPath', () => {
     expect(resolveLogPath(logsDir, runId, 'playwright')).toBe(expected)
   })
 
-  it('maps "agent" to agent-transcript.log', () => {
-    const expected = buildRunPaths(runDirFor(logsDir, runId)).agentTranscriptPath
-    expect(resolveLogPath(logsDir, runId, 'agent')).toBe(expected)
+  it('returns null for "agent" — the historical view reads the agent CLI session log via /api/runs/:runId/agent-session', () => {
+    expect(resolveLogPath(logsDir, runId, 'agent')).toBeNull()
   })
 
   it('maps "service:<safeName>" to svc-<safeName>.log when service is in manifest', () => {
@@ -89,12 +88,8 @@ describe('shouldPreferLogReplay', () => {
 })
 
 describe('formatHistoricalPaneReplay', () => {
-  it('keeps historical agent replay raw so xterm can render colors and cursor redraws', () => {
-    const raw = '\x1b[2J\x1b[31mred\x1b[0m\rnext\x1b]0;title\x07'
-    expect(formatHistoricalPaneReplay('agent', raw)).toBe(raw)
-  })
-
-  it('keeps non-agent pane replay raw so colors and terminal behavior are preserved', () => {
+  it('returns the raw bytes unchanged for every paneId — historical agent view goes through the structured route', () => {
     expect(formatHistoricalPaneReplay('playwright', '\x1b[31mred\x1b[0m')).toBe('\x1b[31mred\x1b[0m')
+    expect(formatHistoricalPaneReplay('service:api', '\x1b[31mred\x1b[0m')).toBe('\x1b[31mred\x1b[0m')
   })
 })

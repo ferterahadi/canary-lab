@@ -48,8 +48,11 @@ describe('wizard claude formatter', () => {
     expect(resultSummary('\nfirst\nsecond')).toBe('first')
     expect(resultSummary([{ type: 'text', text: 'array first\narray second' }])).toBe('array first')
     expect(resultSummary([{ type: 'image', source: 'ignored' }])).toBe('')
+    expect(toolResultText('plain result')).toBe('plain result')
+    expect(toolResultText({ text: 'ignored' })).toBe('')
     expect(toolResultText([{ type: 'text', text: 'array first' }, { type: 'text', text: 'array second' }]))
       .toBe('array first\narray second')
+    expect(formatFullToolResult('   \n')).toBeNull()
     expect(formatFullToolResult('first\nsecond')).toContain('second')
     expect(isBashReadInspection('head -40 ~/Documents/tiktok-portal/api/jobs/index.ts')).toBe(true)
     expect(isBashReadInspection('cat ~/Documents/tiktok-portal/api/approvals/\\[token\\].ts')).toBe(true)
@@ -70,8 +73,10 @@ describe('wizard claude formatter', () => {
     expect(inspectionSummary({ name: 'Bash', input: { command: 'head -40 ~/Documents/tiktok-portal/api/jobs/index.ts' } }, 'import x')).toBe('Number of characters: 8')
     expect(inspectionSummary({ name: 'Bash', input: { command: 'cat ~/Documents/tiktok-portal/api/approvals/\\[token\\].ts' } }, 'export default {}')).toBe('Number of characters: 17')
     expect(inspectionSummary({ name: 'Bash', input: { command: 'grep needle apps/a.ts | awk \'{print $1}\'' } }, 'secret')).toBe('Content read.')
+    expect(inspectionSummary({ name: 'Bash', input: { command: 'grep needle apps/a.ts | wc -l' } }, 'not-a-number\n')).toBe('Number of matches: 1')
     expect(inspectionSummary({ name: 'Bash', input: { command: 'if test -d apps; then find apps -type f; fi' } }, 'apps/a.ts')).toBe('Content read.')
     expect(inspectionSummary({ name: 'Bash', input: { command: 'npm test' } }, 'ok')).toBeNull()
+    expect(inspectionSummary({ name: 'Other', input: {} }, 'ok')).toBeNull()
     expect(resultSummary(123)).toBe('')
     const circular: Record<string, unknown> = {}
     circular.self = circular
@@ -554,6 +559,7 @@ describe('formatToolCall', () => {
   })
   it('Read/Edit/Write: relative path', () => {
     expect(formatToolCall('Read', { file_path: `${process.cwd()}/a.ts` })).toBe('a.ts')
+    expect(formatToolCall('Read', { file_path: `${process.cwd()}/a.ts`, limit: 25 })).toContain('L1-25')
     expect(formatToolCall('Write', { file_path: `${process.cwd()}/b.ts` })).toBe('b.ts')
   })
   it('Read: surfaces L<a>-<b> when offset+limit are set (narrow Read visibility)', () => {
@@ -580,6 +586,9 @@ describe('formatToolCall', () => {
     })
     expect(out).toContain('−2 +3')
   })
+  it('Edit: returns just the file path when no replacement text is present', () => {
+    expect(formatToolCall('Edit', { file_path: `${process.cwd()}/x.ts` })).toBe('x.ts')
+  })
   it('Edit: flags replace_all with (all)', () => {
     const out = formatToolCall('Edit', {
       file_path: `${process.cwd()}/x.ts`,
@@ -601,8 +610,9 @@ describe('formatToolCall', () => {
     expect(formatToolCall('Glob', { pattern: '*.ts', path: `${process.cwd()}/src` })).toContain(' in src')
   })
   it('Grep: pattern + optional path + glob', () => {
-    const out = formatToolCall('Grep', { pattern: 'foo', glob: '*.ts' })
+    const out = formatToolCall('Grep', { pattern: 'foo', path: `${process.cwd()}/src`, glob: '*.ts' })
     expect(out).toContain('foo')
+    expect(out).toContain('in src')
     expect(out).toContain('(*.ts)')
   })
   it('TodoWrite: count with singular/plural', () => {

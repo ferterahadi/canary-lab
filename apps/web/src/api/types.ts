@@ -108,6 +108,7 @@ export interface RunSummaryFailedEntry {
   error?: { message: string; snippet?: string }
   durationMs?: number
   location?: string
+  locations?: string[]
   retry?: number
   logFiles?: string[]
 }

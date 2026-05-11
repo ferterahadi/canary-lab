@@ -143,6 +143,43 @@ describe('SummaryReporter', () => {
     expect(readSummary().failed[0].error).toEqual({ message: '' })
   })
 
+  it('normalizes failed result locations from error objects, stacks, and failed steps', () => {
+    process.env.CANARY_LAB_BENCHMARK_MODE = 'baseline'
+    const reporter = new SummaryReporter()
+    const test = mkTest('location rich fail', '/specs/main.spec.ts', 8)
+    const parent = mkStep('outer', 'test.step', '/specs/main.spec.ts', 9)
+    const child = mkChildStep('inner', 'expect', parent, '/specs/main.spec.ts', 10)
+    reporter.onTestBegin(test)
+    reporter.onStepBegin(test, mkResult(), parent)
+    reporter.onStepBegin(test, mkResult(), child)
+    reporter.onStepEnd(test, mkResult(), { ...child, error: { message: 'step failed' } })
+    reporter.onTestEnd(
+      test,
+      mkResult({
+        status: 'failed',
+        error: {
+          message: 'boom',
+          location: { file: '/specs/main.spec.ts', line: 11 },
+        },
+        errors: [
+          {
+            location: { file: '/specs/main.spec.ts', line: 12 },
+            stack: 'Error: boom\n    at fn (/specs/main.spec.ts:13:7)\n    at fn (/specs/main.spec.ts:13:7)',
+          },
+          { stack: '' },
+        ],
+      }),
+    )
+
+    expect(readSummary().failed[0].locations).toEqual([
+      '/specs/main.spec.ts:11',
+      '/specs/main.spec.ts:12',
+      '/specs/main.spec.ts:13',
+      '/specs/main.spec.ts:10',
+      '/specs/main.spec.ts:9',
+    ])
+  })
+
   it('writes the currently running test on begin and clears it on end', () => {
     const reporter = new SummaryReporter()
     reporter.onTestBegin(mkTest('Currently busy', '/specs/busy.spec.ts', 7))
@@ -192,6 +229,52 @@ describe('SummaryReporter', () => {
     expect(out.failed.map((f) => f.name)).toEqual(['test-case-keep-me'])
     expect(out.skippedNames).toEqual(['test-case-skipped-once'])
     expect(out.passedNames).toEqual([])
+  })
+
+  it('seeds valid passed, skipped, and failed targeted-rerun results with optional fields', () => {
+    process.env.CANARY_LAB_TARGETED_RERUN = '1'
+    fs.mkdirSync(LOGS_DIR, { recursive: true })
+    fs.writeFileSync(
+      path.join(LOGS_DIR, 'e2e-summary.json'),
+      JSON.stringify({
+        passedNames: ['test-case-passed-once', 'test-case-passed-once', ''],
+        skippedNames: ['test-case-skipped-once', 123],
+        failed: [
+          {
+            name: 'test-case-failed-once',
+            error: { message: 'old fail', snippet: 'expect(false).toBe(true)' },
+            durationMs: 9,
+            location: '/specs/fail.spec.ts:4',
+            locations: ['/specs/fail.spec.ts:4', 12],
+            retry: 2,
+            logFiles: ['logs/runs/run-1/failed/test-case-failed-once/svc.log', false],
+          },
+        ],
+      }),
+    )
+
+    const reporter = new SummaryReporter()
+    reporter.onEnd({} as any)
+
+    expect(readSummary()).toEqual({
+      complete: true,
+      total: 3,
+      passed: 1,
+      passedNames: ['test-case-passed-once'],
+      skipped: 1,
+      skippedNames: ['test-case-skipped-once'],
+      failed: [
+        {
+          name: 'test-case-failed-once',
+          error: { message: 'old fail', snippet: 'expect(false).toBe(true)' },
+          durationMs: 9,
+          location: '/specs/fail.spec.ts:4',
+          locations: ['/specs/fail.spec.ts:4'],
+          retry: 2,
+          logFiles: ['logs/runs/run-1/failed/test-case-failed-once/svc.log'],
+        },
+      ],
+    })
   })
 
   it('skips the existing-summary seed when the file parses to a non-object value', () => {
@@ -598,6 +681,50 @@ describe('SummaryReporter', () => {
       title: 'locator.click',
       category: 'pw:api',
       location: '/helpers/voucher.ts:8',
+      locations: ['/helpers/voucher.ts:8', '/specs/nested.spec.ts:25'],
+    })
+  })
+
+  it('persists failed error and parent step locations for code highlighting', () => {
+    const reporter = new SummaryReporter()
+    const test = mkTest('Nested failure', '/specs/nested.spec.ts', 20)
+    const parent = mkStep('Redeem voucher', 'test.step', '/specs/nested.spec.ts', 25)
+    const child = mkChildStep('locator.click', 'pw:api', parent, '/helpers/voucher.ts', 8)
+
+    reporter.onTestBegin(test)
+    reporter.onStepBegin(test, mkResult(), parent)
+    reporter.onStepBegin(test, mkResult(), child)
+    reporter.onStepEnd(test, mkResult(), { ...child, error: { message: 'boom' } })
+    reporter.onTestEnd(
+      test,
+      mkResult({
+        status: 'failed',
+        error: {
+          message: 'boom',
+          location: { file: '/helpers/voucher.ts', line: 8 },
+          stack: [
+            'Error: boom',
+            '    at redeem (/helpers/voucher.ts:8:3)',
+            '    at /specs/nested.spec.ts:25:5',
+          ].join('\n'),
+        },
+        errors: [
+          {
+            message: 'boom',
+            location: { file: '/helpers/voucher.ts', line: 8 },
+            stack: [
+              'Error: boom',
+              '    at redeem (/helpers/voucher.ts:8:3)',
+              '    at /specs/nested.spec.ts:25:5',
+            ].join('\n'),
+          },
+        ],
+      }),
+    )
+
+    expect(readSummary().failed[0]).toMatchObject({
+      name: 'test-case-nested-failure',
+      location: '/specs/nested.spec.ts:20',
       locations: ['/helpers/voucher.ts:8', '/specs/nested.spec.ts:25'],
     })
   })

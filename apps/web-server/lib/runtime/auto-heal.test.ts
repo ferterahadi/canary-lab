@@ -7,6 +7,7 @@ import {
   buildClaudeMcpConfigArg,
   buildOrchestratorHealPrompt,
   pickAvailableHealAgent,
+  readPriorSessionId,
 } from './auto-heal'
 import { renderPersonalWikiMap } from '../../../../shared/runtime/personal-wiki'
 
@@ -72,8 +73,43 @@ describe('buildAgentSpawnCommand', () => {
     expect(cmd.includes('--session-id')).toBe(false)
   })
 
-  it('codex REPL: no exec-only flags / --full-auto / --mcp-config / --session-id', () => {
-    const cmd = buildAgentSpawnCommand('codex', { sessionId: 'ignored', mcpOutputDir: '/tmp/out' })
+  it('claude REPL: emits --resume <uuid> instead of --session-id when resume is true', () => {
+    // On Restart Heal we want claude to continue the previous conversation
+    // (full prior turns + tool results), not start a fresh session pinned to
+    // the same uuid. `--resume` is the resumption flag; `--session-id` only
+    // SETS the id for a new conversation.
+    const cmd = buildAgentSpawnCommand('claude', {
+      sessionId: 'abc-123',
+      resume: true,
+    })
+    expect(cmd).toContain('--resume "abc-123"')
+    expect(cmd.includes('--session-id')).toBe(false)
+  })
+
+  it('claude REPL: emits --session-id (not --resume) when resume is false', () => {
+    const cmd = buildAgentSpawnCommand('claude', {
+      sessionId: 'abc-123',
+      resume: false,
+    })
+    expect(cmd).toContain('--session-id "abc-123"')
+    expect(cmd.includes('--resume')).toBe(false)
+  })
+
+  it('claude REPL: omits both flags when resume is true but no sessionId is supplied', () => {
+    // resume needs a target uuid to resume — without one there's nothing
+    // to continue. Fall through to neither flag rather than emitting a
+    // bare --resume (which would open claude's interactive picker).
+    const cmd = buildAgentSpawnCommand('claude', { resume: true })
+    expect(cmd.includes('--resume')).toBe(false)
+    expect(cmd.includes('--session-id')).toBe(false)
+  })
+
+  it('codex REPL: no exec-only flags / --full-auto / --mcp-config / --session-id / --resume', () => {
+    const cmd = buildAgentSpawnCommand('codex', {
+      sessionId: 'ignored',
+      resume: true,
+      mcpOutputDir: '/tmp/out',
+    })
     expect(cmd).toContain('codex')
     expect(cmd).not.toContain('--skip-git-repo-check')
     // --full-auto is gone for the same reason claude drops bypass-permissions:
@@ -81,6 +117,8 @@ describe('buildAgentSpawnCommand', () => {
     expect(cmd.includes('--full-auto')).toBe(false)
     expect(cmd.includes('--mcp-config')).toBe(false)
     expect(cmd.includes('--session-id')).toBe(false)
+    // Codex has no `--resume` flag; the resume hint is ignored.
+    expect(cmd.includes('--resume')).toBe(false)
   })
 
   it('claude / codex: appends `-- "@<promptFile>"` as a positional arg when promptFile is set', () => {
@@ -129,6 +167,55 @@ describe('buildAgentSpawnCommand', () => {
     expect(cmd.includes('@')).toBe(false)
     // No `--` separator either when there's no positional to protect.
     expect(cmd.includes(' -- ')).toBe(false)
+  })
+})
+
+describe('readPriorSessionId', () => {
+  let tmp: string
+
+  beforeEach(() => {
+    tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-prior-sid-')))
+  })
+
+  afterEach(() => {
+    fs.rmSync(tmp, { recursive: true, force: true })
+  })
+
+  it('returns null when the file does not exist', () => {
+    expect(readPriorSessionId(path.join(tmp, 'nope.txt'))).toBeNull()
+  })
+
+  it('returns the trimmed UUID for a well-formed file', () => {
+    const file = path.join(tmp, 'sid.txt')
+    fs.writeFileSync(file, '  b2160db2-89b8-49ff-a2ba-c0c97a52d63f\n')
+    expect(readPriorSessionId(file)).toBe('b2160db2-89b8-49ff-a2ba-c0c97a52d63f')
+  })
+
+  it('accepts uppercase UUIDs (claude renders them this way in the UI)', () => {
+    const file = path.join(tmp, 'sid.txt')
+    fs.writeFileSync(file, 'B2160DB2-89B8-49FF-A2BA-C0C97A52D63F')
+    expect(readPriorSessionId(file)).toBe('B2160DB2-89B8-49FF-A2BA-C0C97A52D63F')
+  })
+
+  it('returns null for an empty file', () => {
+    const file = path.join(tmp, 'sid.txt')
+    fs.writeFileSync(file, '')
+    expect(readPriorSessionId(file)).toBeNull()
+  })
+
+  it('returns null for garbage that is not a UUID', () => {
+    const file = path.join(tmp, 'sid.txt')
+    fs.writeFileSync(file, 'not-a-uuid')
+    expect(readPriorSessionId(file)).toBeNull()
+  })
+
+  it('returns null when the file contains extra trailing content after a UUID', () => {
+    // A file with a UUID followed by anything else (multi-line, extra
+    // tokens) is treated as corrupt — better to start a fresh session
+    // than feed claude a malformed --resume target.
+    const file = path.join(tmp, 'sid.txt')
+    fs.writeFileSync(file, 'b2160db2-89b8-49ff-a2ba-c0c97a52d63f extra')
+    expect(readPriorSessionId(file)).toBeNull()
   })
 })
 

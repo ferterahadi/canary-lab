@@ -29,6 +29,7 @@ import {
   getRepoGitStatus,
   getWorkspaceGitStatus,
   getPlaywrightConfig,
+  getAgentSession,
   getRunDetail,
   listFeatures,
   listJournal,
@@ -130,6 +131,26 @@ describe('api client', () => {
     const out = await getRunDetail('r1', { fetchImpl })
     expect(out).toEqual(detail)
     expect(fetchImpl).toHaveBeenCalledWith('/api/runs/r1', { method: 'GET' })
+  })
+
+  it('getAgentSession returns normalized events and maps 404 to null', async () => {
+    const session = {
+      agent: 'claude',
+      sessionId: 'sid-1',
+      events: [{ kind: 'assistant-message', timestamp: 't', text: 'done' }],
+    }
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(ok(session))
+      .mockResolvedValueOnce(fail(404, { error: 'agent session not found' }))
+
+    await expect(getAgentSession('run/1', { fetchImpl })).resolves.toEqual(session)
+    await expect(getAgentSession('missing', { fetchImpl })).resolves.toBeNull()
+    expect(fetchImpl.mock.calls[0][0]).toBe('/api/runs/run%2F1/agent-session')
+  })
+
+  it('getAgentSession rethrows non-404 API errors', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(fail(500, { error: 'boom' }))
+    await expect(getAgentSession('run-1', { fetchImpl })).rejects.toMatchObject({ status: 500 })
   })
 
   it('startRun POSTs JSON body', async () => {

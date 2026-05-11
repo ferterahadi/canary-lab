@@ -34,6 +34,7 @@ interface TestEntry {
   }
   durationMs?: number
   location?: string
+  locations?: string[]
   retry?: number
   logFiles?: string[]
 }
@@ -73,6 +74,7 @@ class SummaryReporter implements Reporter {
   private results: TestEntry[] = []
   private running: { name: string; location: string; step?: RunningStep } | null = null
   private stepStack: RunningStep[] = []
+  private failedStepLocationsByTest = new Map<string, string[]>()
   private failureCount = 0
   private lastEnrichedFailureCount = -1
   private readonly mergeExistingSummary = process.env.CANARY_LAB_TARGETED_RERUN === '1'
@@ -84,6 +86,7 @@ class SummaryReporter implements Reporter {
 
   onTestBegin(test: TestCase): void {
     this.stepStack = []
+    this.failedStepLocationsByTest.delete(`test-case-${slugify(test.title)}`)
     this.running = {
       name: `test-case-${slugify(test.title)}`,
       location: `${test.location.file}:${test.location.line}`,
@@ -124,6 +127,9 @@ class SummaryReporter implements Reporter {
     const name = `test-case-${slugify(test.title)}`
     if (!this.running || this.running.name !== name) return
     const ended = stepToRunningStep(step)
+    if (ended.locations?.length && step.error) {
+      this.failedStepLocationsByTest.set(name, ended.locations)
+    }
     const idx = findLastStepIndex(this.stepStack, ended)
     if (idx >= 0) this.stepStack.splice(idx, 1)
     const current = this.stepStack.at(-1)
@@ -156,6 +162,9 @@ class SummaryReporter implements Reporter {
             : {}),
         }
       : undefined
+    const locations = failed
+      ? failureLocations(result, this.failedStepLocationsByTest.get(name))
+      : []
     const entry: TestEntry = {
       name,
       status: result.status,
@@ -163,6 +172,7 @@ class SummaryReporter implements Reporter {
       ...(error ? { error } : {}),
       durationMs: result.duration,
       location: `${test.location.file}:${test.location.line}`,
+      ...(locations.length > 0 ? { locations } : {}),
       retry: result.retry,
     }
     this.results.push(entry)
@@ -249,6 +259,7 @@ class SummaryReporter implements Reporter {
           ...(r.error ? { error: r.error } : {}),
           ...(typeof r.durationMs === 'number' ? { durationMs: r.durationMs } : {}),
           ...(typeof r.location === 'string' ? { location: r.location } : {}),
+          ...(r.locations?.length ? { locations: r.locations } : {}),
           ...(typeof r.retry === 'number' ? { retry: r.retry } : {}),
           ...(r.logFiles ? { logFiles: r.logFiles } : {}),
         })),
@@ -298,6 +309,7 @@ class SummaryReporter implements Reporter {
         ...(isErrorShape(entry.error) ? { error: entry.error } : {}),
         ...(typeof entry.durationMs === 'number' ? { durationMs: entry.durationMs } : {}),
         ...(typeof entry.location === 'string' ? { location: entry.location } : {}),
+        ...(Array.isArray(entry.locations) ? { locations: entry.locations.filter((f: unknown): f is string => typeof f === 'string') } : {}),
         ...(typeof entry.retry === 'number' ? { retry: entry.retry } : {}),
         ...(Array.isArray(entry.logFiles) ? { logFiles: entry.logFiles.filter((f: unknown): f is string => typeof f === 'string') } : {}),
       })
@@ -384,6 +396,44 @@ function stepToRunningStep(step: TestStep): RunningStep {
     ...(step.location ? { location: `${step.location.file}:${step.location.line}` } : {}),
     ...(locations.length > 0 ? { locations } : {}),
   }
+}
+
+function failureLocations(result: TestResult, failedStepLocations?: string[]): string[] {
+  const out: string[] = []
+  const add = (location: string | undefined) => {
+    const normalized = normalizeLocation(location)
+    if (!normalized || out.includes(normalized)) return
+    out.push(normalized)
+  }
+  const addLocation = (location: { file: string; line: number } | undefined) => {
+    if (!location) return
+    add(`${location.file}:${location.line}`)
+  }
+
+  addLocation(result.error?.location)
+  for (const error of result.errors ?? []) {
+    addLocation(error.location)
+    for (const location of stackLocations(error.stack)) add(location)
+  }
+  for (const location of failedStepLocations ?? []) add(location)
+  return out
+}
+
+function stackLocations(stack: string | undefined): string[] {
+  if (!stack) return []
+  const out: string[] = []
+  const locationRe = /(?:\(|\s)(\/[^():\n]+:\d+(?::\d+)?)(?:\)|\s|$)/g
+  for (const match of stack.matchAll(locationRe)) {
+    const location = match[1]
+    if (!out.includes(location)) out.push(location)
+  }
+  return out
+}
+
+function normalizeLocation(location: string | undefined): string | null {
+  if (!location) return null
+  const match = location.match(/^(\/[^:\n]+:\d+)(?::\d+)?$/)
+  return match ? match[1] : location
 }
 
 function stepLocationChain(step: TestStep): string[] {
