@@ -862,6 +862,22 @@ describe('RunStore', () => {
     expect(readRunsIndex(tmpDir)[0].status).toBe('running')
   })
 
+  it('abortAllActiveOrStale aborts registered runs even when persisted detail is missing', async () => {
+    const reg = createRegistry()
+    let stopped = false
+    reg.set('missing-registered', {
+      runId: 'missing-registered',
+      stop: async () => { stopped = true },
+      pauseAndHeal: async () => ({ ok: true as const, failureCount: 0 }),
+      cancelHeal: async () => ({ ok: true as const }),
+    })
+    const store = new RunStore(tmpDir, reg)
+
+    expect(await store.abortAllActiveOrStale()).toEqual({ aborted: ['missing-registered'] })
+    expect(stopped).toBe(true)
+    expect(reg.get('missing-registered')).toBeUndefined()
+  })
+
   it('delete refuses active runs (registered) and stale-active manifests', () => {
     const reg = createRegistry()
     reg.set('active', {

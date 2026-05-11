@@ -75,6 +75,12 @@ export function statusForTest(
 ): StepStatus {
   if (!summary) return 'pending'
   const expected = summaryEntryName(testName)
+  // Currently-running wins over prior state. In targeted-rerun mode the
+  // reporter seeds the new run from the prior summary, so the failed[]
+  // entry for a test that is being re-run is still on disk while the test
+  // is in flight. Checking `running` first lets the badge flip to "running"
+  // instead of sticking on the stale "failed" label.
+  if (isRunActivelyTesting && summary.running?.name === expected) return 'testing'
   const failed = summary.failed.find((f) => f.name === expected)
   if (failed) {
     const msg = failed.error?.message ?? ''
@@ -82,7 +88,6 @@ export function statusForTest(
     return 'failed'
   }
   if (summary.skippedNames?.includes(expected)) return 'skipped'
-  if (isRunActivelyTesting && summary.running?.name === expected) return 'testing'
   if (summary.passedNames) {
     return summary.passedNames.includes(expected) ? 'passed' : 'pending'
   }

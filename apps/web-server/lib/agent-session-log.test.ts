@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -119,6 +119,91 @@ describe('locateCodexSessionLog', () => {
     try { fs.rmSync(runDir, { recursive: true, force: true }) } catch { /* best-effort */ }
   })
 
+  it('ignores malformed Codex session metadata while selecting the newest valid match', () => {
+    const runDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-asl-run-')))
+    writeCodexSession({
+      yyyy: '2026',
+      mm: '05',
+      dd: '11',
+      fileBase: 'rollout-2026-05-11T01-10-00-wrong-type',
+      payload: { id: 'sess-wrong-type', cwd: runDir, timestamp: '2026-05-11T01:10:00.000Z' },
+    })
+    const malformedDir = path.join(homeDir, '.codex', 'sessions', '2026', '05', '11')
+    fs.writeFileSync(path.join(malformedDir, 'rollout-2026-05-11T01-12-00-not-meta.jsonl'), JSON.stringify({ type: 'event_msg' }) + '\n')
+    fs.writeFileSync(path.join(malformedDir, 'notes.txt'), 'not a session')
+    fs.symlinkSync(
+      path.join(malformedDir, 'missing-target.jsonl'),
+      path.join(malformedDir, 'rollout-2026-05-11T01-12-30-dangling.jsonl'),
+    )
+    fs.writeFileSync(path.join(malformedDir, 'rollout-2026-05-11T01-13-00-bad-payload.jsonl'), JSON.stringify({
+      type: 'session_meta',
+      payload: { id: 123, cwd: runDir, timestamp: '2026-05-11T01:13:00.000Z' },
+    }) + '\n')
+    fs.writeFileSync(path.join(malformedDir, 'rollout-2026-05-11T01-14-00-bad-json.jsonl'), '{not-json\n')
+    const expected = writeCodexSession({
+      yyyy: '2026',
+      mm: '05',
+      dd: '11',
+      fileBase: 'rollout-2026-05-11T01-20-00-newest',
+      payload: { id: 'sess-newest', cwd: runDir, timestamp: '2026-05-11T01:20:00.000Z' },
+    })
+
+    const ref = locateCodexSessionLog(runDir, '2026-05-11T01:00:00.000Z', homeDir)
+    expect(ref).toEqual({ agent: 'codex', sessionId: 'sess-newest', logPath: expected })
+
+    try { fs.rmSync(runDir, { recursive: true, force: true }) } catch { /* best-effort */ }
+  })
+
+  it('keeps the newest Codex session when an older match is scanned later', () => {
+    const runDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-asl-run-')))
+    const expected = writeCodexSession({
+      yyyy: '2026',
+      mm: '05',
+      dd: '11',
+      fileBase: '000-newer',
+      payload: { id: 'sess-newer', cwd: runDir, timestamp: '2026-05-11T01:20:00.000Z' },
+    })
+    writeCodexSession({
+      yyyy: '2026',
+      mm: '05',
+      dd: '11',
+      fileBase: '999-older',
+      payload: { id: 'sess-older', cwd: runDir, timestamp: '2026-05-11T01:10:00.000Z' },
+    })
+
+    const ref = locateCodexSessionLog(runDir, '2026-05-11T01:00:00.000Z', homeDir)
+    expect(ref).toEqual({ agent: 'codex', sessionId: 'sess-newer', logPath: expected })
+
+    try { fs.rmSync(runDir, { recursive: true, force: true }) } catch { /* best-effort */ }
+  })
+
+  it('ignores close errors while reading Codex session metadata', () => {
+    const runDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-asl-run-')))
+    const expected = writeCodexSession({
+      yyyy: '2026',
+      mm: '05',
+      dd: '11',
+      fileBase: 'rollout-2026-05-11T01-20-00-close-error',
+      payload: { id: 'sess-close-error', cwd: runDir, timestamp: '2026-05-11T01:20:00.000Z' },
+    })
+    const closeSpy = vi.spyOn(fs, 'closeSync').mockImplementation(() => {
+      throw new Error('close failed')
+    })
+    try {
+      const ref = locateCodexSessionLog(runDir, '2026-05-11T01:00:00.000Z', homeDir)
+      expect(ref).toEqual({ agent: 'codex', sessionId: 'sess-close-error', logPath: expected })
+    } finally {
+      closeSpy.mockRestore()
+      try { fs.rmSync(runDir, { recursive: true, force: true }) } catch { /* best-effort */ }
+    }
+  })
+
+  it('returns null when the Codex sessions root is missing', () => {
+    const runDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-asl-run-')))
+    expect(locateCodexSessionLog(runDir, '2026-05-11T01:00:00.000Z', homeDir)).toBeNull()
+    try { fs.rmSync(runDir, { recursive: true, force: true }) } catch { /* best-effort */ }
+  })
+
   it('crosses UTC date boundaries (scans next day too)', () => {
     const runDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-asl-run-')))
     const expected = writeCodexSession({
@@ -187,6 +272,49 @@ describe('loadAgentSessionLog (claude)', () => {
     ])
   })
 
+  it('defaults malformed Claude assistant tool_use identifiers', () => {
+    const file = writeClaudeLog([
+      {
+        type: 'assistant',
+        timestamp: 't',
+        message: {
+          content: [
+            { type: 'text', text: '   ' },
+            { type: 'thinking', thinking: '   ' },
+            { type: 'tool_use', id: 123, name: null, input: { path: 'x' } },
+          ],
+        },
+      },
+    ])
+
+    const events = loadAgentSessionLog({ agent: 'claude', sessionId: 'sid', logPath: file })
+    expect(events).toEqual([
+      { kind: 'tool-call', timestamp: 't', toolId: '', name: '', input: { path: 'x' } },
+    ])
+  })
+
+  it('skips Claude assistant records whose content is not an array', () => {
+    const file = writeClaudeLog([
+      {
+        type: 'assistant',
+        timestamp: 't',
+        message: { content: 'not-array' },
+      },
+      {
+        type: 'assistant',
+        timestamp: 't',
+        message: {
+          content: [{ type: 'text', text: 'real text' }],
+        },
+      },
+    ])
+
+    const events = loadAgentSessionLog({ agent: 'claude', sessionId: 'sid', logPath: file })
+    expect(events).toEqual([
+      { kind: 'assistant-message', timestamp: 't', text: 'real text' },
+    ])
+  })
+
   it('handles tool_result content that is an array of text/image blocks', () => {
     const file = writeClaudeLog([
       {
@@ -214,6 +342,63 @@ describe('loadAgentSessionLog (claude)', () => {
     ])
   })
 
+  it('handles non-string Claude tool_result content without output text', () => {
+    const file = writeClaudeLog([
+      {
+        type: 'user',
+        timestamp: 't',
+        message: {
+          content: [
+            { type: 'tool_result', tool_use_id: 'toolu_object', content: { structured: true } },
+            { type: 'tool_result', tool_use_id: 'toolu_image', content: [{ type: 'image' }, null] },
+          ],
+        },
+      },
+    ])
+    const events = loadAgentSessionLog({ agent: 'claude', sessionId: 'sid', logPath: file })
+    expect(events).toEqual([
+      { kind: 'tool-result', timestamp: 't', toolId: 'toolu_object', output: '' },
+      { kind: 'tool-result', timestamp: 't', toolId: 'toolu_image', output: '[image]' },
+    ])
+  })
+
+  it('defaults malformed Claude tool_result identifiers and preserves false errors as non-error results', () => {
+    const file = writeClaudeLog([
+      {
+        type: 'user',
+        timestamp: 't',
+        message: {
+          content: [
+            { type: 'tool_result', tool_use_id: 123, content: 'ok', is_error: false },
+          ],
+        },
+      },
+    ])
+    const events = loadAgentSessionLog({ agent: 'claude', sessionId: 'sid', logPath: file })
+    expect(events).toEqual([
+      { kind: 'tool-result', timestamp: 't', toolId: '', output: 'ok' },
+    ])
+  })
+
+  it('normalizes non-empty user text blocks in array content', () => {
+    const file = writeClaudeLog([
+      {
+        type: 'user',
+        timestamp: 't',
+        message: {
+          content: [
+            { type: 'text', text: '   ' },
+            { type: 'text', text: 'review this plan' },
+          ],
+        },
+      },
+    ])
+    const events = loadAgentSessionLog({ agent: 'claude', sessionId: 'sid', logPath: file })
+    expect(events).toEqual([
+      { kind: 'user-message', timestamp: 't', text: 'review this plan' },
+    ])
+  })
+
   it('skips metadata-only event types and malformed lines', () => {
     const file = path.join(homeDir, 'claude.jsonl')
     fs.writeFileSync(
@@ -222,8 +407,11 @@ describe('loadAgentSessionLog (claude)', () => {
         JSON.stringify({ type: 'last-prompt' }),
         JSON.stringify({ type: 'permission-mode' }),
         JSON.stringify({ type: 'file-history-snapshot' }),
+        JSON.stringify(null),
         'not-json-at-all',
         '',
+        JSON.stringify({ type: 'user', timestamp: 't', message: { content: '   ' } }),
+        JSON.stringify({ type: 'user', timestamp: 't', message: { content: 123 } }),
         JSON.stringify({ type: 'user', timestamp: 't', message: { content: 'hi' } }),
       ].join('\n'),
     )
@@ -315,6 +503,58 @@ describe('loadAgentSessionLog (codex)', () => {
     const events = loadAgentSessionLog({ agent: 'codex', sessionId: 'sid', logPath: file })
     expect(events).toEqual([
       { kind: 'tool-call', timestamp: 't', toolId: 'c', name: 'tool', input: 'not json' },
+    ])
+  })
+
+  it('skips empty/machine Codex payloads and defaults malformed tool fields', () => {
+    const file = writeCodexLog([
+      { timestamp: 123, type: 'response_item' },
+      { timestamp: 't', type: 'response_item', payload: {
+        type: 'message', role: 'user',
+        content: 'not-array',
+      } },
+      { timestamp: 't', type: 'response_item', payload: {
+        type: 'message', role: 'assistant',
+        content: [{ type: 'output_text', text: '   ' }],
+      } },
+      { timestamp: 't', type: 'response_item', payload: {
+        type: 'message', role: 'tool',
+        content: [{ type: 'output_text', text: 'not a chat message' }],
+      } },
+      { timestamp: 't', type: 'response_item', payload: {
+        type: 'reasoning', content: [{ type: 'output_text', text: 'hidden' }],
+      } },
+      { timestamp: 123, type: 'response_item', payload: {
+        type: 'function_call',
+        call_id: 42,
+        name: null,
+        arguments: { ok: true },
+      } },
+      { timestamp: 456, type: 'response_item', payload: {
+        type: 'function_call_output',
+        call_id: 42,
+        output: { lines: 2 },
+      } },
+      { timestamp: 't', type: 'response_item', payload: {
+        type: 'function_call_output',
+        output: null,
+      } },
+      { timestamp: 't', type: 'response_item', payload: {
+        type: 'message', role: 'assistant',
+        content: [
+          { type: 'output_text', text: 'first' },
+          { type: 'image', text: 'ignored' },
+          { type: 'output_text', text: 'second' },
+        ],
+      } },
+    ])
+
+    const events = loadAgentSessionLog({ agent: 'codex', sessionId: 'sid', logPath: file })
+    expect(events).toEqual([
+      { kind: 'tool-call', timestamp: '', toolId: '', name: '', input: { ok: true } },
+      { kind: 'tool-result', timestamp: '', toolId: '', output: '{"lines":2}' },
+      { kind: 'tool-result', timestamp: 't', toolId: '', output: '""' },
+      { kind: 'assistant-message', timestamp: 't', text: 'first\nsecond' },
     ])
   })
 })

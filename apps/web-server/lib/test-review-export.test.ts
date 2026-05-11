@@ -136,6 +136,15 @@ function clickToolbarButton(page) {
     expect(svg).not.toContain('height="368"')
   })
 
+  it('sanitizes punctuation-only test titles for flowchart filenames', async () => {
+    const exported = await createAssertionExport(detail({ featureDir: tmpDir, title: '!!!' }))
+
+    expect(exported.assets).toContainEqual(
+      expect.objectContaining({ filename: 'flowcharts/1.svg' }),
+    )
+    expect(exported.html).toContain('<img src="flowcharts/1.svg"')
+  })
+
   it('renders per-test video links after assertions', async () => {
     const featureDir = path.join(tmpDir, 'video-feature')
     fs.mkdirSync(path.join(featureDir, 'e2e'), { recursive: true })

@@ -142,6 +142,30 @@ describe('RunsProvider', () => {
     }
   })
 
+  it('uses wss for default websocket URLs on https pages', () => {
+    const original = globalThis.WebSocket
+    globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket
+    const protocolSpy = vi.spyOn(window.location, 'protocol', 'get').mockReturnValue('https:')
+    const hostSpy = vi.spyOn(window.location, 'host', 'get').mockReturnValue('secure.example')
+    try {
+      act(() => {
+        root.render(
+          <RunsProvider>
+            <Probe
+              captured={{ runs: null, run: null, actions: null, active: null }}
+              runId={null}
+            />
+          </RunsProvider>,
+        )
+      })
+      expect(FakeWebSocket.instances[0].url).toBe('wss://secure.example/ws/runs')
+    } finally {
+      protocolSpy.mockRestore()
+      hostSpy.mockRestore()
+      globalThis.WebSocket = original
+    }
+  })
+
   it('refreshes and starts runs through HTTP fallbacks', async () => {
     const captured = renderProbe()
     vi.mocked(api.listRuns).mockResolvedValue([entry({ runId: 'http-r1', status: 'failed' })])
@@ -246,6 +270,33 @@ describe('RunsProvider', () => {
       await first.promise
     })
     expect(captured.run?.detail?.runId).toBe('lazy-r1')
+  })
+
+  it('deduplicates concurrent missing detail loads across consumers', () => {
+    const first = deferred<RunDetail>()
+    vi.mocked(api.getRunDetail).mockReturnValueOnce(first.promise)
+    const capturedA = emptyCapture()
+    const capturedB = emptyCapture()
+
+    act(() => {
+      root.render(
+        <RunsProvider WebSocketImpl={FakeWebSocket as unknown as typeof WebSocket}>
+          <Probe captured={capturedA} runId="shared-detail" />
+          <Probe captured={capturedB} runId="shared-detail" />
+        </RunsProvider>,
+      )
+    })
+    act(() => {
+      FakeWebSocket.instances[0].onmessage?.({
+        data: JSON.stringify({
+          type: 'snapshot',
+          runs: [entry({ runId: 'shared-detail', status: 'passed' })],
+          details: {},
+        }),
+      })
+    })
+
+    expect(api.getRunDetail).toHaveBeenCalledTimes(1)
   })
 
   it('polls running run details while the run remains active', async () => {
@@ -402,18 +453,22 @@ describe('RunsProvider', () => {
 })
 
 function renderProbe(runId: string | null = 'r1') {
-  const captured: {
-    runs: UseRunsResult | null
-    run: UseRunResult | null
-    actions: UseRunActionsResult | null
-    active: UseGlobalActiveRunResult | null
-  } = { runs: null, run: null, actions: null, active: null }
+  const captured = emptyCapture()
 
   act(() => {
     root.render(<ProbeHarness captured={captured} runId={runId} />)
   })
 
   return captured
+}
+
+function emptyCapture(): {
+  runs: UseRunsResult | null
+  run: UseRunResult | null
+  actions: UseRunActionsResult | null
+  active: UseGlobalActiveRunResult | null
+} {
+  return { runs: null, run: null, actions: null, active: null }
 }
 
 function ProbeHarness({

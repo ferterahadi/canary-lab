@@ -110,10 +110,21 @@ export function PaneTerminal({ runId, paneId }: Props) {
     const inputDisposable = term.onData((data) => conn.sendInput(data))
     const resizeDisposable = term.onResize(({ cols, rows }) => conn.sendResize(cols, rows))
 
-    const handleResize = (): void => { try { fit.fit() } catch { /* ignore */ } }
-    window.addEventListener('resize', handleResize)
+    // Re-fit on every container resize. Two cases matter:
+    // 1. Initial mount after a tab switch — the inline fit.fit() above can
+    //    silently fail because the container has 0 dims before layout
+    //    settles. The observer fires once the container is measured, so
+    //    xterm catches up to the real pane size and term.onResize forwards
+    //    the dims to the server pty (SIGWINCH → clean redraw).
+    // 2. Later in-app resizes — splitter drag, sidebar toggle, etc. The
+    //    old window 'resize' listener missed these.
+    const observer = new ResizeObserver(() => {
+      if (container.clientWidth === 0 || container.clientHeight === 0) return
+      try { fit.fit() } catch { /* ignore */ }
+    })
+    observer.observe(container)
     return () => {
-      window.removeEventListener('resize', handleResize)
+      observer.disconnect()
       unsubscribeTheme()
       inputDisposable.dispose()
       resizeDisposable.dispose()
