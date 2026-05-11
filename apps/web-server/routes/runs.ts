@@ -6,7 +6,12 @@ import type { RunStore, OrchestratorLike, RestartHealResult } from '../lib/run-s
 import { loadFeatures } from '../lib/feature-loader'
 import { buildRunPaths, runDirFor } from '../lib/runtime/run-paths'
 import { createAssertionExport } from '../lib/test-review-export'
-import { loadAgentSessionLog, type AgentSessionRef } from '../lib/agent-session-log'
+import {
+  loadAgentSessionLog,
+  locateMostRecentAgentSessionRef,
+  parseAgentSessionRefFile,
+  selectAgentSessionRef,
+} from '../lib/agent-session-log'
 
 export interface RunsRouteDeps {
   featuresDir: string
@@ -46,12 +51,19 @@ export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Pro
       return { reason: 'run-not-found' }
     }
     const runDir = runDirFor(deps.store.logsDir, req.params.runId)
+    // Prefer the most-recently-modified agent JSONL on disk over the
+    // orchestrator-written ref file. The ref file is only updated when the
+    // heal loop's cleanup runs cleanly — a SIGKILL'd server or a one-off
+    // locator miss leaves it pointing at a stale agent (e.g. claude) even
+    // when codex has since produced newer cycles for the same runDir. Fall
+    // back to the ref file when no on-disk logs are locatable.
     const refPath = buildRunPaths(runDir).agentSessionRefPath
-    let ref: AgentSessionRef
-    try {
-      const raw = fs.readFileSync(refPath, 'utf-8')
-      ref = JSON.parse(raw) as AgentSessionRef
-    } catch {
+    let raw: string | null = null
+    try { raw = fs.readFileSync(refPath, 'utf-8') } catch { /* missing or unreadable */ }
+    const parsed = raw ? parseAgentSessionRefFile(raw) : null
+    const ref = locateMostRecentAgentSessionRef(runDir)
+      ?? (parsed ? selectAgentSessionRef(parsed) : null)
+    if (!ref) {
       reply.code(404)
       return { reason: 'no-session-ref' }
     }

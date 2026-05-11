@@ -33,12 +33,62 @@ export interface AgentSessionRef {
   logPath: string
 }
 
+export interface AgentSessionRefFile {
+  activeAgent?: AgentKind
+  sessions: Partial<Record<AgentKind, AgentSessionRef>>
+}
+
 export type AgentEvent =
   | { kind: 'user-message'; timestamp: string; text: string }
   | { kind: 'assistant-message'; timestamp: string; text: string }
   | { kind: 'assistant-thinking'; timestamp: string; text: string }
   | { kind: 'tool-call'; timestamp: string; toolId: string; name: string; input: unknown }
   | { kind: 'tool-result'; timestamp: string; toolId: string; output: string; isError?: boolean }
+
+export function parseAgentSessionRefFile(raw: string): AgentSessionRefFile | null {
+  let parsed: unknown
+  try { parsed = JSON.parse(raw) } catch { return null }
+  if (!parsed || typeof parsed !== 'object') return null
+  const obj = parsed as {
+    activeAgent?: unknown
+    sessions?: unknown
+    agent?: unknown
+    sessionId?: unknown
+    logPath?: unknown
+  }
+
+  const legacy = normalizeAgentSessionRef(obj)
+  if (legacy) {
+    return { activeAgent: legacy.agent, sessions: { [legacy.agent]: legacy } }
+  }
+
+  const out: AgentSessionRefFile = { sessions: {} }
+  if (obj.activeAgent === 'claude' || obj.activeAgent === 'codex') {
+    out.activeAgent = obj.activeAgent
+  }
+  if (obj.sessions && typeof obj.sessions === 'object') {
+    const sessions = obj.sessions as Partial<Record<AgentKind, unknown>>
+    const claude = normalizeAgentSessionRef(sessions.claude)
+    const codex = normalizeAgentSessionRef(sessions.codex)
+    if (claude?.agent === 'claude') out.sessions.claude = claude
+    if (codex?.agent === 'codex') out.sessions.codex = codex
+  }
+  return out.sessions.claude || out.sessions.codex ? out : null
+}
+
+export function selectAgentSessionRef(file: AgentSessionRefFile, preferredAgent?: AgentKind): AgentSessionRef | null {
+  if (preferredAgent && file.sessions[preferredAgent]) return file.sessions[preferredAgent] ?? null
+  if (file.activeAgent && file.sessions[file.activeAgent]) return file.sessions[file.activeAgent] ?? null
+  return file.sessions.codex ?? file.sessions.claude ?? null
+}
+
+function normalizeAgentSessionRef(value: unknown): AgentSessionRef | null {
+  if (!value || typeof value !== 'object') return null
+  const ref = value as { agent?: unknown; sessionId?: unknown; logPath?: unknown }
+  if (ref.agent !== 'claude' && ref.agent !== 'codex') return null
+  if (typeof ref.sessionId !== 'string' || typeof ref.logPath !== 'string') return null
+  return { agent: ref.agent, sessionId: ref.sessionId, logPath: ref.logPath }
+}
 
 // ─── Claude locator ────────────────────────────────────────────────────────
 
@@ -60,6 +110,32 @@ export function locateClaudeSessionLog(
   return fs.existsSync(candidate) ? candidate : null
 }
 
+// Find the newest Claude session for a run directory without requiring a
+// sidecar session id. Older/interrupted runs can lack `agent-session-id.txt`,
+// but Claude still writes JSONL logs under the encoded run directory.
+export function locateLatestClaudeSessionLog(
+  runDir: string,
+  homeDir: string = os.homedir(),
+): AgentSessionRef | null {
+  const encoded = encodeClaudeProjectDir(runDir)
+  const projectDir = path.join(homeDir, '.claude', 'projects', encoded)
+  let best: { logPath: string; sessionId: string; mtimeMs: number } | null = null
+  for (const name of readDirNames(projectDir)) {
+    if (!name.endsWith('.jsonl')) continue
+    const sessionId = name.slice(0, -'.jsonl'.length)
+    if (!sessionId) continue
+    const candidate = path.join(projectDir, name)
+    let stat: fs.Stats
+    try { stat = fs.statSync(candidate) } catch { continue }
+    if (!stat.isFile()) continue
+    if (!best || stat.mtimeMs > best.mtimeMs) {
+      best = { logPath: candidate, sessionId, mtimeMs: stat.mtimeMs }
+    }
+  }
+  if (!best) return null
+  return { agent: 'claude', sessionId: best.sessionId, logPath: best.logPath }
+}
+
 // ─── Codex locator ─────────────────────────────────────────────────────────
 
 interface CodexSessionMeta {
@@ -69,15 +145,16 @@ interface CodexSessionMeta {
 }
 
 // First-line shape: `{ type: 'session_meta', timestamp, payload: { id, cwd, timestamp, ... } }`.
+//
+// Codex 0.130+ embeds the full agent base-instructions prompt inside
+// `payload.base_instructions.text`, which pushes the first JSONL line well
+// past 100 KB. Read in chunks until we hit `\n` (or hit `MAX_FIRST_LINE`)
+// instead of capping at a fixed buffer — a too-small buffer truncates the
+// JSON and makes the locator silently return null for every real session.
 function readCodexSessionMeta(jsonlPath: string): CodexSessionMeta | null {
-  let fd: number | null = null
+  const firstLine = readFirstLine(jsonlPath)
+  if (firstLine === null) return null
   try {
-    fd = fs.openSync(jsonlPath, 'r')
-    const buf = Buffer.alloc(8192)
-    const n = fs.readSync(fd, buf, 0, buf.length, 0)
-    const text = buf.subarray(0, n).toString('utf-8')
-    const nl = text.indexOf('\n')
-    const firstLine = nl >= 0 ? text.slice(0, nl) : text
     const parsed = JSON.parse(firstLine) as {
       type?: string
       payload?: { id?: unknown; cwd?: unknown; timestamp?: unknown }
@@ -86,6 +163,34 @@ function readCodexSessionMeta(jsonlPath: string): CodexSessionMeta | null {
     const { id, cwd, timestamp } = parsed.payload
     if (typeof id !== 'string' || typeof cwd !== 'string' || typeof timestamp !== 'string') return null
     return { id, cwd, timestamp }
+  } catch {
+    return null
+  }
+}
+
+const FIRST_LINE_CHUNK_BYTES = 64 * 1024
+const FIRST_LINE_MAX_BYTES = 2 * 1024 * 1024
+
+function readFirstLine(jsonlPath: string): string | null {
+  let fd: number | null = null
+  try {
+    fd = fs.openSync(jsonlPath, 'r')
+    const chunks: Buffer[] = []
+    let total = 0
+    while (total < FIRST_LINE_MAX_BYTES) {
+      const buf = Buffer.alloc(FIRST_LINE_CHUNK_BYTES)
+      const n = fs.readSync(fd, buf, 0, buf.length, null)
+      if (n === 0) break
+      const slice = buf.subarray(0, n)
+      const nl = slice.indexOf(0x0a)
+      if (nl >= 0) {
+        chunks.push(slice.subarray(0, nl))
+        return Buffer.concat(chunks).toString('utf-8')
+      }
+      chunks.push(slice)
+      total += n
+    }
+    return chunks.length > 0 ? Buffer.concat(chunks).toString('utf-8') : null
   } catch {
     return null
   } finally {
@@ -127,9 +232,7 @@ export function locateCodexSessionLog(
   let best: { logPath: string; sessionId: string; ts: number } | null = null
   for (const { y, m, d } of datesToScan) {
     const dir = path.join(sessionsRoot, y, m, d)
-    let entries: string[]
-    try { entries = fs.readdirSync(dir) } catch { continue }
-    for (const name of entries) {
+    for (const name of readDirNames(dir)) {
       if (!name.endsWith('.jsonl')) continue
       const candidate = path.join(dir, name)
       const meta = readCodexSessionMeta(candidate)
@@ -144,6 +247,90 @@ export function locateCodexSessionLog(
   }
   if (!best) return null
   return { agent: 'codex', sessionId: best.sessionId, logPath: best.logPath }
+}
+
+// Find the newest Codex session for a run directory without requiring a cycle
+// start timestamp. Older/interrupted runs can lack the `agent-session-id.txt`
+// sidecar; Codex's own JSONL session store is the only durable record in that
+// case.
+//
+// Walks YYYY/MM/DD descending and stops at the first day with a cwd match.
+// Bucket dates are zero-padded strings, so reverse-sorted lexical order is
+// also reverse-sorted by date.
+export function locateLatestCodexSessionLog(
+  runDir: string,
+  homeDir: string = os.homedir(),
+): AgentSessionRef | null {
+  const wantedCwd = realpathOrSelf(runDir)
+  const sessionsRoot = path.join(homeDir, '.codex', 'sessions')
+
+  // Codex filenames follow `rollout-<ISO-ts>-<id>.jsonl`, so lex-descending
+  // order matches chronological order. Iterate newest-first and return on the
+  // first cwd match — avoids reading every JSONL's first line when only the
+  // newest one matters.
+  for (const y of readDirNames(sessionsRoot).sort().reverse()) {
+    const yearDir = path.join(sessionsRoot, y)
+    for (const m of readDirNames(yearDir).sort().reverse()) {
+      const monthDir = path.join(yearDir, m)
+      for (const d of readDirNames(monthDir).sort().reverse()) {
+        const dayDir = path.join(monthDir, d)
+        for (const name of readDirNames(dayDir).sort().reverse()) {
+          if (!name.endsWith('.jsonl')) continue
+          const candidate = path.join(dayDir, name)
+          const meta = readCodexSessionMeta(candidate)
+          if (!meta) continue
+          if (realpathOrSelf(meta.cwd) !== wantedCwd) continue
+          if (!Number.isFinite(Date.parse(meta.timestamp))) continue
+          return { agent: 'codex', sessionId: meta.id, logPath: candidate }
+        }
+      }
+    }
+  }
+  return null
+}
+
+function readDirNames(dir: string): string[] {
+  try { return fs.readdirSync(dir) } catch { return [] }
+}
+
+// Dispatch the per-agent "latest session for this run dir" locator. Each
+// agent CLI stores its sessions under a different layout, so the two
+// underlying functions can't share a path; this just selects between them.
+export function locateLatestSessionLogForAgent(
+  agent: AgentKind,
+  runDir: string,
+  homeDir: string = os.homedir(),
+): AgentSessionRef | null {
+  return agent === 'claude'
+    ? locateLatestClaudeSessionLog(runDir, homeDir)
+    : locateLatestCodexSessionLog(runDir, homeDir)
+}
+
+// Pick the agent (claude or codex) whose JSONL session log for this run is
+// most recently modified on disk. Prefer this over the orchestrator-written
+// `agent-session.json` when displaying history: that ref file is only
+// updated when the heal loop cleans up cleanly, so a SIGKILL'd server or a
+// locator miss leaves it pointing at a stale agent even when the other
+// agent's logs are newer.
+//
+// Ties (e.g. only one agent's log exists, or mtimes are equal) prefer
+// claude — that matches the legacy ref file's preference and keeps the
+// display stable for single-agent runs.
+export function locateMostRecentAgentSessionRef(
+  runDir: string,
+  homeDir: string = os.homedir(),
+): AgentSessionRef | null {
+  const claude = locateLatestClaudeSessionLog(runDir, homeDir)
+  const codex = locateLatestCodexSessionLog(runDir, homeDir)
+  const claudeMs = claude ? safeMtimeMs(claude.logPath) : 0
+  const codexMs = codex ? safeMtimeMs(codex.logPath) : 0
+  if (claudeMs === 0 && codexMs === 0) return null
+  if (codexMs > claudeMs) return codex
+  return claude ?? codex
+}
+
+function safeMtimeMs(p: string): number {
+  try { return fs.statSync(p).mtimeMs } catch { return 0 }
 }
 
 // ─── Reader / normalizer ───────────────────────────────────────────────────
@@ -164,6 +351,45 @@ export function loadAgentSessionLog(ref: AgentSessionRef): AgentEvent[] {
     }
   }
   return events
+}
+
+export function renderAgentSessionContext(ref: AgentSessionRef, maxChars = 12_000): string {
+  const events = loadAgentSessionLog(ref)
+  if (events.length === 0) return ''
+
+  const lines: string[] = [
+    `Previous ${ref.agent} session ${ref.sessionId}:`,
+  ]
+  for (const event of events) {
+    const text = renderAgentEventLine(event)
+    if (!text) continue
+    lines.push(text)
+  }
+  const rendered = lines.join('\n')
+  if (rendered.length <= maxChars) return rendered
+  return `${rendered.slice(0, maxChars)}\n[Previous session context truncated]`
+}
+
+function renderAgentEventLine(event: AgentEvent): string {
+  const prefix = event.timestamp ? `[${event.timestamp}] ` : ''
+  if (event.kind === 'user-message') return `${prefix}USER: ${compactText(event.text)}`
+  if (event.kind === 'assistant-message') return `${prefix}ASSISTANT: ${compactText(event.text)}`
+  if (event.kind === 'assistant-thinking') return `${prefix}THINKING: ${compactText(event.text)}`
+  if (event.kind === 'tool-call') {
+    const input = JSON.stringify(event.input)
+    return `${prefix}TOOL CALL ${event.name}: ${compactText(input)}`
+  }
+  if (event.kind === 'tool-result') {
+    const marker = event.isError ? ' ERROR' : ''
+    return `${prefix}TOOL RESULT${marker}: ${compactText(event.output)}`
+  }
+  return ''
+}
+
+function compactText(text: string, max = 1_200): string {
+  const compact = text.replace(/\s+/g, ' ').trim()
+  if (compact.length <= max) return compact
+  return `${compact.slice(0, max)}...`
 }
 
 // ─── Claude normalization ──────────────────────────────────────────────────
