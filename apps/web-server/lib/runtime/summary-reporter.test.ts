@@ -163,6 +163,50 @@ describe('SummaryReporter', () => {
     expect(readSummary().running).toBeUndefined()
   })
 
+  it('tolerates malformed existing summaries during a targeted rerun seed', () => {
+    // Exercises the defensive validation inside seedFromExistingSummary —
+    // non-array fields, non-string / empty / duplicate names, failed
+    // entries without a name. The reporter must absorb all of these
+    // without throwing and produce a clean baseline summary.
+    process.env.CANARY_LAB_TARGETED_RERUN = '1'
+    fs.mkdirSync(LOGS_DIR, { recursive: true })
+    fs.writeFileSync(
+      path.join(LOGS_DIR, 'e2e-summary.json'),
+      JSON.stringify({
+        passedNames: 'not-an-array',
+        skippedNames: [null, 123, '', 'test-case-skipped-once', 'test-case-skipped-once'],
+        failed: [
+          null,
+          'string-entry',
+          { error: { message: 'no-name' } },
+          { name: 'test-case-keep-me', error: { message: 'real' }, durationMs: 5, retry: 1, logFiles: ['ok.log', 42] },
+          { name: 'test-case-keep-me', error: { message: 'dup' } },
+        ],
+      }),
+    )
+
+    const reporter = new SummaryReporter()
+    reporter.onTestBegin(mkTest('Brand new test', '/specs/new.spec.ts', 3))
+
+    const out = readSummary()
+    expect(out.failed.map((f) => f.name)).toEqual(['test-case-keep-me'])
+    expect(out.skippedNames).toEqual(['test-case-skipped-once'])
+    expect(out.passedNames).toEqual([])
+  })
+
+  it('skips the existing-summary seed when the file parses to a non-object value', () => {
+    // Exercises the `!parsed || typeof parsed !== 'object'` truthy arm —
+    // a bare JSON literal (number) parses successfully but isn't a record.
+    process.env.CANARY_LAB_TARGETED_RERUN = '1'
+    fs.mkdirSync(LOGS_DIR, { recursive: true })
+    fs.writeFileSync(path.join(LOGS_DIR, 'e2e-summary.json'), '123')
+
+    const reporter = new SummaryReporter()
+    reporter.onTestBegin(mkTest('Fresh', '/specs/fresh.spec.ts', 1))
+
+    expect(readSummary().failed).toEqual([])
+  })
+
   it('preserves existing results while a targeted rerun is running', () => {
     process.env.CANARY_LAB_TARGETED_RERUN = '1'
     fs.mkdirSync(LOGS_DIR, { recursive: true })
@@ -654,6 +698,21 @@ describe('SummaryReporter', () => {
       durationMs: 42,
       location: '/spec.ts:1',
       retry: 0,
+    })
+  })
+
+  it('keeps skipped tests out of failed results', () => {
+    const reporter = new SummaryReporter()
+    reporter.onTestEnd(mkTest('Skipped branch'), mkResult({ status: 'skipped' }))
+
+    expect(readSummary()).toEqual({
+      complete: false,
+      total: 1,
+      passed: 0,
+      passedNames: [],
+      skipped: 1,
+      skippedNames: ['test-case-skipped-branch'],
+      failed: [],
     })
   })
 

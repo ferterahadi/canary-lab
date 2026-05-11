@@ -1,6 +1,15 @@
 import { describe, it, expect, vi } from 'vitest'
 import { resolveOpenCommand, openBrowser } from './open-browser'
 
+// Replace the real child_process.spawn shim so tests that exercise the
+// `opts.spawner ?? defaultOpenBrowserSpawner` fallback arm don't actually
+// launch a browser. Tests that pass an explicit spawner are unaffected.
+vi.mock('./open-browser-spawner', () => ({
+  defaultOpenBrowserSpawner: vi.fn(() => {
+    throw new Error('default spawner stubbed in tests')
+  }),
+}))
+
 describe('resolveOpenCommand', () => {
   it('uses `open` on darwin', () => {
     expect(resolveOpenCommand('http://x', 'darwin')).toEqual({
@@ -77,5 +86,13 @@ describe('openBrowser', () => {
     // We can't assert which command without knowing the runtime, but the
     // call happened — meaning the default platform path executed.
     expect(spawner).toHaveBeenCalledOnce()
+  })
+
+  it('falls back to defaultOpenBrowserSpawner when opts.spawner is omitted', () => {
+    // The default spawner is mocked at the top of this file to throw, so we
+    // expect openBrowser to swallow it and return false. The point of the
+    // test is to exercise the `opts.spawner ?? defaultOpenBrowserSpawner`
+    // nullish arm — explicit-spawner tests above only exercise the truthy arm.
+    expect(openBrowser('http://x', { platform: 'linux' })).toBe(false)
   })
 })

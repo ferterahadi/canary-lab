@@ -17,6 +17,7 @@ import {
   playbackTests,
   type PlaybackTest,
 } from '../lib/run-detail-playback'
+import { statusFromPlaybackResult, statusLabel, statusPillClassForStatus } from '../lib/test-step-status'
 import { useRun } from '../state/RunsContext'
 import { RunStatusIndicator } from './RunStatusIndicator'
 import { PaneTerminal } from './PaneTerminal'
@@ -588,11 +589,13 @@ function BrowserActions({ steps }: { steps: PlaybackTest['steps'] }) {
 }
 
 function StatusPill({ passed, status }: { passed?: boolean; status?: string }) {
-  const label = status ?? (passed ? 'passed' : 'running')
-  const color = passed === true ? '#22c55e' : passed === false ? '#ef4444' : '#eab308'
+  const displayStatus = statusFromPlaybackResult({ status, passed })
   return (
-    <span className="shrink-0 rounded px-1.5 py-0.5 text-[10px] uppercase" style={{ color, background: 'var(--bg-selected)' }}>
-      {label}
+    <span
+      className={`shrink-0 rounded border px-1.5 py-0.5 text-[10px] uppercase tracking-wide ${statusPillClassForStatus(displayStatus)}`}
+      style={{ fontFamily: 'var(--font-mono)' }}
+    >
+      {statusLabel(displayStatus)}
     </span>
   )
 }

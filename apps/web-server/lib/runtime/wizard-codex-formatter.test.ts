@@ -45,6 +45,12 @@ describe('wizard codex formatter', () => {
     expect(parseInspectionCommand('ls apps/web')).toEqual({ kind: 'List', label: 'apps/web' })
     expect(parseInspectionCommand('find apps -name "*.ts"')?.kind).toBe('Glob')
     expect(parseInspectionCommand('rg "secret" apps')?.kind).toBe('Grep')
+    // `test -f file && actual-command` guard prefix (line 73-74) and the
+    // sed-pattern slice form (line 82-85). Both arms had zero hits.
+    expect(parseInspectionCommand('test -f apps/web/server.ts && cat apps/web/server.ts'))
+      .toEqual({ kind: 'Read', label: 'apps/web/server.ts' })
+    expect(parseInspectionCommand("sed -n '/start/,/end/p' apps/web/server.ts"))
+      .toEqual({ kind: 'Read', label: 'apps/web/server.ts (pattern slice)' })
     expect(parseReadCommand('npm test')).toBeNull()
     expect(inspectionSummary('Read', 'abc')).toBe('Number of characters: 3')
     expect(inspectionSummary('List', 'a\nb\n')).toBe('Number of files: 2')

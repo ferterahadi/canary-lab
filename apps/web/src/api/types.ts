@@ -124,6 +124,8 @@ export interface RunSummary {
   total: number
   passed: number
   passedNames?: string[]
+  skipped?: number
+  skippedNames?: string[]
   running?: { name: string; location: string; step?: RunSummaryRunningStep }
   failed: RunSummaryFailedEntry[]
 }

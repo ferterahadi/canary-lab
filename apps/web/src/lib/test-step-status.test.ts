@@ -4,6 +4,7 @@ import {
   slugify,
   summaryEntryName,
   statusForTest,
+  statusFromPlaybackResult,
   colorClassForStatus,
   statusLabel,
   statusPillClassForStatus,
@@ -109,6 +110,18 @@ describe('statusForTest', () => {
     expect(statusForTest('Creates a TODO', summary)).toBe('passed')
     expect(statusForTest('Other test', summary)).toBe('pending')
   })
+
+  it('uses skippedNames to distinguish skipped vs failed', () => {
+    const summary: RunSummary = {
+      complete: false,
+      total: 1,
+      passed: 0,
+      failed: [],
+      skipped: 1,
+      skippedNames: ['test-case-creates-a-todo'],
+    }
+    expect(statusForTest('Creates a TODO', summary)).toBe('skipped')
+  })
 })
 
 describe('colorClassForStatus', () => {
@@ -156,11 +169,25 @@ describe('statusPillClassForStatus', () => {
 describe('statusLabel', () => {
   it('maps runtime names to user-facing chip labels', () => {
     expect(statusLabel('testing')).toBe('running')
-    expect(statusLabel('passed')).toBe('succeed')
+    expect(statusLabel('passed')).toBe('passed')
     expect(statusLabel('failed')).toBe('failed')
-    expect(statusLabel('timedout')).toBe('timedout')
+    expect(statusLabel('timedout')).toBe('timed out')
     expect(statusLabel('pending')).toBe('pending')
     expect(statusLabel('skipped')).toBe('skipped')
+  })
+})
+
+describe('statusFromPlaybackResult', () => {
+  it.each([
+    [{ status: 'passed', passed: true }, 'passed'],
+    [{ status: 'failed', passed: false }, 'failed'],
+    [{ status: 'skipped', passed: false }, 'skipped'],
+    [{ status: 'timedOut', passed: false }, 'timedout'],
+    [{ passed: false }, 'failed'],
+    [{ passed: true }, 'passed'],
+    [{}, 'testing'],
+  ] as const)('normalizes playback result %#', (input, expected) => {
+    expect(statusFromPlaybackResult(input)).toBe(expected)
   })
 })
 
@@ -273,6 +300,29 @@ describe('activeBodyLineForTest', () => {
           name: 'test-case-creates-a-todo',
           location: '/todo.spec.ts',
           step: { title: 'setup', category: 'fixture', location: '/todo.spec.ts' },
+        },
+      },
+    })).toBeNull()
+  })
+
+  it('returns null when the location matches but the line number overflows to Infinity', () => {
+    // Exercise the `Number.isFinite(line) ? line : null` falsy arm in
+    // lineFromLocation — only reachable when the regex captures a digit
+    // string so long that Number() rounds it to Infinity.
+    const hugeLine = '1' + '0'.repeat(400)
+    expect(activeBodyLineForTest({
+      testName: 'Creates a TODO',
+      testLine: 10,
+      bodySource: '{\n  await page.goto(\"/\")\n}',
+      summary: {
+        complete: false,
+        total: 0,
+        passed: 0,
+        failed: [],
+        running: {
+          name: 'test-case-creates-a-todo',
+          location: '/todo.spec.ts',
+          step: { title: 'step', category: 'test.step', location: `/todo.spec.ts:${hugeLine}` },
         },
       },
     })).toBeNull()

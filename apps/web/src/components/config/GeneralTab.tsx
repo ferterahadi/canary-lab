@@ -17,7 +17,7 @@ function asOptionalNumber(v: ConfigValue | undefined): number | undefined {
   return typeof v === 'number' ? v : undefined
 }
 
-export function GeneralTab({ feature }: { feature: string }) {
+export function GeneralTab({ feature, onFeatureRenamed }: { feature: string; onFeatureRenamed?: (nextFeature: string) => void }) {
   const ed = useEditableSlice<ParsedConfigDoc, Slice>({
     load: () => api.getFeatureConfigDoc(feature),
     extract: (doc) => {
@@ -42,7 +42,13 @@ export function GeneralTab({ feature }: { feature: string }) {
       }
       return next
     },
-    save: (payload) => api.putFeatureConfigDoc(feature, payload as ConfigValue),
+    save: async (payload) => {
+      const next = await api.putFeatureConfigDoc(feature, payload as ConfigValue)
+      const nextValue = (next.parsed.value ?? {}) as { [k: string]: ConfigValue }
+      const nextName = asString(nextValue.name)
+      if (nextName && nextName !== feature) onFeatureRenamed?.(nextName)
+      return next
+    },
     deps: [feature],
   })
 

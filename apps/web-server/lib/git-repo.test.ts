@@ -6,11 +6,14 @@ import path from 'path'
 import {
   checkoutBranch,
   collectRepoBranchSnapshots,
+  diffContentSinceSnapshot,
+  diffNamesSinceSnapshot,
   findRepo,
   getGitStatus,
   parsePorcelainStatus,
   parseRefList,
   resolveRepoPath,
+  snapshotWorkingTree,
   validateConfiguredRepoBranches,
 } from './git-repo'
 
@@ -195,5 +198,112 @@ describe('git-repo helpers', () => {
     expect(findRepo(feature, 'app')).toEqual({ name: 'app', localPath: '/tmp/app' })
     expect(findRepo(feature, 'missing')).toBeNull()
     expect(findRepo({ ...feature, repos: undefined }, 'app')).toBeNull()
+  })
+
+  describe('snapshotWorkingTree + diffNamesSinceSnapshot', () => {
+    it('returns null for non-git and missing paths', async () => {
+      const plainDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-plain-snap-'))
+      expect(await snapshotWorkingTree(plainDir)).toBeNull()
+      expect(await snapshotWorkingTree(path.join(os.tmpdir(), 'cl-missing-snap-xyz'))).toBeNull()
+    })
+
+    it('returns null when git stash create fails (e.g. zero-commit repo with no HEAD)', async () => {
+      // Exercises the `if (stash.code !== 0) return null` arm — stash create
+      // needs a HEAD ref, which doesn't exist in a brand-new repo.
+      const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-git-empty-')))
+      execFileSync('git', ['init', '-b', 'main'], { cwd: dir, stdio: 'ignore' })
+      expect(await snapshotWorkingTree(dir)).toBeNull()
+    })
+
+    it('returns HEAD for a clean working tree (stash create produces no SHA)', async () => {
+      const repo = tmpRepo()
+      expect(await snapshotWorkingTree(repo)).toBe('HEAD')
+    })
+
+    it('returns a non-empty SHA for a dirty working tree', async () => {
+      const repo = tmpRepo()
+      fs.writeFileSync(path.join(repo, 'README.md'), 'edited\n')
+      const ref = await snapshotWorkingTree(repo)
+      expect(ref).not.toBeNull()
+      expect(ref).not.toBe('HEAD')
+      // git stash create prints a hex commit SHA (≥ 7 chars, typically 40).
+      expect(ref).toMatch(/^[0-9a-f]{7,}$/)
+    })
+
+    it('diffs only what changed between snapshot and now (clean baseline)', async () => {
+      const repo = tmpRepo()
+      const ref = await snapshotWorkingTree(repo)
+      expect(ref).toBe('HEAD')
+      fs.writeFileSync(path.join(repo, 'README.md'), 'after\n')
+      const changed = await diffNamesSinceSnapshot(repo, ref!)
+      expect(changed).toEqual(['README.md'])
+    })
+
+    it('isolates the agent edit window from pre-existing dirty state', async () => {
+      // Pre-existing dirty file on a tracked path (the user's WIP before heal
+      // started). The runner should NOT log this as an agent-edited file.
+      const repo = tmpRepo()
+      execFileSync('git', ['checkout', '-b', 'work'], { cwd: repo, stdio: 'ignore' })
+      // Commit a second tracked file so we have two tracked targets.
+      fs.writeFileSync(path.join(repo, 'app.ts'), 'export const x = 1\n')
+      execFileSync('git', ['add', 'app.ts'], { cwd: repo })
+      execFileSync('git', ['commit', '-m', 'add app'], { cwd: repo, stdio: 'ignore' })
+      // Dirty README BEFORE the snapshot — this is pre-existing state.
+      fs.writeFileSync(path.join(repo, 'README.md'), 'pre-existing dirty\n')
+
+      const ref = await snapshotWorkingTree(repo)
+      expect(ref).not.toBeNull()
+      expect(ref).not.toBe('HEAD')
+
+      // "Agent" turn: only edits app.ts.
+      fs.writeFileSync(path.join(repo, 'app.ts'), 'export const x = 2\n')
+
+      const changed = await diffNamesSinceSnapshot(repo, ref!)
+      expect(changed).toEqual(['app.ts'])
+      expect(changed).not.toContain('README.md')
+    })
+
+    it('returns an empty array when nothing changed during the agent turn', async () => {
+      const repo = tmpRepo()
+      const ref = await snapshotWorkingTree(repo)
+      expect(await diffNamesSinceSnapshot(repo, ref!)).toEqual([])
+    })
+
+    it('omits untracked files (no -u on stash create)', async () => {
+      const repo = tmpRepo()
+      const ref = await snapshotWorkingTree(repo)
+      // Untracked file created during the "agent" turn.
+      fs.writeFileSync(path.join(repo, 'scratch.tmp'), 'build artifact\n')
+      const changed = await diffNamesSinceSnapshot(repo, ref!)
+      expect(changed).not.toContain('scratch.tmp')
+    })
+
+    it('diffNamesSinceSnapshot returns [] on a non-git path', async () => {
+      const plainDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-plain-diff-'))
+      expect(await diffNamesSinceSnapshot(plainDir, 'HEAD')).toEqual([])
+    })
+  })
+
+  describe('diffContentSinceSnapshot', () => {
+    it('returns unified-diff content for files edited after snapshot', async () => {
+      const repo = tmpRepo()
+      const ref = await snapshotWorkingTree(repo)
+      fs.writeFileSync(path.join(repo, 'README.md'), 'after\n')
+      const diff = await diffContentSinceSnapshot(repo, ref!)
+      expect(diff).toMatch(/^diff --git a\/README\.md b\/README\.md/m)
+      expect(diff).toMatch(/^-hello$/m)
+      expect(diff).toMatch(/^\+after$/m)
+    })
+
+    it('returns empty string when nothing changed during the agent turn', async () => {
+      const repo = tmpRepo()
+      const ref = await snapshotWorkingTree(repo)
+      expect(await diffContentSinceSnapshot(repo, ref!)).toBe('')
+    })
+
+    it('returns empty string on a non-git path', async () => {
+      const plainDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-plain-diff-content-'))
+      expect(await diffContentSinceSnapshot(plainDir, 'HEAD')).toBe('')
+    })
   })
 })

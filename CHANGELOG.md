@@ -2,6 +2,26 @@
 
 All notable changes to Canary Lab are listed here. We try to keep the language plain so anyone can follow along.
 
+## 1.0.1 — 2026-05-11
+
+> Re-run `npx canary-lab upgrade` to refresh the managed `CLAUDE.md` / `AGENTS.md` heal block — the heal signal body changed shape (see Breaking changes).
+
+### Added
+
+- **Heal cycles now show a real diff.** Before each heal attempt, Canary Lab snapshots your repo, then captures exactly what the agent changed — no more confusion from unrelated dirty files.
+- **Diff appears in the diagnosis journal.** Every heal iteration in the journal now ends with a diff block showing what was edited that cycle.
+
+### Changed
+
+- **Resizable panels handle window resizes properly.** No more drift or clipping when you resize the window.
+- **Renaming a feature just works.** The list refreshes, your selection follows the new name, and the editor stays open on it.
+- **Tidier journal display.** Internal bookkeeping fields are hidden; `fix.file` / `fix.description` show as `files` / `fix description`.
+
+### Breaking changes
+
+- **Heal signal payload changed.** The `.restart` / `.rerun` body is now `{"hypothesis":"…","fixDescription":"…"}` — `filesChanged` is gone (Canary Lab detects edits from the git snapshot). The built-in heal prompt is already updated; custom prompts need to drop `filesChanged` and add `fixDescription`.
+- **Heal agents no longer touch prior-iteration outcomes.** The runner handles that bookkeeping itself.
+
 ## 1.0.0 — 2026-04-30
 
 > The headline change: Canary Lab is now driven from a local web UI (`canary-lab ui`) instead of a stack of iTerm tabs. Run `npx canary-lab upgrade` after upgrading to refresh the managed `CLAUDE.md` / `AGENTS.md` blocks.

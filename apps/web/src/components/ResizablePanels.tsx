@@ -12,6 +12,7 @@ export interface PanelConfig {
 }
 
 const STORAGE_KEY = 'canary-lab.panel-widths'
+const HANDLE_WIDTH = 4
 
 function loadWidths(panels: PanelConfig[]): number[] {
   try {
@@ -38,23 +39,39 @@ function saveWidths(panels: PanelConfig[], widths: number[]): void {
 export function ResizablePanels({ panels }: { panels: PanelConfig[] }) {
   const [widths, setWidths] = useState<number[]>(() => loadWidths(panels))
   const [collapsed, setCollapsed] = useState<boolean[]>(() => panels.map(() => false))
+  const [containerWidth, setContainerWidth] = useState(0)
   const containerRef = useRef<HTMLDivElement>(null)
   const dragRef = useRef<{ index: number; startX: number; startWidths: number[] } | null>(null)
   const [dragging, setDragging] = useState<number | null>(null)
+  const displayWidths = computePanelWidths(panels, widths, collapsed, containerWidth)
 
   useEffect(() => {
     saveWidths(panels, widths)
   }, [panels, widths])
+
+  useEffect(() => {
+    const node = containerRef.current
+    if (!node) return
+    const measure = (): void => setContainerWidth(node.getBoundingClientRect().width)
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(node)
+    window.addEventListener('resize', measure)
+    return () => {
+      observer.disconnect()
+      window.removeEventListener('resize', measure)
+    }
+  }, [])
 
   const onMouseDown = useCallback((handleIndex: number, e: React.MouseEvent) => {
     e.preventDefault()
     dragRef.current = {
       index: handleIndex,
       startX: e.clientX,
-      startWidths: [...widths],
+      startWidths: [...displayWidths],
     }
     setDragging(handleIndex)
-  }, [widths])
+  }, [displayWidths])
 
   useEffect(() => {
     const onMouseMove = (e: MouseEvent): void => {
@@ -110,8 +127,6 @@ export function ResizablePanels({ panels }: { panels: PanelConfig[] }) {
     })
   }, [])
 
-  const totalHandleWidth = (panels.length - 1) * 4
-
   return (
     <div
       ref={containerRef}
@@ -121,16 +136,14 @@ export function ResizablePanels({ panels }: { panels: PanelConfig[] }) {
       {panels.map((panel, i) => {
         const isCollapsed = collapsed[i]
         const isLast = i === panels.length - 1
-        const panelWidth = isCollapsed ? 0 : widths[i]
+        const panelWidth = displayWidths[i] ?? (isCollapsed ? 0 : widths[i])
 
         return (
           <div key={panel.id} className="contents">
             <div
               className="shrink-0 overflow-hidden transition-[width] duration-200"
               style={{
-                width: isCollapsed ? 0 : isLast
-                  ? `calc(100% - ${widths.slice(0, -1).reduce((a, b, idx) => a + (collapsed[idx] ? 0 : b), 0) + totalHandleWidth}px)`
-                  : `${panelWidth}px`,
+                width: isCollapsed ? 0 : `${panelWidth}px`,
                 minWidth: isCollapsed ? 0 : undefined,
               }}
             >
@@ -167,4 +180,37 @@ export function ResizablePanels({ panels }: { panels: PanelConfig[] }) {
       })}
     </div>
   )
+}
+
+export function computePanelWidths(
+  panels: Pick<PanelConfig, 'minWidth'>[],
+  widths: number[],
+  collapsed: boolean[],
+  containerWidth: number,
+): number[] {
+  if (!Number.isFinite(containerWidth) || containerWidth <= 0) {
+    return panels.map((panel, index) => collapsed[index] ? 0 : widths[index] ?? panel.minWidth)
+  }
+
+  const totalHandleWidth = Math.max(0, panels.length - 1) * HANDLE_WIDTH
+  let remaining = Math.max(0, containerWidth - totalHandleWidth)
+  const minimums = panels.map((panel, index) => collapsed[index] ? 0 : panel.minWidth)
+  const resolved: number[] = []
+
+  for (let index = 0; index < panels.length; index++) {
+    const minWidth = minimums[index]
+    if (index === panels.length - 1) {
+      resolved[index] = collapsed[index] ? 0 : Math.max(minWidth, remaining)
+      break
+    }
+
+    const laterMin = minimums.slice(index + 1).reduce((sum, value) => sum + value, 0)
+    const maxWidth = Math.max(minWidth, remaining - laterMin)
+    const desired = collapsed[index] ? 0 : widths[index] ?? panels[index].minWidth
+    const nextWidth = Math.min(Math.max(desired, minWidth), maxWidth)
+    resolved[index] = nextWidth
+    remaining -= nextWidth
+  }
+
+  return resolved
 }
