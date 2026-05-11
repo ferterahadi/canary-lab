@@ -227,6 +227,25 @@ interface JournalEntry {
   failingTests?: string
 }
 
+// Hard cap on the size of the unified-diff content written per iteration.
+// Keeps `diagnosis-journal.md` readable and bounds the heal agent's context
+// when it reads prior cycles. Larger diffs get truncated with a trailing
+// marker line so the heal agent knows content is missing. Tune in one place.
+export const MAX_JOURNAL_DIFF_BYTES = 8192
+
+export function truncateDiffForJournal(text: string, max = MAX_JOURNAL_DIFF_BYTES): string {
+  const byteLen = Buffer.byteLength(text, 'utf-8')
+  if (byteLen <= max) return text
+  // Slice by bytes to avoid splitting a multibyte rune across the boundary.
+  const buf = Buffer.from(text, 'utf-8')
+  const head = buf.subarray(0, max).toString('utf-8')
+  // Trim any incomplete trailing partial line for readability.
+  const lastNewline = head.lastIndexOf('\n')
+  const safeHead = lastNewline > 0 ? head.slice(0, lastNewline) : head
+  const remaining = byteLen - Buffer.byteLength(safeHead, 'utf-8')
+  return `${safeHead}\n... (truncated, ${remaining} more bytes)`
+}
+
 // Parse the Markdown journal format:
 //
 //   ## Iteration 1 — 2026-04-22T01:20:11Z
@@ -249,7 +268,7 @@ export function parseJournalMarkdown(raw: string): JournalEntry[] {
   let current: JournalEntry | null = null
 
   for (const line of lines) {
-    const heading = headingRe.exec(line)
+    const heading = line.match(headingRe)
     if (heading) {
       if (current) entries.push(current)
       current = {
@@ -259,7 +278,7 @@ export function parseJournalMarkdown(raw: string): JournalEntry[] {
       continue
     }
     if (!current) continue
-    const field = fieldRe.exec(line)
+    const field = line.match(fieldRe)
     if (!field) continue
     const key = field[1]
     const value = field[2].trim()
@@ -446,6 +465,10 @@ export interface JournalAppendInput {
   hypothesis?: string
   filesChanged?: string[]
   fixDescription?: string
+  // Unified-diff content (concatenated across the feature's repos) for the
+  // agent's edit window. Written into a `### Diff` subsection beneath the
+  // structured fields; truncated to MAX_JOURNAL_DIFF_BYTES on write.
+  diffContent?: string
   runId?: string
   // When provided, overrides the global manifest/summary lookup so the
   // orchestrator can append from a per-run dir without the runner-side
@@ -610,6 +633,20 @@ export function appendJournalIteration(input: JournalAppendInput): void {
   section.push(`- signal: ${input.signal}`)
   section.push('- outcome: pending')
   section.push('')
+
+  // Diff content lives in its own subsection — a `- fix.diff:` field line
+  // can't carry multi-line content without breaking the per-line field
+  // parser. The fenced block is `diff`-tagged so editors and the agent both
+  // get syntax cues.
+  const diffContent = input.diffContent?.trim()
+  if (diffContent) {
+    section.push('### Diff')
+    section.push('')
+    section.push('```diff')
+    section.push(truncateDiffForJournal(diffContent))
+    section.push('```')
+    section.push('')
+  }
 
   fs.mkdirSync(path.dirname(journalPath), { recursive: true })
   const header = fs.existsSync(journalPath)

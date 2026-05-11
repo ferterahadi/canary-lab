@@ -5,6 +5,8 @@ import {
   parseBodyFields,
   classifyOutcome,
   outcomeBadgeClass,
+  formatJournalFieldKey,
+  presentJournalFields,
 } from './journal-utils'
 import type { JournalEntry } from '../api/types'
 
@@ -117,5 +119,67 @@ describe('outcomeBadgeClass', () => {
       seen.add(cls)
     }
     expect(seen.size).toBe(outcomes.length)
+  })
+})
+
+describe('formatJournalFieldKey', () => {
+  it('hides plumbing fields the human does not need', () => {
+    expect(formatJournalFieldKey('run')).toBeNull()
+    expect(formatJournalFieldKey('feature')).toBeNull()
+    expect(formatJournalFieldKey('failingTests')).toBeNull()
+  })
+
+  it('renames dotted fields to readable labels', () => {
+    expect(formatJournalFieldKey('fix.description')).toBe('fix description')
+    expect(formatJournalFieldKey('fix.file')).toBe('files')
+  })
+
+  it('passes through other displayed fields unchanged', () => {
+    expect(formatJournalFieldKey('hypothesis')).toBe('hypothesis')
+    expect(formatJournalFieldKey('signal')).toBe('signal')
+    expect(formatJournalFieldKey('outcome')).toBe('outcome')
+  })
+
+  it('shows unknown fields by default (no silent disappearance)', () => {
+    expect(formatJournalFieldKey('something-new')).toBe('something-new')
+  })
+})
+
+describe('presentJournalFields', () => {
+  it('filters out hidden fields and renames the rest, preserving order', () => {
+    const parsed = [
+      { key: 'run', value: '2026-05-11T0230-v0c3' },
+      { key: 'feature', value: 'demo' },
+      { key: 'failingTests', value: 'test-case-x' },
+      { key: 'hypothesis', value: 'guard returns early' },
+      { key: 'fix.file', value: '/repo/a.ts, /repo/b.ts' },
+      { key: 'fix.description', value: 'added bounds check' },
+      { key: 'signal', value: '.restart' },
+      { key: 'outcome', value: 'pending' },
+    ]
+    expect(presentJournalFields(parsed)).toEqual([
+      { key: 'hypothesis', value: 'guard returns early' },
+      { key: 'files', value: '/repo/a.ts, /repo/b.ts' },
+      { key: 'fix description', value: 'added bounds check' },
+      { key: 'signal', value: '.restart' },
+      { key: 'outcome', value: 'pending' },
+    ])
+  })
+
+  it('keeps unknown fields with their original key', () => {
+    const parsed = [
+      { key: 'run', value: 'r1' },
+      { key: 'mystery', value: 'v' },
+    ]
+    expect(presentJournalFields(parsed)).toEqual([
+      { key: 'mystery', value: 'v' },
+    ])
+  })
+
+  it('returns an empty list when every field is hidden', () => {
+    expect(presentJournalFields([
+      { key: 'run', value: 'r1' },
+      { key: 'feature', value: 'demo' },
+    ])).toEqual([])
   })
 })
