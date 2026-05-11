@@ -24,9 +24,22 @@ import {
 import { FileRunStateSink, type RunStateSink } from './run-state-sink'
 import type { PtyFactory, PtyHandle } from './pty-spawner'
 import { HealCycleState, AUTO_HEAL_MAX_CYCLES } from './heal-cycle'
-import { readPriorSessionId } from './auto-heal'
+import {
+  readPriorSessionId,
+  readPriorSessionIdFromValue,
+  type BuildHealCyclePrompt,
+  type BuildHealCyclePromptArgs,
+} from './auto-heal'
 import { appendJournalIteration } from './log-enrichment'
-import { locateClaudeSessionLog, locateCodexSessionLog } from '../agent-session-log'
+import {
+  locateClaudeSessionLog,
+  locateCodexSessionLog,
+  locateLatestSessionLogForAgent,
+  parseAgentSessionRefFile,
+  renderAgentSessionContext,
+  type AgentSessionRef,
+  type AgentSessionRefFile,
+} from '../agent-session-log'
 import type { RunnerLog } from './runner-log'
 import {
   resolveMcpOutputDir,
@@ -163,7 +176,7 @@ export interface AutoHealConfig {
   // flags. Production wires `buildAgentSpawnCommand` from auto-heal.ts; tests
   // pass a no-op script that stays alive (e.g. `cat`). The orchestrator
   // either reuses the prior session id from `<runDir>/agent-session-id.txt`
-  // (setting `resume: true`) or generates a fresh UUID, computes
+  // (setting `resume: true`) or, for claude, generates a fresh UUID, computes
   // `mcpOutputDir`, and passes the path to the cycle-1 prompt file
   // (`<runDir>/heal-prompt.md`); the production builder appends
   // `"@<promptFile>"` as a positional arg so claude reads the file at
@@ -179,7 +192,7 @@ export interface AutoHealConfig {
   // Production wires `buildOrchestratorHealPrompt`; tests pass a stub that
   // returns a deterministic string. The orchestrator pty.write()s the result
   // followed by a newline.
-  buildCyclePrompt?: (args: { cycle: number; outputDir: string; userGuidance?: string }) => string
+  buildCyclePrompt?: BuildHealCyclePrompt
 }
 
 export interface PlaywrightInvocation {
@@ -294,6 +307,14 @@ export class RunOrchestrator extends EventEmitter {
   // (codex has no `--session-id` flag, so we discover the session by
   // matching `cwd === runDir` and `session_meta.timestamp >= here`).
   private healAgentStartedAt: string | null = null
+  // Last dimensions reported by the browser's agent pane. The pane can mount
+  // before auto-heal spawns the REPL, so keep the size and apply it at spawn.
+  private healAgentTerminalSize: { cols: number; rows: number } | null = null
+  // In-memory mirror of `paths.agentSessionRefPath`. `undefined` means we
+  // haven't read disk yet; `null` means we read and the file is missing or
+  // invalid. The orchestrator is the only writer, so once seeded we trust the
+  // cache and update it in lockstep with writeAgentSessionRef.
+  private cachedRefFile: AgentSessionRefFile | null | undefined = undefined
   // Set by cancelHeal() so the heal loop in runFullCycle bails out instead of
   // racing toward another Playwright rerun.
   private healCancelled = false
@@ -830,22 +851,25 @@ export class RunOrchestrator extends EventEmitter {
   }
 
   /**
-   * Push the user's xterm dimensions into the heal-agent pty so claude's
-   * TUI redraws at the correct width. Without this, the pty stays at its
-   * spawn-time defaults (120×30) and claude wraps box-drawing / status
-   * bars to whatever it thinks the terminal is, not what the pane is.
+   * Push the user's xterm dimensions into the heal-agent pty so the agent TUI
+   * redraws at the correct width. Without this, the pty stays at its spawn-time
+   * defaults (120×30) and wraps box-drawing / status bars to whatever it thinks
+   * the terminal is, not what the pane is.
    *
-   * No-op when no agent pty is in flight, or when cols/rows are nonsense.
+   * Invalid dimensions are ignored. Valid dimensions are remembered even when
+   * no agent pty is in flight, because the pane can report its size before the
+   * REPL spawns.
    */
   resizeHealAgent(cols: number, rows: number): void {
-    const pty = this.healAgentPty
-    if (!pty) return
     if (!Number.isFinite(cols) || !Number.isFinite(rows)) return
     if (cols < 1 || rows < 1) return
-    // Cap at sane upper bounds — node-pty accepts huge values but claude's
-    // renderer can chew CPU on absurd sizes (e.g., 100k cols).
+    // Cap at sane upper bounds — node-pty accepts huge values but agent
+    // renderers can chew CPU on absurd sizes (e.g., 100k cols).
     const c = Math.min(Math.floor(cols), 1000)
     const r = Math.min(Math.floor(rows), 1000)
+    this.healAgentTerminalSize = { cols: c, rows: r }
+    const pty = this.healAgentPty
+    if (!pty) return
     try { pty.resize(c, r) } catch { /* pty closed mid-frame */ }
   }
 
@@ -1037,6 +1061,9 @@ export class RunOrchestrator extends EventEmitter {
       cycle: args.cycle,
       outputDir: this.healAgentMcpOutputDir ?? this.runDir,
       userGuidance: args.userGuidance,
+      priorAgentSessionContext: !this.healAgentPty
+        ? this.readCrossAgentSessionContext(cfg.agent)
+        : undefined,
     })
 
     const isFirstSpawn = !this.healAgentPty
@@ -1051,7 +1078,16 @@ export class RunOrchestrator extends EventEmitter {
 
     if (args.userGuidance) this.echoUserInterject(args.userGuidance)
 
-    this.emit('agent-started', { cycle: args.cycle, command: `<repl ${cfg.agent} cycle=${args.cycle}>` })
+    // `redirect: true` tells the server-side broker not to reset the pane.
+    // Cycle 2+ continues in the *same* long-lived REPL, so wiping the
+    // transcript at the cycle boundary would clear the running conversation
+    // (visible as a blink). Only the first spawn is a fresh REPL that
+    // warrants a clean canvas.
+    this.emit('agent-started', {
+      cycle: args.cycle,
+      command: `<repl ${cfg.agent} cycle=${args.cycle}>`,
+      redirect: !isFirstSpawn,
+    })
 
     // Cycle 1 has the prompt already wired into the spawn command's argv
     // (`claude … "@<promptFile>"`), so claude reads it at startup with no
@@ -1100,25 +1136,19 @@ export class RunOrchestrator extends EventEmitter {
     ensureMcpOutputDir(target.dir)
     this.healAgentMcpOutputDir = target.dir
 
-    // claude pins via `--session-id <uuid>` so we know the conversation id
-    // without parsing init frames. codex has no equivalent; leave null.
+    // claude can pin via `--session-id <uuid>` on first launch. codex has no
+    // equivalent on first launch. For both agents, older/interrupted runs can
+    // lack Canary's sidecar files; in that case we recover the latest native
+    // CLI session log for this run directory and resume it.
     //
     // On Restart Heal the run dir already has a session id from the previous
-    // (failed) heal session — reuse it and spawn with `--resume <uuid>` so
-    // claude continues the prior conversation with full history. Without
-    // this, every restart would orphan the previous turns and start the
-    // agent's investigation from scratch.
-    let sessionId: string | undefined
-    let resume = false
-    if (cfg.agent === 'claude') {
-      const prior = readPriorSessionId(this.paths.agentSessionIdPath)
-      if (prior) {
-        sessionId = prior
-        resume = true
-      } else {
-        sessionId = randomUUID()
-      }
-    }
+    // (failed) heal session — reuse it so the agent continues the prior
+    // conversation with full history. Without this, every restart would
+    // orphan the previous turns and start the agent's investigation from
+    // scratch.
+    let sessionId: string | undefined = this.readPriorAgentSessionId(cfg.agent) ?? undefined
+    let resume = sessionId !== undefined
+    if (!sessionId && cfg.agent === 'claude') sessionId = randomUUID()
     this.healAgentSessionId = sessionId ?? null
     try {
       fs.mkdirSync(path.dirname(this.paths.agentSessionIdPath), { recursive: true })
@@ -1148,6 +1178,8 @@ export class RunOrchestrator extends EventEmitter {
         command,
         cwd: this.runDir,
         env: this.agentPtyEnv(),
+        cols: this.healAgentTerminalSize?.cols,
+        rows: this.healAgentTerminalSize?.rows,
       })
     } catch (err) {
       this.emitAgentSystemMessage(`Failed to spawn heal agent: ${(err as Error).message}`)
@@ -1165,6 +1197,7 @@ export class RunOrchestrator extends EventEmitter {
     pty.onExit(({ exitCode }) => {
       if (this.healAgentPty !== pty) return
       this.healAgentPty = null
+      this.persistAgentSessionRef()
       this.emit('agent-exit', { exitCode })
     })
 
@@ -1211,15 +1244,16 @@ export class RunOrchestrator extends EventEmitter {
   //
   // - claude: log path is fully determined by runDir + sessionId, so we
   //   just verify the file exists at the predicted location.
-  // - codex: no `--session-id` flag, so we discover by matching cwd +
-  //   timestamp; locateCodexSessionLog does the directory scan.
+  // - codex: first launch has no `--session-id` flag, so we discover by
+  //   matching cwd + timestamp; locateCodexSessionLog does the directory
+  //   scan. After discovery, persist the id for future `codex resume <id>`.
   //
   // Silently skips when the agent never spawned (manual mode, no failure)
   // or when the locator can't find the file (race, user moved it).
   private persistAgentSessionRef(): void {
     if (!this.autoHeal) return
     const agent = this.autoHeal.agent
-    let ref: { agent: 'claude' | 'codex'; sessionId: string; logPath: string } | null = null
+    let ref: AgentSessionRef | null = null
     if (agent === 'claude' && this.healAgentSessionId) {
       const logPath = locateClaudeSessionLog(this.runDir, this.healAgentSessionId)
       if (logPath) ref = { agent: 'claude', sessionId: this.healAgentSessionId, logPath }
@@ -1228,10 +1262,63 @@ export class RunOrchestrator extends EventEmitter {
       if (found) ref = found
     }
     if (!ref) return
+    this.writeAgentSessionRef(ref)
+  }
+
+  private readPriorAgentSessionId(agent: AutoHealAgent): string | null {
+    const refFile = this.readAgentSessionRefFile()
+    const typed = refFile?.sessions[agent]
+    if (typed) return readPriorSessionIdFromValue(typed.sessionId)
+
+    if (!refFile) {
+      const direct = readPriorSessionId(this.paths.agentSessionIdPath)
+      if (direct) return direct
+    }
+
+    const found = locateLatestSessionLogForAgent(agent, this.runDir)
+    if (found) {
+      this.writeAgentSessionRef(found)
+      return found.sessionId
+    }
+    return null
+  }
+
+  private readCrossAgentSessionContext(targetAgent: AutoHealAgent): string | undefined {
+    const previous = this.findPriorAgentSessionRef(targetAgent)
+    if (!previous) return undefined
+    const rendered = renderAgentSessionContext(previous)
+    return rendered || undefined
+  }
+
+  private findPriorAgentSessionRef(targetAgent: AutoHealAgent): AgentSessionRef | null {
+    const otherAgent: AutoHealAgent = targetAgent === 'claude' ? 'codex' : 'claude'
+    const other = this.readAgentSessionRefFile()?.sessions[otherAgent]
+    if (other) return other
+    return locateLatestSessionLogForAgent(otherAgent, this.runDir)
+  }
+
+  private writeAgentSessionRef(ref: AgentSessionRef): void {
+    const existing = this.readAgentSessionRefFile() ?? { sessions: {} }
+    const next: AgentSessionRefFile = {
+      activeAgent: ref.agent,
+      sessions: { ...existing.sessions, [ref.agent]: ref },
+    }
     try {
       fs.mkdirSync(path.dirname(this.paths.agentSessionRefPath), { recursive: true })
-      fs.writeFileSync(this.paths.agentSessionRefPath, JSON.stringify(ref, null, 2))
+      fs.writeFileSync(this.paths.agentSessionRefPath, JSON.stringify(next, null, 2))
+      fs.writeFileSync(this.paths.agentSessionIdPath, ref.sessionId)
+      this.cachedRefFile = next
     } catch { /* best-effort */ }
+  }
+
+  private readAgentSessionRefFile(): AgentSessionRefFile | null {
+    if (this.cachedRefFile !== undefined) return this.cachedRefFile
+    try {
+      this.cachedRefFile = parseAgentSessionRefFile(fs.readFileSync(this.paths.agentSessionRefPath, 'utf-8'))
+    } catch {
+      this.cachedRefFile = null
+    }
+    return this.cachedRefFile
   }
 
   // Snapshot every git-tracked repo in the feature just before the agent has
@@ -1869,7 +1956,8 @@ export function defaultSpawnCommand(_args: {
   return 'cat'
 }
 
-export function defaultHealPrompt(args: { cycle: number; outputDir: string; userGuidance?: string }): string {
+export function defaultHealPrompt(args: BuildHealCyclePromptArgs): string {
   const guidance = args.userGuidance ? ` guidance="${args.userGuidance}"` : ''
-  return `[heal-agent placeholder cycle=${args.cycle} mcp-out=${args.outputDir}${guidance}]`
+  const prior = args.priorAgentSessionContext ? ' prior-session=true' : ''
+  return `[heal-agent placeholder cycle=${args.cycle} mcp-out=${args.outputDir}${guidance}${prior}]`
 }

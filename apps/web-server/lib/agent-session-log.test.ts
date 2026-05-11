@@ -5,8 +5,14 @@ import path from 'path'
 import {
   encodeClaudeProjectDir,
   locateClaudeSessionLog,
+  locateLatestClaudeSessionLog,
   locateCodexSessionLog,
+  locateLatestCodexSessionLog,
+  locateMostRecentAgentSessionRef,
   loadAgentSessionLog,
+  parseAgentSessionRefFile,
+  renderAgentSessionContext,
+  selectAgentSessionRef,
 } from './agent-session-log'
 
 let homeDir: string
@@ -49,6 +55,61 @@ describe('locateClaudeSessionLog', () => {
   it('returns null when sessionId is falsy', () => {
     expect(locateClaudeSessionLog('/some/dir', '', homeDir)).toBeNull()
   })
+
+  it('finds the newest Claude session for a run directory without a sidecar id', () => {
+    const runDir = '/Users/test/canary/logs/runs/r1'
+    const encoded = encodeClaudeProjectDir(runDir)
+    const projectDir = path.join(homeDir, '.claude', 'projects', encoded)
+    fs.mkdirSync(projectDir, { recursive: true })
+    const older = path.join(projectDir, '01234567-89ab-cdef-0123-456789abcdef.jsonl')
+    const newer = path.join(projectDir, 'fedcba98-7654-3210-fedc-ba9876543210.jsonl')
+    fs.writeFileSync(older, '')
+    fs.writeFileSync(newer, '')
+    fs.writeFileSync(path.join(projectDir, 'notes.txt'), 'ignore me')
+    fs.utimesSync(older, new Date('2026-05-10T00:00:00.000Z'), new Date('2026-05-10T00:00:00.000Z'))
+    fs.utimesSync(newer, new Date('2026-05-11T00:00:00.000Z'), new Date('2026-05-11T00:00:00.000Z'))
+
+    expect(locateLatestClaudeSessionLog(runDir, homeDir)).toEqual({
+      agent: 'claude',
+      sessionId: 'fedcba98-7654-3210-fedc-ba9876543210',
+      logPath: newer,
+    })
+  })
+
+  it('returns null when no Claude project log directory exists for the run', () => {
+    expect(locateLatestClaudeSessionLog('/no/such/run', homeDir)).toBeNull()
+  })
+})
+
+describe('agent session ref file parsing', () => {
+  it('reads the legacy single-session shape', () => {
+    const parsed = parseAgentSessionRefFile(JSON.stringify({
+      agent: 'claude',
+      sessionId: 'sid-c',
+      logPath: '/tmp/claude.jsonl',
+    }))
+    expect(parsed).toEqual({
+      activeAgent: 'claude',
+      sessions: {
+        claude: { agent: 'claude', sessionId: 'sid-c', logPath: '/tmp/claude.jsonl' },
+      },
+    })
+    expect(selectAgentSessionRef(parsed!, 'claude')?.sessionId).toBe('sid-c')
+  })
+
+  it('stores and selects separate Claude and Codex sessions', () => {
+    const parsed = parseAgentSessionRefFile(JSON.stringify({
+      activeAgent: 'codex',
+      sessions: {
+        claude: { agent: 'claude', sessionId: 'sid-c', logPath: '/tmp/claude.jsonl' },
+        codex: { agent: 'codex', sessionId: 'sid-x', logPath: '/tmp/codex.jsonl' },
+      },
+    }))
+
+    expect(selectAgentSessionRef(parsed!)?.sessionId).toBe('sid-x')
+    expect(selectAgentSessionRef(parsed!, 'claude')?.sessionId).toBe('sid-c')
+    expect(selectAgentSessionRef(parsed!, 'codex')?.sessionId).toBe('sid-x')
+  })
 })
 
 describe('locateCodexSessionLog', () => {
@@ -83,6 +144,34 @@ describe('locateCodexSessionLog', () => {
 
     const ref = locateCodexSessionLog(runDir, '2026-05-11T01:23:00.000Z', homeDir)
     expect(ref).toEqual({ agent: 'codex', sessionId: 'sess-aaaa', logPath: expected })
+
+    try { fs.rmSync(runDir, { recursive: true, force: true }) } catch { /* best-effort */ }
+  })
+
+  it('reads session_meta even when the first JSONL line is larger than 64 KB', () => {
+    // Codex 0.130+ embeds the entire base-instructions prompt into the
+    // session_meta payload; the first line can run into hundreds of KB. The
+    // previous 8 KB buffer truncated the JSON and made every real run look
+    // like "no session".
+    const runDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-asl-run-')))
+    const padding = 'x'.repeat(150_000)
+    const dir = path.join(homeDir, '.codex', 'sessions', '2026', '05', '11')
+    fs.mkdirSync(dir, { recursive: true })
+    const file = path.join(dir, 'rollout-2026-05-11T01-23-45-bigprompt.jsonl')
+    const meta = {
+      timestamp: '2026-05-11T01:23:45.000Z',
+      type: 'session_meta',
+      payload: {
+        id: 'sess-bigprompt',
+        cwd: runDir,
+        timestamp: '2026-05-11T01:23:45.000Z',
+        base_instructions: { text: padding },
+      },
+    }
+    fs.writeFileSync(file, JSON.stringify(meta) + '\n')
+
+    const ref = locateCodexSessionLog(runDir, '2026-05-11T01:23:00.000Z', homeDir)
+    expect(ref).toEqual({ agent: 'codex', sessionId: 'sess-bigprompt', logPath: file })
 
     try { fs.rmSync(runDir, { recursive: true, force: true }) } catch { /* best-effort */ }
   })
@@ -223,6 +312,155 @@ describe('locateCodexSessionLog', () => {
 
   it('returns null when cycleStartedAt is unparseable', () => {
     expect(locateCodexSessionLog('/some/dir', 'not-a-date', homeDir)).toBeNull()
+  })
+
+  it('finds the newest matching Codex session without a cycle timestamp', () => {
+    const runDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-asl-run-')))
+    writeCodexSession({
+      yyyy: '2026',
+      mm: '05',
+      dd: '10',
+      fileBase: 'rollout-2026-05-10T20-00-00-old',
+      payload: { id: 'sess-old', cwd: runDir, timestamp: '2026-05-10T20:00:00.000Z' },
+    })
+    const expected = writeCodexSession({
+      yyyy: '2026',
+      mm: '05',
+      dd: '11',
+      fileBase: 'rollout-2026-05-11T01-20-00-newest',
+      payload: { id: 'sess-newest', cwd: runDir, timestamp: '2026-05-11T01:20:00.000Z' },
+    })
+    writeCodexSession({
+      yyyy: '2026',
+      mm: '05',
+      dd: '11',
+      fileBase: 'rollout-2026-05-11T01-30-00-other-cwd',
+      payload: { id: 'sess-other', cwd: '/some/unrelated/dir', timestamp: '2026-05-11T01:30:00.000Z' },
+    })
+
+    expect(locateLatestCodexSessionLog(runDir, homeDir)).toEqual({
+      agent: 'codex',
+      sessionId: 'sess-newest',
+      logPath: expected,
+    })
+
+    try { fs.rmSync(runDir, { recursive: true, force: true }) } catch { /* best-effort */ }
+  })
+})
+
+describe('locateMostRecentAgentSessionRef', () => {
+  function writeClaudeSession(runDir: string, sessionId: string, mtime: Date): string {
+    const projectDir = path.join(homeDir, '.claude', 'projects', encodeClaudeProjectDir(runDir))
+    fs.mkdirSync(projectDir, { recursive: true })
+    const file = path.join(projectDir, `${sessionId}.jsonl`)
+    fs.writeFileSync(file, '')
+    fs.utimesSync(file, mtime, mtime)
+    return file
+  }
+
+  function writeCodexSessionWithMtime(
+    runDir: string,
+    yyyy: string,
+    mm: string,
+    dd: string,
+    sessionId: string,
+    mtime: Date,
+  ): string {
+    const dir = path.join(homeDir, '.codex', 'sessions', yyyy, mm, dd)
+    fs.mkdirSync(dir, { recursive: true })
+    const file = path.join(dir, `rollout-${yyyy}-${mm}-${dd}T00-00-00-${sessionId}.jsonl`)
+    fs.writeFileSync(
+      file,
+      JSON.stringify({
+        timestamp: mtime.toISOString(),
+        type: 'session_meta',
+        payload: { id: sessionId, cwd: runDir, timestamp: mtime.toISOString() },
+      }) + '\n',
+    )
+    fs.utimesSync(file, mtime, mtime)
+    return file
+  }
+
+  it('returns null when neither agent has a log for the run', () => {
+    expect(locateMostRecentAgentSessionRef('/no/such/run', homeDir)).toBeNull()
+  })
+
+  it('returns claude when only claude has a log', () => {
+    const runDir = '/Users/test/run-claude-only'
+    const logPath = writeClaudeSession(runDir, 'sid-claude', new Date('2026-05-11T00:00:00Z'))
+    expect(locateMostRecentAgentSessionRef(runDir, homeDir)).toEqual({
+      agent: 'claude',
+      sessionId: 'sid-claude',
+      logPath,
+    })
+  })
+
+  it('returns codex when only codex has a log', () => {
+    const runDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-asl-run-')))
+    const logPath = writeCodexSessionWithMtime(
+      runDir,
+      '2026',
+      '05',
+      '11',
+      'sid-codex',
+      new Date('2026-05-11T00:00:00Z'),
+    )
+    expect(locateMostRecentAgentSessionRef(runDir, homeDir)).toEqual({
+      agent: 'codex',
+      sessionId: 'sid-codex',
+      logPath,
+    })
+
+    try { fs.rmSync(runDir, { recursive: true, force: true }) } catch { /* best-effort */ }
+  })
+
+  it('returns codex when its log is newer than claude\'s', () => {
+    const runDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-asl-run-')))
+    writeClaudeSession(runDir, 'sid-claude', new Date('2026-05-11T00:00:00Z'))
+    const codexLog = writeCodexSessionWithMtime(
+      runDir,
+      '2026',
+      '05',
+      '12',
+      'sid-codex',
+      new Date('2026-05-12T01:34:00Z'),
+    )
+
+    const ref = locateMostRecentAgentSessionRef(runDir, homeDir)
+    expect(ref).toEqual({ agent: 'codex', sessionId: 'sid-codex', logPath: codexLog })
+
+    try { fs.rmSync(runDir, { recursive: true, force: true }) } catch { /* best-effort */ }
+  })
+
+  it('returns claude when its log is newer than codex\'s', () => {
+    const runDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-asl-run-')))
+    const claudeLog = writeClaudeSession(runDir, 'sid-claude', new Date('2026-05-12T02:00:00Z'))
+    writeCodexSessionWithMtime(
+      runDir,
+      '2026',
+      '05',
+      '11',
+      'sid-codex',
+      new Date('2026-05-11T00:00:00Z'),
+    )
+
+    const ref = locateMostRecentAgentSessionRef(runDir, homeDir)
+    expect(ref).toEqual({ agent: 'claude', sessionId: 'sid-claude', logPath: claudeLog })
+
+    try { fs.rmSync(runDir, { recursive: true, force: true }) } catch { /* best-effort */ }
+  })
+
+  it('prefers claude on an mtime tie to keep single-agent runs stable', () => {
+    const runDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-asl-run-')))
+    const same = new Date('2026-05-11T12:00:00Z')
+    const claudeLog = writeClaudeSession(runDir, 'sid-claude', same)
+    writeCodexSessionWithMtime(runDir, '2026', '05', '11', 'sid-codex', same)
+
+    const ref = locateMostRecentAgentSessionRef(runDir, homeDir)
+    expect(ref?.agent).toBe('claude')
+    expect(ref?.logPath).toBe(claudeLog)
+
+    try { fs.rmSync(runDir, { recursive: true, force: true }) } catch { /* best-effort */ }
   })
 })
 
@@ -419,6 +657,42 @@ describe('loadAgentSessionLog (claude)', () => {
     expect(events).toEqual([
       { kind: 'user-message', timestamp: 't', text: 'hi' },
     ])
+  })
+})
+
+describe('renderAgentSessionContext', () => {
+  it('renders normalized prior-session events into a compact text block', () => {
+    const file = path.join(homeDir, 'claude-context.jsonl')
+    fs.writeFileSync(file, [
+      JSON.stringify({
+        type: 'user',
+        timestamp: '2026-05-11T07:00:00.000Z',
+        message: { content: 'please inspect the fallback path' },
+      }),
+      JSON.stringify({
+        type: 'assistant',
+        timestamp: '2026-05-11T07:01:00.000Z',
+        message: { content: [{ type: 'text', text: 'The issue is in the CNS base URL split.' }] },
+      }),
+    ].join('\n') + '\n')
+
+    const rendered = renderAgentSessionContext({
+      agent: 'claude',
+      sessionId: 'sid-1',
+      logPath: file,
+    })
+
+    expect(rendered).toContain('Previous claude session sid-1:')
+    expect(rendered).toContain('USER: please inspect the fallback path')
+    expect(rendered).toContain('ASSISTANT: The issue is in the CNS base URL split.')
+  })
+
+  it('returns an empty string when the referenced session log cannot be read', () => {
+    expect(renderAgentSessionContext({
+      agent: 'codex',
+      sessionId: 'missing',
+      logPath: '/no/such.jsonl',
+    })).toBe('')
   })
 })
 

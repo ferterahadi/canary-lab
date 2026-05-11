@@ -9,6 +9,7 @@ import {
   buildServiceSpecs,
   type ServiceSpec,
 } from './orchestrator'
+import * as sessionLog from '../agent-session-log'
 import type { PtyFactory, PtyHandle, PtySpawnOptions } from './pty-spawner'
 import type { FeatureConfig } from '../../../../shared/launcher/types'
 import { runDirFor, buildRunPaths } from './run-paths'
@@ -21,6 +22,8 @@ interface FakeProcess {
   data: EventEmitter
   exit: EventEmitter
   killed: string | null
+  writes: string[]
+  resizes: Array<{ cols: number; rows: number }>
   emitData(chunk: string): void
   emitExit(code: number, signal?: number): void
 }
@@ -37,6 +40,8 @@ function makeFakeFactory(): { factory: PtyFactory; spawned: FakeProcess[] } {
       data,
       exit,
       killed: null,
+      writes: [],
+      resizes: [],
       emitData(chunk) { data.emit('data', chunk) },
       emitExit(code, signal) { exit.emit('exit', { exitCode: code, signal }) },
     }
@@ -51,8 +56,10 @@ function makeFakeFactory(): { factory: PtyFactory; spawned: FakeProcess[] } {
         exit.on('exit', cb)
         return { dispose: () => exit.off('exit', cb) }
       },
-      write: vi.fn(),
-      resize: vi.fn(),
+      write: vi.fn((data: string) => { proc.writes.push(data) }),
+      resize: vi.fn((cols: number, rows: number) => {
+        proc.resizes.push({ cols, rows })
+      }),
       kill: (signal) => { proc.killed = signal ?? 'SIGTERM' },
     }
   }
@@ -1207,6 +1214,64 @@ describe('RunOrchestrator.runFullCycle', () => {
     await orch.stop('passed')
   }, 15000)
 
+  it('applies the latest pane size when the heal agent spawns after an early resize event', async () => {
+    const f = makeFakeFactory()
+    const orch = bootForFullCycle({ spawned: f, pwExitCodes: [1], autoHeal: true })
+    fs.mkdirSync(runDir, { recursive: true })
+    fs.writeFileSync(
+      orch.paths.summaryPath,
+      JSON.stringify({ failed: [{ name: 'a', location: 'e2e/a.spec.ts:9' }] }),
+    )
+
+    orch.resizeHealAgent(0, 24)
+    orch.resizeHealAgent(160.8, 42.2)
+
+    const promise = orch.runFullCycle()
+    await new Promise((r) => setTimeout(r, 10))
+    f.spawned[1].emitExit(1)
+    while (f.spawned.length < 3) await new Promise((r) => setTimeout(r, 5))
+
+    expect(f.spawned[2].options.cols).toBe(160)
+    expect(f.spawned[2].options.rows).toBe(42)
+
+    f.spawned[2].emitExit(0)
+    expect(await promise).toBe('failed')
+    await orch.stop('failed')
+  })
+
+  it('resizes the active heal-agent pty and bounds the remembered dimensions', async () => {
+    const f = makeFakeFactory()
+    const orch = bootForFullCycle({ spawned: f, pwExitCodes: [1], autoHeal: true })
+    fs.mkdirSync(runDir, { recursive: true })
+    fs.writeFileSync(
+      orch.paths.summaryPath,
+      JSON.stringify({ failed: [{ name: 'a', location: 'e2e/a.spec.ts:9' }] }),
+    )
+
+    const promise = orch.runFullCycle()
+    await new Promise((r) => setTimeout(r, 10))
+    f.spawned[1].emitExit(1)
+    while (f.spawned.length < 3) await new Promise((r) => setTimeout(r, 5))
+
+    const agent = f.spawned[2]
+    orch.resizeHealAgent(Number.NaN, 24)
+    orch.resizeHealAgent(80, Number.POSITIVE_INFINITY)
+    orch.resizeHealAgent(0, 24)
+    orch.resizeHealAgent(80, -1)
+    expect(agent.resizes).toEqual([])
+
+    orch.resizeHealAgent(100_000.9, 2_000.2)
+    orch.resizeHealAgent(80.8, 24.2)
+    expect(agent.resizes).toEqual([
+      { cols: 1000, rows: 1000 },
+      { cols: 80, rows: 24 },
+    ])
+
+    f.spawned[2].emitExit(0)
+    expect(await promise).toBe('failed')
+    await orch.stop('failed')
+  })
+
   it('gives up but still writes a journal entry when the agent exits without a signal and made no code changes', async () => {
     const f = makeFakeFactory()
     const orch = bootForFullCycle({ spawned: f, pwExitCodes: [1], autoHeal: true })
@@ -1361,7 +1426,12 @@ describe('RunOrchestrator.runFullCycle', () => {
       await orch.stop('failed')
 
       const ref = JSON.parse(fs.readFileSync(orch.paths.agentSessionRefPath, 'utf-8'))
-      expect(ref).toEqual({ agent: 'claude', sessionId, logPath })
+      expect(ref).toEqual({
+        activeAgent: 'claude',
+        sessions: {
+          claude: { agent: 'claude', sessionId, logPath },
+        },
+      })
     } finally {
       if (originalHome === undefined) delete process.env.HOME
       else process.env.HOME = originalHome
@@ -2969,6 +3039,352 @@ describe('RunOrchestrator.restartHealFromFailure', () => {
     f.spawned[0].emitExit(0)
     expect(await promise).toBe('failed')
     await orch.stop('failed')
+  })
+
+  it('claude restart: recovers a missing pointer from the native Claude session log', async () => {
+    const PRIOR_SID = 'b2160db2-89b8-49ff-a2ba-c0c97a52d63f'
+    const paths = buildRunPaths(runDir)
+    const locateSpy = vi.spyOn(sessionLog, 'locateLatestSessionLogForAgent').mockReturnValue({
+      agent: 'claude',
+      sessionId: PRIOR_SID,
+      logPath: '/tmp/claude-session.jsonl',
+    })
+
+    try {
+      const f = makeFakeFactory()
+      const spawnCalls: Array<{ sessionId?: string; resume?: boolean }> = []
+      const orch = new RunOrchestrator({
+        feature: makeFeature({ healOnFailureThreshold: 1 }),
+        runId: RUN_ID,
+        runDir,
+        ptyFactory: f.factory,
+        healthCheck: async () => true,
+        delay: async () => undefined,
+        healSignalPollMs: 1,
+        healAgentTimeoutMs: 20,
+        playwrightSpawner: () => ({ command: 'pw-should-not-run', cwd: tmpDir }),
+        autoHeal: {
+          agent: 'claude',
+          maxCycles: 1,
+          buildSpawnCommand: ({ sessionId, resume }) => {
+            spawnCalls.push({ sessionId, resume })
+            return 'claude heal restart'
+          },
+          buildCyclePrompt: () => 'restart-prompt',
+        },
+      })
+      fs.writeFileSync(
+        orch.paths.summaryPath,
+        JSON.stringify({ failed: [{ name: 'a' }], total: 1, passed: 0 }),
+      )
+
+      const promise = orch.restartHealFromFailure('look again')
+      while (f.spawned.length < 1) await new Promise((r) => setTimeout(r, 5))
+      expect(locateSpy).toHaveBeenCalledWith('claude', runDir)
+      expect(spawnCalls).toEqual([{ sessionId: PRIOR_SID, resume: true }])
+      expect(fs.readFileSync(paths.agentSessionIdPath, 'utf-8').trim()).toBe(PRIOR_SID)
+      expect(JSON.parse(fs.readFileSync(paths.agentSessionRefPath, 'utf-8'))).toEqual({
+        activeAgent: 'claude',
+        sessions: {
+          claude: {
+            agent: 'claude',
+            sessionId: PRIOR_SID,
+            logPath: '/tmp/claude-session.jsonl',
+          },
+        },
+      })
+      f.spawned[0].emitExit(0)
+      expect(await promise).toBe('failed')
+      await orch.stop('failed')
+    } finally {
+      locateSpy.mockRestore()
+    }
+  })
+
+  it('claude restart: injects previous Codex session context into the heal prompt', async () => {
+    const paths = buildRunPaths(runDir)
+    fs.writeFileSync(paths.agentSessionRefPath, JSON.stringify({
+      agent: 'codex',
+      sessionId: '019e1779-6b55-73b1-8ab7-e8e345bd889a',
+      logPath: '/tmp/codex-session.jsonl',
+    }))
+    fs.writeFileSync(paths.agentSessionIdPath, '019e1779-6b55-73b1-8ab7-e8e345bd889a')
+    const renderSpy = vi.spyOn(sessionLog, 'renderAgentSessionContext')
+      .mockReturnValue('Previous codex session 019e...\nASSISTANT: inspect fallback SMS call')
+
+    try {
+      const f = makeFakeFactory()
+      let receivedContext: string | undefined
+      const spawnCalls: Array<{ sessionId?: string; resume?: boolean }> = []
+      const orch = new RunOrchestrator({
+        feature: makeFeature({ healOnFailureThreshold: 1 }),
+        runId: RUN_ID,
+        runDir,
+        ptyFactory: f.factory,
+        healthCheck: async () => true,
+        delay: async () => undefined,
+        healSignalPollMs: 1,
+        healAgentTimeoutMs: 20,
+        playwrightSpawner: () => ({ command: 'pw-should-not-run', cwd: tmpDir }),
+        autoHeal: {
+          agent: 'claude',
+          maxCycles: 1,
+          buildSpawnCommand: ({ sessionId, resume }) => {
+            spawnCalls.push({ sessionId, resume })
+            return 'claude heal restart'
+          },
+          buildCyclePrompt: ({ priorAgentSessionContext }) => {
+            receivedContext = priorAgentSessionContext
+            return 'restart-prompt'
+          },
+        },
+      })
+      fs.writeFileSync(
+        orch.paths.summaryPath,
+        JSON.stringify({ failed: [{ name: 'a' }], total: 1, passed: 0 }),
+      )
+
+      const promise = orch.restartHealFromFailure('look again')
+      while (f.spawned.length < 1) await new Promise((r) => setTimeout(r, 5))
+      expect(renderSpy).toHaveBeenCalledWith({
+        agent: 'codex',
+        sessionId: '019e1779-6b55-73b1-8ab7-e8e345bd889a',
+        logPath: '/tmp/codex-session.jsonl',
+      })
+      expect(receivedContext).toContain('Previous codex session')
+      expect(receivedContext).toContain('fallback SMS call')
+      expect(spawnCalls).toHaveLength(1)
+      expect(spawnCalls[0].resume).toBe(false)
+      expect(spawnCalls[0].sessionId).toMatch(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+      )
+      f.spawned[0].emitExit(0)
+      expect(await promise).toBe('failed')
+      await orch.stop('failed')
+    } finally {
+      renderSpy.mockRestore()
+    }
+  })
+
+  it('codex restart: reuses the prior session id from disk and passes resume=true', async () => {
+    const PRIOR_SID = 'b2160db2-89b8-49ff-a2ba-c0c97a52d63f'
+    const paths = buildRunPaths(runDir)
+    fs.writeFileSync(paths.agentSessionIdPath, PRIOR_SID)
+
+    const f = makeFakeFactory()
+    const spawnCalls: Array<{ sessionId?: string; resume?: boolean }> = []
+    const orch = new RunOrchestrator({
+      feature: makeFeature({ healOnFailureThreshold: 1 }),
+      runId: RUN_ID,
+      runDir,
+      ptyFactory: f.factory,
+      healthCheck: async () => true,
+      delay: async () => undefined,
+      healSignalPollMs: 1,
+      healAgentTimeoutMs: 20,
+      playwrightSpawner: () => ({ command: 'pw-should-not-run', cwd: tmpDir }),
+      autoHeal: {
+        agent: 'codex',
+        maxCycles: 1,
+        buildSpawnCommand: ({ sessionId, resume }) => {
+          spawnCalls.push({ sessionId, resume })
+          return 'codex heal restart'
+        },
+        buildCyclePrompt: () => 'restart-prompt',
+      },
+    })
+    fs.writeFileSync(
+      orch.paths.summaryPath,
+      JSON.stringify({ failed: [{ name: 'a' }], total: 1, passed: 0 }),
+    )
+
+    const promise = orch.restartHealFromFailure('look again')
+    while (f.spawned.length < 1) await new Promise((r) => setTimeout(r, 5))
+    expect(spawnCalls).toEqual([{ sessionId: PRIOR_SID, resume: true }])
+    f.spawned[0].emitExit(0)
+    expect(await promise).toBe('failed')
+    await orch.stop('failed')
+  })
+
+  it('codex restart: can reuse a prior session id from agent-session.json', async () => {
+    const PRIOR_SID = 'b2160db2-89b8-49ff-a2ba-c0c97a52d63f'
+    const paths = buildRunPaths(runDir)
+    fs.writeFileSync(paths.agentSessionRefPath, JSON.stringify({
+      agent: 'codex',
+      sessionId: PRIOR_SID,
+      logPath: '/tmp/codex-session.jsonl',
+    }))
+
+    const f = makeFakeFactory()
+    const spawnCalls: Array<{ sessionId?: string; resume?: boolean }> = []
+    const orch = new RunOrchestrator({
+      feature: makeFeature({ healOnFailureThreshold: 1 }),
+      runId: RUN_ID,
+      runDir,
+      ptyFactory: f.factory,
+      healthCheck: async () => true,
+      delay: async () => undefined,
+      healSignalPollMs: 1,
+      healAgentTimeoutMs: 20,
+      playwrightSpawner: () => ({ command: 'pw-should-not-run', cwd: tmpDir }),
+      autoHeal: {
+        agent: 'codex',
+        maxCycles: 1,
+        buildSpawnCommand: ({ sessionId, resume }) => {
+          spawnCalls.push({ sessionId, resume })
+          return 'codex heal restart'
+        },
+        buildCyclePrompt: () => 'restart-prompt',
+      },
+    })
+    fs.writeFileSync(
+      orch.paths.summaryPath,
+      JSON.stringify({ failed: [{ name: 'a' }], total: 1, passed: 0 }),
+    )
+
+    const promise = orch.restartHealFromFailure('look again')
+    while (f.spawned.length < 1) await new Promise((r) => setTimeout(r, 5))
+    expect(spawnCalls).toEqual([{ sessionId: PRIOR_SID, resume: true }])
+    expect(fs.readFileSync(paths.agentSessionIdPath, 'utf-8').trim()).toBe(PRIOR_SID)
+    f.spawned[0].emitExit(0)
+    expect(await promise).toBe('failed')
+    await orch.stop('failed')
+  })
+
+  it('codex restart: injects previous Claude session context into the heal prompt', async () => {
+    const paths = buildRunPaths(runDir)
+    fs.writeFileSync(paths.agentSessionRefPath, JSON.stringify({
+      agent: 'claude',
+      sessionId: 'd5f3e235-2470-4a1c-bb31-2030880a1670',
+      logPath: '/tmp/claude-session.jsonl',
+    }))
+    fs.writeFileSync(paths.agentSessionIdPath, 'd5f3e235-2470-4a1c-bb31-2030880a1670')
+    const renderSpy = vi.spyOn(sessionLog, 'renderAgentSessionContext')
+      .mockReturnValue('Previous claude session d5f3...\nASSISTANT: use FAKE_CNS_v1_BASE_URL')
+
+    try {
+      const f = makeFakeFactory()
+      let receivedContext: string | undefined
+      const spawnCalls: Array<{ sessionId?: string; resume?: boolean }> = []
+      const orch = new RunOrchestrator({
+        feature: makeFeature({ healOnFailureThreshold: 1 }),
+        runId: RUN_ID,
+        runDir,
+        ptyFactory: f.factory,
+        healthCheck: async () => true,
+        delay: async () => undefined,
+        healSignalPollMs: 1,
+        healAgentTimeoutMs: 20,
+        playwrightSpawner: () => ({ command: 'pw-should-not-run', cwd: tmpDir }),
+        autoHeal: {
+          agent: 'codex',
+          maxCycles: 1,
+          buildSpawnCommand: ({ sessionId, resume }) => {
+            spawnCalls.push({ sessionId, resume })
+            return 'codex heal restart'
+          },
+          buildCyclePrompt: ({ priorAgentSessionContext }) => {
+            receivedContext = priorAgentSessionContext
+            return 'restart-prompt'
+          },
+        },
+      })
+      fs.writeFileSync(
+        orch.paths.summaryPath,
+        JSON.stringify({ failed: [{ name: 'a' }], total: 1, passed: 0 }),
+      )
+
+      const promise = orch.restartHealFromFailure('look again')
+      while (f.spawned.length < 1) await new Promise((r) => setTimeout(r, 5))
+      expect(renderSpy).toHaveBeenCalledWith({
+        agent: 'claude',
+        sessionId: 'd5f3e235-2470-4a1c-bb31-2030880a1670',
+        logPath: '/tmp/claude-session.jsonl',
+      })
+      expect(receivedContext).toContain('Previous claude session')
+      expect(receivedContext).toContain('FAKE_CNS_v1_BASE_URL')
+      expect(spawnCalls).toEqual([{ sessionId: undefined, resume: false }])
+      f.spawned[0].emitExit(0)
+      expect(await promise).toBe('failed')
+      await orch.stop('failed')
+    } finally {
+      renderSpy.mockRestore()
+    }
+  })
+
+  it('codex restart: recovers a missing pointer from the native Codex session log', async () => {
+    const PRIOR_SID = 'b2160db2-89b8-49ff-a2ba-c0c97a52d63f'
+    const paths = buildRunPaths(runDir)
+    fs.writeFileSync(paths.agentSessionRefPath, JSON.stringify({
+      activeAgent: 'claude',
+      sessions: {
+        claude: {
+          agent: 'claude',
+          sessionId: 'd5f3e235-2470-4a1c-bb31-2030880a1670',
+          logPath: '/tmp/claude-session.jsonl',
+        },
+      },
+    }))
+    const locateSpy = vi.spyOn(sessionLog, 'locateLatestSessionLogForAgent').mockReturnValue({
+      agent: 'codex',
+      sessionId: PRIOR_SID,
+      logPath: '/tmp/codex-session.jsonl',
+    })
+
+    try {
+      const f = makeFakeFactory()
+      const spawnCalls: Array<{ sessionId?: string; resume?: boolean }> = []
+      const orch = new RunOrchestrator({
+        feature: makeFeature({ healOnFailureThreshold: 1 }),
+        runId: RUN_ID,
+        runDir,
+        ptyFactory: f.factory,
+        healthCheck: async () => true,
+        delay: async () => undefined,
+        healSignalPollMs: 1,
+        healAgentTimeoutMs: 20,
+        playwrightSpawner: () => ({ command: 'pw-should-not-run', cwd: tmpDir }),
+        autoHeal: {
+          agent: 'codex',
+          maxCycles: 1,
+          buildSpawnCommand: ({ sessionId, resume }) => {
+            spawnCalls.push({ sessionId, resume })
+            return 'codex heal restart'
+          },
+          buildCyclePrompt: () => 'restart-prompt',
+        },
+      })
+      fs.writeFileSync(
+        orch.paths.summaryPath,
+        JSON.stringify({ failed: [{ name: 'a' }], total: 1, passed: 0 }),
+      )
+
+      const promise = orch.restartHealFromFailure('look again')
+      while (f.spawned.length < 1) await new Promise((r) => setTimeout(r, 5))
+      expect(locateSpy).toHaveBeenCalledWith('codex', runDir)
+      expect(spawnCalls).toEqual([{ sessionId: PRIOR_SID, resume: true }])
+      expect(fs.readFileSync(paths.agentSessionIdPath, 'utf-8').trim()).toBe(PRIOR_SID)
+      expect(JSON.parse(fs.readFileSync(paths.agentSessionRefPath, 'utf-8'))).toEqual({
+        activeAgent: 'codex',
+        sessions: {
+          claude: {
+            agent: 'claude',
+            sessionId: 'd5f3e235-2470-4a1c-bb31-2030880a1670',
+            logPath: '/tmp/claude-session.jsonl',
+          },
+          codex: {
+            agent: 'codex',
+            sessionId: PRIOR_SID,
+            logPath: '/tmp/codex-session.jsonl',
+          },
+        },
+      })
+      f.spawned[0].emitExit(0)
+      expect(await promise).toBe('failed')
+      await orch.stop('failed')
+    } finally {
+      locateSpy.mockRestore()
+    }
   })
 })
 

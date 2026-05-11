@@ -4,25 +4,47 @@ import type { AgentSessionEvent, AgentSessionResponse } from '../api/client'
 
 interface Props {
   runId: string
+  pollUntilFound?: boolean
 }
+
+// The agent CLI flushes its JSONL on exit; cap retries at ~9s before showing
+// the empty-state.
+const MAX_POLL_ATTEMPTS = 12
+const POLL_INTERVAL_MS = 750
 
 // Renders the normalized heal-agent JSONL as a chat-style timeline. Used on
 // the historical replay path (terminal runs, no live broker). Live runs keep
 // using the raw xterm pane in PaneTerminal — only after the run finishes do
 // we have the agent CLI's full structured log to render from.
-export function AgentSessionView({ runId }: Props) {
+export function AgentSessionView({ runId, pollUntilFound = false }: Props) {
   const [data, setData] = useState<AgentSessionResponse | null | undefined>(undefined)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let attempts = 0
     setData(undefined)
     setError(null)
-    api.getAgentSession(runId)
-      .then((res) => { if (!cancelled) setData(res) })
-      .catch((err: unknown) => { if (!cancelled) setError(err instanceof Error ? err.message : String(err)) })
-    return () => { cancelled = true }
-  }, [runId])
+    const load = (): void => {
+      api.getAgentSession(runId)
+        .then((res) => {
+          if (cancelled) return
+          if (res === null && pollUntilFound && attempts < MAX_POLL_ATTEMPTS) {
+            attempts += 1
+            timer = setTimeout(load, POLL_INTERVAL_MS)
+            return
+          }
+          setData(res)
+        })
+        .catch((err: unknown) => { if (!cancelled) setError(err instanceof Error ? err.message : String(err)) })
+    }
+    load()
+    return () => {
+      cancelled = true
+      if (timer) clearTimeout(timer)
+    }
+  }, [runId, pollUntilFound])
 
   if (error) {
     return (
@@ -41,7 +63,7 @@ export function AgentSessionView({ runId }: Props) {
   if (data === null) {
     return (
       <div className="px-4 py-3 text-sm" style={{ color: 'var(--text-muted)' }}>
-        No structured session log found for this run.
+        {pollUntilFound ? 'Waiting for structured session log…' : 'No structured session log found for this run.'}
       </div>
     )
   }
