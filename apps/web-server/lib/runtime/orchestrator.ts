@@ -37,6 +37,12 @@ import { readPlaywrightArtifactPolicy } from './playwright-artifact-policy'
 import { slugify } from './summary-reporter'
 import { listSpecFiles } from '../feature-loader'
 import { extractTestsFromSource } from '../ast-extractor'
+import {
+  diffContentSinceSnapshot,
+  diffNamesSinceSnapshot,
+  resolveRepoPath,
+  snapshotWorkingTree,
+} from '../git-repo'
 
 // Headless event-emitting orchestrator for a single feature run. Wraps the
 // existing health-check / signal-file semantics behind a clean API the future
@@ -1124,6 +1130,54 @@ export class RunOrchestrator extends EventEmitter {
     this.healAgentSessionId = null
   }
 
+  // Snapshot every git-tracked repo in the feature just before the agent has
+  // the floor. The returned map is the input to `diffFeatureRepos`, which
+  // computes the list of files the agent actually edited during its turn.
+  // Repos that aren't git working trees are silently omitted — the diff for
+  // them is empty, which yields a `restart([])` (restart everything) fallback
+  // identical to the pre-change behavior when the agent didn't declare files.
+  private async snapshotFeatureRepos(): Promise<Map<string, string>> {
+    const snapshots = new Map<string, string>()
+    for (const repo of this.feature.repos ?? []) {
+      const localPath = repo.localPath
+      if (typeof localPath !== 'string') continue
+      const ref = await snapshotWorkingTree(localPath)
+      if (ref !== null) snapshots.set(localPath, ref)
+    }
+    return snapshots
+  }
+
+  // Diff each snapshotted repo and return absolute paths of the files the
+  // agent touched between snapshot and now. Used as ground truth for both the
+  // journal entry's `fix.file` line and the orchestrator's restart planning.
+  private async diffFeatureRepos(snapshots: Map<string, string>): Promise<string[]> {
+    const out: string[] = []
+    for (const [localPath, ref] of snapshots) {
+      const relPaths = await diffNamesSinceSnapshot(localPath, ref)
+      const absRepoPath = resolveRepoPath(localPath)
+      for (const rel of relPaths) {
+        out.push(path.join(absRepoPath, rel))
+      }
+    }
+    return out
+  }
+
+  // Full unified-diff content (not just names) for each snapshotted repo,
+  // joined into one string. Multi-repo features get a `# repo: <localPath>`
+  // header before each repo's diff so the agent (and a human reviewer) can
+  // tell which tree each hunk came from. Truncation to MAX_JOURNAL_DIFF_BYTES
+  // happens at the journal-writer layer.
+  private async diffContentForFeatureRepos(snapshots: Map<string, string>): Promise<string> {
+    const blocks: string[] = []
+    const multiRepo = snapshots.size > 1
+    for (const [localPath, ref] of snapshots) {
+      const content = await diffContentSinceSnapshot(localPath, ref)
+      if (!content.trim()) continue
+      blocks.push(multiRepo ? `# repo: ${localPath}\n${content}` : content)
+    }
+    return blocks.join('\n')
+  }
+
   // Top-level "do the whole thing" entry. Boots services, runs Playwright,
   // and—if autoHeal is enabled—loops through heal cycles until one of:
   // tests pass, the cap is hit, the agent gives up without signaling, or the
@@ -1138,12 +1192,25 @@ export class RunOrchestrator extends EventEmitter {
     // heal agent would otherwise be spawned. `stop()` has already written
     // 'aborted' to the manifest; honor it.
     if (this.stopped) return this.status
-    let finalStatus: RunManifest['status'] = exitCode === 0 ? 'passed' : 'failed'
+    // Status comes from decideRunStatus, not Playwright's exit byte alone.
+    // The summary file is the authoritative record: PASSED requires every
+    // AST-visible test to be in `passedNames`, so failed/skipped/pending all
+    // block. This catches:
+    //   - The pty.onExit→runPlaywright continuation firing BEFORE the user's
+    //     pause-heal HTTP request reaches the server (otherwise a graceful
+    //     exit-0 would mark "passed, healCycles: 0").
+    //   - Playwright catching SIGTERM/SIGINT, partial-flushing, and exiting 0.
+    //   - Targeted re-runs that complete cleanly while earlier failures or
+    //     pending tests are still recorded in the summary.
+    let finalStatus: RunManifest['status'] = decideRunStatus(
+      this.feature.featureDir,
+      this.paths.summaryPath,
+      exitCode,
+    )
     // If the user clicked Pause & Heal, Playwright was killed on purpose —
-    // a graceful exitCode 0 must NOT mark the run "passed". The
+    // even a clean summary mustn't mark the run "passed". The
     // `markStoppedEarly('user-pause')` call inside `pauseAndHeal` is what
-    // we key off here. We override to 'failed' so the heal-loop entry
-    // condition below is satisfied.
+    // we key off here. Override so the heal-loop entry condition below fires.
     if (this.stoppedEarlyReason === 'user-pause') {
       finalStatus = 'failed'
     }
@@ -1163,6 +1230,10 @@ export class RunOrchestrator extends EventEmitter {
         this.setStatus('healing')
         this.noteHealCycle()
         this.emit('agent-started', { cycle: this.healCycles, command: '<manual>' })
+        // Same snapshot/diff pattern as auto-heal: capture working-tree state
+        // before the user starts editing, then diff after the signal arrives
+        // so the journal records only what the user changed during this turn.
+        const snapshots = await this.snapshotFeatureRepos()
         const signal = await this.waitForHealSignal(MANUAL_TIMEOUT_MS)
         this.emit('agent-exit', { exitCode: 0 })
         if (this.healCancelled || this.stopped) {
@@ -1175,15 +1246,16 @@ export class RunOrchestrator extends EventEmitter {
           this.setStatus(finalStatus)
           break
         }
+        const filesChanged = await this.diffFeatureRepos(snapshots)
+        const diffContent = await this.diffContentForFeatureRepos(snapshots)
         try {
           if (signal.kind === 'restart' || signal.kind === 'rerun') {
             appendJournalIteration({
               signal: signal.kind === 'restart' ? '.restart' : '.rerun',
               hypothesis: typeof signal.body.hypothesis === 'string' ? signal.body.hypothesis : undefined,
-              filesChanged: Array.isArray(signal.body.filesChanged)
-                ? (signal.body.filesChanged.filter((f): f is string => typeof f === 'string'))
-                : undefined,
+              filesChanged,
               fixDescription: typeof signal.body.fixDescription === 'string' ? signal.body.fixDescription : undefined,
+              diffContent,
               runId: this.runId,
               manifestPath: this.paths.manifestPath,
               summaryPath: this.paths.summaryPath,
@@ -1194,9 +1266,6 @@ export class RunOrchestrator extends EventEmitter {
         const rerunTargets = this.rerunTargetsForSummary(readSummary(this.paths.summaryPath))
         this.setStatus('running')
         if (signal.kind === 'restart') {
-          const filesChanged = Array.isArray(signal.body.filesChanged)
-            ? signal.body.filesChanged.filter((f): f is string => typeof f === 'string')
-            : []
           await this.restart(filesChanged)
         } else {
           await this.rerun()
@@ -1208,8 +1277,11 @@ export class RunOrchestrator extends EventEmitter {
         // exit code arrives after the abort flips the flag — don't
         // compute a finalStatus from it.
         if (this.stopped) return this.status
-        finalStatus = exitCode === 0 ? 'passed' : 'failed'
+        finalStatus = decideRunStatus(this.feature.featureDir, this.paths.summaryPath, exitCode)
         this.setStatus(finalStatus)
+        // Break on clean Playwright exit: if exit was 0 but the summary still
+        // shows non-passed tests, finalStatus is already 'failed' above and
+        // exiting the loop hands control back to the user (per design).
         if (exitCode === 0) break
       }
       return finalStatus
@@ -1279,6 +1351,12 @@ export class RunOrchestrator extends EventEmitter {
         this.setStatus('healing')
         this.noteHealCycle()
 
+        // Snapshot every git-tracked feature repo just before the agent runs.
+        // After the signal arrives, the diff against this snapshot is the
+        // ground-truth list of files the agent edited during its turn —
+        // pre-existing dirty state in the workspace doesn't leak in.
+        const snapshots = await this.snapshotFeatureRepos()
+
         const { exitCode: agentExitCode, signal } = await this.runHealAgent({ cycle: cycleNum, failedSlugs, userGuidance })
         userGuidance = undefined
 
@@ -1305,15 +1383,17 @@ export class RunOrchestrator extends EventEmitter {
           break
         }
 
+        const filesChanged = await this.diffFeatureRepos(snapshots)
+        const diffContent = await this.diffContentForFeatureRepos(snapshots)
+
         try {
           if (signal.kind === 'restart' || signal.kind === 'rerun') {
             appendJournalIteration({
               signal: signal.kind === 'restart' ? '.restart' : '.rerun',
               hypothesis: typeof signal.body.hypothesis === 'string' ? signal.body.hypothesis : undefined,
-              filesChanged: Array.isArray(signal.body.filesChanged)
-                ? (signal.body.filesChanged.filter((f): f is string => typeof f === 'string'))
-                : undefined,
+              filesChanged,
               fixDescription: typeof signal.body.fixDescription === 'string' ? signal.body.fixDescription : undefined,
+              diffContent,
               runId: this.runId,
               manifestPath: this.paths.manifestPath,
               summaryPath: this.paths.summaryPath,
@@ -1327,9 +1407,6 @@ export class RunOrchestrator extends EventEmitter {
 
         const action = heal.actionForSignal(signal.kind === 'heal' ? 'rerun' : signal.kind)
         if (action.kind === 'restart-and-rerun') {
-          const filesChanged = Array.isArray(signal.body.filesChanged)
-            ? signal.body.filesChanged.filter((f): f is string => typeof f === 'string')
-            : []
           const { restarted, kept } = await this.restart(filesChanged)
           if (this.stopped) return this.status
           this.healCycleHistory.push({ cycle: cycleNum, restarted, kept })
@@ -1351,8 +1428,11 @@ export class RunOrchestrator extends EventEmitter {
           this.setStatus(finalStatus)
           break
         }
-        finalStatus = exitCode === 0 ? 'passed' : 'failed'
+        finalStatus = decideRunStatus(this.feature.featureDir, this.paths.summaryPath, exitCode)
         this.setStatus(finalStatus)
+        // Break on clean Playwright exit even when finalStatus is 'failed'
+        // (summary disagrees with exit 0): ends the heal loop and hands
+        // control to the user instead of spawning another agent cycle.
         if (exitCode === 0) break
       }
 
@@ -1556,6 +1636,25 @@ export function summarizeFailures(summaryPath: string): { failed: string[]; tota
   const failed = extractFailedSlugs(summary)
   const total = typeof summary.total === 'number' ? summary.total : failed.length
   return { failed, total }
+}
+
+// PASSED only when (a) Playwright exited 0 AND (b) every test the AST can see
+// is in summary.passedNames. Skipped/pending/failed all block. Falls back to
+// summarizeFailures when AST extraction fails so feature dirs with no parseable
+// specs degrade to "no failed entries => passed" instead of always failing.
+export function decideRunStatus(
+  featureDir: string,
+  summaryPath: string,
+  exitCode: number,
+): 'passed' | 'failed' {
+  if (exitCode !== 0) return 'failed'
+  const summary = readSummary(summaryPath)
+  const computed = computeNonPassedTargets(featureDir, summary)
+  if (computed.kind === 'all-passed') return 'passed'
+  if (computed.kind === 'extraction-failed') {
+    return summarizeFailures(summaryPath).failed.length > 0 ? 'failed' : 'passed'
+  }
+  return 'failed'
 }
 
 const SUMMARY_REPORTER_PATH = path.resolve(__dirname, 'summary-reporter.js')

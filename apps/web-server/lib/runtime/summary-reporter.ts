@@ -26,6 +26,7 @@ export function slugify(title: string): string {
 
 interface TestEntry {
   name: string
+  status: string
   passed: boolean
   error?: {
     message: string
@@ -140,6 +141,7 @@ class SummaryReporter implements Reporter {
 
   onTestEnd(test: TestCase, result: TestResult): void {
     const passed = result.status === 'passed'
+    const failed = result.status !== 'passed' && result.status !== 'skipped'
     const name = `test-case-${slugify(test.title)}`
     if (this.running?.name === name) {
       this.running = null
@@ -156,6 +158,7 @@ class SummaryReporter implements Reporter {
       : undefined
     const entry: TestEntry = {
       name,
+      status: result.status,
       passed,
       ...(error ? { error } : {}),
       durationMs: result.duration,
@@ -163,7 +166,7 @@ class SummaryReporter implements Reporter {
       retry: result.retry,
     }
     this.results.push(entry)
-    if (!passed) this.failureCount++
+    if (failed) this.failureCount++
     this.writePlaybackEvent({
       type: 'test-end',
       time: new Date().toISOString(),
@@ -215,7 +218,7 @@ class SummaryReporter implements Reporter {
         parsed.summary.failed.map((f) => [f.name, f.logFiles] as const),
       )
       for (const r of this.results) {
-        if (!r.passed && byName.has(r.name)) {
+        if (isFailureResult(r) && byName.has(r.name)) {
           r.logFiles = byName.get(r.name)
         }
       }
@@ -226,14 +229,21 @@ class SummaryReporter implements Reporter {
 
   private writeSummary(complete: boolean): void {
     const passedResults = this.results.filter((r) => r.passed)
+    const skippedResults = this.results.filter((r) => r.status === 'skipped')
     const summary = {
       complete,
       total: this.results.length,
       passed: passedResults.length,
       passedNames: passedResults.map((r) => r.name),
+      ...(skippedResults.length
+        ? {
+            skipped: skippedResults.length,
+            skippedNames: skippedResults.map((r) => r.name),
+          }
+        : {}),
       ...(this.running ? { running: this.running } : {}),
       failed: this.results
-        .filter((r) => !r.passed)
+        .filter(isFailureResult)
         .map((r) => ({
           name: r.name,
           ...(r.error ? { error: r.error } : {}),
@@ -265,7 +275,14 @@ class SummaryReporter implements Reporter {
     for (const name of passedNames) {
       if (typeof name !== 'string' || !name || seen.has(name)) continue
       seen.add(name)
-      this.results.push({ name, passed: true })
+      this.results.push({ name, status: 'passed', passed: true })
+    }
+
+    const skippedNames = Array.isArray(parsed.skippedNames) ? parsed.skippedNames : []
+    for (const name of skippedNames) {
+      if (typeof name !== 'string' || !name || seen.has(name)) continue
+      seen.add(name)
+      this.results.push({ name, status: 'skipped', passed: false })
     }
 
     const failed = Array.isArray(parsed.failed) ? parsed.failed : []
@@ -276,6 +293,7 @@ class SummaryReporter implements Reporter {
       seen.add(name)
       this.results.push({
         name,
+        status: 'failed',
         passed: false,
         ...(isErrorShape(entry.error) ? { error: entry.error } : {}),
         ...(typeof entry.durationMs === 'number' ? { durationMs: entry.durationMs } : {}),
@@ -284,7 +302,7 @@ class SummaryReporter implements Reporter {
         ...(Array.isArray(entry.logFiles) ? { logFiles: entry.logFiles.filter((f: unknown): f is string => typeof f === 'string') } : {}),
       })
     }
-    this.failureCount = this.results.filter((r) => !r.passed).length
+    this.failureCount = this.results.filter(isFailureResult).length
     this.lastEnrichedFailureCount = this.failureCount
   }
 
@@ -292,7 +310,7 @@ class SummaryReporter implements Reporter {
     const idx = this.results.findIndex((r) => r.name === name)
     if (idx < 0) return
     const [removed] = this.results.splice(idx, 1)
-    if (removed && !removed.passed) this.failureCount = Math.max(0, this.failureCount - 1)
+    if (removed && isFailureResult(removed)) this.failureCount = Math.max(0, this.failureCount - 1)
   }
 
   private writePlaybackEvent(event: PlaybackEvent): void {
@@ -320,7 +338,12 @@ class SummaryReporter implements Reporter {
 
 interface ExistingSummary {
   passedNames?: unknown
+  skippedNames?: unknown
   failed?: unknown
+}
+
+function isFailureResult(entry: Pick<TestEntry, 'status'>): boolean {
+  return entry.status !== 'passed' && entry.status !== 'skipped'
 }
 
 function readExistingSummary(): (ExistingSummary & SummaryForJournalOutcome) | null {

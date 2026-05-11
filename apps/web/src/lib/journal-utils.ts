@@ -54,6 +54,43 @@ export function parseBodyFields(body: string): ParsedField[] {
   return out
 }
 
+// Map journal field keys to human-friendly labels. `null` hides a field from
+// the UI (the data still lives in the raw markdown the agent reads). Fields
+// not listed here fall through with their original key, so new fields surface
+// by default rather than silently disappearing.
+const JOURNAL_FIELD_DISPLAY: Record<string, string | null> = {
+  run: null,
+  feature: null,
+  failingTests: null,
+  hypothesis: 'hypothesis',
+  'fix.file': 'files',
+  'fix.description': 'fix description',
+  signal: 'signal',
+  outcome: 'outcome',
+}
+
+// Returns the human-facing label for a journal field key, or `null` if the
+// field should be hidden from the UI. The raw markdown (still reachable via
+// "Show raw markdown") is what the heal agent reads — this only filters the
+// structured view above it.
+export function formatJournalFieldKey(key: string): string | null {
+  if (Object.prototype.hasOwnProperty.call(JOURNAL_FIELD_DISPLAY, key)) {
+    return JOURNAL_FIELD_DISPLAY[key]
+  }
+  return key
+}
+
+// Convenience: filter + rename in one pass, preserving order.
+export function presentJournalFields(fields: readonly ParsedField[]): ParsedField[] {
+  const out: ParsedField[] = []
+  for (const field of fields) {
+    const label = formatJournalFieldKey(field.key)
+    if (label === null) continue
+    out.push({ key: label, value: field.value })
+  }
+  return out
+}
+
 export type OutcomeBadge = 'pending' | 'all_passed' | 'partial' | 'no_change' | 'regression' | 'unknown'
 
 export function classifyOutcome(outcome: string | null | undefined): OutcomeBadge {

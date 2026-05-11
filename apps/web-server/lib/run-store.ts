@@ -181,6 +181,10 @@ export interface RunSummary {
    *  so the UI can mark only-run tests as passed without falsely turning
    *  unrun tests green when the suite stops early (pause / max-failures). */
   passedNames?: string[]
+  /** Names of tests Playwright reported as skipped. Kept separate from
+   *  `failed` so the UI and heal loop do not treat skipped tests as failures. */
+  skipped?: number
+  skippedNames?: string[]
   /** Currently-running Playwright test, emitted by the reporter on
    *  onTestBegin. Cleared when the matching onTestEnd lands. */
   running?: { name: string; location: string; step?: RunSummaryRunningStep }

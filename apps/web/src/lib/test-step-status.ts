@@ -8,6 +8,45 @@ import type { RunSummary } from '../api/types'
 
 export type StepStatus = 'pending' | 'testing' | 'passed' | 'failed' | 'skipped' | 'timedout'
 
+export interface StatusPresentation {
+  label: string
+  cardClassName: string
+  pillClassName: string
+}
+
+export const STATUS_PRESENTATION: Record<StepStatus, StatusPresentation> = {
+  passed: {
+    label: 'passed',
+    cardClassName: 'border-emerald-500/40 bg-emerald-500/5 dark:border-emerald-500/50',
+    pillClassName: 'border-emerald-500/60 bg-emerald-50 text-emerald-700 dark:border-emerald-400/60 dark:bg-emerald-400/10 dark:text-emerald-300',
+  },
+  testing: {
+    label: 'running',
+    cardClassName: 'border-sky-500/50 bg-sky-500/10 dark:border-sky-500/60',
+    pillClassName: 'border-sky-500/60 bg-sky-50 text-sky-700 dark:border-sky-400/60 dark:bg-sky-400/10 dark:text-sky-300',
+  },
+  failed: {
+    label: 'failed',
+    cardClassName: 'border-rose-500/50 bg-rose-500/5 dark:border-rose-500/60',
+    pillClassName: 'border-rose-500/60 bg-rose-50 text-rose-700 dark:border-rose-400/60 dark:bg-rose-400/10 dark:text-rose-300',
+  },
+  skipped: {
+    label: 'skipped',
+    cardClassName: 'border-amber-500/40 bg-amber-500/5 dark:border-amber-500/50',
+    pillClassName: 'border-amber-500/60 bg-amber-50 text-amber-700 dark:border-amber-400/60 dark:bg-amber-400/10 dark:text-amber-300',
+  },
+  timedout: {
+    label: 'timed out',
+    cardClassName: 'border-amber-500/40 bg-amber-500/5 dark:border-amber-500/50',
+    pillClassName: 'border-amber-500/60 bg-amber-50 text-amber-700 dark:border-amber-400/60 dark:bg-amber-400/10 dark:text-amber-300',
+  },
+  pending: {
+    label: 'pending',
+    cardClassName: 'border-zinc-300 bg-zinc-50/40 dark:border-zinc-700 dark:bg-zinc-900/30',
+    pillClassName: 'border-zinc-400/70 bg-transparent text-zinc-600 dark:border-zinc-500/70 dark:text-zinc-300',
+  },
+}
+
 // Slugify the test name the same way the summary reporter does
 // (shared/e2e-runner/summary-reporter.ts). The summary entry is then
 // `test-case-${slug}`. Kept inline so the frontend doesn't pull in a
@@ -42,6 +81,7 @@ export function statusForTest(
     if (/Test timeout of/i.test(msg)) return 'timedout'
     return 'failed'
   }
+  if (summary.skippedNames?.includes(expected)) return 'skipped'
   if (isRunActivelyTesting && summary.running?.name === expected) return 'testing'
   if (summary.passedNames) {
     return summary.passedNames.includes(expected) ? 'passed' : 'pending'
@@ -78,46 +118,22 @@ function lineFromLocation(location: string): number | null {
 }
 
 export function colorClassForStatus(status: StepStatus): string {
-  switch (status) {
-    case 'passed':
-      return 'border-emerald-500/40 bg-emerald-500/5 dark:border-emerald-500/50'
-    case 'testing':
-      return 'border-sky-500/50 bg-sky-500/10 dark:border-sky-500/60'
-    case 'failed':
-      return 'border-rose-500/50 bg-rose-500/5 dark:border-rose-500/60'
-    case 'timedout':
-    case 'skipped':
-      return 'border-amber-500/40 bg-amber-500/5 dark:border-amber-500/50'
-    case 'pending':
-    default:
-      return 'border-zinc-300 bg-zinc-50/40 dark:border-zinc-700 dark:bg-zinc-900/30'
-  }
+  return STATUS_PRESENTATION[status].cardClassName
 }
 
 export function statusPillClassForStatus(status: StepStatus): string {
-  switch (status) {
-    case 'passed':
-      return 'border-emerald-500/60 bg-emerald-50 text-emerald-700 dark:border-emerald-400/60 dark:bg-emerald-400/10 dark:text-emerald-300'
-    case 'testing':
-      return 'border-sky-500/60 bg-sky-50 text-sky-700 dark:border-sky-400/60 dark:bg-sky-400/10 dark:text-sky-300'
-    case 'failed':
-      return 'border-rose-500/60 bg-rose-50 text-rose-700 dark:border-rose-400/60 dark:bg-rose-400/10 dark:text-rose-300'
-    case 'timedout':
-    case 'skipped':
-      return 'border-amber-500/60 bg-amber-50 text-amber-700 dark:border-amber-400/60 dark:bg-amber-400/10 dark:text-amber-300'
-    case 'pending':
-    default:
-      return 'border-zinc-400/70 bg-transparent text-zinc-600 dark:border-zinc-500/70 dark:text-zinc-300'
-  }
+  return STATUS_PRESENTATION[status].pillClassName
 }
 
 export function statusLabel(status: StepStatus): string {
-  switch (status) {
-    case 'passed':
-      return 'succeed'
-    case 'testing':
-      return 'running'
-    default:
-      return status
-  }
+  return STATUS_PRESENTATION[status].label
+}
+
+export function statusFromPlaybackResult(input: { status?: string; passed?: boolean }): StepStatus {
+  const normalized = input.status?.toLowerCase()
+  if (normalized === 'passed' || input.passed === true) return 'passed'
+  if (normalized === 'skipped') return 'skipped'
+  if (normalized === 'timedout') return 'timedout'
+  if (normalized === 'failed' || input.passed === false) return 'failed'
+  return 'testing'
 }

@@ -12,10 +12,11 @@ interface Props {
   feature: string
   onClose: () => void
   onDeleted?: (feature: string) => void
+  onRenamed?: (oldFeature: string, nextFeature: string) => void
   initialTab?: Tab
 }
 
-export function FeatureConfigEditor({ feature, onClose, onDeleted, initialTab = 'general' }: Props) {
+export function FeatureConfigEditor({ feature, onClose, onDeleted, onRenamed, initialTab = 'general' }: Props) {
   const [tab, setTab] = useState<Tab>(initialTab)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [confirmName, setConfirmName] = useState('')
@@ -109,7 +110,7 @@ export function FeatureConfigEditor({ feature, onClose, onDeleted, initialTab = 
         </nav>
 
         <div className="flex-1 min-h-0">
-          {tab === 'general' && <GeneralTab feature={feature} />}
+          {tab === 'general' && <GeneralTab feature={feature} onFeatureRenamed={(nextFeature) => onRenamed?.(feature, nextFeature)} />}
           {tab === 'repos' && <ReposTab feature={feature} />}
           {tab === 'envsets' && <EnvsetsTab feature={feature} />}
           {tab === 'playwright' && <PlaywrightTab feature={feature} />}

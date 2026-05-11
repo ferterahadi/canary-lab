@@ -232,7 +232,7 @@ function RunningIndicator({
   // until the suite enumeration completes (especially when filtered/retried),
   // which would briefly read "1/1" while 14 tests are actually queued.
   const total = totalTests > 0 ? totalTests : summary.total
-  const done = summary.passed + summary.failed.length
+  const done = summary.passed + summary.failed.length + (summary.skipped ?? summary.skippedNames?.length ?? 0)
   const isTestRunning = isRunActivelyTesting && Boolean(summary.running)
   return (
     <div className="flex items-center gap-2 text-[10px]" style={{ color: 'var(--text-secondary)' }}>

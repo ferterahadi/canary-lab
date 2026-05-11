@@ -193,6 +193,15 @@ export function App() {
           feature={configFor}
           initialTab="playwright"
           onClose={() => setConfigFor(null)}
+          onRenamed={(_, nextFeature) => {
+            setConfigFor(nextFeature)
+            api.listFeatures().then((data) => {
+              setFeatures(data)
+              pendingRunSelectionRef.current = null
+              setSelectedFeature(nextFeature)
+              setSelectedRunId(allRuns.find((r) => r.feature === nextFeature)?.runId ?? null)
+            }).catch(() => {})
+          }}
           onDeleted={(deletedFeature) => {
             setConfigFor(null)
             api.listFeatures().then((data) => {
