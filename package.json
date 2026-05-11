@@ -1,6 +1,6 @@
 {
   "name": "canary-lab",
-  "version": "3",
+  "version": "1.0.3",
   "description": "E2E test scaffolder and runner with agent-assisted self-fixing workflows",
   "keywords": [
     "playwright",
