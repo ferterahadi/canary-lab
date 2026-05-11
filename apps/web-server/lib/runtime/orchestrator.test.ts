@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { execFileSync } from 'child_process'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -1297,7 +1298,18 @@ describe('RunOrchestrator.runFullCycle', () => {
     await orch.stop('failed')
   })
 
-  it('appends a journal entry with filesChanged when the signal includes one', async () => {
+  it('runner-observed git diff drives the journal fix.file and the restart plan', async () => {
+    // tmpDir is the feature's repo localPath; turn it into a git repo with
+    // a baseline commit so the runner's snapshot-then-diff path picks up
+    // files the agent edits between snapshot and signal.
+    execFileSync('git', ['init', '-q'], { cwd: tmpDir })
+    execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: tmpDir })
+    execFileSync('git', ['config', 'user.name', 'Test'], { cwd: tmpDir })
+    fs.writeFileSync(path.join(tmpDir, 'a.ts'), '// initial a\n')
+    fs.writeFileSync(path.join(tmpDir, 'b.ts'), '// initial b\n')
+    execFileSync('git', ['add', 'a.ts', 'b.ts'], { cwd: tmpDir })
+    execFileSync('git', ['commit', '-q', '-m', 'init'], { cwd: tmpDir })
+
     const f = makeFakeFactory()
     // maxCycles=1 so the loop exits after one heal cycle when pw still fails.
     let pwIdx = 0
@@ -1322,11 +1334,15 @@ describe('RunOrchestrator.runFullCycle', () => {
     await new Promise((r) => setTimeout(r, 10))
     f.spawned[1].emitExit(1)
     while (f.spawned.length < 3) await new Promise((r) => setTimeout(r, 5))
-    // Use a path under tmpDir (the feature's repo localPath) so the selective
-    // restart matches and respawns the service.
+    // Agent's turn: modify the tracked files (the snapshot was taken right
+    // before the agent pty was spawned, so these edits are inside the
+    // iteration's diff window).
+    fs.writeFileSync(path.join(tmpDir, 'a.ts'), '// edited a\n')
+    fs.writeFileSync(path.join(tmpDir, 'b.ts'), '// edited b\n')
+    // New signal body shape: hypothesis + fixDescription only. The runner
+    // detects files via git, not from this body.
     fs.writeFileSync(orch.paths.restartSignal, JSON.stringify({
       hypothesis: 'fix the thing',
-      filesChanged: [path.join(tmpDir, 'a.ts'), path.join(tmpDir, 'b.ts'), 42], // non-string entries filtered
       fixDescription: 'patched the handler',
     }))
     f.spawned[2].emitExit(0)
@@ -1335,7 +1351,7 @@ describe('RunOrchestrator.runFullCycle', () => {
     const status = await promise
     expect(status).toBe('failed')
     expect(f.spawned.length).toBeGreaterThanOrEqual(5)
-    // healCycleHistory should record the restart.
+    // healCycleHistory should record the restart, matched against the diff'd files.
     const m = readManifest(orch.paths.manifestPath)!
     expect((m as { healCycleHistory?: unknown[] }).healCycleHistory).toBeTruthy()
     const history = (m as { healCycleHistory: Array<{ cycle: number; restarted: string[]; kept: string[] }> }).healCycleHistory
@@ -1343,8 +1359,110 @@ describe('RunOrchestrator.runFullCycle', () => {
     expect(history[0].restarted).toEqual(['api'])
     const journal = fs.readFileSync(orch.paths.diagnosisJournalPath, 'utf-8')
     expect(journal).toContain('- hypothesis: fix the thing')
+    expect(journal).toContain('- fix.description: patched the handler')
     expect(journal).toContain(`- fix.file: ${path.join(tmpDir, 'a.ts')}, ${path.join(tmpDir, 'b.ts')}`)
     expect(fs.existsSync(path.join(tmpDir, 'logs', 'diagnosis-journal.md'))).toBe(false)
+    await orch.stop('failed')
+  }, 15000)
+
+  it('isolates the agent edit window from pre-existing dirty state', async () => {
+    // Workspace is dirty BEFORE heal runs (user WIP). The journal must record
+    // only what the agent edited during its turn — pre-existing dirty files
+    // must not leak in.
+    execFileSync('git', ['init', '-q'], { cwd: tmpDir })
+    execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: tmpDir })
+    execFileSync('git', ['config', 'user.name', 'Test'], { cwd: tmpDir })
+    fs.writeFileSync(path.join(tmpDir, 'a.ts'), '// initial a\n')
+    fs.writeFileSync(path.join(tmpDir, 'b.ts'), '// initial b\n')
+    execFileSync('git', ['add', 'a.ts', 'b.ts'], { cwd: tmpDir })
+    execFileSync('git', ['commit', '-q', '-m', 'init'], { cwd: tmpDir })
+    // Pre-existing WIP — dirty BEFORE the orchestrator starts. The agent
+    // never touches this file; the diff must not include it.
+    fs.writeFileSync(path.join(tmpDir, 'a.ts'), '// pre-existing dirty\n')
+
+    const f = makeFakeFactory()
+    let pwIdx = 0
+    let healIdx = 0
+    const orch = new RunOrchestrator({
+      feature: makeFeature(),
+      runId: RUN_ID,
+      runDir,
+      ptyFactory: f.factory,
+      healthCheck: async () => true,
+      delay: async () => undefined,
+      healthPollIntervalMs: 5,
+      healSignalPollMs: 1,
+      healAgentTimeoutMs: 1000,
+      playwrightSpawner: () => ({ command: `pw-${pwIdx++}`, cwd: tmpDir }),
+      autoHeal: { agent: 'claude', maxCycles: 1, buildCommand: () => `heal-${healIdx++}` },
+    })
+    fs.mkdirSync(runDir, { recursive: true })
+    fs.writeFileSync(orch.paths.summaryPath, JSON.stringify({ failed: [{ name: 'a' }] }))
+
+    const promise = orch.runFullCycle()
+    await new Promise((r) => setTimeout(r, 10))
+    f.spawned[1].emitExit(1)
+    while (f.spawned.length < 3) await new Promise((r) => setTimeout(r, 5))
+    // Agent edits only b.ts, leaves the pre-existing dirty a.ts alone.
+    fs.writeFileSync(path.join(tmpDir, 'b.ts'), '// edited b by agent\n')
+    fs.writeFileSync(orch.paths.restartSignal, JSON.stringify({
+      hypothesis: 'fixed b',
+      fixDescription: 'only touched b',
+    }))
+    f.spawned[2].emitExit(0)
+    while (f.spawned.length < 5) await new Promise((r) => setTimeout(r, 5))
+    f.spawned[4].emitExit(1)
+    await promise
+
+    const journal = fs.readFileSync(orch.paths.diagnosisJournalPath, 'utf-8')
+    // fix.file records only the agent's edit, not the pre-existing dirty file.
+    expect(journal).toContain(`- fix.file: ${path.join(tmpDir, 'b.ts')}`)
+    expect(journal).not.toContain(`- fix.file: ${path.join(tmpDir, 'a.ts')}`)
+    expect(journal).not.toMatch(new RegExp(`fix\\.file:.*${path.basename(tmpDir)}/a\\.ts`))
+    await orch.stop('failed')
+  }, 15000)
+
+  it('omits fix.file in non-git workspaces and falls back to restart-all', async () => {
+    // No git init on tmpDir → snapshotFeatureRepos sees no working tree, the
+    // diff is empty, the journal omits fix.file, and restart() with an empty
+    // filesChanged respawns every service (the previous "restart all" path).
+    const f = makeFakeFactory()
+    let pwIdx = 0
+    let healIdx = 0
+    const orch = new RunOrchestrator({
+      feature: makeFeature(),
+      runId: RUN_ID,
+      runDir,
+      ptyFactory: f.factory,
+      healthCheck: async () => true,
+      delay: async () => undefined,
+      healthPollIntervalMs: 5,
+      healSignalPollMs: 1,
+      healAgentTimeoutMs: 1000,
+      playwrightSpawner: () => ({ command: `pw-${pwIdx++}`, cwd: tmpDir }),
+      autoHeal: { agent: 'claude', maxCycles: 1, buildCommand: () => `heal-${healIdx++}` },
+    })
+    fs.mkdirSync(runDir, { recursive: true })
+    fs.writeFileSync(orch.paths.summaryPath, JSON.stringify({ failed: [{ name: 'a' }] }))
+
+    const promise = orch.runFullCycle()
+    await new Promise((r) => setTimeout(r, 10))
+    f.spawned[1].emitExit(1)
+    while (f.spawned.length < 3) await new Promise((r) => setTimeout(r, 5))
+    fs.writeFileSync(orch.paths.restartSignal, JSON.stringify({
+      hypothesis: 'fix',
+      fixDescription: 'd',
+    }))
+    f.spawned[2].emitExit(0)
+    while (f.spawned.length < 5) await new Promise((r) => setTimeout(r, 5))
+    f.spawned[4].emitExit(1)
+    await promise
+
+    const journal = fs.readFileSync(orch.paths.diagnosisJournalPath, 'utf-8')
+    expect(journal).toContain('- hypothesis: fix')
+    expect(journal).not.toContain('- fix.file:')
+    // The api service was respawned despite the empty diff (restart-all path).
+    expect(f.spawned.length).toBeGreaterThanOrEqual(5)
     await orch.stop('failed')
   }, 15000)
 

@@ -21,4 +21,4 @@ Rules:
 - After fixing, write the per-run signal file:
   - Service/app fix → `{{restartSignal}}`
   - Test/config-only fix → `{{rerunSignal}}`
-- Signal body: `{"hypothesis":"...","filesChanged":["<abs-path>", ...]}`.
+- Signal body: `{"hypothesis":"<concise diagnosis of what's wrong>","fixDescription":"<concise summary of what the fix does>"}`. Both fields land in the audit journal. The runner detects which files you changed via git — do not list them.

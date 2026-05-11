@@ -188,6 +188,38 @@ function emptyGitStatus(): GitStatus {
   }
 }
 
+// Snapshot the working tree (tracked files only) and return a ref the caller
+// can later `git diff` against. Used by the heal loop to isolate the agent's
+// edit window from pre-existing dirty state: snapshot before the agent edits,
+// diff after the signal arrives, and the result is exactly what changed during
+// the agent's turn — pre-existing WIP doesn't leak in.
+//
+// `git stash create` builds a dangling tree+commit object without touching the
+// stash list, index, or working tree. The returned SHA is reference-only; git
+// GCs it once unreachable, so there's nothing to clean up. When the tree was
+// clean at snapshot time, stash create prints nothing — we fall back to HEAD,
+// which gives equivalent diff semantics for a clean baseline.
+export async function snapshotWorkingTree(repoPath: string): Promise<string | null> {
+  const target = resolveRepoPath(repoPath)
+  if (!fs.existsSync(target) || !fs.statSync(target).isDirectory()) return null
+  const inside = await runGit(target, ['rev-parse', '--is-inside-work-tree'])
+  if (inside.code !== 0 || inside.stdout.trim() !== 'true') return null
+  const stash = await runGit(target, ['stash', 'create'])
+  if (stash.code !== 0) return null
+  const sha = stash.stdout.trim()
+  return sha.length > 0 ? sha : 'HEAD'
+}
+
+export async function diffNamesSinceSnapshot(repoPath: string, ref: string): Promise<string[]> {
+  const target = resolveRepoPath(repoPath)
+  const result = await runGit(target, ['diff', '--name-only', ref])
+  if (result.code !== 0) return []
+  return result.stdout
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+}
+
 export function findRepo(feature: FeatureConfig, name: string): RepoPrerequisite | null {
   return (feature.repos ?? []).find((repo) => repo.name === name) ?? null
 }

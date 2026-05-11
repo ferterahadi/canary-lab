@@ -37,6 +37,11 @@ import { readPlaywrightArtifactPolicy } from './playwright-artifact-policy'
 import { slugify } from './summary-reporter'
 import { listSpecFiles } from '../feature-loader'
 import { extractTestsFromSource } from '../ast-extractor'
+import {
+  diffNamesSinceSnapshot,
+  resolveRepoPath,
+  snapshotWorkingTree,
+} from '../git-repo'
 
 // Headless event-emitting orchestrator for a single feature run. Wraps the
 // existing health-check / signal-file semantics behind a clean API the future
@@ -1124,6 +1129,38 @@ export class RunOrchestrator extends EventEmitter {
     this.healAgentSessionId = null
   }
 
+  // Snapshot every git-tracked repo in the feature just before the agent has
+  // the floor. The returned map is the input to `diffFeatureRepos`, which
+  // computes the list of files the agent actually edited during its turn.
+  // Repos that aren't git working trees are silently omitted — the diff for
+  // them is empty, which yields a `restart([])` (restart everything) fallback
+  // identical to the pre-change behavior when the agent didn't declare files.
+  private async snapshotFeatureRepos(): Promise<Map<string, string>> {
+    const snapshots = new Map<string, string>()
+    for (const repo of this.feature.repos ?? []) {
+      const localPath = repo.localPath
+      if (typeof localPath !== 'string') continue
+      const ref = await snapshotWorkingTree(localPath)
+      if (ref !== null) snapshots.set(localPath, ref)
+    }
+    return snapshots
+  }
+
+  // Diff each snapshotted repo and return absolute paths of the files the
+  // agent touched between snapshot and now. Used as ground truth for both the
+  // journal entry's `fix.file` line and the orchestrator's restart planning.
+  private async diffFeatureRepos(snapshots: Map<string, string>): Promise<string[]> {
+    const out: string[] = []
+    for (const [localPath, ref] of snapshots) {
+      const relPaths = await diffNamesSinceSnapshot(localPath, ref)
+      const absRepoPath = resolveRepoPath(localPath)
+      for (const rel of relPaths) {
+        out.push(path.join(absRepoPath, rel))
+      }
+    }
+    return out
+  }
+
   // Top-level "do the whole thing" entry. Boots services, runs Playwright,
   // and—if autoHeal is enabled—loops through heal cycles until one of:
   // tests pass, the cap is hit, the agent gives up without signaling, or the
@@ -1163,6 +1200,10 @@ export class RunOrchestrator extends EventEmitter {
         this.setStatus('healing')
         this.noteHealCycle()
         this.emit('agent-started', { cycle: this.healCycles, command: '<manual>' })
+        // Same snapshot/diff pattern as auto-heal: capture working-tree state
+        // before the user starts editing, then diff after the signal arrives
+        // so the journal records only what the user changed during this turn.
+        const snapshots = await this.snapshotFeatureRepos()
         const signal = await this.waitForHealSignal(MANUAL_TIMEOUT_MS)
         this.emit('agent-exit', { exitCode: 0 })
         if (this.healCancelled || this.stopped) {
@@ -1175,14 +1216,13 @@ export class RunOrchestrator extends EventEmitter {
           this.setStatus(finalStatus)
           break
         }
+        const filesChanged = await this.diffFeatureRepos(snapshots)
         try {
           if (signal.kind === 'restart' || signal.kind === 'rerun') {
             appendJournalIteration({
               signal: signal.kind === 'restart' ? '.restart' : '.rerun',
               hypothesis: typeof signal.body.hypothesis === 'string' ? signal.body.hypothesis : undefined,
-              filesChanged: Array.isArray(signal.body.filesChanged)
-                ? (signal.body.filesChanged.filter((f): f is string => typeof f === 'string'))
-                : undefined,
+              filesChanged,
               fixDescription: typeof signal.body.fixDescription === 'string' ? signal.body.fixDescription : undefined,
               runId: this.runId,
               manifestPath: this.paths.manifestPath,
@@ -1194,9 +1234,6 @@ export class RunOrchestrator extends EventEmitter {
         const rerunTargets = this.rerunTargetsForSummary(readSummary(this.paths.summaryPath))
         this.setStatus('running')
         if (signal.kind === 'restart') {
-          const filesChanged = Array.isArray(signal.body.filesChanged)
-            ? signal.body.filesChanged.filter((f): f is string => typeof f === 'string')
-            : []
           await this.restart(filesChanged)
         } else {
           await this.rerun()
@@ -1279,6 +1316,12 @@ export class RunOrchestrator extends EventEmitter {
         this.setStatus('healing')
         this.noteHealCycle()
 
+        // Snapshot every git-tracked feature repo just before the agent runs.
+        // After the signal arrives, the diff against this snapshot is the
+        // ground-truth list of files the agent edited during its turn —
+        // pre-existing dirty state in the workspace doesn't leak in.
+        const snapshots = await this.snapshotFeatureRepos()
+
         const { exitCode: agentExitCode, signal } = await this.runHealAgent({ cycle: cycleNum, failedSlugs, userGuidance })
         userGuidance = undefined
 
@@ -1305,14 +1348,14 @@ export class RunOrchestrator extends EventEmitter {
           break
         }
 
+        const filesChanged = await this.diffFeatureRepos(snapshots)
+
         try {
           if (signal.kind === 'restart' || signal.kind === 'rerun') {
             appendJournalIteration({
               signal: signal.kind === 'restart' ? '.restart' : '.rerun',
               hypothesis: typeof signal.body.hypothesis === 'string' ? signal.body.hypothesis : undefined,
-              filesChanged: Array.isArray(signal.body.filesChanged)
-                ? (signal.body.filesChanged.filter((f): f is string => typeof f === 'string'))
-                : undefined,
+              filesChanged,
               fixDescription: typeof signal.body.fixDescription === 'string' ? signal.body.fixDescription : undefined,
               runId: this.runId,
               manifestPath: this.paths.manifestPath,
@@ -1327,9 +1370,6 @@ export class RunOrchestrator extends EventEmitter {
 
         const action = heal.actionForSignal(signal.kind === 'heal' ? 'rerun' : signal.kind)
         if (action.kind === 'restart-and-rerun') {
-          const filesChanged = Array.isArray(signal.body.filesChanged)
-            ? signal.body.filesChanged.filter((f): f is string => typeof f === 'string')
-            : []
           const { restarted, kept } = await this.restart(filesChanged)
           if (this.stopped) return this.status
           this.healCycleHistory.push({ cycle: cycleNum, restarted, kept })

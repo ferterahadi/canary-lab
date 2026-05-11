@@ -109,6 +109,10 @@ export function FeaturesColumn({
         <FeatureConfigEditor
           feature={configFor}
           onClose={() => setConfigFor(null)}
+          onRenamed={(_, nextFeature) => {
+            setConfigFor(nextFeature)
+            onFeaturesChanged?.(nextFeature)
+          }}
           onDeleted={(deletedFeature) => {
             setConfigFor(null)
             onFeaturesChanged?.(selectedFeature === deletedFeature ? null : selectedFeature)

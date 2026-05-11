@@ -62,4 +62,37 @@ describe('buildHealAddendum', () => {
     expect(addendum).toContain('Cycle 1 of 2.')
     expect(addendum).not.toContain('Failing tests:')
   })
+
+  it('asks the agent for hypothesis and fixDescription only, not filesChanged', () => {
+    // The new signal-body contract drops filesChanged (the runner observes it
+    // via git) and adds fixDescription. The addendum must match the static
+    // prompt so the agent sees a consistent schema.
+    const addendum = buildHealAddendum({ cycle: 1 })
+
+    expect(addendum).toContain('hypothesis')
+    expect(addendum).toContain('fixDescription')
+    expect(addendum).toContain('runner detects which files you changed via git')
+    expect(addendum).not.toContain('filesChanged')
+    // Sanity check on the JSON example shape.
+    expect(addendum).toContain('{"hypothesis":"…","fixDescription":"…"}')
+  })
+
+  it('drops the cycle-≥2 patch-outcome instruction but keeps the "skip tried hypotheses" cue', () => {
+    // The reporter's reconcileJournalOutcome patches `outcome: pending`
+    // deterministically on onEnd, so telling the agent to do it is dead
+    // weight. The remaining cue is the journal-awareness flag that the
+    // static prompt depends on.
+    fs.mkdirSync(logsDir, { recursive: true })
+    fs.writeFileSync(journalPath, '# Diagnosis Journal\n')
+
+    const addendum = buildHealAddendum({ cycle: 2 })
+
+    expect(addendum).toContain('Prior iterations exist')
+    expect(addendum).toContain('Skip hypotheses already tried')
+    // None of the patch-outcome text should remain.
+    expect(addendum).not.toContain('outcome: pending')
+    expect(addendum).not.toContain('all_passed')
+    expect(addendum).not.toContain('regression')
+    expect(addendum).not.toContain('Before forming a new hypothesis')
+  })
 })
