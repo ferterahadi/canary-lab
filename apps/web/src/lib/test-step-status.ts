@@ -97,14 +97,30 @@ export function activeBodyLineForTest(input: {
   bodySource: string
   summary: RunSummary | undefined
 }): number | null {
+  const expectedName = summaryEntryName(input.testName)
   const running = input.summary?.running
-  if (!running || running.name !== summaryEntryName(input.testName)) return null
   const bodyLineCount = input.bodySource.split('\n').length
-  const locations = running.step?.locations ?? (running.step?.location ? [running.step.location] : [])
+  if (running?.name === expectedName) {
+    return bodyLineForLocations(
+      running.step?.locations ?? (running.step?.location ? [running.step.location] : []),
+      input.testLine,
+      bodyLineCount,
+    )
+  }
+  const failed = input.summary?.failed.find((entry) => entry.name === expectedName)
+  if (!failed) return null
+  return bodyLineForLocations(
+    failed.locations?.length ? failed.locations : (failed.location ? [failed.location] : []),
+    input.testLine,
+    bodyLineCount,
+  )
+}
+
+function bodyLineForLocations(locations: string[], testLine: number, bodyLineCount: number): number | null {
   for (const location of locations) {
     const absoluteLine = lineFromLocation(location)
     if (absoluteLine == null) continue
-    const relativeLine = absoluteLine - input.testLine + 1
+    const relativeLine = absoluteLine - testLine + 1
     if (relativeLine >= 1 && relativeLine <= bodyLineCount) return relativeLine
   }
   return null

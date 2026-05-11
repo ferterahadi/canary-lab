@@ -25,6 +25,7 @@ import { FileRunStateSink, type RunStateSink } from './run-state-sink'
 import type { PtyFactory, PtyHandle } from './pty-spawner'
 import { HealCycleState, AUTO_HEAL_MAX_CYCLES } from './heal-cycle'
 import { appendJournalIteration } from './log-enrichment'
+import { locateClaudeSessionLog, locateCodexSessionLog } from '../agent-session-log'
 import type { RunnerLog } from './runner-log'
 import {
   resolveMcpOutputDir,
@@ -89,8 +90,16 @@ export interface OrchestratorOptions {
   // Polling interval for the heal-cycle signal-wait loop. Defaults to
   // healthPollIntervalMs.
   healSignalPollMs?: number
-  // Cap on how long we wait for an agent to write a signal after exit.
+  // Hard ceiling on a single heal cycle (signal-wait). Defaults to 60 min.
+  // When the agent is actively producing output, this is the absolute upper
+  // bound on how long one cycle can run; quieter checks live in
+  // `healAgentIdleTimeoutMs` below.
   healAgentTimeoutMs?: number
+  // Idle window — max time the agent can go without emitting any output
+  // before the cycle is given up on. Resets every time a chunk arrives on
+  // the agent pty. Defaults to 3 min, which is generous for normal claude
+  // pacing but catches a wedged REPL.
+  healAgentIdleTimeoutMs?: number
   // Optional runner-log sink. When present, the orchestrator subscribes to its
   // own lifecycle events on construction and tees a human-readable line for
   // each into `runner.log`. Both CLI and web entrypoints provide one.
@@ -232,6 +241,13 @@ export class RunOrchestrator extends EventEmitter {
   private readonly manualHeal: boolean
   private readonly healSignalPollMs: number
   private readonly healAgentTimeoutMs: number
+  private readonly healAgentIdleTimeoutMs: number
+  // Wall-clock of the most recent chunk emitted by the live heal-agent pty.
+  // Reset at the start of each `waitForHealSignal` call. Used to detect a
+  // wedged REPL (no output for `healAgentIdleTimeoutMs`) while still
+  // allowing legitimate long-running cycles to keep going as long as the
+  // agent is producing text.
+  private lastAgentDataAt = 0
   private readonly runnerLog?: RunnerLog
   private readonly stateSink: RunStateSink
   private readonly repoBranchSnapshots?: RepoBranchSnapshot[]
@@ -265,6 +281,11 @@ export class RunOrchestrator extends EventEmitter {
   // `paths.agentSessionIdPath` so external tools can correlate the run with
   // the conversation log under `~/.claude/projects/`.
   private healAgentSessionId: string | null = null
+  // ISO timestamp captured at heal-agent spawn so the codex session-log
+  // locator can find this run's `~/.codex/sessions/.../<rollout>.jsonl`
+  // (codex has no `--session-id` flag, so we discover the session by
+  // matching `cwd === runDir` and `session_meta.timestamp >= here`).
+  private healAgentStartedAt: string | null = null
   // Set by cancelHeal() so the heal loop in runFullCycle bails out instead of
   // racing toward another Playwright rerun.
   private healCancelled = false
@@ -288,7 +309,11 @@ export class RunOrchestrator extends EventEmitter {
     this.autoHeal = opts.autoHeal
     this.manualHeal = opts.manualHeal ?? false
     this.healSignalPollMs = opts.healSignalPollMs ?? this.healthPollIntervalMs
-    this.healAgentTimeoutMs = opts.healAgentTimeoutMs ?? 10 * 60 * 1000
+    // Hard ceiling per cycle. Generous (2h) so a single heal cycle isn't cut
+    // off mid-work for a hard, agent-blind reason — the idle timeout below
+    // is the primary safety net.
+    this.healAgentTimeoutMs = opts.healAgentTimeoutMs ?? 120 * 60 * 1000
+    this.healAgentIdleTimeoutMs = opts.healAgentIdleTimeoutMs ?? 5 * 60 * 1000
     this.runnerLog = opts.runnerLog
     // Default to a file-only sink so unit tests + the CLI shim don't have
     // to know about `RunStore`. Production wires RunStore in via opts.
@@ -865,36 +890,29 @@ export class RunOrchestrator extends EventEmitter {
     return { ok: true }
   }
 
-  // Pipe raw REPL output (ANSI from xterm.js's perspective) into the
-  // transcript file and the `agent-output` event. No JSON parsing — claude's
-  // session id is pinned at spawn via `--session-id <uuid>`, and codex has
-  // no equivalent so we just don't track one for codex.
+  // Forward raw REPL output (ANSI from xterm.js's perspective) into the
+  // `agent-output` event — the pane broker pushes those chunks to live
+  // xterm subscribers. Historical replay no longer reads from a raw
+  // transcript file; the structured-view route reads the agent CLI's own
+  // JSONL session log instead.
+  //
+  // Each chunk bumps `lastAgentDataAt` so `waitForHealSignal` can detect
+  // an idle REPL (no output for `healAgentIdleTimeoutMs`) while not
+  // killing an actively-thinking one.
   private attachAgentDataHandlers(pty: PtyHandle): void {
-    const transcriptPath = this.paths.agentTranscriptPath
     pty.onData((chunk) => {
-      try { fs.appendFileSync(transcriptPath, chunk) } catch { /* ignore */ }
+      this.lastAgentDataAt = Date.now()
       this.emit('agent-output', { chunk })
     })
   }
 
   private echoUserInterject(text: string): void {
     const block = formatUserInterjectBlock(text, this.startedAt)
-    try {
-      fs.mkdirSync(path.dirname(this.paths.agentTranscriptPath), { recursive: true })
-      fs.appendFileSync(this.paths.agentTranscriptPath, block)
-    } catch {
-      // Transcript echo is best-effort; the live pane still gets the message.
-    }
     this.emit('agent-output', { chunk: block })
   }
 
   private emitAgentSystemMessage(message: string): void {
-    const block = `\n[orchestrator] ${message}\n`
-    try {
-      fs.mkdirSync(path.dirname(this.paths.agentTranscriptPath), { recursive: true })
-      fs.appendFileSync(this.paths.agentTranscriptPath, block)
-    } catch { /* transcript message is best-effort */ }
-    this.emit('agent-output', { chunk: block })
+    this.emit('agent-output', { chunk: `\n[orchestrator] ${message}\n` })
   }
 
   private agentPtyEnv(): Record<string, string> {
@@ -907,23 +925,37 @@ export class RunOrchestrator extends EventEmitter {
     }
   }
 
-  // Block until a signal lands or we time out. Returns `null` on timeout, on
-  // user-cancel-heal, on full abort, or when the heal-agent pty has died
-  // (REPL exited cleanly via `/exit`, crashed, or got SIGKILLed) — without
-  // the pty check the loop would otherwise sit on a dead pipe waiting for
-  // a signal file that the now-gone agent will never write, until the full
-  // `healAgentTimeoutMs` elapses (10 min default). The signal watcher
-  // populates `lastDetectedSignal`; we just poll that.
-  async waitForHealSignal(timeoutMs: number = this.healAgentTimeoutMs): Promise<
-    { kind: 'restart' | 'rerun' | 'heal'; body: Record<string, unknown> } | null
-  > {
-    const deadline = Date.now() + timeoutMs
+  // Block until a signal lands or we give up. Returns a tagged result so the
+  // caller can react to *why* the wait ended:
+  //   - signal:       agent wrote `.restart` / `.rerun` / `.heal`
+  //   - pty-died:     REPL exited (clean /exit, crash, or external kill),
+  //                   plus a short grace window so a write-then-exit signal
+  //                   isn't lost to the watcher race
+  //   - idle-timeout: REPL is alive but hasn't emitted any output for
+  //                   `healAgentIdleTimeoutMs` — usually a wedged REPL
+  //   - hard-timeout: REPL is alive and producing output but has been
+  //                   running for `healAgentTimeoutMs` (the absolute upper
+  //                   bound on a single cycle)
+  //   - stopped:      orchestrator aborted (full stop)
+  //   - cancelled:    user clicked Stop Heal mid-cycle
+  // The signal watcher populates `lastDetectedSignal`; we just poll that.
+  async waitForHealSignal(
+    hardTimeoutMs: number = this.healAgentTimeoutMs,
+    idleTimeoutMs: number = this.healAgentIdleTimeoutMs,
+  ): Promise<{
+    signal: { kind: 'restart' | 'rerun' | 'heal'; body: Record<string, unknown> } | null
+    reason: 'signal' | 'pty-died' | 'idle-timeout' | 'hard-timeout' | 'stopped' | 'cancelled'
+  }> {
+    const startedAt = Date.now()
+    // Seed the idle clock at the start of the wait so the first chunk-less
+    // poll doesn't insta-trip the idle timeout.
+    this.lastAgentDataAt = startedAt
+    const hardDeadline = startedAt + hardTimeoutMs
     // Always yield to the macrotask queue here — this loop runs concurrently
     // with the signal-watcher setInterval, and a microtask-only delay would
     // starve the timer queue.
     const yieldOnce = (ms: number) =>
       new Promise<void>((resolve) => setTimeout(resolve, ms))
-    const deadlineCap = deadline
     // When the pty dies before we've seen a signal, give the signal-watcher
     // a short grace window to surface any `.heal`/`.rerun`/`.restart` file
     // the agent wrote just before exiting. Without this, the wait races the
@@ -931,24 +963,33 @@ export class RunOrchestrator extends EventEmitter {
     // that write-then-exit. 1s is plenty — the watcher polls at
     // `healSignalPollMs` (≤1s in production).
     let postExitDeadline: number | null = null
-    while (Date.now() < deadlineCap) {
-      if (this.stopped) return null
-      if (this.healCancelled) return null
+    while (true) {
+      if (this.stopped) return { signal: null, reason: 'stopped' }
+      if (this.healCancelled) return { signal: null, reason: 'cancelled' }
       if (this.lastDetectedSignal) {
         const sig = this.lastDetectedSignal
         this.lastDetectedSignal = null
-        return sig
+        return { signal: sig, reason: 'signal' }
       }
       if (!this.healAgentPty) {
+        // Pty is dead: the `pty-died` grace owns the exit. Don't let the
+        // hard/idle timeouts steal it — they describe a still-alive REPL,
+        // which we no longer have.
         if (postExitDeadline === null) {
           postExitDeadline = Date.now() + 1000
         } else if (Date.now() >= postExitDeadline) {
-          return null
+          return { signal: null, reason: 'pty-died' }
         }
+        await yieldOnce(Math.max(1, this.healSignalPollMs))
+        continue
+      }
+      const now = Date.now()
+      if (now >= hardDeadline) return { signal: null, reason: 'hard-timeout' }
+      if (now - this.lastAgentDataAt >= idleTimeoutMs) {
+        return { signal: null, reason: 'idle-timeout' }
       }
       await yieldOnce(Math.max(1, this.healSignalPollMs))
     }
-    return null
   }
 
   /**
@@ -971,7 +1012,11 @@ export class RunOrchestrator extends EventEmitter {
     cycle: number
     failedSlugs: readonly string[]
     userGuidance?: string
-  }): Promise<{ exitCode: number; signal: { kind: 'restart' | 'rerun' | 'heal'; body: Record<string, unknown> } | null }> {
+  }): Promise<{
+    exitCode: number
+    signal: { kind: 'restart' | 'rerun' | 'heal'; body: Record<string, unknown> } | null
+    reason: 'signal' | 'pty-died' | 'idle-timeout' | 'hard-timeout' | 'stopped' | 'cancelled' | 'spawn-failed'
+  }> {
     const cfg = this.autoHeal
     if (!cfg) throw new Error('autoHeal not configured')
 
@@ -993,7 +1038,7 @@ export class RunOrchestrator extends EventEmitter {
     const pty = this.healAgentPty
     if (!pty) {
       // spawn failed; spawnHealAgentRepl already surfaced the error.
-      return { exitCode: 1, signal: null }
+      return { exitCode: 1, signal: null, reason: 'spawn-failed' }
     }
 
     if (args.userGuidance) this.echoUserInterject(args.userGuidance)
@@ -1010,13 +1055,16 @@ export class RunOrchestrator extends EventEmitter {
       try {
         pty.write(`@${this.healPromptFile}\r`)
       } catch {
-        return { exitCode: 1, signal: null }
+        return { exitCode: 1, signal: null, reason: 'pty-died' }
       }
     }
 
-    const sig = await this.waitForHealSignal(this.healAgentTimeoutMs)
+    const { signal, reason } = await this.waitForHealSignal(
+      this.healAgentTimeoutMs,
+      this.healAgentIdleTimeoutMs,
+    )
     const exitCode = this.healAgentPty ? 0 : 1
-    return { exitCode, signal: sig }
+    return { exitCode, signal, reason }
   }
 
   /** Absolute path to the heal-prompt file written by `buildCyclePrompt`.
@@ -1069,10 +1117,6 @@ export class RunOrchestrator extends EventEmitter {
       throw err
     }
 
-    const transcriptPath = this.paths.agentTranscriptPath
-    fs.mkdirSync(path.dirname(transcriptPath), { recursive: true })
-    if (!fs.existsSync(transcriptPath)) fs.writeFileSync(transcriptPath, '')
-
     let pty: PtyHandle
     try {
       pty = this.ptyFactory({
@@ -1085,6 +1129,7 @@ export class RunOrchestrator extends EventEmitter {
       throw err
     }
     this.healAgentPty = pty
+    this.healAgentStartedAt = new Date().toISOString()
     this.attachAgentDataHandlers(pty)
 
     // When the REPL exits — either intentionally (cleanup writes /exit then
@@ -1112,6 +1157,10 @@ export class RunOrchestrator extends EventEmitter {
    */
   private cleanupHealAgentPty(): void {
     const pty = this.healAgentPty
+    // Persist the agent's CLI-native session-log pointer before clearing
+    // bookkeeping. This runs once per heal session (the auto-heal loop's
+    // finally), so the JSON reflects the final session, not per-cycle.
+    this.persistAgentSessionRef()
     if (!pty) return
     // Clear the field first so the onExit handler in spawnHealAgentRepl
     // sees `this.healAgentPty !== pty` and skips re-emitting agent-exit.
@@ -1128,6 +1177,36 @@ export class RunOrchestrator extends EventEmitter {
     }
     this.healAgentMcpOutputDir = undefined
     this.healAgentSessionId = null
+    this.healAgentStartedAt = null
+  }
+
+  // Write `<runDir>/agent-session.json` pointing at the agent CLI's own
+  // JSONL session log. The UI's structured-view historical replay reads
+  // from that JSONL — way more reliable than our PTY byte capture.
+  //
+  // - claude: log path is fully determined by runDir + sessionId, so we
+  //   just verify the file exists at the predicted location.
+  // - codex: no `--session-id` flag, so we discover by matching cwd +
+  //   timestamp; locateCodexSessionLog does the directory scan.
+  //
+  // Silently skips when the agent never spawned (manual mode, no failure)
+  // or when the locator can't find the file (race, user moved it).
+  private persistAgentSessionRef(): void {
+    if (!this.autoHeal) return
+    const agent = this.autoHeal.agent
+    let ref: { agent: 'claude' | 'codex'; sessionId: string; logPath: string } | null = null
+    if (agent === 'claude' && this.healAgentSessionId) {
+      const logPath = locateClaudeSessionLog(this.runDir, this.healAgentSessionId)
+      if (logPath) ref = { agent: 'claude', sessionId: this.healAgentSessionId, logPath }
+    } else if (agent === 'codex' && this.healAgentStartedAt) {
+      const found = locateCodexSessionLog(this.runDir, this.healAgentStartedAt)
+      if (found) ref = found
+    }
+    if (!ref) return
+    try {
+      fs.mkdirSync(path.dirname(this.paths.agentSessionRefPath), { recursive: true })
+      fs.writeFileSync(this.paths.agentSessionRefPath, JSON.stringify(ref, null, 2))
+    } catch { /* best-effort */ }
   }
 
   // Snapshot every git-tracked repo in the feature just before the agent has
@@ -1234,7 +1313,10 @@ export class RunOrchestrator extends EventEmitter {
         // before the user starts editing, then diff after the signal arrives
         // so the journal records only what the user changed during this turn.
         const snapshots = await this.snapshotFeatureRepos()
-        const signal = await this.waitForHealSignal(MANUAL_TIMEOUT_MS)
+        // Manual heal: no live REPL emits output, so the idle timeout would
+        // otherwise fire after 3 min. Set the idle window equal to the hard
+        // ceiling so it can't dominate the manual flow.
+        const { signal } = await this.waitForHealSignal(MANUAL_TIMEOUT_MS, MANUAL_TIMEOUT_MS)
         this.emit('agent-exit', { exitCode: 0 })
         if (this.healCancelled || this.stopped) {
           finalStatus = 'failed'
@@ -1302,14 +1384,9 @@ export class RunOrchestrator extends EventEmitter {
     if (!this.autoHeal) return 'failed'
     this.prepareRun('stopped')
     if (this.stopped) return this.status
-    // Truncate the previous heal session's transcript so the new REPL
-    // starts on a clean file. The pane broker clears its in-memory buffer
-    // separately (see `restartHeal` in server.ts) — this handles the
-    // on-disk side that survives reconnects and historical reads.
-    try {
-      fs.mkdirSync(path.dirname(this.paths.agentTranscriptPath), { recursive: true })
-      fs.writeFileSync(this.paths.agentTranscriptPath, '')
-    } catch { /* truncate is best-effort */ }
+    // The pane broker's in-memory ring buffer is cleared separately (see
+    // `restartHeal` in server.ts) so reconnecting subscribers don't see the
+    // previous session's bytes. There's no on-disk transcript to truncate.
     return await this.runAutoHealLoop(userGuidance)
   }
 
@@ -1357,7 +1434,7 @@ export class RunOrchestrator extends EventEmitter {
         // pre-existing dirty state in the workspace doesn't leak in.
         const snapshots = await this.snapshotFeatureRepos()
 
-        const { exitCode: agentExitCode, signal } = await this.runHealAgent({ cycle: cycleNum, failedSlugs, userGuidance })
+        const { signal, reason } = await this.runHealAgent({ cycle: cycleNum, failedSlugs, userGuidance })
         userGuidance = undefined
 
         if (this.stopped) return this.status
@@ -1368,31 +1445,61 @@ export class RunOrchestrator extends EventEmitter {
           break
         }
 
-        // REPL died unexpectedly mid-cycle (crash or external kill). Don't
-        // try to respawn — surface in transcript and end the loop.
-        if (agentExitCode !== 0 && !signal) {
-          this.emitAgentSystemMessage('Heal agent exited unexpectedly. Ending the heal loop.')
-          finalStatus = 'failed'
-          this.setStatus(finalStatus)
-          break
-        }
-
-        if (!signal) {
-          finalStatus = 'failed'
-          this.setStatus(finalStatus)
-          break
-        }
-
         const filesChanged = await this.diffFeatureRepos(snapshots)
         const diffContent = await this.diffContentForFeatureRepos(snapshots)
 
+        // No signal: agent exited / went idle / hit the hard ceiling. The
+        // `reason` distinguishes which so the transcript can say what
+        // actually happened (was it our timeout, or did the agent give up?).
+        // Either way, if it edited any feature-repo file, treat as an
+        // implicit `.rerun` so we don't discard the work; otherwise log the
+        // no-op and end the loop. Journal is always written.
+        let effectiveSignal = signal
+        if (!effectiveSignal) {
+          const idleSec = Math.round(this.healAgentIdleTimeoutMs / 1000)
+          const hardMin = Math.round(this.healAgentTimeoutMs / 60_000)
+          const reasonMessage =
+            reason === 'idle-timeout' ? `Heal agent went silent for ${idleSec}s without writing a signal.`
+              : reason === 'hard-timeout' ? `Heal cycle hit the ${hardMin}-minute ceiling without a signal.`
+                : reason === 'pty-died' ? 'Heal agent exited without writing a signal.'
+                  : reason === 'spawn-failed' ? 'Heal agent failed to spawn.'
+                    : `Heal cycle ended without a signal (reason: ${reason}).`
+          this.emitAgentSystemMessage(reasonMessage)
+
+          if (filesChanged.length === 0) {
+            try {
+              appendJournalIteration({
+                signal: '.rerun',
+                hypothesis: `${reasonMessage} No code changes detected.`,
+                fixDescription: 'No fix applied.',
+                runId: this.runId,
+                manifestPath: this.paths.manifestPath,
+                summaryPath: this.paths.summaryPath,
+                journalPath: this.paths.diagnosisJournalPath,
+              })
+            } catch { /* journal write is best-effort */ }
+            this.emitAgentSystemMessage('No code changes detected — ending the heal loop.')
+            finalStatus = 'failed'
+            this.setStatus(finalStatus)
+            break
+          }
+          this.emitAgentSystemMessage('Code changes detected — inferring a rerun from git diff.')
+          effectiveSignal = {
+            kind: 'rerun',
+            body: {
+              hypothesis: `${reasonMessage} Runner inferred a rerun from git diff.`,
+              fixDescription: 'Inferred from git diff — agent did not write a signal body.',
+            },
+          }
+        }
+
         try {
-          if (signal.kind === 'restart' || signal.kind === 'rerun') {
+          if (effectiveSignal.kind === 'restart' || effectiveSignal.kind === 'rerun') {
             appendJournalIteration({
-              signal: signal.kind === 'restart' ? '.restart' : '.rerun',
-              hypothesis: typeof signal.body.hypothesis === 'string' ? signal.body.hypothesis : undefined,
+              signal: effectiveSignal.kind === 'restart' ? '.restart' : '.rerun',
+              hypothesis: typeof effectiveSignal.body.hypothesis === 'string' ? effectiveSignal.body.hypothesis : undefined,
               filesChanged,
-              fixDescription: typeof signal.body.fixDescription === 'string' ? signal.body.fixDescription : undefined,
+              fixDescription: typeof effectiveSignal.body.fixDescription === 'string' ? effectiveSignal.body.fixDescription : undefined,
               diffContent,
               runId: this.runId,
               manifestPath: this.paths.manifestPath,
@@ -1405,7 +1512,7 @@ export class RunOrchestrator extends EventEmitter {
         const rerunTargets = this.rerunTargetsForSummary(summary)
         this.setStatus('running')
 
-        const action = heal.actionForSignal(signal.kind === 'heal' ? 'rerun' : signal.kind)
+        const action = heal.actionForSignal(effectiveSignal.kind === 'heal' ? 'rerun' : effectiveSignal.kind)
         if (action.kind === 'restart-and-rerun') {
           const { restarted, kept } = await this.restart(filesChanged)
           if (this.stopped) return this.status

@@ -602,6 +602,50 @@ describe('SummaryReporter', () => {
     })
   })
 
+  it('persists failed error and parent step locations for code highlighting', () => {
+    const reporter = new SummaryReporter()
+    const test = mkTest('Nested failure', '/specs/nested.spec.ts', 20)
+    const parent = mkStep('Redeem voucher', 'test.step', '/specs/nested.spec.ts', 25)
+    const child = mkChildStep('locator.click', 'pw:api', parent, '/helpers/voucher.ts', 8)
+
+    reporter.onTestBegin(test)
+    reporter.onStepBegin(test, mkResult(), parent)
+    reporter.onStepBegin(test, mkResult(), child)
+    reporter.onStepEnd(test, mkResult(), { ...child, error: { message: 'boom' } })
+    reporter.onTestEnd(
+      test,
+      mkResult({
+        status: 'failed',
+        error: {
+          message: 'boom',
+          location: { file: '/helpers/voucher.ts', line: 8 },
+          stack: [
+            'Error: boom',
+            '    at redeem (/helpers/voucher.ts:8:3)',
+            '    at /specs/nested.spec.ts:25:5',
+          ].join('\n'),
+        },
+        errors: [
+          {
+            message: 'boom',
+            location: { file: '/helpers/voucher.ts', line: 8 },
+            stack: [
+              'Error: boom',
+              '    at redeem (/helpers/voucher.ts:8:3)',
+              '    at /specs/nested.spec.ts:25:5',
+            ].join('\n'),
+          },
+        ],
+      }),
+    )
+
+    expect(readSummary().failed[0]).toMatchObject({
+      name: 'test-case-nested-failure',
+      location: '/specs/nested.spec.ts:20',
+      locations: ['/helpers/voucher.ts:8', '/specs/nested.spec.ts:25'],
+    })
+  })
+
   it('writes structured playback events with attachments', () => {
     const reporter = new SummaryReporter()
     const test = mkTest('Visual checkout', '/specs/checkout.spec.ts', 12)

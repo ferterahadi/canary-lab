@@ -543,6 +543,39 @@ export function getRunDetail(runId: string, opts?: ClientOptions): Promise<RunDe
   )
 }
 
+// Structured heal-agent session view (claude/codex JSONL parsed + normalized
+// into a uniform event stream). 404 on the API maps to `null` here so the UI
+// can fall back to the raw transcript replay without try/catch noise.
+export type AgentSessionEvent =
+  | { kind: 'user-message'; timestamp: string; text: string }
+  | { kind: 'assistant-message'; timestamp: string; text: string }
+  | { kind: 'assistant-thinking'; timestamp: string; text: string }
+  | { kind: 'tool-call'; timestamp: string; toolId: string; name: string; input: unknown }
+  | { kind: 'tool-result'; timestamp: string; toolId: string; output: string; isError?: boolean }
+
+export interface AgentSessionResponse {
+  agent: 'claude' | 'codex'
+  sessionId: string
+  events: AgentSessionEvent[]
+}
+
+export async function getAgentSession(
+  runId: string,
+  opts?: ClientOptions,
+): Promise<AgentSessionResponse | null> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  try {
+    return await request<AgentSessionResponse>(
+      `${baseUrl}/api/runs/${encodeURIComponent(runId)}/agent-session`,
+      { method: 'GET' },
+      fetchImpl,
+    )
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) return null
+    throw err
+  }
+}
+
 export function startRun(
   feature: string,
   opts?: ClientOptions & { env?: string },

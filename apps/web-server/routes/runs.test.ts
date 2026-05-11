@@ -108,6 +108,63 @@ describe('GET /api/runs/:runId', () => {
   })
 })
 
+describe('GET /api/runs/:runId/agent-session', () => {
+  it('returns normalized events when agent-session.json + log exist', async () => {
+    writeManifestForRun('r1')
+    const runDir = runDirFor(logsDir, 'r1')
+    // Stand up a fake claude session log on disk.
+    const logPath = path.join(tmpDir, 'fake-session.jsonl')
+    fs.writeFileSync(logPath, JSON.stringify({
+      type: 'user',
+      timestamp: 't',
+      message: { content: 'hi' },
+    }) + '\n')
+    fs.writeFileSync(path.join(runDir, 'agent-session.json'), JSON.stringify({
+      agent: 'claude',
+      sessionId: 'sid',
+      logPath,
+    }))
+
+    const { app } = await build()
+    const res = await app.inject({ method: 'GET', url: '/api/runs/r1/agent-session' })
+    expect(res.statusCode).toBe(200)
+    const body = res.json() as { agent: string; events: Array<{ kind: string }> }
+    expect(body.agent).toBe('claude')
+    expect(body.events).toEqual([
+      { kind: 'user-message', timestamp: 't', text: 'hi' },
+    ])
+  })
+
+  it('404 reason=run-not-found when the run is unknown', async () => {
+    const { app } = await build()
+    const res = await app.inject({ method: 'GET', url: '/api/runs/none/agent-session' })
+    expect(res.statusCode).toBe(404)
+    expect(res.json()).toEqual({ reason: 'run-not-found' })
+  })
+
+  it('404 reason=no-session-ref when the pointer file is missing', async () => {
+    writeManifestForRun('r1')
+    const { app } = await build()
+    const res = await app.inject({ method: 'GET', url: '/api/runs/r1/agent-session' })
+    expect(res.statusCode).toBe(404)
+    expect(res.json()).toEqual({ reason: 'no-session-ref' })
+  })
+
+  it('404 reason=session-log-missing when the pointed-at JSONL is gone', async () => {
+    writeManifestForRun('r1')
+    const runDir = runDirFor(logsDir, 'r1')
+    fs.writeFileSync(path.join(runDir, 'agent-session.json'), JSON.stringify({
+      agent: 'claude',
+      sessionId: 'sid',
+      logPath: path.join(tmpDir, 'never-existed.jsonl'),
+    }))
+    const { app } = await build()
+    const res = await app.inject({ method: 'GET', url: '/api/runs/r1/agent-session' })
+    expect(res.statusCode).toBe(404)
+    expect(res.json()).toEqual({ reason: 'session-log-missing' })
+  })
+})
+
 describe('GET /api/runs/:runId/artifacts/*', () => {
   it('serves files from the run-local Playwright artifact directory', async () => {
     writeManifestForRun('r1')

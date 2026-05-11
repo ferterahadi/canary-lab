@@ -254,6 +254,46 @@ describe('activeBodyLineForTest', () => {
     })).toBe(3)
   })
 
+  it('uses persisted failed locations after the test stops running', () => {
+    expect(activeBodyLineForTest({
+      testName: 'Creates a TODO',
+      testLine: 10,
+      bodySource: '{\n  await page.goto(\"/\")\n  await expect(locator).toBeVisible()\n}',
+      summary: {
+        complete: true,
+        total: 1,
+        passed: 0,
+        failed: [
+          {
+            name: 'test-case-creates-a-todo',
+            location: '/todo.spec.ts:10',
+            locations: ['/todo.spec.ts:12'],
+          },
+        ],
+      },
+    })).toBe(3)
+  })
+
+  it('keeps the highlight on the parent test body when a child helper location appears first', () => {
+    expect(activeBodyLineForTest({
+      testName: 'Creates a TODO',
+      testLine: 10,
+      bodySource: '{\n  await page.goto(\"/\")\n  await redeemCode(page)\n}',
+      summary: {
+        complete: true,
+        total: 1,
+        passed: 0,
+        failed: [
+          {
+            name: 'test-case-creates-a-todo',
+            location: '/todo.spec.ts:10',
+            locations: ['/helpers/voucher.ts:4', '/todo.spec.ts:12'],
+          },
+        ],
+      },
+    })).toBe(3)
+  })
+
   it('returns null when the running step has no location', () => {
     expect(activeBodyLineForTest({
       testName: 'Creates a TODO',

@@ -1,6 +1,6 @@
 // Plain-text "runner log" — captures the runner's own progress narration to a
-// per-run `runner.log` file alongside `svc-*.log`, `playwright.log`, and
-// `agent-transcript.log`. Two upstream sources tee through here:
+// per-run `runner.log` file alongside `svc-*.log` and `playwright.log`. Two
+// upstream sources tee through here:
 //
 //  1. `RunOrchestrator` lifecycle events (service-started, health-check,
 //     playwright-started, signal-detected, run-complete, …).
