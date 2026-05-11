@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { Terminal, type ITheme } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
+import { WebglAddon } from '@xterm/addon-webgl'
 import { connectPane, type PaneConnection } from '../api/pane-socket'
 import * as api from '../api/client'
 import { currentResolvedTheme, subscribeTheme, type ResolvedTheme } from '../lib/theme'
@@ -26,18 +27,20 @@ const TERM_THEMES: Record<ResolvedTheme, ITheme> = {
 interface Props {
   runId: string
   paneId: string
+  onExit?: (code: number) => void
 }
 
 // Renders a single xterm.js terminal bound to one pane. Re-mounts when
 // runId/paneId change. Buffer replay is handled server-side, so a fresh
 // Terminal per mount is fine.
-export function PaneTerminal({ runId, paneId }: Props) {
+export function PaneTerminal({ runId, paneId, onExit }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const noticeKeysRef = useRef<Set<string>>(new Set())
 
   useEffect(() => {
     const container = containerRef.current
     if (!container) return
+    const isAgentPane = paneId === 'agent'
     noticeKeysRef.current = new Set()
     const term = new Terminal({
       convertEol: true,
@@ -52,13 +55,45 @@ export function PaneTerminal({ runId, paneId }: Props) {
     const fit = new FitAddon()
     term.loadAddon(fit)
     term.open(container)
-    try { fit.fit() } catch { /* container not measured yet */ }
+
+    // Use the WebGL renderer on the agent pane. Codex and Claude TUIs (Ink)
+    // emit full-screen ANSI redraws on every keystroke and every generated
+    // token — dozens per second. The default DOM renderer repaints one node
+    // per cell and visibly flickers under that load; WebGL paints via a
+    // single batched canvas. Falls back silently to DOM if the context can't
+    // be created (headless env, no GPU) or is later lost.
+    let webgl: WebglAddon | null = null
+    if (isAgentPane) {
+      try {
+        const addon = new WebglAddon()
+        addon.onContextLoss(() => {
+          addon.dispose()
+          webgl = null
+        })
+        term.loadAddon(addon)
+        webgl = addon
+      } catch {
+        webgl = null
+      }
+    }
+
+    const fitOnce = (): void => {
+      if (container.clientWidth === 0 || container.clientHeight === 0) return
+      try { fit.fit() } catch { /* ignore */ }
+    }
+
+    fitOnce()
 
     const conn: PaneConnection = connectPane({
       runId,
       paneId,
-      onData: (chunk) => term.write(chunk),
-      onExit: (code) => term.writeln(`\r\nPane exited code=${code}`),
+      onData: (chunk) => {
+        term.write(chunk)
+      },
+      onExit: (code) => {
+        term.writeln(`\r\nPane exited code=${code}`)
+        onExit?.(code)
+      },
       onReset: () => {
         // Server reset the pane (e.g. Restart Heal kicked off a fresh
         // orchestrator). Wipe the visible xterm so the new REPL streams
@@ -78,19 +113,14 @@ export function PaneTerminal({ runId, paneId }: Props) {
         }
       },
       onOpen: () => {
-        // Send the current xterm dimensions as soon as the WS is OPEN. The
-        // pty was spawned at 120×30 defaults; without this push, claude's
-        // TUI renders at that width and its status bar wraps mid-word for
-        // anyone whose pane is wider or narrower. xterm's onResize callback
-        // below covers subsequent resizes (window resize, panel collapse).
         conn.sendResize(term.cols, term.rows)
       },
     })
 
     // Intercept Ctrl+C on the agent pane and route it to the cancel-heal
-    // API instead of letting it through as a raw \x03 to claude. The user's
-    // mental model: Ctrl+C = "stop this heal". Without this, Ctrl+C would
-    // only interrupt claude's current generation but the orchestrator would
+    // API instead of letting it through as a raw \x03 to the agent process.
+    // The user's mental model: Ctrl+C = "stop this heal". Without this,
+    // Ctrl+C would only interrupt the current generation but the orchestrator would
     // immediately re-prompt on the next cycle. 404 / 409 from the API are
     // ignored — if there's nothing to cancel, the keystroke is a no-op.
     const keyHandler = (e: KeyboardEvent): boolean => {
@@ -108,30 +138,34 @@ export function PaneTerminal({ runId, paneId }: Props) {
     // live REPL on the other end; other panes ignore input server-side, so
     // wiring it unconditionally is harmless and keeps the component simple.
     const inputDisposable = term.onData((data) => conn.sendInput(data))
-    const resizeDisposable = term.onResize(({ cols, rows }) => conn.sendResize(cols, rows))
 
-    // Re-fit on every container resize. Two cases matter:
+    // Re-fit non-agent panes on container resize. Two cases matter:
     // 1. Initial mount after a tab switch — the inline fit.fit() above can
     //    silently fail because the container has 0 dims before layout
-    //    settles. The observer fires once the container is measured, so
-    //    xterm catches up to the real pane size and term.onResize forwards
-    //    the dims to the server pty (SIGWINCH → clean redraw).
+    //    settles. The observer fires once the container is measured, so xterm
+    //    catches up to the real pane size and forwards one stable PTY resize.
     // 2. Later in-app resizes — splitter drag, sidebar toggle, etc. The
     //    old window 'resize' listener missed these.
-    const observer = new ResizeObserver(() => {
-      if (container.clientWidth === 0 || container.clientHeight === 0) return
-      try { fit.fit() } catch { /* ignore */ }
-    })
-    observer.observe(container)
+    //
+    // The heal-agent pane is intentionally excluded. Codex and Claude render
+    // full-screen TUIs that redraw on SIGWINCH; live ResizeObserver fitting can
+    // loop with xterm's own DOM changes and make the prompt blink while typing.
+    let observer: ResizeObserver | null = null
+    if (!isAgentPane && typeof ResizeObserver !== 'undefined') {
+      observer = new ResizeObserver(() => {
+        fitOnce()
+      })
+      observer.observe(container)
+    }
     return () => {
-      observer.disconnect()
+      observer?.disconnect()
       unsubscribeTheme()
       inputDisposable.dispose()
-      resizeDisposable.dispose()
       conn.close()
+      webgl?.dispose()
       term.dispose()
     }
-  }, [runId, paneId])
+  }, [runId, paneId, onExit])
 
   return <div ref={containerRef} className="h-full w-full p-2" style={{ background: 'var(--bg-base)' }} />
 }

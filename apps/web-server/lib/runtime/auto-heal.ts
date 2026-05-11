@@ -27,8 +27,13 @@ export function isAgentCliAvailable(agent: HealAgent): boolean {
 // file is rejected as invalid.
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
+export function readPriorSessionIdFromValue(value: string): string | null {
+  const trimmed = value.trim()
+  return UUID_RE.test(trimmed) ? trimmed : null
+}
+
 /**
- * Read a previously-persisted claude session UUID from disk. Returns the
+ * Read a previously-persisted agent session UUID from disk. Returns the
  * trimmed UUID when the file exists and contains a single valid UUID;
  * returns null when the file is missing, unreadable, empty, or contains
  * anything that doesn't look like a UUID.
@@ -39,8 +44,7 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 export function readPriorSessionId(sessionIdPath: string): string | null {
   let raw: string
   try { raw = fs.readFileSync(sessionIdPath, 'utf-8') } catch { return null }
-  const trimmed = raw.trim()
-  return UUID_RE.test(trimmed) ? trimmed : null
+  return readPriorSessionIdFromValue(raw)
 }
 
 const HEAL_PROMPT_TEMPLATE_PATH = path.join(__dirname, '../../prompts/heal-agent.md')
@@ -83,13 +87,15 @@ export function buildClaudeMcpConfigArg(outputDir: string, configFilePath: strin
 
 export interface AgentSpawnArgs {
   /** Pin claude's session UUID. Lets the orchestrator know the id without
-   *  parsing init frames; ignored by codex (no equivalent flag). */
+   *  parsing init frames. For codex this is used only with `resume: true`,
+   *  after the orchestrator has discovered and persisted the prior session id. */
   sessionId?: string
   /** Resume an existing claude conversation by `sessionId` instead of pinning
    *  a fresh one. When true with a `sessionId`, the spawn command emits
    *  `--resume <uuid>` (continues the prior conversation with history). When
    *  false (default), emits `--session-id <uuid>` (starts a new conversation
-   *  pinned to that id). Ignored by codex — codex has no resume flag. */
+   *  pinned to that id). For codex, true with a `sessionId` emits
+   *  `codex resume <uuid>`. */
   resume?: boolean
   /** Where Playwright MCP should write artifacts. When set, claude is spawned
    *  with `--mcp-config` pointing at a JSON file we write to `mcpConfigFile`
@@ -127,7 +133,7 @@ export interface AgentSpawnArgs {
  *   investigation history.
  *
  * - claude: `claude [--resume <uuid> | --session-id <uuid>] [--mcp-config <path>]`
- * - codex:  `codex`
+ * - codex:  `codex` or `codex resume <uuid>`
  */
 export function buildAgentSpawnCommand(agent: HealAgent, args: AgentSpawnArgs = {}): string {
   // Positional `@<promptFile>` arg — claude reads the file at startup and
@@ -162,10 +168,13 @@ export function buildAgentSpawnCommand(agent: HealAgent, args: AgentSpawnArgs = 
     // to the user.
     return `claude${sid}${mcp}${promptArg}`
   }
-  // codex interactive REPL. No `--full-auto`: tool
-  // approvals stay interactive in the pane. Codex has no `--session-id`
-  // analogue; the orchestrator doesn't track a session id for codex (the
-  // REPL stays alive across cycles so we never need to resume mid-run).
+  // codex interactive REPL. No `--full-auto`: tool approvals stay
+  // interactive in the pane. Codex has no `--session-id` analogue, so the
+  // first run starts normally. Once the orchestrator discovers Codex's
+  // persisted session id, Restart Heal can use `codex resume <id>`.
+  if (args.resume && args.sessionId) {
+    return `codex resume ${JSON.stringify(args.sessionId)}${promptArg}`
+  }
   // Codex accepts a positional prompt the same way as claude.
   return `codex${promptArg}`
 }
@@ -207,6 +216,15 @@ export interface OrchestratorAutoHealFactoryOptions {
   promptPath?: string
 }
 
+export interface BuildHealCyclePromptArgs {
+  cycle: number
+  outputDir: string
+  userGuidance?: string
+  priorAgentSessionContext?: string
+}
+
+export type BuildHealCyclePrompt = (args: BuildHealCyclePromptArgs) => string
+
 /**
  * Build a prompt-rendering function compatible with `AutoHealConfig.buildCyclePrompt`.
  * Returns the raw prompt text to write into the REPL's stdin — the orchestrator
@@ -215,7 +233,7 @@ export interface OrchestratorAutoHealFactoryOptions {
  */
 export function buildOrchestratorHealPrompt(
   opts: OrchestratorAutoHealFactoryOptions,
-): (args: { cycle: number; outputDir: string; userGuidance?: string }) => string {
+): BuildHealCyclePrompt {
   // Eagerly load the packaged template so a missing asset surfaces at config
   // time, not on the first heal cycle.
   const promptTemplate = loadPromptTemplate(opts.promptPath)
@@ -234,7 +252,7 @@ export function buildOrchestratorHealPrompt(
     personalWikiMap: renderPersonalWikiMap(opts.personalWikiPath),
   })
 
-  return ({ cycle, userGuidance }) => {
+  return ({ cycle, userGuidance, priorAgentSessionContext }) => {
     const stateAddendum = buildHealAddendum({
       cycle: cycle + 1,
       summaryPath: paths.summaryPath,
@@ -243,7 +261,10 @@ export function buildOrchestratorHealPrompt(
     const guidance = userGuidance?.trim()
       ? `User guidance for this restarted heal cycle:\n\n${userGuidance.trim()}`
       : ''
-    const fullPrompt = [basePrompt, stateAddendum, guidance].filter(Boolean).join('\n\n')
+    const priorContext = priorAgentSessionContext?.trim()
+      ? `Previous agent session context from another agent:\n\n${priorAgentSessionContext.trim()}`
+      : ''
+    const fullPrompt = [basePrompt, stateAddendum, priorContext, guidance].filter(Boolean).join('\n\n')
     fs.mkdirSync(path.dirname(promptFile), { recursive: true })
     fs.writeFileSync(promptFile, fullPrompt)
     return fullPrompt

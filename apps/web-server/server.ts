@@ -29,6 +29,7 @@ import {
   buildAgentSpawnCommand,
   buildOrchestratorHealPrompt,
   pickAvailableHealAgent,
+  type BuildHealCyclePrompt,
   type HealAgent,
 } from './lib/runtime/auto-heal'
 import { loadProjectConfig } from './lib/runtime/launcher/project-config'
@@ -287,7 +288,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
           mcpOutputDir?: string
           promptFile?: string
         }) => string
-        buildCyclePrompt: (args: { cycle: number; outputDir: string; userGuidance?: string }) => string
+        buildCyclePrompt: BuildHealCyclePrompt
       } | undefined
       const agentChoice = projectConfig.healAgent === 'manual'
         ? null
