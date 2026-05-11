@@ -88,6 +88,10 @@ describe('project config', () => {
     expect(normalizePersonalWikiPath('relative/wiki')).toBe(null)
     expect(normalizePersonalWikiPath(path.join(projectRoot, 'missing'))).toBe(null)
     expect(normalizePersonalWikiPath(notDir)).toBe(null)
+    // Non-string inputs (project.json may load with the field set to a
+    // number/object by accident) — exercise the `typeof !== 'string'` arm.
+    expect(normalizePersonalWikiPath(123)).toBe(null)
+    expect(normalizePersonalWikiPath({})).toBe(null)
   })
 
   it('expands ~ personal wiki paths', () => {

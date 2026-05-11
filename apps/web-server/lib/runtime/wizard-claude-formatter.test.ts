@@ -57,6 +57,10 @@ describe('wizard claude formatter', () => {
     expect(isBashReadInspection("sed -n '1,40p' app.ts")).toBe(true)
     expect(splitShellPipes('grep -E "className|id=|type=" app.ts | head -50'))
       .toEqual(['grep -E "className|id=|type=" app.ts', 'head -50'])
+    // Backslash escapes — keep the next character literal even if it would
+    // otherwise be a pipe/quote separator.
+    expect(splitShellPipes('echo a\\|b | wc -l'))
+      .toEqual(['echo a\\|b', 'wc -l'])
     expect(inspectionSummary({ name: 'Read', input: {} }, 'abc')).toBe('Number of characters: 3')
     expect(inspectionSummary({ name: 'Glob', input: {} }, 'a.ts\nb.ts\n')).toBe('Number of files: 2')
     expect(inspectionSummary({ name: 'Grep', input: {} }, 'a:1\nb:2\n')).toBe('Number of matches: 2')

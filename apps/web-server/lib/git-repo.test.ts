@@ -207,6 +207,14 @@ describe('git-repo helpers', () => {
       expect(await snapshotWorkingTree(path.join(os.tmpdir(), 'cl-missing-snap-xyz'))).toBeNull()
     })
 
+    it('returns null when git stash create fails (e.g. zero-commit repo with no HEAD)', async () => {
+      // Exercises the `if (stash.code !== 0) return null` arm — stash create
+      // needs a HEAD ref, which doesn't exist in a brand-new repo.
+      const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-git-empty-')))
+      execFileSync('git', ['init', '-b', 'main'], { cwd: dir, stdio: 'ignore' })
+      expect(await snapshotWorkingTree(dir)).toBeNull()
+    })
+
     it('returns HEAD for a clean working tree (stash create produces no SHA)', async () => {
       const repo = tmpRepo()
       expect(await snapshotWorkingTree(repo)).toBe('HEAD')

@@ -103,6 +103,22 @@ chatter after`
     if (!r.ok) expect(r.error).toMatch(/marker not found/)
   })
 
+  it('ignores fenced JSON when its top-level value is not an array', () => {
+    // Exercises the `body.startsWith('[')` falsy arm in the fenced-block
+    // scan — an object inside the fence should be skipped as a candidate.
+    const r = extractPlan('```json\n{"x":1}\n```')
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.error).toMatch(/marker not found/)
+  })
+
+  it('ignores an unmarked `[` with no matching close bracket', () => {
+    // Exercises the `if (candidate)` falsy arm in planJsonCandidates —
+    // balancedJsonArrayAt returns null when the bracket never closes.
+    const r = extractPlan('debug payload: [{"step":"x"')
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.error).toMatch(/marker not found/)
+  })
+
   it('fails when close marker is missing', () => {
     const r = extractPlan('<plan-output>[]')
     expect(r.ok).toBe(false)

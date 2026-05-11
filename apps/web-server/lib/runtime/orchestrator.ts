@@ -1192,32 +1192,27 @@ export class RunOrchestrator extends EventEmitter {
     // heal agent would otherwise be spawned. `stop()` has already written
     // 'aborted' to the manifest; honor it.
     if (this.stopped) return this.status
-    let finalStatus: RunManifest['status'] = exitCode === 0 ? 'passed' : 'failed'
+    // Status comes from decideRunStatus, not Playwright's exit byte alone.
+    // The summary file is the authoritative record: PASSED requires every
+    // AST-visible test to be in `passedNames`, so failed/skipped/pending all
+    // block. This catches:
+    //   - The pty.onExit→runPlaywright continuation firing BEFORE the user's
+    //     pause-heal HTTP request reaches the server (otherwise a graceful
+    //     exit-0 would mark "passed, healCycles: 0").
+    //   - Playwright catching SIGTERM/SIGINT, partial-flushing, and exiting 0.
+    //   - Targeted re-runs that complete cleanly while earlier failures or
+    //     pending tests are still recorded in the summary.
+    let finalStatus: RunManifest['status'] = decideRunStatus(
+      this.feature.featureDir,
+      this.paths.summaryPath,
+      exitCode,
+    )
     // If the user clicked Pause & Heal, Playwright was killed on purpose —
-    // a graceful exitCode 0 must NOT mark the run "passed". The
+    // even a clean summary mustn't mark the run "passed". The
     // `markStoppedEarly('user-pause')` call inside `pauseAndHeal` is what
-    // we key off here. We override to 'failed' so the heal-loop entry
-    // condition below is satisfied.
+    // we key off here. Override so the heal-loop entry condition below fires.
     if (this.stoppedEarlyReason === 'user-pause') {
       finalStatus = 'failed'
-    }
-    // Summary-trumps-exit-code safety net. Two real-world cases this catches:
-    //   1. The pty.onExit→runPlaywright continuation can fire BEFORE the user's
-    //      pause-heal HTTP request reaches the server, so the override above
-    //      sees `stoppedEarlyReason === undefined` and lets a graceful exit-0
-    //      pass through. The user observes `status: passed, healCycles: 0`
-    //      even though they explicitly asked for heal — and the failures they
-    //      saw are still right there in the summary.
-    //   2. Playwright catches SIGTERM/SIGINT, does a partial flush, and exits
-    //      with code 0 because nothing crashed — but the summary file still
-    //      records the failures that already ran. Trusting exit code 0 here
-    //      would silently bury those failures as a passing run.
-    // The summary is the authoritative record of test outcomes; the exit code
-    // is just a status byte from a process that might have been racing or
-    // signal-handled. Flip back to 'failed' so the heal loop sees the work.
-    if (finalStatus === 'passed') {
-      const { failed: pendingFailed } = summarizeFailures(this.paths.summaryPath)
-      if (pendingFailed.length > 0) finalStatus = 'failed'
     }
     this.setStatus(finalStatus)
 
@@ -1282,8 +1277,11 @@ export class RunOrchestrator extends EventEmitter {
         // exit code arrives after the abort flips the flag — don't
         // compute a finalStatus from it.
         if (this.stopped) return this.status
-        finalStatus = exitCode === 0 ? 'passed' : 'failed'
+        finalStatus = decideRunStatus(this.feature.featureDir, this.paths.summaryPath, exitCode)
         this.setStatus(finalStatus)
+        // Break on clean Playwright exit: if exit was 0 but the summary still
+        // shows non-passed tests, finalStatus is already 'failed' above and
+        // exiting the loop hands control back to the user (per design).
         if (exitCode === 0) break
       }
       return finalStatus
@@ -1430,8 +1428,11 @@ export class RunOrchestrator extends EventEmitter {
           this.setStatus(finalStatus)
           break
         }
-        finalStatus = exitCode === 0 ? 'passed' : 'failed'
+        finalStatus = decideRunStatus(this.feature.featureDir, this.paths.summaryPath, exitCode)
         this.setStatus(finalStatus)
+        // Break on clean Playwright exit even when finalStatus is 'failed'
+        // (summary disagrees with exit 0): ends the heal loop and hands
+        // control to the user instead of spawning another agent cycle.
         if (exitCode === 0) break
       }
 
@@ -1635,6 +1636,25 @@ export function summarizeFailures(summaryPath: string): { failed: string[]; tota
   const failed = extractFailedSlugs(summary)
   const total = typeof summary.total === 'number' ? summary.total : failed.length
   return { failed, total }
+}
+
+// PASSED only when (a) Playwright exited 0 AND (b) every test the AST can see
+// is in summary.passedNames. Skipped/pending/failed all block. Falls back to
+// summarizeFailures when AST extraction fails so feature dirs with no parseable
+// specs degrade to "no failed entries => passed" instead of always failing.
+export function decideRunStatus(
+  featureDir: string,
+  summaryPath: string,
+  exitCode: number,
+): 'passed' | 'failed' {
+  if (exitCode !== 0) return 'failed'
+  const summary = readSummary(summaryPath)
+  const computed = computeNonPassedTargets(featureDir, summary)
+  if (computed.kind === 'all-passed') return 'passed'
+  if (computed.kind === 'extraction-failed') {
+    return summarizeFailures(summaryPath).failed.length > 0 ? 'failed' : 'passed'
+  }
+  return 'failed'
 }
 
 const SUMMARY_REPORTER_PATH = path.resolve(__dirname, 'summary-reporter.js')
