@@ -4,6 +4,7 @@ import {
   slugify,
   summaryEntryName,
   statusForTest,
+  statusFromPlaybackResult,
   colorClassForStatus,
   statusLabel,
   statusPillClassForStatus,
@@ -109,6 +110,18 @@ describe('statusForTest', () => {
     expect(statusForTest('Creates a TODO', summary)).toBe('passed')
     expect(statusForTest('Other test', summary)).toBe('pending')
   })
+
+  it('uses skippedNames to distinguish skipped vs failed', () => {
+    const summary: RunSummary = {
+      complete: false,
+      total: 1,
+      passed: 0,
+      failed: [],
+      skipped: 1,
+      skippedNames: ['test-case-creates-a-todo'],
+    }
+    expect(statusForTest('Creates a TODO', summary)).toBe('skipped')
+  })
 })
 
 describe('colorClassForStatus', () => {
@@ -156,11 +169,25 @@ describe('statusPillClassForStatus', () => {
 describe('statusLabel', () => {
   it('maps runtime names to user-facing chip labels', () => {
     expect(statusLabel('testing')).toBe('running')
-    expect(statusLabel('passed')).toBe('succeed')
+    expect(statusLabel('passed')).toBe('passed')
     expect(statusLabel('failed')).toBe('failed')
-    expect(statusLabel('timedout')).toBe('timedout')
+    expect(statusLabel('timedout')).toBe('timed out')
     expect(statusLabel('pending')).toBe('pending')
     expect(statusLabel('skipped')).toBe('skipped')
+  })
+})
+
+describe('statusFromPlaybackResult', () => {
+  it.each([
+    [{ status: 'passed', passed: true }, 'passed'],
+    [{ status: 'failed', passed: false }, 'failed'],
+    [{ status: 'skipped', passed: false }, 'skipped'],
+    [{ status: 'timedOut', passed: false }, 'timedout'],
+    [{ passed: false }, 'failed'],
+    [{ passed: true }, 'passed'],
+    [{}, 'testing'],
+  ] as const)('normalizes playback result %#', (input, expected) => {
+    expect(statusFromPlaybackResult(input)).toBe(expected)
   })
 })
 

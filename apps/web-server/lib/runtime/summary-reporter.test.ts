@@ -657,6 +657,21 @@ describe('SummaryReporter', () => {
     })
   })
 
+  it('keeps skipped tests out of failed results', () => {
+    const reporter = new SummaryReporter()
+    reporter.onTestEnd(mkTest('Skipped branch'), mkResult({ status: 'skipped' }))
+
+    expect(readSummary()).toEqual({
+      complete: false,
+      total: 1,
+      passed: 0,
+      passedNames: [],
+      skipped: 1,
+      skippedNames: ['test-case-skipped-branch'],
+      failed: [],
+    })
+  })
+
   it('skips enrichment in baseline benchmark mode', () => {
     process.env.CANARY_LAB_BENCHMARK_MODE = 'baseline'
     fs.mkdirSync(LOGS_DIR, { recursive: true })
