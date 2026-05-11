@@ -22,6 +22,27 @@ export function isAgentCliAvailable(agent: HealAgent): boolean {
   }
 }
 
+// Standard UUID format (any version). Matches what `randomUUID()` and
+// claude's session id format produce. Anchored so partial garbage in the
+// file is rejected as invalid.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/**
+ * Read a previously-persisted claude session UUID from disk. Returns the
+ * trimmed UUID when the file exists and contains a single valid UUID;
+ * returns null when the file is missing, unreadable, empty, or contains
+ * anything that doesn't look like a UUID.
+ *
+ * Used by `spawnHealAgentRepl` to resume the prior conversation on
+ * Restart Heal instead of starting a fresh one with a new id.
+ */
+export function readPriorSessionId(sessionIdPath: string): string | null {
+  let raw: string
+  try { raw = fs.readFileSync(sessionIdPath, 'utf-8') } catch { return null }
+  const trimmed = raw.trim()
+  return UUID_RE.test(trimmed) ? trimmed : null
+}
+
 const HEAL_PROMPT_TEMPLATE_PATH = path.join(__dirname, '../../prompts/heal-agent.md')
 
 function loadPromptTemplate(promptPath: string = HEAL_PROMPT_TEMPLATE_PATH): string {
@@ -64,6 +85,12 @@ export interface AgentSpawnArgs {
   /** Pin claude's session UUID. Lets the orchestrator know the id without
    *  parsing init frames; ignored by codex (no equivalent flag). */
   sessionId?: string
+  /** Resume an existing claude conversation by `sessionId` instead of pinning
+   *  a fresh one. When true with a `sessionId`, the spawn command emits
+   *  `--resume <uuid>` (continues the prior conversation with history). When
+   *  false (default), emits `--session-id <uuid>` (starts a new conversation
+   *  pinned to that id). Ignored by codex — codex has no resume flag. */
+  resume?: boolean
   /** Where Playwright MCP should write artifacts. When set, claude is spawned
    *  with `--mcp-config` pointing at a JSON file we write to `mcpConfigFile`
    *  describing the playwright server with `--output-dir <mcpOutputDir>`.
@@ -91,7 +118,15 @@ export interface AgentSpawnArgs {
  * is right there in the pane and can approve / deny each tool — bypassing
  * also hides MCP auth prompts the user needs to see.
  *
- * - claude: `claude [--session-id <uuid>] [--mcp-config <path>]`
+ * Claude session flag:
+ * - `--session-id <uuid>`: starts a NEW conversation pinned to that uuid.
+ *   Used on first spawn for a run so the orchestrator knows the id without
+ *   parsing init frames.
+ * - `--resume <uuid>`: resumes an EXISTING conversation by uuid. Used when
+ *   restarting heal on a previously-failed run so the agent keeps its prior
+ *   investigation history.
+ *
+ * - claude: `claude [--resume <uuid> | --session-id <uuid>] [--mcp-config <path>]`
  * - codex:  `codex`
  */
 export function buildAgentSpawnCommand(agent: HealAgent, args: AgentSpawnArgs = {}): string {
@@ -111,7 +146,11 @@ export function buildAgentSpawnCommand(agent: HealAgent, args: AgentSpawnArgs = 
   const promptArg = args.promptFile ? ` -- ${JSON.stringify(`@${args.promptFile}`)}` : ''
 
   if (agent === 'claude') {
-    const sid = args.sessionId ? ` --session-id ${JSON.stringify(args.sessionId)}` : ''
+    const sid = args.sessionId
+      ? (args.resume
+        ? ` --resume ${JSON.stringify(args.sessionId)}`
+        : ` --session-id ${JSON.stringify(args.sessionId)}`)
+      : ''
     let mcp = ''
     if (args.mcpOutputDir) {
       if (!args.mcpConfigFile) {

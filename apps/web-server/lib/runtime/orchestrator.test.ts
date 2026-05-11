@@ -2829,6 +2829,147 @@ describe('RunOrchestrator.restartHealFromFailure', () => {
     expect(eventLog).toContain('agent-exit')
     await orch.stop('passed')
   })
+
+  it('claude restart: reuses the prior session id from disk and passes resume=true to the spawn-command builder', async () => {
+    // On Restart Heal the run dir already carries the previous heal session's
+    // UUID at `agent-session-id.txt`. We reuse it so the spawn command can
+    // emit `--resume <uuid>` and claude continues the prior conversation
+    // instead of orphaning all the investigation history.
+    const PRIOR_SID = 'b2160db2-89b8-49ff-a2ba-c0c97a52d63f'
+    const paths = buildRunPaths(runDir)
+    fs.writeFileSync(paths.agentSessionIdPath, PRIOR_SID)
+
+    const f = makeFakeFactory()
+    const spawnCalls: Array<{ sessionId?: string; resume?: boolean }> = []
+    const orch = new RunOrchestrator({
+      feature: makeFeature({ healOnFailureThreshold: 1 }),
+      runId: RUN_ID,
+      runDir,
+      ptyFactory: f.factory,
+      healthCheck: async () => true,
+      delay: async () => undefined,
+      healSignalPollMs: 1,
+      healAgentTimeoutMs: 20,
+      playwrightSpawner: () => ({ command: 'pw-should-not-run', cwd: tmpDir }),
+      autoHeal: {
+        agent: 'claude',
+        maxCycles: 1,
+        buildSpawnCommand: ({ sessionId, resume }) => {
+          spawnCalls.push({ sessionId, resume })
+          return 'claude heal restart'
+        },
+        buildCyclePrompt: () => 'restart-prompt',
+      },
+    })
+    fs.writeFileSync(
+      orch.paths.summaryPath,
+      JSON.stringify({ failed: [{ name: 'a' }], total: 1, passed: 0 }),
+    )
+
+    const promise = orch.restartHealFromFailure('look again')
+    while (f.spawned.length < 1) await new Promise((r) => setTimeout(r, 5))
+    expect(spawnCalls).toHaveLength(1)
+    expect(spawnCalls[0]).toEqual({ sessionId: PRIOR_SID, resume: true })
+    // File is preserved unchanged — same UUID across the restart so the UI
+    // shows a stable session and `locateClaudeSessionLog` finds the same
+    // ~/.claude/projects/.../<uuid>.jsonl after resume.
+    expect(fs.readFileSync(paths.agentSessionIdPath, 'utf-8').trim()).toBe(PRIOR_SID)
+    f.spawned[0].emitExit(0)
+    expect(await promise).toBe('failed')
+    await orch.stop('failed')
+  })
+
+  it('claude restart: when no prior session id file exists, generates a fresh UUID with resume=false', async () => {
+    // First-ever heal cycle (or a corrupt/missing sid file) falls back to
+    // the original behavior: mint a new UUID, spawn with --session-id.
+    const paths = buildRunPaths(runDir)
+    expect(fs.existsSync(paths.agentSessionIdPath)).toBe(false)
+
+    const f = makeFakeFactory()
+    const spawnCalls: Array<{ sessionId?: string; resume?: boolean }> = []
+    const orch = new RunOrchestrator({
+      feature: makeFeature({ healOnFailureThreshold: 1 }),
+      runId: RUN_ID,
+      runDir,
+      ptyFactory: f.factory,
+      healthCheck: async () => true,
+      delay: async () => undefined,
+      healSignalPollMs: 1,
+      healAgentTimeoutMs: 20,
+      playwrightSpawner: () => ({ command: 'pw-should-not-run', cwd: tmpDir }),
+      autoHeal: {
+        agent: 'claude',
+        maxCycles: 1,
+        buildSpawnCommand: ({ sessionId, resume }) => {
+          spawnCalls.push({ sessionId, resume })
+          return 'claude heal fresh'
+        },
+        buildCyclePrompt: () => 'fresh-prompt',
+      },
+    })
+    fs.writeFileSync(
+      orch.paths.summaryPath,
+      JSON.stringify({ failed: [{ name: 'a' }], total: 1, passed: 0 }),
+    )
+
+    const promise = orch.restartHealFromFailure('look again')
+    while (f.spawned.length < 1) await new Promise((r) => setTimeout(r, 5))
+    expect(spawnCalls).toHaveLength(1)
+    expect(spawnCalls[0].resume).toBe(false)
+    expect(spawnCalls[0].sessionId).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+    )
+    // File was written so a SUBSEQUENT restart could resume this same session.
+    expect(fs.readFileSync(paths.agentSessionIdPath, 'utf-8').trim()).toBe(spawnCalls[0].sessionId)
+    f.spawned[0].emitExit(0)
+    expect(await promise).toBe('failed')
+    await orch.stop('failed')
+  })
+
+  it('claude restart: corrupt prior-session-id file is ignored — generates a fresh UUID with resume=false', async () => {
+    const paths = buildRunPaths(runDir)
+    fs.writeFileSync(paths.agentSessionIdPath, 'not-a-uuid')
+
+    const f = makeFakeFactory()
+    const spawnCalls: Array<{ sessionId?: string; resume?: boolean }> = []
+    const orch = new RunOrchestrator({
+      feature: makeFeature({ healOnFailureThreshold: 1 }),
+      runId: RUN_ID,
+      runDir,
+      ptyFactory: f.factory,
+      healthCheck: async () => true,
+      delay: async () => undefined,
+      healSignalPollMs: 1,
+      healAgentTimeoutMs: 20,
+      playwrightSpawner: () => ({ command: 'pw-should-not-run', cwd: tmpDir }),
+      autoHeal: {
+        agent: 'claude',
+        maxCycles: 1,
+        buildSpawnCommand: ({ sessionId, resume }) => {
+          spawnCalls.push({ sessionId, resume })
+          return 'claude heal recover'
+        },
+        buildCyclePrompt: () => 'recover-prompt',
+      },
+    })
+    fs.writeFileSync(
+      orch.paths.summaryPath,
+      JSON.stringify({ failed: [{ name: 'a' }], total: 1, passed: 0 }),
+    )
+
+    const promise = orch.restartHealFromFailure('look again')
+    while (f.spawned.length < 1) await new Promise((r) => setTimeout(r, 5))
+    expect(spawnCalls[0].resume).toBe(false)
+    expect(spawnCalls[0].sessionId).not.toBe('not-a-uuid')
+    expect(spawnCalls[0].sessionId).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+    )
+    // The corrupt file was overwritten with the freshly minted UUID.
+    expect(fs.readFileSync(paths.agentSessionIdPath, 'utf-8').trim()).toBe(spawnCalls[0].sessionId)
+    f.spawned[0].emitExit(0)
+    expect(await promise).toBe('failed')
+    await orch.stop('failed')
+  })
 })
 
 describe('RunOrchestrator runFullCycle stoppedEarly', () => {
