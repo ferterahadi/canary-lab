@@ -282,6 +282,18 @@ describe('wizard codex formatter', () => {
     expect(out).toContain('No such file or directory')
   })
 
+  it('does not print an empty output block for inspection command failures', () => {
+    handleCompleted({
+      type: 'command_execution',
+      command: 'cat missing.md',
+      exit_code: 1,
+      aggregated_output: '   ',
+    })
+    const out = writes.join('')
+    expect(out).toContain('Read missing.md (exit 1)')
+    expect(out).not.toContain('output')
+  })
+
   it('prints file changes and defaults missing fields', () => {
     handleCompleted({
       type: 'file_change',

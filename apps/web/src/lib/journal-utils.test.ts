@@ -132,30 +132,29 @@ describe('outcomeBadgeClass', () => {
 })
 
 describe('formatJournalFieldKey', () => {
-  it('hides plumbing fields the human does not need', () => {
-    expect(formatJournalFieldKey('run')).toBeNull()
-    expect(formatJournalFieldKey('feature')).toBeNull()
-    expect(formatJournalFieldKey('failingTests')).toBeNull()
-  })
-
-  it('renames dotted fields to readable labels', () => {
-    expect(formatJournalFieldKey('fix.description')).toBe('fix description')
-    expect(formatJournalFieldKey('fix.file')).toBe('files')
-  })
-
-  it('passes through other displayed fields unchanged', () => {
+  it('returns the friendly label for the four allowed fields', () => {
     expect(formatJournalFieldKey('hypothesis')).toBe('hypothesis')
+    expect(formatJournalFieldKey('fix.description')).toBe('fix description')
     expect(formatJournalFieldKey('signal')).toBe('signal')
     expect(formatJournalFieldKey('outcome')).toBe('outcome')
   })
 
-  it('shows unknown fields by default (no silent disappearance)', () => {
-    expect(formatJournalFieldKey('something-new')).toBe('something-new')
+  it('hides plumbing fields the human does not need', () => {
+    expect(formatJournalFieldKey('run')).toBeNull()
+    expect(formatJournalFieldKey('feature')).toBeNull()
+    expect(formatJournalFieldKey('failingTests')).toBeNull()
+    expect(formatJournalFieldKey('fix.file')).toBeNull()
+  })
+
+  it('hides anything not on the allowlist (no fall-through)', () => {
+    expect(formatJournalFieldKey('metadata')).toBeNull()
+    expect(formatJournalFieldKey('channel')).toBeNull()
+    expect(formatJournalFieldKey('something-new')).toBeNull()
   })
 })
 
 describe('presentJournalFields', () => {
-  it('filters out hidden fields and renames the rest, preserving order', () => {
+  it('keeps only the four allowed fields and renames them, preserving order', () => {
     const parsed = [
       { key: 'run', value: '2026-05-11T0230-v0c3' },
       { key: 'feature', value: 'demo' },
@@ -168,27 +167,29 @@ describe('presentJournalFields', () => {
     ]
     expect(presentJournalFields(parsed)).toEqual([
       { key: 'hypothesis', value: 'guard returns early' },
-      { key: 'files', value: '/repo/a.ts, /repo/b.ts' },
       { key: 'fix description', value: 'added bounds check' },
       { key: 'signal', value: '.restart' },
       { key: 'outcome', value: 'pending' },
     ])
   })
 
-  it('keeps unknown fields with their original key', () => {
+  it('drops keys that look like fields but came from diff-block noise', () => {
     const parsed = [
-      { key: 'run', value: 'r1' },
-      { key: 'mystery', value: 'v' },
+      { key: 'hypothesis', value: 'fixed it' },
+      { key: 'metadata', value: '{ ... }' },
+      { key: 'channel', value: "'call'" },
+      { key: 'logger', value: 'thislogger' },
     ]
     expect(presentJournalFields(parsed)).toEqual([
-      { key: 'mystery', value: 'v' },
+      { key: 'hypothesis', value: 'fixed it' },
     ])
   })
 
-  it('returns an empty list when every field is hidden', () => {
+  it('returns an empty list when no allowed fields are present', () => {
     expect(presentJournalFields([
       { key: 'run', value: 'r1' },
       { key: 'feature', value: 'demo' },
+      { key: 'mystery', value: 'v' },
     ])).toEqual([])
   })
 })

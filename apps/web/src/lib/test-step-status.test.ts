@@ -88,6 +88,17 @@ describe('statusForTest', () => {
     expect(statusForTest('Creates a TODO', inflight)).toBe('testing')
   })
 
+  it('returns testing when a previously-failed test is currently re-running (targeted rerun)', () => {
+    const targetedRerun: RunSummary = {
+      complete: false,
+      total: 2,
+      passed: 1,
+      failed: [{ name: 'test-case-creates-a-todo', error: { message: 'AssertionError: …' } }],
+      running: { name: 'test-case-creates-a-todo', location: '/todo.spec.ts:12' },
+    }
+    expect(statusForTest('Creates a TODO', targetedRerun)).toBe('testing')
+  })
+
   it('ignores stale running entries when the selected run is not actively testing', () => {
     const aborted: RunSummary = {
       complete: false,
