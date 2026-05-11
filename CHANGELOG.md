@@ -2,6 +2,19 @@
 
 All notable changes to Canary Lab are listed here. We try to keep the language plain so anyone can follow along.
 
+## 1.0.3 — 2026-05-11
+
+### Improvements
+- **Smoother agent sessions** — The live view of an agent working through a run is more reliable and easier to follow.
+- **Better terminal display** — Output in the terminal pane renders more cleanly and handles tricky cases without glitches.
+- **Steadier auto-heal** — When a run hits a snag, the automatic recovery picks up where it left off more dependably.
+
+### Housekeeping
+- **More test coverage** — Added a large batch of new tests around sessions, terminals, and run orchestration to catch regressions early.
+- **Dependency tidy-up** — Routine bumps to lock files and package metadata.
+
+---
+
 ## 1.0.2 — 2026-05-11
 
 ### What's new
