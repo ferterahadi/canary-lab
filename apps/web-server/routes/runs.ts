@@ -6,6 +6,7 @@ import type { RunStore, OrchestratorLike, RestartHealResult } from '../lib/run-s
 import { loadFeatures } from '../lib/feature-loader'
 import { buildRunPaths, runDirFor } from '../lib/runtime/run-paths'
 import { createAssertionExport } from '../lib/test-review-export'
+import { loadAgentSessionLog, type AgentSessionRef } from '../lib/agent-session-log'
 
 export interface RunsRouteDeps {
   featuresDir: string
@@ -31,6 +32,35 @@ export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Pro
       return { error: 'run not found' }
     }
     return detail
+  })
+
+  // Structured heal-agent session view. Reads the per-run pointer file
+  // (`agent-session.json`) the orchestrator writes after a heal cycle ends,
+  // then parses + normalizes the agent CLI's own JSONL log into a uniform
+  // event stream for both claude and codex. 404 with a `reason` field in
+  // every failure mode — the UI falls back to the raw transcript replay.
+  app.get<{ Params: { runId: string } }>('/api/runs/:runId/agent-session', async (req, reply) => {
+    const detail = deps.store.get(req.params.runId)
+    if (!detail) {
+      reply.code(404)
+      return { reason: 'run-not-found' }
+    }
+    const runDir = runDirFor(deps.store.logsDir, req.params.runId)
+    const refPath = buildRunPaths(runDir).agentSessionRefPath
+    let ref: AgentSessionRef
+    try {
+      const raw = fs.readFileSync(refPath, 'utf-8')
+      ref = JSON.parse(raw) as AgentSessionRef
+    } catch {
+      reply.code(404)
+      return { reason: 'no-session-ref' }
+    }
+    if (!fs.existsSync(ref.logPath)) {
+      reply.code(404)
+      return { reason: 'session-log-missing' }
+    }
+    const events = loadAgentSessionLog(ref)
+    return { agent: ref.agent, sessionId: ref.sessionId, events }
   })
 
   app.get<{ Params: { runId: string } }>('/api/runs/:runId/assertion.html', async (req, reply) => {
