@@ -77,6 +77,19 @@ describe('buildHealAddendum', () => {
     expect(addendum).toContain('{"hypothesis":"…","fixDescription":"…"}')
   })
 
+  it('omits the journal-awareness cue on cycle ≥ 2 when the journal file does not exist yet', () => {
+    // First heal attempt of a run: cycle counter has advanced (the orchestrator
+    // beginCycle()s before snapshotting + handing off to the agent) but no
+    // prior iteration has been written. The cue must not lie about a journal
+    // that isn't there — the agent would chase a phantom file.
+    fs.mkdirSync(logsDir, { recursive: true })
+    const addendum = buildHealAddendum({ cycle: 2 })
+
+    expect(addendum).toContain('Cycle 2')
+    expect(addendum).not.toContain('Prior iterations exist')
+    expect(addendum).not.toContain('Skip hypotheses already tried')
+  })
+
   it('drops the cycle-≥2 patch-outcome instruction but keeps the "skip tried hypotheses" cue', () => {
     // The reporter's reconcileJournalOutcome patches `outcome: pending`
     // deterministically on onEnd, so telling the agent to do it is dead

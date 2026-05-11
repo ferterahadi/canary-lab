@@ -38,6 +38,7 @@ import { slugify } from './summary-reporter'
 import { listSpecFiles } from '../feature-loader'
 import { extractTestsFromSource } from '../ast-extractor'
 import {
+  diffContentSinceSnapshot,
   diffNamesSinceSnapshot,
   resolveRepoPath,
   snapshotWorkingTree,
@@ -1161,6 +1162,22 @@ export class RunOrchestrator extends EventEmitter {
     return out
   }
 
+  // Full unified-diff content (not just names) for each snapshotted repo,
+  // joined into one string. Multi-repo features get a `# repo: <localPath>`
+  // header before each repo's diff so the agent (and a human reviewer) can
+  // tell which tree each hunk came from. Truncation to MAX_JOURNAL_DIFF_BYTES
+  // happens at the journal-writer layer.
+  private async diffContentForFeatureRepos(snapshots: Map<string, string>): Promise<string> {
+    const blocks: string[] = []
+    const multiRepo = snapshots.size > 1
+    for (const [localPath, ref] of snapshots) {
+      const content = await diffContentSinceSnapshot(localPath, ref)
+      if (!content.trim()) continue
+      blocks.push(multiRepo ? `# repo: ${localPath}\n${content}` : content)
+    }
+    return blocks.join('\n')
+  }
+
   // Top-level "do the whole thing" entry. Boots services, runs Playwright,
   // and—if autoHeal is enabled—loops through heal cycles until one of:
   // tests pass, the cap is hit, the agent gives up without signaling, or the
@@ -1183,6 +1200,24 @@ export class RunOrchestrator extends EventEmitter {
     // condition below is satisfied.
     if (this.stoppedEarlyReason === 'user-pause') {
       finalStatus = 'failed'
+    }
+    // Summary-trumps-exit-code safety net. Two real-world cases this catches:
+    //   1. The pty.onExit→runPlaywright continuation can fire BEFORE the user's
+    //      pause-heal HTTP request reaches the server, so the override above
+    //      sees `stoppedEarlyReason === undefined` and lets a graceful exit-0
+    //      pass through. The user observes `status: passed, healCycles: 0`
+    //      even though they explicitly asked for heal — and the failures they
+    //      saw are still right there in the summary.
+    //   2. Playwright catches SIGTERM/SIGINT, does a partial flush, and exits
+    //      with code 0 because nothing crashed — but the summary file still
+    //      records the failures that already ran. Trusting exit code 0 here
+    //      would silently bury those failures as a passing run.
+    // The summary is the authoritative record of test outcomes; the exit code
+    // is just a status byte from a process that might have been racing or
+    // signal-handled. Flip back to 'failed' so the heal loop sees the work.
+    if (finalStatus === 'passed') {
+      const { failed: pendingFailed } = summarizeFailures(this.paths.summaryPath)
+      if (pendingFailed.length > 0) finalStatus = 'failed'
     }
     this.setStatus(finalStatus)
 
@@ -1217,6 +1252,7 @@ export class RunOrchestrator extends EventEmitter {
           break
         }
         const filesChanged = await this.diffFeatureRepos(snapshots)
+        const diffContent = await this.diffContentForFeatureRepos(snapshots)
         try {
           if (signal.kind === 'restart' || signal.kind === 'rerun') {
             appendJournalIteration({
@@ -1224,6 +1260,7 @@ export class RunOrchestrator extends EventEmitter {
               hypothesis: typeof signal.body.hypothesis === 'string' ? signal.body.hypothesis : undefined,
               filesChanged,
               fixDescription: typeof signal.body.fixDescription === 'string' ? signal.body.fixDescription : undefined,
+              diffContent,
               runId: this.runId,
               manifestPath: this.paths.manifestPath,
               summaryPath: this.paths.summaryPath,
@@ -1349,6 +1386,7 @@ export class RunOrchestrator extends EventEmitter {
         }
 
         const filesChanged = await this.diffFeatureRepos(snapshots)
+        const diffContent = await this.diffContentForFeatureRepos(snapshots)
 
         try {
           if (signal.kind === 'restart' || signal.kind === 'rerun') {
@@ -1357,6 +1395,7 @@ export class RunOrchestrator extends EventEmitter {
               hypothesis: typeof signal.body.hypothesis === 'string' ? signal.body.hypothesis : undefined,
               filesChanged,
               fixDescription: typeof signal.body.fixDescription === 'string' ? signal.body.fixDescription : undefined,
+              diffContent,
               runId: this.runId,
               manifestPath: this.paths.manifestPath,
               summaryPath: this.paths.summaryPath,

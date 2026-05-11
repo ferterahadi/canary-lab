@@ -220,6 +220,17 @@ export async function diffNamesSinceSnapshot(repoPath: string, ref: string): Pro
     .filter(Boolean)
 }
 
+// Full unified-diff content (not just names) against a snapshot ref. Sibling
+// to `diffNamesSinceSnapshot` — same defensive shape: empty string when git
+// fails or there is nothing to diff. Callers must size-bound the result before
+// persisting it; this function intentionally does no truncation.
+export async function diffContentSinceSnapshot(repoPath: string, ref: string): Promise<string> {
+  const target = resolveRepoPath(repoPath)
+  const result = await runGit(target, ['diff', ref])
+  if (result.code !== 0) return ''
+  return result.stdout
+}
+
 export function findRepo(feature: FeatureConfig, name: string): RepoPrerequisite | null {
   return (feature.repos ?? []).find((repo) => repo.name === name) ?? null
 }

@@ -1422,6 +1422,95 @@ describe('RunOrchestrator.runFullCycle', () => {
     await orch.stop('failed')
   }, 15000)
 
+  it('aggregates fix.file across multiple feature repos when the agent edits in each', async () => {
+    // Two git-tracked feature repos. Each gets its own service. Agent edits
+    // one file in each repo during a single heal iteration. The journal's
+    // fix.file should list both absolute paths, and both services should
+    // restart based on the diff matching their service cwds.
+    const repo2 = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-orc-r2-')))
+    for (const dir of [tmpDir, repo2]) {
+      execFileSync('git', ['init', '-q'], { cwd: dir })
+      execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: dir })
+      execFileSync('git', ['config', 'user.name', 'Test'], { cwd: dir })
+      fs.writeFileSync(path.join(dir, 'main.ts'), '// initial\n')
+      execFileSync('git', ['add', 'main.ts'], { cwd: dir })
+      execFileSync('git', ['commit', '-q', '-m', 'init'], { cwd: dir })
+    }
+
+    const f = makeFakeFactory()
+    let pwIdx = 0
+    let healIdx = 0
+    const orch = new RunOrchestrator({
+      feature: makeFeature({
+        repos: [
+          {
+            name: 'api',
+            localPath: tmpDir,
+            startCommands: [{ command: 'echo hi', name: 'api', healthCheck: { url: 'http://x' } }],
+          },
+          {
+            name: 'worker',
+            localPath: repo2,
+            startCommands: [{ command: 'echo hi', name: 'worker', healthCheck: { url: 'http://y' } }],
+          },
+        ],
+      }),
+      runId: RUN_ID,
+      runDir,
+      ptyFactory: f.factory,
+      healthCheck: async () => true,
+      delay: async () => undefined,
+      healthPollIntervalMs: 5,
+      healSignalPollMs: 1,
+      healAgentTimeoutMs: 1000,
+      playwrightSpawner: () => ({ command: `pw-${pwIdx++}`, cwd: tmpDir }),
+      autoHeal: { agent: 'claude', maxCycles: 1, buildCommand: () => `heal-${healIdx++}` },
+    })
+    fs.mkdirSync(runDir, { recursive: true })
+    fs.writeFileSync(orch.paths.summaryPath, JSON.stringify({ failed: [{ name: 'a' }] }))
+
+    const promise = orch.runFullCycle()
+    await new Promise((r) => setTimeout(r, 10))
+    // Two services start in parallel → spawned[0], spawned[1]; spawned[2] = pw.
+    while (f.spawned.length < 3) await new Promise((r) => setTimeout(r, 5))
+    f.spawned[2].emitExit(1)
+    // spawned[3] = heal agent.
+    while (f.spawned.length < 4) await new Promise((r) => setTimeout(r, 5))
+    // Agent edits files in BOTH repos during its turn.
+    fs.writeFileSync(path.join(tmpDir, 'main.ts'), '// edited 1\n')
+    fs.writeFileSync(path.join(repo2, 'main.ts'), '// edited 2\n')
+    fs.writeFileSync(orch.paths.restartSignal, JSON.stringify({
+      hypothesis: 'fix both',
+      fixDescription: 'edited both repos',
+    }))
+    f.spawned[3].emitExit(0)
+    // After the signal: both services restart (spawned[4], spawned[5]), then pw reruns (spawned[6]).
+    while (f.spawned.length < 7) await new Promise((r) => setTimeout(r, 5))
+    f.spawned[6].emitExit(1)
+    await promise
+
+    const journal = fs.readFileSync(orch.paths.diagnosisJournalPath, 'utf-8')
+    // fix.file aggregates absolute paths from both repos.
+    expect(journal).toMatch(/- fix\.file: .+main\.ts, .+main\.ts/)
+    expect(journal).toContain(path.join(tmpDir, 'main.ts'))
+    expect(journal).toContain(path.join(repo2, 'main.ts'))
+    // The ### Diff subsection records the actual content change from both
+    // repos. Multi-repo features get a `# repo:` header per repo so a human
+    // (and the heal agent on cycle 2) can tell hunks apart.
+    expect(journal).toContain('### Diff')
+    expect(journal).toContain('```diff')
+    expect(journal).toContain(`# repo: ${tmpDir}`)
+    expect(journal).toContain(`# repo: ${repo2}`)
+    expect(journal).toMatch(/^-\/\/ initial$/m)
+    expect(journal).toMatch(/^\+\/\/ edited 1$/m)
+    expect(journal).toMatch(/^\+\/\/ edited 2$/m)
+    // Both services were restarted because the diff matched both service cwds.
+    const m = readManifest(orch.paths.manifestPath)!
+    const history = (m as { healCycleHistory: Array<{ cycle: number; restarted: string[]; kept: string[] }> }).healCycleHistory
+    expect(history[0].restarted.sort()).toEqual(['api', 'worker'])
+    await orch.stop('failed')
+  }, 15000)
+
   it('omits fix.file in non-git workspaces and falls back to restart-all', async () => {
     // No git init on tmpDir → snapshotFeatureRepos sees no working tree, the
     // diff is empty, the journal omits fix.file, and restart() with an empty
@@ -1855,6 +1944,125 @@ describe('RunOrchestrator.pauseAndHeal', () => {
     pwPty.emitExit(137)
     await orch.stop('aborted')
   })
+
+  it('pause-and-heal does not let runFullCycle mark the run "passed" when Playwright exits 0 on SIGTERM', async () => {
+    // Regression: if Playwright catches SIGTERM and exits cleanly with code
+    // 0, the naive `finalStatus = exitCode === 0 ? 'passed' : 'failed'`
+    // would mark the whole run passed. The override at
+    // runFullCycle:1184 keys off `stoppedEarlyReason === 'user-pause'` to
+    // flip back to 'failed' so the heal loop is entered. Without that
+    // override, the user's Pause & Heal click would silently auto-complete
+    // the run as passed.
+    const f = makeFakeFactory()
+    let pwIdx = 0
+    let healIdx = 0
+    const orch = new RunOrchestrator({
+      feature: makeFeature(),
+      runId: RUN_ID,
+      runDir,
+      ptyFactory: f.factory,
+      healthCheck: async () => true,
+      delay: async () => undefined,
+      healthPollIntervalMs: 5,
+      healSignalPollMs: 1,
+      healAgentTimeoutMs: 1000,
+      playwrightSpawner: () => ({ command: `pw-${pwIdx++}`, cwd: tmpDir }),
+      autoHeal: { agent: 'claude', maxCycles: 1, buildCommand: () => `heal-${healIdx++}` },
+    })
+    fs.mkdirSync(runDir, { recursive: true })
+    // Failing summary so pauseAndHeal commits (no-failures-yet would no-op).
+    fs.writeFileSync(orch.paths.summaryPath, JSON.stringify({ failed: [{ name: 'a' }], total: 1, passed: 0 }))
+
+    const statuses: string[] = []
+    orch.on('run-status', (e) => statuses.push(e.status))
+
+    const promise = orch.runFullCycle()
+    await new Promise((r) => setTimeout(r, 10))
+    // spawned[0] = api service, spawned[1] = playwright.
+    while (f.spawned.length < 2) await new Promise((r) => setTimeout(r, 5))
+    const pwPty = f.spawned[1]
+    expect(pwPty.killed).toBeNull()
+
+    // Kick off pauseAndHeal but don't await it yet — it's blocked on
+    // `waitForPlaywrightExit`. We need to emit pw exit while it's blocked,
+    // otherwise the 5s SIGKILL fallback fires before the test can proceed.
+    const pausePromise = orch.pauseAndHeal()
+    await new Promise((r) => setTimeout(r, 5))
+    expect(pwPty.killed).toBe('SIGTERM')
+    // Critical step: pw exits CLEANLY (exit code 0). This is the case the
+    // override exists to handle — without it, finalStatus would be 'passed'.
+    pwPty.emitExit(0)
+    expect(await pausePromise).toEqual({ ok: true, failureCount: 1 })
+
+    // Wait for the heal loop to set status to 'healing' (spawned[2] = heal agent).
+    while (f.spawned.length < 3) await new Promise((r) => setTimeout(r, 5))
+
+    // At this point the run must NOT be 'passed'. The override should have
+    // flipped finalStatus to 'failed' and the heal loop should have advanced
+    // status to 'healing'.
+    expect(orch.status).toBe('healing')
+    expect(statuses).not.toContain('passed')
+
+    // The manifest reflects the override.
+    const m = readManifest(orch.paths.manifestPath)!
+    expect(m.stoppedEarly?.reason).toBe('user-pause')
+
+    // Cleanup: agent exits without a signal → heal loop bails with 'failed'.
+    f.spawned[2].emitExit(0)
+    await promise
+    await orch.stop('failed')
+  }, 15000)
+
+  it('does not mark a run "passed" when pw exits 0 but the summary still has failures (race fix)', async () => {
+    // Regression: pty.onExit can fire BEFORE the user's pause-heal request
+    // reaches the server, so `stoppedEarlyReason` is never set and the
+    // user-pause override is bypassed. With pw exiting cleanly (code 0), the
+    // run would silently finalize as 'passed' — even though the summary still
+    // records the failures the user reacted to. The safety net at
+    // runFullCycle flips back to 'failed' when summary disagrees with the
+    // exit code, so the heal loop is entered as the user expected.
+    const f = makeFakeFactory()
+    let pwIdx = 0
+    let healIdx = 0
+    const orch = new RunOrchestrator({
+      feature: makeFeature(),
+      runId: RUN_ID,
+      runDir,
+      ptyFactory: f.factory,
+      healthCheck: async () => true,
+      delay: async () => undefined,
+      healthPollIntervalMs: 5,
+      healSignalPollMs: 1,
+      healAgentTimeoutMs: 1000,
+      playwrightSpawner: () => ({ command: `pw-${pwIdx++}`, cwd: tmpDir }),
+      autoHeal: { agent: 'claude', maxCycles: 1, buildCommand: () => `heal-${healIdx++}` },
+    })
+    fs.mkdirSync(runDir, { recursive: true })
+    // Summary records a failure (the user saw it and clicked pause-heal).
+    fs.writeFileSync(orch.paths.summaryPath, JSON.stringify({ failed: [{ name: 'a' }], total: 1, passed: 0 }))
+
+    const statuses: string[] = []
+    orch.on('run-status', (e) => statuses.push(e.status))
+
+    const promise = orch.runFullCycle()
+    await new Promise((r) => setTimeout(r, 10))
+    while (f.spawned.length < 2) await new Promise((r) => setTimeout(r, 5))
+    // pw exits cleanly with code 0 BEFORE any pauseAndHeal arrives.
+    // stoppedEarlyReason is undefined — the override would let 'passed' slip
+    // through. The safety net should catch the summary's failure entry and
+    // flip the run back to 'failed', entering the heal loop.
+    f.spawned[1].emitExit(0)
+    // spawned[2] = heal agent (only spawned if the heal loop entered).
+    while (f.spawned.length < 3) await new Promise((r) => setTimeout(r, 5))
+
+    expect(orch.status).toBe('healing')
+    expect(statuses).not.toContain('passed')
+
+    // Cleanup: agent exits without a signal so the loop bails 'failed'.
+    f.spawned[2].emitExit(0)
+    await promise
+    await orch.stop('failed')
+  }, 15000)
 
   it('emits paused-by-user with the failure count', async () => {
     const { spawned, orch } = bootForPause()

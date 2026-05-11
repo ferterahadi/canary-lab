@@ -6,6 +6,7 @@ import {
   newestFirst,
   outcomeBadgeClass,
   parseBodyFields,
+  presentJournalFields,
 } from '../lib/journal-utils'
 
 interface Props {
@@ -96,7 +97,7 @@ export function JournalTab({ feature, runId }: Props) {
 
 function EntryCard({ entry, onDelete }: { entry: JournalEntry; onDelete: () => void }) {
   const [expanded, setExpanded] = useState(false)
-  const fields = parseBodyFields(entry.body)
+  const fields = presentJournalFields(parseBodyFields(entry.body))
   const outcome = classifyOutcome(entry.outcome)
   return (
     <li className="rounded-lg p-3" style={{ border: '1px solid var(--border-default)', background: 'var(--bg-elevated)' }}>

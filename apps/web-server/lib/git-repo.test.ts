@@ -6,6 +6,7 @@ import path from 'path'
 import {
   checkoutBranch,
   collectRepoBranchSnapshots,
+  diffContentSinceSnapshot,
   diffNamesSinceSnapshot,
   findRepo,
   getGitStatus,
@@ -272,6 +273,29 @@ describe('git-repo helpers', () => {
     it('diffNamesSinceSnapshot returns [] on a non-git path', async () => {
       const plainDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-plain-diff-'))
       expect(await diffNamesSinceSnapshot(plainDir, 'HEAD')).toEqual([])
+    })
+  })
+
+  describe('diffContentSinceSnapshot', () => {
+    it('returns unified-diff content for files edited after snapshot', async () => {
+      const repo = tmpRepo()
+      const ref = await snapshotWorkingTree(repo)
+      fs.writeFileSync(path.join(repo, 'README.md'), 'after\n')
+      const diff = await diffContentSinceSnapshot(repo, ref!)
+      expect(diff).toMatch(/^diff --git a\/README\.md b\/README\.md/m)
+      expect(diff).toMatch(/^-hello$/m)
+      expect(diff).toMatch(/^\+after$/m)
+    })
+
+    it('returns empty string when nothing changed during the agent turn', async () => {
+      const repo = tmpRepo()
+      const ref = await snapshotWorkingTree(repo)
+      expect(await diffContentSinceSnapshot(repo, ref!)).toBe('')
+    })
+
+    it('returns empty string on a non-git path', async () => {
+      const plainDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-plain-diff-content-'))
+      expect(await diffContentSinceSnapshot(plainDir, 'HEAD')).toBe('')
     })
   })
 })

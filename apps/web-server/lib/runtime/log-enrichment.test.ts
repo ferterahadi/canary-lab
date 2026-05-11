@@ -9,9 +9,11 @@ import {
   enrichSummaryWithLogs,
   extractAllSlices,
   extractLogsForTest,
+  MAX_JOURNAL_DIFF_BYTES,
   nextIterationNumber,
   parseJournalMarkdown,
   stripAnsi,
+  truncateDiffForJournal,
   updateLatestPendingJournalOutcome,
   writeFailureSlices,
   writeHealIndex,
@@ -160,6 +162,40 @@ describe('appendJournalIteration', () => {
     expect(body.match(/# Diagnosis Journal/g)).toHaveLength(1)
   })
 
+  it('omits fix.file when filesChanged is empty or undefined', () => {
+    // Runner-observed diff is empty (non-git workspace, or agent made no
+    // edits). The journal entry should still record everything else but
+    // skip the fix.file line — empty lists shouldn't render as
+    // "- fix.file: " with nothing after the colon.
+    const journalPath = path.join(tmpDir, 'j.md')
+    const manifestPath = path.join(tmpDir, 'm.json')
+    const summaryPath = path.join(tmpDir, 's.json')
+    fs.writeFileSync(manifestPath, '{}')
+    fs.writeFileSync(summaryPath, '{}')
+
+    appendJournalIteration({
+      signal: '.restart',
+      hypothesis: 'no edits',
+      filesChanged: [],
+      journalPath,
+      manifestPath,
+      summaryPath,
+    })
+    appendJournalIteration({
+      signal: '.rerun',
+      hypothesis: 'still no edits',
+      // filesChanged undefined
+      journalPath,
+      manifestPath,
+      summaryPath,
+    })
+
+    const body = fs.readFileSync(journalPath, 'utf-8')
+    expect(body).toContain('- hypothesis: no edits')
+    expect(body).toContain('- hypothesis: still no edits')
+    expect(body).not.toContain('- fix.file:')
+  })
+
   it('tolerates malformed manifest/summary', () => {
     const journalPath = path.join(tmpDir, 'j.md')
     const manifestPath = path.join(tmpDir, 'm.json')
@@ -170,6 +206,76 @@ describe('appendJournalIteration', () => {
       signal: '.restart', hypothesis: 'h', journalPath, manifestPath, summaryPath,
     })
     expect(fs.readFileSync(journalPath, 'utf-8')).toContain('- hypothesis: h')
+  })
+
+  it('writes a `### Diff` fenced block when diffContent is provided', () => {
+    const journalPath = path.join(tmpDir, 'j.md')
+    const manifestPath = path.join(tmpDir, 'm.json')
+    const summaryPath = path.join(tmpDir, 's.json')
+    fs.writeFileSync(manifestPath, '{}')
+    fs.writeFileSync(summaryPath, '{}')
+
+    const diff = 'diff --git a/a.ts b/a.ts\n-old\n+new'
+    appendJournalIteration({
+      signal: '.restart',
+      hypothesis: 'broken',
+      diffContent: diff,
+      journalPath,
+      manifestPath,
+      summaryPath,
+    })
+
+    const body = fs.readFileSync(journalPath, 'utf-8')
+    expect(body).toContain('### Diff')
+    expect(body).toContain('```diff')
+    expect(body).toContain(diff)
+    // Field list still terminates with outcome: pending BEFORE the Diff block.
+    const outcomeIdx = body.indexOf('- outcome: pending')
+    const diffIdx = body.indexOf('### Diff')
+    expect(outcomeIdx).toBeGreaterThan(0)
+    expect(diffIdx).toBeGreaterThan(outcomeIdx)
+  })
+
+  it('omits the Diff section when diffContent is empty or whitespace', () => {
+    const journalPath = path.join(tmpDir, 'j.md')
+    const manifestPath = path.join(tmpDir, 'm.json')
+    const summaryPath = path.join(tmpDir, 's.json')
+    fs.writeFileSync(manifestPath, '{}')
+    fs.writeFileSync(summaryPath, '{}')
+
+    appendJournalIteration({
+      signal: '.restart',
+      hypothesis: 'broken',
+      diffContent: '   \n\n  ',
+      journalPath,
+      manifestPath,
+      summaryPath,
+    })
+
+    const body = fs.readFileSync(journalPath, 'utf-8')
+    expect(body).not.toContain('### Diff')
+    expect(body).not.toContain('```diff')
+  })
+})
+
+describe('truncateDiffForJournal', () => {
+  it('returns the input unchanged when under the cap', () => {
+    expect(truncateDiffForJournal('short')).toBe('short')
+  })
+
+  it('truncates oversized diffs and appends a byte-count marker', () => {
+    const oneLine = 'a'.repeat(80) + '\n'
+    const huge = oneLine.repeat(200) // 200 lines × 81 bytes = 16200 bytes
+    const truncated = truncateDiffForJournal(huge)
+    expect(Buffer.byteLength(truncated, 'utf-8')).toBeLessThan(MAX_JOURNAL_DIFF_BYTES + 80)
+    expect(truncated).toMatch(/\.\.\. \(truncated, \d+ more bytes\)$/)
+  })
+
+  it('respects an explicit max argument', () => {
+    const text = 'line1\nline2\nline3\nline4\n'
+    const truncated = truncateDiffForJournal(text, 10)
+    expect(truncated).toMatch(/\.\.\. \(truncated, \d+ more bytes\)$/)
+    expect(truncated.length).toBeLessThan(text.length + 40)
   })
 })
 
