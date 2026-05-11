@@ -1207,7 +1207,7 @@ describe('RunOrchestrator.runFullCycle', () => {
     await orch.stop('passed')
   }, 15000)
 
-  it('gives up when agent exits without writing a signal', async () => {
+  it('gives up but still writes a journal entry when the agent exits without a signal and made no code changes', async () => {
     const f = makeFakeFactory()
     const orch = bootForFullCycle({ spawned: f, pwExitCodes: [1], autoHeal: true })
     fs.mkdirSync(runDir, { recursive: true })
@@ -1226,8 +1226,201 @@ describe('RunOrchestrator.runFullCycle', () => {
 
     const status = await promise
     expect(status).toBe('failed')
+    // Journal entry preserves the audit trail even when the agent forgot to signal.
+    const journal = fs.readFileSync(orch.paths.diagnosisJournalPath, 'utf-8')
+    expect(journal).toContain('Heal agent exited without writing a signal.')
+    expect(journal).toContain('No code changes detected.')
     await orch.stop('failed')
   })
+
+  it('ends the heal loop with an idle-timeout journal entry when the live agent stays silent', async () => {
+    // Agent pty is alive throughout — never emits data, never exits. The
+    // idle timeout (100ms here) should fire and end the loop with a
+    // reason-specific journal entry, not the generic "exited" message.
+    const f = makeFakeFactory()
+    let pwIdx = 0
+    const orch = new RunOrchestrator({
+      feature: makeFeature(),
+      runId: RUN_ID,
+      runDir,
+      ptyFactory: f.factory,
+      healthCheck: async () => true,
+      delay: async () => undefined,
+      healthPollIntervalMs: 5,
+      healSignalPollMs: 1,
+      healAgentTimeoutMs: 60_000, // hard ceiling well above the idle window
+      healAgentIdleTimeoutMs: 100, // 100ms of silence → idle-timeout
+      playwrightSpawner: () => ({ command: `pw-${pwIdx++}`, cwd: tmpDir }),
+      autoHeal: { agent: 'claude', maxCycles: 1, buildCommand: () => 'heal' },
+    })
+    fs.mkdirSync(runDir, { recursive: true })
+    fs.writeFileSync(orch.paths.summaryPath, JSON.stringify({ failed: [{ name: 'a' }] }))
+
+    const promise = orch.runFullCycle()
+    await new Promise((r) => setTimeout(r, 10))
+    f.spawned[1].emitExit(1) // pw fails → heal loop entered
+    while (f.spawned.length < 3) await new Promise((r) => setTimeout(r, 5))
+    // Do NOT emit any data or exit on the agent pty — let idle timeout fire.
+
+    const status = await promise
+    expect(status).toBe('failed')
+    const journal = fs.readFileSync(orch.paths.diagnosisJournalPath, 'utf-8')
+    expect(journal).toContain('Heal agent went silent')
+    expect(journal).not.toContain('exited without writing')
+    await orch.stop('failed')
+  }, 10000)
+
+  it('ends the heal loop with a hard-timeout journal entry when the cycle hits the absolute ceiling', async () => {
+    // Agent pty is alive AND producing output continuously (never goes
+    // idle), but the hard ceiling kicks in. Should write a hard-timeout
+    // journal entry — not idle, not exited.
+    const f = makeFakeFactory()
+    let pwIdx = 0
+    const orch = new RunOrchestrator({
+      feature: makeFeature(),
+      runId: RUN_ID,
+      runDir,
+      ptyFactory: f.factory,
+      healthCheck: async () => true,
+      delay: async () => undefined,
+      healthPollIntervalMs: 5,
+      healSignalPollMs: 1,
+      healAgentTimeoutMs: 200, // hard ceiling we'll deliberately hit
+      healAgentIdleTimeoutMs: 60_000, // idle window much larger than ceiling
+      playwrightSpawner: () => ({ command: `pw-${pwIdx++}`, cwd: tmpDir }),
+      autoHeal: { agent: 'claude', maxCycles: 1, buildCommand: () => 'heal' },
+    })
+    fs.mkdirSync(runDir, { recursive: true })
+    fs.writeFileSync(orch.paths.summaryPath, JSON.stringify({ failed: [{ name: 'a' }] }))
+
+    const promise = orch.runFullCycle()
+    await new Promise((r) => setTimeout(r, 10))
+    f.spawned[1].emitExit(1)
+    while (f.spawned.length < 3) await new Promise((r) => setTimeout(r, 5))
+    // Keep emitting data so the idle clock stays fresh until the hard
+    // ceiling fires.
+    const pump = setInterval(() => {
+      if (f.spawned[2]) f.spawned[2].emitData('thinking...\n')
+    }, 20)
+    try {
+      const status = await promise
+      expect(status).toBe('failed')
+      const journal = fs.readFileSync(orch.paths.diagnosisJournalPath, 'utf-8')
+      expect(journal).toContain('Heal cycle hit the')
+      expect(journal).toContain('minute ceiling')
+    } finally {
+      clearInterval(pump)
+      await orch.stop('failed')
+    }
+  }, 10000)
+
+  it('writes agent-session.json pointing at the claude session JSONL after the heal flow ends', async () => {
+    // Stand up a fake `~/.claude/projects/<encoded-runDir>/<uuid>.jsonl` so
+    // the locator finds something at the predicted path. We point HOME at a
+    // temp dir for the duration of the test so the orchestrator's
+    // os.homedir() lookup resolves there.
+    const originalHome = process.env.HOME
+    const homeDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-orc-home-')))
+    process.env.HOME = homeDir
+    try {
+      const f = makeFakeFactory()
+      // Capture the orchestrator's view of the run dir (realpathSync'd
+      // tmpDir) so the encoded project path matches.
+      const orch = bootForFullCycle({ spawned: f, pwExitCodes: [1], autoHeal: true })
+      // The orchestrator generates a UUID for claude session id internally;
+      // we can't predict it. Instead, create the fake JSONL eagerly after the
+      // agent pty is spawned, when the orchestrator has written the id to
+      // agentSessionIdPath.
+      fs.mkdirSync(runDir, { recursive: true })
+      fs.writeFileSync(
+        orch.paths.summaryPath,
+        JSON.stringify({ failed: [{ name: 'a' }] }),
+      )
+
+      const promise = orch.runFullCycle()
+      await new Promise((r) => setTimeout(r, 10))
+      f.spawned[1].emitExit(1) // pw fails → heal loop entered
+      // Wait for the agent pty spawn AND for the session id sidecar.
+      while (f.spawned.length < 3 || !fs.existsSync(orch.paths.agentSessionIdPath)) {
+        await new Promise((r) => setTimeout(r, 5))
+      }
+      const sessionId = fs.readFileSync(orch.paths.agentSessionIdPath, 'utf-8').trim()
+      expect(sessionId).toMatch(/^[0-9a-f-]+$/i)
+      // Drop the fake JSONL where locateClaudeSessionLog looks. The encoder
+      // just replaces `/` with `-`, so the leading slash already becomes the
+      // leading dash — no extra prefix.
+      const encoded = runDir.replace(/\//g, '-')
+      const projectDir = path.join(homeDir, '.claude', 'projects', encoded)
+      fs.mkdirSync(projectDir, { recursive: true })
+      const logPath = path.join(projectDir, `${sessionId}.jsonl`)
+      fs.writeFileSync(logPath, '')
+
+      // End the heal cycle: agent exits without signal so the loop bails fast.
+      f.spawned[2].emitExit(0)
+      await promise
+      await orch.stop('failed')
+
+      const ref = JSON.parse(fs.readFileSync(orch.paths.agentSessionRefPath, 'utf-8'))
+      expect(ref).toEqual({ agent: 'claude', sessionId, logPath })
+    } finally {
+      if (originalHome === undefined) delete process.env.HOME
+      else process.env.HOME = originalHome
+      try { fs.rmSync(homeDir, { recursive: true, force: true }) } catch { /* best-effort */ }
+    }
+  }, 15000)
+
+  it('infers a rerun and writes a journal entry when the agent edits files but exits without a signal', async () => {
+    // tmpDir is the feature's repo localPath — make it a git repo so the
+    // orchestrator's snapshot/diff sees the agent's edits.
+    execFileSync('git', ['init', '-q'], { cwd: tmpDir })
+    execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: tmpDir })
+    execFileSync('git', ['config', 'user.name', 'Test'], { cwd: tmpDir })
+    fs.writeFileSync(path.join(tmpDir, 'svc.ts'), '// initial\n')
+    execFileSync('git', ['add', 'svc.ts'], { cwd: tmpDir })
+    execFileSync('git', ['commit', '-q', '-m', 'init'], { cwd: tmpDir })
+
+    const f = makeFakeFactory()
+    let pwIdx = 0
+    let healIdx = 0
+    const orch = new RunOrchestrator({
+      feature: makeFeature(),
+      runId: RUN_ID,
+      runDir,
+      ptyFactory: f.factory,
+      healthCheck: async () => true,
+      delay: async () => undefined,
+      healthPollIntervalMs: 5,
+      healSignalPollMs: 1,
+      healAgentTimeoutMs: 1000,
+      playwrightSpawner: () => ({ command: `pw-${pwIdx++}`, cwd: tmpDir }),
+      autoHeal: { agent: 'claude', maxCycles: 1, buildCommand: () => `heal-${healIdx++}` },
+    })
+    fs.mkdirSync(runDir, { recursive: true })
+    fs.writeFileSync(orch.paths.summaryPath, JSON.stringify({ failed: [{ name: 'a' }] }))
+
+    const promise = orch.runFullCycle()
+    await new Promise((r) => setTimeout(r, 10))
+    f.spawned[1].emitExit(1) // pw fails → enter heal loop
+    while (f.spawned.length < 3) await new Promise((r) => setTimeout(r, 5))
+    // Agent edits a tracked file then exits without writing a signal file.
+    fs.writeFileSync(path.join(tmpDir, 'svc.ts'), '// patched by agent\n')
+    f.spawned[2].emitExit(0)
+    // Inferred .rerun: no service restart, just a second playwright run.
+    while (f.spawned.length < 4) await new Promise((r) => setTimeout(r, 5))
+    f.spawned[3].emitExit(1) // still failing; cap=1 → loop exits
+
+    const status = await promise
+    expect(status).toBe('failed')
+
+    const journal = fs.readFileSync(orch.paths.diagnosisJournalPath, 'utf-8')
+    expect(journal).toContain('Heal agent exited without writing a signal.')
+    expect(journal).toContain('Runner inferred a rerun from git diff.')
+    expect(journal).toContain(path.join(tmpDir, 'svc.ts'))
+    // The 4th spawn (idx 3) is the inferred-rerun's playwright; without the
+    // fallback the loop would have bailed before that pty existed.
+    expect(f.spawned.length).toBeGreaterThanOrEqual(4)
+    await orch.stop('failed')
+  }, 15000)
 
   it('agent exit unwedges the loop within one poll tick (no waiting for the heal-agent timeout)', async () => {
     // Regression: when claude's REPL exits unexpectedly mid-cycle (user
@@ -1292,7 +1485,7 @@ describe('RunOrchestrator.runFullCycle', () => {
     await orch.stop('failed')
   })
 
-  it('emits agent-output and tees to transcript', async () => {
+  it('emits agent-output chunks for the live broker', async () => {
     const f = makeFakeFactory()
     const orch = bootForFullCycle({ spawned: f, pwExitCodes: [1], autoHeal: true })
     fs.mkdirSync(runDir, { recursive: true })
@@ -1306,9 +1499,10 @@ describe('RunOrchestrator.runFullCycle', () => {
     f.spawned[2].emitData('agent says hi\n')
     f.spawned[2].emitExit(0) // no signal → give-up
     await promise
+    // The broker pushes these chunks to live xterm subscribers; historical
+    // replay reads the agent CLI's own JSONL session log instead (no disk
+    // transcript is written here).
     expect(chunks.join('')).toContain('agent says hi')
-    const transcript = fs.readFileSync(orch.paths.agentTranscriptPath, 'utf-8')
-    expect(transcript).toContain('agent says hi')
     await orch.stop('failed')
   })
 
@@ -1662,7 +1856,9 @@ describe('RunOrchestrator.runFullCycle', () => {
 })
 
 describe('RunOrchestrator.waitForHealSignal', () => {
-  it('returns null on timeout', async () => {
+  it('returns pty-died when no agent pty is alive (post-exit grace then bail)', async () => {
+    // With no live heal-agent pty, the `pty-died` grace path is what gets
+    // exercised — the hard/idle timeouts only apply while the REPL is up.
     const { factory } = makeFakeFactory()
     const orch = new RunOrchestrator({
       feature: makeFeature(),
@@ -1673,11 +1869,12 @@ describe('RunOrchestrator.waitForHealSignal', () => {
       delay: async () => undefined,
       healSignalPollMs: 0,
     })
-    const sig = await orch.waitForHealSignal(5)
-    expect(sig).toBeNull()
+    const { signal, reason } = await orch.waitForHealSignal(5_000, 5_000)
+    expect(signal).toBeNull()
+    expect(reason).toBe('pty-died')
   })
 
-  it('respects the stopped flag', async () => {
+  it('returns stopped when the orchestrator has been aborted', async () => {
     const { factory } = makeFakeFactory()
     const orch = new RunOrchestrator({
       feature: makeFeature(),
@@ -1689,7 +1886,9 @@ describe('RunOrchestrator.waitForHealSignal', () => {
       healSignalPollMs: 0,
     })
     await orch.stop('aborted')
-    expect(await orch.waitForHealSignal(50)).toBeNull()
+    const { signal, reason } = await orch.waitForHealSignal(50, 50)
+    expect(signal).toBeNull()
+    expect(reason).toBe('stopped')
   })
 })
 
@@ -2454,13 +2653,10 @@ describe('RunOrchestrator.interjectHealAgent', () => {
     const result = await orch.interjectHealAgent('nudge fix')
     expect(result).toEqual({ ok: true })
     expect(f.spawned.length).toBe(beforeSpawnCount)
-    // Agent-output stream + transcript both echo the user's redirect block.
+    // Agent-output stream echoes the user's redirect block to live xterm.
     const echoed = agentChunks.join('')
     expect(echoed).toContain('user interject')
     expect(echoed).toContain('  │ nudge fix')
-    const transcript = fs.readFileSync(orch.paths.agentTranscriptPath, 'utf-8')
-    expect(transcript).toContain('user interject')
-    expect(transcript).toContain('  │ nudge fix')
     // Status stays in healing — interject does not flip the run state.
     expect(readManifest(orch.paths.manifestPath)?.status).toBe('healing')
     expect(statusEvents).not.toContain('running')
@@ -2515,8 +2711,6 @@ describe('RunOrchestrator.interjectHealAgent', () => {
     expect(f.spawned.length).toBe(beforeSpawnCount) // no respawn
     const echoed = agentChunks.join('')
     expect(echoed).toContain('  │ first line\n  │ second line\n  │ third line')
-    const transcript = fs.readFileSync(orch.paths.agentTranscriptPath, 'utf-8')
-    expect(transcript).toContain('  │ first line\n  │ second line\n  │ third line')
 
     await promise
     await orch.stop('failed')
@@ -2566,9 +2760,6 @@ describe('RunOrchestrator.restartHealFromFailure', () => {
     const echoed = agentChunks.join('')
     expect(echoed).toContain('user interject')
     expect(echoed).toContain('  │ look at fallback country mapping')
-    const transcript = fs.readFileSync(orch.paths.agentTranscriptPath, 'utf-8')
-    expect(transcript).toContain('user interject')
-    expect(transcript).toContain('  │ look at fallback country mapping')
     f.spawned[0].emitExit(0)
 
     expect(await promise).toBe('failed')
@@ -2637,6 +2828,147 @@ describe('RunOrchestrator.restartHealFromFailure', () => {
     expect(await promise).toBe('passed')
     expect(eventLog).toContain('agent-exit')
     await orch.stop('passed')
+  })
+
+  it('claude restart: reuses the prior session id from disk and passes resume=true to the spawn-command builder', async () => {
+    // On Restart Heal the run dir already carries the previous heal session's
+    // UUID at `agent-session-id.txt`. We reuse it so the spawn command can
+    // emit `--resume <uuid>` and claude continues the prior conversation
+    // instead of orphaning all the investigation history.
+    const PRIOR_SID = 'b2160db2-89b8-49ff-a2ba-c0c97a52d63f'
+    const paths = buildRunPaths(runDir)
+    fs.writeFileSync(paths.agentSessionIdPath, PRIOR_SID)
+
+    const f = makeFakeFactory()
+    const spawnCalls: Array<{ sessionId?: string; resume?: boolean }> = []
+    const orch = new RunOrchestrator({
+      feature: makeFeature({ healOnFailureThreshold: 1 }),
+      runId: RUN_ID,
+      runDir,
+      ptyFactory: f.factory,
+      healthCheck: async () => true,
+      delay: async () => undefined,
+      healSignalPollMs: 1,
+      healAgentTimeoutMs: 20,
+      playwrightSpawner: () => ({ command: 'pw-should-not-run', cwd: tmpDir }),
+      autoHeal: {
+        agent: 'claude',
+        maxCycles: 1,
+        buildSpawnCommand: ({ sessionId, resume }) => {
+          spawnCalls.push({ sessionId, resume })
+          return 'claude heal restart'
+        },
+        buildCyclePrompt: () => 'restart-prompt',
+      },
+    })
+    fs.writeFileSync(
+      orch.paths.summaryPath,
+      JSON.stringify({ failed: [{ name: 'a' }], total: 1, passed: 0 }),
+    )
+
+    const promise = orch.restartHealFromFailure('look again')
+    while (f.spawned.length < 1) await new Promise((r) => setTimeout(r, 5))
+    expect(spawnCalls).toHaveLength(1)
+    expect(spawnCalls[0]).toEqual({ sessionId: PRIOR_SID, resume: true })
+    // File is preserved unchanged — same UUID across the restart so the UI
+    // shows a stable session and `locateClaudeSessionLog` finds the same
+    // ~/.claude/projects/.../<uuid>.jsonl after resume.
+    expect(fs.readFileSync(paths.agentSessionIdPath, 'utf-8').trim()).toBe(PRIOR_SID)
+    f.spawned[0].emitExit(0)
+    expect(await promise).toBe('failed')
+    await orch.stop('failed')
+  })
+
+  it('claude restart: when no prior session id file exists, generates a fresh UUID with resume=false', async () => {
+    // First-ever heal cycle (or a corrupt/missing sid file) falls back to
+    // the original behavior: mint a new UUID, spawn with --session-id.
+    const paths = buildRunPaths(runDir)
+    expect(fs.existsSync(paths.agentSessionIdPath)).toBe(false)
+
+    const f = makeFakeFactory()
+    const spawnCalls: Array<{ sessionId?: string; resume?: boolean }> = []
+    const orch = new RunOrchestrator({
+      feature: makeFeature({ healOnFailureThreshold: 1 }),
+      runId: RUN_ID,
+      runDir,
+      ptyFactory: f.factory,
+      healthCheck: async () => true,
+      delay: async () => undefined,
+      healSignalPollMs: 1,
+      healAgentTimeoutMs: 20,
+      playwrightSpawner: () => ({ command: 'pw-should-not-run', cwd: tmpDir }),
+      autoHeal: {
+        agent: 'claude',
+        maxCycles: 1,
+        buildSpawnCommand: ({ sessionId, resume }) => {
+          spawnCalls.push({ sessionId, resume })
+          return 'claude heal fresh'
+        },
+        buildCyclePrompt: () => 'fresh-prompt',
+      },
+    })
+    fs.writeFileSync(
+      orch.paths.summaryPath,
+      JSON.stringify({ failed: [{ name: 'a' }], total: 1, passed: 0 }),
+    )
+
+    const promise = orch.restartHealFromFailure('look again')
+    while (f.spawned.length < 1) await new Promise((r) => setTimeout(r, 5))
+    expect(spawnCalls).toHaveLength(1)
+    expect(spawnCalls[0].resume).toBe(false)
+    expect(spawnCalls[0].sessionId).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+    )
+    // File was written so a SUBSEQUENT restart could resume this same session.
+    expect(fs.readFileSync(paths.agentSessionIdPath, 'utf-8').trim()).toBe(spawnCalls[0].sessionId)
+    f.spawned[0].emitExit(0)
+    expect(await promise).toBe('failed')
+    await orch.stop('failed')
+  })
+
+  it('claude restart: corrupt prior-session-id file is ignored — generates a fresh UUID with resume=false', async () => {
+    const paths = buildRunPaths(runDir)
+    fs.writeFileSync(paths.agentSessionIdPath, 'not-a-uuid')
+
+    const f = makeFakeFactory()
+    const spawnCalls: Array<{ sessionId?: string; resume?: boolean }> = []
+    const orch = new RunOrchestrator({
+      feature: makeFeature({ healOnFailureThreshold: 1 }),
+      runId: RUN_ID,
+      runDir,
+      ptyFactory: f.factory,
+      healthCheck: async () => true,
+      delay: async () => undefined,
+      healSignalPollMs: 1,
+      healAgentTimeoutMs: 20,
+      playwrightSpawner: () => ({ command: 'pw-should-not-run', cwd: tmpDir }),
+      autoHeal: {
+        agent: 'claude',
+        maxCycles: 1,
+        buildSpawnCommand: ({ sessionId, resume }) => {
+          spawnCalls.push({ sessionId, resume })
+          return 'claude heal recover'
+        },
+        buildCyclePrompt: () => 'recover-prompt',
+      },
+    })
+    fs.writeFileSync(
+      orch.paths.summaryPath,
+      JSON.stringify({ failed: [{ name: 'a' }], total: 1, passed: 0 }),
+    )
+
+    const promise = orch.restartHealFromFailure('look again')
+    while (f.spawned.length < 1) await new Promise((r) => setTimeout(r, 5))
+    expect(spawnCalls[0].resume).toBe(false)
+    expect(spawnCalls[0].sessionId).not.toBe('not-a-uuid')
+    expect(spawnCalls[0].sessionId).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+    )
+    // The corrupt file was overwritten with the freshly minted UUID.
+    expect(fs.readFileSync(paths.agentSessionIdPath, 'utf-8').trim()).toBe(spawnCalls[0].sessionId)
+    f.spawned[0].emitExit(0)
+    expect(await promise).toBe('failed')
+    await orch.stop('failed')
   })
 })
 

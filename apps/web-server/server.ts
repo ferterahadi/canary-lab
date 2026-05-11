@@ -281,7 +281,12 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
       const projectConfig = loadProjectConfig(opts.projectRoot)
       let autoHeal: {
         agent: HealAgent
-        buildSpawnCommand: (args: { sessionId?: string; mcpOutputDir?: string; promptFile?: string }) => string
+        buildSpawnCommand: (args: {
+          sessionId?: string
+          resume?: boolean
+          mcpOutputDir?: string
+          promptFile?: string
+        }) => string
         buildCyclePrompt: (args: { cycle: number; outputDir: string; userGuidance?: string }) => string
       } | undefined
       const agentChoice = projectConfig.healAgent === 'manual'
@@ -296,8 +301,9 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
         try {
           autoHeal = {
             agent: agentChoice,
-            buildSpawnCommand: ({ sessionId, mcpOutputDir, promptFile }) => buildAgentSpawnCommand(agentChoice, {
+            buildSpawnCommand: ({ sessionId, resume, mcpOutputDir, promptFile }) => buildAgentSpawnCommand(agentChoice, {
               sessionId,
+              resume,
               mcpOutputDir,
               mcpConfigFile: path.join(runDir, 'mcp-config.json'),
               promptFile,
@@ -414,8 +420,9 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
           runnerLog,
           autoHeal: {
             agent: agentChoice,
-            buildSpawnCommand: ({ sessionId, mcpOutputDir, promptFile }) => buildAgentSpawnCommand(agentChoice, {
+            buildSpawnCommand: ({ sessionId, resume, mcpOutputDir, promptFile }) => buildAgentSpawnCommand(agentChoice, {
               sessionId,
+              resume,
               mcpOutputDir,
               mcpConfigFile: path.join(runDir, 'mcp-config.json'),
               promptFile,

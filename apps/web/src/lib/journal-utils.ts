@@ -54,30 +54,26 @@ export function parseBodyFields(body: string): ParsedField[] {
   return out
 }
 
-// Map journal field keys to human-friendly labels. `null` hides a field from
-// the UI (the data still lives in the raw markdown the agent reads). Fields
-// not listed here fall through with their original key, so new fields surface
-// by default rather than silently disappearing.
-const JOURNAL_FIELD_DISPLAY: Record<string, string | null> = {
-  run: null,
-  feature: null,
-  failingTests: null,
+// Strict allowlist of journal fields shown in the structured view, mapped to
+// their human-friendly labels. Anything not listed here is hidden from the
+// UI — the raw markdown (reachable via "Show raw markdown") still carries
+// every field, and the heal agent reads from that, so hiding here is a
+// presentation-only filter. Strict mode prevents diff-block noise (`- metadata:`,
+// `- channel:`, etc. matching the parser's field regex) from leaking through.
+const JOURNAL_FIELD_DISPLAY: Record<string, string> = {
   hypothesis: 'hypothesis',
-  'fix.file': 'files',
   'fix.description': 'fix description',
   signal: 'signal',
   outcome: 'outcome',
 }
 
 // Returns the human-facing label for a journal field key, or `null` if the
-// field should be hidden from the UI. The raw markdown (still reachable via
-// "Show raw markdown") is what the heal agent reads — this only filters the
-// structured view above it.
+// field should be hidden from the UI.
 export function formatJournalFieldKey(key: string): string | null {
   if (Object.prototype.hasOwnProperty.call(JOURNAL_FIELD_DISPLAY, key)) {
     return JOURNAL_FIELD_DISPLAY[key]
   }
-  return key
+  return null
 }
 
 // Convenience: filter + rename in one pass, preserving order.

@@ -2,6 +2,23 @@
 
 All notable changes to Canary Lab are listed here. We try to keep the language plain so anyone can follow along.
 
+## 1.0.2 — 2026-05-11
+
+### What's new
+- **Cleaner history after auto-heal finishes.** Once the auto-heal agent stops, the run history shows a tidy, organized log of what it did instead of a wall of raw output.
+- **Auto-heal picks up where it left off.** If Claude needs to keep working on a fix across steps, it now continues the same conversation rather than starting fresh each time.
+- **Long heal runs no longer get cut off.** Previously the agent would stop after roughly 10 minutes; it now keeps going by resuming its session, so longer fixes can complete.
+
+### Improvements
+- **More reliable run summaries.** End-of-run summaries handle tricky cases better and are less likely to look off.
+- **Steadier behavior under unusual conditions.** A range of edge cases around logging, run tracking, and live updates are handled more gracefully.
+
+### Housekeeping
+- **Version bump to 1.0.2.**
+- **Lots more tests behind the scenes** to keep future changes from breaking things.
+
+---
+
 ## 1.0.1 — 2026-05-11
 
 > Re-run `npx canary-lab upgrade` to refresh the managed `CLAUDE.md` / `AGENTS.md` heal block — the heal signal body changed shape (see Breaking changes).

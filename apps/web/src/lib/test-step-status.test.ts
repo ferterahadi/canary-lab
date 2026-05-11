@@ -88,6 +88,17 @@ describe('statusForTest', () => {
     expect(statusForTest('Creates a TODO', inflight)).toBe('testing')
   })
 
+  it('returns testing when a previously-failed test is currently re-running (targeted rerun)', () => {
+    const targetedRerun: RunSummary = {
+      complete: false,
+      total: 2,
+      passed: 1,
+      failed: [{ name: 'test-case-creates-a-todo', error: { message: 'AssertionError: …' } }],
+      running: { name: 'test-case-creates-a-todo', location: '/todo.spec.ts:12' },
+    }
+    expect(statusForTest('Creates a TODO', targetedRerun)).toBe('testing')
+  })
+
   it('ignores stale running entries when the selected run is not actively testing', () => {
     const aborted: RunSummary = {
       complete: false,
@@ -250,6 +261,46 @@ describe('activeBodyLineForTest', () => {
             locations: ['/helpers/voucher.ts:4', '/todo.spec.ts:12'],
           },
         },
+      },
+    })).toBe(3)
+  })
+
+  it('uses persisted failed locations after the test stops running', () => {
+    expect(activeBodyLineForTest({
+      testName: 'Creates a TODO',
+      testLine: 10,
+      bodySource: '{\n  await page.goto(\"/\")\n  await expect(locator).toBeVisible()\n}',
+      summary: {
+        complete: true,
+        total: 1,
+        passed: 0,
+        failed: [
+          {
+            name: 'test-case-creates-a-todo',
+            location: '/todo.spec.ts:10',
+            locations: ['/todo.spec.ts:12'],
+          },
+        ],
+      },
+    })).toBe(3)
+  })
+
+  it('keeps the highlight on the parent test body when a child helper location appears first', () => {
+    expect(activeBodyLineForTest({
+      testName: 'Creates a TODO',
+      testLine: 10,
+      bodySource: '{\n  await page.goto(\"/\")\n  await redeemCode(page)\n}',
+      summary: {
+        complete: true,
+        total: 1,
+        passed: 0,
+        failed: [
+          {
+            name: 'test-case-creates-a-todo',
+            location: '/todo.spec.ts:10',
+            locations: ['/helpers/voucher.ts:4', '/todo.spec.ts:12'],
+          },
+        ],
       },
     })).toBe(3)
   })

@@ -143,8 +143,7 @@ function replayLogFile(
   return true
 }
 
-export function formatHistoricalPaneReplay(paneId: string, raw: string): string {
-  void paneId
+export function formatHistoricalPaneReplay(_paneId: string, raw: string): string {
   return raw
 }
 
@@ -154,7 +153,9 @@ export function formatHistoricalPaneReplay(paneId: string, raw: string): string 
  *
  * - `service:<safeName>` → `svc-<safeName>.log`
  * - `playwright`         → `playwright.log`
- * - `agent`              → `agent-transcript.log`
+ * - `agent`              → null (handled by `/api/runs/:runId/agent-session`,
+ *                          which reads the agent CLI's structured JSONL log
+ *                          instead of a raw PTY capture)
  */
 export function resolveLogPath(logsDir: string, runId: string, paneId: string): string | null {
   const runDir = runDirFor(logsDir, runId)
@@ -162,7 +163,7 @@ export function resolveLogPath(logsDir: string, runId: string, paneId: string): 
   const paths = buildRunPaths(runDir)
 
   if (paneId === 'playwright') return paths.playwrightStdoutPath
-  if (paneId === 'agent') return paths.agentTranscriptPath
+  if (paneId === 'agent') return null
 
   if (paneId.startsWith('service:')) {
     const safeName = paneId.slice('service:'.length)

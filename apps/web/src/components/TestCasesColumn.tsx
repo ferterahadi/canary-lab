@@ -48,6 +48,15 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunStatus }: 
 
   const totalTests = specs?.reduce((acc, s) => acc + s.tests.length, 0) ?? 0
   const isRunActivelyTesting = activeRunStatus === 'running'
+  // Numerator is anchored to the *current* spec, not summary totals. Summary
+  // entries can outlive the spec (e.g. seedFromExistingSummary preserves
+  // ghosts from prior runs) which would otherwise push `done` past `total`.
+  const passedCount = (specs ?? []).reduce(
+    (acc, spec) => acc + spec.tests.filter(
+      (t) => statusForTest(t.name, activeRunSummary, isRunActivelyTesting) === 'passed',
+    ).length,
+    0,
+  )
 
   return (
     <div className="cl-panel flex h-full flex-col">
@@ -58,6 +67,7 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunStatus }: 
         <TestsHeaderIndicator
           summary={activeRunSummary}
           totalTests={totalTests}
+          passedCount={passedCount}
           specsLoaded={Boolean(specs)}
           isRunActivelyTesting={isRunActivelyTesting}
         />
@@ -201,15 +211,17 @@ function shortLocation(location: string): string {
 function TestsHeaderIndicator({
   summary,
   totalTests,
+  passedCount,
   specsLoaded,
   isRunActivelyTesting,
 }: {
   summary: RunSummary | undefined
   totalTests: number
+  passedCount: number
   specsLoaded: boolean
   isRunActivelyTesting: boolean
 }) {
-  if (summary) return <RunningIndicator summary={summary} totalTests={totalTests} isRunActivelyTesting={isRunActivelyTesting} />
+  if (summary) return <RunningIndicator summary={summary} totalTests={totalTests} passedCount={passedCount} isRunActivelyTesting={isRunActivelyTesting} />
   if (!specsLoaded || totalTests <= 0) return null
   return (
     <div className="text-[10px]" style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>
@@ -221,10 +233,12 @@ function TestsHeaderIndicator({
 function RunningIndicator({
   summary,
   totalTests,
+  passedCount,
   isRunActivelyTesting,
 }: {
   summary: RunSummary
   totalTests: number
+  passedCount: number
   isRunActivelyTesting: boolean
 }) {
   // Denominator should reflect the *static* test count parsed from the spec
@@ -232,7 +246,7 @@ function RunningIndicator({
   // until the suite enumeration completes (especially when filtered/retried),
   // which would briefly read "1/1" while 14 tests are actually queued.
   const total = totalTests > 0 ? totalTests : summary.total
-  const done = summary.passed + summary.failed.length + (summary.skipped ?? summary.skippedNames?.length ?? 0)
+  const done = totalTests > 0 ? passedCount : summary.passed
   const isTestRunning = isRunActivelyTesting && Boolean(summary.running)
   return (
     <div className="flex items-center gap-2 text-[10px]" style={{ color: 'var(--text-secondary)' }}>
