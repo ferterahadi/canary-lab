@@ -1,6 +1,6 @@
 {
   "name": "canary-lab",
-  "version": "1.0.2",
+  "version": "3",
   "description": "E2E test scaffolder and runner with agent-assisted self-fixing workflows",
   "keywords": [
     "playwright",
@@ -75,6 +75,7 @@
     "@vitejs/plugin-react": "^6.0.1",
     "@vitest/coverage-v8": "^4.1.4",
     "@xterm/addon-fit": "^0.11.0",
+    "@xterm/addon-webgl": "^0.19.0",
     "@xterm/xterm": "^6.0.0",
     "autoprefixer": "^10.5.0",
     "happy-dom": "^20.9.0",

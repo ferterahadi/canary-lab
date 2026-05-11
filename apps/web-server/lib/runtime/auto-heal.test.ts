@@ -8,6 +8,7 @@ import {
   buildOrchestratorHealPrompt,
   pickAvailableHealAgent,
   readPriorSessionId,
+  readPriorSessionIdFromValue,
 } from './auto-heal'
 import { renderPersonalWikiMap } from '../../../../shared/runtime/personal-wiki'
 
@@ -104,10 +105,10 @@ describe('buildAgentSpawnCommand', () => {
     expect(cmd.includes('--session-id')).toBe(false)
   })
 
-  it('codex REPL: no exec-only flags / --full-auto / --mcp-config / --session-id / --resume', () => {
+  it('codex REPL: fresh session uses no exec-only flags / --full-auto / --mcp-config / --session-id / --resume', () => {
     const cmd = buildAgentSpawnCommand('codex', {
       sessionId: 'ignored',
-      resume: true,
+      resume: false,
       mcpOutputDir: '/tmp/out',
     })
     expect(cmd).toContain('codex')
@@ -117,7 +118,19 @@ describe('buildAgentSpawnCommand', () => {
     expect(cmd.includes('--full-auto')).toBe(false)
     expect(cmd.includes('--mcp-config')).toBe(false)
     expect(cmd.includes('--session-id')).toBe(false)
-    // Codex has no `--resume` flag; the resume hint is ignored.
+    // Codex resume is a subcommand, not a flag.
+    expect(cmd.includes('--resume')).toBe(false)
+    expect(cmd.includes('codex resume')).toBe(false)
+  })
+
+  it('codex REPL: resumes a prior session when resume + sessionId are supplied', () => {
+    const cmd = buildAgentSpawnCommand('codex', {
+      sessionId: 'b2160db2-89b8-49ff-a2ba-c0c97a52d63f',
+      resume: true,
+      promptFile: '/tmp/run/heal-prompt.md',
+    })
+    expect(cmd).toBe('codex resume "b2160db2-89b8-49ff-a2ba-c0c97a52d63f" -- "@/tmp/run/heal-prompt.md"')
+    expect(cmd.includes('--session-id')).toBe(false)
     expect(cmd.includes('--resume')).toBe(false)
   })
 
@@ -217,6 +230,12 @@ describe('readPriorSessionId', () => {
     fs.writeFileSync(file, 'b2160db2-89b8-49ff-a2ba-c0c97a52d63f extra')
     expect(readPriorSessionId(file)).toBeNull()
   })
+
+  it('validates a raw persisted session id value without reading a file', () => {
+    expect(readPriorSessionIdFromValue(' b2160db2-89b8-49ff-a2ba-c0c97a52d63f\n'))
+      .toBe('b2160db2-89b8-49ff-a2ba-c0c97a52d63f')
+    expect(readPriorSessionIdFromValue('not-a-uuid')).toBeNull()
+  })
 })
 
 describe('pickAvailableHealAgent', () => {
@@ -291,6 +310,19 @@ describe('buildOrchestratorHealPrompt', () => {
     const promptBody = fs.readFileSync(path.join(runDir, 'heal-prompt.md'), 'utf-8')
     expect(promptBody).toContain('User guidance for this restarted heal cycle')
     expect(promptBody).toContain('focus on the webhook fallback')
+  })
+
+  it('appends prior cross-agent session context to the rendered heal prompt', () => {
+    const build = buildOrchestratorHealPrompt({ agent: 'codex', projectRoot, runDir })
+    build({
+      cycle: 0,
+      outputDir: path.join(runDir, 'out'),
+      priorAgentSessionContext: 'Previous claude session sid:\nASSISTANT: check CNS_V1_BASE_URL',
+    })
+    const promptBody = fs.readFileSync(path.join(runDir, 'heal-prompt.md'), 'utf-8')
+    expect(promptBody).toContain('Previous agent session context from another agent')
+    expect(promptBody).toContain('Previous claude session sid:')
+    expect(promptBody).toContain('check CNS_V1_BASE_URL')
   })
 
   it('includes configured personal wiki context in the rendered heal prompt', () => {

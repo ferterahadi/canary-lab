@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import type {
   PlaywrightArtifact,
   PlaywrightArtifactGroup,
@@ -40,6 +40,7 @@ export function RunDetailColumn({
   const [serviceIdx, setServiceIdx] = useState(0)
   const [playwrightView, setPlaywrightView] = useState<PlaywrightView>('playback')
   const [agentPaneRestartKey, setAgentPaneRestartKey] = useState(0)
+  const [agentPaneExited, setAgentPaneExited] = useState(false)
 
   // Detail comes from the WebSocket-backed RunsContext. No polling here —
   // the same `state.details[runId]` populated for the runs list is reused,
@@ -48,6 +49,13 @@ export function RunDetailColumn({
   // the runs list) is overlaid into `displayStatus` so this header shows
   // `ABORTING` mid-action instead of stale `RUNNING`.
   const { detail, displayStatus } = useRun(runId)
+  const handleAgentPaneExit = useCallback(() => {
+    setAgentPaneExited(true)
+  }, [])
+
+  useEffect(() => {
+    setAgentPaneExited(false)
+  }, [runId, agentPaneRestartKey])
 
   if (!runId) {
     return (
@@ -68,6 +76,7 @@ export function RunDetailColumn({
   const services = m.services
   const repoBranches = m.repoBranches ?? []
   const activeService = services[serviceIdx]
+  const showAgentSession = isTerminalRunStatus(m.status) || agentPaneExited
 
   return (
     <div className="cl-panel relative flex h-full flex-col">
@@ -189,13 +198,14 @@ export function RunDetailColumn({
               <ManualHealBanner runId={m.runId} signalPaths={m.signalPaths} />
             )}
             <div className="min-h-0 flex-1 overflow-hidden">
-              {isTerminalRunStatus(m.status) ? (
-                <AgentSessionView runId={m.runId} />
+              {showAgentSession ? (
+                <AgentSessionView runId={m.runId} pollUntilFound={!isTerminalRunStatus(m.status)} />
               ) : (
                 <PaneTerminal
                   key={`${m.runId}:agent:${agentPaneRestartKey}`}
                   runId={m.runId}
                   paneId="agent"
+                  onExit={handleAgentPaneExit}
                 />
               )}
             </div>

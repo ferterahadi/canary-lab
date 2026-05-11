@@ -40,7 +40,7 @@ export interface PaneConnection {
   // No-ops until the socket is OPEN; never throws.
   sendInput(chunk: string): void
   // Forward terminal dimensions (xterm.js cols/rows) to the server-side pty.
-  // Without this, claude's TUI renders at the pty's spawn-time defaults
+  // Without this, the agent TUI renders at the pty's spawn-time defaults
   // (120×30) regardless of the actual pane width — status bars and
   // box-drawing wrap mid-word. No-ops until the socket is OPEN.
   sendResize(cols: number, rows: number): void
