@@ -1097,6 +1097,13 @@ describe('RunOrchestrator.runFullCycle', () => {
     expect(statuses).toContain('healing')
     expect(statuses.at(-1)).toBe('running')
     expect(f.spawned[3].options.command).toContain('tests/demo.spec.ts:41')
+    // Mimic the SummaryReporter: a successful rerun replaces the seeded
+    // failed entry with a passed entry. Without this, decideRunStatus would
+    // still see `failed: [...]` in the file and correctly mark the run failed.
+    fs.writeFileSync(orch.paths.summaryPath, JSON.stringify({
+      passedNames: ['t'],
+      failed: [],
+    }))
     f.spawned[3].emitExit(0)
 
     const status = await promise
@@ -1184,6 +1191,13 @@ describe('RunOrchestrator.runFullCycle', () => {
     expect(statuses).toEqual(expect.arrayContaining(['failed', 'healing', 'running']))
     expect(statuses.at(-1)).toBe('running')
     expect(f.spawned[4].options.command).toContain('e2e/broken.spec.ts:12')
+    // Mimic the SummaryReporter: rerun cleared the failed entry. Without
+    // this, decideRunStatus would (correctly) treat the seeded failed entry
+    // as still-failing and mark the run failed.
+    fs.writeFileSync(orch.paths.summaryPath, JSON.stringify({
+      passedNames: ['test-case-broken'],
+      failed: [],
+    }))
     f.spawned[4].emitExit(0) // pw passes
 
     const status = await promise
@@ -1577,6 +1591,11 @@ describe('RunOrchestrator.runFullCycle', () => {
     expect(readManifest(orch.paths.manifestPath)?.status).toBe('running')
     expect(statuses.at(-1)).toBe('running')
     expect(f.spawned[3].options.command).toContain('e2e/a.spec.ts:9')
+    // Mimic the SummaryReporter clearing the failed entry on a successful rerun.
+    fs.writeFileSync(orch.paths.summaryPath, JSON.stringify({
+      passedNames: ['a'],
+      failed: [],
+    }))
     f.spawned[3].emitExit(0)
     const status = await promise
     expect(status).toBe('passed')
@@ -1604,6 +1623,11 @@ describe('RunOrchestrator.runFullCycle', () => {
     while (f.spawned.length < 4) await new Promise((r) => setTimeout(r, 5))
     expect(f.spawned[3].options.command).toBe('pw-1')
     expect(chunks.join('')).toContain('running the full Playwright suite')
+    // Mimic the SummaryReporter clearing the failed entry on a successful rerun.
+    fs.writeFileSync(orch.paths.summaryPath, JSON.stringify({
+      passedNames: ['a'],
+      failed: [],
+    }))
     f.spawned[3].emitExit(0)
     expect(await promise).toBe('passed')
     await orch.stop('passed')
@@ -1626,6 +1650,11 @@ describe('RunOrchestrator.runFullCycle', () => {
     f.spawned[2].emitExit(0)
 
     while (f.spawned.length < 4) await new Promise((r) => setTimeout(r, 5))
+    // Mimic the SummaryReporter clearing the failed entry on a successful rerun.
+    fs.writeFileSync(orch.paths.summaryPath, JSON.stringify({
+      passedNames: ['a'],
+      failed: [],
+    }))
     f.spawned[3].emitExit(0)
     expect(await promise).toBe('passed')
     await orch.stop('passed')
@@ -1779,6 +1808,113 @@ describe('computeNonPassedTargets', () => {
     fs.mkdirSync(featureDir, { recursive: true })
     const result = computeNonPassedTargets(featureDir, { passedNames: ['x'] })
     expect(result.kind).toBe('extraction-failed')
+  })
+})
+
+describe('decideRunStatus', () => {
+  function writeSpec(featureDir: string, name: string, body: string): string {
+    const dir = path.join(featureDir, 'e2e')
+    fs.mkdirSync(dir, { recursive: true })
+    const file = path.join(dir, name)
+    fs.writeFileSync(file, body)
+    return file
+  }
+
+  function writeSummary(summaryPath: string, summary: object): void {
+    fs.mkdirSync(path.dirname(summaryPath), { recursive: true })
+    fs.writeFileSync(summaryPath, JSON.stringify(summary))
+  }
+
+  it('returns failed on any non-zero exit code regardless of summary', async () => {
+    const { decideRunStatus } = await import('./orchestrator')
+    const featureDir = path.join(tmpDir, 'features', 'demo')
+    fs.mkdirSync(featureDir, { recursive: true })
+    writeSpec(featureDir, 'a.spec.ts',
+      "import { test } from '@playwright/test'\n" +
+      "test('a', async () => {})\n",
+    )
+    const summaryPath = path.join(tmpDir, 'summary.json')
+    writeSummary(summaryPath, { passedNames: ['test-case-a'] })
+    expect(decideRunStatus(featureDir, summaryPath, 1)).toBe('failed')
+  })
+
+  it('returns passed when exit 0 and every AST test is in passedNames', async () => {
+    const { decideRunStatus } = await import('./orchestrator')
+    const featureDir = path.join(tmpDir, 'features', 'demo')
+    fs.mkdirSync(featureDir, { recursive: true })
+    writeSpec(featureDir, 'a.spec.ts',
+      "import { test } from '@playwright/test'\n" +
+      "test('first', async () => {})\n" +
+      "test('second', async () => {})\n",
+    )
+    const summaryPath = path.join(tmpDir, 'summary.json')
+    writeSummary(summaryPath, { passedNames: ['test-case-first', 'test-case-second'] })
+    expect(decideRunStatus(featureDir, summaryPath, 0)).toBe('passed')
+  })
+
+  it('returns failed on exit 0 when summary still has a failed entry', async () => {
+    const { decideRunStatus } = await import('./orchestrator')
+    const featureDir = path.join(tmpDir, 'features', 'demo')
+    fs.mkdirSync(featureDir, { recursive: true })
+    const spec = writeSpec(featureDir, 'a.spec.ts',
+      "import { test } from '@playwright/test'\n" +
+      "test('first', async () => {})\n" +
+      "test('second', async () => {})\n",
+    )
+    const summaryPath = path.join(tmpDir, 'summary.json')
+    writeSummary(summaryPath, {
+      passedNames: ['test-case-first'],
+      failed: [{ name: 'test-case-second', location: `${spec}:3` }],
+    })
+    expect(decideRunStatus(featureDir, summaryPath, 0)).toBe('failed')
+  })
+
+  it('returns failed on exit 0 when an AST test is pending (missing from summary)', async () => {
+    const { decideRunStatus } = await import('./orchestrator')
+    const featureDir = path.join(tmpDir, 'features', 'demo')
+    fs.mkdirSync(featureDir, { recursive: true })
+    writeSpec(featureDir, 'a.spec.ts',
+      "import { test } from '@playwright/test'\n" +
+      "test('first', async () => {})\n" +
+      "test('second', async () => {})\n",
+    )
+    const summaryPath = path.join(tmpDir, 'summary.json')
+    // Only `first` ran; `second` never made it into the summary at all.
+    writeSummary(summaryPath, { passedNames: ['test-case-first'] })
+    expect(decideRunStatus(featureDir, summaryPath, 0)).toBe('failed')
+  })
+
+  it('returns failed on exit 0 when an AST test is in skippedNames', async () => {
+    const { decideRunStatus } = await import('./orchestrator')
+    const featureDir = path.join(tmpDir, 'features', 'demo')
+    fs.mkdirSync(featureDir, { recursive: true })
+    writeSpec(featureDir, 'a.spec.ts',
+      "import { test } from '@playwright/test'\n" +
+      "test('first', async () => {})\n" +
+      "test('second', async () => {})\n",
+    )
+    const summaryPath = path.join(tmpDir, 'summary.json')
+    writeSummary(summaryPath, {
+      passedNames: ['test-case-first'],
+      skipped: 1,
+      skippedNames: ['test-case-second'],
+    })
+    expect(decideRunStatus(featureDir, summaryPath, 0)).toBe('failed')
+  })
+
+  it('falls back to summarizeFailures when AST extraction fails (no parseable specs)', async () => {
+    const { decideRunStatus } = await import('./orchestrator')
+    const featureDir = path.join(tmpDir, 'features', 'no-specs')
+    fs.mkdirSync(featureDir, { recursive: true })
+    const summaryPath = path.join(tmpDir, 'summary.json')
+
+    // Empty failed[] + exit 0 + no parseable specs => passed (legacy behavior).
+    writeSummary(summaryPath, { passedNames: [] })
+    expect(decideRunStatus(featureDir, summaryPath, 0)).toBe('passed')
+
+    // Failed entry + exit 0 + no parseable specs => failed.
+    writeSummary(summaryPath, { failed: [{ name: 'test-case-x' }] })
+    expect(decideRunStatus(featureDir, summaryPath, 0)).toBe('failed')
   })
 })
 
@@ -2489,6 +2625,14 @@ describe('RunOrchestrator.restartHealFromFailure', () => {
     ])
 
     // Playwright passes — loop ends, cleanupHealAgentPty fires agent-exit.
+    // Mimic the SummaryReporter clearing the failed entry so decideRunStatus
+    // sees the rerun as a real success.
+    fs.writeFileSync(orch.paths.summaryPath, JSON.stringify({
+      passedNames: ['a'],
+      failed: [],
+      total: 1,
+      passed: 1,
+    }))
     f.spawned[2].emitExit(0)
     expect(await promise).toBe('passed')
     expect(eventLog).toContain('agent-exit')

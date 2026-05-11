@@ -61,6 +61,23 @@ describe('runsReducer', () => {
     expect(next.details.new.runId).toBe('new')
   })
 
+  it('places an older incoming run after a newer existing one', () => {
+    // The "inserts new sorted desc" test above hits the `a < b → 1` arm of
+    // byStartedDesc. This case (incoming older than existing) hits the
+    // `a > b → -1` arm, where the comparator is called with the newer
+    // entry first.
+    const start: RunsState = {
+      ...initialRunsState,
+      runs: [entry({ runId: 'newer', startedAt: '2026-02-01T00:00:00Z' })],
+    }
+    const next = runsReducer(start, {
+      type: 'update',
+      runId: 'older',
+      detail: detail({ runId: 'older', startedAt: '2026-01-01T00:00:00Z' }),
+    })
+    expect(next.runs.map((r) => r.runId)).toEqual(['newer', 'older'])
+  })
+
   it('keeps equal startedAt values in the sorted run list', () => {
     const start: RunsState = {
       ...initialRunsState,
