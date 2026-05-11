@@ -24,6 +24,7 @@ import {
 import { FileRunStateSink, type RunStateSink } from './run-state-sink'
 import type { PtyFactory, PtyHandle } from './pty-spawner'
 import { HealCycleState, AUTO_HEAL_MAX_CYCLES } from './heal-cycle'
+import { readPriorSessionId } from './auto-heal'
 import { appendJournalIteration } from './log-enrichment'
 import { locateClaudeSessionLog, locateCodexSessionLog } from '../agent-session-log'
 import type { RunnerLog } from './runner-log'
@@ -161,12 +162,19 @@ export interface AutoHealConfig {
   // Returns the spawn command for the long-lived REPL — just the binary +
   // flags. Production wires `buildAgentSpawnCommand` from auto-heal.ts; tests
   // pass a no-op script that stays alive (e.g. `cat`). The orchestrator
-  // generates `sessionId` (UUID), computes `mcpOutputDir`, and passes the
-  // path to the cycle-1 prompt file (`<runDir>/heal-prompt.md`); the
-  // production builder appends `"@<promptFile>"` as a positional arg so
-  // claude reads the file at startup and processes its content as the
-  // first user message — bypassing the REPL's input editor.
-  buildSpawnCommand?: (args: { sessionId?: string; mcpOutputDir?: string; promptFile?: string }) => string
+  // either reuses the prior session id from `<runDir>/agent-session-id.txt`
+  // (setting `resume: true`) or generates a fresh UUID, computes
+  // `mcpOutputDir`, and passes the path to the cycle-1 prompt file
+  // (`<runDir>/heal-prompt.md`); the production builder appends
+  // `"@<promptFile>"` as a positional arg so claude reads the file at
+  // startup and processes its content as the first user message —
+  // bypassing the REPL's input editor.
+  buildSpawnCommand?: (args: {
+    sessionId?: string
+    resume?: boolean
+    mcpOutputDir?: string
+    promptFile?: string
+  }) => string
   // Returns the prompt text to write to the REPL's stdin for cycle N.
   // Production wires `buildOrchestratorHealPrompt`; tests pass a stub that
   // returns a deterministic string. The orchestrator pty.write()s the result
@@ -1094,7 +1102,23 @@ export class RunOrchestrator extends EventEmitter {
 
     // claude pins via `--session-id <uuid>` so we know the conversation id
     // without parsing init frames. codex has no equivalent; leave null.
-    const sessionId = cfg.agent === 'claude' ? randomUUID() : undefined
+    //
+    // On Restart Heal the run dir already has a session id from the previous
+    // (failed) heal session — reuse it and spawn with `--resume <uuid>` so
+    // claude continues the prior conversation with full history. Without
+    // this, every restart would orphan the previous turns and start the
+    // agent's investigation from scratch.
+    let sessionId: string | undefined
+    let resume = false
+    if (cfg.agent === 'claude') {
+      const prior = readPriorSessionId(this.paths.agentSessionIdPath)
+      if (prior) {
+        sessionId = prior
+        resume = true
+      } else {
+        sessionId = randomUUID()
+      }
+    }
     this.healAgentSessionId = sessionId ?? null
     try {
       fs.mkdirSync(path.dirname(this.paths.agentSessionIdPath), { recursive: true })
@@ -1106,6 +1130,7 @@ export class RunOrchestrator extends EventEmitter {
     try {
       command = (cfg.buildSpawnCommand ?? defaultSpawnCommand)({
         sessionId,
+        resume,
         mcpOutputDir: target.dir,
         // The cycle-1 prompt was already written to this file by the
         // caller (`runHealAgent`); the wired spawn-command builder
@@ -1832,7 +1857,12 @@ function formatElapsedTag(startedAt: string, now: Date): string {
 // Production wires `buildAgentSpawnCommand` / `buildOrchestratorHealPrompt`
 // from auto-heal.ts; these defaults are intentionally minimal so unit tests
 // never silently run a real claude/codex REPL when an override is missing.
-export function defaultSpawnCommand(_args: { sessionId?: string; mcpOutputDir?: string; promptFile?: string }): string {
+export function defaultSpawnCommand(_args: {
+  sessionId?: string
+  resume?: boolean
+  mcpOutputDir?: string
+  promptFile?: string
+}): string {
   // A `cat` keeps the pty alive (so the orchestrator can write prompts to
   // its stdin and pty.onExit doesn't fire mid-loop) and echoes everything we
   // type, which is enough for assertions about prompt content in tests.
