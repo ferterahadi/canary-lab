@@ -2,6 +2,22 @@
 
 All notable changes to Canary Lab are listed here. We try to keep the language plain so anyone can follow along.
 
+## 1.0.4 — 2026-05-12
+
+### What's new
+- **Clearer run status at a glance** — Runs now show more accurate progress and outcome so you can tell what's happening without digging in.
+- **Lifecycle tracking for each run** — Canary Lab keeps a timeline of key moments during a run, making it easier to see what happened and when.
+
+### Improvements
+- **More reliable run details** — The run detail view has been reworked to show information more consistently and update more smoothly.
+- **Steadier live updates** — Streaming updates while a run is in progress are more dependable.
+- **Better handling of run state** — Behind the scenes, runs track their own state more carefully so you'll see fewer odd or stale statuses.
+
+### Housekeeping
+- **More tests** — Added a large batch of internal tests to keep run behavior solid as things change.
+
+---
+
 ## 1.0.3 — 2026-05-11
 
 ### Improvements
