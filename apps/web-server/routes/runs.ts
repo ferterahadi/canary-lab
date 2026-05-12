@@ -12,6 +12,7 @@ import {
   parseAgentSessionRefFile,
   selectAgentSessionRef,
 } from '../lib/agent-session-log'
+import { isTerminalRunStatus } from '../../../shared/run-state'
 
 export interface RunsRouteDeps {
   featuresDir: string
@@ -81,7 +82,7 @@ export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Pro
       reply.code(404)
       return { error: 'run not found' }
     }
-    if (!isTerminalRun(detail.manifest.status)) {
+    if (!isTerminalRunStatus(detail.manifest.status)) {
       reply.code(409)
       return { error: 'assertion export is available after the run finishes' }
     }
@@ -284,10 +285,6 @@ function contentTypeFor(filePath: string): string {
   if (ext === '.mp4') return 'video/mp4'
   if (ext === '.zip') return 'application/zip'
   return 'application/octet-stream'
-}
-
-function isTerminalRun(status: string): boolean {
-  return status === 'passed' || status === 'failed' || status === 'aborted'
 }
 
 function safeFilename(input: string): string {

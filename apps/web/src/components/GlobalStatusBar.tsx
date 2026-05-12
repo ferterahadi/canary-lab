@@ -1,6 +1,7 @@
 import type { RunDetail } from '../api/types'
 import { deriveRunViewModel } from '../lib/run-view-model'
 import { useRuns } from '../state/RunsContext'
+import { isActiveRunStatus } from '../../../../shared/run-state'
 
 interface Props {
   activeRunDetail: RunDetail | null
@@ -24,7 +25,7 @@ export function GlobalStatusBar({ activeRunDetail, onNavigateToRun }: Props) {
   // Guard: only treat 'running' and 'healing' as truly active. The runs
   // index can become stale if the orchestrator crashes, so double-check the
   // manifest status from the detail endpoint.
-  const isActive = status === 'running' || status === 'healing'
+  const isActive = isActiveRunStatus(status)
   const services = activeRunDetail?.manifest.services ?? []
 
   // While healing, Playwright is NOT running (it's been killed) — but the

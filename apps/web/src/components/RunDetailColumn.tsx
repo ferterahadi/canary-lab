@@ -9,6 +9,7 @@ import type {
   ServiceStatus,
   RunLifecycleEvent,
   RunLifecycleSnapshot,
+  RunManifest,
 } from '../api/types'
 import { formatDuration, durationBetween } from '../lib/format'
 import {
@@ -21,15 +22,19 @@ import {
 } from '../lib/run-detail-playback'
 import { statusFromPlaybackResult, statusLabel, statusPillClassForStatus } from '../lib/test-step-status'
 import { useRun } from '../state/RunsContext'
-import { deriveRunViewModel } from '../lib/run-view-model'
+import { deriveRunViewModel, type RunViewModel } from '../lib/run-view-model'
 import { RunStatusIndicator } from './RunStatusIndicator'
 import { PaneTerminal } from './PaneTerminal'
 import { AgentSessionView } from './AgentSessionView'
 import { JournalTab } from './JournalTab'
 import { ManualHealBanner } from './ManualHealBanner'
 import { RestartHealButton } from './RestartHealButton'
+import {
+  isRestartableRunStatus,
+  isTerminalRunStatus as isSharedTerminalRunStatus,
+} from '../../../../shared/run-state'
 
-type Tab = 'overview' | 'services' | 'playwright' | 'agent' | 'journal'
+type Tab = 'overview' | 'run-logs' | 'services' | 'playwright' | 'agent' | 'journal'
 type PlaywrightView = 'terminal' | 'playback'
 
 export function RunDetailColumn({
@@ -94,6 +99,7 @@ export function RunDetailColumn({
         </div>
         <nav className="mt-2 -mx-1 flex gap-1 overflow-x-auto px-1 text-xs scrollbar-thin">
           <TabButton active={tab === 'overview'} onClick={() => setTab('overview')}>Overview</TabButton>
+          <TabButton active={tab === 'run-logs'} onClick={() => setTab('run-logs')}>Run Logs</TabButton>
           <TabButton active={tab === 'services'} onClick={() => setTab('services')} disabled={services.length === 0}>Services</TabButton>
           <TabButton active={tab === 'playwright'} onClick={() => setTab('playwright')}>Playwright</TabButton>
           <TabButton active={tab === 'agent'} onClick={() => setTab('agent')}>Heal agent</TabButton>
@@ -102,80 +108,15 @@ export function RunDetailColumn({
       </header>
       <div className="flex-1 min-h-0 overflow-hidden mt-2">
         {tab === 'overview' && (
-          <div className="h-full overflow-y-auto scrollbar-thin p-4 text-sm">
-            <div className="mb-2 flex items-center justify-between gap-3">
-              <h2 className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-secondary)' }}>
-                Run
-              </h2>
-              {isAssertionExportable(m.status) && (
-                <a
-                  href={assertionHref(m.runId)}
-                  download={assertionFilename(m.feature, m.runId)}
-                  className="shrink-0 rounded px-2.5 py-1 text-[11px] font-medium"
-                  style={{ background: 'var(--bg-selected)', color: 'var(--accent)' }}
-                >
-                  Export Assertion
-                </a>
-              )}
-            </div>
-            <dl className="grid grid-cols-[110px_minmax(0,1fr)] gap-y-1.5 text-xs">
-                <dt style={{ color: 'var(--text-muted)' }}>Feature</dt>
-                <dd className="truncate" style={{ color: 'var(--text-primary)' }} title={m.feature}>{m.feature}</dd>
-                <dt style={{ color: 'var(--text-muted)' }}>Duration</dt>
-                <dd style={{ color: 'var(--text-primary)' }}>{(() => {
-                  const d = durationBetween(m.startedAt, m.endedAt)
-                  return d == null ? 'in progress' : formatDuration(d)
-                })()}</dd>
-                <dt style={{ color: 'var(--text-muted)' }}>Started</dt>
-                <dd className="truncate" style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }} title={m.startedAt}>{m.startedAt}</dd>
-                {m.endedAt && (
-                  <>
-                    <dt style={{ color: 'var(--text-muted)' }}>Ended</dt>
-                    <dd className="truncate" style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }} title={m.endedAt}>{m.endedAt}</dd>
-                  </>
-                )}
-                {m.healCycles > 0 && (
-                  <>
-                    <dt style={{ color: 'var(--text-muted)' }}>Heal cycles</dt>
-                    <dd style={{ color: 'var(--text-secondary)' }}>{m.healCycles}</dd>
-                  </>
-                )}
-                {m.lifecycle && (
-                  <>
-                    <dt style={{ color: 'var(--text-muted)' }}>State</dt>
-                    <dd style={{ color: 'var(--text-secondary)' }}>{view.headline}</dd>
-                  </>
-                )}
-            </dl>
-            {view.recoveryTimeline.length > 0 && (
-              <RecoverySection
-                events={view.recoveryTimeline}
-                alert={view.primaryAlert}
-              />
-            )}
-            {repoBranches.length > 0 && (
-              <div className="mt-4">
-                <SectionHeader>Branches</SectionHeader>
-                <ul className="space-y-2">
-                  {repoBranches.map((repo) => (
-                    <BranchCard key={`${repo.name}:${repo.path}`} repo={repo} />
-                  ))}
-                </ul>
-              </div>
-            )}
-            <div className="mt-4">
-              <SectionHeader>Services</SectionHeader>
-              {services.length === 0 ? (
-                <div className="text-xs" style={{ color: 'var(--text-muted)' }}>No services configured.</div>
-              ) : (
-                <ul className="space-y-2">
-                  {services.map((s) => (
-                    <ServiceCard key={s.safeName} service={s} />
-                  ))}
-                </ul>
-              )}
-            </div>
-          </div>
+          <RunOverviewTab
+            manifest={m}
+            view={view}
+            services={services}
+            repoBranches={repoBranches}
+          />
+        )}
+        {tab === 'run-logs' && (
+          <RunLogsTab view={view} />
         )}
         {tab === 'services' && services.length > 0 && (
           <div className="flex h-full flex-col">
@@ -211,7 +152,7 @@ export function RunDetailColumn({
         )}
         {tab === 'agent' && (
           <div className="flex h-full min-h-0 flex-col overflow-hidden">
-            {m.healMode === 'manual' && m.status === 'healing' && m.signalPaths && (
+            {m.healMode === 'manual' && view.actions.cancelHeal.enabled && m.signalPaths && (
               <ManualHealBanner runId={m.runId} signalPaths={m.signalPaths} />
             )}
             <div className="min-h-0 flex-1 overflow-hidden">
@@ -243,18 +184,127 @@ export function RunDetailColumn({
 }
 
 export function canRestartHeal(status: string): boolean {
-  return status === 'failed' || status === 'aborted'
+  return isRestartableRunStatus(status)
+}
+
+interface RunOverviewTabProps {
+  manifest: RunManifest
+  view: RunViewModel
+  services: ServiceManifestEntry[]
+  repoBranches: RepoBranchSnapshot[]
+}
+
+function RunOverviewTab({
+  manifest,
+  view,
+  services,
+  repoBranches,
+}: RunOverviewTabProps) {
+  const duration = durationBetween(manifest.startedAt, manifest.endedAt)
+
+  return (
+    <div className="h-full overflow-y-auto scrollbar-thin p-4 text-sm">
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <h2 className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-secondary)' }}>
+          Run
+        </h2>
+        {isAssertionExportable(manifest.status) && (
+          <a
+            href={assertionHref(manifest.runId)}
+            download={assertionFilename(manifest.feature, manifest.runId)}
+            className="shrink-0 rounded px-2.5 py-1 text-[11px] font-medium"
+            style={{ background: 'var(--bg-selected)', color: 'var(--accent)' }}
+          >
+            Export Assertion
+          </a>
+        )}
+      </div>
+      <dl className="grid grid-cols-[110px_minmax(0,1fr)] gap-y-1.5 text-xs">
+        <dt style={{ color: 'var(--text-muted)' }}>Feature</dt>
+        <dd className="truncate" style={{ color: 'var(--text-primary)' }} title={manifest.feature}>{manifest.feature}</dd>
+        <dt style={{ color: 'var(--text-muted)' }}>Duration</dt>
+        <dd style={{ color: 'var(--text-primary)' }}>{duration == null ? 'in progress' : formatDuration(duration)}</dd>
+        <dt style={{ color: 'var(--text-muted)' }}>Started</dt>
+        <dd className="truncate" style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }} title={manifest.startedAt}>{manifest.startedAt}</dd>
+        {manifest.endedAt && (
+          <>
+            <dt style={{ color: 'var(--text-muted)' }}>Ended</dt>
+            <dd className="truncate" style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }} title={manifest.endedAt}>{manifest.endedAt}</dd>
+          </>
+        )}
+        {manifest.healCycles > 0 && (
+          <>
+            <dt style={{ color: 'var(--text-muted)' }}>Heal cycles</dt>
+            <dd style={{ color: 'var(--text-secondary)' }}>{manifest.healCycles}</dd>
+          </>
+        )}
+        {manifest.lifecycle && (
+          <>
+            <dt style={{ color: 'var(--text-muted)' }}>State</dt>
+            <dd style={{ color: 'var(--text-secondary)' }}>{view.headline}</dd>
+          </>
+        )}
+      </dl>
+      {repoBranches.length > 0 && (
+        <div className="mt-4">
+          <SectionHeader>Branches</SectionHeader>
+          <ul className="space-y-2">
+            {repoBranches.map((repo) => (
+              <BranchCard key={`${repo.name}:${repo.path}`} repo={repo} />
+            ))}
+          </ul>
+        </div>
+      )}
+      <div className="mt-4">
+        <SectionHeader>Services</SectionHeader>
+        {services.length === 0 ? (
+          <div className="text-xs" style={{ color: 'var(--text-muted)' }}>No services configured.</div>
+        ) : (
+          <ul className="space-y-2">
+            {services.map((s) => (
+              <ServiceCard key={s.safeName} service={s} />
+            ))}
+          </ul>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function RunLogsTab({ view }: { view: RunViewModel }) {
+  if (view.recoveryTimeline.length === 0) {
+    return (
+      <EmptyPane
+        title="No run logs yet."
+        body="Lifecycle events will appear here once Canary Lab records service startup, test execution, recovery, or final status."
+      />
+    )
+  }
+
+  return (
+    <div className="h-full overflow-y-auto scrollbar-thin p-4 text-sm">
+      <div className="mb-2">
+        <h2 className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-secondary)' }}>
+          Run Logs
+        </h2>
+      </div>
+      <RecoveryTimeline
+        events={view.recoveryTimeline}
+        alert={view.primaryAlert}
+      />
+    </div>
+  )
 }
 
 // Run has reached a terminal state — the agent pty is gone, so the live
 // xterm pane has nothing to subscribe to. Switch to the structured-view
 // historical replay (which reads the agent CLI's own JSONL session log).
 export function isTerminalRunStatus(status: string): boolean {
-  return status === 'passed' || status === 'failed' || status === 'aborted'
+  return isSharedTerminalRunStatus(status)
 }
 
 export function isAssertionExportable(status: string): boolean {
-  return status === 'passed' || status === 'failed' || status === 'aborted'
+  return isSharedTerminalRunStatus(status)
 }
 
 export function assertionFilename(feature: string, runId: string): string {
@@ -312,7 +362,7 @@ function PlaywrightPanel({
   )
 }
 
-function RecoverySection({
+function RecoveryTimeline({
   events,
   alert,
 }: {
@@ -320,8 +370,7 @@ function RecoverySection({
   alert?: { tone: 'info' | 'success' | 'warning' | 'error'; message: string }
 }) {
   return (
-    <div className="mt-4">
-      <SectionHeader>Recovery</SectionHeader>
+    <div>
       {alert && (
         <div className={`mb-2 rounded-md border px-2.5 py-2 text-xs ${alertClass(alert.tone)}`}>
           {alert.message}

@@ -1,5 +1,6 @@
 import { ApiError } from '../api/client'
 import type { RunDetail, RunIndexEntry, TransientAction } from '../api/types'
+import { isTerminalRunStatus } from '../../../../shared/run-state'
 
 // Pure module: the reducer + frame-applier that drives RunsContext. Lives
 // outside the .tsx file so it can be unit-tested in the existing
@@ -66,7 +67,7 @@ export function runsReducer(state: RunsState, action: RunsAction): RunsState {
         endedAt: m.endedAt,
       }
       const others = state.runs.filter((r) => r.runId !== action.runId)
-      const transients = isTerminalStatus(entry.status)
+      const transients = isTerminalRunStatus(entry.status)
         ? omitRun(state.transients, action.runId)
         : state.transients
       return {
@@ -115,10 +116,6 @@ function byStartedDesc(a: RunIndexEntry, b: RunIndexEntry): number {
   return a.startedAt < b.startedAt ? 1 : a.startedAt > b.startedAt ? -1 : 0
 }
 
-function isTerminalStatus(status: RunIndexEntry['status']): boolean {
-  return status === 'passed' || status === 'failed' || status === 'aborted'
-}
-
 function omitRun<T>(values: Record<string, T>, runId: string): Record<string, T> {
   const { [runId]: _dropped, ...rest } = values
   return rest
@@ -130,7 +127,7 @@ function pruneTerminalTransients(
 ): Record<string, TransientAction> {
   let next = transients
   for (const run of runs) {
-    if (!isTerminalStatus(run.status) || next[run.runId] == null) continue
+    if (!isTerminalRunStatus(run.status) || next[run.runId] == null) continue
     next = omitRun(next, run.runId)
   }
   return next

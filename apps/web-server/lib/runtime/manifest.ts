@@ -1,11 +1,27 @@
 import fs from 'fs'
 import path from 'path'
 import { runDirFor, runsIndexPath, runsRoot } from './run-paths'
+import type {
+  RunLifecycleSnapshot,
+  RunStatus,
+  ServiceStatus,
+} from '../../../../shared/run-state'
+export type {
+  RunLifecycleAbortReason,
+  RunLifecycleEvent,
+  RunLifecyclePhase,
+  RunLifecycleRestartPlan,
+  RunLifecycleSeverity,
+  RunLifecycleSignal,
+  RunLifecycleSignalStatus,
+  RunLifecycleSnapshot,
+  RunLifecycleTargetedRerun,
+  RunStatus,
+  ServiceStatus,
+} from '../../../../shared/run-state'
 
 // Per-run manifest written at start and updated at finish. Kept narrow and
 // JSON-shaped so the future server can read it without parsing logs.
-
-export type ServiceStatus = 'starting' | 'ready' | 'timeout' | 'stopped'
 
 export interface ServiceManifestEntry {
   name: string
@@ -33,67 +49,6 @@ export interface PlaywrightArtifactPolicy {
   screenshot: PlaywrightScreenshotMode
   video: PlaywrightRetainedArtifactMode
   trace: PlaywrightRetainedArtifactMode
-}
-
-export type RunStatus = 'running' | 'passed' | 'failed' | 'healing' | 'aborted'
-
-export type RunLifecyclePhase =
-  | 'starting-services'
-  | 'running-tests'
-  | 'pausing-for-heal'
-  | 'agent-healing'
-  | 'waiting-for-signal'
-  | 'applying-signal'
-  | 'restarting-services'
-  | 'rerunning-tests'
-  | 'completed'
-  | 'aborted'
-  | 'failed'
-  | 'passed'
-
-export type RunLifecycleSeverity = 'info' | 'success' | 'warning' | 'error'
-export type RunLifecycleSignalStatus = 'accepted' | 'ignored'
-
-export interface RunLifecycleSignal {
-  kind: 'restart' | 'rerun' | 'heal'
-  status: RunLifecycleSignalStatus
-  reason?: string
-}
-
-export interface RunLifecycleRestartPlan {
-  restarted: string[]
-  kept: string[]
-  startedBecauseMissing?: string[]
-  noMatch?: boolean
-}
-
-export interface RunLifecycleTargetedRerun {
-  selected: number
-  total: number
-  mode: 'failed-and-pending' | 'failed-only' | 'full-suite' | 'none'
-  reason: string
-}
-
-export interface RunLifecycleAbortReason {
-  reason: string
-  service?: string
-}
-
-export interface RunLifecycleSnapshot {
-  phase: RunLifecyclePhase
-  headline: string
-  detail?: string
-  updatedAt: string
-  activeCycle?: number
-  lastSignal?: RunLifecycleSignal
-  restartPlan?: RunLifecycleRestartPlan
-  targetedRerun?: RunLifecycleTargetedRerun
-  abortReason?: RunLifecycleAbortReason
-}
-
-export interface RunLifecycleEvent extends RunLifecycleSnapshot {
-  id?: string
-  severity?: RunLifecycleSeverity
 }
 
 // Mid-Run Heal: populated when Playwright was halted before completing the

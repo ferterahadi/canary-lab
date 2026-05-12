@@ -13,6 +13,7 @@ import {
   type ServiceStatus,
 } from './manifest'
 import { buildRunPaths, runDirFor } from './run-paths'
+import { reduceRunLifecycleSnapshot } from '../../../../shared/run-state'
 
 // `RunStateSink` is the interface the orchestrator uses to persist its own
 // state. The default implementation (`FileRunStateSink`) writes the same
@@ -136,14 +137,15 @@ export class FileRunStateSink implements RunStateSink {
   recordLifecycleEvent(runId: string, event: RunLifecycleEvent): void {
     const runDir = runDirFor(this.logsDir, runId)
     const eventPath = buildRunPaths(runDir).lifecycleEventsPath
+    const manifestPath = this.manifestPath(runId)
     const stamped: RunLifecycleEvent = {
       ...event,
       updatedAt: event.updatedAt || new Date().toISOString(),
     }
     fs.mkdirSync(path.dirname(eventPath), { recursive: true })
     fs.appendFileSync(eventPath, JSON.stringify(stamped) + '\n')
-    const { id: _id, severity: _severity, ...snapshot } = stamped
-    updateManifest(this.manifestPath(runId), { lifecycle: snapshot })
+    const previous = readManifest(manifestPath)?.lifecycle
+    updateManifest(manifestPath, { lifecycle: reduceRunLifecycleSnapshot(previous, stamped) })
   }
 }
 

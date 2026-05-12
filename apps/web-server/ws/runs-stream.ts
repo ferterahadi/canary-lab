@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import type { RunStore, RunStoreEvent, RunDetail } from '../lib/run-store'
 import type { RunIndexEntry } from '../lib/runtime/manifest'
+import { isActiveRunStatus } from '../../../shared/run-state'
 
 // `/ws/runs` — push channel that replaces the browser's polling. On connect,
 // sends a single `snapshot` frame with the runs index. Subsequent mutations
@@ -53,7 +54,7 @@ export async function runsStreamRoutes(
     const runs = deps.store.list()
     const details: Record<string, RunDetail> = {}
     for (const entry of runs) {
-      if (entry.status === 'running' || entry.status === 'healing') {
+      if (isActiveRunStatus(entry.status)) {
         const detail = deps.store.get(entry.runId)
         if (detail) details[entry.runId] = detail
       }
