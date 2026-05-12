@@ -19,6 +19,7 @@ import { SaveBar } from './SaveBar'
 import { TemplatedInput } from './TemplatedInput'
 import { useEditableSlice } from './useEditableSlice'
 import { useRuns } from '../../state/RunsContext'
+import { isActiveRunStatus } from '../../../../../shared/run-state'
 
 /** Derive a repo's display name from its localPath basename, falling back
  *  to the cloneUrl basename (strip `.git`). Returns '' if neither yields one. */
@@ -207,7 +208,7 @@ interface Slice {
 export function ReposTab({ feature }: { feature: string }) {
   const { runs } = useRuns()
   const activeRun = runs.some((run) =>
-    run.feature === feature && (run.status === 'running' || run.status === 'healing'))
+    run.feature === feature && isActiveRunStatus(run.status))
   const ed = useEditableSlice<ParsedConfigDoc, Slice>({
     load: () => api.getFeatureConfigDoc(feature),
     extract: (doc) => {

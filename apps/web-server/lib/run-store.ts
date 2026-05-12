@@ -8,12 +8,18 @@ import {
   upsertRunsIndexEntry,
   writeManifest,
   writeRunsIndex,
+  type RunLifecycleEvent,
   type RunIndexEntry,
   type RunManifest,
   type ServiceStatus,
 } from './runtime/manifest'
 import { buildRunPaths, runDirFor } from './runtime/run-paths'
 import { FileRunStateSink, type RunStateSink } from './runtime/run-state-sink'
+import {
+  HEARTBEAT_STALE_MS,
+  isActiveRunStatus,
+  isStaleHeartbeat,
+} from '../../../shared/run-state'
 
 // `RunStore` is the single mutator for everything the runs feature persists:
 // `logs/<runId>/manifest.json`, `logs/runs-index.json`, the per-run dirs, and
@@ -26,9 +32,6 @@ import { FileRunStateSink, type RunStateSink } from './runtime/run-state-sink'
 // The standalone helpers (`listRuns`, `getRunDetail`, `removeRunFromHistory`,
 // `reapStaleRuns`, `readRunSummary`) remain exported so legacy callers and the
 // existing tests keep working; the class wraps them and emits events.
-
-/** A run is considered stale if its heartbeat is older than this (ms). */
-const HEARTBEAT_STALE_MS = 15_000
 
 // PauseResult is structurally compatible with RunOrchestrator.PauseResult —
 // duplicated here so the route layer doesn't need to import the orchestrator
@@ -114,13 +117,12 @@ export async function reapStaleRuns(
   const now = Date.now()
 
   for (const entry of all) {
-    if (entry.status !== 'running' && entry.status !== 'healing') continue
+    if (!isActiveRunStatus(entry.status)) continue
     const manifestPath = path.join(runDirFor(logsDir, entry.runId), 'manifest.json')
     const manifest = readManifest(manifestPath)
     if (!manifest) continue
     if (!manifest.heartbeatAt) continue
-    const heartbeat = new Date(manifest.heartbeatAt).getTime()
-    if (Number.isNaN(heartbeat) || now - heartbeat <= HEARTBEAT_STALE_MS) continue
+    if (!isStaleHeartbeat(manifest.heartbeatAt, now, HEARTBEAT_STALE_MS)) continue
 
     const orch = registry?.get(entry.runId)
     if (orch) {
@@ -239,6 +241,29 @@ export interface RunDetail {
   summary?: RunSummary
   playbackEvents?: PlaywrightPlaybackEvent[]
   playwrightArtifacts?: PlaywrightArtifactGroup[]
+  lifecycleEvents?: RunLifecycleEvent[]
+}
+
+export function readRunLifecycleEvents(runDir: string): RunLifecycleEvent[] | undefined {
+  const p = buildRunPaths(runDir).lifecycleEventsPath
+  let raw: string
+  try {
+    raw = fs.readFileSync(p, 'utf-8')
+  } catch {
+    return undefined
+  }
+  const out: RunLifecycleEvent[] = []
+  for (const line of raw.split('\n')) {
+    const trimmed = line.trim()
+    if (!trimmed) continue
+    try {
+      const parsed = JSON.parse(trimmed) as RunLifecycleEvent
+      if (parsed && typeof parsed === 'object' && typeof parsed.phase === 'string') out.push(parsed)
+    } catch {
+      // Ignore corrupt partial lines; the manifest snapshot remains usable.
+    }
+  }
+  return out.length > 0 ? out : undefined
 }
 
 // Read e2e-summary.json if present. Returns undefined when absent or
@@ -359,12 +384,14 @@ export function getRunDetail(logsDir: string, runId: string): RunDetail | null {
   const summary = readRunSummary(dir)
   const playbackEvents = readPlaywrightPlaybackEvents(dir)
   const playwrightArtifacts = indexPlaywrightArtifacts(runId, dir, playbackEvents)
+  const lifecycleEvents = readRunLifecycleEvents(dir)
   return {
     runId,
     manifest: m,
     ...(summary ? { summary } : {}),
     ...(playbackEvents?.length ? { playbackEvents } : {}),
     ...(playwrightArtifacts?.length ? { playwrightArtifacts } : {}),
+    ...(lifecycleEvents?.length ? { lifecycleEvents } : {}),
   }
 }
 
@@ -488,6 +515,11 @@ export class RunStore extends EventEmitter implements RunStateSink {
     this.emitEvent({ kind: 'changed', runId })
   }
 
+  recordLifecycleEvent(runId: string, event: RunLifecycleEvent): void {
+    this.sink.recordLifecycleEvent(runId, event)
+    this.emitEvent({ kind: 'changed', runId })
+  }
+
   setStatus(runId: string, status: RunManifest['status'], healCycles?: number): void {
     this.sink.setStatus(runId, status, healCycles)
     this.emitEvent({ kind: 'changed', runId })
@@ -544,7 +576,7 @@ export class RunStore extends EventEmitter implements RunStateSink {
       if (result.ok) aborted.add(orch.runId)
     }
     for (const entry of this.list()) {
-      if (entry.status !== 'running' && entry.status !== 'healing') continue
+      if (!isActiveRunStatus(entry.status)) continue
       const result = await this.abort(entry.runId)
       if (result.ok) aborted.add(entry.runId)
     }
@@ -559,7 +591,7 @@ export class RunStore extends EventEmitter implements RunStateSink {
     const detail = this.get(runId)
     if (!detail) return { ok: false, reason: 'not-found' }
     const status = detail.manifest.status
-    if (status === 'running' || status === 'healing') {
+    if (isActiveRunStatus(status)) {
       return { ok: false, reason: 'stale' }
     }
     const removed = removeRunFromHistory(this.logsDir, runId)
@@ -595,7 +627,7 @@ export class RunStore extends EventEmitter implements RunStateSink {
     const detail = this.get(runId)
     if (!detail) return false
     const status = detail.manifest.status
-    if (status !== 'running' && status !== 'healing') return false
+    if (!isActiveRunStatus(status)) return false
     this.finalize(
       runId,
       'aborted',

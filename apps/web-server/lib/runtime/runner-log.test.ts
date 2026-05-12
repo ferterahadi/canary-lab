@@ -117,10 +117,18 @@ describe('renderEvent', () => {
     })
   })
 
-  it('renders signal-detected / run-status / run-complete', () => {
+  it('renders signal events / run-status / run-complete', () => {
     expect(renderEvent('signal-detected', { kind: 'restart', body: {} })).toEqual({
       level: 'INFO',
       message: 'Signal detected: .restart',
+    })
+    expect(renderEvent('signal-accepted', { kind: 'rerun', body: {} })).toEqual({
+      level: 'INFO',
+      message: 'Signal accepted: .rerun',
+    })
+    expect(renderEvent('signal-ignored', { kind: 'heal', body: {}, reason: 'already healing' })).toEqual({
+      level: 'WARN',
+      message: 'Signal ignored: .heal (already healing)',
     })
     expect(renderEvent('run-status', { status: 'healing' })).toEqual({
       level: 'INFO',

@@ -1,6 +1,29 @@
 // Type definitions for the canary-lab web UI. Mirrors the server-side return
 // shapes in apps/web-server/lib/{run-store,feature-loader,journal-store}.ts.
-// Duplicated rather than shared to keep the frontend tsconfig simple.
+// Run-state primitives are shared with the server so recovery behavior has one
+// semantic model; feature/journal/wizard shapes remain web-local API mirrors.
+import type {
+  DisplayStatus,
+  RunLifecycleEvent,
+  RunLifecycleSnapshot,
+  RunStatus,
+  ServiceStatus,
+} from '../../../../shared/run-state'
+export type {
+  DisplayStatus,
+  RunLifecycleAbortReason,
+  RunLifecycleEvent,
+  RunLifecyclePhase,
+  RunLifecycleRestartPlan,
+  RunLifecycleSeverity,
+  RunLifecycleSignal,
+  RunLifecycleSignalStatus,
+  RunLifecycleSnapshot,
+  RunLifecycleTargetedRerun,
+  RunStatus,
+  ServiceStatus,
+  TransientAction,
+} from '../../../../shared/run-state'
 
 export interface FeatureRepo {
   name: string
@@ -37,17 +60,6 @@ export interface FeatureSpecFile {
 
 export type FeatureTests = FeatureSpecFile[]
 
-export type RunStatus = 'running' | 'passed' | 'failed' | 'healing' | 'aborted'
-
-// Transient UI-only states layered over the persisted RunStatus while an
-// async action is in flight. Never written to the manifest — they exist
-// purely so the row's badge can reflect the user's last click ("ABORTING")
-// instead of the stale persisted value ("RUNNING") during the request
-// roundtrip. Resolves back to a RunStatus once the server responds.
-export type TransientAction = 'aborting' | 'deleting' | 'cancelling-heal' | 'pausing'
-
-export type DisplayStatus = RunStatus | TransientAction
-
 export interface RunIndexEntry {
   runId: string
   feature: string
@@ -55,8 +67,6 @@ export interface RunIndexEntry {
   status: RunStatus
   endedAt?: string
 }
-
-export type ServiceStatus = 'starting' | 'ready' | 'timeout' | 'stopped'
 
 export interface ServiceManifestEntry {
   name: string
@@ -101,6 +111,7 @@ export interface RunManifest {
   playwrightArtifacts?: PlaywrightArtifactPolicy
   signalPaths?: { rerun: string; restart: string }
   healMode?: 'auto' | 'manual'
+  lifecycle?: RunLifecycleSnapshot
 }
 
 export interface RunSummaryFailedEntry {
@@ -179,6 +190,7 @@ export interface RunDetail {
   summary?: RunSummary
   playbackEvents?: PlaywrightPlaybackEvent[]
   playwrightArtifacts?: PlaywrightArtifactGroup[]
+  lifecycleEvents?: RunLifecycleEvent[]
 }
 
 export interface SkillSummary {

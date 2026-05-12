@@ -1,11 +1,27 @@
 import fs from 'fs'
 import path from 'path'
 import { runDirFor, runsIndexPath, runsRoot } from './run-paths'
+import type {
+  RunLifecycleSnapshot,
+  RunStatus,
+  ServiceStatus,
+} from '../../../../shared/run-state'
+export type {
+  RunLifecycleAbortReason,
+  RunLifecycleEvent,
+  RunLifecyclePhase,
+  RunLifecycleRestartPlan,
+  RunLifecycleSeverity,
+  RunLifecycleSignal,
+  RunLifecycleSignalStatus,
+  RunLifecycleSnapshot,
+  RunLifecycleTargetedRerun,
+  RunStatus,
+  ServiceStatus,
+} from '../../../../shared/run-state'
 
 // Per-run manifest written at start and updated at finish. Kept narrow and
 // JSON-shaped so the future server can read it without parsing logs.
-
-export type ServiceStatus = 'starting' | 'ready' | 'timeout' | 'stopped'
 
 export interface ServiceManifestEntry {
   name: string
@@ -34,8 +50,6 @@ export interface PlaywrightArtifactPolicy {
   video: PlaywrightRetainedArtifactMode
   trace: PlaywrightRetainedArtifactMode
 }
-
-export type RunStatus = 'running' | 'passed' | 'failed' | 'healing' | 'aborted'
 
 // Mid-Run Heal: populated when Playwright was halted before completing the
 // suite — either by `--max-failures=<N>` (auto-fast-fail) or by an explicit
@@ -80,6 +94,9 @@ export interface RunManifest {
    *  pointing the user at the signal paths above. Only set during the heal
    *  phase of a manual run; cleared when the run leaves the heal state. */
   healMode?: 'auto' | 'manual'
+  /** Latest structured lifecycle state. This is the UI source of truth for
+   *  recovery flow narration; runner.log remains the human-readable audit. */
+  lifecycle?: RunLifecycleSnapshot
 }
 
 function atomicWrite(file: string, body: string): void {

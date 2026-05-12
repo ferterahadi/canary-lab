@@ -4,7 +4,7 @@ import os from 'os'
 import path from 'path'
 import { FileRunStateSink } from './run-state-sink'
 import { readManifest, readRunsIndex, type RunManifest } from './manifest'
-import { runDirFor } from './run-paths'
+import { buildRunPaths, runDirFor } from './run-paths'
 
 let logsDir: string
 
@@ -69,6 +69,29 @@ describe('FileRunStateSink', () => {
     expect(stored.heartbeatAt).toEqual(expect.any(String))
     expect(stored.healMode).toBe('manual')
     expect(readRunsIndex(logsDir)[0].status).toBe('healing')
+  })
+
+  it('records lifecycle events in JSONL and mirrors the latest snapshot into the manifest', () => {
+    const sink = new FileRunStateSink(logsDir)
+    sink.bootstrap(manifest())
+
+    sink.recordLifecycleEvent('run-1', {
+      phase: 'waiting-for-signal',
+      headline: 'Waiting for heal signal',
+      detail: 'The runner is waiting for .restart.',
+      updatedAt: '2026-05-08T00:00:05.000Z',
+      lastSignal: { kind: 'restart', status: 'accepted' },
+    })
+
+    const lifecyclePath = buildRunPaths(runDirFor(logsDir, 'run-1')).lifecycleEventsPath
+    const lines = fs.readFileSync(lifecyclePath, 'utf-8').trim().split('\n')
+    expect(lines).toHaveLength(1)
+    expect(JSON.parse(lines[0])).toMatchObject({ phase: 'waiting-for-signal', headline: 'Waiting for heal signal' })
+    expect(readManifest(sink.manifestPath('run-1'))?.lifecycle).toMatchObject({
+      phase: 'waiting-for-signal',
+      headline: 'Waiting for heal signal',
+      lastSignal: { kind: 'restart', status: 'accepted' },
+    })
   })
 
   it('finalizes services, clears running summary state, and mirrors endedAt into the index', () => {
