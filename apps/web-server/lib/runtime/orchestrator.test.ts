@@ -339,6 +339,10 @@ describe('RunOrchestrator.start', () => {
     orch.on('health-check', (e) => checks.push(e.healthy))
     await expect(orch.start()).rejects.toThrow(/Health check timed out/)
     expect(checks.at(-1)).toBe(false)
+    expect(readManifest(orch.paths.manifestPath)?.lifecycle).toMatchObject({
+      phase: 'aborted',
+      abortReason: { reason: 'service-health-failed', service: 'api' },
+    })
     await orch.stop('aborted')
   })
 
@@ -489,7 +493,7 @@ describe('RunOrchestrator.start', () => {
 })
 
 describe('RunOrchestrator signal watcher', () => {
-  it('detects restart/rerun/heal signals and emits', async () => {
+  it('consumes and records signals as ignored when not waiting for heal input', async () => {
     vi.useFakeTimers()
     const { factory } = makeFakeFactory()
     const orch = new RunOrchestrator({
@@ -501,8 +505,8 @@ describe('RunOrchestrator signal watcher', () => {
       delay: async () => undefined,
       healthPollIntervalMs: 50,
     })
-    const events: { kind: string; body: Record<string, unknown> }[] = []
-    orch.on('signal-detected', (e) => events.push(e))
+    const events: { kind: string; reason: string }[] = []
+    orch.on('signal-ignored', (e) => events.push(e))
 
     await orch.start()
     fs.writeFileSync(orch.paths.restartSignal, '{"hypothesis":"h"}')
@@ -514,8 +518,10 @@ describe('RunOrchestrator signal watcher', () => {
     vi.useRealTimers()
 
     expect(events.map((e) => e.kind).sort()).toEqual(['heal', 'rerun', 'restart'])
-    const restart = events.find((e) => e.kind === 'restart')
-    expect(restart?.body.hypothesis).toBe('h')
+    expect(events.every((e) => e.reason === 'not-waiting-for-signal')).toBe(true)
+    expect(readManifest(orch.paths.manifestPath)?.lifecycle?.lastSignal).toMatchObject({
+      status: 'ignored',
+    })
 
     await orch.stop('passed')
   })
@@ -816,14 +822,14 @@ describe('RunOrchestrator branch coverage', () => {
       delay: async () => undefined,
       healthPollIntervalMs: 5,
     })
-    const detected: Record<string, unknown>[] = []
-    orch.on('signal-detected', (e) => detected.push(e.body))
+    const ignored: string[] = []
+    orch.on('signal-ignored', (e) => ignored.push(e.reason))
     await orch.start()
     fs.writeFileSync(orch.paths.restartSignal, '{not json')
     vi.advanceTimersByTime(10)
     await Promise.resolve()
     vi.useRealTimers()
-    expect(detected[0]).toEqual({})
+    expect(ignored).toEqual(['not-waiting-for-signal'])
     await orch.stop('passed')
   })
 })
@@ -892,6 +898,10 @@ describe('RunOrchestrator.runPlaywright', () => {
       CANARY_LAB_TARGETED_RERUN: '1',
       CANARY_LAB_MANIFEST_PATH: orch.paths.manifestPath,
       CANARY_LAB_SUMMARY_PATH: orch.paths.summaryPath,
+    })
+    expect(readManifest(orch.paths.manifestPath)?.lifecycle?.targetedRerun).toMatchObject({
+      selected: 1,
+      mode: 'failed-and-pending',
     })
     await orch.stop('passed')
   })
@@ -1093,9 +1103,11 @@ describe('RunOrchestrator.runFullCycle', () => {
     await waitFor(2)
     f.spawned[1].emitExit(1) // first playwright fails — orchestrator enters manual heal
 
-    // Give the manual loop a tick to set status to 'healing', then drop a
+    // Wait for the manual loop to enter the signal-waiting phase, then drop a
     // .restart signal as if the user fixed the code by hand.
-    await new Promise((r) => setTimeout(r, 30))
+    while (readManifest(orch.paths.manifestPath)?.lifecycle?.phase !== 'waiting-for-signal') {
+      await new Promise((r) => setTimeout(r, 5))
+    }
     fs.writeFileSync(orch.paths.restartSignal, JSON.stringify({ hypothesis: 'manual' }))
 
     // Services re-spawn (svc at idx 2), then second playwright at idx 3.
@@ -1926,6 +1938,38 @@ describe('RunOrchestrator.runFullCycle', () => {
 })
 
 describe('RunOrchestrator.waitForHealSignal', () => {
+  it('accepts one signal while waiting and ignores duplicate pending signals', async () => {
+    vi.useFakeTimers()
+    const { factory } = makeFakeFactory()
+    const orch = new RunOrchestrator({
+      feature: makeFeature(),
+      runId: RUN_ID,
+      runDir,
+      ptyFactory: factory,
+      healthCheck: async () => true,
+      delay: async () => undefined,
+      healthPollIntervalMs: 10,
+      healSignalPollMs: 10,
+    })
+    await orch.start()
+    const ignored: string[] = []
+    orch.on('signal-ignored', (e) => ignored.push(e.reason))
+    const waiting = orch.waitForHealSignal(5_000, 5_000, false)
+    fs.writeFileSync(orch.paths.restartSignal, '{"hypothesis":"h"}')
+    fs.writeFileSync(orch.paths.rerunSignal, '{}')
+
+    vi.advanceTimersByTime(20)
+    await Promise.resolve()
+    const { signal, reason } = await waiting
+    vi.useRealTimers()
+
+    expect(signal?.kind).toBe('restart')
+    expect(reason).toBe('signal')
+    expect(ignored).toContain('signal-already-pending')
+    expect(readManifest(orch.paths.manifestPath)?.lifecycle?.lastSignal?.status).toBe('ignored')
+    await orch.stop('aborted')
+  })
+
   it('returns pty-died when no agent pty is alive (post-exit grace then bail)', async () => {
     // With no live heal-agent pty, the `pty-died` grace path is what gets
     // exercised — the hard/idle timeouts only apply while the REPL is up.
@@ -2320,6 +2364,7 @@ describe('RunOrchestrator.pauseAndHeal', () => {
       failuresAtStop: 2,
       suiteTotal: 11,
     })
+    expect(fs.readFileSync(orch.paths.lifecycleEventsPath, 'utf-8')).toContain('Pause accepted')
     await orch.stop('aborted')
   })
 
@@ -2864,7 +2909,7 @@ describe('RunOrchestrator.restartHealFromFailure', () => {
     const eventLog: string[] = []
     orch.on('agent-started', () => eventLog.push('agent-started'))
     orch.on('agent-exit', () => eventLog.push('agent-exit'))
-    orch.on('signal-detected', (e) => eventLog.push(`signal:${e.kind}`))
+    orch.on('signal-accepted', (e) => eventLog.push(`signal:${e.kind}`))
     orch.on('service-started', () => eventLog.push('service-started'))
     orch.on('playwright-started', () => eventLog.push('playwright-started'))
 
@@ -3555,15 +3600,13 @@ describe('RunOrchestrator integration smoke', () => {
     await orch.start()
     spawned[0].emitData('boot\n')
     fs.writeFileSync(orch.paths.restartSignal, '')
-    vi.advanceTimersByTime(30)
-    await Promise.resolve()
+    await vi.advanceTimersByTimeAsync(30)
     vi.useRealTimers()
 
     await orch.stop('passed')
 
     expect(eventLog[0]).toBe('service-started')
     expect(eventLog).toContain('service-output')
-    expect(eventLog).toContain('signal:restart')
     expect(eventLog.at(-1)).toBe('run-complete')
     expect(fs.existsSync(orch.paths.manifestPath)).toBe(true)
     expect(fs.existsSync(path.join(runDir, 'svc-api.log'))).toBe(true)

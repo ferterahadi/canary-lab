@@ -8,6 +8,7 @@ import {
   upsertRunsIndexEntry,
   writeManifest,
   writeRunsIndex,
+  type RunLifecycleEvent,
   type RunIndexEntry,
   type RunManifest,
   type ServiceStatus,
@@ -239,6 +240,29 @@ export interface RunDetail {
   summary?: RunSummary
   playbackEvents?: PlaywrightPlaybackEvent[]
   playwrightArtifacts?: PlaywrightArtifactGroup[]
+  lifecycleEvents?: RunLifecycleEvent[]
+}
+
+export function readRunLifecycleEvents(runDir: string): RunLifecycleEvent[] | undefined {
+  const p = buildRunPaths(runDir).lifecycleEventsPath
+  let raw: string
+  try {
+    raw = fs.readFileSync(p, 'utf-8')
+  } catch {
+    return undefined
+  }
+  const out: RunLifecycleEvent[] = []
+  for (const line of raw.split('\n')) {
+    const trimmed = line.trim()
+    if (!trimmed) continue
+    try {
+      const parsed = JSON.parse(trimmed) as RunLifecycleEvent
+      if (parsed && typeof parsed === 'object' && typeof parsed.phase === 'string') out.push(parsed)
+    } catch {
+      // Ignore corrupt partial lines; the manifest snapshot remains usable.
+    }
+  }
+  return out.length > 0 ? out : undefined
 }
 
 // Read e2e-summary.json if present. Returns undefined when absent or
@@ -359,12 +383,14 @@ export function getRunDetail(logsDir: string, runId: string): RunDetail | null {
   const summary = readRunSummary(dir)
   const playbackEvents = readPlaywrightPlaybackEvents(dir)
   const playwrightArtifacts = indexPlaywrightArtifacts(runId, dir, playbackEvents)
+  const lifecycleEvents = readRunLifecycleEvents(dir)
   return {
     runId,
     manifest: m,
     ...(summary ? { summary } : {}),
     ...(playbackEvents?.length ? { playbackEvents } : {}),
     ...(playwrightArtifacts?.length ? { playwrightArtifacts } : {}),
+    ...(lifecycleEvents?.length ? { lifecycleEvents } : {}),
   }
 }
 
@@ -485,6 +511,11 @@ export class RunStore extends EventEmitter implements RunStateSink {
 
   patchManifest(runId: string, patch: Partial<RunManifest>): void {
     this.sink.patchManifest(runId, patch)
+    this.emitEvent({ kind: 'changed', runId })
+  }
+
+  recordLifecycleEvent(runId: string, event: RunLifecycleEvent): void {
+    this.sink.recordLifecycleEvent(runId, event)
     this.emitEvent({ kind: 'changed', runId })
   }
 

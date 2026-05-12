@@ -8,10 +8,11 @@ import {
   upsertRunsIndexEntry,
   writeManifest,
   readManifest,
+  type RunLifecycleEvent,
   type RunManifest,
   type ServiceStatus,
 } from './manifest'
-import { runDirFor } from './run-paths'
+import { buildRunPaths, runDirFor } from './run-paths'
 
 // `RunStateSink` is the interface the orchestrator uses to persist its own
 // state. The default implementation (`FileRunStateSink`) writes the same
@@ -54,6 +55,10 @@ export interface RunStateSink {
   /** Generic partial-update escape hatch. Used for fields the typed
    *  helpers above don't cover (`stoppedEarly`, `healCycleHistory`). */
   patchManifest(runId: string, patch: Partial<RunManifest>): void
+
+  /** Structured lifecycle narration for the UI. Appends the event and mirrors
+   *  its snapshot fields into the manifest so list/detail views stay aligned. */
+  recordLifecycleEvent(runId: string, event: RunLifecycleEvent): void
 }
 
 /** File-backed default. The orchestrator uses this directly when no other
@@ -126,6 +131,19 @@ export class FileRunStateSink implements RunStateSink {
 
   patchManifest(runId: string, patch: Partial<RunManifest>): void {
     updateManifest(this.manifestPath(runId), patch)
+  }
+
+  recordLifecycleEvent(runId: string, event: RunLifecycleEvent): void {
+    const runDir = runDirFor(this.logsDir, runId)
+    const eventPath = buildRunPaths(runDir).lifecycleEventsPath
+    const stamped: RunLifecycleEvent = {
+      ...event,
+      updatedAt: event.updatedAt || new Date().toISOString(),
+    }
+    fs.mkdirSync(path.dirname(eventPath), { recursive: true })
+    fs.appendFileSync(eventPath, JSON.stringify(stamped) + '\n')
+    const { id: _id, severity: _severity, ...snapshot } = stamped
+    updateManifest(this.manifestPath(runId), { lifecycle: snapshot })
   }
 }
 

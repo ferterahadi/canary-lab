@@ -578,6 +578,57 @@ function expectLocalOnly(page) {
     expect(html).toContain('expectLocalOnly')
     expect(html).not.toContain('<h3>External Imports</h3>')
   })
+
+  it('covers failed flowcharts, long labels, malformed bodies, and empty section ids', async () => {
+    const featureDir = path.join(tmpDir, 'flow-edge-feature')
+    const e2eDir = path.join(featureDir, 'e2e')
+    fs.mkdirSync(e2eDir, { recursive: true })
+    const spec = path.join(e2eDir, 'flow.spec.ts')
+    const longWord = 'checkout'.repeat(20)
+    const specSource = `import { test, expect } from '@playwright/test'
+
+test('!!!', async ({ page }) => {
+  await page.route('**/api/**', () => {})
+  openCheckout(page)
+  await expectOneNested(page)
+  ${longWord}(page)
+})
+
+function openCheckout(page) {
+  return expect(page.getByText('Checkout')).toBeVisible()
+}
+
+function expectOneNested(page) {
+  expect(page.getByText('${longWord}')).toBeVisible()
+}
+`
+    fs.writeFileSync(spec, specSource)
+    const failed = detail({
+      featureDir,
+      eventLocation: `${spec}:${lineOf(specSource, "test('!!!'")}`,
+      title: '!!!',
+      durationMs: undefined,
+    })
+    failed.manifest.status = 'failed'
+    failed.summary = { complete: true, total: 1, passed: 0, failed: [{ name: 'test-case-' }] }
+    failed.playbackEvents![0].status = 'failed'
+    failed.playbackEvents![0].passed = false
+    failed.playbackEvents![0].durationMs = undefined
+
+    const exported = await createAssertionExport(failed)
+    const html = exported.html
+    const svg = exported.assets[0].data.toString('utf8')
+
+    expect(exported.assets[0].filename).toBe('flowcharts/1.svg')
+    expect(html).toContain('status-failed')
+    expect(html).not.toContain('<span class="muted">(')
+    expect(svg).toContain('stroke="#e11d48"')
+    expect(svg).toContain('Setup')
+    expect(svg).toContain('Helper: openCheckout')
+    expect(svg).toContain('1 nested assertion')
+    expect(svg).toContain('moderate assertion')
+    expect(svg).toContain('…')
+  })
 })
 
 function detail(opts: {
