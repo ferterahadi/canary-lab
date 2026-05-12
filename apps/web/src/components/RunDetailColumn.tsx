@@ -7,6 +7,9 @@ import type {
   RepoBranchSnapshot,
   ServiceManifestEntry,
   ServiceStatus,
+  RunLifecycleEvent,
+  RunLifecycleSnapshot,
+  RunManifest,
 } from '../api/types'
 import { formatDuration, durationBetween } from '../lib/format'
 import {
@@ -19,14 +22,19 @@ import {
 } from '../lib/run-detail-playback'
 import { statusFromPlaybackResult, statusLabel, statusPillClassForStatus } from '../lib/test-step-status'
 import { useRun } from '../state/RunsContext'
+import { deriveRunViewModel, type RunViewModel } from '../lib/run-view-model'
 import { RunStatusIndicator } from './RunStatusIndicator'
 import { PaneTerminal } from './PaneTerminal'
 import { AgentSessionView } from './AgentSessionView'
 import { JournalTab } from './JournalTab'
 import { ManualHealBanner } from './ManualHealBanner'
 import { RestartHealButton } from './RestartHealButton'
+import {
+  isRestartableRunStatus,
+  isTerminalRunStatus as isSharedTerminalRunStatus,
+} from '../../../../shared/run-state'
 
-type Tab = 'overview' | 'services' | 'playwright' | 'agent' | 'journal'
+type Tab = 'overview' | 'run-logs' | 'services' | 'playwright' | 'agent' | 'journal'
 type PlaywrightView = 'terminal' | 'playback'
 
 export function RunDetailColumn({
@@ -48,7 +56,7 @@ export function RunDetailColumn({
   // next `update` frame. The transient action (e.g. user clicked Stop in
   // the runs list) is overlaid into `displayStatus` so this header shows
   // `ABORTING` mid-action instead of stale `RUNNING`.
-  const { detail, displayStatus } = useRun(runId)
+  const { detail, transient } = useRun(runId)
   const handleAgentPaneExit = useCallback(() => {
     setAgentPaneExited(true)
   }, [])
@@ -73,6 +81,7 @@ export function RunDetailColumn({
   }
 
   const m = detail.manifest
+  const view = deriveRunViewModel(detail, transient)
   const services = m.services
   const repoBranches = m.repoBranches ?? []
   const activeService = services[serviceIdx]
@@ -83,13 +92,14 @@ export function RunDetailColumn({
       <header className="cl-panel-header px-4 py-3">
         <div className="flex min-w-0 items-center gap-2">
           <span className="shrink-0">
-            <RunStatusIndicator status={displayStatus ?? m.status} />
+            <RunStatusIndicator status={view.displayStatus} />
           </span>
           <span className="min-w-0 flex-1 truncate text-sm" style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }} title={m.runId}>{m.runId}</span>
           <span className="shrink-0 truncate text-xs" style={{ color: 'var(--text-muted)' }} title={m.feature}>{m.feature}</span>
         </div>
         <nav className="mt-2 -mx-1 flex gap-1 overflow-x-auto px-1 text-xs scrollbar-thin">
           <TabButton active={tab === 'overview'} onClick={() => setTab('overview')}>Overview</TabButton>
+          <TabButton active={tab === 'run-logs'} onClick={() => setTab('run-logs')}>Run Logs</TabButton>
           <TabButton active={tab === 'services'} onClick={() => setTab('services')} disabled={services.length === 0}>Services</TabButton>
           <TabButton active={tab === 'playwright'} onClick={() => setTab('playwright')}>Playwright</TabButton>
           <TabButton active={tab === 'agent'} onClick={() => setTab('agent')}>Heal agent</TabButton>
@@ -98,68 +108,15 @@ export function RunDetailColumn({
       </header>
       <div className="flex-1 min-h-0 overflow-hidden mt-2">
         {tab === 'overview' && (
-          <div className="h-full overflow-y-auto scrollbar-thin p-4 text-sm">
-            <div className="mb-2 flex items-center justify-between gap-3">
-              <h2 className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-secondary)' }}>
-                Run
-              </h2>
-              {isAssertionExportable(m.status) && (
-                <a
-                  href={assertionHref(m.runId)}
-                  download={assertionFilename(m.feature, m.runId)}
-                  className="shrink-0 rounded px-2.5 py-1 text-[11px] font-medium"
-                  style={{ background: 'var(--bg-selected)', color: 'var(--accent)' }}
-                >
-                  Export Assertion
-                </a>
-              )}
-            </div>
-            <dl className="grid grid-cols-[110px_minmax(0,1fr)] gap-y-1.5 text-xs">
-                <dt style={{ color: 'var(--text-muted)' }}>Feature</dt>
-                <dd className="truncate" style={{ color: 'var(--text-primary)' }} title={m.feature}>{m.feature}</dd>
-                <dt style={{ color: 'var(--text-muted)' }}>Duration</dt>
-                <dd style={{ color: 'var(--text-primary)' }}>{(() => {
-                  const d = durationBetween(m.startedAt, m.endedAt)
-                  return d == null ? 'in progress' : formatDuration(d)
-                })()}</dd>
-                <dt style={{ color: 'var(--text-muted)' }}>Started</dt>
-                <dd className="truncate" style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }} title={m.startedAt}>{m.startedAt}</dd>
-                {m.endedAt && (
-                  <>
-                    <dt style={{ color: 'var(--text-muted)' }}>Ended</dt>
-                    <dd className="truncate" style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }} title={m.endedAt}>{m.endedAt}</dd>
-                  </>
-                )}
-                {m.healCycles > 0 && (
-                  <>
-                    <dt style={{ color: 'var(--text-muted)' }}>Heal cycles</dt>
-                    <dd style={{ color: 'var(--text-secondary)' }}>{m.healCycles}</dd>
-                  </>
-                )}
-            </dl>
-            {repoBranches.length > 0 && (
-              <div className="mt-4">
-                <SectionHeader>Branches</SectionHeader>
-                <ul className="space-y-2">
-                  {repoBranches.map((repo) => (
-                    <BranchCard key={`${repo.name}:${repo.path}`} repo={repo} />
-                  ))}
-                </ul>
-              </div>
-            )}
-            <div className="mt-4">
-              <SectionHeader>Services</SectionHeader>
-              {services.length === 0 ? (
-                <div className="text-xs" style={{ color: 'var(--text-muted)' }}>No services configured.</div>
-              ) : (
-                <ul className="space-y-2">
-                  {services.map((s) => (
-                    <ServiceCard key={s.safeName} service={s} />
-                  ))}
-                </ul>
-              )}
-            </div>
-          </div>
+          <RunOverviewTab
+            manifest={m}
+            view={view}
+            services={services}
+            repoBranches={repoBranches}
+          />
+        )}
+        {tab === 'run-logs' && (
+          <RunLogsTab view={view} />
         )}
         {tab === 'services' && services.length > 0 && (
           <div className="flex h-full flex-col">
@@ -190,11 +147,12 @@ export function RunDetailColumn({
             artifactGroups={detail.playwrightArtifacts}
             artifactPolicy={m.playwrightArtifacts}
             onOpenArtifactSettings={() => onOpenPlaywrightSettings?.(m.feature)}
+            lifecycle={m.lifecycle}
           />
         )}
         {tab === 'agent' && (
           <div className="flex h-full min-h-0 flex-col overflow-hidden">
-            {m.healMode === 'manual' && m.status === 'healing' && m.signalPaths && (
+            {m.healMode === 'manual' && view.actions.cancelHeal.enabled && m.signalPaths && (
               <ManualHealBanner runId={m.runId} signalPaths={m.signalPaths} />
             )}
             <div className="min-h-0 flex-1 overflow-hidden">
@@ -209,7 +167,7 @@ export function RunDetailColumn({
                 />
               )}
             </div>
-            {canRestartHeal(m.status) && (
+            {view.actions.restartHeal.enabled && (
               <RestartHealButton
                 runId={m.runId}
                 onRestarted={() => setAgentPaneRestartKey((key) => key + 1)}
@@ -226,18 +184,127 @@ export function RunDetailColumn({
 }
 
 export function canRestartHeal(status: string): boolean {
-  return status === 'failed' || status === 'aborted'
+  return isRestartableRunStatus(status)
+}
+
+interface RunOverviewTabProps {
+  manifest: RunManifest
+  view: RunViewModel
+  services: ServiceManifestEntry[]
+  repoBranches: RepoBranchSnapshot[]
+}
+
+function RunOverviewTab({
+  manifest,
+  view,
+  services,
+  repoBranches,
+}: RunOverviewTabProps) {
+  const duration = durationBetween(manifest.startedAt, manifest.endedAt)
+
+  return (
+    <div className="h-full overflow-y-auto scrollbar-thin p-4 text-sm">
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <h2 className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-secondary)' }}>
+          Run
+        </h2>
+        {isAssertionExportable(manifest.status) && (
+          <a
+            href={assertionHref(manifest.runId)}
+            download={assertionFilename(manifest.feature, manifest.runId)}
+            className="shrink-0 rounded px-2.5 py-1 text-[11px] font-medium"
+            style={{ background: 'var(--bg-selected)', color: 'var(--accent)' }}
+          >
+            Export Assertion
+          </a>
+        )}
+      </div>
+      <dl className="grid grid-cols-[110px_minmax(0,1fr)] gap-y-1.5 text-xs">
+        <dt style={{ color: 'var(--text-muted)' }}>Feature</dt>
+        <dd className="truncate" style={{ color: 'var(--text-primary)' }} title={manifest.feature}>{manifest.feature}</dd>
+        <dt style={{ color: 'var(--text-muted)' }}>Duration</dt>
+        <dd style={{ color: 'var(--text-primary)' }}>{duration == null ? 'in progress' : formatDuration(duration)}</dd>
+        <dt style={{ color: 'var(--text-muted)' }}>Started</dt>
+        <dd className="truncate" style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }} title={manifest.startedAt}>{manifest.startedAt}</dd>
+        {manifest.endedAt && (
+          <>
+            <dt style={{ color: 'var(--text-muted)' }}>Ended</dt>
+            <dd className="truncate" style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }} title={manifest.endedAt}>{manifest.endedAt}</dd>
+          </>
+        )}
+        {manifest.healCycles > 0 && (
+          <>
+            <dt style={{ color: 'var(--text-muted)' }}>Heal cycles</dt>
+            <dd style={{ color: 'var(--text-secondary)' }}>{manifest.healCycles}</dd>
+          </>
+        )}
+        {manifest.lifecycle && (
+          <>
+            <dt style={{ color: 'var(--text-muted)' }}>State</dt>
+            <dd style={{ color: 'var(--text-secondary)' }}>{view.headline}</dd>
+          </>
+        )}
+      </dl>
+      {repoBranches.length > 0 && (
+        <div className="mt-4">
+          <SectionHeader>Branches</SectionHeader>
+          <ul className="space-y-2">
+            {repoBranches.map((repo) => (
+              <BranchCard key={`${repo.name}:${repo.path}`} repo={repo} />
+            ))}
+          </ul>
+        </div>
+      )}
+      <div className="mt-4">
+        <SectionHeader>Services</SectionHeader>
+        {services.length === 0 ? (
+          <div className="text-xs" style={{ color: 'var(--text-muted)' }}>No services configured.</div>
+        ) : (
+          <ul className="space-y-2">
+            {services.map((s) => (
+              <ServiceCard key={s.safeName} service={s} />
+            ))}
+          </ul>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function RunLogsTab({ view }: { view: RunViewModel }) {
+  if (view.recoveryTimeline.length === 0) {
+    return (
+      <EmptyPane
+        title="No run logs yet."
+        body="Lifecycle events will appear here once Canary Lab records service startup, test execution, recovery, or final status."
+      />
+    )
+  }
+
+  return (
+    <div className="h-full overflow-y-auto scrollbar-thin p-4 text-sm">
+      <div className="mb-2">
+        <h2 className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-secondary)' }}>
+          Run Logs
+        </h2>
+      </div>
+      <RecoveryTimeline
+        events={view.recoveryTimeline}
+        alert={view.primaryAlert}
+      />
+    </div>
+  )
 }
 
 // Run has reached a terminal state — the agent pty is gone, so the live
 // xterm pane has nothing to subscribe to. Switch to the structured-view
 // historical replay (which reads the agent CLI's own JSONL session log).
 export function isTerminalRunStatus(status: string): boolean {
-  return status === 'passed' || status === 'failed' || status === 'aborted'
+  return isSharedTerminalRunStatus(status)
 }
 
 export function isAssertionExportable(status: string): boolean {
-  return status === 'passed' || status === 'failed' || status === 'aborted'
+  return isSharedTerminalRunStatus(status)
 }
 
 export function assertionFilename(feature: string, runId: string): string {
@@ -264,6 +331,7 @@ function PlaywrightPanel({
   artifactGroups,
   artifactPolicy,
   onOpenArtifactSettings,
+  lifecycle,
 }: {
   runId: string
   view: PlaywrightView
@@ -272,9 +340,16 @@ function PlaywrightPanel({
   artifactGroups?: PlaywrightArtifactGroup[]
   artifactPolicy?: PlaywrightArtifactPolicy
   onOpenArtifactSettings?: () => void
+  lifecycle?: RunLifecycleSnapshot
 }) {
   return (
     <div className="flex h-full flex-col">
+      {lifecycle?.targetedRerun && (
+        <div className="mx-3 mt-3 rounded-md border px-3 py-2 text-xs" style={{ borderColor: 'var(--border-default)', background: 'var(--bg-elevated)', color: 'var(--text-secondary)' }}>
+          <span className="font-medium" style={{ color: 'var(--text-primary)' }}>Targeted rerun:</span>{' '}
+          {lifecycle.targetedRerun.reason}
+        </div>
+      )}
       <div className="cl-panel-header flex gap-1 px-3 py-1.5 text-xs">
         <SegmentButton active={view === 'terminal'} onClick={() => onViewChange('terminal')}>Terminal</SegmentButton>
         <SegmentButton active={view === 'playback'} onClick={() => onViewChange('playback')}>Playback</SegmentButton>
@@ -285,6 +360,65 @@ function PlaywrightPanel({
       </div>
     </div>
   )
+}
+
+function RecoveryTimeline({
+  events,
+  alert,
+}: {
+  events: RunLifecycleEvent[]
+  alert?: { tone: 'info' | 'success' | 'warning' | 'error'; message: string }
+}) {
+  return (
+    <div>
+      {alert && (
+        <div className={`mb-2 rounded-md border px-2.5 py-2 text-xs ${alertClass(alert.tone)}`}>
+          {alert.message}
+        </div>
+      )}
+      <ol className="space-y-2">
+        {events.map((event, idx) => (
+          <li key={event.id ?? `${event.updatedAt}:${idx}`} className="grid grid-cols-[12px_minmax(0,1fr)] gap-2 text-xs">
+            <span className={`mt-1.5 h-2 w-2 rounded-full ${dotClass(event.severity)}`} />
+            <span className="min-w-0">
+              <span className="block truncate" style={{ color: 'var(--text-primary)' }}>{event.headline}</span>
+              {event.detail && <span className="block" style={{ color: 'var(--text-muted)' }}>{event.detail}</span>}
+              {event.restartPlan && (
+                <span className="block" style={{ color: 'var(--text-muted)' }}>{formatRestartPlan(event.restartPlan)}</span>
+              )}
+              {event.targetedRerun && (
+                <span className="block" style={{ color: 'var(--text-muted)' }}>
+                  {event.targetedRerun.selected}/{event.targetedRerun.total} selected
+                </span>
+              )}
+            </span>
+          </li>
+        ))}
+      </ol>
+    </div>
+  )
+}
+
+function alertClass(tone: 'info' | 'success' | 'warning' | 'error'): string {
+  if (tone === 'success') return 'border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
+  if (tone === 'warning') return 'border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300'
+  if (tone === 'error') return 'border-rose-500/40 bg-rose-500/10 text-rose-700 dark:text-rose-300'
+  return 'border-sky-500/40 bg-sky-500/10 text-sky-700 dark:text-sky-300'
+}
+
+function dotClass(severity: RunLifecycleEvent['severity']): string {
+  if (severity === 'success') return 'bg-emerald-500'
+  if (severity === 'warning') return 'bg-amber-500'
+  if (severity === 'error') return 'bg-rose-500'
+  return 'bg-sky-500'
+}
+
+function formatRestartPlan(plan: NonNullable<RunLifecycleEvent['restartPlan']>): string {
+  const parts: string[] = []
+  if (plan.restarted.length > 0) parts.push(`restarted ${plan.restarted.join(', ')}`)
+  if (plan.kept.length > 0) parts.push(`kept ${plan.kept.join(', ')}`)
+  if ((plan.startedBecauseMissing ?? []).length > 0) parts.push(`started missing ${(plan.startedBecauseMissing ?? []).join(', ')}`)
+  return parts.join('; ')
 }
 
 function SegmentButton(props: { active: boolean; onClick: () => void; children: React.ReactNode }) {

@@ -86,6 +86,14 @@ export function renderEvent<K extends keyof OrchestratorEventMap>(
       const p = payload as OrchestratorEventMap['signal-detected']
       return { level: 'INFO', message: `Signal detected: .${p.kind}` }
     }
+    case 'signal-accepted': {
+      const p = payload as OrchestratorEventMap['signal-accepted']
+      return { level: 'INFO', message: `Signal accepted: .${p.kind}` }
+    }
+    case 'signal-ignored': {
+      const p = payload as OrchestratorEventMap['signal-ignored']
+      return { level: 'WARN', message: `Signal ignored: .${p.kind} (${p.reason})` }
+    }
     case 'run-status': {
       const p = payload as OrchestratorEventMap['run-status']
       return { level: 'INFO', message: `Run status: ${p.status}` }

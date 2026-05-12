@@ -11,6 +11,7 @@ export interface RunPaths {
   summaryPath: string
   playwrightStdoutPath: string
   playwrightEventsPath: string
+  lifecycleEventsPath: string
   playwrightArtifactsDir: string
   agentSessionIdPath: string
   // Small JSON pointer that records which agent ran and where its CLI-native
@@ -38,6 +39,7 @@ export function buildRunPaths(runDir: string): RunPaths {
     summaryPath: path.join(runDir, 'e2e-summary.json'),
     playwrightStdoutPath: path.join(runDir, 'playwright.log'),
     playwrightEventsPath: path.join(runDir, 'playwright-events.jsonl'),
+    lifecycleEventsPath: path.join(runDir, 'lifecycle-events.jsonl'),
     playwrightArtifactsDir: path.join(runDir, 'playwright-artifacts'),
     agentSessionIdPath: path.join(runDir, 'agent-session-id.txt'),
     agentSessionRefPath: path.join(runDir, 'agent-session.json'),

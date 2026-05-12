@@ -690,6 +690,28 @@ describe('RunStore', () => {
     expect(events).toEqual([{ kind: 'changed', runId: 'r-patch-1' }])
   })
 
+  it('recordLifecycleEvent appends lifecycle, mirrors manifest snapshot, and emits changed', () => {
+    const dir = seedRun('r-life-1', { status: 'running' })
+    const store = new RunStore(tmpDir, createRegistry())
+    const events: RunStoreEvent[] = []
+    store.onEvent((event) => events.push(event))
+
+    store.recordLifecycleEvent('r-life-1', {
+      phase: 'restarting-services',
+      headline: 'Restart plan ready',
+      updatedAt: '2026-05-08T00:00:05.000Z',
+      restartPlan: { restarted: ['api'], kept: ['ngrok'], startedBecauseMissing: ['ngrok'] },
+    })
+
+    expect(readManifest(store.manifestPath('r-life-1'))?.lifecycle).toMatchObject({
+      phase: 'restarting-services',
+      restartPlan: { restarted: ['api'], kept: ['ngrok'], startedBecauseMissing: ['ngrok'] },
+    })
+    expect(getRunDetail(tmpDir, 'r-life-1')?.lifecycleEvents).toHaveLength(1)
+    expect(fs.readFileSync(path.join(dir, 'lifecycle-events.jsonl'), 'utf-8')).toContain('Restart plan ready')
+    expect(events).toEqual([{ kind: 'changed', runId: 'r-life-1' }])
+  })
+
   it('setStatus mirrors status into both manifest and index, and emits changed', () => {
     seedRun('r1', { status: 'running' })
     const store = new RunStore(tmpDir, createRegistry())

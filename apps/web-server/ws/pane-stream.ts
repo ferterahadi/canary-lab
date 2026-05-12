@@ -5,6 +5,7 @@ import type { PaneBroker, PaneId, PaneSubscriber } from '../lib/pane-broker'
 import type { OrchestratorRegistry } from '../lib/run-store'
 import { readManifest } from '../lib/runtime/manifest'
 import { buildRunPaths, runDirFor } from '../lib/runtime/run-paths'
+import { isTerminalRunStatus } from '../../../shared/run-state'
 
 // Wires Fastify's WebSocket plugin to the per-run PaneBroker. Coverage is
 // excluded for this module — the wire-up is too thin to test deterministically
@@ -25,8 +26,6 @@ export interface PaneStreamDeps {
   // broker is gone. Required so the same module can serve historical runs.
   logsDir: string
 }
-
-const TERMINAL_RUN_STATUSES = new Set(['passed', 'failed', 'aborted'])
 
 export async function paneStreamRoutes(
   app: FastifyInstance,
@@ -110,7 +109,7 @@ export async function paneStreamRoutes(
 
 export function shouldReplayLogFile(logsDir: string, runId: string): boolean {
   const manifest = readManifest(path.join(runDirFor(logsDir, runId), 'manifest.json'))
-  return manifest ? TERMINAL_RUN_STATUSES.has(manifest.status) : false
+  return manifest ? isTerminalRunStatus(manifest.status) : false
 }
 
 export function shouldPreferLogReplay(

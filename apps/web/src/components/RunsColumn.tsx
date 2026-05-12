@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { RunIndexEntry } from '../api/types'
 import { formatDuration, durationBetween, shortTime } from '../lib/format'
-import { canPauseHeal, canStop, canDelete, canCancelHeal, deriveDisplayStatus } from '../lib/run-actions'
+import { deriveRunViewModel, type RunViewModel } from '../lib/run-view-model'
 import { useRuns } from '../state/RunsContext'
 import { RunStatusIndicator } from './RunStatusIndicator'
 
@@ -210,7 +210,8 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
               const isPausing = transient === 'pausing'
               const isCancellingHeal = transient === 'cancelling-heal'
               const rowError = errors[r.runId] ?? null
-              const displayStatus = deriveDisplayStatus(r.status, transient)
+              const view = deriveRunViewModel(r, transient)
+              const displayStatus = view.displayStatus
               if (isDeleting) {
                 // In-flight overlay: row is greyed out, inert, and the
                 // `DELETING` badge from the indicator pulses next to the
@@ -258,7 +259,7 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
                       <div className="flex items-center gap-1">
                         {compact ? (
                           <RunActionsKebab
-                            run={r}
+                            view={view}
                             displayStatus={displayStatus}
                             open={openMenuRunId === r.runId}
                             onOpenToggle={(e) => {
@@ -275,7 +276,7 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
                           />
                         ) : (
                           <>
-                            {canStop(r.status) && (
+                            {view.actions.stop.enabled && (
                               <ActionButton
                                 label={isStopping ? 'Stopping' : 'Stop'}
                                 icon={ICON_STOP}
@@ -287,7 +288,7 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
                                 }}
                               />
                             )}
-                            {canPauseHeal(r.status) && (
+                            {view.actions.pauseHeal.enabled && (
                               <ActionButton
                                 label={isPausing ? 'Pausing' : 'Pause'}
                                 icon={ICON_PAUSE}
@@ -299,7 +300,7 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
                                 }}
                               />
                             )}
-                            {canCancelHeal(r.status) && (
+                            {view.actions.cancelHeal.enabled && (
                               <ActionButton
                                 label={isCancellingHeal ? 'Cancelling' : 'Stop Heal'}
                                 icon={ICON_STOP}
@@ -323,15 +324,15 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
                             so the user understands the constraint instead
                             of wondering where the delete went. */}
                         <DeleteIconButton
-                          disabled={!canDelete(r.status) || isDeleting}
+                          disabled={!view.actions.delete.enabled || isDeleting}
                           disabledReason={
-                            !canDelete(r.status)
-                              ? 'Stop the run before deleting'
+                            !view.actions.delete.enabled
+                              ? view.actions.delete.reason ?? 'Stop the run before deleting'
                               : 'Deleting…'
                           }
                           onClick={(e) => {
                             e.stopPropagation()
-                            if (canDelete(r.status) && !isDeleting) setPendingDelete(r)
+                            if (view.actions.delete.enabled && !isDeleting) setPendingDelete(r)
                           }}
                         />
                       </div>
@@ -539,7 +540,7 @@ function RunPopoverButton({
 }
 
 function RunActionsKebab({
-  run,
+  view,
   displayStatus,
   open,
   onOpenToggle,
@@ -551,7 +552,7 @@ function RunActionsKebab({
   onPause,
   onCancelHeal,
 }: {
-  run: RunIndexEntry
+  view: RunViewModel
   displayStatus: import('../api/types').DisplayStatus
   open: boolean
   onOpenToggle: (e: React.MouseEvent) => void
@@ -563,9 +564,9 @@ function RunActionsKebab({
   onPause: () => void
   onCancelHeal: () => void
 }) {
-  const stopAvailable = canStop(run.status)
-  const pauseAvailable = canPauseHeal(run.status)
-  const cancelHealAvailable = canCancelHeal(run.status)
+  const stopAvailable = view.actions.stop.enabled
+  const pauseAvailable = view.actions.pauseHeal.enabled
+  const cancelHealAvailable = view.actions.cancelHeal.enabled
   // NOTE: Delete is intentionally NOT in this menu; it's rendered as a
   // dedicated icon button next to the status indicator at all viewport
   // widths. Keeping it out of the kebab is what guarantees the user sees
