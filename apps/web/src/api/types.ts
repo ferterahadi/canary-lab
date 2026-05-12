@@ -1,6 +1,29 @@
 // Type definitions for the canary-lab web UI. Mirrors the server-side return
 // shapes in apps/web-server/lib/{run-store,feature-loader,journal-store}.ts.
-// Duplicated rather than shared to keep the frontend tsconfig simple.
+// Run-state primitives are shared with the server so recovery behavior has one
+// semantic model; feature/journal/wizard shapes remain web-local API mirrors.
+import type {
+  DisplayStatus,
+  RunLifecycleEvent,
+  RunLifecycleSnapshot,
+  RunStatus,
+  ServiceStatus,
+} from '../../../../shared/run-state'
+export type {
+  DisplayStatus,
+  RunLifecycleAbortReason,
+  RunLifecycleEvent,
+  RunLifecyclePhase,
+  RunLifecycleRestartPlan,
+  RunLifecycleSeverity,
+  RunLifecycleSignal,
+  RunLifecycleSignalStatus,
+  RunLifecycleSnapshot,
+  RunLifecycleTargetedRerun,
+  RunStatus,
+  ServiceStatus,
+  TransientAction,
+} from '../../../../shared/run-state'
 
 export interface FeatureRepo {
   name: string
@@ -37,75 +60,6 @@ export interface FeatureSpecFile {
 
 export type FeatureTests = FeatureSpecFile[]
 
-export type RunStatus = 'running' | 'passed' | 'failed' | 'healing' | 'aborted'
-
-export type RunLifecyclePhase =
-  | 'starting-services'
-  | 'running-tests'
-  | 'pausing-for-heal'
-  | 'agent-healing'
-  | 'waiting-for-signal'
-  | 'applying-signal'
-  | 'restarting-services'
-  | 'rerunning-tests'
-  | 'completed'
-  | 'aborted'
-  | 'failed'
-  | 'passed'
-
-export type RunLifecycleSeverity = 'info' | 'success' | 'warning' | 'error'
-
-export interface RunLifecycleSignal {
-  kind: 'restart' | 'rerun' | 'heal'
-  status: 'accepted' | 'ignored'
-  reason?: string
-}
-
-export interface RunLifecycleRestartPlan {
-  restarted: string[]
-  kept: string[]
-  startedBecauseMissing?: string[]
-  noMatch?: boolean
-}
-
-export interface RunLifecycleTargetedRerun {
-  selected: number
-  total: number
-  mode: 'failed-and-pending' | 'failed-only' | 'full-suite' | 'none'
-  reason: string
-}
-
-export interface RunLifecycleAbortReason {
-  reason: string
-  service?: string
-}
-
-export interface RunLifecycleSnapshot {
-  phase: RunLifecyclePhase
-  headline: string
-  detail?: string
-  updatedAt: string
-  activeCycle?: number
-  lastSignal?: RunLifecycleSignal
-  restartPlan?: RunLifecycleRestartPlan
-  targetedRerun?: RunLifecycleTargetedRerun
-  abortReason?: RunLifecycleAbortReason
-}
-
-export interface RunLifecycleEvent extends RunLifecycleSnapshot {
-  id?: string
-  severity?: RunLifecycleSeverity
-}
-
-// Transient UI-only states layered over the persisted RunStatus while an
-// async action is in flight. Never written to the manifest — they exist
-// purely so the row's badge can reflect the user's last click ("ABORTING")
-// instead of the stale persisted value ("RUNNING") during the request
-// roundtrip. Resolves back to a RunStatus once the server responds.
-export type TransientAction = 'aborting' | 'deleting' | 'cancelling-heal' | 'pausing'
-
-export type DisplayStatus = RunStatus | TransientAction
-
 export interface RunIndexEntry {
   runId: string
   feature: string
@@ -113,8 +67,6 @@ export interface RunIndexEntry {
   status: RunStatus
   endedAt?: string
 }
-
-export type ServiceStatus = 'starting' | 'ready' | 'timeout' | 'stopped'
 
 export interface ServiceManifestEntry {
   name: string

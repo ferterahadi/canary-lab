@@ -89,6 +89,80 @@ describe('deriveRunViewModel', () => {
     expect(vm.actions.delete.enabled).toBe(true)
   })
 
+  it('renders the cns_fallback_chain Case C recovery shape from one lifecycle timeline', () => {
+    const vm = deriveRunViewModel({
+      ...detail({
+        feature: 'cns_fallback_chain',
+        status: 'aborted',
+        lifecycle: {
+          phase: 'aborted',
+          headline: 'Run aborted',
+          detail: 'Health failed: ngrok tunnel',
+          updatedAt: '2026-05-08T00:00:08.000Z',
+          abortReason: { reason: 'service-health-failed', service: 'ngrok tunnel' },
+          targetedRerun: {
+            selected: 18,
+            total: 21,
+            mode: 'failed-and-pending',
+            reason: 'Rerunning 18 not-yet-passed tests because the suite was paused after 2 passed and 1 failed.',
+          },
+        },
+      }),
+      lifecycleEvents: [
+        { phase: 'failed', headline: 'Playwright exited with code 1', updatedAt: '2026-05-08T00:00:01.000Z' },
+        { phase: 'pausing-for-heal', headline: 'Pause accepted', updatedAt: '2026-05-08T00:00:02.000Z' },
+        { phase: 'agent-healing', headline: 'Heal cycle 1 started', updatedAt: '2026-05-08T00:00:03.000Z' },
+        {
+          phase: 'applying-signal',
+          headline: 'Restart signal accepted',
+          updatedAt: '2026-05-08T00:00:04.000Z',
+          lastSignal: { kind: 'restart', status: 'accepted' },
+        },
+        {
+          phase: 'restarting-services',
+          headline: 'Restart plan ready',
+          updatedAt: '2026-05-08T00:00:05.000Z',
+          restartPlan: {
+            restarted: ['mighty-cns gateway stack'],
+            kept: ['ngrok tunnel'],
+            startedBecauseMissing: ['ngrok tunnel'],
+          },
+        },
+        {
+          phase: 'rerunning-tests',
+          headline: 'Targeted rerun selected',
+          updatedAt: '2026-05-08T00:00:06.000Z',
+          targetedRerun: {
+            selected: 18,
+            total: 21,
+            mode: 'failed-and-pending',
+            reason: 'Rerunning 18 not-yet-passed tests because the suite was paused after 2 passed and 1 failed.',
+          },
+        },
+        {
+          phase: 'aborted',
+          headline: 'Health failed: ngrok tunnel',
+          updatedAt: '2026-05-08T00:00:07.000Z',
+          abortReason: { reason: 'service-health-failed', service: 'ngrok tunnel' },
+        },
+      ],
+    })
+
+    expect(vm.headline).toBe('Run aborted')
+    expect(vm.primaryAlert?.message).toBe('Run aborted because ngrok tunnel failed health checks.')
+    expect(vm.actions.restartHeal.enabled).toBe(true)
+    expect(vm.recoveryTimeline.map((event) => event.headline)).toEqual([
+      'Playwright exited with code 1',
+      'Pause accepted',
+      'Heal cycle 1 started',
+      'Restart signal accepted',
+      'Restart plan ready',
+      'Targeted rerun selected',
+      'Health failed: ngrok tunnel',
+    ])
+    expect(vm.recoveryTimeline.find((event) => event.targetedRerun)?.targetedRerun?.selected).toBe(18)
+  })
+
   it.each([
     ['running', 'Running tests', 'info'],
     ['healing', 'Healing', 'info'],

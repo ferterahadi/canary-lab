@@ -8,6 +8,7 @@ import type {
   TransientAction,
 } from '../api/types'
 import { deriveDisplayStatus } from '../lib/run-actions'
+import { isActiveRunStatus } from '../../../../shared/run-state'
 import {
   errorMessage,
   frameToAction,
@@ -308,7 +309,7 @@ export function useRun(runId: string | null | undefined): UseRunResult {
     if (!detail) {
       void ctx.loadRunDetail(runId)
     }
-    if (status !== 'running' && status !== 'healing') return
+    if (!isActiveRunStatus(status)) return
     const timer = setInterval(() => {
       void ctx.loadRunDetail(runId)
     }, 1000)
@@ -352,7 +353,7 @@ export interface UseGlobalActiveRunResult {
 
 export function useGlobalActiveRun(): UseGlobalActiveRunResult {
   const { state } = useRunsContext()
-  const entry = state.runs.find((r) => r.status === 'running' || r.status === 'healing') ?? null
+  const entry = state.runs.find((r) => isActiveRunStatus(r.status)) ?? null
   const detail = entry ? (state.details[entry.runId] ?? null) : null
   return { runId: entry?.runId ?? null, entry, detail }
 }

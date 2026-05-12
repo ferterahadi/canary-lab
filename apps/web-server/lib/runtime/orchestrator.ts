@@ -4,6 +4,12 @@ import { randomUUID } from 'crypto'
 import { EventEmitter } from 'events'
 import type { FeatureConfig, HealthProbe, HttpProbe, TcpProbe } from '../../../../shared/launcher/types'
 import {
+  HealSignalGate,
+  createRunLifecycleEvent,
+  type HealSignal,
+  type HealSignalKind,
+} from '../../../../shared/run-state'
+import {
   enabledForEnv,
   isHealthy,
   isTcpListening,
@@ -296,10 +302,8 @@ export class RunOrchestrator extends EventEmitter {
   private readonly runnerLog?: RunnerLog
   private readonly stateSink: RunStateSink
   private readonly repoBranchSnapshots?: RepoBranchSnapshot[]
-  private lastDetectedSignal: { kind: 'restart' | 'rerun' | 'heal'; body: Record<string, unknown> } | null = null
-  private acceptingHealSignal = false
+  private readonly signalGate = new HealSignalGate()
   private healCycleHistory: Array<{ cycle: number; restarted: string[]; kept: string[] }> = []
-  private lastTargetedRerun: RunLifecycleTargetedRerun | undefined
 
   private status: RunManifest['status'] = 'running'
   private healCycles = 0
@@ -444,21 +448,10 @@ export class RunOrchestrator extends EventEmitter {
     headline: string,
     opts: LifecycleRecordOptions = {},
   ): void {
-    if (opts.targetedRerun) this.lastTargetedRerun = opts.targetedRerun
-    const targetedRerun = opts.targetedRerun ?? this.lastTargetedRerun
-    this.stateSink.recordLifecycleEvent(this.runId, {
+    this.stateSink.recordLifecycleEvent(this.runId, createRunLifecycleEvent(phase, headline, {
       id: randomUUID(),
-      phase,
-      headline,
-      ...(opts.detail ? { detail: opts.detail } : {}),
-      updatedAt: new Date().toISOString(),
-      ...(opts.severity ? { severity: opts.severity } : {}),
-      ...(opts.activeCycle !== undefined ? { activeCycle: opts.activeCycle } : {}),
-      ...(opts.lastSignal ? { lastSignal: opts.lastSignal } : {}),
-      ...(opts.restartPlan ? { restartPlan: opts.restartPlan } : {}),
-      ...(targetedRerun ? { targetedRerun } : {}),
-      ...(opts.abortReason ? { abortReason: opts.abortReason } : {}),
-    })
+      ...opts,
+    }))
   }
 
   private async ensureServicesRunning(): Promise<string[]> {
@@ -637,7 +630,7 @@ export class RunOrchestrator extends EventEmitter {
   private startSignalWatcher(): void {
     if (this.signalWatcher) return
     this.signalWatcher = setInterval(() => {
-      const tries: Array<{ kind: 'restart' | 'rerun' | 'heal'; file: string }> = [
+      const tries: Array<{ kind: HealSignalKind; file: string }> = [
         { kind: 'restart', file: this.paths.restartSignal },
         { kind: 'rerun', file: this.paths.rerunSignal },
         { kind: 'heal', file: this.paths.healSignal },
@@ -650,31 +643,24 @@ export class RunOrchestrator extends EventEmitter {
           if (raw) body = JSON.parse(raw) as Record<string, unknown>
         } catch { /* tolerate empty/non-JSON */ }
         try { fs.unlinkSync(t.file) } catch { /* race with caller is fine */ }
-        if (!this.acceptingHealSignal) {
+        const result = this.signalGate.observe(t.kind, body)
+        if (!result.accepted) {
           this.recordLifecycle('applying-signal', `${signalLabel(t.kind)} signal ignored`, {
-            detail: 'The runner was not waiting for a heal signal.',
+            detail: result.reason === 'signal-already-pending' && result.pendingKind
+              ? `A .${result.pendingKind} signal is already pending.`
+              : 'The runner was not waiting for a heal signal.',
             severity: 'warning',
-            lastSignal: { kind: t.kind, status: 'ignored', reason: 'not-waiting-for-signal' },
+            lastSignal: { kind: t.kind, status: 'ignored', reason: result.reason },
           })
-          this.emit('signal-ignored', { kind: t.kind, reason: 'not-waiting-for-signal' })
+          this.emit('signal-ignored', { kind: t.kind, reason: result.reason })
           continue
         }
-        if (this.lastDetectedSignal) {
-          this.recordLifecycle('applying-signal', `${signalLabel(t.kind)} signal ignored`, {
-            detail: `A .${this.lastDetectedSignal.kind} signal is already pending.`,
-            severity: 'warning',
-            lastSignal: { kind: t.kind, status: 'ignored', reason: 'signal-already-pending' },
-          })
-          this.emit('signal-ignored', { kind: t.kind, reason: 'signal-already-pending' })
-          continue
-        }
-        this.lastDetectedSignal = { kind: t.kind, body }
         this.recordLifecycle('applying-signal', `${signalLabel(t.kind)} signal accepted`, {
           detail: `The runner accepted .${t.kind} and will apply it before verification.`,
           lastSignal: { kind: t.kind, status: 'accepted' },
         })
-        this.emit('signal-detected', { kind: t.kind, body })
-        this.emit('signal-accepted', { kind: t.kind, body })
+        this.emit('signal-detected', result.signal)
+        this.emit('signal-accepted', result.signal)
       }
     }, this.healthPollIntervalMs)
   }
@@ -1133,20 +1119,21 @@ export class RunOrchestrator extends EventEmitter {
   //                   bound on a single cycle)
   //   - stopped:      orchestrator aborted (full stop)
   //   - cancelled:    user clicked Stop Heal mid-cycle
-  // The signal watcher populates `lastDetectedSignal`; we just poll that.
+  // The signal watcher feeds `signalGate`; this wait consumes one accepted
+  // signal and lets the gate audit duplicates or late files.
   async waitForHealSignal(
     hardTimeoutMs: number = this.healAgentTimeoutMs,
     idleTimeoutMs: number = this.healAgentIdleTimeoutMs,
     requiresAgent: boolean = true,
   ): Promise<{
-    signal: { kind: 'restart' | 'rerun' | 'heal'; body: Record<string, unknown> } | null
+    signal: HealSignal | null
     reason: 'signal' | 'pty-died' | 'idle-timeout' | 'hard-timeout' | 'stopped' | 'cancelled'
   }> {
     const startedAt = Date.now()
     // Seed the idle clock at the start of the wait so the first chunk-less
     // poll doesn't insta-trip the idle timeout.
     this.lastAgentDataAt = startedAt
-    this.acceptingHealSignal = true
+    this.signalGate.beginWaiting()
     this.recordLifecycle('waiting-for-signal', 'Waiting for heal signal', {
       detail: 'The runner is waiting for .restart, .rerun, or .heal.',
       activeCycle: this.healCycles,
@@ -1168,9 +1155,8 @@ export class RunOrchestrator extends EventEmitter {
       while (true) {
         if (this.stopped) return { signal: null, reason: 'stopped' }
         if (this.healCancelled) return { signal: null, reason: 'cancelled' }
-        if (this.lastDetectedSignal) {
-          const sig = this.lastDetectedSignal
-          this.lastDetectedSignal = null
+        const sig = this.signalGate.consume()
+        if (sig) {
           return { signal: sig, reason: 'signal' }
         }
         if (requiresAgent && !this.healAgentPty) {
@@ -1193,7 +1179,7 @@ export class RunOrchestrator extends EventEmitter {
         await yieldOnce(Math.max(1, this.healSignalPollMs))
       }
     } finally {
-      this.acceptingHealSignal = false
+      this.signalGate.endWaiting()
     }
   }
 
@@ -1586,7 +1572,7 @@ export class RunOrchestrator extends EventEmitter {
     // asked for manual mode. Transition to 'healing' and wait for the user
     // to fix the code by hand and write the signal file. Loops until tests
     // pass, the user cancels, or the signal-poll timeout (24h) is hit.
-    // Signal watcher (already running) populates `lastDetectedSignal` for
+    // Signal watcher (already running) feeds `signalGate` for
     // `waitForHealSignal` to consume.
     if (!this.autoHeal && this.manualHeal) {
       const MANUAL_TIMEOUT_MS = 24 * 60 * 60 * 1000

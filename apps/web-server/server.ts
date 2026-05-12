@@ -3,6 +3,7 @@ import fs from 'fs'
 import Fastify, { type FastifyInstance } from 'fastify'
 import websocketPlugin from '@fastify/websocket'
 import fastifyStatic from '@fastify/static'
+import { isActiveRunStatus, isRestartableRunStatus } from '../../shared/run-state'
 import { featuresRoutes } from './routes/features'
 import { featureConfigRoutes } from './routes/feature-config'
 import { projectConfigRoutes } from './routes/project-config'
@@ -121,7 +122,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
     featuresDir,
     isRepoActive: (featureName) => runStore
       .list({ feature: featureName })
-      .some((run) => run.status === 'running' || run.status === 'healing'),
+      .some((run) => isActiveRunStatus(run.status)),
   })
   await app.register(projectConfigRoutes, { projectRoot: opts.projectRoot })
   await app.register(journalRoutes, { logsDir, journalPath })
@@ -363,7 +364,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
       const detail = runStore.get(runId)
       if (!detail) return { ok: false, reason: 'run-not-found' as const }
       const manifest = detail.manifest
-      if (manifest.status !== 'failed' && manifest.status !== 'aborted') return { ok: false, reason: 'not-restartable' as const }
+      if (!isRestartableRunStatus(manifest.status)) return { ok: false, reason: 'not-restartable' as const }
       if (manifest.healMode === 'manual') return { ok: false, reason: 'manual-mode' as const }
 
       const features = loadFeatures(featuresDir)

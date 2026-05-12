@@ -1,33 +1,28 @@
-import type { DisplayStatus, RunStatus, TransientAction } from '../api/types'
+import {
+  deriveRunActionAvailability,
+  isTerminalRunStatus,
+  type RunStatus,
+} from '../../../../shared/run-state'
 
 export function canPauseHeal(status: RunStatus): boolean {
-  return status === 'running'
+  return deriveRunActionAvailability(status).pauseHeal.enabled
 }
 
 // Cancel-heal is only valid while the heal agent is actually running.
 export function canCancelHeal(status: RunStatus): boolean {
-  return status === 'healing'
+  return deriveRunActionAvailability(status).cancelHeal.enabled
 }
 
 export function canStop(status: RunStatus): boolean {
-  return status === 'running'
+  return deriveRunActionAvailability(status).stop.enabled
 }
 
 // Delete-from-history is only valid once the run has reached a terminal state.
 // While the orchestrator is still alive (running/healing), the run must finish
 // or be stopped/cancelled before deletion so the user can still audit logs.
 export function canDelete(status: RunStatus): boolean {
-  return status === 'passed' || status === 'failed' || status === 'aborted'
+  return isTerminalRunStatus(status)
 }
 
-// Layer a transient action onto a persisted status for display purposes.
-// Returns the transient label when an action is in flight, otherwise the
-// underlying RunStatus. Used by the RunsColumn row so the badge reads
-// "ABORTING" the moment the user clicks Stop, instead of staying "RUNNING"
-// until the server confirms the abort and the next poll lands.
-export function deriveDisplayStatus(
-  status: RunStatus,
-  transient: TransientAction | null,
-): DisplayStatus {
-  return transient ?? status
-}
+export { deriveDisplayStatus } from '../../../../shared/run-state'
+export type { DisplayStatus, TransientAction } from '../../../../shared/run-state'
