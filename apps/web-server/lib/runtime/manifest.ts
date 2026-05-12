@@ -37,6 +37,65 @@ export interface PlaywrightArtifactPolicy {
 
 export type RunStatus = 'running' | 'passed' | 'failed' | 'healing' | 'aborted'
 
+export type RunLifecyclePhase =
+  | 'starting-services'
+  | 'running-tests'
+  | 'pausing-for-heal'
+  | 'agent-healing'
+  | 'waiting-for-signal'
+  | 'applying-signal'
+  | 'restarting-services'
+  | 'rerunning-tests'
+  | 'completed'
+  | 'aborted'
+  | 'failed'
+  | 'passed'
+
+export type RunLifecycleSeverity = 'info' | 'success' | 'warning' | 'error'
+export type RunLifecycleSignalStatus = 'accepted' | 'ignored'
+
+export interface RunLifecycleSignal {
+  kind: 'restart' | 'rerun' | 'heal'
+  status: RunLifecycleSignalStatus
+  reason?: string
+}
+
+export interface RunLifecycleRestartPlan {
+  restarted: string[]
+  kept: string[]
+  startedBecauseMissing?: string[]
+  noMatch?: boolean
+}
+
+export interface RunLifecycleTargetedRerun {
+  selected: number
+  total: number
+  mode: 'failed-and-pending' | 'failed-only' | 'full-suite' | 'none'
+  reason: string
+}
+
+export interface RunLifecycleAbortReason {
+  reason: string
+  service?: string
+}
+
+export interface RunLifecycleSnapshot {
+  phase: RunLifecyclePhase
+  headline: string
+  detail?: string
+  updatedAt: string
+  activeCycle?: number
+  lastSignal?: RunLifecycleSignal
+  restartPlan?: RunLifecycleRestartPlan
+  targetedRerun?: RunLifecycleTargetedRerun
+  abortReason?: RunLifecycleAbortReason
+}
+
+export interface RunLifecycleEvent extends RunLifecycleSnapshot {
+  id?: string
+  severity?: RunLifecycleSeverity
+}
+
 // Mid-Run Heal: populated when Playwright was halted before completing the
 // suite — either by `--max-failures=<N>` (auto-fast-fail) or by an explicit
 // user-invoked Pause & Heal. Heal-index rendering uses this so the agent
@@ -80,6 +139,9 @@ export interface RunManifest {
    *  pointing the user at the signal paths above. Only set during the heal
    *  phase of a manual run; cleared when the run leaves the heal state. */
   healMode?: 'auto' | 'manual'
+  /** Latest structured lifecycle state. This is the UI source of truth for
+   *  recovery flow narration; runner.log remains the human-readable audit. */
+  lifecycle?: RunLifecycleSnapshot
 }
 
 function atomicWrite(file: string, body: string): void {

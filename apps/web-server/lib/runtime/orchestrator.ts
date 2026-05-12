@@ -16,6 +16,12 @@ import {
   type RunPaths,
 } from './run-paths'
 import {
+  type RunLifecycleAbortReason,
+  type RunLifecycleEvent,
+  type RunLifecyclePhase,
+  type RunLifecycleRestartPlan,
+  type RunLifecycleSeverity,
+  type RunLifecycleTargetedRerun,
   type RepoBranchSnapshot,
   type RunManifest,
   type ServiceManifestEntry,
@@ -161,9 +167,27 @@ export type OrchestratorEventMap = {
     kind: 'restart' | 'rerun' | 'heal'
     body: Record<string, unknown>
   }
+  'signal-accepted': {
+    kind: 'restart' | 'rerun' | 'heal'
+    body: Record<string, unknown>
+  }
+  'signal-ignored': {
+    kind: 'restart' | 'rerun' | 'heal'
+    reason: string
+  }
   'run-status': { status: RunManifest['status'] }
   'run-complete': { status: RunManifest['status'] }
   'paused-by-user': { failureCount: number }
+}
+
+interface LifecycleRecordOptions {
+  detail?: string
+  severity?: RunLifecycleSeverity
+  activeCycle?: number
+  lastSignal?: RunLifecycleEvent['lastSignal']
+  restartPlan?: RunLifecycleRestartPlan
+  targetedRerun?: RunLifecycleTargetedRerun
+  abortReason?: RunLifecycleAbortReason
 }
 
 export type AutoHealAgent = 'claude' | 'codex'
@@ -273,7 +297,9 @@ export class RunOrchestrator extends EventEmitter {
   private readonly stateSink: RunStateSink
   private readonly repoBranchSnapshots?: RepoBranchSnapshot[]
   private lastDetectedSignal: { kind: 'restart' | 'rerun' | 'heal'; body: Record<string, unknown> } | null = null
+  private acceptingHealSignal = false
   private healCycleHistory: Array<{ cycle: number; restarted: string[]; kept: string[] }> = []
+  private lastTargetedRerun: RunLifecycleTargetedRerun | undefined
 
   private status: RunManifest['status'] = 'running'
   private healCycles = 0
@@ -319,6 +345,7 @@ export class RunOrchestrator extends EventEmitter {
   // racing toward another Playwright rerun.
   private healCancelled = false
   private stoppedEarlyReason: StoppedEarlyReason | undefined
+  private pendingAbortReason: RunLifecycleAbortReason | undefined
 
   constructor(opts: OrchestratorOptions) {
     super()
@@ -366,6 +393,8 @@ export class RunOrchestrator extends EventEmitter {
       'agent-exit',
       'heal-cycle-started',
       'signal-detected',
+      'signal-accepted',
+      'signal-ignored',
       'run-status',
       'run-complete',
     ]
@@ -403,17 +432,43 @@ export class RunOrchestrator extends EventEmitter {
     fs.mkdirSync(this.paths.signalsDir, { recursive: true })
 
     this.writeInitialManifest(serviceStatus)
+    this.recordLifecycle('starting-services', 'Starting services', {
+      detail: startingServicesDetail(this.services.length),
+    })
     this.startSignalWatcher()
     this.startHeartbeat()
   }
 
-  private async ensureServicesRunning(): Promise<void> {
+  private recordLifecycle(
+    phase: RunLifecyclePhase,
+    headline: string,
+    opts: LifecycleRecordOptions = {},
+  ): void {
+    if (opts.targetedRerun) this.lastTargetedRerun = opts.targetedRerun
+    const targetedRerun = opts.targetedRerun ?? this.lastTargetedRerun
+    this.stateSink.recordLifecycleEvent(this.runId, {
+      id: randomUUID(),
+      phase,
+      headline,
+      ...(opts.detail ? { detail: opts.detail } : {}),
+      updatedAt: new Date().toISOString(),
+      ...(opts.severity ? { severity: opts.severity } : {}),
+      ...(opts.activeCycle !== undefined ? { activeCycle: opts.activeCycle } : {}),
+      ...(opts.lastSignal ? { lastSignal: opts.lastSignal } : {}),
+      ...(opts.restartPlan ? { restartPlan: opts.restartPlan } : {}),
+      ...(targetedRerun ? { targetedRerun } : {}),
+      ...(opts.abortReason ? { abortReason: opts.abortReason } : {}),
+    })
+  }
+
+  private async ensureServicesRunning(): Promise<string[]> {
     const toStart = this.services.filter((svc) => !this.servicePtys.has(svc.name))
     for (const svc of toStart) {
       this.stateSink.setServiceStatus(this.runId, svc.safeName, 'starting')
       this.spawnService(svc)
     }
     if (this.services.length > 0) await this.waitForHealth()
+    return toStart.map((svc) => svc.safeName)
   }
 
   private writeInitialManifest(serviceStatus: ServiceManifestEntry['status'] = 'starting'): void {
@@ -450,6 +505,12 @@ export class RunOrchestrator extends EventEmitter {
         restart: this.paths.restartSignal,
       },
       healMode: this.autoHeal ? 'auto' : this.manualHeal ? 'manual' : undefined,
+      lifecycle: {
+        phase: 'starting-services',
+        headline: 'Starting services',
+        detail: startingServicesDetail(services.length),
+        updatedAt: new Date().toISOString(),
+      },
       heartbeatAt: new Date().toISOString(),
     }
     this.stateSink.bootstrap(manifest)
@@ -548,6 +609,10 @@ export class RunOrchestrator extends EventEmitter {
       if (ready) {
         this.stateSink.setServiceStatus(this.runId, svc.safeName, 'ready')
         this.emit('health-check', { service: svc, healthy: true, transport })
+        this.recordLifecycle(this.status === 'healing' ? 'agent-healing' : 'starting-services', `Health passed: ${svc.name}`, {
+          detail: `${transport.toUpperCase()} readiness probe passed.`,
+          severity: 'success',
+        })
         return
       }
       await this.delay(this.healthPollIntervalMs)
@@ -557,6 +622,12 @@ export class RunOrchestrator extends EventEmitter {
     const detail = transport === 'http'
       ? `url=${(probe as { http: HttpProbe }).http.url}`
       : `port=${(probe as { tcp: TcpProbe }).tcp.port}`
+    this.pendingAbortReason = { reason: 'service-health-failed', service: svc.name }
+    this.recordLifecycle('aborted', `Health failed: ${svc.name}`, {
+      detail: `Timed out waiting for ${transport.toUpperCase()} readiness (${detail}).`,
+      severity: 'error',
+      abortReason: this.pendingAbortReason,
+    })
     throw new Error(`Health check timed out for ${svc.name} (${transport}, ${detail})`)
   }
 
@@ -579,8 +650,31 @@ export class RunOrchestrator extends EventEmitter {
           if (raw) body = JSON.parse(raw) as Record<string, unknown>
         } catch { /* tolerate empty/non-JSON */ }
         try { fs.unlinkSync(t.file) } catch { /* race with caller is fine */ }
+        if (!this.acceptingHealSignal) {
+          this.recordLifecycle('applying-signal', `${signalLabel(t.kind)} signal ignored`, {
+            detail: 'The runner was not waiting for a heal signal.',
+            severity: 'warning',
+            lastSignal: { kind: t.kind, status: 'ignored', reason: 'not-waiting-for-signal' },
+          })
+          this.emit('signal-ignored', { kind: t.kind, reason: 'not-waiting-for-signal' })
+          continue
+        }
+        if (this.lastDetectedSignal) {
+          this.recordLifecycle('applying-signal', `${signalLabel(t.kind)} signal ignored`, {
+            detail: `A .${this.lastDetectedSignal.kind} signal is already pending.`,
+            severity: 'warning',
+            lastSignal: { kind: t.kind, status: 'ignored', reason: 'signal-already-pending' },
+          })
+          this.emit('signal-ignored', { kind: t.kind, reason: 'signal-already-pending' })
+          continue
+        }
         this.lastDetectedSignal = { kind: t.kind, body }
+        this.recordLifecycle('applying-signal', `${signalLabel(t.kind)} signal accepted`, {
+          detail: `The runner accepted .${t.kind} and will apply it before verification.`,
+          lastSignal: { kind: t.kind, status: 'accepted' },
+        })
         this.emit('signal-detected', { kind: t.kind, body })
+        this.emit('signal-accepted', { kind: t.kind, body })
       }
     }, this.healthPollIntervalMs)
   }
@@ -592,12 +686,25 @@ export class RunOrchestrator extends EventEmitter {
   // and skip the restart entirely (rather than restarting everything) — the
   // heal-agent's claim is wrong but losing warm services to that mistake is
   // costlier than the rerun seeing the same failure.
-  async restart(filesChanged?: readonly string[]): Promise<{ restarted: string[]; kept: string[] }> {
+  async restart(filesChanged?: readonly string[]): Promise<{ restarted: string[]; kept: string[]; startedBecauseMissing: string[] }> {
     const plan = planRestart(filesChanged ?? [], this.services)
+    const startedBecauseMissing = plan.toKeep.filter((safeName) => {
+      const svc = this.services.find((candidate) => candidate.safeName === safeName)
+      return Boolean(svc && !this.servicePtys.has(svc.name))
+    })
     this.emit('restart-planned', {
       toRestart: plan.toRestart,
       toKeep: plan.toKeep,
       noMatch: plan.noMatch,
+    })
+    this.recordLifecycle('restarting-services', 'Restart plan ready', {
+      detail: restartPlanDetail(plan.toRestart, plan.toKeep, startedBecauseMissing),
+      restartPlan: {
+        restarted: plan.toRestart,
+        kept: plan.toKeep,
+        startedBecauseMissing,
+        noMatch: plan.noMatch,
+      },
     })
 
     if (plan.noMatch) {
@@ -605,7 +712,7 @@ export class RunOrchestrator extends EventEmitter {
       for (const svc of this.services) {
         this.emit('service-restart-skipped', { service: svc, reason: 'no-files-changed-here' })
       }
-      return { restarted: [], kept: plan.toKeep }
+      return { restarted: [], kept: plan.toKeep, startedBecauseMissing }
     }
 
     const filesProvided = (filesChanged ?? []).length > 0
@@ -634,7 +741,7 @@ export class RunOrchestrator extends EventEmitter {
       this.spawnService(svc)
     }
     if (targets.length > 0) await this.waitForHealth()
-    return { restarted: plan.toRestart, kept: plan.toKeep }
+    return { restarted: plan.toRestart, kept: plan.toKeep, startedBecauseMissing }
   }
 
   // Re-run is a no-op at the orchestrator level beyond truncating logs — the
@@ -652,7 +759,22 @@ export class RunOrchestrator extends EventEmitter {
   // inject a fake. Returns the exit code after the pty exits.
   async runPlaywright(rerunTargets?: readonly string[]): Promise<number> {
     const inv = this.playwrightSpawner({ feature: this.feature, paths: this.paths, rerunTargets })
+    const targetCount = rerunTargets?.length ?? 0
+    const targetedRerun = targetCount > 0
+      ? {
+          selected: targetCount,
+          total: targetCount,
+          mode: 'failed-and-pending',
+          reason: 'The runner selected tests that had not passed yet.',
+        } satisfies RunLifecycleTargetedRerun
+      : undefined
     this.emit('playwright-started', { command: inv.command })
+    this.recordLifecycle(targetedRerun ? 'rerunning-tests' : 'running-tests', targetedRerun ? 'Rerunning Playwright tests' : 'Running Playwright tests', {
+      detail: targetedRerun
+        ? `Running ${targetCount} selected test target${targetCount === 1 ? '' : 's'}.`
+        : 'Running the configured Playwright suite.',
+      ...(targetedRerun ? { targetedRerun } : {}),
+    })
     const pty = this.ptyFactory({
       command: inv.command,
       cwd: inv.cwd,
@@ -674,6 +796,10 @@ export class RunOrchestrator extends EventEmitter {
       pty.onExit(({ exitCode, signal }) => {
         this.playwrightPty = null
         this.emit('playwright-exit', { exitCode })
+        this.recordLifecycle(exitCode === 0 ? 'completed' : 'failed', `Playwright exited with code ${exitCode}`, {
+          detail: signal ? `Process signal: ${signal}` : undefined,
+          severity: exitCode === 0 ? 'success' : 'warning',
+        })
         const waiter = this.playwrightExitWaiter
         this.playwrightExitWaiter = null
         if (waiter) waiter({ exitCode, signal })
@@ -685,10 +811,33 @@ export class RunOrchestrator extends EventEmitter {
   private rerunTargetsForSummary(summary: SummaryShape): string[] | undefined {
     const computed = computeNonPassedTargets(this.feature.featureDir, summary)
     if (computed.kind === 'targeted') {
+      const passed = countPassed(summary)
+      const failed = Array.isArray(summary.failed) ? summary.failed.length : 0
+      const reason = `Rerunning ${computed.locations.length} not-yet-passed tests because ${passed} passed and ${failed} failed before healing.`
       this.runnerLog?.info(`Targeted re-run: ${computed.locations.length} failed/pending of ${computed.total} total tests`)
+      this.recordLifecycle('rerunning-tests', 'Targeted rerun selected', {
+        detail: reason,
+        targetedRerun: {
+          selected: computed.locations.length,
+          total: computed.total,
+          mode: 'failed-and-pending',
+          reason,
+        },
+      })
       return computed.locations
     }
-    if (computed.kind === 'no-passed-yet') return undefined
+    if (computed.kind === 'no-passed-yet') {
+      this.recordLifecycle('rerunning-tests', 'Full rerun selected', {
+        detail: 'No tests had passed yet, so a targeted rerun would be equivalent to the full suite.',
+        targetedRerun: {
+          selected: computed.total,
+          total: computed.total,
+          mode: 'full-suite',
+          reason: 'No tests had passed yet.',
+        },
+      })
+      return undefined
+    }
     if (computed.kind === 'all-passed') return undefined
     if (computed.kind === 'extraction-failed') {
       // Fall back to legacy failed-only targeting if we couldn't enumerate the
@@ -699,6 +848,16 @@ export class RunOrchestrator extends EventEmitter {
       if (locations.length > 0) return locations
       const msg = 'Post-heal rerun has failed tests without usable file:line locations; running the full Playwright suite.'
       this.runnerLog?.warn(msg)
+      this.recordLifecycle('rerunning-tests', 'Full rerun selected', {
+        detail: msg,
+        severity: 'warning',
+        targetedRerun: {
+          selected: computedTotal(summary),
+          total: computedTotal(summary),
+          mode: 'full-suite',
+          reason: msg,
+        },
+      })
       this.emit('playwright-output', { chunk: `\n[warning] ${msg}\n` })
       return undefined
     }
@@ -759,6 +918,10 @@ export class RunOrchestrator extends EventEmitter {
     // the impending Playwright exit as a heal trigger regardless of whether
     // Playwright exits cleanly (code 0) or via signal.
     this.markStoppedEarly('user-pause', failed.length, total)
+    this.recordLifecycle('pausing-for-heal', 'Pause accepted', {
+      detail: `Stopping Playwright after ${failed.length} failure${failed.length === 1 ? '' : 's'} so healing can start.`,
+      severity: 'warning',
+    })
     this.emit('paused-by-user', { failureCount: failed.length })
 
     const pty = this.playwrightPty
@@ -974,6 +1137,7 @@ export class RunOrchestrator extends EventEmitter {
   async waitForHealSignal(
     hardTimeoutMs: number = this.healAgentTimeoutMs,
     idleTimeoutMs: number = this.healAgentIdleTimeoutMs,
+    requiresAgent: boolean = true,
   ): Promise<{
     signal: { kind: 'restart' | 'rerun' | 'heal'; body: Record<string, unknown> } | null
     reason: 'signal' | 'pty-died' | 'idle-timeout' | 'hard-timeout' | 'stopped' | 'cancelled'
@@ -982,6 +1146,11 @@ export class RunOrchestrator extends EventEmitter {
     // Seed the idle clock at the start of the wait so the first chunk-less
     // poll doesn't insta-trip the idle timeout.
     this.lastAgentDataAt = startedAt
+    this.acceptingHealSignal = true
+    this.recordLifecycle('waiting-for-signal', 'Waiting for heal signal', {
+      detail: 'The runner is waiting for .restart, .rerun, or .heal.',
+      activeCycle: this.healCycles,
+    })
     const hardDeadline = startedAt + hardTimeoutMs
     // Always yield to the macrotask queue here — this loop runs concurrently
     // with the signal-watcher setInterval, and a microtask-only delay would
@@ -995,32 +1164,36 @@ export class RunOrchestrator extends EventEmitter {
     // that write-then-exit. 1s is plenty — the watcher polls at
     // `healSignalPollMs` (≤1s in production).
     let postExitDeadline: number | null = null
-    while (true) {
-      if (this.stopped) return { signal: null, reason: 'stopped' }
-      if (this.healCancelled) return { signal: null, reason: 'cancelled' }
-      if (this.lastDetectedSignal) {
-        const sig = this.lastDetectedSignal
-        this.lastDetectedSignal = null
-        return { signal: sig, reason: 'signal' }
-      }
-      if (!this.healAgentPty) {
-        // Pty is dead: the `pty-died` grace owns the exit. Don't let the
-        // hard/idle timeouts steal it — they describe a still-alive REPL,
-        // which we no longer have.
-        if (postExitDeadline === null) {
-          postExitDeadline = Date.now() + 1000
-        } else if (Date.now() >= postExitDeadline) {
-          return { signal: null, reason: 'pty-died' }
+    try {
+      while (true) {
+        if (this.stopped) return { signal: null, reason: 'stopped' }
+        if (this.healCancelled) return { signal: null, reason: 'cancelled' }
+        if (this.lastDetectedSignal) {
+          const sig = this.lastDetectedSignal
+          this.lastDetectedSignal = null
+          return { signal: sig, reason: 'signal' }
+        }
+        if (requiresAgent && !this.healAgentPty) {
+          // Pty is dead: the `pty-died` grace owns the exit. Don't let the
+          // hard/idle timeouts steal it — they describe a still-alive REPL,
+          // which we no longer have.
+          if (postExitDeadline === null) {
+            postExitDeadline = Date.now() + 1000
+          } else if (Date.now() >= postExitDeadline) {
+            return { signal: null, reason: 'pty-died' }
+          }
+          await yieldOnce(Math.max(1, this.healSignalPollMs))
+          continue
+        }
+        const now = Date.now()
+        if (now >= hardDeadline) return { signal: null, reason: 'hard-timeout' }
+        if (now - this.lastAgentDataAt >= idleTimeoutMs) {
+          return { signal: null, reason: 'idle-timeout' }
         }
         await yieldOnce(Math.max(1, this.healSignalPollMs))
-        continue
       }
-      const now = Date.now()
-      if (now >= hardDeadline) return { signal: null, reason: 'hard-timeout' }
-      if (now - this.lastAgentDataAt >= idleTimeoutMs) {
-        return { signal: null, reason: 'idle-timeout' }
-      }
-      await yieldOnce(Math.max(1, this.healSignalPollMs))
+    } finally {
+      this.acceptingHealSignal = false
     }
   }
 
@@ -1421,6 +1594,10 @@ export class RunOrchestrator extends EventEmitter {
         this.setStatus('healing')
         this.noteHealCycle()
         this.emit('agent-started', { cycle: this.healCycles, command: '<manual>' })
+        this.recordLifecycle('agent-healing', `Manual heal cycle ${this.healCycles} started`, {
+          detail: 'Waiting for a manual agent or user to write a per-run signal file.',
+          activeCycle: this.healCycles,
+        })
         // Same snapshot/diff pattern as auto-heal: capture working-tree state
         // before the user starts editing, then diff after the signal arrives
         // so the journal records only what the user changed during this turn.
@@ -1428,7 +1605,7 @@ export class RunOrchestrator extends EventEmitter {
         // Manual heal: no live REPL emits output, so the idle timeout would
         // otherwise fire after 3 min. Set the idle window equal to the hard
         // ceiling so it can't dominate the manual flow.
-        const { signal } = await this.waitForHealSignal(MANUAL_TIMEOUT_MS, MANUAL_TIMEOUT_MS)
+        const { signal } = await this.waitForHealSignal(MANUAL_TIMEOUT_MS, MANUAL_TIMEOUT_MS, false)
         this.emit('agent-exit', { exitCode: 0 })
         if (this.healCancelled || this.stopped) {
           finalStatus = 'failed'
@@ -1465,6 +1642,13 @@ export class RunOrchestrator extends EventEmitter {
           await this.rerun()
         }
         if (this.stopped) return this.status
+        const startedBecauseMissing = await this.ensureServicesRunning()
+        if (startedBecauseMissing.length > 0) {
+          this.recordLifecycle('restarting-services', 'Started missing services', {
+            detail: `Started ${startedBecauseMissing.join(', ')} before rerun.`,
+            restartPlan: { restarted: [], kept: [], startedBecauseMissing },
+          })
+        }
         exitCode = await this.runPlaywright(rerunTargets)
         // Manual-heal mirror of the auto-heal abort guard: the top of the
         // loop already checks `stopped`, but the killed Playwright pty's
@@ -1539,6 +1723,10 @@ export class RunOrchestrator extends EventEmitter {
         this.emit('heal-cycle-started', { cycle: cycleNum, failureSignature: signature })
         this.setStatus('healing')
         this.noteHealCycle()
+        this.recordLifecycle('agent-healing', `Heal cycle ${cycleNum} started`, {
+          detail: signature ? `Failures: ${signature}` : 'No failure signature was available.',
+          activeCycle: cycleNum,
+        })
 
         // Snapshot every git-tracked feature repo just before the agent runs.
         // After the signal arrives, the diff against this snapshot is the
@@ -1626,17 +1814,29 @@ export class RunOrchestrator extends EventEmitter {
 
         const action = heal.actionForSignal(effectiveSignal.kind === 'heal' ? 'rerun' : effectiveSignal.kind)
         if (action.kind === 'restart-and-rerun') {
-          const { restarted, kept } = await this.restart(filesChanged)
+          const { restarted, kept, startedBecauseMissing } = await this.restart(filesChanged)
           if (this.stopped) return this.status
           this.healCycleHistory.push({ cycle: cycleNum, restarted, kept })
           this.stateSink.patchManifest(this.runId, {
             healCycleHistory: this.healCycleHistory,
           })
+          if (startedBecauseMissing.length > 0) {
+            this.recordLifecycle('restarting-services', 'Starting missing kept services', {
+              detail: `Starting ${startedBecauseMissing.join(', ')} because this heal restart is running in a fresh orchestrator process.`,
+              restartPlan: { restarted, kept, startedBecauseMissing },
+            })
+          }
         } else {
           await this.rerun()
         }
         if (this.stopped) return this.status
-        await this.ensureServicesRunning()
+        const startedBecauseMissing = await this.ensureServicesRunning()
+        if (startedBecauseMissing.length > 0) {
+          this.recordLifecycle('restarting-services', 'Started missing services', {
+            detail: `Started ${startedBecauseMissing.join(', ')} before rerun.`,
+            restartPlan: { restarted: [], kept: [], startedBecauseMissing },
+          })
+        }
 
         const exitCode = await this.runPlaywright(rerunTargets)
         if (this.stopped) return this.status
@@ -1693,6 +1893,11 @@ export class RunOrchestrator extends EventEmitter {
     this.status = status
     this.emit('run-status', { status })
     this.stateSink.setStatus(this.runId, status, this.healCycles)
+    if (status === 'passed' || status === 'failed') {
+      this.recordLifecycle(status, status === 'passed' ? 'Run passed' : 'Run failed', {
+        severity: status === 'passed' ? 'success' : 'error',
+      })
+    }
   }
 
   noteHealCycle(): void {
@@ -1735,6 +1940,10 @@ export class RunOrchestrator extends EventEmitter {
     // only writer at this point; no other path can race because
     // `this.stopped = true` already gates `setStatus`.
     this.stateSink.finalize(this.runId, finalStatus, endedAt, this.healCycles)
+    this.recordLifecycle(finalLifecyclePhase(finalStatus), finalStatus === 'aborted' ? 'Run aborted' : finalStatus === 'passed' ? 'Run passed' : 'Run failed', {
+      severity: finalStatus === 'passed' ? 'success' : finalStatus === 'aborted' ? 'warning' : 'error',
+      ...(finalStatus === 'aborted' ? { abortReason: this.pendingAbortReason ?? { reason: 'run-stopped' } } : {}),
+    })
     this.emit('run-complete', { status: finalStatus })
   }
 }
@@ -1750,6 +1959,35 @@ interface SummaryShape {
 
 export function countPassed(summary: SummaryShape): number {
   return typeof summary.passed === 'number' ? summary.passed : 0
+}
+
+function computedTotal(summary: SummaryShape): number {
+  return typeof summary.total === 'number' ? summary.total : 0
+}
+
+function signalLabel(kind: 'restart' | 'rerun' | 'heal'): string {
+  return kind.charAt(0).toUpperCase() + kind.slice(1)
+}
+
+function startingServicesDetail(serviceCount: number): string {
+  return serviceCount === 0
+    ? 'No services are configured for this feature.'
+    : `Starting ${serviceCount} service${serviceCount === 1 ? '' : 's'}.`
+}
+
+function restartPlanDetail(restarted: string[], kept: string[], startedBecauseMissing: string[]): string {
+  const parts: string[] = []
+  if (restarted.length > 0) parts.push(`Restarting ${restarted.join(', ')}.`)
+  if (kept.length > 0) parts.push(`Keeping warm ${kept.join(', ')}.`)
+  if (startedBecauseMissing.length > 0) parts.push(`Will start missing kept service${startedBecauseMissing.length === 1 ? '' : 's'} ${startedBecauseMissing.join(', ')} before rerun.`)
+  return parts.join(' ') || 'No service restart is required.'
+}
+
+function finalLifecyclePhase(status: RunManifest['status']): RunLifecyclePhase {
+  if (status === 'passed') return 'passed'
+  if (status === 'aborted') return 'aborted'
+  if (status === 'failed') return 'failed'
+  return 'completed'
 }
 
 // Read just the `stoppedEarly.reason` field from a manifest on disk. Returns

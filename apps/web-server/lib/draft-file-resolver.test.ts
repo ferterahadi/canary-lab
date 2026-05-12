@@ -62,6 +62,12 @@ describe('resolveDraftFile', () => {
     if (!r.ok) expect(r.reason).toBe('not-found')
   })
 
+  it('handles a logsDir that already ends in a path separator', () => {
+    const r = resolveDraftFile(logsDir + path.sep, DRAFT_ID, 'feature.config.cjs')
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.absolute.endsWith('feature.config.cjs')).toBe(true)
+  })
+
   it('rejects directory path (not a file)', () => {
     const r = resolveDraftFile(logsDir, DRAFT_ID, 'tests')
     expect(r.ok).toBe(false)

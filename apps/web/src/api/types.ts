@@ -39,6 +39,64 @@ export type FeatureTests = FeatureSpecFile[]
 
 export type RunStatus = 'running' | 'passed' | 'failed' | 'healing' | 'aborted'
 
+export type RunLifecyclePhase =
+  | 'starting-services'
+  | 'running-tests'
+  | 'pausing-for-heal'
+  | 'agent-healing'
+  | 'waiting-for-signal'
+  | 'applying-signal'
+  | 'restarting-services'
+  | 'rerunning-tests'
+  | 'completed'
+  | 'aborted'
+  | 'failed'
+  | 'passed'
+
+export type RunLifecycleSeverity = 'info' | 'success' | 'warning' | 'error'
+
+export interface RunLifecycleSignal {
+  kind: 'restart' | 'rerun' | 'heal'
+  status: 'accepted' | 'ignored'
+  reason?: string
+}
+
+export interface RunLifecycleRestartPlan {
+  restarted: string[]
+  kept: string[]
+  startedBecauseMissing?: string[]
+  noMatch?: boolean
+}
+
+export interface RunLifecycleTargetedRerun {
+  selected: number
+  total: number
+  mode: 'failed-and-pending' | 'failed-only' | 'full-suite' | 'none'
+  reason: string
+}
+
+export interface RunLifecycleAbortReason {
+  reason: string
+  service?: string
+}
+
+export interface RunLifecycleSnapshot {
+  phase: RunLifecyclePhase
+  headline: string
+  detail?: string
+  updatedAt: string
+  activeCycle?: number
+  lastSignal?: RunLifecycleSignal
+  restartPlan?: RunLifecycleRestartPlan
+  targetedRerun?: RunLifecycleTargetedRerun
+  abortReason?: RunLifecycleAbortReason
+}
+
+export interface RunLifecycleEvent extends RunLifecycleSnapshot {
+  id?: string
+  severity?: RunLifecycleSeverity
+}
+
 // Transient UI-only states layered over the persisted RunStatus while an
 // async action is in flight. Never written to the manifest — they exist
 // purely so the row's badge can reflect the user's last click ("ABORTING")
@@ -101,6 +159,7 @@ export interface RunManifest {
   playwrightArtifacts?: PlaywrightArtifactPolicy
   signalPaths?: { rerun: string; restart: string }
   healMode?: 'auto' | 'manual'
+  lifecycle?: RunLifecycleSnapshot
 }
 
 export interface RunSummaryFailedEntry {
@@ -179,6 +238,7 @@ export interface RunDetail {
   summary?: RunSummary
   playbackEvents?: PlaywrightPlaybackEvent[]
   playwrightArtifacts?: PlaywrightArtifactGroup[]
+  lifecycleEvents?: RunLifecycleEvent[]
 }
 
 export interface SkillSummary {
