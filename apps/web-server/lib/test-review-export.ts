@@ -2014,3 +2014,30 @@ function formatMs(ms: number): string {
   if (ms < 1000) return `${ms}ms`
   return `${(ms / 1000).toFixed(1)}s`
 }
+
+export const __testReviewExportInternals = {
+  actionFromIdentifier,
+  audienceFlowDetail,
+  audienceTitle,
+  classifyAssertion,
+  confidenceForAssertions,
+  evaluationTextSlots,
+  formatMs,
+  normalizeEvaluationRewrite,
+  applyEvaluationTextSlotRewrite,
+  parseEvaluationRewrite,
+  parseEvaluationTextSlotRewrite,
+  previewAgentOutput,
+  qualityLabel,
+  qualitySummary,
+  qualitySummaryForAudience,
+  rationaleForAudience,
+  renderPromptTemplate,
+  readableAction,
+  readableActionName,
+  readableCreatedObject,
+  readableHelperName,
+  resultColor,
+  statusClass,
+  wrapSvgText,
+}

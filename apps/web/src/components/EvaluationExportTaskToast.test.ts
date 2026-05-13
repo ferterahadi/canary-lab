@@ -44,4 +44,34 @@ describe('evaluationOutputPanel', () => {
     expect(panel.text).toContain('The agent process has started with haiku')
     expect(panel.text).toContain('[agent:claude] starting localized rewrite (model: haiku)')
   })
+
+  it('normalizes raw agent JSON output into a fenced json block', () => {
+    const panel = evaluationOutputPanel(
+      { mode: 'localized' },
+      [
+        '[evaluation] generating localized wording',
+        '[agent:codex] starting localized rewrite (model: gpt-5.4-mini)',
+        '{"slots":[{"id":"summary","text":"Readable summary"}]}',
+        '[agent:codex] localized rewrite completed',
+      ].join('\n'),
+    )
+
+    expect(panel.text).toContain('```json')
+    expect(panel.text).toContain('"slots": [')
+    expect(panel.text).toContain('[agent:codex] localized rewrite completed')
+  })
+
+  it('keeps already fenced claude json output unchanged', () => {
+    const log = [
+      '[agent:claude] starting localized rewrite (model: haiku)',
+      '```json',
+      '{"slots":[]}',
+      '```',
+    ].join('\n')
+
+    const panel = evaluationOutputPanel({ mode: 'localized' }, log)
+
+    expect(panel.text.match(/```json/g)).toHaveLength(1)
+    expect(panel.text).toContain('{"slots":[]}')
+  })
 })

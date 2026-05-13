@@ -650,6 +650,85 @@ test('records checkout', async ({ page }) => {
     }
   })
 
+  it('rejects evaluation export task requests for missing, active, or invalid-mode runs', async () => {
+    writeManifestForRun('r-active-task', 'checkout', 'running')
+    const { app } = await build()
+
+    expect((await app.inject({
+      method: 'POST',
+      url: '/api/runs/missing/evaluation-export',
+      payload: { mode: 'raw' },
+    })).statusCode).toBe(404)
+    expect((await app.inject({
+      method: 'POST',
+      url: '/api/runs/r-active-task/evaluation-export',
+      payload: { mode: 'raw' },
+    })).statusCode).toBe(409)
+    const invalid = await app.inject({
+      method: 'POST',
+      url: '/api/runs/r-active-task/evaluation-export',
+      payload: { mode: 'invalid' },
+    })
+    expect(invalid.statusCode).toBe(409)
+
+    writeManifestForRun('r-invalid-mode', 'checkout', 'passed')
+    const invalidMode = await app.inject({
+      method: 'POST',
+      url: '/api/runs/r-invalid-mode/evaluation-export',
+      payload: { mode: 'invalid' },
+    })
+    expect(invalidMode.statusCode).toBe(400)
+  })
+
+  it('returns not found for unknown evaluation export tasks', async () => {
+    const { app } = await build()
+
+    expect((await app.inject({ method: 'GET', url: '/api/evaluation-exports/missing' })).statusCode).toBe(404)
+    expect((await app.inject({ method: 'GET', url: '/api/evaluation-exports/missing/download' })).statusCode).toBe(404)
+    expect((await app.inject({ method: 'DELETE', url: '/api/evaluation-exports/missing' })).statusCode).toBe(404)
+  })
+
+  it('completes localized tasks with fallback wording when no rewrite is generated', async () => {
+    writeManifestForRun('!!!', '???', 'passed')
+    const { app } = await build({
+      projectRoot: tmpDir,
+      generateEvaluationRewrite: async () => null,
+    })
+
+    const started = await app.inject({
+      method: 'POST',
+      url: '/api/runs/!!!/evaluation-export',
+      payload: { mode: 'localized' },
+    })
+    const task = await waitForEvaluationTask(app, started.json().taskId)
+    const download = await app.inject({
+      method: 'GET',
+      url: `/api/evaluation-exports/${encodeURIComponent(task.taskId)}/download`,
+    })
+
+    expect(task.status).toBe('completed')
+    expect(download.headers['content-disposition']).toContain('canary-lab-evaluation-run-run.zip')
+    expect(fs.readFileSync(path.join(runDirFor(logsDir, '!!!'), 'evaluation-rewrite-error.txt'), 'utf-8')).toContain('No evaluation rewrite was generated')
+  })
+
+  it('records string failures from localized evaluation export tasks', async () => {
+    writeManifestForRun('r-task-string-failed', 'checkout', 'passed')
+    const { app } = await build({
+      projectRoot: tmpDir,
+      generateEvaluationRewrite: async () => { throw 'string failure' },
+    })
+
+    const started = await app.inject({
+      method: 'POST',
+      url: '/api/runs/r-task-string-failed/evaluation-export',
+      payload: { mode: 'localized' },
+    })
+    const task = await waitForEvaluationTask(app, started.json().taskId)
+
+    expect(task.status).toBe('completed')
+    expect(fs.readFileSync(path.join(runDirFor(logsDir, 'r-task-string-failed'), 'evaluation-rewrite-error.txt'), 'utf-8')).toContain('string failure')
+  })
+
   it('404s when the run is unknown', async () => {
     const { app } = await build()
     const res = await app.inject({ method: 'GET', url: '/api/runs/missing/evaluation.html' })
