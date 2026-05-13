@@ -12,6 +12,7 @@ import {
   cloneRepository,
   createDraft,
   cancelDraftGeneration,
+  cancelEvaluationExportTask,
   deleteDraft,
   deleteFeature,
   deleteEnvsetSlot,
@@ -22,6 +23,7 @@ import {
   getDraftFile,
   getEnvsetSlot,
   getEnvsetsIndex,
+  getEvaluationExportTask,
   getFeatureConfig,
   getFeatureConfigDoc,
   getFeatureTests,
@@ -32,16 +34,17 @@ import {
   getAgentSession,
   getRunDetail,
   listFeatures,
+  listDrafts,
+  listEvaluationExportTasks,
   listJournal,
   listRuns,
-  listSkills,
   listWorkspaceDirs,
   putEnvsetSlot,
   putFeatureConfigDoc,
   putPlaywrightConfig,
   readDotenvFile,
-  recommendSkills,
   rejectDraft,
+  startEvaluationExport,
   startRun,
   stopRun,
   pauseHealRun,
@@ -53,6 +56,7 @@ import {
   openEditor,
   sendAgentInput,
   extractPrdDocuments,
+  downloadEvaluationExportTask,
 } from './client'
 
 const ok = (body: unknown, status = 200): Response =>
@@ -100,6 +104,116 @@ describe('api client', () => {
     await expect(getFeatureTests('x', { fetchImpl })).rejects.toMatchObject({
       status: 404,
       body: 'not found',
+    })
+  })
+
+  it('cancelEvaluationExportTask deletes the task endpoint', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(null, { status: 204 }))
+    await cancelEvaluationExportTask('task/1', { baseUrl: 'http://x', fetchImpl })
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'http://x/api/evaluation-exports/task%2F1',
+      { method: 'DELETE' },
+    )
+  })
+
+  it('starts and fetches evaluation export tasks', async () => {
+    const task = {
+      taskId: 'task/1',
+      runId: 'run/1',
+      feature: 'checkout',
+      mode: 'localized',
+      status: 'running',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+      downloadReady: false,
+    }
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(ok(task, 202))
+      .mockResolvedValueOnce(ok({ ...task, status: 'completed', downloadReady: true }))
+
+    await expect(startEvaluationExport('run/1', 'localized', { baseUrl: 'http://x', fetchImpl })).resolves.toEqual(task)
+    await expect(getEvaluationExportTask('task/1', { baseUrl: 'http://x', fetchImpl })).resolves.toMatchObject({
+      status: 'completed',
+      downloadReady: true,
+    })
+
+    expect(fetchImpl).toHaveBeenNthCalledWith(1, 'http://x/api/runs/run%2F1/evaluation-export', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ mode: 'localized' }),
+    })
+    expect(fetchImpl).toHaveBeenNthCalledWith(2, 'http://x/api/evaluation-exports/task%2F1', { method: 'GET' })
+  })
+
+  it('lists evaluation export tasks with optional run filtering', async () => {
+    const tasks = [{ taskId: 'task-1', runId: 'run/1' }]
+    const fetchImpl = vi.fn().mockResolvedValue(ok(tasks))
+
+    await expect(listEvaluationExportTasks({ runId: 'run/1' }, { baseUrl: 'http://x', fetchImpl })).resolves.toEqual(tasks)
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'http://x/api/evaluation-exports?runId=run%2F1',
+      { method: 'GET' },
+    )
+  })
+
+  it('downloads evaluation export zip files with safe filenames', async () => {
+    const link = {
+      href: '',
+      download: '',
+      style: { display: '' },
+      click: vi.fn(),
+      remove: vi.fn(),
+    } as unknown as HTMLAnchorElement
+    const documentRef = {
+      body: { appendChild: vi.fn() },
+      createElement: vi.fn().mockReturnValue(link),
+    } as unknown as Document
+    const urlApi = {
+      createObjectURL: vi.fn().mockReturnValue('blob:export'),
+      revokeObjectURL: vi.fn(),
+    }
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(new Blob(['zip']), { status: 200 }))
+
+    await downloadEvaluationExportTask(
+      {
+        taskId: 'task/1',
+        runId: '///',
+        feature: 'checkout flow',
+        mode: 'raw',
+        status: 'completed',
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+        downloadReady: true,
+      },
+      { baseUrl: 'http://x', fetchImpl, documentRef, urlApi },
+    )
+
+    expect(fetchImpl).toHaveBeenCalledWith('http://x/api/evaluation-exports/task%2F1/download', { method: 'GET' })
+    expect(link.href).toBe('blob:export')
+    expect(link.download).toBe('canary-lab-evaluation-checkout-flow-run.zip')
+    expect(link.click).toHaveBeenCalled()
+    expect(link.remove).toHaveBeenCalled()
+    expect(urlApi.revokeObjectURL).toHaveBeenCalledWith('blob:export')
+  })
+
+  it('throws ApiError when evaluation export download fails with text body', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response('missing archive', { status: 404 }))
+    await expect(downloadEvaluationExportTask(
+      {
+        taskId: 'missing',
+        runId: 'run-1',
+        feature: 'checkout',
+        mode: 'raw',
+        status: 'failed',
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+        downloadReady: false,
+      },
+      { fetchImpl, documentRef: {} as Document },
+    )).rejects.toMatchObject({
+      status: 404,
+      body: 'missing archive',
     })
   })
 
@@ -151,6 +265,19 @@ describe('api client', () => {
   it('getAgentSession rethrows non-404 API errors', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(fail(500, { error: 'boom' }))
     await expect(getAgentSession('run-1', { fetchImpl })).rejects.toMatchObject({ status: 500 })
+  })
+
+  it('getDraftAgentSession encodes the draft id and stage; 404 → null; non-404 throws', async () => {
+    const { getDraftAgentSession } = await import('./client')
+    const session = { agent: 'claude' as const, sessionId: 'sid', events: [] }
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(ok(session))
+      .mockResolvedValueOnce(fail(404, { reason: 'no-session-ref' }))
+      .mockResolvedValueOnce(fail(500, { error: 'boom' }))
+    await expect(getDraftAgentSession('d/1', 'planning', { fetchImpl })).resolves.toEqual(session)
+    await expect(getDraftAgentSession('d/1', 'planning', { fetchImpl })).resolves.toBeNull()
+    await expect(getDraftAgentSession('d/1', 'planning', { fetchImpl })).rejects.toMatchObject({ status: 500 })
+    expect(fetchImpl.mock.calls[0][0]).toBe('/api/tests/draft/d%2F1/agent-session?stage=planning')
   })
 
   it('startRun POSTs JSON body', async () => {
@@ -238,39 +365,23 @@ describe('api client', () => {
     await expect(deleteJournalEntry(99, { run: 'r1' }, { fetchImpl })).rejects.toBeInstanceOf(ApiError)
   })
 
-  it('listSkills GETs /api/skills', async () => {
-    const fetchImpl = vi.fn().mockResolvedValue(ok([{ id: 'a', name: 'A', description: 'd', source: 'user', path: '/x' }]))
-    const out = await listSkills({ fetchImpl })
-    expect(out[0].id).toBe('a')
-    expect(fetchImpl).toHaveBeenCalledWith('/api/skills', { method: 'GET' })
-  })
-
-  it('recommendSkills POSTs PRD body', async () => {
-    const fetchImpl = vi.fn().mockResolvedValue(ok([{ skillId: 's', score: 1, matchedTerms: ['x'], reasoning: 'r' }]))
-    const out = await recommendSkills({ prdText: 'hello', topN: 5 }, { fetchImpl })
-    expect(out[0].skillId).toBe('s')
-    expect(fetchImpl).toHaveBeenCalledWith('/api/skills/recommend', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ prdText: 'hello', topN: 5 }),
-    })
-  })
-
-  it('recommendSkills throws ApiError on 400', async () => {
-    const fetchImpl = vi.fn().mockResolvedValue(fail(400, { error: 'prd required' }))
-    await expect(recommendSkills({ prdText: '' }, { fetchImpl })).rejects.toBeInstanceOf(ApiError)
-  })
-
   it('createDraft POSTs payload, returns 201 body', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(ok({ draftId: 'd1', status: 'planning' }, 201))
     const out = await createDraft(
-      { prdText: 'p', repos: [{ name: 'r', localPath: '/r' }], skills: ['s1'] },
+      { prdText: 'p', repos: [{ name: 'r', localPath: '/r' }] },
       { fetchImpl },
     )
     expect(out).toEqual({ draftId: 'd1', status: 'planning' })
     const call = (fetchImpl.mock.calls[0] as [string, RequestInit])
     expect(call[0]).toBe('/api/tests/draft')
     expect(call[1].method).toBe('POST')
+  })
+
+  it('listDrafts fetches all wizard drafts', async () => {
+    const drafts = [{ draftId: 'd1', prdText: 'p', prdDocuments: [], repos: [], status: 'planning', createdAt: 'c', updatedAt: 'u' }]
+    const fetchImpl = vi.fn().mockResolvedValue(ok(drafts))
+    await expect(listDrafts({ fetchImpl })).resolves.toEqual(drafts)
+    expect(fetchImpl).toHaveBeenCalledWith('/api/tests/draft', { method: 'GET' })
   })
 
   it('extractPrdDocuments builds multipart form data with optional text and files', async () => {

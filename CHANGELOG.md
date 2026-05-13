@@ -2,6 +2,26 @@
 
 All notable changes to Canary Lab are listed here. We try to keep the language plain so anyone can follow along.
 
+
+---
+
+## 1.0.5 — 2026-05-14
+
+### What's new
+- **Plain-English evaluation report.** Exported evaluation reports now go through a rewrite pass that turns code-like test names, helper calls, and flowchart labels into clear descriptions of what each step is actually checking. The report reads like an operational summary instead of a dump of identifiers.
+- **Live agent activity view.** The agent session screen has been rebuilt to stream what's happening in real time, with a cleaner layout that's now shared across the setup wizard.
+- **Wizard task tracker** — see at a glance which wizard drafts are in progress, what stage they're at, and pick up where you left off.
+
+### Improvements
+- **Friendlier global status bar.** The bar at the top of the app reflects run state more accurately and reacts faster to changes.
+- **Smoother test setup wizard.** Reviewing specs and plans during test creation is tidier and less cluttered.
+
+### Housekeeping
+- **Retired the skills recommender** — the experimental skills suggestion feature has been removed to make room for the new evaluation export workflow.
+- **More thorough test coverage** — lots of new tests under the hood to catch regressions before they reach you.
+
+---
+
 ## 1.0.4 — 2026-05-12
 
 ### What's new
@@ -192,4 +212,3 @@ The per-feature boilerplate is smaller in 0.9.0. The new shape of a scaffolded `
 - `src/config.ts` and the `src/` directory are no longer part of the scaffold.
 
 Projects scaffolded by 0.8.x keep the old shape — the shift is descriptive, not enforced by `canary-lab upgrade`.
-

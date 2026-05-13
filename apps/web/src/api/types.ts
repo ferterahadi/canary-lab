@@ -68,6 +68,21 @@ export interface RunIndexEntry {
   endedAt?: string
 }
 
+export type EvaluationExportMode = 'raw' | 'localized'
+export type EvaluationExportStatus = 'running' | 'completed' | 'failed'
+
+export interface EvaluationExportTask {
+  taskId: string
+  runId: string
+  feature: string
+  mode: EvaluationExportMode
+  status: EvaluationExportStatus
+  createdAt: string
+  updatedAt: string
+  downloadReady: boolean
+  error?: string
+}
+
 export interface ServiceManifestEntry {
   name: string
   safeName: string
@@ -193,24 +208,8 @@ export interface RunDetail {
   lifecycleEvents?: RunLifecycleEvent[]
 }
 
-export interface SkillSummary {
-  id: string
-  name: string
-  description: string
-  source: string
-  path: string
-}
-
-export interface SkillRecommendation {
-  skillId: string
-  score: number
-  matchedTerms: string[]
-  reasoning: string
-}
-
 export type DraftStatus =
   | 'created'
-  | 'recommending'
   | 'planning'
   | 'plan-ready'
   | 'generating'
@@ -238,7 +237,6 @@ export interface DraftRecord {
   prdText: string
   prdDocuments: DraftPrdDocument[]
   repos: DraftRepo[]
-  skills: string[]
   featureName?: string
   wizardAgent?: 'claude' | 'codex'
   activeAgentStage?: 'planning' | 'generating'
@@ -265,7 +263,6 @@ export interface CreateDraftPayload {
   prdText: string
   prdDocuments?: DraftPrdDocument[]
   repos: DraftRepo[]
-  skills?: string[]
   featureName?: string
 }
 

@@ -27,6 +27,12 @@ import {
   STAGE1_DIFF_TEMPLATE,
   STAGE1_TEMPLATE,
 } from '../lib/wizard-agent-spawner'
+import { refForAgentSpawn } from '../lib/agent-session-tailer'
+import {
+  loadAgentSessionLog,
+  locateLatestSessionLogForAgent,
+} from '../lib/agent-session-log'
+import { randomUUID } from 'crypto'
 import { validateGeneratedFeatureFiles } from '../../../shared/feature-scaffold'
 import { resolveDraftFile } from '../lib/draft-file-resolver'
 import { combinePrdText, extractPrdDocument } from '../lib/prd-document-extractor'
@@ -47,6 +53,9 @@ export interface PlanAgentInput {
   repos: DraftRepo[]
   draftDir: string
   agentLogPath: string
+  // Session id to pass via `--session-id` (claude only). Lets the live
+  // structured-event WS tail the agent's JSONL from t=0. Undefined for codex.
+  pinSessionId?: string
 }
 
 export type PlanMode = 'context' | 'diff-only'
@@ -56,11 +65,11 @@ export interface SpecAgentInput {
   agent: 'claude' | 'codex'
   featureName: string
   plan: unknown
-  skills: { id: string; content: string }[]
   repos: DraftRepo[]
   draftDir: string
   agentLogPath: string
   resumeSessionId?: string
+  pinSessionId?: string
 }
 
 export interface TestsDraftRouteDeps {
@@ -71,8 +80,6 @@ export interface TestsDraftRouteDeps {
   spawnPlanAgent(input: PlanAgentInput): Promise<string>
   spawnSpecAgent(input: SpecAgentInput): Promise<string>
   cancelGeneration?(draftId: string): boolean
-  // Optional skill content loader for stage-2 — tests stub it.
-  loadSkillContent?(skillId: string): string
 }
 
 export async function testsDraftRoutes(
@@ -128,12 +135,11 @@ export async function testsDraftRoutes(
   })
 
   app.post<{
-    Body: { prdText?: unknown; prdDocuments?: unknown; repos?: unknown; skills?: unknown; featureName?: unknown }
+    Body: { prdText?: unknown; prdDocuments?: unknown; repos?: unknown; featureName?: unknown }
   }>('/api/tests/draft', async (req, reply) => {
     const prdText = req.body?.prdText
     const prdDocuments = req.body?.prdDocuments
     const repos = req.body?.repos
-    const skills = req.body?.skills
     const featureName = req.body?.featureName
     if (typeof prdText !== 'string') {
       reply.code(400)
@@ -147,7 +153,6 @@ export async function testsDraftRoutes(
     const documentList = Array.isArray(prdDocuments)
       ? prdDocuments.filter(isDraftPrdDocument)
       : []
-    const skillList = Array.isArray(skills) ? (skills as string[]) : undefined
     const featureNameStr = typeof featureName === 'string' ? featureName : undefined
 
     const draftId = deps.newDraftId()
@@ -156,7 +161,6 @@ export async function testsDraftRoutes(
       prdText,
       prdDocuments: documentList,
       repos: repoList,
-      skills: skillList,
       featureName: featureNameStr,
     })
 
@@ -206,6 +210,54 @@ export async function testsDraftRoutes(
       return { error: 'agent log not found' }
     }
     return { content: fs.readFileSync(logPath, 'utf8') }
+  })
+
+  // Structured agent-session snapshot for a draft. Equivalent to
+  // /api/runs/:id/agent-session but keyed on draft + stage. Returns the
+  // events parsed from the agent CLI's JSONL log at the time of the request.
+  // The live WS at /ws/draft/:id/agent-session streams events as they arrive.
+  app.get<{
+    Params: { id: string }
+    Querystring: { stage?: string }
+  }>('/api/tests/draft/:id/agent-session', async (req, reply) => {
+    const rec = readDraft(deps.logsDir, req.params.id)
+    if (!rec) {
+      reply.code(404)
+      return { reason: 'draft-not-found' }
+    }
+    const stage = req.query.stage
+    if (stage !== 'planning' && stage !== 'generating') {
+      reply.code(400)
+      return { reason: 'unknown-stage' }
+    }
+    const ref = stage === 'planning' ? rec.planAgentSessionRef : rec.specAgentSessionRef
+    const spawnedAt = stage === 'planning' ? rec.planAgentSpawnedAt : rec.specAgentSpawnedAt
+    const agent = ref?.agent ?? rec.wizardAgent
+    const p = draftPaths(deps.logsDir, rec.draftId)
+    const resolved = ref && fs.existsSync(ref.logPath)
+      ? ref
+      : agent
+        ? locateLatestSessionLogForAgent(agent, p.draftDir)
+        : null
+    if (!resolved) {
+      reply.code(404)
+      return { reason: 'no-session-ref' }
+    }
+    if (!fs.existsSync(resolved.logPath)) {
+      reply.code(404)
+      return { reason: 'session-log-missing' }
+    }
+    if (spawnedAt) {
+      try {
+        const stat = fs.statSync(resolved.logPath)
+        if (stat.mtimeMs < Date.parse(spawnedAt) - 1000) {
+          reply.code(404)
+          return { reason: 'session-log-stale' }
+        }
+      } catch { /* fall through */ }
+    }
+    const events = loadAgentSessionLog(resolved)
+    return { agent: resolved.agent, sessionId: resolved.sessionId, events }
   })
 
   app.post<{ Params: { id: string }; Body: { plan?: unknown } }>(
@@ -365,12 +417,18 @@ async function runPlanStage(deps: TestsDraftRouteDeps, draftId: string): Promise
     transition(deps.logsDir, draftId, 'error', { errorMessage: picked.error })
     return
   }
+  const p = draftPaths(deps.logsDir, draftId)
+  // Pin the claude session id (codex has no equivalent) so the live agent-
+  // session WS can tail the JSONL log from the moment of spawn.
+  const pinSessionId = picked.agent === 'claude' ? randomUUID() : undefined
+  const planAgentSessionRef = refForAgentSpawn({ agent: picked.agent, cwd: p.draftDir, sessionId: pinSessionId })
   patchDraft(deps.logsDir, draftId, {
     wizardAgent: picked.agent,
     activeAgentStage: 'planning',
+    planAgentSessionRef,
+    planAgentSpawnedAt: new Date().toISOString(),
   })
   if (!isStageCurrent(deps.logsDir, draftId, 'planning')) return
-  const p = draftPaths(deps.logsDir, draftId)
   const planTemplate = selectPlanTemplate(rec)
   let stream: string
   try {
@@ -383,6 +441,7 @@ async function runPlanStage(deps: TestsDraftRouteDeps, draftId: string): Promise
       repos: rec.repos,
       draftDir: p.draftDir,
       agentLogPath: p.planAgentLog,
+      pinSessionId,
     })
   } catch (e) {
     if (isCancelled(deps.logsDir, draftId)) return
@@ -430,31 +489,36 @@ async function runSpecStage(deps: TestsDraftRouteDeps, draftId: string): Promise
     transition(deps.logsDir, draftId, 'error', { errorMessage: picked.error })
     return
   }
-  patchDraft(deps.logsDir, draftId, {
-    wizardAgent: picked.agent,
-    activeAgentStage: 'generating',
-  })
-  if (!isStageCurrent(deps.logsDir, draftId, 'generating')) return
   const p = draftPaths(deps.logsDir, draftId)
-  const skillContents = (rec.skills ?? []).map((id) => ({
-    id,
-    content: deps.loadSkillContent ? deps.loadSkillContent(id) : '',
-  }))
-  let stream: string
   const resumeSessionId = rec.planAgentSessionKind === picked.agent
     ? rec.planAgentSessionId
     : undefined
+  // Pin the spec agent's claude session id too. If we're resuming, the
+  // session id is fixed by the prior agent — reuse it so the JSONL keeps
+  // appending to the same file (claude's `--resume` writes to the same path).
+  const pinSessionId = picked.agent === 'claude'
+    ? (resumeSessionId ?? randomUUID())
+    : undefined
+  const specAgentSessionRef = refForAgentSpawn({ agent: picked.agent, cwd: p.draftDir, sessionId: pinSessionId })
+  patchDraft(deps.logsDir, draftId, {
+    wizardAgent: picked.agent,
+    activeAgentStage: 'generating',
+    specAgentSessionRef,
+    specAgentSpawnedAt: new Date().toISOString(),
+  })
+  if (!isStageCurrent(deps.logsDir, draftId, 'generating')) return
+  let stream: string
   try {
     stream = await deps.spawnSpecAgent({
       draftId,
       agent: picked.agent,
       featureName: rec.featureName ?? defaultFeatureName(rec),
       plan: rec.plan,
-      skills: skillContents,
       repos: rec.repos,
       draftDir: p.draftDir,
       agentLogPath: p.specAgentLog,
       resumeSessionId,
+      pinSessionId: resumeSessionId ? undefined : pinSessionId,
     })
   } catch (e) {
     if (isCancelled(deps.logsDir, draftId)) return

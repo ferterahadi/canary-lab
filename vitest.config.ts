@@ -50,8 +50,10 @@ export default defineConfig({
         'apps/web-server/lib/ast-extractor.ts',
         'apps/web-server/routes/feature-config.ts',
         'apps/web-server/routes/features.ts',
+        'apps/web-server/routes/runs.ts',
         'apps/web-server/routes/tests-draft.ts',
         'apps/web-server/lib/wizard-agent-runner.ts',
+        'apps/web-server/lib/test-review-export.ts',
         'apps/web-server/lib/open-browser-spawner.ts',
         // Pure re-export shim — the underlying implementation lives in
         // shared/lib/dotenv-edit and is exercised through the routes that
@@ -74,10 +76,10 @@ export default defineConfig({
         'templates/**',
       ],
       thresholds: {
-        statements: 97,
-        branches: 97,
-        functions: 97,
-        lines: 97,
+        statements: 98,
+        branches: 98,
+        functions: 98,
+        lines: 98,
       },
     },
   },

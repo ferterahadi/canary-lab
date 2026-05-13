@@ -66,6 +66,68 @@ describe('TestCasesColumn', () => {
     expect(container.textContent).not.toContain('Loading...')
   })
 
+  it('shows that the selected run is active before a specific test is reported', async () => {
+    vi.mocked(getFeatureTests).mockResolvedValue([
+      {
+        file: '/tmp/features/alpha/e2e/a.spec.ts',
+        tests: [
+          {
+            name: 'loads checkout',
+            line: 3,
+            bodySource: '',
+            steps: [],
+          },
+        ],
+      },
+    ])
+
+    await act(async () => {
+      root.render(<TestCasesColumn feature="alpha" activeRunSummary={undefined} activeRunStatus="running" />)
+    })
+
+    expect(container.textContent).toContain('running')
+    expect(container.textContent).toContain('0/1')
+  })
+
+  it('marks the currently running test card when Playwright reports one', async () => {
+    vi.mocked(getFeatureTests).mockResolvedValue([
+      {
+        file: '/tmp/features/alpha/e2e/a.spec.ts',
+        tests: [
+          {
+            name: 'loads checkout',
+            line: 3,
+            bodySource: '',
+            steps: [],
+          },
+        ],
+      },
+    ])
+
+    await act(async () => {
+      root.render(
+        <TestCasesColumn
+          feature="alpha"
+          activeRunStatus="running"
+          activeRunSummary={{
+            complete: false,
+            total: 1,
+            passed: 0,
+            passedNames: [],
+            failed: [],
+            running: {
+              name: 'test-case-loads-checkout',
+              location: '/tmp/features/alpha/e2e/a.spec.ts:3:1',
+            },
+          }}
+        />,
+      )
+    })
+
+    expect(container.textContent).toContain('loads checkout')
+    expect(container.textContent).toContain('running')
+  })
+
   it('renders an error when feature tests fail to load', async () => {
     vi.mocked(getFeatureTests).mockRejectedValue(new ApiError(500, { error: 'boom' }))
 
@@ -77,13 +139,13 @@ describe('TestCasesColumn', () => {
     expect(container.textContent).not.toContain('Loading...')
   })
 
-  it('does not render the assertion export in the tests pane', async () => {
+  it('does not render the evaluation export in the tests pane', async () => {
     vi.mocked(getFeatureTests).mockResolvedValue([])
 
     await act(async () => {
       root.render(<TestCasesColumn feature="alpha beta" activeRunSummary={undefined} activeRunStatus="passed" />)
     })
 
-    expect(container.textContent).not.toContain('Export Assertion')
+    expect(container.textContent).not.toContain('Export Evaluation')
   })
 })

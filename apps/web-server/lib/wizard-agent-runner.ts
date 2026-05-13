@@ -132,6 +132,7 @@ export function spawnPlanAgent(
     const command = buildWizardCommand(input.agent, prompt, {
       claudeBin: deps.claudeBin,
       codexBin: deps.codexBin,
+      pinSessionId: input.pinSessionId,
     })
     return runAgent({
       draftId: input.draftId,
@@ -156,7 +157,6 @@ export function spawnSpecAgent(
     const prompt = buildSpecPrompt({
       featureName: input.featureName,
       plan: input.plan,
-      skills: input.skills,
       repos: input.repos,
       template: deps.specTemplate ? loadTemplate(deps.specTemplate) : undefined,
     })
@@ -164,6 +164,7 @@ export function spawnSpecAgent(
       claudeBin: deps.claudeBin,
       codexBin: deps.codexBin,
       resumeSessionId: input.resumeSessionId,
+      pinSessionId: input.pinSessionId,
     })
     return runAgent({
       draftId: input.draftId,

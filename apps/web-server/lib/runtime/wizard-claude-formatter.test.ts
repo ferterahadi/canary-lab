@@ -47,17 +47,24 @@ describe('wizard claude formatter', () => {
     expect(relPath(process.cwd())).toBe('.')
     expect(relPath(`${process.cwd()}/apps/web/server.ts`)).toBe('apps/web/server.ts')
     expect(formatToolCall('Bash', { command: 'npm test', description: 'run tests' })).toContain('# run tests')
+    expect(formatToolCall('Bash', {})).toBe('')
     expect(formatToolCall('Read', { file_path: 'apps/web/server.ts', offset: 10, limit: 5 })).toContain('L10-14')
+    expect(formatToolCall('Read', {})).toBe('')
     expect(formatToolCall('Read', { file_path: 'apps/web/server.ts', offset: 10 })).toContain('from L10')
     expect(formatToolCall('Read', { file_path: 'apps/web/server.ts', limit: 5 })).toContain('L1-5')
     expect(formatToolCall('Edit', { file_path: 'x.ts' })).toBe('x.ts')
+    expect(formatToolCall('Edit', {})).toBe('')
     expect(formatToolCall('Edit', { file_path: 'x.ts', old_string: 'a', new_string: 'b', replace_all: true })).toContain('−1 +1 (all)')
     expect(formatToolCall('Write', { file_path: 'x.ts' })).toBe('x.ts')
+    expect(formatToolCall('Write', {})).toBe('')
     expect(formatToolCall('Write', { file_path: 'x.ts', content: 'a\nb' })).toContain('2L')
     expect(formatToolCall('Glob', { pattern: '**/*.ts', path: process.cwd() })).toContain('in .')
+    expect(formatToolCall('Glob', { pattern: '**/*.ts', path: '' })).toBe('**/*.ts')
     expect(formatToolCall('Grep', { pattern: 'needle', path: `${process.cwd()}/apps`, glob: '*.ts' })).toContain('(*.ts)')
+    expect(formatToolCall('Grep', { pattern: 'needle', path: '', glob: '' })).toBe('needle')
     expect(formatToolCall('TodoWrite', { todos: [{}] })).toContain('1 todo')
     expect(formatToolCall('TodoWrite', { todos: [{}, {}] })).toContain('2 todos')
+    expect(formatToolCall('TodoWrite', { todos: 'not-array' })).toContain('0 todos')
     expect(formatToolCall('Other', null as any)).toBe('')
     expect(resultSummary('')).toBe('')
     expect(resultSummary('\nfirst\nsecond')).toBe('first')
@@ -91,6 +98,7 @@ describe('wizard claude formatter', () => {
     expect(inspectionSummary({ name: 'Bash', input: { command: 'grep needle apps/a.ts | wc -l' } }, 'not-a-number\n')).toBe('Number of matches: 1')
     expect(inspectionSummary({ name: 'Bash', input: { command: 'if test -d apps; then find apps -type f; fi' } }, 'apps/a.ts')).toBe('Content read.')
     expect(inspectionSummary({ name: 'Bash', input: { command: 'npm test' } }, 'ok')).toBeNull()
+    expect(inspectionSummary({ name: 'Bash', input: {} }, 'ok')).toBeNull()
     expect(inspectionSummary({ name: 'Other', input: {} }, 'ok')).toBeNull()
     expect(resultSummary(123)).toBe('')
     const circular: Record<string, unknown> = {}
@@ -532,6 +540,18 @@ describe('wizard claude formatter', () => {
     }))
     const out = writes.join('')
     expect(out.match(/<plan-output>/g)).toHaveLength(1)
+  })
+
+  it('ignores empty final result text', () => {
+    handleLine(JSON.stringify({
+      type: 'result',
+      duration_ms: 1000,
+      is_error: false,
+      result: '   ',
+    }))
+    const out = writes.join('')
+    expect(out).toContain('done')
+    expect(out).not.toContain('<plan-output>')
   })
 })
 

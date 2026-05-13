@@ -2,7 +2,8 @@ import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { buildTestReviewPacket, createAssertionExport, createAssertionHtml } from './test-review-export'
+import ts from 'typescript'
+import { __testReviewExportInternals, buildEvaluationLlmPrompt, buildTestReviewPacket, createAssertionExport, createAssertionHtml, createEvaluationExport, createEvaluationHtml, evaluationCodexArgs } from './test-review-export'
 import type { RunDetail } from './run-store'
 
 let tmpDir: string
@@ -16,6 +17,32 @@ afterEach(() => {
 })
 
 describe('test review export', () => {
+  it('builds Codex rewrite args with supported read-only flags', () => {
+    expect(evaluationCodexArgs('rewrite prompt')).toEqual([
+      'exec',
+      '--skip-git-repo-check',
+      '--sandbox',
+      'read-only',
+      '--model',
+      'gpt-5.4-mini',
+      'rewrite prompt',
+    ])
+    expect(evaluationCodexArgs('rewrite prompt')).not.toContain('--full-auto')
+    expect(evaluationCodexArgs('rewrite prompt', '/tmp/evaluation-output.txt', '/tmp/evaluation-schema.json')).toEqual([
+      'exec',
+      '--skip-git-repo-check',
+      '--sandbox',
+      'read-only',
+      '--model',
+      'gpt-5.4-mini',
+      '--output-last-message',
+      '/tmp/evaluation-output.txt',
+      '--output-schema',
+      '/tmp/evaluation-schema.json',
+      'rewrite prompt',
+    ])
+  })
+
   it('maps loop-generated tests back to the shared body and imported assertion helpers', () => {
     const featureDir = path.join(tmpDir, 'feature')
     const helperDir = path.join(featureDir, 'e2e', 'helpers')
@@ -86,44 +113,105 @@ function clickToolbarButton(page) {
     }))
   })
 
-  it('creates deterministic assertion review html', async () => {
-    const body = await createAssertionHtml(detail({ featureDir: tmpDir }))
+  it('creates deterministic evaluation report html', async () => {
+    const body = await createEvaluationHtml(detail({ featureDir: tmpDir }))
 
-    expect(body).toContain('<p class="eyebrow">Assertion Review</p>')
-    expect(body).toContain('<h1 id="assertion-review">Checkout</h1>')
+    expect(body).toContain('<p class="eyebrow">Test Results</p>')
+    expect(body).toContain('<h1 id="evaluation-report">Checkout</h1>')
+    expect(body).toContain('Test Cases')
+    expect(body).not.toContain('Evaluation Summary')
+    expect(body).not.toContain('Product Evaluation')
+    expect(body).not.toContain('Engineering Evidence')
     expect(body).toContain('<div class="summary-strip">')
     expect(body).toContain('<nav class="toc" aria-label="Table of contents">')
-    expect(body).toContain('<a href="#assertion-review" data-section-id="assertion-review" aria-current="true">Checkout</a>')
+    expect(body).toContain('<a href="#evaluation-report" data-section-id="evaluation-report" aria-current="true">Checkout</a>')
     expect(body).toContain('<a href="#test-cases" data-section-id="test-cases">Test Cases</a>')
     expect(body).toContain('<section class="test-case" id="1-passes-checkout">')
     expect(body).toContain('<li class="toc-level-2"><a href="#test-cases" data-section-id="test-cases">Test Cases</a></li>')
-    expect(body).toContain('<li class="toc-level-3"><a href="#1-passes-checkout" data-section-id="1-passes-checkout">1. passes checkout</a></li>')
+    expect(body).toContain('<li class="toc-level-3"><a href="#1-passes-checkout" data-section-id="1-passes-checkout">1. Passes checkout</a></li>')
     expect(body).toContain('IntersectionObserver')
     expect(body).toContain("link.setAttribute('aria-current', 'true')")
-    expect(body).toContain('<h3>Assertion Flow</h3>')
-    expect(body).toContain('<img src="flowcharts/1-passes-checkout.svg" alt="Assertion flow for passes checkout">')
-    expect(body).toContain('Local codebase helper implementations are inlined once below')
-    expect(body).toContain('Test Cases')
+    expect(body).toContain('flow-node')
+    expect(body).toContain('data-code-line')
+    expect(body).toContain('<summary>Test code</summary>')
+    expect(body).not.toContain('scrollIntoView')
+    expect(body).not.toContain('</span>\n<span class="code-line"')
+    expect(body).toContain('<h3>How the test runs</h3>')
+    expect(body).toContain('Evaluation flow for Passes checkout')
     expect(body).toContain('<!doctype html>')
     expect(body).not.toContain('test-review.json')
   })
 
-  it('title-cases feature slugs in the report chrome', async () => {
-    const body = await createAssertionHtml(detail({ featureDir: tmpDir, feature: 'shop_redeeming_eats_voucher' }))
+  it('builds a constrained LLM prompt from technical evidence', () => {
+    const templatePath = path.join(tmpDir, 'evaluation-rewrite.md')
+    fs.writeFileSync(templatePath, 'Prompt from file\nEvidence:\n{{evidence}}\nText slots:\n{{textSlots}}\n{{sourceHtmlSection}}')
+    const packet = buildTestReviewPacket(detail({ featureDir: tmpDir, title: 'call missed -> SMS fallback' }))
+    const prompt = buildEvaluationLlmPrompt({
+      packet,
+      templatePath,
+      sourceHtml: '<html>technical report</html>',
+      flowcharts: [{ testName: packet.tests[0].name, steps: ['Start', 'Action: postSendCall', 'Result: passed'] }],
+    })
 
-    expect(body).toContain('<h1 id="assertion-review">Shop Redeeming Eats Voucher</h1>')
-    expect(body).toContain('<a href="#assertion-review" data-section-id="assertion-review" aria-current="true">Shop Redeeming Eats Voucher</a>')
+    expect(prompt).toContain('Prompt from file')
+    expect(prompt).toContain('"feature": "checkout"')
+    expect(prompt).toContain('"title": "call missed -> SMS fallback"')
+    expect(prompt).toContain('"checkStrength": "1 not graded"')
+    expect(prompt).toContain('"flowSteps"')
+    expect(prompt).toContain('Text slots')
+    expect(prompt).toContain('"id": "cases.0.title"')
+    expect(prompt).toContain('Current generated HTML to rewrite from.')
+    expect(prompt).toContain('<html>technical report</html>')
+  })
+
+  it('loads the packaged evaluation rewrite prompt by default', () => {
+    const packet = buildTestReviewPacket(detail({ featureDir: tmpDir, title: 'call missed -> SMS fallback' }))
+    const prompt = buildEvaluationLlmPrompt({
+      packet,
+      sourceHtml: '<html>technical report</html>',
+      flowcharts: [{ testName: packet.tests[0].name, steps: ['Start', 'Action: postSendCall', 'Result: passed'] }],
+    })
+
+    expect(prompt).toContain('Rewrite the human-facing text slots')
+    expect(prompt).toContain('Return strict JSON')
+    expect(prompt).toContain('"id": "cases.0.title"')
+  })
+
+  it('uses validated generated narrative when provided', async () => {
+    const body = await createEvaluationHtml(detail({ featureDir: tmpDir }), {
+      narrative: {
+        featureTitle: 'Generated feature title',
+        summary: 'Generated plain-language summary.',
+        cases: [{
+          title: 'Generated product title',
+          whatWasChecked: 'Generated scenario explanation.',
+          whyItMatters: 'Generated stakeholder impact.',
+          confidence: 'Generated confidence note.',
+          flowSteps: [{ title: 'Generated flow step', detail: 'Generated flow detail' }],
+        }],
+      },
+    })
+
+    expect(body).toContain('Generated feature title')
+    expect(body).toContain('Generated plain-language summary.')
+    expect(body).toContain('Generated product title')
+    expect(body).toContain('Generated flow step')
+  })
+
+  it('title-cases feature slugs in the report chrome', async () => {
+    const body = await createEvaluationHtml(detail({ featureDir: tmpDir, feature: 'shop_redeeming_eats_voucher' }))
+
+    expect(body).toContain('<h1 id="evaluation-report">Shop Redeeming Eats Voucher</h1>')
+    expect(body).toContain('<a href="#evaluation-report" data-section-id="evaluation-report" aria-current="true">Shop Redeeming Eats Voucher</a>')
   })
 
   it('creates external flowchart svg assets for each test case', async () => {
-    const exported = await createAssertionExport(detail({ featureDir: tmpDir }))
+    const exported = await createEvaluationExport(detail({ featureDir: tmpDir }))
 
-    expect(exported.html).toContain('<img src="flowcharts/1-passes-checkout.svg"')
-    expect(exported.assets).toEqual([
-      expect.objectContaining({ filename: 'flowcharts/1-passes-checkout.svg' }),
-    ])
-    const svg = exported.assets[0].data.toString('utf8')
-    expect(svg).toContain('<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="186"')
+    expect(exported.assets).toEqual([])
+    const svg = exported.html
+    expect(svg).toContain('<svg class="flowchart" xmlns="http://www.w3.org/2000/svg" width="1280" height="186"')
+    expect(svg).toContain('class="flow-node"')
     expect(svg).toContain('class="connector"')
     expect(svg).toContain('filter="url(#nodeShadow)"')
     expect(svg).toContain('text-anchor="middle"')
@@ -132,17 +220,15 @@ function clickToolbarButton(page) {
     expect(svg).toContain('stroke="#64748b"')
     expect(svg).toContain('stroke="#16a34a"')
     expect(svg).toContain('Source unavailable')
-    expect(svg).toContain('Result: passed')
+    expect(svg).toContain('Run result: passed')
     expect(svg).not.toContain('height="368"')
   })
 
   it('sanitizes punctuation-only test titles for flowchart filenames', async () => {
     const exported = await createAssertionExport(detail({ featureDir: tmpDir, title: '!!!' }))
 
-    expect(exported.assets).toContainEqual(
-      expect.objectContaining({ filename: 'flowcharts/1.svg' }),
-    )
-    expect(exported.html).toContain('<img src="flowcharts/1.svg"')
+    expect(exported.assets).toEqual([])
+    expect(exported.html).toContain('Evaluation flow for')
   })
 
   it('renders per-test video links after assertions', async () => {
@@ -157,7 +243,7 @@ test('records checkout video', async ({ page }) => {
 `
     fs.writeFileSync(spec, specSource)
 
-    const body = await createAssertionHtml(detail({
+    const body = await createEvaluationHtml(detail({
       featureDir,
       eventLocation: `${spec}:${lineOf(specSource, "test('records")}`,
       title: 'records checkout video',
@@ -169,9 +255,9 @@ test('records checkout video', async ({ page }) => {
 
     expect(body).toContain('<h3>Video</h3>')
     expect(body).toContain('<video controls preload="metadata" src="run-1.webm"></video>')
-    expect(body.indexOf('<h3>Assertion Flow</h3>')).toBeLessThan(body.indexOf('<h3>Test Body</h3>'))
-    expect(body.indexOf('<h3>Test Body</h3>')).toBeLessThan(body.indexOf('<h3>Assertions</h3>'))
-    expect(body.indexOf('<h3>Assertions</h3>')).toBeLessThan(body.indexOf('<h3>Video</h3>'))
+    expect(body.indexOf('<h3>How the test runs</h3>')).toBeLessThan(body.indexOf('<summary>Test code</summary>'))
+    expect(body.indexOf('<summary>Test code</summary>')).toBeLessThan(body.indexOf('<summary>Checks</summary>'))
+    expect(body.indexOf('<summary>Checks</summary>')).toBeLessThan(body.indexOf('<h3>Video</h3>'))
   })
 
   it('keeps duplicate test titles addressable in the assertion review table of contents', async () => {
@@ -202,8 +288,8 @@ test('same title', async ({ page }) => {
 
     expect(body).toContain('<section class="test-case" id="1-same-title">')
     expect(body).toContain('<section class="test-case" id="2-same-title">')
-    expect(body).toContain('<a href="#1-same-title" data-section-id="1-same-title">1. same title</a>')
-    expect(body).toContain('<a href="#2-same-title" data-section-id="2-same-title">2. same title</a>')
+    expect(body).toContain('<a href="#1-same-title" data-section-id="1-same-title">1. Same title</a>')
+    expect(body).toContain('<a href="#2-same-title" data-section-id="2-same-title">2. Same title</a>')
   })
 
   it('escapes dynamic html while preserving highlighted code blocks', async () => {
@@ -236,10 +322,9 @@ test('<script>alert("checkout")</script>', async ({ page }) => {
       eventLocation: `${spec}:${lineOf(specSource, "test('<script>")}`,
       title: '<script>alert("checkout")</script>',
     }))
-    const svg = exported.assets[0].data.toString('utf8')
+    const svg = exported.html
     expect(svg).toContain('&lt;script&gt;alert(&quot;checkout&quot;)&lt;/script&gt;')
-    expect(svg).toContain('&lt;Checkou')
-    expect(svg).toContain('t&gt;')
+    expect(svg).toContain('&lt;Checkout&gt;')
     expect(svg).not.toContain('<Checkout>')
     expect(svg).toContain('<polygon')
   })
@@ -348,14 +433,14 @@ const sharedCheck = (page) => {
       expect.objectContaining({ label: 'toBeTruthy', quality: 'unknown' }),
       expect.objectContaining({ helperName: 'expectReadyAlias', quality: 'strict' }),
     ]))
-    expect(html).toContain('<h3>Test Body</h3>')
-    expect(html).toContain('<h3>Assertion Flow</h3>')
-    expect(html).toContain('<img src="flowcharts/1-renders-checkout-review.svg"')
+    expect(html).toContain('<summary>Test code</summary>')
+    expect(html).toContain('<h3>How the test runs</h3>')
+    expect(html).toContain('Evaluation flow for Renders checkout review')
     expect(html).not.toContain('<h3>Helper Calls</h3>')
-    expect(html).toContain('Local Codebase Implementations')
-    expect(html).toContain('<a href="#local-codebase-implementations" data-section-id="local-codebase-implementations">Local Codebase Implementations</a>')
+    expect(html).toContain('Helper functions used')
+    expect(html).toContain('<a href="#local-codebase-implementations" data-section-id="local-codebase-implementations">Helper functions used</a>')
     expect(html).toContain('helper: <code>expectReadyAlias</code>')
-    expect(html).toContain('nested strict:')
+    expect(html).toContain('nested strong:')
     expect(html).not.toContain('<h3>External Imports</h3>')
     expect(html).not.toContain('<h3>expectCheckoutReady</h3>')
     expect(html).toContain('@playwright/test')
@@ -574,9 +659,43 @@ function expectLocalOnly(page) {
       title: 'local helper only',
     }))
 
-    expect(html).toContain('Local Codebase Implementations')
+    expect(html).toContain('Helper functions used')
     expect(html).toContain('expectLocalOnly')
     expect(html).not.toContain('<h3>External Imports</h3>')
+  })
+
+  it('uses broad deterministic wording without feature-specific localization maps', async () => {
+    const featureDir = path.join(tmpDir, 'message_chain')
+    const e2eDir = path.join(featureDir, 'e2e')
+    fs.mkdirSync(e2eDir, { recursive: true })
+    const spec = path.join(e2eDir, 'message.spec.ts')
+    const specSource = `import { test, expect } from '@playwright/test'
+
+test('A. WA metadata.url -> SMS', async () => {
+  test.skip(!OVERRIDE_FLAG_EXPECTED, 'requires canary override mode')
+  const ids = makeIds('fallback-A')
+  const res = await postSendMessage(ids, { metadataUrl: 'https://example.test' })
+  expect(res.status).toBeLessThan(300)
+})
+`
+    fs.writeFileSync(spec, specSource)
+
+    const html = await createEvaluationHtml(detail({
+      featureDir,
+      feature: 'message_chain',
+      eventLocation: `${spec}:${lineOf(specSource, "test('A. WA")}`,
+      title: 'A. WA metadata.url -> SMS',
+    }))
+
+    expect(html).toContain('<h1 id="evaluation-report">Message Chain</h1>')
+    expect(html).toContain('1. Wa metadata url then sms')
+    expect(html).toContain('Skip if required test setup is missing')
+    expect(html).toContain('Prepare unique identifiers')
+    expect(html).toContain('Send message')
+    expect(html).not.toContain('WhatsApp')
+    expect(html).not.toContain('message link')
+    expect(html).not.toContain('Make ids')
+    expect(html).not.toContain('const ids =')
   })
 
   it('covers failed flowcharts, long labels, malformed bodies, and empty section ids', async () => {
@@ -617,17 +736,369 @@ function expectOneNested(page) {
 
     const exported = await createAssertionExport(failed)
     const html = exported.html
-    const svg = exported.assets[0].data.toString('utf8')
+    const svg = exported.html
 
-    expect(exported.assets[0].filename).toBe('flowcharts/1.svg')
+    expect(exported.assets).toEqual([])
     expect(html).toContain('status-failed')
     expect(html).not.toContain('<span class="muted">(')
     expect(svg).toContain('stroke="#e11d48"')
-    expect(svg).toContain('Setup')
-    expect(svg).toContain('Helper: openCheckout')
-    expect(svg).toContain('1 nested assertion')
-    expect(svg).toContain('moderate assertion')
+    expect(svg).toContain('Prepare the scenario')
+    expect(svg).toContain('Open checkout')
+    expect(svg).toContain('1 check inside this shared step')
+    expect(svg).toContain('Check the expected outcome')
     expect(svg).toContain('…')
+  })
+
+  it('renders readable action labels for the major statement families', async () => {
+    const featureDir = path.join(tmpDir, 'action-label-feature')
+    const e2eDir = path.join(featureDir, 'e2e')
+    fs.mkdirSync(e2eDir, { recursive: true })
+    const spec = path.join(e2eDir, 'actions.spec.ts')
+    const specSource = `import { test, expect } from '@playwright/test'
+
+test('A. authAPI -> warning incl auto-resolved', async ({ page }) => {
+  test.skip(!process.env.E2E_USER, 'missing user')
+  await page.route('**/api/**', () => {})
+  const start = new Date()
+  const ids = makeIds()
+  await mockInventory()
+  await createCart(ids)
+  await sendCheckoutRequest()
+  await fetchSavedOrder()
+  await waitForReceipt()
+  await toggleVoucher()
+  await withLinkedRecords()
+  await clickRelevantControl()
+  await fillRequiredValue()
+  await page.getByRole('button', { name: 'Pay' }).click()
+  await page.getByLabel('Email').fill('customer@example.com')
+  await page.waitForURL(/thank-you/)
+  await expect(page.getByText('Success')).toHaveText('Success')
+  await expect(page.locator('.toast')).toBeVisible()
+  await expect(page.locator('.rows')).toHaveCount(1)
+  await expectUnknownOutcome(page)
+  await unknownUtility(page)
+  void start
+})
+
+function makeIds() {
+  return { orderId: 'o-1' }
+}
+
+function mockInventory() {
+  return true
+}
+
+function createCart(ids) {
+  return ids
+}
+
+function sendCheckoutRequest() {
+  return true
+}
+
+function fetchSavedOrder() {
+  return true
+}
+
+function waitForReceipt() {
+  return true
+}
+
+function toggleVoucher() {
+  return true
+}
+
+function withLinkedRecords() {
+  return true
+}
+
+function clickRelevantControl() {
+  return true
+}
+
+function fillRequiredValue() {
+  return true
+}
+
+function expectUnknownOutcome(page) {
+  expect(page.locator('.anything')).toBeTruthy()
+}
+
+function unknownUtility(page) {
+  return page
+}
+`
+    fs.writeFileSync(spec, specSource)
+
+    const html = await createEvaluationHtml(detail({
+      featureDir,
+      feature: 'action_labels',
+      eventLocation: `${spec}:${lineOf(specSource, "test('A.")}`,
+      title: 'A. authAPI -> warning incl auto-resolved',
+    }))
+
+    expect(html).toContain('Auth api then warning including automatically resolved')
+    expect(html).toContain('Skip if required test setup is missing')
+    expect(html).toContain('Prepare the scenario')
+    expect(html).toContain('Record the start time')
+    expect(html).toContain('Prepare unique identifiers')
+    expect(html).toContain('Prepare inventory')
+    expect(html).toContain('Prepare cart')
+    expect(html).toContain('Send checkout request')
+    expect(html).toContain('Read saved order')
+    expect(html).toContain('Wait for for receipt')
+    expect(html).toContain('Toggle voucher')
+    expect(html).toContain('Check linked records')
+    expect(html).toContain('Click the relevant control')
+    expect(html).toContain('Enter the required value')
+    expect(html).toContain('Confidence: 4 strong, 4 not graded')
+    expect(html).toContain('Helper implementation could not be resolved statically')
+  })
+
+  it('covers internal rewrite parsing and audience wording branches', () => {
+    const packet = buildTestReviewPacket(detail({ featureDir: tmpDir }))
+
+    expect(__testReviewExportInternals.parseEvaluationRewrite('before ```json\n{"summary":"s","cases":[]}\n``` after')).toEqual({
+      summary: 's',
+      cases: [],
+    })
+    expect(__testReviewExportInternals.parseEvaluationRewrite('no object')).toBeUndefined()
+    expect(__testReviewExportInternals.parseEvaluationRewrite('{not json}')).toBeUndefined()
+
+    expect(__testReviewExportInternals.parseEvaluationTextSlotRewrite('```json\n{"slots":[{"id":"summary","text":" New "},{"id":1,"text":"bad"},{"id":"x","text":2}]}\n```')).toEqual([
+      { id: 'summary', text: ' New ' },
+    ])
+    expect(__testReviewExportInternals.parseEvaluationTextSlotRewrite('{"slots":[null,0,false,{"id":"summary","text":"ok"}]}')).toEqual([
+      { id: 'summary', text: 'ok' },
+    ])
+    expect(__testReviewExportInternals.parseEvaluationTextSlotRewrite('{"slots":[]}')).toBeUndefined()
+    expect(__testReviewExportInternals.parseEvaluationTextSlotRewrite('{"slots":{}}')).toBeUndefined()
+    expect(__testReviewExportInternals.parseEvaluationTextSlotRewrite('not json')).toBeUndefined()
+    expect(__testReviewExportInternals.previewAgentOutput('')).toBe('<empty output>')
+    expect(__testReviewExportInternals.previewAgentOutput('x'.repeat(510))).toBe(`${'x'.repeat(500)}...`)
+    expect(__testReviewExportInternals.renderPromptTemplate('{{known}} {{missing}}', { known: 'yes' })).toBe('yes {{missing}}')
+    expect(__testReviewExportInternals.evaluationAgentModel('claude')).toBe('haiku')
+    expect(__testReviewExportInternals.evaluationAgentModel('codex')).toBe('gpt-5.4-mini')
+
+    expect(__testReviewExportInternals.normalizeEvaluationRewrite(undefined, packet)).toBeNull()
+    expect(__testReviewExportInternals.normalizeEvaluationRewrite({ summary: 'x', cases: [] }, packet)).toBeNull()
+    expect(__testReviewExportInternals.normalizeEvaluationRewrite({
+      featureTitle: 1,
+      summary: 'x',
+      cases: [{
+        title: 't',
+        whatWasChecked: 'w',
+        whyItMatters: 'm',
+        confidence: 'c',
+        flowSteps: [{ title: 'step', detail: 1 }, null, { title: 2 }],
+      }],
+    } as never, packet)).toEqual({
+      summary: 'x',
+      cases: [{
+        title: 't',
+        whatWasChecked: 'w',
+        whyItMatters: 'm',
+        confidence: 'c',
+        flowSteps: [{ title: 'step' }],
+      }],
+    })
+    expect(__testReviewExportInternals.normalizeEvaluationRewrite({
+      summary: 'x',
+      cases: [{ title: 't', whatWasChecked: 'w', whyItMatters: 'm' }],
+    } as never, packet)).toBeNull()
+    expect(__testReviewExportInternals.evaluationTextSlots({
+      summary: 'Summary',
+      cases: [{
+        title: 'Title',
+        whatWasChecked: 'Checked',
+        whyItMatters: 'Matters',
+        confidence: 'Confidence',
+        flowSteps: [{ title: 'Step without detail' }, { title: 'Step with detail', detail: 'Detail' }],
+      }],
+    })).toContainEqual({ id: 'cases.0.flowSteps.1.detail', text: 'Detail' })
+    expect(__testReviewExportInternals.evaluationTextSlots({
+      summary: 'Summary only',
+      cases: [{ title: 'Title', whatWasChecked: 'Checked', whyItMatters: 'Matters', confidence: 'Confidence' }],
+    })).toEqual([
+      { id: 'summary', text: 'Summary only' },
+      { id: 'cases.0.title', text: 'Title' },
+      { id: 'cases.0.whatWasChecked', text: 'Checked' },
+      { id: 'cases.0.whyItMatters', text: 'Matters' },
+      { id: 'cases.0.confidence', text: 'Confidence' },
+    ])
+    expect(__testReviewExportInternals.applyEvaluationTextSlotRewrite({
+      featureTitle: 'Base feature',
+      summary: 'Base summary',
+      cases: [{
+        title: 'Base title',
+        whatWasChecked: 'Base checked',
+        whyItMatters: 'Base matters',
+        confidence: 'Base confidence',
+        flowSteps: [{ title: 'Base step' }, { title: 'Base detailed', detail: 'Base detail' }],
+      }],
+    }, [
+      { id: 'featureTitle', text: 'New feature' },
+      { id: 'cases.0.whatWasChecked', text: 'New checked' },
+      { id: 'cases.0.flowSteps.0.detail', text: 'New detail' },
+      { id: 'cases.0.flowSteps.1.title', text: 'New detailed title' },
+    ])).toMatchObject({
+      featureTitle: 'New feature',
+      summary: 'Base summary',
+      cases: [{
+        title: 'Base title',
+        whatWasChecked: 'New checked',
+        whyItMatters: 'Base matters',
+        confidence: 'Base confidence',
+        flowSteps: [
+          { title: 'Base step', detail: 'New detail' },
+          { title: 'New detailed title', detail: 'Base detail' },
+        ],
+      }],
+    })
+    expect(__testReviewExportInternals.applyEvaluationTextSlotRewrite({
+      summary: 'Base summary',
+      cases: [{
+        title: 'Base title',
+        whatWasChecked: 'Base checked',
+        whyItMatters: 'Base matters',
+        confidence: 'Base confidence',
+      }],
+    }, [
+      { id: 'featureTitle', text: '   ' },
+      { id: 'summary', text: 'New summary' },
+      { id: 'cases.0.title', text: 'New title' },
+      { id: 'cases.0.whyItMatters', text: 'New matters' },
+      { id: 'cases.0.confidence', text: 'New confidence' },
+    ])).toEqual({
+      summary: 'New summary',
+      cases: [{
+        title: 'New title',
+        whatWasChecked: 'Base checked',
+        whyItMatters: 'New matters',
+        confidence: 'New confidence',
+      }],
+    })
+
+    const failed = detail({ featureDir: tmpDir, title: 'fails checkout' })
+    failed.manifest.status = 'failed'
+    failed.summary = { complete: true, total: 1, passed: 0, failed: [{ name: 'test-case-fails-checkout', error: 'boom' }] }
+    failed.playbackEvents![0].status = 'failed'
+    failed.playbackEvents![0].passed = false
+    const failedPacket = buildTestReviewPacket(failed)
+    const promptTemplate = path.join(tmpDir, 'prompt.md')
+    fs.writeFileSync(promptTemplate, '{{evidence}}\n{{textSlots}}\n{{sourceHtmlSection}}\n{{unknown}}')
+    const failedPrompt = buildEvaluationLlmPrompt({
+      packet: failedPacket,
+      templatePath: promptTemplate,
+      flowcharts: [{ testName: 'different-test', steps: ['unused'] }],
+    })
+    expect(failedPrompt).toContain('"failureMessages"')
+    expect(failedPrompt).toContain('[]')
+    expect(failedPrompt).toContain('{{unknown}}')
+
+    expect(__testReviewExportInternals.audienceTitle('B. authAPI warn incl auto-resolved -> done')).toBe('Auth api warning including automatically resolved then done')
+    expect(__testReviewExportInternals.audienceFlowDetail('2 nested assertions')).toBe('2 checks inside this shared step')
+    expect(__testReviewExportInternals.audienceFlowDetail('1 nested assertion')).toBe('1 check inside this shared step')
+    expect(__testReviewExportInternals.audienceFlowDetail('strict unknown nested assertion')).toBe('strong not graded included checks')
+    expect(__testReviewExportInternals.audienceFlowDetail('const ids = makeIds()')).toBe('Uses the recorded test step.')
+    expect(__testReviewExportInternals.audienceFlowTitle({ kind: 'start', title: 'Checkout starts' } as never, packet.tests[0])).toBe('Start the scenario')
+    expect(__testReviewExportInternals.audienceFlowTitle({ kind: 'end', title: 'Result: failed' } as never, packet.tests[0])).toBe('Run result: failed')
+    expect(__testReviewExportInternals.audienceFlowTitle({ kind: 'assertion', title: 'strict assertion' } as never, packet.tests[0])).toBe('Check the expected outcome')
+    expect(__testReviewExportInternals.audienceFlowTitle({ kind: 'helper', title: 'Helper: makeIds', detail: 'const ids = makeIds()' } as never, packet.tests[0])).toBe('Prepare unique identifiers')
+    expect(__testReviewExportInternals.audienceFlowTitle({ kind: 'setup', title: 'Setup' } as never, packet.tests[0])).toBe('Prepare the scenario')
+    expect(__testReviewExportInternals.audienceFlowTitle({ kind: 'action', title: 'Action', detail: 'await page.click()' } as never, packet.tests[0])).toBe('Click the relevant control')
+    expect(__testReviewExportInternals.audienceFlowTitle({ kind: 'action', title: 'Action' } as never, packet.tests[0])).toBe('Run the next step')
+
+    expect(__testReviewExportInternals.readableAction('await expect(page.locator(".ready")).toBeVisible()', packet.tests[0])).toBe('Check the expected outcome')
+    expect(__testReviewExportInternals.readableAction('await page.click()', packet.tests[0])).toBe('Click the relevant control')
+    expect(__testReviewExportInternals.readableAction('await page.fill()', packet.tests[0])).toBe('Enter the required value')
+    expect(__testReviewExportInternals.readableAction('await page.waitForURL(/done/)', packet.tests[0])).toBe('Wait for for url')
+    expect(__testReviewExportInternals.readableAction('route request', packet.tests[0])).toBe('Prepare test data or mocks')
+    expect(__testReviewExportInternals.readableAction('void anything', packet.tests[0])).toBe('Passes checkout')
+
+    expect(__testReviewExportInternals.readableActionName('newClock', 'const start = new Date()')).toBe('Record the start time')
+    expect(__testReviewExportInternals.actionFromIdentifier('expectOrder')).toBe('check order')
+    expect(__testReviewExportInternals.actionFromIdentifier('assert')).toBe('check the expected outcome')
+    expect(__testReviewExportInternals.actionFromIdentifier('mock')).toBe('prepare test data')
+    expect(__testReviewExportInternals.actionFromIdentifier('create', 'const ids = makeIds()')).toBe('prepare unique identifiers')
+    expect(__testReviewExportInternals.actionFromIdentifier('createUserId')).toBe('prepare unique identifiers')
+    expect(__testReviewExportInternals.actionFromIdentifier('send')).toBe('send the request')
+    expect(__testReviewExportInternals.actionFromIdentifier('postSendCall')).toBe('send call')
+    expect(__testReviewExportInternals.actionFromIdentifier('read')).toBe('read the saved record')
+    expect(__testReviewExportInternals.actionFromIdentifier('findOrder')).toBe('read order')
+    expect(__testReviewExportInternals.actionFromIdentifier('poll')).toBe('wait for the expected result')
+    expect(__testReviewExportInternals.actionFromIdentifier('waitReceipt')).toBe('wait for receipt')
+    expect(__testReviewExportInternals.actionFromIdentifier('restore')).toBe('restore test data')
+    expect(__testReviewExportInternals.actionFromIdentifier('enableFlag')).toBe('enable flag')
+    expect(__testReviewExportInternals.actionFromIdentifier('with')).toBe('check the related records')
+    expect(__testReviewExportInternals.actionFromIdentifier('hasClickTarget')).toBe('click the relevant control')
+    expect(__testReviewExportInternals.actionFromIdentifier('')).toBe('')
+
+    expect(__testReviewExportInternals.readableCreatedObject([], 'orderIds')).toBe('unique identifiers')
+    expect(__testReviewExportInternals.readableCreatedObject([], undefined)).toBe('test data')
+    expect(__testReviewExportInternals.readableHelperName('')).toBe('')
+
+    expect(__testReviewExportInternals.classifyAssertion('expect(x).toBeHidden()', 'toBeHidden')).toBe('moderate')
+    expect(__testReviewExportInternals.classifyAssertion('expect(count).toBeTruthy()')).toBe('shallow')
+    expect(__testReviewExportInternals.classifyAssertion('expect(foo).toBeTruthy()')).toBe('unknown')
+
+    expect(__testReviewExportInternals.confidenceForAssertions([{ kind: 'direct', label: 'x', quality: 'moderate', rationale: '', snippet: '' }])).toContain('moderate')
+    expect(__testReviewExportInternals.confidenceForAssertions([{ kind: 'direct', label: 'x', quality: 'unknown', rationale: '', snippet: '' }])).toContain('Review the engineering evidence')
+    expect(__testReviewExportInternals.qualityLabel('moderate')).toBe('moderate')
+    expect(__testReviewExportInternals.qualitySummary([])).toBe('')
+    expect(__testReviewExportInternals.qualitySummaryForAudience([{ kind: 'direct', label: 'x', quality: 'shallow', rationale: '', snippet: '' }])).toBe('1 shallow')
+    expect(__testReviewExportInternals.rationaleForAudience('Static analysis could not confidently classify this assertion.')).toContain("couldn't auto-rate")
+    expect(__testReviewExportInternals.rationaleForAudience('other')).toBe('other')
+
+    expect(__testReviewExportInternals.resultColor('failed')).toMatchObject({ stroke: '#e11d48' })
+    expect(__testReviewExportInternals.resultColor('aborted')).toMatchObject({ stroke: '#64748b' })
+    expect(__testReviewExportInternals.statusClass('')).toBe('unknown')
+    expect(__testReviewExportInternals.formatMs(999)).toBe('999ms')
+    expect(__testReviewExportInternals.wrapSvgText('', 10)).toEqual([''])
+    expect(__testReviewExportInternals.wrapSvgText('averyverylongword', 5)).toEqual(['avery', 'veryl', 'ongwo', 'rd'])
+    expect(__testReviewExportInternals.applyFlowStepRewrite([
+      { kind: 'start', title: 'Original start' },
+      { kind: 'action', title: 'Original action', detail: 'Original detail' },
+    ] as never, [])).toEqual([
+      { kind: 'start', title: 'Original start' },
+      { kind: 'action', title: 'Original action', detail: 'Original detail' },
+    ])
+    expect(__testReviewExportInternals.applyFlowStepRewrite([
+      { kind: 'start', title: 'Original start' },
+      { kind: 'action', title: 'Original action', detail: 'Original detail' },
+    ] as never, [{ title: 'New start' }, { title: '', detail: 'Ignored detail' }])).toEqual([
+      { kind: 'start', title: 'New start' },
+      { kind: 'action', title: 'Original action', detail: 'Original detail' },
+    ])
+    expect(__testReviewExportInternals.flowNodesForTest({
+      ...packet.tests[0],
+      testBody: '',
+      assertions: [],
+    })).toContainEqual(expect.objectContaining({ title: 'Source unavailable', detail: 'No static source match' }))
+    expect(__testReviewExportInternals.renderAssertionHtml({
+      kind: 'direct',
+      label: 'unknown',
+      quality: 'unknown',
+      rationale: 'Static analysis could not confidently classify this assertion.',
+      snippet: 'expect(value).toBeTruthy()',
+    })).not.toContain('helper-ref')
+    expect(__testReviewExportInternals.renderAssertionHtml({
+      kind: 'helper',
+      label: 'expectHelper',
+      quality: 'strict',
+      rationale: 'Uses toHaveText matcher.',
+      snippet: 'expectHelper(page)',
+      helperSnippet: 'function expectHelper() {}',
+      helperName: 'expectHelper',
+      nested: [],
+    })).toContain('helper-ref')
+    expect(__testReviewExportInternals.addCodeLineMarkers('<pre>plain</pre>')).toBe('<pre>plain</pre>')
+    expect(__testReviewExportInternals.addCodeLineMarkers('<pre><code>a\n\nb</code></pre>')).toContain('<span class="line-source"> </span>')
+    const functionSrc = ts.createSourceFile('helpers.ts', 'const helper = () => true\nconst value = 1', ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
+    const [helperStmt, valueStmt] = functionSrc.statements
+    expect(__testReviewExportInternals.functionLikeBody(helperStmt)).toBeDefined()
+    expect(__testReviewExportInternals.functionLikeBody(valueStmt)).toBeUndefined()
   })
 })
 

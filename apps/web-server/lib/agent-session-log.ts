@@ -340,17 +340,25 @@ export function loadAgentSessionLog(ref: AgentSessionRef): AgentEvent[] {
   try { raw = fs.readFileSync(ref.logPath, 'utf-8') } catch { return [] }
   const events: AgentEvent[] = []
   for (const line of raw.split('\n')) {
-    if (!line.trim()) continue
-    let parsed: unknown
-    try { parsed = JSON.parse(line) } catch { continue }
-    if (!parsed || typeof parsed !== 'object') continue
-    if (ref.agent === 'claude') {
-      pushClaudeEvents(parsed as ClaudeLine, events)
-    } else {
-      pushCodexEvents(parsed as CodexLine, events)
-    }
+    for (const ev of parseAgentSessionLine(ref.agent, line)) events.push(ev)
   }
   return events
+}
+
+// Parse a single JSONL line into 0..N normalized events. Shared by the batch
+// loader above and the live tailer used by the structured-event WebSocket.
+export function parseAgentSessionLine(agent: AgentKind, line: string): AgentEvent[] {
+  if (!line.trim()) return []
+  let parsed: unknown
+  try { parsed = JSON.parse(line) } catch { return [] }
+  if (!parsed || typeof parsed !== 'object') return []
+  const out: AgentEvent[] = []
+  if (agent === 'claude') {
+    pushClaudeEvents(parsed as ClaudeLine, out)
+  } else {
+    pushCodexEvents(parsed as CodexLine, out)
+  }
+  return out
 }
 
 export function renderAgentSessionContext(ref: AgentSessionRef, maxChars = 12_000): string {
