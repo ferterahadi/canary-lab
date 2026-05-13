@@ -3,6 +3,7 @@ import { deriveRunViewModel } from '../lib/run-view-model'
 import { useRuns } from '../state/RunsContext'
 import { isActiveRunStatus } from '../../../../shared/run-state'
 import { EvaluationExportTaskStatus } from './EvaluationExportTaskToast'
+import { WizardTaskStatus } from './WizardTaskStatus'
 
 interface Props {
   activeRunDetail: RunDetail | null
@@ -79,6 +80,7 @@ export function GlobalStatusBar({ activeRunDetail, onNavigateToRun }: Props) {
             <span className="shrink-0" style={{ color: 'var(--text-muted)' }}>→</span>
           </button>
         )}
+        <WizardTaskStatus />
         <EvaluationExportTaskStatus />
       </div>
     </div>

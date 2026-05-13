@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { Feature } from '../api/types'
-import { AddTestWizard } from './AddTestWizard'
+import { useWizardDrafts } from '../state/WizardDraftContext'
 import { FeatureConfigEditor } from './FeatureConfigEditor'
 import { ThemeToggle } from './ThemeToggle'
 import { SettingsModal } from './SettingsModal'
@@ -18,7 +18,7 @@ export function FeaturesColumn({
   onSelectFeature,
   onFeaturesChanged,
 }: Props) {
-  const [wizardOpen, setWizardOpen] = useState(false)
+  const { startNewWizard } = useWizardDrafts()
   const [configFor, setConfigFor] = useState<string | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
 
@@ -29,7 +29,7 @@ export function FeaturesColumn({
           <span className="cl-kicker">Features</span>
           <button
             type="button"
-            onClick={() => setWizardOpen(true)}
+            onClick={startNewWizard}
             className="cl-button px-2 py-1 text-[10px] font-semibold uppercase tracking-wide"
             style={{ color: 'var(--accent)' }}
           >
@@ -94,16 +94,6 @@ export function FeaturesColumn({
         </button>
       </div>
       {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
-
-      {wizardOpen && (
-        <AddTestWizard
-          features={features}
-          onClose={({ acceptedFeature }) => {
-            setWizardOpen(false)
-            if (acceptedFeature) onFeaturesChanged?.(acceptedFeature)
-          }}
-        />
-      )}
 
       {configFor && (
         <FeatureConfigEditor

@@ -802,6 +802,15 @@ export function createDraft(
   )
 }
 
+export function listDrafts(opts?: ClientOptions): Promise<DraftRecord[]> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<DraftRecord[]>(
+    `${baseUrl}/api/tests/draft`,
+    { method: 'GET' },
+    fetchImpl,
+  )
+}
+
 export function extractPrdDocuments(
   payload: { prdText?: string; files: File[] },
   opts?: ClientOptions,

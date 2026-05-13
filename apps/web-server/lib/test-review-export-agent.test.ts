@@ -118,6 +118,72 @@ describe('evaluation rewrite agent path', () => {
       /claude: unparseable output: <empty output>.*codex: evaluation rewrite agent failed with exit code 2/s,
     )
   })
+
+  it('records non-Error spawn failures from an available agent', async () => {
+    availableAgents = ['claude']
+    vi.doMock('./runtime/auto-heal', () => ({
+      pickAvailableHealAgent: () => 'claude',
+    }))
+    vi.doMock('child_process', () => ({
+      spawn: () => {
+        throw 'spawn exploded'
+      },
+    }))
+    const { generateEvaluationRewriteWithAgent } = await import('./test-review-export')
+
+    await expect(generateEvaluationRewriteWithAgent(detail(), 'claude', tmpDir)).rejects.toThrow(
+      'claude: spawn exploded',
+    )
+  })
+
+  it('cancels an already-aborted agent run', async () => {
+    availableAgents = ['claude']
+    mockAgentModules()
+    const controller = new AbortController()
+    controller.abort()
+    const { generateEvaluationRewriteWithAgent } = await import('./test-review-export')
+
+    await expect(generateEvaluationRewriteWithAgent(detail(), 'claude', tmpDir, { signal: controller.signal })).rejects.toThrow(
+      'evaluation rewrite cancelled',
+    )
+    expect(spawnCalls[0].child.killed).toEqual(['SIGTERM'])
+  })
+
+  it('reports signalled exits and ignores duplicate close events', async () => {
+    availableAgents = ['codex']
+    mockAgentModules(({ child }) => {
+      child.close(null, 'SIGKILL')
+      child.close(0)
+    })
+    const { generateEvaluationRewriteWithAgent } = await import('./test-review-export')
+
+    await expect(generateEvaluationRewriteWithAgent(detail(), 'codex', tmpDir)).rejects.toThrow(
+      'evaluation rewrite agent failed with SIGKILL',
+    )
+  })
+
+  it('falls back to stdout when Codex writes an empty output-last-message file', async () => {
+    availableAgents = ['codex']
+    mockAgentModules(({ args, child }) => {
+      const outputPath = args[args.indexOf('--output-last-message') + 1]
+      fs.writeFileSync(outputPath, '   ')
+      child.stdout.emit('data', JSON.stringify({
+        summary: 'Stdout rewrite summary.',
+        cases: [{
+          title: 'Stdout case',
+          whatWasChecked: 'Stdout check.',
+          whyItMatters: 'Stdout impact.',
+          confidence: 'Stdout confidence.',
+        }],
+      }))
+      child.close(0)
+    })
+    const { generateEvaluationRewriteWithAgent } = await import('./test-review-export')
+
+    const rewrite = await generateEvaluationRewriteWithAgent(detail(), 'codex', tmpDir)
+
+    expect(rewrite?.summary).toBe('Stdout rewrite summary.')
+  })
 })
 
 function mockAgentModules(onSpawn?: (ctx: { command: string; args: string[]; child: FakeChild }) => void): void {
@@ -152,7 +218,7 @@ class FakeChild extends EventEmitter {
     this.killed.push(signal)
   }
 
-  close(code: number, signal: string | null = null): void {
+  close(code: number | null, signal: string | null = null): void {
     this.emit('close', code, signal)
   }
 }

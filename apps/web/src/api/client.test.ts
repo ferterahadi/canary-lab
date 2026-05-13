@@ -34,6 +34,7 @@ import {
   getAgentSession,
   getRunDetail,
   listFeatures,
+  listDrafts,
   listJournal,
   listRuns,
   listWorkspaceDirs,
@@ -361,6 +362,13 @@ describe('api client', () => {
     const call = (fetchImpl.mock.calls[0] as [string, RequestInit])
     expect(call[0]).toBe('/api/tests/draft')
     expect(call[1].method).toBe('POST')
+  })
+
+  it('listDrafts fetches all wizard drafts', async () => {
+    const drafts = [{ draftId: 'd1', prdText: 'p', prdDocuments: [], repos: [], status: 'planning', createdAt: 'c', updatedAt: 'u' }]
+    const fetchImpl = vi.fn().mockResolvedValue(ok(drafts))
+    await expect(listDrafts({ fetchImpl })).resolves.toEqual(drafts)
+    expect(fetchImpl).toHaveBeenCalledWith('/api/tests/draft', { method: 'GET' })
   })
 
   it('extractPrdDocuments builds multipart form data with optional text and files', async () => {

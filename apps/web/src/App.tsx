@@ -7,8 +7,10 @@ import { FeatureConfigEditor } from './components/FeatureConfigEditor'
 import { ResizablePanels } from './components/ResizablePanels'
 import { VerticalSplit } from './components/VerticalSplit'
 import { GlobalStatusBar } from './components/GlobalStatusBar'
+import { AddTestWizard } from './components/AddTestWizard'
 import * as api from './api/client'
 import { useRuns, useRun, useGlobalActiveRun } from './state/RunsContext'
+import { useWizardDrafts } from './state/WizardDraftContext'
 import type { Feature } from './api/types'
 
 export function App() {
@@ -35,6 +37,7 @@ export function App() {
   // happens at render time.
   const { runs: allRuns, startRun: startRunAction } = useRuns()
   const { entry: globalActiveRunEntry, detail: activeRunDetail } = useGlobalActiveRun()
+  const { wizardOpen, closeWizard } = useWizardDrafts()
 
   // Column 3 lists runs scoped to the currently-selected feature.
   const featureRuns = useMemo(
@@ -91,6 +94,22 @@ export function App() {
     } catch { /* surfaced via UI */ }
   }, [selectedFeature, globalActiveRunEntry, startRunAction])
 
+  const refreshFeatures = useCallback((preferredFeature?: string | null): void => {
+    api.listFeatures().then((data) => {
+      setFeatures(data)
+      if (preferredFeature && data.some((f) => f.name === preferredFeature)) {
+        pendingRunSelectionRef.current = null
+        setSelectedFeature(preferredFeature)
+        setSelectedRunId(allRuns.find((r) => r.feature === preferredFeature)?.runId ?? null)
+      } else if (!selectedFeature || !data.some((f) => f.name === selectedFeature)) {
+        const nextFeature = data[0]?.name ?? null
+        pendingRunSelectionRef.current = null
+        setSelectedFeature(nextFeature)
+        setSelectedRunId(nextFeature ? allRuns.find((r) => r.feature === nextFeature)?.runId ?? null : null)
+      }
+    }).catch(() => {})
+  }, [allRuns, selectedFeature])
+
   const selectedFeatureEnvs =
     features.find((f) => f.name === selectedFeature)?.envs ?? []
 
@@ -110,21 +129,7 @@ export function App() {
             setSelectedFeature(name)
             setSelectedRunId(allRuns.find((r) => r.feature === name)?.runId ?? null)
           }}
-          onFeaturesChanged={(preferredFeature) => {
-            api.listFeatures().then((data) => {
-              setFeatures(data)
-              if (preferredFeature && data.some((f) => f.name === preferredFeature)) {
-                pendingRunSelectionRef.current = null
-                setSelectedFeature(preferredFeature)
-                setSelectedRunId(allRuns.find((r) => r.feature === preferredFeature)?.runId ?? null)
-              } else if (!selectedFeature || !data.some((f) => f.name === selectedFeature)) {
-                const nextFeature = data[0]?.name ?? null
-                pendingRunSelectionRef.current = null
-                setSelectedFeature(nextFeature)
-                setSelectedRunId(nextFeature ? allRuns.find((r) => r.feature === nextFeature)?.runId ?? null : null)
-              }
-            }).catch(() => {})
-          }}
+          onFeaturesChanged={refreshFeatures}
         />
       ),
     },
@@ -214,6 +219,13 @@ export function App() {
               }
             }).catch(() => {})
           }}
+        />
+      )}
+      {wizardOpen && (
+        <AddTestWizard
+          features={features}
+          onClose={closeWizard}
+          onAcceptedFeature={(feature) => refreshFeatures(feature)}
         />
       )}
     </div>
