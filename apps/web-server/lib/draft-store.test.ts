@@ -50,7 +50,6 @@ describe('createDraft', () => {
   it('creates the draft dir and writes prd + state', () => {
     const rec = createDraft(tmp, { ...baseInput, now: () => '2026-04-29T15:00:00Z' })
     expect(rec.status).toBe('created')
-    expect(rec.skills).toEqual([])
     expect(rec.createdAt).toBe('2026-04-29T15:00:00Z')
     const p = paths(tmp, baseInput.draftId)
     expect(fs.existsSync(p.prdMd)).toBe(true)
@@ -58,10 +57,9 @@ describe('createDraft', () => {
     expect(JSON.parse(fs.readFileSync(p.draftJson, 'utf8')).status).toBe('created')
   })
 
-  it('honors provided featureName and skills', () => {
-    const rec = createDraft(tmp, { ...baseInput, skills: ['s1', 's2'], featureName: 'login_flow' })
+  it('honors provided featureName', () => {
+    const rec = createDraft(tmp, { ...baseInput, featureName: 'login_flow' })
     expect(rec.featureName).toBe('login_flow')
-    expect(rec.skills).toEqual(['s1', 's2'])
   })
 })
 
@@ -80,7 +78,7 @@ describe('readDraft / writeDraft', () => {
     const rec = createDraft(tmp, baseInput)
     const orig = rec.updatedAt
     // wait a tick so the timestamp differs
-    const next = { ...rec, status: 'recommending' as const }
+    const next = { ...rec, status: 'planning' as const }
     writeDraft(tmp, next, () => '2099-01-01T00:00:00Z')
     const back = readDraft(tmp, rec.draftId)!
     expect(back.updatedAt).toBe('2099-01-01T00:00:00Z')
@@ -117,7 +115,7 @@ describe('listDrafts', () => {
 
 describe('canTransition', () => {
   it('allows valid transitions', () => {
-    expect(canTransition('created', 'recommending')).toBe(true)
+    expect(canTransition('created', 'planning')).toBe(true)
     expect(canTransition('planning', 'cancelled')).toBe(true)
     expect(canTransition('cancelled', 'rejected')).toBe(true)
     expect(canTransition('plan-ready', 'generating')).toBe(true)

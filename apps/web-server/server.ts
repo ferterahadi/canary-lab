@@ -9,7 +9,6 @@ import { featureConfigRoutes } from './routes/feature-config'
 import { projectConfigRoutes } from './routes/project-config'
 import { runsRoutes } from './routes/runs'
 import { journalRoutes } from './routes/journal'
-import { skillsRoutes } from './routes/skills'
 import { testsDraftRoutes, type TestsDraftRouteDeps } from './routes/tests-draft'
 import { paneStreamRoutes } from './ws/pane-stream'
 import { runsStreamRoutes } from './ws/runs-stream'
@@ -17,7 +16,6 @@ import { draftAgentStreamRoutes } from './ws/draft-agent-stream'
 import { createRegistry, RunStore, type OrchestratorRegistry, type OrchestratorLike } from './lib/run-store'
 import { PaneBroker } from './lib/pane-broker'
 import { loadFeatures } from './lib/feature-loader'
-import { loadSkills, type SkillRecord } from './lib/skill-loader'
 import {
   spawnPlanAgent as makePlanAgentSpawner,
   spawnSpecAgent as makeSpecAgentSpawner,
@@ -70,8 +68,6 @@ export interface CreateServerOptions {
   featuresDir?: string
   logsDir?: string
   journalPath?: string
-  // Test seams. Production wiring uses the defaults below.
-  listSkills?: () => SkillRecord[]
   // Override the wizard agent spawners — tests inject sync stubs.
   testsDraftDepsOverride?: Partial<TestsDraftRouteDeps>
   // Override the pty factory used by the wizard runner. Production uses
@@ -126,7 +122,6 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
   })
   await app.register(projectConfigRoutes, { projectRoot: opts.projectRoot })
   await app.register(journalRoutes, { logsDir, journalPath })
-  await app.register(skillsRoutes, { listSkills: opts.listSkills })
 
   // Wizard route deps. Production: real claude -p via node-pty + on-demand
   // PaneBroker per draft so the WebSocket route can stream live agent output.
@@ -139,9 +134,6 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
     }
     return b
   }
-  const skillProvider = opts.listSkills ?? (() => loadSkills())
-  const skillById = (id: string): SkillRecord | undefined =>
-    skillProvider().find((s) => s.id === id)
 
   const productionTestsDraftDeps: TestsDraftRouteDeps = {
     logsDir,
@@ -179,15 +171,6 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
       return makeSpecAgentSpawner({ ptyFactory, broker, registry: wizardAgents })(input)
     },
     cancelGeneration: (draftId: string) => wizardAgents.cancel(draftId),
-    loadSkillContent: (id: string) => {
-      const rec = skillById(id)
-      if (!rec) return ''
-      try {
-        return fs.readFileSync(rec.path, 'utf8')
-      } catch {
-        return ''
-      }
-    },
   }
 
   const testsDraftDeps: TestsDraftRouteDeps = {
@@ -247,6 +230,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
 
   await app.register(runsRoutes, {
     featuresDir,
+    projectRoot: opts.projectRoot,
     store: runStore,
     startRun: async (featureName: string, env?: string): Promise<OrchestratorLike> => {
       const features = loadFeatures(featuresDir)

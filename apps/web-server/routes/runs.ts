@@ -1,11 +1,13 @@
-import type { FastifyInstance } from 'fastify'
+import type { FastifyInstance, FastifyReply } from 'fastify'
 import fs from 'fs'
 import path from 'path'
-import type { PlaywrightArtifact } from '../lib/run-store'
+import type { PlaywrightArtifact, RunDetail } from '../lib/run-store'
 import type { RunStore, OrchestratorLike, RestartHealResult } from '../lib/run-store'
 import { loadFeatures } from '../lib/feature-loader'
 import { buildRunPaths, runDirFor } from '../lib/runtime/run-paths'
-import { createAssertionExport } from '../lib/test-review-export'
+import { createEvaluationExport, generateEvaluationRewriteWithAgent, type EvaluationRewrite } from '../lib/test-review-export'
+import { loadProjectConfig } from '../lib/runtime/launcher/project-config'
+import { PaneBroker, type PaneSubscriber } from '../lib/pane-broker'
 import {
   loadAgentSessionLog,
   locateMostRecentAgentSessionRef,
@@ -14,8 +16,42 @@ import {
 } from '../lib/agent-session-log'
 import { isTerminalRunStatus } from '../../../shared/run-state'
 
+const EVALUATION_REWRITE_FORMAT_VERSION = 6
+
+type EvaluationExportMode = 'raw' | 'localized'
+type EvaluationExportStatus = 'running' | 'completed' | 'failed'
+
+interface EvaluationExportTask {
+  taskId: string
+  runId: string
+  feature: string
+  mode: EvaluationExportMode
+  status: EvaluationExportStatus
+  createdAt: string
+  updatedAt: string
+  downloadReady: boolean
+  error?: string
+  archiveBase: string
+  zip?: Buffer
+  broker: PaneBroker
+  abortController: AbortController
+}
+
+interface EvaluationExportTaskView {
+  taskId: string
+  runId: string
+  feature: string
+  mode: EvaluationExportMode
+  status: EvaluationExportStatus
+  createdAt: string
+  updatedAt: string
+  downloadReady: boolean
+  error?: string
+}
+
 export interface RunsRouteDeps {
   featuresDir: string
+  projectRoot?: string
   /** Single source of truth for run state. Routes read + mutate exclusively
    *  through this — no direct manifest/index file access. */
   store: RunStore
@@ -24,9 +60,17 @@ export interface RunsRouteDeps {
   // initial spawn but not test completion). Injected so tests can stub it.
   startRun(feature: string, env?: string): Promise<OrchestratorLike>
   restartHeal?(runId: string, text: string): Promise<RestartHealResult>
+  generateEvaluationRewrite?(
+    detail: Parameters<typeof generateEvaluationRewriteWithAgent>[0],
+    audienceAdapter: Parameters<typeof generateEvaluationRewriteWithAgent>[1],
+    projectRoot?: string,
+    options?: Parameters<typeof generateEvaluationRewriteWithAgent>[3],
+  ): Promise<EvaluationRewrite | null>
 }
 
 export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Promise<void> {
+  const evaluationExports = new Map<string, EvaluationExportTask>()
+
   app.get<{ Querystring: { feature?: string } }>('/api/runs', async (req) => {
     return deps.store.list({ feature: req.query.feature })
   })
@@ -76,7 +120,108 @@ export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Pro
     return { agent: ref.agent, sessionId: ref.sessionId, events }
   })
 
+  const buildEvaluationZip = async (
+    detail: RunDetail,
+    mode: EvaluationExportMode,
+    log?: (chunk: string) => void,
+    signal?: AbortSignal,
+  ): Promise<{ archiveBase: string; zip: Buffer }> => {
+    throwIfAborted(signal)
+    log?.(`[evaluation] preparing ${mode === 'raw' ? 'raw output' : 'localized output'} export\n`)
+    const videos = assertionVideos(
+      detail.playwrightArtifacts,
+      buildRunPaths(runDirFor(deps.store.logsDir, detail.runId)).playwrightArtifactsDir,
+      detail.runId,
+    )
+    const archiveBase = `canary-lab-evaluation-${safeFilename(detail.manifest.feature)}-${safeFilename(detail.runId)}`
+    const audienceAdapter = mode === 'localized' && deps.projectRoot ? loadProjectConfig(deps.projectRoot).healAgent : 'deterministic'
+    const runDir = runDirFor(deps.store.logsDir, detail.runId)
+    const rewrite = mode === 'localized'
+      ? await loadEvaluationRewrite(detail, runDir, audienceAdapter, deps.projectRoot, deps.generateEvaluationRewrite, app.log, log, signal)
+      : undefined
+    throwIfAborted(signal)
+    const exported = await createEvaluationExport(detail, {
+      audienceAdapter,
+      rewrite,
+      videoLinksByTestName: videoLinksByTestName(videos),
+    })
+    const zip = createZip([
+      { filename: 'evaluation.html', data: Buffer.from(exported.html, 'utf8') },
+      ...exported.assets,
+      ...videos.map((video) => ({ filename: video.filename, data: fs.readFileSync(video.path) })),
+    ])
+    log?.('[evaluation] export archive ready\n')
+    return { archiveBase, zip }
+  }
+
+  const sendEvaluationExport = async (runId: string, reply: FastifyReply) => {
+    const detail = deps.store.get(runId)
+    if (!detail) {
+      reply.code(404)
+      return { error: 'run not found' }
+    }
+    if (!isTerminalRunStatus(detail.manifest.status)) {
+      reply.code(409)
+      return { error: 'evaluation export is available after the run finishes' }
+    }
+    const { archiveBase, zip } = await buildEvaluationZip(detail, 'localized')
+    reply
+      .type('application/zip')
+      .header('content-disposition', `attachment; filename="${archiveBase}.zip"`)
+    return reply.send(zip)
+  }
+
+  const startEvaluationExportTask = (detail: RunDetail, mode: EvaluationExportMode): EvaluationExportTaskView => {
+    const now = new Date().toISOString()
+    const task: EvaluationExportTask = {
+      taskId: `eval-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+      runId: detail.runId,
+      feature: detail.manifest.feature,
+      mode,
+      status: 'running',
+      createdAt: now,
+      updatedAt: now,
+      downloadReady: false,
+      archiveBase: `canary-lab-evaluation-${safeFilename(detail.manifest.feature)}-${safeFilename(detail.runId)}`,
+      broker: new PaneBroker(),
+      abortController: new AbortController(),
+    }
+    evaluationExports.set(task.taskId, task)
+    const push = (chunk: string): void => task.broker.push('export', chunk)
+    push(`[evaluation] task ${task.taskId} started\n`)
+    void (async () => {
+      try {
+        const built = await buildEvaluationZip(detail, mode, push, task.abortController.signal)
+        if (!evaluationExports.has(task.taskId)) return
+        task.archiveBase = built.archiveBase
+        task.zip = built.zip
+        task.status = 'completed'
+        task.downloadReady = true
+        task.updatedAt = new Date().toISOString()
+        push('[evaluation] task completed\n')
+        task.broker.markExit('export', 0)
+      } catch (err) {
+        if (!evaluationExports.has(task.taskId)) return
+        task.status = 'failed'
+        task.error = err instanceof Error ? err.message : String(err)
+        task.updatedAt = new Date().toISOString()
+        task.downloadReady = false
+        push(`[evaluation] task failed: ${task.error}\n`)
+        task.broker.markExit('export', 1)
+      }
+    })()
+    return taskView(task)
+  }
+
+  app.get<{ Params: { runId: string } }>('/api/runs/:runId/evaluation.html', async (req, reply) => {
+    return sendEvaluationExport(req.params.runId, reply)
+  })
+
   app.get<{ Params: { runId: string } }>('/api/runs/:runId/assertion.html', async (req, reply) => {
+    return sendEvaluationExport(req.params.runId, reply)
+  })
+
+  app.post<{ Params: { runId: string }; Body: { mode?: string } }>('/api/runs/:runId/evaluation-export', async (req, reply) => {
     const detail = deps.store.get(req.params.runId)
     if (!detail) {
       reply.code(404)
@@ -84,24 +229,75 @@ export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Pro
     }
     if (!isTerminalRunStatus(detail.manifest.status)) {
       reply.code(409)
-      return { error: 'assertion export is available after the run finishes' }
+      return { error: 'evaluation export is available after the run finishes' }
     }
-    const videos = assertionVideos(
-      detail.playwrightArtifacts,
-      buildRunPaths(runDirFor(deps.store.logsDir, detail.runId)).playwrightArtifactsDir,
-      detail.runId,
-    )
-    const archiveBase = `canary-lab-assertion-${safeFilename(detail.manifest.feature)}-${safeFilename(detail.runId)}`
-    const exported = await createAssertionExport(detail, { videoLinksByTestName: videoLinksByTestName(videos) })
-    const zip = createZip([
-      { filename: 'assertion.html', data: Buffer.from(exported.html, 'utf8') },
-      ...exported.assets,
-      ...videos.map((video) => ({ filename: video.filename, data: fs.readFileSync(video.path) })),
-    ])
+    const mode = parseEvaluationExportMode(req.body?.mode)
+    if (!mode) {
+      reply.code(400)
+      return { error: 'mode must be "raw" or "localized"' }
+    }
+    reply.code(202)
+    return startEvaluationExportTask(detail, mode)
+  })
+
+  app.get<{ Params: { taskId: string } }>('/api/evaluation-exports/:taskId', async (req, reply) => {
+    const task = evaluationExports.get(req.params.taskId)
+    if (!task) {
+      reply.code(404)
+      return { error: 'evaluation export task not found' }
+    }
+    return taskView(task)
+  })
+
+  app.get<{ Params: { taskId: string } }>('/api/evaluation-exports/:taskId/download', async (req, reply) => {
+    const task = evaluationExports.get(req.params.taskId)
+    if (!task) {
+      reply.code(404)
+      return { error: 'evaluation export task not found' }
+    }
+    if (task.status !== 'completed' || !task.zip) {
+      reply.code(409)
+      return { error: 'evaluation export is not ready' }
+    }
     reply
       .type('application/zip')
-      .header('content-disposition', `attachment; filename="${archiveBase}.zip"`)
-    return reply.send(zip)
+      .header('content-disposition', `attachment; filename="${task.archiveBase}.zip"`)
+    return reply.send(task.zip)
+  })
+
+  app.delete<{ Params: { taskId: string } }>('/api/evaluation-exports/:taskId', async (req, reply) => {
+    const task = evaluationExports.get(req.params.taskId)
+    if (!task) {
+      reply.code(404)
+      return { error: 'evaluation export task not found' }
+    }
+    if (task.status === 'running') {
+      task.abortController.abort()
+      task.broker.push('export', '[evaluation] task cancelled\n')
+    }
+    task.broker.markExit('export', task.status === 'running' ? 1 : 0)
+    evaluationExports.delete(req.params.taskId)
+    reply.code(204)
+    return reply.send()
+  })
+
+  app.get<{ Params: { taskId: string } }>('/ws/evaluation-exports/:taskId', { websocket: true }, (socket, req) => {
+    const task = evaluationExports.get(req.params.taskId)
+    if (!task) {
+      socket.send(JSON.stringify({ type: 'error', error: 'evaluation export task not found' }))
+      socket.close()
+      return
+    }
+    const sub: PaneSubscriber = {
+      send: (msg) => {
+        try { socket.send(JSON.stringify(msg)) } catch { /* socket closed */ }
+      },
+      close: () => {
+        try { socket.close() } catch { /* already closed */ }
+      },
+    }
+    const unsub = task.broker.subscribe('export', sub)
+    socket.on('close', () => unsub())
   })
 
   app.get<{ Params: { runId: string; '*': string } }>('/api/runs/:runId/artifacts/*', async (req, reply) => {
@@ -330,6 +526,97 @@ function extensionForContentType(contentType: string | undefined): string | unde
   if (contentType === 'video/mp4') return '.mp4'
   if (contentType === 'video/webm') return '.webm'
   return undefined
+}
+
+async function loadEvaluationRewrite(
+  detail: Parameters<typeof generateEvaluationRewriteWithAgent>[0],
+  runDir: string,
+  audienceAdapter: Parameters<typeof generateEvaluationRewriteWithAgent>[1],
+  projectRoot: string | undefined,
+  generate: RunsRouteDeps['generateEvaluationRewrite'],
+  log?: Pick<FastifyInstance['log'], 'warn'>,
+  onOutput?: (chunk: string) => void,
+  signal?: AbortSignal,
+): Promise<EvaluationRewrite | undefined> {
+  throwIfAborted(signal)
+  const cached = readCachedEvaluationRewrite(runDir)
+  if (cached) {
+    onOutput?.('[evaluation] using cached localized wording\n')
+    return cached
+  }
+  try {
+    onOutput?.('[evaluation] generating localized wording\n')
+    const generated = await (generate ?? generateEvaluationRewriteWithAgent)(detail, audienceAdapter, projectRoot, { onOutput, signal })
+    throwIfAborted(signal)
+    if (generated) {
+      clearEvaluationRewriteError(runDir)
+      writeCachedEvaluationRewrite(runDir, generated)
+      onOutput?.('[evaluation] localized wording cached\n')
+    } else {
+      writeEvaluationRewriteError(runDir, `No evaluation rewrite was generated for adapter "${audienceAdapter ?? 'auto'}".`)
+    }
+    return generated ?? undefined
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    log?.warn(`Evaluation rewrite failed for run ${detail.runId}: ${message}`)
+    writeEvaluationRewriteError(runDir, message)
+    return undefined
+  }
+}
+
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted) throw new Error('evaluation export cancelled')
+}
+
+function readCachedEvaluationRewrite(runDir: string): EvaluationRewrite | undefined {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(path.join(runDir, 'evaluation-rewrite.json'), 'utf-8')) as EvaluationRewrite
+    return parsed.formatVersion === EVALUATION_REWRITE_FORMAT_VERSION ? parsed : undefined
+  } catch {
+    return undefined
+  }
+}
+
+function writeCachedEvaluationRewrite(runDir: string, rewrite: EvaluationRewrite): void {
+  try {
+    fs.writeFileSync(path.join(runDir, 'evaluation-rewrite.json'), `${JSON.stringify({ ...rewrite, formatVersion: EVALUATION_REWRITE_FORMAT_VERSION }, null, 2)}\n`)
+  } catch {
+    return undefined
+  }
+}
+
+function writeEvaluationRewriteError(runDir: string, message: string): void {
+  try {
+    fs.writeFileSync(path.join(runDir, 'evaluation-rewrite-error.txt'), `${message.trim()}\n`)
+  } catch {
+    return undefined
+  }
+}
+
+function clearEvaluationRewriteError(runDir: string): void {
+  try {
+    fs.rmSync(path.join(runDir, 'evaluation-rewrite-error.txt'), { force: true })
+  } catch {
+    return undefined
+  }
+}
+
+function parseEvaluationExportMode(value: string | undefined): EvaluationExportMode | null {
+  return value === 'raw' || value === 'localized' ? value : null
+}
+
+function taskView(task: EvaluationExportTask): EvaluationExportTaskView {
+  return {
+    taskId: task.taskId,
+    runId: task.runId,
+    feature: task.feature,
+    mode: task.mode,
+    status: task.status,
+    createdAt: task.createdAt,
+    updatedAt: task.updatedAt,
+    downloadReady: task.downloadReady,
+    ...(task.error ? { error: task.error } : {}),
+  }
 }
 
 interface ZipEntry {

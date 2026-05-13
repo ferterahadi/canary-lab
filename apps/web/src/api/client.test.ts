@@ -12,6 +12,7 @@ import {
   cloneRepository,
   createDraft,
   cancelDraftGeneration,
+  cancelEvaluationExportTask,
   deleteDraft,
   deleteFeature,
   deleteEnvsetSlot,
@@ -34,13 +35,11 @@ import {
   listFeatures,
   listJournal,
   listRuns,
-  listSkills,
   listWorkspaceDirs,
   putEnvsetSlot,
   putFeatureConfigDoc,
   putPlaywrightConfig,
   readDotenvFile,
-  recommendSkills,
   rejectDraft,
   startRun,
   stopRun,
@@ -101,6 +100,15 @@ describe('api client', () => {
       status: 404,
       body: 'not found',
     })
+  })
+
+  it('cancelEvaluationExportTask deletes the task endpoint', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(null, { status: 204 }))
+    await cancelEvaluationExportTask('task/1', { baseUrl: 'http://x', fetchImpl })
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'http://x/api/evaluation-exports/task%2F1',
+      { method: 'DELETE' },
+    )
   })
 
   it('getDraftAgentLog fetches the full draft agent log by stage', async () => {
@@ -238,33 +246,10 @@ describe('api client', () => {
     await expect(deleteJournalEntry(99, { run: 'r1' }, { fetchImpl })).rejects.toBeInstanceOf(ApiError)
   })
 
-  it('listSkills GETs /api/skills', async () => {
-    const fetchImpl = vi.fn().mockResolvedValue(ok([{ id: 'a', name: 'A', description: 'd', source: 'user', path: '/x' }]))
-    const out = await listSkills({ fetchImpl })
-    expect(out[0].id).toBe('a')
-    expect(fetchImpl).toHaveBeenCalledWith('/api/skills', { method: 'GET' })
-  })
-
-  it('recommendSkills POSTs PRD body', async () => {
-    const fetchImpl = vi.fn().mockResolvedValue(ok([{ skillId: 's', score: 1, matchedTerms: ['x'], reasoning: 'r' }]))
-    const out = await recommendSkills({ prdText: 'hello', topN: 5 }, { fetchImpl })
-    expect(out[0].skillId).toBe('s')
-    expect(fetchImpl).toHaveBeenCalledWith('/api/skills/recommend', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ prdText: 'hello', topN: 5 }),
-    })
-  })
-
-  it('recommendSkills throws ApiError on 400', async () => {
-    const fetchImpl = vi.fn().mockResolvedValue(fail(400, { error: 'prd required' }))
-    await expect(recommendSkills({ prdText: '' }, { fetchImpl })).rejects.toBeInstanceOf(ApiError)
-  })
-
   it('createDraft POSTs payload, returns 201 body', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(ok({ draftId: 'd1', status: 'planning' }, 201))
     const out = await createDraft(
-      { prdText: 'p', repos: [{ name: 'r', localPath: '/r' }], skills: ['s1'] },
+      { prdText: 'p', repos: [{ name: 'r', localPath: '/r' }] },
       { fetchImpl },
     )
     expect(out).toEqual({ draftId: 'd1', status: 'planning' })

@@ -18,7 +18,6 @@ import {
 
 export type DraftStatus =
   | 'created'
-  | 'recommending'
   | 'planning'
   | 'plan-ready'
   | 'generating'
@@ -29,8 +28,7 @@ export type DraftStatus =
   | 'error'
 
 const ALLOWED_TRANSITIONS: Record<DraftStatus, DraftStatus[]> = {
-  created: ['recommending', 'planning', 'rejected', 'cancelled', 'error'],
-  recommending: ['planning', 'rejected', 'cancelled', 'error'],
+  created: ['planning', 'rejected', 'cancelled', 'error'],
   planning: ['plan-ready', 'rejected', 'cancelled', 'error'],
   'plan-ready': ['generating', 'rejected', 'error'],
   generating: ['spec-ready', 'rejected', 'cancelled', 'error'],
@@ -58,7 +56,6 @@ export interface DraftRecord {
   prdText: string
   prdDocuments: DraftPrdDocument[]
   repos: DraftRepo[]
-  skills: string[]
   featureName?: string
   wizardAgent?: 'claude' | 'codex'
   activeAgentStage?: 'planning' | 'generating'
@@ -101,7 +98,6 @@ export interface CreateDraftInput {
   prdText: string
   prdDocuments?: DraftPrdDocument[]
   repos: DraftRepo[]
-  skills?: string[]
   featureName?: string
   now?: () => string
 }
@@ -116,7 +112,6 @@ export function createDraft(logsDir: string, input: CreateDraftInput): DraftReco
     prdText: input.prdText,
     prdDocuments: input.prdDocuments ?? [],
     repos: input.repos,
-    skills: input.skills ?? [],
     featureName: input.featureName,
     status: 'created',
     createdAt: now,

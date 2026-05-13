@@ -9,7 +9,6 @@ function draft(overrides: Partial<DraftRecord> = {}): DraftRecord {
     prdText: 'Login flow',
     prdDocuments: [],
     repos: [{ name: 'app', localPath: '/repo' }],
-    skills: [],
     featureName: 'login_flow',
     status: 'spec-ready',
     createdAt: '2026-05-06T00:00:00.000Z',

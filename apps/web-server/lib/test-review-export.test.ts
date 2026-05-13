@@ -2,7 +2,7 @@ import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { buildTestReviewPacket, createAssertionExport, createAssertionHtml } from './test-review-export'
+import { buildEvaluationLlmPrompt, buildTestReviewPacket, createAssertionExport, createAssertionHtml, createEvaluationExport, createEvaluationHtml, evaluationCodexArgs } from './test-review-export'
 import type { RunDetail } from './run-store'
 
 let tmpDir: string
@@ -16,6 +16,32 @@ afterEach(() => {
 })
 
 describe('test review export', () => {
+  it('builds Codex rewrite args with supported read-only flags', () => {
+    expect(evaluationCodexArgs('rewrite prompt')).toEqual([
+      'exec',
+      '--skip-git-repo-check',
+      '--sandbox',
+      'read-only',
+      '--model',
+      'gpt-5.4-mini',
+      'rewrite prompt',
+    ])
+    expect(evaluationCodexArgs('rewrite prompt')).not.toContain('--full-auto')
+    expect(evaluationCodexArgs('rewrite prompt', '/tmp/evaluation-output.txt', '/tmp/evaluation-schema.json')).toEqual([
+      'exec',
+      '--skip-git-repo-check',
+      '--sandbox',
+      'read-only',
+      '--model',
+      'gpt-5.4-mini',
+      '--output-last-message',
+      '/tmp/evaluation-output.txt',
+      '--output-schema',
+      '/tmp/evaluation-schema.json',
+      'rewrite prompt',
+    ])
+  })
+
   it('maps loop-generated tests back to the shared body and imported assertion helpers', () => {
     const featureDir = path.join(tmpDir, 'feature')
     const helperDir = path.join(featureDir, 'e2e', 'helpers')
@@ -86,44 +112,105 @@ function clickToolbarButton(page) {
     }))
   })
 
-  it('creates deterministic assertion review html', async () => {
-    const body = await createAssertionHtml(detail({ featureDir: tmpDir }))
+  it('creates deterministic evaluation report html', async () => {
+    const body = await createEvaluationHtml(detail({ featureDir: tmpDir }))
 
-    expect(body).toContain('<p class="eyebrow">Assertion Review</p>')
-    expect(body).toContain('<h1 id="assertion-review">Checkout</h1>')
+    expect(body).toContain('<p class="eyebrow">Test Results</p>')
+    expect(body).toContain('<h1 id="evaluation-report">Checkout</h1>')
+    expect(body).toContain('Test Cases')
+    expect(body).not.toContain('Evaluation Summary')
+    expect(body).not.toContain('Product Evaluation')
+    expect(body).not.toContain('Engineering Evidence')
     expect(body).toContain('<div class="summary-strip">')
     expect(body).toContain('<nav class="toc" aria-label="Table of contents">')
-    expect(body).toContain('<a href="#assertion-review" data-section-id="assertion-review" aria-current="true">Checkout</a>')
+    expect(body).toContain('<a href="#evaluation-report" data-section-id="evaluation-report" aria-current="true">Checkout</a>')
     expect(body).toContain('<a href="#test-cases" data-section-id="test-cases">Test Cases</a>')
     expect(body).toContain('<section class="test-case" id="1-passes-checkout">')
     expect(body).toContain('<li class="toc-level-2"><a href="#test-cases" data-section-id="test-cases">Test Cases</a></li>')
-    expect(body).toContain('<li class="toc-level-3"><a href="#1-passes-checkout" data-section-id="1-passes-checkout">1. passes checkout</a></li>')
+    expect(body).toContain('<li class="toc-level-3"><a href="#1-passes-checkout" data-section-id="1-passes-checkout">1. Passes checkout</a></li>')
     expect(body).toContain('IntersectionObserver')
     expect(body).toContain("link.setAttribute('aria-current', 'true')")
-    expect(body).toContain('<h3>Assertion Flow</h3>')
-    expect(body).toContain('<img src="flowcharts/1-passes-checkout.svg" alt="Assertion flow for passes checkout">')
-    expect(body).toContain('Local codebase helper implementations are inlined once below')
-    expect(body).toContain('Test Cases')
+    expect(body).toContain('flow-node')
+    expect(body).toContain('data-code-line')
+    expect(body).toContain('<summary>Test code</summary>')
+    expect(body).not.toContain('scrollIntoView')
+    expect(body).not.toContain('</span>\n<span class="code-line"')
+    expect(body).toContain('<h3>How the test runs</h3>')
+    expect(body).toContain('Evaluation flow for Passes checkout')
     expect(body).toContain('<!doctype html>')
     expect(body).not.toContain('test-review.json')
   })
 
-  it('title-cases feature slugs in the report chrome', async () => {
-    const body = await createAssertionHtml(detail({ featureDir: tmpDir, feature: 'shop_redeeming_eats_voucher' }))
+  it('builds a constrained LLM prompt from technical evidence', () => {
+    const templatePath = path.join(tmpDir, 'evaluation-rewrite.md')
+    fs.writeFileSync(templatePath, 'Prompt from file\nEvidence:\n{{evidence}}\nText slots:\n{{textSlots}}\n{{sourceHtmlSection}}')
+    const packet = buildTestReviewPacket(detail({ featureDir: tmpDir, title: 'call missed -> SMS fallback' }))
+    const prompt = buildEvaluationLlmPrompt({
+      packet,
+      templatePath,
+      sourceHtml: '<html>technical report</html>',
+      flowcharts: [{ testName: packet.tests[0].name, steps: ['Start', 'Action: postSendCall', 'Result: passed'] }],
+    })
 
-    expect(body).toContain('<h1 id="assertion-review">Shop Redeeming Eats Voucher</h1>')
-    expect(body).toContain('<a href="#assertion-review" data-section-id="assertion-review" aria-current="true">Shop Redeeming Eats Voucher</a>')
+    expect(prompt).toContain('Prompt from file')
+    expect(prompt).toContain('"feature": "checkout"')
+    expect(prompt).toContain('"title": "call missed -> SMS fallback"')
+    expect(prompt).toContain('"checkStrength": "1 not graded"')
+    expect(prompt).toContain('"flowSteps"')
+    expect(prompt).toContain('Text slots')
+    expect(prompt).toContain('"id": "cases.0.title"')
+    expect(prompt).toContain('Current generated HTML to rewrite from.')
+    expect(prompt).toContain('<html>technical report</html>')
+  })
+
+  it('loads the packaged evaluation rewrite prompt by default', () => {
+    const packet = buildTestReviewPacket(detail({ featureDir: tmpDir, title: 'call missed -> SMS fallback' }))
+    const prompt = buildEvaluationLlmPrompt({
+      packet,
+      sourceHtml: '<html>technical report</html>',
+      flowcharts: [{ testName: packet.tests[0].name, steps: ['Start', 'Action: postSendCall', 'Result: passed'] }],
+    })
+
+    expect(prompt).toContain('Rewrite the human-facing text slots')
+    expect(prompt).toContain('Return strict JSON')
+    expect(prompt).toContain('"id": "cases.0.title"')
+  })
+
+  it('uses validated generated narrative when provided', async () => {
+    const body = await createEvaluationHtml(detail({ featureDir: tmpDir }), {
+      narrative: {
+        featureTitle: 'Generated feature title',
+        summary: 'Generated plain-language summary.',
+        cases: [{
+          title: 'Generated product title',
+          whatWasChecked: 'Generated scenario explanation.',
+          whyItMatters: 'Generated stakeholder impact.',
+          confidence: 'Generated confidence note.',
+          flowSteps: [{ title: 'Generated flow step', detail: 'Generated flow detail' }],
+        }],
+      },
+    })
+
+    expect(body).toContain('Generated feature title')
+    expect(body).toContain('Generated plain-language summary.')
+    expect(body).toContain('Generated product title')
+    expect(body).toContain('Generated flow step')
+  })
+
+  it('title-cases feature slugs in the report chrome', async () => {
+    const body = await createEvaluationHtml(detail({ featureDir: tmpDir, feature: 'shop_redeeming_eats_voucher' }))
+
+    expect(body).toContain('<h1 id="evaluation-report">Shop Redeeming Eats Voucher</h1>')
+    expect(body).toContain('<a href="#evaluation-report" data-section-id="evaluation-report" aria-current="true">Shop Redeeming Eats Voucher</a>')
   })
 
   it('creates external flowchart svg assets for each test case', async () => {
-    const exported = await createAssertionExport(detail({ featureDir: tmpDir }))
+    const exported = await createEvaluationExport(detail({ featureDir: tmpDir }))
 
-    expect(exported.html).toContain('<img src="flowcharts/1-passes-checkout.svg"')
-    expect(exported.assets).toEqual([
-      expect.objectContaining({ filename: 'flowcharts/1-passes-checkout.svg' }),
-    ])
-    const svg = exported.assets[0].data.toString('utf8')
-    expect(svg).toContain('<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="186"')
+    expect(exported.assets).toEqual([])
+    const svg = exported.html
+    expect(svg).toContain('<svg class="flowchart" xmlns="http://www.w3.org/2000/svg" width="1280" height="186"')
+    expect(svg).toContain('class="flow-node"')
     expect(svg).toContain('class="connector"')
     expect(svg).toContain('filter="url(#nodeShadow)"')
     expect(svg).toContain('text-anchor="middle"')
@@ -132,17 +219,15 @@ function clickToolbarButton(page) {
     expect(svg).toContain('stroke="#64748b"')
     expect(svg).toContain('stroke="#16a34a"')
     expect(svg).toContain('Source unavailable')
-    expect(svg).toContain('Result: passed')
+    expect(svg).toContain('Run result: passed')
     expect(svg).not.toContain('height="368"')
   })
 
   it('sanitizes punctuation-only test titles for flowchart filenames', async () => {
     const exported = await createAssertionExport(detail({ featureDir: tmpDir, title: '!!!' }))
 
-    expect(exported.assets).toContainEqual(
-      expect.objectContaining({ filename: 'flowcharts/1.svg' }),
-    )
-    expect(exported.html).toContain('<img src="flowcharts/1.svg"')
+    expect(exported.assets).toEqual([])
+    expect(exported.html).toContain('Evaluation flow for')
   })
 
   it('renders per-test video links after assertions', async () => {
@@ -157,7 +242,7 @@ test('records checkout video', async ({ page }) => {
 `
     fs.writeFileSync(spec, specSource)
 
-    const body = await createAssertionHtml(detail({
+    const body = await createEvaluationHtml(detail({
       featureDir,
       eventLocation: `${spec}:${lineOf(specSource, "test('records")}`,
       title: 'records checkout video',
@@ -169,9 +254,9 @@ test('records checkout video', async ({ page }) => {
 
     expect(body).toContain('<h3>Video</h3>')
     expect(body).toContain('<video controls preload="metadata" src="run-1.webm"></video>')
-    expect(body.indexOf('<h3>Assertion Flow</h3>')).toBeLessThan(body.indexOf('<h3>Test Body</h3>'))
-    expect(body.indexOf('<h3>Test Body</h3>')).toBeLessThan(body.indexOf('<h3>Assertions</h3>'))
-    expect(body.indexOf('<h3>Assertions</h3>')).toBeLessThan(body.indexOf('<h3>Video</h3>'))
+    expect(body.indexOf('<h3>How the test runs</h3>')).toBeLessThan(body.indexOf('<summary>Test code</summary>'))
+    expect(body.indexOf('<summary>Test code</summary>')).toBeLessThan(body.indexOf('<summary>Checks</summary>'))
+    expect(body.indexOf('<summary>Checks</summary>')).toBeLessThan(body.indexOf('<h3>Video</h3>'))
   })
 
   it('keeps duplicate test titles addressable in the assertion review table of contents', async () => {
@@ -202,8 +287,8 @@ test('same title', async ({ page }) => {
 
     expect(body).toContain('<section class="test-case" id="1-same-title">')
     expect(body).toContain('<section class="test-case" id="2-same-title">')
-    expect(body).toContain('<a href="#1-same-title" data-section-id="1-same-title">1. same title</a>')
-    expect(body).toContain('<a href="#2-same-title" data-section-id="2-same-title">2. same title</a>')
+    expect(body).toContain('<a href="#1-same-title" data-section-id="1-same-title">1. Same title</a>')
+    expect(body).toContain('<a href="#2-same-title" data-section-id="2-same-title">2. Same title</a>')
   })
 
   it('escapes dynamic html while preserving highlighted code blocks', async () => {
@@ -236,10 +321,9 @@ test('<script>alert("checkout")</script>', async ({ page }) => {
       eventLocation: `${spec}:${lineOf(specSource, "test('<script>")}`,
       title: '<script>alert("checkout")</script>',
     }))
-    const svg = exported.assets[0].data.toString('utf8')
+    const svg = exported.html
     expect(svg).toContain('&lt;script&gt;alert(&quot;checkout&quot;)&lt;/script&gt;')
-    expect(svg).toContain('&lt;Checkou')
-    expect(svg).toContain('t&gt;')
+    expect(svg).toContain('&lt;Checkout&gt;')
     expect(svg).not.toContain('<Checkout>')
     expect(svg).toContain('<polygon')
   })
@@ -348,14 +432,14 @@ const sharedCheck = (page) => {
       expect.objectContaining({ label: 'toBeTruthy', quality: 'unknown' }),
       expect.objectContaining({ helperName: 'expectReadyAlias', quality: 'strict' }),
     ]))
-    expect(html).toContain('<h3>Test Body</h3>')
-    expect(html).toContain('<h3>Assertion Flow</h3>')
-    expect(html).toContain('<img src="flowcharts/1-renders-checkout-review.svg"')
+    expect(html).toContain('<summary>Test code</summary>')
+    expect(html).toContain('<h3>How the test runs</h3>')
+    expect(html).toContain('Evaluation flow for Renders checkout review')
     expect(html).not.toContain('<h3>Helper Calls</h3>')
-    expect(html).toContain('Local Codebase Implementations')
-    expect(html).toContain('<a href="#local-codebase-implementations" data-section-id="local-codebase-implementations">Local Codebase Implementations</a>')
+    expect(html).toContain('Helper functions used')
+    expect(html).toContain('<a href="#local-codebase-implementations" data-section-id="local-codebase-implementations">Helper functions used</a>')
     expect(html).toContain('helper: <code>expectReadyAlias</code>')
-    expect(html).toContain('nested strict:')
+    expect(html).toContain('nested strong:')
     expect(html).not.toContain('<h3>External Imports</h3>')
     expect(html).not.toContain('<h3>expectCheckoutReady</h3>')
     expect(html).toContain('@playwright/test')
@@ -574,9 +658,43 @@ function expectLocalOnly(page) {
       title: 'local helper only',
     }))
 
-    expect(html).toContain('Local Codebase Implementations')
+    expect(html).toContain('Helper functions used')
     expect(html).toContain('expectLocalOnly')
     expect(html).not.toContain('<h3>External Imports</h3>')
+  })
+
+  it('uses broad deterministic wording without feature-specific localization maps', async () => {
+    const featureDir = path.join(tmpDir, 'message_chain')
+    const e2eDir = path.join(featureDir, 'e2e')
+    fs.mkdirSync(e2eDir, { recursive: true })
+    const spec = path.join(e2eDir, 'message.spec.ts')
+    const specSource = `import { test, expect } from '@playwright/test'
+
+test('A. WA metadata.url -> SMS', async () => {
+  test.skip(!OVERRIDE_FLAG_EXPECTED, 'requires canary override mode')
+  const ids = makeIds('fallback-A')
+  const res = await postSendMessage(ids, { metadataUrl: 'https://example.test' })
+  expect(res.status).toBeLessThan(300)
+})
+`
+    fs.writeFileSync(spec, specSource)
+
+    const html = await createEvaluationHtml(detail({
+      featureDir,
+      feature: 'message_chain',
+      eventLocation: `${spec}:${lineOf(specSource, "test('A. WA")}`,
+      title: 'A. WA metadata.url -> SMS',
+    }))
+
+    expect(html).toContain('<h1 id="evaluation-report">Message Chain</h1>')
+    expect(html).toContain('1. Wa metadata url then sms')
+    expect(html).toContain('Skip if required test setup is missing')
+    expect(html).toContain('Prepare unique identifiers')
+    expect(html).toContain('Send message')
+    expect(html).not.toContain('WhatsApp')
+    expect(html).not.toContain('message link')
+    expect(html).not.toContain('Make ids')
+    expect(html).not.toContain('const ids =')
   })
 
   it('covers failed flowcharts, long labels, malformed bodies, and empty section ids', async () => {
@@ -617,16 +735,16 @@ function expectOneNested(page) {
 
     const exported = await createAssertionExport(failed)
     const html = exported.html
-    const svg = exported.assets[0].data.toString('utf8')
+    const svg = exported.html
 
-    expect(exported.assets[0].filename).toBe('flowcharts/1.svg')
+    expect(exported.assets).toEqual([])
     expect(html).toContain('status-failed')
     expect(html).not.toContain('<span class="muted">(')
     expect(svg).toContain('stroke="#e11d48"')
-    expect(svg).toContain('Setup')
-    expect(svg).toContain('Helper: openCheckout')
-    expect(svg).toContain('1 nested assertion')
-    expect(svg).toContain('moderate assertion')
+    expect(svg).toContain('Prepare the scenario')
+    expect(svg).toContain('Open checkout')
+    expect(svg).toContain('1 check inside this shared step')
+    expect(svg).toContain('Check the expected outcome')
     expect(svg).toContain('…')
   })
 })

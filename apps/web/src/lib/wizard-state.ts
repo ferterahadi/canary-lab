@@ -7,7 +7,6 @@
 
 export type DraftStatus =
   | 'created'
-  | 'recommending'
   | 'planning'
   | 'plan-ready'
   | 'generating'
@@ -25,7 +24,6 @@ export type WizardStep = 'configure' | 'plan' | 'spec' | 'done'
 export function nextStepForStatus(status: DraftStatus): WizardStep {
   switch (status) {
     case 'created':
-    case 'recommending':
       return 'configure'
     case 'planning':
     case 'plan-ready':
@@ -62,7 +60,6 @@ export function terminalForStep(step: WizardStep, status: DraftStatus): boolean 
 export function isPollingForStep(step: WizardStep, status: DraftStatus): boolean {
   if (step === 'plan') return status === 'planning'
   if (step === 'spec') return status === 'generating'
-  if (step === 'configure') return status === 'recommending'
   return false
 }
 

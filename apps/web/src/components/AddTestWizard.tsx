@@ -67,7 +67,6 @@ export function AddTestWizard({ features, onClose }: Props) {
         prdText: input.agentPrdText ?? input.prdText,
         prdDocuments: input.prdDocuments,
         repos: input.repos,
-        skills: input.skills,
         featureName: input.featureName,
       }
       const { draftId } = await api.createDraft(createPayload)
@@ -78,7 +77,6 @@ export function AddTestWizard({ features, onClose }: Props) {
         prdText: createPayload.prdText,
         prdDocuments: createPayload.prdDocuments ?? [],
         repos: createPayload.repos,
-        skills: createPayload.skills ?? [],
         featureName: createPayload.featureName,
         status: 'planning',
         activeAgentStage: 'planning',
@@ -156,7 +154,6 @@ export function AddTestWizard({ features, onClose }: Props) {
         prdText: configureInput.agentPrdText ?? configureInput.prdText,
         prdDocuments: configureInput.prdDocuments,
         repos: configureInput.repos,
-        skills: configureInput.skills,
         featureName: configureInput.featureName,
       }
       const { draftId } = await api.createDraft(createPayload)
@@ -166,7 +163,6 @@ export function AddTestWizard({ features, onClose }: Props) {
         prdText: createPayload.prdText,
         prdDocuments: createPayload.prdDocuments ?? [],
         repos: createPayload.repos,
-        skills: createPayload.skills ?? [],
         featureName: createPayload.featureName,
         status: 'planning',
         activeAgentStage: 'planning',

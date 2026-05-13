@@ -5,7 +5,7 @@ import type { PaneBroker } from './pane-broker'
 // Pure helpers for the Add Test wizard's plan / spec agents:
 //
 //   - Template loading + `{{placeholder}}` substitution
-//   - Repo / skill / plan formatters that turn structured input into the
+//   - Repo / plan formatters that turn structured input into the
 //     plain-text the prompt template embeds
 //   - The tee-to-disk reducer that fans pty output into a log file + an
 //     optional PaneBroker
@@ -58,15 +58,6 @@ export function formatPlan(plan: unknown): string {
   return JSON.stringify(plan, null, 2)
 }
 
-export function formatSkills(
-  skills: { id: string; content: string }[],
-): string {
-  if (skills.length === 0) return '(no skills selected)'
-  return skills
-    .map((s) => `--- skill: ${s.id} ---\n${s.content.trim()}\n--- end skill ---`)
-    .join('\n\n')
-}
-
 export function buildPlanPrompt(input: {
   prdText: string
   repos: RepoSummary[]
@@ -82,7 +73,6 @@ export function buildPlanPrompt(input: {
 export function buildSpecPrompt(input: {
   featureName: string
   plan: unknown
-  skills: { id: string; content: string }[]
   repos: RepoSummary[]
   template?: string
 }): string {
@@ -90,7 +80,6 @@ export function buildSpecPrompt(input: {
   return substitute(template, {
     featureName: input.featureName,
     plan: formatPlan(input.plan),
-    skills: formatSkills(input.skills),
     repos: formatRepos(input.repos),
   })
 }

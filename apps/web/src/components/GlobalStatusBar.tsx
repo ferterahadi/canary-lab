@@ -2,6 +2,7 @@ import type { RunDetail } from '../api/types'
 import { deriveRunViewModel } from '../lib/run-view-model'
 import { useRuns } from '../state/RunsContext'
 import { isActiveRunStatus } from '../../../../shared/run-state'
+import { EvaluationExportTaskStatus } from './EvaluationExportTaskToast'
 
 interface Props {
   activeRunDetail: RunDetail | null
@@ -41,7 +42,7 @@ export function GlobalStatusBar({ activeRunDetail, onNavigateToRun }: Props) {
 
   return (
     <div
-      className="cl-shell-bar flex items-center gap-4 px-4 py-2 overflow-hidden"
+      className="cl-shell-bar flex items-center gap-3 px-4 py-2 overflow-hidden"
     >
       <span
         className="cl-kicker shrink-0"
@@ -60,23 +61,26 @@ export function GlobalStatusBar({ activeRunDetail, onNavigateToRun }: Props) {
           />
         </div>
       )}
-      {activeRunDetail && isActive && (
-        <button
-          type="button"
-          onClick={() => onNavigateToRun?.(activeRunDetail.manifest.feature, activeRunDetail.manifest.runId)}
-          className="cl-button ml-auto flex min-w-0 items-center gap-2 px-2 py-0.5 text-[11px]"
-          style={{ color: 'var(--text-secondary)' }}
-          title="Go to active run"
-        >
-          <span className="shrink-0" style={{ color: 'var(--text-muted)' }}>Active run:</span>
-          <span className="truncate" style={{ color: 'var(--text-primary)' }}>{activeRunDetail.manifest.feature}</span>
-          <span className="truncate" style={{ color: 'var(--text-secondary)' }}>{view.headline}</span>
-          <span className="truncate" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
-            {activeRunDetail.manifest.runId}
-          </span>
-          <span className="shrink-0" style={{ color: 'var(--text-muted)' }}>→</span>
-        </button>
-      )}
+      <div className="ml-auto flex min-w-0 items-center justify-end gap-2">
+        {activeRunDetail && isActive && (
+          <button
+            type="button"
+            onClick={() => onNavigateToRun?.(activeRunDetail.manifest.feature, activeRunDetail.manifest.runId)}
+            className="cl-button flex min-w-0 max-w-[420px] items-center gap-2 px-2 py-0.5 text-[11px]"
+            style={{ color: 'var(--text-secondary)' }}
+            title={`Go to active run: ${activeRunDetail.manifest.feature} ${view.headline} ${activeRunDetail.manifest.runId}`}
+          >
+            <span className="shrink-0" style={{ color: 'var(--text-muted)' }}>Active:</span>
+            <span className="truncate" style={{ color: 'var(--text-primary)' }}>{activeRunDetail.manifest.feature}</span>
+            <span className="hidden min-w-0 truncate xl:inline" style={{ color: 'var(--text-secondary)' }}>{view.headline}</span>
+            <span className="hidden min-w-0 truncate 2xl:inline" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+              {activeRunDetail.manifest.runId}
+            </span>
+            <span className="shrink-0" style={{ color: 'var(--text-muted)' }}>→</span>
+          </button>
+        )}
+        <EvaluationExportTaskStatus />
+      </div>
     </div>
   )
 }

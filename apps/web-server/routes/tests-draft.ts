@@ -56,7 +56,6 @@ export interface SpecAgentInput {
   agent: 'claude' | 'codex'
   featureName: string
   plan: unknown
-  skills: { id: string; content: string }[]
   repos: DraftRepo[]
   draftDir: string
   agentLogPath: string
@@ -71,8 +70,6 @@ export interface TestsDraftRouteDeps {
   spawnPlanAgent(input: PlanAgentInput): Promise<string>
   spawnSpecAgent(input: SpecAgentInput): Promise<string>
   cancelGeneration?(draftId: string): boolean
-  // Optional skill content loader for stage-2 — tests stub it.
-  loadSkillContent?(skillId: string): string
 }
 
 export async function testsDraftRoutes(
@@ -128,12 +125,11 @@ export async function testsDraftRoutes(
   })
 
   app.post<{
-    Body: { prdText?: unknown; prdDocuments?: unknown; repos?: unknown; skills?: unknown; featureName?: unknown }
+    Body: { prdText?: unknown; prdDocuments?: unknown; repos?: unknown; featureName?: unknown }
   }>('/api/tests/draft', async (req, reply) => {
     const prdText = req.body?.prdText
     const prdDocuments = req.body?.prdDocuments
     const repos = req.body?.repos
-    const skills = req.body?.skills
     const featureName = req.body?.featureName
     if (typeof prdText !== 'string') {
       reply.code(400)
@@ -147,7 +143,6 @@ export async function testsDraftRoutes(
     const documentList = Array.isArray(prdDocuments)
       ? prdDocuments.filter(isDraftPrdDocument)
       : []
-    const skillList = Array.isArray(skills) ? (skills as string[]) : undefined
     const featureNameStr = typeof featureName === 'string' ? featureName : undefined
 
     const draftId = deps.newDraftId()
@@ -156,7 +151,6 @@ export async function testsDraftRoutes(
       prdText,
       prdDocuments: documentList,
       repos: repoList,
-      skills: skillList,
       featureName: featureNameStr,
     })
 
@@ -436,10 +430,6 @@ async function runSpecStage(deps: TestsDraftRouteDeps, draftId: string): Promise
   })
   if (!isStageCurrent(deps.logsDir, draftId, 'generating')) return
   const p = draftPaths(deps.logsDir, draftId)
-  const skillContents = (rec.skills ?? []).map((id) => ({
-    id,
-    content: deps.loadSkillContent ? deps.loadSkillContent(id) : '',
-  }))
   let stream: string
   const resumeSessionId = rec.planAgentSessionKind === picked.agent
     ? rec.planAgentSessionId
@@ -450,7 +440,6 @@ async function runSpecStage(deps: TestsDraftRouteDeps, draftId: string): Promise
       agent: picked.agent,
       featureName: rec.featureName ?? defaultFeatureName(rec),
       plan: rec.plan,
-      skills: skillContents,
       repos: rec.repos,
       draftDir: p.draftDir,
       agentLogPath: p.specAgentLog,

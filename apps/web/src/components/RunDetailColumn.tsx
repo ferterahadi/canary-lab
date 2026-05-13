@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import type {
+  EvaluationExportMode,
   PlaywrightArtifact,
   PlaywrightArtifactGroup,
   PlaywrightArtifactPolicy,
@@ -22,6 +23,7 @@ import {
 } from '../lib/run-detail-playback'
 import { statusFromPlaybackResult, statusLabel, statusPillClassForStatus } from '../lib/test-step-status'
 import { useRun } from '../state/RunsContext'
+import { useEvaluationExports } from '../state/EvaluationExportContext'
 import { deriveRunViewModel, type RunViewModel } from '../lib/run-view-model'
 import { RunStatusIndicator } from './RunStatusIndicator'
 import { PaneTerminal } from './PaneTerminal'
@@ -201,6 +203,18 @@ function RunOverviewTab({
   repoBranches,
 }: RunOverviewTabProps) {
   const duration = durationBetween(manifest.startedAt, manifest.endedAt)
+  const [exportMenuOpen, setExportMenuOpen] = useState(false)
+  const [exportError, setExportError] = useState(false)
+  const { startExport } = useEvaluationExports()
+  const handleExportEvaluation = useCallback(async (mode: EvaluationExportMode) => {
+    setExportMenuOpen(false)
+    setExportError(false)
+    try {
+      await startExport(manifest.runId, mode)
+    } catch {
+      setExportError(true)
+    }
+  }, [manifest.runId, startExport])
 
   return (
     <div className="h-full overflow-y-auto scrollbar-thin p-4 text-sm">
@@ -209,14 +223,45 @@ function RunOverviewTab({
           Run
         </h2>
         {isAssertionExportable(manifest.status) && (
-          <a
-            href={assertionHref(manifest.runId)}
-            download={assertionFilename(manifest.feature, manifest.runId)}
-            className="shrink-0 rounded px-2.5 py-1 text-[11px] font-medium"
-            style={{ background: 'var(--bg-selected)', color: 'var(--accent)' }}
-          >
-            Export Assertion
-          </a>
+          <div className="relative shrink-0">
+            <button
+              type="button"
+              onClick={() => setExportMenuOpen((open) => !open)}
+              aria-haspopup="menu"
+              aria-expanded={exportMenuOpen}
+              className="inline-flex items-center gap-1.5 rounded px-2.5 py-1 text-[11px] font-medium disabled:cursor-wait disabled:opacity-80"
+              style={{ background: 'var(--bg-selected)', color: 'var(--accent)' }}
+            >
+              {exportError ? 'Export failed' : 'Export Evaluation'}
+              <span aria-hidden="true" style={{ color: 'var(--text-muted)' }}>▾</span>
+            </button>
+            {exportMenuOpen && (
+              <div
+                role="menu"
+                className="absolute right-0 z-20 mt-1 w-44 overflow-hidden rounded-md border py-1 text-xs shadow-lg"
+                style={{ borderColor: 'var(--border-default)', background: 'var(--bg-elevated)', color: 'var(--text-primary)' }}
+              >
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => void handleExportEvaluation('raw')}
+                  className="block w-full px-3 py-2 text-left hover:bg-black/5 dark:hover:bg-white/5"
+                >
+                  <span className="block font-medium">Raw output</span>
+                  <span className="block text-[11px]" style={{ color: 'var(--text-muted)' }}>Fast report, no LLM rewrite</span>
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => void handleExportEvaluation('localized')}
+                  className="block w-full px-3 py-2 text-left hover:bg-black/5 dark:hover:bg-white/5"
+                >
+                  <span className="block font-medium">Localized output</span>
+                  <span className="block text-[11px]" style={{ color: 'var(--text-muted)' }}>Uses the LLM rewrite</span>
+                </button>
+              </div>
+            )}
+          </div>
         )}
       </div>
       <dl className="grid grid-cols-[110px_minmax(0,1fr)] gap-y-1.5 text-xs">
@@ -307,12 +352,52 @@ export function isAssertionExportable(status: string): boolean {
   return isSharedTerminalRunStatus(status)
 }
 
+export function isEvaluationExportable(status: string): boolean {
+  return isAssertionExportable(status)
+}
+
 export function assertionFilename(feature: string, runId: string): string {
-  return `canary-lab-assertion-${safeFilename(feature)}-${safeFilename(runId)}.zip`
+  return evaluationFilename(feature, runId)
 }
 
 export function assertionHref(runId: string): string {
-  return `/api/runs/${encodeURIComponent(runId)}/assertion.html`
+  return evaluationHref(runId)
+}
+
+export function evaluationFilename(feature: string, runId: string): string {
+  return `canary-lab-evaluation-${safeFilename(feature)}-${safeFilename(runId)}.zip`
+}
+
+export function evaluationHref(runId: string): string {
+  return `/api/runs/${encodeURIComponent(runId)}/evaluation.html`
+}
+
+export async function downloadEvaluationReport(
+  feature: string,
+  runId: string,
+  opts: {
+    fetchImpl?: typeof fetch
+    documentRef?: Document
+    urlApi?: Pick<typeof URL, 'createObjectURL' | 'revokeObjectURL'>
+  } = {},
+): Promise<void> {
+  const fetchImpl = opts.fetchImpl ?? fetch
+  const documentRef = opts.documentRef ?? document
+  const urlApi = opts.urlApi ?? URL
+  const res = await fetchImpl(evaluationHref(runId))
+  if (!res.ok) throw new Error(`evaluation export failed: HTTP ${res.status}`)
+  const href = urlApi.createObjectURL(await res.blob())
+  const link = documentRef.createElement('a')
+  try {
+    link.href = href
+    link.download = evaluationFilename(feature, runId)
+    link.style.display = 'none'
+    documentRef.body.appendChild(link)
+    link.click()
+  } finally {
+    link.remove()
+    urlApi.revokeObjectURL(href)
+  }
 }
 
 export function hasAssertionVideos(groups: PlaywrightArtifactGroup[] | undefined): boolean {

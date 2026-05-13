@@ -16,14 +16,6 @@ Use this exact feature name in generated config values:
 {{plan}}
 ```
 
-### Selected skills
-
-The user picked these canary-lab skills. Their bodies are inlined below — follow them as authoritative guidance for feature layout, fixtures, selectors, envsets, and test organization. If a skill conflicts with a rule below, the skill wins for the area it covers; otherwise the rules below apply.
-
-```
-{{skills}}
-```
-
 ### Repositories under test
 
 ```
@@ -145,7 +137,7 @@ module.exports = { config }
 ```
 
 - Use the exact repository names and paths from "Repositories under test".
-- Include the best evidence-backed inferred `startCommands` and `healthCheck` for each selected repo. Use `startCommands: []` only when no defensible local command or readiness probe can be inferred from the plan, selected skills, repository contents, or local conventions.
+- Include the best evidence-backed inferred `startCommands` and `healthCheck` for each selected repo. Use `startCommands: []` only when no defensible local command or readiness probe can be inferred from the plan, repository contents, or local conventions.
 - `featureDir: __dirname` is required.
 - Do not use the stale shape `module.exports = { name, services, playwright }`.
 
@@ -162,7 +154,7 @@ loadDotenv({ path: path.join(__dirname, '.env') })
 export default defineConfig({ ...baseConfig })
 ```
 
-`baseConfig` provides a sensible local `baseURL`. Only override `baseConfig` fields when the accepted plan or selected skills require it.
+`baseConfig` provides a sensible local `baseURL`. Only override `baseConfig` fields when the accepted plan requires it.
 
 ## Mapping plan items to tests
 
@@ -207,7 +199,7 @@ Tests within a single spec file run serially; spec files run in parallel. Do not
    import { test, expect } from 'canary-lab/feature-support/log-marker-fixture'
    ```
    Do **not** import from `@playwright/test` directly. The log-marker fixture is required for per-test log slicing in Canary Lab.
-4. Prefer role-based locators (`page.getByRole`, `page.getByLabel`) over CSS selectors when the skills don't specify otherwise. Use `data-testid` only when the source code already exposes one for the element.
+4. Prefer role-based locators (`page.getByRole`, `page.getByLabel`) over CSS selectors. Use `data-testid` only when the source code already exposes one for the element.
 5. For navigation against the feature's main service, use **relative paths** (`page.goto('/login')`) — `baseURL` from `baseConfig` resolves them. Hardcode `http://localhost:PORT` only when targeting a *different* service declared in `feature.config.cjs`, and read its URL from env with a local default that matches that service's healthcheck.
 
 ## Test structure rules
