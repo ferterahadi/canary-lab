@@ -23,6 +23,7 @@ import {
   getDraftFile,
   getEnvsetSlot,
   getEnvsetsIndex,
+  getEvaluationExportTask,
   getFeatureConfig,
   getFeatureConfigDoc,
   getFeatureTests,
@@ -41,6 +42,7 @@ import {
   putPlaywrightConfig,
   readDotenvFile,
   rejectDraft,
+  startEvaluationExport,
   startRun,
   stopRun,
   pauseHealRun,
@@ -52,6 +54,7 @@ import {
   openEditor,
   sendAgentInput,
   extractPrdDocuments,
+  downloadEvaluationExportTask,
 } from './client'
 
 const ok = (body: unknown, status = 200): Response =>
@@ -109,6 +112,95 @@ describe('api client', () => {
       'http://x/api/evaluation-exports/task%2F1',
       { method: 'DELETE' },
     )
+  })
+
+  it('starts and fetches evaluation export tasks', async () => {
+    const task = {
+      taskId: 'task/1',
+      runId: 'run/1',
+      feature: 'checkout',
+      mode: 'localized',
+      status: 'running',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+      downloadReady: false,
+    }
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(ok(task, 202))
+      .mockResolvedValueOnce(ok({ ...task, status: 'completed', downloadReady: true }))
+
+    await expect(startEvaluationExport('run/1', 'localized', { baseUrl: 'http://x', fetchImpl })).resolves.toEqual(task)
+    await expect(getEvaluationExportTask('task/1', { baseUrl: 'http://x', fetchImpl })).resolves.toMatchObject({
+      status: 'completed',
+      downloadReady: true,
+    })
+
+    expect(fetchImpl).toHaveBeenNthCalledWith(1, 'http://x/api/runs/run%2F1/evaluation-export', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ mode: 'localized' }),
+    })
+    expect(fetchImpl).toHaveBeenNthCalledWith(2, 'http://x/api/evaluation-exports/task%2F1', { method: 'GET' })
+  })
+
+  it('downloads evaluation export zip files with safe filenames', async () => {
+    const link = {
+      href: '',
+      download: '',
+      style: { display: '' },
+      click: vi.fn(),
+      remove: vi.fn(),
+    } as unknown as HTMLAnchorElement
+    const documentRef = {
+      body: { appendChild: vi.fn() },
+      createElement: vi.fn().mockReturnValue(link),
+    } as unknown as Document
+    const urlApi = {
+      createObjectURL: vi.fn().mockReturnValue('blob:export'),
+      revokeObjectURL: vi.fn(),
+    }
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(new Blob(['zip']), { status: 200 }))
+
+    await downloadEvaluationExportTask(
+      {
+        taskId: 'task/1',
+        runId: '///',
+        feature: 'checkout flow',
+        mode: 'raw',
+        status: 'completed',
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+        downloadReady: true,
+      },
+      { baseUrl: 'http://x', fetchImpl, documentRef, urlApi },
+    )
+
+    expect(fetchImpl).toHaveBeenCalledWith('http://x/api/evaluation-exports/task%2F1/download', { method: 'GET' })
+    expect(link.href).toBe('blob:export')
+    expect(link.download).toBe('canary-lab-evaluation-checkout-flow-run.zip')
+    expect(link.click).toHaveBeenCalled()
+    expect(link.remove).toHaveBeenCalled()
+    expect(urlApi.revokeObjectURL).toHaveBeenCalledWith('blob:export')
+  })
+
+  it('throws ApiError when evaluation export download fails with text body', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response('missing archive', { status: 404 }))
+    await expect(downloadEvaluationExportTask(
+      {
+        taskId: 'missing',
+        runId: 'run-1',
+        feature: 'checkout',
+        mode: 'raw',
+        status: 'failed',
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+        downloadReady: false,
+      },
+      { fetchImpl, documentRef: {} as Document },
+    )).rejects.toMatchObject({
+      status: 404,
+      body: 'missing archive',
+    })
   })
 
   it('getDraftAgentLog fetches the full draft agent log by stage', async () => {

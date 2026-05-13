@@ -243,10 +243,11 @@ export function evaluationOutputPanel(
       text: log || 'Waiting for export output...',
     }
   }
+  const displayLog = normalizeAgentOutputLog(log)
   if (log.includes('using cached localized wording')) {
     return {
       heading: 'Agent output',
-      text: log,
+      text: displayLog,
     }
   }
   if (/\[agent:[^\]]+\] starting localized rewrite/.test(log) && !log.includes('localized rewrite completed')) {
@@ -256,15 +257,43 @@ export function evaluationOutputPanel(
       : 'The agent process has started. Some CLI backends stay quiet until the final response is ready.'
     return {
       heading: 'Agent output',
-      text: log.includes(note) ? log : `${note}\n\n${log}`,
+      text: displayLog.includes(note) ? displayLog : `${note}\n\n${displayLog}`,
     }
   }
   return {
     heading: 'Agent output',
-    text: log || 'Waiting for agent output...',
+    text: displayLog || 'Waiting for agent output...',
   }
 }
 
 function localizedRewriteModel(log: string): string | null {
   return log.match(/\[agent:[^\]]+\] starting localized rewrite \(model: ([^)]+)\)/)?.[1] ?? null
+}
+
+function normalizeAgentOutputLog(log: string): string {
+  if (!log || log.includes('```json')) return log
+
+  const lines = log.split('\n')
+  const jsonStartLine = lines.findIndex((line) => line.trimStart().startsWith('{'))
+  if (jsonStartLine < 0) return log
+
+  const prefix = lines.slice(0, jsonStartLine).join('\n').trimEnd()
+  const tail = lines.slice(jsonStartLine).join('\n').trim()
+  const normalized = normalizeJsonTail(tail)
+  return `${prefix ? `${prefix}\n\n` : ''}${normalized}`
+}
+
+function normalizeJsonTail(tail: string): string {
+  const lastBrace = tail.lastIndexOf('}')
+  if (lastBrace < 0) return `\`\`\`json\n${tail}\n\`\`\``
+
+  const jsonText = tail.slice(0, lastBrace + 1)
+  const suffix = tail.slice(lastBrace + 1).trim()
+  let body = jsonText
+  try {
+    body = JSON.stringify(JSON.parse(jsonText), null, 2)
+  } catch {
+    body = jsonText
+  }
+  return `\`\`\`json\n${body}\n\`\`\`${suffix ? `\n${suffix}` : ''}`
 }
