@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import * as api from '../../api/client'
 import type { DraftRecord } from '../../api/types'
-import { AgentLogPanel } from './AgentLogPanel'
+import { AgentSessionView } from '../AgentSessionView'
 import { useTheme } from '../../lib/theme'
 
 interface Props {
@@ -51,15 +51,9 @@ export function SpecReviewStep({
                   {acting ? 'Stopping…' : 'Stop generation'}
                 </button>
               </div>
-              <AgentLogPanel
-                draftId={draft.draftId}
-                initialBuffer={draft.specAgentLogTail}
-                agent={draft.wizardAgent}
-                phase="generating"
-                status="running"
-                variant="fill"
-                className="flex-1"
-              />
+              <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950">
+                <AgentSessionView source={{ kind: 'draft', draftId: draft.draftId, stage: 'generating', live: true }} />
+              </div>
             </>
           )}
 
@@ -76,15 +70,9 @@ export function SpecReviewStep({
                 <div className="mb-2 font-medium">Generation stopped.</div>
                 <div>{draft.errorMessage ?? 'Generation cancelled by user'}</div>
               </div>
-              <AgentLogPanel
-                draftId={draft.draftId}
-                initialBuffer={draft.specAgentLogTail}
-                agent={draft.wizardAgent}
-                phase={draft.activeAgentStage ?? 'generating'}
-                status="idle"
-                variant="bounded"
-                className="min-h-[24rem]"
-              />
+              <div className="flex min-h-[24rem] max-h-[min(70vh,44rem)] flex-col overflow-hidden rounded border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950">
+                <AgentSessionView source={{ kind: 'draft', draftId: draft.draftId, stage: draft.activeAgentStage ?? 'generating' }} />
+              </div>
             </>
           )}
 

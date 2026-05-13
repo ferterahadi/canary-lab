@@ -16,7 +16,7 @@ import {
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import type { DraftRecord, PlanStep } from '../../api/types'
-import { AgentLogPanel } from './AgentLogPanel'
+import { AgentSessionView } from '../AgentSessionView'
 import {
   removeStep,
   parsePlanStepMarkdown,
@@ -111,15 +111,9 @@ export function PlanReviewStep({ draft, onAccept, onReject, onRetry, onCancelGen
                   {acting ? 'Stopping…' : 'Stop generation'}
                 </button>
               </div>
-              <AgentLogPanel
-                draftId={draft.draftId}
-                initialBuffer={draft.planAgentLogTail}
-                agent={draft.wizardAgent}
-                phase="planning"
-                status="running"
-                variant="fill"
-                className="flex-1"
-              />
+              <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950">
+                <AgentSessionView source={{ kind: 'draft', draftId: draft.draftId, stage: 'planning', live: true }} />
+              </div>
             </>
           )}
 
@@ -136,15 +130,9 @@ export function PlanReviewStep({ draft, onAccept, onReject, onRetry, onCancelGen
                 <div className="mb-2 font-medium">Generation stopped.</div>
                 <div>{draft.errorMessage ?? 'Generation cancelled by user'}</div>
               </div>
-              <AgentLogPanel
-                draftId={draft.draftId}
-                initialBuffer={draft.planAgentLogTail}
-                agent={draft.wizardAgent}
-                phase="planning"
-                status="idle"
-                variant="bounded"
-                className="min-h-[24rem]"
-              />
+              <div className="flex min-h-[24rem] max-h-[min(70vh,44rem)] flex-col overflow-hidden rounded border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950">
+                <AgentSessionView source={{ kind: 'draft', draftId: draft.draftId, stage: 'planning' }} />
+              </div>
             </>
           )}
 

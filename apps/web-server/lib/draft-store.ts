@@ -5,6 +5,7 @@ import {
   validateFeatureTarget as validateScaffoldTarget,
   type ApplyFeatureScaffoldResult,
 } from '../../../shared/feature-scaffold'
+import type { AgentSessionRef } from './agent-session-log'
 
 // Draft storage for the Add Test wizard. Each draft lives at
 // `<logsDir>/drafts/<draftId>/` with a JSON state file plus the raw PRD,
@@ -61,6 +62,15 @@ export interface DraftRecord {
   activeAgentStage?: 'planning' | 'generating'
   planAgentSessionId?: string
   planAgentSessionKind?: 'claude' | 'codex'
+  // Structured-session ref + spawn timestamp for the live agent-session WS.
+  // Claude pins the session id at spawn so `planAgentSessionRef` is set before
+  // the first byte of agent output. Codex has no equivalent flag — the WS
+  // tailer discovers the rollout file post-hoc using `planAgentSpawnedAt` as
+  // the lower bound and the draft dir as the cwd match.
+  planAgentSessionRef?: AgentSessionRef
+  planAgentSpawnedAt?: string
+  specAgentSessionRef?: AgentSessionRef
+  specAgentSpawnedAt?: string
   status: DraftStatus
   createdAt: string
   updatedAt: string
@@ -170,6 +180,10 @@ export interface TransitionPatch {
   activeAgentStage?: 'planning' | 'generating'
   planAgentSessionId?: string
   planAgentSessionKind?: 'claude' | 'codex'
+  planAgentSessionRef?: AgentSessionRef
+  planAgentSpawnedAt?: string
+  specAgentSessionRef?: AgentSessionRef
+  specAgentSpawnedAt?: string
   errorMessage?: string
 }
 
