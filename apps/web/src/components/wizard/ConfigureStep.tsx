@@ -13,7 +13,6 @@ export interface ConfigureSubmit {
   agentPrdText?: string
   prdDocuments?: DraftPrdDocument[]
   repos: DraftRepo[]
-  skills: string[]
   featureName?: string
 }
 
@@ -161,7 +160,6 @@ export function ConfigureStep({
         agentPrdText,
         prdDocuments: finalDocuments,
         repos: repoList,
-        skills: [],
         featureName: featureName.trim() || undefined,
       })
     } catch (e) {

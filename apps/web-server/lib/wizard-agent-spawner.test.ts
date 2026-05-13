@@ -20,7 +20,6 @@ import {
   paneIdForDraft,
   formatPlan,
   formatRepos,
-  formatSkills,
   loadTemplate,
   shellQuote,
   substitute,
@@ -84,24 +83,6 @@ describe('formatPlan', () => {
   })
 })
 
-describe('formatSkills', () => {
-  it('returns placeholder for empty list', () => {
-    expect(formatSkills([])).toBe('(no skills selected)')
-  })
-
-  it('emits framed blocks per skill, trimming content', () => {
-    const out = formatSkills([
-      { id: 'user:foo', content: '\n\nbody of foo  \n\n' },
-      { id: 'plugin:bar', content: 'body of bar' },
-    ])
-    expect(out).toContain('--- skill: user:foo ---')
-    expect(out).toContain('body of foo')
-    expect(out).toContain('--- skill: plugin:bar ---')
-    expect(out).toContain('body of bar')
-    expect(out).toContain('--- end skill ---')
-  })
-})
-
 describe('loadTemplate', () => {
   it('reads stage 1 prompt template', () => {
     const t = loadTemplate(STAGE1_TEMPLATE)
@@ -132,7 +113,6 @@ describe('loadTemplate', () => {
     const t = loadTemplate(STAGE2_TEMPLATE)
     expect(t).toContain('{{featureName}}')
     expect(t).toContain('{{plan}}')
-    expect(t).toContain('{{skills}}')
     expect(t).toContain("test('<plan step>'")
     expect(t).toContain('Do not wrap a generated test body in a same-named')
     expect(t).toContain('infer')
@@ -189,18 +169,15 @@ describe('buildPlanPrompt', () => {
 })
 
 describe('buildSpecPrompt', () => {
-  it('substitutes plan, skills, and repos', () => {
+  it('substitutes plan and repos', () => {
     const out = buildSpecPrompt({
       featureName: 'login_flow',
       plan: [{ step: 'open page' }],
-      skills: [{ id: 'user:s1', content: 'rule body' }],
       repos: [{ name: 'app', localPath: '/p' }],
-      template: 'F={{featureName}}|P={{plan}}|S={{skills}}|R={{repos}}',
+      template: 'F={{featureName}}|P={{plan}}|R={{repos}}',
     })
     expect(out).toContain('login_flow')
     expect(out).toContain('"step": "open page"')
-    expect(out).toContain('user:s1')
-    expect(out).toContain('rule body')
     expect(out).toContain('- app (/p)')
   })
 
@@ -208,7 +185,6 @@ describe('buildSpecPrompt', () => {
     const out = buildSpecPrompt({
       featureName: 'login_flow',
       plan: [],
-      skills: [],
       repos: [],
     })
     expect(out).toContain('login_flow')

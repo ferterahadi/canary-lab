@@ -2,6 +2,14 @@
 
 All notable changes to Canary Lab are listed here. We try to keep the language plain so anyone can follow along.
 
+## 1.0.5 — 2026-05-13
+
+### What's new
+- **Plain-English evaluation report.** Exported evaluation reports now go through a rewrite pass that turns code-like test names, helper calls, and flowchart labels into clear descriptions of what each step is actually checking. The report reads like an operational summary instead of a dump of identifiers.
+- **Pick how the report gets rewritten.** A new audience adapter lets the rewrite run through Claude, Codex, a manual hand-off, or a deterministic fallback when no agent is available — so you can produce a readable report even without an LLM on hand.
+
+---
+
 ## 1.0.4 — 2026-05-12
 
 ### What's new
@@ -192,4 +200,3 @@ The per-feature boilerplate is smaller in 0.9.0. The new shape of a scaffolded `
 - `src/config.ts` and the `src/` directory are no longer part of the scaffold.
 
 Projects scaffolded by 0.8.x keep the old shape — the shift is descriptive, not enforced by `canary-lab upgrade`.
-

@@ -42,11 +42,8 @@ run(
   tempRoot,
 )
 
-for (const relPath of [
+const scaffoldPaths = [
   'package.json',
-  'node_modules/canary-lab/dist/apps/web-server/prompts/stage1-plan.md',
-  'node_modules/canary-lab/dist/apps/web-server/prompts/stage2-spec.md',
-  'node_modules/canary-lab/dist/apps/web-server/prompts/heal-agent.md',
   'AGENTS.md',
   'CLAUDE.md',
   '.claude/skills/env-import.md',
@@ -55,7 +52,17 @@ for (const relPath of [
   '.codex/canary-lab-feature.md',
   'features/example_todo_api/feature.config.cjs',
   'features/broken_todo_api/feature.config.cjs',
-]) {
+]
+
+const installedPackagePaths = [
+  'node_modules/canary-lab/dist/apps/web-server/prompts/stage1-plan.md',
+  'node_modules/canary-lab/dist/apps/web-server/prompts/stage2-spec.md',
+  'node_modules/canary-lab/dist/apps/web-server/prompts/heal-agent.md',
+  'node_modules/canary-lab/dist/apps/web-server/prompts/evaluation-rewrite.md',
+  'node_modules/canary-lab/dist/apps/web-server/prompts/evaluation-rewrite.schema.json',
+]
+
+for (const relPath of scaffoldPaths) {
   const fullPath = path.join(projectDir, relPath)
   if (!fs.existsSync(fullPath)) {
     throw new Error(`Smoke test failed: missing ${relPath}`)
@@ -100,4 +107,12 @@ for (const relPath of [
 }
 
 run('npm', ['install', '--no-audit', '--no-fund', '--prefer-offline', '--progress=false'], projectDir)
+
+for (const relPath of installedPackagePaths) {
+  const fullPath = path.join(projectDir, relPath)
+  if (!fs.existsSync(fullPath)) {
+    throw new Error(`Smoke test failed: missing ${relPath}`)
+  }
+}
+
 run('npx', ['canary-lab', 'new-feature', 'smoke_feature', 'Smoke test feature'], projectDir)

@@ -156,7 +156,6 @@ export function spawnSpecAgent(
     const prompt = buildSpecPrompt({
       featureName: input.featureName,
       plan: input.plan,
-      skills: input.skills,
       repos: input.repos,
       template: deps.specTemplate ? loadTemplate(deps.specTemplate) : undefined,
     })

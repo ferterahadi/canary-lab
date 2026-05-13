@@ -46,7 +46,7 @@ function writePlanTemplate(dir: string): string {
 
 function writeSpecTemplate(dir: string): string {
   const file = path.join(dir, 'spec-template.md')
-  fs.writeFileSync(file, 'Feature {{featureName}} {{plan}} {{skills}} {{repos}}', 'utf8')
+  fs.writeFileSync(file, 'Feature {{featureName}} {{plan}} {{repos}}', 'utf8')
   return file
 }
 
@@ -173,7 +173,6 @@ describe('wizard agent runner cancellation', () => {
       agent: 'claude',
       featureName: 'login',
       plan: [],
-      skills: [],
       repos: [{ name: 'app', localPath: '/app' }],
       draftDir: tmp,
       agentLogPath: path.join(tmp, 'agent.log'),
@@ -199,7 +198,6 @@ describe('wizard agent runner cancellation', () => {
       agent: 'claude',
       featureName: 'login',
       plan: [],
-      skills: [],
       repos: [{ name: 'app', localPath: '/app' }],
       draftDir: tmp,
       agentLogPath: path.join(tmp, 'agent.log'),

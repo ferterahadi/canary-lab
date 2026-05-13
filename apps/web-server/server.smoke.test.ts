@@ -26,7 +26,7 @@ const inertPtyFactory: PtyFactory = () => ({
 describe('createServer smoke (templates/project)', () => {
   it('binds to a real port and answers a request over HTTP', async () => {
     const projectRoot = path.resolve(__dirname, '..', '..', 'templates', 'project')
-    const { app } = await createServer({ projectRoot, ptyFactory: inertPtyFactory, listSkills: () => [] })
+    const { app } = await createServer({ projectRoot, ptyFactory: inertPtyFactory })
     try {
       const address = await app.listen({ port: 0, host: '127.0.0.1' })
       // Fastify returns "http://127.0.0.1:<port>".
@@ -41,14 +41,11 @@ describe('createServer smoke (templates/project)', () => {
     }
   })
 
-  it('serves all read-side endpoints (features, runs, journal, skills, drafts)', async () => {
+  it('serves all read-side endpoints (features, runs, journal, drafts)', async () => {
     const projectRoot = path.resolve(__dirname, '..', '..', 'templates', 'project')
     const { app } = await createServer({
       projectRoot,
       ptyFactory: inertPtyFactory,
-      listSkills: () => [
-        { id: 'user:demo', name: 'demo', description: 'a test skill', source: 'user', path: '/nope' },
-      ],
     })
     try {
       const features = await app.inject({ method: 'GET', url: '/api/features' })
@@ -73,21 +70,6 @@ describe('createServer smoke (templates/project)', () => {
       const journal = await app.inject({ method: 'GET', url: '/api/journal' })
       expect(journal.statusCode).toBe(200)
       expect(Array.isArray(journal.json())).toBe(true)
-
-      // Skills list endpoint (Section 4 backend wiring).
-      const skills = await app.inject({ method: 'GET', url: '/api/skills' })
-      expect(skills.statusCode).toBe(200)
-      const skillsJson = skills.json() as Array<{ id: string }>
-      expect(skillsJson.map((s) => s.id)).toContain('user:demo')
-
-      // Skill recommender endpoint.
-      const rec = await app.inject({
-        method: 'POST',
-        url: '/api/skills/recommend',
-        payload: { prdText: 'demo flow' },
-      })
-      expect(rec.statusCode).toBe(200)
-      expect(Array.isArray(rec.json())).toBe(true)
 
       // Drafts list endpoint.
       const drafts = await app.inject({ method: 'GET', url: '/api/tests/draft' })
@@ -137,7 +119,7 @@ describe('createServer boot-time active-orphan cleanup', () => {
     ])
 
     const projectRoot = path.resolve(__dirname, '..', '..', 'templates', 'project')
-    const { app } = await createServer({ projectRoot, logsDir, ptyFactory: inertPtyFactory, listSkills: () => [] })
+    const { app } = await createServer({ projectRoot, logsDir, ptyFactory: inertPtyFactory })
     try {
       const manifest = readManifest(path.join(dir, 'manifest.json'))
       expect(manifest?.status).toBe('aborted')
@@ -169,7 +151,7 @@ describe('createServer boot-time active-orphan cleanup', () => {
     ])
 
     const projectRoot = path.resolve(__dirname, '..', '..', 'templates', 'project')
-    const { app } = await createServer({ projectRoot, logsDir, ptyFactory: inertPtyFactory, listSkills: () => [] })
+    const { app } = await createServer({ projectRoot, logsDir, ptyFactory: inertPtyFactory })
     try {
       const manifest = readManifest(path.join(dir, 'manifest.json'))
       expect(manifest?.status).toBe('aborted')
@@ -198,7 +180,7 @@ describe('createServer boot-time active-orphan cleanup', () => {
     ])
 
     const projectRoot = path.resolve(__dirname, '..', '..', 'templates', 'project')
-    const { app } = await createServer({ projectRoot, logsDir, ptyFactory: inertPtyFactory, listSkills: () => [] })
+    const { app } = await createServer({ projectRoot, logsDir, ptyFactory: inertPtyFactory })
     try {
       const manifest = readManifest(path.join(dir, 'manifest.json'))
       expect(manifest?.status).toBe('aborted')
@@ -234,7 +216,7 @@ describe('createServer boot-time active-orphan cleanup', () => {
     ])
 
     const projectRoot = path.resolve(__dirname, '..', '..', 'templates', 'project')
-    const { app } = await createServer({ projectRoot, logsDir, ptyFactory: inertPtyFactory, listSkills: () => [] })
+    const { app } = await createServer({ projectRoot, logsDir, ptyFactory: inertPtyFactory })
     try {
       const manifest = readManifest(path.join(dir, 'manifest.json'))
       expect(manifest?.status).toBe('passed')
@@ -340,27 +322,23 @@ test('Submit credentials', async ({ page }) => {
         fs.writeFileSync(input.agentLogPath, 'spec agent ran', 'utf8')
         return specStream
       },
-      loadSkillContent: () => 'mock skill body',
     }
 
     const { app } = await createServer({
       projectRoot,
       logsDir,
       ptyFactory: inertPtyFactory,
-      listSkills: () => [],
       testsDraftDepsOverride: overrides,
     })
 
     try {
-      // Kick off the draft with skills already chosen so the route auto-runs
-      // the plan stage.
+      // Kick off the draft so the route auto-runs the plan stage.
       const created = await app.inject({
         method: 'POST',
         url: '/api/tests/draft',
         payload: {
           prdText: 'Login flow',
           repos: [{ name: 'app', localPath: '/p/app' }],
-          skills: ['user:demo'],
           featureName: 'login_flow',
         },
       })
