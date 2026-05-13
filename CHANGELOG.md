@@ -5,7 +5,23 @@ All notable changes to Canary Lab are listed here. We try to keep the language p
 ## 1.0.5 — 2026-05-13
 
 ### What's new
+- **Export your evaluation results.** You can now turn a finished run into a shareable evaluation report, and a toast keeps you posted on progress while it's being put together.
+- **Live agent activity view.** The agent session screen has been rebuilt to stream what's happening in real time, with a cleaner layout that's now shared across the setup wizard.
+
+### Improvements
+- **Steadier run tracking.** Runs report their status and lifecycle moments more reliably, so what you see on screen better matches what's actually happening.
+- **Friendlier global status bar.** The bar at the top of the app reflects run state more accurately and reacts faster to changes.
+- **Smoother test setup wizard.** Reviewing specs and plans during test creation is tidier and less cluttered.
+
+---
+
+## 1.0.5 — 2026-05-13
+
+### What's new
 - **Plain-English evaluation report.** Exported evaluation reports now go through a rewrite pass that turns code-like test names, helper calls, and flowchart labels into clear descriptions of what each step is actually checking. The report reads like an operational summary instead of a dump of identifiers.
+
+### Improvements
+- **Smoother test setup wizard.** Reviewing specs and plans during test creation is tidier and less cluttered.
 
 ---
 
