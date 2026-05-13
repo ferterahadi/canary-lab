@@ -170,6 +170,8 @@ describe('agent session ref file parsing', () => {
     expect(selectAgentSessionRef({ activeAgent: 'claude', sessions: { claude, codex } })?.sessionId).toBe('sid-c')
     expect(selectAgentSessionRef({ activeAgent: 'claude', sessions: { codex } })?.sessionId).toBe('sid-x')
     expect(selectAgentSessionRef({ sessions: { claude } })?.sessionId).toBe('sid-c')
+    expect(selectAgentSessionRef({ activeAgent: 'codex', sessions: { claude } })?.sessionId).toBe('sid-c')
+    expect(selectAgentSessionRef({ sessions: {} })).toBeNull()
   })
 })
 
@@ -627,6 +629,35 @@ describe('locateMostRecentAgentSessionRef', () => {
 
     try { fs.rmSync(runDir, { recursive: true, force: true }) } catch { /* best-effort */ }
   })
+
+  it('falls back to claude when the latest Codex file disappears before stat', () => {
+    const runDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-asl-run-')))
+    const claudeLog = writeClaudeSession(runDir, 'sid-claude', new Date('2026-05-11T00:00:00Z'))
+    const codexLog = writeCodexSessionWithMtime(
+      runDir,
+      '2026',
+      '05',
+      '11',
+      'sid-codex',
+      new Date('2026-05-12T00:00:00Z'),
+    )
+    const originalStatSync = fs.statSync
+    const statSpy = vi.spyOn(fs, 'statSync').mockImplementation((candidate) => {
+      if (candidate === codexLog) throw new Error('gone')
+      return originalStatSync(candidate as fs.PathLike)
+    })
+
+    try {
+      expect(locateMostRecentAgentSessionRef(runDir, homeDir)).toEqual({
+        agent: 'claude',
+        sessionId: 'sid-claude',
+        logPath: claudeLog,
+      })
+    } finally {
+      statSpy.mockRestore()
+      try { fs.rmSync(runDir, { recursive: true, force: true }) } catch { /* best-effort */ }
+    }
+  })
 })
 
 describe('loadAgentSessionLog (claude)', () => {
@@ -918,6 +949,23 @@ describe('renderAgentSessionContext', () => {
     expect(rendered).toContain('TOOL RESULT: ok')
     expect(rendered).toContain('TOOL RESULT ERROR: failed')
     expect(rendered).not.toContain('[] TOOL RESULT')
+  })
+
+  it('omits empty rendered event lines from prior-session context', () => {
+    const file = path.join(homeDir, 'codex-context-empty.jsonl')
+    fs.writeFileSync(file, [
+      JSON.stringify({ type: 'response_item', payload: { type: 'message', role: 'assistant', content: 'not-array' } }),
+      JSON.stringify({ type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'real output' }] } }),
+    ].join('\n') + '\n')
+
+    const rendered = renderAgentSessionContext({
+      agent: 'codex',
+      sessionId: 'sid-codex',
+      logPath: file,
+    })
+
+    expect(rendered).toContain('ASSISTANT: real output')
+    expect(rendered).not.toContain('not-array')
   })
 })
 
