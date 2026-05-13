@@ -14,6 +14,7 @@ vi.mock('../api/client', async () => {
   return {
     ...actual,
     startEvaluationExport: vi.fn(),
+    listEvaluationExportTasks: vi.fn(),
     getEvaluationExportTask: vi.fn(),
     downloadEvaluationExportTask: vi.fn(),
     cancelEvaluationExportTask: vi.fn(),
@@ -53,6 +54,7 @@ beforeEach(() => {
   FakeWebSocket.instances = []
   vi.useRealTimers()
   vi.mocked(api.startEvaluationExport).mockReset()
+  vi.mocked(api.listEvaluationExportTasks).mockReset().mockResolvedValue([])
   vi.mocked(api.getEvaluationExportTask).mockReset()
   vi.mocked(api.downloadEvaluationExportTask).mockReset()
   vi.mocked(api.cancelEvaluationExportTask).mockReset()
@@ -67,6 +69,33 @@ afterEach(() => {
 })
 
 describe('EvaluationExportProvider', () => {
+  it('rehydrates persisted tasks and subscribes running tasks on mount', async () => {
+    const running = task({ taskId: 'persisted-running', runId: 'run-persisted', status: 'running' })
+    const completed = task({
+      taskId: 'persisted-completed',
+      runId: 'run-done',
+      status: 'completed',
+      downloadReady: true,
+      createdAt: '2026-01-02T00:00:00.000Z',
+    })
+    vi.mocked(api.listEvaluationExportTasks).mockResolvedValue([completed, running])
+
+    const captured = renderProbe()
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    expect(api.listEvaluationExportTasks).toHaveBeenCalledWith()
+    expect(captured.value?.tasks.map((item) => item.taskId)).toEqual(['persisted-completed', 'persisted-running'])
+    expect(captured.value?.taskForRun('run-persisted')?.taskId).toBe('persisted-running')
+    expect(FakeWebSocket.instances[0].url).toBe('ws://test/ws/evaluation-exports/persisted-running')
+
+    act(() => {
+      FakeWebSocket.instances[0].fire({ type: 'data', chunk: 'restored log\n' })
+    })
+    expect(captured.value?.logsByTaskId['persisted-running']).toContain('restored log')
+  })
+
   it('starts an export, streams logs, refreshes on exit, and exposes selection helpers', async () => {
     const captured = renderProbe()
     const running = task({ taskId: 'task-1', runId: 'run-1', mode: 'localized', status: 'running' })

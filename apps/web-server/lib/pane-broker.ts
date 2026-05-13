@@ -63,9 +63,10 @@ export class PaneBroker {
   // then delivers live chunks until the caller calls the returned unsubscribe.
   // If the pane already exited, replays buffer + exit message and closes
   // synchronously.
-  subscribe(id: PaneId, sub: PaneSubscriber): () => void {
+  subscribe(id: PaneId, sub: PaneSubscriber, opts: { replay?: boolean } = {}): () => void {
     const entry = this.ensure(id)
-    const replay = entry.buffer.snapshot()
+    const shouldReplay = opts.replay ?? true
+    const replay = shouldReplay ? entry.buffer.snapshot() : ''
     if (replay.length > 0) sub.send({ type: 'data', chunk: replay })
     const exit = entry.buffer.exitInfo()
     if (exit) {

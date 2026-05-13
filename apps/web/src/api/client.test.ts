@@ -35,6 +35,7 @@ import {
   getRunDetail,
   listFeatures,
   listDrafts,
+  listEvaluationExportTasks,
   listJournal,
   listRuns,
   listWorkspaceDirs,
@@ -142,6 +143,18 @@ describe('api client', () => {
       body: JSON.stringify({ mode: 'localized' }),
     })
     expect(fetchImpl).toHaveBeenNthCalledWith(2, 'http://x/api/evaluation-exports/task%2F1', { method: 'GET' })
+  })
+
+  it('lists evaluation export tasks with optional run filtering', async () => {
+    const tasks = [{ taskId: 'task-1', runId: 'run/1' }]
+    const fetchImpl = vi.fn().mockResolvedValue(ok(tasks))
+
+    await expect(listEvaluationExportTasks({ runId: 'run/1' }, { baseUrl: 'http://x', fetchImpl })).resolves.toEqual(tasks)
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'http://x/api/evaluation-exports?runId=run%2F1',
+      { method: 'GET' },
+    )
   })
 
   it('downloads evaluation export zip files with safe filenames', async () => {

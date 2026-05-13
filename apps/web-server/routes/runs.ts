@@ -9,6 +9,20 @@ import { createEvaluationExport, generateEvaluationRewriteWithAgent, type Evalua
 import { loadProjectConfig } from '../lib/runtime/launcher/project-config'
 import { PaneBroker, type PaneSubscriber } from '../lib/pane-broker'
 import {
+  appendEvaluationExportLog,
+  createEvaluationExportTask,
+  deleteEvaluationExportTask,
+  evaluationExportTaskView,
+  listEvaluationExportTasks,
+  patchEvaluationExportTask,
+  readEvaluationExportLog,
+  readEvaluationExportTask,
+  readEvaluationExportZip,
+  writeEvaluationExportZip,
+  type EvaluationExportMode,
+  type EvaluationExportTaskRecord,
+} from '../lib/evaluation-export-store'
+import {
   loadAgentSessionLog,
   locateMostRecentAgentSessionRef,
   parseAgentSessionRefFile,
@@ -18,35 +32,9 @@ import { isTerminalRunStatus } from '../../../shared/run-state'
 
 const EVALUATION_REWRITE_FORMAT_VERSION = 6
 
-type EvaluationExportMode = 'raw' | 'localized'
-type EvaluationExportStatus = 'running' | 'completed' | 'failed'
-
-interface EvaluationExportTask {
-  taskId: string
-  runId: string
-  feature: string
-  mode: EvaluationExportMode
-  status: EvaluationExportStatus
-  createdAt: string
-  updatedAt: string
-  downloadReady: boolean
-  error?: string
-  archiveBase: string
-  zip?: Buffer
+interface ActiveEvaluationExportTask {
   broker: PaneBroker
   abortController: AbortController
-}
-
-interface EvaluationExportTaskView {
-  taskId: string
-  runId: string
-  feature: string
-  mode: EvaluationExportMode
-  status: EvaluationExportStatus
-  createdAt: string
-  updatedAt: string
-  downloadReady: boolean
-  error?: string
 }
 
 export interface RunsRouteDeps {
@@ -69,7 +57,7 @@ export interface RunsRouteDeps {
 }
 
 export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Promise<void> {
-  const evaluationExports = new Map<string, EvaluationExportTask>()
+  const activeEvaluationExports = new Map<string, ActiveEvaluationExportTask>()
 
   app.get<{ Querystring: { feature?: string } }>('/api/runs', async (req) => {
     return deps.store.list({ feature: req.query.feature })
@@ -171,9 +159,23 @@ export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Pro
     return reply.send(zip)
   }
 
-  const startEvaluationExportTask = (detail: RunDetail, mode: EvaluationExportMode): EvaluationExportTaskView => {
+  const recoverStaleEvaluationExports = (): void => {
+    const activeIds = new Set(activeEvaluationExports.keys())
+    for (const task of listEvaluationExportTasks(deps.store.logsDir)) {
+      if (task.status !== 'running' || activeIds.has(task.taskId)) continue
+      const message = 'evaluation export interrupted; start a new export'
+      appendEvaluationExportLog(deps.store.logsDir, task.taskId, `[evaluation] task failed: ${message}\n`)
+      patchEvaluationExportTask(deps.store.logsDir, task.taskId, {
+        status: 'failed',
+        downloadReady: false,
+        error: message,
+      })
+    }
+  }
+
+  const startEvaluationExportTask = (detail: RunDetail, mode: EvaluationExportMode) => {
     const now = new Date().toISOString()
-    const task: EvaluationExportTask = {
+    const task: EvaluationExportTaskRecord = {
       taskId: `eval-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
       runId: detail.runId,
       feature: detail.manifest.feature,
@@ -183,34 +185,45 @@ export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Pro
       updatedAt: now,
       downloadReady: false,
       archiveBase: `canary-lab-evaluation-${safeFilename(detail.manifest.feature)}-${safeFilename(detail.runId)}`,
+    }
+    const active: ActiveEvaluationExportTask = {
       broker: new PaneBroker(),
       abortController: new AbortController(),
     }
-    evaluationExports.set(task.taskId, task)
-    const push = (chunk: string): void => task.broker.push('export', chunk)
+    createEvaluationExportTask(deps.store.logsDir, task)
+    activeEvaluationExports.set(task.taskId, active)
+    const push = (chunk: string): void => {
+      appendEvaluationExportLog(deps.store.logsDir, task.taskId, chunk)
+      active.broker.push('export', chunk)
+    }
     push(`[evaluation] task ${task.taskId} started\n`)
     void (async () => {
       try {
-        const built = await buildEvaluationZip(detail, mode, push, task.abortController.signal)
-        if (!evaluationExports.has(task.taskId)) return
-        task.archiveBase = built.archiveBase
-        task.zip = built.zip
-        task.status = 'completed'
-        task.downloadReady = true
-        task.updatedAt = new Date().toISOString()
+        const built = await buildEvaluationZip(detail, mode, push, active.abortController.signal)
+        if (!readEvaluationExportTask(deps.store.logsDir, task.taskId)) return
+        writeEvaluationExportZip(deps.store.logsDir, task.taskId, built.zip)
+        patchEvaluationExportTask(deps.store.logsDir, task.taskId, {
+          archiveBase: built.archiveBase,
+          status: 'completed',
+          downloadReady: true,
+        })
         push('[evaluation] task completed\n')
-        task.broker.markExit('export', 0)
+        active.broker.markExit('export', 0)
       } catch (err) {
-        if (!evaluationExports.has(task.taskId)) return
-        task.status = 'failed'
-        task.error = err instanceof Error ? err.message : String(err)
-        task.updatedAt = new Date().toISOString()
-        task.downloadReady = false
-        push(`[evaluation] task failed: ${task.error}\n`)
-        task.broker.markExit('export', 1)
+        if (!readEvaluationExportTask(deps.store.logsDir, task.taskId)) return
+        const error = err instanceof Error ? err.message : String(err)
+        patchEvaluationExportTask(deps.store.logsDir, task.taskId, {
+          status: 'failed',
+          error,
+          downloadReady: false,
+        })
+        push(`[evaluation] task failed: ${error}\n`)
+        active.broker.markExit('export', 1)
+      } finally {
+        activeEvaluationExports.delete(task.taskId)
       }
     })()
-    return taskView(task)
+    return evaluationExportTaskView(task)
   }
 
   app.get<{ Params: { runId: string } }>('/api/runs/:runId/evaluation.html', async (req, reply) => {
@@ -240,51 +253,74 @@ export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Pro
     return startEvaluationExportTask(detail, mode)
   })
 
+  app.get<{ Querystring: { runId?: string } }>('/api/evaluation-exports', async (req) => {
+    recoverStaleEvaluationExports()
+    return listEvaluationExportTasks(deps.store.logsDir, { runId: req.query.runId })
+      .map(evaluationExportTaskView)
+  })
+
   app.get<{ Params: { taskId: string } }>('/api/evaluation-exports/:taskId', async (req, reply) => {
-    const task = evaluationExports.get(req.params.taskId)
+    recoverStaleEvaluationExports()
+    const task = readEvaluationExportTask(deps.store.logsDir, req.params.taskId)
     if (!task) {
       reply.code(404)
       return { error: 'evaluation export task not found' }
     }
-    return taskView(task)
+    return evaluationExportTaskView(task)
   })
 
   app.get<{ Params: { taskId: string } }>('/api/evaluation-exports/:taskId/download', async (req, reply) => {
-    const task = evaluationExports.get(req.params.taskId)
+    recoverStaleEvaluationExports()
+    const task = readEvaluationExportTask(deps.store.logsDir, req.params.taskId)
     if (!task) {
       reply.code(404)
       return { error: 'evaluation export task not found' }
     }
-    if (task.status !== 'completed' || !task.zip) {
+    const zip = task.status === 'completed' ? readEvaluationExportZip(deps.store.logsDir, task.taskId) : null
+    if (!zip) {
       reply.code(409)
       return { error: 'evaluation export is not ready' }
     }
     reply
       .type('application/zip')
       .header('content-disposition', `attachment; filename="${task.archiveBase}.zip"`)
-    return reply.send(task.zip)
+    return reply.send(zip)
   })
 
   app.delete<{ Params: { taskId: string } }>('/api/evaluation-exports/:taskId', async (req, reply) => {
-    const task = evaluationExports.get(req.params.taskId)
+    const task = readEvaluationExportTask(deps.store.logsDir, req.params.taskId)
     if (!task) {
       reply.code(404)
       return { error: 'evaluation export task not found' }
     }
+    const active = activeEvaluationExports.get(task.taskId)
     if (task.status === 'running') {
-      task.abortController.abort()
-      task.broker.push('export', '[evaluation] task cancelled\n')
+      active?.abortController.abort()
+      appendEvaluationExportLog(deps.store.logsDir, task.taskId, '[evaluation] task cancelled\n')
+      active?.broker.push('export', '[evaluation] task cancelled\n')
     }
-    task.broker.markExit('export', task.status === 'running' ? 1 : 0)
-    evaluationExports.delete(req.params.taskId)
+    active?.broker.markExit('export', task.status === 'running' ? 1 : 0)
+    activeEvaluationExports.delete(req.params.taskId)
+    deleteEvaluationExportTask(deps.store.logsDir, req.params.taskId)
     reply.code(204)
     return reply.send()
   })
 
   app.get<{ Params: { taskId: string } }>('/ws/evaluation-exports/:taskId', { websocket: true }, (socket, req) => {
-    const task = evaluationExports.get(req.params.taskId)
+    recoverStaleEvaluationExports()
+    const task = readEvaluationExportTask(deps.store.logsDir, req.params.taskId)
     if (!task) {
       socket.send(JSON.stringify({ type: 'error', error: 'evaluation export task not found' }))
+      socket.close()
+      return
+    }
+    const log = readEvaluationExportLog(deps.store.logsDir, task.taskId)
+    if (log.length > 0) {
+      socket.send(JSON.stringify({ type: 'data', chunk: log }))
+    }
+    const active = activeEvaluationExports.get(task.taskId)
+    if (!active) {
+      socket.send(JSON.stringify({ type: 'exit', code: task.status === 'completed' ? 0 : 1 }))
       socket.close()
       return
     }
@@ -296,7 +332,7 @@ export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Pro
         try { socket.close() } catch { /* already closed */ }
       },
     }
-    const unsub = task.broker.subscribe('export', sub)
+    const unsub = active.broker.subscribe('export', sub, { replay: false })
     socket.on('close', () => unsub())
   })
 
@@ -603,20 +639,6 @@ function clearEvaluationRewriteError(runDir: string): void {
 
 function parseEvaluationExportMode(value: string | undefined): EvaluationExportMode | null {
   return value === 'raw' || value === 'localized' ? value : null
-}
-
-function taskView(task: EvaluationExportTask): EvaluationExportTaskView {
-  return {
-    taskId: task.taskId,
-    runId: task.runId,
-    feature: task.feature,
-    mode: task.mode,
-    status: task.status,
-    createdAt: task.createdAt,
-    updatedAt: task.updatedAt,
-    downloadReady: task.downloadReady,
-    ...(task.error ? { error: task.error } : {}),
-  }
 }
 
 interface ZipEntry {
