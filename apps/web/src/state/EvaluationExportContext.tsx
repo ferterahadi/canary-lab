@@ -69,6 +69,20 @@ export function EvaluationExportProvider({ children, wsBase, WebSocketImpl }: Ev
     }
   }, [WebSocketImpl, appendLog, refreshTask, wsBase])
 
+  useEffect(() => {
+    let cancelled = false
+    api.listEvaluationExportTasks()
+      .then((tasks) => {
+        if (cancelled) return
+        setTasksById(Object.fromEntries(tasks.map((task) => [task.taskId, task])))
+        for (const task of tasks) {
+          if (task.status === 'running') subscribeTask(task.taskId)
+        }
+      })
+      .catch(() => { /* keep an empty task list on startup failures */ })
+    return () => { cancelled = true }
+  }, [subscribeTask])
+
   const startExport = useCallback(async (
     runId: string,
     mode: EvaluationExportMode,

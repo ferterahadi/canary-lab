@@ -572,6 +572,19 @@ export function getEvaluationExportTask(
   )
 }
 
+export function listEvaluationExportTasks(
+  query: { runId?: string } = {},
+  opts?: ClientOptions,
+): Promise<EvaluationExportTask[]> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  const qs = query.runId ? `?runId=${encodeURIComponent(query.runId)}` : ''
+  return request<EvaluationExportTask[]>(
+    `${baseUrl}/api/evaluation-exports${qs}`,
+    { method: 'GET' },
+    fetchImpl,
+  )
+}
+
 export async function cancelEvaluationExportTask(
   taskId: string,
   opts?: ClientOptions,

@@ -5,6 +5,7 @@ import path from 'path'
 import Fastify from 'fastify'
 import { runsRoutes } from './runs'
 import { createRegistry, RunStore, type OrchestratorLike, type RestartHealResult } from '../lib/run-store'
+import { createEvaluationExportTask, evaluationExportsDir } from '../lib/evaluation-export-store'
 import { readManifest, readRunsIndex, writeManifest, writeRunsIndex } from '../lib/runtime/manifest'
 import { runDirFor } from '../lib/runtime/run-paths'
 
@@ -508,6 +509,35 @@ test('records checkout', async ({ page }) => {
     expect(download.statusCode).toBe(200)
     expect(download.headers['content-disposition']).toContain('canary-lab-evaluation-checkout-r-task-raw.zip')
     expect(download.rawPayload.toString('latin1')).toContain('evaluation.html')
+    expect(fs.existsSync(path.join(evaluationExportsDir(logsDir), task.taskId, 'task.json'))).toBe(true)
+    expect(fs.readFileSync(path.join(evaluationExportsDir(logsDir), task.taskId, 'export.log'), 'utf8')).toContain('task completed')
+    expect(fs.existsSync(path.join(evaluationExportsDir(logsDir), task.taskId, 'export.zip'))).toBe(true)
+  })
+
+  it('lists persisted evaluation export tasks and filters by run', async () => {
+    writeManifestForRun('r-task-list-a', 'checkout', 'passed')
+    writeManifestForRun('r-task-list-b', 'orders', 'passed')
+    const { app } = await build()
+
+    const first = await app.inject({
+      method: 'POST',
+      url: '/api/runs/r-task-list-a/evaluation-export',
+      payload: { mode: 'raw' },
+    })
+    const second = await app.inject({
+      method: 'POST',
+      url: '/api/runs/r-task-list-b/evaluation-export',
+      payload: { mode: 'raw' },
+    })
+    await waitForEvaluationTask(app, first.json().taskId)
+    await waitForEvaluationTask(app, second.json().taskId)
+
+    const all = await app.inject({ method: 'GET', url: '/api/evaluation-exports' })
+    const filtered = await app.inject({ method: 'GET', url: '/api/evaluation-exports?runId=r-task-list-a' })
+
+    expect(all.statusCode).toBe(200)
+    expect(all.json().map((task: { taskId: string }) => task.taskId).sort()).toEqual([first.json().taskId, second.json().taskId].sort())
+    expect(filtered.json().map((task: { runId: string }) => task.runId)).toEqual(['r-task-list-a'])
   })
 
   it('runs localized evaluation export tasks through the rewrite path', async () => {
@@ -686,6 +716,33 @@ test('records checkout', async ({ page }) => {
     expect((await app.inject({ method: 'GET', url: '/api/evaluation-exports/missing' })).statusCode).toBe(404)
     expect((await app.inject({ method: 'GET', url: '/api/evaluation-exports/missing/download' })).statusCode).toBe(404)
     expect((await app.inject({ method: 'DELETE', url: '/api/evaluation-exports/missing' })).statusCode).toBe(404)
+  })
+
+  it('marks persisted running evaluation export tasks as failed when no worker owns them', async () => {
+    createEvaluationExportTask(logsDir, {
+      taskId: 'eval-stale-task',
+      runId: 'r-stale-task',
+      feature: 'checkout',
+      mode: 'raw',
+      status: 'running',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+      downloadReady: false,
+      archiveBase: 'canary-lab-evaluation-checkout-r-stale-task',
+    })
+    const { app } = await build()
+
+    const listed = await app.inject({ method: 'GET', url: '/api/evaluation-exports' })
+    const fetched = await app.inject({ method: 'GET', url: '/api/evaluation-exports/eval-stale-task' })
+
+    expect(listed.json()[0]).toMatchObject({
+      taskId: 'eval-stale-task',
+      status: 'failed',
+      downloadReady: false,
+      error: 'evaluation export interrupted; start a new export',
+    })
+    expect(fetched.json()).toMatchObject({ status: 'failed' })
+    expect(fs.readFileSync(path.join(evaluationExportsDir(logsDir), 'eval-stale-task', 'export.log'), 'utf8')).toContain('interrupted')
   })
 
   it('completes localized tasks with fallback wording when no rewrite is generated', async () => {
