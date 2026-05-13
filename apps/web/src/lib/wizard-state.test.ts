@@ -12,7 +12,6 @@ import {
 
 const ALL: DraftStatus[] = [
   'created',
-  'recommending',
   'planning',
   'plan-ready',
   'generating',
@@ -24,9 +23,8 @@ const ALL: DraftStatus[] = [
 ]
 
 describe('nextStepForStatus', () => {
-  it('keeps configure for created/recommending', () => {
+  it('keeps configure for created', () => {
     expect(nextStepForStatus('created')).toBe('configure')
-    expect(nextStepForStatus('recommending')).toBe('configure')
   })
   it('plan step covers planning + plan-ready', () => {
     expect(nextStepForStatus('planning')).toBe('plan')
@@ -56,8 +54,7 @@ describe('isPollingForStep', () => {
     expect(isPollingForStep('spec', 'generating')).toBe(true)
     expect(isPollingForStep('spec', 'spec-ready')).toBe(false)
   })
-  it('configure polls only while recommending', () => {
-    expect(isPollingForStep('configure', 'recommending')).toBe(true)
+  it('configure does not poll', () => {
     expect(isPollingForStep('configure', 'created')).toBe(false)
   })
   it('done never polls', () => {
@@ -77,7 +74,6 @@ describe('terminalForStep', () => {
   })
   it('configure terminal at created (so user can submit)', () => {
     expect(terminalForStep('configure', 'created')).toBe(true)
-    expect(terminalForStep('configure', 'recommending')).toBe(false)
   })
   it('done is terminal only at accepted/rejected/cancelled/error', () => {
     expect(terminalForStep('done', 'accepted')).toBe(true)

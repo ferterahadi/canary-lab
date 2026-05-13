@@ -1,20 +1,12 @@
-// WebSocket wrapper for the wizard draft agent stream. Mirrors `pane-socket`
-// but keyed on draft id and pointed at `/ws/draft/:draftId/agent`. The
-// server-side broker replays buffered chunks on connect, so reconnect is the
-// same one-shot policy: try once after an unexpected close, then give up.
-
-export interface DraftSocketMessage {
+export interface EvaluationExportSocketMessage {
   type: 'data' | 'exit' | 'error'
   chunk?: string
   code?: number
   error?: string
 }
 
-export type DraftAgentStage = 'planning' | 'generating'
-
-export interface ConnectDraftAgentOptions {
-  draftId: string
-  stage?: DraftAgentStage
+export interface ConnectEvaluationExportOptions {
+  taskId: string
   onData: (chunk: string) => void
   onExit?: (code: number) => void
   onError?: (err: string) => void
@@ -23,7 +15,7 @@ export interface ConnectDraftAgentOptions {
   maxReconnects?: number
 }
 
-export interface DraftAgentConnection {
+export interface EvaluationExportConnection {
   close(): void
 }
 
@@ -33,14 +25,13 @@ const defaultWsBase = (): string => {
   return `${proto}//${location.host}`
 }
 
-export function connectDraftAgent(opts: ConnectDraftAgentOptions): DraftAgentConnection {
+export function connectEvaluationExport(opts: ConnectEvaluationExportOptions): EvaluationExportConnection {
   const WSImpl = opts.WebSocketImpl ?? (globalThis as { WebSocket?: typeof WebSocket }).WebSocket
   if (!WSImpl) {
     throw new Error('WebSocket implementation not available')
   }
   const base = opts.wsBase ?? defaultWsBase()
-  const stage = opts.stage ?? 'planning'
-  const url = `${base}/ws/draft/${encodeURIComponent(opts.draftId)}/agent?stage=${encodeURIComponent(stage)}`
+  const url = `${base}/ws/evaluation-exports/${encodeURIComponent(opts.taskId)}`
   const maxReconnects = opts.maxReconnects ?? 1
 
   let closed = false
@@ -52,9 +43,9 @@ export function connectDraftAgent(opts: ConnectDraftAgentOptions): DraftAgentCon
     const ws = new WSImpl(url)
     socket = ws
     ws.onmessage = (ev: MessageEvent): void => {
-      let msg: DraftSocketMessage
+      let msg: EvaluationExportSocketMessage
       try {
-        msg = JSON.parse(typeof ev.data === 'string' ? ev.data : '') as DraftSocketMessage
+        msg = JSON.parse(typeof ev.data === 'string' ? ev.data : '') as EvaluationExportSocketMessage
       } catch {
         return
       }

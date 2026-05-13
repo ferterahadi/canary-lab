@@ -53,7 +53,7 @@ function fileBlocks(files: GeneratedFeatureFile[]): string {
 }
 
 describe('POST /api/tests/draft', () => {
-  it('creates a draft and starts planning without skills or PRD text', async () => {
+  it('creates a draft and starts planning without PRD text', async () => {
     const deps = makeDeps()
     const app = await makeApp(deps)
     const r = await app.inject({
@@ -154,7 +154,7 @@ describe('POST /api/tests/draft', () => {
     await app.close()
   })
 
-  it('jumps to planning when skills supplied', async () => {
+  it('jumps to planning when a valid draft is supplied', async () => {
     const deps = makeDeps({
       spawnPlanAgent: async () => `<plan-output>[
         {"step":"x","actions":["a"],"expectedOutcome":"y"}
@@ -167,7 +167,6 @@ describe('POST /api/tests/draft', () => {
       payload: {
         prdText: 'Login',
         repos: [{ name: 'app', localPath: '/p' }],
-        skills: ['s1'],
       },
     })
     expect(r.statusCode).toBe(201)
@@ -305,7 +304,6 @@ describe('runPlanStage', () => {
       payload: {
         prdText: 'Login',
         repos: [{ name: 'app', localPath: '/p' }],
-        skills: ['s1'],
       },
     })
     const id = fs.readdirSync(path.join(logsDir, 'drafts'))[0]
@@ -329,7 +327,6 @@ describe('runPlanStage', () => {
       payload: {
         prdText: 'Login',
         repos: [{ name: 'app', localPath: '/p' }],
-        skills: ['s1'],
       },
     })
     const drafts = fs.readdirSync(path.join(logsDir, 'drafts'))
@@ -378,7 +375,6 @@ describe('runPlanStage', () => {
       payload: {
         prdText: 'X',
         repos: [{ name: 'app', localPath: '/p' }],
-        skills: ['s1'],
       },
     })
     const id = fs.readdirSync(path.join(logsDir, 'drafts'))[0]
@@ -401,7 +397,6 @@ describe('runPlanStage', () => {
       payload: {
         prdText: 'X',
         repos: [{ name: 'app', localPath: '/p' }],
-        skills: ['s1'],
       },
     })
     const id = fs.readdirSync(path.join(logsDir, 'drafts'))[0]
@@ -547,7 +542,6 @@ describe('POST /api/tests/draft/:id/accept-plan', () => {
       payload: {
         prdText: 'X',
         repos: [{ name: 'app', localPath: '/p' }],
-        skills: ['s1'],
       },
     })
     const id = post.json().draftId
@@ -687,7 +681,6 @@ describe('POST /api/tests/draft/:id/accept-spec', () => {
       payload: {
         prdText: 'Login flow',
         repos: [{ name: 'app', localPath: '/p' }],
-        skills: ['s1'],
         featureName: 'login',
       },
     })
@@ -742,7 +735,6 @@ describe('POST /api/tests/draft/:id/accept-spec', () => {
       payload: {
         prdText: 'Deps flow',
         repos: [{ name: 'app', localPath: '/p' }],
-        skills: ['s1'],
         featureName: 'deps',
       },
     })
@@ -778,7 +770,6 @@ describe('POST /api/tests/draft/:id/accept-spec', () => {
       payload: {
         prdText: 'Bad package',
         repos: [{ name: 'app', localPath: '/p' }],
-        skills: ['s1'],
         featureName: 'badpkg',
       },
     })
@@ -812,7 +803,6 @@ module.exports = { config }
       payload: {
         prdText: 'Bad scaffold',
         repos: [{ name: 'app', localPath: '/p' }],
-        skills: ['s1'],
         featureName: 'badscaffold',
       },
     })
@@ -843,7 +833,6 @@ module.exports = { config }
       payload: {
         prdText: 'X',
         repos: [{ name: 'app', localPath: '/p' }],
-        skills: ['s1'],
         featureName: 'login',
       },
     })
@@ -916,7 +905,6 @@ describe('runSpecStage error paths', () => {
       payload: {
         prdText: 'X',
         repos: [{ name: 'app', localPath: '/p' }],
-        skills: ['s1'],
       },
     })
     const id = post.json().draftId
@@ -943,7 +931,6 @@ describe('runSpecStage error paths', () => {
       payload: {
         prdText: 'X',
         repos: [{ name: 'app', localPath: '/p' }],
-        skills: ['s1'],
       },
     })
     const id = post.json().draftId
@@ -961,35 +948,6 @@ describe('runSpecStage error paths', () => {
     // No throw.
   })
 
-  it('uses loadSkillContent if provided', async () => {
-    let loaded: string[] = []
-    const deps = makeDeps({
-      spawnPlanAgent: async () => `<plan-output>[
-        {"step":"X","actions":["a"],"expectedOutcome":"y"}
-      ]</plan-output>`,
-      spawnSpecAgent: async () => '<file path="x.ts">x</file>',
-      loadSkillContent: (id) => {
-        loaded.push(id)
-        return `body of ${id}`
-      },
-    })
-    const app = await makeApp(deps)
-    const post = await app.inject({
-      method: 'POST',
-      url: '/api/tests/draft',
-      payload: {
-        prdText: 'X',
-        repos: [{ name: 'app', localPath: '/p' }],
-        skills: ['skill-a', 'skill-b'],
-      },
-    })
-    const id = post.json().draftId
-    await new Promise((r) => setTimeout(r, 20))
-    await app.inject({ method: 'POST', url: `/api/tests/draft/${id}/accept-plan`, payload: {} })
-    await new Promise((r) => setTimeout(r, 20))
-    expect(loaded).toEqual(['skill-a', 'skill-b'])
-    await app.close()
-  })
 })
 
 describe('reject and delete', () => {

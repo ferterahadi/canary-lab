@@ -5,7 +5,7 @@ import type { PaneBroker } from './pane-broker'
 // Pure helpers for the Add Test wizard's plan / spec agents:
 //
 //   - Template loading + `{{placeholder}}` substitution
-//   - Repo / skill / plan formatters that turn structured input into the
+//   - Repo / plan formatters that turn structured input into the
 //     plain-text the prompt template embeds
 //   - The tee-to-disk reducer that fans pty output into a log file + an
 //     optional PaneBroker
@@ -58,15 +58,6 @@ export function formatPlan(plan: unknown): string {
   return JSON.stringify(plan, null, 2)
 }
 
-export function formatSkills(
-  skills: { id: string; content: string }[],
-): string {
-  if (skills.length === 0) return '(no skills selected)'
-  return skills
-    .map((s) => `--- skill: ${s.id} ---\n${s.content.trim()}\n--- end skill ---`)
-    .join('\n\n')
-}
-
 export function buildPlanPrompt(input: {
   prdText: string
   repos: RepoSummary[]
@@ -82,7 +73,6 @@ export function buildPlanPrompt(input: {
 export function buildSpecPrompt(input: {
   featureName: string
   plan: unknown
-  skills: { id: string; content: string }[]
   repos: RepoSummary[]
   template?: string
 }): string {
@@ -90,7 +80,6 @@ export function buildSpecPrompt(input: {
   return substitute(template, {
     featureName: input.featureName,
     plan: formatPlan(input.plan),
-    skills: formatSkills(input.skills),
     repos: formatRepos(input.repos),
   })
 }
@@ -139,15 +128,20 @@ export function createTeeSink(opts: {
 // Build the argv used to invoke Claude in streaming JSON mode. The wizard
 // pipes that JSON through a formatter so users see progress immediately while
 // the final assistant text remains parseable by the draft output parser.
-export function buildClaudeArgs(prompt: string): string[] {
-  return [
+//
+// `sessionId` pins the JSONL log path written by the claude CLI to
+// `~/.claude/projects/<encoded-cwd>/<sessionId>.jsonl` so the live structured
+// session WS can tail it from the moment of spawn.
+export function buildClaudeArgs(prompt: string, sessionId?: string): string[] {
+  const base = [
     '--dangerously-skip-permissions',
     '--output-format=stream-json',
     '--include-partial-messages',
     '--verbose',
-    '-p',
-    prompt,
   ]
+  if (sessionId) base.push('--session-id', sessionId)
+  base.push('-p', prompt)
+  return base
 }
 
 export function buildClaudeResumeArgs(prompt: string, sessionId: string): string[] {
@@ -171,10 +165,10 @@ export function shellQuote(arg: string): string {
   return `'${arg.replace(/'/g, `'\\''`)}'`
 }
 
-export function buildClaudeCommand(prompt: string, claudeBin = 'claude', resumeSessionId?: string): string {
+export function buildClaudeCommand(prompt: string, claudeBin = 'claude', resumeSessionId?: string, pinSessionId?: string): string {
   const args = resumeSessionId
     ? buildClaudeResumeArgs(prompt, resumeSessionId)
-    : buildClaudeArgs(prompt)
+    : buildClaudeArgs(prompt, pinSessionId)
   return `set -o pipefail; ${claudeBin} ${args.map(shellQuote).join(' ')} | node ${shellQuote(WIZARD_CLAUDE_FORMATTER_FILE)}`
 }
 
@@ -196,10 +190,10 @@ export function buildCodexCommand(prompt: string, codexBin = 'codex', resumeSess
 export function buildWizardCommand(
   agent: WizardAgentKind,
   prompt: string,
-  bins: { claudeBin?: string; codexBin?: string; resumeSessionId?: string } = {},
+  bins: { claudeBin?: string; codexBin?: string; resumeSessionId?: string; pinSessionId?: string } = {},
 ): string {
   return agent === 'claude'
-    ? buildClaudeCommand(prompt, bins.claudeBin, bins.resumeSessionId)
+    ? buildClaudeCommand(prompt, bins.claudeBin, bins.resumeSessionId, bins.pinSessionId)
     : buildCodexCommand(prompt, bins.codexBin, bins.resumeSessionId)
 }
 

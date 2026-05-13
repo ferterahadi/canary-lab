@@ -123,15 +123,15 @@ Each run gets its own directory under `logs/runs/<runId>/`. The exact contents d
 
 Outside the run directory, `logs/runs/index.json` tracks run history and `logs/current/` points at the active run so manual agents can use stable paths while the UI keeps the full run history.
 
-## Assertion Review
+## Evaluation Report
 
-Each completed run can export a single-page **Assertion Review** for the feature it ran — the "Export Assertion" button in the run detail Overview tab. The download is a `.zip` containing one HTML file, per-test flowchart SVGs, and any captured videos.
+Each completed run can export a single-page **Evaluation Report** for the feature it ran — the "Export Evaluation" button in the run detail Overview tab. The download is a `.zip` containing one final `evaluation.html` report and any captured videos. The report uses the configured Heal Agent when available to rewrite test titles and flowchart labels into accessible English, then caches that wording with the run so repeated exports stay stable.
 
-![Assertion Review sample](docs/assets/assertion-review.png)
+![Evaluation Report sample](docs/assets/assertion-review.png)
 
-Each test case lists its body, the helpers it calls (with local helper definitions inlined once), and every assertion. Each assertion is graded **strict / moderate / shallow / unknown** by static analysis — a string-equality check on a business-critical field grades strict; `toBeVisible()` grades moderate; an existence-or-count check grades shallow.
+The report starts with stakeholder-readable evaluation language: what behavior was checked, why it matters, the run result, and the strength of the evidence in plain terms. The engineering evidence remains in the same artifact: each test case can expand its flowchart, test code, helper code, videos, and exact checks.
 
-The intended use is PR review. A green run says the suite passed; the assertion review says what it actually proved. Attach it to a PR so the reviewer — human or agent — can decide whether the assertions match what the change is supposed to deliver.
+The intended use is PR or product review. A green run says the suite passed; the evaluation report says what it actually proved in language useful to both product stakeholders and engineers.
 
 ## Self-Fixing Workflow
 

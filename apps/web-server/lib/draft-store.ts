@@ -5,6 +5,7 @@ import {
   validateFeatureTarget as validateScaffoldTarget,
   type ApplyFeatureScaffoldResult,
 } from '../../../shared/feature-scaffold'
+import type { AgentSessionRef } from './agent-session-log'
 
 // Draft storage for the Add Test wizard. Each draft lives at
 // `<logsDir>/drafts/<draftId>/` with a JSON state file plus the raw PRD,
@@ -18,7 +19,6 @@ import {
 
 export type DraftStatus =
   | 'created'
-  | 'recommending'
   | 'planning'
   | 'plan-ready'
   | 'generating'
@@ -29,8 +29,7 @@ export type DraftStatus =
   | 'error'
 
 const ALLOWED_TRANSITIONS: Record<DraftStatus, DraftStatus[]> = {
-  created: ['recommending', 'planning', 'rejected', 'cancelled', 'error'],
-  recommending: ['planning', 'rejected', 'cancelled', 'error'],
+  created: ['planning', 'rejected', 'cancelled', 'error'],
   planning: ['plan-ready', 'rejected', 'cancelled', 'error'],
   'plan-ready': ['generating', 'rejected', 'error'],
   generating: ['spec-ready', 'rejected', 'cancelled', 'error'],
@@ -58,12 +57,20 @@ export interface DraftRecord {
   prdText: string
   prdDocuments: DraftPrdDocument[]
   repos: DraftRepo[]
-  skills: string[]
   featureName?: string
   wizardAgent?: 'claude' | 'codex'
   activeAgentStage?: 'planning' | 'generating'
   planAgentSessionId?: string
   planAgentSessionKind?: 'claude' | 'codex'
+  // Structured-session ref + spawn timestamp for the live agent-session WS.
+  // Claude pins the session id at spawn so `planAgentSessionRef` is set before
+  // the first byte of agent output. Codex has no equivalent flag — the WS
+  // tailer discovers the rollout file post-hoc using `planAgentSpawnedAt` as
+  // the lower bound and the draft dir as the cwd match.
+  planAgentSessionRef?: AgentSessionRef
+  planAgentSpawnedAt?: string
+  specAgentSessionRef?: AgentSessionRef
+  specAgentSpawnedAt?: string
   status: DraftStatus
   createdAt: string
   updatedAt: string
@@ -101,7 +108,6 @@ export interface CreateDraftInput {
   prdText: string
   prdDocuments?: DraftPrdDocument[]
   repos: DraftRepo[]
-  skills?: string[]
   featureName?: string
   now?: () => string
 }
@@ -116,7 +122,6 @@ export function createDraft(logsDir: string, input: CreateDraftInput): DraftReco
     prdText: input.prdText,
     prdDocuments: input.prdDocuments ?? [],
     repos: input.repos,
-    skills: input.skills ?? [],
     featureName: input.featureName,
     status: 'created',
     createdAt: now,
@@ -175,6 +180,10 @@ export interface TransitionPatch {
   activeAgentStage?: 'planning' | 'generating'
   planAgentSessionId?: string
   planAgentSessionKind?: 'claude' | 'codex'
+  planAgentSessionRef?: AgentSessionRef
+  planAgentSpawnedAt?: string
+  specAgentSessionRef?: AgentSessionRef
+  specAgentSpawnedAt?: string
   errorMessage?: string
 }
 

@@ -91,6 +91,7 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunStatus }: 
                 const runningLocation = isRunActivelyTesting && activeRunSummary?.running?.name === entryName
                   ? activeRunSummary.running.location
                   : undefined
+                const isRunningTest = Boolean(runningLocation)
                 const activeLine = activeBodyLineForTest({
                   testName: t.name,
                   testLine: t.line,
@@ -104,6 +105,7 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunStatus }: 
                     test={t}
                     status={statusForTest(t.name, activeRunSummary, isRunActivelyTesting)}
                     runningLocation={runningLocation}
+                    isRunningTest={isRunningTest}
                     runningStep={isRunActivelyTesting && activeRunSummary?.running?.name === entryName ? activeRunSummary.running.step : undefined}
                     activeLine={activeLine}
                     expanded={isExpanded}
@@ -131,6 +133,7 @@ function TestCard({
   test,
   status,
   runningLocation,
+  isRunningTest,
   runningStep,
   activeLine,
   expanded,
@@ -140,6 +143,7 @@ function TestCard({
   test: ExtractedTest
   status: StepStatus
   runningLocation?: string
+  isRunningTest: boolean
   runningStep?: RunSummaryRunningStep
   activeLine?: number | null
   expanded: boolean
@@ -148,7 +152,10 @@ function TestCard({
   return (
     <div
       className={`cl-card cl-card-hover transition-all duration-150 ${colorClassForStatus(status)}`}
-      style={{ background: expanded ? 'var(--bg-selected)' : undefined }}
+      style={{
+        background: expanded || isRunningTest ? 'var(--bg-selected)' : undefined,
+        boxShadow: isRunningTest ? 'inset 3px 0 0 var(--accent)' : undefined,
+      }}
     >
       <button
         type="button"
@@ -223,6 +230,18 @@ function TestsHeaderIndicator({
 }) {
   if (summary) return <RunningIndicator summary={summary} totalTests={totalTests} passedCount={passedCount} isRunActivelyTesting={isRunActivelyTesting} />
   if (!specsLoaded || totalTests <= 0) return null
+  if (isRunActivelyTesting) {
+    return (
+      <div className="flex items-center gap-2 text-[10px]" style={{ color: 'var(--text-secondary)' }}>
+        <span className="relative flex h-2 w-2">
+          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-sky-400 opacity-75" />
+          <span className="relative inline-flex h-2 w-2 rounded-full bg-sky-500" />
+        </span>
+        <span className="uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>running</span>
+        <span style={{ fontFamily: 'var(--font-mono)' }}>0/{totalTests}</span>
+      </div>
+    )
+  }
   return (
     <div className="text-[10px]" style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>
       {totalTests}
@@ -247,7 +266,7 @@ function RunningIndicator({
   // which would briefly read "1/1" while 14 tests are actually queued.
   const total = totalTests > 0 ? totalTests : summary.total
   const done = totalTests > 0 ? passedCount : summary.passed
-  const isTestRunning = isRunActivelyTesting && Boolean(summary.running)
+  const isTestRunning = isRunActivelyTesting
   return (
     <div className="flex items-center gap-2 text-[10px]" style={{ color: 'var(--text-secondary)' }}>
       {isTestRunning && (
@@ -255,6 +274,9 @@ function RunningIndicator({
           <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-sky-400 opacity-75" />
           <span className="relative inline-flex h-2 w-2 rounded-full bg-sky-500" />
         </span>
+      )}
+      {isTestRunning && (
+        <span className="uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>running</span>
       )}
       <span style={{ fontFamily: 'var(--font-mono)' }}>{done}/{total}</span>
     </div>
