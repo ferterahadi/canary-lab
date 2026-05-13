@@ -13,6 +13,7 @@ import { testsDraftRoutes, type TestsDraftRouteDeps } from './routes/tests-draft
 import { paneStreamRoutes } from './ws/pane-stream'
 import { runsStreamRoutes } from './ws/runs-stream'
 import { draftAgentStreamRoutes } from './ws/draft-agent-stream'
+import { agentSessionStreamRoutes } from './ws/agent-session-stream'
 import { createRegistry, RunStore, type OrchestratorRegistry, type OrchestratorLike } from './lib/run-store'
 import { PaneBroker } from './lib/pane-broker'
 import { loadFeatures } from './lib/feature-loader'
@@ -460,6 +461,10 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
   await app.register(runsStreamRoutes, { store: runStore })
   await app.register(draftAgentStreamRoutes, {
     brokerForDraft: (draftId) => draftBrokers.get(draftId) ?? null,
+  })
+  await app.register(agentSessionStreamRoutes, {
+    store: runStore,
+    logsDir,
   })
 
   // Serve the built React frontend if it exists. In development the dist dir

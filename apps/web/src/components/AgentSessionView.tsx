@@ -1,50 +1,170 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import * as api from '../api/client'
 import type { AgentSessionEvent, AgentSessionResponse } from '../api/client'
+import { connectAgentSessionStream } from '../api/agent-session-socket'
+
+// Single agent viewer for the wizard (draft planning/generating) and the run
+// detail page. Renders the agent CLI's JSONL as a chat-style timeline:
+// `MessageCard` / `ThinkingCard` / `ToolCallCard` / `ToolResultCard`.
+//
+// Two transports:
+//   - REST snapshot via `getAgentSession` / `getDraftAgentSession` for the
+//     initial render — gives us every event already on disk.
+//   - Live WS via `connectAgentSessionStream` when `live` is set — appends
+//     newly-tailed events as they arrive.
+//
+// The pre-existing `pollUntilFound` mode is gone; the live WS handles
+// "session not yet on disk" by retrying internally on the server.
+
+export type AgentSessionSource =
+  | { kind: 'run'; runId: string; live?: boolean }
+  | { kind: 'draft'; draftId: string; stage: 'planning' | 'generating'; live?: boolean }
 
 interface Props {
-  runId: string
-  pollUntilFound?: boolean
+  source: AgentSessionSource
 }
 
-// The agent CLI flushes its JSONL on exit; cap retries at ~9s before showing
-// the empty-state.
-const MAX_POLL_ATTEMPTS = 12
-const POLL_INTERVAL_MS = 750
+const SNAPSHOT_POLL_MS = 1500
 
-// Renders the normalized heal-agent JSONL as a chat-style timeline. Used on
-// the historical replay path (terminal runs, no live broker). Live runs keep
-// using the raw xterm pane in PaneTerminal — only after the run finishes do
-// we have the agent CLI's full structured log to render from.
-export function AgentSessionView({ runId, pollUntilFound = false }: Props) {
-  const [data, setData] = useState<AgentSessionResponse | null | undefined>(undefined)
+interface ViewState {
+  agent: 'claude' | 'codex' | null
+  sessionId: string
+  events: AgentSessionEvent[]
+}
+
+export function AgentSessionView({ source }: Props) {
+  const [state, setState] = useState<ViewState | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
+  const scrollerRef = useRef<HTMLDivElement | null>(null)
+  const followingLatestRef = useRef(true)
+  const [showJumpLatest, setShowJumpLatest] = useState(false)
+  // Stable key for the effect dependencies — destructured rather than the
+  // whole object so a new prop reference each render doesn't restart the WS.
+  const sourceKey = useMemo(() => sourceCacheKey(source), [source])
 
   useEffect(() => {
     let cancelled = false
-    let timer: ReturnType<typeof setTimeout> | undefined
-    let attempts = 0
-    setData(undefined)
+    let conn: { close(): void } | null = null
+    let pollTimer: ReturnType<typeof setTimeout> | null = null
+    setLoading(true)
     setError(null)
-    const load = (): void => {
-      api.getAgentSession(runId)
-        .then((res) => {
-          if (cancelled) return
-          if (res === null && pollUntilFound && attempts < MAX_POLL_ATTEMPTS) {
-            attempts += 1
-            timer = setTimeout(load, POLL_INTERVAL_MS)
-            return
-          }
-          setData(res)
-        })
-        .catch((err: unknown) => { if (!cancelled) setError(err instanceof Error ? err.message : String(err)) })
+    setState(null)
+
+    const applySnapshot = (snapshot: AgentSessionResponse | null): void => {
+      if (cancelled) return
+      if (!snapshot) {
+        // No log yet on disk. Keep waiting if live; otherwise show empty state.
+        setState({ agent: null, sessionId: '', events: [] })
+        return
+      }
+      setState({ agent: snapshot.agent, sessionId: snapshot.sessionId, events: snapshot.events })
     }
-    load()
+
+    const fetchSnapshot = async (): Promise<AgentSessionResponse | null> => {
+      if (source.kind === 'run') return api.getAgentSession(source.runId)
+      return api.getDraftAgentSession(source.draftId, source.stage)
+    }
+
+    fetchSnapshot()
+      .then((snapshot) => {
+        applySnapshot(snapshot)
+        if (cancelled) return
+        setLoading(false)
+        if (!source.live) return
+        // Open the live WS. The server replays events from the start of the
+        // file, so dedupe by index relative to the snapshot length.
+        let snapshotLen = snapshot?.events.length ?? 0
+        let seenFromWs = 0
+        conn = connectAgentSessionStream({
+          source: source.kind === 'run'
+            ? { kind: 'run', runId: source.runId }
+            : { kind: 'draft', draftId: source.draftId, stage: source.stage },
+          onEvent: (event) => {
+            if (cancelled) return
+            // The first `snapshotLen` events the WS sends are replay of what
+            // we already have. Drop them; append the rest.
+            seenFromWs += 1
+            if (seenFromWs <= snapshotLen) return
+            setState((prev) => {
+              if (!prev) return { agent: event.kind === 'user-message' || event.kind === 'assistant-message' ? 'claude' : null as never, sessionId: '', events: [event] }
+              return { ...prev, events: [...prev.events, event] }
+            })
+          },
+          onError: (err) => {
+            if (cancelled) return
+            // Don't surface every transient ws error as a hard failure — the
+            // server reports things like "session-log-missing" while the
+            // agent is still booting.
+            if (err === 'session-log-missing' || err === 'no-session-ref') return
+            setError(err)
+          },
+        })
+        // While live, periodically re-pull the REST snapshot too. This is a
+        // belt-and-braces guard for cases where the WS reconnects and the
+        // server's replay misses an event that landed between disconnect and
+        // reconnect. Also recovers the session id once the file appears.
+        const repoll = (): void => {
+          if (cancelled || !source.live) return
+          fetchSnapshot()
+            .then((next) => {
+              if (cancelled || !next) return
+              if (next.events.length > snapshotLen) {
+                snapshotLen = next.events.length
+                setState({ agent: next.agent, sessionId: next.sessionId, events: next.events })
+              } else if (next.sessionId) {
+                setState((prev) => prev && !prev.sessionId
+                  ? { ...prev, agent: next.agent, sessionId: next.sessionId }
+                  : prev)
+              }
+            })
+            .catch(() => { /* ignore */ })
+            .finally(() => {
+              if (!cancelled) pollTimer = setTimeout(repoll, SNAPSHOT_POLL_MS)
+            })
+        }
+        pollTimer = setTimeout(repoll, SNAPSHOT_POLL_MS)
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return
+        setError(err instanceof Error ? err.message : String(err))
+        setLoading(false)
+      })
+
     return () => {
       cancelled = true
-      if (timer) clearTimeout(timer)
+      if (conn) conn.close()
+      if (pollTimer) clearTimeout(pollTimer)
     }
-  }, [runId, pollUntilFound])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sourceKey])
+
+  // Auto-scroll-to-bottom while the user is following the latest. Re-evaluate
+  // after every event append.
+  useEffect(() => {
+    const el = scrollerRef.current
+    if (!el) return
+    if (followingLatestRef.current) {
+      el.scrollTop = el.scrollHeight
+    }
+  }, [state?.events.length])
+
+  const onScroll = (): void => {
+    const el = scrollerRef.current
+    if (!el) return
+    const distanceFromBottom = el.scrollHeight - (el.scrollTop + el.clientHeight)
+    const atBottom = distanceFromBottom <= 16
+    followingLatestRef.current = atBottom
+    setShowJumpLatest(!atBottom)
+  }
+
+  const jumpLatest = (): void => {
+    const el = scrollerRef.current
+    if (!el) return
+    el.scrollTop = el.scrollHeight
+    followingLatestRef.current = true
+    setShowJumpLatest(false)
+  }
 
   if (error) {
     return (
@@ -53,40 +173,55 @@ export function AgentSessionView({ runId, pollUntilFound = false }: Props) {
       </div>
     )
   }
-  if (data === undefined) {
+  if (loading) {
     return (
       <div className="px-4 py-3 text-sm" style={{ color: 'var(--text-muted)' }}>
         Loading session…
       </div>
     )
   }
-  if (data === null) {
+  if (!state || (!state.sessionId && state.events.length === 0)) {
     return (
       <div className="px-4 py-3 text-sm" style={{ color: 'var(--text-muted)' }}>
-        {pollUntilFound ? 'Waiting for structured session log…' : 'No structured session log found for this run.'}
-      </div>
-    )
-  }
-  if (data.events.length === 0) {
-    return (
-      <div className="px-4 py-3 text-sm" style={{ color: 'var(--text-muted)' }}>
-        Session log is empty — agent produced no parseable events.
+        {source.live ? 'Waiting for agent output…' : 'No structured session log found.'}
       </div>
     )
   }
 
   return (
-    <div className="h-full overflow-y-auto px-4 py-3 text-sm" style={{ background: 'var(--bg-base)' }}>
-      <div className="mb-3 text-[11px] uppercase tracking-[0.08em]" style={{ color: 'var(--text-muted)' }}>
-        Agent: {data.agent} · Session: <span style={{ fontFamily: 'var(--font-mono)' }}>{data.sessionId}</span>
+    <div className="relative flex h-full min-h-0 flex-col" style={{ background: 'var(--bg-base)' }}>
+      <div
+        ref={scrollerRef}
+        onScroll={onScroll}
+        className="h-full min-h-0 flex-1 overflow-y-auto px-4 py-3 text-sm"
+      >
+        {state.agent && state.sessionId && (
+          <div className="mb-3 text-[11px] uppercase tracking-[0.08em]" style={{ color: 'var(--text-muted)' }}>
+            Agent: {state.agent} · Session: <span style={{ fontFamily: 'var(--font-mono)' }}>{state.sessionId}</span>
+          </div>
+        )}
+        <div className="flex flex-col gap-3">
+          {state.events.map((event: AgentSessionEvent, idx: number) => (
+            <EventCard key={idx} event={event} />
+          ))}
+        </div>
       </div>
-      <div className="flex flex-col gap-3">
-        {data.events.map((event: AgentSessionEvent, idx: number) => (
-          <EventCard key={idx} event={event} />
-        ))}
-      </div>
+      {showJumpLatest && (
+        <button
+          type="button"
+          onClick={jumpLatest}
+          className="absolute bottom-3 right-3 rounded bg-sky-500/10 px-2 py-1 text-[11px] font-medium text-sky-700 shadow hover:bg-sky-500/20 dark:text-sky-300"
+        >
+          Jump latest
+        </button>
+      )}
     </div>
   )
+}
+
+function sourceCacheKey(source: AgentSessionSource): string {
+  if (source.kind === 'run') return `run:${source.runId}:${source.live ? '1' : '0'}`
+  return `draft:${source.draftId}:${source.stage}:${source.live ? '1' : '0'}`
 }
 
 function EventCard({ event }: { event: AgentSessionEvent }) {
@@ -242,7 +377,6 @@ export function summarizeInput(input: unknown): string {
   }
   if (typeof input !== 'object') return String(input)
   const obj = input as Record<string, unknown>
-  // Common known fields across both agents' tools.
   const interesting = ['file_path', 'path', 'cmd', 'command', 'pattern', 'query', 'url']
   for (const key of interesting) {
     if (typeof obj[key] === 'string' && obj[key]) {

@@ -664,6 +664,24 @@ export async function getAgentSession(
   }
 }
 
+export async function getDraftAgentSession(
+  draftId: string,
+  stage: 'planning' | 'generating',
+  opts?: ClientOptions,
+): Promise<AgentSessionResponse | null> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  try {
+    return await request<AgentSessionResponse>(
+      `${baseUrl}/api/tests/draft/${encodeURIComponent(draftId)}/agent-session?stage=${encodeURIComponent(stage)}`,
+      { method: 'GET' },
+      fetchImpl,
+    )
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) return null
+    throw err
+  }
+}
+
 export function startRun(
   feature: string,
   opts?: ClientOptions & { env?: string },

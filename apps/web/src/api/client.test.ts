@@ -253,6 +253,19 @@ describe('api client', () => {
     await expect(getAgentSession('run-1', { fetchImpl })).rejects.toMatchObject({ status: 500 })
   })
 
+  it('getDraftAgentSession encodes the draft id and stage; 404 → null; non-404 throws', async () => {
+    const { getDraftAgentSession } = await import('./client')
+    const session = { agent: 'claude' as const, sessionId: 'sid', events: [] }
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(ok(session))
+      .mockResolvedValueOnce(fail(404, { reason: 'no-session-ref' }))
+      .mockResolvedValueOnce(fail(500, { error: 'boom' }))
+    await expect(getDraftAgentSession('d/1', 'planning', { fetchImpl })).resolves.toEqual(session)
+    await expect(getDraftAgentSession('d/1', 'planning', { fetchImpl })).resolves.toBeNull()
+    await expect(getDraftAgentSession('d/1', 'planning', { fetchImpl })).rejects.toMatchObject({ status: 500 })
+    expect(fetchImpl.mock.calls[0][0]).toBe('/api/tests/draft/d%2F1/agent-session?stage=planning')
+  })
+
   it('startRun POSTs JSON body', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(ok({ runId: 'r2' }, 201))
     const out = await startRun('feat-x', { fetchImpl })

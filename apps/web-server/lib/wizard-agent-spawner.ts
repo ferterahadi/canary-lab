@@ -128,15 +128,20 @@ export function createTeeSink(opts: {
 // Build the argv used to invoke Claude in streaming JSON mode. The wizard
 // pipes that JSON through a formatter so users see progress immediately while
 // the final assistant text remains parseable by the draft output parser.
-export function buildClaudeArgs(prompt: string): string[] {
-  return [
+//
+// `sessionId` pins the JSONL log path written by the claude CLI to
+// `~/.claude/projects/<encoded-cwd>/<sessionId>.jsonl` so the live structured
+// session WS can tail it from the moment of spawn.
+export function buildClaudeArgs(prompt: string, sessionId?: string): string[] {
+  const base = [
     '--dangerously-skip-permissions',
     '--output-format=stream-json',
     '--include-partial-messages',
     '--verbose',
-    '-p',
-    prompt,
   ]
+  if (sessionId) base.push('--session-id', sessionId)
+  base.push('-p', prompt)
+  return base
 }
 
 export function buildClaudeResumeArgs(prompt: string, sessionId: string): string[] {
@@ -160,10 +165,10 @@ export function shellQuote(arg: string): string {
   return `'${arg.replace(/'/g, `'\\''`)}'`
 }
 
-export function buildClaudeCommand(prompt: string, claudeBin = 'claude', resumeSessionId?: string): string {
+export function buildClaudeCommand(prompt: string, claudeBin = 'claude', resumeSessionId?: string, pinSessionId?: string): string {
   const args = resumeSessionId
     ? buildClaudeResumeArgs(prompt, resumeSessionId)
-    : buildClaudeArgs(prompt)
+    : buildClaudeArgs(prompt, pinSessionId)
   return `set -o pipefail; ${claudeBin} ${args.map(shellQuote).join(' ')} | node ${shellQuote(WIZARD_CLAUDE_FORMATTER_FILE)}`
 }
 
@@ -185,10 +190,10 @@ export function buildCodexCommand(prompt: string, codexBin = 'codex', resumeSess
 export function buildWizardCommand(
   agent: WizardAgentKind,
   prompt: string,
-  bins: { claudeBin?: string; codexBin?: string; resumeSessionId?: string } = {},
+  bins: { claudeBin?: string; codexBin?: string; resumeSessionId?: string; pinSessionId?: string } = {},
 ): string {
   return agent === 'claude'
-    ? buildClaudeCommand(prompt, bins.claudeBin, bins.resumeSessionId)
+    ? buildClaudeCommand(prompt, bins.claudeBin, bins.resumeSessionId, bins.pinSessionId)
     : buildCodexCommand(prompt, bins.codexBin, bins.resumeSessionId)
 }
 

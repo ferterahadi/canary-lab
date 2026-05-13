@@ -159,7 +159,7 @@ export function RunDetailColumn({
             )}
             <div className="min-h-0 flex-1 overflow-hidden">
               {showAgentSession ? (
-                <AgentSessionView runId={m.runId} pollUntilFound={!isTerminalRunStatus(m.status)} />
+                <AgentSessionView source={{ kind: 'run', runId: m.runId, live: !isTerminalRunStatus(m.status) }} />
               ) : (
                 <PaneTerminal
                   key={`${m.runId}:agent:${agentPaneRestartKey}`}

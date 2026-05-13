@@ -32,7 +32,7 @@ describe('PlanReviewStep', () => {
     )
 
     expect(html).toContain('overflow-hidden p-6')
-    expect(html).toContain('flex h-full min-h-0 flex-1 flex-col overflow-hidden')
+    expect(html).toContain('flex min-h-0 flex-1 flex-col overflow-hidden')
     expect(html).not.toContain('max-h-[min(70vh,44rem)]')
   })
 
@@ -50,6 +50,6 @@ describe('PlanReviewStep', () => {
 
     expect(html).toContain('overflow-y-auto p-6')
     expect(html).toContain('max-h-[min(70vh,44rem)]')
-    expect(html).toContain('h-[min(52vh,34rem)]')
+    expect(html).toContain('min-h-[24rem]')
   })
 })
