@@ -166,12 +166,15 @@ export function AddTestWizard({ features, onClose, onAcceptedFeature }: Props) {
 
   return (
     <div className="cl-panel fixed inset-0 z-50 flex flex-col">
-      <header className="cl-shell-bar flex items-center justify-between px-6 py-3">
-        <div className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>Add test</div>
+      <header className="cl-shell-bar flex items-center justify-between gap-3 px-6 py-3">
+        <div className="min-w-0">
+          <div className="cl-kicker">Wizard</div>
+          <h2 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>Add test</h2>
+        </div>
         <button
           type="button"
           onClick={requestCancel}
-          className="cl-button px-2 py-1 text-xs"
+          className="cl-button shrink-0 px-2 py-1 text-xs"
         >
           Close
         </button>

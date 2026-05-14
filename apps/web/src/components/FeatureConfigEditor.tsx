@@ -3,7 +3,7 @@ import { GeneralTab } from './config/GeneralTab'
 import { ReposTab } from './config/ReposTab'
 import { EnvsetsTab } from './config/EnvsetsTab'
 import { PlaywrightTab } from './config/PlaywrightTab'
-import { ConfirmModal } from './config/atoms'
+import { CloseIcon, ConfirmModal, TrashIcon } from './config/atoms'
 import * as api from '../api/client'
 
 type Tab = 'general' | 'repos' | 'envsets' | 'playwright'
@@ -57,16 +57,13 @@ export function FeatureConfigEditor({ feature, onClose, onDeleted, onRenamed, in
     >
       <div
         className="cl-modal flex h-[88vh] w-[min(960px,94vw)] flex-col overflow-hidden rounded-lg"
+        style={{ background: 'var(--bg-elevated)' }}
         onClick={(e) => e.stopPropagation()}
       >
-        <header
-          className="cl-panel-header flex items-center justify-between gap-3 px-4 py-3"
-        >
+        <header className="cl-dialog-header">
           <div className="min-w-0 flex-1">
-            <div className="cl-kicker">
-              Feature configuration
-            </div>
-            <div className="truncate text-sm font-medium" style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>
+            <div className="cl-kicker mb-1">Feature configuration</div>
+            <div className="truncate text-sm font-semibold" style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>
               {feature}
             </div>
           </div>
@@ -82,9 +79,7 @@ export function FeatureConfigEditor({ feature, onClose, onDeleted, onRenamed, in
             className="cl-icon-button h-7 w-7 shrink-0"
             style={{ border: '1px solid color-mix(in srgb, var(--danger) 36%, var(--border-default))', color: 'var(--danger)' }}
           >
-            <svg viewBox="0 0 16 16" width="13" height="13" fill="currentColor" aria-hidden="true">
-              <path d="M5.5 2h5l.5 1H14v1H2V3h3l.5-1zM3.5 5h9l-.7 8.2a1.5 1.5 0 0 1-1.5 1.3H5.7a1.5 1.5 0 0 1-1.5-1.3L3.5 5zm2.5 2v6h1V7H6zm3 0v6h1V7H9z" />
-            </svg>
+            <TrashIcon />
           </button>
           <button
             type="button"
@@ -93,10 +88,7 @@ export function FeatureConfigEditor({ feature, onClose, onDeleted, onRenamed, in
             className="cl-icon-button h-7 w-7 shrink-0"
             style={{ border: '1px solid var(--border-default)' }}
           >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <line x1="18" y1="6" x2="6" y2="18" />
-              <line x1="6" y1="6" x2="18" y2="18" />
-            </svg>
+            <CloseIcon size={14} />
           </button>
         </header>
 

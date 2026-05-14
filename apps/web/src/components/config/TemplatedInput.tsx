@@ -166,7 +166,7 @@ export function TemplatedInput({
           padding: 0 2px;
         }
         .templated-input [data-detach]:hover {
-          color: #ef4444;
+          color: var(--danger);
         }
       `}</style>
       {picker && (
@@ -363,7 +363,7 @@ function TokenPicker({
       <div className="mb-1 text-[10px] uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
         {slot ? `Pick a key from ${slot}` : 'Pick a slot'}
       </div>
-      {error && <div className="mb-1 text-[11px]" style={{ color: '#ef4444' }}>{error}</div>}
+      {error && <div className="mb-1 text-[11px]" style={{ color: 'var(--danger)' }}>{error}</div>}
       {!slot ? (
         slots.length === 0 ? (
           <div className="text-[11px]" style={{ color: 'var(--text-muted)' }}>

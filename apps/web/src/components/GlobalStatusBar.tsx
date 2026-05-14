@@ -4,6 +4,7 @@ import { useRuns } from '../state/RunsContext'
 import { isActiveRunStatus } from '../../../../shared/run-state'
 import { EvaluationExportTaskStatus } from './EvaluationExportTaskToast'
 import { WizardTaskStatus } from './WizardTaskStatus'
+import { StatusDot, type StatusDotState } from './config/atoms'
 
 interface Props {
   activeRunDetail: RunDetail | null
@@ -42,21 +43,27 @@ export function GlobalStatusBar({ activeRunDetail, onNavigateToRun }: Props) {
   const servicesActive = isActive
 
   return (
-    <div
-      className="cl-shell-bar flex items-center gap-3 px-4 py-2 overflow-hidden"
-    >
-      <span
-        className="cl-kicker shrink-0"
+    <div className="relative">
+      <div
+        className="cl-shell-bar flex items-center gap-3 px-4 py-2 overflow-hidden"
       >
+      <span
+        className="cl-kicker shrink-0 inline-flex items-center gap-2"
+      >
+        <span
+          aria-hidden="true"
+          className="inline-block h-1.5 w-1.5 animate-pulse rounded-full"
+          style={{ background: 'var(--accent)' }}
+        />
         Canary Lab
       </span>
       <span className="cl-divider shrink-0">|</span>
       <ConnectionBadge state={connection} />
       <span className="cl-divider shrink-0">|</span>
-      <div className="shrink-0"><StatusDot label="Playwright" state={playwrightState} /></div>
+      <div className="shrink-0"><StatusChip label="Playwright" state={playwrightState} /></div>
       {services.length > 0 && (
         <div className="shrink-0">
-          <StatusDot
+          <StatusChip
             label={`${services.length} service${services.length > 1 ? 's' : ''}`}
             state={servicesActive ? 'running' : 'idle'}
           />
@@ -83,6 +90,8 @@ export function GlobalStatusBar({ activeRunDetail, onNavigateToRun }: Props) {
         <WizardTaskStatus />
         <EvaluationExportTaskStatus />
       </div>
+      </div>
+      <div aria-hidden="true" className="cl-accent-strip" />
     </div>
   )
 }
@@ -95,49 +104,34 @@ function ConnectionBadge({
 }: {
   state: 'connecting' | 'live' | 'reconnecting' | 'disconnected'
 }) {
-  const palette = {
-    live:          { dot: 'bg-emerald-500',  text: 'text-emerald-700/90 dark:text-emerald-300/90', label: 'live',         pulse: false },
-    connecting:    { dot: 'bg-amber-500',    text: 'text-amber-700/90 dark:text-amber-300/90',     label: 'connecting',   pulse: true },
-    reconnecting:  { dot: 'bg-amber-500',    text: 'text-amber-700/90 dark:text-amber-300/90',     label: 'reconnecting', pulse: true },
-    disconnected:  { dot: 'bg-rose-500',     text: 'text-rose-700/90 dark:text-rose-300/90',       label: 'offline',      pulse: false },
-  }[state]
+  const palette: Record<typeof state, { dot: StatusDotState; text: string; label: string; pulse: boolean }> = {
+    live:         { dot: 'success', text: 'text-emerald-700/90 dark:text-emerald-300/90', label: 'live',         pulse: false },
+    connecting:   { dot: 'warning', text: 'text-amber-700/90 dark:text-amber-300/90',     label: 'connecting',   pulse: true },
+    reconnecting: { dot: 'warning', text: 'text-amber-700/90 dark:text-amber-300/90',     label: 'reconnecting', pulse: true },
+    disconnected: { dot: 'failed',  text: 'text-rose-700/90 dark:text-rose-300/90',       label: 'offline',      pulse: false },
+  }
+  const p = palette[state]
   return (
     <div
       data-testid="runs-connection-badge"
       data-state={state}
-      className={`flex shrink-0 items-center gap-1.5 text-[10px] uppercase tracking-wide ${palette.text}`}
-      title={`Runs stream: ${palette.label}`}
+      className={`flex shrink-0 items-center gap-1.5 text-[10px] uppercase tracking-wide ${p.text}`}
+      title={`Runs stream: ${p.label}`}
     >
-      <span className="relative flex h-2 w-2">
-        {palette.pulse && (
-          <span className={`absolute inline-flex h-full w-full animate-ping rounded-full ${palette.dot} opacity-75`} />
-        )}
-        <span className={`relative inline-flex h-2 w-2 rounded-full ${palette.dot}`} />
-      </span>
-      <span>{palette.label}</span>
+      <StatusDot state={p.dot} pulse={p.pulse} halo={p.pulse} />
+      <span>{p.label}</span>
     </div>
   )
 }
 
-function StatusDot({ label, state }: { label: string; state: 'running' | 'healing' | 'idle' }) {
-  const dotColor =
-    state === 'running' ? 'bg-emerald-500'
-    : state === 'healing' ? 'bg-amber-500'
-    : 'bg-slate-400 dark:bg-slate-600'
-
-  const dotGlow =
-    state === 'running' ? 'bg-emerald-400'
-    : state === 'healing' ? 'bg-amber-400'
-    : ''
-
+function StatusChip({ label, state }: { label: string; state: 'running' | 'healing' | 'idle' }) {
+  const dotState: StatusDotState =
+    state === 'running' ? 'success'
+    : state === 'healing' ? 'warning'
+    : 'idle'
   return (
     <div className="flex items-center gap-1.5 text-[10px]" style={{ color: 'var(--text-secondary)' }}>
-      <span className="relative flex h-2 w-2">
-        {state !== 'idle' && (
-          <span className={`absolute inline-flex h-full w-full animate-ping rounded-full ${dotGlow} opacity-75`} />
-        )}
-        <span className={`relative inline-flex h-2 w-2 rounded-full ${dotColor}`} />
-      </span>
+      <StatusDot state={dotState} pulse={state !== 'idle'} halo={state !== 'idle'} />
       <span>{label}</span>
       <span className="uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>
         {state}

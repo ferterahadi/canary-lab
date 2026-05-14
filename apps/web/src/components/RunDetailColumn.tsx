@@ -637,7 +637,7 @@ export function PlaywrightPlayback({
                 <TraceActions artifacts={traceArtifacts} />
               </div>
               {test.error?.message ? (
-                <pre className="mt-2 max-h-28 overflow-auto whitespace-pre-wrap rounded-md p-2 scrollbar-thin" style={{ background: 'var(--bg-selected)', color: '#ef4444', fontFamily: 'var(--font-mono)' }}>
+                <pre className="mt-2 max-h-28 overflow-auto whitespace-pre-wrap rounded-md p-2 scrollbar-thin" style={{ background: 'var(--bg-selected)', color: 'var(--danger)', fontFamily: 'var(--font-mono)' }}>
                   {test.error.message}
                 </pre>
               ) : (
@@ -926,7 +926,7 @@ function BrowserActions({ steps }: { steps: PlaybackTest['steps'] }) {
               <span className="text-right" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{idx + 1}</span>
               <span className="min-w-0 truncate" title={step.title}>
                 {step.title}
-                {!step.ended && <span style={{ color: '#eab308' }}> (running)</span>}
+                {!step.ended && <span style={{ color: 'var(--warning)' }}> (running)</span>}
               </span>
             </li>
           ))}
@@ -1025,9 +1025,9 @@ function SectionHeader({ children }: { children: React.ReactNode }) {
 }
 
 const STATUS_COLOR: Record<ServiceStatus, string> = {
-  ready: '#22c55e',
-  starting: '#eab308',
-  timeout: '#ef4444',
+  ready: 'var(--success)',
+  starting: 'var(--warning)',
+  timeout: 'var(--danger)',
   stopped: 'var(--text-muted)',
 }
 
@@ -1143,9 +1143,9 @@ function ServiceStatusDot({ status }: { status?: ServiceStatus }) {
   // Fixed 6×6 slot reserved regardless of status, so the chip text never
   // shifts when the dot appears/disappears (e.g. on `stopped`).
   const color =
-    status === 'ready' ? '#22c55e'      // green
-    : status === 'starting' ? '#eab308' // yellow (pulses)
-    : status === 'timeout' ? '#ef4444'  // red
+    status === 'ready' ? 'var(--success)'      // green
+    : status === 'starting' ? 'var(--warning)' // yellow (pulses)
+    : status === 'timeout' ? 'var(--danger)'  // red
     : 'transparent'                     // stopped or undefined
   return (
     <span

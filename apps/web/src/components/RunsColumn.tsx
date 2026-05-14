@@ -139,6 +139,7 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
       <div className="cl-panel-header flex items-center gap-3 px-4 py-3">
         <div className="flex min-w-0 flex-1 items-center gap-2">
           <span className="cl-kicker shrink-0">Runs</span>
+          {feature && runs.length > 0 && <span className="cl-count-chip">{runs.length}</span>}
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
           {compact ? (
@@ -194,7 +195,7 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
         ) : runs.length === 0 ? (
           <div className="px-4 py-6 text-xs" style={{ color: 'var(--text-muted)' }}>No runs yet for this feature.</div>
         ) : (
-          <ul>
+          <ul className="flex flex-col gap-1 px-2 py-2">
             {runs.map((r) => {
               const dur = durationBetween(r.startedAt, r.endedAt)
               const isSelected = r.runId === selectedRunId
@@ -213,22 +214,14 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
               const view = deriveRunViewModel(r, transient)
               const displayStatus = view.displayStatus
               if (isDeleting) {
-                // In-flight overlay: row is greyed out, inert, and the
-                // `DELETING` badge from the indicator pulses next to the
-                // run id. The row stays mounted until the server confirms
-                // the delete (no optimistic removal) so a network drop or
-                // 409 leaves the user with something to see + recover
-                // from, rather than a row that silently vanished.
                 return (
                   <li key={r.runId}>
                     <div
                       aria-busy="true"
                       aria-live="polite"
-                      className="pointer-events-none flex w-full flex-col items-start gap-1.5 px-4 py-3 text-left"
+                      className="pointer-events-none flex w-full flex-col items-start gap-1.5 rounded-lg px-3 py-2.5 text-left"
                       style={{
-                        borderBottom: '1px solid var(--border-subtle)',
                         background: 'var(--bg-hover)',
-                        borderLeft: '2px solid transparent',
                         opacity: 0.6,
                       }}
                     >
@@ -249,10 +242,7 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
                   <button
                     type="button"
                     onClick={() => onSelectRun(r.runId)}
-                    className={`flex w-full flex-col items-start gap-1.5 px-4 py-3 text-left ${isSelected ? 'cl-row-selected' : 'cl-row'}`}
-                    style={{
-                      borderLeft: isSelected ? '2px solid var(--accent)' : '2px solid transparent',
-                    }}
+                    className={`cl-list-row flex w-full flex-col items-start gap-1.5 px-3 py-2.5 text-left ${isSelected ? 'cl-list-row-selected' : ''}`}
                   >
                     <div className="flex w-full items-center justify-between gap-2">
                       <span className="shrink-0 text-xs" style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>{shortTime(r.startedAt)}</span>

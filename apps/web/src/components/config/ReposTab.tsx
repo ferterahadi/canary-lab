@@ -231,7 +231,7 @@ export function ReposTab({ feature }: { feature: string }) {
   })
 
   if (ed.error && !ed.draft) {
-    return <div className="p-4 text-xs" style={{ color: '#ef4444' }}>{ed.error}</div>
+    return <div className="p-4 text-xs" style={{ color: 'var(--danger)' }}>{ed.error}</div>
   }
   if (ed.loading || !ed.draft) {
     return <div className="p-4 text-xs" style={{ color: 'var(--text-muted)' }}>Loading…</div>
@@ -455,7 +455,7 @@ function RepoCard({
             </div>
           )}
           {cloneError && (
-            <div className="mt-1 mb-2 text-[10px]" style={{ color: '#ef4444' }}>{cloneError}</div>
+            <div className="mt-1 mb-2 text-[10px]" style={{ color: 'var(--danger)' }}>{cloneError}</div>
           )}
           {cloneTargetOpen && (
             <FolderPickerModal
@@ -697,7 +697,7 @@ function BranchControl({
             {status.dirtyFiles.length} uncommitted {status.dirtyFiles.length === 1 ? 'file' : 'files'}
           </div>
         )}
-        {error && <div className="text-[10px]" style={{ color: '#ef4444' }}>{error}</div>}
+        {error && <div className="text-[10px]" style={{ color: 'var(--danger)' }}>{error}</div>}
       </div>
     </FieldRow>
   )
