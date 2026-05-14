@@ -3,7 +3,7 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { PlaywrightArtifactGroup, PlaywrightArtifactPolicy, PlaywrightPlaybackEvent } from '../api/types'
+import type { PlaywrightArtifactGroup, PlaywrightArtifactPolicy, PlaywrightPlaybackEvent, RunSummary } from '../api/types'
 import { PlaywrightPlayback } from './RunDetailColumn'
 
 let container: HTMLDivElement
@@ -163,6 +163,51 @@ describe('PlaywrightPlayback', () => {
 
     expect(onOpenArtifactSettings).toHaveBeenCalledTimes(1)
   })
+
+  it('marks the currently running rerun attempt with the chip instead of a card highlight', () => {
+    renderPlayback({
+      events: [
+        {
+          type: 'test-begin',
+          time: '2026-01-01T00:00:00.000Z',
+          test: { name: 'checkout', title: 'checkout failed before heal', location: 'checkout.spec.ts:1' },
+        },
+        {
+          type: 'test-end',
+          time: '2026-01-01T00:01:00.000Z',
+          test: { name: 'checkout', title: 'checkout failed before heal', location: 'checkout.spec.ts:1' },
+          status: 'failed',
+          passed: false,
+          durationMs: 60000,
+          retry: 0,
+          error: { message: 'old failure' },
+        },
+        {
+          type: 'test-begin',
+          time: '2026-01-01T00:10:00.000Z',
+          test: { name: 'checkout', title: 'checkout rerun now', location: 'checkout.spec.ts:1' },
+        },
+      ],
+      summary: {
+        complete: false,
+        total: 2,
+        passed: 0,
+        failed: [{ name: 'checkout', error: { message: 'old failure' } }],
+        running: { name: 'checkout', location: 'checkout.spec.ts:1' },
+      },
+    })
+
+    expect(container.textContent).toContain('checkout failed before heal')
+    expect(container.textContent).toContain('checkout rerun now')
+    expect(container.textContent).not.toContain('Now running:')
+    expect(container.textContent).toContain('Currently executing in this Playwright process.')
+    expect(container.textContent).toContain('2/2')
+    const runningPill = [...container.querySelectorAll('span')]
+      .find((candidate) => candidate.textContent === 'running')
+    expect(runningPill).toBeTruthy()
+    const cards = [...container.querySelectorAll('.cl-card.p-3')]
+    expect(cards[1]?.getAttribute('style') ?? '').not.toMatch(/background|box-shadow/)
+  })
 })
 
 function renderPlayback({
@@ -174,11 +219,13 @@ function renderPlayback({
   policy = { screenshot: 'on', trace: 'on', video: 'on' },
   events: playbackEvents = events,
   onOpenArtifactSettings,
+  summary,
 }: {
   artifacts?: PlaywrightArtifactGroup['artifacts']
   policy?: PlaywrightArtifactPolicy
   events?: PlaywrightPlaybackEvent[]
   onOpenArtifactSettings?: () => void
+  summary?: RunSummary
 } = {}) {
   act(() => {
     root.render(
@@ -187,6 +234,7 @@ function renderPlayback({
         artifactGroups={[{ testName: 'checkout', artifacts }]}
         artifactPolicy={policy}
         onOpenArtifactSettings={onOpenArtifactSettings}
+        summary={summary}
       />,
     )
   })

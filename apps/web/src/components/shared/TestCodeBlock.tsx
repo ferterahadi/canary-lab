@@ -44,10 +44,12 @@ export function ShikiCode({
   source,
   activeLine,
   sourceLocation,
+  runningHighlight,
 }: {
   source: string
   activeLine?: number | null
   sourceLocation?: SourceLocation
+  runningHighlight?: boolean
 }) {
   const { resolved } = useTheme()
   const [html, setHtml] = useState<string | null>(null)
@@ -95,7 +97,7 @@ export function ShikiCode({
           if (line) void openAt(Number(line))
         }}
         // eslint-disable-next-line react/no-danger
-        dangerouslySetInnerHTML={{ __html: decorateShikiLines(html, activeLine, sourceLocation?.startLine) }}
+        dangerouslySetInnerHTML={{ __html: decorateShikiLines(html, activeLine, sourceLocation?.startLine, runningHighlight) }}
       />
     </CodeShell>
   )
@@ -141,13 +143,15 @@ function CodeShell({
   )
 }
 
-function decorateShikiLines(html: string, activeLine?: number | null, startLine?: number): string {
+function decorateShikiLines(html: string, activeLine?: number | null, startLine?: number, runningHighlight?: boolean): string {
   let lineNo = 0
+  const bg = runningHighlight ? 'rgba(234, 179, 8, 0.22)' : 'rgba(14, 165, 233, 0.18)'
+  const bar = runningHighlight ? 'rgb(234, 179, 8)' : 'rgb(14, 165, 233)'
   return html.replace(/<span class="line"/g, (match) => {
     lineNo += 1
     const attrs = startLine ? ` data-source-line="${sourceLineForBodyLine(startLine, lineNo)}"` : ''
     if (lineNo !== activeLine) return `${match}${attrs}`
-    return `<span class="line"${attrs} data-active-line="true" style="display:block;margin:0 -0.5rem;padding:0 0.5rem;background:rgba(14, 165, 233, 0.18);box-shadow:inset 2px 0 0 rgb(14, 165, 233)"`
+    return `<span class="line"${attrs} data-active-line="true" style="display:block;margin:0 -0.5rem;padding:0 0.5rem;background:${bg};box-shadow:inset 2px 0 0 ${bar}"`
   })
 }
 
@@ -167,15 +171,24 @@ export function StepBlock({
   status,
   depth,
   sourceFile,
+  runningLine,
 }: {
   step: ExtractedStep
   status: StepStatus
   depth: number
   sourceFile?: string
+  runningLine?: number | null
 }) {
   const [expanded, setExpanded] = useState(false)
+  const isRunningStep = runningLine != null && step.line === runningLine
+  const cardClass = isRunningStep
+    ? 'border-yellow-500/60 bg-yellow-400/15 dark:border-yellow-400/60 dark:bg-yellow-400/10'
+    : `${colorClassForStatus(status)} bg-[var(--bg-surface)]`
   return (
-    <li className={`rounded-md border ${colorClassForStatus(status)} bg-[var(--bg-surface)] p-1.5`}>
+    <li
+      className={`rounded-md border ${cardClass} p-1.5`}
+      style={isRunningStep ? { boxShadow: 'inset 3px 0 0 rgb(234, 179, 8)' } : undefined}
+    >
       <button
         type="button"
         className="flex w-full items-center gap-2 text-left text-xs"
@@ -196,7 +209,7 @@ export function StepBlock({
       {step.children.length > 0 && (
         <ul className="mt-1.5 space-y-1.5 pl-3" style={{ borderLeft: '1px solid var(--border-default)' }}>
           {step.children.map((child, i) => (
-            <StepBlock key={`${child.line}:${i}`} step={child} status={status} depth={depth + 1} sourceFile={sourceFile} />
+            <StepBlock key={`${child.line}:${i}`} step={child} status={status} depth={depth + 1} sourceFile={sourceFile} runningLine={runningLine} />
           ))}
         </ul>
       )}

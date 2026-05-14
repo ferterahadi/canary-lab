@@ -90,6 +90,26 @@ describe('buildHealAddendum', () => {
     expect(addendum).not.toContain('Skip hypotheses already tried')
   })
 
+  it('uses the service-mode hard rule by default (no mode supplied)', () => {
+    const addendum = buildHealAddendum({ cycle: 1 })
+    expect(addendum).toContain('Do NOT Read the test spec file')
+    expect(addendum).toContain('fix service/app code only')
+    expect(addendum).not.toContain('Read the failing test spec')
+  })
+
+  it('uses the service-mode hard rule when mode is explicitly "service"', () => {
+    const addendum = buildHealAddendum({ cycle: 1, mode: 'service' })
+    expect(addendum).toContain('Do NOT Read the test spec file')
+  })
+
+  it('inverts the hard rule under test mode — agent is told to read the test spec', () => {
+    const addendum = buildHealAddendum({ cycle: 1, mode: 'test' })
+    expect(addendum).toContain('Read the failing test spec')
+    expect(addendum).toContain('e2e/helpers/')
+    expect(addendum).not.toContain('Do NOT Read the test spec file')
+    expect(addendum).not.toContain('fix service/app code only')
+  })
+
   it('drops the cycle-≥2 patch-outcome instruction but keeps the "skip tried hypotheses" cue', () => {
     // The reporter's reconcileJournalOutcome patches `outcome: pending`
     // deterministically on onEnd, so telling the agent to do it is dead

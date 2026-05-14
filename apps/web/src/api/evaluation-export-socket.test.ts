@@ -47,6 +47,17 @@ describe('connectEvaluationExport', () => {
     expect(FakeSocket.instances[0].url).toBe('ws://test/ws/evaluation-exports/task%2F1')
   })
 
+  it('derives ws:// from the page location when no wsBase is provided', () => {
+    reset()
+    vi.stubGlobal('location', { protocol: 'http:', host: 'example.test:1234' })
+    connectEvaluationExport({
+      taskId: 'task-x',
+      onData: () => {},
+      WebSocketImpl: FakeSocket as unknown as typeof WebSocket,
+    })
+    expect(FakeSocket.instances[0].url).toBe('ws://example.test:1234/ws/evaluation-exports/task-x')
+  })
+
   it('forwards data and exit messages', () => {
     reset()
     const onData = vi.fn()

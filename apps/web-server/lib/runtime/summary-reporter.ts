@@ -3,6 +3,7 @@ import path from 'path'
 import type {
   FullResult,
   Reporter,
+  Suite,
   TestCase,
   TestResult,
   TestStep,
@@ -39,6 +40,13 @@ interface TestEntry {
   logFiles?: string[]
 }
 
+interface KnownTestEntry {
+  name: string
+  title: string
+  titlePath?: string[]
+  location?: string
+}
+
 interface RunningStep {
   title: string
   category: string
@@ -71,25 +79,34 @@ type PlaybackEvent =
     }
 
 class SummaryReporter implements Reporter {
+  private readonly mergeExistingSummary = process.env.CANARY_LAB_TARGETED_RERUN === '1'
+  private readonly initialSummary = readExistingSummary()
   private results: TestEntry[] = []
+  private knownTests: KnownTestEntry[] = knownTestsFromExistingSummary(this.initialSummary)
+  private sawSuiteInventory = this.knownTests.length > 0
   private running: { name: string; location: string; step?: RunningStep } | null = null
   private stepStack: RunningStep[] = []
   private failedStepLocationsByTest = new Map<string, string[]>()
   private failureCount = 0
   private lastEnrichedFailureCount = -1
-  private readonly mergeExistingSummary = process.env.CANARY_LAB_TARGETED_RERUN === '1'
-  private readonly initialSummary = readExistingSummary()
 
   constructor() {
     if (this.mergeExistingSummary) this.seedFromExistingSummary()
   }
 
+  onBegin(_config: unknown, suite: Suite): void {
+    this.sawSuiteInventory = true
+    for (const test of suite.allTests()) this.rememberKnownTest(test)
+    this.writeSummary(false)
+  }
+
   onTestBegin(test: TestCase): void {
     this.stepStack = []
-    this.failedStepLocationsByTest.delete(`test-case-${slugify(test.title)}`)
+    const known = this.rememberKnownTest(test)
+    this.failedStepLocationsByTest.delete(known.name)
     this.running = {
-      name: `test-case-${slugify(test.title)}`,
-      location: `${test.location.file}:${test.location.line}`,
+      name: known.name,
+      location: known.location ?? `${test.location.file}:${test.location.line}`,
     }
     this.writePlaybackEvent({
       type: 'test-begin',
@@ -104,7 +121,7 @@ class SummaryReporter implements Reporter {
   }
 
   onStepBegin(test: TestCase, _result: TestResult, step: TestStep): void {
-    const name = `test-case-${slugify(test.title)}`
+    const name = this.rememberKnownTest(test).name
     if (!this.running || this.running.name !== name) {
       this.running = {
         name,
@@ -124,7 +141,7 @@ class SummaryReporter implements Reporter {
   }
 
   onStepEnd(test: TestCase, _result: TestResult, step: TestStep): void {
-    const name = `test-case-${slugify(test.title)}`
+    const name = this.rememberKnownTest(test).name
     if (!this.running || this.running.name !== name) return
     const ended = stepToRunningStep(step)
     if (ended.locations?.length && step.error) {
@@ -148,7 +165,8 @@ class SummaryReporter implements Reporter {
   onTestEnd(test: TestCase, result: TestResult): void {
     const passed = result.status === 'passed'
     const failed = result.status !== 'passed' && result.status !== 'skipped'
-    const name = `test-case-${slugify(test.title)}`
+    const known = this.rememberKnownTest(test)
+    const name = known.name
     if (this.running?.name === name) {
       this.running = null
       this.stepStack = []
@@ -171,7 +189,7 @@ class SummaryReporter implements Reporter {
       passed,
       ...(error ? { error } : {}),
       durationMs: result.duration,
-      location: `${test.location.file}:${test.location.line}`,
+      location: known.location ?? `${test.location.file}:${test.location.line}`,
       ...(locations.length > 0 ? { locations } : {}),
       retry: result.retry,
     }
@@ -180,11 +198,11 @@ class SummaryReporter implements Reporter {
     this.writePlaybackEvent({
       type: 'test-end',
       time: new Date().toISOString(),
-      test: {
-        name,
-        title: test.title,
-        location: `${test.location.file}:${test.location.line}`,
-      },
+          test: {
+            name,
+            title: test.title,
+            location: known.location ?? `${test.location.file}:${test.location.line}`,
+          },
       status: result.status,
       passed,
       durationMs: result.duration,
@@ -240,11 +258,13 @@ class SummaryReporter implements Reporter {
   private writeSummary(complete: boolean): void {
     const passedResults = this.results.filter((r) => r.passed)
     const skippedResults = this.results.filter((r) => r.status === 'skipped')
+    const includeKnownTests = this.sawSuiteInventory
     const summary = {
       complete,
-      total: this.results.length,
+      total: includeKnownTests ? this.knownTests.length : this.results.length,
       passed: passedResults.length,
       passedNames: passedResults.map((r) => r.name),
+      ...(includeKnownTests ? { knownTests: this.knownTests } : {}),
       ...(skippedResults.length
         ? {
             skipped: skippedResults.length,
@@ -318,6 +338,12 @@ class SummaryReporter implements Reporter {
     this.lastEnrichedFailureCount = this.failureCount
   }
 
+  private rememberKnownTest(test: TestCase): KnownTestEntry {
+    const entry = knownTestFromTest(test)
+    mergeKnownTest(this.knownTests, entry)
+    return entry
+  }
+
   private removeResult(name: string): void {
     const idx = this.results.findIndex((r) => r.name === name)
     if (idx < 0) return
@@ -352,10 +378,66 @@ interface ExistingSummary {
   passedNames?: unknown
   skippedNames?: unknown
   failed?: unknown
+  knownTests?: unknown
 }
 
 function isFailureResult(entry: Pick<TestEntry, 'status'>): boolean {
   return entry.status !== 'passed' && entry.status !== 'skipped'
+}
+
+function knownTestFromTest(test: TestCase): KnownTestEntry {
+  const titlePath = typeof test.titlePath === 'function'
+    ? test.titlePath().filter((part): part is string => typeof part === 'string' && part.length > 0)
+    : undefined
+  return {
+    name: `test-case-${slugify(test.title)}`,
+    title: test.title,
+    ...(titlePath && titlePath.length > 0 ? { titlePath } : {}),
+    ...(test.location?.file && typeof test.location.line === 'number'
+      ? { location: `${test.location.file}:${test.location.line}` }
+      : {}),
+  }
+}
+
+function knownTestsFromExistingSummary(summary: ExistingSummary | null): KnownTestEntry[] {
+  const raw = Array.isArray(summary?.knownTests) ? summary.knownTests : []
+  const out: KnownTestEntry[] = []
+  for (const entry of raw) {
+    if (!entry || typeof entry !== 'object') continue
+    const value = entry as {
+      name?: unknown
+      title?: unknown
+      titlePath?: unknown
+      location?: unknown
+    }
+    if (typeof value.name !== 'string' || value.name.length === 0) continue
+    if (typeof value.title !== 'string' || value.title.length === 0) continue
+    mergeKnownTest(out, {
+      name: value.name,
+      title: value.title,
+      ...(Array.isArray(value.titlePath)
+        ? { titlePath: value.titlePath.filter((part): part is string => typeof part === 'string' && part.length > 0) }
+        : {}),
+      ...(typeof value.location === 'string' && value.location.length > 0 ? { location: value.location } : {}),
+    })
+  }
+  return out
+}
+
+function mergeKnownTest(knownTests: KnownTestEntry[], entry: KnownTestEntry): void {
+  const idx = knownTests.findIndex((known) => known.name === entry.name)
+  if (idx < 0) {
+    knownTests.push(entry)
+    return
+  }
+  knownTests[idx] = {
+    ...knownTests[idx],
+    ...entry,
+    titlePath: entry.titlePath && entry.titlePath.length > 0
+      ? entry.titlePath
+      : knownTests[idx].titlePath,
+    location: entry.location ?? knownTests[idx].location,
+  }
 }
 
 function readExistingSummary(): (ExistingSummary & SummaryForJournalOutcome) | null {

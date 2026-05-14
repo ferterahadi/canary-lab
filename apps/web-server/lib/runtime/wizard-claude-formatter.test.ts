@@ -106,6 +106,34 @@ describe('wizard claude formatter', () => {
     expect(toolSummary('Other', circular)).toBe('')
   })
 
+  it('renders the absolute-path fallback as a HOME tilde and pretty-prints Glob/Grep paths', () => {
+    const originalHome = process.env.HOME
+    process.env.HOME = '/home/user'
+    try {
+      expect(relPath('/home/user/notes.md')).toBe('~/notes.md')
+    } finally {
+      process.env.HOME = originalHome
+    }
+    delete process.env.HOME
+    try {
+      // Without HOME the fallback regex replaces nothing meaningful but still
+      // exercises the `?? ''` branch.
+      expect(relPath('/elsewhere/x.ts').endsWith('/elsewhere/x.ts')).toBe(true)
+    } finally {
+      process.env.HOME = originalHome
+    }
+    expect(formatToolCall('Glob', { pattern: '**/*.ts', path: 'apps/web/src' })).toContain('in')
+    expect(formatToolCall('Grep', { pattern: 'needle', path: 'apps/web/src', glob: '*.ts' })).toContain('in')
+    // Empty pattern exercises the `?? ''` fallback in both Glob and Grep branches.
+    expect(typeof formatToolCall('Glob', {})).toBe('string')
+    expect(typeof formatToolCall('Grep', {})).toBe('string')
+  })
+
+  it('ignores unknown JSONL message types without emitting output', () => {
+    handleLine(JSON.stringify({ type: 'unknown-event', payload: { whatever: 1 } }))
+    expect(writes).toEqual([])
+  })
+
   it('ignores empty, invalid, and unsupported payloads', () => {
     handleLine('')
     handleLine('not json')

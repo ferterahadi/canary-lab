@@ -142,6 +142,20 @@ describe('appendJournalIteration', () => {
     expect(fs.readFileSync(journalPath, 'utf-8')).toContain('- feature: old-shape')
   })
 
+  it('records no-signal iterations explicitly', () => {
+    const journalPath = path.join(tmpDir, 'j.md')
+
+    appendJournalIteration({
+      signal: 'none',
+      hypothesis: 'Heal agent went silent without writing a signal.',
+      journalPath,
+      manifestPath: path.join(tmpDir, 'm.json'),
+      summaryPath: path.join(tmpDir, 's.json'),
+    })
+
+    expect(fs.readFileSync(journalPath, 'utf-8')).toContain('- signal: none')
+  })
+
   it('appends successive iterations and increments the counter', () => {
     const journalPath = path.join(tmpDir, 'j.md')
     const manifestPath = path.join(tmpDir, 'm.json')

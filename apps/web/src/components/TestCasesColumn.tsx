@@ -176,7 +176,17 @@ function TestCard({
       {expanded && (
         <div className="space-y-2 px-3 pb-3">
           {runningLocation && (
-            <div className="rounded-md border px-2 py-1 text-[10px]" style={{ color: 'var(--text-secondary)', borderColor: 'color-mix(in srgb, var(--accent) 40%, transparent)', background: 'var(--accent-soft)', fontFamily: 'var(--font-mono)' }}>
+            <div
+              className="rounded-md border px-2 py-1 text-[10px]"
+              style={{
+                color: 'var(--text-secondary)',
+                borderColor: isRunningTest
+                  ? 'rgb(234, 179, 8)'
+                  : 'color-mix(in srgb, var(--accent) 40%, transparent)',
+                background: isRunningTest ? 'rgba(234, 179, 8, 0.15)' : 'var(--accent-soft)',
+                fontFamily: 'var(--font-mono)',
+              }}
+            >
               {runningStep?.location
                 ? `Running line ${lineLabel(runningStep.location)} · ${runningStep.category}`
                 : `Running from ${shortLocation(runningLocation)}`}
@@ -185,15 +195,36 @@ function TestCard({
           {test.steps.length > 0 ? (
             <ul className="space-y-1.5 pl-3" style={{ borderLeft: '1px solid var(--border-default)' }}>
               {test.steps.map((s, i) => (
-                <StepBlock key={`${s.line}:${i}`} step={s} status={status} depth={0} sourceFile={sourceFile} />
+                <StepBlock
+                  key={`${s.line}:${i}`}
+                  step={s}
+                  status={status}
+                  depth={0}
+                  sourceFile={sourceFile}
+                  runningLine={isRunningTest ? activeLine : null}
+                />
               ))}
             </ul>
           ) : test.bodySource ? (
-            <ShikiCode
-              source={test.bodySource}
-              activeLine={activeLine}
-              sourceLocation={{ file: sourceFile, startLine: test.line }}
-            />
+            <div
+              style={
+                isRunningTest && activeLine == null
+                  ? {
+                      borderRadius: 6,
+                      padding: 2,
+                      background: 'rgba(234, 179, 8, 0.12)',
+                      boxShadow: 'inset 0 0 0 1px rgb(234, 179, 8), inset 3px 0 0 rgb(234, 179, 8)',
+                    }
+                  : undefined
+              }
+            >
+              <ShikiCode
+                source={test.bodySource}
+                activeLine={activeLine}
+                sourceLocation={{ file: sourceFile, startLine: test.line }}
+                runningHighlight={isRunningTest}
+              />
+            </div>
           ) : (
             <div className="text-xs" style={{ color: 'var(--text-muted)' }}>
               No test body available.

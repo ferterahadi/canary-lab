@@ -60,6 +60,7 @@ describe('playbackTests', () => {
         name: 'auth.spec.ts:login',
         title: 'logs in after retry',
         startedAt: '2026-01-01T00:00:00.000Z',
+        endedAt: '2026-01-01T00:00:04.000Z',
         status: 'passed',
         passed: true,
         durationMs: 40,
@@ -67,6 +68,53 @@ describe('playbackTests', () => {
         error: undefined,
         steps: [{ title: 'Opened /login', category: 'pw:api', ended: true }],
       },
+    ])
+  })
+
+  it('keeps a rerun attempt separate from the previous result for the same test', () => {
+    const events: PlaywrightPlaybackEvent[] = [
+      {
+        type: 'test-begin',
+        time: '2026-01-01T00:00:00.000Z',
+        test: { name: 'checkout', title: 'checkout flow', location: 'checkout.spec.ts:1' },
+      },
+      {
+        type: 'test-end',
+        time: '2026-01-01T00:00:05.000Z',
+        test: { name: 'checkout', title: 'checkout flow', location: 'checkout.spec.ts:1' },
+        status: 'failed',
+        passed: false,
+        durationMs: 5000,
+        retry: 0,
+        error: { message: 'first failure' },
+      },
+      {
+        type: 'test-begin',
+        time: '2026-01-01T00:10:00.000Z',
+        test: { name: 'checkout', title: 'checkout flow rerun', location: 'checkout.spec.ts:1' },
+      },
+      {
+        type: 'step-begin',
+        time: '2026-01-01T00:10:01.000Z',
+        test: { name: 'checkout', title: 'checkout flow rerun' },
+        step: { title: 'Click "Place Order"', category: 'pw:api' },
+      },
+    ]
+
+    expect(playbackTests(events)).toEqual([
+      expect.objectContaining({
+        name: 'checkout',
+        title: 'checkout flow',
+        status: 'failed',
+        endedAt: '2026-01-01T00:00:05.000Z',
+        error: { message: 'first failure' },
+      }),
+      expect.objectContaining({
+        name: 'checkout',
+        title: 'checkout flow rerun',
+        startedAt: '2026-01-01T00:10:00.000Z',
+        steps: [{ title: 'Clicked Place Order', category: 'pw:api', ended: false }],
+      }),
     ])
   })
 
@@ -97,6 +145,7 @@ describe('playbackTests', () => {
         status: 'failed',
         passed: false,
         durationMs: 20,
+        endedAt: '2026-01-01T00:00:02.000Z',
         retry: 0,
         error: { message: 'boom', snippet: 'expect(false).toBe(true)' },
         steps: [],
@@ -314,21 +363,30 @@ describe('artifactsForPlayback', () => {
   })
 
   it('keeps screenshot ordering stable when mtimes are missing', () => {
+    // Pass mtimeMs as explicit undefined via cast to bypass the default in `artifact()`,
+    // exercising the `?? 0` fallback in the sort comparator.
+    const missingMtime = (name: string): PlaywrightArtifactGroup['artifacts'][number] => ({
+      name,
+      kind: 'screenshot',
+      path: `/tmp/${name}`,
+      url: `/artifacts/${name}`,
+      sizeBytes: 1,
+      mtimeMs: undefined as unknown as number,
+    })
     const groupsWithoutMtime: PlaywrightArtifactGroup[] = [
       {
         testName: 'auth.spec.ts:login',
-        artifacts: [
-          artifact('screenshot', 'first.png', undefined),
-          artifact('screenshot', 'second.png', undefined),
-        ],
+        artifacts: [missingMtime('first.png'), missingMtime('second.png')],
       },
     ]
 
-    expect(artifactsForPlayback('auth.spec.ts:login', groupsWithoutMtime, {
+    const result = artifactsForPlayback('auth.spec.ts:login', groupsWithoutMtime, {
       screenshot: 'on',
       video: 'off',
       trace: 'off',
-    }).screenshots).toEqual([artifact('screenshot', 'first.png', undefined)])
+    }).screenshots
+    expect(result).toHaveLength(1)
+    expect(result[0].name).toBe('first.png')
   })
 
   it('prefers the deterministic final-page screenshot over attachment duplicates', () => {

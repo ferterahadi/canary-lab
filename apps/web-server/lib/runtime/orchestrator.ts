@@ -200,7 +200,9 @@ export type AutoHealAgent = 'claude' | 'codex'
 
 export interface AutoHealConfig {
   agent: AutoHealAgent
-  // 1-based cap on heal cycles. Default = AUTO_HEAL_MAX_CYCLES.
+  // Optional 1-based cap on heal cycles. Omit for the production default:
+  // keep healing until all tests pass, the human stops it, or a cycle cannot
+  // produce a signal/change to apply.
   maxCycles?: number
   // Returns the spawn command for the long-lived REPL — just the binary +
   // flags. Production wires `buildAgentSpawnCommand` from auto-heal.ts; tests
@@ -230,10 +232,30 @@ export interface PlaywrightInvocation {
   cwd: string
 }
 
+export type PlaywrightRerunSelection =
+  | {
+      kind: 'targets'
+      targets: readonly string[]
+      selected: number
+      total: number
+      mode: RunLifecycleTargetedRerun['mode']
+      reason: string
+    }
+  | {
+      kind: 'grep'
+      grep: string
+      selected: number
+      total: number
+      mode: RunLifecycleTargetedRerun['mode']
+      reason: string
+    }
+
 export type PlaywrightSpawner = (args: {
   feature: FeatureConfig
   paths: RunPaths
   rerunTargets?: readonly string[]
+  rerunGrep?: string
+  rerunSelection?: PlaywrightRerunSelection
 }) => PlaywrightInvocation
 
 export function buildServiceSpecs(
@@ -350,6 +372,7 @@ export class RunOrchestrator extends EventEmitter {
   private healCancelled = false
   private stoppedEarlyReason: StoppedEarlyReason | undefined
   private pendingAbortReason: RunLifecycleAbortReason | undefined
+  private lastLifecycleEvent: { phase: RunLifecyclePhase; headline: string } | null = null
 
   constructor(opts: OrchestratorOptions) {
     super()
@@ -452,6 +475,7 @@ export class RunOrchestrator extends EventEmitter {
       id: randomUUID(),
       ...opts,
     }))
+    this.lastLifecycleEvent = { phase, headline }
   }
 
   private async ensureServicesRunning(): Promise<string[]> {
@@ -743,15 +767,24 @@ export class RunOrchestrator extends EventEmitter {
   //
   // Spawns Playwright through the same ptyFactory used for services so tests
   // inject a fake. Returns the exit code after the pty exits.
-  async runPlaywright(rerunTargets?: readonly string[]): Promise<number> {
-    const inv = this.playwrightSpawner({ feature: this.feature, paths: this.paths, rerunTargets })
-    const targetCount = rerunTargets?.length ?? 0
-    const targetedRerun = targetCount > 0
+  async runPlaywright(rerun?: readonly string[] | PlaywrightRerunSelection): Promise<number> {
+    const rerunSelection = normalizeRerunSelection(rerun)
+    const rerunTargets = rerunSelection?.kind === 'targets' ? rerunSelection.targets : undefined
+    const rerunGrep = rerunSelection?.kind === 'grep' ? rerunSelection.grep : undefined
+    const inv = this.playwrightSpawner({
+      feature: this.feature,
+      paths: this.paths,
+      rerunTargets,
+      rerunGrep,
+      rerunSelection,
+    })
+    const targetCount = rerunSelection?.selected ?? 0
+    const targetedRerun = rerunSelection
       ? {
-          selected: targetCount,
-          total: targetCount,
-          mode: 'failed-and-pending',
-          reason: 'The runner selected tests that had not passed yet.',
+          selected: rerunSelection.selected,
+          total: rerunSelection.total,
+          mode: rerunSelection.mode,
+          reason: rerunSelection.reason,
         } satisfies RunLifecycleTargetedRerun
       : undefined
     this.emit('playwright-started', { command: inv.command })
@@ -768,7 +801,7 @@ export class RunOrchestrator extends EventEmitter {
         CANARY_LAB_PROJECT_ROOT: this.feature.featureDir,
         CANARY_LAB_MANIFEST_PATH: this.paths.manifestPath,
         CANARY_LAB_SUMMARY_PATH: this.paths.summaryPath,
-        ...(rerunTargets && rerunTargets.length > 0 ? { CANARY_LAB_TARGETED_RERUN: '1' } : {}),
+        ...(rerunSelection ? { CANARY_LAB_TARGETED_RERUN: '1' } : {}),
       },
     })
     this.playwrightPty = pty
@@ -794,60 +827,37 @@ export class RunOrchestrator extends EventEmitter {
     })
   }
 
-  private rerunTargetsForSummary(summary: SummaryShape): string[] | undefined {
-    const computed = computeNonPassedTargets(this.feature.featureDir, summary)
-    if (computed.kind === 'targeted') {
-      const passed = countPassed(summary)
-      const failed = Array.isArray(summary.failed) ? summary.failed.length : 0
-      const reason = `Rerunning ${computed.locations.length} not-yet-passed tests because ${passed} passed and ${failed} failed before healing.`
-      this.runnerLog?.info(`Targeted re-run: ${computed.locations.length} failed/pending of ${computed.total} total tests`)
+  private verificationPlanForSummary(summary: SummaryShape): VerificationPlan {
+    const plan = computeVerificationPlan(this.feature.featureDir, summary)
+    if (plan.kind === 'targeted') {
+      this.runnerLog?.info(`Targeted re-run: ${plan.failedFirst.length} failed + ${plan.pending.length} pending of ${plan.total} total tests`)
       this.recordLifecycle('rerunning-tests', 'Targeted rerun selected', {
-        detail: reason,
+        detail: plan.selection.reason,
         targetedRerun: {
-          selected: computed.locations.length,
-          total: computed.total,
-          mode: 'failed-and-pending',
-          reason,
+          selected: plan.selection.selected,
+          total: plan.selection.total,
+          mode: plan.selection.mode,
+          reason: plan.selection.reason,
         },
       })
-      return computed.locations
+      return plan
     }
-    if (computed.kind === 'no-passed-yet') {
+    if (plan.kind === 'full-suite') {
+      this.runnerLog?.warn(plan.reason)
       this.recordLifecycle('rerunning-tests', 'Full rerun selected', {
-        detail: 'No tests had passed yet, so a targeted rerun would be equivalent to the full suite.',
-        targetedRerun: {
-          selected: computed.total,
-          total: computed.total,
-          mode: 'full-suite',
-          reason: 'No tests had passed yet.',
-        },
-      })
-      return undefined
-    }
-    if (computed.kind === 'all-passed') return undefined
-    if (computed.kind === 'extraction-failed') {
-      // Fall back to legacy failed-only targeting if we couldn't enumerate the
-      // suite (no spec files found, or AST parse blew up everywhere).
-      const failedSlugs = extractFailedSlugs(summary)
-      if (failedSlugs.length === 0) return undefined
-      const locations = extractFailedLocations(summary)
-      if (locations.length > 0) return locations
-      const msg = 'Post-heal rerun has failed tests without usable file:line locations; running the full Playwright suite.'
-      this.runnerLog?.warn(msg)
-      this.recordLifecycle('rerunning-tests', 'Full rerun selected', {
-        detail: msg,
+        detail: plan.reason,
         severity: 'warning',
         targetedRerun: {
-          selected: computedTotal(summary),
-          total: computedTotal(summary),
+          selected: plan.total,
+          total: plan.total,
           mode: 'full-suite',
-          reason: msg,
+          reason: plan.reason,
         },
       })
-      this.emit('playwright-output', { chunk: `\n[warning] ${msg}\n` })
-      return undefined
+      this.emit('playwright-output', { chunk: `\n[warning] ${plan.reason}\n` })
+      return plan
     }
-    return undefined
+    return plan
   }
 
   // Wait for the in-flight Playwright pty to exit. Resolves immediately when
@@ -1249,14 +1259,15 @@ export class RunOrchestrator extends EventEmitter {
     })
 
     // Cycle 1 has the prompt already wired into the spawn command's argv
-    // (`claude … "@<promptFile>"`), so claude reads it at startup with no
-    // stdin write. Cycle 2+ needs to re-prompt the alive REPL: write the
-    // updated prompt body to the same file (already done above) and tell
-    // claude to re-read it via the `@<path>` reference. Single-line input
-    // submits cleanly on `\r`; no input-editor multi-line ambiguity.
+    // (`claude … "@<promptFile>"`), so the agent reads it at startup with no
+    // stdin write. Cycle 2+ needs to re-prompt the alive REPL. Avoid `@<path>`
+    // here: in Claude's input editor it can attach/read the file without
+    // submitting the composer, leaving the run stuck until a human presses
+    // Enter. Send a plain instruction with the prompt path instead.
     if (!isFirstSpawn) {
       try {
-        pty.write(`@${this.healPromptFile}\r`)
+        const promptMessage = `Read ${this.healPromptFile} and continue the auto-heal cycle now.`
+        pty.write(BRACKETED_PASTE_BEGIN + promptMessage + BRACKETED_PASTE_END + '\r')
       } catch {
         return { exitCode: 1, signal: null, reason: 'pty-died' }
       }
@@ -1620,7 +1631,7 @@ export class RunOrchestrator extends EventEmitter {
             })
           }
         } catch { /* journal is best-effort */ }
-        const rerunTargets = this.rerunTargetsForSummary(readSummary(this.paths.summaryPath))
+        const verificationPlan = this.verificationPlanForSummary(readSummary(this.paths.summaryPath))
         this.setStatus('running')
         if (signal.kind === 'restart') {
           await this.restart(filesChanged)
@@ -1635,7 +1646,7 @@ export class RunOrchestrator extends EventEmitter {
             restartPlan: { restarted: [], kept: [], startedBecauseMissing },
           })
         }
-        exitCode = await this.runPlaywright(rerunTargets)
+        exitCode = await this.runPlaywright(selectionForPlan(verificationPlan))
         // Manual-heal mirror of the auto-heal abort guard: the top of the
         // loop already checks `stopped`, but the killed Playwright pty's
         // exit code arrives after the abort flips the flag — don't
@@ -1643,10 +1654,7 @@ export class RunOrchestrator extends EventEmitter {
         if (this.stopped) return this.status
         finalStatus = decideRunStatus(this.feature.featureDir, this.paths.summaryPath, exitCode)
         this.setStatus(finalStatus)
-        // Break on clean Playwright exit: if exit was 0 but the summary still
-        // shows non-passed tests, finalStatus is already 'failed' above and
-        // exiting the loop hands control back to the user (per design).
-        if (exitCode === 0) break
+        if (finalStatus === 'passed') break
       }
       return finalStatus
     }
@@ -1701,6 +1709,28 @@ export class RunOrchestrator extends EventEmitter {
         }
         const summary = readSummary(this.paths.summaryPath)
         const failedSlugs = extractFailedSlugs(summary)
+        if (failedSlugs.length === 0) {
+          const pendingPlan = this.verificationPlanForSummary(summary)
+          if (pendingPlan.kind === 'all-passed') {
+            if (summaryHasPassingEvidence(summary)) {
+              finalStatus = 'passed'
+              this.setStatus(finalStatus)
+            }
+            break
+          }
+          this.setStatus('running')
+          const exitCode = await this.runPlaywright(selectionForPlan(pendingPlan))
+          if (this.stopped) return this.status
+          if (this.healCancelled) {
+            finalStatus = 'failed'
+            this.setStatus(finalStatus)
+            break
+          }
+          finalStatus = decideRunStatus(this.feature.featureDir, this.paths.summaryPath, exitCode)
+          this.setStatus(finalStatus)
+          if (finalStatus === 'passed') break
+          continue
+        }
         const signature = failedSlugs.slice().sort().join('|')
         const decision = heal.observeFailures(signature)
         if (!decision.shouldHeal) break
@@ -1755,7 +1785,7 @@ export class RunOrchestrator extends EventEmitter {
           if (filesChanged.length === 0) {
             try {
               appendJournalIteration({
-                signal: '.rerun',
+                signal: 'none',
                 hypothesis: `${reasonMessage} No code changes detected.`,
                 fixDescription: 'No fix applied.',
                 runId: this.runId,
@@ -1795,7 +1825,7 @@ export class RunOrchestrator extends EventEmitter {
           }
         } catch { /* journal write is best-effort */ }
 
-        const rerunTargets = this.rerunTargetsForSummary(summary)
+        const verificationPlan = this.verificationPlanForSummary(summary)
         this.setStatus('running')
 
         const action = heal.actionForSignal(effectiveSignal.kind === 'heal' ? 'rerun' : effectiveSignal.kind)
@@ -1824,7 +1854,7 @@ export class RunOrchestrator extends EventEmitter {
           })
         }
 
-        const exitCode = await this.runPlaywright(rerunTargets)
+        const exitCode = await this.runPlaywright(selectionForPlan(verificationPlan))
         if (this.stopped) return this.status
         // User cancelled mid-Playwright (cancelHeal SIGTERM'd the pw pty).
         // Don't read into the killed pty's exit code — finalize as failed.
@@ -1835,10 +1865,7 @@ export class RunOrchestrator extends EventEmitter {
         }
         finalStatus = decideRunStatus(this.feature.featureDir, this.paths.summaryPath, exitCode)
         this.setStatus(finalStatus)
-        // Break on clean Playwright exit even when finalStatus is 'failed'
-        // (summary disagrees with exit 0): ends the heal loop and hands
-        // control to the user instead of spawning another agent cycle.
-        if (exitCode === 0) break
+        if (finalStatus === 'passed') break
       }
 
       return finalStatus
@@ -1926,10 +1953,14 @@ export class RunOrchestrator extends EventEmitter {
     // only writer at this point; no other path can race because
     // `this.stopped = true` already gates `setStatus`.
     this.stateSink.finalize(this.runId, finalStatus, endedAt, this.healCycles)
-    this.recordLifecycle(finalLifecyclePhase(finalStatus), finalStatus === 'aborted' ? 'Run aborted' : finalStatus === 'passed' ? 'Run passed' : 'Run failed', {
-      severity: finalStatus === 'passed' ? 'success' : finalStatus === 'aborted' ? 'warning' : 'error',
-      ...(finalStatus === 'aborted' ? { abortReason: this.pendingAbortReason ?? { reason: 'run-stopped' } } : {}),
-    })
+    const finalPhase = finalLifecyclePhase(finalStatus)
+    const finalHeadline = finalStatus === 'aborted' ? 'Run aborted' : finalStatus === 'passed' ? 'Run passed' : 'Run failed'
+    if (this.lastLifecycleEvent?.phase !== finalPhase || this.lastLifecycleEvent.headline !== finalHeadline) {
+      this.recordLifecycle(finalPhase, finalHeadline, {
+        severity: finalStatus === 'passed' ? 'success' : finalStatus === 'aborted' ? 'warning' : 'error',
+        ...(finalStatus === 'aborted' ? { abortReason: this.pendingAbortReason ?? { reason: 'run-stopped' } } : {}),
+      })
+    }
     this.emit('run-complete', { status: finalStatus })
   }
 }
@@ -1941,6 +1972,14 @@ interface SummaryShape {
   passed?: unknown
   passedNames?: unknown
   total?: unknown
+  knownTests?: unknown
+}
+
+interface KnownSummaryTest {
+  name: string
+  title: string
+  titlePath?: string[]
+  location?: string
 }
 
 export function countPassed(summary: SummaryShape): number {
@@ -2005,6 +2044,224 @@ export type NonPassedTargetsResult =
   | { kind: 'no-passed-yet'; total: number }
   | { kind: 'extraction-failed' }
 
+export type RerunTargetsOrderedResult =
+  | {
+      kind: 'targeted'
+      locations: string[]
+      failedFirst: string[]
+      pending: string[]
+      droppedFailedSlugs: string[]
+      total: number
+    }
+  | { kind: 'all-passed'; total: number }
+  | { kind: 'extraction-failed' }
+
+export type VerificationPlan =
+  | {
+      kind: 'targeted'
+      selection: PlaywrightRerunSelection
+      failedFirst: KnownSummaryTest[]
+      pending: KnownSummaryTest[]
+      total: number
+    }
+  | { kind: 'full-suite'; reason: string; total: number }
+  | { kind: 'all-passed'; total: number }
+
+export function computeVerificationPlan(
+  featureDir: string,
+  summary: SummaryShape,
+): VerificationPlan {
+  const knownTests = knownTestsFromSummary(summary)
+  if (knownTests.length > 0) {
+    const passed = passedNameSet(summary)
+    const failedSlugs = extractFailedSlugs(summary).filter((slug) => !passed.has(slug))
+    const failedSet = new Set(failedSlugs)
+    const knownByName = new Map(knownTests.map((test) => [test.name, test] as const))
+    const missingFailed = failedSlugs.filter((slug) => !knownByName.has(slug))
+    const failedFirst = uniqueByName(failedSlugs
+      .map((slug) => knownByName.get(slug))
+      .filter((test): test is KnownSummaryTest => Boolean(test)))
+    const pending = knownTests.filter((test) => !passed.has(test.name) && !failedSet.has(test.name))
+    const selected = [...failedFirst, ...pending]
+    if (selected.length === 0) return { kind: 'all-passed', total: knownTests.length }
+    if (missingFailed.length > 0) {
+      return {
+        kind: 'full-suite',
+        total: knownTests.length,
+        reason: `Post-heal rerun could not match ${missingFailed.length} failed test${missingFailed.length === 1 ? '' : 's'} in the known Playwright inventory; running the full suite with the configured failure threshold.`,
+      }
+    }
+    const grep = grepForKnownTests(selected)
+    if (!grep) {
+      return {
+        kind: 'full-suite',
+        total: knownTests.length,
+        reason: 'Post-heal rerun could not build a safe title selector for every not-yet-passed test; running the full suite with the configured failure threshold.',
+      }
+    }
+    const passedCount = countPassed(summary)
+    const failedCount = Array.isArray(summary.failed) ? summary.failed.length : 0
+    const reason = `Rerunning ${selected.length} not-yet-passed tests (${failedFirst.length} previously failed first, then ${pending.length} pending) because ${passedCount} passed and ${failedCount} failed before healing.`
+    return {
+      kind: 'targeted',
+      selection: {
+        kind: 'grep',
+        grep,
+        selected: selected.length,
+        total: knownTests.length,
+        mode: 'failed-and-pending',
+        reason,
+      },
+      failedFirst,
+      pending,
+      total: knownTests.length,
+    }
+  }
+
+  const computed = computeRerunTargetsOrdered(featureDir, summary)
+  if (computed.kind === 'all-passed') return { kind: 'all-passed', total: computed.total }
+  if (computed.kind === 'targeted') {
+    if (computed.droppedFailedSlugs.length > 0) {
+      return {
+        kind: 'full-suite',
+        total: computed.total,
+        reason: `Post-heal rerun could not safely target ${computed.droppedFailedSlugs.length} previously failed test${computed.droppedFailedSlugs.length === 1 ? '' : 's'} from static spec extraction; running the full suite with the configured failure threshold.`,
+      }
+    }
+    const passedCount = countPassed(summary)
+    const failedCount = Array.isArray(summary.failed) ? summary.failed.length : 0
+    const reason = `Rerunning ${computed.locations.length} not-yet-passed tests (${computed.failedFirst.length} previously failed first, then ${computed.pending.length} pending) because ${passedCount} passed and ${failedCount} failed before healing.`
+    return {
+      kind: 'targeted',
+      selection: {
+        kind: 'targets',
+        targets: computed.locations,
+        selected: computed.locations.length,
+        total: computed.total,
+        mode: 'failed-and-pending',
+        reason,
+      },
+      failedFirst: computed.failedFirst.map((location) => ({
+        name: location,
+        title: location,
+        location,
+      })),
+      pending: computed.pending.map((location) => ({
+        name: location,
+        title: location,
+        location,
+      })),
+      total: computed.total,
+    }
+  }
+
+  const failedSlugs = extractFailedSlugs(summary)
+  if (failedSlugs.length === 0) return { kind: 'all-passed', total: computedTotal(summary) }
+  const locations = extractFailedLocations(summary)
+  const canTargetEveryFailure = locations.length >= failedSlugs.length && locations.every(isSpecLocation)
+  if (canTargetEveryFailure) {
+    const reason = `Rerunning ${locations.length} failed test location${locations.length === 1 ? '' : 's'} from the summary because the full Playwright inventory is unavailable.`
+    return {
+      kind: 'targeted',
+      selection: {
+        kind: 'targets',
+        targets: locations,
+        selected: locations.length,
+        total: computedTotal(summary) || locations.length,
+        mode: 'failed-and-pending',
+        reason,
+      },
+      failedFirst: locations.map((location) => ({ name: location, title: location, location })),
+      pending: [],
+      total: computedTotal(summary) || locations.length,
+    }
+  }
+  return {
+    kind: 'full-suite',
+    total: computedTotal(summary) || failedSlugs.length,
+    reason: 'Post-heal rerun has failed tests without a complete safe selector set; running the full Playwright suite with the configured failure threshold.',
+  }
+}
+
+// Compute the ordered list of file:line locations for a post-heal rerun:
+// previously-failed tests FIRST (so we verify the fix landed), then anything
+// still pending in source order. Failed locations are looked up by slug in the
+// CURRENT AST so the rerun resolves correctly even if the heal agent moved
+// the test to a new line. Slugs that no longer exist in the AST (the agent
+// renamed or deleted the test) are reported via `droppedFailedSlugs` so the
+// caller can surface a lifecycle warning instead of silently shipping a
+// `file:line` that Playwright will report as "no tests found".
+export function computeRerunTargetsOrdered(
+  featureDir: string,
+  summary: SummaryShape,
+): RerunTargetsOrderedResult {
+  const files = listSpecFiles(featureDir)
+  if (files.length === 0) return { kind: 'extraction-failed' }
+
+  const allTests: Array<{ location: string; slug: string }> = []
+  let parsedAny = false
+  for (const file of files) {
+    let source = ''
+    try { source = fs.readFileSync(file, 'utf-8') } catch { continue }
+    const result = extractTestsFromSource(file, source)
+    if (result.parseError && result.tests.length === 0) continue
+    parsedAny = true
+    for (const t of result.tests) {
+      allTests.push({
+        location: `${file}:${t.line}`,
+        slug: `test-case-${slugify(t.name)}`,
+      })
+    }
+  }
+  if (!parsedAny || allTests.length === 0) return { kind: 'extraction-failed' }
+
+  const locationBySlug = new Map<string, string>()
+  for (const t of allTests) {
+    if (!locationBySlug.has(t.slug)) locationBySlug.set(t.slug, t.location)
+  }
+
+  const passedRaw = Array.isArray(summary.passedNames) ? summary.passedNames : []
+  const passed = new Set(passedRaw.filter((n): n is string => typeof n === 'string'))
+
+  const failedSlugs = extractFailedSlugs(summary)
+  const failedFirstSlugs = new Set<string>()
+  const failedFirst: string[] = []
+  const droppedFailedSlugs: string[] = []
+  for (const slug of failedSlugs) {
+    if (passed.has(slug)) continue // recovered between snapshots
+    if (failedFirstSlugs.has(slug)) continue
+    const loc = locationBySlug.get(slug)
+    if (!loc) {
+      droppedFailedSlugs.push(slug)
+      continue
+    }
+    failedFirstSlugs.add(slug)
+    failedFirst.push(loc)
+  }
+
+  const pending: string[] = []
+  const seenLocations = new Set<string>(failedFirst)
+  for (const t of allTests) {
+    if (passed.has(t.slug)) continue
+    if (failedFirstSlugs.has(t.slug)) continue
+    if (seenLocations.has(t.location)) continue
+    seenLocations.add(t.location)
+    pending.push(t.location)
+  }
+
+  if (failedFirst.length === 0 && pending.length === 0) {
+    return { kind: 'all-passed', total: allTests.length }
+  }
+  return {
+    kind: 'targeted',
+    locations: [...failedFirst, ...pending],
+    failedFirst,
+    pending,
+    droppedFailedSlugs,
+    total: allTests.length,
+  }
+}
+
 // Compute file:line locations for every test that has NOT yet passed in the
 // given summary — i.e. the union of failed + pending. Used on heal restart so
 // the agent re-runs everything still outstanding, not just the ones that
@@ -2053,6 +2310,88 @@ export function computeNonPassedTargets(
   return { kind: 'targeted', locations, total: allTests.length }
 }
 
+function knownTestsFromSummary(summary: SummaryShape): KnownSummaryTest[] {
+  const raw = Array.isArray(summary.knownTests) ? summary.knownTests : []
+  const out: KnownSummaryTest[] = []
+  for (const entry of raw) {
+    if (!entry || typeof entry !== 'object') continue
+    const value = entry as {
+      name?: unknown
+      title?: unknown
+      titlePath?: unknown
+      location?: unknown
+    }
+    if (typeof value.name !== 'string' || value.name.length === 0) continue
+    if (typeof value.title !== 'string' || value.title.length === 0) continue
+    if (out.some((test) => test.name === value.name)) continue
+    out.push({
+      name: value.name,
+      title: value.title,
+      ...(Array.isArray(value.titlePath)
+        ? { titlePath: value.titlePath.filter((part): part is string => typeof part === 'string' && part.length > 0) }
+        : {}),
+      ...(typeof value.location === 'string' && value.location.length > 0 ? { location: value.location } : {}),
+    })
+  }
+  return out
+}
+
+function passedNameSet(summary: SummaryShape): Set<string> {
+  const passedRaw = Array.isArray(summary.passedNames) ? summary.passedNames : []
+  return new Set(passedRaw.filter((name): name is string => typeof name === 'string' && name.length > 0))
+}
+
+function summaryHasPassingEvidence(summary: SummaryShape): boolean {
+  if (knownTestsFromSummary(summary).length > 0) return true
+  const total = computedTotal(summary)
+  return total > 0 && countPassed(summary) >= total
+}
+
+function uniqueByName(tests: KnownSummaryTest[]): KnownSummaryTest[] {
+  const seen = new Set<string>()
+  const out: KnownSummaryTest[] = []
+  for (const test of tests) {
+    if (seen.has(test.name)) continue
+    seen.add(test.name)
+    out.push(test)
+  }
+  return out
+}
+
+function grepForKnownTests(tests: KnownSummaryTest[]): string | null {
+  const titles = Array.from(new Set(tests.map((test) => test.title).filter(Boolean)))
+  if (titles.length === 0) return null
+  const escaped = titles.map(escapeRegExp)
+  return escaped.length === 1 ? escaped[0] : `(?:${escaped.join('|')})`
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[\\^$.*+?()[\]{}|]/g, '\\$&')
+}
+
+function isSpecLocation(location: string): boolean {
+  return /(?:\.spec\.[cm]?[jt]sx?|\.test\.[cm]?[jt]sx?):\d+(?::\d+)?$/.test(location)
+}
+
+function selectionForPlan(plan: VerificationPlan): PlaywrightRerunSelection | undefined {
+  return plan.kind === 'targeted' ? plan.selection : undefined
+}
+
+function normalizeRerunSelection(rerun?: readonly string[] | PlaywrightRerunSelection): PlaywrightRerunSelection | undefined {
+  if (!rerun) return undefined
+  if (!Array.isArray(rerun)) return rerun as PlaywrightRerunSelection
+  const targets = rerun as readonly string[]
+  if (targets.length === 0) return undefined
+  return {
+    kind: 'targets',
+    targets,
+    selected: targets.length,
+    total: targets.length,
+    mode: 'failed-and-pending',
+    reason: 'The runner selected tests that had not passed yet.',
+  }
+}
+
 export function extractFailedSlugs(summary: SummaryShape): string[] {
   const failed = Array.isArray(summary.failed) ? summary.failed : []
   return failed
@@ -2081,10 +2420,10 @@ export function summarizeFailures(summaryPath: string): { failed: string[]; tota
   return { failed, total }
 }
 
-// PASSED only when (a) Playwright exited 0 AND (b) every test the AST can see
-// is in summary.passedNames. Skipped/pending/failed all block. Falls back to
-// summarizeFailures when AST extraction fails so feature dirs with no parseable
-// specs degrade to "no failed entries => passed" instead of always failing.
+// PASSED only when (a) Playwright exited 0 AND (b) every known test is in
+// summary.passedNames. The reporter's runtime `knownTests` inventory is the
+// first source of truth so helper/factory-generated tests count; static spec
+// extraction remains only as a legacy fallback.
 export function decideRunStatus(
   featureDir: string,
   summaryPath: string,
@@ -2092,12 +2431,7 @@ export function decideRunStatus(
 ): 'passed' | 'failed' {
   if (exitCode !== 0) return 'failed'
   const summary = readSummary(summaryPath)
-  const computed = computeNonPassedTargets(featureDir, summary)
-  if (computed.kind === 'all-passed') return 'passed'
-  if (computed.kind === 'extraction-failed') {
-    return summarizeFailures(summaryPath).failed.length > 0 ? 'failed' : 'passed'
-  }
-  return 'failed'
+  return computeVerificationPlan(featureDir, summary).kind === 'all-passed' ? 'passed' : 'failed'
 }
 
 const SUMMARY_REPORTER_PATH = path.resolve(__dirname, 'summary-reporter.js')
@@ -2114,7 +2448,7 @@ const BRACKETED_PASTE_END = '\x1b[201~'
 
 // Production Playwright invocation. Uses `npx playwright test` with our custom
 // summary reporter, rooted at the feature dir. Tests inject their own.
-export const defaultPlaywrightSpawner: PlaywrightSpawner = ({ feature, paths, rerunTargets }) => {
+export const defaultPlaywrightSpawner: PlaywrightSpawner = ({ feature, paths, rerunTargets, rerunGrep }) => {
   const reporter = SUMMARY_REPORTER_PATH
   const threshold = feature.healOnFailureThreshold
   const maxFailures = typeof threshold === 'number' && threshold > 0
@@ -2123,8 +2457,9 @@ export const defaultPlaywrightSpawner: PlaywrightSpawner = ({ feature, paths, re
   const targets = rerunTargets && rerunTargets.length > 0
     ? ` ${rerunTargets.map((target) => JSON.stringify(target)).join(' ')}`
     : ''
+  const grep = rerunGrep ? ` --grep=${JSON.stringify(rerunGrep)}` : ''
   return {
-    command: `npx playwright test${targets} --output=${JSON.stringify(paths.playwrightArtifactsDir)} --reporter=${JSON.stringify(reporter)},list${maxFailures}`,
+    command: `npx playwright test${targets}${grep} --output=${JSON.stringify(paths.playwrightArtifactsDir)} --reporter=${JSON.stringify(reporter)},list${maxFailures}`,
     cwd: feature.featureDir,
   }
 }
