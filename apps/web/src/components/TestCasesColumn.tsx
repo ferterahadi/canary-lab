@@ -4,6 +4,7 @@ import type { ExtractedTest, FeatureSpecFile, RunStatus } from '../api/types'
 import { activeBodyLineForTest, colorClassForStatus, statusForTest, summaryEntryName, type StepStatus } from '../lib/test-step-status'
 import type { RunSummary, RunSummaryRunningStep } from '../api/types'
 import { ShikiCode, StatusPill, StepBlock } from './shared/TestCodeBlock'
+import { ChevronRightIcon, StatusDot } from './config/atoms'
 
 interface Props {
   feature: string | null
@@ -162,8 +163,12 @@ function TestCard({
         onClick={onToggle}
         className="flex w-full items-center gap-3 px-3 py-2.5 text-left"
       >
-        <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
-          {expanded ? '▾' : '▸'}
+        <span
+          aria-hidden="true"
+          className="inline-flex shrink-0 items-center justify-center transition-transform duration-150"
+          style={{ color: 'var(--text-muted)', transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)' }}
+        >
+          <ChevronRightIcon />
         </span>
         <div className="flex-1 min-w-0 truncate text-sm font-medium" title={test.name} style={{ color: 'var(--text-primary)' }}>
           {test.name}
@@ -264,20 +269,13 @@ function TestsHeaderIndicator({
   if (isRunActivelyTesting) {
     return (
       <div className="flex items-center gap-2 text-[10px]" style={{ color: 'var(--text-secondary)' }}>
-        <span className="relative flex h-2 w-2">
-          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-sky-400 opacity-75" />
-          <span className="relative inline-flex h-2 w-2 rounded-full bg-sky-500" />
-        </span>
+        <StatusDot state="running" halo />
         <span className="uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>running</span>
         <span style={{ fontFamily: 'var(--font-mono)' }}>0/{totalTests}</span>
       </div>
     )
   }
-  return (
-    <div className="text-[10px]" style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>
-      {totalTests}
-    </div>
-  )
+  return <span className="cl-count-chip">{totalTests}</span>
 }
 
 function RunningIndicator({
@@ -300,12 +298,7 @@ function RunningIndicator({
   const isTestRunning = isRunActivelyTesting
   return (
     <div className="flex items-center gap-2 text-[10px]" style={{ color: 'var(--text-secondary)' }}>
-      {isTestRunning && (
-        <span className="relative flex h-2 w-2">
-          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-sky-400 opacity-75" />
-          <span className="relative inline-flex h-2 w-2 rounded-full bg-sky-500" />
-        </span>
-      )}
+      {isTestRunning && <StatusDot state="running" halo />}
       {isTestRunning && (
         <span className="uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>running</span>
       )}

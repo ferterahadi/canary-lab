@@ -19,14 +19,14 @@ export function SaveBar({ dirty, saving, error, savedAt, onSave, onDiscard, righ
     >
       <div className="flex min-w-0 items-center gap-3 text-[11px]" style={{ color: 'var(--text-muted)' }}>
         {error ? (
-          <span style={{ color: '#ef4444' }}>{error}</span>
+          <span style={{ color: 'var(--danger)' }}>{error}</span>
         ) : dirty ? (
           <span className="flex items-center gap-1.5">
-            <span className="inline-block h-1.5 w-1.5 rounded-full" style={{ background: '#eab308' }} />
+            <span className="inline-block h-1.5 w-1.5 rounded-full" style={{ background: 'var(--warning)' }} />
             Unsaved changes
           </span>
         ) : showSavedFlash ? (
-          <span style={{ color: '#22c55e' }}>Saved.</span>
+          <span style={{ color: 'var(--success)' }}>Saved.</span>
         ) : (
           <span>Up to date.</span>
         )}

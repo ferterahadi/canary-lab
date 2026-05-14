@@ -2,6 +2,15 @@ import { useMemo, useState } from 'react'
 import type { DraftRecord } from '../api/types'
 import { slugifyFeatureName } from '../lib/wizard-validation'
 import { isActiveWizardTask, useWizardDrafts } from '../state/WizardDraftContext'
+import { CloseIcon, StatusDot, type StatusDotState } from './config/atoms'
+
+function dotStateForDraft(status: DraftRecord['status']): StatusDotState {
+  if (status === 'plan-ready' || status === 'spec-ready' || status === 'accepted') return 'success'
+  if (status === 'error') return 'failed'
+  if (status === 'cancelled' || status === 'rejected') return 'warning'
+  if (status === 'created') return 'idle'
+  return 'running'
+}
 
 type FilterKey = 'running' | 'ready' | 'failed' | 'created'
 type Tone = 'running' | 'ready' | 'failed' | 'idle' | 'neutral'
@@ -37,7 +46,7 @@ export function WizardTaskStatus() {
           style={{ color: 'var(--text-secondary)' }}
           title={`${statusLabel(latestTask)}: ${taskTitle(latestTask)}`}
         >
-          <StatusDot status={latestTask.status} />
+          <StatusDot state={dotStateForDraft(latestTask.status)} />
           <span className="shrink-0 font-medium" style={{ color: 'var(--text-primary)' }}>
             Wizards
           </span>
@@ -222,7 +231,7 @@ function TaskRow({
         className="min-w-0 flex-1 rounded-md px-3 py-2 text-left"
       >
         <span className="flex min-w-0 items-center gap-2">
-          <StatusDot status={task.status} />
+          <StatusDot state={dotStateForDraft(task.status)} />
           <span className="min-w-0 truncate text-[13px] font-semibold" style={{ color: 'var(--text-primary)' }}>
             {taskTitle(task)}
           </span>
@@ -401,19 +410,6 @@ function statusChipPalette(status: DraftRecord['status']): { bg: string; text: s
   return { bg: 'rgba(14, 165, 233, 0.15)', text: 'rgb(56, 189, 248)' }
 }
 
-function StatusDot({ status }: { status: DraftRecord['status'] }) {
-  const cls = status === 'plan-ready' || status === 'spec-ready' || status === 'accepted'
-    ? 'bg-emerald-500'
-    : status === 'error'
-      ? 'bg-rose-500'
-      : status === 'cancelled' || status === 'rejected'
-        ? 'bg-amber-500'
-        : status === 'created'
-          ? 'bg-zinc-500'
-          : 'animate-pulse bg-sky-500'
-  return <span aria-hidden="true" className={`inline-flex h-2 w-2 shrink-0 rounded-full ${cls}`} />
-}
-
 function statusLabel(task: DraftRecord): string {
   if (task.status === 'planning') return 'Wizard planning'
   if (task.status === 'generating') return 'Wizard generating spec'
@@ -483,15 +479,6 @@ function StopIcon() {
   return (
     <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
       <rect x="6" y="6" width="12" height="12" rx="1.5" />
-    </svg>
-  )
-}
-
-function CloseIcon() {
-  return (
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M18 6 6 18" />
-      <path d="m6 6 12 12" />
     </svg>
   )
 }

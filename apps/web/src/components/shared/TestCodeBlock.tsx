@@ -135,7 +135,7 @@ function CodeShell({
         {children}
       </div>
       {openError && (
-        <div className="text-[10px]" style={{ color: '#ef4444' }}>
+        <div className="text-[10px]" style={{ color: 'var(--danger)' }}>
           {openError}
         </div>
       )}

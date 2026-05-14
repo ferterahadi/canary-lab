@@ -3,10 +3,100 @@
  * borders, elevated surfaces, mono labels for technical fields. No external
  * UI lib; everything is a thin wrapper over native inputs so the editor
  * stays light and consistent with the rest of the app.
+ *
+ * Status atoms (`StatusDot`, `CloseIcon`, `DownloadIcon`) live here too so
+ * the rest of the app can compose the same chrome used by
+ * `EvaluationExportTaskToast` — that toast is the reference design language.
  */
 import { useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { CSSProperties, ReactNode } from 'react'
+
+// ---------------------------------------------------------------------------
+// Status atoms (shared with EvaluationExportTaskToast / WizardTaskStatus /
+// RunStatusIndicator / Stepper). 10px circle, no border, semantic palette
+// borrowed from the toast.
+// ---------------------------------------------------------------------------
+
+export type StatusDotState = 'idle' | 'running' | 'success' | 'failed' | 'warning'
+
+const STATUS_DOT_BG: Record<StatusDotState, string> = {
+  idle:    'bg-zinc-400 dark:bg-zinc-500',
+  running: 'bg-sky-500',
+  success: 'bg-emerald-500',
+  failed:  'bg-rose-500',
+  warning: 'bg-amber-500',
+}
+
+export function StatusDot({
+  state,
+  pulse,
+  halo,
+  className = '',
+}: {
+  state: StatusDotState
+  /** Override default pulse animation on the dot. `running` pulses by
+   *  default; pass `true` for transient action states. */
+  pulse?: boolean
+  /** Render an `animate-ping` ring around the dot. Used by row-level status
+   *  indicators where the halo is a stronger "this is changing" cue than
+   *  the dot's own pulse. */
+  halo?: boolean
+  className?: string
+}) {
+  const shouldPulse = pulse ?? state === 'running'
+  const dotCls = `cl-status-dot ${STATUS_DOT_BG[state]} ${shouldPulse ? 'animate-pulse' : ''}`.trim()
+  if (!halo) {
+    return <span aria-hidden="true" className={`${dotCls} ${className}`.trim()} />
+  }
+  return (
+    <span aria-hidden="true" className={`relative inline-flex ${className}`.trim()}>
+      <span
+        className={`absolute inset-0 inline-flex animate-ping rounded-full ${STATUS_DOT_BG[state]} opacity-60`}
+      />
+      <span className={`relative ${dotCls}`} />
+    </span>
+  )
+}
+
+export function CloseIcon({ size = 13 }: { size?: number } = {}) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.4"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M18 6 6 18" />
+      <path d="m6 6 12 12" />
+    </svg>
+  )
+}
+
+export function DownloadIcon({ size = 13 }: { size?: number } = {}) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+      <path d="M7 10l5 5 5-5" />
+      <path d="M12 15V3" />
+    </svg>
+  )
+}
 
 const inputStyle: CSSProperties = {
   backgroundColor: 'var(--bg-elevated)',
@@ -365,23 +455,28 @@ export function IconButton({
   title,
   children,
   variant = 'ghost',
+  size = 'sm',
 }: {
   onClick: () => void
   ariaLabel: string
   title?: string
   children: ReactNode
   variant?: 'ghost' | 'danger'
+  size?: 'sm' | 'md'
 }) {
+  const sizeCls = size === 'md' ? 'h-7 w-7' : 'h-6 w-6'
+  const restColor = variant === 'danger' ? 'var(--danger)' : 'var(--text-muted)'
+  const hoverColor = variant === 'danger' ? 'var(--danger)' : 'var(--text-primary)'
   return (
     <button
       type="button"
       aria-label={ariaLabel}
       title={title ?? ariaLabel}
       onClick={onClick}
-      className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md transition-colors duration-150"
-      style={{ color: variant === 'danger' ? '#ef4444' : 'var(--text-muted)' }}
-      onMouseEnter={(e) => { e.currentTarget.style.color = variant === 'danger' ? '#ef4444' : 'var(--text-primary)' }}
-      onMouseLeave={(e) => { e.currentTarget.style.color = variant === 'danger' ? '#ef4444' : 'var(--text-muted)' }}
+      className={`inline-flex ${sizeCls} shrink-0 items-center justify-center rounded-md transition-colors duration-150`}
+      style={{ color: restColor }}
+      onMouseEnter={(e) => { e.currentTarget.style.color = hoverColor }}
+      onMouseLeave={(e) => { e.currentTarget.style.color = restColor }}
     >
       {children}
     </button>
@@ -428,55 +523,66 @@ export function Modal({
   open,
   onClose,
   title,
+  eyebrow,
+  status,
+  meta,
   width = 480,
   children,
 }: {
   open: boolean
   onClose: () => void
+  /** Sentence-case title shown as `text-sm font-semibold`. */
   title?: string
+  /** Optional uppercase kicker (e.g. "Settings", "Feature configuration"). */
+  eyebrow?: string
+  /** Optional status dot shown to the left of the title. */
+  status?: StatusDotState
+  /** Optional metadata content rendered as a 2-col grid under the title. */
+  meta?: ReactNode
   width?: number
   children: ReactNode
 }) {
   if (!open) return null
+  const hasHeader = Boolean(title || eyebrow || meta || status)
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center"
-      style={{ background: 'rgba(0,0,0,0.5)' }}
+      className="cl-modal-backdrop fixed inset-0 z-50 flex items-center justify-center p-4"
       onClick={onClose}
     >
       <div
-        className="relative rounded-md"
+        className="cl-modal relative flex max-h-[calc(100vh-2rem)] flex-col overflow-hidden rounded-lg"
         style={{
           width,
           maxWidth: '94vw',
-          background: 'var(--bg-base)',
-          border: '1px solid var(--border-default)',
+          background: 'var(--bg-elevated)',
         }}
         onClick={(e) => e.stopPropagation()}
       >
-        {title && (
-          <div
-            className="flex items-center justify-between px-4 py-3"
-            style={{ borderBottom: '1px solid var(--border-default)' }}
-          >
-            <span
-              className="text-[10px] uppercase tracking-wider font-medium"
-              style={{ color: 'var(--text-muted)' }}
-            >
-              {title}
-            </span>
+        {hasHeader && (
+          <header className="cl-dialog-header">
+            {status && <StatusDot state={status} className="mt-1" />}
+            <div className="min-w-0 flex-1">
+              {eyebrow && <div className="cl-kicker mb-1">{eyebrow}</div>}
+              {title && (
+                <h2 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
+                  {title}
+                </h2>
+              )}
+              {meta && <div className="cl-meta-grid mt-1">{meta}</div>}
+            </div>
             <button
               type="button"
               aria-label="Close"
               onClick={onClose}
-              className="text-xs"
-              style={{ color: 'var(--text-muted)' }}
+              className="cl-icon-button h-7 w-7 shrink-0"
             >
-              ✕
+              <CloseIcon size={14} />
             </button>
-          </div>
+          </header>
         )}
-        {children}
+        <div className="min-h-0 flex-1 overflow-y-auto scrollbar-thin">
+          {children}
+        </div>
       </div>
     </div>
   )
@@ -506,7 +612,13 @@ export function ConfirmModal({
   confirmDisabled?: boolean
 }) {
   return (
-    <Modal open={open} onClose={onCancel} title={title} width={420}>
+    <Modal
+      open={open}
+      onClose={onCancel}
+      title={title}
+      status={variant === 'danger' ? 'failed' : undefined}
+      width={440}
+    >
       <div className="px-4 py-3 text-xs" style={{ color: 'var(--text-primary)' }}>
         {message}
       </div>
@@ -518,8 +630,7 @@ export function ConfirmModal({
           type="button"
           onClick={onCancel}
           disabled={busy}
-          className="rounded-md px-3 py-1 text-[11px] uppercase tracking-wider"
-          style={{ color: 'var(--text-muted)', border: '1px solid var(--border-default)' }}
+          className="cl-button rounded-md px-3 py-1 text-[11px] uppercase tracking-wider"
         >
           {cancelLabel}
         </button>
@@ -527,11 +638,13 @@ export function ConfirmModal({
           type="button"
           onClick={onConfirm}
           disabled={busy || confirmDisabled}
-          className="rounded-md px-3 py-1 text-[11px] uppercase tracking-wider"
+          className="rounded-md px-3 py-1 text-[11px] font-semibold uppercase tracking-wider transition-colors"
           style={{
             color: variant === 'danger' ? '#fff' : 'var(--text-primary)',
-            background: variant === 'danger' ? '#ef4444' : 'transparent',
-            border: variant === 'danger' ? '1px solid #ef4444' : '1px solid var(--border-default)',
+            background: variant === 'danger' ? 'var(--danger)' : 'transparent',
+            border: variant === 'danger'
+              ? '1px solid var(--danger)'
+              : '1px solid var(--border-default)',
             opacity: busy || confirmDisabled ? 0.45 : 1,
             cursor: busy || confirmDisabled ? 'not-allowed' : 'pointer',
           }}

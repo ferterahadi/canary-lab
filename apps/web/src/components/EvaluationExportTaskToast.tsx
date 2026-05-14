@@ -1,5 +1,12 @@
 import { useEvaluationExports } from '../state/EvaluationExportContext'
 import type { EvaluationExportMode, EvaluationExportTask } from '../api/types'
+import { CloseIcon, DownloadIcon, StatusDot, type StatusDotState } from './config/atoms'
+
+function dotStateForExport(status: EvaluationExportTask['status']): StatusDotState {
+  if (status === 'completed') return 'success'
+  if (status === 'failed') return 'failed'
+  return 'running'
+}
 
 export function EvaluationExportTaskStatus() {
   const {
@@ -28,7 +35,7 @@ export function EvaluationExportTaskStatus() {
           style={{ color: 'var(--text-secondary)' }}
           title={`${statusLabel(latestTask)}: ${modeLabel(latestTask.mode)} ${latestTask.runId}`}
         >
-          <StatusDot status={latestTask.status} />
+          <StatusDot state={dotStateForExport(latestTask.status)} />
           <span className="shrink-0 font-medium" style={{ color: 'var(--text-primary)' }}>
             {compactStatusLabel(latestTask)}
           </span>
@@ -88,11 +95,11 @@ function EvaluationExportDialog({
         className="flex max-h-[calc(100vh-3rem)] w-[min(980px,calc(100vw-3rem))] flex-col rounded-lg border shadow-2xl"
         style={{ borderColor: 'var(--border-default)', background: 'var(--bg-elevated)', color: 'var(--text-primary)' }}
       >
-        <header className="flex items-start gap-3 border-b px-4 py-3" style={{ borderColor: 'var(--border-default)' }}>
-          <StatusDot status={task.status} />
+        <header className="cl-dialog-header">
+          <StatusDot state={dotStateForExport(task.status)} className="mt-1" />
           <div className="min-w-0 flex-1">
             <h2 className="text-sm font-semibold">Evaluation export</h2>
-            <div className="mt-1 grid grid-cols-2 gap-x-4 gap-y-1 text-xs" style={{ color: 'var(--text-muted)' }}>
+            <div className="cl-meta-grid mt-1">
               <span className="truncate">Mode: {modeLabel(task.mode)}</span>
               <span className="truncate">Status: {task.status}</span>
               <span className="truncate" title={task.runId}>Run: {task.runId}</span>
@@ -139,7 +146,7 @@ function EvaluationExportDialog({
                     }}
                   >
                     <span className="flex items-center gap-2">
-                      <StatusDot status={item.status} />
+                      <StatusDot state={dotStateForExport(item.status)} />
                       <span className="min-w-0 flex-1 truncate font-medium">{modeLabel(item.mode)}</span>
                     </span>
                     <span className="mt-1 block truncate text-[11px]" style={{ color: 'var(--text-muted)' }}>
@@ -186,34 +193,6 @@ function EvaluationExportDialog({
       </section>
     </div>
   )
-}
-
-function DownloadIcon() {
-  return (
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-      <path d="M7 10l5 5 5-5" />
-      <path d="M12 15V3" />
-    </svg>
-  )
-}
-
-function CloseIcon() {
-  return (
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M18 6 6 18" />
-      <path d="m6 6 12 12" />
-    </svg>
-  )
-}
-
-function StatusDot({ status }: { status: EvaluationExportTask['status'] }) {
-  const cls = status === 'completed'
-    ? 'bg-emerald-500'
-    : status === 'failed'
-      ? 'bg-rose-500'
-      : 'animate-pulse bg-sky-500'
-  return <span aria-hidden="true" className={`inline-flex h-2.5 w-2.5 shrink-0 rounded-full ${cls}`} />
 }
 
 function statusLabel(task: EvaluationExportTask): string {

@@ -53,7 +53,7 @@ export function GeneralTab({ feature, onFeatureRenamed }: { feature: string; onF
   })
 
   if (ed.error && !ed.draft) {
-    return <div className="p-4 text-xs" style={{ color: '#ef4444' }}>{ed.error}</div>
+    return <div className="p-4 text-xs" style={{ color: 'var(--danger)' }}>{ed.error}</div>
   }
   if (ed.loading || !ed.draft) {
     return <div className="p-4 text-xs" style={{ color: 'var(--text-muted)' }}>Loading…</div>
