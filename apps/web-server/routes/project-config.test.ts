@@ -243,6 +243,20 @@ describe('PUT /api/project-config', () => {
     }
   })
 
+  it('rejects non-string personal wiki path values', async () => {
+    const app = await makeApp()
+    try {
+      const r = await app.inject({
+        method: 'PUT',
+        url: '/api/project-config',
+        payload: { personalWikiPath: 123 },
+      })
+      expect(r.statusCode).toBe(400)
+    } finally {
+      await app.close()
+    }
+  })
+
   it('rejects missing, relative, and non-directory personal wiki paths', async () => {
     const file = path.join(projectRoot, 'note.md')
     fs.writeFileSync(file, 'x')

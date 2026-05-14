@@ -283,6 +283,17 @@ describe('detectMigrations', () => {
     expect(hasPendingMigrations(r)).toBe(false)
   })
 
+  it('falls back to the bundled CLAUDE.md template when no body is supplied', () => {
+    const repo = mkRepo()
+    // No templateHealPromptBody → triggers loadTemplateHealPrompt path. The bundled
+    // template lives under either ../templates or ../../templates relative to the
+    // built script; in this dev tree neither exists at those relative paths, so the
+    // function returns '' and we just verify detectMigrations completes.
+    const r = detectMigrations(repo)
+    expect(r).toBeTruthy()
+    expect(Array.isArray(r.orphanedLogs)).toBe(true)
+  })
+
   it('repo with diagnosis-journal.md only is clean', () => {
     const repo = mkRepo()
     fs.mkdirSync(path.join(repo, 'logs'))

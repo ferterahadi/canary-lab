@@ -5,7 +5,7 @@
 // The orchestrator owns the actual fs/pty side effects; this module is
 // deterministic and trivially unit-testable.
 
-export const AUTO_HEAL_MAX_CYCLES = 3
+export const AUTO_HEAL_MAX_CYCLES = Number.POSITIVE_INFINITY
 
 export type HealSignalKind = 'restart' | 'rerun'
 

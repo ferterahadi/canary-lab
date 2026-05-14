@@ -278,6 +278,43 @@ describe('EvaluationExportProvider', () => {
     expect(FakeWebSocket.instances[0].closeCalls).toBe(1)
   })
 
+  it('skips re-subscribing a task that already has an active connection', async () => {
+    const captured = renderProbe()
+    const running = task({ taskId: 'dup-task', runId: 'run-dup', status: 'running' })
+    vi.mocked(api.startEvaluationExport).mockResolvedValue(running)
+
+    await act(async () => {
+      await captured.value?.startExport('run-dup', 'raw')
+    })
+    expect(FakeWebSocket.instances).toHaveLength(1)
+
+    await act(async () => {
+      await captured.value?.startExport('run-dup', 'raw')
+    })
+    // The second startExport reuses the existing connection rather than opening another.
+    expect(FakeWebSocket.instances).toHaveLength(1)
+  })
+
+  it('ignores rehydrated tasks when the provider unmounts before tasks resolve', async () => {
+    let resolveTasks: (tasks: EvaluationExportTask[]) => void = () => {}
+    vi.mocked(api.listEvaluationExportTasks).mockReturnValueOnce(
+      new Promise<EvaluationExportTask[]>((resolve) => { resolveTasks = resolve }),
+    )
+    renderProbe()
+
+    act(() => {
+      root.unmount()
+    })
+
+    await act(async () => {
+      resolveTasks([task({ taskId: 'late-task', runId: 'run-late', status: 'running' })])
+      await Promise.resolve()
+    })
+
+    // No socket opens because the rehydration short-circuits on the cancelled flag.
+    expect(FakeWebSocket.instances).toHaveLength(0)
+  })
+
   it('throws when the hook is used outside the provider', () => {
     function OutsideProviderProbe() {
       useEvaluationExports()

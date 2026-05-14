@@ -599,6 +599,16 @@ describe('readPlaywrightPlaybackEvents / indexPlaywrightArtifacts', () => {
       },
     ])
   })
+
+  it('sorts multiple artifact groups by test name', () => {
+    for (const slug of ['zebra-test', 'alpha-test']) {
+      const file = path.join(tmpDir, 'playwright-artifacts', slug, 'trace.zip')
+      fs.mkdirSync(path.dirname(file), { recursive: true })
+      fs.writeFileSync(file, 'zip')
+    }
+    const result = indexPlaywrightArtifacts('r-multi', tmpDir, undefined)
+    expect(result?.map((g) => g.testName)).toEqual(['alpha-test', 'zebra-test'])
+  })
 })
 
 describe('RunStore', () => {
@@ -710,6 +720,30 @@ describe('RunStore', () => {
     expect(getRunDetail(tmpDir, 'r-life-1')?.lifecycleEvents).toHaveLength(1)
     expect(fs.readFileSync(path.join(dir, 'lifecycle-events.jsonl'), 'utf-8')).toContain('Restart plan ready')
     expect(events).toEqual([{ kind: 'changed', runId: 'r-life-1' }])
+  })
+
+  it('ignores corrupt lifecycle JSONL lines and entries that lack a phase string', () => {
+    const dir = seedRun('r-life-bad', { status: 'running' })
+    const lifecyclePath = path.join(dir, 'lifecycle-events.jsonl')
+    // Mix valid entry with two unusable lines: one corrupt JSON and one with a non-string phase.
+    fs.writeFileSync(
+      lifecyclePath,
+      [
+        '{not valid json',
+        JSON.stringify({ phase: 7, headline: 'numeric phase' }),
+        '',
+        JSON.stringify({ phase: 'restarting-services', headline: 'ok', updatedAt: '2026-05-08T00:00:05.000Z' }),
+      ].join('\n'),
+    )
+    const events = getRunDetail(tmpDir, 'r-life-bad')?.lifecycleEvents
+    expect(events).toHaveLength(1)
+    expect(events?.[0]).toMatchObject({ phase: 'restarting-services' })
+  })
+
+  it('returns undefined when every lifecycle JSONL line fails to parse into an event', () => {
+    const dir = seedRun('r-life-all-bad', { status: 'running' })
+    fs.writeFileSync(path.join(dir, 'lifecycle-events.jsonl'), '{nope\n{also-nope\n')
+    expect(getRunDetail(tmpDir, 'r-life-all-bad')?.lifecycleEvents).toBeUndefined()
   })
 
   it('setStatus mirrors status into both manifest and index, and emits changed', () => {

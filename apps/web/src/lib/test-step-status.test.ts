@@ -285,6 +285,25 @@ describe('activeBodyLineForTest', () => {
     })).toBe(3)
   })
 
+  it('falls back to the failed entry location when locations is absent entirely', () => {
+    expect(activeBodyLineForTest({
+      testName: 'Creates a TODO',
+      testLine: 10,
+      bodySource: '{\n  await page.goto(\"/\")\n  await expect(locator).toBeVisible()\n}',
+      summary: {
+        complete: true,
+        total: 1,
+        passed: 0,
+        failed: [
+          {
+            name: 'test-case-creates-a-todo',
+            location: '/todo.spec.ts:12',
+          },
+        ],
+      },
+    })).toBe(3)
+  })
+
   it('falls back to the failed entry location when locations is empty', () => {
     expect(activeBodyLineForTest({
       testName: 'Creates a TODO',

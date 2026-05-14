@@ -66,6 +66,26 @@ describe('wizard codex formatter', () => {
     expect(writes).toEqual([])
   })
 
+  it('ignores unknown line types without emitting output', () => {
+    handleLine(JSON.stringify({ type: 'unknown.event', stuff: 1 }))
+    expect(writes).toEqual([])
+  })
+
+  it('prints inspection label without output line when a read-style command succeeds with empty output', () => {
+    handleLine(JSON.stringify({
+      type: 'item.completed',
+      item: {
+        type: 'command_execution',
+        command: 'cat empty.txt',
+        exit_code: 0,
+        aggregated_output: '',
+      },
+    }))
+    const out = writes.join('')
+    expect(out).toContain('Read empty.txt (ok)')
+    expect(out).not.toContain('Number of characters')
+  })
+
   it('prints thread progress without ANSI', () => {
     handleLine(JSON.stringify({ type: 'thread.started', thread_id: 'thread-123456' }))
     expect(writes.join('')).toContain('[[canary-lab:wizard-session agent=codex id=thread-123456]]')

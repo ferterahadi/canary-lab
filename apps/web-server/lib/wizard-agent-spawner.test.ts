@@ -228,6 +228,11 @@ describe('shellQuote / buildClaudeArgs / buildClaudeCommand', () => {
     expect(buildClaudeArgs('hi')).not.toContain('--continue')
   })
 
+  it('includes --session-id when provided', () => {
+    expect(buildClaudeArgs('hi', 'sess-42')).toContain('--session-id')
+    expect(buildClaudeArgs('hi', 'sess-42')).toContain('sess-42')
+  })
+
   it('builds claude resume args for spec generation', () => {
     expect(buildClaudeResumeArgs('hi', 'sess-123')).toEqual([
       '--dangerously-skip-permissions',

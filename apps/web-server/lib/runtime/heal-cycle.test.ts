@@ -21,14 +21,14 @@ describe('HealCycleState.observeFailures', () => {
     expect(s.observeFailures('c')).toEqual({ shouldHeal: false, reason: 'max-cycles' })
   })
 
-  it('exposes a default max equal to the public constant', () => {
-    expect(AUTO_HEAL_MAX_CYCLES).toBe(3)
+  it('does not cap cycles by default', () => {
+    expect(AUTO_HEAL_MAX_CYCLES).toBe(Number.POSITIVE_INFINITY)
     const s = new HealCycleState()
-    for (let i = 0; i < AUTO_HEAL_MAX_CYCLES; i++) {
+    for (let i = 0; i < 20; i++) {
       expect(s.observeFailures(`sig-${i}`).shouldHeal).toBe(true)
       s.beginCycle()
     }
-    expect(s.observeFailures('again').shouldHeal).toBe(false)
+    expect(s.observeFailures('again').shouldHeal).toBe(true)
   })
 
   it('detects no-progress when same signature repeats past the cap', () => {

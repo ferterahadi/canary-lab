@@ -9,8 +9,8 @@ import type {
   ServiceManifestEntry,
   ServiceStatus,
   RunLifecycleEvent,
-  RunLifecycleSnapshot,
   RunManifest,
+  RunSummary,
 } from '../api/types'
 import { formatDuration, durationBetween } from '../lib/format'
 import {
@@ -118,7 +118,7 @@ export function RunDetailColumn({
           />
         )}
         {tab === 'run-logs' && (
-          <RunLogsTab view={view} />
+          <RunLogsTab view={view} summary={detail.summary} />
         )}
         {tab === 'services' && services.length > 0 && (
           <div className="flex h-full flex-col">
@@ -149,7 +149,7 @@ export function RunDetailColumn({
             artifactGroups={detail.playwrightArtifacts}
             artifactPolicy={m.playwrightArtifacts}
             onOpenArtifactSettings={() => onOpenPlaywrightSettings?.(m.feature)}
-            lifecycle={m.lifecycle}
+            summary={detail.summary}
           />
         )}
         {tab === 'agent' && (
@@ -316,7 +316,7 @@ function RunOverviewTab({
   )
 }
 
-function RunLogsTab({ view }: { view: RunViewModel }) {
+function RunLogsTab({ view, summary }: { view: RunViewModel; summary?: RunSummary }) {
   if (view.recoveryTimeline.length === 0) {
     return (
       <EmptyPane
@@ -336,6 +336,7 @@ function RunLogsTab({ view }: { view: RunViewModel }) {
       <RecoveryTimeline
         events={view.recoveryTimeline}
         alert={view.primaryAlert}
+        summary={summary}
       />
     </div>
   )
@@ -416,7 +417,7 @@ function PlaywrightPanel({
   artifactGroups,
   artifactPolicy,
   onOpenArtifactSettings,
-  lifecycle,
+  summary,
 }: {
   runId: string
   view: PlaywrightView
@@ -425,23 +426,17 @@ function PlaywrightPanel({
   artifactGroups?: PlaywrightArtifactGroup[]
   artifactPolicy?: PlaywrightArtifactPolicy
   onOpenArtifactSettings?: () => void
-  lifecycle?: RunLifecycleSnapshot
+  summary?: RunSummary
 }) {
   return (
     <div className="flex h-full flex-col">
-      {lifecycle?.targetedRerun && (
-        <div className="mx-3 mt-3 rounded-md border px-3 py-2 text-xs" style={{ borderColor: 'var(--border-default)', background: 'var(--bg-elevated)', color: 'var(--text-secondary)' }}>
-          <span className="font-medium" style={{ color: 'var(--text-primary)' }}>Targeted rerun:</span>{' '}
-          {lifecycle.targetedRerun.reason}
-        </div>
-      )}
       <div className="cl-panel-header flex gap-1 px-3 py-1.5 text-xs">
         <SegmentButton active={view === 'terminal'} onClick={() => onViewChange('terminal')}>Terminal</SegmentButton>
         <SegmentButton active={view === 'playback'} onClick={() => onViewChange('playback')}>Playback</SegmentButton>
       </div>
       <div className="flex-1 min-h-0">
         {view === 'terminal' && <PaneTerminal runId={runId} paneId="playwright" />}
-        {view === 'playback' && <PlaywrightPlayback events={events} artifactGroups={artifactGroups} artifactPolicy={artifactPolicy} onOpenArtifactSettings={onOpenArtifactSettings} />}
+        {view === 'playback' && <PlaywrightPlayback events={events} artifactGroups={artifactGroups} artifactPolicy={artifactPolicy} onOpenArtifactSettings={onOpenArtifactSettings} summary={summary} />}
       </div>
     </div>
   )
@@ -450,10 +445,13 @@ function PlaywrightPanel({
 function RecoveryTimeline({
   events,
   alert,
+  summary,
 }: {
   events: RunLifecycleEvent[]
   alert?: { tone: 'info' | 'success' | 'warning' | 'error'; message: string }
+  summary?: RunSummary
 }) {
+  const now = useTimelineNow(events)
   return (
     <div>
       {alert && (
@@ -462,26 +460,108 @@ function RecoveryTimeline({
         </div>
       )}
       <ol className="space-y-2">
-        {events.map((event, idx) => (
-          <li key={event.id ?? `${event.updatedAt}:${idx}`} className="grid grid-cols-[12px_minmax(0,1fr)] gap-2 text-xs">
-            <span className={`mt-1.5 h-2 w-2 rounded-full ${dotClass(event.severity)}`} />
-            <span className="min-w-0">
-              <span className="block truncate" style={{ color: 'var(--text-primary)' }}>{event.headline}</span>
-              {event.detail && <span className="block" style={{ color: 'var(--text-muted)' }}>{event.detail}</span>}
-              {event.restartPlan && (
-                <span className="block" style={{ color: 'var(--text-muted)' }}>{formatRestartPlan(event.restartPlan)}</span>
-              )}
-              {event.targetedRerun && (
-                <span className="block" style={{ color: 'var(--text-muted)' }}>
-                  {event.targetedRerun.selected}/{event.targetedRerun.total} selected
+        {events.map((event, idx) => {
+          const durationLabel = lifecycleDurationLabel(events, idx, now)
+          const showRunningTest = idx === events.length - 1 && summary?.running && isPlaywrightLifecyclePhase(event.phase)
+          return (
+            <li key={event.id ?? `${event.updatedAt}:${idx}`} className="grid grid-cols-[12px_minmax(0,1fr)] gap-2 text-xs">
+              <span className={`mt-1.5 h-2 w-2 rounded-full ${dotClass(event.severity)}`} />
+              <span className="min-w-0">
+                <span className="flex min-w-0 items-baseline gap-2">
+                  <time
+                    className="shrink-0 tabular-nums text-[10px]"
+                    dateTime={event.updatedAt}
+                    title={formatLifecycleDateTime(event.updatedAt)}
+                    style={{ color: 'var(--text-muted)' }}
+                  >
+                    {formatLifecycleTime(event.updatedAt)}
+                  </time>
+                  <span className="min-w-0 flex-1 truncate" style={{ color: 'var(--text-primary)' }}>{event.headline}</span>
+                  {durationLabel && (
+                    <span className="shrink-0 tabular-nums text-[10px]" style={{ color: 'var(--text-muted)' }}>
+                      {durationLabel}
+                    </span>
+                  )}
                 </span>
-              )}
-            </span>
-          </li>
-        ))}
+                {event.detail && <span className="block" style={{ color: 'var(--text-muted)' }}>{event.detail}</span>}
+                {showRunningTest && summary?.running && (
+                  <span className="block" style={{ color: 'var(--text-muted)' }}>
+                    Now running: {formatSummaryTestName(summary.running.name)}
+                    {summary.running.step?.location
+                      ? ` · ${shortLocation(summary.running.step.location)}`
+                      : summary.running.location
+                        ? ` · ${shortLocation(summary.running.location)}`
+                        : ''}
+                  </span>
+                )}
+                {event.restartPlan && (
+                  <span className="block" style={{ color: 'var(--text-muted)' }}>{formatRestartPlan(event.restartPlan)}</span>
+                )}
+                {event.targetedRerun && (
+                  <span className="block" style={{ color: 'var(--text-muted)' }}>
+                    {event.targetedRerun.selected}/{event.targetedRerun.total} selected
+                  </span>
+                )}
+              </span>
+            </li>
+          )
+        })}
       </ol>
     </div>
   )
+}
+
+function useTimelineNow(events: RunLifecycleEvent[]): number {
+  const [now, setNow] = useState(() => Date.now())
+  const lastPhase = events.at(-1)?.phase
+  const lastUpdatedAt = events.at(-1)?.updatedAt
+  const tick = Boolean(lastPhase && !isTerminalLifecyclePhase(lastPhase))
+
+  useEffect(() => {
+    setNow(Date.now())
+    if (!tick) return undefined
+    const timer = window.setInterval(() => setNow(Date.now()), 30_000)
+    return () => window.clearInterval(timer)
+  }, [tick, lastUpdatedAt])
+
+  return now
+}
+
+function formatLifecycleTime(iso: string): string {
+  const time = Date.parse(iso)
+  if (!Number.isFinite(time)) return iso
+  return new Intl.DateTimeFormat(undefined, {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  }).format(new Date(time))
+}
+
+function formatLifecycleDateTime(iso: string): string {
+  const time = Date.parse(iso)
+  if (!Number.isFinite(time)) return iso
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: 'medium',
+    timeStyle: 'medium',
+  }).format(new Date(time))
+}
+
+function lifecycleDurationLabel(events: RunLifecycleEvent[], idx: number, now: number): string | null {
+  const start = Date.parse(events[idx]?.updatedAt ?? '')
+  if (!Number.isFinite(start)) return null
+  const next = events[idx + 1]
+  if (next) {
+    const end = Date.parse(next.updatedAt)
+    if (!Number.isFinite(end) || end < start) return null
+    return `took ${formatDuration(end - start)}`
+  }
+  if (isTerminalLifecyclePhase(events[idx].phase)) return null
+  return `for ${formatDuration(Math.max(0, now - start))}`
+}
+
+function isTerminalLifecyclePhase(phase: RunLifecycleEvent['phase']): boolean {
+  return phase === 'passed' || phase === 'failed' || phase === 'aborted' || phase === 'completed'
 }
 
 function alertClass(tone: 'info' | 'success' | 'warning' | 'error'): string {
@@ -524,28 +604,35 @@ export function PlaywrightPlayback({
   artifactGroups,
   artifactPolicy,
   onOpenArtifactSettings,
+  summary,
 }: {
   events?: PlaywrightPlaybackEvent[]
   artifactGroups?: PlaywrightArtifactGroup[]
   artifactPolicy?: PlaywrightArtifactPolicy
   onOpenArtifactSettings?: () => void
+  summary?: RunSummary
 }) {
   const tests = playbackTests(events)
   if (tests.length === 0) {
     return <EmptyPane title="No playback events captured yet." body="Use Terminal for older runs or runs that ended before structured Playwright events were written." />
   }
+  const activeIndex = currentPlaybackIndex(tests, summary?.running?.name)
   return (
     <div className="h-full overflow-y-auto p-3 text-xs scrollbar-thin" style={{ background: 'var(--bg-base)' }}>
       <div className="space-y-2">
-        {tests.map((test) => {
+        {tests.map((test, idx) => {
           const playbackArtifacts = artifactsForPlayback(test.name, artifactGroups, artifactPolicy)
           const traceArtifacts = playbackArtifacts.links.filter((artifact) => artifact.kind === 'trace')
           const videoArtifacts = playbackArtifacts.links.filter((artifact) => artifact.kind === 'video')
+          const isCurrent = idx === activeIndex
           return (
-            <div key={`${test.name}:${test.retry ?? 0}:${test.startedAt ?? ''}`} className="cl-card p-3">
+            <div
+              key={`${test.name}:${test.retry ?? 0}:${test.startedAt ?? ''}`}
+              className="cl-card p-3"
+            >
               <div className="flex min-w-0 items-start gap-3">
                 <div className="min-w-0 flex-1">
-                  <PlaybackHeader test={test} />
+                  <PlaybackHeader test={test} current={isCurrent} index={idx} total={tests.length} />
                 </div>
                 <TraceActions artifacts={traceArtifacts} />
               </div>
@@ -555,7 +642,7 @@ export function PlaywrightPlayback({
                 </pre>
               ) : (
                 <div className="mt-2 text-[11px]" style={{ color: 'var(--text-muted)' }}>
-                  {test.passed === true ? 'Completed without a Playwright error.' : test.status ? `Status: ${test.status}` : 'Still running.'}
+                  {isCurrent ? 'Currently executing in this Playwright process.' : test.passed === true ? 'Completed without a Playwright error.' : test.status ? `Status: ${test.status}` : 'Still running.'}
                 </div>
               )}
               <ScreenshotPanel artifacts={playbackArtifacts.screenshots} mode={playbackArtifacts.screenshotMode} onOpenSettings={onOpenArtifactSettings} />
@@ -590,17 +677,33 @@ function TraceActions({ artifacts }: { artifacts: PlaywrightArtifact[] }) {
   )
 }
 
-function PlaybackHeader({ test }: { test: PlaybackTest }) {
+function PlaybackHeader({
+  test,
+  current,
+  index,
+  total,
+}: {
+  test: PlaybackTest
+  current: boolean
+  index: number
+  total: number
+}) {
   return (
     <div className="flex min-w-0 items-start gap-2">
-      <StatusPill passed={test.passed} status={test.status} />
+      <StatusPill passed={test.passed} status={test.status} current={current} />
       <div className="min-w-0 flex-1">
-        <div className="truncate font-medium" style={{ color: 'var(--text-primary)' }} title={test.title}>
-          {test.title}
+        <div className="flex min-w-0 items-center gap-2">
+          <div className="truncate font-medium" style={{ color: 'var(--text-primary)' }} title={test.title}>
+            {test.title}
+          </div>
+          <span className="shrink-0 rounded px-1 py-0.5 text-[10px]" style={{ background: 'var(--bg-selected)', color: current ? 'var(--accent)' : 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+            {index + 1}/{total}
+          </span>
         </div>
         <div className="mt-0.5 flex flex-wrap gap-x-3 gap-y-1 text-[11px]" style={{ color: 'var(--text-muted)' }}>
           {typeof test.durationMs === 'number' && <span>{formatDuration(test.durationMs)}</span>}
           {typeof test.retry === 'number' && test.retry > 0 && <span>retry {test.retry}</span>}
+          {test.startedAt && <span>{formatLifecycleTime(test.startedAt)}</span>}
         </div>
       </div>
     </div>
@@ -833,8 +936,8 @@ function BrowserActions({ steps }: { steps: PlaybackTest['steps'] }) {
   )
 }
 
-function StatusPill({ passed, status }: { passed?: boolean; status?: string }) {
-  const displayStatus = statusFromPlaybackResult({ status, passed })
+function StatusPill({ passed, status, current }: { passed?: boolean; status?: string; current?: boolean }) {
+  const displayStatus = current ? 'testing' : statusFromPlaybackResult({ status, passed })
   return (
     <span
       className={`shrink-0 rounded border px-1.5 py-0.5 text-[10px] uppercase tracking-wide ${statusPillClassForStatus(displayStatus)}`}
@@ -843,6 +946,30 @@ function StatusPill({ passed, status }: { passed?: boolean; status?: string }) {
       {statusLabel(displayStatus)}
     </span>
   )
+}
+
+function currentPlaybackIndex(tests: PlaybackTest[], runningName?: string): number {
+  if (!runningName) return -1
+  for (let i = tests.length - 1; i >= 0; i--) {
+    if (tests[i].name === runningName && !tests[i].endedAt) return i
+  }
+  for (let i = tests.length - 1; i >= 0; i--) {
+    if (tests[i].name === runningName) return i
+  }
+  return -1
+}
+
+function isPlaywrightLifecyclePhase(phase: RunLifecycleEvent['phase']): boolean {
+  return phase === 'running-tests' || phase === 'rerunning-tests'
+}
+
+function formatSummaryTestName(name: string): string {
+  return name.replace(/^test-case-/, '').replace(/-/g, ' ')
+}
+
+export function shortLocation(location: string): string {
+  const parts = location.split('/')
+  return parts.slice(-2).join('/')
 }
 
 function BranchCard({ repo }: { repo: RepoBranchSnapshot }) {
