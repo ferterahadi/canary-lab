@@ -101,7 +101,7 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunStatus }: 
                 return (
                   <TestCard
                     key={key}
-                    sourceFile={spec.file}
+                    sourceFile={t.sourceFile ?? spec.file}
                     test={t}
                     status={statusForTest(t.name, activeRunSummary, isRunActivelyTesting)}
                     runningLocation={runningLocation}

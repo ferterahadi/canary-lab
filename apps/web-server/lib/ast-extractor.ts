@@ -20,6 +20,10 @@ export interface ExtractedTest {
   line: number
   bodySource: string
   steps: ExtractedStep[]
+  // Present when the `test(...)` lives in a different file than the spec
+  // that owns it (e.g. a factory helper). UI uses this to link the code
+  // viewer at the real definition site instead of the importing spec.
+  sourceFile?: string
 }
 
 export interface ExtractResult {
