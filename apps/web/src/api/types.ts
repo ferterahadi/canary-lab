@@ -50,6 +50,10 @@ export interface ExtractedTest {
   line: number
   bodySource: string
   steps: ExtractedStep[]
+  // Set when the test is defined in a helper file (e.g. a factory) rather
+  // than the spec file that owns it. Click-throughs in the UI prefer this
+  // path so the code viewer lands at the actual definition site.
+  sourceFile?: string
 }
 
 export interface FeatureSpecFile {

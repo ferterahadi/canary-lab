@@ -310,6 +310,70 @@ describe('GET /api/features/:name/tests', () => {
     expect(body[0].tests[0].name).toBe('runs ${key} case')
   })
 
+  it('attributes helper-defined tests to the entry-point spec with body from the helper file', async () => {
+    // Mirrors the `defineLocaleSpec` pattern: the spec file is a one-liner
+    // that calls a helper, and the helper holds the real `test(...)` body.
+    // Without origin-file enrichment, the helper-generated tests would be
+    // dropped (bucketed under the helper path, which is not a spec file).
+    const dir = writeFeature('factory', {
+      // Wrapper spec body is irrelevant — the AST extractor finds no tests
+      // here because `defineSpec(...)` is just a function call.
+      spec: "import { defineSpec } from './helpers/factory'\ndefineSpec()\n",
+    })
+    const wrapperSpec = path.join(dir, 'e2e', 'a.spec.ts')
+    const helpersDir = path.join(dir, 'e2e', 'helpers')
+    fs.mkdirSync(helpersDir, { recursive: true })
+    const helperFile = path.join(helpersDir, 'factory.ts')
+    // Real `test(...)` body lives here. Line numbers must match the JSON
+    // we feed the spawner below (test on line 4, step on line 5).
+    fs.writeFileSync(
+      helperFile,
+      [
+        "import { test } from '@playwright/test'",
+        "export function defineSpec() {",
+        "  test.describe('matrix', () => {",
+        "    test('inner case', async () => {",
+        "      await test.step('inner-step', async () => {})",
+        "    })",
+        "  })",
+        "}",
+      ].join('\n'),
+    )
+    const spawner = jsonSpawner(() => ({
+      config: { rootDir: dir },
+      suites: [
+        {
+          file: wrapperSpec,
+          suites: [
+            {
+              file: helperFile,
+              title: 'matrix',
+              specs: [{ title: 'inner case', file: helperFile, line: 4 }],
+            },
+          ],
+        },
+      ],
+    }))
+    const app = await build({ spawner })
+    const res = await app.inject({ method: 'GET', url: '/api/features/factory/tests' })
+    expect(res.statusCode).toBe(200)
+    const body = res.json() as Array<{
+      file: string
+      tests: Array<{ name: string; line: number; bodySource: string; sourceFile?: string; steps: Array<{ label: string }> }>
+    }>
+    // Only the wrapper spec is returned by `listSpecFiles` (helpers/ is
+    // ignored). The helper-defined test must show up under the wrapper.
+    expect(body).toHaveLength(1)
+    expect(body[0].file).toBe(wrapperSpec)
+    expect(body[0].tests).toHaveLength(1)
+    const t = body[0].tests[0]
+    expect(t.name).toBe('inner case')
+    expect(t.line).toBe(4)
+    expect(t.sourceFile).toBe(helperFile)
+    expect(t.bodySource).toContain("test.step('inner-step'")
+    expect(t.steps.map((s) => s.label)).toEqual(['inner-step'])
+  })
+
   it('passes the first feature envset into Playwright list without applying files', async () => {
     const dir = writeFeature('alpha', {
       spec: "test('placeholder', async () => {})\n",
