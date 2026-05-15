@@ -4,6 +4,7 @@ import type { ExtractedTest, FeatureSpecFile, RunStatus } from '../api/types'
 import { activeBodyLineForTest, colorClassForStatus, statusForTest, summaryEntryName, type StepStatus } from '../lib/test-step-status'
 import type { RunSummary, RunSummaryRunningStep } from '../api/types'
 import { ShikiCode, StatusPill, StepBlock } from './shared/TestCodeBlock'
+import { ChevronRightIcon, StatusDot } from './config/atoms'
 
 interface Props {
   feature: string | null
@@ -60,9 +61,10 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunStatus }: 
 
   return (
     <div className="cl-panel flex h-full flex-col">
-      <div className="cl-panel-header flex items-center justify-between px-4 py-3">
-        <div className="flex items-center gap-2">
+      <div className="cl-panel-header flex items-center justify-between gap-2 px-4 py-3">
+        <div className="flex min-w-0 items-center gap-2">
           <span className="cl-kicker">Tests</span>
+          {totalTests > 0 && !activeRunSummary && <span className="cl-count-chip">{totalTests}</span>}
         </div>
         <TestsHeaderIndicator
           summary={activeRunSummary}
@@ -101,7 +103,7 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunStatus }: 
                 return (
                   <TestCard
                     key={key}
-                    sourceFile={spec.file}
+                    sourceFile={t.sourceFile ?? spec.file}
                     test={t}
                     status={statusForTest(t.name, activeRunSummary, isRunActivelyTesting)}
                     runningLocation={runningLocation}
@@ -154,7 +156,6 @@ function TestCard({
       className={`cl-card cl-card-hover transition-all duration-150 ${colorClassForStatus(status)}`}
       style={{
         background: expanded || isRunningTest ? 'var(--bg-selected)' : undefined,
-        boxShadow: isRunningTest ? 'inset 3px 0 0 var(--accent)' : undefined,
       }}
     >
       <button
@@ -162,21 +163,46 @@ function TestCard({
         onClick={onToggle}
         className="flex w-full items-center gap-3 px-3 py-2.5 text-left"
       >
-        <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
-          {expanded ? '▾' : '▸'}
+        <span
+          aria-hidden="true"
+          className="inline-flex shrink-0 items-center justify-center transition-transform duration-150"
+          style={{ color: 'var(--text-muted)', transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)' }}
+        >
+          <ChevronRightIcon />
         </span>
-        <div className="flex-1 min-w-0 truncate text-sm font-medium" title={test.name} style={{ color: 'var(--text-primary)' }}>
+        <div
+          className="flex-1 min-w-0 truncate text-sm font-medium"
+          title={test.name}
+          style={{ color: 'var(--text-primary)' }}
+        >
           {test.name}
         </div>
-        <span className="shrink-0 text-[10px]" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
-          L{test.line}
+        <span
+          className="shrink-0"
+          style={{
+            color: 'var(--text-muted)',
+            fontFamily: 'var(--font-mono)',
+            fontSize: 10.5,
+          }}
+        >
+          :{test.line}
         </span>
         <StatusPill status={status} />
       </button>
       {expanded && (
         <div className="space-y-2 px-3 pb-3">
           {runningLocation && (
-            <div className="rounded-md border px-2 py-1 text-[10px]" style={{ color: 'var(--text-secondary)', borderColor: 'color-mix(in srgb, var(--accent) 40%, transparent)', background: 'var(--accent-soft)', fontFamily: 'var(--font-mono)' }}>
+            <div
+              className="rounded-md border px-2 py-1 text-[10px]"
+              style={{
+                color: 'var(--text-secondary)',
+                borderColor: isRunningTest
+                  ? 'rgb(234, 179, 8)'
+                  : 'color-mix(in srgb, var(--accent) 40%, transparent)',
+                background: isRunningTest ? 'rgba(234, 179, 8, 0.15)' : 'var(--accent-soft)',
+                fontFamily: 'var(--font-mono)',
+              }}
+            >
               {runningStep?.location
                 ? `Running line ${lineLabel(runningStep.location)} · ${runningStep.category}`
                 : `Running from ${shortLocation(runningLocation)}`}
@@ -185,15 +211,36 @@ function TestCard({
           {test.steps.length > 0 ? (
             <ul className="space-y-1.5 pl-3" style={{ borderLeft: '1px solid var(--border-default)' }}>
               {test.steps.map((s, i) => (
-                <StepBlock key={`${s.line}:${i}`} step={s} status={status} depth={0} sourceFile={sourceFile} />
+                <StepBlock
+                  key={`${s.line}:${i}`}
+                  step={s}
+                  status={status}
+                  depth={0}
+                  sourceFile={sourceFile}
+                  runningLine={isRunningTest ? activeLine : null}
+                />
               ))}
             </ul>
           ) : test.bodySource ? (
-            <ShikiCode
-              source={test.bodySource}
-              activeLine={activeLine}
-              sourceLocation={{ file: sourceFile, startLine: test.line }}
-            />
+            <div
+              style={
+                isRunningTest && activeLine == null
+                  ? {
+                      borderRadius: 6,
+                      padding: 2,
+                      background: 'rgba(234, 179, 8, 0.12)',
+                      boxShadow: 'inset 0 0 0 1px rgb(234, 179, 8), inset 3px 0 0 rgb(234, 179, 8)',
+                    }
+                  : undefined
+              }
+            >
+              <ShikiCode
+                source={test.bodySource}
+                activeLine={activeLine}
+                sourceLocation={{ file: sourceFile, startLine: test.line }}
+                runningHighlight={isRunningTest}
+              />
+            </div>
           ) : (
             <div className="text-xs" style={{ color: 'var(--text-muted)' }}>
               No test body available.
@@ -232,21 +279,17 @@ function TestsHeaderIndicator({
   if (!specsLoaded || totalTests <= 0) return null
   if (isRunActivelyTesting) {
     return (
-      <div className="flex items-center gap-2 text-[10px]" style={{ color: 'var(--text-secondary)' }}>
-        <span className="relative flex h-2 w-2">
-          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-sky-400 opacity-75" />
-          <span className="relative inline-flex h-2 w-2 rounded-full bg-sky-500" />
-        </span>
-        <span className="uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>running</span>
-        <span style={{ fontFamily: 'var(--font-mono)' }}>0/{totalTests}</span>
+      <div
+        className="flex items-center gap-1.5"
+        style={{ color: 'var(--text-secondary)', fontSize: 11.5, fontWeight: 500 }}
+      >
+        <StatusDot state="running" halo />
+        <span>Running</span>
+        <span style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontSize: 11 }}>0/{totalTests}</span>
       </div>
     )
   }
-  return (
-    <div className="text-[10px]" style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>
-      {totalTests}
-    </div>
-  )
+  return null
 }
 
 function RunningIndicator({
@@ -268,17 +311,15 @@ function RunningIndicator({
   const done = totalTests > 0 ? passedCount : summary.passed
   const isTestRunning = isRunActivelyTesting
   return (
-    <div className="flex items-center gap-2 text-[10px]" style={{ color: 'var(--text-secondary)' }}>
-      {isTestRunning && (
-        <span className="relative flex h-2 w-2">
-          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-sky-400 opacity-75" />
-          <span className="relative inline-flex h-2 w-2 rounded-full bg-sky-500" />
-        </span>
-      )}
-      {isTestRunning && (
-        <span className="uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>running</span>
-      )}
-      <span style={{ fontFamily: 'var(--font-mono)' }}>{done}/{total}</span>
+    <div
+      className="flex items-center gap-1.5"
+      style={{ color: 'var(--text-secondary)', fontSize: 11.5, fontWeight: 500 }}
+    >
+      {isTestRunning && <StatusDot state="running" halo />}
+      {isTestRunning && <span style={{ color: 'var(--text-muted)' }}>Running</span>}
+      <span style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', fontSize: 11 }}>
+        {done}<span style={{ color: 'var(--text-muted)' }}>/{total}</span>
+      </span>
     </div>
   )
 }

@@ -457,11 +457,12 @@ export function writeHealIndex(parsed?: {
 // The runner pre-seeds the iteration heading and the fields it already knows
 // (feature, failingTests, timestamp, signal, fix.file, outcome: pending) so
 // the agent doesn't have to spend tokens writing ceremony boilerplate. The
-// agent only supplies `hypothesis` (and optionally `fix.description`) in the
-// signal-body JSON it wrote to `.restart` / `.rerun`.
+// agent normally supplies `hypothesis` (and optionally `fix.description`) in
+// the signal-body JSON it wrote to `.restart` / `.rerun`; `.none` records a
+// runner-side no-signal timeout or exit.
 
 export interface JournalAppendInput {
-  signal: '.restart' | '.rerun'
+  signal: '.restart' | '.rerun' | 'none'
   hypothesis?: string
   filesChanged?: string[]
   fixDescription?: string

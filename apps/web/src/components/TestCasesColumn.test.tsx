@@ -85,7 +85,7 @@ describe('TestCasesColumn', () => {
       root.render(<TestCasesColumn feature="alpha" activeRunSummary={undefined} activeRunStatus="running" />)
     })
 
-    expect(container.textContent).toContain('running')
+    expect(container.textContent).toContain('Running')
     expect(container.textContent).toContain('0/1')
   })
 
@@ -125,7 +125,7 @@ describe('TestCasesColumn', () => {
     })
 
     expect(container.textContent).toContain('loads checkout')
-    expect(container.textContent).toContain('running')
+    expect(container.textContent).toContain('Running')
   })
 
   it('renders an error when feature tests fail to load', async () => {

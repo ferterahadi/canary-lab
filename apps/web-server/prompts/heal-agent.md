@@ -1,4 +1,4 @@
-Playwright failed. Fix service/app code, not tests.
+Playwright failed. {{healingDirective}}
 
 Run directory:
 - `{{runDir}}` (`{{runDirRel}}` from the project root)
@@ -13,15 +13,17 @@ Useful only when needed:
 - `{{runDir}}/svc-<safeName>.log` — full service log. Use only if a slice is missing or too short.
 - `{{journalPath}}` — prior heal attempts. Use only when the current prompt or index says prior iterations exist.
 
+{{featureDocsMap}}
+
 {{personalWikiMap}}
 
 Rules:
-- Do not read the test spec unless the failure cannot be understood from the index and logs.
+- {{testSpecRule}}
 - Prefer exact slice paths from `heal-index.md` before broad repo search.
 - After fixing, write the per-run signal file:
   - Service/app fix → `{{restartSignal}}`
   - Test/config-only fix → `{{rerunSignal}}`
-- If the existing logs and snapshots don't give you a clear hypothesis, add temporary logging to the suspect service/app code and write the restart signal. The next cycle will read the new log output.
+- {{loggingRule}}
 - Signal body: `{"hypothesis":"<concise diagnosis of what's wrong>","fixDescription":"<concise summary of what the fix does>"}`. Both fields land in the audit journal. The runner detects which files you changed via git — do not list them.
 
-Make the failing Playwright tests pass on the next cycle by fixing the root cause in service/app code and writing the appropriate signal file.
+{{closingDirective}}

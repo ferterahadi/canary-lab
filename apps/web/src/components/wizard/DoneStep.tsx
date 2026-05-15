@@ -12,19 +12,44 @@ export function DoneStep({ featureName, onRunNow, onClose, starting }: Props) {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex-1 min-h-0 overflow-y-auto p-6">
-        <div className="mx-auto max-w-3xl space-y-4">
-          <div className="rounded-lg border border-emerald-500/40 bg-emerald-500/10 p-4">
-            <div className="text-sm font-medium text-emerald-700 dark:text-emerald-200">Feature created</div>
-            <div className="mt-2 text-xs text-emerald-800/80 dark:text-emerald-100/80">
-              Spec files were written to{' '}
-              <span className="font-mono">features/{featureName}/</span>.
+        <div className="mx-auto max-w-2xl space-y-4">
+          <div
+            className="flex items-start gap-3 p-4"
+            style={{
+              border: '1px solid color-mix(in srgb, var(--success) 30%, transparent)',
+              background: 'color-mix(in srgb, var(--success) 8%, transparent)',
+              borderRadius: 8,
+            }}
+          >
+            <span
+              aria-hidden="true"
+              className="mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full"
+              style={{ background: 'var(--success)', color: '#ffffff', fontSize: 11 }}
+            >
+              ✓
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
+                Feature created
+              </div>
+              <div className="mt-1 text-xs" style={{ color: 'var(--text-secondary)' }}>
+                Spec files were written to{' '}
+                <span
+                  style={{
+                    fontFamily: 'var(--font-mono)',
+                    color: 'var(--text-primary)',
+                  }}
+                >
+                  features/{featureName}/
+                </span>
+              </div>
             </div>
           </div>
 
-          <div className="text-xs" style={{ color: 'var(--text-secondary)' }}>
-            You can run the new feature now to verify it loads, or close and pick it from the
-            features sidebar.
-          </div>
+          <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+            Run the new feature now to verify it loads, or close and pick it from the features
+            sidebar.
+          </p>
         </div>
       </div>
 
@@ -32,7 +57,7 @@ export function DoneStep({ featureName, onRunNow, onClose, starting }: Props) {
         <button
           type="button"
           onClick={onClose}
-          className="cl-button px-3 py-1.5 text-xs"
+          className="cl-button px-3 py-1.5"
         >
           Close
         </button>
@@ -40,7 +65,7 @@ export function DoneStep({ featureName, onRunNow, onClose, starting }: Props) {
           type="button"
           onClick={onRunNow}
           disabled={starting}
-          className="cl-button-primary px-3 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+          className="cl-button-primary px-3 py-1.5 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {starting ? 'Starting…' : 'Run it now'}
         </button>

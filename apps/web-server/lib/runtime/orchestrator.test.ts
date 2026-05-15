@@ -13,7 +13,7 @@ import * as sessionLog from '../agent-session-log'
 import type { PtyFactory, PtyHandle, PtySpawnOptions } from './pty-spawner'
 import type { FeatureConfig } from '../../../../shared/launcher/types'
 import { runDirFor, buildRunPaths } from './run-paths'
-import { readManifest, readRunsIndex } from './manifest'
+import { readManifest, readRunsIndex, type RunLifecycleEvent } from './manifest'
 import { RunnerLog } from './runner-log'
 
 interface FakeProcess {
@@ -942,6 +942,14 @@ describe('RunOrchestrator.runFullCycle', () => {
     return orch
   }
 
+  function readLifecycleEvents(orch: RunOrchestrator): RunLifecycleEvent[] {
+    return fs.readFileSync(orch.paths.lifecycleEventsPath, 'utf-8')
+      .trim()
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as RunLifecycleEvent)
+  }
+
   it('returns passed when Playwright exits 0 on first try', async () => {
     const f = makeFakeFactory()
     const orch = bootForFullCycle({ spawned: f, pwExitCodes: [0] })
@@ -1226,6 +1234,46 @@ describe('RunOrchestrator.runFullCycle', () => {
     await orch.stop('passed')
   }, 15000)
 
+  it('continues into another heal cycle when Playwright exits 0 but summary still has failures', async () => {
+    const f = makeFakeFactory()
+    const orch = bootForFullCycle({ spawned: f, pwExitCodes: [1, 0], autoHeal: true })
+    fs.mkdirSync(runDir, { recursive: true })
+    fs.writeFileSync(
+      orch.paths.summaryPath,
+      JSON.stringify({ failed: [{ name: 'test-case-broken', location: 'e2e/broken.spec.ts:12' }] }),
+    )
+    const heal: number[] = []
+    orch.on('heal-cycle-started', (event) => heal.push(event.cycle))
+
+    const promise = orch.runFullCycle()
+    const waitFor = async (n: number, label: string) => {
+      const start = Date.now()
+      while (f.spawned.length < n) {
+        if (Date.now() - start > 3000) {
+          throw new Error(`stuck waiting for ${label}: spawned=${f.spawned.length}`)
+        }
+        await new Promise((r) => setTimeout(r, 5))
+      }
+    }
+
+    await waitFor(2, 'first playwright')
+    f.spawned[1].emitExit(1)
+    await waitFor(3, 'first heal agent')
+    fs.writeFileSync(orch.paths.rerunSignal, JSON.stringify({ hypothesis: 'try again' }))
+    f.spawned[2].emitExit(0)
+
+    await waitFor(4, 'second playwright')
+    // Leave the failed summary intact while Playwright exits cleanly. The
+    // orchestrator must trust decideRunStatus over the process exit byte and
+    // spawn heal cycle 2 instead of finalizing the run as failed.
+    f.spawned[3].emitExit(0)
+    await waitFor(5, 'second heal agent')
+
+    expect(heal).toEqual([1, 2])
+    await orch.stop('failed')
+    await promise
+  }, 15000)
+
   it('applies the latest pane size when the heal agent spawns after an early resize event', async () => {
     const f = makeFakeFactory()
     const orch = bootForFullCycle({ spawned: f, pwExitCodes: [1], autoHeal: true })
@@ -1307,6 +1355,7 @@ describe('RunOrchestrator.runFullCycle', () => {
     const journal = fs.readFileSync(orch.paths.diagnosisJournalPath, 'utf-8')
     expect(journal).toContain('Heal agent exited without writing a signal.')
     expect(journal).toContain('No code changes detected.')
+    expect(journal).toContain('- signal: none')
     await orch.stop('failed')
   })
 
@@ -1344,7 +1393,10 @@ describe('RunOrchestrator.runFullCycle', () => {
     const journal = fs.readFileSync(orch.paths.diagnosisJournalPath, 'utf-8')
     expect(journal).toContain('Heal agent went silent')
     expect(journal).not.toContain('exited without writing')
+    expect(journal).toContain('- signal: none')
     await orch.stop('failed')
+    const events = readLifecycleEvents(orch)
+    expect(events.slice(-2).map((event) => event.headline)).not.toEqual(['Run failed', 'Run failed'])
   }, 10000)
 
   it('ends the heal loop with a hard-timeout journal entry when the cycle hits the absolute ceiling', async () => {
@@ -1385,6 +1437,7 @@ describe('RunOrchestrator.runFullCycle', () => {
       const journal = fs.readFileSync(orch.paths.diagnosisJournalPath, 'utf-8')
       expect(journal).toContain('Heal cycle hit the')
       expect(journal).toContain('minute ceiling')
+      expect(journal).toContain('- signal: none')
     } finally {
       clearInterval(pump)
       await orch.stop('failed')
@@ -2018,6 +2071,47 @@ describe('RunOrchestrator.runHealAgent', () => {
     })
     await expect(orch.runHealAgent({ cycle: 1, failedSlugs: [] })).rejects.toThrow(/autoHeal/)
   })
+
+  it('submits a real prompt message to the live REPL on cycle 2+', async () => {
+    const f = makeFakeFactory()
+    const orch = new RunOrchestrator({
+      feature: makeFeature({ healOnFailureThreshold: 1, repos: [] }),
+      runId: RUN_ID,
+      runDir,
+      ptyFactory: f.factory,
+      delay: async () => undefined,
+      healthPollIntervalMs: 1,
+      healSignalPollMs: 1,
+      healAgentTimeoutMs: 200,
+      autoHeal: {
+        agent: 'claude',
+        buildSpawnCommand: ({ promptFile }) => `claude -- ${JSON.stringify(`@${promptFile}`)}`,
+        buildCyclePrompt: () => 'cycle prompt',
+      },
+    })
+    await orch.start()
+
+    const first = orch.runHealAgent({ cycle: 1, failedSlugs: ['a'] })
+    while (f.spawned.length < 1) await new Promise((r) => setTimeout(r, 5))
+    fs.writeFileSync(orch.paths.rerunSignal, '{}')
+    expect(await first).toMatchObject({ reason: 'signal', signal: { kind: 'rerun' } })
+
+    const agent = f.spawned[0]
+    const beforeWrites = agent.writes.length
+    const second = orch.runHealAgent({ cycle: 2, failedSlugs: ['a'] })
+    while (agent.writes.length === beforeWrites) await new Promise((r) => setTimeout(r, 5))
+
+    const cyclePromptWrite = agent.writes.slice(beforeWrites).join('')
+    const promptPath = path.join(runDir, 'heal-prompt.md')
+    expect(cyclePromptWrite).toContain('\x1b[200~')
+    expect(cyclePromptWrite).toContain(`Read ${promptPath} and continue the auto-heal cycle now.`)
+    expect(cyclePromptWrite).toContain('\x1b[201~\r')
+    expect(cyclePromptWrite).not.toContain(`@${promptPath}`)
+
+    fs.writeFileSync(orch.paths.rerunSignal, '{}')
+    expect(await second).toMatchObject({ reason: 'signal', signal: { kind: 'rerun' } })
+    await orch.stop('failed')
+  })
 })
 
 describe('readSummary / extractFailedSlugs / defaultPlaywrightSpawner / defaultSpawnCommand / defaultHealPrompt', () => {
@@ -2121,6 +2215,192 @@ describe('computeNonPassedTargets', () => {
     fs.mkdirSync(featureDir, { recursive: true })
     const result = computeNonPassedTargets(featureDir, { passedNames: ['x'] })
     expect(result.kind).toBe('extraction-failed')
+  })
+})
+
+describe('computeRerunTargetsOrdered', () => {
+  function writeSpec(featureDir: string, name: string, body: string): string {
+    const dir = path.join(featureDir, 'e2e')
+    fs.mkdirSync(dir, { recursive: true })
+    const file = path.join(dir, name)
+    fs.writeFileSync(file, body)
+    return file
+  }
+
+  it('orders previously-failed tests first, then pending in source order', async () => {
+    const { computeRerunTargetsOrdered } = await import('./orchestrator')
+    const featureDir = path.join(tmpDir, 'features', 'demo-ordered')
+    fs.mkdirSync(featureDir, { recursive: true })
+    // Spec layout: pending at line 2, failed at line 3 (failure comes AFTER
+    // pending in source order — proves failed-first ordering isn't just
+    // accidental source order).
+    const specA = writeSpec(featureDir, 'a.spec.ts',
+      "import { test } from '@playwright/test'\n" +
+      "test('a pending one', async () => {})\n" +
+      "test('a failing one', async () => {})\n",
+    )
+    const specB = writeSpec(featureDir, 'b.spec.ts',
+      "import { test } from '@playwright/test'\n" +
+      "test('b another pending', async () => {})\n",
+    )
+
+    const result = computeRerunTargetsOrdered(featureDir, {
+      passedNames: ['test-case-something-already-passed'],
+      failed: [{ name: 'test-case-a-failing-one', location: `${specA}:3` }],
+    })
+
+    expect(result.kind).toBe('targeted')
+    if (result.kind !== 'targeted') return
+    expect(result.failedFirst).toEqual([`${specA}:3`])
+    expect(result.pending).toEqual([`${specA}:2`, `${specB}:2`])
+    expect(result.locations).toEqual([`${specA}:3`, `${specA}:2`, `${specB}:2`])
+    expect(result.droppedFailedSlugs).toEqual([])
+    expect(result.total).toBe(3)
+  })
+
+  it('drops failed slugs that no longer exist in the AST and reports them', async () => {
+    const { computeRerunTargetsOrdered } = await import('./orchestrator')
+    const featureDir = path.join(tmpDir, 'features', 'demo-dropped')
+    fs.mkdirSync(featureDir, { recursive: true })
+    const specA = writeSpec(featureDir, 'a.spec.ts',
+      "import { test } from '@playwright/test'\n" +
+      "test('renamed test', async () => {})\n" +
+      "test('still here', async () => {})\n",
+    )
+
+    const result = computeRerunTargetsOrdered(featureDir, {
+      passedNames: ['test-case-still-here'],
+      failed: [
+        { name: 'test-case-old-name-that-was-renamed', location: `${specA}:3` },
+        { name: 'test-case-deleted-entirely', location: `${specA}:99` },
+      ],
+    })
+
+    expect(result.kind).toBe('targeted')
+    if (result.kind !== 'targeted') return
+    expect(result.failedFirst).toEqual([])
+    expect(result.pending).toEqual([`${specA}:2`])
+    expect(result.droppedFailedSlugs.sort()).toEqual([
+      'test-case-deleted-entirely',
+      'test-case-old-name-that-was-renamed',
+    ])
+  })
+
+  it('returns pending-only when every prior-failed slug has since passed', async () => {
+    const { computeRerunTargetsOrdered } = await import('./orchestrator')
+    const featureDir = path.join(tmpDir, 'features', 'demo-recovered')
+    fs.mkdirSync(featureDir, { recursive: true })
+    const specA = writeSpec(featureDir, 'a.spec.ts',
+      "import { test } from '@playwright/test'\n" +
+      "test('was failing now passing', async () => {})\n" +
+      "test('pending one', async () => {})\n",
+    )
+
+    const result = computeRerunTargetsOrdered(featureDir, {
+      passedNames: ['test-case-was-failing-now-passing'],
+      // The same slug is still listed in summary.failed (stale) — the helper
+      // should ignore it because the slug is also in passedNames.
+      failed: [{ name: 'test-case-was-failing-now-passing', location: `${specA}:2` }],
+    })
+
+    expect(result.kind).toBe('targeted')
+    if (result.kind !== 'targeted') return
+    expect(result.failedFirst).toEqual([])
+    expect(result.pending).toEqual([`${specA}:3`])
+    expect(result.locations).toEqual([`${specA}:3`])
+  })
+
+  it('handles empty passedNames by listing failed-first then everything else', async () => {
+    const { computeRerunTargetsOrdered } = await import('./orchestrator')
+    const featureDir = path.join(tmpDir, 'features', 'demo-no-passed')
+    fs.mkdirSync(featureDir, { recursive: true })
+    const specA = writeSpec(featureDir, 'a.spec.ts',
+      "import { test } from '@playwright/test'\n" +
+      "test('first', async () => {})\n" +
+      "test('second', async () => {})\n" +
+      "test('third', async () => {})\n",
+    )
+
+    const result = computeRerunTargetsOrdered(featureDir, {
+      failed: [{ name: 'test-case-third', location: `${specA}:4` }],
+    })
+
+    expect(result.kind).toBe('targeted')
+    if (result.kind !== 'targeted') return
+    expect(result.failedFirst).toEqual([`${specA}:4`])
+    expect(result.pending).toEqual([`${specA}:2`, `${specA}:3`])
+    expect(result.locations).toEqual([`${specA}:4`, `${specA}:2`, `${specA}:3`])
+  })
+
+  it('returns all-passed when every AST test is in passedNames', async () => {
+    const { computeRerunTargetsOrdered } = await import('./orchestrator')
+    const featureDir = path.join(tmpDir, 'features', 'demo-all-passed')
+    fs.mkdirSync(featureDir, { recursive: true })
+    writeSpec(featureDir, 'a.spec.ts',
+      "import { test } from '@playwright/test'\n" +
+      "test('only one', async () => {})\n",
+    )
+    const result = computeRerunTargetsOrdered(featureDir, {
+      passedNames: ['test-case-only-one'],
+    })
+    expect(result.kind).toBe('all-passed')
+  })
+
+  it('returns extraction-failed when there are no spec files', async () => {
+    const { computeRerunTargetsOrdered } = await import('./orchestrator')
+    const featureDir = path.join(tmpDir, 'features', 'demo-empty')
+    fs.mkdirSync(featureDir, { recursive: true })
+    const result = computeRerunTargetsOrdered(featureDir, { passedNames: ['x'] })
+    expect(result.kind).toBe('extraction-failed')
+  })
+})
+
+describe('computeVerificationPlan', () => {
+  it('uses knownTests to target factory-generated failed and pending tests by title', async () => {
+    const { computeVerificationPlan } = await import('./orchestrator')
+    const featureDir = path.join(tmpDir, 'features', 'demo-known')
+    fs.mkdirSync(featureDir, { recursive: true })
+
+    const result = computeVerificationPlan(featureDir, {
+      passed: 1,
+      passedNames: ['test-case-already-passed'],
+      total: 3,
+      knownTests: [
+        { name: 'test-case-already-passed', title: 'already passed', location: `${featureDir}/e2e/helpers/spec-factory.ts:54` },
+        { name: 'test-case-factory-failed', title: 'en_SG: checkout — address + payment pages', location: `${featureDir}/e2e/helpers/spec-factory.ts:58` },
+        { name: 'test-case-factory-pending', title: 'en_SG: payment — authorize branch end-to-end', location: `${featureDir}/e2e/helpers/spec-factory.ts:63` },
+      ],
+      failed: [
+        { name: 'test-case-factory-failed', location: `${featureDir}/e2e/helpers/spec-factory.ts:58` },
+      ],
+    })
+
+    expect(result.kind).toBe('targeted')
+    if (result.kind !== 'targeted') return
+    expect(result.selection.kind).toBe('grep')
+    if (result.selection.kind !== 'grep') return
+    expect(result.failedFirst.map((test) => test.name)).toEqual(['test-case-factory-failed'])
+    expect(result.pending.map((test) => test.name)).toEqual(['test-case-factory-pending'])
+    expect(result.selection.grep).toContain('en_SG: checkout')
+    expect(result.selection.grep).toContain('en_SG: payment')
+  })
+
+  it('falls back to full-suite when failed tests cannot be safely selected', async () => {
+    const { computeVerificationPlan } = await import('./orchestrator')
+    const featureDir = path.join(tmpDir, 'features', 'demo-unsafe')
+    fs.mkdirSync(featureDir, { recursive: true })
+
+    const result = computeVerificationPlan(featureDir, {
+      total: 3,
+      passedNames: ['test-case-a'],
+      failed: [
+        { name: 'test-case-helper-fail', location: `${featureDir}/e2e/helpers/spec-factory.ts:58` },
+      ],
+    })
+
+    expect(result.kind).toBe('full-suite')
+    if (result.kind !== 'full-suite') return
+    expect(result.reason).toContain('full Playwright suite')
   })
 })
 
@@ -3558,6 +3838,30 @@ describe('defaultPlaywrightSpawner --max-failures', () => {
     const f = makeFeature()
     const inv = defaultPlaywrightSpawner({ feature: f, paths: buildRunPaths(runDir) })
     expect(inv.command).not.toContain('--max-failures=')
+  })
+
+  it('keeps --max-failures on reruns when threshold is set', async () => {
+    const { defaultPlaywrightSpawner } = await import('./orchestrator')
+    const f = makeFeature({ healOnFailureThreshold: 5 })
+    const inv = defaultPlaywrightSpawner({
+      feature: f,
+      paths: buildRunPaths(runDir),
+      rerunTargets: ['e2e/a.spec.ts:10'],
+    })
+    expect(inv.command).toContain('--max-failures=5')
+    expect(inv.command).toContain(JSON.stringify('e2e/a.spec.ts:10'))
+  })
+
+  it('supports grep-based rerun selectors for factory-generated tests', async () => {
+    const { defaultPlaywrightSpawner } = await import('./orchestrator')
+    const f = makeFeature({ healOnFailureThreshold: 2 })
+    const inv = defaultPlaywrightSpawner({
+      feature: f,
+      paths: buildRunPaths(runDir),
+      rerunGrep: 'en_SG: checkout',
+    })
+    expect(inv.command).toContain(`--grep=${JSON.stringify('en_SG: checkout')}`)
+    expect(inv.command).toContain('--max-failures=2')
   })
 })
 

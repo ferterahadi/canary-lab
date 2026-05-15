@@ -51,12 +51,12 @@ export function ManualHealBanner({ runId, signalPaths }: Props) {
     <div
       className="mx-3 mt-3 mb-2 rounded-md p-3 text-xs"
       style={{
-        background: 'color-mix(in srgb, #eab308 10%, transparent)',
-        border: '1px solid color-mix(in srgb, #eab308 40%, transparent)',
+        background: 'color-mix(in srgb, var(--warning) 10%, transparent)',
+        border: '1px solid color-mix(in srgb, var(--warning) 40%, transparent)',
         color: 'var(--text-primary)',
       }}
     >
-      <div className="font-medium" style={{ color: '#eab308' }}>
+      <div className="font-semibold" style={{ color: 'var(--warning)' }}>
         Tests failed — auto-heal is set to <strong>Manual</strong>
       </div>
       <div className="mt-1.5" style={{ color: 'var(--text-secondary)' }}>
@@ -95,7 +95,7 @@ export function ManualHealBanner({ runId, signalPaths }: Props) {
           onClick={onCancel}
           disabled={cancelling}
           className="rounded-md px-2 py-1 text-[10px] uppercase tracking-wider"
-          style={{ color: '#ef4444', border: '1px solid color-mix(in srgb, #ef4444 40%, transparent)' }}
+          style={{ color: 'var(--danger)', border: '1px solid color-mix(in srgb, var(--danger) 40%, transparent)' }}
         >
           {cancelling ? 'Cancelling…' : 'Cancel'}
         </button>
@@ -114,7 +114,7 @@ export function ManualHealBanner({ runId, signalPaths }: Props) {
           onCopy={() => onCopy('restart')}
         />
       </div>
-      {err && <div className="mt-2 text-[11px]" style={{ color: '#ef4444' }}>{err}</div>}
+      {err && <div className="mt-2 text-[11px]" style={{ color: 'var(--danger)' }}>{err}</div>}
     </div>
   )
 }
@@ -144,7 +144,7 @@ function SignalRow({
         type="button"
         onClick={onCopy}
         className="shrink-0 rounded-md px-1.5 py-0.5 text-[10px] uppercase tracking-wider"
-        style={{ color: copied ? '#22c55e' : 'var(--text-muted)', border: '1px solid var(--border-default)' }}
+        style={{ color: copied ? 'var(--success)' : 'var(--text-muted)', border: '1px solid var(--border-default)' }}
       >
         {copied ? 'Copied' : 'Copy'}
       </button>

@@ -157,6 +157,59 @@ describe('listPlaywrightTests', () => {
     expect(entries).toEqual([])
   })
 
+  it('attributes helper-defined tests to the outermost (entry-point) spec file', async () => {
+    // Simulates Playwright's report when a spec just imports a helper that
+    // calls `test(...)`. Top-level suite is the spec the runner loaded;
+    // inner suite + specs report the helper's location. The entry's `file`
+    // must be the spec (so bucketing keeps the test under it), while
+    // `originFile`/`originLine` must point at the helper.
+    const entries = await listPlaywrightTests(tmpDir, {
+      spawner: jsonSpawner({
+        config: { rootDir: tmpDir },
+        suites: [
+          {
+            file: 'e2e/hk-en-alipay.spec.ts',
+            suites: [
+              {
+                file: 'e2e/helpers/spec-factory.ts',
+                title: 'en_HK matrix',
+                specs: [
+                  { title: 'en_HK: main page', file: 'e2e/helpers/spec-factory.ts', line: 54 },
+                  { title: 'en_HK: checkout', file: 'e2e/helpers/spec-factory.ts', line: 58 },
+                ],
+              },
+            ],
+          },
+        ],
+      }),
+    })
+    expect(entries).not.toBeNull()
+    expect(entries).toHaveLength(2)
+    for (const e of entries!) {
+      expect(e.file).toBe(path.resolve(tmpDir, 'e2e/hk-en-alipay.spec.ts'))
+      expect(e.originFile).toBe(path.resolve(tmpDir, 'e2e/helpers/spec-factory.ts'))
+    }
+    expect(entries![0].originLine).toBe(54)
+    expect(entries![1].originLine).toBe(58)
+  })
+
+  it('keeps originFile === file for direct test() calls', async () => {
+    const entries = await listPlaywrightTests(tmpDir, {
+      spawner: jsonSpawner({
+        config: { rootDir: tmpDir },
+        suites: [
+          {
+            file: 'e2e/direct.spec.ts',
+            specs: [{ title: 'plain', line: 4 }],
+          },
+        ],
+      }),
+    })
+    const entry = entries![0]
+    expect(entry.file).toBe(entry.originFile)
+    expect(entry.line).toBe(entry.originLine)
+  })
+
   it('falls back to featureDir when report.config.rootDir is missing', async () => {
     const entries = await listPlaywrightTests(tmpDir, {
       spawner: jsonSpawner({

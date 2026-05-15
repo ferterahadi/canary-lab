@@ -3,7 +3,7 @@ import os from 'os'
 import path from 'path'
 import Fastify from 'fastify'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { readDraft, writeDraft } from '../lib/draft-store'
+import { paths as draftPaths, readDraft, writeDraft } from '../lib/draft-store'
 import {
   runPlanStage,
   runSpecStage,
@@ -258,6 +258,35 @@ describe('POST /api/tests/draft/:id/cancel-generation', () => {
   })
 })
 
+describe('GET /api/tests/draft/:id/agent-session', () => {
+  it('does not return a saved session log that predates the current draft stage', async () => {
+    const app = await makeApp(makeDeps())
+    const post = await app.inject({
+      method: 'POST',
+      url: '/api/tests/draft',
+      payload: { prdText: 'X', repos: [{ name: 'a', localPath: '/' }] },
+    })
+    const id = post.json().draftId
+    const rec = readDraft(logsDir, id)!
+    const p = draftPaths(logsDir, id)
+    const oldLogPath = path.join(p.draftDir, 'old-session.jsonl')
+    fs.writeFileSync(oldLogPath, '{}\n')
+    fs.utimesSync(oldLogPath, new Date('2026-05-15T23:59:00.000Z'), new Date('2026-05-15T23:59:00.000Z'))
+    writeDraft(logsDir, {
+      ...rec,
+      wizardAgent: 'claude',
+      planAgentSpawnedAt: '2026-05-16T00:00:00.000Z',
+      planAgentSessionRef: { agent: 'claude', sessionId: 'old-session', logPath: oldLogPath },
+    })
+
+    const r = await app.inject({ method: 'GET', url: `/api/tests/draft/${id}/agent-session?stage=planning` })
+
+    expect(r.statusCode).toBe(404)
+    expect(r.json()).toEqual({ reason: 'no-session-ref' })
+    await app.close()
+  })
+})
+
 describe('runPlanStage', () => {
   it('selects diff-only planning for drafts without documents or notes', () => {
     expect(selectPlanTemplate({ prdText: '   ', prdDocuments: [] })).toEqual({
@@ -277,7 +306,7 @@ describe('runPlanStage', () => {
   })
 
   it('selects context planning when notes are present', () => {
-    expect(selectPlanTemplate({ prdText: 'checkout acceptance criteria', prdDocuments: [] })).toEqual({
+    expect(selectPlanTemplate({ prdText: '   ', additionalNotes: 'checkout acceptance criteria', prdDocuments: [] })).toEqual({
       mode: 'context',
       templatePath: STAGE1_TEMPLATE,
     })
@@ -285,7 +314,8 @@ describe('runPlanStage', () => {
 
   it('selects context planning when documents and notes are present', () => {
     expect(selectPlanTemplate({
-      prdText: 'checkout acceptance criteria',
+      prdText: '',
+      additionalNotes: 'checkout acceptance criteria',
       prdDocuments: [{ filename: 'prd.md', contentType: 'text/markdown', characters: 10 }],
     })).toEqual({
       mode: 'context',
@@ -706,6 +736,114 @@ describe('POST /api/tests/draft/:id/accept-spec', () => {
     expect(fs.existsSync(path.join(featureDir, '.canary-lab-draft-id'))).toBe(false)
     const rec = readDraft(logsDir, id)!
     expect(rec.status).toBe('accepted')
+    await app.close()
+  })
+
+  it('preserves uploaded originals and additional notes under feature docs once', async () => {
+    const deps = makeDeps({
+      spawnPlanAgent: async () => `<plan-output>[
+        {"step":"Open","actions":["go"],"expectedOutcome":"visible"}
+      ]</plan-output>`,
+      spawnSpecAgent: async () => fileBlocks(buildFeatureScaffold({ featureName: 'context_docs' })),
+    })
+    const app = await makeApp(deps)
+    const post = await app.inject({
+      method: 'POST',
+      url: '/api/tests/draft',
+      payload: {
+        prdText: '# Pasted PRD\n\nKeep checkout steps strict',
+        additionalNotes: 'Keep checkout steps strict',
+        prdDocuments: [
+          {
+            filename: 'command.md',
+            contentType: 'text/markdown',
+            characters: 15,
+            text: 'Command guidance',
+            contentBase64: Buffer.from('# Command\n').toString('base64'),
+          },
+          {
+            filename: 'cresclaben.md',
+            contentType: 'text/markdown',
+            characters: 18,
+            text: 'Cresclaben notes',
+            contentBase64: Buffer.from('# Cresclaben\n').toString('base64'),
+          },
+        ],
+        repos: [{ name: 'app', localPath: '/p' }],
+        featureName: 'context_docs',
+      },
+    })
+    const id = post.json().draftId
+    await new Promise((r) => setTimeout(r, 20))
+    await app.inject({ method: 'POST', url: `/api/tests/draft/${id}/accept-plan`, payload: {} })
+    await new Promise((r) => setTimeout(r, 20))
+
+    const r = await app.inject({ method: 'POST', url: `/api/tests/draft/${id}/accept-spec`, payload: {} })
+    expect(r.statusCode).toBe(200)
+    const featureDir = path.join(projectRoot, 'features', 'context_docs')
+    expect(fs.readFileSync(path.join(featureDir, 'docs', 'additional-notes.md'), 'utf8')).toContain('Keep checkout steps strict')
+    expect(fs.readFileSync(path.join(featureDir, 'docs', 'command.md'), 'utf8')).toBe('# Command\n')
+    expect(fs.readFileSync(path.join(featureDir, 'docs', 'cresclaben.md'), 'utf8')).toBe('# Cresclaben\n')
+    expect(walkRelative(path.join(featureDir, 'docs'))).toEqual([
+      'additional-notes.md',
+      'command.md',
+      'cresclaben.md',
+    ])
+    const rec = readDraft(logsDir, id)!
+    const generatedDocs = (rec.generatedFiles ?? [])
+      .map((file) => path.relative(featureDir, file))
+      .filter((file) => file.startsWith('docs/'))
+      .sort()
+    expect(generatedDocs).toEqual([
+      'docs/additional-notes.md',
+      'docs/command.md',
+      'docs/cresclaben.md',
+    ])
+    await app.close()
+  })
+
+  it('preserves same-name uploads with deterministic suffixes before the extension', async () => {
+    const deps = makeDeps({
+      spawnPlanAgent: async () => `<plan-output>[
+        {"step":"Open","actions":["go"],"expectedOutcome":"visible"}
+      ]</plan-output>`,
+      spawnSpecAgent: async () => fileBlocks(buildFeatureScaffold({ featureName: 'collision_docs' })),
+    })
+    const app = await makeApp(deps)
+    const post = await app.inject({
+      method: 'POST',
+      url: '/api/tests/draft',
+      payload: {
+        prdText: '# Pasted PRD',
+        prdDocuments: [
+          {
+            filename: 'command.md',
+            contentType: 'text/markdown',
+            characters: 5,
+            contentBase64: Buffer.from('first').toString('base64'),
+          },
+          {
+            filename: 'command.md',
+            contentType: 'text/markdown',
+            characters: 6,
+            contentBase64: Buffer.from('second').toString('base64'),
+          },
+        ],
+        repos: [{ name: 'app', localPath: '/p' }],
+        featureName: 'collision_docs',
+      },
+    })
+    const id = post.json().draftId
+    await new Promise((r) => setTimeout(r, 20))
+    await app.inject({ method: 'POST', url: `/api/tests/draft/${id}/accept-plan`, payload: {} })
+    await new Promise((r) => setTimeout(r, 20))
+
+    const r = await app.inject({ method: 'POST', url: `/api/tests/draft/${id}/accept-spec`, payload: {} })
+    expect(r.statusCode).toBe(200)
+    const featureDir = path.join(projectRoot, 'features', 'collision_docs')
+    expect(fs.readFileSync(path.join(featureDir, 'docs', 'command.md'), 'utf8')).toBe('first')
+    expect(fs.readFileSync(path.join(featureDir, 'docs', 'command-2.md'), 'utf8')).toBe('second')
+    expect(walkRelative(path.join(featureDir, 'docs'))).toEqual(['command-2.md', 'command.md'])
     await app.close()
   })
 

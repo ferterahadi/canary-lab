@@ -111,6 +111,77 @@ describe('SummaryReporter', () => {
     })
   })
 
+  it('persists the Playwright suite inventory before any test has finished', () => {
+    const reporter = new SummaryReporter()
+
+    reporter.onBegin({} as any, {
+      allTests: () => [
+        { ...mkTest('factory one', '/helpers/spec-factory.ts', 54), titlePath: () => ['matrix', 'factory one'] },
+        { ...mkTest('factory two', '/helpers/spec-factory.ts', 58), titlePath: () => ['matrix', 'factory two'] },
+      ],
+    } as any)
+
+    expect(readSummary()).toMatchObject({
+      complete: false,
+      total: 2,
+      passed: 0,
+      passedNames: [],
+      knownTests: [
+        {
+          name: 'test-case-factory-one',
+          title: 'factory one',
+          titlePath: ['matrix', 'factory one'],
+          location: '/helpers/spec-factory.ts:54',
+        },
+        {
+          name: 'test-case-factory-two',
+          title: 'factory two',
+          titlePath: ['matrix', 'factory two'],
+          location: '/helpers/spec-factory.ts:58',
+        },
+      ],
+    })
+  })
+
+  it('merges knownTests and prior statuses across targeted reruns', () => {
+    fs.mkdirSync(LOGS_DIR, { recursive: true })
+    fs.writeFileSync(path.join(LOGS_DIR, 'e2e-summary.json'), JSON.stringify({
+      complete: true,
+      total: 3,
+      passed: 1,
+      passedNames: ['test-case-old-pass'],
+      knownTests: [
+        { name: 'test-case-old-pass', title: 'old pass', location: '/a.spec.ts:1' },
+        { name: 'test-case-old-fail', title: 'old fail', location: '/helpers/spec-factory.ts:54' },
+        { name: 'test-case-still-pending', title: 'still pending', location: '/helpers/spec-factory.ts:58' },
+      ],
+      failed: [
+        { name: 'test-case-old-fail', location: '/helpers/spec-factory.ts:54' },
+      ],
+    }))
+    process.env.CANARY_LAB_TARGETED_RERUN = '1'
+
+    const reporter = new SummaryReporter()
+    reporter.onBegin({} as any, {
+      allTests: () => [mkTest('old fail', '/helpers/spec-factory.ts', 54)],
+    } as any)
+    reporter.onTestEnd(mkTest('old fail', '/helpers/spec-factory.ts', 54), mkResult())
+    reporter.onEnd({} as any)
+
+    expect(readSummary()).toMatchObject({
+      complete: true,
+      total: 3,
+      passed: 2,
+      passedNames: ['test-case-old-pass', 'test-case-old-fail'],
+      knownTests: [
+        { name: 'test-case-old-pass', title: 'old pass', location: '/a.spec.ts:1' },
+        { name: 'test-case-old-fail', title: 'old fail', location: '/helpers/spec-factory.ts:54' },
+        { name: 'test-case-still-pending', title: 'still pending', location: '/helpers/spec-factory.ts:58' },
+      ],
+      failed: [],
+    })
+  })
+
   it('strips ANSI noise and truncates large error fields', () => {
     const reporter = new SummaryReporter()
     reporter.onTestEnd(
@@ -854,6 +925,143 @@ describe('SummaryReporter', () => {
 
     expect(fs.existsSync(path.join(LOGS_DIR, 'heal-index.md'))).toBe(false)
     expect(readSummary().failed[0].logFiles).toBeUndefined()
+  })
+
+  it('seeds knownTests from an existing summary, filtering bad entries and merging duplicates', () => {
+    fs.mkdirSync(LOGS_DIR, { recursive: true })
+    fs.writeFileSync(
+      path.join(LOGS_DIR, 'e2e-summary.json'),
+      JSON.stringify({
+        complete: true,
+        knownTests: [
+          null,
+          'string-entry',
+          { title: 'missing name' },
+          { name: 'bad', title: '' },
+          { name: '', title: 'bad title' },
+          {
+            name: 'test-case-rich',
+            title: 'rich',
+            titlePath: ['outer', '', 7, 'inner'],
+            location: '/r.spec.ts:11',
+          },
+          {
+            name: 'test-case-empty-loc',
+            title: 'empty loc',
+            titlePath: 'not-array',
+            location: '',
+          },
+          { name: 'test-case-rich', title: 'rich override', location: '/r.spec.ts:12' },
+        ],
+        passedNames: [],
+        failed: [],
+      }),
+    )
+
+    const reporter = new SummaryReporter()
+    reporter.onBegin({} as any, {
+      allTests: () => [
+        { ...mkTest('rich override', '/r.spec.ts', 12), titlePath: () => ['outer', 'inner'] },
+      ],
+    } as any)
+    reporter.onEnd({} as any)
+
+    const out = readSummary()
+    expect(out.knownTests).toEqual([
+      { name: 'test-case-rich', title: 'rich override', titlePath: ['outer', 'inner'], location: '/r.spec.ts:12' },
+      { name: 'test-case-empty-loc', title: 'empty loc' },
+      { name: 'test-case-rich-override', title: 'rich override', titlePath: ['outer', 'inner'], location: '/r.spec.ts:12' },
+    ])
+  })
+
+  it('uses computed location fallback when known.location is unset', () => {
+    const reporter = new SummaryReporter()
+    const test = { title: 'no loc', location: { file: '', line: 7 } } as any
+    reporter.onTestBegin(test)
+    expect(readSummary().running).toEqual({ name: 'test-case-no-loc', location: ':7' })
+    reporter.onTestEnd(test, mkResult())
+    expect(readSummary()).toMatchObject({
+      passedNames: ['test-case-no-loc'],
+    })
+    // playback event also exercises the same fallback in onTestEnd
+    const events = readEvents()
+    expect(events.at(-1)).toMatchObject({ type: 'test-end', test: { location: ':7' } })
+  })
+
+  it('does not decrement failureCount when removing a non-failure result', () => {
+    process.env.CANARY_LAB_TARGETED_RERUN = '1'
+    fs.mkdirSync(LOGS_DIR, { recursive: true })
+    fs.writeFileSync(
+      path.join(LOGS_DIR, 'e2e-summary.json'),
+      JSON.stringify({
+        passedNames: ['test-case-rerun-pass'],
+        failed: [],
+      }),
+    )
+    const reporter = new SummaryReporter()
+    reporter.onTestEnd(mkTest('rerun pass', '/r.spec.ts', 4), mkResult())
+    expect(readSummary().passedNames).toEqual(['test-case-rerun-pass'])
+  })
+
+  it('ignores non-array failed lists in existing summaries', () => {
+    process.env.CANARY_LAB_TARGETED_RERUN = '1'
+    fs.mkdirSync(LOGS_DIR, { recursive: true })
+    fs.writeFileSync(
+      path.join(LOGS_DIR, 'e2e-summary.json'),
+      JSON.stringify({ passedNames: [], failed: 'nope' }),
+    )
+    const reporter = new SummaryReporter()
+    reporter.onTestEnd(mkTest('fresh'), mkResult())
+    expect(readSummary().passedNames).toEqual(['test-case-fresh'])
+  })
+
+  it('drops the location when the playwright TestCase omits file or line', () => {
+    const reporter = new SummaryReporter()
+    const test = { title: 'no loc', location: { file: '', line: 7 } } as any
+    reporter.onTestEnd(test, mkResult())
+    // No known location is rendered for the result entry
+    expect(readSummary().passedNames).toEqual(['test-case-no-loc'])
+  })
+
+  it('skips reconcile when readExistingSummary returns null after a final write', () => {
+    const reporter = new SummaryReporter()
+    reporter.onTestEnd(mkTest('happy'), mkResult())
+    const summaryPath = path.join(LOGS_DIR, 'e2e-summary.json')
+    const real = fs.readFileSync
+    const spy = vi.spyOn(fs, 'readFileSync').mockImplementation(((p: any, enc: any) => {
+      if (String(p) === summaryPath) throw new Error('no summary')
+      return (real as any)(p, enc)
+    }) as typeof fs.readFileSync)
+    try {
+      reporter.onEnd({} as any)
+    } finally {
+      spy.mockRestore()
+    }
+    // onEnd still completes — final write happened first, reconcile silently bails.
+    expect(readSummary().complete).toBe(true)
+  })
+
+  it('normalizes failure locations including non-matching paths and skips undefined entries', () => {
+    const reporter = new SummaryReporter()
+    reporter.onTestEnd(
+      mkTest('weird stack', '/specs/x.spec.ts', 1),
+      mkResult({
+        status: 'failed',
+        error: {
+          message: 'boom',
+          // Relative file path triggers the non-matching branch in normalizeLocation.
+          location: { file: 'relative/foo.ts', line: 5 },
+        },
+        errors: [
+          {
+            location: undefined,
+            stack: 'Error: boom\n    at fn (relative/path.ts:7:1)\n    at /abs/path.ts:9:2',
+          },
+        ],
+      }),
+    )
+    const failed = readSummary().failed[0]
+    expect(failed.locations).toEqual(['relative/foo.ts:5', '/abs/path.ts:9'])
   })
 
   it('runs final enrichment when failures were not enriched earlier', () => {

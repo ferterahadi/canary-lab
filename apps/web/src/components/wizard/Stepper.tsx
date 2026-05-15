@@ -1,31 +1,72 @@
 import type { WizardStep } from '../../lib/wizard-state'
 
 const STEPS: { key: WizardStep; label: string }[] = [
-  { key: 'configure', label: '1. Configure' },
-  { key: 'plan', label: '2. Plan Review' },
-  { key: 'spec', label: '3. Spec Review' },
-  { key: 'done', label: '4. Done' },
+  { key: 'configure', label: 'Configure' },
+  { key: 'plan', label: 'Plan' },
+  { key: 'spec', label: 'Spec' },
+  { key: 'done', label: 'Done' },
 ]
 
-// Linear progress indicator at the top of the wizard. The active step is
-// highlighted; previously-passed steps are shown in a muted "complete"
-// color. Display-only — clicks do not navigate.
+type State = 'current' | 'done' | 'upcoming'
+
+// Compact horizontal progress indicator. Numbered pills + label; the current
+// step is accented, completed steps carry the accent on a filled pill, and
+// upcoming steps stay muted. Display-only — clicks do not navigate.
 export function Stepper({ current }: { current: WizardStep }) {
   const currentIdx = STEPS.findIndex((s) => s.key === current)
   return (
-    <ol className="cl-panel-header flex w-full items-center gap-2 px-6 py-3 text-xs">
+    <ol
+      className="flex w-full items-center gap-2 px-6 py-3"
+      style={{
+        background: 'var(--bg-surface)',
+        borderBottom: '1px solid var(--border-default)',
+      }}
+    >
       {STEPS.map((s, i) => {
-        const state = i === currentIdx ? 'current' : i < currentIdx ? 'done' : 'upcoming'
-        const cls =
-          state === 'current'
-            ? 'font-medium text-[var(--text-primary)]'
-            : state === 'done'
-              ? 'text-emerald-500 dark:text-emerald-400'
-              : 'text-[var(--text-muted)]'
+        const state: State = i === currentIdx ? 'current' : i < currentIdx ? 'done' : 'upcoming'
+        const labelColor =
+          state === 'current' ? 'var(--text-primary)'
+          : state === 'done' ? 'var(--text-secondary)'
+          : 'var(--text-muted)'
+        const pillBg =
+          state === 'current' ? 'var(--accent)'
+          : state === 'done' ? 'var(--accent)'
+          : 'transparent'
+        const pillColor =
+          state === 'current' ? '#ffffff'
+          : state === 'done' ? '#ffffff'
+          : 'var(--text-muted)'
+        const pillBorder =
+          state === 'upcoming' ? '1px solid var(--border-default)' : '1px solid transparent'
+        const isLast = i === STEPS.length - 1
         return (
           <li key={s.key} className="flex items-center gap-2">
-            <span className={cls}>{s.label}</span>
-            {i < STEPS.length - 1 && <span style={{ color: 'var(--border-strong)' }}>›</span>}
+            <span
+              className="inline-flex h-5 w-5 items-center justify-center rounded-full"
+              style={{
+                background: pillBg,
+                color: pillColor,
+                border: pillBorder,
+                fontFamily: 'var(--font-mono)',
+                fontSize: 10.5,
+                fontWeight: 600,
+              }}
+            >
+              {state === 'done' ? '✓' : i + 1}
+            </span>
+            <span
+              className="text-xs"
+              style={{ color: labelColor, fontWeight: state === 'current' ? 600 : 500 }}
+            >
+              {s.label}
+            </span>
+            {!isLast && (
+              <span
+                aria-hidden="true"
+                className="mx-1 inline-block h-px w-6"
+                style={{ background: 'var(--border-default)' }}
+              />
+            )}
           </li>
         )
       })}

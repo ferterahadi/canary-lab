@@ -88,6 +88,7 @@ export function WizardDraftProvider({ children }: { children: ReactNode }) {
     const optimistic: DraftRecord = {
       draftId: created.draftId,
       prdText: payload.prdText,
+      additionalNotes: payload.additionalNotes,
       prdDocuments: payload.prdDocuments ?? [],
       repos: payload.repos,
       featureName: payload.featureName,

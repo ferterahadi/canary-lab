@@ -100,10 +100,26 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
       pwByFile.set(entry.file, arr)
     }
 
+    // AST-extract any origin file we encounter that isn't already in
+    // astByFile (i.e. helper files referenced by `entry.originFile`). The
+    // ExtractedTest body/steps for helper-defined tests come from these.
+    const originAstByFile = new Map<string, ReturnType<typeof extractTestsFromSource>>()
+    for (const entry of pwList) {
+      if (!entry.originFile || entry.originFile === entry.file) continue
+      if (astByFile.has(entry.originFile) || originAstByFile.has(entry.originFile)) continue
+      let source = ''
+      try { source = fs.readFileSync(entry.originFile, 'utf-8') } catch { /* unreadable */ }
+      originAstByFile.set(entry.originFile, extractTestsFromSource(entry.originFile, source))
+    }
+
+    function lookupAstByLine(file: string, line: number): ExtractedTest | undefined {
+      const ast = astByFile.get(file) ?? originAstByFile.get(file)
+      if (!ast) return undefined
+      return ast.tests.find((t) => t.line === line)
+    }
+
     return specFiles.map((file) => {
       const ast = astByFile.get(file)
-      const astByLine = new Map<number, ExtractedTest>()
-      for (const t of ast?.tests ?? []) astByLine.set(t.line, t)
 
       const pwEntries = pwByFile.get(file)
       if (!pwEntries || pwEntries.length === 0) {
@@ -118,13 +134,18 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
         .slice()
         .sort((a, b) => a.line - b.line || a.title.localeCompare(b.title))
         .map((entry) => {
-          const fromAst = astByLine.get(entry.line)
-          return {
+          const isHelperDefined = entry.originFile && entry.originFile !== entry.file
+          const fromAst = isHelperDefined
+            ? lookupAstByLine(entry.originFile, entry.originLine)
+            : lookupAstByLine(file, entry.line)
+          const test: ExtractedTest = {
             name: entry.title,
-            line: entry.line,
+            line: isHelperDefined ? entry.originLine : entry.line,
             bodySource: fromAst?.bodySource ?? '',
             steps: fromAst?.steps ?? [],
           }
+          if (isHelperDefined) test.sourceFile = entry.originFile
+          return test
         })
       return {
         file,

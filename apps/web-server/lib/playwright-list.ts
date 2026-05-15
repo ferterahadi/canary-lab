@@ -11,9 +11,20 @@ import path from 'path'
 // which case callers should fall back to the AST extractor.
 
 export interface PlaywrightListEntry {
-  file: string // absolute path to spec file
-  line: number // 1-based line of the `test(...)` call
-  title: string // fully-resolved test title
+  // Absolute path to the *entry-point* spec file Playwright loaded — i.e.
+  // the top-level suite's file. For direct `test(...)` calls this equals
+  // `originFile`. For tests defined inside a helper (e.g. a factory imported
+  // by the spec) this is the importing spec, NOT the helper.
+  file: string
+  // 1-based line of the call site. For helper-defined tests this is the
+  // line of the `test(...)` invocation inside the helper, since Playwright
+  // reports the literal definition site.
+  line: number
+  title: string
+  // Absolute path to the file where `test(...)` literally lives. Equal to
+  // `file` for direct tests; differs when the spec calls into a helper.
+  originFile: string
+  originLine: number
 }
 
 interface PwSpec {
@@ -74,19 +85,38 @@ function cacheSignature(featureDir: string): string {
   return parts.join('|')
 }
 
-function collectSpecs(suites: PwSuite[] | undefined, rootDir: string, out: PlaywrightListEntry[]): void {
+function collectSpecs(
+  suites: PwSuite[] | undefined,
+  rootDir: string,
+  out: PlaywrightListEntry[],
+  rootFile?: string,
+): void {
   if (!suites) return
   for (const suite of suites) {
+    // The outermost suite Playwright emits per loaded spec file holds the
+    // entry-point file path. Lock it in on the first ancestor that carries
+    // a file — inner suites (e.g. created by a helper's `test.describe`)
+    // must NOT overwrite it, otherwise helper-defined tests get attributed
+    // to the helper instead of the spec that imported it.
+    const nextRoot = rootFile ?? suite.file
     if (suite.specs) {
       for (const spec of suite.specs) {
         if (typeof spec.title !== 'string' || typeof spec.line !== 'number') continue
-        const file = spec.file ?? suite.file
-        if (!file) continue
-        const abs = path.isAbsolute(file) ? file : path.resolve(rootDir, file)
-        out.push({ file: abs, line: spec.line, title: spec.title })
+        const originRaw = spec.file ?? suite.file
+        if (!originRaw) continue
+        const originAbs = path.isAbsolute(originRaw) ? originRaw : path.resolve(rootDir, originRaw)
+        const entryRaw = nextRoot ?? originRaw
+        const entryAbs = path.isAbsolute(entryRaw) ? entryRaw : path.resolve(rootDir, entryRaw)
+        out.push({
+          file: entryAbs,
+          line: spec.line,
+          title: spec.title,
+          originFile: originAbs,
+          originLine: spec.line,
+        })
       }
     }
-    collectSpecs(suite.suites, rootDir, out)
+    collectSpecs(suite.suites, rootDir, out, nextRoot)
   }
 }
 

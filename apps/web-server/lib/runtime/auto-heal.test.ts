@@ -296,6 +296,83 @@ describe('buildOrchestratorHealPrompt', () => {
     expect(prompt).toBe(promptBody)
   })
 
+  it('renders service-mode copy when manifest.repoPaths is non-empty', () => {
+    fs.writeFileSync(
+      path.join(runDir, 'manifest.json'),
+      JSON.stringify({
+        runId: 'r1',
+        feature: 'f',
+        startedAt: '2026-01-01T00:00:00Z',
+        status: 'running',
+        healCycles: 0,
+        services: [],
+        repoPaths: ['/some/repo'],
+      }),
+    )
+    const build = buildOrchestratorHealPrompt({ agent: 'claude', projectRoot, runDir })
+    const prompt = build({ cycle: 0, outputDir: path.join(runDir, 'out') })
+    expect(prompt).toContain('Fix service/app code, not tests.')
+    expect(prompt).toContain('Do not read the test spec unless')
+    expect(prompt).toContain('Do NOT Read the test spec file')
+    expect(prompt).not.toContain('no editable service repos')
+  })
+
+  it('surfaces feature docs when the accepted feature has preserved context', () => {
+    const featureDir = path.join(projectRoot, 'features', 'context_docs')
+    fs.mkdirSync(path.join(featureDir, 'docs'), { recursive: true })
+    fs.writeFileSync(
+      path.join(runDir, 'manifest.json'),
+      JSON.stringify({
+        runId: 'r1',
+        feature: 'context_docs',
+        featureDir,
+        startedAt: '2026-01-01T00:00:00Z',
+        status: 'running',
+        healCycles: 0,
+        services: [],
+        repoPaths: ['/some/repo'],
+      }),
+    )
+    const build = buildOrchestratorHealPrompt({ agent: 'claude', projectRoot, runDir })
+    const prompt = build({ cycle: 0, outputDir: path.join(runDir, 'out') })
+    expect(prompt).toContain('Feature context docs:')
+    expect(prompt).toContain(path.join(featureDir, 'docs'))
+    expect(prompt).toContain('uploaded Add Test documents and additional notes')
+  })
+
+  it('renders test-mode copy when manifest.repoPaths is empty', () => {
+    fs.writeFileSync(
+      path.join(runDir, 'manifest.json'),
+      JSON.stringify({
+        runId: 'r1',
+        feature: 'f',
+        startedAt: '2026-01-01T00:00:00Z',
+        status: 'running',
+        healCycles: 0,
+        services: [],
+        repoPaths: [],
+      }),
+    )
+    const build = buildOrchestratorHealPrompt({ agent: 'claude', projectRoot, runDir })
+    const prompt = build({ cycle: 0, outputDir: path.join(runDir, 'out') })
+    expect(prompt).toContain('This feature has no editable service repos')
+    expect(prompt).toContain('Read the failing test spec and its helpers')
+    // The service-mode prohibition must be absent in test mode (both the
+    // static rule and the per-cycle addendum reinforcement).
+    expect(prompt).not.toContain('Fix service/app code, not tests.')
+    expect(prompt).not.toContain('Do not read the test spec unless')
+    expect(prompt).not.toContain('Do NOT Read the test spec file')
+  })
+
+  it('defaults to service-mode copy when manifest.json is missing', () => {
+    // A transient I/O glitch or a test fixture without a manifest must not
+    // silently flip to test-mode for a feature that does have editable repos.
+    const build = buildOrchestratorHealPrompt({ agent: 'claude', projectRoot, runDir })
+    const prompt = build({ cycle: 0, outputDir: path.join(runDir, 'out') })
+    expect(prompt).toContain('Fix service/app code, not tests.')
+    expect(prompt).not.toContain('no editable service repos')
+  })
+
   it('auto-heal does not depend on project CLAUDE.md / AGENTS.md', () => {
     fs.writeFileSync(path.join(projectRoot, 'CLAUDE.md'), 'custom user notes without markers')
     fs.writeFileSync(path.join(projectRoot, 'AGENTS.md'), 'custom codex notes without markers')
