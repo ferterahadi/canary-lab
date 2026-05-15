@@ -1,7 +1,7 @@
 # Changelog
 
 All notable changes to Canary Lab are listed here. We try to keep the language plain so anyone can follow along.
-
+---
 Each entry is tagged with the area it touches:
 
 - **[Test Runner]** — running tests, run history, auto-heal, services, logs
@@ -9,6 +9,15 @@ Each entry is tagged with the area it touches:
 - **[Export evaluation]** — exported evaluation reports
 - **[Benchmark]** — self-heal benchmarking (retired in 1.0.0)
 - **[General]** — UI shell, CLI, scaffolding, packaging
+
+---
+## 1.0.6 — 2026-05-15
+
+- **[Test Runner]** **Better test discovery.** Tests defined through helpers are now picked up and reported correctly alongside everything else.
+- **[Test Runner]** **Clearer run status.** Run state tracking is more accurate, so what you see in the UI matches what's actually happening.
+- **[Test Runner]** **More reliable self-heal cycle.** The auto-heal loop holds up more dependably across iterations, with steadier handoffs between runs and heal attempts.
+- **[Test Runner]** **Test-generation context carried into heal.** The PRD, supporting documents, skills, and descriptions you attach during test generation are now preserved on the test and surfaced to the agent during the heal cycle, so it has the original intent to work from instead of guessing from code alone.
+- **[General]** **Fresh look.** The interface has been redesigned with cleaner styling including clearer run status indicators throughout.
 
 ---
 

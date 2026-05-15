@@ -30,8 +30,8 @@ import {
 import { refForAgentSpawn } from '../lib/agent-session-tailer'
 import {
   loadAgentSessionLog,
-  locateLatestSessionLogForAgent,
 } from '../lib/agent-session-log'
+import { resolveDraftStageSessionRef } from '../lib/draft-agent-session'
 import { randomUUID } from 'crypto'
 import { validateGeneratedFeatureFiles } from '../../../shared/feature-scaffold'
 import { resolveDraftFile } from '../lib/draft-file-resolver'
@@ -238,15 +238,13 @@ export async function testsDraftRoutes(
       reply.code(400)
       return { reason: 'unknown-stage' }
     }
-    const ref = stage === 'planning' ? rec.planAgentSessionRef : rec.specAgentSessionRef
-    const spawnedAt = stage === 'planning' ? rec.planAgentSpawnedAt : rec.specAgentSpawnedAt
-    const agent = ref?.agent ?? rec.wizardAgent
     const p = draftPaths(deps.logsDir, rec.draftId)
-    const resolved = ref && fs.existsSync(ref.logPath)
-      ? ref
-      : agent
-        ? locateLatestSessionLogForAgent(agent, p.draftDir)
-        : null
+    const resolved = resolveDraftStageSessionRef({
+      ref: stage === 'planning' ? rec.planAgentSessionRef : rec.specAgentSessionRef,
+      agent: rec.wizardAgent,
+      draftDir: p.draftDir,
+      spawnedAt: stage === 'planning' ? rec.planAgentSpawnedAt : rec.specAgentSpawnedAt,
+    })
     if (!resolved) {
       reply.code(404)
       return { reason: 'no-session-ref' }
@@ -254,15 +252,6 @@ export async function testsDraftRoutes(
     if (!fs.existsSync(resolved.logPath)) {
       reply.code(404)
       return { reason: 'session-log-missing' }
-    }
-    if (spawnedAt) {
-      try {
-        const stat = fs.statSync(resolved.logPath)
-        if (stat.mtimeMs < Date.parse(spawnedAt) - 1000) {
-          reply.code(404)
-          return { reason: 'session-log-stale' }
-        }
-      } catch { /* fall through */ }
     }
     const events = loadAgentSessionLog(resolved)
     return { agent: resolved.agent, sessionId: resolved.sessionId, events }
@@ -302,7 +291,7 @@ export async function testsDraftRoutes(
       }
       const featureName = req.body?.featureName ?? rec.featureName ?? defaultFeatureName(rec)
       const generated = readGeneratedFiles(deps.logsDir, rec.draftId)
-      const generatedWithContextDocs = [...generated, ...contextDocsForDraft(rec)]
+      const generatedWithContextDocs = [...generated, ...additionalNotesDocForDraft(rec)]
       const validation = validateFeatureTarget(deps.projectRoot, featureName)
       if (!validation.ok) {
         reply.code(validation.error === 'feature-exists' ? 409 : 400)
@@ -477,11 +466,13 @@ async function runPlanStage(deps: TestsDraftRouteDeps, draftId: string): Promise
   })
 }
 
-export function hasUserContext(rec: Pick<DraftRecord, 'prdText' | 'prdDocuments'>): boolean {
-  return rec.prdText.trim().length > 0 || rec.prdDocuments.length > 0
+export function hasUserContext(rec: Pick<DraftRecord, 'prdText' | 'additionalNotes' | 'prdDocuments'>): boolean {
+  return rec.prdText.trim().length > 0
+    || (rec.additionalNotes?.trim().length ?? 0) > 0
+    || rec.prdDocuments.length > 0
 }
 
-export function selectPlanTemplate(rec: Pick<DraftRecord, 'prdText' | 'prdDocuments'>): {
+export function selectPlanTemplate(rec: Pick<DraftRecord, 'prdText' | 'additionalNotes' | 'prdDocuments'>): {
   mode: PlanMode
   templatePath: string
 } {
@@ -604,47 +595,23 @@ function isDraftPrdDocument(value: unknown): value is DraftPrdDocument {
     && (doc.contentBase64 === undefined || typeof doc.contentBase64 === 'string')
 }
 
-function contextDocsForDraft(rec: DraftRecord): { path: string; content: string }[] {
-  const files: { path: string; content: string }[] = []
+function additionalNotesDocForDraft(rec: DraftRecord): { path: string; content: string }[] {
   const notes = rec.additionalNotes?.trim()
-  if (notes) {
-    files.push({
-      path: 'docs/additional-notes.md',
-      content: `# Additional notes\n\n${notes}\n`,
-    })
-  }
-  rec.prdDocuments.forEach((doc, index) => {
-    const text = doc.text?.trim()
-    if (!text) return
-    files.push({
-      path: `docs/${safeContextDocFilename(doc.filename, index)}`,
-      content: [
-        `# ${doc.filename}`,
-        '',
-        `Content type: ${doc.contentType}`,
-        '',
-        text,
-        '',
-      ].join('\n'),
-    })
-  })
-  return files
-}
-
-function safeContextDocFilename(filename: string, index: number): string {
-  const parsed = path.parse(filename)
-  const stem = (parsed.name || `document-${index + 1}`)
-    .replace(/[^a-zA-Z0-9._-]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 80) || `document-${index + 1}`
-  return `uploaded-${index + 1}-${stem}.md`
+  return notes
+    ? [{
+        path: 'docs/additional-notes.md',
+        content: `# Additional notes\n\n${notes}\n`,
+      }]
+    : []
 }
 
 function writeUploadedDocumentCopies(featureDir: string, rec: DraftRecord): string[] {
   const written: string[] = []
-  rec.prdDocuments.forEach((doc, index) => {
+  const used = new Set<string>()
+  rec.prdDocuments.forEach((doc) => {
     if (!doc.contentBase64) return
-    const target = path.join(featureDir, 'docs', 'uploads', safeUploadedFilename(doc.filename, index))
+    const filename = uniqueUploadedFilename(featureDir, doc.filename, used)
+    const target = path.join(featureDir, 'docs', filename)
     fs.mkdirSync(path.dirname(target), { recursive: true })
     fs.writeFileSync(target, Buffer.from(doc.contentBase64, 'base64'))
     written.push(target)
@@ -652,14 +619,26 @@ function writeUploadedDocumentCopies(featureDir: string, rec: DraftRecord): stri
   return written
 }
 
-function safeUploadedFilename(filename: string, index: number): string {
-  const parsed = path.parse(path.basename(filename))
-  const stem = (parsed.name || `document-${index + 1}`)
-    .replace(/[^a-zA-Z0-9._-]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 80) || `document-${index + 1}`
-  const ext = parsed.ext.replace(/[^a-zA-Z0-9.]/g, '').slice(0, 16)
-  return `uploaded-${index + 1}-${stem}${ext}`
+function uniqueUploadedFilename(featureDir: string, filename: string, used: Set<string>): string {
+  const safe = safeUploadedFilename(filename)
+  const parsed = path.parse(safe)
+  let candidate = safe
+  let suffix = 2
+  while (
+    used.has(candidate.toLowerCase())
+    || fs.existsSync(path.join(featureDir, 'docs', candidate))
+  ) {
+    candidate = `${parsed.name}-${suffix}${parsed.ext}`
+    suffix += 1
+  }
+  used.add(candidate.toLowerCase())
+  return candidate
+}
+
+function safeUploadedFilename(filename: string): string {
+  const base = filename.replace(/[\\/]+/g, '-').replace(/[\x00-\x1f\x7f]/g, '').trim()
+  if (!base || base === '.' || base === '..') return 'document'
+  return base
 }
 
 function defaultFeatureName(rec: DraftRecord): string {

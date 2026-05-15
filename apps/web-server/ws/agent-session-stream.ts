@@ -3,11 +3,11 @@ import type { FastifyInstance } from 'fastify'
 import {
   type AgentSessionRef,
   locateMostRecentAgentSessionRef,
-  locateLatestSessionLogForAgent,
   parseAgentSessionRefFile,
   selectAgentSessionRef,
 } from '../lib/agent-session-log'
 import { tailAgentSession } from '../lib/agent-session-tailer'
+import { resolveDraftStageSessionRef } from '../lib/draft-agent-session'
 import { readDraft, paths as draftPaths } from '../lib/draft-store'
 import { runDirFor, buildRunPaths } from '../lib/runtime/run-paths'
 import type { RunStore } from '../lib/run-store'
@@ -73,7 +73,6 @@ export async function agentSessionStreamRoutes(
         return
       }
       const ref = stage === 'planning' ? draft.planAgentSessionRef : draft.specAgentSessionRef
-      const spawnedAt = stage === 'planning' ? draft.planAgentSpawnedAt : draft.specAgentSpawnedAt
       const agent = ref?.agent ?? draft.wizardAgent ?? 'claude'
       const p = draftPaths(deps.logsDir, req.params.draftId)
       const handle = tailAgentSession({
@@ -83,19 +82,17 @@ export async function agentSessionStreamRoutes(
         discoverRef: () => {
           // Re-read the draft each time — refs may be filled in after the
           // initial connection (race between WS attach and spawn writing the
-          // ref to disk). For codex, fall back to locator + spawnedAt floor.
+          // ref to disk). For codex, use the stage spawn timestamp so a new
+          // draft never displays an older draft session.
           const fresh = readDraft(deps.logsDir, req.params.draftId)
           const freshRef = stage === 'planning' ? fresh?.planAgentSessionRef : fresh?.specAgentSessionRef
-          if (freshRef && fs.existsSync(freshRef.logPath)) return freshRef
-          const located = locateLatestSessionLogForAgent(agent, p.draftDir)
-          if (!located) return null
-          if (spawnedAt) {
-            try {
-              const stat = fs.statSync(located.logPath)
-              if (stat.mtimeMs < Date.parse(spawnedAt) - 1000) return null
-            } catch { return null }
-          }
-          return located
+          const spawnedAt = stage === 'planning' ? fresh?.planAgentSpawnedAt : fresh?.specAgentSpawnedAt
+          return resolveDraftStageSessionRef({
+            ref: freshRef,
+            agent: freshRef?.agent ?? fresh?.wizardAgent ?? agent,
+            draftDir: p.draftDir,
+            spawnedAt,
+          })
         },
       })
       socket.on('close', () => handle.close())
