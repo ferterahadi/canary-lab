@@ -317,6 +317,29 @@ describe('buildOrchestratorHealPrompt', () => {
     expect(prompt).not.toContain('no editable service repos')
   })
 
+  it('surfaces feature docs when the accepted feature has preserved context', () => {
+    const featureDir = path.join(projectRoot, 'features', 'context_docs')
+    fs.mkdirSync(path.join(featureDir, 'docs'), { recursive: true })
+    fs.writeFileSync(
+      path.join(runDir, 'manifest.json'),
+      JSON.stringify({
+        runId: 'r1',
+        feature: 'context_docs',
+        featureDir,
+        startedAt: '2026-01-01T00:00:00Z',
+        status: 'running',
+        healCycles: 0,
+        services: [],
+        repoPaths: ['/some/repo'],
+      }),
+    )
+    const build = buildOrchestratorHealPrompt({ agent: 'claude', projectRoot, runDir })
+    const prompt = build({ cycle: 0, outputDir: path.join(runDir, 'out') })
+    expect(prompt).toContain('Feature context docs:')
+    expect(prompt).toContain(path.join(featureDir, 'docs'))
+    expect(prompt).toContain('uploaded Add Test documents and additional notes')
+  })
+
   it('renders test-mode copy when manifest.repoPaths is empty', () => {
     fs.writeFileSync(
       path.join(runDir, 'manifest.json'),

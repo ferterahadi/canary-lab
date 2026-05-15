@@ -295,6 +295,7 @@ export function buildOrchestratorHealPrompt(
       summaryPath: paths.summaryPath,
       failedDir: paths.failedDir,
       journalPath: paths.diagnosisJournalPath,
+      featureDocsMap: renderFeatureDocsMap(paths.manifestPath),
       restartSignal: paths.restartSignal,
       rerunSignal: paths.rerunSignal,
       personalWikiMap: renderPersonalWikiMap(opts.personalWikiPath),
@@ -320,4 +321,16 @@ export function buildOrchestratorHealPrompt(
     fs.writeFileSync(promptFile, fullPrompt)
     return fullPrompt
   }
+}
+
+function renderFeatureDocsMap(manifestPath: string): string {
+  const manifest = readManifest(manifestPath)
+  const featureDir = manifest?.featureDir
+  if (!featureDir) return ''
+  const docsDir = path.join(featureDir, 'docs')
+  if (!fs.existsSync(docsDir)) return ''
+  return [
+    'Feature context docs:',
+    `- \`${docsDir}\` — uploaded Add Test documents and additional notes preserved for this feature. Read these when the failure may depend on product requirements, acceptance criteria, or user-provided context.`,
+  ].join('\n')
 }

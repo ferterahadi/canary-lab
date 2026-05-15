@@ -91,15 +91,27 @@ export function RunDetailColumn({
 
   return (
     <div className="cl-panel relative flex h-full flex-col">
-      <header className="cl-panel-header px-4 py-3">
+      <header className="cl-panel-header px-4 pt-3 pb-0">
         <div className="flex min-w-0 items-center gap-2">
           <span className="shrink-0">
             <RunStatusIndicator status={view.displayStatus} />
           </span>
-          <span className="min-w-0 flex-1 truncate text-sm" style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }} title={m.runId}>{m.runId}</span>
-          <span className="shrink-0 truncate text-xs" style={{ color: 'var(--text-muted)' }} title={m.feature}>{m.feature}</span>
+          <span
+            className="min-w-0 flex-1 truncate text-sm font-medium"
+            title={m.runId}
+            style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}
+          >
+            {m.runId}
+          </span>
+          <span
+            className="shrink-0 truncate text-xs"
+            title={m.feature}
+            style={{ color: 'var(--text-muted)' }}
+          >
+            {m.feature}
+          </span>
         </div>
-        <nav className="mt-2 -mx-1 flex gap-1 overflow-x-auto px-1 text-xs scrollbar-thin">
+        <nav className="mt-3 flex gap-5 overflow-x-auto scrollbar-thin">
           <TabButton active={tab === 'overview'} onClick={() => setTab('overview')}>Overview</TabButton>
           <TabButton active={tab === 'run-logs'} onClick={() => setTab('run-logs')}>Run Logs</TabButton>
           <TabButton active={tab === 'services'} onClick={() => setTab('services')} disabled={services.length === 0}>Services</TabButton>
@@ -940,8 +952,8 @@ function StatusPill({ passed, status, current }: { passed?: boolean; status?: st
   const displayStatus = current ? 'testing' : statusFromPlaybackResult({ status, passed })
   return (
     <span
-      className={`shrink-0 rounded border px-1.5 py-0.5 text-[10px] uppercase tracking-wide ${statusPillClassForStatus(displayStatus)}`}
-      style={{ fontFamily: 'var(--font-mono)' }}
+      className={`inline-flex shrink-0 items-center justify-center rounded border px-1.5 py-0.5 text-[10px] uppercase tracking-wide ${statusPillClassForStatus(displayStatus)}`}
+      style={{ fontFamily: 'var(--font-mono)', minWidth: '3.75rem' }}
     >
       {statusLabel(displayStatus)}
     </span>
@@ -1163,9 +1175,9 @@ function TabButton(props: { active: boolean; disabled?: boolean; onClick: () => 
       type="button"
       disabled={disabled}
       onClick={onClick}
-      className={`cl-tab shrink-0 whitespace-nowrap px-2.5 py-1 ${active ? 'cl-tab-active' : ''}`}
+      className={`cl-tab shrink-0 whitespace-nowrap px-2 py-1 ${active ? 'cl-tab-active' : ''}`}
       style={{
-        color: active ? 'var(--text-primary)' : disabled ? 'var(--text-muted)' : 'var(--text-secondary)',
+        opacity: disabled ? 0.45 : 1,
         cursor: disabled ? 'not-allowed' : 'pointer',
       }}
     >

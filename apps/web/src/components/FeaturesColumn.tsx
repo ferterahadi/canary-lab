@@ -24,21 +24,19 @@ export function FeaturesColumn({
 
   return (
     <div className="cl-panel flex h-full flex-col">
-      <div className="cl-panel-header px-4 py-3">
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex min-w-0 items-center gap-2">
-            <span className="cl-kicker">Features</span>
-            {features.length > 0 && <span className="cl-count-chip">{features.length}</span>}
-          </div>
-          <button
-            type="button"
-            onClick={startNewWizard}
-            className="cl-button shrink-0 whitespace-nowrap px-2 py-1 text-[10px] font-semibold uppercase tracking-wide"
-            style={{ color: 'var(--accent)' }}
-          >
-            + New
-          </button>
+      <div className="cl-panel-header flex items-center justify-between gap-2 px-4 py-3">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="cl-kicker">Features</span>
+          {features.length > 0 && <span className="cl-count-chip">{features.length}</span>}
         </div>
+        <button
+          type="button"
+          onClick={startNewWizard}
+          className="cl-button shrink-0 whitespace-nowrap px-2.5 py-1"
+          title="Add a new feature"
+        >
+          + New
+        </button>
       </div>
       <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin px-2 py-2">
         {features.length === 0 ? (

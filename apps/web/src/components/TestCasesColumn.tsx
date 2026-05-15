@@ -61,9 +61,10 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunStatus }: 
 
   return (
     <div className="cl-panel flex h-full flex-col">
-      <div className="cl-panel-header flex items-center justify-between px-4 py-3">
-        <div className="flex items-center gap-2">
+      <div className="cl-panel-header flex items-center justify-between gap-2 px-4 py-3">
+        <div className="flex min-w-0 items-center gap-2">
           <span className="cl-kicker">Tests</span>
+          {totalTests > 0 && !activeRunSummary && <span className="cl-count-chip">{totalTests}</span>}
         </div>
         <TestsHeaderIndicator
           summary={activeRunSummary}
@@ -155,7 +156,6 @@ function TestCard({
       className={`cl-card cl-card-hover transition-all duration-150 ${colorClassForStatus(status)}`}
       style={{
         background: expanded || isRunningTest ? 'var(--bg-selected)' : undefined,
-        boxShadow: isRunningTest ? 'inset 3px 0 0 var(--accent)' : undefined,
       }}
     >
       <button
@@ -170,11 +170,22 @@ function TestCard({
         >
           <ChevronRightIcon />
         </span>
-        <div className="flex-1 min-w-0 truncate text-sm font-medium" title={test.name} style={{ color: 'var(--text-primary)' }}>
+        <div
+          className="flex-1 min-w-0 truncate text-sm font-medium"
+          title={test.name}
+          style={{ color: 'var(--text-primary)' }}
+        >
           {test.name}
         </div>
-        <span className="shrink-0 text-[10px]" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
-          L{test.line}
+        <span
+          className="shrink-0"
+          style={{
+            color: 'var(--text-muted)',
+            fontFamily: 'var(--font-mono)',
+            fontSize: 10.5,
+          }}
+        >
+          :{test.line}
         </span>
         <StatusPill status={status} />
       </button>
@@ -268,14 +279,17 @@ function TestsHeaderIndicator({
   if (!specsLoaded || totalTests <= 0) return null
   if (isRunActivelyTesting) {
     return (
-      <div className="flex items-center gap-2 text-[10px]" style={{ color: 'var(--text-secondary)' }}>
+      <div
+        className="flex items-center gap-1.5"
+        style={{ color: 'var(--text-secondary)', fontSize: 11.5, fontWeight: 500 }}
+      >
         <StatusDot state="running" halo />
-        <span className="uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>running</span>
-        <span style={{ fontFamily: 'var(--font-mono)' }}>0/{totalTests}</span>
+        <span>Running</span>
+        <span style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontSize: 11 }}>0/{totalTests}</span>
       </div>
     )
   }
-  return <span className="cl-count-chip">{totalTests}</span>
+  return null
 }
 
 function RunningIndicator({
@@ -297,12 +311,15 @@ function RunningIndicator({
   const done = totalTests > 0 ? passedCount : summary.passed
   const isTestRunning = isRunActivelyTesting
   return (
-    <div className="flex items-center gap-2 text-[10px]" style={{ color: 'var(--text-secondary)' }}>
+    <div
+      className="flex items-center gap-1.5"
+      style={{ color: 'var(--text-secondary)', fontSize: 11.5, fontWeight: 500 }}
+    >
       {isTestRunning && <StatusDot state="running" halo />}
-      {isTestRunning && (
-        <span className="uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>running</span>
-      )}
-      <span style={{ fontFamily: 'var(--font-mono)' }}>{done}/{total}</span>
+      {isTestRunning && <span style={{ color: 'var(--text-muted)' }}>Running</span>}
+      <span style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', fontSize: 11 }}>
+        {done}<span style={{ color: 'var(--text-muted)' }}>/{total}</span>
+      </span>
     </div>
   )
 }

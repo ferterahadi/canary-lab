@@ -162,12 +162,11 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
                   value={selectedEnv}
                   onChange={(e) => setEnvOverride(e.target.value)}
                   disabled={!feature}
-                  className="cl-input appearance-none rounded-md py-1 pl-2 pr-6 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+                  className="cl-input appearance-none py-1 pl-2 pr-6 text-xs disabled:cursor-not-allowed disabled:opacity-50"
                   style={{
                     backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' fill='none'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%23888' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")`,
                     backgroundRepeat: 'no-repeat',
                     backgroundPosition: 'right 6px center',
-                    fontFamily: 'var(--font-mono)',
                   }}
                   aria-label="Environment"
                 >
@@ -181,7 +180,7 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
                 disabled={!feature || runDisabled}
                 title={runDisabled ? runDisabledReason : undefined}
                 onClick={() => onStartRun(selectedEnv || undefined)}
-                className="cl-button-primary px-3 py-1.5 text-xs font-semibold"
+                className="cl-button-primary px-3 py-1.5"
               >
                 Run Now
               </button>
@@ -226,11 +225,28 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
                       }}
                     >
                       <div className="flex w-full items-center justify-between gap-2">
-                        <span className="shrink-0 text-xs" style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>{shortTime(r.startedAt)}</span>
+                        <span
+                          className="shrink-0"
+                          style={{
+                            color: 'var(--text-secondary)',
+                            fontFamily: 'var(--font-mono)',
+                            fontSize: 12,
+                            letterSpacing: '0.02em',
+                          }}
+                        >
+                          {shortTime(r.startedAt)}
+                        </span>
                         <RunStatusIndicator status={displayStatus} />
                       </div>
-                      <div className="flex w-full items-center justify-between text-[11px]" style={{ color: 'var(--text-muted)' }}>
-                        <span className="truncate" style={{ fontFamily: 'var(--font-mono)' }}>{r.runId}</span>
+                      <div
+                        className="flex w-full items-center justify-between"
+                        style={{
+                          color: 'var(--text-muted)',
+                          fontFamily: 'var(--font-mono)',
+                          fontSize: 10.5,
+                        }}
+                      >
+                        <span className="truncate">{r.runId}</span>
                         {dur != null && <span className="opacity-60">{formatDuration(dur)}</span>}
                       </div>
                     </div>
@@ -245,7 +261,17 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
                     className={`cl-list-row flex w-full flex-col items-start gap-1.5 px-3 py-2.5 text-left ${isSelected ? 'cl-list-row-selected' : ''}`}
                   >
                     <div className="flex w-full items-center justify-between gap-2">
-                      <span className="shrink-0 text-xs" style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>{shortTime(r.startedAt)}</span>
+                      <span
+                        className="shrink-0"
+                        style={{
+                          color: isSelected ? 'var(--text-primary)' : 'var(--text-secondary)',
+                          fontFamily: 'var(--font-mono)',
+                          fontSize: 12,
+                          letterSpacing: '0.02em',
+                        }}
+                      >
+                        {shortTime(r.startedAt)}
+                      </span>
                       <div className="flex items-center gap-1">
                         {compact ? (
                           <RunActionsKebab
@@ -327,8 +353,15 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
                         />
                       </div>
                     </div>
-                    <div className="flex w-full items-center justify-between text-[11px]" style={{ color: 'var(--text-muted)' }}>
-                      <span className="truncate" style={{ fontFamily: 'var(--font-mono)' }}>{r.runId}</span>
+                    <div
+                      className="flex w-full items-center justify-between"
+                      style={{
+                        color: 'var(--text-muted)',
+                        fontFamily: 'var(--font-mono)',
+                        fontSize: 10.5,
+                      }}
+                    >
+                      <span className="truncate">{r.runId}</span>
                       {dur != null && <span>{formatDuration(dur)}</span>}
                     </div>
                     {rowError && (
@@ -783,27 +816,33 @@ function ConfirmDialog({
   onCancel: () => void
   onConfirm: () => void
 }) {
-  const confirmColors = variant === 'danger'
-    ? 'border-rose-500/40 bg-rose-500/10 text-rose-700 hover:bg-rose-500/20 dark:text-rose-300'
-    : 'border-amber-500/50 bg-amber-500/10 text-amber-700 hover:bg-amber-500/20 dark:text-amber-300'
+  const isDanger = variant === 'danger'
+  const confirmStyle: React.CSSProperties = isDanger
+    ? { background: 'var(--danger)', borderColor: 'var(--danger)' }
+    : { background: 'var(--warning)', borderColor: 'var(--warning)' }
   return (
-    <div className="cl-modal-backdrop absolute inset-0 z-50 flex items-center justify-center">
-      <div className="cl-modal w-[420px] rounded-lg p-4">
-        <h2 className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>{title}</h2>
-        <p className="mt-2 text-xs" style={{ color: 'var(--text-secondary)' }}>{description}</p>
-        <div className="mt-4 flex justify-end gap-2 text-xs">
+    <div className="cl-modal-backdrop absolute inset-0 z-50 flex items-center justify-center p-6">
+      <div className="cl-modal w-[440px] p-5">
+        <h2 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>{title}</h2>
+        <p
+          className="mt-1.5 text-[13px] leading-relaxed"
+          style={{ color: 'var(--text-secondary)' }}
+        >
+          {description}
+        </p>
+        <div className="mt-4 flex justify-end gap-2">
           <button
             type="button"
             onClick={onCancel}
-            className="rounded-md px-3 py-1.5 transition-colors duration-150"
-            style={{ border: '1px solid var(--border-default)', color: 'var(--text-secondary)' }}
+            className="cl-button px-3 py-1.5"
           >
             Cancel
           </button>
           <button
             type="button"
             onClick={onConfirm}
-            className={`rounded-md border px-3 py-1.5 transition-colors duration-150 ${confirmColors}`}
+            className="cl-button-primary px-3 py-1.5"
+            style={confirmStyle}
           >
             {confirmLabel}
           </button>

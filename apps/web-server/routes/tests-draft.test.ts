@@ -709,6 +709,48 @@ describe('POST /api/tests/draft/:id/accept-spec', () => {
     await app.close()
   })
 
+  it('preserves uploaded document text and additional notes under feature docs', async () => {
+    const deps = makeDeps({
+      spawnPlanAgent: async () => `<plan-output>[
+        {"step":"Open","actions":["go"],"expectedOutcome":"visible"}
+      ]</plan-output>`,
+      spawnSpecAgent: async () => fileBlocks(buildFeatureScaffold({ featureName: 'context_docs' })),
+    })
+    const app = await makeApp(deps)
+    const post = await app.inject({
+      method: 'POST',
+      url: '/api/tests/draft',
+      payload: {
+        prdText: '# Pasted PRD\n\nKeep checkout steps strict\n\n---\n\n# Acceptance.pdf\n\nUploaded acceptance criteria',
+        additionalNotes: 'Keep checkout steps strict',
+        prdDocuments: [{
+          filename: 'Acceptance Criteria.pdf',
+          contentType: 'application/pdf',
+          characters: 28,
+          text: 'Uploaded acceptance criteria',
+          contentBase64: Buffer.from('original pdf bytes').toString('base64'),
+        }],
+        repos: [{ name: 'app', localPath: '/p' }],
+        featureName: 'context_docs',
+      },
+    })
+    const id = post.json().draftId
+    await new Promise((r) => setTimeout(r, 20))
+    await app.inject({ method: 'POST', url: `/api/tests/draft/${id}/accept-plan`, payload: {} })
+    await new Promise((r) => setTimeout(r, 20))
+
+    const r = await app.inject({ method: 'POST', url: `/api/tests/draft/${id}/accept-spec`, payload: {} })
+    expect(r.statusCode).toBe(200)
+    const featureDir = path.join(projectRoot, 'features', 'context_docs')
+    expect(fs.readFileSync(path.join(featureDir, 'docs', 'additional-notes.md'), 'utf8')).toContain('Keep checkout steps strict')
+    expect(fs.readFileSync(path.join(featureDir, 'docs', 'uploaded-1-Acceptance-Criteria.md'), 'utf8')).toContain('Uploaded acceptance criteria')
+    expect(fs.readFileSync(path.join(featureDir, 'docs', 'uploads', 'uploaded-1-Acceptance-Criteria.pdf'), 'utf8')).toBe('original pdf bytes')
+    const rec = readDraft(logsDir, id)!
+    expect(rec.generatedFiles?.some((file) => file.endsWith(path.join('docs', 'additional-notes.md')))).toBe(true)
+    expect(rec.generatedFiles?.some((file) => file.endsWith(path.join('docs', 'uploads', 'uploaded-1-Acceptance-Criteria.pdf')))).toBe(true)
+    await app.close()
+  })
+
   it('merges generated dev dependencies into root package.json on accept', async () => {
     fs.writeFileSync(path.join(projectRoot, 'package.json'), JSON.stringify({
       name: 'proj',
