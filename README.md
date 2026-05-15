@@ -9,7 +9,7 @@ I wanted an inner loop where I describe a feature, the tests run, an agent reads
 
 It only works because three other things keep getting better. Playwright keeps catching things I'd miss. Claude and Codex keep getting better at reading evidence and editing code. node-pty and the surrounding ecosystem make the orchestration boring. I didn't build the hard parts — I'm assembling them.
 
-[![Canary Lab UI walkthrough](docs/assets/canary-lab-ui-walkthrough.png)](docs/assets/canary-lab-ui-walkthrough.gif)
+![Canary Lab UI walkthrough](docs/assets/canary-lab-ui-walkthrough.png)
 
 See [CHANGELOG.md](CHANGELOG.md) for what's new in each release.
 
