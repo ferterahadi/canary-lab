@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { downloadEvaluationReport, evaluationFilename, evaluationHref, canRestartHeal, isEvaluationExportable } from './RunDetailColumn'
+import { downloadEvaluationReport, evaluationFilename, evaluationHref, canRestartHeal, isEvaluationExportable, shortLocation } from './RunDetailColumn'
 
 describe('canRestartHeal', () => {
   it('is enabled only for terminal runs that can be restarted', () => {
@@ -61,5 +61,12 @@ describe('evaluation export helpers', () => {
     expect(click).toHaveBeenCalledTimes(1)
     expect(removed).toHaveLength(1)
     expect(urlApi.revokeObjectURL).toHaveBeenCalledWith('blob:report')
+  })
+})
+
+describe('shortLocation', () => {
+  it('keeps the final two path segments for compact runtime labels', () => {
+    expect(shortLocation('/Users/oddle/workspace/e2e/helpers/login.ts:209')).toBe('helpers/login.ts:209')
+    expect(shortLocation('checkout.spec.ts:12')).toBe('checkout.spec.ts:12')
   })
 })

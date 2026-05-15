@@ -18,9 +18,21 @@ import {
 // - A reminder that the runner writes journal entries for the agent, so the
 //   agent only supplies hypothesis + filesChanged in the signal body.
 
+// Heal mode for the upcoming cycle.
+//
+// - `service`: the run has at least one editable service repo. The agent
+//   should fix service/app code and avoid reading the test spec.
+// - `test`: the run has zero editable repos (remote-env runs against a
+//   deployed target, or features without a `repos` block). The test spec /
+//   `e2e/helpers/` is the only fixable code, so the agent is told to read it.
+export type HealMode = 'service' | 'test'
+
 export interface HealAddendumInput {
   cycle: number // 1-based: the cycle about to run
   maxCycles?: number
+  /** When omitted, defaults to `service` for backwards compatibility with
+   *  existing callers and fixtures. */
+  mode?: HealMode
   summaryPath?: string
   journalPath?: string
 }
@@ -41,6 +53,7 @@ function readFailingSlugs(summaryPath: string = getSummaryPath()): string[] {
 export function buildHealAddendum(input: HealAddendumInput): string {
   const slugs = readFailingSlugs(input.summaryPath)
   const journalExists = fs.existsSync(input.journalPath ?? DIAGNOSIS_JOURNAL_PATH)
+  const mode: HealMode = input.mode ?? 'service'
 
   const parts: string[] = []
 
@@ -50,7 +63,9 @@ export function buildHealAddendum(input: HealAddendumInput): string {
   )
 
   parts.push(
-    'Do NOT Read the test spec file. Use the heal-prompt resource map above and fix service/app code only.',
+    mode === 'service'
+      ? 'Do NOT Read the test spec file. Use the heal-prompt resource map above and fix service/app code only.'
+      : 'Read the failing test spec and its `e2e/helpers/` — those are the only fixable code for this feature.',
   )
 
   parts.push(

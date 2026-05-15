@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import * as api from '../api/client'
 import type { EditorChoice, HealAgentChoice, ProjectConfig } from '../api/client'
+import { CloseIcon } from './config/atoms'
 
 const HEAL_AGENT_OPTIONS: { value: HealAgentChoice; label: string; description: string }[] = [
   {
@@ -99,21 +100,23 @@ export function SettingsModal({ onClose }: Props) {
     >
       <div
         className="cl-modal relative flex max-h-[calc(100vh-2rem)] w-[min(480px,100%)] flex-col overflow-hidden rounded-lg"
+        style={{ background: 'var(--bg-elevated)' }}
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="cl-panel-header flex items-center justify-between px-4 py-3">
-          <span className="cl-kicker">
-            Settings
-          </span>
+        <header className="cl-dialog-header">
+          <div className="min-w-0 flex-1">
+            <div className="cl-kicker">Project</div>
+            <h2 className="mt-1 text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>Settings</h2>
+          </div>
           <button
             type="button"
             aria-label="Close settings"
             onClick={onClose}
-            className="cl-icon-button h-7 w-7 text-xs"
+            className="cl-icon-button h-7 w-7 shrink-0"
           >
-            ✕
+            <CloseIcon size={14} />
           </button>
-        </div>
+        </header>
         <div className="min-h-0 overflow-y-auto px-4 py-3">
           {!draft ? (
             <div className="text-xs" style={{ color: 'var(--text-muted)' }}>
@@ -198,7 +201,7 @@ export function SettingsModal({ onClose }: Props) {
           )}
         </div>
         <div className="cl-panel-footer flex items-center justify-end gap-2 px-4 py-3">
-          {error && <span className="mr-auto text-xs" style={{ color: '#ef4444' }}>{error}</span>}
+          {error && <span className="mr-auto text-xs" style={{ color: 'var(--danger)' }}>{error}</span>}
           <button
             type="button"
             onClick={onClose}

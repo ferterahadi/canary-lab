@@ -335,6 +335,29 @@ describe('locatorForAgentInDir', () => {
       expect(locator()).toBeNull()
     })
   })
+
+  it('returns null when statSync throws after the locator resolves a ref', () => {
+    const home = path.join(tmp, 'home6')
+    const cwd = path.join(tmp, 'cwd6')
+    const logPath = seedClaudeLog(home, cwd)
+    const realStat = fs.statSync.bind(fs)
+    let hits = 0
+    const spy = vi.spyOn(fs, 'statSync').mockImplementation(((p: fs.PathLike, ...rest: unknown[]) => {
+      if (String(p) === logPath) {
+        hits += 1
+        if (hits >= 2) throw new Error('stat boom')
+      }
+      return (realStat as unknown as (...a: unknown[]) => fs.Stats)(p, ...rest)
+    }) as typeof fs.statSync)
+    try {
+      withHome(home, () => {
+        const locator = locatorForAgentInDir('claude', cwd, new Date().toISOString())
+        expect(locator()).toBeNull()
+      })
+    } finally {
+      spy.mockRestore()
+    }
+  })
 })
 
 function seedClaudeLog(home: string, cwd: string): string {

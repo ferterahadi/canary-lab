@@ -36,7 +36,7 @@ export const STATUS_PRESENTATION: Record<StepStatus, StatusPresentation> = {
     pillClassName: 'border-amber-500/60 bg-amber-50 text-amber-700 dark:border-amber-400/60 dark:bg-amber-400/10 dark:text-amber-300',
   },
   timedout: {
-    label: 'timed out',
+    label: 'timeout',
     cardClassName: 'border-amber-500/40 bg-amber-500/5 dark:border-amber-500/50',
     pillClassName: 'border-amber-500/60 bg-amber-50 text-amber-700 dark:border-amber-400/60 dark:bg-amber-400/10 dark:text-amber-300',
   },

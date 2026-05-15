@@ -13,6 +13,7 @@ export interface PlaybackTest {
   name: string
   title: string
   startedAt?: string
+  endedAt?: string
   status?: string
   passed?: boolean
   durationMs?: number
@@ -35,8 +36,15 @@ export const DEFAULT_PLAYWRIGHT_ARTIFACT_POLICY: PlaywrightArtifactPolicy = {
 
 export function playbackTests(events?: PlaywrightPlaybackEvent[]): PlaybackTest[] {
   const tests = new Map<string, PlaybackTest>()
+  const activeKeyByName = new Map<string, string>()
+  const latestKeyByName = new Map<string, string>()
   for (const event of events ?? []) {
-    const key = event.test.name
+    let key = activeKeyByName.get(event.test.name) ?? latestKeyByName.get(event.test.name) ?? event.test.name
+    if (event.type === 'test-begin') {
+      key = `${event.test.name}:${event.time}`
+      activeKeyByName.set(event.test.name, key)
+      latestKeyByName.set(event.test.name, key)
+    }
     const current = tests.get(key) ?? { name: event.test.name, title: event.test.title, steps: [] }
     current.title = event.test.title || current.title
     if (event.type === 'test-begin') current.startedAt = event.time
@@ -54,8 +62,11 @@ export function playbackTests(events?: PlaywrightPlaybackEvent[]): PlaybackTest[
       current.durationMs = event.durationMs
       current.retry = event.retry
       current.error = event.error
+      current.endedAt = event.time
+      activeKeyByName.delete(event.test.name)
     }
     tests.set(key, current)
+    latestKeyByName.set(event.test.name, key)
   }
   return [...tests.values()].map((test) => ({ ...test, steps: compactPlaybackSteps(test.steps) }))
 }

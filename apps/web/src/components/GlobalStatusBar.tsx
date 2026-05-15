@@ -4,6 +4,7 @@ import { useRuns } from '../state/RunsContext'
 import { isActiveRunStatus } from '../../../../shared/run-state'
 import { EvaluationExportTaskStatus } from './EvaluationExportTaskToast'
 import { WizardTaskStatus } from './WizardTaskStatus'
+import { StatusDot, type StatusDotState } from './config/atoms'
 
 interface Props {
   activeRunDetail: RunDetail | null
@@ -42,46 +43,56 @@ export function GlobalStatusBar({ activeRunDetail, onNavigateToRun }: Props) {
   const servicesActive = isActive
 
   return (
-    <div
-      className="cl-shell-bar flex items-center gap-3 px-4 py-2 overflow-hidden"
-    >
-      <span
-        className="cl-kicker shrink-0"
+    <div className="relative">
+      <div
+        className="cl-shell-bar flex items-center gap-3 px-4 py-2 overflow-hidden"
       >
-        Canary Lab
+      <span className="shrink-0 inline-flex items-center gap-2">
+        <span
+          aria-hidden="true"
+          className="inline-block h-1.5 w-1.5 animate-pulse rounded-full"
+          style={{
+            background: 'var(--accent)',
+            boxShadow: '0 0 12px color-mix(in srgb, var(--accent) 60%, transparent)',
+          }}
+        />
+        <span className="cl-wordmark">Canary Lab</span>
       </span>
-      <span className="cl-divider shrink-0">|</span>
+      <span className="cl-divider shrink-0">·</span>
       <ConnectionBadge state={connection} />
-      <span className="cl-divider shrink-0">|</span>
-      <div className="shrink-0"><StatusDot label="Playwright" state={playwrightState} /></div>
+      <span className="cl-divider shrink-0">·</span>
+      <div className="shrink-0"><StatusChip label="Playwright" state={playwrightState} /></div>
       {services.length > 0 && (
-        <div className="shrink-0">
-          <StatusDot
-            label={`${services.length} service${services.length > 1 ? 's' : ''}`}
-            state={servicesActive ? 'running' : 'idle'}
-          />
-        </div>
+        <>
+          <span className="cl-divider shrink-0">·</span>
+          <div className="shrink-0">
+            <StatusChip
+              label={`${services.length} service${services.length > 1 ? 's' : ''}`}
+              state={servicesActive ? 'running' : 'idle'}
+            />
+          </div>
+        </>
       )}
       <div className="ml-auto flex min-w-0 items-center justify-end gap-2">
         {activeRunDetail && isActive && (
           <button
             type="button"
             onClick={() => onNavigateToRun?.(activeRunDetail.manifest.feature, activeRunDetail.manifest.runId)}
-            className="cl-button flex min-w-0 max-w-[420px] items-center gap-2 px-2 py-0.5 text-[11px]"
-            style={{ color: 'var(--text-secondary)' }}
+            className="cl-button flex min-w-0 max-w-[460px] items-center gap-2 px-2.5 py-1"
             title={`Go to active run: ${activeRunDetail.manifest.feature} ${view.headline} ${activeRunDetail.manifest.runId}`}
           >
-            <span className="shrink-0" style={{ color: 'var(--text-muted)' }}>Active:</span>
-            <span className="truncate" style={{ color: 'var(--text-primary)' }}>{activeRunDetail.manifest.feature}</span>
-            <span className="hidden min-w-0 truncate xl:inline" style={{ color: 'var(--text-secondary)' }}>{view.headline}</span>
-            <span className="hidden min-w-0 truncate 2xl:inline" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+            <span className="shrink-0" style={{ color: 'var(--text-muted)', fontSize: 11 }}>Active</span>
+            <span className="truncate" style={{ color: 'var(--text-primary)', fontSize: 12, fontWeight: 500 }}>{activeRunDetail.manifest.feature}</span>
+            <span className="hidden min-w-0 truncate xl:inline" style={{ color: 'var(--text-secondary)', fontSize: 11.5 }}>{view.headline}</span>
+            <span className="hidden min-w-0 truncate 2xl:inline" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontSize: 11 }}>
               {activeRunDetail.manifest.runId}
             </span>
-            <span className="shrink-0" style={{ color: 'var(--text-muted)' }}>→</span>
+            <span className="shrink-0" style={{ color: 'var(--accent)' }}>→</span>
           </button>
         )}
         <WizardTaskStatus />
         <EvaluationExportTaskStatus />
+      </div>
       </div>
     </div>
   )
@@ -95,51 +106,40 @@ function ConnectionBadge({
 }: {
   state: 'connecting' | 'live' | 'reconnecting' | 'disconnected'
 }) {
-  const palette = {
-    live:          { dot: 'bg-emerald-500',  text: 'text-emerald-700/90 dark:text-emerald-300/90', label: 'live',         pulse: false },
-    connecting:    { dot: 'bg-amber-500',    text: 'text-amber-700/90 dark:text-amber-300/90',     label: 'connecting',   pulse: true },
-    reconnecting:  { dot: 'bg-amber-500',    text: 'text-amber-700/90 dark:text-amber-300/90',     label: 'reconnecting', pulse: true },
-    disconnected:  { dot: 'bg-rose-500',     text: 'text-rose-700/90 dark:text-rose-300/90',       label: 'offline',      pulse: false },
-  }[state]
+  const palette: Record<typeof state, { dot: StatusDotState; text: string; label: string; pulse: boolean }> = {
+    live:         { dot: 'success', text: 'text-emerald-700/90 dark:text-emerald-300/90', label: 'live',         pulse: false },
+    connecting:   { dot: 'warning', text: 'text-amber-700/90 dark:text-amber-300/90',     label: 'connecting',   pulse: true },
+    reconnecting: { dot: 'warning', text: 'text-amber-700/90 dark:text-amber-300/90',     label: 'reconnecting', pulse: true },
+    disconnected: { dot: 'failed',  text: 'text-rose-700/90 dark:text-rose-300/90',       label: 'offline',      pulse: false },
+  }
+  const p = palette[state]
   return (
     <div
       data-testid="runs-connection-badge"
       data-state={state}
-      className={`flex shrink-0 items-center gap-1.5 text-[10px] uppercase tracking-wide ${palette.text}`}
-      title={`Runs stream: ${palette.label}`}
+      className={`flex shrink-0 items-center gap-1.5 ${p.text}`}
+      style={{ fontSize: 11.5, fontWeight: 500 }}
+      title={`Runs stream: ${p.label}`}
     >
-      <span className="relative flex h-2 w-2">
-        {palette.pulse && (
-          <span className={`absolute inline-flex h-full w-full animate-ping rounded-full ${palette.dot} opacity-75`} />
-        )}
-        <span className={`relative inline-flex h-2 w-2 rounded-full ${palette.dot}`} />
-      </span>
-      <span>{palette.label}</span>
+      <StatusDot state={p.dot} pulse={p.pulse} halo={p.pulse} />
+      <span>{p.label}</span>
     </div>
   )
 }
 
-function StatusDot({ label, state }: { label: string; state: 'running' | 'healing' | 'idle' }) {
-  const dotColor =
-    state === 'running' ? 'bg-emerald-500'
-    : state === 'healing' ? 'bg-amber-500'
-    : 'bg-slate-400 dark:bg-slate-600'
-
-  const dotGlow =
-    state === 'running' ? 'bg-emerald-400'
-    : state === 'healing' ? 'bg-amber-400'
-    : ''
-
+function StatusChip({ label, state }: { label: string; state: 'running' | 'healing' | 'idle' }) {
+  const dotState: StatusDotState =
+    state === 'running' ? 'success'
+    : state === 'healing' ? 'warning'
+    : 'idle'
   return (
-    <div className="flex items-center gap-1.5 text-[10px]" style={{ color: 'var(--text-secondary)' }}>
-      <span className="relative flex h-2 w-2">
-        {state !== 'idle' && (
-          <span className={`absolute inline-flex h-full w-full animate-ping rounded-full ${dotGlow} opacity-75`} />
-        )}
-        <span className={`relative inline-flex h-2 w-2 rounded-full ${dotColor}`} />
-      </span>
+    <div
+      className="flex items-center gap-1.5"
+      style={{ color: 'var(--text-primary)', fontSize: 11.5, fontWeight: 500 }}
+    >
+      <StatusDot state={dotState} pulse={state !== 'idle'} halo={state !== 'idle'} />
       <span>{label}</span>
-      <span className="uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>
+      <span style={{ color: 'var(--text-muted)', fontSize: 11, fontWeight: 400 }}>
         {state}
       </span>
     </div>

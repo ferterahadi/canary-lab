@@ -182,7 +182,7 @@ describe('statusLabel', () => {
     expect(statusLabel('testing')).toBe('running')
     expect(statusLabel('passed')).toBe('passed')
     expect(statusLabel('failed')).toBe('failed')
-    expect(statusLabel('timedout')).toBe('timed out')
+    expect(statusLabel('timedout')).toBe('timeout')
     expect(statusLabel('pending')).toBe('pending')
     expect(statusLabel('skipped')).toBe('skipped')
   })
@@ -279,6 +279,25 @@ describe('activeBodyLineForTest', () => {
             name: 'test-case-creates-a-todo',
             location: '/todo.spec.ts:10',
             locations: ['/todo.spec.ts:12'],
+          },
+        ],
+      },
+    })).toBe(3)
+  })
+
+  it('falls back to the failed entry location when locations is absent entirely', () => {
+    expect(activeBodyLineForTest({
+      testName: 'Creates a TODO',
+      testLine: 10,
+      bodySource: '{\n  await page.goto(\"/\")\n  await expect(locator).toBeVisible()\n}',
+      summary: {
+        complete: true,
+        total: 1,
+        passed: 0,
+        failed: [
+          {
+            name: 'test-case-creates-a-todo',
+            location: '/todo.spec.ts:12',
           },
         ],
       },

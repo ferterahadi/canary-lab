@@ -50,6 +50,10 @@ export interface ExtractedTest {
   line: number
   bodySource: string
   steps: ExtractedStep[]
+  // Set when the test is defined in a helper file (e.g. a factory) rather
+  // than the spec file that owns it. Click-throughs in the UI prefer this
+  // path so the code viewer lands at the actual definition site.
+  sourceFile?: string
 }
 
 export interface FeatureSpecFile {
@@ -235,6 +239,7 @@ export interface DraftRepo {
 export interface DraftRecord {
   draftId: string
   prdText: string
+  additionalNotes?: string
   prdDocuments: DraftPrdDocument[]
   repos: DraftRepo[]
   featureName?: string
@@ -257,10 +262,13 @@ export interface DraftPrdDocument {
   filename: string
   contentType: string
   characters: number
+  text?: string
+  contentBase64?: string
 }
 
 export interface CreateDraftPayload {
   prdText: string
+  additionalNotes?: string
   prdDocuments?: DraftPrdDocument[]
   repos: DraftRepo[]
   featureName?: string

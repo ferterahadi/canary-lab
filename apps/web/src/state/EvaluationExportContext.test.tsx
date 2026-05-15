@@ -69,7 +69,7 @@ afterEach(() => {
 })
 
 describe('EvaluationExportProvider', () => {
-  it('rehydrates persisted tasks and subscribes running tasks on mount', async () => {
+  it('rehydrates persisted tasks and replays task logs on mount', async () => {
     const running = task({ taskId: 'persisted-running', runId: 'run-persisted', status: 'running' })
     const completed = task({
       taskId: 'persisted-completed',
@@ -88,12 +88,17 @@ describe('EvaluationExportProvider', () => {
     expect(api.listEvaluationExportTasks).toHaveBeenCalledWith()
     expect(captured.value?.tasks.map((item) => item.taskId)).toEqual(['persisted-completed', 'persisted-running'])
     expect(captured.value?.taskForRun('run-persisted')?.taskId).toBe('persisted-running')
-    expect(FakeWebSocket.instances[0].url).toBe('ws://test/ws/evaluation-exports/persisted-running')
+    expect(FakeWebSocket.instances.map((socket) => socket.url)).toEqual([
+      'ws://test/ws/evaluation-exports/persisted-completed',
+      'ws://test/ws/evaluation-exports/persisted-running',
+    ])
 
     act(() => {
-      FakeWebSocket.instances[0].fire({ type: 'data', chunk: 'restored log\n' })
+      FakeWebSocket.instances[0].fire({ type: 'data', chunk: 'completed restored log\n' })
+      FakeWebSocket.instances[1].fire({ type: 'data', chunk: 'running restored log\n' })
     })
-    expect(captured.value?.logsByTaskId['persisted-running']).toContain('restored log')
+    expect(captured.value?.logsByTaskId['persisted-completed']).toContain('completed restored log')
+    expect(captured.value?.logsByTaskId['persisted-running']).toContain('running restored log')
   })
 
   it('starts an export, streams logs, refreshes on exit, and exposes selection helpers', async () => {
@@ -276,6 +281,43 @@ describe('EvaluationExportProvider', () => {
       root.unmount()
     })
     expect(FakeWebSocket.instances[0].closeCalls).toBe(1)
+  })
+
+  it('skips re-subscribing a task that already has an active connection', async () => {
+    const captured = renderProbe()
+    const running = task({ taskId: 'dup-task', runId: 'run-dup', status: 'running' })
+    vi.mocked(api.startEvaluationExport).mockResolvedValue(running)
+
+    await act(async () => {
+      await captured.value?.startExport('run-dup', 'raw')
+    })
+    expect(FakeWebSocket.instances).toHaveLength(1)
+
+    await act(async () => {
+      await captured.value?.startExport('run-dup', 'raw')
+    })
+    // The second startExport reuses the existing connection rather than opening another.
+    expect(FakeWebSocket.instances).toHaveLength(1)
+  })
+
+  it('ignores rehydrated tasks when the provider unmounts before tasks resolve', async () => {
+    let resolveTasks: (tasks: EvaluationExportTask[]) => void = () => {}
+    vi.mocked(api.listEvaluationExportTasks).mockReturnValueOnce(
+      new Promise<EvaluationExportTask[]>((resolve) => { resolveTasks = resolve }),
+    )
+    renderProbe()
+
+    act(() => {
+      root.unmount()
+    })
+
+    await act(async () => {
+      resolveTasks([task({ taskId: 'late-task', runId: 'run-late', status: 'running' })])
+      await Promise.resolve()
+    })
+
+    // No socket opens because the rehydration short-circuits on the cancelled flag.
+    expect(FakeWebSocket.instances).toHaveLength(0)
   })
 
   it('throws when the hook is used outside the provider', () => {

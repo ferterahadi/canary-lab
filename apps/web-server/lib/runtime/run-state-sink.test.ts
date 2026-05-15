@@ -94,6 +94,22 @@ describe('FileRunStateSink', () => {
     })
   })
 
+  it('stamps a fresh updatedAt when recordLifecycleEvent omits one', () => {
+    const sink = new FileRunStateSink(logsDir)
+    sink.bootstrap(manifest())
+    const before = new Date().toISOString()
+    sink.recordLifecycleEvent('run-1', {
+      phase: 'waiting-for-signal',
+      headline: 'auto-stamped',
+      detail: 'no updatedAt provided',
+      updatedAt: '',
+    })
+    const lifecyclePath = buildRunPaths(runDirFor(logsDir, 'run-1')).lifecycleEventsPath
+    const event = JSON.parse(fs.readFileSync(lifecyclePath, 'utf-8').trim())
+    expect(event.updatedAt).not.toBe('')
+    expect(event.updatedAt >= before).toBe(true)
+  })
+
   it('finalizes services, clears running summary state, and mirrors endedAt into the index', () => {
     const sink = new FileRunStateSink(logsDir)
     sink.bootstrap(manifest())

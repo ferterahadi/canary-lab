@@ -157,6 +157,69 @@ describe('api client', () => {
     )
   })
 
+  it('lists evaluation export tasks without query when no runId', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(ok([]))
+    await expect(listEvaluationExportTasks({}, { baseUrl: 'http://x', fetchImpl })).resolves.toEqual([])
+    expect(fetchImpl).toHaveBeenCalledWith('http://x/api/evaluation-exports', { method: 'GET' })
+  })
+
+  it('downloads using the ambient document and URL when no overrides are provided', async () => {
+    const link = {
+      href: '',
+      download: '',
+      style: { display: '' },
+      click: vi.fn(),
+      remove: vi.fn(),
+    } as unknown as HTMLAnchorElement
+    const ambientDoc = {
+      body: { appendChild: vi.fn() },
+      createElement: vi.fn().mockReturnValue(link),
+    }
+    const ambientURL = {
+      createObjectURL: vi.fn().mockReturnValue('blob:ambient'),
+      revokeObjectURL: vi.fn(),
+    }
+    vi.stubGlobal('document', ambientDoc)
+    vi.stubGlobal('URL', ambientURL)
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(new Blob(['zip']), { status: 200 }))
+    try {
+      await downloadEvaluationExportTask(
+        {
+          taskId: 'task-amb',
+          runId: 'run-amb',
+          feature: 'ambient',
+          mode: 'raw',
+          status: 'completed',
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+          downloadReady: true,
+        },
+        { fetchImpl },
+      )
+    } finally {
+      vi.unstubAllGlobals()
+    }
+    expect(link.click).toHaveBeenCalled()
+    expect(ambientURL.createObjectURL).toHaveBeenCalled()
+  })
+
+  it('throws ApiError with null body when evaluation export download response is empty', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response('', { status: 500 }))
+    await expect(downloadEvaluationExportTask(
+      {
+        taskId: 'gone',
+        runId: 'run-gone',
+        feature: 'gone',
+        mode: 'raw',
+        status: 'failed',
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+        downloadReady: false,
+      },
+      { fetchImpl, documentRef: {} as Document },
+    )).rejects.toMatchObject({ status: 500, body: null })
+  })
+
   it('downloads evaluation export zip files with safe filenames', async () => {
     const link = {
       href: '',

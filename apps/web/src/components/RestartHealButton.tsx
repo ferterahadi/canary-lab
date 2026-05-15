@@ -58,7 +58,7 @@ export function RestartHealButton({ runId, onRestarted }: Props) {
       >
         {sending ? 'Restarting…' : 'Restart Heal'}
       </button>
-      {err && <span className="text-[11px]" style={{ color: '#ef4444' }}>{err}</span>}
+      {err && <span className="text-[11px]" style={{ color: 'var(--danger)' }}>{err}</span>}
     </div>
   )
 }

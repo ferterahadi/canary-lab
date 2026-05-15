@@ -162,6 +162,34 @@ describe('wizard agent runner cancellation', () => {
     fs.rmSync(tmp, { recursive: true, force: true })
   })
 
+  it('starts planning with a fresh command instead of resuming an older session', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'wizard-runner-'))
+    const pty = new FakePty()
+    let command = ''
+    const run = spawnPlanAgent({
+      ptyFactory: (opts) => {
+        command = opts.command
+        return pty
+      },
+      planTemplate: writePlanTemplate(tmp),
+    })({
+      draftId: 'd4-fresh',
+      agent: 'claude',
+      prdText: 'Login',
+      repos: [{ name: 'app', localPath: '/app' }],
+      draftDir: tmp,
+      agentLogPath: path.join(tmp, 'agent.log'),
+      pinSessionId: 'new-plan-session',
+    })
+
+    pty.emitData('<plan-output>[]</plan-output>')
+    pty.emitExit(0)
+    await expect(run).resolves.toContain('<plan-output>')
+    expect(command).toContain(`'--session-id' 'new-plan-session'`)
+    expect(command).not.toContain(`'--resume'`)
+    fs.rmSync(tmp, { recursive: true, force: true })
+  })
+
   it('hides misleading restored-session notices from spec output', async () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'wizard-runner-'))
     const pty = new FakePty()
@@ -183,6 +211,36 @@ describe('wizard agent runner cancellation', () => {
     pty.emitExit(0)
     await expect(run).resolves.not.toContain('Restored session')
     expect(fs.readFileSync(path.join(tmp, 'agent.log'), 'utf8')).not.toContain('Restored session')
+    fs.rmSync(tmp, { recursive: true, force: true })
+  })
+
+  it('resumes the matching planning session during spec generation', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'wizard-runner-'))
+    const pty = new FakePty()
+    let command = ''
+    const run = spawnSpecAgent({
+      ptyFactory: (opts) => {
+        command = opts.command
+        return pty
+      },
+      specTemplate: writeSpecTemplate(tmp),
+    })({
+      draftId: 'd5-resume',
+      agent: 'claude',
+      featureName: 'login',
+      plan: [],
+      repos: [{ name: 'app', localPath: '/app' }],
+      draftDir: tmp,
+      agentLogPath: path.join(tmp, 'agent.log'),
+      resumeSessionId: 'sess-123',
+      pinSessionId: 'must-not-be-used',
+    })
+
+    pty.emitData('<file path="x.ts">x</file>')
+    pty.emitExit(0)
+    await expect(run).resolves.toContain('<file path="x.ts">')
+    expect(command).toContain(`'--resume' 'sess-123'`)
+    expect(command).not.toContain(`'--session-id' 'must-not-be-used'`)
     fs.rmSync(tmp, { recursive: true, force: true })
   })
 

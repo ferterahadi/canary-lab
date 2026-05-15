@@ -60,6 +60,7 @@ export function EvaluationExportProvider({ children, wsBase, WebSocketImpl }: Ev
         WebSocketImpl,
         onData: (chunk) => appendLog(taskId, chunk),
         onExit: () => {
+          delete connectionsRef.current[taskId]
           void refreshTask(taskId)
         },
         onError: (err) => appendLog(taskId, `[evaluation] log stream error: ${err}\n`),
@@ -76,7 +77,7 @@ export function EvaluationExportProvider({ children, wsBase, WebSocketImpl }: Ev
         if (cancelled) return
         setTasksById(Object.fromEntries(tasks.map((task) => [task.taskId, task])))
         for (const task of tasks) {
-          if (task.status === 'running') subscribeTask(task.taskId)
+          subscribeTask(task.taskId)
         }
       })
       .catch(() => { /* keep an empty task list on startup failures */ })
@@ -125,8 +126,11 @@ export function EvaluationExportProvider({ children, wsBase, WebSocketImpl }: Ev
   const openTask = useCallback((taskId?: string): void => {
     const nextTaskId = taskId ?? latestTask?.taskId ?? null
     setSelectedTaskId(nextTaskId)
-    if (nextTaskId) setDialogOpen(true)
-  }, [latestTask?.taskId])
+    if (nextTaskId) {
+      if (!logsByTaskId[nextTaskId]) subscribeTask(nextTaskId)
+      setDialogOpen(true)
+    }
+  }, [latestTask?.taskId, logsByTaskId, subscribeTask])
 
   const closeDialog = useCallback((): void => {
     setDialogOpen(false)

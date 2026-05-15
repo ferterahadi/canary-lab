@@ -275,7 +275,7 @@ export function EnvsetsTab({ feature }: { feature: string }) {
         )}
       </div>
       {error && (
-        <div className="px-4 py-1.5 text-xs" style={{ color: '#ef4444' }}>{error}</div>
+        <div className="px-4 py-1.5 text-xs" style={{ color: 'var(--danger)' }}>{error}</div>
       )}
       {envObj && slotName ? (
         <SlotEditor
@@ -451,7 +451,7 @@ function AddSlotModal({
               <div className="px-3 py-2 text-xs" style={{ color: 'var(--text-muted)' }}>Empty directory.</div>
             )}
           </div>
-          {error && <div className="px-4 pb-2 text-xs" style={{ color: '#ef4444' }}>{error}</div>}
+          {error && <div className="px-4 pb-2 text-xs" style={{ color: 'var(--danger)' }}>{error}</div>}
         </div>
       ) : (
         <div className="flex flex-col gap-3 px-4 py-3">
@@ -481,7 +481,7 @@ function AddSlotModal({
           <div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
             The picked file's content will be copied into every existing env ({envCount}). Edit per-env afterward.
           </div>
-          {error && <div className="text-xs" style={{ color: '#ef4444' }}>{error}</div>}
+          {error && <div className="text-xs" style={{ color: 'var(--danger)' }}>{error}</div>}
           <div className="flex justify-end gap-2 pt-2" style={{ borderTop: '1px solid var(--border-default)' }}>
             <button
               type="button"
@@ -597,7 +597,7 @@ function SlotEditor({
                   title="Remove key"
                   onClick={() => setDraft(draft.filter((_, j) => j !== i))}
                   className="absolute right-1.5 top-1/2 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md opacity-0 transition-opacity duration-150 group-hover:opacity-100 focus:opacity-100"
-                  style={{ color: '#ef4444' }}
+                  style={{ color: 'var(--danger)' }}
                 >
                   <TrashIcon />
                 </button>
@@ -625,7 +625,7 @@ function SlotEditor({
             </button>
           </div>
           {doc.unparsedLines.length > 0 && (
-            <div className="mt-3 text-[10px]" style={{ color: '#eab308' }}>
+            <div className="mt-3 text-[10px]" style={{ color: 'var(--warning)' }}>
               {doc.unparsedLines.length} line(s) couldn't be parsed and will be preserved verbatim.
             </div>
           )}
@@ -861,7 +861,7 @@ function CopyFromModal({
               </div>
             </div>
           )}
-          {error && <div className="text-xs" style={{ color: '#ef4444' }}>{error}</div>}
+          {error && <div className="text-xs" style={{ color: 'var(--danger)' }}>{error}</div>}
           <div className="flex justify-end gap-2 pt-2" style={{ borderTop: '1px solid var(--border-default)' }}>
             <button
               type="button"
@@ -900,9 +900,9 @@ function CopyFromModal({
                 onToggle: () => setOverwrite((s) => ({ ...s, [m.key]: !s[m.key] })),
                 detail: (
                   <span className="text-[10px]" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
-                    <span style={{ color: '#ef4444' }}>{m.currentValue || '∅'}</span>
+                    <span style={{ color: 'var(--danger)' }}>{m.currentValue || '∅'}</span>
                     {' → '}
-                    <span style={{ color: '#22c55e' }}>{m.sourceValue || '∅'}</span>
+                    <span style={{ color: 'var(--success)' }}>{m.sourceValue || '∅'}</span>
                   </span>
                 ),
               }))}
@@ -916,7 +916,7 @@ function CopyFromModal({
                 checked: !!addNew[e.key],
                 onToggle: () => setAddNew((s) => ({ ...s, [e.key]: !s[e.key] })),
                 detail: (
-                  <span className="text-[10px]" style={{ color: '#22c55e', fontFamily: 'var(--font-mono)' }}>
+                  <span className="text-[10px]" style={{ color: 'var(--success)', fontFamily: 'var(--font-mono)' }}>
                     {e.value || '∅'}
                   </span>
                 ),

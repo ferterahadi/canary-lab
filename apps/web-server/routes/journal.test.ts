@@ -134,4 +134,13 @@ describe('DELETE /api/journal/:iteration', () => {
     const res = await app.inject({ method: 'DELETE', url: '/api/journal/99' })
     expect(res.statusCode).toBe(404)
   })
+
+  it('404s when the legacy fallback also lacks a matching iteration', async () => {
+    const app = await build()
+    fs.rmSync(runJournalPath, { force: true })
+    // Iteration 99 does not exist in the legacy journal — the fallback check
+    // runs but ultimately reports not found.
+    const res = await app.inject({ method: 'DELETE', url: '/api/journal/99?run=r-bbbb' })
+    expect(res.statusCode).toBe(404)
+  })
 })

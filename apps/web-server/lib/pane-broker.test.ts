@@ -22,6 +22,16 @@ describe('PaneBroker', () => {
     expect(r.msgs).toEqual([{ type: 'data', chunk: 'hello world' }])
   })
 
+  it('skips the buffer replay when replay:false is passed', () => {
+    const b = new PaneBroker(1024)
+    b.push('service:api', 'old buffered')
+    const r = recorder()
+    b.subscribe('service:api', r, { replay: false })
+    expect(r.msgs).toEqual([])
+    b.push('service:api', 'live')
+    expect(r.msgs).toEqual([{ type: 'data', chunk: 'live' }])
+  })
+
   it('forwards live data to all current subscribers', () => {
     const b = new PaneBroker(1024)
     const a = recorder()
