@@ -176,16 +176,34 @@ export function ConfigureStep({
       <div className="flex-1 min-h-0 overflow-y-auto p-6">
         <div className="mx-auto grid max-w-6xl gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(360px,440px)]">
           <div className="space-y-4">
-            <section className="rounded-lg border border-zinc-200 bg-white/70 p-4 dark:border-zinc-800 dark:bg-zinc-950/40">
+            <section className="cl-frame p-5">
               <div className="flex items-start justify-between gap-4">
                 <div>
-                  <div className="text-xs font-semibold uppercase tracking-wide text-zinc-700 dark:text-zinc-300">1. Optional context</div>
-                  <p className="mt-1 text-xs text-zinc-500">Add PRDs, notes, or acceptance criteria if you have them. If this is blank, Canary Lab infers coverage from the selected repos.</p>
+                  <div className="cl-frame-heading">1. Optional context</div>
+                  <p className="mt-1 text-xs">Add PRDs, notes, or acceptance criteria if you have them. If this is blank, Canary Lab infers coverage from the selected repos.</p>
                 </div>
-                {prdFiles.length > 0 && <span className="rounded bg-sky-500/10 px-2 py-1 text-[11px] text-sky-500">{prdFiles.length} queued</span>}
+                {prdFiles.length > 0 && (
+                  <span
+                    className="px-2 py-0.5 text-[11px]"
+                    style={{
+                      color: 'var(--accent)',
+                      background: 'var(--accent-soft)',
+                      borderRadius: 9999,
+                      fontWeight: 500,
+                    }}
+                  >
+                    {prdFiles.length} queued
+                  </span>
+                )}
               </div>
               <div
-                className="mt-3 rounded-lg border border-dashed border-zinc-300 bg-zinc-50 p-4 text-xs text-zinc-600 dark:border-zinc-700 dark:bg-zinc-900/40 dark:text-zinc-400"
+                className="mt-3 p-4 text-xs"
+                style={{
+                  border: '1px dashed var(--border-strong)',
+                  background: 'var(--bg-input)',
+                  color: 'var(--text-secondary)',
+                  borderRadius: 6,
+                }}
                 onDragOver={(e) => {
                   e.preventDefault()
                   e.dataTransfer.dropEffect = 'copy'
@@ -197,10 +215,10 @@ export function ConfigureStep({
               >
                 <div className="flex items-center justify-between gap-3">
                   <div>
-                    <div className="font-medium text-zinc-800 dark:text-zinc-200">Drop docs here</div>
+                    <div className="font-medium">Drop docs here</div>
                     <div className="mt-0.5">Supports .txt, .md, .pdf, and .docx.</div>
                   </div>
-                  <label className="shrink-0 cursor-pointer rounded border border-zinc-300 px-2 py-1 text-[11px] text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-900">
+                  <label className="cl-button shrink-0 cursor-pointer px-2 py-1">
                     Browse files
                     <input
                       type="file"
@@ -217,22 +235,26 @@ export function ConfigureStep({
                 {prdFiles.length > 0 && (
                   <ul className="mt-3 space-y-1">
                     {prdFiles.map((file, i) => (
-                      <li key={`${file.name}:${i}`} className="flex items-center gap-2 rounded bg-white px-2 py-1 font-mono text-[11px] dark:bg-zinc-950">
+                      <li
+                        key={`${file.name}:${i}`}
+                        className="flex items-center gap-2 px-2 py-1 font-mono text-[11px]"
+                        style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)', borderRadius: 2 }}
+                      >
                         <span className="min-w-0 flex-1 truncate">{file.name}</span>
-                        <span className="text-zinc-400">{formatBytes(file.size)}</span>
-                        <button type="button" onClick={() => removeFile(i)} className="text-zinc-500 hover:text-rose-400">Remove</button>
+                        <span className="opacity-70">{formatBytes(file.size)}</span>
+                        <button type="button" onClick={() => removeFile(i)} className="hover:opacity-100 opacity-70">Remove</button>
                       </li>
                     ))}
                   </ul>
                 )}
                 {prdDocuments.length > 0 && prdFiles.length === 0 && (
-                  <div className="mt-2 text-[11px] text-zinc-500">
+                  <div className="mt-2 text-[11px]">
                     Extracted {prdDocuments.length} document{prdDocuments.length === 1 ? '' : 's'}.
                   </div>
                 )}
-                {extractError && <div className="mt-2 text-[11px] text-rose-400">{extractError}</div>}
+                {extractError && <div className="mt-2 text-[11px]" style={{ color: 'var(--danger)' }}>{extractError}</div>}
               </div>
-              <label className="mt-4 block text-xs font-medium uppercase tracking-wide text-zinc-600 dark:text-zinc-400" htmlFor="prd">
+              <label className="cl-frame-heading mt-4 block" htmlFor="prd">
                 Additional notes only
               </label>
               <textarea
@@ -241,18 +263,21 @@ export function ConfigureStep({
                 value={prdText}
                 onChange={(e) => setPrdText(e.target.value)}
                 placeholder="Paste extra requirements, links, user flows, acceptance criteria, or edge cases. Uploaded docs stay attached above and will not be copied here."
-                className="mt-2 w-full resize-y rounded border border-zinc-300 bg-white p-3 font-mono text-xs text-zinc-900 focus:border-zinc-500 focus:outline-none dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100"
+                className="cl-input mt-2 w-full resize-y p-3 text-xs"
               />
             </section>
           </div>
 
           <aside className="space-y-4">
-            <section className="rounded-lg border border-zinc-200 bg-white/70 p-4 dark:border-zinc-800 dark:bg-zinc-950/40">
-              <div className="text-xs font-semibold uppercase tracking-wide text-zinc-700 dark:text-zinc-300">2. Repositories under test</div>
-              <p className="mt-1 text-xs text-zinc-500">Select known repos or add any local folder. Canary Lab does not assume repos live in `~/Documents`.</p>
+            <section className="cl-frame p-5">
+              <div className="cl-frame-heading">2. Repositories under test</div>
+              <p className="mt-1 text-xs">Select known repos or add any local folder. Canary Lab does not assume repos live in `~/Documents`.</p>
 
-              <div className="mt-3 rounded border border-zinc-200 p-3 dark:border-zinc-800">
-                <div className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">Add a repo folder</div>
+              <div
+                className="mt-3 p-3"
+                style={{ border: '1px solid var(--border-subtle)', borderRadius: 2 }}
+              >
+                <div className="cl-frame-heading">Add a repo folder</div>
                 <div className="mt-2">
                   <FolderPicker
                     value={repoPathDraft}
@@ -273,33 +298,41 @@ export function ConfigureStep({
                     if (e.key === 'Enter') void addRepoPath()
                   }}
                   placeholder="/absolute/path/to/repo or ~/path/to/repo"
-                  className="mt-2 w-full rounded border border-zinc-300 bg-white px-2 py-1.5 font-mono text-[11px] text-zinc-900 focus:border-zinc-500 focus:outline-none dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100"
+                  className="cl-input mt-2 w-full px-2 py-1.5 text-[11px]"
                 />
                 <div className="mt-2 flex justify-end">
                   <button
                     type="button"
                     onClick={() => void addRepoPath()}
                     disabled={repoAdding}
-                    className="rounded bg-sky-600 px-3 py-1.5 text-xs text-white hover:bg-sky-500 disabled:opacity-50"
+                    className="cl-button-primary px-3 py-1.5 disabled:opacity-50"
                   >
                     {repoAdding ? 'Adding...' : 'Add path'}
                   </button>
                 </div>
-                {repoAddError && <div className="mt-2 text-[11px] text-rose-400">{repoAddError}</div>}
+                {repoAddError && <div className="mt-2 text-[11px]" style={{ color: 'var(--danger)' }}>{repoAddError}</div>}
               </div>
 
               {repoList.length > 0 && (
                 <div className="mt-3">
-                  <div className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">Selected</div>
+                  <div className="cl-frame-heading">Selected</div>
                   <div className="mt-2 space-y-1">
                     {repoList.map((repo) => {
                       const key = repoKey(repo)
                       return (
-                        <div key={key} className="rounded border border-emerald-500/30 bg-emerald-500/10 px-2 py-1.5 text-xs">
+                        <div
+                          key={key}
+                          className="px-2 py-1.5 text-xs"
+                          style={{
+                            border: '1px solid var(--accent)',
+                            background: 'var(--accent-soft)',
+                            borderRadius: 6,
+                          }}
+                        >
                           <div className="flex items-center gap-2">
-                            <span className="min-w-0 flex-1 truncate font-medium text-zinc-800 dark:text-zinc-200">{repo.name}</span>
-                            <span className="min-w-0 flex-[1.6] truncate font-mono text-[10px] text-zinc-500">{repo.localPath}</span>
-                            <button type="button" onClick={() => toggleRepo(repo)} className="text-zinc-500 hover:text-rose-400">Remove</button>
+                            <span className="min-w-0 flex-1 truncate font-medium">{repo.name}</span>
+                            <span className="min-w-0 flex-[1.6] truncate font-mono text-[10px]" style={{ color: 'var(--text-muted)' }}>{repo.localPath}</span>
+                            <button type="button" onClick={() => toggleRepo(repo)} className="hover:opacity-100 opacity-70">Remove</button>
                           </div>
                           <RepoBranchPicker repo={repo} onChange={updateSelectedRepo} />
                         </div>
@@ -310,10 +343,10 @@ export function ConfigureStep({
               )}
 
               <div className="mt-3">
-                <div className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">Known from existing features</div>
+                <div className="cl-frame-heading">Known from existing features</div>
                 <div className="mt-2 max-h-72 space-y-1 overflow-y-auto">
                   {allRepos.length === 0 ? (
-                    <div className="text-xs text-zinc-500">No existing feature repos yet. Add a folder above.</div>
+                    <div className="text-xs">No existing feature repos yet. Add a folder above.</div>
                   ) : (
                     allRepos.map(({ repo, feature }) => {
                       const key = repoKey(repo)
@@ -321,55 +354,71 @@ export function ConfigureStep({
                       return (
                         <label
                           key={key}
-                          className={`flex items-center gap-2 rounded border px-2 py-1.5 text-xs ${selected ? 'border-emerald-500/30 bg-emerald-500/10' : 'border-zinc-200 bg-zinc-100/60 dark:border-zinc-800 dark:bg-zinc-900/60'} text-zinc-800 dark:text-zinc-200`}
+                          className="flex items-center gap-2 px-2 py-1.5 text-xs"
+                          style={{
+                            border: `1px solid ${selected ? 'var(--accent)' : 'var(--border-default)'}`,
+                            background: selected ? 'var(--accent-soft)' : 'var(--bg-input)',
+                            color: 'var(--text-primary)',
+                            borderRadius: 6,
+                          }}
                         >
                           <input type="checkbox" checked={selected} onChange={() => toggleRepo(repo)} />
                           <span className="min-w-0 flex-1 truncate font-medium">{repo.name}</span>
                           {repo.branch && (
-                            <span className="max-w-[110px] truncate font-mono text-[10px] text-zinc-500" title={repo.branch}>
+                            <span className="max-w-[110px] truncate font-mono text-[10px]" style={{ color: 'var(--text-muted)' }} title={repo.branch}>
                               {repo.branch}
                             </span>
                           )}
-                          <span className="truncate text-zinc-400 dark:text-zinc-600">from {feature}</span>
+                          <span className="truncate opacity-70">from {feature}</span>
                         </label>
                       )
                     })
                   )}
                 </div>
               </div>
-              {validation.errors.repos && <div className="mt-2 text-xs text-rose-400">{validation.errors.repos}</div>}
+              {validation.errors.repos && <div className="mt-2 text-xs" style={{ color: 'var(--danger)' }}>{validation.errors.repos}</div>}
             </section>
 
-            <section className="rounded-lg border border-zinc-200 bg-white/70 p-4 dark:border-zinc-800 dark:bg-zinc-950/40">
-              <label className="block text-xs font-semibold uppercase tracking-wide text-zinc-700 dark:text-zinc-300" htmlFor="featureName">
+            <section className="cl-frame p-5">
+              <label className="cl-frame-heading block" htmlFor="featureName">
                 Feature name
               </label>
-              <p className="mt-1 text-xs text-zinc-500">Optional folder name for the generated Canary Lab feature.</p>
+              <p className="mt-1 text-xs">Optional folder name for the generated Canary Lab feature.</p>
               <input
                 id="featureName"
                 type="text"
                 value={featureName}
                 onChange={(e) => setFeatureName(e.target.value)}
                 placeholder={featureNamePlaceholder}
-                className="mt-2 w-full rounded border border-zinc-300 bg-white px-2 py-1.5 text-xs text-zinc-900 focus:border-zinc-500 focus:outline-none dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100"
+                className="cl-input mt-2 w-full px-2 py-1.5 text-xs"
+                style={{ fontFamily: 'var(--font-sans)' }}
               />
-              {validation.errors.featureName && <div className="mt-1 text-xs text-rose-400">{validation.errors.featureName}</div>}
+              {validation.errors.featureName && <div className="mt-1 text-xs" style={{ color: 'var(--danger)' }}>{validation.errors.featureName}</div>}
             </section>
           </aside>
 
           {errorMessage && (
-            <div className="lg:col-span-2 rounded border border-rose-500/40 bg-rose-500/10 p-2 text-xs text-rose-300">
+            <div
+              className="lg:col-span-2 p-3 text-xs"
+              style={{
+                border: '1px solid var(--danger)',
+                background: 'color-mix(in srgb, var(--danger) 8%, transparent)',
+                color: 'var(--danger)',
+                fontFamily: 'var(--font-mono)',
+                borderRadius: 6,
+              }}
+            >
               {errorMessage}
             </div>
           )}
         </div>
       </div>
 
-      <div className="flex items-center justify-end gap-2 border-t border-zinc-200 dark:border-zinc-800 px-6 py-3">
+      <div className="cl-panel-footer flex items-center justify-end gap-2 px-6 py-3">
         <button
           type="button"
           onClick={onCancel}
-          className="rounded border border-zinc-300 dark:border-zinc-700 px-3 py-1.5 text-xs text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-800"
+          className="cl-button px-3 py-1.5"
         >
           Cancel
         </button>
@@ -377,9 +426,9 @@ export function ConfigureStep({
           type="button"
           onClick={submit}
           disabled={!validation.ok || submitting || extracting}
-          className="rounded bg-emerald-600 px-3 py-1.5 text-xs text-zinc-50 hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
+          className="cl-button-primary px-4 py-1.5 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {submitting || extracting ? 'Starting draft...' : 'Draft test plan'}
+          {submitting || extracting ? 'Starting draft…' : 'Draft test plan'}
         </button>
       </div>
     </div>
@@ -474,7 +523,14 @@ function RepoBranchPicker({
   }
 
   return (
-    <div className="mt-2 rounded border border-zinc-200/70 bg-white/50 p-2 dark:border-zinc-800/80 dark:bg-zinc-950/30">
+    <div
+      className="mt-2 p-2"
+      style={{
+        border: '1px solid var(--border-subtle)',
+        background: 'var(--bg-overlay)',
+        borderRadius: 6,
+      }}
+    >
       <div className="flex flex-wrap items-center gap-2">
         <span
           className="inline-flex max-w-[180px] items-center rounded px-2 py-1 font-mono text-[10px]"
@@ -489,7 +545,7 @@ function RepoBranchPicker({
           </span>
         </span>
         {status?.dirty && (
-          <span className="text-[10px] text-amber-500">
+          <span className="text-[10px]" style={{ color: 'var(--warning)' }}>
             Dirty worktree
           </span>
         )}
@@ -506,10 +562,10 @@ function RepoBranchPicker({
               onChange({ ...repo, branch: e.target.value || undefined })
             }}
             placeholder={status?.currentBranch ?? 'feature/my-branch'}
-            className="w-full rounded border border-zinc-300 bg-white px-2 py-1.5 font-mono text-[11px] text-zinc-900 focus:border-zinc-500 focus:outline-none dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100"
+            className="cl-input w-full px-2 py-1.5 text-[11px]"
           />
           {suggestionsOpen && visibleBranches.length > 0 && (
-            <div className="absolute left-0 right-0 top-[calc(100%+4px)] z-50 max-h-40 overflow-y-auto rounded border border-zinc-300 bg-white py-1 font-mono text-[11px] shadow-lg dark:border-zinc-700 dark:bg-zinc-950">
+            <div className="cl-popover absolute left-0 right-0 top-[calc(100%+4px)] z-50 max-h-40 overflow-y-auto py-1 font-mono text-[11px]">
               {visibleBranches.map((branch) => (
                 <button
                   key={branch}
@@ -519,7 +575,11 @@ function RepoBranchPicker({
                     onChange({ ...repo, branch })
                     setSuggestionsOpen(false)
                   }}
-                  className={`block w-full truncate px-2 py-1.5 text-left ${branch === target ? 'bg-sky-500/10 text-zinc-900 dark:text-zinc-100' : 'text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-900'}`}
+                  className="block w-full truncate px-2 py-1.5 text-left"
+                  style={{
+                    background: branch === target ? 'var(--accent-soft)' : 'transparent',
+                    color: branch === target ? 'var(--text-primary)' : 'var(--text-secondary)',
+                  }}
                 >
                   {branch}
                 </button>
@@ -531,19 +591,19 @@ function RepoBranchPicker({
           type="button"
           onClick={doCheckout}
           disabled={!canSwitch}
-          className="shrink-0 rounded border border-zinc-300 px-2 py-1.5 text-[10px] uppercase tracking-wide text-zinc-600 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-900"
+          className="cl-button shrink-0 px-2 py-1.5 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {switching ? 'Switching...' : 'Switch'}
         </button>
         <button
           type="button"
           onClick={loadStatus}
-          className="shrink-0 rounded border border-zinc-300 px-2 py-1.5 text-[10px] uppercase tracking-wide text-zinc-600 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-900"
+          className="cl-button shrink-0 px-2 py-1.5"
         >
           Refresh
         </button>
       </div>
-      {error && <div className="mt-1 text-[10px] text-rose-400">{error}</div>}
+      {error && <div className="mt-1 text-[10px]" style={{ color: 'var(--danger)' }}>{error}</div>}
     </div>
   )
 }

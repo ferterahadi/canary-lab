@@ -239,6 +239,7 @@ export interface DraftRepo {
 export interface DraftRecord {
   draftId: string
   prdText: string
+  additionalNotes?: string
   prdDocuments: DraftPrdDocument[]
   repos: DraftRepo[]
   featureName?: string
@@ -261,10 +262,13 @@ export interface DraftPrdDocument {
   filename: string
   contentType: string
   characters: number
+  text?: string
+  contentBase64?: string
 }
 
 export interface CreateDraftPayload {
   prdText: string
+  additionalNotes?: string
   prdDocuments?: DraftPrdDocument[]
   repos: DraftRepo[]
   featureName?: string

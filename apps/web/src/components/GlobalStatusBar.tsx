@@ -47,51 +47,53 @@ export function GlobalStatusBar({ activeRunDetail, onNavigateToRun }: Props) {
       <div
         className="cl-shell-bar flex items-center gap-3 px-4 py-2 overflow-hidden"
       >
-      <span
-        className="cl-kicker shrink-0 inline-flex items-center gap-2"
-      >
+      <span className="shrink-0 inline-flex items-center gap-2">
         <span
           aria-hidden="true"
           className="inline-block h-1.5 w-1.5 animate-pulse rounded-full"
-          style={{ background: 'var(--accent)' }}
+          style={{
+            background: 'var(--accent)',
+            boxShadow: '0 0 12px color-mix(in srgb, var(--accent) 60%, transparent)',
+          }}
         />
-        Canary Lab
+        <span className="cl-wordmark">Canary Lab</span>
       </span>
-      <span className="cl-divider shrink-0">|</span>
+      <span className="cl-divider shrink-0">·</span>
       <ConnectionBadge state={connection} />
-      <span className="cl-divider shrink-0">|</span>
+      <span className="cl-divider shrink-0">·</span>
       <div className="shrink-0"><StatusChip label="Playwright" state={playwrightState} /></div>
       {services.length > 0 && (
-        <div className="shrink-0">
-          <StatusChip
-            label={`${services.length} service${services.length > 1 ? 's' : ''}`}
-            state={servicesActive ? 'running' : 'idle'}
-          />
-        </div>
+        <>
+          <span className="cl-divider shrink-0">·</span>
+          <div className="shrink-0">
+            <StatusChip
+              label={`${services.length} service${services.length > 1 ? 's' : ''}`}
+              state={servicesActive ? 'running' : 'idle'}
+            />
+          </div>
+        </>
       )}
       <div className="ml-auto flex min-w-0 items-center justify-end gap-2">
         {activeRunDetail && isActive && (
           <button
             type="button"
             onClick={() => onNavigateToRun?.(activeRunDetail.manifest.feature, activeRunDetail.manifest.runId)}
-            className="cl-button flex min-w-0 max-w-[420px] items-center gap-2 px-2 py-0.5 text-[11px]"
-            style={{ color: 'var(--text-secondary)' }}
+            className="cl-button flex min-w-0 max-w-[460px] items-center gap-2 px-2.5 py-1"
             title={`Go to active run: ${activeRunDetail.manifest.feature} ${view.headline} ${activeRunDetail.manifest.runId}`}
           >
-            <span className="shrink-0" style={{ color: 'var(--text-muted)' }}>Active:</span>
-            <span className="truncate" style={{ color: 'var(--text-primary)' }}>{activeRunDetail.manifest.feature}</span>
-            <span className="hidden min-w-0 truncate xl:inline" style={{ color: 'var(--text-secondary)' }}>{view.headline}</span>
-            <span className="hidden min-w-0 truncate 2xl:inline" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+            <span className="shrink-0" style={{ color: 'var(--text-muted)', fontSize: 11 }}>Active</span>
+            <span className="truncate" style={{ color: 'var(--text-primary)', fontSize: 12, fontWeight: 500 }}>{activeRunDetail.manifest.feature}</span>
+            <span className="hidden min-w-0 truncate xl:inline" style={{ color: 'var(--text-secondary)', fontSize: 11.5 }}>{view.headline}</span>
+            <span className="hidden min-w-0 truncate 2xl:inline" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontSize: 11 }}>
               {activeRunDetail.manifest.runId}
             </span>
-            <span className="shrink-0" style={{ color: 'var(--text-muted)' }}>→</span>
+            <span className="shrink-0" style={{ color: 'var(--accent)' }}>→</span>
           </button>
         )}
         <WizardTaskStatus />
         <EvaluationExportTaskStatus />
       </div>
       </div>
-      <div aria-hidden="true" className="cl-accent-strip" />
     </div>
   )
 }
@@ -115,7 +117,8 @@ function ConnectionBadge({
     <div
       data-testid="runs-connection-badge"
       data-state={state}
-      className={`flex shrink-0 items-center gap-1.5 text-[10px] uppercase tracking-wide ${p.text}`}
+      className={`flex shrink-0 items-center gap-1.5 ${p.text}`}
+      style={{ fontSize: 11.5, fontWeight: 500 }}
       title={`Runs stream: ${p.label}`}
     >
       <StatusDot state={p.dot} pulse={p.pulse} halo={p.pulse} />
@@ -130,10 +133,13 @@ function StatusChip({ label, state }: { label: string; state: 'running' | 'heali
     : state === 'healing' ? 'warning'
     : 'idle'
   return (
-    <div className="flex items-center gap-1.5 text-[10px]" style={{ color: 'var(--text-secondary)' }}>
+    <div
+      className="flex items-center gap-1.5"
+      style={{ color: 'var(--text-primary)', fontSize: 11.5, fontWeight: 500 }}
+    >
       <StatusDot state={dotState} pulse={state !== 'idle'} halo={state !== 'idle'} />
       <span>{label}</span>
-      <span className="uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>
+      <span style={{ color: 'var(--text-muted)', fontSize: 11, fontWeight: 400 }}>
         {state}
       </span>
     </div>

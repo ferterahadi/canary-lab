@@ -59,6 +59,7 @@ export function AddTestWizard({ features, onClose, onAcceptedFeature }: Props) {
     try {
       const createPayload = {
         prdText: input.agentPrdText ?? input.prdText,
+        additionalNotes: input.prdText,
         prdDocuments: input.prdDocuments,
         repos: input.repos,
         featureName: input.featureName,
@@ -124,6 +125,7 @@ export function AddTestWizard({ features, onClose, onAcceptedFeature }: Props) {
       await rejectAndDelete(draft.draftId)
       const createPayload = {
         prdText: configureInput?.agentPrdText ?? configureInput?.prdText ?? draft.prdText,
+        additionalNotes: configureInput?.prdText ?? draft.additionalNotes,
         prdDocuments: configureInput?.prdDocuments ?? draft.prdDocuments,
         repos: configureInput?.repos ?? draft.repos,
         featureName: configureInput?.featureName ?? draft.featureName,
@@ -165,16 +167,18 @@ export function AddTestWizard({ features, onClose, onAcceptedFeature }: Props) {
           : ''
 
   return (
-    <div className="cl-panel fixed inset-0 z-50 flex flex-col">
+    <div className="cl-panel fixed inset-0 z-50 flex flex-col" style={{ background: 'var(--bg-base)' }}>
       <header className="cl-shell-bar flex items-center justify-between gap-3 px-6 py-3">
         <div className="min-w-0">
-          <div className="cl-kicker">Wizard</div>
-          <h2 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>Add test</h2>
+          <div className="cl-rubric">New feature</div>
+          <h2 className="mt-0.5 text-base font-semibold" style={{ color: 'var(--text-primary)' }}>
+            Add test
+          </h2>
         </div>
         <button
           type="button"
           onClick={requestCancel}
-          className="cl-button shrink-0 px-2 py-1 text-xs"
+          className="cl-button shrink-0 px-3 py-1.5"
         >
           Close
         </button>

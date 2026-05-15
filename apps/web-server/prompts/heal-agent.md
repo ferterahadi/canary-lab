@@ -13,6 +13,8 @@ Useful only when needed:
 - `{{runDir}}/svc-<safeName>.log` — full service log. Use only if a slice is missing or too short.
 - `{{journalPath}}` — prior heal attempts. Use only when the current prompt or index says prior iterations exist.
 
+{{featureDocsMap}}
+
 {{personalWikiMap}}
 
 Rules:

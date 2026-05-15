@@ -50,11 +50,14 @@ export interface DraftPrdDocument {
   filename: string
   contentType: string
   characters: number
+  text?: string
+  contentBase64?: string
 }
 
 export interface DraftRecord {
   draftId: string
   prdText: string
+  additionalNotes?: string
   prdDocuments: DraftPrdDocument[]
   repos: DraftRepo[]
   featureName?: string
@@ -106,6 +109,7 @@ export function paths(logsDir: string, draftId: string): DraftPaths {
 export interface CreateDraftInput {
   draftId: string
   prdText: string
+  additionalNotes?: string
   prdDocuments?: DraftPrdDocument[]
   repos: DraftRepo[]
   featureName?: string
@@ -120,6 +124,7 @@ export function createDraft(logsDir: string, input: CreateDraftInput): DraftReco
   const record: DraftRecord = {
     draftId: input.draftId,
     prdText: input.prdText,
+    additionalNotes: input.additionalNotes,
     prdDocuments: input.prdDocuments ?? [],
     repos: input.repos,
     featureName: input.featureName,

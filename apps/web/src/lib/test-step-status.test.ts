@@ -182,7 +182,7 @@ describe('statusLabel', () => {
     expect(statusLabel('testing')).toBe('running')
     expect(statusLabel('passed')).toBe('passed')
     expect(statusLabel('failed')).toBe('failed')
-    expect(statusLabel('timedout')).toBe('timed out')
+    expect(statusLabel('timedout')).toBe('timeout')
     expect(statusLabel('pending')).toBe('pending')
     expect(statusLabel('skipped')).toBe('skipped')
   })

@@ -109,11 +109,15 @@ export async function testsDraftRoutes(
           continue
         }
         const buffer = await part.toBuffer()
-        documents.push(await extractPrdDocument({
+        const extracted = await extractPrdDocument({
           filename: part.filename,
           contentType: part.mimetype,
           buffer,
-        }))
+        })
+        documents.push({
+          ...extracted,
+          contentBase64: buffer.toString('base64'),
+        })
       }
     } catch (err) {
       reply.code(400)
@@ -130,14 +134,17 @@ export async function testsDraftRoutes(
         filename: doc.filename,
         contentType: doc.contentType,
         characters: doc.characters,
+        text: doc.text,
+        contentBase64: doc.contentBase64,
       })),
     }
   })
 
   app.post<{
-    Body: { prdText?: unknown; prdDocuments?: unknown; repos?: unknown; featureName?: unknown }
+    Body: { prdText?: unknown; additionalNotes?: unknown; prdDocuments?: unknown; repos?: unknown; featureName?: unknown }
   }>('/api/tests/draft', async (req, reply) => {
     const prdText = req.body?.prdText
+    const additionalNotes = req.body?.additionalNotes
     const prdDocuments = req.body?.prdDocuments
     const repos = req.body?.repos
     const featureName = req.body?.featureName
@@ -159,6 +166,7 @@ export async function testsDraftRoutes(
     const rec = createDraft(deps.logsDir, {
       draftId,
       prdText,
+      additionalNotes: typeof additionalNotes === 'string' ? additionalNotes : undefined,
       prdDocuments: documentList,
       repos: repoList,
       featureName: featureNameStr,
@@ -294,12 +302,13 @@ export async function testsDraftRoutes(
       }
       const featureName = req.body?.featureName ?? rec.featureName ?? defaultFeatureName(rec)
       const generated = readGeneratedFiles(deps.logsDir, rec.draftId)
+      const generatedWithContextDocs = [...generated, ...contextDocsForDraft(rec)]
       const validation = validateFeatureTarget(deps.projectRoot, featureName)
       if (!validation.ok) {
         reply.code(validation.error === 'feature-exists' ? 409 : 400)
         return { error: validation.error, featureDir: validation.featureDir }
       }
-      const scaffold = validateGeneratedFeatureFiles(featureName, generated)
+      const scaffold = validateGeneratedFeatureFiles(featureName, generatedWithContextDocs)
       if (!scaffold.ok) {
         reply.code(400)
         return { error: 'invalid-scaffold', details: scaffold.error }
@@ -312,16 +321,17 @@ export async function testsDraftRoutes(
       const result = applyToProject({
         draftId: rec.draftId,
         featureName,
-        generated,
+        generated: generatedWithContextDocs,
         projectRoot: deps.projectRoot,
       })
       if (!result.ok) {
         reply.code(result.error === 'feature-exists' ? 409 : 400)
         return { error: result.error, details: result.details, featureDir: result.featureDir }
       }
+      const uploadedDocsWritten = writeUploadedDocumentCopies(result.featureDir, rec)
       transition(deps.logsDir, rec.draftId, 'accepted', {
         featureName,
-        generatedFiles: result.written,
+        generatedFiles: [...result.written, ...uploadedDocsWritten],
         devDependencies: rec.devDependencies,
       })
       return {
@@ -590,6 +600,66 @@ function isDraftPrdDocument(value: unknown): value is DraftPrdDocument {
   return typeof doc.filename === 'string'
     && typeof doc.contentType === 'string'
     && typeof doc.characters === 'number'
+    && (doc.text === undefined || typeof doc.text === 'string')
+    && (doc.contentBase64 === undefined || typeof doc.contentBase64 === 'string')
+}
+
+function contextDocsForDraft(rec: DraftRecord): { path: string; content: string }[] {
+  const files: { path: string; content: string }[] = []
+  const notes = rec.additionalNotes?.trim()
+  if (notes) {
+    files.push({
+      path: 'docs/additional-notes.md',
+      content: `# Additional notes\n\n${notes}\n`,
+    })
+  }
+  rec.prdDocuments.forEach((doc, index) => {
+    const text = doc.text?.trim()
+    if (!text) return
+    files.push({
+      path: `docs/${safeContextDocFilename(doc.filename, index)}`,
+      content: [
+        `# ${doc.filename}`,
+        '',
+        `Content type: ${doc.contentType}`,
+        '',
+        text,
+        '',
+      ].join('\n'),
+    })
+  })
+  return files
+}
+
+function safeContextDocFilename(filename: string, index: number): string {
+  const parsed = path.parse(filename)
+  const stem = (parsed.name || `document-${index + 1}`)
+    .replace(/[^a-zA-Z0-9._-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 80) || `document-${index + 1}`
+  return `uploaded-${index + 1}-${stem}.md`
+}
+
+function writeUploadedDocumentCopies(featureDir: string, rec: DraftRecord): string[] {
+  const written: string[] = []
+  rec.prdDocuments.forEach((doc, index) => {
+    if (!doc.contentBase64) return
+    const target = path.join(featureDir, 'docs', 'uploads', safeUploadedFilename(doc.filename, index))
+    fs.mkdirSync(path.dirname(target), { recursive: true })
+    fs.writeFileSync(target, Buffer.from(doc.contentBase64, 'base64'))
+    written.push(target)
+  })
+  return written
+}
+
+function safeUploadedFilename(filename: string, index: number): string {
+  const parsed = path.parse(path.basename(filename))
+  const stem = (parsed.name || `document-${index + 1}`)
+    .replace(/[^a-zA-Z0-9._-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 80) || `document-${index + 1}`
+  const ext = parsed.ext.replace(/[^a-zA-Z0-9.]/g, '').slice(0, 16)
+  return `uploaded-${index + 1}-${stem}${ext}`
 }
 
 function defaultFeatureName(rec: DraftRecord): string {
