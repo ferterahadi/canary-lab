@@ -1769,15 +1769,24 @@ function playbackTests(events: PlaywrightPlaybackEvent[]): Array<{
   status: string
   durationMs?: number
 }> {
-  return events
-    .filter((event): event is Extract<PlaywrightPlaybackEvent, { type: 'test-end' }> => event.type === 'test-end')
-    .map((event) => ({
+  // One entry per (name, location). Retries and heal-cycle reruns share both
+  // and fold into the latest test-end. Two distinct tests that share a title
+  // (and therefore a name, since name = `test-case-${slugify(title)}`) but
+  // live at different locations stay separate — the HTML export disambiguates
+  // them via positional anchor IDs. Map preserves first-seen insertion order.
+  const latest = new Map<string, { name: string; title: string; location: string; status: string; durationMs?: number }>()
+  for (const event of events) {
+    if (event.type !== 'test-end') continue
+    const key = `${event.test.name}@${event.test.location}`
+    latest.set(key, {
       name: event.test.name,
       title: event.test.title,
       location: event.test.location,
       status: event.status,
       durationMs: event.durationMs,
-    }))
+    })
+  }
+  return [...latest.values()]
 }
 
 function listSpecFiles(featureDir: string): string[] {

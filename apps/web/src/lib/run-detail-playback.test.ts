@@ -71,7 +71,7 @@ describe('playbackTests', () => {
     ])
   })
 
-  it('keeps a rerun attempt separate from the previous result for the same test', () => {
+  it('collapses rerun attempts to a single entry showing the latest attempt', () => {
     const events: PlaywrightPlaybackEvent[] = [
       {
         type: 'test-begin',
@@ -104,16 +104,35 @@ describe('playbackTests', () => {
     expect(playbackTests(events)).toEqual([
       expect.objectContaining({
         name: 'checkout',
-        title: 'checkout flow',
-        status: 'failed',
-        endedAt: '2026-01-01T00:00:05.000Z',
-        error: { message: 'first failure' },
-      }),
-      expect.objectContaining({
-        name: 'checkout',
         title: 'checkout flow rerun',
         startedAt: '2026-01-01T00:10:00.000Z',
         steps: [{ title: 'Clicked Place Order', category: 'pw:api', ended: false }],
+      }),
+    ])
+  })
+
+  it('uses the test name as the playback identity when location is missing', () => {
+    const events: PlaywrightPlaybackEvent[] = [
+      {
+        type: 'test-begin',
+        time: '2026-01-01T00:00:00.000Z',
+        test: { name: 'legacy checkout', title: 'legacy checkout' },
+      },
+      {
+        type: 'test-end',
+        time: '2026-01-01T00:00:03.000Z',
+        test: { name: 'legacy checkout', title: 'legacy checkout' },
+        status: 'passed',
+        passed: true,
+        durationMs: 3000,
+      },
+    ]
+
+    expect(playbackTests(events)).toEqual([
+      expect.objectContaining({
+        name: 'legacy checkout',
+        title: 'legacy checkout',
+        endedAt: '2026-01-01T00:00:03.000Z',
       }),
     ])
   })

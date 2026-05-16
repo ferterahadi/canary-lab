@@ -370,6 +370,17 @@ describe('git-repo helpers', () => {
       expect(changed).toEqual(['features/feat-a/helper.ts'])
     })
 
+    it('passes through empty magic pathspecs without repo-relative conversion', async () => {
+      const repo = repoWithSubtrees()
+      const ref = await snapshotWorkingTree(repo)
+      fs.writeFileSync(path.join(repo, 'features', 'feat-a', 'helper.ts'), 'export const a = 2\n')
+      const changed = await diffNamesSinceSnapshot(repo, ref!, [
+        'features/feat-a',
+        ':(exclude)',
+      ])
+      expect(changed).toEqual([])
+    })
+
     it('scopes diffContentSinceSnapshot to the same pathspec semantics', async () => {
       const repo = repoWithSubtrees()
       const ref = await snapshotWorkingTree(repo)
