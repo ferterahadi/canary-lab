@@ -609,6 +609,117 @@ describe('readPlaywrightPlaybackEvents / indexPlaywrightArtifacts', () => {
     const result = indexPlaywrightArtifacts('r-multi', tmpDir, undefined)
     expect(result?.map((g) => g.testName)).toEqual(['alpha-test', 'zebra-test'])
   })
+
+  it('falls back to the keep dir when the live artifacts dir has been wiped', () => {
+    // Simulates the state right after Playwright respawned for a heal-cycle
+    // rerun: it cleared `playwright-artifacts/` (or only wrote one pw-slug
+    // into it), but `playwright-artifacts-keep/` still has the prior cycle's
+    // per-test directories.
+    const keepDir = path.join(tmpDir, 'playwright-artifacts-keep')
+    const keepCase = path.join(keepDir, 'pw-slug-a')
+    fs.mkdirSync(keepCase, { recursive: true })
+    fs.writeFileSync(path.join(keepCase, 'video.webm'), 'webm-keep')
+
+    // The JSONL still references the original live-dir path (Playwright wrote
+    // it before the next invocation wiped that file).
+    const staleAttachmentPath = path.join(tmpDir, 'playwright-artifacts', 'pw-slug-a', 'video.webm')
+    const result = indexPlaywrightArtifacts('r-keep', tmpDir, [
+      {
+        type: 'test-end',
+        time: 't',
+        test: { name: 'test-case-a', title: 'Case A', location: 'x:1' },
+        status: 'passed',
+        passed: true,
+        durationMs: 1,
+        retry: 0,
+        attachments: [{ name: 'video', contentType: 'video/webm', path: staleAttachmentPath }],
+      },
+    ])
+
+    expect(result).toEqual([
+      {
+        testName: 'test-case-a',
+        testTitle: 'Case A',
+        artifacts: [
+          expect.objectContaining({
+            kind: 'video',
+            name: 'video',
+            path: 'pw-slug-a/video.webm',
+            url: '/api/runs/r-keep/artifacts/pw-slug-a/video.webm',
+          }),
+        ],
+      },
+    ])
+  })
+
+  it('prefers the live dir when the same pw-slug exists in both', () => {
+    // Both dirs hold a video for the same pw-slug. The live dir is the most
+    // recent (just-finished) Playwright invocation, so its file wins.
+    const liveCase = path.join(tmpDir, 'playwright-artifacts', 'pw-slug-a')
+    const keepCase = path.join(tmpDir, 'playwright-artifacts-keep', 'pw-slug-a')
+    fs.mkdirSync(liveCase, { recursive: true })
+    fs.mkdirSync(keepCase, { recursive: true })
+    fs.writeFileSync(path.join(liveCase, 'video.webm'), 'webm-fresh')
+    fs.writeFileSync(path.join(keepCase, 'video.webm'), 'webm-stale')
+
+    const result = indexPlaywrightArtifacts('r-overlap', tmpDir, [
+      {
+        type: 'test-end',
+        time: 't',
+        test: { name: 'test-case-a', title: 'Case A', location: 'x:1' },
+        status: 'passed',
+        passed: true,
+        durationMs: 1,
+        retry: 0,
+        attachments: [{
+          name: 'video',
+          contentType: 'video/webm',
+          path: path.join(liveCase, 'video.webm'),
+        }],
+      },
+    ])
+
+    expect(result).toHaveLength(1)
+    expect(result?.[0].testName).toBe('test-case-a')
+    expect(result?.[0].artifacts).toHaveLength(1)
+    expect(result?.[0].artifacts[0].sizeBytes).toBe(Buffer.byteLength('webm-fresh'))
+  })
+
+  it('merges artifacts when each pw-slug lives in only one of the two dirs', () => {
+    // Cycle 0 ran two tests; cycle 1 reran only test A so the live dir holds
+    // just A, and the keep dir holds the prior copies of both A and B. The
+    // indexer should surface both tests, picking A from live and B from keep.
+    const liveA = path.join(tmpDir, 'playwright-artifacts', 'pw-a')
+    const keepA = path.join(tmpDir, 'playwright-artifacts-keep', 'pw-a')
+    const keepB = path.join(tmpDir, 'playwright-artifacts-keep', 'pw-b')
+    fs.mkdirSync(liveA, { recursive: true })
+    fs.mkdirSync(keepA, { recursive: true })
+    fs.mkdirSync(keepB, { recursive: true })
+    fs.writeFileSync(path.join(liveA, 'video.webm'), 'a-fresh')
+    fs.writeFileSync(path.join(keepA, 'video.webm'), 'a-stale')
+    fs.writeFileSync(path.join(keepB, 'video.webm'), 'b-stale')
+
+    const result = indexPlaywrightArtifacts('r-merge', tmpDir, [
+      {
+        type: 'test-end',
+        time: 't',
+        test: { name: 'test-case-a', title: 'Case A', location: 'x:1' },
+        status: 'passed',
+        passed: true,
+        durationMs: 1,
+        retry: 0,
+        attachments: [{ name: 'video', contentType: 'video/webm', path: path.join(liveA, 'video.webm') }],
+      },
+      // No JSONL attachment for test B in this latest invocation — its
+      // identity must be recovered from the keep dir's pw-slug.
+    ])
+
+    expect(result?.map((g) => g.testName).sort()).toEqual(['pw-b', 'test-case-a'])
+    const a = result?.find((g) => g.testName === 'test-case-a')
+    expect(a?.artifacts[0].sizeBytes).toBe(Buffer.byteLength('a-fresh'))
+    const b = result?.find((g) => g.testName === 'pw-b')
+    expect(b?.artifacts[0].sizeBytes).toBe(Buffer.byteLength('b-stale'))
+  })
 })
 
 describe('RunStore', () => {

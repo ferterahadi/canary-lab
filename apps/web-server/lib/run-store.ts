@@ -315,8 +315,12 @@ export function indexPlaywrightArtifacts(
   runDir: string,
   events: PlaywrightPlaybackEvent[] | undefined,
 ): PlaywrightArtifactGroup[] | undefined {
-  const artifactsDir = buildRunPaths(runDir).playwrightArtifactsDir
-  if (!fs.existsSync(artifactsDir)) return undefined
+  const paths = buildRunPaths(runDir)
+  const currentDir = paths.playwrightArtifactsDir
+  const keepDir = paths.playwrightArtifactsKeepDir
+  const hasCurrent = fs.existsSync(currentDir)
+  const hasKeep = fs.existsSync(keepDir)
+  if (!hasCurrent && !hasKeep) return undefined
 
   const groups = new Map<string, PlaywrightArtifactGroup>()
   const seen = new Set<string>()
@@ -327,11 +331,32 @@ export function indexPlaywrightArtifacts(
     if ('test' in event && event.test?.title) titleByName.set(event.test.name, event.test.title)
   }
 
+  // Resolve a filePath against the current dir first, falling back to the
+  // keep dir when current has been wiped by the next Playwright invocation.
+  // The returned `rel` is always relative to `currentDir` so URL generation
+  // and dedup keys stay stable regardless of which physical directory the
+  // file currently lives in (the artifact-serving route looks in both).
+  const resolveFile = (filePath: string): { resolved: string; rel: string } | null => {
+    const abs = path.resolve(filePath)
+    const relCurrent = path.relative(currentDir, abs)
+    if (!relCurrent.startsWith('..') && !path.isAbsolute(relCurrent)) {
+      if (hasCurrent && fs.existsSync(abs) && fs.statSync(abs).isFile()) {
+        return { resolved: abs, rel: relCurrent }
+      }
+      if (hasKeep) {
+        const keepCandidate = path.join(keepDir, relCurrent)
+        if (fs.existsSync(keepCandidate) && fs.statSync(keepCandidate).isFile()) {
+          return { resolved: keepCandidate, rel: relCurrent }
+        }
+      }
+    }
+    return null
+  }
+
   const add = (testName: string, filePath: string, name?: string, contentType?: string): void => {
-    const resolved = path.resolve(filePath)
-    const rel = path.relative(artifactsDir, resolved)
-    if (rel.startsWith('..') || path.isAbsolute(rel)) return
-    if (!fs.existsSync(resolved) || !fs.statSync(resolved).isFile()) return
+    const found = resolveFile(filePath)
+    if (!found) return
+    const { resolved, rel } = found
     const key = `${testName}:${rel}`
     if (seen.has(key) || seenRel.has(rel)) return
     const firstSegment = rel.split(path.sep)[0]
@@ -363,11 +388,23 @@ export function indexPlaywrightArtifacts(
     }
   }
 
-  for (const filePath of listFiles(artifactsDir)) {
-    const rel = path.relative(artifactsDir, filePath)
-    const firstSegment = rel.split(path.sep)[0]
-    if (!seenRel.has(rel)) add(testNameByArtifactDir.get(firstSegment) ?? firstSegment, filePath)
+  // Walk current first, then keep. Each file is keyed by its rel-against-
+  // currentDir so a file present in both dirs is added once with the current
+  // copy preferred.
+  const walkDir = (dir: string): void => {
+    if (!fs.existsSync(dir)) return
+    for (const filePath of listFiles(dir)) {
+      const rel = path.relative(dir, filePath)
+      if (seenRel.has(rel)) continue
+      const firstSegment = rel.split(path.sep)[0]
+      // Synthesize a path rooted at currentDir so resolveFile picks whichever
+      // dir actually contains the file and the rel-path → URL mapping stays
+      // consistent.
+      add(testNameByArtifactDir.get(firstSegment) ?? firstSegment, path.join(currentDir, rel))
+    }
   }
+  walkDir(currentDir)
+  walkDir(keepDir)
 
   const indexed = [...groups.values()]
     .map((g) => ({

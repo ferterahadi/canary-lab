@@ -836,6 +836,7 @@ export class RunOrchestrator extends EventEmitter {
     return new Promise<number>((resolve) => {
       pty.onExit(({ exitCode, signal }) => {
         this.playwrightPty = null
+        this.persistPlaywrightArtifacts()
         this.emit('playwright-exit', { exitCode })
         this.recordLifecycle(exitCode === 0 ? 'completed' : 'failed', `Playwright exited with code ${exitCode}`, {
           detail: signal ? `Process signal: ${signal}` : undefined,
@@ -847,6 +848,36 @@ export class RunOrchestrator extends EventEmitter {
         resolve(exitCode)
       })
     })
+  }
+
+  // Copy each per-test subdir from `playwright-artifacts/` into the keep dir
+  // so it survives the next Playwright invocation's `--output` wipe. New
+  // artifacts for the same pw-slug overwrite the previous copy — heal-cycle
+  // reruns of a single test thus replace that test's previous video/trace
+  // while leaving the other tests' artifacts intact. Best-effort: failures
+  // here are logged but do not fail the run.
+  private persistPlaywrightArtifacts(): void {
+    const src = this.paths.playwrightArtifactsDir
+    const dst = this.paths.playwrightArtifactsKeepDir
+    if (!fs.existsSync(src)) return
+    try { fs.mkdirSync(dst, { recursive: true }) } catch { return }
+    let entries: fs.Dirent[]
+    try {
+      entries = fs.readdirSync(src, { withFileTypes: true })
+    } catch {
+      return
+    }
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue
+      const srcPath = path.join(src, entry.name)
+      const dstPath = path.join(dst, entry.name)
+      try {
+        fs.rmSync(dstPath, { recursive: true, force: true })
+        fs.cpSync(srcPath, dstPath, { recursive: true })
+      } catch (err) {
+        this.runnerLog?.warn(`persist playwright artifact ${entry.name} failed: ${err instanceof Error ? err.message : String(err)}`)
+      }
+    }
   }
 
   private verificationPlanForSummary(summary: SummaryShape): VerificationPlan {

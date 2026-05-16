@@ -231,6 +231,49 @@ describe('GET /api/runs/:runId/artifacts/*', () => {
     expect(res.statusCode).toBe(200)
     expect(res.headers['content-type']).toContain(contentType)
   })
+
+  it('falls back to the keep dir when the file is only in playwright-artifacts-keep', async () => {
+    // After a heal-cycle respawn, Playwright wipes `playwright-artifacts/`.
+    // Files that the orchestrator copied into `playwright-artifacts-keep/`
+    // must still be reachable via the same artifact URL the indexer minted
+    // against the live dir.
+    writeManifestForRun('r1')
+    const keepFile = path.join(runDirFor(logsDir, 'r1'), 'playwright-artifacts-keep', 'pw-slug-a', 'video.webm')
+    fs.mkdirSync(path.dirname(keepFile), { recursive: true })
+    fs.writeFileSync(keepFile, 'KEPT-WEBM')
+    const { app } = await build()
+
+    const res = await app.inject({ method: 'GET', url: '/api/runs/r1/artifacts/pw-slug-a/video.webm' })
+    expect(res.statusCode).toBe(200)
+    expect(res.headers['content-type']).toContain('video/webm')
+    expect(res.body).toBe('KEPT-WEBM')
+  })
+
+  it('prefers the live dir when the same path exists in both', async () => {
+    writeManifestForRun('r1')
+    const live = path.join(runDirFor(logsDir, 'r1'), 'playwright-artifacts', 'pw-slug-a', 'video.webm')
+    const keep = path.join(runDirFor(logsDir, 'r1'), 'playwright-artifacts-keep', 'pw-slug-a', 'video.webm')
+    fs.mkdirSync(path.dirname(live), { recursive: true })
+    fs.mkdirSync(path.dirname(keep), { recursive: true })
+    fs.writeFileSync(live, 'FRESH-WEBM')
+    fs.writeFileSync(keep, 'STALE-WEBM')
+    const { app } = await build()
+
+    const res = await app.inject({ method: 'GET', url: '/api/runs/r1/artifacts/pw-slug-a/video.webm' })
+    expect(res.statusCode).toBe(200)
+    expect(res.body).toBe('FRESH-WEBM')
+  })
+
+  it('404s when the file is in neither dir', async () => {
+    writeManifestForRun('r1')
+    // Create both dirs but no matching file.
+    fs.mkdirSync(path.join(runDirFor(logsDir, 'r1'), 'playwright-artifacts'), { recursive: true })
+    fs.mkdirSync(path.join(runDirFor(logsDir, 'r1'), 'playwright-artifacts-keep'), { recursive: true })
+    const { app } = await build()
+
+    const res = await app.inject({ method: 'GET', url: '/api/runs/r1/artifacts/pw-slug-a/video.webm' })
+    expect(res.statusCode).toBe(404)
+  })
 })
 
 describe('GET /api/runs/:runId/evaluation.html', () => {
