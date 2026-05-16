@@ -15,6 +15,14 @@ afterEach(() => {
 })
 
 describe('git-repo subprocess edge cases', () => {
+  it('returns null when git reports a blank working-tree root', async () => {
+    const repo = tmpDir()
+    mockGitSequence([{ stdout: '\n' }])
+    const { getGitRoot } = await import('./git-repo')
+
+    await expect(getGitRoot(repo)).resolves.toBeNull()
+  })
+
   it('returns empty status when git reports a nonnumeric process error', async () => {
     const repo = tmpDir()
     execFileMock.mockImplementationOnce((_cmd, _args, _opts, cb) => {

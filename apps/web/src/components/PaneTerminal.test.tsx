@@ -125,12 +125,20 @@ afterEach(() => {
 })
 
 describe('PaneTerminal', () => {
-  it('sends the agent pane size on open but not on streamed output or live layout observation', async () => {
+  it('one-shot fits the agent pane when its container is first measured, ignoring streamed output', async () => {
     await act(async () => {
       root.render(<PaneTerminal runId="r1" paneId="agent" />)
     })
 
-    expect(resizeState.observers).toHaveLength(0)
+    // Agent pane gets a one-shot ResizeObserver: PaneTerminal now stays mounted
+    // across tab switches, so the initial mount can be inside a hidden parent
+    // (0×0 container) where the inline fit short-circuits. The observer fits
+    // exactly once when real dims arrive, then disconnects to avoid a flicker
+    // loop with the Ink TUI's redraw-on-SIGWINCH behavior.
+    expect(resizeState.observers).toHaveLength(1)
+    const observer = resizeState.observers[0]
+    expect(observer.observe).toHaveBeenCalledTimes(1)
+
     act(() => {
       paneState.options[0].onOpen?.()
     })
@@ -146,6 +154,14 @@ describe('PaneTerminal', () => {
     expect(terminalState.writes).toContain('streamed output')
     expect(paneState.connections[0].sendResize).toHaveBeenCalledTimes(1)
     expect(terminalState.fitCalls).toBe(fitCallsAfterOpen)
+
+    // Container reaches real dims → observer fires → fit + pty resize once, then disconnect.
+    act(() => {
+      observer.callback([], observer as unknown as ResizeObserver)
+    })
+    expect(terminalState.fitCalls).toBe(fitCallsAfterOpen + 1)
+    expect(paneState.connections[0].sendResize).toHaveBeenCalledTimes(2)
+    expect(observer.disconnect).toHaveBeenCalledTimes(1)
   })
 
   it('fits non-agent panes when their container resize observer fires', async () => {

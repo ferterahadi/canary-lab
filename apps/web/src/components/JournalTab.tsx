@@ -107,7 +107,13 @@ function EntryCard({ entry, onDelete }: { entry: JournalEntry; onDelete: () => v
             Iteration {entry.iteration ?? '?'}
           </span>
           {entry.timestamp && (
-            <span className="text-[10px]" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{entry.timestamp}</span>
+            <span
+              className="text-[10px]"
+              style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}
+              title={entry.timestamp}
+            >
+              {formatLocalDateTime(entry.timestamp)}
+            </span>
           )}
           <span className={`rounded-md border px-1.5 py-0.5 text-[10px] uppercase tracking-wide ${outcomeBadgeClass(outcome)}`}>
             {outcome}
@@ -144,6 +150,15 @@ function EntryCard({ entry, onDelete }: { entry: JournalEntry; onDelete: () => v
       )}
     </li>
   )
+}
+
+function formatLocalDateTime(iso: string): string {
+  const time = Date.parse(iso)
+  if (!Number.isFinite(time)) return iso
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: 'medium',
+    timeStyle: 'medium',
+  }).format(new Date(time))
 }
 
 function FieldRow({ field }: { field: { key: string; value: string } }) {

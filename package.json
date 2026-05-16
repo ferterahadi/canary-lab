@@ -95,7 +95,7 @@
     "@fastify/multipart": "^10.0.0",
     "@fastify/static": "^9.1.3",
     "@fastify/websocket": "^11.2.0",
-    "@playwright/mcp": "^0.0.71",
+    "@playwright/mcp": "^0.0.75",
     "@playwright/test": "^1.54.2",
     "ast-types": "^0.16.1",
     "dotenv": "^16.6.1",
