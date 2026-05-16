@@ -30,6 +30,8 @@ describe('PlaywrightPlayback', () => {
     expect(container.textContent).toContain('Completed without a Playwright error.')
     expect(container.querySelector('a[download="trace.zip"]')?.textContent).toBe('Download trace')
     expect(container.querySelector('.cl-card')?.firstElementChild?.querySelector('a[download="trace.zip"]')?.textContent).toBe('Download trace')
+    expect(container.querySelector('a[download="trace.zip"]')?.className).toContain('truncate')
+    expect(container.querySelector('a[download="trace.zip"]')?.className).toContain('max-w-full')
     expect(container.textContent).toContain('Screenshot')
     expect(container.textContent).toContain('Video')
     expect(container.querySelector('img')).toBeNull()

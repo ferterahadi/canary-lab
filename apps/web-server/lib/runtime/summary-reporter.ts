@@ -17,6 +17,7 @@ import {
   type SummaryForJournalOutcome,
 } from './log-enrichment'
 import { getSummaryPath } from './paths'
+import { extractTraceSummary } from './trace-enrichment'
 
 export function slugify(title: string): string {
   return title
@@ -38,6 +39,9 @@ interface TestEntry {
   locations?: string[]
   retry?: number
   logFiles?: string[]
+  /** Repo-relative path to the curated failure-summary.md produced from this
+   *  test's Playwright trace.zip. Populated in onEnd after async extraction. */
+  traceSummaryFile?: string
 }
 
 interface KnownTestEntry {
@@ -89,6 +93,11 @@ class SummaryReporter implements Reporter {
   private failedStepLocationsByTest = new Map<string, string[]>()
   private failureCount = 0
   private lastEnrichedFailureCount = -1
+  // Absolute path to the Playwright `trace.zip` attachment for each failed
+  // test, keyed by the test's slug-name. Populated in `onTestEnd` from
+  // `result.attachments` and consumed in `onEnd` to drive trace-summary
+  // extraction (async, parallel) before the final heal-index write.
+  private tracePathsByName = new Map<string, string>()
 
   constructor() {
     if (this.mergeExistingSummary) this.seedFromExistingSummary()
@@ -195,6 +204,10 @@ class SummaryReporter implements Reporter {
     }
     this.results.push(entry)
     if (failed) this.failureCount++
+    if (failed) {
+      const tracePath = findTraceAttachmentPath(result.attachments)
+      if (tracePath) this.tracePathsByName.set(name, tracePath)
+    }
     this.writePlaybackEvent({
       type: 'test-end',
       time: new Date().toISOString(),
@@ -225,7 +238,7 @@ class SummaryReporter implements Reporter {
     }
   }
 
-  onEnd(_result: FullResult): void {
+  async onEnd(_result: FullResult): Promise<void> {
     this.running = null
     this.stepStack = []
     this.writeSummary(true)
@@ -236,6 +249,12 @@ class SummaryReporter implements Reporter {
       process.env.CANARY_LAB_BENCHMARK_MODE !== 'baseline'
     ) {
       this.runEnrichment()
+    }
+    if (
+      this.tracePathsByName.size > 0 &&
+      process.env.CANARY_LAB_BENCHMARK_MODE !== 'baseline'
+    ) {
+      await this.runTraceEnrichment()
     }
   }
 
@@ -253,6 +272,56 @@ class SummaryReporter implements Reporter {
     }
     writeHealIndex(parsed ?? undefined)
     this.lastEnrichedFailureCount = this.failureCount
+  }
+
+  /**
+   * For each failed test that produced a Playwright `trace.zip`, run
+   * `npx playwright trace` to extract a curated `failure-summary.md` into
+   * `<runDir>/failed/<slug>/trace-extract/`. Extractions run in parallel —
+   * each one is independent and bounded by an internal timeout. After all
+   * settle, the heal-index is rewritten so the curated trace summary
+   * appears as a bullet under each failure.
+   *
+   * Best-effort: a failure to extract one trace does not block the others
+   * and does not throw — the file simply won't appear in the index. Service
+   * log slices remain as fallback signal.
+   */
+  private async runTraceEnrichment(): Promise<void> {
+    const runDir = path.dirname(getSummaryPath())
+    const tasks: Array<Promise<{ name: string; relPath: string } | null>> = []
+    for (const [name, traceZipPath] of this.tracePathsByName) {
+      const outputDir = path.join(runDir, 'failed', name, 'trace-extract')
+      tasks.push(
+        extractTraceSummary({ traceZipPath, outputDir, testName: name })
+          .then((res) => ({
+            name,
+            relPath: path.relative(runDir, res.summaryPath),
+          }))
+          .catch(() => null),
+      )
+    }
+    const settled = await Promise.all(tasks)
+    let any = false
+    for (const r of settled) {
+      if (!r) continue
+      any = true
+      const entry = this.results.find((e) => e.name === r.name)
+      if (entry) entry.traceSummaryFile = r.relPath
+    }
+    if (!any) return
+    // Rewrite the summary so `traceSummaryFile` lands on each failed entry,
+    // then rebuild the heal-index so the agent sees the trace bullet.
+    this.writeSummary(true)
+    const parsed = enrichSummaryWithLogs()
+    if (parsed?.summary.failed) {
+      for (const failed of parsed.summary.failed) {
+        const entry = this.results.find((e) => e.name === failed.name)
+        if (entry?.traceSummaryFile) {
+          failed.traceSummaryFile = entry.traceSummaryFile
+        }
+      }
+    }
+    writeHealIndex(parsed ?? undefined)
   }
 
   private writeSummary(complete: boolean): void {
@@ -282,6 +351,7 @@ class SummaryReporter implements Reporter {
           ...(r.locations?.length ? { locations: r.locations } : {}),
           ...(typeof r.retry === 'number' ? { retry: r.retry } : {}),
           ...(r.logFiles ? { logFiles: r.logFiles } : {}),
+          ...(r.traceSummaryFile ? { traceSummaryFile: r.traceSummaryFile } : {}),
         })),
     }
 
@@ -383,6 +453,23 @@ interface ExistingSummary {
 
 function isFailureResult(entry: Pick<TestEntry, 'status'>): boolean {
   return entry.status !== 'passed' && entry.status !== 'skipped'
+}
+
+// Playwright records the trace zip as an attachment with `name === 'trace'`
+// and a `path` pointing at the per-test artifact dir
+// (`<playwright-artifacts>/<pw-slug>/trace.zip`). The slug Playwright uses
+// here is its own and doesn't match our `slugify(title)`, so we read the
+// path off the attachment directly instead of reconstructing it.
+function findTraceAttachmentPath(
+  attachments: ReadonlyArray<{ name?: string; path?: string }> | undefined,
+): string | null {
+  if (!attachments) return null
+  for (const a of attachments) {
+    if (a?.name === 'trace' && typeof a.path === 'string' && a.path.length > 0) {
+      return a.path
+    }
+  }
+  return null
 }
 
 function knownTestFromTest(test: TestCase): KnownTestEntry {

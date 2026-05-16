@@ -507,6 +507,26 @@ describe('writeHealIndex with journal tail and various manifest shapes', () => {
     ).not.toThrow()
   })
 
+  it('emits a trace bullet when traceSummaryFile is set on a failed entry', () => {
+    const healIndexPath = path.join(tmpDir, 'heal-index.md')
+    writeHealIndex({
+      manifest: { featureName: 'demo' },
+      summary: {
+        failed: [
+          {
+            name: 'click-checkout',
+            error: { message: 'TimeoutError' },
+            traceSummaryFile: 'logs/runs/X/failed/click-checkout/trace-extract/failure-summary.md',
+          },
+        ],
+      },
+      healIndexPath,
+    })
+    const body = fs.readFileSync(healIndexPath, 'utf-8')
+    expect(body).toContain('- **click-checkout**')
+    expect(body).toMatch(/- trace: logs\/runs\/X\/failed\/click-checkout\/trace-extract\/failure-summary\.md/)
+  })
+
   it('renders the previous heal-cycle note when history has restarts/keeps', () => {
     expect(() =>
       writeHealIndex({

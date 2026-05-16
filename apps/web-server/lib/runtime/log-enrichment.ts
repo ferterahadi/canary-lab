@@ -109,6 +109,11 @@ function writeSlicesToDisk(
 interface FailedEntry {
   name: string
   logFiles?: string[]
+  // Repo-relative path to `trace-extract/failure-summary.md` produced from
+  // the test's Playwright trace.zip. Populated by the trace-enrichment step
+  // after the test run completes; surfaced in `heal-index.md` so the agent
+  // reads the curated trace summary as its first stop for "what went wrong".
+  traceSummaryFile?: string
   error?: { message?: string; snippet?: string }
   location?: string
   durationMs?: number
@@ -418,6 +423,9 @@ export function writeHealIndex(parsed?: {
       }
       if (entry.logFiles && entry.logFiles.length > 0) {
         lines.push(`  - slice: ${entry.logFiles.join(', ')}`)
+      }
+      if (entry.traceSummaryFile) {
+        lines.push(`  - trace: ${entry.traceSummaryFile} — read this for the failing action, page state, failed requests, console errors`)
       }
     }
     lines.push('')
