@@ -479,6 +479,38 @@ describe('buildOrchestratorHealPrompt', () => {
     const promptX = buildX({ cycle: 0, outputDir: path.join(runDir, 'out') })
     expect(promptC).toBe(promptX)
   })
+
+  it('omits the stuck-cycle escalation when consecutiveSameFailures is not supplied', () => {
+    // Default path: prior cycles, but no streak threading. Escalation stays
+    // hidden so we don't surface it spuriously to legacy callers.
+    fs.writeFileSync(
+      path.join(runDir, 'e2e-summary.json'),
+      JSON.stringify({ failed: [{ name: 'test-a' }] }),
+    )
+    const build = buildOrchestratorHealPrompt({ agent: 'claude', projectRoot, runDir })
+    const prompt = build({ cycle: 5, outputDir: path.join(runDir, 'out') })
+    expect(prompt).not.toContain('Escalation:')
+  })
+
+  it('emits the stuck-cycle escalation when consecutiveSameFailures crosses the threshold', () => {
+    // End-to-end: the orchestrator's streak value flows through the cycle
+    // prompt builder into the addendum block. Concrete failedDir path is
+    // present in the escalation bullet so the agent can Read directly.
+    fs.writeFileSync(
+      path.join(runDir, 'e2e-summary.json'),
+      JSON.stringify({ failed: [{ name: 'test-a' }, { name: 'test-b' }] }),
+    )
+    const build = buildOrchestratorHealPrompt({ agent: 'claude', projectRoot, runDir })
+    const prompt = build({
+      cycle: 2, // becomes cycle 3 in the addendum after the +1 mapping
+      outputDir: path.join(runDir, 'out'),
+      consecutiveSameFailures: 3,
+    })
+    expect(prompt).toContain('Escalation: this is cycle 3 with the same failing set (test-a, test-b).')
+    // The failedDir path the addendum embeds is the same one the static
+    // template uses — confirms threading through buildHealAddendum.
+    expect(prompt).toContain(`${path.join(runDir, 'failed')}/<slug>/trace-extract/snapshot-at-failure.txt`)
+  })
 })
 
 describe('renderPlaywrightMcpHint', () => {

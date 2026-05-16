@@ -58,7 +58,7 @@ async function runPlaywrightCli(args: string[], cwd: string): Promise<RunCliResu
       { cwd, timeout: CLI_TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024 },
       (err, stdout) => {
         if (err) {
-          resolve({ ok: false, error: stripTrailingNoise(stdout) || (err.message ?? String(err)) })
+          resolve({ ok: false, error: stripTrailingNoise(stdout) || err.message })
           return
         }
         resolve({ ok: true, stdout: stripTrailingNoise(stdout) })

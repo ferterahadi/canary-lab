@@ -42,7 +42,6 @@ export function normalizeStartCommand(
 // the legacy flat form (`{ url, timeoutMs }`). Anything else with named keys
 // is an env→probe map.
 function isProbeShape(x: HealthCheck): x is HealthProbe | LegacyHealthProbe {
-  if (x == null || typeof x !== 'object') return false
   return 'http' in x || 'tcp' in x || 'url' in x
 }
 

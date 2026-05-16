@@ -35,6 +35,28 @@ export interface HealAddendumInput {
   mode?: HealMode
   summaryPath?: string
   journalPath?: string
+  /**
+   * Number of consecutive observations of the SAME failing set, taken from
+   * `HealCycleState.snapshot().consecutiveSameFailures` AFTER the most recent
+   * `observeFailures` call. When `>= 3` — i.e., we've seen the same set
+   * three times, meaning two prior agent attempts didn't reduce the failure
+   * count — the addendum injects an escalation block telling the agent to
+   * change tactic rather than double down on the prior approach.
+   *
+   * Threshold rationale: counter==1 is the first observation (no prior fix
+   * attempt). counter==2 is the second cycle (one prior attempt — could be
+   * an honest miss, not yet "stuck"). counter==3 is two prior attempts on the
+   * same set — the agent IS stuck and needs a tactical reset.
+   */
+  consecutiveSameFailures?: number
+  /**
+   * Absolute path to the run's `failed/` directory. Required for the
+   * escalation block to embed concrete `<failedDir>/<slug>/trace-extract/...`
+   * paths the agent can `Read` directly. The static template already exposes
+   * this as `{{failedDir}}`, but the addendum is appended AFTER template
+   * rendering so it can't use that placeholder.
+   */
+  failedDir?: string
 }
 
 function readFailingSlugs(summaryPath: string = getSummaryPath()): string[] {
@@ -72,6 +94,20 @@ export function buildHealAddendum(input: HealAddendumInput): string {
     'You do not need to write to this run\'s `diagnosis-journal.md`. The runner appends an iteration entry automatically from your signal body. Put `hypothesis` (concise diagnosis of what\'s wrong) and `fixDescription` (concise summary of what the fix does) into the `.restart` / `.rerun` JSON body: `{"hypothesis":"…","fixDescription":"…"}`. The runner detects which files you changed via git — do not list them.',
   )
 
+  // Stuck-cycle escalation. When `consecutiveSameFailures >= 3`, this is the
+  // 3rd observation of the same failing set — two previous heal attempts
+  // didn't move the needle. Surface that explicitly to the agent and steer
+  // it toward a different tactic rather than another fresh hypothesis on the
+  // same code path.
+  if ((input.consecutiveSameFailures ?? 0) >= 3 && slugs.length > 0) {
+    parts.push(renderEscalationBlock({
+      cycle: input.cycle,
+      slugs,
+      journalPath: input.journalPath ?? DIAGNOSIS_JOURNAL_PATH,
+      failedDir: input.failedDir,
+    }))
+  }
+
   if (journalExists && input.cycle >= 2) {
     parts.push(
       'Prior iterations exist in this run\'s `diagnosis-journal.md`. Skip hypotheses already tried.',
@@ -79,4 +115,29 @@ export function buildHealAddendum(input: HealAddendumInput): string {
   }
 
   return parts.join('\n\n')
+}
+
+// The escalation block is intentionally concrete: it tells the agent which
+// files to re-read (with absolute paths so `Read` lands the right artifact),
+// names the prior-iteration diff as the source of truth for what was tried,
+// and lists tactical alternatives instead of vague encouragement. The
+// `<slug>` placeholder mirrors the static heal-agent.md convention — the
+// agent substitutes the first failing slug from the failing-tests line above.
+function renderEscalationBlock(input: {
+  cycle: number
+  slugs: string[]
+  journalPath: string
+  failedDir?: string
+}): string {
+  const slugList = input.slugs.join(', ')
+  const traceDir = input.failedDir ? `${input.failedDir}/<slug>/trace-extract` : '<failedDir>/<slug>/trace-extract'
+  const snapshotPath = `${traceDir}/snapshot-at-failure.txt`
+  const networkPath = `${traceDir}/network-failed.txt`
+  return [
+    `Escalation: this is cycle ${input.cycle} with the same failing set (${slugList}). Two previous attempts didn't reduce the failure count. Treat this as a signal to change tactic, not double down:`,
+    `- Re-read \`${snapshotPath}\` and \`${networkPath}\` for the FIRST failing test before editing — the trace usually shows the real failure mode (DNS, missing element, race) more clearly than the error message.`,
+    `- If you already changed \`e2e/helpers/\` in cycle ${input.cycle - 1} and the same tests are still failing, your last edit didn't help. Read the diff in \`${input.journalPath}\` for the prior iteration, and either revert it or build on it — don't replace it with a fresh unrelated hypothesis.`,
+    '- If the failure looks infra-flaky (DNS resolution, third-party scripts, timing), the right fix may be retry/wait logic in `e2e/helpers/`, not selector tweaks.',
+    '- If you have no clear hypothesis, add diagnostic logging or assertions and write `.rerun` — the next cycle will pick up richer output.',
+  ].join('\n')
 }

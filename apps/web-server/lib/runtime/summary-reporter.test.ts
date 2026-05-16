@@ -822,6 +822,95 @@ describe('SummaryReporter', () => {
     })
   })
 
+  it('rewrites heal-index with trace summaries when service logs are present', async () => {
+    const runDir = LOGS_DIR
+    fs.mkdirSync(runDir, { recursive: true })
+    const svcLog = path.join(runDir, 'svc-api.log')
+    const slugA = 'test-case-traced-w-logs'
+    const slugB = 'test-case-no-trace'
+    fs.writeFileSync(
+      svcLog,
+      `start\n<${slugA}>\nlate boom\n</${slugA}>\n<${slugB}>\nother boom\n</${slugB}>\nend\n`,
+    )
+    fs.writeFileSync(
+      path.join(runDir, 'manifest.json'),
+      JSON.stringify({ services: [{ logPath: svcLog }], feature: 'checkout' }),
+    )
+    const traceZip = path.join(runDir, 'trace.zip')
+    fs.writeFileSync(traceZip, 'zip')
+    traceMocks.extractTraceSummary.mockResolvedValue({
+      summaryPath: path.join(runDir, 'failed', slugA, 'trace-extract', 'failure-summary.md'),
+      bytes: 12,
+      failedActionId: '1',
+    })
+    const reporter = new SummaryReporter()
+    reporter.onTestEnd(
+      mkTest('Traced w logs', '/specs/x.spec.ts', 6),
+      mkResult({
+        status: 'failed',
+        error: { message: 'boom' },
+        attachments: [{ name: 'trace', path: traceZip }],
+      }),
+    )
+    // Second failure has no trace attachment → no traceSummaryFile.
+    reporter.onTestEnd(
+      mkTest('No trace', '/specs/y.spec.ts', 4),
+      mkResult({ status: 'failed', error: { message: 'no trace' } }),
+    )
+    await reporter.onEnd({} as any)
+    const out = readSummary()
+    const traced = out.failed.find((e: any) => e.name === slugA)
+    const noTrace = out.failed.find((e: any) => e.name === slugB)
+    expect(traced.traceSummaryFile).toContain('failure-summary.md')
+    expect(noTrace.traceSummaryFile).toBeUndefined()
+  })
+
+  it('records a step end with no locations and no error', () => {
+    const reporter = new SummaryReporter()
+    const test = mkTest('Step end no loc', '/specs/no-loc.spec.ts', 3)
+    const step = mkStep('expect', 'expect')
+    reporter.onTestBegin(test)
+    reporter.onStepBegin(test, mkResult(), step)
+    // step.error absent and no locations → both conditions false
+    reporter.onStepEnd(test, mkResult(), step)
+    reporter.onTestEnd(test, mkResult({ status: 'failed', error: { message: 'x' } }))
+    const summary = readSummary()
+    expect(summary.failed[0].locations).toBeUndefined()
+  })
+
+  it('records a failed step with no location without persisting failed step locations', () => {
+    const reporter = new SummaryReporter()
+    const test = mkTest('Step err no loc', '/specs/err.spec.ts', 3)
+    const step = mkStep('expect', 'expect')
+    reporter.onTestBegin(test)
+    reporter.onStepBegin(test, mkResult(), step)
+    // step.error truthy but step has no location → locs.length === 0 path
+    reporter.onStepEnd(test, mkResult(), { ...step, error: { message: 'step failed' } })
+    reporter.onTestEnd(test, mkResult({ status: 'failed', error: { message: 'x' } }))
+    const summary = readSummary()
+    expect(summary.failed[0].locations).toBeUndefined()
+  })
+
+  it('preserves an existing titlePath when a later entry has none', () => {
+    fs.mkdirSync(LOGS_DIR, { recursive: true })
+    fs.writeFileSync(
+      path.join(LOGS_DIR, 'e2e-summary.json'),
+      JSON.stringify({
+        complete: true,
+        knownTests: [
+          { name: 'test-case-keep-path', title: 'keep path', titlePath: ['outer', 'keep path'] },
+          { name: 'test-case-keep-path', title: 'keep path' },
+        ],
+        passedNames: [],
+        failed: [],
+      }),
+    )
+    const reporter = new SummaryReporter()
+    reporter.onEnd({} as any)
+    const out = readSummary()
+    expect(out.knownTests[0].titlePath).toEqual(['outer', 'keep path'])
+  })
+
   it('writes the currently running step location and keeps the test running when the step ends', () => {
     const reporter = new SummaryReporter()
     const test = mkTest('Currently busy', '/specs/busy.spec.ts', 7)

@@ -274,6 +274,13 @@ export interface BuildHealCyclePromptArgs {
   outputDir: string
   userGuidance?: string
   priorAgentSessionContext?: string
+  /**
+   * The current value of `HealCycleState.snapshot().consecutiveSameFailures`,
+   * AFTER `observeFailures` has been called for this cycle. Threaded through
+   * to `buildHealAddendum` so the stuck-cycle escalation block can fire at
+   * the right moment (>= 3 = two prior fix attempts on the same set failed).
+   */
+  consecutiveSameFailures?: number
 }
 
 export type BuildHealCyclePrompt = (args: BuildHealCyclePromptArgs) => string
@@ -294,7 +301,7 @@ export function buildOrchestratorHealPrompt(
   const paths = buildRunPaths(opts.runDir)
   const runDirRel = path.relative(opts.projectRoot, opts.runDir) || opts.runDir
 
-  return ({ cycle, userGuidance, priorAgentSessionContext }) => {
+  return ({ cycle, userGuidance, priorAgentSessionContext, consecutiveSameFailures }) => {
     // Re-detect per cycle: the manifest is written by the orchestrator before
     // the first heal cycle, and re-reading on each cycle keeps us correct if
     // a later iteration extends the manifest.
@@ -323,6 +330,11 @@ export function buildOrchestratorHealPrompt(
       mode,
       summaryPath: paths.summaryPath,
       journalPath: paths.diagnosisJournalPath,
+      // Plumb the stuck-cycle counter and per-run failedDir through so the
+      // escalation block in `buildHealAddendum` can fire with concrete
+      // `<failedDir>/<slug>/trace-extract/...` paths when the agent is stuck.
+      consecutiveSameFailures,
+      failedDir: paths.failedDir,
     })
     const guidance = userGuidance?.trim()
       ? `User guidance for this restarted heal cycle:\n\n${userGuidance.trim()}`

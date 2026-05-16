@@ -304,6 +304,13 @@ describe('validateHealthCheck', () => {
     expect(() => validateHealthCheck({ url: '' }, ctx)).toThrow(/legacy healthCheck\.url/)
   })
 
+  it('rejects env-map probes that declare no transport at all', () => {
+    expect(() => validateHealthCheck(
+      { local: { timeoutMs: 100 } as never },
+      ctx,
+    )).toThrow(/declare one transport/)
+  })
+
   it('error message names the feature, command, and env when applicable', () => {
     let caught: Error | null = null
     try {
@@ -331,6 +338,21 @@ describe('isTcpListening', () => {
     // Port 1 is virtually never bound on a normal machine; if it is, this
     // test will be flaky — pick another reserved-ish port.
     await expect(isTcpListening(1, '127.0.0.1', 200)).resolves.toBe(false)
+  })
+
+  it('returns false when the connection attempt exceeds the timeout', async () => {
+    const socket: any = new EventEmitter()
+    socket.destroy = vi.fn()
+    const createConnection = vi.spyOn(net, 'createConnection').mockReturnValue(socket)
+    vi.useFakeTimers()
+    try {
+      const result = isTcpListening(1234, '127.0.0.1', 50)
+      vi.advanceTimersByTime(60)
+      await expect(result).resolves.toBe(false)
+    } finally {
+      vi.useRealTimers()
+      createConnection.mockRestore()
+    }
   })
 
   it('ignores late socket events after a TCP probe has settled', async () => {

@@ -239,11 +239,10 @@ function gatherCiPathHints(repoRoot: string): CiPathHint[] {
   return findOldPathReferences(cleaned)
 }
 
-function loadTemplateHealPrompt(): string {
-  const candidates = [
-    path.resolve(__dirname, '../templates/project/CLAUDE.md'),
-    path.resolve(__dirname, '../../templates/project/CLAUDE.md'),
-  ]
+export function loadTemplateHealPrompt(candidates: string[] = [
+  path.resolve(__dirname, '../templates/project/CLAUDE.md'),
+  path.resolve(__dirname, '../../templates/project/CLAUDE.md'),
+]): string {
   const found = candidates.find((c) => fs.existsSync(c))
   if (!found) return ''
   return extractHealPrompt(fs.readFileSync(found, 'utf-8')) ?? ''

@@ -128,4 +128,135 @@ describe('buildHealAddendum', () => {
     expect(addendum).not.toContain('regression')
     expect(addendum).not.toContain('Before forming a new hypothesis')
   })
+
+  describe('stuck-cycle escalation', () => {
+    // Threshold semantics:
+    //   counter==1: first observation of this failure set — no prior fix
+    //               attempt yet. No escalation.
+    //   counter==2: second observation — one fix attempt failed. Could still
+    //               be an honest miss, no escalation yet (avoid being premature).
+    //   counter==3: third observation — two fix attempts failed. The agent is
+    //               stuck; emit the escalation block.
+
+    function seedFailingSummary(): void {
+      fs.mkdirSync(logsDir, { recursive: true })
+      fs.writeFileSync(summaryPath, JSON.stringify({ failed: [{ name: 'test-a' }, { name: 'test-b' }] }))
+    }
+
+    it('omits the escalation block when consecutiveSameFailures is 0 (fresh cycle, no streak)', () => {
+      seedFailingSummary()
+      const addendum = buildHealAddendum({ cycle: 1, consecutiveSameFailures: 0 })
+      expect(addendum).not.toContain('Escalation:')
+      expect(addendum).not.toContain('change tactic')
+    })
+
+    it('omits the escalation block when consecutiveSameFailures is 1 (first observation, no prior fix yet)', () => {
+      seedFailingSummary()
+      const addendum = buildHealAddendum({ cycle: 1, consecutiveSameFailures: 1 })
+      expect(addendum).not.toContain('Escalation:')
+    })
+
+    it('omits the escalation block when consecutiveSameFailures is 2 (one fix attempt failed — give the agent one more shot)', () => {
+      seedFailingSummary()
+      const addendum = buildHealAddendum({ cycle: 2, consecutiveSameFailures: 2 })
+      expect(addendum).not.toContain('Escalation:')
+    })
+
+    it('omits the escalation block when consecutiveSameFailures is undefined (caller did not plumb it in)', () => {
+      seedFailingSummary()
+      const addendum = buildHealAddendum({ cycle: 5 })
+      expect(addendum).not.toContain('Escalation:')
+    })
+
+    it('omits the escalation block when there are no failing slugs (nothing to escalate about)', () => {
+      // No summary on disk → readFailingSlugs returns [].
+      const addendum = buildHealAddendum({ cycle: 3, consecutiveSameFailures: 3 })
+      expect(addendum).not.toContain('Escalation:')
+    })
+
+    it('emits the escalation block at the threshold (consecutiveSameFailures === 3)', () => {
+      seedFailingSummary()
+      const failedDir = path.join(tmpRoot, 'logs', 'runs', 'r1', 'failed')
+      const addendum = buildHealAddendum({
+        cycle: 3,
+        consecutiveSameFailures: 3,
+        failedDir,
+      })
+      expect(addendum).toContain('Escalation: this is cycle 3 with the same failing set (test-a, test-b).')
+      expect(addendum).toContain('change tactic, not double down')
+      // Specific tactical bullets are present.
+      expect(addendum).toContain('trace usually shows the real failure mode')
+      expect(addendum).toContain('your last edit didn\'t help')
+      expect(addendum).toContain('infra-flaky')
+      expect(addendum).toContain('diagnostic logging or assertions')
+    })
+
+    it('continues emitting the escalation block above the threshold (counter === 5)', () => {
+      seedFailingSummary()
+      const addendum = buildHealAddendum({
+        cycle: 5,
+        consecutiveSameFailures: 5,
+        failedDir: '/run/failed',
+      })
+      expect(addendum).toContain('Escalation:')
+    })
+
+    it('embeds absolute `failedDir/<slug>/trace-extract/...` paths so the agent can Read them directly', () => {
+      seedFailingSummary()
+      const failedDir = '/abs/path/logs/runs/r1/failed'
+      const addendum = buildHealAddendum({
+        cycle: 3,
+        consecutiveSameFailures: 3,
+        failedDir,
+      })
+      expect(addendum).toContain('/abs/path/logs/runs/r1/failed/<slug>/trace-extract/snapshot-at-failure.txt')
+      expect(addendum).toContain('/abs/path/logs/runs/r1/failed/<slug>/trace-extract/network-failed.txt')
+    })
+
+    it('embeds the absolute journalPath in the prior-cycle-diff bullet', () => {
+      seedFailingSummary()
+      const runJournalPath = '/abs/path/logs/runs/r1/diagnosis-journal.md'
+      const addendum = buildHealAddendum({
+        cycle: 4,
+        consecutiveSameFailures: 4,
+        failedDir: '/abs/path/logs/runs/r1/failed',
+        journalPath: runJournalPath,
+      })
+      expect(addendum).toContain(`Read the diff in \`${runJournalPath}\``)
+    })
+
+    it('falls back to <failedDir>/<slug>/... placeholders when failedDir is not plumbed in', () => {
+      // Defensive fallback so the block still renders something useful if a
+      // future caller forgets the path. Not the recommended path — but a
+      // missing failedDir shouldn't crash addendum building.
+      seedFailingSummary()
+      const addendum = buildHealAddendum({ cycle: 3, consecutiveSameFailures: 3 })
+      expect(addendum).toContain('<failedDir>/<slug>/trace-extract/snapshot-at-failure.txt')
+    })
+
+    it('references cycle N-1 as the prior cycle in the diff bullet', () => {
+      seedFailingSummary()
+      const addendum = buildHealAddendum({
+        cycle: 7,
+        consecutiveSameFailures: 5,
+        failedDir: '/run/failed',
+      })
+      expect(addendum).toContain('changed `e2e/helpers/` in cycle 6')
+    })
+
+    it('coexists with the prior-iterations cue (escalation precedes journal cue in the output)', () => {
+      seedFailingSummary()
+      fs.writeFileSync(journalPath, '# Diagnosis Journal\n')
+      const addendum = buildHealAddendum({
+        cycle: 3,
+        consecutiveSameFailures: 3,
+        failedDir: '/run/failed',
+      })
+      const escalationIdx = addendum.indexOf('Escalation:')
+      const journalIdx = addendum.indexOf('Prior iterations exist')
+      expect(escalationIdx).toBeGreaterThan(-1)
+      expect(journalIdx).toBeGreaterThan(-1)
+      expect(escalationIdx).toBeLessThan(journalIdx)
+    })
+  })
 })

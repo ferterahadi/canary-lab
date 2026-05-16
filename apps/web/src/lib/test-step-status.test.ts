@@ -341,6 +341,24 @@ describe('activeBodyLineForTest', () => {
     })).toBe(3)
   })
 
+  it('returns null when the failed entry has neither locations nor location', () => {
+    expect(activeBodyLineForTest({
+      testName: 'Creates a TODO',
+      testLine: 10,
+      bodySource: '{\n  await page.goto(\"/\")\n}',
+      summary: {
+        complete: true,
+        total: 1,
+        passed: 0,
+        failed: [
+          {
+            name: 'test-case-creates-a-todo',
+          },
+        ],
+      },
+    })).toBeNull()
+  })
+
   it('keeps the highlight on the parent test body when a child helper location appears first', () => {
     expect(activeBodyLineForTest({
       testName: 'Creates a TODO',

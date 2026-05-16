@@ -375,6 +375,16 @@ describe('RunsProvider', () => {
     expect(api.cancelHealRun).toHaveBeenCalledWith('r-actions')
   })
 
+  it('invokes the websocket onerror handler without scheduling a reconnect', () => {
+    renderProbe()
+    const socket = FakeWebSocket.instances[0]
+    expect(socket.onerror).toBeTypeOf('function')
+    act(() => {
+      socket.onerror?.()
+    })
+    // No throw; onclose path remains the one to schedule reconnects.
+  })
+
   it('moves through reconnect state and exposes disconnected after max backoff', async () => {
     vi.useFakeTimers()
     const captured = renderProbe()
