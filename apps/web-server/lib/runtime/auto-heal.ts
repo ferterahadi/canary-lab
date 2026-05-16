@@ -356,7 +356,7 @@ function renderFeatureDocsMap(manifestPath: string): string {
 // empty string collapses cleanly.
 export function renderTraceExtractHint(failedDir: string): string {
   if (!hasAnyFailureWith(failedDir, 'trace-extract/failure-summary.md')) return ''
-  return `- \`${failedDir}/<slug>/trace-extract/failure-summary.md\` — curated extract of the failing Playwright run: the failing action with its selector and error, the accessibility snapshot of the page at the moment of failure, failed network requests, and console errors. Read this FIRST for any failure that involves a UI interaction — it answers "which element did Playwright try to find" and "what was actually on the page". The raw \`trace.zip\` lives next to it; for full drill-down use \`npx playwright trace open <zip>\` then \`actions\`, \`action <id>\`, \`snapshot <id>\`, \`requests\`, \`console\`.`
+  return `- \`${failedDir}/<slug>/trace-extract/failure-summary.md\` — curated extract of the failing Playwright run. Read this FIRST for any UI failure: failing action with selector + error, accessibility snapshot at the failure moment, failed network, console errors. For deeper drill-down, every supporting file is in the SAME directory (\`failing-action.txt\`, \`failed-actions.txt\`, \`snapshot-at-failure.txt\`, \`snapshot-before.txt\`, \`actions.txt\`, \`network-failed.txt\`, \`console-errors.txt\`, \`metadata.txt\`) — use the \`Read\` tool on them directly. Do NOT invoke the \`playwright trace\` CLI; everything you need is already on disk.`
 }
 
 export function renderPlaywrightMcpHint(failedDir: string): string {

@@ -7,6 +7,7 @@
 import type { RunSummary } from '../api/types'
 
 export type StepStatus = 'pending' | 'testing' | 'passed' | 'failed' | 'skipped' | 'timedout'
+export type RunningTestSummary = NonNullable<RunSummary['running']>
 
 export interface StatusPresentation {
   label: string
@@ -80,7 +81,7 @@ export function statusForTest(
   // entry for a test that is being re-run is still on disk while the test
   // is in flight. Checking `running` first lets the badge flip to "running"
   // instead of sticking on the stale "failed" label.
-  if (isRunActivelyTesting && summary.running?.name === expected) return 'testing'
+  if (isRunActivelyTesting && runningTestForSummaryName(summary, expected)) return 'testing'
   const failed = summary.failed.find((f) => f.name === expected)
   if (failed) {
     const msg = failed.error?.message ?? ''
@@ -103,9 +104,9 @@ export function activeBodyLineForTest(input: {
   summary: RunSummary | undefined
 }): number | null {
   const expectedName = summaryEntryName(input.testName)
-  const running = input.summary?.running
+  const running = input.summary ? runningTestForSummaryName(input.summary, expectedName) : undefined
   const bodyLineCount = input.bodySource.split('\n').length
-  if (running?.name === expectedName) {
+  if (running) {
     return bodyLineForLocations(
       running.step?.locations ?? (running.step?.location ? [running.step.location] : []),
       input.testLine,
@@ -119,6 +120,14 @@ export function activeBodyLineForTest(input: {
     input.testLine,
     bodyLineCount,
   )
+}
+
+export function runningTestForSummaryName(
+  summary: RunSummary,
+  summaryName: string,
+): RunningTestSummary | undefined {
+  return summary.runningTests?.find((entry) => entry.name === summaryName)
+    ?? (summary.running?.name === summaryName ? summary.running : undefined)
 }
 
 function bodyLineForLocations(locations: string[], testLine: number, bodyLineCount: number): number | null {
