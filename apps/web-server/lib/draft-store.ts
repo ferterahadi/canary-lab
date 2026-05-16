@@ -61,6 +61,7 @@ export interface DraftRecord {
   prdDocuments: DraftPrdDocument[]
   repos: DraftRepo[]
   featureName?: string
+  intentSummary?: string
   wizardAgent?: 'claude' | 'codex'
   activeAgentStage?: 'planning' | 'generating'
   planAgentSessionId?: string
@@ -88,6 +89,7 @@ export interface DraftPaths {
   draftJson: string
   prdMd: string
   planJson: string
+  intentMd: string
   planAgentLog: string
   specAgentLog: string
   generatedDir: string
@@ -100,6 +102,7 @@ export function paths(logsDir: string, draftId: string): DraftPaths {
     draftJson: path.join(draftDir, 'draft.json'),
     prdMd: path.join(draftDir, 'prd.md'),
     planJson: path.join(draftDir, 'plan.json'),
+    intentMd: path.join(draftDir, 'intent.md'),
     planAgentLog: path.join(draftDir, 'plan-agent.log'),
     specAgentLog: path.join(draftDir, 'spec-agent.log'),
     generatedDir: path.join(draftDir, 'generated'),
@@ -178,6 +181,7 @@ export function canTransition(from: DraftStatus, to: DraftStatus): boolean {
 
 export interface TransitionPatch {
   plan?: unknown
+  intentSummary?: string
   generatedFiles?: string[]
   devDependencies?: string[]
   featureName?: string

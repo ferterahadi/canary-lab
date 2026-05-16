@@ -3,6 +3,7 @@ import {
   extractDevDependencies,
   extractGeneratedFiles,
   extractGeneratedSpecOutput,
+  extractIntentSummary,
   extractPlan,
   extractWizardSessionRef,
 } from './wizard-output-parser'
@@ -193,6 +194,41 @@ chatter after`
     const r = extractPlan('agent chatter [}] after')
     expect(r.ok).toBe(false)
     if (!r.ok) expect(r.error).toBe('plan-output marker not found')
+  })
+})
+
+describe('extractIntentSummary', () => {
+  it('extracts the body between intent-summary markers', () => {
+    const stream = `chatter
+<intent-summary>
+The test covers checkout vouchers.
+
+Constraints: voucher creation UI is a non-goal.
+</intent-summary>
+<plan-output>[]</plan-output>`
+    const r = extractIntentSummary(stream)
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.value).toContain('The test covers checkout vouchers.')
+    expect(r.value).toContain('non-goal')
+  })
+
+  it('reports when the open marker is missing', () => {
+    const r = extractIntentSummary('<plan-output>[]</plan-output>')
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.error).toBe('intent-summary marker not found')
+  })
+
+  it('reports when the close marker is missing', () => {
+    const r = extractIntentSummary('<intent-summary>oops no close')
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.error).toBe('intent-summary close marker not found')
+  })
+
+  it('reports when the body is empty', () => {
+    const r = extractIntentSummary('<intent-summary>   \n  </intent-summary>')
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.error).toBe('intent-summary body empty')
   })
 })
 

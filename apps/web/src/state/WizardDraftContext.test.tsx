@@ -272,7 +272,7 @@ describe('WizardDraftProvider', () => {
       await captured.value?.acceptSpec('draft-a', 'checkout-flow')
     })
 
-    expect(api.acceptPlan).toHaveBeenCalledWith('draft-a', [{ step: 'Add test', actions: ['Create spec'], expectedOutcome: 'Spec is generated' }])
+    expect(api.acceptPlan).toHaveBeenCalledWith('draft-a', [{ step: 'Add test', actions: ['Create spec'], expectedOutcome: 'Spec is generated' }], undefined)
     expect(api.acceptSpec).toHaveBeenCalledWith('draft-a', 'checkout-flow')
     expect(captured.value?.drafts[0].status).toBe('spec-ready')
   })
