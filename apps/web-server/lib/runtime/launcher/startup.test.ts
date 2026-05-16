@@ -238,6 +238,7 @@ describe('resolveHealthProbe', () => {
 
   it('rejects malformed probe shapes during coercion', () => {
     expect(() => coerceProbe({ timeoutMs: 100 } as never)).toThrow(/declare one transport/)
+    expect(() => coerceProbe({} as never)).toThrow(/declare one transport/)
   })
 })
 

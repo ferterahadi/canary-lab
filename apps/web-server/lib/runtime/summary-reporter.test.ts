@@ -5,6 +5,9 @@ import path from 'path'
 
 const tmpRoot = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-sr-')))
 const LOGS_DIR = path.join(tmpRoot, 'logs')
+const traceMocks = vi.hoisted(() => ({
+  extractTraceSummary: vi.fn(),
+}))
 
 vi.mock('./paths', () => ({
   ROOT: tmpRoot,
@@ -18,10 +21,15 @@ vi.mock('./paths', () => ({
     process.env.CANARY_LAB_SUMMARY_PATH ?? path.join(LOGS_DIR, 'e2e-summary.json'),
 }))
 
+vi.mock('./trace-enrichment', () => ({
+  extractTraceSummary: traceMocks.extractTraceSummary,
+}))
+
 const { slugify, default: SummaryReporter } = await import('./summary-reporter')
 
 afterEach(() => {
   fs.rmSync(LOGS_DIR, { recursive: true, force: true })
+  traceMocks.extractTraceSummary.mockReset()
   delete process.env.CANARY_LAB_SUMMARY_PATH
   delete process.env.CANARY_LAB_MANIFEST_PATH
   delete process.env.CANARY_LAB_BENCHMARK_MODE
@@ -669,6 +677,107 @@ describe('SummaryReporter', () => {
       passed: 0,
       passedNames: [],
       failed: [],
+    })
+  })
+
+  it('adds trace summaries to failed entries and rewrites the heal index on end', async () => {
+    fs.mkdirSync(LOGS_DIR, { recursive: true })
+    const traceZip = path.join(LOGS_DIR, 'trace.zip')
+    fs.writeFileSync(traceZip, 'zip')
+    traceMocks.extractTraceSummary.mockResolvedValue({
+      summaryPath: path.join(LOGS_DIR, 'failed', 'test-case-traced-fail', 'trace-extract', 'failure-summary.md'),
+      bytes: 120,
+      failedActionId: '4',
+    })
+    const reporter = new SummaryReporter()
+
+    reporter.onTestEnd(
+      mkTest('Traced fail', '/specs/traced.spec.ts', 6),
+      mkResult({
+        status: 'failed',
+        error: { message: 'boom' },
+        attachments: [
+          { name: 'screenshot', path: path.join(LOGS_DIR, 'shot.png'), contentType: 'image/png' },
+          { name: 'trace', path: traceZip, contentType: 'application/zip' },
+        ],
+      }),
+    )
+    await reporter.onEnd({} as any)
+
+    expect(traceMocks.extractTraceSummary).toHaveBeenCalledWith({
+      traceZipPath: traceZip,
+      outputDir: path.join(LOGS_DIR, 'failed', 'test-case-traced-fail', 'trace-extract'),
+      testName: 'test-case-traced-fail',
+    })
+    expect(readSummary().failed[0]).toMatchObject({
+      name: 'test-case-traced-fail',
+      traceSummaryFile: path.join('failed', 'test-case-traced-fail', 'trace-extract', 'failure-summary.md'),
+    })
+  })
+
+  it('keeps final summaries when one trace extraction fails and another succeeds', async () => {
+    fs.mkdirSync(LOGS_DIR, { recursive: true })
+    const traceA = path.join(LOGS_DIR, 'trace-a.zip')
+    const traceB = path.join(LOGS_DIR, 'trace-b.zip')
+    fs.writeFileSync(traceA, 'zip')
+    fs.writeFileSync(traceB, 'zip')
+    traceMocks.extractTraceSummary
+      .mockRejectedValueOnce(new Error('trace failed'))
+      .mockResolvedValueOnce({
+        summaryPath: path.join(LOGS_DIR, 'failed', 'different-test', 'trace-extract', 'failure-summary.md'),
+        bytes: 20,
+        failedActionId: null,
+      })
+    const reporter = new SummaryReporter()
+
+    reporter.onTestEnd(
+      mkTest('First fail'),
+      mkResult({
+        status: 'failed',
+        error: { message: 'first' },
+        attachments: [{ name: 'trace', path: traceA }],
+      }),
+    )
+    reporter.onTestEnd(
+      mkTest('Second fail'),
+      mkResult({
+        status: 'failed',
+        error: { message: 'second' },
+        attachments: [{ name: 'trace', path: traceB }],
+      }),
+    )
+    await reporter.onEnd({} as any)
+
+    expect(traceMocks.extractTraceSummary).toHaveBeenCalledTimes(2)
+    expect(readSummary().failed.map((entry) => entry.traceSummaryFile)).toEqual([
+      undefined,
+      path.join('failed', 'different-test', 'trace-extract', 'failure-summary.md'),
+    ])
+  })
+
+  it('leaves failed entries unchanged when every trace extraction fails', async () => {
+    fs.mkdirSync(LOGS_DIR, { recursive: true })
+    const traceZip = path.join(LOGS_DIR, 'trace.zip')
+    fs.writeFileSync(traceZip, 'zip')
+    traceMocks.extractTraceSummary.mockRejectedValue(new Error('trace failed'))
+    const reporter = new SummaryReporter()
+
+    reporter.onTestEnd(
+      mkTest('Trace fail'),
+      mkResult({
+        status: 'failed',
+        error: { message: 'boom' },
+        attachments: [{ name: 'trace', path: traceZip }],
+      }),
+    )
+    await reporter.onEnd({} as any)
+
+    expect(readSummary().failed[0]).toEqual({
+      name: 'test-case-trace-fail',
+      error: { message: 'boom' },
+      durationMs: 42,
+      location: '/spec.ts:1',
+      retry: 0,
     })
   })
 

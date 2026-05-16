@@ -34,6 +34,39 @@ describe('resolveDraftStageSessionRef', () => {
     expect(resolved).toBeNull()
   })
 
+  it('keeps a saved ref when no spawn timestamp needs freshness checking', () => {
+    const logPath = path.join(tmpDir, 'fresh.jsonl')
+    fs.writeFileSync(logPath, '{}\n')
+
+    const ref = { agent: 'claude' as const, sessionId: 'saved', logPath }
+    expect(resolveDraftStageSessionRef({ ref, draftDir })).toBe(ref)
+  })
+
+  it('rejects saved refs with invalid spawn timestamps', () => {
+    const logPath = path.join(tmpDir, 'invalid-time.jsonl')
+    fs.writeFileSync(logPath, '{}\n')
+
+    expect(resolveDraftStageSessionRef({
+      ref: { agent: 'claude', sessionId: 'saved', logPath },
+      draftDir,
+      spawnedAt: 'not-a-date',
+    })).toBeNull()
+  })
+
+  it('does not discover sessions for non-codex agents or missing spawn timestamps', () => {
+    expect(resolveDraftStageSessionRef({
+      agent: 'claude',
+      draftDir,
+      spawnedAt: '2026-05-16T00:00:00.000Z',
+      homeDir,
+    })).toBeNull()
+    expect(resolveDraftStageSessionRef({
+      agent: 'codex',
+      draftDir,
+      homeDir,
+    })).toBeNull()
+  })
+
   it('discovers only codex sessions for the same draft dir at or after spawnedAt', () => {
     writeCodexSession({
       id: 'old-session',
