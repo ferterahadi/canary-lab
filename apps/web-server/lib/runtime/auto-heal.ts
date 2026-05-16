@@ -100,7 +100,19 @@ function loadPromptTemplate(promptPath: string = HEAL_PROMPT_TEMPLATE_PATH): str
 }
 
 function renderPromptTemplate(template: string, values: Record<string, string>): string {
-  return template.replace(/\{\{(\w+)\}\}/g, (match, key: string) => values[key] ?? match)
+  // Drop any line that holds nothing but a single placeholder that resolves
+  // to empty — otherwise the empty bullet sits between live bullets and
+  // breaks the markdown list. Lines that mix a placeholder with other text
+  // (e.g. `- {{failedDir}}/<slug>/foo`) are left alone.
+  const placeholderOnlyLine = /^[ \t]*\{\{(\w+)\}\}[ \t]*$/
+  const lines = template.split('\n')
+  const kept: string[] = []
+  for (const line of lines) {
+    const m = line.match(placeholderOnlyLine)
+    if (m && (values[m[1]] ?? '').length === 0) continue
+    kept.push(line.replace(/\{\{(\w+)\}\}/g, (match, key: string) => values[key] ?? match))
+  }
+  return kept.join('\n')
 }
 
 // Build a transient `--mcp-config` argument for `claude`. Writes the MCP
@@ -296,6 +308,8 @@ export function buildOrchestratorHealPrompt(
       failedDir: paths.failedDir,
       journalPath: paths.diagnosisJournalPath,
       featureDocsMap: renderFeatureDocsMap(paths.manifestPath),
+      traceExtractHint: renderTraceExtractHint(paths.failedDir),
+      playwrightMcpHint: renderPlaywrightMcpHint(paths.failedDir),
       restartSignal: paths.restartSignal,
       rerunSignal: paths.rerunSignal,
       personalWikiMap: renderPersonalWikiMap(opts.personalWikiPath),
@@ -333,4 +347,46 @@ function renderFeatureDocsMap(manifestPath: string): string {
     'Feature context docs:',
     `- \`${docsDir}\` — uploaded Add Test documents and additional notes preserved for this feature. Read these when the failure may depend on product requirements, acceptance criteria, or user-provided context.`,
   ].join('\n')
+}
+
+// Optional per-failure artifact hints. Only emit a bullet when at least one
+// failure dir actually contains the artifact, so the heal agent isn't told
+// to look for files that don't exist. Returns the bullet line (no trailing
+// newline) or an empty string. The template wraps the placeholder so an
+// empty string collapses cleanly.
+export function renderTraceExtractHint(failedDir: string): string {
+  if (!hasAnyFailureWith(failedDir, 'trace-extract/failure-summary.md')) return ''
+  return `- \`${failedDir}/<slug>/trace-extract/failure-summary.md\` — curated extract of the failing Playwright run: the failing action with its selector and error, the accessibility snapshot of the page at the moment of failure, failed network requests, and console errors. Read this FIRST for any failure that involves a UI interaction — it answers "which element did Playwright try to find" and "what was actually on the page". The raw \`trace.zip\` lives next to it; for full drill-down use \`npx playwright trace open <zip>\` then \`actions\`, \`action <id>\`, \`snapshot <id>\`, \`requests\`, \`console\`.`
+}
+
+export function renderPlaywrightMcpHint(failedDir: string): string {
+  if (!hasAnyFailureWithNonEmptyDir(failedDir, 'playwright-mcp')) return ''
+  return `- \`${failedDir}/<slug>/playwright-mcp/\` — console logs / DOM snapshots / network captures the Playwright MCP server recorded from a re-execution of this failure. Inspect when the trace summary plus service log together still don't explain the bug, or when you need to re-drive the page.`
+}
+
+function hasAnyFailureWith(failedDir: string, relPath: string): boolean {
+  if (!fs.existsSync(failedDir)) return false
+  let entries: fs.Dirent[]
+  try { entries = fs.readdirSync(failedDir, { withFileTypes: true }) } catch { return false }
+  for (const e of entries) {
+    if (!e.isDirectory()) continue
+    if (fs.existsSync(path.join(failedDir, e.name, relPath))) return true
+  }
+  return false
+}
+
+function hasAnyFailureWithNonEmptyDir(failedDir: string, subDir: string): boolean {
+  if (!fs.existsSync(failedDir)) return false
+  let entries: fs.Dirent[]
+  try { entries = fs.readdirSync(failedDir, { withFileTypes: true }) } catch { return false }
+  for (const e of entries) {
+    if (!e.isDirectory()) continue
+    const candidate = path.join(failedDir, e.name, subDir)
+    if (!fs.existsSync(candidate)) continue
+    try {
+      const inner = fs.readdirSync(candidate).filter((f) => !f.startsWith('_'))
+      if (inner.length > 0) return true
+    } catch { /* ignore */ }
+  }
+  return false
 }

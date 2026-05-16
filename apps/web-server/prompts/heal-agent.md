@@ -8,8 +8,9 @@ Start here:
 - `{{summaryPath}}` — raw Playwright summary. Use only if `heal-index.md` is missing or incomplete.
 
 Useful only when needed:
+{{traceExtractHint}}
 - `{{failedDir}}/<slug>/<svc>.log` — pre-sliced service logs referenced by `heal-index.md`.
-- `{{failedDir}}/<slug>/playwright-mcp/` — when present, console logs / DOM snapshots / network captures the Playwright MCP server recorded for this failure. Inspect when the service log alone does not explain the bug.
+{{playwrightMcpHint}}
 - `{{runDir}}/svc-<safeName>.log` — full service log. Use only if a slice is missing or too short.
 - `{{journalPath}}` — prior heal attempts. Use only when the current prompt or index says prior iterations exist.
 

@@ -642,7 +642,7 @@ export function PlaywrightPlayback({
               key={`${test.name}:${test.retry ?? 0}:${test.startedAt ?? ''}`}
               className="cl-card p-3"
             >
-              <div className="flex min-w-0 items-start gap-3">
+              <div className="flex min-w-0 flex-wrap items-start gap-3">
                 <div className="min-w-0 flex-1">
                   <PlaybackHeader test={test} current={isCurrent} index={idx} total={tests.length} />
                 </div>
@@ -671,7 +671,7 @@ export function PlaywrightPlayback({
 function TraceActions({ artifacts }: { artifacts: PlaywrightArtifact[] }) {
   if (artifacts.length === 0) return null
   return (
-    <div className="flex shrink-0 flex-wrap justify-end gap-2">
+    <div className="flex min-w-0 max-w-full flex-wrap justify-end gap-2">
       {artifacts.map((artifact) => (
         <a
           key={artifact.path}
@@ -679,7 +679,7 @@ function TraceActions({ artifacts }: { artifacts: PlaywrightArtifact[] }) {
           target="_blank"
           rel="noreferrer"
           download={artifact.name}
-          className="rounded px-2.5 py-1 text-[11px] font-medium"
+          className="max-w-full truncate whitespace-nowrap rounded px-2.5 py-1 text-[11px] font-medium"
           style={{ background: 'var(--bg-selected)', color: 'var(--accent)' }}
         >
           Download trace
