@@ -277,6 +277,47 @@ describe('SummaryReporter', () => {
 
     reporter.onTestEnd(mkTest('Currently busy', '/specs/busy.spec.ts', 7), mkResult())
     expect(readSummary().running).toBeUndefined()
+    expect(readSummary().runningTests).toBeUndefined()
+  })
+
+  it('tracks multiple currently running tests for parallel Playwright workers', () => {
+    const reporter = new SummaryReporter()
+    const first = mkTest('First worker', '/specs/first.spec.ts', 7)
+    const second = mkTest('Second worker', '/specs/second.spec.ts', 11)
+
+    reporter.onTestBegin(first)
+    reporter.onTestBegin(second)
+
+    expect(readSummary()).toMatchObject({
+      running: {
+        name: 'test-case-first-worker',
+        location: '/specs/first.spec.ts:7',
+      },
+      runningTests: [
+        {
+          name: 'test-case-first-worker',
+          location: '/specs/first.spec.ts:7',
+        },
+        {
+          name: 'test-case-second-worker',
+          location: '/specs/second.spec.ts:11',
+        },
+      ],
+    })
+
+    reporter.onTestEnd(first, mkResult())
+    expect(readSummary()).toMatchObject({
+      running: {
+        name: 'test-case-second-worker',
+        location: '/specs/second.spec.ts:11',
+      },
+      runningTests: [
+        {
+          name: 'test-case-second-worker',
+          location: '/specs/second.spec.ts:11',
+        },
+      ],
+    })
   })
 
   it('tolerates malformed existing summaries during a targeted rerun seed', () => {
@@ -804,6 +845,37 @@ describe('SummaryReporter', () => {
       name: 'test-case-currently-busy',
       location: '/specs/busy.spec.ts:7',
     })
+  })
+
+  it('keeps parallel worker step state isolated per running test', () => {
+    const reporter = new SummaryReporter()
+    const first = mkTest('First worker', '/specs/first.spec.ts', 7)
+    const second = mkTest('Second worker', '/specs/second.spec.ts', 11)
+    const firstStep = mkStep('first setup', 'test.step', '/specs/first.spec.ts', 8)
+    const secondStep = mkStep('second setup', 'test.step', '/specs/second.spec.ts', 12)
+
+    reporter.onTestBegin(first)
+    reporter.onTestBegin(second)
+    reporter.onStepBegin(first, mkResult(), firstStep)
+    reporter.onStepBegin(second, mkResult(), secondStep)
+    reporter.onStepEnd(first, mkResult(), firstStep)
+
+    expect(readSummary().runningTests).toEqual([
+      {
+        name: 'test-case-first-worker',
+        location: '/specs/first.spec.ts:7',
+      },
+      {
+        name: 'test-case-second-worker',
+        location: '/specs/second.spec.ts:11',
+        step: {
+          title: 'second setup',
+          category: 'test.step',
+          location: '/specs/second.spec.ts:12',
+          locations: ['/specs/second.spec.ts:12'],
+        },
+      },
+    ])
   })
 
   it('starts running state from a step event when begin was missed', () => {

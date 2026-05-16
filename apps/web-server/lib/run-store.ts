@@ -190,6 +190,9 @@ export interface RunSummary {
   /** Currently-running Playwright test, emitted by the reporter on
    *  onTestBegin. Cleared when the matching onTestEnd lands. */
   running?: { name: string; location: string; step?: RunSummaryRunningStep }
+  /** All currently-running Playwright tests. Present when Playwright workers
+   *  run multiple test cases concurrently. */
+  runningTests?: Array<{ name: string; location: string; step?: RunSummaryRunningStep }>
   failed: RunSummaryFailedEntry[]
 }
 

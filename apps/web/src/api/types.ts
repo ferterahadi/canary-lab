@@ -158,6 +158,7 @@ export interface RunSummary {
   skipped?: number
   skippedNames?: string[]
   running?: { name: string; location: string; step?: RunSummaryRunningStep }
+  runningTests?: Array<{ name: string; location: string; step?: RunSummaryRunningStep }>
   failed: RunSummaryFailedEntry[]
 }
 

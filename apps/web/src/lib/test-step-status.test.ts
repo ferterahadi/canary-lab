@@ -88,6 +88,23 @@ describe('statusForTest', () => {
     expect(statusForTest('Creates a TODO', inflight)).toBe('testing')
   })
 
+  it('returns testing for every test in the parallel runningTests list', () => {
+    const inflight: RunSummary = {
+      complete: false,
+      total: 2,
+      passed: 0,
+      failed: [],
+      running: { name: 'test-case-creates-a-todo', location: '/todo.spec.ts:12' },
+      runningTests: [
+        { name: 'test-case-creates-a-todo', location: '/todo.spec.ts:12' },
+        { name: 'test-case-updates-a-todo', location: '/todo.spec.ts:22' },
+      ],
+    }
+
+    expect(statusForTest('Creates a TODO', inflight)).toBe('testing')
+    expect(statusForTest('Updates a TODO', inflight)).toBe('testing')
+  })
+
   it('returns testing when a previously-failed test is currently re-running (targeted rerun)', () => {
     const targetedRerun: RunSummary = {
       complete: false,

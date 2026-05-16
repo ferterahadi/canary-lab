@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import * as api from '../api/client'
 import type { ExtractedTest, FeatureSpecFile, RunStatus } from '../api/types'
-import { activeBodyLineForTest, colorClassForStatus, statusForTest, summaryEntryName, type StepStatus } from '../lib/test-step-status'
+import { activeBodyLineForTest, colorClassForStatus, runningTestForSummaryName, statusForTest, summaryEntryName, type StepStatus } from '../lib/test-step-status'
 import type { RunSummary, RunSummaryRunningStep } from '../api/types'
 import { ShikiCode, StatusPill, StepBlock } from './shared/TestCodeBlock'
 import { ChevronRightIcon, StatusDot } from './config/atoms'
@@ -90,9 +90,10 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunStatus }: 
                 const key = `${spec.file}:${t.line}:${t.name}`
                 const isExpanded = expandedTest === key
                 const entryName = summaryEntryName(t.name)
-                const runningLocation = isRunActivelyTesting && activeRunSummary?.running?.name === entryName
-                  ? activeRunSummary.running.location
+                const runningTest = isRunActivelyTesting && activeRunSummary
+                  ? runningTestForSummaryName(activeRunSummary, entryName)
                   : undefined
+                const runningLocation = runningTest?.location
                 const isRunningTest = Boolean(runningLocation)
                 const activeLine = activeBodyLineForTest({
                   testName: t.name,
@@ -108,7 +109,7 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunStatus }: 
                     status={statusForTest(t.name, activeRunSummary, isRunActivelyTesting)}
                     runningLocation={runningLocation}
                     isRunningTest={isRunningTest}
-                    runningStep={isRunActivelyTesting && activeRunSummary?.running?.name === entryName ? activeRunSummary.running.step : undefined}
+                    runningStep={runningTest?.step}
                     activeLine={activeLine}
                     expanded={isExpanded}
                     onToggle={() => setExpandedTest(isExpanded ? null : key)}

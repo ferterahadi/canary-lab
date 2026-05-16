@@ -58,6 +58,12 @@ interface RunningStep {
   locations?: string[]
 }
 
+interface RunningTest {
+  name: string
+  location: string
+  step?: RunningStep
+}
+
 type PlaybackEvent =
   | {
       type: 'test-begin'
@@ -88,8 +94,8 @@ class SummaryReporter implements Reporter {
   private results: TestEntry[] = []
   private knownTests: KnownTestEntry[] = knownTestsFromExistingSummary(this.initialSummary)
   private sawSuiteInventory = this.knownTests.length > 0
-  private running: { name: string; location: string; step?: RunningStep } | null = null
-  private stepStack: RunningStep[] = []
+  private runningTests = new Map<string, RunningTest>()
+  private stepStacksByTest = new Map<string, RunningStep[]>()
   private failedStepLocationsByTest = new Map<string, string[]>()
   private failureCount = 0
   private lastEnrichedFailureCount = -1
@@ -110,20 +116,21 @@ class SummaryReporter implements Reporter {
   }
 
   onTestBegin(test: TestCase): void {
-    this.stepStack = []
     const known = this.rememberKnownTest(test)
     this.failedStepLocationsByTest.delete(known.name)
-    this.running = {
+    const running = {
       name: known.name,
       location: known.location ?? `${test.location.file}:${test.location.line}`,
     }
+    this.stepStacksByTest.set(known.name, [])
+    this.runningTests.set(known.name, running)
     this.writePlaybackEvent({
       type: 'test-begin',
       time: new Date().toISOString(),
       test: {
-        name: this.running.name,
+        name: running.name,
         title: test.title,
-        location: this.running.location,
+        location: running.location,
       },
     })
     this.writeSummary(false)
@@ -131,15 +138,19 @@ class SummaryReporter implements Reporter {
 
   onStepBegin(test: TestCase, _result: TestResult, step: TestStep): void {
     const name = this.rememberKnownTest(test).name
-    if (!this.running || this.running.name !== name) {
-      this.running = {
+    let running = this.runningTests.get(name)
+    if (!running) {
+      running = {
         name,
         location: `${test.location.file}:${test.location.line}`,
       }
+      this.runningTests.set(name, running)
     }
     const runningStep = stepToRunningStep(step)
-    this.stepStack.push(runningStep)
-    this.running = { ...this.running, step: runningStep }
+    const stepStack = this.stepStacksByTest.get(name) ?? []
+    stepStack.push(runningStep)
+    this.stepStacksByTest.set(name, stepStack)
+    this.runningTests.set(name, { ...running, step: runningStep })
     this.writePlaybackEvent({
       type: 'step-begin',
       time: new Date().toISOString(),
@@ -151,17 +162,20 @@ class SummaryReporter implements Reporter {
 
   onStepEnd(test: TestCase, _result: TestResult, step: TestStep): void {
     const name = this.rememberKnownTest(test).name
-    if (!this.running || this.running.name !== name) return
+    const running = this.runningTests.get(name)
+    if (!running) return
     const ended = stepToRunningStep(step)
     if (ended.locations?.length && step.error) {
       this.failedStepLocationsByTest.set(name, ended.locations)
     }
-    const idx = findLastStepIndex(this.stepStack, ended)
-    if (idx >= 0) this.stepStack.splice(idx, 1)
-    const current = this.stepStack.at(-1)
-    this.running = current
-      ? { ...this.running, step: current }
-      : { name: this.running.name, location: this.running.location }
+    const stepStack = this.stepStacksByTest.get(name) ?? []
+    const idx = findLastStepIndex(stepStack, ended)
+    if (idx >= 0) stepStack.splice(idx, 1)
+    this.stepStacksByTest.set(name, stepStack)
+    const current = stepStack.at(-1)
+    this.runningTests.set(name, current
+      ? { ...running, step: current }
+      : { name: running.name, location: running.location })
     this.writePlaybackEvent({
       type: 'step-end',
       time: new Date().toISOString(),
@@ -176,10 +190,8 @@ class SummaryReporter implements Reporter {
     const failed = result.status !== 'passed' && result.status !== 'skipped'
     const known = this.rememberKnownTest(test)
     const name = known.name
-    if (this.running?.name === name) {
-      this.running = null
-      this.stepStack = []
-    }
+    this.runningTests.delete(name)
+    this.stepStacksByTest.delete(name)
     this.removeResult(name)
     const error = !passed && result.error
       ? {
@@ -239,8 +251,8 @@ class SummaryReporter implements Reporter {
   }
 
   async onEnd(_result: FullResult): Promise<void> {
-    this.running = null
-    this.stepStack = []
+    this.runningTests.clear()
+    this.stepStacksByTest.clear()
     this.writeSummary(true)
     this.reconcileJournalOutcome()
     if (
@@ -340,7 +352,7 @@ class SummaryReporter implements Reporter {
             skippedNames: skippedResults.map((r) => r.name),
           }
         : {}),
-      ...(this.running ? { running: this.running } : {}),
+      ...this.runningSummaryFields(),
       failed: this.results
         .filter(isFailureResult)
         .map((r) => ({
@@ -360,6 +372,15 @@ class SummaryReporter implements Reporter {
     const tmpPath = `${finalPath}.tmp`
     fs.writeFileSync(tmpPath, JSON.stringify(summary, null, 2) + '\n')
     fs.renameSync(tmpPath, finalPath)
+  }
+
+  private runningSummaryFields(): { running?: RunningTest; runningTests?: RunningTest[] } {
+    const runningTests = [...this.runningTests.values()]
+    if (runningTests.length === 0) return {}
+    return {
+      running: runningTests[0],
+      runningTests,
+    }
   }
 
   private seedFromExistingSummary(): void {

@@ -128,6 +128,62 @@ describe('TestCasesColumn', () => {
     expect(container.textContent).toContain('Running')
   })
 
+  it('marks multiple currently running test cards when Playwright workers run in parallel', async () => {
+    vi.mocked(getFeatureTests).mockResolvedValue([
+      {
+        file: '/tmp/features/alpha/e2e/a.spec.ts',
+        tests: [
+          {
+            name: 'loads checkout',
+            line: 3,
+            bodySource: '',
+            steps: [],
+          },
+          {
+            name: 'submits payment',
+            line: 12,
+            bodySource: '',
+            steps: [],
+          },
+        ],
+      },
+    ])
+
+    await act(async () => {
+      root.render(
+        <TestCasesColumn
+          feature="alpha"
+          activeRunStatus="running"
+          activeRunSummary={{
+            complete: false,
+            total: 2,
+            passed: 0,
+            passedNames: [],
+            failed: [],
+            running: {
+              name: 'test-case-loads-checkout',
+              location: '/tmp/features/alpha/e2e/a.spec.ts:3:1',
+            },
+            runningTests: [
+              {
+                name: 'test-case-loads-checkout',
+                location: '/tmp/features/alpha/e2e/a.spec.ts:3:1',
+              },
+              {
+                name: 'test-case-submits-payment',
+                location: '/tmp/features/alpha/e2e/a.spec.ts:12:1',
+              },
+            ],
+          }}
+        />,
+      )
+    })
+
+    expect(container.textContent).toContain('loads checkout')
+    expect(container.textContent).toContain('submits payment')
+    expect(container.querySelectorAll('.border-sky-500\\/50')).toHaveLength(2)
+  })
+
   it('renders an error when feature tests fail to load', async () => {
     vi.mocked(getFeatureTests).mockRejectedValue(new ApiError(500, { error: 'boom' }))
 
