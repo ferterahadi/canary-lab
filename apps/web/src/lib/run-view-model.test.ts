@@ -70,6 +70,14 @@ describe('deriveRunViewModel', () => {
     expect(vm.actions.delete.reason).toContain(transient.replace(/-/g, ' '))
   })
 
+  it('falls back to the run headline for unknown transient action values', () => {
+    const vm = deriveRunViewModel(detail({ status: 'failed' }), 'unknown-action' as TransientAction)
+
+    expect(vm.displayStatus).toBe('unknown-action')
+    expect(vm.headline).toBe('Run failed')
+    expect(Object.values(vm.actions).every((action) => !action.enabled)).toBe(true)
+  })
+
   it('surfaces terminal lifecycle alerts without treating pending journal as active state', () => {
     const vm = deriveRunViewModel(detail({
       status: 'aborted',

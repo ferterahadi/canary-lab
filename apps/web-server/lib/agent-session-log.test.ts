@@ -173,6 +173,14 @@ describe('agent session ref file parsing', () => {
     expect(selectAgentSessionRef({ activeAgent: 'codex', sessions: { claude } })?.sessionId).toBe('sid-c')
     expect(selectAgentSessionRef({ sessions: {} })).toBeNull()
   })
+
+  it('falls back when preferred or active refs point at an absent session slot', () => {
+    const claude = { agent: 'claude' as const, sessionId: 'sid-c', logPath: '/tmp/claude.jsonl' }
+    const codex = { agent: 'codex' as const, sessionId: 'sid-x', logPath: '/tmp/codex.jsonl' }
+
+    expect(selectAgentSessionRef({ sessions: { claude } }, 'codex')).toBe(claude)
+    expect(selectAgentSessionRef({ activeAgent: 'claude', sessions: { codex } })).toBe(codex)
+  })
 })
 
 describe('locateCodexSessionLog', () => {

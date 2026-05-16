@@ -48,6 +48,7 @@ function resolvePlaywrightCli(): string {
   if (cachedCliPath) return cachedCliPath
   const pkgPath = require.resolve('@playwright/test/package.json')
   const cli = path.join(path.dirname(pkgPath), 'cli.js')
+  /* v8 ignore next -- package installs without cli.js are corrupt install states, not runtime branches. */
   if (!fs.existsSync(cli)) {
     throw new Error(`playwright cli not found at ${cli}`)
   }

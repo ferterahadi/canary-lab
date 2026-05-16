@@ -188,6 +188,12 @@ chatter after`
     expect(invalid.ok).toBe(false)
     if (!invalid.ok) expect(invalid.error).toMatch(/coverageType/)
   })
+
+  it('ignores malformed unmarked array candidates and reports the missing marker', () => {
+    const r = extractPlan('agent chatter [}] after')
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.error).toBe('plan-output marker not found')
+  })
 })
 
 describe('extractGeneratedFiles', () => {
