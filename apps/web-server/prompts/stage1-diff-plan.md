@@ -10,7 +10,47 @@ Diff-mode E2E tests are valuable for **regression safety** — pinning prior beh
 
 ## Critical output contract
 
-Your final answer must contain exactly one literal `<plan-output>` open marker and exactly one literal `</plan-output>` close marker, wrapping a JSON array. The Canary Lab wizard parser fails with `plan-output marker not found` if you omit the markers, output bare JSON, rename them, or wrap them only in a Markdown code fence. Anything outside the markers is treated as agent chatter and ignored.
+Your final answer must contain **two** tagged blocks, in this order:
+
+1. exactly one `<intent-summary>` … `</intent-summary>` block (plain English prose), and
+2. exactly one `<plan-output>` … `</plan-output>` block wrapping a JSON array.
+
+The Canary Lab wizard parser fails with `plan-output marker not found` if you omit the plan markers, output bare JSON, rename them, or wrap them only in a Markdown code fence. The intent-summary markers must also be literal — do not rename or fence them. Anything outside the markers is treated as agent chatter and ignored.
+
+### Intent summary block
+
+The intent summary is a short human-readable distillation of *what the diff appears to do and what the test is therefore for*. **The first line of the block must be exactly:**
+
+```
+Inferred from local diff (no PRD provided).
+```
+
+After that line, write 2–4 short paragraphs in plain English (no JSON, no Markdown headers, no bullet lists) covering, in order:
+
+- The branch name and the dominant theme of commit messages since the base ref (what the author appears to be doing).
+- What the modified test files in the diff assert — these are the strongest signal of intended new behavior.
+- The blast radius worth pinning: schema/contract changes, restored/re-added code, post-success update paths, tracked-input recomputations, and any other prior behavior that could silently regress.
+
+Do not invent product requirements beyond what the diff, commit messages, and modified tests support.
+
+```
+<intent-summary>
+Inferred from local diff (no PRD provided).
+
+Branch `release/1.0.7`. Commits in this range focus on enhancing trace-summary
+extraction for failed Playwright tests and tightening reporting around journal
+handling. The modified spec under e2e/heal.spec.ts now asserts that trace
+summaries are surfaced on failure, so that is the new behavior under test.
+
+Regression surface to pin: the prior heal-agent flow still completes when no
+trace exists, the report still includes journal entries for passed tests, and
+the trace-summary block is omitted when extraction itself errors. Several
+post-success cache updates around the heal pipeline are touched and worth
+covering.
+</intent-summary>
+```
+
+### Plan output block
 
 ```
 <plan-output>
@@ -170,4 +210,4 @@ A second worked example, showing items that pin a post-success update path and a
 </plan-output>
 ```
 
-Now produce the diff-mode plan for the selected repositories.
+Now produce the intent summary and diff-mode plan for the selected repositories. Emit `<intent-summary>` first (with the mandatory leading `Inferred from local diff (no PRD provided).` line), then `<plan-output>`.

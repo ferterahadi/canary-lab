@@ -27,7 +27,7 @@ import {
 
 interface Props {
   draft: DraftRecord
-  onAccept: (editedPlan?: PlanStep[]) => void
+  onAccept: (editedPlan?: PlanStep[], editedIntent?: string) => void
   onReject: () => void
   onRetry: () => void
   onCancelGeneration: () => void
@@ -48,11 +48,17 @@ export function PlanReviewStep({ draft, onAccept, onReject, onRetry, onCancelGen
   )
   const [plan, setPlan] = useState<PlanStep[]>(seedPlan)
   const [planMarkdown, setPlanMarkdown] = useState<string[]>(() => seedPlan.map(renderPlanStepMarkdown))
+  const seedIntent = draft.intentSummary ?? ''
+  const [intentDraft, setIntentDraft] = useState<string>(seedIntent)
 
   useEffect(() => {
     setPlan(seedPlan)
     setPlanMarkdown(seedPlan.map(renderPlanStepMarkdown))
   }, [seedPlan])
+
+  useEffect(() => {
+    setIntentDraft(seedIntent)
+  }, [seedIntent])
 
   const editable = status === 'plan-ready'
   const generationActive = status === 'planning' || status === 'generating'
@@ -165,51 +171,76 @@ export function PlanReviewStep({ draft, onAccept, onReject, onRetry, onCancelGen
           )}
 
           {(status === 'plan-ready' || status === 'generating' || status === 'spec-ready' || status === 'accepted') && (
-            <div>
-              <div className="mb-3 flex items-center justify-between">
-                <div className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
-                  Generated plan
+            <div className="space-y-5">
+              <div>
+                <div className="mb-2 text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
+                  Intent summary
                 </div>
-                {editable && (
-                  <button
-                    type="button"
-                    onClick={handleAppend}
-                    className="cl-button px-2 py-1"
+                <textarea
+                  value={intentDraft}
+                  onChange={(e) => setIntentDraft(e.target.value)}
+                  readOnly={!editable}
+                  rows={6}
+                  placeholder={editable ? 'No intent summary produced — describe what this test is for.' : ''}
+                  className="cl-input min-h-32 w-full resize-y px-3 py-2 text-[11px] leading-5"
+                  style={{
+                    background: editable ? 'var(--bg-surface)' : 'var(--bg-overlay)',
+                  }}
+                  spellCheck={false}
+                />
+                <div
+                  className="mt-1 text-[10.5px]"
+                  style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}
+                >
+                  Saved to <code>docs/intent.md</code> when you accept the plan.
+                </div>
+              </div>
+              <div>
+                <div className="mb-3 flex items-center justify-between">
+                  <div className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
+                    Generated plan
+                  </div>
+                  {editable && (
+                    <button
+                      type="button"
+                      onClick={handleAppend}
+                      className="cl-button px-2 py-1"
+                    >
+                      + Add step
+                    </button>
+                  )}
+                </div>
+                {editable ? (
+                  <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+                    <SortableContext items={plan.map((_, i) => String(i))} strategy={verticalListSortingStrategy}>
+                      <ol className="space-y-3">
+                        {plan.map((item, i) => (
+                          <SortablePlanItem
+                            key={i}
+                            id={String(i)}
+                            index={i}
+                            markdown={planMarkdown[i] ?? renderPlanStepMarkdown(item)}
+                            onChange={handleMarkdownChange}
+                            onRemove={handleRemove}
+                          />
+                        ))}
+                      </ol>
+                    </SortableContext>
+                  </DndContext>
+                ) : (
+                  <PlanList plan={plan} />
+                )}
+                {editable && hasErrors && (
+                  <div
+                    className="mt-2 text-[11px]"
+                    style={{ color: 'var(--danger)', fontFamily: 'var(--font-mono)' }}
                   >
-                    + Add step
-                  </button>
+                    {errors.map((e, i) => (
+                      <div key={i}>· Card #{e.index + 1}: {e.message}</div>
+                    ))}
+                  </div>
                 )}
               </div>
-              {editable ? (
-                <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-                  <SortableContext items={plan.map((_, i) => String(i))} strategy={verticalListSortingStrategy}>
-                    <ol className="space-y-3">
-                      {plan.map((item, i) => (
-                        <SortablePlanItem
-                          key={i}
-                          id={String(i)}
-                          index={i}
-                          markdown={planMarkdown[i] ?? renderPlanStepMarkdown(item)}
-                          onChange={handleMarkdownChange}
-                          onRemove={handleRemove}
-                        />
-                      ))}
-                    </ol>
-                  </SortableContext>
-                </DndContext>
-              ) : (
-                <PlanList plan={plan} />
-              )}
-              {editable && hasErrors && (
-                <div
-                  className="mt-2 text-[11px]"
-                  style={{ color: 'var(--danger)', fontFamily: 'var(--font-mono)' }}
-                >
-                  {errors.map((e, i) => (
-                    <div key={i}>· Card #{e.index + 1}: {e.message}</div>
-                  ))}
-                </div>
-              )}
             </div>
           )}
         </div>
@@ -249,7 +280,7 @@ export function PlanReviewStep({ draft, onAccept, onReject, onRetry, onCancelGen
             </button>
             <button
               type="button"
-              onClick={() => onAccept(editedPlan)}
+              onClick={() => onAccept(editedPlan, intentDraft.trim() ? intentDraft : undefined)}
               disabled={acting || status !== 'plan-ready' || hasErrors}
               className="cl-button-primary px-4 py-1.5 disabled:cursor-not-allowed disabled:opacity-50"
             >

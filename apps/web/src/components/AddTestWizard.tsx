@@ -74,11 +74,11 @@ export function AddTestWizard({ features, onClose, onAcceptedFeature }: Props) {
     }
   }, [startDraft])
 
-  const handleAcceptPlan = useCallback(async (editedPlan?: PlanStep[]): Promise<void> => {
+  const handleAcceptPlan = useCallback(async (editedPlan?: PlanStep[], editedIntent?: string): Promise<void> => {
     if (!draft) return
     setActing(true)
     try {
-      await acceptPlan(draft.draftId, editedPlan)
+      await acceptPlan(draft.draftId, editedPlan, editedIntent)
     } catch (e) {
       setErrorMessage(e instanceof Error ? e.message : 'Accept failed')
     } finally {

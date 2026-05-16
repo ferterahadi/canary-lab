@@ -20,6 +20,7 @@ import {
 } from '../lib/draft-store'
 import {
   extractGeneratedSpecOutput,
+  extractIntentSummary,
   extractPlan,
   extractWizardSessionRef,
 } from '../lib/wizard-output-parser'
@@ -257,7 +258,7 @@ export async function testsDraftRoutes(
     return { agent: resolved.agent, sessionId: resolved.sessionId, events }
   })
 
-  app.post<{ Params: { id: string }; Body: { plan?: unknown } }>(
+  app.post<{ Params: { id: string }; Body: { plan?: unknown; intentSummary?: string } }>(
     '/api/tests/draft/:id/accept-plan',
     async (req, reply) => {
       const rec = readDraft(deps.logsDir, req.params.id)
@@ -270,7 +271,15 @@ export async function testsDraftRoutes(
         return { error: `cannot accept-plan from status ${rec.status}` }
       }
       const plan = req.body?.plan ?? rec.plan
-      transition(deps.logsDir, rec.draftId, 'generating', { plan })
+      const submittedIntent = typeof req.body?.intentSummary === 'string' ? req.body.intentSummary.trim() : undefined
+      const intentSummary = submittedIntent !== undefined && submittedIntent.length > 0
+        ? submittedIntent
+        : rec.intentSummary
+      if (intentSummary !== undefined) {
+        const p = draftPaths(deps.logsDir, rec.draftId)
+        fs.writeFileSync(p.intentMd, intentSummary, 'utf8')
+      }
+      transition(deps.logsDir, rec.draftId, 'generating', { plan, intentSummary })
       runSpecStage(deps, rec.draftId).catch(() => {/* logged via draft.errorMessage */})
       reply.code(202)
       return { draftId: rec.draftId, status: 'generating' }
@@ -291,7 +300,11 @@ export async function testsDraftRoutes(
       }
       const featureName = req.body?.featureName ?? rec.featureName ?? defaultFeatureName(rec)
       const generated = readGeneratedFiles(deps.logsDir, rec.draftId)
-      const generatedWithContextDocs = [...generated, ...additionalNotesDocForDraft(rec)]
+      const generatedWithContextDocs = [
+        ...generated,
+        ...intentSummaryDocForDraft(rec),
+        ...additionalNotesDocForDraft(rec),
+      ]
       const validation = validateFeatureTarget(deps.projectRoot, featureName)
       if (!validation.ok) {
         reply.code(validation.error === 'feature-exists' ? 409 : 400)
@@ -456,9 +469,13 @@ async function runPlanStage(deps: TestsDraftRouteDeps, draftId: string): Promise
     return
   }
   fs.writeFileSync(p.planJson, JSON.stringify(parsed.value, null, 2), 'utf8')
+  const intent = extractIntentSummary(stream)
+  const intentSummary = intent.ok ? intent.value : 'No intent summary produced by agent.'
+  fs.writeFileSync(p.intentMd, intentSummary, 'utf8')
   const sessionRef = extractWizardSessionRef(stream)
   transition(deps.logsDir, draftId, 'plan-ready', {
     plan: parsed.value,
+    intentSummary,
     activeAgentStage: undefined,
     ...(sessionRef
       ? { planAgentSessionId: sessionRef.id, planAgentSessionKind: sessionRef.kind }
@@ -601,6 +618,16 @@ function additionalNotesDocForDraft(rec: DraftRecord): { path: string; content: 
     ? [{
         path: 'docs/additional-notes.md',
         content: `# Additional notes\n\n${notes}\n`,
+      }]
+    : []
+}
+
+function intentSummaryDocForDraft(rec: DraftRecord): { path: string; content: string }[] {
+  const summary = rec.intentSummary?.trim()
+  return summary
+    ? [{
+        path: 'docs/intent.md',
+        content: `# Intent summary\n\n${summary}\n`,
       }]
     : []
 }

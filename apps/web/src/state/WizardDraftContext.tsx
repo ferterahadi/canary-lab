@@ -13,7 +13,7 @@ interface WizardDraftContextValue {
   closeWizard: () => void
   refreshDraft: (draftId: string) => Promise<DraftRecord | null>
   cancelGeneration: (draftId: string) => Promise<DraftRecord | null>
-  acceptPlan: (draftId: string, plan?: PlanStep[]) => Promise<DraftRecord | null>
+  acceptPlan: (draftId: string, plan?: PlanStep[], intentSummary?: string) => Promise<DraftRecord | null>
   acceptSpec: (draftId: string, featureName?: string) => Promise<DraftRecord | null>
   rejectAndDelete: (draftId: string) => Promise<void>
   deleteTask: (draftId: string) => Promise<void>
@@ -119,8 +119,8 @@ export function WizardDraftProvider({ children }: { children: ReactNode }) {
     return refreshDraft(draftId)
   }, [refreshDraft])
 
-  const acceptPlan = useCallback(async (draftId: string, plan?: PlanStep[]): Promise<DraftRecord | null> => {
-    await api.acceptPlan(draftId, plan)
+  const acceptPlan = useCallback(async (draftId: string, plan?: PlanStep[], intentSummary?: string): Promise<DraftRecord | null> => {
+    await api.acceptPlan(draftId, plan, intentSummary)
     return refreshDraft(draftId)
   }, [refreshDraft])
 
