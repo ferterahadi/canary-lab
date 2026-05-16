@@ -507,6 +507,26 @@ describe('writeHealIndex with journal tail and various manifest shapes', () => {
     ).not.toThrow()
   })
 
+  it('emits a trace bullet when traceSummaryFile is set on a failed entry', () => {
+    const healIndexPath = path.join(tmpDir, 'heal-index.md')
+    writeHealIndex({
+      manifest: { featureName: 'demo' },
+      summary: {
+        failed: [
+          {
+            name: 'click-checkout',
+            error: { message: 'TimeoutError' },
+            traceSummaryFile: 'logs/runs/X/failed/click-checkout/trace-extract/failure-summary.md',
+          },
+        ],
+      },
+      healIndexPath,
+    })
+    const body = fs.readFileSync(healIndexPath, 'utf-8')
+    expect(body).toContain('- **click-checkout**')
+    expect(body).toMatch(/- trace: logs\/runs\/X\/failed\/click-checkout\/trace-extract\/failure-summary\.md/)
+  })
+
   it('renders the previous heal-cycle note when history has restarts/keeps', () => {
     expect(() =>
       writeHealIndex({
@@ -552,6 +572,210 @@ describe('writeHealIndex with journal tail and various manifest shapes', () => {
         summary: { failed: [] },
       }),
     ).not.toThrow()
+  })
+})
+
+describe('writeHealIndex failure delta vs previous cycle', () => {
+  // The delta section gives the agent cross-cycle attribution: which tests
+  // its prior turn unblocked, which it broke, which it left alone. Suppressed
+  // on cycle 1 (no prior cycle to compare). Each bucket only appears when
+  // non-empty.
+
+  function readBody(healIndexPath: string): string {
+    return fs.readFileSync(healIndexPath, 'utf-8')
+  }
+
+  it('suppresses the delta section on the first cycle (previousFailingSlugs empty/omitted)', () => {
+    const healIndexPath = path.join(tmpDir, 'heal-index.md')
+    writeHealIndex({
+      manifest: { featureName: 'demo' },
+      summary: { failed: [{ name: 't1' }, { name: 't2' }] },
+      healIndexPath,
+    })
+    expect(readBody(healIndexPath)).not.toContain('## Failure delta vs previous cycle')
+  })
+
+  it('suppresses the delta section when previousFailingSlugs is an empty array', () => {
+    const healIndexPath = path.join(tmpDir, 'heal-index.md')
+    writeHealIndex({
+      manifest: { featureName: 'demo' },
+      summary: { failed: [{ name: 't1' }] },
+      previousFailingSlugs: [],
+      healIndexPath,
+    })
+    expect(readBody(healIndexPath)).not.toContain('## Failure delta vs previous cycle')
+  })
+
+  it('suppresses the section when current failures is empty (no failures, no delta to show)', () => {
+    const healIndexPath = path.join(tmpDir, 'heal-index.md')
+    writeHealIndex({
+      manifest: { featureName: 'demo' },
+      summary: { failed: [] },
+      previousFailingSlugs: ['t1', 't2'],
+      healIndexPath,
+    })
+    expect(readBody(healIndexPath)).not.toContain('## Failure delta vs previous cycle')
+  })
+
+  it('emits all three buckets when the failure set has mixed deltas', () => {
+    const healIndexPath = path.join(tmpDir, 'heal-index.md')
+    writeHealIndex({
+      manifest: { featureName: 'demo' },
+      // Previous: t1, t2, t3 — current: t1 (still), t4 (new); t2 + t3 newly passing.
+      summary: { failed: [{ name: 't1' }, { name: 't4' }] },
+      previousFailingSlugs: ['t1', 't2', 't3'],
+      healIndexPath,
+    })
+    const body = readBody(healIndexPath)
+    expect(body).toContain('## Failure delta vs previous cycle')
+    expect(body).toContain('- still failing (1): t1')
+    expect(body).toContain('- newly failing (1): t4')
+    expect(body).toContain('- newly passing (2): t2, t3')
+  })
+
+  it('emits only the still-failing bucket when nothing changed', () => {
+    const healIndexPath = path.join(tmpDir, 'heal-index.md')
+    writeHealIndex({
+      manifest: { featureName: 'demo' },
+      summary: { failed: [{ name: 't1' }, { name: 't2' }] },
+      previousFailingSlugs: ['t1', 't2'],
+      healIndexPath,
+    })
+    const body = readBody(healIndexPath)
+    expect(body).toContain('## Failure delta vs previous cycle')
+    expect(body).toContain('- still failing (2): t1, t2')
+    expect(body).not.toContain('- newly failing')
+    expect(body).not.toContain('- newly passing')
+  })
+
+  it('emits only the newly-failing bucket when previous failures all passed but new ones appeared', () => {
+    const healIndexPath = path.join(tmpDir, 'heal-index.md')
+    writeHealIndex({
+      manifest: { featureName: 'demo' },
+      summary: { failed: [{ name: 't3' }, { name: 't4' }] },
+      previousFailingSlugs: ['t1', 't2'],
+      healIndexPath,
+    })
+    const body = readBody(healIndexPath)
+    expect(body).toContain('## Failure delta vs previous cycle')
+    expect(body).toContain('- newly failing (2): t3, t4')
+    expect(body).toContain('- newly passing (2): t1, t2')
+    expect(body).not.toContain('- still failing')
+  })
+
+  it('preserves current-failure order from the summary in the still-failing bucket', () => {
+    const healIndexPath = path.join(tmpDir, 'heal-index.md')
+    writeHealIndex({
+      manifest: { featureName: 'demo' },
+      // Previous slugs in a different order than current.
+      summary: { failed: [{ name: 'z' }, { name: 'a' }, { name: 'm' }] },
+      previousFailingSlugs: ['a', 'm', 'z'],
+      healIndexPath,
+    })
+    const body = readBody(healIndexPath)
+    expect(body).toContain('- still failing (3): z, a, m')
+  })
+
+  it('falls back to the journal\'s latest failingTests when previousFailingSlugs is omitted', () => {
+    // This is the production path: the reporter calls writeHealIndex without
+    // any orchestrator state. The journal entry recorded in the prior cycle
+    // becomes the previous-cycle source of truth.
+    const healIndexPath = path.join(tmpDir, 'heal-index.md')
+    const runJournalPath = path.join(tmpDir, 'diagnosis-journal.md')
+    fs.writeFileSync(runJournalPath, `## Iteration 1 — 2026-05-16T10:00:00Z
+
+- run: r1
+- failingTests: t1, t2, t3
+- signal: .rerun
+- outcome: pending
+`)
+    writeHealIndex({
+      manifest: { featureName: 'demo' },
+      summary: { failed: [{ name: 't1' }, { name: 't4' }] },
+      journalPath: runJournalPath,
+      healIndexPath,
+    })
+    const body = readBody(healIndexPath)
+    expect(body).toContain('## Failure delta vs previous cycle')
+    expect(body).toContain('- still failing (1): t1')
+    expect(body).toContain('- newly failing (1): t4')
+    expect(body).toContain('- newly passing (2): t2, t3')
+  })
+
+  it('explicit previousFailingSlugs takes precedence over the journal fallback', () => {
+    const healIndexPath = path.join(tmpDir, 'heal-index.md')
+    const runJournalPath = path.join(tmpDir, 'diagnosis-journal.md')
+    fs.writeFileSync(runJournalPath, `## Iteration 1 — t1
+
+- failingTests: x, y
+- signal: .rerun
+- outcome: pending
+`)
+    writeHealIndex({
+      manifest: { featureName: 'demo' },
+      summary: { failed: [{ name: 't1' }] },
+      // Caller's slugs override the journal — used by tests and any future
+      // caller that knows the prior set independently.
+      previousFailingSlugs: ['t1', 't2'],
+      journalPath: runJournalPath,
+      healIndexPath,
+    })
+    const body = readBody(healIndexPath)
+    expect(body).toContain('- still failing (1): t1')
+    expect(body).toContain('- newly passing (1): t2')
+    // The journal slugs (x, y) MUST NOT appear.
+    expect(body).not.toContain('newly passing (2): x, y')
+  })
+
+  it('falls back to no-delta when the latest journal entry has no failingTests field', () => {
+    const healIndexPath = path.join(tmpDir, 'heal-index.md')
+    const runJournalPath = path.join(tmpDir, 'diagnosis-journal.md')
+    // Iteration with no failingTests line — e.g., the journal append happened
+    // before the summary was ready. Behavior: suppress the delta section.
+    fs.writeFileSync(runJournalPath, `## Iteration 1 — t1
+
+- signal: .rerun
+- outcome: pending
+`)
+    writeHealIndex({
+      manifest: { featureName: 'demo' },
+      summary: { failed: [{ name: 't1' }] },
+      journalPath: runJournalPath,
+      healIndexPath,
+    })
+    expect(readBody(healIndexPath)).not.toContain('## Failure delta vs previous cycle')
+  })
+
+  it('uses ONLY the latest journal entry (older iterations are ignored)', () => {
+    // The "previous" cycle is whichever one ran most recently — not a union
+    // across all prior cycles. This pins that semantic.
+    const healIndexPath = path.join(tmpDir, 'heal-index.md')
+    const runJournalPath = path.join(tmpDir, 'diagnosis-journal.md')
+    fs.writeFileSync(runJournalPath, `## Iteration 1 — t1
+
+- failingTests: ancient-a, ancient-b
+- signal: .rerun
+- outcome: regression
+
+## Iteration 2 — t2
+
+- failingTests: recent-a, recent-b
+- signal: .rerun
+- outcome: pending
+`)
+    writeHealIndex({
+      manifest: { featureName: 'demo' },
+      summary: { failed: [{ name: 'recent-a' }, { name: 'new-c' }] },
+      journalPath: runJournalPath,
+      healIndexPath,
+    })
+    const body = readBody(healIndexPath)
+    expect(body).toContain('- still failing (1): recent-a')
+    expect(body).toContain('- newly failing (1): new-c')
+    expect(body).toContain('- newly passing (1): recent-b')
+    // Ancient iteration entries don't bleed in.
+    expect(body).not.toContain('ancient-a')
+    expect(body).not.toContain('ancient-b')
   })
 })
 

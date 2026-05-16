@@ -6,6 +6,7 @@ import { codeToHtml } from 'shiki'
 import ts from 'typescript'
 import type { RunDetail, PlaywrightPlaybackEvent } from './run-store'
 import { pickAvailableHealAgent, type HealAgent } from './runtime/auto-heal'
+import { formatCodeForDisplay } from '../../../shared/code-display-format'
 
 export type AssertionQuality = 'strict' | 'moderate' | 'shallow' | 'unknown'
 
@@ -527,7 +528,7 @@ function loadSourceTests(featureDir: string | undefined): Map<string, SourceTest
             file,
             line: lineFor(node, src),
             title,
-            bodySource: cleanSnippet(body.getText(src)),
+            bodySource: formatCodeForDisplay(body.getText(src)),
             helperCalls: review.helperCalls,
             helperDefinitions: review.helperDefinitions,
             externalImports: dedupe([
@@ -1401,10 +1402,11 @@ function rationaleForAudience(rationale: string): string {
 }
 
 async function highlightCode(source: string): Promise<string> {
+  const formatted = formatCodeForDisplay(source)
   try {
-    return await codeToHtml(source, { lang: 'typescript', theme: 'one-light' })
+    return await codeToHtml(formatted, { lang: 'typescript', theme: 'one-light' })
   } catch {
-    return `<pre class="fallback-code"><code>${escapeHtml(source)}</code></pre>`
+    return `<pre class="fallback-code"><code>${escapeHtml(formatted)}</code></pre>`
   }
 }
 
@@ -1767,15 +1769,24 @@ function playbackTests(events: PlaywrightPlaybackEvent[]): Array<{
   status: string
   durationMs?: number
 }> {
-  return events
-    .filter((event): event is Extract<PlaywrightPlaybackEvent, { type: 'test-end' }> => event.type === 'test-end')
-    .map((event) => ({
+  // One entry per (name, location). Retries and heal-cycle reruns share both
+  // and fold into the latest test-end. Two distinct tests that share a title
+  // (and therefore a name, since name = `test-case-${slugify(title)}`) but
+  // live at different locations stay separate — the HTML export disambiguates
+  // them via positional anchor IDs. Map preserves first-seen insertion order.
+  const latest = new Map<string, { name: string; title: string; location: string; status: string; durationMs?: number }>()
+  for (const event of events) {
+    if (event.type !== 'test-end') continue
+    const key = `${event.test.name}@${event.test.location}`
+    latest.set(key, {
       name: event.test.name,
       title: event.test.title,
       location: event.test.location,
       status: event.status,
       durationMs: event.durationMs,
-    }))
+    })
+  }
+  return [...latest.values()]
 }
 
 function listSpecFiles(featureDir: string): string[] {

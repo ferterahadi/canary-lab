@@ -22,6 +22,7 @@ describe('buildRunPaths', () => {
     expect(p.playwrightStdoutPath).toBe(path.join(runDir, 'playwright.log'))
     expect(p.playwrightEventsPath).toBe(path.join(runDir, 'playwright-events.jsonl'))
     expect(p.playwrightArtifactsDir).toBe(path.join(runDir, 'playwright-artifacts'))
+    expect(p.playwrightArtifactsKeepDir).toBe(path.join(runDir, 'playwright-artifacts-keep'))
     expect(p.runnerLogPath).toBe(path.join(runDir, 'runner.log'))
     expect(p.healIndexPath).toBe(path.join(runDir, 'heal-index.md'))
     expect(p.diagnosisJournalPath).toBe(path.join(runDir, 'diagnosis-journal.md'))

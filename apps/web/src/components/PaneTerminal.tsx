@@ -151,10 +151,29 @@ export function PaneTerminal({ runId, paneId, onExit }: Props) {
     // full-screen TUIs that redraw on SIGWINCH; live ResizeObserver fitting can
     // loop with xterm's own DOM changes and make the prompt blink while typing.
     let observer: ResizeObserver | null = null
-    if (!isAgentPane && typeof ResizeObserver !== 'undefined') {
-      observer = new ResizeObserver(() => {
-        fitOnce()
-      })
+    if (typeof ResizeObserver !== 'undefined') {
+      if (isAgentPane) {
+        // One-shot fit on the agent pane. PaneTerminal now stays mounted
+        // across tab switches (hidden via the parent's `hidden` attribute),
+        // so on first mount the container is 0×0 and the inline fitOnce()
+        // above short-circuits; onOpen then forwards the default 80×24 to
+        // the pty. Observe until the container reports real dims, fit once,
+        // push the new size to the pty, then disconnect — we don't keep
+        // observing because the Ink TUI redraws on every SIGWINCH and a
+        // live observer would loop with xterm's own DOM mutations, flickering
+        // the prompt while typing.
+        observer = new ResizeObserver(() => {
+          if (container.clientWidth === 0 || container.clientHeight === 0) return
+          fitOnce()
+          conn.sendResize(term.cols, term.rows)
+          observer?.disconnect()
+          observer = null
+        })
+      } else {
+        observer = new ResizeObserver(() => {
+          fitOnce()
+        })
+      }
       observer.observe(container)
     }
     return () => {

@@ -15,6 +15,14 @@ afterEach(() => {
 })
 
 describe('git-repo subprocess edge cases', () => {
+  it('returns null when git reports a blank working-tree root', async () => {
+    const repo = tmpDir()
+    mockGitSequence([{ stdout: '\n' }])
+    const { getGitRoot } = await import('./git-repo')
+
+    await expect(getGitRoot(repo)).resolves.toBeNull()
+  })
+
   it('returns empty status when git reports a nonnumeric process error', async () => {
     const repo = tmpDir()
     execFileMock.mockImplementationOnce((_cmd, _args, _opts, cb) => {
@@ -42,6 +50,58 @@ describe('git-repo subprocess edge cases', () => {
       message: 'git checkout failed',
       statusCode: 500,
     })
+  })
+
+  it('resolves with stderr from child.on(error) when spawn itself fails', async () => {
+    const repo = tmpDir()
+    execFileMock.mockImplementationOnce(() => {
+      // Don't invoke the execFile callback — only trigger the error event.
+      return {
+        on: (event: string, cb: (err: Error) => void) => {
+          if (event === 'error') cb(new Error('spawn ENOENT'))
+        },
+      }
+    })
+    const { getGitStatus } = await import('./git-repo')
+    await expect(getGitStatus(repo)).resolves.toMatchObject({ isGitRepo: false })
+  })
+
+  it('reports a branch mismatch when current branch differs from expected', async () => {
+    const repo = tmpDir()
+    mockGitSequence([
+      { stdout: 'true\n' },
+      { stdout: 'dev\n' },
+      { stdout: '' },
+      { stdout: '' },
+      { stdout: '' },
+    ])
+    const { validateConfiguredRepoBranches } = await import('./git-repo')
+    await expect(validateConfiguredRepoBranches({
+      name: 'demo',
+      description: 'd',
+      envs: [],
+      featureDir: repo,
+      repos: [{ name: 'app', localPath: repo, branch: 'main' }],
+    })).rejects.toThrow('app: expected main, current dev')
+  })
+
+  it('validates configured repo branches without failures when they match', async () => {
+    const repo = tmpDir()
+    mockGitSequence([
+      { stdout: 'true\n' },
+      { stdout: 'main\n' },
+      { stdout: '' },
+      { stdout: '' },
+      { stdout: '' },
+    ])
+    const { validateConfiguredRepoBranches } = await import('./git-repo')
+    await expect(validateConfiguredRepoBranches({
+      name: 'demo',
+      description: 'd',
+      envs: [],
+      featureDir: repo,
+      repos: [{ name: 'app', localPath: repo, branch: 'main' }],
+    })).resolves.toBeUndefined()
   })
 
   it('handles empty repo lists and branch checks with no current branch', async () => {

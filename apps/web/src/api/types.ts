@@ -158,6 +158,7 @@ export interface RunSummary {
   skipped?: number
   skippedNames?: string[]
   running?: { name: string; location: string; step?: RunSummaryRunningStep }
+  runningTests?: Array<{ name: string; location: string; step?: RunSummaryRunningStep }>
   failed: RunSummaryFailedEntry[]
 }
 
@@ -243,6 +244,7 @@ export interface DraftRecord {
   prdDocuments: DraftPrdDocument[]
   repos: DraftRepo[]
   featureName?: string
+  intentSummary?: string
   wizardAgent?: 'claude' | 'codex'
   activeAgentStage?: 'planning' | 'generating'
   planAgentSessionId?: string

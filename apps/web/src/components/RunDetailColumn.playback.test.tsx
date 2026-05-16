@@ -30,6 +30,8 @@ describe('PlaywrightPlayback', () => {
     expect(container.textContent).toContain('Completed without a Playwright error.')
     expect(container.querySelector('a[download="trace.zip"]')?.textContent).toBe('Download trace')
     expect(container.querySelector('.cl-card')?.firstElementChild?.querySelector('a[download="trace.zip"]')?.textContent).toBe('Download trace')
+    expect(container.querySelector('a[download="trace.zip"]')?.className).toContain('truncate')
+    expect(container.querySelector('a[download="trace.zip"]')?.className).toContain('max-w-full')
     expect(container.textContent).toContain('Screenshot')
     expect(container.textContent).toContain('Video')
     expect(container.querySelector('img')).toBeNull()
@@ -197,16 +199,18 @@ describe('PlaywrightPlayback', () => {
       },
     })
 
-    expect(container.textContent).toContain('checkout failed before heal')
+    expect(container.textContent).not.toContain('checkout failed before heal')
+    expect(container.textContent).not.toContain('old failure')
     expect(container.textContent).toContain('checkout rerun now')
     expect(container.textContent).not.toContain('Now running:')
     expect(container.textContent).toContain('Currently executing in this Playwright process.')
-    expect(container.textContent).toContain('2/2')
+    expect(container.textContent).toContain('1/1')
     const runningPill = [...container.querySelectorAll('span')]
       .find((candidate) => candidate.textContent === 'running')
     expect(runningPill).toBeTruthy()
     const cards = [...container.querySelectorAll('.cl-card.p-3')]
-    expect(cards[1]?.getAttribute('style') ?? '').not.toMatch(/background|box-shadow/)
+    expect(cards).toHaveLength(1)
+    expect(cards[0]?.getAttribute('style') ?? '').not.toMatch(/background|box-shadow/)
   })
 })
 

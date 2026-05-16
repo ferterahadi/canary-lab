@@ -13,6 +13,15 @@ export interface RunPaths {
   playwrightEventsPath: string
   lifecycleEventsPath: string
   playwrightArtifactsDir: string
+  // Durable copy of each Playwright per-test artifact directory. Playwright's
+  // `--output=playwright-artifacts/` clears that directory at the start of
+  // every invocation, so heal-cycle reruns (which respawn Playwright with
+  // `--grep` to retry just the failed test) wipe the videos/traces/screenshots
+  // of previously passing tests. After every Playwright invocation the
+  // orchestrator copies each per-test subdir from `playwright-artifacts/` into
+  // this keep dir; new artifacts for the same pw-slug overwrite the previous
+  // copy so the keep dir always reflects the latest attempt per test.
+  playwrightArtifactsKeepDir: string
   agentSessionIdPath: string
   // Small JSON pointer that records which agent ran and where its CLI-native
   // JSONL session log is on disk (e.g. ~/.claude/projects/.../<uuid>.jsonl
@@ -41,6 +50,7 @@ export function buildRunPaths(runDir: string): RunPaths {
     playwrightEventsPath: path.join(runDir, 'playwright-events.jsonl'),
     lifecycleEventsPath: path.join(runDir, 'lifecycle-events.jsonl'),
     playwrightArtifactsDir: path.join(runDir, 'playwright-artifacts'),
+    playwrightArtifactsKeepDir: path.join(runDir, 'playwright-artifacts-keep'),
     agentSessionIdPath: path.join(runDir, 'agent-session-id.txt'),
     agentSessionRefPath: path.join(runDir, 'agent-session.json'),
     runnerLogPath: path.join(runDir, 'runner.log'),

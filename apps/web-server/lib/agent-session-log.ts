@@ -77,8 +77,8 @@ export function parseAgentSessionRefFile(raw: string): AgentSessionRefFile | nul
 }
 
 export function selectAgentSessionRef(file: AgentSessionRefFile, preferredAgent?: AgentKind): AgentSessionRef | null {
-  if (preferredAgent && file.sessions[preferredAgent]) return file.sessions[preferredAgent] ?? null
-  if (file.activeAgent && file.sessions[file.activeAgent]) return file.sessions[file.activeAgent] ?? null
+  if (preferredAgent && file.sessions[preferredAgent]) return file.sessions[preferredAgent]!
+  if (file.activeAgent && file.sessions[file.activeAgent]) return file.sessions[file.activeAgent]!
   return file.sessions.codex ?? file.sessions.claude ?? null
 }
 
@@ -326,7 +326,7 @@ export function locateMostRecentAgentSessionRef(
   const codexMs = codex ? safeMtimeMs(codex.logPath) : 0
   if (claudeMs === 0 && codexMs === 0) return null
   if (codexMs > claudeMs) return codex
-  return claude ?? codex
+  return claude
 }
 
 function safeMtimeMs(p: string): number {
@@ -369,9 +369,7 @@ export function renderAgentSessionContext(ref: AgentSessionRef, maxChars = 12_00
     `Previous ${ref.agent} session ${ref.sessionId}:`,
   ]
   for (const event of events) {
-    const text = renderAgentEventLine(event)
-    if (!text) continue
-    lines.push(text)
+    lines.push(renderAgentEventLine(event))
   }
   const rendered = lines.join('\n')
   if (rendered.length <= maxChars) return rendered
@@ -380,18 +378,20 @@ export function renderAgentSessionContext(ref: AgentSessionRef, maxChars = 12_00
 
 function renderAgentEventLine(event: AgentEvent): string {
   const prefix = event.timestamp ? `[${event.timestamp}] ` : ''
-  if (event.kind === 'user-message') return `${prefix}USER: ${compactText(event.text)}`
-  if (event.kind === 'assistant-message') return `${prefix}ASSISTANT: ${compactText(event.text)}`
-  if (event.kind === 'assistant-thinking') return `${prefix}THINKING: ${compactText(event.text)}`
-  if (event.kind === 'tool-call') {
-    const input = JSON.stringify(event.input)
-    return `${prefix}TOOL CALL ${event.name}: ${compactText(input)}`
+  switch (event.kind) {
+    case 'user-message':
+      return `${prefix}USER: ${compactText(event.text)}`
+    case 'assistant-message':
+      return `${prefix}ASSISTANT: ${compactText(event.text)}`
+    case 'assistant-thinking':
+      return `${prefix}THINKING: ${compactText(event.text)}`
+    case 'tool-call':
+      return `${prefix}TOOL CALL ${event.name}: ${compactText(JSON.stringify(event.input))}`
+    case 'tool-result': {
+      const marker = event.isError ? ' ERROR' : ''
+      return `${prefix}TOOL RESULT${marker}: ${compactText(event.output)}`
+    }
   }
-  if (event.kind === 'tool-result') {
-    const marker = event.isError ? ' ERROR' : ''
-    return `${prefix}TOOL RESULT${marker}: ${compactText(event.output)}`
-  }
-  return ''
 }
 
 function compactText(text: string, max = 1_200): string {
@@ -549,8 +549,7 @@ function pushCodexEvents(line: CodexLine, out: AgentEvent[]): void {
   // `reasoning` payloads carry encrypted/empty content for non-owners; skip.
 }
 
-function codexMessageText(content: unknown): string {
-  if (!Array.isArray(content)) return ''
+function codexMessageText(content: unknown[]): string {
   const parts: string[] = []
   for (const block of content as Array<{ type?: string; text?: unknown }>) {
     if ((block?.type === 'input_text' || block?.type === 'output_text') && typeof block.text === 'string') {

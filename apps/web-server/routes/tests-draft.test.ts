@@ -369,6 +369,59 @@ describe('runPlanStage', () => {
     await app.close()
   })
 
+  it('persists the intent summary block to intent.md and the draft', async () => {
+    const deps = makeDeps({
+      spawnPlanAgent: async () => `<intent-summary>
+The test covers the login flow and asserts the dashboard greeting renders.
+</intent-summary>
+<plan-output>[
+  {"step":"Open","actions":["go"],"expectedOutcome":"visible"}
+]</plan-output>`,
+    })
+    const app = await makeApp(deps)
+    await app.inject({
+      method: 'POST',
+      url: '/api/tests/draft',
+      payload: {
+        prdText: 'Login',
+        repos: [{ name: 'app', localPath: '/p' }],
+      },
+    })
+    const id = fs.readdirSync(path.join(logsDir, 'drafts'))[0]
+    await new Promise((r) => setTimeout(r, 10))
+    const rec = readDraft(logsDir, id)!
+    expect(rec.status).toBe('plan-ready')
+    expect(rec.intentSummary).toContain('login flow')
+    const intentBody = fs.readFileSync(path.join(logsDir, 'drafts', id, 'intent.md'), 'utf8')
+    expect(intentBody).toContain('login flow')
+    expect(intentBody).toContain('dashboard greeting')
+    await app.close()
+  })
+
+  it('synthesizes a placeholder intent summary when the block is missing', async () => {
+    const deps = makeDeps({
+      spawnPlanAgent: async () => `<plan-output>[
+        {"step":"Open","actions":["go"],"expectedOutcome":"visible"}
+      ]</plan-output>`,
+    })
+    const app = await makeApp(deps)
+    await app.inject({
+      method: 'POST',
+      url: '/api/tests/draft',
+      payload: {
+        prdText: 'Login',
+        repos: [{ name: 'app', localPath: '/p' }],
+      },
+    })
+    const id = fs.readdirSync(path.join(logsDir, 'drafts'))[0]
+    await new Promise((r) => setTimeout(r, 10))
+    const rec = readDraft(logsDir, id)!
+    expect(rec.status).toBe('plan-ready')
+    expect(rec.intentSummary).toBe('No intent summary produced by agent.')
+    expect(fs.readFileSync(path.join(logsDir, 'drafts', id, 'intent.md'), 'utf8')).toBe('No intent summary produced by agent.')
+    await app.close()
+  })
+
   it('stores the plan agent session id when the formatter exposes one', async () => {
     const deps = makeDeps({
       spawnPlanAgent: async () => `[[canary-lab:wizard-session agent=claude id=sess-plan-123]]
@@ -732,7 +785,7 @@ describe('POST /api/tests/draft/:id/accept-spec', () => {
     expect(fs.readFileSync(path.join(featureDir, 'feature.config.cjs'), 'utf8')).toContain("name: 'login'")
     expect(fs.readFileSync(path.join(featureDir, 'playwright.config.ts'), 'utf8')).toContain('baseConfig')
     expect(fs.readFileSync(path.join(featureDir, 'e2e/login.spec.ts'), 'utf8')).toContain("test('x'")
-    expect(walkRelative(featureDir)).toEqual([...canonicalScaffoldPaths('login')].sort())
+    expect(walkRelative(featureDir)).toEqual([...canonicalScaffoldPaths('login'), 'docs/intent.md'].sort())
     expect(fs.existsSync(path.join(featureDir, '.canary-lab-draft-id'))).toBe(false)
     const rec = readDraft(logsDir, id)!
     expect(rec.status).toBe('accepted')
@@ -788,6 +841,7 @@ describe('POST /api/tests/draft/:id/accept-spec', () => {
       'additional-notes.md',
       'command.md',
       'cresclaben.md',
+      'intent.md',
     ])
     const rec = readDraft(logsDir, id)!
     const generatedDocs = (rec.generatedFiles ?? [])
@@ -798,7 +852,44 @@ describe('POST /api/tests/draft/:id/accept-spec', () => {
       'docs/additional-notes.md',
       'docs/command.md',
       'docs/cresclaben.md',
+      'docs/intent.md',
     ])
+    await app.close()
+  })
+
+  it('writes docs/intent.md with the user-edited intent summary on accept-spec', async () => {
+    const deps = makeDeps({
+      spawnPlanAgent: async () => `<intent-summary>
+Agent-produced intent summary.
+</intent-summary>
+<plan-output>[
+  {"step":"Open","actions":["go"],"expectedOutcome":"visible"}
+]</plan-output>`,
+      spawnSpecAgent: async () => fileBlocks(buildFeatureScaffold({ featureName: 'intent_feature' })),
+    })
+    const app = await makeApp(deps)
+    const post = await app.inject({
+      method: 'POST',
+      url: '/api/tests/draft',
+      payload: {
+        prdText: 'Login',
+        repos: [{ name: 'app', localPath: '/p' }],
+        featureName: 'intent_feature',
+      },
+    })
+    const id = post.json().draftId
+    await new Promise((r) => setTimeout(r, 20))
+    await app.inject({
+      method: 'POST',
+      url: `/api/tests/draft/${id}/accept-plan`,
+      payload: { intentSummary: 'User-edited intent text.' },
+    })
+    await new Promise((r) => setTimeout(r, 20))
+    const accept = await app.inject({ method: 'POST', url: `/api/tests/draft/${id}/accept-spec`, payload: {} })
+    expect(accept.statusCode).toBe(200)
+    const featureDir = path.join(projectRoot, 'features', 'intent_feature')
+    const intentBody = fs.readFileSync(path.join(featureDir, 'docs', 'intent.md'), 'utf8')
+    expect(intentBody).toBe('# Intent summary\n\nUser-edited intent text.\n')
     await app.close()
   })
 
@@ -843,7 +934,7 @@ describe('POST /api/tests/draft/:id/accept-spec', () => {
     const featureDir = path.join(projectRoot, 'features', 'collision_docs')
     expect(fs.readFileSync(path.join(featureDir, 'docs', 'command.md'), 'utf8')).toBe('first')
     expect(fs.readFileSync(path.join(featureDir, 'docs', 'command-2.md'), 'utf8')).toBe('second')
-    expect(walkRelative(path.join(featureDir, 'docs'))).toEqual(['command-2.md', 'command.md'])
+    expect(walkRelative(path.join(featureDir, 'docs'))).toEqual(['command-2.md', 'command.md', 'intent.md'])
     await app.close()
   })
 

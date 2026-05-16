@@ -5,6 +5,9 @@ import path from 'path'
 
 const tmpRoot = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-sr-')))
 const LOGS_DIR = path.join(tmpRoot, 'logs')
+const traceMocks = vi.hoisted(() => ({
+  extractTraceSummary: vi.fn(),
+}))
 
 vi.mock('./paths', () => ({
   ROOT: tmpRoot,
@@ -18,10 +21,15 @@ vi.mock('./paths', () => ({
     process.env.CANARY_LAB_SUMMARY_PATH ?? path.join(LOGS_DIR, 'e2e-summary.json'),
 }))
 
+vi.mock('./trace-enrichment', () => ({
+  extractTraceSummary: traceMocks.extractTraceSummary,
+}))
+
 const { slugify, default: SummaryReporter } = await import('./summary-reporter')
 
 afterEach(() => {
   fs.rmSync(LOGS_DIR, { recursive: true, force: true })
+  traceMocks.extractTraceSummary.mockReset()
   delete process.env.CANARY_LAB_SUMMARY_PATH
   delete process.env.CANARY_LAB_MANIFEST_PATH
   delete process.env.CANARY_LAB_BENCHMARK_MODE
@@ -269,6 +277,47 @@ describe('SummaryReporter', () => {
 
     reporter.onTestEnd(mkTest('Currently busy', '/specs/busy.spec.ts', 7), mkResult())
     expect(readSummary().running).toBeUndefined()
+    expect(readSummary().runningTests).toBeUndefined()
+  })
+
+  it('tracks multiple currently running tests for parallel Playwright workers', () => {
+    const reporter = new SummaryReporter()
+    const first = mkTest('First worker', '/specs/first.spec.ts', 7)
+    const second = mkTest('Second worker', '/specs/second.spec.ts', 11)
+
+    reporter.onTestBegin(first)
+    reporter.onTestBegin(second)
+
+    expect(readSummary()).toMatchObject({
+      running: {
+        name: 'test-case-first-worker',
+        location: '/specs/first.spec.ts:7',
+      },
+      runningTests: [
+        {
+          name: 'test-case-first-worker',
+          location: '/specs/first.spec.ts:7',
+        },
+        {
+          name: 'test-case-second-worker',
+          location: '/specs/second.spec.ts:11',
+        },
+      ],
+    })
+
+    reporter.onTestEnd(first, mkResult())
+    expect(readSummary()).toMatchObject({
+      running: {
+        name: 'test-case-second-worker',
+        location: '/specs/second.spec.ts:11',
+      },
+      runningTests: [
+        {
+          name: 'test-case-second-worker',
+          location: '/specs/second.spec.ts:11',
+        },
+      ],
+    })
   })
 
   it('tolerates malformed existing summaries during a targeted rerun seed', () => {
@@ -672,6 +721,196 @@ describe('SummaryReporter', () => {
     })
   })
 
+  it('adds trace summaries to failed entries and rewrites the heal index on end', async () => {
+    fs.mkdirSync(LOGS_DIR, { recursive: true })
+    const traceZip = path.join(LOGS_DIR, 'trace.zip')
+    fs.writeFileSync(traceZip, 'zip')
+    traceMocks.extractTraceSummary.mockResolvedValue({
+      summaryPath: path.join(LOGS_DIR, 'failed', 'test-case-traced-fail', 'trace-extract', 'failure-summary.md'),
+      bytes: 120,
+      failedActionId: '4',
+    })
+    const reporter = new SummaryReporter()
+
+    reporter.onTestEnd(
+      mkTest('Traced fail', '/specs/traced.spec.ts', 6),
+      mkResult({
+        status: 'failed',
+        error: { message: 'boom' },
+        attachments: [
+          { name: 'screenshot', path: path.join(LOGS_DIR, 'shot.png'), contentType: 'image/png' },
+          { name: 'trace', path: traceZip, contentType: 'application/zip' },
+        ],
+      }),
+    )
+    await reporter.onEnd({} as any)
+
+    expect(traceMocks.extractTraceSummary).toHaveBeenCalledWith({
+      traceZipPath: traceZip,
+      outputDir: path.join(LOGS_DIR, 'failed', 'test-case-traced-fail', 'trace-extract'),
+      testName: 'test-case-traced-fail',
+    })
+    expect(readSummary().failed[0]).toMatchObject({
+      name: 'test-case-traced-fail',
+      traceSummaryFile: path.join('failed', 'test-case-traced-fail', 'trace-extract', 'failure-summary.md'),
+    })
+  })
+
+  it('keeps final summaries when one trace extraction fails and another succeeds', async () => {
+    fs.mkdirSync(LOGS_DIR, { recursive: true })
+    const traceA = path.join(LOGS_DIR, 'trace-a.zip')
+    const traceB = path.join(LOGS_DIR, 'trace-b.zip')
+    fs.writeFileSync(traceA, 'zip')
+    fs.writeFileSync(traceB, 'zip')
+    traceMocks.extractTraceSummary
+      .mockRejectedValueOnce(new Error('trace failed'))
+      .mockResolvedValueOnce({
+        summaryPath: path.join(LOGS_DIR, 'failed', 'different-test', 'trace-extract', 'failure-summary.md'),
+        bytes: 20,
+        failedActionId: null,
+      })
+    const reporter = new SummaryReporter()
+
+    reporter.onTestEnd(
+      mkTest('First fail'),
+      mkResult({
+        status: 'failed',
+        error: { message: 'first' },
+        attachments: [{ name: 'trace', path: traceA }],
+      }),
+    )
+    reporter.onTestEnd(
+      mkTest('Second fail'),
+      mkResult({
+        status: 'failed',
+        error: { message: 'second' },
+        attachments: [{ name: 'trace', path: traceB }],
+      }),
+    )
+    await reporter.onEnd({} as any)
+
+    expect(traceMocks.extractTraceSummary).toHaveBeenCalledTimes(2)
+    expect(readSummary().failed.map((entry) => entry.traceSummaryFile)).toEqual([
+      undefined,
+      path.join('failed', 'different-test', 'trace-extract', 'failure-summary.md'),
+    ])
+  })
+
+  it('leaves failed entries unchanged when every trace extraction fails', async () => {
+    fs.mkdirSync(LOGS_DIR, { recursive: true })
+    const traceZip = path.join(LOGS_DIR, 'trace.zip')
+    fs.writeFileSync(traceZip, 'zip')
+    traceMocks.extractTraceSummary.mockRejectedValue(new Error('trace failed'))
+    const reporter = new SummaryReporter()
+
+    reporter.onTestEnd(
+      mkTest('Trace fail'),
+      mkResult({
+        status: 'failed',
+        error: { message: 'boom' },
+        attachments: [{ name: 'trace', path: traceZip }],
+      }),
+    )
+    await reporter.onEnd({} as any)
+
+    expect(readSummary().failed[0]).toEqual({
+      name: 'test-case-trace-fail',
+      error: { message: 'boom' },
+      durationMs: 42,
+      location: '/spec.ts:1',
+      retry: 0,
+    })
+  })
+
+  it('rewrites heal-index with trace summaries when service logs are present', async () => {
+    const runDir = LOGS_DIR
+    fs.mkdirSync(runDir, { recursive: true })
+    const svcLog = path.join(runDir, 'svc-api.log')
+    const slugA = 'test-case-traced-w-logs'
+    const slugB = 'test-case-no-trace'
+    fs.writeFileSync(
+      svcLog,
+      `start\n<${slugA}>\nlate boom\n</${slugA}>\n<${slugB}>\nother boom\n</${slugB}>\nend\n`,
+    )
+    fs.writeFileSync(
+      path.join(runDir, 'manifest.json'),
+      JSON.stringify({ services: [{ logPath: svcLog }], feature: 'checkout' }),
+    )
+    const traceZip = path.join(runDir, 'trace.zip')
+    fs.writeFileSync(traceZip, 'zip')
+    traceMocks.extractTraceSummary.mockResolvedValue({
+      summaryPath: path.join(runDir, 'failed', slugA, 'trace-extract', 'failure-summary.md'),
+      bytes: 12,
+      failedActionId: '1',
+    })
+    const reporter = new SummaryReporter()
+    reporter.onTestEnd(
+      mkTest('Traced w logs', '/specs/x.spec.ts', 6),
+      mkResult({
+        status: 'failed',
+        error: { message: 'boom' },
+        attachments: [{ name: 'trace', path: traceZip }],
+      }),
+    )
+    // Second failure has no trace attachment → no traceSummaryFile.
+    reporter.onTestEnd(
+      mkTest('No trace', '/specs/y.spec.ts', 4),
+      mkResult({ status: 'failed', error: { message: 'no trace' } }),
+    )
+    await reporter.onEnd({} as any)
+    const out = readSummary()
+    const traced = out.failed.find((e: any) => e.name === slugA)
+    const noTrace = out.failed.find((e: any) => e.name === slugB)
+    expect(traced.traceSummaryFile).toContain('failure-summary.md')
+    expect(noTrace.traceSummaryFile).toBeUndefined()
+  })
+
+  it('records a step end with no locations and no error', () => {
+    const reporter = new SummaryReporter()
+    const test = mkTest('Step end no loc', '/specs/no-loc.spec.ts', 3)
+    const step = mkStep('expect', 'expect')
+    reporter.onTestBegin(test)
+    reporter.onStepBegin(test, mkResult(), step)
+    // step.error absent and no locations → both conditions false
+    reporter.onStepEnd(test, mkResult(), step)
+    reporter.onTestEnd(test, mkResult({ status: 'failed', error: { message: 'x' } }))
+    const summary = readSummary()
+    expect(summary.failed[0].locations).toBeUndefined()
+  })
+
+  it('records a failed step with no location without persisting failed step locations', () => {
+    const reporter = new SummaryReporter()
+    const test = mkTest('Step err no loc', '/specs/err.spec.ts', 3)
+    const step = mkStep('expect', 'expect')
+    reporter.onTestBegin(test)
+    reporter.onStepBegin(test, mkResult(), step)
+    // step.error truthy but step has no location → locs.length === 0 path
+    reporter.onStepEnd(test, mkResult(), { ...step, error: { message: 'step failed' } })
+    reporter.onTestEnd(test, mkResult({ status: 'failed', error: { message: 'x' } }))
+    const summary = readSummary()
+    expect(summary.failed[0].locations).toBeUndefined()
+  })
+
+  it('preserves an existing titlePath when a later entry has none', () => {
+    fs.mkdirSync(LOGS_DIR, { recursive: true })
+    fs.writeFileSync(
+      path.join(LOGS_DIR, 'e2e-summary.json'),
+      JSON.stringify({
+        complete: true,
+        knownTests: [
+          { name: 'test-case-keep-path', title: 'keep path', titlePath: ['outer', 'keep path'] },
+          { name: 'test-case-keep-path', title: 'keep path' },
+        ],
+        passedNames: [],
+        failed: [],
+      }),
+    )
+    const reporter = new SummaryReporter()
+    reporter.onEnd({} as any)
+    const out = readSummary()
+    expect(out.knownTests[0].titlePath).toEqual(['outer', 'keep path'])
+  })
+
   it('writes the currently running step location and keeps the test running when the step ends', () => {
     const reporter = new SummaryReporter()
     const test = mkTest('Currently busy', '/specs/busy.spec.ts', 7)
@@ -695,6 +934,37 @@ describe('SummaryReporter', () => {
       name: 'test-case-currently-busy',
       location: '/specs/busy.spec.ts:7',
     })
+  })
+
+  it('keeps parallel worker step state isolated per running test', () => {
+    const reporter = new SummaryReporter()
+    const first = mkTest('First worker', '/specs/first.spec.ts', 7)
+    const second = mkTest('Second worker', '/specs/second.spec.ts', 11)
+    const firstStep = mkStep('first setup', 'test.step', '/specs/first.spec.ts', 8)
+    const secondStep = mkStep('second setup', 'test.step', '/specs/second.spec.ts', 12)
+
+    reporter.onTestBegin(first)
+    reporter.onTestBegin(second)
+    reporter.onStepBegin(first, mkResult(), firstStep)
+    reporter.onStepBegin(second, mkResult(), secondStep)
+    reporter.onStepEnd(first, mkResult(), firstStep)
+
+    expect(readSummary().runningTests).toEqual([
+      {
+        name: 'test-case-first-worker',
+        location: '/specs/first.spec.ts:7',
+      },
+      {
+        name: 'test-case-second-worker',
+        location: '/specs/second.spec.ts:11',
+        step: {
+          title: 'second setup',
+          category: 'test.step',
+          location: '/specs/second.spec.ts:12',
+          locations: ['/specs/second.spec.ts:12'],
+        },
+      },
+    ])
   })
 
   it('starts running state from a step event when begin was missed', () => {

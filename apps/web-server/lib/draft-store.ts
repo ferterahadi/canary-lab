@@ -61,6 +61,7 @@ export interface DraftRecord {
   prdDocuments: DraftPrdDocument[]
   repos: DraftRepo[]
   featureName?: string
+  intentSummary?: string
   wizardAgent?: 'claude' | 'codex'
   activeAgentStage?: 'planning' | 'generating'
   planAgentSessionId?: string
@@ -88,6 +89,7 @@ export interface DraftPaths {
   draftJson: string
   prdMd: string
   planJson: string
+  intentMd: string
   planAgentLog: string
   specAgentLog: string
   generatedDir: string
@@ -100,6 +102,7 @@ export function paths(logsDir: string, draftId: string): DraftPaths {
     draftJson: path.join(draftDir, 'draft.json'),
     prdMd: path.join(draftDir, 'prd.md'),
     planJson: path.join(draftDir, 'plan.json'),
+    intentMd: path.join(draftDir, 'intent.md'),
     planAgentLog: path.join(draftDir, 'plan-agent.log'),
     specAgentLog: path.join(draftDir, 'spec-agent.log'),
     generatedDir: path.join(draftDir, 'generated'),
@@ -178,6 +181,7 @@ export function canTransition(from: DraftStatus, to: DraftStatus): boolean {
 
 export interface TransitionPatch {
   plan?: unknown
+  intentSummary?: string
   generatedFiles?: string[]
   devDependencies?: string[]
   featureName?: string
@@ -236,8 +240,9 @@ export type MergeDevDependenciesResult =
 export function validateFeatureTarget(projectRoot: string, featureName: string): ValidateFeatureTargetResult {
   const result = validateScaffoldTarget(projectRoot, featureName)
   if (result.ok) return { ok: true, featureDir: result.featureDir }
-  if (result.error === 'invalid-scaffold') return { ok: false, error: 'invalid-name' }
-  return { ok: false, error: result.error, featureDir: result.featureDir }
+  // shared.validateFeatureTarget only emits 'feature-exists' | 'invalid-name';
+  // 'invalid-scaffold' is reserved for the apply path.
+  return { ok: false, error: result.error as 'feature-exists' | 'invalid-name', featureDir: result.featureDir }
 }
 
 export function applyToProject(input: ApplyToProjectInput): ApplyToProjectResult {

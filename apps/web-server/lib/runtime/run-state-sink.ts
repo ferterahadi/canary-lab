@@ -163,10 +163,12 @@ function clearRunningFromSummary(summaryPath: string): void {
   } catch {
     return
   }
-  if (typeof parsed !== 'object' || parsed === null || !('running' in parsed)) return
+  if (typeof parsed !== 'object' || parsed === null) return
+  if (!('running' in parsed) && !('runningTests' in parsed)) return
 
   const summary = { ...(parsed as Record<string, unknown>) }
   delete summary.running
+  delete summary.runningTests
   const tmpPath = `${summaryPath}.tmp`
   fs.writeFileSync(tmpPath, JSON.stringify(summary, null, 2) + '\n')
   fs.renameSync(tmpPath, summaryPath)

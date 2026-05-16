@@ -77,6 +77,26 @@ describe('locateClaudeSessionLog', () => {
     })
   })
 
+  it('keeps the newest mtime entry even when iterated after an older entry', () => {
+    const runDir = '/Users/test/canary/logs/runs/r2'
+    const encoded = encodeClaudeProjectDir(runDir)
+    const projectDir = path.join(homeDir, '.claude', 'projects', encoded)
+    fs.mkdirSync(projectDir, { recursive: true })
+    // Names ordered so that the NEWER-mtime file is iterated first (a* before z*).
+    const newer = path.join(projectDir, 'aaaaaaaa-89ab-cdef-0123-456789abcdef.jsonl')
+    const older = path.join(projectDir, 'zzzzzzzz-7654-3210-fedc-ba9876543210.jsonl')
+    fs.writeFileSync(newer, '')
+    fs.writeFileSync(older, '')
+    fs.utimesSync(newer, new Date('2026-05-12T00:00:00.000Z'), new Date('2026-05-12T00:00:00.000Z'))
+    fs.utimesSync(older, new Date('2026-05-10T00:00:00.000Z'), new Date('2026-05-10T00:00:00.000Z'))
+
+    expect(locateLatestClaudeSessionLog(runDir, homeDir)).toEqual({
+      agent: 'claude',
+      sessionId: 'aaaaaaaa-89ab-cdef-0123-456789abcdef',
+      logPath: newer,
+    })
+  })
+
   it('returns null when no Claude project log directory exists for the run', () => {
     expect(locateLatestClaudeSessionLog('/no/such/run', homeDir)).toBeNull()
   })
@@ -172,6 +192,14 @@ describe('agent session ref file parsing', () => {
     expect(selectAgentSessionRef({ sessions: { claude } })?.sessionId).toBe('sid-c')
     expect(selectAgentSessionRef({ activeAgent: 'codex', sessions: { claude } })?.sessionId).toBe('sid-c')
     expect(selectAgentSessionRef({ sessions: {} })).toBeNull()
+  })
+
+  it('falls back when preferred or active refs point at an absent session slot', () => {
+    const claude = { agent: 'claude' as const, sessionId: 'sid-c', logPath: '/tmp/claude.jsonl' }
+    const codex = { agent: 'codex' as const, sessionId: 'sid-x', logPath: '/tmp/codex.jsonl' }
+
+    expect(selectAgentSessionRef({ sessions: { claude } }, 'codex')).toBe(claude)
+    expect(selectAgentSessionRef({ activeAgent: 'claude', sessions: { codex } })).toBe(codex)
   })
 })
 

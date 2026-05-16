@@ -17,6 +17,7 @@ import {
   type SummaryForJournalOutcome,
 } from './log-enrichment'
 import { getSummaryPath } from './paths'
+import { extractTraceSummary } from './trace-enrichment'
 
 export function slugify(title: string): string {
   return title
@@ -38,6 +39,9 @@ interface TestEntry {
   locations?: string[]
   retry?: number
   logFiles?: string[]
+  /** Repo-relative path to the curated failure-summary.md produced from this
+   *  test's Playwright trace.zip. Populated in onEnd after async extraction. */
+  traceSummaryFile?: string
 }
 
 interface KnownTestEntry {
@@ -52,6 +56,12 @@ interface RunningStep {
   category: string
   location?: string
   locations?: string[]
+}
+
+interface RunningTest {
+  name: string
+  location: string
+  step?: RunningStep
 }
 
 type PlaybackEvent =
@@ -84,11 +94,16 @@ class SummaryReporter implements Reporter {
   private results: TestEntry[] = []
   private knownTests: KnownTestEntry[] = knownTestsFromExistingSummary(this.initialSummary)
   private sawSuiteInventory = this.knownTests.length > 0
-  private running: { name: string; location: string; step?: RunningStep } | null = null
-  private stepStack: RunningStep[] = []
+  private runningTests = new Map<string, RunningTest>()
+  private stepStacksByTest = new Map<string, RunningStep[]>()
   private failedStepLocationsByTest = new Map<string, string[]>()
   private failureCount = 0
   private lastEnrichedFailureCount = -1
+  // Absolute path to the Playwright `trace.zip` attachment for each failed
+  // test, keyed by the test's slug-name. Populated in `onTestEnd` from
+  // `result.attachments` and consumed in `onEnd` to drive trace-summary
+  // extraction (async, parallel) before the final heal-index write.
+  private tracePathsByName = new Map<string, string>()
 
   constructor() {
     if (this.mergeExistingSummary) this.seedFromExistingSummary()
@@ -101,20 +116,21 @@ class SummaryReporter implements Reporter {
   }
 
   onTestBegin(test: TestCase): void {
-    this.stepStack = []
     const known = this.rememberKnownTest(test)
     this.failedStepLocationsByTest.delete(known.name)
-    this.running = {
+    const running = {
       name: known.name,
       location: known.location ?? `${test.location.file}:${test.location.line}`,
     }
+    this.stepStacksByTest.set(known.name, [])
+    this.runningTests.set(known.name, running)
     this.writePlaybackEvent({
       type: 'test-begin',
       time: new Date().toISOString(),
       test: {
-        name: this.running.name,
+        name: running.name,
         title: test.title,
-        location: this.running.location,
+        location: running.location,
       },
     })
     this.writeSummary(false)
@@ -122,15 +138,19 @@ class SummaryReporter implements Reporter {
 
   onStepBegin(test: TestCase, _result: TestResult, step: TestStep): void {
     const name = this.rememberKnownTest(test).name
-    if (!this.running || this.running.name !== name) {
-      this.running = {
+    let running = this.runningTests.get(name)
+    if (!running) {
+      running = {
         name,
         location: `${test.location.file}:${test.location.line}`,
       }
+      this.runningTests.set(name, running)
     }
     const runningStep = stepToRunningStep(step)
-    this.stepStack.push(runningStep)
-    this.running = { ...this.running, step: runningStep }
+    const stepStack = this.stepStacksByTest.get(name) ?? []
+    stepStack.push(runningStep)
+    this.stepStacksByTest.set(name, stepStack)
+    this.runningTests.set(name, { ...running, step: runningStep })
     this.writePlaybackEvent({
       type: 'step-begin',
       time: new Date().toISOString(),
@@ -142,17 +162,20 @@ class SummaryReporter implements Reporter {
 
   onStepEnd(test: TestCase, _result: TestResult, step: TestStep): void {
     const name = this.rememberKnownTest(test).name
-    if (!this.running || this.running.name !== name) return
+    const running = this.runningTests.get(name)
+    if (!running) return
     const ended = stepToRunningStep(step)
-    if (ended.locations?.length && step.error) {
+    if (step.error && ended.locations) {
       this.failedStepLocationsByTest.set(name, ended.locations)
     }
-    const idx = findLastStepIndex(this.stepStack, ended)
-    if (idx >= 0) this.stepStack.splice(idx, 1)
-    const current = this.stepStack.at(-1)
-    this.running = current
-      ? { ...this.running, step: current }
-      : { name: this.running.name, location: this.running.location }
+    const stepStack = this.stepStacksByTest.get(name)!
+    const idx = findLastStepIndex(stepStack, ended)
+    if (idx >= 0) stepStack.splice(idx, 1)
+    this.stepStacksByTest.set(name, stepStack)
+    const current = stepStack.at(-1)
+    this.runningTests.set(name, current
+      ? { ...running, step: current }
+      : { name: running.name, location: running.location })
     this.writePlaybackEvent({
       type: 'step-end',
       time: new Date().toISOString(),
@@ -167,10 +190,8 @@ class SummaryReporter implements Reporter {
     const failed = result.status !== 'passed' && result.status !== 'skipped'
     const known = this.rememberKnownTest(test)
     const name = known.name
-    if (this.running?.name === name) {
-      this.running = null
-      this.stepStack = []
-    }
+    this.runningTests.delete(name)
+    this.stepStacksByTest.delete(name)
     this.removeResult(name)
     const error = !passed && result.error
       ? {
@@ -195,6 +216,10 @@ class SummaryReporter implements Reporter {
     }
     this.results.push(entry)
     if (failed) this.failureCount++
+    if (failed) {
+      const tracePath = findTraceAttachmentPath(result.attachments)
+      if (tracePath) this.tracePathsByName.set(name, tracePath)
+    }
     this.writePlaybackEvent({
       type: 'test-end',
       time: new Date().toISOString(),
@@ -225,9 +250,9 @@ class SummaryReporter implements Reporter {
     }
   }
 
-  onEnd(_result: FullResult): void {
-    this.running = null
-    this.stepStack = []
+  async onEnd(_result: FullResult): Promise<void> {
+    this.runningTests.clear()
+    this.stepStacksByTest.clear()
     this.writeSummary(true)
     this.reconcileJournalOutcome()
     if (
@@ -236,6 +261,12 @@ class SummaryReporter implements Reporter {
       process.env.CANARY_LAB_BENCHMARK_MODE !== 'baseline'
     ) {
       this.runEnrichment()
+    }
+    if (
+      this.tracePathsByName.size > 0 &&
+      process.env.CANARY_LAB_BENCHMARK_MODE !== 'baseline'
+    ) {
+      await this.runTraceEnrichment()
     }
   }
 
@@ -255,6 +286,56 @@ class SummaryReporter implements Reporter {
     this.lastEnrichedFailureCount = this.failureCount
   }
 
+  /**
+   * For each failed test that produced a Playwright `trace.zip`, run
+   * `npx playwright trace` to extract a curated `failure-summary.md` into
+   * `<runDir>/failed/<slug>/trace-extract/`. Extractions run in parallel —
+   * each one is independent and bounded by an internal timeout. After all
+   * settle, the heal-index is rewritten so the curated trace summary
+   * appears as a bullet under each failure.
+   *
+   * Best-effort: a failure to extract one trace does not block the others
+   * and does not throw — the file simply won't appear in the index. Service
+   * log slices remain as fallback signal.
+   */
+  private async runTraceEnrichment(): Promise<void> {
+    const runDir = path.dirname(getSummaryPath())
+    const tasks: Array<Promise<{ name: string; relPath: string } | null>> = []
+    for (const [name, traceZipPath] of this.tracePathsByName) {
+      const outputDir = path.join(runDir, 'failed', name, 'trace-extract')
+      tasks.push(
+        extractTraceSummary({ traceZipPath, outputDir, testName: name })
+          .then((res) => ({
+            name,
+            relPath: path.relative(runDir, res.summaryPath),
+          }))
+          .catch(() => null),
+      )
+    }
+    const settled = await Promise.all(tasks)
+    let any = false
+    for (const r of settled) {
+      if (!r) continue
+      any = true
+      const entry = this.results.find((e) => e.name === r.name)!
+      entry.traceSummaryFile = r.relPath
+    }
+    if (!any) return
+    // Rewrite the summary so `traceSummaryFile` lands on each failed entry,
+    // then rebuild the heal-index so the agent sees the trace bullet.
+    this.writeSummary(true)
+    const parsed = enrichSummaryWithLogs()
+    if (parsed?.summary.failed) {
+      for (const failed of parsed.summary.failed) {
+        const entry = this.results.find((e) => e.name === failed.name)
+        if (entry?.traceSummaryFile) {
+          failed.traceSummaryFile = entry.traceSummaryFile
+        }
+      }
+    }
+    writeHealIndex(parsed ?? undefined)
+  }
+
   private writeSummary(complete: boolean): void {
     const passedResults = this.results.filter((r) => r.passed)
     const skippedResults = this.results.filter((r) => r.status === 'skipped')
@@ -271,7 +352,7 @@ class SummaryReporter implements Reporter {
             skippedNames: skippedResults.map((r) => r.name),
           }
         : {}),
-      ...(this.running ? { running: this.running } : {}),
+      ...this.runningSummaryFields(),
       failed: this.results
         .filter(isFailureResult)
         .map((r) => ({
@@ -282,6 +363,7 @@ class SummaryReporter implements Reporter {
           ...(r.locations?.length ? { locations: r.locations } : {}),
           ...(typeof r.retry === 'number' ? { retry: r.retry } : {}),
           ...(r.logFiles ? { logFiles: r.logFiles } : {}),
+          ...(r.traceSummaryFile ? { traceSummaryFile: r.traceSummaryFile } : {}),
         })),
     }
 
@@ -290,6 +372,15 @@ class SummaryReporter implements Reporter {
     const tmpPath = `${finalPath}.tmp`
     fs.writeFileSync(tmpPath, JSON.stringify(summary, null, 2) + '\n')
     fs.renameSync(tmpPath, finalPath)
+  }
+
+  private runningSummaryFields(): { running?: RunningTest; runningTests?: RunningTest[] } {
+    const runningTests = [...this.runningTests.values()]
+    if (runningTests.length === 0) return {}
+    return {
+      running: runningTests[0],
+      runningTests,
+    }
   }
 
   private seedFromExistingSummary(): void {
@@ -385,6 +476,23 @@ function isFailureResult(entry: Pick<TestEntry, 'status'>): boolean {
   return entry.status !== 'passed' && entry.status !== 'skipped'
 }
 
+// Playwright records the trace zip as an attachment with `name === 'trace'`
+// and a `path` pointing at the per-test artifact dir
+// (`<playwright-artifacts>/<pw-slug>/trace.zip`). The slug Playwright uses
+// here is its own and doesn't match our `slugify(title)`, so we read the
+// path off the attachment directly instead of reconstructing it.
+function findTraceAttachmentPath(
+  attachments: ReadonlyArray<{ name?: string; path?: string }> | undefined,
+): string | null {
+  if (!attachments) return null
+  for (const a of attachments) {
+    if (a?.name === 'trace' && typeof a.path === 'string' && a.path.length > 0) {
+      return a.path
+    }
+  }
+  return null
+}
+
 function knownTestFromTest(test: TestCase): KnownTestEntry {
   const titlePath = typeof test.titlePath === 'function'
     ? test.titlePath().filter((part): part is string => typeof part === 'string' && part.length > 0)
@@ -430,14 +538,13 @@ function mergeKnownTest(knownTests: KnownTestEntry[], entry: KnownTestEntry): vo
     knownTests.push(entry)
     return
   }
-  knownTests[idx] = {
+  const merged: KnownTestEntry = {
     ...knownTests[idx],
     ...entry,
-    titlePath: entry.titlePath && entry.titlePath.length > 0
-      ? entry.titlePath
-      : knownTests[idx].titlePath,
     location: entry.location ?? knownTests[idx].location,
   }
+  if (!entry.titlePath?.length) merged.titlePath = knownTests[idx].titlePath
+  knownTests[idx] = merged
 }
 
 function readExistingSummary(): (ExistingSummary & SummaryForJournalOutcome) | null {
@@ -482,9 +589,9 @@ function stepToRunningStep(step: TestStep): RunningStep {
 
 function failureLocations(result: TestResult, failedStepLocations?: string[]): string[] {
   const out: string[] = []
-  const add = (location: string | undefined) => {
+  const add = (location: string) => {
     const normalized = normalizeLocation(location)
-    if (!normalized || out.includes(normalized)) return
+    if (out.includes(normalized)) return
     out.push(normalized)
   }
   const addLocation = (location: { file: string; line: number } | undefined) => {
@@ -512,8 +619,7 @@ function stackLocations(stack: string | undefined): string[] {
   return out
 }
 
-function normalizeLocation(location: string | undefined): string | null {
-  if (!location) return null
+function normalizeLocation(location: string): string {
   const match = location.match(/^(\/[^:\n]+:\d+)(?::\d+)?$/)
   return match ? match[1] : location
 }
