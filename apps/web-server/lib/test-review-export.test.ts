@@ -499,7 +499,7 @@ test('blocked read', async ({ page }) => {
         title: 'handles template title',
       }))
 
-      expect(packet.tests[0].testBody).toBe('expectLocal(page)')
+      expect(packet.tests[0].testBody).toBe('expectLocal(page);')
       expect(packet.tests[0].helperDefinitions).toContainEqual(expect.objectContaining({
         name: 'expectLocal',
         dependencies: [expect.objectContaining({ name: 'expectNested' })],

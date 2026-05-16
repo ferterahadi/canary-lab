@@ -320,6 +320,34 @@ describe('EvaluationExportProvider', () => {
     expect(FakeWebSocket.instances).toHaveLength(0)
   })
 
+  it('keeps an empty task list when listEvaluationExportTasks rejects on startup', async () => {
+    vi.mocked(api.listEvaluationExportTasks).mockRejectedValueOnce(new Error('boom'))
+    const captured = renderProbe()
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(captured.value?.tasks).toEqual([])
+  })
+
+  it('sorts remaining tasks by createdAt after dismissTask', async () => {
+    const t1 = task({ taskId: 't1', runId: 'r1', status: 'completed', createdAt: '2026-01-01T00:00:00.000Z' })
+    const t2 = task({ taskId: 't2', runId: 'r2', status: 'completed', createdAt: '2026-01-02T00:00:00.000Z' })
+    const t3 = task({ taskId: 't3', runId: 'r3', status: 'completed', createdAt: '2026-01-03T00:00:00.000Z' })
+    vi.mocked(api.listEvaluationExportTasks).mockResolvedValueOnce([t1, t2, t3])
+    vi.mocked(api.cancelEvaluationExportTask).mockResolvedValue(undefined)
+    const captured = renderProbe()
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(captured.value?.tasks.map((t) => t.taskId)).toEqual(['t3', 't2', 't1'])
+    await act(async () => {
+      await captured.value!.dismissTask('t2')
+    })
+    expect(captured.value?.tasks.map((t) => t.taskId)).toEqual(['t3', 't1'])
+  })
+
   it('throws when the hook is used outside the provider', () => {
     function OutsideProviderProbe() {
       useEvaluationExports()

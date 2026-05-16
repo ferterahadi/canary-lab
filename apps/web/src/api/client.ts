@@ -899,15 +899,19 @@ export function cancelDraftGeneration(
 export function acceptPlan(
   id: string,
   plan?: PlanStep[],
+  intentSummary?: string,
   opts?: ClientOptions,
 ): Promise<{ draftId: string; status: string }> {
   const { baseUrl, fetchImpl } = defaultOpts(opts)
+  const body: { plan?: PlanStep[]; intentSummary?: string } = {}
+  if (plan) body.plan = plan
+  if (intentSummary !== undefined) body.intentSummary = intentSummary
   return request<{ draftId: string; status: string }>(
     `${baseUrl}/api/tests/draft/${encodeURIComponent(id)}/accept-plan`,
     {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(plan ? { plan } : {}),
+      body: JSON.stringify(body),
     },
     fetchImpl,
   )

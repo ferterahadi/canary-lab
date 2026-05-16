@@ -67,8 +67,10 @@ import { extractTestsFromSource } from '../ast-extractor'
 import {
   diffContentSinceSnapshot,
   diffNamesSinceSnapshot,
+  getGitRoot,
   resolveRepoPath,
   snapshotWorkingTree,
+  type DiffPathspec,
 } from '../git-repo'
 
 // Headless event-emitting orchestrator for a single feature run. Wraps the
@@ -194,6 +196,26 @@ interface LifecycleRecordOptions {
   restartPlan?: RunLifecycleRestartPlan
   targetedRerun?: RunLifecycleTargetedRerun
   abortReason?: RunLifecycleAbortReason
+}
+
+// One snapshot entry per edit surface tracked across a heal cycle. Service
+// repos populate this with `gitRoot === resolveRepoPath(localPath)` and no
+// pathspecs. The feature dir populates it with `gitRoot` = the workspace
+// repo root (resolved via `git rev-parse --show-toplevel`) and pathspecs
+// that scope the diff to the feature subtree while excluding any service
+// repo nested inside.
+interface FeatureRepoSnapshot {
+  ref: string
+  gitRoot: string
+  pathspecs?: readonly DiffPathspec[]
+}
+
+// True when `child` is a descendant of `parent` (or identical). Used by the
+// snapshot helper to decide whether a service repo lives inside the feature
+// dir and therefore needs to be excluded from the feature-dir diff scope.
+function isPathInside(child: string, parent: string): boolean {
+  const rel = path.relative(parent, child)
+  return rel.length > 0 && !rel.startsWith('..') && !path.isAbsolute(rel)
 }
 
 export type AutoHealAgent = 'claude' | 'codex'
@@ -814,6 +836,7 @@ export class RunOrchestrator extends EventEmitter {
     return new Promise<number>((resolve) => {
       pty.onExit(({ exitCode, signal }) => {
         this.playwrightPty = null
+        this.persistPlaywrightArtifacts()
         this.emit('playwright-exit', { exitCode })
         this.recordLifecycle(exitCode === 0 ? 'completed' : 'failed', `Playwright exited with code ${exitCode}`, {
           detail: signal ? `Process signal: ${signal}` : undefined,
@@ -825,6 +848,36 @@ export class RunOrchestrator extends EventEmitter {
         resolve(exitCode)
       })
     })
+  }
+
+  // Copy each per-test subdir from `playwright-artifacts/` into the keep dir
+  // so it survives the next Playwright invocation's `--output` wipe. New
+  // artifacts for the same pw-slug overwrite the previous copy — heal-cycle
+  // reruns of a single test thus replace that test's previous video/trace
+  // while leaving the other tests' artifacts intact. Best-effort: failures
+  // here are logged but do not fail the run.
+  private persistPlaywrightArtifacts(): void {
+    const src = this.paths.playwrightArtifactsDir
+    const dst = this.paths.playwrightArtifactsKeepDir
+    if (!fs.existsSync(src)) return
+    try { fs.mkdirSync(dst, { recursive: true }) } catch { return }
+    let entries: fs.Dirent[]
+    try {
+      entries = fs.readdirSync(src, { withFileTypes: true })
+    } catch {
+      return
+    }
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue
+      const srcPath = path.join(src, entry.name)
+      const dstPath = path.join(dst, entry.name)
+      try {
+        fs.rmSync(dstPath, { recursive: true, force: true })
+        fs.cpSync(srcPath, dstPath, { recursive: true })
+      } catch (err) {
+        this.runnerLog?.warn(`persist playwright artifact ${entry.name} failed: ${err instanceof Error ? err.message : String(err)}`)
+      }
+    }
   }
 
   private verificationPlanForSummary(summary: SummaryShape): VerificationPlan {
@@ -1213,6 +1266,13 @@ export class RunOrchestrator extends EventEmitter {
     cycle: number
     failedSlugs: readonly string[]
     userGuidance?: string
+    /**
+     * Streak counter from `HealCycleState.snapshot().consecutiveSameFailures`,
+     * captured by the caller right after `observeFailures`. Threaded through
+     * to the cycle prompt builder so the stuck-cycle escalation block can
+     * fire when the agent has had two failed attempts on the same set.
+     */
+    consecutiveSameFailures?: number
   }): Promise<{
     exitCode: number
     signal: { kind: 'restart' | 'rerun' | 'heal'; body: Record<string, unknown> } | null
@@ -1230,6 +1290,7 @@ export class RunOrchestrator extends EventEmitter {
       cycle: args.cycle,
       outputDir: this.healAgentMcpOutputDir ?? this.runDir,
       userGuidance: args.userGuidance,
+      consecutiveSameFailures: args.consecutiveSameFailures,
       priorAgentSessionContext: !this.healAgentPty
         ? this.readCrossAgentSessionContext(cfg.agent)
         : undefined,
@@ -1491,50 +1552,86 @@ export class RunOrchestrator extends EventEmitter {
     return this.cachedRefFile
   }
 
-  // Snapshot every git-tracked repo in the feature just before the agent has
-  // the floor. The returned map is the input to `diffFeatureRepos`, which
-  // computes the list of files the agent actually edited during its turn.
-  // Repos that aren't git working trees are silently omitted — the diff for
-  // them is empty, which yields a `restart([])` (restart everything) fallback
-  // identical to the pre-change behavior when the agent didn't declare files.
-  private async snapshotFeatureRepos(): Promise<Map<string, string>> {
-    const snapshots = new Map<string, string>()
+  // Snapshot every git-tracked edit surface in the feature just before the
+  // agent has the floor. The returned map is the input to `diffFeatureRepos`,
+  // which computes the list of files the agent actually edited during its
+  // turn. Two kinds of entries:
+  //
+  //   1. **Service repo** (one per `feature.repos[]`): keyed by `localPath`,
+  //      diffed in full. `localPath` is assumed to be a git working-tree
+  //      root, so paths returned by `git diff --name-only` join directly.
+  //
+  //   2. **Feature directory** (`feature.featureDir`): keyed by `featureDir`,
+  //      diffed via pathspec scoped to the feature subtree of whatever git
+  //      repo owns it (typically the workspace repo). Service-repo subtrees
+  //      nested under the feature dir are excluded so they aren't double-
+  //      counted. Captures the agent's edits to `e2e/helpers/`, test specs,
+  //      and feature docs — none of which live in any service repo.
+  //
+  // Entries that aren't git working trees are silently omitted — the diff
+  // for them is empty, which yields a `restart([])` (restart everything)
+  // fallback identical to the pre-change behavior when the agent didn't
+  // declare files.
+  private async snapshotFeatureRepos(): Promise<Map<string, FeatureRepoSnapshot>> {
+    const snapshots = new Map<string, FeatureRepoSnapshot>()
+    const serviceRepoRoots: string[] = []
     for (const repo of this.feature.repos ?? []) {
       const localPath = repo.localPath
       if (typeof localPath !== 'string') continue
       const ref = await snapshotWorkingTree(localPath)
-      if (ref !== null) snapshots.set(localPath, ref)
+      if (ref === null) continue
+      const absRoot = resolveRepoPath(localPath)
+      snapshots.set(localPath, { ref, gitRoot: absRoot })
+      serviceRepoRoots.push(absRoot)
     }
+
+    // Layer the feature dir on top: it lives inside a workspace-level git
+    // repo (one .git for the whole workspace), so we snapshot from there and
+    // scope the diff to `feature.featureDir` via pathspec. Excludes any
+    // service-repo subtree that's nested under it.
+    const featureDir = this.feature.featureDir
+    if (typeof featureDir === 'string' && featureDir.length > 0) {
+      const featureDirAbs = resolveRepoPath(featureDir)
+      const gitRoot = await getGitRoot(featureDirAbs)
+      const ref = await snapshotWorkingTree(featureDirAbs)
+      if (gitRoot !== null && ref !== null && !snapshots.has(featureDir)) {
+        const excludes = serviceRepoRoots
+          .filter((root) => isPathInside(root, featureDirAbs))
+          .map((root) => `:(exclude)${root}` satisfies DiffPathspec)
+        const pathspecs: DiffPathspec[] = [featureDirAbs, ...excludes]
+        snapshots.set(featureDir, { ref, gitRoot, pathspecs })
+      }
+    }
+
     return snapshots
   }
 
-  // Diff each snapshotted repo and return absolute paths of the files the
+  // Diff each snapshotted tree and return absolute paths of the files the
   // agent touched between snapshot and now. Used as ground truth for both the
   // journal entry's `fix.file` line and the orchestrator's restart planning.
-  private async diffFeatureRepos(snapshots: Map<string, string>): Promise<string[]> {
+  private async diffFeatureRepos(snapshots: Map<string, FeatureRepoSnapshot>): Promise<string[]> {
     const out: string[] = []
-    for (const [localPath, ref] of snapshots) {
-      const relPaths = await diffNamesSinceSnapshot(localPath, ref)
-      const absRepoPath = resolveRepoPath(localPath)
+    for (const [, snap] of snapshots) {
+      const relPaths = await diffNamesSinceSnapshot(snap.gitRoot, snap.ref, snap.pathspecs)
       for (const rel of relPaths) {
-        out.push(path.join(absRepoPath, rel))
+        out.push(path.join(snap.gitRoot, rel))
       }
     }
     return out
   }
 
-  // Full unified-diff content (not just names) for each snapshotted repo,
-  // joined into one string. Multi-repo features get a `# repo: <localPath>`
-  // header before each repo's diff so the agent (and a human reviewer) can
-  // tell which tree each hunk came from. Truncation to MAX_JOURNAL_DIFF_BYTES
-  // happens at the journal-writer layer.
-  private async diffContentForFeatureRepos(snapshots: Map<string, string>): Promise<string> {
+  // Full unified-diff content (not just names) for each snapshotted tree,
+  // joined into one string. Multi-tree features get a `# repo: <key>` header
+  // before each diff so the agent (and a human reviewer) can tell which tree
+  // each hunk came from. Truncation to MAX_JOURNAL_DIFF_BYTES happens at the
+  // journal-writer layer.
+  private async diffContentForFeatureRepos(snapshots: Map<string, FeatureRepoSnapshot>): Promise<string> {
     const blocks: string[] = []
-    const multiRepo = snapshots.size > 1
-    for (const [localPath, ref] of snapshots) {
-      const content = await diffContentSinceSnapshot(localPath, ref)
+    const multiTree = snapshots.size > 1
+    for (const [key, snap] of snapshots) {
+      const content = await diffContentSinceSnapshot(snap.gitRoot, snap.ref, snap.pathspecs)
       if (!content.trim()) continue
-      blocks.push(multiRepo ? `# repo: ${localPath}\n${content}` : content)
+      blocks.push(multiTree ? `# repo: ${key}\n${content}` : content)
     }
     return blocks.join('\n')
   }
@@ -1732,8 +1829,18 @@ export class RunOrchestrator extends EventEmitter {
           continue
         }
         const signature = failedSlugs.slice().sort().join('|')
-        const decision = heal.observeFailures(signature)
+        // `observeFailures` now takes the raw slug array so it can remember it
+        // on `snapshot().lastFailingSlugs` — that's what the heal-index uses
+        // to compute the "delta vs previous cycle" section. The signature
+        // string stays as the human-readable lifecycle-event detail.
+        const decision = heal.observeFailures(failedSlugs)
         if (!decision.shouldHeal) break
+
+        // Capture the same-failure streak AFTER `observeFailures` has updated
+        // it for this cycle. The threshold-based escalation block in the cycle
+        // prompt keys off this value (>= 3 = two prior fix attempts failed on
+        // the same failing set).
+        const consecutiveSameFailures = heal.snapshot().consecutiveSameFailures
 
         const cycleNum = heal.beginCycle() + 1
         this.emit('heal-cycle-started', { cycle: cycleNum, failureSignature: signature })
@@ -1750,7 +1857,7 @@ export class RunOrchestrator extends EventEmitter {
         // pre-existing dirty state in the workspace doesn't leak in.
         const snapshots = await this.snapshotFeatureRepos()
 
-        const { signal, reason } = await this.runHealAgent({ cycle: cycleNum, failedSlugs, userGuidance })
+        const { signal, reason } = await this.runHealAgent({ cycle: cycleNum, failedSlugs, userGuidance, consecutiveSameFailures })
         userGuidance = undefined
 
         if (this.stopped) return this.status

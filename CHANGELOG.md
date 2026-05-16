@@ -11,6 +11,13 @@ Each entry is tagged with the area it touches:
 - **[General]** — UI shell, CLI, scaffolding, packaging
 
 ---
+## 1.0.7 — 2026-05-16
+
+- **[Test Runner]** **Playwright traces in the heal index.** I started feeding the Playwright trace for each failure into the heal index, and the agent started fixing things noticeably faster — it can see exactly what happened in the browser instead of guessing from logs. Shipping this one quickly because it felt too useful to sit on
+- **[General]** **Various bug fixes.**
+
+---
+
 ## 1.0.6 — 2026-05-15
 
 - **[Test Runner]** **Better test discovery.** Tests defined through helpers are now picked up and reported correctly alongside everything else.

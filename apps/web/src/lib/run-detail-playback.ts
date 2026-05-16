@@ -38,12 +38,18 @@ export function playbackTests(events?: PlaywrightPlaybackEvent[]): PlaybackTest[
   const tests = new Map<string, PlaybackTest>()
   const activeKeyByName = new Map<string, string>()
   const latestKeyByName = new Map<string, string>()
+  // Tracks the `location` (file:line) for each attempt's key — only test-begin
+  // and test-end events carry location, so we record it as we see them.
+  const locationByKey = new Map<string, string>()
   for (const event of events ?? []) {
     let key = activeKeyByName.get(event.test.name) ?? latestKeyByName.get(event.test.name) ?? event.test.name
     if (event.type === 'test-begin') {
       key = `${event.test.name}:${event.time}`
       activeKeyByName.set(event.test.name, key)
       latestKeyByName.set(event.test.name, key)
+    }
+    if ((event.type === 'test-begin' || event.type === 'test-end') && event.test.location) {
+      locationByKey.set(key, event.test.location)
     }
     const current = tests.get(key) ?? { name: event.test.name, title: event.test.title, steps: [] }
     current.title = event.test.title || current.title
@@ -68,7 +74,21 @@ export function playbackTests(events?: PlaywrightPlaybackEvent[]): PlaybackTest[
     tests.set(key, current)
     latestKeyByName.set(event.test.name, key)
   }
-  return [...tests.values()].map((test) => ({ ...test, steps: compactPlaybackSteps(test.steps) }))
+  // Collapse attempts to one entry per (name, location). Retries and heal-cycle
+  // reruns share a location and fold into the latest attempt. Two distinct
+  // tests that happen to share a title (and therefore a `name`) but live at
+  // different locations stay as separate entries — the export HTML disambiguates
+  // them via positional anchor IDs. Map preserves first-seen identity order,
+  // last write wins so the latest attempt is kept.
+  const latestKeyByIdentity = new Map<string, string>()
+  for (const [key, test] of tests.entries()) {
+    const identity = `${test.name}@${locationByKey.get(key) ?? ''}`
+    latestKeyByIdentity.set(identity, key)
+  }
+  return [...latestKeyByIdentity.values()]
+    .map((key) => tests.get(key))
+    .filter((test): test is PlaybackTest => test !== undefined)
+    .map((test) => ({ ...test, steps: compactPlaybackSteps(test.steps) }))
 }
 
 export function artifactsForPlayback(

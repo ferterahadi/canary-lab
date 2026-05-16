@@ -905,6 +905,73 @@ describe('RunOrchestrator.runPlaywright', () => {
     })
     await orch.stop('passed')
   })
+
+  it('mirrors per-test artifact dirs into playwright-artifacts-keep on Playwright exit', async () => {
+    const { factory, spawned } = makeFakeFactory()
+    const orch = new RunOrchestrator({
+      feature: makeFeature(),
+      runId: RUN_ID,
+      runDir,
+      ptyFactory: factory,
+      healthCheck: async () => true,
+      delay: async () => undefined,
+      playwrightSpawner: () => ({ command: 'fake-pw', cwd: tmpDir }),
+    })
+
+    await orch.start()
+    const exitPromise = orch.runPlaywright()
+    const pwPty = spawned[spawned.length - 1]
+    // Simulate Playwright writing per-test artifacts into the live dir
+    // before the process exits.
+    const liveCase = path.join(orch.paths.playwrightArtifactsDir, 'pw-slug-a')
+    fs.mkdirSync(liveCase, { recursive: true })
+    fs.writeFileSync(path.join(liveCase, 'video.webm'), 'fresh-webm')
+    fs.writeFileSync(path.join(liveCase, 'trace.zip'), 'fresh-trace')
+    pwPty.emitExit(0)
+    await exitPromise
+
+    const keepCase = path.join(orch.paths.playwrightArtifactsKeepDir, 'pw-slug-a')
+    expect(fs.readFileSync(path.join(keepCase, 'video.webm'), 'utf-8')).toBe('fresh-webm')
+    expect(fs.readFileSync(path.join(keepCase, 'trace.zip'), 'utf-8')).toBe('fresh-trace')
+    await orch.stop('passed')
+  })
+
+  it('overwrites the keep copy for the same pw-slug and preserves untouched tests', async () => {
+    const { factory, spawned } = makeFakeFactory()
+    const orch = new RunOrchestrator({
+      feature: makeFeature(),
+      runId: RUN_ID,
+      runDir,
+      ptyFactory: factory,
+      healthCheck: async () => true,
+      delay: async () => undefined,
+      playwrightSpawner: () => ({ command: 'fake-pw', cwd: tmpDir }),
+    })
+
+    // Pre-seed the keep dir as if a prior cycle had run two tests: A and B.
+    const keepA = path.join(orch.paths.playwrightArtifactsKeepDir, 'pw-a')
+    const keepB = path.join(orch.paths.playwrightArtifactsKeepDir, 'pw-b')
+    fs.mkdirSync(keepA, { recursive: true })
+    fs.mkdirSync(keepB, { recursive: true })
+    fs.writeFileSync(path.join(keepA, 'video.webm'), 'a-stale')
+    fs.writeFileSync(path.join(keepB, 'video.webm'), 'b-stale')
+
+    await orch.start()
+    const exitPromise = orch.runPlaywright()
+    const pwPty = spawned[spawned.length - 1]
+    // The "rerun" only writes test A's pw-slug into the live dir.
+    const liveA = path.join(orch.paths.playwrightArtifactsDir, 'pw-a')
+    fs.mkdirSync(liveA, { recursive: true })
+    fs.writeFileSync(path.join(liveA, 'video.webm'), 'a-fresh')
+    pwPty.emitExit(0)
+    await exitPromise
+
+    // A is overwritten with the latest attempt's bytes.
+    expect(fs.readFileSync(path.join(keepA, 'video.webm'), 'utf-8')).toBe('a-fresh')
+    // B is untouched — it wasn't in this rerun's live dir.
+    expect(fs.readFileSync(path.join(keepB, 'video.webm'), 'utf-8')).toBe('b-stale')
+    await orch.stop('passed')
+  })
 })
 
 describe('RunOrchestrator.runFullCycle', () => {

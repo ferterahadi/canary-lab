@@ -499,16 +499,23 @@ describe('api client', () => {
 
   it('acceptPlan posts plan when provided', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(ok({ draftId: 'd', status: 'generating' }, 202))
-    await acceptPlan('d', [{ step: 's', actions: ['a'], expectedOutcome: 'e' }], { fetchImpl })
+    await acceptPlan('d', [{ step: 's', actions: ['a'], expectedOutcome: 'e' }], undefined, { fetchImpl })
     const body = JSON.parse((fetchImpl.mock.calls[0] as [string, RequestInit])[1].body as string)
     expect(body.plan).toBeDefined()
   })
 
   it('acceptPlan posts empty body when no plan supplied', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(ok({ draftId: 'd', status: 'generating' }, 202))
-    await acceptPlan('d', undefined, { fetchImpl })
+    await acceptPlan('d', undefined, undefined, { fetchImpl })
     const body = JSON.parse((fetchImpl.mock.calls[0] as [string, RequestInit])[1].body as string)
     expect(body).toEqual({})
+  })
+
+  it('acceptPlan posts intentSummary when provided', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(ok({ draftId: 'd', status: 'generating' }, 202))
+    await acceptPlan('d', undefined, 'Edited intent', { fetchImpl })
+    const body = JSON.parse((fetchImpl.mock.calls[0] as [string, RequestInit])[1].body as string)
+    expect(body).toEqual({ intentSummary: 'Edited intent' })
   })
 
   it('acceptSpec posts featureName when given', async () => {

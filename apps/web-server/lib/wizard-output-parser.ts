@@ -33,6 +33,18 @@ export function extractWizardSessionRef(stream: string): WizardSessionRef | null
 
 const PLAN_OPEN = '<plan-output>'
 const PLAN_CLOSE = '</plan-output>'
+const INTENT_OPEN = '<intent-summary>'
+const INTENT_CLOSE = '</intent-summary>'
+
+export function extractIntentSummary(stream: string): ParseResult<string> {
+  const open = stream.indexOf(INTENT_OPEN)
+  if (open < 0) return { ok: false, error: 'intent-summary marker not found' }
+  const close = stream.indexOf(INTENT_CLOSE, open + INTENT_OPEN.length)
+  if (close < 0) return { ok: false, error: 'intent-summary close marker not found' }
+  const body = stream.slice(open + INTENT_OPEN.length, close).trim()
+  if (!body) return { ok: false, error: 'intent-summary body empty' }
+  return { ok: true, value: body }
+}
 
 export function extractPlan(stream: string): ParseResult<PlanStep[]> {
   const open = stream.indexOf(PLAN_OPEN)
@@ -126,7 +138,6 @@ function balancedJsonArrayAt(text: string, start: number): string | null {
     if (ch === ']') {
       depth--
       if (depth === 0) return text.slice(start, i + 1).trim()
-      if (depth < 0) return null
     }
   }
   return null

@@ -9,6 +9,7 @@ import {
   diffContentSinceSnapshot,
   diffNamesSinceSnapshot,
   findRepo,
+  getGitRoot,
   getGitStatus,
   parsePorcelainStatus,
   parseRefList,
@@ -304,6 +305,122 @@ describe('git-repo helpers', () => {
     it('returns empty string on a non-git path', async () => {
       const plainDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-plain-diff-content-'))
       expect(await diffContentSinceSnapshot(plainDir, 'HEAD')).toBe('')
+    })
+  })
+
+  describe('diff pathspec scoping', () => {
+    // The orchestrator needs to diff the feature directory (a subtree of the
+    // workspace repo) while excluding service-repo subtrees that are diffed
+    // separately on their own snapshot. These tests pin the pathspec wiring.
+
+    function repoWithSubtrees(): string {
+      const repo = tmpRepo()
+      fs.mkdirSync(path.join(repo, 'features', 'feat-a'), { recursive: true })
+      fs.mkdirSync(path.join(repo, 'features', 'feat-a', 'services', 'svc-x'), { recursive: true })
+      fs.mkdirSync(path.join(repo, 'features', 'feat-b'), { recursive: true })
+      fs.writeFileSync(path.join(repo, 'features', 'feat-a', 'helper.ts'), 'export const a = 1\n')
+      fs.writeFileSync(path.join(repo, 'features', 'feat-a', 'services', 'svc-x', 'main.ts'), 'export const s = 1\n')
+      fs.writeFileSync(path.join(repo, 'features', 'feat-b', 'helper.ts'), 'export const b = 1\n')
+      execFileSync('git', ['add', '.'], { cwd: repo, stdio: 'ignore' })
+      execFileSync('git', ['commit', '-m', 'seed subtrees'], { cwd: repo, stdio: 'ignore' })
+      return repo
+    }
+
+    it('scopes diffNamesSinceSnapshot to an include pathspec (in-scope edits kept, out-of-scope dropped)', async () => {
+      const repo = repoWithSubtrees()
+      const ref = await snapshotWorkingTree(repo)
+      // Edit one file inside feat-a, one in feat-b.
+      fs.writeFileSync(path.join(repo, 'features', 'feat-a', 'helper.ts'), 'export const a = 2\n')
+      fs.writeFileSync(path.join(repo, 'features', 'feat-b', 'helper.ts'), 'export const b = 2\n')
+      const changed = await diffNamesSinceSnapshot(repo, ref!, ['features/feat-a'])
+      expect(changed).toEqual(['features/feat-a/helper.ts'])
+    })
+
+    it('accepts absolute paths and converts them to repo-relative', async () => {
+      const repo = repoWithSubtrees()
+      const ref = await snapshotWorkingTree(repo)
+      fs.writeFileSync(path.join(repo, 'features', 'feat-a', 'helper.ts'), 'export const a = 2\n')
+      fs.writeFileSync(path.join(repo, 'features', 'feat-b', 'helper.ts'), 'export const b = 2\n')
+      const changed = await diffNamesSinceSnapshot(repo, ref!, [path.join(repo, 'features', 'feat-a')])
+      expect(changed).toEqual(['features/feat-a/helper.ts'])
+    })
+
+    it('honors :(exclude) magic prefix to drop a subtree from the diff', async () => {
+      const repo = repoWithSubtrees()
+      const ref = await snapshotWorkingTree(repo)
+      // Both the feature helper AND a nested service file get edited.
+      fs.writeFileSync(path.join(repo, 'features', 'feat-a', 'helper.ts'), 'export const a = 2\n')
+      fs.writeFileSync(path.join(repo, 'features', 'feat-a', 'services', 'svc-x', 'main.ts'), 'export const s = 2\n')
+      const changed = await diffNamesSinceSnapshot(repo, ref!, [
+        'features/feat-a',
+        ':(exclude)features/feat-a/services/svc-x',
+      ])
+      expect(changed).toEqual(['features/feat-a/helper.ts'])
+    })
+
+    it('honors :(exclude) magic prefix with absolute exclude path', async () => {
+      const repo = repoWithSubtrees()
+      const ref = await snapshotWorkingTree(repo)
+      fs.writeFileSync(path.join(repo, 'features', 'feat-a', 'helper.ts'), 'export const a = 2\n')
+      fs.writeFileSync(path.join(repo, 'features', 'feat-a', 'services', 'svc-x', 'main.ts'), 'export const s = 2\n')
+      const changed = await diffNamesSinceSnapshot(repo, ref!, [
+        path.join(repo, 'features', 'feat-a'),
+        `:(exclude)${path.join(repo, 'features', 'feat-a', 'services', 'svc-x')}`,
+      ])
+      expect(changed).toEqual(['features/feat-a/helper.ts'])
+    })
+
+    it('passes through empty magic pathspecs without repo-relative conversion', async () => {
+      const repo = repoWithSubtrees()
+      const ref = await snapshotWorkingTree(repo)
+      fs.writeFileSync(path.join(repo, 'features', 'feat-a', 'helper.ts'), 'export const a = 2\n')
+      const changed = await diffNamesSinceSnapshot(repo, ref!, [
+        'features/feat-a',
+        ':(exclude)',
+      ])
+      expect(changed).toEqual([])
+    })
+
+    it('scopes diffContentSinceSnapshot to the same pathspec semantics', async () => {
+      const repo = repoWithSubtrees()
+      const ref = await snapshotWorkingTree(repo)
+      fs.writeFileSync(path.join(repo, 'features', 'feat-a', 'helper.ts'), 'export const a = 2\n')
+      fs.writeFileSync(path.join(repo, 'features', 'feat-b', 'helper.ts'), 'export const b = 2\n')
+      const diff = await diffContentSinceSnapshot(repo, ref!, ['features/feat-a'])
+      expect(diff).toMatch(/^diff --git a\/features\/feat-a\/helper\.ts b\/features\/feat-a\/helper\.ts/m)
+      expect(diff).not.toMatch(/features\/feat-b/)
+    })
+
+    it('an empty pathspec array is equivalent to no scoping (legacy behavior)', async () => {
+      const repo = repoWithSubtrees()
+      const ref = await snapshotWorkingTree(repo)
+      fs.writeFileSync(path.join(repo, 'features', 'feat-a', 'helper.ts'), 'export const a = 2\n')
+      fs.writeFileSync(path.join(repo, 'features', 'feat-b', 'helper.ts'), 'export const b = 2\n')
+      const changed = await diffNamesSinceSnapshot(repo, ref!, [])
+      expect(changed.sort()).toEqual(['features/feat-a/helper.ts', 'features/feat-b/helper.ts'])
+    })
+  })
+
+  describe('getGitRoot', () => {
+    it('returns the working-tree root when called from the repo root', async () => {
+      const repo = tmpRepo()
+      expect(await getGitRoot(repo)).toBe(repo)
+    })
+
+    it('returns the working-tree root when called from a nested subdirectory', async () => {
+      const repo = tmpRepo()
+      const nested = path.join(repo, 'features', 'feat-a', 'e2e', 'helpers')
+      fs.mkdirSync(nested, { recursive: true })
+      expect(await getGitRoot(nested)).toBe(repo)
+    })
+
+    it('returns null for a non-git directory', async () => {
+      const plainDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-plain-root-'))
+      expect(await getGitRoot(plainDir)).toBeNull()
+    })
+
+    it('returns null for a missing path', async () => {
+      expect(await getGitRoot(path.join(os.tmpdir(), 'cl-missing-root-xyz'))).toBeNull()
     })
   })
 })

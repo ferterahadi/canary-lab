@@ -338,25 +338,33 @@ export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Pro
 
   app.get<{ Params: { runId: string; '*': string } }>('/api/runs/:runId/artifacts/*', async (req, reply) => {
     const runDir = runDirFor(deps.store.logsDir, req.params.runId)
-    const artifactsDir = buildRunPaths(runDir).playwrightArtifactsDir
-    const requested = path.resolve(artifactsDir, req.params['*'])
-    const rel = path.relative(artifactsDir, requested)
-    if (rel.startsWith('..') || path.isAbsolute(rel)) {
+    const runPaths = buildRunPaths(runDir)
+    // Try the live `playwright-artifacts/` first, then fall back to the
+    // durable `playwright-artifacts-keep/` snapshot. Heal-cycle reruns wipe
+    // the live dir at the start of every Playwright invocation, so the keep
+    // dir is what carries the videos/traces for tests not in the latest
+    // rerun selection.
+    const bases = [runPaths.playwrightArtifactsDir, runPaths.playwrightArtifactsKeepDir]
+    let validRel: string | null = null
+    for (const base of bases) {
+      const requested = path.resolve(base, req.params['*'])
+      const rel = path.relative(base, requested)
+      if (rel.startsWith('..') || path.isAbsolute(rel)) continue
+      validRel = rel
+      try {
+        const stat = fs.statSync(requested)
+        if (stat.isFile()) {
+          reply.type(contentTypeFor(requested))
+          return reply.send(fs.createReadStream(requested))
+        }
+      } catch { /* try next base */ }
+    }
+    if (validRel === null) {
       reply.code(400)
       return { error: 'invalid artifact path' }
     }
-    try {
-      const stat = fs.statSync(requested)
-      if (!stat.isFile()) {
-        reply.code(404)
-        return { error: 'artifact not found' }
-      }
-    } catch {
-      reply.code(404)
-      return { error: 'artifact not found' }
-    }
-    reply.type(contentTypeFor(requested))
-    return reply.send(fs.createReadStream(requested))
+    reply.code(404)
+    return { error: 'artifact not found' }
   })
 
   app.post<{ Body: { feature?: string; env?: string } }>('/api/runs', async (req, reply) => {

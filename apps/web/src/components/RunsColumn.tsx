@@ -239,15 +239,15 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
                         <RunStatusIndicator status={displayStatus} />
                       </div>
                       <div
-                        className="flex w-full items-center justify-between"
+                        className="flex w-full min-w-0 items-center justify-between gap-2"
                         style={{
                           color: 'var(--text-muted)',
                           fontFamily: 'var(--font-mono)',
                           fontSize: 10.5,
                         }}
                       >
-                        <span className="truncate">{r.runId}</span>
-                        {dur != null && <span className="opacity-60">{formatDuration(dur)}</span>}
+                        <span className="min-w-0 flex-1 truncate">{r.runId}</span>
+                        {dur != null && <span className="shrink-0 opacity-60">{formatDuration(dur)}</span>}
                       </div>
                     </div>
                   </li>
@@ -354,15 +354,15 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
                       </div>
                     </div>
                     <div
-                      className="flex w-full items-center justify-between"
+                      className="flex w-full min-w-0 items-center justify-between gap-2"
                       style={{
                         color: 'var(--text-muted)',
                         fontFamily: 'var(--font-mono)',
                         fontSize: 10.5,
                       }}
                     >
-                      <span className="truncate">{r.runId}</span>
-                      {dur != null && <span>{formatDuration(dur)}</span>}
+                      <span className="min-w-0 flex-1 truncate">{r.runId}</span>
+                      {dur != null && <span className="shrink-0">{formatDuration(dur)}</span>}
                     </div>
                     {rowError && (
                       <div

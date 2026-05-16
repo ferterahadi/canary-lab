@@ -164,31 +164,34 @@ export function RunDetailColumn({
             summary={detail.summary}
           />
         )}
-        {tab === 'agent' && (
-          <div className="flex h-full min-h-0 flex-col overflow-hidden">
-            {m.healMode === 'manual' && view.actions.cancelHeal.enabled && m.signalPaths && (
-              <ManualHealBanner runId={m.runId} signalPaths={m.signalPaths} />
-            )}
-            <div className="min-h-0 flex-1 overflow-hidden">
-              {showAgentSession ? (
-                <AgentSessionView source={{ kind: 'run', runId: m.runId, live: !isTerminalRunStatus(m.status) }} />
-              ) : (
-                <PaneTerminal
-                  key={`${m.runId}:agent:${agentPaneRestartKey}`}
-                  runId={m.runId}
-                  paneId="agent"
-                  onExit={handleAgentPaneExit}
-                />
-              )}
-            </div>
-            {view.actions.restartHeal.enabled && (
-              <RestartHealButton
+        {/* Always rendered, hidden via display:none when another tab is active.
+            Keeps the live xterm + WebSocket alive so the Ink-based heal agent
+            TUI isn't replayed from scratch on tab return — replaying the raw
+            stream re-executes every clear-screen redraw and collapses scrollback
+            to the last frame. */}
+        <div hidden={tab !== 'agent'} className="flex h-full min-h-0 flex-col overflow-hidden">
+          {m.healMode === 'manual' && view.actions.cancelHeal.enabled && m.signalPaths && (
+            <ManualHealBanner runId={m.runId} signalPaths={m.signalPaths} />
+          )}
+          <div className="min-h-0 flex-1 overflow-hidden">
+            {showAgentSession ? (
+              <AgentSessionView source={{ kind: 'run', runId: m.runId, live: !isTerminalRunStatus(m.status) }} />
+            ) : (
+              <PaneTerminal
+                key={`${m.runId}:agent:${agentPaneRestartKey}`}
                 runId={m.runId}
-                onRestarted={() => setAgentPaneRestartKey((key) => key + 1)}
+                paneId="agent"
+                onExit={handleAgentPaneExit}
               />
             )}
           </div>
-        )}
+          {view.actions.restartHeal.enabled && (
+            <RestartHealButton
+              runId={m.runId}
+              onRestarted={() => setAgentPaneRestartKey((key) => key + 1)}
+            />
+          )}
+        </div>
         {tab === 'journal' && (
           <JournalTab feature={m.feature} runId={m.runId} />
         )}
@@ -642,7 +645,7 @@ export function PlaywrightPlayback({
               key={`${test.name}:${test.retry ?? 0}:${test.startedAt ?? ''}`}
               className="cl-card p-3"
             >
-              <div className="flex min-w-0 items-start gap-3">
+              <div className="flex min-w-0 flex-wrap items-start gap-3">
                 <div className="min-w-0 flex-1">
                   <PlaybackHeader test={test} current={isCurrent} index={idx} total={tests.length} />
                 </div>
@@ -671,7 +674,7 @@ export function PlaywrightPlayback({
 function TraceActions({ artifacts }: { artifacts: PlaywrightArtifact[] }) {
   if (artifacts.length === 0) return null
   return (
-    <div className="flex shrink-0 flex-wrap justify-end gap-2">
+    <div className="flex min-w-0 max-w-full flex-wrap justify-end gap-2">
       {artifacts.map((artifact) => (
         <a
           key={artifact.path}
@@ -679,7 +682,7 @@ function TraceActions({ artifacts }: { artifacts: PlaywrightArtifact[] }) {
           target="_blank"
           rel="noreferrer"
           download={artifact.name}
-          className="rounded px-2.5 py-1 text-[11px] font-medium"
+          className="max-w-full truncate whitespace-nowrap rounded px-2.5 py-1 text-[11px] font-medium"
           style={{ background: 'var(--bg-selected)', color: 'var(--accent)' }}
         >
           Download trace

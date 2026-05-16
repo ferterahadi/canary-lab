@@ -88,6 +88,23 @@ describe('statusForTest', () => {
     expect(statusForTest('Creates a TODO', inflight)).toBe('testing')
   })
 
+  it('returns testing for every test in the parallel runningTests list', () => {
+    const inflight: RunSummary = {
+      complete: false,
+      total: 2,
+      passed: 0,
+      failed: [],
+      running: { name: 'test-case-creates-a-todo', location: '/todo.spec.ts:12' },
+      runningTests: [
+        { name: 'test-case-creates-a-todo', location: '/todo.spec.ts:12' },
+        { name: 'test-case-updates-a-todo', location: '/todo.spec.ts:22' },
+      ],
+    }
+
+    expect(statusForTest('Creates a TODO', inflight)).toBe('testing')
+    expect(statusForTest('Updates a TODO', inflight)).toBe('testing')
+  })
+
   it('returns testing when a previously-failed test is currently re-running (targeted rerun)', () => {
     const targetedRerun: RunSummary = {
       complete: false,
@@ -322,6 +339,24 @@ describe('activeBodyLineForTest', () => {
         ],
       },
     })).toBe(3)
+  })
+
+  it('returns null when the failed entry has neither locations nor location', () => {
+    expect(activeBodyLineForTest({
+      testName: 'Creates a TODO',
+      testLine: 10,
+      bodySource: '{\n  await page.goto(\"/\")\n}',
+      summary: {
+        complete: true,
+        total: 1,
+        passed: 0,
+        failed: [
+          {
+            name: 'test-case-creates-a-todo',
+          },
+        ],
+      },
+    })).toBeNull()
   })
 
   it('keeps the highlight on the parent test body when a child helper location appears first', () => {

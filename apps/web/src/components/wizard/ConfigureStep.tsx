@@ -182,19 +182,6 @@ export function ConfigureStep({
                   <div className="cl-frame-heading">1. Optional context</div>
                   <p className="mt-1 text-xs">Add PRDs, notes, or acceptance criteria if you have them. If this is blank, Canary Lab infers coverage from the selected repos.</p>
                 </div>
-                {prdFiles.length > 0 && (
-                  <span
-                    className="px-2 py-0.5 text-[11px]"
-                    style={{
-                      color: 'var(--accent)',
-                      background: 'var(--accent-soft)',
-                      borderRadius: 9999,
-                      fontWeight: 500,
-                    }}
-                  >
-                    {prdFiles.length} queued
-                  </span>
-                )}
               </div>
               <div
                 className="mt-3 p-4 text-xs"

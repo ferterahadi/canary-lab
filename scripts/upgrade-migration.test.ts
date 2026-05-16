@@ -13,6 +13,7 @@ import {
   extractHealPrompt,
   compareHealPrompt,
   findOldPathReferences,
+  loadTemplateHealPrompt,
 } from './upgrade-migration'
 import { KNOWN_OLD_HEAL_PROMPTS } from './upgrade-known-prompts'
 
@@ -508,6 +509,17 @@ describe('renderReport', () => {
       orphanedLogs: ['/nonexistent/path/svc-x.log'],
     })
     expect(out).toContain('/nonexistent/path/svc-x.log')
+  })
+
+  it('returns an empty string when loadTemplateHealPrompt finds no template', () => {
+    expect(loadTemplateHealPrompt(['/no/such/template.md'])).toBe('')
+  })
+
+  it('returns an empty string when loadTemplateHealPrompt template lacks heal section', () => {
+    const repo = mkRepo()
+    const stub = path.join(repo, 'CLAUDE.md')
+    fs.writeFileSync(stub, '# nothing\n\nno heal section here\n')
+    expect(loadTemplateHealPrompt([stub])).toBe('')
   })
 
   it('renders B / KB / MB size buckets for orphan files', () => {

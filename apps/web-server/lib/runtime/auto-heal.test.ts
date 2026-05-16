@@ -9,6 +9,8 @@ import {
   pickAvailableHealAgent,
   readPriorSessionId,
   readPriorSessionIdFromValue,
+  renderPlaywrightMcpHint,
+  renderTraceExtractHint,
 } from './auto-heal'
 import { renderPersonalWikiMap } from '../../../../shared/runtime/personal-wiki'
 
@@ -426,6 +428,48 @@ describe('buildOrchestratorHealPrompt', () => {
     expect(promptBody).not.toContain('{{personalWikiMap}}')
   })
 
+  it('omits the playwright-mcp bullet when no failure dir has MCP artifacts', () => {
+    const build = buildOrchestratorHealPrompt({ agent: 'claude', projectRoot, runDir })
+    const prompt = build({ cycle: 0, outputDir: path.join(runDir, 'out') })
+    expect(prompt).not.toContain('playwright-mcp/')
+    expect(prompt).not.toContain('console logs / DOM snapshots / network captures the Playwright MCP server')
+  })
+
+  it('emits the playwright-mcp bullet when at least one failure dir has MCP artifacts', () => {
+    const mcpDir = path.join(runDir, 'failed', 'test-case-broken', 'playwright-mcp')
+    fs.mkdirSync(mcpDir, { recursive: true })
+    fs.writeFileSync(path.join(mcpDir, 'snapshot.png'), 'fake')
+    const build = buildOrchestratorHealPrompt({ agent: 'claude', projectRoot, runDir })
+    const prompt = build({ cycle: 0, outputDir: path.join(runDir, 'out') })
+    expect(prompt).toContain('playwright-mcp/')
+    expect(prompt).toContain('console logs / DOM snapshots / network captures the Playwright MCP server')
+  })
+
+  it('treats playwright-mcp dirs containing only `_attribution.json` as empty', () => {
+    const mcpDir = path.join(runDir, 'failed', 'test-case-x', 'playwright-mcp')
+    fs.mkdirSync(mcpDir, { recursive: true })
+    fs.writeFileSync(path.join(mcpDir, '_attribution.json'), '[]')
+    const build = buildOrchestratorHealPrompt({ agent: 'claude', projectRoot, runDir })
+    const prompt = build({ cycle: 0, outputDir: path.join(runDir, 'out') })
+    expect(prompt).not.toContain('playwright-mcp/')
+  })
+
+  it('omits the trace-extract bullet when no failure dir has a failure-summary.md', () => {
+    const build = buildOrchestratorHealPrompt({ agent: 'claude', projectRoot, runDir })
+    const prompt = build({ cycle: 0, outputDir: path.join(runDir, 'out') })
+    expect(prompt).not.toContain('trace-extract/failure-summary.md')
+  })
+
+  it('emits the trace-extract bullet when at least one failure has a failure-summary.md', () => {
+    const traceDir = path.join(runDir, 'failed', 'test-case-broken', 'trace-extract')
+    fs.mkdirSync(traceDir, { recursive: true })
+    fs.writeFileSync(path.join(traceDir, 'failure-summary.md'), '# Failure summary')
+    const build = buildOrchestratorHealPrompt({ agent: 'claude', projectRoot, runDir })
+    const prompt = build({ cycle: 0, outputDir: path.join(runDir, 'out') })
+    expect(prompt).toContain('trace-extract/failure-summary.md')
+    expect(prompt).toContain('curated extract of the failing Playwright run')
+  })
+
   it('agent-agnostic: rendered prompt body is the same for claude and codex', () => {
     // The prompt is the conversation content; the agent flag only controls
     // the spawn command. Renderers must not branch on agent.
@@ -434,6 +478,77 @@ describe('buildOrchestratorHealPrompt', () => {
     const buildX = buildOrchestratorHealPrompt({ agent: 'codex', projectRoot, runDir })
     const promptX = buildX({ cycle: 0, outputDir: path.join(runDir, 'out') })
     expect(promptC).toBe(promptX)
+  })
+
+  it('omits the stuck-cycle escalation when consecutiveSameFailures is not supplied', () => {
+    // Default path: prior cycles, but no streak threading. Escalation stays
+    // hidden so we don't surface it spuriously to legacy callers.
+    fs.writeFileSync(
+      path.join(runDir, 'e2e-summary.json'),
+      JSON.stringify({ failed: [{ name: 'test-a' }] }),
+    )
+    const build = buildOrchestratorHealPrompt({ agent: 'claude', projectRoot, runDir })
+    const prompt = build({ cycle: 5, outputDir: path.join(runDir, 'out') })
+    expect(prompt).not.toContain('Escalation:')
+  })
+
+  it('emits the stuck-cycle escalation when consecutiveSameFailures crosses the threshold', () => {
+    // End-to-end: the orchestrator's streak value flows through the cycle
+    // prompt builder into the addendum block. Concrete failedDir path is
+    // present in the escalation bullet so the agent can Read directly.
+    fs.writeFileSync(
+      path.join(runDir, 'e2e-summary.json'),
+      JSON.stringify({ failed: [{ name: 'test-a' }, { name: 'test-b' }] }),
+    )
+    const build = buildOrchestratorHealPrompt({ agent: 'claude', projectRoot, runDir })
+    const prompt = build({
+      cycle: 2, // becomes cycle 3 in the addendum after the +1 mapping
+      outputDir: path.join(runDir, 'out'),
+      consecutiveSameFailures: 3,
+    })
+    expect(prompt).toContain('Escalation: this is cycle 3 with the same failing set (test-a, test-b).')
+    // The failedDir path the addendum embeds is the same one the static
+    // template uses — confirms threading through buildHealAddendum.
+    expect(prompt).toContain(`${path.join(runDir, 'failed')}/<slug>/trace-extract/snapshot-at-failure.txt`)
+  })
+})
+
+describe('renderPlaywrightMcpHint', () => {
+  let tmp: string
+  beforeEach(() => { tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-'))) })
+  afterEach(() => { fs.rmSync(tmp, { recursive: true, force: true }) })
+
+  it('returns empty string when failed dir does not exist', () => {
+    expect(renderPlaywrightMcpHint(path.join(tmp, 'nonexistent'))).toBe('')
+  })
+
+  it('returns empty string when no failure dir has a non-empty playwright-mcp/', () => {
+    fs.mkdirSync(path.join(tmp, 'a'), { recursive: true })
+    fs.mkdirSync(path.join(tmp, 'b', 'playwright-mcp'), { recursive: true })
+    expect(renderPlaywrightMcpHint(tmp)).toBe('')
+  })
+
+  it('returns a bullet when any failure dir has files in playwright-mcp/', () => {
+    fs.mkdirSync(path.join(tmp, 'a', 'playwright-mcp'), { recursive: true })
+    fs.writeFileSync(path.join(tmp, 'a', 'playwright-mcp', 'snap.png'), 'fake')
+    expect(renderPlaywrightMcpHint(tmp)).toContain('playwright-mcp/')
+  })
+})
+
+describe('renderTraceExtractHint', () => {
+  let tmp: string
+  beforeEach(() => { tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-trace-'))) })
+  afterEach(() => { fs.rmSync(tmp, { recursive: true, force: true }) })
+
+  it('returns empty string when no failure dir has trace-extract/failure-summary.md', () => {
+    fs.mkdirSync(path.join(tmp, 'a'), { recursive: true })
+    expect(renderTraceExtractHint(tmp)).toBe('')
+  })
+
+  it('returns a bullet when at least one failure has a failure-summary.md', () => {
+    fs.mkdirSync(path.join(tmp, 'a', 'trace-extract'), { recursive: true })
+    fs.writeFileSync(path.join(tmp, 'a', 'trace-extract', 'failure-summary.md'), 'x')
+    expect(renderTraceExtractHint(tmp)).toContain('failure-summary.md')
   })
 })
 
