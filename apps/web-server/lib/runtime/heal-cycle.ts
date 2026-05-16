@@ -22,6 +22,11 @@ export interface HealCycleSnapshot {
   cycle: number              // 0-based count of heal cycles completed so far
   lastFailureSignature: string
   consecutiveSameFailures: number
+  // The failing-slug list from the most recently observed cycle, in the order
+  // the caller supplied. Empty before the first `observeFailures` call (and
+  // therefore a reliable "is this the first heal cycle?" signal for callers
+  // that want to render a delta vs the previous cycle).
+  lastFailingSlugs: string[]
 }
 
 export class HealCycleState {
@@ -29,6 +34,7 @@ export class HealCycleState {
   private cycle = 0
   private lastFailureSignature = ''
   private consecutiveSameFailures = 0
+  private lastFailingSlugs: string[] = []
 
   constructor(opts: HealCycleStateOptions = {}) {
     this.maxCycles = opts.maxCycles ?? AUTO_HEAL_MAX_CYCLES
@@ -37,7 +43,14 @@ export class HealCycleState {
   // Called when Playwright finishes a run. Returns whether we should attempt
   // another heal cycle (true) or stop (false). Updates internal failure-streak
   // tracking — three identical failure sets in a row means the agent is stuck.
-  observeFailures(signature: string): { shouldHeal: boolean; reason?: 'max-cycles' | 'no-progress' } {
+  //
+  // Accepts the raw failing-slug array (not a pre-joined signature) so the
+  // state can remember the slug list itself, which feeds the heal-index
+  // delta-vs-previous-cycle section. The internal "same failures?" check
+  // still keys off a sorted-join signature so ordering changes from the test
+  // runner can't masquerade as progress.
+  observeFailures(slugs: string[]): { shouldHeal: boolean; reason?: 'max-cycles' | 'no-progress' } {
+    const signature = slugs.slice().sort().join('|')
     if (signature === '') return { shouldHeal: false }
     if (this.cycle >= this.maxCycles) return { shouldHeal: false, reason: 'max-cycles' }
     if (signature === this.lastFailureSignature) {
@@ -46,6 +59,7 @@ export class HealCycleState {
       this.consecutiveSameFailures = 1
       this.lastFailureSignature = signature
     }
+    this.lastFailingSlugs = slugs.slice()
     if (this.consecutiveSameFailures > this.maxCycles) {
       return { shouldHeal: false, reason: 'no-progress' }
     }
@@ -81,6 +95,7 @@ export class HealCycleState {
       cycle: this.cycle,
       lastFailureSignature: this.lastFailureSignature,
       consecutiveSameFailures: this.consecutiveSameFailures,
+      lastFailingSlugs: this.lastFailingSlugs.slice(),
     }
   }
 }

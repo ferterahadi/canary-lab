@@ -126,7 +126,6 @@ function balancedJsonArrayAt(text: string, start: number): string | null {
     if (ch === ']') {
       depth--
       if (depth === 0) return text.slice(start, i + 1).trim()
-      if (depth < 0) return null
     }
   }
   return null

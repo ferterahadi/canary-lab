@@ -141,4 +141,15 @@ describe('FileRunStateSink', () => {
     expect(fs.readFileSync(summaryPath, 'utf-8')).toBe('{bad json')
     expect(readManifest(sink.manifestPath('run-1'))?.status).toBe('failed')
   })
+
+  it('leaves non-object JSON summaries untouched during finalize', () => {
+    const sink = new FileRunStateSink(logsDir)
+    sink.bootstrap(manifest())
+    const summaryPath = path.join(runDirFor(logsDir, 'run-1'), 'e2e-summary.json')
+    fs.writeFileSync(summaryPath, '42')
+
+    sink.finalize('run-1', 'failed', '2026-05-08T00:03:00.000Z', 0)
+
+    expect(fs.readFileSync(summaryPath, 'utf-8')).toBe('42')
+  })
 })

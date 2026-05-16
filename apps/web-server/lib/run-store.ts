@@ -575,8 +575,9 @@ export class RunStore extends EventEmitter implements RunStateSink {
   async abortAllActiveOrStale(): Promise<AbortAllResult> {
     const aborted = new Set<string>()
     for (const orch of this.registry.list()) {
-      const result = await this.abort(orch.runId)
-      if (result.ok) aborted.add(orch.runId)
+      // Registered orchestrators are always abortable through `abort()`.
+      await this.abort(orch.runId)
+      aborted.add(orch.runId)
     }
     for (const entry of this.list()) {
       if (!isActiveRunStatus(entry.status)) continue
@@ -597,8 +598,8 @@ export class RunStore extends EventEmitter implements RunStateSink {
     if (isActiveRunStatus(status)) {
       return { ok: false, reason: 'stale' }
     }
-    const removed = removeRunFromHistory(this.logsDir, runId)
-    if (removed) this.emitEvent({ kind: 'removed', runId })
+    removeRunFromHistory(this.logsDir, runId)
+    this.emitEvent({ kind: 'removed', runId })
     return { ok: true }
   }
 

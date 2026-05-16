@@ -236,8 +236,9 @@ export type MergeDevDependenciesResult =
 export function validateFeatureTarget(projectRoot: string, featureName: string): ValidateFeatureTargetResult {
   const result = validateScaffoldTarget(projectRoot, featureName)
   if (result.ok) return { ok: true, featureDir: result.featureDir }
-  if (result.error === 'invalid-scaffold') return { ok: false, error: 'invalid-name' }
-  return { ok: false, error: result.error, featureDir: result.featureDir }
+  // shared.validateFeatureTarget only emits 'feature-exists' | 'invalid-name';
+  // 'invalid-scaffold' is reserved for the apply path.
+  return { ok: false, error: result.error as 'feature-exists' | 'invalid-name', featureDir: result.featureDir }
 }
 
 export function applyToProject(input: ApplyToProjectInput): ApplyToProjectResult {

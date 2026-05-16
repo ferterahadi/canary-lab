@@ -6,6 +6,7 @@ import { codeToHtml } from 'shiki'
 import ts from 'typescript'
 import type { RunDetail, PlaywrightPlaybackEvent } from './run-store'
 import { pickAvailableHealAgent, type HealAgent } from './runtime/auto-heal'
+import { formatCodeForDisplay } from '../../../shared/code-display-format'
 
 export type AssertionQuality = 'strict' | 'moderate' | 'shallow' | 'unknown'
 
@@ -527,7 +528,7 @@ function loadSourceTests(featureDir: string | undefined): Map<string, SourceTest
             file,
             line: lineFor(node, src),
             title,
-            bodySource: cleanSnippet(body.getText(src)),
+            bodySource: formatCodeForDisplay(body.getText(src)),
             helperCalls: review.helperCalls,
             helperDefinitions: review.helperDefinitions,
             externalImports: dedupe([
@@ -1401,10 +1402,11 @@ function rationaleForAudience(rationale: string): string {
 }
 
 async function highlightCode(source: string): Promise<string> {
+  const formatted = formatCodeForDisplay(source)
   try {
-    return await codeToHtml(source, { lang: 'typescript', theme: 'one-light' })
+    return await codeToHtml(formatted, { lang: 'typescript', theme: 'one-light' })
   } catch {
-    return `<pre class="fallback-code"><code>${escapeHtml(source)}</code></pre>`
+    return `<pre class="fallback-code"><code>${escapeHtml(formatted)}</code></pre>`
   }
 }
 

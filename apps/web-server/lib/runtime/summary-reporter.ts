@@ -165,10 +165,10 @@ class SummaryReporter implements Reporter {
     const running = this.runningTests.get(name)
     if (!running) return
     const ended = stepToRunningStep(step)
-    if (ended.locations?.length && step.error) {
+    if (step.error && ended.locations) {
       this.failedStepLocationsByTest.set(name, ended.locations)
     }
-    const stepStack = this.stepStacksByTest.get(name) ?? []
+    const stepStack = this.stepStacksByTest.get(name)!
     const idx = findLastStepIndex(stepStack, ended)
     if (idx >= 0) stepStack.splice(idx, 1)
     this.stepStacksByTest.set(name, stepStack)
@@ -317,8 +317,8 @@ class SummaryReporter implements Reporter {
     for (const r of settled) {
       if (!r) continue
       any = true
-      const entry = this.results.find((e) => e.name === r.name)
-      if (entry) entry.traceSummaryFile = r.relPath
+      const entry = this.results.find((e) => e.name === r.name)!
+      entry.traceSummaryFile = r.relPath
     }
     if (!any) return
     // Rewrite the summary so `traceSummaryFile` lands on each failed entry,
@@ -538,14 +538,13 @@ function mergeKnownTest(knownTests: KnownTestEntry[], entry: KnownTestEntry): vo
     knownTests.push(entry)
     return
   }
-  knownTests[idx] = {
+  const merged: KnownTestEntry = {
     ...knownTests[idx],
     ...entry,
-    titlePath: entry.titlePath && entry.titlePath.length > 0
-      ? entry.titlePath
-      : knownTests[idx].titlePath,
     location: entry.location ?? knownTests[idx].location,
   }
+  if (!entry.titlePath?.length) merged.titlePath = knownTests[idx].titlePath
+  knownTests[idx] = merged
 }
 
 function readExistingSummary(): (ExistingSummary & SummaryForJournalOutcome) | null {
@@ -590,9 +589,9 @@ function stepToRunningStep(step: TestStep): RunningStep {
 
 function failureLocations(result: TestResult, failedStepLocations?: string[]): string[] {
   const out: string[] = []
-  const add = (location: string | undefined) => {
+  const add = (location: string) => {
     const normalized = normalizeLocation(location)
-    if (!normalized || out.includes(normalized)) return
+    if (out.includes(normalized)) return
     out.push(normalized)
   }
   const addLocation = (location: { file: string; line: number } | undefined) => {
@@ -620,8 +619,7 @@ function stackLocations(stack: string | undefined): string[] {
   return out
 }
 
-function normalizeLocation(location: string | undefined): string | null {
-  if (!location) return null
+function normalizeLocation(location: string): string {
   const match = location.match(/^(\/[^:\n]+:\d+)(?::\d+)?$/)
   return match ? match[1] : location
 }

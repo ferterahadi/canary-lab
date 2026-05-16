@@ -351,6 +351,58 @@ describe('extractTraceSummary', () => {
     expect(content).toContain('trace open failed: open failed')
   })
 
+  it('renders failure messages when errorsOnly and consoleErrors subcommands fail', async () => {
+    const traceZipPath = path.join(tmp, 'trace.zip')
+    fs.writeFileSync(traceZipPath, 'zip')
+    const outputDir = path.join(tmp, 'out')
+
+    mockByCommand({
+      'trace open <zip>': () => ({ stdout: 'opened' }),
+      'trace actions': () => ({ stdout: '' }),
+      'trace actions --errors-only': () => ({ error: 'errors-only failed' }),
+      'trace requests --failed': () => ({ stdout: '' }),
+      'trace console --errors-only': () => ({ error: 'console failed' }),
+      'trace close': () => ({ stdout: '' }),
+    })
+
+    const result = await extractTraceSummary({ traceZipPath, outputDir })
+    const content = fs.readFileSync(result.summaryPath, 'utf-8')
+    expect(result.failedActionId).toBeNull()
+    expect(content).toContain('trace actions --errors-only failed: errors-only failed')
+    expect(content).toContain('trace console --errors-only failed: console failed')
+  })
+
+  it('renders "Full list" pointers when failed requests, console errors, or actions exceed caps', async () => {
+    const traceZipPath = path.join(tmp, 'trace.zip')
+    fs.writeFileSync(traceZipPath, 'zip')
+    const outputDir = path.join(tmp, 'out')
+    const failingActionLine = ' 99. 0:00.001  click button                                      1ms  ✗'
+    // 20 action rows triggers >15 cap; 15 request rows triggers >10 cap.
+    const actionRows = Array.from({ length: 20 }, (_, i) => ` ${i + 1}. 0:00.001  step ${i + 1}                                  1ms`)
+    const requestRows = Array.from({ length: 15 }, (_, i) => `GET https://example.test/req${i} 500`)
+    const consoleRows = Array.from({ length: 15 }, (_, i) => `console.error err-${i}`)
+
+    mockByCommand({
+      'trace open <zip>': () => ({ stdout: 'meta' }),
+      'trace actions': () => ({
+        stdout: ['h1', 'h2', ...actionRows, failingActionLine].join('\n'),
+      }),
+      'trace actions --errors-only': () => ({ stdout: ['h1', 'h2', failingActionLine].join('\n') }),
+      'trace action 99': () => ({ stdout: 'detail' }),
+      'trace snapshot 99': () => ({ stdout: 'snap' }),
+      'trace snapshot 99 --name before': () => ({ stdout: '' }),
+      'trace requests --failed': () => ({ stdout: ['h1', 'h2', ...requestRows].join('\n') }),
+      'trace console --errors-only': () => ({ stdout: ['h1', 'h2', ...consoleRows].join('\n') }),
+      'trace close': () => ({ stdout: '' }),
+    })
+
+    const result = await extractTraceSummary({ traceZipPath, outputDir })
+    const content = fs.readFileSync(result.summaryPath, 'utf-8')
+    expect(content).toContain('Full list (15 failed requests): trace-extract/network-failed.txt')
+    expect(content).toContain('Full list (15 console errors): trace-extract/console-errors.txt')
+    expect(content).toContain('Full timeline (21 actions): trace-extract/actions.txt')
+  })
+
   it('still produces a usable summary when first-failure detail and snapshot fail', async () => {
     const traceZipPath = path.join(tmp, 'trace.zip')
     fs.writeFileSync(traceZipPath, 'zip')

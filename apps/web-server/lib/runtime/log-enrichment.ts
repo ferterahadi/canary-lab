@@ -302,6 +302,24 @@ export function parseJournalMarkdown(raw: string): JournalEntry[] {
   return entries
 }
 
+// Read the latest journal iteration's `failingTests` line and split it back
+// into a slug array. This is the "what was failing at the start of the
+// previous cycle" record. Returns [] when the journal is missing, has no
+// iterations, or the latest entry has no failingTests field (e.g., the
+// summary was missing when the iteration was appended).
+function readPreviousFailingSlugsFromJournal(journalPath: string): string[] {
+  try {
+    const raw = fs.readFileSync(journalPath, 'utf-8')
+    const entries = parseJournalMarkdown(raw)
+    const last = entries[entries.length - 1]
+    const value = last?.failingTests?.trim()
+    if (!value) return []
+    return value.split(',').map((s) => s.trim()).filter((s) => s.length > 0)
+  } catch {
+    return []
+  }
+}
+
 function readJournalTail(journalPath: string, limit = 3): JournalEntry[] {
   try {
     const raw = fs.readFileSync(journalPath, 'utf-8')
@@ -365,6 +383,13 @@ export function writeHealIndex(parsed?: {
   healIndexPath?: string
   summaryPath?: string
   journalPath?: string
+  /**
+   * Failing-slug list from the cycle BEFORE this one. When provided and
+   * non-empty, `writeHealIndex` emits a `## Failure delta vs previous cycle`
+   * section so the agent can see what its prior cycle changed (or didn't).
+   * Empty / omitted on the first cycle of a run.
+   */
+  previousFailingSlugs?: readonly string[]
 }): void {
   let summary: EnrichedSummary
   let manifest: Manifest
@@ -427,6 +452,42 @@ export function writeHealIndex(parsed?: {
       if (entry.traceSummaryFile) {
         lines.push(`  - trace: ${entry.traceSummaryFile} — read this for the failing action, page state, failed requests, console errors`)
       }
+    }
+    lines.push('')
+  }
+
+  // Failure delta vs the previous cycle's failing set. Only emitted when we
+  // actually have a previous cycle to compare against — on the initial run
+  // there's no prior journal entry, so the section is suppressed.
+  // The agent uses this to attribute what its prior turn did or didn't change:
+  //   - still failing: same tests as last cycle — your previous fix didn't help
+  //   - newly failing: regressions you introduced last cycle
+  //   - newly passing: tests your previous fix actually unblocked
+  //
+  // When `previousFailingSlugs` isn't explicitly plumbed in, fall back to the
+  // latest journal iteration's `failingTests` line. The reporter calls
+  // writeHealIndex without orchestrator access, so journal-derived defaults
+  // keep the call sites simple while still giving the agent the delta.
+  const prevSlugs = parsed?.previousFailingSlugs ?? readPreviousFailingSlugsFromJournal(journalPath)
+  if (failed.length > 0 && prevSlugs.length > 0) {
+    const currentSlugs = failed
+      .map((e) => (typeof e.name === 'string' ? e.name : ''))
+      .filter((n) => n.length > 0)
+    const currentSet = new Set(currentSlugs)
+    const previousSet = new Set(prevSlugs)
+    const stillFailing = currentSlugs.filter((s) => previousSet.has(s))
+    const newlyFailing = currentSlugs.filter((s) => !previousSet.has(s))
+    const newlyPassing = prevSlugs.filter((s) => !currentSet.has(s))
+
+    lines.push('## Failure delta vs previous cycle')
+    if (stillFailing.length > 0) {
+      lines.push(`- still failing (${stillFailing.length}): ${stillFailing.join(', ')}`)
+    }
+    if (newlyFailing.length > 0) {
+      lines.push(`- newly failing (${newlyFailing.length}): ${newlyFailing.join(', ')}`)
+    }
+    if (newlyPassing.length > 0) {
+      lines.push(`- newly passing (${newlyPassing.length}): ${newlyPassing.join(', ')}`)
     }
     lines.push('')
   }

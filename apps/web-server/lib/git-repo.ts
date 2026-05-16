@@ -165,7 +165,7 @@ export async function validateConfiguredRepoBranches(feature: FeatureConfig): Pr
       continue
     }
     if (status.currentBranch !== expected) {
-      failures.push(`${repo.name}: expected ${expected}, current ${status.currentBranch ?? '(none)'}`)
+      failures.push(`${repo.name}: expected ${expected}, current ${status.currentBranch}`)
     }
   }
   if (failures.length > 0) {
@@ -186,6 +186,21 @@ function emptyGitStatus(): GitStatus {
     localBranches: [],
     remoteBranches: [],
   }
+}
+
+// Resolve the absolute path to the git working-tree root for any directory
+// inside a git repo. Returns null when the target isn't a git working tree
+// (or doesn't exist). Useful when the orchestrator wants to diff a subtree
+// (e.g., `feature.featureDir`) that lives inside a larger workspace repo —
+// `git diff --name-only` always emits paths relative to the working-tree
+// root, so callers need that root to convert back to absolute paths.
+export async function getGitRoot(targetPath: string): Promise<string | null> {
+  const target = resolveRepoPath(targetPath)
+  if (!fs.existsSync(target) || !fs.statSync(target).isDirectory()) return null
+  const result = await runGit(target, ['rev-parse', '--show-toplevel'])
+  if (result.code !== 0) return null
+  const root = result.stdout.trim()
+  return root.length > 0 ? root : null
 }
 
 // Snapshot the working tree (tracked files only) and return a ref the caller
@@ -210,9 +225,45 @@ export async function snapshotWorkingTree(repoPath: string): Promise<string | nu
   return sha.length > 0 ? sha : 'HEAD'
 }
 
-export async function diffNamesSinceSnapshot(repoPath: string, ref: string): Promise<string[]> {
+// Optional pathspecs accepted by both diff helpers. Each entry is either
+// repo-relative or absolute (auto-converted relative to `repoPath`), and may
+// use git's `:(exclude)<path>` magic prefix to exclude a subtree. When the
+// `pathspecs` array is set and non-empty, it scopes the diff to those paths;
+// when unset/empty, the diff covers the entire working tree (legacy behavior).
+//
+// Used by the heal loop to diff the feature directory (a subtree of the
+// workspace repo) while excluding service-repo subtrees that are diffed
+// separately on their own snapshot — prevents double-counting.
+export type DiffPathspec = string
+
+function buildPathspecArgs(repoPath: string, pathspecs?: readonly DiffPathspec[]): string[] {
+  if (!pathspecs || pathspecs.length === 0) return []
+  const args: string[] = ['--']
+  for (const raw of pathspecs) {
+    args.push(repoRelativePathspec(repoPath, raw))
+  }
+  return args
+}
+
+// Preserve git's `:(exclude)<path>` (or `:!<path>`) magic prefix while
+// converting the trailing path portion to a repo-relative path when it was
+// supplied as an absolute path. Callers can mix relative and absolute freely.
+function repoRelativePathspec(repoPath: string, raw: DiffPathspec): string {
+  const magicMatch = raw.match(/^(:\([^)]+\)|:!)(.*)$/)
+  const prefix = magicMatch?.[1] ?? ''
+  const body = magicMatch?.[2] ?? raw
+  if (body.length === 0) return raw
+  const rel = path.isAbsolute(body) ? path.relative(repoPath, body) : body
+  return prefix + rel
+}
+
+export async function diffNamesSinceSnapshot(
+  repoPath: string,
+  ref: string,
+  pathspecs?: readonly DiffPathspec[],
+): Promise<string[]> {
   const target = resolveRepoPath(repoPath)
-  const result = await runGit(target, ['diff', '--name-only', ref])
+  const result = await runGit(target, ['diff', '--name-only', ref, ...buildPathspecArgs(target, pathspecs)])
   if (result.code !== 0) return []
   return result.stdout
     .split(/\r?\n/)
@@ -224,9 +275,13 @@ export async function diffNamesSinceSnapshot(repoPath: string, ref: string): Pro
 // to `diffNamesSinceSnapshot` — same defensive shape: empty string when git
 // fails or there is nothing to diff. Callers must size-bound the result before
 // persisting it; this function intentionally does no truncation.
-export async function diffContentSinceSnapshot(repoPath: string, ref: string): Promise<string> {
+export async function diffContentSinceSnapshot(
+  repoPath: string,
+  ref: string,
+  pathspecs?: readonly DiffPathspec[],
+): Promise<string> {
   const target = resolveRepoPath(repoPath)
-  const result = await runGit(target, ['diff', ref])
+  const result = await runGit(target, ['diff', ref, ...buildPathspecArgs(target, pathspecs)])
   if (result.code !== 0) return ''
   return result.stdout
 }
