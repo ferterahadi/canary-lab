@@ -116,9 +116,11 @@ export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Pro
   ): Promise<{ archiveBase: string; zip: Buffer }> => {
     throwIfAborted(signal)
     log?.(`[evaluation] preparing ${mode === 'raw' ? 'raw output' : 'localized output'} export\n`)
+    const runPaths = buildRunPaths(runDirFor(deps.store.logsDir, detail.runId))
     const videos = assertionVideos(
       detail.playwrightArtifacts,
-      buildRunPaths(runDirFor(deps.store.logsDir, detail.runId)).playwrightArtifactsDir,
+      runPaths.playwrightArtifactsDir,
+      runPaths.playwrightArtifactsKeepDir,
       detail.runId,
     )
     const archiveBase = `canary-lab-evaluation-${safeFilename(detail.manifest.feature)}-${safeFilename(detail.runId)}`
@@ -534,17 +536,30 @@ function safeFilename(input: string): string {
 function assertionVideos(
   groups: Array<{ testName: string; artifacts: PlaywrightArtifact[] }> | undefined,
   artifactsDir: string,
+  artifactsKeepDir: string,
   runId: string,
 ): Array<{ filename: string; path: string; testName: string }> {
+  // Mirror indexPlaywrightArtifacts.resolveFile: artifact.path is rooted at
+  // the live artifacts dir, but after heal-cycle reruns the live dir only
+  // holds the last invocation's outputs. Fall back to the keep dir so videos
+  // from earlier invocations still make it into the export.
+  const fileAt = (rel: string): string | null => {
+    const live = path.resolve(artifactsDir, rel)
+    if (fs.existsSync(live) && fs.statSync(live).isFile()) return live
+    const kept = path.resolve(artifactsKeepDir, rel)
+    if (fs.existsSync(kept) && fs.statSync(kept).isFile()) return kept
+    return null
+  }
   const videos = (groups ?? [])
     .flatMap((group) => group.artifacts.map((artifact) => ({ artifact, testName: group.testName })))
     .map(({ artifact, testName }) => {
-      const filePath = path.resolve(artifactsDir, artifact.path)
-      const rel = path.relative(artifactsDir, filePath)
-      return { artifact, filePath, testName, valid: !rel.startsWith('..') && !path.isAbsolute(rel) }
+      const rel = path.relative(artifactsDir, path.resolve(artifactsDir, artifact.path))
+      const valid = !rel.startsWith('..') && !path.isAbsolute(rel)
+      const filePath = valid ? fileAt(rel) : null
+      return { artifact, filePath, testName, valid }
     })
-    .filter(({ artifact, filePath, valid }) =>
-      valid && artifact.kind === 'video' && fs.existsSync(filePath) && fs.statSync(filePath).isFile())
+    .filter((entry): entry is { artifact: PlaywrightArtifact; filePath: string; testName: string; valid: boolean } =>
+      entry.valid && entry.artifact.kind === 'video' && entry.filePath !== null)
   const used = new Set<string>()
   return videos.map(({ artifact, filePath, testName }, idx) => {
     const ext = path.extname(filePath) || extensionForContentType(artifact.contentType) || '.webm'
