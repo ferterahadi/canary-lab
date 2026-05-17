@@ -11,6 +11,12 @@ Each entry is tagged with the area it touches:
 - **[General]** — UI shell, CLI, scaffolding, packaging
 
 ---
+## 1.0.8 — 2026-05-17
+
+- **[Export evaluation]** **Missing videos in exported evaluations.** Fixes a case where exported evaluations were attaching stale or missing video recordings — now the right video lands with each run. Small fix shipping ahead of 1.1.x.
+
+---
+
 ## 1.0.7 — 2026-05-16
 
 - **[Test Runner]** **Playwright traces in the heal index.** I started feeding the Playwright trace for each failure into the heal index, and the agent started fixing things noticeably faster — it can see exactly what happened in the browser instead of guessing from logs. Shipping this one quickly because it felt too useful to sit on
