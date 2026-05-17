@@ -652,6 +652,25 @@ describe('readPlaywrightPlaybackEvents / indexPlaywrightArtifacts', () => {
     ])
   })
 
+  it('skips stale attachments that resolve to keep-dir directories', () => {
+    const keepCase = path.join(tmpDir, 'playwright-artifacts-keep', 'pw-dir', 'video.webm')
+    fs.mkdirSync(keepCase, { recursive: true })
+
+    const staleAttachmentPath = path.join(tmpDir, 'playwright-artifacts', 'pw-dir', 'video.webm')
+    expect(indexPlaywrightArtifacts('r-keep-dir', tmpDir, [
+      {
+        type: 'test-end',
+        time: 't',
+        test: { name: 'test-case-dir', title: 'Case Dir', location: 'x:1' },
+        status: 'failed',
+        passed: false,
+        durationMs: 1,
+        retry: 0,
+        attachments: [{ name: 'video', contentType: 'video/webm', path: staleAttachmentPath }],
+      },
+    ])).toBeUndefined()
+  })
+
   it('prefers the live dir when the same pw-slug exists in both', () => {
     // Both dirs hold a video for the same pw-slug. The live dir is the most
     // recent (just-finished) Playwright invocation, so its file wins.
