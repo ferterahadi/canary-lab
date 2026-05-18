@@ -16,7 +16,7 @@ export interface ProjectConfigRouteDeps {
   projectRoot: string
 }
 
-const HEAL_AGENT_VALUES: HealAgentChoice[] = ['auto', 'claude', 'codex', 'manual']
+const HEAL_AGENT_VALUES: HealAgentChoice[] = ['auto', 'claude', 'codex', 'manual', 'external']
 const EDITOR_VALUES: EditorChoice[] = ['auto', 'vscode', 'cursor', 'system']
 
 export async function projectConfigRoutes(

@@ -63,6 +63,39 @@ export interface StoppedEarlyInfo {
   suiteTotal: number
 }
 
+export type ExternalHealClientKind =
+  | 'claude-cli'
+  | 'claude-desktop'
+  | 'codex-cli'
+  | 'codex-desktop'
+  | 'other'
+
+export type ExternalHealSessionStatus =
+  | 'connected'
+  | 'waiting'
+  | 'healing'
+  | 'running-tests'
+  | 'paused'
+  | 'disconnected'
+
+/**
+ * Identity + liveness record for an external AI client (Claude Desktop, Codex
+ * CLI, etc.) that has claimed heal duty for this run via MCP. Populated only
+ * when `healMode === 'external'`. The orchestrator no longer spawns a heal
+ * agent PTY in that mode — it parks at `waiting-for-signal` and lets the
+ * external client write signals through `POST /api/runs/:runId/signal`.
+ */
+export interface ExternalHealSession {
+  sessionId: string
+  clientKind: ExternalHealClientKind
+  clientVersion?: string
+  conversationName?: string
+  claimedAt: string
+  lastHeartbeatAt: string
+  status: ExternalHealSessionStatus
+  cycleCount: number
+}
+
 export interface RunManifest {
   runId: string
   feature: string
@@ -92,8 +125,15 @@ export interface RunManifest {
   signalPaths?: { rerun: string; restart: string }
   /** When the run is heal-paused under manual mode, the UI renders a banner
    *  pointing the user at the signal paths above. Only set during the heal
-   *  phase of a manual run; cleared when the run leaves the heal state. */
-  healMode?: 'auto' | 'manual'
+   *  phase of a manual run; cleared when the run leaves the heal state.
+   *
+   *  `'external'` means an external AI client (Claude/Codex CLI or Desktop,
+   *  connected via MCP) owns the heal loop for this run. See
+   *  `externalHealSession` below for identity + heartbeat state. */
+  healMode?: 'auto' | 'manual' | 'external'
+  /** Populated when `healMode === 'external'`. Tracks the single external
+   *  client that holds the heal claim for this run. */
+  externalHealSession?: ExternalHealSession
   /** Latest structured lifecycle state. This is the UI source of truth for
    *  recovery flow narration; runner.log remains the human-readable audit. */
   lifecycle?: RunLifecycleSnapshot

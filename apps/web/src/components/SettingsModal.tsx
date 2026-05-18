@@ -24,6 +24,11 @@ const HEAL_AGENT_OPTIONS: { value: HealAgentChoice; label: string; description: 
     label: 'Manual',
     description: 'Skip auto-heal. Open Claude/Codex desktop yourself when a run pauses.',
   },
+  {
+    value: 'external',
+    label: 'External client (MCP)',
+    description: 'Let Claude / Codex Desktop or CLI drive heal over MCP. Canary Lab waits for the external client to claim and signal.',
+  },
 ]
 
 const EDITOR_OPTIONS: { value: EditorChoice; label: string; description: string }[] = [

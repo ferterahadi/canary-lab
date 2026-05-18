@@ -115,6 +115,32 @@ export interface PlaywrightArtifactPolicy {
   trace: PlaywrightRetainedArtifactMode
 }
 
+export type ExternalHealClientKind =
+  | 'claude-cli'
+  | 'claude-desktop'
+  | 'codex-cli'
+  | 'codex-desktop'
+  | 'other'
+
+export type ExternalHealSessionStatus =
+  | 'connected'
+  | 'waiting'
+  | 'healing'
+  | 'running-tests'
+  | 'paused'
+  | 'disconnected'
+
+export interface ExternalHealSession {
+  sessionId: string
+  clientKind: ExternalHealClientKind
+  clientVersion?: string
+  conversationName?: string
+  claimedAt: string
+  lastHeartbeatAt: string
+  status: ExternalHealSessionStatus
+  cycleCount: number
+}
+
 export interface RunManifest {
   runId: string
   feature: string
@@ -129,7 +155,8 @@ export interface RunManifest {
   repoBranches?: RepoBranchSnapshot[]
   playwrightArtifacts?: PlaywrightArtifactPolicy
   signalPaths?: { rerun: string; restart: string }
-  healMode?: 'auto' | 'manual'
+  healMode?: 'auto' | 'manual' | 'external'
+  externalHealSession?: ExternalHealSession
   lifecycle?: RunLifecycleSnapshot
 }
 

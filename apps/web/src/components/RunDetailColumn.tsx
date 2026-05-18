@@ -28,6 +28,7 @@ import { deriveRunViewModel, type RunViewModel } from '../lib/run-view-model'
 import { RunStatusIndicator } from './RunStatusIndicator'
 import { PaneTerminal } from './PaneTerminal'
 import { AgentSessionView } from './AgentSessionView'
+import { ExternalHealPanel } from './ExternalHealPanel'
 import { JournalTab } from './JournalTab'
 import { ManualHealBanner } from './ManualHealBanner'
 import { RestartHealButton } from './RestartHealButton'
@@ -174,7 +175,17 @@ export function RunDetailColumn({
             <ManualHealBanner runId={m.runId} signalPaths={m.signalPaths} />
           )}
           <div className="min-h-0 flex-1 overflow-hidden">
-            {showAgentSession ? (
+            {m.healMode === 'external' && m.externalHealSession ? (
+              // External heal: the agent transcript lives in the user's
+              // Claude / Codex window, not in Canary Lab. Render the dedicated
+              // status panel and skip both AgentSessionView (no JSONL to tail)
+              // and PaneTerminal (no local PTY to attach).
+              <ExternalHealPanel
+                runId={m.runId}
+                session={m.externalHealSession}
+                lifecycleEvents={detail.lifecycleEvents}
+              />
+            ) : showAgentSession ? (
               <AgentSessionView source={{ kind: 'run', runId: m.runId, live: !isTerminalRunStatus(m.status) }} />
             ) : (
               <PaneTerminal
@@ -185,7 +196,7 @@ export function RunDetailColumn({
               />
             )}
           </div>
-          {view.actions.restartHeal.enabled && (
+          {view.actions.restartHeal.enabled && m.healMode !== 'external' && (
             <RestartHealButton
               runId={m.runId}
               onRestarted={() => setAgentPaneRestartKey((key) => key + 1)}

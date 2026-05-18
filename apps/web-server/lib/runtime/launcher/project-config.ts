@@ -2,7 +2,7 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 
-export type HealAgentChoice = 'auto' | 'claude' | 'codex' | 'manual'
+export type HealAgentChoice = 'auto' | 'claude' | 'codex' | 'manual' | 'external'
 export type EditorChoice = 'auto' | 'vscode' | 'cursor' | 'system'
 
 export interface ProjectConfig {
@@ -19,7 +19,13 @@ export function projectConfigPath(projectRoot: string): string {
 }
 
 function isHealAgentChoice(v: unknown): v is HealAgentChoice {
-  return v === 'auto' || v === 'claude' || v === 'codex' || v === 'manual'
+  return (
+    v === 'auto' ||
+    v === 'claude' ||
+    v === 'codex' ||
+    v === 'manual' ||
+    v === 'external'
+  )
 }
 
 function isEditorChoice(v: unknown): v is EditorChoice {

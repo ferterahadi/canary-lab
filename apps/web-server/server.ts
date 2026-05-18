@@ -10,6 +10,9 @@ import { projectConfigRoutes } from './routes/project-config'
 import { runsRoutes } from './routes/runs'
 import { journalRoutes } from './routes/journal'
 import { testsDraftRoutes, type TestsDraftRouteDeps } from './routes/tests-draft'
+import { externalHealRoutes, makeExternalHealAuditLogger } from './routes/external-heal'
+import { ExternalHealBroker } from './lib/external-heal-broker'
+import { registerMcpRoutes } from './mcp/server'
 import { paneStreamRoutes } from './ws/pane-stream'
 import { runsStreamRoutes } from './ws/runs-stream'
 import { draftAgentStreamRoutes } from './ws/draft-agent-stream'
@@ -107,6 +110,26 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
   // not controllable by this process. Finalize it immediately instead of
   // waiting for the heartbeat staleness window or requiring a manual Stop.
   await runStore.abortAllActiveOrStale()
+  // Tracks which external AI client (Claude Desktop / Codex CLI etc.) holds
+  // heal duty for each run. Routes hit this; the orchestrator subscribes to
+  // claim-changed events through the run-store fan-out.
+  const externalHealBroker = new ExternalHealBroker({
+    now: () => Date.now(),
+    emit: (event) => runStore.emit('event', event),
+    patchManifest: (runId, patch) => runStore.patchManifest(runId, patch),
+    audit: makeExternalHealAuditLogger(logsDir),
+  })
+  // Periodic sweep: any external session whose heartbeat is older than
+  // HEARTBEAT_STALE_MS gets its status flipped to 'disconnected'. The
+  // orchestrator's signal-wait loop is untouched — runs stay parked at
+  // waiting-for-signal so the client can reconnect with the same session id
+  // and resume without losing state.
+  const externalHealWatchdog = setInterval(() => {
+    try { externalHealBroker.markStaleClaims() } catch { /* best-effort */ }
+  }, 5_000)
+  // Don't keep the process alive solely for the watchdog interval — that
+  // would prevent `canary-lab ui` from exiting cleanly on SIGINT/SIGTERM.
+  if (typeof externalHealWatchdog.unref === 'function') externalHealWatchdog.unref()
   const brokers = new Map<string, PaneBroker>()
   const draftBrokers = new Map<string, PaneBroker>()
   const wizardAgents = new WizardAgentRegistry()
@@ -123,6 +146,10 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
   })
   await app.register(projectConfigRoutes, { projectRoot: opts.projectRoot })
   await app.register(journalRoutes, { logsDir, journalPath })
+  await app.register(externalHealRoutes, {
+    store: runStore,
+    broker: externalHealBroker,
+  })
 
   // Wizard route deps. Production: real claude -p via node-pty + on-demand
   // PaneBroker per draft so the WebSocket route can stream live agent output.
@@ -233,7 +260,11 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
     featuresDir,
     projectRoot: opts.projectRoot,
     store: runStore,
-    startRun: async (featureName: string, env?: string): Promise<OrchestratorLike> => {
+    startRun: async (
+      featureName: string,
+      env?: string,
+      healAgentReq?: { kind: 'external'; sessionId: string; clientKind: 'claude-cli' | 'claude-desktop' | 'codex-cli' | 'codex-desktop' | 'other'; clientVersion?: string; conversationName?: string },
+    ): Promise<OrchestratorLike> => {
       const features = loadFeatures(featuresDir)
       const feature = features.find((f) => f.name === featureName)
       if (!feature) throw new Error(`feature not found: ${featureName}`)
@@ -258,14 +289,35 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
         }
       }
 
-      // Wire the heal loop based on the project's heal-agent setting:
-      //   - 'auto' (default) → prefer claude, fall back to codex.
-      //   - 'claude' / 'codex' → require that exact CLI on PATH.
-      //   - 'manual' → skip auto-heal entirely; the orchestrator's signal
-      //     polling handles the user's hand-driven fix instead.
+      // Wire the heal loop based on the project's heal-agent setting (or an
+      // explicit per-request override):
+      //   - body `healAgent.kind === 'external'` → skip auto-heal, set
+      //     externalHeal mode, claim the broker for the supplied session.
+      //   - project 'auto' (default) → prefer claude, fall back to codex.
+      //   - project 'claude' / 'codex' → require that exact CLI on PATH.
+      //   - project 'manual' → skip auto-heal entirely; the orchestrator's
+      //     signal polling handles the user's hand-driven fix instead.
+      //   - project 'external' → treated like manual at startup; the
+      //     external client typically registers explicitly via the body
+      //     override or `POST /heal-agent/claim` post-start.
       // If the chosen CLI isn't available, autoHeal stays undefined and the
       // run still works without the self-fixing cycle.
       const projectConfig = loadProjectConfig(opts.projectRoot)
+      const isExternalRequest = healAgentReq?.kind === 'external'
+      let externalHealSession: import('./lib/runtime/manifest').ExternalHealSession | undefined
+      if (isExternalRequest && healAgentReq) {
+        const nowIso = new Date().toISOString()
+        externalHealSession = {
+          sessionId: healAgentReq.sessionId,
+          clientKind: healAgentReq.clientKind,
+          ...(healAgentReq.clientVersion ? { clientVersion: healAgentReq.clientVersion } : {}),
+          ...(healAgentReq.conversationName ? { conversationName: healAgentReq.conversationName } : {}),
+          claimedAt: nowIso,
+          lastHeartbeatAt: nowIso,
+          status: 'connected',
+          cycleCount: 0,
+        }
+      }
       let autoHeal: {
         agent: HealAgent
         buildSpawnCommand: (args: {
@@ -276,13 +328,22 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
         }) => string
         buildCyclePrompt: BuildHealCyclePrompt
       } | undefined
-      const agentChoice = projectConfig.healAgent === 'manual'
-        ? null
-        : projectConfig.healAgent === 'auto'
-          ? pickAvailableHealAgent()
-          : pickAvailableHealAgent(projectConfig.healAgent)
-      if (projectConfig.healAgent === 'manual') {
+      const agentChoice =
+        isExternalRequest
+          || projectConfig.healAgent === 'manual'
+          || projectConfig.healAgent === 'external'
+          ? null
+          : projectConfig.healAgent === 'auto'
+            ? pickAvailableHealAgent()
+            : pickAvailableHealAgent(projectConfig.healAgent)
+      if (isExternalRequest) {
+        runnerLog.info(
+          `Auto-heal disabled: external client (${healAgentReq?.clientKind}, session ${healAgentReq?.sessionId.slice(0, 8)}) will drive the heal loop.`,
+        )
+      } else if (projectConfig.healAgent === 'manual') {
         runnerLog.info('Auto-heal disabled: project config is set to "manual" — the run will pause for hand-driven fixes.')
+      } else if (projectConfig.healAgent === 'external') {
+        runnerLog.info('Auto-heal disabled: project config is set to "external" — the run will wait for an external client to claim heal.')
       }
       if (agentChoice) {
         try {
@@ -319,7 +380,10 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
           ptyFactory: realPtyFactory(),
           runnerLog,
           autoHeal,
-          manualHeal: projectConfig.healAgent === 'manual',
+          manualHeal:
+            !isExternalRequest && projectConfig.healAgent === 'manual',
+          externalHeal: isExternalRequest || projectConfig.healAgent === 'external',
+          externalHealSession,
           repoBranchSnapshots,
           // Route every manifest/index write through RunStore so its event
           // emitter sees the mutation. Phase 2 attaches the WS endpoint to
@@ -329,6 +393,19 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
       } catch (err) {
         if (backups) restore(backups)
         throw err
+      }
+      // If the request supplied an explicit external claim, register it with
+      // the broker so heartbeats / signals from the matching session id are
+      // recognised. The session was already baked into the initial manifest
+      // by passing it to the orchestrator constructor; this call ensures the
+      // in-memory map agrees and the audit log records the claim.
+      if (isExternalRequest && healAgentReq) {
+        externalHealBroker.claim(runId, {
+          sessionId: healAgentReq.sessionId,
+          clientKind: healAgentReq.clientKind,
+          ...(healAgentReq.clientVersion ? { clientVersion: healAgentReq.clientVersion } : {}),
+          ...(healAgentReq.conversationName ? { conversationName: healAgentReq.conversationName } : {}),
+        })
       }
 
       attachRunStreams(orch, runnerLog, feature.name, backups)
@@ -465,6 +542,30 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
   await app.register(agentSessionStreamRoutes, {
     store: runStore,
     logsDir,
+  })
+
+  // MCP HTTP server — mounts at /mcp so Claude/Codex Desktop/CLI can connect
+  // over the streamable HTTP transport. Tools wrap the REST endpoints
+  // registered above; for `start_run` we reuse `app.inject()` rather than
+  // duplicating the 270-line orchestrator-construction code.
+  await app.register(registerMcpRoutes, {
+    store: runStore,
+    broker: externalHealBroker,
+    featuresDir,
+    projectRoot: opts.projectRoot,
+    startRun: async (feature, env, healAgent) => {
+      const resp = await app.inject({
+        method: 'POST',
+        url: '/api/runs',
+        payload: { feature, env, ...(healAgent ? { healAgent } : {}) },
+      })
+      if (resp.statusCode !== 201) {
+        const body = (() => { try { return JSON.parse(resp.payload) } catch { return resp.payload } })()
+        const message = typeof body === 'object' && body && 'error' in body ? String((body as { error: unknown }).error) : String(body)
+        throw new Error(`start_run failed (${resp.statusCode}): ${message}`)
+      }
+      return JSON.parse(resp.payload) as { runId: string }
+    },
   })
 
   // Serve the built React frontend if it exists. In development the dist dir
