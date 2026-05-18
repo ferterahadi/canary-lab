@@ -467,8 +467,19 @@ export interface RunStoreEvent {
    *  whether to refetch a single run or the whole list:
    *   - `bootstrap` / `changed` / `finalized` — single-run change
    *   - `removed` — single-run history removal
-   *   - `index-changed` — list-level (e.g. reaper) */
-  kind: 'bootstrap' | 'changed' | 'finalized' | 'removed' | 'index-changed'
+   *   - `index-changed` — list-level (e.g. reaper)
+   *   - `external-heal-task` — a run held by an external client just entered
+   *     `waiting-for-signal` and the client should fetch heal context.
+   *   - `external-claim-changed` — claim / release / heartbeat-stale
+   *     transitions for the external session that owns this run. */
+  kind:
+    | 'bootstrap'
+    | 'changed'
+    | 'finalized'
+    | 'removed'
+    | 'index-changed'
+    | 'external-heal-task'
+    | 'external-claim-changed'
   runId?: string
 }
 

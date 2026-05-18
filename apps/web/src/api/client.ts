@@ -331,7 +331,7 @@ export function putEnvsetSlot(
 
 // ─── project config ───────────────────────────────────────────────────────
 
-export type HealAgentChoice = 'auto' | 'claude' | 'codex' | 'manual'
+export type HealAgentChoice = 'auto' | 'claude' | 'codex' | 'manual' | 'external'
 export type EditorChoice = 'auto' | 'vscode' | 'cursor' | 'system'
 
 export interface ProjectConfig {

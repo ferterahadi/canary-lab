@@ -22,6 +22,7 @@ import {
   type RunPaths,
 } from './run-paths'
 import {
+  type ExternalHealSession,
   type RunLifecycleAbortReason,
   type RunLifecycleEvent,
   type RunLifecyclePhase,
@@ -115,6 +116,21 @@ export interface OrchestratorOptions {
   // file by hand (no agent process spawned). When false (default), failing
   // tests with no autoHeal short-circuit to 'failed' immediately.
   manualHeal?: boolean
+  // External heal mode: identical operational behavior to `manualHeal` (no
+  // agent CLI is spawned, the orchestrator parks at waiting-for-signal until
+  // a signal file appears in `<runDir>/signals/`). The only difference is
+  // that the manifest's `healMode` is written as `'external'` so the UI can
+  // render the dedicated `ExternalHealPanel` instead of the manual-heal
+  // banner, and so external clients (Claude/Codex via MCP) can recognise
+  // ownership. Mutually exclusive with `autoHeal`; takes precedence over
+  // `manualHeal` for the manifest tag when both are true.
+  externalHeal?: boolean
+  /** When `externalHeal` is true, the route layer auto-claims the broker for
+   *  the request's session. Passing the resulting `ExternalHealSession` here
+   *  lets the orchestrator include it in the initial manifest write so the UI
+   *  sees the "Healing via Claude Desktop" badge from the very first frame
+   *  instead of after a follow-up patch round-trip. */
+  externalHealSession?: ExternalHealSession
   // Polling interval for the heal-cycle signal-wait loop. Defaults to
   // healthPollIntervalMs.
   healSignalPollMs?: number
@@ -334,6 +350,8 @@ export class RunOrchestrator extends EventEmitter {
   private readonly playwrightSpawner: PlaywrightSpawner
   private readonly autoHeal?: AutoHealConfig
   private readonly manualHeal: boolean
+  private readonly externalHeal: boolean
+  private readonly externalHealSession: ExternalHealSession | undefined
   private readonly healSignalPollMs: number
   private readonly healAgentTimeoutMs: number
   private readonly healAgentIdleTimeoutMs: number
@@ -413,6 +431,8 @@ export class RunOrchestrator extends EventEmitter {
     this.playwrightSpawner = opts.playwrightSpawner ?? defaultPlaywrightSpawner
     this.autoHeal = opts.autoHeal
     this.manualHeal = opts.manualHeal ?? false
+    this.externalHeal = opts.externalHeal ?? false
+    this.externalHealSession = opts.externalHealSession
     this.healSignalPollMs = opts.healSignalPollMs ?? this.healthPollIntervalMs
     // Hard ceiling per cycle. Generous (2h) so a single heal cycle isn't cut
     // off mid-work for a hard, agent-blind reason — the idle timeout below
@@ -543,7 +563,14 @@ export class RunOrchestrator extends EventEmitter {
         rerun: this.paths.rerunSignal,
         restart: this.paths.restartSignal,
       },
-      healMode: this.autoHeal ? 'auto' : this.manualHeal ? 'manual' : undefined,
+      healMode: this.externalHeal
+        ? 'external'
+        : this.autoHeal
+          ? 'auto'
+          : this.manualHeal
+            ? 'manual'
+            : undefined,
+      ...(this.externalHealSession ? { externalHealSession: this.externalHealSession } : {}),
       lifecycle: {
         phase: 'starting-services',
         headline: 'Starting services',
@@ -1676,20 +1703,26 @@ export class RunOrchestrator extends EventEmitter {
 
     if (finalStatus === 'passed') return finalStatus
 
-    // Manual heal mode: no agent CLI configured but the user explicitly
-    // asked for manual mode. Transition to 'healing' and wait for the user
-    // to fix the code by hand and write the signal file. Loops until tests
-    // pass, the user cancels, or the signal-poll timeout (24h) is hit.
-    // Signal watcher (already running) feeds `signalGate` for
+    // Manual / external heal mode: no agent CLI configured but the user
+    // explicitly asked for hand- or external-driven mode. Transition to
+    // 'healing' and wait for either the user (manual) or the external client
+    // (external, via POST /api/runs/:runId/signal) to write the signal file.
+    // Loops until tests pass, the user cancels, or the signal-poll timeout
+    // (24h) is hit. Signal watcher (already running) feeds `signalGate` for
     // `waitForHealSignal` to consume.
-    if (!this.autoHeal && this.manualHeal) {
+    if (!this.autoHeal && (this.manualHeal || this.externalHeal)) {
       const MANUAL_TIMEOUT_MS = 24 * 60 * 60 * 1000
+      const modeLabel = this.externalHeal ? 'External' : 'Manual'
+      const modeCommand = this.externalHeal ? '<external>' : '<manual>'
+      const modeDetail = this.externalHeal
+        ? 'Waiting for an external AI client (Claude/Codex via MCP) to write a per-run signal file.'
+        : 'Waiting for a manual agent or user to write a per-run signal file.'
       while (true) {
         this.setStatus('healing')
         this.noteHealCycle()
-        this.emit('agent-started', { cycle: this.healCycles, command: '<manual>' })
-        this.recordLifecycle('agent-healing', `Manual heal cycle ${this.healCycles} started`, {
-          detail: 'Waiting for a manual agent or user to write a per-run signal file.',
+        this.emit('agent-started', { cycle: this.healCycles, command: modeCommand })
+        this.recordLifecycle('agent-healing', `${modeLabel} heal cycle ${this.healCycles} started`, {
+          detail: modeDetail,
           activeCycle: this.healCycles,
         })
         // Same snapshot/diff pattern as auto-heal: capture working-tree state

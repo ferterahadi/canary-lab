@@ -1,0 +1,322 @@
+import fs from 'fs'
+import path from 'path'
+import { z } from 'zod'
+import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
+import type { RunStore } from '../lib/run-store'
+import type { ExternalHealBroker } from '../lib/external-heal-broker'
+import { loadFeatures } from '../lib/feature-loader'
+import { runDirFor, buildRunPaths } from '../lib/runtime/run-paths'
+import {
+  isActiveRunStatus,
+  isTerminalRunStatus,
+  deriveRunActionAvailability,
+} from '../../../shared/run-state'
+
+// Every Canary Lab MCP tool is a thin wrapper around an existing internal
+// helper or REST handler. The translation pattern: validate input via zod,
+// call the helper, format the result as a CallToolResult.
+//
+// Confirmation gates: destructive tools (abort_run, delete_run, etc.) require
+// `confirm: true` literally in the input schema so a misbehaving model can't
+// invoke them by accident.
+
+export interface CanaryLabMcpDeps {
+  store: RunStore
+  broker: ExternalHealBroker
+  featuresDir: string
+  projectRoot: string
+  startRun: (
+    feature: string,
+    env?: string,
+    healAgent?: {
+      kind: 'external'
+      sessionId: string
+      clientKind: 'claude-cli' | 'claude-desktop' | 'codex-cli' | 'codex-desktop' | 'other'
+      clientVersion?: string
+      conversationName?: string
+    },
+  ) => Promise<{ runId: string }>
+}
+
+const CLIENT_KIND = z.enum(['claude-cli', 'claude-desktop', 'codex-cli', 'codex-desktop', 'other'])
+const SIGNAL_KIND = z.enum(['rerun', 'restart', 'heal'])
+const HEAL_STATUS = z.enum(['connected', 'waiting', 'healing', 'running-tests', 'paused', 'disconnected'])
+
+export function registerCanaryLabTools(server: McpServer, deps: CanaryLabMcpDeps): void {
+  // ─── reads ────────────────────────────────────────────────────────────
+
+  server.registerTool('list_features', {
+    description: 'List every Canary Lab feature in the workspace, with envs, repos, and a short summary.',
+    inputSchema: {},
+  }, async () => {
+    const features = loadFeatures(deps.featuresDir).map((f) => ({
+      name: f.name,
+      description: f.description ?? '',
+      envs: f.envs ?? [],
+      repos: (f.repos ?? []).map((r) => ({ name: r.name, localPath: r.localPath, branch: r.branch ?? null })),
+    }))
+    return asJsonResult(features)
+  })
+
+  server.registerTool('list_runs', {
+    description: 'List Canary Lab runs, newest first. Optionally filter by feature.',
+    inputSchema: {
+      feature: z.string().optional().describe('Feature name. Omit to list across all features.'),
+    },
+  }, async ({ feature }) => {
+    return asJsonResult(deps.store.list(feature ? { feature } : {}))
+  })
+
+  server.registerTool('get_run', {
+    description: 'Fetch the full detail for one run: manifest, summary, lifecycle events, playwright artifacts.',
+    inputSchema: { runId: z.string() },
+  }, async ({ runId }) => {
+    const detail = deps.store.get(runId)
+    if (!detail) return errorResult(`run not found: ${runId}`)
+    return asJsonResult(detail)
+  })
+
+  server.registerTool('get_run_actions', {
+    description: 'Which actions are valid right now for a run (pauseHeal, stop, cancelHeal, delete, restartHeal, signal kinds, evaluation export).',
+    inputSchema: { runId: z.string() },
+  }, async ({ runId }) => {
+    const detail = deps.store.get(runId)
+    if (!detail) return errorResult(`run not found: ${runId}`)
+    const status = detail.manifest.status
+    return asJsonResult({
+      status,
+      availability: deriveRunActionAvailability(status, null),
+      signal: { rerun: isActiveRunStatus(status), restart: isActiveRunStatus(status), heal: isActiveRunStatus(status) },
+      evaluationExport: { available: isTerminalRunStatus(status) },
+      externalClaim: deps.broker.getSession(runId),
+    })
+  })
+
+  server.registerTool('get_heal_context', {
+    description: 'Bundle of failure context an external heal agent needs: failed tests with artifact URLs, heal-index markdown, journal, repo branches, lifecycle.',
+    inputSchema: { runId: z.string() },
+  }, async ({ runId }) => {
+    const detail = deps.store.get(runId)
+    if (!detail) return errorResult(`run not found: ${runId}`)
+    const runDir = runDirFor(deps.store.logsDir, runId)
+    const paths = buildRunPaths(runDir)
+    const summary = detail.summary
+    const failedTests = (summary?.failed ?? []).map((entry) => ({
+      name: entry.name,
+      ...(entry.error ? { error: entry.error } : {}),
+      ...(entry.location ? { location: entry.location } : {}),
+      ...(typeof entry.retry === 'number' ? { retry: entry.retry } : {}),
+      artifacts:
+        detail.playwrightArtifacts
+          ?.find((g) => g.testName === entry.name)
+          ?.artifacts.map((a) => ({ name: a.name, kind: a.kind, url: a.url })) ?? [],
+    }))
+    return asJsonResult({
+      runId,
+      feature: detail.manifest.feature,
+      env: detail.manifest.env ?? null,
+      status: detail.manifest.status,
+      healCycles: detail.manifest.healCycles,
+      repoBranches: detail.manifest.repoBranches ?? [],
+      lifecycle: detail.manifest.lifecycle ?? null,
+      externalHealSession: detail.manifest.externalHealSession ?? null,
+      summary: summary ?? null,
+      failedTests,
+      healIndexMarkdown: safeRead(paths.healIndexPath),
+      journalMarkdown: safeRead(paths.diagnosisJournalPath),
+      artifactsBase: `/api/runs/${encodeURIComponent(runId)}/artifacts/`,
+    })
+  })
+
+  // ─── run lifecycle ────────────────────────────────────────────────────
+
+  server.registerTool('start_run', {
+    description:
+      'Start a new Canary Lab run. Set `claim_heal: true` to register this MCP session as the external heal agent for the run (recommended for agentic workflows).',
+    inputSchema: {
+      feature: z.string().describe('Feature name (from list_features).'),
+      env: z.string().optional().describe('Envset name. Defaults to the feature\'s first declared env.'),
+      claim_heal: z.boolean().default(true).describe('Whether to claim this run\'s heal duty for the current MCP session.'),
+      session_id: z.string().describe('Stable id identifying this MCP/agent session. Reuse the same id across calls within one conversation to enable reconnects.'),
+      client_kind: CLIENT_KIND.default('other').describe('Which kind of client is starting the run.'),
+      conversation_name: z.string().optional().describe('Human label shown in the Canary Lab UI (e.g. "fix checkout").'),
+    },
+  }, async ({ feature, env, claim_heal, session_id, client_kind, conversation_name }) => {
+    try {
+      const result = await deps.startRun(
+        feature,
+        env,
+        claim_heal
+          ? {
+              kind: 'external',
+              sessionId: session_id,
+              clientKind: client_kind,
+              ...(conversation_name ? { conversationName: conversation_name } : {}),
+            }
+          : undefined,
+      )
+      return asJsonResult({ runId: result.runId, claimed: claim_heal })
+    } catch (err) {
+      return errorResult(err instanceof Error ? err.message : String(err))
+    }
+  })
+
+  server.registerTool('pause_run', {
+    description: 'Pause an active run and jump into heal mode immediately.',
+    inputSchema: { runId: z.string() },
+  }, async ({ runId }) => {
+    const orch = deps.store.registry.get(runId)
+    if (!orch) return errorResult(`run not active: ${runId}`)
+    const result = await orch.pauseAndHeal()
+    if (!result.ok) return errorResult(`could not pause: ${result.reason}`)
+    return asJsonResult({ status: 'healing', failureCount: result.failureCount })
+  })
+
+  server.registerTool('cancel_heal', {
+    description: 'Cancel an in-flight heal cycle. Run transitions to failed.',
+    inputSchema: { runId: z.string() },
+  }, async ({ runId }) => {
+    const orch = deps.store.registry.get(runId)
+    if (!orch) return errorResult(`run not active: ${runId}`)
+    const result = await orch.cancelHeal()
+    if (!result.ok) return errorResult(`could not cancel: ${result.reason}`)
+    return asJsonResult({ status: 'cancelled' })
+  })
+
+  server.registerTool('abort_run', {
+    description:
+      'Hard-abort an active run. Requires `confirm: true` because this kills Playwright + services and cannot be undone.',
+    inputSchema: {
+      runId: z.string(),
+      confirm: z.literal(true).describe('Must be true. Guard against accidental aborts.'),
+    },
+    annotations: { destructiveHint: true, idempotentHint: false },
+  }, async ({ runId }) => {
+    const result = await deps.store.abort(runId)
+    if (!result.ok) return errorResult(`could not abort: ${result.reason}`)
+    return asJsonResult({ aborted: true, runId })
+  })
+
+  // ─── external heal flow ───────────────────────────────────────────────
+
+  server.registerTool('claim_heal', {
+    description:
+      'Claim heal duty for a run as this external session. Idempotent if the same session_id is already the holder; rejected with already-claimed if a different session holds it.',
+    inputSchema: {
+      runId: z.string(),
+      session_id: z.string(),
+      client_kind: CLIENT_KIND.default('other'),
+      client_version: z.string().optional(),
+      conversation_name: z.string().optional(),
+    },
+  }, async ({ runId, session_id, client_kind, client_version, conversation_name }) => {
+    if (!deps.store.get(runId)) return errorResult(`run not found: ${runId}`)
+    const result = deps.broker.claim(runId, {
+      sessionId: session_id,
+      clientKind: client_kind,
+      ...(client_version ? { clientVersion: client_version } : {}),
+      ...(conversation_name ? { conversationName: conversation_name } : {}),
+    })
+    if (!result.accepted) {
+      return errorResult(`already-claimed by session ${result.currentSession.sessionId} (${result.currentSession.clientKind})`)
+    }
+    return asJsonResult({ accepted: true, session: result.session })
+  })
+
+  server.registerTool('release_heal', {
+    description: 'Release a heal claim. No-op if the session_id does not match the current holder.',
+    inputSchema: { runId: z.string(), session_id: z.string() },
+  }, async ({ runId, session_id }) => {
+    const result = deps.broker.release(runId, session_id)
+    return asJsonResult({ released: result.released })
+  })
+
+  server.registerTool('heartbeat', {
+    description: 'Refresh the external heal session liveness. Call every 5–10s while you hold a claim to avoid auto-disconnect at 15s.',
+    inputSchema: {
+      runId: z.string(),
+      session_id: z.string(),
+      status: HEAL_STATUS.default('connected'),
+    },
+  }, async ({ runId, session_id, status }) => {
+    const result = deps.broker.heartbeat(runId, session_id, status)
+    if (!result.ok) return errorResult(`heartbeat rejected: ${result.reason}`)
+    return asJsonResult({ ok: true, session: result.session })
+  })
+
+  server.registerTool('signal_run', {
+    description:
+      'Write a heal-cycle signal. The orchestrator picks it up via its existing poll loop. Use `rerun` for test-only fixes (no service restart) and `restart` when services need to be restarted.',
+    inputSchema: {
+      runId: z.string(),
+      kind: SIGNAL_KIND,
+      session_id: z.string().optional().describe('Required when the run holds an external claim; must match the claim holder.'),
+      reason: z.string().optional().describe('Short note for the journal.'),
+      files_changed: z.array(z.string()).optional().describe('Paths of files modified during this heal cycle, relative to repo roots.'),
+    },
+  }, async ({ runId, kind, session_id, reason, files_changed }) => {
+    const detail = deps.store.get(runId)
+    if (!detail) return errorResult(`run not found: ${runId}`)
+    if (!isActiveRunStatus(detail.manifest.status)) {
+      return errorResult(`run not active (status=${detail.manifest.status})`)
+    }
+    const ownership = deps.broker.assertOwnership(runId, session_id)
+    if (!ownership.ok && ownership.reason === 'session-mismatch') {
+      return errorResult(`session-mismatch: run is held by ${ownership.currentSession?.sessionId}`)
+    }
+    const paths = buildRunPaths(runDirFor(deps.store.logsDir, runId))
+    const target = kind === 'restart' ? paths.restartSignal
+      : kind === 'rerun' ? paths.rerunSignal
+      : paths.healSignal
+    const body = {
+      ...(reason ? { reason } : {}),
+      ...(files_changed && files_changed.length > 0 ? { filesChanged: files_changed } : {}),
+    }
+    try {
+      fs.mkdirSync(path.dirname(target), { recursive: true })
+      fs.writeFileSync(target, JSON.stringify(body))
+    } catch (err) {
+      return errorResult(`could not write signal: ${(err as Error).message}`)
+    }
+    deps.broker.bumpCycle(runId)
+    return asJsonResult({ accepted: true, kind, path: target })
+  })
+
+  server.registerTool('write_journal', {
+    description: 'Append a diagnosis note to the run\'s journal. Useful for recording what an external heal cycle attempted.',
+    inputSchema: {
+      runId: z.string(),
+      iteration: z.number().int().min(1).describe('Heal cycle number this note belongs to.'),
+      body: z.string().describe('Markdown note body. The journal is human-readable.'),
+    },
+  }, async ({ runId, iteration, body }) => {
+    const detail = deps.store.get(runId)
+    if (!detail) return errorResult(`run not found: ${runId}`)
+    const runDir = runDirFor(deps.store.logsDir, runId)
+    const journalPath = buildRunPaths(runDir).diagnosisJournalPath
+    // Match the existing journal format: `## Iteration N` heading + body.
+    const section = `\n## Iteration ${iteration}\n\n${body.trimEnd()}\n`
+    try {
+      fs.mkdirSync(path.dirname(journalPath), { recursive: true })
+      fs.appendFileSync(journalPath, section)
+    } catch (err) {
+      return errorResult(`could not append journal: ${(err as Error).message}`)
+    }
+    return asJsonResult({ appended: true, path: journalPath })
+  })
+}
+
+// ─── result helpers ─────────────────────────────────────────────────────
+
+function asJsonResult(value: unknown): CallToolResult {
+  return { content: [{ type: 'text', text: JSON.stringify(value, null, 2) }] }
+}
+
+function errorResult(message: string): CallToolResult {
+  return { content: [{ type: 'text', text: message }], isError: true }
+}
+
+function safeRead(file: string): string | null {
+  try { return fs.readFileSync(file, 'utf-8') } catch { return null }
+}

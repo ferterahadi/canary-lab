@@ -37,16 +37,31 @@ interface ActiveEvaluationExportTask {
   abortController: AbortController
 }
 
+export interface ExternalHealAgentRequest {
+  kind: 'external'
+  sessionId: string
+  clientKind: 'claude-cli' | 'claude-desktop' | 'codex-cli' | 'codex-desktop' | 'other'
+  clientVersion?: string
+  conversationName?: string
+}
+
 export interface RunsRouteDeps {
   featuresDir: string
   projectRoot?: string
   /** Single source of truth for run state. Routes read + mutate exclusively
    *  through this — no direct manifest/index file access. */
   store: RunStore
-  // Factory: given a feature name, build + start an orchestrator. Returns the
-  // runId synchronously after `start()` is in flight (the factory awaits the
-  // initial spawn but not test completion). Injected so tests can stub it.
-  startRun(feature: string, env?: string): Promise<OrchestratorLike>
+  // Factory: given a feature name + optional healAgent override, build + start
+  // an orchestrator. Returns the orchestrator synchronously after `start()` is
+  // in flight (the factory awaits the initial spawn but not test completion).
+  // When `healAgent.kind === 'external'`, the orchestrator must be configured
+  // with externalHeal=true and the external-heal broker claim should be
+  // bootstrapped before the orchestrator's heal-loop entry condition triggers.
+  startRun(
+    feature: string,
+    env?: string,
+    healAgent?: ExternalHealAgentRequest,
+  ): Promise<OrchestratorLike>
   restartHeal?(runId: string, text: string): Promise<RestartHealResult>
   generateEvaluationRewrite?(
     detail: Parameters<typeof generateEvaluationRewriteWithAgent>[0],
@@ -124,7 +139,14 @@ export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Pro
       detail.runId,
     )
     const archiveBase = `canary-lab-evaluation-${safeFilename(detail.manifest.feature)}-${safeFilename(detail.runId)}`
-    const audienceAdapter = mode === 'localized' && deps.projectRoot ? loadProjectConfig(deps.projectRoot).healAgent : 'deterministic'
+    // When the project default is the new `external` heal-agent, there is no
+    // local LLM voice for evaluation rewriting — fall back to the deterministic
+    // adapter so exports stay reproducible.
+    const projectHealAgent = mode === 'localized' && deps.projectRoot
+      ? loadProjectConfig(deps.projectRoot).healAgent
+      : 'deterministic'
+    const audienceAdapter: 'auto' | 'claude' | 'codex' | 'manual' | 'deterministic' =
+      projectHealAgent === 'external' ? 'deterministic' : projectHealAgent
     const runDir = runDirFor(deps.store.logsDir, detail.runId)
     const rewrite = mode === 'localized'
       ? await loadEvaluationRewrite(detail, runDir, audienceAdapter, deps.projectRoot, deps.generateEvaluationRewrite, app.log, log, signal)
@@ -369,7 +391,13 @@ export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Pro
     return { error: 'artifact not found' }
   })
 
-  app.post<{ Body: { feature?: string; env?: string } }>('/api/runs', async (req, reply) => {
+  app.post<{
+    Body: {
+      feature?: string
+      env?: string
+      healAgent?: ExternalHealAgentRequest | { kind?: string }
+    }
+  }>('/api/runs', async (req, reply) => {
     const feature = req.body?.feature
     if (typeof feature !== 'string' || feature.length === 0) {
       reply.code(400)
@@ -389,8 +417,13 @@ export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Pro
       reply.code(400)
       return { error: `env must be one of: ${declared.join(', ')}` }
     }
+    const healAgent = parseExternalHealAgent(req.body?.healAgent)
+    if (healAgent && 'error' in healAgent) {
+      reply.code(400)
+      return { error: healAgent.error }
+    }
     try {
-      const orch = await deps.startRun(feature, env)
+      const orch = await deps.startRun(feature, env, healAgent ?? undefined)
       deps.store.registry.set(orch.runId, orch)
       reply.code(201)
       return { runId: orch.runId }
@@ -662,6 +695,43 @@ function clearEvaluationRewriteError(runDir: string): void {
 
 function parseEvaluationExportMode(value: string | undefined): EvaluationExportMode | null {
   return value === 'raw' || value === 'localized' ? value : null
+}
+
+const EXTERNAL_CLIENT_KINDS: ExternalHealAgentRequest['clientKind'][] = [
+  'claude-cli',
+  'claude-desktop',
+  'codex-cli',
+  'codex-desktop',
+  'other',
+]
+
+function parseExternalHealAgent(
+  value: unknown,
+): ExternalHealAgentRequest | { error: string } | null {
+  if (value === undefined || value === null) return null
+  if (typeof value !== 'object') return { error: 'healAgent must be an object' }
+  const v = value as Record<string, unknown>
+  if (v.kind === undefined) return null
+  // v1 only wires up the external kind via this body field; the existing
+  // project-config healAgent setting remains the source of truth for
+  // 'auto' / 'claude' / 'codex' / 'manual'. The body override is *only* the
+  // hook for external MCP clients to register themselves at run start.
+  if (v.kind !== 'external') {
+    return { error: 'healAgent.kind must be "external" when overriding from the request body' }
+  }
+  if (typeof v.sessionId !== 'string' || !v.sessionId) {
+    return { error: 'healAgent.sessionId is required when kind="external"' }
+  }
+  if (typeof v.clientKind !== 'string' || !(EXTERNAL_CLIENT_KINDS as string[]).includes(v.clientKind)) {
+    return { error: `healAgent.clientKind must be one of: ${EXTERNAL_CLIENT_KINDS.join(', ')}` }
+  }
+  return {
+    kind: 'external',
+    sessionId: v.sessionId,
+    clientKind: v.clientKind as ExternalHealAgentRequest['clientKind'],
+    ...(typeof v.clientVersion === 'string' ? { clientVersion: v.clientVersion } : {}),
+    ...(typeof v.conversationName === 'string' ? { conversationName: v.conversationName } : {}),
+  }
 }
 
 interface ZipEntry {
