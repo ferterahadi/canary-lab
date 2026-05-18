@@ -748,6 +748,7 @@ describe('RunStore', () => {
     status: 'running' | 'passed' | 'failed' | 'aborted' | 'healing'
     feature: string
     healCycles: number
+    healMode: 'auto' | 'manual' | 'external'
     services: NonNullable<ReturnType<typeof readManifest>>['services']
   }> = {}): string {
     const dir = runDirFor(tmpDir, runId)
@@ -761,6 +762,7 @@ describe('RunStore', () => {
       status,
       healCycles: overrides.healCycles ?? 0,
       services: overrides.services ?? [],
+      ...(overrides.healMode ? { healMode: overrides.healMode } : {}),
     })
     writeRunsIndex(tmpDir, [
       ...readRunsIndex(tmpDir).filter((e) => e.runId !== runId),
@@ -850,6 +852,39 @@ describe('RunStore', () => {
     expect(getRunDetail(tmpDir, 'r-life-1')?.lifecycleEvents).toHaveLength(1)
     expect(fs.readFileSync(path.join(dir, 'lifecycle-events.jsonl'), 'utf-8')).toContain('Restart plan ready')
     expect(events).toEqual([{ kind: 'changed', runId: 'r-life-1' }])
+  })
+
+  it('emits an external-heal-task event when an external run waits for a signal', () => {
+    seedRun('r-life-external', { status: 'healing', healMode: 'external' })
+    const store = new RunStore(tmpDir, createRegistry())
+    const events: RunStoreEvent[] = []
+    store.onEvent((event) => events.push(event))
+
+    store.recordLifecycleEvent('r-life-external', {
+      phase: 'waiting-for-signal',
+      headline: 'Waiting for heal signal',
+      updatedAt: '2026-05-08T00:00:05.000Z',
+    })
+
+    expect(events).toEqual([
+      { kind: 'changed', runId: 'r-life-external' },
+      { kind: 'external-heal-task', runId: 'r-life-external' },
+    ])
+  })
+
+  it('does not emit an external-heal-task event when a non-external run waits for a signal', () => {
+    seedRun('r-life-manual', { status: 'healing', healMode: 'manual' })
+    const store = new RunStore(tmpDir, createRegistry())
+    const events: RunStoreEvent[] = []
+    store.onEvent((event) => events.push(event))
+
+    store.recordLifecycleEvent('r-life-manual', {
+      phase: 'waiting-for-signal',
+      headline: 'Waiting for heal signal',
+      updatedAt: '2026-05-08T00:00:05.000Z',
+    })
+
+    expect(events).toEqual([{ kind: 'changed', runId: 'r-life-manual' }])
   })
 
   it('ignores corrupt lifecycle JSONL lines and entries that lack a phase string', () => {

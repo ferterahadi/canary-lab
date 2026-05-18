@@ -4,6 +4,7 @@ import { z } from 'zod'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import type { RunStore } from '../lib/run-store'
+import type { RunDetail, RunStoreEvent } from '../lib/run-store'
 import type { ExternalHealBroker } from '../lib/external-heal-broker'
 import { loadFeatures } from '../lib/feature-loader'
 import { runDirFor, buildRunPaths } from '../lib/runtime/run-paths'
@@ -42,6 +43,8 @@ export interface CanaryLabMcpDeps {
 const CLIENT_KIND = z.enum(['claude-cli', 'claude-desktop', 'codex-cli', 'codex-desktop', 'other'])
 const SIGNAL_KIND = z.enum(['rerun', 'restart', 'heal'])
 const HEAL_STATUS = z.enum(['connected', 'waiting', 'healing', 'running-tests', 'paused', 'disconnected'])
+const WAIT_FOR_HEAL_TASK_DEFAULT_TIMEOUT_MS = 15 * 60 * 1000
+const WAIT_FOR_HEAL_TASK_MAX_TIMEOUT_MS = 60 * 60 * 1000
 
 export function registerCanaryLabTools(server: McpServer, deps: CanaryLabMcpDeps): void {
   // ─── reads ────────────────────────────────────────────────────────────
@@ -97,36 +100,9 @@ export function registerCanaryLabTools(server: McpServer, deps: CanaryLabMcpDeps
     description: 'Bundle of failure context an external heal agent needs: failed tests with artifact URLs, heal-index markdown, journal, repo branches, lifecycle.',
     inputSchema: { runId: z.string() },
   }, async ({ runId }) => {
-    const detail = deps.store.get(runId)
-    if (!detail) return errorResult(`run not found: ${runId}`)
-    const runDir = runDirFor(deps.store.logsDir, runId)
-    const paths = buildRunPaths(runDir)
-    const summary = detail.summary
-    const failedTests = (summary?.failed ?? []).map((entry) => ({
-      name: entry.name,
-      ...(entry.error ? { error: entry.error } : {}),
-      ...(entry.location ? { location: entry.location } : {}),
-      ...(typeof entry.retry === 'number' ? { retry: entry.retry } : {}),
-      artifacts:
-        detail.playwrightArtifacts
-          ?.find((g) => g.testName === entry.name)
-          ?.artifacts.map((a) => ({ name: a.name, kind: a.kind, url: a.url })) ?? [],
-    }))
-    return asJsonResult({
-      runId,
-      feature: detail.manifest.feature,
-      env: detail.manifest.env ?? null,
-      status: detail.manifest.status,
-      healCycles: detail.manifest.healCycles,
-      repoBranches: detail.manifest.repoBranches ?? [],
-      lifecycle: detail.manifest.lifecycle ?? null,
-      externalHealSession: detail.manifest.externalHealSession ?? null,
-      summary: summary ?? null,
-      failedTests,
-      healIndexMarkdown: safeRead(paths.healIndexPath),
-      journalMarkdown: safeRead(paths.diagnosisJournalPath),
-      artifactsBase: `/api/runs/${encodeURIComponent(runId)}/artifacts/`,
-    })
+    const context = buildHealContext(deps, runId)
+    if (!context) return errorResult(`run not found: ${runId}`)
+    return asJsonResult(context)
   })
 
   // ─── run lifecycle ────────────────────────────────────────────────────
@@ -245,6 +221,21 @@ export function registerCanaryLabTools(server: McpServer, deps: CanaryLabMcpDeps
     return asJsonResult({ ok: true, session: result.session })
   })
 
+  server.registerTool('wait_for_heal_task', {
+    description:
+      'Wait until a claimed external run needs code fixes, reaches a terminal result, or times out. Use this after start_run/claim_heal and again after signal_run.',
+    inputSchema: {
+      runId: z.string(),
+      session_id: z.string().describe('External heal session id that owns this run.'),
+      timeout_ms: z.number().int().positive().max(WAIT_FOR_HEAL_TASK_MAX_TIMEOUT_MS)
+        .default(WAIT_FOR_HEAL_TASK_DEFAULT_TIMEOUT_MS)
+        .describe('How long to wait. Defaults to 15 minutes and is capped at 60 minutes.'),
+    },
+  }, async ({ runId, session_id, timeout_ms }) => {
+    const result = await waitForHealTask(deps, runId, session_id, timeout_ms)
+    return result.ok ? asJsonResult(result.value) : errorResult(result.error)
+  })
+
   server.registerTool('signal_run', {
     description:
       'Write a heal-cycle signal. The orchestrator picks it up via its existing poll loop. Use `rerun` for test-only fixes (no service restart) and `restart` when services need to be restarted.',
@@ -308,6 +299,149 @@ export function registerCanaryLabTools(server: McpServer, deps: CanaryLabMcpDeps
 }
 
 // ─── result helpers ─────────────────────────────────────────────────────
+
+function buildHealContext(deps: CanaryLabMcpDeps, runId: string): Record<string, unknown> | null {
+  const detail = deps.store.get(runId)
+  if (!detail) return null
+  const runDir = runDirFor(deps.store.logsDir, runId)
+  const paths = buildRunPaths(runDir)
+  const summary = detail.summary
+  const failedTests = (summary?.failed ?? []).map((entry) => ({
+    name: entry.name,
+    ...(entry.error ? { error: entry.error } : {}),
+    ...(entry.location ? { location: entry.location } : {}),
+    ...(typeof entry.retry === 'number' ? { retry: entry.retry } : {}),
+    artifacts:
+      detail.playwrightArtifacts
+        ?.find((g) => g.testName === entry.name)
+        ?.artifacts.map((a) => ({ name: a.name, kind: a.kind, url: a.url })) ?? [],
+  }))
+  return {
+    runId,
+    feature: detail.manifest.feature,
+    env: detail.manifest.env ?? null,
+    status: detail.manifest.status,
+    healCycles: detail.manifest.healCycles,
+    repoBranches: detail.manifest.repoBranches ?? [],
+    lifecycle: detail.manifest.lifecycle ?? null,
+    externalHealSession: detail.manifest.externalHealSession ?? null,
+    summary: summary ?? null,
+    failedTests,
+    healIndexMarkdown: safeRead(paths.healIndexPath),
+    journalMarkdown: safeRead(paths.diagnosisJournalPath),
+    artifactsBase: `/api/runs/${encodeURIComponent(runId)}/artifacts/`,
+  }
+}
+
+type WaitForHealTaskValue =
+  | { type: 'needs_heal'; runId: string; cycle: number; context: Record<string, unknown> }
+  | { type: 'passed'; runId: string; summary: RunDetail['summary'] | null }
+  | { type: 'failed'; runId: string; status: string; summary: RunDetail['summary'] | null }
+  | { type: 'timeout'; runId: string; status: string | null; lifecycle: RunDetail['manifest']['lifecycle'] | null }
+
+type WaitForHealTaskResult =
+  | { ok: true; value: WaitForHealTaskValue }
+  | { ok: false; error: string }
+
+function classifyWaitForHealTask(
+  deps: CanaryLabMcpDeps,
+  runId: string,
+  sessionId: string,
+): WaitForHealTaskResult | null {
+  const detail = deps.store.get(runId)
+  if (!detail) return { ok: false, error: `run not found: ${runId}` }
+
+  const status = detail.manifest.status
+  if (status === 'passed') {
+    return { ok: true, value: { type: 'passed', runId, summary: detail.summary ?? null } }
+  }
+  if (isTerminalRunStatus(status)) {
+    return { ok: true, value: { type: 'failed', runId, status, summary: detail.summary ?? null } }
+  }
+
+  const ownership = deps.broker.assertOwnership(runId, sessionId)
+  if (!ownership.ok) {
+    return {
+      ok: false,
+      error: ownership.reason === 'session-mismatch'
+        ? `session-mismatch: run is held by ${ownership.currentSession?.sessionId}`
+        : `no external heal claim for run: ${runId}`,
+    }
+  }
+
+  if (
+    isActiveRunStatus(status) &&
+    detail.manifest.healMode === 'external' &&
+    detail.manifest.lifecycle?.phase === 'waiting-for-signal'
+  ) {
+    const context = buildHealContext(deps, runId)
+    if (!context) return { ok: false, error: `run not found: ${runId}` }
+    return {
+      ok: true,
+      value: {
+        type: 'needs_heal',
+        runId,
+        cycle: detail.manifest.lifecycle.activeCycle ?? detail.manifest.healCycles,
+        context,
+      },
+    }
+  }
+
+  return null
+}
+
+async function waitForHealTask(
+  deps: CanaryLabMcpDeps,
+  runId: string,
+  sessionId: string,
+  timeoutMs: number,
+): Promise<WaitForHealTaskResult> {
+  const immediate = classifyWaitForHealTask(deps, runId, sessionId)
+  if (immediate) return immediate
+
+  return await new Promise<WaitForHealTaskResult>((resolve) => {
+    let settled = false
+    const finish = (result: WaitForHealTaskResult): void => {
+      if (settled) return
+      settled = true
+      deps.store.offEvent(onEvent)
+      clearTimeout(timeout)
+      clearInterval(heartbeat)
+      resolve(result)
+    }
+    const check = (): void => {
+      const result = classifyWaitForHealTask(deps, runId, sessionId)
+      if (result) finish(result)
+    }
+    const onEvent = (event: RunStoreEvent): void => {
+      if (event.runId && event.runId !== runId) return
+      check()
+    }
+    const beat = (): void => {
+      const detail = deps.store.get(runId)
+      if (!detail || isTerminalRunStatus(detail.manifest.status)) return
+      deps.broker.heartbeat(runId, sessionId, 'waiting')
+    }
+    deps.store.onEvent(onEvent)
+    const timeout = setTimeout(() => {
+      const detail = deps.store.get(runId)
+      finish({
+        ok: true,
+        value: {
+          type: 'timeout',
+          runId,
+          status: detail?.manifest.status ?? null,
+          lifecycle: detail?.manifest.lifecycle ?? null,
+        },
+      })
+    }, timeoutMs)
+    const heartbeat = setInterval(beat, 5_000)
+    if (typeof timeout.unref === 'function') timeout.unref()
+    if (typeof heartbeat.unref === 'function') heartbeat.unref()
+    beat()
+    check()
+  })
+}
 
 function asJsonResult(value: unknown): CallToolResult {
   return { content: [{ type: 'text', text: JSON.stringify(value, null, 2) }] }

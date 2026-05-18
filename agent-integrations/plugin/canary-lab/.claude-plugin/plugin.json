@@ -1,0 +1,8 @@
+{
+  "name": "canary-lab",
+  "version": "1.0.0",
+  "description": "Run and heal Canary Lab features through MCP.",
+  "author": {
+    "name": "Canary Lab"
+  }
+}

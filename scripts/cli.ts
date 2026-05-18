@@ -3,6 +3,8 @@
 import { main as initProject } from './init-project'
 import { main as upgradeProject } from './upgrade'
 import { runUi } from './ui-command'
+import { main as runMcp } from './mcp'
+import { main as runAgent } from './agent'
 import { main as createFeature } from './new-feature'
 import { main as runEnv } from './env'
 import { banner, section, dim, fail, line } from '../shared/cli-ui/ui'
@@ -27,6 +29,8 @@ export function printUsage(): void {
   section('Usage')
   console.log(`  canary-lab init <folder> ${dim('[--package-spec <spec>]')}`)
   console.log(`  canary-lab ui ${dim('[--port <n>]')}`)
+  console.log(`  canary-lab mcp ${dim('[doctor] [--url <url>]')}`)
+  console.log(`  canary-lab agent install <codex|claude|all> ${dim('[--dry-run] [--force]')}`)
   console.log(`  canary-lab new feature <name> ${dim('[--description "..."]')}`)
   console.log(`  canary-lab new-feature <name> ${dim('[--description "..."]')}`)
   console.log(`  canary-lab env apply <feature> <set>`)
@@ -44,6 +48,12 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
       return
     case 'ui':
       await runUi(args)
+      return
+    case 'mcp':
+      await runMcp(args)
+      return
+    case 'agent':
+      await runAgent(args)
       return
     case 'new':
       if (args[0] !== 'feature') {

@@ -569,6 +569,12 @@ export class RunStore extends EventEmitter implements RunStateSink {
   recordLifecycleEvent(runId: string, event: RunLifecycleEvent): void {
     this.sink.recordLifecycleEvent(runId, event)
     this.emitEvent({ kind: 'changed', runId })
+    if (event.phase === 'waiting-for-signal') {
+      const detail = this.get(runId)
+      if (detail?.manifest.healMode === 'external') {
+        this.emitEvent({ kind: 'external-heal-task', runId })
+      }
+    }
   }
 
   setStatus(runId: string, status: RunManifest['status'], healCycles?: number): void {

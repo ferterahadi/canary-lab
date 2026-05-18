@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, afterEach } from 'vitest'
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -17,6 +17,12 @@ afterEach(() => {
   while (tmpDirs.length) fs.rmSync(tmpDirs.pop()!, { recursive: true, force: true })
   vi.unstubAllEnvs()
   vi.restoreAllMocks()
+})
+
+beforeEach(() => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-agent-home-'))
+  tmpDirs.push(home)
+  vi.stubEnv('CANARY_LAB_AGENT_HOME', home)
 })
 
 const START = '<!-- managed:canary-lab:start -->'
@@ -163,6 +169,25 @@ describe("main (upgrade orchestration)", () => {
 
     const pkg = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf-8"))
     expect(pkg.scripts.postinstall).toBe("canary-lab upgrade --silent")
+  })
+
+  it("refreshes only existing user-level agent integrations on upgrade", async () => {
+    const root = mkProjectRoot()
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-agent-upgrade-'))
+    tmpDirs.push(home)
+    vi.stubEnv("CANARY_LAB_PROJECT_ROOT", root)
+    vi.stubEnv("CANARY_LAB_AGENT_HOME", home)
+    vi.spyOn(console, "log").mockImplementation(() => {})
+
+    const staleSkill = path.join(home, '.codex', 'skills', 'canary-lab', 'SKILL.md')
+    fs.mkdirSync(path.dirname(staleSkill), { recursive: true })
+    fs.writeFileSync(staleSkill, 'stale prompt')
+
+    await main([])
+
+    expect(fs.readFileSync(staleSkill, 'utf-8')).toContain('wait_for_heal_task')
+    expect(fs.existsSync(path.join(home, '.claude', 'skills', 'canary-lab', 'SKILL.md'))).toBe(false)
+    expect(fs.existsSync(path.join(home, '.canary-lab', 'agent-integrations', 'canary-lab-plugin', '.mcp.json'))).toBe(false)
   })
 
   it("adds envset value rules to an existing project .gitignore", async () => {
