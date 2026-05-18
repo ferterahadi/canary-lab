@@ -1,0 +1,3 @@
+display_name: Canary Lab
+short_description: Run and heal Canary Lab features through MCP.
+default_prompt: Use $canary-lab to run or heal a Canary Lab feature through MCP.

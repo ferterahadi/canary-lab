@@ -11,6 +11,7 @@ import {
 } from './upgrade-migration'
 import { loadProjectConfig } from '../apps/web-server/lib/runtime/launcher/project-config'
 import { applyPersonalWikiBlock } from '../shared/runtime/personal-wiki'
+import { refreshInstalled as refreshInstalledAgentIntegrations } from './agent'
 
 const MARKER_START = '<!-- managed:canary-lab:start -->'
 const MARKER_END = '<!-- managed:canary-lab:end -->'
@@ -137,6 +138,7 @@ export interface MainExtras {
   /** Injected confirm — called only when there are orphaned logs and
    * `--force-archive` was not passed. Async to support readline prompts. */
   confirm?: (orphanCount: number) => Promise<boolean> | boolean
+  agentHomeDir?: string
 }
 
 function log(msg: string, opts: UpgradeOptions): void {
@@ -301,6 +303,13 @@ export async function main(
   // reliably, so the runner itself nudges users who fall behind).
   const installedVersion = getInstalledPackageVersion()
   if (installedVersion) writeStamp(projectRoot, installedVersion)
+
+  // Refresh only user-level integrations that are already installed. First-time
+  // installs remain explicit via `canary-lab agent install`.
+  refreshInstalledAgentIntegrations('all', {
+    homeDir: extras.agentHomeDir ?? process.env.CANARY_LAB_AGENT_HOME,
+    log: (msg) => log(`  ${msg}`, opts),
+  })
 
   if (updated > 0) {
     log(`\n  Canary Lab: upgraded ${updated} managed file${updated === 1 ? '' : 's'}.`, opts)

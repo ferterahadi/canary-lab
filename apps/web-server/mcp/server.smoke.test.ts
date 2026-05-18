@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import path from 'path'
+import fs from 'fs'
+import os from 'os'
 import { createServer } from '../server'
 import type { PtyFactory } from '../lib/runtime/pty-spawner'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
@@ -61,6 +63,7 @@ describe('MCP HTTP server (smoke)', () => {
         'get_run',
         'get_run_actions',
         'get_heal_context',
+        'wait_for_heal_task',
         'start_run',
         'pause_run',
         'cancel_heal',
@@ -155,6 +158,119 @@ describe('MCP HTTP server (smoke)', () => {
         arguments: { runId: 'not-a-real-run' },
       })
       expect(result.isError).toBe(true)
+    } finally {
+      if (client) await client.close().catch(() => undefined)
+      await app.close()
+    }
+  })
+
+  it('wait_for_heal_task reports needs_heal, terminal states, and timeout', async () => {
+    const projectRoot = path.resolve(__dirname, '..', '..', '..', 'templates', 'project')
+    const logsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-wait-')))
+    const { app, runStore } = await createServer({ projectRoot, logsDir, ptyFactory: inertPtyFactory })
+    let client: Client | null = null
+    try {
+      const address = await app.listen({ port: 0, host: '127.0.0.1' })
+      client = new Client(
+        { name: 'canary-lab-smoke', version: '0.0.1' },
+        { capabilities: {} },
+      )
+      await client.connect(new StreamableHTTPClientTransport(new URL('/mcp', address)))
+
+      runStore.bootstrap({
+        runId: 'wait-needs-heal',
+        feature: 'broken_todo_api',
+        startedAt: '2026-05-08T00:00:00.000Z',
+        status: 'healing',
+        healCycles: 1,
+        services: [],
+        healMode: 'external',
+      })
+      await client.callTool({
+        name: 'claim_heal',
+        arguments: {
+          runId: 'wait-needs-heal',
+          session_id: 'sess-1',
+          client_kind: 'codex-cli',
+        },
+      })
+      runStore.recordLifecycleEvent('wait-needs-heal', {
+        phase: 'waiting-for-signal',
+        headline: 'Waiting for heal signal',
+        updatedAt: '2026-05-08T00:00:01.000Z',
+        activeCycle: 1,
+      })
+      const needsHeal = await client.callTool({
+        name: 'wait_for_heal_task',
+        arguments: { runId: 'wait-needs-heal', session_id: 'sess-1', timeout_ms: 1000 },
+      })
+      expect(JSON.parse((needsHeal.content?.[0] as { text: string }).text)).toMatchObject({
+        type: 'needs_heal',
+        runId: 'wait-needs-heal',
+        cycle: 1,
+      })
+
+      runStore.bootstrap({
+        runId: 'wait-passed',
+        feature: 'broken_todo_api',
+        startedAt: '2026-05-08T00:00:00.000Z',
+        status: 'passed',
+        healCycles: 0,
+        services: [],
+      })
+      const passed = await client.callTool({
+        name: 'wait_for_heal_task',
+        arguments: { runId: 'wait-passed', session_id: 'sess-1', timeout_ms: 1000 },
+      })
+      expect(JSON.parse((passed.content?.[0] as { text: string }).text)).toMatchObject({
+        type: 'passed',
+        runId: 'wait-passed',
+      })
+
+      runStore.bootstrap({
+        runId: 'wait-failed',
+        feature: 'broken_todo_api',
+        startedAt: '2026-05-08T00:00:00.000Z',
+        status: 'failed',
+        healCycles: 0,
+        services: [],
+      })
+      const failed = await client.callTool({
+        name: 'wait_for_heal_task',
+        arguments: { runId: 'wait-failed', session_id: 'sess-1', timeout_ms: 1000 },
+      })
+      expect(JSON.parse((failed.content?.[0] as { text: string }).text)).toMatchObject({
+        type: 'failed',
+        runId: 'wait-failed',
+        status: 'failed',
+      })
+
+      runStore.bootstrap({
+        runId: 'wait-timeout',
+        feature: 'broken_todo_api',
+        startedAt: '2026-05-08T00:00:00.000Z',
+        status: 'running',
+        healCycles: 0,
+        services: [],
+        healMode: 'external',
+      })
+      await client.callTool({
+        name: 'claim_heal',
+        arguments: {
+          runId: 'wait-timeout',
+          session_id: 'sess-timeout',
+          client_kind: 'codex-cli',
+        },
+      })
+      const timeout = await client.callTool({
+        name: 'wait_for_heal_task',
+        arguments: { runId: 'wait-timeout', session_id: 'sess-timeout', timeout_ms: 10 },
+      })
+      expect(JSON.parse((timeout.content?.[0] as { text: string }).text)).toMatchObject({
+        type: 'timeout',
+        runId: 'wait-timeout',
+        status: 'running',
+      })
     } finally {
       if (client) await client.close().catch(() => undefined)
       await app.close()

@@ -3,12 +3,16 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 const initProject = vi.fn(async () => {})
 const upgradeProject = vi.fn(async () => {})
 const runUi = vi.fn(async () => {})
+const runMcp = vi.fn(async () => {})
+const runAgent = vi.fn(async () => {})
 const createFeature = vi.fn(async () => {})
 const runEnv = vi.fn(async () => {})
 
 vi.mock('./init-project', () => ({ main: initProject }))
 vi.mock('./upgrade', () => ({ main: upgradeProject }))
 vi.mock('./ui-command', () => ({ runUi }))
+vi.mock('./mcp', () => ({ main: runMcp }))
+vi.mock('./agent', () => ({ main: runAgent }))
 vi.mock('./new-feature', () => ({ main: createFeature }))
 vi.mock('./env', () => ({ main: runEnv }))
 
@@ -18,6 +22,8 @@ beforeEach(() => {
   initProject.mockClear()
   upgradeProject.mockClear()
   runUi.mockClear()
+  runMcp.mockClear()
+  runAgent.mockClear()
   createFeature.mockClear()
   runEnv.mockClear()
 })
@@ -30,6 +36,8 @@ describe('printUsage', () => {
     spy.mockRestore()
     expect(out).toContain('canary-lab init <folder>')
     expect(out).toContain('canary-lab ui')
+    expect(out).toContain('canary-lab mcp')
+    expect(out).toContain('canary-lab agent install <codex|claude|all>')
     expect(out).toContain('canary-lab new feature <name>')
     expect(out).toContain('canary-lab new-feature <name>')
     expect(out).toContain('canary-lab env apply <feature> <set>')
@@ -48,6 +56,16 @@ describe('main (cli routing)', () => {
   it('routes "ui" and forwards remaining args', async () => {
     await main(['ui', '--port', '8080'])
     expect(runUi).toHaveBeenCalledExactlyOnceWith(['--port', '8080'])
+  })
+
+  it('routes "mcp" and forwards remaining args', async () => {
+    await main(['mcp', 'doctor', '--url', 'http://127.0.0.1:7421/mcp'])
+    expect(runMcp).toHaveBeenCalledExactlyOnceWith(['doctor', '--url', 'http://127.0.0.1:7421/mcp'])
+  })
+
+  it('routes "agent" and forwards remaining args', async () => {
+    await main(['agent', 'install', 'codex', '--dry-run'])
+    expect(runAgent).toHaveBeenCalledExactlyOnceWith(['install', 'codex', '--dry-run'])
   })
 
   it('routes "new feature" and forwards remaining args', async () => {
