@@ -9,10 +9,10 @@ import { RestartHealButton } from './RestartHealButton'
 
 vi.mock('../api/client', async () => {
   const actual = await vi.importActual<typeof import('../api/client')>('../api/client')
-  return {
-    ...actual,
-    sendAgentInput: vi.fn(),
-  }
+	  return {
+	    ...actual,
+	    restartRun: vi.fn(),
+	  }
 })
 
 let container: HTMLDivElement
@@ -22,7 +22,7 @@ beforeEach(() => {
   container = document.createElement('div')
   document.body.appendChild(container)
   root = createRoot(container)
-  vi.mocked(api.sendAgentInput).mockReset()
+	  vi.mocked(api.restartRun).mockReset()
 })
 
 afterEach(() => {
@@ -33,17 +33,19 @@ afterEach(() => {
 })
 
 describe('RestartHealButton', () => {
-  it('renders the Restart Heal button without stale guidance text', () => {
-    const html = renderToStaticMarkup(<RestartHealButton runId="r1" />)
-    expect(html).toContain('Restart Heal')
-    expect(html).not.toContain('Type guidance for the agent in the pane after it spawns')
+	  it('renders the Retest Remaining button with the shared action styling', () => {
+	    const html = renderToStaticMarkup(<RestartHealButton runId="r1" />)
+	    expect(html).toContain('Retest Remaining')
+	    expect(html).toContain('Reruns failed, skipped, and pending tests.')
+	    expect(html).toContain('rounded-md px-3 py-1.5 text-xs')
+	    expect(html).not.toContain('Type guidance for the agent in the pane after it spawns')
     // No stray input field — the REPL owns input once the new orchestrator
     // spawns, so the button is the only control here.
     expect(html).not.toContain('<input')
   })
 
   it('notifies the parent after the restart request succeeds', async () => {
-    vi.mocked(api.sendAgentInput).mockResolvedValue({ status: 'restarted' })
+	    vi.mocked(api.restartRun).mockResolvedValue({ status: 'restarted', mode: 'remaining' })
     const onRestarted = vi.fn()
 
     await act(async () => {
@@ -56,7 +58,7 @@ describe('RestartHealButton', () => {
       button?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     })
 
-    expect(api.sendAgentInput).toHaveBeenCalledWith('r1', '')
-    expect(onRestarted).toHaveBeenCalledTimes(1)
-  })
+	    expect(api.restartRun).toHaveBeenCalledWith('r1')
+	    expect(onRestarted).toHaveBeenCalledTimes(1)
+	  })
 })

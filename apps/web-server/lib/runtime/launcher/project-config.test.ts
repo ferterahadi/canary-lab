@@ -26,10 +26,10 @@ afterEach(() => {
 describe('project config', () => {
   it('returns defaults when the config file is missing or unreadable JSON', () => {
     const projectRoot = mkProject()
-    expect(loadProjectConfig(projectRoot)).toEqual({ healAgent: 'auto', editor: 'auto', personalWikiPath: null })
+    expect(loadProjectConfig(projectRoot)).toEqual({ healAgent: 'external', editor: 'auto', personalWikiPath: null })
 
     fs.writeFileSync(projectConfigPath(projectRoot), '{not json')
-    expect(loadProjectConfig(projectRoot)).toEqual({ healAgent: 'auto', editor: 'auto', personalWikiPath: null })
+    expect(loadProjectConfig(projectRoot)).toEqual({ healAgent: 'external', editor: 'auto', personalWikiPath: null })
   })
 
   it('loads valid healAgent values and falls back for unknown values', () => {
@@ -38,22 +38,22 @@ describe('project config', () => {
     expect(loadProjectConfig(projectRoot)).toEqual({ healAgent: 'manual', editor: 'auto', personalWikiPath: null })
 
     fs.writeFileSync(projectConfigPath(projectRoot), JSON.stringify({ healAgent: 'wizard' }))
-    expect(loadProjectConfig(projectRoot)).toEqual({ healAgent: 'auto', editor: 'auto', personalWikiPath: null })
+    expect(loadProjectConfig(projectRoot)).toEqual({ healAgent: 'external', editor: 'auto', personalWikiPath: null })
   })
 
   it('loads valid editor values and falls back for unknown values', () => {
     const projectRoot = mkProject()
     fs.writeFileSync(projectConfigPath(projectRoot), JSON.stringify({ editor: 'vscode' }))
-    expect(loadProjectConfig(projectRoot)).toEqual({ healAgent: 'auto', editor: 'vscode', personalWikiPath: null })
+    expect(loadProjectConfig(projectRoot)).toEqual({ healAgent: 'external', editor: 'vscode', personalWikiPath: null })
 
     fs.writeFileSync(projectConfigPath(projectRoot), JSON.stringify({ editor: 'cursor' }))
-    expect(loadProjectConfig(projectRoot)).toEqual({ healAgent: 'auto', editor: 'cursor', personalWikiPath: null })
+    expect(loadProjectConfig(projectRoot)).toEqual({ healAgent: 'external', editor: 'cursor', personalWikiPath: null })
 
     fs.writeFileSync(projectConfigPath(projectRoot), JSON.stringify({ editor: 'system' }))
-    expect(loadProjectConfig(projectRoot)).toEqual({ healAgent: 'auto', editor: 'system', personalWikiPath: null })
+    expect(loadProjectConfig(projectRoot)).toEqual({ healAgent: 'external', editor: 'system', personalWikiPath: null })
 
     fs.writeFileSync(projectConfigPath(projectRoot), JSON.stringify({ editor: 'vim' }))
-    expect(loadProjectConfig(projectRoot)).toEqual({ healAgent: 'auto', editor: 'auto', personalWikiPath: null })
+    expect(loadProjectConfig(projectRoot)).toEqual({ healAgent: 'external', editor: 'auto', personalWikiPath: null })
   })
 
   it('persists only supported healAgent values', () => {
@@ -64,7 +64,7 @@ describe('project config', () => {
     )
 
     saveProjectConfig(projectRoot, { healAgent: 'other' as never, editor: 'auto', personalWikiPath: null })
-    expect(loadProjectConfig(projectRoot)).toEqual({ healAgent: 'auto', editor: 'auto', personalWikiPath: null })
+    expect(loadProjectConfig(projectRoot)).toEqual({ healAgent: 'external', editor: 'auto', personalWikiPath: null })
   })
 
   it('persists only supported editor values', () => {
@@ -106,6 +106,6 @@ describe('project config', () => {
   it('loads missing or invalid stored personal wiki paths as null', () => {
     const projectRoot = mkProject()
     fs.writeFileSync(projectConfigPath(projectRoot), JSON.stringify({ personalWikiPath: path.join(projectRoot, 'missing') }))
-    expect(loadProjectConfig(projectRoot)).toEqual({ healAgent: 'auto', editor: 'auto', personalWikiPath: null })
+    expect(loadProjectConfig(projectRoot)).toEqual({ healAgent: 'external', editor: 'auto', personalWikiPath: null })
   })
 })

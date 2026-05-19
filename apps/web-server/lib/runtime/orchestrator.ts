@@ -910,7 +910,7 @@ export class RunOrchestrator extends EventEmitter {
   private verificationPlanForSummary(summary: SummaryShape): VerificationPlan {
     const plan = computeVerificationPlan(this.feature.featureDir, summary)
     if (plan.kind === 'targeted') {
-      this.runnerLog?.info(`Targeted re-run: ${plan.failedFirst.length} failed + ${plan.pending.length} pending of ${plan.total} total tests`)
+      this.runnerLog?.info(`Targeted re-run: ${plan.failedFirst.length} failed + ${plan.skipped.length} skipped + ${plan.pending.length} pending of ${plan.total} total tests`)
       this.recordLifecycle('rerunning-tests', 'Targeted rerun selected', {
         detail: plan.selection.reason,
         targetedRerun: {
@@ -938,6 +938,21 @@ export class RunOrchestrator extends EventEmitter {
       return plan
     }
     return plan
+  }
+
+  private recordFullSuiteTerminalRestartFallback(reason: string, total: number): void {
+    this.runnerLog?.warn(reason)
+    this.recordLifecycle('rerunning-tests', 'Full restart rerun selected', {
+      detail: reason,
+      severity: 'warning',
+      targetedRerun: {
+        selected: total,
+        total,
+        mode: 'full-suite',
+        reason,
+      },
+    })
+    this.emit('playwright-output', { chunk: `\n[warning] ${reason}\n` })
   }
 
   // Wait for the in-flight Playwright pty to exit. Resolves immediately when
@@ -1701,6 +1716,38 @@ export class RunOrchestrator extends EventEmitter {
     }
     this.setStatus(finalStatus)
 
+    return await this.continueAfterTestRun(finalStatus)
+  }
+
+  async restartTerminalRun(userGuidance?: string): Promise<RunManifest['status']> {
+    await this.start()
+    if (this.stopped) return this.status
+    if (userGuidance) {
+      this.runnerLog?.info(`Terminal run restart guidance: ${userGuidance}`)
+    }
+    const summary = readSummary(this.paths.summaryPath)
+    const verificationPlan = this.verificationPlanForSummary(summary)
+    let selection = selectionForPlan(verificationPlan)
+    if (verificationPlan.kind === 'all-passed') {
+      if (summaryHasPassingEvidence(summary)) {
+        this.setStatus('passed')
+        return 'passed'
+      }
+      this.recordFullSuiteTerminalRestartFallback(
+        'Terminal restart could not find prior passing evidence or a safe remaining-test selector; running the full Playwright suite.',
+        verificationPlan.total,
+      )
+      selection = undefined
+    }
+    this.setStatus('running')
+    const exitCode = await this.runPlaywright(selection)
+    if (this.stopped) return this.status
+    const finalStatus = decideRunStatus(this.feature.featureDir, this.paths.summaryPath, exitCode)
+    this.setStatus(finalStatus)
+    return await this.continueAfterTestRun(finalStatus)
+  }
+
+  private async continueAfterTestRun(finalStatus: RunManifest['status']): Promise<RunManifest['status']> {
     if (finalStatus === 'passed') return finalStatus
 
     // Manual / external heal mode: no agent CLI configured but the user
@@ -1711,82 +1758,7 @@ export class RunOrchestrator extends EventEmitter {
     // (24h) is hit. Signal watcher (already running) feeds `signalGate` for
     // `waitForHealSignal` to consume.
     if (!this.autoHeal && (this.manualHeal || this.externalHeal)) {
-      const MANUAL_TIMEOUT_MS = 24 * 60 * 60 * 1000
-      const modeLabel = this.externalHeal ? 'External' : 'Manual'
-      const modeCommand = this.externalHeal ? '<external>' : '<manual>'
-      const modeDetail = this.externalHeal
-        ? 'Waiting for an external AI client (Claude/Codex via MCP) to write a per-run signal file.'
-        : 'Waiting for a manual agent or user to write a per-run signal file.'
-      while (true) {
-        this.setStatus('healing')
-        this.noteHealCycle()
-        this.emit('agent-started', { cycle: this.healCycles, command: modeCommand })
-        this.recordLifecycle('agent-healing', `${modeLabel} heal cycle ${this.healCycles} started`, {
-          detail: modeDetail,
-          activeCycle: this.healCycles,
-        })
-        // Same snapshot/diff pattern as auto-heal: capture working-tree state
-        // before the user starts editing, then diff after the signal arrives
-        // so the journal records only what the user changed during this turn.
-        const snapshots = await this.snapshotFeatureRepos()
-        // Manual heal: no live REPL emits output, so the idle timeout would
-        // otherwise fire after 3 min. Set the idle window equal to the hard
-        // ceiling so it can't dominate the manual flow.
-        const { signal } = await this.waitForHealSignal(MANUAL_TIMEOUT_MS, MANUAL_TIMEOUT_MS, false)
-        this.emit('agent-exit', { exitCode: 0 })
-        if (this.healCancelled || this.stopped) {
-          finalStatus = 'failed'
-          this.setStatus(finalStatus)
-          break
-        }
-        if (!signal) {
-          finalStatus = 'failed'
-          this.setStatus(finalStatus)
-          break
-        }
-        const filesChanged = await this.diffFeatureRepos(snapshots)
-        const diffContent = await this.diffContentForFeatureRepos(snapshots)
-        try {
-          if (signal.kind === 'restart' || signal.kind === 'rerun') {
-            appendJournalIteration({
-              signal: signal.kind === 'restart' ? '.restart' : '.rerun',
-              hypothesis: typeof signal.body.hypothesis === 'string' ? signal.body.hypothesis : undefined,
-              filesChanged,
-              fixDescription: typeof signal.body.fixDescription === 'string' ? signal.body.fixDescription : undefined,
-              diffContent,
-              runId: this.runId,
-              manifestPath: this.paths.manifestPath,
-              summaryPath: this.paths.summaryPath,
-              journalPath: this.paths.diagnosisJournalPath,
-            })
-          }
-        } catch { /* journal is best-effort */ }
-        const verificationPlan = this.verificationPlanForSummary(readSummary(this.paths.summaryPath))
-        this.setStatus('running')
-        if (signal.kind === 'restart') {
-          await this.restart(filesChanged)
-        } else {
-          await this.rerun()
-        }
-        if (this.stopped) return this.status
-        const startedBecauseMissing = await this.ensureServicesRunning()
-        if (startedBecauseMissing.length > 0) {
-          this.recordLifecycle('restarting-services', 'Started missing services', {
-            detail: `Started ${startedBecauseMissing.join(', ')} before rerun.`,
-            restartPlan: { restarted: [], kept: [], startedBecauseMissing },
-          })
-        }
-        exitCode = await this.runPlaywright(selectionForPlan(verificationPlan))
-        // Manual-heal mirror of the auto-heal abort guard: the top of the
-        // loop already checks `stopped`, but the killed Playwright pty's
-        // exit code arrives after the abort flips the flag — don't
-        // compute a finalStatus from it.
-        if (this.stopped) return this.status
-        finalStatus = decideRunStatus(this.feature.featureDir, this.paths.summaryPath, exitCode)
-        this.setStatus(finalStatus)
-        if (finalStatus === 'passed') break
-      }
-      return finalStatus
+      return await this.runManualExternalHealLoop(finalStatus)
     }
 
     if (!this.autoHeal) return finalStatus
@@ -1798,6 +1770,86 @@ export class RunOrchestrator extends EventEmitter {
     if (this.stopped) return this.status
 
     return await this.runAutoHealLoop()
+  }
+
+  private async runManualExternalHealLoop(initialStatus: RunManifest['status']): Promise<RunManifest['status']> {
+    const MANUAL_TIMEOUT_MS = 24 * 60 * 60 * 1000
+    const modeLabel = this.externalHeal ? 'External' : 'Manual'
+    const modeCommand = this.externalHeal ? '<external>' : '<manual>'
+    const modeDetail = this.externalHeal
+      ? 'Waiting for an external AI client (Claude/Codex via MCP) to write a per-run signal file.'
+      : 'Waiting for a manual agent or user to write a per-run signal file.'
+    let finalStatus = initialStatus
+    while (true) {
+      this.setStatus('healing')
+      this.noteHealCycle()
+      this.emit('agent-started', { cycle: this.healCycles, command: modeCommand })
+      this.recordLifecycle('agent-healing', `${modeLabel} heal cycle ${this.healCycles} started`, {
+        detail: modeDetail,
+        activeCycle: this.healCycles,
+      })
+      // Same snapshot/diff pattern as auto-heal: capture working-tree state
+      // before the user starts editing, then diff after the signal arrives
+      // so the journal records only what the user changed during this turn.
+      const snapshots = await this.snapshotFeatureRepos()
+      // Manual heal: no live REPL emits output, so the idle timeout would
+      // otherwise fire after 3 min. Set the idle window equal to the hard
+      // ceiling so it can't dominate the manual flow.
+      const { signal } = await this.waitForHealSignal(MANUAL_TIMEOUT_MS, MANUAL_TIMEOUT_MS, false)
+      this.emit('agent-exit', { exitCode: 0 })
+      if (this.healCancelled || this.stopped) {
+        finalStatus = 'failed'
+        this.setStatus(finalStatus)
+        break
+      }
+      if (!signal) {
+        finalStatus = 'failed'
+        this.setStatus(finalStatus)
+        break
+      }
+      const filesChanged = await this.diffFeatureRepos(snapshots)
+      const diffContent = await this.diffContentForFeatureRepos(snapshots)
+      try {
+        if (signal.kind === 'restart' || signal.kind === 'rerun') {
+          appendJournalIteration({
+            signal: signal.kind === 'restart' ? '.restart' : '.rerun',
+            hypothesis: typeof signal.body.hypothesis === 'string' ? signal.body.hypothesis : undefined,
+            filesChanged,
+            fixDescription: typeof signal.body.fixDescription === 'string' ? signal.body.fixDescription : undefined,
+            diffContent,
+            runId: this.runId,
+            manifestPath: this.paths.manifestPath,
+            summaryPath: this.paths.summaryPath,
+            journalPath: this.paths.diagnosisJournalPath,
+          })
+        }
+      } catch { /* journal is best-effort */ }
+      const verificationPlan = this.verificationPlanForSummary(readSummary(this.paths.summaryPath))
+      this.setStatus('running')
+      if (signal.kind === 'restart') {
+        await this.restart(filesChanged)
+      } else {
+        await this.rerun()
+      }
+      if (this.stopped) return this.status
+      const startedBecauseMissing = await this.ensureServicesRunning()
+      if (startedBecauseMissing.length > 0) {
+        this.recordLifecycle('restarting-services', 'Started missing services', {
+          detail: `Started ${startedBecauseMissing.join(', ')} before rerun.`,
+          restartPlan: { restarted: [], kept: [], startedBecauseMissing },
+        })
+      }
+      const exitCode = await this.runPlaywright(selectionForPlan(verificationPlan))
+      // Manual-heal mirror of the auto-heal abort guard: the top of the
+      // loop already checks `stopped`, but the killed Playwright pty's
+      // exit code arrives after the abort flips the flag — don't
+      // compute a finalStatus from it.
+      if (this.stopped) return this.status
+      finalStatus = decideRunStatus(this.feature.featureDir, this.paths.summaryPath, exitCode)
+      this.setStatus(finalStatus)
+      if (finalStatus === 'passed') break
+    }
+    return finalStatus
   }
 
   async restartHealFromFailure(userGuidance: string): Promise<RunManifest['status']> {
@@ -2111,6 +2163,7 @@ interface SummaryShape {
   failed?: Array<{ name?: unknown; endTime?: unknown; location?: unknown }>
   passed?: unknown
   passedNames?: unknown
+  skippedNames?: unknown
   total?: unknown
   knownTests?: unknown
 }
@@ -2189,6 +2242,7 @@ export type RerunTargetsOrderedResult =
       kind: 'targeted'
       locations: string[]
       failedFirst: string[]
+      skipped: string[]
       pending: string[]
       droppedFailedSlugs: string[]
       total: number
@@ -2201,6 +2255,7 @@ export type VerificationPlan =
       kind: 'targeted'
       selection: PlaywrightRerunSelection
       failedFirst: KnownSummaryTest[]
+      skipped: KnownSummaryTest[]
       pending: KnownSummaryTest[]
       total: number
     }
@@ -2214,6 +2269,7 @@ export function computeVerificationPlan(
   const knownTests = knownTestsFromSummary(summary)
   if (knownTests.length > 0) {
     const passed = passedNameSet(summary)
+    const skippedSet = skippedNameSet(summary)
     const failedSlugs = extractFailedSlugs(summary).filter((slug) => !passed.has(slug))
     const failedSet = new Set(failedSlugs)
     const knownByName = new Map(knownTests.map((test) => [test.name, test] as const))
@@ -2221,8 +2277,9 @@ export function computeVerificationPlan(
     const failedFirst = uniqueByName(failedSlugs
       .map((slug) => knownByName.get(slug))
       .filter((test): test is KnownSummaryTest => Boolean(test)))
-    const pending = knownTests.filter((test) => !passed.has(test.name) && !failedSet.has(test.name))
-    const selected = [...failedFirst, ...pending]
+    const skipped = knownTests.filter((test) => !passed.has(test.name) && !failedSet.has(test.name) && skippedSet.has(test.name))
+    const pending = knownTests.filter((test) => !passed.has(test.name) && !failedSet.has(test.name) && !skippedSet.has(test.name))
+    const selected = [...failedFirst, ...skipped, ...pending]
     if (selected.length === 0) return { kind: 'all-passed', total: knownTests.length }
     if (missingFailed.length > 0) {
       return {
@@ -2241,7 +2298,7 @@ export function computeVerificationPlan(
     }
     const passedCount = countPassed(summary)
     const failedCount = Array.isArray(summary.failed) ? summary.failed.length : 0
-    const reason = `Rerunning ${selected.length} not-yet-passed tests (${failedFirst.length} previously failed first, then ${pending.length} pending) because ${passedCount} passed and ${failedCount} failed before healing.`
+    const reason = `Rerunning ${selected.length} not-yet-passed tests (${failedFirst.length} failed first, then ${skipped.length} skipped, then ${pending.length} pending/not-run) because ${passedCount} passed and ${failedCount} failed before healing.`
     return {
       kind: 'targeted',
       selection: {
@@ -2253,6 +2310,7 @@ export function computeVerificationPlan(
         reason,
       },
       failedFirst,
+      skipped,
       pending,
       total: knownTests.length,
     }
@@ -2270,7 +2328,7 @@ export function computeVerificationPlan(
     }
     const passedCount = countPassed(summary)
     const failedCount = Array.isArray(summary.failed) ? summary.failed.length : 0
-    const reason = `Rerunning ${computed.locations.length} not-yet-passed tests (${computed.failedFirst.length} previously failed first, then ${computed.pending.length} pending) because ${passedCount} passed and ${failedCount} failed before healing.`
+    const reason = `Rerunning ${computed.locations.length} not-yet-passed tests (${computed.failedFirst.length} failed first, then ${computed.skipped.length} skipped, then ${computed.pending.length} pending/not-run) because ${passedCount} passed and ${failedCount} failed before healing.`
     return {
       kind: 'targeted',
       selection: {
@@ -2282,6 +2340,11 @@ export function computeVerificationPlan(
         reason,
       },
       failedFirst: computed.failedFirst.map((location) => ({
+        name: location,
+        title: location,
+        location,
+      })),
+      skipped: computed.skipped.map((location) => ({
         name: location,
         title: location,
         location,
@@ -2312,6 +2375,7 @@ export function computeVerificationPlan(
         reason,
       },
       failedFirst: locations.map((location) => ({ name: location, title: location, location })),
+      skipped: [],
       pending: [],
       total: computedTotal(summary) || locations.length,
     }
@@ -2362,6 +2426,7 @@ export function computeRerunTargetsOrdered(
 
   const passedRaw = Array.isArray(summary.passedNames) ? summary.passedNames : []
   const passed = new Set(passedRaw.filter((n): n is string => typeof n === 'string'))
+  const skipped = skippedNameSet(summary)
 
   const failedSlugs = extractFailedSlugs(summary)
   const failedFirstSlugs = new Set<string>()
@@ -2379,23 +2444,35 @@ export function computeRerunTargetsOrdered(
     failedFirst.push(loc)
   }
 
-  const pending: string[] = []
+  const skippedLocations: string[] = []
   const seenLocations = new Set<string>(failedFirst)
   for (const t of allTests) {
     if (passed.has(t.slug)) continue
     if (failedFirstSlugs.has(t.slug)) continue
+    if (!skipped.has(t.slug)) continue
+    if (seenLocations.has(t.location)) continue
+    seenLocations.add(t.location)
+    skippedLocations.push(t.location)
+  }
+
+  const pending: string[] = []
+  for (const t of allTests) {
+    if (passed.has(t.slug)) continue
+    if (failedFirstSlugs.has(t.slug)) continue
+    if (skipped.has(t.slug)) continue
     if (seenLocations.has(t.location)) continue
     seenLocations.add(t.location)
     pending.push(t.location)
   }
 
-  if (failedFirst.length === 0 && pending.length === 0) {
+  if (failedFirst.length === 0 && skippedLocations.length === 0 && pending.length === 0) {
     return { kind: 'all-passed', total: allTests.length }
   }
   return {
     kind: 'targeted',
-    locations: [...failedFirst, ...pending],
+    locations: [...failedFirst, ...skippedLocations, ...pending],
     failedFirst,
+    skipped: skippedLocations,
     pending,
     droppedFailedSlugs,
     total: allTests.length,
@@ -2479,6 +2556,11 @@ function knownTestsFromSummary(summary: SummaryShape): KnownSummaryTest[] {
 function passedNameSet(summary: SummaryShape): Set<string> {
   const passedRaw = Array.isArray(summary.passedNames) ? summary.passedNames : []
   return new Set(passedRaw.filter((name): name is string => typeof name === 'string' && name.length > 0))
+}
+
+function skippedNameSet(summary: SummaryShape): Set<string> {
+  const skippedRaw = Array.isArray(summary.skippedNames) ? summary.skippedNames : []
+  return new Set(skippedRaw.filter((name): name is string => typeof name === 'string' && name.length > 0))
 }
 
 function summaryHasPassingEvidence(summary: SummaryShape): boolean {

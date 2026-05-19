@@ -210,9 +210,30 @@ export function AgentSessionView({ source }: Props) {
         <button
           type="button"
           onClick={jumpLatest}
-          className="absolute bottom-3 right-3 rounded bg-sky-500/10 px-2 py-1 text-[11px] font-medium text-sky-700 shadow hover:bg-sky-500/20 dark:text-sky-300"
+          aria-label="Jump to latest"
+          title="Jump to latest"
+          className="absolute bottom-3 right-3 inline-flex h-8 w-8 items-center justify-center rounded-full text-blue-600/85 transition-all duration-150 hover:text-blue-600 hover:[box-shadow:0_4px_14px_color-mix(in_srgb,black_24%,transparent)] dark:text-blue-300/85 dark:hover:text-blue-200"
+          style={{
+            background: 'color-mix(in srgb, var(--bg-elevated) 94%, transparent)',
+            border: '1px solid color-mix(in srgb, var(--border-focus) 32%, var(--border-default))',
+            boxShadow: '0 2px 10px color-mix(in srgb, black 20%, transparent)',
+            backdropFilter: 'blur(6px)',
+          }}
         >
-          Jump latest
+          <svg
+            viewBox="0 0 16 16"
+            width="14"
+            height="14"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M4 5l4 4 4-4" />
+            <path d="M4 13.25h8" />
+          </svg>
         </button>
       )}
     </div>
