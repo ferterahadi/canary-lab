@@ -179,7 +179,7 @@ describe('ExternalHealBroker.heartbeat', () => {
     captured.events.length = 0
 
     // Mark stale → status flips to 'disconnected', should emit.
-    now = new Date('2026-05-18T10:01:00.000Z').getTime()
+    now = new Date('2026-05-18T10:11:00.000Z').getTime()
     broker.markStaleClaims()
     expect(captured.events.some((e) => e.kind === 'external-claim-changed')).toBe(true)
     captured.events.length = 0
@@ -210,6 +210,64 @@ describe('ExternalHealBroker.heartbeat', () => {
   })
 })
 
+describe('ExternalHealBroker.touch', () => {
+  it('refreshes lastHeartbeatAt without changing status when alive', () => {
+    let now = new Date('2026-05-18T10:00:00.000Z').getTime()
+    const { deps, captured } = makeDeps(() => now)
+    const broker = new ExternalHealBroker(deps)
+    broker.claim('run-1', { sessionId: 'sess-A', clientKind: 'claude-desktop' })
+    broker.heartbeat('run-1', 'sess-A', 'healing')
+    captured.events.length = 0
+
+    now = new Date('2026-05-18T10:00:10.000Z').getTime()
+    const res = broker.touch('run-1', 'sess-A')
+    expect(res.ok).toBe(true)
+    const session = broker.getSession('run-1')
+    expect(session?.lastHeartbeatAt).toBe('2026-05-18T10:00:10.000Z')
+    expect(session?.status).toBe('healing')
+    expect(captured.events).toHaveLength(0)
+  })
+
+  it('revives a disconnected session as healing and emits a claim-changed event', () => {
+    let now = new Date('2026-05-18T10:00:00.000Z').getTime()
+    const { deps, captured } = makeDeps(() => now)
+    const broker = new ExternalHealBroker(deps)
+    broker.claim('run-1', { sessionId: 'sess-A', clientKind: 'claude-desktop' })
+
+    now = new Date('2026-05-18T10:11:00.000Z').getTime()
+    broker.markStaleClaims()
+    expect(broker.getSession('run-1')?.status).toBe('disconnected')
+    captured.events.length = 0
+
+    now = new Date('2026-05-18T10:11:05.000Z').getTime()
+    const res = broker.touch('run-1', 'sess-A')
+    expect(res.ok).toBe(true)
+    const session = broker.getSession('run-1')
+    expect(session?.status).toBe('healing')
+    expect(session?.lastHeartbeatAt).toBe('2026-05-18T10:11:05.000Z')
+    expect(captured.events.some((e) => e.kind === 'external-claim-changed')).toBe(true)
+  })
+
+  it('rejects with session-mismatch when sessionId differs', () => {
+    const { deps } = makeDeps()
+    const broker = new ExternalHealBroker(deps)
+    broker.claim('run-1', { sessionId: 'sess-A', clientKind: 'claude-desktop' })
+    const res = broker.touch('run-1', 'sess-B')
+    expect(res.ok).toBe(false)
+    if (res.ok) throw new Error('unreachable')
+    expect(res.reason).toBe('session-mismatch')
+  })
+
+  it('rejects with no-claim when no session exists', () => {
+    const { deps } = makeDeps()
+    const broker = new ExternalHealBroker(deps)
+    const res = broker.touch('run-1', 'sess-A')
+    expect(res.ok).toBe(false)
+    if (res.ok) throw new Error('unreachable')
+    expect(res.reason).toBe('no-claim')
+  })
+})
+
 describe('ExternalHealBroker.markStaleClaims', () => {
   it('flips status to disconnected when heartbeat is older than HEARTBEAT_STALE_MS', () => {
     let now = new Date('2026-05-18T10:00:00.000Z').getTime()
@@ -217,12 +275,12 @@ describe('ExternalHealBroker.markStaleClaims', () => {
     const broker = new ExternalHealBroker(deps)
     broker.claim('run-1', { sessionId: 'sess-A', clientKind: 'claude-desktop' })
 
-    now = new Date('2026-05-18T10:00:14.000Z').getTime() // 14s, still fresh
+    now = new Date('2026-05-18T10:09:59.000Z').getTime() // just under 10min, still fresh
     const fresh = broker.markStaleClaims()
     expect(fresh).toEqual([])
     expect(broker.getSession('run-1')?.status).toBe('connected')
 
-    now = new Date('2026-05-18T10:00:16.000Z').getTime() // 16s, stale
+    now = new Date('2026-05-18T10:10:01.000Z').getTime() // just over 10min, stale
     const stale = broker.markStaleClaims()
     expect(stale).toEqual(['run-1'])
     expect(broker.getSession('run-1')?.status).toBe('disconnected')
@@ -234,13 +292,13 @@ describe('ExternalHealBroker.markStaleClaims', () => {
     const broker = new ExternalHealBroker(deps)
     broker.claim('run-1', { sessionId: 'sess-A', clientKind: 'claude-desktop' })
 
-    now = new Date('2026-05-18T10:00:30.000Z').getTime()
+    now = new Date('2026-05-18T10:11:00.000Z').getTime()
     broker.markStaleClaims()
     captured.events.length = 0
     captured.manifestPatches.length = 0
 
     // Second sweep — already disconnected, should be a no-op.
-    now = new Date('2026-05-18T10:00:45.000Z').getTime()
+    now = new Date('2026-05-18T10:12:00.000Z').getTime()
     const stale = broker.markStaleClaims()
     expect(stale).toEqual([])
     expect(captured.events).toHaveLength(0)

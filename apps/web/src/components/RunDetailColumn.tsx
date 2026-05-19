@@ -183,7 +183,6 @@ export function RunDetailColumn({
               <ExternalHealPanel
                 runId={m.runId}
                 session={m.externalHealSession}
-                lifecycleEvents={detail.lifecycleEvents}
               />
             ) : showAgentSession ? (
               <AgentSessionView source={{ kind: 'run', runId: m.runId, live: !isTerminalRunStatus(m.status) }} />

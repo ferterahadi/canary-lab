@@ -4,6 +4,7 @@ import fs from 'fs'
 import os from 'os'
 import { createServer } from '../server'
 import type { PtyFactory } from '../lib/runtime/pty-spawner'
+import { runDirFor } from '../lib/runtime/run-paths'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 
@@ -235,15 +236,64 @@ describe('MCP HTTP server (smoke)', () => {
         healCycles: 0,
         services: [],
       })
+      const knownTests = Array.from({ length: 21 }, (_, index) => ({
+        name: `test-${index + 1}`,
+        title: `Test ${index + 1}`,
+      }))
+      fs.writeFileSync(
+        path.join(runDirFor(logsDir, 'wait-failed'), 'e2e-summary.json'),
+        JSON.stringify({
+          complete: true,
+          total: 21,
+          passed: 3,
+          passedNames: ['test-1', 'test-2', 'test-4'],
+          knownTests,
+          failed: [
+            { name: 'test-3', error: { message: 'C failed' } },
+            { name: 'test-5', error: { message: 'E failed' } },
+          ],
+        }),
+      )
       const failed = await client.callTool({
         name: 'wait_for_heal_task',
         arguments: { runId: 'wait-failed', session_id: 'sess-1', timeout_ms: 1000 },
       })
-      expect(JSON.parse((failed.content?.[0] as { text: string }).text)).toMatchObject({
+      const failedBody = JSON.parse((failed.content?.[0] as { text: string }).text)
+      expect(failedBody).toMatchObject({
         type: 'failed',
         runId: 'wait-failed',
         status: 'failed',
+        counts: {
+          totalKnown: 21,
+          passed: 3,
+          failed: 2,
+          skipped: 0,
+          notRun: 16,
+          passedNames: ['test-1', 'test-2', 'test-4'],
+          failedNames: ['test-3', 'test-5'],
+          skippedNames: [],
+          notRunNames: [
+            'test-6',
+            'test-7',
+            'test-8',
+            'test-9',
+            'test-10',
+            'test-11',
+            'test-12',
+            'test-13',
+            'test-14',
+            'test-15',
+            'test-16',
+            'test-17',
+            'test-18',
+            'test-19',
+            'test-20',
+            'test-21',
+          ],
+          statusLine: '3/21 passed, 2 failed, 16 not run',
+        },
       })
+      expect(JSON.stringify(failedBody)).not.toContain('19/21 passed')
 
       runStore.bootstrap({
         runId: 'wait-timeout',
@@ -270,6 +320,124 @@ describe('MCP HTTP server (smoke)', () => {
         type: 'timeout',
         runId: 'wait-timeout',
         status: 'running',
+      })
+    } finally {
+      if (client) await client.close().catch(() => undefined)
+      await app.close()
+    }
+  })
+
+  it('start_run reuses an active feature run instead of creating a duplicate', async () => {
+    const projectRoot = path.resolve(__dirname, '..', '..', '..', 'templates', 'project')
+    const logsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-start-reuse-')))
+    const { app, runStore } = await createServer({ projectRoot, logsDir, ptyFactory: inertPtyFactory })
+    let client: Client | null = null
+    try {
+      const address = await app.listen({ port: 0, host: '127.0.0.1' })
+      client = new Client(
+        { name: 'canary-lab-smoke', version: '0.0.1' },
+        { capabilities: {} },
+      )
+      await client.connect(new StreamableHTTPClientTransport(new URL('/mcp', address)))
+
+      runStore.bootstrap({
+        runId: 'reuse-active',
+        feature: 'broken_todo_api',
+        env: 'local',
+        startedAt: '2026-05-08T00:00:00.000Z',
+        status: 'healing',
+        healCycles: 1,
+        services: [],
+        healMode: 'external',
+      })
+
+      const result = await client.callTool({
+        name: 'start_run',
+        arguments: {
+          feature: 'broken_todo_api',
+          env: 'local',
+          claim_heal: true,
+          session_id: 'sess-reuse',
+          client_kind: 'claude-desktop',
+          conversation_name: 'resume existing run',
+          force_new: true,
+        },
+      })
+      const body = JSON.parse((result.content?.[0] as { text: string }).text)
+      expect(body).toMatchObject({
+        runId: 'reuse-active',
+        reused: true,
+        status: 'healing',
+        claimed: true,
+        ignoredForceNew: true,
+      })
+      expect(body.warning).toContain('signal_run')
+      expect(runStore.list({ feature: 'broken_todo_api' }).map((entry) => entry.runId)).toEqual(['reuse-active'])
+      expect(runStore.get('reuse-active')?.manifest.externalHealSession).toMatchObject({
+        sessionId: 'sess-reuse',
+        clientKind: 'claude-desktop',
+      })
+    } finally {
+      if (client) await client.close().catch(() => undefined)
+      await app.close()
+    }
+  })
+
+  it('start_run prefers an existing run that is waiting for heal over a newer running run', async () => {
+    const projectRoot = path.resolve(__dirname, '..', '..', '..', 'templates', 'project')
+    const logsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-start-heal-first-')))
+    const { app, runStore } = await createServer({ projectRoot, logsDir, ptyFactory: inertPtyFactory })
+    let client: Client | null = null
+    try {
+      const address = await app.listen({ port: 0, host: '127.0.0.1' })
+      client = new Client(
+        { name: 'canary-lab-smoke', version: '0.0.1' },
+        { capabilities: {} },
+      )
+      await client.connect(new StreamableHTTPClientTransport(new URL('/mcp', address)))
+
+      runStore.bootstrap({
+        runId: 'older-waiting-heal',
+        feature: 'broken_todo_api',
+        env: 'local',
+        startedAt: '2026-05-08T00:00:00.000Z',
+        status: 'healing',
+        healCycles: 1,
+        services: [],
+        healMode: 'external',
+      })
+      runStore.recordLifecycleEvent('older-waiting-heal', {
+        phase: 'waiting-for-signal',
+        headline: 'Waiting for heal signal',
+        updatedAt: '2026-05-08T00:00:01.000Z',
+        activeCycle: 1,
+      })
+      runStore.bootstrap({
+        runId: 'newer-running',
+        feature: 'broken_todo_api',
+        env: 'local',
+        startedAt: '2026-05-08T00:01:00.000Z',
+        status: 'running',
+        healCycles: 0,
+        services: [],
+      })
+
+      const result = await client.callTool({
+        name: 'start_run',
+        arguments: {
+          feature: 'broken_todo_api',
+          env: 'local',
+          claim_heal: true,
+          session_id: 'sess-heal-first',
+          client_kind: 'claude-desktop',
+        },
+      })
+
+      expect(JSON.parse((result.content?.[0] as { text: string }).text)).toMatchObject({
+        runId: 'older-waiting-heal',
+        reused: true,
+        status: 'healing',
+        claimed: true,
       })
     } finally {
       if (client) await client.close().catch(() => undefined)

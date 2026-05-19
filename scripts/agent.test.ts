@@ -47,6 +47,22 @@ describe('canary-lab agent install', () => {
     expect(lines.join('\n')).toContain('Updated Codex skill')
   })
 
+  it('instructs agents to verify fixes with signal_run instead of start_run', () => {
+    const assets = path.resolve(__dirname, '..', 'agent-integrations')
+    const skillPaths = [
+      path.join(assets, 'codex', 'skills', 'canary-lab', 'SKILL.md'),
+      path.join(assets, 'claude', 'skills', 'canary-lab', 'SKILL.md'),
+      path.join(assets, 'plugin', 'canary-lab', 'skills', 'canary-lab', 'SKILL.md'),
+    ]
+
+    for (const skillPath of skillPaths) {
+      const body = fs.readFileSync(skillPath, 'utf-8')
+      expect(body).toContain('never call `start_run` to verify')
+      expect(body).toContain('`write_journal`, then `signal_run`, then `wait_for_heal_task`')
+      expect(body).toContain('Do not pass `force_new` during normal healing')
+    }
+  })
+
   it('leaves up-to-date installed integrations untouched during refresh', async () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-agent-refresh-current-'))
     install('codex', { homeDir: home, log: () => {} })

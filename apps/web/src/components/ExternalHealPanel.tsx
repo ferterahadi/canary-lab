@@ -3,30 +3,23 @@ import * as api from '../api/client'
 import type {
   ExternalHealSession,
   ExternalHealSessionStatus,
-  RunLifecycleEvent,
 } from '../api/types'
 
 interface Props {
   runId: string
   session: ExternalHealSession
-  lifecycleEvents?: RunLifecycleEvent[]
 }
 
 // The "Heal agent" tab when an external AI client (Claude Desktop / Codex /
 // Claude CLI / Codex CLI via MCP) holds the heal claim for this run. We
 // intentionally do NOT mirror the agent's transcript here — that lives in the
-// user's external session window. This panel surfaces:
-//   • who's healing (kind + conversation name + session id)
-//   • how lively the connection is (heartbeat + status pill)
-//   • a thin lifecycle ribbon so the user still sees the run moving
-//   • a clear pointer back to the external client
-export function ExternalHealPanel({ runId: _runId, session, lifecycleEvents }: Props) {
+// user's external session window. This panel surfaces who's healing, how
+// lively the connection is, and a clear pointer back to the external client.
+export function ExternalHealPanel({ runId: _runId, session }: Props) {
   const [now, setNow] = useState(() => Date.now())
   const [opening, setOpening] = useState<'claude' | 'codex' | null>(null)
-  const [copied, setCopied] = useState(false)
   const [openError, setOpenError] = useState<string | null>(null)
 
-  // Re-render once a second so the relative heartbeat label stays fresh.
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 1000)
     return () => clearInterval(id)
@@ -42,8 +35,11 @@ export function ExternalHealPanel({ runId: _runId, session, lifecycleEvents }: P
   const heartbeatLabel = ageLabel(ageMs)
 
   const isDisconnected = session.status === 'disconnected'
+  const isLive =
+    session.status === 'connected' ||
+    session.status === 'healing' ||
+    session.status === 'running-tests'
   const desktopAgent = clientKindToDesktopAgent(session.clientKind)
-  const displayName = session.conversationName?.trim() || `Session ${session.sessionId.slice(0, 8)}`
 
   const onOpenAgent = async (agent: 'claude' | 'codex'): Promise<void> => {
     setOpening(agent)
@@ -57,109 +53,105 @@ export function ExternalHealPanel({ runId: _runId, session, lifecycleEvents }: P
     }
   }
 
-  const onCopySessionId = async (): Promise<void> => {
-    try {
-      await navigator.clipboard.writeText(session.sessionId)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 1500)
-    } catch {
-      // Clipboard API may be unavailable in some browser contexts. Silent.
-    }
-  }
-
-  const tintForClient = clientTint(session.clientKind)
+  const tint = clientTint(session.clientKind)
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3 overflow-y-auto p-4">
+    <div className="flex h-full min-h-0 flex-col overflow-y-auto p-4">
       <div
-        className="rounded-xl p-5"
+        className="relative overflow-hidden rounded-2xl p-6"
         style={{
-          background: `linear-gradient(140deg, color-mix(in srgb, ${tintForClient} 8%, var(--bg-elevated)) 0%, var(--bg-elevated) 70%)`,
-          border: `1px solid color-mix(in srgb, ${tintForClient} 26%, var(--border-default))`,
+          background: `radial-gradient(120% 90% at 0% 0%, color-mix(in srgb, ${tint} 14%, transparent) 0%, transparent 55%), var(--bg-elevated)`,
+          border: `1px solid color-mix(in srgb, ${tint} 24%, var(--border-default))`,
         }}
       >
         <div className="flex items-start gap-4">
-          <ClientMonogram clientKind={session.clientKind} tint={tintForClient} />
-          <div className="min-w-0 flex-1">
-            <div className="text-[10px] uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
+          <BrandMark clientKind={session.clientKind} tint={tint} />
+          <div className="min-w-0 flex-1 pt-0.5">
+            <div
+              className="text-[10px] font-medium uppercase"
+              style={{ color: 'var(--text-muted)', letterSpacing: '0.16em' }}
+            >
               External heal session
             </div>
-            <div
-              className="mt-0.5 text-base font-semibold"
-              style={{ color: 'var(--text-primary)' }}
+            <h2
+              className="mt-1.5 text-xl font-semibold"
+              style={{
+                color: 'var(--text-primary)',
+                letterSpacing: '-0.01em',
+                lineHeight: 1.2,
+              }}
             >
               {headlineFor(session.clientKind)}
-            </div>
-            <div
-              className="mt-1.5 truncate text-lg"
-              style={{ color: 'var(--text-primary)' }}
-              title={displayName}
-            >
-              {displayName}
-            </div>
-            <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px]" style={{ color: 'var(--text-muted)' }}>
-              <button
-                type="button"
-                onClick={onCopySessionId}
-                className="rounded-md px-2 py-0.5"
-                style={{
-                  border: '1px solid var(--border-default)',
-                  color: copied ? 'var(--success)' : 'var(--text-secondary)',
-                  fontFamily: 'var(--font-mono)',
-                }}
-                title="Copy session id"
-              >
-                {copied ? 'Copied' : `id ${session.sessionId.slice(0, 12)}`}
-              </button>
-              <span className="opacity-70">·</span>
-              <span style={{ color: heartbeatColor }}>{heartbeatLabel}</span>
-              <span className="opacity-70">·</span>
+            </h2>
+
+            <div className="mt-3.5 flex flex-wrap items-center gap-2.5 text-[11px]">
               <StatusPill status={session.status} />
+              <span
+                className="inline-flex items-center gap-1.5"
+                style={{ color: heartbeatColor }}
+              >
+                <span
+                  className="inline-block h-1.5 w-1.5 rounded-full"
+                  style={{
+                    background: heartbeatColor,
+                    boxShadow: isLive ? `0 0 6px ${heartbeatColor}` : 'none',
+                  }}
+                  aria-hidden
+                />
+                {heartbeatLabel}
+              </span>
               {session.cycleCount > 0 && (
                 <>
-                  <span className="opacity-70">·</span>
-                  <span>{session.cycleCount} {session.cycleCount === 1 ? 'cycle' : 'cycles'}</span>
+                  <span style={{ color: 'var(--text-muted)', opacity: 0.55 }}>·</span>
+                  <span style={{ color: 'var(--text-muted)' }}>
+                    {session.cycleCount} {session.cycleCount === 1 ? 'cycle' : 'cycles'}
+                  </span>
                 </>
               )}
             </div>
           </div>
         </div>
 
-        <div
-          className="mt-4 text-xs leading-relaxed"
+        <p
+          className="mt-5 text-[13px] leading-relaxed"
           style={{ color: 'var(--text-secondary)' }}
         >
           {isDisconnected
             ? `Lost connection to ${clientLabel(session.clientKind)}. The run is paused waiting for you to reconnect — Canary Lab keeps the claim, so the same session id can resume right where it left off.`
             : `Agent output is streaming in your ${clientLabel(session.clientKind)} window. This panel tracks the run; open your conversation to follow the agent's reasoning.`}
-        </div>
+        </p>
 
         {desktopAgent && (
-          <div className="mt-4 flex flex-wrap gap-2">
+          <div className="mt-5">
             <button
               type="button"
               onClick={() => onOpenAgent(desktopAgent)}
               disabled={opening !== null}
-              className="rounded-md px-3 py-1.5 text-[11px] uppercase tracking-wider"
+              className="inline-flex items-center gap-2 rounded-lg px-3.5 py-2 text-[11px] font-medium uppercase tracking-wider"
               style={{
-                color: tintForClient,
-                background: `color-mix(in srgb, ${tintForClient} 12%, transparent)`,
-                border: `1px solid color-mix(in srgb, ${tintForClient} 40%, transparent)`,
+                color: tint,
+                background: `color-mix(in srgb, ${tint} 14%, transparent)`,
+                border: `1px solid color-mix(in srgb, ${tint} 38%, transparent)`,
                 opacity: opening === desktopAgent ? 0.6 : 1,
               }}
             >
-              {opening === desktopAgent
-                ? 'Opening…'
-                : `Open ${clientLabel(session.clientKind)} →`}
+              {opening === desktopAgent ? (
+                'Opening…'
+              ) : (
+                <>
+                  <span>Open {clientLabel(session.clientKind)}</span>
+                  <span aria-hidden>→</span>
+                </>
+              )}
             </button>
           </div>
         )}
         {openError && (
-          <div className="mt-2 text-[11px]" style={{ color: 'var(--danger)' }}>{openError}</div>
+          <div className="mt-3 text-[11px]" style={{ color: 'var(--danger)' }}>
+            {openError}
+          </div>
         )}
       </div>
-
-      <LifecycleRibbon events={lifecycleEvents} status={session.status} />
     </div>
   )
 }
@@ -168,7 +160,7 @@ function StatusPill({ status }: { status: ExternalHealSessionStatus }) {
   const palette = statusPalette(status)
   return (
     <span
-      className="rounded-full px-2 py-0.5 text-[10px] uppercase tracking-wider"
+      className="rounded-full px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-wider"
       style={{
         color: palette.fg,
         background: palette.bg,
@@ -180,93 +172,43 @@ function StatusPill({ status }: { status: ExternalHealSessionStatus }) {
   )
 }
 
-function ClientMonogram({ clientKind, tint }: { clientKind: ExternalHealSession['clientKind']; tint: string }) {
-  const letters = clientKind.startsWith('claude') ? 'CL' : clientKind.startsWith('codex') ? 'CX' : '·'
-  return (
-    <div
-      className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg text-base font-semibold"
-      style={{
-        background: `color-mix(in srgb, ${tint} 18%, transparent)`,
-        color: tint,
-        border: `1px solid color-mix(in srgb, ${tint} 35%, transparent)`,
-        fontFamily: 'var(--font-mono)',
-      }}
-      aria-hidden
-    >
-      {letters}
-    </div>
-  )
-}
-
-function LifecycleRibbon({
-  events,
-  status,
+function BrandMark({
+  clientKind,
+  tint,
 }: {
-  events: RunLifecycleEvent[] | undefined
-  status: ExternalHealSessionStatus
+  clientKind: ExternalHealSession['clientKind']
+  tint: string
 }) {
-  const recent = useMemo(() => {
-    if (!events || events.length === 0) return []
-    // Take the last ~6 distinct headlines so the ribbon stays readable.
-    const acc: RunLifecycleEvent[] = []
-    for (let i = events.length - 1; i >= 0 && acc.length < 6; i -= 1) {
-      const e = events[i]
-      if (!acc.some((seen) => seen.headline === e.headline)) acc.unshift(e)
-    }
-    return acc
-  }, [events])
+  const isClaude = clientKind.startsWith('claude')
+  const isCodex = clientKind.startsWith('codex')
 
-  if (recent.length === 0) {
+  if (isClaude || isCodex) {
+    const src = isClaude ? '/brand/claude.webp' : '/brand/codex.webp'
+    const alt = isClaude ? 'Claude' : 'Codex'
     return (
       <div
-        className="rounded-lg px-4 py-3 text-xs"
+        className="relative h-14 w-14 shrink-0 overflow-hidden rounded-xl"
         style={{
-          background: 'var(--bg-elevated)',
-          border: '1px solid var(--border-default)',
-          color: 'var(--text-muted)',
+          border: `1px solid color-mix(in srgb, ${tint} 30%, var(--border-default))`,
         }}
       >
-        {status === 'waiting'
-          ? 'Waiting for next agent action.'
-          : 'Run lifecycle will appear here as the orchestrator progresses.'}
+        <img src={src} alt={alt} width={56} height={56} className="h-full w-full object-cover" />
       </div>
     )
   }
 
   return (
     <div
-      className="rounded-lg p-3"
+      className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl"
       style={{
-        background: 'var(--bg-elevated)',
-        border: '1px solid var(--border-default)',
+        background: `color-mix(in srgb, ${tint} 14%, transparent)`,
+        border: `1px solid color-mix(in srgb, ${tint} 30%, transparent)`,
+        color: tint,
+        fontFamily: 'var(--font-mono)',
       }}
+      aria-hidden
     >
-      <div className="text-[10px] uppercase tracking-wider mb-2" style={{ color: 'var(--text-muted)' }}>
-        Run lifecycle
-      </div>
-      <ol className="flex flex-col gap-1.5">
-        {recent.map((event, idx) => {
-          const isLast = idx === recent.length - 1
-          return (
-            <li key={`${event.updatedAt}-${idx}`} className="flex items-start gap-2 text-xs">
-              <span
-                className="mt-1.5 inline-block h-1.5 w-1.5 shrink-0 rounded-full"
-                style={{
-                  background: isLast ? 'var(--border-focus)' : 'var(--text-muted)',
-                  opacity: isLast ? 1 : 0.6,
-                }}
-                aria-hidden
-              />
-              <div className="min-w-0 flex-1">
-                <div style={{ color: 'var(--text-primary)' }}>{event.headline}</div>
-                {event.detail && (
-                  <div className="mt-0.5 text-[11px]" style={{ color: 'var(--text-muted)' }}>{event.detail}</div>
-                )}
-              </div>
-            </li>
-          )
-        })}
-      </ol>
+      <span className="text-base font-semibold">·</span>
     </div>
   )
 }
@@ -304,7 +246,6 @@ function statusPalette(status: ExternalHealSessionStatus): { fg: string; bg: str
       border: 'color-mix(in srgb, var(--border-focus) 40%, transparent)',
     }
   }
-  // connected / waiting
   return {
     fg: 'var(--success)',
     bg: 'color-mix(in srgb, var(--success) 12%, transparent)',
@@ -329,10 +270,10 @@ function ageColor(ageMs: number | null): string {
 
 function clientLabel(kind: ExternalHealSession['clientKind']): string {
   switch (kind) {
-    case 'claude-cli': return 'Claude CLI'
-    case 'claude-desktop': return 'Claude Desktop'
-    case 'codex-cli': return 'Codex CLI'
-    case 'codex-desktop': return 'Codex Desktop'
+    case 'claude-cli': return 'Claude (Desktop/CLI)'
+    case 'claude-desktop': return 'Claude (Desktop/CLI)'
+    case 'codex-cli': return 'Codex (Desktop/CLI)'
+    case 'codex-desktop': return 'Codex (Desktop/CLI)'
     case 'other': return 'external client'
   }
 }
@@ -343,10 +284,8 @@ function headlineFor(kind: ExternalHealSession['clientKind']): string {
 }
 
 function clientTint(kind: ExternalHealSession['clientKind']): string {
-  // Slight palette differentiation so Claude and Codex feel distinct without
-  // either dominating. Falls back to the existing focus accent for 'other'.
-  if (kind.startsWith('claude')) return '#d39965' // warm sand
-  if (kind.startsWith('codex')) return '#7aa2f7'  // cool indigo
+  if (kind.startsWith('claude')) return '#d39965'
+  if (kind.startsWith('codex')) return '#7aa2f7'
   return 'var(--border-focus)'
 }
 

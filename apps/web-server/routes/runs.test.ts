@@ -57,6 +57,7 @@ function writeFeature(name: string): void {
 
 async function build(opts: {
   startRun?: (f: string) => Promise<OrchestratorLike>
+  broker?: Parameters<typeof runsRoutes>[1]['broker']
   restartHeal?: (runId: string, text: string) => Promise<RestartHealResult>
   projectRoot?: string
   generateEvaluationRewrite?: Parameters<typeof runsRoutes>[1]['generateEvaluationRewrite']
@@ -68,6 +69,7 @@ async function build(opts: {
     featuresDir,
     projectRoot: opts.projectRoot,
     store,
+    broker: opts.broker,
     startRun: opts.startRun ?? (async () => { throw new Error('not configured') }),
     restartHeal: opts.restartHeal,
     generateEvaluationRewrite: opts.generateEvaluationRewrite,
@@ -934,6 +936,86 @@ describe('POST /api/runs', () => {
     const res = await app.inject({ method: 'POST', url: '/api/runs', payload: { feature: 'noenv' } })
     expect(res.statusCode).toBe(201)
     expect(receivedEnv).toBeUndefined()
+  })
+
+  it('reuses an active external-heal run instead of starting another run', async () => {
+    const dir = path.join(featuresDir, 'foo')
+    fs.mkdirSync(dir, { recursive: true })
+    fs.writeFileSync(
+      path.join(dir, 'feature.config.cjs'),
+      `module.exports = { config: { name: 'foo', description: 'd', envs: ['local'], featureDir: __dirname } }`,
+    )
+    const runDir = runDirFor(logsDir, 'active-heal')
+    fs.mkdirSync(runDir, { recursive: true })
+    writeManifest(path.join(runDir, 'manifest.json'), {
+      runId: 'active-heal',
+      feature: 'foo',
+      featureDir: dir,
+      env: 'local',
+      startedAt: '2026-05-19T00:00:00.000Z',
+      status: 'healing',
+      healCycles: 1,
+      services: [],
+      healMode: 'external',
+      lifecycle: {
+        phase: 'waiting-for-signal',
+        headline: 'Waiting for heal signal',
+        updatedAt: '2026-05-19T00:00:01.000Z',
+      },
+    })
+    writeRunsIndex(logsDir, [
+      {
+        runId: 'active-heal',
+        feature: 'foo',
+        startedAt: '2026-05-19T00:00:00.000Z',
+        status: 'healing',
+      },
+    ])
+    const startRun = vi.fn(async () => makeStub('new-run'))
+    const claim = vi.fn(() => ({
+      accepted: true as const,
+      session: {
+        sessionId: 'sess-1',
+        clientKind: 'claude-desktop' as const,
+        claimedAt: '2026-05-19T00:00:02.000Z',
+        lastHeartbeatAt: '2026-05-19T00:00:02.000Z',
+        status: 'connected' as const,
+        cycleCount: 0,
+      },
+    }))
+    const { app } = await build({ startRun, broker: { claim } })
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/runs',
+      payload: {
+        feature: 'foo',
+        env: 'local',
+        healAgent: {
+          kind: 'external',
+          sessionId: 'sess-1',
+          clientKind: 'claude-desktop',
+          conversationName: 'resume run',
+        },
+        forceNew: true,
+      },
+    })
+
+    expect(res.statusCode).toBe(200)
+    expect(res.json()).toMatchObject({
+      runId: 'active-heal',
+      reused: true,
+      status: 'healing',
+      claimed: true,
+      ignoredForceNew: true,
+    })
+    expect(res.json().warning).toContain('signal_run')
+    expect(startRun).not.toHaveBeenCalled()
+    expect(claim).toHaveBeenCalledWith('active-heal', {
+      sessionId: 'sess-1',
+      clientKind: 'claude-desktop',
+      conversationName: 'resume run',
+    })
   })
 
   it('500s with stringified non-Error rejection', async () => {
