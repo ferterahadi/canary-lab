@@ -257,10 +257,11 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
   }
 
   await app.register(runsRoutes, {
-    featuresDir,
-    projectRoot: opts.projectRoot,
-    store: runStore,
-    startRun: async (
+	    featuresDir,
+	    projectRoot: opts.projectRoot,
+	    store: runStore,
+	    broker: externalHealBroker,
+	    startRun: async (
       featureName: string,
       env?: string,
       healAgentReq?: { kind: 'external'; sessionId: string; clientKind: 'claude-cli' | 'claude-desktop' | 'codex-cli' | 'codex-desktop' | 'other'; clientVersion?: string; conversationName?: string },
@@ -554,12 +555,12 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
     featuresDir,
     projectRoot: opts.projectRoot,
     startRun: async (feature, env, healAgent) => {
-      const resp = await app.inject({
-        method: 'POST',
-        url: '/api/runs',
-        payload: { feature, env, ...(healAgent ? { healAgent } : {}) },
-      })
-      if (resp.statusCode !== 201) {
+	      const resp = await app.inject({
+	        method: 'POST',
+	        url: '/api/runs',
+	        payload: { feature, env, ...(healAgent ? { healAgent } : {}) },
+	      })
+	      if (resp.statusCode !== 200 && resp.statusCode !== 201) {
         const body = (() => { try { return JSON.parse(resp.payload) } catch { return resp.payload } })()
         const message = typeof body === 'object' && body && 'error' in body ? String((body as { error: unknown }).error) : String(body)
         throw new Error(`start_run failed (${resp.statusCode}): ${message}`)

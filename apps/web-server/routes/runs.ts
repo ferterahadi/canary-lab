@@ -28,7 +28,8 @@ import {
   parseAgentSessionRefFile,
   selectAgentSessionRef,
 } from '../lib/agent-session-log'
-import { isTerminalRunStatus } from '../../../shared/run-state'
+import { isActiveRunStatus, isTerminalRunStatus } from '../../../shared/run-state'
+import type { ExternalHealBroker } from '../lib/external-heal-broker'
 
 const EVALUATION_REWRITE_FORMAT_VERSION = 6
 
@@ -62,6 +63,7 @@ export interface RunsRouteDeps {
     env?: string,
     healAgent?: ExternalHealAgentRequest,
   ): Promise<OrchestratorLike>
+  broker?: Pick<ExternalHealBroker, 'claim'>
   restartHeal?(runId: string, text: string): Promise<RestartHealResult>
   generateEvaluationRewrite?(
     detail: Parameters<typeof generateEvaluationRewriteWithAgent>[0],
@@ -396,6 +398,7 @@ export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Pro
       feature?: string
       env?: string
       healAgent?: ExternalHealAgentRequest | { kind?: string }
+      forceNew?: boolean
     }
   }>('/api/runs', async (req, reply) => {
     const feature = req.body?.feature
@@ -421,6 +424,31 @@ export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Pro
     if (healAgent && 'error' in healAgent) {
       reply.code(400)
       return { error: healAgent.error }
+    }
+    if (healAgent) {
+      const active = findActiveRunForFeature(deps.store, feature, env)
+      if (active) {
+        const claim = deps.broker?.claim(active.manifest.runId, {
+          sessionId: healAgent.sessionId,
+          clientKind: healAgent.clientKind,
+          ...(healAgent.clientVersion ? { clientVersion: healAgent.clientVersion } : {}),
+          ...(healAgent.conversationName ? { conversationName: healAgent.conversationName } : {}),
+        }) ?? null
+        reply.code(200)
+        return {
+          runId: active.manifest.runId,
+          reused: true,
+          status: active.manifest.status,
+          claimed: claim ? claim.accepted : false,
+          claim,
+          ...(req.body?.forceNew
+            ? {
+                ignoredForceNew: true,
+                warning: 'An active run already exists for this feature. Continue it with write_journal, signal_run, and wait_for_heal_task instead of starting a fresh run.',
+              }
+            : {}),
+        }
+      }
     }
     try {
       const orch = await deps.startRun(feature, env, healAgent ?? undefined)
@@ -732,6 +760,33 @@ function parseExternalHealAgent(
     ...(typeof v.clientVersion === 'string' ? { clientVersion: v.clientVersion } : {}),
     ...(typeof v.conversationName === 'string' ? { conversationName: v.conversationName } : {}),
   }
+}
+
+function findActiveRunForFeature(
+  store: RunStore,
+  feature: string,
+  env: string | undefined,
+): RunDetail | null {
+  const candidates: Array<{ detail: RunDetail; startedAt: string }> = []
+  for (const entry of store.list({ feature })) {
+    if (!isActiveRunStatus(entry.status)) continue
+    const detail = store.get(entry.runId)
+    if (!detail) continue
+    if (env && detail.manifest.env !== env) continue
+    candidates.push({ detail, startedAt: entry.startedAt })
+  }
+  candidates.sort((a, b) => {
+    const priorityDiff = activeRunPriority(a.detail) - activeRunPriority(b.detail)
+    if (priorityDiff !== 0) return priorityDiff
+    return a.startedAt < b.startedAt ? 1 : a.startedAt > b.startedAt ? -1 : 0
+  })
+  return candidates[0]?.detail ?? null
+}
+
+function activeRunPriority(detail: RunDetail): number {
+  if (detail.manifest.lifecycle?.phase === 'waiting-for-signal') return 0
+  if (detail.manifest.status === 'healing') return 1
+  return 2
 }
 
 interface ZipEntry {

@@ -16,6 +16,7 @@ import {
 } from './run-store'
 import { readManifest, writeManifest, writeRunsIndex, readRunsIndex } from './runtime/manifest'
 import { runDirFor } from './runtime/run-paths'
+import { HEARTBEAT_STALE_MS } from '../../../shared/run-state'
 
 let tmpDir: string
 beforeEach(() => {
@@ -91,7 +92,7 @@ describe('listRuns', () => {
       status: 'running',
       healCycles: 0,
       services: [],
-      heartbeatAt: new Date(Date.now() - 60_000).toISOString(),
+      heartbeatAt: new Date(Date.now() - HEARTBEAT_STALE_MS - 1).toISOString(),
     })
     writeRunsIndex(tmpDir, [
       { runId: 'stale-untouched', feature: 'foo', startedAt: '2026-01-01T00:00:00Z', status: 'running' },
@@ -113,7 +114,7 @@ describe('reapStaleRuns', () => {
       status: 'running',
       healCycles: 0,
       services: [],
-      heartbeatAt: new Date(Date.now() - 60_000).toISOString(),
+      heartbeatAt: new Date(Date.now() - HEARTBEAT_STALE_MS - 1).toISOString(),
     })
     writeRunsIndex(tmpDir, [
       { runId: 'stale-1', feature: 'foo', startedAt: '2026-01-01T00:00:00Z', status: 'running' },
@@ -185,7 +186,7 @@ describe('reapStaleRuns', () => {
       status: 'running',
       healCycles: 0,
       services: [],
-      heartbeatAt: new Date(Date.now() - 60_000).toISOString(),
+      heartbeatAt: new Date(Date.now() - HEARTBEAT_STALE_MS - 1).toISOString(),
     })
     writeRunsIndex(tmpDir, [
       { runId: 'dead-1', feature: 'foo', startedAt: '2026-01-01T00:00:00Z', status: 'running' },
@@ -250,7 +251,7 @@ describe('reapStaleRuns', () => {
       status: 'healing',
       healCycles: 0,
       services: [],
-      heartbeatAt: new Date(Date.now() - 60_000).toISOString(),
+      heartbeatAt: new Date(Date.now() - HEARTBEAT_STALE_MS - 1).toISOString(),
     })
     writeRunsIndex(tmpDir, [
       { runId: 'boom-1', feature: 'foo', startedAt: '2026-01-01T00:00:00Z', status: 'healing' },
@@ -1151,7 +1152,7 @@ describe('RunStore', () => {
       status: 'running',
       healCycles: 0,
       services: [],
-      heartbeatAt: new Date(Date.now() - 60_000).toISOString(),
+      heartbeatAt: new Date(Date.now() - HEARTBEAT_STALE_MS - 1).toISOString(),
     })
     writeRunsIndex(tmpDir, [
       { runId: 'stale', feature: 'foo', startedAt: '2026-01-01T00:00:00Z', status: 'running' },

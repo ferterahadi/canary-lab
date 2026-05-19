@@ -178,6 +178,30 @@ export class ExternalHealBroker {
     return { ok: true, session: next }
   }
 
+  /** Refresh `lastHeartbeatAt` for any MCP call from the claim holder.
+   *  Distinct from `heartbeat()` in that it does not require the caller to
+   *  declare a status — it just proves liveness. If the watchdog had already
+   *  marked the session disconnected, revive it as `healing` since the agent
+   *  obviously isn't gone (it's calling us). */
+  touch(runId: string, sessionId: string): HeartbeatResult {
+    const existing = this.sessions.get(runId)
+    if (!existing) return { ok: false, reason: 'no-claim' }
+    if (existing.sessionId !== sessionId) return { ok: false, reason: 'session-mismatch' }
+
+    const wasDisconnected = existing.status === 'disconnected'
+    const next: ExternalHealSession = {
+      ...existing,
+      lastHeartbeatAt: new Date(this.deps.now()).toISOString(),
+      ...(wasDisconnected ? { status: 'healing' as const } : {}),
+    }
+    this.sessions.set(runId, next)
+    this.deps.patchManifest(runId, { externalHealSession: next })
+    if (wasDisconnected) {
+      this.deps.emit({ kind: 'external-claim-changed', runId })
+    }
+    return { ok: true, session: next }
+  }
+
   /** Increment the cycle counter on the active session. No-op when no claim. */
   bumpCycle(runId: string): void {
     const existing = this.sessions.get(runId)

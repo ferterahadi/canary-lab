@@ -98,10 +98,14 @@ export function registerCanaryLabTools(server: McpServer, deps: CanaryLabMcpDeps
 
   server.registerTool('get_heal_context', {
     description: 'Bundle of failure context an external heal agent needs: failed tests with artifact URLs, heal-index markdown, journal, repo branches, lifecycle.',
-    inputSchema: { runId: z.string() },
-  }, async ({ runId }) => {
+    inputSchema: {
+      runId: z.string(),
+      session_id: z.string().optional().describe('External heal session id. When provided, refreshes the session heartbeat.'),
+    },
+  }, async ({ runId, session_id }) => {
     const context = buildHealContext(deps, runId)
     if (!context) return errorResult(`run not found: ${runId}`)
+    if (session_id) deps.broker.touch(runId, session_id)
     return asJsonResult(context)
   })
 
@@ -109,7 +113,7 @@ export function registerCanaryLabTools(server: McpServer, deps: CanaryLabMcpDeps
 
   server.registerTool('start_run', {
     description:
-      'Start a new Canary Lab run. Set `claim_heal: true` to register this MCP session as the external heal agent for the run (recommended for agentic workflows).',
+      'Start or resume a Canary Lab run. This returns the newest active run for the feature instead of creating a duplicate, even if `force_new` is passed. Use this only as the initial entrypoint or when no runId is known. After code changes, call `write_journal`, `signal_run`, then `wait_for_heal_task` on the same run.',
     inputSchema: {
       feature: z.string().describe('Feature name (from list_features).'),
       env: z.string().optional().describe('Envset name. Defaults to the feature\'s first declared env.'),
@@ -117,9 +121,37 @@ export function registerCanaryLabTools(server: McpServer, deps: CanaryLabMcpDeps
       session_id: z.string().describe('Stable id identifying this MCP/agent session. Reuse the same id across calls within one conversation to enable reconnects.'),
       client_kind: CLIENT_KIND.default('other').describe('Which kind of client is starting the run.'),
       conversation_name: z.string().optional().describe('Human label shown in the Canary Lab UI (e.g. "fix checkout").'),
+      force_new: z.boolean().default(false).describe('Deprecated for MCP clients. Ignored when the feature already has an active run; use `signal_run` to verify fixes on the existing healing run.'),
     },
-  }, async ({ feature, env, claim_heal, session_id, client_kind, conversation_name }) => {
+  }, async ({ feature, env, claim_heal, session_id, client_kind, conversation_name, force_new }) => {
     try {
+      const active = findActiveRunForFeature(deps, feature, env)
+      if (active) {
+        let claim: { accepted: true; session: unknown } | { accepted: false; reason: string; currentSession: unknown } | null = null
+        if (claim_heal) {
+          const result = deps.broker.claim(active.manifest.runId, {
+            sessionId: session_id,
+            clientKind: client_kind,
+            ...(conversation_name ? { conversationName: conversation_name } : {}),
+          })
+          claim = result.accepted
+            ? { accepted: true, session: result.session }
+            : { accepted: false, reason: result.reason, currentSession: result.currentSession }
+        }
+        return asJsonResult({
+          runId: active.manifest.runId,
+          reused: true,
+          status: active.manifest.status,
+          claimed: claim_heal ? claim?.accepted === true : false,
+          claim,
+          ...(force_new
+            ? {
+                ignoredForceNew: true,
+                warning: 'An active run already exists for this feature. Continue it with write_journal, signal_run, and wait_for_heal_task instead of starting a fresh run.',
+              }
+            : {}),
+        })
+      }
       const result = await deps.startRun(
         feature,
         env,
@@ -132,7 +164,7 @@ export function registerCanaryLabTools(server: McpServer, deps: CanaryLabMcpDeps
             }
           : undefined,
       )
-      return asJsonResult({ runId: result.runId, claimed: claim_heal })
+      return asJsonResult({ runId: result.runId, reused: false, claimed: claim_heal })
     } catch (err) {
       return errorResult(err instanceof Error ? err.message : String(err))
     }
@@ -209,7 +241,7 @@ export function registerCanaryLabTools(server: McpServer, deps: CanaryLabMcpDeps
   })
 
   server.registerTool('heartbeat', {
-    description: 'Refresh the external heal session liveness. Call every 5–10s while you hold a claim to avoid auto-disconnect at 15s.',
+    description: 'Refresh the external heal session liveness. Sessions auto-disconnect after 10 minutes without any MCP traffic; any signal_run / write_journal / get_heal_context call also refreshes liveness, so you usually do not need to call this explicitly during normal healing.',
     inputSchema: {
       runId: z.string(),
       session_id: z.string(),
@@ -256,6 +288,7 @@ export function registerCanaryLabTools(server: McpServer, deps: CanaryLabMcpDeps
     if (!ownership.ok && ownership.reason === 'session-mismatch') {
       return errorResult(`session-mismatch: run is held by ${ownership.currentSession?.sessionId}`)
     }
+    if (session_id) deps.broker.touch(runId, session_id)
     const paths = buildRunPaths(runDirFor(deps.store.logsDir, runId))
     const target = kind === 'restart' ? paths.restartSignal
       : kind === 'rerun' ? paths.rerunSignal
@@ -280,8 +313,9 @@ export function registerCanaryLabTools(server: McpServer, deps: CanaryLabMcpDeps
       runId: z.string(),
       iteration: z.number().int().min(1).describe('Heal cycle number this note belongs to.'),
       body: z.string().describe('Markdown note body. The journal is human-readable.'),
+      session_id: z.string().optional().describe('External heal session id. When provided, refreshes the session heartbeat.'),
     },
-  }, async ({ runId, iteration, body }) => {
+  }, async ({ runId, iteration, body, session_id }) => {
     const detail = deps.store.get(runId)
     if (!detail) return errorResult(`run not found: ${runId}`)
     const runDir = runDirFor(deps.store.logsDir, runId)
@@ -294,11 +328,39 @@ export function registerCanaryLabTools(server: McpServer, deps: CanaryLabMcpDeps
     } catch (err) {
       return errorResult(`could not append journal: ${(err as Error).message}`)
     }
+    if (session_id) deps.broker.touch(runId, session_id)
     return asJsonResult({ appended: true, path: journalPath })
   })
 }
 
 // ─── result helpers ─────────────────────────────────────────────────────
+
+function findActiveRunForFeature(
+  deps: CanaryLabMcpDeps,
+  feature: string,
+  env: string | undefined,
+): RunDetail | null {
+  const candidates: Array<{ detail: RunDetail; startedAt: string }> = []
+  for (const entry of deps.store.list({ feature })) {
+    if (!isActiveRunStatus(entry.status)) continue
+    const detail = deps.store.get(entry.runId)
+    if (!detail) continue
+    if (env && detail.manifest.env !== env) continue
+    candidates.push({ detail, startedAt: entry.startedAt })
+  }
+  candidates.sort((a, b) => {
+    const priorityDiff = activeRunPriority(a.detail) - activeRunPriority(b.detail)
+    if (priorityDiff !== 0) return priorityDiff
+    return a.startedAt < b.startedAt ? 1 : a.startedAt > b.startedAt ? -1 : 0
+  })
+  return candidates[0]?.detail ?? null
+}
+
+function activeRunPriority(detail: RunDetail): number {
+  if (detail.manifest.lifecycle?.phase === 'waiting-for-signal') return 0
+  if (detail.manifest.status === 'healing') return 1
+  return 2
+}
 
 function buildHealContext(deps: CanaryLabMcpDeps, runId: string): Record<string, unknown> | null {
   const detail = deps.store.get(runId)
@@ -326,6 +388,7 @@ function buildHealContext(deps: CanaryLabMcpDeps, runId: string): Record<string,
     lifecycle: detail.manifest.lifecycle ?? null,
     externalHealSession: detail.manifest.externalHealSession ?? null,
     summary: summary ?? null,
+    counts: normalizeRunCounts(summary ?? null),
     failedTests,
     healIndexMarkdown: safeRead(paths.healIndexPath),
     journalMarkdown: safeRead(paths.diagnosisJournalPath),
@@ -333,10 +396,82 @@ function buildHealContext(deps: CanaryLabMcpDeps, runId: string): Record<string,
   }
 }
 
+interface NormalizedRunCounts {
+  totalKnown: number
+  passed: number
+  failed: number
+  skipped: number
+  notRun: number
+  passedNames: string[]
+  failedNames: string[]
+  skippedNames: string[]
+  notRunNames: string[]
+  statusLine: string
+}
+
+function normalizeRunCounts(summary: RunDetail['summary'] | null): NormalizedRunCounts {
+  const summaryWithKnownTests = summary as (RunDetail['summary'] & { knownTests?: unknown }) | null
+  const knownTests = Array.isArray(summaryWithKnownTests?.knownTests)
+    ? summaryWithKnownTests.knownTests
+    : []
+  const knownNames = uniqueStrings(knownTests.map((entry) => {
+    if (!entry || typeof entry !== 'object') return ''
+    const name = (entry as { name?: unknown }).name
+    return typeof name === 'string' ? name : ''
+  }))
+  const passedNames = uniqueStrings(summary?.passedNames ?? [])
+  const failedNames = uniqueStrings((summary?.failed ?? []).map((entry) => entry.name))
+  const skippedNames = uniqueStrings(summary?.skippedNames ?? [])
+  const accounted = new Set([...passedNames, ...failedNames, ...skippedNames])
+  const notRunNames = knownNames.filter((name) => !accounted.has(name))
+  const totalKnown = knownNames.length > 0 ? knownNames.length : numberOrZero(summary?.total)
+  const passed = typeof summary?.passed === 'number' ? summary.passed : passedNames.length
+  const failed = failedNames.length
+  const skipped = typeof summary?.skipped === 'number' ? summary.skipped : skippedNames.length
+  const notRun = knownNames.length > 0
+    ? notRunNames.length
+    : Math.max(0, totalKnown - passed - failed - skipped)
+
+  return {
+    totalKnown,
+    passed,
+    failed,
+    skipped,
+    notRun,
+    passedNames,
+    failedNames,
+    skippedNames,
+    notRunNames,
+    statusLine: statusLineForCounts({ totalKnown, passed, failed, skipped, notRun }),
+  }
+}
+
+function statusLineForCounts(counts: Pick<NormalizedRunCounts, 'totalKnown' | 'passed' | 'failed' | 'skipped' | 'notRun'>): string {
+  const parts = [`${counts.passed}/${counts.totalKnown} passed`, `${counts.failed} failed`]
+  if (counts.skipped > 0) parts.push(`${counts.skipped} skipped`)
+  parts.push(`${counts.notRun} not run`)
+  return parts.join(', ')
+}
+
+function uniqueStrings(values: unknown[]): string[] {
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const value of values) {
+    if (typeof value !== 'string' || value.length === 0 || seen.has(value)) continue
+    seen.add(value)
+    out.push(value)
+  }
+  return out
+}
+
+function numberOrZero(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0
+}
+
 type WaitForHealTaskValue =
   | { type: 'needs_heal'; runId: string; cycle: number; context: Record<string, unknown> }
-  | { type: 'passed'; runId: string; summary: RunDetail['summary'] | null }
-  | { type: 'failed'; runId: string; status: string; summary: RunDetail['summary'] | null }
+  | { type: 'passed'; runId: string; summary: RunDetail['summary'] | null; counts: NormalizedRunCounts }
+  | { type: 'failed'; runId: string; status: string; summary: RunDetail['summary'] | null; counts: NormalizedRunCounts }
   | { type: 'timeout'; runId: string; status: string | null; lifecycle: RunDetail['manifest']['lifecycle'] | null }
 
 type WaitForHealTaskResult =
@@ -353,10 +488,27 @@ function classifyWaitForHealTask(
 
   const status = detail.manifest.status
   if (status === 'passed') {
-    return { ok: true, value: { type: 'passed', runId, summary: detail.summary ?? null } }
+    return {
+      ok: true,
+      value: {
+        type: 'passed',
+        runId,
+        summary: detail.summary ?? null,
+        counts: normalizeRunCounts(detail.summary ?? null),
+      },
+    }
   }
   if (isTerminalRunStatus(status)) {
-    return { ok: true, value: { type: 'failed', runId, status, summary: detail.summary ?? null } }
+    return {
+      ok: true,
+      value: {
+        type: 'failed',
+        runId,
+        status,
+        summary: detail.summary ?? null,
+        counts: normalizeRunCounts(detail.summary ?? null),
+      },
+    }
   }
 
   const ownership = deps.broker.assertOwnership(runId, sessionId)
