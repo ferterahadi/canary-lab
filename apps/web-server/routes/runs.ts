@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyReply } from 'fastify'
 import fs from 'fs'
 import path from 'path'
 import type { PlaywrightArtifact, RunDetail } from '../lib/run-store'
-import type { RunStore, OrchestratorLike, RestartHealResult } from '../lib/run-store'
+import type { RunStore, OrchestratorLike, RestartHealResult, RestartRunResult } from '../lib/run-store'
 import { loadFeatures } from '../lib/feature-loader'
 import { buildRunPaths, runDirFor } from '../lib/runtime/run-paths'
 import { createEvaluationExport, generateEvaluationRewriteWithAgent, type EvaluationRewrite } from '../lib/test-review-export'
@@ -28,7 +28,7 @@ import {
   parseAgentSessionRefFile,
   selectAgentSessionRef,
 } from '../lib/agent-session-log'
-import { isActiveRunStatus, isTerminalRunStatus } from '../../../shared/run-state'
+import { isTerminalRunStatus } from '../../../shared/run-state'
 import type { ExternalHealBroker } from '../lib/external-heal-broker'
 
 const EVALUATION_REWRITE_FORMAT_VERSION = 6
@@ -65,6 +65,7 @@ export interface RunsRouteDeps {
   ): Promise<OrchestratorLike>
   broker?: Pick<ExternalHealBroker, 'claim'>
   restartHeal?(runId: string, text: string): Promise<RestartHealResult>
+  restartRun?(runId: string): Promise<RestartRunResult>
   generateEvaluationRewrite?(
     detail: Parameters<typeof generateEvaluationRewriteWithAgent>[0],
     audienceAdapter: Parameters<typeof generateEvaluationRewriteWithAgent>[1],
@@ -542,6 +543,17 @@ export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Pro
     },
   )
 
+  app.post<{ Params: { runId: string } }>('/api/runs/:runId/restart', async (req, reply) => {
+    const restarted = await deps.restartRun?.(req.params.runId)
+    if (restarted?.ok) {
+      reply.code(202)
+      return { status: 'restarted', mode: restarted.mode }
+    }
+    const reason = restarted?.reason ?? 'not-restartable'
+    reply.code(reason === 'run-not-found' ? 404 : reason === 'spawn-failed' ? 500 : 409)
+    return { reason }
+  })
+
   // POST /api/runs/:runId/abort — explicit abort of an active run. Stops
   // the orchestrator (kills Playwright + heal agent + service ptys) and
   // marks the manifest 'aborted'. The run is preserved in history so the
@@ -769,7 +781,7 @@ function findActiveRunForFeature(
 ): RunDetail | null {
   const candidates: Array<{ detail: RunDetail; startedAt: string }> = []
   for (const entry of store.list({ feature })) {
-    if (!isActiveRunStatus(entry.status)) continue
+    if (entry.status !== 'healing') continue
     const detail = store.get(entry.runId)
     if (!detail) continue
     if (env && detail.manifest.env !== env) continue

@@ -7,7 +7,7 @@ import { isActiveRunStatus, isRestartableRunStatus } from '../../shared/run-stat
 import { featuresRoutes } from './routes/features'
 import { featureConfigRoutes } from './routes/feature-config'
 import { projectConfigRoutes } from './routes/project-config'
-import { runsRoutes } from './routes/runs'
+import { runsRoutes, type ExternalHealAgentRequest } from './routes/runs'
 import { journalRoutes } from './routes/journal'
 import { testsDraftRoutes, type TestsDraftRouteDeps } from './routes/tests-draft'
 import { externalHealRoutes, makeExternalHealAuditLogger } from './routes/external-heal'
@@ -256,6 +256,103 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
     })
   }
 
+  const restartExternalRun = async (
+    runId: string,
+    healAgentReq: { kind: 'external'; sessionId: string; clientKind: 'claude-cli' | 'claude-desktop' | 'codex-cli' | 'codex-desktop' | 'other'; clientVersion?: string; conversationName?: string },
+    guidance?: string,
+  ): Promise<OrchestratorLike> => {
+    const detail = runStore.get(runId)
+    if (!detail) throw Object.assign(new Error('run-not-found'), { statusCode: 404 })
+    const manifest = detail.manifest
+    if (!isRestartableRunStatus(manifest.status)) throw Object.assign(new Error('not-restartable'), { statusCode: 409 })
+
+    const features = loadFeatures(featuresDir)
+    const feature = features.find((f) => f.name === manifest.feature)
+    if (!feature) throw Object.assign(new Error('feature not found'), { statusCode: 404 })
+
+    const env = manifest.env ?? feature.envs?.[0]
+    const runDir = runDirFor(logsDir, runId)
+    const runnerLog = new RunnerLog(buildRunPaths(runDir).runnerLogPath)
+
+    let backups: BackupRecord[] | null = null
+    if (env) {
+      try {
+        backups = applyFeatureEnvset(feature.featureDir, env)
+        if (backups) runnerLog.info(`Applied envset "${env}" for external restart ${feature.name}`)
+      } catch (err) {
+        runnerLog.warn(`envset apply failed: ${(err as Error).message}`)
+        throw Object.assign(err instanceof Error ? err : new Error(String(err)), { statusCode: 500 })
+      }
+    }
+
+    let repoBranchSnapshots
+    try {
+      await validateConfiguredRepoBranches(feature)
+      repoBranchSnapshots = await collectRepoBranchSnapshots(feature)
+    } catch (err) {
+      if (backups) restore(backups)
+      runnerLog.warn(`External restart rejected: ${(err as Error).message}`)
+      throw Object.assign(err instanceof Error ? err : new Error(String(err)), { statusCode: 409 })
+    }
+
+    const nowIso = new Date().toISOString()
+    const externalHealSession: import('./lib/runtime/manifest').ExternalHealSession = {
+      sessionId: healAgentReq.sessionId,
+      clientKind: healAgentReq.clientKind,
+      ...(healAgentReq.clientVersion ? { clientVersion: healAgentReq.clientVersion } : {}),
+      ...(healAgentReq.conversationName ? { conversationName: healAgentReq.conversationName } : {}),
+      claimedAt: nowIso,
+      lastHeartbeatAt: nowIso,
+      status: 'connected',
+      cycleCount: 0,
+    }
+
+    let orch: RunOrchestrator
+    try {
+      orch = new RunOrchestrator({
+        feature,
+        env,
+        runId,
+        runDir,
+        ptyFactory,
+        runnerLog,
+        externalHeal: true,
+        externalHealSession,
+        repoBranchSnapshots,
+        initialHealCycles: manifest.healCycles,
+        runStateSink: runStore,
+      })
+    } catch (err) {
+      if (backups) restore(backups)
+      runnerLog.warn(`External restart failed: ${(err as Error).message}`)
+      throw Object.assign(err instanceof Error ? err : new Error(String(err)), { statusCode: 500 })
+    }
+
+    externalHealBroker.claim(runId, {
+      sessionId: healAgentReq.sessionId,
+      clientKind: healAgentReq.clientKind,
+      ...(healAgentReq.clientVersion ? { clientVersion: healAgentReq.clientVersion } : {}),
+      ...(healAgentReq.conversationName ? { conversationName: healAgentReq.conversationName } : {}),
+    })
+
+    attachRunStreams(orch, runnerLog, feature.name, backups)
+    const broker = brokers.get(runId)!
+    broker.resetPane('agent')
+    broker.push('agent', `\n[orchestrator] Restarting external heal${guidance ? `: ${guidance}` : ''}\n`)
+    registry.set(runId, orch)
+    orch.restartTerminalRun(guidance)
+      .then(async (status) => {
+        await orch.stop(status).catch(() => {})
+        registry.delete(orch.runId)
+      })
+      .catch(async (err) => {
+        broker.push('agent', `\n[orchestrator error] ${String(err)}\n`)
+        await orch.stop('aborted').catch(() => {})
+        registry.delete(orch.runId)
+      })
+    return orch
+  }
+
   await app.register(runsRoutes, {
 	    featuresDir,
 	    projectRoot: opts.projectRoot,
@@ -378,7 +475,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
           env,
           runId,
           runDir,
-          ptyFactory: realPtyFactory(),
+	          ptyFactory,
           runnerLog,
           autoHeal,
           manualHeal:
@@ -422,6 +519,127 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
           registry.delete(orch.runId)
       })
       return orch
+    },
+    restartRun: async (runId: string) => {
+      const detail = runStore.get(runId)
+      if (!detail) return { ok: false, reason: 'run-not-found' as const }
+      const manifest = detail.manifest
+      if (isActiveRunStatus(manifest.status)) return { ok: false, reason: 'already-active' as const }
+      if (!isRestartableRunStatus(manifest.status)) return { ok: false, reason: 'not-restartable' as const }
+
+      const features = loadFeatures(featuresDir)
+      const feature = features.find((f) => f.name === manifest.feature)
+      if (!feature) return { ok: false, reason: 'not-restartable' as const }
+
+      const runDir = runDirFor(logsDir, runId)
+      const runnerLog = new RunnerLog(buildRunPaths(runDir).runnerLogPath)
+      const env = manifest.env ?? feature.envs?.[0]
+      if (!manifest.env && env) {
+        runnerLog.warn(`Restarting run for legacy manifest without persisted env; defaulting to "${env}".`)
+      }
+      let backups: BackupRecord[] | null = null
+      if (env) {
+        try {
+          backups = applyFeatureEnvset(feature.featureDir, env)
+          if (backups) runnerLog.info(`Applied envset "${env}" for run restart ${feature.name}`)
+        } catch (err) {
+          runnerLog.warn(`envset apply failed: ${(err as Error).message}`)
+          return { ok: false, reason: 'spawn-failed' as const }
+        }
+      }
+
+      let repoBranchSnapshots
+      try {
+        await validateConfiguredRepoBranches(feature)
+        repoBranchSnapshots = await collectRepoBranchSnapshots(feature)
+      } catch (err) {
+        if (backups) restore(backups)
+        runnerLog.warn(`Run restart rejected: ${(err as Error).message}`)
+        return { ok: false, reason: 'not-restartable' as const }
+      }
+
+      const projectConfig = loadProjectConfig(opts.projectRoot)
+      const preserveExternal = manifest.healMode === 'external'
+      const preserveManual = manifest.healMode === 'manual'
+      let autoHeal: {
+        agent: HealAgent
+        buildSpawnCommand: (args: {
+          sessionId?: string
+          resume?: boolean
+          mcpOutputDir?: string
+          promptFile?: string
+        }) => string
+        buildCyclePrompt: BuildHealCyclePrompt
+      } | undefined
+
+      if (!preserveExternal && !preserveManual && projectConfig.healAgent !== 'manual' && projectConfig.healAgent !== 'external') {
+        const agentChoice = projectConfig.healAgent === 'auto'
+          ? pickAvailableHealAgent()
+          : pickAvailableHealAgent(projectConfig.healAgent)
+        if (agentChoice) {
+          try {
+            autoHeal = {
+              agent: agentChoice,
+              buildSpawnCommand: ({ sessionId, resume, mcpOutputDir, promptFile }) => buildAgentSpawnCommand(agentChoice, {
+                sessionId,
+                resume,
+                mcpOutputDir,
+                mcpConfigFile: path.join(runDir, 'mcp-config.json'),
+                promptFile,
+              }),
+              buildCyclePrompt: buildOrchestratorHealPrompt({
+                agent: agentChoice,
+                projectRoot: opts.projectRoot,
+                runDir,
+                personalWikiPath: projectConfig.personalWikiPath,
+              }),
+            }
+          } catch (err) {
+            runnerLog.warn(`Auto-heal disabled for run restart: ${(err as Error).message}`)
+          }
+        } else {
+          runnerLog.warn('Auto-heal disabled for run restart: no `claude` or `codex` CLI on PATH.')
+        }
+      }
+
+      let orch: RunOrchestrator
+      try {
+        orch = new RunOrchestrator({
+          feature,
+          env,
+          runId,
+          runDir,
+          ptyFactory,
+          runnerLog,
+          autoHeal,
+          manualHeal: preserveManual,
+          externalHeal: preserveExternal,
+          externalHealSession: preserveExternal ? manifest.externalHealSession : undefined,
+          repoBranchSnapshots,
+          initialHealCycles: manifest.healCycles,
+          runStateSink: runStore,
+        })
+      } catch (err) {
+        if (backups) restore(backups)
+        runnerLog.warn(`Run restart failed: ${(err as Error).message}`)
+        return { ok: false, reason: 'spawn-failed' as const }
+      }
+
+      attachRunStreams(orch, runnerLog, feature.name, backups)
+      const broker = brokers.get(runId)!
+      broker.push('agent', '\n[orchestrator] Retesting remaining failed, skipped, and pending tests...\n')
+      registry.set(runId, orch)
+      orch.restartTerminalRun()
+        .then(async (status) => {
+          await orch.stop(status).catch(() => {})
+          registry.delete(orch.runId)
+        })
+        .catch(async (err) => {
+          broker.push('agent', `\n[orchestrator error] ${String(err)}\n`)
+          await orch.stop('aborted').catch(() => {})
+          registry.delete(orch.runId)
+        })
+      return { ok: true as const, mode: 'remaining' as const }
     },
     restartHeal: async (runId: string, text: string) => {
       const detail = runStore.get(runId)
@@ -481,7 +699,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
           env,
           runId,
           runDir,
-          ptyFactory: realPtyFactory(),
+	          ptyFactory,
           runnerLog,
           autoHeal: {
             agent: agentChoice,
@@ -554,7 +772,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
     broker: externalHealBroker,
     featuresDir,
     projectRoot: opts.projectRoot,
-    startRun: async (feature, env, healAgent) => {
+	    startRun: async (feature, env, healAgent) => {
 	      const resp = await app.inject({
 	        method: 'POST',
 	        url: '/api/runs',
@@ -565,9 +783,13 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
         const message = typeof body === 'object' && body && 'error' in body ? String((body as { error: unknown }).error) : String(body)
         throw new Error(`start_run failed (${resp.statusCode}): ${message}`)
       }
-      return JSON.parse(resp.payload) as { runId: string }
+	      return JSON.parse(resp.payload) as { runId: string }
+	    },
+    restartExternalRun: async (runId, healAgent, guidance) => {
+      const orch = await restartExternalRun(runId, healAgent, guidance)
+      return { runId: orch.runId, mode: 'remaining' }
     },
-  })
+	  })
 
   // Serve the built React frontend if it exists. In development the dist dir
   // is missing — fall back to a placeholder so `GET /` still returns something

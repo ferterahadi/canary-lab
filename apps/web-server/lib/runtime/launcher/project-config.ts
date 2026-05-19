@@ -11,7 +11,10 @@ export interface ProjectConfig {
   personalWikiPath: string | null
 }
 
-const DEFAULT: ProjectConfig = { healAgent: 'auto', editor: 'auto', personalWikiPath: null }
+// Default to `external` — the modern Claude/Codex via MCP flow. `auto` is
+// still accepted by the validator for backwards compatibility with older
+// configs, but new installs and the settings UI prefer external.
+const DEFAULT: ProjectConfig = { healAgent: 'external', editor: 'auto', personalWikiPath: null }
 const FILENAME = 'canary-lab.config.json'
 
 export function projectConfigPath(projectRoot: string): string {

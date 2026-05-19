@@ -60,8 +60,13 @@ describe('canary-lab agent install', () => {
       expect(body).toContain('never call `start_run` to verify')
       expect(body).toContain('`write_journal`, then `signal_run`, then `wait_for_heal_task`')
       expect(body).toContain('Do not pass `force_new` during normal healing')
-    }
-  })
+	      expect(body).toContain('cancel_heal')
+	      expect(body).toContain('healing run has priority')
+	      expect(body).toContain('remaining-test mode')
+	      expect(body).toContain('failed tests first, then skipped tests, then pending/not-run tests')
+	      expect(body).toContain('do not tell the user no test filter exists')
+	    }
+	  })
 
   it('leaves up-to-date installed integrations untouched during refresh', async () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-agent-refresh-current-'))

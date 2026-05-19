@@ -53,9 +53,10 @@ import {
   getProjectConfig,
   putProjectConfig,
   openAgentApp,
-  openEditor,
-  sendAgentInput,
-  extractPrdDocuments,
+	  openEditor,
+	  sendAgentInput,
+	  restartRun,
+	  extractPrdDocuments,
   downloadEvaluationExportTask,
 } from './client'
 
@@ -734,6 +735,14 @@ describe('api client', () => {
     const [url, init] = fetchImpl.mock.calls[0]
     expect(url).toBe('/api/runs/r1/agent-input')
     expect(JSON.parse(init.body as string)).toEqual({ data: 'hello\n' })
+  })
+
+  it('restartRun POSTs to the restart route', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(ok({ status: 'restarted', mode: 'remaining' }, 202))
+    await restartRun('r1', { fetchImpl })
+    const [url, init] = fetchImpl.mock.calls[0]
+    expect(url).toBe('/api/runs/r1/restart')
+    expect(init.method).toBe('POST')
   })
 
   it('addEnvsetSlot POSTs the body', async () => {

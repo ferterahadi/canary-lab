@@ -68,7 +68,7 @@ describe('SettingsModal', () => {
     })
 
     expect(api.putProjectConfig).toHaveBeenCalledWith({
-      healAgent: 'auto',
+      healAgent: 'external',
       editor: 'auto',
       personalWikiPath: '/tmp/wiki',
     })
@@ -104,7 +104,7 @@ describe('SettingsModal', () => {
     })
 
     expect(api.putProjectConfig).toHaveBeenCalledWith({
-      healAgent: 'auto',
+      healAgent: 'external',
       editor: 'auto',
       personalWikiPath: null,
     })

@@ -2054,6 +2054,57 @@ describe('RunOrchestrator.runFullCycle', () => {
     f.spawned[3].emitExit(0)
     expect(await promise).toBe('passed')
     await orch.stop('passed')
+	  })
+})
+
+describe('RunOrchestrator.restartTerminalRun', () => {
+  it('starts by retesting failed, skipped, and pending tests without a full-suite first pass', async () => {
+    const f = makeFakeFactory()
+    const featureDir = path.join(tmpDir, 'features', 'demo')
+    fs.mkdirSync(featureDir, { recursive: true })
+    const paths = buildRunPaths(runDir)
+    fs.writeFileSync(paths.summaryPath, JSON.stringify({
+      complete: true,
+      total: 4,
+      passed: 1,
+      passedNames: ['test-case-a'],
+      skipped: 1,
+      skippedNames: ['test-case-c'],
+      knownTests: [
+        { name: 'test-case-a', title: 'A passed', location: `${featureDir}/e2e/spec.ts:10` },
+        { name: 'test-case-b', title: 'B failed', location: `${featureDir}/e2e/spec.ts:20` },
+        { name: 'test-case-c', title: 'C skipped', location: `${featureDir}/e2e/spec.ts:30` },
+        { name: 'test-case-d', title: 'D pending', location: `${featureDir}/e2e/spec.ts:40` },
+      ],
+      failed: [{ name: 'test-case-b', location: `${featureDir}/e2e/spec.ts:20` }],
+    }))
+    const selections: unknown[] = []
+    const orch = new RunOrchestrator({
+      feature: makeFeature({ featureDir, repos: undefined }),
+      runId: RUN_ID,
+      runDir,
+      ptyFactory: f.factory,
+      healthCheck: async () => true,
+      playwrightSpawner: ({ rerunSelection }) => {
+        selections.push(rerunSelection)
+        return { command: 'pw', cwd: tmpDir }
+      },
+    })
+
+    const promise = orch.restartTerminalRun()
+    await new Promise((resolve) => setTimeout(resolve, 5))
+    expect(f.spawned).toHaveLength(1)
+    f.spawned[0].emitExit(1)
+    await promise
+
+    expect(selections[0]).toMatchObject({
+      kind: 'grep',
+      selected: 3,
+      total: 4,
+      mode: 'failed-and-pending',
+    })
+    expect((selections[0] as { reason: string }).reason).toContain('1 failed first, then 1 skipped, then 1 pending/not-run')
+    expect(f.spawned[0].options.env?.CANARY_LAB_TARGETED_RERUN).toBe('1')
   })
 })
 
@@ -2446,10 +2497,40 @@ describe('computeVerificationPlan', () => {
     if (result.kind !== 'targeted') return
     expect(result.selection.kind).toBe('grep')
     if (result.selection.kind !== 'grep') return
-    expect(result.failedFirst.map((test) => test.name)).toEqual(['test-case-factory-failed'])
-    expect(result.pending.map((test) => test.name)).toEqual(['test-case-factory-pending'])
+	    expect(result.failedFirst.map((test) => test.name)).toEqual(['test-case-factory-failed'])
+	    expect(result.skipped.map((test) => test.name)).toEqual([])
+	    expect(result.pending.map((test) => test.name)).toEqual(['test-case-factory-pending'])
     expect(result.selection.grep).toContain('en_SG: checkout')
     expect(result.selection.grep).toContain('en_SG: payment')
+	  })
+
+  it('orders remaining known tests as failed, skipped, then pending', async () => {
+    const { computeVerificationPlan } = await import('./orchestrator')
+    const featureDir = path.join(tmpDir, 'features', 'demo-known-order')
+    fs.mkdirSync(featureDir, { recursive: true })
+
+    const result = computeVerificationPlan(featureDir, {
+      passed: 1,
+      passedNames: ['test-case-a'],
+      skippedNames: ['test-case-c'],
+      total: 4,
+      knownTests: [
+        { name: 'test-case-a', title: 'A passed', location: `${featureDir}/e2e/spec.ts:10` },
+        { name: 'test-case-b', title: 'B failed', location: `${featureDir}/e2e/spec.ts:20` },
+        { name: 'test-case-c', title: 'C skipped', location: `${featureDir}/e2e/spec.ts:30` },
+        { name: 'test-case-d', title: 'D pending', location: `${featureDir}/e2e/spec.ts:40` },
+      ],
+      failed: [
+        { name: 'test-case-b', location: `${featureDir}/e2e/spec.ts:20` },
+      ],
+    })
+
+    expect(result.kind).toBe('targeted')
+    if (result.kind !== 'targeted') return
+    expect(result.failedFirst.map((test) => test.name)).toEqual(['test-case-b'])
+    expect(result.skipped.map((test) => test.name)).toEqual(['test-case-c'])
+    expect(result.pending.map((test) => test.name)).toEqual(['test-case-d'])
+    expect(result.selection.reason).toContain('1 failed first, then 1 skipped, then 1 pending/not-run')
   })
 
   it('falls back to full-suite when failed tests cannot be safely selected', async () => {

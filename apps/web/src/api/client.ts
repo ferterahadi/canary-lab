@@ -759,6 +759,18 @@ export function sendAgentInput(
   )
 }
 
+export function restartRun(
+  runId: string,
+  opts?: ClientOptions,
+): Promise<{ status: 'restarted'; mode: 'remaining' }> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<{ status: 'restarted'; mode: 'remaining' }>(
+    `${baseUrl}/api/runs/${encodeURIComponent(runId)}/restart`,
+    { method: 'POST' },
+    fetchImpl,
+  )
+}
+
 // Abort an active run. POSTs to the abort endpoint which kills Playwright,
 // the heal agent, and any service ptys, then marks the manifest 'aborted'.
 // History is preserved — use `deleteRun` afterwards to hard-remove the logs.

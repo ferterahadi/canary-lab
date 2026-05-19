@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type {
   EvaluationExportMode,
   PlaywrightArtifact,
@@ -31,7 +31,6 @@ import { AgentSessionView } from './AgentSessionView'
 import { ExternalHealPanel } from './ExternalHealPanel'
 import { JournalTab } from './JournalTab'
 import { ManualHealBanner } from './ManualHealBanner'
-import { RestartHealButton } from './RestartHealButton'
 import {
   isRestartableRunStatus,
   isTerminalRunStatus as isSharedTerminalRunStatus,
@@ -67,6 +66,22 @@ export function RunDetailColumn({
   useEffect(() => {
     setAgentPaneExited(false)
   }, [runId, agentPaneRestartKey])
+
+  // Each new heal cycle spawns a fresh Claude/Codex PTY. Without this, after
+  // the previous cycle's PTY exited (and we flipped to the transcript view),
+  // the transcript would keep showing for cycle 2+ even though a live PTY is
+  // running — because `agentPaneExited` is sticky and `agentPaneRestartKey`
+  // never changed. Bumping the restart key remounts PaneTerminal with a
+  // fresh connection and (via the effect above) clears the exited flag.
+  const lastHealCyclesRef = useRef<number | undefined>(undefined)
+  useEffect(() => {
+    const cycles = detail?.manifest.healCycles
+    if (cycles == null) return
+    if (lastHealCyclesRef.current !== undefined && cycles > lastHealCyclesRef.current) {
+      setAgentPaneRestartKey((k) => k + 1)
+    }
+    lastHealCyclesRef.current = cycles
+  }, [detail?.manifest.healCycles])
 
   if (!runId) {
     return (
@@ -195,12 +210,9 @@ export function RunDetailColumn({
               />
             )}
           </div>
-          {view.actions.restartHeal.enabled && m.healMode !== 'external' && (
-            <RestartHealButton
-              runId={m.runId}
-              onRestarted={() => setAgentPaneRestartKey((key) => key + 1)}
-            />
-          )}
+          {/* Retest lives as a per-row icon in RunsColumn now (see
+              RetestIconButton). The footer-bar variant that used to sit here
+              duplicated that affordance. */}
         </div>
         {tab === 'journal' && (
           <JournalTab feature={m.feature} runId={m.runId} />
@@ -247,25 +259,30 @@ function RunOverviewTab({
         <h2 className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-secondary)' }}>
           Run
         </h2>
-        {isAssertionExportable(manifest.status) && (
-          <div className="relative shrink-0">
-            <button
-              type="button"
-              onClick={() => setExportMenuOpen((open) => !open)}
-              aria-haspopup="menu"
-              aria-expanded={exportMenuOpen}
-              className="inline-flex items-center gap-1.5 rounded px-2.5 py-1 text-[11px] font-medium disabled:cursor-wait disabled:opacity-80"
-              style={{ background: 'var(--bg-selected)', color: 'var(--accent)' }}
-            >
-              {exportError ? 'Export failed' : 'Export Evaluation'}
-              <span aria-hidden="true" style={{ color: 'var(--text-muted)' }}>▾</span>
-            </button>
-            {exportMenuOpen && (
-              <div
-                role="menu"
-                className="absolute right-0 z-20 mt-1 w-44 overflow-hidden rounded-md border py-1 text-xs shadow-lg"
-                style={{ borderColor: 'var(--border-default)', background: 'var(--bg-elevated)', color: 'var(--text-primary)' }}
+        <div className="flex shrink-0 items-center gap-2">
+          {/* Retest is surfaced as an icon-only button on each run row in
+              RunsColumn — see RetestIconButton. The inline button used to
+              live here, but it duplicated that affordance and felt heavy
+              on the overview header. */}
+          {isAssertionExportable(manifest.status) && (
+            <div className="relative shrink-0">
+              <button
+                type="button"
+                onClick={() => setExportMenuOpen((open) => !open)}
+                aria-haspopup="menu"
+                aria-expanded={exportMenuOpen}
+                className="inline-flex items-center gap-1.5 rounded px-2.5 py-1 text-[11px] font-medium disabled:cursor-wait disabled:opacity-80"
+                style={{ background: 'var(--bg-selected)', color: 'var(--accent)' }}
               >
+                {exportError ? 'Export failed' : 'Export Evaluation'}
+                <span aria-hidden="true" style={{ color: 'var(--text-muted)' }}>▾</span>
+              </button>
+              {exportMenuOpen && (
+                <div
+                  role="menu"
+                  className="absolute right-0 z-20 mt-1 w-44 overflow-hidden rounded-md border py-1 text-xs shadow-lg"
+                  style={{ borderColor: 'var(--border-default)', background: 'var(--bg-elevated)', color: 'var(--text-primary)' }}
+                >
                 <button
                   type="button"
                   role="menuitem"
@@ -284,10 +301,11 @@ function RunOverviewTab({
                   <span className="block font-medium">Localized output</span>
                   <span className="block text-[11px]" style={{ color: 'var(--text-muted)' }}>Uses the LLM rewrite</span>
                 </button>
-              </div>
-            )}
-          </div>
-        )}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       </div>
       <dl className="grid grid-cols-[110px_minmax(0,1fr)] gap-y-1.5 text-xs">
         <dt style={{ color: 'var(--text-muted)' }}>Feature</dt>

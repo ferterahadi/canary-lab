@@ -3,11 +3,15 @@ import * as api from '../api/client'
 import type { EditorChoice, HealAgentChoice, ProjectConfig } from '../api/client'
 import { CloseIcon } from './config/atoms'
 
+// `auto` is intentionally omitted — the server default is now `external` and
+// existing `auto` configs are migrated to `external` on load (see
+// `migrateLegacyHealAgent` below). Order presents the most common modern
+// choice first.
 const HEAL_AGENT_OPTIONS: { value: HealAgentChoice; label: string; description: string }[] = [
   {
-    value: 'auto',
-    label: 'Auto-detect',
-    description: 'Prefer Claude when available, fall back to Codex.',
+    value: 'external',
+    label: 'External client',
+    description: 'Let Claude / Codex Desktop or CLI drive heal over MCP. Canary Lab waits for the external client to claim and signal.',
   },
   {
     value: 'claude',
@@ -24,12 +28,13 @@ const HEAL_AGENT_OPTIONS: { value: HealAgentChoice; label: string; description: 
     label: 'Manual',
     description: 'Skip auto-heal. Open Claude/Codex desktop yourself when a run pauses.',
   },
-  {
-    value: 'external',
-    label: 'External client (MCP)',
-    description: 'Let Claude / Codex Desktop or CLI drive heal over MCP. Canary Lab waits for the external client to claim and signal.',
-  },
 ]
+
+// Map legacy `auto` saved config to the new default (`external`) for display.
+// Saving will persist the new value, retiring `auto` in this project.
+function migrateLegacyHealAgent(value: HealAgentChoice): HealAgentChoice {
+  return value === 'auto' ? 'external' : value
+}
 
 const EDITOR_OPTIONS: { value: EditorChoice; label: string; description: string }[] = [
   {
@@ -67,7 +72,14 @@ export function SettingsModal({ onClose }: Props) {
   useEffect(() => {
     let cancelled = false
     api.getProjectConfig()
-      .then((c) => { if (!cancelled) { setConfig(c); setDraft(c) } })
+      .then((c) => {
+        if (cancelled) return
+        // Stash the as-loaded config for dirty comparison, but project the
+        // legacy `auto` value to `external` in the draft so the radio group
+        // shows a valid selection. Saving will persist the migrated value.
+        setConfig(c)
+        setDraft({ ...c, healAgent: migrateLegacyHealAgent(c.healAgent) })
+      })
       .catch((e: unknown) => {
         if (cancelled) return
         setError(e instanceof Error ? e.message : 'Failed to load settings')

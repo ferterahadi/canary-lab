@@ -38,6 +38,17 @@ export interface CanaryLabMcpDeps {
       conversationName?: string
     },
   ) => Promise<{ runId: string }>
+  restartExternalRun?: (
+    runId: string,
+    healAgent: {
+      kind: 'external'
+      sessionId: string
+      clientKind: 'claude-cli' | 'claude-desktop' | 'codex-cli' | 'codex-desktop' | 'other'
+      clientVersion?: string
+      conversationName?: string
+    },
+    guidance?: string,
+  ) => Promise<{ runId: string; mode?: 'remaining' }>
 }
 
 const CLIENT_KIND = z.enum(['claude-cli', 'claude-desktop', 'codex-cli', 'codex-desktop', 'other'])
@@ -113,43 +124,106 @@ export function registerCanaryLabTools(server: McpServer, deps: CanaryLabMcpDeps
 
   server.registerTool('start_run', {
     description:
-      'Start or resume a Canary Lab run. This returns the newest active run for the feature instead of creating a duplicate, even if `force_new` is passed. Use this only as the initial entrypoint or when no runId is known. After code changes, call `write_journal`, `signal_run`, then `wait_for_heal_task` on the same run.',
+      'Smart entrypoint for Canary Lab runs. If a matching run is healing, this returns that run and blocks fresh/different starts until `cancel_heal` stops it. If `runId` or `run_ref` targets a failed/aborted run and no heal is active, this restarts that same run in remaining-test mode: failed first, then skipped, then pending/not-run. Otherwise it starts a new run. After code changes, call `write_journal`, `signal_run`, then `wait_for_heal_task` on the same run.',
     inputSchema: {
       feature: z.string().describe('Feature name (from list_features).'),
       env: z.string().optional().describe('Envset name. Defaults to the feature\'s first declared env.'),
+      runId: z.string().optional().describe('Optional exact run id to resume or restart. If a different run is currently healing, the active heal blocks this request.'),
+      run_ref: z.string().optional().describe('Optional exact run id or unique suffix such as "7cvh" to resume or restart. If a different run is currently healing, the active heal blocks this request.'),
       claim_heal: z.boolean().default(true).describe('Whether to claim this run\'s heal duty for the current MCP session.'),
       session_id: z.string().describe('Stable id identifying this MCP/agent session. Reuse the same id across calls within one conversation to enable reconnects.'),
       client_kind: CLIENT_KIND.default('other').describe('Which kind of client is starting the run.'),
       conversation_name: z.string().optional().describe('Human label shown in the Canary Lab UI (e.g. "fix checkout").'),
-      force_new: z.boolean().default(false).describe('Deprecated for MCP clients. Ignored when the feature already has an active run; use `signal_run` to verify fixes on the existing healing run.'),
+      guidance: z.string().optional().describe('Optional user guidance when restarting a failed/aborted run by runId or run_ref.'),
+      force_new: z.boolean().default(false).describe('Deprecated for MCP clients. If a matching run is healing, this is blocked until `cancel_heal` stops that run.'),
     },
-  }, async ({ feature, env, claim_heal, session_id, client_kind, conversation_name, force_new }) => {
+  }, async ({ feature, env, runId, run_ref, claim_heal, session_id, client_kind, conversation_name, guidance, force_new }) => {
     try {
-      const active = findActiveRunForFeature(deps, feature, env)
-      if (active) {
-        let claim: { accepted: true; session: unknown } | { accepted: false; reason: string; currentSession: unknown } | null = null
-        if (claim_heal) {
-          const result = deps.broker.claim(active.manifest.runId, {
-            sessionId: session_id,
-            clientKind: client_kind,
-            ...(conversation_name ? { conversationName: conversation_name } : {}),
+      const requestedRef = runId ?? run_ref
+      const healing = findHealingRunForFeature(deps, feature, env)
+      if (healing) {
+        const requested = requestedRef ? resolveRunRef(deps, feature, env, requestedRef) : null
+        if (force_new || (requested && (requested.kind !== 'resolved' || requested.detail.manifest.runId !== healing.manifest.runId))) {
+          return asJsonResult({
+            type: 'active_heal_blocks_start',
+            activeRunId: healing.manifest.runId,
+            activeStatus: healing.manifest.status,
+            ...(requestedRef ? { requestedRunRef: requestedRef } : {}),
+            ...(requested?.kind === 'resolved' ? { requestedRunId: requested.detail.manifest.runId } : {}),
+            message: 'A matching run is already healing. Stop it first with cancel_heal before starting fresh or rerunning another run.',
           })
-          claim = result.accepted
-            ? { accepted: true, session: result.session }
-            : { accepted: false, reason: result.reason, currentSession: result.currentSession }
         }
+        const claim = claim_heal ? claimRun(deps, healing.manifest.runId, session_id, client_kind, conversation_name) : null
         return asJsonResult({
-          runId: active.manifest.runId,
+          runId: healing.manifest.runId,
           reused: true,
-          status: active.manifest.status,
+          status: healing.manifest.status,
           claimed: claim_heal ? claim?.accepted === true : false,
           claim,
           ...(force_new
             ? {
                 ignoredForceNew: true,
-                warning: 'An active run already exists for this feature. Continue it with write_journal, signal_run, and wait_for_heal_task instead of starting a fresh run.',
+                warning: 'A matching run is already healing. Continue it with write_journal, signal_run, and wait_for_heal_task, or stop it first with cancel_heal.',
               }
             : {}),
+        })
+      }
+      if (requestedRef) {
+        const resolved = resolveRunRef(deps, feature, env, requestedRef)
+        if (resolved.kind === 'missing') return errorResult(`run-not-found: ${requestedRef}`)
+        if (resolved.kind === 'ambiguous') {
+          return asJsonResult({
+            type: 'ambiguous_run_ref',
+            run_ref: requestedRef,
+            candidates: resolved.candidates.map(runCandidate),
+          })
+        }
+        const target = resolved.detail
+        const status = target.manifest.status
+        if (isActiveRunStatus(status)) {
+          const claim = claim_heal ? claimRun(deps, target.manifest.runId, session_id, client_kind, conversation_name) : null
+          return asJsonResult({
+            runId: target.manifest.runId,
+            reused: true,
+            status,
+            claimed: claim_heal ? claim?.accepted === true : false,
+            claim,
+          })
+        }
+        if (status === 'passed') {
+          return asJsonResult({
+            type: 'not_restartable',
+            runId: target.manifest.runId,
+            status,
+            message: 'Passed runs are not restarted by start_run. Start a fresh run without runId/run_ref if you want to test again.',
+          })
+        }
+        if (status !== 'failed' && status !== 'aborted') {
+          return errorResult(`run-not-restartable: ${target.manifest.runId} status=${status}`)
+        }
+        if (!deps.restartExternalRun) return errorResult('restartExternalRun dependency is not configured')
+        const restarted = await deps.restartExternalRun(
+          target.manifest.runId,
+          {
+            kind: 'external',
+            sessionId: session_id,
+            clientKind: client_kind,
+            ...(conversation_name ? { conversationName: conversation_name } : {}),
+          },
+          guidance,
+        )
+        const claim = claim_heal ? claimRun(deps, restarted.runId, session_id, client_kind, conversation_name) : null
+        const counts = normalizeRunCounts(target.summary ?? null)
+        return asJsonResult({
+          runId: restarted.runId,
+          reused: true,
+          restarted: true,
+          mode: restarted.mode ?? 'remaining',
+          statusLine: counts.statusLine,
+          counts,
+          status: 'running',
+          claimed: claim_heal ? claim?.accepted === true : false,
+          claim,
         })
       }
       const result = await deps.startRun(
@@ -335,14 +409,33 @@ export function registerCanaryLabTools(server: McpServer, deps: CanaryLabMcpDeps
 
 // ─── result helpers ─────────────────────────────────────────────────────
 
-function findActiveRunForFeature(
+type ClaimResult = { accepted: true; session: unknown } | { accepted: false; reason: string; currentSession: unknown }
+
+function claimRun(
+  deps: CanaryLabMcpDeps,
+  runId: string,
+  sessionId: string,
+  clientKind: z.infer<typeof CLIENT_KIND>,
+  conversationName: string | undefined,
+): ClaimResult {
+  const result = deps.broker.claim(runId, {
+    sessionId,
+    clientKind,
+    ...(conversationName ? { conversationName } : {}),
+  })
+  return result.accepted
+    ? { accepted: true, session: result.session }
+    : { accepted: false, reason: result.reason, currentSession: result.currentSession }
+}
+
+function findHealingRunForFeature(
   deps: CanaryLabMcpDeps,
   feature: string,
   env: string | undefined,
 ): RunDetail | null {
   const candidates: Array<{ detail: RunDetail; startedAt: string }> = []
   for (const entry of deps.store.list({ feature })) {
-    if (!isActiveRunStatus(entry.status)) continue
+    if (entry.status !== 'healing') continue
     const detail = deps.store.get(entry.runId)
     if (!detail) continue
     if (env && detail.manifest.env !== env) continue
@@ -360,6 +453,42 @@ function activeRunPriority(detail: RunDetail): number {
   if (detail.manifest.lifecycle?.phase === 'waiting-for-signal') return 0
   if (detail.manifest.status === 'healing') return 1
   return 2
+}
+
+type RunRefResolution =
+  | { kind: 'resolved'; detail: RunDetail }
+  | { kind: 'ambiguous'; candidates: RunDetail[] }
+  | { kind: 'missing' }
+
+function resolveRunRef(
+  deps: CanaryLabMcpDeps,
+  feature: string,
+  env: string | undefined,
+  ref: string,
+): RunRefResolution {
+  const matches: RunDetail[] = []
+  for (const entry of deps.store.list({ feature })) {
+    const detail = deps.store.get(entry.runId)
+    if (!detail) continue
+    if (env && detail.manifest.env !== env) continue
+    if (detail.manifest.runId === ref || detail.manifest.runId.endsWith(ref)) {
+      matches.push(detail)
+    }
+  }
+  if (matches.length === 0) return { kind: 'missing' }
+  if (matches.length > 1) return { kind: 'ambiguous', candidates: matches }
+  return { kind: 'resolved', detail: matches[0] }
+}
+
+function runCandidate(detail: RunDetail): Record<string, unknown> {
+  return {
+    runId: detail.manifest.runId,
+    feature: detail.manifest.feature,
+    env: detail.manifest.env ?? null,
+    status: detail.manifest.status,
+    startedAt: detail.manifest.startedAt,
+    endedAt: detail.manifest.endedAt ?? null,
+  }
 }
 
 function buildHealContext(deps: CanaryLabMcpDeps, runId: string): Record<string, unknown> | null {

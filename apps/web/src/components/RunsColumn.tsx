@@ -1,5 +1,7 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import * as api from '../api/client'
+import { ApiError } from '../api/client'
 import type { RunIndexEntry } from '../api/types'
 import { formatDuration, durationBetween, shortTime } from '../lib/format'
 import { deriveRunViewModel, type RunViewModel } from '../lib/run-view-model'
@@ -53,6 +55,52 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
   // dispatchers (abort/delete/etc.) handle the API call + error capture
   // internally, so the component just decides WHEN to call them.
   const { transients, errors, abort, delete: deleteAction, pauseHeal, cancelHeal, clearError } = useRuns()
+
+  // Retest ("restart") doesn't live in RunsContext because it's fast and the
+  // run flips to `running`/`healing` via the WS update almost immediately.
+  // Tracked locally so the row icon can show a spinner + disable until the
+  // POST returns.
+  const [restartingIds, setRestartingIds] = useState<ReadonlySet<string>>(() => new Set())
+  const [restartErrors, setRestartErrors] = useState<Record<string, string>>({})
+  const onRestartRequest = useCallback(async (runId: string): Promise<void> => {
+    if (restartingIds.has(runId)) return
+    setRestartingIds((prev) => {
+      const next = new Set(prev)
+      next.add(runId)
+      return next
+    })
+    setRestartErrors((prev) => {
+      if (!(runId in prev)) return prev
+      const next = { ...prev }
+      delete next[runId]
+      return next
+    })
+    try {
+      await api.restartRun(runId)
+    } catch (e: unknown) {
+      const reason = e instanceof ApiError
+        ? (e.body as { reason?: unknown })?.reason
+        : undefined
+      const msg = typeof reason === 'string'
+        ? `Retest failed: ${reason}`
+        : e instanceof Error ? e.message : 'Retest failed'
+      setRestartErrors((prev) => ({ ...prev, [runId]: msg }))
+    } finally {
+      setRestartingIds((prev) => {
+        const next = new Set(prev)
+        next.delete(runId)
+        return next
+      })
+    }
+  }, [restartingIds])
+  const clearRestartError = useCallback((runId: string): void => {
+    setRestartErrors((prev) => {
+      if (!(runId in prev)) return prev
+      const next = { ...prev }
+      delete next[runId]
+      return next
+    })
+  }, [])
 
   useEffect(() => {
     const el = containerRef.current
@@ -209,7 +257,8 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
               const isStopping = transient === 'aborting'
               const isPausing = transient === 'pausing'
               const isCancellingHeal = transient === 'cancelling-heal'
-              const rowError = errors[r.runId] ?? null
+              const isRestarting = restartingIds.has(r.runId)
+              const rowError = errors[r.runId] ?? restartErrors[r.runId] ?? null
               const view = deriveRunViewModel(r, transient)
               const displayStatus = view.displayStatus
               if (isDeleting) {
@@ -333,6 +382,22 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
                             </span>
                           </>
                         )}
+                        {/* Retest icon sits between the action cluster and
+                            delete — only rendered when restart is available
+                            (failed / aborted). Same visual weight as delete
+                            but blue-tinted to read as "retry" vs "destroy".
+                            Spins while the POST is in flight; the WS update
+                            then flips the row to running/healing on its own. */}
+                        {view.actions.restartHeal.enabled && (
+                          <RetestIconButton
+                            disabled={isRestarting}
+                            spinning={isRestarting}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              void onRestartRequest(r.runId)
+                            }}
+                          />
+                        )}
                         {/* Delete is always rendered as an icon-only button
                             to the right of the status indicator, regardless
                             of compact mode. It's blocked (visible but
@@ -372,7 +437,7 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
                         <span className="truncate">{rowError}</span>
                         <button
                           type="button"
-                          onClick={(e) => { e.stopPropagation(); clearError(r.runId) }}
+                          onClick={(e) => { e.stopPropagation(); clearError(r.runId); clearRestartError(r.runId) }}
                           aria-label="Dismiss error"
                           className="shrink-0 rounded px-1 text-[10px] uppercase tracking-wide opacity-70 hover:opacity-100"
                         >
@@ -761,6 +826,68 @@ function ActionButton({
 // a tooltip explaining why — the user always sees that delete *exists*,
 // just not whether it's currently available. Rendered as `<span role="button">`
 // because the surrounding row is itself a `<button>`.
+// Sibling of DeleteIconButton — same 20×20 ghost-button silhouette, same
+// 11px SVG, but blue-tinted to read as "retry" instead of "destroy". Only
+// rendered when restart is available (terminal failed/aborted), so its mere
+// presence is the affordance — no "Retest" label needed in the row body.
+// While spinning, the icon rotates and the button is disabled to swallow
+// double-clicks; the WS update flips the row's status badge to running/
+// healing within a beat or two, which removes the icon entirely.
+function RetestIconButton({
+  disabled,
+  spinning,
+  onClick,
+}: {
+  disabled: boolean
+  spinning: boolean
+  onClick: (e: React.MouseEvent) => void
+}) {
+  const label = spinning
+    ? 'Retesting remaining tests…'
+    : 'Retest remaining: reruns failed, skipped, and pending tests'
+  return (
+    <span
+      role="button"
+      tabIndex={disabled ? -1 : 0}
+      aria-disabled={disabled}
+      aria-label={label}
+      title={label}
+      onClick={(e) => {
+        if (disabled) { e.stopPropagation(); return }
+        onClick(e)
+      }}
+      onKeyDown={(e) => {
+        if (disabled) return
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault(); e.stopPropagation()
+          onClick(e as unknown as React.MouseEvent)
+        }
+      }}
+      className={`inline-flex h-5 w-5 items-center justify-center rounded-md transition-colors duration-150 ${
+        spinning
+          ? 'cursor-wait text-blue-500/70 dark:text-blue-300/70'
+          : 'cursor-pointer text-blue-600/70 hover:bg-blue-500/12 hover:text-blue-600 dark:text-blue-400/70 dark:hover:text-blue-300'
+      }`}
+    >
+      <svg
+        viewBox="0 0 16 16"
+        width="11"
+        height="11"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden="true"
+        className={spinning ? 'animate-spin' : ''}
+      >
+        <path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9" />
+        <path d="M13.5 2v3.5H10" />
+      </svg>
+    </span>
+  )
+}
+
 function DeleteIconButton({
   disabled,
   disabledReason,

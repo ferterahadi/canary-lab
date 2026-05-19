@@ -4,7 +4,7 @@ import os from 'os'
 import path from 'path'
 import Fastify from 'fastify'
 import { runsRoutes } from './runs'
-import { createRegistry, RunStore, type OrchestratorLike, type RestartHealResult } from '../lib/run-store'
+import { createRegistry, RunStore, type OrchestratorLike, type RestartHealResult, type RestartRunResult } from '../lib/run-store'
 import { createEvaluationExportTask, evaluationExportsDir } from '../lib/evaluation-export-store'
 import { readManifest, readRunsIndex, writeManifest, writeRunsIndex } from '../lib/runtime/manifest'
 import { runDirFor } from '../lib/runtime/run-paths'
@@ -56,10 +56,11 @@ function writeFeature(name: string): void {
 }
 
 async function build(opts: {
-  startRun?: (f: string) => Promise<OrchestratorLike>
-  broker?: Parameters<typeof runsRoutes>[1]['broker']
-  restartHeal?: (runId: string, text: string) => Promise<RestartHealResult>
-  projectRoot?: string
+	  startRun?: (f: string) => Promise<OrchestratorLike>
+	  broker?: Parameters<typeof runsRoutes>[1]['broker']
+	  restartHeal?: (runId: string, text: string) => Promise<RestartHealResult>
+	  restartRun?: (runId: string) => Promise<RestartRunResult>
+	  projectRoot?: string
   generateEvaluationRewrite?: Parameters<typeof runsRoutes>[1]['generateEvaluationRewrite']
 } = {}) {
   const registry = createRegistry()
@@ -70,10 +71,11 @@ async function build(opts: {
     projectRoot: opts.projectRoot,
     store,
     broker: opts.broker,
-    startRun: opts.startRun ?? (async () => { throw new Error('not configured') }),
-    restartHeal: opts.restartHeal,
-    generateEvaluationRewrite: opts.generateEvaluationRewrite,
-  })
+	    startRun: opts.startRun ?? (async () => { throw new Error('not configured') }),
+	    restartHeal: opts.restartHeal,
+	    restartRun: opts.restartRun,
+	    generateEvaluationRewrite: opts.generateEvaluationRewrite,
+	  })
   return { app, registry, store }
 }
 
@@ -1269,6 +1271,40 @@ describe('POST /api/runs/:runId/agent-input', () => {
     expect(res.statusCode).toBe(202)
     expect(res.json()).toEqual({ status: 'sent' })
     expect(received).toBe('hi\n')
+  })
+})
+
+describe('POST /api/runs/:runId/restart', () => {
+  it('restarts a terminal run in remaining-test mode', async () => {
+    let received = ''
+    const { app } = await build({
+      restartRun: async (runId) => {
+        received = runId
+        return { ok: true, mode: 'remaining' }
+      },
+    })
+
+    const res = await app.inject({ method: 'POST', url: '/api/runs/old-failed/restart' })
+
+    expect(res.statusCode).toBe(202)
+    expect(res.json()).toEqual({ status: 'restarted', mode: 'remaining' })
+    expect(received).toBe('old-failed')
+  })
+
+  it.each([
+    ['run-not-found', 404],
+    ['not-restartable', 409],
+    ['already-active', 409],
+    ['spawn-failed', 500],
+  ] as const)('maps restart failure %s to HTTP %d', async (reason, statusCode) => {
+    const { app } = await build({
+      restartRun: async () => ({ ok: false, reason }),
+    })
+
+    const res = await app.inject({ method: 'POST', url: '/api/runs/r1/restart' })
+
+    expect(res.statusCode).toBe(statusCode)
+    expect(res.json()).toEqual({ reason })
   })
 })
 

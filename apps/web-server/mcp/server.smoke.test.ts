@@ -2,7 +2,11 @@ import { describe, it, expect } from 'vitest'
 import path from 'path'
 import fs from 'fs'
 import os from 'os'
+import Fastify from 'fastify'
 import { createServer } from '../server'
+import { registerMcpRoutes } from './server'
+import { createRegistry, RunStore } from '../lib/run-store'
+import { ExternalHealBroker } from '../lib/external-heal-broker'
 import type { PtyFactory } from '../lib/runtime/pty-spawner'
 import { runDirFor } from '../lib/runtime/run-paths'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
@@ -21,6 +25,32 @@ const inertPtyFactory: PtyFactory = () => ({
   resize: () => { /* noop */ },
   kill: () => { /* noop */ },
 })
+
+async function createMcpHarness(opts: {
+  logsDir: string
+  projectRoot: string
+  featuresDir: string
+  startRun?: Parameters<typeof registerMcpRoutes>[1]['startRun']
+  restartExternalRun?: Parameters<typeof registerMcpRoutes>[1]['restartExternalRun']
+}) {
+  const app = Fastify()
+  const runStore = new RunStore(opts.logsDir, createRegistry())
+  const broker = new ExternalHealBroker({
+    now: () => Date.now(),
+    emit: (event) => runStore.emit('event', event),
+    patchManifest: (runId, patch) => runStore.patchManifest(runId, patch),
+    audit: () => {},
+  })
+  await app.register(registerMcpRoutes, {
+    store: runStore,
+    broker,
+    featuresDir: opts.featuresDir,
+    projectRoot: opts.projectRoot,
+    startRun: opts.startRun ?? (async () => ({ runId: 'new-run' })),
+    restartExternalRun: opts.restartExternalRun,
+  })
+  return { app, runStore }
+}
 
 describe('MCP HTTP server (smoke)', () => {
   it('exposes /mcp/health with the registered tool count', async () => {
@@ -327,7 +357,7 @@ describe('MCP HTTP server (smoke)', () => {
     }
   })
 
-  it('start_run reuses an active feature run instead of creating a duplicate', async () => {
+  it('start_run reuses a healing feature run instead of creating a duplicate', async () => {
     const projectRoot = path.resolve(__dirname, '..', '..', '..', 'templates', 'project')
     const logsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-start-reuse-')))
     const { app, runStore } = await createServer({ projectRoot, logsDir, ptyFactory: inertPtyFactory })
@@ -360,7 +390,6 @@ describe('MCP HTTP server (smoke)', () => {
           session_id: 'sess-reuse',
           client_kind: 'claude-desktop',
           conversation_name: 'resume existing run',
-          force_new: true,
         },
       })
       const body = JSON.parse((result.content?.[0] as { text: string }).text)
@@ -369,13 +398,76 @@ describe('MCP HTTP server (smoke)', () => {
         reused: true,
         status: 'healing',
         claimed: true,
-        ignoredForceNew: true,
       })
-      expect(body.warning).toContain('signal_run')
       expect(runStore.list({ feature: 'broken_todo_api' }).map((entry) => entry.runId)).toEqual(['reuse-active'])
       expect(runStore.get('reuse-active')?.manifest.externalHealSession).toMatchObject({
         sessionId: 'sess-reuse',
         clientKind: 'claude-desktop',
+      })
+    } finally {
+      if (client) await client.close().catch(() => undefined)
+      await app.close()
+    }
+  })
+
+  it('start_run blocks fresh starts while a matching run is healing', async () => {
+    const projectRoot = path.resolve(__dirname, '..', '..', '..', 'templates', 'project')
+    const logsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-start-block-')))
+    const { app, runStore } = await createServer({ projectRoot, logsDir, ptyFactory: inertPtyFactory })
+    let client: Client | null = null
+    try {
+      const address = await app.listen({ port: 0, host: '127.0.0.1' })
+      client = new Client(
+        { name: 'canary-lab-smoke', version: '0.0.1' },
+        { capabilities: {} },
+      )
+      await client.connect(new StreamableHTTPClientTransport(new URL('/mcp', address)))
+
+      runStore.bootstrap({
+        runId: 'blocking-heal',
+        feature: 'broken_todo_api',
+        env: 'local',
+        startedAt: '2026-05-08T00:00:00.000Z',
+        status: 'healing',
+        healCycles: 1,
+        services: [],
+        healMode: 'external',
+      })
+
+      const result = await client.callTool({
+        name: 'start_run',
+        arguments: {
+          feature: 'broken_todo_api',
+          env: 'local',
+          claim_heal: true,
+          session_id: 'sess-block',
+          client_kind: 'claude-desktop',
+          force_new: true,
+        },
+      })
+
+      expect(JSON.parse((result.content?.[0] as { text: string }).text)).toMatchObject({
+        type: 'active_heal_blocks_start',
+        activeRunId: 'blocking-heal',
+        activeStatus: 'healing',
+      })
+
+      const differentRun = await client.callTool({
+        name: 'start_run',
+        arguments: {
+          feature: 'broken_todo_api',
+          env: 'local',
+          run_ref: 'some-other-run',
+          claim_heal: true,
+          session_id: 'sess-block',
+          client_kind: 'claude-desktop',
+        },
+      })
+
+      expect(JSON.parse((differentRun.content?.[0] as { text: string }).text)).toMatchObject({
+        type: 'active_heal_blocks_start',
+        activeRunId: 'blocking-heal',
+        requestedRunRef: 'some-other-run',
       })
     } finally {
       if (client) await client.close().catch(() => undefined)
@@ -439,6 +531,173 @@ describe('MCP HTTP server (smoke)', () => {
         status: 'healing',
         claimed: true,
       })
+    } finally {
+      if (client) await client.close().catch(() => undefined)
+      await app.close()
+    }
+  })
+
+  it('start_run restarts a failed or aborted run by unique suffix when no run is healing', async () => {
+    const projectRoot = path.resolve(__dirname, '..', '..', '..', 'templates', 'project')
+    const logsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-start-ref-')))
+    const featuresDir = path.join(projectRoot, 'features')
+    const restarted: Array<{ runId: string; sessionId: string }> = []
+    const { app, runStore } = await createMcpHarness({
+      logsDir,
+      projectRoot,
+      featuresDir,
+      restartExternalRun: async (runId, healAgent) => {
+        restarted.push({ runId, sessionId: healAgent.sessionId })
+        runStore.patchManifest(runId, { status: 'running' })
+        return { runId }
+      },
+    })
+    let client: Client | null = null
+    try {
+      const address = await app.listen({ port: 0, host: '127.0.0.1' })
+      client = new Client(
+        { name: 'canary-lab-smoke', version: '0.0.1' },
+        { capabilities: {} },
+      )
+      await client.connect(new StreamableHTTPClientTransport(new URL('/mcp', address)))
+
+      runStore.bootstrap({
+        runId: '2026-05-19T0841-7cvh',
+        feature: 'broken_todo_api',
+        env: 'local',
+        startedAt: '2026-05-19T08:41:00.000Z',
+        status: 'aborted',
+        healCycles: 3,
+        services: [],
+        healMode: 'external',
+      })
+
+      const result = await client.callTool({
+        name: 'start_run',
+        arguments: {
+          feature: 'broken_todo_api',
+          env: 'local',
+          run_ref: '7cvh',
+          claim_heal: true,
+          session_id: 'sess-restart',
+          client_kind: 'claude-desktop',
+        },
+      })
+
+	      expect(JSON.parse((result.content?.[0] as { text: string }).text)).toMatchObject({
+	        runId: '2026-05-19T0841-7cvh',
+	        reused: true,
+	        restarted: true,
+	        mode: 'remaining',
+	        counts: {
+	          totalKnown: 0,
+	          passed: 0,
+	          failed: 0,
+	          skipped: 0,
+	          notRun: 0,
+	        },
+	        claimed: true,
+	      })
+      expect(restarted).toEqual([{ runId: '2026-05-19T0841-7cvh', sessionId: 'sess-restart' }])
+    } finally {
+      if (client) await client.close().catch(() => undefined)
+      await app.close()
+    }
+  })
+
+  it('start_run returns candidates for an ambiguous run suffix', async () => {
+    const projectRoot = path.resolve(__dirname, '..', '..', '..', 'templates', 'project')
+    const logsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-start-ambiguous-')))
+    const featuresDir = path.join(projectRoot, 'features')
+    const { app, runStore } = await createMcpHarness({ logsDir, projectRoot, featuresDir })
+    let client: Client | null = null
+    try {
+      const address = await app.listen({ port: 0, host: '127.0.0.1' })
+      client = new Client(
+        { name: 'canary-lab-smoke', version: '0.0.1' },
+        { capabilities: {} },
+      )
+      await client.connect(new StreamableHTTPClientTransport(new URL('/mcp', address)))
+
+      for (const runId of ['2026-05-19T0841-7cvh', '2026-05-19T0941-17cvh']) {
+        runStore.bootstrap({
+          runId,
+          feature: 'broken_todo_api',
+          env: 'local',
+          startedAt: '2026-05-19T08:41:00.000Z',
+          status: 'failed',
+          healCycles: 1,
+          services: [],
+        })
+      }
+
+      const result = await client.callTool({
+        name: 'start_run',
+        arguments: {
+          feature: 'broken_todo_api',
+          env: 'local',
+          run_ref: '7cvh',
+          claim_heal: true,
+          session_id: 'sess-ambiguous',
+          client_kind: 'claude-desktop',
+        },
+      })
+
+      const body = JSON.parse((result.content?.[0] as { text: string }).text)
+      expect(body).toMatchObject({
+        type: 'ambiguous_run_ref',
+        run_ref: '7cvh',
+      })
+      expect(body.candidates.map((entry: { runId: string }) => entry.runId).sort()).toEqual([
+        '2026-05-19T0841-7cvh',
+        '2026-05-19T0941-17cvh',
+      ])
+    } finally {
+      if (client) await client.close().catch(() => undefined)
+      await app.close()
+    }
+  })
+
+  it('start_run starts a new run when no matching run is healing and no run ref is provided', async () => {
+    const projectRoot = path.resolve(__dirname, '..', '..', '..', 'templates', 'project')
+    const logsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-start-new-')))
+    const featuresDir = path.join(projectRoot, 'features')
+    const starts: string[] = []
+    const { app } = await createMcpHarness({
+      logsDir,
+      projectRoot,
+      featuresDir,
+      startRun: async (feature) => {
+        starts.push(feature)
+        return { runId: 'fresh-run' }
+      },
+    })
+    let client: Client | null = null
+    try {
+      const address = await app.listen({ port: 0, host: '127.0.0.1' })
+      client = new Client(
+        { name: 'canary-lab-smoke', version: '0.0.1' },
+        { capabilities: {} },
+      )
+      await client.connect(new StreamableHTTPClientTransport(new URL('/mcp', address)))
+
+      const result = await client.callTool({
+        name: 'start_run',
+        arguments: {
+          feature: 'broken_todo_api',
+          env: 'local',
+          claim_heal: true,
+          session_id: 'sess-new',
+          client_kind: 'claude-desktop',
+        },
+      })
+
+      expect(JSON.parse((result.content?.[0] as { text: string }).text)).toMatchObject({
+        runId: 'fresh-run',
+        reused: false,
+        claimed: true,
+      })
+      expect(starts).toEqual(['broken_todo_api'])
     } finally {
       if (client) await client.close().catch(() => undefined)
       await app.close()

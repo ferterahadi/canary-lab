@@ -52,6 +52,10 @@ export type RestartHealResult =
   | { ok: true }
   | { ok: false; reason: 'run-not-found' | 'not-restartable' | 'manual-mode' | 'spawn-failed' }
 
+export type RestartRunResult =
+  | { ok: true; mode: 'remaining' }
+  | { ok: false; reason: 'run-not-found' | 'not-restartable' | 'already-active' | 'spawn-failed' }
+
 export interface OrchestratorLike {
   runId: string
   stop(finalStatus?: RunManifest['status']): Promise<void>

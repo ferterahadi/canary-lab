@@ -42,7 +42,7 @@ describe('GET /api/project-config', () => {
     try {
       const r = await app.inject({ method: 'GET', url: '/api/project-config' })
       expect(r.statusCode).toBe(200)
-      expect(r.json()).toEqual({ healAgent: 'auto', editor: 'auto', personalWikiPath: null })
+      expect(r.json()).toEqual({ healAgent: 'external', editor: 'auto', personalWikiPath: null })
     } finally {
       await app.close()
     }
@@ -124,11 +124,11 @@ describe('PUT /api/project-config', () => {
         payload: { editor: 'cursor' },
       })
       expect(r.statusCode).toBe(200)
-      expect(r.json()).toEqual({ healAgent: 'auto', editor: 'cursor', personalWikiPath: null })
+      expect(r.json()).toEqual({ healAgent: 'external', editor: 'cursor', personalWikiPath: null })
       const written = JSON.parse(
         fs.readFileSync(path.join(projectRoot, 'canary-lab.config.json'), 'utf-8'),
       )
-      expect(written).toEqual({ healAgent: 'auto', editor: 'cursor', personalWikiPath: null })
+      expect(written).toEqual({ healAgent: 'external', editor: 'cursor', personalWikiPath: null })
     } finally {
       await app.close()
     }
@@ -160,7 +160,7 @@ describe('PUT /api/project-config', () => {
       })
       expect(r.statusCode).toBe(200)
       expect(r.json()).toEqual({
-        healAgent: 'auto',
+        healAgent: 'external',
         editor: 'auto',
         personalWikiPath: fs.realpathSync(wiki),
       })
