@@ -5,15 +5,28 @@
 
 Canary Lab is a local orchestration layer for evaluating agent-built features with Playwright.
 
-The workflow is simple: an agent implements a feature in your app, then writes Playwright tests that describe the behavior the feature should prove. Canary Lab starts the required services, applies the selected envset, invokes Playwright, and stores the full evidence for each run: service logs, Playwright output, screenshots, traces, videos, failure summaries, and diagnosis notes.
+For each run, Canary Lab starts the required services, applies the selected envset, invokes Playwright, and stores the full evidence: service logs, Playwright output, screenshots, traces, videos, failure summaries, and diagnosis notes.
 
 When a test fails, the agent does not need to work from a pasted error or terminal scrollback. It reads the run context Canary Lab saved, fixes the app or the test, signals a rerun or restart, and lets Canary Lab continue the cycle until the behavior is verified with evidence.
 
-Playwright remains the test runner. Canary Lab is the control plane around it: feature scaffolding, envset switching, service orchestration, run history, failure context, agent handoff, and repeatable reruns.
+Playwright remains the test runner. Canary Lab is the control plane around it: feature scaffolding, envset switching, service orchestration, run history, failure context, agent handoff, repeatable reruns, and evaluation exports.
 
 ![Canary Lab UI walkthrough](docs/assets/canary-lab-ui-walkthrough.png)
 
 See [CHANGELOG.md](CHANGELOG.md) for what's new in each release.
+
+## Agent-First Workflow (v1.1.0+)
+
+From v1.1.0 onward, Canary Lab is built for an agent-first loop. Your coding agent handles most instructions. Canary Lab monitors each run and keeps the local evidence.
+
+1. The agent implements a feature in the app.
+2. The agent turns the product change into Playwright coverage.
+3. The agent takes control of a Canary Lab run through MCP. Custom clients can use the local HTTP API. Users can also start runs from the UI.
+4. Canary Lab applies envsets, starts services, invokes Playwright, and records evidence.
+5. If the run fails, the agent reads the saved run context, fixes the app or test, and signals `.rerun` or `.restart`.
+6. Once the run passes, Canary Lab can export an evaluation report for review.
+
+Canary Lab is not the main chat surface in this workflow. The agent remains the place for instructions. Canary Lab keeps the run visible, stores the evidence, and exposes control through the UI, MCP, and local HTTP API.
 
 ## What Canary Lab Owns
 
