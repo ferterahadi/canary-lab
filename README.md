@@ -3,56 +3,59 @@
 [![npm](https://img.shields.io/npm/v/canary-lab.svg)](https://www.npmjs.com/package/canary-lab)
 [![license](https://img.shields.io/npm/l/canary-lab.svg)](LICENSE)
 
-Canary Lab is a local harness I built around Playwright so I can hand a failing test to Claude or Codex and walk away.
+Canary Lab is a local orchestration layer for evaluating agent-built features with Playwright.
 
-I wanted an inner loop where I describe a feature, the tests run, an agent reads the failure, fixes the code, and tries again — without me in the middle. Playwright already tells me what failed; the agent already knows how to fix things. Canary Lab is the plumbing in between.
+The workflow is simple: an agent implements a feature in your app, then writes Playwright tests that describe the behavior the feature should prove. Canary Lab starts the required services, applies the selected envset, invokes Playwright, and stores the full evidence for each run: service logs, Playwright output, screenshots, traces, videos, failure summaries, and diagnosis notes.
 
-It only works because three other things keep getting better. Playwright keeps catching things I'd miss. Claude and Codex keep getting better at reading evidence and editing code. node-pty and the surrounding ecosystem make the orchestration boring. I didn't build the hard parts — I'm assembling them.
+When a test fails, the agent does not need to work from a pasted error or terminal scrollback. It reads the run context Canary Lab saved, fixes the app or the test, signals a rerun or restart, and lets Canary Lab continue the cycle until the behavior is verified with evidence.
+
+Playwright remains the test runner. Canary Lab is the control plane around it: feature scaffolding, envset switching, service orchestration, run history, failure context, agent handoff, and repeatable reruns.
 
 ![Canary Lab UI walkthrough](docs/assets/canary-lab-ui-walkthrough.png)
 
 See [CHANGELOG.md](CHANGELOG.md) for what's new in each release.
 
-## Mental Model
+## What Canary Lab Owns
 
-Playwright is still the test runner. Canary Lab is the workspace around the run.
+Canary Lab has a narrow boundary. It does not define a new test language, assertion model, or browser runner. Agents and engineers write Playwright tests, and Playwright executes them.
 
-A typical failure is rarely just a failed assertion. It may depend on which env file was active, whether the local services were healthy, what the backend logged while the test was running, and which screenshot, trace, or video Playwright produced. Canary Lab keeps those pieces together for each run so the next step is based on the actual local state, not a pasted error message.
+Canary Lab handles the run context around Playwright:
 
-Canary Lab owns the surrounding workflow:
+- feature folder structure and scaffold conventions
+- envset application and cleanup
+- service startup, health checks, PTY streams, and shutdown
+- run manifests, lifecycle events, logs, and retained artifacts
+- failure slices, summaries, journals, and agent handoff prompts
+- rerun and restart signals after a fix
 
-- start the services a feature needs, wait for them to be ready, and stop them cleanly
-- apply the selected envset across the local repos involved in the run
-- keep service logs, Playwright output, screenshots, videos, traces, and event history under one run
-- separate logs by test so a failure points at the relevant window of activity
-- give a human or agent a shared place to review evidence, write diagnosis notes, and request a rerun or restart
-
-Canary Lab does not replace Playwright or hide its output. It keeps Playwright visible, then adds the local system context needed to debug the result.
+The goal is to keep the run state explicit. A failed Playwright run should have enough surrounding context for the next human or agent to inspect what happened, change the app or test, and continue from the same run without relying on terminal scrollback.
 
 ## Who This Is For
 
 Use this if:
 
-- your tests depend on more than one local app or service
-- you often switch env files during local testing
-- you want failure context collected in one place
-- you want Claude Code or Codex to work from logs and summaries instead of only a pasted test failure
+- you use agents to implement features and want an evidence-backed evaluation loop
+- you want agents to write Playwright tests, inspect failures, fix code, and rerun without losing context
+- your Playwright tests depend on local services, env files, or multiple repos
+- you want service logs, Playwright output, artifacts, summaries, and diagnosis notes kept with each run
+- you want Claude, Codex, or another agent to work from saved run context instead of terminal scrollback
 
 ## Who This Is Not For
 
 This is probably not for you if:
 
-- you only test a single app
-- normal Playwright fixtures, reporters, and scripts are enough
-- you need Linux or Windows support today
+- a plain `npx playwright test` command gives you enough context
+- you do not need service orchestration, env switching, or retained run history
+- you do not want agents involved in writing, debugging, or rerunning tests
 - you want a CI-first tool rather than a local development workflow
+- you need a polished Linux or Windows workflow today
 
 ## Current Scope
 
-- **Cross-platform.** Services and the heal agent run inside `node-pty` — no AppleScript, no iTerm, no Terminal.app. The web UI streams those PTYs into your browser.
+- **Local PTY orchestration.** Services and the heal agent run inside `node-pty` — no AppleScript, no iTerm, no Terminal.app. The web UI streams those PTYs into your browser.
 - **Node.js ≥ 20**, **npm ≥ 9**.
 - A modern browser (Chrome / Firefox / Safari) for the local UI on `http://localhost:7421`.
-- **Optional, for headless auto-heal:** [Claude Code CLI](https://docs.claude.com/en/docs/claude-code) (`claude`) or [Codex CLI](https://github.com/openai/codex) (`codex`) on `PATH`.
+- **Optional, for agent-driven repair:** [Claude Code CLI](https://docs.claude.com/en/docs/claude-code) (`claude`) or [Codex CLI](https://github.com/openai/codex) (`codex`) on `PATH`.
 
 ## Quick Start
 
@@ -78,19 +81,37 @@ npx canary-lab ui --port 8123
 
 `canary-lab init` scaffolds four sample features (`example_todo_api`, `broken_todo_api`, `tricky_checkout_api`, `flaky_orders_api`) so you can try the heal workflow before bringing your own services.
 
+## Feature Authoring
+
+A feature is a folder under `features/<name>/` with a `feature.config.cjs`, a Playwright config, envsets, and Playwright specs. Agents should write normal Playwright tests in `e2e/`; Canary Lab gives those tests a stable feature folder, shared package helpers, and a runner that knows how to start the surrounding system.
+
+You can create the folder from the UI or with:
+
+```bash
+npx canary-lab new feature checkout-discounts --description "Validate checkout discounts"
+```
+
+The web UI also includes an Add Test workflow. Paste a PRD or upload a document, choose the repos that matter, review the generated plan, review the generated Playwright files, and then accept the feature into the project. The generated files still run through Playwright; Canary Lab only provides the scaffold, review flow, and orchestration around the run.
+
 ## Commands
 
 ```bash
 npx canary-lab init <folder>
 npx canary-lab ui # primary surface (web UI)
 npx canary-lab ui --port 8123 # use a custom UI port
+npx canary-lab mcp # bridge a local MCP client to the UI server
+npx canary-lab mcp doctor # verify the local MCP bridge
+npx canary-lab agent install <codex|claude|all>
 npx canary-lab new feature <name> --description "..."
+npx canary-lab new-feature <name> --description "..."
 npx canary-lab env apply <feature> <set>
 npx canary-lab env revert <feature>
 npx canary-lab upgrade
 ```
 
-The `new feature` and `env` commands are deterministic wrappers for agents and scripts. The web UI remains the primary human workflow for creating features, editing envsets, running tests, and reviewing results.
+The `new feature`, `new-feature`, and `env` commands are deterministic wrappers for agents and scripts. The web UI remains the primary human workflow for creating features, editing envsets, running tests, and reviewing results.
+
+The `mcp` command bridges local AI clients into the running Canary Lab UI server. MCP clients can list features, start or resume runs, fetch heal context, write diagnosis notes, signal reruns or restarts, and wait for the next repair task without scraping terminal output.
 
 `canary-lab upgrade` is for syncing scaffolded docs and skills in an existing project with the current package version. It is not a general dependency or repo upgrade system.
 
@@ -98,7 +119,9 @@ The `new feature` and `env` commands are deterministic wrappers for agents and s
 
 The web UI manages temporary environment files for a feature. In the Envsets tab, create an env, add the files that should be swapped during a run, edit their values, and start the run from the UI. Canary Lab stores envsets under `features/<feature>/envsets/`, backs up the target files at the start of each run, and restores them afterward.
 
-If setting envsets up by hand feels tedious, the scaffolded project ships an `Env Import` skill (`.claude/skills/env-import.md`). Ask Claude or Codex to "import env files for [feature]" and the agent copies the relevant `.env` files from the repos declared in `feature.config.cjs` into the feature's envsets.
+Feature configs can also declare env-specific service startup. For example, a `local` env can boot a service from `startCommands`, while a `production` env can skip local startup and point Playwright at a deployed URL through the selected envset.
+
+If setting envsets up by hand feels tedious, the scaffolded project ships env-import guidance for both Claude and Codex (`.claude/skills/env-import.md` and `.codex/env-import.md`). Ask the agent to import env files for a feature; it will inspect the repos declared in `feature.config.cjs`, copy selected env files into `features/<feature>/envsets/`, and update `envsets.config.json`.
 
 ### Environment variable safety
 
@@ -110,22 +133,24 @@ Each run gets its own directory under `logs/runs/<runId>/`. The exact contents d
 
 - `manifest.json` — run metadata, selected feature, service status, repo snapshots, artifact policy, and signal paths
 - `runner.log` — orchestration events such as service startup, health checks, Playwright start/exit, detected signals, and cleanup
+- `lifecycle-events.jsonl` — structured lifecycle events used by the UI to render run progress and recovery state
 - `svc-*.log` — stdout/stderr captured from each started service
 - `playwright.log` — raw Playwright stdout/stderr from the run
 - `playwright-events.jsonl` — structured test and browser-action events used by Playback
 - `playwright-artifacts/` — Playwright output directory for retained screenshots, videos, traces, and attachments
+- `playwright-artifacts-keep/` — durable artifact snapshots kept across targeted reruns
 - `e2e-summary.json` — current test state, failed tests, and failure context written by the summary reporter
 - `failed/<slug>/` — per-failure slices and, when available, Playwright MCP captures for that failure
 - `heal-index.md` — compact failure index for human or agent-driven repair, written when failures are enriched
 - `diagnosis-journal.md` — heal-cycle hypotheses, changed files, signals, and outcomes when healing has run
-- `agent-transcript.log` — raw Claude or Codex output when auto-heal runs
+- `agent-session.json` and `agent-session-id.txt` — pointers to the Claude or Codex session used for structured replay when auto-heal runs
 - `signals/` — `.heal`, `.rerun`, and `.restart` files used to pause, rerun tests, or restart affected services
 
 Outside the run directory, `logs/runs/index.json` tracks run history and `logs/current/` points at the active run so manual agents can use stable paths while the UI keeps the full run history.
 
 ## Evaluation Report
 
-Each completed run can export a single-page **Evaluation Report** for the feature it ran — the "Export Evaluation" button in the run detail Overview tab. The download is a `.zip` containing one final `evaluation.html` report and any captured videos. The report uses the configured Heal Agent when available to rewrite test titles and flowchart labels into accessible English, then caches that wording with the run so repeated exports stay stable.
+Each completed run can export a single-page **Evaluation Report** for the feature it ran — the "Export Evaluation" button in the run detail Overview tab. The download is a `.zip` containing one final `evaluation.html` report and any captured videos. Use the raw export for a fast report, or the localized export when you want the configured Heal Agent to rewrite test titles and flowchart labels into accessible English. Localized wording is cached with the run so repeated exports stay stable.
 
 ![Evaluation Report sample](docs/assets/assertion-review.png)
 
@@ -135,13 +160,13 @@ The intended use is PR or product review. A green run says the suite passed; the
 
 ## Self-Fixing Workflow
 
-When a test fails, an agent fixes the code. The scaffolded project ships with `CLAUDE.md` and `AGENTS.md` containing the managed `heal-prompt` section both flavors point at `logs/current/...`. After a fix, the agent writes one of the active run's signal files: `signals/.restart` for service or app changes, `signals/.rerun` for test/config-only changes.
+When a Playwright test fails, an agent fixes the app or the test. The scaffolded project ships with `CLAUDE.md` and `AGENTS.md` containing the managed `heal-prompt` section; both flavors point at `logs/current/...`. After a fix, the agent writes one of the active run's signal files: `signals/.restart` for service or app changes, `signals/.rerun` for test/config-only changes.
 
 ### Auto-heal
 
 The runner spawns a Claude or Codex agent in its own PTY tab inside the web UI when a test fails. Canary Lab renders its packaged `apps/web-server/prompts/heal-agent.md` template with the active run's exact file paths and passes that prompt to the agent. Output is filtered through a formatter so you see readable progress instead of raw stream-json.
 
-Auto-heal is capped by the runner — the current default is 3 heal cycles. If auto-heal gives up, exits without a signal, or no Claude/Codex CLI is available, the run finishes as failed; start another run or switch the project to Manual before retrying the hand-driven loop.
+Auto-heal keeps cycling until the tests pass, the user stops the run, the agent exits without a useful signal, a cycle times out, or no Claude/Codex CLI is available. If the run finishes as failed, start another run or switch the project to Manual before retrying the hand-driven loop.
 
 ### Manual heal
 
@@ -178,7 +203,7 @@ The agent is not asked to reconstruct the run from terminal scrollback. In both 
 flowchart TD
     A["Start a run from the web UI"] --> B["Start services in node-pty panes"]
     B --> C["Wait for health checks"]
-    C --> D["Run Playwright"]
+    C --> D["Invoke Playwright"]
     D --> E["Write per-run logs, events, artifacts, and summary"]
     E --> F["Render run detail in the UI"]
     F --> G{"Failure?"}
@@ -234,7 +259,7 @@ flowchart TD
         logs[/"svc-*.log + playwright.log"/]
         evidence[/"playwright-events.jsonl + playwright-artifacts/ + e2e-summary.json"/]
         healctx[/"failed/{{slug}}/ + heal-index.md + diagnosis-journal.md"/]
-        transcript[/"agent-transcript.log"/]
+        session[/"agent-session.json + agent-session-id.txt"/]
         signals[/"signals/.heal + .rerun + .restart"/]
     end
 
@@ -248,7 +273,7 @@ flowchart TD
     evidence --> autoheal
     healctx -.-> autoheal
     autoheal --> agent
-    agent --> transcript
+    agent --> session
     agent -.-> healctx
     agent --> signals
     signals --> runtime
@@ -265,7 +290,7 @@ flowchart TD
     class runtime,setup runtime
     class playwright,capture test
     class autoheal,agent heal
-    class state,logs,evidence,healctx,transcript,signals artifact
+    class state,logs,evidence,healctx,session,signals artifact
 ```
 
 ### Local Development
@@ -277,7 +302,7 @@ npm run build
 
 ### Repository Layout
 
-- `scripts/` — CLI entry and scaffold/upgrade commands
+- `scripts/` — CLI entry, scaffold/upgrade commands, MCP bridge, and agent integration installer
 - `apps/web-server/` — local server, API routes, runtime orchestrator, run store, and PTY streams
 - `apps/web/` — React UI for features, runs, playback, journals, and configuration
 - `shared/e2e-runner/` — Playwright fixture support used by generated projects
@@ -285,7 +310,7 @@ npm run build
 - `shared/runtime/` — shared `project-root` resolver
 - `templates/project/` — files copied into scaffolded projects
 
-The package exposes a `canary-lab/feature-support/...` import surface to generated projects via the `exports` field in `package.json`; it maps to compiled files under `dist/shared/configs/`.
+The package exposes a `canary-lab/feature-support/...` import surface to generated projects via the `exports` field in `package.json`; it maps to compiled files under `dist/shared/configs/`, `dist/shared/e2e-runner/`, and `dist/shared/launcher/`.
 
 ### Build and Test
 
