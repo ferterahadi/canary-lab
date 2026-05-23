@@ -5,6 +5,7 @@ import path from 'path'
 import {
   buildAgentSpawnCommand,
   buildClaudeMcpConfigArg,
+  buildHealPromptMap,
   buildOrchestratorHealPrompt,
   pickAvailableHealAgent,
   readPriorSessionId,
@@ -13,6 +14,18 @@ import {
   renderTraceExtractHint,
 } from './auto-heal'
 import { renderPersonalWikiMap } from '../../../../shared/runtime/personal-wiki'
+
+function writeRunManifest(runDir: string, body: Record<string, unknown>): void {
+  fs.writeFileSync(path.join(runDir, 'manifest.json'), JSON.stringify({
+    runId: 'r1',
+    feature: 'f',
+    startedAt: '2026-01-01T00:00:00Z',
+    status: 'running',
+    healCycles: 0,
+    services: [],
+    ...body,
+  }))
+}
 
 describe('buildClaudeMcpConfigArg', () => {
   it('writes the MCP config to disk and returns `--mcp-config "<file>"`', () => {
@@ -253,6 +266,106 @@ describe('pickAvailableHealAgent', () => {
   // is covered by isAgentCliAvailable + the explicit override branches.
 })
 
+describe('buildHealPromptMap', () => {
+  let tmp: string
+  let runDir: string
+  let projectRoot: string
+
+  beforeEach(() => {
+    tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-heal-map-')))
+    runDir = path.join(tmp, 'run')
+    projectRoot = path.join(tmp, 'project')
+    fs.mkdirSync(runDir, { recursive: true })
+    fs.mkdirSync(projectRoot, { recursive: true })
+  })
+
+  afterEach(() => {
+    fs.rmSync(tmp, { recursive: true, force: true })
+  })
+
+  it('maps available service-mode resources and omits unavailable placeholders', () => {
+    const featureDir = path.join(projectRoot, 'features', 'checkout')
+    writeRunManifest(runDir, {
+      featureDir,
+      repoPaths: ['/repo/app'],
+    })
+    fs.mkdirSync(path.join(featureDir, 'docs'), { recursive: true })
+    fs.writeFileSync(path.join(runDir, 'heal-index.md'), '# Heal Index\n')
+    fs.writeFileSync(path.join(runDir, 'e2e-summary.json'), '{}\n')
+    fs.writeFileSync(path.join(runDir, 'diagnosis-journal.md'), '# Journal\n')
+    fs.mkdirSync(path.join(runDir, 'failed', 'checkout-fails'), { recursive: true })
+    fs.writeFileSync(path.join(runDir, 'failed', 'checkout-fails', 'api.log'), 'slice')
+    fs.mkdirSync(path.join(runDir, 'failed', 'checkout-fails', 'trace-extract'), { recursive: true })
+    fs.writeFileSync(path.join(runDir, 'failed', 'checkout-fails', 'trace-extract', 'failure-summary.md'), 'trace')
+    fs.mkdirSync(path.join(runDir, 'failed', 'checkout-fails', 'playwright-mcp'), { recursive: true })
+    fs.writeFileSync(path.join(runDir, 'failed', 'checkout-fails', 'playwright-mcp', 'snapshot.png'), 'png')
+    fs.writeFileSync(path.join(runDir, 'svc-api.log'), 'full log')
+    const wikiPath = path.join(tmp, 'wiki')
+    fs.mkdirSync(wikiPath, { recursive: true })
+
+    const healPrompt = buildHealPromptMap({
+      projectRoot,
+      runDir,
+      personalWikiPath: wikiPath,
+    })
+
+    expect(healPrompt).toMatchObject({
+      source: 'canary-lab/heal-agent-map',
+      mode: 'service',
+      runDir,
+      runDirRel: '../run',
+      startHere: [
+        {
+          id: 'heal-index',
+          field: 'healIndexMarkdown',
+          path: path.join(runDir, 'heal-index.md'),
+        },
+      ],
+      boundaries: {
+        fixTarget: expect.stringContaining('Fix service/app code, not tests.'),
+        signalPolicy: {
+          serviceOrRuntimeChange: 'restart',
+          testOrConfigOnlyChange: 'rerun',
+          mechanism: 'call signal_run; do not write signal files directly',
+        },
+      },
+    })
+    expect(healPrompt.resources.map((entry) => entry.id)).toEqual([
+      'failed-slices',
+      'trace-extract',
+      'playwright-mcp',
+      'full-service-log',
+      'journal',
+      'feature-docs',
+      'personal-wiki',
+    ])
+    expect(JSON.stringify(healPrompt)).not.toContain('{{')
+    expect(JSON.stringify(healPrompt)).not.toContain('null')
+  })
+
+  it('falls back to summary and test-mode boundaries when heal-index is unavailable', () => {
+    writeRunManifest(runDir, { repoPaths: [] })
+    fs.writeFileSync(path.join(runDir, 'e2e-summary.json'), '{}\n')
+    fs.mkdirSync(path.join(runDir, 'failed', 'checkout-fails', 'playwright-mcp'), { recursive: true })
+    fs.writeFileSync(path.join(runDir, 'failed', 'checkout-fails', 'playwright-mcp', '_attribution.json'), '[]')
+
+    const healPrompt = buildHealPromptMap({ projectRoot, runDir })
+
+    expect(healPrompt.mode).toBe('test')
+    expect(healPrompt.startHere).toEqual([
+      {
+        id: 'summary',
+        field: 'summary',
+        path: path.join(runDir, 'e2e-summary.json'),
+        purpose: 'Raw Playwright summary. Use when heal-index.md is missing or incomplete.',
+      },
+    ])
+    expect(healPrompt.resources).toEqual([])
+    expect(healPrompt.boundaries.fixTarget).toContain('This feature has no editable service repos')
+    expect(healPrompt.boundaries.fixTarget).toContain('Read the failing test spec and its helpers')
+  })
+})
+
 describe('buildOrchestratorHealPrompt', () => {
   let tmp: string
   let runDir: string
@@ -299,18 +412,7 @@ describe('buildOrchestratorHealPrompt', () => {
   })
 
   it('renders service-mode copy when manifest.repoPaths is non-empty', () => {
-    fs.writeFileSync(
-      path.join(runDir, 'manifest.json'),
-      JSON.stringify({
-        runId: 'r1',
-        feature: 'f',
-        startedAt: '2026-01-01T00:00:00Z',
-        status: 'running',
-        healCycles: 0,
-        services: [],
-        repoPaths: ['/some/repo'],
-      }),
-    )
+    writeRunManifest(runDir, { repoPaths: ['/some/repo'] })
     const build = buildOrchestratorHealPrompt({ agent: 'claude', projectRoot, runDir })
     const prompt = build({ cycle: 0, outputDir: path.join(runDir, 'out') })
     expect(prompt).toContain('Fix service/app code, not tests.')
@@ -322,19 +424,11 @@ describe('buildOrchestratorHealPrompt', () => {
   it('surfaces feature docs when the accepted feature has preserved context', () => {
     const featureDir = path.join(projectRoot, 'features', 'context_docs')
     fs.mkdirSync(path.join(featureDir, 'docs'), { recursive: true })
-    fs.writeFileSync(
-      path.join(runDir, 'manifest.json'),
-      JSON.stringify({
-        runId: 'r1',
-        feature: 'context_docs',
-        featureDir,
-        startedAt: '2026-01-01T00:00:00Z',
-        status: 'running',
-        healCycles: 0,
-        services: [],
-        repoPaths: ['/some/repo'],
-      }),
-    )
+    writeRunManifest(runDir, {
+      feature: 'context_docs',
+      featureDir,
+      repoPaths: ['/some/repo'],
+    })
     const build = buildOrchestratorHealPrompt({ agent: 'claude', projectRoot, runDir })
     const prompt = build({ cycle: 0, outputDir: path.join(runDir, 'out') })
     expect(prompt).toContain('Feature context docs:')
@@ -343,18 +437,7 @@ describe('buildOrchestratorHealPrompt', () => {
   })
 
   it('renders test-mode copy when manifest.repoPaths is empty', () => {
-    fs.writeFileSync(
-      path.join(runDir, 'manifest.json'),
-      JSON.stringify({
-        runId: 'r1',
-        feature: 'f',
-        startedAt: '2026-01-01T00:00:00Z',
-        status: 'running',
-        healCycles: 0,
-        services: [],
-        repoPaths: [],
-      }),
-    )
+    writeRunManifest(runDir, { repoPaths: [] })
     const build = buildOrchestratorHealPrompt({ agent: 'claude', projectRoot, runDir })
     const prompt = build({ cycle: 0, outputDir: path.join(runDir, 'out') })
     expect(prompt).toContain('This feature has no editable service repos')

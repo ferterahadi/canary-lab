@@ -76,6 +76,7 @@ describe('canary-lab agent install', () => {
       expect(body).toContain('~/.canary-lab/workspaces.json')
       expect(body).toContain('http://127.0.0.1:7421/mcp/health')
       expect(body).toContain('Do not add `--port`')
+      expect(body).toContain('context.healPrompt.startHere')
       expect(body).toContain('`write_journal`, then `signal_run`, then `wait_for_heal_task`')
       expect(body).toContain('Do not pass `force_new` during normal healing')
 	      expect(body).toContain('cancel_heal')

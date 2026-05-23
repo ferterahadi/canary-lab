@@ -25,7 +25,7 @@ Use the Canary Lab MCP tools in this order:
 3. if `start_run` returns `active_heal_blocks_start`, ask whether to call `cancel_heal` on `activeRunId`; do not start a fresh or different run while a matching run is healing
 4. if `start_run` returns an active run, continue it
 5. `wait_for_heal_task`
-6. fix application code when `needs_heal` is returned
+6. when `needs_heal` is returned, inspect `context.healPrompt.startHere` first, then use `context.healPrompt.resources`, the returned heal context, and the checked-out source code
 7. `write_journal`
 8. `signal_run` with `rerun` or `restart`
 9. repeat from `wait_for_heal_task` until passed or terminal failure

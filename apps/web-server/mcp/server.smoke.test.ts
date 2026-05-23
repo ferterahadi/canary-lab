@@ -195,6 +195,69 @@ describe('MCP HTTP server (smoke)', () => {
     }
   })
 
+  it('get_heal_context returns the structured heal prompt map', async () => {
+    const projectRoot = path.resolve(__dirname, '..', '..', '..', 'templates', 'project')
+    const logsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-context-')))
+    const { app, runStore } = await createServer({ projectRoot, logsDir, ptyFactory: inertPtyFactory })
+    let client: Client | null = null
+    try {
+      const address = await app.listen({ port: 0, host: '127.0.0.1' })
+      client = new Client(
+        { name: 'canary-lab-smoke', version: '0.0.1' },
+        { capabilities: {} },
+      )
+      await client.connect(new StreamableHTTPClientTransport(new URL('/mcp', address)))
+
+      runStore.bootstrap({
+        runId: 'context-map',
+        feature: 'broken_todo_api',
+        startedAt: '2026-05-08T00:00:00.000Z',
+        status: 'healing',
+        healCycles: 1,
+        services: [],
+        healMode: 'external',
+        repoPaths: ['/repo/app'],
+      })
+      const runDir = runDirFor(logsDir, 'context-map')
+      fs.writeFileSync(path.join(runDir, 'heal-index.md'), '# Heal Index\n')
+      fs.writeFileSync(path.join(runDir, 'diagnosis-journal.md'), '# Journal\n')
+      fs.mkdirSync(path.join(runDir, 'failed', 'test-case', 'trace-extract'), { recursive: true })
+      fs.writeFileSync(path.join(runDir, 'failed', 'test-case', 'trace-extract', 'failure-summary.md'), '# Trace\n')
+
+      const result = await client.callTool({
+        name: 'get_heal_context',
+        arguments: { runId: 'context-map', session_id: 'sess-context' },
+      })
+      const body = JSON.parse((result.content?.[0] as { text: string }).text)
+
+      expect(body.healPrompt).toMatchObject({
+        source: 'canary-lab/heal-agent-map',
+        mode: 'service',
+        startHere: [
+          {
+            id: 'heal-index',
+            field: 'healIndexMarkdown',
+            path: path.join(runDir, 'heal-index.md'),
+          },
+        ],
+        boundaries: {
+          signalPolicy: {
+            serviceOrRuntimeChange: 'restart',
+            testOrConfigOnlyChange: 'rerun',
+            mechanism: 'call signal_run; do not write signal files directly',
+          },
+        },
+      })
+      expect(body.healPrompt.resources.map((entry: { id: string }) => entry.id)).toEqual([
+        'trace-extract',
+        'journal',
+      ])
+    } finally {
+      if (client) await client.close().catch(() => undefined)
+      await app.close()
+    }
+  })
+
   it('wait_for_heal_task reports needs_heal, terminal states, and timeout', async () => {
     const projectRoot = path.resolve(__dirname, '..', '..', '..', 'templates', 'project')
     const logsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-wait-')))
@@ -217,6 +280,7 @@ describe('MCP HTTP server (smoke)', () => {
         services: [],
         healMode: 'external',
       })
+      fs.writeFileSync(path.join(runDirFor(logsDir, 'wait-needs-heal'), 'heal-index.md'), '# Heal Index\n')
       await client.callTool({
         name: 'claim_heal',
         arguments: {
@@ -235,10 +299,15 @@ describe('MCP HTTP server (smoke)', () => {
         name: 'wait_for_heal_task',
         arguments: { runId: 'wait-needs-heal', session_id: 'sess-1', timeout_ms: 1000 },
       })
-      expect(JSON.parse((needsHeal.content?.[0] as { text: string }).text)).toMatchObject({
+      const needsHealBody = JSON.parse((needsHeal.content?.[0] as { text: string }).text)
+      expect(needsHealBody).toMatchObject({
         type: 'needs_heal',
         runId: 'wait-needs-heal',
         cycle: 1,
+      })
+      expect(needsHealBody.context.healPrompt.startHere[0]).toMatchObject({
+        id: 'heal-index',
+        field: 'healIndexMarkdown',
       })
 
       runStore.bootstrap({

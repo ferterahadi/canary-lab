@@ -8,6 +8,8 @@ import type { RunDetail, RunStoreEvent } from '../lib/run-store'
 import type { ExternalHealBroker } from '../lib/external-heal-broker'
 import { loadFeatures } from '../lib/feature-loader'
 import { runDirFor, buildRunPaths } from '../lib/runtime/run-paths'
+import { buildHealPromptMap } from '../lib/runtime/auto-heal'
+import { loadProjectConfig } from '../lib/runtime/launcher/project-config'
 import {
   isActiveRunStatus,
   isTerminalRunStatus,
@@ -497,6 +499,7 @@ function buildHealContext(deps: CanaryLabMcpDeps, runId: string): Record<string,
   const runDir = runDirFor(deps.store.logsDir, runId)
   const paths = buildRunPaths(runDir)
   const summary = detail.summary
+  const projectConfig = loadProjectConfig(deps.projectRoot)
   const failedTests = (summary?.failed ?? []).map((entry) => ({
     name: entry.name,
     ...(entry.error ? { error: entry.error } : {}),
@@ -522,6 +525,11 @@ function buildHealContext(deps: CanaryLabMcpDeps, runId: string): Record<string,
     healIndexMarkdown: safeRead(paths.healIndexPath),
     journalMarkdown: safeRead(paths.diagnosisJournalPath),
     artifactsBase: `/api/runs/${encodeURIComponent(runId)}/artifacts/`,
+    healPrompt: buildHealPromptMap({
+      projectRoot: deps.projectRoot,
+      runDir,
+      personalWikiPath: projectConfig.personalWikiPath,
+    }),
   }
 }
 
