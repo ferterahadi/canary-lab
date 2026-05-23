@@ -3,7 +3,7 @@
 ## Current Package Model
 
 - Publish one CLI: `canary-lab`
-- Main subcommands: `init`, `run`, `env`, `new-feature`
+- Main subcommands: `init`, `setup`, `ui`, `mcp`, `new feature`, `env`, `upgrade`
 - Package internals ship as compiled code in `dist/`
 - Scaffold templates live in `templates/project/` and are copied into `dist/templates/` during build
 

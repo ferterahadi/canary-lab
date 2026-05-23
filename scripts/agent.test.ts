@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { install, main, refreshInstalled } from './agent'
+import { install, installOrRefresh, main, refreshInstalled } from './agent'
 
 describe('canary-lab agent install', () => {
   it('dry-run prints planned copies and MCP snippets without writing files', () => {
@@ -47,6 +47,20 @@ describe('canary-lab agent install', () => {
     expect(lines.join('\n')).toContain('Updated Codex skill')
   })
 
+  it('installOrRefresh installs missing integrations and updates stale managed files', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-agent-setup-'))
+    const lines: string[] = []
+    installOrRefresh('codex', { homeDir: home, log: (line) => lines.push(line) })
+    const skillPath = path.join(home, '.codex', 'skills', 'canary-lab', 'SKILL.md')
+    fs.writeFileSync(skillPath, 'stale prompt')
+
+    expect(installOrRefresh('codex', { homeDir: home, log: (line) => lines.push(line) })).toBe(1)
+
+    expect(fs.readFileSync(skillPath, 'utf-8')).toContain('Workspace Bootstrap')
+    expect(lines.join('\n')).toContain('Installed Codex skill')
+    expect(lines.join('\n')).toContain('Updated Codex skill')
+  })
+
   it('instructs agents to verify fixes with signal_run instead of start_run', () => {
     const assets = path.resolve(__dirname, '..', 'agent-integrations')
     const skillPaths = [
@@ -58,6 +72,10 @@ describe('canary-lab agent install', () => {
     for (const skillPath of skillPaths) {
       const body = fs.readFileSync(skillPath, 'utf-8')
       expect(body).toContain('never call `start_run` to verify')
+      expect(body).toContain('Workspace Bootstrap')
+      expect(body).toContain('~/.canary-lab/workspaces.json')
+      expect(body).toContain('http://127.0.0.1:7421/mcp/health')
+      expect(body).toContain('Do not add `--port`')
       expect(body).toContain('`write_journal`, then `signal_run`, then `wait_for_heal_task`')
       expect(body).toContain('Do not pass `force_new` during normal healing')
 	      expect(body).toContain('cancel_heal')

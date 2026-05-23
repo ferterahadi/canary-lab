@@ -129,6 +129,7 @@ export async function registerMcpRoutes(
     server: SERVER_INFO,
     toolCount,
     activeSessions: transports.size,
+    projectRoot: deps.projectRoot,
   }))
 }
 

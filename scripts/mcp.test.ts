@@ -36,6 +36,8 @@ describe('canary-lab mcp', () => {
       await expect(doctor(`${address}/mcp`, { stdout, stderr })).resolves.toBe(true)
       expect(stdout.text()).toContain('Canary Lab MCP is reachable')
       expect(stderr.text()).toBe('')
+      const health = await fetch(`${address}/mcp/health`).then((res) => res.json()) as { projectRoot?: string }
+      expect(health.projectRoot).toBe(projectRoot)
     } finally {
       await app.close()
     }

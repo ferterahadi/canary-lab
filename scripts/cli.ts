@@ -5,6 +5,7 @@ import { main as upgradeProject } from './upgrade'
 import { runUi } from './ui-command'
 import { main as runMcp } from './mcp'
 import { main as runAgent } from './agent'
+import { main as runSetup } from './setup'
 import { main as createFeature } from './new-feature'
 import { main as runEnv } from './env'
 import { banner, section, dim, fail, line } from '../shared/cli-ui/ui'
@@ -28,11 +29,10 @@ export function printUsage(): void {
   banner('Canary Lab')
   section('Usage')
   console.log(`  canary-lab init <folder> ${dim('[--package-spec <spec>]')}`)
-  console.log(`  canary-lab ui ${dim('[--port <n>]')}`)
+  console.log(`  canary-lab setup ${dim('[--workspace <path>] [--agent auto|codex|claude|all] [--dry-run] [--force]')}`)
+  console.log(`  canary-lab ui`)
   console.log(`  canary-lab mcp ${dim('[doctor] [--url <url>]')}`)
-  console.log(`  canary-lab agent install <codex|claude|all> ${dim('[--dry-run] [--force]')}`)
   console.log(`  canary-lab new feature <name> ${dim('[--description "..."]')}`)
-  console.log(`  canary-lab new-feature <name> ${dim('[--description "..."]')}`)
   console.log(`  canary-lab env apply <feature> <set>`)
   console.log(`  canary-lab env revert <feature>`)
   console.log(`  canary-lab upgrade ${dim('[--silent] [--check] [--force-archive]')}`)
@@ -45,6 +45,9 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
   switch (command) {
     case 'init':
       await initProject(args)
+      return
+    case 'setup':
+      await runSetup(args)
       return
     case 'ui':
       await runUi(args)
@@ -62,9 +65,6 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
         return
       }
       await createFeature(args.slice(1))
-      return
-    case 'new-feature':
-      await createFeature(args)
       return
     case 'env':
       await runEnv(args)
