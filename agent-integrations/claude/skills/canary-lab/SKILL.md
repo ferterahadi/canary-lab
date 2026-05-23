@@ -31,7 +31,7 @@ Before calling Canary Lab MCP tools, make sure the workspace and UI server are a
 7. Call `wait_for_heal_task` with the same `session_id`.
 8. If it returns `passed`, summarize using `result.counts.statusLine` and stop.
 9. If it returns `failed`, report the terminal status using `result.counts.statusLine` and relevant failure summary.
-10. If it returns `needs_heal`, inspect the returned heal context and the checked-out source code.
+10. If it returns `needs_heal`, inspect `context.healPrompt.startHere` first, then use `context.healPrompt.resources`, the returned heal context, and the checked-out source code.
 11. Fix app/service code, not tests, unless the test is provably wrong.
 12. Call `write_journal` with what was diagnosed and changed.
 13. Call `signal_run` with `kind: "rerun"` for test-only/app-code fixes that do not need service restart, or `kind: "restart"` when services or env need restarting. Include `files_changed`.
