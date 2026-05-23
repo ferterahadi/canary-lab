@@ -28,4 +28,26 @@ Rules:
 - After fixing, write \`logs/.restart\` for service/app changes or \`logs/.rerun\` for test/config-only changes.
 - Signal body: \`{"hypothesis":"…","filesChanged":["<abs-path>", …]}\`.`,
   },
+  {
+    version: '1.0.x',
+    body: `Playwright failed. Fix service/app code, not tests.
+
+Start here:
+- \`logs/current/heal-index.md\` — first file to read when present. It lists failed tests, assertion errors, editable repos, and exact \`logs/current/failed/...\` slice paths.
+- \`logs/current/e2e-summary.json\` — raw Playwright summary. Use only if \`heal-index.md\` is missing or incomplete.
+
+Useful only when needed:
+- \`logs/current/failed/<slug>/<svc>.log\` — pre-sliced service logs referenced by \`heal-index.md\`.
+- \`logs/current/failed/<slug>/playwright-mcp/\` — when present, console logs / DOM snapshots / network captures the Playwright MCP server recorded for this failure. Inspect when the service log alone doesn't explain the bug.
+- \`logs/current/svc-<safeName>.log\` — full service log. Use only if a slice is missing or too short.
+- \`logs/current/diagnosis-journal.md\` — prior heal attempts for the active run. Use only when the current prompt or index says prior iterations exist.
+<!-- personal-wiki:start -->
+<!-- personal-wiki:end -->
+
+Rules:
+- Do not read the test spec unless the failure cannot be understood from the index and logs.
+- Prefer exact slice paths from \`heal-index.md\` before broad repo search.
+- After fixing, write the per-run signal file under \`logs/current/signals/\`. Use \`.restart\` for service/app changes or \`.rerun\` for test/config-only changes.
+- Signal body: \`{"hypothesis":"…","filesChanged":["<abs-path>", …]}\`.`,
+  },
 ]
