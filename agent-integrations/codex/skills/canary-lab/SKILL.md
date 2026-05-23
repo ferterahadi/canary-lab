@@ -7,6 +7,18 @@ description: Use when the user asks Codex to run, verify, debug, heal, or iterat
 
 Use Canary Lab MCP tools for Canary Lab runs instead of ad hoc shell commands when available.
 
+## Workspace Bootstrap
+
+Before calling Canary Lab MCP tools, make sure the workspace and UI server are available.
+
+1. Read the user-level registry at `~/.canary-lab/workspaces.json`. On Windows, resolve it from the user's home directory, for example `%USERPROFILE%\.canary-lab\workspaces.json`.
+2. If the registry has exactly one workspace, use that workspace. If it has multiple workspaces, list their `name` and `path` values and ask which one to use.
+3. If the registry is missing or empty, ask the user to run `npx canary-lab setup` from the Canary Lab workspace.
+4. Check `http://127.0.0.1:7421/mcp/health`.
+5. If the health check succeeds, confirm `projectRoot` matches the selected workspace. If it points at a different workspace, ask the user whether to stop the existing Canary Lab server before continuing.
+6. If the health check fails, start `npx canary-lab ui` from the selected workspace in a visible long-running terminal when the host supports that. Do not add `--port`; Canary Lab uses port `7421` so MCP clients can connect consistently.
+7. Once the health check passes, call `list_features` and `list_runs` before helping the user choose what to rerun.
+
 ## External Run Loop
 
 1. Call `list_features` and choose the requested feature.

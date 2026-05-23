@@ -3,6 +3,7 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { extractManagedBlock, applyManagedBlock, applyGitignoreRules, main } from './upgrade'
+import { readWorkspaceRegistry } from '../shared/runtime/workspace-registry'
 
 const tmpDirs: string[] = []
 function mkProjectRoot(): string {
@@ -126,6 +127,7 @@ describe("main (upgrade orchestration)", () => {
 
   it("copies FULLY_MANAGED files, applies MARKER_MANAGED, injects postinstall", async () => {
     const root = mkProjectRoot()
+    const home = process.env.CANARY_LAB_AGENT_HOME!
     vi.stubEnv("CANARY_LAB_PROJECT_ROOT", root)
     fs.writeFileSync(path.join(root, "package.json"), JSON.stringify({ name: "p", scripts: {} }))
     vi.spyOn(console, "log").mockImplementation(() => {})
@@ -153,8 +155,8 @@ describe("main (upgrade orchestration)", () => {
       expect(content).toContain("logs/current/heal-index.md")
       expect(content).toContain("logs/current/e2e-summary.json")
       expect(content).toContain("logs/current/diagnosis-journal.md")
-      expect(content).toContain("`.restart`")
-      expect(content).toContain("`.rerun`")
+      expect(content).toContain(".restart")
+      expect(content).toContain(".rerun")
       expect(content).toContain("logs/current/signals/")
       expect(content).toContain("Prefer exact slice paths from `heal-index.md` before broad repo search.")
       expect(content).not.toContain("Avoid broad repo grep")
@@ -169,6 +171,7 @@ describe("main (upgrade orchestration)", () => {
 
     const pkg = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf-8"))
     expect(pkg.scripts.postinstall).toBe("canary-lab upgrade --silent")
+    expect(readWorkspaceRegistry(home).workspaces[0].path).toBe(root)
   })
 
   it("refreshes only existing user-level agent integrations on upgrade", async () => {

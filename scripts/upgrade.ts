@@ -12,6 +12,7 @@ import {
 import { loadProjectConfig } from '../apps/web-server/lib/runtime/launcher/project-config'
 import { applyPersonalWikiBlock } from '../shared/runtime/personal-wiki'
 import { refreshInstalled as refreshInstalledAgentIntegrations } from './agent'
+import { upsertWorkspace } from '../shared/runtime/workspace-registry'
 
 const MARKER_START = '<!-- managed:canary-lab:start -->'
 const MARKER_END = '<!-- managed:canary-lab:end -->'
@@ -208,6 +209,12 @@ export async function main(
   const projectConfig = loadProjectConfig(projectRoot)
   let updated = 0
 
+  // Keep the user-level workspace registry current so agent skills can find
+  // Canary Lab projects without relying on shell-specific environment files.
+  upsertWorkspace(projectRoot, {
+    homeDir: extras.agentHomeDir ?? process.env.CANARY_LAB_AGENT_HOME,
+  })
+
   // 1. Fully-managed files: overwrite from templates
   for (const relPath of FULLY_MANAGED) {
     const templatePath = path.join(templateRoot, relPath)
@@ -305,7 +312,7 @@ export async function main(
   if (installedVersion) writeStamp(projectRoot, installedVersion)
 
   // Refresh only user-level integrations that are already installed. First-time
-  // installs remain explicit via `canary-lab agent install`.
+  // installs remain explicit via `canary-lab setup`.
   refreshInstalledAgentIntegrations('all', {
     homeDir: extras.agentHomeDir ?? process.env.CANARY_LAB_AGENT_HOME,
     log: (msg) => log(`  ${msg}`, opts),

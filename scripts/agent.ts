@@ -6,6 +6,7 @@ import path from 'path'
 import { runAsScript } from './run-as-script'
 
 type Target = 'codex' | 'claude' | 'all'
+export type AgentInstallTarget = Target
 
 interface AgentInstallOptions {
   dryRun?: boolean
@@ -89,6 +90,39 @@ export function install(target: Target, opts: AgentInstallOptions = {}): void {
       },
     },
   }, null, 2))
+}
+
+export function installOrRefresh(target: Target, opts: AgentInstallOptions = {}): number {
+  const home = opts.homeDir ?? os.homedir()
+  const log = opts.log ?? console.log
+  const assets = resolveAgentAssetsDir()
+  const dryRun = opts.dryRun ?? false
+  const force = opts.force ?? false
+  let changed = 0
+
+  for (const op of buildOperations(target, home, assets)) {
+    if (!fs.existsSync(op.from)) throw new Error(`missing packaged asset: ${op.from}`)
+    if (dryRun) {
+      log(`[dry-run] install or refresh ${op.label}: ${op.from} -> ${op.to}`)
+      continue
+    }
+    if (fs.existsSync(op.to)) {
+      if (!force && dirsEqual(op.from, op.to)) {
+        log(`${op.label} already up to date: ${op.to}`)
+        continue
+      }
+      fs.rmSync(op.to, { recursive: true, force: true })
+      copyDir(op.from, op.to)
+      log(`Updated ${op.label}: ${op.to}`)
+      changed += 1
+      continue
+    }
+    copyDir(op.from, op.to)
+    log(`Installed ${op.label}: ${op.to}`)
+    changed += 1
+  }
+
+  return changed
 }
 
 export function refreshInstalled(target: Target, opts: AgentInstallOptions = {}): number {

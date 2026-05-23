@@ -81,11 +81,10 @@ npx canary-lab ui
 2. **Runs**: recent runs under `logs/runs/<runId>/`.
 3. **Run detail**: overview, service terminals, Playwright output, playback, heal output, and diagnosis journal.
 
-Useful flags:
+Useful flag:
 
 ```bash
 npx canary-lab ui --no-open
-npx canary-lab ui --port 8123
 ```
 
 `canary-lab init` scaffolds sample features: `example_todo_api`, `broken_todo_api`, `tricky_checkout_api`, and `flaky_orders_api`.
@@ -111,13 +110,11 @@ The UI also has an Add Test flow. It can turn a PRD or uploaded document into a 
 
 ```bash
 npx canary-lab init <folder>
+npx canary-lab setup
 npx canary-lab ui
-npx canary-lab ui --port 8123
 npx canary-lab mcp
 npx canary-lab mcp doctor
-npx canary-lab agent install <codex|claude|all>
 npx canary-lab new feature <name> --description "..."
-npx canary-lab new-feature <name> --description "..."
 npx canary-lab env apply <feature> <set>
 npx canary-lab env revert <feature>
 npx canary-lab upgrade
@@ -126,8 +123,9 @@ npx canary-lab upgrade
 Notes:
 
 - `ui` is the primary human workflow.
+- `setup` repairs or refreshes workspace registration, Codex/Claude skills, and MCP configuration when the matching CLI is available.
 - `mcp` bridges local AI clients into the running UI server.
-- `new feature`, `new-feature`, and `env` are deterministic wrappers for scripts and agents.
+- `new feature` and `env` are deterministic wrappers for scripts and agents.
 - `upgrade` syncs scaffolded docs and skills in an existing project. It is not a dependency upgrade command.
 
 ## Environment Switching
@@ -310,7 +308,7 @@ npm run build
 
 ### Repository Layout
 
-- `scripts/`: CLI entry, scaffold/upgrade commands, MCP bridge, and agent installer
+- `scripts/`: CLI entry, scaffold/setup/upgrade commands, and MCP bridge
 - `apps/web-server/`: local server, API routes, runtime orchestrator, run store, and PTY streams
 - `apps/web/`: React UI
 - `shared/e2e-runner/`: Playwright fixture support
