@@ -3,11 +3,11 @@
 [![npm](https://img.shields.io/npm/v/canary-lab.svg)](https://www.npmjs.com/package/canary-lab)
 [![license](https://img.shields.io/npm/l/canary-lab.svg)](LICENSE)
 
-Canary Lab is an agent-ready local control plane for Playwright feature evaluations. It starts services, applies envsets, runs Playwright, and stores the run evidence a coding agent needs to diagnose, repair, and rerun failed checks.
+Canary Lab runs Playwright tests, captures structured evidence on failure, and dispatches an agent (Claude or Codex) to investigate the failing run, edit application code, and rerun until the tests pass.
 
-Playwright remains the test runner. Canary Lab owns the workflow around it: feature scaffolding, service orchestration, env switching, run history, failure context, agent handoff, repeatable reruns, and evaluation exports.
+The model is tests-as-spec: tests encode intended behavior, and a failed test means a regression in the code, not drift in the test. The usual self-healing test tools do the opposite — they assume the application changed intentionally and the test should adapt.
 
-The repair can be in the application code or in the test cases. Canary Lab captures the run context, the agent uses that context to make the fix, Canary Lab reruns the test, and the loop continues until the acceptance criteria pass.
+Playwright executes the tests. Canary Lab owns service startup, env switching, run history, failure-context extraction, agent handoff, and rerun signals. Per-run state lives under `logs/runs/<runId>/`.
 
 ![Canary Lab UI walkthrough](docs/assets/canary-lab-ui-walkthrough.png)
 
@@ -45,7 +45,7 @@ The goal is to keep run state explicit. A failed Playwright run should have enou
 
 ## Use It When
 
-- Playwright tests need local services, env files, or multiple repos.
+- You want to run e2e tests and have an agent fix the application code when they fail
 - You want logs, screenshots, traces, videos, summaries, and diagnosis notes saved per run.
 - You want an agent to repair failures from saved run context instead of terminal scrollback.
 - You need repeatable reruns with explicit env and service cleanup.
@@ -53,9 +53,9 @@ The goal is to keep run state explicit. A failed Playwright run should have enou
 Canary Lab is probably unnecessary if:
 
 - A plain `npx playwright test` command gives you enough context.
+- You want tests that update themselves when the UI changes (self-healing locators).
 - You do not need service orchestration, env switching, or retained local run history.
-- You want a hosted synthetic monitoring product or CI-first test analytics dashboard.
-- You do not want agents involved in writing, debugging, or rerunning tests.
+- You want a hosted dashboard that manages tests for you.
 
 ## Current Scope
 
