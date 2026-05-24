@@ -40,6 +40,10 @@ interface RunsContextValue {
    *  with the run's initial detail, so the row appears immediately. Returns
    *  the new runId, or throws on failure. */
   startRun: (feature: string, env?: string) => Promise<string>
+  startVerification: (
+    feature: string,
+    input: { configId?: string; targetUrls?: Record<string, string>; playwrightEnvsetId?: string },
+  ) => Promise<string>
   /** Lazily hydrate a run detail that was omitted from the initial WS
    *  snapshot. Terminal runs use this path so selecting historical rows does
    *  not leave the detail pane waiting forever. */
@@ -194,6 +198,15 @@ export function RunsProvider({ children, wsUrl, WebSocketImpl }: RunsProviderPro
     return runId
   }, [refresh, state.connection])
 
+  const startVerification = useCallback(async (
+    feature: string,
+    input: { configId?: string; targetUrls?: Record<string, string>; playwrightEnvsetId?: string },
+  ): Promise<string> => {
+    const { runId } = await api.executeVerification(feature, input)
+    if (state.connection !== 'live') await refresh()
+    return runId
+  }, [refresh, state.connection])
+
   const loadRunDetail = useCallback(async (runId: string): Promise<void> => {
     if (detailLoadsRef.current.has(runId)) return
     detailLoadsRef.current.add(runId)
@@ -221,13 +234,14 @@ export function RunsProvider({ children, wsUrl, WebSocketImpl }: RunsProviderPro
     state,
     refresh,
     startRun,
+    startVerification,
     loadRunDetail,
     abort,
     delete: deleteRun,
     pauseHeal,
     cancelHeal,
     clearError,
-  }), [state, refresh, startRun, loadRunDetail, abort, deleteRun, pauseHeal, cancelHeal, clearError])
+  }), [state, refresh, startRun, startVerification, loadRunDetail, abort, deleteRun, pauseHeal, cancelHeal, clearError])
 
   return <RunsContext.Provider value={value}>{children}</RunsContext.Provider>
 }
@@ -255,6 +269,11 @@ export interface UseRunsResult {
   refresh: () => Promise<void>
   /** Start a new run. */
   startRun: (feature: string, env?: string) => Promise<string>
+  /** Start a deployment verification. */
+  startVerification: (
+    feature: string,
+    input: { configId?: string; targetUrls?: Record<string, string>; playwrightEnvsetId?: string },
+  ) => Promise<string>
   // ── Per-run actions (the runId is the first arg). The parent can
   //    dispatch these for any row without needing a child component. ──
   abort: (runId: string) => Promise<void>
@@ -273,6 +292,7 @@ export function useRuns(): UseRunsResult {
     errors: ctx.state.errors,
     refresh: ctx.refresh,
     startRun: ctx.startRun,
+    startVerification: ctx.startVerification,
     abort: ctx.abort,
     delete: ctx.delete,
     pauseHeal: ctx.pauseHeal,

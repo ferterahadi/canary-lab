@@ -35,20 +35,36 @@ export function deriveRunViewModel(
   const detail = isRunDetail(input) ? input : null
   const manifest = detail?.manifest ?? input ?? undefined
   const status = manifest?.status ?? 'aborted'
+  const executionType = manifest?.executionType ?? 'run'
   const lifecycle = detail?.manifest.lifecycle
   const events = detail?.lifecycleEvents ?? []
   const displayStatus = deriveDisplayStatus(status, transient)
   const headline = transientHeadline(transient) ?? lifecycle?.headline ?? fallbackHeadline(status)
   const subtext = lifecycle?.detail
-  const alert = primaryAlert(status, lifecycle?.abortReason?.service)
+  const alert = primaryAlert(status, lifecycle?.abortReason?.service, executionType)
 
   return {
     displayStatus,
     headline,
     ...(subtext ? { subtext } : {}),
     ...(alert ? { primaryAlert: alert } : {}),
-    actions: deriveRunActionAvailability(status, transient),
+    actions: executionType === 'verify'
+      ? verifyActionAvailability(status, transient)
+      : deriveRunActionAvailability(status, transient),
     recoveryTimeline: events.length > 0 ? events : lifecycle ? [{ ...lifecycle, severity: severityForStatus(status) }] : [],
+  }
+}
+
+function verifyActionAvailability(
+  status: RunStatus,
+  transient: TransientAction | null,
+): RunViewModel['actions'] {
+  const base = deriveRunActionAvailability(status, transient)
+  return {
+    ...base,
+    pauseHeal: { enabled: false, reason: 'Verify is observational and does not start healing.' },
+    cancelHeal: { enabled: false, reason: 'Verify does not start heal cycles.' },
+    restartHeal: { enabled: false, reason: 'Verify results are not healed; start another Verify execution instead.' },
   }
 }
 
@@ -74,15 +90,16 @@ function transientHeadline(transient: TransientAction | null): string | undefine
   if (transient === 'pausing') return 'Pausing for heal'
 }
 
-function primaryAlert(status: RunStatus, service?: string): RunViewModel['primaryAlert'] | null {
+function primaryAlert(status: RunStatus, service?: string, executionType: 'run' | 'verify' = 'run'): RunViewModel['primaryAlert'] | null {
+  const label = executionType === 'verify' ? 'Verify' : 'Run'
   if (status === 'aborted') {
     return {
       tone: 'warning',
-      message: service ? `Run aborted because ${service} failed health checks.` : 'Run aborted before completion.',
+      message: service ? `${label} aborted because ${service} failed health checks.` : `${label} aborted before completion.`,
     }
   }
-  if (status === 'failed') return { tone: 'error', message: 'Run finished with failing tests.' }
-  if (status === 'passed') return { tone: 'success', message: 'Run passed.' }
+  if (status === 'failed') return { tone: 'error', message: executionType === 'verify' ? 'Verify found deployment failures. No healing was started.' : 'Run finished with failing tests.' }
+  if (status === 'passed') return { tone: 'success', message: `${label} passed.` }
   return null
 }
 

@@ -32,6 +32,7 @@ async function createMcpHarness(opts: {
   featuresDir: string
   startRun?: Parameters<typeof registerMcpRoutes>[1]['startRun']
   restartExternalRun?: Parameters<typeof registerMcpRoutes>[1]['restartExternalRun']
+  startVerification?: Parameters<typeof registerMcpRoutes>[1]['startVerification']
 }) {
   const app = Fastify()
   const runStore = new RunStore(opts.logsDir, createRegistry())
@@ -48,6 +49,7 @@ async function createMcpHarness(opts: {
     projectRoot: opts.projectRoot,
     startRun: opts.startRun ?? (async () => ({ runId: 'new-run' })),
     restartExternalRun: opts.restartExternalRun,
+    startVerification: opts.startVerification,
   })
   return { app, runStore }
 }
@@ -93,6 +95,12 @@ describe('MCP HTTP server (smoke)', () => {
         'list_runs',
         'get_run',
         'get_run_actions',
+        'list_verification_configs',
+        'get_verification_config',
+        'create_verification_config',
+        'update_verification_config',
+        'execute_verification',
+        'get_verification_result',
         'get_heal_context',
         'wait_for_heal_task',
         'start_run',
@@ -255,6 +263,152 @@ describe('MCP HTTP server (smoke)', () => {
     } finally {
       if (client) await client.close().catch(() => undefined)
       await app.close()
+    }
+  })
+
+  it('exposes verification config, execution, and result tools', async () => {
+    const projectRoot = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-verify-')))
+    const featuresDir = path.join(projectRoot, 'features')
+    const logsDir = path.join(projectRoot, 'logs')
+    const featureDir = path.join(featuresDir, 'checkout')
+    fs.mkdirSync(path.join(featureDir, 'envsets', 'production'), { recursive: true })
+    fs.writeFileSync(path.join(featureDir, 'envsets', 'production', 'checkout.env'), 'GATEWAY_URL=https://api.example.com\n')
+    fs.writeFileSync(
+      path.join(featureDir, 'feature.config.cjs'),
+      `module.exports = { config: {
+        name: 'checkout',
+        description: 'checkout',
+        envs: ['production'],
+        repos: [{ name: 'api', localPath: __dirname, startCommands: [{ name: 'api-server', command: 'npm run dev' }] }],
+        featureDir: __dirname,
+      } }`,
+    )
+
+    const executions: unknown[] = []
+    let harnessStore: RunStore | null = null
+    const { app, runStore } = await createMcpHarness({
+      logsDir,
+      projectRoot,
+      featuresDir,
+      startVerification: async (feature, input) => {
+        executions.push({ feature, input })
+        harnessStore!.bootstrap({
+          runId: 'verify-run-1',
+          executionType: 'verify',
+          feature,
+          env: input.playwrightEnvsetId,
+          startedAt: '2026-05-24T00:00:00.000Z',
+          status: 'running',
+          healCycles: 0,
+          services: [],
+          verification: {
+            configName: 'Production',
+            playwrightEnvsetId: input.playwrightEnvsetId ?? 'production',
+            targetUrls: input.targetUrls ?? { 'api-server': 'https://api.example.com' },
+            targets: [{ id: 'api-server', name: 'api', url: 'https://api.example.com' }],
+          },
+        })
+        return { runId: 'verify-run-1' }
+      },
+    })
+    harnessStore = runStore
+
+    let client: Client | null = null
+    try {
+      const address = await app.listen({ port: 0, host: '127.0.0.1' })
+      client = new Client(
+        { name: 'canary-lab-smoke', version: '0.0.1' },
+        { capabilities: {} },
+      )
+      await client.connect(new StreamableHTTPClientTransport(new URL('/mcp', address)))
+
+      const created = await client.callTool({
+        name: 'create_verification_config',
+        arguments: {
+          featureId: 'checkout',
+          name: 'Production',
+          playwrightEnvsetId: 'production',
+          targetUrls: { 'api-server': 'https://api.example.com' },
+        },
+      })
+      const createdBody = JSON.parse((created.content?.[0] as { text: string }).text) as { id: string }
+
+      const listed = await client.callTool({
+        name: 'list_verification_configs',
+        arguments: { featureId: 'checkout' },
+      })
+      expect(JSON.parse((listed.content?.[0] as { text: string }).text)).toHaveLength(1)
+
+      const updated = await client.callTool({
+        name: 'update_verification_config',
+        arguments: {
+          featureId: 'checkout',
+          configId: createdBody.id,
+          name: 'Beta',
+          playwrightEnvsetId: 'production',
+          targetUrls: { 'api-server': 'https://beta.example.com' },
+        },
+      })
+      expect(JSON.parse((updated.content?.[0] as { text: string }).text)).toMatchObject({
+        id: createdBody.id,
+        name: 'Beta',
+      })
+
+      const executed = await client.callTool({
+        name: 'execute_verification',
+        arguments: {
+          featureId: 'checkout',
+          playwrightEnvsetId: 'production',
+          targetUrls: { 'api-server': 'https://api.example.com' },
+        },
+      })
+      expect(JSON.parse((executed.content?.[0] as { text: string }).text)).toMatchObject({
+        executionId: 'verify-run-1',
+        executionType: 'verify',
+        status: 'running',
+        playwrightEnvsetId: 'production',
+      })
+      expect(executions).toEqual([
+        {
+          feature: 'checkout',
+          input: {
+            playwrightEnvsetId: 'production',
+            targetUrls: { 'api-server': 'https://api.example.com' },
+          },
+        },
+      ])
+
+      runStore.patchManifest('verify-run-1', {
+        status: 'failed',
+        verification: {
+          configName: 'Production',
+          playwrightEnvsetId: 'production',
+          targetUrls: { 'api-server': 'https://api.example.com' },
+          targets: [{ id: 'api-server', name: 'api', url: 'https://api.example.com' }],
+          diagnostics: {
+            generatedAt: '2026-05-24T00:00:01.000Z',
+            summary: '1 Playwright test failed during deployment verification.',
+            targetUrls: { 'api-server': 'https://api.example.com' },
+            failedTests: [{ name: 'loads home', targetUrl: 'https://api.example.com' }],
+          },
+        },
+      })
+      const result = await client.callTool({
+        name: 'get_verification_result',
+        arguments: { executionId: 'verify-run-1' },
+      })
+      expect(JSON.parse((result.content?.[0] as { text: string }).text)).toMatchObject({
+        executionId: 'verify-run-1',
+        executionType: 'verify',
+        status: 'failed',
+        diagnostics: {
+          failedTests: [{ name: 'loads home' }],
+        },
+      })
+    } finally {
+      if (client) await client.close().catch(() => undefined)
+      await app.close()
+      fs.rmSync(projectRoot, { recursive: true, force: true })
     }
   })
 

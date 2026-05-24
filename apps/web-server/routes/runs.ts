@@ -90,6 +90,24 @@ export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Pro
     return detail
   })
 
+  app.get<{ Params: { runId: string } }>('/api/runs/:runId/verification-report', async (req, reply) => {
+    const detail = deps.store.get(req.params.runId)
+    if (!detail) {
+      reply.code(404)
+      return { error: 'run not found' }
+    }
+    if ((detail.manifest.executionType ?? 'run') !== 'verify') {
+      reply.code(409)
+      return { error: 'run is not a verification execution' }
+    }
+    return {
+      runId: detail.runId,
+      executionType: 'verify',
+      status: detail.manifest.status,
+      verification: detail.manifest.verification ?? null,
+    }
+  })
+
   // Structured heal-agent session view. Reads the per-run pointer file
   // (`agent-session.json`) the orchestrator writes after a heal cycle ends,
   // then parses + normalizes the agent CLI's own JSONL log into a uniform

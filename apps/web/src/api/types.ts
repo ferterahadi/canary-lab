@@ -9,6 +9,13 @@ import type {
   RunStatus,
   ServiceStatus,
 } from '../../../../shared/run-state'
+import type {
+  ExecutionType,
+  VerificationConfig,
+  VerificationDiagnostics,
+  VerificationRunMetadata,
+  VerificationTarget,
+} from '../../../../shared/verification'
 export type {
   DisplayStatus,
   RunLifecycleAbortReason,
@@ -24,6 +31,13 @@ export type {
   ServiceStatus,
   TransientAction,
 } from '../../../../shared/run-state'
+export type {
+  ExecutionType,
+  VerificationConfig,
+  VerificationDiagnostics,
+  VerificationRunMetadata,
+  VerificationTarget,
+} from '../../../../shared/verification'
 
 export interface FeatureRepo {
   name: string
@@ -66,10 +80,14 @@ export type FeatureTests = FeatureSpecFile[]
 
 export interface RunIndexEntry {
   runId: string
+  executionType?: ExecutionType
   feature: string
   startedAt: string
   status: RunStatus
   endedAt?: string
+  verificationConfigName?: string
+  verificationPlaywrightEnvsetId?: string
+  verificationTargetUrls?: Record<string, string>
 }
 
 export type EvaluationExportMode = 'raw' | 'localized'
@@ -88,6 +106,7 @@ export interface EvaluationExportTask {
 }
 
 export interface ServiceManifestEntry {
+  repoName?: string
   name: string
   safeName: string
   command: string
@@ -143,6 +162,7 @@ export interface ExternalHealSession {
 
 export interface RunManifest {
   runId: string
+  executionType?: ExecutionType
   feature: string
   featureDir?: string
   env?: string
@@ -158,6 +178,7 @@ export interface RunManifest {
   healMode?: 'auto' | 'manual' | 'external'
   externalHealSession?: ExternalHealSession
   lifecycle?: RunLifecycleSnapshot
+  verification?: VerificationRunMetadata
 }
 
 export interface RunSummaryFailedEntry {
@@ -168,6 +189,7 @@ export interface RunSummaryFailedEntry {
   locations?: string[]
   retry?: number
   logFiles?: string[]
+  traceSummaryFile?: string
 }
 
 export interface RunSummaryRunningStep {

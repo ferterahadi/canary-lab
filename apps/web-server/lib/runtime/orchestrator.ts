@@ -3,6 +3,7 @@ import path from 'path'
 import { randomUUID } from 'crypto'
 import { EventEmitter } from 'events'
 import type { FeatureConfig, HealthProbe, HttpProbe, TcpProbe } from '../../../../shared/launcher/types'
+import type { ExecutionType, VerificationRunMetadata } from '../../../../shared/verification'
 import {
   HealSignalGate,
   createRunLifecycleEvent,
@@ -79,6 +80,7 @@ import {
 // Fastify server can drive without inheriting any readline / iTerm cruft.
 
 export interface ServiceSpec {
+  repoName: string
   name: string
   safeName: string
   command: string
@@ -159,6 +161,9 @@ export interface OrchestratorOptions {
   runStateSink?: RunStateSink
   repoBranchSnapshots?: RepoBranchSnapshot[]
   initialHealCycles?: number
+  executionType?: ExecutionType
+  verification?: VerificationRunMetadata
+  playwrightEnv?: Record<string, string>
 }
 
 export type PauseResult =
@@ -318,6 +323,7 @@ export function buildServiceSpecs(
       const safeName = normalized.name!.replace(/[^a-z0-9]+/gi, '-').toLowerCase()
       const probe = resolveHealthProbe(normalized.healthCheck, env)
       out.push({
+        repoName: repo.name,
         name: normalized.name!,
         safeName,
         command: interp(normalized.command),
@@ -364,6 +370,9 @@ export class RunOrchestrator extends EventEmitter {
   private readonly runnerLog?: RunnerLog
   private readonly stateSink: RunStateSink
   private readonly repoBranchSnapshots?: RepoBranchSnapshot[]
+  private readonly executionType: ExecutionType
+  private readonly verification?: VerificationRunMetadata
+  private readonly playwrightEnv: Record<string, string>
   private readonly signalGate = new HealSignalGate()
   private healCycleHistory: Array<{ cycle: number; restarted: string[]; kept: string[] }> = []
 
@@ -445,6 +454,9 @@ export class RunOrchestrator extends EventEmitter {
     this.stateSink = opts.runStateSink ?? new FileRunStateSink(this.logsRoot)
     this.repoBranchSnapshots = opts.repoBranchSnapshots
     this.healCycles = opts.initialHealCycles ?? 0
+    this.executionType = opts.executionType ?? 'run'
+    this.verification = opts.verification
+    this.playwrightEnv = opts.playwrightEnv ?? {}
     if (this.runnerLog) this.attachRunnerLog(this.runnerLog)
   }
 
@@ -532,6 +544,7 @@ export class RunOrchestrator extends EventEmitter {
 
   private writeInitialManifest(serviceStatus: ServiceManifestEntry['status'] = 'starting'): void {
     const services: ServiceManifestEntry[] = this.services.map((s) => ({
+      repoName: s.repoName,
       name: s.name,
       safeName: s.safeName,
       command: s.command,
@@ -545,6 +558,7 @@ export class RunOrchestrator extends EventEmitter {
     }))
     const manifest: RunManifest = {
       runId: this.runId,
+      executionType: this.executionType,
       feature: this.feature.name,
       featureDir: this.feature.featureDir,
       env: this.env,
@@ -578,6 +592,7 @@ export class RunOrchestrator extends EventEmitter {
         updatedAt: new Date().toISOString(),
       },
       heartbeatAt: new Date().toISOString(),
+      ...(this.verification ? { verification: this.verification } : {}),
     }
     this.stateSink.bootstrap(manifest)
   }
@@ -847,6 +862,7 @@ export class RunOrchestrator extends EventEmitter {
       command: inv.command,
       cwd: inv.cwd,
       env: {
+        ...this.playwrightEnv,
         CANARY_LAB_PROJECT_ROOT: this.feature.featureDir,
         CANARY_LAB_MANIFEST_PATH: this.paths.manifestPath,
         CANARY_LAB_SUMMARY_PATH: this.paths.summaryPath,
@@ -1717,6 +1733,19 @@ export class RunOrchestrator extends EventEmitter {
     this.setStatus(finalStatus)
 
     return await this.continueAfterTestRun(finalStatus)
+  }
+
+  async runVerification(): Promise<RunManifest['status']> {
+    this.prepareRun('stopped')
+    if (this.stopped) return this.status
+    this.recordLifecycle('running-tests', 'Running verification tests', {
+      detail: 'Verify is observational only: Canary Lab will not start services or heal code.',
+    })
+    const exitCode = await this.runPlaywright()
+    if (this.stopped) return this.status
+    const finalStatus = decideRunStatus(this.feature.featureDir, this.paths.summaryPath, exitCode)
+    this.setStatus(finalStatus)
+    return finalStatus
   }
 
   async restartTerminalRun(userGuidance?: string): Promise<RunManifest['status']> {

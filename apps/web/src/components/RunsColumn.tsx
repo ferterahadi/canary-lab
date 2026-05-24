@@ -7,6 +7,7 @@ import { formatDuration, durationBetween, shortTime } from '../lib/format'
 import { deriveRunViewModel, type RunViewModel } from '../lib/run-view-model'
 import { useRuns } from '../state/RunsContext'
 import { RunStatusIndicator } from './RunStatusIndicator'
+import { VerificationDialog } from './VerificationDialog'
 
 interface Props {
   feature: string | null
@@ -15,6 +16,11 @@ interface Props {
   selectedRunId: string | null
   onSelectRun: (runId: string | null) => void
   onStartRun: (env?: string) => void
+  onStartVerification: (input: {
+    configId?: string
+    targetUrls?: Record<string, string>
+    playwrightEnvsetId?: string
+  }) => Promise<void>
   runDisabled?: boolean
   runDisabledReason?: string
 }
@@ -38,15 +44,14 @@ const ICON_PAUSE = (
 // pops over with the same options.
 const COMPACT_THRESHOLD_PX = 360
 
-export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRun, onStartRun, runDisabled, runDisabledReason }: Props) {
-  const [envOverride, setEnvOverride] = useState<string | null>(null)
-  const selectedEnv = envOverride && envs.includes(envOverride) ? envOverride : envs[0] ?? ''
+export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRun, onStartRun, onStartVerification, runDisabled, runDisabledReason }: Props) {
   const [pendingPause, setPendingPause] = useState<RunIndexEntry | null>(null)
   const [pendingStop, setPendingStop] = useState<RunIndexEntry | null>(null)
   const [pendingDelete, setPendingDelete] = useState<RunIndexEntry | null>(null)
   const [pendingCancelHeal, setPendingCancelHeal] = useState<RunIndexEntry | null>(null)
   const [openMenuRunId, setOpenMenuRunId] = useState<string | null>(null)
   const [runPopoverOpen, setRunPopoverOpen] = useState(false)
+  const [verifyDialogOpen, setVerifyDialogOpen] = useState(false)
   const [compact, setCompact] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
 
@@ -131,7 +136,7 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
     if (!runPopoverOpen) return
     const onDocClick = (e: MouseEvent): void => {
       const target = e.target as HTMLElement | null
-      if (target && target.closest('[data-run-popover]')) return
+      if (target && target.closest('[data-run-launch-menu]')) return
       setRunPopoverOpen(false)
     }
     document.addEventListener('mousedown', onDocClick)
@@ -191,46 +196,57 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
           {compact ? (
-            <RunPopoverButton
-              feature={feature}
-              envs={envs}
-              selectedEnv={selectedEnv}
-              onSelectEnv={(v) => setEnvOverride(v)}
-              disabled={!feature || Boolean(runDisabled)}
-              disabledReason={runDisabledReason}
-              open={runPopoverOpen}
-              onToggle={() => setRunPopoverOpen((v) => !v)}
-              onClose={() => setRunPopoverOpen(false)}
-              onStartRun={() => { onStartRun(selectedEnv || undefined); setRunPopoverOpen(false) }}
-            />
+            <>
+              <RunLaunchControl
+                feature={feature}
+                envs={envs}
+                compact
+                open={runPopoverOpen}
+                onToggle={() => setRunPopoverOpen((v) => !v)}
+                onClose={() => setRunPopoverOpen(false)}
+                runDisabled={Boolean(runDisabled)}
+                disabledReason={runDisabledReason}
+                onStartEnv={(env) => {
+                  onStartRun(env || undefined)
+                  setRunPopoverOpen(false)
+                }}
+              />
+              <button
+                type="button"
+                disabled={!feature || runDisabled}
+                title={runDisabled ? runDisabledReason : 'Verify'}
+                aria-label="Verify deployment"
+                onClick={() => setVerifyDialogOpen(true)}
+                className="cl-button flex h-7 w-7 items-center justify-center disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M3 8.5 6.2 12 13 4" />
+                </svg>
+              </button>
+            </>
           ) : (
             <>
-              {envs.length > 1 && (
-                <select
-                  value={selectedEnv}
-                  onChange={(e) => setEnvOverride(e.target.value)}
-                  disabled={!feature}
-                  className="cl-input appearance-none py-1 pl-2 pr-6 text-xs disabled:cursor-not-allowed disabled:opacity-50"
-                  style={{
-                    backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' fill='none'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%23888' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")`,
-                    backgroundRepeat: 'no-repeat',
-                    backgroundPosition: 'right 6px center',
-                  }}
-                  aria-label="Environment"
-                >
-                  {envs.map((e) => (
-                    <option key={e} value={e}>{e}</option>
-                  ))}
-                </select>
-              )}
+              <RunLaunchControl
+                feature={feature}
+                envs={envs}
+                open={runPopoverOpen}
+                onToggle={() => setRunPopoverOpen((v) => !v)}
+                onClose={() => setRunPopoverOpen(false)}
+                runDisabled={Boolean(runDisabled)}
+                disabledReason={runDisabledReason}
+                onStartEnv={(env) => {
+                  onStartRun(env || undefined)
+                  setRunPopoverOpen(false)
+                }}
+              />
               <button
                 type="button"
                 disabled={!feature || runDisabled}
                 title={runDisabled ? runDisabledReason : undefined}
-                onClick={() => onStartRun(selectedEnv || undefined)}
-                className="cl-button-primary px-3 py-1.5"
+                onClick={() => setVerifyDialogOpen(true)}
+                className="cl-button px-3 py-1.5"
               >
-                Run Now
+                Verify
               </button>
             </>
           )}
@@ -261,6 +277,14 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
               const rowError = errors[r.runId] ?? restartErrors[r.runId] ?? null
               const view = deriveRunViewModel(r, transient)
               const displayStatus = view.displayStatus
+              const executionType = r.executionType ?? 'run'
+              const typeLabel = executionType === 'verify' ? 'Verify' : 'Run'
+              const verifySummary = executionType === 'verify'
+                ? [
+                    r.verificationConfigName,
+                    r.verificationPlaywrightEnvsetId,
+                  ].filter(Boolean).join(' · ')
+                : null
               if (isDeleting) {
                 return (
                   <li key={r.runId}>
@@ -274,17 +298,20 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
                       }}
                     >
                       <div className="flex w-full items-center justify-between gap-2">
-                        <span
-                          className="shrink-0"
-                          style={{
-                            color: 'var(--text-secondary)',
-                            fontFamily: 'var(--font-mono)',
-                            fontSize: 12,
-                            letterSpacing: '0.02em',
-                          }}
-                        >
-                          {shortTime(r.startedAt)}
-                        </span>
+                        <div className="flex min-w-0 items-center gap-2">
+                          <span
+                            className="shrink-0"
+                            style={{
+                              color: 'var(--text-secondary)',
+                              fontFamily: 'var(--font-mono)',
+                              fontSize: 12,
+                              letterSpacing: '0.02em',
+                            }}
+                          >
+                            {shortTime(r.startedAt)}
+                          </span>
+                          <ExecutionTypeBadge type={executionType} />
+                        </div>
                         <RunStatusIndicator status={displayStatus} />
                       </div>
                       <div
@@ -295,7 +322,7 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
                           fontSize: 10.5,
                         }}
                       >
-                        <span className="min-w-0 flex-1 truncate">{r.runId}</span>
+                        <span className="min-w-0 flex-1 truncate">{verifySummary || `${typeLabel} ${r.runId}`}</span>
                         {dur != null && <span className="shrink-0 opacity-60">{formatDuration(dur)}</span>}
                       </div>
                     </div>
@@ -310,17 +337,20 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
                     className={`cl-list-row flex w-full flex-col items-start gap-1.5 px-3 py-2.5 text-left ${isSelected ? 'cl-list-row-selected' : ''}`}
                   >
                     <div className="flex w-full items-center justify-between gap-2">
-                      <span
-                        className="shrink-0"
-                        style={{
-                          color: isSelected ? 'var(--text-primary)' : 'var(--text-secondary)',
-                          fontFamily: 'var(--font-mono)',
-                          fontSize: 12,
-                          letterSpacing: '0.02em',
-                        }}
-                      >
-                        {shortTime(r.startedAt)}
-                      </span>
+                      <div className="flex min-w-0 items-center gap-2">
+                        <span
+                          className="shrink-0"
+                          style={{
+                            color: isSelected ? 'var(--text-primary)' : 'var(--text-secondary)',
+                            fontFamily: 'var(--font-mono)',
+                            fontSize: 12,
+                            letterSpacing: '0.02em',
+                          }}
+                        >
+                          {shortTime(r.startedAt)}
+                        </span>
+                        <ExecutionTypeBadge type={executionType} />
+                      </div>
                       <div className="flex items-center gap-1">
                         {compact ? (
                           <RunActionsKebab
@@ -426,7 +456,7 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
                         fontSize: 10.5,
                       }}
                     >
-                      <span className="min-w-0 flex-1 truncate">{r.runId}</span>
+                      <span className="min-w-0 flex-1 truncate" title={verifySummary || r.runId}>{verifySummary || r.runId}</span>
                       {dur != null && <span className="shrink-0">{formatDuration(dur)}</span>}
                     </div>
                     {rowError && (
@@ -492,7 +522,118 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
           onConfirm={confirmCancelHeal}
         />
       )}
+      {verifyDialogOpen && feature && (
+        <VerificationDialog
+          feature={feature}
+          envs={envs}
+          disabled={runDisabled}
+          disabledReason={runDisabledReason}
+          onClose={() => setVerifyDialogOpen(false)}
+          onStart={onStartVerification}
+        />
+      )}
     </div>
+  )
+}
+
+function RunLaunchControl({
+  feature,
+  envs,
+  compact = false,
+  open,
+  onToggle,
+  onClose,
+  runDisabled,
+  disabledReason,
+  onStartEnv,
+}: {
+  feature: string | null
+  envs: string[]
+  compact?: boolean
+  open: boolean
+  onToggle: () => void
+  onClose: () => void
+  runDisabled: boolean
+  disabledReason?: string
+  onStartEnv: (env: string) => void
+}) {
+  const POPOVER_WIDTH = 190
+  const buttonRef = useRef<HTMLButtonElement>(null)
+  const pos = useAnchoredPosition(buttonRef, open && envs.length > 0, POPOVER_WIDTH)
+  const title = runDisabled && disabledReason ? disabledReason : 'Run'
+  const handleButtonClick = (): void => {
+    if (!feature) return
+    if (envs.length === 0) {
+      if (!runDisabled) onStartEnv('')
+      return
+    }
+    onToggle()
+  }
+  return (
+    <>
+      <button
+        ref={buttonRef}
+        type="button"
+        disabled={!feature}
+        title={title}
+        onClick={handleButtonClick}
+        aria-haspopup={envs.length > 0 ? 'menu' : undefined}
+        aria-expanded={envs.length > 0 ? open : undefined}
+        aria-label={compact ? 'Run' : undefined}
+        data-run-launch-menu
+        className={`cl-run-menu-button ${compact ? 'cl-run-menu-button-compact' : ''} disabled:cursor-not-allowed disabled:opacity-40`}
+      >
+        <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+          <path d="M5 3.2v9.6a.6.6 0 0 0 .92.508l7.2-4.8a.6.6 0 0 0 0-1.016l-7.2-4.8A.6.6 0 0 0 5 3.2z" />
+        </svg>
+        {!compact && <span>Run</span>}
+        <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="m4 6 4 4 4-4" />
+        </svg>
+      </button>
+      {open && pos && envs.length > 0 && createPortal(
+        <div
+          role="menu"
+          data-run-launch-menu
+          onClick={(e) => e.stopPropagation()}
+          className="cl-popover cl-run-launch-menu p-1.5 text-xs"
+          style={{
+            position: 'fixed',
+            top: pos.top,
+            left: pos.left,
+            width: POPOVER_WIDTH,
+            zIndex: 1000,
+          }}
+        >
+          <div className="px-2 pb-1 pt-1 text-[10px] uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
+            Choose envset
+          </div>
+          {envs.map((env) => (
+            <button
+              key={env}
+              type="button"
+              role="menuitem"
+              disabled={runDisabled}
+              onClick={() => {
+                if (runDisabled) return
+                onStartEnv(env)
+              }}
+              className="cl-run-env-option disabled:cursor-not-allowed disabled:opacity-45"
+            >
+              <span className="cl-run-env-option-dot" aria-hidden="true" />
+              <span className="min-w-0 flex-1 truncate" style={{ fontFamily: 'var(--font-mono)' }}>{env}</span>
+            </button>
+          ))}
+          {runDisabled && disabledReason && (
+            <p className="mx-2 mt-1 border-t pt-2 text-[10px]" style={{ borderColor: 'var(--border-default)', color: 'var(--text-muted)' }}>
+              {disabledReason}
+            </p>
+          )}
+          <button type="button" onClick={onClose} className="sr-only">Close</button>
+        </div>,
+        document.body,
+      )}
+    </>
   )
 }
 
@@ -527,104 +668,6 @@ function useAnchoredPosition(
     }
   }, [open, anchorRef, width])
   return pos
-}
-
-function RunPopoverButton({
-  feature,
-  envs,
-  selectedEnv,
-  onSelectEnv,
-  disabled,
-  disabledReason,
-  open,
-  onToggle,
-  onClose,
-  onStartRun,
-}: {
-  feature: string | null
-  envs: string[]
-  selectedEnv: string
-  onSelectEnv: (env: string) => void
-  disabled: boolean
-  disabledReason?: string
-  open: boolean
-  onToggle: () => void
-  onClose: () => void
-  onStartRun: () => void
-}) {
-  const POPOVER_WIDTH = 220
-  const buttonRef = useRef<HTMLButtonElement>(null)
-  const pos = useAnchoredPosition(buttonRef, open, POPOVER_WIDTH)
-  return (
-    <>
-      <button
-        ref={buttonRef}
-        type="button"
-        onClick={onToggle}
-        disabled={!feature}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        aria-label="Run a test"
-        title={disabled && disabledReason ? disabledReason : 'Run'}
-        data-run-popover
-        className="cl-button-primary flex h-7 w-7 items-center justify-center disabled:cursor-not-allowed disabled:opacity-40"
-      >
-        <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-          <path d="M5 3.2v9.6a.6.6 0 0 0 .92.508l7.2-4.8a.6.6 0 0 0 0-1.016l-7.2-4.8A.6.6 0 0 0 5 3.2z" />
-        </svg>
-      </button>
-      {open && pos && createPortal(
-        <div
-          role="menu"
-          data-run-popover
-          onClick={(e) => e.stopPropagation()}
-          className="cl-popover overflow-hidden rounded-lg p-3 text-xs"
-          style={{
-            position: 'fixed',
-            top: pos.top,
-            left: pos.left,
-            width: POPOVER_WIDTH,
-            zIndex: 1000,
-          }}
-        >
-          {envs.length > 1 && (
-            <div className="mb-2">
-              <label className="mb-1 block text-[10px] uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Environment</label>
-              <select
-                value={selectedEnv}
-                onChange={(e) => onSelectEnv(e.target.value)}
-                className="cl-input w-full appearance-none rounded-md py-1.5 pl-2 pr-6 text-xs"
-                style={{
-                  backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' fill='none'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%23888' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")`,
-                  backgroundRepeat: 'no-repeat',
-                  backgroundPosition: 'right 6px center',
-                  fontFamily: 'var(--font-mono)',
-                }}
-              >
-                {envs.map((e) => (
-                  <option key={e} value={e}>{e}</option>
-                ))}
-              </select>
-            </div>
-          )}
-          <button
-            type="button"
-            disabled={disabled}
-            onClick={onStartRun}
-            title={disabled ? disabledReason : undefined}
-            className="cl-button-primary w-full px-3 py-1.5 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            Run Now
-          </button>
-          {disabled && disabledReason && (
-            <p className="mt-2 text-[10px]" style={{ color: 'var(--text-muted)' }}>{disabledReason}</p>
-          )}
-          <button type="button" onClick={onClose} className="sr-only">Close</button>
-        </div>,
-        document.body,
-      )}
-    </>
-  )
 }
 
 function RunActionsKebab({
@@ -778,6 +821,22 @@ function MenuItem({
       {icon && <span className="shrink-0">{icon}</span>}
       <span>{label}</span>
     </button>
+  )
+}
+
+function ExecutionTypeBadge({ type }: { type: 'run' | 'verify' }) {
+  const isVerify = type === 'verify'
+  return (
+    <span
+      className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase"
+      style={{
+        background: isVerify ? 'rgba(14, 165, 233, 0.12)' : 'var(--bg-selected)',
+        color: isVerify ? 'var(--accent)' : 'var(--text-muted)',
+        letterSpacing: '0.04em',
+      }}
+    >
+      {isVerify ? 'Verify' : 'Run'}
+    </span>
   )
 }
 

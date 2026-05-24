@@ -30,6 +30,7 @@ vi.mock('../api/client', async () => {
     deleteRun: vi.fn(),
     pauseHealRun: vi.fn(),
     cancelHealRun: vi.fn(),
+    executeVerification: vi.fn(),
   }
 })
 
@@ -67,6 +68,7 @@ beforeEach(() => {
   vi.mocked(api.deleteRun).mockReset()
   vi.mocked(api.pauseHealRun).mockReset()
   vi.mocked(api.cancelHealRun).mockReset()
+  vi.mocked(api.executeVerification).mockReset()
 })
 
 afterEach(() => {
@@ -199,6 +201,38 @@ describe('RunsProvider', () => {
     expect(api.startRun).toHaveBeenCalledWith('checkout', undefined)
     expect(api.stopRun).toHaveBeenCalledWith('live-run')
     expect(api.listRuns).not.toHaveBeenCalled()
+  })
+
+  it('starts verification runs and refreshes only when websocket state is not live', async () => {
+    const captured = renderProbe()
+    vi.mocked(api.executeVerification)
+      .mockResolvedValueOnce({ runId: 'verify-http', executionType: 'verify' })
+      .mockResolvedValueOnce({ runId: 'verify-live', executionType: 'verify' })
+    vi.mocked(api.listRuns).mockResolvedValue([])
+
+    await act(async () => {
+      await expect(captured.runs?.startVerification('checkout', {
+        playwrightEnvsetId: 'production',
+        targetUrls: { api: 'https://api.example.com' },
+      })).resolves.toBe('verify-http')
+    })
+    expect(api.executeVerification).toHaveBeenCalledWith('checkout', {
+      playwrightEnvsetId: 'production',
+      targetUrls: { api: 'https://api.example.com' },
+    })
+    expect(api.listRuns).toHaveBeenCalledTimes(1)
+
+    act(() => {
+      FakeWebSocket.instances[0].onopen?.()
+    })
+    await act(async () => {
+      await expect(captured.runs?.startVerification('checkout', {
+        configId: 'config-1',
+      })).resolves.toBe('verify-live')
+    })
+
+    expect(api.executeVerification).toHaveBeenLastCalledWith('checkout', { configId: 'config-1' })
+    expect(api.listRuns).toHaveBeenCalledTimes(1)
   })
 
   it('swallows refresh and detail-load failures', async () => {

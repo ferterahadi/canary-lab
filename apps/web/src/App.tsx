@@ -35,7 +35,7 @@ export function App() {
   // Runs come from the WebSocket-backed RunsProvider — no polling here.
   // `runs` is the full index across all features; the per-feature filter
   // happens at render time.
-  const { runs: allRuns, startRun: startRunAction } = useRuns()
+  const { runs: allRuns, startRun: startRunAction, startVerification: startVerificationAction } = useRuns()
   const { entry: globalActiveRunEntry, detail: activeRunDetail } = useGlobalActiveRun()
   const { wizardOpen, closeWizard } = useWizardDrafts()
 
@@ -93,6 +93,18 @@ export function App() {
       setSelectedRunId(runId)
     } catch { /* surfaced via UI */ }
   }, [selectedFeature, globalActiveRunEntry, startRunAction])
+
+  const handleStartVerification = useCallback(async (input: {
+    configId?: string
+    targetUrls?: Record<string, string>
+    playwrightEnvsetId?: string
+  }): Promise<void> => {
+    if (!selectedFeature) return
+    if (globalActiveRunEntry) return
+    const runId = await startVerificationAction(selectedFeature, input)
+    pendingRunSelectionRef.current = runId
+    setSelectedRunId(runId)
+  }, [selectedFeature, globalActiveRunEntry, startVerificationAction])
 
   const refreshFeatures = useCallback((preferredFeature?: string | null): void => {
     api.listFeatures().then((data) => {
@@ -166,6 +178,7 @@ export function App() {
               selectedRunId={selectedRunId}
               onSelectRun={setSelectedRunId}
               onStartRun={handleStartRun}
+              onStartVerification={handleStartVerification}
               runDisabled={Boolean(globalActiveRunEntry)}
               runDisabledReason={
                 globalActiveRunEntry

@@ -235,4 +235,22 @@ describe('deriveRunViewModel', () => {
     expect(vm.actions.stop.reason).toBe('Stop is available only while tests are running.')
     expect(vm.actions.cancelHeal.reason).toBe('Cancel Heal is available only while an agent is healing.')
   })
+
+  it('disables heal-only actions for verification runs', () => {
+    const vm = deriveRunViewModel(detail({ executionType: 'verify', status: 'failed' }))
+
+    expect(vm.actions.pauseHeal).toEqual({
+      enabled: false,
+      reason: 'Verify is observational and does not start healing.',
+    })
+    expect(vm.actions.cancelHeal).toEqual({
+      enabled: false,
+      reason: 'Verify does not start heal cycles.',
+    })
+    expect(vm.actions.restartHeal).toEqual({
+      enabled: false,
+      reason: 'Verify results are not healed; start another Verify execution instead.',
+    })
+    expect(vm.actions.delete.enabled).toBe(true)
+  })
 })
