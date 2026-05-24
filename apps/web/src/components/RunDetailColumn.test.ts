@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { downloadEvaluationReport, evaluationFilename, evaluationHref, canRestartHeal, isEvaluationExportable, servicePrimaryLabel, serviceSecondaryLabel, shortLocation } from './RunDetailColumn'
+import { downloadEvaluationReport, evaluationFilename, evaluationHref, canRestartHeal, isEvaluationExportable, servicePrimaryLabel, serviceTabLabelParts, shortLocation } from './RunDetailColumn'
 
 describe('canRestartHeal', () => {
   it('is enabled only for terminal runs that can be restarted', () => {
@@ -72,7 +72,7 @@ describe('shortLocation', () => {
 })
 
 describe('service labels', () => {
-  it('uses the repo name as the primary label when the command has its own name', () => {
+  it('uses only the repo name when the command has its own name', () => {
     const service = {
       repoName: 'mighty-cns',
       name: 'mighty-cns gateway stack',
@@ -83,7 +83,6 @@ describe('service labels', () => {
     }
 
     expect(servicePrimaryLabel(service)).toBe('mighty-cns')
-    expect(serviceSecondaryLabel(service)).toBe('mighty-cns gateway stack')
   })
 
   it('falls back to the service name for older manifests', () => {
@@ -96,7 +95,6 @@ describe('service labels', () => {
     }
 
     expect(servicePrimaryLabel(service)).toBe('api')
-    expect(serviceSecondaryLabel(service)).toBeNull()
   })
 
   it('can use a repo fallback for older manifests that have branch snapshots', () => {
@@ -109,6 +107,29 @@ describe('service labels', () => {
     }
 
     expect(servicePrimaryLabel(service, 'mighty-cns')).toBe('mighty-cns')
-    expect(serviceSecondaryLabel(service, 'mighty-cns')).toBe('mighty-cns gateway stack')
+  })
+
+  it('builds service tab labels from repo name and branch only', () => {
+    const service = {
+      repoName: 'mighty-cns',
+      name: 'mighty-cns gateway stack',
+      safeName: 'mighty-cns-gateway-stack',
+      command: 'yarn start:all:dev',
+      cwd: '/Users/oddle/Documents/mighty-cns',
+      logPath: '/tmp/svc.log',
+    }
+
+    expect(serviceTabLabelParts(service, {
+      name: 'mighty-cns',
+      path: '/Users/oddle/Documents/mighty-cns',
+      branch: 'release/2.8.2',
+      expectedBranch: 'release/2.8.2',
+      detached: false,
+      dirty: false,
+      dirtyFiles: [],
+    })).toEqual({
+      primary: 'mighty-cns',
+      branch: 'release/2.8.2',
+    })
   })
 })

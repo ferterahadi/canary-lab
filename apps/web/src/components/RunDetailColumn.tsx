@@ -255,13 +255,14 @@ export function servicePrimaryLabel(
   return service.repoName?.trim() || repoNameFallback?.trim() || service.name
 }
 
-export function serviceSecondaryLabel(
+export function serviceTabLabelParts(
   service: Pick<ServiceManifestEntry, 'name' | 'repoName'>,
-  repoNameFallback?: string | null,
-): string | null {
-  const repoName = service.repoName?.trim() || repoNameFallback?.trim()
-  if (!repoName || service.name === repoName) return null
-  return service.name
+  branch: RepoBranchSnapshot | null,
+): { primary: string; branch: string | null } {
+  return {
+    primary: servicePrimaryLabel(service, branch?.name),
+    branch: branch ? branchLabel(branch) : null,
+  }
 }
 
 interface RunOverviewTabProps {
@@ -1209,29 +1210,22 @@ function ServiceTabButton({
   active: boolean
   onClick: () => void
 }) {
-  const label = branch ? branchLabel(branch) : null
-  const primaryLabel = servicePrimaryLabel(service, branch?.name)
-  const secondaryLabel = serviceSecondaryLabel(service, branch?.name)
+  const labelParts = serviceTabLabelParts(service, branch)
   return (
     <button
       type="button"
       onClick={onClick}
-      title={branch ? branchTooltip(service, branch) : primaryLabel}
+      title={branch ? branchTooltip(service, branch) : labelParts.primary}
       className={`cl-tab flex min-w-0 shrink-0 items-center gap-1.5 px-2 py-1 ${active ? 'cl-tab-active' : ''}`}
       style={{
         color: active ? 'var(--text-primary)' : 'var(--text-secondary)',
       }}
     >
       <ServiceStatusDot status={service.status} />
-      <span className="max-w-[150px] truncate">{primaryLabel}</span>
-      {secondaryLabel && (
-        <span className="max-w-[130px] truncate text-[10px]" style={{ color: 'var(--text-muted)' }}>
-          {secondaryLabel}
-        </span>
-      )}
-      {label && (
+      <span className="max-w-[150px] truncate">{labelParts.primary}</span>
+      {labelParts.branch && (
         <span className="max-w-[120px] truncate rounded px-1 py-0.5 text-[10px]" style={{ background: 'var(--bg-selected)', color: branch?.dirty ? '#f59e0b' : 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
-          @ {label}
+          @ {labelParts.branch}
         </span>
       )}
     </button>
