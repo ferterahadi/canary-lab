@@ -96,7 +96,7 @@ export function FeatureConfigEditor({ feature, onClose, onDeleted, onRenamed, in
           className="cl-panel-header flex gap-1 px-3 py-1.5 text-xs"
         >
           <TabButton active={tab === 'general'} onClick={() => setTab('general')}>General</TabButton>
-          <TabButton active={tab === 'repos'} onClick={() => setTab('repos')}>Repos & services</TabButton>
+          <TabButton active={tab === 'repos'} onClick={() => setTab('repos')}>Service</TabButton>
           <TabButton active={tab === 'envsets'} onClick={() => setTab('envsets')}>Envsets</TabButton>
           <TabButton active={tab === 'playwright'} onClick={() => setTab('playwright')}>Playwright</TabButton>
         </nav>

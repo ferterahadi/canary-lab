@@ -333,16 +333,6 @@ function RunOverviewTab({
           </>
         )}
       </dl>
-      {repoBranches.length > 0 && (
-        <div className="mt-4">
-          <SectionHeader>Branches</SectionHeader>
-          <ul className="space-y-2">
-            {repoBranches.map((repo) => (
-              <BranchCard key={`${repo.name}:${repo.path}`} repo={repo} />
-            ))}
-          </ul>
-        </div>
-      )}
       <div className="mt-4">
         <SectionHeader>Services</SectionHeader>
         {services.length === 0 ? (
@@ -350,7 +340,7 @@ function RunOverviewTab({
         ) : (
           <ul className="space-y-2">
             {services.map((s) => (
-              <ServiceCard key={s.safeName} service={s} />
+              <ServiceCard key={s.safeName} service={s} branch={branchForService(s, repoBranches)} />
             ))}
           </ul>
         )}
@@ -1015,50 +1005,6 @@ export function shortLocation(location: string): string {
   return parts.slice(-2).join('/')
 }
 
-function BranchCard({ repo }: { repo: RepoBranchSnapshot }) {
-  const branch = repo.detached ? 'detached HEAD' : repo.branch ?? 'unknown'
-  const mismatch = repo.expectedBranch && repo.branch !== repo.expectedBranch
-  return (
-    <li className="cl-card p-3">
-      <div className="flex items-center gap-2">
-        <div className="min-w-0 flex-1 truncate text-xs font-medium" style={{ color: 'var(--text-primary)' }}>
-          {repo.name}
-        </div>
-        {repo.dirty && (
-          <span className="shrink-0 rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wider" style={{ background: 'var(--bg-selected)', color: '#f59e0b' }}>
-            dirty
-          </span>
-        )}
-        {mismatch && (
-          <span className="shrink-0 rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wider" style={{ background: 'var(--bg-selected)', color: '#f59e0b' }}>
-            mismatch
-          </span>
-        )}
-      </div>
-      <div className="mt-2 grid grid-cols-[58px_minmax(0,1fr)] gap-x-2 gap-y-1">
-        <BranchField label="branch" value={branch} />
-        {repo.expectedBranch && <BranchField label="expected" value={repo.expectedBranch} />}
-        <BranchField label="path" value={repo.path} />
-      </div>
-    </li>
-  )
-}
-
-function BranchField({ label, value }: { label: string; value: string }) {
-  return (
-    <>
-      <span className="text-[10px] uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>{label}</span>
-      <span
-        className="min-w-0 truncate text-[11px]"
-        style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }}
-        title={value}
-      >
-        {value}
-      </span>
-    </>
-  )
-}
-
 function SectionHeader({ children }: { children: React.ReactNode }) {
   return (
     <h2 className="mb-2 text-[11px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-secondary)' }}>
@@ -1107,7 +1053,13 @@ function ServiceTabButton({
   )
 }
 
-function ServiceCard({ service }: { service: { name: string; command: string; cwd: string; logPath: string; healthUrl?: string; status?: ServiceStatus } }) {
+function ServiceCard({
+  service,
+  branch,
+}: {
+  service: { name: string; command: string; cwd: string; logPath: string; healthUrl?: string; status?: ServiceStatus }
+  branch: RepoBranchSnapshot | null
+}) {
   return (
     <li className="cl-card p-3">
       <div className="flex items-center gap-2">
@@ -1124,10 +1076,65 @@ function ServiceCard({ service }: { service: { name: string; command: string; cw
       <div className="mt-2 grid grid-cols-[36px_minmax(0,1fr)_auto] items-center gap-x-2 gap-y-1">
         <ServiceField label="cmd" value={service.command} />
         <ServiceField label="cwd" value={service.cwd} />
+        {branch && <BranchRow branch={branch} />}
         <ServiceField label="log" value={service.logPath} />
         {service.healthUrl && <ServiceField label="url" value={service.healthUrl} href={service.healthUrl} />}
       </div>
     </li>
+  )
+}
+
+function BranchRow({ branch }: { branch: RepoBranchSnapshot }) {
+  const value = branch.detached ? 'detached HEAD' : branch.branch ?? 'unknown'
+  const mismatch = Boolean(branch.expectedBranch && branch.branch !== branch.expectedBranch)
+  const onCopy = () => {
+    void navigator.clipboard?.writeText(value)
+  }
+  return (
+    <>
+      <span className="text-[10px] uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>ref</span>
+      <span className="flex min-w-0 items-center gap-1.5">
+        <span
+          className="min-w-0 truncate text-[11px]"
+          style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }}
+          title={value}
+        >
+          {value}
+        </span>
+        {branch.dirty && (
+          <span
+            className="shrink-0 rounded px-1 py-0.5 text-[9px] uppercase tracking-wider"
+            style={{ background: 'var(--bg-selected)', color: '#f59e0b' }}
+          >
+            dirty
+          </span>
+        )}
+        {mismatch && (
+          <span
+            className="shrink-0 rounded px-1 py-0.5 text-[9px] uppercase tracking-wider"
+            style={{ background: 'var(--bg-selected)', color: '#f59e0b' }}
+            title={`expected ${branch.expectedBranch}`}
+          >
+            ≠ {branch.expectedBranch}
+          </span>
+        )}
+      </span>
+      <span className="flex shrink-0 items-center gap-1">
+        <button
+          type="button"
+          onClick={onCopy}
+          aria-label="Copy branch"
+          title="Copy branch"
+          className="cl-icon-button h-5 w-5"
+          style={{ color: 'var(--text-muted)' }}
+        >
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+          </svg>
+        </button>
+      </span>
+    </>
   )
 }
 
