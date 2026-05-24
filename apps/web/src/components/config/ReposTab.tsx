@@ -37,6 +37,22 @@ function deriveRepoName(localPath: ProbePath, cloneUrl: string | undefined): str
   return ''
 }
 
+function nextRepoName(
+  currentName: string,
+  currentDerivedName: string,
+  nextLocalPath: ProbePath,
+  cloneUrl: string | undefined,
+): string {
+  return currentName && currentName !== currentDerivedName
+    ? currentName
+    : deriveRepoName(nextLocalPath, cloneUrl)
+}
+
+function sameProbePath(a: ProbePath, b: ProbePath): boolean {
+  if (typeof a === 'string' || typeof b === 'string') return a === b
+  return a.$expr === b.$expr
+}
+
 // ─── slice types ─────────────────────────────────────────────────────────
 
 type ProbePath = string | { $expr: string }
@@ -261,23 +277,27 @@ export function ReposTab({ feature }: { feature: string }) {
           {repos.length === 0 && (
             <div className="text-xs" style={{ color: 'var(--text-muted)' }}>No services configured.</div>
           )}
-          {repos.map((repo, i) => (
-            <RepoCard
-              key={i}
-              feature={feature}
-              repo={repo}
-              rootEnvs={rootEnvs}
-              activeRun={activeRun}
-              onChange={(next) => ed.setDraft((d) => ({
-                ...d,
-                repos: d.repos.map((r, j) => j === i ? next : r),
-              }))}
-              onRemove={() => ed.setDraft((d) => ({
-                ...d,
-                repos: d.repos.filter((_, j) => j !== i),
-              }))}
-            />
-          ))}
+          {repos.map((repo, i) => {
+            const persistedRepo = ed.baseline?.repos.find((r) => sameProbePath(r.localPath, repo.localPath))
+            return (
+              <RepoCard
+                key={i}
+                feature={feature}
+                repo={repo}
+                repoLookupName={persistedRepo?.name}
+                rootEnvs={rootEnvs}
+                activeRun={activeRun}
+                onChange={(next) => ed.setDraft((d) => ({
+                  ...d,
+                  repos: d.repos.map((r, j) => j === i ? next : r),
+                }))}
+                onRemove={() => ed.setDraft((d) => ({
+                  ...d,
+                  repos: d.repos.filter((_, j) => j !== i),
+                }))}
+              />
+            )
+          })}
           <button
             type="button"
             onClick={addRepo}
@@ -309,6 +329,7 @@ export function ReposTab({ feature }: { feature: string }) {
 function RepoCard({
   feature,
   repo,
+  repoLookupName,
   rootEnvs,
   activeRun,
   onChange,
@@ -316,6 +337,7 @@ function RepoCard({
 }: {
   feature: string
   repo: RepoSlice
+  repoLookupName: string | undefined
   rootEnvs: string[]
   activeRun: boolean
   onChange: (next: RepoSlice) => void
@@ -347,7 +369,7 @@ function RepoCard({
 
   // When the user picks a localPath that has a .git/config, prefill cloneUrl.
   const handleLocalPathChange = (absolutePath: string): void => {
-    const nextName = deriveRepoName(absolutePath, repo.cloneUrl)
+    const nextName = nextRepoName(repo.name, derivedName, absolutePath, repo.cloneUrl)
     const next: RepoSlice = { ...repo, localPath: absolutePath, name: nextName }
     onChange(next)
     if (!repo.cloneUrl) {
@@ -366,7 +388,11 @@ function RepoCard({
     setCloneError(null)
     try {
       const r = await api.cloneRepository({ cloneUrl: repo.cloneUrl, parentDir, repoName })
-      onChange({ ...repo, localPath: r.localPath, name: deriveRepoName(r.localPath, repo.cloneUrl) })
+      onChange({
+        ...repo,
+        localPath: r.localPath,
+        name: nextRepoName(repo.name, derivedName, r.localPath, repo.cloneUrl),
+      })
       setPathExists(true)
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'clone failed'
@@ -402,6 +428,14 @@ function RepoCard({
 
       {open && (
         <div className="px-3 pb-3">
+          <FieldRow label="Name">
+            <TextInput
+              value={repo.name}
+              placeholder={derivedName || 'service-name'}
+              onChange={(name) => onChange({ ...repo, name })}
+            />
+          </FieldRow>
+
           <FieldRow label="Local path" hint="Click to pick a folder">
             {isExpr ? (
               <div className="flex items-center gap-2">
@@ -423,6 +457,7 @@ function RepoCard({
           <BranchControl
             feature={feature}
             repo={repo}
+            repoLookupName={repoLookupName}
             localPathStr={localPathStr}
             isExpr={isExpr}
             activeRun={activeRun}
@@ -501,6 +536,7 @@ function RepoCard({
 function BranchControl({
   feature,
   repo,
+  repoLookupName,
   localPathStr,
   isExpr,
   activeRun,
@@ -508,6 +544,7 @@ function BranchControl({
 }: {
   feature: string
   repo: RepoSlice
+  repoLookupName: string | undefined
   localPathStr: string
   isExpr: boolean
   activeRun: boolean
@@ -518,7 +555,7 @@ function BranchControl({
   const [switching, setSwitching] = useState(false)
   const [suggestionsOpen, setSuggestionsOpen] = useState(false)
   const [switchHovered, setSwitchHovered] = useState(false)
-  const repoName = repo.name || deriveRepoName(repo.localPath, repo.cloneUrl)
+  const repoName = repoLookupName || repo.name || deriveRepoName(repo.localPath, repo.cloneUrl)
   const target = repo.branch ?? ''
 
   const loadStatus = (): void => {
