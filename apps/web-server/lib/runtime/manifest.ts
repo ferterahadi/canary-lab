@@ -6,6 +6,10 @@ import type {
   RunStatus,
   ServiceStatus,
 } from '../../../../shared/run-state'
+import type {
+  ExecutionType,
+  VerificationRunMetadata,
+} from '../../../../shared/verification'
 export type {
   RunLifecycleAbortReason,
   RunLifecycleEvent,
@@ -24,6 +28,8 @@ export type {
 // JSON-shaped so the future server can read it without parsing logs.
 
 export interface ServiceManifestEntry {
+  /** Repo identity from feature.config repos[].name. Older manifests omit it. */
+  repoName?: string
   name: string
   safeName: string
   command: string
@@ -98,6 +104,7 @@ export interface ExternalHealSession {
 
 export interface RunManifest {
   runId: string
+  executionType?: ExecutionType
   feature: string
   featureDir?: string
   env?: string
@@ -137,6 +144,7 @@ export interface RunManifest {
   /** Latest structured lifecycle state. This is the UI source of truth for
    *  recovery flow narration; runner.log remains the human-readable audit. */
   lifecycle?: RunLifecycleSnapshot
+  verification?: VerificationRunMetadata
 }
 
 function atomicWrite(file: string, body: string): void {
@@ -201,10 +209,14 @@ export function updateAllServicesStatus(
 
 export interface RunIndexEntry {
   runId: string
+  executionType?: ExecutionType
   feature: string
   startedAt: string
   status: RunStatus
   endedAt?: string
+  verificationConfigName?: string
+  verificationPlaywrightEnvsetId?: string
+  verificationTargetUrls?: Record<string, string>
 }
 
 export function readRunsIndex(logsDir: string): RunIndexEntry[] {

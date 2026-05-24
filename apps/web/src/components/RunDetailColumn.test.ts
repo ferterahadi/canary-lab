@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { downloadEvaluationReport, evaluationFilename, evaluationHref, canRestartHeal, isEvaluationExportable, shortLocation } from './RunDetailColumn'
+import { downloadEvaluationReport, evaluationFilename, evaluationHref, canRestartHeal, isEvaluationExportable, servicePrimaryLabel, serviceSecondaryLabel, shortLocation } from './RunDetailColumn'
 
 describe('canRestartHeal', () => {
   it('is enabled only for terminal runs that can be restarted', () => {
@@ -68,5 +68,47 @@ describe('shortLocation', () => {
   it('keeps the final two path segments for compact runtime labels', () => {
     expect(shortLocation('/Users/oddle/workspace/e2e/helpers/login.ts:209')).toBe('helpers/login.ts:209')
     expect(shortLocation('checkout.spec.ts:12')).toBe('checkout.spec.ts:12')
+  })
+})
+
+describe('service labels', () => {
+  it('uses the repo name as the primary label when the command has its own name', () => {
+    const service = {
+      repoName: 'mighty-cns',
+      name: 'mighty-cns gateway stack',
+      safeName: 'mighty-cns-gateway-stack',
+      command: 'yarn start:all:dev',
+      cwd: '/Users/oddle/Documents/mighty-cns',
+      logPath: '/tmp/svc.log',
+    }
+
+    expect(servicePrimaryLabel(service)).toBe('mighty-cns')
+    expect(serviceSecondaryLabel(service)).toBe('mighty-cns gateway stack')
+  })
+
+  it('falls back to the service name for older manifests', () => {
+    const service = {
+      name: 'api',
+      safeName: 'api',
+      command: 'npm run dev',
+      cwd: '/repo/api',
+      logPath: '/tmp/api.log',
+    }
+
+    expect(servicePrimaryLabel(service)).toBe('api')
+    expect(serviceSecondaryLabel(service)).toBeNull()
+  })
+
+  it('can use a repo fallback for older manifests that have branch snapshots', () => {
+    const service = {
+      name: 'mighty-cns gateway stack',
+      safeName: 'mighty-cns-gateway-stack',
+      command: 'yarn start:all:dev',
+      cwd: '/Users/oddle/Documents/mighty-cns',
+      logPath: '/tmp/svc.log',
+    }
+
+    expect(servicePrimaryLabel(service, 'mighty-cns')).toBe('mighty-cns')
+    expect(serviceSecondaryLabel(service, 'mighty-cns')).toBe('mighty-cns gateway stack')
   })
 })

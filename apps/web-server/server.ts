@@ -6,6 +6,7 @@ import fastifyStatic from '@fastify/static'
 import { isActiveRunStatus, isRestartableRunStatus } from '../../shared/run-state'
 import { featuresRoutes } from './routes/features'
 import { featureConfigRoutes } from './routes/feature-config'
+import { verificationRoutes } from './routes/verification'
 import { projectConfigRoutes } from './routes/project-config'
 import { runsRoutes, type ExternalHealAgentRequest } from './routes/runs'
 import { journalRoutes } from './routes/journal'
@@ -48,6 +49,11 @@ import {
   restore,
 } from './lib/runtime/env-switcher/switch'
 import type { BackupRecord } from './lib/runtime/env-switcher/types'
+import {
+  buildVerificationDiagnostics,
+  resolveVerificationRun,
+  type ResolveVerificationInput,
+} from './lib/verification'
 
 // Apply a feature's envset in-process and return the backups to revert later.
 // Returns null when the feature has no envsets configured (silent skip).
@@ -143,6 +149,83 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
     isRepoActive: (featureName) => runStore
       .list({ feature: featureName })
       .some((run) => isActiveRunStatus(run.status)),
+  })
+  const startVerification = async (
+    featureName: string,
+    input: ResolveVerificationInput,
+  ): Promise<OrchestratorLike> => {
+    const features = loadFeatures(featuresDir)
+    const feature = features.find((f) => f.name === featureName)
+    if (!feature) throw Object.assign(new Error(`feature not found: ${featureName}`), { statusCode: 404 })
+
+    const resolved = resolveVerificationRun(feature, input)
+    const runId = generateRunId()
+    const runDir = runDirFor(logsDir, runId)
+    const runnerLog = new RunnerLog(buildRunPaths(runDir).runnerLogPath)
+    runnerLog.info(
+      `Verify started: feature=${feature.name} envset=${resolved.metadata.playwrightEnvsetId} runId=${runId}`,
+    )
+    runnerLog.info('Verify is observational only: local services and heal loops are disabled.')
+
+    let backups: BackupRecord[] | null = null
+    try {
+      backups = applyFeatureEnvset(feature.featureDir, resolved.metadata.playwrightEnvsetId)
+      if (backups) runnerLog.info(`Applied Playwright envset "${resolved.metadata.playwrightEnvsetId}" for verification`)
+    } catch (err) {
+      runnerLog.warn(`envset apply failed: ${(err as Error).message}`)
+      throw Object.assign(err instanceof Error ? err : new Error(String(err)), { statusCode: 500 })
+    }
+
+    const verificationFeature = { ...feature, repos: [] }
+    let orch: RunOrchestrator
+    try {
+      orch = new RunOrchestrator({
+        feature: verificationFeature,
+        env: resolved.metadata.playwrightEnvsetId,
+        runId,
+        runDir,
+        ptyFactory,
+        runnerLog,
+        runStateSink: runStore,
+        executionType: 'verify',
+        verification: resolved.metadata,
+        playwrightEnv: resolved.playwrightEnv,
+      })
+    } catch (err) {
+      if (backups) restore(backups)
+      throw Object.assign(err instanceof Error ? err : new Error(String(err)), { statusCode: 500 })
+    }
+
+    attachRunStreams(orch, runnerLog, feature.name, backups)
+    const broker = brokers.get(runId)!
+    orch.runVerification()
+      .then(async (status) => {
+        await orch.stop(status).catch(() => {})
+        if (status === 'failed') {
+          const detail = runStore.get(runId)
+          if (detail) {
+            const diagnostics = buildVerificationDiagnostics(detail, runDir)
+            runStore.patchManifest(runId, {
+              verification: {
+                ...resolved.metadata,
+                diagnostics,
+              },
+            })
+          }
+        }
+        registry.delete(orch.runId)
+      })
+      .catch(async (err) => {
+        broker.push('playwright', `\n[verification error] ${String(err)}\n`)
+        await orch.stop('aborted').catch(() => {})
+        registry.delete(orch.runId)
+      })
+    return orch
+  }
+  await app.register(verificationRoutes, {
+    featuresDir,
+    store: runStore,
+    startVerification,
   })
   await app.register(projectConfigRoutes, { projectRoot: opts.projectRoot })
   await app.register(journalRoutes, { logsDir, journalPath })
@@ -524,6 +607,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
       const detail = runStore.get(runId)
       if (!detail) return { ok: false, reason: 'run-not-found' as const }
       const manifest = detail.manifest
+      if ((manifest.executionType ?? 'run') === 'verify') return { ok: false, reason: 'not-restartable' as const }
       if (isActiveRunStatus(manifest.status)) return { ok: false, reason: 'already-active' as const }
       if (!isRestartableRunStatus(manifest.status)) return { ok: false, reason: 'not-restartable' as const }
 
@@ -645,6 +729,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
       const detail = runStore.get(runId)
       if (!detail) return { ok: false, reason: 'run-not-found' as const }
       const manifest = detail.manifest
+      if ((manifest.executionType ?? 'run') === 'verify') return { ok: false, reason: 'not-restartable' as const }
       if (!isRestartableRunStatus(manifest.status)) return { ok: false, reason: 'not-restartable' as const }
       if (manifest.healMode === 'manual') return { ok: false, reason: 'manual-mode' as const }
 
@@ -788,6 +873,19 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
     restartExternalRun: async (runId, healAgent, guidance) => {
       const orch = await restartExternalRun(runId, healAgent, guidance)
       return { runId: orch.runId, mode: 'remaining' }
+    },
+    startVerification: async (feature, input) => {
+      const resp = await app.inject({
+        method: 'POST',
+        url: `/api/features/${encodeURIComponent(feature)}/verifications`,
+        payload: input,
+      })
+      if (resp.statusCode !== 200 && resp.statusCode !== 201) {
+        const body = (() => { try { return JSON.parse(resp.payload) } catch { return resp.payload } })()
+        const message = typeof body === 'object' && body && 'error' in body ? String((body as { error: unknown }).error) : String(body)
+        throw new Error(`execute_verification failed (${resp.statusCode}): ${message}`)
+      }
+      return JSON.parse(resp.payload) as { runId: string }
     },
 	  })
 

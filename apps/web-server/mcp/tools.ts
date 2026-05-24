@@ -11,6 +11,13 @@ import { runDirFor, buildRunPaths } from '../lib/runtime/run-paths'
 import { buildHealPromptMap } from '../lib/runtime/auto-heal'
 import { loadProjectConfig } from '../lib/runtime/launcher/project-config'
 import {
+  createVerificationConfig,
+  getVerificationConfig,
+  listVerificationConfigs,
+  updateVerificationConfig,
+  type ResolveVerificationInput,
+} from '../lib/verification'
+import {
   isActiveRunStatus,
   isTerminalRunStatus,
   deriveRunActionAvailability,
@@ -51,6 +58,10 @@ export interface CanaryLabMcpDeps {
     },
     guidance?: string,
   ) => Promise<{ runId: string; mode?: 'remaining' }>
+  startVerification?: (
+    feature: string,
+    input: ResolveVerificationInput,
+  ) => Promise<{ runId: string }>
 }
 
 const CLIENT_KIND = z.enum(['claude-cli', 'claude-desktop', 'codex-cli', 'codex-desktop', 'other'])
@@ -107,6 +118,116 @@ export function registerCanaryLabTools(server: McpServer, deps: CanaryLabMcpDeps
       evaluationExport: { available: isTerminalRunStatus(status) },
       externalClaim: deps.broker.getSession(runId),
     })
+  })
+
+  server.registerTool('list_verification_configs', {
+    description: 'List saved Verify configurations for a Canary Lab feature.',
+    inputSchema: {
+      featureId: z.string().describe('Feature name.'),
+    },
+  }, async ({ featureId }) => {
+    const feature = loadFeatures(deps.featuresDir).find((candidate) => candidate.name === featureId)
+    if (!feature) return errorResult(`feature not found: ${featureId}`)
+    return asJsonResult(listVerificationConfigs(feature))
+  })
+
+  server.registerTool('get_verification_config', {
+    description: 'Fetch one saved Verify configuration for a Canary Lab feature.',
+    inputSchema: {
+      featureId: z.string().describe('Feature name.'),
+      configId: z.string().describe('Verification config id.'),
+    },
+  }, async ({ featureId, configId }) => {
+    const feature = loadFeatures(deps.featuresDir).find((candidate) => candidate.name === featureId)
+    if (!feature) return errorResult(`feature not found: ${featureId}`)
+    const config = getVerificationConfig(feature, configId)
+    if (!config) return errorResult(`verification config not found: ${configId}`)
+    return asJsonResult(config)
+  })
+
+  server.registerTool('create_verification_config', {
+    description: 'Create a saved Verify configuration for a feature.',
+    inputSchema: {
+      featureId: z.string().describe('Feature name.'),
+      name: z.string().describe('Configuration name, e.g. Beta or Staging.'),
+      targetUrls: z.record(z.string(), z.string()).describe('Target URLs keyed by verification target id.'),
+      playwrightEnvsetId: z.string().describe('Playwright envset to apply for verification.'),
+    },
+  }, async ({ featureId, name, targetUrls, playwrightEnvsetId }) => {
+    const feature = loadFeatures(deps.featuresDir).find((candidate) => candidate.name === featureId)
+    if (!feature) return errorResult(`feature not found: ${featureId}`)
+    try {
+      return asJsonResult(createVerificationConfig(feature, { name, targetUrls, playwrightEnvsetId }))
+    } catch (err) {
+      return errorResult(err instanceof Error ? err.message : String(err))
+    }
+  })
+
+  server.registerTool('update_verification_config', {
+    description: 'Update a saved Verify configuration for a feature.',
+    inputSchema: {
+      featureId: z.string().describe('Feature name.'),
+      configId: z.string().describe('Verification config id.'),
+      name: z.string().describe('Configuration name, e.g. Beta or Staging.'),
+      targetUrls: z.record(z.string(), z.string()).describe('Target URLs keyed by verification target id.'),
+      playwrightEnvsetId: z.string().describe('Playwright envset to apply for verification.'),
+    },
+  }, async ({ featureId, configId, name, targetUrls, playwrightEnvsetId }) => {
+    const feature = loadFeatures(deps.featuresDir).find((candidate) => candidate.name === featureId)
+    if (!feature) return errorResult(`feature not found: ${featureId}`)
+    try {
+      const config = updateVerificationConfig(feature, configId, { name, targetUrls, playwrightEnvsetId })
+      if (!config) return errorResult(`verification config not found: ${configId}`)
+      return asJsonResult(config)
+    } catch (err) {
+      return errorResult(err instanceof Error ? err.message : String(err))
+    }
+  })
+
+  server.registerTool('execute_verification', {
+    description: 'Execute Verify for a deployed environment. This never starts local services and never starts healing.',
+    inputSchema: {
+      featureId: z.string().describe('Feature name.'),
+      configId: z.string().optional().describe('Saved verification config id.'),
+      targetUrls: z.record(z.string(), z.string()).optional().describe('Target URLs keyed by verification target id.'),
+      playwrightEnvsetId: z.string().optional().describe('Playwright envset to apply for verification.'),
+    },
+  }, async ({ featureId, configId, targetUrls, playwrightEnvsetId }) => {
+    if (!deps.startVerification) return errorResult('startVerification dependency is not configured')
+    try {
+      const started = await deps.startVerification(featureId, {
+        ...(configId ? { configId } : {}),
+        ...(targetUrls ? { targetUrls } : {}),
+        ...(playwrightEnvsetId ? { playwrightEnvsetId } : {}),
+      })
+      const detail = deps.store.get(started.runId)
+      if (!detail) {
+        return asJsonResult({
+          executionId: started.runId,
+          executionType: 'verify',
+          status: 'queued',
+          targetUrls: targetUrls ?? {},
+          playwrightEnvsetId: playwrightEnvsetId ?? '',
+        })
+      }
+      return asJsonResult(verificationResult(detail))
+    } catch (err) {
+      return errorResult(err instanceof Error ? err.message : String(err))
+    }
+  })
+
+  server.registerTool('get_verification_result', {
+    description: 'Retrieve Verify result and diagnostics for a verification execution.',
+    inputSchema: {
+      executionId: z.string().describe('Verification execution id.'),
+    },
+  }, async ({ executionId }) => {
+    const detail = deps.store.get(executionId)
+    if (!detail) return errorResult(`verification result not found: ${executionId}`)
+    if ((detail.manifest.executionType ?? 'run') !== 'verify') {
+      return errorResult(`execution is not verify: ${executionId}`)
+    }
+    return asJsonResult(verificationResult(detail))
   })
 
   server.registerTool('get_heal_context', {
@@ -485,12 +606,31 @@ function resolveRunRef(
 function runCandidate(detail: RunDetail): Record<string, unknown> {
   return {
     runId: detail.manifest.runId,
+    executionType: detail.manifest.executionType ?? 'run',
     feature: detail.manifest.feature,
     env: detail.manifest.env ?? null,
     status: detail.manifest.status,
     startedAt: detail.manifest.startedAt,
     endedAt: detail.manifest.endedAt ?? null,
   }
+}
+
+function verificationResult(detail: RunDetail): Record<string, unknown> {
+  const verification = detail.manifest.verification
+  return {
+    executionId: detail.manifest.runId,
+    executionType: 'verify',
+    status: mcpVerificationStatus(detail.manifest.status),
+    ...(verification?.configName ? { configName: verification.configName } : {}),
+    targetUrls: verification?.targetUrls ?? {},
+    playwrightEnvsetId: verification?.playwrightEnvsetId ?? detail.manifest.env ?? '',
+    ...(verification?.diagnostics ? { diagnostics: verification.diagnostics } : {}),
+  }
+}
+
+function mcpVerificationStatus(status: string): string {
+  if (status === 'aborted') return 'cancelled'
+  return status
 }
 
 function buildHealContext(deps: CanaryLabMcpDeps, runId: string): Record<string, unknown> | null {

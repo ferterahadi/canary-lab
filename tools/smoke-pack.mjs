@@ -115,4 +115,4 @@ for (const relPath of installedPackagePaths) {
   }
 }
 
-run('npx', ['canary-lab', 'new-feature', 'smoke_feature', 'Smoke test feature'], projectDir)
+run('npx', ['canary-lab', 'new', 'feature', 'smoke_feature', '--description', 'Smoke test feature'], projectDir)

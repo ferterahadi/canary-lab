@@ -116,6 +116,7 @@ describe('buildServiceSpecs', () => {
     expect(specs).toHaveLength(3)
     expect(specs[0].name).toBe('r-cmd-1')
     expect(specs[1].name).toBe('apiA')
+    expect(specs[1]).toMatchObject({ repoName: 'r' })
     // Legacy bare-url shape coerced to tagged http probe.
     expect(specs[2].healthProbe).toEqual({ http: { url: 'http://b', timeoutMs: undefined } })
   })
@@ -255,6 +256,7 @@ describe('RunOrchestrator.start', () => {
     const manifest = readManifest(path.join(runDir, 'manifest.json'))!
     expect(manifest.runId).toBe(RUN_ID)
     expect(manifest.feature).toBe('demo')
+    expect(manifest.services[0]).toMatchObject({ repoName: 'api', name: 'api' })
     expect(manifest.services[0].safeName).toBe('api')
     expect(manifest.services[0].logPath.endsWith('svc-api.log')).toBe(true)
     expect(manifest.repoBranches).toEqual([{
