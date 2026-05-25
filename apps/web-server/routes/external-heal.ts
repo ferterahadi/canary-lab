@@ -11,7 +11,8 @@ import type {
   ExternalHealClientKind,
   ExternalHealSessionStatus,
 } from '../lib/runtime/manifest'
-import { buildRunPaths, runDirFor } from '../lib/runtime/run-paths'
+import { buildExternalHealContext, writeHealSignal } from '../lib/external-heal-surface'
+import { runDirFor } from '../lib/runtime/run-paths'
 import {
   isActiveRunStatus,
   isTerminalRunStatus,
@@ -161,36 +162,7 @@ export async function externalHealRoutes(
         reply.code(404)
         return { error: 'run not found' }
       }
-      const runDir = runDirFor(deps.store.logsDir, req.params.runId)
-      const paths = buildRunPaths(runDir)
-      const summary = detail.summary
-      const failedTests = (summary?.failed ?? []).map((entry) => ({
-        name: entry.name,
-        ...(entry.error ? { error: entry.error } : {}),
-        ...(entry.location ? { location: entry.location } : {}),
-        ...(typeof entry.retry === 'number' ? { retry: entry.retry } : {}),
-        artifacts:
-          detail.playwrightArtifacts
-            ?.find((g) => g.testName === entry.name)
-            ?.artifacts.map((a) => ({ name: a.name, kind: a.kind, url: a.url })) ?? [],
-      }))
-      const healIndexMarkdown = safeRead(paths.healIndexPath)
-      const journalMarkdown = safeRead(paths.diagnosisJournalPath)
-      return {
-        runId: req.params.runId,
-        feature: detail.manifest.feature,
-        env: detail.manifest.env ?? null,
-        status: detail.manifest.status,
-        healCycles: detail.manifest.healCycles,
-        repoBranches: detail.manifest.repoBranches ?? [],
-        lifecycle: detail.manifest.lifecycle ?? null,
-        externalHealSession: detail.manifest.externalHealSession ?? null,
-        summary: summary ?? null,
-        failedTests,
-        healIndexMarkdown,
-        journalMarkdown,
-        artifactsBase: `/api/runs/${encodeURIComponent(req.params.runId)}/artifacts/`,
-      }
+      return buildExternalHealContext({ detail, logsDir: deps.store.logsDir })
     },
   )
 
@@ -229,14 +201,14 @@ export async function externalHealRoutes(
         reply.code(409)
         return { reason: 'session-mismatch', currentSession: ownership.currentSession }
       }
-      const runDir = runDirFor(deps.store.logsDir, req.params.runId)
-      const paths = buildRunPaths(runDir)
-      const target = kind === 'restart' ? paths.restartSignal
-        : kind === 'rerun' ? paths.rerunSignal
-        : paths.healSignal
+      let signal: ReturnType<typeof writeHealSignal>
       try {
-        fs.mkdirSync(path.dirname(target), { recursive: true })
-        fs.writeFileSync(target, JSON.stringify(body))
+        signal = writeHealSignal({
+          logsDir: deps.store.logsDir,
+          runId: req.params.runId,
+          kind,
+          body: body as Record<string, unknown>,
+        })
       } catch (err) {
         reply.code(500)
         return { error: (err as Error).message }
@@ -247,7 +219,7 @@ export async function externalHealRoutes(
       deps.broker.bumpCycle(req.params.runId)
       deps.onSignalAccepted?.(req.params.runId, kind, body as Record<string, unknown>)
       reply.code(202)
-      return { accepted: true, kind, path: target }
+      return { accepted: true, kind, path: signal.path }
     },
   )
 
@@ -291,14 +263,6 @@ function isSessionStatus(value: unknown): value is ExternalHealSessionStatus {
 
 function isSignalKind(value: unknown): value is HealSignalKind {
   return typeof value === 'string' && (VALID_SIGNAL_KINDS as string[]).includes(value)
-}
-
-function safeRead(file: string): string | null {
-  try {
-    return fs.readFileSync(file, 'utf-8')
-  } catch {
-    return null
-  }
 }
 
 /** Convenience factory: the production audit-log writer. Used by server.ts
