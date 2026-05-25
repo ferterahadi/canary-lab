@@ -112,16 +112,11 @@ function WizardTaskDialog({
         }}
       >
         <header
-          className="flex items-start gap-3 border-b px-4 py-3"
+          className="flex items-center gap-3 border-b px-4 py-3"
           style={{ borderColor: 'var(--border-default)' }}
         >
           <div className="min-w-0 flex-1">
             <h2 className="text-sm font-semibold">Wizard tasks</h2>
-            <p className="mt-0.5 text-xs" style={{ color: 'var(--text-muted)' }}>
-              {tasks.length === 0
-                ? 'No tasks running.'
-                : `${tasks.length} ${tasks.length === 1 ? 'task' : 'tasks'} · ${counts.running} running`}
-            </p>
           </div>
           <button
             type="button"

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import * as api from '../api/client'
 import type { EditorChoice, HealAgentChoice, ProjectConfig } from '../api/client'
 import { CloseIcon } from './config/atoms'
+import { FolderPicker } from './config/FolderPicker'
 
 // `auto` and `manual` are intentionally omitted from the settings UI. The
 // server still accepts them for old config files and run-level compatibility,
@@ -139,18 +140,12 @@ export function SettingsModal({ onClose }: Props) {
               <div className="text-[10px] uppercase tracking-wider mb-2" style={{ color: 'var(--text-muted)' }}>
                 Personal wiki
               </div>
-              <input
-                type="text"
-                value={draft.personalWikiPath ?? ''}
-                onChange={(e) => setDraft({ ...draft, personalWikiPath: e.target.value.trim() ? e.target.value : null })}
+              <FolderPicker
+                value={draft.personalWikiPath}
+                onChange={(p) => setDraft({ ...draft, personalWikiPath: p.trim() ? p : null })}
                 placeholder="~/Documents/wiki"
-                className="w-full rounded-md px-2.5 py-1.5 text-xs outline-none"
-                style={{
-                  background: 'var(--bg-elevated)',
-                  border: '1px solid var(--border-default)',
-                  color: 'var(--text-primary)',
-                  fontFamily: 'var(--font-mono)',
-                }}
+                title="Select personal wiki folder"
+                confirmLabel="Use wiki folder"
               />
               <div className="mt-1 text-xs" style={{ color: 'var(--text-muted)' }}>
                 Optional Karpathy-style personal wiki folder for distilled agent notes. Auto-heal receives the path and reads only relevant notes.
