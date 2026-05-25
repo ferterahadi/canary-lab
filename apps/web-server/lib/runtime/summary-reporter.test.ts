@@ -25,7 +25,7 @@ vi.mock('./trace-enrichment', () => ({
   extractTraceSummary: traceMocks.extractTraceSummary,
 }))
 
-const { slugify, default: SummaryReporter } = await import('./summary-reporter')
+const { slugify, testIdFor, default: SummaryReporter } = await import('./summary-reporter')
 
 afterEach(() => {
   fs.rmSync(LOGS_DIR, { recursive: true, force: true })
@@ -443,6 +443,70 @@ describe('SummaryReporter', () => {
         },
       ],
     })
+  })
+
+  it('replays a rich existing summary with explicit ids in knownTests, passedIds, skippedIds, and failed entries', () => {
+    // Exercises every "id is present" branch in replayFromExistingSummary +
+    // knownTestsFromExistingSummary + idForExistingResult: passedIds /
+    // skippedIds arrays, an explicit failed entry id, location-based
+    // resolution against a known test, and single-match by-name resolution.
+    process.env.CANARY_LAB_TARGETED_RERUN = '1'
+    fs.mkdirSync(LOGS_DIR, { recursive: true })
+
+    // Compute the test-A id with the production helper so onTestEnd's
+    // computed id matches the replayed result — this triggers the
+    // first-try findIndex hit inside removeResult.
+    const idA = testIdFor({ title: 'A', location: '/spec.ts:1' })
+    const idB = 'test-id-known-b'
+    const idC = 'test-id-known-c'
+    const idD = 'test-id-known-d'
+    const idE = 'test-id-known-e'
+
+    fs.writeFileSync(
+      path.join(LOGS_DIR, 'e2e-summary.json'),
+      JSON.stringify({
+        knownTests: [
+          { id: idA, name: 'test-case-a', title: 'A', location: '/spec.ts:1' },
+          { id: idB, name: 'test-case-b', title: 'B', location: '/spec.ts:2' },
+          { id: idC, name: 'test-case-c', title: 'C', location: '/spec.ts:3' },
+          { id: idD, name: 'test-case-d', title: 'D', location: '/spec.ts:4' },
+          { id: idE, name: 'test-case-e', title: 'E', location: '/spec.ts:5' },
+        ],
+        passedNames: ['test-case-a', 'test-case-b'],
+        // passedIds is an array but only covers idx=0 — idx=1 falls through
+        // to idForExistingResult({ name: 'test-case-b' }), which finds a
+        // single non-legacy match in knownTests and returns idB.
+        passedIds: [idA],
+        skippedNames: ['test-case-c'],
+        skippedIds: [idC],
+        failed: [
+          // Explicit string id on the failed entry.
+          { name: 'test-case-d', id: idD, error: { message: 'fail-d' } },
+          // No id but a location matches a knownTests entry exactly.
+          { name: 'test-case-e', location: '/spec.ts:5', error: { message: 'fail-e' } },
+        ],
+      }),
+    )
+
+    const reporter = new SummaryReporter()
+
+    // Drive onTestEnd for test A so the replayed-by-id entry is removed via
+    // the first findIndex (covers the "id resolved on first try" branch).
+    reporter.onTestEnd(
+      { title: 'A', location: { file: '/spec.ts', line: 1 } } as any,
+      mkResult({ status: 'passed' }),
+    )
+    reporter.onEnd({} as any)
+
+    const out = readSummary()
+    expect(out.passedNames).toEqual(expect.arrayContaining(['test-case-a', 'test-case-b']))
+    expect(out.passedIds).toEqual(expect.arrayContaining([idA, idB]))
+    expect(out.skippedNames).toEqual(['test-case-c'])
+    expect(out.skippedIds).toEqual([idC])
+    expect(out.failed).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: idD, name: 'test-case-d' }),
+      expect.objectContaining({ id: idE, name: 'test-case-e', location: '/spec.ts:5' }),
+    ]))
   })
 
   it('skips the existing-summary seed when the file parses to a non-object value', () => {
