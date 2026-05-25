@@ -169,7 +169,7 @@ describe('PUT /api/project-config', () => {
     }
   })
 
-  it('updates CLAUDE.md and AGENTS.md when personal wiki path is set', async () => {
+  it('does not create agent docs when personal wiki path is set', async () => {
     const wiki = path.join(projectRoot, 'wiki')
     fs.mkdirSync(wiki)
     const app = await makeApp()
@@ -180,15 +180,8 @@ describe('PUT /api/project-config', () => {
         payload: { personalWikiPath: wiki },
       })
       expect(r.statusCode).toBe(200)
-      for (const mdFile of ['CLAUDE.md', 'AGENTS.md']) {
-        const content = fs.readFileSync(path.join(projectRoot, mdFile), 'utf-8')
-        expect(content).toContain('<!-- personal-wiki:start -->')
-        expect(content).toContain(`- \`${fs.realpathSync(wiki)}\` — Karpathy-style personal wiki`)
-        expect(content).toContain('<!-- personal-wiki:end -->')
-      }
-      expect(fs.readFileSync(path.join(projectRoot, 'CLAUDE.md'), 'utf-8')).toBe(
-        fs.readFileSync(path.join(projectRoot, 'AGENTS.md'), 'utf-8'),
-      )
+      expect(fs.existsSync(path.join(projectRoot, 'CLAUDE.md'))).toBe(false)
+      expect(fs.existsSync(path.join(projectRoot, 'AGENTS.md'))).toBe(false)
     } finally {
       await app.close()
     }
@@ -225,11 +218,8 @@ describe('PUT /api/project-config', () => {
       })
       expect(r1.statusCode).toBe(200)
       expect(r1.json().personalWikiPath).toBe(null)
-      for (const mdFile of ['CLAUDE.md', 'AGENTS.md']) {
-        const content = fs.readFileSync(path.join(projectRoot, mdFile), 'utf-8')
-        expect(content).toContain('<!-- personal-wiki:start -->\n<!-- personal-wiki:end -->')
-        expect(content).not.toContain('Karpathy-style personal wiki')
-      }
+      expect(fs.existsSync(path.join(projectRoot, 'CLAUDE.md'))).toBe(false)
+      expect(fs.existsSync(path.join(projectRoot, 'AGENTS.md'))).toBe(false)
 
       const r2 = await app.inject({
         method: 'PUT',

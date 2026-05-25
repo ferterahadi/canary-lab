@@ -463,7 +463,7 @@ export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Pro
           ...(req.body?.forceNew
             ? {
                 ignoredForceNew: true,
-                warning: 'An active run already exists for this feature. Continue it with write_journal, signal_run, and wait_for_heal_task instead of starting a fresh run.',
+                warning: 'An active run already exists for this feature. Continue it with signal_run and wait_for_heal_task instead of starting a fresh run.',
               }
             : {}),
         }

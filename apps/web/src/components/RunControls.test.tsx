@@ -115,6 +115,23 @@ describe('run overview', () => {
     expect(container.textContent).toContain('Envset')
     expect(container.textContent).toContain('beta')
   })
+
+  it('shows the heal agent recorded on the run manifest', async () => {
+    const { useRun } = await import('../state/RunsContext')
+    vi.mocked(useRun).mockReturnValue({
+      detail: runDetail({ healMode: 'auto', healAgent: 'codex' }),
+      indexed: undefined,
+      transient: null,
+      status: 'passed',
+    })
+
+    await act(async () => {
+      root.render(<RunDetailColumn runId="run-1" />)
+    })
+
+    expect(container.textContent).toContain('Heal agent')
+    expect(container.textContent).toContain('Codex')
+  })
 })
 
 function runDetail(overrides: Partial<RunDetail['manifest']> = {}): RunDetail {

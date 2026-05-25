@@ -2,7 +2,6 @@ import { describe, it, expect } from 'vitest'
 import path from 'path'
 import {
   buildRunPaths,
-  currentRunSymlinkPath,
   runDirFor,
   runsIndexPath,
   runsRoot,
@@ -54,9 +53,5 @@ describe('runs root helpers', () => {
     expect(runDirFor('/proj/logs', '2026-04-28T1015-abc1')).toBe(
       '/proj/logs/runs/2026-04-28T1015-abc1',
     )
-  })
-
-  it('currentRunSymlinkPath places `current` at logs root', () => {
-    expect(currentRunSymlinkPath('/proj/logs')).toBe('/proj/logs/current')
   })
 })

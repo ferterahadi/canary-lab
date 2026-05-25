@@ -1,6 +1,6 @@
 import fs from 'fs'
 import path from 'path'
-import { runDirFor, runsIndexPath, runsRoot } from './run-paths'
+import { runsIndexPath, runsRoot } from './run-paths'
 import type {
   RunLifecycleSnapshot,
   RunStatus,
@@ -76,6 +76,8 @@ export type ExternalHealClientKind =
   | 'codex-desktop'
   | 'other'
 
+export type LocalHealAgent = 'claude' | 'codex'
+
 export type ExternalHealSessionStatus =
   | 'connected'
   | 'waiting'
@@ -138,6 +140,9 @@ export interface RunManifest {
    *  connected via MCP) owns the heal loop for this run. See
    *  `externalHealSession` below for identity + heartbeat state. */
   healMode?: 'auto' | 'manual' | 'external'
+  /** Resolved local CLI used for auto-heal. Locks the run to the agent that
+   *  was chosen when the run started, even if project settings change later. */
+  healAgent?: LocalHealAgent
   /** Populated when `healMode === 'external'`. Tracks the single external
    *  client that holds the heal claim for this run. */
   externalHealSession?: ExternalHealSession
@@ -246,29 +251,4 @@ export function upsertRunsIndexEntry(
   }
   writeRunsIndex(logsDir, entries)
   return entries
-}
-
-// Update or remove the `logs/current` symlink so legacy heal-index path
-// expectations (which read `logs/current/heal-index.md`) keep working.
-export function setCurrentRunSymlink(logsDir: string, runId: string | null): void {
-  const link = path.join(logsDir, 'current')
-  try {
-    fs.rmSync(link, { recursive: true, force: true })
-  } catch {
-    /* no existing link — fine */
-  }
-  if (runId === null) return
-  fs.mkdirSync(runsRoot(logsDir), { recursive: true })
-  const target = path.relative(logsDir, runDirFor(logsDir, runId))
-  try {
-    fs.symlinkSync(target, link, 'dir')
-  } catch {
-    // Symlinks may fail on some filesystems (e.g. Windows without admin). Fall
-    // back to a tiny pointer file so callers can still resolve the path.
-    try {
-      fs.writeFileSync(link, target)
-    } catch {
-      /* best-effort */
-    }
-  }
 }

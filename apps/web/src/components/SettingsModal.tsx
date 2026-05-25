@@ -3,15 +3,16 @@ import * as api from '../api/client'
 import type { EditorChoice, HealAgentChoice, ProjectConfig } from '../api/client'
 import { CloseIcon } from './config/atoms'
 
-// `auto` is intentionally omitted — the server default is now `external` and
-// existing `auto` configs are migrated to `external` on load (see
-// `migrateLegacyHealAgent` below). Order presents the most common modern
-// choice first.
-const HEAL_AGENT_OPTIONS: { value: HealAgentChoice; label: string; description: string }[] = [
+// `auto` and `manual` are intentionally omitted from the settings UI. The
+// server still accepts them for old config files and run-level compatibility,
+// but the modern project-level choice is external client ownership.
+type VisibleHealAgentChoice = Extract<HealAgentChoice, 'external' | 'claude' | 'codex'>
+
+const HEAL_AGENT_OPTIONS: { value: VisibleHealAgentChoice; label: string; description: string }[] = [
   {
     value: 'external',
     label: 'External client',
-    description: 'Let Claude / Codex Desktop or CLI drive heal over MCP. Canary Lab waits for the external client to claim and signal.',
+    description: 'Let Claude / Codex Desktop or CLI drive heal over MCP. Canary Lab waits for that client to claim and signal.',
   },
   {
     value: 'claude',
@@ -23,17 +24,12 @@ const HEAL_AGENT_OPTIONS: { value: HealAgentChoice; label: string; description: 
     label: 'Codex',
     description: 'Always use the `codex` CLI for auto-heal.',
   },
-  {
-    value: 'manual',
-    label: 'Manual',
-    description: 'Skip auto-heal. Open Claude/Codex desktop yourself when a run pauses.',
-  },
 ]
 
-// Map legacy `auto` saved config to the new default (`external`) for display.
-// Saving will persist the new value, retiring `auto` in this project.
+// Map legacy `auto` / `manual` saved config to the new default (`external`) for
+// display. Saving will persist the new value, retiring it in this project.
 function migrateLegacyHealAgent(value: HealAgentChoice): HealAgentChoice {
-  return value === 'auto' ? 'external' : value
+  return value === 'auto' || value === 'manual' ? 'external' : value
 }
 
 const EDITOR_OPTIONS: { value: EditorChoice; label: string; description: string }[] = [
@@ -122,8 +118,7 @@ export function SettingsModal({ onClose }: Props) {
       >
         <header className="cl-dialog-header">
           <div className="min-w-0 flex-1">
-            <div className="cl-kicker">Project</div>
-            <h2 className="mt-1 text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>Settings</h2>
+            <h2 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>Project Settings</h2>
           </div>
           <button
             type="button"

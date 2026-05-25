@@ -139,6 +139,24 @@ describe('statusForTest', () => {
     expect(statusForTest('Other test', summary)).toBe('pending')
   })
 
+  it('uses test ids to distinguish duplicate test titles', () => {
+    const summary: RunSummary = {
+      complete: false,
+      total: 2,
+      passed: 1,
+      failed: [],
+      passedNames: ['test-case-validates-input'],
+      passedIds: ['test-id-alpha'],
+      knownTests: [
+        { id: 'test-id-alpha', name: 'test-case-validates-input', title: 'validates input', location: '/a.spec.ts:10' },
+        { id: 'test-id-beta', name: 'test-case-validates-input', title: 'validates input', location: '/a.spec.ts:30' },
+      ],
+    } as RunSummary
+
+    expect(statusForTest({ name: 'validates input', id: 'test-id-alpha' }, summary)).toBe('passed')
+    expect(statusForTest({ name: 'validates input', id: 'test-id-beta' }, summary)).toBe('pending')
+  })
+
   it('uses skippedNames to distinguish skipped vs failed', () => {
     const summary: RunSummary = {
       complete: false,

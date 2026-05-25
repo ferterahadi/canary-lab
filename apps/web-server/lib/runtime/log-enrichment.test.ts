@@ -3,7 +3,6 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import {
-  appendExternalJournalIteration,
   appendJournalIteration,
   capSlice,
   classifyJournalOutcome,
@@ -270,49 +269,6 @@ describe('appendJournalIteration', () => {
     const body = fs.readFileSync(journalPath, 'utf-8')
     expect(body).not.toContain('### Diff')
     expect(body).not.toContain('```diff')
-  })
-})
-
-describe('appendExternalJournalIteration', () => {
-  it('writes an externally supplied note using canonical journal fields', () => {
-    const journalPath = path.join(tmpDir, 'j.md')
-    const manifestPath = path.join(tmpDir, 'm.json')
-    fs.writeFileSync(manifestPath, JSON.stringify({ feature: 'checkout' }))
-
-    appendExternalJournalIteration({
-      iteration: 3,
-      runId: 'run-ext',
-      body: 'Hypothesis: route module was disabled\n\nFix: enabled the module import',
-      journalPath,
-      manifestPath,
-    })
-
-    const body = fs.readFileSync(journalPath, 'utf-8')
-    expect(body).toContain('# Diagnosis Journal')
-    expect(body).toMatch(/## Iteration 3 [—-] \d{4}-\d{2}-\d{2}T/)
-    expect(body).toContain('- run: run-ext')
-    expect(body).toContain('- feature: checkout')
-    expect(body).toContain('- hypothesis: route module was disabled')
-    expect(body).toContain('- fix.description: enabled the module import')
-    expect(body).toContain('- outcome: pending')
-    expect(body).toContain('Hypothesis: route module was disabled')
-    expect(body).toContain('Fix: enabled the module import')
-  })
-
-  it('falls back to the first non-empty body line for the hypothesis', () => {
-    const journalPath = path.join(tmpDir, 'j.md')
-    const manifestPath = path.join(tmpDir, 'm.json')
-    fs.writeFileSync(manifestPath, JSON.stringify({ feature: 'checkout' }))
-
-    appendExternalJournalIteration({
-      iteration: 1,
-      runId: 'run-ext',
-      body: '\nThe gateway route is missing.\n\nFix: enabled it',
-      journalPath,
-      manifestPath,
-    })
-
-    expect(fs.readFileSync(journalPath, 'utf-8')).toContain('- hypothesis: The gateway route is missing.')
   })
 })
 

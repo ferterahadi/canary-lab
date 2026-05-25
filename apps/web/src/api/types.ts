@@ -60,6 +60,7 @@ export interface ExtractedStep {
 }
 
 export interface ExtractedTest {
+  id?: string
   name: string
   line: number
   bodySource: string
@@ -176,12 +177,14 @@ export interface RunManifest {
   playwrightArtifacts?: PlaywrightArtifactPolicy
   signalPaths?: { rerun: string; restart: string }
   healMode?: 'auto' | 'manual' | 'external'
+  healAgent?: 'claude' | 'codex'
   externalHealSession?: ExternalHealSession
   lifecycle?: RunLifecycleSnapshot
   verification?: VerificationRunMetadata
 }
 
 export interface RunSummaryFailedEntry {
+  id?: string
   name: string
   error?: { message: string; snippet?: string }
   durationMs?: number
@@ -204,10 +207,19 @@ export interface RunSummary {
   total: number
   passed: number
   passedNames?: string[]
+  passedIds?: string[]
   skipped?: number
   skippedNames?: string[]
-  running?: { name: string; location: string; step?: RunSummaryRunningStep }
-  runningTests?: Array<{ name: string; location: string; step?: RunSummaryRunningStep }>
+  skippedIds?: string[]
+  knownTests?: Array<{
+    id?: string
+    name: string
+    title?: string
+    titlePath?: string[]
+    location?: string
+  }>
+  running?: { id?: string; name: string; location: string; step?: RunSummaryRunningStep }
+  runningTests?: Array<{ id?: string; name: string; location: string; step?: RunSummaryRunningStep }>
   failed: RunSummaryFailedEntry[]
 }
 

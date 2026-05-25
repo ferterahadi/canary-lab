@@ -10,7 +10,6 @@ import {
   type HealAgentChoice,
   type ProjectConfig,
 } from '../lib/runtime/launcher/project-config'
-import { syncPersonalWikiAgentDocs } from '../../../shared/runtime/personal-wiki'
 
 export interface ProjectConfigRouteDeps {
   projectRoot: string
@@ -53,9 +52,6 @@ export async function projectConfigRoutes(
         : current.personalWikiPath,
     }
     saveProjectConfig(deps.projectRoot, next)
-    if (incomingPersonalWikiPath !== undefined) {
-      syncPersonalWikiAgentDocs(deps.projectRoot, next.personalWikiPath)
-    }
     return next
   })
 

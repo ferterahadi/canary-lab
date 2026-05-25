@@ -78,7 +78,3 @@ export function runsIndexPath(logsDir: string): string {
 export function runDirFor(logsDir: string, runId: string): string {
   return path.join(runsRoot(logsDir), runId)
 }
-
-export function currentRunSymlinkPath(logsDir: string): string {
-  return path.join(logsDir, 'current')
-}

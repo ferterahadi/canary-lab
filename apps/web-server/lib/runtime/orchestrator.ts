@@ -584,6 +584,7 @@ export class RunOrchestrator extends EventEmitter {
           : this.manualHeal
             ? 'manual'
             : undefined,
+      ...(this.autoHeal ? { healAgent: this.autoHeal.agent } : {}),
       ...(this.externalHealSession ? { externalHealSession: this.externalHealSession } : {}),
       lifecycle: {
         phase: 'starting-services',
@@ -620,6 +621,8 @@ export class RunOrchestrator extends EventEmitter {
       this.emit('service-output', { service: svc, chunk })
     })
     pty.onExit(({ exitCode, signal }) => {
+      if (this.servicePtys.get(svc.name) !== pty) return
+      this.servicePtys.delete(svc.name)
       this.emit('service-exit', { service: svc, exitCode, signal })
     })
   }

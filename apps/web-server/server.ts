@@ -54,6 +54,8 @@ import {
   resolveVerificationRun,
   type ResolveVerificationInput,
 } from './lib/verification'
+import type { HealAgentChoice } from './lib/runtime/launcher/project-config'
+import type { LocalHealAgent } from './lib/runtime/manifest'
 
 // Apply a feature's envset in-process and return the backups to revert later.
 // Returns null when the feature has no envsets configured (silent skip).
@@ -68,6 +70,16 @@ function applyFeatureEnvset(featureDir: string, setName: string): BackupRecord[]
   const backups = backup(targets, Date.now())
   applySet(envSetsDir, setName, targets)
   return backups
+}
+
+function pickConfiguredHealAgent(
+  configured: HealAgentChoice,
+  persisted?: LocalHealAgent,
+): HealAgent | null {
+  if (persisted) return pickAvailableHealAgent(persisted)
+  if (configured === 'auto') return pickAvailableHealAgent()
+  if (configured === 'claude' || configured === 'codex') return pickAvailableHealAgent(configured)
+  return null
 }
 
 // Bootstrap glue. Excluded from coverage — the testable logic lives under
@@ -313,6 +325,9 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
     }
     const broker = brokers.get(runId) ?? new PaneBroker()
     brokers.set(runId, broker)
+    orch.on('service-started', ({ service }) => {
+      broker.resetPane(`service:${service.safeName}`)
+    })
     orch.on('service-output', ({ service, chunk }) => {
       broker.push(`service:${service.safeName}`, chunk)
     })
@@ -509,14 +524,9 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
         }) => string
         buildCyclePrompt: BuildHealCyclePrompt
       } | undefined
-      const agentChoice =
-        isExternalRequest
-          || projectConfig.healAgent === 'manual'
-          || projectConfig.healAgent === 'external'
-          ? null
-          : projectConfig.healAgent === 'auto'
-            ? pickAvailableHealAgent()
-            : pickAvailableHealAgent(projectConfig.healAgent)
+      const agentChoice = isExternalRequest
+        ? null
+        : pickConfiguredHealAgent(projectConfig.healAgent)
       if (isExternalRequest) {
         runnerLog.info(
           `Auto-heal disabled: external client (${healAgentReq?.clientKind}, session ${healAgentReq?.sessionId.slice(0, 8)}) will drive the heal loop.`,
@@ -656,10 +666,8 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
         buildCyclePrompt: BuildHealCyclePrompt
       } | undefined
 
-      if (!preserveExternal && !preserveManual && projectConfig.healAgent !== 'manual' && projectConfig.healAgent !== 'external') {
-        const agentChoice = projectConfig.healAgent === 'auto'
-          ? pickAvailableHealAgent()
-          : pickAvailableHealAgent(projectConfig.healAgent)
+      if (!preserveExternal && !preserveManual) {
+        const agentChoice = pickConfiguredHealAgent(projectConfig.healAgent, manifest.healAgent)
         if (agentChoice) {
           try {
             autoHeal = {
@@ -740,13 +748,11 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
       const runDir = runDirFor(logsDir, runId)
       const runnerLog = new RunnerLog(buildRunPaths(runDir).runnerLogPath)
       const projectConfig = loadProjectConfig(opts.projectRoot)
-      if (projectConfig.healAgent === 'manual') {
+      if (!manifest.healAgent && projectConfig.healAgent === 'manual') {
         runnerLog.info('Heal restart rejected: project config is set to "manual".')
         return { ok: false, reason: 'manual-mode' as const }
       }
-      const agentChoice = projectConfig.healAgent === 'auto'
-        ? pickAvailableHealAgent()
-        : pickAvailableHealAgent(projectConfig.healAgent)
+      const agentChoice = pickConfiguredHealAgent(projectConfig.healAgent, manifest.healAgent)
       if (!agentChoice) {
         runnerLog.warn('Heal restart failed: no `claude` or `codex` CLI on PATH.')
         return { ok: false, reason: 'spawn-failed' as const }

@@ -38,7 +38,6 @@ const REPAIR_TOOLS = [
   'signal_run',
   'start_run',
   'wait_for_heal_task',
-  'write_journal',
 ].sort()
 
 const VERIFY_TOOLS = [
@@ -74,7 +73,6 @@ const FULL_TOOLS = [
   'start_run',
   'update_verification_config',
   'wait_for_heal_task',
-  'write_journal',
 ].sort()
 
 async function connectClient(address: string, pathAndQuery = '/mcp'): Promise<Client> {
@@ -371,9 +369,9 @@ describe('MCP HTTP server (smoke)', () => {
     }
   })
 
-  it('write_journal appends canonical run-local journal sections visible to the UI', async () => {
+  it('signal_run writes canonical restart/rerun journal payloads', async () => {
     const projectRoot = path.resolve(__dirname, '..', '..', '..', 'templates', 'project')
-    const logsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-journal-')))
+    const logsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-signal-')))
     const { app, runStore } = await createServer({ projectRoot, logsDir, ptyFactory: inertPtyFactory })
     let client: Client | null = null
     try {
@@ -391,41 +389,55 @@ describe('MCP HTTP server (smoke)', () => {
       })
 
       const result = await client.callTool({
-        name: 'write_journal',
+        name: 'signal_run',
         arguments: {
           runId: 'journal-run',
-          iteration: 2,
-          body: 'Hypothesis: route module was disabled\n\nFix: enabled the module import',
+          kind: 'restart',
+          hypothesis: 'route module was disabled',
+          fixDescription: 'enabled the module import',
         },
       })
       expect(result.isError).not.toBe(true)
 
-      const journalPath = path.join(runDirFor(logsDir, 'journal-run'), 'diagnosis-journal.md')
-      const journal = fs.readFileSync(journalPath, 'utf-8')
-      expect(journal).toContain('# Diagnosis Journal')
-      expect(journal).toMatch(/## Iteration 2 [—-] \d{4}-\d{2}-\d{2}T/)
-      expect(journal).toContain('- run: journal-run')
-      expect(journal).toContain('- feature: broken_todo_api')
-      expect(journal).toContain('- hypothesis: route module was disabled')
-      expect(journal).toContain('- fix.description: enabled the module import')
-      expect(journal).toContain('- outcome: pending')
-      expect(journal).toContain('Hypothesis: route module was disabled')
-      expect(journal).toContain('Fix: enabled the module import')
+      const paths = path.join(runDirFor(logsDir, 'journal-run'), 'signals', '.restart')
+      expect(fs.readFileSync(paths, 'utf-8')).toBe(JSON.stringify({
+        hypothesis: 'route module was disabled',
+        fixDescription: 'enabled the module import',
+      }))
+    } finally {
+      if (client) await client.close().catch(() => undefined)
+      await app.close()
+    }
+  })
 
-      const res = await app.inject({
-        method: 'GET',
-        url: '/api/journal?feature=broken_todo_api&run=journal-run',
+  it('rejects signal_run restart/rerun calls without journal fields', async () => {
+    const projectRoot = path.resolve(__dirname, '..', '..', '..', 'templates', 'project')
+    const logsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-signal-validation-')))
+    const { app, runStore } = await createServer({ projectRoot, logsDir, ptyFactory: inertPtyFactory })
+    let client: Client | null = null
+    try {
+      const address = await app.listen({ port: 0, host: '127.0.0.1' })
+      client = await connectClient(address)
+
+      runStore.bootstrap({
+        runId: 'journal-run',
+        feature: 'broken_todo_api',
+        startedAt: '2026-05-08T00:00:00.000Z',
+        status: 'healing',
+        healCycles: 2,
+        services: [],
+        healMode: 'external',
       })
-      expect(res.statusCode).toBe(200)
-      expect(res.json()).toMatchObject([
-        {
-          iteration: 2,
-          run: 'journal-run',
-          feature: 'broken_todo_api',
-          outcome: 'pending',
+
+      const missingFix = await client.callTool({
+        name: 'signal_run',
+        arguments: {
+          runId: 'journal-run',
+          kind: 'rerun',
           hypothesis: 'route module was disabled',
         },
-      ])
+      })
+      expect(missingFix.isError).toBe(true)
     } finally {
       if (client) await client.close().catch(() => undefined)
       await app.close()

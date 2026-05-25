@@ -204,4 +204,68 @@ describe('TestCasesColumn', () => {
 
     expect(container.textContent).not.toContain('Export Evaluation')
   })
+
+  it('uses the selected run summary for counts and duplicate-title statuses', async () => {
+    vi.mocked(getFeatureTests).mockResolvedValue([
+      {
+        file: '/tmp/features/alpha/e2e/current.spec.ts',
+        tests: Array.from({ length: 33 }, (_, idx) => ({
+          name: `current test ${idx + 1}`,
+          line: idx + 1,
+          bodySource: '',
+          steps: [],
+        })),
+      },
+    ])
+
+    const knownTests = Array.from({ length: 31 }, (_, idx) => ({
+      id: `test-id-${idx + 1}`,
+      name: `test-case-run-test-${idx + 1}`,
+      title: `run test ${idx + 1}`,
+      location: `/tmp/features/alpha/e2e/run.spec.ts:${idx + 1}`,
+    }))
+    knownTests[5] = {
+      id: 'test-id-duplicate-a',
+      name: 'test-case-validates-duplicate',
+      title: 'validates duplicate',
+      location: '/tmp/features/alpha/e2e/run.spec.ts:100',
+    }
+    knownTests[6] = {
+      id: 'test-id-duplicate-b',
+      name: 'test-case-validates-duplicate',
+      title: 'validates duplicate',
+      location: '/tmp/features/alpha/e2e/run.spec.ts:120',
+    }
+
+    await act(async () => {
+      root.render(
+        <TestCasesColumn
+          feature="alpha"
+          activeRunStatus="aborted"
+          activeRunSummary={{
+            complete: false,
+            total: 31,
+            passed: 12,
+            passedNames: [
+              ...knownTests.slice(0, 5).map((test) => test.name),
+              'test-case-validates-duplicate',
+              ...knownTests.slice(7, 13).map((test) => test.name),
+            ],
+            passedIds: [
+              ...knownTests.slice(0, 5).map((test) => test.id),
+              'test-id-duplicate-a',
+              ...knownTests.slice(7, 13).map((test) => test.id),
+            ],
+            knownTests,
+            failed: [],
+          } as any}
+        />,
+      )
+    })
+
+    expect(container.textContent).toContain('12/31')
+    expect(container.textContent).not.toContain('13/33')
+    expect(container.textContent).toContain('validates duplicate')
+    expect(container.querySelectorAll('.border-emerald-500\\/40')).toHaveLength(12)
+  })
 })
