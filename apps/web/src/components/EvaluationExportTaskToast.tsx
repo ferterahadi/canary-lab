@@ -96,16 +96,7 @@ function EvaluationExportDialog({
         style={{ borderColor: 'var(--border-default)', background: 'var(--bg-elevated)', color: 'var(--text-primary)' }}
       >
         <header className="cl-dialog-header">
-          <StatusDot state={dotStateForExport(task.status)} className="mt-1" />
-          <div className="min-w-0 flex-1">
-            <h2 className="text-sm font-semibold">Evaluation export</h2>
-            <div className="cl-meta-grid mt-1">
-              <span className="truncate">Mode: {modeLabel(task.mode)}</span>
-              <span className="truncate">Status: {task.status}</span>
-              <span className="truncate" title={task.runId}>Run: {task.runId}</span>
-              <span className="truncate" title={task.feature}>Feature: {task.feature}</span>
-            </div>
-          </div>
+          <h2 className="min-w-0 flex-1 text-sm font-semibold">Evaluation export</h2>
           <button
             type="button"
             onClick={onClose}

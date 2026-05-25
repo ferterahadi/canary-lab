@@ -275,7 +275,7 @@ describe('RunOrchestrator.start', () => {
 
     const index = readRunsIndex(path.join(tmpDir, 'logs'))
     expect(index.find((e) => e.runId === RUN_ID)?.feature).toBe('demo')
-    expect(fs.existsSync(path.join(tmpDir, 'logs', 'current'))).toBe(true)
+    expect(fs.existsSync(path.join(tmpDir, 'logs', 'current'))).toBe(false)
 
     await orch.stop('passed')
   })

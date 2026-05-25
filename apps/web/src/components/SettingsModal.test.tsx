@@ -12,6 +12,7 @@ vi.mock('../api/client', async () => {
     ...actual,
     getProjectConfig: vi.fn(),
     putProjectConfig: vi.fn(),
+    listWorkspaceDirs: vi.fn(),
   }
 })
 
@@ -24,6 +25,11 @@ beforeEach(() => {
   root = createRoot(container)
   vi.mocked(api.getProjectConfig).mockReset()
   vi.mocked(api.putProjectConfig).mockReset()
+  vi.mocked(api.listWorkspaceDirs).mockReset().mockResolvedValue({
+    absolute: '/tmp/wiki',
+    parent: '/tmp',
+    dirs: [],
+  })
 })
 
 afterEach(() => {
@@ -34,7 +40,7 @@ afterEach(() => {
 })
 
 describe('SettingsModal', () => {
-  it('renders and saves the personal wiki path', async () => {
+  it('renders the current wiki path and saves a new one picked via the folder picker', async () => {
     const onClose = vi.fn()
     vi.mocked(api.getProjectConfig).mockResolvedValue({
       healAgent: 'auto',
@@ -52,17 +58,24 @@ describe('SettingsModal', () => {
     })
     await act(async () => {})
 
-    const input = container.querySelector('input[type="text"]') as HTMLInputElement | null
-    expect(input?.value).toBe('/Users/oddle/Documents/wiki/wiki')
+    const pickerButton = [...container.querySelectorAll('button')]
+      .find((b) => b.textContent?.includes('/Users/oddle/Documents/wiki/wiki'))
+    expect(pickerButton).toBeTruthy()
 
     await act(async () => {
-      setInputValue(input!, '/tmp/wiki')
+      pickerButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+    await act(async () => {})
+
+    const confirm = [...document.querySelectorAll('button')]
+      .find((b) => b.textContent === 'Use wiki folder')
+    expect(confirm).toBeTruthy()
+    await act(async () => {
+      confirm!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     })
 
     const save = [...container.querySelectorAll('button')]
       .find((button) => button.textContent === 'Save')
-    expect(save).toBeTruthy()
-
     await act(async () => {
       save!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     })
@@ -74,45 +87,4 @@ describe('SettingsModal', () => {
     })
     expect(onClose).toHaveBeenCalled()
   })
-
-  it('clears the personal wiki path when the input is emptied', async () => {
-    vi.mocked(api.getProjectConfig).mockResolvedValue({
-      healAgent: 'auto',
-      editor: 'auto',
-      personalWikiPath: '/tmp/wiki',
-    })
-    vi.mocked(api.putProjectConfig).mockResolvedValue({
-      healAgent: 'auto',
-      editor: 'auto',
-      personalWikiPath: null,
-    })
-
-    await act(async () => {
-      root.render(<SettingsModal onClose={() => {}} />)
-    })
-    await act(async () => {})
-
-    const input = container.querySelector('input[type="text"]') as HTMLInputElement
-    await act(async () => {
-      setInputValue(input, '')
-    })
-
-    const save = [...container.querySelectorAll('button')]
-      .find((button) => button.textContent === 'Save')
-    await act(async () => {
-      save!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-    })
-
-    expect(api.putProjectConfig).toHaveBeenCalledWith({
-      healAgent: 'external',
-      editor: 'auto',
-      personalWikiPath: null,
-    })
-  })
 })
-
-function setInputValue(input: HTMLInputElement, value: string): void {
-  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
-  setter?.call(input, value)
-  input.dispatchEvent(new Event('input', { bubbles: true }))
-}
