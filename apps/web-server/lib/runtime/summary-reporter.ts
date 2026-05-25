@@ -466,12 +466,12 @@ class SummaryReporter implements Reporter {
     return entry
   }
 
-  private removeResult(id: string | undefined, name: string): void {
-    let idx = id ? this.results.findIndex((r) => r.id === id) : -1
+  private removeResult(id: string, name: string): void {
+    let idx = this.results.findIndex((r) => r.id === id)
     if (idx < 0) {
-      idx = id
-        ? this.results.findIndex((r) => r.name === name && !r.id)
-        : this.results.findIndex((r) => r.name === name)
+      // Legacy fallback: a prior summary may have been loaded with results
+      // that predated id tagging — match by name when no id is recorded.
+      idx = this.results.findIndex((r) => r.name === name && !r.id)
     }
     if (idx < 0) return
     const [removed] = this.results.splice(idx, 1)

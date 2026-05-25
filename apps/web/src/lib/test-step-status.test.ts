@@ -157,6 +157,67 @@ describe('statusForTest', () => {
     expect(statusForTest({ name: 'validates input', id: 'test-id-beta' }, summary)).toBe('pending')
   })
 
+  it('uses skippedIds to mark a specific duplicate-title instance as skipped', () => {
+    const summary: RunSummary = {
+      complete: false,
+      total: 2,
+      passed: 0,
+      failed: [],
+      skipped: 1,
+      skippedIds: ['test-id-alpha'],
+      knownTests: [
+        { id: 'test-id-alpha', name: 'test-case-validates-input', title: 'validates input', location: '/a.spec.ts:10' },
+        { id: 'test-id-beta', name: 'test-case-validates-input', title: 'validates input', location: '/a.spec.ts:30' },
+      ],
+    } as RunSummary
+
+    expect(statusForTest({ name: 'validates input', id: 'test-id-alpha' }, summary)).toBe('skipped')
+    expect(statusForTest({ name: 'validates input', id: 'test-id-beta' }, summary)).toBe('pending')
+  })
+
+  it('returns testing when the identity id matches a parallel running entry', () => {
+    const summary: RunSummary = {
+      complete: false,
+      total: 2,
+      passed: 0,
+      failed: [],
+      runningTests: [
+        { id: 'test-id-alpha', name: 'test-case-validates-input', location: '/a.spec.ts:10' },
+        { id: 'test-id-beta', name: 'test-case-validates-input', location: '/a.spec.ts:30' },
+      ],
+    } as RunSummary
+
+    expect(statusForTest({ name: 'validates input', id: 'test-id-beta' }, summary)).toBe('testing')
+  })
+
+  it('falls back to summary.running when only its id matches the identity id', () => {
+    const summary: RunSummary = {
+      complete: false,
+      total: 2,
+      passed: 0,
+      failed: [],
+      running: { id: 'test-id-alpha', name: 'test-case-validates-input', location: '/a.spec.ts:10' },
+    } as RunSummary
+
+    expect(statusForTest({ name: 'validates input', id: 'test-id-alpha' }, summary)).toBe('testing')
+  })
+
+  it('matches a failed entry by id even when titles collide', () => {
+    const summary: RunSummary = {
+      complete: true,
+      total: 2,
+      passed: 1,
+      failed: [
+        { id: 'test-id-alpha', name: 'test-case-validates-input', error: { message: 'AssertionError' } },
+      ],
+      passedIds: ['test-id-beta'],
+      passedNames: ['test-case-validates-input'],
+    } as RunSummary
+
+    expect(statusForTest({ name: 'validates input', id: 'test-id-alpha' }, summary)).toBe('failed')
+    expect(statusForTest({ name: 'validates input', id: 'test-id-beta' }, summary)).toBe('passed')
+  })
+
   it('uses skippedNames to distinguish skipped vs failed', () => {
     const summary: RunSummary = {
       complete: false,

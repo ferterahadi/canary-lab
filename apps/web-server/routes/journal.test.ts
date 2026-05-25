@@ -115,6 +115,37 @@ Fix: enabled the module
     ])
   })
 
+  it('falls back to the manifest featureName when feature is absent', async () => {
+    const app = await build()
+    const runDir = runDirFor(logsDir, 'r-legacy-name')
+    const paths = buildRunPaths(runDir)
+    fs.mkdirSync(runDir, { recursive: true })
+    fs.writeFileSync(paths.manifestPath, JSON.stringify({
+      runId: 'r-legacy-name',
+      featureName: 'bar',
+      startedAt: '2026-05-25T08:00:00.000Z',
+      status: 'healing',
+      healCycles: 0,
+      services: [],
+    }))
+    fs.writeFileSync(paths.diagnosisJournalPath, `## Iteration 7
+
+Hypothesis: stale build artifact
+
+Fix: cleared the cache
+`)
+
+    const res = await app.inject({ method: 'GET', url: '/api/journal?feature=bar&run=r-legacy-name' })
+    expect(res.statusCode).toBe(200)
+    expect(res.json()).toMatchObject([
+      {
+        iteration: 7,
+        run: 'r-legacy-name',
+        feature: 'bar',
+      },
+    ])
+  })
+
   it('rejects path-like run ids without reading the root journal', async () => {
     const app = await build()
     const res = await app.inject({ method: 'GET', url: '/api/journal?run=..%2Fsecret' })
