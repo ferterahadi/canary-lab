@@ -25,8 +25,8 @@ Before calling Canary Lab MCP tools, make sure the workspace and UI server are a
 2. Call `start_run` with `claim_heal: true`, a stable `session_id`, `client_kind: "codex-cli"` or `"codex-desktop"`, and a useful `conversation_name`. For requests like "rerun 7cvh", pass `run_ref: "7cvh"`.
 3. If `start_run` returns `active_heal_blocks_start`, stop and ask whether to call `cancel_heal` on `activeRunId`. Do not start a fresh or different run while a matching run is healing.
 4. If `start_run` returns an active run, continue that run.
-5. If `start_run` or `claim_heal` reports `already-claimed`, stop and tell the user which session owns the run.
-6. If the user explicitly says "stop heal", call `cancel_heal`.
+5. If `start_run` reports `already-claimed`, stop and tell the user which session owns the run.
+6. Handle user interrupts explicitly: "pause", "intercept", or "pause and heal" means call `pause_run`; "stop heal" or "cancel repair" means call `cancel_heal`; "abort", "kill the run", or "stop everything" means call `abort_run` only with the required confirmation.
 7. Call `wait_for_heal_task` with the same `session_id`.
 8. If it returns `passed`, summarize using `result.counts.statusLine` and stop.
 9. If it returns `failed`, report the terminal status using `result.counts.statusLine` and relevant failure summary.
@@ -39,7 +39,7 @@ Before calling Canary Lab MCP tools, make sure the workspace and UI server are a
 ## Guardrails
 
 - Keep the same `session_id` for the whole conversation.
-- Call `heartbeat` with `status: "healing"` at the top of each new tool batch while you are actively fixing code. Sessions auto-disconnect after 10 minutes of MCP silence — `Read`/`Edit`/`Write`/`Bash` are not MCP calls and do not refresh liveness. `signal_run`, `write_journal`, and `get_heal_context` also refresh liveness, so explicit `heartbeat` is only needed when a long stretch of local tool use is expected before the next of those.
+- `heartbeat` is a low-level liveness refresh for long local repair stretches. `wait_for_heal_task` heartbeats while waiting, and `signal_run`, `write_journal`, and `get_heal_context` refresh liveness, so call explicit `heartbeat` only before or after a long stretch of local `Read` / `Edit` / `Write` / `Bash` work.
 - `start_run` is the single entrypoint for start/resume/restart intent; a healing run has priority and blocks fresh or different starts until `cancel_heal` stops it.
 - For requests like "rerun 7cvh", `start_run` resolves the run suffix and restarts that same failed/aborted run in remaining-test mode. Canary Lab reruns failed tests first, then skipped tests, then pending/not-run tests; do not tell the user no test filter exists.
 - After changing code or tests, never call `start_run` to verify. Verification means `write_journal`, then `signal_run`, then `wait_for_heal_task` on the same `runId`.
@@ -47,7 +47,7 @@ Before calling Canary Lab MCP tools, make sure the workspace and UI server are a
 - Never compute passed count as `summary.total - summary.failed.length`.
 - Use `result.counts.statusLine`, `result.counts.passed`, or `summary.passed` for pass counts.
 - Treat tests absent from `passedNames`, `failed`, and `skippedNames` as not run, not passed.
-- Do not call `abort_run` unless the user asks or the run is clearly unrecoverable.
+- Do not call `abort_run` unless the user asks, and pass the required confirmation only for an explicit abort/kill/stop-everything request.
 - Prefer `get_heal_context` when you need to refresh failure artifacts outside the wait loop.
 - Record concise, factual journal notes. Do not paste raw transcripts.
 - When the run is waiting for external heal, Canary Lab is the source of truth for status, artifacts, and rerun/restart signals.

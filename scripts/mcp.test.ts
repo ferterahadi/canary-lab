@@ -26,7 +26,7 @@ class BufferWritable extends Writable {
 }
 
 describe('canary-lab mcp', () => {
-  it('doctor verifies a running UI MCP server and wait_for_heal_task', async () => {
+  it('doctor verifies a running UI MCP server and the default repair profile', async () => {
     const projectRoot = path.resolve(__dirname, '..', 'templates', 'project')
     const { app } = await createServer({ projectRoot, ptyFactory: inertPtyFactory })
     const stdout = new BufferWritable()
@@ -38,6 +38,26 @@ describe('canary-lab mcp', () => {
       expect(stderr.text()).toBe('')
       const health = await fetch(`${address}/mcp/health`).then((res) => res.json()) as { projectRoot?: string }
       expect(health.projectRoot).toBe(projectRoot)
+    } finally {
+      await app.close()
+    }
+  })
+
+  it.each([
+    ['repair', 'wait_for_heal_task'],
+    ['verify', 'execute_verification'],
+    ['full', 'execute_verification'],
+  ] as const)('doctor verifies the %s profile', async (profile, requiredTool) => {
+    const projectRoot = path.resolve(__dirname, '..', 'templates', 'project')
+    const { app } = await createServer({ projectRoot, ptyFactory: inertPtyFactory })
+    const stdout = new BufferWritable()
+    const stderr = new BufferWritable()
+    try {
+      const address = await app.listen({ port: 0, host: '127.0.0.1' })
+      await expect(doctor(`${address}/mcp`, { stdout, stderr, profile })).resolves.toBe(true)
+      expect(stdout.text()).toContain(`Profile: ${profile}`)
+      expect(stdout.text()).toContain(requiredTool)
+      expect(stderr.text()).toBe('')
     } finally {
       await app.close()
     }
@@ -60,5 +80,29 @@ describe('canary-lab mcp', () => {
     } finally {
       await app.close()
     }
+  })
+
+  it('routes doctor profile through main', async () => {
+    const projectRoot = path.resolve(__dirname, '..', 'templates', 'project')
+    const { app } = await createServer({ projectRoot, ptyFactory: inertPtyFactory })
+    const exits: number[] = []
+    try {
+      const address = await app.listen({ port: 0, host: '127.0.0.1' })
+      await main(['doctor', '--url', `${address}/mcp`, '--profile', 'verify'], { exit: (code) => { exits.push(code) } })
+      expect(exits).toEqual([0])
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('rejects invalid profiles', async () => {
+    const stderr = new BufferWritable()
+    const exits: number[] = []
+    await main(['doctor', '--profile', 'nope'], {
+      stderr,
+      exit: (code) => { exits.push(code) },
+    })
+    expect(exits).toEqual([1])
+    expect(stderr.text()).toContain('Invalid MCP profile: nope')
   })
 })

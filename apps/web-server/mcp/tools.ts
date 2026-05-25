@@ -70,10 +70,128 @@ const HEAL_STATUS = z.enum(['connected', 'waiting', 'healing', 'running-tests', 
 const WAIT_FOR_HEAL_TASK_DEFAULT_TIMEOUT_MS = 15 * 60 * 1000
 const WAIT_FOR_HEAL_TASK_MAX_TIMEOUT_MS = 60 * 60 * 1000
 
-export function registerCanaryLabTools(server: McpServer, deps: CanaryLabMcpDeps): void {
+export const CANARY_LAB_MCP_PROFILES = ['repair', 'verify', 'full'] as const
+export type CanaryLabMcpProfile = typeof CANARY_LAB_MCP_PROFILES[number]
+
+export type CanaryLabMcpToolName =
+  | 'list_features'
+  | 'list_runs'
+  | 'get_run'
+  | 'get_run_actions'
+  | 'list_verification_configs'
+  | 'get_verification_config'
+  | 'create_verification_config'
+  | 'update_verification_config'
+  | 'execute_verification'
+  | 'get_verification_result'
+  | 'get_heal_context'
+  | 'start_run'
+  | 'pause_run'
+  | 'cancel_heal'
+  | 'abort_run'
+  | 'claim_heal'
+  | 'release_heal'
+  | 'heartbeat'
+  | 'wait_for_heal_task'
+  | 'signal_run'
+  | 'write_journal'
+
+const REPAIR_TOOLS = [
+  'list_features',
+  'list_runs',
+  'start_run',
+  'wait_for_heal_task',
+  'get_heal_context',
+  'get_run',
+  'write_journal',
+  'signal_run',
+  'heartbeat',
+  'pause_run',
+  'cancel_heal',
+  'abort_run',
+] as const satisfies readonly CanaryLabMcpToolName[]
+
+const VERIFY_TOOLS = [
+  'list_features',
+  'list_runs',
+  'get_run',
+  'list_verification_configs',
+  'get_verification_config',
+  'create_verification_config',
+  'update_verification_config',
+  'execute_verification',
+  'get_verification_result',
+] as const satisfies readonly CanaryLabMcpToolName[]
+
+const FULL_TOOLS = [
+  'list_features',
+  'list_runs',
+  'get_run',
+  'get_run_actions',
+  'list_verification_configs',
+  'get_verification_config',
+  'create_verification_config',
+  'update_verification_config',
+  'execute_verification',
+  'get_verification_result',
+  'get_heal_context',
+  'start_run',
+  'pause_run',
+  'cancel_heal',
+  'abort_run',
+  'claim_heal',
+  'release_heal',
+  'heartbeat',
+  'wait_for_heal_task',
+  'signal_run',
+  'write_journal',
+] as const satisfies readonly CanaryLabMcpToolName[]
+
+const TOOLS_BY_PROFILE: Record<CanaryLabMcpProfile, readonly CanaryLabMcpToolName[]> = {
+  repair: REPAIR_TOOLS,
+  verify: VERIFY_TOOLS,
+  full: FULL_TOOLS,
+}
+
+export function isCanaryLabMcpProfile(value: string | undefined): value is CanaryLabMcpProfile {
+  return !!value && (CANARY_LAB_MCP_PROFILES as readonly string[]).includes(value)
+}
+
+export function normalizeCanaryLabMcpProfile(value: string | undefined): CanaryLabMcpProfile | null {
+  if (!value) return 'repair'
+  return isCanaryLabMcpProfile(value) ? value : null
+}
+
+export function toolsForCanaryLabMcpProfile(profile: CanaryLabMcpProfile): readonly CanaryLabMcpToolName[] {
+  return TOOLS_BY_PROFILE[profile]
+}
+
+export interface CanaryLabMcpToolOptions {
+  profile?: CanaryLabMcpProfile
+}
+
+export function registerCanaryLabTools(
+  server: McpServer,
+  deps: CanaryLabMcpDeps,
+  opts: CanaryLabMcpToolOptions = {},
+): void {
+  const profile = opts.profile ?? 'repair'
+  const enabled = new Set<CanaryLabMcpToolName>(TOOLS_BY_PROFILE[profile])
+  const knownTools = new Set<CanaryLabMcpToolName>(FULL_TOOLS)
+  const registerTool: McpServer['registerTool'] = ((name: string, config: unknown, cb: unknown) => {
+    const toolName = name as CanaryLabMcpToolName
+    if (!knownTools.has(toolName)) {
+      throw new Error(`MCP tool is not assigned to a profile: ${name}`)
+    }
+    if (enabled.has(toolName)) {
+      const register = server.registerTool as unknown as (toolName: string, toolConfig: unknown, callback: unknown) => unknown
+      register.call(server, name, config, cb)
+    }
+  }) as McpServer['registerTool']
+
   // ─── reads ────────────────────────────────────────────────────────────
 
-  server.registerTool('list_features', {
+  registerTool('list_features', {
     description: 'List every Canary Lab feature in the workspace, with envs, repos, and a short summary.',
     inputSchema: {},
   }, async () => {
@@ -86,7 +204,7 @@ export function registerCanaryLabTools(server: McpServer, deps: CanaryLabMcpDeps
     return asJsonResult(features)
   })
 
-  server.registerTool('list_runs', {
+  registerTool('list_runs', {
     description: 'List Canary Lab runs, newest first. Optionally filter by feature.',
     inputSchema: {
       feature: z.string().optional().describe('Feature name. Omit to list across all features.'),
@@ -95,7 +213,7 @@ export function registerCanaryLabTools(server: McpServer, deps: CanaryLabMcpDeps
     return asJsonResult(deps.store.list(feature ? { feature } : {}))
   })
 
-  server.registerTool('get_run', {
+  registerTool('get_run', {
     description: 'Fetch the full detail for one run: manifest, summary, lifecycle events, playwright artifacts.',
     inputSchema: { runId: z.string() },
   }, async ({ runId }) => {
@@ -104,7 +222,7 @@ export function registerCanaryLabTools(server: McpServer, deps: CanaryLabMcpDeps
     return asJsonResult(detail)
   })
 
-  server.registerTool('get_run_actions', {
+  registerTool('get_run_actions', {
     description: 'Which actions are valid right now for a run (pauseHeal, stop, cancelHeal, delete, restartHeal, signal kinds, evaluation export).',
     inputSchema: { runId: z.string() },
   }, async ({ runId }) => {
@@ -120,7 +238,7 @@ export function registerCanaryLabTools(server: McpServer, deps: CanaryLabMcpDeps
     })
   })
 
-  server.registerTool('list_verification_configs', {
+  registerTool('list_verification_configs', {
     description: 'List saved Verify configurations for a Canary Lab feature.',
     inputSchema: {
       featureId: z.string().describe('Feature name.'),
@@ -131,7 +249,7 @@ export function registerCanaryLabTools(server: McpServer, deps: CanaryLabMcpDeps
     return asJsonResult(listVerificationConfigs(feature))
   })
 
-  server.registerTool('get_verification_config', {
+  registerTool('get_verification_config', {
     description: 'Fetch one saved Verify configuration for a Canary Lab feature.',
     inputSchema: {
       featureId: z.string().describe('Feature name.'),
@@ -145,7 +263,7 @@ export function registerCanaryLabTools(server: McpServer, deps: CanaryLabMcpDeps
     return asJsonResult(config)
   })
 
-  server.registerTool('create_verification_config', {
+  registerTool('create_verification_config', {
     description: 'Create a saved Verify configuration for a feature.',
     inputSchema: {
       featureId: z.string().describe('Feature name.'),
@@ -163,7 +281,7 @@ export function registerCanaryLabTools(server: McpServer, deps: CanaryLabMcpDeps
     }
   })
 
-  server.registerTool('update_verification_config', {
+  registerTool('update_verification_config', {
     description: 'Update a saved Verify configuration for a feature.',
     inputSchema: {
       featureId: z.string().describe('Feature name.'),
@@ -184,7 +302,7 @@ export function registerCanaryLabTools(server: McpServer, deps: CanaryLabMcpDeps
     }
   })
 
-  server.registerTool('execute_verification', {
+  registerTool('execute_verification', {
     description: 'Execute Verify for a deployed environment. This never starts local services and never starts healing.',
     inputSchema: {
       featureId: z.string().describe('Feature name.'),
@@ -216,7 +334,7 @@ export function registerCanaryLabTools(server: McpServer, deps: CanaryLabMcpDeps
     }
   })
 
-  server.registerTool('get_verification_result', {
+  registerTool('get_verification_result', {
     description: 'Retrieve Verify result and diagnostics for a verification execution.',
     inputSchema: {
       executionId: z.string().describe('Verification execution id.'),
@@ -230,7 +348,7 @@ export function registerCanaryLabTools(server: McpServer, deps: CanaryLabMcpDeps
     return asJsonResult(verificationResult(detail))
   })
 
-  server.registerTool('get_heal_context', {
+  registerTool('get_heal_context', {
     description: 'Bundle of failure context an external heal agent needs: failed tests with artifact URLs, heal-index markdown, journal, repo branches, lifecycle.',
     inputSchema: {
       runId: z.string(),
@@ -245,7 +363,7 @@ export function registerCanaryLabTools(server: McpServer, deps: CanaryLabMcpDeps
 
   // ─── run lifecycle ────────────────────────────────────────────────────
 
-  server.registerTool('start_run', {
+  registerTool('start_run', {
     description:
       'Smart entrypoint for Canary Lab runs. If a matching run is healing, this returns that run and blocks fresh/different starts until `cancel_heal` stops it. If `runId` or `run_ref` targets a failed/aborted run and no heal is active, this restarts that same run in remaining-test mode: failed first, then skipped, then pending/not-run. Otherwise it starts a new run. After code changes, call `write_journal`, `signal_run`, then `wait_for_heal_task` on the same run.',
     inputSchema: {
@@ -367,7 +485,7 @@ export function registerCanaryLabTools(server: McpServer, deps: CanaryLabMcpDeps
     }
   })
 
-  server.registerTool('pause_run', {
+  registerTool('pause_run', {
     description: 'Pause an active run and jump into heal mode immediately.',
     inputSchema: { runId: z.string() },
   }, async ({ runId }) => {
@@ -378,7 +496,7 @@ export function registerCanaryLabTools(server: McpServer, deps: CanaryLabMcpDeps
     return asJsonResult({ status: 'healing', failureCount: result.failureCount })
   })
 
-  server.registerTool('cancel_heal', {
+  registerTool('cancel_heal', {
     description: 'Cancel an in-flight heal cycle. Run transitions to failed.',
     inputSchema: { runId: z.string() },
   }, async ({ runId }) => {
@@ -389,7 +507,7 @@ export function registerCanaryLabTools(server: McpServer, deps: CanaryLabMcpDeps
     return asJsonResult({ status: 'cancelled' })
   })
 
-  server.registerTool('abort_run', {
+  registerTool('abort_run', {
     description:
       'Hard-abort an active run. Requires `confirm: true` because this kills Playwright + services and cannot be undone.',
     inputSchema: {
@@ -405,7 +523,7 @@ export function registerCanaryLabTools(server: McpServer, deps: CanaryLabMcpDeps
 
   // ─── external heal flow ───────────────────────────────────────────────
 
-  server.registerTool('claim_heal', {
+  registerTool('claim_heal', {
     description:
       'Claim heal duty for a run as this external session. Idempotent if the same session_id is already the holder; rejected with already-claimed if a different session holds it.',
     inputSchema: {
@@ -429,7 +547,7 @@ export function registerCanaryLabTools(server: McpServer, deps: CanaryLabMcpDeps
     return asJsonResult({ accepted: true, session: result.session })
   })
 
-  server.registerTool('release_heal', {
+  registerTool('release_heal', {
     description: 'Release a heal claim. No-op if the session_id does not match the current holder.',
     inputSchema: { runId: z.string(), session_id: z.string() },
   }, async ({ runId, session_id }) => {
@@ -437,7 +555,7 @@ export function registerCanaryLabTools(server: McpServer, deps: CanaryLabMcpDeps
     return asJsonResult({ released: result.released })
   })
 
-  server.registerTool('heartbeat', {
+  registerTool('heartbeat', {
     description: 'Refresh the external heal session liveness. Sessions auto-disconnect after 10 minutes without any MCP traffic; any signal_run / write_journal / get_heal_context call also refreshes liveness, so you usually do not need to call this explicitly during normal healing.',
     inputSchema: {
       runId: z.string(),
@@ -450,7 +568,7 @@ export function registerCanaryLabTools(server: McpServer, deps: CanaryLabMcpDeps
     return asJsonResult({ ok: true, session: result.session })
   })
 
-  server.registerTool('wait_for_heal_task', {
+  registerTool('wait_for_heal_task', {
     description:
       'Wait until a claimed external run needs code fixes, reaches a terminal result, or times out. Use this after start_run/claim_heal and again after signal_run.',
     inputSchema: {
@@ -465,7 +583,7 @@ export function registerCanaryLabTools(server: McpServer, deps: CanaryLabMcpDeps
     return result.ok ? asJsonResult(result.value) : errorResult(result.error)
   })
 
-  server.registerTool('signal_run', {
+  registerTool('signal_run', {
     description:
       'Write a heal-cycle signal. The orchestrator picks it up via its existing poll loop. Use `rerun` for test-only fixes (no service restart) and `restart` when services need to be restarted.',
     inputSchema: {
@@ -504,7 +622,7 @@ export function registerCanaryLabTools(server: McpServer, deps: CanaryLabMcpDeps
     return asJsonResult({ accepted: true, kind, path: target })
   })
 
-  server.registerTool('write_journal', {
+  registerTool('write_journal', {
     description: 'Append a diagnosis note to the run\'s journal. Useful for recording what an external heal cycle attempted.',
     inputSchema: {
       runId: z.string(),
@@ -517,11 +635,24 @@ export function registerCanaryLabTools(server: McpServer, deps: CanaryLabMcpDeps
     if (!detail) return errorResult(`run not found: ${runId}`)
     const runDir = runDirFor(deps.store.logsDir, runId)
     const journalPath = buildRunPaths(runDir).diagnosisJournalPath
-    // Match the existing journal format: `## Iteration N` heading + body.
-    const section = `\n## Iteration ${iteration}\n\n${body.trimEnd()}\n`
+    const hypothesis = extractJournalLine(body, 'Hypothesis') ?? firstJournalLine(body)
+    const fixDescription = extractJournalLine(body, 'Fix')
+    const section = [
+      `## Iteration ${iteration} — ${new Date().toISOString()}`,
+      '',
+      `- run: ${runId}`,
+      `- feature: ${detail.manifest.feature}`,
+      ...(hypothesis ? [`- hypothesis: ${truncateJournalField(hypothesis)}`] : []),
+      ...(fixDescription ? [`- fix.description: ${truncateJournalField(fixDescription)}`] : []),
+      '- outcome: pending',
+      '',
+      body.trimEnd(),
+      '',
+    ].join('\n')
     try {
       fs.mkdirSync(path.dirname(journalPath), { recursive: true })
-      fs.appendFileSync(journalPath, section)
+      const prefix = fs.existsSync(journalPath) ? '\n' : '# Diagnosis Journal\n\n'
+      fs.appendFileSync(journalPath, prefix + section)
     } catch (err) {
       return errorResult(`could not append journal: ${(err as Error).message}`)
     }
@@ -531,6 +662,28 @@ export function registerCanaryLabTools(server: McpServer, deps: CanaryLabMcpDeps
 }
 
 // ─── result helpers ─────────────────────────────────────────────────────
+
+function extractJournalLine(body: string, label: string): string | null {
+  const re = new RegExp(`^\\s*${label}:\\s*(.+?)\\s*$`, 'i')
+  for (const line of body.split('\n')) {
+    const match = re.exec(line)
+    if (match) return match[1].trim()
+  }
+  return null
+}
+
+function firstJournalLine(body: string): string | null {
+  for (const line of body.split('\n')) {
+    const trimmed = line.trim()
+    if (trimmed) return trimmed.replace(/^\s*Hypothesis:\s*/i, '').trim()
+  }
+  return null
+}
+
+function truncateJournalField(value: string, max = 400): string {
+  const flat = value.replace(/\s+/g, ' ').trim()
+  return flat.length <= max ? flat : `${flat.slice(0, max - 3)}...`
+}
 
 type ClaimResult = { accepted: true; session: unknown } | { accepted: false; reason: string; currentSession: unknown }
 

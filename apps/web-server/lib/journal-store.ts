@@ -16,7 +16,7 @@ export interface JournalSection {
   body: string
 }
 
-const HEADING_RE = /^##\s+Iteration\s+(\d+)\s+[—-]\s+(.+?)\s*$/
+const HEADING_RE = /^##\s+Iteration\s+(\d+)(?:\s+[—-]\s+(.+?))?\s*$/
 const FIELD_RE = /^\s*-\s+([\w.-]+):\s*(.*)$/
 
 export function splitJournalSections(raw: string): JournalSection[] {
@@ -43,7 +43,7 @@ export function splitJournalSections(raw: string): JournalSection[] {
       flush()
       current = {
         iteration: parseInt(heading[1], 10),
-        timestamp: heading[2].trim(),
+        timestamp: heading[2]?.trim() ?? null,
         feature: null,
         run: null,
         outcome: null,

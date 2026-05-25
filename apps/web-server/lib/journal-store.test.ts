@@ -59,6 +59,21 @@ describe('splitJournalSections', () => {
     expect(s[0].body).toContain('- fix.file: app/x.ts')
   })
 
+  it('parses legacy external-client headings without timestamps', () => {
+    const s = splitJournalSections(`## Iteration 2
+
+Hypothesis: fixed the route
+
+Fix: enabled the module
+`)
+    expect(s).toHaveLength(1)
+    expect(s[0]).toMatchObject({
+      iteration: 2,
+      timestamp: null,
+      body: expect.stringContaining('Hypothesis: fixed the route'),
+    })
+  })
+
   it('returns empty array for empty input', () => {
     expect(splitJournalSections('')).toEqual([])
   })

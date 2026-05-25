@@ -5,7 +5,12 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js'
 import type { RunStore } from '../lib/run-store'
 import type { ExternalHealBroker } from '../lib/external-heal-broker'
-import { registerCanaryLabTools, type CanaryLabMcpDeps } from './tools'
+import {
+  normalizeCanaryLabMcpProfile,
+  registerCanaryLabTools,
+  type CanaryLabMcpDeps,
+  type CanaryLabMcpProfile,
+} from './tools'
 
 // Singleton MCP server mounted on the existing Fastify instance at `/mcp`.
 // Uses the streamable HTTP transport so Claude Desktop / Codex Desktop and
@@ -50,14 +55,16 @@ export async function registerMcpRoutes(
   // Fastify boot. Keyed by the session id the transport mints on init.
   const transports = new Map<string, StreamableHTTPServerTransport>()
 
-  // Tool count is static — register tools once on a detached McpServer
-  // (never connected to a transport) so /mcp/health can answer without
-  // requiring an active MCP session.
-  const probe = new McpServer(SERVER_INFO)
-  registerCanaryLabTools(probe, deps)
-  const toolCount = countTools(probe)
+  // Tool counts are static per profile — register tools on detached McpServer
+  // instances (never connected to a transport) so /mcp/health can answer
+  // without requiring an active MCP session.
+  const toolCounts = {
+    repair: countToolsForProfile(deps, 'repair'),
+    verify: countToolsForProfile(deps, 'verify'),
+    full: countToolsForProfile(deps, 'full'),
+  } satisfies Record<CanaryLabMcpProfile, number>
 
-  const newSession = async (): Promise<StreamableHTTPServerTransport> => {
+  const newSession = async (profile: CanaryLabMcpProfile): Promise<StreamableHTTPServerTransport> => {
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: () => randomUUID(),
       onsessioninitialized: (id) => { transports.set(id, transport) },
@@ -68,7 +75,7 @@ export async function registerMcpRoutes(
       if (id) transports.delete(id)
     }
     const mcp = new McpServer(SERVER_INFO)
-    registerCanaryLabTools(mcp, deps)
+    registerCanaryLabTools(mcp, deps, { profile })
     await mcp.connect(transport)
     return transport
   }
@@ -94,7 +101,16 @@ export async function registerMcpRoutes(
         }
         transport = existing
       } else if (req.method === 'POST' && isInitializeRequest(req.body)) {
-        transport = await newSession()
+        const profile = profileFromUrl(req.url)
+        if (!profile.ok) {
+          reply.code(400).send({
+            jsonrpc: '2.0',
+            error: { code: -32602, message: profile.error },
+            id: null,
+          })
+          return
+        }
+        transport = await newSession(profile.profile)
       } else {
         reply.code(400).send({
           jsonrpc: '2.0',
@@ -124,13 +140,33 @@ export async function registerMcpRoutes(
 
   // Lightweight health endpoint so smoke tests can confirm the MCP route is
   // mounted without speaking the protocol.
-  app.get('/mcp/health', async () => ({
-    ok: true,
-    server: SERVER_INFO,
-    toolCount,
-    activeSessions: transports.size,
-    projectRoot: deps.projectRoot,
-  }))
+  app.get('/mcp/health', async (req, reply) => {
+    const profile = profileFromUrl(req.url)
+    if (!profile.ok) {
+      reply.code(400)
+      return { error: profile.error }
+    }
+    return {
+      ok: true,
+      server: SERVER_INFO,
+      profile: profile.profile,
+      toolCount: toolCounts[profile.profile],
+      activeSessions: transports.size,
+      projectRoot: deps.projectRoot,
+    }
+  })
+}
+
+function countToolsForProfile(deps: McpRouteDeps, profile: CanaryLabMcpProfile): number {
+  const probe = new McpServer(SERVER_INFO)
+  registerCanaryLabTools(probe, deps, { profile })
+  return countTools(probe)
+}
+
+function profileFromUrl(url: string): { ok: true; profile: CanaryLabMcpProfile } | { ok: false; error: string } {
+  const rawProfile = new URL(url, 'http://localhost').searchParams.get('profile') ?? undefined
+  const profile = normalizeCanaryLabMcpProfile(rawProfile)
+  return profile ? { ok: true, profile } : { ok: false, error: `invalid MCP profile: ${rawProfile}` }
 }
 
 function countTools(mcp: McpServer): number {
