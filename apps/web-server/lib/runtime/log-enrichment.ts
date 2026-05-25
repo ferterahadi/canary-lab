@@ -548,6 +548,14 @@ export interface JournalAppendInput {
   journalPath?: string
 }
 
+export interface ExternalJournalAppendInput {
+  iteration: number
+  runId: string
+  body: string
+  manifestPath?: string
+  journalPath?: string
+}
+
 export type JournalOutcome = 'all_passed' | 'partial' | 'no_change' | 'regression'
 
 export interface SummaryForJournalOutcome {
@@ -638,6 +646,7 @@ export function nextIterationNumber(journalPath: string = DIAGNOSIS_JOURNAL_PATH
 }
 
 interface ManifestForJournal {
+  feature?: string
   featureName?: string
 }
 
@@ -649,6 +658,36 @@ function readManifestFrom(file: string): ManifestForJournal {
   }
 }
 
+function readFeatureNameFromManifest(file: string): string | undefined {
+  const manifest = readManifestFrom(file)
+  return manifest.feature ?? manifest.featureName
+}
+
+function appendJournalSection(journalPath: string, section: string[]): void {
+  fs.mkdirSync(path.dirname(journalPath), { recursive: true })
+  const header = fs.existsSync(journalPath)
+    ? ''
+    : '# Diagnosis Journal\n\n'
+  fs.appendFileSync(journalPath, header + section.join('\n'))
+}
+
+function extractExternalJournalLine(body: string, label: string): string | undefined {
+  const re = new RegExp(`^\\s*${label}:\\s*(.+?)\\s*$`, 'i')
+  for (const line of body.split('\n')) {
+    const match = re.exec(line)
+    if (match) return match[1].trim()
+  }
+  return undefined
+}
+
+function firstExternalJournalLine(body: string): string | undefined {
+  for (const line of body.split('\n')) {
+    const trimmed = line.trim()
+    if (trimmed) return trimmed.replace(/^\s*Hypothesis:\s*/i, '').trim()
+  }
+  return undefined
+}
+
 export function appendJournalIteration(input: JournalAppendInput): void {
   const hypothesis = input.hypothesis?.trim()
   if (!hypothesis) return // Nothing meaningful to record — skip.
@@ -657,19 +696,7 @@ export function appendJournalIteration(input: JournalAppendInput): void {
   const summaryPath = input.summaryPath ?? getSummaryPath()
   const journalPath = input.journalPath ?? DIAGNOSIS_JOURNAL_PATH
 
-  // Per-run manifests carry `feature` (the new orchestrator shape); legacy
-  // top-level manifests carry `featureName`. Try both so the journal entry's
-  // feature field stays populated either way.
-  let featureName: string | undefined
-  try {
-    const raw = JSON.parse(fs.readFileSync(manifestPath, 'utf-8')) as {
-      feature?: string
-      featureName?: string
-    }
-    featureName = raw.feature ?? raw.featureName
-  } catch {
-    featureName = readManifestFrom(manifestPath).featureName
-  }
+  const featureName = readFeatureNameFromManifest(manifestPath)
 
   let failingTests = ''
   try {
@@ -718,9 +745,34 @@ export function appendJournalIteration(input: JournalAppendInput): void {
     section.push('')
   }
 
-  fs.mkdirSync(path.dirname(journalPath), { recursive: true })
-  const header = fs.existsSync(journalPath)
-    ? ''
-    : '# Diagnosis Journal\n\n'
-  fs.appendFileSync(journalPath, header + section.join('\n'))
+  appendJournalSection(journalPath, section)
+}
+
+export function appendExternalJournalIteration(input: ExternalJournalAppendInput): void {
+  const manifestPath = input.manifestPath ?? MANIFEST_PATH
+  const journalPath = input.journalPath ?? DIAGNOSIS_JOURNAL_PATH
+  const featureName = readFeatureNameFromManifest(manifestPath)
+  const hypothesis = extractExternalJournalLine(input.body, 'Hypothesis')
+    ?? firstExternalJournalLine(input.body)
+  const fixDescription = extractExternalJournalLine(input.body, 'Fix')
+
+  const section: string[] = []
+  section.push(`## Iteration ${input.iteration} — ${new Date().toISOString()}`)
+  section.push('')
+  section.push(`- run: ${input.runId}`)
+  if (featureName) section.push(`- feature: ${featureName}`)
+  if (hypothesis) section.push(`- hypothesis: ${truncateOneLine(hypothesis, 400)}`)
+  if (fixDescription) {
+    section.push(`- fix.description: ${truncateOneLine(fixDescription, 400)}`)
+  }
+  section.push('- outcome: pending')
+  section.push('')
+
+  const body = input.body.trimEnd()
+  if (body) {
+    section.push(body)
+    section.push('')
+  }
+
+  appendJournalSection(journalPath, section)
 }

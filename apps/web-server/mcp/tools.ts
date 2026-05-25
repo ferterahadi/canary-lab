@@ -1,15 +1,19 @@
-import fs from 'fs'
-import path from 'path'
 import { z } from 'zod'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import type { RunStore } from '../lib/run-store'
 import type { RunDetail, RunStoreEvent } from '../lib/run-store'
 import type { ExternalHealBroker } from '../lib/external-heal-broker'
+import {
+  buildExternalHealContext,
+  normalizeRunCounts,
+  writeHealSignal,
+  type ExternalHealContext,
+  type NormalizedRunCounts,
+} from '../lib/external-heal-surface'
 import { loadFeatures } from '../lib/feature-loader'
 import { runDirFor, buildRunPaths } from '../lib/runtime/run-paths'
-import { buildHealPromptMap } from '../lib/runtime/auto-heal'
-import { loadProjectConfig } from '../lib/runtime/launcher/project-config'
+import { appendExternalJournalIteration } from '../lib/runtime/log-enrichment'
 import {
   createVerificationConfig,
   getVerificationConfig,
@@ -355,8 +359,13 @@ export function registerCanaryLabTools(
       session_id: z.string().optional().describe('External heal session id. When provided, refreshes the session heartbeat.'),
     },
   }, async ({ runId, session_id }) => {
-    const context = buildHealContext(deps, runId)
-    if (!context) return errorResult(`run not found: ${runId}`)
+    const detail = deps.store.get(runId)
+    if (!detail) return errorResult(`run not found: ${runId}`)
+    const context = buildExternalHealContext({
+      detail,
+      logsDir: deps.store.logsDir,
+      projectRoot: deps.projectRoot,
+    })
     if (session_id) deps.broker.touch(runId, session_id)
     return asJsonResult(context)
   })
@@ -604,22 +613,18 @@ export function registerCanaryLabTools(
       return errorResult(`session-mismatch: run is held by ${ownership.currentSession?.sessionId}`)
     }
     if (session_id) deps.broker.touch(runId, session_id)
-    const paths = buildRunPaths(runDirFor(deps.store.logsDir, runId))
-    const target = kind === 'restart' ? paths.restartSignal
-      : kind === 'rerun' ? paths.rerunSignal
-      : paths.healSignal
     const body = {
       ...(reason ? { reason } : {}),
       ...(files_changed && files_changed.length > 0 ? { filesChanged: files_changed } : {}),
     }
+    let signal: ReturnType<typeof writeHealSignal>
     try {
-      fs.mkdirSync(path.dirname(target), { recursive: true })
-      fs.writeFileSync(target, JSON.stringify(body))
+      signal = writeHealSignal({ logsDir: deps.store.logsDir, runId, kind, body })
     } catch (err) {
       return errorResult(`could not write signal: ${(err as Error).message}`)
     }
     deps.broker.bumpCycle(runId)
-    return asJsonResult({ accepted: true, kind, path: target })
+    return asJsonResult({ accepted: true, kind, path: signal.path })
   })
 
   registerTool('write_journal', {
@@ -634,56 +639,24 @@ export function registerCanaryLabTools(
     const detail = deps.store.get(runId)
     if (!detail) return errorResult(`run not found: ${runId}`)
     const runDir = runDirFor(deps.store.logsDir, runId)
-    const journalPath = buildRunPaths(runDir).diagnosisJournalPath
-    const hypothesis = extractJournalLine(body, 'Hypothesis') ?? firstJournalLine(body)
-    const fixDescription = extractJournalLine(body, 'Fix')
-    const section = [
-      `## Iteration ${iteration} — ${new Date().toISOString()}`,
-      '',
-      `- run: ${runId}`,
-      `- feature: ${detail.manifest.feature}`,
-      ...(hypothesis ? [`- hypothesis: ${truncateJournalField(hypothesis)}`] : []),
-      ...(fixDescription ? [`- fix.description: ${truncateJournalField(fixDescription)}`] : []),
-      '- outcome: pending',
-      '',
-      body.trimEnd(),
-      '',
-    ].join('\n')
+    const paths = buildRunPaths(runDir)
     try {
-      fs.mkdirSync(path.dirname(journalPath), { recursive: true })
-      const prefix = fs.existsSync(journalPath) ? '\n' : '# Diagnosis Journal\n\n'
-      fs.appendFileSync(journalPath, prefix + section)
+      appendExternalJournalIteration({
+        iteration,
+        runId,
+        body,
+        manifestPath: paths.manifestPath,
+        journalPath: paths.diagnosisJournalPath,
+      })
     } catch (err) {
       return errorResult(`could not append journal: ${(err as Error).message}`)
     }
     if (session_id) deps.broker.touch(runId, session_id)
-    return asJsonResult({ appended: true, path: journalPath })
+    return asJsonResult({ appended: true, path: paths.diagnosisJournalPath })
   })
 }
 
 // ─── result helpers ─────────────────────────────────────────────────────
-
-function extractJournalLine(body: string, label: string): string | null {
-  const re = new RegExp(`^\\s*${label}:\\s*(.+?)\\s*$`, 'i')
-  for (const line of body.split('\n')) {
-    const match = re.exec(line)
-    if (match) return match[1].trim()
-  }
-  return null
-}
-
-function firstJournalLine(body: string): string | null {
-  for (const line of body.split('\n')) {
-    const trimmed = line.trim()
-    if (trimmed) return trimmed.replace(/^\s*Hypothesis:\s*/i, '').trim()
-  }
-  return null
-}
-
-function truncateJournalField(value: string, max = 400): string {
-  const flat = value.replace(/\s+/g, ' ').trim()
-  return flat.length <= max ? flat : `${flat.slice(0, max - 3)}...`
-}
 
 type ClaimResult = { accepted: true; session: unknown } | { accepted: false; reason: string; currentSession: unknown }
 
@@ -786,120 +759,8 @@ function mcpVerificationStatus(status: string): string {
   return status
 }
 
-function buildHealContext(deps: CanaryLabMcpDeps, runId: string): Record<string, unknown> | null {
-  const detail = deps.store.get(runId)
-  if (!detail) return null
-  const runDir = runDirFor(deps.store.logsDir, runId)
-  const paths = buildRunPaths(runDir)
-  const summary = detail.summary
-  const projectConfig = loadProjectConfig(deps.projectRoot)
-  const failedTests = (summary?.failed ?? []).map((entry) => ({
-    name: entry.name,
-    ...(entry.error ? { error: entry.error } : {}),
-    ...(entry.location ? { location: entry.location } : {}),
-    ...(typeof entry.retry === 'number' ? { retry: entry.retry } : {}),
-    artifacts:
-      detail.playwrightArtifacts
-        ?.find((g) => g.testName === entry.name)
-        ?.artifacts.map((a) => ({ name: a.name, kind: a.kind, url: a.url })) ?? [],
-  }))
-  return {
-    runId,
-    feature: detail.manifest.feature,
-    env: detail.manifest.env ?? null,
-    status: detail.manifest.status,
-    healCycles: detail.manifest.healCycles,
-    repoBranches: detail.manifest.repoBranches ?? [],
-    lifecycle: detail.manifest.lifecycle ?? null,
-    externalHealSession: detail.manifest.externalHealSession ?? null,
-    summary: summary ?? null,
-    counts: normalizeRunCounts(summary ?? null),
-    failedTests,
-    healIndexMarkdown: safeRead(paths.healIndexPath),
-    journalMarkdown: safeRead(paths.diagnosisJournalPath),
-    artifactsBase: `/api/runs/${encodeURIComponent(runId)}/artifacts/`,
-    healPrompt: buildHealPromptMap({
-      projectRoot: deps.projectRoot,
-      runDir,
-      personalWikiPath: projectConfig.personalWikiPath,
-    }),
-  }
-}
-
-interface NormalizedRunCounts {
-  totalKnown: number
-  passed: number
-  failed: number
-  skipped: number
-  notRun: number
-  passedNames: string[]
-  failedNames: string[]
-  skippedNames: string[]
-  notRunNames: string[]
-  statusLine: string
-}
-
-function normalizeRunCounts(summary: RunDetail['summary'] | null): NormalizedRunCounts {
-  const summaryWithKnownTests = summary as (RunDetail['summary'] & { knownTests?: unknown }) | null
-  const knownTests = Array.isArray(summaryWithKnownTests?.knownTests)
-    ? summaryWithKnownTests.knownTests
-    : []
-  const knownNames = uniqueStrings(knownTests.map((entry) => {
-    if (!entry || typeof entry !== 'object') return ''
-    const name = (entry as { name?: unknown }).name
-    return typeof name === 'string' ? name : ''
-  }))
-  const passedNames = uniqueStrings(summary?.passedNames ?? [])
-  const failedNames = uniqueStrings((summary?.failed ?? []).map((entry) => entry.name))
-  const skippedNames = uniqueStrings(summary?.skippedNames ?? [])
-  const accounted = new Set([...passedNames, ...failedNames, ...skippedNames])
-  const notRunNames = knownNames.filter((name) => !accounted.has(name))
-  const totalKnown = knownNames.length > 0 ? knownNames.length : numberOrZero(summary?.total)
-  const passed = typeof summary?.passed === 'number' ? summary.passed : passedNames.length
-  const failed = failedNames.length
-  const skipped = typeof summary?.skipped === 'number' ? summary.skipped : skippedNames.length
-  const notRun = knownNames.length > 0
-    ? notRunNames.length
-    : Math.max(0, totalKnown - passed - failed - skipped)
-
-  return {
-    totalKnown,
-    passed,
-    failed,
-    skipped,
-    notRun,
-    passedNames,
-    failedNames,
-    skippedNames,
-    notRunNames,
-    statusLine: statusLineForCounts({ totalKnown, passed, failed, skipped, notRun }),
-  }
-}
-
-function statusLineForCounts(counts: Pick<NormalizedRunCounts, 'totalKnown' | 'passed' | 'failed' | 'skipped' | 'notRun'>): string {
-  const parts = [`${counts.passed}/${counts.totalKnown} passed`, `${counts.failed} failed`]
-  if (counts.skipped > 0) parts.push(`${counts.skipped} skipped`)
-  parts.push(`${counts.notRun} not run`)
-  return parts.join(', ')
-}
-
-function uniqueStrings(values: unknown[]): string[] {
-  const seen = new Set<string>()
-  const out: string[] = []
-  for (const value of values) {
-    if (typeof value !== 'string' || value.length === 0 || seen.has(value)) continue
-    seen.add(value)
-    out.push(value)
-  }
-  return out
-}
-
-function numberOrZero(value: unknown): number {
-  return typeof value === 'number' && Number.isFinite(value) ? value : 0
-}
-
 type WaitForHealTaskValue =
-  | { type: 'needs_heal'; runId: string; cycle: number; context: Record<string, unknown> }
+  | { type: 'needs_heal'; runId: string; cycle: number; context: ExternalHealContext }
   | { type: 'passed'; runId: string; summary: RunDetail['summary'] | null; counts: NormalizedRunCounts }
   | { type: 'failed'; runId: string; status: string; summary: RunDetail['summary'] | null; counts: NormalizedRunCounts }
   | { type: 'timeout'; runId: string; status: string | null; lifecycle: RunDetail['manifest']['lifecycle'] | null }
@@ -956,8 +817,13 @@ function classifyWaitForHealTask(
     detail.manifest.healMode === 'external' &&
     detail.manifest.lifecycle?.phase === 'waiting-for-signal'
   ) {
-    const context = buildHealContext(deps, runId)
-    if (!context) return { ok: false, error: `run not found: ${runId}` }
+    const latest = deps.store.get(runId)
+    if (!latest) return { ok: false, error: `run not found: ${runId}` }
+    const context = buildExternalHealContext({
+      detail: latest,
+      logsDir: deps.store.logsDir,
+      projectRoot: deps.projectRoot,
+    })
     return {
       ok: true,
       value: {
@@ -1031,8 +897,4 @@ function asJsonResult(value: unknown): CallToolResult {
 
 function errorResult(message: string): CallToolResult {
   return { content: [{ type: 'text', text: message }], isError: true }
-}
-
-function safeRead(file: string): string | null {
-  try { return fs.readFileSync(file, 'utf-8') } catch { return null }
 }
