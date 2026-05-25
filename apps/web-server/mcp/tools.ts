@@ -12,8 +12,6 @@ import {
   type NormalizedRunCounts,
 } from '../lib/external-heal-surface'
 import { loadFeatures } from '../lib/feature-loader'
-import { runDirFor, buildRunPaths } from '../lib/runtime/run-paths'
-import { appendExternalJournalIteration } from '../lib/runtime/log-enrichment'
 import {
   createVerificationConfig,
   getVerificationConfig,
@@ -98,7 +96,6 @@ export type CanaryLabMcpToolName =
   | 'heartbeat'
   | 'wait_for_heal_task'
   | 'signal_run'
-  | 'write_journal'
 
 const REPAIR_TOOLS = [
   'list_features',
@@ -107,7 +104,6 @@ const REPAIR_TOOLS = [
   'wait_for_heal_task',
   'get_heal_context',
   'get_run',
-  'write_journal',
   'signal_run',
   'heartbeat',
   'pause_run',
@@ -148,7 +144,6 @@ const FULL_TOOLS = [
   'heartbeat',
   'wait_for_heal_task',
   'signal_run',
-  'write_journal',
 ] as const satisfies readonly CanaryLabMcpToolName[]
 
 const TOOLS_BY_PROFILE: Record<CanaryLabMcpProfile, readonly CanaryLabMcpToolName[]> = {
@@ -374,7 +369,7 @@ export function registerCanaryLabTools(
 
   registerTool('start_run', {
     description:
-      'Smart entrypoint for Canary Lab runs. If a matching run is healing, this returns that run and blocks fresh/different starts until `cancel_heal` stops it. If `runId` or `run_ref` targets a failed/aborted run and no heal is active, this restarts that same run in remaining-test mode: failed first, then skipped, then pending/not-run. Otherwise it starts a new run. After code changes, call `write_journal`, `signal_run`, then `wait_for_heal_task` on the same run.',
+      'Smart entrypoint for Canary Lab runs. If a matching run is healing, this returns that run and blocks fresh/different starts until `cancel_heal` stops it. If `runId` or `run_ref` targets a failed/aborted run and no heal is active, this restarts that same run in remaining-test mode: failed first, then skipped, then pending/not-run. Otherwise it starts a new run. After code changes, call `signal_run` with hypothesis and fixDescription, then `wait_for_heal_task` on the same run.',
     inputSchema: {
       feature: z.string().describe('Feature name (from list_features).'),
       env: z.string().optional().describe('Envset name. Defaults to the feature\'s first declared env.'),
@@ -413,7 +408,7 @@ export function registerCanaryLabTools(
           ...(force_new
             ? {
                 ignoredForceNew: true,
-                warning: 'A matching run is already healing. Continue it with write_journal, signal_run, and wait_for_heal_task, or stop it first with cancel_heal.',
+                warning: 'A matching run is already healing. Continue it with signal_run and wait_for_heal_task, or stop it first with cancel_heal.',
               }
             : {}),
         })
@@ -565,7 +560,7 @@ export function registerCanaryLabTools(
   })
 
   registerTool('heartbeat', {
-    description: 'Refresh the external heal session liveness. Sessions auto-disconnect after 10 minutes without any MCP traffic; any signal_run / write_journal / get_heal_context call also refreshes liveness, so you usually do not need to call this explicitly during normal healing.',
+    description: 'Refresh the external heal session liveness. Sessions auto-disconnect after 10 minutes without any MCP traffic; any signal_run / get_heal_context call also refreshes liveness, so you usually do not need to call this explicitly during normal healing.',
     inputSchema: {
       runId: z.string(),
       session_id: z.string(),
@@ -594,29 +589,31 @@ export function registerCanaryLabTools(
 
   registerTool('signal_run', {
     description:
-      'Write a heal-cycle signal. The orchestrator picks it up via its existing poll loop. Use `rerun` for test-only fixes (no service restart) and `restart` when services need to be restarted.',
+      'Write a heal-cycle signal. The orchestrator picks it up via its existing poll loop and writes the diagnosis journal from this signal plus runner-observed git diff. Use `rerun` for test-only fixes (no service restart) and `restart` when services need to be restarted.',
     inputSchema: {
       runId: z.string(),
       kind: SIGNAL_KIND,
       session_id: z.string().optional().describe('Required when the run holds an external claim; must match the claim holder.'),
-      reason: z.string().optional().describe('Short note for the journal.'),
-      files_changed: z.array(z.string()).optional().describe('Paths of files modified during this heal cycle, relative to repo roots.'),
+      hypothesis: z.string().optional().describe('Required for restart/rerun. Concise diagnosis of what was wrong.'),
+      fixDescription: z.string().optional().describe('Required for restart/rerun. Concise summary of what the fix changed.'),
     },
-  }, async ({ runId, kind, session_id, reason, files_changed }) => {
+  }, async ({ runId, kind, session_id, hypothesis, fixDescription }) => {
     const detail = deps.store.get(runId)
     if (!detail) return errorResult(`run not found: ${runId}`)
     if (!isActiveRunStatus(detail.manifest.status)) {
       return errorResult(`run not active (status=${detail.manifest.status})`)
+    }
+    if ((kind === 'restart' || kind === 'rerun') && (!hasText(hypothesis) || !hasText(fixDescription))) {
+      return errorResult('restart/rerun signal requires hypothesis and fixDescription')
     }
     const ownership = deps.broker.assertOwnership(runId, session_id)
     if (!ownership.ok && ownership.reason === 'session-mismatch') {
       return errorResult(`session-mismatch: run is held by ${ownership.currentSession?.sessionId}`)
     }
     if (session_id) deps.broker.touch(runId, session_id)
-    const body = {
-      ...(reason ? { reason } : {}),
-      ...(files_changed && files_changed.length > 0 ? { filesChanged: files_changed } : {}),
-    }
+    const body = kind === 'restart' || kind === 'rerun'
+      ? { hypothesis: hypothesis!.trim(), fixDescription: fixDescription!.trim() }
+      : {}
     let signal: ReturnType<typeof writeHealSignal>
     try {
       signal = writeHealSignal({ logsDir: deps.store.logsDir, runId, kind, body })
@@ -625,34 +622,6 @@ export function registerCanaryLabTools(
     }
     deps.broker.bumpCycle(runId)
     return asJsonResult({ accepted: true, kind, path: signal.path })
-  })
-
-  registerTool('write_journal', {
-    description: 'Append a diagnosis note to the run\'s journal. Useful for recording what an external heal cycle attempted.',
-    inputSchema: {
-      runId: z.string(),
-      iteration: z.number().int().min(1).describe('Heal cycle number this note belongs to.'),
-      body: z.string().describe('Markdown note body. The journal is human-readable.'),
-      session_id: z.string().optional().describe('External heal session id. When provided, refreshes the session heartbeat.'),
-    },
-  }, async ({ runId, iteration, body, session_id }) => {
-    const detail = deps.store.get(runId)
-    if (!detail) return errorResult(`run not found: ${runId}`)
-    const runDir = runDirFor(deps.store.logsDir, runId)
-    const paths = buildRunPaths(runDir)
-    try {
-      appendExternalJournalIteration({
-        iteration,
-        runId,
-        body,
-        manifestPath: paths.manifestPath,
-        journalPath: paths.diagnosisJournalPath,
-      })
-    } catch (err) {
-      return errorResult(`could not append journal: ${(err as Error).message}`)
-    }
-    if (session_id) deps.broker.touch(runId, session_id)
-    return asJsonResult({ appended: true, path: paths.diagnosisJournalPath })
   })
 }
 
@@ -897,4 +866,8 @@ function asJsonResult(value: unknown): CallToolResult {
 
 function errorResult(message: string): CallToolResult {
   return { content: [{ type: 'text', text: message }], isError: true }
+}
+
+function hasText(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0
 }

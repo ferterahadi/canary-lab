@@ -3,10 +3,13 @@ import * as api from '../api/client'
 import type {
   ExternalHealSession,
   ExternalHealSessionStatus,
+  RunStatus,
 } from '../api/types'
+import { isTerminalRunStatus } from '../../../../shared/run-state'
 
 interface Props {
   runId: string
+  runStatus: RunStatus
   session: ExternalHealSession
 }
 
@@ -15,7 +18,7 @@ interface Props {
 // intentionally do NOT mirror the agent's transcript here — that lives in the
 // user's external session window. This panel surfaces who's healing, how
 // lively the connection is, and a clear pointer back to the external client.
-export function ExternalHealPanel({ runId: _runId, session }: Props) {
+export function ExternalHealPanel({ runId: _runId, runStatus, session }: Props) {
   const [now, setNow] = useState(() => Date.now())
   const [opening, setOpening] = useState<'claude' | 'codex' | null>(null)
   const [openError, setOpenError] = useState<string | null>(null)
@@ -34,11 +37,15 @@ export function ExternalHealPanel({ runId: _runId, session }: Props) {
   const heartbeatColor = ageColor(ageMs)
   const heartbeatLabel = ageLabel(ageMs)
 
-  const isDisconnected = session.status === 'disconnected'
+  const terminalStatus = isTerminalRunStatus(runStatus) ? runStatus : null
+  const displayedStatus = terminalStatus ?? session.status
+  const isDisconnected = !terminalStatus && session.status === 'disconnected'
   const isLive =
-    session.status === 'connected' ||
-    session.status === 'healing' ||
-    session.status === 'running-tests'
+    !terminalStatus && (
+      session.status === 'connected' ||
+      session.status === 'healing' ||
+      session.status === 'running-tests'
+    )
   const desktopAgent = clientKindToDesktopAgent(session.clientKind)
 
   const onOpenAgent = async (agent: 'claude' | 'codex'): Promise<void> => {
@@ -87,7 +94,7 @@ export function ExternalHealPanel({ runId: _runId, session }: Props) {
         </div>
 
         <div className="mt-2.5 flex flex-wrap items-center gap-x-2 gap-y-1.5 text-[10px] @[320px]:mt-3 @[320px]:gap-x-2.5 @[320px]:text-[11px] @[480px]:mt-3.5">
-          <StatusPill status={session.status} />
+          <StatusPill status={displayedStatus} />
           <span
             className="inline-flex items-center gap-1.5"
             style={{ color: heartbeatColor }}
@@ -117,7 +124,9 @@ export function ExternalHealPanel({ runId: _runId, session }: Props) {
           className="mt-3 text-[11px] leading-relaxed @[320px]:mt-4 @[320px]:text-xs @[480px]:mt-5 @[480px]:text-[13px]"
           style={{ color: 'var(--text-secondary)' }}
         >
-          {isDisconnected
+          {terminalStatus
+            ? terminalMessage(terminalStatus, session.clientKind)
+            : isDisconnected
             ? `Lost connection to ${clientLabel(session.clientKind)}. The run is paused waiting for you to reconnect — Canary Lab keeps the claim, so the same session id can resume right where it left off.`
             : `Agent output is streaming in your ${clientLabel(session.clientKind)} window. This panel tracks the run; open your conversation to follow the agent's reasoning.`}
         </p>
@@ -157,7 +166,9 @@ export function ExternalHealPanel({ runId: _runId, session }: Props) {
   )
 }
 
-function StatusPill({ status }: { status: ExternalHealSessionStatus }) {
+type PanelStatus = ExternalHealSessionStatus | Extract<RunStatus, 'passed' | 'failed' | 'aborted'>
+
+function StatusPill({ status }: { status: PanelStatus }) {
   const palette = statusPalette(status)
   return (
     <span
@@ -214,8 +225,11 @@ function BrandMark({
   )
 }
 
-function statusLabel(status: ExternalHealSessionStatus): string {
+function statusLabel(status: PanelStatus): string {
   switch (status) {
+    case 'passed': return 'Passed'
+    case 'failed': return 'Failed'
+    case 'aborted': return 'Aborted'
     case 'connected': return 'Connected'
     case 'waiting': return 'Waiting'
     case 'healing': return 'Healing'
@@ -225,12 +239,19 @@ function statusLabel(status: ExternalHealSessionStatus): string {
   }
 }
 
-function statusPalette(status: ExternalHealSessionStatus): { fg: string; bg: string; border: string } {
-  if (status === 'disconnected') {
+function statusPalette(status: PanelStatus): { fg: string; bg: string; border: string } {
+  if (status === 'failed' || status === 'disconnected') {
     return {
       fg: 'var(--danger)',
       bg: 'color-mix(in srgb, var(--danger) 12%, transparent)',
       border: 'color-mix(in srgb, var(--danger) 40%, transparent)',
+    }
+  }
+  if (status === 'aborted') {
+    return {
+      fg: 'var(--text-muted)',
+      bg: 'color-mix(in srgb, var(--text-muted) 12%, transparent)',
+      border: 'color-mix(in srgb, var(--text-muted) 34%, transparent)',
     }
   }
   if (status === 'paused') {
@@ -252,6 +273,20 @@ function statusPalette(status: ExternalHealSessionStatus): { fg: string; bg: str
     bg: 'color-mix(in srgb, var(--success) 12%, transparent)',
     border: 'color-mix(in srgb, var(--success) 40%, transparent)',
   }
+}
+
+function terminalMessage(
+  status: Extract<RunStatus, 'passed' | 'failed' | 'aborted'>,
+  clientKind: ExternalHealSession['clientKind'],
+): string {
+  const agent = clientLabel(clientKind)
+  if (status === 'aborted') {
+    return `This run was aborted. The external ${agent} heal session is no longer active for this run.`
+  }
+  if (status === 'failed') {
+    return `This run finished failed. The external ${agent} heal session is no longer actively waiting for a signal.`
+  }
+  return `This run passed. The external ${agent} heal session has completed for this run.`
 }
 
 function ageLabel(ageMs: number | null): string {

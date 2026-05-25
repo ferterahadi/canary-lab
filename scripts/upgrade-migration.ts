@@ -147,6 +147,9 @@ export function compareHealPrompt(
   currentClaudeMd: string,
   templateBody: string,
 ): HealPromptComparison {
+  if (templateBody.trim().length === 0) {
+    return { status: 'matches-current' }
+  }
   if (currentClaudeMd.length === 0) {
     // No CLAUDE.md yet (fresh install) — treat as up-to-date; the docs/skills
     // sync that runs after migration will create it from the template.
@@ -386,7 +389,7 @@ export function renderReport(report: MigrationReport): string {
     for (const h of report.ciPathHints) {
       lines.push(`   ${h.file}:${h.line}: ${h.content.trim()}`)
     }
-    lines.push('   Update to logs/current/heal-index.md and logs/current/svc-*.log respectively.')
+    lines.push('   Update to logs/runs/<runId>/heal-index.md and logs/runs/<runId>/svc-*.log respectively.')
   } else {
     lines.push('✓ No CI scripts referencing old log paths.')
   }

@@ -1,6 +1,6 @@
 ---
 name: canary-lab
-description: Use when the user asks Codex to run, verify, debug, heal, or iterate on Canary Lab features through the Canary Lab MCP tools. Guides Codex through list_features, start_run, wait_for_heal_task, code fixes, write_journal, signal_run, and repeat-until-passing workflows.
+description: Use when the user asks Codex to run, verify, debug, heal, or iterate on Canary Lab features through the Canary Lab MCP tools. Guides Codex through list_features, start_run, wait_for_heal_task, code fixes, signal_run, and repeat-until-passing workflows.
 ---
 
 # Canary Lab
@@ -32,17 +32,17 @@ Before calling Canary Lab MCP tools, make sure the workspace and UI server are a
 9. If it returns `failed`, report the terminal status using `result.counts.statusLine` and relevant failure summary.
 10. If it returns `needs_heal`, inspect `context.healPrompt.startHere` first, then use `context.healPrompt.resources`, the returned heal context, and the checked-out source code.
 11. Fix app/service code, not tests, unless the test is provably wrong.
-12. Call `write_journal` with what was diagnosed and changed.
-13. Call `signal_run` with `kind: "rerun"` for test-only/app-code fixes that do not need service restart, or `kind: "restart"` when services or env need restarting. Include `files_changed`.
+12. Call `signal_run` with `kind: "rerun"` for test-only/app-code fixes that do not need service restart, or `kind: "restart"` when services or env need restarting. Include `hypothesis` and `fixDescription`; Canary Lab writes the journal from that signal and its observed git diff.
+13. Do not call a separate journal-writing tool; the runner records failing tests, changed files, signal, outcome, and diff.
 14. Repeat from `wait_for_heal_task` until the run passes or reaches terminal failure.
 
 ## Guardrails
 
 - Keep the same `session_id` for the whole conversation.
-- `heartbeat` is a low-level liveness refresh for long local repair stretches. `wait_for_heal_task` heartbeats while waiting, and `signal_run`, `write_journal`, and `get_heal_context` refresh liveness, so call explicit `heartbeat` only before or after a long stretch of local `Read` / `Edit` / `Write` / `Bash` work.
+- `heartbeat` is a low-level liveness refresh for long local repair stretches. `wait_for_heal_task` heartbeats while waiting, and `signal_run` and `get_heal_context` refresh liveness, so call explicit `heartbeat` only before or after a long stretch of local `Read` / `Edit` / `Write` / `Bash` work.
 - `start_run` is the single entrypoint for start/resume/restart intent; a healing run has priority and blocks fresh or different starts until `cancel_heal` stops it.
 - For requests like "rerun 7cvh", `start_run` resolves the run suffix and restarts that same failed/aborted run in remaining-test mode. Canary Lab reruns failed tests first, then skipped tests, then pending/not-run tests; do not tell the user no test filter exists.
-- After changing code or tests, never call `start_run` to verify. Verification means `write_journal`, then `signal_run`, then `wait_for_heal_task` on the same `runId`.
+- After changing code or tests, never call `start_run` to verify. Verification means `signal_run` with `hypothesis` and `fixDescription`, then `wait_for_heal_task` on the same `runId`.
 - Do not pass `force_new` during normal healing.
 - Never compute passed count as `summary.total - summary.failed.length`.
 - Use `result.counts.statusLine`, `result.counts.passed`, or `summary.passed` for pass counts.

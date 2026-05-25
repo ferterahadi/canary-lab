@@ -125,7 +125,7 @@ describe("main (upgrade orchestration)", () => {
     expect(logSpy).not.toHaveBeenCalled()
   })
 
-  it("copies FULLY_MANAGED files, applies MARKER_MANAGED, injects postinstall", async () => {
+  it("copies managed skill files, removes legacy agent docs, and injects postinstall", async () => {
     const root = mkProjectRoot()
     const home = process.env.CANARY_LAB_AGENT_HOME!
     vi.stubEnv("CANARY_LAB_PROJECT_ROOT", root)
@@ -136,38 +136,12 @@ describe("main (upgrade orchestration)", () => {
 
     expect(fs.existsSync(path.join(root, ".claude/skills/env-import.md"))).toBe(true)
     expect(fs.existsSync(path.join(root, ".codex/env-import.md"))).toBe(true)
-    // Heal skill files are no longer shipped — the workflow lives inline in
-    // CLAUDE.md / AGENTS.md between <!-- heal-prompt:start/end --> markers.
     expect(fs.existsSync(path.join(root, ".claude/skills/self-fixing-loop.md"))).toBe(false)
     expect(fs.existsSync(path.join(root, ".claude/skills/heal-loop.md"))).toBe(false)
     expect(fs.existsSync(path.join(root, ".codex/self-fixing-loop.md"))).toBe(false)
     expect(fs.existsSync(path.join(root, ".codex/heal-loop.md"))).toBe(false)
-
-    for (const mdFile of ["CLAUDE.md", "AGENTS.md"]) {
-      const content = fs.readFileSync(path.join(root, mdFile), "utf-8")
-      expect(content).toContain("<!-- managed:canary-lab:start -->")
-      expect(content).toContain("<!-- managed:canary-lab:end -->")
-      expect(content).toContain("<!-- heal-prompt:start -->")
-      expect(content).toContain("<!-- heal-prompt:end -->")
-      expect(content).toContain("<!-- personal-wiki:start -->")
-      expect(content).toContain("<!-- personal-wiki:end -->")
-      expect(content).toContain("When the user says `self heal`, follow the `heal-prompt` block below. The `logs/current` pointer tracks the active run.")
-      expect(content).toContain("logs/current/heal-index.md")
-      expect(content).toContain("logs/current/e2e-summary.json")
-      expect(content).toContain("logs/current/diagnosis-journal.md")
-      expect(content).toContain(".restart")
-      expect(content).toContain(".rerun")
-      expect(content).toContain("logs/current/signals/")
-      expect(content).toContain("Prefer exact slice paths from `heal-index.md` before broad repo search.")
-      expect(content).not.toContain("Avoid broad repo grep")
-      expect(content).not.toContain("Before editing, group related failures by file")
-      expect(content).not.toContain("## Quick Start")
-      expect(content).not.toContain("## Context Files")
-      expect(content).not.toContain("## Importing Env Files")
-    }
-    expect(fs.readFileSync(path.join(root, "CLAUDE.md"), "utf-8")).toBe(
-      fs.readFileSync(path.join(root, "AGENTS.md"), "utf-8"),
-    )
+    expect(fs.existsSync(path.join(root, "CLAUDE.md"))).toBe(false)
+    expect(fs.existsSync(path.join(root, "AGENTS.md"))).toBe(false)
 
     const pkg = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf-8"))
     expect(pkg.scripts.postinstall).toBe("canary-lab upgrade --silent")
@@ -248,24 +222,22 @@ describe("main (upgrade orchestration)", () => {
     }
   })
 
-  it("preserves user content around markers across upgrades (surgical replace)", async () => {
+  it("removes managed agent doc blocks while preserving user notes", async () => {
     const root = mkProjectRoot()
     vi.stubEnv("CANARY_LAB_PROJECT_ROOT", root)
     vi.spyOn(console, "log").mockImplementation(() => {})
 
-    await main([])
     const claudePath = path.join(root, "CLAUDE.md")
-    const withUserNotes =
-      fs.readFileSync(claudePath, "utf-8") + "\n\n# My notes\ncustom stuff\n"
-    fs.writeFileSync(claudePath, withUserNotes)
+    fs.writeFileSync(claudePath, `# My notes\ncustom stuff\n\n${BLOCK}\n`)
+    fs.writeFileSync(path.join(root, "AGENTS.md"), `${BLOCK}\n`)
 
     await main([])
     const after = fs.readFileSync(claudePath, "utf-8")
-    expect(after).toContain("# My notes")
-    expect(after).toContain("custom stuff")
+    expect(after).toBe("# My notes\ncustom stuff\n")
+    expect(fs.existsSync(path.join(root, "AGENTS.md"))).toBe(false)
   })
 
-  it("re-renders personal wiki blocks from canary-lab.config.json on upgrade", async () => {
+  it("does not create agent docs for personal wiki settings on upgrade", async () => {
     const root = mkProjectRoot()
     const wiki = path.join(root, "wiki")
     fs.mkdirSync(wiki)
@@ -278,15 +250,8 @@ describe("main (upgrade orchestration)", () => {
 
     await main([])
 
-    for (const mdFile of ["CLAUDE.md", "AGENTS.md"]) {
-      const content = fs.readFileSync(path.join(root, mdFile), "utf-8")
-      expect(content).toContain("<!-- personal-wiki:start -->")
-      expect(content).toContain(`- \`${fs.realpathSync(wiki)}\` — Karpathy-style personal wiki`)
-      expect(content).toContain("<!-- personal-wiki:end -->")
-    }
-    expect(fs.readFileSync(path.join(root, "CLAUDE.md"), "utf-8")).toBe(
-      fs.readFileSync(path.join(root, "AGENTS.md"), "utf-8"),
-    )
+    expect(fs.existsSync(path.join(root, "CLAUDE.md"))).toBe(false)
+    expect(fs.existsSync(path.join(root, "AGENTS.md"))).toBe(false)
   })
 
   it("does not crash on malformed package.json", async () => {

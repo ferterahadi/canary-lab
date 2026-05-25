@@ -192,6 +192,11 @@ export async function externalHealRoutes(
         reply.code(400)
         return { error: 'body must be an object' }
       }
+      const signalBody = body as Record<string, unknown>
+      if ((kind === 'restart' || kind === 'rerun') && !hasJournalSignalFields(signalBody)) {
+        reply.code(400)
+        return { error: 'restart/rerun signal body requires hypothesis and fixDescription' }
+      }
       const sessionId = req.body?.sessionId
       // If a session is claimed, only the claim holder can write signals (or
       // a request without a sessionId, which represents the UI / a server-
@@ -207,7 +212,7 @@ export async function externalHealRoutes(
           logsDir: deps.store.logsDir,
           runId: req.params.runId,
           kind,
-          body: body as Record<string, unknown>,
+          body: signalBody,
         })
       } catch (err) {
         reply.code(500)
@@ -217,7 +222,7 @@ export async function externalHealRoutes(
       // reflects "n cycles this session" without waiting for the next manifest
       // patch the orchestrator writes.
       deps.broker.bumpCycle(req.params.runId)
-      deps.onSignalAccepted?.(req.params.runId, kind, body as Record<string, unknown>)
+      deps.onSignalAccepted?.(req.params.runId, kind, signalBody)
       reply.code(202)
       return { accepted: true, kind, path: signal.path }
     },
@@ -263,6 +268,14 @@ function isSessionStatus(value: unknown): value is ExternalHealSessionStatus {
 
 function isSignalKind(value: unknown): value is HealSignalKind {
   return typeof value === 'string' && (VALID_SIGNAL_KINDS as string[]).includes(value)
+}
+
+function hasJournalSignalFields(body: Record<string, unknown>): boolean {
+  return hasText(body.hypothesis) && hasText(body.fixDescription)
+}
+
+function hasText(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0
 }
 
 /** Convenience factory: the production audit-log writer. Used by server.ts

@@ -219,6 +219,7 @@ export function RunDetailColumn({
               // and PaneTerminal (no local PTY to attach).
               <ExternalHealPanel
                 runId={m.runId}
+                runStatus={m.status}
                 session={m.externalHealSession}
               />
             ) : showAgentSession ? (
@@ -367,6 +368,14 @@ function RunOverviewTab({
             <dd style={{ color: 'var(--text-secondary)' }}>{manifest.healCycles}</dd>
           </>
         )}
+        {healAgentOverviewLabel(manifest) && (
+          <>
+            <dt style={{ color: 'var(--text-muted)' }}>Heal agent</dt>
+            <dd className="truncate" style={{ color: 'var(--text-secondary)' }} title={healAgentOverviewLabel(manifest) ?? undefined}>
+              {healAgentOverviewLabel(manifest)}
+            </dd>
+          </>
+        )}
         {manifest.lifecycle && (
           <>
             <dt style={{ color: 'var(--text-muted)' }}>State</dt>
@@ -388,6 +397,28 @@ function RunOverviewTab({
       </div>
     </div>
   )
+}
+
+function healAgentOverviewLabel(manifest: RunManifest): string | null {
+  if (manifest.healMode === 'external' && manifest.externalHealSession) {
+    return externalHealClientLabel(manifest.externalHealSession.clientKind)
+  }
+  if (manifest.healAgent === 'claude') return 'Claude'
+  if (manifest.healAgent === 'codex') return 'Codex'
+  if (manifest.healMode === 'manual') return 'Manual'
+  if (manifest.healMode === 'external') return 'External client'
+  if (manifest.healMode === 'auto') return 'Auto'
+  return null
+}
+
+function externalHealClientLabel(kind: RunManifest['externalHealSession']['clientKind']): string {
+  switch (kind) {
+    case 'claude-cli': return 'Claude CLI'
+    case 'claude-desktop': return 'Claude Desktop'
+    case 'codex-cli': return 'Codex CLI'
+    case 'codex-desktop': return 'Codex Desktop'
+    case 'other': return 'External client'
+  }
 }
 
 function VerifyOverviewTab({

@@ -1,7 +1,6 @@
 import fs from 'fs'
 import path from 'path'
 import {
-  setCurrentRunSymlink,
   updateAllServicesStatus,
   updateManifest,
   updateServiceStatus,
@@ -31,7 +30,7 @@ import { reduceRunLifecycleSnapshot } from '../../../../shared/run-state'
 
 export interface RunStateSink {
   /** Initial manifest write at orchestrator construction. Also upserts the
-   *  runs-index entry and points `logs/current` at this run. */
+   *  runs-index entry. */
   bootstrap(manifest: RunManifest): void
 
   /** Mid-run status transition. Mirrors the new status into both manifest
@@ -77,7 +76,6 @@ export class FileRunStateSink implements RunStateSink {
     const mp = this.manifestPath(manifest.runId)
     writeManifest(mp, manifest)
     upsertRunsIndexEntry(this.logsDir, indexEntryFromManifest(manifest, manifest.status))
-    setCurrentRunSymlink(this.logsDir, manifest.runId)
   }
 
   setStatus(runId: string, status: RunManifest['status'], healCycles?: number): void {

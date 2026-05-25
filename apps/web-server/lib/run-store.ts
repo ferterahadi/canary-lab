@@ -22,8 +22,8 @@ import {
 } from '../../../shared/run-state'
 
 // `RunStore` is the single mutator for everything the runs feature persists:
-// `logs/<runId>/manifest.json`, `logs/runs-index.json`, the per-run dirs, and
-// the `logs/current` symlink. Routes and the orchestrator both go through it
+// `logs/runs/<runId>/manifest.json`, `logs/runs/index.json`, and the per-run
+// dirs. Routes and the orchestrator both go through it
 // so:
 //   1. invariants (e.g. "writes drop on a stopped orchestrator") live in one
 //      place,
@@ -164,6 +164,7 @@ export function removeRunFromHistory(logsDir: string, runId: string): boolean {
 }
 
 export interface RunSummaryFailedEntry {
+  id?: string
   name: string
   error?: { message: string; snippet?: string }
   durationMs?: number
@@ -187,16 +188,25 @@ export interface RunSummary {
    *  so the UI can mark only-run tests as passed without falsely turning
    *  unrun tests green when the suite stops early (pause / max-failures). */
   passedNames?: string[]
+  passedIds?: string[]
   /** Names of tests Playwright reported as skipped. Kept separate from
    *  `failed` so the UI and heal loop do not treat skipped tests as failures. */
   skipped?: number
   skippedNames?: string[]
+  skippedIds?: string[]
+  knownTests?: Array<{
+    id?: string
+    name: string
+    title?: string
+    titlePath?: string[]
+    location?: string
+  }>
   /** Currently-running Playwright test, emitted by the reporter on
    *  onTestBegin. Cleared when the matching onTestEnd lands. */
-  running?: { name: string; location: string; step?: RunSummaryRunningStep }
+  running?: { id?: string; name: string; location: string; step?: RunSummaryRunningStep }
   /** All currently-running Playwright tests. Present when Playwright workers
    *  run multiple test cases concurrently. */
-  runningTests?: Array<{ name: string; location: string; step?: RunSummaryRunningStep }>
+  runningTests?: Array<{ id?: string; name: string; location: string; step?: RunSummaryRunningStep }>
   failed: RunSummaryFailedEntry[]
 }
 

@@ -174,7 +174,7 @@ Main files and folders:
 - `agent-session.json` and `agent-session-id.txt`: agent replay pointers for auto-heal
 - `signals/`: `.heal`, `.rerun`, and `.restart`
 
-`logs/runs/index.json` tracks run history. `logs/current/` points to the active run.
+`logs/runs/index.json` tracks run history. Run detail and MCP flows resolve artifacts by run id under `logs/runs/<runId>/`.
 
 ## Evaluation Report
 
@@ -186,12 +186,10 @@ The report summarizes what was tested, the result, and the evidence. Each test c
 
 ## Agent Repair Workflow
 
-When a Playwright test fails, an agent can fix the app or test and signal the next runner action through MCP. The local signal files remain the underlying manual mechanism:
+When a Playwright test fails, an external client can claim the run over MCP, fetch the run-scoped context, fix the app or test, and signal the next runner action:
 
-- `signals/.restart` for service or app changes
-- `signals/.rerun` for test or config-only changes
-
-The scaffolded `CLAUDE.md` and `AGENTS.md` files include a managed `heal-prompt` section that points at `logs/current/...`.
+- `signal_run` with `kind: "restart"` for service or app changes
+- `signal_run` with `kind: "rerun"` for test or config-only changes
 
 ### Auto-Heal
 
@@ -201,25 +199,25 @@ Auto-heal stops when tests pass, the user stops the run, the agent exits without
 
 ### Manual Heal
 
-Set the project heal agent to **Manual** when you want to drive the fix yourself. A failing run waits for a signal file.
+Manual repair uses the run-scoped context in the UI or MCP response. A failing run waits for a signal file under its own run directory.
 
-1. Open a terminal in the scaffolded project.
-2. Run `claude` or `codex`.
-3. Send: `self heal`.
+1. Open the failed run in Canary Lab.
+2. Read the run's `heal-index.md`, failure slices, and `diagnosis-journal.md`.
+3. Write `logs/runs/<runId>/signals/.restart` or `logs/runs/<runId>/signals/.rerun`.
 
-The agent reads the managed prompt and writes `.restart` or `.rerun`.
+MCP clients should prefer `get_heal_context`, `wait_for_heal_task`, and `signal_run` instead of writing signal files directly.
 
 ### Repair Context
 
 Agents should start from:
 
-- `logs/current/heal-index.md`
-- `logs/current/failed/<slug>/`
-- `logs/current/e2e-summary.json`
-- `logs/current/playwright-events.jsonl`
-- `logs/current/diagnosis-journal.md`
-- `logs/current/signals/.rerun`
-- `logs/current/signals/.restart`
+- `logs/runs/<runId>/heal-index.md`
+- `logs/runs/<runId>/failed/<slug>/`
+- `logs/runs/<runId>/e2e-summary.json`
+- `logs/runs/<runId>/playwright-events.jsonl`
+- `logs/runs/<runId>/diagnosis-journal.md`
+- `logs/runs/<runId>/signals/.rerun`
+- `logs/runs/<runId>/signals/.restart`
 
 ## Limitations
 

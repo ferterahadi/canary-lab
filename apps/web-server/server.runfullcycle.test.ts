@@ -7,6 +7,7 @@ import { createServer } from './server'
 import { RunOrchestrator } from './lib/runtime/orchestrator'
 import { generateRunId } from './lib/runtime/run-id'
 import { runDirFor } from './lib/runtime/run-paths'
+import type { PaneMessage, PaneSubscriber } from './lib/pane-broker'
 import type { PtyFactory, PtyHandle, PtySpawnOptions } from './lib/runtime/pty-spawner'
 
 // End-to-end check: POST /api/runs against the broken_todo_api fixture, drive
@@ -50,6 +51,17 @@ function makeFakeFactory(): { factory: PtyFactory; spawned: FakeProc[] } {
   return { factory, spawned }
 }
 
+function recorder(): PaneSubscriber & { msgs: PaneMessage[]; closed: boolean } {
+  const msgs: PaneMessage[] = []
+  let closed = false
+  return {
+    msgs,
+    get closed() { return closed },
+    send: (msg) => { msgs.push(msg) },
+    close: () => { closed = true },
+  } as PaneSubscriber & { msgs: PaneMessage[]; closed: boolean }
+}
+
 let projectRoot: string
 let logsDir: string
 let featuresDir: string
@@ -85,6 +97,46 @@ afterEach(() => {
 })
 
 describe('createServer + RunOrchestrator.runFullCycle integration', () => {
+  it('resets a service pane when that service starts again', async () => {
+    const fake = makeFakeFactory()
+    const { app, registry, brokers } = await createServer({
+      projectRoot,
+      featuresDir,
+      logsDir,
+      ptyFactory: fake.factory,
+    })
+    const started = await app.inject({
+      method: 'POST',
+      url: '/api/runs',
+      payload: { feature: 'broken_demo' },
+    })
+    expect(started.statusCode).toBe(201)
+    const runId = (started.json() as { runId: string }).runId
+    const broker = brokers.get(runId)
+    expect(broker).toBeTruthy()
+
+    broker!.push('service:svc', 'old output')
+    const sub = recorder()
+    broker!.subscribe('service:svc', sub)
+    const orch = registry.get(runId) as RunOrchestrator
+    orch.emit('service-started', {
+      pid: 999,
+      service: {
+        repoName: 'svc',
+        name: 'svc',
+        safeName: 'svc',
+        command: 'echo svc',
+        cwd: featuresDir,
+      },
+    })
+
+    expect(sub.msgs.at(-1)).toEqual({ type: 'reset' })
+    expect(sub.closed).toBe(true)
+
+    await orch.stop('aborted')
+    await app.close()
+  }, 15000)
+
   it('POST /api/runs drives orchestrator end-to-end with a fake pty factory', async () => {
     const fake = makeFakeFactory()
     const events: string[] = []

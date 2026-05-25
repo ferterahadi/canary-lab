@@ -47,17 +47,23 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunStatus }: 
     )
   }
 
-  const totalTests = specs?.reduce((acc, s) => acc + s.tests.length, 0) ?? 0
+  const runSpecs = activeRunSummary?.knownTests?.length
+    ? specsFromRunSummary(activeRunSummary)
+    : null
+  const displaySpecs = runSpecs ?? specs
+  const totalTests = displaySpecs?.reduce((acc, s) => acc + s.tests.length, 0) ?? 0
   const isRunActivelyTesting = activeRunStatus === 'running'
   // Numerator is anchored to the *current* spec, not summary totals. Summary
   // entries can outlive the spec (e.g. seedFromExistingSummary preserves
   // ghosts from prior runs) which would otherwise push `done` past `total`.
-  const passedCount = (specs ?? []).reduce(
-    (acc, spec) => acc + spec.tests.filter(
-      (t) => statusForTest(t.name, activeRunSummary, isRunActivelyTesting) === 'passed',
-    ).length,
-    0,
-  )
+  const passedCount = runSpecs && activeRunSummary
+    ? activeRunSummary.passed
+    : (displaySpecs ?? []).reduce(
+        (acc, spec) => acc + spec.tests.filter(
+          (t) => statusForTest({ name: t.name, id: t.id }, activeRunSummary, isRunActivelyTesting) === 'passed',
+        ).length,
+        0,
+      )
 
   return (
     <div className="cl-panel flex h-full flex-col">
@@ -75,19 +81,19 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunStatus }: 
         />
       </div>
       <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin p-3">
-        {loadError ? (
+        {loadError && !runSpecs ? (
           <div className="rounded-md border px-3 py-2 text-xs" style={{ color: 'var(--text-secondary)', borderColor: 'var(--border-default)', background: 'var(--bg-muted)' }}>
             {loadError}
           </div>
-        ) : !specs ? (
+        ) : !displaySpecs ? (
           <div className="text-xs" style={{ color: 'var(--text-muted)' }}>Loading...</div>
-        ) : specs.length === 0 ? (
+        ) : displaySpecs.length === 0 ? (
           <div className="text-xs" style={{ color: 'var(--text-muted)' }}>No spec files found.</div>
         ) : (
           <div className="space-y-1.5">
-            {specs.flatMap((spec) =>
+            {displaySpecs.flatMap((spec) =>
               spec.tests.map((t) => {
-                const key = `${spec.file}:${t.line}:${t.name}`
+                const key = `${spec.file}:${t.line}:${t.id ?? t.name}`
                 const isExpanded = expandedTest === key
                 const entryName = summaryEntryName(t.name)
                 const runningTest = isRunActivelyTesting && activeRunSummary
@@ -106,7 +112,7 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunStatus }: 
                     key={key}
                     sourceFile={t.sourceFile ?? spec.file}
                     test={t}
-                    status={statusForTest(t.name, activeRunSummary, isRunActivelyTesting)}
+                    status={statusForTest({ name: t.name, id: t.id }, activeRunSummary, isRunActivelyTesting)}
                     runningLocation={runningLocation}
                     isRunningTest={isRunningTest}
                     runningStep={runningTest?.step}
@@ -122,6 +128,32 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunStatus }: 
       </div>
     </div>
   )
+}
+
+function specsFromRunSummary(summary: RunSummary): FeatureSpecFile[] {
+  const byFile = new Map<string, ExtractedTest[]>()
+  for (const known of summary.knownTests ?? []) {
+    const parsed = parseSummaryLocation(known.location)
+    const file = parsed?.file ?? 'Run summary'
+    const tests = byFile.get(file) ?? []
+    tests.push({
+      id: known.id,
+      name: known.title ?? known.name,
+      line: parsed?.line ?? 0,
+      bodySource: '',
+      steps: [],
+      ...(parsed?.file ? { sourceFile: parsed.file } : {}),
+    })
+    byFile.set(file, tests)
+  }
+  return [...byFile.entries()].map(([file, tests]) => ({ file, tests }))
+}
+
+function parseSummaryLocation(location: string | undefined): { file: string; line: number } | null {
+  if (!location) return null
+  const match = /^(.*):(\d+)(?::\d+)?$/.exec(location)
+  if (!match) return { file: location, line: 0 }
+  return { file: match[1], line: Number(match[2]) }
 }
 
 function formatLoadError(err: unknown): string {

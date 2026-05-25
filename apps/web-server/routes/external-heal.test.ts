@@ -299,24 +299,44 @@ describe('external heal routes', () => {
     const mismatch = await app.inject({
       method: 'POST',
       url: '/api/runs/run-1/signal',
-      payload: { sessionId: 'sess-B', kind: 'restart', body: {} },
+      payload: {
+        sessionId: 'sess-B',
+        kind: 'restart',
+        body: { hypothesis: 'restart it', fixDescription: 'fixed it' },
+      },
     })
     expect(mismatch.statusCode).toBe(409)
     expect(mismatch.json().reason).toBe('session-mismatch')
 
-    for (const kind of ['restart', 'rerun', 'heal'] as const) {
+    for (const kind of ['restart', 'rerun'] as const) {
       const res = await app.inject({
         method: 'POST',
         url: '/api/runs/run-1/signal',
-        payload: { sessionId: 'sess-A', kind, body: { hypothesis: `${kind} it` } },
+        payload: {
+          sessionId: 'sess-A',
+          kind,
+          body: { hypothesis: `${kind} it`, fixDescription: `${kind} fixed` },
+        },
       })
       expect(res.statusCode).toBe(202)
       expect(res.json()).toMatchObject({ accepted: true, kind })
     }
+    const heal = await app.inject({
+      method: 'POST',
+      url: '/api/runs/run-1/signal',
+      payload: { sessionId: 'sess-A', kind: 'heal', body: { hypothesis: 'heal it' } },
+    })
+    expect(heal.statusCode).toBe(202)
 
     const paths = buildRunPaths(runDirFor(logsDir, 'run-1'))
-    expect(fs.readFileSync(paths.restartSignal, 'utf-8')).toBe(JSON.stringify({ hypothesis: 'restart it' }))
-    expect(fs.readFileSync(paths.rerunSignal, 'utf-8')).toBe(JSON.stringify({ hypothesis: 'rerun it' }))
+    expect(fs.readFileSync(paths.restartSignal, 'utf-8')).toBe(JSON.stringify({
+      hypothesis: 'restart it',
+      fixDescription: 'restart fixed',
+    }))
+    expect(fs.readFileSync(paths.rerunSignal, 'utf-8')).toBe(JSON.stringify({
+      hypothesis: 'rerun it',
+      fixDescription: 'rerun fixed',
+    }))
     expect(fs.readFileSync(paths.healSignal, 'utf-8')).toBe(JSON.stringify({ hypothesis: 'heal it' }))
     expect(broker.getSession('run-1')?.cycleCount).toBe(3)
     expect(acceptedSignals.map((s) => s.kind)).toEqual(['restart', 'rerun', 'heal'])
@@ -326,8 +346,10 @@ describe('external heal routes', () => {
       url: '/api/runs/run-1/signal',
       payload: { sessionId: 'sess-A', kind: 'rerun' },
     })
-    expect(defaultBody.statusCode).toBe(202)
-    expect(fs.readFileSync(paths.rerunSignal, 'utf-8')).toBe(JSON.stringify({}))
+    expect(defaultBody.statusCode).toBe(400)
+    expect(defaultBody.json()).toEqual({
+      error: 'restart/rerun signal body requires hypothesis and fixDescription',
+    })
   })
 
   it('validates signal requests and returns filesystem errors', async () => {
@@ -343,7 +365,7 @@ describe('external heal routes', () => {
     expect((await app.inject({
       method: 'POST',
       url: '/api/runs/done/signal',
-      payload: { kind: 'restart', body: {} },
+      payload: { kind: 'restart', body: { hypothesis: 'h', fixDescription: 'f' } },
     })).json()).toEqual({ reason: 'run-not-active' })
     expect((await app.inject({
       method: 'POST',
@@ -355,6 +377,16 @@ describe('external heal routes', () => {
       url: '/api/runs/run-1/signal',
       payload: { kind: 'restart', body: 'bad' },
     })).json()).toEqual({ error: 'body must be an object' })
+    expect((await app.inject({
+      method: 'POST',
+      url: '/api/runs/run-1/signal',
+      payload: { kind: 'restart', body: { hypothesis: 'h' } },
+    })).json()).toEqual({ error: 'restart/rerun signal body requires hypothesis and fixDescription' })
+    expect((await app.inject({
+      method: 'POST',
+      url: '/api/runs/run-1/signal',
+      payload: { kind: 'rerun', body: { fixDescription: 'f' } },
+    })).json()).toEqual({ error: 'restart/rerun signal body requires hypothesis and fixDescription' })
 
     const writeSpy = vi.spyOn(fs, 'writeFileSync').mockImplementationOnce(() => {
       throw new Error('disk full')
@@ -362,7 +394,7 @@ describe('external heal routes', () => {
     const failed = await app.inject({
       method: 'POST',
       url: '/api/runs/run-1/signal',
-      payload: { kind: 'restart', body: {} },
+      payload: { kind: 'restart', body: { hypothesis: 'h', fixDescription: 'f' } },
     })
     expect(failed.statusCode).toBe(500)
     expect(failed.json()).toEqual({ error: 'disk full' })

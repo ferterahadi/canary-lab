@@ -116,6 +116,36 @@ describe('buildExternalHealContext', () => {
       },
     })
   })
+
+  it('normalizes counts from the run summary instead of duplicate title names', () => {
+    const context = buildExternalHealContext({
+      detail: {
+        ...detailFor('run-duplicates'),
+        summary: {
+          complete: false,
+          total: 2,
+          passed: 1,
+          passedNames: ['test-case-validates-input'],
+          passedIds: ['test-id-a'],
+          knownTests: [
+            { id: 'test-id-a', name: 'test-case-validates-input' },
+            { id: 'test-id-b', name: 'test-case-validates-input' },
+          ],
+          failed: [],
+        } as any,
+      },
+      logsDir,
+      projectRoot: tmpDir,
+    })
+
+    expect(context.counts).toMatchObject({
+      totalKnown: 2,
+      passed: 1,
+      failed: 0,
+      notRun: 1,
+      statusLine: '1/2 passed, 0 failed, 1 not run',
+    })
+  })
 })
 
 describe('writeHealSignal', () => {

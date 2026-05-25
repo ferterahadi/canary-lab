@@ -9,8 +9,6 @@ import {
   hasPendingMigrations,
   type MigrationReport,
 } from './upgrade-migration'
-import { loadProjectConfig } from '../apps/web-server/lib/runtime/launcher/project-config'
-import { applyPersonalWikiBlock } from '../shared/runtime/personal-wiki'
 import { refreshInstalled as refreshInstalledAgentIntegrations } from './agent'
 import { upsertWorkspace } from '../shared/runtime/workspace-registry'
 
@@ -46,8 +44,8 @@ const DEPRECATED: string[] = [
   '.codex/self-fixing-loop.md',
 ]
 
-/** Files where only the content between markers is replaced. */
-const MARKER_MANAGED: string[] = [
+/** Agent docs used to carry Canary Lab-managed instructions; MCP now owns this. */
+const DEPRECATED_AGENT_DOCS: string[] = [
   'CLAUDE.md',
   'AGENTS.md',
 ]
@@ -118,6 +116,22 @@ export function applyManagedBlock(existing: string, block: string, relPath: stri
   // Case 3: unknown content — append
   const trimmed = existing.trimEnd()
   return trimmed + (trimmed.length > 0 ? '\n\n' : '') + block + '\n'
+}
+
+function removeManagedBlock(existing: string, relPath: string): string | null {
+  const startIdx = existing.indexOf(MARKER_START)
+  const endIdx = existing.indexOf(MARKER_END)
+
+  if (startIdx !== -1 && endIdx !== -1) {
+    const before = existing.slice(0, startIdx).trimEnd()
+    const after = existing.slice(endIdx + MARKER_END.length).trimStart()
+    const next = [before, after].filter(Boolean).join('\n\n')
+    return next ? `${next}\n` : null
+  }
+
+  const signature = LEGACY_SIGNATURES[relPath]
+  if (signature && existing.trimStart().startsWith(signature)) return null
+  return existing
 }
 
 export function applyGitignoreRules(existing: string): string {
@@ -206,7 +220,6 @@ export async function main(
   }
 
   const templateRoot = getTemplateRoot()
-  const projectConfig = loadProjectConfig(projectRoot)
   let updated = 0
 
   // Keep the user-level workspace registry current so agent skills can find
@@ -236,31 +249,24 @@ export async function main(
     updated += 1
   }
 
-  // 2. Marker-managed files: replace only the managed section
-  for (const relPath of MARKER_MANAGED) {
-    const templatePath = path.join(templateRoot, relPath)
+  // 2. Remove previously managed root agent docs. Preserve user notes outside
+  // the managed block; delete generated-only files.
+  for (const relPath of DEPRECATED_AGENT_DOCS) {
     const targetPath = path.join(projectRoot, relPath)
 
-    if (!fs.existsSync(templatePath)) continue
+    if (!fs.existsSync(targetPath)) continue
 
-    const templateContent = fs.readFileSync(templatePath, 'utf-8')
-    const managedBlock = extractManagedBlock(templateContent)
-    if (!managedBlock) continue
+    const existing = fs.readFileSync(targetPath, 'utf-8')
+    const result = removeManagedBlock(existing, relPath)
 
-    const existing = fs.existsSync(targetPath)
-      ? fs.readFileSync(targetPath, 'utf-8')
-      : ''
-
-    const result = applyPersonalWikiBlock(
-      applyManagedBlock(existing, managedBlock, relPath),
-      projectConfig.personalWikiPath,
-    )
-
-    // Skip if nothing changed
     if (result === existing) continue
-
-    fs.writeFileSync(targetPath, result)
-    log(`  Updated ${relPath} (managed section)`, opts)
+    if (result === null) {
+      fs.unlinkSync(targetPath)
+      log(`  Removed deprecated ${relPath}`, opts)
+    } else {
+      fs.writeFileSync(targetPath, result)
+      log(`  Removed deprecated Canary Lab block from ${relPath}`, opts)
+    }
     updated += 1
   }
 

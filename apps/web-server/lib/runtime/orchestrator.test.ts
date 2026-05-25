@@ -556,6 +556,32 @@ describe('RunOrchestrator.restart / rerun / status', () => {
     await orch.stop('passed')
   })
 
+  it('ignores a stale service exit from a pty replaced during restart', async () => {
+    const { factory, spawned } = makeFakeFactory()
+    const orch = new RunOrchestrator({
+      feature: makeFeature(),
+      runId: RUN_ID,
+      runDir,
+      ptyFactory: factory,
+      healthCheck: async () => true,
+      delay: async () => undefined,
+    })
+    const exits: number[] = []
+    orch.on('service-exit', (event) => exits.push(event.exitCode))
+
+    await orch.start()
+    await orch.restart()
+    expect(spawned).toHaveLength(2)
+
+    spawned[0].emitExit(1)
+    expect(exits).toEqual([])
+
+    spawned[1].emitExit(2)
+    expect(exits).toEqual([2])
+
+    await orch.stop('failed')
+  })
+
   it('selective restart only respawns services matching filesChanged', async () => {
     const { factory, spawned } = makeFakeFactory()
     const repoA = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-orc-a-'))
@@ -982,6 +1008,7 @@ describe('RunOrchestrator.runFullCycle', () => {
     pwExitCodes: number[]
     autoHeal?: boolean
     manualHeal?: boolean
+    externalHeal?: boolean
   }) {
     let pwIdx = 0
     let healIdx = 0
@@ -1007,6 +1034,7 @@ describe('RunOrchestrator.runFullCycle', () => {
           }
         : undefined,
       manualHeal: opts.manualHeal,
+      externalHeal: opts.externalHeal,
     })
     return orch
   }
@@ -1207,6 +1235,69 @@ describe('RunOrchestrator.runFullCycle', () => {
     await orch.stop('passed')
   }, 15000)
 
+  it('external heal mode writes the canonical journal from the signal only', async () => {
+    execFileSync('git', ['init', '-q'], { cwd: tmpDir })
+    execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: tmpDir })
+    execFileSync('git', ['config', 'user.name', 'Test'], { cwd: tmpDir })
+    fs.writeFileSync(path.join(tmpDir, 'handler.ts'), '// initial\n')
+    execFileSync('git', ['add', 'handler.ts'], { cwd: tmpDir })
+    execFileSync('git', ['commit', '-q', '-m', 'init'], { cwd: tmpDir })
+
+    const f = makeFakeFactory()
+    const orch = bootForFullCycle({
+      spawned: f,
+      pwExitCodes: [1, 0],
+      externalHeal: true,
+    })
+    fs.mkdirSync(runDir, { recursive: true })
+    fs.writeFileSync(orch.paths.summaryPath, JSON.stringify({
+      failed: [{ name: 'test-case-checkout', location: 'tests/checkout.spec.ts:41' }],
+    }))
+
+    const promise = orch.runFullCycle()
+    const waitFor = async (n: number) => {
+      const start = Date.now()
+      while (f.spawned.length < n) {
+        if (Date.now() - start > 3000) throw new Error(`stuck: spawned=${f.spawned.length}`)
+        await new Promise((r) => setTimeout(r, 5))
+      }
+    }
+    await waitFor(2)
+    f.spawned[1].emitExit(1)
+
+    while (readManifest(orch.paths.manifestPath)?.lifecycle?.phase !== 'waiting-for-signal') {
+      await new Promise((r) => setTimeout(r, 5))
+    }
+    fs.writeFileSync(path.join(tmpDir, 'handler.ts'), '// external client edit\n')
+    fs.writeFileSync(orch.paths.rerunSignal, JSON.stringify({
+      hypothesis: 'handler returns stale checkout state',
+      fixDescription: 'updated handler response state',
+    }))
+
+    await waitFor(3)
+    expect(f.spawned[2].options.command).toContain('tests/checkout.spec.ts:41')
+    fs.writeFileSync(orch.paths.summaryPath, JSON.stringify({
+      passedNames: ['test-case-checkout'],
+      failed: [],
+    }))
+    f.spawned[2].emitExit(0)
+
+    const status = await promise
+    expect(status).toBe('passed')
+    const journal = fs.readFileSync(orch.paths.diagnosisJournalPath, 'utf-8')
+    expect(journal).toContain('- run: 2026-04-28T1015-aaaa')
+    expect(journal).toContain('- feature: demo')
+    expect(journal).toContain('- failingTests: test-case-checkout')
+    expect(journal).toContain('- hypothesis: handler returns stale checkout state')
+    expect(journal).toContain(`- fix.file: ${path.join(tmpDir, 'handler.ts')}`)
+    expect(journal).toContain('- fix.description: updated handler response state')
+    expect(journal).toContain('- signal: .rerun')
+    expect(journal).toContain('- outcome: pending')
+    expect(journal).toContain('### Diff')
+    expect(journal).toContain('+// external client edit')
+    await orch.stop('passed')
+  }, 15000)
+
   it('manual heal mode: gives up if user cancels via cancelHeal()', async () => {
     const f = makeFakeFactory()
     const orch = bootForFullCycle({
@@ -1246,6 +1337,21 @@ describe('RunOrchestrator.runFullCycle', () => {
       expect(m.signalPaths.restart).toBe(orch.paths.restartSignal)
       await orch.stop('passed')
     })()
+  })
+
+  it('writes the resolved auto-heal agent to the manifest', async () => {
+    const f = makeFakeFactory()
+    const orch = bootForFullCycle({ spawned: f, pwExitCodes: [0], autoHeal: true })
+
+    const promise = orch.runFullCycle()
+    await new Promise((r) => setTimeout(r, 5))
+    f.spawned[1].emitExit(0)
+    await promise
+
+    const m = JSON.parse(fs.readFileSync(orch.paths.manifestPath, 'utf-8'))
+    expect(m.healMode).toBe('auto')
+    expect(m.healAgent).toBe('claude')
+    await orch.stop('passed')
   })
 
   it('runs heal cycle on failure and recovers via .restart signal', async () => {

@@ -307,7 +307,7 @@ export async function featureConfigRoutes(
   )
 
   // ─── envsets ──────────────────────────────────────────────────────────
-  // Layout (per workspace convention, see CLAUDE.md):
+  // Layout (per workspace convention):
   //   <featureDir>/envsets/envsets.config.json
   //   <featureDir>/envsets/<env>/<slot-file>
   //
