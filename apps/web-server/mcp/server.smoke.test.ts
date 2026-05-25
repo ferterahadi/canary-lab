@@ -26,6 +26,66 @@ const inertPtyFactory: PtyFactory = () => ({
   kill: () => { /* noop */ },
 })
 
+const REPAIR_TOOLS = [
+  'abort_run',
+  'cancel_heal',
+  'get_heal_context',
+  'get_run',
+  'heartbeat',
+  'list_features',
+  'list_runs',
+  'pause_run',
+  'signal_run',
+  'start_run',
+  'wait_for_heal_task',
+  'write_journal',
+].sort()
+
+const VERIFY_TOOLS = [
+  'create_verification_config',
+  'execute_verification',
+  'get_run',
+  'get_verification_config',
+  'get_verification_result',
+  'list_features',
+  'list_runs',
+  'list_verification_configs',
+  'update_verification_config',
+].sort()
+
+const FULL_TOOLS = [
+  'abort_run',
+  'cancel_heal',
+  'claim_heal',
+  'create_verification_config',
+  'execute_verification',
+  'get_heal_context',
+  'get_run',
+  'get_run_actions',
+  'get_verification_config',
+  'get_verification_result',
+  'heartbeat',
+  'list_features',
+  'list_runs',
+  'list_verification_configs',
+  'pause_run',
+  'release_heal',
+  'signal_run',
+  'start_run',
+  'update_verification_config',
+  'wait_for_heal_task',
+  'write_journal',
+].sort()
+
+async function connectClient(address: string, pathAndQuery = '/mcp'): Promise<Client> {
+  const client = new Client(
+    { name: 'canary-lab-smoke', version: '0.0.1' },
+    { capabilities: {} },
+  )
+  await client.connect(new StreamableHTTPClientTransport(new URL(pathAndQuery, address)))
+  return client
+}
+
 async function createMcpHarness(opts: {
   logsDir: string
   projectRoot: string
@@ -55,66 +115,83 @@ async function createMcpHarness(opts: {
 }
 
 describe('MCP HTTP server (smoke)', () => {
-  it('exposes /mcp/health with the registered tool count', async () => {
+  it('exposes /mcp/health with profile-specific tool counts', async () => {
     const projectRoot = path.resolve(__dirname, '..', '..', '..', 'templates', 'project')
     const { app } = await createServer({ projectRoot, ptyFactory: inertPtyFactory })
     try {
       const res = await app.inject({ method: 'GET', url: '/mcp/health' })
       expect(res.statusCode).toBe(200)
-      const body = res.json() as { ok: boolean; server: { name: string }; toolCount: number }
+      const body = res.json() as { ok: boolean; server: { name: string }; toolCount: number; profile: string }
       expect(body.ok).toBe(true)
       expect(body.server.name).toBe('canary-lab')
-      // We register at least the core v1 tool set; assert the floor rather
-      // than the exact number so this doesn't trip on later additions.
-      expect(body.toolCount).toBeGreaterThanOrEqual(12)
+      expect(body.profile).toBe('repair')
+      expect(body.toolCount).toBe(REPAIR_TOOLS.length)
+
+      const full = await app.inject({ method: 'GET', url: '/mcp/health?profile=full' })
+      expect(full.statusCode).toBe(200)
+      expect((full.json() as { profile: string; toolCount: number })).toMatchObject({
+        profile: 'full',
+        toolCount: FULL_TOOLS.length,
+      })
+
+      const verify = await app.inject({ method: 'GET', url: '/mcp/health?profile=verify' })
+      expect(verify.statusCode).toBe(200)
+      expect((verify.json() as { profile: string; toolCount: number })).toMatchObject({
+        profile: 'verify',
+        toolCount: VERIFY_TOOLS.length,
+      })
     } finally {
       await app.close()
     }
   })
 
-  it('answers tools/list and tools/call over the streamable HTTP transport', async () => {
+  it('rejects invalid MCP profiles before creating sessions', async () => {
+    const projectRoot = path.resolve(__dirname, '..', '..', '..', 'templates', 'project')
+    const { app } = await createServer({ projectRoot, ptyFactory: inertPtyFactory })
+    try {
+      const health = await app.inject({ method: 'GET', url: '/mcp/health?profile=nope' })
+      expect(health.statusCode).toBe(400)
+      expect(health.json()).toMatchObject({ error: 'invalid MCP profile: nope' })
+
+      const init = await app.inject({
+        method: 'POST',
+        url: '/mcp?profile=nope',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json, text/event-stream',
+        },
+        payload: {
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'initialize',
+          params: {
+            protocolVersion: '2025-03-26',
+            capabilities: {},
+            clientInfo: { name: 'profile-probe', version: '0.0.1' },
+          },
+        },
+      })
+      expect(init.statusCode).toBe(400)
+      expect(init.json()).toMatchObject({
+        jsonrpc: '2.0',
+        error: { message: 'invalid MCP profile: nope' },
+      })
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('answers tools/list with the default repair profile and tools/call over the streamable HTTP transport', async () => {
     const projectRoot = path.resolve(__dirname, '..', '..', '..', 'templates', 'project')
     const { app } = await createServer({ projectRoot, ptyFactory: inertPtyFactory })
     let client: Client | null = null
     try {
       const address = await app.listen({ port: 0, host: '127.0.0.1' })
-      const url = new URL('/mcp', address)
-      client = new Client(
-        { name: 'canary-lab-smoke', version: '0.0.1' },
-        { capabilities: {} },
-      )
-      const transport = new StreamableHTTPClientTransport(url)
-      await client.connect(transport)
+      client = await connectClient(address)
 
-      // tools/list — every tool we registered should be discoverable.
       const tools = await client.listTools()
       const names = tools.tools.map((t) => t.name).sort()
-      // Core v1 surface. Don't assert ordering; just presence.
-      for (const required of [
-        'list_features',
-        'list_runs',
-        'get_run',
-        'get_run_actions',
-        'list_verification_configs',
-        'get_verification_config',
-        'create_verification_config',
-        'update_verification_config',
-        'execute_verification',
-        'get_verification_result',
-        'get_heal_context',
-        'wait_for_heal_task',
-        'start_run',
-        'pause_run',
-        'cancel_heal',
-        'abort_run',
-        'claim_heal',
-        'release_heal',
-        'heartbeat',
-        'signal_run',
-        'write_journal',
-      ]) {
-        expect(names, `tool '${required}' should be registered`).toContain(required)
-      }
+      expect(names).toEqual(REPAIR_TOOLS)
 
       // tools/call list_features — should return the templates/project scaffold.
       const result = await client.callTool({ name: 'list_features', arguments: {} })
@@ -123,6 +200,38 @@ describe('MCP HTTP server (smoke)', () => {
       const featureNames = features.map((f) => f.name).sort()
       expect(featureNames).toContain('broken_todo_api')
       expect(featureNames).toContain('example_todo_api')
+    } finally {
+      if (client) await client.close().catch(() => undefined)
+      await app.close()
+    }
+  })
+
+  it('answers tools/list with the full profile', async () => {
+    const projectRoot = path.resolve(__dirname, '..', '..', '..', 'templates', 'project')
+    const { app } = await createServer({ projectRoot, ptyFactory: inertPtyFactory })
+    let client: Client | null = null
+    try {
+      const address = await app.listen({ port: 0, host: '127.0.0.1' })
+      client = await connectClient(address, '/mcp?profile=full')
+
+      const tools = await client.listTools()
+      expect(tools.tools.map((t) => t.name).sort()).toEqual(FULL_TOOLS)
+    } finally {
+      if (client) await client.close().catch(() => undefined)
+      await app.close()
+    }
+  })
+
+  it('answers tools/list with the verify profile', async () => {
+    const projectRoot = path.resolve(__dirname, '..', '..', '..', 'templates', 'project')
+    const { app } = await createServer({ projectRoot, ptyFactory: inertPtyFactory })
+    let client: Client | null = null
+    try {
+      const address = await app.listen({ port: 0, host: '127.0.0.1' })
+      client = await connectClient(address, '/mcp?profile=verify')
+
+      const tools = await client.listTools()
+      expect(tools.tools.map((t) => t.name).sort()).toEqual(VERIFY_TOOLS)
     } finally {
       if (client) await client.close().catch(() => undefined)
       await app.close()
@@ -210,11 +319,7 @@ describe('MCP HTTP server (smoke)', () => {
     let client: Client | null = null
     try {
       const address = await app.listen({ port: 0, host: '127.0.0.1' })
-      client = new Client(
-        { name: 'canary-lab-smoke', version: '0.0.1' },
-        { capabilities: {} },
-      )
-      await client.connect(new StreamableHTTPClientTransport(new URL('/mcp', address)))
+      client = await connectClient(address)
 
       runStore.bootstrap({
         runId: 'context-map',
@@ -259,6 +364,67 @@ describe('MCP HTTP server (smoke)', () => {
       expect(body.healPrompt.resources.map((entry: { id: string }) => entry.id)).toEqual([
         'trace-extract',
         'journal',
+      ])
+    } finally {
+      if (client) await client.close().catch(() => undefined)
+      await app.close()
+    }
+  })
+
+  it('write_journal appends canonical run-local journal sections visible to the UI', async () => {
+    const projectRoot = path.resolve(__dirname, '..', '..', '..', 'templates', 'project')
+    const logsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-journal-')))
+    const { app, runStore } = await createServer({ projectRoot, logsDir, ptyFactory: inertPtyFactory })
+    let client: Client | null = null
+    try {
+      const address = await app.listen({ port: 0, host: '127.0.0.1' })
+      client = await connectClient(address)
+
+      runStore.bootstrap({
+        runId: 'journal-run',
+        feature: 'broken_todo_api',
+        startedAt: '2026-05-08T00:00:00.000Z',
+        status: 'healing',
+        healCycles: 2,
+        services: [],
+        healMode: 'external',
+      })
+
+      const result = await client.callTool({
+        name: 'write_journal',
+        arguments: {
+          runId: 'journal-run',
+          iteration: 2,
+          body: 'Hypothesis: route module was disabled\n\nFix: enabled the module import',
+        },
+      })
+      expect(result.isError).not.toBe(true)
+
+      const journalPath = path.join(runDirFor(logsDir, 'journal-run'), 'diagnosis-journal.md')
+      const journal = fs.readFileSync(journalPath, 'utf-8')
+      expect(journal).toContain('# Diagnosis Journal')
+      expect(journal).toMatch(/## Iteration 2 [—-] \d{4}-\d{2}-\d{2}T/)
+      expect(journal).toContain('- run: journal-run')
+      expect(journal).toContain('- feature: broken_todo_api')
+      expect(journal).toContain('- hypothesis: route module was disabled')
+      expect(journal).toContain('- fix.description: enabled the module import')
+      expect(journal).toContain('- outcome: pending')
+      expect(journal).toContain('Hypothesis: route module was disabled')
+      expect(journal).toContain('Fix: enabled the module import')
+
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/journal?feature=broken_todo_api&run=journal-run',
+      })
+      expect(res.statusCode).toBe(200)
+      expect(res.json()).toMatchObject([
+        {
+          iteration: 2,
+          run: 'journal-run',
+          feature: 'broken_todo_api',
+          outcome: 'pending',
+          hypothesis: 'route module was disabled',
+        },
       ])
     } finally {
       if (client) await client.close().catch(() => undefined)
@@ -316,11 +482,7 @@ describe('MCP HTTP server (smoke)', () => {
     let client: Client | null = null
     try {
       const address = await app.listen({ port: 0, host: '127.0.0.1' })
-      client = new Client(
-        { name: 'canary-lab-smoke', version: '0.0.1' },
-        { capabilities: {} },
-      )
-      await client.connect(new StreamableHTTPClientTransport(new URL('/mcp', address)))
+      client = await connectClient(address, '/mcp?profile=verify')
 
       const created = await client.callTool({
         name: 'create_verification_config',
@@ -419,11 +581,7 @@ describe('MCP HTTP server (smoke)', () => {
     let client: Client | null = null
     try {
       const address = await app.listen({ port: 0, host: '127.0.0.1' })
-      client = new Client(
-        { name: 'canary-lab-smoke', version: '0.0.1' },
-        { capabilities: {} },
-      )
-      await client.connect(new StreamableHTTPClientTransport(new URL('/mcp', address)))
+      client = await connectClient(address, '/mcp?profile=full')
 
       runStore.bootstrap({
         runId: 'wait-needs-heal',

@@ -1,10 +1,12 @@
 import type { FastifyInstance } from 'fastify'
+import fs from 'fs'
 import { buildRunPaths, runDirFor } from '../lib/runtime/run-paths'
 import {
   readJournal,
   filterSections,
   newestFirst,
   deleteIterationSection,
+  type JournalSection,
 } from '../lib/journal-store'
 
 export interface JournalRouteDeps {
@@ -14,12 +16,38 @@ export interface JournalRouteDeps {
 }
 
 export async function journalRoutes(app: FastifyInstance, deps: JournalRouteDeps): Promise<void> {
+  const runPathsFor = (runId: string) => buildRunPaths(runDirFor(deps.logsDir, runId))
+
   const resolveJournalPath = (runId?: string): string | null => {
     if (runId) {
       if (runId.includes('/') || runId.includes('\\') || runId.includes('..')) return null
-      return buildRunPaths(runDirFor(deps.logsDir, runId)).diagnosisJournalPath
+      return runPathsFor(runId).diagnosisJournalPath
     }
     return deps.journalPath ?? null
+  }
+
+  const inferFeatureFromRunManifest = (runId: string): string | null => {
+    try {
+      const raw = JSON.parse(fs.readFileSync(runPathsFor(runId).manifestPath, 'utf-8')) as {
+        feature?: unknown
+        featureName?: unknown
+      }
+      if (typeof raw.feature === 'string') return raw.feature
+      if (typeof raw.featureName === 'string') return raw.featureName
+    } catch {
+      /* no manifest or unreadable manifest */
+    }
+    return null
+  }
+
+  const inferRunLocalFields = (sections: JournalSection[], runId?: string): JournalSection[] => {
+    if (!runId) return sections
+    const feature = inferFeatureFromRunManifest(runId)
+    return sections.map((section) => ({
+      ...section,
+      run: section.run ?? runId,
+      feature: section.feature ?? feature,
+    }))
   }
 
   app.get<{ Querystring: { feature?: string; run?: string } }>(
@@ -27,7 +55,7 @@ export async function journalRoutes(app: FastifyInstance, deps: JournalRouteDeps
     async (req) => {
       const journalPath = resolveJournalPath(req.query.run)
       if (!journalPath) return []
-      const { sections } = readJournal(journalPath)
+      const sections = inferRunLocalFields(readJournal(journalPath).sections, req.query.run)
       let filtered = filterSections(sections, {
         feature: req.query.feature,
         run: req.query.run,

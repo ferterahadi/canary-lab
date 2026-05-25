@@ -25,7 +25,7 @@ Typical flow:
 2. Add Playwright coverage under a Canary Lab feature folder.
 3. Start or claim the run through **MCP**. Custom clients can use the **local HTTP API**. Users can also start runs from the **UI**.
 4. Canary Lab applies the selected envset, starts services, runs Playwright, and records evidence.
-5. On failure, the agent reads the saved context, fixes the app or test, and writes `.rerun` or `.restart`.
+5. On failure, the agent reads the saved context, fixes the app or test, writes a diagnosis note, and signals `rerun` or `restart` through MCP. Manual/local healing can still use the signal files directly.
 6. When the run passes, export an evaluation report if review evidence is needed.
 
 ## What Canary Lab Owns
@@ -112,8 +112,8 @@ The UI also has an Add Test flow. It can turn a PRD or uploaded document into a 
 npx canary-lab init <folder>
 npx canary-lab setup
 npx canary-lab ui
-npx canary-lab mcp
-npx canary-lab mcp doctor
+npx canary-lab mcp [--profile repair|verify|full]
+npx canary-lab mcp doctor [--profile repair|verify|full]
 npx canary-lab new feature <name> --description "..."
 npx canary-lab env apply <feature> <set>
 npx canary-lab env revert <feature>
@@ -124,7 +124,7 @@ Notes:
 
 - `ui` is the primary human workflow.
 - `setup` repairs or refreshes workspace registration, Codex/Claude skills, and MCP configuration when the matching CLI is available.
-- `mcp` bridges local AI clients into the running UI server.
+- `mcp` bridges local AI clients into the running UI server. It defaults to the `repair` profile for agent repair loops; use `--profile verify` for deployment verification tools or `--profile full` for the complete low-level surface.
 - `new feature` and `env` are deterministic wrappers for scripts and agents.
 - `upgrade` syncs scaffolded docs and skills in an existing project. It is not a dependency upgrade command.
 
@@ -186,7 +186,7 @@ The report summarizes what was tested, the result, and the evidence. Each test c
 
 ## Agent Repair Workflow
 
-When a Playwright test fails, an agent can fix the app or test and write a signal file:
+When a Playwright test fails, an agent can fix the app or test and signal the next runner action through MCP. The local signal files remain the underlying manual mechanism:
 
 - `signals/.restart` for service or app changes
 - `signals/.rerun` for test or config-only changes
@@ -230,7 +230,7 @@ Agents should start from:
 
 ## Runtime Model
 
-A run starts from the UI, MCP bridge, or local HTTP API. Canary Lab starts services, waits for health checks, runs Playwright, writes run artifacts, and shows the result in the UI. Failed runs can enter manual heal or auto-heal. The next Playwright pass is triggered by `.rerun` or `.restart`.
+A run starts from the UI, MCP bridge, or local HTTP API. Canary Lab starts services, waits for health checks, runs Playwright, writes run artifacts, and shows the result in the UI. Failed runs can enter manual heal or auto-heal. The next Playwright pass is triggered by MCP `signal_run` or by `.rerun` / `.restart` signal files.
 
 ## For Contributors
 

@@ -82,6 +82,39 @@ describe('GET /api/journal', () => {
     expect((res.json() as Array<{ iteration: number }>).map((b) => b.iteration)).toEqual([2])
   })
 
+  it('shows legacy external-client run journals by inferring missing run and feature fields', async () => {
+    const app = await build()
+    const runDir = runDirFor(logsDir, 'r-external')
+    const paths = buildRunPaths(runDir)
+    fs.mkdirSync(runDir, { recursive: true })
+    fs.writeFileSync(paths.manifestPath, JSON.stringify({
+      runId: 'r-external',
+      feature: 'foo',
+      startedAt: '2026-05-25T08:00:00.000Z',
+      status: 'healing',
+      healCycles: 2,
+      services: [],
+    }))
+    fs.writeFileSync(paths.diagnosisJournalPath, `## Iteration 2
+
+Hypothesis: route was not registered
+
+Fix: enabled the module
+`)
+
+    const res = await app.inject({ method: 'GET', url: '/api/journal?feature=foo&run=r-external' })
+    expect(res.statusCode).toBe(200)
+    expect(res.json()).toMatchObject([
+      {
+        iteration: 2,
+        timestamp: null,
+        run: 'r-external',
+        feature: 'foo',
+        body: expect.stringContaining('Fix: enabled the module'),
+      },
+    ])
+  })
+
   it('rejects path-like run ids without reading the root journal', async () => {
     const app = await build()
     const res = await app.inject({ method: 'GET', url: '/api/journal?run=..%2Fsecret' })
