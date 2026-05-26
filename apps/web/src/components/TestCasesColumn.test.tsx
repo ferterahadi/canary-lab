@@ -331,6 +331,57 @@ describe('TestCasesColumn', () => {
     expect(container.textContent).not.toContain('No test body available.')
   })
 
+  it('hydrates selected run summary tests by title when source lines drift', async () => {
+    vi.mocked(getFeatureTests).mockResolvedValue([
+      {
+        file: '/tmp/features/alpha/e2e/current.spec.ts',
+        tests: [
+          {
+            name: 'retrieves a REJECTED record with reason populated',
+            line: 396,
+            bodySource: "{\n  await page.goto('/line/rejected')\n  await expect(page).toHaveText('REJECTED')\n}",
+            steps: [],
+          },
+        ],
+      },
+    ])
+
+    await act(async () => {
+      root.render(
+        <TestCasesColumn
+          feature="alpha"
+          activeRunStatus="running"
+          activeRunSummary={{
+            complete: false,
+            total: 1,
+            passed: 0,
+            passedNames: [],
+            failed: [],
+            running: {
+              name: 'test-case-retrieves-a-rejected-record-with-reason-populated',
+              location: '/tmp/features/alpha/e2e/current.spec.ts:396:1',
+            },
+            knownTests: [
+              {
+                id: 'test-id-rejected',
+                name: 'test-case-retrieves-a-rejected-record-with-reason-populated',
+                title: 'retrieves a REJECTED record with reason populated',
+                location: '/tmp/features/alpha/e2e/current.spec.ts:393',
+              },
+            ],
+          }}
+        />,
+      )
+    })
+
+    await act(async () => {
+      container.querySelector('button')?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+
+    expect(container.textContent).toContain("page.goto('/line/rejected')")
+    expect(container.textContent).not.toContain('No test body available.')
+  })
+
   it('uses the selected run summary for counts and duplicate-title statuses', async () => {
     vi.mocked(getFeatureTests).mockResolvedValue([
       {

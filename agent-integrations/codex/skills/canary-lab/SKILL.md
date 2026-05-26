@@ -30,7 +30,7 @@ Before calling Canary Lab MCP tools, make sure the workspace and UI server are a
 7. Call `wait_for_heal_task` with the same `session_id`.
 8. If it returns `passed`, summarize using `result.counts.statusLine` and stop.
 9. If it returns `failed`, report the terminal status using `result.counts.statusLine` and relevant failure summary.
-10. If it returns `needs_heal`, inspect `context.healPrompt.startHere` first, then use `context.healPrompt.resources`, the returned heal context, and the checked-out source code.
+10. If it returns `needs_heal`, treat the returned heal context as the compact first-stop packet: inspect `context.healPrompt.startHere` first, then use `context.healPrompt.resources`, current failures, and the checked-out source code. Call `get_run_snapshot` only when you need the verbose raw summary, full counts, or deeper debugging fields.
 11. Fix app/service code, not tests, unless the test is provably wrong.
 12. Call `signal_run` with `kind: "rerun"` for test-only/app-code fixes that do not need service restart, or `kind: "restart"` when services or env need restarting. Include `hypothesis` and `fixDescription`; Canary Lab writes the journal from that signal and its observed git diff.
 13. Do not call a separate journal-writing tool; the runner records failing tests, changed files, signal, outcome, and diff.
@@ -48,6 +48,6 @@ Before calling Canary Lab MCP tools, make sure the workspace and UI server are a
 - Use `result.counts.statusLine`, `result.counts.passed`, or `summary.passed` for pass counts.
 - Treat tests absent from `passedNames`, `failed`, and `skippedNames` as not run, not passed.
 - Do not call `abort_run` unless the user asks, and pass the required confirmation only for an explicit abort/kill/stop-everything request.
-- Prefer `get_heal_context` when you need to refresh failure artifacts outside the wait loop.
+- Prefer compact `get_heal_context` when you need to refresh failure artifacts outside the wait loop. Use `get_run_snapshot` only for verbose fallback/debugging context.
 - Record concise, factual journal notes. Do not paste raw transcripts.
 - When the run is waiting for external heal, Canary Lab is the source of truth for status, artifacts, and rerun/restart signals.

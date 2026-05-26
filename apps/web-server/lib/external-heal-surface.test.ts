@@ -3,7 +3,7 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import type { RunDetail } from './run-store'
-import { buildExternalHealContext, normalizeRunCounts, writeHealSignal } from './external-heal-surface'
+import { buildExternalHealContext, buildExternalRunSnapshot, normalizeRunCounts, writeHealSignal } from './external-heal-surface'
 import { buildRunPaths, runDirFor } from './runtime/run-paths'
 
 let tmpDir: string
@@ -49,6 +49,7 @@ function detailFor(runId: string): RunDetail {
           error: { message: 'boom', snippet: 'expect(x)' },
           location: 'e2e/checkout.spec.ts:12:3',
           retry: 1,
+          logFiles: ['failed/checkout-fails/svc-app.log'],
         },
       ],
       skipped: 0,
@@ -72,7 +73,7 @@ function detailFor(runId: string): RunDetail {
 }
 
 describe('buildExternalHealContext', () => {
-  it('builds the shared heal context used by MCP and HTTP routes', () => {
+  it('builds compact agent-first heal context used by MCP and HTTP routes', () => {
     const runId = 'run-1'
     const runDir = runDirFor(logsDir, runId)
     const paths = buildRunPaths(runDir)
@@ -93,15 +94,21 @@ describe('buildExternalHealContext', () => {
       env: 'local',
       status: 'healing',
       counts: { statusLine: '1/3 passed, 1 failed, 1 not run' },
-      healIndexMarkdown: '# Heal Index\n',
-      journalMarkdown: '# Journal\n',
-      artifactsBase: '/api/runs/run-1/artifacts/',
+      healIndex: {
+        path: paths.healIndexPath,
+        markdown: '# Heal Index\n',
+      },
+      journal: {
+        path: paths.diagnosisJournalPath,
+        markdown: '# Journal\n',
+      },
       failedTests: [
         {
           name: 'checkout fails',
           error: { message: 'boom', snippet: 'expect(x)' },
           location: 'e2e/checkout.spec.ts:12:3',
           retry: 1,
+          logFiles: ['failed/checkout-fails/svc-app.log'],
           artifacts: [
             {
               name: 'trace',
@@ -115,9 +122,15 @@ describe('buildExternalHealContext', () => {
         source: 'canary-lab/heal-agent-map',
       },
     })
+    expect(context).not.toHaveProperty('summary')
+    expect(context).not.toHaveProperty('healIndexMarkdown')
+    expect(context).not.toHaveProperty('journalMarkdown')
+    expect(context).not.toHaveProperty('artifactsBase')
+    expect(context.counts).not.toHaveProperty('notRunNames')
+    expect(JSON.stringify(context)).not.toContain('not run yet')
   })
 
-  it('normalizes counts from the run summary instead of duplicate title names', () => {
+  it('keeps compact counts when normalizing duplicate title names', () => {
     const context = buildExternalHealContext({
       detail: {
         ...detailFor('run-duplicates'),
@@ -144,6 +157,47 @@ describe('buildExternalHealContext', () => {
       failed: 0,
       notRun: 1,
       statusLine: '1/2 passed, 0 failed, 1 not run',
+    })
+    expect(context.counts).not.toHaveProperty('notRunNames')
+  })
+})
+
+describe('buildExternalRunSnapshot', () => {
+  it('preserves the full external heal snapshot shape for debugging fallback', () => {
+    const runId = 'run-1'
+    const runDir = runDirFor(logsDir, runId)
+    const paths = buildRunPaths(runDir)
+    fs.mkdirSync(runDir, { recursive: true })
+    fs.writeFileSync(paths.manifestPath, JSON.stringify(detailFor(runId).manifest))
+    fs.writeFileSync(paths.healIndexPath, '# Heal Index\n')
+    fs.writeFileSync(paths.diagnosisJournalPath, '# Journal\n')
+
+    const snapshot = buildExternalRunSnapshot({
+      detail: detailFor(runId),
+      logsDir,
+      projectRoot: tmpDir,
+    })
+
+    expect(snapshot).toMatchObject({
+      runId,
+      feature: 'checkout',
+      summary: {
+        knownTests: [
+          { name: 'already passed' },
+          { name: 'checkout fails' },
+          { name: 'not run yet' },
+        ],
+      },
+      counts: {
+        notRunNames: ['not run yet'],
+        statusLine: '1/3 passed, 1 failed, 1 not run',
+      },
+      healIndexMarkdown: '# Heal Index\n',
+      journalMarkdown: '# Journal\n',
+      artifactsBase: '/api/runs/run-1/artifacts/',
+      healPrompt: {
+        source: 'canary-lab/heal-agent-map',
+      },
     })
   })
 })

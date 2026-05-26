@@ -11,7 +11,7 @@ import type {
   ExternalHealClientKind,
   ExternalHealSessionStatus,
 } from '../lib/runtime/manifest'
-import { buildExternalHealContext, writeHealSignal } from '../lib/external-heal-surface'
+import { buildExternalHealContext, buildExternalRunSnapshot, writeHealSignal } from '../lib/external-heal-surface'
 import { runDirFor } from '../lib/runtime/run-paths'
 import {
   isActiveRunStatus,
@@ -151,8 +151,8 @@ export async function externalHealRoutes(
     },
   )
 
-  // GET /api/runs/:runId/heal-context — one-shot bundle for the external client
-  // to feed its agent. Reads from existing on-disk artifacts so the orchestrator
+  // GET /api/runs/:runId/heal-context — compact agent-first bundle for the
+  // external client. Reads from existing on-disk artifacts so the orchestrator
   // doesn't need to know the external client exists.
   app.get<{ Params: { runId: string } }>(
     '/api/runs/:runId/heal-context',
@@ -163,6 +163,20 @@ export async function externalHealRoutes(
         return { error: 'run not found' }
       }
       return buildExternalHealContext({ detail, logsDir: deps.store.logsDir })
+    },
+  )
+
+  // GET /api/runs/:runId/run-snapshot — verbose fallback with the full
+  // external-heal snapshot, including raw summary and full count lists.
+  app.get<{ Params: { runId: string } }>(
+    '/api/runs/:runId/run-snapshot',
+    async (req, reply) => {
+      const detail = deps.store.get(req.params.runId)
+      if (!detail) {
+        reply.code(404)
+        return { error: 'run not found' }
+      }
+      return buildExternalRunSnapshot({ detail, logsDir: deps.store.logsDir })
     },
   )
 

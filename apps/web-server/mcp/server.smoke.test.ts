@@ -31,6 +31,7 @@ const REPAIR_TOOLS = [
   'cancel_heal',
   'get_heal_context',
   'get_run',
+  'get_run_snapshot',
   'heartbeat',
   'list_features',
   'list_runs',
@@ -61,6 +62,7 @@ const FULL_TOOLS = [
   'get_heal_context',
   'get_run',
   'get_run_actions',
+  'get_run_snapshot',
   'get_verification_config',
   'get_verification_result',
   'heartbeat',
@@ -310,7 +312,7 @@ describe('MCP HTTP server (smoke)', () => {
     }
   })
 
-  it('get_heal_context returns the structured heal prompt map', async () => {
+  it('get_heal_context returns compact context and get_run_snapshot returns the full fallback', async () => {
     const projectRoot = path.resolve(__dirname, '..', '..', '..', 'templates', 'project')
     const logsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-context-')))
     const { app, runStore } = await createServer({ projectRoot, logsDir, ptyFactory: inertPtyFactory })
@@ -332,6 +334,25 @@ describe('MCP HTTP server (smoke)', () => {
       const runDir = runDirFor(logsDir, 'context-map')
       fs.writeFileSync(path.join(runDir, 'heal-index.md'), '# Heal Index\n')
       fs.writeFileSync(path.join(runDir, 'diagnosis-journal.md'), '# Journal\n')
+      fs.writeFileSync(path.join(runDir, 'e2e-summary.json'), JSON.stringify({
+        complete: false,
+        total: 3,
+        passed: 1,
+        passedNames: ['test-1'],
+        knownTests: [
+          { name: 'test-1' },
+          { name: 'test-2' },
+          { name: 'test-3' },
+        ],
+        failed: [
+          {
+            name: 'test-2',
+            error: { message: 'boom' },
+            location: 'e2e/example.spec.ts:10',
+            logFiles: ['failed/test-2/svc-app.log'],
+          },
+        ],
+      }))
       fs.mkdirSync(path.join(runDir, 'failed', 'test-case', 'trace-extract'), { recursive: true })
       fs.writeFileSync(path.join(runDir, 'failed', 'test-case', 'trace-extract', 'failure-summary.md'), '# Trace\n')
 
@@ -341,6 +362,37 @@ describe('MCP HTTP server (smoke)', () => {
       })
       const body = JSON.parse((result.content?.[0] as { text: string }).text)
 
+      expect(body).toMatchObject({
+        runId: 'context-map',
+        feature: 'broken_todo_api',
+        counts: {
+          totalKnown: 3,
+          passed: 1,
+          failed: 1,
+          skipped: 0,
+          notRun: 1,
+          statusLine: '1/3 passed, 1 failed, 1 not run',
+        },
+        healIndex: {
+          path: path.join(runDir, 'heal-index.md'),
+          markdown: '# Heal Index\n',
+        },
+        journal: {
+          path: path.join(runDir, 'diagnosis-journal.md'),
+          markdown: '# Journal\n',
+        },
+        failedTests: [
+          {
+            name: 'test-2',
+            logFiles: ['failed/test-2/svc-app.log'],
+          },
+        ],
+      })
+      expect(body).not.toHaveProperty('summary')
+      expect(body).not.toHaveProperty('healIndexMarkdown')
+      expect(body).not.toHaveProperty('journalMarkdown')
+      expect(body.counts).not.toHaveProperty('notRunNames')
+      expect(JSON.stringify(body)).not.toContain('test-3')
       expect(body.healPrompt).toMatchObject({
         source: 'canary-lab/heal-agent-map',
         mode: 'service',
@@ -363,6 +415,29 @@ describe('MCP HTTP server (smoke)', () => {
         'trace-extract',
         'journal',
       ])
+
+      const snapshotResult = await client.callTool({
+        name: 'get_run_snapshot',
+        arguments: { runId: 'context-map' },
+      })
+      const snapshot = JSON.parse((snapshotResult.content?.[0] as { text: string }).text)
+      expect(snapshot).toMatchObject({
+        runId: 'context-map',
+        summary: {
+          knownTests: [
+            { name: 'test-1' },
+            { name: 'test-2' },
+            { name: 'test-3' },
+          ],
+        },
+        counts: {
+          notRunNames: ['test-3'],
+          statusLine: '1/3 passed, 1 failed, 1 not run',
+        },
+        healIndexMarkdown: '# Heal Index\n',
+        journalMarkdown: '# Journal\n',
+        artifactsBase: '/api/runs/context-map/artifacts/',
+      })
     } finally {
       if (client) await client.close().catch(() => undefined)
       await app.close()
@@ -781,10 +856,19 @@ describe('MCP HTTP server (smoke)', () => {
         arguments: { runId: 'wait-claim', session_id: 'sess-claude', timeout_ms: 1000 },
       })
 
-      expect(JSON.parse((result.content?.[0] as { text: string }).text)).toMatchObject({
+      const body = JSON.parse((result.content?.[0] as { text: string }).text)
+      expect(body).toMatchObject({
         type: 'needs_heal',
         runId: 'wait-claim',
+        context: {
+          runId: 'wait-claim',
+          healIndex: {
+            markdown: '# Heal Index\n',
+          },
+        },
       })
+      expect(body.context).not.toHaveProperty('summary')
+      expect(body.context).not.toHaveProperty('healIndexMarkdown')
       expect(runStore.get('wait-claim')?.manifest.externalHealSession).toMatchObject({
         sessionId: 'sess-claude',
         clientKind: 'claude-desktop',
