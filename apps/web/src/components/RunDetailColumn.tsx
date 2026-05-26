@@ -212,11 +212,10 @@ export function RunDetailColumn({
             <ManualHealBanner runId={m.runId} signalPaths={m.signalPaths} />
           )}
           <div className="min-h-0 flex-1 overflow-hidden">
-            {m.healMode === 'external' && m.externalHealSession ? (
-              // External heal: the agent transcript lives in the user's
-              // Claude / Codex window, not in Canary Lab. Render the dedicated
-              // status panel and skip both AgentSessionView (no JSONL to tail)
-              // and PaneTerminal (no local PTY to attach).
+            {m.healMode === 'external' ? (
+              // External heal: there is no local PTY to attach. The agent
+              // transcript lives in the user's Claude / Codex window once a
+              // client claims the run; before that, show the parked state.
               <ExternalHealPanel
                 runId={m.runId}
                 runStatus={m.status}

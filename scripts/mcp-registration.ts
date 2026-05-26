@@ -14,12 +14,14 @@ const CODEX_REMOVE_ARGS = ['mcp', 'remove', SERVER_NAME]
 const CLAUDE_ADD_ARGS = [
   'mcp',
   'add',
-  '--transport',
-  'http',
   '--scope',
   'user',
   SERVER_NAME,
-  'http://localhost:7421/mcp',
+  '--',
+  'npx',
+  '-y',
+  'canary-lab',
+  'mcp',
 ]
 const CLAUDE_REMOVE_ARGS = ['mcp', 'remove', SERVER_NAME, '-s', 'user']
 
@@ -76,8 +78,9 @@ function expectedConfig(target: McpRegistrationTarget, output: string): boolean 
     return /\bcommand:\s*npx\b/.test(output) &&
       /\bargs:\s*-y\s+canary-lab\s+mcp\b/.test(output)
   }
-  return /\bType:\s*http\b/i.test(output) &&
-    /\bURL:\s*http:\/\/localhost:7421\/mcp\b/.test(output)
+  return /\bType:\s*stdio\b/i.test(output) &&
+    /\bCommand:\s*npx\b/i.test(output) &&
+    /\bArgs:\s*-y\s+canary-lab\s+mcp\b/i.test(output)
 }
 
 function commandAvailable(command: string): boolean {

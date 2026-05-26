@@ -156,7 +156,7 @@ describe('setup', () => {
     expect(fs.existsSync(path.join(home, '.claude', 'skills', 'canary-lab', 'SKILL.md'))).toBe(true)
     expect(mocks.execFileSync).toHaveBeenCalledWith(
       'claude',
-      ['mcp', 'add', '--transport', 'http', '--scope', 'user', 'canary-lab', 'http://localhost:7421/mcp'],
+      ['mcp', 'add', '--scope', 'user', 'canary-lab', '--', 'npx', '-y', 'canary-lab', 'mcp'],
       { stdio: 'ignore' },
     )
   })
@@ -185,7 +185,7 @@ describe('setup', () => {
     )
     expect(mocks.execFileSync).toHaveBeenCalledWith(
       'claude',
-      ['mcp', 'add', '--transport', 'http', '--scope', 'user', 'canary-lab', 'http://localhost:7421/mcp'],
+      ['mcp', 'add', '--scope', 'user', 'canary-lab', '--', 'npx', '-y', 'canary-lab', 'mcp'],
       { stdio: 'ignore' },
     )
   })

@@ -10,14 +10,13 @@ import { isTerminalRunStatus } from '../../../../shared/run-state'
 interface Props {
   runId: string
   runStatus: RunStatus
-  session: ExternalHealSession
+  session?: ExternalHealSession
 }
 
-// The "Heal agent" tab when an external AI client (Claude Desktop / Codex /
-// Claude CLI / Codex CLI via MCP) holds the heal claim for this run. We
-// intentionally do NOT mirror the agent's transcript here — that lives in the
-// user's external session window. This panel surfaces who's healing, how
-// lively the connection is, and a clear pointer back to the external client.
+// The "Heal agent" tab when external heal mode is active. When an external
+// client has claimed the run, its transcript lives in the user's Claude/Codex
+// session rather than Canary Lab. When no claim exists yet, this panel makes
+// that parked state explicit instead of rendering an empty local terminal.
 export function ExternalHealPanel({ runId: _runId, runStatus, session }: Props) {
   const [now, setNow] = useState(() => Date.now())
   const [opening, setOpening] = useState<'claude' | 'codex' | null>(null)
@@ -29,24 +28,26 @@ export function ExternalHealPanel({ runId: _runId, runStatus, session }: Props) 
   }, [])
 
   const heartbeatMs = useMemo(() => {
+    if (!session) return null
     const t = Date.parse(session.lastHeartbeatAt)
     return Number.isFinite(t) ? t : null
-  }, [session.lastHeartbeatAt])
+  }, [session])
 
   const ageMs = heartbeatMs == null ? null : Math.max(0, now - heartbeatMs)
   const heartbeatColor = ageColor(ageMs)
   const heartbeatLabel = ageLabel(ageMs)
 
   const terminalStatus = isTerminalRunStatus(runStatus) ? runStatus : null
-  const displayedStatus = terminalStatus ?? session.status
-  const isDisconnected = !terminalStatus && session.status === 'disconnected'
+  const displayedStatus = terminalStatus ?? session?.status ?? 'waiting'
+  const isDisconnected = !terminalStatus && session?.status === 'disconnected'
   const isLive =
-    !terminalStatus && (
+    Boolean(session) && !terminalStatus && (
       session.status === 'connected' ||
       session.status === 'healing' ||
       session.status === 'running-tests'
     )
-  const desktopAgent = clientKindToDesktopAgent(session.clientKind)
+  const clientKind = session?.clientKind ?? 'other'
+  const desktopAgent = session ? clientKindToDesktopAgent(session.clientKind) : null
 
   const onOpenAgent = async (agent: 'claude' | 'codex'): Promise<void> => {
     setOpening(agent)
@@ -60,7 +61,7 @@ export function ExternalHealPanel({ runId: _runId, runStatus, session }: Props) 
     }
   }
 
-  const tint = clientTint(session.clientKind)
+  const tint = clientTint(clientKind)
 
   return (
     <div className="@container flex h-full min-h-0 flex-col overflow-y-auto p-3 @[400px]:p-4">
@@ -72,7 +73,7 @@ export function ExternalHealPanel({ runId: _runId, runStatus, session }: Props) 
         }}
       >
         <div className="flex items-start gap-3 @[480px]:gap-4">
-          <BrandMark clientKind={session.clientKind} tint={tint} />
+          <BrandMark clientKind={clientKind} tint={tint} />
           <div className="min-w-0 flex-1 pt-0.5">
             <div
               className="text-[9px] font-medium uppercase @[320px]:text-[10px]"
@@ -88,7 +89,7 @@ export function ExternalHealPanel({ runId: _runId, runStatus, session }: Props) 
                 lineHeight: 1.2,
               }}
             >
-              {headlineFor(session.clientKind)}
+              {headlineFor(clientKind, Boolean(session))}
             </h2>
           </div>
         </div>
@@ -109,7 +110,7 @@ export function ExternalHealPanel({ runId: _runId, runStatus, session }: Props) 
             />
             {heartbeatLabel}
           </span>
-          {session.cycleCount > 0 && (
+          {session && session.cycleCount > 0 && (
             <span
               className="inline-flex items-center gap-1.5"
               style={{ color: 'var(--text-muted)' }}
@@ -125,9 +126,11 @@ export function ExternalHealPanel({ runId: _runId, runStatus, session }: Props) 
           style={{ color: 'var(--text-secondary)' }}
         >
           {terminalStatus
-            ? terminalMessage(terminalStatus, session.clientKind)
+            ? terminalMessage(terminalStatus, clientKind, Boolean(session))
             : isDisconnected
             ? `Lost connection to ${clientLabel(session.clientKind)}. The run is paused waiting for you to reconnect — Canary Lab keeps the claim, so the same session id can resume right where it left off.`
+            : !session
+            ? 'No external client has claimed this run yet. Canary Lab is waiting for a Claude or Codex MCP session to claim the run and send a restart or rerun signal.'
             : `Agent output is streaming in your ${clientLabel(session.clientKind)} window. This panel tracks the run; open your conversation to follow the agent's reasoning.`}
         </p>
 
@@ -213,14 +216,57 @@ function BrandMark({
     <div
       className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg @[320px]:h-12 @[320px]:w-12 @[320px]:rounded-xl @[480px]:h-14 @[480px]:w-14"
       style={{
-        background: `color-mix(in srgb, ${tint} 14%, transparent)`,
-        border: `1px solid color-mix(in srgb, ${tint} 30%, transparent)`,
+        background: `linear-gradient(135deg, color-mix(in srgb, ${tint} 22%, transparent), color-mix(in srgb, ${tint} 8%, transparent))`,
+        border: `1px solid color-mix(in srgb, ${tint} 38%, var(--border-default))`,
         color: tint,
-        fontFamily: 'var(--font-mono)',
+        boxShadow: `inset 0 0 0 1px color-mix(in srgb, white 7%, transparent), 0 10px 24px color-mix(in srgb, ${tint} 14%, transparent)`,
       }}
-      aria-hidden
+      role="img"
+      aria-label="External client"
     >
-      <span className="text-base font-semibold">·</span>
+      <svg
+        viewBox="0 0 32 32"
+        width="28"
+        height="28"
+        fill="none"
+        aria-hidden="true"
+        className="h-6 w-6 @[320px]:h-7 @[320px]:w-7"
+      >
+        <rect
+          x="5"
+          y="7"
+          width="15"
+          height="12"
+          rx="2.5"
+          fill="color-mix(in srgb, currentColor 12%, transparent)"
+          stroke="currentColor"
+          strokeWidth="1.6"
+        />
+        <path
+          d="M9 12.5 11.8 15 9 17.5M13.6 17.5h3.2"
+          stroke="currentColor"
+          strokeWidth="1.6"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        <path
+          d="M20 11h3.5c1.7 0 2.5.8 2.5 2.4v5.2c0 1.6-.8 2.4-2.5 2.4H20"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          opacity="0.8"
+        />
+        <path
+          d="M20 15h4.2M20 19h4.2"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          opacity="0.55"
+        />
+        <circle cx="26" cy="11" r="1.7" fill="currentColor" />
+        <circle cx="26" cy="21" r="1.7" fill="currentColor" opacity="0.78" />
+      </svg>
     </div>
   )
 }
@@ -278,7 +324,17 @@ function statusPalette(status: PanelStatus): { fg: string; bg: string; border: s
 function terminalMessage(
   status: Extract<RunStatus, 'passed' | 'failed' | 'aborted'>,
   clientKind: ExternalHealSession['clientKind'],
+  hasSession: boolean,
 ): string {
+  if (!hasSession) {
+    if (status === 'aborted') {
+      return 'This run was aborted. No external client is active for this run.'
+    }
+    if (status === 'failed') {
+      return 'This run finished failed. No external client is actively waiting for a signal.'
+    }
+    return 'This run passed. No external client is active for this run.'
+  }
   const agent = clientLabel(clientKind)
   if (status === 'aborted') {
     return `This run was aborted. The external ${agent} heal session is no longer active for this run.`
@@ -314,13 +370,17 @@ function clientLabel(kind: ExternalHealSession['clientKind']): string {
   }
 }
 
-function headlineFor(kind: ExternalHealSession['clientKind']): string {
+function headlineFor(
+  kind: ExternalHealSession['clientKind'],
+  hasSession: boolean,
+): string {
+  if (!hasSession) return 'External Client'
   // Keep the heading short so it never wraps. The icon + colour already
   // identify the brand; the longer `clientLabel` (with the Desktop/CLI
   // qualifier) is reserved for the description copy where it has room.
   if (kind.startsWith('claude')) return 'Healing via Claude'
   if (kind.startsWith('codex')) return 'Healing via Codex'
-  return 'Healing via external client'
+  return 'External Client'
 }
 
 function clientTint(kind: ExternalHealSession['clientKind']): string {

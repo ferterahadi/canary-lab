@@ -3,7 +3,7 @@ import path from 'path'
 import { Writable } from 'stream'
 import { createServer } from '../apps/web-server/server'
 import type { PtyFactory } from '../apps/web-server/lib/runtime/pty-spawner'
-import { bridge, doctor, main } from './mcp'
+import { bridge, doctor, ensureMcpServerReachable, main } from './mcp'
 
 const inertPtyFactory: PtyFactory = () => ({
   pid: 0,
@@ -65,7 +65,54 @@ describe('canary-lab mcp', () => {
 
   it('bridge reports a clear error when the UI MCP server is not reachable', async () => {
     const stderr = new BufferWritable()
-    await expect(bridge('http://127.0.0.1:9/mcp', { stderr })).resolves.toBe(false)
+    await expect(bridge('http://127.0.0.1:9/mcp', { stderr, autoStartUi: false })).resolves.toBe(false)
+    expect(stderr.text()).toContain('Start the UI first: canary-lab ui')
+  })
+
+  it('auto-starts the UI and waits for health when the default local MCP server is down', async () => {
+    const stderr = new BufferWritable()
+    let started = false
+    let healthChecks = 0
+    const fetchMock: typeof fetch = async (url) => {
+      healthChecks += 1
+      if (String(url).endsWith('/mcp/health') && started) {
+        return new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        })
+      }
+      throw new TypeError('fetch failed')
+    }
+
+    await expect(ensureMcpServerReachable('http://127.0.0.1:7421/mcp', {
+      stderr,
+      fetch: fetchMock,
+      startUi: async () => { started = true },
+      startupPollMs: 1,
+      startupTimeoutMs: 50,
+    })).resolves.toBe(true)
+
+    expect(started).toBe(true)
+    expect(healthChecks).toBeGreaterThan(1)
+    expect(stderr.text()).toContain('starting `canary-lab ui --no-open`')
+  })
+
+  it('does not auto-start the UI for custom MCP URLs', async () => {
+    const stderr = new BufferWritable()
+    let started = false
+    const fetchMock: typeof fetch = async () => {
+      throw new TypeError('fetch failed')
+    }
+
+    await expect(ensureMcpServerReachable('http://127.0.0.1:9/mcp', {
+      stderr,
+      fetch: fetchMock,
+      startUi: async () => { started = true },
+      startupPollMs: 1,
+      startupTimeoutMs: 5,
+    })).resolves.toBe(false)
+
+    expect(started).toBe(false)
     expect(stderr.text()).toContain('Start the UI first: canary-lab ui')
   })
 

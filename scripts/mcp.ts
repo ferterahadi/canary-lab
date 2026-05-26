@@ -1,5 +1,8 @@
 #!/usr/bin/env node
 
+import fs from 'fs'
+import path from 'path'
+import { spawn } from 'child_process'
 import { Readable, Writable } from 'stream'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
@@ -12,6 +15,8 @@ import {
 } from '../apps/web-server/mcp/tools'
 
 const DEFAULT_MCP_URL = 'http://127.0.0.1:7421/mcp'
+const DEFAULT_UI_STARTUP_TIMEOUT_MS = 15_000
+const DEFAULT_UI_STARTUP_POLL_MS = 250
 
 export interface McpCommandOptions {
   profile?: CanaryLabMcpProfile
@@ -20,6 +25,10 @@ export interface McpCommandOptions {
   stderr?: Writable
   fetch?: typeof fetch
   exit?: (code: number) => void
+  autoStartUi?: boolean
+  startUi?: (stderr: Writable) => Promise<void> | void
+  startupTimeoutMs?: number
+  startupPollMs?: number
 }
 
 export async function main(
@@ -49,6 +58,7 @@ export async function doctor(url: string, opts: McpCommandOptions = {}): Promise
   const fetchFn = opts.fetch ?? fetch
   const profile = opts.profile ?? 'repair'
   const profileUrl = urlWithProfile(url, profile)
+  if (!await ensureMcpServerReachable(url, opts)) return false
   try {
     const healthUrl = healthUrlFor(profileUrl)
     const health = await fetchFn(healthUrl)
@@ -88,14 +98,7 @@ export async function bridge(url: string, opts: McpCommandOptions = {}): Promise
   const stderr = opts.stderr ?? process.stderr
   const fetchFn = opts.fetch ?? fetch
   const profileUrl = urlWithProfile(url, opts.profile ?? 'repair')
-  try {
-    const health = await fetchFn(healthUrlFor(profileUrl))
-    if (!health.ok) throw new Error(`/mcp/health returned ${health.status}`)
-  } catch (err) {
-    stderr.write(`Canary Lab MCP is not reachable at ${url}: ${(err as Error).message}\n`)
-    stderr.write(`Start the UI first: canary-lab ui\n`)
-    return false
-  }
+  if (!await ensureMcpServerReachable(profileUrl, opts)) return false
 
   const stdio = new StdioServerTransport(opts.stdin, opts.stdout)
   const http = new StreamableHTTPClientTransport(new URL(profileUrl), { fetch: fetchFn })
@@ -124,6 +127,103 @@ export async function bridge(url: string, opts: McpCommandOptions = {}): Promise
   await http.start()
   await stdio.start()
   return true
+}
+
+export async function ensureMcpServerReachable(
+  url: string,
+  opts: McpCommandOptions = {},
+): Promise<boolean> {
+  const stderr = opts.stderr ?? process.stderr
+  const fetchFn = opts.fetch ?? fetch
+  const firstCheck = await checkHealth(url, fetchFn)
+  if (firstCheck.ok) return true
+
+  if (opts.autoStartUi === false || !isDefaultLocalMcpUrl(url)) {
+    stderr.write(`Canary Lab MCP is not reachable at ${stripProfile(url)}: ${firstCheck.error}\n`)
+    stderr.write('Start the UI first: canary-lab ui\n')
+    return false
+  }
+
+  stderr.write('Canary Lab UI is not running; starting `canary-lab ui --no-open`...\n')
+  try {
+    await (opts.startUi ?? startUiInBackground)(stderr)
+  } catch (err) {
+    stderr.write(`Failed to start Canary Lab UI: ${(err as Error).message}\n`)
+    stderr.write('Start the UI manually: canary-lab ui\n')
+    return false
+  }
+
+  const timeoutMs = opts.startupTimeoutMs ?? DEFAULT_UI_STARTUP_TIMEOUT_MS
+  const pollMs = opts.startupPollMs ?? DEFAULT_UI_STARTUP_POLL_MS
+  const deadline = Date.now() + timeoutMs
+  let lastError = firstCheck.error
+  while (Date.now() <= deadline) {
+    await sleep(pollMs)
+    const check = await checkHealth(url, fetchFn)
+    if (check.ok) return true
+    lastError = check.error
+  }
+
+  stderr.write(`Canary Lab MCP is not reachable at ${stripProfile(url)} after starting the UI: ${lastError}\n`)
+  stderr.write('Start the UI manually: canary-lab ui\n')
+  return false
+}
+
+async function checkHealth(
+  url: string,
+  fetchFn: typeof fetch,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  try {
+    const health = await fetchFn(healthUrlFor(url))
+    if (!health.ok) return { ok: false, error: `/mcp/health returned ${health.status}` }
+    return { ok: true }
+  } catch (err) {
+    return { ok: false, error: (err as Error).message }
+  }
+}
+
+function startUiInBackground(stderr: Writable): void {
+  const child = spawn(process.execPath, [resolveCliPath(), 'ui', '--no-open'], {
+    cwd: process.cwd(),
+    detached: true,
+    env: process.env,
+    stdio: ['ignore', 'ignore', 'pipe'],
+  })
+  child.stderr?.on('data', (chunk: Buffer | string) => {
+    stderr.write(`[canary-lab ui] ${chunk.toString()}`)
+  })
+  child.unref()
+}
+
+function resolveCliPath(): string {
+  const siblingCli = path.join(__dirname, 'cli.js')
+  if (fs.existsSync(siblingCli)) return siblingCli
+  return process.argv[1] ?? siblingCli
+}
+
+function isDefaultLocalMcpUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url)
+    return (parsed.hostname === '127.0.0.1' || parsed.hostname === 'localhost') &&
+      parsed.port === '7421' &&
+      parsed.pathname === '/mcp'
+  } catch {
+    return false
+  }
+}
+
+function stripProfile(url: string): string {
+  try {
+    const parsed = new URL(url)
+    parsed.searchParams.delete('profile')
+    return parsed.toString()
+  } catch {
+    return url
+  }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
 function parseArgs(argv: string[]):
