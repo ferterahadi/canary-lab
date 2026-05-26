@@ -3,7 +3,14 @@ import path from 'path'
 import { Writable } from 'stream'
 import { createServer } from '../apps/web-server/server'
 import type { PtyFactory } from '../apps/web-server/lib/runtime/pty-spawner'
-import { bridge, doctor, ensureMcpServerReachable, main } from './mcp'
+import {
+  bridge,
+  doctor,
+  ensureMcpServerReachable,
+  inferClientKindFromProcessLines,
+  inferMcpClientKind,
+  main,
+} from './mcp'
 
 const inertPtyFactory: PtyFactory = () => ({
   pid: 0,
@@ -151,5 +158,22 @@ describe('canary-lab mcp', () => {
     })
     expect(exits).toEqual([1])
     expect(stderr.text()).toContain('Invalid MCP profile: nope')
+  })
+
+  it('infers desktop client kind from the launching process tree', () => {
+    expect(inferClientKindFromProcessLines([
+      '/Applications/Claude.app/Contents/Frameworks/Claude Helper.app/Contents/MacOS/Claude Helper',
+      '/sbin/launchd',
+    ])).toBe('claude-desktop')
+    expect(inferClientKindFromProcessLines([
+      '/Applications/Codex.app/Contents/Resources/codex sandbox macos',
+      '/sbin/launchd',
+    ])).toBe('codex-desktop')
+  })
+
+  it('prefers explicit CANARY_LAB_MCP_CLIENT_KIND over process inference', () => {
+    expect(inferMcpClientKind({
+      CANARY_LAB_MCP_CLIENT_KIND: 'codex-desktop',
+    }, 1)).toBe('codex-desktop')
   })
 })

@@ -94,6 +94,18 @@ describe('ExternalHealBroker.claim', () => {
     })
   })
 
+  it('upgrades an existing generic claim when the same session later identifies the client', () => {
+    const { deps } = makeDeps(() => now)
+    const broker = new ExternalHealBroker(deps)
+    broker.claim('run-1', { sessionId: 'sess-A', clientKind: 'other' })
+
+    const res = broker.claim('run-1', { sessionId: 'sess-A', clientKind: 'claude-desktop' })
+
+    expect(res.accepted).toBe(true)
+    if (!res.accepted) throw new Error('unreachable')
+    expect(res.session.clientKind).toBe('claude-desktop')
+  })
+
   it('rejects a different sessionId with 409 already-claimed', () => {
     const { deps, captured } = makeDeps(() => now)
     const broker = new ExternalHealBroker(deps)

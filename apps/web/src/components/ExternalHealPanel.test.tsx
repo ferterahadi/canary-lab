@@ -31,6 +31,33 @@ describe('ExternalHealPanel', () => {
     expect(html).not.toContain('Aborted')
   })
 
+  it.each([
+    ['claude-desktop', 'Claude Desktop', 'Open Claude'],
+    ['claude-cli', 'Claude CLI', null],
+    ['codex-desktop', 'Codex Desktop', 'Open Codex'],
+    ['codex-cli', 'Codex CLI', null],
+  ] as const)('renders the exact external client kind for %s', (clientKind, label, openButton) => {
+    const html = renderToStaticMarkup(
+      <ExternalHealPanel
+        runId="run-1"
+        runStatus="healing"
+        session={session({ clientKind })}
+      />,
+    )
+
+    expect(html).toContain(label)
+    expect(html).toContain(`alt="${label}"`)
+    expect(html).toContain(`Agent output is streaming in your ${label} window`)
+    if (openButton) {
+      expect(html).toContain(openButton)
+    } else {
+      expect(html).not.toContain('Open Claude')
+      expect(html).not.toContain('Open Codex')
+    }
+    expect(html).not.toContain('Desktop/CLI')
+    expect(html).not.toContain('External Client')
+  })
+
   it('explains external mode before a client has claimed the run', () => {
     const html = renderToStaticMarkup(
       <ExternalHealPanel

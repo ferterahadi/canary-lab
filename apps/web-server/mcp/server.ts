@@ -11,6 +11,7 @@ import {
   type CanaryLabMcpDeps,
   type CanaryLabMcpProfile,
 } from './tools'
+import type { ExternalHealClientKind } from '../lib/runtime/manifest'
 
 // Singleton MCP server mounted on the existing Fastify instance at `/mcp`.
 // Uses the streamable HTTP transport so Claude Desktop / Codex Desktop and
@@ -64,7 +65,10 @@ export async function registerMcpRoutes(
     full: countToolsForProfile(deps, 'full'),
   } satisfies Record<CanaryLabMcpProfile, number>
 
-  const newSession = async (profile: CanaryLabMcpProfile): Promise<StreamableHTTPServerTransport> => {
+  const newSession = async (
+    profile: CanaryLabMcpProfile,
+    defaultClientKind: ExternalHealClientKind,
+  ): Promise<StreamableHTTPServerTransport> => {
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: () => randomUUID(),
       onsessioninitialized: (id) => { transports.set(id, transport) },
@@ -75,7 +79,7 @@ export async function registerMcpRoutes(
       if (id) transports.delete(id)
     }
     const mcp = new McpServer(SERVER_INFO)
-    registerCanaryLabTools(mcp, deps, { profile })
+    registerCanaryLabTools(mcp, deps, { profile, defaultClientKind })
     await mcp.connect(transport)
     return transport
   }
@@ -101,16 +105,16 @@ export async function registerMcpRoutes(
         }
         transport = existing
       } else if (req.method === 'POST' && isInitializeRequest(req.body)) {
-        const profile = profileFromUrl(req.url)
-        if (!profile.ok) {
+        const context = contextFromUrl(req.url)
+        if (!context.ok) {
           reply.code(400).send({
             jsonrpc: '2.0',
-            error: { code: -32602, message: profile.error },
+            error: { code: -32602, message: context.error },
             id: null,
           })
           return
         }
-        transport = await newSession(profile.profile)
+        transport = await newSession(context.profile, context.clientKind)
       } else {
         reply.code(400).send({
           jsonrpc: '2.0',
@@ -141,16 +145,17 @@ export async function registerMcpRoutes(
   // Lightweight health endpoint so smoke tests can confirm the MCP route is
   // mounted without speaking the protocol.
   app.get('/mcp/health', async (req, reply) => {
-    const profile = profileFromUrl(req.url)
-    if (!profile.ok) {
+    const context = contextFromUrl(req.url)
+    if (!context.ok) {
       reply.code(400)
-      return { error: profile.error }
+      return { error: context.error }
     }
     return {
       ok: true,
       server: SERVER_INFO,
-      profile: profile.profile,
-      toolCount: toolCounts[profile.profile],
+      profile: context.profile,
+      clientKind: context.clientKind,
+      toolCount: toolCounts[context.profile],
       activeSessions: transports.size,
       projectRoot: deps.projectRoot,
     }
@@ -163,10 +168,18 @@ function countToolsForProfile(deps: McpRouteDeps, profile: CanaryLabMcpProfile):
   return countTools(probe)
 }
 
-function profileFromUrl(url: string): { ok: true; profile: CanaryLabMcpProfile } | { ok: false; error: string } {
-  const rawProfile = new URL(url, 'http://localhost').searchParams.get('profile') ?? undefined
+function contextFromUrl(url: string):
+  | { ok: true; profile: CanaryLabMcpProfile; clientKind: ExternalHealClientKind }
+  | { ok: false; error: string } {
+  const params = new URL(url, 'http://localhost').searchParams
+  const rawProfile = params.get('profile') ?? undefined
   const profile = normalizeCanaryLabMcpProfile(rawProfile)
-  return profile ? { ok: true, profile } : { ok: false, error: `invalid MCP profile: ${rawProfile}` }
+  if (!profile) return { ok: false, error: `invalid MCP profile: ${rawProfile}` }
+  const rawClientKind = params.get('client_kind') ?? 'other'
+  if (!isExternalHealClientKind(rawClientKind)) {
+    return { ok: false, error: `invalid MCP client_kind: ${rawClientKind}` }
+  }
+  return { ok: true, profile, clientKind: rawClientKind }
 }
 
 function countTools(mcp: McpServer): number {
@@ -175,4 +188,12 @@ function countTools(mcp: McpServer): number {
   // any only here so the rest of the file stays typed.
   const tools = (mcp as unknown as { _registeredTools?: Record<string, unknown> })._registeredTools
   return tools ? Object.keys(tools).length : 0
+}
+
+function isExternalHealClientKind(value: string): value is ExternalHealClientKind {
+  return value === 'claude-cli' ||
+    value === 'claude-desktop' ||
+    value === 'codex-cli' ||
+    value === 'codex-desktop' ||
+    value === 'other'
 }

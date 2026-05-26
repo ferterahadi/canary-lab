@@ -199,7 +199,7 @@ function BrandMark({
 
   if (isClaude || isCodex) {
     const src = isClaude ? '/brand/claude.webp' : '/brand/codex.webp'
-    const alt = isClaude ? 'Claude' : 'Codex'
+    const alt = clientLabel(clientKind)
     return (
       <div
         className="relative h-10 w-10 shrink-0 overflow-hidden rounded-lg @[320px]:h-12 @[320px]:w-12 @[320px]:rounded-xl @[480px]:h-14 @[480px]:w-14"
@@ -330,8 +330,8 @@ function terminalMessage(
   }
   const agent = clientLabel(clientKind)
   return status === 'failed'
-    ? `The external ${agent} heal session is no longer actively waiting for a signal.`
-    : `The external ${agent} heal session is no longer active for this run.`
+    ? `The ${agent} heal session is no longer actively waiting for a signal.`
+    : `The ${agent} heal session is no longer active for this run.`
 }
 
 function ageLabel(ageMs: number | null): string {
@@ -351,10 +351,10 @@ function ageColor(ageMs: number | null): string {
 
 function clientLabel(kind: ExternalHealSession['clientKind']): string {
   switch (kind) {
-    case 'claude-cli': return 'Claude (Desktop/CLI)'
-    case 'claude-desktop': return 'Claude (Desktop/CLI)'
-    case 'codex-cli': return 'Codex (Desktop/CLI)'
-    case 'codex-desktop': return 'Codex (Desktop/CLI)'
+    case 'claude-cli': return 'Claude CLI'
+    case 'claude-desktop': return 'Claude Desktop'
+    case 'codex-cli': return 'Codex CLI'
+    case 'codex-desktop': return 'Codex Desktop'
     case 'other': return 'external client'
   }
 }
@@ -364,12 +364,7 @@ function headlineFor(
   hasSession: boolean,
 ): string {
   if (!hasSession) return 'External Client'
-  // Keep the heading short so it never wraps. The icon + colour already
-  // identify the brand; the longer `clientLabel` (with the Desktop/CLI
-  // qualifier) is reserved for the description copy where it has room.
-  if (kind.startsWith('claude')) return 'Healing via Claude'
-  if (kind.startsWith('codex')) return 'Healing via Codex'
-  return 'External Client'
+  return kind === 'other' ? 'External Client' : clientLabel(kind)
 }
 
 function clientTint(kind: ExternalHealSession['clientKind']): string {
@@ -381,7 +376,7 @@ function clientTint(kind: ExternalHealSession['clientKind']): string {
 function clientKindToDesktopAgent(
   kind: ExternalHealSession['clientKind'],
 ): 'claude' | 'codex' | null {
-  if (kind.startsWith('claude')) return 'claude'
-  if (kind.startsWith('codex')) return 'codex'
+  if (kind === 'claude-desktop') return 'claude'
+  if (kind === 'codex-desktop') return 'codex'
   return null
 }
