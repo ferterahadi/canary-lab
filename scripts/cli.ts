@@ -31,7 +31,7 @@ export function printUsage(): void {
   console.log(`  canary-lab init <folder> ${dim('[--package-spec <spec>]')}`)
   console.log(`  canary-lab setup ${dim('[--workspace <path>] [--agent auto|codex|claude|all] [--dry-run] [--force]')}`)
   console.log(`  canary-lab ui`)
-  console.log(`  canary-lab mcp ${dim('[doctor] [--url <url>] [--profile repair|verify|full] [--client-kind <kind>]')}`)
+  console.log(`  canary-lab mcp ${dim('[doctor] [--url <url>] [--profile repair|verify|author|full] [--client-kind <kind>]')}`)
   console.log(`  canary-lab new feature <name> ${dim('[--description "..."]')}`)
   console.log(`  canary-lab env apply <feature> <set>`)
   console.log(`  canary-lab env revert <feature>`)

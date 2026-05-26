@@ -1,19 +1,28 @@
 import fs from 'fs'
 import path from 'path'
+import { createZip } from './simple-zip'
+import type { ExternalHealClientKind } from './runtime/manifest'
 
 export type EvaluationExportMode = 'raw' | 'localized'
 export type EvaluationExportStatus = 'running' | 'completed' | 'failed'
+export type EvaluationExportProducer = 'internal' | 'external'
 
 export interface EvaluationExportTaskRecord {
   taskId: string
   runId: string
   feature: string
   mode: EvaluationExportMode
+  producer?: EvaluationExportProducer
   status: EvaluationExportStatus
   createdAt: string
   updatedAt: string
   downloadReady: boolean
   archiveBase: string
+  clientKind?: ExternalHealClientKind
+  sessionId?: string
+  conversationName?: string
+  language?: string
+  externalSessionUrl?: string
   error?: string
 }
 
@@ -22,10 +31,16 @@ export interface EvaluationExportTaskView {
   runId: string
   feature: string
   mode: EvaluationExportMode
+  producer: EvaluationExportProducer
   status: EvaluationExportStatus
   createdAt: string
   updatedAt: string
   downloadReady: boolean
+  clientKind?: ExternalHealClientKind
+  sessionId?: string
+  conversationName?: string
+  language?: string
+  externalSessionUrl?: string
   error?: string
 }
 
@@ -134,6 +149,18 @@ export function writeEvaluationExportZip(logsDir: string, taskId: string, zip: B
   fs.writeFileSync(p.zipPath, zip)
 }
 
+export function writeEvaluationExportFilesZip(
+  logsDir: string,
+  taskId: string,
+  files: Array<{ path: string; content: string }>,
+): void {
+  const entries = files.map((file) => {
+    const normalized = validateArchivePath(file.path)
+    return { filename: normalized, data: Buffer.from(file.content, 'utf8') }
+  })
+  writeEvaluationExportZip(logsDir, taskId, createZip(entries))
+}
+
 export function readEvaluationExportZip(logsDir: string, taskId: string): Buffer | null {
   const p = evaluationExportTaskPaths(logsDir, taskId)
   if (!p || !fs.existsSync(p.zipPath)) return null
@@ -153,10 +180,16 @@ export function evaluationExportTaskView(record: EvaluationExportTaskRecord): Ev
     runId: record.runId,
     feature: record.feature,
     mode: record.mode,
+    producer: record.producer ?? 'internal',
     status: record.status,
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
     downloadReady: record.downloadReady,
+    ...(record.clientKind ? { clientKind: record.clientKind } : {}),
+    ...(record.sessionId ? { sessionId: record.sessionId } : {}),
+    ...(record.conversationName ? { conversationName: record.conversationName } : {}),
+    ...(record.language ? { language: record.language } : {}),
+    ...(record.externalSessionUrl ? { externalSessionUrl: record.externalSessionUrl } : {}),
     ...(record.error ? { error: record.error } : {}),
   }
 }
@@ -167,14 +200,38 @@ function normalizeTaskRecord(value: EvaluationExportTaskRecord): EvaluationExpor
   if (typeof value.runId !== 'string') return null
   if (typeof value.feature !== 'string') return null
   if (value.mode !== 'raw' && value.mode !== 'localized') return null
+  if (value.producer !== undefined && value.producer !== 'internal' && value.producer !== 'external') return null
   if (value.status !== 'running' && value.status !== 'completed' && value.status !== 'failed') return null
   if (typeof value.createdAt !== 'string' || typeof value.updatedAt !== 'string') return null
   if (typeof value.downloadReady !== 'boolean') return null
   if (typeof value.archiveBase !== 'string') return null
+  if (value.clientKind !== undefined && !isExternalHealClientKind(value.clientKind)) return null
+  if (value.sessionId !== undefined && typeof value.sessionId !== 'string') return null
+  if (value.conversationName !== undefined && typeof value.conversationName !== 'string') return null
+  if (value.language !== undefined && typeof value.language !== 'string') return null
+  if (value.externalSessionUrl !== undefined && typeof value.externalSessionUrl !== 'string') return null
   if (value.error !== undefined && typeof value.error !== 'string') return null
-  return value
+  return { ...value, producer: value.producer ?? 'internal' }
 }
 
 function isSafeTaskId(taskId: string): boolean {
   return /^eval-[a-z0-9-]+$/.test(taskId)
+}
+
+function validateArchivePath(filePath: string): string {
+  if (!filePath) throw new Error('archive file path empty')
+  if (path.isAbsolute(filePath)) throw new Error(`archive file path "${filePath}" must be relative`)
+  const normalized = path.posix.normalize(filePath.split(path.sep).join('/'))
+  if (normalized === '..' || normalized.startsWith('../') || normalized.includes('/../')) {
+    throw new Error(`archive file path "${filePath}" must stay inside the archive`)
+  }
+  return normalized
+}
+
+function isExternalHealClientKind(value: unknown): value is ExternalHealClientKind {
+  return value === 'claude-cli' ||
+    value === 'claude-desktop' ||
+    value === 'codex-cli' ||
+    value === 'codex-desktop' ||
+    value === 'other'
 }

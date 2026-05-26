@@ -23,6 +23,24 @@ describe('evaluationOutputPanel', () => {
     expect(panel.text).toContain('[agent:codex] starting localized rewrite')
   })
 
+  it('summarizes external-client exports without showing agent output', () => {
+    const panel = evaluationOutputPanel(
+      {
+        mode: 'localized',
+        producer: 'external',
+        clientKind: 'codex-cli',
+        conversationName: 'Export this into evaluation',
+      },
+      '[agent:codex] internal transcript that should not render\n',
+    )
+
+    expect(panel.heading).toBe('Export progress')
+    expect(panel.text).toContain('Generated using external client')
+    expect(panel.text).toContain('codex-cli')
+    expect(panel.text).toContain('Export this into evaluation')
+    expect(panel.text).not.toContain('internal transcript')
+  })
+
   it('shows cached localized output logs without extra guidance text', () => {
     const panel = evaluationOutputPanel(
       { mode: 'localized' },

@@ -1,6 +1,6 @@
 ---
 name: canary-lab
-description: Use when running, verifying, debugging, or healing Canary Lab features through Canary Lab MCP tools. Teaches the external loop with list_features, start_run, wait_for_heal_task, source-code fixes, signal_run, and repeat until the run passes.
+description: Use when running, verifying, debugging, healing, creating, or exporting Canary Lab features through Canary Lab MCP tools. Teaches external run repair plus author workflows with create_feature, env capture, external draft apply, and evaluation export.
 type: skill
 ---
 
@@ -36,6 +36,30 @@ Before calling Canary Lab MCP tools, make sure the workspace and UI server are a
 12. Call `signal_run` with `kind: "rerun"` for test-only/app-code fixes that do not need service restart, or `kind: "restart"` when services or env need restarting. Include `hypothesis` and `fixDescription`; Canary Lab writes the journal from that signal and its observed git diff.
 13. Do not call a separate journal-writing tool; the runner records failing tests, changed files, signal, outcome, and diff.
 14. Repeat from `wait_for_heal_task` until the run passes or reaches terminal failure.
+
+## External Authoring Workflow
+
+Use the MCP `author` profile, or `full`, when the user asks to create a feature, preserve env files, add test cases, or export a completed run as an evaluation. Canary Lab is the control plane and artifact store; this client writes the test cases and report content.
+
+### Create or Extend a Feature
+
+1. For a new feature, call `create_feature`. It creates the skeleton files and returns test-file rules, envset schema, and next-step tool hints. Do not manually invent a partial scaffold.
+2. If the user asks to preserve existing `.env`, `.env.dev`, `application.properties`, or similar repo config files, inspect the source repo enough to identify the files, then call `capture_feature_env_files`. Do not paste secret values into chat; Canary Lab returns redacted previews only.
+3. Author or edit specs under `features/<feature>/e2e/`.
+4. Specs must import:
+   ```ts
+   import { test, expect } from 'canary-lab/feature-support/log-marker-fixture'
+   ```
+5. Call `start_external_draft` with a stable `session_id`, `client_kind: "claude-cli"` or `"claude-desktop"`, and a useful `conversation_name`.
+6. Call `update_external_draft_stage` as work progresses: `scaffolding`, `authoring-tests`, `validating`, `ready`, `applied`, or `error`.
+7. Call `apply_external_draft` with the externally authored files, or after writing them locally, so Canary Lab validates and records the applied draft. Do not ask Canary Lab to spawn another Claude/Codex agent for MCP-created authoring.
+
+### Export an Evaluation
+
+1. After the relevant run is passing, call `start_external_evaluation_export` with the run id and requested language.
+2. Use the returned schema to write the evaluation report or archive in this client.
+3. Call `submit_external_evaluation_export` with the generated files or archive.
+4. Use `get_evaluation_export`, `list_evaluation_exports`, or `download_evaluation_export` for status and download. Canary Lab stores the artifact, but it does not rewrite, translate, or generate the report with an internal agent for external exports.
 
 ## Guardrails
 

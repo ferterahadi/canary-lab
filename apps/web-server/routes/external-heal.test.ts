@@ -456,6 +456,7 @@ describe('external heal routes', () => {
     const { app } = await build()
 
     expect((await app.inject({ method: 'GET', url: '/api/runs/missing/heal-context' })).statusCode).toBe(404)
+    expect((await app.inject({ method: 'GET', url: '/api/runs/missing/run-snapshot' })).statusCode).toBe(404)
     expect((await app.inject({ method: 'GET', url: '/api/runs/missing/actions' })).statusCode).toBe(404)
 
     const actions = await app.inject({ method: 'GET', url: '/api/runs/done/actions' })

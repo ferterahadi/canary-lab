@@ -150,6 +150,78 @@ describe('WizardTaskStatus', () => {
     expect(container.textContent).not.toContain('running-a')
     expect(container.textContent).not.toContain('ready-a')
   })
+
+  it('routes external draft clicks to the external client instead of the internal wizard', () => {
+    const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null)
+    context.drafts = [
+      draft({
+        draftId: 'external-1',
+        status: 'generating',
+        featureName: 'external-flow',
+        source: 'external',
+        externalStage: 'authoring-tests',
+        externalClientKind: 'codex-cli',
+        externalSessionId: 'sess-ext-1',
+        externalConversationName: 'Add tests externally',
+        externalSessionUrl: 'codex://session/sess-ext-1',
+      }),
+    ]
+    context.latestTask = context.drafts[0]
+
+    act(() => {
+      root.render(<WizardTaskStatus />)
+    })
+    act(() => {
+      container.querySelector('button')?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+
+    expect(container.textContent).toContain('external-flow')
+    expect(container.textContent).toContain('authoring-tests')
+    expect(container.textContent).toContain('codex-cli')
+
+    const externalButton = Array.from(container.querySelectorAll('button'))
+      .find((button) => button.textContent?.includes('external-flow'))
+    act(() => {
+      externalButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+
+    expect(context.openTask).not.toHaveBeenCalled()
+    expect(openSpy).toHaveBeenCalledWith('codex://session/sess-ext-1', '_blank', 'noopener,noreferrer')
+    openSpy.mockRestore()
+  })
+
+  it('shows a handoff panel when an external draft has no session URL', () => {
+    context.drafts = [
+      draft({
+        draftId: 'external-2',
+        status: 'spec-ready',
+        featureName: 'handoff-flow',
+        source: 'external',
+        externalStage: 'ready',
+        externalClientKind: 'claude-desktop',
+        externalSessionId: 'sess-handoff',
+        externalConversationName: 'Add handoff tests',
+      }),
+    ]
+    context.latestTask = context.drafts[0]
+
+    act(() => {
+      root.render(<WizardTaskStatus />)
+    })
+    act(() => {
+      container.querySelector('button')?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+    const handoffButton = Array.from(container.querySelectorAll('button'))
+      .find((button) => button.textContent?.includes('handoff-flow'))
+    act(() => {
+      handoffButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+
+    expect(context.openTask).not.toHaveBeenCalled()
+    expect(container.textContent).toContain('Generated using external client')
+    expect(container.textContent).toContain('sess-handoff')
+    expect(container.textContent).toContain('Add handoff tests')
+  })
 })
 
 function draft(overrides: Partial<DraftRecord> = {}): DraftRecord {

@@ -257,6 +257,33 @@ describe('normalizeRunCounts', () => {
     expect(counts.skipped).toBe(1)
     expect(counts.statusLine).toBe('1/3 passed, 0 failed, 1 skipped, 1 not run')
   })
+
+  it('treats non-finite fallback totals as zero', () => {
+    const counts = normalizeRunCounts({
+      complete: false,
+      total: Number.NaN,
+      passed: 0,
+      failed: [],
+      skipped: 0,
+    })
+
+    expect(counts.totalKnown).toBe(0)
+    expect(counts.statusLine).toBe('0/0 passed, 0 failed, 0 not run')
+  })
+
+  it('uses numeric fallback totals when known tests are absent', () => {
+    const counts = normalizeRunCounts({
+      complete: false,
+      total: 4,
+      passed: 1,
+      failed: [{ name: 'failed test' }],
+      skipped: 1,
+    })
+
+    expect(counts.totalKnown).toBe(4)
+    expect(counts.notRun).toBe(1)
+    expect(counts.statusLine).toBe('1/4 passed, 1 failed, 1 skipped, 1 not run')
+  })
 })
 
 describe('writeHealSignal', () => {

@@ -203,9 +203,21 @@ function modeLabel(mode: EvaluationExportMode): string {
 }
 
 export function evaluationOutputPanel(
-  task: Pick<EvaluationExportTask, 'mode'>,
+  task: Pick<EvaluationExportTask, 'mode' | 'producer' | 'clientKind' | 'conversationName' | 'sessionId'>,
   rawLog: string,
 ): { heading: 'Agent output' | 'Export progress'; text: string } {
+  if (task.producer === 'external') {
+    const details = [
+      'Generated using external client.',
+      task.clientKind ? `Client: ${task.clientKind}` : null,
+      task.conversationName ? `Conversation: ${task.conversationName}` : null,
+      task.sessionId ? `Session: ${task.sessionId}` : null,
+    ].filter(Boolean)
+    return {
+      heading: 'Export progress',
+      text: details.join('\n'),
+    }
+  }
   const log = rawLog.trim()
   if (task.mode === 'raw') {
     return {

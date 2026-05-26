@@ -93,16 +93,23 @@ export interface RunIndexEntry {
 
 export type EvaluationExportMode = 'raw' | 'localized'
 export type EvaluationExportStatus = 'running' | 'completed' | 'failed'
+export type EvaluationExportProducer = 'internal' | 'external'
 
 export interface EvaluationExportTask {
   taskId: string
   runId: string
   feature: string
   mode: EvaluationExportMode
+  producer?: EvaluationExportProducer
   status: EvaluationExportStatus
   createdAt: string
   updatedAt: string
   downloadReady: boolean
+  clientKind?: ExternalHealClientKind
+  sessionId?: string
+  conversationName?: string
+  language?: string
+  externalSessionUrl?: string
   error?: string
 }
 
@@ -285,6 +292,15 @@ export type DraftStatus =
   | 'cancelled'
   | 'error'
 
+export type DraftSource = 'internal' | 'external'
+export type ExternalDraftStage =
+  | 'scaffolding'
+  | 'authoring-tests'
+  | 'validating'
+  | 'ready'
+  | 'applied'
+  | 'error'
+
 export interface PlanStep {
   coverageType?: string
   step: string
@@ -305,6 +321,12 @@ export interface DraftRecord {
   prdDocuments: DraftPrdDocument[]
   repos: DraftRepo[]
   featureName?: string
+  source?: DraftSource
+  externalStage?: ExternalDraftStage
+  externalClientKind?: ExternalHealClientKind
+  externalSessionId?: string
+  externalConversationName?: string
+  externalSessionUrl?: string
   intentSummary?: string
   wizardAgent?: 'claude' | 'codex'
   activeAgentStage?: 'planning' | 'generating'

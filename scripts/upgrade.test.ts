@@ -125,17 +125,29 @@ describe("main (upgrade orchestration)", () => {
     expect(logSpy).not.toHaveBeenCalled()
   })
 
-  it("copies managed skill files, removes legacy agent docs, and injects postinstall", async () => {
+  it("removes project-local skill files, removes legacy agent docs, and injects postinstall", async () => {
     const root = mkProjectRoot()
     const home = process.env.CANARY_LAB_AGENT_HOME!
     vi.stubEnv("CANARY_LAB_PROJECT_ROOT", root)
     fs.writeFileSync(path.join(root, "package.json"), JSON.stringify({ name: "p", scripts: {} }))
+    for (const rel of [
+      ".claude/skills/env-import.md",
+      ".claude/skills/canary-lab-feature.md",
+      ".codex/env-import.md",
+      ".codex/canary-lab-feature.md",
+    ]) {
+      const target = path.join(root, rel)
+      fs.mkdirSync(path.dirname(target), { recursive: true })
+      fs.writeFileSync(target, "stale project-local skill")
+    }
     vi.spyOn(console, "log").mockImplementation(() => {})
 
     await main([])
 
-    expect(fs.existsSync(path.join(root, ".claude/skills/env-import.md"))).toBe(true)
-    expect(fs.existsSync(path.join(root, ".codex/env-import.md"))).toBe(true)
+    expect(fs.existsSync(path.join(root, ".claude/skills/env-import.md"))).toBe(false)
+    expect(fs.existsSync(path.join(root, ".claude/skills/canary-lab-feature.md"))).toBe(false)
+    expect(fs.existsSync(path.join(root, ".codex/env-import.md"))).toBe(false)
+    expect(fs.existsSync(path.join(root, ".codex/canary-lab-feature.md"))).toBe(false)
     expect(fs.existsSync(path.join(root, ".claude/skills/self-fixing-loop.md"))).toBe(false)
     expect(fs.existsSync(path.join(root, ".claude/skills/heal-loop.md"))).toBe(false)
     expect(fs.existsSync(path.join(root, ".codex/self-fixing-loop.md"))).toBe(false)
@@ -183,18 +195,17 @@ describe("main (upgrade orchestration)", () => {
     expect(gitignore).not.toContain("!features/*/envsets/*/*")
   })
 
-  it("does not rewrite FULLY_MANAGED file if content already matches template", async () => {
+  it("does not recreate deprecated project-local skill files", async () => {
     const root = mkProjectRoot()
     vi.stubEnv("CANARY_LAB_PROJECT_ROOT", root)
     vi.spyOn(console, "log").mockImplementation(() => {})
 
     await main([])
-    const target = path.join(root, ".claude/skills/env-import.md")
-    const mtime1 = fs.statSync(target).mtimeMs
-    await new Promise((r) => setTimeout(r, 10))
-    await main([])
-    const mtime2 = fs.statSync(target).mtimeMs
-    expect(mtime2).toBe(mtime1)
+
+    expect(fs.existsSync(path.join(root, ".claude/skills/env-import.md"))).toBe(false)
+    expect(fs.existsSync(path.join(root, ".claude/skills/canary-lab-feature.md"))).toBe(false)
+    expect(fs.existsSync(path.join(root, ".codex/env-import.md"))).toBe(false)
+    expect(fs.existsSync(path.join(root, ".codex/canary-lab-feature.md"))).toBe(false)
   })
 
   it("removes deprecated heal skill files from projects scaffolded by older canary-lab versions", async () => {

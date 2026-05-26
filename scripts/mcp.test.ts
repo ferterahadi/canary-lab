@@ -53,6 +53,7 @@ describe('canary-lab mcp', () => {
   it.each([
     ['repair', 'wait_for_heal_task'],
     ['verify', 'execute_verification'],
+    ['author', 'create_feature'],
     ['full', 'execute_verification'],
   ] as const)('doctor verifies the %s profile', async (profile, requiredTool) => {
     const projectRoot = path.resolve(__dirname, '..', 'templates', 'project')

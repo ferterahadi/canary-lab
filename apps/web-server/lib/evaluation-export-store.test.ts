@@ -16,6 +16,7 @@ import {
   readEvaluationExportZip,
   deleteEvaluationExportTask,
   evaluationExportTaskView,
+  writeEvaluationExportFilesZip,
   type EvaluationExportTaskRecord,
 } from './evaluation-export-store'
 
@@ -104,6 +105,12 @@ describe('evaluation-export-store', () => {
       { taskId: ID, runId: 'r', feature: 'f', mode: 'raw', status: 'running', createdAt: 1, updatedAt: 'b', downloadReady: false, archiveBase: 'x' },
       { taskId: ID, runId: 'r', feature: 'f', mode: 'raw', status: 'running', createdAt: 'a', updatedAt: 'b', downloadReady: 'no', archiveBase: 'x' },
       { taskId: ID, runId: 'r', feature: 'f', mode: 'raw', status: 'running', createdAt: 'a', updatedAt: 'b', downloadReady: false, archiveBase: 123 },
+      { taskId: ID, runId: 'r', feature: 'f', mode: 'raw', producer: 'partner', status: 'running', createdAt: 'a', updatedAt: 'b', downloadReady: false, archiveBase: 'x' },
+      { taskId: ID, runId: 'r', feature: 'f', mode: 'raw', status: 'running', createdAt: 'a', updatedAt: 'b', downloadReady: false, archiveBase: 'x', clientKind: 'browser' },
+      { taskId: ID, runId: 'r', feature: 'f', mode: 'raw', status: 'running', createdAt: 'a', updatedAt: 'b', downloadReady: false, archiveBase: 'x', sessionId: 7 },
+      { taskId: ID, runId: 'r', feature: 'f', mode: 'raw', status: 'running', createdAt: 'a', updatedAt: 'b', downloadReady: false, archiveBase: 'x', conversationName: 7 },
+      { taskId: ID, runId: 'r', feature: 'f', mode: 'raw', status: 'running', createdAt: 'a', updatedAt: 'b', downloadReady: false, archiveBase: 'x', language: 7 },
+      { taskId: ID, runId: 'r', feature: 'f', mode: 'raw', status: 'running', createdAt: 'a', updatedAt: 'b', downloadReady: false, archiveBase: 'x', externalSessionUrl: 7 },
       { taskId: ID, runId: 'r', feature: 'f', mode: 'raw', status: 'running', createdAt: 'a', updatedAt: 'b', downloadReady: false, archiveBase: 'x', error: 7 },
     ]
     for (const v of variants) {
@@ -134,8 +141,13 @@ describe('evaluation-export-store', () => {
     const view = evaluationExportTaskView(patched!)
     expect(view).toMatchObject({ taskId: ID, status: 'completed', downloadReady: true })
     expect(view.error).toBeUndefined()
-    const failed = evaluationExportTaskView(makeRecord({ status: 'failed', error: 'boom' }))
+    const failed = evaluationExportTaskView(makeRecord({
+      status: 'failed',
+      error: 'boom',
+      externalSessionUrl: 'https://codex.example/session',
+    }))
     expect(failed.error).toBe('boom')
+    expect(failed.externalSessionUrl).toBe('https://codex.example/session')
 
     const second = createEvaluationExportTask(tmpDir, makeRecord({ taskId: 'eval-task-zzz', runId: 'run-2' }))
     expect(second).toBeTruthy()
@@ -158,5 +170,24 @@ describe('evaluation-export-store', () => {
 
   it('listEvaluationExportTasks returns [] when root missing', () => {
     expect(listEvaluationExportTasks(tmpDir)).toEqual([])
+  })
+
+  it('validates archive paths before writing generated files zip', () => {
+    expect(() => writeEvaluationExportFilesZip(tmpDir, ID, [{ path: '', content: 'x' }]))
+      .toThrow('archive file path empty')
+    expect(() => writeEvaluationExportFilesZip(tmpDir, ID, [{ path: '/tmp/out.txt', content: 'x' }]))
+      .toThrow('must be relative')
+    expect(() => writeEvaluationExportFilesZip(tmpDir, ID, [{ path: '../out.txt', content: 'x' }]))
+      .toThrow('must stay inside the archive')
+    expect(() => writeEvaluationExportFilesZip(tmpDir, ID, [{ path: 'nested/out.txt', content: 'x' }]))
+      .not.toThrow()
+    expect(readEvaluationExportZip(tmpDir, ID)).not.toBeNull()
+  })
+
+  it('accepts every external client kind in persisted task metadata', () => {
+    for (const clientKind of ['claude-cli', 'claude-desktop', 'codex-cli', 'codex-desktop', 'other'] as const) {
+      writeEvaluationExportTask(tmpDir, makeRecord({ taskId: `eval-${clientKind}`, clientKind }))
+      expect(readEvaluationExportTask(tmpDir, `eval-${clientKind}`)?.clientKind).toBe(clientKind)
+    }
   })
 })

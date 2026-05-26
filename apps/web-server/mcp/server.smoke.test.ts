@@ -26,7 +26,9 @@ const inertPtyFactory: PtyFactory = () => ({
   kill: () => { /* noop */ },
 })
 
-const REPAIR_TOOLS = [
+const uniqueSorted = (values: string[]): string[] => Array.from(new Set(values)).sort()
+
+const REPAIR_TOOLS = uniqueSorted([
   'abort_run',
   'cancel_heal',
   'get_heal_context',
@@ -39,9 +41,9 @@ const REPAIR_TOOLS = [
   'signal_run',
   'start_run',
   'wait_for_heal_task',
-].sort()
+])
 
-const VERIFY_TOOLS = [
+const VERIFY_TOOLS = uniqueSorted([
   'create_verification_config',
   'execute_verification',
   'get_run',
@@ -51,9 +53,32 @@ const VERIFY_TOOLS = [
   'list_runs',
   'list_verification_configs',
   'update_verification_config',
-].sort()
+])
 
-const FULL_TOOLS = [
+const AUTHOR_TOOLS = uniqueSorted([
+  'apply_external_draft',
+  'capture_feature_env_files',
+  'checkout_feature_repo_branch',
+  'create_feature',
+  'delete_evaluation_export',
+  'delete_feature',
+  'download_evaluation_export',
+  'get_evaluation_export',
+  'get_feature_envset_summary',
+  'get_feature_repo_status',
+  'get_run',
+  'get_run_snapshot',
+  'list_evaluation_exports',
+  'list_features',
+  'list_runs',
+  'start_external_draft',
+  'start_external_evaluation_export',
+  'submit_external_evaluation_export',
+  'update_external_draft_stage',
+])
+
+const FULL_TOOLS = uniqueSorted([
+  ...AUTHOR_TOOLS,
   'abort_run',
   'cancel_heal',
   'claim_heal',
@@ -75,7 +100,7 @@ const FULL_TOOLS = [
   'start_run',
   'update_verification_config',
   'wait_for_heal_task',
-].sort()
+])
 
 async function connectClient(address: string, pathAndQuery = '/mcp'): Promise<Client> {
   const client = new Client(
@@ -139,6 +164,13 @@ describe('MCP HTTP server (smoke)', () => {
       expect((verify.json() as { profile: string; toolCount: number })).toMatchObject({
         profile: 'verify',
         toolCount: VERIFY_TOOLS.length,
+      })
+
+      const author = await app.inject({ method: 'GET', url: '/mcp/health?profile=author' })
+      expect(author.statusCode).toBe(200)
+      expect((author.json() as { profile: string; toolCount: number })).toMatchObject({
+        profile: 'author',
+        toolCount: AUTHOR_TOOLS.length,
       })
     } finally {
       await app.close()
@@ -235,6 +267,166 @@ describe('MCP HTTP server (smoke)', () => {
     } finally {
       if (client) await client.close().catch(() => undefined)
       await app.close()
+    }
+  })
+
+  it('answers tools/list with the author profile', async () => {
+    const projectRoot = path.resolve(__dirname, '..', '..', '..', 'templates', 'project')
+    const { app } = await createServer({ projectRoot, ptyFactory: inertPtyFactory })
+    let client: Client | null = null
+    try {
+      const address = await app.listen({ port: 0, host: '127.0.0.1' })
+      client = await connectClient(address, '/mcp?profile=author')
+
+      const tools = await client.listTools()
+      expect(tools.tools.map((t) => t.name).sort()).toEqual(AUTHOR_TOOLS)
+    } finally {
+      if (client) await client.close().catch(() => undefined)
+      await app.close()
+    }
+  })
+
+  it('drives external feature authoring, env capture, drafts, and evaluation export without local agent spawns', async () => {
+    const projectRoot = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-author-')))
+    const featuresDir = path.join(projectRoot, 'features')
+    const logsDir = path.join(projectRoot, 'logs')
+    const repoDir = path.join(projectRoot, 'repo-api')
+    fs.mkdirSync(repoDir, { recursive: true })
+    fs.writeFileSync(path.join(repoDir, '.env.dev'), 'API_KEY=secret\nGATEWAY_URL=http://localhost:4100\n')
+    fs.writeFileSync(path.join(repoDir, 'application.properties'), 'spring.datasource.password=secret2\n')
+
+    const { app, runStore } = await createMcpHarness({ logsDir, projectRoot, featuresDir })
+    let client: Client | null = null
+    try {
+      const address = await app.listen({ port: 0, host: '127.0.0.1' })
+      client = await connectClient(address, '/mcp?profile=author&client_kind=codex-cli')
+
+      const created = await client.callTool({
+        name: 'create_feature',
+        arguments: {
+          feature: 'checkout_flow',
+          description: 'Checkout flow',
+          envs: ['local', 'staging'],
+          repos: [{ name: 'api', localPath: repoDir, branch: 'main' }],
+        },
+      })
+      const createdBody = JSON.parse((created.content?.[0] as { text: string }).text)
+      expect(createdBody).toMatchObject({
+        feature: 'checkout_flow',
+        nextSteps: expect.arrayContaining(['capture_feature_env_files', 'start_external_draft', 'apply_external_draft']),
+      })
+      const featureDir = path.join(featuresDir, 'checkout_flow')
+      expect(fs.existsSync(path.join(featureDir, 'feature.config.cjs'))).toBe(true)
+      expect(fs.existsSync(path.join(featureDir, 'e2e', 'checkout_flow.spec.ts'))).toBe(false)
+
+      const captured = await client.callTool({
+        name: 'capture_feature_env_files',
+        arguments: {
+          feature: 'checkout_flow',
+          sources: [
+            { env: 'local', sourcePath: path.join(repoDir, '.env.dev'), slot: 'api.env.dev' },
+            { env: 'staging', sourcePath: path.join(repoDir, 'application.properties'), slot: 'api-application.properties' },
+          ],
+        },
+      })
+      const capturedBody = JSON.parse((captured.content?.[0] as { text: string }).text)
+      expect(capturedBody.captured).toHaveLength(2)
+      expect(capturedBody.captured[0].preview).toContainEqual({ key: 'API_KEY', value: '********' })
+      expect(fs.readFileSync(path.join(featureDir, 'envsets', 'local', 'api.env.dev'), 'utf8')).toContain('API_KEY=secret')
+
+      const summary = await client.callTool({
+        name: 'get_feature_envset_summary',
+        arguments: { feature: 'checkout_flow' },
+      })
+      const summaryBody = JSON.parse((summary.content?.[0] as { text: string }).text)
+      expect(summaryBody.envs.map((env: { name: string }) => env.name)).toEqual(['local', 'staging'])
+      expect(JSON.stringify(summaryBody)).not.toContain('secret')
+
+      const draft = await client.callTool({
+        name: 'start_external_draft',
+        arguments: {
+          feature: 'checkout_flow',
+          stage: 'authoring-tests',
+          session_id: 'sess-author-1',
+          conversation_name: 'Add checkout tests',
+          external_session_url: 'codex://session/sess-author-1',
+        },
+      })
+      const draftBody = JSON.parse((draft.content?.[0] as { text: string }).text)
+      expect(draftBody).toMatchObject({
+        feature: 'checkout_flow',
+        source: 'external',
+        externalStage: 'authoring-tests',
+        sessionId: 'sess-author-1',
+      })
+
+      const applied = await client.callTool({
+        name: 'apply_external_draft',
+        arguments: {
+          draftId: draftBody.draftId,
+          confirm: true,
+          files: [{
+            path: 'e2e/checkout.spec.ts',
+            content: "import { test, expect } from 'canary-lab/feature-support/log-marker-fixture'\n\ntest('checkout works', async () => { expect(true).toBe(true) })\n",
+          }],
+        },
+      })
+      expect(JSON.parse((applied.content?.[0] as { text: string }).text)).toMatchObject({
+        status: 'applied',
+        feature: 'checkout_flow',
+      })
+      expect(fs.readFileSync(path.join(featureDir, 'e2e', 'checkout.spec.ts'), 'utf8')).toContain('checkout works')
+
+      runStore.bootstrap({
+        runId: 'author-eval-run',
+        feature: 'checkout_flow',
+        startedAt: '2026-05-27T00:00:00.000Z',
+        status: 'passed',
+        healCycles: 0,
+        services: [],
+      })
+      const exportTask = await client.callTool({
+        name: 'start_external_evaluation_export',
+        arguments: {
+          runId: 'author-eval-run',
+          language: 'English',
+          session_id: 'sess-author-1',
+          conversation_name: 'Export this into evaluation',
+        },
+      })
+      const exportBody = JSON.parse((exportTask.content?.[0] as { text: string }).text)
+      expect(exportBody).toMatchObject({
+        task: { producer: 'external', status: 'running', language: 'English' },
+        reportSchema: { archiveBase64: 'base64 encoded .zip, or submit files[] for Canary Lab to zip' },
+      })
+
+      await client.callTool({
+        name: 'submit_external_evaluation_export',
+        arguments: {
+          taskId: exportBody.task.taskId,
+          files: [{ path: 'evaluation.md', content: '# Checkout evaluation\nGenerated externally.\n' }],
+        },
+      })
+      const fetchedExport = await client.callTool({
+        name: 'get_evaluation_export',
+        arguments: { taskId: exportBody.task.taskId },
+      })
+      expect(JSON.parse((fetchedExport.content?.[0] as { text: string }).text)).toMatchObject({
+        producer: 'external',
+        status: 'completed',
+        downloadReady: true,
+      })
+      const download = await client.callTool({
+        name: 'download_evaluation_export',
+        arguments: { taskId: exportBody.task.taskId },
+      })
+      const downloadBody = JSON.parse((download.content?.[0] as { text: string }).text)
+      expect(downloadBody.filename).toMatch(/checkout_flow-author-eval-run\.zip$/)
+      expect(Buffer.from(downloadBody.archiveBase64, 'base64').length).toBeGreaterThan(100)
+    } finally {
+      if (client) await client.close().catch(() => undefined)
+      await app.close()
+      fs.rmSync(projectRoot, { recursive: true, force: true })
     }
   })
 
