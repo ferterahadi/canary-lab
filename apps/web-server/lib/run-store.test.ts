@@ -515,6 +515,90 @@ describe('readRunSummary', () => {
       ],
     })
   })
+
+  it('remaps duplicate knownTest ids across skipped, failed, and running entries', () => {
+    fs.writeFileSync(
+      path.join(tmpDir, 'e2e-summary.json'),
+      JSON.stringify({
+        complete: false,
+        total: 3,
+        passed: 0,
+        skipped: 1,
+        skippedIds: ['old-id', 'unmapped-skipped-id'],
+        knownTests: [
+          {
+            id: 'old-id',
+            name: 'test-case-line-drift',
+            title: 'line drift',
+            titlePath: ['spec.ts', 'group', 'line drift'],
+          },
+          {
+            id: 'new-id',
+            name: 'test-case-line-drift',
+            title: 'line drift',
+            titlePath: ['spec.ts', 'group', 'line drift'],
+          },
+          {
+            id: 'other-id',
+            name: 'test-case-other',
+            title: 'other',
+            titlePath: ['spec.ts', 'group', 'other'],
+          },
+          {
+            id: 'same-id',
+            name: 'test-case-same-id',
+            title: 'same id',
+            titlePath: ['spec.ts', 'group', 'same id'],
+          },
+          {
+            id: 'same-id',
+            name: 'test-case-same-id',
+            title: 'same id',
+            titlePath: ['spec.ts', 'group', 'same id'],
+          },
+          {
+            id: 'untitled-old',
+            name: 'test-case-untitled',
+            titlePath: ['spec.ts', 'group', 'untitled'],
+          },
+          {
+            id: 'untitled-new',
+            name: 'test-case-untitled',
+            titlePath: ['spec.ts', 'group', 'untitled'],
+          },
+          {
+            id: 'no-title-path',
+            name: 'test-case-no-title-path',
+          },
+        ],
+        failed: [
+          { id: 'old-id', name: 'test-case-line-drift' },
+          { id: 'unmapped-id', name: 'test-case-unmapped' },
+          { name: 'test-case-without-id' },
+        ],
+        running: { id: 'old-id', name: 'test-case-line-drift', location: 'spec.ts:10' },
+        runningTests: [
+          { id: 'old-id', name: 'test-case-line-drift', location: 'spec.ts:10' },
+          { name: 'test-case-without-id', location: 'spec.ts:20' },
+        ],
+      }),
+    )
+
+    expect(readRunSummary(tmpDir)).toMatchObject({
+      total: 5,
+      skippedIds: ['new-id', 'unmapped-skipped-id'],
+      failed: [
+        { id: 'new-id', name: 'test-case-line-drift' },
+        { id: 'unmapped-id', name: 'test-case-unmapped' },
+        { name: 'test-case-without-id' },
+      ],
+      running: { id: 'new-id' },
+      runningTests: [
+        { id: 'new-id' },
+        { name: 'test-case-without-id' },
+      ],
+    })
+  })
 })
 
 describe('readPlaywrightPlaybackEvents / indexPlaywrightArtifacts', () => {

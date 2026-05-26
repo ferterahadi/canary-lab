@@ -44,10 +44,6 @@ run(
 
 const scaffoldPaths = [
   'package.json',
-  '.claude/skills/env-import.md',
-  '.claude/skills/canary-lab-feature.md',
-  '.codex/env-import.md',
-  '.codex/canary-lab-feature.md',
   'features/example_todo_api/feature.config.cjs',
   'features/broken_todo_api/feature.config.cjs',
 ]
@@ -72,8 +68,12 @@ for (const relPath of [
   'CLAUDE.md',
   '.claude/skills/heal-loop.md',
   '.claude/skills/self-fixing-loop.md',
+  '.claude/skills/env-import.md',
+  '.claude/skills/canary-lab-feature.md',
   '.codex/heal-loop.md',
   '.codex/self-fixing-loop.md',
+  '.codex/env-import.md',
+  '.codex/canary-lab-feature.md',
   'features/example_todo_api/src/config.ts',
 ]) {
   if (fs.existsSync(path.join(projectDir, relPath))) {

@@ -208,6 +208,7 @@ export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Pro
     const activeIds = new Set(activeEvaluationExports.keys())
     for (const task of listEvaluationExportTasks(deps.store.logsDir)) {
       if (task.status !== 'running' || activeIds.has(task.taskId)) continue
+      if ((task.producer ?? 'internal') === 'external') continue
       const message = 'evaluation export interrupted; start a new export'
       appendEvaluationExportLog(deps.store.logsDir, task.taskId, `[evaluation] task failed: ${message}\n`)
       patchEvaluationExportTask(deps.store.logsDir, task.taskId, {
@@ -225,6 +226,7 @@ export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Pro
       runId: detail.runId,
       feature: detail.manifest.feature,
       mode,
+      producer: 'internal',
       status: 'running',
       createdAt: now,
       updatedAt: now,

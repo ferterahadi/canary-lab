@@ -26,12 +26,7 @@ const GITIGNORE_PATTERNS: string[] = [
 ]
 
 /** Files that are fully managed — overwritten on every upgrade. */
-const FULLY_MANAGED: string[] = [
-  '.claude/skills/env-import.md',
-  '.claude/skills/canary-lab-feature.md',
-  '.codex/env-import.md',
-  '.codex/canary-lab-feature.md',
-]
+const FULLY_MANAGED: string[] = []
 
 /**
  * Files that used to ship with canary-lab but no longer do. Removed on upgrade
@@ -39,6 +34,10 @@ const FULLY_MANAGED: string[] = [
  * append to; never remove entries (they're how we clean up past installs).
  */
 const DEPRECATED: string[] = [
+  '.claude/skills/env-import.md',
+  '.claude/skills/canary-lab-feature.md',
+  '.codex/env-import.md',
+  '.codex/canary-lab-feature.md',
   '.claude/skills/heal-loop.md',
   '.claude/skills/self-fixing-loop.md',
   '.codex/heal-loop.md',

@@ -315,6 +315,7 @@ function urlWithContext(
 }
 
 function requiredToolsForProfile(profile: CanaryLabMcpProfile): string[] {
+  if (profile === 'author') return ['create_feature', 'start_external_draft', 'start_external_evaluation_export']
   if (profile === 'verify') return ['execute_verification']
   if (profile === 'full') return ['wait_for_heal_task', 'execute_verification']
   return ['wait_for_heal_task']

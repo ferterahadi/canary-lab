@@ -62,6 +62,7 @@ export async function registerMcpRoutes(
   const toolCounts = {
     repair: countToolsForProfile(deps, 'repair'),
     verify: countToolsForProfile(deps, 'verify'),
+    author: countToolsForProfile(deps, 'author'),
     full: countToolsForProfile(deps, 'full'),
   } satisfies Record<CanaryLabMcpProfile, number>
 

@@ -1,4 +1,6 @@
 import { z } from 'zod'
+import fs from 'fs'
+import path from 'path'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import type { RunStore } from '../lib/run-store'
@@ -21,6 +23,37 @@ import {
   updateVerificationConfig,
   type ResolveVerificationInput,
 } from '../lib/verification'
+import {
+  applyExternalDraftFiles,
+  captureFeatureEnvFiles,
+  checkoutFeatureRepoBranch,
+  createFeatureSkeleton,
+  deleteFeature,
+  getFeatureEnvsetSummary,
+  getFeatureRepoStatus,
+  type EnvFileSource,
+} from '../lib/feature-authoring'
+import {
+  createDraft,
+  paths as draftPaths,
+  readDraft,
+  writeDraft,
+  type DraftRecord,
+  type ExternalDraftStage,
+} from '../lib/draft-store'
+import {
+  appendEvaluationExportLog,
+  createEvaluationExportTask,
+  deleteEvaluationExportTask,
+  evaluationExportTaskView,
+  listEvaluationExportTasks,
+  patchEvaluationExportTask,
+  readEvaluationExportTask,
+  readEvaluationExportZip,
+  writeEvaluationExportFilesZip,
+  writeEvaluationExportZip,
+  type EvaluationExportTaskRecord,
+} from '../lib/evaluation-export-store'
 import {
   isActiveRunStatus,
   isTerminalRunStatus,
@@ -71,10 +104,11 @@ export interface CanaryLabMcpDeps {
 const CLIENT_KIND = z.enum(['claude-cli', 'claude-desktop', 'codex-cli', 'codex-desktop', 'other'])
 const SIGNAL_KIND = z.enum(['rerun', 'restart', 'heal'])
 const HEAL_STATUS = z.enum(['connected', 'waiting', 'healing', 'running-tests', 'paused', 'disconnected'])
+const EXTERNAL_DRAFT_STAGE = z.enum(['scaffolding', 'authoring-tests', 'validating', 'ready', 'applied', 'error'])
 const WAIT_FOR_HEAL_TASK_DEFAULT_TIMEOUT_MS = 15 * 60 * 1000
 const WAIT_FOR_HEAL_TASK_MAX_TIMEOUT_MS = 60 * 60 * 1000
 
-export const CANARY_LAB_MCP_PROFILES = ['repair', 'verify', 'full'] as const
+export const CANARY_LAB_MCP_PROFILES = ['repair', 'verify', 'author', 'full'] as const
 export type CanaryLabMcpProfile = typeof CANARY_LAB_MCP_PROFILES[number]
 
 export type CanaryLabMcpToolName =
@@ -89,6 +123,21 @@ export type CanaryLabMcpToolName =
   | 'update_verification_config'
   | 'execute_verification'
   | 'get_verification_result'
+  | 'create_feature'
+  | 'get_feature_envset_summary'
+  | 'capture_feature_env_files'
+  | 'delete_feature'
+  | 'get_feature_repo_status'
+  | 'checkout_feature_repo_branch'
+  | 'start_external_evaluation_export'
+  | 'submit_external_evaluation_export'
+  | 'list_evaluation_exports'
+  | 'get_evaluation_export'
+  | 'download_evaluation_export'
+  | 'delete_evaluation_export'
+  | 'start_external_draft'
+  | 'update_external_draft_stage'
+  | 'apply_external_draft'
   | 'get_heal_context'
   | 'start_run'
   | 'pause_run'
@@ -127,7 +176,30 @@ const VERIFY_TOOLS = [
   'get_verification_result',
 ] as const satisfies readonly CanaryLabMcpToolName[]
 
+const AUTHOR_TOOLS = [
+  'list_features',
+  'list_runs',
+  'get_run',
+  'get_run_snapshot',
+  'create_feature',
+  'get_feature_envset_summary',
+  'capture_feature_env_files',
+  'delete_feature',
+  'get_feature_repo_status',
+  'checkout_feature_repo_branch',
+  'start_external_evaluation_export',
+  'submit_external_evaluation_export',
+  'list_evaluation_exports',
+  'get_evaluation_export',
+  'download_evaluation_export',
+  'delete_evaluation_export',
+  'start_external_draft',
+  'update_external_draft_stage',
+  'apply_external_draft',
+] as const satisfies readonly CanaryLabMcpToolName[]
+
 const FULL_TOOLS = [
+  ...AUTHOR_TOOLS,
   'list_features',
   'list_runs',
   'get_run',
@@ -154,6 +226,7 @@ const FULL_TOOLS = [
 const TOOLS_BY_PROFILE: Record<CanaryLabMcpProfile, readonly CanaryLabMcpToolName[]> = {
   repair: REPAIR_TOOLS,
   verify: VERIFY_TOOLS,
+  author: AUTHOR_TOOLS,
   full: FULL_TOOLS,
 }
 
@@ -366,6 +439,347 @@ export function registerCanaryLabTools(
       return errorResult(`execution is not verify: ${executionId}`)
     }
     return asJsonResult(verificationResult(detail))
+  })
+
+  // ─── external authoring and export control ───────────────────────────
+
+  registerTool('create_feature', {
+    description: 'Create a Canary Lab feature skeleton for an external client to author tests. This never generates test cases or starts a local Claude/Codex agent.',
+    inputSchema: {
+      feature: z.string().describe('Feature name to create under features/<name>.'),
+      description: z.string().optional(),
+      envs: z.array(z.string()).optional().describe('Envset names to declare. Defaults to local.'),
+      repos: z.array(z.object({
+        name: z.string(),
+        localPath: z.string(),
+        cloneUrl: z.string().optional(),
+        branch: z.string().optional(),
+        startCommands: z.array(z.unknown()).optional(),
+        envs: z.array(z.string()).optional(),
+      })).optional(),
+      envSources: z.array(z.object({
+        sourcePath: z.string(),
+        env: z.string().optional(),
+        slot: z.string().optional(),
+        target: z.string().optional(),
+        description: z.string().optional(),
+        confirmOverwrite: z.boolean().optional(),
+      })).optional().describe('Optional env/config files to copy into feature envsets. Values are never returned.'),
+    },
+  }, async ({ feature, description, envs, repos, envSources }) => {
+    try {
+      const created = createFeatureSkeleton({
+        projectRoot: deps.projectRoot,
+        featuresDir: deps.featuresDir,
+        feature,
+        description,
+        envs,
+        repos,
+      })
+      if (!created.ok) return errorResult(created.error)
+      const captured = envSources?.length
+        ? captureFeatureEnvFiles({ projectRoot: deps.projectRoot, featuresDir: deps.featuresDir }, { feature, sources: envSources as EnvFileSource[] })
+        : null
+      if (captured && !captured.ok) return errorResult(captured.error)
+      return asJsonResult({
+        ...created,
+        ...(captured?.ok ? { captured: captured.captured, envsets: captured.summary } : {}),
+      })
+    } catch (err) {
+      return errorResult(err instanceof Error ? err.message : String(err))
+    }
+  })
+
+  registerTool('get_feature_envset_summary', {
+    description: 'List a feature envset layout, slot targets, and redacted key previews. Secret values are never returned.',
+    inputSchema: { feature: z.string() },
+  }, async ({ feature }) => {
+    const summary = getFeatureEnvsetSummary({ projectRoot: deps.projectRoot, featuresDir: deps.featuresDir }, feature)
+    if (!summary) return errorResult(`feature not found: ${feature}`)
+    return asJsonResult(summary)
+  })
+
+  registerTool('capture_feature_env_files', {
+    description: 'Copy declared .env/properties files into feature envsets and update envsets.config.json. Returns redacted key previews only.',
+    inputSchema: {
+      feature: z.string(),
+      sources: z.array(z.object({
+        sourcePath: z.string(),
+        env: z.string().optional(),
+        slot: z.string().optional(),
+        target: z.string().optional(),
+        description: z.string().optional(),
+        confirmOverwrite: z.boolean().optional(),
+      })).min(1),
+    },
+  }, async ({ feature, sources }) => {
+    try {
+      const result = captureFeatureEnvFiles({ projectRoot: deps.projectRoot, featuresDir: deps.featuresDir }, { feature, sources: sources as EnvFileSource[] })
+      return result.ok ? asJsonResult(result) : errorResult(result.error)
+    } catch (err) {
+      return errorResult(err instanceof Error ? err.message : String(err))
+    }
+  })
+
+  registerTool('delete_feature', {
+    description: 'Delete a Canary Lab feature directory. Requires confirmName to match the feature name.',
+    inputSchema: {
+      feature: z.string(),
+      confirmName: z.string().describe('Must exactly match feature.'),
+    },
+    annotations: { destructiveHint: true, idempotentHint: false },
+  }, async ({ feature, confirmName }) => {
+    const result = deleteFeature({ projectRoot: deps.projectRoot, featuresDir: deps.featuresDir }, { feature, confirmName })
+    return result.ok ? asJsonResult({ deleted: true, feature, featureDir: result.featureDir }) : errorResult(result.error)
+  })
+
+  registerTool('get_feature_repo_status', {
+    description: 'Get git branch/dirty status for a repo declared in feature.config.cjs.',
+    inputSchema: { feature: z.string(), repo: z.string() },
+  }, async ({ feature, repo }) => {
+    const status = await getFeatureRepoStatus({ projectRoot: deps.projectRoot, featuresDir: deps.featuresDir }, feature, repo)
+    if (!status) return errorResult(`repo not found: ${feature}/${repo}`)
+    return asJsonResult(status)
+  })
+
+  registerTool('checkout_feature_repo_branch', {
+    description: 'Checkout a branch in a repo declared in feature.config.cjs. Confirm-gated because it changes the user repo checkout.',
+    inputSchema: {
+      feature: z.string(),
+      repo: z.string(),
+      branch: z.string(),
+      confirm: z.literal(true),
+    },
+    annotations: { destructiveHint: true, idempotentHint: false },
+  }, async ({ feature, repo, branch, confirm }) => {
+    const result = await checkoutFeatureRepoBranch(
+      { projectRoot: deps.projectRoot, featuresDir: deps.featuresDir },
+      { feature, repo, branch, confirm },
+    )
+    return isToolErrorPayload(result) ? errorResult(result.error) : asJsonResult(result)
+  })
+
+  registerTool('start_external_evaluation_export', {
+    description: 'Create an evaluation export task for an external client to author. Returns run context plus the report/archive submission schema. Does not start any local LLM.',
+    inputSchema: {
+      runId: z.string(),
+      language: z.string().default('English'),
+      session_id: z.string(),
+      client_kind: clientKindInput,
+      conversation_name: z.string().optional(),
+      external_session_url: z.string().optional(),
+    },
+  }, async ({ runId, language, session_id, client_kind, conversation_name, external_session_url }) => {
+    const detail = deps.store.get(runId)
+    if (!detail) return errorResult(`run not found: ${runId}`)
+    if (!isTerminalRunStatus(detail.manifest.status)) {
+      return errorResult('evaluation export is available after the run finishes')
+    }
+    const now = new Date().toISOString()
+    const task: EvaluationExportTaskRecord = {
+      taskId: newEvaluationTaskId(),
+      runId,
+      feature: detail.manifest.feature,
+      mode: 'localized',
+      producer: 'external',
+      status: 'running',
+      createdAt: now,
+      updatedAt: now,
+      downloadReady: false,
+      archiveBase: `canary-lab-evaluation-${safeFilename(detail.manifest.feature)}-${safeFilename(runId)}`,
+      clientKind: client_kind,
+      sessionId: session_id,
+      ...(conversation_name ? { conversationName: conversation_name } : {}),
+      language,
+      ...(external_session_url ? { externalSessionUrl: external_session_url } : {}),
+    }
+    createEvaluationExportTask(deps.store.logsDir, task)
+    appendEvaluationExportLog(deps.store.logsDir, task.taskId, '[evaluation] external export task created\n')
+    return asJsonResult({
+      task: evaluationExportTaskView(task),
+      runContext: buildExternalRunSnapshot({
+        detail,
+        logsDir: deps.store.logsDir,
+        projectRoot: deps.projectRoot,
+      }),
+      reportSchema: externalEvaluationReportSchema(),
+    })
+  })
+
+  registerTool('submit_external_evaluation_export', {
+    description: 'Store the report/archive produced by an external client and mark the evaluation export task completed.',
+    inputSchema: {
+      taskId: z.string(),
+      archiveBase64: z.string().optional(),
+      files: z.array(z.object({ path: z.string(), content: z.string() })).optional(),
+    },
+  }, async ({ taskId, archiveBase64, files }) => {
+    const task = readEvaluationExportTask(deps.store.logsDir, taskId)
+    if (!task) return errorResult(`evaluation export task not found: ${taskId}`)
+    if ((task.producer ?? 'internal') !== 'external') return errorResult('only external export tasks can be submitted through this tool')
+    if (!archiveBase64 && (!files || files.length === 0)) return errorResult('submit archiveBase64 or files[]')
+    try {
+      if (archiveBase64) {
+        writeEvaluationExportZip(deps.store.logsDir, taskId, Buffer.from(archiveBase64, 'base64'))
+      } else {
+        writeEvaluationExportFilesZip(deps.store.logsDir, taskId, files!)
+      }
+      appendEvaluationExportLog(deps.store.logsDir, taskId, '[evaluation] external report submitted\n')
+      const next = patchEvaluationExportTask(deps.store.logsDir, taskId, {
+        status: 'completed',
+        downloadReady: true,
+      })
+      return asJsonResult(evaluationExportTaskView(next!))
+    } catch (err) {
+      return errorResult(err instanceof Error ? err.message : String(err))
+    }
+  })
+
+  registerTool('list_evaluation_exports', {
+    description: 'List persisted evaluation export tasks.',
+    inputSchema: { runId: z.string().optional() },
+  }, async ({ runId }) => {
+    const tasks = listEvaluationExportTasks(deps.store.logsDir, runId ? { runId } : {})
+    return asJsonResult(tasks.map(evaluationExportTaskView))
+  })
+
+  registerTool('get_evaluation_export', {
+    description: 'Fetch one evaluation export task.',
+    inputSchema: { taskId: z.string() },
+  }, async ({ taskId }) => {
+    const task = readEvaluationExportTask(deps.store.logsDir, taskId)
+    if (!task) return errorResult(`evaluation export task not found: ${taskId}`)
+    return asJsonResult(evaluationExportTaskView(task))
+  })
+
+  registerTool('download_evaluation_export', {
+    description: 'Return a completed evaluation export archive as base64 for MCP clients.',
+    inputSchema: { taskId: z.string() },
+  }, async ({ taskId }) => {
+    const task = readEvaluationExportTask(deps.store.logsDir, taskId)
+    if (!task) return errorResult(`evaluation export task not found: ${taskId}`)
+    const zip = task.status === 'completed' ? readEvaluationExportZip(deps.store.logsDir, taskId) : null
+    if (!zip) return errorResult('evaluation export is not ready')
+    return asJsonResult({
+      task: evaluationExportTaskView(task),
+      filename: `${task.archiveBase}.zip`,
+      archiveBase64: zip.toString('base64'),
+    })
+  })
+
+  registerTool('delete_evaluation_export', {
+    description: 'Delete an evaluation export task and stored archive. Requires confirm: true.',
+    inputSchema: { taskId: z.string(), confirm: z.literal(true) },
+    annotations: { destructiveHint: true, idempotentHint: false },
+  }, async ({ taskId }) => {
+    const deleted = deleteEvaluationExportTask(deps.store.logsDir, taskId)
+    if (!deleted) return errorResult(`evaluation export task not found: ${taskId}`)
+    return asJsonResult({ deleted: true, taskId })
+  })
+
+  registerTool('start_external_draft', {
+    description: 'Create an external test-authoring draft/task record. This never starts the internal wizard agents.',
+    inputSchema: {
+      feature: z.string(),
+      stage: EXTERNAL_DRAFT_STAGE.default('scaffolding'),
+      session_id: z.string(),
+      client_kind: clientKindInput,
+      conversation_name: z.string().optional(),
+      external_session_url: z.string().optional(),
+    },
+  }, async ({ feature, stage, session_id, client_kind, conversation_name, external_session_url }) => {
+    const featureConfig = loadFeatures(deps.featuresDir).find((candidate) => candidate.name === feature)
+    if (!featureConfig) return errorResult(`feature not found: ${feature}`)
+    const draftId = newDraftId()
+    const record = createDraft(deps.store.logsDir, {
+      draftId,
+      prdText: `External client is authoring tests for ${feature}.`,
+      prdDocuments: [],
+      repos: (featureConfig.repos ?? []).map((repo) => ({
+        name: repo.name,
+        localPath: repo.localPath,
+        ...(repo.branch ? { branch: repo.branch } : {}),
+      })),
+      featureName: feature,
+      source: 'external',
+      externalStage: stage as ExternalDraftStage,
+      externalClientKind: client_kind,
+      externalSessionId: session_id,
+      ...(conversation_name ? { externalConversationName: conversation_name } : {}),
+      ...(external_session_url ? { externalSessionUrl: external_session_url } : {}),
+    })
+    const next: DraftRecord = {
+      ...record,
+      status: statusForExternalStage(stage as ExternalDraftStage),
+      updatedAt: new Date().toISOString(),
+    }
+    writeDraft(deps.store.logsDir, next)
+    return asJsonResult(externalDraftView(next))
+  })
+
+  registerTool('update_external_draft_stage', {
+    description: 'Update the visible stage for an external draft/task record.',
+    inputSchema: {
+      draftId: z.string(),
+      stage: EXTERNAL_DRAFT_STAGE,
+      message: z.string().optional(),
+    },
+  }, async ({ draftId, stage, message }) => {
+    const current = readDraft(deps.store.logsDir, draftId)
+    if (!current) return errorResult(`draft not found: ${draftId}`)
+    if ((current.source ?? 'internal') !== 'external') return errorResult('draft is not external-owned')
+    const next: DraftRecord = {
+      ...current,
+      externalStage: stage as ExternalDraftStage,
+      status: statusForExternalStage(stage as ExternalDraftStage),
+      ...(stage === 'error' && message ? { errorMessage: message } : {}),
+      updatedAt: new Date().toISOString(),
+    }
+    writeDraft(deps.store.logsDir, next)
+    return asJsonResult(externalDraftView(next))
+  })
+
+  registerTool('apply_external_draft', {
+    description: 'Validate externally authored test files and apply them to the target feature. Requires confirm: true. This never starts internal wizard agents.',
+    inputSchema: {
+      draftId: z.string(),
+      confirm: z.literal(true),
+      files: z.array(z.object({ path: z.string(), content: z.string() })).optional(),
+    },
+    annotations: { destructiveHint: true, idempotentHint: false },
+  }, async ({ draftId, files }) => {
+    const current = readDraft(deps.store.logsDir, draftId)
+    if (!current) return errorResult(`draft not found: ${draftId}`)
+    if ((current.source ?? 'internal') !== 'external') return errorResult('draft is not external-owned')
+    if (!current.featureName) return errorResult('external draft has no featureName')
+    const feature = loadFeatures(deps.featuresDir).find((candidate) => candidate.name === current.featureName)
+    if (!feature?.featureDir) return errorResult(`feature not found: ${current.featureName}`)
+    const applied = applyExternalDraftFiles({
+      featureDir: feature.featureDir,
+      files: files?.map((file) => ({ path: file.path, content: file.content })),
+    })
+    if (!applied.ok) return errorResult(applied.error)
+    const p = draftPaths(deps.store.logsDir, draftId)
+    fs.mkdirSync(p.generatedDir, { recursive: true })
+    for (const file of files ?? []) {
+      const target = path.join(p.generatedDir, file.path)
+      fs.mkdirSync(path.dirname(target), { recursive: true })
+      fs.writeFileSync(target, file.content, 'utf8')
+    }
+    const next: DraftRecord = {
+      ...current,
+      externalStage: 'applied',
+      status: 'accepted',
+      generatedFiles: applied.written,
+      updatedAt: new Date().toISOString(),
+    }
+    writeDraft(deps.store.logsDir, next)
+    return asJsonResult({
+      draftId,
+      feature: current.featureName,
+      status: 'applied',
+      written: applied.written,
+    })
   })
 
   registerTool('get_heal_context', {
@@ -756,6 +1170,66 @@ function verificationResult(detail: RunDetail): Record<string, unknown> {
 function mcpVerificationStatus(status: string): string {
   if (status === 'aborted') return 'cancelled'
   return status
+}
+
+function statusForExternalStage(stage: ExternalDraftStage): DraftRecord['status'] {
+  if (stage === 'ready') return 'spec-ready'
+  if (stage === 'applied') return 'accepted'
+  if (stage === 'error') return 'error'
+  return 'generating'
+}
+
+function externalDraftView(record: DraftRecord): Record<string, unknown> {
+  return {
+    draftId: record.draftId,
+    feature: record.featureName,
+    featureName: record.featureName,
+    source: record.source ?? 'internal',
+    externalStage: record.externalStage,
+    status: record.status,
+    clientKind: record.externalClientKind,
+    sessionId: record.externalSessionId,
+    conversationName: record.externalConversationName,
+    externalSessionUrl: record.externalSessionUrl,
+    createdAt: record.createdAt,
+    updatedAt: record.updatedAt,
+    ...(record.errorMessage ? { errorMessage: record.errorMessage } : {}),
+  }
+}
+
+function newDraftId(): string {
+  return `draft-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+}
+
+function newEvaluationTaskId(): string {
+  return `eval-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+}
+
+function safeFilename(input: string): string {
+  return input.replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'export'
+}
+
+function externalEvaluationReportSchema(): Record<string, unknown> {
+  return {
+    archiveBase64: 'base64 encoded .zip, or submit files[] for Canary Lab to zip',
+    files: [
+      {
+        path: 'evaluation.md or evaluation.html',
+        content: 'Externally authored report content in the requested language',
+      },
+    ],
+    requiredBehavior: [
+      'Do not ask Canary Lab to rewrite or translate the report.',
+      'Submit the final report/archive through submit_external_evaluation_export.',
+    ],
+  }
+}
+
+function isToolErrorPayload(value: unknown): value is { error: string; statusCode?: number } {
+  return !!value &&
+    typeof value === 'object' &&
+    'error' in value &&
+    typeof (value as { error?: unknown }).error === 'string'
 }
 
 type WaitForHealTaskValue =

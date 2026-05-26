@@ -5,8 +5,11 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
   applyFeatureScaffold,
   buildFeatureScaffold,
+  buildFeatureSkeletonScaffold,
   canonicalScaffoldPaths,
+  skeletonScaffoldPaths,
   validateGeneratedFeatureFiles,
+  validateGeneratedSpecFiles,
 } from './feature-scaffold'
 
 let tmp: string
@@ -25,6 +28,20 @@ describe('buildFeatureScaffold', () => {
     expect(files.map((file) => file.path)).toEqual(canonicalScaffoldPaths('demo_login'))
     expect(files.find((file) => file.path === 'feature.config.cjs')?.content).toContain("name: 'demo_login'")
     expect(files.find((file) => file.path === 'playwright.config.ts')?.content).toContain('baseConfig')
+  })
+
+  it('can build the external-client skeleton without generated specs', () => {
+    const files = buildFeatureSkeletonScaffold({
+      featureName: 'demo_login',
+      description: 'Demo login',
+      envs: ['local', 'staging'],
+      repos: [{ name: 'api', localPath: '/repos/api', branch: 'main' }],
+    })
+
+    expect(files.map((file) => file.path)).toEqual(skeletonScaffoldPaths('demo_login'))
+    expect(files.some((file) => file.path.endsWith('.spec.ts'))).toBe(false)
+    expect(files.find((file) => file.path === 'feature.config.cjs')?.content).toContain("envs: ['local', 'staging']")
+    expect(files.find((file) => file.path === 'feature.config.cjs')?.content).toContain("name: 'api'")
   })
 })
 
@@ -75,6 +92,28 @@ describe('validateGeneratedFeatureFiles', () => {
     const r = validateGeneratedFeatureFiles('demo_login', files)
     expect(r.ok).toBe(false)
     if (!r.ok) expect(r.error).toContain('log-marker-fixture')
+  })
+})
+
+describe('validateGeneratedSpecFiles', () => {
+  it('accepts externally authored specs without requiring scaffold files', () => {
+    expect(validateGeneratedSpecFiles([
+      {
+        path: 'e2e/login.spec.ts',
+        content: "import { test, expect } from 'canary-lab/feature-support/log-marker-fixture'\n",
+      },
+    ])).toEqual({ ok: true })
+  })
+
+  it('rejects external specs outside e2e', () => {
+    const r = validateGeneratedSpecFiles([
+      {
+        path: 'tests/login.spec.ts',
+        content: "import { test } from 'canary-lab/feature-support/log-marker-fixture'\n",
+      },
+    ])
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.error).toContain('directly under e2e/')
   })
 })
 
