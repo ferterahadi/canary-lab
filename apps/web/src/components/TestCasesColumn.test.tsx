@@ -205,6 +205,54 @@ describe('TestCasesColumn', () => {
     expect(container.textContent).not.toContain('Export Evaluation')
   })
 
+  it('hydrates selected run summary tests with parsed spec code when location still matches', async () => {
+    vi.mocked(getFeatureTests).mockResolvedValue([
+      {
+        file: '/tmp/features/alpha/e2e/current.spec.ts',
+        tests: [
+          {
+            name: 'validates checkout',
+            line: 14,
+            bodySource: "{\n  await page.goto('/checkout')\n  await expect(page).toHaveURL(/checkout/)\n}",
+            steps: [],
+          },
+        ],
+      },
+    ])
+
+    await act(async () => {
+      root.render(
+        <TestCasesColumn
+          feature="alpha"
+          activeRunStatus="passed"
+          activeRunSummary={{
+            complete: true,
+            total: 1,
+            passed: 1,
+            passedNames: ['test-case-validates-checkout'],
+            passedIds: ['test-id-checkout'],
+            knownTests: [
+              {
+                id: 'test-id-checkout',
+                name: 'test-case-validates-checkout',
+                title: 'validates checkout',
+                location: '/tmp/features/alpha/e2e/current.spec.ts:14',
+              },
+            ],
+            failed: [],
+          }}
+        />,
+      )
+    })
+
+    await act(async () => {
+      container.querySelector('button')?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+
+    expect(container.textContent).toContain("page.goto('/checkout')")
+    expect(container.textContent).not.toContain('No test body available.')
+  })
+
   it('uses the selected run summary for counts and duplicate-title statuses', async () => {
     vi.mocked(getFeatureTests).mockResolvedValue([
       {

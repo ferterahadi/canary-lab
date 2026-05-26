@@ -780,7 +780,7 @@ describe('RunStore', () => {
     expect(store.get('missing')).toBeNull()
   })
 
-  it('bootstrap writes manifest, index, and current symlink, then emits', () => {
+  it('bootstrap writes manifest and index, then emits', () => {
     const store = new RunStore(tmpDir, createRegistry())
     const events: RunStoreEvent[] = []
     store.on('event', (e) => events.push(e))

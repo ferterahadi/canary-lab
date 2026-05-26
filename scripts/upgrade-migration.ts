@@ -33,6 +33,8 @@ export interface MigrationReport {
   healPromptStatus: HealPromptStatus
   healPromptDiff?: string
   ciPathHints: CiPathHint[]
+  legacyCurrentPointer?: string
+  removedLegacyCurrentPointer?: string
   /** Raw paths that would be archived (input to applyArchive). Same as
    * archivedFiles before applyArchive runs. */
   orphanedLogs: string[]
@@ -64,6 +66,37 @@ export function findOrphanedLogs(repoRoot: string): string[] {
     }
   }
   return out.sort()
+}
+
+/** Find the legacy `logs/current` symlink when it only points into logs/runs/. */
+export function findLegacyCurrentPointer(repoRoot: string): string | undefined {
+  const logsDir = path.join(repoRoot, 'logs')
+  const pointer = path.join(logsDir, 'current')
+  let stat: fs.Stats
+  try {
+    stat = fs.lstatSync(pointer)
+  } catch {
+    return undefined
+  }
+  if (!stat.isSymbolicLink()) return undefined
+
+  let target: string
+  try {
+    target = fs.readlinkSync(pointer)
+  } catch {
+    return undefined
+  }
+  const resolvedTarget = path.resolve(logsDir, target)
+  const runsRoot = path.join(logsDir, 'runs')
+  const relativeToRuns = path.relative(runsRoot, resolvedTarget)
+  if (
+    relativeToRuns === '' ||
+    relativeToRuns.startsWith('..') ||
+    path.isAbsolute(relativeToRuns)
+  ) {
+    return undefined
+  }
+  return pointer
 }
 
 /** Lint a single feature.config.cjs file. Returns issue list (empty if clean). */
@@ -261,6 +294,7 @@ export function detectMigrations(
   opts: DetectMigrationsOptions = {},
 ): MigrationReport {
   const orphanedLogs = findOrphanedLogs(repoRoot)
+  const legacyCurrentPointer = findLegacyCurrentPointer(repoRoot)
   const staleFeatureConfigs = findStaleFeatureConfigs(repoRoot)
 
   const claudeMdPath = path.join(repoRoot, 'CLAUDE.md')
@@ -280,6 +314,7 @@ export function detectMigrations(
     healPromptDiff: heal.diff,
     healPromptNote: heal.note,
     ciPathHints,
+    legacyCurrentPointer,
   }
 }
 
@@ -303,6 +338,15 @@ export function applyArchive(report: MigrationReport, repoRoot: string): void {
     fs.renameSync(src, dest)
     report.archivedFiles.push(dest)
   }
+}
+
+export function removeLegacyCurrentPointer(report: MigrationReport, repoRoot: string): void {
+  const pointer = report.legacyCurrentPointer
+  if (!pointer) return
+  const currentPointer = findLegacyCurrentPointer(repoRoot)
+  if (currentPointer !== pointer) return
+  fs.unlinkSync(pointer)
+  report.removedLegacyCurrentPointer = pointer
 }
 
 /** Filesystem-safe ISO timestamp: `YYYY-MM-DDTHHMM`. */
@@ -348,6 +392,16 @@ export function renderReport(report: MigrationReport): string {
     lines.push('   These will be moved to logs/_pre-0.10.x-archive/<ts>/ if you confirm.')
   } else {
     lines.push('✓ No orphaned 0.9.x logs at top level of logs/.')
+  }
+  lines.push('')
+
+  if (report.removedLegacyCurrentPointer) {
+    lines.push(`✓ Removed legacy active-run pointer: ${report.removedLegacyCurrentPointer}`)
+  } else if (report.legacyCurrentPointer) {
+    lines.push(`⚠  Found legacy active-run pointer: ${report.legacyCurrentPointer}`)
+    lines.push('   It points into logs/runs/ and will be removed during upgrade.')
+  } else {
+    lines.push('✓ No legacy logs/current active-run pointer.')
   }
   lines.push('')
 
@@ -401,6 +455,7 @@ export function renderReport(report: MigrationReport): string {
 export function hasPendingMigrations(report: MigrationReport): boolean {
   return (
     report.orphanedLogs.length > 0 ||
+    Boolean(report.legacyCurrentPointer && !report.removedLegacyCurrentPointer) ||
     report.staleFeatureConfigs.length > 0 ||
     report.healPromptStatus !== 'matches-current' ||
     report.ciPathHints.length > 0

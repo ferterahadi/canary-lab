@@ -17,8 +17,8 @@ import { reduceRunLifecycleSnapshot } from '../../../../shared/run-state'
 
 // `RunStateSink` is the interface the orchestrator uses to persist its own
 // state. The default implementation (`FileRunStateSink`) writes the same
-// manifest.json + runs-index.json + symlink files the rest of the system
-// already reads. The web-server layer extends this with event emission so
+// manifest.json + runs-index.json files the rest of the system already reads.
+// The web-server layer extends this with event emission so
 // WebSocket subscribers can be notified without polling — but the
 // orchestrator only needs to know about this minimal interface.
 //
