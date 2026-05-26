@@ -48,7 +48,7 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunStatus }: 
   }
 
   const runSpecs = activeRunSummary?.knownTests?.length
-    ? specsFromRunSummary(activeRunSummary)
+    ? specsFromRunSummary(activeRunSummary, specs)
     : null
   const displaySpecs = runSpecs ?? specs
   const totalTests = displaySpecs?.reduce((acc, s) => acc + s.tests.length, 0) ?? 0
@@ -130,23 +130,46 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunStatus }: 
   )
 }
 
-function specsFromRunSummary(summary: RunSummary): FeatureSpecFile[] {
+function specsFromRunSummary(summary: RunSummary, specs: FeatureSpecFile[] | null): FeatureSpecFile[] {
   const byFile = new Map<string, ExtractedTest[]>()
+  const sourceByLocation = testsByLocation(specs)
   for (const known of summary.knownTests ?? []) {
     const parsed = parseSummaryLocation(known.location)
     const file = parsed?.file ?? 'Run summary'
     const tests = byFile.get(file) ?? []
+    const candidates = parsed ? sourceByLocation.get(locationKey(parsed.file, parsed.line)) : undefined
+    const source = candidates?.find((candidate) => {
+      return candidate.name === known.title || candidate.name === known.name
+    }) ?? candidates?.[0]
     tests.push({
       id: known.id,
       name: known.title ?? known.name,
       line: parsed?.line ?? 0,
-      bodySource: '',
-      steps: [],
-      ...(parsed?.file ? { sourceFile: parsed.file } : {}),
+      bodySource: source?.bodySource ?? '',
+      steps: source?.steps ?? [],
+      ...(source?.sourceFile ? { sourceFile: source.sourceFile } : parsed?.file ? { sourceFile: parsed.file } : {}),
     })
     byFile.set(file, tests)
   }
   return [...byFile.entries()].map(([file, tests]) => ({ file, tests }))
+}
+
+function testsByLocation(specs: FeatureSpecFile[] | null): Map<string, ExtractedTest[]> {
+  const out = new Map<string, ExtractedTest[]>()
+  for (const spec of specs ?? []) {
+    for (const test of spec.tests) {
+      const file = test.sourceFile ?? spec.file
+      const key = locationKey(file, test.line)
+      const tests = out.get(key) ?? []
+      tests.push(test)
+      out.set(key, tests)
+    }
+  }
+  return out
+}
+
+function locationKey(file: string, line: number): string {
+  return `${file}:${line}`
 }
 
 function parseSummaryLocation(location: string | undefined): { file: string; line: number } | null {

@@ -5,6 +5,7 @@ import { getInstalledPackageVersion, writeStamp } from '../shared/runtime/upgrad
 import {
   detectMigrations,
   applyArchive,
+  removeLegacyCurrentPointer,
   renderReport,
   hasPendingMigrations,
   type MigrationReport,
@@ -181,6 +182,7 @@ export async function runMigration(
     const ok = opts.forceArchive ? true : await confirm(report.orphanedLogs.length)
     if (ok) applyArchive(report, projectRoot)
   }
+  removeLegacyCurrentPointer(report, projectRoot)
   log(renderReport(report), opts)
   return { report, pending }
 }
