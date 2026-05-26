@@ -934,6 +934,52 @@ describe('RunOrchestrator.runPlaywright', () => {
     await orch.stop('passed')
   })
 
+  it('refreshes the stop-and-heal threshold from disk before each Playwright spawn', async () => {
+    const featureDir = path.join(tmpDir, 'features', 'demo')
+    fs.mkdirSync(featureDir, { recursive: true })
+    fs.writeFileSync(path.join(featureDir, 'feature.config.cjs'), [
+      'exports.config = {',
+      '  name: "demo",',
+      '  description: "demo",',
+      '  envs: ["local"],',
+      '  featureDir: __dirname,',
+      '  repos: [],',
+      '  healOnFailureThreshold: 4,',
+      '}',
+      '',
+    ].join('\n'))
+    const { factory, spawned } = makeFakeFactory()
+    const orch = new RunOrchestrator({
+      feature: makeFeature({ featureDir, repos: [], healOnFailureThreshold: 1 }),
+      runId: RUN_ID,
+      runDir,
+      ptyFactory: factory,
+      healthCheck: async () => true,
+      delay: async () => undefined,
+    })
+
+    const firstRun = orch.runPlaywright()
+    spawned.at(-1)!.emitExit(1)
+    await firstRun
+    expect(spawned.at(-1)!.options.command).toContain('--max-failures=4')
+
+    fs.writeFileSync(path.join(featureDir, 'feature.config.cjs'), [
+      'exports.config = {',
+      '  name: "demo",',
+      '  description: "demo",',
+      '  envs: ["local"],',
+      '  featureDir: __dirname,',
+      '  repos: [],',
+      '}',
+      '',
+    ].join('\n'))
+
+    const secondRun = orch.runPlaywright()
+    spawned.at(-1)!.emitExit(1)
+    await secondRun
+    expect(spawned.at(-1)!.options.command).not.toContain('--max-failures=')
+  })
+
   it('mirrors per-test artifact dirs into playwright-artifacts-keep on Playwright exit', async () => {
     const { factory, spawned } = makeFakeFactory()
     const orch = new RunOrchestrator({

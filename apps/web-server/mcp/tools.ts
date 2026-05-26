@@ -7,6 +7,7 @@ import type { ExternalHealBroker } from '../lib/external-heal-broker'
 import type { ExternalHealClientKind } from '../lib/runtime/manifest'
 import {
   buildExternalHealContext,
+  buildExternalRunSnapshot,
   normalizeRunCounts,
   writeHealSignal,
   type ExternalHealContext,
@@ -80,6 +81,7 @@ export type CanaryLabMcpToolName =
   | 'list_features'
   | 'list_runs'
   | 'get_run'
+  | 'get_run_snapshot'
   | 'get_run_actions'
   | 'list_verification_configs'
   | 'get_verification_config'
@@ -104,6 +106,7 @@ const REPAIR_TOOLS = [
   'start_run',
   'wait_for_heal_task',
   'get_heal_context',
+  'get_run_snapshot',
   'get_run',
   'signal_run',
   'heartbeat',
@@ -136,6 +139,7 @@ const FULL_TOOLS = [
   'execute_verification',
   'get_verification_result',
   'get_heal_context',
+  'get_run_snapshot',
   'start_run',
   'pause_run',
   'cancel_heal',
@@ -223,6 +227,19 @@ export function registerCanaryLabTools(
     const detail = deps.store.get(runId)
     if (!detail) return errorResult(`run not found: ${runId}`)
     return asJsonResult(detail)
+  })
+
+  registerTool('get_run_snapshot', {
+    description: 'Fetch the verbose external-heal run snapshot: summary, full counts, failed tests, heal index, journal, artifact base, and heal prompt map.',
+    inputSchema: { runId: z.string() },
+  }, async ({ runId }) => {
+    const detail = deps.store.get(runId)
+    if (!detail) return errorResult(`run not found: ${runId}`)
+    return asJsonResult(buildExternalRunSnapshot({
+      detail,
+      logsDir: deps.store.logsDir,
+      projectRoot: deps.projectRoot,
+    }))
   })
 
   registerTool('get_run_actions', {
@@ -352,7 +369,7 @@ export function registerCanaryLabTools(
   })
 
   registerTool('get_heal_context', {
-    description: 'Bundle of failure context an external heal agent needs: failed tests with artifact URLs, heal-index markdown, journal, repo branches, lifecycle.',
+    description: 'Compact failure handoff packet an external heal agent needs first: current failures, artifact URLs, heal-index, journal, repo branches, lifecycle, and heal prompt map. Use get_run_snapshot for verbose raw summary/debugging fields.',
     inputSchema: {
       runId: z.string(),
       session_id: z.string().optional().describe('External heal session id. When provided, refreshes the session heartbeat.'),

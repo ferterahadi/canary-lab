@@ -38,7 +38,7 @@ export function ExternalHealPanel({ runId: _runId, runStatus, session }: Props) 
   const heartbeatLabel = ageLabel(ageMs)
 
   const terminalStatus = isTerminalRunStatus(runStatus) ? runStatus : null
-  const displayedStatus = terminalStatus ? null : session?.status ?? 'waiting'
+  const displayedStatus = terminalStatus ?? session?.status ?? 'waiting'
   const isDisconnected = !terminalStatus && session?.status === 'disconnected'
   const isLive =
     Boolean(session) && !terminalStatus && (

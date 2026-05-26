@@ -64,7 +64,7 @@ import { planRestart } from './restart-planner'
 import { interpolateConfigTokens, makeTokenCache } from './launcher/interpolate'
 import { readPlaywrightArtifactPolicy } from './playwright-artifact-policy'
 import { slugify } from './summary-reporter'
-import { listSpecFiles } from '../feature-loader'
+import { listSpecFiles, loadFeatures } from '../feature-loader'
 import { extractTestsFromSource } from '../ast-extractor'
 import {
   diffContentSinceSnapshot,
@@ -838,8 +838,9 @@ export class RunOrchestrator extends EventEmitter {
     const rerunSelection = normalizeRerunSelection(rerun)
     const rerunTargets = rerunSelection?.kind === 'targets' ? rerunSelection.targets : undefined
     const rerunGrep = rerunSelection?.kind === 'grep' ? rerunSelection.grep : undefined
+    const feature = this.featureWithLatestHealThreshold()
     const inv = this.playwrightSpawner({
-      feature: this.feature,
+      feature,
       paths: this.paths,
       rerunTargets,
       rerunGrep,
@@ -894,6 +895,13 @@ export class RunOrchestrator extends EventEmitter {
         resolve(exitCode)
       })
     })
+  }
+
+  private featureWithLatestHealThreshold(): FeatureConfig {
+    const latestThreshold = readLatestHealOnFailureThreshold(this.feature)
+    return latestThreshold === this.feature.healOnFailureThreshold
+      ? this.feature
+      : { ...this.feature, healOnFailureThreshold: latestThreshold }
   }
 
   // Copy each per-test subdir from `playwright-artifacts/` into the keep dir
@@ -2672,6 +2680,17 @@ export function summarizeFailures(summaryPath: string): { failed: string[]; tota
   const failed = extractFailedSlugs(summary)
   const total = typeof summary.total === 'number' ? summary.total : failed.length
   return { failed, total }
+}
+
+export function readLatestHealOnFailureThreshold(feature: FeatureConfig): number | undefined {
+  try {
+    const featureDir = path.resolve(feature.featureDir)
+    const latest = loadFeatures(path.dirname(featureDir))
+      .find((candidate) => path.resolve(candidate.featureDir) === featureDir || candidate.name === feature.name)
+    return latest ? latest.healOnFailureThreshold : feature.healOnFailureThreshold
+  } catch {
+    return feature.healOnFailureThreshold
+  }
 }
 
 // PASSED only when (a) Playwright exited 0 AND (b) every known test is in

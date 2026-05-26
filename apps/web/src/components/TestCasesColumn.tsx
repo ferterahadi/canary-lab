@@ -135,18 +135,22 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunStatus }: 
 function specsFromRunSummary(summary: RunSummary, specs: FeatureSpecFile[] | null): FeatureSpecFile[] {
   const byFile = new Map<string, ExtractedTest[]>()
   const sourceByLocation = testsByLocation(specs)
+  const sourceByFile = testsByFile(specs)
   for (const known of summary.knownTests ?? []) {
     const parsed = parseSummaryLocation(known.location)
     const file = parsed?.file ?? 'Run summary'
     const tests = byFile.get(file) ?? []
-    const candidates = parsed ? sourceByLocation.get(locationKey(parsed.file, parsed.line)) : undefined
-    const source = candidates?.find((candidate) => {
-      return candidate.name === known.title || candidate.name === known.name
-    }) ?? candidates?.[0]
+    const source = findSourceTest({
+      parsed,
+      knownName: known.name,
+      knownTitle: known.title,
+      sourceByLocation,
+      sourceByFile,
+    })
     tests.push({
       id: known.id,
       name: known.title ?? known.name,
-      line: parsed?.line ?? 0,
+      line: source?.line ?? parsed?.line ?? 0,
       bodySource: source?.bodySource ?? '',
       steps: source?.steps ?? [],
       ...(source?.sourceFile ? { sourceFile: source.sourceFile } : parsed?.file ? { sourceFile: parsed.file } : {}),
@@ -154,6 +158,28 @@ function specsFromRunSummary(summary: RunSummary, specs: FeatureSpecFile[] | nul
     byFile.set(file, tests)
   }
   return [...byFile.entries()].map(([file, tests]) => ({ file, tests }))
+}
+
+function findSourceTest(input: {
+  parsed: { file: string; line: number } | null
+  knownName: string
+  knownTitle?: string
+  sourceByLocation: Map<string, ExtractedTest[]>
+  sourceByFile: Map<string, ExtractedTest[]>
+}): ExtractedTest | undefined {
+  if (!input.parsed) return undefined
+  const matchesKnown = (candidate: ExtractedTest) => {
+    return candidate.name === input.knownTitle
+      || candidate.name === input.knownName
+      || summaryEntryName(candidate.name) === input.knownName
+  }
+
+  const exactCandidates = input.sourceByLocation.get(locationKey(input.parsed.file, input.parsed.line))
+  const exact = exactCandidates?.find(matchesKnown) ?? exactCandidates?.[0]
+  if (exact) return exact
+
+  const sameFileMatches = (input.sourceByFile.get(input.parsed.file) ?? []).filter(matchesKnown)
+  return sameFileMatches.length === 1 ? sameFileMatches[0] : undefined
 }
 
 function testsByLocation(specs: FeatureSpecFile[] | null): Map<string, ExtractedTest[]> {
@@ -165,6 +191,19 @@ function testsByLocation(specs: FeatureSpecFile[] | null): Map<string, Extracted
       const tests = out.get(key) ?? []
       tests.push(test)
       out.set(key, tests)
+    }
+  }
+  return out
+}
+
+function testsByFile(specs: FeatureSpecFile[] | null): Map<string, ExtractedTest[]> {
+  const out = new Map<string, ExtractedTest[]>()
+  for (const spec of specs ?? []) {
+    for (const test of spec.tests) {
+      const file = test.sourceFile ?? spec.file
+      const tests = out.get(file) ?? []
+      tests.push(test)
+      out.set(file, tests)
     }
   }
   return out

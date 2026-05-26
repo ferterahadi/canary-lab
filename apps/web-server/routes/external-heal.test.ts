@@ -66,14 +66,20 @@ function writeSummary(runId: string): void {
   const runDir = runDirFor(logsDir, runId)
   fs.writeFileSync(path.join(runDir, 'e2e-summary.json'), JSON.stringify({
     complete: true,
-    total: 1,
+    total: 3,
     passed: 0,
+    knownTests: [
+      { name: 'checkout fails' },
+      { name: 'setup fails before artifact capture' },
+      { name: 'not run yet' },
+    ],
     failed: [
       {
         name: 'checkout fails',
         error: { message: 'Expected total to match', snippet: 'expect(total).toBe(12)' },
         location: 'e2e/checkout.spec.ts:12:3',
         retry: 1,
+        logFiles: ['failed/checkout-fails/svc-app.log'],
       },
       {
         name: 'setup fails before artifact capture',
@@ -227,7 +233,7 @@ describe('external heal routes', () => {
     })).json()).toEqual({ reason: 'no-matching-claim' })
   })
 
-  it('returns heal context with failed test artifacts and nullable missing fields', async () => {
+  it('returns compact heal context with failed test artifacts and nullable missing fields', async () => {
     writeRun('run-1')
     writeSummary('run-1')
     const { app } = await build()
@@ -241,15 +247,27 @@ describe('external heal routes', () => {
       env: 'local',
       status: 'running',
       healCycles: 1,
-      healIndexMarkdown: '# Heal Index\n',
-      journalMarkdown: '# Journal\n',
-      artifactsBase: '/api/runs/run-1/artifacts/',
+      counts: {
+        totalKnown: 3,
+        passed: 0,
+        failed: 2,
+        skipped: 0,
+        notRun: 1,
+        statusLine: '0/3 passed, 2 failed, 1 not run',
+      },
+      healIndex: {
+        markdown: '# Heal Index\n',
+      },
+      journal: {
+        markdown: '# Journal\n',
+      },
       failedTests: [
         {
           name: 'checkout fails',
           error: { message: 'Expected total to match', snippet: 'expect(total).toBe(12)' },
           location: 'e2e/checkout.spec.ts:12:3',
           retry: 1,
+          logFiles: ['failed/checkout-fails/svc-app.log'],
           artifacts: [
             {
               name: 'trace',
@@ -263,6 +281,38 @@ describe('external heal routes', () => {
           artifacts: [],
         },
       ],
+    })
+    expect(res.json()).not.toHaveProperty('summary')
+    expect(res.json()).not.toHaveProperty('healIndexMarkdown')
+    expect(res.json()).not.toHaveProperty('journalMarkdown')
+    expect(res.json().counts).not.toHaveProperty('notRunNames')
+    expect(JSON.stringify(res.json())).not.toContain('not run yet')
+  })
+
+  it('returns full run snapshot as the verbose debugging fallback', async () => {
+    writeRun('run-1')
+    writeSummary('run-1')
+    const { app } = await build()
+
+    const res = await app.inject({ method: 'GET', url: '/api/runs/run-1/run-snapshot' })
+
+    expect(res.statusCode).toBe(200)
+    expect(res.json()).toMatchObject({
+      runId: 'run-1',
+      summary: {
+        knownTests: [
+          { name: 'checkout fails' },
+          { name: 'setup fails before artifact capture' },
+          { name: 'not run yet' },
+        ],
+      },
+      counts: {
+        notRunNames: ['not run yet'],
+        statusLine: '0/3 passed, 2 failed, 1 not run',
+      },
+      healIndexMarkdown: '# Heal Index\n',
+      journalMarkdown: '# Journal\n',
+      artifactsBase: '/api/runs/run-1/artifacts/',
     })
   })
 
@@ -284,11 +334,11 @@ describe('external heal routes', () => {
       repoBranches: [],
       lifecycle: null,
       externalHealSession: null,
-      summary: null,
       failedTests: [],
-      healIndexMarkdown: null,
-      journalMarkdown: null,
+      healIndex: null,
+      journal: null,
     })
+    expect(res.json()).not.toHaveProperty('summary')
   })
 
   it('validates and writes restart, rerun, and heal signal files', async () => {

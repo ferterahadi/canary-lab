@@ -11,7 +11,17 @@ export interface ExternalHealFailedTest {
   error?: unknown
   location?: string
   retry?: number
+  logFiles?: string[]
   artifacts: Array<{ name: string; kind: string; url: string }>
+}
+
+export interface CompactRunCounts {
+  totalKnown: number
+  passed: number
+  failed: number
+  skipped: number
+  notRun: number
+  statusLine: string
 }
 
 export interface NormalizedRunCounts {
@@ -39,6 +49,22 @@ export interface ExternalHealContext {
   repoBranches: RunDetail['manifest']['repoBranches']
   lifecycle: RunDetail['manifest']['lifecycle'] | null
   externalHealSession: RunDetail['manifest']['externalHealSession'] | null
+  counts: CompactRunCounts
+  failedTests: ExternalHealFailedTest[]
+  healIndex: { path: string; markdown: string } | null
+  journal: { path: string; markdown: string } | null
+  healPrompt?: HealPromptMap
+}
+
+export interface ExternalRunSnapshot {
+  runId: string
+  feature: string
+  env: string | null
+  status: string
+  healCycles: number
+  repoBranches: RunDetail['manifest']['repoBranches']
+  lifecycle: RunDetail['manifest']['lifecycle'] | null
+  externalHealSession: RunDetail['manifest']['externalHealSession'] | null
   summary: RunDetail['summary'] | null
   counts: NormalizedRunCounts
   failedTests: ExternalHealFailedTest[]
@@ -55,26 +81,38 @@ export interface BuildExternalHealContextInput {
 }
 
 export function buildExternalHealContext(input: BuildExternalHealContextInput): ExternalHealContext {
+  const snapshot = buildExternalRunSnapshot(input)
+  const runDir = runDirFor(input.logsDir, snapshot.runId)
+  const paths = buildRunPaths(runDir)
+
+  return {
+    runId: snapshot.runId,
+    feature: snapshot.feature,
+    env: snapshot.env,
+    status: snapshot.status,
+    healCycles: snapshot.healCycles,
+    repoBranches: snapshot.repoBranches,
+    lifecycle: snapshot.lifecycle,
+    externalHealSession: snapshot.externalHealSession,
+    counts: compactCounts(snapshot.counts),
+    failedTests: snapshot.failedTests,
+    healIndex: snapshot.healIndexMarkdown === null
+      ? null
+      : { path: paths.healIndexPath, markdown: snapshot.healIndexMarkdown },
+    journal: snapshot.journalMarkdown === null
+      ? null
+      : { path: paths.diagnosisJournalPath, markdown: snapshot.journalMarkdown },
+    ...(snapshot.healPrompt ? { healPrompt: snapshot.healPrompt } : {}),
+  }
+}
+
+export function buildExternalRunSnapshot(input: BuildExternalHealContextInput): ExternalRunSnapshot {
   const { detail, logsDir, projectRoot } = input
   const runId = detail.manifest.runId
   const runDir = runDirFor(logsDir, runId)
   const paths = buildRunPaths(runDir)
   const summary = detail.summary
-  const failedTests = (summary?.failed ?? []).map((entry) => ({
-    name: entry.name,
-    ...(entry.error ? { error: entry.error } : {}),
-    ...(entry.location ? { location: entry.location } : {}),
-    ...(typeof entry.retry === 'number' ? { retry: entry.retry } : {}),
-    artifacts:
-      detail.playwrightArtifacts
-        ?.find((group) => group.testName === entry.name)
-        ?.artifacts.map((artifact) => ({
-          name: artifact.name,
-          kind: artifact.kind,
-          url: artifact.url,
-        })) ?? [],
-  }))
-  const context: ExternalHealContext = {
+  const context: ExternalRunSnapshot = {
     runId,
     feature: detail.manifest.feature,
     env: detail.manifest.env ?? null,
@@ -85,7 +123,7 @@ export function buildExternalHealContext(input: BuildExternalHealContextInput): 
     externalHealSession: detail.manifest.externalHealSession ?? null,
     summary: summary ?? null,
     counts: normalizeRunCounts(summary ?? null),
-    failedTests,
+    failedTests: buildFailedTests(detail),
     healIndexMarkdown: safeRead(paths.healIndexPath),
     journalMarkdown: safeRead(paths.diagnosisJournalPath),
     artifactsBase: `/api/runs/${encodeURIComponent(runId)}/artifacts/`,
@@ -99,6 +137,35 @@ export function buildExternalHealContext(input: BuildExternalHealContextInput): 
     })
   }
   return context
+}
+
+function buildFailedTests(detail: RunDetail): ExternalHealFailedTest[] {
+  return (detail.summary?.failed ?? []).map((entry) => ({
+    name: entry.name,
+    ...(entry.error ? { error: entry.error } : {}),
+    ...(entry.location ? { location: entry.location } : {}),
+    ...(typeof entry.retry === 'number' ? { retry: entry.retry } : {}),
+    ...(entry.logFiles?.length ? { logFiles: entry.logFiles } : {}),
+    artifacts:
+      detail.playwrightArtifacts
+        ?.find((group) => group.testName === entry.name)
+        ?.artifacts.map((artifact) => ({
+          name: artifact.name,
+          kind: artifact.kind,
+          url: artifact.url,
+        })) ?? [],
+  }))
+}
+
+function compactCounts(counts: NormalizedRunCounts): CompactRunCounts {
+  return {
+    totalKnown: counts.totalKnown,
+    passed: counts.passed,
+    failed: counts.failed,
+    skipped: counts.skipped,
+    notRun: counts.notRun,
+    statusLine: counts.statusLine,
+  }
 }
 
 export interface WriteHealSignalInput {

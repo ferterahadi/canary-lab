@@ -205,7 +205,7 @@ Manual repair uses the run-scoped context in the UI or MCP response. A failing r
 2. Read the run's `heal-index.md`, failure slices, and `diagnosis-journal.md`.
 3. Write `logs/runs/<runId>/signals/.restart` or `logs/runs/<runId>/signals/.rerun`.
 
-MCP clients should prefer `get_heal_context`, `wait_for_heal_task`, and `signal_run` instead of writing signal files directly.
+MCP clients should prefer compact `get_heal_context`, `wait_for_heal_task`, and `signal_run` instead of writing signal files directly. Use `get_run_snapshot` only when the compact context is not enough and the agent needs the verbose raw summary, full count lists, or deeper debugging fields.
 
 If a running Claude or Codex session says Canary Lab tools are unavailable, run `npx canary-lab setup --force`, then start a fresh client session. MCP tools are discovered by the client session; the local HTTP API is only a fallback for custom clients or emergency debugging.
 
@@ -213,6 +213,8 @@ If a running Claude or Codex session says Canary Lab tools are unavailable, run 
 
 Agents should start from:
 
+- `get_heal_context` for the compact current-failure handoff packet
+- `get_run_snapshot` only as the verbose fallback
 - `logs/runs/<runId>/heal-index.md`
 - `logs/runs/<runId>/failed/<slug>/`
 - `logs/runs/<runId>/e2e-summary.json`

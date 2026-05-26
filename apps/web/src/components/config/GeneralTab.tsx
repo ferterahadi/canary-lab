@@ -81,7 +81,7 @@ export function GeneralTab({ feature, onFeatureRenamed }: { feature: string; onF
         <div className="px-4 py-3">
           <FieldRow
             label="Stop & heal after"
-            hint="When enabled, stops the test run once N tests have failed, then triggers the auto-heal flow."
+            hint="When enabled, each new Playwright spawn starts with --max-failures=N. Changes made while tests are already running apply to the next rerun or restart, not the current process."
             layout="inline"
           >
             <div className="flex items-center gap-3">
