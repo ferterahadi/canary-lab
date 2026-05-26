@@ -123,8 +123,8 @@ npx canary-lab upgrade
 Notes:
 
 - `ui` is the primary human workflow.
-- `setup` repairs or refreshes workspace registration, Codex/Claude skills, and MCP configuration when the matching CLI is available.
-- `mcp` bridges local AI clients into the running UI server. It defaults to the `repair` profile for agent repair loops; use `--profile verify` for deployment verification tools or `--profile full` for the complete low-level surface.
+- `setup` repairs or refreshes workspace registration, Codex/Claude skills, and MCP configuration when the matching CLI is available. Both clients are registered through the `canary-lab mcp` bridge so they do not depend on the UI server already being up when the client session starts.
+- `mcp` bridges local AI clients into the UI server. If the default local server is down, the bridge starts `canary-lab ui --no-open`, waits for `/mcp/health`, then exposes tools. It defaults to the `repair` profile for agent repair loops; use `--profile verify` for deployment verification tools or `--profile full` for the complete low-level surface.
 - `new feature` and `env` are deterministic wrappers for scripts and agents.
 - `upgrade` syncs scaffolded docs and skills in an existing project. It is not a dependency upgrade command.
 
@@ -206,6 +206,8 @@ Manual repair uses the run-scoped context in the UI or MCP response. A failing r
 3. Write `logs/runs/<runId>/signals/.restart` or `logs/runs/<runId>/signals/.rerun`.
 
 MCP clients should prefer `get_heal_context`, `wait_for_heal_task`, and `signal_run` instead of writing signal files directly.
+
+If a running Claude or Codex session says Canary Lab tools are unavailable, run `npx canary-lab setup --force`, then start a fresh client session. MCP tools are discovered by the client session; the local HTTP API is only a fallback for custom clients or emergency debugging.
 
 ### Repair Context
 

@@ -132,6 +132,42 @@ describe('run overview', () => {
     expect(container.textContent).toContain('Heal agent')
     expect(container.textContent).toContain('Codex')
   })
+
+  it('shows an external waiting panel instead of an empty terminal before claim', async () => {
+    const { useRun } = await import('../state/RunsContext')
+    vi.mocked(useRun).mockReturnValue({
+      detail: runDetail({
+        status: 'healing',
+        endedAt: undefined,
+        healMode: 'external',
+        lifecycle: {
+          phase: 'waiting-for-signal',
+          headline: 'Waiting for heal signal',
+          updatedAt: '2026-01-01T00:00:30.000Z',
+          activeCycle: 1,
+        },
+      }),
+      indexed: undefined,
+      transient: null,
+      status: 'healing',
+    })
+
+    await act(async () => {
+      root.render(<RunDetailColumn runId="run-1" />)
+    })
+
+    const healTab = [...container.querySelectorAll('button')]
+      .find((button) => button.textContent?.trim() === 'Heal agent')
+    expect(healTab).toBeTruthy()
+
+    await act(async () => {
+      healTab?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+
+    expect(container.textContent).toContain('External Client')
+    expect(container.textContent).toContain('No external client has claimed this run yet')
+    expect(container.textContent).not.toContain('terminal')
+  })
 })
 
 function runDetail(overrides: Partial<RunDetail['manifest']> = {}): RunDetail {

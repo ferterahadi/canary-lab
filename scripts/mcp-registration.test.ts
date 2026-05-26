@@ -107,7 +107,7 @@ describe('registerCanaryLabMcp', () => {
 
     expect(mocks.execFileSync).toHaveBeenCalledWith(
       'claude',
-      ['mcp', 'add', '--transport', 'http', '--scope', 'user', 'canary-lab', 'http://localhost:7421/mcp'],
+      ['mcp', 'add', '--scope', 'user', 'canary-lab', '--', 'npx', '-y', 'canary-lab', 'mcp'],
       { stdio: 'ignore' },
     )
     expect(lines).toContain('Claude MCP configured')
@@ -115,7 +115,7 @@ describe('registerCanaryLabMcp', () => {
 
   it('leaves matching Claude MCP config untouched', () => {
     const lines: string[] = []
-    cliAvailable('claude', 'canary-lab:\n  Type: http\n  URL: http://localhost:7421/mcp\n')
+    cliAvailable('claude', 'canary-lab:\n  Type: stdio\n  Command: npx\n  Args: -y canary-lab mcp\n')
 
     registerCanaryLabMcp('claude', { log: (line) => lines.push(line) })
 
@@ -142,7 +142,7 @@ describe('registerCanaryLabMcp', () => {
     expect(mocks.execFileSync).toHaveBeenCalledWith('claude', ['mcp', 'remove', 'canary-lab', '-s', 'user'], { stdio: 'ignore' })
     expect(mocks.execFileSync).toHaveBeenCalledWith(
       'claude',
-      ['mcp', 'add', '--transport', 'http', '--scope', 'user', 'canary-lab', 'http://localhost:7421/mcp'],
+      ['mcp', 'add', '--scope', 'user', 'canary-lab', '--', 'npx', '-y', 'canary-lab', 'mcp'],
       { stdio: 'ignore' },
     )
     expect(lines).toContain('Claude MCP configured')
