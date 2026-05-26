@@ -296,10 +296,60 @@ export function readRunSummary(runDir: string): RunSummary | undefined {
   try {
     const parsed = JSON.parse(raw) as RunSummary
     if (typeof parsed !== 'object' || parsed === null) return undefined
-    return parsed
+    return normalizeRunSummary(parsed)
   } catch {
     return undefined
   }
+}
+
+function normalizeRunSummary(summary: RunSummary): RunSummary {
+  if (!Array.isArray(summary.knownTests) || summary.knownTests.length === 0) return summary
+
+  const knownTests: NonNullable<RunSummary['knownTests']> = []
+  const indexByLogicalKey = new Map<string, number>()
+  const idRemap = new Map<string, string>()
+  for (const entry of summary.knownTests) {
+    const logicalKey = knownTestLogicalKey(entry)
+    if (!logicalKey) {
+      knownTests.push(entry)
+      continue
+    }
+    const existingIndex = indexByLogicalKey.get(logicalKey)
+    if (existingIndex === undefined) {
+      indexByLogicalKey.set(logicalKey, knownTests.length)
+      knownTests.push(entry)
+      continue
+    }
+    const previous = knownTests[existingIndex]
+    if (previous.id && entry.id && previous.id !== entry.id) idRemap.set(previous.id, entry.id)
+    knownTests[existingIndex] = entry
+  }
+  if (knownTests.length === summary.knownTests.length && idRemap.size === 0) return summary
+
+  return {
+    ...summary,
+    total: knownTests.length,
+    knownTests,
+    ...(summary.passedIds ? { passedIds: remapIds(summary.passedIds, idRemap) } : {}),
+    ...(summary.skippedIds ? { skippedIds: remapIds(summary.skippedIds, idRemap) } : {}),
+    failed: summary.failed.map((entry) => remapSummaryEntryId(entry, idRemap)),
+    ...(summary.running ? { running: remapSummaryEntryId(summary.running, idRemap) } : {}),
+    ...(summary.runningTests ? { runningTests: summary.runningTests.map((entry) => remapSummaryEntryId(entry, idRemap)) } : {}),
+  }
+}
+
+function knownTestLogicalKey(entry: NonNullable<RunSummary['knownTests']>[number]): string | undefined {
+  return entry.titlePath?.length ? [...entry.titlePath, entry.title ?? ''].join('\u001f') : undefined
+}
+
+function remapIds(ids: string[], idRemap: Map<string, string>): string[] {
+  return [...new Set(ids.map((id) => idRemap.get(id) ?? id))]
+}
+
+function remapSummaryEntryId<T extends { id?: string }>(entry: T, idRemap: Map<string, string>): T {
+  if (!entry.id) return entry
+  const mapped = idRemap.get(entry.id)
+  return mapped ? { ...entry, id: mapped } : entry
 }
 
 export function readPlaywrightPlaybackEvents(runDir: string): PlaywrightPlaybackEvent[] | undefined {

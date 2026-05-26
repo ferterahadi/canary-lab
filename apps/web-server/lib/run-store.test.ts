@@ -460,6 +460,61 @@ describe('readRunSummary', () => {
     )
     expect(readRunSummary(tmpDir)).toEqual({ complete: false, total: 0, passed: 0, failed: [] })
   })
+
+  it('normalizes duplicate knownTests from line-drifted targeted reruns', () => {
+    fs.writeFileSync(
+      path.join(tmpDir, 'e2e-summary.json'),
+      JSON.stringify({
+        complete: true,
+        total: 3,
+        passed: 1,
+        passedNames: ['test-case-line-drift'],
+        passedIds: ['old-id'],
+        knownTests: [
+          {
+            id: 'old-id',
+            name: 'test-case-line-drift',
+            title: 'line drift',
+            titlePath: ['spec.ts', 'group', 'line drift'],
+            location: '/spec.ts:10',
+          },
+          {
+            id: 'new-id',
+            name: 'test-case-line-drift',
+            title: 'line drift',
+            titlePath: ['spec.ts', 'group', 'line drift'],
+            location: '/spec.ts:12',
+          },
+          {
+            id: 'other-id',
+            name: 'test-case-other',
+            title: 'other',
+            titlePath: ['spec.ts', 'group', 'other'],
+            location: '/spec.ts:20',
+          },
+        ],
+        failed: [],
+      }),
+    )
+
+    expect(readRunSummary(tmpDir)).toMatchObject({
+      total: 2,
+      passedIds: ['new-id'],
+      knownTests: [
+        {
+          id: 'new-id',
+          name: 'test-case-line-drift',
+          title: 'line drift',
+          titlePath: ['spec.ts', 'group', 'line drift'],
+          location: '/spec.ts:12',
+        },
+        {
+          id: 'other-id',
+          name: 'test-case-other',
+        },
+      ],
+    })
+  })
 })
 
 describe('readPlaywrightPlaybackEvents / indexPlaywrightArtifacts', () => {
