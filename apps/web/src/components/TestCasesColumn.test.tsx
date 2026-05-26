@@ -81,6 +81,37 @@ describe('TestCasesColumn', () => {
     expect(container.textContent).not.toContain('Loading...')
   })
 
+  it('places the no-run test count on the right side of the header', async () => {
+    vi.mocked(getFeatureTests).mockResolvedValue([
+      {
+        file: '/tmp/features/alpha/e2e/a.spec.ts',
+        tests: [
+          {
+            name: 'loads checkout',
+            line: 3,
+            bodySource: '',
+            steps: [],
+          },
+          {
+            name: 'submits payment',
+            line: 12,
+            bodySource: '',
+            steps: [],
+          },
+        ],
+      },
+    ])
+
+    await act(async () => {
+      root.render(<TestCasesColumn feature="alpha" activeRunSummary={undefined} activeRunStatus={undefined} />)
+    })
+
+    const header = container.querySelector('.cl-panel-header')
+    expect(header?.children[0]?.textContent).toBe('Tests')
+    expect(header?.children[1]?.textContent).toBe('2')
+    expect(header?.textContent).not.toContain('0/2')
+  })
+
   it('shows that the selected run is active before a specific test is reported', async () => {
     vi.mocked(getFeatureTests).mockResolvedValue([
       {
@@ -382,37 +413,49 @@ describe('TestCasesColumn', () => {
     expect(container.textContent).not.toContain('No test body available.')
   })
 
-  it('uses the selected run summary for counts and duplicate-title statuses', async () => {
-    vi.mocked(getFeatureTests).mockResolvedValue([
-      {
-        file: '/tmp/features/alpha/e2e/current.spec.ts',
-        tests: Array.from({ length: 33 }, (_, idx) => ({
-          name: `current test ${idx + 1}`,
-          line: idx + 1,
-          bodySource: '',
-          steps: [],
-        })),
-      },
-    ])
-
+  it('uses workspace tests for counts and run summary ids only for statuses', async () => {
+    const specFile = '/tmp/features/alpha/e2e/current.spec.ts'
     const knownTests = Array.from({ length: 31 }, (_, idx) => ({
       id: `test-id-${idx + 1}`,
       name: `test-case-run-test-${idx + 1}`,
       title: `run test ${idx + 1}`,
-      location: `/tmp/features/alpha/e2e/run.spec.ts:${idx + 1}`,
+      location: `${specFile}:${idx + 1}`,
     }))
     knownTests[5] = {
       id: 'test-id-duplicate-a',
       name: 'test-case-validates-duplicate',
       title: 'validates duplicate',
-      location: '/tmp/features/alpha/e2e/run.spec.ts:100',
+      location: `${specFile}:100`,
     }
     knownTests[6] = {
       id: 'test-id-duplicate-b',
       name: 'test-case-validates-duplicate',
       title: 'validates duplicate',
-      location: '/tmp/features/alpha/e2e/run.spec.ts:120',
+      location: `${specFile}:120`,
     }
+    vi.mocked(getFeatureTests).mockResolvedValue([
+      {
+        file: specFile,
+        tests: [
+          ...knownTests.slice(0, 5).map((test, idx) => ({
+            name: test.title,
+            line: idx + 1,
+            bodySource: '',
+            steps: [],
+          })),
+          { name: 'validates duplicate', line: 100, bodySource: '', steps: [] },
+          { name: 'validates duplicate', line: 120, bodySource: '', steps: [] },
+          ...knownTests.slice(7, 31).map((test, idx) => ({
+            name: test.title,
+            line: idx + 8,
+            bodySource: '',
+            steps: [],
+          })),
+          { name: 'workspace-only test 32', line: 132, bodySource: '', steps: [] },
+          { name: 'workspace-only test 33', line: 133, bodySource: '', steps: [] },
+        ],
+      },
+    ])
 
     await act(async () => {
       root.render(
@@ -440,8 +483,9 @@ describe('TestCasesColumn', () => {
       )
     })
 
-    expect(container.textContent).toContain('12/31')
-    expect(container.textContent).not.toContain('13/33')
+    expect(container.textContent).toContain('12/33')
+    expect(container.textContent).not.toContain('12/31')
+    expect(container.textContent).toContain('workspace-only test 33')
     expect(container.textContent).toContain('validates duplicate')
     expect(container.querySelectorAll('.border-emerald-500\\/40')).toHaveLength(12)
   })

@@ -238,6 +238,58 @@ describe('SummaryReporter', () => {
     })
   })
 
+  it('merges targeted-rerun knownTests by title path when source lines drift', () => {
+    fs.mkdirSync(LOGS_DIR, { recursive: true })
+    const oldId = testIdFor({
+      title: 'line drift',
+      titlePath: ['spec.ts', 'group', 'line drift'],
+      location: '/spec.ts:10',
+    })
+    fs.writeFileSync(path.join(LOGS_DIR, 'e2e-summary.json'), JSON.stringify({
+      complete: true,
+      total: 1,
+      passed: 1,
+      passedNames: ['test-case-line-drift'],
+      passedIds: [oldId],
+      knownTests: [
+        {
+          id: oldId,
+          name: 'test-case-line-drift',
+          title: 'line drift',
+          titlePath: ['spec.ts', 'group', 'line drift'],
+          location: '/spec.ts:10',
+        },
+      ],
+      failed: [],
+    }))
+    process.env.CANARY_LAB_TARGETED_RERUN = '1'
+
+    const reporter = new SummaryReporter()
+    reporter.onBegin({} as any, {
+      allTests: () => [
+        { ...mkTest('line drift', '/spec.ts', 12), titlePath: () => ['spec.ts', 'group', 'line drift'] },
+      ],
+    } as any)
+    reporter.onEnd({} as any)
+
+    const out = readSummary()
+    expect(out.total).toBe(1)
+    expect(out.knownTests).toEqual([
+      {
+        id: testIdFor({
+          title: 'line drift',
+          titlePath: ['spec.ts', 'group', 'line drift'],
+          location: '/spec.ts:12',
+        }),
+        name: 'test-case-line-drift',
+        title: 'line drift',
+        titlePath: ['spec.ts', 'group', 'line drift'],
+        location: '/spec.ts:12',
+      },
+    ])
+    expect(out.passedIds).toEqual([out.knownTests[0].id])
+  })
+
   it('strips ANSI noise and truncates large error fields', () => {
     const reporter = new SummaryReporter()
     reporter.onTestEnd(
@@ -1362,9 +1414,8 @@ describe('SummaryReporter', () => {
 
     const out = readSummary()
     expect(out.knownTests).toEqual([
-      { id: expect.any(String), name: 'test-case-rich', title: 'rich override', titlePath: ['outer', 'inner'], location: '/r.spec.ts:12' },
-      { id: expect.any(String), name: 'test-case-empty-loc', title: 'empty loc' },
       { id: expect.any(String), name: 'test-case-rich-override', title: 'rich override', titlePath: ['outer', 'inner'], location: '/r.spec.ts:12' },
+      { id: expect.any(String), name: 'test-case-empty-loc', title: 'empty loc' },
     ])
   })
 

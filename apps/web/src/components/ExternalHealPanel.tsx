@@ -351,10 +351,10 @@ function ageColor(ageMs: number | null): string {
 
 function clientLabel(kind: ExternalHealSession['clientKind']): string {
   switch (kind) {
-    case 'claude-cli': return 'Claude CLI'
-    case 'claude-desktop': return 'Claude Desktop'
-    case 'codex-cli': return 'Codex CLI'
-    case 'codex-desktop': return 'Codex Desktop'
+    case 'claude-cli': return 'Claude'
+    case 'claude-desktop': return 'Claude'
+    case 'codex-cli': return 'Codex'
+    case 'codex-desktop': return 'Codex'
     case 'other': return 'external client'
   }
 }

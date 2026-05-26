@@ -462,7 +462,12 @@ class SummaryReporter implements Reporter {
 
   private rememberKnownTest(test: TestCase): KnownTestEntry {
     const entry = knownTestFromTest(test)
-    mergeKnownTest(this.knownTests, entry)
+    const merged = mergeKnownTest(this.knownTests, entry)
+    if (merged.previousId && merged.previousId !== entry.id) {
+      for (const result of this.results) {
+        if (result.id === merged.previousId) result.id = entry.id
+      }
+    }
     return entry
   }
 
@@ -582,16 +587,18 @@ function knownTestsFromExistingSummary(summary: ExistingSummary | null): KnownTe
   return out
 }
 
-function mergeKnownTest(knownTests: KnownTestEntry[], entry: KnownTestEntry): void {
+function mergeKnownTest(knownTests: KnownTestEntry[], entry: KnownTestEntry): { previousId?: string } {
+  const entryLogicalKey = knownTestLogicalKey(entry)
   const idx = knownTests.findIndex((known) => known.id === entry.id || (
     known.id.startsWith('legacy-') &&
     known.name === entry.name &&
     known.location === entry.location
-  ))
+  ) || (entryLogicalKey !== undefined && knownTestLogicalKey(known) === entryLogicalKey))
   if (idx < 0) {
     knownTests.push(entry)
-    return
+    return {}
   }
+  const previousId = knownTests[idx].id
   const merged: KnownTestEntry = {
     ...knownTests[idx],
     ...entry,
@@ -599,6 +606,11 @@ function mergeKnownTest(knownTests: KnownTestEntry[], entry: KnownTestEntry): vo
   }
   if (!entry.titlePath?.length) merged.titlePath = knownTests[idx].titlePath
   knownTests[idx] = merged
+  return { previousId }
+}
+
+function knownTestLogicalKey(entry: Pick<KnownTestEntry, 'title' | 'titlePath'>): string | undefined {
+  return entry.titlePath?.length ? [...entry.titlePath, entry.title].join('\u001f') : undefined
 }
 
 function legacyTestIdForName(name: string): string {
