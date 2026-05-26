@@ -4,7 +4,7 @@ import { ExternalHealPanel } from './ExternalHealPanel'
 import type { ExternalHealSession } from '../api/types'
 
 describe('ExternalHealPanel', () => {
-  it('shows the terminal run status instead of a stale waiting session status', () => {
+  it('hides stale session status once the run is terminal', () => {
     const html = renderToStaticMarkup(
       <ExternalHealPanel
         runId="run-1"
@@ -13,11 +13,9 @@ describe('ExternalHealPanel', () => {
       />,
     )
 
-    expect(html).toContain('Aborted')
     expect(html).not.toContain('Waiting')
-    expect(html).toContain('This run was aborted')
-    expect(html).toContain('var(--text-muted)')
-    expect(html).not.toContain('var(--success)')
+    expect(html).not.toContain('Aborted')
+    expect(html).toContain('is no longer active for this run')
   })
 
   it('keeps the external session status while the run is active', () => {
@@ -58,6 +56,8 @@ describe('ExternalHealPanel', () => {
 
     expect(html).toContain('External Client')
     expect(html).toContain('No external client is actively waiting for a signal')
+    expect(html).not.toContain('Failed')
+    expect(html).not.toContain('var(--danger)')
     expect(html).not.toContain('external external')
   })
 })

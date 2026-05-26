@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from 'vitest'
+import { describe, it, expect, afterEach, vi } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -105,6 +105,31 @@ describe('findLegacyCurrentPointer / removeLegacyCurrentPointer', () => {
     fs.rmSync(path.join(repo, 'logs', 'current'), { recursive: true, force: true })
     fs.symlinkSync('/tmp', path.join(repo, 'logs', 'current'))
     expect(findLegacyCurrentPointer(repo)).toBeUndefined()
+  })
+
+  it('ignores logs/current when the symlink target cannot be read', () => {
+    const repo = mkRepo()
+    fs.mkdirSync(path.join(repo, 'logs', 'runs', 'r1'), { recursive: true })
+    fs.symlinkSync('runs/r1', path.join(repo, 'logs', 'current'))
+    vi.spyOn(fs, 'readlinkSync').mockImplementationOnce(() => {
+      throw new Error('readlink failed')
+    })
+
+    expect(findLegacyCurrentPointer(repo)).toBeUndefined()
+  })
+
+  it('leaves logs/current alone when the report pointer is stale', () => {
+    const repo = mkRepo()
+    fs.mkdirSync(path.join(repo, 'logs', 'runs', 'r1'), { recursive: true })
+    const pointer = path.join(repo, 'logs', 'current')
+    fs.symlinkSync('runs/r1', pointer)
+    const report = detectMigrations(repo, { templateHealPromptBody: TEMPLATE_BODY })
+
+    report.legacyCurrentPointer = path.join(repo, 'logs', 'current-stale')
+    removeLegacyCurrentPointer(report, repo)
+
+    expect(fs.existsSync(pointer)).toBe(true)
+    expect(report.removedLegacyCurrentPointer).toBeUndefined()
   })
 })
 

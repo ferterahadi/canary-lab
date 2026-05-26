@@ -38,13 +38,13 @@ export function ExternalHealPanel({ runId: _runId, runStatus, session }: Props) 
   const heartbeatLabel = ageLabel(ageMs)
 
   const terminalStatus = isTerminalRunStatus(runStatus) ? runStatus : null
-  const displayedStatus = terminalStatus ?? session?.status ?? 'waiting'
+  const displayedStatus = terminalStatus ? null : session?.status ?? 'waiting'
   const isDisconnected = !terminalStatus && session?.status === 'disconnected'
   const isLive =
     Boolean(session) && !terminalStatus && (
-      session.status === 'connected' ||
-      session.status === 'healing' ||
-      session.status === 'running-tests'
+      session?.status === 'connected' ||
+      session?.status === 'healing' ||
+      session?.status === 'running-tests'
     )
   const clientKind = session?.clientKind ?? 'other'
   const desktopAgent = session ? clientKindToDesktopAgent(session.clientKind) : null
@@ -95,7 +95,7 @@ export function ExternalHealPanel({ runId: _runId, runStatus, session }: Props) 
         </div>
 
         <div className="mt-2.5 flex flex-wrap items-center gap-x-2 gap-y-1.5 text-[10px] @[320px]:mt-3 @[320px]:gap-x-2.5 @[320px]:text-[11px] @[480px]:mt-3.5">
-          <StatusPill status={displayedStatus} />
+          {displayedStatus && <StatusPill status={displayedStatus} />}
           <span
             className="inline-flex items-center gap-1.5"
             style={{ color: heartbeatColor }}
@@ -226,46 +226,43 @@ function BrandMark({
     >
       <svg
         viewBox="0 0 32 32"
-        width="28"
-        height="28"
+        width="30"
+        height="30"
         fill="none"
         aria-hidden="true"
-        className="h-6 w-6 @[320px]:h-7 @[320px]:w-7"
+        className="h-7 w-7 @[320px]:h-8 @[320px]:w-8"
       >
         <rect
-          x="5"
-          y="7"
-          width="15"
-          height="12"
-          rx="2.5"
-          fill="color-mix(in srgb, currentColor 12%, transparent)"
+          x="6"
+          y="8"
+          width="20"
+          height="14"
+          rx="3"
+          fill="currentColor"
+          opacity="0.13"
+        />
+        <rect
+          x="6"
+          y="8"
+          width="20"
+          height="14"
+          rx="3"
           stroke="currentColor"
-          strokeWidth="1.6"
+          strokeWidth="2"
         />
         <path
-          d="M9 12.5 11.8 15 9 17.5M13.6 17.5h3.2"
+          d="M11 13h10M11 17h6"
           stroke="currentColor"
-          strokeWidth="1.6"
+          strokeWidth="2"
           strokeLinecap="round"
-          strokeLinejoin="round"
+          opacity="0.72"
         />
         <path
-          d="M20 11h3.5c1.7 0 2.5.8 2.5 2.4v5.2c0 1.6-.8 2.4-2.5 2.4H20"
+          d="M16 22v3M11.5 25h9"
           stroke="currentColor"
-          strokeWidth="1.5"
+          strokeWidth="2"
           strokeLinecap="round"
-          strokeLinejoin="round"
-          opacity="0.8"
         />
-        <path
-          d="M20 15h4.2M20 19h4.2"
-          stroke="currentColor"
-          strokeWidth="1.5"
-          strokeLinecap="round"
-          opacity="0.55"
-        />
-        <circle cx="26" cy="11" r="1.7" fill="currentColor" />
-        <circle cx="26" cy="21" r="1.7" fill="currentColor" opacity="0.78" />
       </svg>
     </div>
   )
@@ -327,22 +324,14 @@ function terminalMessage(
   hasSession: boolean,
 ): string {
   if (!hasSession) {
-    if (status === 'aborted') {
-      return 'This run was aborted. No external client is active for this run.'
-    }
-    if (status === 'failed') {
-      return 'This run finished failed. No external client is actively waiting for a signal.'
-    }
-    return 'This run passed. No external client is active for this run.'
+    return status === 'failed'
+      ? 'No external client is actively waiting for a signal.'
+      : 'No external client is active for this run.'
   }
   const agent = clientLabel(clientKind)
-  if (status === 'aborted') {
-    return `This run was aborted. The external ${agent} heal session is no longer active for this run.`
-  }
-  if (status === 'failed') {
-    return `This run finished failed. The external ${agent} heal session is no longer actively waiting for a signal.`
-  }
-  return `This run passed. The external ${agent} heal session has completed for this run.`
+  return status === 'failed'
+    ? `The external ${agent} heal session is no longer actively waiting for a signal.`
+    : `The external ${agent} heal session is no longer active for this run.`
 }
 
 function ageLabel(ageMs: number | null): string {
