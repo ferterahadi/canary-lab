@@ -107,6 +107,7 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunStatus }: 
                   bodySource: t.bodySource,
                   summary: isRunActivelyTesting ? activeRunSummary : undefined,
                 })
+                const activeSourceLine = activeLine == null ? null : t.line + activeLine - 1
                 return (
                   <TestCard
                     key={key}
@@ -117,6 +118,7 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunStatus }: 
                     isRunningTest={isRunningTest}
                     runningStep={runningTest?.step}
                     activeLine={activeLine}
+                    activeSourceLine={activeSourceLine}
                     expanded={isExpanded}
                     onToggle={() => setExpandedTest(isExpanded ? null : key)}
                   />
@@ -194,6 +196,7 @@ function TestCard({
   isRunningTest,
   runningStep,
   activeLine,
+  activeSourceLine,
   expanded,
   onToggle,
 }: {
@@ -204,6 +207,7 @@ function TestCard({
   isRunningTest: boolean
   runningStep?: RunSummaryRunningStep
   activeLine?: number | null
+  activeSourceLine?: number | null
   expanded: boolean
   onToggle: () => void
 }) {
@@ -273,7 +277,7 @@ function TestCard({
                   status={status}
                   depth={0}
                   sourceFile={sourceFile}
-                  runningLine={isRunningTest ? activeLine : null}
+                  runningSourceLine={isRunningTest ? activeSourceLine : null}
                 />
               ))}
             </ul>

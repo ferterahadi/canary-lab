@@ -15,6 +15,21 @@ vi.mock('../api/client', async () => {
   }
 })
 
+vi.mock('shiki/core', () => ({
+  createHighlighterCore: async () => ({
+    codeToHtml: (code: string) => (
+      `<pre class="shiki one-dark-pro"><code>${
+        code.split('\n').map((line) => `<span class="line">${line}</span>`).join('\n')
+      }</code></pre>`
+    ),
+  }),
+}))
+vi.mock('shiki/engine/oniguruma', () => ({ createOnigurumaEngine: () => ({}) }))
+vi.mock('shiki/langs/typescript.mjs', () => ({ default: {} }))
+vi.mock('shiki/themes/one-dark-pro.mjs', () => ({ default: {} }))
+vi.mock('shiki/themes/one-light.mjs', () => ({ default: {} }))
+vi.mock('shiki/wasm', () => ({ default: {} }))
+
 let container: HTMLDivElement
 let root: Root
 
@@ -184,6 +199,69 @@ describe('TestCasesColumn', () => {
     expect(container.querySelectorAll('.border-sky-500\\/50')).toHaveLength(2)
   })
 
+  it('shows the yellow running-line highlight inside an expanded step body', async () => {
+    vi.mocked(getFeatureTests).mockResolvedValue([
+      {
+        file: '/tmp/features/alpha/e2e/a.spec.ts',
+        tests: [
+          {
+            name: 'sends message',
+            line: 3,
+            bodySource: "{\n  await test.step('send', async () => {\n    const payload = createPayload()\n    await send(payload)\n  })\n}",
+            steps: [
+              {
+                label: 'send',
+                line: 4,
+                bodySource: '{\n  const payload = createPayload()\n  await send(payload)\n}',
+                children: [],
+              },
+            ],
+          },
+        ],
+      },
+    ])
+
+    await act(async () => {
+      root.render(
+        <TestCasesColumn
+          feature="alpha"
+          activeRunStatus="running"
+          activeRunSummary={{
+            complete: false,
+            total: 1,
+            passed: 0,
+            passedNames: [],
+            failed: [],
+            running: {
+              name: 'test-case-sends-message',
+              location: '/tmp/features/alpha/e2e/a.spec.ts:3:1',
+              step: {
+                title: 'send payload',
+                category: 'test.step',
+                location: '/tmp/features/alpha/e2e/a.spec.ts:6:5',
+              },
+            },
+          }}
+        />,
+      )
+    })
+
+    const buttons = Array.from(container.querySelectorAll('button'))
+    const testButton = buttons.find((button) => button.textContent?.includes('sends message'))
+    await act(async () => {
+      testButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+    const stepButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '▸sendL4')
+    await act(async () => {
+      stepButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+    await waitFor(() => Boolean(container.querySelector('[data-active-line="true"]')))
+
+    const activeLine = container.querySelector<HTMLElement>('[data-active-line="true"]')
+    expect(activeLine?.textContent).toContain('await send(payload)')
+    expect(activeLine?.getAttribute('style')).toContain('rgb(234, 179, 8)')
+  })
+
   it('renders an error when feature tests fail to load', async () => {
     vi.mocked(getFeatureTests).mockRejectedValue(new ApiError(500, { error: 'boom' }))
 
@@ -317,3 +395,13 @@ describe('TestCasesColumn', () => {
     expect(container.querySelectorAll('.border-emerald-500\\/40')).toHaveLength(12)
   })
 })
+
+async function waitFor(condition: () => boolean): Promise<void> {
+  for (let i = 0; i < 20; i += 1) {
+    if (condition()) return
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+  }
+  expect(condition()).toBe(true)
+}

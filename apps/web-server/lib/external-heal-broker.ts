@@ -92,6 +92,9 @@ export class ExternalHealBroker {
     const session: ExternalHealSession = existing
       ? {
           ...existing,
+          clientKind: existing.clientKind === 'other' && input.clientKind !== 'other'
+            ? input.clientKind
+            : existing.clientKind,
           // Reconnect: refresh heartbeat + connection status, preserve cycle count.
           lastHeartbeatAt: nowIso,
           status: 'connected',

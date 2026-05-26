@@ -4,6 +4,7 @@ import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import type { RunStore } from '../lib/run-store'
 import type { RunDetail, RunStoreEvent } from '../lib/run-store'
 import type { ExternalHealBroker } from '../lib/external-heal-broker'
+import type { ExternalHealClientKind } from '../lib/runtime/manifest'
 import {
   buildExternalHealContext,
   normalizeRunCounts,
@@ -167,6 +168,7 @@ export function toolsForCanaryLabMcpProfile(profile: CanaryLabMcpProfile): reado
 
 export interface CanaryLabMcpToolOptions {
   profile?: CanaryLabMcpProfile
+  defaultClientKind?: ExternalHealClientKind
 }
 
 export function registerCanaryLabTools(
@@ -175,6 +177,8 @@ export function registerCanaryLabTools(
   opts: CanaryLabMcpToolOptions = {},
 ): void {
   const profile = opts.profile ?? 'repair'
+  const defaultClientKind = opts.defaultClientKind ?? 'other'
+  const clientKindInput = CLIENT_KIND.default(defaultClientKind)
   const enabled = new Set<CanaryLabMcpToolName>(TOOLS_BY_PROFILE[profile])
   const knownTools = new Set<CanaryLabMcpToolName>(FULL_TOOLS)
   const registerTool: McpServer['registerTool'] = ((name: string, config: unknown, cb: unknown) => {
@@ -352,10 +356,14 @@ export function registerCanaryLabTools(
     inputSchema: {
       runId: z.string(),
       session_id: z.string().optional().describe('External heal session id. When provided, refreshes the session heartbeat.'),
+      client_kind: clientKindInput.describe('Which kind of client is requesting context. Defaults to the MCP client type when known.'),
     },
-  }, async ({ runId, session_id }) => {
+  }, async ({ runId, session_id, client_kind }) => {
     const detail = deps.store.get(runId)
     if (!detail) return errorResult(`run not found: ${runId}`)
+    if (session_id) {
+      ensureExternalClaimForMcpCall(deps, runId, session_id, client_kind)
+    }
     const context = buildExternalHealContext({
       detail,
       logsDir: deps.store.logsDir,
@@ -377,7 +385,7 @@ export function registerCanaryLabTools(
       run_ref: z.string().optional().describe('Optional exact run id or unique suffix such as "7cvh" to resume or restart. If a different run is currently healing, the active heal blocks this request.'),
       claim_heal: z.boolean().default(true).describe('Whether to claim this run\'s heal duty for the current MCP session.'),
       session_id: z.string().describe('Stable id identifying this MCP/agent session. Reuse the same id across calls within one conversation to enable reconnects.'),
-      client_kind: CLIENT_KIND.default('other').describe('Which kind of client is starting the run.'),
+      client_kind: clientKindInput.describe('Which kind of client is starting the run. Defaults to the MCP client type when known.'),
       conversation_name: z.string().optional().describe('Human label shown in the Canary Lab UI (e.g. "fix checkout").'),
       guidance: z.string().optional().describe('Optional user guidance when restarting a failed/aborted run by runId or run_ref.'),
       force_new: z.boolean().default(false).describe('Deprecated for MCP clients. If a matching run is healing, this is blocked until `cancel_heal` stops that run.'),
@@ -533,7 +541,7 @@ export function registerCanaryLabTools(
     inputSchema: {
       runId: z.string(),
       session_id: z.string(),
-      client_kind: CLIENT_KIND.default('other'),
+      client_kind: clientKindInput,
       client_version: z.string().optional(),
       conversation_name: z.string().optional(),
     },
@@ -564,9 +572,11 @@ export function registerCanaryLabTools(
     inputSchema: {
       runId: z.string(),
       session_id: z.string(),
+      client_kind: clientKindInput.describe('Which kind of client is heartbeating. Defaults to the MCP client type when known.'),
       status: HEAL_STATUS.default('connected'),
     },
-  }, async ({ runId, session_id, status }) => {
+  }, async ({ runId, session_id, client_kind, status }) => {
+    ensureExternalClaimForMcpCall(deps, runId, session_id, client_kind)
     const result = deps.broker.heartbeat(runId, session_id, status)
     if (!result.ok) return errorResult(`heartbeat rejected: ${result.reason}`)
     return asJsonResult({ ok: true, session: result.session })
@@ -578,12 +588,13 @@ export function registerCanaryLabTools(
     inputSchema: {
       runId: z.string(),
       session_id: z.string().describe('External heal session id that owns this run.'),
+      client_kind: clientKindInput.describe('Which kind of client is waiting. Defaults to the MCP client type when known.'),
       timeout_ms: z.number().int().positive().max(WAIT_FOR_HEAL_TASK_MAX_TIMEOUT_MS)
         .default(WAIT_FOR_HEAL_TASK_DEFAULT_TIMEOUT_MS)
         .describe('How long to wait. Defaults to 15 minutes and is capped at 60 minutes.'),
     },
-  }, async ({ runId, session_id, timeout_ms }) => {
-    const result = await waitForHealTask(deps, runId, session_id, timeout_ms)
+  }, async ({ runId, session_id, client_kind, timeout_ms }) => {
+    const result = await waitForHealTask(deps, runId, session_id, client_kind, timeout_ms)
     return result.ok ? asJsonResult(result.value) : errorResult(result.error)
   })
 
@@ -594,10 +605,11 @@ export function registerCanaryLabTools(
       runId: z.string(),
       kind: SIGNAL_KIND,
       session_id: z.string().optional().describe('Required when the run holds an external claim; must match the claim holder.'),
+      client_kind: clientKindInput.describe('Which kind of client is sending the signal. Defaults to the MCP client type when known.'),
       hypothesis: z.string().optional().describe('Required for restart/rerun. Concise diagnosis of what was wrong.'),
       fixDescription: z.string().optional().describe('Required for restart/rerun. Concise summary of what the fix changed.'),
     },
-  }, async ({ runId, kind, session_id, hypothesis, fixDescription }) => {
+  }, async ({ runId, kind, session_id, client_kind, hypothesis, fixDescription }) => {
     const detail = deps.store.get(runId)
     if (!detail) return errorResult(`run not found: ${runId}`)
     if (!isActiveRunStatus(detail.manifest.status)) {
@@ -606,6 +618,7 @@ export function registerCanaryLabTools(
     if ((kind === 'restart' || kind === 'rerun') && (!hasText(hypothesis) || !hasText(fixDescription))) {
       return errorResult('restart/rerun signal requires hypothesis and fixDescription')
     }
+    if (session_id) ensureExternalClaimForMcpCall(deps, runId, session_id, client_kind)
     const ownership = deps.broker.assertOwnership(runId, session_id)
     if (!ownership.ok && ownership.reason === 'session-mismatch') {
       return errorResult(`session-mismatch: run is held by ${ownership.currentSession?.sessionId}`)
@@ -811,8 +824,10 @@ async function waitForHealTask(
   deps: CanaryLabMcpDeps,
   runId: string,
   sessionId: string,
+  clientKind: ExternalHealClientKind,
   timeoutMs: number,
 ): Promise<WaitForHealTaskResult> {
+  ensureExternalClaimForMcpCall(deps, runId, sessionId, clientKind)
   const immediate = classifyWaitForHealTask(deps, runId, sessionId)
   if (immediate) return immediate
 
@@ -837,6 +852,7 @@ async function waitForHealTask(
     const beat = (): void => {
       const detail = deps.store.get(runId)
       if (!detail || isTerminalRunStatus(detail.manifest.status)) return
+      ensureExternalClaimForMcpCall(deps, runId, sessionId, clientKind)
       deps.broker.heartbeat(runId, sessionId, 'waiting')
     }
     deps.store.onEvent(onEvent)
@@ -858,6 +874,31 @@ async function waitForHealTask(
     beat()
     check()
   })
+}
+
+function ensureExternalClaimForMcpCall(
+  deps: CanaryLabMcpDeps,
+  runId: string,
+  sessionId: string,
+  clientKind: ExternalHealClientKind,
+): void {
+  const detail = deps.store.get(runId)
+  if (!detail || detail.manifest.healMode !== 'external' || isTerminalRunStatus(detail.manifest.status)) {
+    return
+  }
+
+  const existing = deps.broker.getSession(runId)
+  if (!existing) {
+    deps.broker.claim(runId, { sessionId, clientKind })
+    return
+  }
+
+  if (existing.sessionId !== sessionId) return
+  if (existing.clientKind === 'other' && clientKind !== 'other') {
+    deps.broker.claim(runId, { sessionId, clientKind })
+    return
+  }
+  deps.broker.touch(runId, sessionId)
 }
 
 function asJsonResult(value: unknown): CallToolResult {

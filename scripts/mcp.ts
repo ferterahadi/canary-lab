@@ -2,7 +2,7 @@
 
 import fs from 'fs'
 import path from 'path'
-import { spawn } from 'child_process'
+import { execFileSync, spawn } from 'child_process'
 import { Readable, Writable } from 'stream'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
@@ -13,6 +13,7 @@ import {
   normalizeCanaryLabMcpProfile,
   type CanaryLabMcpProfile,
 } from '../apps/web-server/mcp/tools'
+import type { ExternalHealClientKind } from '../apps/web-server/lib/runtime/manifest'
 
 const DEFAULT_MCP_URL = 'http://127.0.0.1:7421/mcp'
 const DEFAULT_UI_STARTUP_TIMEOUT_MS = 15_000
@@ -20,6 +21,7 @@ const DEFAULT_UI_STARTUP_POLL_MS = 250
 
 export interface McpCommandOptions {
   profile?: CanaryLabMcpProfile
+  clientKind?: ExternalHealClientKind
   stdin?: Readable
   stdout?: Writable
   stderr?: Writable
@@ -44,11 +46,19 @@ export async function main(
     return
   }
   if (parsed.command === 'doctor') {
-    const ok = await doctor(parsed.url, { ...opts, profile: parsed.profile })
+    const ok = await doctor(parsed.url, {
+      ...opts,
+      profile: parsed.profile,
+      clientKind: parsed.clientKind ?? opts.clientKind,
+    })
     exit(ok ? 0 : 1)
     return
   }
-  const ok = await bridge(parsed.url, { ...opts, profile: parsed.profile })
+  const ok = await bridge(parsed.url, {
+    ...opts,
+    profile: parsed.profile,
+    clientKind: parsed.clientKind ?? opts.clientKind,
+  })
   if (!ok) exit(1)
 }
 
@@ -57,7 +67,7 @@ export async function doctor(url: string, opts: McpCommandOptions = {}): Promise
   const stdout = opts.stdout ?? process.stdout
   const fetchFn = opts.fetch ?? fetch
   const profile = opts.profile ?? 'repair'
-  const profileUrl = urlWithProfile(url, profile)
+  const profileUrl = urlWithContext(url, profile, opts.clientKind ?? inferMcpClientKind() ?? 'other')
   if (!await ensureMcpServerReachable(url, opts)) return false
   try {
     const healthUrl = healthUrlFor(profileUrl)
@@ -97,7 +107,11 @@ export async function doctor(url: string, opts: McpCommandOptions = {}): Promise
 export async function bridge(url: string, opts: McpCommandOptions = {}): Promise<boolean> {
   const stderr = opts.stderr ?? process.stderr
   const fetchFn = opts.fetch ?? fetch
-  const profileUrl = urlWithProfile(url, opts.profile ?? 'repair')
+  const profileUrl = urlWithContext(
+    url,
+    opts.profile ?? 'repair',
+    opts.clientKind ?? inferMcpClientKind() ?? 'other',
+  )
   if (!await ensureMcpServerReachable(profileUrl, opts)) return false
 
   const stdio = new StdioServerTransport(opts.stdin, opts.stdout)
@@ -227,11 +241,12 @@ function sleep(ms: number): Promise<void> {
 }
 
 function parseArgs(argv: string[]):
-  | { ok: true; command: 'bridge' | 'doctor'; url: string; profile: CanaryLabMcpProfile }
+  | { ok: true; command: 'bridge' | 'doctor'; url: string; profile: CanaryLabMcpProfile; clientKind?: ExternalHealClientKind }
   | { ok: false; error: string } {
   let command: 'bridge' | 'doctor' = 'bridge'
   let url = DEFAULT_MCP_URL
   let profile: CanaryLabMcpProfile = 'repair'
+  let clientKind: ExternalHealClientKind | undefined
   const args = [...argv]
   if (args[0] === 'doctor') {
     command = 'doctor'
@@ -254,6 +269,15 @@ function parseArgs(argv: string[]):
       i += 1
       continue
     }
+    if (arg === '--client-kind') {
+      const value = args[i + 1]
+      if (!isExternalHealClientKind(value)) {
+        return { ok: false, error: `Invalid MCP client kind: ${value ?? ''}` }
+      }
+      clientKind = value
+      i += 1
+      continue
+    }
     return { ok: false, error: `Unknown canary-lab mcp argument: ${arg}` }
   }
   try {
@@ -262,7 +286,7 @@ function parseArgs(argv: string[]):
   } catch {
     return { ok: false, error: `Invalid MCP URL: ${url}` }
   }
-  return { ok: true, command, url, profile }
+  return { ok: true, command, url, profile, ...(clientKind ? { clientKind } : {}) }
 }
 
 async function forwardMessage(
@@ -279,9 +303,14 @@ function healthUrlFor(url: string): string {
   return parsed.toString()
 }
 
-function urlWithProfile(url: string, profile: CanaryLabMcpProfile): string {
+function urlWithContext(
+  url: string,
+  profile: CanaryLabMcpProfile,
+  clientKind: ExternalHealClientKind,
+): string {
   const parsed = new URL(url)
   parsed.searchParams.set('profile', profile)
+  parsed.searchParams.set('client_kind', clientKind)
   return parsed.toString()
 }
 
@@ -299,6 +328,60 @@ function isInitializeResult(message: JSONRPCMessage): message is JSONRPCMessage 
     typeof message.result === 'object' &&
     'protocolVersion' in message.result &&
     typeof (message.result as { protocolVersion?: unknown }).protocolVersion === 'string'
+}
+
+export function inferMcpClientKind(
+  env: NodeJS.ProcessEnv = process.env,
+  startPid = process.ppid,
+): ExternalHealClientKind | null {
+  if (isExternalHealClientKind(env.CANARY_LAB_MCP_CLIENT_KIND)) {
+    return env.CANARY_LAB_MCP_CLIENT_KIND
+  }
+  return inferClientKindFromProcessLines(readProcessLineage(startPid))
+}
+
+export function inferClientKindFromProcessLines(lines: string[]): ExternalHealClientKind | null {
+  const haystack = lines.join('\n')
+  if (/\/Applications\/Claude\.app\b|Claude Helper|Claude\.app/i.test(haystack)) return 'claude-desktop'
+  if (/\/Applications\/Codex\.app\b|Codex Helper|Codex\.app/i.test(haystack)) return 'codex-desktop'
+  if (/(^|[\s/])claude(?:\s|$)|claude-code/i.test(haystack)) return 'claude-cli'
+  if (/(^|[\s/])codex(?:\s|$)/i.test(haystack)) return 'codex-cli'
+  return null
+}
+
+function readProcessLineage(startPid: number): string[] {
+  if (process.platform === 'win32') return []
+  const lines: string[] = []
+  let pid = startPid
+  for (let depth = 0; depth < 10 && pid > 1; depth += 1) {
+    const entry = readProcessEntry(pid)
+    if (!entry) break
+    lines.push(entry.command)
+    pid = entry.ppid
+  }
+  return lines
+}
+
+function readProcessEntry(pid: number): { ppid: number; command: string } | null {
+  try {
+    const out = execFileSync('ps', ['-p', String(pid), '-o', 'ppid=,command='], {
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim()
+    const match = out.match(/^(\d+)\s+([\s\S]+)$/)
+    if (!match) return null
+    return { ppid: Number(match[1]), command: match[2] }
+  } catch {
+    return null
+  }
+}
+
+function isExternalHealClientKind(value: unknown): value is ExternalHealClientKind {
+  return value === 'claude-cli' ||
+    value === 'claude-desktop' ||
+    value === 'codex-cli' ||
+    value === 'codex-desktop' ||
+    value === 'other'
 }
 
 runAsScript(module, main)

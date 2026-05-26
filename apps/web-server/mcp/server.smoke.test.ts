@@ -750,6 +750,51 @@ describe('MCP HTTP server (smoke)', () => {
     }
   })
 
+  it('wait_for_heal_task claims an unclaimed external run with the MCP client kind', async () => {
+    const projectRoot = path.resolve(__dirname, '..', '..', '..', 'templates', 'project')
+    const logsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-wait-claim-')))
+    const { app, runStore } = await createServer({ projectRoot, logsDir, ptyFactory: inertPtyFactory })
+    let client: Client | null = null
+    try {
+      const address = await app.listen({ port: 0, host: '127.0.0.1' })
+      client = await connectClient(address, '/mcp?profile=full&client_kind=claude-desktop')
+
+      runStore.bootstrap({
+        runId: 'wait-claim',
+        feature: 'broken_todo_api',
+        startedAt: '2026-05-08T00:00:00.000Z',
+        status: 'healing',
+        healCycles: 1,
+        services: [],
+        healMode: 'external',
+      })
+      fs.writeFileSync(path.join(runDirFor(logsDir, 'wait-claim'), 'heal-index.md'), '# Heal Index\n')
+      runStore.recordLifecycleEvent('wait-claim', {
+        phase: 'waiting-for-signal',
+        headline: 'Waiting for heal signal',
+        updatedAt: '2026-05-08T00:00:01.000Z',
+        activeCycle: 1,
+      })
+
+      const result = await client.callTool({
+        name: 'wait_for_heal_task',
+        arguments: { runId: 'wait-claim', session_id: 'sess-claude', timeout_ms: 1000 },
+      })
+
+      expect(JSON.parse((result.content?.[0] as { text: string }).text)).toMatchObject({
+        type: 'needs_heal',
+        runId: 'wait-claim',
+      })
+      expect(runStore.get('wait-claim')?.manifest.externalHealSession).toMatchObject({
+        sessionId: 'sess-claude',
+        clientKind: 'claude-desktop',
+      })
+    } finally {
+      if (client) await client.close().catch(() => undefined)
+      await app.close()
+    }
+  })
+
   it('start_run reuses a healing feature run instead of creating a duplicate', async () => {
     const projectRoot = path.resolve(__dirname, '..', '..', '..', 'templates', 'project')
     const logsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-start-reuse-')))
