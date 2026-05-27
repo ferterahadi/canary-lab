@@ -45,6 +45,35 @@ export interface McpRouteDeps extends CanaryLabMcpDeps {
 
 const SERVER_INFO = { name: 'canary-lab', version: '1.0.0', title: 'Canary Lab' }
 
+// Sent to MCP clients in the `initialize` result so external agents that do
+// not carry the Canary Lab skill still learn the run/heal/author loops. The
+// repair text is load-bearing: without it, result-driven clients invent their
+// own get_run_snapshot poll loop instead of blocking on wait_for_heal_task,
+// and never pick up the needs_heal handoff.
+const REPAIR_INSTRUCTIONS = `Canary Lab — external repair loop. Fix failing runs by editing app/service code (not tests, unless a test is provably wrong).
+
+1. start_run with claim_heal:true, a stable session_id reused for the whole conversation, client_kind, and conversation_name. For "rerun <id>" pass run_ref (e.g. "7cvh").
+2. wait_for_heal_task with the same runId + session_id. This BLOCKS until the run needs fixes, passes, fails, or times out, and heartbeats for you while it waits. Always wait this way — never poll get_run_snapshot or get_run in a loop to wait for a result.
+3. On needs_heal: read context.healPrompt.startHere first, fix the code, then signal_run (kind:"rerun" for test-only/app-code fixes, "restart" when services or env must restart) with hypothesis + fixDescription.
+4. wait_for_heal_task again on the same run. Repeat until passed or terminal failure.
+
+get_run_snapshot is for verbose debugging only, not for waiting. Read pass counts from result.counts.statusLine / result.counts.passed, never total - failed.`
+
+const VERIFY_INSTRUCTIONS = `Canary Lab — verification profile. Manage saved Verify configs and run them: list_verification_configs, get/create/update_verification_config, then execute_verification and get_verification_result.`
+
+const AUTHOR_INSTRUCTIONS = `Canary Lab — authoring profile. Create or extend features and export evaluations; Canary Lab is the control plane, this client writes the test/report content.
+
+- New feature: create_feature (returns the skeleton + nextSteps). Author specs under features/<feature>/e2e importing from 'canary-lab/feature-support/log-marker-fixture'. To preserve repo env/config, call capture_feature_env_files (secret values are never returned).
+- Draft flow: start_external_draft → update_external_draft_stage (scaffolding → authoring-tests → validating → ready → applied) → apply_external_draft.
+- Evaluation export (run must be passing): start_external_evaluation_export → submit_external_evaluation_export, then get/list/download_evaluation_export.`
+
+const INSTRUCTIONS_BY_PROFILE: Record<CanaryLabMcpProfile, string> = {
+  repair: REPAIR_INSTRUCTIONS,
+  verify: VERIFY_INSTRUCTIONS,
+  author: AUTHOR_INSTRUCTIONS,
+  full: `${REPAIR_INSTRUCTIONS}\n\n${AUTHOR_INSTRUCTIONS}\n\n${VERIFY_INSTRUCTIONS}`,
+}
+
 export async function registerMcpRoutes(
   app: FastifyInstance,
   deps: McpRouteDeps,
@@ -79,7 +108,7 @@ export async function registerMcpRoutes(
       const id = transport.sessionId
       if (id) transports.delete(id)
     }
-    const mcp = new McpServer(SERVER_INFO)
+    const mcp = new McpServer(SERVER_INFO, { instructions: INSTRUCTIONS_BY_PROFILE[profile] })
     registerCanaryLabTools(mcp, deps, { profile, defaultClientKind })
     await mcp.connect(transport)
     return transport

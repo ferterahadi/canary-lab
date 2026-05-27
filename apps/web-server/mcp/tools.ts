@@ -881,6 +881,7 @@ export function registerCanaryLabTools(
           status: healing.manifest.status,
           claimed: claim_heal ? claim?.accepted === true : false,
           claim,
+          ...(claim_heal ? healWaitNext(healing.manifest.runId) : {}),
           ...(force_new
             ? {
                 ignoredForceNew: true,
@@ -909,6 +910,7 @@ export function registerCanaryLabTools(
             status,
             claimed: claim_heal ? claim?.accepted === true : false,
             claim,
+            ...(claim_heal ? healWaitNext(target.manifest.runId) : {}),
           })
         }
         if (status === 'passed') {
@@ -945,6 +947,7 @@ export function registerCanaryLabTools(
           status: 'running',
           claimed: claim_heal ? claim?.accepted === true : false,
           claim,
+          ...(claim_heal ? healWaitNext(restarted.runId) : {}),
         })
       }
       const result = await deps.startRun(
@@ -959,7 +962,12 @@ export function registerCanaryLabTools(
             }
           : undefined,
       )
-      return asJsonResult({ runId: result.runId, reused: false, claimed: claim_heal })
+      return asJsonResult({
+        runId: result.runId,
+        reused: false,
+        claimed: claim_heal,
+        ...(claim_heal ? healWaitNext(result.runId) : {}),
+      })
     } catch (err) {
       return errorResult(err instanceof Error ? err.message : String(err))
     }
@@ -1102,7 +1110,7 @@ export function registerCanaryLabTools(
       return errorResult(`could not write signal: ${(err as Error).message}`)
     }
     deps.broker.bumpCycle(runId)
-    return asJsonResult({ accepted: true, kind, path: signal.path })
+    return asJsonResult({ accepted: true, kind, path: signal.path, runId, ...healWaitNext(runId) })
   })
 
   registerTool('handoff_heal', {
@@ -1135,6 +1143,17 @@ export function registerCanaryLabTools(
 }
 
 // ─── result helpers ─────────────────────────────────────────────────────
+
+// Emitted in start_run / signal_run results so result-driven external clients
+// (which may not carry the Canary Lab skill) block on wait_for_heal_task
+// instead of inventing a get_run_snapshot poll loop. Mirrors the create_feature
+// nextSteps convention.
+function healWaitNext(runId: string): { nextSteps: string[]; next: string } {
+  return {
+    nextSteps: ['wait_for_heal_task'],
+    next: `Call wait_for_heal_task with runId "${runId}" and the same session_id to wait for the result — it blocks and heartbeats for you. Do not poll get_run_snapshot or get_run in a loop to wait.`,
+  }
+}
 
 type ClaimResult = { accepted: true; session: unknown } | { accepted: false; reason: string; currentSession: unknown }
 

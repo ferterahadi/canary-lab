@@ -669,6 +669,10 @@ describe('MCP HTTP server (smoke)', () => {
       })
       expect(result.isError).not.toBe(true)
 
+      const signalBody = JSON.parse((result.content?.[0] as { text: string }).text) as { nextSteps?: string[]; runId?: string }
+      expect(signalBody.nextSteps).toContain('wait_for_heal_task')
+      expect(signalBody.runId).toBe('journal-run')
+
       const paths = path.join(runDirFor(logsDir, 'journal-run'), 'signals', '.restart')
       expect(fs.readFileSync(paths, 'utf-8')).toBe(JSON.stringify({
         hypothesis: 'route module was disabled',
@@ -710,6 +714,28 @@ describe('MCP HTTP server (smoke)', () => {
       expect(missingFix.isError).toBe(true)
     } finally {
       if (client) await client.close().catch(() => undefined)
+      await app.close()
+    }
+  })
+
+  it('advertises the repair loop via server initialize instructions', async () => {
+    const projectRoot = path.resolve(__dirname, '..', '..', '..', 'templates', 'project')
+    const { app } = await createServer({ projectRoot, ptyFactory: inertPtyFactory })
+    let repairClient: Client | null = null
+    let authorClient: Client | null = null
+    try {
+      const address = await app.listen({ port: 0, host: '127.0.0.1' })
+      repairClient = await connectClient(address, '/mcp?profile=repair')
+      const repairInstructions = repairClient.getInstructions() ?? ''
+      expect(repairInstructions).toContain('wait_for_heal_task')
+      expect(repairInstructions).toContain('signal_run')
+
+      authorClient = await connectClient(address, '/mcp?profile=author')
+      const authorInstructions = authorClient.getInstructions() ?? ''
+      expect(authorInstructions).toContain('create_feature')
+    } finally {
+      if (repairClient) await repairClient.close().catch(() => undefined)
+      if (authorClient) await authorClient.close().catch(() => undefined)
       await app.close()
     }
   })
@@ -1315,6 +1341,8 @@ describe('MCP HTTP server (smoke)', () => {
 	        },
 	        claimed: true,
 	      })
+      const restartBody = JSON.parse((result.content?.[0] as { text: string }).text) as { nextSteps?: string[] }
+      expect(restartBody.nextSteps).toContain('wait_for_heal_task')
       expect(restarted).toEqual([{ runId: '2026-05-19T0841-7cvh', sessionId: 'sess-restart' }])
     } finally {
       if (client) await client.close().catch(() => undefined)

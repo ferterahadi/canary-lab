@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
+  AuditEntry,
   EvaluationExportMode,
   PlaywrightArtifact,
   PlaywrightArtifactGroup,
@@ -10,10 +11,13 @@ import type {
   ServiceStatus,
   RunLifecycleEvent,
   RunManifest,
+  RunStatus,
   RunSummary,
   VerificationDiagnostics,
 } from '../api/types'
+import { getRunAudit } from '../api/client'
 import { formatDuration, durationBetween } from '../lib/format'
+import { buildTimelineRows, isTerminalLifecyclePhase, type TimelineRow } from '../lib/run-timeline'
 import {
   artifactsForPlayback,
   branchForService,
@@ -30,7 +34,6 @@ import { RunStatusIndicator } from './RunStatusIndicator'
 import { PaneTerminal } from './PaneTerminal'
 import { AgentSessionView } from './AgentSessionView'
 import { ExternalHealPanel } from './ExternalHealPanel'
-import { ActivityTab } from './ActivityTab'
 import { JournalTab } from './JournalTab'
 import { ManualHealBanner } from './ManualHealBanner'
 import {
@@ -38,7 +41,7 @@ import {
   isTerminalRunStatus as isSharedTerminalRunStatus,
 } from '../../../../shared/run-state'
 
-type Tab = 'overview' | 'run-logs' | 'services' | 'playwright' | 'agent' | 'journal' | 'activity'
+type Tab = 'overview' | 'run-logs' | 'services' | 'playwright' | 'agent' | 'journal'
 type PlaywrightView = 'terminal' | 'playback'
 
 export function RunDetailColumn({
@@ -152,7 +155,6 @@ export function RunDetailColumn({
           <TabButton active={tab === 'playwright'} onClick={() => setTab('playwright')}>Playwright</TabButton>
           {!isVerify && <TabButton active={tab === 'agent'} onClick={() => setTab('agent')}>Heal agent</TabButton>}
           {!isVerify && <TabButton active={tab === 'journal'} onClick={() => setTab('journal')}>Journal</TabButton>}
-          {!isVerify && <TabButton active={tab === 'activity'} onClick={() => setTab('activity')}>Activity</TabButton>}
         </nav>
       </header>
       <div className="flex-1 min-h-0 overflow-hidden mt-2">
@@ -169,7 +171,7 @@ export function RunDetailColumn({
           )
         )}
         {!isVerify && tab === 'run-logs' && (
-          <RunLogsTab view={view} summary={detail.summary} />
+          <RunLogsTab view={view} summary={detail.summary} runId={m.runId} runStatus={m.status} />
         )}
         {!isVerify && tab === 'services' && services.length > 0 && (
           <div className="flex h-full flex-col">
@@ -240,9 +242,6 @@ export function RunDetailColumn({
         </div>}
         {!isVerify && tab === 'journal' && (
           <JournalTab feature={m.feature} runId={m.runId} />
-        )}
-        {!isVerify && tab === 'activity' && (
-          <ActivityTab runId={m.runId} runStatus={m.status} />
         )}
       </div>
     </div>
@@ -491,8 +490,25 @@ function VerifyOverviewTab({
   )
 }
 
-function RunLogsTab({ view, summary }: { view: RunViewModel; summary?: RunSummary }) {
-  if (view.recoveryTimeline.length === 0) {
+function RunLogsTab({
+  view,
+  summary,
+  runId,
+  runStatus,
+}: {
+  view: RunViewModel
+  summary?: RunSummary
+  runId: string
+  runStatus: RunStatus
+}) {
+  const audit = useExternalAudit(runId, runStatus)
+  const now = useTimelineNow(view.recoveryTimeline)
+  const rows = useMemo(
+    () => buildTimelineRows(view.recoveryTimeline, audit, { now }),
+    [view.recoveryTimeline, audit, now],
+  )
+
+  if (rows.length === 0) {
     return (
       <EmptyPane
         title="No run logs yet."
@@ -508,13 +524,40 @@ function RunLogsTab({ view, summary }: { view: RunViewModel; summary?: RunSummar
           Run Logs
         </h2>
       </div>
-      <RecoveryTimeline
-        events={view.recoveryTimeline}
-        alert={view.primaryAlert}
-        summary={summary}
-      />
+      <RecoveryTimeline rows={rows} alert={view.primaryAlert} summary={summary} />
     </div>
   )
+}
+
+// External MCP commands are appended to `<runDir>/external-commands.jsonl`. Tail
+// it via /api/runs/:runId/audit so the heal-loop story interleaves with the
+// orchestrator's own lifecycle events. Poll every 2s while the run is active;
+// for terminal runs the log is final, so one read suffices. Best-effort: a
+// fetch error just means no external rows, never a broken Run Logs pane.
+function useExternalAudit(runId: string, runStatus: RunStatus): AuditEntry[] {
+  const [entries, setEntries] = useState<AuditEntry[]>([])
+  const terminal = isTerminalRunStatus(runStatus)
+
+  useEffect(() => {
+    let cancelled = false
+    const fetchAudit = async (): Promise<void> => {
+      try {
+        const res = await getRunAudit(runId)
+        if (!cancelled) setEntries(res.entries)
+      } catch {
+        // Audit is best-effort; leave prior entries in place on a transient error.
+      }
+    }
+    void fetchAudit()
+    if (terminal) return () => { cancelled = true }
+    const id = window.setInterval(() => { void fetchAudit() }, 2000)
+    return () => {
+      cancelled = true
+      window.clearInterval(id)
+    }
+  }, [runId, terminal])
+
+  return entries
 }
 
 // Run has reached a terminal state — the agent pty is gone, so the live
@@ -688,15 +731,14 @@ function DiagnosticList({ title, lines }: { title: string; lines: string[] }) {
 }
 
 function RecoveryTimeline({
-  events,
+  rows,
   alert,
   summary,
 }: {
-  events: RunLifecycleEvent[]
+  rows: TimelineRow[]
   alert?: { tone: 'info' | 'success' | 'warning' | 'error'; message: string }
   summary?: RunSummary
 }) {
-  const now = useTimelineNow(events)
   return (
     <div>
       {alert && (
@@ -705,30 +747,38 @@ function RecoveryTimeline({
         </div>
       )}
       <ol className="space-y-2">
-        {events.map((event, idx) => {
-          const durationLabel = lifecycleDurationLabel(events, idx, now)
-          const showRunningTest = idx === events.length - 1 && summary?.running && isPlaywrightLifecyclePhase(event.phase)
+        {rows.map((row) => {
+          const event = row.event
+          const showRunningTest = row.isLastEngine && summary?.running && event != null && isPlaywrightLifecyclePhase(event.phase)
           return (
-            <li key={event.id ?? `${event.updatedAt}:${idx}`} className="grid grid-cols-[12px_minmax(0,1fr)] gap-2 text-xs">
-              <span className={`mt-1.5 h-2 w-2 rounded-full ${dotClass(event.severity)}`} />
+            <li key={row.key} className="grid grid-cols-[12px_minmax(0,1fr)] gap-2 text-xs">
+              <span className={`mt-1.5 h-2 w-2 rounded-full ${dotClass(row.severity)}`} />
               <span className="min-w-0">
                 <span className="flex min-w-0 items-baseline gap-2">
                   <time
                     className="shrink-0 tabular-nums text-[10px]"
-                    dateTime={event.updatedAt}
-                    title={formatLifecycleDateTime(event.updatedAt)}
+                    dateTime={row.ts}
+                    title={formatLifecycleDateTime(row.ts)}
                     style={{ color: 'var(--text-muted)' }}
                   >
-                    {formatLifecycleTime(event.updatedAt)}
+                    {formatLifecycleTime(row.ts)}
                   </time>
-                  <span className="min-w-0 flex-1 truncate" style={{ color: 'var(--text-primary)' }}>{event.headline}</span>
-                  {durationLabel && (
+                  <span className="min-w-0 flex-1 truncate" style={{ color: 'var(--text-primary)' }}>{row.headline}</span>
+                  {row.durationLabel && (
                     <span className="shrink-0 tabular-nums text-[10px]" style={{ color: 'var(--text-muted)' }}>
-                      {durationLabel}
+                      {row.durationLabel}
                     </span>
                   )}
                 </span>
-                {event.detail && <span className="block" style={{ color: 'var(--text-muted)' }}>{event.detail}</span>}
+                {(row.clientLabel || row.detail) && (
+                  <span className="block" style={{ color: 'var(--text-muted)' }}>
+                    {row.clientLabel && (
+                      <span style={{ color: 'var(--text-secondary)' }}>{row.clientLabel}</span>
+                    )}
+                    {row.clientLabel && row.detail ? ' · ' : ''}
+                    {row.detail}
+                  </span>
+                )}
                 {showRunningTest && summary?.running && (
                   <span className="block" style={{ color: 'var(--text-muted)' }}>
                     Now running: {formatSummaryTestName(summary.running.name)}
@@ -739,10 +789,10 @@ function RecoveryTimeline({
                         : ''}
                   </span>
                 )}
-                {event.restartPlan && (
+                {event?.restartPlan && (
                   <span className="block" style={{ color: 'var(--text-muted)' }}>{formatRestartPlan(event.restartPlan)}</span>
                 )}
-                {event.targetedRerun && (
+                {event?.targetedRerun && (
                   <span className="block" style={{ color: 'var(--text-muted)' }}>
                     {event.targetedRerun.selected}/{event.targetedRerun.total} selected
                   </span>
@@ -790,23 +840,6 @@ function formatLifecycleDateTime(iso: string): string {
     dateStyle: 'medium',
     timeStyle: 'medium',
   }).format(new Date(time))
-}
-
-function lifecycleDurationLabel(events: RunLifecycleEvent[], idx: number, now: number): string | null {
-  const start = Date.parse(events[idx]?.updatedAt ?? '')
-  if (!Number.isFinite(start)) return null
-  const next = events[idx + 1]
-  if (next) {
-    const end = Date.parse(next.updatedAt)
-    if (!Number.isFinite(end) || end < start) return null
-    return `took ${formatDuration(end - start)}`
-  }
-  if (isTerminalLifecyclePhase(events[idx].phase)) return null
-  return `for ${formatDuration(Math.max(0, now - start))}`
-}
-
-function isTerminalLifecyclePhase(phase: RunLifecycleEvent['phase']): boolean {
-  return phase === 'passed' || phase === 'failed' || phase === 'aborted' || phase === 'completed'
 }
 
 function alertClass(tone: 'info' | 'success' | 'warning' | 'error'): string {

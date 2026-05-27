@@ -653,7 +653,7 @@ body {
 }
 
 .cl-verify-modal {
-  width: min(920px, calc(100vw - 2rem));
+  width: min(560px, calc(100vw - 2rem));
   background:
     linear-gradient(180deg, color-mix(in srgb, var(--bg-elevated) 34%, transparent), transparent 34%),
     var(--bg-surface);
@@ -705,34 +705,6 @@ body {
   font-family: var(--font-mono);
   font-size: 10.5px;
   padding: 0.25rem 0.5rem;
-}
-
-.cl-verify-rail {
-  background: color-mix(in srgb, var(--bg-elevated) 56%, transparent);
-}
-
-.cl-verify-config-option {
-  background: var(--bg-surface);
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-lg);
-  color: var(--text-secondary);
-  padding: 0.65rem 0.75rem;
-  transition: background 120ms ease, border-color 120ms ease, color 120ms ease, transform 120ms ease;
-}
-
-.cl-verify-config-option:hover,
-.cl-verify-config-option:focus-visible {
-  background: var(--bg-hover);
-  border-color: var(--border-strong);
-  color: var(--text-primary);
-  outline: none;
-}
-
-.cl-verify-config-option-active {
-  background: color-mix(in srgb, var(--accent) 10%, var(--bg-surface));
-  border-color: color-mix(in srgb, var(--accent) 56%, var(--border-default));
-  color: var(--text-primary);
-  box-shadow: inset 3px 0 0 var(--accent);
 }
 
 .cl-verify-section {
