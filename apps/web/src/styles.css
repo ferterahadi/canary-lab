@@ -566,56 +566,40 @@ body {
 .cl-list-row-healing:hover {
   background: color-mix(in srgb, var(--warning) 24%, transparent);
 }
-/* The moving shine rides the row's border, not the interior: a conic-gradient
-   glint is masked to a thin ring and rotated around the rounded edge via the
-   registered --cl-edge-angle. The flat tint above stays put underneath. */
-@property --cl-edge-angle {
-  syntax: '<angle>';
-  initial-value: 0deg;
-  inherits: false;
-}
+/* The moving shine rides the row's border at a CONSTANT speed: a short
+   brand-coloured glint travels the rounded-rect outline via offset-path, which
+   is parametrised by distance along the path — so it doesn't accelerate on the
+   long edges and slow at the corners the way a rotating conic gradient does.
+   Colour is the plain --accent / --warning tokens (no white wash) so it matches
+   the blue/yellow used elsewhere. The flat tint above stays put underneath, and
+   it keeps animating under prefers-reduced-motion by deliberate product
+   decision — no reduced-motion gate. */
 .cl-list-row-running::after,
 .cl-list-row-healing::after {
   content: '';
   position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  padding: 0.5px;
+  top: 0;
+  left: 0;
+  width: 18px;
+  height: 1px;
+  border-radius: 1px;
+  offset-path: inset(0 round var(--radius-md));
+  offset-distance: 0%;
+  offset-rotate: auto;
   pointer-events: none;
-  -webkit-mask:
-    linear-gradient(#000 0 0) content-box,
-    linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-          mask-composite: exclude;
   animation: cl-edge-beam 2.4s linear infinite;
 }
 .cl-list-row-running::after {
-  background: conic-gradient(
-    from var(--cl-edge-angle),
-    transparent 0%,
-    transparent 62%,
-    color-mix(in srgb, var(--accent) 60%, transparent) 76%,
-    color-mix(in srgb, white 75%, transparent) 84%,
-    color-mix(in srgb, var(--accent) 60%, transparent) 92%,
-    transparent 100%
-  );
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--accent) 55%, transparent);
 }
 .cl-list-row-healing::after {
-  background: conic-gradient(
-    from var(--cl-edge-angle),
-    transparent 0%,
-    transparent 62%,
-    color-mix(in srgb, var(--warning) 62%, transparent) 76%,
-    color-mix(in srgb, white 75%, transparent) 84%,
-    color-mix(in srgb, var(--warning) 62%, transparent) 92%,
-    transparent 100%
-  );
+  background: linear-gradient(90deg, transparent, var(--warning), transparent);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--warning) 55%, transparent);
 }
 @keyframes cl-edge-beam {
-  to { --cl-edge-angle: 360deg; }
+  to { offset-distance: 100%; }
 }
-/* The edge beam intentionally keeps animating under prefers-reduced-motion —
-   deliberate product decision, so there is no reduced-motion gate here. */
 
 /* Subtle count chip — mono numeral on a soft fill. */
 .cl-count-chip {

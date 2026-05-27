@@ -102,7 +102,7 @@ function McpPromoDialog({
       <section
         role="dialog"
         aria-modal="true"
-        aria-labelledby="mcp-promo-title"
+        aria-label="Canary Lab agent workflow"
         className="cl-modal cl-mcp-promo-modal overflow-hidden"
       >
         <button
@@ -125,13 +125,7 @@ function McpPromoDialog({
           />
         </div>
         <div className="cl-mcp-promo-body">
-          <h2 id="mcp-promo-title" className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>
-            Run Canary Lab from Codex or Claude Desktop
-          </h2>
-          <p className="mt-2 text-sm leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
-            Type <span className="font-mono" style={{ color: 'var(--text-primary)' }}>/canary-lab</span>, then describe the test, run, or evaluation you want.
-          </p>
-          <div className="mt-4 rounded-md border p-3" style={{ borderColor: 'var(--border-default)', background: 'var(--bg-elevated)' }}>
+          <div className="rounded-md border p-3" style={{ borderColor: 'var(--border-default)', background: 'var(--bg-elevated)' }}>
             <p className="text-[11px] font-medium uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>{copy.label}</p>
             <p className="mt-1 text-sm" style={{ color: 'var(--text-primary)' }}>{copy.example}</p>
           </div>

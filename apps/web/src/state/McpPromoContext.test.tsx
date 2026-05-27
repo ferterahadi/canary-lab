@@ -41,7 +41,6 @@ describe('McpPromoProvider', () => {
     })
 
     expect(continued).not.toHaveBeenCalled()
-    expect(document.body.textContent).toContain('Run Canary Lab from Codex or Claude Desktop')
     expect(document.body.textContent).toContain('/canary-lab create a checkout test')
 
     act(() => {
@@ -49,7 +48,7 @@ describe('McpPromoProvider', () => {
     })
 
     expect(continued).toHaveBeenCalledTimes(1)
-    expect(document.body.textContent).not.toContain('Run Canary Lab from Codex or Claude Desktop')
+    expect(document.body.textContent).not.toContain('/canary-lab create a checkout test')
   })
 
   it('cancels the original action when the user dismisses the promo', () => {
@@ -64,7 +63,7 @@ describe('McpPromoProvider', () => {
     })
 
     expect(continued).not.toHaveBeenCalled()
-    expect(document.body.textContent).not.toContain('Run Canary Lab from Codex or Claude Desktop')
+    expect(document.body.textContent).not.toContain('/canary-lab run this feature')
   })
 
   it('stores per-action dismissal only after continuing with the checkbox checked', () => {
@@ -111,7 +110,7 @@ describe('McpPromoProvider', () => {
         clickButton('Trigger export-evaluation')
       })
       expect(continued).not.toHaveBeenCalled()
-      expect(document.body.textContent).toContain('Run Canary Lab from Codex or Claude Desktop')
+      expect(document.body.textContent).toContain('/canary-lab export the selected evaluation')
 
       act(() => {
         clickButton('Continue')
