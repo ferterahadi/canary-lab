@@ -11,6 +11,16 @@ Each entry is tagged with the area it touches:
 - **[General]** — UI shell, CLI, scaffolding, packaging
 
 ---
+## 1.1.0 — 2026-05-28
+
+> The headline change: Canary Lab can now be driven from Codex Desktop, Claude Desktop, and other MCP clients. After upgrading, run `npx canary-lab setup` to refresh the local MCP registration.
+
+- **[General]** **MCP support.** Codex and Claude can now connect to Canary Lab directly, start runs, inspect failures, and continue the work from the agent chat.
+- **[Test Runner]** **External repair flow.** A connected agent can take over a failing run, read the saved evidence, make a fix, and ask Canary Lab to rerun or restart.
+- **[Test Generation]** **Agent-driven feature work.** External agents can create features, add notes, apply generated tests, and prepare evaluation exports.
+- **[General]** **Cleaner UI.** Run details, external repair, verification, export, and status screens have been tightened up with clearer labels, less clutter, and steadier status updates.
+
+---
 ## 1.0.8 — 2026-05-17
 
 - **[Export evaluation]** **Missing videos in exported evaluations.** Fixes a case where exported evaluations were attaching stale or missing video recordings — now the right video lands with each run. Small fix shipping ahead of 1.1.x.

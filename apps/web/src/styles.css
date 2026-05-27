@@ -551,9 +551,12 @@ body {
 
 /* Active-run highlight on the whole row — blue while running, yellow while
    healing. Declared after the selected/hover rules so an in-flight run wins
-   over the grey selected background at equal specificity. A glossy band sweeps
-   across (::after) to signal the run is live; it falls back to a calm flat
-   tint under prefers-reduced-motion. */
+   over the grey selected background at equal specificity. The interior tint is
+   constant; the row's edge "breathes" — a brand-coloured hairline ring plus a
+   soft inner glow that pulses in opacity — to signal the run is live. All the
+   motion is opacity on a fully-inset ::after, so nothing spills into the row
+   gaps. It keeps animating under prefers-reduced-motion by deliberate product
+   decision — no reduced-motion gate. */
 .cl-list-row-running {
   background: color-mix(in srgb, var(--accent) 16%, transparent);
 }
@@ -566,39 +569,28 @@ body {
 .cl-list-row-healing:hover {
   background: color-mix(in srgb, var(--warning) 24%, transparent);
 }
-/* The moving shine rides the row's border at a CONSTANT speed: a short
-   brand-coloured glint travels the rounded-rect outline via offset-path, which
-   is parametrised by distance along the path — so it doesn't accelerate on the
-   long edges and slow at the corners the way a rotating conic gradient does.
-   Colour is the plain --accent / --warning tokens (no white wash) so it matches
-   the blue/yellow used elsewhere. The flat tint above stays put underneath, and
-   it keeps animating under prefers-reduced-motion by deliberate product
-   decision — no reduced-motion gate. */
 .cl-list-row-running::after,
 .cl-list-row-healing::after {
   content: '';
   position: absolute;
-  top: 0;
-  left: 0;
-  width: 18px;
-  height: 1px;
-  border-radius: 1px;
-  offset-path: inset(0 round var(--radius-md));
-  offset-distance: 0%;
-  offset-rotate: auto;
+  inset: 0;
+  border-radius: inherit;
   pointer-events: none;
-  animation: cl-edge-beam 2.4s linear infinite;
+  animation: cl-edge-breathe 3s ease-in-out infinite;
 }
 .cl-list-row-running::after {
-  background: linear-gradient(90deg, transparent, var(--accent), transparent);
-  box-shadow: 0 0 6px color-mix(in srgb, var(--accent) 55%, transparent);
+  box-shadow:
+    inset 0 0 0 1px var(--accent),
+    inset 0 0 12px -4px var(--accent);
 }
 .cl-list-row-healing::after {
-  background: linear-gradient(90deg, transparent, var(--warning), transparent);
-  box-shadow: 0 0 6px color-mix(in srgb, var(--warning) 55%, transparent);
+  box-shadow:
+    inset 0 0 0 1px var(--warning),
+    inset 0 0 12px -4px var(--warning);
 }
-@keyframes cl-edge-beam {
-  to { offset-distance: 100%; }
+@keyframes cl-edge-breathe {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 0.95; }
 }
 
 /* Subtle count chip — mono numeral on a soft fill. */

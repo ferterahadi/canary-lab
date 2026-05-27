@@ -153,7 +153,7 @@ function McpHealthBadge() {
   const updateMenuPosition = useCallback((): void => {
     const rect = buttonRef.current?.getBoundingClientRect()
     if (!rect) return
-    const width = Math.min(380, Math.max(304, window.innerWidth - 16))
+    const width = Math.min(360, Math.max(304, window.innerWidth - 16))
     const left = Math.min(Math.max(8, rect.left), Math.max(8, window.innerWidth - width - 8))
     setMenuPosition({ top: rect.bottom + 8, left, width })
   }, [])
@@ -259,18 +259,19 @@ const McpHealthMenu = forwardRef<HTMLDivElement, {
         top: position.top,
         left: position.left,
         width: position.width,
+        maxHeight: 'min(440px, calc(100vh - 64px))',
         borderColor: 'var(--border-default)',
         background: 'color-mix(in srgb, var(--bg-elevated) 94%, black)',
         color: 'var(--text-primary)',
       }}
     >
-      <div className="border-b px-3 py-3" style={{ borderColor: 'var(--border-default)' }}>
-        <div className="flex items-start justify-between gap-3">
+      <div className="border-b px-3 py-2.5" style={{ borderColor: 'var(--border-default)' }}>
+        <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
             <div className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
               MCP endpoint
             </div>
-            <div className="mt-0.5 text-xs" style={{ color: 'var(--text-muted)' }}>
+            <div className="mt-0.5 truncate text-[11px]" style={{ color: 'var(--text-muted)' }}>
               {health.state === 'failed' ? health.error : 'Ready for external repair agents'}
             </div>
           </div>
@@ -284,18 +285,21 @@ const McpHealthMenu = forwardRef<HTMLDivElement, {
             {health.toolCount ?? tools.length} tools
           </div>
         </div>
-        <div className="mt-3 grid grid-cols-2 gap-2">
-          <McpHealthMeta label="Workspace" value={workspaceName} detail={health.projectRoot ?? 'Checking'} mono />
-          <McpHealthMeta label="Tool set" value={profile.label} detail={profile.detail} />
-          <McpHealthMeta label="Active sessions" value={String(activeSessions)} detail="Connected clients" />
-          <McpHealthMeta label="MCP URL" value="/mcp" detail="Health: /mcp/health" mono />
+        <div className="mt-2 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[10px]" style={{ color: 'var(--text-muted)' }}>
+          <span className="truncate" title={health.projectRoot ?? 'Checking'}>{workspaceName}</span>
+          <span aria-hidden="true">/</span>
+          <span title={profile.detail}>{profile.label}</span>
+          <span aria-hidden="true">/</span>
+          <span>{activeSessions} active</span>
+          <span aria-hidden="true">/</span>
+          <span style={{ fontFamily: 'var(--font-mono)' }}>/mcp</span>
         </div>
       </div>
       <div className="border-b px-2 py-2" style={{ borderColor: 'var(--border-default)' }}>
-        <div className="mb-1.5 px-1 text-[10px] uppercase" style={{ color: 'var(--text-muted)', letterSpacing: 0 }}>
+        <div className="mb-1 px-1 text-[10px] uppercase" style={{ color: 'var(--text-muted)', letterSpacing: 0 }}>
           Profiles
         </div>
-        <div className="grid grid-cols-2 gap-1.5">
+        <div className="grid grid-cols-4 gap-1">
           {MCP_PROFILES.map((candidate) => {
             const selected = candidate.id === selectedProfile
             return (
@@ -303,8 +307,9 @@ const McpHealthMenu = forwardRef<HTMLDivElement, {
                 key={candidate.id}
                 type="button"
                 onClick={() => onSelectProfile(candidate.id)}
-                className="min-w-0 rounded border px-2 py-1.5 text-left"
+                className="min-w-0 rounded border px-2 py-1 text-center text-[11px]"
                 aria-pressed={selected}
+                title={candidate.detail}
                 style={{
                   borderColor: selected ? 'color-mix(in srgb, var(--accent) 58%, var(--border-default))' : 'var(--border-default)',
                   background: selected
@@ -312,24 +317,26 @@ const McpHealthMenu = forwardRef<HTMLDivElement, {
                     : 'color-mix(in srgb, var(--bg-muted) 26%, transparent)',
                 }}
               >
-                <span className="block truncate text-[11px]" style={{ color: 'var(--text-primary)' }}>
-                  {candidate.label}
-                </span>
-                <span className="block truncate text-[10px]" style={{ color: 'var(--text-muted)' }}>
-                  {candidate.detail}
-                </span>
+                <span className="block truncate" style={{ color: 'var(--text-primary)' }}>{candidate.label}</span>
               </button>
             )
           })}
         </div>
       </div>
-      <div className="max-h-64 overflow-y-auto px-2 py-2">
+      <div className="border-b px-3 py-1.5" style={{ borderColor: 'var(--border-default)' }}>
+        <div className="flex items-center justify-between gap-2 text-[10px] uppercase" style={{ color: 'var(--text-muted)', letterSpacing: 0 }}>
+          <span>Tools</span>
+          <span>{tools.length} shown</span>
+        </div>
+      </div>
+      <div className="max-h-40 overflow-y-auto px-2 py-1.5">
         {tools.length > 0 ? (
-          <ul className="space-y-1" aria-label="MCP tools">
+          <ul className="grid grid-cols-1 gap-1" aria-label="MCP tools">
             {tools.map((tool) => (
               <li
                 key={tool}
-                className="rounded px-2 py-1 text-[11px]"
+                className="truncate rounded px-2 py-0.5 text-[11px]"
+                title={tool}
                 style={{
                   background: 'color-mix(in srgb, var(--bg-muted) 52%, transparent)',
                   color: 'var(--text-secondary)',
@@ -346,7 +353,7 @@ const McpHealthMenu = forwardRef<HTMLDivElement, {
           </div>
         )}
       </div>
-      <div className="border-t px-3 py-2" style={{ borderColor: 'var(--border-default)' }}>
+      <div className="border-t px-3 py-1.5" style={{ borderColor: 'var(--border-default)' }}>
         <div className="flex items-center justify-between gap-2 text-[10px]" style={{ color: 'var(--text-muted)' }}>
           <span className="truncate">{checkMessage ?? 'Checks the selected profile health endpoint'}</span>
           {lastCheckedLabel && <span className="shrink-0">{lastCheckedLabel}</span>}
@@ -355,45 +362,6 @@ const McpHealthMenu = forwardRef<HTMLDivElement, {
     </div>
   )
 })
-
-function McpHealthMeta({
-  label,
-  value,
-  detail,
-  mono,
-}: {
-  label: string
-  value: string
-  detail: string
-  mono?: boolean
-}) {
-  return (
-    <div
-      className="min-w-0 rounded border px-2 py-1.5"
-      style={{
-        borderColor: 'color-mix(in srgb, var(--border-default) 74%, transparent)',
-        background: 'color-mix(in srgb, var(--bg-muted) 38%, transparent)',
-      }}
-    >
-      <div className="text-[10px] uppercase" style={{ color: 'var(--text-muted)', letterSpacing: 0 }}>
-        {label}
-      </div>
-      <div
-        className="truncate text-[11px]"
-        title={detail}
-        style={{
-          color: 'var(--text-primary)',
-          fontFamily: mono ? 'var(--font-mono)' : undefined,
-        }}
-      >
-        {value}
-      </div>
-      <div className="truncate text-[10px]" style={{ color: 'var(--text-muted)' }}>
-        {detail}
-      </div>
-    </div>
-  )
-}
 
 function workspaceNameFromRoot(projectRoot?: string): string {
   if (!projectRoot) return 'Checking'
