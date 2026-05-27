@@ -451,6 +451,157 @@ describe('external heal routes', () => {
     expect(writeSpy).toHaveBeenCalled()
   })
 
+  it('hands off active external runs to manual mode and rejects local-agent targets for active runs', async () => {
+    writeRun('run-1', 'running')
+    const { app, broker, audit } = await build()
+    broker.claim('run-1', { sessionId: 'sess-A', clientKind: 'codex-cli' })
+
+    const manual = await app.inject({
+      method: 'POST',
+      url: '/api/runs/run-1/heal-agent/handoff',
+      payload: { to: 'manual', sessionId: 'sess-A' },
+    })
+    expect(manual.statusCode).toBe(202)
+    expect(manual.json()).toMatchObject({
+      accepted: true,
+      to: 'manual',
+      previousSession: { sessionId: 'sess-A', clientKind: 'codex-cli' },
+    })
+    expect(broker.getSession('run-1')).toBeNull()
+    expect(audit.at(-1)?.entry.action).toBe('handoff')
+
+    // After release the run no longer holds a claim — patch the manifest's
+    // healMode field for the next case to mirror that.
+    broker.claim('run-1', { sessionId: 'sess-B', clientKind: 'claude-desktop' })
+    const blocked = await app.inject({
+      method: 'POST',
+      url: '/api/runs/run-1/heal-agent/handoff',
+      payload: { to: 'claude', sessionId: 'sess-B' },
+    })
+    expect(blocked.statusCode).toBe(409)
+    expect(blocked.json().reason).toBe('active-run-not-handoff-capable')
+    // Claim should survive the rejected handoff.
+    expect(broker.getSession('run-1')?.sessionId).toBe('sess-B')
+  })
+
+  it('rejects handoff with mismatched session id', async () => {
+    writeRun('run-1', 'running')
+    const { app, broker } = await build()
+    broker.claim('run-1', { sessionId: 'sess-A', clientKind: 'codex-cli' })
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/runs/run-1/heal-agent/handoff',
+      payload: { to: 'manual', sessionId: 'sess-other' },
+    })
+    expect(res.statusCode).toBe(409)
+    expect(res.json().reason).toBe('session-mismatch')
+    expect(broker.getSession('run-1')?.sessionId).toBe('sess-A')
+  })
+
+  it('hands off terminal runs to a local heal agent through restartLocalHeal', async () => {
+    writeRun('run-1', 'failed')
+    const restartCalls: Array<{ runId: string; guidance: string }> = []
+    const store = new RunStore(logsDir, createRegistry())
+    const events: RunStoreEvent[] = []
+    const audit: Array<{ runId: string; entry: ExternalHealAuditEntry }> = []
+    const deps: ExternalHealBrokerDeps = {
+      now: () => new Date('2026-05-18T10:00:00.000Z').getTime(),
+      emit: (event) => { events.push(event) },
+      patchManifest: (runId, patch) => { store.patchManifest(runId, patch) },
+      audit: (runId, entry) => { audit.push({ runId, entry }) },
+    }
+    const broker = new ExternalHealBroker(deps)
+    broker.claim('run-1', { sessionId: 'sess-A', clientKind: 'claude-desktop' })
+    const app = Fastify()
+    await app.register(externalHealRoutes, {
+      store,
+      broker,
+      restartLocalHeal: async (runId, guidance) => {
+        restartCalls.push({ runId, guidance })
+        return { ok: true }
+      },
+    })
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/runs/run-1/heal-agent/handoff',
+      payload: { to: 'auto', sessionId: 'sess-A', guidance: 'try claude' },
+    })
+
+    expect(res.statusCode).toBe(202)
+    expect(res.json()).toMatchObject({ accepted: true, to: 'auto' })
+    expect(restartCalls).toEqual([{ runId: 'run-1', guidance: 'try claude' }])
+    expect(broker.getSession('run-1')).toBeNull()
+  })
+
+  it('validates handoff target and 404s missing runs', async () => {
+    writeRun('run-1', 'running')
+    const { app } = await build()
+    expect((await app.inject({
+      method: 'POST',
+      url: '/api/runs/missing/heal-agent/handoff',
+      payload: { to: 'manual' },
+    })).statusCode).toBe(404)
+    expect((await app.inject({
+      method: 'POST',
+      url: '/api/runs/run-1/heal-agent/handoff',
+      payload: { to: 'invalid' },
+    })).statusCode).toBe(400)
+  })
+
+  it('returns parsed audit entries from external-commands.jsonl', async () => {
+    writeRun('run-1')
+    const { app, broker } = await build()
+    broker.claim('run-1', { sessionId: 'sess-A', clientKind: 'claude-desktop' })
+    // Force a few audit entries by exercising the broker.
+    broker.release('run-1', 'sess-A')
+    const logger = makeExternalHealAuditLogger(logsDir)
+    logger('run-1', {
+      ts: '2026-05-18T10:00:00.000Z',
+      sessionId: 'sess-A',
+      clientKind: 'claude-desktop',
+      action: 'claim',
+    })
+    logger('run-1', {
+      ts: '2026-05-18T10:00:05.000Z',
+      sessionId: 'sess-A',
+      clientKind: 'claude-desktop',
+      action: 'release',
+    })
+
+    const res = await app.inject({ method: 'GET', url: '/api/runs/run-1/audit' })
+    expect(res.statusCode).toBe(200)
+    expect(res.json().entries).toEqual([
+      {
+        ts: '2026-05-18T10:00:00.000Z',
+        sessionId: 'sess-A',
+        clientKind: 'claude-desktop',
+        action: 'claim',
+      },
+      {
+        ts: '2026-05-18T10:00:05.000Z',
+        sessionId: 'sess-A',
+        clientKind: 'claude-desktop',
+        action: 'release',
+      },
+    ])
+  })
+
+  it('returns an empty audit list when no entries have been recorded', async () => {
+    writeRun('run-1')
+    const { app } = await build()
+    const res = await app.inject({ method: 'GET', url: '/api/runs/run-1/audit' })
+    expect(res.statusCode).toBe(200)
+    expect(res.json()).toEqual({ entries: [] })
+  })
+
+  it('404s the audit endpoint on missing runs', async () => {
+    const { app } = await build()
+    const res = await app.inject({ method: 'GET', url: '/api/runs/missing/audit' })
+    expect(res.statusCode).toBe(404)
+  })
+
   it('reports terminal action availability and 404s missing action/context runs', async () => {
     writeRun('done', 'failed')
     const { app } = await build()

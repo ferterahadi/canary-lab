@@ -34,6 +34,7 @@ const REPAIR_TOOLS = uniqueSorted([
   'get_heal_context',
   'get_run',
   'get_run_snapshot',
+  'handoff_heal',
   'heartbeat',
   'list_features',
   'list_runs',
@@ -75,6 +76,7 @@ const AUTHOR_TOOLS = uniqueSorted([
   'start_external_evaluation_export',
   'submit_external_evaluation_export',
   'update_external_draft_stage',
+  'write_envset',
 ])
 
 const FULL_TOOLS = uniqueSorted([
@@ -90,6 +92,7 @@ const FULL_TOOLS = uniqueSorted([
   'get_run_snapshot',
   'get_verification_config',
   'get_verification_result',
+  'handoff_heal',
   'heartbeat',
   'list_features',
   'list_runs',

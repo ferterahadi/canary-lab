@@ -15,6 +15,7 @@ import { buildExternalHealContext, buildExternalRunSnapshot, writeHealSignal } f
 import { runDirFor } from '../lib/runtime/run-paths'
 import {
   isActiveRunStatus,
+  isRestartableRunStatus,
   isTerminalRunStatus,
   deriveRunActionAvailability,
   type HealSignalKind,
@@ -39,6 +40,9 @@ const VALID_STATUS: ExternalHealSessionStatus[] = [
 
 const VALID_SIGNAL_KINDS: HealSignalKind[] = ['restart', 'rerun', 'heal']
 
+const VALID_HANDOFF_TARGETS = ['auto', 'claude', 'codex', 'manual'] as const
+export type HealHandoffTarget = typeof VALID_HANDOFF_TARGETS[number]
+
 export interface ExternalHealRouteDeps {
   store: RunStore
   broker: ExternalHealBroker
@@ -46,6 +50,11 @@ export interface ExternalHealRouteDeps {
    *  accepted. The orchestrator picks signals up by polling the file system,
    *  but other consumers may want to broadcast immediately. */
   onSignalAccepted?(runId: string, kind: HealSignalKind, body: Record<string, unknown>): void
+  /** Hook for `to ∈ {auto, claude, codex}` handoff on a terminal run — wraps
+   *  the same `restartHeal` path the runs route uses. Returning `ok: false`
+   *  surfaces as a 409 to the caller. Omit when local heal restart isn't
+   *  available (e.g. test harnesses). */
+  restartLocalHeal?(runId: string, guidance: string): Promise<{ ok: true } | { ok: false; reason: string }>
 }
 
 interface ClaimBody {
@@ -68,6 +77,12 @@ interface SignalBody {
   kind?: string
   body?: Record<string, unknown>
   sessionId?: string
+}
+
+interface HandoffBody {
+  to?: string
+  sessionId?: string
+  guidance?: string
 }
 
 export async function externalHealRoutes(
@@ -242,6 +257,97 @@ export async function externalHealRoutes(
     },
   )
 
+  // POST /api/runs/:runId/heal-agent/handoff — switch a run from external
+  // heal back to a local mode. For `manual`, this clears the external claim
+  // and patches `healMode='manual'`; the orchestrator's signal-wait loop
+  // (already running) keeps parking on signal files written by hand.
+  // For `auto/claude/codex` the run must be in a restartable terminal state
+  // (failed/aborted) because the orchestrator cannot accept a new heal-agent
+  // mid-flight — for active external runs the caller must abort + restart
+  // with a fresh heal-agent choice instead.
+  app.post<{ Params: { runId: string }; Body: HandoffBody }>(
+    '/api/runs/:runId/heal-agent/handoff',
+    async (req, reply) => {
+      const detail = deps.store.get(req.params.runId)
+      if (!detail) {
+        reply.code(404)
+        return { error: 'run not found' }
+      }
+      const to = req.body?.to
+      if (!isHandoffTarget(to)) {
+        reply.code(400)
+        return { error: `to must be one of: ${VALID_HANDOFF_TARGETS.join(', ')}` }
+      }
+      const sessionId = req.body?.sessionId
+      const ownership = deps.broker.assertOwnership(req.params.runId, sessionId)
+      if (!ownership.ok && ownership.reason === 'session-mismatch') {
+        reply.code(409)
+        return { reason: 'session-mismatch', currentSession: ownership.currentSession }
+      }
+      const status = detail.manifest.status
+      if (to === 'manual') {
+        const result = deps.broker.transferTo(req.params.runId, 'manual')
+        reply.code(202)
+        return { accepted: true, to: 'manual', previousSession: result.previousSession }
+      }
+      // local heal-agent target — currently only restartable terminal runs
+      // can be handed off because the running orchestrator was constructed
+      // without an autoHeal config.
+      if (isActiveRunStatus(status)) {
+        reply.code(409)
+        return {
+          reason: 'active-run-not-handoff-capable',
+          message: 'Active external heal runs cannot hot-swap to a local agent. Abort the run and start a new one with the desired heal agent.',
+          status,
+        }
+      }
+      if (!isRestartableRunStatus(status)) {
+        reply.code(409)
+        return { reason: 'run-not-restartable', status }
+      }
+      if (!deps.restartLocalHeal) {
+        reply.code(409)
+        return { reason: 'restart-local-heal-unavailable' }
+      }
+      // Drop the external claim before kicking off the local restart so the
+      // new orchestrator constructs cleanly without a stale broker entry.
+      const transferred = deps.broker.transferTo(req.params.runId, 'auto')
+      const guidance = typeof req.body?.guidance === 'string' && req.body.guidance.trim().length > 0
+        ? req.body.guidance.trim()
+        : `Handing off heal from external client to ${to}.`
+      const restarted = await deps.restartLocalHeal(req.params.runId, guidance)
+      if (!restarted.ok) {
+        reply.code(restarted.reason === 'spawn-failed' ? 500 : 409)
+        return { reason: restarted.reason, previousSession: transferred.previousSession }
+      }
+      reply.code(202)
+      return { accepted: true, to, previousSession: transferred.previousSession }
+    },
+  )
+
+  // GET /api/runs/:runId/audit — return the JSONL audit trail of external
+  // commands recorded for this run. Empty array when no audit log exists.
+  app.get<{ Params: { runId: string } }>(
+    '/api/runs/:runId/audit',
+    async (req, reply) => {
+      const detail = deps.store.get(req.params.runId)
+      if (!detail) {
+        reply.code(404)
+        return { error: 'run not found' }
+      }
+      const runDir = runDirFor(deps.store.logsDir, req.params.runId)
+      const auditPath = path.join(runDir, 'external-commands.jsonl')
+      if (!fs.existsSync(auditPath)) return { entries: [] }
+      const raw = fs.readFileSync(auditPath, 'utf-8')
+      const entries: ExternalHealAuditEntry[] = []
+      for (const line of raw.split('\n')) {
+        if (!line.trim()) continue
+        try { entries.push(JSON.parse(line) as ExternalHealAuditEntry) } catch { /* skip malformed */ }
+      }
+      return { entries }
+    },
+  )
+
   // GET /api/runs/:runId/actions — which actions are valid right now. Lets
   // the external client reason about what to do without re-deriving server
   // logic. Mirrors `deriveRunActionAvailability` for the run's current status.
@@ -282,6 +388,10 @@ function isSessionStatus(value: unknown): value is ExternalHealSessionStatus {
 
 function isSignalKind(value: unknown): value is HealSignalKind {
   return typeof value === 'string' && (VALID_SIGNAL_KINDS as string[]).includes(value)
+}
+
+function isHandoffTarget(value: unknown): value is HealHandoffTarget {
+  return typeof value === 'string' && (VALID_HANDOFF_TARGETS as readonly string[]).includes(value)
 }
 
 function hasJournalSignalFields(body: Record<string, unknown>): boolean {
