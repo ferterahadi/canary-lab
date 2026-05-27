@@ -2,6 +2,12 @@ import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
+
+// Stub the MCP refresh so upgrade tests never shell out to the real
+// claude/codex CLIs (which would mutate the developer's actual config).
+const mcpRefreshMocks = vi.hoisted(() => ({ refreshCanaryLabMcp: vi.fn() }))
+vi.mock('./mcp-refresh', () => ({ refreshCanaryLabMcp: mcpRefreshMocks.refreshCanaryLabMcp }))
+
 import { extractManagedBlock, applyManagedBlock, applyGitignoreRules, main } from './upgrade'
 import { readWorkspaceRegistry } from '../shared/runtime/workspace-registry'
 
@@ -24,6 +30,7 @@ beforeEach(() => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-agent-home-'))
   tmpDirs.push(home)
   vi.stubEnv('CANARY_LAB_AGENT_HOME', home)
+  mcpRefreshMocks.refreshCanaryLabMcp.mockClear()
 })
 
 const START = '<!-- managed:canary-lab:start -->'
@@ -158,6 +165,16 @@ describe("main (upgrade orchestration)", () => {
     const pkg = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf-8"))
     expect(pkg.scripts.postinstall).toBe("canary-lab upgrade --silent")
     expect(readWorkspaceRegistry(home).workspaces[0].path).toBe(root)
+  })
+
+  it("re-points already-configured MCP clients on upgrade", async () => {
+    const root = mkProjectRoot()
+    vi.stubEnv("CANARY_LAB_PROJECT_ROOT", root)
+    vi.spyOn(console, "log").mockImplementation(() => {})
+
+    await main([])
+
+    expect(mcpRefreshMocks.refreshCanaryLabMcp).toHaveBeenCalledTimes(1)
   })
 
   it("refreshes only existing user-level agent integrations on upgrade", async () => {

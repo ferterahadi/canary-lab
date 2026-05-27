@@ -136,6 +136,8 @@ export function App() {
         <FeaturesColumn
           features={features}
           selectedFeature={selectedFeature}
+          activeRunFeature={globalActiveRunEntry?.feature ?? null}
+          activeRunStatus={globalActiveRunEntry?.status ?? null}
           onSelectFeature={(name) => {
             pendingRunSelectionRef.current = null
             setSelectedFeature(name)

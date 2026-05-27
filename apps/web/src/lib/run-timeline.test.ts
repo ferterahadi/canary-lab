@@ -62,8 +62,8 @@ describe('buildTimelineRows', () => {
 
     expect(rows.map((r) => `${r.source}:${r.headline}`)).toEqual([
       'engine:Starting services',
-      'external:claimed the heal',
-      'external:went stale — disconnected',
+      'external:Claimed the heal',
+      'external:Went stale — disconnected',
       'engine:Running Playwright tests',
       'engine:Run failed',
     ])
@@ -88,18 +88,18 @@ describe('buildTimelineRows', () => {
       { now: NOW },
     )
 
-    expect(rows[0]).toMatchObject({ source: 'external', severity: 'success', headline: 'claimed the heal', clientLabel: 'Claude CLI', durationLabel: null })
+    expect(rows[0]).toMatchObject({ source: 'external', severity: 'success', headline: 'Claimed the heal', clientLabel: 'Claude CLI', durationLabel: null })
     expect(rows[0].detail).toContain('conversationName=test line integration')
-    expect(rows[1]).toMatchObject({ severity: 'warning', headline: 'went stale — disconnected' })
-    expect(rows[2]).toMatchObject({ severity: 'success', headline: 'reconnected to the heal' })
-    expect(rows[3]).toMatchObject({ severity: 'error', headline: 'heal claim rejected', clientLabel: 'Codex CLI' })
-    expect(rows[4]).toMatchObject({ severity: 'info', headline: 'released the heal' })
-    expect(rows[5]).toMatchObject({ severity: 'info', headline: 'handed off the heal' })
+    expect(rows[1]).toMatchObject({ severity: 'warning', headline: 'Went stale — disconnected' })
+    expect(rows[2]).toMatchObject({ severity: 'success', headline: 'Reconnected to the heal' })
+    expect(rows[3]).toMatchObject({ severity: 'error', headline: 'Heal claim rejected', clientLabel: 'Codex CLI' })
+    expect(rows[4]).toMatchObject({ severity: 'info', headline: 'Released the heal' })
+    expect(rows[5]).toMatchObject({ severity: 'info', headline: 'Handed off the heal' })
   })
 
   it('falls back to the raw action name for unknown external actions', () => {
     const rows = buildTimelineRows([], [audit({ ts: '2026-05-26T10:19:05.000Z', action: 'frobnicate', clientKind: 'other' })], { now: NOW })
-    expect(rows[0]).toMatchObject({ source: 'external', headline: 'frobnicate', severity: 'info' })
+    expect(rows[0]).toMatchObject({ source: 'external', headline: 'Frobnicate', severity: 'info' })
   })
 
   it('leaves client label and detail null when the entry has no client or args', () => {

@@ -79,16 +79,22 @@ function externalRow(entry: AuditEntry, idx: number): TimelineRow {
   }
 }
 
+// Headlines are sentence-cased so external rows read like the engine lifecycle
+// events they sit beside ("Starting services", "Run failed").
 function mapExternalAction(action: string): { headline: string; severity: RunLifecycleSeverity } {
   switch (action) {
-    case 'claim': return { headline: 'claimed the heal', severity: 'success' }
-    case 'claim-reconnect': return { headline: 'reconnected to the heal', severity: 'success' }
-    case 'claim-rejected': return { headline: 'heal claim rejected', severity: 'error' }
-    case 'stale-disconnect': return { headline: 'went stale — disconnected', severity: 'warning' }
-    case 'release': return { headline: 'released the heal', severity: 'info' }
-    case 'handoff': return { headline: 'handed off the heal', severity: 'info' }
-    default: return { headline: action, severity: 'info' }
+    case 'claim': return { headline: 'Claimed the heal', severity: 'success' }
+    case 'claim-reconnect': return { headline: 'Reconnected to the heal', severity: 'success' }
+    case 'claim-rejected': return { headline: 'Heal claim rejected', severity: 'error' }
+    case 'stale-disconnect': return { headline: 'Went stale — disconnected', severity: 'warning' }
+    case 'release': return { headline: 'Released the heal', severity: 'info' }
+    case 'handoff': return { headline: 'Handed off the heal', severity: 'info' }
+    default: return { headline: capitalize(action), severity: 'info' }
   }
+}
+
+function capitalize(value: string): string {
+  return value.length === 0 ? value : value[0].toUpperCase() + value.slice(1)
 }
 
 export function lifecycleDurationLabel(events: RunLifecycleEvent[], idx: number, now: number): string | null {

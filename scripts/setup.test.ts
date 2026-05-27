@@ -125,6 +125,8 @@ describe('setup', () => {
     expect(fs.existsSync(path.join(home, '.canary-lab', 'agent-integrations', 'canary-lab-plugin', '.mcp.json'))).toBe(true)
   })
 
+  const verifiedStub = () => ({ status: 'verified' as const, message: '' })
+
   it('setup --agent codex installs the skill and configures Codex MCP', () => {
     const home = mkTmp()
     const workspace = mkWorkspace()
@@ -133,12 +135,15 @@ describe('setup', () => {
     setup({ workspace, agent: 'codex', dryRun: false, force: false }, {
       homeDir: home,
       log: () => {},
+      execPath: '/usr/bin/node',
+      cliPath: '/opt/canary-lab/dist/scripts/cli.js',
+      verifyMcp: verifiedStub,
     })
 
     expect(fs.existsSync(path.join(home, '.codex', 'skills', 'canary-lab', 'SKILL.md'))).toBe(true)
     expect(mocks.execFileSync).toHaveBeenCalledWith(
       'codex',
-      ['mcp', 'add', 'canary-lab', '--', 'npx', '-y', 'canary-lab', 'mcp'],
+      ['mcp', 'add', 'canary-lab', '--', '/usr/bin/node', '/opt/canary-lab/dist/scripts/cli.js', 'mcp'],
       { stdio: 'ignore' },
     )
   })
@@ -151,12 +156,15 @@ describe('setup', () => {
     setup({ workspace, agent: 'claude', dryRun: false, force: false }, {
       homeDir: home,
       log: () => {},
+      execPath: '/usr/bin/node',
+      cliPath: '/opt/canary-lab/dist/scripts/cli.js',
+      verifyMcp: verifiedStub,
     })
 
     expect(fs.existsSync(path.join(home, '.claude', 'skills', 'canary-lab', 'SKILL.md'))).toBe(true)
     expect(mocks.execFileSync).toHaveBeenCalledWith(
       'claude',
-      ['mcp', 'add', '--scope', 'user', 'canary-lab', '--', 'npx', '-y', 'canary-lab', 'mcp'],
+      ['mcp', 'add', '--scope', 'user', 'canary-lab', '--', '/usr/bin/node', '/opt/canary-lab/dist/scripts/cli.js', 'mcp'],
       { stdio: 'ignore' },
     )
   })
@@ -176,18 +184,79 @@ describe('setup', () => {
     setup({ workspace, agent: 'all', dryRun: false, force: false }, {
       homeDir: home,
       log: () => {},
+      execPath: '/usr/bin/node',
+      cliPath: '/opt/canary-lab/dist/scripts/cli.js',
+      verifyMcp: verifiedStub,
     })
 
     expect(mocks.execFileSync).toHaveBeenCalledWith(
       'codex',
-      ['mcp', 'add', 'canary-lab', '--', 'npx', '-y', 'canary-lab', 'mcp'],
+      ['mcp', 'add', 'canary-lab', '--', '/usr/bin/node', '/opt/canary-lab/dist/scripts/cli.js', 'mcp'],
       { stdio: 'ignore' },
     )
     expect(mocks.execFileSync).toHaveBeenCalledWith(
       'claude',
-      ['mcp', 'add', '--scope', 'user', 'canary-lab', '--', 'npx', '-y', 'canary-lab', 'mcp'],
+      ['mcp', 'add', '--scope', 'user', 'canary-lab', '--', '/usr/bin/node', '/opt/canary-lab/dist/scripts/cli.js', 'mcp'],
       { stdio: 'ignore' },
     )
+  })
+
+  it('configures Claude Desktop when its config directory exists', () => {
+    const home = mkTmp()
+    const workspace = mkWorkspace()
+    const desktopConfigPath = path.join(mkTmp(), 'Claude', 'claude_desktop_config.json')
+    fs.mkdirSync(path.dirname(desktopConfigPath), { recursive: true })
+
+    setup({ workspace, agent: 'auto', dryRun: false, force: false }, {
+      homeDir: home,
+      log: () => {},
+      execPath: '/usr/bin/node',
+      cliPath: '/opt/canary-lab/dist/scripts/cli.js',
+      claudeDesktopConfigPath: desktopConfigPath,
+      verifyMcp: verifiedStub,
+    })
+
+    const cfg = JSON.parse(fs.readFileSync(desktopConfigPath, 'utf-8'))
+    expect(cfg.mcpServers['canary-lab'].command).toBe('/usr/bin/node')
+    expect(cfg.mcpServers['canary-lab'].args).toEqual(['/opt/canary-lab/dist/scripts/cli.js', 'mcp'])
+    expect(cfg.mcpServers['canary-lab'].env.PATH).toContain('/usr/bin')
+  })
+
+  it('does not touch Claude Desktop when its config directory is absent', () => {
+    const home = mkTmp()
+    const workspace = mkWorkspace()
+    const desktopConfigPath = path.join(mkTmp(), 'Claude', 'claude_desktop_config.json')
+
+    setup({ workspace, agent: 'auto', dryRun: false, force: false }, {
+      homeDir: home,
+      log: () => {},
+      claudeDesktopConfigPath: desktopConfigPath,
+      verifyMcp: verifiedStub,
+    })
+
+    expect(fs.existsSync(desktopConfigPath)).toBe(false)
+  })
+
+  it('verifies the registration and warns when the command is broken', () => {
+    const home = mkTmp()
+    const workspace = mkWorkspace()
+    cliAvailable('codex')
+    const lines: string[] = []
+    const seen: string[] = []
+
+    setup({ workspace, agent: 'codex', dryRun: false, force: false }, {
+      homeDir: home,
+      log: (line) => lines.push(line),
+      execPath: '/usr/bin/node',
+      cliPath: '/opt/canary-lab/dist/scripts/cli.js',
+      verifyMcp: (invocation) => {
+        seen.push(invocation.command)
+        return { status: 'broken', message: 'version mismatch' }
+      },
+    })
+
+    expect(seen).toEqual(['/usr/bin/node'])
+    expect(lines.join('\n')).toContain('WARNING: Canary Lab MCP verification failed')
   })
 
   it('dry-run does not write the registry or integrations', () => {

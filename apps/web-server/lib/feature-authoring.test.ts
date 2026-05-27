@@ -14,6 +14,7 @@ import {
   getFeatureEnvsetSummary,
   getFeatureRepoStatus,
   parseRedactedEntries,
+  writeFeatureDoc,
 } from './feature-authoring'
 
 let tmpDir: string
@@ -437,5 +438,74 @@ module.exports = { config }
       { key: 'B', value: '********' },
       { key: 'C', value: '********' },
     ])
+  })
+})
+
+describe('writeFeatureDoc', () => {
+  it('writes a markdown doc into the feature docs/ dir and reports the relative path', () => {
+    const featureDir = writeFeatureConfig('line_integration')
+    const res = writeFeatureDoc(ctx(), {
+      feature: 'line_integration',
+      relPath: 'session-notes.md',
+      content: '# Notes\n\nDistilled.',
+    })
+    expect(res).toEqual({
+      ok: true,
+      writtenPath: path.join(featureDir, 'docs', 'session-notes.md'),
+      relativePath: path.join('docs', 'session-notes.md'),
+    })
+    expect(fs.readFileSync(path.join(featureDir, 'docs', 'session-notes.md'), 'utf8')).toBe('# Notes\n\nDistilled.')
+  })
+
+  it('is create-or-replace — re-writing the same relPath overwrites', () => {
+    writeFeatureConfig('line_integration')
+    writeFeatureDoc(ctx(), { feature: 'line_integration', relPath: 'plan.md', content: 'v1' })
+    const res = writeFeatureDoc(ctx(), { feature: 'line_integration', relPath: 'plan.md', content: 'v2' })
+    expect(res.ok).toBe(true)
+    const featureDir = path.join(featuresDir, 'line_integration')
+    expect(fs.readFileSync(path.join(featureDir, 'docs', 'plan.md'), 'utf8')).toBe('v2')
+  })
+
+  it('strips an optional leading docs/ so both forms land in docs/', () => {
+    writeFeatureConfig('line_integration')
+    const res = writeFeatureDoc(ctx(), { feature: 'line_integration', relPath: 'docs/plan.md', content: 'x' })
+    expect(res).toMatchObject({ ok: true, relativePath: path.join('docs', 'plan.md') })
+  })
+
+  it('supports nested subdirectories under docs/', () => {
+    const featureDir = writeFeatureConfig('line_integration')
+    const res = writeFeatureDoc(ctx(), { feature: 'line_integration', relPath: 'sessions/2026-05-28.md', content: 'x' })
+    expect(res).toMatchObject({ ok: true, relativePath: path.join('docs', 'sessions', '2026-05-28.md') })
+    expect(fs.existsSync(path.join(featureDir, 'docs', 'sessions', '2026-05-28.md'))).toBe(true)
+  })
+
+  it('rejects an unknown feature', () => {
+    expect(writeFeatureDoc(ctx(), { feature: 'nope', relPath: 'x.md', content: 'x' }))
+      .toEqual({ ok: false, error: 'feature not found' })
+  })
+
+  it('rejects empty content', () => {
+    writeFeatureConfig('line_integration')
+    expect(writeFeatureDoc(ctx(), { feature: 'line_integration', relPath: 'x.md', content: '   ' }))
+      .toEqual({ ok: false, error: 'content must be a non-empty string' })
+  })
+
+  it('rejects an absolute relPath', () => {
+    writeFeatureConfig('line_integration')
+    expect(writeFeatureDoc(ctx(), { feature: 'line_integration', relPath: '/etc/passwd.md', content: 'x' }))
+      .toEqual({ ok: false, error: 'relPath must be relative' })
+  })
+
+  it('rejects a non-markdown extension', () => {
+    writeFeatureConfig('line_integration')
+    expect(writeFeatureDoc(ctx(), { feature: 'line_integration', relPath: 'notes.txt', content: 'x' }))
+      .toEqual({ ok: false, error: 'relPath must end in .md or .markdown' })
+  })
+
+  it('rejects a path that escapes the docs directory', () => {
+    const featureDir = writeFeatureConfig('line_integration')
+    expect(writeFeatureDoc(ctx(), { feature: 'line_integration', relPath: '../escape.md', content: 'x' }))
+      .toEqual({ ok: false, error: 'relPath must not escape the docs directory' })
+    expect(fs.existsSync(path.join(featureDir, 'escape.md'))).toBe(false)
   })
 })

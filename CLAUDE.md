@@ -34,7 +34,8 @@ To run a feature's tests against a deployed environment without booting the loca
 
 - MCP HTTP server mounts at `localhost:7421/mcp` (streamable HTTP) inside `canary-lab ui`. Health: `GET /mcp/health?profile=<p>`.
 - **Profiles** pick the tool subset via `?profile=`: `repair` (heal loop, default), `verify` (verification configs), `author` (feature/envset/draft/eval authoring), `full` (union). Optional `?client_kind=claude-desktop|codex-cli|...`.
-- Tools live in `apps/web-server/mcp/tools.ts` — thin wrappers over existing REST routes/helpers. `start_run`/`write_envset`/etc. reuse handlers via `app.inject()`; don't duplicate orchestrator logic.
+- Tools live in `apps/web-server/mcp/tools.ts` — thin wrappers over existing REST routes/helpers. `start_run`/`write_envset`/etc. reuse handlers via `app.inject()`; don't duplicate orchestrator logic. Author-profile tools call `lib/feature-authoring.ts` directly.
+- **Feature docs convention**: feature-scoped prose (distilled sessions, plans, notes) lives at `features/<name>/docs/<slug>.md`. The `write_feature_doc` MCP tool (author/full profiles) is the only sanctioned writer — create-or-replace, markdown only, path-traversal hardened. The draft-apply path rejects non-spec files, so docs do NOT go through it.
 - Profile membership = the `REPAIR_TOOLS`/`VERIFY_TOOLS`/`AUTHOR_TOOLS` arrays. `FULL_TOOLS` auto-dedupes their union + `FULL_ONLY_TOOLS`. Adding/moving a tool also requires updating the mirror arrays in `mcp/server.smoke.test.ts`.
 - Each MCP session gets its own transport (`mcp/server.ts`) — a singleton rejects the 2nd client with `-32600 Server already initialized`.
 - Destructive tools gate on `confirm: z.literal(true)` in their input schema (e.g. `abort_run`, `write_envset`).
