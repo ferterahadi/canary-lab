@@ -535,6 +535,77 @@ describe('external heal routes', () => {
     expect(broker.getSession('run-1')).toBeNull()
   })
 
+  it('rejects local-agent handoff for terminal runs that are not restartable', async () => {
+    writeRun('run-1', 'passed')
+    const { app } = await build()
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/runs/run-1/heal-agent/handoff',
+      payload: { to: 'auto' },
+    })
+    expect(res.statusCode).toBe(409)
+    expect(res.json()).toEqual({ reason: 'run-not-restartable', status: 'passed' })
+  })
+
+  it('rejects local-agent handoff when no restartLocalHeal dependency is wired', async () => {
+    writeRun('run-1', 'failed')
+    const { app } = await build()
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/runs/run-1/heal-agent/handoff',
+      payload: { to: 'auto' },
+    })
+    expect(res.statusCode).toBe(409)
+    expect(res.json()).toEqual({ reason: 'restart-local-heal-unavailable' })
+  })
+
+  it('maps restartLocalHeal failures to 500 for spawn-failed and 409 otherwise', async () => {
+    writeRun('run-spawn', 'failed')
+    writeRun('run-busy', 'aborted')
+    const store = new RunStore(logsDir, createRegistry())
+    const broker = new ExternalHealBroker({
+      now: () => new Date('2026-05-18T10:00:00.000Z').getTime(),
+      emit: () => {},
+      patchManifest: (runId, patch) => { store.patchManifest(runId, patch) },
+      audit: () => {},
+    })
+    broker.claim('run-spawn', { sessionId: 'sess-A', clientKind: 'claude-desktop' })
+    broker.claim('run-busy', { sessionId: 'sess-B', clientKind: 'claude-desktop' })
+    const app = Fastify()
+    await app.register(externalHealRoutes, {
+      store,
+      broker,
+      restartLocalHeal: async (runId) =>
+        runId === 'run-spawn'
+          ? { ok: false, reason: 'spawn-failed' }
+          : { ok: false, reason: 'orchestrator-busy' },
+    })
+
+    const spawnFailed = await app.inject({
+      method: 'POST',
+      url: '/api/runs/run-spawn/heal-agent/handoff',
+      payload: { to: 'auto', sessionId: 'sess-A' },
+    })
+    expect(spawnFailed.statusCode).toBe(500)
+    expect(spawnFailed.json()).toMatchObject({
+      reason: 'spawn-failed',
+      previousSession: { sessionId: 'sess-A' },
+    })
+    expect(broker.getSession('run-spawn')).toBeNull()
+
+    const busy = await app.inject({
+      method: 'POST',
+      url: '/api/runs/run-busy/heal-agent/handoff',
+      payload: { to: 'codex', sessionId: 'sess-B' },
+    })
+    expect(busy.statusCode).toBe(409)
+    expect(busy.json()).toMatchObject({
+      reason: 'orchestrator-busy',
+      previousSession: { sessionId: 'sess-B' },
+    })
+    expect(broker.getSession('run-busy')).toBeNull()
+  })
+
   it('validates handoff target and 404s missing runs', async () => {
     writeRun('run-1', 'running')
     const { app } = await build()
