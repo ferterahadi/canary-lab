@@ -89,6 +89,22 @@ npx canary-lab ui --no-open
 
 `canary-lab init` scaffolds sample features: `example_todo_api`, `broken_todo_api`, `tricky_checkout_api`, and `flaky_orders_api`.
 
+## Set Up Codex or Claude
+
+To let Codex or Claude control Canary Lab from the agent chat:
+
+```bash
+npx canary-lab setup
+```
+
+Then restart Codex or Claude so it can discover the new Canary Lab tools.
+
+If the tools do not show up, refresh the setup and start a fresh agent session:
+
+```bash
+npx canary-lab setup --force
+```
+
 ## Feature Folders
 
 A feature lives under `features/<name>/` and contains:
