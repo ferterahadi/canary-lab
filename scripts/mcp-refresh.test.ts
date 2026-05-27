@@ -48,7 +48,7 @@ describe('refreshCanaryLabMcp', () => {
     expect(mocks.execFileSync).toHaveBeenCalledWith('claude', ['mcp', 'remove', 'canary-lab', '-s', 'user'], { stdio: 'ignore' })
     expect(mocks.execFileSync).toHaveBeenCalledWith(
       'claude',
-      ['mcp', 'add', '--scope', 'user', 'canary-lab', '--', EXEC, CLI, 'mcp'],
+      ['mcp', 'add', '--scope', 'user', 'canary-lab', '--', EXEC, CLI, 'mcp', '--profile', 'full'],
       { stdio: 'ignore' },
     )
     expect(JSON.parse(fs.readFileSync(desktopConfigPath, 'utf-8')).mcpServers['canary-lab'].command).toBe(EXEC)

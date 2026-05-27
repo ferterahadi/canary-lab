@@ -330,6 +330,36 @@ describe('EvaluationExportProvider', () => {
     expect(captured.value?.tasks).toEqual([])
   })
 
+  it('discovers externally created export tasks without a refresh', async () => {
+    vi.useFakeTimers()
+    const external = task({
+      taskId: 'external-task',
+      runId: 'run-external',
+      producer: 'external',
+      status: 'running',
+      createdAt: '2026-01-02T00:00:00.000Z',
+    })
+    vi.mocked(api.listEvaluationExportTasks)
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([external])
+
+    const captured = renderProbe()
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(captured.value?.tasks).toEqual([])
+
+    await act(async () => {
+      vi.advanceTimersByTime(3000)
+      await Promise.resolve()
+    })
+
+    expect(api.listEvaluationExportTasks).toHaveBeenCalledTimes(2)
+    expect(captured.value?.latestTask?.taskId).toBe('external-task')
+    expect(captured.value?.taskForRun('run-external')?.taskId).toBe('external-task')
+    expect(FakeWebSocket.instances.map((socket) => socket.url)).toContain('ws://test/ws/evaluation-exports/external-task')
+  })
+
   it('sorts remaining tasks by createdAt after dismissTask', async () => {
     const t1 = task({ taskId: 't1', runId: 'r1', status: 'completed', createdAt: '2026-01-01T00:00:00.000Z' })
     const t2 = task({ taskId: 't2', runId: 'r2', status: 'completed', createdAt: '2026-01-02T00:00:00.000Z' })

@@ -153,9 +153,9 @@ describe('MCP HTTP server (smoke)', () => {
       const body = res.json() as { ok: boolean; server: { name: string }; toolCount: number; profile: string; tools: string[] }
       expect(body.ok).toBe(true)
       expect(body.server.name).toBe('canary-lab')
-      expect(body.profile).toBe('repair')
-      expect(body.toolCount).toBe(REPAIR_TOOLS.length)
-      expect([...body.tools].sort()).toEqual(REPAIR_TOOLS)
+      expect(body.profile).toBe('full')
+      expect(body.toolCount).toBe(FULL_TOOLS.length)
+      expect([...body.tools].sort()).toEqual(FULL_TOOLS)
 
       const full = await app.inject({ method: 'GET', url: '/mcp/health?profile=full' })
       expect(full.statusCode).toBe(200)
@@ -218,7 +218,7 @@ describe('MCP HTTP server (smoke)', () => {
     }
   })
 
-  it('answers tools/list with the default repair profile and tools/call over the streamable HTTP transport', async () => {
+  it('answers tools/list with the default full profile and tools/call over the streamable HTTP transport', async () => {
     const projectRoot = path.resolve(__dirname, '..', '..', '..', 'templates', 'project')
     const { app } = await createServer({ projectRoot, ptyFactory: inertPtyFactory })
     let client: Client | null = null
@@ -228,7 +228,7 @@ describe('MCP HTTP server (smoke)', () => {
 
       const tools = await client.listTools()
       const names = tools.tools.map((t) => t.name).sort()
-      expect(names).toEqual(REPAIR_TOOLS)
+      expect(names).toEqual(FULL_TOOLS)
 
       // tools/call list_features — should return the templates/project scaffold.
       const result = await client.callTool({ name: 'list_features', arguments: {} })
@@ -386,7 +386,7 @@ describe('MCP HTTP server (smoke)', () => {
         runId: 'author-eval-run',
         feature: 'checkout_flow',
         startedAt: '2026-05-27T00:00:00.000Z',
-        status: 'passed',
+        status: 'failed',
         healCycles: 0,
         services: [],
       })
@@ -403,14 +403,20 @@ describe('MCP HTTP server (smoke)', () => {
       expect(exportBody).toMatchObject({
         task: { producer: 'external', status: 'running', language: 'English' },
         reportSchema: { archiveBase64: 'base64 encoded .zip, or submit files[] for Canary Lab to zip' },
+        nextSteps: expect.arrayContaining(['author evaluation report files', 'submit_external_evaluation_export']),
       })
 
-      await client.callTool({
+      const submittedExport = await client.callTool({
         name: 'submit_external_evaluation_export',
         arguments: {
           taskId: exportBody.task.taskId,
           files: [{ path: 'evaluation.md', content: '# Checkout evaluation\nGenerated externally.\n' }],
         },
+      })
+      expect(JSON.parse((submittedExport.content?.[0] as { text: string }).text)).toMatchObject({
+        status: 'completed',
+        downloadReady: true,
+        nextSteps: expect.arrayContaining(['download_evaluation_export']),
       })
       const fetchedExport = await client.callTool({
         name: 'get_evaluation_export',

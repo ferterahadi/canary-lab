@@ -255,7 +255,7 @@ export function isCanaryLabMcpProfile(value: string | undefined): value is Canar
 }
 
 export function normalizeCanaryLabMcpProfile(value: string | undefined): CanaryLabMcpProfile | null {
-  if (!value) return 'repair'
+  if (!value) return 'full'
   return isCanaryLabMcpProfile(value) ? value : null
 }
 
@@ -273,7 +273,7 @@ export function registerCanaryLabTools(
   deps: CanaryLabMcpDeps,
   opts: CanaryLabMcpToolOptions = {},
 ): void {
-  const profile = opts.profile ?? 'repair'
+  const profile = opts.profile ?? 'full'
   const defaultClientKind = opts.defaultClientKind ?? 'other'
   const clientKindInput = CLIENT_KIND.default(defaultClientKind)
   const enabled = new Set<CanaryLabMcpToolName>(TOOLS_BY_PROFILE[profile])
@@ -660,6 +660,7 @@ export function registerCanaryLabTools(
         projectRoot: deps.projectRoot,
       }),
       reportSchema: externalEvaluationReportSchema(),
+      nextSteps: ['author evaluation report files', 'submit_external_evaluation_export'],
     })
   })
 
@@ -686,7 +687,10 @@ export function registerCanaryLabTools(
         status: 'completed',
         downloadReady: true,
       })
-      return asJsonResult(evaluationExportTaskView(next!))
+      return asJsonResult({
+        ...evaluationExportTaskView(next!),
+        nextSteps: ['download_evaluation_export'],
+      })
     } catch (err) {
       return errorResult(err instanceof Error ? err.message : String(err))
     }
@@ -1324,6 +1328,7 @@ function externalEvaluationReportSchema(): Record<string, unknown> {
     ],
     requiredBehavior: [
       'Do not ask Canary Lab to rewrite or translate the report.',
+      'If the run failed or was aborted, preserve that status in the report instead of blocking the export.',
       'Submit the final report/archive through submit_external_evaluation_export.',
     ],
   }

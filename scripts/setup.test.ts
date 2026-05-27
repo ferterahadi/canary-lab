@@ -143,7 +143,7 @@ describe('setup', () => {
     expect(fs.existsSync(path.join(home, '.codex', 'skills', 'canary-lab', 'SKILL.md'))).toBe(true)
     expect(mocks.execFileSync).toHaveBeenCalledWith(
       'codex',
-      ['mcp', 'add', 'canary-lab', '--', '/usr/bin/node', '/opt/canary-lab/dist/scripts/cli.js', 'mcp'],
+      ['mcp', 'add', 'canary-lab', '--', '/usr/bin/node', '/opt/canary-lab/dist/scripts/cli.js', 'mcp', '--profile', 'full'],
       { stdio: 'ignore' },
     )
   })
@@ -164,7 +164,7 @@ describe('setup', () => {
     expect(fs.existsSync(path.join(home, '.claude', 'skills', 'canary-lab', 'SKILL.md'))).toBe(true)
     expect(mocks.execFileSync).toHaveBeenCalledWith(
       'claude',
-      ['mcp', 'add', '--scope', 'user', 'canary-lab', '--', '/usr/bin/node', '/opt/canary-lab/dist/scripts/cli.js', 'mcp'],
+      ['mcp', 'add', '--scope', 'user', 'canary-lab', '--', '/usr/bin/node', '/opt/canary-lab/dist/scripts/cli.js', 'mcp', '--profile', 'full'],
       { stdio: 'ignore' },
     )
   })
@@ -191,12 +191,12 @@ describe('setup', () => {
 
     expect(mocks.execFileSync).toHaveBeenCalledWith(
       'codex',
-      ['mcp', 'add', 'canary-lab', '--', '/usr/bin/node', '/opt/canary-lab/dist/scripts/cli.js', 'mcp'],
+      ['mcp', 'add', 'canary-lab', '--', '/usr/bin/node', '/opt/canary-lab/dist/scripts/cli.js', 'mcp', '--profile', 'full'],
       { stdio: 'ignore' },
     )
     expect(mocks.execFileSync).toHaveBeenCalledWith(
       'claude',
-      ['mcp', 'add', '--scope', 'user', 'canary-lab', '--', '/usr/bin/node', '/opt/canary-lab/dist/scripts/cli.js', 'mcp'],
+      ['mcp', 'add', '--scope', 'user', 'canary-lab', '--', '/usr/bin/node', '/opt/canary-lab/dist/scripts/cli.js', 'mcp', '--profile', 'full'],
       { stdio: 'ignore' },
     )
   })
@@ -218,7 +218,7 @@ describe('setup', () => {
 
     const cfg = JSON.parse(fs.readFileSync(desktopConfigPath, 'utf-8'))
     expect(cfg.mcpServers['canary-lab'].command).toBe('/usr/bin/node')
-    expect(cfg.mcpServers['canary-lab'].args).toEqual(['/opt/canary-lab/dist/scripts/cli.js', 'mcp'])
+    expect(cfg.mcpServers['canary-lab'].args).toEqual(['/opt/canary-lab/dist/scripts/cli.js', 'mcp', '--profile', 'full'])
     expect(cfg.mcpServers['canary-lab'].env.PATH).toContain('/usr/bin')
   })
 
