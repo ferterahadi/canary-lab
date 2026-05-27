@@ -33,6 +33,7 @@ import {
   getPlaywrightConfig,
   getAgentSession,
   getRunDetail,
+  getRunAudit,
   getVerificationTargets,
   listFeatures,
   listDrafts,
@@ -314,6 +315,14 @@ describe('api client', () => {
     const out = await getRunDetail('r1', { fetchImpl })
     expect(out).toEqual(detail)
     expect(fetchImpl).toHaveBeenCalledWith('/api/runs/r1', { method: 'GET' })
+  })
+
+  it('getRunAudit fetches the run audit trail by id', async () => {
+    const audit = { entries: [{ ts: 't', sessionId: null, clientKind: null, action: 'handoff' }] }
+    const fetchImpl = vi.fn().mockResolvedValue(ok(audit))
+    const out = await getRunAudit('r 1', { fetchImpl })
+    expect(out).toEqual(audit)
+    expect(fetchImpl).toHaveBeenCalledWith('/api/runs/r%201/audit', { method: 'GET' })
   })
 
   it('uses verification target and config endpoints with encoded feature names', async () => {

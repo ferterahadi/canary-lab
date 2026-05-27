@@ -220,31 +220,25 @@ const AUTHOR_TOOLS = [
   'apply_external_draft',
 ] as const satisfies readonly CanaryLabMcpToolName[]
 
-const FULL_TOOLS = [
-  ...AUTHOR_TOOLS,
-  'list_features',
-  'list_runs',
-  'get_run',
+// Tools that exist only in the `full` profile — everything else is composed
+// from the per-workflow profiles above.
+const FULL_ONLY_TOOLS = [
   'get_run_actions',
-  'list_verification_configs',
-  'get_verification_config',
-  'create_verification_config',
-  'update_verification_config',
-  'execute_verification',
-  'get_verification_result',
-  'get_heal_context',
-  'get_run_snapshot',
-  'start_run',
-  'pause_run',
-  'cancel_heal',
-  'abort_run',
   'claim_heal',
   'release_heal',
-  'heartbeat',
-  'wait_for_heal_task',
-  'signal_run',
-  'handoff_heal',
 ] as const satisfies readonly CanaryLabMcpToolName[]
+
+// `full` is the deduplicated union of every profile plus the full-only tools.
+// Defining it as a union means adding a tool to any profile surfaces it in
+// `full` automatically — no second edit, no drift, no duplicate entries.
+const FULL_TOOLS: readonly CanaryLabMcpToolName[] = Array.from(
+  new Set<CanaryLabMcpToolName>([
+    ...REPAIR_TOOLS,
+    ...VERIFY_TOOLS,
+    ...AUTHOR_TOOLS,
+    ...FULL_ONLY_TOOLS,
+  ]),
+)
 
 const TOOLS_BY_PROFILE: Record<CanaryLabMcpProfile, readonly CanaryLabMcpToolName[]> = {
   repair: REPAIR_TOOLS,
