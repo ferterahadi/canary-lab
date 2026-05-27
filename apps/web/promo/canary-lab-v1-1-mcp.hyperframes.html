@@ -1,0 +1,384 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Canary Lab v1.1.0 MCP Promo</title>
+  <style>
+    :root {
+      --bg-base: #0a0a0a;
+      --bg-surface: #141414;
+      --bg-elevated: #1c1c1c;
+      --bg-selected: #262626;
+      --border: #262626;
+      --border-strong: #3a3a3a;
+      --accent: #3b82f6;
+      --accent-strong: #60a5fa;
+      --success: #34d399;
+      --warning: #fbbf24;
+      --text: #fafafa;
+      --text-secondary: #a3a3a3;
+      --text-muted: #737373;
+      --font-sans: "Inter Tight", "Geist", ui-sans-serif, system-ui, sans-serif;
+      --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    html,
+    body {
+      margin: 0;
+      background: var(--bg-base);
+      color: var(--text);
+      font-family: var(--font-sans);
+    }
+    [data-composition-id="canary-lab-mcp-promo"] {
+      position: relative;
+      width: 1280px;
+      height: 440px;
+      overflow: hidden;
+      background:
+        linear-gradient(90deg, rgba(59, 130, 246, 0) 0%, rgba(59, 130, 246, 0.11) 52%, rgba(59, 130, 246, 0) 100%),
+        radial-gradient(circle at 78% 20%, rgba(59, 130, 246, 0.22), transparent 28%),
+        var(--bg-base);
+    }
+    [data-composition-id="canary-lab-mcp-promo"]::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background-image:
+        linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,0.025) 1px, transparent 1px);
+      background-size: 40px 40px;
+      opacity: 0.24;
+      mask-image: linear-gradient(90deg, transparent, #000 14%, #000 86%, transparent);
+    }
+    .shell {
+      position: absolute;
+      left: 58px;
+      right: 58px;
+      top: 24px;
+      height: 392px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: rgba(20, 20, 20, 0.88);
+      box-shadow: 0 24px 70px rgba(0, 0, 0, 0.44);
+      overflow: hidden;
+    }
+    .topbar {
+      position: absolute;
+      inset: 0 0 auto;
+      height: 48px;
+      display: none;
+      border-bottom: 1px solid var(--border);
+      background: var(--bg-surface);
+      align-items: center;
+      gap: 16px;
+      padding: 0 22px;
+      box-sizing: border-box;
+      font-size: 13px;
+      font-weight: 600;
+    }
+    .pulse {
+      width: 7px;
+      height: 7px;
+      border-radius: 999px;
+      background: var(--accent);
+      box-shadow: 0 0 18px rgba(59, 130, 246, 0.8);
+    }
+    .wordmark {
+      letter-spacing: -0.01em;
+    }
+    .topbar-meta {
+      color: var(--text-muted);
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 500;
+    }
+    .stage-title {
+      position: absolute;
+      left: 66px;
+      top: 76px;
+      width: 460px;
+      margin: 0;
+      font-size: 46px;
+      line-height: 0.94;
+      letter-spacing: -0.035em;
+      font-weight: 700;
+    }
+    .stage-subtitle {
+      position: absolute;
+      left: 68px;
+      top: 172px;
+      width: 410px;
+      margin: 0;
+      color: var(--text-secondary);
+      font-size: 17px;
+      line-height: 1.35;
+      letter-spacing: -0.01em;
+    }
+    .action-stack {
+      position: absolute;
+      left: 66px;
+      top: 220px;
+      width: 360px;
+      display: grid;
+      gap: 8px;
+    }
+    .action-row {
+      height: 46px;
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      background: var(--bg-elevated);
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 0 16px;
+      box-sizing: border-box;
+      color: var(--text-secondary);
+      font-size: 14px;
+      font-weight: 600;
+    }
+    .action-row.active {
+      border-color: color-mix(in srgb, var(--accent) 72%, var(--border));
+      background: color-mix(in srgb, var(--accent) 18%, var(--bg-elevated));
+      color: var(--text);
+    }
+    .action-icon {
+      width: 22px;
+      height: 22px;
+      border-radius: 6px;
+      background: var(--bg-selected);
+      display: grid;
+      place-items: center;
+      color: var(--accent-strong);
+      font-size: 14px;
+      font-family: var(--font-mono);
+    }
+    .agent-card {
+      position: absolute;
+      right: 34px;
+      top: 24px;
+      width: 548px;
+      height: 344px;
+      border: 1px solid var(--border-strong);
+      border-radius: 9px;
+      background: #101010;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.035);
+      overflow: hidden;
+    }
+    .agent-header {
+      position: absolute;
+      inset: 0 0 auto;
+      height: 42px;
+      border-bottom: 1px solid var(--border);
+      background: var(--bg-surface);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 18px;
+      box-sizing: border-box;
+      color: var(--text-secondary);
+      font-size: 12px;
+      font-weight: 600;
+    }
+    .agent-tabs {
+      display: flex;
+      gap: 8px;
+    }
+    .agent-tab {
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      padding: 4px 8px;
+      background: var(--bg-elevated);
+      color: var(--text);
+    }
+    .command {
+      position: absolute;
+      left: 26px;
+      right: 26px;
+      top: 68px;
+      height: 62px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--bg-elevated);
+      display: flex;
+      align-items: center;
+      padding: 0 24px;
+      box-sizing: border-box;
+      font-family: var(--font-mono);
+      font-size: 18px;
+      letter-spacing: -0.015em;
+      white-space: nowrap;
+    }
+    .slash {
+      color: var(--accent-strong);
+      font-weight: 700;
+    }
+    .command-text {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .cursor {
+      width: 7px;
+      height: 22px;
+      margin-left: 8px;
+      border-radius: 2px;
+      background: var(--accent);
+    }
+    .tool-list {
+      position: absolute;
+      left: 26px;
+      right: 26px;
+      top: 142px;
+      display: grid;
+      gap: 10px;
+    }
+    .tool-row {
+      height: 40px;
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      background: #151515;
+      display: grid;
+      grid-template-columns: 24px 1fr;
+      align-items: center;
+      gap: 12px;
+      padding: 0 16px;
+      box-sizing: border-box;
+      font-family: var(--font-mono);
+      font-size: 14px;
+      color: var(--text-secondary);
+    }
+    .tool-row strong {
+      color: var(--text);
+      font-weight: 600;
+    }
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      background: var(--text-muted);
+    }
+    .tool-row.done .status-dot { background: var(--success); box-shadow: 0 0 12px rgba(52, 211, 153, 0.42); }
+    .tool-row.active .status-dot { background: var(--accent); box-shadow: 0 0 12px rgba(59, 130, 246, 0.62); }
+    .tool-row.wait .status-dot { background: var(--warning); box-shadow: 0 0 12px rgba(251, 191, 36, 0.42); }
+    .tool-state {
+      display: none;
+      color: var(--text-muted);
+      font-family: var(--font-sans);
+      font-size: 12px;
+      font-weight: 600;
+    }
+    .result {
+      position: absolute;
+      left: 26px;
+      right: 26px;
+      bottom: 14px;
+      height: 38px;
+      border: 1px solid color-mix(in srgb, var(--accent) 56%, var(--border));
+      border-radius: 8px;
+      background: color-mix(in srgb, var(--accent) 13%, #121212);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 22px;
+      box-sizing: border-box;
+      color: var(--text);
+      font-size: 15px;
+      font-weight: 700;
+      letter-spacing: -0.015em;
+    }
+    .result small {
+      color: var(--text-secondary);
+      font-size: 11px;
+      font-weight: 600;
+      font-family: var(--font-mono);
+    }
+    .path {
+      position: absolute;
+      left: 452px;
+      top: 258px;
+      width: 120px;
+      height: 2px;
+      background: linear-gradient(90deg, transparent, var(--accent), transparent);
+      box-shadow: 0 0 18px rgba(59, 130, 246, 0.5);
+    }
+    .path-dot {
+      position: absolute;
+      left: 562px;
+      top: 249px;
+      width: 20px;
+      height: 20px;
+      border-radius: 999px;
+      background: var(--accent);
+      box-shadow: 0 0 24px rgba(59, 130, 246, 0.85);
+    }
+  </style>
+</head>
+<body>
+  <main data-composition-id="canary-lab-mcp-promo" data-width="1280" data-height="440" data-duration="16">
+    <section class="shell">
+      <div class="topbar">
+        <span class="pulse"></span>
+        <span class="wordmark">Canary Lab</span>
+        <span class="topbar-meta">MCP bridge live - 127.0.0.1:7421</span>
+      </div>
+
+      <h1 class="stage-title">Run Canary Lab from your agent.</h1>
+      <p class="stage-subtitle">Ask Codex or Claude Desktop to add tests, start runs, and export evaluations.</p>
+
+      <div class="action-stack">
+        <div class="action-row create active"><span class="action-icon">+</span><span>Add a feature test</span></div>
+        <div class="action-row run"><span class="action-icon">&gt;</span><span>Run selected test cases</span></div>
+        <div class="action-row export"><span class="action-icon">E</span><span>Export an evaluation</span></div>
+      </div>
+
+      <div class="path"></div>
+      <div class="path-dot"></div>
+
+      <section class="agent-card">
+        <header class="agent-header">
+          <span>Codex or Claude Desktop</span>
+          <span class="agent-tabs"><span class="agent-tab">Codex</span><span class="agent-tab">Claude</span></span>
+        </header>
+        <div class="command"><span class="slash">/canary-lab</span><span class="command-text">&nbsp;add checkout tests</span><span class="cursor"></span></div>
+        <div class="tool-list">
+          <div class="tool-row done"><span class="status-dot"></span><strong>connect_canary_lab</strong><span class="tool-state">ready</span></div>
+          <div class="tool-row active"><span class="status-dot"></span><strong>write_feature_doc</strong><span class="tool-state">drafting</span></div>
+          <div class="tool-row wait"><span class="status-dot"></span><strong>create_feature</strong><span class="tool-state">ready</span></div>
+        </div>
+        <div class="result"><span>Canary Lab handles the run over MCP.</span><small>MCP</small></div>
+      </section>
+    </section>
+  </main>
+  <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+  <script>
+    window.__timelines = window.__timelines || {};
+    const tl = gsap.timeline({ paused: true });
+    tl.from('.shell', { opacity: 0, y: 18, scale: 0.985, duration: 0.8, ease: 'power3.out', immediateRender: false }, 0);
+    tl.from('.stage-title', { opacity: 0, y: 28, duration: 0.75, ease: 'power3.out', immediateRender: false }, 0.35);
+    tl.from('.stage-subtitle', { opacity: 0, y: 18, duration: 0.55, ease: 'power3.out', immediateRender: false }, 0.65);
+    tl.from('.action-row', { opacity: 0, x: -18, stagger: 0.09, duration: 0.45, ease: 'power3.out', immediateRender: false }, 1.0);
+    tl.from('.agent-card', { opacity: 0, x: 34, duration: 0.75, ease: 'power3.out', immediateRender: false }, 1.25);
+    tl.from('.command', { opacity: 0, y: 16, duration: 0.45, ease: 'power3.out', immediateRender: false }, 1.8);
+    tl.from('.tool-row', { opacity: 0, y: 14, stagger: 0.16, duration: 0.42, ease: 'power3.out', immediateRender: false }, 2.35);
+    tl.from('.path', { opacity: 0, scaleX: 0, transformOrigin: 'left center', duration: 0.5, ease: 'power2.out', immediateRender: false }, 2.2);
+    tl.fromTo('.path-dot', { opacity: 0, x: 0 }, { opacity: 1, x: -120, duration: 1.2, ease: 'power2.inOut' }, 2.3);
+    tl.from('.result', { opacity: 0, y: 16, duration: 0.5, ease: 'power3.out', immediateRender: false }, 3.2);
+    tl.to('.create', { backgroundColor: '#1c1c1c', borderColor: '#262626', color: '#a3a3a3', duration: 0.25 }, 5.2);
+    tl.to('.run', { backgroundColor: 'rgba(59, 130, 246, 0.18)', borderColor: '#3b82f6', color: '#fafafa', duration: 0.25 }, 5.2);
+    tl.to('.command-text', { opacity: 0, y: -8, duration: 0.18 }, 5.15);
+    tl.set('.command-text', { textContent: ' run selected test cases', y: 8 }, 5.35);
+    tl.to('.command-text', { opacity: 1, y: 0, duration: 0.22 }, 5.38);
+    tl.set('.tool-row.active strong', { textContent: 'start_run' }, 5.35);
+    tl.set('.tool-row.wait strong', { textContent: 'wait_for_heal_task' }, 5.35);
+    tl.to('.run', { backgroundColor: '#1c1c1c', borderColor: '#262626', color: '#a3a3a3', duration: 0.25 }, 9.2);
+    tl.to('.export', { backgroundColor: 'rgba(59, 130, 246, 0.18)', borderColor: '#3b82f6', color: '#fafafa', duration: 0.25 }, 9.2);
+    tl.to('.command-text', { opacity: 0, y: -8, duration: 0.18 }, 9.15);
+    tl.set('.command-text', { textContent: ' export an evaluation', y: 8 }, 9.35);
+    tl.to('.command-text', { opacity: 1, y: 0, duration: 0.22 }, 9.38);
+    tl.set('.tool-row.active strong', { textContent: 'export_evaluation' }, 9.35);
+    tl.set('.tool-row.wait strong', { textContent: 'localized_output' }, 9.35);
+    window.__timelines['canary-lab-mcp-promo'] = tl;
+  </script>
+</body>
+</html>

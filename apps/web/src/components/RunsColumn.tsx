@@ -5,6 +5,7 @@ import { ApiError } from '../api/client'
 import type { RunIndexEntry } from '../api/types'
 import { formatDuration, durationBetween, shortTime } from '../lib/format'
 import { deriveRunViewModel, type RunViewModel } from '../lib/run-view-model'
+import { useMcpPromo } from '../state/McpPromoContext'
 import { useRuns } from '../state/RunsContext'
 import { RunStatusIndicator } from './RunStatusIndicator'
 import { VerificationDialog } from './VerificationDialog'
@@ -54,6 +55,7 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
   const [verifyDialogOpen, setVerifyDialogOpen] = useState(false)
   const [compact, setCompact] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
+  const { gatePromo } = useMcpPromo()
 
   // Single source of truth for action state — transient flags + per-run
   // errors come from the WS-backed RunsContext, not local state. Action
@@ -207,8 +209,10 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
                 runDisabled={Boolean(runDisabled)}
                 disabledReason={runDisabledReason}
                 onStartEnv={(env) => {
-                  onStartRun(env || undefined)
-                  setRunPopoverOpen(false)
+                  gatePromo('run-test', () => {
+                    onStartRun(env || undefined)
+                    setRunPopoverOpen(false)
+                  })
                 }}
               />
               <button
@@ -235,8 +239,10 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
                 runDisabled={Boolean(runDisabled)}
                 disabledReason={runDisabledReason}
                 onStartEnv={(env) => {
-                  onStartRun(env || undefined)
-                  setRunPopoverOpen(false)
+                  gatePromo('run-test', () => {
+                    onStartRun(env || undefined)
+                    setRunPopoverOpen(false)
+                  })
                 }}
               />
               <button

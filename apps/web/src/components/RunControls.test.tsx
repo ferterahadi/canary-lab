@@ -28,6 +28,11 @@ vi.mock('../state/EvaluationExportContext', () => ({
   })),
 }))
 
+const gatePromo = vi.fn((_action: string, continueAction: () => void) => continueAction())
+vi.mock('../state/McpPromoContext', () => ({
+  useMcpPromo: () => ({ gatePromo }),
+}))
+
 vi.mock('./AgentSessionView', () => ({
   AgentSessionView: () => <div>agent session</div>,
 }))
@@ -43,6 +48,7 @@ beforeEach(() => {
   container = document.createElement('div')
   document.body.appendChild(container)
   root = createRoot(container)
+  gatePromo.mockImplementation((_action: string, continueAction: () => void) => continueAction())
 })
 
 afterEach(() => {
@@ -55,6 +61,42 @@ afterEach(() => {
 })
 
 describe('run launch controls', () => {
+  it('gates a direct run through the MCP promo before starting', () => {
+    const onStartRun = vi.fn()
+    gatePromo.mockImplementationOnce(() => {})
+
+    act(() => {
+      root.render(
+        <RunsColumn
+          feature="alpha"
+          envs={[]}
+          runs={[]}
+          selectedRunId={null}
+          onSelectRun={() => {}}
+          onStartRun={onStartRun}
+          onStartVerification={async () => {}}
+        />,
+      )
+    })
+
+    const runButton = [...container.querySelectorAll('button')]
+      .find((button) => button.textContent?.trim() === 'Run')
+
+    act(() => {
+      runButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+
+    expect(gatePromo).toHaveBeenCalledWith('run-test', expect.any(Function))
+    expect(onStartRun).not.toHaveBeenCalled()
+
+    act(() => {
+      const continueAction = gatePromo.mock.calls[0][1] as () => void
+      continueAction()
+    })
+
+    expect(onStartRun).toHaveBeenCalledExactlyOnceWith(undefined)
+  })
+
   it('opens envset choices from Run and starts the chosen envset', () => {
     const onStartRun = vi.fn()
 
@@ -94,11 +136,58 @@ describe('run launch controls', () => {
     })
 
     expect(onStartRun).toHaveBeenCalledExactlyOnceWith('beta')
+    expect(gatePromo).toHaveBeenCalledWith('run-test', expect.any(Function))
     expect(document.body.querySelector('[role="menu"][data-run-launch-menu]')).toBeNull()
   })
 })
 
 describe('run overview', () => {
+  it('gates raw and localized evaluation exports through the MCP promo', async () => {
+    const { useRun } = await import('../state/RunsContext')
+    const { useEvaluationExports } = await import('../state/EvaluationExportContext')
+    const startExport = vi.fn()
+    vi.mocked(useEvaluationExports).mockReturnValue({ startExport } as ReturnType<typeof useEvaluationExports>)
+    vi.mocked(useRun).mockReturnValue({
+      detail: runDetail({ status: 'passed' }),
+      indexed: undefined,
+      transient: null,
+      status: 'passed',
+    })
+    gatePromo.mockImplementation((_action, _continueAction) => {})
+
+    await act(async () => {
+      root.render(<RunDetailColumn runId="run-1" />)
+    })
+
+    await act(async () => {
+      clickButton('Export Evaluation')
+    })
+    await act(async () => {
+      clickButton('Raw output')
+    })
+
+    expect(gatePromo).toHaveBeenCalledWith('export-evaluation', expect.any(Function))
+    expect(startExport).not.toHaveBeenCalled()
+
+    await act(async () => {
+      const continueAction = gatePromo.mock.calls.at(-1)?.[1] as () => void
+      continueAction()
+    })
+    expect(startExport).toHaveBeenCalledWith('run-1', 'raw')
+
+    await act(async () => {
+      clickButton('Export Evaluation')
+    })
+    await act(async () => {
+      clickButton('Localized output')
+    })
+    await act(async () => {
+      const continueAction = gatePromo.mock.calls.at(-1)?.[1] as () => void
+      continueAction()
+    })
+    expect(startExport).toHaveBeenLastCalledWith('run-1', 'localized')
+  })
+
   it('shows the envset recorded on the run manifest', async () => {
     const { useRun } = await import('../state/RunsContext')
     vi.mocked(useRun).mockReturnValue({
@@ -190,4 +279,11 @@ function runDetail(overrides: Partial<RunDetail['manifest']> = {}): RunDetail {
       failed: [],
     },
   }
+}
+
+function clickButton(label: string): void {
+  const button = [...document.body.querySelectorAll('button')]
+    .find((item) => item.textContent?.includes(label))
+  expect(button).toBeTruthy()
+  button?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
 }

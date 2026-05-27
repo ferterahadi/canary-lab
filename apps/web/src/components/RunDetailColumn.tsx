@@ -29,6 +29,7 @@ import {
 import { statusFromPlaybackResult, statusLabel, statusPillClassForStatus } from '../lib/test-step-status'
 import { useRun } from '../state/RunsContext'
 import { useEvaluationExports } from '../state/EvaluationExportContext'
+import { useMcpPromo } from '../state/McpPromoContext'
 import { deriveRunViewModel, type RunViewModel } from '../lib/run-view-model'
 import { RunStatusIndicator } from './RunStatusIndicator'
 import { PaneTerminal } from './PaneTerminal'
@@ -286,15 +287,14 @@ function RunOverviewTab({
   const [exportMenuOpen, setExportMenuOpen] = useState(false)
   const [exportError, setExportError] = useState(false)
   const { startExport } = useEvaluationExports()
+  const { gatePromo } = useMcpPromo()
   const handleExportEvaluation = useCallback(async (mode: EvaluationExportMode) => {
     setExportMenuOpen(false)
     setExportError(false)
-    try {
-      await startExport(manifest.runId, mode)
-    } catch {
-      setExportError(true)
-    }
-  }, [manifest.runId, startExport])
+    gatePromo('export-evaluation', () => {
+      void Promise.resolve(startExport(manifest.runId, mode)).catch(() => setExportError(true))
+    })
+  }, [gatePromo, manifest.runId, startExport])
 
   return (
     <div className="h-full overflow-y-auto scrollbar-thin p-4 text-sm">

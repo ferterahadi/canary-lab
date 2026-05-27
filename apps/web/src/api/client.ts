@@ -183,6 +183,26 @@ export function putPlaywrightConfig(
   )
 }
 
+export interface McpHealth {
+  ok: boolean
+  server: { name: string; version?: string }
+  profile: string
+  clientKind: string
+  toolCount: number
+  tools?: string[]
+  activeSessions: number
+  projectRoot: string
+}
+
+export function getMcpHealth(profile = 'repair', opts?: ClientOptions): Promise<McpHealth> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<McpHealth>(
+    `${baseUrl}/mcp/health?profile=${encodeURIComponent(profile)}`,
+    { method: 'GET' },
+    fetchImpl,
+  )
+}
+
 // ─── envsets ──────────────────────────────────────────────────────────────
 
 export interface EnvsetIndex {

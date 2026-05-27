@@ -102,6 +102,11 @@ describe('buildTimelineRows', () => {
     expect(rows[0]).toMatchObject({ source: 'external', headline: 'Frobnicate', severity: 'info' })
   })
 
+  it('leaves an empty unknown external action label empty', () => {
+    const rows = buildTimelineRows([], [audit({ ts: '2026-05-26T10:19:05.000Z', action: '', clientKind: 'other' })], { now: NOW })
+    expect(rows[0]).toMatchObject({ source: 'external', headline: '', severity: 'info' })
+  })
+
   it('leaves client label and detail null when the entry has no client or args', () => {
     const rows = buildTimelineRows([], [audit({ ts: '2026-05-26T10:19:05.000Z', action: 'claim' })], { now: NOW })
     expect(rows[0].clientLabel).toBeNull()
