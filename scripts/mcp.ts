@@ -16,6 +16,7 @@ import {
 import type { ExternalHealClientKind } from '../apps/web-server/lib/runtime/manifest'
 
 const DEFAULT_MCP_URL = 'http://127.0.0.1:7421/mcp'
+const DEFAULT_MCP_PROFILE: CanaryLabMcpProfile = 'full'
 const DEFAULT_UI_STARTUP_TIMEOUT_MS = 15_000
 const DEFAULT_UI_STARTUP_POLL_MS = 250
 
@@ -68,7 +69,7 @@ export async function doctor(url: string, opts: McpCommandOptions = {}): Promise
   const stderr = opts.stderr ?? process.stderr
   const stdout = opts.stdout ?? process.stdout
   const fetchFn = opts.fetch ?? fetch
-  const profile = opts.profile ?? 'repair'
+  const profile = opts.profile ?? DEFAULT_MCP_PROFILE
   const profileUrl = urlWithContext(url, profile, opts.clientKind ?? inferMcpClientKind() ?? 'other')
   if (!await ensureMcpServerReachable(url, opts)) return false
   try {
@@ -111,7 +112,7 @@ export async function bridge(url: string, opts: McpCommandOptions = {}): Promise
   const fetchFn = opts.fetch ?? fetch
   const profileUrl = urlWithContext(
     url,
-    opts.profile ?? 'repair',
+    opts.profile ?? DEFAULT_MCP_PROFILE,
     opts.clientKind ?? inferMcpClientKind() ?? 'other',
   )
   if (!await ensureMcpServerReachable(profileUrl, opts)) return false
@@ -247,7 +248,7 @@ function parseArgs(argv: string[]):
   | { ok: false; error: string } {
   let command: 'bridge' | 'doctor' = 'bridge'
   let url = DEFAULT_MCP_URL
-  let profile: CanaryLabMcpProfile = 'repair'
+  let profile: CanaryLabMcpProfile = DEFAULT_MCP_PROFILE
   let clientKind: ExternalHealClientKind | undefined
   let autoStartUi = true
   const args = [...argv]
@@ -324,7 +325,7 @@ function urlWithContext(
 function requiredToolsForProfile(profile: CanaryLabMcpProfile): string[] {
   if (profile === 'author') return ['create_feature', 'start_external_draft', 'start_external_evaluation_export']
   if (profile === 'verify') return ['execute_verification']
-  if (profile === 'full') return ['wait_for_heal_task', 'execute_verification']
+  if (profile === 'full') return ['wait_for_heal_task', 'start_external_evaluation_export', 'execute_verification']
   return ['wait_for_heal_task']
 }
 

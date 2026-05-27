@@ -55,7 +55,7 @@ Use the MCP `author` profile, or `full`, when the user asks to create a feature,
 
 ### Export an Evaluation
 
-1. After the relevant run is passing, call `start_external_evaluation_export` with the run id and requested language.
+1. After the relevant run is terminal (passed, failed, or aborted), call `start_external_evaluation_export` with the run id and requested language. If the user asks to export a failed or aborted run as-is, preserve that status in the report instead of trying to heal first.
 2. Use the returned schema to write the evaluation report or archive in this client.
 3. Call `submit_external_evaluation_export` with the generated files or archive.
 4. Use `get_evaluation_export`, `list_evaluation_exports`, or `download_evaluation_export` for status and download. Canary Lab stores the artifact, but it does not rewrite, translate, or generate the report with an internal agent for external exports.

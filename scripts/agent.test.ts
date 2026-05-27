@@ -11,7 +11,7 @@ describe('canary-lab agent install', () => {
     install('all', { homeDir: home, dryRun: true, log: (line) => lines.push(line) })
 
     expect(lines.join('\n')).toContain('[dry-run] copy Codex skill')
-    expect(lines.join('\n')).toContain('npx -y canary-lab mcp')
+    expect(lines.join('\n')).toContain('npx -y canary-lab mcp --profile full')
     expect(fs.existsSync(path.join(home, '.codex'))).toBe(false)
   })
 

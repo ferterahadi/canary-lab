@@ -47,11 +47,11 @@ export function resolveMcpInvocation(opts: {
   pathEnv?: string
 }): ResolvedMcpInvocation {
   if (isEphemeralNpxInstall(opts.cliPath)) {
-    return { command: 'npx', args: ['-y', `${SERVER_NAME}@latest`, 'mcp'] }
+    return { command: 'npx', args: ['-y', `${SERVER_NAME}@latest`, 'mcp', '--profile', 'full'] }
   }
   const invocation: ResolvedMcpInvocation = {
     command: opts.execPath,
-    args: [opts.cliPath, 'mcp'],
+    args: [opts.cliPath, 'mcp', '--profile', 'full'],
   }
   // GUI clients (Claude/Codex Desktop) launch servers with a minimal env that
   // often lacks the nvm/homebrew node dir, so embed an explicit PATH.

@@ -51,7 +51,7 @@ describe('registerCanaryLabMcp', () => {
     expect(mocks.execFileSync).toHaveBeenCalledWith('codex', ['mcp', 'get', 'canary-lab'], expect.anything())
     expect(mocks.execFileSync).toHaveBeenCalledWith(
       'codex',
-      ['mcp', 'add', 'canary-lab', '--', '/usr/bin/node', '/opt/canary-lab/dist/scripts/cli.js', 'mcp'],
+      ['mcp', 'add', 'canary-lab', '--', '/usr/bin/node', '/opt/canary-lab/dist/scripts/cli.js', 'mcp', '--profile', 'full'],
       { stdio: 'ignore' },
     )
     expect(lines).toContain('Codex MCP configured')
@@ -59,7 +59,7 @@ describe('registerCanaryLabMcp', () => {
 
   it('leaves matching Codex MCP config untouched', () => {
     const lines: string[] = []
-    cliAvailable('codex', 'canary-lab\n  command: /usr/bin/node\n  args: /opt/canary-lab/dist/scripts/cli.js mcp\n')
+    cliAvailable('codex', 'canary-lab\n  command: /usr/bin/node\n  args: /opt/canary-lab/dist/scripts/cli.js mcp --profile full\n')
 
     registerCanaryLabMcp('codex', {
       log: (line) => lines.push(line),
@@ -73,7 +73,21 @@ describe('registerCanaryLabMcp', () => {
 
   it('treats a legacy npx config as a conflict so upgrade can replace it', () => {
     const lines: string[] = []
-    cliAvailable('codex', 'canary-lab\n  command: npx\n  args: -y canary-lab mcp\n')
+    cliAvailable('codex', 'canary-lab\n  command: npx\n  args: -y canary-lab mcp --profile repair\n')
+
+    registerCanaryLabMcp('codex', {
+      log: (line) => lines.push(line),
+      execPath: '/usr/bin/node',
+      cliPath: '/opt/canary-lab/dist/scripts/cli.js',
+    })
+
+    expect(mocks.execFileSync).not.toHaveBeenCalledWith('codex', expect.arrayContaining(['add']), expect.anything())
+    expect(lines[0]).toContain('Codex MCP is already configured differently')
+  })
+
+  it('treats a no-profile absolute config as stale', () => {
+    const lines: string[] = []
+    cliAvailable('codex', 'canary-lab\n  command: /usr/bin/node\n  args: /opt/canary-lab/dist/scripts/cli.js mcp\n')
 
     registerCanaryLabMcp('codex', {
       log: (line) => lines.push(line),
@@ -109,7 +123,7 @@ describe('registerCanaryLabMcp', () => {
     expect(mocks.execFileSync).toHaveBeenCalledWith('codex', ['mcp', 'remove', 'canary-lab'], { stdio: 'ignore' })
     expect(mocks.execFileSync).toHaveBeenCalledWith(
       'codex',
-      ['mcp', 'add', 'canary-lab', '--', '/usr/bin/node', '/opt/canary-lab/dist/scripts/cli.js', 'mcp'],
+      ['mcp', 'add', 'canary-lab', '--', '/usr/bin/node', '/opt/canary-lab/dist/scripts/cli.js', 'mcp', '--profile', 'full'],
       { stdio: 'ignore' },
     )
     expect(lines).toContain('Codex MCP configured')
@@ -138,7 +152,7 @@ describe('registerCanaryLabMcp', () => {
 
     expect(mocks.execFileSync).toHaveBeenCalledWith(
       'claude',
-      ['mcp', 'add', '--scope', 'user', 'canary-lab', '--', '/usr/bin/node', '/opt/canary-lab/dist/scripts/cli.js', 'mcp'],
+      ['mcp', 'add', '--scope', 'user', 'canary-lab', '--', '/usr/bin/node', '/opt/canary-lab/dist/scripts/cli.js', 'mcp', '--profile', 'full'],
       { stdio: 'ignore' },
     )
     expect(lines).toContain('Claude MCP configured')
@@ -146,7 +160,7 @@ describe('registerCanaryLabMcp', () => {
 
   it('leaves matching Claude MCP config untouched', () => {
     const lines: string[] = []
-    cliAvailable('claude', 'canary-lab:\n  Type: stdio\n  Command: /usr/bin/node\n  Args: /opt/canary-lab/dist/scripts/cli.js mcp\n')
+    cliAvailable('claude', 'canary-lab:\n  Type: stdio\n  Command: /usr/bin/node\n  Args: /opt/canary-lab/dist/scripts/cli.js mcp --profile full\n')
 
     registerCanaryLabMcp('claude', {
       log: (line) => lines.push(line),
@@ -182,7 +196,7 @@ describe('registerCanaryLabMcp', () => {
     expect(mocks.execFileSync).toHaveBeenCalledWith('claude', ['mcp', 'remove', 'canary-lab', '-s', 'user'], { stdio: 'ignore' })
     expect(mocks.execFileSync).toHaveBeenCalledWith(
       'claude',
-      ['mcp', 'add', '--scope', 'user', 'canary-lab', '--', '/usr/bin/node', '/opt/canary-lab/dist/scripts/cli.js', 'mcp'],
+      ['mcp', 'add', '--scope', 'user', 'canary-lab', '--', '/usr/bin/node', '/opt/canary-lab/dist/scripts/cli.js', 'mcp', '--profile', 'full'],
       { stdio: 'ignore' },
     )
     expect(lines).toContain('Claude MCP configured')
@@ -200,7 +214,7 @@ describe('registerCanaryLabMcp', () => {
     })
 
     expect(lines).toEqual([
-      '[dry-run] configure Codex MCP: codex mcp add canary-lab -- /usr/bin/node /opt/canary-lab/dist/scripts/cli.js mcp',
+      '[dry-run] configure Codex MCP: codex mcp add canary-lab -- /usr/bin/node /opt/canary-lab/dist/scripts/cli.js mcp --profile full',
     ])
     expect(mocks.execFileSync).not.toHaveBeenCalledWith('codex', expect.arrayContaining(['add']), expect.anything())
     expect(mocks.execFileSync).not.toHaveBeenCalledWith('codex', expect.arrayContaining(['remove']), expect.anything())
@@ -234,7 +248,7 @@ describe('registerCanaryLabMcp refresh', () => {
     expect(mocks.execFileSync).toHaveBeenCalledWith('codex', ['mcp', 'remove', 'canary-lab'], { stdio: 'ignore' })
     expect(mocks.execFileSync).toHaveBeenCalledWith(
       'codex',
-      ['mcp', 'add', 'canary-lab', '--', '/usr/bin/node', '/opt/canary-lab/dist/scripts/cli.js', 'mcp'],
+      ['mcp', 'add', 'canary-lab', '--', '/usr/bin/node', '/opt/canary-lab/dist/scripts/cli.js', 'mcp', '--profile', 'full'],
       { stdio: 'ignore' },
     )
   })
@@ -258,7 +272,7 @@ describe('resolveMcpInvocation', () => {
       cliPath: '/opt/canary-lab/dist/scripts/cli.js',
     })).toEqual({
       command: '/usr/bin/node',
-      args: ['/opt/canary-lab/dist/scripts/cli.js', 'mcp'],
+      args: ['/opt/canary-lab/dist/scripts/cli.js', 'mcp', '--profile', 'full'],
     })
   })
 
@@ -269,7 +283,7 @@ describe('resolveMcpInvocation', () => {
       forGui: true,
     })
     expect(resolved.command).toBe('/Users/x/.nvm/versions/node/v20.20.2/bin/node')
-    expect(resolved.args).toEqual(['/opt/canary-lab/dist/scripts/cli.js', 'mcp'])
+    expect(resolved.args).toEqual(['/opt/canary-lab/dist/scripts/cli.js', 'mcp', '--profile', 'full'])
     expect(resolved.env?.PATH).toContain('/Users/x/.nvm/versions/node/v20.20.2/bin')
     expect(resolved.env?.PATH).toContain('/usr/bin')
   })
@@ -290,7 +304,7 @@ describe('resolveMcpInvocation', () => {
       cliPath: '/Users/x/.npm/_npx/abc123/node_modules/canary-lab/dist/scripts/cli.js',
     })).toEqual({
       command: 'npx',
-      args: ['-y', 'canary-lab@latest', 'mcp'],
+      args: ['-y', 'canary-lab@latest', 'mcp', '--profile', 'full'],
     })
   })
 
