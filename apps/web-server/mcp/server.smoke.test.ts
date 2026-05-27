@@ -150,11 +150,12 @@ describe('MCP HTTP server (smoke)', () => {
     try {
       const res = await app.inject({ method: 'GET', url: '/mcp/health' })
       expect(res.statusCode).toBe(200)
-      const body = res.json() as { ok: boolean; server: { name: string }; toolCount: number; profile: string }
+      const body = res.json() as { ok: boolean; server: { name: string }; toolCount: number; profile: string; tools: string[] }
       expect(body.ok).toBe(true)
       expect(body.server.name).toBe('canary-lab')
       expect(body.profile).toBe('repair')
       expect(body.toolCount).toBe(REPAIR_TOOLS.length)
+      expect([...body.tools].sort()).toEqual(REPAIR_TOOLS)
 
       const full = await app.inject({ method: 'GET', url: '/mcp/health?profile=full' })
       expect(full.statusCode).toBe(200)

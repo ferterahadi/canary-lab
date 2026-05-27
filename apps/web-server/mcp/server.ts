@@ -8,6 +8,7 @@ import type { ExternalHealBroker } from '../lib/external-heal-broker'
 import {
   normalizeCanaryLabMcpProfile,
   registerCanaryLabTools,
+  toolsForCanaryLabMcpProfile,
   type CanaryLabMcpDeps,
   type CanaryLabMcpProfile,
 } from './tools'
@@ -187,6 +188,7 @@ export async function registerMcpRoutes(
       profile: context.profile,
       clientKind: context.clientKind,
       toolCount: toolCounts[context.profile],
+      tools: toolsForCanaryLabMcpProfile(context.profile),
       activeSessions: transports.size,
       projectRoot: deps.projectRoot,
     }

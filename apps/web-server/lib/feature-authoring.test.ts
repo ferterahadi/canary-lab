@@ -502,6 +502,14 @@ describe('writeFeatureDoc', () => {
       .toEqual({ ok: false, error: 'relPath must end in .md or .markdown' })
   })
 
+  it('rejects an empty relPath', () => {
+    writeFeatureConfig('line_integration')
+    expect(writeFeatureDoc(ctx(), { feature: 'line_integration', relPath: null as never, content: 'x' }))
+      .toEqual({ ok: false, error: 'relPath required' })
+    expect(writeFeatureDoc(ctx(), { feature: 'line_integration', relPath: '   ', content: 'x' }))
+      .toEqual({ ok: false, error: 'relPath required' })
+  })
+
   it('rejects a path that escapes the docs directory', () => {
     const featureDir = writeFeatureConfig('line_integration')
     expect(writeFeatureDoc(ctx(), { feature: 'line_integration', relPath: '../escape.md', content: 'x' }))

@@ -27,6 +27,7 @@ import {
   getFeatureConfig,
   getFeatureConfigDoc,
   getFeatureTests,
+  getMcpHealth,
   getGitRemote,
   getRepoGitStatus,
   getWorkspaceGitStatus,
@@ -112,6 +113,23 @@ describe('api client', () => {
       status: 404,
       body: 'not found',
     })
+  })
+
+  it('getMcpHealth checks the MCP health endpoint with the selected profile', async () => {
+    const health = {
+      ok: true,
+      server: { name: 'canary-lab' },
+      profile: 'full',
+      clientKind: 'other',
+      toolCount: 42,
+      tools: ['start_run', 'wait_for_heal_task'],
+      activeSessions: 0,
+      projectRoot: '/workspace',
+    }
+    const fetchImpl = vi.fn().mockResolvedValue(ok(health))
+
+    await expect(getMcpHealth('full', { baseUrl: 'http://x', fetchImpl })).resolves.toEqual(health)
+    expect(fetchImpl).toHaveBeenCalledWith('http://x/mcp/health?profile=full', { method: 'GET' })
   })
 
   it('cancelEvaluationExportTask deletes the task endpoint', async () => {

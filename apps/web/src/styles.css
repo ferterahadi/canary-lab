@@ -258,56 +258,8 @@ body {
   opacity: 1;
 }
 
-/* Running indicator on a feature row — "Running" (green) or "Healing"
-   (amber), with a softly pulsing dot. Sits between the name and the cog and
-   composes with the selected-row background. */
-.cl-run-chip {
-  display: inline-flex;
-  align-items: center;
-  align-self: center;
-  flex: 0 0 auto;
-  gap: 0.3rem;
-  margin-right: 0.375rem;
-  padding: 0.1rem 0.45rem;
-  border-radius: 9999px;
-  border: 1px solid color-mix(in srgb, var(--success) 30%, var(--border-default));
-  background: color-mix(in srgb, var(--success) 12%, transparent);
-  color: color-mix(in srgb, var(--success) 82%, var(--text-primary));
-  font-size: 9.5px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  white-space: nowrap;
-}
-
-.cl-run-chip-dot {
-  --cl-run-pulse: var(--success);
-  width: 0.375rem;
-  height: 0.375rem;
-  border-radius: 9999px;
-  background: var(--cl-run-pulse);
-  animation: cl-run-pulse 1.6s ease-out infinite;
-}
-
-.cl-run-chip-healing {
-  border-color: color-mix(in srgb, var(--warning) 32%, var(--border-default));
-  background: color-mix(in srgb, var(--warning) 12%, transparent);
-  color: color-mix(in srgb, var(--warning) 84%, var(--text-primary));
-}
-
-.cl-run-chip-healing .cl-run-chip-dot {
-  --cl-run-pulse: var(--warning);
-}
-
-@keyframes cl-run-pulse {
-  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--cl-run-pulse) 45%, transparent); }
-  70% { box-shadow: 0 0 0 5px transparent; }
-  100% { box-shadow: 0 0 0 0 transparent; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .cl-run-chip-dot { animation: none; }
-}
+/* Active-run state is shown by highlighting the whole feature row, not a
+   chip — see .cl-list-row-running / .cl-list-row-healing below. */
 
 .numeric-input::-webkit-outer-spin-button,
 .numeric-input::-webkit-inner-spin-button {
@@ -597,6 +549,74 @@ body {
   background: var(--bg-selected);
 }
 
+/* Active-run highlight on the whole row — blue while running, yellow while
+   healing. Declared after the selected/hover rules so an in-flight run wins
+   over the grey selected background at equal specificity. A glossy band sweeps
+   across (::after) to signal the run is live; it falls back to a calm flat
+   tint under prefers-reduced-motion. */
+.cl-list-row-running {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+.cl-list-row-running:hover {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+}
+.cl-list-row-healing {
+  background: color-mix(in srgb, var(--warning) 18%, transparent);
+}
+.cl-list-row-healing:hover {
+  background: color-mix(in srgb, var(--warning) 24%, transparent);
+}
+/* The moving shine rides the row's border, not the interior: a conic-gradient
+   glint is masked to a thin ring and rotated around the rounded edge via the
+   registered --cl-edge-angle. The flat tint above stays put underneath. */
+@property --cl-edge-angle {
+  syntax: '<angle>';
+  initial-value: 0deg;
+  inherits: false;
+}
+.cl-list-row-running::after,
+.cl-list-row-healing::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 0.5px;
+  pointer-events: none;
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+          mask-composite: exclude;
+  animation: cl-edge-beam 2.4s linear infinite;
+}
+.cl-list-row-running::after {
+  background: conic-gradient(
+    from var(--cl-edge-angle),
+    transparent 0%,
+    transparent 62%,
+    color-mix(in srgb, var(--accent) 60%, transparent) 76%,
+    color-mix(in srgb, white 75%, transparent) 84%,
+    color-mix(in srgb, var(--accent) 60%, transparent) 92%,
+    transparent 100%
+  );
+}
+.cl-list-row-healing::after {
+  background: conic-gradient(
+    from var(--cl-edge-angle),
+    transparent 0%,
+    transparent 62%,
+    color-mix(in srgb, var(--warning) 62%, transparent) 76%,
+    color-mix(in srgb, white 75%, transparent) 84%,
+    color-mix(in srgb, var(--warning) 62%, transparent) 92%,
+    transparent 100%
+  );
+}
+@keyframes cl-edge-beam {
+  to { --cl-edge-angle: 360deg; }
+}
+/* The edge beam intentionally keeps animating under prefers-reduced-motion —
+   deliberate product decision, so there is no reduced-motion gate here. */
+
 /* Subtle count chip — mono numeral on a soft fill. */
 .cl-count-chip {
   display: inline-flex;
@@ -701,6 +721,82 @@ body {
   border-radius: var(--radius-xl);
   box-shadow: var(--shadow-popover);
   animation: fm-fade-up 180ms ease-out;
+}
+
+.cl-mcp-promo-modal {
+  width: min(820px, calc(100vw - 2rem));
+  max-height: 88vh;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+
+.cl-mcp-promo-backdrop {
+  padding-block: 6vh;
+  padding-inline: 1rem;
+}
+
+.cl-mcp-promo-video-wrap {
+  flex: 0 0 auto;
+  aspect-ratio: 1280 / 440;
+  background: #050505;
+  border-bottom: 1px solid var(--border-default);
+}
+
+.cl-mcp-promo-video {
+  aspect-ratio: 1280 / 440;
+  height: auto;
+  display: block;
+  width: 100%;
+  background: #050505;
+  object-fit: contain;
+}
+
+.cl-mcp-promo-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 1rem 1.25rem 1.1rem;
+}
+
+.cl-mcp-promo-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-top: 1.25rem;
+}
+
+.cl-mcp-promo-close {
+  position: absolute;
+  top: 0.75rem;
+  right: 0.75rem;
+  z-index: 2;
+  display: grid;
+  height: 2rem;
+  width: 2rem;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--border-default) 72%, var(--text-primary));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-overlay) 86%, transparent);
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  font-weight: 700;
+  line-height: 1;
+  box-shadow: var(--shadow-popover);
+  transition: border-color 120ms ease, color 120ms ease, background 120ms ease;
+}
+
+.cl-mcp-promo-close:hover {
+  border-color: var(--border-focus);
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+}
+
+.cl-mcp-promo-close:focus-visible {
+  border-color: var(--border-focus);
+  box-shadow: 0 0 0 3px var(--accent-soft), var(--shadow-popover);
+  outline: none;
 }
 
 .cl-verify-modal {
