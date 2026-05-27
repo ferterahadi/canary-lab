@@ -222,7 +222,6 @@ function McpHealthBadge() {
           lastCheckedLabel={lastCheckedLabel}
           checkMessage={checkMessage}
           onSelectProfile={setSelectedProfile}
-          onTest={() => { void testConnection(selectedProfile) }}
         />,
         document.body,
       )}
@@ -237,7 +236,6 @@ const McpHealthMenu = forwardRef<HTMLDivElement, {
   lastCheckedLabel: string | null
   checkMessage: string | null
   onSelectProfile: (profile: McpProfile) => void
-  onTest: () => void
 }>(function McpHealthMenu({
   health,
   position,
@@ -245,7 +243,6 @@ const McpHealthMenu = forwardRef<HTMLDivElement, {
   lastCheckedLabel,
   checkMessage,
   onSelectProfile,
-  onTest,
 }, ref) {
   const tools = health.tools ?? []
   const workspaceName = workspaceNameFromRoot(health.projectRoot)
@@ -349,19 +346,11 @@ const McpHealthMenu = forwardRef<HTMLDivElement, {
           </div>
         )}
       </div>
-      <div className="border-t p-2" style={{ borderColor: 'var(--border-default)' }}>
-        <div className="mb-2 flex items-center justify-between gap-2 px-1 text-[10px]" style={{ color: 'var(--text-muted)' }}>
+      <div className="border-t px-3 py-2" style={{ borderColor: 'var(--border-default)' }}>
+        <div className="flex items-center justify-between gap-2 text-[10px]" style={{ color: 'var(--text-muted)' }}>
           <span className="truncate">{checkMessage ?? 'Checks the selected profile health endpoint'}</span>
           {lastCheckedLabel && <span className="shrink-0">{lastCheckedLabel}</span>}
         </div>
-        <button
-          type="button"
-          onClick={onTest}
-          className="cl-button flex w-full items-center justify-center px-3 py-1.5 text-xs disabled:cursor-wait disabled:opacity-60"
-          disabled={health.state === 'checking'}
-        >
-          {health.state === 'checking' ? 'Checking health' : 'Check health'}
-        </button>
       </div>
     </div>
   )

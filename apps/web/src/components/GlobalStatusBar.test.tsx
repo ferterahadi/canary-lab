@@ -71,6 +71,7 @@ describe('GlobalStatusBar', () => {
     expect(container.textContent).toContain('ready')
     expect(container.textContent).not.toContain('12 tools')
     expect(container.textContent).not.toContain('Check health')
+    expect(container.textContent).not.toContain('Test MCP')
     expect(api.getMcpHealth).toHaveBeenCalledWith('repair')
 
     const indicator = [...container.querySelectorAll('button')]
@@ -102,15 +103,12 @@ describe('GlobalStatusBar', () => {
     expect(menu?.textContent).toContain('start_run')
     expect(menu?.textContent).toContain('wait_for_heal_task')
     expect(menu?.textContent).toContain('Health OK at')
+    expect(menu?.textContent).not.toContain('Check health')
+    expect(menu?.textContent).not.toContain('Test MCP')
 
     const testButton = [...document.body.querySelectorAll('button')]
       .find((button) => button.textContent?.trim() === 'Check health')
-    expect(testButton).toBeTruthy()
-
-    await act(async () => {
-      testButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-    })
-    expect(api.getMcpHealth).toHaveBeenCalledTimes(2)
+    expect(testButton).toBeFalsy()
 
     const authorButton = [...document.body.querySelectorAll('button')]
       .find((button) => button.textContent?.includes('Author'))
