@@ -410,6 +410,12 @@ describe('extractAllSlices / extractLogsForTest', () => {
     expect(extractLogsForTest('a', [log])['svc-api']).toBe('x')
   })
 
+  it('strips PTY control codes from extracted slices', () => {
+    const log = path.join(tmpDir, 'svc-api.log')
+    fs.writeFileSync(log, '<foo>\x1b[32m201 Created\x1b[0m\x1b[20;5Htail</foo>')
+    expect(extractAllSlices(['foo'], [log]).get('foo')!['svc-api']).toBe('201 Createdtail')
+  })
+
   it('skips missing service logs gracefully', () => {
     const slices = extractAllSlices(['x'], [path.join(tmpDir, 'missing.log')])
     expect(slices.get('x')).toEqual({})
@@ -882,6 +888,13 @@ describe('stripAnsi', () => {
   it('strips ESC-prefixed and bracket-only color sequences', () => {
     expect(stripAnsi('\x1b[31mred\x1b[0m')).toBe('red')
     expect(stripAnsi('[2mdim[22m')).toBe('dim')
+  })
+
+  it('strips non-color control codes: cursor moves, erases, charset, OSC', () => {
+    expect(stripAnsi('a\x1b[20;10Hb')).toBe('ab')        // cursor position
+    expect(stripAnsi('\x1b[2Jcleared')).toBe('cleared')  // erase screen
+    expect(stripAnsi('\x1b(B\x1b[mhi')).toBe('hi')       // charset + reset
+    expect(stripAnsi('\x1b]0;title\x07x')).toBe('x')     // OSC window title
   })
 })
 

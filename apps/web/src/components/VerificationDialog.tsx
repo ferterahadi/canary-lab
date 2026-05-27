@@ -47,11 +47,6 @@ export function VerificationDialog({
     [targetUrls, targets],
   )
 
-  const summaryItems = useMemo(() => [
-    { label: 'Configs', value: String(configs.length) },
-    { label: 'Targets', value: String(targets.length) },
-  ], [configs.length, targets.length])
-
   useEffect(() => {
     let cancelled = false
     setLoading(true)
@@ -191,115 +186,104 @@ export function VerificationDialog({
             <CloseIcon size={14} />
           </button>
         </div>
-        <div className="grid grid-cols-2 border-b" style={{ borderColor: 'var(--border-default)' }}>
-          {summaryItems.map((item) => (
-            <div key={item.label} className="min-w-0 border-r px-5 py-3 last:border-r-0 sm:px-6" style={{ borderColor: 'var(--border-default)' }}>
-              <div className="cl-rubric">{item.label}</div>
-              <div className="mt-1 truncate text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
-                {item.value}
-              </div>
-            </div>
-          ))}
-        </div>
         <div className="min-h-0 flex-1 overflow-y-auto text-sm scrollbar-thin">
           {loading ? (
             <div className="px-6 py-10 text-xs" style={{ color: 'var(--text-muted)' }}>Loading verification settings...</div>
           ) : (
-            <div className="grid gap-0 lg:grid-cols-[230px_minmax(0,1fr)]">
-              <section className="cl-verify-rail border-b p-4 lg:border-r lg:border-b-0" style={{ borderColor: 'var(--border-default)' }}>
-                <div className="mb-3 flex items-center justify-between gap-2">
-                  <SectionTitle>Saved configurations</SectionTitle>
-                  <button type="button" onClick={startNewConfig} className="cl-button px-2 py-1 text-[11px]">
-                    New
-                  </button>
+            <div className="space-y-4 p-4 sm:p-5">
+              <section className="cl-verify-section">
+                <SectionTitle>Start from</SectionTitle>
+                <p className="mt-1 text-[11px]" style={{ color: 'var(--text-muted)' }}>Reuse a saved setup, or start fresh.</p>
+                <select
+                  value={selectedConfigId ?? ''}
+                  onChange={(e) => {
+                    const id = e.target.value
+                    if (!id) {
+                      startNewConfig()
+                      return
+                    }
+                    const config = configs.find((item) => item.id === id)
+                    if (config) selectConfig(config)
+                  }}
+                  className="cl-input mt-2 w-full px-3 py-2 text-xs"
+                >
+                  <option value="">New configuration</option>
+                  {configs.map((config) => (
+                    <option key={config.id} value={config.id}>{config.name}</option>
+                  ))}
+                </select>
+              </section>
+
+              <section className="cl-verify-section">
+                <div className="flex items-center justify-between gap-3">
+                  <SectionTitle>Services</SectionTitle>
+                  <span className="cl-verify-count">{configuredTargetCount} configured</span>
                 </div>
-                {configs.length === 0 ? (
-                  <div className="cl-verify-empty rounded-md border border-dashed px-3 py-3 text-xs" style={{ borderColor: 'var(--border-default)', color: 'var(--text-muted)' }}>
-                    No saved configurations.
-                  </div>
+                <p className="mt-1 text-[11px]" style={{ color: 'var(--text-muted)' }}>Health-check URL for each service.</p>
+                {targets.length === 0 ? (
+                  <div className="cl-verify-empty mt-2 rounded-md border border-dashed px-3 py-4 text-xs" style={{ borderColor: 'var(--border-default)', color: 'var(--text-muted)' }}>No services discovered.</div>
                 ) : (
-                  <div className="space-y-2">
-                    {configs.map((config) => (
-                      <VerificationConfigOption
-                        key={config.id}
-                        config={config}
-                        active={config.id === selectedConfigId}
-                        onSelect={() => selectConfig(config)}
-                      />
+                  <div className="mt-2 space-y-2">
+                    {targets.map((target) => (
+                      <div key={target.id} className="cl-verify-target-row">
+                        <div className="min-w-0">
+                          <div className="flex min-w-0 items-center gap-2">
+                            <span className="cl-verify-service-dot" aria-hidden="true" />
+                            <div className="truncate text-xs font-semibold" style={{ color: 'var(--text-primary)' }} title={target.name}>{target.name}</div>
+                          </div>
+                        </div>
+                        <input
+                          value={targetUrls[target.id] ?? ''}
+                          onChange={(e) => setTargetUrls((prev) => ({ ...prev, [target.id]: e.target.value }))}
+                          placeholder="https://service.example.com/health"
+                          className="cl-input min-w-0 px-3 py-2 text-xs"
+                          style={{ fontFamily: 'var(--font-mono)' }}
+                        />
+                      </div>
                     ))}
                   </div>
                 )}
               </section>
 
-              <div className="space-y-5 p-4 sm:p-5">
-                <section className="cl-verify-section">
-                  <div className="flex items-center justify-between gap-3">
-                    <SectionTitle>Health checks</SectionTitle>
-                    <span className="cl-verify-count">{configuredTargetCount} configured</span>
-                  </div>
-                  {targets.length === 0 ? (
-                    <div className="cl-verify-empty mt-2 rounded-md border border-dashed px-3 py-4 text-xs" style={{ borderColor: 'var(--border-default)', color: 'var(--text-muted)' }}>No health checks discovered.</div>
-                  ) : (
-                    <div className="mt-2 space-y-2">
-                      {targets.map((target) => (
-                        <div key={target.id} className="cl-verify-target-row">
-                          <div className="min-w-0">
-                            <div className="flex min-w-0 items-center gap-2">
-                              <span className="cl-verify-service-dot" aria-hidden="true" />
-                              <div className="truncate text-xs font-semibold" style={{ color: 'var(--text-primary)' }} title={target.name}>{target.name}</div>
-                            </div>
-                          </div>
-                          <input
-                            value={targetUrls[target.id] ?? ''}
-                            onChange={(e) => setTargetUrls((prev) => ({ ...prev, [target.id]: e.target.value }))}
-                            placeholder="https://service.example.com/health"
-                            className="cl-input min-w-0 px-3 py-2 text-xs"
-                            style={{ fontFamily: 'var(--font-mono)' }}
-                          />
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </section>
+              <section className="cl-verify-section">
+                <SectionTitle>Playwright</SectionTitle>
+                <p className="mt-1 text-[11px]" style={{ color: 'var(--text-muted)' }}>Which env file to run tests with.</p>
+                <select
+                  value={playwrightEnvsetId}
+                  onChange={(e) => setPlaywrightEnvsetId(e.target.value)}
+                  className="cl-input mt-2 w-full px-3 py-2 text-xs"
+                  disabled={envs.length === 0}
+                >
+                  {envs.length === 0 ? (
+                    <option value="">No envsets configured</option>
+                  ) : envs.map((env) => (
+                    <option key={env} value={env}>{env}</option>
+                  ))}
+                </select>
+              </section>
 
-                <div className="grid gap-4 md:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">
-                  <section className="cl-verify-section">
-                    <SectionTitle>Playwright configuration</SectionTitle>
-                    <select
-                      value={playwrightEnvsetId}
-                      onChange={(e) => setPlaywrightEnvsetId(e.target.value)}
-                      className="cl-input mt-2 w-full px-3 py-2 text-xs"
-                      disabled={envs.length === 0}
-                    >
-                      {envs.length === 0 ? (
-                        <option value="">No envsets configured</option>
-                      ) : envs.map((env) => (
-                        <option key={env} value={env}>{env}</option>
-                      ))}
-                    </select>
-                  </section>
-
-                  <section className="cl-verify-section">
-                    <SectionTitle>Save configuration</SectionTitle>
-                    <div className="mt-2 flex gap-2">
-                      <input
-                        value={name}
-                        onChange={(e) => setName(e.target.value)}
-                        placeholder="Beta, Staging, Production..."
-                        className="cl-input min-w-0 flex-1 px-3 py-2 text-xs"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => void save()}
-                        disabled={saving}
-                        className="cl-button px-3 py-2 text-xs disabled:cursor-wait disabled:opacity-60"
-                      >
-                        {saving ? 'Saving...' : selectedConfigId ? 'Update' : 'Save'}
-                      </button>
-                    </div>
-                  </section>
+              <section className="cl-verify-section">
+                <SectionTitle>Save this setup</SectionTitle>
+                <p className="mt-1 text-[11px]" style={{ color: 'var(--text-muted)' }}>
+                  {selectedConfigId ? 'Updates the loaded configuration.' : 'Name it to reuse later (optional).'}
+                </p>
+                <div className="mt-2 flex gap-2">
+                  <input
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder="Beta, Staging, Production..."
+                    className="cl-input min-w-0 flex-1 px-3 py-2 text-xs"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => void save()}
+                    disabled={saving}
+                    className="cl-button px-3 py-2 text-xs disabled:cursor-wait disabled:opacity-60"
+                  >
+                    {saving ? 'Saving...' : selectedConfigId ? 'Update' : 'Save'}
+                  </button>
                 </div>
-              </div>
+              </section>
             </div>
           )}
           {error && (
@@ -331,33 +315,6 @@ export function VerificationDialog({
         </div>
       </div>
     </div>
-  )
-}
-
-function VerificationConfigOption({
-  config,
-  active,
-  onSelect,
-}: {
-  config: VerificationConfig
-  active: boolean
-  onSelect: () => void
-}) {
-  const targetCount = Object.keys(config.targetUrls).length
-  const targetLabel = `${targetCount} ${targetCount === 1 ? 'target' : 'targets'}`
-
-  return (
-    <button
-      type="button"
-      onClick={onSelect}
-      className={`cl-verify-config-option w-full text-left ${active ? 'cl-verify-config-option-active' : ''}`}
-    >
-      <span className="block truncate text-xs font-semibold">{config.name}</span>
-      <span className="mt-1 flex min-w-0 items-center justify-between gap-2 text-[11px]">
-        <span className="truncate" style={{ fontFamily: 'var(--font-mono)' }}>{config.playwrightEnvsetId}</span>
-        <span>{targetLabel}</span>
-      </span>
-    </button>
   )
 }
 
