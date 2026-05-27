@@ -17,6 +17,7 @@ import {
 import { CSS } from '@dnd-kit/utilities'
 import type { DraftRecord, PlanStep } from '../../api/types'
 import { AgentSessionView } from '../AgentSessionView'
+import { ExternalDraftAgentPanel } from '../ExternalDraftAgentPanel'
 import {
   removeStep,
   parsePlanStepMarkdown,
@@ -104,33 +105,39 @@ export function PlanReviewStep({ draft, onAccept, onReject, onRetry, onCancelGen
       <div className={bodyClassName}>
         <div className={`mx-auto max-w-3xl ${status === 'planning' ? 'flex h-full min-h-0 flex-col gap-4' : 'space-y-5'}`}>
           {status === 'planning' && (
-            <>
-              <div
-                className="flex items-center justify-between gap-3 p-3"
-                style={{
-                  border: '1px solid var(--border-default)',
-                  background: 'var(--bg-overlay)',
-                  color: 'var(--text-secondary)',
-                  borderRadius: 6,
-                  fontFamily: 'var(--font-mono)',
-                  fontSize: 11.5,
-                }}
-              >
-                <span>Agent is drafting the test plan…</span>
-                <button
-                  type="button"
-                  onClick={onCancelGeneration}
-                  disabled={acting}
-                  className="cl-button px-2 py-1 disabled:opacity-50"
-                  style={{ color: 'var(--danger)', borderColor: 'var(--danger)' }}
-                >
-                  {acting ? 'Stopping…' : 'Stop generation'}
-                </button>
-              </div>
+            draft.source === 'external' ? (
               <div className="cl-frame flex min-h-0 flex-1 flex-col overflow-hidden">
-                <AgentSessionView source={{ kind: 'draft', draftId: draft.draftId, stage: 'planning', live: true }} />
+                <ExternalDraftAgentPanel draft={draft} stageView="planning" />
               </div>
-            </>
+            ) : (
+              <>
+                <div
+                  className="flex items-center justify-between gap-3 p-3"
+                  style={{
+                    border: '1px solid var(--border-default)',
+                    background: 'var(--bg-overlay)',
+                    color: 'var(--text-secondary)',
+                    borderRadius: 6,
+                    fontFamily: 'var(--font-mono)',
+                    fontSize: 11.5,
+                  }}
+                >
+                  <span>Agent is drafting the test plan…</span>
+                  <button
+                    type="button"
+                    onClick={onCancelGeneration}
+                    disabled={acting}
+                    className="cl-button px-2 py-1 disabled:opacity-50"
+                    style={{ color: 'var(--danger)', borderColor: 'var(--danger)' }}
+                  >
+                    {acting ? 'Stopping…' : 'Stop generation'}
+                  </button>
+                </div>
+                <div className="cl-frame flex min-h-0 flex-1 flex-col overflow-hidden">
+                  <AgentSessionView source={{ kind: 'draft', draftId: draft.draftId, stage: 'planning', live: true }} />
+                </div>
+              </>
+            )
           )}
 
           {status === 'error' && (
@@ -164,9 +171,15 @@ export function PlanReviewStep({ draft, onAccept, onReject, onRetry, onCancelGen
                 <div className="mb-2 font-semibold">Generation stopped.</div>
                 <div className="text-[11px] opacity-90">{draft.errorMessage ?? 'Generation cancelled by user'}</div>
               </div>
-              <div className="cl-frame flex min-h-[24rem] max-h-[min(70vh,44rem)] flex-col overflow-hidden">
-                <AgentSessionView source={{ kind: 'draft', draftId: draft.draftId, stage: 'planning' }} />
-              </div>
+              {draft.source === 'external' ? (
+                <div className="cl-frame flex min-h-[24rem] max-h-[min(70vh,44rem)] flex-col overflow-hidden">
+                  <ExternalDraftAgentPanel draft={draft} stageView="planning" />
+                </div>
+              ) : (
+                <div className="cl-frame flex min-h-[24rem] max-h-[min(70vh,44rem)] flex-col overflow-hidden">
+                  <AgentSessionView source={{ kind: 'draft', draftId: draft.draftId, stage: 'planning' }} />
+                </div>
+              )}
             </>
           )}
 

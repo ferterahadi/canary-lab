@@ -364,6 +364,19 @@ export interface CreateDraftResponse {
   status: DraftStatus
 }
 
+export interface AuditEntry {
+  ts: string
+  sessionId: string | null
+  clientKind: ExternalHealClientKind | null
+  action: string
+  args?: Record<string, unknown>
+  result?: Record<string, unknown>
+}
+
+export interface AuditList {
+  entries: AuditEntry[]
+}
+
 export interface JournalEntry {
   iteration: number | null
   timestamp: string | null

@@ -3,6 +3,7 @@
 // Production callers use the default (the global `fetch`).
 
 import type {
+  AuditList,
   Feature,
   FeatureTests,
   RunIndexEntry,
@@ -540,6 +541,15 @@ export function getRunDetail(runId: string, opts?: ClientOptions): Promise<RunDe
   const { baseUrl, fetchImpl } = defaultOpts(opts)
   return request<RunDetail>(
     `${baseUrl}/api/runs/${encodeURIComponent(runId)}`,
+    { method: 'GET' },
+    fetchImpl,
+  )
+}
+
+export function getRunAudit(runId: string, opts?: ClientOptions): Promise<AuditList> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<AuditList>(
+    `${baseUrl}/api/runs/${encodeURIComponent(runId)}/audit`,
     { method: 'GET' },
     fetchImpl,
   )

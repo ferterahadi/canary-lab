@@ -99,6 +99,24 @@ export interface CanaryLabMcpDeps {
     feature: string,
     input: ResolveVerificationInput,
   ) => Promise<{ runId: string }>
+  /** PUT /api/features/:name/envsets/:env/:slot — overwrites a slot file's
+   *  parsed entries. Provided as a dep so MCP `write_envset` can reuse the
+   *  REST handler's path-traversal and feature-resolution checks. */
+  writeEnvsetSlot?: (
+    feature: string,
+    env: string,
+    slot: string,
+    entries: Array<{ key: string; value: string }>,
+  ) => Promise<{ path: string; entries: Array<{ key: string; value: string }>; unparsedLines: number[] }>
+  /** POST /api/runs/:runId/heal-agent/handoff — swap heal mode away from
+   *  external. Mirrors the REST handler so MCP `handoff_heal` doesn't
+   *  re-implement the broker + restart wiring. */
+  handoffHeal?: (
+    runId: string,
+    to: 'auto' | 'claude' | 'codex' | 'manual',
+    sessionId: string | undefined,
+    guidance: string | undefined,
+  ) => Promise<{ statusCode: number; body: unknown }>
 }
 
 const CLIENT_KIND = z.enum(['claude-cli', 'claude-desktop', 'codex-cli', 'codex-desktop', 'other'])
@@ -126,6 +144,7 @@ export type CanaryLabMcpToolName =
   | 'create_feature'
   | 'get_feature_envset_summary'
   | 'capture_feature_env_files'
+  | 'write_envset'
   | 'delete_feature'
   | 'get_feature_repo_status'
   | 'checkout_feature_repo_branch'
@@ -148,6 +167,7 @@ export type CanaryLabMcpToolName =
   | 'heartbeat'
   | 'wait_for_heal_task'
   | 'signal_run'
+  | 'handoff_heal'
 
 const REPAIR_TOOLS = [
   'list_features',
@@ -162,6 +182,7 @@ const REPAIR_TOOLS = [
   'pause_run',
   'cancel_heal',
   'abort_run',
+  'handoff_heal',
 ] as const satisfies readonly CanaryLabMcpToolName[]
 
 const VERIFY_TOOLS = [
@@ -184,6 +205,7 @@ const AUTHOR_TOOLS = [
   'create_feature',
   'get_feature_envset_summary',
   'capture_feature_env_files',
+  'write_envset',
   'delete_feature',
   'get_feature_repo_status',
   'checkout_feature_repo_branch',
@@ -221,6 +243,7 @@ const FULL_TOOLS = [
   'heartbeat',
   'wait_for_heal_task',
   'signal_run',
+  'handoff_heal',
 ] as const satisfies readonly CanaryLabMcpToolName[]
 
 const TOOLS_BY_PROFILE: Record<CanaryLabMcpProfile, readonly CanaryLabMcpToolName[]> = {
@@ -516,6 +539,26 @@ export function registerCanaryLabTools(
     try {
       const result = captureFeatureEnvFiles({ projectRoot: deps.projectRoot, featuresDir: deps.featuresDir }, { feature, sources: sources as EnvFileSource[] })
       return result.ok ? asJsonResult(result) : errorResult(result.error)
+    } catch (err) {
+      return errorResult(err instanceof Error ? err.message : String(err))
+    }
+  })
+
+  registerTool('write_envset', {
+    description: 'Overwrite an envset slot file with the supplied key/value entries. Destructive — replaces existing keys and drops unparseable lines. Use capture_feature_env_files to bulk-copy from a source file instead.',
+    inputSchema: {
+      feature: z.string(),
+      env: z.string().describe('Envset folder name, e.g. local or staging.'),
+      slot: z.string().describe('Slot filename inside the envset, e.g. api.env or application.properties.'),
+      entries: z.array(z.object({ key: z.string(), value: z.string() })).describe('Replacement key/value pairs. Empty array clears the file.'),
+      confirm: z.literal(true).describe('Must be true. Guards against accidental envset overwrites.'),
+    },
+    annotations: { destructiveHint: true, idempotentHint: true },
+  }, async ({ feature, env, slot, entries }) => {
+    if (!deps.writeEnvsetSlot) return errorResult('writeEnvsetSlot dependency is not configured')
+    try {
+      const result = await deps.writeEnvsetSlot(feature, env, slot, entries)
+      return asJsonResult({ feature, env, slot, path: result.path, entries: result.entries, unparsedLines: result.unparsedLines })
     } catch (err) {
       return errorResult(err instanceof Error ? err.message : String(err))
     }
@@ -1066,6 +1109,34 @@ export function registerCanaryLabTools(
     }
     deps.broker.bumpCycle(runId)
     return asJsonResult({ accepted: true, kind, path: signal.path })
+  })
+
+  registerTool('handoff_heal', {
+    description:
+      'Hand off heal duty from this external session to a local heal mode (auto/claude/codex/manual). For active runs only manual is supported (the orchestrator cannot hot-swap to a local agent); for failed/aborted runs auto/claude/codex restart the heal with a fresh agent.',
+    inputSchema: {
+      runId: z.string(),
+      to: z.enum(['auto', 'claude', 'codex', 'manual']),
+      session_id: z.string().optional().describe('External heal session id. Required when the run holds an external claim and the caller is not the broker holder.'),
+      guidance: z.string().optional().describe('Optional context passed to the restarted local heal agent. Ignored for to=manual.'),
+      confirm: z.literal(true).describe('Must be true. Guards against accidental handoffs.'),
+    },
+    annotations: { destructiveHint: true, idempotentHint: false },
+  }, async ({ runId, to, session_id, guidance }) => {
+    if (!deps.handoffHeal) return errorResult('handoffHeal dependency is not configured')
+    try {
+      const result = await deps.handoffHeal(runId, to, session_id, guidance)
+      if (result.statusCode >= 200 && result.statusCode < 300) {
+        return asJsonResult(result.body)
+      }
+      const body = result.body
+      const message = body && typeof body === 'object' && 'reason' in body
+        ? `${(body as { reason: string }).reason}${'message' in body ? `: ${(body as { message: string }).message}` : ''}`
+        : typeof body === 'string' ? body : `handoff failed (${result.statusCode})`
+      return errorResult(message)
+    } catch (err) {
+      return errorResult(err instanceof Error ? err.message : String(err))
+    }
   })
 }
 

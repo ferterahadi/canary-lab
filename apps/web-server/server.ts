@@ -241,10 +241,14 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
   })
   await app.register(projectConfigRoutes, { projectRoot: opts.projectRoot })
   await app.register(journalRoutes, { logsDir, journalPath })
-  await app.register(externalHealRoutes, {
+  // `restartLocalHeal` deferred until after the runs route declares its
+  // production restartHeal closure — defined below and threaded back in via
+  // a setter-style hook on the route deps.
+  const externalHealDeps: Parameters<typeof externalHealRoutes>[1] = {
     store: runStore,
     broker: externalHealBroker,
-  })
+  }
+  await app.register(externalHealRoutes, externalHealDeps)
 
   // Wizard route deps. Production: real claude -p via node-pty + on-demand
   // PaneBroker per draft so the WebSocket route can stream live agent output.
@@ -733,7 +737,17 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
         })
       return { ok: true as const, mode: 'remaining' as const }
     },
-    restartHeal: async (runId: string, text: string) => {
+    restartHeal: restartLocalHealClosure,
+  })
+  // Re-export the local-heal restart closure to the external-heal handoff
+  // route now that it's defined. The route captures `deps.restartLocalHeal`
+  // by reference at request time, so this late-bind is safe.
+  externalHealDeps.restartLocalHeal = (runId, guidance) => restartLocalHealClosure(runId, guidance)
+  // Inline definition below — extracted out of the runsRoutes deps object so
+  // both runs (agent-input → restartHeal) and external-heal (handoff) paths
+  // can share the same orchestrator-construction code without duplicating it.
+  // The function body matches the previous inline definition exactly.
+  async function restartLocalHealClosure(runId: string, text: string): Promise<{ ok: true } | { ok: false; reason: 'run-not-found' | 'not-restartable' | 'manual-mode' | 'spawn-failed' }> {
       const detail = runStore.get(runId)
       if (!detail) return { ok: false, reason: 'run-not-found' as const }
       const manifest = detail.manifest
@@ -838,8 +852,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
           registry.delete(orch.runId)
         })
       return { ok: true as const }
-    },
-  })
+  }
   await app.register(paneStreamRoutes, {
     registry,
     brokerFor: (runId) => brokers.get(runId) ?? null,
@@ -892,6 +905,32 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
         throw new Error(`execute_verification failed (${resp.statusCode}): ${message}`)
       }
       return JSON.parse(resp.payload) as { runId: string }
+    },
+    writeEnvsetSlot: async (feature, env, slot, entries) => {
+      const resp = await app.inject({
+        method: 'PUT',
+        url: `/api/features/${encodeURIComponent(feature)}/envsets/${encodeURIComponent(env)}/${encodeURIComponent(slot)}`,
+        payload: { entries },
+      })
+      const body = (() => { try { return JSON.parse(resp.payload) } catch { return resp.payload } })()
+      if (resp.statusCode !== 200 && resp.statusCode !== 201) {
+        const message = typeof body === 'object' && body && 'error' in body ? String((body as { error: unknown }).error) : String(body)
+        throw new Error(`write_envset failed (${resp.statusCode}): ${message}`)
+      }
+      return body as { path: string; entries: Array<{ key: string; value: string }>; unparsedLines: number[] }
+    },
+    handoffHeal: async (runId, to, sessionId, guidance) => {
+      const resp = await app.inject({
+        method: 'POST',
+        url: `/api/runs/${encodeURIComponent(runId)}/heal-agent/handoff`,
+        payload: {
+          to,
+          ...(sessionId ? { sessionId } : {}),
+          ...(guidance ? { guidance } : {}),
+        },
+      })
+      const body = (() => { try { return JSON.parse(resp.payload) } catch { return resp.payload } })()
+      return { statusCode: resp.statusCode, body }
     },
 	  })
 

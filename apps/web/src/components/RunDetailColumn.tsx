@@ -30,6 +30,7 @@ import { RunStatusIndicator } from './RunStatusIndicator'
 import { PaneTerminal } from './PaneTerminal'
 import { AgentSessionView } from './AgentSessionView'
 import { ExternalHealPanel } from './ExternalHealPanel'
+import { ActivityTab } from './ActivityTab'
 import { JournalTab } from './JournalTab'
 import { ManualHealBanner } from './ManualHealBanner'
 import {
@@ -37,7 +38,7 @@ import {
   isTerminalRunStatus as isSharedTerminalRunStatus,
 } from '../../../../shared/run-state'
 
-type Tab = 'overview' | 'run-logs' | 'services' | 'playwright' | 'agent' | 'journal'
+type Tab = 'overview' | 'run-logs' | 'services' | 'playwright' | 'agent' | 'journal' | 'activity'
 type PlaywrightView = 'terminal' | 'playback'
 
 export function RunDetailColumn({
@@ -151,6 +152,7 @@ export function RunDetailColumn({
           <TabButton active={tab === 'playwright'} onClick={() => setTab('playwright')}>Playwright</TabButton>
           {!isVerify && <TabButton active={tab === 'agent'} onClick={() => setTab('agent')}>Heal agent</TabButton>}
           {!isVerify && <TabButton active={tab === 'journal'} onClick={() => setTab('journal')}>Journal</TabButton>}
+          {!isVerify && <TabButton active={tab === 'activity'} onClick={() => setTab('activity')}>Activity</TabButton>}
         </nav>
       </header>
       <div className="flex-1 min-h-0 overflow-hidden mt-2">
@@ -238,6 +240,9 @@ export function RunDetailColumn({
         </div>}
         {!isVerify && tab === 'journal' && (
           <JournalTab feature={m.feature} runId={m.runId} />
+        )}
+        {!isVerify && tab === 'activity' && (
+          <ActivityTab runId={m.runId} runStatus={m.status} />
         )}
       </div>
     </div>

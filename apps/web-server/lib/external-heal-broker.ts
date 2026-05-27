@@ -154,6 +154,25 @@ export class ExternalHealBroker {
     return { released: true }
   }
 
+  /** Server-driven release for the handoff endpoint: drop the claim and flip
+   *  `healMode` to the new mode in one patch. Unlike `release`, this does not
+   *  require a sessionId match — the route layer enforces ownership before
+   *  calling this. Audited as `handoff` with the target mode in args. */
+  transferTo(runId: string, toMode: 'auto' | 'manual'): { transferred: boolean; previousSession: ExternalHealSession | null } {
+    const existing = this.sessions.get(runId) ?? null
+    if (existing) this.sessions.delete(runId)
+    this.deps.patchManifest(runId, { externalHealSession: undefined, healMode: toMode })
+    this.deps.emit({ kind: 'external-claim-changed', runId })
+    this.deps.audit(runId, {
+      ts: new Date(this.deps.now()).toISOString(),
+      sessionId: existing?.sessionId ?? null,
+      clientKind: existing?.clientKind ?? null,
+      action: 'handoff',
+      args: { to: toMode },
+    })
+    return { transferred: true, previousSession: existing }
+  }
+
   /** Update heartbeat + status on the active session. Does not emit unless the
    *  connection status actually transitions (e.g. disconnected → connected). */
   heartbeat(

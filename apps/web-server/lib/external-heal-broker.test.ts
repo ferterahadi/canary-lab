@@ -394,6 +394,53 @@ describe('ExternalHealBroker.assertOwnership', () => {
   })
 })
 
+describe('ExternalHealBroker.transferTo', () => {
+  it('releases the active claim and patches healMode in one go', () => {
+    const { deps, captured } = makeDeps()
+    const broker = new ExternalHealBroker(deps)
+    broker.claim('run-1', { sessionId: 'sess-A', clientKind: 'claude-desktop' })
+    captured.manifestPatches.length = 0
+    captured.events.length = 0
+    captured.audit.length = 0
+
+    const res = broker.transferTo('run-1', 'manual')
+
+    expect(res.transferred).toBe(true)
+    expect(res.previousSession?.sessionId).toBe('sess-A')
+    expect(broker.getSession('run-1')).toBeNull()
+    expect(captured.manifestPatches).toEqual([
+      { runId: 'run-1', externalHealSession: undefined, healMode: 'manual' },
+    ])
+    expect(captured.events.map((e) => e.kind)).toEqual(['external-claim-changed'])
+    expect(captured.audit).toHaveLength(1)
+    expect(captured.audit[0].entry).toMatchObject({
+      action: 'handoff',
+      args: { to: 'manual' },
+      sessionId: 'sess-A',
+      clientKind: 'claude-desktop',
+    })
+  })
+
+  it('still patches healMode when there is no active claim', () => {
+    const { deps, captured } = makeDeps()
+    const broker = new ExternalHealBroker(deps)
+
+    const res = broker.transferTo('run-1', 'auto')
+
+    expect(res.transferred).toBe(true)
+    expect(res.previousSession).toBeNull()
+    expect(captured.manifestPatches).toEqual([
+      { runId: 'run-1', externalHealSession: undefined, healMode: 'auto' },
+    ])
+    expect(captured.audit[0].entry).toMatchObject({
+      action: 'handoff',
+      args: { to: 'auto' },
+      sessionId: null,
+      clientKind: null,
+    })
+  })
+})
+
 describe('ExternalHealBroker.rehydrate and listClaims', () => {
   it('rehydrates persisted sessions and exposes the current claim list', () => {
     const { deps } = makeDeps()
