@@ -77,6 +77,7 @@ const AUTHOR_TOOLS = uniqueSorted([
   'submit_external_evaluation_export',
   'update_external_draft_stage',
   'write_envset',
+  'write_feature_doc',
 ])
 
 const FULL_TOOLS = uniqueSorted([

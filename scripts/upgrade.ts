@@ -11,6 +11,7 @@ import {
   type MigrationReport,
 } from './upgrade-migration'
 import { refreshInstalled as refreshInstalledAgentIntegrations } from './agent'
+import { refreshCanaryLabMcp } from './mcp-refresh'
 import { upsertWorkspace } from '../shared/runtime/workspace-registry'
 
 const MARKER_START = '<!-- managed:canary-lab:start -->'
@@ -324,6 +325,18 @@ export async function main(
     homeDir: extras.agentHomeDir ?? process.env.CANARY_LAB_AGENT_HOME,
     log: (msg) => log(`  ${msg}`, opts),
   })
+
+  // Re-point already-configured MCP clients at this install so a legacy
+  // `npx -y canary-lab mcp` entry or a stale path self-heals. Best-effort:
+  // never let an MCP CLI hiccup abort the upgrade.
+  try {
+    refreshCanaryLabMcp({
+      homeDir: extras.agentHomeDir ?? process.env.CANARY_LAB_AGENT_HOME,
+      log: (msg) => log(`  ${msg}`, opts),
+    })
+  } catch {
+    /* MCP refresh is best-effort */
+  }
 
   if (updated > 0) {
     log(`\n  Canary Lab: upgraded ${updated} managed file${updated === 1 ? '' : 's'}.`, opts)

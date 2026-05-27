@@ -31,6 +31,7 @@ import {
   deleteFeature,
   getFeatureEnvsetSummary,
   getFeatureRepoStatus,
+  writeFeatureDoc,
   type EnvFileSource,
 } from '../lib/feature-authoring'
 import {
@@ -142,6 +143,7 @@ export type CanaryLabMcpToolName =
   | 'execute_verification'
   | 'get_verification_result'
   | 'create_feature'
+  | 'write_feature_doc'
   | 'get_feature_envset_summary'
   | 'capture_feature_env_files'
   | 'write_envset'
@@ -203,6 +205,7 @@ const AUTHOR_TOOLS = [
   'get_run',
   'get_run_snapshot',
   'create_feature',
+  'write_feature_doc',
   'get_feature_envset_summary',
   'capture_feature_env_files',
   'write_envset',
@@ -505,6 +508,23 @@ export function registerCanaryLabTools(
     } catch (err) {
       return errorResult(err instanceof Error ? err.message : String(err))
     }
+  })
+
+  registerTool('write_feature_doc', {
+    description:
+      'Write a prose doc (distilled session, plan, notes) into a feature\'s docs/ directory — the home for feature-scoped documentation. Create-or-replace: pick a descriptive relPath (e.g. "2026-05-28-line-integration-notes.md"); re-writing the same path overwrites. Markdown only (.md/.markdown). Use this for "add this plan/distillation to feature <name>".',
+    inputSchema: {
+      feature: z.string().describe('Existing feature name (from list_features).'),
+      relPath: z.string().describe('Path relative to the feature docs/ dir, e.g. "notes.md" or "sessions/2026-05-28.md". A leading "docs/" is optional. Must end in .md or .markdown.'),
+      content: z.string().describe('Markdown document body.'),
+    },
+  }, async ({ feature, relPath, content }) => {
+    const result = writeFeatureDoc(
+      { projectRoot: deps.projectRoot, featuresDir: deps.featuresDir },
+      { feature, relPath, content },
+    )
+    if (!result.ok) return errorResult(result.error)
+    return asJsonResult({ written: true, path: result.writtenPath, relativePath: result.relativePath })
   })
 
   registerTool('get_feature_envset_summary', {

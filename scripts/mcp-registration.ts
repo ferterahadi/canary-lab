@@ -1,29 +1,71 @@
 import { execFileSync } from 'child_process'
+import path from 'path'
 
 export type McpRegistrationTarget = 'codex' | 'claude'
+
+export interface ResolvedMcpInvocation {
+  command: string
+  args: string[]
+  env?: Record<string, string>
+}
 
 export interface McpRegistrationOptions {
   dryRun?: boolean
   force?: boolean
   log?: (msg: string) => void
+  /** Node binary used to launch the bridge. Defaults to the running node. */
+  execPath?: string
+  /** Absolute path to the installed `cli.js`. Defaults to this build's sibling. */
+  cliPath?: string
+  /** Re-point an already-configured client only; never add to a client that
+   *  has no canary-lab entry, and heal a stale/legacy entry without prompting. */
+  refreshOnly?: boolean
 }
 
 const SERVER_NAME = 'canary-lab'
-const CODEX_ADD_ARGS = ['mcp', 'add', SERVER_NAME, '--', 'npx', '-y', 'canary-lab', 'mcp']
-const CODEX_REMOVE_ARGS = ['mcp', 'remove', SERVER_NAME]
-const CLAUDE_ADD_ARGS = [
-  'mcp',
-  'add',
-  '--scope',
-  'user',
-  SERVER_NAME,
-  '--',
-  'npx',
-  '-y',
-  'canary-lab',
-  'mcp',
-]
-const CLAUDE_REMOVE_ARGS = ['mcp', 'remove', SERVER_NAME, '-s', 'user']
+
+// After build, dist/scripts/mcp-registration.js sits next to cli.js, so the
+// running install can hand clients an absolute path to the exact version that
+// ran `setup` — no npx version resolution, no PATH dependence, no skew with
+// whatever npm `latest` happens to be.
+export function resolveCliPath(): string {
+  return path.join(__dirname, 'cli.js')
+}
+
+// npx installs land in a content-hashed `_npx` cache dir that npm garbage
+// collects. Pinning a client config to that path would rot, so for an
+// ephemeral install we register the portable `npx canary-lab@latest` form
+// instead (which also auto-follows future publishes).
+export function isEphemeralNpxInstall(cliPath: string): boolean {
+  return cliPath.split(/[\\/]/).includes('_npx')
+}
+
+export function resolveMcpInvocation(opts: {
+  execPath: string
+  cliPath: string
+  forGui?: boolean
+  pathEnv?: string
+}): ResolvedMcpInvocation {
+  if (isEphemeralNpxInstall(opts.cliPath)) {
+    return { command: 'npx', args: ['-y', `${SERVER_NAME}@latest`, 'mcp'] }
+  }
+  const invocation: ResolvedMcpInvocation = {
+    command: opts.execPath,
+    args: [opts.cliPath, 'mcp'],
+  }
+  // GUI clients (Claude/Codex Desktop) launch servers with a minimal env that
+  // often lacks the nvm/homebrew node dir, so embed an explicit PATH.
+  if (opts.forGui) {
+    invocation.env = { PATH: opts.pathEnv ?? defaultGuiPath(opts.execPath) }
+  }
+  return invocation
+}
+
+function defaultGuiPath(execPath: string): string {
+  const nodeDir = path.dirname(execPath)
+  const standard = ['/opt/homebrew/bin', '/usr/local/bin', '/usr/bin', '/bin', '/usr/sbin', '/sbin']
+  return [nodeDir, ...standard.filter((dir) => dir !== nodeDir)].join(':')
+}
 
 export function registerCanaryLabMcp(
   target: McpRegistrationTarget,
@@ -38,49 +80,60 @@ export function registerCanaryLabMcp(
     return
   }
 
+  const invocation = resolveMcpInvocation({
+    execPath: opts.execPath ?? process.execPath,
+    cliPath: opts.cliPath ?? resolveCliPath(),
+  })
+  const addArgs = addArgsFor(target, invocation)
+
   if (opts.dryRun) {
-    log(`[dry-run] configure ${label} MCP: ${renderCommand(command, addArgsFor(target))}`)
+    log(`[dry-run] configure ${label} MCP: ${renderCommand(command, addArgs)}`)
     return
   }
 
-  const current = getExistingConfig(target)
+  const current = getExistingConfig(target, invocation)
   if (current.status === 'expected') {
     log(`${label} MCP already configured`)
     return
   }
 
+  if (current.status === 'missing' && opts.refreshOnly) {
+    return
+  }
+
   if (current.status === 'conflict') {
-    if (!opts.force) {
+    if (!opts.force && !opts.refreshOnly) {
       log(`${label} MCP is already configured differently. Rerun \`npx canary-lab setup --force\` to replace it.`)
       return
     }
     execFileSync(command, removeArgsFor(target), { stdio: 'ignore' })
   }
 
-  execFileSync(command, addArgsFor(target), { stdio: 'ignore' })
+  execFileSync(command, addArgs, { stdio: 'ignore' })
   log(`${label} MCP configured`)
 }
 
-function getExistingConfig(target: McpRegistrationTarget): { status: 'missing' | 'expected' | 'conflict' } {
+function getExistingConfig(
+  target: McpRegistrationTarget,
+  invocation: ResolvedMcpInvocation,
+): { status: 'missing' | 'expected' | 'conflict' } {
   try {
     const output = execFileSync(target, ['mcp', 'get', SERVER_NAME], {
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'pipe'],
     })
-    return expectedConfig(target, output) ? { status: 'expected' } : { status: 'conflict' }
+    return expectedConfig(output, invocation) ? { status: 'expected' } : { status: 'conflict' }
   } catch {
     return { status: 'missing' }
   }
 }
 
-function expectedConfig(target: McpRegistrationTarget, output: string): boolean {
-  if (target === 'codex') {
-    return /\bcommand:\s*npx\b/.test(output) &&
-      /\bargs:\s*-y\s+canary-lab\s+mcp\b/.test(output)
-  }
-  return /\bType:\s*stdio\b/i.test(output) &&
-    /\bCommand:\s*npx\b/i.test(output) &&
-    /\bArgs:\s*-y\s+canary-lab\s+mcp\b/i.test(output)
+// The registered command is now machine-specific (absolute node + cli.js), so
+// match the live `mcp get` output against the invocation we would write rather
+// than a fixed string. A legacy `npx -y canary-lab mcp` config therefore reads
+// as a conflict and is replaced on `setup --force` / `upgrade`.
+function expectedConfig(output: string, invocation: ResolvedMcpInvocation): boolean {
+  return output.includes(invocation.command) && output.includes(invocation.args.join(' '))
 }
 
 function commandAvailable(command: string): boolean {
@@ -93,12 +146,17 @@ function commandAvailable(command: string): boolean {
   }
 }
 
-function addArgsFor(target: McpRegistrationTarget): string[] {
-  return target === 'codex' ? CODEX_ADD_ARGS : CLAUDE_ADD_ARGS
+function addArgsFor(target: McpRegistrationTarget, invocation: ResolvedMcpInvocation): string[] {
+  const tail = ['--', invocation.command, ...invocation.args]
+  return target === 'codex'
+    ? ['mcp', 'add', SERVER_NAME, ...tail]
+    : ['mcp', 'add', '--scope', 'user', SERVER_NAME, ...tail]
 }
 
 function removeArgsFor(target: McpRegistrationTarget): string[] {
-  return target === 'codex' ? CODEX_REMOVE_ARGS : CLAUDE_REMOVE_ARGS
+  return target === 'codex'
+    ? ['mcp', 'remove', SERVER_NAME]
+    : ['mcp', 'remove', SERVER_NAME, '-s', 'user']
 }
 
 function renderCommand(command: string, args: string[]): string {

@@ -50,6 +50,7 @@ export async function main(
       ...opts,
       profile: parsed.profile,
       clientKind: parsed.clientKind ?? opts.clientKind,
+      autoStartUi: opts.autoStartUi ?? parsed.autoStartUi,
     })
     exit(ok ? 0 : 1)
     return
@@ -58,6 +59,7 @@ export async function main(
     ...opts,
     profile: parsed.profile,
     clientKind: parsed.clientKind ?? opts.clientKind,
+    autoStartUi: opts.autoStartUi ?? parsed.autoStartUi,
   })
   if (!ok) exit(1)
 }
@@ -241,12 +243,13 @@ function sleep(ms: number): Promise<void> {
 }
 
 function parseArgs(argv: string[]):
-  | { ok: true; command: 'bridge' | 'doctor'; url: string; profile: CanaryLabMcpProfile; clientKind?: ExternalHealClientKind }
+  | { ok: true; command: 'bridge' | 'doctor'; url: string; profile: CanaryLabMcpProfile; clientKind?: ExternalHealClientKind; autoStartUi: boolean }
   | { ok: false; error: string } {
   let command: 'bridge' | 'doctor' = 'bridge'
   let url = DEFAULT_MCP_URL
   let profile: CanaryLabMcpProfile = 'repair'
   let clientKind: ExternalHealClientKind | undefined
+  let autoStartUi = true
   const args = [...argv]
   if (args[0] === 'doctor') {
     command = 'doctor'
@@ -254,6 +257,10 @@ function parseArgs(argv: string[]):
   }
   for (let i = 0; i < args.length; i += 1) {
     const arg = args[i]
+    if (arg === '--no-autostart') {
+      autoStartUi = false
+      continue
+    }
     if (arg === '--url') {
       const value = args[i + 1]
       if (!value) return { ok: false, error: 'Usage: canary-lab mcp [doctor] [--url <url>]' }
@@ -286,7 +293,7 @@ function parseArgs(argv: string[]):
   } catch {
     return { ok: false, error: `Invalid MCP URL: ${url}` }
   }
-  return { ok: true, command, url, profile, ...(clientKind ? { clientKind } : {}) }
+  return { ok: true, command, url, profile, autoStartUi, ...(clientKind ? { clientKind } : {}) }
 }
 
 async function forwardMessage(

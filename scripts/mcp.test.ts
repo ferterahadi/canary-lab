@@ -71,6 +71,44 @@ describe('canary-lab mcp', () => {
     }
   })
 
+  it('doctor --no-autostart reports unreachable without trying to start the UI', async () => {
+    const stdout = new BufferWritable()
+    const stderr = new BufferWritable()
+    const exits: number[] = []
+    let startUiCalled = false
+    const failingFetch = (async () => { throw new Error('no server') }) as unknown as typeof fetch
+
+    await main(['doctor', '--no-autostart'], {
+      stdout,
+      stderr,
+      fetch: failingFetch,
+      startUi: () => { startUiCalled = true },
+      exit: (code) => { exits.push(code) },
+    })
+
+    expect(startUiCalled).toBe(false)
+    expect(stderr.text()).toContain('Start the UI first')
+    expect(exits).toContain(1)
+  })
+
+  it('doctor auto-starts the UI by default when unreachable', async () => {
+    const stderr = new BufferWritable()
+    let startUiCalled = false
+    const failingFetch = (async () => { throw new Error('no server') }) as unknown as typeof fetch
+
+    await main(['doctor'], {
+      stdout: new BufferWritable(),
+      stderr,
+      fetch: failingFetch,
+      startUi: () => { startUiCalled = true },
+      startupTimeoutMs: 20,
+      startupPollMs: 5,
+      exit: () => { /* noop */ },
+    })
+
+    expect(startUiCalled).toBe(true)
+  })
+
   it('bridge reports a clear error when the UI MCP server is not reachable', async () => {
     const stderr = new BufferWritable()
     await expect(bridge('http://127.0.0.1:9/mcp', { stderr, autoStartUi: false })).resolves.toBe(false)

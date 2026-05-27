@@ -275,6 +275,31 @@ export function applyExternalDraftFiles(input: {
   return { ok: true, written }
 }
 
+// Write a prose doc (distilled session, plan, notes) into a feature's `docs/`
+// directory. The one home for feature-scoped documentation — the scaffold
+// otherwise has no place for it, and the draft-apply path rejects non-spec
+// files. Create-or-replace: the caller picks a slug; re-writing the same
+// relPath overwrites. Markdown only; path-traversal hardened.
+export function writeFeatureDoc(ctx: FeatureAuthoringContext, input: {
+  feature: string
+  relPath: string
+  content: string
+}): { ok: true; writtenPath: string; relativePath: string } | { ok: false; error: string } {
+  const feature = findFeature(ctx.featuresDir, input.feature)
+  if (!feature?.featureDir) return { ok: false, error: 'feature not found' }
+  if (typeof input.content !== 'string' || input.content.trim() === '') {
+    return { ok: false, error: 'content must be a non-empty string' }
+  }
+  const resolved = resolveDocRelPath(input.relPath)
+  if (!resolved.ok) return { ok: false, error: resolved.error }
+  const docsDir = path.join(feature.featureDir, 'docs')
+  const dest = path.join(docsDir, resolved.rel)
+  if (!isWithin(docsDir, dest)) return { ok: false, error: 'relPath must not escape the docs directory' }
+  fs.mkdirSync(path.dirname(dest), { recursive: true })
+  fs.writeFileSync(dest, input.content, 'utf8')
+  return { ok: true, writtenPath: dest, relativePath: path.relative(feature.featureDir, dest) }
+}
+
 export function externalTestFileRules(): Record<string, unknown> {
   return {
     specs: 'Place Playwright specs directly under e2e/*.spec.ts.',
@@ -314,6 +339,22 @@ export function parseRedactedEntries(raw: string): RedactedEntry[] {
 
 function findFeature(featuresDir: string, featureName: string): FeatureConfig | undefined {
   return loadFeatures(featuresDir).find((feature) => feature.name === featureName)
+}
+
+// Resolve a caller-supplied doc path to a path relative to the feature's
+// `docs/` dir. Accepts an optional leading `docs/` so both "notes.md" and
+// "docs/notes.md" land in the same place. Rejects absolute paths and
+// non-markdown extensions; traversal is caught by the `isWithin` guard at the
+// call site (so `../x.md` resolves and then fails the within-docs check).
+function resolveDocRelPath(relPath: string): { ok: true; rel: string } | { ok: false; error: string } {
+  const trimmed = (relPath ?? '').trim()
+  if (!trimmed) return { ok: false, error: 'relPath required' }
+  if (path.isAbsolute(trimmed)) return { ok: false, error: 'relPath must be relative' }
+  const rel = trimmed.replace(/^\.?[/\\]?docs[/\\]/i, '')
+  if (!/\.(md|markdown)$/i.test(rel)) {
+    return { ok: false, error: 'relPath must end in .md or .markdown' }
+  }
+  return { ok: true, rel }
 }
 
 function readEnvsetsConfig(envsetsDir: string): EnvsetsConfigJson {

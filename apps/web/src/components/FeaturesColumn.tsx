@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { Feature } from '../api/types'
+import type { Feature, RunStatus } from '../api/types'
 import { useWizardDrafts } from '../state/WizardDraftContext'
 import { FeatureConfigEditor } from './FeatureConfigEditor'
 import { ThemeToggle } from './ThemeToggle'
@@ -8,6 +8,10 @@ import { SettingsModal } from './SettingsModal'
 interface Props {
   features: Feature[]
   selectedFeature: string | null
+  /** Feature whose run is currently active (running or healing), or null. */
+  activeRunFeature?: string | null
+  /** Status of that active run — drives the chip label/color. */
+  activeRunStatus?: RunStatus | null
   onSelectFeature: (name: string) => void
   onFeaturesChanged?: (preferredFeature?: string | null) => void
 }
@@ -15,6 +19,8 @@ interface Props {
 export function FeaturesColumn({
   features,
   selectedFeature,
+  activeRunFeature,
+  activeRunStatus,
   onSelectFeature,
   onFeaturesChanged,
 }: Props) {
@@ -45,6 +51,8 @@ export function FeaturesColumn({
           <ul className="flex flex-col gap-1">
             {features.map((f) => {
               const isSelected = f.name === selectedFeature
+              const isRunning = Boolean(activeRunFeature) && f.name === activeRunFeature
+              const runLabel = activeRunStatus === 'healing' ? 'Healing' : 'Running'
               return (
                 <li
                   key={f.name}
@@ -63,6 +71,15 @@ export function FeaturesColumn({
                   >
                     {f.name}
                   </button>
+                  {isRunning && (
+                    <span
+                      className={`cl-run-chip${activeRunStatus === 'healing' ? ' cl-run-chip-healing' : ''}`}
+                      title={`${runLabel} now`}
+                    >
+                      <span className="cl-run-chip-dot" aria-hidden="true" />
+                      {runLabel}
+                    </span>
+                  )}
                   <button
                     type="button"
                     onClick={() => setConfigFor(f.name)}
