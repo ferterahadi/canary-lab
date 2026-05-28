@@ -76,6 +76,8 @@ describe('canary-lab agent install', () => {
       expect(body).toContain('~/.canary-lab/workspaces.json')
       expect(body).toContain('http://127.0.0.1:7421/mcp/health')
       expect(body).toContain('Do not add `--port`')
+      expect(body).toContain('Do not reflexively call `list_features` or `list_runs` after health')
+      expect(body).toContain('For random or new feature creation, call `create_feature` directly with a unique feature name')
       expect(body).toContain('context.healPrompt.startHere')
       expect(body).toContain('get_run_snapshot')
       expect(body).toContain('`signal_run` with `hypothesis` and `fixDescription`, then `wait_for_heal_task`')

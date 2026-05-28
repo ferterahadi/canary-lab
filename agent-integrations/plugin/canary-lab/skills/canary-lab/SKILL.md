@@ -16,7 +16,9 @@ Before calling Canary Lab MCP tools, make sure the workspace and UI server are a
 4. Check `http://127.0.0.1:7421/mcp/health`.
 5. If the health check succeeds, confirm `projectRoot` matches the selected workspace. If it points at a different workspace, ask the user whether to stop the existing Canary Lab server before continuing.
 6. If the health check fails, start `npx canary-lab ui` from the selected workspace in a visible long-running terminal when the host supports that. Do not add `--port`; Canary Lab uses port `7421` so MCP clients can connect consistently.
-7. Once the health check passes, call `list_features` and `list_runs` before helping the user choose what to rerun.
+7. Do not reflexively call `list_features` or `list_runs` after health. For random or new feature creation, call `create_feature` directly with a unique feature name. Use `list_features` only when you need to discover or choose an existing feature, and use `list_runs` only for run, heal, verification, or export workflows.
+
+For random or new feature creation, call `create_feature` directly with a unique feature name. Do not call `list_features` just to avoid collisions; if the chosen name already exists, retry `create_feature` with a different unique name.
 
 Use the Canary Lab MCP tools in this order:
 

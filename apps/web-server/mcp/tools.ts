@@ -321,7 +321,7 @@ export function registerCanaryLabTools(
   // ─── reads ────────────────────────────────────────────────────────────
 
   registerTool('list_features', {
-    description: 'List every Canary Lab feature in the workspace, with envs, repos, and a short summary.',
+    description: 'List existing Canary Lab features when you need to choose or inspect one. Do not call this before random/new feature creation; call create_feature directly with a unique name and retry on collision.',
     inputSchema: {},
   }, async () => {
     const features = loadFeatures(deps.featuresDir).map((f) => ({
@@ -815,7 +815,12 @@ export function registerCanaryLabTools(
       updatedAt: new Date().toISOString(),
     }
     writeDraft(deps.store.logsDir, next)
-    return asJsonResult(externalDraftView(next))
+    return asJsonResult({
+      ...externalDraftView(next),
+      canaryLabBehavior: 'tracking-only',
+      statusMeaning: 'External client is authoring tests; Canary Lab is not running an internal wizard agent.',
+      nextSteps: externalDraftAuthoringNextSteps(feature),
+    })
   })
 
   registerTool('update_external_draft_stage', {
@@ -1343,6 +1348,15 @@ function externalDraftView(record: DraftRecord): Record<string, unknown> {
     updatedAt: record.updatedAt,
     ...(record.errorMessage ? { errorMessage: record.errorMessage } : {}),
   }
+}
+
+function externalDraftAuthoringNextSteps(feature: string): string[] {
+  return [
+    'Tell the user you are authoring tests now and they can wait in the external client.',
+    `Author or edit Playwright specs under features/${feature}/e2e.`,
+    'Call update_external_draft_stage as progress changes.',
+    'Call apply_external_draft when the files are ready to validate and record.',
+  ]
 }
 
 function newDraftId(): string {
