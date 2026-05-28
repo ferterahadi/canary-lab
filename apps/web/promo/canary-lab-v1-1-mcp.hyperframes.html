@@ -32,7 +32,7 @@
     [data-composition-id="canary-lab-mcp-promo"] {
       position: relative;
       width: 1280px;
-      height: 440px;
+      height: 560px;
       overflow: hidden;
       background:
         linear-gradient(90deg, rgba(59, 130, 246, 0) 0%, rgba(59, 130, 246, 0.11) 52%, rgba(59, 130, 246, 0) 100%),
@@ -55,8 +55,8 @@
       position: absolute;
       left: 58px;
       right: 58px;
-      top: 24px;
-      height: 392px;
+      top: 28px;
+      height: 504px;
       border: 1px solid var(--border);
       border-radius: 10px;
       background: rgba(20, 20, 20, 0.88);
@@ -95,8 +95,8 @@
     }
     .stage-title {
       position: absolute;
-      left: 66px;
-      top: 76px;
+      left: 740px;
+      top: 128px;
       width: 460px;
       margin: 0;
       font-size: 46px;
@@ -106,8 +106,8 @@
     }
     .stage-subtitle {
       position: absolute;
-      left: 68px;
-      top: 172px;
+      left: 742px;
+      top: 224px;
       width: 410px;
       margin: 0;
       color: var(--text-secondary);
@@ -117,8 +117,8 @@
     }
     .action-stack {
       position: absolute;
-      left: 66px;
-      top: 220px;
+      left: 740px;
+      top: 300px;
       width: 360px;
       display: grid;
       gap: 8px;
@@ -155,10 +155,10 @@
     }
     .agent-card {
       position: absolute;
-      right: 34px;
-      top: 24px;
+      left: 92px;
+      top: 84px;
       width: 548px;
-      height: 344px;
+      height: 392px;
       border: 1px solid var(--border-strong);
       border-radius: 9px;
       background: #101010;
@@ -295,17 +295,17 @@
     }
     .path {
       position: absolute;
-      left: 452px;
-      top: 258px;
-      width: 120px;
+      left: 650px;
+      top: 375px;
+      width: 80px;
       height: 2px;
       background: linear-gradient(90deg, transparent, var(--accent), transparent);
       box-shadow: 0 0 18px rgba(59, 130, 246, 0.5);
     }
     .path-dot {
       position: absolute;
-      left: 562px;
-      top: 249px;
+      left: 650px;
+      top: 366px;
       width: 20px;
       height: 20px;
       border-radius: 999px;
@@ -315,7 +315,7 @@
   </style>
 </head>
 <body>
-  <main data-composition-id="canary-lab-mcp-promo" data-width="1280" data-height="440" data-duration="16">
+  <main data-composition-id="canary-lab-mcp-promo" data-width="1280" data-height="560" data-duration="16">
     <section class="shell">
       <div class="topbar">
         <span class="pulse"></span>
@@ -362,7 +362,7 @@
     tl.from('.command', { opacity: 0, y: 16, duration: 0.45, ease: 'power3.out', immediateRender: false }, 1.8);
     tl.from('.tool-row', { opacity: 0, y: 14, stagger: 0.16, duration: 0.42, ease: 'power3.out', immediateRender: false }, 2.35);
     tl.from('.path', { opacity: 0, scaleX: 0, transformOrigin: 'left center', duration: 0.5, ease: 'power2.out', immediateRender: false }, 2.2);
-    tl.fromTo('.path-dot', { opacity: 0, x: 0 }, { opacity: 1, x: -120, duration: 1.2, ease: 'power2.inOut' }, 2.3);
+    tl.fromTo('.path-dot', { opacity: 0, x: 0 }, { opacity: 1, x: 80, duration: 1.2, ease: 'power2.inOut' }, 2.3);
     tl.from('.result', { opacity: 0, y: 16, duration: 0.5, ease: 'power3.out', immediateRender: false }, 3.2);
     tl.to('.create', { backgroundColor: '#1c1c1c', borderColor: '#262626', color: '#a3a3a3', duration: 0.25 }, 5.2);
     tl.to('.run', { backgroundColor: 'rgba(59, 130, 246, 0.18)', borderColor: '#3b82f6', color: '#fafafa', duration: 0.25 }, 5.2);

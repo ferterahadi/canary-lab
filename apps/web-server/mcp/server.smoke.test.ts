@@ -385,11 +385,37 @@ describe('MCP HTTP server (smoke)', () => {
       runStore.bootstrap({
         runId: 'author-eval-run',
         feature: 'checkout_flow',
+        featureDir,
         startedAt: '2026-05-27T00:00:00.000Z',
+        endedAt: '2026-05-27T00:01:00.000Z',
         status: 'failed',
         healCycles: 0,
         services: [],
       })
+      const evalRunDir = runDirFor(logsDir, 'author-eval-run')
+      fs.writeFileSync(path.join(evalRunDir, 'e2e-summary.json'), JSON.stringify({
+        complete: true,
+        total: 1,
+        passed: 1,
+        passedNames: ['test-case-checkout-works'],
+        failed: [],
+      }))
+      fs.writeFileSync(
+        path.join(evalRunDir, 'playwright-events.jsonl'),
+        JSON.stringify({
+          type: 'test-end',
+          time: '2026-05-27T00:01:00.000Z',
+          test: {
+            name: 'test-case-checkout-works',
+            title: 'checkout works',
+            location: `${path.join(featureDir, 'e2e', 'checkout.spec.ts')}:3`,
+          },
+          status: 'passed',
+          passed: true,
+          durationMs: 42,
+          retry: 0,
+        }) + '\n',
+      )
       const exportTask = await client.callTool({
         name: 'start_external_evaluation_export',
         arguments: {
@@ -402,15 +428,35 @@ describe('MCP HTTP server (smoke)', () => {
       const exportBody = JSON.parse((exportTask.content?.[0] as { text: string }).text)
       expect(exportBody).toMatchObject({
         task: { producer: 'external', status: 'running', language: 'English' },
-        reportSchema: { archiveBase64: 'base64 encoded .zip, or submit files[] for Canary Lab to zip' },
-        nextSteps: expect.arrayContaining(['author evaluation report files', 'submit_external_evaluation_export']),
+        reportSchema: {
+          output: 'evaluation.html',
+          textSlots: expect.any(Array),
+          rewrite: expect.any(Object),
+        },
+        nextSteps: expect.arrayContaining(['author structured evaluation wording', 'submit_external_evaluation_export']),
       })
+      expect(JSON.stringify(exportBody.reportSchema)).not.toContain('evaluation.md')
+      expect(exportBody.reportSchema.textSlots.length).toBeGreaterThan(0)
+
+      const rejectedMarkdown = await client.callTool({
+        name: 'submit_external_evaluation_export',
+        arguments: {
+          taskId: exportBody.task.taskId,
+          files: [{ path: 'evaluation.md', content: '# Checkout evaluation\nGenerated externally.\n' }],
+        },
+      })
+      expect(rejectedMarkdown.isError).toBe(true)
+      expect((rejectedMarkdown.content?.[0] as { text: string }).text).toBe('submit textSlots[] or rewrite')
 
       const submittedExport = await client.callTool({
         name: 'submit_external_evaluation_export',
         arguments: {
           taskId: exportBody.task.taskId,
-          files: [{ path: 'evaluation.md', content: '# Checkout evaluation\nGenerated externally.\n' }],
+          textSlots: exportBody.reportSchema.textSlots.map((slot: { id: string; text: string }) =>
+            slot.id === 'summary'
+              ? { ...slot, text: 'Externally reviewed checkout wording rendered by Canary Lab.' }
+              : slot,
+          ),
         },
       })
       expect(JSON.parse((submittedExport.content?.[0] as { text: string }).text)).toMatchObject({
@@ -433,7 +479,12 @@ describe('MCP HTTP server (smoke)', () => {
       })
       const downloadBody = JSON.parse((download.content?.[0] as { text: string }).text)
       expect(downloadBody.filename).toMatch(/checkout_flow-author-eval-run\.zip$/)
-      expect(Buffer.from(downloadBody.archiveBase64, 'base64').length).toBeGreaterThan(100)
+      const archiveText = Buffer.from(downloadBody.archiveBase64, 'base64').toString('latin1')
+      expect(archiveText).toContain('evaluation.html')
+      expect(archiveText).not.toContain('evaluation.md')
+      expect(archiveText).toContain('Externally reviewed checkout wording rendered by Canary Lab.')
+      expect(archiveText).toContain('class="flowchart"')
+      expect(archiveText).toContain('<summary>Test code</summary>')
     } finally {
       if (client) await client.close().catch(() => undefined)
       await app.close()

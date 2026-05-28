@@ -51,10 +51,18 @@ import {
   patchEvaluationExportTask,
   readEvaluationExportTask,
   readEvaluationExportZip,
-  writeEvaluationExportFilesZip,
   writeEvaluationExportZip,
   type EvaluationExportTaskRecord,
 } from '../lib/evaluation-export-store'
+import { buildEvaluationExportArchive } from '../lib/evaluation-export-archive'
+import {
+  applyEvaluationTextSlotRewrite,
+  buildTestReviewPacket,
+  deterministicEvaluationRewrite,
+  evaluationTextSlots,
+  normalizeEvaluationRewrite,
+  type EvaluationRewrite,
+} from '../lib/test-review-export'
 import {
   isActiveRunStatus,
   isTerminalRunStatus,
@@ -68,6 +76,27 @@ import {
 // Confirmation gates: destructive tools (abort_run, delete_run, etc.) require
 // `confirm: true` literally in the input schema so a misbehaving model can't
 // invoke them by accident.
+
+const evaluationTextSlotInput = z.object({
+  id: z.string(),
+  text: z.string(),
+})
+
+const evaluationRewriteInput = z.object({
+  formatVersion: z.number().optional(),
+  featureTitle: z.string().optional(),
+  summary: z.string(),
+  cases: z.array(z.object({
+    title: z.string(),
+    whatWasChecked: z.string(),
+    whyItMatters: z.string(),
+    confidence: z.string(),
+    flowSteps: z.array(z.object({
+      title: z.string(),
+      detail: z.string().optional(),
+    })).optional(),
+  })),
+})
 
 export interface CanaryLabMcpDeps {
   store: RunStore
@@ -659,31 +688,42 @@ export function registerCanaryLabTools(
         logsDir: deps.store.logsDir,
         projectRoot: deps.projectRoot,
       }),
-      reportSchema: externalEvaluationReportSchema(),
-      nextSteps: ['author evaluation report files', 'submit_external_evaluation_export'],
+      reportSchema: externalEvaluationReportSchema(detail),
+      nextSteps: ['author structured evaluation wording', 'submit_external_evaluation_export'],
     })
   })
 
   registerTool('submit_external_evaluation_export', {
-    description: 'Store the report/archive produced by an external client and mark the evaluation export task completed.',
+    description: 'Render structured external evaluation wording through Canary Lab’s canonical HTML export and mark the task completed.',
     inputSchema: {
       taskId: z.string(),
-      archiveBase64: z.string().optional(),
-      files: z.array(z.object({ path: z.string(), content: z.string() })).optional(),
+      textSlots: z.array(evaluationTextSlotInput).optional(),
+      rewrite: evaluationRewriteInput.optional(),
     },
-  }, async ({ taskId, archiveBase64, files }) => {
+  }, async ({ taskId, textSlots, rewrite }) => {
     const task = readEvaluationExportTask(deps.store.logsDir, taskId)
     if (!task) return errorResult(`evaluation export task not found: ${taskId}`)
     if ((task.producer ?? 'internal') !== 'external') return errorResult('only external export tasks can be submitted through this tool')
-    if (!archiveBase64 && (!files || files.length === 0)) return errorResult('submit archiveBase64 or files[]')
+    if (!rewrite && (!textSlots || textSlots.length === 0)) return errorResult('submit textSlots[] or rewrite')
+    const detail = deps.store.get(task.runId)
+    if (!detail) return errorResult(`run not found: ${task.runId}`)
     try {
-      if (archiveBase64) {
-        writeEvaluationExportZip(deps.store.logsDir, taskId, Buffer.from(archiveBase64, 'base64'))
-      } else {
-        writeEvaluationExportFilesZip(deps.store.logsDir, taskId, files!)
+      const packet = buildTestReviewPacket(detail)
+      const normalizedRewrite = rewrite
+        ? normalizeEvaluationRewrite(rewrite as EvaluationRewrite, packet)
+        : applyEvaluationTextSlotRewrite(deterministicEvaluationRewrite(packet), textSlots!)
+      if (!normalizedRewrite) {
+        return errorResult('rewrite must include one case for each evaluated test')
       }
+      const built = await buildEvaluationExportArchive(detail, {
+        logsDir: deps.store.logsDir,
+        audienceAdapter: 'deterministic',
+        rewrite: normalizedRewrite,
+      })
+      writeEvaluationExportZip(deps.store.logsDir, taskId, built.zip)
       appendEvaluationExportLog(deps.store.logsDir, taskId, '[evaluation] external report submitted\n')
       const next = patchEvaluationExportTask(deps.store.logsDir, taskId, {
+        archiveBase: built.archiveBase,
         status: 'completed',
         downloadReady: true,
       })
@@ -1317,19 +1357,17 @@ function safeFilename(input: string): string {
   return input.replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'export'
 }
 
-function externalEvaluationReportSchema(): Record<string, unknown> {
+function externalEvaluationReportSchema(detail: RunDetail): Record<string, unknown> {
+  const packet = buildTestReviewPacket(detail)
+  const rewrite = deterministicEvaluationRewrite(packet)
   return {
-    archiveBase64: 'base64 encoded .zip, or submit files[] for Canary Lab to zip',
-    files: [
-      {
-        path: 'evaluation.md or evaluation.html',
-        content: 'Externally authored report content in the requested language',
-      },
-    ],
+    output: 'evaluation.html',
+    textSlots: evaluationTextSlots(rewrite),
+    rewrite,
     requiredBehavior: [
-      'Do not ask Canary Lab to rewrite or translate the report.',
+      'Submit structured wording only; Canary Lab renders the final evaluation.html.',
       'If the run failed or was aborted, preserve that status in the report instead of blocking the export.',
-      'Submit the final report/archive through submit_external_evaluation_export.',
+      'Submit textSlots[] or rewrite through submit_external_evaluation_export.',
     ],
   }
 }

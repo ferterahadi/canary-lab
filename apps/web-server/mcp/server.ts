@@ -67,7 +67,7 @@ const AUTHOR_INSTRUCTIONS = `Canary Lab — authoring profile. Create or extend 
 - New feature: create_feature (returns the skeleton + nextSteps). Author specs under features/<feature>/e2e importing from 'canary-lab/feature-support/log-marker-fixture'. To preserve repo env/config, call capture_feature_env_files (secret values are never returned).
 - Docs/plans/distillations: write_feature_doc puts markdown into features/<feature>/docs/ — the home for feature-scoped prose. For "add this plan/distillation to feature <name>", call write_feature_doc with a descriptive relPath (e.g. "2026-05-28-line-notes.md"). Create-or-replace, .md/.markdown only.
 - Draft flow: start_external_draft → update_external_draft_stage (scaffolding → authoring-tests → validating → ready → applied) → apply_external_draft.
-- Evaluation export (run must be terminal, not necessarily passing): start_external_evaluation_export → submit_external_evaluation_export, then get/list/download_evaluation_export. If the run failed or was aborted and the user asks to export as-is, preserve that status in the report instead of trying to heal first.`
+- Evaluation export (run must be terminal, not necessarily passing): start_external_evaluation_export returns editable textSlots/rewrite; submit structured wording through submit_external_evaluation_export, then get/list/download_evaluation_export. Canary Lab renders the final evaluation.html archive. If the run failed or was aborted and the user asks to export as-is, preserve that status in the wording instead of trying to heal first.`
 
 const INSTRUCTIONS_BY_PROFILE: Record<CanaryLabMcpProfile, string> = {
   repair: REPAIR_INSTRUCTIONS,

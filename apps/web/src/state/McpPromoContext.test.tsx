@@ -41,14 +41,14 @@ describe('McpPromoProvider', () => {
     })
 
     expect(continued).not.toHaveBeenCalled()
-    expect(document.body.textContent).toContain('/canary-lab create a checkout test')
+    expect(document.body.querySelector('video')?.getAttribute('src')).toBe('/promo/canary-lab-v1-1-mcp.webm')
 
     act(() => {
       clickButton('Continue')
     })
 
     expect(continued).toHaveBeenCalledTimes(1)
-    expect(document.body.textContent).not.toContain('/canary-lab create a checkout test')
+    expect(document.body.querySelector('video')).toBeNull()
   })
 
   it('cancels the original action when the user dismisses the promo', () => {
@@ -63,7 +63,7 @@ describe('McpPromoProvider', () => {
     })
 
     expect(continued).not.toHaveBeenCalled()
-    expect(document.body.textContent).not.toContain('/canary-lab run this feature')
+    expect(document.body.querySelector('video')).toBeNull()
   })
 
   it('stores per-action dismissal only after continuing with the checkbox checked', () => {
@@ -90,7 +90,7 @@ describe('McpPromoProvider', () => {
     })
 
     expect(continued).toHaveBeenCalledTimes(2)
-    expect(document.body.textContent).toContain('/canary-lab export the selected evaluation')
+    expect(document.body.querySelector('video')?.getAttribute('src')).toBe('/promo/canary-lab-v1-1-mcp.webm')
   })
 
   it('falls back to showing the promo when localStorage is unavailable', () => {
@@ -110,7 +110,7 @@ describe('McpPromoProvider', () => {
         clickButton('Trigger export-evaluation')
       })
       expect(continued).not.toHaveBeenCalled()
-      expect(document.body.textContent).toContain('/canary-lab export the selected evaluation')
+      expect(document.body.querySelector('video')?.getAttribute('src')).toBe('/promo/canary-lab-v1-1-mcp.webm')
 
       act(() => {
         clickButton('Continue')
