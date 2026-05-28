@@ -31,9 +31,14 @@ export function EvaluationExportProvider({ children, wsBase, WebSocketImpl }: Ev
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
   const [dialogOpen, setDialogOpen] = useState(false)
   const connectionsRef = useRef<Record<string, EvaluationExportConnection>>({})
+  const tasksByIdRef = useRef<Record<string, EvaluationExportTask>>({})
 
   const rememberTask = useCallback((task: EvaluationExportTask): void => {
-    setTasksById((current) => ({ ...current, [task.taskId]: task }))
+    setTasksById((current) => {
+      const next = { ...current, [task.taskId]: task }
+      tasksByIdRef.current = next
+      return next
+    })
   }, [])
 
   const appendLog = useCallback((taskId: string, chunk: string): void => {
@@ -70,19 +75,42 @@ export function EvaluationExportProvider({ children, wsBase, WebSocketImpl }: Ev
     }
   }, [WebSocketImpl, appendLog, refreshTask, wsBase])
 
+  const reconcileTasks = useCallback((tasks: EvaluationExportTask[]): void => {
+    const previous = tasksByIdRef.current
+    const next = Object.fromEntries(tasks.map((task) => [task.taskId, task]))
+    tasksByIdRef.current = next
+    setTasksById(next)
+    for (const task of tasks) {
+      if (task.status === 'running' || !previous[task.taskId]) subscribeTask(task.taskId)
+    }
+  }, [subscribeTask])
+
   useEffect(() => {
     let cancelled = false
     api.listEvaluationExportTasks()
       .then((tasks) => {
         if (cancelled) return
-        setTasksById(Object.fromEntries(tasks.map((task) => [task.taskId, task])))
-        for (const task of tasks) {
-          subscribeTask(task.taskId)
-        }
+        reconcileTasks(tasks)
       })
       .catch(() => { /* keep an empty task list on startup failures */ })
     return () => { cancelled = true }
-  }, [subscribeTask])
+  }, [reconcileTasks])
+
+  useEffect(() => {
+    let cancelled = false
+    const timer = setInterval(() => {
+      api.listEvaluationExportTasks()
+        .then((tasks) => {
+          if (cancelled) return
+          reconcileTasks(tasks)
+        })
+        .catch(() => { /* keep the last known task list on discovery failures */ })
+    }, 3000)
+    return () => {
+      cancelled = true
+      clearInterval(timer)
+    }
+  }, [reconcileTasks])
 
   const startExport = useCallback(async (
     runId: string,
@@ -153,6 +181,7 @@ export function EvaluationExportProvider({ children, wsBase, WebSocketImpl }: Ev
     }
     setTasksById((current) => {
       const { [taskId]: _removed, ...rest } = current
+      tasksByIdRef.current = rest
       const remaining = Object.values(rest).sort((a, b) => b.createdAt.localeCompare(a.createdAt))
       setSelectedTaskId((selected) => {
         if (selected && selected !== taskId) return selected

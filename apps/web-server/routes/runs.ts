@@ -1,11 +1,12 @@
 import type { FastifyInstance, FastifyReply } from 'fastify'
 import fs from 'fs'
 import path from 'path'
-import type { PlaywrightArtifact, RunDetail } from '../lib/run-store'
+import type { RunDetail } from '../lib/run-store'
 import type { RunStore, OrchestratorLike, RestartHealResult, RestartRunResult } from '../lib/run-store'
 import { loadFeatures } from '../lib/feature-loader'
 import { buildRunPaths, runDirFor } from '../lib/runtime/run-paths'
-import { createEvaluationExport, generateEvaluationRewriteWithAgent, type EvaluationRewrite } from '../lib/test-review-export'
+import { generateEvaluationRewriteWithAgent, type EvaluationRewrite } from '../lib/test-review-export'
+import { buildEvaluationExportArchive } from '../lib/evaluation-export-archive'
 import { loadProjectConfig } from '../lib/runtime/launcher/project-config'
 import { PaneBroker, type PaneSubscriber } from '../lib/pane-broker'
 import {
@@ -152,14 +153,6 @@ export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Pro
   ): Promise<{ archiveBase: string; zip: Buffer }> => {
     throwIfAborted(signal)
     log?.(`[evaluation] preparing ${mode === 'raw' ? 'raw output' : 'localized output'} export\n`)
-    const runPaths = buildRunPaths(runDirFor(deps.store.logsDir, detail.runId))
-    const videos = assertionVideos(
-      detail.playwrightArtifacts,
-      runPaths.playwrightArtifactsDir,
-      runPaths.playwrightArtifactsKeepDir,
-      detail.runId,
-    )
-    const archiveBase = `canary-lab-evaluation-${safeFilename(detail.manifest.feature)}-${safeFilename(detail.runId)}`
     // When the project default is the new `external` heal-agent, there is no
     // local LLM voice for evaluation rewriting — fall back to the deterministic
     // adapter so exports stay reproducible.
@@ -173,18 +166,13 @@ export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Pro
       ? await loadEvaluationRewrite(detail, runDir, audienceAdapter, deps.projectRoot, deps.generateEvaluationRewrite, app.log, log, signal)
       : undefined
     throwIfAborted(signal)
-    const exported = await createEvaluationExport(detail, {
+    const built = await buildEvaluationExportArchive(detail, {
+      logsDir: deps.store.logsDir,
       audienceAdapter,
       rewrite,
-      videoLinksByTestName: videoLinksByTestName(videos),
     })
-    const zip = createZip([
-      { filename: 'evaluation.html', data: Buffer.from(exported.html, 'utf8') },
-      ...exported.assets,
-      ...videos.map((video) => ({ filename: video.filename, data: fs.readFileSync(video.path) })),
-    ])
     log?.('[evaluation] export archive ready\n')
-    return { archiveBase, zip }
+    return built
   }
 
   const sendEvaluationExport = async (runId: string, reply: FastifyReply) => {
@@ -626,60 +614,6 @@ function safeFilename(input: string): string {
   return input.replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'run'
 }
 
-function assertionVideos(
-  groups: Array<{ testName: string; artifacts: PlaywrightArtifact[] }> | undefined,
-  artifactsDir: string,
-  artifactsKeepDir: string,
-  runId: string,
-): Array<{ filename: string; path: string; testName: string }> {
-  // Mirror indexPlaywrightArtifacts.resolveFile: artifact.path is rooted at
-  // the live artifacts dir, but after heal-cycle reruns the live dir only
-  // holds the last invocation's outputs. Fall back to the keep dir so videos
-  // from earlier invocations still make it into the export.
-  const fileAt = (rel: string): string | null => {
-    const live = path.resolve(artifactsDir, rel)
-    if (fs.existsSync(live) && fs.statSync(live).isFile()) return live
-    const kept = path.resolve(artifactsKeepDir, rel)
-    if (fs.existsSync(kept) && fs.statSync(kept).isFile()) return kept
-    return null
-  }
-  const videos = (groups ?? [])
-    .flatMap((group) => group.artifacts.map((artifact) => ({ artifact, testName: group.testName })))
-    .map(({ artifact, testName }) => {
-      const rel = path.relative(artifactsDir, path.resolve(artifactsDir, artifact.path))
-      const valid = !rel.startsWith('..') && !path.isAbsolute(rel)
-      const filePath = valid ? fileAt(rel) : null
-      return { artifact, filePath, testName, valid }
-    })
-    .filter((entry): entry is { artifact: PlaywrightArtifact; filePath: string; testName: string; valid: boolean } =>
-      entry.valid && entry.artifact.kind === 'video' && entry.filePath !== null)
-  const used = new Set<string>()
-  return videos.map(({ artifact, filePath, testName }, idx) => {
-    const ext = path.extname(filePath) || extensionForContentType(artifact.contentType) || '.webm'
-    const suffix = videos.length === 1 ? '' : `-${idx + 1}`
-    let filename = `${safeFilename(runId)}${suffix}${ext}`
-    let dedupe = 2
-    while (used.has(filename)) {
-      filename = `${safeFilename(runId)}${suffix}-${dedupe}${ext}`
-      dedupe += 1
-    }
-    used.add(filename)
-    return { filename, path: filePath, testName }
-  })
-}
-
-function videoLinksByTestName(videos: Array<{ filename: string; testName: string }>): Record<string, string[]> {
-  const out: Record<string, string[]> = {}
-  for (const video of videos) out[video.testName] = [...(out[video.testName] ?? []), video.filename]
-  return out
-}
-
-function extensionForContentType(contentType: string | undefined): string | undefined {
-  if (contentType === 'video/mp4') return '.mp4'
-  if (contentType === 'video/webm') return '.webm'
-  return undefined
-}
-
 async function loadEvaluationRewrite(
   detail: Parameters<typeof generateEvaluationRewriteWithAgent>[0],
   runDir: string,
@@ -819,64 +753,4 @@ function activeRunPriority(detail: RunDetail): number {
   if (detail.manifest.lifecycle?.phase === 'waiting-for-signal') return 0
   if (detail.manifest.status === 'healing') return 1
   return 2
-}
-
-interface ZipEntry {
-  filename: string
-  data: Buffer
-}
-
-function createZip(entries: ZipEntry[]): Buffer {
-  const fileRecords: Buffer[] = []
-  const centralRecords: Buffer[] = []
-  let offset = 0
-  for (const entry of entries) {
-    const name = Buffer.from(entry.filename, 'utf8')
-    const crc = crc32(entry.data)
-    const local = Buffer.alloc(30)
-    local.writeUInt32LE(0x04034b50, 0)
-    local.writeUInt16LE(20, 4)
-    local.writeUInt16LE(0x0800, 6)
-    local.writeUInt16LE(0, 8)
-    local.writeUInt32LE(0, 10)
-    local.writeUInt32LE(crc, 14)
-    local.writeUInt32LE(entry.data.length, 18)
-    local.writeUInt32LE(entry.data.length, 22)
-    local.writeUInt16LE(name.length, 26)
-    const fileRecord = Buffer.concat([local, name, entry.data])
-    fileRecords.push(fileRecord)
-
-    const central = Buffer.alloc(46)
-    central.writeUInt32LE(0x02014b50, 0)
-    central.writeUInt16LE(20, 4)
-    central.writeUInt16LE(20, 6)
-    central.writeUInt16LE(0x0800, 8)
-    central.writeUInt16LE(0, 10)
-    central.writeUInt32LE(0, 12)
-    central.writeUInt32LE(crc, 16)
-    central.writeUInt32LE(entry.data.length, 20)
-    central.writeUInt32LE(entry.data.length, 24)
-    central.writeUInt16LE(name.length, 28)
-    central.writeUInt32LE(offset, 42)
-    centralRecords.push(Buffer.concat([central, name]))
-    offset += fileRecord.length
-  }
-  const centralOffset = offset
-  const centralDirectory = Buffer.concat(centralRecords)
-  const end = Buffer.alloc(22)
-  end.writeUInt32LE(0x06054b50, 0)
-  end.writeUInt16LE(entries.length, 8)
-  end.writeUInt16LE(entries.length, 10)
-  end.writeUInt32LE(centralDirectory.length, 12)
-  end.writeUInt32LE(centralOffset, 16)
-  return Buffer.concat([...fileRecords, centralDirectory, end])
-}
-
-function crc32(buffer: Buffer): number {
-  let crc = 0xffffffff
-  for (const byte of buffer) {
-    crc ^= byte
-    for (let i = 0; i < 8; i += 1) crc = (crc >>> 1) ^ (0xedb88320 & -(crc & 1))
-  }
-  return (crc ^ 0xffffffff) >>> 0
 }

@@ -84,7 +84,7 @@ function markDismissed(action: McpPromoAction): void {
 }
 
 function McpPromoDialog({
-  action,
+  action: _action,
   videoSrc,
   onCancel,
   onContinue,
@@ -95,7 +95,6 @@ function McpPromoDialog({
   onContinue: (dismiss: boolean) => void
 }) {
   const [dismiss, setDismiss] = useState(false)
-  const copy = PROMO_COPY[action]
 
   return (
     <div className="cl-modal-backdrop cl-mcp-promo-backdrop fixed inset-0 z-[70] flex items-center justify-center">
@@ -125,10 +124,6 @@ function McpPromoDialog({
           />
         </div>
         <div className="cl-mcp-promo-body">
-          <div className="rounded-md border p-3" style={{ borderColor: 'var(--border-default)', background: 'var(--bg-elevated)' }}>
-            <p className="text-[11px] font-medium uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>{copy.label}</p>
-            <p className="mt-1 text-sm" style={{ color: 'var(--text-primary)' }}>{copy.example}</p>
-          </div>
           <div className="cl-mcp-promo-footer">
             <label className="flex items-center gap-2 text-xs" style={{ color: 'var(--text-secondary)' }}>
               <input
@@ -147,19 +142,4 @@ function McpPromoDialog({
       </section>
     </div>
   )
-}
-
-const PROMO_COPY: Record<McpPromoAction, { label: string; example: string }> = {
-  'create-feature': {
-    label: 'Feature test',
-    example: '/canary-lab create a checkout test for the new voucher flow',
-  },
-  'run-test': {
-    label: 'Run test cases',
-    example: '/canary-lab run this feature against production',
-  },
-  'export-evaluation': {
-    label: 'Export evaluation',
-    example: '/canary-lab export the selected evaluation',
-  },
 }
