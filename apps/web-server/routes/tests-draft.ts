@@ -37,6 +37,7 @@ import { randomUUID } from 'crypto'
 import { validateGeneratedFeatureFiles } from '../../../shared/feature-scaffold'
 import { resolveDraftFile } from '../lib/draft-file-resolver'
 import { combinePrdText, extractPrdDocument } from '../lib/prd-document-extractor'
+import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../lib/workspace-events'
 
 // Wizard pipeline ports. The agent spawners are injected — production wires
 // them to real `claude -p` pty invocations; tests pass synchronous stubs.
@@ -81,6 +82,7 @@ export interface TestsDraftRouteDeps {
   spawnPlanAgent(input: PlanAgentInput): Promise<string>
   spawnSpecAgent(input: SpecAgentInput): Promise<string>
   cancelGeneration?(draftId: string): boolean
+  workspaceEvents?: WorkspaceEventPublisher
 }
 
 export async function testsDraftRoutes(
@@ -164,7 +166,7 @@ export async function testsDraftRoutes(
     const featureNameStr = typeof featureName === 'string' ? featureName : undefined
 
     const draftId = deps.newDraftId()
-    const rec = createDraft(deps.logsDir, {
+    createDraft(deps.logsDir, {
       draftId,
       prdText,
       additionalNotes: typeof additionalNotes === 'string' ? additionalNotes : undefined,
@@ -173,7 +175,8 @@ export async function testsDraftRoutes(
       featureName: featureNameStr,
     })
 
-    transition(deps.logsDir, draftId, 'planning')
+    const rec = transitionDraft(deps, draftId, 'planning')
+    publishWorkspaceEvent(deps.workspaceEvents, { type: 'draft-created', draft: rec })
     runPlanStage(deps, draftId).catch(() => {/* logged via draft.errorMessage */})
 
     reply.code(201)
@@ -279,7 +282,7 @@ export async function testsDraftRoutes(
         const p = draftPaths(deps.logsDir, rec.draftId)
         fs.writeFileSync(p.intentMd, intentSummary, 'utf8')
       }
-      transition(deps.logsDir, rec.draftId, 'generating', { plan, intentSummary })
+      transitionDraft(deps, rec.draftId, 'generating', { plan, intentSummary })
       runSpecStage(deps, rec.draftId).catch(() => {/* logged via draft.errorMessage */})
       reply.code(202)
       return { draftId: rec.draftId, status: 'generating' }
@@ -331,11 +334,13 @@ export async function testsDraftRoutes(
         return { error: result.error, details: result.details, featureDir: result.featureDir }
       }
       const uploadedDocsWritten = writeUploadedDocumentCopies(result.featureDir, rec)
-      transition(deps.logsDir, rec.draftId, 'accepted', {
+      transitionDraft(deps, rec.draftId, 'accepted', {
         featureName,
         generatedFiles: [...result.written, ...uploadedDocsWritten],
         devDependencies: rec.devDependencies,
       })
+      publishWorkspaceEvent(deps.workspaceEvents, { type: 'feature-created', feature: featureName })
+      publishWorkspaceEvent(deps.workspaceEvents, { type: 'tests-changed', feature: featureName })
       return {
         draftId: rec.draftId,
         status: 'accepted',
@@ -355,7 +360,7 @@ export async function testsDraftRoutes(
       reply.code(409)
       return { error: `cannot reject while ${rec.status}; stop generation first` }
     }
-    transition(deps.logsDir, rec.draftId, 'rejected')
+    transitionDraft(deps, rec.draftId, 'rejected')
     reply.code(204)
     return null
   })
@@ -370,7 +375,7 @@ export async function testsDraftRoutes(
       reply.code(409)
       return { error: `cannot cancel-generation from status ${rec.status}` }
     }
-    transition(deps.logsDir, rec.draftId, 'cancelled', {
+    transitionDraft(deps, rec.draftId, 'cancelled', {
       activeAgentStage: undefined,
       errorMessage: 'Generation cancelled by user',
     })
@@ -413,6 +418,7 @@ export async function testsDraftRoutes(
       reply.code(404)
       return { error: 'draft not found' }
     }
+    publishWorkspaceEvent(deps.workspaceEvents, { type: 'draft-deleted', draftId: req.params.id })
     reply.code(204)
     return null
   })
@@ -426,7 +432,7 @@ async function runPlanStage(deps: TestsDraftRouteDeps, draftId: string): Promise
   if (rec.status !== 'planning') return
   const picked = pickWizardAgent(deps)
   if (!picked.ok) {
-    transition(deps.logsDir, draftId, 'error', { errorMessage: picked.error })
+    transitionDraft(deps, draftId, 'error', { errorMessage: picked.error })
     return
   }
   const p = draftPaths(deps.logsDir, draftId)
@@ -434,7 +440,7 @@ async function runPlanStage(deps: TestsDraftRouteDeps, draftId: string): Promise
   // session WS can tail the JSONL log from the moment of spawn.
   const pinSessionId = picked.agent === 'claude' ? randomUUID() : undefined
   const planAgentSessionRef = refForAgentSpawn({ agent: picked.agent, cwd: p.draftDir, sessionId: pinSessionId })
-  patchDraft(deps.logsDir, draftId, {
+  patchDraft(deps, draftId, {
     wizardAgent: picked.agent,
     activeAgentStage: 'planning',
     planAgentSessionRef,
@@ -457,7 +463,7 @@ async function runPlanStage(deps: TestsDraftRouteDeps, draftId: string): Promise
     })
   } catch (e) {
     if (isCancelled(deps.logsDir, draftId)) return
-    transition(deps.logsDir, draftId, 'error', {
+    transitionDraft(deps, draftId, 'error', {
       errorMessage: `plan agent failed: ${(e as Error).message}`,
     })
     return
@@ -465,7 +471,7 @@ async function runPlanStage(deps: TestsDraftRouteDeps, draftId: string): Promise
   if (isCancelled(deps.logsDir, draftId)) return
   const parsed = extractPlan(stream)
   if (!parsed.ok) {
-    transition(deps.logsDir, draftId, 'error', { errorMessage: parsed.error })
+    transitionDraft(deps, draftId, 'error', { errorMessage: parsed.error })
     return
   }
   fs.writeFileSync(p.planJson, JSON.stringify(parsed.value, null, 2), 'utf8')
@@ -473,7 +479,7 @@ async function runPlanStage(deps: TestsDraftRouteDeps, draftId: string): Promise
   const intentSummary = intent.ok ? intent.value : 'No intent summary produced by agent.'
   fs.writeFileSync(p.intentMd, intentSummary, 'utf8')
   const sessionRef = extractWizardSessionRef(stream)
-  transition(deps.logsDir, draftId, 'plan-ready', {
+  transitionDraft(deps, draftId, 'plan-ready', {
     plan: parsed.value,
     intentSummary,
     activeAgentStage: undefined,
@@ -504,7 +510,7 @@ async function runSpecStage(deps: TestsDraftRouteDeps, draftId: string): Promise
   if (rec.status !== 'generating') return
   const picked = pickWizardAgent(deps)
   if (!picked.ok) {
-    transition(deps.logsDir, draftId, 'error', { errorMessage: picked.error })
+    transitionDraft(deps, draftId, 'error', { errorMessage: picked.error })
     return
   }
   const p = draftPaths(deps.logsDir, draftId)
@@ -518,7 +524,7 @@ async function runSpecStage(deps: TestsDraftRouteDeps, draftId: string): Promise
     ? (resumeSessionId ?? randomUUID())
     : undefined
   const specAgentSessionRef = refForAgentSpawn({ agent: picked.agent, cwd: p.draftDir, sessionId: pinSessionId })
-  patchDraft(deps.logsDir, draftId, {
+  patchDraft(deps, draftId, {
     wizardAgent: picked.agent,
     activeAgentStage: 'generating',
     specAgentSessionRef,
@@ -540,7 +546,7 @@ async function runSpecStage(deps: TestsDraftRouteDeps, draftId: string): Promise
     })
   } catch (e) {
     if (isCancelled(deps.logsDir, draftId)) return
-    transition(deps.logsDir, draftId, 'error', {
+    transitionDraft(deps, draftId, 'error', {
       errorMessage: `spec agent failed: ${(e as Error).message}`,
     })
     return
@@ -548,7 +554,7 @@ async function runSpecStage(deps: TestsDraftRouteDeps, draftId: string): Promise
   if (isCancelled(deps.logsDir, draftId)) return
   const parsed = extractGeneratedSpecOutput(stream)
   if (!parsed.ok) {
-    transition(deps.logsDir, draftId, 'error', { errorMessage: parsed.error })
+    transitionDraft(deps, draftId, 'error', { errorMessage: parsed.error })
     return
   }
   fs.mkdirSync(p.generatedDir, { recursive: true })
@@ -557,7 +563,7 @@ async function runSpecStage(deps: TestsDraftRouteDeps, draftId: string): Promise
     fs.mkdirSync(path.dirname(target), { recursive: true })
     fs.writeFileSync(target, file.content, 'utf8')
   }
-  transition(deps.logsDir, draftId, 'spec-ready', {
+  transitionDraft(deps, draftId, 'spec-ready', {
     generatedFiles: parsed.value.files.map((f) => f.path),
     devDependencies: parsed.value.devDependencies,
     activeAgentStage: undefined,
@@ -596,10 +602,23 @@ function isStageCurrent(logsDir: string, draftId: string, status: DraftRecord['s
   return readDraft(logsDir, draftId)?.status === status
 }
 
-function patchDraft(logsDir: string, draftId: string, patch: Partial<DraftRecord>): void {
-  const rec = readDraft(logsDir, draftId)
+function transitionDraft(
+  deps: TestsDraftRouteDeps,
+  draftId: string,
+  status: DraftRecord['status'],
+  patch?: Partial<DraftRecord>,
+): DraftRecord {
+  const next = transition(deps.logsDir, draftId, status, patch)
+  publishWorkspaceEvent(deps.workspaceEvents, { type: 'draft-updated', draft: next })
+  return next
+}
+
+function patchDraft(deps: TestsDraftRouteDeps, draftId: string, patch: Partial<DraftRecord>): void {
+  const rec = readDraft(deps.logsDir, draftId)
   if (!rec) return
-  writeDraft(logsDir, { ...rec, ...patch })
+  const next = { ...rec, ...patch }
+  writeDraft(deps.logsDir, next)
+  publishWorkspaceEvent(deps.workspaceEvents, { type: 'draft-updated', draft: next })
 }
 
 function isDraftPrdDocument(value: unknown): value is DraftPrdDocument {

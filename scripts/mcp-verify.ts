@@ -48,10 +48,21 @@ export function verifyMcpRegistration(
 ): VerifyResult {
   const { exitCode, output } = run(
     invocation.command,
-    [...invocation.args, 'doctor', '--no-autostart'],
+    doctorArgs(invocation.args),
     invocation.env,
   )
   return classifyDoctorOutput(exitCode, output)
+}
+
+function doctorArgs(args: string[]): string[] {
+  const mcpIndex = args.indexOf('mcp')
+  if (mcpIndex === -1) return [...args, 'doctor', '--no-autostart']
+  return [
+    ...args.slice(0, mcpIndex + 1),
+    'doctor',
+    ...args.slice(mcpIndex + 1),
+    '--no-autostart',
+  ]
 }
 
 const defaultRunner: VerifyRunner = (command, args, env) => {

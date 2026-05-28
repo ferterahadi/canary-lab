@@ -48,6 +48,7 @@ export async function agentSessionStreamRoutes(
       const ref = resolveRunRef(runDir)
       const handle = tailAgentSession({
         ref: ref ?? { agent: 'claude', sessionId: '', logPath: '' },
+        onReady: (readyRef) => sendJson(socket, { type: 'session', agent: readyRef.agent, sessionId: readyRef.sessionId }),
         onEvent: (event) => sendJson(socket, { type: 'event', event }),
         onError: (err) => sendJson(socket, { type: 'error', error: err.message }),
         discoverRef: () => resolveRunRef(runDir),
@@ -77,6 +78,7 @@ export async function agentSessionStreamRoutes(
       const p = draftPaths(deps.logsDir, req.params.draftId)
       const handle = tailAgentSession({
         ref: ref ?? { agent, sessionId: '', logPath: '' },
+        onReady: (readyRef) => sendJson(socket, { type: 'session', agent: readyRef.agent, sessionId: readyRef.sessionId }),
         onEvent: (event) => sendJson(socket, { type: 'event', event }),
         onError: (err) => sendJson(socket, { type: 'error', error: err.message }),
         discoverRef: () => {

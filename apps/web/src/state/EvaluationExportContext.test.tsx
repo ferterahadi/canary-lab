@@ -88,14 +88,14 @@ describe('EvaluationExportProvider', () => {
     expect(api.listEvaluationExportTasks).toHaveBeenCalledWith()
     expect(captured.value?.tasks.map((item) => item.taskId)).toEqual(['persisted-completed', 'persisted-running'])
     expect(captured.value?.taskForRun('run-persisted')?.taskId).toBe('persisted-running')
-    expect(FakeWebSocket.instances.map((socket) => socket.url)).toEqual([
+    expect(exportSockets().map((socket) => socket.url)).toEqual([
       'ws://test/ws/evaluation-exports/persisted-completed',
       'ws://test/ws/evaluation-exports/persisted-running',
     ])
 
     act(() => {
-      FakeWebSocket.instances[0].fire({ type: 'data', chunk: 'completed restored log\n' })
-      FakeWebSocket.instances[1].fire({ type: 'data', chunk: 'running restored log\n' })
+      taskSocket('persisted-completed').fire({ type: 'data', chunk: 'completed restored log\n' })
+      taskSocket('persisted-running').fire({ type: 'data', chunk: 'running restored log\n' })
     })
     expect(captured.value?.logsByTaskId['persisted-completed']).toContain('completed restored log')
     expect(captured.value?.logsByTaskId['persisted-running']).toContain('running restored log')
@@ -113,7 +113,7 @@ describe('EvaluationExportProvider', () => {
     })
 
     expect(api.startEvaluationExport).toHaveBeenCalledWith('run-1', 'localized')
-    expect(FakeWebSocket.instances[0].url).toBe('ws://test/ws/evaluation-exports/task-1')
+    expect(taskSocket('task-1').url).toBe('ws://test/ws/evaluation-exports/task-1')
     expect(captured.value?.latestTask?.taskId).toBe('task-1')
     expect(captured.value?.selectedTask?.taskId).toBe('task-1')
     expect(captured.value?.taskForRun('run-1')?.taskId).toBe('task-1')
@@ -121,12 +121,12 @@ describe('EvaluationExportProvider', () => {
     expect(captured.value?.logsByTaskId['task-1']).toContain('localized output')
 
     act(() => {
-      FakeWebSocket.instances[0].fire({ type: 'data', chunk: 'chunk\n' })
+      taskSocket('task-1').fire({ type: 'data', chunk: 'chunk\n' })
     })
     expect(captured.value?.logsByTaskId['task-1']).toContain('chunk')
 
     await act(async () => {
-      FakeWebSocket.instances[0].fire({ type: 'exit', code: 0 })
+      taskSocket('task-1').fire({ type: 'exit', code: 0 })
       await Promise.resolve()
     })
     expect(captured.value?.latestTask?.status).toBe('completed')
@@ -148,8 +148,7 @@ describe('EvaluationExportProvider', () => {
     expect(captured.value?.dialogOpen).toBe(false)
   })
 
-  it('polls running tasks and records refresh failures', async () => {
-    vi.useFakeTimers()
+  it('records refresh failures when a task log stream exits before task refresh succeeds', async () => {
     const captured = renderProbe()
     const running = task({ taskId: 'task-2', status: 'running' })
     vi.mocked(api.startEvaluationExport).mockResolvedValue(running)
@@ -159,7 +158,7 @@ describe('EvaluationExportProvider', () => {
       await captured.value?.startExport('run-2', 'raw')
     })
     await act(async () => {
-      vi.advanceTimersByTime(1500)
+      taskSocket('task-2').fire({ type: 'exit', code: 1 })
       await Promise.resolve()
     })
 
@@ -218,7 +217,6 @@ describe('EvaluationExportProvider', () => {
     vi.mocked(api.startEvaluationExport)
       .mockResolvedValueOnce(running)
       .mockResolvedValueOnce(running)
-    vi.mocked(api.getEvaluationExportTask).mockRejectedValue('refresh string failure')
 
     await act(async () => {
       await captured.value?.startExport('run-a', 'raw')
@@ -231,11 +229,7 @@ describe('EvaluationExportProvider', () => {
     })
     expect(captured.value?.selectedTask).toBeNull()
 
-    await act(async () => {
-      vi.advanceTimersByTime(1500)
-      await Promise.resolve()
-    })
-    expect(captured.value?.logsByTaskId['same-task']).toContain('unable to refresh task: refresh string failure')
+    expect(captured.value?.logsByTaskId['same-task']).toContain('queued raw output export')
   })
 
   it('handles socket setup failures, stream errors, dismiss, and unmount cleanup', async () => {
@@ -273,14 +267,14 @@ describe('EvaluationExportProvider', () => {
       await socketCaptured.value?.startExport('run-4', 'raw')
     })
     act(() => {
-      FakeWebSocket.instances[0].fire({ type: 'error' })
+      taskSocket('task-4').fire({ type: 'error' })
     })
     expect(socketCaptured.value?.logsByTaskId['task-4']).toContain('log stream error: unknown error')
 
     act(() => {
       root.unmount()
     })
-    expect(FakeWebSocket.instances[0].closeCalls).toBe(1)
+    expect(workspaceSocket().closeCalls).toBe(1)
   })
 
   it('skips re-subscribing a task that already has an active connection', async () => {
@@ -291,13 +285,13 @@ describe('EvaluationExportProvider', () => {
     await act(async () => {
       await captured.value?.startExport('run-dup', 'raw')
     })
-    expect(FakeWebSocket.instances).toHaveLength(1)
+    expect(exportSockets()).toHaveLength(1)
 
     await act(async () => {
       await captured.value?.startExport('run-dup', 'raw')
     })
     // The second startExport reuses the existing connection rather than opening another.
-    expect(FakeWebSocket.instances).toHaveLength(1)
+    expect(exportSockets()).toHaveLength(1)
   })
 
   it('ignores rehydrated tasks when the provider unmounts before tasks resolve', async () => {
@@ -317,7 +311,7 @@ describe('EvaluationExportProvider', () => {
     })
 
     // No socket opens because the rehydration short-circuits on the cancelled flag.
-    expect(FakeWebSocket.instances).toHaveLength(0)
+    expect(exportSockets()).toHaveLength(0)
   })
 
   it('keeps an empty task list when listEvaluationExportTasks rejects on startup', async () => {
@@ -331,7 +325,6 @@ describe('EvaluationExportProvider', () => {
   })
 
   it('discovers externally created export tasks without a refresh', async () => {
-    vi.useFakeTimers()
     const external = task({
       taskId: 'external-task',
       runId: 'run-external',
@@ -339,9 +332,7 @@ describe('EvaluationExportProvider', () => {
       status: 'running',
       createdAt: '2026-01-02T00:00:00.000Z',
     })
-    vi.mocked(api.listEvaluationExportTasks)
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([external])
+    vi.mocked(api.listEvaluationExportTasks).mockResolvedValueOnce([])
 
     const captured = renderProbe()
     await act(async () => {
@@ -349,12 +340,11 @@ describe('EvaluationExportProvider', () => {
     })
     expect(captured.value?.tasks).toEqual([])
 
-    await act(async () => {
-      vi.advanceTimersByTime(3000)
-      await Promise.resolve()
+    act(() => {
+      workspaceSocket().fire({ type: 'evaluation-export-created', task: external })
     })
 
-    expect(api.listEvaluationExportTasks).toHaveBeenCalledTimes(2)
+    expect(api.listEvaluationExportTasks).toHaveBeenCalledTimes(1)
     expect(captured.value?.latestTask?.taskId).toBe('external-task')
     expect(captured.value?.taskForRun('run-external')?.taskId).toBe('external-task')
     expect(FakeWebSocket.instances.map((socket) => socket.url)).toContain('ws://test/ws/evaluation-exports/external-task')
@@ -392,14 +382,14 @@ describe('EvaluationExportProvider', () => {
     await act(async () => {
       await Promise.resolve()
     })
-    expect(FakeWebSocket.instances).toHaveLength(1)
+    expect(exportSockets()).toHaveLength(1)
 
     await act(async () => {
       vi.advanceTimersByTime(3000)
       await Promise.resolve()
     })
 
-    expect(FakeWebSocket.instances).toHaveLength(1)
+    expect(exportSockets()).toHaveLength(1)
   })
 
   it('ignores periodic discovery results after unmount', async () => {
@@ -426,7 +416,7 @@ describe('EvaluationExportProvider', () => {
       await Promise.resolve()
     })
 
-    expect(FakeWebSocket.instances).toHaveLength(0)
+    expect(exportSockets()).toHaveLength(0)
     root = createRoot(container)
   })
 
@@ -472,6 +462,23 @@ function renderProbe(WebSocketImpl: typeof WebSocket = FakeWebSocket as unknown 
     )
   })
   return captured
+}
+
+function workspaceSocket(): FakeWebSocket {
+  const socket = FakeWebSocket.instances.find((item) => item.url === 'ws://test/ws/workspace')
+  if (!socket) throw new Error('workspace socket not opened')
+  return socket
+}
+
+function exportSockets(): FakeWebSocket[] {
+  return FakeWebSocket.instances.filter((item) => item.url.includes('/ws/evaluation-exports/'))
+}
+
+function taskSocket(taskId: string): FakeWebSocket {
+  const url = `ws://test/ws/evaluation-exports/${taskId}`
+  const socket = FakeWebSocket.instances.find((item) => item.url === url)
+  if (!socket) throw new Error(`task socket not opened: ${taskId}`)
+  return socket
 }
 
 function Probe({ captured }: { captured: { value: ReturnType<typeof useEvaluationExports> | null } }) {

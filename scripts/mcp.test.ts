@@ -10,6 +10,7 @@ import {
   inferClientKindFromProcessLines,
   inferMcpClientKind,
   main,
+  resolveUiProjectRootForMcpAutostart,
 } from './mcp'
 
 const inertPtyFactory: PtyFactory = () => ({
@@ -145,6 +146,72 @@ describe('canary-lab mcp', () => {
     expect(started).toBe(true)
     expect(healthChecks).toBeGreaterThan(1)
     expect(stderr.text()).toContain('starting `canary-lab ui --no-open`')
+  })
+
+  it('resolves MCP UI autostart from the current workspace before falling back to registry', () => {
+    const cwdWorkspace = path.resolve(__dirname, '..', 'templates', 'project')
+    const registered = path.resolve(__dirname, '..')
+
+    expect(resolveUiProjectRootForMcpAutostart({
+      cwd: cwdWorkspace,
+      registry: { version: 1, workspaces: [] },
+    })).toBe(cwdWorkspace)
+
+    expect(resolveUiProjectRootForMcpAutostart({
+      cwd: '/',
+      registry: {
+        version: 1,
+        workspaces: [
+          { name: 'old', path: registered, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+          { name: 'workspace', path: cwdWorkspace, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-02-01T00:00:00.000Z' },
+        ],
+      },
+    })).toBe(cwdWorkspace)
+  })
+
+  it('does not auto-start a UI server from / when no workspace can be resolved', async () => {
+    const stderr = new BufferWritable()
+    let started = false
+    const fetchMock: typeof fetch = async () => {
+      throw new TypeError('fetch failed')
+    }
+
+    await expect(ensureMcpServerReachable('http://127.0.0.1:7421/mcp', {
+      cwd: '/',
+      registry: { version: 1, workspaces: [] },
+      stderr,
+      fetch: fetchMock,
+      startUi: async () => { started = true },
+      startupPollMs: 1,
+      startupTimeoutMs: 5,
+    })).resolves.toBe(false)
+
+    expect(started).toBe(false)
+    expect(stderr.text()).toContain('Cannot auto-start Canary Lab UI because no workspace could be resolved')
+  })
+
+  it('rejects a default local MCP server that is bound to an unusable project root', async () => {
+    const stderr = new BufferWritable()
+    let started = false
+    const fetchMock: typeof fetch = async (url) => {
+      if (String(url).endsWith('/mcp/health')) {
+        return new Response(JSON.stringify({ ok: true, projectRoot: '/' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        })
+      }
+      throw new TypeError('unexpected fetch')
+    }
+
+    await expect(ensureMcpServerReachable('http://127.0.0.1:7421/mcp', {
+      stderr,
+      fetch: fetchMock,
+      startUi: async () => { started = true },
+    })).resolves.toBe(false)
+
+    expect(started).toBe(false)
+    expect(stderr.text()).toContain('projectRoot "/"')
+    expect(stderr.text()).toContain('Stop that server')
   })
 
   it('does not auto-start the UI for custom MCP URLs', async () => {

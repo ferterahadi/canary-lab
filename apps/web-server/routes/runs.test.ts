@@ -8,6 +8,7 @@ import { createRegistry, RunStore, type OrchestratorLike, type RestartHealResult
 import { createEvaluationExportTask, evaluationExportsDir } from '../lib/evaluation-export-store'
 import { readManifest, readRunsIndex, writeManifest, writeRunsIndex } from '../lib/runtime/manifest'
 import { runDirFor } from '../lib/runtime/run-paths'
+import type { WorkspaceEvent } from '../lib/workspace-events'
 
 let tmpDir: string
 let logsDir: string
@@ -60,8 +61,9 @@ async function build(opts: {
 	  broker?: Parameters<typeof runsRoutes>[1]['broker']
 	  restartHeal?: (runId: string, text: string) => Promise<RestartHealResult>
 	  restartRun?: (runId: string) => Promise<RestartRunResult>
-	  projectRoot?: string
+  projectRoot?: string
   generateEvaluationRewrite?: Parameters<typeof runsRoutes>[1]['generateEvaluationRewrite']
+  events?: WorkspaceEvent[]
 } = {}) {
   const registry = createRegistry()
   const store = new RunStore(logsDir, registry)
@@ -73,8 +75,9 @@ async function build(opts: {
     broker: opts.broker,
 	    startRun: opts.startRun ?? (async () => { throw new Error('not configured') }),
 	    restartHeal: opts.restartHeal,
-	    restartRun: opts.restartRun,
+    restartRun: opts.restartRun,
 	    generateEvaluationRewrite: opts.generateEvaluationRewrite,
+	    workspaceEvents: opts.events ? { publish: (event) => opts.events!.push(event) } : undefined,
 	  })
   return { app, registry, store }
 }
@@ -766,6 +769,7 @@ test('records checkout', async ({ page }) => {
   })
 
   it('marks persisted running evaluation export tasks as failed when no worker owns them', async () => {
+    const events: WorkspaceEvent[] = []
     createEvaluationExportTask(logsDir, {
       taskId: 'eval-stale-task',
       runId: 'r-stale-task',
@@ -777,7 +781,7 @@ test('records checkout', async ({ page }) => {
       downloadReady: false,
       archiveBase: 'canary-lab-evaluation-checkout-r-stale-task',
     })
-    const { app } = await build()
+    const { app } = await build({ events })
 
     const listed = await app.inject({ method: 'GET', url: '/api/evaluation-exports' })
     const fetched = await app.inject({ method: 'GET', url: '/api/evaluation-exports/eval-stale-task' })
@@ -790,6 +794,10 @@ test('records checkout', async ({ page }) => {
     })
     expect(fetched.json()).toMatchObject({ status: 'failed' })
     expect(fs.readFileSync(path.join(evaluationExportsDir(logsDir), 'eval-stale-task', 'export.log'), 'utf8')).toContain('interrupted')
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'evaluation-export-updated',
+      task: expect.objectContaining({ taskId: 'eval-stale-task', status: 'failed' }),
+    }))
   })
 
   it('keeps running external evaluation export tasks pending across refresh', async () => {

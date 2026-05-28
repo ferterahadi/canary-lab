@@ -25,10 +25,13 @@ describe('verifyMcpRegistration', () => {
   it('probes the resolved command with `mcp doctor --no-autostart`', () => {
     const calls: Array<{ command: string; args: string[] }> = []
     const result = verifyMcpRegistration(
-      { command: '/usr/bin/node', args: ['/opt/cli.js', 'mcp'] },
+      { command: '/usr/bin/node', args: ['/opt/cli.js', 'mcp', '--profile', 'full'] },
       (command, args) => { calls.push({ command, args }); return { exitCode: 0, output: 'reachable' } },
     )
-    expect(calls).toEqual([{ command: '/usr/bin/node', args: ['/opt/cli.js', 'mcp', 'doctor', '--no-autostart'] }])
+    expect(calls).toEqual([{
+      command: '/usr/bin/node',
+      args: ['/opt/cli.js', 'mcp', 'doctor', '--profile', 'full', '--no-autostart'],
+    }])
     expect(result.status).toBe('verified')
   })
 

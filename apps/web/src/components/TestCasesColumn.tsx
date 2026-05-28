@@ -10,9 +10,10 @@ interface Props {
   feature: string | null
   activeRunSummary: RunSummary | undefined
   activeRunStatus: RunStatus | undefined
+  refreshKey?: number
 }
 
-export function TestCasesColumn({ feature, activeRunSummary, activeRunStatus }: Props) {
+export function TestCasesColumn({ feature, activeRunSummary, activeRunStatus, refreshKey = 0 }: Props) {
   const [specs, setSpecs] = useState<FeatureSpecFile[] | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [expandedTest, setExpandedTest] = useState<string | null>(null)
@@ -37,7 +38,7 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunStatus }: 
         setLoadError(formatLoadError(err))
       })
     return () => { cancelled = true }
-  }, [feature])
+  }, [feature, refreshKey])
 
   if (!feature) {
     return (

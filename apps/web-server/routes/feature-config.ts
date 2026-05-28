@@ -15,10 +15,12 @@ import { loadFeatures } from '../lib/feature-loader'
 import { resolveVars } from '../lib/runtime/env-switcher/switch'
 import { getProjectRoot } from '../../../shared/runtime/project-root'
 import { checkoutBranch, findRepo, getGitStatus, resolveRepoPath } from '../lib/git-repo'
+import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../lib/workspace-events'
 
 export interface FeatureConfigRouteDeps {
   featuresDir: string
   isRepoActive?: (feature: string, repo: string) => boolean
+  workspaceEvents?: WorkspaceEventPublisher
 }
 
 const FEATURE_CONFIG_NAMES = ['feature.config.cjs', 'feature.config.js', 'feature.config.ts']
@@ -167,6 +169,7 @@ export async function featureConfigRoutes(
       }
       fs.writeFileSync(cfg.path, next)
       const parsed = readFeatureConfig(next)
+      publishWorkspaceEvent(deps.workspaceEvents, { type: 'features-changed' })
       return { path: cfg.path, format: cfg.format, content: next, parsed }
     },
   )
@@ -254,6 +257,7 @@ export async function featureConfigRoutes(
         return { error: 'feature directory is outside the features root' }
       }
       fs.rmSync(featureDir, { recursive: true, force: true })
+      publishWorkspaceEvent(deps.workspaceEvents, { type: 'feature-deleted', feature: feature.name })
       reply.code(204)
       return null
     },
@@ -397,6 +401,8 @@ export async function featureConfigRoutes(
         fs.writeFileSync(path.join(envDir, 'feature.env'), '')
       }
       syncEnvsInConfig(feature.featureDir)
+      publishWorkspaceEvent(deps.workspaceEvents, { type: 'envsets-changed', feature: feature.name })
+      publishWorkspaceEvent(deps.workspaceEvents, { type: 'features-changed' })
       reply.code(201)
       return { env: envName }
     },
@@ -419,6 +425,8 @@ export async function featureConfigRoutes(
       }
       fs.rmSync(envDir, { recursive: true, force: true })
       syncEnvsInConfig(feature.featureDir)
+      publishWorkspaceEvent(deps.workspaceEvents, { type: 'envsets-changed', feature: feature.name })
+      publishWorkspaceEvent(deps.workspaceEvents, { type: 'features-changed' })
       reply.code(204)
       return null
     },
@@ -473,6 +481,7 @@ export async function featureConfigRoutes(
       const next = writeDotenv(source, req.body.entries)
       fs.writeFileSync(slotPath, next)
       const parsed = parseDotenv(next)
+      publishWorkspaceEvent(deps.workspaceEvents, { type: 'envsets-changed', feature: feature.name })
       return { path: slotPath, content: next, ...parsed }
     },
   )
@@ -550,6 +559,7 @@ export async function featureConfigRoutes(
       },
     }
     writeEnvsetsConfig(envsetsDir, nextCfg)
+    publishWorkspaceEvent(deps.workspaceEvents, { type: 'envsets-changed', feature: feature.name })
     reply.code(201)
     return { slot: slotName }
   })
@@ -581,6 +591,7 @@ export async function featureConfigRoutes(
         cfg.feature.slots = cfg.feature.slots.filter((s) => s !== slotName)
       }
       if (fs.existsSync(envsetsDir)) writeEnvsetsConfig(envsetsDir, cfg)
+      publishWorkspaceEvent(deps.workspaceEvents, { type: 'envsets-changed', feature: feature.name })
       reply.code(204)
       return null
     },

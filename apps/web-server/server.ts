@@ -18,7 +18,9 @@ import { paneStreamRoutes } from './ws/pane-stream'
 import { runsStreamRoutes } from './ws/runs-stream'
 import { draftAgentStreamRoutes } from './ws/draft-agent-stream'
 import { agentSessionStreamRoutes } from './ws/agent-session-stream'
+import { workspaceStreamRoutes } from './ws/workspace-stream'
 import { createRegistry, RunStore, type OrchestratorRegistry, type OrchestratorLike } from './lib/run-store'
+import { WorkspaceEventBus } from './lib/workspace-events'
 import { PaneBroker } from './lib/pane-broker'
 import { loadFeatures } from './lib/feature-loader'
 import {
@@ -123,6 +125,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
 
   const registry = createRegistry()
   const runStore = new RunStore(logsDir, registry)
+  const workspaceEvents = new WorkspaceEventBus()
   // One-shot cleanup: a fresh UI server starts with an empty registry, so any
   // persisted 'running'/'healing' row is from a previous server process and is
   // not controllable by this process. Finalize it immediately instead of
@@ -158,6 +161,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
   await app.register(featuresRoutes, { featuresDir })
   await app.register(featureConfigRoutes, {
     featuresDir,
+    workspaceEvents,
     isRepoActive: (featureName) => runStore
       .list({ feature: featureName })
       .some((run) => isActiveRunStatus(run.status)),
@@ -265,6 +269,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
   const productionTestsDraftDeps: TestsDraftRouteDeps = {
     logsDir,
     projectRoot: opts.projectRoot,
+    workspaceEvents,
     newDraftId: () => {
       const id = generateRunId()
       ensureDraftBroker(id)
@@ -460,6 +465,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
 	    projectRoot: opts.projectRoot,
 	    store: runStore,
 	    broker: externalHealBroker,
+      workspaceEvents,
 	    startRun: async (
       featureName: string,
       env?: string,
@@ -859,6 +865,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
     logsDir,
   })
   await app.register(runsStreamRoutes, { store: runStore })
+  await app.register(workspaceStreamRoutes, { events: workspaceEvents })
   await app.register(draftAgentStreamRoutes, {
     brokerForDraft: (draftId) => draftBrokers.get(draftId) ?? null,
   })
@@ -876,6 +883,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
     broker: externalHealBroker,
     featuresDir,
     projectRoot: opts.projectRoot,
+    workspaceEvents,
 	    startRun: async (feature, env, healAgent) => {
 	      const resp = await app.inject({
 	        method: 'POST',
