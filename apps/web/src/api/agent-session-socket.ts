@@ -3,21 +3,24 @@ import type { AgentSessionEvent } from './client'
 // WebSocket wrapper for live structured agent-session events. Source is
 // either a run id or a (draftId, stage) pair — the server routes are
 // /ws/runs/:runId/agent-session and /ws/draft/:draftId/agent-session?stage=
-// respectively, and emit messages of the form { type: 'event', event } |
-// { type: 'error', error }.
+// respectively, and emit messages of the form { type: 'session', ... } |
+// { type: 'event', event } | { type: 'error', error }.
 
 export type AgentSessionSocketSource =
   | { kind: 'run'; runId: string }
   | { kind: 'draft'; draftId: string; stage: 'planning' | 'generating' }
 
 export interface AgentSessionSocketMessage {
-  type: 'event' | 'error' | 'done'
+  type: 'session' | 'event' | 'error' | 'done'
+  agent?: 'claude' | 'codex'
+  sessionId?: string
   event?: AgentSessionEvent
   error?: string
 }
 
 export interface ConnectAgentSessionOptions {
   source: AgentSessionSocketSource
+  onSession?: (session: { agent: 'claude' | 'codex'; sessionId: string }) => void
   onEvent: (event: AgentSessionEvent) => void
   onError?: (err: string) => void
   onDone?: () => void
@@ -61,7 +64,9 @@ export function connectAgentSessionStream(opts: ConnectAgentSessionOptions): Age
     ws.onmessage = (ev: MessageEvent): void => {
       let msg: AgentSessionSocketMessage
       try { msg = JSON.parse(typeof ev.data === 'string' ? ev.data : '') as AgentSessionSocketMessage } catch { return }
-      if (msg.type === 'event' && msg.event) {
+      if (msg.type === 'session' && msg.agent && typeof msg.sessionId === 'string') {
+        opts.onSession?.({ agent: msg.agent, sessionId: msg.sessionId })
+      } else if (msg.type === 'event' && msg.event) {
         opts.onEvent(msg.event)
       } else if (msg.type === 'error') {
         opts.onError?.(msg.error ?? 'unknown error')

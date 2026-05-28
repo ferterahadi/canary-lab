@@ -24,8 +24,6 @@ interface Props {
   source: AgentSessionSource
 }
 
-const SNAPSHOT_POLL_MS = 1500
-
 interface ViewState {
   agent: 'claude' | 'codex' | null
   sessionId: string
@@ -46,7 +44,6 @@ export function AgentSessionView({ source }: Props) {
   useEffect(() => {
     let cancelled = false
     let conn: { close(): void } | null = null
-    let pollTimer: ReturnType<typeof setTimeout> | null = null
     setLoading(true)
     setError(null)
     setState(null)
@@ -80,6 +77,12 @@ export function AgentSessionView({ source }: Props) {
           source: source.kind === 'run'
             ? { kind: 'run', runId: source.runId }
             : { kind: 'draft', draftId: source.draftId, stage: source.stage },
+          onSession: (session) => {
+            if (cancelled) return
+            setState((prev) => prev
+              ? { ...prev, agent: session.agent, sessionId: session.sessionId }
+              : { agent: session.agent, sessionId: session.sessionId, events: [] })
+          },
           onEvent: (event) => {
             if (cancelled) return
             // The first `snapshotLen` events the WS sends are replay of what
@@ -87,7 +90,7 @@ export function AgentSessionView({ source }: Props) {
             seenFromWs += 1
             if (seenFromWs <= snapshotLen) return
             setState((prev) => {
-              if (!prev) return { agent: event.kind === 'user-message' || event.kind === 'assistant-message' ? 'claude' : null as never, sessionId: '', events: [event] }
+              if (!prev) return { agent: null, sessionId: '', events: [event] }
               return { ...prev, events: [...prev.events, event] }
             })
           },
@@ -100,30 +103,6 @@ export function AgentSessionView({ source }: Props) {
             setError(err)
           },
         })
-        // While live, periodically re-pull the REST snapshot too. This is a
-        // belt-and-braces guard for cases where the WS reconnects and the
-        // server's replay misses an event that landed between disconnect and
-        // reconnect. Also recovers the session id once the file appears.
-        const repoll = (): void => {
-          if (cancelled || !source.live) return
-          fetchSnapshot()
-            .then((next) => {
-              if (cancelled || !next) return
-              if (next.events.length > snapshotLen) {
-                snapshotLen = next.events.length
-                setState({ agent: next.agent, sessionId: next.sessionId, events: next.events })
-              } else if (next.sessionId) {
-                setState((prev) => prev && !prev.sessionId
-                  ? { ...prev, agent: next.agent, sessionId: next.sessionId }
-                  : prev)
-              }
-            })
-            .catch(() => { /* ignore */ })
-            .finally(() => {
-              if (!cancelled) pollTimer = setTimeout(repoll, SNAPSHOT_POLL_MS)
-            })
-        }
-        pollTimer = setTimeout(repoll, SNAPSHOT_POLL_MS)
       })
       .catch((err: unknown) => {
         if (cancelled) return
@@ -134,7 +113,6 @@ export function AgentSessionView({ source }: Props) {
     return () => {
       cancelled = true
       if (conn) conn.close()
-      if (pollTimer) clearTimeout(pollTimer)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sourceKey])

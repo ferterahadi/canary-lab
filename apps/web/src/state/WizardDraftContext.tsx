@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import * as api from '../api/client'
+import { connectWorkspaceEvents } from '../api/workspace-socket'
 import type { CreateDraftPayload, DraftRecord, PlanStep } from '../api/types'
 
 interface WizardDraftContextValue {
@@ -21,15 +22,16 @@ interface WizardDraftContextValue {
 
 const WizardDraftContext = createContext<WizardDraftContextValue | null>(null)
 
-export function WizardDraftProvider({ children }: { children: ReactNode }) {
+export interface WizardDraftProviderProps {
+  children: ReactNode
+  wsBase?: string
+  WebSocketImpl?: typeof WebSocket
+}
+
+export function WizardDraftProvider({ children, wsBase, WebSocketImpl }: WizardDraftProviderProps) {
   const [draftsById, setDraftsById] = useState<Record<string, DraftRecord>>({})
   const [selectedDraftId, setSelectedDraftId] = useState<string | null>(null)
   const [wizardOpen, setWizardOpen] = useState(false)
-
-  const rememberDraft = useCallback((draft: DraftRecord): DraftRecord => {
-    setDraftsById((current) => ({ ...current, [draft.draftId]: draft }))
-    return draft
-  }, [])
 
   const forgetDraft = useCallback((draftId: string): void => {
     setDraftsById((current) => {
@@ -39,6 +41,15 @@ export function WizardDraftProvider({ children }: { children: ReactNode }) {
     setSelectedDraftId((selected) => (selected === draftId ? null : selected))
   }, [])
 
+  const rememberDraft = useCallback((draft: DraftRecord): DraftRecord => {
+    if (!isVisibleWizardTask(draft)) {
+      forgetDraft(draft.draftId)
+      return draft
+    }
+    setDraftsById((current) => ({ ...current, [draft.draftId]: draft }))
+    return draft
+  }, [forgetDraft])
+
   const refreshDraft = useCallback(async (draftId: string): Promise<DraftRecord | null> => {
     try {
       return rememberDraft(await api.getDraft(draftId))
@@ -47,26 +58,44 @@ export function WizardDraftProvider({ children }: { children: ReactNode }) {
     }
   }, [rememberDraft])
 
+  const reconcileDraftList = useCallback((drafts: DraftRecord[]): void => {
+    const visible = drafts.filter(isVisibleWizardTask)
+    const next = Object.fromEntries(visible.map((draft) => [draft.draftId, draft]))
+    setDraftsById(next)
+    setSelectedDraftId((selected) => (selected && !next[selected] ? null : selected))
+  }, [])
+
   useEffect(() => {
     let cancelled = false
     api.listDrafts()
       .then((drafts) => {
-        if (cancelled) return
-        const visible = drafts.filter(isVisibleWizardTask)
-        setDraftsById(Object.fromEntries(visible.map((draft) => [draft.draftId, draft])))
+        if (!cancelled) reconcileDraftList(drafts)
       })
       .catch(() => { /* keep an empty task list on startup failures */ })
     return () => { cancelled = true }
-  }, [])
+  }, [reconcileDraftList])
 
   useEffect(() => {
-    const active = Object.values(draftsById).filter((draft) => isActiveWizardTask(draft.status))
-    if (active.length === 0) return
-    const timer = setInterval(() => {
-      for (const draft of active) void refreshDraft(draft.draftId)
-    }, 1000)
-    return () => clearInterval(timer)
-  }, [draftsById, refreshDraft])
+    let conn: { close(): void } | null = null
+    try {
+      conn = connectWorkspaceEvents({
+        wsBase,
+        WebSocketImpl,
+        onEvent: (event) => {
+          if (event.type === 'draft-created' || event.type === 'draft-updated') {
+            rememberDraft(event.draft)
+            return
+          }
+          if (event.type === 'draft-deleted') {
+            forgetDraft(event.draftId)
+          }
+        },
+      })
+    } catch {
+      // The initial REST list and direct mutation responses still keep the wizard usable.
+    }
+    return () => conn?.close()
+  }, [WebSocketImpl, forgetDraft, rememberDraft, wsBase])
 
   const drafts = useMemo(
     () => Object.values(draftsById)

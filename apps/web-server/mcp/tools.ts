@@ -68,6 +68,7 @@ import {
   isTerminalRunStatus,
   deriveRunActionAvailability,
 } from '../../../shared/run-state'
+import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../lib/workspace-events'
 
 // Every Canary Lab MCP tool is a thin wrapper around an existing internal
 // helper or REST handler. The translation pattern: validate input via zod,
@@ -147,6 +148,7 @@ export interface CanaryLabMcpDeps {
     sessionId: string | undefined,
     guidance: string | undefined,
   ) => Promise<{ statusCode: number; body: unknown }>
+  workspaceEvents?: WorkspaceEventPublisher
 }
 
 const CLIENT_KIND = z.enum(['claude-cli', 'claude-desktop', 'codex-cli', 'codex-desktop', 'other'])
@@ -530,6 +532,8 @@ export function registerCanaryLabTools(
         ? captureFeatureEnvFiles({ projectRoot: deps.projectRoot, featuresDir: deps.featuresDir }, { feature, sources: envSources as EnvFileSource[] })
         : null
       if (captured && !captured.ok) return errorResult(captured.error)
+      publishWorkspaceEvent(deps.workspaceEvents, { type: 'feature-created', feature })
+      if (captured?.ok) publishWorkspaceEvent(deps.workspaceEvents, { type: 'envsets-changed', feature })
       return asJsonResult({
         ...created,
         ...(captured?.ok ? { captured: captured.captured, envsets: captured.summary } : {}),
@@ -581,7 +585,10 @@ export function registerCanaryLabTools(
   }, async ({ feature, sources }) => {
     try {
       const result = captureFeatureEnvFiles({ projectRoot: deps.projectRoot, featuresDir: deps.featuresDir }, { feature, sources: sources as EnvFileSource[] })
-      return result.ok ? asJsonResult(result) : errorResult(result.error)
+      if (!result.ok) return errorResult(result.error)
+      publishWorkspaceEvent(deps.workspaceEvents, { type: 'envsets-changed', feature })
+      publishWorkspaceEvent(deps.workspaceEvents, { type: 'features-changed' })
+      return asJsonResult(result)
     } catch (err) {
       return errorResult(err instanceof Error ? err.message : String(err))
     }
@@ -601,6 +608,7 @@ export function registerCanaryLabTools(
     if (!deps.writeEnvsetSlot) return errorResult('writeEnvsetSlot dependency is not configured')
     try {
       const result = await deps.writeEnvsetSlot(feature, env, slot, entries)
+      publishWorkspaceEvent(deps.workspaceEvents, { type: 'envsets-changed', feature })
       return asJsonResult({ feature, env, slot, path: result.path, entries: result.entries, unparsedLines: result.unparsedLines })
     } catch (err) {
       return errorResult(err instanceof Error ? err.message : String(err))
@@ -616,7 +624,9 @@ export function registerCanaryLabTools(
     annotations: { destructiveHint: true, idempotentHint: false },
   }, async ({ feature, confirmName }) => {
     const result = deleteFeature({ projectRoot: deps.projectRoot, featuresDir: deps.featuresDir }, { feature, confirmName })
-    return result.ok ? asJsonResult({ deleted: true, feature, featureDir: result.featureDir }) : errorResult(result.error)
+    if (!result.ok) return errorResult(result.error)
+    publishWorkspaceEvent(deps.workspaceEvents, { type: 'feature-deleted', feature })
+    return asJsonResult({ deleted: true, feature, featureDir: result.featureDir })
   })
 
   registerTool('get_feature_repo_status', {
@@ -681,6 +691,7 @@ export function registerCanaryLabTools(
     }
     createEvaluationExportTask(deps.store.logsDir, task)
     appendEvaluationExportLog(deps.store.logsDir, task.taskId, '[evaluation] external export task created\n')
+    publishWorkspaceEvent(deps.workspaceEvents, { type: 'evaluation-export-created', task: evaluationExportTaskView(task) })
     return asJsonResult({
       task: evaluationExportTaskView(task),
       runContext: buildExternalRunSnapshot({
@@ -727,6 +738,9 @@ export function registerCanaryLabTools(
         status: 'completed',
         downloadReady: true,
       })
+      if (next) {
+        publishWorkspaceEvent(deps.workspaceEvents, { type: 'evaluation-export-updated', task: evaluationExportTaskView(next) })
+      }
       return asJsonResult({
         ...evaluationExportTaskView(next!),
         nextSteps: ['download_evaluation_export'],
@@ -775,6 +789,7 @@ export function registerCanaryLabTools(
   }, async ({ taskId }) => {
     const deleted = deleteEvaluationExportTask(deps.store.logsDir, taskId)
     if (!deleted) return errorResult(`evaluation export task not found: ${taskId}`)
+    publishWorkspaceEvent(deps.workspaceEvents, { type: 'evaluation-export-deleted', taskId })
     return asJsonResult({ deleted: true, taskId })
   })
 
@@ -815,6 +830,7 @@ export function registerCanaryLabTools(
       updatedAt: new Date().toISOString(),
     }
     writeDraft(deps.store.logsDir, next)
+    publishWorkspaceEvent(deps.workspaceEvents, { type: 'draft-created', draft: next })
     return asJsonResult({
       ...externalDraftView(next),
       canaryLabBehavior: 'tracking-only',
@@ -842,6 +858,7 @@ export function registerCanaryLabTools(
       updatedAt: new Date().toISOString(),
     }
     writeDraft(deps.store.logsDir, next)
+    publishWorkspaceEvent(deps.workspaceEvents, { type: 'draft-updated', draft: next })
     return asJsonResult(externalDraftView(next))
   })
 
@@ -880,6 +897,8 @@ export function registerCanaryLabTools(
       updatedAt: new Date().toISOString(),
     }
     writeDraft(deps.store.logsDir, next)
+    publishWorkspaceEvent(deps.workspaceEvents, { type: 'draft-updated', draft: next })
+    publishWorkspaceEvent(deps.workspaceEvents, { type: 'tests-changed', feature: current.featureName })
     return asJsonResult({
       draftId,
       feature: current.featureName,

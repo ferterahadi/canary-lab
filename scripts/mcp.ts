@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import fs from 'fs'
+import os from 'os'
 import path from 'path'
 import { execFileSync, spawn } from 'child_process'
 import { Readable, Writable } from 'stream'
@@ -14,6 +15,11 @@ import {
   type CanaryLabMcpProfile,
 } from '../apps/web-server/mcp/tools'
 import type { ExternalHealClientKind } from '../apps/web-server/lib/runtime/manifest'
+import { looksLikeProjectRoot } from '../shared/runtime/project-root'
+import {
+  readWorkspaceRegistry,
+  type CanaryLabWorkspaceRegistry,
+} from '../shared/runtime/workspace-registry'
 
 const DEFAULT_MCP_URL = 'http://127.0.0.1:7421/mcp'
 const DEFAULT_MCP_PROFILE: CanaryLabMcpProfile = 'full'
@@ -29,9 +35,12 @@ export interface McpCommandOptions {
   fetch?: typeof fetch
   exit?: (code: number) => void
   autoStartUi?: boolean
-  startUi?: (stderr: Writable) => Promise<void> | void
+  startUi?: (stderr: Writable, projectRoot: string) => Promise<void> | void
   startupTimeoutMs?: number
   startupPollMs?: number
+  cwd?: string
+  homeDir?: string
+  registry?: CanaryLabWorkspaceRegistry
 }
 
 export async function main(
@@ -153,7 +162,17 @@ export async function ensureMcpServerReachable(
   const stderr = opts.stderr ?? process.stderr
   const fetchFn = opts.fetch ?? fetch
   const firstCheck = await checkHealth(url, fetchFn)
-  if (firstCheck.ok) return true
+  if (firstCheck.ok) {
+    if (
+      isDefaultLocalMcpUrl(url) &&
+      firstCheck.projectRoot &&
+      !isUsableUiProjectRoot(firstCheck.projectRoot)
+    ) {
+      stderr.write(`Canary Lab MCP is reachable at ${stripProfile(url)} but is serving unusable projectRoot "${firstCheck.projectRoot}". Stop that server, then run \`canary-lab ui\` from a Canary Lab workspace.\n`)
+      return false
+    }
+    return true
+  }
 
   if (opts.autoStartUi === false || !isDefaultLocalMcpUrl(url)) {
     stderr.write(`Canary Lab MCP is not reachable at ${stripProfile(url)}: ${firstCheck.error}\n`)
@@ -162,8 +181,17 @@ export async function ensureMcpServerReachable(
   }
 
   stderr.write('Canary Lab UI is not running; starting `canary-lab ui --no-open`...\n')
+  const projectRoot = resolveUiProjectRootForMcpAutostart({
+    cwd: opts.cwd ?? process.cwd(),
+    homeDir: opts.homeDir,
+    registry: opts.registry,
+  })
+  if (!projectRoot) {
+    stderr.write('Cannot auto-start Canary Lab UI because no workspace could be resolved. Run `canary-lab ui` from a Canary Lab workspace, or set CANARY_LAB_PROJECT_ROOT.\n')
+    return false
+  }
   try {
-    await (opts.startUi ?? startUiInBackground)(stderr)
+    await (opts.startUi ?? startUiInBackground)(stderr, projectRoot)
   } catch (err) {
     stderr.write(`Failed to start Canary Lab UI: ${(err as Error).message}\n`)
     stderr.write('Start the UI manually: canary-lab ui\n')
@@ -189,27 +217,78 @@ export async function ensureMcpServerReachable(
 async function checkHealth(
   url: string,
   fetchFn: typeof fetch,
-): Promise<{ ok: true } | { ok: false; error: string }> {
+): Promise<{ ok: true; projectRoot?: string } | { ok: false; error: string }> {
   try {
     const health = await fetchFn(healthUrlFor(url))
     if (!health.ok) return { ok: false, error: `/mcp/health returned ${health.status}` }
-    return { ok: true }
+    const body = await health.json().catch(() => null) as { projectRoot?: unknown } | null
+    return {
+      ok: true,
+      ...(typeof body?.projectRoot === 'string' ? { projectRoot: body.projectRoot } : {}),
+    }
   } catch (err) {
     return { ok: false, error: (err as Error).message }
   }
 }
 
-function startUiInBackground(stderr: Writable): void {
+function startUiInBackground(stderr: Writable, projectRoot: string): void {
   const child = spawn(process.execPath, [resolveCliPath(), 'ui', '--no-open'], {
-    cwd: process.cwd(),
+    cwd: projectRoot,
     detached: true,
-    env: process.env,
+    env: { ...process.env, CANARY_LAB_PROJECT_ROOT: projectRoot },
     stdio: ['ignore', 'ignore', 'pipe'],
   })
   child.stderr?.on('data', (chunk: Buffer | string) => {
     stderr.write(`[canary-lab ui] ${chunk.toString()}`)
   })
   child.unref()
+}
+
+export function resolveUiProjectRootForMcpAutostart(opts: {
+  cwd?: string
+  homeDir?: string
+  registry?: CanaryLabWorkspaceRegistry
+} = {}): string | null {
+  const explicitRoot = process.env.CANARY_LAB_PROJECT_ROOT
+  if (explicitRoot && isUsableUiProjectRoot(explicitRoot)) {
+    return path.resolve(explicitRoot)
+  }
+
+  const cwd = path.resolve(opts.cwd ?? process.cwd())
+  const fromCwd = findUsableUiProjectRootUpward(cwd)
+  if (fromCwd) return fromCwd
+
+  const registry = opts.registry ?? readWorkspaceRegistry(opts.homeDir ?? os.homedir())
+  const candidates = registry.workspaces
+    .filter((workspace) => isUsableUiProjectRoot(workspace.path))
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+  return candidates[0]?.path ?? null
+}
+
+function findUsableUiProjectRootUpward(start: string): string | null {
+  let current = path.resolve(start)
+  while (true) {
+    if (isUsableUiProjectRoot(current)) return current
+    const parent = path.dirname(current)
+    if (parent === current) return null
+    current = parent
+  }
+}
+
+function isUsableUiProjectRoot(candidate: string): boolean {
+  const resolved = path.resolve(candidate)
+  return looksLikeProjectRoot(resolved) || looksLikeCanaryLabPackage(resolved)
+}
+
+function looksLikeCanaryLabPackage(candidate: string): boolean {
+  const packageJson = path.join(candidate, 'package.json')
+  if (!fs.existsSync(packageJson)) return false
+  try {
+    const parsed = JSON.parse(fs.readFileSync(packageJson, 'utf-8')) as { name?: string }
+    return parsed.name === 'canary-lab'
+  } catch {
+    return false
+  }
 }
 
 function resolveCliPath(): string {

@@ -31,6 +31,7 @@ import {
 } from '../lib/agent-session-log'
 import { isTerminalRunStatus } from '../../../shared/run-state'
 import type { ExternalHealBroker } from '../lib/external-heal-broker'
+import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../lib/workspace-events'
 
 const EVALUATION_REWRITE_FORMAT_VERSION = 6
 
@@ -65,6 +66,7 @@ export interface RunsRouteDeps {
     healAgent?: ExternalHealAgentRequest,
   ): Promise<OrchestratorLike>
   broker?: Pick<ExternalHealBroker, 'claim'>
+  workspaceEvents?: WorkspaceEventPublisher
   restartHeal?(runId: string, text: string): Promise<RestartHealResult>
   restartRun?(runId: string): Promise<RestartRunResult>
   generateEvaluationRewrite?(
@@ -199,11 +201,14 @@ export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Pro
       if ((task.producer ?? 'internal') === 'external') continue
       const message = 'evaluation export interrupted; start a new export'
       appendEvaluationExportLog(deps.store.logsDir, task.taskId, `[evaluation] task failed: ${message}\n`)
-      patchEvaluationExportTask(deps.store.logsDir, task.taskId, {
+      const patched = patchEvaluationExportTask(deps.store.logsDir, task.taskId, {
         status: 'failed',
         downloadReady: false,
         error: message,
       })
+      if (patched) {
+        publishWorkspaceEvent(deps.workspaceEvents, { type: 'evaluation-export-updated', task: evaluationExportTaskView(patched) })
+      }
     }
   }
 
@@ -226,6 +231,7 @@ export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Pro
       abortController: new AbortController(),
     }
     createEvaluationExportTask(deps.store.logsDir, task)
+    publishWorkspaceEvent(deps.workspaceEvents, { type: 'evaluation-export-created', task: evaluationExportTaskView(task) })
     activeEvaluationExports.set(task.taskId, active)
     const push = (chunk: string): void => {
       appendEvaluationExportLog(deps.store.logsDir, task.taskId, chunk)
@@ -237,21 +243,27 @@ export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Pro
         const built = await buildEvaluationZip(detail, mode, push, active.abortController.signal)
         if (!readEvaluationExportTask(deps.store.logsDir, task.taskId)) return
         writeEvaluationExportZip(deps.store.logsDir, task.taskId, built.zip)
-        patchEvaluationExportTask(deps.store.logsDir, task.taskId, {
+        const patched = patchEvaluationExportTask(deps.store.logsDir, task.taskId, {
           archiveBase: built.archiveBase,
           status: 'completed',
           downloadReady: true,
         })
+        if (patched) {
+          publishWorkspaceEvent(deps.workspaceEvents, { type: 'evaluation-export-updated', task: evaluationExportTaskView(patched) })
+        }
         push('[evaluation] task completed\n')
         active.broker.markExit('export', 0)
       } catch (err) {
         if (!readEvaluationExportTask(deps.store.logsDir, task.taskId)) return
         const error = err instanceof Error ? err.message : String(err)
-        patchEvaluationExportTask(deps.store.logsDir, task.taskId, {
+        const patched = patchEvaluationExportTask(deps.store.logsDir, task.taskId, {
           status: 'failed',
           error,
           downloadReady: false,
         })
+        if (patched) {
+          publishWorkspaceEvent(deps.workspaceEvents, { type: 'evaluation-export-updated', task: evaluationExportTaskView(patched) })
+        }
         push(`[evaluation] task failed: ${error}\n`)
         active.broker.markExit('export', 1)
       } finally {
@@ -337,6 +349,7 @@ export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Pro
     active?.broker.markExit('export', task.status === 'running' ? 1 : 0)
     activeEvaluationExports.delete(req.params.taskId)
     deleteEvaluationExportTask(deps.store.logsDir, req.params.taskId)
+    publishWorkspaceEvent(deps.workspaceEvents, { type: 'evaluation-export-deleted', taskId: req.params.taskId })
     reply.code(204)
     return reply.send()
   })

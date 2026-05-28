@@ -9,6 +9,7 @@ import { VerticalSplit } from './components/VerticalSplit'
 import { GlobalStatusBar } from './components/GlobalStatusBar'
 import { AddTestWizard } from './components/AddTestWizard'
 import * as api from './api/client'
+import { connectWorkspaceEvents } from './api/workspace-socket'
 import { useRuns, useRun, useGlobalActiveRun } from './state/RunsContext'
 import { useWizardDrafts } from './state/WizardDraftContext'
 import type { Feature } from './api/types'
@@ -18,7 +19,9 @@ export function App() {
   const [selectedFeature, setSelectedFeature] = useState<string | null>(null)
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
   const [configFor, setConfigFor] = useState<string | null>(null)
+  const [testsRefreshKey, setTestsRefreshKey] = useState(0)
   const pendingRunSelectionRef = useRef<string | null>(null)
+  const selectedFeatureRef = useRef<string | null>(null)
 
   // Initial features load + auto-select first feature.
   useEffect(() => {
@@ -122,6 +125,33 @@ export function App() {
     }).catch(() => {})
   }, [allRuns, selectedFeature])
 
+  useEffect(() => {
+    selectedFeatureRef.current = selectedFeature
+  }, [selectedFeature])
+
+  useEffect(() => {
+    let conn: { close(): void } | null = null
+    try {
+      conn = connectWorkspaceEvents({
+        onEvent: (event) => {
+          if (event.type === 'feature-created' || event.type === 'feature-deleted' || event.type === 'features-changed') {
+            refreshFeatures(event.type === 'feature-created' ? event.feature : undefined)
+            return
+          }
+          if (event.type === 'tests-changed' && selectedFeatureRef.current === event.feature) {
+            setTestsRefreshKey((key) => key + 1)
+          }
+          if (event.type === 'envsets-changed') {
+            refreshFeatures(selectedFeatureRef.current)
+          }
+        },
+      })
+    } catch {
+      // Initial REST load and direct UI callbacks still keep the page usable.
+    }
+    return () => conn?.close()
+  }, [refreshFeatures])
+
   const selectedFeatureEnvs =
     features.find((f) => f.name === selectedFeature)?.envs ?? []
 
@@ -158,6 +188,7 @@ export function App() {
           feature={selectedFeature}
           activeRunSummary={summaryForSelectedFeature}
           activeRunStatus={statusForSelectedFeature}
+          refreshKey={testsRefreshKey}
         />
       ),
     },
