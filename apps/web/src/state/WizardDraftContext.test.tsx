@@ -137,6 +137,64 @@ describe('WizardDraftProvider', () => {
     expect(captured.value?.selectedDraft).toBeNull()
   })
 
+  it('reconciles startup results against a preselected draft id', async () => {
+    let resolveDrafts: (drafts: DraftRecord[]) => void = () => {}
+    vi.mocked(api.listDrafts).mockReturnValueOnce(
+      new Promise<DraftRecord[]>((resolve) => { resolveDrafts = resolve }),
+    )
+    const captured = renderProbe()
+
+    act(() => {
+      captured.value?.openTask('keep-selected')
+    })
+    await act(async () => {
+      resolveDrafts([draft({ draftId: 'keep-selected', status: 'plan-ready' })])
+      await Promise.resolve()
+    })
+    expect(captured.value?.selectedDraft?.draftId).toBe('keep-selected')
+
+    act(() => {
+      root.unmount()
+      container.remove()
+      container = document.createElement('div')
+      document.body.appendChild(container)
+      root = createRoot(container)
+    })
+    vi.mocked(api.listDrafts).mockReturnValueOnce(
+      new Promise<DraftRecord[]>((resolve) => { resolveDrafts = resolve }),
+    )
+    const missing = renderProbe()
+    act(() => {
+      missing.value?.openTask('missing-selected')
+    })
+    await act(async () => {
+      resolveDrafts([])
+      await Promise.resolve()
+    })
+
+    expect(missing.value?.selectedDraft).toBeNull()
+  })
+
+  it('removes draft records deleted by workspace events', async () => {
+    vi.mocked(api.listDrafts).mockResolvedValueOnce([draft({ draftId: 'remove-me', status: 'plan-ready' })])
+    const captured = renderProbe()
+    await act(async () => {
+      await Promise.resolve()
+    })
+    act(() => {
+      captured.value?.openTask('remove-me')
+    })
+    expect(captured.value?.wizardOpen).toBe(true)
+
+    act(() => {
+      workspaceSocket().fire({ type: 'draft-deleted', draftId: 'remove-me' })
+      workspaceSocket().fire({ type: 'features-changed' })
+    })
+
+    expect(captured.value?.drafts).toEqual([])
+    expect(captured.value?.selectedDraft).toBeNull()
+  })
+
   it('ignores startup results after the provider unmounts', async () => {
     let resolveDrafts!: (drafts: DraftRecord[]) => void
     vi.mocked(api.listDrafts).mockReturnValue(new Promise((resolve) => {

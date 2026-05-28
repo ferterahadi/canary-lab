@@ -760,11 +760,36 @@ body {
   padding: 0.9rem 1.25rem 1rem;
 }
 
+.cl-mcp-promo-setup {
+  margin: 0 0 0.75rem;
+  color: var(--text-secondary);
+  font-size: 0.8125rem;
+  line-height: 1.45;
+}
+
+.cl-mcp-promo-setup code {
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
 .cl-mcp-promo-footer {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
+}
+
+@media (max-width: 520px) {
+  .cl-mcp-promo-footer {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .cl-mcp-promo-footer .cl-button-primary {
+    justify-content: center;
+  }
 }
 
 .cl-mcp-promo-close {

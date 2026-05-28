@@ -124,6 +124,10 @@ function McpPromoDialog({
           />
         </div>
         <div className="cl-mcp-promo-body">
+          <p className="cl-mcp-promo-setup">
+            To use Canary Lab from Codex or Claude, run <code>npx canary-lab setup</code> once from this
+            workspace, then restart Codex or Claude to load the tools.
+          </p>
           <div className="cl-mcp-promo-footer">
             <label className="flex items-center gap-2 text-xs" style={{ color: 'var(--text-secondary)' }}>
               <input

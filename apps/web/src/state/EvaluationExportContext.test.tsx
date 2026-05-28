@@ -166,6 +166,23 @@ describe('EvaluationExportProvider', () => {
     expect(captured.value?.logsByTaskId['task-2']).toContain('unable to refresh task: offline')
   })
 
+  it('records non-error refresh failures from task log streams', async () => {
+    const captured = renderProbe()
+    const running = task({ taskId: 'task-string-failure', status: 'running' })
+    vi.mocked(api.startEvaluationExport).mockResolvedValue(running)
+    vi.mocked(api.getEvaluationExportTask).mockRejectedValue('offline string')
+
+    await act(async () => {
+      await captured.value?.startExport('run-string-failure', 'raw')
+    })
+    await act(async () => {
+      taskSocket('task-string-failure').fire({ type: 'exit', code: 1 })
+      await Promise.resolve()
+    })
+
+    expect(captured.value?.logsByTaskId['task-string-failure']).toContain('unable to refresh task: offline string')
+  })
+
   it('keeps an explicitly selected remaining task when dismissing another task', async () => {
     const captured = renderProbe()
     const older = task({ taskId: 'older-task', runId: 'run-old', createdAt: '2026-01-01T00:00:00.000Z' })
@@ -348,6 +365,70 @@ describe('EvaluationExportProvider', () => {
     expect(captured.value?.latestTask?.taskId).toBe('external-task')
     expect(captured.value?.taskForRun('run-external')?.taskId).toBe('external-task')
     expect(FakeWebSocket.instances.map((socket) => socket.url)).toContain('ws://test/ws/evaluation-exports/external-task')
+  })
+
+  it('updates export tasks from workspace events without subscribing completed tasks', async () => {
+    const completed = task({ taskId: 'external-completed', runId: 'run-external', status: 'completed' })
+    const running = task({ taskId: 'external-running', runId: 'run-external', status: 'running' })
+    vi.mocked(api.listEvaluationExportTasks).mockResolvedValueOnce([])
+
+    const captured = renderProbe()
+    await act(async () => {
+      await Promise.resolve()
+    })
+    act(() => {
+      workspaceSocket().fire({ type: 'evaluation-export-updated', task: completed })
+      workspaceSocket().fire({ type: 'evaluation-export-updated', task: running })
+      workspaceSocket().fire({ type: 'features-changed' })
+    })
+
+    expect(captured.value?.latestTask?.taskId).toBe('external-completed')
+    expect(FakeWebSocket.instances.map((socket) => socket.url)).toContain('ws://test/ws/evaluation-exports/external-running')
+    expect(FakeWebSocket.instances.map((socket) => socket.url)).not.toContain('ws://test/ws/evaluation-exports/external-completed')
+  })
+
+  it('does not resubscribe known completed tasks during startup reconciliation', async () => {
+    let resolveTasks: (tasks: EvaluationExportTask[]) => void = () => {}
+    const known = task({ taskId: 'known-completed', runId: 'run-known', status: 'completed' })
+    vi.mocked(api.listEvaluationExportTasks).mockReturnValueOnce(
+      new Promise<EvaluationExportTask[]>((resolve) => { resolveTasks = resolve }),
+    )
+    vi.mocked(api.startEvaluationExport).mockResolvedValueOnce(task({ ...known, status: 'running' }))
+    const captured = renderProbe()
+
+    await act(async () => {
+      await captured.value?.startExport('run-known', 'raw')
+    })
+    expect(exportSockets()).toHaveLength(1)
+
+    await act(async () => {
+      resolveTasks([known])
+      await Promise.resolve()
+    })
+
+    expect(captured.value?.latestTask?.status).toBe('completed')
+    expect(exportSockets()).toHaveLength(1)
+  })
+
+  it('removes export tasks deleted by workspace events', async () => {
+    const existing = task({ taskId: 'delete-me', runId: 'run-delete', status: 'running' })
+    vi.mocked(api.listEvaluationExportTasks).mockResolvedValueOnce([existing])
+    const captured = renderProbe()
+    await act(async () => {
+      await Promise.resolve()
+    })
+    act(() => {
+      captured.value?.openTask('delete-me')
+    })
+    expect(captured.value?.dialogOpen).toBe(true)
+
+    act(() => {
+      workspaceSocket().fire({ type: 'evaluation-export-deleted', taskId: 'delete-me' })
+    })
+
+    expect(captured.value?.tasks).toEqual([])
+    expect(captured.value?.selectedTask).toBeNull()
+    expect(captured.value?.dialogOpen).toBe(false)
   })
 
   it('keeps known tasks when periodic discovery fails', async () => {
