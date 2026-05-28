@@ -64,17 +64,10 @@ function assertionVideos(
     })
     .filter((entry): entry is { artifact: PlaywrightArtifact; filePath: string; testName: string; valid: boolean } =>
       entry.valid && entry.artifact.kind === 'video' && entry.filePath !== null)
-  const used = new Set<string>()
   return videos.map(({ artifact, filePath, testName }, idx) => {
     const ext = path.extname(filePath) || extensionForContentType(artifact.contentType) || '.webm'
     const suffix = videos.length === 1 ? '' : `-${idx + 1}`
-    let filename = `${safeFilename(runId)}${suffix}${ext}`
-    let dedupe = 2
-    while (used.has(filename)) {
-      filename = `${safeFilename(runId)}${suffix}-${dedupe}${ext}`
-      dedupe += 1
-    }
-    used.add(filename)
+    const filename = `${safeFilename(runId)}${suffix}${ext}`
     return { filename, path: filePath, testName }
   })
 }

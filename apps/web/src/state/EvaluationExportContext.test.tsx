@@ -360,6 +360,76 @@ describe('EvaluationExportProvider', () => {
     expect(FakeWebSocket.instances.map((socket) => socket.url)).toContain('ws://test/ws/evaluation-exports/external-task')
   })
 
+  it('keeps known tasks when periodic discovery fails', async () => {
+    vi.useFakeTimers()
+    const completed = task({ taskId: 'known-task', runId: 'run-known', status: 'completed' })
+    vi.mocked(api.listEvaluationExportTasks)
+      .mockResolvedValueOnce([completed])
+      .mockRejectedValueOnce(new Error('offline'))
+
+    const captured = renderProbe()
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(captured.value?.tasks.map((item) => item.taskId)).toEqual(['known-task'])
+
+    await act(async () => {
+      vi.advanceTimersByTime(3000)
+      await Promise.resolve()
+    })
+
+    expect(captured.value?.tasks.map((item) => item.taskId)).toEqual(['known-task'])
+  })
+
+  it('does not re-subscribe unchanged completed tasks during periodic discovery', async () => {
+    vi.useFakeTimers()
+    const completed = task({ taskId: 'stable-task', runId: 'run-stable', status: 'completed' })
+    vi.mocked(api.listEvaluationExportTasks)
+      .mockResolvedValueOnce([completed])
+      .mockResolvedValueOnce([completed])
+
+    renderProbe()
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(FakeWebSocket.instances).toHaveLength(1)
+
+    await act(async () => {
+      vi.advanceTimersByTime(3000)
+      await Promise.resolve()
+    })
+
+    expect(FakeWebSocket.instances).toHaveLength(1)
+  })
+
+  it('ignores periodic discovery results after unmount', async () => {
+    vi.useFakeTimers()
+    let resolveTasks: (tasks: EvaluationExportTask[]) => void = () => {}
+    vi.mocked(api.listEvaluationExportTasks)
+      .mockResolvedValueOnce([])
+      .mockReturnValueOnce(new Promise<EvaluationExportTask[]>((resolve) => { resolveTasks = resolve }))
+
+    renderProbe()
+    await act(async () => {
+      await Promise.resolve()
+    })
+    await act(async () => {
+      vi.advanceTimersByTime(3000)
+      await Promise.resolve()
+    })
+    act(() => {
+      root.unmount()
+    })
+
+    await act(async () => {
+      resolveTasks([task({ taskId: 'late-periodic-task', runId: 'run-late', status: 'running' })])
+      await Promise.resolve()
+    })
+
+    expect(FakeWebSocket.instances).toHaveLength(0)
+    root = createRoot(container)
+  })
+
   it('sorts remaining tasks by createdAt after dismissTask', async () => {
     const t1 = task({ taskId: 't1', runId: 'r1', status: 'completed', createdAt: '2026-01-01T00:00:00.000Z' })
     const t2 = task({ taskId: 't2', runId: 'r2', status: 'completed', createdAt: '2026-01-02T00:00:00.000Z' })
