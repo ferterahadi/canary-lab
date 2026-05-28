@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from 'vitest'
+import { describe, it, expect, afterEach, vi } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -8,12 +8,14 @@ import {
   renderReport,
   hasPendingMigrations,
   findOrphanedLogs,
+  findLegacyCurrentPointer,
   findStaleFeatureConfigs,
   lintFeatureConfig,
   extractHealPrompt,
   compareHealPrompt,
   findOldPathReferences,
   loadTemplateHealPrompt,
+  removeLegacyCurrentPointer,
 } from './upgrade-migration'
 import { KNOWN_OLD_HEAL_PROMPTS } from './upgrade-known-prompts'
 
@@ -76,6 +78,58 @@ describe('findOrphanedLogs', () => {
     fs.writeFileSync(path.join(repo, 'logs', '.DS_Store'), '')
     fs.writeFileSync(path.join(repo, 'logs', 'something-else.txt'), '')
     expect(findOrphanedLogs(repo)).toEqual([])
+  })
+})
+
+describe('findLegacyCurrentPointer / removeLegacyCurrentPointer', () => {
+  it('detects and removes a logs/current symlink into logs/runs', () => {
+    const repo = mkRepo()
+    fs.mkdirSync(path.join(repo, 'logs', 'runs', 'r1'), { recursive: true })
+    const pointer = path.join(repo, 'logs', 'current')
+    fs.symlinkSync('runs/r1', pointer)
+
+    expect(findLegacyCurrentPointer(repo)).toBe(pointer)
+    const report = detectMigrations(repo, { templateHealPromptBody: TEMPLATE_BODY })
+    expect(report.legacyCurrentPointer).toBe(pointer)
+
+    removeLegacyCurrentPointer(report, repo)
+    expect(fs.existsSync(pointer)).toBe(false)
+    expect(report.removedLegacyCurrentPointer).toBe(pointer)
+  })
+
+  it('ignores logs/current when it is not a symlink into logs/runs', () => {
+    const repo = mkRepo()
+    fs.mkdirSync(path.join(repo, 'logs', 'current'), { recursive: true })
+    expect(findLegacyCurrentPointer(repo)).toBeUndefined()
+
+    fs.rmSync(path.join(repo, 'logs', 'current'), { recursive: true, force: true })
+    fs.symlinkSync('/tmp', path.join(repo, 'logs', 'current'))
+    expect(findLegacyCurrentPointer(repo)).toBeUndefined()
+  })
+
+  it('ignores logs/current when the symlink target cannot be read', () => {
+    const repo = mkRepo()
+    fs.mkdirSync(path.join(repo, 'logs', 'runs', 'r1'), { recursive: true })
+    fs.symlinkSync('runs/r1', path.join(repo, 'logs', 'current'))
+    vi.spyOn(fs, 'readlinkSync').mockImplementationOnce(() => {
+      throw new Error('readlink failed')
+    })
+
+    expect(findLegacyCurrentPointer(repo)).toBeUndefined()
+  })
+
+  it('leaves logs/current alone when the report pointer is stale', () => {
+    const repo = mkRepo()
+    fs.mkdirSync(path.join(repo, 'logs', 'runs', 'r1'), { recursive: true })
+    const pointer = path.join(repo, 'logs', 'current')
+    fs.symlinkSync('runs/r1', pointer)
+    const report = detectMigrations(repo, { templateHealPromptBody: TEMPLATE_BODY })
+
+    report.legacyCurrentPointer = path.join(repo, 'logs', 'current-stale')
+    removeLegacyCurrentPointer(report, repo)
+
+    expect(fs.existsSync(pointer)).toBe(true)
+    expect(report.removedLegacyCurrentPointer).toBeUndefined()
   })
 })
 
@@ -280,6 +334,7 @@ describe('detectMigrations', () => {
     expect(r.orphanedLogs).toEqual([])
     expect(r.staleFeatureConfigs).toEqual([])
     expect(r.healPromptStatus).toBe('matches-current')
+    expect(r.legacyCurrentPointer).toBeUndefined()
     expect(r.ciPathHints).toEqual([])
     expect(hasPendingMigrations(r)).toBe(false)
   })
@@ -310,6 +365,19 @@ describe('detectMigrations', () => {
     fs.writeFileSync(path.join(repo, 'logs', 'runs', 'r1', 'svc-a.log'), 'x')
     const r = detectMigrations(repo, { templateHealPromptBody: TEMPLATE_BODY })
     expect(r.orphanedLogs).toEqual([])
+    expect(hasPendingMigrations(r)).toBe(false)
+  })
+
+  it('repo with legacy logs/current pointer is pending until removed', () => {
+    const repo = mkRepo()
+    fs.mkdirSync(path.join(repo, 'logs', 'runs', 'r1'), { recursive: true })
+    fs.symlinkSync('runs/r1', path.join(repo, 'logs', 'current'))
+
+    const r = detectMigrations(repo, { templateHealPromptBody: TEMPLATE_BODY })
+    expect(r.legacyCurrentPointer).toBe(path.join(repo, 'logs', 'current'))
+    expect(hasPendingMigrations(r)).toBe(true)
+
+    removeLegacyCurrentPointer(r, repo)
     expect(hasPendingMigrations(r)).toBe(false)
   })
 
@@ -429,6 +497,21 @@ describe('renderReport', () => {
     expect(out).toContain('All feature.config.cjs files look clean')
     expect(out).toContain('Heal prompt in CLAUDE.md is up to date')
     expect(out).toContain('No CI scripts referencing old log paths')
+  })
+
+  it('renders legacy current pointer warning and removal', () => {
+    const warning = renderReport({
+      ...baseReport(),
+      legacyCurrentPointer: '/repo/logs/current',
+    })
+    expect(warning).toContain('Found legacy active-run pointer')
+
+    const removed = renderReport({
+      ...baseReport(),
+      legacyCurrentPointer: '/repo/logs/current',
+      removedLegacyCurrentPointer: '/repo/logs/current',
+    })
+    expect(removed).toContain('Removed legacy active-run pointer')
   })
 
   it('renders orphaned-logs warning when orphans pending', () => {

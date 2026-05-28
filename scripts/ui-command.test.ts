@@ -42,16 +42,18 @@ afterEach(() => {
 })
 
 describe('runUi signal cleanup', () => {
-  it('does not start the server when the requested port is invalid', async () => {
+  it('does not start the server when --port is passed', async () => {
     const exit = vi.fn()
+    const messages: string[] = []
 
-    await runUi(['--port', '12abc'], {
+    await runUi(['--port', '8123'], {
       projectRoot: '/tmp/canary-lab-workspace',
-      log: () => {},
+      log: (msg) => { messages.push(msg) },
       exit,
     })
 
     expect(exit).toHaveBeenCalledExactlyOnceWith(1)
+    expect(messages[0]).toContain('was removed')
     expect(mocks.createServer).not.toHaveBeenCalled()
   })
 
@@ -87,6 +89,8 @@ describe('runUi signal cleanup', () => {
         return true
       },
     })
+
+    expect(app.listen).toHaveBeenCalledExactlyOnceWith({ port: 7421, host: '127.0.0.1' })
 
     process.emit('SIGINT')
     await new Promise((resolve) => setTimeout(resolve, 0))
@@ -149,12 +153,7 @@ describe('runUi signal cleanup', () => {
 })
 
 describe('parsePort', () => {
-  it('parses --port and --port=<n>', () => {
-    expect(parsePort(['--port', '8123'])).toBe(8123)
-    expect(parsePort(['--port=8124'])).toBe(8124)
-  })
-
-  it('rejects missing, non-numeric, partial, and out-of-range ports', () => {
+  it('rejects removed --port forms', () => {
     const messages: string[] = []
     const exit = vi.fn()
     const opts = {
@@ -162,17 +161,13 @@ describe('parsePort', () => {
       exit,
     }
 
-    expect(parsePort(['--port'], opts)).toBeUndefined()
-    expect(parsePort(['--port', '12abc'], opts)).toBeUndefined()
-    expect(parsePort(['--port=0'], opts)).toBeUndefined()
-    expect(parsePort(['--port=65536'], opts)).toBeUndefined()
+    expect(parsePort(['--port'], opts)).toBe('removed-port-option')
+    expect(parsePort(['--port=8123'], opts)).toBe('removed-port-option')
 
-    expect(exit).toHaveBeenCalledTimes(4)
+    expect(exit).toHaveBeenCalledTimes(2)
     expect(messages).toEqual([
-      'Usage: canary-lab ui [--port <n>] [--no-open]',
-      'Invalid port "12abc". Use a number between 1 and 65535.',
-      'Invalid port "0". Use a number between 1 and 65535.',
-      'Invalid port "65536". Use a number between 1 and 65535.',
+      '`canary-lab ui --port` was removed. Canary Lab always uses port 7421 so MCP clients can connect consistently.',
+      '`canary-lab ui --port` was removed. Canary Lab always uses port 7421 so MCP clients can connect consistently.',
     ])
   })
 })

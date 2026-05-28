@@ -33,6 +33,8 @@ export interface MigrationReport {
   healPromptStatus: HealPromptStatus
   healPromptDiff?: string
   ciPathHints: CiPathHint[]
+  legacyCurrentPointer?: string
+  removedLegacyCurrentPointer?: string
   /** Raw paths that would be archived (input to applyArchive). Same as
    * archivedFiles before applyArchive runs. */
   orphanedLogs: string[]
@@ -64,6 +66,37 @@ export function findOrphanedLogs(repoRoot: string): string[] {
     }
   }
   return out.sort()
+}
+
+/** Find the legacy `logs/current` symlink when it only points into logs/runs/. */
+export function findLegacyCurrentPointer(repoRoot: string): string | undefined {
+  const logsDir = path.join(repoRoot, 'logs')
+  const pointer = path.join(logsDir, 'current')
+  let stat: fs.Stats
+  try {
+    stat = fs.lstatSync(pointer)
+  } catch {
+    return undefined
+  }
+  if (!stat.isSymbolicLink()) return undefined
+
+  let target: string
+  try {
+    target = fs.readlinkSync(pointer)
+  } catch {
+    return undefined
+  }
+  const resolvedTarget = path.resolve(logsDir, target)
+  const runsRoot = path.join(logsDir, 'runs')
+  const relativeToRuns = path.relative(runsRoot, resolvedTarget)
+  if (
+    relativeToRuns === '' ||
+    relativeToRuns.startsWith('..') ||
+    path.isAbsolute(relativeToRuns)
+  ) {
+    return undefined
+  }
+  return pointer
 }
 
 /** Lint a single feature.config.cjs file. Returns issue list (empty if clean). */
@@ -147,6 +180,9 @@ export function compareHealPrompt(
   currentClaudeMd: string,
   templateBody: string,
 ): HealPromptComparison {
+  if (templateBody.trim().length === 0) {
+    return { status: 'matches-current' }
+  }
   if (currentClaudeMd.length === 0) {
     // No CLAUDE.md yet (fresh install) — treat as up-to-date; the docs/skills
     // sync that runs after migration will create it from the template.
@@ -258,6 +294,7 @@ export function detectMigrations(
   opts: DetectMigrationsOptions = {},
 ): MigrationReport {
   const orphanedLogs = findOrphanedLogs(repoRoot)
+  const legacyCurrentPointer = findLegacyCurrentPointer(repoRoot)
   const staleFeatureConfigs = findStaleFeatureConfigs(repoRoot)
 
   const claudeMdPath = path.join(repoRoot, 'CLAUDE.md')
@@ -277,6 +314,7 @@ export function detectMigrations(
     healPromptDiff: heal.diff,
     healPromptNote: heal.note,
     ciPathHints,
+    legacyCurrentPointer,
   }
 }
 
@@ -300,6 +338,15 @@ export function applyArchive(report: MigrationReport, repoRoot: string): void {
     fs.renameSync(src, dest)
     report.archivedFiles.push(dest)
   }
+}
+
+export function removeLegacyCurrentPointer(report: MigrationReport, repoRoot: string): void {
+  const pointer = report.legacyCurrentPointer
+  if (!pointer) return
+  const currentPointer = findLegacyCurrentPointer(repoRoot)
+  if (currentPointer !== pointer) return
+  fs.unlinkSync(pointer)
+  report.removedLegacyCurrentPointer = pointer
 }
 
 /** Filesystem-safe ISO timestamp: `YYYY-MM-DDTHHMM`. */
@@ -348,6 +395,16 @@ export function renderReport(report: MigrationReport): string {
   }
   lines.push('')
 
+  if (report.removedLegacyCurrentPointer) {
+    lines.push(`✓ Removed legacy active-run pointer: ${report.removedLegacyCurrentPointer}`)
+  } else if (report.legacyCurrentPointer) {
+    lines.push(`⚠  Found legacy active-run pointer: ${report.legacyCurrentPointer}`)
+    lines.push('   It points into logs/runs/ and will be removed during upgrade.')
+  } else {
+    lines.push('✓ No legacy logs/current active-run pointer.')
+  }
+  lines.push('')
+
   // feature.config.cjs lint
   if (report.staleFeatureConfigs.length > 0) {
     lines.push(`⚠  ${report.staleFeatureConfigs.length} feature.config.cjs file(s) have issues:`)
@@ -386,7 +443,7 @@ export function renderReport(report: MigrationReport): string {
     for (const h of report.ciPathHints) {
       lines.push(`   ${h.file}:${h.line}: ${h.content.trim()}`)
     }
-    lines.push('   Update to logs/current/heal-index.md and logs/current/svc-*.log respectively.')
+    lines.push('   Update to logs/runs/<runId>/heal-index.md and logs/runs/<runId>/svc-*.log respectively.')
   } else {
     lines.push('✓ No CI scripts referencing old log paths.')
   }
@@ -398,6 +455,7 @@ export function renderReport(report: MigrationReport): string {
 export function hasPendingMigrations(report: MigrationReport): boolean {
   return (
     report.orphanedLogs.length > 0 ||
+    Boolean(report.legacyCurrentPointer && !report.removedLegacyCurrentPointer) ||
     report.staleFeatureConfigs.length > 0 ||
     report.healPromptStatus !== 'matches-current' ||
     report.ciPathHints.length > 0

@@ -8,6 +8,10 @@ import type { RunSummary } from '../api/types'
 
 export type StepStatus = 'pending' | 'testing' | 'passed' | 'failed' | 'skipped' | 'timedout'
 export type RunningTestSummary = NonNullable<RunSummary['running']>
+export interface TestStatusIdentity {
+  name: string
+  id?: string
+}
 
 export interface StatusPresentation {
   label: string
@@ -70,25 +74,30 @@ export function summaryEntryName(testName: string): string {
 // summaries without that field fall back to the legacy "complete ⇒ passed"
 // heuristic for back-compat.
 export function statusForTest(
-  testName: string,
+  test: string | TestStatusIdentity,
   summary: RunSummary | undefined,
   isRunActivelyTesting = true,
 ): StepStatus {
   if (!summary) return 'pending'
-  const expected = summaryEntryName(testName)
+  const identity = typeof test === 'string' ? { name: test } : test
+  const expected = summaryEntryName(identity.name)
   // Currently-running wins over prior state. In targeted-rerun mode the
   // reporter seeds the new run from the prior summary, so the failed[]
   // entry for a test that is being re-run is still on disk while the test
   // is in flight. Checking `running` first lets the badge flip to "running"
   // instead of sticking on the stale "failed" label.
-  if (isRunActivelyTesting && runningTestForSummaryName(summary, expected)) return 'testing'
-  const failed = summary.failed.find((f) => f.name === expected)
+  if (isRunActivelyTesting && runningTestForIdentity(summary, expected, identity.id)) return 'testing'
+  const failed = summary.failed.find((f) => matchesSummaryEntry(f, expected, identity.id))
   if (failed) {
     const msg = failed.error?.message ?? ''
     if (/Test timeout of/i.test(msg)) return 'timedout'
     return 'failed'
   }
+  if (identity.id && summary.skippedIds?.includes(identity.id)) return 'skipped'
   if (summary.skippedNames?.includes(expected)) return 'skipped'
+  if (identity.id && summary.passedIds) {
+    return summary.passedIds.includes(identity.id) ? 'passed' : 'pending'
+  }
   if (summary.passedNames) {
     return summary.passedNames.includes(expected) ? 'passed' : 'pending'
   }
@@ -128,6 +137,28 @@ export function runningTestForSummaryName(
 ): RunningTestSummary | undefined {
   return summary.runningTests?.find((entry) => entry.name === summaryName)
     ?? (summary.running?.name === summaryName ? summary.running : undefined)
+}
+
+function runningTestForIdentity(
+  summary: RunSummary,
+  summaryName: string,
+  id?: string,
+): RunningTestSummary | undefined {
+  if (id) {
+    const byId = summary.runningTests?.find((entry) => entry.id === id)
+      ?? (summary.running?.id === id ? summary.running : undefined)
+    if (byId) return byId
+  }
+  return runningTestForSummaryName(summary, summaryName)
+}
+
+function matchesSummaryEntry(
+  entry: { id?: string; name: string },
+  summaryName: string,
+  id?: string,
+): boolean {
+  if (id && entry.id) return entry.id === id
+  return entry.name === summaryName
 }
 
 function bodyLineForLocations(locations: string[], testLine: number, bodyLineCount: number): number | null {

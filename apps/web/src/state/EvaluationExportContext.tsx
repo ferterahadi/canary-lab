@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import * as api from '../api/client'
 import { connectEvaluationExport, type EvaluationExportConnection } from '../api/evaluation-export-socket'
+import { connectWorkspaceEvents, type WorkspaceEventsConnection } from '../api/workspace-socket'
 import type { EvaluationExportMode, EvaluationExportTask } from '../api/types'
 
 interface EvaluationExportContextValue {
@@ -31,9 +32,15 @@ export function EvaluationExportProvider({ children, wsBase, WebSocketImpl }: Ev
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
   const [dialogOpen, setDialogOpen] = useState(false)
   const connectionsRef = useRef<Record<string, EvaluationExportConnection>>({})
+  const workspaceConnectionRef = useRef<WorkspaceEventsConnection | null>(null)
+  const tasksByIdRef = useRef<Record<string, EvaluationExportTask>>({})
 
   const rememberTask = useCallback((task: EvaluationExportTask): void => {
-    setTasksById((current) => ({ ...current, [task.taskId]: task }))
+    setTasksById((current) => {
+      const next = { ...current, [task.taskId]: task }
+      tasksByIdRef.current = next
+      return next
+    })
   }, [])
 
   const appendLog = useCallback((taskId: string, chunk: string): void => {
@@ -70,19 +77,46 @@ export function EvaluationExportProvider({ children, wsBase, WebSocketImpl }: Ev
     }
   }, [WebSocketImpl, appendLog, refreshTask, wsBase])
 
+  const reconcileTasks = useCallback((tasks: EvaluationExportTask[]): void => {
+    const previous = tasksByIdRef.current
+    const next = Object.fromEntries(tasks.map((task) => [task.taskId, task]))
+    tasksByIdRef.current = next
+    setTasksById(next)
+    for (const task of tasks) {
+      if (task.status === 'running' || !previous[task.taskId]) subscribeTask(task.taskId)
+    }
+  }, [subscribeTask])
+
+  const forgetTask = useCallback((taskId: string): void => {
+    connectionsRef.current[taskId]?.close()
+    delete connectionsRef.current[taskId]
+    setTasksById((current) => {
+      const { [taskId]: _removed, ...rest } = current
+      tasksByIdRef.current = rest
+      const remaining = Object.values(rest).sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      setSelectedTaskId((selected) => {
+        if (selected && selected !== taskId) return selected
+        return remaining[0]?.taskId ?? null
+      })
+      setDialogOpen((open) => open && remaining.length > 0)
+      return rest
+    })
+    setLogsByTaskId((current) => {
+      const { [taskId]: _removed, ...rest } = current
+      return rest
+    })
+  }, [])
+
   useEffect(() => {
     let cancelled = false
     api.listEvaluationExportTasks()
       .then((tasks) => {
         if (cancelled) return
-        setTasksById(Object.fromEntries(tasks.map((task) => [task.taskId, task])))
-        for (const task of tasks) {
-          subscribeTask(task.taskId)
-        }
+        reconcileTasks(tasks)
       })
       .catch(() => { /* keep an empty task list on startup failures */ })
     return () => { cancelled = true }
-  }, [subscribeTask])
+  }, [reconcileTasks])
 
   const startExport = useCallback(async (
     runId: string,
@@ -97,13 +131,31 @@ export function EvaluationExportProvider({ children, wsBase, WebSocketImpl }: Ev
   }, [appendLog, rememberTask, subscribeTask])
 
   useEffect(() => {
-    const running = Object.values(tasksById).filter((task) => task.status === 'running')
-    if (running.length === 0) return
-    const timer = setInterval(() => {
-      for (const task of running) void refreshTask(task.taskId)
-    }, 1500)
-    return () => clearInterval(timer)
-  }, [refreshTask, tasksById])
+    try {
+      workspaceConnectionRef.current = connectWorkspaceEvents({
+        wsBase,
+        WebSocketImpl,
+        onEvent: (event) => {
+          if (event.type === 'evaluation-export-created' || event.type === 'evaluation-export-updated') {
+            rememberTask(event.task)
+            if (event.type === 'evaluation-export-created' || event.task.status === 'running') {
+              subscribeTask(event.task.taskId)
+            }
+            return
+          }
+          if (event.type === 'evaluation-export-deleted') {
+            forgetTask(event.taskId)
+          }
+        },
+      })
+    } catch {
+      // Startup REST rehydration and direct mutation responses still keep the UI usable.
+    }
+    return () => {
+      workspaceConnectionRef.current?.close()
+      workspaceConnectionRef.current = null
+    }
+  }, [WebSocketImpl, forgetTask, rememberTask, subscribeTask, wsBase])
 
   useEffect(() => {
     return () => {
@@ -143,29 +195,14 @@ export function EvaluationExportProvider({ children, wsBase, WebSocketImpl }: Ev
   }, [tasksById])
 
   const dismissTask = useCallback(async (taskId: string): Promise<void> => {
-    connectionsRef.current[taskId]?.close()
-    delete connectionsRef.current[taskId]
     try {
       await api.cancelEvaluationExportTask(taskId)
     } catch {
       // The server may already have forgotten the task after a restart. The
       // UI-level dismiss should still clear the stale local task.
     }
-    setTasksById((current) => {
-      const { [taskId]: _removed, ...rest } = current
-      const remaining = Object.values(rest).sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-      setSelectedTaskId((selected) => {
-        if (selected && selected !== taskId) return selected
-        return remaining[0]?.taskId ?? null
-      })
-      setDialogOpen((open) => open && remaining.length > 0)
-      return rest
-    })
-    setLogsByTaskId((current) => {
-      const { [taskId]: _removed, ...rest } = current
-      return rest
-    })
-  }, [])
+    forgetTask(taskId)
+  }, [forgetTask])
 
   const value = useMemo<EvaluationExportContextValue>(() => ({
     tasks,

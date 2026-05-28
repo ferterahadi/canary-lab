@@ -408,7 +408,7 @@ function parseEvaluationTextSlotRewrite(output: string): EvaluationTextSlot[] | 
   }
 }
 
-function evaluationTextSlots(rewrite: EvaluationRewrite): EvaluationTextSlot[] {
+export function evaluationTextSlots(rewrite: EvaluationRewrite): EvaluationTextSlot[] {
   return [
     ...(rewrite.featureTitle ? [{ id: 'featureTitle', text: rewrite.featureTitle }] : []),
     { id: 'summary', text: rewrite.summary },
@@ -425,7 +425,7 @@ function evaluationTextSlots(rewrite: EvaluationRewrite): EvaluationTextSlot[] {
   ]
 }
 
-function applyEvaluationTextSlotRewrite(base: EvaluationRewrite, slots: EvaluationTextSlot[]): EvaluationRewrite {
+export function applyEvaluationTextSlotRewrite(base: EvaluationRewrite, slots: EvaluationTextSlot[]): EvaluationRewrite {
   const byId = new Map<string, string>()
   for (const slot of slots) {
     const text = slot.text.trim()
@@ -781,7 +781,7 @@ function rationaleFor(quality: AssertionQuality, snippet: string, matcher?: stri
   return 'Static analysis could not confidently classify this assertion.'
 }
 
-function deterministicEvaluationRewrite(packet: TestReviewPacket): EvaluationRewrite {
+export function deterministicEvaluationRewrite(packet: TestReviewPacket): EvaluationRewrite {
   const feature = titleCaseFeatureName(packet.feature)
   const result = `${packet.passed}/${packet.total} checks passed`
   return {
@@ -807,7 +807,7 @@ function deterministicEvaluationRewrite(packet: TestReviewPacket): EvaluationRew
   }
 }
 
-function normalizeEvaluationRewrite(input: EvaluationRewrite | undefined, packet: TestReviewPacket): EvaluationRewrite | null {
+export function normalizeEvaluationRewrite(input: EvaluationRewrite | undefined, packet: TestReviewPacket): EvaluationRewrite | null {
   if (!input || typeof input.summary !== 'string' || !Array.isArray(input.cases)) return null
   if (input.cases.length !== packet.tests.length) return null
   const cases = input.cases.map((item) => {

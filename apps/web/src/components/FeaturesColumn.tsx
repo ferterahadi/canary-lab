@@ -1,6 +1,7 @@
 import { useState } from 'react'
-import type { Feature } from '../api/types'
+import type { Feature, RunStatus } from '../api/types'
 import { useWizardDrafts } from '../state/WizardDraftContext'
+import { useMcpPromo } from '../state/McpPromoContext'
 import { FeatureConfigEditor } from './FeatureConfigEditor'
 import { ThemeToggle } from './ThemeToggle'
 import { SettingsModal } from './SettingsModal'
@@ -8,6 +9,10 @@ import { SettingsModal } from './SettingsModal'
 interface Props {
   features: Feature[]
   selectedFeature: string | null
+  /** Feature whose run is currently active (running or healing), or null. */
+  activeRunFeature?: string | null
+  /** Status of that active run — drives the chip label/color. */
+  activeRunStatus?: RunStatus | null
   onSelectFeature: (name: string) => void
   onFeaturesChanged?: (preferredFeature?: string | null) => void
 }
@@ -15,10 +20,13 @@ interface Props {
 export function FeaturesColumn({
   features,
   selectedFeature,
+  activeRunFeature,
+  activeRunStatus,
   onSelectFeature,
   onFeaturesChanged,
 }: Props) {
   const { startNewWizard } = useWizardDrafts()
+  const { gatePromo } = useMcpPromo()
   const [configFor, setConfigFor] = useState<string | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
 
@@ -31,7 +39,7 @@ export function FeaturesColumn({
         </div>
         <button
           type="button"
-          onClick={startNewWizard}
+          onClick={() => gatePromo('create-feature', startNewWizard)}
           className="cl-button shrink-0 whitespace-nowrap px-2.5 py-1"
           title="Add a new feature"
         >
@@ -45,14 +53,17 @@ export function FeaturesColumn({
           <ul className="flex flex-col gap-1">
             {features.map((f) => {
               const isSelected = f.name === selectedFeature
+              const isActive = Boolean(activeRunFeature) && f.name === activeRunFeature
+              const runState = isActive ? (activeRunStatus === 'healing' ? 'healing' : 'running') : null
               return (
                 <li
                   key={f.name}
-                  className={`feature-row group cl-list-row text-sm ${isSelected ? 'cl-list-row-selected' : ''}`}
+                  className={`feature-row group cl-list-row text-sm${isSelected ? ' cl-list-row-selected' : ''}${runState ? ` cl-list-row-${runState}` : ''}`}
                   style={{
                     color: isSelected ? 'var(--text-primary)' : 'var(--text-secondary)',
                     fontWeight: isSelected ? 500 : 400,
                   }}
+                  title={runState ? (runState === 'healing' ? 'Healing now' : 'Running now') : undefined}
                 >
                   <button
                     type="button"
@@ -63,6 +74,9 @@ export function FeaturesColumn({
                   >
                     {f.name}
                   </button>
+                  {runState && (
+                    <span className="sr-only">{runState === 'healing' ? 'Healing' : 'Running'}</span>
+                  )}
                   <button
                     type="button"
                     onClick={() => setConfigFor(f.name)}

@@ -9,6 +9,13 @@ import type {
   RunStatus,
   ServiceStatus,
 } from '../../../../shared/run-state'
+import type {
+  ExecutionType,
+  VerificationConfig,
+  VerificationDiagnostics,
+  VerificationRunMetadata,
+  VerificationTarget,
+} from '../../../../shared/verification'
 export type {
   DisplayStatus,
   RunLifecycleAbortReason,
@@ -24,6 +31,13 @@ export type {
   ServiceStatus,
   TransientAction,
 } from '../../../../shared/run-state'
+export type {
+  ExecutionType,
+  VerificationConfig,
+  VerificationDiagnostics,
+  VerificationRunMetadata,
+  VerificationTarget,
+} from '../../../../shared/verification'
 
 export interface FeatureRepo {
   name: string
@@ -46,6 +60,7 @@ export interface ExtractedStep {
 }
 
 export interface ExtractedTest {
+  id?: string
   name: string
   line: number
   bodySource: string
@@ -66,28 +81,40 @@ export type FeatureTests = FeatureSpecFile[]
 
 export interface RunIndexEntry {
   runId: string
+  executionType?: ExecutionType
   feature: string
   startedAt: string
   status: RunStatus
   endedAt?: string
+  verificationConfigName?: string
+  verificationPlaywrightEnvsetId?: string
+  verificationTargetUrls?: Record<string, string>
 }
 
 export type EvaluationExportMode = 'raw' | 'localized'
 export type EvaluationExportStatus = 'running' | 'completed' | 'failed'
+export type EvaluationExportProducer = 'internal' | 'external'
 
 export interface EvaluationExportTask {
   taskId: string
   runId: string
   feature: string
   mode: EvaluationExportMode
+  producer?: EvaluationExportProducer
   status: EvaluationExportStatus
   createdAt: string
   updatedAt: string
   downloadReady: boolean
+  clientKind?: ExternalHealClientKind
+  sessionId?: string
+  conversationName?: string
+  language?: string
+  externalSessionUrl?: string
   error?: string
 }
 
 export interface ServiceManifestEntry {
+  repoName?: string
   name: string
   safeName: string
   command: string
@@ -115,8 +142,35 @@ export interface PlaywrightArtifactPolicy {
   trace: PlaywrightRetainedArtifactMode
 }
 
+export type ExternalHealClientKind =
+  | 'claude-cli'
+  | 'claude-desktop'
+  | 'codex-cli'
+  | 'codex-desktop'
+  | 'other'
+
+export type ExternalHealSessionStatus =
+  | 'connected'
+  | 'waiting'
+  | 'healing'
+  | 'running-tests'
+  | 'paused'
+  | 'disconnected'
+
+export interface ExternalHealSession {
+  sessionId: string
+  clientKind: ExternalHealClientKind
+  clientVersion?: string
+  conversationName?: string
+  claimedAt: string
+  lastHeartbeatAt: string
+  status: ExternalHealSessionStatus
+  cycleCount: number
+}
+
 export interface RunManifest {
   runId: string
+  executionType?: ExecutionType
   feature: string
   featureDir?: string
   env?: string
@@ -129,11 +183,15 @@ export interface RunManifest {
   repoBranches?: RepoBranchSnapshot[]
   playwrightArtifacts?: PlaywrightArtifactPolicy
   signalPaths?: { rerun: string; restart: string }
-  healMode?: 'auto' | 'manual'
+  healMode?: 'auto' | 'manual' | 'external'
+  healAgent?: 'claude' | 'codex'
+  externalHealSession?: ExternalHealSession
   lifecycle?: RunLifecycleSnapshot
+  verification?: VerificationRunMetadata
 }
 
 export interface RunSummaryFailedEntry {
+  id?: string
   name: string
   error?: { message: string; snippet?: string }
   durationMs?: number
@@ -141,6 +199,7 @@ export interface RunSummaryFailedEntry {
   locations?: string[]
   retry?: number
   logFiles?: string[]
+  traceSummaryFile?: string
 }
 
 export interface RunSummaryRunningStep {
@@ -155,10 +214,19 @@ export interface RunSummary {
   total: number
   passed: number
   passedNames?: string[]
+  passedIds?: string[]
   skipped?: number
   skippedNames?: string[]
-  running?: { name: string; location: string; step?: RunSummaryRunningStep }
-  runningTests?: Array<{ name: string; location: string; step?: RunSummaryRunningStep }>
+  skippedIds?: string[]
+  knownTests?: Array<{
+    id?: string
+    name: string
+    title?: string
+    titlePath?: string[]
+    location?: string
+  }>
+  running?: { id?: string; name: string; location: string; step?: RunSummaryRunningStep }
+  runningTests?: Array<{ id?: string; name: string; location: string; step?: RunSummaryRunningStep }>
   failed: RunSummaryFailedEntry[]
 }
 
@@ -224,6 +292,15 @@ export type DraftStatus =
   | 'cancelled'
   | 'error'
 
+export type DraftSource = 'internal' | 'external'
+export type ExternalDraftStage =
+  | 'scaffolding'
+  | 'authoring-tests'
+  | 'validating'
+  | 'ready'
+  | 'applied'
+  | 'error'
+
 export interface PlanStep {
   coverageType?: string
   step: string
@@ -244,6 +321,12 @@ export interface DraftRecord {
   prdDocuments: DraftPrdDocument[]
   repos: DraftRepo[]
   featureName?: string
+  source?: DraftSource
+  externalStage?: ExternalDraftStage
+  externalClientKind?: ExternalHealClientKind
+  externalSessionId?: string
+  externalConversationName?: string
+  externalSessionUrl?: string
   intentSummary?: string
   wizardAgent?: 'claude' | 'codex'
   activeAgentStage?: 'planning' | 'generating'
@@ -279,6 +362,19 @@ export interface CreateDraftPayload {
 export interface CreateDraftResponse {
   draftId: string
   status: DraftStatus
+}
+
+export interface AuditEntry {
+  ts: string
+  sessionId: string | null
+  clientKind: ExternalHealClientKind | null
+  action: string
+  args?: Record<string, unknown>
+  result?: Record<string, unknown>
+}
+
+export interface AuditList {
+  entries: AuditEntry[]
 }
 
 export interface JournalEntry {

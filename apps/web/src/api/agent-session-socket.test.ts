@@ -73,6 +73,27 @@ describe('connectAgentSessionStream', () => {
     expect(onEvent).toHaveBeenCalledWith(sampleEvent)
   })
 
+  it('forwards valid session metadata to onSession', () => {
+    reset()
+    const onSession = vi.fn()
+    connectAgentSessionStream({
+      source: { kind: 'run', runId: 'r' },
+      onEvent: () => {},
+      onSession,
+      wsBase: 'ws://h',
+      WebSocketImpl: FakeWebSocket as unknown as typeof WebSocket,
+    })
+    FakeWebSocket.instances[0].onmessage?.({
+      data: JSON.stringify({ type: 'session', agent: 'codex', sessionId: 'sess-1' }),
+    })
+    FakeWebSocket.instances[0].onmessage?.({
+      data: JSON.stringify({ type: 'session', agent: 'codex' }),
+    })
+
+    expect(onSession).toHaveBeenCalledOnce()
+    expect(onSession).toHaveBeenCalledWith({ agent: 'codex', sessionId: 'sess-1' })
+  })
+
   it('forwards error messages to onError', () => {
     reset()
     const onError = vi.fn()

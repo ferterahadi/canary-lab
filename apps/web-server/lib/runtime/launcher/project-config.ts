@@ -2,7 +2,7 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 
-export type HealAgentChoice = 'auto' | 'claude' | 'codex' | 'manual'
+export type HealAgentChoice = 'auto' | 'claude' | 'codex' | 'manual' | 'external'
 export type EditorChoice = 'auto' | 'vscode' | 'cursor' | 'system'
 
 export interface ProjectConfig {
@@ -11,7 +11,10 @@ export interface ProjectConfig {
   personalWikiPath: string | null
 }
 
-const DEFAULT: ProjectConfig = { healAgent: 'auto', editor: 'auto', personalWikiPath: null }
+// Default to `external` — the modern Claude/Codex via MCP flow. `auto` is
+// still accepted by the validator for backwards compatibility with older
+// configs, but new installs and the settings UI prefer external.
+const DEFAULT: ProjectConfig = { healAgent: 'external', editor: 'auto', personalWikiPath: null }
 const FILENAME = 'canary-lab.config.json'
 
 export function projectConfigPath(projectRoot: string): string {
@@ -19,7 +22,13 @@ export function projectConfigPath(projectRoot: string): string {
 }
 
 function isHealAgentChoice(v: unknown): v is HealAgentChoice {
-  return v === 'auto' || v === 'claude' || v === 'codex' || v === 'manual'
+  return (
+    v === 'auto' ||
+    v === 'claude' ||
+    v === 'codex' ||
+    v === 'manual' ||
+    v === 'external'
+  )
 }
 
 function isEditorChoice(v: unknown): v is EditorChoice {

@@ -34,7 +34,7 @@ function manifest(overrides: Partial<RunManifest> = {}): RunManifest {
 }
 
 describe('FileRunStateSink', () => {
-  it('bootstraps the manifest, runs index, and current run pointer', () => {
+  it('bootstraps the manifest and runs index without a current run pointer', () => {
     const sink = new FileRunStateSink(logsDir)
     sink.bootstrap(manifest())
 
@@ -47,7 +47,7 @@ describe('FileRunStateSink', () => {
         status: 'running',
       },
     ])
-    expect(fs.existsSync(path.join(logsDir, 'current'))).toBe(true)
+    expect(fs.existsSync(path.join(logsDir, 'current'))).toBe(false)
   })
 
   it('updates status, heal cycles, service status, heartbeat, and manifest patches', () => {

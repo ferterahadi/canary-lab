@@ -44,12 +44,6 @@ run(
 
 const scaffoldPaths = [
   'package.json',
-  'AGENTS.md',
-  'CLAUDE.md',
-  '.claude/skills/env-import.md',
-  '.claude/skills/canary-lab-feature.md',
-  '.codex/env-import.md',
-  '.codex/canary-lab-feature.md',
   'features/example_todo_api/feature.config.cjs',
   'features/broken_todo_api/feature.config.cjs',
 ]
@@ -69,36 +63,17 @@ for (const relPath of scaffoldPaths) {
   }
 }
 
-for (const mdFile of ['CLAUDE.md', 'AGENTS.md']) {
-  const content = fs.readFileSync(path.join(projectDir, mdFile), 'utf-8')
-  for (const expected of [
-    '<!-- managed:canary-lab:start -->',
-    '<!-- managed:canary-lab:end -->',
-    '<!-- heal-prompt:start -->',
-    '<!-- heal-prompt:end -->',
-    'When the user says `self heal`, follow the `heal-prompt` block below. The `logs/current` pointer tracks the active run.',
-    'logs/current/heal-index.md',
-    'logs/current/e2e-summary.json',
-    'logs/current/diagnosis-journal.md',
-    'logs/current/signals/',
-    'Prefer exact slice paths from `heal-index.md` before broad repo search.',
-  ]) {
-    if (!content.includes(expected)) {
-      throw new Error(`Smoke test failed: ${mdFile} missing ${expected}`)
-    }
-  }
-  for (const removed of ['## Quick Start', '## Context Files', '## Importing Env Files', 'Before editing, group related failures by file', 'Avoid broad repo grep']) {
-    if (content.includes(removed)) {
-      throw new Error(`Smoke test failed: ${mdFile} still includes ${removed}`)
-    }
-  }
-}
-
 for (const relPath of [
+  'AGENTS.md',
+  'CLAUDE.md',
   '.claude/skills/heal-loop.md',
   '.claude/skills/self-fixing-loop.md',
+  '.claude/skills/env-import.md',
+  '.claude/skills/canary-lab-feature.md',
   '.codex/heal-loop.md',
   '.codex/self-fixing-loop.md',
+  '.codex/env-import.md',
+  '.codex/canary-lab-feature.md',
   'features/example_todo_api/src/config.ts',
 ]) {
   if (fs.existsSync(path.join(projectDir, relPath))) {
@@ -115,4 +90,4 @@ for (const relPath of installedPackagePaths) {
   }
 }
 
-run('npx', ['canary-lab', 'new-feature', 'smoke_feature', 'Smoke test feature'], projectDir)
+run('npx', ['canary-lab', 'new', 'feature', 'smoke_feature', '--description', 'Smoke test feature'], projectDir)

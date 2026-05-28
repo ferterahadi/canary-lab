@@ -1,11 +1,12 @@
 import type { FastifyInstance, FastifyReply } from 'fastify'
 import fs from 'fs'
 import path from 'path'
-import type { PlaywrightArtifact, RunDetail } from '../lib/run-store'
-import type { RunStore, OrchestratorLike, RestartHealResult } from '../lib/run-store'
+import type { RunDetail } from '../lib/run-store'
+import type { RunStore, OrchestratorLike, RestartHealResult, RestartRunResult } from '../lib/run-store'
 import { loadFeatures } from '../lib/feature-loader'
 import { buildRunPaths, runDirFor } from '../lib/runtime/run-paths'
-import { createEvaluationExport, generateEvaluationRewriteWithAgent, type EvaluationRewrite } from '../lib/test-review-export'
+import { generateEvaluationRewriteWithAgent, type EvaluationRewrite } from '../lib/test-review-export'
+import { buildEvaluationExportArchive } from '../lib/evaluation-export-archive'
 import { loadProjectConfig } from '../lib/runtime/launcher/project-config'
 import { PaneBroker, type PaneSubscriber } from '../lib/pane-broker'
 import {
@@ -29,6 +30,8 @@ import {
   selectAgentSessionRef,
 } from '../lib/agent-session-log'
 import { isTerminalRunStatus } from '../../../shared/run-state'
+import type { ExternalHealBroker } from '../lib/external-heal-broker'
+import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../lib/workspace-events'
 
 const EVALUATION_REWRITE_FORMAT_VERSION = 6
 
@@ -37,17 +40,35 @@ interface ActiveEvaluationExportTask {
   abortController: AbortController
 }
 
+export interface ExternalHealAgentRequest {
+  kind: 'external'
+  sessionId: string
+  clientKind: 'claude-cli' | 'claude-desktop' | 'codex-cli' | 'codex-desktop' | 'other'
+  clientVersion?: string
+  conversationName?: string
+}
+
 export interface RunsRouteDeps {
   featuresDir: string
   projectRoot?: string
   /** Single source of truth for run state. Routes read + mutate exclusively
    *  through this — no direct manifest/index file access. */
   store: RunStore
-  // Factory: given a feature name, build + start an orchestrator. Returns the
-  // runId synchronously after `start()` is in flight (the factory awaits the
-  // initial spawn but not test completion). Injected so tests can stub it.
-  startRun(feature: string, env?: string): Promise<OrchestratorLike>
+  // Factory: given a feature name + optional healAgent override, build + start
+  // an orchestrator. Returns the orchestrator synchronously after `start()` is
+  // in flight (the factory awaits the initial spawn but not test completion).
+  // When `healAgent.kind === 'external'`, the orchestrator must be configured
+  // with externalHeal=true and the external-heal broker claim should be
+  // bootstrapped before the orchestrator's heal-loop entry condition triggers.
+  startRun(
+    feature: string,
+    env?: string,
+    healAgent?: ExternalHealAgentRequest,
+  ): Promise<OrchestratorLike>
+  broker?: Pick<ExternalHealBroker, 'claim'>
+  workspaceEvents?: WorkspaceEventPublisher
   restartHeal?(runId: string, text: string): Promise<RestartHealResult>
+  restartRun?(runId: string): Promise<RestartRunResult>
   generateEvaluationRewrite?(
     detail: Parameters<typeof generateEvaluationRewriteWithAgent>[0],
     audienceAdapter: Parameters<typeof generateEvaluationRewriteWithAgent>[1],
@@ -70,6 +91,24 @@ export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Pro
       return { error: 'run not found' }
     }
     return detail
+  })
+
+  app.get<{ Params: { runId: string } }>('/api/runs/:runId/verification-report', async (req, reply) => {
+    const detail = deps.store.get(req.params.runId)
+    if (!detail) {
+      reply.code(404)
+      return { error: 'run not found' }
+    }
+    if ((detail.manifest.executionType ?? 'run') !== 'verify') {
+      reply.code(409)
+      return { error: 'run is not a verification execution' }
+    }
+    return {
+      runId: detail.runId,
+      executionType: 'verify',
+      status: detail.manifest.status,
+      verification: detail.manifest.verification ?? null,
+    }
   })
 
   // Structured heal-agent session view. Reads the per-run pointer file
@@ -116,32 +155,26 @@ export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Pro
   ): Promise<{ archiveBase: string; zip: Buffer }> => {
     throwIfAborted(signal)
     log?.(`[evaluation] preparing ${mode === 'raw' ? 'raw output' : 'localized output'} export\n`)
-    const runPaths = buildRunPaths(runDirFor(deps.store.logsDir, detail.runId))
-    const videos = assertionVideos(
-      detail.playwrightArtifacts,
-      runPaths.playwrightArtifactsDir,
-      runPaths.playwrightArtifactsKeepDir,
-      detail.runId,
-    )
-    const archiveBase = `canary-lab-evaluation-${safeFilename(detail.manifest.feature)}-${safeFilename(detail.runId)}`
-    const audienceAdapter = mode === 'localized' && deps.projectRoot ? loadProjectConfig(deps.projectRoot).healAgent : 'deterministic'
+    // When the project default is the new `external` heal-agent, there is no
+    // local LLM voice for evaluation rewriting — fall back to the deterministic
+    // adapter so exports stay reproducible.
+    const projectHealAgent = mode === 'localized' && deps.projectRoot
+      ? loadProjectConfig(deps.projectRoot).healAgent
+      : 'deterministic'
+    const audienceAdapter: 'auto' | 'claude' | 'codex' | 'manual' | 'deterministic' =
+      projectHealAgent === 'external' ? 'deterministic' : projectHealAgent
     const runDir = runDirFor(deps.store.logsDir, detail.runId)
     const rewrite = mode === 'localized'
       ? await loadEvaluationRewrite(detail, runDir, audienceAdapter, deps.projectRoot, deps.generateEvaluationRewrite, app.log, log, signal)
       : undefined
     throwIfAborted(signal)
-    const exported = await createEvaluationExport(detail, {
+    const built = await buildEvaluationExportArchive(detail, {
+      logsDir: deps.store.logsDir,
       audienceAdapter,
       rewrite,
-      videoLinksByTestName: videoLinksByTestName(videos),
     })
-    const zip = createZip([
-      { filename: 'evaluation.html', data: Buffer.from(exported.html, 'utf8') },
-      ...exported.assets,
-      ...videos.map((video) => ({ filename: video.filename, data: fs.readFileSync(video.path) })),
-    ])
     log?.('[evaluation] export archive ready\n')
-    return { archiveBase, zip }
+    return built
   }
 
   const sendEvaluationExport = async (runId: string, reply: FastifyReply) => {
@@ -165,13 +198,17 @@ export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Pro
     const activeIds = new Set(activeEvaluationExports.keys())
     for (const task of listEvaluationExportTasks(deps.store.logsDir)) {
       if (task.status !== 'running' || activeIds.has(task.taskId)) continue
+      if ((task.producer ?? 'internal') === 'external') continue
       const message = 'evaluation export interrupted; start a new export'
       appendEvaluationExportLog(deps.store.logsDir, task.taskId, `[evaluation] task failed: ${message}\n`)
-      patchEvaluationExportTask(deps.store.logsDir, task.taskId, {
+      const patched = patchEvaluationExportTask(deps.store.logsDir, task.taskId, {
         status: 'failed',
         downloadReady: false,
         error: message,
       })
+      if (patched) {
+        publishWorkspaceEvent(deps.workspaceEvents, { type: 'evaluation-export-updated', task: evaluationExportTaskView(patched) })
+      }
     }
   }
 
@@ -182,6 +219,7 @@ export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Pro
       runId: detail.runId,
       feature: detail.manifest.feature,
       mode,
+      producer: 'internal',
       status: 'running',
       createdAt: now,
       updatedAt: now,
@@ -193,6 +231,7 @@ export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Pro
       abortController: new AbortController(),
     }
     createEvaluationExportTask(deps.store.logsDir, task)
+    publishWorkspaceEvent(deps.workspaceEvents, { type: 'evaluation-export-created', task: evaluationExportTaskView(task) })
     activeEvaluationExports.set(task.taskId, active)
     const push = (chunk: string): void => {
       appendEvaluationExportLog(deps.store.logsDir, task.taskId, chunk)
@@ -204,21 +243,27 @@ export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Pro
         const built = await buildEvaluationZip(detail, mode, push, active.abortController.signal)
         if (!readEvaluationExportTask(deps.store.logsDir, task.taskId)) return
         writeEvaluationExportZip(deps.store.logsDir, task.taskId, built.zip)
-        patchEvaluationExportTask(deps.store.logsDir, task.taskId, {
+        const patched = patchEvaluationExportTask(deps.store.logsDir, task.taskId, {
           archiveBase: built.archiveBase,
           status: 'completed',
           downloadReady: true,
         })
+        if (patched) {
+          publishWorkspaceEvent(deps.workspaceEvents, { type: 'evaluation-export-updated', task: evaluationExportTaskView(patched) })
+        }
         push('[evaluation] task completed\n')
         active.broker.markExit('export', 0)
       } catch (err) {
         if (!readEvaluationExportTask(deps.store.logsDir, task.taskId)) return
         const error = err instanceof Error ? err.message : String(err)
-        patchEvaluationExportTask(deps.store.logsDir, task.taskId, {
+        const patched = patchEvaluationExportTask(deps.store.logsDir, task.taskId, {
           status: 'failed',
           error,
           downloadReady: false,
         })
+        if (patched) {
+          publishWorkspaceEvent(deps.workspaceEvents, { type: 'evaluation-export-updated', task: evaluationExportTaskView(patched) })
+        }
         push(`[evaluation] task failed: ${error}\n`)
         active.broker.markExit('export', 1)
       } finally {
@@ -304,6 +349,7 @@ export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Pro
     active?.broker.markExit('export', task.status === 'running' ? 1 : 0)
     activeEvaluationExports.delete(req.params.taskId)
     deleteEvaluationExportTask(deps.store.logsDir, req.params.taskId)
+    publishWorkspaceEvent(deps.workspaceEvents, { type: 'evaluation-export-deleted', taskId: req.params.taskId })
     reply.code(204)
     return reply.send()
   })
@@ -369,7 +415,14 @@ export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Pro
     return { error: 'artifact not found' }
   })
 
-  app.post<{ Body: { feature?: string; env?: string } }>('/api/runs', async (req, reply) => {
+  app.post<{
+    Body: {
+      feature?: string
+      env?: string
+      healAgent?: ExternalHealAgentRequest | { kind?: string }
+      forceNew?: boolean
+    }
+  }>('/api/runs', async (req, reply) => {
     const feature = req.body?.feature
     if (typeof feature !== 'string' || feature.length === 0) {
       reply.code(400)
@@ -389,8 +442,38 @@ export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Pro
       reply.code(400)
       return { error: `env must be one of: ${declared.join(', ')}` }
     }
+    const healAgent = parseExternalHealAgent(req.body?.healAgent)
+    if (healAgent && 'error' in healAgent) {
+      reply.code(400)
+      return { error: healAgent.error }
+    }
+    if (healAgent) {
+      const active = findActiveRunForFeature(deps.store, feature, env)
+      if (active) {
+        const claim = deps.broker?.claim(active.manifest.runId, {
+          sessionId: healAgent.sessionId,
+          clientKind: healAgent.clientKind,
+          ...(healAgent.clientVersion ? { clientVersion: healAgent.clientVersion } : {}),
+          ...(healAgent.conversationName ? { conversationName: healAgent.conversationName } : {}),
+        }) ?? null
+        reply.code(200)
+        return {
+          runId: active.manifest.runId,
+          reused: true,
+          status: active.manifest.status,
+          claimed: claim ? claim.accepted : false,
+          claim,
+          ...(req.body?.forceNew
+            ? {
+                ignoredForceNew: true,
+                warning: 'An active run already exists for this feature. Continue it with signal_run and wait_for_heal_task instead of starting a fresh run.',
+              }
+            : {}),
+        }
+      }
+    }
     try {
-      const orch = await deps.startRun(feature, env)
+      const orch = await deps.startRun(feature, env, healAgent ?? undefined)
       deps.store.registry.set(orch.runId, orch)
       reply.code(201)
       return { runId: orch.runId }
@@ -481,6 +564,17 @@ export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Pro
     },
   )
 
+  app.post<{ Params: { runId: string } }>('/api/runs/:runId/restart', async (req, reply) => {
+    const restarted = await deps.restartRun?.(req.params.runId)
+    if (restarted?.ok) {
+      reply.code(202)
+      return { status: 'restarted', mode: restarted.mode }
+    }
+    const reason = restarted?.reason ?? 'not-restartable'
+    reply.code(reason === 'run-not-found' ? 404 : reason === 'spawn-failed' ? 500 : 409)
+    return { reason }
+  })
+
   // POST /api/runs/:runId/abort — explicit abort of an active run. Stops
   // the orchestrator (kills Playwright + heal agent + service ptys) and
   // marks the manifest 'aborted'. The run is preserved in history so the
@@ -531,60 +625,6 @@ function contentTypeFor(filePath: string): string {
 
 function safeFilename(input: string): string {
   return input.replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'run'
-}
-
-function assertionVideos(
-  groups: Array<{ testName: string; artifacts: PlaywrightArtifact[] }> | undefined,
-  artifactsDir: string,
-  artifactsKeepDir: string,
-  runId: string,
-): Array<{ filename: string; path: string; testName: string }> {
-  // Mirror indexPlaywrightArtifacts.resolveFile: artifact.path is rooted at
-  // the live artifacts dir, but after heal-cycle reruns the live dir only
-  // holds the last invocation's outputs. Fall back to the keep dir so videos
-  // from earlier invocations still make it into the export.
-  const fileAt = (rel: string): string | null => {
-    const live = path.resolve(artifactsDir, rel)
-    if (fs.existsSync(live) && fs.statSync(live).isFile()) return live
-    const kept = path.resolve(artifactsKeepDir, rel)
-    if (fs.existsSync(kept) && fs.statSync(kept).isFile()) return kept
-    return null
-  }
-  const videos = (groups ?? [])
-    .flatMap((group) => group.artifacts.map((artifact) => ({ artifact, testName: group.testName })))
-    .map(({ artifact, testName }) => {
-      const rel = path.relative(artifactsDir, path.resolve(artifactsDir, artifact.path))
-      const valid = !rel.startsWith('..') && !path.isAbsolute(rel)
-      const filePath = valid ? fileAt(rel) : null
-      return { artifact, filePath, testName, valid }
-    })
-    .filter((entry): entry is { artifact: PlaywrightArtifact; filePath: string; testName: string; valid: boolean } =>
-      entry.valid && entry.artifact.kind === 'video' && entry.filePath !== null)
-  const used = new Set<string>()
-  return videos.map(({ artifact, filePath, testName }, idx) => {
-    const ext = path.extname(filePath) || extensionForContentType(artifact.contentType) || '.webm'
-    const suffix = videos.length === 1 ? '' : `-${idx + 1}`
-    let filename = `${safeFilename(runId)}${suffix}${ext}`
-    let dedupe = 2
-    while (used.has(filename)) {
-      filename = `${safeFilename(runId)}${suffix}-${dedupe}${ext}`
-      dedupe += 1
-    }
-    used.add(filename)
-    return { filename, path: filePath, testName }
-  })
-}
-
-function videoLinksByTestName(videos: Array<{ filename: string; testName: string }>): Record<string, string[]> {
-  const out: Record<string, string[]> = {}
-  for (const video of videos) out[video.testName] = [...(out[video.testName] ?? []), video.filename]
-  return out
-}
-
-function extensionForContentType(contentType: string | undefined): string | undefined {
-  if (contentType === 'video/mp4') return '.mp4'
-  if (contentType === 'video/webm') return '.webm'
-  return undefined
 }
 
 async function loadEvaluationRewrite(
@@ -664,62 +704,66 @@ function parseEvaluationExportMode(value: string | undefined): EvaluationExportM
   return value === 'raw' || value === 'localized' ? value : null
 }
 
-interface ZipEntry {
-  filename: string
-  data: Buffer
+const EXTERNAL_CLIENT_KINDS: ExternalHealAgentRequest['clientKind'][] = [
+  'claude-cli',
+  'claude-desktop',
+  'codex-cli',
+  'codex-desktop',
+  'other',
+]
+
+function parseExternalHealAgent(
+  value: unknown,
+): ExternalHealAgentRequest | { error: string } | null {
+  if (value === undefined || value === null) return null
+  if (typeof value !== 'object') return { error: 'healAgent must be an object' }
+  const v = value as Record<string, unknown>
+  if (v.kind === undefined) return null
+  // v1 only wires up the external kind via this body field; the existing
+  // project-config healAgent setting remains the source of truth for
+  // 'auto' / 'claude' / 'codex' / 'manual'. The body override is *only* the
+  // hook for external MCP clients to register themselves at run start.
+  if (v.kind !== 'external') {
+    return { error: 'healAgent.kind must be "external" when overriding from the request body' }
+  }
+  if (typeof v.sessionId !== 'string' || !v.sessionId) {
+    return { error: 'healAgent.sessionId is required when kind="external"' }
+  }
+  if (typeof v.clientKind !== 'string' || !(EXTERNAL_CLIENT_KINDS as string[]).includes(v.clientKind)) {
+    return { error: `healAgent.clientKind must be one of: ${EXTERNAL_CLIENT_KINDS.join(', ')}` }
+  }
+  return {
+    kind: 'external',
+    sessionId: v.sessionId,
+    clientKind: v.clientKind as ExternalHealAgentRequest['clientKind'],
+    ...(typeof v.clientVersion === 'string' ? { clientVersion: v.clientVersion } : {}),
+    ...(typeof v.conversationName === 'string' ? { conversationName: v.conversationName } : {}),
+  }
 }
 
-function createZip(entries: ZipEntry[]): Buffer {
-  const fileRecords: Buffer[] = []
-  const centralRecords: Buffer[] = []
-  let offset = 0
-  for (const entry of entries) {
-    const name = Buffer.from(entry.filename, 'utf8')
-    const crc = crc32(entry.data)
-    const local = Buffer.alloc(30)
-    local.writeUInt32LE(0x04034b50, 0)
-    local.writeUInt16LE(20, 4)
-    local.writeUInt16LE(0x0800, 6)
-    local.writeUInt16LE(0, 8)
-    local.writeUInt32LE(0, 10)
-    local.writeUInt32LE(crc, 14)
-    local.writeUInt32LE(entry.data.length, 18)
-    local.writeUInt32LE(entry.data.length, 22)
-    local.writeUInt16LE(name.length, 26)
-    const fileRecord = Buffer.concat([local, name, entry.data])
-    fileRecords.push(fileRecord)
-
-    const central = Buffer.alloc(46)
-    central.writeUInt32LE(0x02014b50, 0)
-    central.writeUInt16LE(20, 4)
-    central.writeUInt16LE(20, 6)
-    central.writeUInt16LE(0x0800, 8)
-    central.writeUInt16LE(0, 10)
-    central.writeUInt32LE(0, 12)
-    central.writeUInt32LE(crc, 16)
-    central.writeUInt32LE(entry.data.length, 20)
-    central.writeUInt32LE(entry.data.length, 24)
-    central.writeUInt16LE(name.length, 28)
-    central.writeUInt32LE(offset, 42)
-    centralRecords.push(Buffer.concat([central, name]))
-    offset += fileRecord.length
+function findActiveRunForFeature(
+  store: RunStore,
+  feature: string,
+  env: string | undefined,
+): RunDetail | null {
+  const candidates: Array<{ detail: RunDetail; startedAt: string }> = []
+  for (const entry of store.list({ feature })) {
+    if (entry.status !== 'healing') continue
+    const detail = store.get(entry.runId)
+    if (!detail) continue
+    if (env && detail.manifest.env !== env) continue
+    candidates.push({ detail, startedAt: entry.startedAt })
   }
-  const centralOffset = offset
-  const centralDirectory = Buffer.concat(centralRecords)
-  const end = Buffer.alloc(22)
-  end.writeUInt32LE(0x06054b50, 0)
-  end.writeUInt16LE(entries.length, 8)
-  end.writeUInt16LE(entries.length, 10)
-  end.writeUInt32LE(centralDirectory.length, 12)
-  end.writeUInt32LE(centralOffset, 16)
-  return Buffer.concat([...fileRecords, centralDirectory, end])
+  candidates.sort((a, b) => {
+    const priorityDiff = activeRunPriority(a.detail) - activeRunPriority(b.detail)
+    if (priorityDiff !== 0) return priorityDiff
+    return a.startedAt < b.startedAt ? 1 : a.startedAt > b.startedAt ? -1 : 0
+  })
+  return candidates[0]?.detail ?? null
 }
 
-function crc32(buffer: Buffer): number {
-  let crc = 0xffffffff
-  for (const byte of buffer) {
-    crc ^= byte
-    for (let i = 0; i < 8; i += 1) crc = (crc >>> 1) ^ (0xedb88320 & -(crc & 1))
-  }
-  return (crc ^ 0xffffffff) >>> 0
+function activeRunPriority(detail: RunDetail): number {
+  if (detail.manifest.lifecycle?.phase === 'waiting-for-signal') return 0
+  if (detail.manifest.status === 'healing') return 1
+  return 2
 }

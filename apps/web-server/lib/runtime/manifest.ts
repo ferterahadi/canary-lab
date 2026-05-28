@@ -1,11 +1,15 @@
 import fs from 'fs'
 import path from 'path'
-import { runDirFor, runsIndexPath, runsRoot } from './run-paths'
+import { runsIndexPath, runsRoot } from './run-paths'
 import type {
   RunLifecycleSnapshot,
   RunStatus,
   ServiceStatus,
 } from '../../../../shared/run-state'
+import type {
+  ExecutionType,
+  VerificationRunMetadata,
+} from '../../../../shared/verification'
 export type {
   RunLifecycleAbortReason,
   RunLifecycleEvent,
@@ -24,6 +28,8 @@ export type {
 // JSON-shaped so the future server can read it without parsing logs.
 
 export interface ServiceManifestEntry {
+  /** Repo identity from feature.config repos[].name. Older manifests omit it. */
+  repoName?: string
   name: string
   safeName: string
   command: string
@@ -63,8 +69,44 @@ export interface StoppedEarlyInfo {
   suiteTotal: number
 }
 
+export type ExternalHealClientKind =
+  | 'claude-cli'
+  | 'claude-desktop'
+  | 'codex-cli'
+  | 'codex-desktop'
+  | 'other'
+
+export type LocalHealAgent = 'claude' | 'codex'
+
+export type ExternalHealSessionStatus =
+  | 'connected'
+  | 'waiting'
+  | 'healing'
+  | 'running-tests'
+  | 'paused'
+  | 'disconnected'
+
+/**
+ * Identity + liveness record for an external AI client (Claude Desktop, Codex
+ * CLI, etc.) that has claimed heal duty for this run via MCP. Populated only
+ * when `healMode === 'external'`. The orchestrator no longer spawns a heal
+ * agent PTY in that mode — it parks at `waiting-for-signal` and lets the
+ * external client write signals through `POST /api/runs/:runId/signal`.
+ */
+export interface ExternalHealSession {
+  sessionId: string
+  clientKind: ExternalHealClientKind
+  clientVersion?: string
+  conversationName?: string
+  claimedAt: string
+  lastHeartbeatAt: string
+  status: ExternalHealSessionStatus
+  cycleCount: number
+}
+
 export interface RunManifest {
   runId: string
+  executionType?: ExecutionType
   feature: string
   featureDir?: string
   env?: string
@@ -92,11 +134,22 @@ export interface RunManifest {
   signalPaths?: { rerun: string; restart: string }
   /** When the run is heal-paused under manual mode, the UI renders a banner
    *  pointing the user at the signal paths above. Only set during the heal
-   *  phase of a manual run; cleared when the run leaves the heal state. */
-  healMode?: 'auto' | 'manual'
+   *  phase of a manual run; cleared when the run leaves the heal state.
+   *
+   *  `'external'` means an external AI client (Claude/Codex CLI or Desktop,
+   *  connected via MCP) owns the heal loop for this run. See
+   *  `externalHealSession` below for identity + heartbeat state. */
+  healMode?: 'auto' | 'manual' | 'external'
+  /** Resolved local CLI used for auto-heal. Locks the run to the agent that
+   *  was chosen when the run started, even if project settings change later. */
+  healAgent?: LocalHealAgent
+  /** Populated when `healMode === 'external'`. Tracks the single external
+   *  client that holds the heal claim for this run. */
+  externalHealSession?: ExternalHealSession
   /** Latest structured lifecycle state. This is the UI source of truth for
    *  recovery flow narration; runner.log remains the human-readable audit. */
   lifecycle?: RunLifecycleSnapshot
+  verification?: VerificationRunMetadata
 }
 
 function atomicWrite(file: string, body: string): void {
@@ -161,10 +214,14 @@ export function updateAllServicesStatus(
 
 export interface RunIndexEntry {
   runId: string
+  executionType?: ExecutionType
   feature: string
   startedAt: string
   status: RunStatus
   endedAt?: string
+  verificationConfigName?: string
+  verificationPlaywrightEnvsetId?: string
+  verificationTargetUrls?: Record<string, string>
 }
 
 export function readRunsIndex(logsDir: string): RunIndexEntry[] {
@@ -194,29 +251,4 @@ export function upsertRunsIndexEntry(
   }
   writeRunsIndex(logsDir, entries)
   return entries
-}
-
-// Update or remove the `logs/current` symlink so legacy heal-index path
-// expectations (which read `logs/current/heal-index.md`) keep working.
-export function setCurrentRunSymlink(logsDir: string, runId: string | null): void {
-  const link = path.join(logsDir, 'current')
-  try {
-    fs.rmSync(link, { recursive: true, force: true })
-  } catch {
-    /* no existing link — fine */
-  }
-  if (runId === null) return
-  fs.mkdirSync(runsRoot(logsDir), { recursive: true })
-  const target = path.relative(logsDir, runDirFor(logsDir, runId))
-  try {
-    fs.symlinkSync(target, link, 'dir')
-  } catch {
-    // Symlinks may fail on some filesystems (e.g. Windows without admin). Fall
-    // back to a tiny pointer file so callers can still resolve the path.
-    try {
-      fs.writeFileSync(link, target)
-    } catch {
-      /* best-effort */
-    }
-  }
 }

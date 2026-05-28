@@ -171,16 +171,17 @@ export function StepBlock({
   status,
   depth,
   sourceFile,
-  runningLine,
+  runningSourceLine,
 }: {
   step: ExtractedStep
   status: StepStatus
   depth: number
   sourceFile?: string
-  runningLine?: number | null
+  runningSourceLine?: number | null
 }) {
   const [expanded, setExpanded] = useState(false)
-  const isRunningStep = runningLine != null && step.line === runningLine
+  const activeLine = bodyLineForSourceLine(step.line, step.bodySource, runningSourceLine)
+  const isRunningStep = activeLine != null
   const cardClass = isRunningStep
     ? 'border-yellow-500/60 bg-yellow-400/15 dark:border-yellow-400/60 dark:bg-yellow-400/10'
     : `${colorClassForStatus(status)} bg-[var(--bg-surface)]`
@@ -202,17 +203,27 @@ export function StepBlock({
         <div className="mt-1.5">
           <ShikiCode
             source={step.bodySource}
+            activeLine={activeLine}
             sourceLocation={sourceFile ? { file: sourceFile, startLine: step.line } : undefined}
+            runningHighlight={isRunningStep}
           />
         </div>
       )}
       {step.children.length > 0 && (
         <ul className="mt-1.5 space-y-1.5 pl-3" style={{ borderLeft: '1px solid var(--border-default)' }}>
           {step.children.map((child, i) => (
-            <StepBlock key={`${child.line}:${i}`} step={child} status={status} depth={depth + 1} sourceFile={sourceFile} runningLine={runningLine} />
+            <StepBlock key={`${child.line}:${i}`} step={child} status={status} depth={depth + 1} sourceFile={sourceFile} runningSourceLine={runningSourceLine} />
           ))}
         </ul>
       )}
     </li>
   )
+}
+
+function bodyLineForSourceLine(startLine: number, source: string, sourceLine?: number | null): number | null {
+  if (sourceLine == null) return null
+  if (!source) return null
+  const line = sourceLine - startLine + 1
+  if (line < 1 || line > source.split('\n').length) return null
+  return line
 }

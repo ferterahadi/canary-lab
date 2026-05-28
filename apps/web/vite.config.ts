@@ -23,6 +23,7 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/api': { target: 'http://127.0.0.1:7421', changeOrigin: true },
+      '/mcp': { target: 'http://127.0.0.1:7421', changeOrigin: true },
       '/ws': { target: 'ws://127.0.0.1:7421', ws: true, changeOrigin: true },
     },
   },

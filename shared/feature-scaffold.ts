@@ -12,6 +12,17 @@ export interface GeneratedFeatureFile {
 export interface BuildFeatureScaffoldInput {
   featureName: string
   description?: string
+  envs?: string[]
+  repos?: FeatureScaffoldRepo[]
+}
+
+export interface FeatureScaffoldRepo {
+  name: string
+  localPath: string
+  cloneUrl?: string
+  branch?: string
+  startCommands?: unknown[]
+  envs?: string[]
 }
 
 export type ValidateGeneratedFeatureResult =
@@ -38,14 +49,30 @@ export function canonicalScaffoldPaths(featureName: string): string[] {
   ]
 }
 
+export function skeletonScaffoldPaths(featureName: string): string[] {
+  return [
+    'feature.config.cjs',
+    CANONICAL_PLAYWRIGHT_CONFIG,
+    'envsets/envsets.config.json',
+    `envsets/local/${featureName}.env`,
+  ]
+}
+
 export function buildFeatureScaffold(input: BuildFeatureScaffoldInput): GeneratedFeatureFile[] {
+  const skeleton = buildFeatureSkeletonScaffold(input)
+  return [
+    ...skeleton,
+    { path: `e2e/${input.featureName}.spec.ts`, content: buildSpec(input.featureName) },
+  ]
+}
+
+export function buildFeatureSkeletonScaffold(input: BuildFeatureScaffoldInput): GeneratedFeatureFile[] {
   const description = input.description?.trim() || 'TODO: add description'
   return [
-    { path: 'feature.config.cjs', content: buildFeatureConfig(input.featureName, description) },
+    { path: 'feature.config.cjs', content: buildFeatureConfig(input.featureName, description, input.envs, input.repos) },
     { path: CANONICAL_PLAYWRIGHT_CONFIG, content: buildPlaywrightConfig() },
     { path: 'envsets/envsets.config.json', content: buildEnvsetsConfig(input.featureName) },
     { path: `envsets/local/${input.featureName}.env`, content: 'GATEWAY_URL=http://localhost:3000\n' },
-    { path: `e2e/${input.featureName}.spec.ts`, content: buildSpec(input.featureName) },
   ]
 }
 
@@ -95,6 +122,30 @@ export function validateGeneratedFeatureFiles(
   const envsetsResult = validateEnvsetsConfig(byPath.get('envsets/envsets.config.json')!)
   if (!envsetsResult.ok) return envsetsResult
 
+  return { ok: true }
+}
+
+export function validateGeneratedSpecFiles(
+  files: GeneratedFeatureFile[],
+): ValidateGeneratedFeatureResult {
+  if (files.length === 0) return { ok: false, error: 'no generated files' }
+  const seen = new Set<string>()
+  let specCount = 0
+  for (const file of files) {
+    const pathResult = validateRelativePath(file.path)
+    if (!pathResult.ok) return pathResult
+    if (seen.has(file.path)) return { ok: false, error: `duplicate generated file "${file.path}"` }
+    seen.add(file.path)
+    if (!file.path.endsWith('.spec.ts')) continue
+    specCount += 1
+    if (!file.path.startsWith('e2e/') || file.path.split('/').length !== 2) {
+      return { ok: false, error: `spec file "${file.path}" must live directly under e2e/` }
+    }
+    if (!file.content.includes(LOG_MARKER_FIXTURE_IMPORT)) {
+      return { ok: false, error: `spec file "${file.path}" must import ${LOG_MARKER_FIXTURE_IMPORT}` }
+    }
+  }
+  if (specCount === 0) return { ok: false, error: 'missing required e2e/*.spec.ts file' }
   return { ok: true }
 }
 
@@ -180,12 +231,19 @@ function validateEnvsetsConfig(content: string): ValidateGeneratedFeatureResult 
   return { ok: true }
 }
 
-function buildFeatureConfig(name: string, description: string): string {
+function buildFeatureConfig(
+  name: string,
+  description: string,
+  envsInput: string[] | undefined,
+  reposInput: FeatureScaffoldRepo[] | undefined,
+): string {
+  const envs = sanitizeEnvNames(envsInput)
+  const repos = reposInput ?? []
   return `const config = {
   name: '${name}',
   description: '${escapeSingleQuoted(description)}',
-  envs: ['local'],
-  repos: [],
+  envs: ${formatStringArray(envs)},
+  repos: ${formatRepos(repos)},
   featureDir: __dirname,
 }
 
@@ -235,6 +293,33 @@ test.describe('${name}', () => {
   })
 })
 `
+}
+
+function sanitizeEnvNames(envs: string[] | undefined): string[] {
+  const clean = (envs ?? ['local'])
+    .map((env) => env.trim())
+    .filter(Boolean)
+  return Array.from(new Set(clean.length > 0 ? clean : ['local']))
+}
+
+function formatStringArray(values: string[]): string {
+  return `[${values.map((value) => `'${escapeSingleQuoted(value)}'`).join(', ')}]`
+}
+
+function formatRepos(repos: FeatureScaffoldRepo[]): string {
+  if (repos.length === 0) return '[]'
+  const rendered = repos.map((repo) => {
+    const fields = [
+      `name: '${escapeSingleQuoted(repo.name)}'`,
+      `localPath: '${escapeSingleQuoted(repo.localPath)}'`,
+    ]
+    if (repo.cloneUrl) fields.push(`cloneUrl: '${escapeSingleQuoted(repo.cloneUrl)}'`)
+    if (repo.branch) fields.push(`branch: '${escapeSingleQuoted(repo.branch)}'`)
+    if (repo.envs?.length) fields.push(`envs: ${formatStringArray(sanitizeEnvNames(repo.envs))}`)
+    if (repo.startCommands?.length) fields.push(`startCommands: ${JSON.stringify(repo.startCommands, null, 2)}`)
+    return `{\n      ${fields.join(',\n      ')}\n    }`
+  })
+  return `[\n    ${rendered.join(',\n    ')}\n  ]`
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

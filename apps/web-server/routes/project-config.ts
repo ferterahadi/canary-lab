@@ -10,13 +10,12 @@ import {
   type HealAgentChoice,
   type ProjectConfig,
 } from '../lib/runtime/launcher/project-config'
-import { syncPersonalWikiAgentDocs } from '../../../shared/runtime/personal-wiki'
 
 export interface ProjectConfigRouteDeps {
   projectRoot: string
 }
 
-const HEAL_AGENT_VALUES: HealAgentChoice[] = ['auto', 'claude', 'codex', 'manual']
+const HEAL_AGENT_VALUES: HealAgentChoice[] = ['auto', 'claude', 'codex', 'manual', 'external']
 const EDITOR_VALUES: EditorChoice[] = ['auto', 'vscode', 'cursor', 'system']
 
 export async function projectConfigRoutes(
@@ -53,9 +52,6 @@ export async function projectConfigRoutes(
         : current.personalWikiPath,
     }
     saveProjectConfig(deps.projectRoot, next)
-    if (incomingPersonalWikiPath !== undefined) {
-      syncPersonalWikiAgentDocs(deps.projectRoot, next.personalWikiPath)
-    }
     return next
   })
 

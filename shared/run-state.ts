@@ -84,7 +84,7 @@ export const ACTIVE_RUN_STATUSES = ['running', 'healing'] as const
 export type TerminalRunStatus = typeof TERMINAL_RUN_STATUSES[number]
 export type ActiveRunStatus = typeof ACTIVE_RUN_STATUSES[number]
 
-export const HEARTBEAT_STALE_MS = 15_000
+export const HEARTBEAT_STALE_MS = 10 * 60 * 1000
 
 export function isTerminalRunStatus(status: string | null | undefined): status is TerminalRunStatus {
   return status === 'passed' || status === 'failed' || status === 'aborted'

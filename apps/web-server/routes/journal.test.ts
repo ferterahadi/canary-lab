@@ -82,6 +82,102 @@ describe('GET /api/journal', () => {
     expect((res.json() as Array<{ iteration: number }>).map((b) => b.iteration)).toEqual([2])
   })
 
+  it('shows legacy external-client run journals by inferring missing run and feature fields', async () => {
+    const app = await build()
+    const runDir = runDirFor(logsDir, 'r-external')
+    const paths = buildRunPaths(runDir)
+    fs.mkdirSync(runDir, { recursive: true })
+    fs.writeFileSync(paths.manifestPath, JSON.stringify({
+      runId: 'r-external',
+      feature: 'foo',
+      startedAt: '2026-05-25T08:00:00.000Z',
+      status: 'healing',
+      healCycles: 2,
+      services: [],
+    }))
+    fs.writeFileSync(paths.diagnosisJournalPath, `## Iteration 2
+
+Hypothesis: route was not registered
+
+Fix: enabled the module
+`)
+
+    const res = await app.inject({ method: 'GET', url: '/api/journal?feature=foo&run=r-external' })
+    expect(res.statusCode).toBe(200)
+    expect(res.json()).toMatchObject([
+      {
+        iteration: 2,
+        timestamp: null,
+        run: 'r-external',
+        feature: 'foo',
+        body: expect.stringContaining('Fix: enabled the module'),
+      },
+    ])
+  })
+
+  it('falls back to the manifest featureName when feature is absent', async () => {
+    const app = await build()
+    const runDir = runDirFor(logsDir, 'r-legacy-name')
+    const paths = buildRunPaths(runDir)
+    fs.mkdirSync(runDir, { recursive: true })
+    fs.writeFileSync(paths.manifestPath, JSON.stringify({
+      runId: 'r-legacy-name',
+      featureName: 'bar',
+      startedAt: '2026-05-25T08:00:00.000Z',
+      status: 'healing',
+      healCycles: 0,
+      services: [],
+    }))
+    fs.writeFileSync(paths.diagnosisJournalPath, `## Iteration 7
+
+Hypothesis: stale build artifact
+
+Fix: cleared the cache
+`)
+
+    const res = await app.inject({ method: 'GET', url: '/api/journal?feature=bar&run=r-legacy-name' })
+    expect(res.statusCode).toBe(200)
+    expect(res.json()).toMatchObject([
+      {
+        iteration: 7,
+        run: 'r-legacy-name',
+        feature: 'bar',
+      },
+    ])
+  })
+
+  it('leaves the inferred feature null when the manifest has neither feature nor featureName', async () => {
+    const app = await build()
+    const runDir = runDirFor(logsDir, 'r-no-feature')
+    const paths = buildRunPaths(runDir)
+    fs.mkdirSync(runDir, { recursive: true })
+    // Manifest is well-formed JSON but feature/featureName are both absent
+    // (or non-string) — exercises the falsy branch on the featureName check.
+    fs.writeFileSync(paths.manifestPath, JSON.stringify({
+      runId: 'r-no-feature',
+      startedAt: '2026-05-25T08:00:00.000Z',
+      status: 'healing',
+      healCycles: 0,
+      services: [],
+    }))
+    fs.writeFileSync(paths.diagnosisJournalPath, `## Iteration 3
+
+Hypothesis: nothing to infer
+
+Fix: noop
+`)
+
+    const res = await app.inject({ method: 'GET', url: '/api/journal?run=r-no-feature' })
+    expect(res.statusCode).toBe(200)
+    expect(res.json()).toMatchObject([
+      {
+        iteration: 3,
+        run: 'r-no-feature',
+        feature: null,
+      },
+    ])
+  })
+
   it('rejects path-like run ids without reading the root journal', async () => {
     const app = await build()
     const res = await app.inject({ method: 'GET', url: '/api/journal?run=..%2Fsecret' })

@@ -38,6 +38,7 @@ export interface TailOptions {
   // (codex spawns can't pin a session id up front). Called on a backoff until
   // it returns a ref whose `logPath` exists.
   discoverRef?(): AgentSessionRef | null
+  onReady?(ref: AgentSessionRef): void
   // Overridable for tests; defaults match a 2-minute discovery window.
   pollIntervalMs?: number
   pollMaxAttempts?: number
@@ -121,6 +122,7 @@ export function tailAgentSession(opts: TailOptions): TailHandle {
       reportError(err as Error)
       return
     }
+    try { opts.onReady?.(ref) } catch { /* subscriber failures must not crash the tailer */ }
     // Emit everything currently present.
     flush()
     // Some agents write the file in one go after our initial flush; trigger

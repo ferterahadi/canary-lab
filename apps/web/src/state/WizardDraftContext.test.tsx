@@ -24,6 +24,24 @@ vi.mock('../api/client', async () => {
   }
 })
 
+class FakeWebSocket {
+  static instances: FakeWebSocket[] = []
+  onmessage: ((event: MessageEvent) => void) | null = null
+  closeCalls = 0
+
+  constructor(public url: string) {
+    FakeWebSocket.instances.push(this)
+  }
+
+  close(): void {
+    this.closeCalls += 1
+  }
+
+  fire(message: unknown): void {
+    this.onmessage?.({ data: JSON.stringify(message) } as MessageEvent)
+  }
+}
+
 let container: HTMLDivElement
 let root: Root
 
@@ -31,6 +49,7 @@ beforeEach(() => {
   container = document.createElement('div')
   document.body.appendChild(container)
   root = createRoot(container)
+  FakeWebSocket.instances = []
   vi.useRealTimers()
   vi.mocked(api.listDrafts).mockReset().mockResolvedValue([])
   vi.mocked(api.getDraft).mockReset()
@@ -74,6 +93,108 @@ describe('WizardDraftProvider', () => {
     expect(captured.value?.selectedDraft?.draftId).toBe('ready-b')
   })
 
+  it('discovers visible drafts created outside the current page session', async () => {
+    const external = draft({
+      draftId: 'external-a',
+      status: 'planning',
+      source: 'external',
+      externalStage: 'scaffolding',
+      createdAt: '2026-01-02T00:00:00.000Z',
+    })
+    vi.mocked(api.listDrafts).mockResolvedValueOnce([])
+
+    const captured = renderProbe()
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(captured.value?.drafts).toEqual([])
+
+    act(() => {
+      workspaceSocket().fire({ type: 'draft-created', draft: external })
+    })
+
+    expect(captured.value?.drafts.map((item) => item.draftId)).toEqual(['external-a'])
+    expect(captured.value?.latestTask?.source).toBe('external')
+  })
+
+  it('reconciles hidden draft records after the page is already open', async () => {
+    vi.mocked(api.listDrafts).mockResolvedValueOnce([draft({ draftId: 'ready-a', status: 'spec-ready' })])
+
+    const captured = renderProbe()
+    await act(async () => {
+      await Promise.resolve()
+    })
+    act(() => {
+      captured.value?.openTask('ready-a')
+    })
+    expect(captured.value?.selectedDraft?.draftId).toBe('ready-a')
+
+    act(() => {
+      workspaceSocket().fire({ type: 'draft-updated', draft: draft({ draftId: 'ready-a', status: 'accepted' }) })
+    })
+
+    expect(captured.value?.drafts).toEqual([])
+    expect(captured.value?.selectedDraft).toBeNull()
+  })
+
+  it('reconciles startup results against a preselected draft id', async () => {
+    let resolveDrafts: (drafts: DraftRecord[]) => void = () => {}
+    vi.mocked(api.listDrafts).mockReturnValueOnce(
+      new Promise<DraftRecord[]>((resolve) => { resolveDrafts = resolve }),
+    )
+    const captured = renderProbe()
+
+    act(() => {
+      captured.value?.openTask('keep-selected')
+    })
+    await act(async () => {
+      resolveDrafts([draft({ draftId: 'keep-selected', status: 'plan-ready' })])
+      await Promise.resolve()
+    })
+    expect(captured.value?.selectedDraft?.draftId).toBe('keep-selected')
+
+    act(() => {
+      root.unmount()
+      container.remove()
+      container = document.createElement('div')
+      document.body.appendChild(container)
+      root = createRoot(container)
+    })
+    vi.mocked(api.listDrafts).mockReturnValueOnce(
+      new Promise<DraftRecord[]>((resolve) => { resolveDrafts = resolve }),
+    )
+    const missing = renderProbe()
+    act(() => {
+      missing.value?.openTask('missing-selected')
+    })
+    await act(async () => {
+      resolveDrafts([])
+      await Promise.resolve()
+    })
+
+    expect(missing.value?.selectedDraft).toBeNull()
+  })
+
+  it('removes draft records deleted by workspace events', async () => {
+    vi.mocked(api.listDrafts).mockResolvedValueOnce([draft({ draftId: 'remove-me', status: 'plan-ready' })])
+    const captured = renderProbe()
+    await act(async () => {
+      await Promise.resolve()
+    })
+    act(() => {
+      captured.value?.openTask('remove-me')
+    })
+    expect(captured.value?.wizardOpen).toBe(true)
+
+    act(() => {
+      workspaceSocket().fire({ type: 'draft-deleted', draftId: 'remove-me' })
+      workspaceSocket().fire({ type: 'features-changed' })
+    })
+
+    expect(captured.value?.drafts).toEqual([])
+    expect(captured.value?.selectedDraft).toBeNull()
+  })
+
   it('ignores startup results after the provider unmounts', async () => {
     let resolveDrafts!: (drafts: DraftRecord[]) => void
     vi.mocked(api.listDrafts).mockReturnValue(new Promise((resolve) => {
@@ -113,36 +234,25 @@ describe('WizardDraftProvider', () => {
     expect(captured.value?.selectedDraft).toBeNull()
   })
 
-  it('polls every active draft and stops after the refreshed status is ready', async () => {
-    vi.useFakeTimers()
+  it('updates active drafts from workspace events instead of periodic refresh', async () => {
     vi.mocked(api.listDrafts).mockResolvedValue([
       draft({ draftId: 'a', status: 'planning' }),
       draft({ draftId: 'b', status: 'generating' }),
       draft({ draftId: 'c', status: 'spec-ready' }),
     ])
-    vi.mocked(api.getDraft)
-      .mockResolvedValueOnce(draft({ draftId: 'a', status: 'plan-ready' }))
-      .mockResolvedValueOnce(draft({ draftId: 'b', status: 'spec-ready' }))
 
-    renderProbe()
+    const captured = renderProbe()
     await act(async () => {
       await Promise.resolve()
     })
-    await act(async () => {
-      vi.advanceTimersByTime(1000)
-      await Promise.resolve()
+    act(() => {
+      workspaceSocket().fire({ type: 'draft-updated', draft: draft({ draftId: 'a', status: 'plan-ready' }) })
+      workspaceSocket().fire({ type: 'draft-updated', draft: draft({ draftId: 'b', status: 'spec-ready' }) })
     })
 
-    expect(api.getDraft).toHaveBeenCalledWith('a')
-    expect(api.getDraft).toHaveBeenCalledWith('b')
-    expect(api.getDraft).not.toHaveBeenCalledWith('c')
-
-    vi.mocked(api.getDraft).mockClear()
-    await act(async () => {
-      vi.advanceTimersByTime(1000)
-      await Promise.resolve()
-    })
     expect(api.getDraft).not.toHaveBeenCalled()
+    expect(captured.value?.drafts.find((item) => item.draftId === 'a')?.status).toBe('plan-ready')
+    expect(captured.value?.drafts.find((item) => item.draftId === 'b')?.status).toBe('spec-ready')
   })
 
   it('starts new drafts, closes the modal without cancellation, and cancels explicitly', async () => {
@@ -377,12 +487,18 @@ function renderProbe() {
   const captured: { value: ReturnType<typeof useWizardDrafts> | null } = { value: null }
   act(() => {
     root.render(
-      <WizardDraftProvider>
+      <WizardDraftProvider WebSocketImpl={FakeWebSocket as unknown as typeof WebSocket} wsBase="ws://test">
         <Probe captured={captured} />
       </WizardDraftProvider>,
     )
   })
   return captured
+}
+
+function workspaceSocket(): FakeWebSocket {
+  const socket = FakeWebSocket.instances.find((item) => item.url === 'ws://test/ws/workspace')
+  if (!socket) throw new Error('workspace socket not opened')
+  return socket
 }
 
 function Probe({ captured }: { captured: { value: ReturnType<typeof useWizardDrafts> | null } }) {

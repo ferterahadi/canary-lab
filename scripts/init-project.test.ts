@@ -4,7 +4,9 @@ import os from 'os'
 import path from 'path'
 
 const execFileSync = vi.fn(() => Buffer.from(''))
+const setupProject = vi.fn()
 vi.mock('child_process', () => ({ execFileSync }))
+vi.mock('./setup', () => ({ setup: setupProject }))
 
 const { main, parseArgs, copyDir, resolveFirstExisting, buildPackageJson } = await import(
   './init-project'
@@ -22,6 +24,7 @@ beforeEach(() => {
   originalCwd = process.cwd()
   execFileSync.mockReset()
   execFileSync.mockImplementation(() => Buffer.from(''))
+  setupProject.mockReset()
 })
 
 afterEach(() => {
@@ -151,6 +154,12 @@ describe('main (init-project orchestration)', () => {
       ['init', '-q'],
       expect.objectContaining({ cwd: target, stdio: 'ignore' }),
     )
+    expect(setupProject).toHaveBeenCalledExactlyOnceWith({
+      workspace: target,
+      agent: 'auto',
+      dryRun: false,
+      force: false,
+    })
   })
 
   it('scaffolds gitignore rules that keep feature envset values out of git', async () => {
@@ -207,5 +216,20 @@ describe('main (init-project orchestration)', () => {
     expect(
       fs.existsSync(path.join(workspace, 'ok', 'package.json')),
     ).toBe(true)
+  })
+
+  it('swallows setup failures and prints the repair command', async () => {
+    setupProject.mockImplementationOnce(() => {
+      throw new Error('setup failed')
+    })
+    const workspace = mkTmp()
+    process.chdir(workspace)
+    const messages: string[] = []
+    vi.spyOn(console, 'log').mockImplementation((msg) => { messages.push(String(msg)) })
+
+    await expect(main(['ok', '--package-spec', '^1.0.0'])).resolves.toBeUndefined()
+
+    expect(messages.join('\n')).toContain('Canary Lab setup skipped: setup failed')
+    expect(messages.join('\n')).toContain('npx canary-lab setup')
   })
 })
