@@ -42,6 +42,8 @@ describe('McpPromoProvider', () => {
 
     expect(continued).not.toHaveBeenCalled()
     expect(document.body.querySelector('video')?.getAttribute('src')).toBe('/promo/canary-lab-v1-1-mcp.webm')
+    expect(document.body.textContent).toContain('npx canary-lab setup')
+    expect(document.body.textContent).toContain('restart Codex or Claude')
 
     act(() => {
       clickButton('Continue')
