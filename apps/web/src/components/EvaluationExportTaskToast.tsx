@@ -24,6 +24,7 @@ export function EvaluationExportTaskStatus() {
   if (!latestTask) return null
 
   const task = selectedTask ?? latestTask
+  const latestRunLabel = evaluationTaskRunLabel(latestTask)
 
   return (
     <>
@@ -33,14 +34,14 @@ export function EvaluationExportTaskStatus() {
           onClick={() => openTask(latestTask.taskId)}
           className="cl-button flex min-w-0 max-w-[260px] items-center gap-2 px-2 py-0.5 text-[11px]"
           style={{ color: 'var(--text-secondary)' }}
-          title={`${statusLabel(latestTask)}: ${modeLabel(latestTask.mode)} ${latestTask.runId}`}
+          title={`${statusLabel(latestTask)}: ${latestRunLabel} (${modeLabel(latestTask.mode)} · ${latestTask.runId})`}
         >
           <StatusDot state={dotStateForExport(latestTask.status)} />
           <span className="shrink-0 font-medium" style={{ color: 'var(--text-primary)' }}>
             {compactStatusLabel(latestTask)}
           </span>
           <span className="hidden min-w-0 truncate xl:inline" style={{ color: 'var(--text-muted)' }}>
-            {modeLabel(latestTask.mode)}
+            {latestRunLabel}
           </span>
           {tasks.length > 1 && (
             <span className="shrink-0 rounded px-1.5 py-0.5 text-[10px]" style={{ background: 'var(--bg-selected)', color: 'var(--text-muted)' }}>
@@ -119,6 +120,7 @@ function EvaluationExportDialog({
           >
             {tasks.map((item) => {
               const active = item.taskId === task.taskId
+              const runLabel = evaluationTaskRunLabel(item)
               return (
                 <div
                   key={item.taskId}
@@ -138,10 +140,12 @@ function EvaluationExportDialog({
                   >
                     <span className="flex items-center gap-2">
                       <StatusDot state={dotStateForExport(item.status)} />
-                      <span className="min-w-0 flex-1 truncate font-medium">{modeLabel(item.mode)}</span>
+                      <span className="min-w-0 flex-1 truncate font-medium" title={runLabel}>
+                        {runLabel}
+                      </span>
                     </span>
                     <span className="mt-1 block truncate text-[11px]" style={{ color: 'var(--text-muted)' }}>
-                      {item.status} · {item.runId}
+                      {evaluationTaskMeta(item)}
                     </span>
                   </button>
                   <button
@@ -200,6 +204,14 @@ function compactStatusLabel(task: EvaluationExportTask): string {
 
 function modeLabel(mode: EvaluationExportMode): string {
   return mode === 'localized' ? 'Localized output' : 'Raw output'
+}
+
+export function evaluationTaskRunLabel(task: Pick<EvaluationExportTask, 'feature' | 'runId'>): string {
+  return task.feature.trim() || task.runId
+}
+
+export function evaluationTaskMeta(task: Pick<EvaluationExportTask, 'mode' | 'status' | 'runId'>): string {
+  return `${modeLabel(task.mode)} · ${task.status} · ${task.runId}`
 }
 
 export function evaluationOutputPanel(

@@ -1,5 +1,21 @@
 import { describe, expect, it } from 'vitest'
-import { evaluationOutputPanel } from './EvaluationExportTaskToast'
+import { evaluationOutputPanel, evaluationTaskMeta, evaluationTaskRunLabel } from './EvaluationExportTaskToast'
+
+describe('evaluation export task labels', () => {
+  it('uses the run feature as the primary task label', () => {
+    expect(evaluationTaskRunLabel({ feature: 'shop_nginx_support', runId: '2026-05-28T0443-jjcx' })).toBe('shop_nginx_support')
+  })
+
+  it('falls back to the run id when an older task has no feature name', () => {
+    expect(evaluationTaskRunLabel({ feature: '   ', runId: '2026-05-28T0443-jjcx' })).toBe('2026-05-28T0443-jjcx')
+  })
+
+  it('keeps export mode and status in secondary task metadata', () => {
+    expect(evaluationTaskMeta({ mode: 'localized', status: 'completed', runId: '2026-05-28T0443-jjcx' })).toBe(
+      'Localized output · completed · 2026-05-28T0443-jjcx',
+    )
+  })
+})
 
 describe('evaluationOutputPanel', () => {
   it('shows raw export lifecycle logs without extra LLM guidance text', () => {
