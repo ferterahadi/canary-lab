@@ -4,7 +4,7 @@ import { planRestart } from './restart-planner'
 import type { ServiceSpec } from './orchestrator'
 
 function svc(safeName: string, cwd: string): ServiceSpec {
-  return { name: safeName, safeName, command: 'echo', cwd }
+  return { repoName: safeName, name: safeName, safeName, command: 'echo', cwd }
 }
 
 describe('planRestart', () => {

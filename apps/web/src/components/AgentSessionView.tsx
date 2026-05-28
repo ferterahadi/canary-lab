@@ -24,8 +24,6 @@ interface Props {
   source: AgentSessionSource
 }
 
-const SNAPSHOT_POLL_MS = 1500
-
 interface ViewState {
   agent: 'claude' | 'codex' | null
   sessionId: string
@@ -46,7 +44,6 @@ export function AgentSessionView({ source }: Props) {
   useEffect(() => {
     let cancelled = false
     let conn: { close(): void } | null = null
-    let pollTimer: ReturnType<typeof setTimeout> | null = null
     setLoading(true)
     setError(null)
     setState(null)
@@ -80,6 +77,12 @@ export function AgentSessionView({ source }: Props) {
           source: source.kind === 'run'
             ? { kind: 'run', runId: source.runId }
             : { kind: 'draft', draftId: source.draftId, stage: source.stage },
+          onSession: (session) => {
+            if (cancelled) return
+            setState((prev) => prev
+              ? { ...prev, agent: session.agent, sessionId: session.sessionId }
+              : { agent: session.agent, sessionId: session.sessionId, events: [] })
+          },
           onEvent: (event) => {
             if (cancelled) return
             // The first `snapshotLen` events the WS sends are replay of what
@@ -87,7 +90,7 @@ export function AgentSessionView({ source }: Props) {
             seenFromWs += 1
             if (seenFromWs <= snapshotLen) return
             setState((prev) => {
-              if (!prev) return { agent: event.kind === 'user-message' || event.kind === 'assistant-message' ? 'claude' : null as never, sessionId: '', events: [event] }
+              if (!prev) return { agent: null, sessionId: '', events: [event] }
               return { ...prev, events: [...prev.events, event] }
             })
           },
@@ -100,30 +103,6 @@ export function AgentSessionView({ source }: Props) {
             setError(err)
           },
         })
-        // While live, periodically re-pull the REST snapshot too. This is a
-        // belt-and-braces guard for cases where the WS reconnects and the
-        // server's replay misses an event that landed between disconnect and
-        // reconnect. Also recovers the session id once the file appears.
-        const repoll = (): void => {
-          if (cancelled || !source.live) return
-          fetchSnapshot()
-            .then((next) => {
-              if (cancelled || !next) return
-              if (next.events.length > snapshotLen) {
-                snapshotLen = next.events.length
-                setState({ agent: next.agent, sessionId: next.sessionId, events: next.events })
-              } else if (next.sessionId) {
-                setState((prev) => prev && !prev.sessionId
-                  ? { ...prev, agent: next.agent, sessionId: next.sessionId }
-                  : prev)
-              }
-            })
-            .catch(() => { /* ignore */ })
-            .finally(() => {
-              if (!cancelled) pollTimer = setTimeout(repoll, SNAPSHOT_POLL_MS)
-            })
-        }
-        pollTimer = setTimeout(repoll, SNAPSHOT_POLL_MS)
       })
       .catch((err: unknown) => {
         if (cancelled) return
@@ -134,7 +113,6 @@ export function AgentSessionView({ source }: Props) {
     return () => {
       cancelled = true
       if (conn) conn.close()
-      if (pollTimer) clearTimeout(pollTimer)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sourceKey])
@@ -210,9 +188,30 @@ export function AgentSessionView({ source }: Props) {
         <button
           type="button"
           onClick={jumpLatest}
-          className="absolute bottom-3 right-3 rounded bg-sky-500/10 px-2 py-1 text-[11px] font-medium text-sky-700 shadow hover:bg-sky-500/20 dark:text-sky-300"
+          aria-label="Jump to latest"
+          title="Jump to latest"
+          className="absolute bottom-3 right-3 inline-flex h-8 w-8 items-center justify-center rounded-full text-blue-600/85 transition-all duration-150 hover:text-blue-600 hover:[box-shadow:0_4px_14px_color-mix(in_srgb,black_24%,transparent)] dark:text-blue-300/85 dark:hover:text-blue-200"
+          style={{
+            background: 'color-mix(in srgb, var(--bg-elevated) 94%, transparent)',
+            border: '1px solid color-mix(in srgb, var(--border-focus) 32%, var(--border-default))',
+            boxShadow: '0 2px 10px color-mix(in srgb, black 20%, transparent)',
+            backdropFilter: 'blur(6px)',
+          }}
         >
-          Jump latest
+          <svg
+            viewBox="0 0 16 16"
+            width="14"
+            height="14"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M4 5l4 4 4-4" />
+            <path d="M4 13.25h8" />
+          </svg>
         </button>
       )}
     </div>

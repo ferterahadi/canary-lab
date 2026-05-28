@@ -28,6 +28,15 @@ export type DraftStatus =
   | 'cancelled'
   | 'error'
 
+export type DraftSource = 'internal' | 'external'
+export type ExternalDraftStage =
+  | 'scaffolding'
+  | 'authoring-tests'
+  | 'validating'
+  | 'ready'
+  | 'applied'
+  | 'error'
+
 const ALLOWED_TRANSITIONS: Record<DraftStatus, DraftStatus[]> = {
   created: ['planning', 'rejected', 'cancelled', 'error'],
   planning: ['plan-ready', 'rejected', 'cancelled', 'error'],
@@ -61,6 +70,12 @@ export interface DraftRecord {
   prdDocuments: DraftPrdDocument[]
   repos: DraftRepo[]
   featureName?: string
+  source?: DraftSource
+  externalStage?: ExternalDraftStage
+  externalClientKind?: 'claude-cli' | 'claude-desktop' | 'codex-cli' | 'codex-desktop' | 'other'
+  externalSessionId?: string
+  externalConversationName?: string
+  externalSessionUrl?: string
   intentSummary?: string
   wizardAgent?: 'claude' | 'codex'
   activeAgentStage?: 'planning' | 'generating'
@@ -116,6 +131,12 @@ export interface CreateDraftInput {
   prdDocuments?: DraftPrdDocument[]
   repos: DraftRepo[]
   featureName?: string
+  source?: DraftSource
+  externalStage?: ExternalDraftStage
+  externalClientKind?: 'claude-cli' | 'claude-desktop' | 'codex-cli' | 'codex-desktop' | 'other'
+  externalSessionId?: string
+  externalConversationName?: string
+  externalSessionUrl?: string
   now?: () => string
 }
 
@@ -131,6 +152,12 @@ export function createDraft(logsDir: string, input: CreateDraftInput): DraftReco
     prdDocuments: input.prdDocuments ?? [],
     repos: input.repos,
     featureName: input.featureName,
+    source: input.source,
+    externalStage: input.externalStage,
+    externalClientKind: input.externalClientKind,
+    externalSessionId: input.externalSessionId,
+    externalConversationName: input.externalConversationName,
+    externalSessionUrl: input.externalSessionUrl,
     status: 'created',
     createdAt: now,
     updatedAt: now,
@@ -185,6 +212,12 @@ export interface TransitionPatch {
   generatedFiles?: string[]
   devDependencies?: string[]
   featureName?: string
+  source?: DraftSource
+  externalStage?: ExternalDraftStage
+  externalClientKind?: 'claude-cli' | 'claude-desktop' | 'codex-cli' | 'codex-desktop' | 'other'
+  externalSessionId?: string
+  externalConversationName?: string
+  externalSessionUrl?: string
   wizardAgent?: 'claude' | 'codex'
   activeAgentStage?: 'planning' | 'generating'
   planAgentSessionId?: string

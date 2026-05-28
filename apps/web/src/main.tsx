@@ -4,6 +4,7 @@ import { App } from './App'
 import { RunsProvider } from './state/RunsContext'
 import { EvaluationExportProvider } from './state/EvaluationExportContext'
 import { WizardDraftProvider } from './state/WizardDraftContext'
+import { McpPromoProvider } from './state/McpPromoContext'
 import { bootstrapTheme } from './lib/theme'
 import './styles.css'
 
@@ -14,9 +15,11 @@ createRoot(container).render(
   <React.StrictMode>
     <RunsProvider>
       <WizardDraftProvider>
-        <EvaluationExportProvider>
-          <App />
-        </EvaluationExportProvider>
+        <McpPromoProvider>
+          <EvaluationExportProvider>
+            <App />
+          </EvaluationExportProvider>
+        </McpPromoProvider>
       </WizardDraftProvider>
     </RunsProvider>
   </React.StrictMode>,

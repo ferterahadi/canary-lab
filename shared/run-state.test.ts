@@ -30,7 +30,7 @@ describe('run status predicates', () => {
   })
 
   it('detects stale heartbeats without treating missing or invalid timestamps as stale', () => {
-    const now = Date.parse('2026-05-12T00:00:30.000Z')
+    const now = Date.parse('2026-05-12T00:10:30.000Z')
     expect(isStaleHeartbeat('2026-05-12T00:00:00.000Z', now)).toBe(true)
     expect(isStaleHeartbeat(new Date(now - HEARTBEAT_STALE_MS).toISOString(), now)).toBe(false)
     expect(isStaleHeartbeat(undefined, now)).toBe(false)

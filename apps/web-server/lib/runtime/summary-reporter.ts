@@ -27,6 +27,7 @@ export function slugify(title: string): string {
 }
 
 interface TestEntry {
+  id?: string
   name: string
   status: string
   passed: boolean
@@ -45,6 +46,7 @@ interface TestEntry {
 }
 
 interface KnownTestEntry {
+  id: string
   name: string
   title: string
   titlePath?: string[]
@@ -59,6 +61,7 @@ interface RunningStep {
 }
 
 interface RunningTest {
+  id?: string
   name: string
   location: string
   step?: RunningStep
@@ -68,18 +71,18 @@ type PlaybackEvent =
   | {
       type: 'test-begin'
       time: string
-      test: { name: string; title: string; location: string }
+      test: { id?: string; name: string; title: string; location: string }
     }
   | {
       type: 'step-begin' | 'step-end'
       time: string
-      test: { name: string; title: string }
+      test: { id?: string; name: string; title: string }
       step: RunningStep
     }
   | {
       type: 'test-end'
       time: string
-      test: { name: string; title: string; location: string }
+      test: { id?: string; name: string; title: string; location: string }
       status: string
       passed: boolean
       durationMs: number
@@ -117,17 +120,19 @@ class SummaryReporter implements Reporter {
 
   onTestBegin(test: TestCase): void {
     const known = this.rememberKnownTest(test)
-    this.failedStepLocationsByTest.delete(known.name)
+    this.failedStepLocationsByTest.delete(known.id)
     const running = {
+      id: known.id,
       name: known.name,
       location: known.location ?? `${test.location.file}:${test.location.line}`,
     }
-    this.stepStacksByTest.set(known.name, [])
-    this.runningTests.set(known.name, running)
+    this.stepStacksByTest.set(known.id, [])
+    this.runningTests.set(known.id, running)
     this.writePlaybackEvent({
       type: 'test-begin',
       time: new Date().toISOString(),
       test: {
+        id: known.id,
         name: running.name,
         title: test.title,
         location: running.location,
@@ -137,49 +142,50 @@ class SummaryReporter implements Reporter {
   }
 
   onStepBegin(test: TestCase, _result: TestResult, step: TestStep): void {
-    const name = this.rememberKnownTest(test).name
-    let running = this.runningTests.get(name)
+    const known = this.rememberKnownTest(test)
+    let running = this.runningTests.get(known.id)
     if (!running) {
       running = {
-        name,
+        id: known.id,
+        name: known.name,
         location: `${test.location.file}:${test.location.line}`,
       }
-      this.runningTests.set(name, running)
+      this.runningTests.set(known.id, running)
     }
     const runningStep = stepToRunningStep(step)
-    const stepStack = this.stepStacksByTest.get(name) ?? []
+    const stepStack = this.stepStacksByTest.get(known.id) ?? []
     stepStack.push(runningStep)
-    this.stepStacksByTest.set(name, stepStack)
-    this.runningTests.set(name, { ...running, step: runningStep })
+    this.stepStacksByTest.set(known.id, stepStack)
+    this.runningTests.set(known.id, { ...running, step: runningStep })
     this.writePlaybackEvent({
       type: 'step-begin',
       time: new Date().toISOString(),
-      test: { name, title: test.title },
+      test: { id: known.id, name: known.name, title: test.title },
       step: runningStep,
     })
     this.writeSummary(false)
   }
 
   onStepEnd(test: TestCase, _result: TestResult, step: TestStep): void {
-    const name = this.rememberKnownTest(test).name
-    const running = this.runningTests.get(name)
+    const known = this.rememberKnownTest(test)
+    const running = this.runningTests.get(known.id)
     if (!running) return
     const ended = stepToRunningStep(step)
     if (step.error && ended.locations) {
-      this.failedStepLocationsByTest.set(name, ended.locations)
+      this.failedStepLocationsByTest.set(known.id, ended.locations)
     }
-    const stepStack = this.stepStacksByTest.get(name)!
+    const stepStack = this.stepStacksByTest.get(known.id)!
     const idx = findLastStepIndex(stepStack, ended)
     if (idx >= 0) stepStack.splice(idx, 1)
-    this.stepStacksByTest.set(name, stepStack)
+    this.stepStacksByTest.set(known.id, stepStack)
     const current = stepStack.at(-1)
-    this.runningTests.set(name, current
+    this.runningTests.set(known.id, current
       ? { ...running, step: current }
-      : { name: running.name, location: running.location })
+      : { id: running.id, name: running.name, location: running.location })
     this.writePlaybackEvent({
       type: 'step-end',
       time: new Date().toISOString(),
-      test: { name, title: test.title },
+      test: { id: known.id, name: known.name, title: test.title },
       step: ended,
     })
     this.writeSummary(false)
@@ -190,9 +196,9 @@ class SummaryReporter implements Reporter {
     const failed = result.status !== 'passed' && result.status !== 'skipped'
     const known = this.rememberKnownTest(test)
     const name = known.name
-    this.runningTests.delete(name)
-    this.stepStacksByTest.delete(name)
-    this.removeResult(name)
+    this.runningTests.delete(known.id)
+    this.stepStacksByTest.delete(known.id)
+    this.removeResult(known.id, name)
     const error = !passed && result.error
       ? {
           message: stripAnsi(result.error.message ?? '').slice(0, 1000),
@@ -202,9 +208,10 @@ class SummaryReporter implements Reporter {
         }
       : undefined
     const locations = failed
-      ? failureLocations(result, this.failedStepLocationsByTest.get(name))
+      ? failureLocations(result, this.failedStepLocationsByTest.get(known.id))
       : []
     const entry: TestEntry = {
+      id: known.id,
       name,
       status: result.status,
       passed,
@@ -224,6 +231,7 @@ class SummaryReporter implements Reporter {
       type: 'test-end',
       time: new Date().toISOString(),
           test: {
+            id: known.id,
             name,
             title: test.title,
             location: known.location ?? `${test.location.file}:${test.location.line}`,
@@ -339,23 +347,28 @@ class SummaryReporter implements Reporter {
   private writeSummary(complete: boolean): void {
     const passedResults = this.results.filter((r) => r.passed)
     const skippedResults = this.results.filter((r) => r.status === 'skipped')
+    const passedIds = passedResults.flatMap((r) => r.id ? [r.id] : [])
+    const skippedIds = skippedResults.flatMap((r) => r.id ? [r.id] : [])
     const includeKnownTests = this.sawSuiteInventory
     const summary = {
       complete,
       total: includeKnownTests ? this.knownTests.length : this.results.length,
       passed: passedResults.length,
       passedNames: passedResults.map((r) => r.name),
+      ...(passedIds.length ? { passedIds } : {}),
       ...(includeKnownTests ? { knownTests: this.knownTests } : {}),
       ...(skippedResults.length
         ? {
             skipped: skippedResults.length,
             skippedNames: skippedResults.map((r) => r.name),
+            ...(skippedIds.length ? { skippedIds } : {}),
           }
         : {}),
       ...this.runningSummaryFields(),
       failed: this.results
         .filter(isFailureResult)
         .map((r) => ({
+          ...(r.id ? { id: r.id } : {}),
           name: r.name,
           ...(r.error ? { error: r.error } : {}),
           ...(typeof r.durationMs === 'number' ? { durationMs: r.durationMs } : {}),
@@ -394,26 +407,44 @@ class SummaryReporter implements Reporter {
 
     const seen = new Set<string>()
     const passedNames = Array.isArray(parsed.passedNames) ? parsed.passedNames : []
-    for (const name of passedNames) {
-      if (typeof name !== 'string' || !name || seen.has(name)) continue
-      seen.add(name)
-      this.results.push({ name, status: 'passed', passed: true })
+    const passedIds = Array.isArray(parsed.passedIds) ? parsed.passedIds : []
+    for (const [index, name] of passedNames.entries()) {
+      if (typeof name !== 'string' || !name) continue
+      const id = stringAt(passedIds, index) ?? idForExistingResult({ name, knownTests: this.knownTests })
+      const key = id ?? name
+      if (seen.has(key)) continue
+      seen.add(key)
+      this.results.push({ ...(id ? { id } : {}), name, status: 'passed', passed: true })
     }
 
     const skippedNames = Array.isArray(parsed.skippedNames) ? parsed.skippedNames : []
-    for (const name of skippedNames) {
-      if (typeof name !== 'string' || !name || seen.has(name)) continue
-      seen.add(name)
-      this.results.push({ name, status: 'skipped', passed: false })
+    const skippedIds = Array.isArray(parsed.skippedIds) ? parsed.skippedIds : []
+    for (const [index, name] of skippedNames.entries()) {
+      if (typeof name !== 'string' || !name) continue
+      const id = stringAt(skippedIds, index) ?? idForExistingResult({ name, knownTests: this.knownTests })
+      const key = id ?? name
+      if (seen.has(key)) continue
+      seen.add(key)
+      this.results.push({ ...(id ? { id } : {}), name, status: 'skipped', passed: false })
     }
 
     const failed = Array.isArray(parsed.failed) ? parsed.failed : []
     for (const entry of failed) {
       if (!entry || typeof entry !== 'object') continue
       const name = typeof entry.name === 'string' ? entry.name : ''
-      if (!name || seen.has(name)) continue
-      seen.add(name)
+      if (!name) continue
+      const id = typeof entry.id === 'string'
+        ? entry.id
+        : idForExistingResult({
+            name,
+            knownTests: this.knownTests,
+            location: typeof entry.location === 'string' ? entry.location : undefined,
+          })
+      const key = id ?? name
+      if (seen.has(key)) continue
+      seen.add(key)
       this.results.push({
+        ...(id ? { id } : {}),
         name,
         status: 'failed',
         passed: false,
@@ -431,12 +462,22 @@ class SummaryReporter implements Reporter {
 
   private rememberKnownTest(test: TestCase): KnownTestEntry {
     const entry = knownTestFromTest(test)
-    mergeKnownTest(this.knownTests, entry)
+    const merged = mergeKnownTest(this.knownTests, entry)
+    if (merged.previousId && merged.previousId !== entry.id) {
+      for (const result of this.results) {
+        if (result.id === merged.previousId) result.id = entry.id
+      }
+    }
     return entry
   }
 
-  private removeResult(name: string): void {
-    const idx = this.results.findIndex((r) => r.name === name)
+  private removeResult(id: string, name: string): void {
+    let idx = this.results.findIndex((r) => r.id === id)
+    if (idx < 0) {
+      // Legacy fallback: a prior summary may have been loaded with results
+      // that predated id tagging — match by name when no id is recorded.
+      idx = this.results.findIndex((r) => r.name === name && !r.id)
+    }
     if (idx < 0) return
     const [removed] = this.results.splice(idx, 1)
     if (removed && isFailureResult(removed)) this.failureCount = Math.max(0, this.failureCount - 1)
@@ -467,7 +508,9 @@ class SummaryReporter implements Reporter {
 
 interface ExistingSummary {
   passedNames?: unknown
+  passedIds?: unknown
   skippedNames?: unknown
+  skippedIds?: unknown
   failed?: unknown
   knownTests?: unknown
 }
@@ -497,13 +540,19 @@ function knownTestFromTest(test: TestCase): KnownTestEntry {
   const titlePath = typeof test.titlePath === 'function'
     ? test.titlePath().filter((part): part is string => typeof part === 'string' && part.length > 0)
     : undefined
+  const location = test.location?.file && typeof test.location.line === 'number'
+    ? `${test.location.file}:${test.location.line}`
+    : undefined
   return {
+    id: testIdFor({
+      title: test.title,
+      ...(titlePath && titlePath.length > 0 ? { titlePath } : {}),
+      ...(location ? { location } : {}),
+    }),
     name: `test-case-${slugify(test.title)}`,
     title: test.title,
     ...(titlePath && titlePath.length > 0 ? { titlePath } : {}),
-    ...(test.location?.file && typeof test.location.line === 'number'
-      ? { location: `${test.location.file}:${test.location.line}` }
-      : {}),
+    ...(location ? { location } : {}),
   }
 }
 
@@ -513,6 +562,7 @@ function knownTestsFromExistingSummary(summary: ExistingSummary | null): KnownTe
   for (const entry of raw) {
     if (!entry || typeof entry !== 'object') continue
     const value = entry as {
+      id?: unknown
       name?: unknown
       title?: unknown
       titlePath?: unknown
@@ -520,24 +570,35 @@ function knownTestsFromExistingSummary(summary: ExistingSummary | null): KnownTe
     }
     if (typeof value.name !== 'string' || value.name.length === 0) continue
     if (typeof value.title !== 'string' || value.title.length === 0) continue
+    const explicitId = typeof value.id === 'string' && value.id.length > 0
+    const id = explicitId ? value.id as string : legacyTestIdForName(value.name)
+    const titlePath = Array.isArray(value.titlePath)
+      ? value.titlePath.filter((part): part is string => typeof part === 'string' && part.length > 0)
+      : undefined
+    const location = typeof value.location === 'string' && value.location.length > 0 ? value.location : undefined
     mergeKnownTest(out, {
+      id,
       name: value.name,
       title: value.title,
-      ...(Array.isArray(value.titlePath)
-        ? { titlePath: value.titlePath.filter((part): part is string => typeof part === 'string' && part.length > 0) }
-        : {}),
-      ...(typeof value.location === 'string' && value.location.length > 0 ? { location: value.location } : {}),
+      ...(titlePath && titlePath.length > 0 ? { titlePath } : {}),
+      ...(location ? { location } : {}),
     })
   }
   return out
 }
 
-function mergeKnownTest(knownTests: KnownTestEntry[], entry: KnownTestEntry): void {
-  const idx = knownTests.findIndex((known) => known.name === entry.name)
+function mergeKnownTest(knownTests: KnownTestEntry[], entry: KnownTestEntry): { previousId?: string } {
+  const entryLogicalKey = knownTestLogicalKey(entry)
+  const idx = knownTests.findIndex((known) => known.id === entry.id || (
+    known.id.startsWith('legacy-') &&
+    known.name === entry.name &&
+    known.location === entry.location
+  ) || (entryLogicalKey !== undefined && knownTestLogicalKey(known) === entryLogicalKey))
   if (idx < 0) {
     knownTests.push(entry)
-    return
+    return {}
   }
+  const previousId = knownTests[idx].id
   const merged: KnownTestEntry = {
     ...knownTests[idx],
     ...entry,
@@ -545,6 +606,50 @@ function mergeKnownTest(knownTests: KnownTestEntry[], entry: KnownTestEntry): vo
   }
   if (!entry.titlePath?.length) merged.titlePath = knownTests[idx].titlePath
   knownTests[idx] = merged
+  return { previousId }
+}
+
+function knownTestLogicalKey(entry: Pick<KnownTestEntry, 'title' | 'titlePath'>): string | undefined {
+  return entry.titlePath?.length ? [...entry.titlePath, entry.title].join('\u001f') : undefined
+}
+
+function legacyTestIdForName(name: string): string {
+  return `legacy-${name}`
+}
+
+export function testIdFor(input: { title: string; titlePath?: string[]; location?: string }): string {
+  const parts = [
+    input.location ?? '',
+    ...(input.titlePath && input.titlePath.length > 0 ? input.titlePath : [input.title]),
+  ]
+  return `test-id-${hashString(parts.join('\u001f'))}`
+}
+
+function hashString(input: string): string {
+  let hash = 0x811c9dc5
+  for (let i = 0; i < input.length; i++) {
+    hash ^= input.charCodeAt(i)
+    hash = Math.imul(hash, 0x01000193)
+  }
+  return (hash >>> 0).toString(36)
+}
+
+function stringAt(values: unknown[], index: number): string | undefined {
+  const value = values[index]
+  return typeof value === 'string' && value.length > 0 ? value : undefined
+}
+
+function idForExistingResult(input: {
+  name: string
+  knownTests: KnownTestEntry[]
+  location?: string
+}): string | undefined {
+  if (input.location) {
+    const exact = input.knownTests.find((test) => test.name === input.name && test.location === input.location)
+    if (exact && !exact.id.startsWith('legacy-')) return exact.id
+  }
+  const matches = input.knownTests.filter((test) => test.name === input.name)
+  return matches.length === 1 && !matches[0].id.startsWith('legacy-') ? matches[0].id : undefined
 }
 
 function readExistingSummary(): (ExistingSummary & SummaryForJournalOutcome) | null {

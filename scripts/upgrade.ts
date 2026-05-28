@@ -5,12 +5,14 @@ import { getInstalledPackageVersion, writeStamp } from '../shared/runtime/upgrad
 import {
   detectMigrations,
   applyArchive,
+  removeLegacyCurrentPointer,
   renderReport,
   hasPendingMigrations,
   type MigrationReport,
 } from './upgrade-migration'
-import { loadProjectConfig } from '../apps/web-server/lib/runtime/launcher/project-config'
-import { applyPersonalWikiBlock } from '../shared/runtime/personal-wiki'
+import { refreshInstalled as refreshInstalledAgentIntegrations } from './agent'
+import { refreshCanaryLabMcp } from './mcp-refresh'
+import { upsertWorkspace } from '../shared/runtime/workspace-registry'
 
 const MARKER_START = '<!-- managed:canary-lab:start -->'
 const MARKER_END = '<!-- managed:canary-lab:end -->'
@@ -25,12 +27,7 @@ const GITIGNORE_PATTERNS: string[] = [
 ]
 
 /** Files that are fully managed — overwritten on every upgrade. */
-const FULLY_MANAGED: string[] = [
-  '.claude/skills/env-import.md',
-  '.claude/skills/canary-lab-feature.md',
-  '.codex/env-import.md',
-  '.codex/canary-lab-feature.md',
-]
+const FULLY_MANAGED: string[] = []
 
 /**
  * Files that used to ship with canary-lab but no longer do. Removed on upgrade
@@ -38,14 +35,18 @@ const FULLY_MANAGED: string[] = [
  * append to; never remove entries (they're how we clean up past installs).
  */
 const DEPRECATED: string[] = [
+  '.claude/skills/env-import.md',
+  '.claude/skills/canary-lab-feature.md',
+  '.codex/env-import.md',
+  '.codex/canary-lab-feature.md',
   '.claude/skills/heal-loop.md',
   '.claude/skills/self-fixing-loop.md',
   '.codex/heal-loop.md',
   '.codex/self-fixing-loop.md',
 ]
 
-/** Files where only the content between markers is replaced. */
-const MARKER_MANAGED: string[] = [
+/** Agent docs used to carry Canary Lab-managed instructions; MCP now owns this. */
+const DEPRECATED_AGENT_DOCS: string[] = [
   'CLAUDE.md',
   'AGENTS.md',
 ]
@@ -118,6 +119,22 @@ export function applyManagedBlock(existing: string, block: string, relPath: stri
   return trimmed + (trimmed.length > 0 ? '\n\n' : '') + block + '\n'
 }
 
+function removeManagedBlock(existing: string, relPath: string): string | null {
+  const startIdx = existing.indexOf(MARKER_START)
+  const endIdx = existing.indexOf(MARKER_END)
+
+  if (startIdx !== -1 && endIdx !== -1) {
+    const before = existing.slice(0, startIdx).trimEnd()
+    const after = existing.slice(endIdx + MARKER_END.length).trimStart()
+    const next = [before, after].filter(Boolean).join('\n\n')
+    return next ? `${next}\n` : null
+  }
+
+  const signature = LEGACY_SIGNATURES[relPath]
+  if (signature && existing.trimStart().startsWith(signature)) return null
+  return existing
+}
+
 export function applyGitignoreRules(existing: string): string {
   const lines = existing.split(/\r?\n/)
   const missingPatterns = GITIGNORE_PATTERNS.filter((rule) => !lines.includes(rule))
@@ -137,6 +154,7 @@ export interface MainExtras {
   /** Injected confirm — called only when there are orphaned logs and
    * `--force-archive` was not passed. Async to support readline prompts. */
   confirm?: (orphanCount: number) => Promise<boolean> | boolean
+  agentHomeDir?: string
 }
 
 function log(msg: string, opts: UpgradeOptions): void {
@@ -164,6 +182,7 @@ export async function runMigration(
     const ok = opts.forceArchive ? true : await confirm(report.orphanedLogs.length)
     if (ok) applyArchive(report, projectRoot)
   }
+  removeLegacyCurrentPointer(report, projectRoot)
   log(renderReport(report), opts)
   return { report, pending }
 }
@@ -203,8 +222,13 @@ export async function main(
   }
 
   const templateRoot = getTemplateRoot()
-  const projectConfig = loadProjectConfig(projectRoot)
   let updated = 0
+
+  // Keep the user-level workspace registry current so agent skills can find
+  // Canary Lab projects without relying on shell-specific environment files.
+  upsertWorkspace(projectRoot, {
+    homeDir: extras.agentHomeDir ?? process.env.CANARY_LAB_AGENT_HOME,
+  })
 
   // 1. Fully-managed files: overwrite from templates
   for (const relPath of FULLY_MANAGED) {
@@ -227,31 +251,24 @@ export async function main(
     updated += 1
   }
 
-  // 2. Marker-managed files: replace only the managed section
-  for (const relPath of MARKER_MANAGED) {
-    const templatePath = path.join(templateRoot, relPath)
+  // 2. Remove previously managed root agent docs. Preserve user notes outside
+  // the managed block; delete generated-only files.
+  for (const relPath of DEPRECATED_AGENT_DOCS) {
     const targetPath = path.join(projectRoot, relPath)
 
-    if (!fs.existsSync(templatePath)) continue
+    if (!fs.existsSync(targetPath)) continue
 
-    const templateContent = fs.readFileSync(templatePath, 'utf-8')
-    const managedBlock = extractManagedBlock(templateContent)
-    if (!managedBlock) continue
+    const existing = fs.readFileSync(targetPath, 'utf-8')
+    const result = removeManagedBlock(existing, relPath)
 
-    const existing = fs.existsSync(targetPath)
-      ? fs.readFileSync(targetPath, 'utf-8')
-      : ''
-
-    const result = applyPersonalWikiBlock(
-      applyManagedBlock(existing, managedBlock, relPath),
-      projectConfig.personalWikiPath,
-    )
-
-    // Skip if nothing changed
     if (result === existing) continue
-
-    fs.writeFileSync(targetPath, result)
-    log(`  Updated ${relPath} (managed section)`, opts)
+    if (result === null) {
+      fs.unlinkSync(targetPath)
+      log(`  Removed deprecated ${relPath}`, opts)
+    } else {
+      fs.writeFileSync(targetPath, result)
+      log(`  Removed deprecated Canary Lab block from ${relPath}`, opts)
+    }
     updated += 1
   }
 
@@ -301,6 +318,25 @@ export async function main(
   // reliably, so the runner itself nudges users who fall behind).
   const installedVersion = getInstalledPackageVersion()
   if (installedVersion) writeStamp(projectRoot, installedVersion)
+
+  // Refresh only user-level integrations that are already installed. First-time
+  // installs remain explicit via `canary-lab setup`.
+  refreshInstalledAgentIntegrations('all', {
+    homeDir: extras.agentHomeDir ?? process.env.CANARY_LAB_AGENT_HOME,
+    log: (msg) => log(`  ${msg}`, opts),
+  })
+
+  // Re-point already-configured MCP clients at this install so a legacy
+  // `npx -y canary-lab mcp` entry or a stale path self-heals. Best-effort:
+  // never let an MCP CLI hiccup abort the upgrade.
+  try {
+    refreshCanaryLabMcp({
+      homeDir: extras.agentHomeDir ?? process.env.CANARY_LAB_AGENT_HOME,
+      log: (msg) => log(`  ${msg}`, opts),
+    })
+  } catch {
+    /* MCP refresh is best-effort */
+  }
 
   if (updated > 0) {
     log(`\n  Canary Lab: upgraded ${updated} managed file${updated === 1 ? '' : 's'}.`, opts)

@@ -4,10 +4,11 @@ import os from 'os'
 import path from 'path'
 import Fastify from 'fastify'
 import { runsRoutes } from './runs'
-import { createRegistry, RunStore, type OrchestratorLike, type RestartHealResult } from '../lib/run-store'
+import { createRegistry, RunStore, type OrchestratorLike, type RestartHealResult, type RestartRunResult } from '../lib/run-store'
 import { createEvaluationExportTask, evaluationExportsDir } from '../lib/evaluation-export-store'
 import { readManifest, readRunsIndex, writeManifest, writeRunsIndex } from '../lib/runtime/manifest'
 import { runDirFor } from '../lib/runtime/run-paths'
+import type { WorkspaceEvent } from '../lib/workspace-events'
 
 let tmpDir: string
 let logsDir: string
@@ -56,10 +57,13 @@ function writeFeature(name: string): void {
 }
 
 async function build(opts: {
-  startRun?: (f: string) => Promise<OrchestratorLike>
-  restartHeal?: (runId: string, text: string) => Promise<RestartHealResult>
+	  startRun?: (f: string) => Promise<OrchestratorLike>
+	  broker?: Parameters<typeof runsRoutes>[1]['broker']
+	  restartHeal?: (runId: string, text: string) => Promise<RestartHealResult>
+	  restartRun?: (runId: string) => Promise<RestartRunResult>
   projectRoot?: string
   generateEvaluationRewrite?: Parameters<typeof runsRoutes>[1]['generateEvaluationRewrite']
+  events?: WorkspaceEvent[]
 } = {}) {
   const registry = createRegistry()
   const store = new RunStore(logsDir, registry)
@@ -68,10 +72,13 @@ async function build(opts: {
     featuresDir,
     projectRoot: opts.projectRoot,
     store,
-    startRun: opts.startRun ?? (async () => { throw new Error('not configured') }),
-    restartHeal: opts.restartHeal,
-    generateEvaluationRewrite: opts.generateEvaluationRewrite,
-  })
+    broker: opts.broker,
+	    startRun: opts.startRun ?? (async () => { throw new Error('not configured') }),
+	    restartHeal: opts.restartHeal,
+    restartRun: opts.restartRun,
+	    generateEvaluationRewrite: opts.generateEvaluationRewrite,
+	    workspaceEvents: opts.events ? { publish: (event) => opts.events!.push(event) } : undefined,
+	  })
   return { app, registry, store }
 }
 
@@ -762,6 +769,7 @@ test('records checkout', async ({ page }) => {
   })
 
   it('marks persisted running evaluation export tasks as failed when no worker owns them', async () => {
+    const events: WorkspaceEvent[] = []
     createEvaluationExportTask(logsDir, {
       taskId: 'eval-stale-task',
       runId: 'r-stale-task',
@@ -773,7 +781,7 @@ test('records checkout', async ({ page }) => {
       downloadReady: false,
       archiveBase: 'canary-lab-evaluation-checkout-r-stale-task',
     })
-    const { app } = await build()
+    const { app } = await build({ events })
 
     const listed = await app.inject({ method: 'GET', url: '/api/evaluation-exports' })
     const fetched = await app.inject({ method: 'GET', url: '/api/evaluation-exports/eval-stale-task' })
@@ -786,6 +794,43 @@ test('records checkout', async ({ page }) => {
     })
     expect(fetched.json()).toMatchObject({ status: 'failed' })
     expect(fs.readFileSync(path.join(evaluationExportsDir(logsDir), 'eval-stale-task', 'export.log'), 'utf8')).toContain('interrupted')
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'evaluation-export-updated',
+      task: expect.objectContaining({ taskId: 'eval-stale-task', status: 'failed' }),
+    }))
+  })
+
+  it('keeps running external evaluation export tasks pending across refresh', async () => {
+    createEvaluationExportTask(logsDir, {
+      taskId: 'eval-external-pending',
+      runId: 'r-external-pending',
+      feature: 'checkout',
+      mode: 'localized',
+      producer: 'external',
+      status: 'running',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+      downloadReady: false,
+      archiveBase: 'canary-lab-evaluation-checkout-r-external-pending',
+      clientKind: 'codex-cli',
+      sessionId: 'sess-export',
+      conversationName: 'Export evaluation',
+      language: 'English',
+    })
+    const { app } = await build()
+
+    const listed = await app.inject({ method: 'GET', url: '/api/evaluation-exports' })
+    const fetched = await app.inject({ method: 'GET', url: '/api/evaluation-exports/eval-external-pending' })
+
+    expect(listed.json()[0]).toMatchObject({
+      taskId: 'eval-external-pending',
+      producer: 'external',
+      status: 'running',
+      downloadReady: false,
+      clientKind: 'codex-cli',
+      sessionId: 'sess-export',
+    })
+    expect(fetched.json()).toMatchObject({ status: 'running', producer: 'external' })
   })
 
   it('completes localized tasks with fallback wording when no rewrite is generated', async () => {
@@ -934,6 +979,86 @@ describe('POST /api/runs', () => {
     const res = await app.inject({ method: 'POST', url: '/api/runs', payload: { feature: 'noenv' } })
     expect(res.statusCode).toBe(201)
     expect(receivedEnv).toBeUndefined()
+  })
+
+  it('reuses an active external-heal run instead of starting another run', async () => {
+    const dir = path.join(featuresDir, 'foo')
+    fs.mkdirSync(dir, { recursive: true })
+    fs.writeFileSync(
+      path.join(dir, 'feature.config.cjs'),
+      `module.exports = { config: { name: 'foo', description: 'd', envs: ['local'], featureDir: __dirname } }`,
+    )
+    const runDir = runDirFor(logsDir, 'active-heal')
+    fs.mkdirSync(runDir, { recursive: true })
+    writeManifest(path.join(runDir, 'manifest.json'), {
+      runId: 'active-heal',
+      feature: 'foo',
+      featureDir: dir,
+      env: 'local',
+      startedAt: '2026-05-19T00:00:00.000Z',
+      status: 'healing',
+      healCycles: 1,
+      services: [],
+      healMode: 'external',
+      lifecycle: {
+        phase: 'waiting-for-signal',
+        headline: 'Waiting for heal signal',
+        updatedAt: '2026-05-19T00:00:01.000Z',
+      },
+    })
+    writeRunsIndex(logsDir, [
+      {
+        runId: 'active-heal',
+        feature: 'foo',
+        startedAt: '2026-05-19T00:00:00.000Z',
+        status: 'healing',
+      },
+    ])
+    const startRun = vi.fn(async () => makeStub('new-run'))
+    const claim = vi.fn(() => ({
+      accepted: true as const,
+      session: {
+        sessionId: 'sess-1',
+        clientKind: 'claude-desktop' as const,
+        claimedAt: '2026-05-19T00:00:02.000Z',
+        lastHeartbeatAt: '2026-05-19T00:00:02.000Z',
+        status: 'connected' as const,
+        cycleCount: 0,
+      },
+    }))
+    const { app } = await build({ startRun, broker: { claim } })
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/runs',
+      payload: {
+        feature: 'foo',
+        env: 'local',
+        healAgent: {
+          kind: 'external',
+          sessionId: 'sess-1',
+          clientKind: 'claude-desktop',
+          conversationName: 'resume run',
+        },
+        forceNew: true,
+      },
+    })
+
+    expect(res.statusCode).toBe(200)
+    expect(res.json()).toMatchObject({
+      runId: 'active-heal',
+      reused: true,
+      status: 'healing',
+      claimed: true,
+      ignoredForceNew: true,
+    })
+    expect(res.json().warning).toContain('signal_run')
+    expect(startRun).not.toHaveBeenCalled()
+    expect(claim).toHaveBeenCalledWith('active-heal', {
+      sessionId: 'sess-1',
+      clientKind: 'claude-desktop',
+      conversationName: 'resume run',
+    })
   })
 
   it('500s with stringified non-Error rejection', async () => {
@@ -1187,6 +1312,40 @@ describe('POST /api/runs/:runId/agent-input', () => {
     expect(res.statusCode).toBe(202)
     expect(res.json()).toEqual({ status: 'sent' })
     expect(received).toBe('hi\n')
+  })
+})
+
+describe('POST /api/runs/:runId/restart', () => {
+  it('restarts a terminal run in remaining-test mode', async () => {
+    let received = ''
+    const { app } = await build({
+      restartRun: async (runId) => {
+        received = runId
+        return { ok: true, mode: 'remaining' }
+      },
+    })
+
+    const res = await app.inject({ method: 'POST', url: '/api/runs/old-failed/restart' })
+
+    expect(res.statusCode).toBe(202)
+    expect(res.json()).toEqual({ status: 'restarted', mode: 'remaining' })
+    expect(received).toBe('old-failed')
+  })
+
+  it.each([
+    ['run-not-found', 404],
+    ['not-restartable', 409],
+    ['already-active', 409],
+    ['spawn-failed', 500],
+  ] as const)('maps restart failure %s to HTTP %d', async (reason, statusCode) => {
+    const { app } = await build({
+      restartRun: async () => ({ ok: false, reason }),
+    })
+
+    const res = await app.inject({ method: 'POST', url: '/api/runs/r1/restart' })
+
+    expect(res.statusCode).toBe(statusCode)
+    expect(res.json()).toEqual({ reason })
   })
 })
 

@@ -51,6 +51,11 @@
   --radius-lg: 8px;
   --radius-xl: 10px;
 
+  --scrollbar-size: 10px;
+  --scrollbar-thumb: color-mix(in srgb, var(--border-strong) 78%, transparent);
+  --scrollbar-thumb-hover: color-mix(in srgb, var(--text-muted) 76%, transparent);
+  --scrollbar-track: transparent;
+
   --font-mono: 'JetBrains Mono', ui-monospace, monospace;
   --font-sans: 'Inter Tight', 'Geist', ui-sans-serif, system-ui, -apple-system, sans-serif;
 }
@@ -108,27 +113,47 @@ body {
   font-family: var(--font-mono);
 }
 
-/* Hairline auto-hiding scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+}
+
+*::-webkit-scrollbar {
+  width: var(--scrollbar-size);
+  height: var(--scrollbar-size);
+}
+
+*::-webkit-scrollbar-track {
+  background: var(--scrollbar-track);
+}
+
+*::-webkit-scrollbar-thumb {
+  min-height: 2rem;
+  min-width: 2rem;
+  background: var(--scrollbar-thumb);
+  background-clip: padding-box;
+  border: 3px solid transparent;
+  border-radius: 999px;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+  background-clip: padding-box;
+}
+
+*::-webkit-scrollbar-corner {
+  background: var(--scrollbar-track);
+}
+
+/* Compatibility class for existing scroll containers. */
 .scrollbar-thin {
   scrollbar-width: thin;
-  scrollbar-color: transparent transparent;
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
 }
-.scrollbar-thin:hover {
-  scrollbar-color: var(--border-strong) transparent;
-}
+
 .scrollbar-thin::-webkit-scrollbar {
-  width: 4px;
-  height: 4px;
-}
-.scrollbar-thin::-webkit-scrollbar-track {
-  background: transparent;
-}
-.scrollbar-thin::-webkit-scrollbar-thumb {
-  background: transparent;
-  border-radius: 4px;
-}
-.scrollbar-thin:hover::-webkit-scrollbar-thumb {
-  background: var(--border-strong);
+  width: var(--scrollbar-size);
+  height: var(--scrollbar-size);
 }
 
 .resize-handle {
@@ -257,6 +282,9 @@ body {
 .feature-row__cog:focus-visible {
   opacity: 1;
 }
+
+/* Active-run state is shown by highlighting the whole feature row, not a
+   chip — see .cl-list-row-running / .cl-list-row-healing below. */
 
 .numeric-input::-webkit-outer-spin-button,
 .numeric-input::-webkit-inner-spin-button {
@@ -424,6 +452,94 @@ body {
     0 10px 28px -8px rgba(59, 130, 246, 0.7);
 }
 
+.cl-run-menu-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  height: 30px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-md);
+  background: var(--accent);
+  color: #ffffff;
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 0 0.85rem;
+  transition: background 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
+  box-shadow: 0 1px 2px rgba(37, 99, 235, 0.18);
+}
+
+.cl-run-menu-button-compact {
+  width: 30px;
+  padding: 0;
+  gap: 0;
+}
+
+.cl-run-menu-button:hover,
+.cl-run-menu-button:focus-visible,
+.cl-run-menu-button[aria-expanded="true"] {
+  background: var(--accent-strong);
+  border-color: var(--accent-strong);
+  outline: none;
+  box-shadow: 0 2px 6px rgba(37, 99, 235, 0.28);
+}
+
+.cl-run-menu-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+  box-shadow: none;
+}
+
+.cl-run-launch-menu {
+  overflow: hidden;
+}
+
+.cl-run-env-option {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 0.55rem;
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  padding: 0.55rem 0.6rem;
+  text-align: left;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.cl-run-env-option:hover,
+.cl-run-env-option:focus-visible {
+  background: var(--bg-hover);
+  outline: none;
+}
+
+.cl-run-env-option-dot {
+  width: 0.45rem;
+  height: 0.45rem;
+  flex: 0 0 auto;
+  border-radius: 9999px;
+  background: var(--success);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--success) 12%, transparent);
+}
+
+.dark .cl-run-menu-button {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 92%, white 8%), var(--accent));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 0 0 1px rgba(59, 130, 246, 0.2),
+    0 8px 24px -8px rgba(59, 130, 246, 0.6);
+}
+
+.dark .cl-run-menu-button:hover,
+.dark .cl-run-menu-button:focus-visible,
+.dark .cl-run-menu-button[aria-expanded="true"] {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--accent-strong) 92%, white 8%), var(--accent-strong));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.10),
+    0 0 0 1px rgba(96, 165, 250, 0.3),
+    0 10px 28px -8px rgba(59, 130, 246, 0.7);
+}
+
 /* Hairline-separated rows. */
 .cl-row {
   border-bottom: 1px solid var(--border-subtle);
@@ -456,6 +572,50 @@ body {
 }
 .cl-list-row-selected:hover {
   background: var(--bg-selected);
+}
+
+/* Active-run highlight on the whole row — blue while running, yellow while
+   healing. Declared after the selected/hover rules so an in-flight run wins
+   over the grey selected background at equal specificity. The interior tint is
+   constant; the row's edge "breathes" — a brand-coloured hairline ring plus a
+   soft inner glow that pulses in opacity — to signal the run is live. All the
+   motion is opacity on a fully-inset ::after, so nothing spills into the row
+   gaps. It keeps animating under prefers-reduced-motion by deliberate product
+   decision — no reduced-motion gate. */
+.cl-list-row-running {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+.cl-list-row-running:hover {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+}
+.cl-list-row-healing {
+  background: color-mix(in srgb, var(--warning) 18%, transparent);
+}
+.cl-list-row-healing:hover {
+  background: color-mix(in srgb, var(--warning) 24%, transparent);
+}
+.cl-list-row-running::after,
+.cl-list-row-healing::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  animation: cl-edge-breathe 3s ease-in-out infinite;
+}
+.cl-list-row-running::after {
+  box-shadow:
+    inset 0 0 0 1px var(--accent),
+    inset 0 0 12px -4px var(--accent);
+}
+.cl-list-row-healing::after {
+  box-shadow:
+    inset 0 0 0 1px var(--warning),
+    inset 0 0 12px -4px var(--warning);
+}
+@keyframes cl-edge-breathe {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 0.95; }
 }
 
 /* Subtle count chip — mono numeral on a soft fill. */
@@ -564,6 +724,211 @@ body {
   animation: fm-fade-up 180ms ease-out;
 }
 
+.cl-mcp-promo-modal {
+  width: min(880px, calc(100vw - 2rem));
+  max-height: 88vh;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+
+.cl-mcp-promo-backdrop {
+  padding-block: 6vh;
+  padding-inline: 1rem;
+}
+
+.cl-mcp-promo-video-wrap {
+  flex: 0 0 auto;
+  aspect-ratio: 1280 / 560;
+  background: #050505;
+  border-bottom: 1px solid var(--border-default);
+}
+
+.cl-mcp-promo-video {
+  aspect-ratio: 1280 / 560;
+  height: auto;
+  display: block;
+  width: 100%;
+  background: #050505;
+  object-fit: contain;
+}
+
+.cl-mcp-promo-body {
+  flex: 0 0 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 0.9rem 1.25rem 1rem;
+}
+
+.cl-mcp-promo-setup {
+  margin: 0 0 0.75rem;
+  color: var(--text-secondary);
+  font-size: 0.8125rem;
+  line-height: 1.45;
+}
+
+.cl-mcp-promo-setup code {
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
+.cl-mcp-promo-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+@media (max-width: 520px) {
+  .cl-mcp-promo-footer {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .cl-mcp-promo-footer .cl-button-primary {
+    justify-content: center;
+  }
+}
+
+.cl-mcp-promo-close {
+  position: absolute;
+  top: 0.75rem;
+  right: 0.75rem;
+  z-index: 2;
+  display: grid;
+  height: 2rem;
+  width: 2rem;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--border-default) 72%, var(--text-primary));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-overlay) 86%, transparent);
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  font-weight: 700;
+  line-height: 1;
+  box-shadow: var(--shadow-popover);
+  transition: border-color 120ms ease, color 120ms ease, background 120ms ease;
+}
+
+.cl-mcp-promo-close:hover {
+  border-color: var(--border-focus);
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+}
+
+.cl-mcp-promo-close:focus-visible {
+  border-color: var(--border-focus);
+  box-shadow: 0 0 0 3px var(--accent-soft), var(--shadow-popover);
+  outline: none;
+}
+
+.cl-verify-modal {
+  width: min(560px, calc(100vw - 2rem));
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--bg-elevated) 34%, transparent), transparent 34%),
+    var(--bg-surface);
+  position: relative;
+}
+
+.cl-verify-modal::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto;
+  height: 2px;
+  background: linear-gradient(
+    90deg,
+    var(--success),
+    var(--accent) 48%,
+    var(--warning)
+  );
+  opacity: 0.9;
+}
+
+.cl-verify-header {
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--accent) 9%, transparent), transparent 52%),
+    var(--bg-surface);
+  border-bottom: 1px solid var(--border-default);
+}
+
+.cl-verify-mode-chip,
+.cl-verify-count {
+  align-items: center;
+  border: 1px solid var(--border-default);
+  border-radius: 9999px;
+  display: inline-flex;
+  line-height: 1;
+}
+
+.cl-verify-mode-chip {
+  background: color-mix(in srgb, var(--success) 10%, transparent);
+  border-color: color-mix(in srgb, var(--success) 24%, var(--border-default));
+  color: color-mix(in srgb, var(--success) 78%, var(--text-primary));
+  font-family: var(--font-mono);
+  font-size: 10px;
+  padding: 0.25rem 0.45rem;
+}
+
+.cl-verify-count {
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  padding: 0.25rem 0.5rem;
+}
+
+.cl-verify-section {
+  background: color-mix(in srgb, var(--bg-surface) 78%, var(--bg-elevated));
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-panel);
+  padding: 0.9rem;
+}
+
+.cl-verify-target-row {
+  align-items: center;
+  background: var(--bg-input);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  column-gap: 0.9rem;
+  display: grid;
+  grid-template-columns: minmax(150px, 0.42fr) minmax(0, 1fr);
+  padding: 0.65rem;
+}
+
+.cl-verify-service-dot {
+  background: var(--success);
+  border-radius: 9999px;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--success) 14%, transparent);
+  flex: 0 0 auto;
+  height: 0.4rem;
+  width: 0.4rem;
+}
+
+.cl-verify-empty {
+  background: repeating-linear-gradient(
+    -45deg,
+    transparent 0,
+    transparent 10px,
+    color-mix(in srgb, var(--border-default) 24%, transparent) 10px,
+    color-mix(in srgb, var(--border-default) 24%, transparent) 11px
+  );
+}
+
+.cl-verify-footer {
+  background: var(--bg-surface);
+  border-top: 1px solid var(--border-default);
+}
+
+@media (max-width: 640px) {
+  .cl-verify-target-row {
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: 0.6rem;
+  }
+}
+
 .cl-code-shell {
   background: var(--bg-input);
   border: 1px solid var(--border-default);
@@ -592,7 +957,7 @@ body {
 /* Dialog header. */
 .cl-dialog-header {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 0.75rem;
   padding: 0.75rem 1rem;
   border-bottom: 1px solid var(--border-default);

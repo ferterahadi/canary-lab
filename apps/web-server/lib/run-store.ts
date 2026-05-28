@@ -22,8 +22,8 @@ import {
 } from '../../../shared/run-state'
 
 // `RunStore` is the single mutator for everything the runs feature persists:
-// `logs/<runId>/manifest.json`, `logs/runs-index.json`, the per-run dirs, and
-// the `logs/current` symlink. Routes and the orchestrator both go through it
+// `logs/runs/<runId>/manifest.json`, `logs/runs/index.json`, and the per-run
+// dirs. Routes and the orchestrator both go through it
 // so:
 //   1. invariants (e.g. "writes drop on a stopped orchestrator") live in one
 //      place,
@@ -51,6 +51,10 @@ export type OrchestratorInterjectResult =
 export type RestartHealResult =
   | { ok: true }
   | { ok: false; reason: 'run-not-found' | 'not-restartable' | 'manual-mode' | 'spawn-failed' }
+
+export type RestartRunResult =
+  | { ok: true; mode: 'remaining' }
+  | { ok: false; reason: 'run-not-found' | 'not-restartable' | 'already-active' | 'spawn-failed' }
 
 export interface OrchestratorLike {
   runId: string
@@ -160,6 +164,7 @@ export function removeRunFromHistory(logsDir: string, runId: string): boolean {
 }
 
 export interface RunSummaryFailedEntry {
+  id?: string
   name: string
   error?: { message: string; snippet?: string }
   durationMs?: number
@@ -183,16 +188,25 @@ export interface RunSummary {
    *  so the UI can mark only-run tests as passed without falsely turning
    *  unrun tests green when the suite stops early (pause / max-failures). */
   passedNames?: string[]
+  passedIds?: string[]
   /** Names of tests Playwright reported as skipped. Kept separate from
    *  `failed` so the UI and heal loop do not treat skipped tests as failures. */
   skipped?: number
   skippedNames?: string[]
+  skippedIds?: string[]
+  knownTests?: Array<{
+    id?: string
+    name: string
+    title?: string
+    titlePath?: string[]
+    location?: string
+  }>
   /** Currently-running Playwright test, emitted by the reporter on
    *  onTestBegin. Cleared when the matching onTestEnd lands. */
-  running?: { name: string; location: string; step?: RunSummaryRunningStep }
+  running?: { id?: string; name: string; location: string; step?: RunSummaryRunningStep }
   /** All currently-running Playwright tests. Present when Playwright workers
    *  run multiple test cases concurrently. */
-  runningTests?: Array<{ name: string; location: string; step?: RunSummaryRunningStep }>
+  runningTests?: Array<{ id?: string; name: string; location: string; step?: RunSummaryRunningStep }>
   failed: RunSummaryFailedEntry[]
 }
 
@@ -282,10 +296,60 @@ export function readRunSummary(runDir: string): RunSummary | undefined {
   try {
     const parsed = JSON.parse(raw) as RunSummary
     if (typeof parsed !== 'object' || parsed === null) return undefined
-    return parsed
+    return normalizeRunSummary(parsed)
   } catch {
     return undefined
   }
+}
+
+function normalizeRunSummary(summary: RunSummary): RunSummary {
+  if (!Array.isArray(summary.knownTests) || summary.knownTests.length === 0) return summary
+
+  const knownTests: NonNullable<RunSummary['knownTests']> = []
+  const indexByLogicalKey = new Map<string, number>()
+  const idRemap = new Map<string, string>()
+  for (const entry of summary.knownTests) {
+    const logicalKey = knownTestLogicalKey(entry)
+    if (!logicalKey) {
+      knownTests.push(entry)
+      continue
+    }
+    const existingIndex = indexByLogicalKey.get(logicalKey)
+    if (existingIndex === undefined) {
+      indexByLogicalKey.set(logicalKey, knownTests.length)
+      knownTests.push(entry)
+      continue
+    }
+    const previous = knownTests[existingIndex]
+    if (previous.id && entry.id && previous.id !== entry.id) idRemap.set(previous.id, entry.id)
+    knownTests[existingIndex] = entry
+  }
+  if (knownTests.length === summary.knownTests.length && idRemap.size === 0) return summary
+
+  return {
+    ...summary,
+    total: knownTests.length,
+    knownTests,
+    ...(summary.passedIds ? { passedIds: remapIds(summary.passedIds, idRemap) } : {}),
+    ...(summary.skippedIds ? { skippedIds: remapIds(summary.skippedIds, idRemap) } : {}),
+    failed: summary.failed.map((entry) => remapSummaryEntryId(entry, idRemap)),
+    ...(summary.running ? { running: remapSummaryEntryId(summary.running, idRemap) } : {}),
+    ...(summary.runningTests ? { runningTests: summary.runningTests.map((entry) => remapSummaryEntryId(entry, idRemap)) } : {}),
+  }
+}
+
+function knownTestLogicalKey(entry: NonNullable<RunSummary['knownTests']>[number]): string | undefined {
+  return entry.titlePath?.length ? [...entry.titlePath, entry.title ?? ''].join('\u001f') : undefined
+}
+
+function remapIds(ids: string[], idRemap: Map<string, string>): string[] {
+  return [...new Set(ids.map((id) => idRemap.get(id) ?? id))]
+}
+
+function remapSummaryEntryId<T extends { id?: string }>(entry: T, idRemap: Map<string, string>): T {
+  if (!entry.id) return entry
+  const mapped = idRemap.get(entry.id)
+  return mapped ? { ...entry, id: mapped } : entry
 }
 
 export function readPlaywrightPlaybackEvents(runDir: string): PlaywrightPlaybackEvent[] | undefined {
@@ -467,8 +531,19 @@ export interface RunStoreEvent {
    *  whether to refetch a single run or the whole list:
    *   - `bootstrap` / `changed` / `finalized` — single-run change
    *   - `removed` — single-run history removal
-   *   - `index-changed` — list-level (e.g. reaper) */
-  kind: 'bootstrap' | 'changed' | 'finalized' | 'removed' | 'index-changed'
+   *   - `index-changed` — list-level (e.g. reaper)
+   *   - `external-heal-task` — a run held by an external client just entered
+   *     `waiting-for-signal` and the client should fetch heal context.
+   *   - `external-claim-changed` — claim / release / heartbeat-stale
+   *     transitions for the external session that owns this run. */
+  kind:
+    | 'bootstrap'
+    | 'changed'
+    | 'finalized'
+    | 'removed'
+    | 'index-changed'
+    | 'external-heal-task'
+    | 'external-claim-changed'
   runId?: string
 }
 
@@ -558,6 +633,12 @@ export class RunStore extends EventEmitter implements RunStateSink {
   recordLifecycleEvent(runId: string, event: RunLifecycleEvent): void {
     this.sink.recordLifecycleEvent(runId, event)
     this.emitEvent({ kind: 'changed', runId })
+    if (event.phase === 'waiting-for-signal') {
+      const detail = this.get(runId)
+      if (detail?.manifest.healMode === 'external') {
+        this.emitEvent({ kind: 'external-heal-task', runId })
+      }
+    }
   }
 
   setStatus(runId: string, status: RunManifest['status'], healCycles?: number): void {

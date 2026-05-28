@@ -9,7 +9,6 @@ import { getProjectRoot } from '../shared/runtime/project-root'
 import { openBrowser } from '../apps/web-server/lib/open-browser'
 
 export interface UiCommandOptions {
-  port?: number
   projectRoot?: string
   // Injected for tests / future programmatic use.
   log?: (msg: string) => void
@@ -27,7 +26,8 @@ export async function runUi(argv: string[], opts: UiCommandOptions = {}): Promis
   }
   const portFromArgs = parsePort(argv, { log, exit: requestExit })
   if (exitRequested) return
-  const port = portFromArgs ?? opts.port ?? 7421
+  if (portFromArgs !== undefined) return
+  const port = 7421
   const noOpen = argv.includes('--no-open')
   const projectRoot = opts.projectRoot ?? getProjectRoot()
   const { app, runStore, revertAllEnvsets, cancelAllWizardAgents } = await createServer({ projectRoot })
@@ -66,7 +66,17 @@ export async function runUi(argv: string[], opts: UiCommandOptions = {}): Promis
   process.once('SIGTERM', () => { void shutdown(143) })
   process.once('beforeExit', () => { void cleanup() })
 
-  await app.listen({ port, host: '127.0.0.1' })
+  try {
+    await app.listen({ port, host: '127.0.0.1' })
+  } catch (err) {
+    try { await app.close() } catch { /* already closed or never fully opened */ }
+    if (isAddressInUseError(err)) {
+      log('Canary Lab port 7421 is already in use. Stop the existing Canary Lab server or free the port, then run `npx canary-lab ui` again.')
+      requestExit(1)
+      return
+    }
+    throw err
+  }
   const url = `http://localhost:${port}`
   log(`Open ${url}`)
   log(`Project root: ${path.relative(process.cwd(), projectRoot) || '.'}`)
@@ -113,39 +123,23 @@ async function confirmShutdownFromStdin(): Promise<boolean> {
 export function parsePort(
   argv: string[],
   opts: Pick<UiCommandOptions, 'log' | 'exit'> = {},
-): number | undefined {
+): 'removed-port-option' | undefined {
   const log = opts.log ?? ((m: string) => console.log(m))
   const exit = opts.exit ?? ((code: number) => { process.exit(code) })
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]
-    if (a === '--port') {
-      if (!argv[i + 1]) {
-        log('Usage: canary-lab ui [--port <n>] [--no-open]')
-        exit(1)
-        return undefined
-      }
-      return parsePortValue(argv[i + 1], { log, exit })
-    } else if (a.startsWith('--port=')) {
-      return parsePortValue(a.slice('--port='.length), { log, exit })
+    if (a === '--port' || a.startsWith('--port=')) {
+      log('`canary-lab ui --port` was removed. Canary Lab always uses port 7421 so MCP clients can connect consistently.')
+      exit(1)
+      return 'removed-port-option'
     }
   }
   return undefined
 }
 
-function parsePortValue(
-  raw: string,
-  opts: Required<Pick<UiCommandOptions, 'log' | 'exit'>>,
-): number | undefined {
-  if (!/^\d+$/.test(raw)) {
-    opts.log(`Invalid port "${raw}". Use a number between 1 and 65535.`)
-    opts.exit(1)
-    return undefined
-  }
-  const n = Number(raw)
-  if (!Number.isInteger(n) || n < 1 || n > 65535) {
-    opts.log(`Invalid port "${raw}". Use a number between 1 and 65535.`)
-    opts.exit(1)
-    return undefined
-  }
-  return n
+function isAddressInUseError(err: unknown): boolean {
+  return !!err &&
+    typeof err === 'object' &&
+    'code' in err &&
+    (err as { code?: unknown }).code === 'EADDRINUSE'
 }

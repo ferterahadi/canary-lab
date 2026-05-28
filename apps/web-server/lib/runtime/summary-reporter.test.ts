@@ -25,7 +25,7 @@ vi.mock('./trace-enrichment', () => ({
   extractTraceSummary: traceMocks.extractTraceSummary,
 }))
 
-const { slugify, default: SummaryReporter } = await import('./summary-reporter')
+const { slugify, testIdFor, default: SummaryReporter } = await import('./summary-reporter')
 
 afterEach(() => {
   fs.rmSync(LOGS_DIR, { recursive: true, force: true })
@@ -88,6 +88,7 @@ describe('SummaryReporter', () => {
       total: 1,
       passed: 1,
       passedNames: ['test-case-a-happy-test'],
+      passedIds: [expect.any(String)],
       failed: [],
     })
 
@@ -107,8 +108,10 @@ describe('SummaryReporter', () => {
       total: 2,
       passed: 1,
       passedNames: ['test-case-a-happy-test'],
+      passedIds: [expect.any(String)],
       failed: [
         {
+          id: expect.any(String),
           name: 'test-case-the-sad-test',
           error: { message: 'boom', snippet: 'expect(x).toBe(y)' },
           durationMs: 99,
@@ -136,12 +139,14 @@ describe('SummaryReporter', () => {
       passedNames: [],
       knownTests: [
         {
+          id: expect.any(String),
           name: 'test-case-factory-one',
           title: 'factory one',
           titlePath: ['matrix', 'factory one'],
           location: '/helpers/spec-factory.ts:54',
         },
         {
+          id: expect.any(String),
           name: 'test-case-factory-two',
           title: 'factory two',
           titlePath: ['matrix', 'factory two'],
@@ -149,6 +154,49 @@ describe('SummaryReporter', () => {
         },
       ],
     })
+  })
+
+  it('writes collision-safe ids for duplicate-title results', () => {
+    const reporter = new SummaryReporter()
+    reporter.onBegin({} as any, {
+      allTests: () => [
+        { ...mkTest('validates duplicate', '/a.spec.ts', 10), titlePath: () => ['group a', 'validates duplicate'] },
+        { ...mkTest('validates duplicate', '/a.spec.ts', 20), titlePath: () => ['group b', 'validates duplicate'] },
+      ],
+    } as any)
+    reporter.onTestEnd(
+      { ...mkTest('validates duplicate', '/a.spec.ts', 10), titlePath: () => ['group a', 'validates duplicate'] },
+      mkResult(),
+    )
+    reporter.onTestEnd(
+      { ...mkTest('validates duplicate', '/a.spec.ts', 20), titlePath: () => ['group b', 'validates duplicate'] },
+      mkResult({ status: 'failed', error: { message: 'boom' } }),
+    )
+
+    const summary = readSummary()
+    expect(summary.knownTests).toEqual([
+      expect.objectContaining({
+        id: expect.any(String),
+        name: 'test-case-validates-duplicate',
+        title: 'validates duplicate',
+        location: '/a.spec.ts:10',
+      }),
+      expect.objectContaining({
+        id: expect.any(String),
+        name: 'test-case-validates-duplicate',
+        title: 'validates duplicate',
+        location: '/a.spec.ts:20',
+      }),
+    ])
+    expect(summary.knownTests[0].id).not.toBe(summary.knownTests[1].id)
+    expect(summary.passedNames).toEqual(['test-case-validates-duplicate'])
+    expect(summary.passedIds).toEqual([summary.knownTests[0].id])
+    expect(summary.failed).toEqual([
+      expect.objectContaining({
+        id: summary.knownTests[1].id,
+        name: 'test-case-validates-duplicate',
+      }),
+    ])
   })
 
   it('merges knownTests and prior statuses across targeted reruns', () => {
@@ -188,6 +236,58 @@ describe('SummaryReporter', () => {
       ],
       failed: [],
     })
+  })
+
+  it('merges targeted-rerun knownTests by title path when source lines drift', () => {
+    fs.mkdirSync(LOGS_DIR, { recursive: true })
+    const oldId = testIdFor({
+      title: 'line drift',
+      titlePath: ['spec.ts', 'group', 'line drift'],
+      location: '/spec.ts:10',
+    })
+    fs.writeFileSync(path.join(LOGS_DIR, 'e2e-summary.json'), JSON.stringify({
+      complete: true,
+      total: 1,
+      passed: 1,
+      passedNames: ['test-case-line-drift'],
+      passedIds: [oldId],
+      knownTests: [
+        {
+          id: oldId,
+          name: 'test-case-line-drift',
+          title: 'line drift',
+          titlePath: ['spec.ts', 'group', 'line drift'],
+          location: '/spec.ts:10',
+        },
+      ],
+      failed: [],
+    }))
+    process.env.CANARY_LAB_TARGETED_RERUN = '1'
+
+    const reporter = new SummaryReporter()
+    reporter.onBegin({} as any, {
+      allTests: () => [
+        { ...mkTest('line drift', '/spec.ts', 12), titlePath: () => ['spec.ts', 'group', 'line drift'] },
+      ],
+    } as any)
+    reporter.onEnd({} as any)
+
+    const out = readSummary()
+    expect(out.total).toBe(1)
+    expect(out.knownTests).toEqual([
+      {
+        id: testIdFor({
+          title: 'line drift',
+          titlePath: ['spec.ts', 'group', 'line drift'],
+          location: '/spec.ts:12',
+        }),
+        name: 'test-case-line-drift',
+        title: 'line drift',
+        titlePath: ['spec.ts', 'group', 'line drift'],
+        location: '/spec.ts:12',
+      },
+    ])
+    expect(out.passedIds).toEqual([out.knownTests[0].id])
   })
 
   it('strips ANSI noise and truncates large error fields', () => {
@@ -397,6 +497,70 @@ describe('SummaryReporter', () => {
     })
   })
 
+  it('replays a rich existing summary with explicit ids in knownTests, passedIds, skippedIds, and failed entries', () => {
+    // Exercises every "id is present" branch in replayFromExistingSummary +
+    // knownTestsFromExistingSummary + idForExistingResult: passedIds /
+    // skippedIds arrays, an explicit failed entry id, location-based
+    // resolution against a known test, and single-match by-name resolution.
+    process.env.CANARY_LAB_TARGETED_RERUN = '1'
+    fs.mkdirSync(LOGS_DIR, { recursive: true })
+
+    // Compute the test-A id with the production helper so onTestEnd's
+    // computed id matches the replayed result — this triggers the
+    // first-try findIndex hit inside removeResult.
+    const idA = testIdFor({ title: 'A', location: '/spec.ts:1' })
+    const idB = 'test-id-known-b'
+    const idC = 'test-id-known-c'
+    const idD = 'test-id-known-d'
+    const idE = 'test-id-known-e'
+
+    fs.writeFileSync(
+      path.join(LOGS_DIR, 'e2e-summary.json'),
+      JSON.stringify({
+        knownTests: [
+          { id: idA, name: 'test-case-a', title: 'A', location: '/spec.ts:1' },
+          { id: idB, name: 'test-case-b', title: 'B', location: '/spec.ts:2' },
+          { id: idC, name: 'test-case-c', title: 'C', location: '/spec.ts:3' },
+          { id: idD, name: 'test-case-d', title: 'D', location: '/spec.ts:4' },
+          { id: idE, name: 'test-case-e', title: 'E', location: '/spec.ts:5' },
+        ],
+        passedNames: ['test-case-a', 'test-case-b'],
+        // passedIds is an array but only covers idx=0 — idx=1 falls through
+        // to idForExistingResult({ name: 'test-case-b' }), which finds a
+        // single non-legacy match in knownTests and returns idB.
+        passedIds: [idA],
+        skippedNames: ['test-case-c'],
+        skippedIds: [idC],
+        failed: [
+          // Explicit string id on the failed entry.
+          { name: 'test-case-d', id: idD, error: { message: 'fail-d' } },
+          // No id but a location matches a knownTests entry exactly.
+          { name: 'test-case-e', location: '/spec.ts:5', error: { message: 'fail-e' } },
+        ],
+      }),
+    )
+
+    const reporter = new SummaryReporter()
+
+    // Drive onTestEnd for test A so the replayed-by-id entry is removed via
+    // the first findIndex (covers the "id resolved on first try" branch).
+    reporter.onTestEnd(
+      { title: 'A', location: { file: '/spec.ts', line: 1 } } as any,
+      mkResult({ status: 'passed' }),
+    )
+    reporter.onEnd({} as any)
+
+    const out = readSummary()
+    expect(out.passedNames).toEqual(expect.arrayContaining(['test-case-a', 'test-case-b']))
+    expect(out.passedIds).toEqual(expect.arrayContaining([idA, idB]))
+    expect(out.skippedNames).toEqual(['test-case-c'])
+    expect(out.skippedIds).toEqual([idC])
+    expect(out.failed).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: idD, name: 'test-case-d' }),
+      expect.objectContaining({ id: idE, name: 'test-case-e', location: '/spec.ts:5' }),
+    ]))
+  })
+
   it('skips the existing-summary seed when the file parses to a non-object value', () => {
     // Exercises the `!parsed || typeof parsed !== 'object'` truthy arm —
     // a bare JSON literal (number) parses successfully but isn't a record.
@@ -482,6 +646,7 @@ describe('SummaryReporter', () => {
       total: 2,
       passed: 2,
       passedNames: ['test-case-happy-path', 'test-case-sad-path'],
+      passedIds: [expect.any(String)],
       failed: [],
     })
   })
@@ -616,6 +781,7 @@ describe('SummaryReporter', () => {
           logFiles: ['logs/runs/run-1/failed/test-case-still-broken/svc.log'],
         },
         {
+          id: expect.any(String),
           name: 'test-case-sad-path',
           error: { message: 'new sad fail' },
           durationMs: 33,
@@ -647,6 +813,7 @@ describe('SummaryReporter', () => {
       total: 1,
       passed: 1,
       passedNames: ['test-case-new-pass'],
+      passedIds: [expect.any(String)],
       failed: [],
     })
   })
@@ -664,6 +831,7 @@ describe('SummaryReporter', () => {
       total: 1,
       passed: 1,
       passedNames: ['test-case-new-pass'],
+      passedIds: [expect.any(String)],
       failed: [],
     })
   })
@@ -814,6 +982,7 @@ describe('SummaryReporter', () => {
     await reporter.onEnd({} as any)
 
     expect(readSummary().failed[0]).toEqual({
+      id: expect.any(String),
       name: 'test-case-trace-fail',
       error: { message: 'boom' },
       durationMs: 42,
@@ -919,6 +1088,7 @@ describe('SummaryReporter', () => {
     reporter.onStepBegin(test, mkResult(), step)
 
     expect(readSummary().running).toEqual({
+      id: expect.any(String),
       name: 'test-case-currently-busy',
       location: '/specs/busy.spec.ts:7',
       step: {
@@ -931,6 +1101,7 @@ describe('SummaryReporter', () => {
 
     reporter.onStepEnd(test, mkResult(), step)
     expect(readSummary().running).toEqual({
+      id: expect.any(String),
       name: 'test-case-currently-busy',
       location: '/specs/busy.spec.ts:7',
     })
@@ -951,10 +1122,12 @@ describe('SummaryReporter', () => {
 
     expect(readSummary().runningTests).toEqual([
       {
+        id: expect.any(String),
         name: 'test-case-first-worker',
         location: '/specs/first.spec.ts:7',
       },
       {
+        id: expect.any(String),
         name: 'test-case-second-worker',
         location: '/specs/second.spec.ts:11',
         step: {
@@ -973,6 +1146,7 @@ describe('SummaryReporter', () => {
     reporter.onStepBegin(test, mkResult(), mkStep('setup', 'fixture'))
 
     expect(readSummary().running).toEqual({
+      id: expect.any(String),
       name: 'test-case-late-begin',
       location: '/specs/late.spec.ts:3',
       step: { title: 'setup', category: 'fixture' },
@@ -1162,6 +1336,7 @@ describe('SummaryReporter', () => {
     reporter.onTestEnd(mkTest('silent fail'), mkResult({ status: 'timedOut' }))
 
     expect(readSummary().failed[0]).toEqual({
+      id: expect.any(String),
       name: 'test-case-silent-fail',
       durationMs: 42,
       location: '/spec.ts:1',
@@ -1180,6 +1355,7 @@ describe('SummaryReporter', () => {
       passedNames: [],
       skipped: 1,
       skippedNames: ['test-case-skipped-branch'],
+      skippedIds: [expect.any(String)],
       failed: [],
     })
   })
@@ -1238,9 +1414,8 @@ describe('SummaryReporter', () => {
 
     const out = readSummary()
     expect(out.knownTests).toEqual([
-      { name: 'test-case-rich', title: 'rich override', titlePath: ['outer', 'inner'], location: '/r.spec.ts:12' },
-      { name: 'test-case-empty-loc', title: 'empty loc' },
-      { name: 'test-case-rich-override', title: 'rich override', titlePath: ['outer', 'inner'], location: '/r.spec.ts:12' },
+      { id: expect.any(String), name: 'test-case-rich-override', title: 'rich override', titlePath: ['outer', 'inner'], location: '/r.spec.ts:12' },
+      { id: expect.any(String), name: 'test-case-empty-loc', title: 'empty loc' },
     ])
   })
 
@@ -1248,7 +1423,7 @@ describe('SummaryReporter', () => {
     const reporter = new SummaryReporter()
     const test = { title: 'no loc', location: { file: '', line: 7 } } as any
     reporter.onTestBegin(test)
-    expect(readSummary().running).toEqual({ name: 'test-case-no-loc', location: ':7' })
+    expect(readSummary().running).toEqual({ id: expect.any(String), name: 'test-case-no-loc', location: ':7' })
     reporter.onTestEnd(test, mkResult())
     expect(readSummary()).toMatchObject({
       passedNames: ['test-case-no-loc'],

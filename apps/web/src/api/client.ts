@@ -3,6 +3,7 @@
 // Production callers use the default (the global `fetch`).
 
 import type {
+  AuditList,
   Feature,
   FeatureTests,
   RunIndexEntry,
@@ -15,6 +16,8 @@ import type {
   EvaluationExportTask,
   PlanStep,
   DraftPrdDocument,
+  VerificationConfig,
+  VerificationTarget,
 } from './types'
 
 export class ApiError extends Error {
@@ -180,6 +183,26 @@ export function putPlaywrightConfig(
   )
 }
 
+export interface McpHealth {
+  ok: boolean
+  server: { name: string; version?: string }
+  profile: string
+  clientKind: string
+  toolCount: number
+  tools?: string[]
+  activeSessions: number
+  projectRoot: string
+}
+
+export function getMcpHealth(profile = 'repair', opts?: ClientOptions): Promise<McpHealth> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<McpHealth>(
+    `${baseUrl}/mcp/health?profile=${encodeURIComponent(profile)}`,
+    { method: 'GET' },
+    fetchImpl,
+  )
+}
+
 // ─── envsets ──────────────────────────────────────────────────────────────
 
 export interface EnvsetIndex {
@@ -331,7 +354,7 @@ export function putEnvsetSlot(
 
 // ─── project config ───────────────────────────────────────────────────────
 
-export type HealAgentChoice = 'auto' | 'claude' | 'codex' | 'manual'
+export type HealAgentChoice = 'auto' | 'claude' | 'codex' | 'manual' | 'external'
 export type EditorChoice = 'auto' | 'vscode' | 'cursor' | 'system'
 
 export interface ProjectConfig {
@@ -539,6 +562,98 @@ export function getRunDetail(runId: string, opts?: ClientOptions): Promise<RunDe
   return request<RunDetail>(
     `${baseUrl}/api/runs/${encodeURIComponent(runId)}`,
     { method: 'GET' },
+    fetchImpl,
+  )
+}
+
+export function getRunAudit(runId: string, opts?: ClientOptions): Promise<AuditList> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<AuditList>(
+    `${baseUrl}/api/runs/${encodeURIComponent(runId)}/audit`,
+    { method: 'GET' },
+    fetchImpl,
+  )
+}
+
+export interface VerificationTargetIndex {
+  targets: VerificationTarget[]
+  targetUrls: Record<string, string>
+}
+
+export function getVerificationTargets(
+  feature: string,
+  envset?: string,
+  opts?: ClientOptions,
+): Promise<VerificationTargetIndex> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  const qs = envset ? `?envset=${encodeURIComponent(envset)}` : ''
+  return request<VerificationTargetIndex>(
+    `${baseUrl}/api/features/${encodeURIComponent(feature)}/verification-targets${qs}`,
+    { method: 'GET' },
+    fetchImpl,
+  )
+}
+
+export function listVerificationConfigs(
+  feature: string,
+  opts?: ClientOptions,
+): Promise<VerificationConfig[]> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<VerificationConfig[]>(
+    `${baseUrl}/api/features/${encodeURIComponent(feature)}/verification-configs`,
+    { method: 'GET' },
+    fetchImpl,
+  )
+}
+
+export function createVerificationConfig(
+  feature: string,
+  body: { name: string; targetUrls: Record<string, string>; playwrightEnvsetId: string },
+  opts?: ClientOptions,
+): Promise<VerificationConfig> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<VerificationConfig>(
+    `${baseUrl}/api/features/${encodeURIComponent(feature)}/verification-configs`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    },
+    fetchImpl,
+  )
+}
+
+export function updateVerificationConfig(
+  feature: string,
+  configId: string,
+  body: { name: string; targetUrls: Record<string, string>; playwrightEnvsetId: string },
+  opts?: ClientOptions,
+): Promise<VerificationConfig> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<VerificationConfig>(
+    `${baseUrl}/api/features/${encodeURIComponent(feature)}/verification-configs/${encodeURIComponent(configId)}`,
+    {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    },
+    fetchImpl,
+  )
+}
+
+export function executeVerification(
+  feature: string,
+  body: { configId?: string; targetUrls?: Record<string, string>; playwrightEnvsetId?: string },
+  opts?: ClientOptions,
+): Promise<{ runId: string; executionType: 'verify' }> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<{ runId: string; executionType: 'verify' }>(
+    `${baseUrl}/api/features/${encodeURIComponent(feature)}/verifications`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    },
     fetchImpl,
   )
 }
@@ -755,6 +870,18 @@ export function sendAgentInput(
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ data }),
     },
+    fetchImpl,
+  )
+}
+
+export function restartRun(
+  runId: string,
+  opts?: ClientOptions,
+): Promise<{ status: 'restarted'; mode: 'remaining' }> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<{ status: 'restarted'; mode: 'remaining' }>(
+    `${baseUrl}/api/runs/${encodeURIComponent(runId)}/restart`,
+    { method: 'POST' },
     fetchImpl,
   )
 }

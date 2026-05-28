@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "canary-lab": {
+      "command": "npx",
+      "args": ["-y", "canary-lab", "mcp", "--profile", "full"]
+    }
+  }
+}

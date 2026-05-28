@@ -6,6 +6,8 @@ const sourceTemplates = path.join(repoRoot, 'templates')
 const distTemplates = path.join(repoRoot, 'dist', 'templates')
 const sourcePrompts = path.join(repoRoot, 'apps', 'web-server', 'prompts')
 const distPrompts = path.join(repoRoot, 'dist', 'apps', 'web-server', 'prompts')
+const sourceAgentIntegrations = path.join(repoRoot, 'agent-integrations')
+const distAgentIntegrations = path.join(repoRoot, 'dist', 'agent-integrations')
 
 function copyDir(sourceDir, targetDir) {
   fs.mkdirSync(targetDir, { recursive: true })
@@ -16,7 +18,9 @@ function copyDir(sourceDir, targetDir) {
       copyDir(sourcePath, targetPath)
       continue
     }
-    fs.copyFileSync(sourcePath, targetPath)
+    if (entry.isFile()) {
+      fs.copyFileSync(sourcePath, targetPath)
+    }
   }
 }
 
@@ -25,3 +29,6 @@ copyDir(sourceTemplates, distTemplates)
 
 fs.rmSync(distPrompts, { recursive: true, force: true })
 copyDir(sourcePrompts, distPrompts)
+
+fs.rmSync(distAgentIntegrations, { recursive: true, force: true })
+copyDir(sourceAgentIntegrations, distAgentIntegrations)

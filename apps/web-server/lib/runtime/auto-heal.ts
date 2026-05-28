@@ -83,7 +83,7 @@ const MODE_COPY: Record<HealMode, {
 // to fix, so the agent must fix the tests instead. On any read/parse error we
 // default to `service` so a transient I/O glitch doesn't silently flip the
 // prompt for a feature that does have editable repos.
-function detectHealMode(manifestPath: string): HealMode {
+export function detectHealMode(manifestPath: string): HealMode {
   const manifest = readManifest(manifestPath)
   if (!manifest) return 'service'
   const repoPaths = Array.isArray(manifest.repoPaths) ? manifest.repoPaths : []
@@ -285,6 +285,146 @@ export interface BuildHealCyclePromptArgs {
 
 export type BuildHealCyclePrompt = (args: BuildHealCyclePromptArgs) => string
 
+export interface HealPromptStartEntry {
+  id: 'heal-index' | 'summary'
+  field?: 'healIndexMarkdown' | 'summary'
+  path: string
+  purpose: string
+}
+
+export interface HealPromptResourceEntry {
+  id:
+    | 'failed-slices'
+    | 'trace-extract'
+    | 'playwright-mcp'
+    | 'full-service-log'
+    | 'journal'
+    | 'feature-docs'
+    | 'personal-wiki'
+  field?: 'journalMarkdown'
+  path: string
+  useWhen: string
+}
+
+export interface HealPromptMap {
+  source: 'canary-lab/heal-agent-map'
+  mode: HealMode
+  runDir: string
+  runDirRel: string
+  startHere: HealPromptStartEntry[]
+  resources: HealPromptResourceEntry[]
+  boundaries: {
+    fixTarget: string
+    signalPolicy: {
+      serviceOrRuntimeChange: 'restart'
+      testOrConfigOnlyChange: 'rerun'
+      mechanism: 'call signal_run; do not write signal files directly'
+    }
+  }
+}
+
+export interface HealPromptMapOptions {
+  projectRoot: string
+  runDir: string
+  personalWikiPath?: string | null
+}
+
+export function buildHealPromptMap(opts: HealPromptMapOptions): HealPromptMap {
+  const paths = buildRunPaths(opts.runDir)
+  const mode = detectHealMode(paths.manifestPath)
+  const modeCopy = MODE_COPY[mode]
+  const runDirRel = path.relative(opts.projectRoot, opts.runDir) || opts.runDir
+  const startHere: HealPromptStartEntry[] = []
+  const resources: HealPromptResourceEntry[] = []
+
+  if (fileHasContent(paths.healIndexPath)) {
+    startHere.push({
+      id: 'heal-index',
+      field: 'healIndexMarkdown',
+      path: paths.healIndexPath,
+      purpose: 'First source to inspect. Lists failed tests, assertion errors, editable repos, and exact per-failure slice paths.',
+    })
+  } else if (fs.existsSync(paths.summaryPath)) {
+    startHere.push({
+      id: 'summary',
+      field: 'summary',
+      path: paths.summaryPath,
+      purpose: 'Raw Playwright summary. Use when heal-index.md is missing or incomplete.',
+    })
+  }
+
+  if (hasAnyFailureLog(paths.failedDir)) {
+    resources.push({
+      id: 'failed-slices',
+      path: `${paths.failedDir}/<slug>/<svc>.log`,
+      useWhen: 'Use the exact per-failure slice paths referenced by heal-index.md.',
+    })
+  }
+  if (hasAnyFailureWith(paths.failedDir, 'trace-extract/failure-summary.md')) {
+    resources.push({
+      id: 'trace-extract',
+      path: `${paths.failedDir}/<slug>/trace-extract/failure-summary.md`,
+      useWhen: 'Use for UI failures when the trace extract exists; it summarizes failing actions, snapshots, failed network, and console errors.',
+    })
+  }
+  if (hasAnyFailureWithNonEmptyDir(paths.failedDir, 'playwright-mcp')) {
+    resources.push({
+      id: 'playwright-mcp',
+      path: `${paths.failedDir}/<slug>/playwright-mcp/`,
+      useWhen: 'Use when Playwright MCP artifacts exist and the trace summary plus service logs are not enough.',
+    })
+  }
+  if (hasAnyServiceLog(opts.runDir)) {
+    resources.push({
+      id: 'full-service-log',
+      path: `${opts.runDir}/svc-<safeName>.log`,
+      useWhen: 'Use only if a per-failure slice is missing or too short.',
+    })
+  }
+  if (fileHasContent(paths.diagnosisJournalPath)) {
+    resources.push({
+      id: 'journal',
+      field: 'journalMarkdown',
+      path: paths.diagnosisJournalPath,
+      useWhen: 'Use when prior iterations exist or the current cycle references earlier attempts.',
+    })
+  }
+  const docsDir = featureDocsDir(paths.manifestPath)
+  if (docsDir) {
+    resources.push({
+      id: 'feature-docs',
+      path: docsDir,
+      useWhen: 'Use when product requirements, acceptance criteria, or uploaded Add Test context may explain the failure.',
+    })
+  }
+  const wikiMap = renderPersonalWikiMap(opts.personalWikiPath)
+  const wikiPath = opts.personalWikiPath?.trim()
+  if (wikiMap && wikiPath && directoryExists(wikiPath)) {
+    resources.push({
+      id: 'personal-wiki',
+      path: wikiPath,
+      useWhen: 'Use when the current failure seems related to prior work preserved in the personal wiki.',
+    })
+  }
+
+  return {
+    source: 'canary-lab/heal-agent-map',
+    mode,
+    runDir: opts.runDir,
+    runDirRel,
+    startHere,
+    resources,
+    boundaries: {
+      fixTarget: `${modeCopy.healingDirective} ${modeCopy.testSpecRule}`,
+      signalPolicy: {
+        serviceOrRuntimeChange: 'restart',
+        testOrConfigOnlyChange: 'rerun',
+        mechanism: 'call signal_run; do not write signal files directly',
+      },
+    },
+  }
+}
+
 /**
  * Build a prompt-rendering function compatible with `AutoHealConfig.buildCyclePrompt`.
  * Returns the raw prompt text to write into the REPL's stdin — the orchestrator
@@ -350,15 +490,20 @@ export function buildOrchestratorHealPrompt(
 }
 
 function renderFeatureDocsMap(manifestPath: string): string {
-  const manifest = readManifest(manifestPath)
-  const featureDir = manifest?.featureDir
-  if (!featureDir) return ''
-  const docsDir = path.join(featureDir, 'docs')
-  if (!fs.existsSync(docsDir)) return ''
+  const docsDir = featureDocsDir(manifestPath)
+  if (!docsDir) return ''
   return [
     'Feature context docs:',
     `- \`${docsDir}\` — uploaded Add Test documents and additional notes preserved for this feature. Read these when the failure may depend on product requirements, acceptance criteria, or user-provided context.`,
   ].join('\n')
+}
+
+function featureDocsDir(manifestPath: string): string | null {
+  const manifest = readManifest(manifestPath)
+  const featureDir = manifest?.featureDir
+  if (!featureDir) return null
+  const docsDir = path.join(featureDir, 'docs')
+  return directoryExists(docsDir) ? docsDir : null
 }
 
 // Optional per-failure artifact hints. Only emit a bullet when at least one
@@ -399,6 +544,42 @@ function hasAnyFailureWithNonEmptyDir(failedDir: string, subDir: string): boolea
       const inner = fs.readdirSync(candidate).filter((f) => !f.startsWith('_'))
       if (inner.length > 0) return true
     } catch { /* ignore */ }
+  }
+  return false
+}
+
+function fileHasContent(file: string): boolean {
+  try {
+    return fs.readFileSync(file, 'utf-8').trim().length > 0
+  } catch {
+    return false
+  }
+}
+
+function directoryExists(dir: string): boolean {
+  try {
+    return fs.statSync(dir).isDirectory()
+  } catch {
+    return false
+  }
+}
+
+function hasAnyServiceLog(runDir: string): boolean {
+  let entries: fs.Dirent[]
+  try { entries = fs.readdirSync(runDir, { withFileTypes: true }) } catch { return false }
+  return entries.some((entry) => entry.isFile() && /^svc-.+\.log$/.test(entry.name))
+}
+
+function hasAnyFailureLog(failedDir: string): boolean {
+  if (!fs.existsSync(failedDir)) return false
+  let entries: fs.Dirent[]
+  try { entries = fs.readdirSync(failedDir, { withFileTypes: true }) } catch { return false }
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue
+    const dir = path.join(failedDir, entry.name)
+    let inner: fs.Dirent[]
+    try { inner = fs.readdirSync(dir, { withFileTypes: true }) } catch { continue }
+    if (inner.some((candidate) => candidate.isFile() && candidate.name.endsWith('.log'))) return true
   }
   return false
 }

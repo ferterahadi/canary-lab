@@ -3,6 +3,7 @@ import path from 'path'
 import { randomUUID } from 'crypto'
 import { EventEmitter } from 'events'
 import type { FeatureConfig, HealthProbe, HttpProbe, TcpProbe } from '../../../../shared/launcher/types'
+import type { ExecutionType, VerificationRunMetadata } from '../../../../shared/verification'
 import {
   HealSignalGate,
   createRunLifecycleEvent,
@@ -22,6 +23,7 @@ import {
   type RunPaths,
 } from './run-paths'
 import {
+  type ExternalHealSession,
   type RunLifecycleAbortReason,
   type RunLifecycleEvent,
   type RunLifecyclePhase,
@@ -62,7 +64,7 @@ import { planRestart } from './restart-planner'
 import { interpolateConfigTokens, makeTokenCache } from './launcher/interpolate'
 import { readPlaywrightArtifactPolicy } from './playwright-artifact-policy'
 import { slugify } from './summary-reporter'
-import { listSpecFiles } from '../feature-loader'
+import { listSpecFiles, loadFeatures } from '../feature-loader'
 import { extractTestsFromSource } from '../ast-extractor'
 import {
   diffContentSinceSnapshot,
@@ -78,6 +80,7 @@ import {
 // Fastify server can drive without inheriting any readline / iTerm cruft.
 
 export interface ServiceSpec {
+  repoName: string
   name: string
   safeName: string
   command: string
@@ -115,6 +118,21 @@ export interface OrchestratorOptions {
   // file by hand (no agent process spawned). When false (default), failing
   // tests with no autoHeal short-circuit to 'failed' immediately.
   manualHeal?: boolean
+  // External heal mode: identical operational behavior to `manualHeal` (no
+  // agent CLI is spawned, the orchestrator parks at waiting-for-signal until
+  // a signal file appears in `<runDir>/signals/`). The only difference is
+  // that the manifest's `healMode` is written as `'external'` so the UI can
+  // render the dedicated `ExternalHealPanel` instead of the manual-heal
+  // banner, and so external clients (Claude/Codex via MCP) can recognise
+  // ownership. Mutually exclusive with `autoHeal`; takes precedence over
+  // `manualHeal` for the manifest tag when both are true.
+  externalHeal?: boolean
+  /** When `externalHeal` is true, the route layer auto-claims the broker for
+   *  the request's session. Passing the resulting `ExternalHealSession` here
+   *  lets the orchestrator include it in the initial manifest write so the UI
+   *  sees the "Healing via Claude Desktop" badge from the very first frame
+   *  instead of after a follow-up patch round-trip. */
+  externalHealSession?: ExternalHealSession
   // Polling interval for the heal-cycle signal-wait loop. Defaults to
   // healthPollIntervalMs.
   healSignalPollMs?: number
@@ -143,6 +161,9 @@ export interface OrchestratorOptions {
   runStateSink?: RunStateSink
   repoBranchSnapshots?: RepoBranchSnapshot[]
   initialHealCycles?: number
+  executionType?: ExecutionType
+  verification?: VerificationRunMetadata
+  playwrightEnv?: Record<string, string>
 }
 
 export type PauseResult =
@@ -302,6 +323,7 @@ export function buildServiceSpecs(
       const safeName = normalized.name!.replace(/[^a-z0-9]+/gi, '-').toLowerCase()
       const probe = resolveHealthProbe(normalized.healthCheck, env)
       out.push({
+        repoName: repo.name,
         name: normalized.name!,
         safeName,
         command: interp(normalized.command),
@@ -334,6 +356,8 @@ export class RunOrchestrator extends EventEmitter {
   private readonly playwrightSpawner: PlaywrightSpawner
   private readonly autoHeal?: AutoHealConfig
   private readonly manualHeal: boolean
+  private readonly externalHeal: boolean
+  private readonly externalHealSession: ExternalHealSession | undefined
   private readonly healSignalPollMs: number
   private readonly healAgentTimeoutMs: number
   private readonly healAgentIdleTimeoutMs: number
@@ -346,6 +370,9 @@ export class RunOrchestrator extends EventEmitter {
   private readonly runnerLog?: RunnerLog
   private readonly stateSink: RunStateSink
   private readonly repoBranchSnapshots?: RepoBranchSnapshot[]
+  private readonly executionType: ExecutionType
+  private readonly verification?: VerificationRunMetadata
+  private readonly playwrightEnv: Record<string, string>
   private readonly signalGate = new HealSignalGate()
   private healCycleHistory: Array<{ cycle: number; restarted: string[]; kept: string[] }> = []
 
@@ -413,6 +440,8 @@ export class RunOrchestrator extends EventEmitter {
     this.playwrightSpawner = opts.playwrightSpawner ?? defaultPlaywrightSpawner
     this.autoHeal = opts.autoHeal
     this.manualHeal = opts.manualHeal ?? false
+    this.externalHeal = opts.externalHeal ?? false
+    this.externalHealSession = opts.externalHealSession
     this.healSignalPollMs = opts.healSignalPollMs ?? this.healthPollIntervalMs
     // Hard ceiling per cycle. Generous (2h) so a single heal cycle isn't cut
     // off mid-work for a hard, agent-blind reason — the idle timeout below
@@ -425,6 +454,9 @@ export class RunOrchestrator extends EventEmitter {
     this.stateSink = opts.runStateSink ?? new FileRunStateSink(this.logsRoot)
     this.repoBranchSnapshots = opts.repoBranchSnapshots
     this.healCycles = opts.initialHealCycles ?? 0
+    this.executionType = opts.executionType ?? 'run'
+    this.verification = opts.verification
+    this.playwrightEnv = opts.playwrightEnv ?? {}
     if (this.runnerLog) this.attachRunnerLog(this.runnerLog)
   }
 
@@ -512,6 +544,7 @@ export class RunOrchestrator extends EventEmitter {
 
   private writeInitialManifest(serviceStatus: ServiceManifestEntry['status'] = 'starting'): void {
     const services: ServiceManifestEntry[] = this.services.map((s) => ({
+      repoName: s.repoName,
       name: s.name,
       safeName: s.safeName,
       command: s.command,
@@ -525,6 +558,7 @@ export class RunOrchestrator extends EventEmitter {
     }))
     const manifest: RunManifest = {
       runId: this.runId,
+      executionType: this.executionType,
       feature: this.feature.name,
       featureDir: this.feature.featureDir,
       env: this.env,
@@ -543,7 +577,15 @@ export class RunOrchestrator extends EventEmitter {
         rerun: this.paths.rerunSignal,
         restart: this.paths.restartSignal,
       },
-      healMode: this.autoHeal ? 'auto' : this.manualHeal ? 'manual' : undefined,
+      healMode: this.externalHeal
+        ? 'external'
+        : this.autoHeal
+          ? 'auto'
+          : this.manualHeal
+            ? 'manual'
+            : undefined,
+      ...(this.autoHeal ? { healAgent: this.autoHeal.agent } : {}),
+      ...(this.externalHealSession ? { externalHealSession: this.externalHealSession } : {}),
       lifecycle: {
         phase: 'starting-services',
         headline: 'Starting services',
@@ -551,6 +593,7 @@ export class RunOrchestrator extends EventEmitter {
         updatedAt: new Date().toISOString(),
       },
       heartbeatAt: new Date().toISOString(),
+      ...(this.verification ? { verification: this.verification } : {}),
     }
     this.stateSink.bootstrap(manifest)
   }
@@ -578,6 +621,8 @@ export class RunOrchestrator extends EventEmitter {
       this.emit('service-output', { service: svc, chunk })
     })
     pty.onExit(({ exitCode, signal }) => {
+      if (this.servicePtys.get(svc.name) !== pty) return
+      this.servicePtys.delete(svc.name)
       this.emit('service-exit', { service: svc, exitCode, signal })
     })
   }
@@ -793,8 +838,9 @@ export class RunOrchestrator extends EventEmitter {
     const rerunSelection = normalizeRerunSelection(rerun)
     const rerunTargets = rerunSelection?.kind === 'targets' ? rerunSelection.targets : undefined
     const rerunGrep = rerunSelection?.kind === 'grep' ? rerunSelection.grep : undefined
+    const feature = this.featureWithLatestHealThreshold()
     const inv = this.playwrightSpawner({
-      feature: this.feature,
+      feature,
       paths: this.paths,
       rerunTargets,
       rerunGrep,
@@ -820,6 +866,7 @@ export class RunOrchestrator extends EventEmitter {
       command: inv.command,
       cwd: inv.cwd,
       env: {
+        ...this.playwrightEnv,
         CANARY_LAB_PROJECT_ROOT: this.feature.featureDir,
         CANARY_LAB_MANIFEST_PATH: this.paths.manifestPath,
         CANARY_LAB_SUMMARY_PATH: this.paths.summaryPath,
@@ -848,6 +895,13 @@ export class RunOrchestrator extends EventEmitter {
         resolve(exitCode)
       })
     })
+  }
+
+  private featureWithLatestHealThreshold(): FeatureConfig {
+    const latestThreshold = readLatestHealOnFailureThreshold(this.feature)
+    return latestThreshold === this.feature.healOnFailureThreshold
+      ? this.feature
+      : { ...this.feature, healOnFailureThreshold: latestThreshold }
   }
 
   // Copy each per-test subdir from `playwright-artifacts/` into the keep dir
@@ -883,7 +937,7 @@ export class RunOrchestrator extends EventEmitter {
   private verificationPlanForSummary(summary: SummaryShape): VerificationPlan {
     const plan = computeVerificationPlan(this.feature.featureDir, summary)
     if (plan.kind === 'targeted') {
-      this.runnerLog?.info(`Targeted re-run: ${plan.failedFirst.length} failed + ${plan.pending.length} pending of ${plan.total} total tests`)
+      this.runnerLog?.info(`Targeted re-run: ${plan.failedFirst.length} failed + ${plan.skipped.length} skipped + ${plan.pending.length} pending of ${plan.total} total tests`)
       this.recordLifecycle('rerunning-tests', 'Targeted rerun selected', {
         detail: plan.selection.reason,
         targetedRerun: {
@@ -911,6 +965,21 @@ export class RunOrchestrator extends EventEmitter {
       return plan
     }
     return plan
+  }
+
+  private recordFullSuiteTerminalRestartFallback(reason: string, total: number): void {
+    this.runnerLog?.warn(reason)
+    this.recordLifecycle('rerunning-tests', 'Full restart rerun selected', {
+      detail: reason,
+      severity: 'warning',
+      targetedRerun: {
+        selected: total,
+        total,
+        mode: 'full-suite',
+        reason,
+      },
+    })
+    this.emit('playwright-output', { chunk: `\n[warning] ${reason}\n` })
   }
 
   // Wait for the in-flight Playwright pty to exit. Resolves immediately when
@@ -1674,86 +1743,62 @@ export class RunOrchestrator extends EventEmitter {
     }
     this.setStatus(finalStatus)
 
+    return await this.continueAfterTestRun(finalStatus)
+  }
+
+  async runVerification(): Promise<RunManifest['status']> {
+    this.prepareRun('stopped')
+    if (this.stopped) return this.status
+    this.recordLifecycle('running-tests', 'Running verification tests', {
+      detail: 'Verify is observational only: Canary Lab will not start services or heal code.',
+    })
+    const exitCode = await this.runPlaywright()
+    if (this.stopped) return this.status
+    const finalStatus = decideRunStatus(this.feature.featureDir, this.paths.summaryPath, exitCode)
+    this.setStatus(finalStatus)
+    return finalStatus
+  }
+
+  async restartTerminalRun(userGuidance?: string): Promise<RunManifest['status']> {
+    await this.start()
+    if (this.stopped) return this.status
+    if (userGuidance) {
+      this.runnerLog?.info(`Terminal run restart guidance: ${userGuidance}`)
+    }
+    const summary = readSummary(this.paths.summaryPath)
+    const verificationPlan = this.verificationPlanForSummary(summary)
+    let selection = selectionForPlan(verificationPlan)
+    if (verificationPlan.kind === 'all-passed') {
+      if (summaryHasPassingEvidence(summary)) {
+        this.setStatus('passed')
+        return 'passed'
+      }
+      this.recordFullSuiteTerminalRestartFallback(
+        'Terminal restart could not find prior passing evidence or a safe remaining-test selector; running the full Playwright suite.',
+        verificationPlan.total,
+      )
+      selection = undefined
+    }
+    this.setStatus('running')
+    const exitCode = await this.runPlaywright(selection)
+    if (this.stopped) return this.status
+    const finalStatus = decideRunStatus(this.feature.featureDir, this.paths.summaryPath, exitCode)
+    this.setStatus(finalStatus)
+    return await this.continueAfterTestRun(finalStatus)
+  }
+
+  private async continueAfterTestRun(finalStatus: RunManifest['status']): Promise<RunManifest['status']> {
     if (finalStatus === 'passed') return finalStatus
 
-    // Manual heal mode: no agent CLI configured but the user explicitly
-    // asked for manual mode. Transition to 'healing' and wait for the user
-    // to fix the code by hand and write the signal file. Loops until tests
-    // pass, the user cancels, or the signal-poll timeout (24h) is hit.
-    // Signal watcher (already running) feeds `signalGate` for
+    // Manual / external heal mode: no agent CLI configured but the user
+    // explicitly asked for hand- or external-driven mode. Transition to
+    // 'healing' and wait for either the user (manual) or the external client
+    // (external, via POST /api/runs/:runId/signal) to write the signal file.
+    // Loops until tests pass, the user cancels, or the signal-poll timeout
+    // (24h) is hit. Signal watcher (already running) feeds `signalGate` for
     // `waitForHealSignal` to consume.
-    if (!this.autoHeal && this.manualHeal) {
-      const MANUAL_TIMEOUT_MS = 24 * 60 * 60 * 1000
-      while (true) {
-        this.setStatus('healing')
-        this.noteHealCycle()
-        this.emit('agent-started', { cycle: this.healCycles, command: '<manual>' })
-        this.recordLifecycle('agent-healing', `Manual heal cycle ${this.healCycles} started`, {
-          detail: 'Waiting for a manual agent or user to write a per-run signal file.',
-          activeCycle: this.healCycles,
-        })
-        // Same snapshot/diff pattern as auto-heal: capture working-tree state
-        // before the user starts editing, then diff after the signal arrives
-        // so the journal records only what the user changed during this turn.
-        const snapshots = await this.snapshotFeatureRepos()
-        // Manual heal: no live REPL emits output, so the idle timeout would
-        // otherwise fire after 3 min. Set the idle window equal to the hard
-        // ceiling so it can't dominate the manual flow.
-        const { signal } = await this.waitForHealSignal(MANUAL_TIMEOUT_MS, MANUAL_TIMEOUT_MS, false)
-        this.emit('agent-exit', { exitCode: 0 })
-        if (this.healCancelled || this.stopped) {
-          finalStatus = 'failed'
-          this.setStatus(finalStatus)
-          break
-        }
-        if (!signal) {
-          finalStatus = 'failed'
-          this.setStatus(finalStatus)
-          break
-        }
-        const filesChanged = await this.diffFeatureRepos(snapshots)
-        const diffContent = await this.diffContentForFeatureRepos(snapshots)
-        try {
-          if (signal.kind === 'restart' || signal.kind === 'rerun') {
-            appendJournalIteration({
-              signal: signal.kind === 'restart' ? '.restart' : '.rerun',
-              hypothesis: typeof signal.body.hypothesis === 'string' ? signal.body.hypothesis : undefined,
-              filesChanged,
-              fixDescription: typeof signal.body.fixDescription === 'string' ? signal.body.fixDescription : undefined,
-              diffContent,
-              runId: this.runId,
-              manifestPath: this.paths.manifestPath,
-              summaryPath: this.paths.summaryPath,
-              journalPath: this.paths.diagnosisJournalPath,
-            })
-          }
-        } catch { /* journal is best-effort */ }
-        const verificationPlan = this.verificationPlanForSummary(readSummary(this.paths.summaryPath))
-        this.setStatus('running')
-        if (signal.kind === 'restart') {
-          await this.restart(filesChanged)
-        } else {
-          await this.rerun()
-        }
-        if (this.stopped) return this.status
-        const startedBecauseMissing = await this.ensureServicesRunning()
-        if (startedBecauseMissing.length > 0) {
-          this.recordLifecycle('restarting-services', 'Started missing services', {
-            detail: `Started ${startedBecauseMissing.join(', ')} before rerun.`,
-            restartPlan: { restarted: [], kept: [], startedBecauseMissing },
-          })
-        }
-        exitCode = await this.runPlaywright(selectionForPlan(verificationPlan))
-        // Manual-heal mirror of the auto-heal abort guard: the top of the
-        // loop already checks `stopped`, but the killed Playwright pty's
-        // exit code arrives after the abort flips the flag — don't
-        // compute a finalStatus from it.
-        if (this.stopped) return this.status
-        finalStatus = decideRunStatus(this.feature.featureDir, this.paths.summaryPath, exitCode)
-        this.setStatus(finalStatus)
-        if (finalStatus === 'passed') break
-      }
-      return finalStatus
+    if (!this.autoHeal && (this.manualHeal || this.externalHeal)) {
+      return await this.runManualExternalHealLoop(finalStatus)
     }
 
     if (!this.autoHeal) return finalStatus
@@ -1765,6 +1810,86 @@ export class RunOrchestrator extends EventEmitter {
     if (this.stopped) return this.status
 
     return await this.runAutoHealLoop()
+  }
+
+  private async runManualExternalHealLoop(initialStatus: RunManifest['status']): Promise<RunManifest['status']> {
+    const MANUAL_TIMEOUT_MS = 24 * 60 * 60 * 1000
+    const modeLabel = this.externalHeal ? 'External' : 'Manual'
+    const modeCommand = this.externalHeal ? '<external>' : '<manual>'
+    const modeDetail = this.externalHeal
+      ? 'Waiting for an external AI client (Claude/Codex via MCP) to write a per-run signal file.'
+      : 'Waiting for a manual agent or user to write a per-run signal file.'
+    let finalStatus = initialStatus
+    while (true) {
+      this.setStatus('healing')
+      this.noteHealCycle()
+      this.emit('agent-started', { cycle: this.healCycles, command: modeCommand })
+      this.recordLifecycle('agent-healing', `${modeLabel} heal cycle ${this.healCycles} started`, {
+        detail: modeDetail,
+        activeCycle: this.healCycles,
+      })
+      // Same snapshot/diff pattern as auto-heal: capture working-tree state
+      // before the user starts editing, then diff after the signal arrives
+      // so the journal records only what the user changed during this turn.
+      const snapshots = await this.snapshotFeatureRepos()
+      // Manual heal: no live REPL emits output, so the idle timeout would
+      // otherwise fire after 3 min. Set the idle window equal to the hard
+      // ceiling so it can't dominate the manual flow.
+      const { signal } = await this.waitForHealSignal(MANUAL_TIMEOUT_MS, MANUAL_TIMEOUT_MS, false)
+      this.emit('agent-exit', { exitCode: 0 })
+      if (this.healCancelled || this.stopped) {
+        finalStatus = 'failed'
+        this.setStatus(finalStatus)
+        break
+      }
+      if (!signal) {
+        finalStatus = 'failed'
+        this.setStatus(finalStatus)
+        break
+      }
+      const filesChanged = await this.diffFeatureRepos(snapshots)
+      const diffContent = await this.diffContentForFeatureRepos(snapshots)
+      try {
+        if (signal.kind === 'restart' || signal.kind === 'rerun') {
+          appendJournalIteration({
+            signal: signal.kind === 'restart' ? '.restart' : '.rerun',
+            hypothesis: typeof signal.body.hypothesis === 'string' ? signal.body.hypothesis : undefined,
+            filesChanged,
+            fixDescription: typeof signal.body.fixDescription === 'string' ? signal.body.fixDescription : undefined,
+            diffContent,
+            runId: this.runId,
+            manifestPath: this.paths.manifestPath,
+            summaryPath: this.paths.summaryPath,
+            journalPath: this.paths.diagnosisJournalPath,
+          })
+        }
+      } catch { /* journal is best-effort */ }
+      const verificationPlan = this.verificationPlanForSummary(readSummary(this.paths.summaryPath))
+      this.setStatus('running')
+      if (signal.kind === 'restart') {
+        await this.restart(filesChanged)
+      } else {
+        await this.rerun()
+      }
+      if (this.stopped) return this.status
+      const startedBecauseMissing = await this.ensureServicesRunning()
+      if (startedBecauseMissing.length > 0) {
+        this.recordLifecycle('restarting-services', 'Started missing services', {
+          detail: `Started ${startedBecauseMissing.join(', ')} before rerun.`,
+          restartPlan: { restarted: [], kept: [], startedBecauseMissing },
+        })
+      }
+      const exitCode = await this.runPlaywright(selectionForPlan(verificationPlan))
+      // Manual-heal mirror of the auto-heal abort guard: the top of the
+      // loop already checks `stopped`, but the killed Playwright pty's
+      // exit code arrives after the abort flips the flag — don't
+      // compute a finalStatus from it.
+      if (this.stopped) return this.status
+      finalStatus = decideRunStatus(this.feature.featureDir, this.paths.summaryPath, exitCode)
+      this.setStatus(finalStatus)
+      if (finalStatus === 'passed') break
+    }
+    return finalStatus
   }
 
   async restartHealFromFailure(userGuidance: string): Promise<RunManifest['status']> {
@@ -2078,6 +2203,7 @@ interface SummaryShape {
   failed?: Array<{ name?: unknown; endTime?: unknown; location?: unknown }>
   passed?: unknown
   passedNames?: unknown
+  skippedNames?: unknown
   total?: unknown
   knownTests?: unknown
 }
@@ -2156,6 +2282,7 @@ export type RerunTargetsOrderedResult =
       kind: 'targeted'
       locations: string[]
       failedFirst: string[]
+      skipped: string[]
       pending: string[]
       droppedFailedSlugs: string[]
       total: number
@@ -2168,6 +2295,7 @@ export type VerificationPlan =
       kind: 'targeted'
       selection: PlaywrightRerunSelection
       failedFirst: KnownSummaryTest[]
+      skipped: KnownSummaryTest[]
       pending: KnownSummaryTest[]
       total: number
     }
@@ -2181,6 +2309,7 @@ export function computeVerificationPlan(
   const knownTests = knownTestsFromSummary(summary)
   if (knownTests.length > 0) {
     const passed = passedNameSet(summary)
+    const skippedSet = skippedNameSet(summary)
     const failedSlugs = extractFailedSlugs(summary).filter((slug) => !passed.has(slug))
     const failedSet = new Set(failedSlugs)
     const knownByName = new Map(knownTests.map((test) => [test.name, test] as const))
@@ -2188,8 +2317,9 @@ export function computeVerificationPlan(
     const failedFirst = uniqueByName(failedSlugs
       .map((slug) => knownByName.get(slug))
       .filter((test): test is KnownSummaryTest => Boolean(test)))
-    const pending = knownTests.filter((test) => !passed.has(test.name) && !failedSet.has(test.name))
-    const selected = [...failedFirst, ...pending]
+    const skipped = knownTests.filter((test) => !passed.has(test.name) && !failedSet.has(test.name) && skippedSet.has(test.name))
+    const pending = knownTests.filter((test) => !passed.has(test.name) && !failedSet.has(test.name) && !skippedSet.has(test.name))
+    const selected = [...failedFirst, ...skipped, ...pending]
     if (selected.length === 0) return { kind: 'all-passed', total: knownTests.length }
     if (missingFailed.length > 0) {
       return {
@@ -2208,7 +2338,7 @@ export function computeVerificationPlan(
     }
     const passedCount = countPassed(summary)
     const failedCount = Array.isArray(summary.failed) ? summary.failed.length : 0
-    const reason = `Rerunning ${selected.length} not-yet-passed tests (${failedFirst.length} previously failed first, then ${pending.length} pending) because ${passedCount} passed and ${failedCount} failed before healing.`
+    const reason = `Rerunning ${selected.length} not-yet-passed tests (${failedFirst.length} failed first, then ${skipped.length} skipped, then ${pending.length} pending/not-run) because ${passedCount} passed and ${failedCount} failed before healing.`
     return {
       kind: 'targeted',
       selection: {
@@ -2220,6 +2350,7 @@ export function computeVerificationPlan(
         reason,
       },
       failedFirst,
+      skipped,
       pending,
       total: knownTests.length,
     }
@@ -2237,7 +2368,7 @@ export function computeVerificationPlan(
     }
     const passedCount = countPassed(summary)
     const failedCount = Array.isArray(summary.failed) ? summary.failed.length : 0
-    const reason = `Rerunning ${computed.locations.length} not-yet-passed tests (${computed.failedFirst.length} previously failed first, then ${computed.pending.length} pending) because ${passedCount} passed and ${failedCount} failed before healing.`
+    const reason = `Rerunning ${computed.locations.length} not-yet-passed tests (${computed.failedFirst.length} failed first, then ${computed.skipped.length} skipped, then ${computed.pending.length} pending/not-run) because ${passedCount} passed and ${failedCount} failed before healing.`
     return {
       kind: 'targeted',
       selection: {
@@ -2249,6 +2380,11 @@ export function computeVerificationPlan(
         reason,
       },
       failedFirst: computed.failedFirst.map((location) => ({
+        name: location,
+        title: location,
+        location,
+      })),
+      skipped: computed.skipped.map((location) => ({
         name: location,
         title: location,
         location,
@@ -2279,6 +2415,7 @@ export function computeVerificationPlan(
         reason,
       },
       failedFirst: locations.map((location) => ({ name: location, title: location, location })),
+      skipped: [],
       pending: [],
       total: computedTotal(summary) || locations.length,
     }
@@ -2329,6 +2466,7 @@ export function computeRerunTargetsOrdered(
 
   const passedRaw = Array.isArray(summary.passedNames) ? summary.passedNames : []
   const passed = new Set(passedRaw.filter((n): n is string => typeof n === 'string'))
+  const skipped = skippedNameSet(summary)
 
   const failedSlugs = extractFailedSlugs(summary)
   const failedFirstSlugs = new Set<string>()
@@ -2346,23 +2484,35 @@ export function computeRerunTargetsOrdered(
     failedFirst.push(loc)
   }
 
-  const pending: string[] = []
+  const skippedLocations: string[] = []
   const seenLocations = new Set<string>(failedFirst)
   for (const t of allTests) {
     if (passed.has(t.slug)) continue
     if (failedFirstSlugs.has(t.slug)) continue
+    if (!skipped.has(t.slug)) continue
+    if (seenLocations.has(t.location)) continue
+    seenLocations.add(t.location)
+    skippedLocations.push(t.location)
+  }
+
+  const pending: string[] = []
+  for (const t of allTests) {
+    if (passed.has(t.slug)) continue
+    if (failedFirstSlugs.has(t.slug)) continue
+    if (skipped.has(t.slug)) continue
     if (seenLocations.has(t.location)) continue
     seenLocations.add(t.location)
     pending.push(t.location)
   }
 
-  if (failedFirst.length === 0 && pending.length === 0) {
+  if (failedFirst.length === 0 && skippedLocations.length === 0 && pending.length === 0) {
     return { kind: 'all-passed', total: allTests.length }
   }
   return {
     kind: 'targeted',
-    locations: [...failedFirst, ...pending],
+    locations: [...failedFirst, ...skippedLocations, ...pending],
     failedFirst,
+    skipped: skippedLocations,
     pending,
     droppedFailedSlugs,
     total: allTests.length,
@@ -2448,6 +2598,11 @@ function passedNameSet(summary: SummaryShape): Set<string> {
   return new Set(passedRaw.filter((name): name is string => typeof name === 'string' && name.length > 0))
 }
 
+function skippedNameSet(summary: SummaryShape): Set<string> {
+  const skippedRaw = Array.isArray(summary.skippedNames) ? summary.skippedNames : []
+  return new Set(skippedRaw.filter((name): name is string => typeof name === 'string' && name.length > 0))
+}
+
 function summaryHasPassingEvidence(summary: SummaryShape): boolean {
   if (knownTestsFromSummary(summary).length > 0) return true
   const total = computedTotal(summary)
@@ -2525,6 +2680,17 @@ export function summarizeFailures(summaryPath: string): { failed: string[]; tota
   const failed = extractFailedSlugs(summary)
   const total = typeof summary.total === 'number' ? summary.total : failed.length
   return { failed, total }
+}
+
+export function readLatestHealOnFailureThreshold(feature: FeatureConfig): number | undefined {
+  try {
+    const featureDir = path.resolve(feature.featureDir)
+    const latest = loadFeatures(path.dirname(featureDir))
+      .find((candidate) => path.resolve(candidate.featureDir) === featureDir || candidate.name === feature.name)
+    return latest ? latest.healOnFailureThreshold : feature.healOnFailureThreshold
+  } catch {
+    return feature.healOnFailureThreshold
+  }
 }
 
 // PASSED only when (a) Playwright exited 0 AND (b) every known test is in

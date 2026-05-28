@@ -5,6 +5,7 @@ import os from 'os'
 import path from 'path'
 import Fastify, { type FastifyInstance } from 'fastify'
 import { featureConfigRoutes } from './feature-config'
+import type { WorkspaceEvent } from '../lib/workspace-events'
 
 let tmpDir: string
 let featuresDir: string
@@ -56,10 +57,17 @@ function buildGitRepo(name: string): string {
   return dir
 }
 
-async function makeApp(opts: { isRepoActive?: (feature: string, repo: string) => boolean } = {}): Promise<FastifyInstance> {
+async function makeApp(opts: {
+  isRepoActive?: (feature: string, repo: string) => boolean
+  events?: WorkspaceEvent[]
+} = {}): Promise<FastifyInstance> {
   const app = Fastify()
   await app.register(async (a) => {
-    await featureConfigRoutes(a, { featuresDir, isRepoActive: opts.isRepoActive })
+    await featureConfigRoutes(a, {
+      featuresDir,
+      isRepoActive: opts.isRepoActive,
+      workspaceEvents: opts.events ? { publish: (event) => opts.events!.push(event) } : undefined,
+    })
   })
   await app.ready()
   return app
@@ -286,11 +294,12 @@ describe('feature.config endpoints', () => {
 
 describe('feature deletion endpoint', () => {
   it('deletes the whole feature directory when the confirmation name matches', async () => {
+    const events: WorkspaceEvent[] = []
     const featureDir = buildFeature('gone', {
       playwright: `module.exports = { testDir: './e2e' }`,
       envsets: { local: { 'feature.env': 'A=1\n' } },
     })
-    const app = await makeApp()
+    const app = await makeApp({ events })
     try {
       const r = await app.inject({
         method: 'DELETE',
@@ -299,6 +308,7 @@ describe('feature deletion endpoint', () => {
       })
       expect(r.statusCode).toBe(204)
       expect(fs.existsSync(featureDir)).toBe(false)
+      expect(events).toContainEqual({ type: 'feature-deleted', feature: 'gone' })
     } finally {
       await app.close()
     }

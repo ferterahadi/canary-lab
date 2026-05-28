@@ -27,16 +27,20 @@ import {
   getFeatureConfig,
   getFeatureConfigDoc,
   getFeatureTests,
+  getMcpHealth,
   getGitRemote,
   getRepoGitStatus,
   getWorkspaceGitStatus,
   getPlaywrightConfig,
   getAgentSession,
   getRunDetail,
+  getRunAudit,
+  getVerificationTargets,
   listFeatures,
   listDrafts,
   listEvaluationExportTasks,
   listJournal,
+  listVerificationConfigs,
   listRuns,
   listWorkspaceDirs,
   putEnvsetSlot,
@@ -45,6 +49,9 @@ import {
   readDotenvFile,
   rejectDraft,
   startEvaluationExport,
+  createVerificationConfig,
+  updateVerificationConfig,
+  executeVerification,
   startRun,
   stopRun,
   pauseHealRun,
@@ -53,9 +60,10 @@ import {
   getProjectConfig,
   putProjectConfig,
   openAgentApp,
-  openEditor,
-  sendAgentInput,
-  extractPrdDocuments,
+	  openEditor,
+	  sendAgentInput,
+	  restartRun,
+	  extractPrdDocuments,
   downloadEvaluationExportTask,
 } from './client'
 
@@ -105,6 +113,23 @@ describe('api client', () => {
       status: 404,
       body: 'not found',
     })
+  })
+
+  it('getMcpHealth checks the MCP health endpoint with the selected profile', async () => {
+    const health = {
+      ok: true,
+      server: { name: 'canary-lab' },
+      profile: 'full',
+      clientKind: 'other',
+      toolCount: 42,
+      tools: ['start_run', 'wait_for_heal_task'],
+      activeSessions: 0,
+      projectRoot: '/workspace',
+    }
+    const fetchImpl = vi.fn().mockResolvedValue(ok(health))
+
+    await expect(getMcpHealth('full', { baseUrl: 'http://x', fetchImpl })).resolves.toEqual(health)
+    expect(fetchImpl).toHaveBeenCalledWith('http://x/mcp/health?profile=full', { method: 'GET' })
   })
 
   it('cancelEvaluationExportTask deletes the task endpoint', async () => {
@@ -308,6 +333,92 @@ describe('api client', () => {
     const out = await getRunDetail('r1', { fetchImpl })
     expect(out).toEqual(detail)
     expect(fetchImpl).toHaveBeenCalledWith('/api/runs/r1', { method: 'GET' })
+  })
+
+  it('getRunAudit fetches the run audit trail by id', async () => {
+    const audit = { entries: [{ ts: 't', sessionId: null, clientKind: null, action: 'handoff' }] }
+    const fetchImpl = vi.fn().mockResolvedValue(ok(audit))
+    const out = await getRunAudit('r 1', { fetchImpl })
+    expect(out).toEqual(audit)
+    expect(fetchImpl).toHaveBeenCalledWith('/api/runs/r%201/audit', { method: 'GET' })
+  })
+
+  it('uses verification target and config endpoints with encoded feature names', async () => {
+    const targetIndex = {
+      targets: [{ id: 'api', name: 'API', envVar: 'GATEWAY_URL' }],
+      targetUrls: { api: 'https://api.example.com' },
+    }
+    const config = {
+      id: 'config/1',
+      featureId: 'checkout',
+      name: 'Production',
+      targetUrls: { api: 'https://api.example.com' },
+      playwrightEnvsetId: 'production',
+      createdAt: '2026-05-24T00:00:00.000Z',
+      updatedAt: '2026-05-24T00:00:00.000Z',
+    }
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(ok(targetIndex))
+      .mockResolvedValueOnce(ok(targetIndex))
+      .mockResolvedValueOnce(ok([config]))
+      .mockResolvedValueOnce(ok(config, 201))
+      .mockResolvedValueOnce(ok({ ...config, name: 'Beta' }))
+
+    await expect(getVerificationTargets('feat/a', 'production', { fetchImpl })).resolves.toEqual(targetIndex)
+    await expect(getVerificationTargets('feat/a', undefined, { fetchImpl })).resolves.toEqual(targetIndex)
+    await expect(listVerificationConfigs('feat/a', { fetchImpl })).resolves.toEqual([config])
+    await expect(createVerificationConfig('feat/a', {
+      name: 'Production',
+      targetUrls: { api: 'https://api.example.com' },
+      playwrightEnvsetId: 'production',
+    }, { fetchImpl })).resolves.toEqual(config)
+    await expect(updateVerificationConfig('feat/a', 'config/1', {
+      name: 'Beta',
+      targetUrls: { api: 'https://beta.example.com' },
+      playwrightEnvsetId: 'production',
+    }, { fetchImpl })).resolves.toMatchObject({ name: 'Beta' })
+
+    expect(fetchImpl.mock.calls[0]).toEqual([
+      '/api/features/feat%2Fa/verification-targets?envset=production',
+      { method: 'GET' },
+    ])
+    expect(fetchImpl.mock.calls[1]).toEqual([
+      '/api/features/feat%2Fa/verification-targets',
+      { method: 'GET' },
+    ])
+    expect(fetchImpl.mock.calls[2]).toEqual([
+      '/api/features/feat%2Fa/verification-configs',
+      { method: 'GET' },
+    ])
+    expect(fetchImpl.mock.calls[3][0]).toBe('/api/features/feat%2Fa/verification-configs')
+    expect(fetchImpl.mock.calls[3][1]).toMatchObject({ method: 'POST', headers: { 'content-type': 'application/json' } })
+    expect(JSON.parse((fetchImpl.mock.calls[3][1] as RequestInit).body as string)).toEqual({
+      name: 'Production',
+      targetUrls: { api: 'https://api.example.com' },
+      playwrightEnvsetId: 'production',
+    })
+    expect(fetchImpl.mock.calls[4][0]).toBe('/api/features/feat%2Fa/verification-configs/config%2F1')
+    expect(fetchImpl.mock.calls[4][1]).toMatchObject({ method: 'PUT', headers: { 'content-type': 'application/json' } })
+  })
+
+  it('executes deployment verification with optional config and target overrides', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(ok({ runId: 'verify-1', executionType: 'verify' }, 201))
+
+    await expect(executeVerification('feat/a', {
+      configId: 'config/1',
+      playwrightEnvsetId: 'production',
+      targetUrls: { api: 'https://api.example.com' },
+    }, { fetchImpl })).resolves.toEqual({ runId: 'verify-1', executionType: 'verify' })
+
+    expect(fetchImpl).toHaveBeenCalledWith('/api/features/feat%2Fa/verifications', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        configId: 'config/1',
+        playwrightEnvsetId: 'production',
+        targetUrls: { api: 'https://api.example.com' },
+      }),
+    })
   })
 
   it('getAgentSession returns normalized events and maps 404 to null', async () => {
@@ -734,6 +845,14 @@ describe('api client', () => {
     const [url, init] = fetchImpl.mock.calls[0]
     expect(url).toBe('/api/runs/r1/agent-input')
     expect(JSON.parse(init.body as string)).toEqual({ data: 'hello\n' })
+  })
+
+  it('restartRun POSTs to the restart route', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(ok({ status: 'restarted', mode: 'remaining' }, 202))
+    await restartRun('r1', { fetchImpl })
+    const [url, init] = fetchImpl.mock.calls[0]
+    expect(url).toBe('/api/runs/r1/restart')
+    expect(init.method).toBe('POST')
   })
 
   it('addEnvsetSlot POSTs the body', async () => {

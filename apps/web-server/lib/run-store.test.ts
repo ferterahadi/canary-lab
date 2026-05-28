@@ -16,6 +16,7 @@ import {
 } from './run-store'
 import { readManifest, writeManifest, writeRunsIndex, readRunsIndex } from './runtime/manifest'
 import { runDirFor } from './runtime/run-paths'
+import { HEARTBEAT_STALE_MS } from '../../../shared/run-state'
 
 let tmpDir: string
 beforeEach(() => {
@@ -91,7 +92,7 @@ describe('listRuns', () => {
       status: 'running',
       healCycles: 0,
       services: [],
-      heartbeatAt: new Date(Date.now() - 60_000).toISOString(),
+      heartbeatAt: new Date(Date.now() - HEARTBEAT_STALE_MS - 1).toISOString(),
     })
     writeRunsIndex(tmpDir, [
       { runId: 'stale-untouched', feature: 'foo', startedAt: '2026-01-01T00:00:00Z', status: 'running' },
@@ -113,7 +114,7 @@ describe('reapStaleRuns', () => {
       status: 'running',
       healCycles: 0,
       services: [],
-      heartbeatAt: new Date(Date.now() - 60_000).toISOString(),
+      heartbeatAt: new Date(Date.now() - HEARTBEAT_STALE_MS - 1).toISOString(),
     })
     writeRunsIndex(tmpDir, [
       { runId: 'stale-1', feature: 'foo', startedAt: '2026-01-01T00:00:00Z', status: 'running' },
@@ -185,7 +186,7 @@ describe('reapStaleRuns', () => {
       status: 'running',
       healCycles: 0,
       services: [],
-      heartbeatAt: new Date(Date.now() - 60_000).toISOString(),
+      heartbeatAt: new Date(Date.now() - HEARTBEAT_STALE_MS - 1).toISOString(),
     })
     writeRunsIndex(tmpDir, [
       { runId: 'dead-1', feature: 'foo', startedAt: '2026-01-01T00:00:00Z', status: 'running' },
@@ -250,7 +251,7 @@ describe('reapStaleRuns', () => {
       status: 'healing',
       healCycles: 0,
       services: [],
-      heartbeatAt: new Date(Date.now() - 60_000).toISOString(),
+      heartbeatAt: new Date(Date.now() - HEARTBEAT_STALE_MS - 1).toISOString(),
     })
     writeRunsIndex(tmpDir, [
       { runId: 'boom-1', feature: 'foo', startedAt: '2026-01-01T00:00:00Z', status: 'healing' },
@@ -458,6 +459,145 @@ describe('readRunSummary', () => {
       JSON.stringify({ complete: false, total: 0, passed: 0, failed: [] }),
     )
     expect(readRunSummary(tmpDir)).toEqual({ complete: false, total: 0, passed: 0, failed: [] })
+  })
+
+  it('normalizes duplicate knownTests from line-drifted targeted reruns', () => {
+    fs.writeFileSync(
+      path.join(tmpDir, 'e2e-summary.json'),
+      JSON.stringify({
+        complete: true,
+        total: 3,
+        passed: 1,
+        passedNames: ['test-case-line-drift'],
+        passedIds: ['old-id'],
+        knownTests: [
+          {
+            id: 'old-id',
+            name: 'test-case-line-drift',
+            title: 'line drift',
+            titlePath: ['spec.ts', 'group', 'line drift'],
+            location: '/spec.ts:10',
+          },
+          {
+            id: 'new-id',
+            name: 'test-case-line-drift',
+            title: 'line drift',
+            titlePath: ['spec.ts', 'group', 'line drift'],
+            location: '/spec.ts:12',
+          },
+          {
+            id: 'other-id',
+            name: 'test-case-other',
+            title: 'other',
+            titlePath: ['spec.ts', 'group', 'other'],
+            location: '/spec.ts:20',
+          },
+        ],
+        failed: [],
+      }),
+    )
+
+    expect(readRunSummary(tmpDir)).toMatchObject({
+      total: 2,
+      passedIds: ['new-id'],
+      knownTests: [
+        {
+          id: 'new-id',
+          name: 'test-case-line-drift',
+          title: 'line drift',
+          titlePath: ['spec.ts', 'group', 'line drift'],
+          location: '/spec.ts:12',
+        },
+        {
+          id: 'other-id',
+          name: 'test-case-other',
+        },
+      ],
+    })
+  })
+
+  it('remaps duplicate knownTest ids across skipped, failed, and running entries', () => {
+    fs.writeFileSync(
+      path.join(tmpDir, 'e2e-summary.json'),
+      JSON.stringify({
+        complete: false,
+        total: 3,
+        passed: 0,
+        skipped: 1,
+        skippedIds: ['old-id', 'unmapped-skipped-id'],
+        knownTests: [
+          {
+            id: 'old-id',
+            name: 'test-case-line-drift',
+            title: 'line drift',
+            titlePath: ['spec.ts', 'group', 'line drift'],
+          },
+          {
+            id: 'new-id',
+            name: 'test-case-line-drift',
+            title: 'line drift',
+            titlePath: ['spec.ts', 'group', 'line drift'],
+          },
+          {
+            id: 'other-id',
+            name: 'test-case-other',
+            title: 'other',
+            titlePath: ['spec.ts', 'group', 'other'],
+          },
+          {
+            id: 'same-id',
+            name: 'test-case-same-id',
+            title: 'same id',
+            titlePath: ['spec.ts', 'group', 'same id'],
+          },
+          {
+            id: 'same-id',
+            name: 'test-case-same-id',
+            title: 'same id',
+            titlePath: ['spec.ts', 'group', 'same id'],
+          },
+          {
+            id: 'untitled-old',
+            name: 'test-case-untitled',
+            titlePath: ['spec.ts', 'group', 'untitled'],
+          },
+          {
+            id: 'untitled-new',
+            name: 'test-case-untitled',
+            titlePath: ['spec.ts', 'group', 'untitled'],
+          },
+          {
+            id: 'no-title-path',
+            name: 'test-case-no-title-path',
+          },
+        ],
+        failed: [
+          { id: 'old-id', name: 'test-case-line-drift' },
+          { id: 'unmapped-id', name: 'test-case-unmapped' },
+          { name: 'test-case-without-id' },
+        ],
+        running: { id: 'old-id', name: 'test-case-line-drift', location: 'spec.ts:10' },
+        runningTests: [
+          { id: 'old-id', name: 'test-case-line-drift', location: 'spec.ts:10' },
+          { name: 'test-case-without-id', location: 'spec.ts:20' },
+        ],
+      }),
+    )
+
+    expect(readRunSummary(tmpDir)).toMatchObject({
+      total: 5,
+      skippedIds: ['new-id', 'unmapped-skipped-id'],
+      failed: [
+        { id: 'new-id', name: 'test-case-line-drift' },
+        { id: 'unmapped-id', name: 'test-case-unmapped' },
+        { name: 'test-case-without-id' },
+      ],
+      running: { id: 'new-id' },
+      runningTests: [
+        { id: 'new-id' },
+        { name: 'test-case-without-id' },
+      ],
+    })
   })
 })
 
@@ -748,6 +888,7 @@ describe('RunStore', () => {
     status: 'running' | 'passed' | 'failed' | 'aborted' | 'healing'
     feature: string
     healCycles: number
+    healMode: 'auto' | 'manual' | 'external'
     services: NonNullable<ReturnType<typeof readManifest>>['services']
   }> = {}): string {
     const dir = runDirFor(tmpDir, runId)
@@ -761,6 +902,7 @@ describe('RunStore', () => {
       status,
       healCycles: overrides.healCycles ?? 0,
       services: overrides.services ?? [],
+      ...(overrides.healMode ? { healMode: overrides.healMode } : {}),
     })
     writeRunsIndex(tmpDir, [
       ...readRunsIndex(tmpDir).filter((e) => e.runId !== runId),
@@ -777,7 +919,7 @@ describe('RunStore', () => {
     expect(store.get('missing')).toBeNull()
   })
 
-  it('bootstrap writes manifest, index, and current symlink, then emits', () => {
+  it('bootstrap writes manifest and index, then emits', () => {
     const store = new RunStore(tmpDir, createRegistry())
     const events: RunStoreEvent[] = []
     store.on('event', (e) => events.push(e))
@@ -850,6 +992,39 @@ describe('RunStore', () => {
     expect(getRunDetail(tmpDir, 'r-life-1')?.lifecycleEvents).toHaveLength(1)
     expect(fs.readFileSync(path.join(dir, 'lifecycle-events.jsonl'), 'utf-8')).toContain('Restart plan ready')
     expect(events).toEqual([{ kind: 'changed', runId: 'r-life-1' }])
+  })
+
+  it('emits an external-heal-task event when an external run waits for a signal', () => {
+    seedRun('r-life-external', { status: 'healing', healMode: 'external' })
+    const store = new RunStore(tmpDir, createRegistry())
+    const events: RunStoreEvent[] = []
+    store.onEvent((event) => events.push(event))
+
+    store.recordLifecycleEvent('r-life-external', {
+      phase: 'waiting-for-signal',
+      headline: 'Waiting for heal signal',
+      updatedAt: '2026-05-08T00:00:05.000Z',
+    })
+
+    expect(events).toEqual([
+      { kind: 'changed', runId: 'r-life-external' },
+      { kind: 'external-heal-task', runId: 'r-life-external' },
+    ])
+  })
+
+  it('does not emit an external-heal-task event when a non-external run waits for a signal', () => {
+    seedRun('r-life-manual', { status: 'healing', healMode: 'manual' })
+    const store = new RunStore(tmpDir, createRegistry())
+    const events: RunStoreEvent[] = []
+    store.onEvent((event) => events.push(event))
+
+    store.recordLifecycleEvent('r-life-manual', {
+      phase: 'waiting-for-signal',
+      headline: 'Waiting for heal signal',
+      updatedAt: '2026-05-08T00:00:05.000Z',
+    })
+
+    expect(events).toEqual([{ kind: 'changed', runId: 'r-life-manual' }])
   })
 
   it('ignores corrupt lifecycle JSONL lines and entries that lack a phase string', () => {
@@ -1116,7 +1291,7 @@ describe('RunStore', () => {
       status: 'running',
       healCycles: 0,
       services: [],
-      heartbeatAt: new Date(Date.now() - 60_000).toISOString(),
+      heartbeatAt: new Date(Date.now() - HEARTBEAT_STALE_MS - 1).toISOString(),
     })
     writeRunsIndex(tmpDir, [
       { runId: 'stale', feature: 'foo', startedAt: '2026-01-01T00:00:00Z', status: 'running' },

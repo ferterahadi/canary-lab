@@ -1,7 +1,6 @@
 import fs from 'fs'
 import path from 'path'
 import {
-  setCurrentRunSymlink,
   updateAllServicesStatus,
   updateManifest,
   updateServiceStatus,
@@ -9,6 +8,7 @@ import {
   writeManifest,
   readManifest,
   type RunLifecycleEvent,
+  type RunIndexEntry,
   type RunManifest,
   type ServiceStatus,
 } from './manifest'
@@ -17,8 +17,8 @@ import { reduceRunLifecycleSnapshot } from '../../../../shared/run-state'
 
 // `RunStateSink` is the interface the orchestrator uses to persist its own
 // state. The default implementation (`FileRunStateSink`) writes the same
-// manifest.json + runs-index.json + symlink files the rest of the system
-// already reads. The web-server layer extends this with event emission so
+// manifest.json + runs-index.json files the rest of the system already reads.
+// The web-server layer extends this with event emission so
 // WebSocket subscribers can be notified without polling — but the
 // orchestrator only needs to know about this minimal interface.
 //
@@ -30,7 +30,7 @@ import { reduceRunLifecycleSnapshot } from '../../../../shared/run-state'
 
 export interface RunStateSink {
   /** Initial manifest write at orchestrator construction. Also upserts the
-   *  runs-index entry and points `logs/current` at this run. */
+   *  runs-index entry. */
   bootstrap(manifest: RunManifest): void
 
   /** Mid-run status transition. Mirrors the new status into both manifest
@@ -75,13 +75,7 @@ export class FileRunStateSink implements RunStateSink {
   bootstrap(manifest: RunManifest): void {
     const mp = this.manifestPath(manifest.runId)
     writeManifest(mp, manifest)
-    upsertRunsIndexEntry(this.logsDir, {
-      runId: manifest.runId,
-      feature: manifest.feature,
-      startedAt: manifest.startedAt,
-      status: manifest.status,
-    })
-    setCurrentRunSymlink(this.logsDir, manifest.runId)
+    upsertRunsIndexEntry(this.logsDir, indexEntryFromManifest(manifest, manifest.status))
   }
 
   setStatus(runId: string, status: RunManifest['status'], healCycles?: number): void {
@@ -91,12 +85,7 @@ export class FileRunStateSink implements RunStateSink {
     updateManifest(mp, patch)
     const m = readManifest(mp)
     if (m) {
-      upsertRunsIndexEntry(this.logsDir, {
-        runId,
-        feature: m.feature,
-        startedAt: m.startedAt,
-        status,
-      })
+      upsertRunsIndexEntry(this.logsDir, indexEntryFromManifest(m, status))
     }
   }
 
@@ -112,13 +101,7 @@ export class FileRunStateSink implements RunStateSink {
     clearRunningFromSummary(path.join(runDirFor(this.logsDir, runId), 'e2e-summary.json'))
     const m = readManifest(mp)
     if (m) {
-      upsertRunsIndexEntry(this.logsDir, {
-        runId,
-        feature: m.feature,
-        startedAt: m.startedAt,
-        status,
-        endedAt,
-      })
+      upsertRunsIndexEntry(this.logsDir, indexEntryFromManifest(m, status, endedAt))
     }
   }
 
@@ -146,6 +129,24 @@ export class FileRunStateSink implements RunStateSink {
     fs.appendFileSync(eventPath, JSON.stringify(stamped) + '\n')
     const previous = readManifest(manifestPath)?.lifecycle
     updateManifest(manifestPath, { lifecycle: reduceRunLifecycleSnapshot(previous, stamped) })
+  }
+}
+
+function indexEntryFromManifest(
+  manifest: RunManifest,
+  status: RunManifest['status'],
+  endedAt?: string,
+): RunIndexEntry {
+  return {
+    runId: manifest.runId,
+    ...(manifest.executionType ? { executionType: manifest.executionType } : {}),
+    feature: manifest.feature,
+    startedAt: manifest.startedAt,
+    status,
+    ...(endedAt ? { endedAt } : {}),
+    ...(manifest.verification?.configName ? { verificationConfigName: manifest.verification.configName } : {}),
+    ...(manifest.verification?.playwrightEnvsetId ? { verificationPlaywrightEnvsetId: manifest.verification.playwrightEnvsetId } : {}),
+    ...(manifest.verification?.targetUrls ? { verificationTargetUrls: manifest.verification.targetUrls } : {}),
   }
 }
 

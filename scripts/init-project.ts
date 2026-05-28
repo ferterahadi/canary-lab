@@ -4,6 +4,7 @@ import { execFileSync } from 'child_process'
 import { ok, section, step, line, path as ansiPath } from '../shared/cli-ui/ui'
 import { fail } from '../shared/cli-ui/ui'
 import { runAsScript } from './run-as-script'
+import { setup as setupCanaryLab } from './setup'
 
 export function resolveFirstExisting(pathsToTry: string[]): string {
   const match = pathsToTry.find((candidate) => fs.existsSync(candidate))
@@ -105,7 +106,14 @@ export function buildPackageJson(projectName: string, packageSpec: string): stri
   ) + '\n'
 }
 
-export async function main(args = process.argv.slice(2)): Promise<void> {
+export interface InitProjectExtras {
+  setupProject?: typeof setupCanaryLab
+}
+
+export async function main(
+  args = process.argv.slice(2),
+  extras: InitProjectExtras = {},
+): Promise<void> {
   const { folder, packageSpec } = parseArgs(args)
   const targetDir = path.resolve(process.cwd(), folder)
 
@@ -140,12 +148,29 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
     }
   }
 
+  const setupProject = extras.setupProject ?? setupCanaryLab
+  let setupOk = true
+  try {
+    setupProject({
+      workspace: targetDir,
+      agent: 'auto',
+      dryRun: false,
+      force: false,
+    })
+  } catch (err) {
+    setupOk = false
+    console.log(`Canary Lab setup skipped: ${(err as Error).message}`)
+  }
+
   ok(`Canary Lab project created at ${ansiPath(targetDir)}`)
   section('Next steps')
   step(1, `cd ${folder}`)
   step(2, 'npm install')
   step(3, 'npm run install:browsers')
   step(4, 'npx canary-lab ui')
+  if (!setupOk) {
+    step(5, 'npx canary-lab setup')
+  }
   line()
 }
 

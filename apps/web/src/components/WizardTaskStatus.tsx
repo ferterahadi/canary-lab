@@ -26,12 +26,22 @@ export function WizardTaskStatus() {
     deleteTask,
   } = useWizardDrafts()
   const [dialogOpen, setDialogOpen] = useState(false)
+  const [externalHandoff, setExternalHandoff] = useState<DraftRecord | null>(null)
 
   if (!latestTask) return null
 
   const openDraft = (draftId: string): void => {
     setDialogOpen(false)
+    setExternalHandoff(null)
     openTask(draftId)
+  }
+
+  const openExternalDraft = (task: DraftRecord): void => {
+    if (task.externalSessionUrl) {
+      window.open(task.externalSessionUrl, '_blank', 'noopener,noreferrer')
+      return
+    }
+    setExternalHandoff(task)
   }
 
   const activeSelectedId = wizardOpen ? selectedDraft?.draftId ?? null : null
@@ -62,8 +72,10 @@ export function WizardTaskStatus() {
         <WizardTaskDialog
           tasks={drafts}
           activeSelectedId={activeSelectedId}
+          externalHandoff={externalHandoff}
           onClose={() => setDialogOpen(false)}
           onOpen={openDraft}
+          onOpenExternal={openExternalDraft}
           onStop={(draftId) => void cancelGeneration(draftId)}
           onDismiss={(draftId) => void deleteTask(draftId)}
         />
@@ -75,15 +87,19 @@ export function WizardTaskStatus() {
 function WizardTaskDialog({
   tasks,
   activeSelectedId,
+  externalHandoff,
   onClose,
   onOpen,
+  onOpenExternal,
   onStop,
   onDismiss,
 }: {
   tasks: DraftRecord[]
   activeSelectedId: string | null
+  externalHandoff: DraftRecord | null
   onClose: () => void
   onOpen: (draftId: string) => void
+  onOpenExternal: (task: DraftRecord) => void
   onStop: (draftId: string) => void
   onDismiss: (draftId: string) => void
 }) {
@@ -112,16 +128,11 @@ function WizardTaskDialog({
         }}
       >
         <header
-          className="flex items-start gap-3 border-b px-4 py-3"
+          className="flex items-center gap-3 border-b px-4 py-3"
           style={{ borderColor: 'var(--border-default)' }}
         >
           <div className="min-w-0 flex-1">
             <h2 className="text-sm font-semibold">Wizard tasks</h2>
-            <p className="mt-0.5 text-xs" style={{ color: 'var(--text-muted)' }}>
-              {tasks.length === 0
-                ? 'No tasks running.'
-                : `${tasks.length} ${tasks.length === 1 ? 'task' : 'tasks'} · ${counts.running} running`}
-            </p>
           </div>
           <button
             type="button"
@@ -146,6 +157,10 @@ function WizardTaskDialog({
           <FilterPill label="Drafts" value={counts.created} tone="idle" active={filter === 'created'} onClick={() => toggle('created')} />
         </div>
 
+        {externalHandoff && (
+          <ExternalHandoffPanel task={externalHandoff} />
+        )}
+
         <div className="min-h-0 flex-1 overflow-auto p-2 scrollbar-thin">
           {filtered.length === 0 ? (
             <EmptyState filter={filter} totalTasks={tasks.length} />
@@ -157,6 +172,7 @@ function WizardTaskDialog({
                   task={task}
                   selected={activeSelectedId === task.draftId}
                   onOpen={onOpen}
+                  onOpenExternal={onOpenExternal}
                   onStop={onStop}
                   onDismiss={onDismiss}
                 />
@@ -205,12 +221,14 @@ function TaskRow({
   task,
   selected,
   onOpen,
+  onOpenExternal,
   onStop,
   onDismiss,
 }: {
   task: DraftRecord
   selected: boolean
   onOpen: (draftId: string) => void
+  onOpenExternal: (task: DraftRecord) => void
   onStop: (draftId: string) => void
   onDismiss: (draftId: string) => void
 }) {
@@ -227,7 +245,7 @@ function TaskRow({
     >
       <button
         type="button"
-        onClick={() => onOpen(task.draftId)}
+        onClick={() => task.source === 'external' ? onOpenExternal(task) : onOpen(task.draftId)}
         className="min-w-0 flex-1 rounded-md px-3 py-2 text-left"
       >
         <span className="flex min-w-0 items-center gap-2">
@@ -239,10 +257,12 @@ function TaskRow({
         </span>
         <span className="mt-1 flex min-w-0 items-center gap-2 truncate text-[11px]" style={{ color: 'var(--text-muted)' }}>
           <span className="truncate">{stageLabel(task)}</span>
-          {task.wizardAgent && (
+          {(task.source === 'external' ? task.externalClientKind : task.wizardAgent) && (
             <>
               <Sep />
-              <span className="font-mono text-[10px] uppercase tracking-wide">{task.wizardAgent}</span>
+              <span className="font-mono text-[10px] uppercase tracking-wide">
+                {task.source === 'external' ? task.externalClientKind : task.wizardAgent}
+              </span>
             </>
           )}
           <Sep />
@@ -295,6 +315,22 @@ function TaskRow({
         )}
       </div>
     </li>
+  )
+}
+
+function ExternalHandoffPanel({ task }: { task: DraftRecord }) {
+  return (
+    <div
+      className="border-b px-4 py-3 text-xs"
+      style={{ borderColor: 'var(--border-default)', background: 'var(--bg-base)', color: 'var(--text-secondary)' }}
+    >
+      <div className="font-semibold" style={{ color: 'var(--text-primary)' }}>Generated using external client</div>
+      <div className="mt-1 flex min-w-0 flex-wrap items-center gap-2">
+        {task.externalClientKind && <span>{task.externalClientKind}</span>}
+        {task.externalSessionId && <span className="font-mono">{task.externalSessionId}</span>}
+        {task.externalConversationName && <span className="truncate">{task.externalConversationName}</span>}
+      </div>
+    </div>
   )
 }
 
@@ -442,6 +478,7 @@ function taskTitle(task: DraftRecord): string {
 }
 
 function stageLabel(task: DraftRecord): string {
+  if (task.source === 'external' && task.externalStage) return task.externalStage
   if (task.activeAgentStage === 'planning' || task.status === 'planning') return 'Plan stage'
   if (task.activeAgentStage === 'generating' || task.status === 'generating') return 'Spec stage'
   if (task.status === 'plan-ready') return 'Plan review'

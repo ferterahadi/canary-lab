@@ -37,6 +37,22 @@ function deriveRepoName(localPath: ProbePath, cloneUrl: string | undefined): str
   return ''
 }
 
+function nextRepoName(
+  currentName: string,
+  currentDerivedName: string,
+  nextLocalPath: ProbePath,
+  cloneUrl: string | undefined,
+): string {
+  return currentName && currentName !== currentDerivedName
+    ? currentName
+    : deriveRepoName(nextLocalPath, cloneUrl)
+}
+
+function sameProbePath(a: ProbePath, b: ProbePath): boolean {
+  if (typeof a === 'string' || typeof b === 'string') return a === b
+  return a.$expr === b.$expr
+}
+
 // ─── slice types ─────────────────────────────────────────────────────────
 
 type ProbePath = string | { $expr: string }
@@ -256,28 +272,32 @@ export function ReposTab({ feature }: { feature: string }) {
   return (
     <div className="flex h-full flex-col">
       <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin">
-        <SectionHeader>Repositories</SectionHeader>
+        <SectionHeader>Services</SectionHeader>
         <div className="px-4 py-3 flex flex-col gap-3">
           {repos.length === 0 && (
-            <div className="text-xs" style={{ color: 'var(--text-muted)' }}>No repositories configured.</div>
+            <div className="text-xs" style={{ color: 'var(--text-muted)' }}>No services configured.</div>
           )}
-          {repos.map((repo, i) => (
-            <RepoCard
-              key={i}
-              feature={feature}
-              repo={repo}
-              rootEnvs={rootEnvs}
-              activeRun={activeRun}
-              onChange={(next) => ed.setDraft((d) => ({
-                ...d,
-                repos: d.repos.map((r, j) => j === i ? next : r),
-              }))}
-              onRemove={() => ed.setDraft((d) => ({
-                ...d,
-                repos: d.repos.filter((_, j) => j !== i),
-              }))}
-            />
-          ))}
+          {repos.map((repo, i) => {
+            const persistedRepo = ed.baseline?.repos.find((r) => sameProbePath(r.localPath, repo.localPath))
+            return (
+              <RepoCard
+                key={i}
+                feature={feature}
+                repo={repo}
+                repoLookupName={persistedRepo?.name}
+                rootEnvs={rootEnvs}
+                activeRun={activeRun}
+                onChange={(next) => ed.setDraft((d) => ({
+                  ...d,
+                  repos: d.repos.map((r, j) => j === i ? next : r),
+                }))}
+                onRemove={() => ed.setDraft((d) => ({
+                  ...d,
+                  repos: d.repos.filter((_, j) => j !== i),
+                }))}
+              />
+            )
+          })}
           <button
             type="button"
             onClick={addRepo}
@@ -287,7 +307,7 @@ export function ReposTab({ feature }: { feature: string }) {
             onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-muted)' }}
           >
             <PlusIcon />
-            Add repository
+            Add Service
           </button>
         </div>
       </div>
@@ -309,6 +329,7 @@ export function ReposTab({ feature }: { feature: string }) {
 function RepoCard({
   feature,
   repo,
+  repoLookupName,
   rootEnvs,
   activeRun,
   onChange,
@@ -316,6 +337,7 @@ function RepoCard({
 }: {
   feature: string
   repo: RepoSlice
+  repoLookupName: string | undefined
   rootEnvs: string[]
   activeRun: boolean
   onChange: (next: RepoSlice) => void
@@ -347,7 +369,7 @@ function RepoCard({
 
   // When the user picks a localPath that has a .git/config, prefill cloneUrl.
   const handleLocalPathChange = (absolutePath: string): void => {
-    const nextName = deriveRepoName(absolutePath, repo.cloneUrl)
+    const nextName = nextRepoName(repo.name, derivedName, absolutePath, repo.cloneUrl)
     const next: RepoSlice = { ...repo, localPath: absolutePath, name: nextName }
     onChange(next)
     if (!repo.cloneUrl) {
@@ -366,7 +388,11 @@ function RepoCard({
     setCloneError(null)
     try {
       const r = await api.cloneRepository({ cloneUrl: repo.cloneUrl, parentDir, repoName })
-      onChange({ ...repo, localPath: r.localPath, name: deriveRepoName(r.localPath, repo.cloneUrl) })
+      onChange({
+        ...repo,
+        localPath: r.localPath,
+        name: nextRepoName(repo.name, derivedName, r.localPath, repo.cloneUrl),
+      })
       setPathExists(true)
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'clone failed'
@@ -402,6 +428,14 @@ function RepoCard({
 
       {open && (
         <div className="px-3 pb-3">
+          <FieldRow label="Name">
+            <TextInput
+              value={repo.name}
+              placeholder={derivedName || 'service-name'}
+              onChange={(name) => onChange({ ...repo, name })}
+            />
+          </FieldRow>
+
           <FieldRow label="Local path" hint="Click to pick a folder">
             {isExpr ? (
               <div className="flex items-center gap-2">
@@ -423,6 +457,7 @@ function RepoCard({
           <BranchControl
             feature={feature}
             repo={repo}
+            repoLookupName={repoLookupName}
             localPathStr={localPathStr}
             isExpr={isExpr}
             activeRun={activeRun}
@@ -501,6 +536,7 @@ function RepoCard({
 function BranchControl({
   feature,
   repo,
+  repoLookupName,
   localPathStr,
   isExpr,
   activeRun,
@@ -508,6 +544,7 @@ function BranchControl({
 }: {
   feature: string
   repo: RepoSlice
+  repoLookupName: string | undefined
   localPathStr: string
   isExpr: boolean
   activeRun: boolean
@@ -517,7 +554,8 @@ function BranchControl({
   const [error, setError] = useState<string | null>(null)
   const [switching, setSwitching] = useState(false)
   const [suggestionsOpen, setSuggestionsOpen] = useState(false)
-  const repoName = repo.name || deriveRepoName(repo.localPath, repo.cloneUrl)
+  const [switchHovered, setSwitchHovered] = useState(false)
+  const repoName = repoLookupName || repo.name || deriveRepoName(repo.localPath, repo.cloneUrl)
   const target = repo.branch ?? ''
 
   const loadStatus = (): void => {
@@ -589,35 +627,24 @@ function BranchControl({
     && !switching
     && status.currentBranch !== target.trim()
 
+  // Explain *why* Switch is disabled, surfaced as a native hover tooltip.
+  const switchDisabledReason: string | undefined = (() => {
+    if (canSwitch || switching) return undefined
+    if (!repoName) return 'Set a folder for this service first'
+    if (!target.trim()) return 'Enter a branch name to switch to'
+    if (!status?.isGitRepo) return 'Not a git repository'
+    if (status.dirty) {
+      const n = status.dirtyFiles.length
+      return `Commit or stash ${n} uncommitted ${n === 1 ? 'change' : 'changes'} to enable`
+    }
+    if (activeRun) return 'Disabled while this feature is running'
+    if (status.currentBranch === target.trim()) return 'Already on this branch'
+    return undefined
+  })()
+
   return (
     <FieldRow label="Branch" hint="Optional branch Canary Lab expects before starting this repo's services.">
       <div className="flex flex-col gap-1.5">
-        <div className="flex flex-wrap items-center gap-2">
-          <span
-            className="inline-flex max-w-[220px] items-center rounded-md px-2 py-1 text-[10px]"
-            style={{
-              background: 'var(--bg-surface)',
-              border: '1px solid var(--border-default)',
-              color: status?.isGitRepo ? 'var(--text-secondary)' : 'var(--text-muted)',
-              fontFamily: 'var(--font-mono)',
-            }}
-            title={status?.isGitRepo ? status.currentBranch ?? 'detached HEAD' : 'Not a git repository'}
-          >
-            <span className="truncate">
-              {status?.isGitRepo ? status.currentBranch ?? 'detached HEAD' : 'No git status'}
-            </span>
-          </span>
-          {status?.dirty && (
-            <span className="text-[10px]" style={{ color: '#f59e0b' }}>
-              Dirty worktree
-            </span>
-          )}
-          {activeRun && (
-            <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
-              Switch disabled while this feature is running
-            </span>
-          )}
-        </div>
         <div className="flex items-start gap-2">
           <div className="relative min-w-0 flex-1">
             <input
@@ -670,31 +697,64 @@ function BranchControl({
               </div>
             )}
           </div>
-          <button
-            type="button"
-            disabled={!canSwitch}
-            onClick={doCheckout}
-            className="shrink-0 rounded-md px-2.5 py-1.5 text-[10px] uppercase tracking-wider"
-            style={{
-              color: canSwitch ? 'var(--text-primary)' : 'var(--text-muted)',
-              border: '1px solid var(--border-default)',
-              opacity: canSwitch ? 1 : 0.55,
-            }}
+          {/* Custom tooltip driven by React state — Tailwind JIT didn't pick up
+              group-hover utilities, and native title tooltips don't fire on
+              disabled buttons. State-driven render is bulletproof. */}
+          <span
+            className="relative shrink-0 inline-flex"
+            style={{ cursor: switchDisabledReason ? 'help' : 'default' }}
+            onMouseEnter={() => setSwitchHovered(true)}
+            onMouseLeave={() => setSwitchHovered(false)}
           >
-            {switching ? 'Switching…' : 'Switch'}
-          </button>
+            <button
+              type="button"
+              disabled={!canSwitch}
+              onClick={doCheckout}
+              className="rounded-md px-2.5 py-1.5 text-[10px] uppercase tracking-wider"
+              style={{
+                color: canSwitch ? 'var(--text-primary)' : 'var(--text-muted)',
+                border: '1px solid var(--border-default)',
+                opacity: canSwitch ? 1 : 0.55,
+                pointerEvents: canSwitch || switching ? undefined : 'none',
+              }}
+            >
+              {switching ? 'Switching…' : 'Switch'}
+            </button>
+            {switchHovered && switchDisabledReason && (
+              <span
+                role="tooltip"
+                className="pointer-events-none absolute left-1/2 bottom-[calc(100%+6px)] -translate-x-1/2 whitespace-nowrap rounded-md px-2 py-1 text-[10px]"
+                style={{
+                  background: 'var(--bg-elevated)',
+                  border: '1px solid var(--border-default)',
+                  color: 'var(--text-primary)',
+                  zIndex: 60,
+                  boxShadow: '0 4px 12px rgba(0,0,0,0.4)',
+                }}
+              >
+                {switchDisabledReason}
+              </span>
+            )}
+          </span>
           <button
             type="button"
             onClick={loadStatus}
-            className="shrink-0 rounded-md px-2.5 py-1.5 text-[10px] uppercase tracking-wider"
+            aria-label="Refresh git status"
+            title="Refresh git status"
+            className="shrink-0 inline-flex items-center justify-center rounded-md px-2.5 py-1.5 text-xs leading-none"
             style={{ color: 'var(--text-muted)', border: '1px solid var(--border-default)' }}
           >
-            Refresh
+            ↻
           </button>
         </div>
-        {status?.dirty && status.dirtyFiles.length > 0 && (
+        {status?.isGitRepo && status.dirty && status.dirtyFiles.length > 0 && (
           <div className="text-[10px]" style={{ color: '#f59e0b', fontFamily: 'var(--font-mono)' }}>
-            {status.dirtyFiles.length} uncommitted {status.dirtyFiles.length === 1 ? 'file' : 'files'}
+            {status.dirtyFiles.length} uncommitted
+          </div>
+        )}
+        {activeRun && (
+          <div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
+            Switch disabled while this feature is running
           </div>
         )}
         {error && <div className="text-[10px]" style={{ color: 'var(--danger)' }}>{error}</div>}

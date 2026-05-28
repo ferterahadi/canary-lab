@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import * as api from '../api/client'
-import type { ExtractedTest, FeatureSpecFile, RunStatus } from '../api/types'
+import type { FeatureSpecFile, RunStatus } from '../api/types'
 import { activeBodyLineForTest, colorClassForStatus, runningTestForSummaryName, statusForTest, summaryEntryName, type StepStatus } from '../lib/test-step-status'
 import type { RunSummary, RunSummaryRunningStep } from '../api/types'
 import { ShikiCode, StatusPill, StepBlock } from './shared/TestCodeBlock'
@@ -10,9 +10,10 @@ interface Props {
   feature: string | null
   activeRunSummary: RunSummary | undefined
   activeRunStatus: RunStatus | undefined
+  refreshKey?: number
 }
 
-export function TestCasesColumn({ feature, activeRunSummary, activeRunStatus }: Props) {
+export function TestCasesColumn({ feature, activeRunSummary, activeRunStatus, refreshKey = 0 }: Props) {
   const [specs, setSpecs] = useState<FeatureSpecFile[] | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [expandedTest, setExpandedTest] = useState<string | null>(null)
@@ -37,7 +38,7 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunStatus }: 
         setLoadError(formatLoadError(err))
       })
     return () => { cancelled = true }
-  }, [feature])
+  }, [feature, refreshKey])
 
   if (!feature) {
     return (
@@ -47,14 +48,16 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunStatus }: 
     )
   }
 
-  const totalTests = specs?.reduce((acc, s) => acc + s.tests.length, 0) ?? 0
+  const displaySpecs = specs
+  const totalTests = displaySpecs?.reduce((acc, s) => acc + s.tests.length, 0) ?? 0
   const isRunActivelyTesting = activeRunStatus === 'running'
-  // Numerator is anchored to the *current* spec, not summary totals. Summary
-  // entries can outlive the spec (e.g. seedFromExistingSummary preserves
-  // ghosts from prior runs) which would otherwise push `done` past `total`.
-  const passedCount = (specs ?? []).reduce(
+  const passedCount = (displaySpecs ?? []).reduce(
     (acc, spec) => acc + spec.tests.filter(
-      (t) => statusForTest(t.name, activeRunSummary, isRunActivelyTesting) === 'passed',
+      (t) => statusForTest(
+        summaryIdentityForWorkspaceTest(t.name, t.line, t.sourceFile ?? spec.file, activeRunSummary),
+        activeRunSummary,
+        isRunActivelyTesting,
+      ) === 'passed',
     ).length,
     0,
   )
@@ -64,7 +67,6 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunStatus }: 
       <div className="cl-panel-header flex items-center justify-between gap-2 px-4 py-3">
         <div className="flex min-w-0 items-center gap-2">
           <span className="cl-kicker">Tests</span>
-          {totalTests > 0 && !activeRunSummary && <span className="cl-count-chip">{totalTests}</span>}
         </div>
         <TestsHeaderIndicator
           summary={activeRunSummary}
@@ -79,15 +81,15 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunStatus }: 
           <div className="rounded-md border px-3 py-2 text-xs" style={{ color: 'var(--text-secondary)', borderColor: 'var(--border-default)', background: 'var(--bg-muted)' }}>
             {loadError}
           </div>
-        ) : !specs ? (
+        ) : !displaySpecs ? (
           <div className="text-xs" style={{ color: 'var(--text-muted)' }}>Loading...</div>
-        ) : specs.length === 0 ? (
+        ) : displaySpecs.length === 0 ? (
           <div className="text-xs" style={{ color: 'var(--text-muted)' }}>No spec files found.</div>
         ) : (
           <div className="space-y-1.5">
-            {specs.flatMap((spec) =>
+            {displaySpecs.flatMap((spec) =>
               spec.tests.map((t) => {
-                const key = `${spec.file}:${t.line}:${t.name}`
+                const key = `${spec.file}:${t.line}:${t.id ?? t.name}`
                 const isExpanded = expandedTest === key
                 const entryName = summaryEntryName(t.name)
                 const runningTest = isRunActivelyTesting && activeRunSummary
@@ -101,16 +103,22 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunStatus }: 
                   bodySource: t.bodySource,
                   summary: isRunActivelyTesting ? activeRunSummary : undefined,
                 })
+                const activeSourceLine = activeLine == null ? null : t.line + activeLine - 1
                 return (
                   <TestCard
                     key={key}
                     sourceFile={t.sourceFile ?? spec.file}
                     test={t}
-                    status={statusForTest(t.name, activeRunSummary, isRunActivelyTesting)}
+                    status={statusForTest(
+                      summaryIdentityForWorkspaceTest(t.name, t.line, t.sourceFile ?? spec.file, activeRunSummary),
+                      activeRunSummary,
+                      isRunActivelyTesting,
+                    )}
                     runningLocation={runningLocation}
                     isRunningTest={isRunningTest}
                     runningStep={runningTest?.step}
                     activeLine={activeLine}
+                    activeSourceLine={activeSourceLine}
                     expanded={isExpanded}
                     onToggle={() => setExpandedTest(isExpanded ? null : key)}
                   />
@@ -122,6 +130,32 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunStatus }: 
       </div>
     </div>
   )
+}
+
+function parseSummaryLocation(location: string | undefined): { file: string; line: number } | null {
+  if (!location) return null
+  const match = /^(.*):(\d+)(?::\d+)?$/.exec(location)
+  if (!match) return { file: location, line: 0 }
+  return { file: match[1], line: Number(match[2]) }
+}
+
+function summaryIdentityForWorkspaceTest(
+  name: string,
+  line: number,
+  file: string,
+  summary: RunSummary | undefined,
+): { name: string; id?: string } {
+  const matchesName = (known: NonNullable<RunSummary['knownTests']>[number]) => {
+    return known.title === name || known.name === summaryEntryName(name)
+  }
+  const known = summary?.knownTests?.find((entry) => {
+    const parsed = parseSummaryLocation(entry.location)
+    return parsed?.file === file && parsed.line === line && matchesName(entry)
+  }) ?? summary?.knownTests?.find((entry) => {
+    const parsed = parseSummaryLocation(entry.location)
+    return parsed?.file === file && parsed.line === line
+  })
+  return known?.id ? { name, id: known.id } : { name }
 }
 
 function formatLoadError(err: unknown): string {
@@ -139,6 +173,7 @@ function TestCard({
   isRunningTest,
   runningStep,
   activeLine,
+  activeSourceLine,
   expanded,
   onToggle,
 }: {
@@ -149,6 +184,7 @@ function TestCard({
   isRunningTest: boolean
   runningStep?: RunSummaryRunningStep
   activeLine?: number | null
+  activeSourceLine?: number | null
   expanded: boolean
   onToggle: () => void
 }) {
@@ -218,7 +254,7 @@ function TestCard({
                   status={status}
                   depth={0}
                   sourceFile={sourceFile}
-                  runningLine={isRunningTest ? activeLine : null}
+                  runningSourceLine={isRunningTest ? activeSourceLine : null}
                 />
               ))}
             </ul>
@@ -290,7 +326,7 @@ function TestsHeaderIndicator({
       </div>
     )
   }
-  return null
+  return <span className="cl-count-chip">{totalTests}</span>
 }
 
 function RunningIndicator({

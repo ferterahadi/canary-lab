@@ -42,7 +42,9 @@ export function extractAllSlices(
 
   for (const logPath of serviceLogs) {
     if (!fs.existsSync(logPath)) continue
-    const content = fs.readFileSync(logPath, 'utf-8')
+    // The raw svc-*.log keeps its PTY control codes for the xterm pane replay;
+    // strip them here so the heal-agent slices are plain text.
+    const content = stripAnsi(fs.readFileSync(logPath, 'utf-8'))
     const svcName = path.basename(logPath, '.log')
     const relFullPath = path.relative(ROOT, logPath)
     for (const slug of slugs) {
@@ -357,14 +359,20 @@ function readManifest(file: string = MANIFEST_PATH): Manifest {
   }
 }
 
-// Strip ANSI color escape sequences from a string. Playwright emits them in
-// error messages, and some reporters also emit the bracketed form without
-// the escape prefix (`[2m`, `[22m`). Both forms are noise in a markdown file
-// consumed by an agent.
+// Matches terminal control sequences: CSI (colors `m`, cursor moves `H`,
+// erases `J`/`K`, …), OSC (`ESC ] … BEL/ST`), charset designation (`ESC ( B`),
+// and keypad-mode toggles (`ESC =`/`ESC >`). Services run under a PTY, so their
+// captured output carries the full set, not just colors.
+// eslint-disable-next-line no-control-regex
+const TERM_ESCAPE_RE = /\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\)|[()][A-Za-z0-9]|[=>])/g
+
+// Strip ANSI/terminal control sequences from a string. Playwright emits color
+// codes in error messages; PTY-captured service logs add cursor moves and
+// erases. Some reporters also emit the bracket form without the escape prefix
+// (`[2m`, `[22m`). All of it is noise in a markdown/log slice read by an agent.
 export function stripAnsi(s: string): string {
   return s
-    // eslint-disable-next-line no-control-regex
-    .replace(/\x1b\[[0-9;]*m/g, '')
+    .replace(TERM_ESCAPE_RE, '')
     .replace(/\[\d+(?:;\d+)*m/g, '')
 }
 
@@ -638,6 +646,7 @@ export function nextIterationNumber(journalPath: string = DIAGNOSIS_JOURNAL_PATH
 }
 
 interface ManifestForJournal {
+  feature?: string
   featureName?: string
 }
 
@@ -649,6 +658,19 @@ function readManifestFrom(file: string): ManifestForJournal {
   }
 }
 
+function readFeatureNameFromManifest(file: string): string | undefined {
+  const manifest = readManifestFrom(file)
+  return manifest.feature ?? manifest.featureName
+}
+
+function appendJournalSection(journalPath: string, section: string[]): void {
+  fs.mkdirSync(path.dirname(journalPath), { recursive: true })
+  const header = fs.existsSync(journalPath)
+    ? ''
+    : '# Diagnosis Journal\n\n'
+  fs.appendFileSync(journalPath, header + section.join('\n'))
+}
+
 export function appendJournalIteration(input: JournalAppendInput): void {
   const hypothesis = input.hypothesis?.trim()
   if (!hypothesis) return // Nothing meaningful to record — skip.
@@ -657,19 +679,7 @@ export function appendJournalIteration(input: JournalAppendInput): void {
   const summaryPath = input.summaryPath ?? getSummaryPath()
   const journalPath = input.journalPath ?? DIAGNOSIS_JOURNAL_PATH
 
-  // Per-run manifests carry `feature` (the new orchestrator shape); legacy
-  // top-level manifests carry `featureName`. Try both so the journal entry's
-  // feature field stays populated either way.
-  let featureName: string | undefined
-  try {
-    const raw = JSON.parse(fs.readFileSync(manifestPath, 'utf-8')) as {
-      feature?: string
-      featureName?: string
-    }
-    featureName = raw.feature ?? raw.featureName
-  } catch {
-    featureName = readManifestFrom(manifestPath).featureName
-  }
+  const featureName = readFeatureNameFromManifest(manifestPath)
 
   let failingTests = ''
   try {
@@ -718,9 +728,5 @@ export function appendJournalIteration(input: JournalAppendInput): void {
     section.push('')
   }
 
-  fs.mkdirSync(path.dirname(journalPath), { recursive: true })
-  const header = fs.existsSync(journalPath)
-    ? ''
-    : '# Diagnosis Journal\n\n'
-  fs.appendFileSync(journalPath, header + section.join('\n'))
+  appendJournalSection(journalPath, section)
 }

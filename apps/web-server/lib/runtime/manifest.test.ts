@@ -1,11 +1,10 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import {
   readManifest,
   readRunsIndex,
-  setCurrentRunSymlink,
   updateManifest,
   updateServiceStatus,
   upsertRunsIndexEntry,
@@ -13,7 +12,7 @@ import {
   writeRunsIndex,
   type RunManifest,
 } from './manifest'
-import { runDirFor, runsIndexPath } from './run-paths'
+import { runsIndexPath } from './run-paths'
 
 let tmpDir: string
 beforeEach(() => {
@@ -97,41 +96,7 @@ describe('runs index', () => {
   })
 })
 
-describe('setCurrentRunSymlink', () => {
-  it('points logs/current at the requested run dir', () => {
-    fs.mkdirSync(runDirFor(tmpDir, 'abc'), { recursive: true })
-    fs.writeFileSync(path.join(runDirFor(tmpDir, 'abc'), 'marker'), 'hi')
-
-    setCurrentRunSymlink(tmpDir, 'abc')
-    expect(fs.readFileSync(path.join(tmpDir, 'current', 'marker'), 'utf-8')).toBe('hi')
-  })
-
-  it('replaces an existing link when called again', () => {
-    fs.mkdirSync(runDirFor(tmpDir, 'one'), { recursive: true })
-    fs.writeFileSync(path.join(runDirFor(tmpDir, 'one'), 'who'), 'one')
-    fs.mkdirSync(runDirFor(tmpDir, 'two'), { recursive: true })
-    fs.writeFileSync(path.join(runDirFor(tmpDir, 'two'), 'who'), 'two')
-
-    setCurrentRunSymlink(tmpDir, 'one')
-    setCurrentRunSymlink(tmpDir, 'two')
-    expect(fs.readFileSync(path.join(tmpDir, 'current', 'who'), 'utf-8')).toBe('two')
-  })
-
-  it('removes the symlink when runId is null', () => {
-    fs.mkdirSync(runDirFor(tmpDir, 'one'), { recursive: true })
-    setCurrentRunSymlink(tmpDir, 'one')
-    setCurrentRunSymlink(tmpDir, null)
-    expect(fs.existsSync(path.join(tmpDir, 'current'))).toBe(false)
-  })
-
-  it('replaces an existing regular file at the link path', () => {
-    fs.mkdirSync(runDirFor(tmpDir, 'one'), { recursive: true })
-    fs.writeFileSync(path.join(runDirFor(tmpDir, 'one'), 'who'), 'one')
-    fs.writeFileSync(path.join(tmpDir, 'current'), 'stale-pointer')
-    setCurrentRunSymlink(tmpDir, 'one')
-    expect(fs.readFileSync(path.join(tmpDir, 'current', 'who'), 'utf-8')).toBe('one')
-  })
-
+describe('service status updates', () => {
   it('updateServiceStatus updates the matching service and persists', () => {
     const manifestPath = path.join(tmpDir, 'manifest.json')
     writeManifest(
@@ -155,21 +120,4 @@ describe('setCurrentRunSymlink', () => {
     expect(updateServiceStatus(path.join(tmpDir, 'nope.json'), 'api', 'healthy')).toBeNull()
   })
 
-  it('falls back to writing a pointer file when symlinkSync throws', () => {
-    fs.mkdirSync(runDirFor(tmpDir, 'two'), { recursive: true })
-    const origSymlink = fs.symlinkSync
-    const spy = vi.spyOn(fs, 'symlinkSync').mockImplementation(() => {
-      throw new Error('symlink not supported')
-    })
-    try {
-      setCurrentRunSymlink(tmpDir, 'two')
-    } finally {
-      spy.mockRestore()
-    }
-    void origSymlink
-    const linkPath = path.join(tmpDir, 'current')
-    expect(fs.existsSync(linkPath)).toBe(true)
-    // It's a regular file in this fallback, not a directory.
-    expect(fs.lstatSync(linkPath).isSymbolicLink()).toBe(false)
-  })
 })
