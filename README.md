@@ -9,6 +9,7 @@ The model is tests-as-spec: tests encode intended behavior, and a failed test me
 
 Playwright executes the tests. Canary Lab owns service startup, env switching, run history, failure-context extraction, agent handoff, and rerun signals. Per-run state lives under `logs/runs/<runId>/`.
 
+
 ![Canary Lab UI walkthrough](docs/assets/canary-lab-ui-walkthrough.png)
 
 See [CHANGELOG.md](CHANGELOG.md) for release notes.
@@ -72,8 +73,11 @@ npx canary-lab init my-lab
 cd my-lab
 npm install
 npm run install:browsers
+npx canary-lab setup
 npx canary-lab ui
 ```
+
+`canary-lab setup` registers the workspace and configures Codex or Claude when those clients are installed. Restart Codex or Claude after setup so the client can discover the Canary Lab tools.
 
 `canary-lab ui` starts the local server and opens the web UI. The UI has three main areas:
 
