@@ -363,7 +363,15 @@ describe('MCP HTTP server (smoke)', () => {
         source: 'external',
         externalStage: 'authoring-tests',
         sessionId: 'sess-author-1',
+        canaryLabBehavior: 'tracking-only',
+        statusMeaning: 'External client is authoring tests; Canary Lab is not running an internal wizard agent.',
       })
+      expect(draftBody.nextSteps).toEqual([
+        'Tell the user you are authoring tests now and they can wait in the external client.',
+        'Author or edit Playwright specs under features/checkout_flow/e2e.',
+        'Call update_external_draft_stage as progress changes.',
+        'Call apply_external_draft when the files are ready to validate and record.',
+      ])
 
       const applied = await client.callTool({
         name: 'apply_external_draft',
@@ -792,6 +800,8 @@ describe('MCP HTTP server (smoke)', () => {
       authorClient = await connectClient(address, '/mcp?profile=author')
       const authorInstructions = authorClient.getInstructions() ?? ''
       expect(authorInstructions).toContain('create_feature')
+      expect(authorInstructions).toContain('call create_feature directly')
+      expect(authorInstructions).toContain('do not call list_features just to avoid collisions')
     } finally {
       if (repairClient) await repairClient.close().catch(() => undefined)
       if (authorClient) await authorClient.close().catch(() => undefined)

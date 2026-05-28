@@ -18,7 +18,7 @@ Before calling Canary Lab MCP tools, make sure the workspace and UI server are a
 4. Check `http://127.0.0.1:7421/mcp/health`.
 5. If the health check succeeds, confirm `projectRoot` matches the selected workspace. If it points at a different workspace, ask the user whether to stop the existing Canary Lab server before continuing.
 6. If the health check fails, start `npx canary-lab ui` from the selected workspace in a visible long-running terminal when the host supports that. Do not add `--port`; Canary Lab uses port `7421` so MCP clients can connect consistently.
-7. Once the health check passes, call `list_features` and `list_runs` before helping the user choose what to rerun.
+7. Do not reflexively call `list_features` or `list_runs` after health. For random or new feature creation, call `create_feature` directly with a unique feature name. Use `list_features` only when you need to discover or choose an existing feature, and use `list_runs` only for run, heal, verification, or export workflows.
 
 ## External Run Loop
 
@@ -43,15 +43,15 @@ Use the MCP `author` profile, or `full`, when the user asks to create a feature,
 
 ### Create or Extend a Feature
 
-1. For a new feature, call `create_feature`. It creates the skeleton files and returns test-file rules, envset schema, and next-step tool hints. Do not manually invent a partial scaffold.
+1. For random or new feature creation, call `create_feature` directly with a unique feature name. It creates the skeleton files and returns test-file rules, envset schema, and next-step tool hints. Do not call `list_features` just to avoid collisions; if the chosen name already exists, retry `create_feature` with a different unique name.
 2. If the user asks to preserve existing `.env`, `.env.dev`, `application.properties`, or similar repo config files, inspect the source repo enough to identify the files, then call `capture_feature_env_files`. Do not paste secret values into chat; Canary Lab returns redacted previews only.
 3. Author or edit specs under `features/<feature>/e2e/`.
 4. Specs must import:
    ```ts
    import { test, expect } from 'canary-lab/feature-support/log-marker-fixture'
    ```
-5. Call `start_external_draft` with a stable `session_id`, `client_kind: "claude-cli"` or `"claude-desktop"`, and a useful `conversation_name`.
-6. Call `update_external_draft_stage` as work progresses: `scaffolding`, `authoring-tests`, `validating`, `ready`, `applied`, or `error`.
+5. Call `start_external_draft` with a stable `session_id`, `client_kind: "claude-cli"` or `"claude-desktop"`, and a useful `conversation_name`. This only creates a visible Canary Lab task so the user sees that this external client is authoring tests; it does not start an internal wizard agent.
+6. After `start_external_draft` returns, tell the user you are authoring tests and they can wait in this external client. Continue writing specs locally, then call `update_external_draft_stage` as work progresses: `scaffolding`, `authoring-tests`, `validating`, `ready`, `applied`, or `error`.
 7. Call `apply_external_draft` with the externally authored files, or after writing them locally, so Canary Lab validates and records the applied draft. Do not ask Canary Lab to spawn another Claude/Codex agent for MCP-created authoring.
 
 ### Export an Evaluation
