@@ -14,7 +14,7 @@ interface Props {
 }
 
 // The "Heal agent" tab when external heal mode is active. When an external
-// client has claimed the run, its transcript lives in the user's Claude/Codex
+// client has claimed the run, its transcript lives in the user's agent
 // session rather than Canary Lab. When no claim exists yet, this panel makes
 // that parked state explicit instead of rendering an empty local terminal.
 export function ExternalHealPanel({ runId: _runId, runStatus, session }: Props) {
@@ -130,7 +130,7 @@ export function ExternalHealPanel({ runId: _runId, runStatus, session }: Props) 
             : isDisconnected
             ? `Lost connection to ${clientLabel(session.clientKind)}. The run is paused waiting for you to reconnect — Canary Lab keeps the claim, so the same session id can resume right where it left off.`
             : !session
-            ? 'No external client has claimed this run yet. Canary Lab is waiting for a Claude or Codex MCP session to claim the run and send a restart or rerun signal.'
+            ? 'No external client has claimed this run yet. Canary Lab is waiting for an AI Agent MCP session to claim the run and send a restart or rerun signal.'
             : `Agent output is streaming in your ${clientLabel(session.clientKind)} window. This panel tracks the run; open your conversation to follow the agent's reasoning.`}
         </p>
 
@@ -355,7 +355,7 @@ function clientLabel(kind: ExternalHealSession['clientKind']): string {
     case 'claude-desktop': return 'Claude Desktop'
     case 'codex-cli': return 'Codex CLI'
     case 'codex-desktop': return 'Codex Desktop'
-    case 'other': return 'External Client'
+    case 'other': return 'AI Agent'
   }
 }
 
@@ -363,8 +363,8 @@ function headlineFor(
   kind: ExternalHealSession['clientKind'],
   hasSession: boolean,
 ): string {
-  if (!hasSession) return 'External Client'
-  return kind === 'other' ? 'External Client' : clientLabel(kind)
+  if (!hasSession) return 'AI Agent'
+  return kind === 'other' ? 'AI Agent' : clientLabel(kind)
 }
 
 function clientTint(kind: ExternalHealSession['clientKind']): string {
