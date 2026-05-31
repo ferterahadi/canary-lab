@@ -1,4 +1,4 @@
-export type RunStatus = 'running' | 'passed' | 'failed' | 'healing' | 'aborted'
+export type RunStatus = 'queued' | 'running' | 'passed' | 'failed' | 'healing' | 'aborted'
 export type ServiceStatus = 'starting' | 'ready' | 'timeout' | 'stopped'
 
 export type RunLifecyclePhase =
@@ -98,6 +98,17 @@ export function isRestartableRunStatus(status: string | null | undefined): statu
   return status === 'failed' || status === 'aborted'
 }
 
+/** A run admitted to the queue but not yet started — holds no processes or
+ *  ports. Distinct from active (running/healing) and terminal statuses. */
+export function isQueuedRunStatus(status: string | null | undefined): status is 'queued' {
+  return status === 'queued'
+}
+
+/** Why a run is parked in the queue. `resources` = the admission budget is
+ *  full; `repo-collision` = it declined worktree isolation against an active
+ *  run on the same repo and is waiting for that repo to free up. */
+export type QueueReason = 'resources' | 'repo-collision'
+
 export function isStaleHeartbeat(
   heartbeatAt: string | null | undefined,
   nowMs: number = Date.now(),
@@ -121,7 +132,7 @@ export function deriveRunActionAvailability(
 ): RunActionAvailabilitySet {
   return {
     pauseHeal: availability(status === 'running' && !transient, disabledReason('pauseHeal', status, transient)),
-    stop: availability(status === 'running' && !transient, disabledReason('stop', status, transient)),
+    stop: availability((status === 'running' || status === 'queued') && !transient, disabledReason('stop', status, transient)),
     cancelHeal: availability(status === 'healing' && !transient, disabledReason('cancelHeal', status, transient)),
     delete: availability(isTerminalRunStatus(status) && !transient, disabledReason('delete', status, transient)),
     restartHeal: availability(isRestartableRunStatus(status) && !transient, disabledReason('restartHeal', status, transient)),
@@ -217,7 +228,7 @@ function disabledReason(
 ): string | undefined {
   if (transient) return `Action unavailable while ${transient.replace(/-/g, ' ')} is in progress.`
   if (action === 'pauseHeal') return status === 'running' ? undefined : 'Pause & Heal is available only while tests are running.'
-  if (action === 'stop') return status === 'running' ? undefined : 'Stop is available only while tests are running.'
+  if (action === 'stop') return (status === 'running' || status === 'queued') ? undefined : 'Stop is available only while a run is queued or its tests are running.'
   if (action === 'cancelHeal') return status === 'healing' ? undefined : 'Cancel Heal is available only while an agent is healing.'
   if (action === 'delete') return isTerminalRunStatus(status) ? undefined : 'Delete is available after the run finishes.'
   if (action === 'restartHeal') return isRestartableRunStatus(status) ? undefined : 'Restart Heal is available after a failed or aborted run.'

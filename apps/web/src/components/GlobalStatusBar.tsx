@@ -3,10 +3,11 @@ import { createPortal } from 'react-dom'
 import type { RunDetail } from '../api/types'
 import * as api from '../api/client'
 import { deriveRunViewModel } from '../lib/run-view-model'
-import { useRuns } from '../state/RunsContext'
+import { useActiveRuns, useRuns } from '../state/RunsContext'
 import { isActiveRunStatus } from '../../../../shared/run-state'
 import { EvaluationExportTaskStatus } from './EvaluationExportTaskToast'
 import { WizardTaskStatus } from './WizardTaskStatus'
+import { RunsListDialog } from './RunsListDialog'
 import { StatusDot, type StatusDotState } from './config/atoms'
 
 interface Props {
@@ -25,6 +26,8 @@ interface Props {
 // they're looking at may be stale until the socket reconnects.
 export function GlobalStatusBar({ activeRunDetail, onNavigateToRun }: Props) {
   const { connection } = useRuns()
+  const { count: activeCount } = useActiveRuns()
+  const [runsOpen, setRunsOpen] = useState(false)
   const status = activeRunDetail?.manifest.status
   const view = deriveRunViewModel(activeRunDetail)
 
@@ -83,10 +86,36 @@ export function GlobalStatusBar({ activeRunDetail, onNavigateToRun }: Props) {
             <span className="shrink-0" style={{ color: 'var(--accent)' }}>→</span>
           </button>
         )}
+        <button
+          type="button"
+          onClick={() => setRunsOpen(true)}
+          className="cl-button flex shrink-0 items-center gap-1.5 px-2.5 py-1"
+          title="Show all runs"
+          aria-label={`Show all runs${activeCount > 0 ? ` (${activeCount} active)` : ''}`}
+        >
+          <span style={{ color: 'var(--text-primary)', fontSize: 12, fontWeight: 500 }}>Runs</span>
+          {activeCount > 0 && (
+            <span
+              className="inline-flex min-w-[16px] items-center justify-center rounded-full px-1 text-[10px] font-semibold"
+              style={{
+                background: 'color-mix(in srgb, var(--accent) 20%, transparent)',
+                color: 'var(--accent)',
+              }}
+            >
+              {activeCount}
+            </span>
+          )}
+        </button>
         <WizardTaskStatus />
         <EvaluationExportTaskStatus />
       </div>
       </div>
+      {runsOpen && (
+        <RunsListDialog
+          onClose={() => setRunsOpen(false)}
+          onNavigateToRun={(feature, runId) => onNavigateToRun?.(feature, runId)}
+        />
+      )}
     </div>
   )
 }

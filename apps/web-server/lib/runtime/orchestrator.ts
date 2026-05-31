@@ -2,7 +2,7 @@ import fs from 'fs'
 import path from 'path'
 import { randomUUID } from 'crypto'
 import { EventEmitter } from 'events'
-import type { FeatureConfig, HealthProbe, HttpProbe, TcpProbe } from '../../../../shared/launcher/types'
+import type { FeatureConfig, HealthProbe, HttpProbe, PortSlot, TcpProbe } from '../../../../shared/launcher/types'
 import type { ExecutionType, VerificationRunMetadata } from '../../../../shared/verification'
 import {
   HealSignalGate,
@@ -62,6 +62,8 @@ import {
 } from './playwright-mcp-artifacts'
 import { planRestart } from './restart-planner'
 import { interpolateConfigTokens, makeTokenCache } from './launcher/interpolate'
+import { releasePorts } from './port-allocator'
+import { removeWorktree, type WorktreeHandle } from './repo-worktree'
 import { readPlaywrightArtifactPolicy } from './playwright-artifact-policy'
 import { slugify } from './summary-reporter'
 import { listSpecFiles, loadFeatures } from '../feature-loader'
@@ -87,6 +89,11 @@ export interface ServiceSpec {
   cwd: string
   /** Resolved per-env readiness probe (single transport). */
   healthProbe?: HealthProbe
+  /** Extra env injected at spawn — e.g. the allocated `PORT` for each declared
+   *  port slot whose `env` is set. */
+  env?: Record<string, string>
+  /** Per-run allocated ports keyed by declared slot name (for the manifest). */
+  allocatedPorts?: Record<string, number>
 }
 
 export interface OrchestratorOptions {
@@ -164,6 +171,14 @@ export interface OrchestratorOptions {
   executionType?: ExecutionType
   verification?: VerificationRunMetadata
   playwrightEnv?: Record<string, string>
+  /** Per-run allocated ports keyed by slot name (allocated by the start flow
+   *  before construction). Resolves `${port.<slot>}` tokens and is injected as
+   *  each service's declared `env`. Released on stop. */
+  portMap?: Map<string, number>
+  /** Per-run git worktrees created (opt-in) after a same-repo collision. The
+   *  orchestrator redirects affected services' cwd into the worktree, records
+   *  them in the manifest, and removes them on stop. */
+  worktrees?: WorktreeHandle[]
 }
 
 export type PauseResult =
@@ -301,27 +316,77 @@ export type PlaywrightSpawner = (args: {
   rerunSelection?: PlaywrightRerunSelection
 }) => PlaywrightInvocation
 
+export interface BuildServiceSpecsOptions {
+  /** Per-run allocated ports keyed by slot name. Resolves `${port.<slot>}`
+   *  tokens and is injected as each declared slot's `env` var. */
+  portMap?: Map<string, number>
+  /** Per-run repo localPath overrides keyed by repo name. Set when a repo is
+   *  isolated in a worktree so the service `cwd` points at the worktree. */
+  repoPathOverrides?: Record<string, string>
+}
+
+function resolvePortEnv(
+  ports: PortSlot[] | undefined,
+  portMap: Map<string, number> | undefined,
+): { env: Record<string, string>; allocatedPorts: Record<string, number> } {
+  const env: Record<string, string> = {}
+  const allocatedPorts: Record<string, number> = {}
+  for (const slot of ports ?? []) {
+    const port = portMap?.get(slot.name)
+    if (port == null) continue
+    allocatedPorts[slot.name] = port
+    if (slot.env) env[slot.env] = String(port)
+  }
+  return { env, allocatedPorts }
+}
+
+/** Gather the unique port slots a feature declares for the given env. The
+ *  start flow allocates one free port per slot before constructing the
+ *  orchestrator (buildServiceSpecs runs synchronously in the constructor). */
+export function collectPortSlots(feature: FeatureConfig, env?: string): PortSlot[] {
+  const slots = new Map<string, PortSlot>()
+  for (const repo of feature.repos ?? []) {
+    if (!enabledForEnv(repo.envs, env)) continue
+    const commands = repo.startCommands ?? []
+    for (let i = 0; i < commands.length; i++) {
+      const normalized = normalizeStartCommand(commands[i], `${repo.name}-cmd-${i + 1}`)
+      if (!enabledForEnv(normalized.envs, env)) continue
+      for (const slot of normalized.ports ?? []) {
+        if (!slots.has(slot.name)) slots.set(slot.name, slot)
+      }
+    }
+  }
+  return [...slots.values()]
+}
+
 export function buildServiceSpecs(
   feature: FeatureConfig,
   runDir: string,
   env?: string,
+  opts: BuildServiceSpecsOptions = {},
 ): ServiceSpec[] {
   const out: ServiceSpec[] = []
   // ${slot.key} tokens in feature.config values resolve from the chosen env's
-  // envset slot files at boot time. The cache shares parsed slot files across
-  // every value in this build pass.
-  const tokenCtx = { envName: env, envsetsDir: path.join(feature.featureDir, 'envsets') }
+  // envset slot files at boot time, and the reserved ${port.<slot>} namespace
+  // from the per-run port map. The cache shares parsed slot files across every
+  // value in this build pass.
+  const tokenCtx = {
+    envName: env,
+    envsetsDir: path.join(feature.featureDir, 'envsets'),
+    ports: opts.portMap,
+  }
   const tokenCache = makeTokenCache()
   const interp = <T,>(node: T): T => interpolateConfigTokens(node, tokenCtx, tokenCache)
   for (const repo of feature.repos ?? []) {
     if (!enabledForEnv(repo.envs, env)) continue
-    const dir = resolvePath(repo.localPath)
+    const dir = opts.repoPathOverrides?.[repo.name] ?? resolvePath(repo.localPath)
     const commands = repo.startCommands ?? []
     for (let i = 0; i < commands.length; i++) {
       const normalized = normalizeStartCommand(commands[i], `${repo.name}-cmd-${i + 1}`)
       if (!enabledForEnv(normalized.envs, env)) continue
       const safeName = normalized.name!.replace(/[^a-z0-9]+/gi, '-').toLowerCase()
       const probe = resolveHealthProbe(normalized.healthCheck, env)
+      const { env: portEnv, allocatedPorts } = resolvePortEnv(normalized.ports, opts.portMap)
       out.push({
         repoName: repo.name,
         name: normalized.name!,
@@ -329,14 +394,13 @@ export function buildServiceSpecs(
         command: interp(normalized.command),
         cwd: dir,
         healthProbe: probe ? interp(probe) : undefined,
+        ...(Object.keys(portEnv).length > 0 ? { env: portEnv } : {}),
+        ...(Object.keys(allocatedPorts).length > 0 ? { allocatedPorts } : {}),
         // Service log path is implied by runDir; consumers can derive via buildRunPaths.
       })
     }
   }
-  // Annotate with per-service log paths to keep downstream consumers simple.
-  return out.map((s) => ({
-    ...s,
-  }))
+  return out
 }
 
 export class RunOrchestrator extends EventEmitter {
@@ -373,6 +437,9 @@ export class RunOrchestrator extends EventEmitter {
   private readonly executionType: ExecutionType
   private readonly verification?: VerificationRunMetadata
   private readonly playwrightEnv: Record<string, string>
+  private readonly portMap?: Map<string, number>
+  private readonly worktreeHandles: WorktreeHandle[]
+  private readonly repoPathOverrides: Record<string, string>
   private readonly signalGate = new HealSignalGate()
   private healCycleHistory: Array<{ cycle: number; restarted: string[]; kept: string[] }> = []
 
@@ -430,7 +497,16 @@ export class RunOrchestrator extends EventEmitter {
     this.runId = opts.runId
     this.runDir = opts.runDir
     this.paths = buildRunPaths(opts.runDir)
-    this.services = buildServiceSpecs(opts.feature, opts.runDir, opts.env)
+    this.portMap = opts.portMap
+    this.worktreeHandles = opts.worktrees ?? []
+    this.repoPathOverrides = {}
+    for (const handle of this.worktreeHandles) {
+      this.repoPathOverrides[handle.repoName] = handle.localPath
+    }
+    this.services = buildServiceSpecs(opts.feature, opts.runDir, opts.env, {
+      portMap: this.portMap,
+      repoPathOverrides: this.repoPathOverrides,
+    })
     this.ptyFactory = opts.ptyFactory
     this.healthCheck = opts.healthCheck ?? isHealthy
     this.healthPollIntervalMs = opts.healthPollIntervalMs ?? 1000
@@ -555,7 +631,10 @@ export class RunOrchestrator extends EventEmitter {
       // still work for the http case.
       healthUrl: s.healthProbe && 'http' in s.healthProbe ? s.healthProbe.http.url : undefined,
       status: serviceStatus,
+      ...(s.allocatedPorts && Object.keys(s.allocatedPorts).length > 0 ? { allocatedPorts: s.allocatedPorts } : {}),
     }))
+    const worktreeMap: Record<string, string> = {}
+    for (const handle of this.worktreeHandles) worktreeMap[handle.repoName] = handle.worktreeRoot
     const manifest: RunManifest = {
       runId: this.runId,
       executionType: this.executionType,
@@ -566,11 +645,15 @@ export class RunOrchestrator extends EventEmitter {
       status: this.status,
       healCycles: this.healCycles,
       services,
+      // Reflect the actual paths this run occupies: worktree-isolated repos
+      // point at their worktree so a later run can take the freed source in
+      // place without a false collision.
       repoPaths: (this.feature.repos ?? [])
-        .map((r) => resolvePath(r.localPath))
+        .map((r) => this.repoPathOverrides[r.name] ?? resolvePath(r.localPath))
         .filter((p) => {
           try { return fs.existsSync(p) } catch { return false }
         }),
+      ...(Object.keys(worktreeMap).length > 0 ? { worktrees: worktreeMap } : {}),
       repoBranches: this.repoBranchSnapshots,
       playwrightArtifacts: readPlaywrightArtifactPolicy(this.feature.featureDir),
       signalPaths: {
@@ -598,6 +681,17 @@ export class RunOrchestrator extends EventEmitter {
     this.stateSink.bootstrap(manifest)
   }
 
+  // Per-run allocated ports exposed to the Playwright process as
+  // CANARY_PORT_<slot> so tests can resolve the dynamic target. Empty when the
+  // feature declares no port slots (remote runs keep their static envset URL).
+  private testPortEnv(): Record<string, string> {
+    const out: Record<string, string> = {}
+    if (this.portMap) {
+      for (const [slot, port] of this.portMap) out[`CANARY_PORT_${slot}`] = String(port)
+    }
+    return out
+  }
+
   private ensureLogFile(target: string): void {
     if (this.logFiles.has(target)) return
     fs.mkdirSync(path.dirname(target), { recursive: true })
@@ -611,7 +705,7 @@ export class RunOrchestrator extends EventEmitter {
     const pty = this.ptyFactory({
       command: `LOG_MODE=plain ${svc.command}`,
       cwd: svc.cwd,
-      env: { LOG_MODE: 'plain' },
+      env: { LOG_MODE: 'plain', ...(svc.env ?? {}) },
     })
     this.servicePtys.set(svc.name, pty)
     this.emit('service-started', { service: svc, pid: pty.pid })
@@ -867,6 +961,10 @@ export class RunOrchestrator extends EventEmitter {
       cwd: inv.cwd,
       env: {
         ...this.playwrightEnv,
+        // Per-run allocated ports, so tests can target the same dynamic port
+        // the local service bound (CANARY_PORT_<slot>). Empty when no ports
+        // were allocated, preserving the static envset target for remote runs.
+        ...this.testPortEnv(),
         CANARY_LAB_PROJECT_ROOT: this.feature.featureDir,
         CANARY_LAB_MANIFEST_PATH: this.paths.manifestPath,
         CANARY_LAB_SUMMARY_PATH: this.paths.summaryPath,
@@ -2178,6 +2276,13 @@ export class RunOrchestrator extends EventEmitter {
       this.servicePtys.delete(name)
     }
     this.logFiles.clear()
+    // Release per-run isolation resources. Ports go back to the pool; worktrees
+    // are torn down (best-effort) so the source repo doesn't accumulate stale
+    // checkouts. Failures here must not block run finalization.
+    if (this.portMap) releasePorts(this.portMap.values())
+    for (const handle of this.worktreeHandles) {
+      await removeWorktree(handle).catch(() => {})
+    }
     const endedAt = new Date().toISOString()
     this.status = finalStatus
     // Single terminal write — services flipped to 'stopped', status +

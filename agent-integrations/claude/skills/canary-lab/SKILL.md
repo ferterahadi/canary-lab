@@ -24,7 +24,7 @@ Before calling Canary Lab MCP tools, make sure the workspace and UI server are a
 
 1. Call `list_features` and choose the requested feature.
 2. Call `start_run` with `claim_heal: true`, a stable `session_id`, `client_kind: "claude-cli"` or `"claude-desktop"`, and a useful `conversation_name`. For requests like "rerun 7cvh", pass `run_ref: "7cvh"`.
-3. If `start_run` returns `active_heal_blocks_start`, stop and ask whether to call `cancel_heal` on `activeRunId`. Do not start a fresh or different run while a matching run is healing.
+3. If `start_run` returns `type: "repo_collision_requires_choice"`, another run is using the same app/repo. Ask the user whether to run this one isolated in a per-run git worktree (runs now, concurrently) or queue it until the other run finishes, then re-call `start_run` with `isolation: "worktree"` or `isolation: "queue"`. Do not guess. If `start_run` returns `queued: true`, tell the user the run is parked (`queueReason`) and will start automatically when capacity frees; `wait_for_heal_task` still blocks until it starts and needs fixes.
 4. If `start_run` returns an active run, continue that run.
 5. If `start_run` reports `already-claimed`, stop and tell the user which session owns the run.
 6. Handle user interrupts explicitly: "pause", "intercept", or "pause and heal" means call `pause_run`; "stop heal" or "cancel repair" means call `cancel_heal`; "abort", "kill the run", or "stop everything" means call `abort_run` only with the required confirmation.
@@ -65,10 +65,10 @@ Use the MCP `author` profile, or `full`, when the user asks to create a feature,
 
 - Keep the same `session_id` for the whole conversation.
 - `heartbeat` is a low-level liveness refresh for long local repair stretches. `wait_for_heal_task` heartbeats while waiting, and `signal_run` and `get_heal_context` refresh liveness, so call explicit `heartbeat` only before or after a long stretch of local `Read` / `Edit` / `Write` / `Bash` work.
-- `start_run` is the single entrypoint for start/resume/restart intent; a healing run has priority and blocks fresh or different starts until `cancel_heal` stops it.
+- `start_run` is the single entrypoint for start/resume/restart intent. With no `run_ref`/`force_new`, a healing run for the feature is continued by default. Concurrent runs are allowed: a same-app collision returns `repo_collision_requires_choice` (resolve with `isolation: "worktree"` or `"queue"`); over the resource budget, the run is `queued` and starts automatically.
 - For requests like "rerun 7cvh", `start_run` resolves the run suffix and restarts that same failed/aborted run in remaining-test mode. Canary Lab reruns failed tests first, then skipped tests, then pending/not-run tests; do not tell the user no test filter exists.
 - After changing code or tests, never call `start_run` to verify. Verification means `signal_run` with `hypothesis` and `fixDescription`, then `wait_for_heal_task` on the same `runId`.
-- Do not pass `force_new` during normal healing.
+- During normal healing, omit `run_ref`/`force_new` so `start_run` continues the healing run. Use `force_new` only when the user explicitly wants a separate concurrent run on the same feature (it resolves through the collision choice).
 - Never compute passed count as `summary.total - summary.failed.length`.
 - Use `result.counts.statusLine`, `result.counts.passed`, or `summary.passed` for pass counts.
 - Treat tests absent from `passedNames`, `failed`, and `skippedNames` as not run, not passed.

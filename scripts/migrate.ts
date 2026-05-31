@@ -163,6 +163,77 @@ export function rewriteHelper(
   return { ok: true, content: out }
 }
 
+// ─── Concurrency readiness advisory (1.2.0) ──────────────────────────────
+// Non-destructive: scans each `feature.config.cjs` for hardcoded app ports
+// (healthCheck URLs, `--port` flags, tcp/tunnel `port:` fields) and reports
+// which features should declare port slots + use `${port.<slot>}` to run
+// concurrently without clashing. NEVER edits anything — 1.2.0 is fully
+// backward-compatible, so this is guidance only.
+
+export interface ConcurrencyAdvisory {
+  feature: string
+  /** Distinct literal ports found in the config (not already `${port.*}`). */
+  hardcodedPorts: number[]
+  /** The config already declares a `ports:` slot. */
+  hasPortSlot: boolean
+  /** The config already uses a `${port.*}` token somewhere. */
+  usesPortToken: boolean
+}
+
+export function analyzeFeatureConfigText(feature: string, src: string): ConcurrencyAdvisory | null {
+  // Strip comments so illustrative snippets (e.g. `// { tcp: { port: 4100 } }`)
+  // don't false-flag. Line comments are only stripped when `//` starts the line
+  // (after whitespace), so `http://...` URLs in code are preserved.
+  const code = src
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/^\s*\/\/.*$/gm, '')
+  const ports = new Set<number>()
+  const add = (re: RegExp): void => { for (const m of code.matchAll(re)) ports.add(Number(m[1])) }
+  add(/localhost:(\d{2,5})\b/g)       // healthCheck URLs
+  add(/--port[= ]+(\d{2,5})\b/g)      // dev-server flags in the command
+  add(/\bport\s*:\s*(\d{2,5})\b/g)    // tcp probes + tunnels
+  const hardcodedPorts = [...ports].sort((a, b) => a - b)
+  if (hardcodedPorts.length === 0) return null
+  return {
+    feature,
+    hardcodedPorts,
+    hasPortSlot: /\bports\s*:/.test(code),
+    usesPortToken: code.includes('${port.'),
+  }
+}
+
+export function collectConcurrencyAdvisories(featuresDir: string, features: string[]): ConcurrencyAdvisory[] {
+  const out: ConcurrencyAdvisory[] = []
+  for (const name of features) {
+    const cfg = path.join(featuresDir, name, 'feature.config.cjs')
+    if (!fs.existsSync(cfg)) continue
+    const advisory = analyzeFeatureConfigText(name, fs.readFileSync(cfg, 'utf-8'))
+    if (advisory) out.push(advisory)
+  }
+  return out
+}
+
+function printConcurrencyAdvisory(advisories: ConcurrencyAdvisory[]): void {
+  section('Concurrency readiness (1.2.0)')
+  if (advisories.length === 0) {
+    ok('No features hardcode an app port — nothing to do for concurrency.')
+    return
+  }
+  info('Multiple runs can now run at once. A feature that hardcodes a port can clash with another run; declare a port slot and use ${port.<slot>} so each run gets its own.')
+  for (const a of advisories) {
+    const portList = a.hardcodedPorts.map((p) => `:${p}`).join(', ')
+    const label = ansiPath(`features/${a.feature}`)
+    if (a.hasPortSlot && a.usesPortToken) {
+      warn(`${label} — partially migrated; literal port(s) still present: ${portList}`)
+    } else {
+      warn(`${label} — hardcoded port(s): ${portList}`)
+    }
+    bullet(dim("add `ports: [{ name: 'api', env: 'PORT' }]` to each startCommand, then replace the literal ports with `${port.api}` in the command (--port), the healthCheck URL, and inter-service envset values"))
+  }
+  line()
+  info('This is advisory only — leaving features as-is keeps them working (they just queue instead of running concurrently with a port-clashing run). See the "Concurrent Runs" section in CLAUDE.md.')
+}
+
 function applyPlan(plan: FeaturePlan): void {
   for (const w of plan.writes) {
     fs.writeFileSync(w.filePath, w.content)
@@ -207,8 +278,13 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
     isLegacyFeature(path.join(featuresDir, name)),
   )
 
+  // Concurrency readiness is independent of the 0.8.0 layout migration — every
+  // feature is scanned and the advisory always prints.
+  const advisories = collectConcurrencyAdvisories(featuresDir, allFeatures)
+
   if (legacyFeatures.length === 0) {
     ok('Nothing to migrate — no features with the 0.8.0 `src/config.ts` layout detected.')
+    printConcurrencyAdvisory(advisories)
     return
   }
 
@@ -254,6 +330,8 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
     line()
     info('Skipped features were left untouched — migrate them by hand if desired.')
   }
+
+  printConcurrencyAdvisory(advisories)
 }
 
 if (require.main === module) {

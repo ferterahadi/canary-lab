@@ -7,9 +7,11 @@ import * as api from '../api/client'
 import type { RunDetail, RunIndexEntry } from '../api/types'
 import {
   RunsProvider,
+  useActiveRuns,
   useGlobalActiveRun,
   useRun,
   useRunActions,
+  useRunDetails,
   useRuns,
   type UseGlobalActiveRunResult,
   type UseRunActionsResult,
@@ -122,6 +124,62 @@ describe('RunsProvider', () => {
       socket.onmessage?.({ data: JSON.stringify({ type: 'removed', runId: 'r1' }) })
     })
     expect(captured.runs?.runs).toEqual([])
+  })
+
+  it('useActiveRuns counts running/healing/queued, and useRunDetails exposes the details map', () => {
+    let active: { runs: RunIndexEntry[]; count: number } | null = null
+    let details: Record<string, RunDetail> | null = null
+    function P(): null {
+      active = useActiveRuns()
+      details = useRunDetails()
+      return null
+    }
+    act(() => {
+      root.render(
+        <RunsProvider WebSocketImpl={FakeWebSocket as unknown as typeof WebSocket}>
+          <P />
+        </RunsProvider>,
+      )
+    })
+    act(() => {
+      FakeWebSocket.instances[0].onmessage?.({
+        data: JSON.stringify({
+          type: 'snapshot',
+          runs: [
+            entry({ runId: 'r1', status: 'running' }),
+            entry({ runId: 'r2', status: 'queued' }),
+            entry({ runId: 'r3', status: 'healing' }),
+            entry({ runId: 'r4', status: 'passed' }),
+          ],
+          details: { r1: detail({ runId: 'r1', status: 'running' }) },
+        }),
+      })
+    })
+    expect(active!.count).toBe(3)
+    expect(active!.runs.map((r) => r.runId).sort()).toEqual(['r1', 'r2', 'r3'])
+    expect(Object.keys(details!)).toEqual(['r1'])
+  })
+
+  it('startRun forwards env + isolation, and omits opts when neither is given', async () => {
+    vi.mocked(api.listRuns).mockResolvedValue([])
+    vi.mocked(api.startRun).mockResolvedValue({ runId: 'r-x' })
+    let runsApi: UseRunsResult | null = null
+    function P(): null { runsApi = useRuns(); return null }
+    act(() => {
+      root.render(
+        <RunsProvider WebSocketImpl={FakeWebSocket as unknown as typeof WebSocket}>
+          <P />
+        </RunsProvider>,
+      )
+    })
+    await act(async () => { await runsApi!.startRun('feat', 'local', 'worktree') })
+    expect(api.startRun).toHaveBeenLastCalledWith('feat', { env: 'local', isolation: 'worktree' })
+    await act(async () => { await runsApi!.startRun('feat', 'local') })
+    expect(api.startRun).toHaveBeenLastCalledWith('feat', { env: 'local' })
+    await act(async () => { await runsApi!.startRun('feat', undefined, 'queue') })
+    expect(api.startRun).toHaveBeenLastCalledWith('feat', { isolation: 'queue' })
+    await act(async () => { await runsApi!.startRun('feat') })
+    expect(api.startRun).toHaveBeenLastCalledWith('feat', undefined)
   })
 
   it('uses injected websocket URLs and the global websocket constructor fallback', () => {

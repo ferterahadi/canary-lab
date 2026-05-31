@@ -30,18 +30,9 @@ export interface McpRouteDeps extends CanaryLabMcpDeps {
   featuresDir: string
   projectRoot: string
   /** Same startRun factory used by the runs route — lets MCP `start_run`
-   *  reuse the production code path (envset apply, repo validation, etc.). */
-  startRun: (
-    feature: string,
-    env?: string,
-    healAgent?: {
-      kind: 'external'
-      sessionId: string
-      clientKind: 'claude-cli' | 'claude-desktop' | 'codex-cli' | 'codex-desktop' | 'other'
-      clientVersion?: string
-      conversationName?: string
-    },
-  ) => Promise<{ runId: string }>
+   *  reuse the production code path (envset apply, repo validation, admission/
+   *  collision, etc.). Inherited signature from CanaryLabMcpDeps. */
+  startRun: CanaryLabMcpDeps['startRun']
 }
 
 const SERVER_INFO = { name: 'canary-lab', version: '1.0.0', title: 'Canary Lab' }
@@ -54,6 +45,8 @@ const SERVER_INFO = { name: 'canary-lab', version: '1.0.0', title: 'Canary Lab' 
 const REPAIR_INSTRUCTIONS = `Canary Lab — external repair loop. Fix failing runs by editing app/service code (not tests, unless a test is provably wrong).
 
 1. start_run with claim_heal:true, a stable session_id reused for the whole conversation, client_kind, and conversation_name. For "rerun <id>" pass run_ref (e.g. "7cvh").
+   - If start_run returns type:"repo_collision_requires_choice", another run is using the same app/repo. ASK THE USER whether to run isolated (a per-run git worktree, concurrent) or queue until the other run finishes, then re-call start_run with isolation:"worktree" or isolation:"queue". Do not guess.
+   - If start_run returns queued:true, the run is parked (queueReason tells you why) and will start automatically when capacity frees; wait_for_heal_task still works — it blocks until the run starts and needs fixes.
 2. wait_for_heal_task with the same runId + session_id. This BLOCKS until the run needs fixes, passes, fails, or times out, and heartbeats for you while it waits. Always wait this way — never poll get_run_snapshot or get_run in a loop to wait for a result.
 3. On needs_heal: read context.healPrompt.startHere first, fix the code, then signal_run (kind:"rerun" for test-only/app-code fixes, "restart" when services or env must restart) with hypothesis + fixDescription.
 4. wait_for_heal_task again on the same run. Repeat until passed or terminal failure.

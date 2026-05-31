@@ -14,13 +14,16 @@ const config = {
           // `production` skips startup and the production envset points
           // GATEWAY_URL at the remote URL instead.
           envs: ['local'],
+          // Canary Lab allocates a free port per run (injected as PORT) so two
+          // local runs of this app never clash. Reference it via `${port.api}`.
+          ports: [{ name: 'api', env: 'PORT' }],
           // Per-env readiness probe. Exactly one transport per probe:
           //   http: { url, timeoutMs?, deadlineMs? }
           //   tcp:  { port, host?, timeoutMs?, deadlineMs? }
           // Production skips the local boot entirely (see `envs` above) but
           // we still declare a remote http probe for parity.
           healthCheck: {
-            local:      { http: { url: 'http://localhost:4000/', timeoutMs: 3000 } },
+            local:      { http: { url: 'http://localhost:${port.api}/', timeoutMs: 3000 } },
             production: { http: { url: 'https://example.com/healthz', timeoutMs: 3000 } },
           },
         },

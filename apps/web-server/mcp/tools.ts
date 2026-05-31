@@ -99,6 +99,19 @@ const evaluationRewriteInput = z.object({
   })),
 })
 
+/** Result of an MCP-driven start request under concurrency. */
+export type McpStartRunOutcome =
+  | { kind: 'started'; runId: string }
+  | { kind: 'queued'; runId: string; reason: 'resources' | 'repo-collision' }
+  | {
+      kind: 'collision'
+      conflictingRunId: string
+      conflictingFeature: string
+      repoPaths: string[]
+      options: Array<'worktree' | 'queue'>
+      message: string
+    }
+
 export interface CanaryLabMcpDeps {
   store: RunStore
   broker: ExternalHealBroker
@@ -114,7 +127,8 @@ export interface CanaryLabMcpDeps {
       clientVersion?: string
       conversationName?: string
     },
-  ) => Promise<{ runId: string }>
+    isolation?: 'worktree' | 'queue',
+  ) => Promise<McpStartRunOutcome>
   restartExternalRun?: (
     runId: string,
     healAgent: {
@@ -944,24 +958,19 @@ export function registerCanaryLabTools(
       client_kind: clientKindInput.describe('Which kind of client is starting the run. Defaults to the MCP client type when known.'),
       conversation_name: z.string().optional().describe('Human label shown in the Canary Lab UI (e.g. "fix checkout").'),
       guidance: z.string().optional().describe('Optional user guidance when restarting a failed/aborted run by runId or run_ref.'),
-      force_new: z.boolean().default(false).describe('Deprecated for MCP clients. If a matching run is healing, this is blocked until `cancel_heal` stops that run.'),
+      force_new: z.boolean().default(false).describe('Start a fresh concurrent run even if a matching run is healing (it continues independently). A same-repo collision still asks you to choose isolation.'),
+      isolation: z.enum(['worktree', 'queue']).optional().describe('Only needed after start_run returns repo_collision_requires_choice: "worktree" isolates this run in a per-run git worktree and starts it now (concurrent); "queue" waits until the conflicting run finishes.'),
     },
-  }, async ({ feature, env, runId, run_ref, claim_heal, session_id, client_kind, conversation_name, guidance, force_new }) => {
+  }, async ({ feature, env, runId, run_ref, claim_heal, session_id, client_kind, conversation_name, guidance, force_new, isolation }) => {
     try {
       const requestedRef = runId ?? run_ref
+      // Default (no explicit ref, no force_new): continue the run that's
+      // already healing for this feature — the external-heal continuation
+      // pattern. With concurrency, `force_new` (or targeting a different run)
+      // no longer blocks: it falls through to a fresh concurrent start, where
+      // same-repo collisions surface a worktree/queue choice.
       const healing = findHealingRunForFeature(deps, feature, env)
-      if (healing) {
-        const requested = requestedRef ? resolveRunRef(deps, feature, env, requestedRef) : null
-        if (force_new || (requested && (requested.kind !== 'resolved' || requested.detail.manifest.runId !== healing.manifest.runId))) {
-          return asJsonResult({
-            type: 'active_heal_blocks_start',
-            activeRunId: healing.manifest.runId,
-            activeStatus: healing.manifest.status,
-            ...(requestedRef ? { requestedRunRef: requestedRef } : {}),
-            ...(requested?.kind === 'resolved' ? { requestedRunId: requested.detail.manifest.runId } : {}),
-            message: 'A matching run is already healing. Stop it first with cancel_heal before starting fresh or rerunning another run.',
-          })
-        }
+      if (healing && !force_new && !requestedRef) {
         const claim = claim_heal ? claimRun(deps, healing.manifest.runId, session_id, client_kind, conversation_name) : null
         return asJsonResult({
           runId: healing.manifest.runId,
@@ -970,12 +979,6 @@ export function registerCanaryLabTools(
           claimed: claim_heal ? claim?.accepted === true : false,
           claim,
           ...(claim_heal ? healWaitNext(healing.manifest.runId) : {}),
-          ...(force_new
-            ? {
-                ignoredForceNew: true,
-                warning: 'A matching run is already healing. Continue it with signal_run and wait_for_heal_task, or stop it first with cancel_heal.',
-              }
-            : {}),
         })
       }
       if (requestedRef) {
@@ -1038,7 +1041,7 @@ export function registerCanaryLabTools(
           ...(claim_heal ? healWaitNext(restarted.runId) : {}),
         })
       }
-      const result = await deps.startRun(
+      const outcome = await deps.startRun(
         feature,
         env,
         claim_heal
@@ -1049,12 +1052,36 @@ export function registerCanaryLabTools(
               ...(conversation_name ? { conversationName: conversation_name } : {}),
             }
           : undefined,
+        isolation,
       )
+      if (outcome.kind === 'collision') {
+        // Same-repo collision and the client didn't choose. Nothing started —
+        // ask the user, then re-call start_run with isolation:"worktree"|"queue".
+        return asJsonResult({
+          type: 'repo_collision_requires_choice',
+          conflictingRunId: outcome.conflictingRunId,
+          conflictingFeature: outcome.conflictingFeature,
+          repoPaths: outcome.repoPaths,
+          options: outcome.options,
+          message: outcome.message,
+          nextSteps: ['ask_user_worktree_or_queue'],
+        })
+      }
+      if (outcome.kind === 'queued') {
+        return asJsonResult({
+          runId: outcome.runId,
+          reused: false,
+          queued: true,
+          queueReason: outcome.reason,
+          claimed: claim_heal,
+          ...(claim_heal ? healWaitNext(outcome.runId) : {}),
+        })
+      }
       return asJsonResult({
-        runId: result.runId,
+        runId: outcome.runId,
         reused: false,
         claimed: claim_heal,
-        ...(claim_heal ? healWaitNext(result.runId) : {}),
+        ...(claim_heal ? healWaitNext(outcome.runId) : {}),
       })
     } catch (err) {
       return errorResult(err instanceof Error ? err.message : String(err))
