@@ -810,12 +810,35 @@ export async function getDraftAgentSession(
   }
 }
 
+// Body of the 409 the server returns when a start request hits a same-repo
+// collision and the caller hasn't chosen how to handle it.
+export interface RepoCollisionChoice {
+  type: 'repo_collision_requires_choice'
+  conflictingRunId: string
+  conflictingFeature: string
+  repoPaths: string[]
+  options: Array<'worktree' | 'queue'>
+  message: string
+}
+
+/** Returns the collision payload when `err` is the 409 collision-choice
+ *  ApiError, else null. */
+export function asRepoCollision(err: unknown): RepoCollisionChoice | null {
+  if (err instanceof ApiError && err.status === 409 && err.body && typeof err.body === 'object'
+    && (err.body as { type?: string }).type === 'repo_collision_requires_choice') {
+    return err.body as RepoCollisionChoice
+  }
+  return null
+}
+
 export function startRun(
   feature: string,
-  opts?: ClientOptions & { env?: string },
+  opts?: ClientOptions & { env?: string; isolation?: 'worktree' | 'queue' },
 ): Promise<{ runId: string }> {
   const { baseUrl, fetchImpl } = defaultOpts(opts)
-  const body = opts?.env ? { feature, env: opts.env } : { feature }
+  const body: Record<string, unknown> = { feature }
+  if (opts?.env) body.env = opts.env
+  if (opts?.isolation) body.isolation = opts.isolation
   return request<{ runId: string }>(
     `${baseUrl}/api/runs`,
     {

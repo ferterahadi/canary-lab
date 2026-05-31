@@ -21,6 +21,7 @@ interface Entry {
 }
 
 const PALETTE: Record<DisplayStatus, Entry> = {
+  queued:  { dot: 'idle',    text: 'text-zinc-600 dark:text-zinc-400', label: 'queued' },
   passed:  { dot: 'success', text: 'text-emerald-700/90 dark:text-emerald-300/90' },
   failed:  { dot: 'failed',  text: 'text-rose-700/90 dark:text-rose-300/90' },
   aborted: { dot: 'idle',    text: 'text-zinc-600 dark:text-zinc-400' },

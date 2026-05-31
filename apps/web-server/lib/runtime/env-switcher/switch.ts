@@ -66,13 +66,23 @@ export function applySet(
   envSetsDir: string,
   setName: string,
   targets: Array<{ slot: string; targetPath: string }>,
+  // Optional content transform applied to each slot file before it is written
+  // to its target. The run path passes a resolver that fills the reserved
+  // `${port.<slot>}` namespace with the run's allocated ports so a multi-service
+  // feature's inter-service config follows the allocation. Absent (e.g. the CLI
+  // `env` switching path) → verbatim copy, byte-for-byte as before.
+  resolve?: (content: string) => string,
 ) {
   const setDir = path.join(envSetsDir, setName);
   for (const { slot, targetPath } of targets) {
     const sourcePath = path.join(setDir, slot);
     if (fs.existsSync(sourcePath)) {
       fs.mkdirSync(path.dirname(targetPath), { recursive: true });
-      fs.copyFileSync(sourcePath, targetPath);
+      if (resolve) {
+        fs.writeFileSync(targetPath, resolve(fs.readFileSync(sourcePath, 'utf-8')));
+      } else {
+        fs.copyFileSync(sourcePath, targetPath);
+      }
     }
   }
 }

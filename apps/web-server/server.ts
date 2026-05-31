@@ -19,7 +19,7 @@ import { runsStreamRoutes } from './ws/runs-stream'
 import { draftAgentStreamRoutes } from './ws/draft-agent-stream'
 import { agentSessionStreamRoutes } from './ws/agent-session-stream'
 import { workspaceStreamRoutes } from './ws/workspace-stream'
-import { createRegistry, RunStore, type OrchestratorRegistry, type OrchestratorLike } from './lib/run-store'
+import { createRegistry, RunStore, type OrchestratorRegistry, type OrchestratorLike, type StartRunOutcome } from './lib/run-store'
 import { WorkspaceEventBus } from './lib/workspace-events'
 import { PaneBroker } from './lib/pane-broker'
 import { loadFeatures } from './lib/feature-loader'
@@ -30,7 +30,15 @@ import {
 import { WizardAgentRegistry } from './lib/wizard-agent-registry'
 import { generateRunId } from './lib/runtime/run-id'
 import { runDirFor, buildRunPaths } from './lib/runtime/run-paths'
-import { RunOrchestrator } from './lib/runtime/orchestrator'
+import { RunOrchestrator, collectPortSlots, buildServiceSpecs } from './lib/runtime/orchestrator'
+import { allocatePorts } from './lib/runtime/port-allocator'
+import { resolvePortTokens } from './lib/runtime/launcher/interpolate'
+import { RunScheduler, type SchedulerActiveRun } from './lib/runtime/run-scheduler'
+import { estimateRunCost, resolveAdmissionConfig, readSystemResources } from './lib/runtime/admission'
+import { detectRepoCollision, normalizeRepoPaths } from './lib/runtime/repo-collision'
+import { addWorktree, type WorktreeHandle } from './lib/runtime/repo-worktree'
+import type { QueueReason } from '../../shared/run-state'
+import type { FeatureConfig } from '../../shared/launcher/types'
 import {
   buildAgentSpawnCommand,
   buildOrchestratorHealPrompt,
@@ -59,9 +67,25 @@ import {
 import type { HealAgentChoice } from './lib/runtime/launcher/project-config'
 import type { LocalHealAgent } from './lib/runtime/manifest'
 
+// Allocate one free TCP port per declared port slot for this run so concurrent
+// runs (even of the same app) never clash on a hardcoded port. Returns
+// undefined when the feature declares no port slots — the run then behaves
+// exactly as before. The orchestrator releases these ports on stop.
+async function allocateRunPorts(
+  feature: FeatureConfig,
+  env: string | undefined,
+): Promise<Map<string, number> | undefined> {
+  const slots = collectPortSlots(feature, env)
+  return slots.length > 0 ? await allocatePorts(slots) : undefined
+}
+
 // Apply a feature's envset in-process and return the backups to revert later.
 // Returns null when the feature has no envsets configured (silent skip).
-function applyFeatureEnvset(featureDir: string, setName: string): BackupRecord[] | null {
+function applyFeatureEnvset(
+  featureDir: string,
+  setName: string,
+  portMap?: Map<string, number>,
+): BackupRecord[] | null {
   const envSetsDir = getEnvSetsDir(featureDir)
   if (!fs.existsSync(path.join(envSetsDir, 'envsets.config.json'))) return null
   const config = loadConfig(featureDir)
@@ -70,7 +94,13 @@ function applyFeatureEnvset(featureDir: string, setName: string): BackupRecord[]
     targetPath: resolveVars(config.slots[slot].target, config.appRoots),
   }))
   const backups = backup(targets, Date.now())
-  applySet(envSetsDir, setName, targets)
+  // Resolve the reserved ${port.<slot>} namespace in each applied file so a
+  // multi-service feature's inter-service config follows the run's allocated
+  // ports. No port map (e.g. verify path) → verbatim copy.
+  const resolve = portMap && portMap.size > 0
+    ? (content: string) => resolvePortTokens(content, portMap)
+    : undefined
+  applySet(envSetsDir, setName, targets, resolve)
   return backups
 }
 
@@ -381,10 +411,11 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
     const runDir = runDirFor(logsDir, runId)
     const runnerLog = new RunnerLog(buildRunPaths(runDir).runnerLogPath)
 
+    const portMap = await allocateRunPorts(feature, env)
     let backups: BackupRecord[] | null = null
     if (env) {
       try {
-        backups = applyFeatureEnvset(feature.featureDir, env)
+        backups = applyFeatureEnvset(feature.featureDir, env, portMap)
         if (backups) runnerLog.info(`Applied envset "${env}" for external restart ${feature.name}`)
       } catch (err) {
         runnerLog.warn(`envset apply failed: ${(err as Error).message}`)
@@ -421,6 +452,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
         env,
         runId,
         runDir,
+        portMap,
         ptyFactory,
         runnerLog,
         externalHeal: true,
@@ -460,6 +492,72 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
     return orch
   }
 
+  // ── Concurrency: admission + queue scheduler ──────────────────────────
+  // Different apps run concurrently on distinct allocated ports; runs that
+  // exceed the resource budget, or that decline worktree isolation against an
+  // active run on the same repo, are parked here and promoted FIFO on run-end.
+  const admissionConfig = resolveAdmissionConfig()
+  const listActiveForScheduler = (): SchedulerActiveRun[] =>
+    runStore.list()
+      .filter((e) => isActiveRunStatus(e.status))
+      .map((e) => {
+        const detail = runStore.get(e.runId)
+        return {
+          runId: e.runId,
+          feature: e.feature,
+          repoPaths: detail?.manifest.repoPaths ?? [],
+          cost: estimateRunCost(detail?.manifest.services?.length ?? 0),
+        }
+      })
+  const scheduler = new RunScheduler({
+    listActive: listActiveForScheduler,
+    readResources: readSystemResources,
+    config: admissionConfig,
+  })
+  runStore.onEvent((e) => { if (e.kind === 'finalized') void scheduler.promote() })
+
+  // Map a set of resolved repo paths back to feature.config repo names so we
+  // know which repos to isolate in a worktree.
+  const repoNamesForPaths = (feature: FeatureConfig, paths: string[]): string[] => {
+    const set = new Set(paths)
+    return (feature.repos ?? [])
+      .filter((r) => { const [p] = normalizeRepoPaths([r.localPath]); return p != null && set.has(p) })
+      .map((r) => r.name)
+  }
+
+  // Persist a placeholder manifest for a queued run so it shows up in the UI
+  // (status 'queued' + reason) before any process is spawned. Promotion later
+  // overwrites this with the real running manifest under the same runId.
+  const writeQueuedManifest = (
+    runId: string,
+    feature: FeatureConfig,
+    env: string | undefined,
+    reason: QueueReason,
+  ): void => {
+    const startedAt = new Date().toISOString()
+    runStore.bootstrap({
+      runId,
+      executionType: 'run',
+      feature: feature.name,
+      featureDir: feature.featureDir,
+      env,
+      startedAt,
+      status: 'queued',
+      healCycles: 0,
+      services: [],
+      repoPaths: normalizeRepoPaths((feature.repos ?? []).map((r) => r.localPath)),
+      queueReason: reason,
+      heartbeatAt: startedAt,
+    })
+  }
+
+  // Cancel a run that's still waiting in the queue (no orchestrator yet).
+  const cancelQueuedRun = (runId: string): boolean => {
+    if (!scheduler.cancel(runId)) return false
+    runStore.finalize(runId, 'aborted', new Date().toISOString(), 0)
+    return true
+  }
+
   await app.register(runsRoutes, {
 	    featuresDir,
 	    projectRoot: opts.projectRoot,
@@ -470,24 +568,43 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
       featureName: string,
       env?: string,
       healAgentReq?: { kind: 'external'; sessionId: string; clientKind: 'claude-cli' | 'claude-desktop' | 'codex-cli' | 'codex-desktop' | 'other'; clientVersion?: string; conversationName?: string },
-    ): Promise<OrchestratorLike> => {
+      isolation?: 'worktree' | 'queue',
+    ): Promise<StartRunOutcome> => {
       const features = loadFeatures(featuresDir)
       const feature = features.find((f) => f.name === featureName)
       if (!feature) throw new Error(`feature not found: ${featureName}`)
+      await validateConfiguredRepoBranches(feature)
       const runId = generateRunId()
       const runDir = runDirFor(logsDir, runId)
-      const runnerLog = new RunnerLog(buildRunPaths(runDir).runnerLogPath)
-      runnerLog.info(
-        `Run started: feature=${feature.name}${env ? ` env=${env}` : ''} runId=${runId}`,
-      )
+      const sourceRepoPaths = normalizeRepoPaths((feature.repos ?? []).map((r) => r.localPath))
+      const cost = estimateRunCost(buildServiceSpecs(feature, runDir, env).length)
+      const collision = detectRepoCollision(sourceRepoPaths, listActiveForScheduler())
+      if (collision && !isolation) {
+        return {
+          kind: 'collision',
+          conflictingRunId: collision.conflictingRunId,
+          conflictingFeature: collision.conflictingFeature,
+          repoPaths: collision.repoPaths,
+        }
+      }
+      const useWorktree = Boolean(collision) && isolation === 'worktree'
+      const worktreeRepoNames = useWorktree && collision ? repoNamesForPaths(feature, collision.repoPaths) : []
 
-      await validateConfiguredRepoBranches(feature)
-      const repoBranchSnapshots = await collectRepoBranchSnapshots(feature)
+      // The actual launch: envset apply, worktree isolation, orchestrator
+      // construction + kickoff. Deferred and reused by the queue when the run
+      // can't start immediately.
+      const launch = async (): Promise<OrchestratorLike> => {
+        const runnerLog = new RunnerLog(buildRunPaths(runDir).runnerLogPath)
+        runnerLog.info(
+          `Run started: feature=${feature.name}${env ? ` env=${env}` : ''} runId=${runId}`,
+        )
+        const repoBranchSnapshots = await collectRepoBranchSnapshots(feature)
 
+      const portMap = await allocateRunPorts(feature, env)
       let backups: BackupRecord[] | null = null
       if (env) {
         try {
-          backups = applyFeatureEnvset(feature.featureDir, env)
+          backups = applyFeatureEnvset(feature.featureDir, env, portMap)
           if (backups) runnerLog.info(`Applied envset "${env}" for ${feature.name}`)
         } catch (err) {
           runnerLog.warn(`envset apply failed: ${(err as Error).message}`)
@@ -571,6 +688,17 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
         runnerLog.warn('Auto-heal disabled: no `claude` or `codex` CLI on PATH (set CANARY_LAB_HEAL_AGENT=claude|codex to override).')
       }
 
+      const worktrees: WorktreeHandle[] = []
+      for (const repoName of worktreeRepoNames) {
+        const repo = (feature.repos ?? []).find((r) => r.name === repoName)
+        if (!repo) continue
+        try {
+          worktrees.push(await addWorktree({ repoName, localPath: repo.localPath, worktreesDir: path.join(runDir, 'worktrees') }))
+          runnerLog.info(`Isolated repo "${repoName}" in a per-run worktree.`)
+        } catch (err) {
+          runnerLog.warn(`Worktree isolation failed for "${repoName}"; running in place: ${(err as Error).message}`)
+        }
+      }
       let orch: RunOrchestrator
       try {
         orch = new RunOrchestrator({
@@ -578,6 +706,8 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
           env,
           runId,
           runDir,
+          portMap,
+          worktrees,
 	          ptyFactory,
           runnerLog,
           autoHeal,
@@ -621,8 +751,30 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
           await orch.stop('aborted').catch(() => {})
           registry.delete(orch.runId)
       })
-      return orch
+        // Register synchronously so the scheduler's next fit() / promotion sees
+        // this run as active before any await yields.
+        registry.set(orch.runId, orch)
+        return orch
+      }
+
+      // Collision declined worktree → queue until the conflicting repo frees.
+      if (collision && isolation === 'queue') {
+        writeQueuedManifest(runId, feature, env, 'repo-collision')
+        scheduler.enqueue({ runId, feature: feature.name, repoPaths: sourceRepoPaths, cost, reason: 'repo-collision', launch: async () => { await launch() } })
+        return { kind: 'queued', runId, reason: 'repo-collision' }
+      }
+      // Worktree-isolated runs can't collide, so they're gated on resources only.
+      const schedRepoPaths = useWorktree ? [] : sourceRepoPaths
+      const fit = scheduler.fits({ repoPaths: schedRepoPaths, cost })
+      if (!fit.ok) {
+        writeQueuedManifest(runId, feature, env, fit.reason)
+        scheduler.enqueue({ runId, feature: feature.name, repoPaths: schedRepoPaths, cost, reason: fit.reason, launch: async () => { await launch() } })
+        return { kind: 'queued', runId, reason: fit.reason }
+      }
+      const orch = await launch()
+      return { kind: 'started', orch }
     },
+    cancelQueuedRun,
     restartRun: async (runId: string) => {
       const detail = runStore.get(runId)
       if (!detail) return { ok: false, reason: 'run-not-found' as const }
@@ -641,10 +793,11 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
       if (!manifest.env && env) {
         runnerLog.warn(`Restarting run for legacy manifest without persisted env; defaulting to "${env}".`)
       }
+      const portMap = await allocateRunPorts(feature, env)
       let backups: BackupRecord[] | null = null
       if (env) {
         try {
-          backups = applyFeatureEnvset(feature.featureDir, env)
+          backups = applyFeatureEnvset(feature.featureDir, env, portMap)
           if (backups) runnerLog.info(`Applied envset "${env}" for run restart ${feature.name}`)
         } catch (err) {
           runnerLog.warn(`envset apply failed: ${(err as Error).message}`)
@@ -711,6 +864,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
           env,
           runId,
           runDir,
+          portMap,
           ptyFactory,
           runnerLog,
           autoHeal,
@@ -782,10 +936,11 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
       if (!manifest.env && env) {
         runnerLog.warn(`Restarting heal for legacy run without persisted env; defaulting to "${env}".`)
       }
+      const portMap = await allocateRunPorts(feature, env)
       let backups: BackupRecord[] | null = null
       if (env) {
         try {
-          backups = applyFeatureEnvset(feature.featureDir, env)
+          backups = applyFeatureEnvset(feature.featureDir, env, portMap)
           if (backups) runnerLog.info(`Applied envset "${env}" for restarted heal ${feature.name}`)
         } catch (err) {
           runnerLog.warn(`envset apply failed: ${(err as Error).message}`)
@@ -810,6 +965,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
           env,
           runId,
           runDir,
+          portMap,
 	          ptyFactory,
           runnerLog,
           autoHeal: {
@@ -884,18 +1040,31 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
     featuresDir,
     projectRoot: opts.projectRoot,
     workspaceEvents,
-	    startRun: async (feature, env, healAgent) => {
+	    startRun: async (feature, env, healAgent, isolation) => {
 	      const resp = await app.inject({
 	        method: 'POST',
 	        url: '/api/runs',
-	        payload: { feature, env, ...(healAgent ? { healAgent } : {}) },
+	        payload: { feature, env, ...(healAgent ? { healAgent } : {}), ...(isolation ? { isolation } : {}) },
 	      })
-	      if (resp.statusCode !== 200 && resp.statusCode !== 201) {
-        const body = (() => { try { return JSON.parse(resp.payload) } catch { return resp.payload } })()
-        const message = typeof body === 'object' && body && 'error' in body ? String((body as { error: unknown }).error) : String(body)
-        throw new Error(`start_run failed (${resp.statusCode}): ${message}`)
-      }
-	      return JSON.parse(resp.payload) as { runId: string }
+	      const body = (() => { try { return JSON.parse(resp.payload) } catch { return resp.payload } })() as Record<string, unknown>
+	      if (resp.statusCode === 201 || resp.statusCode === 200) {
+	        return { kind: 'started', runId: String(body.runId) }
+	      }
+	      if (resp.statusCode === 202) {
+	        return { kind: 'queued', runId: String(body.runId), reason: body.queueReason === 'repo-collision' ? 'repo-collision' : 'resources' }
+	      }
+	      if (resp.statusCode === 409 && body.type === 'repo_collision_requires_choice') {
+	        return {
+	          kind: 'collision',
+	          conflictingRunId: String(body.conflictingRunId),
+	          conflictingFeature: String(body.conflictingFeature),
+	          repoPaths: Array.isArray(body.repoPaths) ? body.repoPaths as string[] : [],
+	          options: ['worktree', 'queue'],
+	          message: String(body.message ?? 'Same-app collision.'),
+	        }
+	      }
+	      const message = body && 'error' in body ? String(body.error) : String(resp.payload)
+	      throw new Error(`start_run failed (${resp.statusCode}): ${message}`)
 	    },
     restartExternalRun: async (runId, healAgent, guidance) => {
       const orch = await restartExternalRun(runId, healAgent, guidance)

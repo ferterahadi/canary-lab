@@ -232,7 +232,7 @@ describe('deriveRunViewModel', () => {
 
     expect(vm.primaryAlert).toEqual({ tone: 'error', message: 'Run finished with failing tests.' })
     expect(vm.actions.pauseHeal.reason).toBe('Pause & Heal is available only while tests are running.')
-    expect(vm.actions.stop.reason).toBe('Stop is available only while tests are running.')
+    expect(vm.actions.stop.reason).toBe('Stop is available only while a run is queued or its tests are running.')
     expect(vm.actions.cancelHeal.reason).toBe('Cancel Heal is available only while an agent is healing.')
   })
 

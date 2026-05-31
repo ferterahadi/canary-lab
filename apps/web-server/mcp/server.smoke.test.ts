@@ -1222,7 +1222,7 @@ describe('MCP HTTP server (smoke)', () => {
     }
   })
 
-  it('start_run blocks fresh starts while a matching run is healing', async () => {
+  it('start_run asks for a collision choice when a run is already using the same app', async () => {
     const projectRoot = path.resolve(__dirname, '..', '..', '..', 'templates', 'project')
     const logsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-start-block-')))
     const { app, runStore } = await createServer({ projectRoot, logsDir, ptyFactory: inertPtyFactory })
@@ -1235,18 +1235,22 @@ describe('MCP HTTP server (smoke)', () => {
       )
       await client.connect(new StreamableHTTPClientTransport(new URL('/mcp', address)))
 
+      // A run already occupying the broken_todo_api repo (running, not healing,
+      // so the route's heal-reuse path doesn't short-circuit).
       runStore.bootstrap({
-        runId: 'blocking-heal',
+        runId: 'busy-run',
         feature: 'broken_todo_api',
         env: 'local',
         startedAt: '2026-05-08T00:00:00.000Z',
-        status: 'healing',
-        healCycles: 1,
+        status: 'running',
+        healCycles: 0,
         services: [],
-        healMode: 'external',
+        repoPaths: [path.join(projectRoot, 'features', 'broken_todo_api')],
       })
 
-      const result = await client.callTool({
+      // A fresh same-app start detects the collision and asks how to resolve it
+      // instead of blindly starting (or the old active_heal_blocks_start).
+      const collision = await client.callTool({
         name: 'start_run',
         arguments: {
           feature: 'broken_todo_api',
@@ -1254,32 +1258,12 @@ describe('MCP HTTP server (smoke)', () => {
           claim_heal: true,
           session_id: 'sess-block',
           client_kind: 'claude-desktop',
-          force_new: true,
         },
       })
-
-      expect(JSON.parse((result.content?.[0] as { text: string }).text)).toMatchObject({
-        type: 'active_heal_blocks_start',
-        activeRunId: 'blocking-heal',
-        activeStatus: 'healing',
-      })
-
-      const differentRun = await client.callTool({
-        name: 'start_run',
-        arguments: {
-          feature: 'broken_todo_api',
-          env: 'local',
-          run_ref: 'some-other-run',
-          claim_heal: true,
-          session_id: 'sess-block',
-          client_kind: 'claude-desktop',
-        },
-      })
-
-      expect(JSON.parse((differentRun.content?.[0] as { text: string }).text)).toMatchObject({
-        type: 'active_heal_blocks_start',
-        activeRunId: 'blocking-heal',
-        requestedRunRef: 'some-other-run',
+      expect(JSON.parse((collision.content?.[0] as { text: string }).text)).toMatchObject({
+        type: 'repo_collision_requires_choice',
+        conflictingRunId: 'busy-run',
+        options: ['worktree', 'queue'],
       })
     } finally {
       if (client) await client.close().catch(() => undefined)

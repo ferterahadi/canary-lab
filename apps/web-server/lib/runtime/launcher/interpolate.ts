@@ -5,7 +5,13 @@ import { parseDotenv } from '../../../../../shared/lib/dotenv-edit'
 export interface TokenCtx {
   envName: string | undefined
   envsetsDir: string
+  /** Per-run allocated ports keyed by slot name. Resolves the reserved
+   *  `${port.<slot>}` namespace. Independent of envName/envsets. */
+  ports?: Map<string, number>
 }
+
+/** Reserved token namespace for per-run allocated ports (`${port.api}`). */
+const PORT_SLOT = 'port'
 
 const TOKEN_RE = /\$\{([a-zA-Z0-9._-]+)\.([a-zA-Z0-9_-]+)\}/g
 
@@ -37,13 +43,31 @@ export function interpolateFeatureTokens(
   ctx: TokenCtx,
   cache: Cache = makeTokenCache(),
 ): string {
-  if (!ctx.envName || !value.includes('${')) return value
+  if (!value.includes('${')) return value
   return value.replace(TOKEN_RE, (full, slot, key) => {
-    const map = loadSlot(ctx.envsetsDir, ctx.envName!, slot, cache)
+    // Reserved per-run port namespace — independent of env/envsets.
+    if (slot === PORT_SLOT) {
+      const port = ctx.ports?.get(key)
+      return port == null ? full : String(port)
+    }
+    // Envset-backed tokens require a selected env to resolve.
+    if (!ctx.envName) return full
+    const map = loadSlot(ctx.envsetsDir, ctx.envName, slot, cache)
     if (!map) return full
     const v = map.get(key)
     return v ?? full
   })
+}
+
+/**
+ * Resolve ONLY the reserved `${port.<slot>}` namespace in arbitrary text — used
+ * when applying envset files for a run, so a multi-service feature's
+ * inter-service URLs and config-file listen ports follow the run's allocated
+ * ports. Every other `${...}` token is left literal (envName is undefined, so
+ * envset-slot tokens never resolve here).
+ */
+export function resolvePortTokens(content: string, ports: Map<string, number>): string {
+  return interpolateFeatureTokens(content, { envName: undefined, envsetsDir: '', ports })
 }
 
 export function interpolateConfigTokens<T>(

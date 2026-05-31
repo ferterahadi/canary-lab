@@ -17,7 +17,9 @@ vi.mock('../api/client', async () => {
 })
 
 vi.mock('../state/RunsContext', () => ({
-  useRuns: () => ({ connection: 'live' }),
+  useRuns: () => ({ connection: 'live', runs: [] }),
+  useActiveRuns: () => ({ runs: [], count: 0 }),
+  useRunDetails: () => ({}),
 }))
 
 vi.mock('./WizardTaskStatus', () => ({
