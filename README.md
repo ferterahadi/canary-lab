@@ -3,14 +3,14 @@
 [![npm](https://img.shields.io/npm/v/canary-lab.svg)](https://www.npmjs.com/package/canary-lab)
 [![license](https://img.shields.io/npm/l/canary-lab.svg)](LICENSE)
 
-Canary Lab runs Playwright tests, captures structured evidence on failure, and dispatches an agent (Claude or Codex) to investigate the failing run, edit application code, and rerun until the tests pass.
+Run local Playwright tests across multiple services and give Claude/Codex the exact failure context to fix them.
+
+Canary Lab wraps Playwright with service startup, env switching, run history, failure-context extraction, agent handoff, and rerun signals. Per-run state lives under `logs/runs/<runId>/`, so a failing run has a durable evidence trail instead of disappearing into terminal scrollback.
 
 The model is tests-as-spec: tests encode intended behavior, and a failed test means a regression in the code, not drift in the test. The usual self-healing test tools do the opposite — they assume the application changed intentionally and the test should adapt.
 
-Playwright executes the tests. Canary Lab owns service startup, env switching, run history, failure-context extraction, agent handoff, and rerun signals. Per-run state lives under `logs/runs/<runId>/`.
 
-
-![Canary Lab UI walkthrough](docs/assets/canary-lab-ui-walkthrough.png)
+![Canary Lab repair loop: failing Playwright test, saved context, agent fix, passing rerun](docs/assets/canary-lab-repair-loop.gif)
 
 See [CHANGELOG.md](CHANGELOG.md) for release notes.
 
@@ -43,6 +43,18 @@ Canary Lab handles the run context around Playwright:
 - Rerun and restart signals after a fix.
 
 The goal is to keep run state explicit. A failed Playwright run should have enough surrounding context for the next human or agent to inspect what happened, change the app or test, and continue without relying on terminal scrollback.
+
+## Why Not Just Playwright?
+
+Use plain Playwright when one command gives you enough context. Canary Lab is for local workflows where the failure depends on more than a browser assertion: which services were running, which env files were active, what the backend logged, and which screenshots, traces, or videos were produced.
+
+Canary Lab does not replace Playwright's test language, browser runner, assertions, fixtures, or reporters. It keeps Playwright visible, then adds the local orchestration and failure handoff that make a failed run easier for a human or agent to repair.
+
+## Common Use Cases
+
+- **Multi-repo local apps:** start a frontend, API, worker, and dependent service together, then keep each service log attached to the Playwright run that used it.
+- **Environment switching:** run the same feature against `local`, `staging`, or `production` envsets without hand-editing `.env` files before and after each run.
+- **Agent repair from saved evidence:** give Claude or Codex the failure slice, Playwright summary, screenshots, traces, service logs, and diagnosis journal, then let the agent signal `rerun` or `restart` after a fix.
 
 ## Use It When
 
