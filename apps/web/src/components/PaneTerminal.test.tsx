@@ -192,6 +192,54 @@ describe('PaneTerminal', () => {
     expect(terminalState.writes).toContain('\r\nPane exited code=0')
   })
 
+  it('shows the empty-state placeholder after the grace window, then hides it once output streams', async () => {
+    vi.useFakeTimers()
+    try {
+      await act(async () => {
+        root.render(
+          <PaneTerminal
+            runId="r1"
+            paneId="playwright"
+            emptyState={{ title: 'Playwright', hint: 'Test output appears here.' }}
+          />,
+        )
+      })
+
+      // During the grace window the placeholder is suppressed (buffered output
+      // may still be replaying), so the pane stays bare.
+      expect(container.textContent).not.toContain('Playwright')
+
+      act(() => {
+        vi.advanceTimersByTime(700)
+      })
+      expect(container.textContent).toContain('Playwright')
+      expect(container.textContent).toContain('Test output appears here.')
+
+      // First streamed chunk → the pane has content, placeholder disappears.
+      act(() => {
+        paneState.options[0].onData?.('hello world')
+      })
+      expect(container.textContent).not.toContain('Playwright')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('omits the placeholder entirely when no emptyState is provided', async () => {
+    vi.useFakeTimers()
+    try {
+      await act(async () => {
+        root.render(<PaneTerminal runId="r1" paneId="agent" />)
+      })
+      act(() => {
+        vi.advanceTimersByTime(700)
+      })
+      expect(container.textContent).toBe('')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('loads the WebGL renderer for the agent pane only', async () => {
     await act(async () => {
       root.render(<PaneTerminal runId="r1" paneId="agent" />)

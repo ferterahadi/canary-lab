@@ -189,7 +189,11 @@ export function RunDetailColumn({
             </div>
             <div className="flex-1 min-h-0">
               {activeService && (
-                <PaneTerminal runId={m.runId} paneId={`service:${activeService.safeName}`} />
+                <PaneTerminal
+                  runId={m.runId}
+                  paneId={`service:${activeService.safeName}`}
+                  emptyState={{ title: 'Services', hint: 'Output appears here once this service writes to its log.' }}
+                />
               )}
             </div>
           </div>
@@ -234,6 +238,7 @@ export function RunDetailColumn({
                 runId={m.runId}
                 paneId="agent"
                 onExit={handleAgentPaneExit}
+                emptyState={{ title: 'Heal agent', hint: 'Waiting for the heal agent to start — its session streams here once it begins.' }}
               />
             )}
           </div>
@@ -655,7 +660,13 @@ function PlaywrightPanel({
         <SegmentButton active={view === 'playback'} onClick={() => onViewChange('playback')}>Playback</SegmentButton>
       </div>
       <div className="flex-1 min-h-0">
-        {view === 'terminal' && <PaneTerminal runId={runId} paneId="playwright" />}
+        {view === 'terminal' && (
+          <PaneTerminal
+            runId={runId}
+            paneId="playwright"
+            emptyState={{ title: 'Playwright', hint: 'Test output appears here once Playwright starts running.' }}
+          />
+        )}
         {view === 'playback' && (
           <div className="h-full overflow-y-auto scrollbar-thin" style={{ background: 'var(--bg-base)' }}>
             {diagnostics && <VerificationDiagnosticsPanel diagnostics={diagnostics} />}
