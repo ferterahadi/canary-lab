@@ -13,24 +13,26 @@ import {
 const WIDTH = 1920
 const HEIGHT = 1080
 const FPS = 24
-const DURATION = FPS * 24
+const DURATION = FPS * 20
 const CENTER_X = WIDTH / 2
 const CENTER_Y = HEIGHT / 2
 
 const timing = {
   introIn: 0,
-  introOut: 88,
-  appIn: 76,
-  appOut: 508,
-  healingStart: 188,
-  healingEnd: 244,
-  agentFixIn: 236,
-  agentFixOut: 324,
-  rerunIn: 316,
-  journalIn: 392,
-  finalIn: 500,
+  introOut: 72,
+  appIn: 56,
+  appOut: 400,
+  healingStart: 128,
+  healingEnd: 166,
+  agentFixIn: 158,
+  agentFixOut: 238,
+  rerunIn: 226,
+  journalIn: 300,
+  finalIn: 374,
   finalOut: DURATION,
 }
+
+const journalScrollEnd = timing.finalIn - 3
 
 type Shot = {
   frame: number
@@ -48,18 +50,20 @@ function clamp(value: number, min: number, max: number): number {
 }
 
 function fade(frame: number, start: number, end: number, inFrames = 8, outFrames = 8): number {
-  const fadeIn = inFrames <= 0
+  const rawIn = inFrames <= 0
     ? (frame >= start ? 1 : 0)
     : interpolate(frame, [start, start + inFrames], [0, 1], {
       extrapolateLeft: 'clamp',
       extrapolateRight: 'clamp',
     })
-  const fadeOut = outFrames <= 0
+  const fadeIn = inFrames <= 0 ? rawIn : Easing.out(Easing.cubic)(rawIn)
+  const rawOut = outFrames <= 0
     ? (frame < end ? 1 : 0)
     : interpolate(frame, [end - outFrames, end], [1, 0], {
       extrapolateLeft: 'clamp',
       extrapolateRight: 'clamp',
     })
+  const fadeOut = outFrames <= 0 ? rawOut : 1 - Easing.in(Easing.cubic)(1 - rawOut)
   return Math.min(fadeIn, fadeOut)
 }
 
@@ -94,19 +98,28 @@ function holdCamera(): Shot[] {
 function healingCamera(): Shot[] {
   return [
     { frame: timing.healingStart, x: CENTER_X, y: CENTER_Y, zoom: 1 },
-    { frame: timing.healingStart + 7, x: 1035, y: 575, zoom: 1.72 },
-    { frame: timing.healingStart + 11, x: 1050, y: 585, zoom: 1.64 },
-    { frame: timing.healingEnd, x: 1050, y: 585, zoom: 1.64 },
+    { frame: timing.healingStart + 5, x: 1040, y: 575, zoom: 1.86 },
+    { frame: timing.healingStart + 9, x: 1050, y: 585, zoom: 1.68 },
+    { frame: timing.healingEnd, x: 1050, y: 585, zoom: 1.68 },
   ]
 }
 
 function rerunCamera(): Shot[] {
   return [
-    { frame: timing.rerunIn, x: 1050, y: 585, zoom: 1.64 },
-    { frame: timing.rerunIn + 12, x: 1050, y: 585, zoom: 1.64 },
-    { frame: timing.rerunIn + 20, x: 940, y: 532, zoom: 0.96 },
-    { frame: timing.rerunIn + 24, x: CENTER_X, y: CENTER_Y, zoom: 1 },
+    { frame: timing.rerunIn, x: 1050, y: 585, zoom: 1.68 },
+    { frame: timing.rerunIn + 6, x: 940, y: 532, zoom: 0.92 },
+    { frame: timing.rerunIn + 10, x: CENTER_X, y: CENTER_Y, zoom: 1 },
     { frame: timing.journalIn, x: CENTER_X, y: CENTER_Y, zoom: 1 },
+  ]
+}
+
+function journalCamera(): Shot[] {
+  return [
+    { frame: timing.journalIn, x: CENTER_X, y: CENTER_Y, zoom: 1 },
+    { frame: timing.journalIn + 8, x: 1200, y: 695, zoom: 1.58 },
+    { frame: timing.journalIn + 13, x: 1210, y: 705, zoom: 1.48 },
+    { frame: journalScrollEnd, x: 1210, y: 740, zoom: 1.48 },
+    { frame: timing.finalIn, x: 1210, y: 748, zoom: 1.48 },
   ]
 }
 
@@ -134,21 +147,34 @@ function cameraBlur(frame: number, ranges: Array<[number, number]>): number {
     const distance = Math.abs(frame - mid) / ((end - start) / 2)
     return Math.max(max, clamp(1 - distance, 0, 1))
   }, 0)
-  return strength * 3.8
+  return strength * 4.2
 }
 
 function agentWindowMotion(frame: number, start: number, end: number): CSSProperties {
-  const enter = snapEased(frame, start, start + 12)
-  const exit = interpolate(frame, [end - 10, end], [1, 0], {
+  const enter = snapEased(frame, start, start + 8)
+  const settle = snapEased(frame, start + 6, start + 13)
+  const exit = interpolate(frame, [end - 7, end], [1, 0], {
     extrapolateLeft: 'clamp',
     extrapolateRight: 'clamp',
   })
   const presence = Math.min(enter, exit)
-  const y = (1 - enter) * 22
-  const scale = 0.972 + enter * 0.028
-  const blur = (1 - presence) * 5
+  const y = (1 - enter) * 16
+  const scale = 0.96 + enter * 0.04 + (1 - settle) * enter * 0.01
+  const blur = (1 - presence) * 4.5
   return {
     transform: `translate3d(0, ${y}px, 0) scale(${scale})`,
+    filter: `blur(${blur}px)`,
+  }
+}
+
+function sceneKick(frame: number, start: number, end: number): CSSProperties {
+  const kickIn = snapEased(frame, start, start + 7)
+  const kickOut = snapEased(frame, end - 8, end)
+  const opacity = Math.min(kickIn, 1 - kickOut)
+  const scale = 0.982 + kickIn * 0.018 - kickOut * 0.012
+  const blur = (1 - opacity) * 2.2
+  return {
+    transform: `scale(${scale})`,
     filter: `blur(${blur}px)`,
   }
 }
@@ -199,12 +225,55 @@ function LiveAppShot({
   )
 }
 
+function JournalWarpShot({ opacity }: { opacity: number }) {
+  const frame = useCurrentFrame()
+  const progress = interpolate(frame, [timing.journalIn, journalScrollEnd], [0, 1], {
+    extrapolateLeft: 'clamp',
+    extrapolateRight: 'clamp',
+  })
+  const backgroundY = valueBetween(frame, timing.journalIn, timing.finalIn, -46, 104)
+
+  return (
+    <>
+      <AbsoluteFill
+        style={{
+          overflow: 'hidden',
+          opacity: opacity * fade(frame, timing.journalIn, timing.finalIn, 1, 10),
+          background: '#020403',
+          filter: 'blur(11px) brightness(0.42) saturate(0.9)',
+          transform: `translate3d(0, ${backgroundY}px, 0) scale(1.05)`,
+        }}
+      >
+        <Img
+          src={frameSource(frame)}
+          style={{
+            width: WIDTH,
+            height: HEIGHT,
+            objectFit: 'cover',
+          }}
+        />
+        <div style={scanlineStyle} />
+      </AbsoluteFill>
+      <LiveAppShot
+        opacity={opacity}
+        shots={journalCamera()}
+        blurRanges={[
+          [timing.journalIn, timing.journalIn + 13],
+          [journalScrollEnd - 4, timing.finalIn],
+        ]}
+        brightness={0.98 + progress * 0.02}
+      />
+    </>
+  )
+}
+
 function ProductScene() {
   const frame = useCurrentFrame()
   const opacity = fade(frame, timing.appIn, timing.appOut, 6, 10)
   const fullOpacity = frame < timing.healingStart ? opacity : 0
-  const healingOpacity = opacity * fade(frame, timing.healingStart, timing.healingEnd, 1, 6)
-  const rerunOpacity = opacity * fade(frame, timing.rerunIn, timing.appOut, 2, 6)
+  const healingOpacity = opacity * fade(frame, timing.healingStart, timing.healingEnd, 0, 6)
+  const rerunOpacity = opacity * fade(frame, timing.rerunIn, timing.journalIn + 5, 2, 5)
+  const journalOpacity = opacity * fade(frame, timing.journalIn, timing.finalIn, 1, 8)
 
   return (
     <>
@@ -222,23 +291,24 @@ function ProductScene() {
       <LiveAppShot
         opacity={rerunOpacity}
         shots={rerunCamera()}
-        blurRanges={[[timing.rerunIn + 12, timing.rerunIn + 24]]}
+        blurRanges={[[timing.rerunIn, timing.rerunIn + 10]]}
         brightness={0.96}
       />
+      <JournalWarpShot opacity={journalOpacity} />
     </>
   )
 }
 
 function AgentIntro() {
   const frame = useCurrentFrame()
-  const opacity = fade(frame, timing.introIn, timing.introOut, 10, 10)
+  const opacity = fade(frame, timing.introIn, timing.introOut, 8, 6)
   const command = '/canary-lab run checkout. Fix failures. Rerun until green.'
-  const typed = command.slice(0, Math.round(command.length * eased(frame, seconds(0.8), seconds(2.5))))
-  const replyOpacity = fade(frame, seconds(2.6), timing.introOut - 4, 8, 6)
-  const bootOpacity = fade(frame, seconds(3.2), timing.introOut, 8, 8)
+  const typed = command.slice(0, Math.round(command.length * eased(frame, seconds(0.45), seconds(1.55))))
+  const replyOpacity = fade(frame, seconds(1.6), timing.introOut - 3, 5, 5)
+  const bootOpacity = fade(frame, seconds(2.05), timing.introOut, 5, 5)
 
   return (
-    <AbsoluteFill style={{ ...agentSceneStyle, opacity }}>
+    <AbsoluteFill style={{ ...agentSceneStyle, opacity, ...sceneKick(frame, timing.introIn, timing.introOut) }}>
       <AgentGlow />
       <div style={{ ...agentWindowStyle, ...agentWindowMotion(frame, timing.introIn, timing.introOut) }}>
         <AgentTitleBar label="AI Agent" status="Canary Lab connected" />
@@ -270,13 +340,13 @@ function AgentIntro() {
 
 function AgentFixScene() {
   const frame = useCurrentFrame()
-  const opacity = fade(frame, timing.agentFixIn, timing.agentFixOut, 8, 8)
-  const first = fade(frame, timing.agentFixIn + 10, timing.agentFixOut, 6, 8)
-  const second = fade(frame, timing.agentFixIn + 34, timing.agentFixOut, 6, 8)
-  const patch = fade(frame, timing.agentFixIn + 46, timing.agentFixOut, 5, 8)
+  const opacity = fade(frame, timing.agentFixIn, timing.agentFixOut, 6, 6)
+  const first = fade(frame, timing.agentFixIn + 5, timing.agentFixOut, 4, 6)
+  const second = fade(frame, timing.agentFixIn + 18, timing.agentFixOut, 4, 6)
+  const patch = fade(frame, timing.agentFixIn + 30, timing.agentFixOut, 4, 6)
 
   return (
-    <AbsoluteFill style={{ ...agentSceneStyle, opacity }}>
+    <AbsoluteFill style={{ ...agentSceneStyle, opacity, ...sceneKick(frame, timing.agentFixIn, timing.agentFixOut) }}>
       <AgentGlow />
       <div style={{ ...agentWindowStyle, ...agentWindowMotion(frame, timing.agentFixIn, timing.agentFixOut) }}>
         <AgentTitleBar label="AI Agent" status="Reading Canary Lab context" />
@@ -312,12 +382,18 @@ function AgentFixScene() {
 
 function FinalScene() {
   const frame = useCurrentFrame()
-  const opacity = fade(frame, timing.finalIn, timing.finalOut, 10, 0)
-  const scale = interpolate(frame, [timing.finalIn, timing.finalIn + 18], [0.96, 1], {
-    extrapolateLeft: 'clamp',
-    extrapolateRight: 'clamp',
-  })
-  const itemOpacity = (index: number) => fade(frame, timing.finalIn + 28 + index * 6, timing.finalOut, 4, 0)
+  const opacity = fade(frame, timing.finalIn, timing.finalOut, 7, 0)
+  const snapIn = snapEased(frame, timing.finalIn, timing.finalIn + 9)
+  const settle = snapEased(frame, timing.finalIn + 7, timing.finalIn + 15)
+  const scale = 0.94 + snapIn * 0.072 - settle * 0.012
+  const itemMotion = (index: number): CSSProperties => {
+    const start = timing.finalIn + 18 + index * 3
+    const enter = snapEased(frame, start, start + 5)
+    return {
+      opacity: fade(frame, start, timing.finalOut, 3, 0),
+      transform: `translate3d(0, ${(1 - enter) * 18}px, 0) scale(${0.982 + enter * 0.018})`,
+    }
+  }
 
   return (
     <AbsoluteFill style={{ ...finalSceneStyle, opacity }}>
@@ -335,7 +411,7 @@ function FinalScene() {
             'Let AI Agent fix and rerun',
             'Keep the repair journal',
           ].map((item, index) => (
-            <div key={item} style={{ ...finalItemStyle, opacity: itemOpacity(index) }}>
+            <div key={item} style={{ ...finalItemStyle, ...itemMotion(index) }}>
               <span style={finalItemDotStyle} />
               {item}
             </div>
