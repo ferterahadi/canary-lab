@@ -2,7 +2,6 @@ import { forwardRef, useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { RunDetail } from '../api/types'
 import * as api from '../api/client'
-import { deriveRunViewModel } from '../lib/run-view-model'
 import { useActiveRuns, useRuns } from '../state/RunsContext'
 import { isActiveRunStatus } from '../../../../shared/run-state'
 import { EvaluationExportTaskStatus } from './EvaluationExportTaskToast'
@@ -29,7 +28,6 @@ export function GlobalStatusBar({ activeRunDetail, onNavigateToRun }: Props) {
   const { count: activeCount } = useActiveRuns()
   const [runsOpen, setRunsOpen] = useState(false)
   const status = activeRunDetail?.manifest.status
-  const view = deriveRunViewModel(activeRunDetail)
 
   // Guard: only treat 'running' and 'healing' as truly active. The runs
   // index can become stale if the orchestrator crashes, so double-check the
@@ -70,31 +68,18 @@ export function GlobalStatusBar({ activeRunDetail, onNavigateToRun }: Props) {
         </>
       )}
       <div className="ml-auto hidden min-w-0 items-center justify-end gap-2 sm:flex">
-        {activeRunDetail && isActive && (
+        {/* Only surface the Runs button while something is running, healing, or
+            queued. With no active runs there's nothing live to jump to, so the
+            button is hidden to keep the bar quiet. */}
+        {activeCount > 0 && (
           <button
             type="button"
-            onClick={() => onNavigateToRun?.(activeRunDetail.manifest.feature, activeRunDetail.manifest.runId)}
-            className="cl-button flex min-w-0 max-w-[460px] items-center gap-2 px-2.5 py-1"
-            title={`Go to active run: ${activeRunDetail.manifest.feature} ${view.headline} ${activeRunDetail.manifest.runId}`}
+            onClick={() => setRunsOpen(true)}
+            className="cl-button flex shrink-0 items-center gap-1.5 px-2.5 py-1"
+            title="Show all runs"
+            aria-label={`Show all runs (${activeCount} active)`}
           >
-            <span className="shrink-0" style={{ color: 'var(--text-muted)', fontSize: 11 }}>Active</span>
-            <span className="truncate" style={{ color: 'var(--text-primary)', fontSize: 12, fontWeight: 500 }}>{activeRunDetail.manifest.feature}</span>
-            <span className="hidden min-w-0 truncate xl:inline" style={{ color: 'var(--text-secondary)', fontSize: 11.5 }}>{view.headline}</span>
-            <span className="hidden min-w-0 truncate 2xl:inline" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontSize: 11 }}>
-              {activeRunDetail.manifest.runId}
-            </span>
-            <span className="shrink-0" style={{ color: 'var(--accent)' }}>→</span>
-          </button>
-        )}
-        <button
-          type="button"
-          onClick={() => setRunsOpen(true)}
-          className="cl-button flex shrink-0 items-center gap-1.5 px-2.5 py-1"
-          title="Show all runs"
-          aria-label={`Show all runs${activeCount > 0 ? ` (${activeCount} active)` : ''}`}
-        >
-          <span style={{ color: 'var(--text-primary)', fontSize: 12, fontWeight: 500 }}>Runs</span>
-          {activeCount > 0 && (
+            <span style={{ color: 'var(--text-primary)', fontSize: 12, fontWeight: 500 }}>Runs</span>
             <span
               className="inline-flex min-w-[16px] items-center justify-center rounded-full px-1 text-[10px] font-semibold"
               style={{
@@ -104,8 +89,8 @@ export function GlobalStatusBar({ activeRunDetail, onNavigateToRun }: Props) {
             >
               {activeCount}
             </span>
-          )}
-        </button>
+          </button>
+        )}
         <WizardTaskStatus />
         <EvaluationExportTaskStatus />
       </div>
