@@ -12,6 +12,12 @@
       "runtimeExecutable": "python3",
       "runtimeArgs": ["-m", "http.server", "5174", "--directory", "docs"],
       "port": 5174
+    },
+    {
+      "name": "boot-mockup",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "5180", "--directory", ".superpowers/boot-mockup"],
+      "port": 5180
     }
   ]
 }

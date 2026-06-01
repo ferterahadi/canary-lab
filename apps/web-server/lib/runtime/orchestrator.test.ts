@@ -7,6 +7,7 @@ import { EventEmitter } from 'events'
 import {
   RunOrchestrator,
   buildServiceSpecs,
+  collectPortSlots,
   type ServiceSpec,
 } from './orchestrator'
 import * as sessionLog from '../agent-session-log'
@@ -188,6 +189,62 @@ describe('buildServiceSpecs', () => {
     })
     const specs = buildServiceSpecs(f, runDir, 'local')
     expect(specs[0].command).toBe('echo ${ghost.X}')
+  })
+
+  it('injects allocated ports as env + resolves ${port.<slot>} in command and probe', () => {
+    const f = makeFeature({
+      repos: [{
+        name: 'r',
+        localPath: tmpDir,
+        startCommands: [{
+          command: 'serve',
+          name: 'svc',
+          ports: [{ name: 'api', env: 'PORT' }],
+          healthCheck: { http: { url: 'http://localhost:${port.api}/' } },
+        }],
+      }],
+    })
+    const portMap = new Map([['api', 51999]])
+    const specs = buildServiceSpecs(f, runDir, 'local', { portMap })
+    expect(specs[0].env).toEqual({ PORT: '51999' })
+    expect(specs[0].allocatedPorts).toEqual({ api: 51999 })
+    expect(specs[0].healthProbe).toEqual({ http: { url: 'http://localhost:51999/' } })
+  })
+
+  it('declares no port env when no port map is supplied (back-compat)', () => {
+    const f = makeFeature({
+      repos: [{
+        name: 'r',
+        localPath: tmpDir,
+        startCommands: [{ command: 'serve', name: 'svc', ports: [{ name: 'api', env: 'PORT' }] }],
+      }],
+    })
+    const specs = buildServiceSpecs(f, runDir, 'local')
+    expect(specs[0].env).toBeUndefined()
+    expect(specs[0].allocatedPorts).toBeUndefined()
+  })
+
+  it('redirects cwd to the worktree override for an isolated repo', () => {
+    const f = makeFeature({
+      repos: [{ name: 'r', localPath: tmpDir, startCommands: [{ command: 'serve', name: 'svc' }] }],
+    })
+    const specs = buildServiceSpecs(f, runDir, 'local', { repoPathOverrides: { r: '/wt/r' } })
+    expect(specs[0].cwd).toBe('/wt/r')
+  })
+
+  it('collectPortSlots gathers unique declared slots for the env', () => {
+    const f = makeFeature({
+      repos: [{
+        name: 'r',
+        localPath: tmpDir,
+        startCommands: [
+          { command: 'a', name: 'a', ports: [{ name: 'api', env: 'PORT' }] },
+          { command: 'b', name: 'b', ports: [{ name: 'api' }, { name: 'admin', env: 'ADMIN_PORT' }] },
+        ],
+      }],
+    })
+    const slots = collectPortSlots(f, 'local')
+    expect(slots.map((s) => s.name).sort()).toEqual(['admin', 'api'])
   })
 
   it('skips an entire repo when its repo-level envs excludes the selected env', () => {

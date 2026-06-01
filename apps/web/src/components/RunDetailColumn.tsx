@@ -89,10 +89,15 @@ export function RunDetailColumn({
     lastHealCyclesRef.current = cycles
   }, [detail?.manifest.healCycles])
 
-  const isVerifyRun = (detail?.manifest.executionType ?? 'run') === 'verify'
+  const executionType = detail?.manifest.executionType ?? 'run'
+  const isVerifyRun = executionType === 'verify'
+  const isBootRun = executionType === 'boot'
   useEffect(() => {
     if (isVerifyRun && tab !== 'overview' && tab !== 'playwright') setTab('overview')
-  }, [isVerifyRun, tab])
+    // A boot-only session has no Playwright / heal / journal — keep the user on
+    // the tabs that exist (overview, run logs, services).
+    if (isBootRun && tab !== 'overview' && tab !== 'run-logs' && tab !== 'services') setTab('overview')
+  }, [isVerifyRun, isBootRun, tab])
 
   if (!runId) {
     return (
@@ -122,7 +127,7 @@ export function RunDetailColumn({
       <header className="cl-panel-header px-4 pt-3 pb-0">
         <div className="flex min-w-0 items-center gap-2">
           <span className="shrink-0">
-            <RunStatusIndicator status={view.displayStatus} />
+            <RunStatusIndicator status={view.displayStatus} executionType={executionType} />
           </span>
           <span
             className="min-w-0 flex-1 truncate text-sm font-medium"
@@ -134,12 +139,12 @@ export function RunDetailColumn({
           <span
             className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase"
             style={{
-              background: isVerify ? 'rgba(14, 165, 233, 0.12)' : 'var(--bg-selected)',
-              color: isVerify ? 'var(--accent)' : 'var(--text-muted)',
+              background: isVerify ? 'rgba(14, 165, 233, 0.12)' : isBootRun ? 'var(--boot-soft)' : 'var(--bg-selected)',
+              color: isVerify ? 'var(--accent)' : isBootRun ? 'var(--boot)' : 'var(--text-muted)',
               letterSpacing: '0.04em',
             }}
           >
-            {isVerify ? 'Verify' : 'Run'}
+            {isVerify ? 'Verify' : isBootRun ? 'Boot' : 'Run'}
           </span>
           <span
             className="shrink-0 truncate text-xs"
@@ -153,9 +158,9 @@ export function RunDetailColumn({
           <TabButton active={tab === 'overview'} onClick={() => setTab('overview')}>Overview</TabButton>
           {!isVerify && <TabButton active={tab === 'run-logs'} onClick={() => setTab('run-logs')}>Run Logs</TabButton>}
           {!isVerify && <TabButton active={tab === 'services'} onClick={() => setTab('services')} disabled={services.length === 0}>Services</TabButton>}
-          <TabButton active={tab === 'playwright'} onClick={() => setTab('playwright')}>Playwright</TabButton>
-          {!isVerify && <TabButton active={tab === 'agent'} onClick={() => setTab('agent')}>Heal agent</TabButton>}
-          {!isVerify && <TabButton active={tab === 'journal'} onClick={() => setTab('journal')}>Journal</TabButton>}
+          {!isBootRun && <TabButton active={tab === 'playwright'} onClick={() => setTab('playwright')}>Playwright</TabButton>}
+          {!isVerify && !isBootRun && <TabButton active={tab === 'agent'} onClick={() => setTab('agent')}>Heal agent</TabButton>}
+          {!isVerify && !isBootRun && <TabButton active={tab === 'journal'} onClick={() => setTab('journal')}>Journal</TabButton>}
         </nav>
       </header>
       <div className="flex-1 min-h-0 overflow-hidden mt-2">
@@ -189,7 +194,11 @@ export function RunDetailColumn({
             </div>
             <div className="flex-1 min-h-0">
               {activeService && (
-                <PaneTerminal runId={m.runId} paneId={`service:${activeService.safeName}`} />
+                <PaneTerminal
+                  runId={m.runId}
+                  paneId={`service:${activeService.safeName}`}
+                  emptyState={{ title: 'Services', hint: 'Output appears here once this service writes to its log.' }}
+                />
               )}
             </div>
           </div>
@@ -234,6 +243,7 @@ export function RunDetailColumn({
                 runId={m.runId}
                 paneId="agent"
                 onExit={handleAgentPaneExit}
+                emptyState={{ title: 'Heal agent', hint: 'Waiting for the heal agent to start — its session streams here once it begins.' }}
               />
             )}
           </div>
@@ -386,8 +396,16 @@ function RunOverviewTab({
           </>
         )}
       </dl>
+      {/* For a boot-only session the held-state message is the point of the
+          screen, so surface it on the overview (normal runs keep it in the
+          Run Logs timeline only). */}
+      {manifest.executionType === 'boot' && view.primaryAlert && (
+        <div className={`mt-4 rounded-md border px-2.5 py-2 text-xs ${alertClass(view.primaryAlert.tone)}`}>
+          {view.primaryAlert.message}
+        </div>
+      )}
       <div className="mt-4">
-        <SectionHeader>Services</SectionHeader>
+        <SectionHeader>{manifest.executionType === 'boot' ? 'Services (open to exercise)' : 'Services'}</SectionHeader>
         {services.length === 0 ? (
           <div className="text-xs" style={{ color: 'var(--text-muted)' }}>No services configured.</div>
         ) : (
@@ -655,7 +673,13 @@ function PlaywrightPanel({
         <SegmentButton active={view === 'playback'} onClick={() => onViewChange('playback')}>Playback</SegmentButton>
       </div>
       <div className="flex-1 min-h-0">
-        {view === 'terminal' && <PaneTerminal runId={runId} paneId="playwright" />}
+        {view === 'terminal' && (
+          <PaneTerminal
+            runId={runId}
+            paneId="playwright"
+            emptyState={{ title: 'Playwright', hint: 'Test output appears here once Playwright starts running.' }}
+          />
+        )}
         {view === 'playback' && (
           <div className="h-full overflow-y-auto scrollbar-thin" style={{ background: 'var(--bg-base)' }}>
             {diagnostics && <VerificationDiagnosticsPanel diagnostics={diagnostics} />}

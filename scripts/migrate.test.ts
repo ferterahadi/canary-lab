@@ -2,7 +2,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { main, planFeatureMigration, rewriteHelper } from './migrate'
+import { main, planFeatureMigration, rewriteHelper, analyzeFeatureConfigText, collectConcurrencyAdvisories } from './migrate'
 
 const tmpDirs: string[] = []
 
@@ -70,6 +70,76 @@ afterEach(() => {
   while (tmpDirs.length) fs.rmSync(tmpDirs.pop()!, { recursive: true, force: true })
   vi.unstubAllEnvs()
   vi.restoreAllMocks()
+})
+
+describe('analyzeFeatureConfigText', () => {
+  it('flags hardcoded ports from healthCheck URLs, --port flags, and tcp/tunnel port fields', () => {
+    const src = `const config = { repos: [{ startCommands: [
+      { command: 'pnpm dev --port 3000', healthCheck: { url: 'http://localhost:5003/health' } },
+      { command: 'x', healthCheck: { tcp: { port: 8080 } } },
+    ] }] }`
+    const a = analyzeFeatureConfigText('mpass', src)
+    expect(a).not.toBeNull()
+    expect(a!.hardcodedPorts).toEqual([3000, 5003, 8080])
+    expect(a!.hasPortSlot).toBe(false)
+    expect(a!.usesPortToken).toBe(false)
+  })
+
+  it('returns null when the config is fully tokenized with no literal ports', () => {
+    const src = `const config = { repos: [{ startCommands: [
+      { command: 'pnpm dev --port \${port.api}', ports: [{ name: 'api', env: 'PORT' }],
+        healthCheck: { url: 'http://localhost:\${port.api}/' } },
+    ] }] }`
+    expect(analyzeFeatureConfigText('ok', src)).toBeNull()
+  })
+
+  it('reports a partial migration: slot+token present but a literal port remains', () => {
+    const src = `const config = { repos: [{ startCommands: [
+      { command: 'pnpm dev --port \${port.api}', ports: [{ name: 'api' }],
+        healthCheck: { url: 'http://localhost:4100/' } },
+    ] }] }`
+    const a = analyzeFeatureConfigText('partial', src)
+    expect(a!.hardcodedPorts).toEqual([4100])
+    expect(a!.hasPortSlot).toBe(true)
+    expect(a!.usesPortToken).toBe(true)
+  })
+
+  it('does not misfire on the words "ports:" or "import"', () => {
+    const src = `import x from 'y'\nconst config = { repos: [{ startCommands: [{ command: 'run', ports: [{ name: 'api', env: 'PORT' }] }] }] }`
+    expect(analyzeFeatureConfigText('clean', src)).toBeNull()
+  })
+
+  it('ignores ports inside comments (illustrative snippets) but keeps http:// URLs intact', () => {
+    const src = [
+      'const config = { repos: [{ startCommands: [{',
+      "  command: 'x', ports: [{ name: 'api', env: 'PORT' }],",
+      '  // switch to `{ tcp: { port: 4100 } }` for raw TCP servers',
+      "  healthCheck: { url: 'http://localhost:\${port.api}/' },",
+      '}] }] }',
+    ].join('\n')
+    // The :4100 lives only in a comment; the real URL is tokenized → no flag.
+    expect(analyzeFeatureConfigText('commented', src)).toBeNull()
+  })
+})
+
+describe('collectConcurrencyAdvisories', () => {
+  it('returns advisories only for features that hardcode a port', () => {
+    const root = mkProjectRoot()
+    const featuresDir = path.join(root, 'features')
+    fs.mkdirSync(path.join(featuresDir, 'hard'))
+    fs.writeFileSync(
+      path.join(featuresDir, 'hard', 'feature.config.cjs'),
+      `module.exports = { config: { repos: [{ startCommands: [{ command: 'x', healthCheck: { url: 'http://localhost:4100/' } }] }] } }`,
+    )
+    fs.mkdirSync(path.join(featuresDir, 'tokenized'))
+    fs.writeFileSync(
+      path.join(featuresDir, 'tokenized', 'feature.config.cjs'),
+      `module.exports = { config: { repos: [{ startCommands: [{ command: 'x --port \${port.api}', ports: [{ name: 'api', env: 'PORT' }], healthCheck: { url: 'http://localhost:\${port.api}/' } }] }] } }`,
+    )
+    const advisories = collectConcurrencyAdvisories(featuresDir, ['hard', 'tokenized'])
+    expect(advisories.map((a) => a.feature)).toEqual(['hard'])
+    expect(advisories[0].hardcodedPorts).toEqual([4100])
+  })
 })
 
 describe('rewriteHelper', () => {

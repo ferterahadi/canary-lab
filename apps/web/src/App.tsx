@@ -8,6 +8,8 @@ import { ResizablePanels } from './components/ResizablePanels'
 import { VerticalSplit } from './components/VerticalSplit'
 import { GlobalStatusBar } from './components/GlobalStatusBar'
 import { AddTestWizard } from './components/AddTestWizard'
+import { CollisionConfirmDialog } from './components/CollisionConfirmDialog'
+import type { RepoCollisionChoice } from './api/client'
 import * as api from './api/client'
 import { connectWorkspaceEvents } from './api/workspace-socket'
 import { useRuns, useRun, useGlobalActiveRun } from './state/RunsContext'
@@ -20,6 +22,7 @@ export function App() {
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
   const [configFor, setConfigFor] = useState<string | null>(null)
   const [testsRefreshKey, setTestsRefreshKey] = useState(0)
+  const [collisionPrompt, setCollisionPrompt] = useState<{ feature: string; env?: string; mode?: 'test' | 'boot'; info: RepoCollisionChoice } | null>(null)
   const pendingRunSelectionRef = useRef<string | null>(null)
   const selectedFeatureRef = useRef<string | null>(null)
 
@@ -42,9 +45,11 @@ export function App() {
   const { entry: globalActiveRunEntry, detail: activeRunDetail } = useGlobalActiveRun()
   const { wizardOpen, closeWizard } = useWizardDrafts()
 
-  // Column 3 lists runs scoped to the currently-selected feature.
+  // Column 3 lists runs scoped to the currently-selected feature. Boot-only
+  // sessions are excluded — they're not test runs and live in the global
+  // Services surface, not the Runs list.
   const featureRuns = useMemo(
-    () => allRuns.filter((r) => r.feature === selectedFeature),
+    () => allRuns.filter((r) => r.feature === selectedFeature && r.executionType !== 'boot'),
     [allRuns, selectedFeature],
   )
 
@@ -87,15 +92,42 @@ export function App() {
     ?? selectedRunForFeature?.status
     ?? latestRunForFeature?.status
 
-  const handleStartRun = useCallback(async (env?: string): Promise<void> => {
+  const handleStartRun = useCallback(async (env?: string, mode: 'test' | 'boot' = 'test'): Promise<void> => {
     if (!selectedFeature) return
-    if (globalActiveRunEntry) return // single-run constraint
+    // Concurrent runs are allowed: different apps run in parallel on distinct
+    // allocated ports; the backend admits or queues as resources allow. A
+    // same-repo collision comes back as a 409 — prompt the user to isolate or
+    // queue, then re-issue with their choice (preserving the boot/test mode).
     try {
-      const runId = await startRunAction(selectedFeature, env)
-      pendingRunSelectionRef.current = runId
-      setSelectedRunId(runId)
+      const runId = await startRunAction(selectedFeature, env, undefined, mode)
+      // Boot sessions are managed in the global Services overlay, never column
+      // 3 — don't select them into the run-detail pane.
+      if (mode !== 'boot') {
+        pendingRunSelectionRef.current = runId
+        setSelectedRunId(runId)
+      }
+    } catch (err) {
+      const collision = api.asRepoCollision(err)
+      if (collision) {
+        setCollisionPrompt({ feature: selectedFeature, env, mode, info: collision })
+        return
+      }
+      /* other errors surfaced via UI */
+    }
+  }, [selectedFeature, startRunAction])
+
+  const resolveCollision = useCallback(async (isolation: 'worktree' | 'queue'): Promise<void> => {
+    const prompt = collisionPrompt
+    setCollisionPrompt(null)
+    if (!prompt) return
+    try {
+      const runId = await startRunAction(prompt.feature, prompt.env, isolation, prompt.mode)
+      if (prompt.mode !== 'boot') {
+        pendingRunSelectionRef.current = runId
+        setSelectedRunId(runId)
+      }
     } catch { /* surfaced via UI */ }
-  }, [selectedFeature, globalActiveRunEntry, startRunAction])
+  }, [collisionPrompt, startRunAction])
 
   const handleStartVerification = useCallback(async (input: {
     configId?: string
@@ -103,11 +135,10 @@ export function App() {
     playwrightEnvsetId?: string
   }): Promise<void> => {
     if (!selectedFeature) return
-    if (globalActiveRunEntry) return
     const runId = await startVerificationAction(selectedFeature, input)
     pendingRunSelectionRef.current = runId
     setSelectedRunId(runId)
-  }, [selectedFeature, globalActiveRunEntry, startVerificationAction])
+  }, [selectedFeature, startVerificationAction])
 
   const refreshFeatures = useCallback((preferredFeature?: string | null): void => {
     api.listFeatures().then((data) => {
@@ -115,12 +146,12 @@ export function App() {
       if (preferredFeature && data.some((f) => f.name === preferredFeature)) {
         pendingRunSelectionRef.current = null
         setSelectedFeature(preferredFeature)
-        setSelectedRunId(allRuns.find((r) => r.feature === preferredFeature)?.runId ?? null)
+        setSelectedRunId(allRuns.find((r) => r.feature === preferredFeature && r.executionType !== 'boot')?.runId ?? null)
       } else if (!selectedFeature || !data.some((f) => f.name === selectedFeature)) {
         const nextFeature = data[0]?.name ?? null
         pendingRunSelectionRef.current = null
         setSelectedFeature(nextFeature)
-        setSelectedRunId(nextFeature ? allRuns.find((r) => r.feature === nextFeature)?.runId ?? null : null)
+        setSelectedRunId(nextFeature ? allRuns.find((r) => r.feature === nextFeature && r.executionType !== 'boot')?.runId ?? null : null)
       }
     }).catch(() => {})
   }, [allRuns, selectedFeature])
@@ -168,10 +199,11 @@ export function App() {
           selectedFeature={selectedFeature}
           activeRunFeature={globalActiveRunEntry?.feature ?? null}
           activeRunStatus={globalActiveRunEntry?.status ?? null}
+          activeRunExecutionType={globalActiveRunEntry?.executionType ?? null}
           onSelectFeature={(name) => {
             pendingRunSelectionRef.current = null
             setSelectedFeature(name)
-            setSelectedRunId(allRuns.find((r) => r.feature === name)?.runId ?? null)
+            setSelectedRunId(allRuns.find((r) => r.feature === name && r.executionType !== 'boot')?.runId ?? null)
           }}
           onFeaturesChanged={refreshFeatures}
         />
@@ -212,12 +244,7 @@ export function App() {
               onSelectRun={setSelectedRunId}
               onStartRun={handleStartRun}
               onStartVerification={handleStartVerification}
-              runDisabled={Boolean(globalActiveRunEntry)}
-              runDisabledReason={
-                globalActiveRunEntry
-                  ? `Another run is ${globalActiveRunEntry.status} (${globalActiveRunEntry.feature}). Stop it first.`
-                  : undefined
-              }
+              runDisabled={false}
             />
           )}
           bottom={<RunDetailColumn runId={selectedRunId} onOpenPlaywrightSettings={setConfigFor} />}
@@ -250,7 +277,7 @@ export function App() {
               setFeatures(data)
               pendingRunSelectionRef.current = null
               setSelectedFeature(nextFeature)
-              setSelectedRunId(allRuns.find((r) => r.feature === nextFeature)?.runId ?? null)
+              setSelectedRunId(allRuns.find((r) => r.feature === nextFeature && r.executionType !== 'boot')?.runId ?? null)
             }).catch(() => {})
           }}
           onDeleted={(deletedFeature) => {
@@ -261,7 +288,7 @@ export function App() {
                 const nextFeature = data[0]?.name ?? null
                 pendingRunSelectionRef.current = null
                 setSelectedFeature(nextFeature)
-                setSelectedRunId(nextFeature ? allRuns.find((r) => r.feature === nextFeature)?.runId ?? null : null)
+                setSelectedRunId(nextFeature ? allRuns.find((r) => r.feature === nextFeature && r.executionType !== 'boot')?.runId ?? null : null)
               }
             }).catch(() => {})
           }}
@@ -272,6 +299,14 @@ export function App() {
           features={features}
           onClose={closeWizard}
           onAcceptedFeature={(feature) => refreshFeatures(feature)}
+        />
+      )}
+      {collisionPrompt && (
+        <CollisionConfirmDialog
+          info={collisionPrompt.info}
+          feature={collisionPrompt.feature}
+          onChoose={resolveCollision}
+          onCancel={() => setCollisionPrompt(null)}
         />
       )}
     </div>

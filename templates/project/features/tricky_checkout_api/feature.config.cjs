@@ -10,7 +10,9 @@ const config = {
         {
           name: 'tricky-checkout-api-server',
           command: 'npx tsx scripts/server.ts',
-          healthCheck: { http: { url: 'http://localhost:4200/', timeoutMs: 3000 } },
+          // Per-run allocated port (injected as PORT); reference via ${port.api}.
+          ports: [{ name: 'api', env: 'PORT' }],
+          healthCheck: { http: { url: 'http://localhost:${port.api}/', timeoutMs: 3000 } },
         },
       ],
     },

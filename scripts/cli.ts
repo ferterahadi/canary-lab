@@ -8,6 +8,7 @@ import { main as runAgent } from './agent'
 import { main as runSetup } from './setup'
 import { main as createFeature } from './new-feature'
 import { main as runEnv } from './env'
+import { main as runBoot } from './boot'
 import { banner, section, dim, fail, line } from '../shared/cli-ui/ui'
 import { runAsScript } from './run-as-script'
 import readline from 'readline'
@@ -35,6 +36,8 @@ export function printUsage(): void {
   console.log(`  canary-lab new feature <name> ${dim('[--description "..."]')}`)
   console.log(`  canary-lab env apply <feature> <set>`)
   console.log(`  canary-lab env revert <feature>`)
+  console.log(`  canary-lab boot <feature> ${dim('[env]')}      ${dim('(boot services + hold, no tests; needs `canary-lab ui` running)')}`)
+  console.log(`  canary-lab boot stop <runId>`)
   console.log(`  canary-lab upgrade ${dim('[--silent] [--check] [--force-archive]')}`)
   line()
 }
@@ -68,6 +71,9 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
       return
     case 'env':
       await runEnv(args)
+      return
+    case 'boot':
+      await runBoot(args)
       return
     case 'upgrade':
       await upgradeProject(args, { confirm: confirmYn })

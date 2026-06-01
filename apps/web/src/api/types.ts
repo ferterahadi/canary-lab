@@ -122,6 +122,8 @@ export interface ServiceManifestEntry {
   logPath: string
   healthUrl?: string
   status?: ServiceStatus
+  /** Per-run allocated ports keyed by declared slot name. */
+  allocatedPorts?: Record<string, number>
 }
 
 export interface RepoBranchSnapshot {
@@ -181,6 +183,10 @@ export interface RunManifest {
   services: ServiceManifestEntry[]
   repoPaths?: string[]
   repoBranches?: RepoBranchSnapshot[]
+  /** Per-run git worktrees (repo name → worktree path) when isolated. */
+  worktrees?: Record<string, string>
+  /** Why a queued run is waiting. Present only while status === 'queued'. */
+  queueReason?: 'resources' | 'repo-collision'
   playwrightArtifacts?: PlaywrightArtifactPolicy
   signalPaths?: { rerun: string; restart: string }
   healMode?: 'auto' | 'manual' | 'external'

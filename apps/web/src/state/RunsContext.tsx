@@ -38,8 +38,9 @@ interface RunsContextValue {
   refresh: () => Promise<void>
   /** Start a new run. The server's response triggers a WS `update` frame
    *  with the run's initial detail, so the row appears immediately. Returns
-   *  the new runId, or throws on failure. */
-  startRun: (feature: string, env?: string) => Promise<string>
+   *  the new runId, or throws on failure. `isolation` resolves a same-repo
+   *  collision: 'worktree' isolates + runs now, 'queue' waits. */
+  startRun: (feature: string, env?: string, isolation?: 'worktree' | 'queue', mode?: 'test' | 'boot') => Promise<string>
   startVerification: (
     feature: string,
     input: { configId?: string; targetUrls?: Record<string, string>; playwrightEnvsetId?: string },
@@ -191,8 +192,11 @@ export function RunsProvider({ children, wsUrl, WebSocketImpl }: RunsProviderPro
     [refresh, state.connection],
   )
 
-  const startRun = useCallback(async (feature: string, env?: string): Promise<string> => {
-    const opts = env ? { env } : undefined
+  const startRun = useCallback(async (feature: string, env?: string, isolation?: 'worktree' | 'queue', mode?: 'test' | 'boot'): Promise<string> => {
+    const boot = mode === 'boot'
+    const opts = env || isolation || boot
+      ? { ...(env ? { env } : {}), ...(isolation ? { isolation } : {}), ...(boot ? { mode: 'boot' as const } : {}) }
+      : undefined
     const { runId } = await api.startRun(feature, opts)
     if (state.connection !== 'live') await refresh()
     return runId
@@ -267,8 +271,8 @@ export interface UseRunsResult {
   /** Manually refresh the index list. Primarily used internally by actions
    *  in disconnected mode; consumers usually don't need to call this. */
   refresh: () => Promise<void>
-  /** Start a new run. */
-  startRun: (feature: string, env?: string) => Promise<string>
+  /** Start a new run. `isolation` resolves a same-repo collision. */
+  startRun: (feature: string, env?: string, isolation?: 'worktree' | 'queue', mode?: 'test' | 'boot') => Promise<string>
   /** Start a deployment verification. */
   startVerification: (
     feature: string,
@@ -378,6 +382,33 @@ export function useGlobalActiveRun(): UseGlobalActiveRunResult {
   const entry = state.runs.find((r) => isActiveRunStatus(r.status)) ?? null
   const detail = entry ? (state.details[entry.runId] ?? null) : null
   return { runId: entry?.runId ?? null, entry, detail }
+}
+
+// Every run that occupies resources or a queue slot right now: running,
+// healing, or queued. Concurrent runs are allowed, so this can hold several.
+// Drives the top-right runs control + its badge count.
+export function useActiveRuns(): { runs: RunIndexEntry[]; count: number } {
+  const { state } = useRunsContext()
+  const runs = state.runs.filter((r) => isActiveRunStatus(r.status) || r.status === 'queued')
+  return { runs, count: runs.length }
+}
+
+// Boot-only sessions that are currently live (booting or held). These are
+// surfaced in the global Services pill, NOT the Runs list — a boot is not a
+// test run. `executionType === 'boot'` is the discriminator.
+export function useActiveBootSessions(): { sessions: RunIndexEntry[]; count: number } {
+  const { state } = useRunsContext()
+  const sessions = state.runs.filter(
+    (r) => r.executionType === 'boot' && (isActiveRunStatus(r.status) || r.status === 'queued'),
+  )
+  return { sessions, count: sessions.length }
+}
+
+// Read-only access to the per-run detail map (manifests + summaries). Lets the
+// runs dialog surface allocated ports without calling useRun() per row (which
+// would break the Rules of Hooks inside a list map).
+export function useRunDetails(): Record<string, RunDetail> {
+  return useRunsContext().state.details
 }
 
 // ─── Internals ───────────────────────────────────────────────────────────

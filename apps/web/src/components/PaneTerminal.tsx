@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Terminal, type ITheme } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebglAddon } from '@xterm/addon-webgl'
@@ -28,20 +28,52 @@ interface Props {
   runId: string
   paneId: string
   onExit?: (code: number) => void
+  /**
+   * Placeholder shown over the terminal while it has streamed no output yet —
+   * so an idle pane reads as "nothing here yet" instead of a blank black box.
+   * Omit it (e.g. the heal-agent pane) to keep the bare terminal.
+   */
+  emptyState?: { title: string; hint?: string }
 }
+
+// How long to wait after mount before showing the empty-state placeholder.
+// The pane socket replays any buffered output on connect, so a pane that DOES
+// have logs fills in within a few frames — this grace window keeps the
+// placeholder from flashing before that replayed output lands.
+const EMPTY_STATE_GRACE_MS = 600
 
 // Renders a single xterm.js terminal bound to one pane. Re-mounts when
 // runId/paneId change. Buffer replay is handled server-side, so a fresh
 // Terminal per mount is fine.
-export function PaneTerminal({ runId, paneId, onExit }: Props) {
+export function PaneTerminal({ runId, paneId, onExit, emptyState }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const noticeKeysRef = useRef<Set<string>>(new Set())
+  const hadOutputRef = useRef(false)
+  // `hasOutput` flips true on the first streamed byte (or exit/error notice);
+  // `graceElapsed` gates the placeholder so it only appears once we've waited
+  // long enough to be confident the pane really is empty. Both reset on a
+  // pane reset (Restart Heal) so a freshly-cleared pane shows the placeholder
+  // again until new output arrives.
+  const [hasOutput, setHasOutput] = useState(false)
+  const [graceElapsed, setGraceElapsed] = useState(false)
 
   useEffect(() => {
     const container = containerRef.current
     if (!container) return
     const isAgentPane = paneId === 'agent'
     noticeKeysRef.current = new Set()
+    hadOutputRef.current = false
+    setHasOutput(false)
+    setGraceElapsed(false)
+    const graceTimer = setTimeout(() => setGraceElapsed(true), EMPTY_STATE_GRACE_MS)
+    // Flip to "has output" exactly once, on the false→true transition, so a
+    // chatty pane (the Ink heal-agent TUI emits dozens of frames/sec) doesn't
+    // dispatch a state update per chunk.
+    const markOutput = (): void => {
+      if (hadOutputRef.current) return
+      hadOutputRef.current = true
+      setHasOutput(true)
+    }
     const term = new Terminal({
       convertEol: true,
       fontFamily: "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace",
@@ -88,9 +120,11 @@ export function PaneTerminal({ runId, paneId, onExit }: Props) {
       runId,
       paneId,
       onData: (chunk) => {
+        if (chunk) markOutput()
         term.write(chunk)
       },
       onExit: (code) => {
+        markOutput()
         term.writeln(`\r\nPane exited code=${code}`)
         onExit?.(code)
       },
@@ -98,14 +132,18 @@ export function PaneTerminal({ runId, paneId, onExit }: Props) {
         // Server reset the pane (e.g. Restart Heal kicked off a fresh
         // orchestrator). Wipe the visible xterm so the new REPL streams
         // into a clean canvas. Notice keys are also reset so a re-emitted
-        // error after restart isn't suppressed.
+        // error after restart isn't suppressed, and the empty-state
+        // placeholder returns until the fresh REPL prints something.
         term.clear()
         noticeKeysRef.current = new Set()
+        hadOutputRef.current = false
+        setHasOutput(false)
       },
       onError: (err) => {
         const notice = paneTerminalNotice(paneId, err)
         if (noticeKeysRef.current.has(notice.key)) return
         noticeKeysRef.current.add(notice.key)
+        markOutput()
         const [title, ...details] = notice.lines
         term.writeln(`\r\n${title}`)
         for (const detail of details) {
@@ -177,6 +215,7 @@ export function PaneTerminal({ runId, paneId, onExit }: Props) {
       observer.observe(container)
     }
     return () => {
+      clearTimeout(graceTimer)
       observer?.disconnect()
       unsubscribeTheme()
       inputDisposable.dispose()
@@ -186,5 +225,45 @@ export function PaneTerminal({ runId, paneId, onExit }: Props) {
     }
   }, [runId, paneId, onExit])
 
-  return <div ref={containerRef} className="h-full w-full p-2" style={{ background: 'var(--bg-base)' }} />
+  const showEmptyState = Boolean(emptyState) && !hasOutput && graceElapsed
+
+  return (
+    <div className="relative h-full w-full" style={{ background: 'var(--bg-base)' }}>
+      <div ref={containerRef} className="h-full w-full p-2" />
+      {showEmptyState && emptyState && (
+        <PaneEmptyState title={emptyState.title} hint={emptyState.hint} />
+      )}
+    </div>
+  )
+}
+
+// Centered placeholder layered over the (empty) terminal. `pointer-events-none`
+// keeps the xterm underneath fully interactive — the moment output streams in,
+// `showEmptyState` flips false and this unmounts.
+function PaneEmptyState({ title, hint }: { title: string; hint?: string }) {
+  return (
+    <div className="pointer-events-none absolute inset-0 flex select-none flex-col items-center justify-center gap-2.5 px-6 text-center">
+      <span style={{ color: 'var(--text-muted)', opacity: 0.55 }}>
+        <TerminalGlyph />
+      </span>
+      <div className="text-[13px] font-medium" style={{ color: 'var(--text-secondary)' }}>
+        {title}
+      </div>
+      {hint && (
+        <div className="max-w-[280px] text-[11.5px] leading-relaxed" style={{ color: 'var(--text-muted)' }}>
+          {hint}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function TerminalGlyph() {
+  return (
+    <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <path d="M7 9l3 3-3 3" />
+      <path d="M13 15h4" />
+    </svg>
+  )
 }

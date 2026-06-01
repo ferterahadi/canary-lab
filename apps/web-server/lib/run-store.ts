@@ -82,6 +82,17 @@ export interface OrchestratorRegistry {
   list(): OrchestratorLike[]
 }
 
+/**
+ * Result of a start-run request under concurrency. A run either starts now,
+ * is queued (resource budget full, or it declined worktree isolation on a
+ * same-repo collision), or the caller must choose how to handle a same-repo
+ * collision (isolate in a worktree vs queue) before anything starts.
+ */
+export type StartRunOutcome =
+  | { kind: 'started'; orch: OrchestratorLike }
+  | { kind: 'queued'; runId: string; reason: 'resources' | 'repo-collision' }
+  | { kind: 'collision'; conflictingRunId: string; conflictingFeature: string; repoPaths: string[] }
+
 export function createRegistry(): OrchestratorRegistry {
   const map = new Map<string, OrchestratorLike>()
   return {

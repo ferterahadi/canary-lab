@@ -2,11 +2,12 @@ import { forwardRef, useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { RunDetail } from '../api/types'
 import * as api from '../api/client'
-import { deriveRunViewModel } from '../lib/run-view-model'
-import { useRuns } from '../state/RunsContext'
+import { useActiveBootSessions, useActiveRuns, useRuns } from '../state/RunsContext'
 import { isActiveRunStatus } from '../../../../shared/run-state'
 import { EvaluationExportTaskStatus } from './EvaluationExportTaskToast'
 import { WizardTaskStatus } from './WizardTaskStatus'
+import { RunsListDialog } from './RunsListDialog'
+import { ServicesDialog } from './ServicesDialog'
 import { StatusDot, type StatusDotState } from './config/atoms'
 
 interface Props {
@@ -25,8 +26,14 @@ interface Props {
 // they're looking at may be stale until the socket reconnects.
 export function GlobalStatusBar({ activeRunDetail, onNavigateToRun }: Props) {
   const { connection } = useRuns()
+  const { runs: activeRuns } = useActiveRuns()
+  const { count: bootCount } = useActiveBootSessions()
+  // Boots are NOT runs: the Runs button counts only test/verify runs; boot
+  // sessions are surfaced in the separate Services pill.
+  const runsCount = activeRuns.filter((r) => r.executionType !== 'boot').length
+  const [runsOpen, setRunsOpen] = useState(false)
+  const [servicesOpen, setServicesOpen] = useState(false)
   const status = activeRunDetail?.manifest.status
-  const view = deriveRunViewModel(activeRunDetail)
 
   // Guard: only treat 'running' and 'healing' as truly active. The runs
   // index can become stale if the orchestrator crashes, so double-check the
@@ -67,26 +74,61 @@ export function GlobalStatusBar({ activeRunDetail, onNavigateToRun }: Props) {
         </>
       )}
       <div className="ml-auto hidden min-w-0 items-center justify-end gap-2 sm:flex">
-        {activeRunDetail && isActive && (
+        {/* Services pill: held boot sessions, distinct from runs. Appears
+            whenever something is booted; the teal count + a one-shot pulse
+            (keyed on the count) signal a fresh boot landing here. */}
+        {bootCount > 0 && (
           <button
             type="button"
-            onClick={() => onNavigateToRun?.(activeRunDetail.manifest.feature, activeRunDetail.manifest.runId)}
-            className="cl-button flex min-w-0 max-w-[460px] items-center gap-2 px-2.5 py-1"
-            title={`Go to active run: ${activeRunDetail.manifest.feature} ${view.headline} ${activeRunDetail.manifest.runId}`}
+            onClick={() => setServicesOpen(true)}
+            className="cl-button relative flex shrink-0 items-center gap-1.5 px-2.5 py-1"
+            title="Show booted services"
+            aria-label={`Show booted services (${bootCount} up)`}
           >
-            <span className="shrink-0" style={{ color: 'var(--text-muted)', fontSize: 11 }}>Active</span>
-            <span className="truncate" style={{ color: 'var(--text-primary)', fontSize: 12, fontWeight: 500 }}>{activeRunDetail.manifest.feature}</span>
-            <span className="hidden min-w-0 truncate xl:inline" style={{ color: 'var(--text-secondary)', fontSize: 11.5 }}>{view.headline}</span>
-            <span className="hidden min-w-0 truncate 2xl:inline" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontSize: 11 }}>
-              {activeRunDetail.manifest.runId}
+            <span key={`svc-pulse-${bootCount}`} aria-hidden="true" className="cl-boot-pill-pulse" />
+            <StatusDot state="booted" className="shrink-0" />
+            <span style={{ color: 'var(--text-primary)', fontSize: 12, fontWeight: 500 }}>Services</span>
+            <span
+              className="inline-flex min-w-[16px] items-center justify-center rounded-full px-1 text-[10px] font-semibold"
+              style={{ background: 'var(--boot-soft)', color: 'var(--boot)' }}
+            >
+              {bootCount}
             </span>
-            <span className="shrink-0" style={{ color: 'var(--accent)' }}>→</span>
+          </button>
+        )}
+        {/* Only surface the Runs button while a test/verify run is running,
+            healing, or queued. */}
+        {runsCount > 0 && (
+          <button
+            type="button"
+            onClick={() => setRunsOpen(true)}
+            className="cl-button flex shrink-0 items-center gap-1.5 px-2.5 py-1"
+            title="Show all runs"
+            aria-label={`Show all runs (${runsCount} active)`}
+          >
+            <span style={{ color: 'var(--text-primary)', fontSize: 12, fontWeight: 500 }}>Runs</span>
+            <span
+              className="inline-flex min-w-[16px] items-center justify-center rounded-full px-1 text-[10px] font-semibold"
+              style={{
+                background: 'color-mix(in srgb, var(--accent) 20%, transparent)',
+                color: 'var(--accent)',
+              }}
+            >
+              {runsCount}
+            </span>
           </button>
         )}
         <WizardTaskStatus />
         <EvaluationExportTaskStatus />
       </div>
       </div>
+      {runsOpen && (
+        <RunsListDialog
+          onClose={() => setRunsOpen(false)}
+          onNavigateToRun={(feature, runId) => onNavigateToRun?.(feature, runId)}
+        />
+      )}
+      {servicesOpen && <ServicesDialog onClose={() => setServicesOpen(false)} />}
     </div>
   )
 }

@@ -68,10 +68,27 @@ export type HealthCheck =
   | LegacyHealthProbe
   | { [envName: string]: HealthProbe | LegacyHealthProbe }
 
+/**
+ * Declares a port this command needs. Canary Lab allocates a distinct free
+ * port per run per slot so two concurrent runs of the same app don't clash.
+ * The allocated value is injected as `env` (e.g. PORT) on the spawned process
+ * and is referenceable elsewhere in this config via `${port.<name>}` (e.g. in
+ * `healthCheck.http.url` or the test target).
+ */
+export interface PortSlot {
+  /** Slot name referenced via `${port.<name>}` tokens. */
+  name: string
+  /** Env var the service reads to learn its port (e.g. 'PORT'). Omit when the
+   *  service only needs the token in its healthCheck URL. */
+  env?: string
+}
+
 export interface StartCommand {
   command: string
   name?: string
   healthCheck?: HealthCheck
+  /** Per-run port slots — see {@link PortSlot}. */
+  ports?: PortSlot[]
   // Whitelist of envs in which this command should boot. Omit to boot in
   // every env. Per-command override of the repo-level `envs` field.
   envs?: string[]

@@ -23,13 +23,13 @@ export interface RepoBranchSnapshot {
   dirty: boolean
 }
 
-interface GitResult {
+export interface GitResult {
   code: number
   stdout: string
   stderr: string
 }
 
-function runGit(cwd: string, args: string[]): Promise<GitResult> {
+export function runGit(cwd: string, args: string[]): Promise<GitResult> {
   return new Promise((resolve) => {
     const child = execFile('git', args, { cwd }, (error, stdout, stderr) => {
       const code = typeof (error as { code?: unknown } | null)?.code === 'number'

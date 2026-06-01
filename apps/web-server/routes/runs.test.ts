@@ -57,7 +57,8 @@ function writeFeature(name: string): void {
 }
 
 async function build(opts: {
-	  startRun?: (f: string) => Promise<OrchestratorLike>
+	  startRun?: Parameters<typeof runsRoutes>[1]['startRun']
+	  cancelQueuedRun?: (runId: string) => boolean
 	  broker?: Parameters<typeof runsRoutes>[1]['broker']
 	  restartHeal?: (runId: string, text: string) => Promise<RestartHealResult>
 	  restartRun?: (runId: string) => Promise<RestartRunResult>
@@ -74,6 +75,7 @@ async function build(opts: {
     store,
     broker: opts.broker,
 	    startRun: opts.startRun ?? (async () => { throw new Error('not configured') }),
+	    cancelQueuedRun: opts.cancelQueuedRun,
 	    restartHeal: opts.restartHeal,
     restartRun: opts.restartRun,
 	    generateEvaluationRewrite: opts.generateEvaluationRewrite,
@@ -905,7 +907,7 @@ describe('POST /api/runs', () => {
   it('starts a run via the injected factory and registers it', async () => {
     writeFeature('foo')
     const stub = makeStub('run-1')
-    const { app, registry } = await build({ startRun: async () => stub })
+    const { app, registry } = await build({ startRun: async () => ({ kind: 'started', orch: stub }) })
     const res = await app.inject({ method: 'POST', url: '/api/runs', payload: { feature: 'foo' } })
     expect(res.statusCode).toBe(201)
     expect(res.json()).toEqual({ runId: 'run-1' })
@@ -920,7 +922,7 @@ describe('POST /api/runs', () => {
       `module.exports = { config: { name: 'foo', description: 'd', envs: ['local','production'], featureDir: __dirname } }`,
     )
     const stub = makeStub('rx')
-    const { app } = await build({ startRun: async () => stub })
+    const { app } = await build({ startRun: async () => ({ kind: 'started', orch: stub }) })
     const res = await app.inject({
       method: 'POST',
       url: '/api/runs',
@@ -939,7 +941,7 @@ describe('POST /api/runs', () => {
     )
     const stub = makeStub('ry')
     let receivedEnv = ''
-    const { app } = await build({ startRun: async (_feature, env) => { receivedEnv = env ?? ''; return stub } })
+    const { app } = await build({ startRun: async (_feature, env) => { receivedEnv = env ?? ''; return { kind: 'started', orch: stub } } })
     const res = await app.inject({
       method: 'POST',
       url: '/api/runs',
@@ -958,10 +960,34 @@ describe('POST /api/runs', () => {
     )
     const stub = makeStub('rz')
     let receivedEnv = ''
-    const { app } = await build({ startRun: async (_feature, env) => { receivedEnv = env ?? ''; return stub } })
+    const { app } = await build({ startRun: async (_feature, env) => { receivedEnv = env ?? ''; return { kind: 'started', orch: stub } } })
     const res = await app.inject({ method: 'POST', url: '/api/runs', payload: { feature: 'foo' } })
     expect(res.statusCode).toBe(201)
     expect(receivedEnv).toBe('local')
+  })
+
+  it('passes executionType "boot" to the factory when mode:boot is requested', async () => {
+    writeFeature('foo')
+    const stub = makeStub('rb')
+    let receivedExecutionType: string | undefined = 'untouched'
+    const { app } = await build({
+      startRun: async (_f, _e, _h, _i, executionType) => { receivedExecutionType = executionType; return { kind: 'started', orch: stub } },
+    })
+    const res = await app.inject({ method: 'POST', url: '/api/runs', payload: { feature: 'foo', mode: 'boot' } })
+    expect(res.statusCode).toBe(201)
+    expect(receivedExecutionType).toBe('boot')
+  })
+
+  it('defaults executionType to "run" when mode is omitted', async () => {
+    writeFeature('foo')
+    const stub = makeStub('rr')
+    let receivedExecutionType: string | undefined = 'untouched'
+    const { app } = await build({
+      startRun: async (_f, _e, _h, _i, executionType) => { receivedExecutionType = executionType; return { kind: 'started', orch: stub } },
+    })
+    const res = await app.inject({ method: 'POST', url: '/api/runs', payload: { feature: 'foo' } })
+    expect(res.statusCode).toBe(201)
+    expect(receivedExecutionType).toBe('run')
   })
 
   it('runs without env when feature declares no envs', async () => {
@@ -974,11 +1000,47 @@ describe('POST /api/runs', () => {
     const stub = makeStub('rno')
     let receivedEnv: string | undefined = 'untouched'
     const { app } = await build({
-      startRun: async (_f, env) => { receivedEnv = env; return stub },
+      startRun: async (_f, env) => { receivedEnv = env; return { kind: 'started', orch: stub } },
     })
     const res = await app.inject({ method: 'POST', url: '/api/runs', payload: { feature: 'noenv' } })
     expect(res.statusCode).toBe(201)
     expect(receivedEnv).toBeUndefined()
+  })
+
+  it('returns 409 repo_collision_requires_choice when the factory reports a collision', async () => {
+    writeFeature('foo')
+    const { app } = await build({
+      startRun: async () => ({ kind: 'collision', conflictingRunId: 'other-1', conflictingFeature: 'foo', repoPaths: ['/repos/foo'] }),
+    })
+    const res = await app.inject({ method: 'POST', url: '/api/runs', payload: { feature: 'foo' } })
+    expect(res.statusCode).toBe(409)
+    const body = res.json()
+    expect(body.type).toBe('repo_collision_requires_choice')
+    expect(body.conflictingRunId).toBe('other-1')
+    expect(body.options).toEqual(['worktree', 'queue'])
+  })
+
+  it('returns 202 + queueReason when the factory queues the run, threading isolation', async () => {
+    writeFeature('foo')
+    let receivedIsolation: string | undefined = 'untouched'
+    const { app } = await build({
+      startRun: async (_f, _env, _heal, isolation) => { receivedIsolation = isolation; return { kind: 'queued', runId: 'q-1', reason: 'repo-collision' } },
+    })
+    const res = await app.inject({ method: 'POST', url: '/api/runs', payload: { feature: 'foo', isolation: 'queue' } })
+    expect(res.statusCode).toBe(202)
+    expect(res.json()).toEqual({ runId: 'q-1', status: 'queued', queueReason: 'repo-collision' })
+    expect(receivedIsolation).toBe('queue')
+  })
+
+  it('aborting a queued run falls back to cancelQueuedRun', async () => {
+    writeFeature('foo')
+    const cancelled: string[] = []
+    const { app } = await build({
+      cancelQueuedRun: (runId) => { cancelled.push(runId); return true },
+    })
+    const res = await app.inject({ method: 'POST', url: '/api/runs/q-9/abort' })
+    expect(res.statusCode).toBe(204)
+    expect(cancelled).toEqual(['q-9'])
   })
 
   it('reuses an active external-heal run instead of starting another run', async () => {
