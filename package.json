@@ -62,6 +62,11 @@
     "test:coverage": "vitest run --coverage",
     "build:web": "vite build --config apps/web/vite.config.ts",
     "dev:web": "vite --config apps/web/vite.config.ts",
+    "promo:agent:capture": "node apps/web/promo/agent-repair-loop/capture-live-app.mjs",
+    "promo:agent:render:webm": "remotion render apps/web/promo/agent-repair-loop/index.tsx CanaryLabAgentPromo docs/assets/canary-lab-ai-agent-promo.webm --codec=vp8 --crf=18 --concurrency=1 --public-dir=apps/web/promo/agent-repair-loop/public",
+    "promo:agent:render:gif": "remotion render apps/web/promo/agent-repair-loop/index.tsx CanaryLabAgentPromo docs/assets/canary-lab-repair-loop.gif --codec=gif --concurrency=1 --public-dir=apps/web/promo/agent-repair-loop/public",
+    "promo:agent:render": "npm run promo:agent:capture && npm run promo:agent:render:webm && npm run promo:agent:render:gif",
+    "promo:agent:verify": "node apps/web/promo/agent-repair-loop/verify-video.mjs",
     "postinstall": "node tools/fix-node-pty-permissions.mjs",
     "prepack": "npm run build",
     "smoke:pack": "node tools/smoke-pack.mjs",
@@ -72,6 +77,7 @@
     "tag:force": "node tools/tag-release.mjs --force"
   },
   "devDependencies": {
+    "@remotion/cli": "^4.0.469",
     "@tailwindcss/postcss": "^4.2.4",
     "@types/node": "^25.5.2",
     "@types/react": "^19.2.14",
@@ -87,6 +93,7 @@
     "postcss": "^8.5.12",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
+    "remotion": "^4.0.469",
     "tailwindcss": "^4.2.4",
     "tsx": "^4.20.3",
     "vite": "^8.0.10",
