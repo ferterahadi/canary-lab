@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { RunDetail, RunIndexEntry, RunStatus } from '../api/types'
+import type { ExecutionType, RunDetail, RunIndexEntry, RunStatus } from '../api/types'
 import { ChevronRightIcon, StatusDot, type StatusDotState } from './config/atoms'
 import { useRunDetails, useRuns } from '../state/RunsContext'
 import { shortTime } from '../lib/format'
@@ -59,7 +59,9 @@ function queueNote(entry: RunIndexEntry, detail: RunDetail | undefined): string 
 }
 
 export function RunsListDialog({ onClose, onNavigateToRun }: Props) {
-  const { runs } = useRuns()
+  const { runs: allRuns } = useRuns()
+  // Boot-only sessions are managed in the Services dialog, never here.
+  const runs = allRuns.filter((r) => r.executionType !== 'boot')
   const details = useRunDetails()
   // Finished runs are the long tail — collapsed by default so active work leads.
   const [finishedOpen, setFinishedOpen] = useState(false)
@@ -173,7 +175,9 @@ function RunRow({
 }) {
   const ports = portsLabel(detail)
   const note = queueNote(run, detail)
-  const dot = DOT[run.status]
+  // A held boot session is status 'running' but reads as teal "services up".
+  const isBoot = run.executionType === 'boot'
+  const dot = isBoot && run.status === 'running' ? { state: 'booted' as const, pulse: true } : DOT[run.status]
   const meta: Array<{ text: string; mono?: boolean }> = [{ text: shortTime(run.startedAt) }]
   if (ports) meta.push({ text: ports, mono: true })
   if (note) meta.push({ text: note })
@@ -204,7 +208,7 @@ function RunRow({
             ))}
           </span>
         </span>
-        <RunStatusChip status={run.status} />
+        <RunStatusChip status={run.status} executionType={run.executionType} />
         <span
           className="shrink-0 opacity-0 transition-opacity group-hover:opacity-100"
           style={{ color: 'var(--accent)' }}
@@ -217,14 +221,20 @@ function RunRow({
   )
 }
 
-function RunStatusChip({ status }: { status: RunStatus }) {
-  const palette = CHIP[status]
+function RunStatusChip({ status, executionType }: { status: RunStatus; executionType?: ExecutionType }) {
+  const boot = executionType === 'boot' && (status === 'running' || status === 'aborted')
+  const palette = boot
+    ? (status === 'running'
+        ? { bg: 'var(--boot-soft)', text: 'var(--boot)' }
+        : { bg: 'var(--bg-selected)', text: 'var(--text-muted)' })
+    : CHIP[status]
+  const label = boot ? (status === 'running' ? 'services up' : 'stopped') : status
   return (
     <span
       className="shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide"
       style={{ background: palette.bg, color: palette.text }}
     >
-      {status}
+      {label}
     </span>
   )
 }

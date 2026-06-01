@@ -41,6 +41,10 @@ vi.mock('./PaneTerminal', () => ({
   PaneTerminal: () => <div>terminal</div>,
 }))
 
+vi.mock('./VerificationDialog', () => ({
+  VerificationDialog: () => <div data-testid="verification-dialog">verification dialog</div>,
+}))
+
 let container: HTMLDivElement
 let root: Root
 
@@ -61,7 +65,7 @@ afterEach(() => {
 })
 
 describe('run launch controls', () => {
-  it('gates a direct run through the MCP promo before starting', () => {
+  it('gates a run through the MCP promo before starting (env-less feature)', () => {
     const onStartRun = vi.fn()
     gatePromo.mockImplementationOnce(() => {})
 
@@ -79,11 +83,17 @@ describe('run launch controls', () => {
       )
     })
 
+    // Open the Run menu, then use the env-less "Run tests" action.
     const runButton = [...container.querySelectorAll('button')]
       .find((button) => button.textContent?.trim() === 'Run')
-
     act(() => {
       runButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+    const runTests = [...document.body.querySelectorAll('[role="menuitem"]')]
+      .find((b) => b.textContent?.includes('Run tests'))
+    expect(runTests).toBeTruthy()
+    act(() => {
+      runTests?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     })
 
     expect(gatePromo).toHaveBeenCalledWith('run-test', expect.any(Function))
@@ -94,7 +104,47 @@ describe('run launch controls', () => {
       continueAction()
     })
 
-    expect(onStartRun).toHaveBeenCalledExactlyOnceWith(undefined)
+    expect(onStartRun).toHaveBeenCalledExactlyOnceWith(undefined, 'test')
+  })
+
+  it('opens the Verify config dialog from the Run menu Verify tab', () => {
+    const onStartVerification = vi.fn(async () => {})
+
+    act(() => {
+      root.render(
+        <RunsColumn
+          feature="alpha"
+          envs={['local']}
+          runs={[]}
+          selectedRunId={null}
+          onSelectRun={() => {}}
+          onStartRun={() => {}}
+          onStartVerification={onStartVerification}
+        />,
+      )
+    })
+
+    const runButton = [...container.querySelectorAll('button')]
+      .find((button) => button.textContent?.trim() === 'Run')
+    act(() => {
+      runButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+    // Switch the toggle to Verify, then click its CTA.
+    const verifyToggle = [...document.body.querySelectorAll('[role="menu"][data-run-launch-menu] button')]
+      .find((b) => b.textContent?.trim() === 'Verify')
+    expect(verifyToggle).toBeTruthy()
+    act(() => {
+      verifyToggle?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+    const verifyCta = [...document.body.querySelectorAll('[role="menuitem"]')]
+      .find((b) => b.textContent?.includes('Set up'))
+    expect(verifyCta).toBeTruthy()
+    act(() => {
+      verifyCta?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+    // The launch popover closes and the Verify dialog opens.
+    expect(document.body.querySelector('[role="menu"][data-run-launch-menu]')).toBeNull()
+    expect(document.body.querySelector('[data-testid="verification-dialog"]')).toBeTruthy()
   })
 
   it('opens envset choices from Run and starts the chosen envset', () => {
@@ -135,9 +185,54 @@ describe('run launch controls', () => {
       betaOption?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     })
 
-    expect(onStartRun).toHaveBeenCalledExactlyOnceWith('beta')
+    expect(onStartRun).toHaveBeenCalledExactlyOnceWith('beta', 'test')
     expect(gatePromo).toHaveBeenCalledWith('run-test', expect.any(Function))
     expect(document.body.querySelector('[role="menu"][data-run-launch-menu]')).toBeNull()
+  })
+
+  it('starts a boot-only session when the Boot toggle is selected', () => {
+    const onStartRun = vi.fn()
+
+    act(() => {
+      root.render(
+        <RunsColumn
+          feature="alpha"
+          envs={['local', 'beta']}
+          runs={[]}
+          selectedRunId={null}
+          onSelectRun={() => {}}
+          onStartRun={onStartRun}
+          onStartVerification={async () => {}}
+        />,
+      )
+    })
+
+    const runButton = [...container.querySelectorAll('button')]
+      .find((button) => button.textContent?.trim() === 'Run')
+    act(() => {
+      runButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+
+    // Flip the mode toggle to Boot, then choose an envset.
+    const bootToggle = [...document.body.querySelectorAll('[role="menu"][data-run-launch-menu] button')]
+      .find((button) => button.textContent?.trim() === 'Boot')
+    expect(bootToggle).toBeTruthy()
+    act(() => {
+      bootToggle?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+
+    // The popover now advertises the boot behaviour.
+    const menu = document.body.querySelector('[role="menu"][data-run-launch-menu]')
+    expect(menu?.getAttribute('data-mode')).toBe('boot')
+    expect(menu?.textContent).toContain('no tests')
+
+    const betaOption = [...document.body.querySelectorAll('[role="menuitem"]')]
+      .find((button) => button.textContent?.includes('beta'))
+    act(() => {
+      betaOption?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+
+    expect(onStartRun).toHaveBeenCalledExactlyOnceWith('beta', 'boot')
   })
 })
 

@@ -2,11 +2,12 @@ import { forwardRef, useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { RunDetail } from '../api/types'
 import * as api from '../api/client'
-import { useActiveRuns, useRuns } from '../state/RunsContext'
+import { useActiveBootSessions, useActiveRuns, useRuns } from '../state/RunsContext'
 import { isActiveRunStatus } from '../../../../shared/run-state'
 import { EvaluationExportTaskStatus } from './EvaluationExportTaskToast'
 import { WizardTaskStatus } from './WizardTaskStatus'
 import { RunsListDialog } from './RunsListDialog'
+import { ServicesDialog } from './ServicesDialog'
 import { StatusDot, type StatusDotState } from './config/atoms'
 
 interface Props {
@@ -25,8 +26,13 @@ interface Props {
 // they're looking at may be stale until the socket reconnects.
 export function GlobalStatusBar({ activeRunDetail, onNavigateToRun }: Props) {
   const { connection } = useRuns()
-  const { count: activeCount } = useActiveRuns()
+  const { runs: activeRuns } = useActiveRuns()
+  const { count: bootCount } = useActiveBootSessions()
+  // Boots are NOT runs: the Runs button counts only test/verify runs; boot
+  // sessions are surfaced in the separate Services pill.
+  const runsCount = activeRuns.filter((r) => r.executionType !== 'boot').length
   const [runsOpen, setRunsOpen] = useState(false)
+  const [servicesOpen, setServicesOpen] = useState(false)
   const status = activeRunDetail?.manifest.status
 
   // Guard: only treat 'running' and 'healing' as truly active. The runs
@@ -68,16 +74,37 @@ export function GlobalStatusBar({ activeRunDetail, onNavigateToRun }: Props) {
         </>
       )}
       <div className="ml-auto hidden min-w-0 items-center justify-end gap-2 sm:flex">
-        {/* Only surface the Runs button while something is running, healing, or
-            queued. With no active runs there's nothing live to jump to, so the
-            button is hidden to keep the bar quiet. */}
-        {activeCount > 0 && (
+        {/* Services pill: held boot sessions, distinct from runs. Appears
+            whenever something is booted; the teal count + a one-shot pulse
+            (keyed on the count) signal a fresh boot landing here. */}
+        {bootCount > 0 && (
+          <button
+            type="button"
+            onClick={() => setServicesOpen(true)}
+            className="cl-button relative flex shrink-0 items-center gap-1.5 px-2.5 py-1"
+            title="Show booted services"
+            aria-label={`Show booted services (${bootCount} up)`}
+          >
+            <span key={`svc-pulse-${bootCount}`} aria-hidden="true" className="cl-boot-pill-pulse" />
+            <StatusDot state="booted" className="shrink-0" />
+            <span style={{ color: 'var(--text-primary)', fontSize: 12, fontWeight: 500 }}>Services</span>
+            <span
+              className="inline-flex min-w-[16px] items-center justify-center rounded-full px-1 text-[10px] font-semibold"
+              style={{ background: 'var(--boot-soft)', color: 'var(--boot)' }}
+            >
+              {bootCount}
+            </span>
+          </button>
+        )}
+        {/* Only surface the Runs button while a test/verify run is running,
+            healing, or queued. */}
+        {runsCount > 0 && (
           <button
             type="button"
             onClick={() => setRunsOpen(true)}
             className="cl-button flex shrink-0 items-center gap-1.5 px-2.5 py-1"
             title="Show all runs"
-            aria-label={`Show all runs (${activeCount} active)`}
+            aria-label={`Show all runs (${runsCount} active)`}
           >
             <span style={{ color: 'var(--text-primary)', fontSize: 12, fontWeight: 500 }}>Runs</span>
             <span
@@ -87,7 +114,7 @@ export function GlobalStatusBar({ activeRunDetail, onNavigateToRun }: Props) {
                 color: 'var(--accent)',
               }}
             >
-              {activeCount}
+              {runsCount}
             </span>
           </button>
         )}
@@ -101,6 +128,7 @@ export function GlobalStatusBar({ activeRunDetail, onNavigateToRun }: Props) {
           onNavigateToRun={(feature, runId) => onNavigateToRun?.(feature, runId)}
         />
       )}
+      {servicesOpen && <ServicesDialog onClose={() => setServicesOpen(false)} />}
     </div>
   )
 }

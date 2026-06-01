@@ -3,6 +3,7 @@ export type ServiceStatus = 'starting' | 'ready' | 'timeout' | 'stopped'
 
 export type RunLifecyclePhase =
   | 'starting-services'
+  | 'services-ready'
   | 'running-tests'
   | 'pausing-for-heal'
   | 'agent-healing'

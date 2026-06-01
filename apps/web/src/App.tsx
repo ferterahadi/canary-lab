@@ -22,7 +22,7 @@ export function App() {
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
   const [configFor, setConfigFor] = useState<string | null>(null)
   const [testsRefreshKey, setTestsRefreshKey] = useState(0)
-  const [collisionPrompt, setCollisionPrompt] = useState<{ feature: string; env?: string; info: RepoCollisionChoice } | null>(null)
+  const [collisionPrompt, setCollisionPrompt] = useState<{ feature: string; env?: string; mode?: 'test' | 'boot'; info: RepoCollisionChoice } | null>(null)
   const pendingRunSelectionRef = useRef<string | null>(null)
   const selectedFeatureRef = useRef<string | null>(null)
 
@@ -45,9 +45,11 @@ export function App() {
   const { entry: globalActiveRunEntry, detail: activeRunDetail } = useGlobalActiveRun()
   const { wizardOpen, closeWizard } = useWizardDrafts()
 
-  // Column 3 lists runs scoped to the currently-selected feature.
+  // Column 3 lists runs scoped to the currently-selected feature. Boot-only
+  // sessions are excluded — they're not test runs and live in the global
+  // Services surface, not the Runs list.
   const featureRuns = useMemo(
-    () => allRuns.filter((r) => r.feature === selectedFeature),
+    () => allRuns.filter((r) => r.feature === selectedFeature && r.executionType !== 'boot'),
     [allRuns, selectedFeature],
   )
 
@@ -90,20 +92,20 @@ export function App() {
     ?? selectedRunForFeature?.status
     ?? latestRunForFeature?.status
 
-  const handleStartRun = useCallback(async (env?: string): Promise<void> => {
+  const handleStartRun = useCallback(async (env?: string, mode: 'test' | 'boot' = 'test'): Promise<void> => {
     if (!selectedFeature) return
     // Concurrent runs are allowed: different apps run in parallel on distinct
     // allocated ports; the backend admits or queues as resources allow. A
     // same-repo collision comes back as a 409 — prompt the user to isolate or
-    // queue, then re-issue with their choice.
+    // queue, then re-issue with their choice (preserving the boot/test mode).
     try {
-      const runId = await startRunAction(selectedFeature, env)
+      const runId = await startRunAction(selectedFeature, env, undefined, mode)
       pendingRunSelectionRef.current = runId
       setSelectedRunId(runId)
     } catch (err) {
       const collision = api.asRepoCollision(err)
       if (collision) {
-        setCollisionPrompt({ feature: selectedFeature, env, info: collision })
+        setCollisionPrompt({ feature: selectedFeature, env, mode, info: collision })
         return
       }
       /* other errors surfaced via UI */
@@ -115,7 +117,7 @@ export function App() {
     setCollisionPrompt(null)
     if (!prompt) return
     try {
-      const runId = await startRunAction(prompt.feature, prompt.env, isolation)
+      const runId = await startRunAction(prompt.feature, prompt.env, isolation, prompt.mode)
       pendingRunSelectionRef.current = runId
       setSelectedRunId(runId)
     } catch { /* surfaced via UI */ }
@@ -191,6 +193,7 @@ export function App() {
           selectedFeature={selectedFeature}
           activeRunFeature={globalActiveRunEntry?.feature ?? null}
           activeRunStatus={globalActiveRunEntry?.status ?? null}
+          activeRunExecutionType={globalActiveRunEntry?.executionType ?? null}
           onSelectFeature={(name) => {
             pendingRunSelectionRef.current = null
             setSelectedFeature(name)

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { createPortal } from 'react-dom'
 import * as api from '../api/client'
 import { ApiError } from '../api/client'
-import type { RunIndexEntry } from '../api/types'
+import type { ExecutionType, RunIndexEntry } from '../api/types'
 import { formatDuration, durationBetween, shortTime } from '../lib/format'
 import { deriveRunViewModel, type RunViewModel } from '../lib/run-view-model'
 import { useMcpPromo } from '../state/McpPromoContext'
@@ -16,7 +16,7 @@ interface Props {
   runs: RunIndexEntry[]
   selectedRunId: string | null
   onSelectRun: (runId: string | null) => void
-  onStartRun: (env?: string) => void
+  onStartRun: (env?: string, mode?: 'test' | 'boot') => void
   onStartVerification: (input: {
     configId?: string
     targetUrls?: Record<string, string>
@@ -197,65 +197,25 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
           {feature && runs.length > 0 && <span className="cl-count-chip">{runs.length}</span>}
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
-          {compact ? (
-            <>
-              <RunLaunchControl
-                feature={feature}
-                envs={envs}
-                compact
-                open={runPopoverOpen}
-                onToggle={() => setRunPopoverOpen((v) => !v)}
-                onClose={() => setRunPopoverOpen(false)}
-                runDisabled={Boolean(runDisabled)}
-                disabledReason={runDisabledReason}
-                onStartEnv={(env) => {
-                  gatePromo('run-test', () => {
-                    onStartRun(env || undefined)
-                    setRunPopoverOpen(false)
-                  })
-                }}
-              />
-              <button
-                type="button"
-                disabled={!feature || runDisabled}
-                title={runDisabled ? runDisabledReason : 'Verify'}
-                aria-label="Verify deployment"
-                onClick={() => setVerifyDialogOpen(true)}
-                className="cl-button flex h-7 w-7 items-center justify-center disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <path d="M3 8.5 6.2 12 13 4" />
-                </svg>
-              </button>
-            </>
-          ) : (
-            <>
-              <RunLaunchControl
-                feature={feature}
-                envs={envs}
-                open={runPopoverOpen}
-                onToggle={() => setRunPopoverOpen((v) => !v)}
-                onClose={() => setRunPopoverOpen(false)}
-                runDisabled={Boolean(runDisabled)}
-                disabledReason={runDisabledReason}
-                onStartEnv={(env) => {
-                  gatePromo('run-test', () => {
-                    onStartRun(env || undefined)
-                    setRunPopoverOpen(false)
-                  })
-                }}
-              />
-              <button
-                type="button"
-                disabled={!feature || runDisabled}
-                title={runDisabled ? runDisabledReason : undefined}
-                onClick={() => setVerifyDialogOpen(true)}
-                className="cl-button px-3 py-1.5"
-              >
-                Verify
-              </button>
-            </>
-          )}
+          {/* One launch control. Test / Boot / Verify all live in the Run menu;
+              the standalone Verify button was folded in here. */}
+          <RunLaunchControl
+            feature={feature}
+            envs={envs}
+            compact={compact}
+            open={runPopoverOpen}
+            onToggle={() => setRunPopoverOpen((v) => !v)}
+            onClose={() => setRunPopoverOpen(false)}
+            runDisabled={Boolean(runDisabled)}
+            disabledReason={runDisabledReason}
+            onVerify={() => { setVerifyDialogOpen(true); setRunPopoverOpen(false) }}
+            onStartEnv={(env, mode) => {
+              gatePromo('run-test', () => {
+                onStartRun(env || undefined, mode)
+                setRunPopoverOpen(false)
+              })
+            }}
+          />
         </div>
       </div>
       <div className="flex-1 overflow-y-auto scrollbar-thin">
@@ -318,7 +278,7 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
                           </span>
                           <ExecutionTypeBadge type={executionType} />
                         </div>
-                        <RunStatusIndicator status={displayStatus} />
+                        <RunStatusIndicator status={displayStatus} executionType={executionType} />
                       </div>
                       <div
                         className="flex w-full min-w-0 items-center justify-between gap-2"
@@ -362,6 +322,7 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
                           <RunActionsKebab
                             view={view}
                             displayStatus={displayStatus}
+                            executionType={executionType}
                             open={openMenuRunId === r.runId}
                             onOpenToggle={(e) => {
                               e.stopPropagation()
@@ -414,7 +375,7 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
                               />
                             )}
                             <span className="ml-1 inline-flex items-center">
-                              <RunStatusIndicator status={displayStatus} />
+                              <RunStatusIndicator status={displayStatus} executionType={executionType} />
                             </span>
                           </>
                         )}
@@ -499,14 +460,25 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
         />
       )}
       {pendingStop && (
-        <ConfirmDialog
-          title="Stop this run?"
-          description={`This will abort all running processes for run ${pendingStop.runId}. Results collected so far are preserved.`}
-          confirmLabel="Stop Run"
-          variant="danger"
-          onCancel={() => setPendingStop(null)}
-          onConfirm={confirmStop}
-        />
+        pendingStop.executionType === 'boot' ? (
+          <ConfirmDialog
+            title="Stop these services?"
+            description={`This stops all services for boot session ${pendingStop.runId} and reverts the envset. No test results are affected.`}
+            confirmLabel="Stop Services"
+            variant="danger"
+            onCancel={() => setPendingStop(null)}
+            onConfirm={confirmStop}
+          />
+        ) : (
+          <ConfirmDialog
+            title="Stop this run?"
+            description={`This will abort all running processes for run ${pendingStop.runId}. Results collected so far are preserved.`}
+            confirmLabel="Stop Run"
+            variant="danger"
+            onCancel={() => setPendingStop(null)}
+            onConfirm={confirmStop}
+          />
+        )
       )}
       {pendingDelete && (
         <ConfirmDialog
@@ -552,6 +524,7 @@ function RunLaunchControl({
   runDisabled,
   disabledReason,
   onStartEnv,
+  onVerify,
 }: {
   feature: string | null
   envs: string[]
@@ -561,20 +534,18 @@ function RunLaunchControl({
   onClose: () => void
   runDisabled: boolean
   disabledReason?: string
-  onStartEnv: (env: string) => void
+  onStartEnv: (env: string, mode: 'test' | 'boot') => void
+  onVerify: () => void
 }) {
-  const POPOVER_WIDTH = 190
+  const POPOVER_WIDTH = 214
   const buttonRef = useRef<HTMLButtonElement>(null)
-  const pos = useAnchoredPosition(buttonRef, open && envs.length > 0, POPOVER_WIDTH)
+  const pos = useAnchoredPosition(buttonRef, open, POPOVER_WIDTH)
   const title = runDisabled && disabledReason ? disabledReason : 'Run'
-  const handleButtonClick = (): void => {
-    if (!feature) return
-    if (envs.length === 0) {
-      if (!runDisabled) onStartEnv('')
-      return
-    }
-    onToggle()
-  }
+  // One launch control, three modes. Test/Boot pick an envset inline; Verify
+  // opens its own config dialog. `mode` is sticky within the session. Test runs
+  // the suite; Boot holds services (lands in the Services pill, not Runs).
+  const [mode, setMode] = useState<'test' | 'boot' | 'verify'>('test')
+  const launchMode: 'test' | 'boot' = mode === 'boot' ? 'boot' : 'test'
   return (
     <>
       <button
@@ -582,9 +553,9 @@ function RunLaunchControl({
         type="button"
         disabled={!feature}
         title={title}
-        onClick={handleButtonClick}
-        aria-haspopup={envs.length > 0 ? 'menu' : undefined}
-        aria-expanded={envs.length > 0 ? open : undefined}
+        onClick={() => { if (feature) onToggle() }}
+        aria-haspopup="menu"
+        aria-expanded={open}
         aria-label={compact ? 'Run' : undefined}
         data-run-launch-menu
         className={`cl-run-menu-button ${compact ? 'cl-run-menu-button-compact' : ''} disabled:cursor-not-allowed disabled:opacity-40`}
@@ -597,39 +568,94 @@ function RunLaunchControl({
           <path d="m4 6 4 4 4-4" />
         </svg>
       </button>
-      {open && pos && envs.length > 0 && createPortal(
+      {open && pos && createPortal(
         <div
           role="menu"
           data-run-launch-menu
+          data-mode={mode}
           onClick={(e) => e.stopPropagation()}
           className="cl-popover cl-run-launch-menu p-1.5 text-xs"
-          style={{
-            position: 'fixed',
-            top: pos.top,
-            left: pos.left,
-            width: POPOVER_WIDTH,
-            zIndex: 1000,
-          }}
+          style={{ position: 'fixed', top: pos.top, left: pos.left, width: POPOVER_WIDTH, zIndex: 1000 }}
         >
-          <div className="px-2 pb-1 pt-1 text-[10px] uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
-            Choose envset
-          </div>
-          {envs.map((env) => (
-            <button
-              key={env}
-              type="button"
-              role="menuitem"
-              disabled={runDisabled}
-              onClick={() => {
-                if (runDisabled) return
-                onStartEnv(env)
-              }}
-              className="cl-run-env-option disabled:cursor-not-allowed disabled:opacity-45"
-            >
-              <span className="cl-run-env-option-dot" aria-hidden="true" />
-              <span className="min-w-0 flex-1 truncate" style={{ fontFamily: 'var(--font-mono)' }}>{env}</span>
+          <div className="cl-mode-toggle" role="group" aria-label="Run mode">
+            <button type="button" data-active={mode === 'boot'} data-mode="boot" onClick={() => setMode('boot')} className="cl-mode-toggle-btn">
+              <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <rect x="2" y="2.5" width="12" height="4" rx="1" />
+                <rect x="2" y="9.5" width="12" height="4" rx="1" />
+                <path d="M4.5 4.5h.01M4.5 11.5h.01" />
+              </svg>
+              Boot
             </button>
-          ))}
+            <button type="button" data-active={mode === 'test'} onClick={() => setMode('test')} className="cl-mode-toggle-btn">
+              <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                <path d="M5 3.2v9.6a.6.6 0 0 0 .92.508l7.2-4.8a.6.6 0 0 0 0-1.016l-7.2-4.8A.6.6 0 0 0 5 3.2z" />
+              </svg>
+              Test
+            </button>
+            <button type="button" data-active={mode === 'verify'} data-mode="verify" onClick={() => setMode('verify')} className="cl-mode-toggle-btn">
+              <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M3 8.5 6.2 12 13 4" />
+              </svg>
+              Verify
+            </button>
+          </div>
+
+          {mode === 'verify' ? (
+            <>
+              <p className="px-2 pb-1.5 pt-1 text-[10px] leading-snug" style={{ color: 'var(--text-muted)' }}>
+                Check a deployment against target URLs — observational, no services booted.
+              </p>
+              <button
+                type="button"
+                role="menuitem"
+                disabled={runDisabled}
+                onClick={() => { if (!runDisabled) onVerify() }}
+                className="cl-run-env-option disabled:cursor-not-allowed disabled:opacity-45"
+              >
+                <span className="min-w-0 flex-1">Set up &amp; run verify →</span>
+              </button>
+            </>
+          ) : (
+            <>
+              {mode === 'boot' && (
+                <p className="px-2 pb-1.5 pt-0.5 text-[10px] leading-snug" style={{ color: 'var(--text-muted)' }}>
+                  Boots services and holds them — no tests. Manage &amp; stop from the Services pill.
+                </p>
+              )}
+              {envs.length > 0 ? (
+                <>
+                  <div className="px-2 pb-1 pt-1 text-[10px] uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
+                    {mode === 'boot' ? 'Boot which envset' : 'Choose envset'}
+                  </div>
+                  {envs.map((env) => (
+                    <button
+                      key={env}
+                      type="button"
+                      role="menuitem"
+                      disabled={runDisabled}
+                      onClick={() => { if (!runDisabled) onStartEnv(env, launchMode) }}
+                      className="cl-run-env-option disabled:cursor-not-allowed disabled:opacity-45"
+                    >
+                      <span className="cl-run-env-option-dot" aria-hidden="true" />
+                      <span className="min-w-0 flex-1 truncate" style={{ fontFamily: 'var(--font-mono)' }}>{env}</span>
+                    </button>
+                  ))}
+                </>
+              ) : (
+                <button
+                  type="button"
+                  role="menuitem"
+                  disabled={runDisabled}
+                  onClick={() => { if (!runDisabled) onStartEnv('', launchMode) }}
+                  className="cl-run-env-option disabled:cursor-not-allowed disabled:opacity-45"
+                >
+                  <span className="cl-run-env-option-dot" aria-hidden="true" />
+                  <span className="min-w-0 flex-1">{mode === 'boot' ? 'Boot services' : 'Run tests'}</span>
+                </button>
+              )}
+            </>
+          )}
+
           {runDisabled && disabledReason && (
             <p className="mx-2 mt-1 border-t pt-2 text-[10px]" style={{ borderColor: 'var(--border-default)', color: 'var(--text-muted)' }}>
               {disabledReason}
@@ -679,6 +705,7 @@ function useAnchoredPosition(
 function RunActionsKebab({
   view,
   displayStatus,
+  executionType,
   open,
   onOpenToggle,
   onClose,
@@ -691,6 +718,7 @@ function RunActionsKebab({
 }: {
   view: RunViewModel
   displayStatus: import('../api/types').DisplayStatus
+  executionType?: import('../api/types').ExecutionType
   open: boolean
   onOpenToggle: (e: React.MouseEvent) => void
   onClose: () => void
@@ -715,7 +743,7 @@ function RunActionsKebab({
   return (
     <div className="shrink-0" data-run-menu>
       <div className="flex items-center gap-1.5">
-        <RunStatusIndicator status={displayStatus} />
+        <RunStatusIndicator status={displayStatus} executionType={executionType} />
         {hasActions && (
           <button
             ref={buttonRef}
@@ -830,18 +858,19 @@ function MenuItem({
   )
 }
 
-function ExecutionTypeBadge({ type }: { type: 'run' | 'verify' }) {
-  const isVerify = type === 'verify'
+function ExecutionTypeBadge({ type }: { type: ExecutionType }) {
+  const style = type === 'verify'
+    ? { background: 'rgba(14, 165, 233, 0.12)', color: 'var(--accent)' }
+    : type === 'boot'
+      ? { background: 'var(--boot-soft)', color: 'var(--boot)' }
+      : { background: 'var(--bg-selected)', color: 'var(--text-muted)' }
+  const label = type === 'verify' ? 'Verify' : type === 'boot' ? 'Boot' : 'Run'
   return (
     <span
       className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase"
-      style={{
-        background: isVerify ? 'rgba(14, 165, 233, 0.12)' : 'var(--bg-selected)',
-        color: isVerify ? 'var(--accent)' : 'var(--text-muted)',
-        letterSpacing: '0.04em',
-      }}
+      style={{ ...style, letterSpacing: '0.04em' }}
     >
-      {isVerify ? 'Verify' : 'Run'}
+      {label}
     </span>
   )
 }

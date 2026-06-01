@@ -128,6 +128,7 @@ export interface CanaryLabMcpDeps {
       conversationName?: string
     },
     isolation?: 'worktree' | 'queue',
+    executionType?: 'run' | 'boot',
   ) => Promise<McpStartRunOutcome>
   restartExternalRun?: (
     runId: string,
@@ -206,6 +207,7 @@ export type CanaryLabMcpToolName =
   | 'apply_external_draft'
   | 'get_heal_context'
   | 'start_run'
+  | 'boot_services'
   | 'pause_run'
   | 'cancel_heal'
   | 'abort_run'
@@ -220,6 +222,7 @@ const REPAIR_TOOLS = [
   'list_features',
   'list_runs',
   'start_run',
+  'boot_services',
   'wait_for_heal_task',
   'get_heal_context',
   'get_run_snapshot',
@@ -236,6 +239,8 @@ const VERIFY_TOOLS = [
   'list_features',
   'list_runs',
   'get_run',
+  'boot_services',
+  'abort_run',
   'list_verification_configs',
   'get_verification_config',
   'create_verification_config',
@@ -1082,6 +1087,46 @@ export function registerCanaryLabTools(
         reused: false,
         claimed: claim_heal,
         ...(claim_heal ? healWaitNext(outcome.runId) : {}),
+      })
+    } catch (err) {
+      return errorResult(err instanceof Error ? err.message : String(err))
+    }
+  })
+
+  registerTool('boot_services', {
+    description:
+      "Apply the feature's envset and boot its services, then HOLD them — no Playwright tests, no heal loop. Use this to bring an app up so you (or the user) can exercise it manually. The run stays active until torn down with `abort_run`, which stops the services and reverts the envset. Same-repo collisions and resource limits behave exactly like start_run (returns repo_collision_requires_choice / queued).",
+    inputSchema: {
+      feature: z.string().describe('Feature name (from list_features).'),
+      env: z.string().optional().describe("Envset name. Defaults to the feature's first declared env."),
+      isolation: z.enum(['worktree', 'queue']).optional().describe('Only needed after this returns repo_collision_requires_choice: "worktree" boots in a per-run git worktree (concurrent); "queue" waits until the conflicting run finishes.'),
+    },
+  }, async ({ feature, env, isolation }) => {
+    try {
+      const outcome = await deps.startRun(feature, env, undefined, isolation, 'boot')
+      if (outcome.kind === 'collision') {
+        return asJsonResult({
+          type: 'repo_collision_requires_choice',
+          conflictingRunId: outcome.conflictingRunId,
+          conflictingFeature: outcome.conflictingFeature,
+          repoPaths: outcome.repoPaths,
+          options: outcome.options,
+          message: outcome.message,
+          nextSteps: ['ask_user_worktree_or_queue'],
+        })
+      }
+      if (outcome.kind === 'queued') {
+        return asJsonResult({
+          runId: outcome.runId,
+          queued: true,
+          queueReason: outcome.reason,
+          nextSteps: ['boot starts automatically when capacity frees; stop it with abort_run when done'],
+        })
+      }
+      return asJsonResult({
+        runId: outcome.runId,
+        booted: true,
+        nextSteps: ['services are booting and will be held — exercise them, then call abort_run (confirm:true) to stop services + revert the envset'],
       })
     } catch (err) {
       return errorResult(err instanceof Error ? err.message : String(err))

@@ -1857,6 +1857,25 @@ export class RunOrchestrator extends EventEmitter {
     return finalStatus
   }
 
+  // Boot-only entry. The envset was applied before construction (by the server's
+  // startRun factory). This boots the services + waits for health, then HOLDS
+  // them — no Playwright, no heal loop. The run stays active (status 'running',
+  // phase 'services-ready') until the user/agent stops it; `stop()` then tears
+  // the services down and the server's run-complete handler reverts the envset.
+  //
+  // Unlike `runFullCycle`, the caller must NOT chain `.then(stop)` on this
+  // promise: resolving here means "services are up and held", not "run done".
+  // A health-check timeout still `throw`s out of `start()` so the caller's
+  // `.catch` can stop()+revert; an abort mid-boot sets `this.stopped`.
+  async bootOnly(): Promise<void> {
+    await this.start()
+    if (this.stopped) return
+    this.recordLifecycle('services-ready', 'Services ready — boot-only session (tests skipped)', {
+      detail: 'Services are up and held. Stop the run to tear them down and revert the envset.',
+      severity: 'success',
+    })
+  }
+
   async restartTerminalRun(userGuidance?: string): Promise<RunManifest['status']> {
     await this.start()
     if (this.stopped) return this.status
@@ -2290,12 +2309,18 @@ export class RunOrchestrator extends EventEmitter {
     // only writer at this point; no other path can race because
     // `this.stopped = true` already gates `setStatus`.
     this.stateSink.finalize(this.runId, finalStatus, endedAt, this.healCycles)
+    // A boot-only session ending is a normal teardown, not a failure: give it a
+    // calm "services stopped" headline (info, no abortReason) instead of the
+    // warning-tinted "Run aborted" a test run gets.
+    const isBoot = this.executionType === 'boot'
     const finalPhase = finalLifecyclePhase(finalStatus)
-    const finalHeadline = finalStatus === 'aborted' ? 'Run aborted' : finalStatus === 'passed' ? 'Run passed' : 'Run failed'
+    const finalHeadline = finalStatus === 'aborted'
+      ? (isBoot ? 'Services stopped — envset reverted' : 'Run aborted')
+      : finalStatus === 'passed' ? 'Run passed' : 'Run failed'
     if (this.lastLifecycleEvent?.phase !== finalPhase || this.lastLifecycleEvent.headline !== finalHeadline) {
       this.recordLifecycle(finalPhase, finalHeadline, {
-        severity: finalStatus === 'passed' ? 'success' : finalStatus === 'aborted' ? 'warning' : 'error',
-        ...(finalStatus === 'aborted' ? { abortReason: this.pendingAbortReason ?? { reason: 'run-stopped' } } : {}),
+        severity: finalStatus === 'passed' ? 'success' : finalStatus === 'aborted' ? (isBoot ? 'info' : 'warning') : 'error',
+        ...(finalStatus === 'aborted' && !isBoot ? { abortReason: this.pendingAbortReason ?? { reason: 'run-stopped' } } : {}),
       })
     }
     this.emit('run-complete', { status: finalStatus })

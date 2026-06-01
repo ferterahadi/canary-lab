@@ -1,4 +1,10 @@
-export type ExecutionType = 'run' | 'verify'
+// `run`    — the normal boot → Playwright → heal cycle.
+// `verify` — observational: run tests against a deployment, never boot/heal.
+// `boot`   — apply envset + boot the feature's services and hold them (no
+//            Playwright, no heal) until the run is stopped, which tears the
+//            services down and reverts the envset. Its RunStatus stays
+//            `running` while held; the distinct identity is derived from this.
+export type ExecutionType = 'run' | 'verify' | 'boot'
 
 export interface VerificationTarget {
   id: string

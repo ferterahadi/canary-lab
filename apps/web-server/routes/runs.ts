@@ -30,6 +30,7 @@ import {
   selectAgentSessionRef,
 } from '../lib/agent-session-log'
 import { isTerminalRunStatus } from '../../../shared/run-state'
+import type { ExecutionType } from '../../../shared/verification'
 import type { ExternalHealBroker } from '../lib/external-heal-broker'
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../lib/workspace-events'
 
@@ -65,6 +66,7 @@ export interface RunsRouteDeps {
     env?: string,
     healAgent?: ExternalHealAgentRequest,
     isolation?: 'worktree' | 'queue',
+    executionType?: ExecutionType,
   ): Promise<StartRunOutcome>
   /** Cancel a run still waiting in the admission queue (no orchestrator yet).
    *  Returns true when it was queued and is now aborted. */
@@ -426,6 +428,10 @@ export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Pro
       healAgent?: ExternalHealAgentRequest | { kind?: string }
       forceNew?: boolean
       isolation?: 'worktree' | 'queue'
+      // 'boot' = apply envset + boot the feature's services and hold them, no
+      // Playwright. Stop the run (POST /api/runs/:runId/abort) to tear down +
+      // revert env. Defaults to a normal test run.
+      mode?: 'test' | 'boot'
     }
   }>('/api/runs', async (req, reply) => {
     const feature = req.body?.feature
@@ -480,8 +486,9 @@ export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Pro
     const isolation = req.body?.isolation === 'worktree' || req.body?.isolation === 'queue'
       ? req.body.isolation
       : undefined
+    const executionType: ExecutionType = req.body?.mode === 'boot' ? 'boot' : 'run'
     try {
-      const outcome = await deps.startRun(feature, env, healAgent ?? undefined, isolation)
+      const outcome = await deps.startRun(feature, env, healAgent ?? undefined, isolation, executionType)
       if (outcome.kind === 'collision') {
         // Same-repo collision and the caller didn't choose how to handle it.
         // Nothing started — surface the choice so the UI / MCP client can ask.

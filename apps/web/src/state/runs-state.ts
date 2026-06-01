@@ -57,14 +57,23 @@ export function runsReducer(state: RunsState, action: RunsAction): RunsState {
       return { ...state, runs: action.runs, details: action.details }
     case 'update': {
       // Update both list and details. The list entry is derived from the
-      // manifest so the badge stays in sync without a separate poll.
+      // manifest so the badge stays in sync without a separate poll. It MUST
+      // mirror the backend's index entry (indexEntryFromManifest) field-for-
+      // field — in particular `executionType`, or an active boot/verify run
+      // loses its identity on every heartbeat `update` frame (it would fall
+      // back to looking like a plain test run, leak into the Runs list, and
+      // never reach the Services pill).
       const m = action.detail.manifest
       const entry: RunIndexEntry = {
         runId: m.runId,
+        ...(m.executionType ? { executionType: m.executionType } : {}),
         feature: m.feature,
         startedAt: m.startedAt,
         status: m.status,
-        endedAt: m.endedAt,
+        ...(m.endedAt ? { endedAt: m.endedAt } : {}),
+        ...(m.verification?.configName ? { verificationConfigName: m.verification.configName } : {}),
+        ...(m.verification?.playwrightEnvsetId ? { verificationPlaywrightEnvsetId: m.verification.playwrightEnvsetId } : {}),
+        ...(m.verification?.targetUrls ? { verificationTargetUrls: m.verification.targetUrls } : {}),
       }
       const others = state.runs.filter((r) => r.runId !== action.runId)
       const transients = isTerminalRunStatus(entry.status)

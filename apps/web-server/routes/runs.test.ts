@@ -966,6 +966,30 @@ describe('POST /api/runs', () => {
     expect(receivedEnv).toBe('local')
   })
 
+  it('passes executionType "boot" to the factory when mode:boot is requested', async () => {
+    writeFeature('foo')
+    const stub = makeStub('rb')
+    let receivedExecutionType: string | undefined = 'untouched'
+    const { app } = await build({
+      startRun: async (_f, _e, _h, _i, executionType) => { receivedExecutionType = executionType; return { kind: 'started', orch: stub } },
+    })
+    const res = await app.inject({ method: 'POST', url: '/api/runs', payload: { feature: 'foo', mode: 'boot' } })
+    expect(res.statusCode).toBe(201)
+    expect(receivedExecutionType).toBe('boot')
+  })
+
+  it('defaults executionType to "run" when mode is omitted', async () => {
+    writeFeature('foo')
+    const stub = makeStub('rr')
+    let receivedExecutionType: string | undefined = 'untouched'
+    const { app } = await build({
+      startRun: async (_f, _e, _h, _i, executionType) => { receivedExecutionType = executionType; return { kind: 'started', orch: stub } },
+    })
+    const res = await app.inject({ method: 'POST', url: '/api/runs', payload: { feature: 'foo' } })
+    expect(res.statusCode).toBe(201)
+    expect(receivedExecutionType).toBe('run')
+  })
+
   it('runs without env when feature declares no envs', async () => {
     const dir = path.join(featuresDir, 'noenv')
     fs.mkdirSync(dir, { recursive: true })

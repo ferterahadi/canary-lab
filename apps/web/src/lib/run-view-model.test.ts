@@ -253,4 +253,65 @@ describe('deriveRunViewModel', () => {
     })
     expect(vm.actions.delete.enabled).toBe(true)
   })
+
+  it('holds a boot session: only Stop is offered, with a teal-friendly headline + alert', () => {
+    const vm = deriveRunViewModel(detail({ executionType: 'boot', status: 'running' }))
+
+    // Held boot session: Stop is the only live action; heal actions are gated.
+    expect(vm.actions.stop.enabled).toBe(true)
+    expect(vm.actions.pauseHeal.enabled).toBe(false)
+    expect(vm.actions.pauseHeal.reason).toContain('Boot-only')
+    expect(vm.actions.cancelHeal.enabled).toBe(false)
+    expect(vm.actions.restartHeal.enabled).toBe(false)
+    // No lifecycle in this fixture → boot fallback headline + info alert.
+    expect(vm.headline).toBe('Services ready')
+    expect(vm.primaryAlert).toEqual({
+      tone: 'info',
+      message: 'Services are up and held. Stop the run to tear them down and revert the envset.',
+    })
+  })
+
+  it('reassures that the envset reverted when a boot session is stopped', () => {
+    const vm = deriveRunViewModel(detail({ executionType: 'boot', status: 'aborted' }))
+    expect(vm.headline).toBe('Services stopped')
+    expect(vm.primaryAlert).toEqual({ tone: 'info', message: 'Services stopped. Envset reverted.' })
+    expect(vm.actions.restartHeal.enabled).toBe(false)
+    expect(vm.actions.delete.enabled).toBe(true)
+  })
+
+  it('relabels the stop transient as "Stopping services" for a boot run', () => {
+    const vm = deriveRunViewModel(detail({ executionType: 'boot', status: 'running' }), 'aborting')
+    expect(vm.headline).toBe('Stopping services')
+  })
+
+  it('labels a queued boot run and shows no alert', () => {
+    const vm = deriveRunViewModel(detail({ executionType: 'boot', status: 'queued' }))
+    expect(vm.headline).toBe('Queued — services will boot when capacity frees')
+    expect(vm.primaryAlert).toBeUndefined()
+  })
+
+  it('falls back to a generic boot headline for unexpected statuses, with no alert', () => {
+    // A boot session never passes/fails (no tests), but the headline + alert
+    // stay defined defensively for any status.
+    const vm = deriveRunViewModel(detail({ executionType: 'boot', status: 'passed' }))
+    expect(vm.headline).toBe('Boot-only session')
+    expect(vm.primaryAlert).toBeUndefined()
+  })
+
+  it('explains a health-failed boot abort and confirms the envset reverted', () => {
+    const vm = deriveRunViewModel(detail({
+      executionType: 'boot',
+      status: 'aborted',
+      lifecycle: {
+        phase: 'aborted',
+        headline: 'Services stopped — envset reverted',
+        updatedAt: '2026-05-08T00:00:02.000Z',
+        abortReason: { reason: 'service-health-failed', service: 'api' },
+      },
+    }))
+    expect(vm.primaryAlert).toEqual({
+      tone: 'warning',
+      message: 'Boot stopped because api failed health checks. Envset reverted.',
+    })
+  })
 })

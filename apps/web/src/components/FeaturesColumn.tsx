@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { Feature, RunStatus } from '../api/types'
+import type { ExecutionType, Feature, RunStatus } from '../api/types'
 import { useWizardDrafts } from '../state/WizardDraftContext'
 import { useMcpPromo } from '../state/McpPromoContext'
 import { FeatureConfigEditor } from './FeatureConfigEditor'
@@ -13,6 +13,9 @@ interface Props {
   activeRunFeature?: string | null
   /** Status of that active run — drives the chip label/color. */
   activeRunStatus?: RunStatus | null
+  /** Execution type of that active run — a `boot` run gets the teal
+   *  "services up" treatment instead of the running/healing tint. */
+  activeRunExecutionType?: ExecutionType | null
   onSelectFeature: (name: string) => void
   onFeaturesChanged?: (preferredFeature?: string | null) => void
 }
@@ -22,6 +25,7 @@ export function FeaturesColumn({
   selectedFeature,
   activeRunFeature,
   activeRunStatus,
+  activeRunExecutionType,
   onSelectFeature,
   onFeaturesChanged,
 }: Props) {
@@ -54,7 +58,11 @@ export function FeaturesColumn({
             {features.map((f) => {
               const isSelected = f.name === selectedFeature
               const isActive = Boolean(activeRunFeature) && f.name === activeRunFeature
-              const runState = isActive ? (activeRunStatus === 'healing' ? 'healing' : 'running') : null
+              const runState = isActive
+                ? (activeRunExecutionType === 'boot'
+                    ? 'booted'
+                    : activeRunStatus === 'healing' ? 'healing' : 'running')
+                : null
               return (
                 <li
                   key={f.name}
@@ -63,7 +71,7 @@ export function FeaturesColumn({
                     color: isSelected ? 'var(--text-primary)' : 'var(--text-secondary)',
                     fontWeight: isSelected ? 500 : 400,
                   }}
-                  title={runState ? (runState === 'healing' ? 'Healing now' : 'Running now') : undefined}
+                  title={runState ? (runState === 'healing' ? 'Healing now' : runState === 'booted' ? 'Services up (boot-only)' : 'Running now') : undefined}
                 >
                   <button
                     type="button"
@@ -75,7 +83,7 @@ export function FeaturesColumn({
                     {f.name}
                   </button>
                   {runState && (
-                    <span className="sr-only">{runState === 'healing' ? 'Healing' : 'Running'}</span>
+                    <span className="sr-only">{runState === 'healing' ? 'Healing' : runState === 'booted' ? 'Services up' : 'Running'}</span>
                   )}
                   <button
                     type="button"

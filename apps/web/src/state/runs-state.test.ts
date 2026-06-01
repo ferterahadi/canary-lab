@@ -61,6 +61,29 @@ describe('runsReducer', () => {
     expect(next.details.new.runId).toBe('new')
   })
 
+  it('update carries executionType + verification fields onto the derived list entry', () => {
+    // Regression: active runs get frequent `update` frames; if the derived
+    // entry drops executionType, a held boot reverts to looking like a test
+    // run (leaks into the Runs list, drives the Tests counter, never reaches
+    // the Services pill). The entry must mirror the backend index entry.
+    const next = runsReducer(initialRunsState, {
+      type: 'update',
+      runId: 'b1',
+      detail: detail({
+        runId: 'b1',
+        executionType: 'boot',
+        endedAt: '2026-02-01T00:01:00Z',
+        verification: { configName: 'Prod', playwrightEnvsetId: 'production', targetUrls: { default: 'https://x' } },
+      }),
+    })
+    const e = next.runs.find((r) => r.runId === 'b1')!
+    expect(e.executionType).toBe('boot')
+    expect(e.endedAt).toBe('2026-02-01T00:01:00Z')
+    expect(e.verificationConfigName).toBe('Prod')
+    expect(e.verificationPlaywrightEnvsetId).toBe('production')
+    expect(e.verificationTargetUrls).toEqual({ default: 'https://x' })
+  })
+
   it('places an older incoming run after a newer existing one', () => {
     // The "inserts new sorted desc" test above hits the `a < b → 1` arm of
     // byStartedDesc. This case (incoming older than existing) hits the

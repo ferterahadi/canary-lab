@@ -833,12 +833,13 @@ export function asRepoCollision(err: unknown): RepoCollisionChoice | null {
 
 export function startRun(
   feature: string,
-  opts?: ClientOptions & { env?: string; isolation?: 'worktree' | 'queue' },
+  opts?: ClientOptions & { env?: string; isolation?: 'worktree' | 'queue'; mode?: 'test' | 'boot' },
 ): Promise<{ runId: string }> {
   const { baseUrl, fetchImpl } = defaultOpts(opts)
   const body: Record<string, unknown> = { feature }
   if (opts?.env) body.env = opts.env
   if (opts?.isolation) body.isolation = opts.isolation
+  if (opts?.mode === 'boot') body.mode = 'boot'
   return request<{ runId: string }>(
     `${baseUrl}/api/runs`,
     {
