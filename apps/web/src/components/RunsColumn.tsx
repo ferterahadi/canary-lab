@@ -622,6 +622,11 @@ function RunLaunchControl({
                   Boots services and holds them — no tests. Manage &amp; stop from the Services pill.
                 </p>
               )}
+              {mode === 'test' && (
+                <p className="px-2 pb-1.5 pt-0.5 text-[10px] leading-snug" style={{ color: 'var(--text-muted)' }}>
+                  Boots services and runs the feature&apos;s tests — tears them down when done.
+                </p>
+              )}
               {envs.length > 0 ? (
                 <>
                   <div className="px-2 pb-1 pt-1 text-[10px] uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
