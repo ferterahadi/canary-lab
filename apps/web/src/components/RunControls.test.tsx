@@ -253,7 +253,7 @@ describe('run overview', () => {
       healTab?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     })
 
-    expect(container.textContent).toContain('External Client')
+    expect(container.textContent).toContain('AI Agent')
     expect(container.textContent).toContain('No external client has claimed this run yet')
     expect(container.textContent).not.toContain('terminal')
   })

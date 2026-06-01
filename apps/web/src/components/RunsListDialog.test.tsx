@@ -48,12 +48,28 @@ describe('RunsListDialog', () => {
     expect(text).toContain('Running')
     expect(text).toContain('Queued')
     expect(text).toContain('Finished')
+    // Active runs are expanded by default.
     expect(text).toContain('app_a')
-    expect(text).toContain('app_b')
     // Allocated port for the running run.
     expect(text).toContain(':51999')
     // Collision queue note.
     expect(text).toContain('waiting for the same app to finish')
+    // Finished runs are collapsed by default — app_b stays hidden until expanded.
+    expect(text).not.toContain('app_b')
+  })
+
+  it('reveals finished runs when the Finished disclosure is expanded', async () => {
+    await act(async () => {
+      root.render(<RunsListDialog onClose={() => {}} onNavigateToRun={() => {}} />)
+    })
+    expect(document.body.textContent ?? '').not.toContain('app_b')
+    const disclosure = [...container.querySelectorAll('button')]
+      .find((b) => b.getAttribute('aria-expanded') === 'false')
+    expect(disclosure).toBeTruthy()
+    await act(async () => {
+      disclosure?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+    expect(document.body.textContent ?? '').toContain('app_b')
   })
 
   it('navigates to a run and closes when a row is clicked', async () => {

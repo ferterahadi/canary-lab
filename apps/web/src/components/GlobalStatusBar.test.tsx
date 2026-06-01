@@ -16,9 +16,11 @@ vi.mock('../api/client', async () => {
   }
 })
 
+const mockActiveRuns = vi.hoisted(() => ({ value: { runs: [] as unknown[], count: 0 } }))
+
 vi.mock('../state/RunsContext', () => ({
   useRuns: () => ({ connection: 'live', runs: [] }),
-  useActiveRuns: () => ({ runs: [], count: 0 }),
+  useActiveRuns: () => mockActiveRuns.value,
   useRunDetails: () => ({}),
 }))
 
@@ -34,6 +36,7 @@ let container: HTMLDivElement
 let root: Root
 
 beforeEach(() => {
+  mockActiveRuns.value = { runs: [], count: 0 }
   container = document.createElement('div')
   document.body.appendChild(container)
   root = createRoot(container)
@@ -62,7 +65,32 @@ afterEach(() => {
   vi.clearAllMocks()
 })
 
+function runsButton(): HTMLButtonElement | undefined {
+  return [...container.querySelectorAll('button')]
+    .find((button) => button.getAttribute('aria-label')?.startsWith('Show all runs')) as HTMLButtonElement | undefined
+}
+
 describe('GlobalStatusBar', () => {
+  it('hides the Runs button when no runs are running, healing, or queued', async () => {
+    mockActiveRuns.value = { runs: [], count: 0 }
+    await act(async () => {
+      root.render(<GlobalStatusBar activeRunDetail={null} />)
+    })
+    expect(runsButton()).toBeUndefined()
+  })
+
+  it('shows the Runs button with an active count when runs are active', async () => {
+    mockActiveRuns.value = { runs: [{}, {}], count: 2 }
+    await act(async () => {
+      root.render(<GlobalStatusBar activeRunDetail={null} />)
+    })
+    const button = runsButton()
+    expect(button).toBeTruthy()
+    expect(button?.getAttribute('aria-label')).toBe('Show all runs (2 active)')
+    expect(button?.textContent).toContain('Runs')
+    expect(button?.textContent).toContain('2')
+  })
+
   it('replaces the Playwright chip with a collapsed MCP indicator menu', async () => {
     await act(async () => {
       root.render(<GlobalStatusBar activeRunDetail={null} />)
