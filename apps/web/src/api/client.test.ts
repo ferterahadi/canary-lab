@@ -466,6 +466,26 @@ describe('api client', () => {
     })
   })
 
+  it('startRun forwards boot mode in the body', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(ok({ runId: 'rb' }, 201))
+    await startRun('feat-x', { fetchImpl, env: 'local', mode: 'boot' })
+    expect(fetchImpl).toHaveBeenCalledWith('/api/runs', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ feature: 'feat-x', env: 'local', mode: 'boot' }),
+    })
+  })
+
+  it('startRun omits mode for a normal test run', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(ok({ runId: 'rt' }, 201))
+    await startRun('feat-x', { fetchImpl, mode: 'test' })
+    expect(fetchImpl).toHaveBeenCalledWith('/api/runs', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ feature: 'feat-x' }),
+    })
+  })
+
   it('startRun throws ApiError on 400', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(fail(400, { error: 'feature required' }))
     await expect(startRun('', { fetchImpl })).rejects.toBeInstanceOf(ApiError)

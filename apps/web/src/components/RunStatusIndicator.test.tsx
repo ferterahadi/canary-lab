@@ -41,4 +41,19 @@ describe('RunStatusIndicator', () => {
     const html = renderToStaticMarkup(<RunStatusIndicator status={'mystery' as RunStatus} />)
     expect(html).toContain('bg-zinc-400')
   })
+
+  it('renders a held boot run as teal "services up" (not sky "running")', () => {
+    const html = renderToStaticMarkup(<RunStatusIndicator status="running" executionType="boot" />)
+    expect(html).toContain('bg-cyan-500')      // teal booted dot, not bg-sky-500
+    expect(html).not.toContain('bg-sky-500')
+    expect(html).toContain('services up')       // label override
+    expect(html).toContain('cl-dot-breathe')    // calm breathe, not animate-pulse
+    expect(html).not.toContain('animate-ping')  // no urgent halo
+  })
+
+  it('renders a stopped boot run as a neutral "stopped"', () => {
+    const html = renderToStaticMarkup(<RunStatusIndicator status="aborted" executionType="boot" />)
+    expect(html).toContain('bg-zinc-400')
+    expect(html).toContain('stopped')
+  })
 })

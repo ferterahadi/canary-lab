@@ -66,6 +66,7 @@ import {
 } from './lib/verification'
 import type { HealAgentChoice } from './lib/runtime/launcher/project-config'
 import type { LocalHealAgent } from './lib/runtime/manifest'
+import type { ExecutionType } from '../../shared/verification'
 
 // Allocate one free TCP port per declared port slot for this run so concurrent
 // runs (even of the same app) never clash on a hardcoded port. Returns
@@ -533,11 +534,12 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
     feature: FeatureConfig,
     env: string | undefined,
     reason: QueueReason,
+    executionType: ExecutionType = 'run',
   ): void => {
     const startedAt = new Date().toISOString()
     runStore.bootstrap({
       runId,
-      executionType: 'run',
+      executionType,
       feature: feature.name,
       featureDir: feature.featureDir,
       env,
@@ -569,7 +571,9 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
       env?: string,
       healAgentReq?: { kind: 'external'; sessionId: string; clientKind: 'claude-cli' | 'claude-desktop' | 'codex-cli' | 'codex-desktop' | 'other'; clientVersion?: string; conversationName?: string },
       isolation?: 'worktree' | 'queue',
+      executionType: ExecutionType = 'run',
     ): Promise<StartRunOutcome> => {
+      const isBoot = executionType === 'boot'
       const features = loadFeatures(featuresDir)
       const feature = features.find((f) => f.name === featureName)
       if (!feature) throw new Error(`feature not found: ${featureName}`)
@@ -651,10 +655,12 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
         }) => string
         buildCyclePrompt: BuildHealCyclePrompt
       } | undefined
-      const agentChoice = isExternalRequest
+      const agentChoice = (isExternalRequest || isBoot)
         ? null
         : pickConfiguredHealAgent(projectConfig.healAgent)
-      if (isExternalRequest) {
+      if (isBoot) {
+        runnerLog.info('Boot-only session: booting services and holding them — no tests, no heal.')
+      } else if (isExternalRequest) {
         runnerLog.info(
           `Auto-heal disabled: external client (${healAgentReq?.clientKind}, session ${healAgentReq?.sessionId.slice(0, 8)}) will drive the heal loop.`,
         )
@@ -684,7 +690,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
         } catch (err) {
           runnerLog.warn(`Auto-heal disabled: ${(err as Error).message}`)
         }
-      } else {
+      } else if (!isBoot) {
         runnerLog.warn('Auto-heal disabled: no `claude` or `codex` CLI on PATH (set CANARY_LAB_HEAL_AGENT=claude|codex to override).')
       }
 
@@ -710,10 +716,13 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
           worktrees,
 	          ptyFactory,
           runnerLog,
-          autoHeal,
+          executionType,
+          // A boot-only session never runs tests, so it never heals — force all
+          // heal modes off regardless of project config.
+          autoHeal: isBoot ? undefined : autoHeal,
           manualHeal:
-            !isExternalRequest && projectConfig.healAgent === 'manual',
-          externalHeal: isExternalRequest || projectConfig.healAgent === 'external',
+            !isBoot && !isExternalRequest && projectConfig.healAgent === 'manual',
+          externalHeal: !isBoot && (isExternalRequest || projectConfig.healAgent === 'external'),
           externalHealSession,
           repoBranchSnapshots,
           // Route every manifest/index write through RunStore so its event
@@ -741,16 +750,30 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
 
       attachRunStreams(orch, runnerLog, feature.name, backups)
       const broker = brokers.get(runId)!
-      orch.runFullCycle()
-        .then(async (status) => {
-          await orch.stop(status).catch(() => {})
-          registry.delete(orch.runId)
-        })
-        .catch(async (err) => {
-          broker.push('agent', `\n[orchestrator error] ${String(err)}\n`)
-          await orch.stop('aborted').catch(() => {})
-          registry.delete(orch.runId)
-      })
+      if (isBoot) {
+        // Boot-only: boot + hold. On success do NOT stop — the services stay up
+        // and the run stays an active registry entry until the user/agent hits
+        // Stop/abort, which runs orch.stop() → tears services down → fires
+        // run-complete → reverts the envset (see attachRunStreams). Only the
+        // failure path (health timeout, etc.) tears down here.
+        orch.bootOnly()
+          .catch(async (err) => {
+            broker.push('agent', `\n[boot error] ${String(err)}\n`)
+            await orch.stop('aborted').catch(() => {})
+            registry.delete(orch.runId)
+          })
+      } else {
+        orch.runFullCycle()
+          .then(async (status) => {
+            await orch.stop(status).catch(() => {})
+            registry.delete(orch.runId)
+          })
+          .catch(async (err) => {
+            broker.push('agent', `\n[orchestrator error] ${String(err)}\n`)
+            await orch.stop('aborted').catch(() => {})
+            registry.delete(orch.runId)
+          })
+      }
         // Register synchronously so the scheduler's next fit() / promotion sees
         // this run as active before any await yields.
         registry.set(orch.runId, orch)
@@ -759,7 +782,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
 
       // Collision declined worktree → queue until the conflicting repo frees.
       if (collision && isolation === 'queue') {
-        writeQueuedManifest(runId, feature, env, 'repo-collision')
+        writeQueuedManifest(runId, feature, env, 'repo-collision', executionType)
         scheduler.enqueue({ runId, feature: feature.name, repoPaths: sourceRepoPaths, cost, reason: 'repo-collision', launch: async () => { await launch() } })
         return { kind: 'queued', runId, reason: 'repo-collision' }
       }
@@ -767,7 +790,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
       const schedRepoPaths = useWorktree ? [] : sourceRepoPaths
       const fit = scheduler.fits({ repoPaths: schedRepoPaths, cost })
       if (!fit.ok) {
-        writeQueuedManifest(runId, feature, env, fit.reason)
+        writeQueuedManifest(runId, feature, env, fit.reason, executionType)
         scheduler.enqueue({ runId, feature: feature.name, repoPaths: schedRepoPaths, cost, reason: fit.reason, launch: async () => { await launch() } })
         return { kind: 'queued', runId, reason: fit.reason }
       }
@@ -1040,11 +1063,11 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
     featuresDir,
     projectRoot: opts.projectRoot,
     workspaceEvents,
-	    startRun: async (feature, env, healAgent, isolation) => {
+	    startRun: async (feature, env, healAgent, isolation, executionType) => {
 	      const resp = await app.inject({
 	        method: 'POST',
 	        url: '/api/runs',
-	        payload: { feature, env, ...(healAgent ? { healAgent } : {}), ...(isolation ? { isolation } : {}) },
+	        payload: { feature, env, ...(healAgent ? { healAgent } : {}), ...(isolation ? { isolation } : {}), ...(executionType === 'boot' ? { mode: 'boot' } : {}) },
 	      })
 	      const body = (() => { try { return JSON.parse(resp.payload) } catch { return resp.payload } })() as Record<string, unknown>
 	      if (resp.statusCode === 201 || resp.statusCode === 200) {

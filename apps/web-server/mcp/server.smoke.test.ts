@@ -30,6 +30,7 @@ const uniqueSorted = (values: string[]): string[] => Array.from(new Set(values))
 
 const REPAIR_TOOLS = uniqueSorted([
   'abort_run',
+  'boot_services',
   'cancel_heal',
   'get_heal_context',
   'get_run',
@@ -45,6 +46,8 @@ const REPAIR_TOOLS = uniqueSorted([
 ])
 
 const VERIFY_TOOLS = uniqueSorted([
+  'abort_run',
+  'boot_services',
   'create_verification_config',
   'execute_verification',
   'get_run',
@@ -83,6 +86,7 @@ const AUTHOR_TOOLS = uniqueSorted([
 const FULL_TOOLS = uniqueSorted([
   ...AUTHOR_TOOLS,
   'abort_run',
+  'boot_services',
   'cancel_heal',
   'claim_heal',
   'create_verification_config',
@@ -1496,6 +1500,45 @@ describe('MCP HTTP server (smoke)', () => {
         claimed: true,
       })
       expect(starts).toEqual(['broken_todo_api'])
+    } finally {
+      if (client) await client.close().catch(() => undefined)
+      await app.close()
+    }
+  })
+
+  it('boot_services starts a boot-mode run with no heal agent', async () => {
+    const projectRoot = path.resolve(__dirname, '..', '..', '..', 'templates', 'project')
+    const logsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-boot-')))
+    const featuresDir = path.join(projectRoot, 'features')
+    const calls: Array<{ feature: string; env?: string; healAgent: unknown; isolation?: string; executionType?: string }> = []
+    const { app } = await createMcpHarness({
+      logsDir,
+      projectRoot,
+      featuresDir,
+      startRun: async (feature, env, healAgent, isolation, executionType) => {
+        calls.push({ feature, env, healAgent, isolation, executionType })
+        return { kind: 'started', runId: 'boot-run' } as never
+      },
+    })
+    let client: Client | null = null
+    try {
+      const address = await app.listen({ port: 0, host: '127.0.0.1' })
+      client = new Client({ name: 'canary-lab-smoke', version: '0.0.1' }, { capabilities: {} })
+      await client.connect(new StreamableHTTPClientTransport(new URL('/mcp', address)))
+
+      const result = await client.callTool({
+        name: 'boot_services',
+        arguments: { feature: 'example_todo_api', env: 'local' },
+      })
+
+      expect(JSON.parse((result.content?.[0] as { text: string }).text)).toMatchObject({
+        runId: 'boot-run',
+        booted: true,
+      })
+      expect(calls).toHaveLength(1)
+      expect(calls[0]).toMatchObject({ feature: 'example_todo_api', env: 'local', executionType: 'boot' })
+      // Boot sessions never heal — no external heal agent is attached.
+      expect(calls[0].healAgent).toBeUndefined()
     } finally {
       if (client) await client.close().catch(() => undefined)
       await app.close()
