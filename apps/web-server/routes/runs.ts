@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyReply } from 'fastify'
 import fs from 'fs'
 import path from 'path'
 import type { RunDetail } from '../lib/run-store'
-import type { RunStore, OrchestratorLike, RestartHealResult, RestartRunResult } from '../lib/run-store'
+import type { RunStore, OrchestratorLike, RestartHealResult, RestartRunResult, StartRunOutcome } from '../lib/run-store'
 import { loadFeatures } from '../lib/feature-loader'
 import { buildRunPaths, runDirFor } from '../lib/runtime/run-paths'
 import { generateEvaluationRewriteWithAgent, type EvaluationRewrite } from '../lib/test-review-export'
@@ -30,6 +30,7 @@ import {
   selectAgentSessionRef,
 } from '../lib/agent-session-log'
 import { isTerminalRunStatus } from '../../../shared/run-state'
+import type { ExecutionType } from '../../../shared/verification'
 import type { ExternalHealBroker } from '../lib/external-heal-broker'
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../lib/workspace-events'
 
@@ -64,7 +65,12 @@ export interface RunsRouteDeps {
     feature: string,
     env?: string,
     healAgent?: ExternalHealAgentRequest,
-  ): Promise<OrchestratorLike>
+    isolation?: 'worktree' | 'queue',
+    executionType?: ExecutionType,
+  ): Promise<StartRunOutcome>
+  /** Cancel a run still waiting in the admission queue (no orchestrator yet).
+   *  Returns true when it was queued and is now aborted. */
+  cancelQueuedRun?(runId: string): boolean
   broker?: Pick<ExternalHealBroker, 'claim'>
   workspaceEvents?: WorkspaceEventPublisher
   restartHeal?(runId: string, text: string): Promise<RestartHealResult>
@@ -421,6 +427,11 @@ export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Pro
       env?: string
       healAgent?: ExternalHealAgentRequest | { kind?: string }
       forceNew?: boolean
+      isolation?: 'worktree' | 'queue'
+      // 'boot' = apply envset + boot the feature's services and hold them, no
+      // Playwright. Stop the run (POST /api/runs/:runId/abort) to tear down +
+      // revert env. Defaults to a normal test run.
+      mode?: 'test' | 'boot'
     }
   }>('/api/runs', async (req, reply) => {
     const feature = req.body?.feature
@@ -472,11 +483,34 @@ export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Pro
         }
       }
     }
+    const isolation = req.body?.isolation === 'worktree' || req.body?.isolation === 'queue'
+      ? req.body.isolation
+      : undefined
+    const executionType: ExecutionType = req.body?.mode === 'boot' ? 'boot' : 'run'
     try {
-      const orch = await deps.startRun(feature, env, healAgent ?? undefined)
-      deps.store.registry.set(orch.runId, orch)
+      const outcome = await deps.startRun(feature, env, healAgent ?? undefined, isolation, executionType)
+      if (outcome.kind === 'collision') {
+        // Same-repo collision and the caller didn't choose how to handle it.
+        // Nothing started — surface the choice so the UI / MCP client can ask.
+        reply.code(409)
+        return {
+          type: 'repo_collision_requires_choice',
+          conflictingRunId: outcome.conflictingRunId,
+          conflictingFeature: outcome.conflictingFeature,
+          repoPaths: outcome.repoPaths,
+          options: ['worktree', 'queue'] as const,
+          message: `Another run (${outcome.conflictingFeature}) is using the same app. Re-send with isolation:"worktree" to run it isolated, or isolation:"queue" to wait until that run finishes.`,
+        }
+      }
+      if (outcome.kind === 'queued') {
+        reply.code(202)
+        return { runId: outcome.runId, status: 'queued', queueReason: outcome.reason }
+      }
+      // started — the factory registers the orchestrator; set here too so the
+      // registration is guaranteed regardless of factory implementation.
+      deps.store.registry.set(outcome.orch.runId, outcome.orch)
       reply.code(201)
-      return { runId: orch.runId }
+      return { runId: outcome.orch.runId }
     } catch (err) {
       const code = typeof (err as { statusCode?: unknown }).statusCode === 'number'
         ? (err as { statusCode: number }).statusCode
@@ -582,6 +616,12 @@ export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Pro
   app.post<{ Params: { runId: string } }>('/api/runs/:runId/abort', async (req, reply) => {
     const result = await deps.store.abort(req.params.runId)
     if (!result.ok) {
+      // A run still waiting in the admission queue has no orchestrator, so the
+      // store can't abort it — cancel it out of the queue instead.
+      if (deps.cancelQueuedRun?.(req.params.runId)) {
+        reply.code(204)
+        return ''
+      }
       reply.code(404)
       return { error: 'run not active' }
     }

@@ -2,6 +2,7 @@ import fs from 'fs'
 import path from 'path'
 import { runsIndexPath, runsRoot } from './run-paths'
 import type {
+  QueueReason,
   RunLifecycleSnapshot,
   RunStatus,
   ServiceStatus,
@@ -11,6 +12,7 @@ import type {
   VerificationRunMetadata,
 } from '../../../../shared/verification'
 export type {
+  QueueReason,
   RunLifecycleAbortReason,
   RunLifecycleEvent,
   RunLifecyclePhase,
@@ -37,6 +39,11 @@ export interface ServiceManifestEntry {
   logPath: string
   healthUrl?: string
   status?: ServiceStatus
+  /** Per-run allocated ports keyed by the service's declared port-slot name
+   *  (feature.config startCommands[].ports[].name). Empty/omitted when the
+   *  service declares no ports. The UI surfaces these so concurrent runs are
+   *  distinguishable. */
+  allocatedPorts?: Record<string, number>
 }
 
 export interface RepoBranchSnapshot {
@@ -117,6 +124,14 @@ export interface RunManifest {
   services: ServiceManifestEntry[]
   repoPaths?: string[]
   repoBranches?: RepoBranchSnapshot[]
+  /** When this run isolated one or more repos in a per-run git worktree
+   *  (opted in after a same-repo collision), maps repo name → worktree path.
+   *  Omitted/empty when the run uses repos in place. */
+  worktrees?: Record<string, string>
+  /** Set only while `status === 'queued'`. Explains why the run is parked so
+   *  the UI can show "waiting for resources" vs "waiting for <feature> to
+   *  finish". Cleared when the run is admitted. */
+  queueReason?: QueueReason
   playwrightArtifacts?: PlaywrightArtifactPolicy
   stoppedEarly?: StoppedEarlyInfo
   /**

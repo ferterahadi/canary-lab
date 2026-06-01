@@ -2,7 +2,7 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { interpolateConfigTokens, interpolateFeatureTokens, makeTokenCache } from './interpolate'
+import { interpolateConfigTokens, interpolateFeatureTokens, makeTokenCache, resolvePortTokens } from './interpolate'
 
 let dir: string
 
@@ -54,6 +54,24 @@ describe('interpolateFeatureTokens', () => {
       .toBe('http://localhost:3000')
   })
 
+  it('resolves the reserved ${port.<slot>} namespace from the run port map', () => {
+    const ports = new Map([['api', 51234]])
+    expect(interpolateFeatureTokens('http://localhost:${port.api}/', { envName: 'local', envsetsDir: dir, ports }))
+      .toBe('http://localhost:51234/')
+  })
+
+  it('resolves port tokens even with no env selected (env-independent)', () => {
+    const ports = new Map([['api', 4321]])
+    expect(interpolateFeatureTokens('${port.api}', { envName: undefined, envsetsDir: dir, ports }))
+      .toBe('4321')
+  })
+
+  it('leaves a port token literal when the slot was not allocated', () => {
+    const ports = new Map([['api', 4321]])
+    expect(interpolateFeatureTokens('${port.admin}', { envName: 'local', envsetsDir: dir, ports }))
+      .toBe('${port.admin}')
+  })
+
   it('caches slot reads across calls', () => {
     const cache = makeTokenCache()
     const ctx = { envName: 'local', envsetsDir: dir }
@@ -61,6 +79,32 @@ describe('interpolateFeatureTokens', () => {
     fs.writeFileSync(path.join(dir, 'local', 'api'), 'PORT=9999\n')
     // Second call uses the cached map, not the new file content.
     expect(interpolateFeatureTokens('${api.PORT}', ctx, cache)).toBe('3030')
+  })
+})
+
+describe('resolvePortTokens', () => {
+  const ports = new Map([['mpass', 51001], ['oms', 51002]])
+
+  it('resolves multiple ${port.<slot>} tokens in envset-style content', () => {
+    const content = [
+      'server.port=${port.mpass}',
+      'oddle.oms.url=http://localhost:${port.oms}/',
+      'MP_BASE_URL=http://localhost:${port.mpass}',
+    ].join('\n')
+    expect(resolvePortTokens(content, ports)).toBe([
+      'server.port=51001',
+      'oddle.oms.url=http://localhost:51002/',
+      'MP_BASE_URL=http://localhost:51001',
+    ].join('\n'))
+  })
+
+  it('leaves non-port tokens and unknown slots literal', () => {
+    const content = 'A=${port.mpass}\nB=${secret.KEY}\nC=${port.unknown}'
+    expect(resolvePortTokens(content, ports)).toBe('A=51001\nB=${secret.KEY}\nC=${port.unknown}')
+  })
+
+  it('returns content unchanged when it has no tokens', () => {
+    expect(resolvePortTokens('PLAIN=value', ports)).toBe('PLAIN=value')
   })
 })
 

@@ -18,7 +18,7 @@ import type { CSSProperties, ReactNode } from 'react'
 // borrowed from the toast.
 // ---------------------------------------------------------------------------
 
-export type StatusDotState = 'idle' | 'running' | 'success' | 'failed' | 'warning'
+export type StatusDotState = 'idle' | 'running' | 'success' | 'failed' | 'warning' | 'booted'
 
 const STATUS_DOT_BG: Record<StatusDotState, string> = {
   idle:    'bg-zinc-400 dark:bg-zinc-500',
@@ -26,6 +26,8 @@ const STATUS_DOT_BG: Record<StatusDotState, string> = {
   success: 'bg-emerald-500',
   failed:  'bg-rose-500',
   warning: 'bg-amber-500',
+  // Boot-only "services up" — teal, distinct from the sky running dot.
+  booted:  'bg-cyan-500',
 }
 
 export function StatusDot({
@@ -44,8 +46,10 @@ export function StatusDot({
   halo?: boolean
   className?: string
 }) {
-  const shouldPulse = pulse ?? state === 'running'
-  const dotCls = `cl-status-dot ${STATUS_DOT_BG[state]} ${shouldPulse ? 'animate-pulse' : ''}`.trim()
+  // `booted` breathes slowly by default (alive but idle); `running` pulses.
+  const shouldPulse = pulse ?? (state === 'running' || state === 'booted')
+  const animCls = !shouldPulse ? '' : state === 'booted' ? 'cl-dot-breathe' : 'animate-pulse'
+  const dotCls = `cl-status-dot ${STATUS_DOT_BG[state]} ${animCls}`.trim()
   if (!halo) {
     return <span aria-hidden="true" className={`${dotCls} ${className}`.trim()} />
   }

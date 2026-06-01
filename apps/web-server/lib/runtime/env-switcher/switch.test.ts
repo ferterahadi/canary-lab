@@ -179,6 +179,26 @@ describe('backup / applySet / restore round-trip', () => {
     applySet(path.join(root, 'envsets'), 'local', [{ slot: 'a.env', targetPath }])
     expect(fs.readFileSync(targetPath, 'utf-8')).toBe('hi')
   })
+
+  it('applySet transforms content through the optional resolver', () => {
+    const root = mkTmp()
+    const setDir = path.join(root, 'envsets', 'local')
+    fs.mkdirSync(setDir, { recursive: true })
+    fs.writeFileSync(path.join(setDir, 'app.env'), 'PORT=${port.api}\nSTATIC=keep')
+    const targetPath = path.join(root, 'app.env')
+    applySet(path.join(root, 'envsets'), 'local', [{ slot: 'app.env', targetPath }], (c) => c.replace('${port.api}', '51234'))
+    expect(fs.readFileSync(targetPath, 'utf-8')).toBe('PORT=51234\nSTATIC=keep')
+  })
+
+  it('applySet copies verbatim when no resolver is passed', () => {
+    const root = mkTmp()
+    const setDir = path.join(root, 'envsets', 'local')
+    fs.mkdirSync(setDir, { recursive: true })
+    fs.writeFileSync(path.join(setDir, 'app.env'), 'PORT=${port.api}')
+    const targetPath = path.join(root, 'app.env')
+    applySet(path.join(root, 'envsets'), 'local', [{ slot: 'app.env', targetPath }])
+    expect(fs.readFileSync(targetPath, 'utf-8')).toBe('PORT=${port.api}')
+  })
 })
 
 function seedFeature(root: string, featureName: string, sets: Record<string, Record<string, string>>) {

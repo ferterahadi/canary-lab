@@ -16,8 +16,15 @@ vi.mock('../api/client', async () => {
   }
 })
 
+const mockActiveRuns = vi.hoisted(() => ({ value: { runs: [] as unknown[], count: 0 } }))
+const mockBootSessions = vi.hoisted(() => ({ value: { sessions: [] as unknown[], count: 0 } }))
+
 vi.mock('../state/RunsContext', () => ({
-  useRuns: () => ({ connection: 'live' }),
+  useRuns: () => ({ connection: 'live', runs: [], abort: vi.fn() }),
+  useActiveRuns: () => mockActiveRuns.value,
+  useActiveBootSessions: () => mockBootSessions.value,
+  useRun: () => ({ detail: undefined, status: undefined, transient: null }),
+  useRunDetails: () => ({}),
 }))
 
 vi.mock('./WizardTaskStatus', () => ({
@@ -32,6 +39,8 @@ let container: HTMLDivElement
 let root: Root
 
 beforeEach(() => {
+  mockActiveRuns.value = { runs: [], count: 0 }
+  mockBootSessions.value = { sessions: [], count: 0 }
   container = document.createElement('div')
   document.body.appendChild(container)
   root = createRoot(container)
@@ -60,7 +69,52 @@ afterEach(() => {
   vi.clearAllMocks()
 })
 
+function runsButton(): HTMLButtonElement | undefined {
+  return [...container.querySelectorAll('button')]
+    .find((button) => button.getAttribute('aria-label')?.startsWith('Show all runs')) as HTMLButtonElement | undefined
+}
+
+function servicesButton(): HTMLButtonElement | undefined {
+  return [...container.querySelectorAll('button')]
+    .find((button) => button.getAttribute('aria-label')?.startsWith('Show booted services')) as HTMLButtonElement | undefined
+}
+
 describe('GlobalStatusBar', () => {
+  it('hides the Runs button when no runs are running, healing, or queued', async () => {
+    mockActiveRuns.value = { runs: [], count: 0 }
+    await act(async () => {
+      root.render(<GlobalStatusBar activeRunDetail={null} />)
+    })
+    expect(runsButton()).toBeUndefined()
+  })
+
+  it('shows the Runs button with an active count when runs are active', async () => {
+    mockActiveRuns.value = { runs: [{}, {}], count: 2 }
+    await act(async () => {
+      root.render(<GlobalStatusBar activeRunDetail={null} />)
+    })
+    const button = runsButton()
+    expect(button).toBeTruthy()
+    expect(button?.getAttribute('aria-label')).toBe('Show all runs (2 active)')
+    expect(button?.textContent).toContain('Runs')
+    expect(button?.textContent).toContain('2')
+  })
+
+  it('surfaces booted services in the Services pill, separate from the Runs button', async () => {
+    // A boot-only run is active: it must show in Services, never the Runs count.
+    mockBootSessions.value = { sessions: [{}], count: 1 }
+    mockActiveRuns.value = { runs: [{ executionType: 'boot' }], count: 1 }
+    await act(async () => {
+      root.render(<GlobalStatusBar activeRunDetail={null} />)
+    })
+    const svc = servicesButton()
+    expect(svc).toBeTruthy()
+    expect(svc?.getAttribute('aria-label')).toBe('Show booted services (1 up)')
+    expect(svc?.textContent).toContain('Services')
+    expect(svc?.textContent).toContain('1')
+    expect(runsButton()).toBeUndefined()
+  })
+
   it('replaces the Playwright chip with a collapsed MCP indicator menu', async () => {
     await act(async () => {
       root.render(<GlobalStatusBar activeRunDetail={null} />)

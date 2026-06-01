@@ -31,7 +31,11 @@ async function jsonCall<T>(url: string, init: RequestInit = {}): Promise<Respons
 }
 
 export class OrdersApi {
-  baseUrl = process.env.GATEWAY_URL ?? 'http://localhost:4300'
+  // Prefer the per-run port Canary Lab allocated for the local service
+  // (CANARY_PORT_api); fall back to GATEWAY_URL for remote runs.
+  baseUrl = process.env.CANARY_PORT_api
+    ? `http://localhost:${process.env.CANARY_PORT_api}`
+    : (process.env.GATEWAY_URL ?? 'http://localhost:4300')
 
   createOrder = () =>
     jsonCall<{ orderId: string }>(`${this.baseUrl}/order`, { method: 'POST' })

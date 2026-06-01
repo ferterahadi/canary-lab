@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import {
   ApiError,
+  asRepoCollision,
   acceptPlan,
   acceptSpec,
   addEnvsetSlot,
@@ -458,6 +459,26 @@ describe('api client', () => {
     const fetchImpl = vi.fn().mockResolvedValue(ok({ runId: 'r2' }, 201))
     const out = await startRun('feat-x', { fetchImpl })
     expect(out).toEqual({ runId: 'r2' })
+    expect(fetchImpl).toHaveBeenCalledWith('/api/runs', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ feature: 'feat-x' }),
+    })
+  })
+
+  it('startRun forwards boot mode in the body', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(ok({ runId: 'rb' }, 201))
+    await startRun('feat-x', { fetchImpl, env: 'local', mode: 'boot' })
+    expect(fetchImpl).toHaveBeenCalledWith('/api/runs', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ feature: 'feat-x', env: 'local', mode: 'boot' }),
+    })
+  })
+
+  it('startRun omits mode for a normal test run', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(ok({ runId: 'rt' }, 201))
+    await startRun('feat-x', { fetchImpl, mode: 'test' })
     expect(fetchImpl).toHaveBeenCalledWith('/api/runs', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -935,6 +956,31 @@ describe('api client', () => {
     await startRun('feat-x', { fetchImpl, env: 'production' })
     const init = fetchImpl.mock.calls[0][1] as RequestInit
     expect(JSON.parse(init.body as string)).toEqual({ feature: 'feat-x', env: 'production' })
+  })
+
+  it('startRun includes isolation when provided', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(ok({ runId: 'r-iso' }, 202))
+    await startRun('feat-x', { fetchImpl, env: 'local', isolation: 'worktree' })
+    const init = fetchImpl.mock.calls[0][1] as RequestInit
+    expect(JSON.parse(init.body as string)).toEqual({ feature: 'feat-x', env: 'local', isolation: 'worktree' })
+  })
+
+  it('asRepoCollision returns the payload for a 409 collision ApiError, else null', () => {
+    const collisionBody = {
+      type: 'repo_collision_requires_choice',
+      conflictingRunId: 'r1',
+      conflictingFeature: 'foo',
+      repoPaths: ['/a'],
+      options: ['worktree', 'queue'],
+      message: 'm',
+    }
+    expect(asRepoCollision(new ApiError(409, collisionBody))).toEqual(collisionBody)
+    // Non-ApiError, wrong status, null body, non-object body, wrong type → null.
+    expect(asRepoCollision(new Error('nope'))).toBeNull()
+    expect(asRepoCollision(new ApiError(500, collisionBody))).toBeNull()
+    expect(asRepoCollision(new ApiError(409, null))).toBeNull()
+    expect(asRepoCollision(new ApiError(409, 'string body'))).toBeNull()
+    expect(asRepoCollision(new ApiError(409, { type: 'something_else' }))).toBeNull()
   })
 
   it('uses globalThis.fetch by default when no fetchImpl provided', async () => {
