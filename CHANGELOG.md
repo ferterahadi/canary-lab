@@ -11,6 +11,15 @@ Each entry is tagged with the area it touches:
 - **[General]** — UI shell, CLI, scaffolding, packaging
 
 ---
+## 1.2.0 — 2026-06-01
+
+> Run `npx canary-lab upgrade` to refresh your sample features so they pick up per-run ports for concurrent runs.
+
+- **[Test Runner]** **Run several things at once.** You can now have multiple test runs going at the same time instead of waiting for one to finish, as long as their services don't share a port. When your machine is busy, extra runs are parked in a queue and started as soon as there's room. And if you start a second run on a project that's already busy, you choose whether to run it in an isolated copy or have it wait.
+- **[Test Runner]** **Boot your services without running tests.** A new mode lets you start an app's services on their own, without kicking off a test run, so you can poke at the running app yourself. It's handy for manual exploration, reproducing an issue by hand, or just confirming a service comes up cleanly before you commit to a full run.
+
+---
+
 ## 1.1.0 — 2026-05-28
 
 > The headline change: Canary Lab can now be driven from Codex Desktop, Claude Desktop, and other MCP clients. After upgrading, run `npx canary-lab setup` to refresh the local MCP registration.
