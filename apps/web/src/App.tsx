@@ -100,8 +100,12 @@ export function App() {
     // queue, then re-issue with their choice (preserving the boot/test mode).
     try {
       const runId = await startRunAction(selectedFeature, env, undefined, mode)
-      pendingRunSelectionRef.current = runId
-      setSelectedRunId(runId)
+      // Boot sessions are managed in the global Services overlay, never column
+      // 3 — don't select them into the run-detail pane.
+      if (mode !== 'boot') {
+        pendingRunSelectionRef.current = runId
+        setSelectedRunId(runId)
+      }
     } catch (err) {
       const collision = api.asRepoCollision(err)
       if (collision) {
@@ -118,8 +122,10 @@ export function App() {
     if (!prompt) return
     try {
       const runId = await startRunAction(prompt.feature, prompt.env, isolation, prompt.mode)
-      pendingRunSelectionRef.current = runId
-      setSelectedRunId(runId)
+      if (prompt.mode !== 'boot') {
+        pendingRunSelectionRef.current = runId
+        setSelectedRunId(runId)
+      }
     } catch { /* surfaced via UI */ }
   }, [collisionPrompt, startRunAction])
 
@@ -140,12 +146,12 @@ export function App() {
       if (preferredFeature && data.some((f) => f.name === preferredFeature)) {
         pendingRunSelectionRef.current = null
         setSelectedFeature(preferredFeature)
-        setSelectedRunId(allRuns.find((r) => r.feature === preferredFeature)?.runId ?? null)
+        setSelectedRunId(allRuns.find((r) => r.feature === preferredFeature && r.executionType !== 'boot')?.runId ?? null)
       } else if (!selectedFeature || !data.some((f) => f.name === selectedFeature)) {
         const nextFeature = data[0]?.name ?? null
         pendingRunSelectionRef.current = null
         setSelectedFeature(nextFeature)
-        setSelectedRunId(nextFeature ? allRuns.find((r) => r.feature === nextFeature)?.runId ?? null : null)
+        setSelectedRunId(nextFeature ? allRuns.find((r) => r.feature === nextFeature && r.executionType !== 'boot')?.runId ?? null : null)
       }
     }).catch(() => {})
   }, [allRuns, selectedFeature])
@@ -197,7 +203,7 @@ export function App() {
           onSelectFeature={(name) => {
             pendingRunSelectionRef.current = null
             setSelectedFeature(name)
-            setSelectedRunId(allRuns.find((r) => r.feature === name)?.runId ?? null)
+            setSelectedRunId(allRuns.find((r) => r.feature === name && r.executionType !== 'boot')?.runId ?? null)
           }}
           onFeaturesChanged={refreshFeatures}
         />
@@ -271,7 +277,7 @@ export function App() {
               setFeatures(data)
               pendingRunSelectionRef.current = null
               setSelectedFeature(nextFeature)
-              setSelectedRunId(allRuns.find((r) => r.feature === nextFeature)?.runId ?? null)
+              setSelectedRunId(allRuns.find((r) => r.feature === nextFeature && r.executionType !== 'boot')?.runId ?? null)
             }).catch(() => {})
           }}
           onDeleted={(deletedFeature) => {
@@ -282,7 +288,7 @@ export function App() {
                 const nextFeature = data[0]?.name ?? null
                 pendingRunSelectionRef.current = null
                 setSelectedFeature(nextFeature)
-                setSelectedRunId(nextFeature ? allRuns.find((r) => r.feature === nextFeature)?.runId ?? null : null)
+                setSelectedRunId(nextFeature ? allRuns.find((r) => r.feature === nextFeature && r.executionType !== 'boot')?.runId ?? null : null)
               }
             }).catch(() => {})
           }}
