@@ -13,8 +13,13 @@ const outDir = path.join(here, 'public/live-app')
 const width = 1920
 const height = 1080
 const fps = 24
-const durationSeconds = 24
+const durationSeconds = 20
 const frameCount = fps * durationSeconds
+const healingStartFrame = 128
+const rerunStartFrame = 226
+const journalStartFrame = 300
+const finalStartFrame = 374
+const journalScrollEndFrame = finalStartFrame - 3
 const port = Number(process.env.CANARY_PROMO_PORT ?? 5184)
 const baseUrl = `http://127.0.0.1:${port}`
 const runId = '2026-06-01T0412-checkout'
@@ -387,18 +392,17 @@ function journalEntries() {
 }
 
 function stateForFrame(frame) {
-  if (frame < 146) return 'running'
-  if (frame < 196) return 'failed'
-  if (frame < 330) return 'healing'
-  if (frame < 392) return 'rerun'
+  if (frame < 116) return 'running'
+  if (frame < healingStartFrame) return 'failed'
+  if (frame < rerunStartFrame) return 'healing'
+  if (frame < journalStartFrame) return 'rerun'
   return 'passed'
 }
 
 function tabForFrame(frame) {
-  if (frame >= 392 && frame < 505) return 'Journal'
-  if (frame >= 150 && frame < 196) return 'Playwright'
-  if (frame >= 196 && frame < 330) return 'Heal agent'
-  if (frame >= 330 && frame < 392) return 'Heal agent'
+  if (frame >= journalStartFrame && frame < finalStartFrame) return 'Journal'
+  if (frame >= 116 && frame < healingStartFrame) return 'Playwright'
+  if (frame >= healingStartFrame && frame < journalStartFrame) return 'Heal agent'
   return 'Overview'
 }
 
@@ -561,15 +565,16 @@ try {
     }
 
     if (nextTab === 'Journal') {
-      const progress = Math.max(0, Math.min(1, (frame - 392) / 84))
+      const progress = Math.max(0, Math.min(1, (frame - journalStartFrame) / (journalScrollEndFrame - journalStartFrame)))
+      const easedProgress = Math.pow(progress, 0.76)
       await page.evaluate((amount) => {
         const iterationNode = [...document.querySelectorAll('li')]
           .find((node) => node.textContent?.includes('Iteration'))
         const scroller = iterationNode?.closest('.overflow-y-auto')
         if (scroller) {
-          scroller.scrollTop = scroller.scrollHeight * (1 - amount)
+          scroller.scrollTop = (scroller.scrollHeight - scroller.clientHeight) * (1 - amount)
         }
-      }, progress)
+      }, easedProgress)
     }
 
     await page.screenshot({
