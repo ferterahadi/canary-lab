@@ -5,7 +5,7 @@
 
 The AI repair loop for Playwright.
 
-Canary Lab runs your local Playwright tests, captures the evidence around each failure, and gives Codex, Claude, or another MCP client the context it needs to fix the app and rerun the check.
+Canary Lab runs your local Playwright tests, captures the evidence around each failure, and gives your AI Agent the context it needs to fix the app and rerun the check.
 
 It is built for teams using tests as the spec. A failed test should leave behind enough context for the next engineer or AI agent to understand what broke, change the right code, and continue from the same run instead of digging through terminal scrollback.
 
@@ -16,7 +16,7 @@ It is built for teams using tests as the spec. A failed test should leave behind
 1. Canary Lab starts your local services and applies the selected envset.
 2. Playwright runs the feature tests.
 3. Logs, screenshots, traces, videos, summaries, and failure slices are saved under `logs/runs/<runId>/`.
-4. Codex, Claude, or another MCP client reads the failure context.
+4. The AI Agent reads the failure context.
 5. The agent fixes the app or test and signals `rerun` or `restart`.
 6. Canary Lab continues from the same run until the check passes.
 
@@ -117,7 +117,7 @@ Canary Lab is likely unnecessary if:
 - Local service orchestration through `node-pty`.
 - Node.js >= 20 and npm >= 9.
 - Modern browser: Chrome, Firefox, or Safari.
-- Optional repair agents: supported agent CLIs (`claude` or `codex`) on `PATH`.
+- Optional repair agents: supported AI Agent CLIs on `PATH`.
 
 ## Feature Folders
 
