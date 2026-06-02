@@ -2,7 +2,7 @@
 
 Thanks for working on Canary Lab. This guide covers the repository layout, local
 development, and the build and test workflow. For user-facing usage, see the
-[README](README.md). For deeper internal notes, see [AGENTS.md](AGENTS.md).
+[README](../README.md). For deeper internal notes, see [AGENTS.md](../AGENTS.md).
 
 ## Code Orientation
 
