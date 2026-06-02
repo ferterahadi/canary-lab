@@ -143,7 +143,7 @@ if (dryRun) {
   process.exit(0);
 }
 
-const changelogPath = new URL("../CHANGELOG.md", import.meta.url);
+const changelogPath = new URL("../docs/CHANGELOG.md", import.meta.url);
 
 const defaultPreamble = `# Changelog
 

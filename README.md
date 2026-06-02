@@ -117,7 +117,7 @@ When a run fails, Canary Lab pauses it, waits for a fix, and reruns from the sam
 - **External heal** (default) — an external MCP client claims the run, reads the saved context, and signals the fix over MCP.
 - **Auto-heal** — Canary Lab spawns a local `claude`/`codex` CLI in a PTY tab (select Claude or Codex in Settings).
 
-See the [guide](docs/guide.md#repairing-a-failed-run) for the full loop, MCP tool flow, and signal files.
+See the [guide](docs/GUIDE.md#repairing-a-failed-run) for the full loop, MCP tool flow, and signal files.
 
 ## Limitations
 
@@ -128,9 +128,9 @@ See the [guide](docs/guide.md#repairing-a-failed-run) for the full loop, MCP too
 
 ## Documentation
 
-- [Guide](docs/guide.md) — environment switching, run-output layout, repairing a failed run, evaluation reports, and external authoring.
-- [CONTRIBUTING.md](CONTRIBUTING.md) — code orientation, run architecture, and the build/test workflow.
-- [CHANGELOG.md](CHANGELOG.md) — release notes.
+- [Guide](docs/GUIDE.md) — environment switching, run-output layout, repairing a failed run, evaluation reports, and external authoring.
+- [Contributing](docs/CONTRIBUTING.md) — code orientation, run architecture, and the build/test workflow.
+- [CHANGELOG.md](docs/CHANGELOG.md) — release notes.
 
 ## License
 
