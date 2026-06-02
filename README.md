@@ -9,6 +9,21 @@ Canary Lab runs your local Playwright tests, captures the evidence around each f
 
 ![Canary Lab repair loop: failing Playwright test, saved details, AI Agent fix, passing rerun](docs/assets/canary-lab-repair-loop.gif)
 
+**Contents**
+
+- [Repair Loop](#repair-loop)
+- [Quick Start](#quick-start)
+- [Agent-First Workflow](#agent-first-workflow)
+- [What Canary Lab Owns](#what-canary-lab-owns)
+- [When to Use It](#when-to-use-it)
+- [Requirements](#requirements)
+- [Feature Folders](#feature-folders)
+- [Commands](#commands)
+- [Repairing a Failed Run](#repairing-a-failed-run)
+- [Limitations](#limitations)
+- [Documentation](#documentation)
+- [License](#license)
+
 ## Repair Loop
 
 1. Canary Lab applies the selected envset and starts your local services.
@@ -130,7 +145,7 @@ See the [guide](docs/GUIDE.md#repairing-a-failed-run) for the full loop, MCP too
 
 - [Guide](docs/GUIDE.md) — environment switching, run-output layout, repairing a failed run, evaluation reports, and external authoring.
 - [Contributing](docs/CONTRIBUTING.md) — code orientation, run architecture, and the build/test workflow.
-- [CHANGELOG.md](docs/CHANGELOG.md) — release notes.
+- [Changelog](docs/CHANGELOG.md) — release notes.
 
 ## License
 
