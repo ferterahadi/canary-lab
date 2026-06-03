@@ -29,6 +29,7 @@ interface BenchmarkContextValue {
     skill: string
     level: SabotageLevel
     iterations: number
+    agent?: 'claude' | 'codex'
   }) => Promise<string>
   abortBenchmark: (id: string) => Promise<void>
   /** Fetch a benchmark's full manifest and seed it into `details` — used to
@@ -116,7 +117,7 @@ export function BenchmarkProvider({
   }, [wsUrl, WebSocketImpl])
 
   const startBenchmark = useCallback(
-    async (input: { feature: string; skill: string; level: SabotageLevel; iterations: number }) => {
+    async (input: { feature: string; skill: string; level: SabotageLevel; iterations: number; agent?: 'claude' | 'codex' }) => {
       const { benchmarkId } = await api.startBenchmark(input)
       return benchmarkId
     },

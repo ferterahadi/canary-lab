@@ -379,7 +379,9 @@ export interface UseGlobalActiveRunResult {
 
 export function useGlobalActiveRun(): UseGlobalActiveRunResult {
   const { state } = useRunsContext()
-  const entry = state.runs.find((r) => isActiveRunStatus(r.status)) ?? null
+  // Benchmark runs (arms + the validity-gate trial) drive the benchmark window,
+  // not the main shell — never surface one as the globally-active run.
+  const entry = state.runs.find((r) => isActiveRunStatus(r.status) && r.executionType !== 'benchmark') ?? null
   const detail = entry ? (state.details[entry.runId] ?? null) : null
   return { runId: entry?.runId ?? null, entry, detail }
 }

@@ -58,6 +58,7 @@ function ConfigScreen({
   const [skills, setSkills] = useState<SabotageSkillSummary[]>([])
   const [skill, setSkill] = useState<string>('')
   const [iterations, setIterations] = useState(2)
+  const [agent, setAgent] = useState<'claude' | 'codex'>('claude')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -85,7 +86,7 @@ function ConfigScreen({
     if (!feature || !selected) return
     setBusy(true); setError(null)
     try {
-      const id = await startBenchmark({ feature, skill: selected.name, level: selected.level, iterations })
+      const id = await startBenchmark({ feature, skill: selected.name, level: selected.level, iterations, agent })
       onStarted(id)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -141,6 +142,31 @@ function ConfigScreen({
             <select value={feature} onChange={(e) => setFeature(e.target.value)} style={selectStyle}>
               {features.map((f) => <option key={f.name} value={f.name}>{f.name}</option>)}
             </select>
+          </Field>
+
+          <Field label="Heal agent">
+            <div style={{ display: 'inline-flex', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)', overflow: 'hidden', height: 34 }}>
+              {(['claude', 'codex'] as const).map((a, i) => (
+                <button
+                  key={a}
+                  type="button"
+                  onClick={() => setAgent(a)}
+                  aria-pressed={agent === a}
+                  style={{
+                    border: 'none', cursor: 'pointer', padding: '0 16px', fontSize: 12, fontWeight: 500,
+                    fontFamily: 'var(--font-mono)', textTransform: 'capitalize',
+                    borderLeft: i === 1 ? '1px solid var(--border-default)' : 'none',
+                    background: agent === a ? 'var(--accent-soft)' : 'var(--bg-input)',
+                    color: agent === a ? 'var(--accent)' : 'var(--text-secondary)',
+                  }}
+                >
+                  {a}
+                </button>
+              ))}
+            </div>
+            <span style={{ color: 'var(--text-muted)', fontSize: 11.5, marginLeft: 12 }}>
+              both arms use this CLI · independent of your global heal setting
+            </span>
           </Field>
 
           <Field label="Iterations">

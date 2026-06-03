@@ -44,8 +44,10 @@ export interface BenchmarkRunnerDeps {
   allocateRunPorts: (feature: FeatureConfig, env: string | undefined) => Promise<Map<string, number> | undefined>
   applyFeatureEnvset: (featureDir: string, setName: string, portMap?: Map<string, number>) => unknown
   loadFeatures: () => FeatureConfig[]
-  /** Resolve the heal/sabotage agent from project config (claude|codex). */
-  pickAgent: () => HealAgent | null
+  /** Resolve the heal/sabotage agent. Prefers the per-benchmark choice; ignores
+   *  the project's global heal-agent setting so a benchmark is reproducible and
+   *  always local-auto. Returns null when the chosen CLI isn't installed. */
+  pickAgent: (preferred?: HealAgent) => HealAgent | null
   now: () => string
 }
 
@@ -66,8 +68,11 @@ export function createBenchmarkRunner(deps: BenchmarkRunnerDeps) {
     const found = deps.loadFeatures().find((f) => f.name === input.feature)
     if (!found) throw Object.assign(new Error(`feature not found: ${input.feature}`), { statusCode: 404 })
     const feature: FeatureConfig = found
-    const agentChoice = deps.pickAgent()
-    if (!agentChoice) throw Object.assign(new Error('No claude/codex CLI available for benchmark'), { statusCode: 409 })
+    const agentChoice = deps.pickAgent(input.agent)
+    if (!agentChoice) {
+      const want = input.agent ? `the ${input.agent} CLI` : 'a claude/codex CLI'
+      throw Object.assign(new Error(`${want} is not available for the benchmark`), { statusCode: 409 })
+    }
     const agent: HealAgent = agentChoice
 
     const skills = loadBundledSabotageSkills()
@@ -306,7 +311,7 @@ export function createBenchmarkRunner(deps: BenchmarkRunnerDeps) {
         // the repo's localPath instead; the benchmark owns the worktree's life.
         ptyFactory: deps.ptyFactory,
         runnerLog,
-        executionType: 'run',
+        executionType: 'benchmark', // hidden from the global Runs list
         runStateSink: deps.runStore as never,
         // No autoHeal → boots services, runs tests once, returns passed/failed.
       })
@@ -356,7 +361,7 @@ export function createBenchmarkRunner(deps: BenchmarkRunnerDeps) {
         // break resetArms. The benchmark owns each worktree's lifecycle.
         ptyFactory: deps.ptyFactory,
         runnerLog,
-        executionType: 'run',
+        executionType: 'benchmark', // hidden from the global Runs list
         runStateSink: deps.runStore as never,
         autoHeal: {
           agent,

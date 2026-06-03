@@ -32,7 +32,7 @@ export function GlobalStatusBar({ activeRunDetail, onNavigateToRun }: Props) {
   const { count: bootCount } = useActiveBootSessions()
   // Boots are NOT runs: the Runs button counts only test/verify runs; boot
   // sessions are surfaced in the separate Services pill.
-  const runsCount = activeRuns.filter((r) => r.executionType !== 'boot').length
+  const runsCount = activeRuns.filter((r) => r.executionType !== 'boot' && r.executionType !== 'benchmark').length
   const [runsOpen, setRunsOpen] = useState(false)
   const [servicesOpen, setServicesOpen] = useState(false)
   const [benchmarkOpen, setBenchmarkOpen] = useState(false)

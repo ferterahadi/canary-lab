@@ -49,7 +49,7 @@ export function App() {
   // sessions are excluded — they're not test runs and live in the global
   // Services surface, not the Runs list.
   const featureRuns = useMemo(
-    () => allRuns.filter((r) => r.feature === selectedFeature && r.executionType !== 'boot'),
+    () => allRuns.filter((r) => r.feature === selectedFeature && r.executionType !== 'boot' && r.executionType !== 'benchmark'),
     [allRuns, selectedFeature],
   )
 
@@ -146,12 +146,12 @@ export function App() {
       if (preferredFeature && data.some((f) => f.name === preferredFeature)) {
         pendingRunSelectionRef.current = null
         setSelectedFeature(preferredFeature)
-        setSelectedRunId(allRuns.find((r) => r.feature === preferredFeature && r.executionType !== 'boot')?.runId ?? null)
+        setSelectedRunId(allRuns.find((r) => r.feature === preferredFeature && r.executionType !== 'boot' && r.executionType !== 'benchmark')?.runId ?? null)
       } else if (!selectedFeature || !data.some((f) => f.name === selectedFeature)) {
         const nextFeature = data[0]?.name ?? null
         pendingRunSelectionRef.current = null
         setSelectedFeature(nextFeature)
-        setSelectedRunId(nextFeature ? allRuns.find((r) => r.feature === nextFeature && r.executionType !== 'boot')?.runId ?? null : null)
+        setSelectedRunId(nextFeature ? allRuns.find((r) => r.feature === nextFeature && r.executionType !== 'boot' && r.executionType !== 'benchmark')?.runId ?? null : null)
       }
     }).catch(() => {})
   }, [allRuns, selectedFeature])
@@ -203,7 +203,7 @@ export function App() {
           onSelectFeature={(name) => {
             pendingRunSelectionRef.current = null
             setSelectedFeature(name)
-            setSelectedRunId(allRuns.find((r) => r.feature === name && r.executionType !== 'boot')?.runId ?? null)
+            setSelectedRunId(allRuns.find((r) => r.feature === name && r.executionType !== 'boot' && r.executionType !== 'benchmark')?.runId ?? null)
           }}
           onFeaturesChanged={refreshFeatures}
         />
@@ -277,7 +277,7 @@ export function App() {
               setFeatures(data)
               pendingRunSelectionRef.current = null
               setSelectedFeature(nextFeature)
-              setSelectedRunId(allRuns.find((r) => r.feature === nextFeature && r.executionType !== 'boot')?.runId ?? null)
+              setSelectedRunId(allRuns.find((r) => r.feature === nextFeature && r.executionType !== 'boot' && r.executionType !== 'benchmark')?.runId ?? null)
             }).catch(() => {})
           }}
           onDeleted={(deletedFeature) => {
@@ -288,7 +288,7 @@ export function App() {
                 const nextFeature = data[0]?.name ?? null
                 pendingRunSelectionRef.current = null
                 setSelectedFeature(nextFeature)
-                setSelectedRunId(nextFeature ? allRuns.find((r) => r.feature === nextFeature && r.executionType !== 'boot')?.runId ?? null : null)
+                setSelectedRunId(nextFeature ? allRuns.find((r) => r.feature === nextFeature && r.executionType !== 'boot' && r.executionType !== 'benchmark')?.runId ?? null : null)
               }
             }).catch(() => {})
           }}

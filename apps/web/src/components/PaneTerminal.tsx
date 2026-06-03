@@ -177,35 +177,49 @@ export function PaneTerminal({ runId, paneId, onExit, emptyState }: Props) {
     // wiring it unconditionally is harmless and keeps the component simple.
     const inputDisposable = term.onData((data) => conn.sendInput(data))
 
-    // Re-fit non-agent panes on container resize. Two cases matter:
+    // Re-fit panes on container resize. Two cases matter:
     // 1. Initial mount after a tab switch — the inline fit.fit() above can
     //    silently fail because the container has 0 dims before layout
     //    settles. The observer fires once the container is measured, so xterm
     //    catches up to the real pane size and forwards one stable PTY resize.
     // 2. Later in-app resizes — splitter drag, sidebar toggle, etc. The
     //    old window 'resize' listener missed these.
-    //
-    // The heal-agent pane is intentionally excluded. Codex and Claude render
-    // full-screen TUIs that redraw on SIGWINCH; live ResizeObserver fitting can
-    // loop with xterm's own DOM changes and make the prompt blink while typing.
     let observer: ResizeObserver | null = null
+    let resizeTimer: ReturnType<typeof setTimeout> | null = null
     if (typeof ResizeObserver !== 'undefined') {
       if (isAgentPane) {
-        // One-shot fit on the agent pane. PaneTerminal now stays mounted
-        // across tab switches (hidden via the parent's `hidden` attribute),
-        // so on first mount the container is 0×0 and the inline fitOnce()
-        // above short-circuits; onOpen then forwards the default 80×24 to
-        // the pty. Observe until the container reports real dims, fit once,
-        // push the new size to the pty, then disconnect — we don't keep
-        // observing because the Ink TUI redraws on every SIGWINCH and a
-        // live observer would loop with xterm's own DOM mutations, flickering
-        // the prompt while typing.
-        observer = new ResizeObserver(() => {
+        // The agent pane runs an Ink TUI (Claude/Codex) that redraws the whole
+        // screen on every SIGWINCH. A naive live observer that fit + resized on
+        // each fire would spam SIGWINCH during a splitter drag and make the
+        // prompt blink while typing — which is why this used to fit once and
+        // then disconnect, leaving the pane frozen at its first-measured size.
+        //
+        // Instead, keep observing but guard the two flicker sources:
+        //   • Debounce so a continuous drag collapses into a single fit at the
+        //     end, not one per animation frame.
+        //   • Only forward a PTY resize when the character grid actually
+        //     changes (proposeDimensions vs current cols/rows). Typing and
+        //     token streaming never change the grid, so they never trigger a
+        //     SIGWINCH redraw — only real geometry changes do.
+        const refitAgent = (): void => {
           if (container.clientWidth === 0 || container.clientHeight === 0) return
+          const proposed = fit.proposeDimensions()
+          if (!proposed) return
+          if (proposed.cols === term.cols && proposed.rows === term.rows) return
           fitOnce()
           conn.sendResize(term.cols, term.rows)
-          observer?.disconnect()
-          observer = null
+          // The WebGL renderer keeps a texture atlas and per-cell geometry that
+          // can desync from the new grid after a resize (most visibly across
+          // Retina DPR), leaving stale glyphs smeared at their pre-resize
+          // positions — and because the buffer is already correct, the Ink
+          // TUI's own redraws never overwrite the bad paint. Clear the atlas
+          // and force a full repaint so xterm draws the new grid from scratch.
+          webgl?.clearTextureAtlas()
+          term.refresh(0, term.rows - 1)
+        }
+        observer = new ResizeObserver(() => {
+          if (resizeTimer) clearTimeout(resizeTimer)
+          resizeTimer = setTimeout(refitAgent, 120)
         })
       } else {
         observer = new ResizeObserver(() => {
@@ -216,6 +230,7 @@ export function PaneTerminal({ runId, paneId, onExit, emptyState }: Props) {
     }
     return () => {
       clearTimeout(graceTimer)
+      if (resizeTimer) clearTimeout(resizeTimer)
       observer?.disconnect()
       unsubscribeTheme()
       inputDisposable.dispose()

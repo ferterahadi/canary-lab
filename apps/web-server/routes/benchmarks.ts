@@ -32,6 +32,7 @@ interface StartBody {
   skill?: string
   level?: string
   iterations?: number
+  agent?: string
 }
 
 const LEVELS: ReadonlySet<SabotageLevel> = new Set<SabotageLevel>(['min', 'med', 'max'])
@@ -110,8 +111,9 @@ export async function benchmarkRoutes(
         : 1
     const skill =
       typeof body.skill === 'string' && body.skill.trim() ? body.skill.trim() : 'default'
+    const agent = body.agent === 'codex' ? 'codex' : body.agent === 'claude' ? 'claude' : undefined
     try {
-      return await deps.startBenchmark({ feature, skill, level: normalizeLevel(body.level), iterations })
+      return await deps.startBenchmark({ feature, skill, level: normalizeLevel(body.level), iterations, agent })
     } catch (err) {
       const statusCode = (err as { statusCode?: number }).statusCode ?? 500
       reply.code(statusCode)

@@ -60,8 +60,9 @@ function queueNote(entry: RunIndexEntry, detail: RunDetail | undefined): string 
 
 export function RunsListDialog({ onClose, onNavigateToRun }: Props) {
   const { runs: allRuns } = useRuns()
-  // Boot-only sessions are managed in the Services dialog, never here.
-  const runs = allRuns.filter((r) => r.executionType !== 'boot')
+  // Boot sessions live in the Services dialog; benchmark runs (arms + the
+  // validity-gate trial) live in the benchmark window — neither belongs here.
+  const runs = allRuns.filter((r) => r.executionType !== 'boot' && r.executionType !== 'benchmark')
   const details = useRunDetails()
   // Finished runs are the long tail — collapsed by default so active work leads.
   const [finishedOpen, setFinishedOpen] = useState(false)
