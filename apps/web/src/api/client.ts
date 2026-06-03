@@ -19,6 +19,12 @@ import type {
   VerificationConfig,
   VerificationTarget,
 } from './types'
+import type {
+  BenchmarkIndexEntry,
+  BenchmarkManifest,
+  SabotageLevel,
+  SabotageSkillSummary,
+} from './benchmark-types'
 
 export class ApiError extends Error {
   readonly status: number
@@ -67,6 +73,61 @@ async function request<T>(
 export function listFeatures(opts?: ClientOptions): Promise<Feature[]> {
   const { baseUrl, fetchImpl } = defaultOpts(opts)
   return request<Feature[]>(`${baseUrl}/api/features`, { method: 'GET' }, fetchImpl)
+}
+
+// ─── Benchmark ─────────────────────────────────────────────────────────────
+
+export function listBenchmarks(opts?: ClientOptions): Promise<BenchmarkIndexEntry[]> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<BenchmarkIndexEntry[]>(`${baseUrl}/api/benchmarks`, { method: 'GET' }, fetchImpl)
+}
+
+export function getBenchmark(id: string, opts?: ClientOptions): Promise<BenchmarkManifest> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<BenchmarkManifest>(
+    `${baseUrl}/api/benchmarks/${encodeURIComponent(id)}`,
+    { method: 'GET' },
+    fetchImpl,
+  )
+}
+
+export function listSabotageSkills(feature: string, opts?: ClientOptions): Promise<SabotageSkillSummary[]> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<SabotageSkillSummary[]>(
+    `${baseUrl}/api/benchmark-skills?feature=${encodeURIComponent(feature)}`,
+    { method: 'GET' },
+    fetchImpl,
+  )
+}
+
+export function startBenchmark(
+  input: { feature: string; skill: string; level: SabotageLevel; iterations: number },
+  opts?: ClientOptions,
+): Promise<{ benchmarkId: string }> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<{ benchmarkId: string }>(
+    `${baseUrl}/api/benchmarks`,
+    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) },
+    fetchImpl,
+  )
+}
+
+export function abortBenchmark(id: string, opts?: ClientOptions): Promise<{ ok: boolean }> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<{ ok: boolean }>(
+    `${baseUrl}/api/benchmarks/${encodeURIComponent(id)}/abort`,
+    { method: 'POST' },
+    fetchImpl,
+  )
+}
+
+export function getBenchmarkSabotageLog(id: string, opts?: ClientOptions): Promise<{ log: string }> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<{ log: string }>(
+    `${baseUrl}/api/benchmarks/${encodeURIComponent(id)}/sabotage-log`,
+    { method: 'GET' },
+    fetchImpl,
+  )
 }
 
 export function getFeatureTests(name: string, opts?: ClientOptions): Promise<FeatureTests> {

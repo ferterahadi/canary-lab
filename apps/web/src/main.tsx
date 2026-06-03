@@ -2,6 +2,7 @@ import React from 'react'
 import { createRoot } from 'react-dom/client'
 import { App } from './App'
 import { RunsProvider } from './state/RunsContext'
+import { BenchmarkProvider } from './state/BenchmarkContext'
 import { EvaluationExportProvider } from './state/EvaluationExportContext'
 import { WizardDraftProvider } from './state/WizardDraftContext'
 import { McpPromoProvider } from './state/McpPromoContext'
@@ -14,13 +15,15 @@ if (!container) throw new Error('root element missing')
 createRoot(container).render(
   <React.StrictMode>
     <RunsProvider>
-      <WizardDraftProvider>
-        <McpPromoProvider>
-          <EvaluationExportProvider>
-            <App />
-          </EvaluationExportProvider>
-        </McpPromoProvider>
-      </WizardDraftProvider>
+      <BenchmarkProvider>
+        <WizardDraftProvider>
+          <McpPromoProvider>
+            <EvaluationExportProvider>
+              <App />
+            </EvaluationExportProvider>
+          </McpPromoProvider>
+        </WizardDraftProvider>
+      </BenchmarkProvider>
     </RunsProvider>
   </React.StrictMode>,
 )
