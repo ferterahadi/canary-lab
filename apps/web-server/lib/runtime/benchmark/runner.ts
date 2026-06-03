@@ -1,8 +1,11 @@
 import fs from 'fs'
+import os from 'os'
 import path from 'path'
+import { randomUUID } from 'crypto'
 import { spawn, type ChildProcess } from 'child_process'
 import type { FeatureConfig, RepoPrerequisite } from '../../../../../shared/launcher/types'
 import { runGit } from '../../git-repo'
+import { encodeClaudeProjectDir } from '../../agent-session-log'
 import { addWorktree, removeWorktree, type WorktreeHandle } from '../repo-worktree'
 import { RunOrchestrator, defaultPlaywrightSpawner, buildServiceSpecs } from '../orchestrator'
 import { estimateRunCost } from '../admission'
@@ -145,6 +148,7 @@ export function createBenchmarkRunner(deps: BenchmarkRunnerDeps) {
 
       sabotage: async () => {
         const result = await runSabotage(skill.recipe, {
+          isAborted: () => aborted,
           createStagingWorktree: async () => {
             stagingHandle = await addWorktree({
               repoName: repo.name,
@@ -161,7 +165,13 @@ export function createBenchmarkRunner(deps: BenchmarkRunnerDeps) {
           runSabotageAgent: async (wtRoot, recipe) => {
             const featureSub = path.relative(stagingHandle!.worktreeRoot, stagingHandle!.localPath)
             const cwd = featureSub ? path.join(wtRoot, featureSub) : wtRoot
-            await runAgentHeadless(agent, recipe, cwd, path.join(benchDir, 'sabotage-agent.log'), children)
+            // For claude, pin a session id so we can locate the native session
+            // JSONL and render it through the shared AgentSessionView (the same
+            // timeline the Heal-agent tab + wizard use). Write the ref the
+            // benchmark agent-session endpoint/WS resolve from.
+            const sessionId = agent === 'claude' ? randomUUID() : undefined
+            if (sessionId) writeBenchmarkClaudeRef(benchDir, cwd, sessionId)
+            await runAgentHeadless(agent, recipe, cwd, path.join(benchDir, 'sabotage-agent.log'), children, sessionId)
           },
           testsUntouched: async (wtRoot) => {
             const res = await runGit(wtRoot, ['diff', '--name-only', 'HEAD'])
@@ -399,15 +409,12 @@ export function createBenchmarkRunner(deps: BenchmarkRunnerDeps) {
   /** Stop a running benchmark: kills the sabotage child + arm runs; the run is
    *  marked 'aborted'. No-op if the benchmark already finished. */
   function abort(benchmarkId: string): void {
-    const handle = aborts.get(benchmarkId)
-    if (handle) {
-      handle()
-      return
-    }
-    // No live handle → the benchmark was started by a previous server process
-    // (the registry is per-process). There's nothing to kill, but its manifest
-    // is still 'running' on disk, so Stop must flip it or the UI shows it as
-    // running forever.
+    // Kill the in-flight sabotage child + stop arm runs (a no-op for an orphan
+    // from a previous process — the registry is per-process). Then flip the
+    // persisted manifest to 'aborted' immediately so Stop reflects right away,
+    // even while the orchestrator unwinds. The orchestrator's abort guards stop
+    // it from overwriting this state as the current phase winds down.
+    aborts.get(benchmarkId)?.()
     const m = deps.store.get(benchmarkId)
     if (m && m.status !== 'done' && m.status !== 'aborted' && m.status !== 'error') {
       deps.store.save({ ...m, status: 'aborted', endedAt: deps.now() })
@@ -421,18 +428,21 @@ export function createBenchmarkRunner(deps: BenchmarkRunnerDeps) {
 
 // Sabotage / one-shot agent run, headless (no REPL): run the prompt to
 // completion and resolve on exit. Permissions are auto-accepted because there
-// is no human in this loop.
+// is no human in this loop. `claude` gets a pinned `--session-id` so we can
+// locate + render its native session log via AgentSessionView. Raw stdout is
+// still teed to `sabotage-agent.log` (debug + the codex fallback view).
 function runAgentHeadless(
   agent: HealAgent,
   prompt: string,
   cwd: string,
   logPath?: string,
   children?: Set<ChildProcess>,
+  sessionId?: string,
 ): Promise<void> {
   return new Promise((resolve) => {
     const args =
       agent === 'claude'
-        ? ['-p', prompt, '--dangerously-skip-permissions']
+        ? ['-p', prompt, '--dangerously-skip-permissions', ...(sessionId ? ['--session-id', sessionId] : [])]
         : ['exec', '--full-auto', prompt]
     let out: number | 'ignore' = 'ignore'
     if (logPath) {
@@ -451,6 +461,20 @@ function runAgentHeadless(
     child.on('close', done)
     child.on('error', done)
   })
+}
+
+// Write `<benchDir>/agent-session.json` pointing at the sabotage agent's native
+// claude session log (path is fully determined by the real cwd + session id),
+// so the benchmark agent-session endpoint/WS can serve it to AgentSessionView.
+function writeBenchmarkClaudeRef(benchDir: string, cwd: string, sessionId: string): void {
+  try {
+    const realCwd = fs.realpathSync(cwd)
+    const logPath = path.join(os.homedir(), '.claude', 'projects', encodeClaudeProjectDir(realCwd), `${sessionId}.jsonl`)
+    const ref = { activeAgent: 'claude', sessions: { claude: { agent: 'claude', sessionId, logPath } } }
+    fs.writeFileSync(path.join(benchDir, 'agent-session.json'), JSON.stringify(ref, null, 2))
+  } catch {
+    /* best-effort — the setup view falls back to the text log */
+  }
 }
 
 // Git worktrees don't include gitignored deps, so the arm/staging worktrees have

@@ -23,6 +23,9 @@ export interface SabotageDeps {
   captureDiff: (worktreePath: string) => Promise<string>
   /** Re-sabotage attempts before giving up. Default 2. */
   maxAttempts?: number
+  /** When it returns true, abort the sabotage promptly (Stop pressed) — the
+   *  caller treats the throw as 'aborted'. */
+  isAborted?: () => boolean
 }
 
 export interface SabotageResult {
@@ -40,7 +43,11 @@ export async function runSabotage(
   const worktreePath = await deps.createStagingWorktree()
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    if (deps.isAborted?.()) throw new Error('Sabotage aborted')
     await deps.runSabotageAgent(worktreePath, recipe)
+    // The agent child is killed on abort → resolves here → bail before the
+    // (expensive) validity-gate trial run.
+    if (deps.isAborted?.()) throw new Error('Sabotage aborted')
 
     if (!(await deps.testsUntouched(worktreePath))) {
       throw new Error(

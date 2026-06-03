@@ -46,17 +46,29 @@ export class BenchmarkOrchestrator {
     let m: BenchmarkManifest = { ...d.manifest, status: 'sabotaging' }
     d.persist(m)
 
+    // Stop signal can arrive at any phase. We bail at each boundary and skip the
+    // streaming persists once aborted, so a Stop reflects promptly and nothing
+    // overwrites the 'aborted' state the runner optimistically wrote.
+    const finalizeAborted = (): BenchmarkManifest => {
+      m = { ...m, status: 'aborted', endedAt: d.now() }
+      d.persist(m)
+      return m
+    }
+
     try {
       const { sabotageSha, diff } = await d.sabotage()
+      if (d.isAborted?.()) return finalizeAborted()
       d.writeDiff(diff)
       m = { ...m, sabotageSha, status: 'running' }
       d.persist(m)
 
       await d.setupArms(sabotageSha)
+      if (d.isAborted?.()) return finalizeAborted()
 
       const report = await d.runRace({
         sabotageSha,
         onArmStart: (arm, iteration, runId) => {
+          if (d.isAborted?.()) return
           m = {
             ...m,
             currentIteration: Math.max(m.currentIteration, iteration),
@@ -69,10 +81,12 @@ export class BenchmarkOrchestrator {
           d.persist(m)
         },
         onResult: (result) => {
+          if (d.isAborted?.()) return
           m = { ...m, results: [...m.results, result], currentIteration: result.iteration }
           d.persist(m)
         },
         onIterationComplete: (iteration) => {
+          if (d.isAborted?.()) return
           m = { ...m, currentIteration: iteration }
           d.persist(m)
         },
@@ -81,7 +95,11 @@ export class BenchmarkOrchestrator {
       m = { ...m, status: d.isAborted?.() ? 'aborted' : 'done', endedAt: d.now(), report }
       d.persist(m)
     } catch (err) {
-      m = { ...m, status: 'error', error: err instanceof Error ? err.message : String(err), endedAt: d.now() }
+      // A Stop that interrupts a phase surfaces as a throw — record it as
+      // 'aborted', not 'error'.
+      m = d.isAborted?.()
+        ? { ...m, status: 'aborted', endedAt: d.now() }
+        : { ...m, status: 'error', error: err instanceof Error ? err.message : String(err), endedAt: d.now() }
       d.persist(m)
     } finally {
       await d.cleanup?.()

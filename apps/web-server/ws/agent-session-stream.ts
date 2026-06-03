@@ -1,7 +1,9 @@
 import fs from 'fs'
+import path from 'path'
 import type { FastifyInstance } from 'fastify'
 import {
   type AgentSessionRef,
+  findClaudeLogBySessionId,
   locateMostRecentAgentSessionRef,
   parseAgentSessionRefFile,
   selectAgentSessionRef,
@@ -10,6 +12,7 @@ import { tailAgentSession } from '../lib/agent-session-tailer'
 import { resolveDraftStageSessionRef } from '../lib/draft-agent-session'
 import { readDraft, paths as draftPaths } from '../lib/draft-store'
 import { runDirFor, buildRunPaths } from '../lib/runtime/run-paths'
+import { benchmarkDir } from '../lib/runtime/benchmark/paths'
 import type { RunStore } from '../lib/run-store'
 
 // WebSocket route that streams live structured agent-session events.
@@ -100,6 +103,38 @@ export async function agentSessionStreamRoutes(
       socket.on('close', () => handle.close())
     },
   )
+
+  // Benchmark sabotage-agent session — resolves the ref the runner wrote into
+  // the benchmark dir and tails the native claude log, same as runs/drafts.
+  app.get<{ Params: { benchmarkId: string } }>(
+    '/ws/benchmarks/:benchmarkId/agent-session',
+    { websocket: true },
+    (socket, req) => {
+      const benchDir = benchmarkDir(deps.logsDir, req.params.benchmarkId)
+      const ref = resolveBenchmarkRef(benchDir)
+      const handle = tailAgentSession({
+        ref: ref ?? { agent: 'claude', sessionId: '', logPath: '' },
+        onReady: (readyRef) => sendJson(socket, { type: 'session', agent: readyRef.agent, sessionId: readyRef.sessionId }),
+        onEvent: (event) => sendJson(socket, { type: 'event', event }),
+        onError: (err) => sendJson(socket, { type: 'error', error: err.message }),
+        discoverRef: () => resolveBenchmarkRef(benchDir),
+      })
+      socket.on('close', () => handle.close())
+    },
+  )
+}
+
+function resolveBenchmarkRef(benchDir: string): AgentSessionRef | null {
+  let raw: string | null = null
+  try { raw = fs.readFileSync(path.join(benchDir, 'agent-session.json'), 'utf-8') } catch { return null }
+  const parsed = raw ? parseAgentSessionRefFile(raw) : null
+  const ref = parsed ? selectAgentSessionRef(parsed) : null
+  if (!ref) return null
+  // The cwd-derived logPath can be wrong (Claude's project-dir slug folds more
+  // than `/`). Once the log exists, locate it by session id instead.
+  if (ref.logPath && fs.existsSync(ref.logPath)) return ref
+  const found = ref.agent === 'claude' ? findClaudeLogBySessionId(ref.sessionId) : null
+  return found ? { ...ref, logPath: found } : ref
 }
 
 function resolveRunRef(runDir: string): AgentSessionRef | null {

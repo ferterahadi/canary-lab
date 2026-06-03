@@ -9,6 +9,7 @@ import type { AgentSessionEvent } from './client'
 export type AgentSessionSocketSource =
   | { kind: 'run'; runId: string }
   | { kind: 'draft'; draftId: string; stage: 'planning' | 'generating' }
+  | { kind: 'benchmark'; benchmarkId: string }
 
 export interface AgentSessionSocketMessage {
   type: 'session' | 'event' | 'error' | 'done'
@@ -42,6 +43,9 @@ const defaultWsBase = (): string => {
 function urlFor(base: string, source: AgentSessionSocketSource): string {
   if (source.kind === 'run') {
     return `${base}/ws/runs/${encodeURIComponent(source.runId)}/agent-session`
+  }
+  if (source.kind === 'benchmark') {
+    return `${base}/ws/benchmarks/${encodeURIComponent(source.benchmarkId)}/agent-session`
   }
   return `${base}/ws/draft/${encodeURIComponent(source.draftId)}/agent-session?stage=${encodeURIComponent(source.stage)}`
 }

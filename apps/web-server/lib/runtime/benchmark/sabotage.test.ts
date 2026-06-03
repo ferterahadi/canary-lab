@@ -51,4 +51,12 @@ describe('runSabotage', () => {
       runSabotage('r', deps({ testsFail: async () => false, maxAttempts: 3 })),
     ).rejects.toThrow(/never (failed|went red)|failed to break/i)
   })
+
+  it('aborts promptly when isAborted() is true, skipping the validity-gate trial', async () => {
+    let trialRan = false
+    await expect(
+      runSabotage('r', deps({ isAborted: () => true, testsFail: async () => { trialRan = true; return true } })),
+    ).rejects.toThrow(/aborted/i)
+    expect(trialRan).toBe(false)
+  })
 })
