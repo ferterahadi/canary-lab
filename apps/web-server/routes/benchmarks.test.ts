@@ -38,6 +38,7 @@ async function buildApp(deps: {
   listSkills?: (feature: string) => SabotageSkill[]
   abortBenchmark?: (id: string) => void
   readSabotageLog?: (id: string) => string
+  loadAgentSession?: (id: string) => { agent: string; sessionId: string; events: unknown[] } | null
 }) {
   const app = Fastify()
   await app.register(benchmarkRoutes, {
@@ -46,6 +47,7 @@ async function buildApp(deps: {
     listSkills: deps.listSkills ?? (() => []),
     abortBenchmark: deps.abortBenchmark ?? (() => {}),
     readSabotageLog: deps.readSabotageLog ?? (() => ''),
+    loadAgentSession: deps.loadAgentSession ?? (() => null),
   })
   return app
 }

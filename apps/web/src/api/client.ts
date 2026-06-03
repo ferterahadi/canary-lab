@@ -130,6 +130,23 @@ export function getBenchmarkSabotageLog(id: string, opts?: ClientOptions): Promi
   )
 }
 
+export async function getBenchmarkAgentSession(
+  id: string,
+  opts?: ClientOptions,
+): Promise<AgentSessionResponse | null> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  try {
+    return await request<AgentSessionResponse>(
+      `${baseUrl}/api/benchmarks/${encodeURIComponent(id)}/agent-session`,
+      { method: 'GET' },
+      fetchImpl,
+    )
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) return null
+    throw err
+  }
+}
+
 export function getFeatureTests(name: string, opts?: ClientOptions): Promise<FeatureTests> {
   const { baseUrl, fetchImpl } = defaultOpts(opts)
   return request<FeatureTests>(

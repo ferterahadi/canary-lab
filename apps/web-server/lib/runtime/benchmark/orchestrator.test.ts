@@ -112,6 +112,39 @@ describe('BenchmarkOrchestrator.run', () => {
     expect(final?.status).toBe('aborted')
   })
 
+  it('short-circuits to aborted after sabotage without running the race', async () => {
+    let raceRan = false
+    const orch = new BenchmarkOrchestrator({
+      manifest: makeManifest(),
+      persist: () => {},
+      sabotage: async () => ({ sabotageSha: 'sha', diff: 'D' }),
+      writeDiff: () => {},
+      setupArms: async () => {},
+      runRace: async () => { raceRan = true; return REPORT },
+      now: () => 't',
+      isAborted: () => true,
+    })
+    const final = await orch.run()
+    expect(final.status).toBe('aborted')
+    expect(raceRan).toBe(false)
+  })
+
+  it('records a throw during an abort as aborted, not error', async () => {
+    const orch = new BenchmarkOrchestrator({
+      manifest: makeManifest(),
+      persist: () => {},
+      sabotage: async () => { throw new Error('child killed') },
+      writeDiff: () => {},
+      setupArms: async () => {},
+      runRace: async () => REPORT,
+      now: () => 't',
+      isAborted: () => true,
+    })
+    const final = await orch.run()
+    expect(final.status).toBe('aborted')
+    expect(final.error).toBeUndefined()
+  })
+
   it('captures errors as status=error with a message, and still runs cleanup', async () => {
     let cleaned = false
     const orch = new BenchmarkOrchestrator({

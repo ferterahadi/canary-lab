@@ -4,6 +4,7 @@ import type { Feature } from '../api/types'
 import type { BenchmarkArm, BenchmarkManifest, SabotageLevel, SabotageSkillSummary } from '../api/benchmark-types'
 import { useBenchmark, useBenchmarks } from '../state/BenchmarkContext'
 import { RunDetailColumn } from './RunDetailColumn'
+import { AgentSessionView } from './AgentSessionView'
 
 // The benchmark workspace window: a large portal-style overlay (config → setup →
 // race → report). Per-arm monitoring reuses the real RunDetailColumn.
@@ -27,27 +28,14 @@ export function BenchmarkWindow({ onClose }: { onClose: () => void }) {
   const blocked = !!live
 
   return (
-    <div
-      style={{
-        position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', zIndex: 60,
-        display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '3vh 3vw',
-      }}
-      onMouseDown={(e) => { if (e.target === e.currentTarget) onClose() }}
-    >
-      <div
-        style={{
-          width: 'min(1280px, 94vw)', height: 'min(880px, 94vh)',
-          background: 'var(--bg-overlay)', border: '1px solid var(--border-default)',
-          borderRadius: 'var(--radius-xl)', boxShadow: '0 30px 80px rgba(0,0,0,0.6)',
-          display: 'flex', flexDirection: 'column', overflow: 'hidden',
-        }}
-      >
-        {activeId ? (
-          <BenchmarkDetail id={activeId} onClose={onClose} onNew={() => setActiveId(null)} />
-        ) : (
-          <ConfigScreen onClose={onClose} onStarted={setActiveId} startBenchmark={startBenchmark} blocked={blocked} />
-        )}
-      </div>
+    // Full-screen, mirroring the Add Test wizard (fixed inset-0) — the benchmark
+    // is a focused workspace, not a floating modal.
+    <div className="fixed inset-0 z-[60] flex flex-col" style={{ background: 'var(--bg-base)' }}>
+      {activeId ? (
+        <BenchmarkDetail id={activeId} onClose={onClose} onNew={() => setActiveId(null)} />
+      ) : (
+        <ConfigScreen onClose={onClose} onStarted={setActiveId} startBenchmark={startBenchmark} blocked={blocked} />
+      )}
     </div>
   )
 }
@@ -85,7 +73,9 @@ function ConfigScreen({
     if (!feature) return
     api.listSabotageSkills(feature).then((s) => {
       setSkills(s)
-      setSkill(s[0]?.name ?? '')
+      // Keep the current pick if the new feature still offers it (skills are
+      // generic, so it usually does) — only fall back to the first otherwise.
+      setSkill((prev) => (s.some((x) => x.name === prev) ? prev : s[0]?.name ?? ''))
     }).catch(() => setSkills([]))
   }, [feature])
 
@@ -106,7 +96,7 @@ function ConfigScreen({
   return (
     <>
       <BenchmarkHeader stage={0} title="New benchmark" onClose={onClose} />
-      <div style={{ flex: 1, overflow: 'auto', padding: '20px 22px', display: 'flex', justifyContent: 'center' }}>
+      <div style={{ flex: 1, overflow: 'auto', padding: '24px 22px 56px', display: 'flex', justifyContent: 'center' }}>
         <div style={{ width: 'min(720px, 100%)' }}>
           <Label>Sabotage skill</Label>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
@@ -247,8 +237,6 @@ function BenchmarkDetail({ id, onClose, onNew }: { id: string; onClose: () => vo
 
 function SetupView({ m }: { m: BenchmarkManifest }) {
   const [elapsed, setElapsed] = useState(0)
-  const [log, setLog] = useState('')
-  const logRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     const start = new Date(m.startedAt).getTime()
@@ -258,22 +246,8 @@ function SetupView({ m }: { m: BenchmarkManifest }) {
     return () => clearInterval(t)
   }, [m.startedAt])
 
-  useEffect(() => {
-    let cancelled = false
-    const poll = () => {
-      api.getBenchmarkSabotageLog(m.benchmarkId).then((r) => { if (!cancelled) setLog(r.log) }).catch(() => {})
-    }
-    poll()
-    const t = setInterval(poll, 1500)
-    return () => { cancelled = true; clearInterval(t) }
-  }, [m.benchmarkId])
-
-  useEffect(() => {
-    if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight
-  }, [log])
-
   return (
-    <div style={{ color: 'var(--text-secondary)', fontSize: 13, maxWidth: 860 }}>
+    <div style={{ color: 'var(--text-secondary)', fontSize: 13, maxWidth: 980, display: 'flex', flexDirection: 'column', height: '100%' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
         <span className="animate-pulse" style={{ width: 9, height: 9, borderRadius: 9999, background: 'rgb(251,191,36)', flex: 'none' }} />
         <span>
@@ -286,17 +260,41 @@ function SetupView({ m }: { m: BenchmarkManifest }) {
         When the broken state is frozen, both arms (🐤 harness, ⚙ baseline) start automatically and the race appears here.
       </div>
       <div style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '.4px', color: 'var(--text-muted)', marginBottom: 7, fontWeight: 600 }}>Sabotage agent</div>
-      <div
-        ref={logRef}
-        style={{
-          fontFamily: 'var(--font-mono)', fontSize: 11.5, background: '#000',
-          border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)',
-          padding: '11px 13px', lineHeight: 1.6, whiteSpace: 'pre-wrap', color: '#cfd6dd',
-          minHeight: 120, maxHeight: 360, overflow: 'auto',
-        }}
-      >
-        {log || 'Waiting for the sabotage agent to start…'}
+      <div style={{ flex: 1, minHeight: 200, border: '1px solid var(--border-default)', borderRadius: 'var(--radius-lg)', overflow: 'hidden' }}>
+        {m.agent === 'codex'
+          ? <CodexSabotageLog benchmarkId={m.benchmarkId} />
+          : <AgentSessionView source={{ kind: 'benchmark', benchmarkId: m.benchmarkId, live: true }} />}
       </div>
+    </div>
+  )
+}
+
+// Codex doesn't write a locatable native session log we can feed to
+// AgentSessionView, so it keeps the simple tailed-text view.
+function CodexSabotageLog({ benchmarkId }: { benchmarkId: string }) {
+  const [log, setLog] = useState('')
+  const logRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    let cancelled = false
+    const poll = () => {
+      api.getBenchmarkSabotageLog(benchmarkId).then((r) => { if (!cancelled) setLog(r.log) }).catch(() => {})
+    }
+    poll()
+    const t = setInterval(poll, 1500)
+    return () => { cancelled = true; clearInterval(t) }
+  }, [benchmarkId])
+  useEffect(() => {
+    if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight
+  }, [log])
+  return (
+    <div
+      ref={logRef}
+      style={{
+        fontFamily: 'var(--font-mono)', fontSize: 11.5, background: '#000', height: '100%',
+        padding: '11px 13px', lineHeight: 1.6, whiteSpace: 'pre-wrap', color: '#cfd6dd', overflow: 'auto',
+      }}
+    >
+      {log || 'Waiting for the sabotage agent to start…'}
     </div>
   )
 }
@@ -597,6 +595,7 @@ function BenchmarkHeader({
   onNew?: () => void
   onClose: () => void
 }) {
+  const active = status === 'sabotaging' || status === 'ready' || status === 'running'
   const dot = !status
     ? 'var(--accent)'
     : status === 'done'
@@ -636,7 +635,7 @@ function BenchmarkHeader({
               ■ Stop
             </button>
           )}
-          {onNew && (
+          {onNew && !active && (
             <button className="cl-button" style={{ padding: '6px 12px' }} onClick={onNew}>＋ New</button>
           )}
           <button className="cl-button" style={{ padding: '6px 12px' }} onClick={onClose}>Close ✕</button>

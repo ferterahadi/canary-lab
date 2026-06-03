@@ -26,6 +26,12 @@ import { BenchmarkRunStore } from './lib/runtime/benchmark/store'
 import { createBenchmarkRunner } from './lib/runtime/benchmark/runner'
 import { loadBundledSabotageSkills, sabotageSkillsForFeature } from './lib/runtime/benchmark/skills'
 import { benchmarkDir } from './lib/runtime/benchmark/paths'
+import {
+  parseAgentSessionRefFile,
+  selectAgentSessionRef,
+  loadAgentSessionLog,
+  findClaudeLogBySessionId,
+} from './lib/agent-session-log'
 import { WorkspaceEventBus } from './lib/workspace-events'
 import { PaneBroker } from './lib/pane-broker'
 import { loadFeatures } from './lib/feature-loader'
@@ -1082,6 +1088,21 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
         return fs.readFileSync(path.join(benchmarkDir(logsDir, id), 'sabotage-agent.log'), 'utf-8')
       } catch {
         return ''
+      }
+    },
+    loadAgentSession: (id) => {
+      try {
+        const raw = fs.readFileSync(path.join(benchmarkDir(logsDir, id), 'agent-session.json'), 'utf-8')
+        const parsed = parseAgentSessionRefFile(raw)
+        const ref = parsed ? selectAgentSessionRef(parsed) : null
+        if (!ref) return null
+        const logPath = fs.existsSync(ref.logPath)
+          ? ref.logPath
+          : (ref.agent === 'claude' ? findClaudeLogBySessionId(ref.sessionId) : null)
+        if (!logPath) return null
+        return { agent: ref.agent, sessionId: ref.sessionId, events: loadAgentSessionLog({ ...ref, logPath }) }
+      } catch {
+        return null
       }
     },
     listSkills: (feature) => sabotageSkillsForFeature(loadBundledSabotageSkills(), feature),

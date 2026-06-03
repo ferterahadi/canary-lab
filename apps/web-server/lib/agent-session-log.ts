@@ -110,6 +110,25 @@ export function locateClaudeSessionLog(
   return fs.existsSync(candidate) ? candidate : null
 }
 
+// Locate a Claude session log by its (globally-unique) session id alone,
+// scanning every project dir. Encoding-agnostic — Claude's project-dir slug
+// isn't a pure `/`→`-` mapping (it also folds `_`→`-`, etc.), so when we know
+// the cwd-derived path may be wrong we fall back to this.
+export function findClaudeLogBySessionId(
+  sessionId: string,
+  homeDir: string = os.homedir(),
+): string | null {
+  if (!sessionId) return null
+  const base = path.join(homeDir, '.claude', 'projects')
+  let dirs: string[]
+  try { dirs = fs.readdirSync(base) } catch { return null }
+  for (const dir of dirs) {
+    const candidate = path.join(base, dir, `${sessionId}.jsonl`)
+    if (fs.existsSync(candidate)) return candidate
+  }
+  return null
+}
+
 // Find the newest Claude session for a run directory without requiring a
 // sidecar session id. Older/interrupted runs can lack `agent-session-id.txt`,
 // but Claude still writes JSONL logs under the encoded run directory.

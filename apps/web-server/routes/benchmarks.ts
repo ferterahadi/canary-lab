@@ -22,6 +22,9 @@ export interface BenchmarkRouteDeps {
   abortBenchmark(benchmarkId: string): void
   /** The sabotage agent's captured output (for live visibility during setup). */
   readSabotageLog(benchmarkId: string): string
+  /** The sabotage agent's structured session (parsed native log) for the shared
+   *  AgentSessionView timeline. Null when no session is locatable yet. */
+  loadAgentSession(benchmarkId: string): { agent: string; sessionId: string; events: unknown[] } | null
 }
 
 interface StartBody {
@@ -71,6 +74,19 @@ export async function benchmarkRoutes(
   app.get<{ Params: { benchmarkId: string } }>(
     '/api/benchmarks/:benchmarkId/sabotage-log',
     async (req) => ({ log: deps.readSabotageLog(req.params.benchmarkId) }),
+  )
+
+  // Structured sabotage-agent session for the shared AgentSessionView timeline.
+  app.get<{ Params: { benchmarkId: string } }>(
+    '/api/benchmarks/:benchmarkId/agent-session',
+    async (req, reply) => {
+      const session = deps.loadAgentSession(req.params.benchmarkId)
+      if (!session) {
+        reply.code(404)
+        return { reason: 'no-session' }
+      }
+      return session
+    },
   )
 
   app.post<{ Params: { benchmarkId: string } }>(
