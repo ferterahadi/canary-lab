@@ -1,0 +1,7 @@
+{
+  "name": "multi-failure-cascade",
+  "title": "Multi-failure cascade",
+  "level": "max",
+  "summary": "Several interacting failures across the app. Multiple tests fail and partially mask each other.",
+  "appliesTo": ["*"]
+}

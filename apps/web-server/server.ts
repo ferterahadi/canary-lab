@@ -20,6 +20,12 @@ import { draftAgentStreamRoutes } from './ws/draft-agent-stream'
 import { agentSessionStreamRoutes } from './ws/agent-session-stream'
 import { workspaceStreamRoutes } from './ws/workspace-stream'
 import { createRegistry, RunStore, type OrchestratorRegistry, type OrchestratorLike, type StartRunOutcome } from './lib/run-store'
+import { benchmarkRoutes } from './routes/benchmarks'
+import { benchmarkStreamRoutes } from './ws/benchmark-stream'
+import { BenchmarkRunStore } from './lib/runtime/benchmark/store'
+import { createBenchmarkRunner } from './lib/runtime/benchmark/runner'
+import { loadBundledSabotageSkills, sabotageSkillsForFeature } from './lib/runtime/benchmark/skills'
+import { benchmarkDir } from './lib/runtime/benchmark/paths'
 import { WorkspaceEventBus } from './lib/workspace-events'
 import { PaneBroker } from './lib/pane-broker'
 import { loadFeatures } from './lib/feature-loader'
@@ -156,6 +162,11 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
 
   const registry = createRegistry()
   const runStore = new RunStore(logsDir, registry)
+  const benchmarkStore = new BenchmarkRunStore(logsDir)
+  // A benchmark left 'running'/'sabotaging' in the index belongs to a dead
+  // process (this one just started) — flip it to 'aborted' so it doesn't resume
+  // forever as running in the UI and so Stop isn't needed for it.
+  benchmarkStore.reconcileInterrupted(() => new Date().toISOString())
   const workspaceEvents = new WorkspaceEventBus()
   // One-shot cleanup: a fresh UI server starts with an empty registry, so any
   // persisted 'running'/'healing' row is from a previous server process and is
@@ -1044,6 +1055,38 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
     logsDir,
   })
   await app.register(runsStreamRoutes, { store: runStore })
+
+  // Benchmark: race two repair arms on a sabotaged codebase. The runner closes
+  // over the same primitives startRun uses (ptyFactory, registry, attachRunStreams).
+  const benchmarkRunner = createBenchmarkRunner({
+    projectRoot: opts.projectRoot,
+    logsDir,
+    store: benchmarkStore,
+    ptyFactory,
+    runStore,
+    registry,
+    scheduler,
+    attachRunStreams,
+    allocateRunPorts,
+    applyFeatureEnvset,
+    loadFeatures: () => loadFeatures(featuresDir),
+    pickAgent: () => pickConfiguredHealAgent(loadProjectConfig(opts.projectRoot).healAgent),
+    now: () => new Date().toISOString(),
+  })
+  await app.register(benchmarkRoutes, {
+    store: benchmarkStore,
+    startBenchmark: benchmarkRunner.startBenchmark,
+    abortBenchmark: benchmarkRunner.abort,
+    readSabotageLog: (id) => {
+      try {
+        return fs.readFileSync(path.join(benchmarkDir(logsDir, id), 'sabotage-agent.log'), 'utf-8')
+      } catch {
+        return ''
+      }
+    },
+    listSkills: (feature) => sabotageSkillsForFeature(loadBundledSabotageSkills(), feature),
+  })
+  await app.register(benchmarkStreamRoutes, { store: benchmarkStore })
   await app.register(workspaceStreamRoutes, { events: workspaceEvents })
   await app.register(draftAgentStreamRoutes, {
     brokerForDraft: (draftId) => draftBrokers.get(draftId) ?? null,

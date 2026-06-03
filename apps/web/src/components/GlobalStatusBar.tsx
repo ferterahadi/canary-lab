@@ -3,11 +3,13 @@ import { createPortal } from 'react-dom'
 import type { RunDetail } from '../api/types'
 import * as api from '../api/client'
 import { useActiveBootSessions, useActiveRuns, useRuns } from '../state/RunsContext'
+import { useBenchmarks } from '../state/BenchmarkContext'
 import { isActiveRunStatus } from '../../../../shared/run-state'
 import { EvaluationExportTaskStatus } from './EvaluationExportTaskToast'
 import { WizardTaskStatus } from './WizardTaskStatus'
 import { RunsListDialog } from './RunsListDialog'
 import { ServicesDialog } from './ServicesDialog'
+import { BenchmarkWindow } from './BenchmarkWindow'
 import { StatusDot, type StatusDotState } from './config/atoms'
 
 interface Props {
@@ -33,6 +35,29 @@ export function GlobalStatusBar({ activeRunDetail, onNavigateToRun }: Props) {
   const runsCount = activeRuns.filter((r) => r.executionType !== 'boot').length
   const [runsOpen, setRunsOpen] = useState(false)
   const [servicesOpen, setServicesOpen] = useState(false)
+  const [benchmarkOpen, setBenchmarkOpen] = useState(false)
+  // The right-hand action cluster collapses into a single toggle. Default
+  // expanded (actions stay glanceable); the choice persists across reloads.
+  const [actionsExpanded, setActionsExpanded] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('cl-actions-expanded') !== 'false'
+    } catch {
+      return true
+    }
+  })
+  useEffect(() => {
+    try {
+      localStorage.setItem('cl-actions-expanded', String(actionsExpanded))
+    } catch {
+      /* storage unavailable — non-fatal */
+    }
+  }, [actionsExpanded])
+  const { benchmarks } = useBenchmarks()
+  const activeBenchmark = benchmarks.find((b) => b.status === 'sabotaging' || b.status === 'running')
+  // Aggregate "something's happening" count shown on the toggle when collapsed,
+  // so an active benchmark / run / boot is never hidden behind the chevron.
+  const actionsActiveCount =
+    (activeBenchmark ? 1 : 0) + (runsCount > 0 ? 1 : 0) + (bootCount > 0 ? 1 : 0)
   const status = activeRunDetail?.manifest.status
 
   // Guard: only treat 'running' and 'healing' as truly active. The runs
@@ -73,53 +98,124 @@ export function GlobalStatusBar({ activeRunDetail, onNavigateToRun }: Props) {
           </div>
         </>
       )}
-      <div className="ml-auto hidden min-w-0 items-center justify-end gap-2 sm:flex">
-        {/* Services pill: held boot sessions, distinct from runs. Appears
-            whenever something is booted; the teal count + a one-shot pulse
-            (keyed on the count) signal a fresh boot landing here. */}
-        {bootCount > 0 && (
-          <button
-            type="button"
-            onClick={() => setServicesOpen(true)}
-            className="cl-button relative flex shrink-0 items-center gap-1.5 px-2.5 py-1"
-            title="Show booted services"
-            aria-label={`Show booted services (${bootCount} up)`}
-          >
-            <span key={`svc-pulse-${bootCount}`} aria-hidden="true" className="cl-boot-pill-pulse" />
-            <StatusDot state="booted" className="shrink-0" />
-            <span style={{ color: 'var(--text-primary)', fontSize: 12, fontWeight: 500 }}>Services</span>
-            <span
-              className="inline-flex min-w-[16px] items-center justify-center rounded-full px-1 text-[10px] font-semibold"
-              style={{ background: 'var(--boot-soft)', color: 'var(--boot)' }}
+      <div className="ml-auto hidden min-w-0 items-center justify-end sm:flex">
+        {/* Collapsible action cluster. Defaults to expanded (so the actions
+            stay glanceable); the toggle tucks them behind a single control and
+            the choice persists. Benchmark sits at the right end, nearest the
+            toggle. When collapsed, the toggle carries an aggregate live
+            indicator so an active run/boot/benchmark is never hidden. */}
+        <div
+          className="flex min-w-0 items-center gap-2 overflow-hidden"
+          aria-hidden={!actionsExpanded}
+          style={{
+            maxWidth: actionsExpanded ? 800 : 0,
+            opacity: actionsExpanded ? 1 : 0,
+            transform: actionsExpanded ? 'none' : 'translateX(10px)',
+            marginRight: actionsExpanded ? 8 : 0,
+            pointerEvents: actionsExpanded ? 'auto' : 'none',
+            transition:
+              'max-width 300ms cubic-bezier(0.22,1,0.36,1), opacity 200ms ease, transform 260ms cubic-bezier(0.22,1,0.36,1), margin-right 300ms cubic-bezier(0.22,1,0.36,1)',
+          }}
+        >
+          {/* Services pill: held boot sessions, distinct from runs. Appears
+              whenever something is booted; the teal count + a one-shot pulse
+              (keyed on the count) signal a fresh boot landing here. */}
+          {bootCount > 0 && (
+            <button
+              type="button"
+              onClick={() => setServicesOpen(true)}
+              className="cl-button relative flex shrink-0 items-center gap-1.5 px-2.5 py-1"
+              title="Show booted services"
+              aria-label={`Show booted services (${bootCount} up)`}
             >
-              {bootCount}
-            </span>
-          </button>
-        )}
-        {/* Only surface the Runs button while a test/verify run is running,
-            healing, or queued. */}
-        {runsCount > 0 && (
+              <span key={`svc-pulse-${bootCount}`} aria-hidden="true" className="cl-boot-pill-pulse" />
+              <StatusDot state="booted" className="shrink-0" />
+              <span style={{ color: 'var(--text-primary)', fontSize: 12, fontWeight: 500 }}>Services</span>
+              <span
+                className="inline-flex min-w-[16px] items-center justify-center rounded-full px-1 text-[10px] font-semibold"
+                style={{ background: 'var(--boot-soft)', color: 'var(--boot)' }}
+              >
+                {bootCount}
+              </span>
+            </button>
+          )}
+          {/* Only surface the Runs button while a test/verify run is running,
+              healing, or queued. */}
+          {runsCount > 0 && (
+            <button
+              type="button"
+              onClick={() => setRunsOpen(true)}
+              className="cl-button flex shrink-0 items-center gap-1.5 px-2.5 py-1"
+              title="Show all runs"
+              aria-label={`Show all runs (${runsCount} active)`}
+            >
+              <span style={{ color: 'var(--text-primary)', fontSize: 12, fontWeight: 500 }}>Runs</span>
+              <span
+                className="inline-flex min-w-[16px] items-center justify-center rounded-full px-1 text-[10px] font-semibold"
+                style={{
+                  background: 'color-mix(in srgb, var(--accent) 20%, transparent)',
+                  color: 'var(--accent)',
+                }}
+              >
+                {runsCount}
+              </span>
+            </button>
+          )}
+          <WizardTaskStatus />
+          <EvaluationExportTaskStatus />
           <button
             type="button"
-            onClick={() => setRunsOpen(true)}
+            onClick={() => setBenchmarkOpen(true)}
             className="cl-button flex shrink-0 items-center gap-1.5 px-2.5 py-1"
-            title="Show all runs"
-            aria-label={`Show all runs (${runsCount} active)`}
+            title={activeBenchmark ? 'A benchmark is running — click to view' : 'Run a benchmark — race two repair agents on a sabotaged codebase'}
+            style={{ color: 'var(--accent)', borderColor: 'color-mix(in srgb, var(--accent) 45%, var(--border-default))' }}
           >
-            <span style={{ color: 'var(--text-primary)', fontSize: 12, fontWeight: 500 }}>Runs</span>
-            <span
-              className="inline-flex min-w-[16px] items-center justify-center rounded-full px-1 text-[10px] font-semibold"
-              style={{
-                background: 'color-mix(in srgb, var(--accent) 20%, transparent)',
-                color: 'var(--accent)',
-              }}
-            >
-              {runsCount}
-            </span>
+            {activeBenchmark ? (
+              <span aria-hidden="true" className="inline-block h-1.5 w-1.5 animate-pulse rounded-full" style={{ background: 'rgb(56,189,248)' }} />
+            ) : (
+              <span>⚔</span>
+            )}
+            <span style={{ fontSize: 12, fontWeight: 500 }}>{activeBenchmark ? 'Benchmark running' : 'Benchmark'}</span>
           </button>
-        )}
-        <WizardTaskStatus />
-        <EvaluationExportTaskStatus />
+        </div>
+        <button
+          type="button"
+          onClick={() => setActionsExpanded((v) => !v)}
+          className="cl-button flex shrink-0 items-center gap-1.5 px-2 py-1"
+          aria-expanded={actionsExpanded}
+          aria-label={actionsExpanded ? 'Collapse actions' : 'Expand actions'}
+          title={
+            actionsExpanded
+              ? 'Collapse actions'
+              : actionsActiveCount > 0
+                ? `${actionsActiveCount} active — expand actions`
+                : 'Expand actions'
+          }
+          style={
+            !actionsExpanded && actionsActiveCount > 0
+              ? { color: 'var(--accent)', borderColor: 'color-mix(in srgb, var(--accent) 45%, var(--border-default))' }
+              : undefined
+          }
+        >
+          <span
+            aria-hidden="true"
+            style={{
+              display: 'inline-block',
+              fontSize: 14,
+              lineHeight: 1,
+              transition: 'transform 260ms cubic-bezier(0.22,1,0.36,1)',
+              transform: actionsExpanded ? 'rotate(0deg)' : 'rotate(180deg)',
+            }}
+          >
+            ›
+          </span>
+          {!actionsExpanded && actionsActiveCount > 0 && (
+            <span className="flex items-center gap-1">
+              <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full" style={{ background: 'var(--accent)' }} />
+              <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--accent)' }}>{actionsActiveCount}</span>
+            </span>
+          )}
+        </button>
       </div>
       </div>
       {runsOpen && (
@@ -129,6 +225,7 @@ export function GlobalStatusBar({ activeRunDetail, onNavigateToRun }: Props) {
         />
       )}
       {servicesOpen && <ServicesDialog onClose={() => setServicesOpen(false)} />}
+      {benchmarkOpen && <BenchmarkWindow onClose={() => setBenchmarkOpen(false)} />}
     </div>
   )
 }
