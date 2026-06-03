@@ -1076,7 +1076,9 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
     allocateRunPorts,
     applyFeatureEnvset,
     loadFeatures: () => loadFeatures(featuresDir),
-    pickAgent: () => pickConfiguredHealAgent(loadProjectConfig(opts.projectRoot).healAgent),
+    // Benchmark pins its own agent (per-run choice), NOT the project's global
+    // heal-agent setting — keeps a benchmark reproducible + always local-auto.
+    pickAgent: (preferred) => pickAvailableHealAgent(preferred),
     now: () => new Date().toISOString(),
   })
   await app.register(benchmarkRoutes, {

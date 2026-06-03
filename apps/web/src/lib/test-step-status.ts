@@ -111,6 +111,7 @@ export function activeBodyLineForTest(input: {
   testLine: number
   bodySource: string
   summary: RunSummary | undefined
+  sourceFile?: string
 }): number | null {
   const expectedName = summaryEntryName(input.testName)
   const running = input.summary ? runningTestForSummaryName(input.summary, expectedName) : undefined
@@ -120,6 +121,7 @@ export function activeBodyLineForTest(input: {
       running.step?.locations ?? (running.step?.location ? [running.step.location] : []),
       input.testLine,
       bodyLineCount,
+      input.sourceFile,
     )
   }
   const failed = input.summary?.failed.find((entry) => entry.name === expectedName)
@@ -128,6 +130,7 @@ export function activeBodyLineForTest(input: {
     failed.locations?.length ? failed.locations : (failed.location ? [failed.location] : []),
     input.testLine,
     bodyLineCount,
+    input.sourceFile,
   )
 }
 
@@ -161,12 +164,37 @@ function matchesSummaryEntry(
   return entry.name === summaryName
 }
 
-function bodyLineForLocations(locations: string[], testLine: number, bodyLineCount: number): number | null {
-  for (const location of locations) {
+function bodyLineForLocations(
+  locations: string[],
+  testLine: number,
+  bodyLineCount: number,
+  sourceFile?: string,
+): number | null {
+  const relativeBodyLine = (location: string): number | null => {
     const absoluteLine = lineFromLocation(location)
-    if (absoluteLine == null) continue
+    if (absoluteLine == null) return null
     const relativeLine = absoluteLine - testLine + 1
-    if (relativeLine >= 1 && relativeLine <= bodyLineCount) return relativeLine
+    return relativeLine >= 1 && relativeLine <= bodyLineCount ? relativeLine : null
+  }
+  // When we know which file the card is showing, only ever highlight a line
+  // from that file. Steps that run inside helper modules report their own
+  // file (Playwright attributes each step to the first user frame, which for
+  // a helper-wrapped call is the helper, not the spec). Highlighting those
+  // would point at a line that isn't the code on screen, so we skip them and
+  // keep the highlight on the deepest in-body call site instead.
+  if (sourceFile) {
+    for (const location of locations) {
+      const file = fileFromLocation(location)
+      if (file && sameSourceFile(file, sourceFile)) {
+        const relative = relativeBodyLine(location)
+        if (relative != null) return relative
+      }
+    }
+    return null
+  }
+  for (const location of locations) {
+    const relative = relativeBodyLine(location)
+    if (relative != null) return relative
   }
   return null
 }
@@ -176,6 +204,20 @@ function lineFromLocation(location: string): number | null {
   if (!match) return null
   const line = Number(match[1])
   return Number.isFinite(line) ? line : null
+}
+
+function fileFromLocation(location: string): string | null {
+  const match = location.match(/:(\d+)(?::\d+)?$/)
+  if (!match || match.index == null) return null
+  const file = location.slice(0, match.index)
+  return file.length > 0 ? file : null
+}
+
+function sameSourceFile(a: string, b: string): boolean {
+  if (a === b) return true
+  const basenameA = a.slice(a.lastIndexOf('/') + 1)
+  const basenameB = b.slice(b.lastIndexOf('/') + 1)
+  return basenameA.length > 0 && basenameA === basenameB
 }
 
 export function colorClassForStatus(status: StepStatus): string {

@@ -101,7 +101,7 @@ export function listSabotageSkills(feature: string, opts?: ClientOptions): Promi
 }
 
 export function startBenchmark(
-  input: { feature: string; skill: string; level: SabotageLevel; iterations: number },
+  input: { feature: string; skill: string; level: SabotageLevel; iterations: number; agent?: 'claude' | 'codex' },
   opts?: ClientOptions,
 ): Promise<{ benchmarkId: string }> {
   const { baseUrl, fetchImpl } = defaultOpts(opts)

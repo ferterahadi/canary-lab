@@ -102,6 +102,7 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunStatus, re
                   testLine: t.line,
                   bodySource: t.bodySource,
                   summary: isRunActivelyTesting ? activeRunSummary : undefined,
+                  sourceFile: t.sourceFile ?? spec.file,
                 })
                 const activeSourceLine = activeLine == null ? null : t.line + activeLine - 1
                 return (

@@ -9,6 +9,12 @@ import { PaneTerminal } from './PaneTerminal'
 const terminalState = vi.hoisted(() => ({
   writes: [] as string[],
   fitCalls: 0,
+  // What FitAddon.proposeDimensions() returns. The component only forwards a
+  // PTY resize when these differ from the mock Terminal's fixed 80×24 grid, so
+  // tests flip this to simulate a real geometry change vs. a no-op resize.
+  proposedDimensions: { cols: 80, rows: 24 } as { cols: number; rows: number } | undefined,
+  refreshCalls: 0,
+  clearTextureAtlasCalls: 0,
   webglAddonCtorCalls: 0,
   instances: [] as Array<{
     cols: number
@@ -49,6 +55,9 @@ vi.mock('@xterm/xterm', () => ({
       terminalState.writes.push(text)
     }
     clear(): void {}
+    refresh(): void {
+      terminalState.refreshCalls += 1
+    }
     attachCustomKeyEventHandler(): void {}
     onData(handler: (data: string) => void): { dispose: () => void } {
       this.dataHandlers.push(handler)
@@ -63,6 +72,9 @@ vi.mock('@xterm/addon-fit', () => ({
     fit(): void {
       terminalState.fitCalls += 1
     }
+    proposeDimensions(): { cols: number; rows: number } | undefined {
+      return terminalState.proposedDimensions
+    }
   },
 }))
 
@@ -72,6 +84,9 @@ vi.mock('@xterm/addon-webgl', () => ({
       terminalState.webglAddonCtorCalls += 1
     }
     onContextLoss(_handler: () => void): void {}
+    clearTextureAtlas(): void {
+      terminalState.clearTextureAtlasCalls += 1
+    }
     dispose(): void {}
   },
 }))
@@ -95,6 +110,9 @@ let root: Root
 beforeEach(() => {
   terminalState.writes = []
   terminalState.fitCalls = 0
+  terminalState.proposedDimensions = { cols: 80, rows: 24 }
+  terminalState.refreshCalls = 0
+  terminalState.clearTextureAtlasCalls = 0
   terminalState.webglAddonCtorCalls = 0
   terminalState.instances = []
   paneState.options = []
@@ -125,43 +143,73 @@ afterEach(() => {
 })
 
 describe('PaneTerminal', () => {
-  it('one-shot fits the agent pane when its container is first measured, ignoring streamed output', async () => {
-    await act(async () => {
-      root.render(<PaneTerminal runId="r1" paneId="agent" />)
-    })
+  it('keeps re-fitting the agent pane on resize, debounced and only when the grid changes', async () => {
+    vi.useFakeTimers()
+    try {
+      await act(async () => {
+        root.render(<PaneTerminal runId="r1" paneId="agent" />)
+      })
 
-    // Agent pane gets a one-shot ResizeObserver: PaneTerminal now stays mounted
-    // across tab switches, so the initial mount can be inside a hidden parent
-    // (0×0 container) where the inline fit short-circuits. The observer fits
-    // exactly once when real dims arrive, then disconnects to avoid a flicker
-    // loop with the Ink TUI's redraw-on-SIGWINCH behavior.
-    expect(resizeState.observers).toHaveLength(1)
-    const observer = resizeState.observers[0]
-    expect(observer.observe).toHaveBeenCalledTimes(1)
+      expect(resizeState.observers).toHaveLength(1)
+      const observer = resizeState.observers[0]
+      expect(observer.observe).toHaveBeenCalledTimes(1)
 
-    act(() => {
-      paneState.options[0].onOpen?.()
-    })
+      act(() => {
+        paneState.options[0].onOpen?.()
+      })
+      expect(paneState.connections[0].sendResize).toHaveBeenCalledTimes(1)
+      expect(paneState.connections[0].sendResize).toHaveBeenLastCalledWith(80, 24)
+      const fitCallsAfterOpen = terminalState.fitCalls
 
-    expect(paneState.connections[0].sendResize).toHaveBeenCalledTimes(1)
-    expect(paneState.connections[0].sendResize).toHaveBeenLastCalledWith(80, 24)
-    const fitCallsAfterOpen = terminalState.fitCalls
+      // Streamed output never triggers a fit or a PTY resize — only geometry does.
+      act(() => {
+        paneState.options[0].onData('streamed output')
+      })
+      expect(terminalState.writes).toContain('streamed output')
+      expect(paneState.connections[0].sendResize).toHaveBeenCalledTimes(1)
+      expect(terminalState.fitCalls).toBe(fitCallsAfterOpen)
 
-    act(() => {
-      paneState.options[0].onData('streamed output')
-    })
+      // A burst of observer fires (e.g. a splitter drag) collapses into a
+      // single debounced fit, and forwards one PTY resize because the proposed
+      // grid differs from the current 80×24.
+      terminalState.proposedDimensions = { cols: 100, rows: 30 }
+      act(() => {
+        observer.callback([], observer as unknown as ResizeObserver)
+        observer.callback([], observer as unknown as ResizeObserver)
+        observer.callback([], observer as unknown as ResizeObserver)
+      })
+      // Nothing fires until the debounce window elapses.
+      expect(terminalState.fitCalls).toBe(fitCallsAfterOpen)
+      act(() => {
+        vi.advanceTimersByTime(120)
+      })
+      expect(terminalState.fitCalls).toBe(fitCallsAfterOpen + 1)
+      expect(paneState.connections[0].sendResize).toHaveBeenCalledTimes(2)
 
-    expect(terminalState.writes).toContain('streamed output')
-    expect(paneState.connections[0].sendResize).toHaveBeenCalledTimes(1)
-    expect(terminalState.fitCalls).toBe(fitCallsAfterOpen)
+      // A real resize forces a clean repaint: clear the WebGL atlas and refresh,
+      // so stale glyphs from the old grid don't smear at their pre-resize cells.
+      expect(terminalState.clearTextureAtlasCalls).toBe(1)
+      expect(terminalState.refreshCalls).toBe(1)
 
-    // Container reaches real dims → observer fires → fit + pty resize once, then disconnect.
-    act(() => {
-      observer.callback([], observer as unknown as ResizeObserver)
-    })
-    expect(terminalState.fitCalls).toBe(fitCallsAfterOpen + 1)
-    expect(paneState.connections[0].sendResize).toHaveBeenCalledTimes(2)
-    expect(observer.disconnect).toHaveBeenCalledTimes(1)
+      // The observer stays live (never disconnects), so later resizes still fit.
+      expect(observer.disconnect).not.toHaveBeenCalled()
+
+      // A resize that leaves the character grid unchanged is a no-op: no fit,
+      // no SIGWINCH-inducing PTY resize, so the Ink TUI never redraws. (The
+      // mock Terminal keeps its 80×24 grid, so proposing 80×24 means "no
+      // change" regardless of the fit above.)
+      terminalState.proposedDimensions = { cols: 80, rows: 24 }
+      act(() => {
+        observer.callback([], observer as unknown as ResizeObserver)
+        vi.advanceTimersByTime(120)
+      })
+      expect(terminalState.fitCalls).toBe(fitCallsAfterOpen + 1)
+      expect(paneState.connections[0].sendResize).toHaveBeenCalledTimes(2)
+      expect(terminalState.clearTextureAtlasCalls).toBe(1)
+      expect(terminalState.refreshCalls).toBe(1)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('fits non-agent panes when their container resize observer fires', async () => {
