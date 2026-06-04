@@ -5,6 +5,7 @@ import path from 'path'
 import {
   encodeClaudeProjectDir,
   locateClaudeSessionLog,
+  findClaudeLogBySessionId,
   locateLatestClaudeSessionLog,
   locateCodexSessionLog,
   locateLatestCodexSessionLog,
@@ -55,6 +56,32 @@ describe('locateClaudeSessionLog', () => {
 
   it('returns null when sessionId is falsy', () => {
     expect(locateClaudeSessionLog('/some/dir', '', homeDir)).toBeNull()
+  })
+})
+
+describe('findClaudeLogBySessionId', () => {
+  it('returns null when sessionId is falsy', () => {
+    expect(findClaudeLogBySessionId('', homeDir)).toBeNull()
+  })
+
+  it('returns null when the projects directory does not exist', () => {
+    expect(findClaudeLogBySessionId('sid', path.join(homeDir, 'missing-home'))).toBeNull()
+  })
+
+  it('scans every project dir and returns the matching session log regardless of encoding', () => {
+    const sessionId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
+    const base = path.join(homeDir, '.claude', 'projects')
+    fs.mkdirSync(path.join(base, '-some-other-proj'), { recursive: true })
+    const target = path.join(base, '-folded_slug-proj')
+    fs.mkdirSync(target, { recursive: true })
+    const jsonl = path.join(target, `${sessionId}.jsonl`)
+    fs.writeFileSync(jsonl, '')
+    expect(findClaudeLogBySessionId(sessionId, homeDir)).toBe(jsonl)
+  })
+
+  it('returns null when no project dir holds the session', () => {
+    fs.mkdirSync(path.join(homeDir, '.claude', 'projects', '-proj'), { recursive: true })
+    expect(findClaudeLogBySessionId('no-such-session', homeDir)).toBeNull()
   })
 
   it('finds the newest Claude session for a run directory without a sidecar id', () => {

@@ -32,12 +32,19 @@ describe('baselinePlaywrightSpawner', () => {
 
 describe('buildBaselineHealPrompt', () => {
   let runDir: string
+  let worktree: string
+  let restartSignal: string
+  let rerunSignal: string
   beforeEach(() => {
     runDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-armcfg-')))
+    // Worktree-local signal dir (as the runner wires it) — NOT under runDir.
+    worktree = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-armcfg-wt-')))
+    restartSignal = path.join(worktree, '.canary-signals', '.restart')
+    rerunSignal = path.join(worktree, '.canary-signals', '.rerun')
   })
 
   it('is minimal: fix app code, tests read-only, Playwright only — and omits Canary curated context', () => {
-    const build = buildBaselineHealPrompt({ runDir })
+    const build = buildBaselineHealPrompt({ runDir, restartSignal, rerunSignal })
     const prompt = build({ cycle: 0, outputDir: path.join(runDir, 'mcp') })
     expect(prompt.toLowerCase()).toContain('playwright')
     expect(prompt.toLowerCase()).toContain('do not edit')
@@ -46,18 +53,19 @@ describe('buildBaselineHealPrompt', () => {
     expect(prompt).not.toContain('trace-extract')
   })
 
-  it('exposes the same completion-signal mechanism as the harness: literal .restart/.rerun file paths', () => {
-    const build = buildBaselineHealPrompt({ runDir })
+  it('points the agent at the worktree-local signal files, never the run dir', () => {
+    const build = buildBaselineHealPrompt({ runDir, restartSignal, rerunSignal })
     const prompt = build({ cycle: 0, outputDir: path.join(runDir, 'mcp') })
-    // Must point at the real signal files the orchestrator watches, not the
-    // signal_run MCP tool (which is not registered in the agent's mcp-config).
-    expect(prompt).toContain(path.join(runDir, 'signals', '.restart'))
-    expect(prompt).toContain(path.join(runDir, 'signals', '.rerun'))
+    // Real signal files the orchestrator watches, not the signal_run MCP tool.
+    expect(prompt).toContain(restartSignal)
+    expect(prompt).toContain(rerunSignal)
     expect(prompt).not.toContain('signal_run')
+    // The run dir is never leaked — that's where harness-only artifacts live.
+    expect(prompt).not.toContain(runDir)
   })
 
   it('persists the prompt to <runDir>/heal-prompt.md', () => {
-    const build = buildBaselineHealPrompt({ runDir })
+    const build = buildBaselineHealPrompt({ runDir, restartSignal, rerunSignal })
     const prompt = build({ cycle: 0, outputDir: path.join(runDir, 'mcp') })
     expect(fs.readFileSync(path.join(runDir, 'heal-prompt.md'), 'utf-8')).toBe(prompt)
   })

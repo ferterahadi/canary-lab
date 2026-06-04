@@ -2,7 +2,6 @@ import fs from 'fs'
 import path from 'path'
 import type { BuildHealCyclePrompt } from '../auto-heal'
 import type { PlaywrightSpawner } from '../orchestrator'
-import { buildRunPaths } from '../run-paths'
 
 // The harness-vs-baseline knob. Both arms run the SAME agent + model + Playwright
 // MCP; the ONLY differences are (1) whether the failure-evidence enrichment runs
@@ -34,6 +33,12 @@ export interface BaselineHealPromptOptions {
   /** Per-run dir — the prompt is persisted to <runDir>/heal-prompt.md so the
    *  spawn command's `@<promptFile>` positional reads it, same as the harness. */
   runDir: string
+  /** Absolute path of the `.restart` completion-signal file. Lives in the
+   *  agent's own worktree (not the run dir) so the baseline agent is never
+   *  handed a path into the harness-only run dir. */
+  restartSignal: string
+  /** Absolute path of the `.rerun` completion-signal file (worktree-local). */
+  rerunSignal: string
 }
 
 /**
@@ -43,18 +48,21 @@ export interface BaselineHealPromptOptions {
  * failure context. Mirrors `buildOrchestratorHealPrompt`'s contract (returns the
  * text and persists it to `heal-prompt.md`).
  *
- * It DOES get the same completion-signal mechanism as the harness — the literal
- * `signals/.restart` / `.rerun` file paths the orchestrator watches. Without
- * this, baseline could fix the code but never tell the orchestrator it was done,
- * so every cycle stalled until the 5-min idle timeout. The benchmark's
- * differentiator is the curated failure *context*, not knowledge of the signal
- * protocol — both arms must be able to close the loop.
+ * It DOES get the same completion-signal mechanism as the harness — empty
+ * `.restart` / `.rerun` files the orchestrator watches. Without this, baseline
+ * could fix the code but never tell the orchestrator it was done, so every cycle
+ * stalled until the 5-min idle timeout. The benchmark's differentiator is the
+ * curated failure *context*, not knowledge of the signal protocol — both arms
+ * must be able to close the loop.
+ *
+ * The signal paths are worktree-local (see runner.ts), NOT under the run dir, so
+ * pointing the baseline agent at them never reveals the harness-only run-dir
+ * artifacts (`e2e-summary.json`, `svc-*.log`, sliced logs, trace-extracts).
  */
 export function buildBaselineHealPrompt(
   opts: BaselineHealPromptOptions,
 ): BuildHealCyclePrompt {
   const promptFile = path.join(opts.runDir, 'heal-prompt.md')
-  const paths = buildRunPaths(opts.runDir)
   return () => {
     const prompt = [
       'The Playwright end-to-end tests for this app are failing.',
@@ -63,8 +71,8 @@ export function buildBaselineHealPrompt(
       'Reproduce with `npx playwright test` and inspect the browser trace via the Playwright MCP tools as needed.',
       [
         'When you have a fix in place, signal completion by writing an empty signal file:',
-        `- Service/app or runtime fix → \`${paths.restartSignal}\``,
-        `- Test/config-only fix → \`${paths.rerunSignal}\``,
+        `- Service/app or runtime fix → \`${opts.restartSignal}\``,
+        `- Test/config-only fix → \`${opts.rerunSignal}\``,
       ].join('\n'),
     ].join('\n\n')
     fs.mkdirSync(path.dirname(promptFile), { recursive: true })

@@ -51,6 +51,15 @@ describe('computeBenchmarkReport', () => {
     expect(report.reliabilityMultiple).toBe(2)
   })
 
+  it('reports zero avgHealCycles and undefined tokens for an arm with no iterations', () => {
+    // Only arm A reported — arm B has no rows, exercising the empty-arm branches.
+    const report = computeBenchmarkReport([r('A', 1, true, 3, 10_000)])
+    expect(report.baseline.iterationsTotal).toBe(0)
+    expect(report.baseline.avgHealCycles).toBe(0)
+    expect(report.baseline.totalWallClockMs).toBe(0)
+    expect(report.baseline.totalTokens).toBeUndefined()
+  })
+
   it('reliability multiple is null when baseline never healed (no divide-by-zero)', () => {
     const report = computeBenchmarkReport([
       r('A', 1, true, 2, 38_000),

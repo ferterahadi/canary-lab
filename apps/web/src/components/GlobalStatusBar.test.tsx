@@ -27,6 +27,14 @@ vi.mock('../state/RunsContext', () => ({
   useRunDetails: () => ({}),
 }))
 
+vi.mock('../state/BenchmarkContext', () => ({
+  useBenchmarks: () => ({ benchmarks: [], connection: 'live', startBenchmark: vi.fn(), abortBenchmark: vi.fn(), loadBenchmark: vi.fn() }),
+}))
+
+vi.mock('./BenchmarkWindow', () => ({
+  BenchmarkWindow: () => null,
+}))
+
 vi.mock('./WizardTaskStatus', () => ({
   WizardTaskStatus: () => null,
 }))

@@ -345,10 +345,19 @@ export function createBenchmarkRunner(deps: BenchmarkRunnerDeps) {
       const runId = generateRunId()
       const runDir = runDirFor(deps.logsDir, runId)
       const runnerLog = new RunnerLog(buildRunPaths(runDir).runnerLogPath)
+      // Baseline signals completion from a dir inside its OWN worktree, never
+      // the run dir — so handing it the signal path doesn't expose harness-only
+      // artifacts (e2e-summary.json, svc-*.log) that sit in the run dir.
+      const baselineSignalsDir = path.join(featureDir, '.canary-signals')
+      const baselinePaths = buildRunPaths(runDir, { signalsDir: baselineSignalsDir })
       const buildCyclePrompt =
         mode === 'harness'
           ? buildOrchestratorHealPrompt({ agent, projectRoot: deps.projectRoot, runDir })
-          : buildBaselineHealPrompt({ runDir })
+          : buildBaselineHealPrompt({
+              runDir,
+              restartSignal: baselinePaths.restartSignal,
+              rerunSignal: baselinePaths.rerunSignal,
+            })
       const orch = new RunOrchestrator({
         feature: armFeature,
         env,
@@ -376,7 +385,11 @@ export function createBenchmarkRunner(deps: BenchmarkRunnerDeps) {
           buildCyclePrompt,
         },
         ...(mode === 'baseline'
-          ? { playwrightSpawner: baselinePlaywrightSpawner(defaultPlaywrightSpawner) }
+          ? {
+              playwrightSpawner: baselinePlaywrightSpawner(defaultPlaywrightSpawner),
+              // Watch the worktree-local signal dir, not <runDir>/signals.
+              signalsDir: baselineSignalsDir,
+            }
           : {}),
       })
       deps.attachRunStreams(orch, runnerLog, armFeature.name, null)

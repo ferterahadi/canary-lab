@@ -15,6 +15,77 @@ const LEVEL_BADGE: Record<SabotageLevel, { bg: string; fg: string }> = {
   max: { bg: 'rgba(244,63,94,0.15)', fg: 'rgb(251,113,133)' },
 }
 
+// The ONLY things that differ between the two arms — canary-lab's curated and
+// captured failure context. Everything else (claude agent, the frozen bug,
+// booted services, the Playwright MCP + each arm's own browser trace, and the
+// completion-signal protocol) is identical, so the race isolates the value of
+// this context alone. Mirrors lib/runtime/benchmark/arm-config.ts + the
+// CANARY_LAB_BENCHMARK_MODE enrichment gate in summary-reporter.ts.
+const ARM_EXPOSURE: { label: string; detail: string }[] = [
+  { label: 'heal-index', detail: 'failed tests, assertions, editable repos, exact slice paths' },
+  { label: 'Sliced failure logs', detail: 'per-failure service-log excerpts, not the raw log' },
+  { label: 'Trace-extract', detail: 'failing action + selector, a11y snapshot, failed network, console' },
+  { label: 'Diagnosis journal', detail: 'what prior heal cycles already tried' },
+  { label: 'Captured service logs', detail: 'canary-lab’s svc-*.log capture' },
+  { label: 'Playwright summary', detail: 'the e2e-summary.json reporter output' },
+  { label: 'Feature docs / wiki', detail: 'product context + preserved prior work' },
+]
+
+function ArmExposureCompare() {
+  const [open, setOpen] = useState(false)
+  const COLS = '1fr 64px 64px'
+  return (
+    <div style={{ marginTop: 18 }}>
+      {/* Collapsed by default — the setup screen already carries the sabotage
+          recipe, so this stays a one-line teaser until the user opts in. */}
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        style={{
+          display: 'flex', alignItems: 'baseline', gap: 8, width: '100%', textAlign: 'left',
+          background: 'transparent', border: 'none', padding: '2px 0', cursor: 'pointer',
+        }}
+      >
+        <span style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '.4px', color: 'var(--text-muted)', fontWeight: 600, flex: 'none' }}>
+          What each arm gets
+        </span>
+        <span style={{ flex: 1, minWidth: 0, fontSize: 11, color: 'var(--text-muted)', opacity: 0.75, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          — only canary-lab’s curated failure context differs
+        </span>
+        <span aria-hidden style={{ fontSize: 9, color: 'var(--text-muted)', flex: 'none', display: 'inline-block', transition: 'transform .15s ease', transform: open ? 'rotate(90deg)' : 'none' }}>▶</span>
+      </button>
+
+      {open && (
+        <div style={{ marginTop: 11 }}>
+          <div style={{ fontSize: 11.5, color: 'var(--text-muted)', lineHeight: 1.55, marginBottom: 10 }}>
+            Both arms share the same claude agent, the same frozen bug, booted services, the Playwright MCP,
+            each arm’s own browser trace, and the completion-signal protocol. The race isolates one variable:{' '}
+            <b style={{ color: 'var(--text-secondary)' }}>canary-lab’s curated failure context</b>.
+          </div>
+          <div style={{ border: '1px solid var(--border-default)', borderRadius: 'var(--radius-lg)', overflow: 'hidden', background: 'var(--bg-surface)' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: COLS, alignItems: 'center', padding: '7px 13px', borderBottom: '1px solid var(--border-default)', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.4px', color: 'var(--text-muted)' }}>
+              <span>canary-lab failure context</span>
+              <span style={{ textAlign: 'center', color: 'var(--boot)' }}>🐤 Harness</span>
+              <span style={{ textAlign: 'center' }}>⚙ Baseline</span>
+            </div>
+            {ARM_EXPOSURE.map((row, i) => (
+              <div key={row.label} style={{ display: 'grid', gridTemplateColumns: COLS, alignItems: 'center', padding: '7px 13px', borderTop: i === 0 ? 'none' : '1px solid var(--border-default)' }}>
+                <span style={{ fontSize: 12, lineHeight: 1.4 }}>
+                  <span style={{ color: 'var(--text-primary)', fontWeight: 500 }}>{row.label}</span>
+                  <span style={{ color: 'var(--text-muted)', fontSize: 11 }}> — {row.detail}</span>
+                </span>
+                <span style={{ textAlign: 'center', color: 'var(--boot)', fontWeight: 700 }}>✓</span>
+                <span style={{ textAlign: 'center', color: 'var(--text-muted)' }}>✗</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function BenchmarkWindow({ onClose }: { onClose: () => void }) {
   const { startBenchmark, benchmarks } = useBenchmarks()
   // Resume ONLY a live benchmark (so you don't lose a run in progress); when
@@ -177,6 +248,8 @@ function ConfigScreen({
             </div>
             <span style={{ color: 'var(--text-muted)', fontSize: 11.5, marginLeft: 12 }}>same frozen bug, repeated → variance</span>
           </Field>
+
+          <ArmExposureCompare />
 
           {error && <div style={{ color: 'rgb(251,113,133)', fontSize: 12, marginTop: 10 }}>{error}</div>}
 
