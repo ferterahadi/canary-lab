@@ -2,10 +2,10 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "canary-ui",
+      "name": "web-dev",
       "runtimeExecutable": "sh",
-      "runtimeArgs": ["-c", "export PATH=\"$HOME/.local/bin:$PATH\" && cd /Users/oddle/Documents/canary-lab-workspace && exec npx canary-lab ui --no-open"],
-      "port": 7421
+      "runtimeArgs": ["-c", "cd /Users/oddle/Documents/canary-lab && exec npm run dev:web"],
+      "port": 5173
     }
   ]
 }

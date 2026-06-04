@@ -8,6 +8,7 @@ import { PaneTerminal } from './PaneTerminal'
 
 const terminalState = vi.hoisted(() => ({
   writes: [] as string[],
+  openCalls: 0,
   fitCalls: 0,
   // What FitAddon.proposeDimensions() returns. The component only forwards a
   // PTY resize when these differ from the mock Terminal's fixed 80×24 grid, so
@@ -47,7 +48,9 @@ vi.mock('@xterm/xterm', () => ({
     loadAddon(addon: unknown): void {
       this.loadedAddons.push(addon)
     }
-    open(): void {}
+    open(): void {
+      terminalState.openCalls += 1
+    }
     write(text: string): void {
       terminalState.writes.push(text)
     }
@@ -109,6 +112,7 @@ let root: Root
 
 beforeEach(() => {
   terminalState.writes = []
+  terminalState.openCalls = 0
   terminalState.fitCalls = 0
   terminalState.proposedDimensions = { cols: 80, rows: 24 }
   terminalState.refreshCalls = 0
@@ -286,6 +290,47 @@ describe('PaneTerminal', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it('defers opening the agent pane (and the WebGL renderer) until the container has dimensions', async () => {
+    // The agent pane mounts inside a `hidden` (display:none) tab, so at mount
+    // the container reports 0×0. Opening — and especially constructing the
+    // WebGL texture atlas — against a 0-size element corrupts glyph rendering
+    // (smeared, overlapping text). Nothing should open until the pane is
+    // actually measured.
+    Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, get: () => 0 })
+    Object.defineProperty(HTMLElement.prototype, 'clientHeight', { configurable: true, get: () => 0 })
+
+    await act(async () => {
+      root.render(<PaneTerminal runId="r1" paneId="agent" />)
+    })
+
+    // Renderer is dormant: no open(), no WebGL context, no fit.
+    expect(terminalState.openCalls).toBe(0)
+    expect(terminalState.webglAddonCtorCalls).toBe(0)
+    expect(terminalState.fitCalls).toBe(0)
+    // ...but the PTY socket connects immediately so buffered output isn't lost.
+    expect(paneState.connections).toHaveLength(1)
+
+    // Container gets real layout; the (debounced) resize observer fires.
+    Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, get: () => 640 })
+    Object.defineProperty(HTMLElement.prototype, 'clientHeight', { configurable: true, get: () => 360 })
+    vi.useFakeTimers()
+    try {
+      act(() => {
+        const observer = resizeState.observers[0]
+        observer.callback([], observer as unknown as ResizeObserver)
+        vi.advanceTimersByTime(120)
+      })
+    } finally {
+      vi.useRealTimers()
+    }
+
+    // Now it opens exactly once, WebGL initializes against the real size, and
+    // the grid is fit.
+    expect(terminalState.openCalls).toBe(1)
+    expect(terminalState.webglAddonCtorCalls).toBe(1)
+    expect(terminalState.fitCalls).toBeGreaterThanOrEqual(1)
   })
 
   it('loads the WebGL renderer for the agent pane only', async () => {

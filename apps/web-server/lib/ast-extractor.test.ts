@@ -116,6 +116,45 @@ describe('extractTestsFromSource', () => {
     expect(steps[1].bodySource).toContain('fn expr')
   })
 
+  it('ignores a test() call with no arguments', () => {
+    // getStringArg returns null on a missing first arg.
+    const r = extractTestsFromSource('a.spec.ts', `test()`)
+    expect(r.tests).toEqual([])
+  })
+
+  it('accepts a no-substitution template literal title and no body', () => {
+    // Covers the NoSubstitutionTemplateLiteral title path and the bodyless
+    // test branches (empty bodySource + no steps).
+    const r = extractTestsFromSource('a.spec.ts', 'test(`plain title`)')
+    expect(r.tests).toHaveLength(1)
+    expect(r.tests[0].name).toBe('plain title')
+    expect(r.tests[0].bodySource).toBe('')
+    expect(r.tests[0].steps).toEqual([])
+  })
+
+  it('stringifies a non-Error thrown during parsing', () => {
+    // A source whose `.length` getter throws a primitive makes
+    // ts.createSourceFile throw a non-Error, exercising the String(err) fallback.
+    const hostile = { get length(): number { throw 'plain string failure' } }
+    const r = extractTestsFromSource('a.spec.ts', hostile as unknown as string)
+    expect(r.parseError).toBe('plain string failure')
+    expect(r.tests).toEqual([])
+  })
+
+  it('treats a test.step whose second arg is not a function as bodyless', () => {
+    // getStepBody hits its non-arrow/non-function-expression fallthrough.
+    const src = `
+      test('outer', async () => {
+        await test.step('weird', 123)
+      })
+    `
+    const r = extractTestsFromSource('a.spec.ts', src)
+    const steps = r.tests[0].steps
+    expect(steps.map((s) => s.label)).toEqual(['weird'])
+    expect(steps[0].bodySource).toBe('')
+    expect(steps[0].children).toEqual([])
+  })
+
   it('still returns gracefully on syntactically odd input', () => {
     // TS createSourceFile is lenient; this just ensures we don't throw.
     const src = `test('a', async () => { @@@ }`

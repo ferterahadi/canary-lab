@@ -393,7 +393,8 @@ export async function testsDraftRoutes(
         reply.code(404)
         return { error: 'draft not found' }
       }
-      const requestPath = (req.params as { '*': string })['*'] ?? ''
+      // Fastify always populates a wildcard `*` param with a string.
+      const requestPath = (req.params as { '*': string })['*']
       const resolved = resolveDraftFile(deps.logsDir, req.params.id, requestPath)
       if (!resolved.ok) {
         if (resolved.reason === 'invalid-path') {

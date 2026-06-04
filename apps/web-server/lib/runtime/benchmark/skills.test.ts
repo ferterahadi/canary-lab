@@ -78,6 +78,12 @@ describe('loadSabotageSkills', () => {
     expect(loadSabotageSkills(root).map((s) => s.name)).toEqual(['real'])
   })
 
+  it('skips plain files sitting at the skills root (non-directory entries)', () => {
+    fs.writeFileSync(path.join(root, 'README.md'), 'just a file, not a skill folder')
+    writeSkill('real', { name: 'real', title: 'R', level: 'min', summary: '', appliesTo: [] })
+    expect(loadSabotageSkills(root).map((s) => s.name)).toEqual(['real'])
+  })
+
   it('returns [] when the skills directory does not exist', () => {
     expect(loadSabotageSkills(path.join(root, 'missing'))).toEqual([])
   })
