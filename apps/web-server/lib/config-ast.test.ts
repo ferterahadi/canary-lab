@@ -196,6 +196,96 @@ module.exports.config = { ...base, ['dyn']: 1, name: 'old' }`
     expect(v.a[0]).toBe(null)
     expect(v.a[1]).toBe(2)
   })
+
+  // ─── deepEqual branch coverage (via patchObjectLiteral) ───────────────────
+  // patchObjectLiteral only regenerates a property when deepEqual(current,next)
+  // is false. These cases drive each short-circuit in deepEqual so the diff is
+  // detected and the value is rewritten.
+
+  it('regenerates when current value is null but next is not (deepEqual a===null)', () => {
+    const src = `module.exports.config = { a: null }`
+    const out = writeFeatureConfig(src, { a: 5 })
+    expect(out).toMatch(/a:\s*5/)
+  })
+
+  it('regenerates when next value is null but current is not (deepEqual b===null)', () => {
+    const src = `module.exports.config = { a: 5 }`
+    const out = writeFeatureConfig(src, { a: null })
+    expect(out).toMatch(/a:\s*null/)
+  })
+
+  it('regenerates when current is an array but next is an object (deepEqual array vs non-array)', () => {
+    const src = `module.exports.config = { a: [1, 2] }`
+    const out = writeFeatureConfig(src, { a: { x: 1 } })
+    expect(out).toMatch(/a:\s*\{[\s\S]*x:\s*1/)
+  })
+
+  it('regenerates when current is an object but next is an array (deepEqual non-array vs array)', () => {
+    const src = `module.exports.config = { a: { x: 1 } }`
+    const out = writeFeatureConfig(src, { a: [1, 2] })
+    expect(out).toMatch(/a:\s*\[\s*1,\s*2/)
+  })
+
+  it('regenerates when arrays differ in length (deepEqual length check)', () => {
+    const src = `module.exports.config = { a: [1, 2] }`
+    const out = writeFeatureConfig(src, { a: [1, 2, 3] })
+    expect(out).toMatch(/a:\s*\[\s*1,\s*2,\s*3/)
+  })
+
+  it('regenerates when objects differ in key count (deepEqual key-length check)', () => {
+    const src = `module.exports.config = { a: { x: 1 } }`
+    const out = writeFeatureConfig(src, { a: { x: 1, y: 2 } })
+    expect(out).toMatch(/y:\s*2/)
+  })
+
+  it('regenerates when a value changes to a different boolean (valueToNode boolean path)', () => {
+    const src = `module.exports.config = { flag: true }`
+    const out = writeFeatureConfig(src, { flag: false })
+    expect(out).toMatch(/flag:\s*false/)
+  })
+
+  // ─── locateFeatureConfigObject branch coverage ────────────────────────────
+
+  it('ignores top-level non-Identifier declarators (e.g. destructuring) when collecting consts', () => {
+    // `const { x } = obj` is a VariableDeclarator whose id is not an Identifier;
+    // it must be skipped in the shorthand-ref collection pass.
+    const src = `const { x } = require('./x')
+const config = { name: 'd', flag: true }
+module.exports = { config }`
+    const r = readFeatureConfig(src)
+    expect((r.value as Record<string, ConfigValue>).name).toBe('d')
+  })
+
+  it('skips spread elements inside the module.exports = {...} object', () => {
+    // The spread property is not an ObjectProperty/Property and must be skipped
+    // before the real `config:` property is found.
+    const src = `const base = { other: 1 }
+module.exports = { ...base, config: { name: 'e' } }`
+    const r = readFeatureConfig(src)
+    expect((r.value as Record<string, ConfigValue>).name).toBe('e')
+  })
+
+  it('skips non-config properties inside the module.exports = {...} object', () => {
+    const src = `module.exports = { other: 1, config: { name: 'f' } }`
+    const r = readFeatureConfig(src)
+    expect((r.value as Record<string, ConfigValue>).name).toBe('f')
+  })
+
+  it('does not resolve a config shorthand whose const init is not an object literal', () => {
+    // `const config = makeConfig()` → shorthand ref resolves to a declarator
+    // whose init is a CallExpression, not an ObjectExpression, so it falls
+    // through and the locator returns null.
+    const src = `const config = makeConfig()
+module.exports = { config }`
+    expect(() => readFeatureConfig(src)).toThrow(/Unable to locate feature config/)
+  })
+
+  it('returns null when module.exports right-hand side is not an object', () => {
+    // `module.exports = makeConfig()` matches the module.exports left side but
+    // the right is a CallExpression, so the `{ config }` branch is skipped.
+    const src = `module.exports = makeConfig()`
+    expect(() => readFeatureConfig(src)).toThrow(/Unable to locate feature config/)
+  })
 })
 
 // ─── playwright.config patterns ─────────────────────────────────────────────

@@ -36,17 +36,18 @@ export interface ExtractResult {
 function getStringArg(node: ts.CallExpression, src?: ts.SourceFile): string | null {
   const arg = node.arguments[0]
   if (!arg) return null
+  // isStringLiteralLike covers both string literals and no-substitution
+  // template literals (`` `plain title` ``).
   if (ts.isStringLiteralLike(arg)) return arg.text
-  if (ts.isNoSubstitutionTemplateLiteral(arg)) return arg.text
   // Template literal with substitutions, e.g. `redeems ${key} voucher`.
   // Reconstruct the raw template text with `${expr}` placeholders preserved
   // so loop-generated tests at least surface a recognisable name when the
   // Playwright `--list` enrichment isn't available.
   if (ts.isTemplateExpression(arg) && src) {
+    // A template expression's source text is always backtick-delimited;
+    // strip the surrounding backticks, keeping `${...}` segments verbatim.
     const raw = arg.getText(src)
-    // Strip surrounding backticks; keep `${...}` segments verbatim.
-    if (raw.startsWith('`') && raw.endsWith('`')) return raw.slice(1, -1)
-    return raw
+    return raw.slice(1, -1)
   }
   return null
 }

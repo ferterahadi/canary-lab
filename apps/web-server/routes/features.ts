@@ -81,7 +81,8 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
 
     if (pwList === null) {
       return specFiles.map((file) => {
-        const result = astByFile.get(file) ?? { file, tests: [] as ExtractedTest[] }
+        // astByFile has an entry for every specFile (populated above).
+        const result = astByFile.get(file)!
         return {
           file,
           tests: result.tests,
@@ -113,20 +114,22 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
     }
 
     function lookupAstByLine(file: string, line: number): ExtractedTest | undefined {
-      const ast = astByFile.get(file) ?? originAstByFile.get(file)
-      if (!ast) return undefined
+      // `file` is always either a specFile (in astByFile) or an originFile we
+      // AST-extracted into originAstByFile above, so one of them resolves.
+      const ast = (astByFile.get(file) ?? originAstByFile.get(file))!
       return ast.tests.find((t) => t.line === line)
     }
 
     return specFiles.map((file) => {
-      const ast = astByFile.get(file)
+      // astByFile has an entry for every specFile (populated above).
+      const ast = astByFile.get(file)!
 
       const pwEntries = pwByFile.get(file)
       if (!pwEntries || pwEntries.length === 0) {
         return {
           file,
-          tests: ast?.tests ?? [],
-          ...(ast?.parseError ? { parseError: ast.parseError } : {}),
+          tests: ast.tests,
+          ...(ast.parseError ? { parseError: ast.parseError } : {}),
         }
       }
 
@@ -150,7 +153,7 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
       return {
         file,
         tests,
-        ...(ast?.parseError ? { parseError: ast.parseError } : {}),
+        ...(ast.parseError ? { parseError: ast.parseError } : {}),
       }
     })
   })
@@ -159,7 +162,7 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
 function envsetProcessEnv(
   featureDir: string,
   envName: string | undefined,
-  warn: (err: unknown) => void = () => {},
+  warn: (err: unknown) => void,
 ): NodeJS.ProcessEnv {
   if (!envName) return {}
   const envSetsDir = getEnvSetsDir(featureDir)
@@ -191,8 +194,9 @@ function envsetProcessEnv(
   return env
 }
 
-function isEnvSetsConfig(config: unknown): config is EnvSetsConfig {
-  if (!config || typeof config !== 'object') return false
+// `config` is the parsed envsets.config.json (loadConfig returns a typed but
+// unvalidated object); this checks the runtime shape we actually depend on.
+function isEnvSetsConfig(config: EnvSetsConfig): boolean {
   const value = config as Partial<EnvSetsConfig>
   return Boolean(value.feature)
     && typeof value.feature === 'object'
