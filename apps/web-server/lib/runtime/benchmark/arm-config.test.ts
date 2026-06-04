@@ -46,6 +46,16 @@ describe('buildBaselineHealPrompt', () => {
     expect(prompt).not.toContain('trace-extract')
   })
 
+  it('exposes the same completion-signal mechanism as the harness: literal .restart/.rerun file paths', () => {
+    const build = buildBaselineHealPrompt({ runDir })
+    const prompt = build({ cycle: 0, outputDir: path.join(runDir, 'mcp') })
+    // Must point at the real signal files the orchestrator watches, not the
+    // signal_run MCP tool (which is not registered in the agent's mcp-config).
+    expect(prompt).toContain(path.join(runDir, 'signals', '.restart'))
+    expect(prompt).toContain(path.join(runDir, 'signals', '.rerun'))
+    expect(prompt).not.toContain('signal_run')
+  })
+
   it('persists the prompt to <runDir>/heal-prompt.md', () => {
     const build = buildBaselineHealPrompt({ runDir })
     const prompt = build({ cycle: 0, outputDir: path.join(runDir, 'mcp') })

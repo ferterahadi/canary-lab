@@ -2,6 +2,7 @@ import fs from 'fs'
 import path from 'path'
 import type { BuildHealCyclePrompt } from '../auto-heal'
 import type { PlaywrightSpawner } from '../orchestrator'
+import { buildRunPaths } from '../run-paths'
 
 // The harness-vs-baseline knob. Both arms run the SAME agent + model + Playwright
 // MCP; the ONLY differences are (1) whether the failure-evidence enrichment runs
@@ -41,18 +42,30 @@ export interface BaselineHealPromptOptions {
  * (`npx playwright test` + the Playwright MCP) — none of Canary Lab's curated
  * failure context. Mirrors `buildOrchestratorHealPrompt`'s contract (returns the
  * text and persists it to `heal-prompt.md`).
+ *
+ * It DOES get the same completion-signal mechanism as the harness — the literal
+ * `signals/.restart` / `.rerun` file paths the orchestrator watches. Without
+ * this, baseline could fix the code but never tell the orchestrator it was done,
+ * so every cycle stalled until the 5-min idle timeout. The benchmark's
+ * differentiator is the curated failure *context*, not knowledge of the signal
+ * protocol — both arms must be able to close the loop.
  */
 export function buildBaselineHealPrompt(
   opts: BaselineHealPromptOptions,
 ): BuildHealCyclePrompt {
   const promptFile = path.join(opts.runDir, 'heal-prompt.md')
+  const paths = buildRunPaths(opts.runDir)
   return () => {
     const prompt = [
       'The Playwright end-to-end tests for this app are failing.',
       'Fix the application / service code so the tests pass.',
       'Do NOT edit the test files — the tests are the fixed specification.',
       'Reproduce with `npx playwright test` and inspect the browser trace via the Playwright MCP tools as needed.',
-      'When you have a fix in place, write the rerun signal (or restart if services / env must restart) by calling `signal_run`.',
+      [
+        'When you have a fix in place, signal completion by writing an empty signal file:',
+        `- Service/app or runtime fix → \`${paths.restartSignal}\``,
+        `- Test/config-only fix → \`${paths.rerunSignal}\``,
+      ].join('\n'),
     ].join('\n\n')
     fs.mkdirSync(path.dirname(promptFile), { recursive: true })
     fs.writeFileSync(promptFile, prompt)
