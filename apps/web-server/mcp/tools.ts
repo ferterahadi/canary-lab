@@ -998,6 +998,11 @@ export function registerCanaryLabTools(
         }
         const target = resolved.detail
         const status = target.manifest.status
+        if (isActiveBootRun(target)) {
+          // Boot-only sessions hold services up with no tests and no heal loop.
+          // Don't claim heal or tell the caller to wait_for_heal_task.
+          return asJsonResult({ ...bootSessionValue(target), reused: true })
+        }
         if (isActiveRunStatus(status)) {
           const claim = claim_heal ? claimRun(deps, target.manifest.runId, session_id, client_kind, conversation_name) : null
           return asJsonResult({
@@ -1315,6 +1320,34 @@ function healWaitNext(runId: string): { nextSteps: string[]; next: string } {
   }
 }
 
+const BOOT_SESSION_MESSAGE =
+  'Boot-only session: services are up and held. No tests run and there is no heal task. Stop with abort_run (confirm:true) when done.'
+
+// A boot run (started via boot_services) holds its services up with no Playwright
+// tests and no heal loop. Following or waiting on one must not claim heal or block
+// on wait_for_heal_task — surface a boot_session result so skill-less clients stop
+// here too instead of dead-waiting until timeout.
+function isActiveBootRun(detail: RunDetail | null | undefined): boolean {
+  return (
+    !!detail &&
+    (detail.manifest.executionType ?? 'run') === 'boot' &&
+    isActiveRunStatus(detail.manifest.status)
+  )
+}
+
+function bootSessionValue(detail: RunDetail): Extract<WaitForHealTaskValue, { type: 'boot_session' }> {
+  return {
+    type: 'boot_session',
+    runId: detail.manifest.runId,
+    executionType: 'boot',
+    status: detail.manifest.status,
+    claimed: false,
+    lifecycle: detail.manifest.lifecycle ?? null,
+    message: BOOT_SESSION_MESSAGE,
+    nextSteps: ['boot session — services are up and held; exercise them, then abort_run (confirm:true) when done'],
+  }
+}
+
 type ClaimResult = { accepted: true; session: unknown } | { accepted: false; reason: string; currentSession: unknown }
 
 function claimRun(
@@ -1489,6 +1522,16 @@ type WaitForHealTaskValue =
   | { type: 'passed'; runId: string; summary: RunDetail['summary'] | null; counts: NormalizedRunCounts }
   | { type: 'failed'; runId: string; status: string; summary: RunDetail['summary'] | null; counts: NormalizedRunCounts }
   | { type: 'timeout'; runId: string; status: string | null; lifecycle: RunDetail['manifest']['lifecycle'] | null }
+  | {
+      type: 'boot_session'
+      runId: string
+      executionType: 'boot'
+      status: string
+      claimed: false
+      lifecycle: RunDetail['manifest']['lifecycle'] | null
+      message: string
+      nextSteps: string[]
+    }
 
 type WaitForHealTaskResult =
   | { ok: true; value: WaitForHealTaskValue }
@@ -1501,6 +1544,8 @@ function classifyWaitForHealTask(
 ): WaitForHealTaskResult | null {
   const detail = deps.store.get(runId)
   if (!detail) return { ok: false, error: `run not found: ${runId}` }
+
+  if (isActiveBootRun(detail)) return { ok: true, value: bootSessionValue(detail) }
 
   const status = detail.manifest.status
   if (status === 'passed') {
@@ -1570,6 +1615,10 @@ async function waitForHealTask(
   clientKind: ExternalHealClientKind,
   timeoutMs: number,
 ): Promise<WaitForHealTaskResult> {
+  // A boot-only session never produces a heal task — return immediately instead
+  // of claiming heal and blocking until timeout.
+  const bootDetail = deps.store.get(runId)
+  if (bootDetail && isActiveBootRun(bootDetail)) return { ok: true, value: bootSessionValue(bootDetail) }
   ensureExternalClaimForMcpCall(deps, runId, sessionId, clientKind)
   const immediate = classifyWaitForHealTask(deps, runId, sessionId)
   if (immediate) return immediate

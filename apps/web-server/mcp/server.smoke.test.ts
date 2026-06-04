@@ -1407,6 +1407,96 @@ describe('MCP HTTP server (smoke)', () => {
     }
   })
 
+  it('start_run reports a held boot session instead of claiming heal', async () => {
+    const projectRoot = path.resolve(__dirname, '..', '..', '..', 'templates', 'project')
+    const logsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-start-boot-')))
+    const featuresDir = path.join(projectRoot, 'features')
+    const { app, runStore } = await createMcpHarness({ logsDir, projectRoot, featuresDir })
+    let client: Client | null = null
+    try {
+      const address = await app.listen({ port: 0, host: '127.0.0.1' })
+      client = await connectClient(address, '/mcp?profile=full')
+
+      runStore.bootstrap({
+        runId: '2026-06-04T1525-6qdm',
+        feature: 'broken_todo_api',
+        env: 'local',
+        startedAt: '2026-06-04T15:25:00.000Z',
+        status: 'running',
+        executionType: 'boot',
+        healCycles: 0,
+        services: [],
+        healMode: 'external',
+      })
+
+      const result = await client.callTool({
+        name: 'start_run',
+        arguments: {
+          feature: 'broken_todo_api',
+          env: 'local',
+          run_ref: '6qdm',
+          claim_heal: true,
+          session_id: 'sess-boot',
+          client_kind: 'claude-cli',
+        },
+      })
+      const body = JSON.parse((result.content?.[0] as { text: string }).text)
+      expect(body).toMatchObject({
+        type: 'boot_session',
+        executionType: 'boot',
+        runId: '2026-06-04T1525-6qdm',
+        reused: true,
+        claimed: false,
+        status: 'running',
+      })
+      // Boot sessions must not steer the agent into the heal wait loop.
+      expect(body.nextSteps ?? []).not.toContain('wait_for_heal_task')
+      expect(body.claim).toBeUndefined()
+    } finally {
+      if (client) await client.close().catch(() => undefined)
+      await app.close()
+    }
+  })
+
+  it('wait_for_heal_task returns boot_session immediately for a held boot run', async () => {
+    const projectRoot = path.resolve(__dirname, '..', '..', '..', 'templates', 'project')
+    const logsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-wait-boot-')))
+    const { app, runStore } = await createServer({ projectRoot, logsDir, ptyFactory: inertPtyFactory })
+    let client: Client | null = null
+    try {
+      const address = await app.listen({ port: 0, host: '127.0.0.1' })
+      client = await connectClient(address, '/mcp?profile=full')
+
+      runStore.bootstrap({
+        runId: 'wait-boot',
+        feature: 'broken_todo_api',
+        startedAt: '2026-06-04T15:25:00.000Z',
+        status: 'running',
+        executionType: 'boot',
+        healCycles: 0,
+        services: [],
+        healMode: 'external',
+      })
+
+      // No claim_heal first — a boot run short-circuits before requiring a claim,
+      // and with a generous timeout this must still return without blocking.
+      const result = await client.callTool({
+        name: 'wait_for_heal_task',
+        arguments: { runId: 'wait-boot', session_id: 'sess-boot', timeout_ms: 600000 },
+      })
+      expect(JSON.parse((result.content?.[0] as { text: string }).text)).toMatchObject({
+        type: 'boot_session',
+        runId: 'wait-boot',
+        executionType: 'boot',
+        status: 'running',
+        claimed: false,
+      })
+    } finally {
+      if (client) await client.close().catch(() => undefined)
+      await app.close()
+    }
+  })
+
   it('start_run returns candidates for an ambiguous run suffix', async () => {
     const projectRoot = path.resolve(__dirname, '..', '..', '..', 'templates', 'project')
     const logsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-start-ambiguous-')))

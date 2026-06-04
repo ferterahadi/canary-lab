@@ -40,6 +40,23 @@ const STATUS_COLOR: Record<RunStatus, string> = {
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000
 const HUNDRED_MB = 100 * 1024 * 1024
 
+type SortKey = 'runId' | 'kind' | 'status' | 'feature' | 'age' | 'folder' | 'artifacts'
+
+// Numeric columns default to descending (biggest/newest first); text columns to ascending.
+const NUMERIC_KEYS: ReadonlySet<SortKey> = new Set(['age', 'folder', 'artifacts'])
+
+function sortValue(r: Row, key: SortKey): string | number {
+  switch (key) {
+    case 'runId': return r.runId
+    case 'kind': return KIND_LABEL[r.kind]
+    case 'status': return r.status ?? ''
+    case 'feature': return r.feature
+    case 'age': return r.startedAt ? Date.parse(r.startedAt) : 0
+    case 'folder': return r.folderBytes
+    case 'artifacts': return r.artifactBytes
+  }
+}
+
 function listingToRows(listing: CleanupListing): Row[] {
   const runs: Row[] = listing.runs.map((r) => ({
     runId: r.runId,
@@ -66,6 +83,44 @@ function listingToRows(listing: CleanupListing): Row[] {
   return [...runs, ...orphans].sort((a, b) => b.folderBytes - a.folderBytes)
 }
 
+function SortHeader({
+  sortKey,
+  label,
+  align,
+  sort,
+  onSort,
+}: {
+  sortKey: SortKey
+  label: string
+  align?: 'right'
+  sort: { key: SortKey; dir: 'asc' | 'desc' }
+  onSort: (key: SortKey) => void
+}) {
+  const active = sort.key === sortKey
+  return (
+    <th
+      className="cl-sort-th py-1 pr-3 select-none"
+      style={{ textAlign: align ?? 'left', cursor: 'pointer' }}
+      onClick={() => onSort(sortKey)}
+      aria-sort={active ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}
+    >
+      <span
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 3,
+          color: active ? 'var(--text-secondary)' : undefined,
+        }}
+      >
+        {label}
+        <span style={{ fontSize: 9, opacity: active ? 1 : 0.3 }}>
+          {active ? (sort.dir === 'asc' ? '▲' : '▼') : '▾'}
+        </span>
+      </span>
+    </th>
+  )
+}
+
 export function LogCleanupPage({ onClose }: Props) {
   const [listing, setListing] = useState<CleanupListing | null>(null)
   const [loading, setLoading] = useState(true)
@@ -74,6 +129,7 @@ export function LogCleanupPage({ onClose }: Props) {
   const [busy, setBusy] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
   const [confirm, setConfirm] = useState<{ action: 'trim' | 'delete'; ids: string[]; bytes: number } | null>(null)
+  const [sort, setSort] = useState<{ key: SortKey; dir: 'asc' | 'desc' }>({ key: 'folder', dir: 'desc' })
 
   const refresh = useCallback(async () => {
     setLoading(true)
@@ -97,6 +153,25 @@ export function LogCleanupPage({ onClose }: Props) {
 
   const rows = useMemo(() => (listing ? listingToRows(listing) : []), [listing])
   const rowById = useMemo(() => new Map(rows.map((r) => [r.runId, r])), [rows])
+
+  const sortedRows = useMemo(() => {
+    const dir = sort.dir === 'asc' ? 1 : -1
+    return [...rows].sort((a, b) => {
+      const av = sortValue(a, sort.key)
+      const bv = sortValue(b, sort.key)
+      if (av < bv) return -dir
+      if (av > bv) return dir
+      return 0
+    })
+  }, [rows, sort])
+
+  const toggleSort = (key: SortKey): void => {
+    setSort((prev) =>
+      prev.key === key
+        ? { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' }
+        : { key, dir: NUMERIC_KEYS.has(key) ? 'desc' : 'asc' },
+    )
+  }
 
   const toggle = (runId: string): void => {
     const row = rowById.get(runId)
@@ -155,24 +230,16 @@ export function LogCleanupPage({ onClose }: Props) {
   const totals = listing?.totals
 
   return (
-    <div className="flex h-full w-full flex-col" style={{ background: 'var(--bg-base)' }}>
+    <div className="fixed inset-0 z-[60] flex flex-col" style={{ background: 'var(--bg-base)' }}>
       {/* Header */}
       <div className="flex shrink-0 items-center gap-3 border-b px-5 py-3" style={{ borderColor: 'var(--border-default)' }}>
-        <button type="button" onClick={onClose} className="cl-button px-2.5 py-1" aria-label="Back to workspace">
-          ‹ Back
-        </button>
         <h1 style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-primary)' }}>Log Cleanup</h1>
-        {totals && (
-          <div className="ml-auto flex items-center gap-4" style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
-            <span>Total on disk: <strong style={{ color: 'var(--text-primary)' }}>{formatBytes(totals.totalBytes)}</strong></span>
-            <span>Reclaimable by trim: <strong style={{ color: 'var(--text-primary)' }}>{formatBytes(totals.reclaimableTrimBytes)}</strong></span>
-            <span>By delete: <strong style={{ color: 'var(--text-primary)' }}>{formatBytes(totals.reclaimableDeleteBytes)}</strong></span>
-            <button type="button" onClick={() => void refresh()} className="cl-button px-2 py-1" disabled={loading || busy}>Refresh</button>
-          </div>
-        )}
+        <button type="button" onClick={onClose} className="cl-button ml-auto px-3 py-1.5" aria-label="Close cleanup">
+          Close ✕
+        </button>
       </div>
 
-      {/* Presets */}
+      {/* Presets + totals */}
       <div className="flex shrink-0 flex-wrap items-center gap-2 border-b px-5 py-2" style={{ borderColor: 'var(--border-default)' }}>
         <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Quick select:</span>
         {presets.map((p) => (
@@ -184,6 +251,14 @@ export function LogCleanupPage({ onClose }: Props) {
           <button type="button" onClick={() => setSelected(new Set())} className="cl-button px-2 py-0.5" style={{ fontSize: 11 }}>
             Clear selection
           </button>
+        )}
+        {totals && (
+          <div className="ml-auto flex items-center gap-4" style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+            <span>Total on disk: <strong style={{ color: 'var(--text-primary)' }}>{formatBytes(totals.totalBytes)}</strong></span>
+            <span>Reclaimable by trim: <strong style={{ color: 'var(--text-primary)' }}>{formatBytes(totals.reclaimableTrimBytes)}</strong></span>
+            <span>By delete: <strong style={{ color: 'var(--text-primary)' }}>{formatBytes(totals.reclaimableDeleteBytes)}</strong></span>
+            <button type="button" onClick={() => void refresh()} className="cl-button px-2 py-1" disabled={loading || busy}>Refresh</button>
+          </div>
         )}
       </div>
 
@@ -201,18 +276,18 @@ export function LogCleanupPage({ onClose }: Props) {
             <thead>
               <tr style={{ color: 'var(--text-muted)', textAlign: 'left' }}>
                 <th className="py-1 pr-2" style={{ width: 28 }} />
-                <th className="py-1 pr-3">Run</th>
-                <th className="py-1 pr-3">Kind</th>
-                <th className="py-1 pr-3">Status</th>
-                <th className="py-1 pr-3">Feature</th>
-                <th className="py-1 pr-3">Age</th>
-                <th className="py-1 pr-3" style={{ textAlign: 'right' }}>Folder</th>
-                <th className="py-1 pr-3" style={{ textAlign: 'right' }}>Artifacts</th>
+                <SortHeader sortKey="runId" label="Run" sort={sort} onSort={toggleSort} />
+                <SortHeader sortKey="kind" label="Kind" sort={sort} onSort={toggleSort} />
+                <SortHeader sortKey="status" label="Status" sort={sort} onSort={toggleSort} />
+                <SortHeader sortKey="feature" label="Feature" sort={sort} onSort={toggleSort} />
+                <SortHeader sortKey="age" label="Age" sort={sort} onSort={toggleSort} />
+                <SortHeader sortKey="folder" label="Folder" align="right" sort={sort} onSort={toggleSort} />
+                <SortHeader sortKey="artifacts" label="Artifacts" align="right" sort={sort} onSort={toggleSort} />
                 <th className="py-1 pr-1" style={{ textAlign: 'right' }}>Actions</th>
               </tr>
             </thead>
             <tbody>
-              {rows.map((r) => (
+              {sortedRows.map((r) => (
                 <tr
                   key={r.runId}
                   style={{ borderTop: '1px solid var(--border-default)', opacity: r.active ? 0.5 : 1 }}

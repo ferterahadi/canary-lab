@@ -415,6 +415,14 @@ body {
   outline: none;
 }
 
+.cl-sort-th {
+  transition: color 120ms ease;
+}
+
+.cl-sort-th:hover {
+  color: var(--text-secondary);
+}
+
 .cl-button-primary {
   background: var(--accent);
   border: 1px solid var(--accent);
