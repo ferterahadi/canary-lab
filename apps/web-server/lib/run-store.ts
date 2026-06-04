@@ -13,8 +13,9 @@ import {
   type RunManifest,
   type ServiceStatus,
 } from './runtime/manifest'
-import { buildRunPaths, runDirFor } from './runtime/run-paths'
+import { buildRunPaths, runDirFor, runsRoot } from './runtime/run-paths'
 import { FileRunStateSink, type RunStateSink } from './runtime/run-state-sink'
+import type { ExecutionType } from '../../../shared/verification'
 import {
   HEARTBEAT_STALE_MS,
   isActiveRunStatus,
@@ -135,7 +136,22 @@ export async function reapStaleRuns(
     if (!isActiveRunStatus(entry.status)) continue
     const manifestPath = path.join(runDirFor(logsDir, entry.runId), 'manifest.json')
     const manifest = readManifest(manifestPath)
-    if (!manifest) continue
+    if (!manifest) {
+      // Active index entry with no readable manifest. A live run always writes
+      // its manifest before its index entry (FileRunStateSink.bootstrap), so
+      // this is an orphan left by a process that died mid-teardown (e.g. a
+      // boot/manual-services run) — UNLESS an orchestrator is still registered
+      // for it, in which case the run is genuinely live and the manifest read
+      // merely glitched: leave it alone. Reap the orphan straight from the
+      // index so it can't stay stuck active forever.
+      if (registry?.get(entry.runId)) continue
+      upsertRunsIndexEntry(logsDir, {
+        ...entry,
+        status: 'aborted',
+        endedAt: entry.endedAt ?? new Date(now).toISOString(),
+      })
+      continue
+    }
     if (!manifest.heartbeatAt) continue
     if (!isStaleHeartbeat(manifest.heartbeatAt, now, HEARTBEAT_STALE_MS)) continue
 
@@ -172,6 +188,52 @@ export function removeRunFromHistory(logsDir: string, runId: string): boolean {
     changed = true
   }
   return changed
+}
+
+/** Recursively sum the byte size of every regular file under `dir`. Returns 0
+ *  when the directory is absent or unreadable — callers treat missing artifacts
+ *  as "nothing to reclaim". Symlinks are not followed (lstat). */
+export function dirSizeBytes(dir: string): number {
+  let total = 0
+  let entries: fs.Dirent[]
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true })
+  } catch {
+    return 0
+  }
+  for (const entry of entries) {
+    const full = path.join(dir, entry.name)
+    if (entry.isDirectory()) {
+      total += dirSizeBytes(full)
+    } else if (entry.isFile()) {
+      try { total += fs.statSync(full).size } catch { /* vanished mid-walk */ }
+    }
+  }
+  return total
+}
+
+/** Byte size of the heavy Playwright artifact directories (videos / traces /
+ *  screenshots) for a run — the two dirs `trimRunArtifacts` removes. */
+export function runArtifactBytes(logsDir: string, runId: string): number {
+  const paths = buildRunPaths(runDirFor(logsDir, runId))
+  return dirSizeBytes(paths.playwrightArtifactsDir) + dirSizeBytes(paths.playwrightArtifactsKeepDir)
+}
+
+/** Delete ONLY a run's Playwright artifact directories (`playwright-artifacts`
+ *  + `playwright-artifacts-keep`), reclaiming the bulk of its disk while
+ *  leaving the manifest, summary, logs, and run-index entry intact — the run
+ *  stays listed and inspectable, just without video/trace playback. Returns the
+ *  number of bytes freed. Caller is responsible for verifying the run is
+ *  terminal; this does not stop a running orchestrator. */
+export function trimRunArtifacts(logsDir: string, runId: string): number {
+  const paths = buildRunPaths(runDirFor(logsDir, runId))
+  let freed = 0
+  for (const dir of [paths.playwrightArtifactsDir, paths.playwrightArtifactsKeepDir]) {
+    if (!fs.existsSync(dir)) continue
+    freed += dirSizeBytes(dir)
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+  return freed
 }
 
 export interface RunSummaryFailedEntry {
@@ -565,6 +627,104 @@ export interface DeleteResult {
   reason?: 'active' | 'not-found' | 'stale'
 }
 
+export interface TrimResult {
+  ok: boolean
+  reason?: 'active' | 'not-found' | 'stale'
+  /** Bytes reclaimed by removing the artifact dirs. Present when `ok`. */
+  freedBytes?: number
+}
+
+/** One indexed run, annotated with disk usage for the cleanup view. */
+export interface CleanupRunEntry {
+  runId: string
+  feature: string
+  executionType: ExecutionType
+  status: RunManifest['status']
+  startedAt: string
+  endedAt?: string
+  /** Total bytes of the whole run directory. */
+  folderBytes: number
+  /** Bytes held by the trimmable Playwright artifact dirs (subset of folder). */
+  artifactBytes: number
+  /** True when the run is still live (registered orchestrator or active status).
+   *  Active runs cannot be trimmed or deleted. */
+  active: boolean
+}
+
+/** A directory under `logs/runs/` with no entry in `index.json` — an
+ *  interrupted/never-finalized run. Delete-only; it has no manifest. */
+export interface CleanupOrphan {
+  runId: string
+  folderBytes: number
+}
+
+export interface CleanupListing {
+  runs: CleanupRunEntry[]
+  orphans: CleanupOrphan[]
+  totals: {
+    /** Every run folder + every orphan folder. */
+    totalBytes: number
+    /** Artifact bytes reclaimable by trimming non-active runs. */
+    reclaimableTrimBytes: number
+    /** Folder bytes reclaimable by deleting non-active runs + all orphans. */
+    reclaimableDeleteBytes: number
+  }
+}
+
+/** Build the cleanup view: every indexed run annotated with disk usage and an
+ *  `active` flag, plus orphan directories not present in the index, plus
+ *  reclaimable totals. `isActive(runId, status)` lets the RunStore overlay the
+ *  live orchestrator registry on top of the persisted status. */
+export function listCleanupEntries(
+  logsDir: string,
+  isActive: (runId: string, status: RunManifest['status']) => boolean = (_id, status) => isActiveRunStatus(status),
+): CleanupListing {
+  const index = readRunsIndex(logsDir)
+  const indexed = new Set(index.map((e) => e.runId))
+
+  const runs: CleanupRunEntry[] = index.map((entry) => {
+    const folderBytes = dirSizeBytes(runDirFor(logsDir, entry.runId))
+    const artifactBytes = runArtifactBytes(logsDir, entry.runId)
+    return {
+      runId: entry.runId,
+      feature: entry.feature,
+      executionType: entry.executionType ?? 'run',
+      status: entry.status,
+      startedAt: entry.startedAt,
+      ...(entry.endedAt ? { endedAt: entry.endedAt } : {}),
+      folderBytes,
+      artifactBytes,
+      active: isActive(entry.runId, entry.status),
+    }
+  })
+
+  const orphans: CleanupOrphan[] = []
+  const root = runsRoot(logsDir)
+  let rootEntries: fs.Dirent[] = []
+  try {
+    rootEntries = fs.readdirSync(root, { withFileTypes: true })
+  } catch {
+    rootEntries = []
+  }
+  for (const entry of rootEntries) {
+    if (!entry.isDirectory()) continue
+    if (indexed.has(entry.name)) continue
+    orphans.push({ runId: entry.name, folderBytes: dirSizeBytes(path.join(root, entry.name)) })
+  }
+
+  const totalBytes =
+    runs.reduce((sum, r) => sum + r.folderBytes, 0) +
+    orphans.reduce((sum, o) => sum + o.folderBytes, 0)
+  const reclaimableTrimBytes = runs
+    .filter((r) => !r.active)
+    .reduce((sum, r) => sum + r.artifactBytes, 0)
+  const reclaimableDeleteBytes =
+    runs.filter((r) => !r.active).reduce((sum, r) => sum + r.folderBytes, 0) +
+    orphans.reduce((sum, o) => sum + o.folderBytes, 0)
+
+  return { runs, orphans, totals: { totalBytes, reclaimableTrimBytes, reclaimableDeleteBytes } }
+}
+
 export interface AbortResult {
   ok: boolean
   reason?: 'not-active'
@@ -722,7 +882,17 @@ export class RunStore extends EventEmitter implements RunStateSink {
   delete(runId: string): DeleteResult {
     if (this.registry.get(runId)) return { ok: false, reason: 'active' }
     const detail = this.get(runId)
-    if (!detail) return { ok: false, reason: 'not-found' }
+    if (!detail) {
+      // No manifest. If a directory still exists it's an orphan (an
+      // interrupted run that never finalized) — safe to reap since it isn't
+      // registered and has no active status to honor. `removeRunFromHistory`
+      // returns false when neither a dir nor an index entry exists.
+      if (removeRunFromHistory(this.logsDir, runId)) {
+        this.emitEvent({ kind: 'removed', runId })
+        return { ok: true }
+      }
+      return { ok: false, reason: 'not-found' }
+    }
     const status = detail.manifest.status
     if (isActiveRunStatus(status)) {
       return { ok: false, reason: 'stale' }
@@ -730,6 +900,29 @@ export class RunStore extends EventEmitter implements RunStateSink {
     removeRunFromHistory(this.logsDir, runId)
     this.emitEvent({ kind: 'removed', runId })
     return { ok: true }
+  }
+
+  /** Reclaim disk by deleting a terminal run's Playwright artifact dirs while
+   *  keeping the run in history. Same active/stale guards as `delete`. Emits
+   *  `changed` so subscribers refresh the (now lighter) run. */
+  trimArtifacts(runId: string): TrimResult {
+    if (this.registry.get(runId)) return { ok: false, reason: 'active' }
+    const detail = this.get(runId)
+    if (!detail) return { ok: false, reason: 'not-found' }
+    if (isActiveRunStatus(detail.manifest.status)) return { ok: false, reason: 'stale' }
+    const freedBytes = trimRunArtifacts(this.logsDir, runId)
+    this.emitEvent({ kind: 'changed', runId })
+    return { ok: true, freedBytes }
+  }
+
+  /** Disk-usage view for the Log Cleanup page. Overlays the live orchestrator
+   *  registry on top of persisted status so a run that just started (status
+   *  not yet flipped) still reports `active`. */
+  cleanupListing(): CleanupListing {
+    return listCleanupEntries(
+      this.logsDir,
+      (runId, status) => Boolean(this.registry.get(runId)) || isActiveRunStatus(status),
+    )
   }
 
   /** Remove a run from history without policy checks. The reaper uses this
@@ -758,15 +951,18 @@ export class RunStore extends EventEmitter implements RunStateSink {
 
   private finalizePersistedActiveRun(runId: string): boolean {
     const detail = this.get(runId)
-    if (!detail) return false
-    const status = detail.manifest.status
-    if (!isActiveRunStatus(status)) return false
-    this.finalize(
-      runId,
-      'aborted',
-      new Date().toISOString(),
-      detail.manifest.healCycles,
-    )
+    if (detail) {
+      if (!isActiveRunStatus(detail.manifest.status)) return false
+      this.finalize(runId, 'aborted', new Date().toISOString(), detail.manifest.healCycles)
+      return true
+    }
+    // No manifest, but the run may still be listed as active in the index (an
+    // interrupted boot run that never finalized). `finalize` writes the index
+    // even without a manifest, so we can recover it from the index entry alone
+    // — otherwise the UI Stop button would be a silent no-op against a zombie.
+    const entry = this.list().find((e) => e.runId === runId)
+    if (!entry || !isActiveRunStatus(entry.status)) return false
+    this.finalize(runId, 'aborted', new Date().toISOString(), 0)
     return true
   }
 }

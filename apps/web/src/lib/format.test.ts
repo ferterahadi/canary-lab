@@ -4,6 +4,8 @@ import {
   formatDuration,
   durationBetween,
   shortTime,
+  formatBytes,
+  timeAgo,
 } from './format'
 
 describe('statusBadgeClass', () => {
@@ -61,5 +63,28 @@ describe('shortTime', () => {
   })
   it('returns the raw value when the input is not a date', () => {
     expect(shortTime('garbage')).toBe('garbage')
+  })
+})
+
+describe('formatBytes', () => {
+  it('formats across units with sensible rounding', () => {
+    expect(formatBytes(0)).toBe('0 B')
+    expect(formatBytes(-5)).toBe('0 B')
+    expect(formatBytes(512)).toBe('512 B')
+    expect(formatBytes(2048)).toBe('2 KB')
+    expect(formatBytes(1.5 * 1024 * 1024)).toBe('1.5 MB')
+    expect(formatBytes(993 * 1024 * 1024)).toBe('993 MB')
+    expect(formatBytes(4.26 * 1024 * 1024 * 1024)).toBe('4.3 GB')
+  })
+})
+
+describe('timeAgo', () => {
+  const now = Date.parse('2026-06-04T12:00:00Z')
+  it('formats relative time', () => {
+    expect(timeAgo('2026-06-04T11:59:30Z', now)).toBe('just now')
+    expect(timeAgo('2026-06-04T11:50:00Z', now)).toBe('10m ago')
+    expect(timeAgo('2026-06-04T09:00:00Z', now)).toBe('3h ago')
+    expect(timeAgo('2026-05-30T12:00:00Z', now)).toBe('5d ago')
+    expect(timeAgo('garbage', now)).toBe('garbage')
   })
 })

@@ -1162,6 +1162,46 @@ describe('RunOrchestrator.runFullCycle', () => {
     await orch.stop('passed')
   })
 
+  it('stops instead of re-running forever when only skipped tests remain (auto-heal)', async () => {
+    // Regression: a run that ends 6-passed / 1-skipped / 0-failed is treated as
+    // 'failed' (a skipped test is not verified), so auto-heal enters the
+    // failedSlugs===0 "pending" branch. That branch re-runs the not-yet-passed
+    // tests with NO heal agent — but a `test.skip(cond)` re-runs to the same
+    // skipped result every time, so the branch used to loop forever (the
+    // symptom the user saw: "Targeted rerun selected → exit 0 → Run failed",
+    // repeating every ~1s). The no-progress guard must terminate the run after
+    // a rerun that doesn't change the not-yet-passed set.
+    const f = makeFakeFactory()
+    const orch = bootForFullCycle({ spawned: f, pwExitCodes: [], autoHeal: true })
+    fs.mkdirSync(runDir, { recursive: true })
+    fs.writeFileSync(orch.paths.summaryPath, JSON.stringify({
+      passed: 1,
+      passedNames: ['test-case-passes'],
+      skipped: 1,
+      skippedNames: ['test-case-skipped'],
+      total: 2,
+      knownTests: [
+        { name: 'test-case-passes', title: 'passes', location: 'tests/demo.spec.ts:3' },
+        { name: 'test-case-skipped', title: 'skipped', location: 'tests/demo.spec.ts:7' },
+      ],
+    }))
+
+    const promise = orch.runFullCycle()
+    // [0]=service, [1]=initial playwright run.
+    while (f.spawned.length < 2) await new Promise((r) => setTimeout(r, 5))
+    f.spawned[1].emitExit(0)
+    // The pending branch performs exactly ONE rerun ([2]) before detecting that
+    // the not-yet-passed set is unchanged and stopping.
+    while (f.spawned.length < 3) await new Promise((r) => setTimeout(r, 5))
+    f.spawned[2].emitExit(0)
+
+    const status = await promise
+    expect(status).toBe('failed')
+    // No third rerun ([3]) — the loop terminated rather than spinning.
+    expect(f.spawned).toHaveLength(3)
+    await orch.stop('failed')
+  })
+
   it('abort during auto-heal-eligible run does NOT spawn a heal agent', async () => {
     // Regression: with autoHeal configured, after stop() killed the
     // Playwright pty, runFullCycle would fall through into the heal loop

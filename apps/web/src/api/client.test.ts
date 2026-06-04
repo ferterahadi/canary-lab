@@ -19,6 +19,8 @@ import {
   deleteEnvsetSlot,
   deleteJournalEntry,
   deleteRun,
+  cleanupRuns,
+  trimRun,
   getDraft,
   getDraftAgentLog,
   getDraftFile,
@@ -804,6 +806,21 @@ describe('api client', () => {
     const fetchImpl = vi.fn().mockResolvedValue(new Response(null, { status: 204 }))
     await deleteRun('r1', { fetchImpl })
     expect(fetchImpl).toHaveBeenCalledWith('/api/runs/r1', { method: 'DELETE' })
+  })
+
+  it('cleanupRuns GETs /api/cleanup/runs', async () => {
+    const listing = { runs: [], orphans: [], totals: { totalBytes: 0, reclaimableTrimBytes: 0, reclaimableDeleteBytes: 0 } }
+    const fetchImpl = vi.fn().mockResolvedValue(ok(listing))
+    const r = await cleanupRuns({ fetchImpl })
+    expect(fetchImpl).toHaveBeenCalledWith('/api/cleanup/runs', { method: 'GET' })
+    expect(r).toEqual(listing)
+  })
+
+  it('trimRun POSTs /api/runs/:runId/trim and returns freedBytes', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(ok({ freedBytes: 1234 }))
+    const r = await trimRun('r1', { fetchImpl })
+    expect(fetchImpl).toHaveBeenCalledWith('/api/runs/r1/trim', { method: 'POST' })
+    expect(r).toEqual({ freedBytes: 1234 })
   })
 
   it('createEnvset POSTs the env name', async () => {

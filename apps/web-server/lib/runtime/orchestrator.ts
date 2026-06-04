@@ -2057,6 +2057,14 @@ export class RunOrchestrator extends EventEmitter {
             }
             break
           }
+          // This rerun spawns NO heal agent — it just re-executes the
+          // not-yet-passed tests. That can only make progress on genuinely
+          // not-run (pending) tests; a deterministically skipped test
+          // (`test.skip(cond)`) re-runs to the same skipped result every time.
+          // Capture the not-passed set before the rerun so a no-progress cycle
+          // terminates the run instead of re-running the identical summary
+          // forever (the skipped-test infinite-rerun bug).
+          const beforeSignature = nonPassedSignatureFromPlan(pendingPlan)
           this.setStatus('running')
           const exitCode = await this.runPlaywright(selectionForPlan(pendingPlan))
           if (this.stopped) return this.status
@@ -2068,6 +2076,20 @@ export class RunOrchestrator extends EventEmitter {
           finalStatus = decideRunStatus(this.feature.featureDir, this.paths.summaryPath, exitCode)
           this.setStatus(finalStatus)
           if (finalStatus === 'passed') break
+          const afterSummary = readSummary(this.paths.summaryPath)
+          if (
+            extractFailedSlugs(afterSummary).length === 0 &&
+            nonPassedSignatureFromPlan(computeVerificationPlan(this.feature.featureDir, afterSummary)) === beforeSignature
+          ) {
+            const skippedCount = pendingPlan.kind === 'targeted' ? pendingPlan.skipped.length : 0
+            this.recordLifecycle('rerunning-tests', 'Stopped: not-yet-passed tests stayed unchanged after rerun', {
+              detail: skippedCount > 0
+                ? `${skippedCount} test${skippedCount === 1 ? '' : 's'} remained skipped; a rerun without a code fix cannot turn skipped tests green. Stopping instead of re-running indefinitely.`
+                : 'A rerun made no progress on the not-yet-passed tests; stopping instead of re-running indefinitely.',
+              severity: 'warning',
+            })
+            break
+          }
           continue
         }
         const signature = failedSlugs.slice().sort().join('|')
@@ -2767,6 +2789,20 @@ function isSpecLocation(location: string): boolean {
 
 function selectionForPlan(plan: VerificationPlan): PlaywrightRerunSelection | undefined {
   return plan.kind === 'targeted' ? plan.selection : undefined
+}
+
+// Stable signature of the not-yet-passed test set a plan would re-run. Used by
+// the auto-heal no-agent rerun branch to detect a no-progress cycle: if a rerun
+// leaves this set unchanged, re-running again would produce the identical
+// result (e.g. the only remaining tests are deterministically skipped via
+// `test.skip(cond)`), so the loop must stop instead of spinning forever.
+function nonPassedSignatureFromPlan(plan: VerificationPlan): string {
+  if (plan.kind === 'all-passed') return ''
+  if (plan.kind === 'full-suite') return `full-suite:${plan.total}`
+  return [...plan.failedFirst, ...plan.skipped, ...plan.pending]
+    .map((test) => test.name)
+    .sort()
+    .join('|')
 }
 
 function normalizeRerunSelection(rerun?: readonly string[] | PlaywrightRerunSelection): PlaywrightRerunSelection | undefined {

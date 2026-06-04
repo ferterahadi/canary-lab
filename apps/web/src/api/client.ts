@@ -7,6 +7,7 @@ import type {
   Feature,
   FeatureTests,
   RunIndexEntry,
+  CleanupListing,
   RunDetail,
   JournalEntry,
   CreateDraftPayload,
@@ -65,7 +66,14 @@ async function request<T>(
     }
   }
   if (!res.ok) {
-    throw new ApiError(res.status, body)
+    // Surface the server's `{ error }` message (most routes return one) as the
+    // Error message so callers showing `e.message` get the real reason, not a
+    // bare "HTTP 409".
+    const message =
+      body && typeof body === 'object' && typeof (body as { error?: unknown }).error === 'string'
+        ? (body as { error: string }).error
+        : undefined
+    throw new ApiError(res.status, body, message)
   }
   return body as T
 }
@@ -1008,6 +1016,24 @@ export async function deleteRun(runId: string, opts?: ClientOptions): Promise<vo
   await request<unknown>(
     `${baseUrl}/api/runs/${encodeURIComponent(runId)}`,
     { method: 'DELETE' },
+    fetchImpl,
+  )
+}
+
+// Disk-usage listing for the Log Cleanup page: every run + orphan dir with
+// folder/artifact byte sizes and reclaimable totals.
+export function cleanupRuns(opts?: ClientOptions): Promise<CleanupListing> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<CleanupListing>(`${baseUrl}/api/cleanup/runs`, { method: 'GET' }, fetchImpl)
+}
+
+// Reclaim a terminal run's Playwright artifacts (videos/traces) while keeping
+// the run in history. Server returns 409 if the run is still active.
+export async function trimRun(runId: string, opts?: ClientOptions): Promise<{ freedBytes: number }> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<{ freedBytes: number }>(
+    `${baseUrl}/api/runs/${encodeURIComponent(runId)}/trim`,
+    { method: 'POST' },
     fetchImpl,
   )
 }

@@ -5,6 +5,7 @@ import {
   updateManifest,
   updateServiceStatus,
   upsertRunsIndexEntry,
+  readRunsIndex,
   writeManifest,
   readManifest,
   type RunLifecycleEvent,
@@ -102,6 +103,16 @@ export class FileRunStateSink implements RunStateSink {
     const m = readManifest(mp)
     if (m) {
       upsertRunsIndexEntry(this.logsDir, indexEntryFromManifest(m, status, endedAt))
+      return
+    }
+    // No manifest to read (an interrupted run — e.g. a boot/manual-services
+    // session killed mid-teardown — that never persisted or had its manifest
+    // cleaned up). `updateManifest` above was a no-op, so the index entry would
+    // otherwise stay stuck active forever. Flip the existing index row terminal
+    // directly so the run can still be aborted/reaped.
+    const existing = readRunsIndex(this.logsDir).find((e) => e.runId === runId)
+    if (existing) {
+      upsertRunsIndexEntry(this.logsDir, { ...existing, status, endedAt })
     }
   }
 

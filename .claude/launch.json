@@ -4,7 +4,7 @@
     {
       "name": "canary-ui",
       "runtimeExecutable": "sh",
-      "runtimeArgs": ["-c", "cd /Users/oddle/Documents/canary-lab-workspace && exec npx canary-lab ui --no-open"],
+      "runtimeArgs": ["-c", "export PATH=\"$HOME/.local/bin:$PATH\" && cd /Users/oddle/Documents/canary-lab-workspace && exec npx canary-lab ui --no-open"],
       "port": 7421
     }
   ]
