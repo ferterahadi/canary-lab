@@ -193,6 +193,7 @@ export function LogCleanupPage({ onClose }: Props) {
     { label: 'Orphaned folders', predicate: (r) => r.isOrphan },
     { label: 'Aborted boots', predicate: (r) => r.kind === 'boot' && r.status === 'aborted' },
     { label: 'All aborted', predicate: (r) => r.status === 'aborted' },
+    { label: 'All benchmark', predicate: (r) => r.kind === 'benchmark' },
     { label: 'Passed > 30 days', predicate: (r) => r.status === 'passed' && !!r.startedAt && now - Date.parse(r.startedAt) > THIRTY_DAYS_MS },
     { label: 'Folders > 100 MB', predicate: (r) => r.folderBytes > HUNDRED_MB },
   ]
