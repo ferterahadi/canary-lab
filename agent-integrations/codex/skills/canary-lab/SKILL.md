@@ -24,10 +24,10 @@ Before calling Canary Lab MCP tools, make sure the workspace and UI server are a
 1. Call `list_features` and choose the requested feature.
 2. Call `start_run` with `claim_heal: true`, a stable `session_id`, `client_kind: "codex-cli"` or `"codex-desktop"`, and a useful `conversation_name`. For requests like "rerun 7cvh", pass `run_ref: "7cvh"`.
 3. If `start_run` returns `type: "repo_collision_requires_choice"`, another run is using the same app/repo. Ask the user whether to run this one isolated in a per-run git worktree (runs now, concurrently) or queue it until the other run finishes, then re-call `start_run` with `isolation: "worktree"` or `isolation: "queue"`. Do not guess. If `start_run` returns `queued: true`, tell the user the run is parked (`queueReason`) and will start automatically when capacity frees; `wait_for_heal_task` still blocks until it starts and needs fixes.
-4. If `start_run` returns an active run, continue that run.
+4. If `start_run` returns an active run, continue that run. But if it returns `type: "boot_session"` (or `executionType: "boot"`), the run is a held boot-only session — services are up, no tests run, and there is no heal task. Do not claim heal or call `wait_for_heal_task`; report that services are ready and that the user can stop them with `abort_run` (confirm:true) when done.
 5. If `start_run` reports `already-claimed`, stop and tell the user which session owns the run.
 6. Handle user interrupts explicitly: "pause", "intercept", or "pause and heal" means call `pause_run`; "stop heal" or "cancel repair" means call `cancel_heal`; "abort", "kill the run", or "stop everything" means call `abort_run` only with the required confirmation.
-7. Call `wait_for_heal_task` with the same `session_id`.
+7. Call `wait_for_heal_task` with the same `session_id`. (If it ever returns `type: "boot_session"`, the run is a held boot-only session — report services are up and stop here; do not wait again.)
 8. If it returns `passed`, summarize using `result.counts.statusLine` and stop.
 9. If it returns `failed`, report the terminal status using `result.counts.statusLine` and relevant failure summary.
 10. If it returns `needs_heal`, treat the returned heal context as the compact first-stop packet: inspect `context.healPrompt.startHere` first, then use `context.healPrompt.resources`, current failures, and the checked-out source code. Call `get_run_snapshot` only when you need the verbose raw summary, full counts, or deeper debugging fields.
