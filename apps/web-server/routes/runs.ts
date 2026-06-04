@@ -650,6 +650,36 @@ export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Pro
     reply.code(204)
     return ''
   })
+
+  // GET /api/cleanup/runs — disk-usage view for the Log Cleanup page: every
+  // indexed run annotated with folder/artifact byte sizes + an `active` flag,
+  // plus orphan directories (on disk, missing from index.json), plus
+  // reclaimable totals. Walks each run dir on demand (the page is opened
+  // rarely; sizes must be accurate after a trim).
+  app.get('/api/cleanup/runs', async () => {
+    return deps.store.cleanupListing()
+  })
+
+  // POST /api/runs/:runId/trim — reclaim disk by deleting a terminal run's
+  // Playwright artifact dirs while keeping the run in history. Same active/
+  // stale policy as DELETE (enforced in `RunStore.trimArtifacts`), mapped to
+  // HTTP codes here.
+  app.post<{ Params: { runId: string } }>('/api/runs/:runId/trim', async (req, reply) => {
+    const result = deps.store.trimArtifacts(req.params.runId)
+    if (!result.ok) {
+      if (result.reason === 'not-found') {
+        reply.code(404)
+        return { error: 'run not found' }
+      }
+      reply.code(409)
+      return {
+        error: result.reason === 'active'
+          ? 'run is still active; abort it first'
+          : 'run is still active; reap or abort first',
+      }
+    }
+    return { freedBytes: result.freedBytes ?? 0 }
+  })
 }
 
 function contentTypeFor(filePath: string): string {

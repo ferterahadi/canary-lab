@@ -52,6 +52,37 @@ export function durationBetween(startedAt: string, endedAt?: string): number | n
   return Math.max(0, end - start)
 }
 
+// Human-readable byte size. Examples: 0 -> "0 B", 2048 -> "2 KB",
+// 1.5 GB -> "1.5 GB". One decimal below 100 of a unit, whole numbers above.
+export function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '0 B'
+  const units = ['B', 'KB', 'MB', 'GB', 'TB']
+  let value = bytes
+  let unit = 0
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024
+    unit += 1
+  }
+  const rounded = unit === 0 || value >= 100 ? Math.round(value) : Math.round(value * 10) / 10
+  return `${rounded} ${units[unit]}`
+}
+
+// Compact "time ago" from an ISO string, relative to `now` (ms). Examples:
+// "just now", "5m ago", "3h ago", "12d ago". Falls back to the raw input if
+// it doesn't parse.
+export function timeAgo(iso: string, now: number = Date.now()): string {
+  const t = Date.parse(iso)
+  if (!Number.isFinite(t)) return iso
+  const secs = Math.max(0, Math.round((now - t) / 1000))
+  if (secs < 60) return 'just now'
+  const mins = Math.round(secs / 60)
+  if (mins < 60) return `${mins}m ago`
+  const hours = Math.round(mins / 60)
+  if (hours < 24) return `${hours}h ago`
+  const days = Math.round(hours / 24)
+  return `${days}d ago`
+}
+
 // Short timestamp (HH:MM:SS) extracted from an ISO string. Falls back to the
 // raw input if it doesn't parse.
 export function shortTime(iso: string): string {

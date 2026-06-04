@@ -7,6 +7,7 @@ import {
   listRuns,
   reapStaleRuns,
   removeRunFromHistory,
+  trimRunArtifacts,
   getRunDetail,
   indexPlaywrightArtifacts,
   readPlaywrightPlaybackEvents,
@@ -15,7 +16,7 @@ import {
   type RunStoreEvent,
 } from './run-store'
 import { readManifest, writeManifest, writeRunsIndex, readRunsIndex } from './runtime/manifest'
-import { runDirFor } from './runtime/run-paths'
+import { buildRunPaths, runDirFor } from './runtime/run-paths'
 import { HEARTBEAT_STALE_MS } from '../../../shared/run-state'
 
 let tmpDir: string
@@ -206,12 +207,34 @@ describe('reapStaleRuns', () => {
     expect(listRuns(tmpDir)[0].status).toBe('passed')
   })
 
-  it('skips entries whose manifest cannot be read', async () => {
-    // Index entry exists but no manifest file on disk → readManifest returns null.
+  it('reaps an active entry with no manifest when no orchestrator is registered', async () => {
+    // Index entry exists but no manifest file on disk (e.g. a boot run killed
+    // mid-teardown). A live run always writes its manifest before its index
+    // entry, so an active index row with no manifest is an orphan — reap it to
+    // aborted instead of leaving it stuck running forever.
     writeRunsIndex(tmpDir, [
       { runId: 'no-manifest', feature: 'foo', startedAt: '2026-01-01T00:00:00Z', status: 'running' },
     ])
     await reapStaleRuns(tmpDir)
+    const indexed = listRuns(tmpDir)[0]
+    expect(indexed.status).toBe('aborted')
+    expect(indexed.endedAt).toBeDefined()
+  })
+
+  it('leaves a no-manifest active entry alone while its orchestrator is still registered', async () => {
+    // A registered orchestrator means the run is genuinely live and its
+    // manifest read merely glitched — don't reap it out from under itself.
+    const reg = createRegistry()
+    reg.set('live-no-manifest', {
+      runId: 'live-no-manifest',
+      stop: async () => {},
+      pauseAndHeal: async () => ({ ok: true as const, failureCount: 0 }),
+      cancelHeal: async () => ({ ok: true as const }),
+    })
+    writeRunsIndex(tmpDir, [
+      { runId: 'live-no-manifest', feature: 'foo', startedAt: '2026-01-01T00:00:00Z', status: 'running' },
+    ])
+    await reapStaleRuns(tmpDir, reg)
     expect(listRuns(tmpDir)[0].status).toBe('running')
   })
 
@@ -1189,6 +1212,30 @@ describe('RunStore', () => {
     expect(events).toEqual([{ kind: 'finalized', runId: 'orphan' }])
   })
 
+  it('abort finalizes a persisted running entry that has no manifest', async () => {
+    // An interrupted boot run leaves an active index entry but no manifest, so
+    // get() returns null. abort must still flip the index terminal — otherwise
+    // the UI Stop button is a silent no-op against an unstoppable zombie.
+    writeRunsIndex(tmpDir, [
+      { runId: 'no-manifest', feature: 'foo', startedAt: '2026-01-01T00:00:00Z', status: 'running' },
+    ])
+    const store = new RunStore(tmpDir, createRegistry())
+    const events: RunStoreEvent[] = []
+    store.on('event', (e) => events.push(e))
+
+    expect(await store.abort('no-manifest')).toEqual({ ok: true })
+
+    const indexed = readRunsIndex(tmpDir).find((e) => e.runId === 'no-manifest')!
+    expect(indexed.status).toBe('aborted')
+    expect(indexed.endedAt).toBeTruthy()
+    expect(events.some((e) => e.kind === 'finalized')).toBe(true)
+  })
+
+  it('abort still reports not-active for an unknown run with no manifest or index entry', async () => {
+    const store = new RunStore(tmpDir, createRegistry())
+    expect(await store.abort('ghost')).toEqual({ ok: false, reason: 'not-active' })
+  })
+
   it('abortAllActiveOrStale stops registered runs and finalizes orphaned active rows', async () => {
     const reg = createRegistry()
     const stopped: string[] = []
@@ -1213,14 +1260,17 @@ describe('RunStore', () => {
     expect(readManifest(store.manifestPath('done'))?.status).toBe('passed')
   })
 
-  it('abortAllActiveOrStale skips indexed active rows that no longer have detail', async () => {
+  it('abortAllActiveOrStale finalizes indexed active rows even when persisted detail is missing', async () => {
+    // A manifest-less active row (interrupted boot run) must still be recovered
+    // on shutdown cleanup — otherwise it stays a permanently-running zombie no
+    // restart can clear.
     writeRunsIndex(tmpDir, [
       { runId: 'missing-detail', feature: 'foo', startedAt: '2026-01-01T00:00:00Z', status: 'running' },
     ])
     const store = new RunStore(tmpDir, createRegistry())
 
-    expect(await store.abortAllActiveOrStale()).toEqual({ aborted: [] })
-    expect(readRunsIndex(tmpDir)[0].status).toBe('running')
+    expect(await store.abortAllActiveOrStale()).toEqual({ aborted: ['missing-detail'] })
+    expect(readRunsIndex(tmpDir)[0].status).toBe('aborted')
   })
 
   it('abortAllActiveOrStale aborts registered runs even when persisted detail is missing', async () => {
@@ -1334,5 +1384,86 @@ describe('RunStore', () => {
     const m = readManifest(store.manifestPath('r1'))!
     expect(m.services[0].status).toBe('ready')
     expect(events).toEqual([{ kind: 'changed', runId: 'r1' }])
+  })
+
+  // ─── cleanup: trim artifacts / orphan delete / listing ────────────────
+
+  function seedArtifacts(runId: string, bytesEach: number): void {
+    const paths = buildRunPaths(runDirFor(tmpDir, runId))
+    for (const dir of [paths.playwrightArtifactsDir, paths.playwrightArtifactsKeepDir]) {
+      fs.mkdirSync(dir, { recursive: true })
+      fs.writeFileSync(path.join(dir, 'video.webm'), Buffer.alloc(bytesEach))
+    }
+  }
+
+  function fakeOrch(runId: string) {
+    return {
+      runId,
+      stop: async () => {},
+      pauseAndHeal: async () => ({ ok: true as const, failureCount: 0 }),
+      cancelHeal: async () => ({ ok: true as const }),
+    }
+  }
+
+  it('trimRunArtifacts deletes only the playwright-artifacts dirs, keeps the manifest, is idempotent', () => {
+    seedRun('trim-me', { status: 'passed' })
+    seedArtifacts('trim-me', 1024)
+    const paths = buildRunPaths(runDirFor(tmpDir, 'trim-me'))
+    expect(trimRunArtifacts(tmpDir, 'trim-me')).toBe(2048)
+    expect(fs.existsSync(paths.playwrightArtifactsDir)).toBe(false)
+    expect(fs.existsSync(paths.playwrightArtifactsKeepDir)).toBe(false)
+    expect(fs.existsSync(paths.manifestPath)).toBe(true)
+    expect(trimRunArtifacts(tmpDir, 'trim-me')).toBe(0)
+  })
+
+  it('store.trimArtifacts guards active/stale/not-found and emits changed on success', () => {
+    const reg = createRegistry()
+    reg.set('active', fakeOrch('active'))
+    seedRun('active', { status: 'running' }); seedArtifacts('active', 512)
+    seedRun('stale', { status: 'running' }); seedArtifacts('stale', 512)
+    seedRun('done', { status: 'passed' }); seedArtifacts('done', 512)
+    const store = new RunStore(tmpDir, reg)
+    expect(store.trimArtifacts('active')).toEqual({ ok: false, reason: 'active' })
+    expect(store.trimArtifacts('stale')).toEqual({ ok: false, reason: 'stale' })
+    expect(store.trimArtifacts('ghost')).toEqual({ ok: false, reason: 'not-found' })
+    const events: RunStoreEvent[] = []
+    store.on('event', (e) => events.push(e))
+    expect(store.trimArtifacts('done')).toEqual({ ok: true, freedBytes: 1024 })
+    expect(events).toEqual([{ kind: 'changed', runId: 'done' }])
+  })
+
+  it('store.delete removes an orphan directory with no manifest', () => {
+    const dir = runDirFor(tmpDir, 'orphan')
+    fs.mkdirSync(dir, { recursive: true })
+    fs.writeFileSync(path.join(dir, 'playwright.log'), 'partial run, never finalized')
+    const store = new RunStore(tmpDir, createRegistry())
+    const events: RunStoreEvent[] = []
+    store.on('event', (e) => events.push(e))
+    expect(store.delete('orphan')).toEqual({ ok: true })
+    expect(fs.existsSync(dir)).toBe(false)
+    expect(events).toEqual([{ kind: 'removed', runId: 'orphan' }])
+  })
+
+  it('cleanupListing reports sizes, orphans, active flags, and reclaimable totals', () => {
+    const reg = createRegistry()
+    reg.set('live', fakeOrch('live'))
+    seedRun('live', { status: 'running' }); seedArtifacts('live', 100)
+    seedRun('done', { status: 'passed', feature: 'bar' }); seedArtifacts('done', 100)
+    const orphanDir = runDirFor(tmpDir, 'orphan')
+    fs.mkdirSync(orphanDir, { recursive: true })
+    fs.writeFileSync(path.join(orphanDir, 'x.log'), Buffer.alloc(50))
+    const store = new RunStore(tmpDir, reg)
+    const listing = store.cleanupListing()
+
+    const done = listing.runs.find((r) => r.runId === 'done')!
+    const live = listing.runs.find((r) => r.runId === 'live')!
+    expect(done.active).toBe(false)
+    expect(done.artifactBytes).toBe(200)
+    expect(live.active).toBe(true)
+    expect(listing.orphans.map((o) => o.runId)).toEqual(['orphan'])
+    // Trim reclaims artifacts of non-active runs only; delete reclaims whole
+    // non-active folders plus every orphan.
+    expect(listing.totals.reclaimableTrimBytes).toBe(200)
+    expect(listing.totals.reclaimableDeleteBytes).toBe(done.folderBytes + 50)
   })
 })

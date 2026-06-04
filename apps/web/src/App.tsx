@@ -9,6 +9,7 @@ import { VerticalSplit } from './components/VerticalSplit'
 import { GlobalStatusBar } from './components/GlobalStatusBar'
 import { AddTestWizard } from './components/AddTestWizard'
 import { CollisionConfirmDialog } from './components/CollisionConfirmDialog'
+import { LogCleanupPage } from './components/LogCleanupPage'
 import type { RepoCollisionChoice } from './api/client'
 import * as api from './api/client'
 import { connectWorkspaceEvents } from './api/workspace-socket'
@@ -23,6 +24,8 @@ export function App() {
   const [configFor, setConfigFor] = useState<string | null>(null)
   const [testsRefreshKey, setTestsRefreshKey] = useState(0)
   const [collisionPrompt, setCollisionPrompt] = useState<{ feature: string; env?: string; mode?: 'test' | 'boot'; info: RepoCollisionChoice } | null>(null)
+  // Top-level view: the normal workspace, or the full-screen Log Cleanup page.
+  const [view, setView] = useState<'workspace' | 'cleanup'>('workspace')
   const pendingRunSelectionRef = useRef<string | null>(null)
   const selectedFeatureRef = useRef<string | null>(null)
 
@@ -261,10 +264,14 @@ export function App() {
           pendingRunSelectionRef.current = null
           setSelectedFeature(feature)
           setSelectedRunId(runId)
+          setView('workspace')
         }}
+        onOpenCleanup={() => setView('cleanup')}
       />
       <div className="min-h-0 flex-1">
-        <ResizablePanels panels={panels} />
+        {view === 'cleanup'
+          ? <LogCleanupPage onClose={() => setView('workspace')} />
+          : <ResizablePanels panels={panels} />}
       </div>
       {configFor && (
         <FeatureConfigEditor

@@ -1523,3 +1523,55 @@ describe('DELETE /api/runs/:runId', () => {
     expect(res.statusCode).toBe(404)
   })
 })
+
+describe('cleanup routes', () => {
+  function seedArtifacts(runId: string, bytes: number): void {
+    const dir = runDirFor(logsDir, runId)
+    for (const sub of ['playwright-artifacts', 'playwright-artifacts-keep']) {
+      fs.mkdirSync(path.join(dir, sub), { recursive: true })
+      fs.writeFileSync(path.join(dir, sub, 'video.webm'), Buffer.alloc(bytes))
+    }
+  }
+
+  it('GET /api/cleanup/runs returns sizes, orphans, and totals', async () => {
+    writeManifestForRun('r-done', 'foo', 'passed')
+    writeRunsIndex(logsDir, [{ runId: 'r-done', feature: 'foo', startedAt: 'now', status: 'passed' }])
+    seedArtifacts('r-done', 1000)
+    fs.mkdirSync(path.join(runDirFor(logsDir, 'r-orphan')), { recursive: true })
+    fs.writeFileSync(path.join(runDirFor(logsDir, 'r-orphan'), 'x.log'), Buffer.alloc(40))
+
+    const { app } = await build()
+    const res = await app.inject({ method: 'GET', url: '/api/cleanup/runs' })
+    expect(res.statusCode).toBe(200)
+    const body = res.json()
+    expect(body.runs.find((r: { runId: string }) => r.runId === 'r-done').artifactBytes).toBe(2000)
+    expect(body.orphans.map((o: { runId: string }) => o.runId)).toEqual(['r-orphan'])
+    expect(body.totals.reclaimableTrimBytes).toBe(2000)
+  })
+
+  it('POST /api/runs/:id/trim reclaims artifacts and returns freedBytes', async () => {
+    writeManifestForRun('r-trim', 'foo', 'passed')
+    writeRunsIndex(logsDir, [{ runId: 'r-trim', feature: 'foo', startedAt: 'now', status: 'passed' }])
+    seedArtifacts('r-trim', 500)
+    const { app } = await build()
+    const res = await app.inject({ method: 'POST', url: '/api/runs/r-trim/trim' })
+    expect(res.statusCode).toBe(200)
+    expect(res.json().freedBytes).toBe(1000)
+    expect(fs.existsSync(path.join(runDirFor(logsDir, 'r-trim'), 'playwright-artifacts'))).toBe(false)
+    expect(fs.existsSync(path.join(runDirFor(logsDir, 'r-trim'), 'manifest.json'))).toBe(true)
+  })
+
+  it('POST trim 404s on unknown run', async () => {
+    const { app } = await build()
+    expect((await app.inject({ method: 'POST', url: '/api/runs/ghost/trim' })).statusCode).toBe(404)
+  })
+
+  it('POST trim 409s on an active (registered) run', async () => {
+    writeManifestForRun('r-active', 'foo', 'running')
+    writeRunsIndex(logsDir, [{ runId: 'r-active', feature: 'foo', startedAt: 'now', status: 'running' }])
+    const { app, registry } = await build()
+    registry.set('r-active', makeStub('r-active'))
+    const res = await app.inject({ method: 'POST', url: '/api/runs/r-active/trim' })
+    expect(res.statusCode).toBe(409)
+  })
+})

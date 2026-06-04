@@ -15,6 +15,7 @@ import { StatusDot, type StatusDotState } from './config/atoms'
 interface Props {
   activeRunDetail: RunDetail | null
   onNavigateToRun?: (feature: string, runId: string) => void
+  onOpenCleanup?: () => void
 }
 
 // Always-visible top bar showing whether any run is currently active across
@@ -26,7 +27,7 @@ interface Props {
 // "reconnecting" / "disconnected"). Push frames keep run state in sync;
 // when the channel drops, the user sees a banner so they know the data
 // they're looking at may be stale until the socket reconnects.
-export function GlobalStatusBar({ activeRunDetail, onNavigateToRun }: Props) {
+export function GlobalStatusBar({ activeRunDetail, onNavigateToRun, onOpenCleanup }: Props) {
   const { connection } = useRuns()
   const { runs: activeRuns } = useActiveRuns()
   const { count: bootCount } = useActiveBootSessions()
@@ -176,6 +177,16 @@ export function GlobalStatusBar({ activeRunDetail, onNavigateToRun }: Props) {
               <span>⚔</span>
             )}
             <span style={{ fontSize: 12, fontWeight: 500 }}>{activeBenchmark ? 'Benchmark running' : 'Benchmark'}</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => onOpenCleanup?.()}
+            className="cl-button flex shrink-0 items-center gap-1.5 px-2.5 py-1"
+            title="Log cleanup — reclaim disk and tidy old runs"
+            aria-label="Open log cleanup"
+          >
+            <span aria-hidden="true">🧹</span>
+            <span style={{ fontSize: 12, fontWeight: 500 }}>Cleanup</span>
           </button>
         </div>
         <button

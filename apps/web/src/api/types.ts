@@ -91,6 +91,35 @@ export interface RunIndexEntry {
   verificationTargetUrls?: Record<string, string>
 }
 
+// ─── Log cleanup ─────────────────────────────────────────────────────────
+
+export interface CleanupRunEntry {
+  runId: string
+  feature: string
+  executionType: ExecutionType
+  status: RunStatus
+  startedAt: string
+  endedAt?: string
+  folderBytes: number
+  artifactBytes: number
+  active: boolean
+}
+
+export interface CleanupOrphan {
+  runId: string
+  folderBytes: number
+}
+
+export interface CleanupListing {
+  runs: CleanupRunEntry[]
+  orphans: CleanupOrphan[]
+  totals: {
+    totalBytes: number
+    reclaimableTrimBytes: number
+    reclaimableDeleteBytes: number
+  }
+}
+
 export type EvaluationExportMode = 'raw' | 'localized'
 export type EvaluationExportStatus = 'running' | 'completed' | 'failed'
 export type EvaluationExportProducer = 'internal' | 'external'

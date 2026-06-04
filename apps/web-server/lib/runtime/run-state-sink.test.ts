@@ -3,7 +3,7 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { FileRunStateSink } from './run-state-sink'
-import { readManifest, readRunsIndex, type RunManifest } from './manifest'
+import { readManifest, readRunsIndex, writeRunsIndex, type RunManifest } from './manifest'
 import { buildRunPaths, runDirFor } from './run-paths'
 
 let logsDir: string
@@ -128,6 +128,24 @@ describe('FileRunStateSink', () => {
     expect(stored.services[0].status).toBe('stopped')
     expect(JSON.parse(fs.readFileSync(summaryPath, 'utf-8')).running).toBeUndefined()
     expect(readRunsIndex(logsDir)[0].endedAt).toBe('2026-05-08T00:01:00.000Z')
+  })
+
+  it('flips a stale index entry terminal even when the manifest file is missing', () => {
+    const sink = new FileRunStateSink(logsDir)
+    // Simulate an interrupted run: an active index entry with no manifest.json
+    // (e.g. a boot / manual-services run killed mid-teardown). finalize must
+    // still mirror the terminal status into the index so the run can't stay
+    // stuck active — otherwise it becomes an unstoppable zombie in the UI.
+    writeRunsIndex(logsDir, [
+      { runId: 'orphan', feature: 'checkout', startedAt: '2026-05-08T00:00:00.000Z', status: 'running' },
+    ])
+
+    sink.finalize('orphan', 'aborted', '2026-05-08T00:05:00.000Z', 0)
+
+    expect(fs.existsSync(sink.manifestPath('orphan'))).toBe(false)
+    const indexed = readRunsIndex(logsDir).find((e) => e.runId === 'orphan')!
+    expect(indexed.status).toBe('aborted')
+    expect(indexed.endedAt).toBe('2026-05-08T00:05:00.000Z')
   })
 
   it('leaves malformed summaries untouched during finalize', () => {
