@@ -11,7 +11,7 @@ import {
   BenchmarkRunStore,
   type BenchmarkStoreEvent,
 } from './store'
-import { benchmarkDir, buildBenchmarkPaths } from './paths'
+import { benchmarkDir, buildBenchmarkPaths, benchmarksIndexPath } from './paths'
 import type { BenchmarkManifest } from './types'
 
 let logsDir: string
@@ -85,6 +85,17 @@ describe('benchmark store', () => {
   it('returns [] for a missing index', () => {
     expect(readBenchmarksIndex(logsDir)).toEqual([])
   })
+
+  it('returns null patching a manifest that does not exist', () => {
+    expect(updateBenchmarkManifest(path.join(logsDir, 'nope.json'), { status: 'done' })).toBeNull()
+  })
+
+  it('returns [] when the index file holds non-array JSON', () => {
+    const file = benchmarksIndexPath(logsDir)
+    fs.mkdirSync(path.dirname(file), { recursive: true })
+    fs.writeFileSync(file, JSON.stringify({ not: 'an array' }))
+    expect(readBenchmarksIndex(logsDir)).toEqual([])
+  })
 })
 
 describe('BenchmarkRunStore', () => {
@@ -130,6 +141,25 @@ describe('BenchmarkRunStore', () => {
     // terminal benchmark untouched (no event, no status change)
     expect(store.get('finished')?.status).toBe('done')
     expect(events.map((e) => e.benchmarkId).sort()).toEqual(['live', 'setup'])
+  })
+
+  it('reconcileInterrupted() skips index entries whose manifest is missing', () => {
+    const store = new BenchmarkRunStore(logsDir)
+    // An index entry left as 'running' but with no manifest on disk (a partially
+    // written benchmark). reconcile must skip it, not crash.
+    upsertBenchmarkIndexEntry(logsDir, {
+      benchmarkId: 'orphan',
+      feature: 'f',
+      level: 'med',
+      status: 'running',
+      startedAt: 't',
+    })
+    const events: BenchmarkStoreEvent[] = []
+    store.onEvent((e) => events.push(e))
+    store.reconcileInterrupted(() => 'now')
+    // No manifest → nothing to flip → no event emitted for it.
+    expect(events).toEqual([])
+    expect(store.get('orphan')).toBeNull()
   })
 
   it('remove() drops it from the index, deletes its dir, and emits removed', () => {

@@ -12,6 +12,8 @@ import {
   indexPlaywrightArtifacts,
   readPlaywrightPlaybackEvents,
   readRunSummary,
+  dirSizeBytes,
+  listCleanupEntries,
   RunStore,
   type RunStoreEvent,
 } from './run-store'
@@ -101,6 +103,64 @@ describe('listRuns', () => {
     const result = listRuns(tmpDir)
     expect(result[0].status).toBe('running')
     expect(readManifest(path.join(dir, 'manifest.json'))?.status).toBe('running')
+  })
+})
+
+describe('dirSizeBytes', () => {
+  it('returns 0 for a directory that cannot be read', () => {
+    expect(dirSizeBytes(path.join(tmpDir, 'does-not-exist'))).toBe(0)
+  })
+
+  it('sums file sizes recursively, skipping symlinks', () => {
+    const dir = path.join(tmpDir, 'sized')
+    fs.mkdirSync(path.join(dir, 'sub'), { recursive: true })
+    fs.writeFileSync(path.join(dir, 'a.txt'), 'hello') // 5 bytes
+    fs.writeFileSync(path.join(dir, 'sub', 'b.txt'), 'world!') // 6 bytes
+    fs.symlinkSync(path.join(dir, 'a.txt'), path.join(dir, 'link'))
+    expect(dirSizeBytes(dir)).toBe(11)
+  })
+})
+
+describe('listCleanupEntries', () => {
+  it('returns empty listing when nothing exists', () => {
+    const listing = listCleanupEntries(tmpDir)
+    expect(listing.runs).toEqual([])
+    expect(listing.orphans).toEqual([])
+    expect(listing.totals).toEqual({ totalBytes: 0, reclaimableTrimBytes: 0, reclaimableDeleteBytes: 0 })
+  })
+
+  it('annotates indexed runs with disk usage + active flag and finds orphans', () => {
+    const dir = runDirFor(tmpDir, 'r1')
+    fs.mkdirSync(dir, { recursive: true })
+    fs.writeFileSync(path.join(dir, 'manifest.json'), '{}') // some bytes
+    writeRunsIndex(tmpDir, [
+      { runId: 'r1', feature: 'foo', startedAt: '2026-01-01T00:00:00Z', status: 'passed', endedAt: '2026-01-01T00:05:00Z', executionType: 'boot' },
+    ])
+    // An on-disk run dir not present in the index → orphan.
+    fs.mkdirSync(path.join(runDirFor(tmpDir, 'orphan-x')), { recursive: true })
+    fs.writeFileSync(path.join(runDirFor(tmpDir, 'orphan-x'), 'junk.log'), 'xyz')
+
+    // Default isActive: a 'passed' run is not active → reclaimable.
+    const listing = listCleanupEntries(tmpDir)
+    expect(listing.runs.map((r) => r.runId)).toEqual(['r1'])
+    expect(listing.runs[0].active).toBe(false)
+    expect(listing.runs[0].endedAt).toBe('2026-01-01T00:05:00Z')
+    expect(listing.runs[0].executionType).toBe('boot')
+    expect(listing.orphans.map((o) => o.runId)).toEqual(['orphan-x'])
+    expect(listing.totals.totalBytes).toBeGreaterThan(0)
+    expect(listing.totals.reclaimableDeleteBytes).toBeGreaterThan(0)
+  })
+
+  it('honors the injected isActive overlay so a live run is non-reclaimable', () => {
+    const dir = runDirFor(tmpDir, 'live')
+    fs.mkdirSync(dir, { recursive: true })
+    fs.writeFileSync(path.join(dir, 'manifest.json'), '{}')
+    writeRunsIndex(tmpDir, [
+      { runId: 'live', feature: 'foo', startedAt: '2026-01-01T00:00:00Z', status: 'passed' },
+    ])
+    const listing = listCleanupEntries(tmpDir, (runId) => runId === 'live')
+    expect(listing.runs[0].active).toBe(true)
+    expect(listing.totals.reclaimableDeleteBytes).toBe(0)
   })
 })
 
@@ -1287,6 +1347,27 @@ describe('RunStore', () => {
     expect(await store.abortAllActiveOrStale()).toEqual({ aborted: ['missing-registered'] })
     expect(stopped).toBe(true)
     expect(reg.get('missing-registered')).toBeUndefined()
+  })
+
+  it('abortAllActiveOrStale skips an index row whose manifest already finalized', async () => {
+    // Index still claims 'running' but the on-disk manifest is terminal and no
+    // orchestrator is registered → abort() returns ok:false, so it is not
+    // counted as aborted (the false branch of the result.ok guard).
+    const dir = runDirFor(tmpDir, 'already-done')
+    fs.mkdirSync(dir, { recursive: true })
+    writeManifest(path.join(dir, 'manifest.json'), {
+      runId: 'already-done',
+      feature: 'foo',
+      startedAt: '2026-01-01T00:00:00Z',
+      status: 'passed',
+      healCycles: 0,
+      services: [],
+    })
+    writeRunsIndex(tmpDir, [
+      { runId: 'already-done', feature: 'foo', startedAt: '2026-01-01T00:00:00Z', status: 'running' },
+    ])
+    const store = new RunStore(tmpDir, createRegistry())
+    expect(await store.abortAllActiveOrStale()).toEqual({ aborted: [] })
   })
 
   it('delete refuses active runs (registered) and stale-active manifests', () => {

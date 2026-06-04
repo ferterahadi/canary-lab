@@ -145,6 +145,75 @@ describe('BenchmarkOrchestrator.run', () => {
     expect(final.error).toBeUndefined()
   })
 
+  it('short-circuits to aborted after setupArms without running the race', async () => {
+    let raceRan = false
+    let abortNow = false
+    const orch = new BenchmarkOrchestrator({
+      manifest: makeManifest(),
+      persist: () => {},
+      sabotage: async () => ({ sabotageSha: 'sha', diff: 'D' }),
+      writeDiff: () => {},
+      setupArms: async () => { abortNow = true },
+      runRace: async () => { raceRan = true; return REPORT },
+      now: () => 't',
+      isAborted: () => abortNow,
+    })
+    const final = await orch.run()
+    expect(final.status).toBe('aborted')
+    expect(raceRan).toBe(false)
+  })
+
+  it('skips the streaming persists and finalizes aborted when a stop arrives mid-race', async () => {
+    const persisted: BenchmarkManifest[] = []
+    let inRace = false
+    const orch = new BenchmarkOrchestrator({
+      manifest: makeManifest({
+        arms: [
+          { arm: 'A', mode: 'harness', runIds: [] },
+          { arm: 'B', mode: 'baseline', runIds: [] },
+        ],
+      }),
+      persist: (m) => persisted.push(structuredClone(m)),
+      sabotage: async () => ({ sabotageSha: 'sha', diff: 'D' }),
+      writeDiff: () => {},
+      setupArms: async () => {},
+      runRace: async ({ onArmStart, onResult, onIterationComplete }) => {
+        inRace = true
+        onArmStart('A', 1, 'run-A')
+        onResult({ arm: 'A', iteration: 1, healed: true, healCycles: 1, wallClockMs: 1 })
+        onIterationComplete(1)
+        return REPORT
+      },
+      now: () => 't',
+      isAborted: () => inRace,
+    })
+
+    const final = await orch.run()
+
+    // Every streaming callback was guarded → no runId/result leaked into the manifest.
+    expect(final.status).toBe('aborted')
+    expect(final.arms.find((a) => a.arm === 'A')?.runIds).toEqual([])
+    expect(final.results).toEqual([])
+    expect(persisted.some((m) => m.arms.find((a) => a.arm === 'A')?.runIds.length)).toBe(false)
+  })
+
+  it('stringifies a non-Error throw into the error field', async () => {
+    let final: BenchmarkManifest | undefined
+    const orch = new BenchmarkOrchestrator({
+      manifest: makeManifest(),
+      persist: (m) => { final = m },
+      sabotage: async () => { throw 'plain string failure' },
+      writeDiff: () => {},
+      setupArms: async () => {},
+      runRace: async () => REPORT,
+      now: () => 't',
+    })
+    const result = await orch.run()
+    expect(result.status).toBe('error')
+    expect(result.error).toBe('plain string failure')
+    expect(final?.error).toBe('plain string failure')
+  })
+
   it('captures errors as status=error with a message, and still runs cleanup', async () => {
     let cleaned = false
     const orch = new BenchmarkOrchestrator({

@@ -179,6 +179,11 @@ export interface OrchestratorOptions {
    *  orchestrator redirects affected services' cwd into the worktree, records
    *  them in the manifest, and removes them on stop. */
   worktrees?: WorktreeHandle[]
+  /** Relocate the heal-signal directory away from `<runDir>/signals`. The
+   *  benchmark baseline arm points this at the agent's own worktree so the
+   *  agent can signal completion without being handed a path into the run dir
+   *  (where harness-only artifacts live). Omit for the default location. */
+  signalsDir?: string
 }
 
 export type PauseResult =
@@ -496,7 +501,7 @@ export class RunOrchestrator extends EventEmitter {
     this.env = opts.env
     this.runId = opts.runId
     this.runDir = opts.runDir
-    this.paths = buildRunPaths(opts.runDir)
+    this.paths = buildRunPaths(opts.runDir, opts.signalsDir ? { signalsDir: opts.signalsDir } : undefined)
     this.portMap = opts.portMap
     this.worktreeHandles = opts.worktrees ?? []
     this.repoPathOverrides = {}

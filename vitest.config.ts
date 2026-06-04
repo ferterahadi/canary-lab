@@ -63,6 +63,12 @@ export default defineConfig({
         // and the node-pty wrapper can't be exercised deterministically
         // without a real TTY / native binding.
         'apps/web-server/lib/runtime/auto-heal.ts',
+        // The benchmark runner is the I/O wiring behind the (separately tested)
+        // BenchmarkOrchestrator/Race: it spawns the sabotage subprocess, creates
+        // git worktrees, and drives real RunOrchestrators per arm. Same category
+        // as runtime/orchestrator.ts above — exercised by behavior tests, not
+        // unit-coverable without a real git repo + agent CLIs + TTY.
+        'apps/web-server/lib/runtime/benchmark/runner.ts',
         'apps/web-server/lib/runtime/pty-spawner.ts',
         'apps/web-server/lib/runtime/**/types.ts',
         // Race-condition and defence-in-depth guards: the uncovered branches

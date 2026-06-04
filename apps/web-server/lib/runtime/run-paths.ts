@@ -40,8 +40,17 @@ export interface RunPaths {
   serviceLog(safeName: string): string
 }
 
-export function buildRunPaths(runDir: string): RunPaths {
-  const signalsDir = path.join(runDir, 'signals')
+/**
+ * Build the per-run path layout from a single `runDir`.
+ *
+ * `overrides.signalsDir` relocates the heal-signal directory away from
+ * `<runDir>/signals`. The benchmark's baseline arm uses this to put its
+ * completion-signal file inside the agent's own worktree, so the baseline
+ * agent is never handed a path into the run dir (where harness-only artifacts
+ * like `e2e-summary.json` and `svc-*.log` live). Everything else is unaffected.
+ */
+export function buildRunPaths(runDir: string, overrides?: { signalsDir?: string }): RunPaths {
+  const signalsDir = overrides?.signalsDir ?? path.join(runDir, 'signals')
   return {
     runDir,
     manifestPath: path.join(runDir, 'manifest.json'),

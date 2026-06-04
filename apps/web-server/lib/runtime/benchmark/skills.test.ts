@@ -81,6 +81,41 @@ describe('loadSabotageSkills', () => {
   it('returns [] when the skills directory does not exist', () => {
     expect(loadSabotageSkills(path.join(root, 'missing'))).toEqual([])
   })
+
+  it('falls back to folder name / empty fields when meta omits name/title/summary/appliesTo', () => {
+    const dir = path.join(root, 'bare-meta')
+    fs.mkdirSync(dir, { recursive: true })
+    fs.writeFileSync(path.join(dir, 'meta.json'), JSON.stringify({}))
+    fs.writeFileSync(path.join(dir, 'skill.md'), MD)
+    const skills = loadSabotageSkills(root)
+    const s = skills.find((x) => x.dir === dir)!
+    expect(s.name).toBe('bare-meta') // ← folder name
+    expect(s.title).toBe('bare-meta') // ← String(undefined ?? folder name)
+    expect(s.summary).toBe('')
+    expect(s.appliesTo).toEqual([])
+  })
+
+  it('derives the title from a non-string name field via String(meta.name)', () => {
+    const dir = path.join(root, 'numeric-name')
+    fs.mkdirSync(dir, { recursive: true })
+    // name present but not a string → name uses folder, title = String(meta.name).
+    fs.writeFileSync(path.join(dir, 'meta.json'), JSON.stringify({ name: 42, level: 'min' }))
+    const skills = loadSabotageSkills(root)
+    const s = skills.find((x) => x.dir === dir)!
+    expect(s.name).toBe('numeric-name')
+    expect(s.title).toBe('42')
+  })
+
+  it('loads a skill with meta.json but no skill.md (empty description/recipe)', () => {
+    const dir = path.join(root, 'no-md')
+    fs.mkdirSync(dir, { recursive: true })
+    fs.writeFileSync(path.join(dir, 'meta.json'), JSON.stringify({ name: 'no-md', title: 'No MD', level: 'min', summary: '', appliesTo: [] }))
+    const skills = loadSabotageSkills(root)
+    expect(skills).toHaveLength(1)
+    expect(skills[0].name).toBe('no-md')
+    expect(skills[0].description).toBe('')
+    expect(skills[0].recipe).toBe('')
+  })
 })
 
 describe('loadBundledSabotageSkills', () => {

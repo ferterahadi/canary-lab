@@ -79,6 +79,38 @@ describe('benchmarkRoutes', () => {
     await app.close()
   })
 
+  it('POST /api/benchmarks 400s when the body is absent entirely', async () => {
+    const app = await buildApp({})
+    const res = await app.inject({ method: 'POST', url: '/api/benchmarks' })
+    expect(res.statusCode).toBe(400)
+    expect(res.json()).toEqual({ error: 'feature is required' })
+    await app.close()
+  })
+
+  it('POST /api/benchmarks normalizes the agent (codex/claude/unset)', async () => {
+    const received: Array<string | undefined> = []
+    const app = await buildApp({
+      startBenchmark: async (input) => {
+        received.push(input.agent)
+        return { benchmarkId: 'b' }
+      },
+    })
+    for (const [agent, expected] of [['codex', 'codex'], ['claude', 'claude'], ['weird', undefined], [undefined, undefined]] as const) {
+      await app.inject({ method: 'POST', url: '/api/benchmarks', payload: { feature: 'f', agent } })
+    }
+    expect(received).toEqual(['codex', 'claude', undefined, undefined])
+    await app.close()
+  })
+
+  it('GET /api/benchmark-skills defaults to an empty feature when none is given', async () => {
+    let askedFor: string | undefined
+    const app = await buildApp({ listSkills: (feature) => { askedFor = feature; return [] } })
+    const res = await app.inject({ method: 'GET', url: '/api/benchmark-skills' })
+    expect(res.statusCode).toBe(200)
+    expect(askedFor).toBe('')
+    await app.close()
+  })
+
   it('GET /api/benchmarks returns the index', async () => {
     const app = await buildApp({
       store: fakeStore({
@@ -124,6 +156,51 @@ describe('benchmarkRoutes', () => {
     expect(res.json()).toEqual([
       { name: 'off-by-one', title: 'Off-by-one nudge', level: 'min', summary: 'one subtle bug', description: 'desc', recipe: 'secret recipe' },
     ])
+    await app.close()
+  })
+
+  it('POST /api/benchmarks surfaces the thrown statusCode + message', async () => {
+    const app = await buildApp({
+      startBenchmark: async () => {
+        throw Object.assign(new Error('A benchmark is already running'), { statusCode: 409 })
+      },
+    })
+    const res = await app.inject({ method: 'POST', url: '/api/benchmarks', payload: { feature: 'f' } })
+    expect(res.statusCode).toBe(409)
+    expect(res.json()).toEqual({ error: 'A benchmark is already running' })
+    await app.close()
+  })
+
+  it('POST /api/benchmarks defaults to 500 + stringifies a non-Error throw', async () => {
+    const app = await buildApp({
+      startBenchmark: async () => { throw 'boom' },
+    })
+    const res = await app.inject({ method: 'POST', url: '/api/benchmarks', payload: { feature: 'f' } })
+    expect(res.statusCode).toBe(500)
+    expect(res.json()).toEqual({ error: 'boom' })
+    await app.close()
+  })
+
+  it('GET /api/benchmarks/:id/sabotage-log returns the captured log', async () => {
+    const app = await buildApp({ readSabotageLog: (id) => `log for ${id}` })
+    const res = await app.inject({ method: 'GET', url: '/api/benchmarks/b1/sabotage-log' })
+    expect(res.statusCode).toBe(200)
+    expect(res.json()).toEqual({ log: 'log for b1' })
+    await app.close()
+  })
+
+  it('GET /api/benchmarks/:id/agent-session returns the session, 404 when none', async () => {
+    const app = await buildApp({
+      loadAgentSession: (id) =>
+        id === 'b1' ? { agent: 'claude', sessionId: 's1', events: [{ t: 'x' }] } : null,
+    })
+    const hit = await app.inject({ method: 'GET', url: '/api/benchmarks/b1/agent-session' })
+    expect(hit.statusCode).toBe(200)
+    expect(hit.json()).toEqual({ agent: 'claude', sessionId: 's1', events: [{ t: 'x' }] })
+
+    const miss = await app.inject({ method: 'GET', url: '/api/benchmarks/nope/agent-session' })
+    expect(miss.statusCode).toBe(404)
+    expect(miss.json()).toEqual({ reason: 'no-session' })
     await app.close()
   })
 

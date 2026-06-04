@@ -68,6 +68,13 @@ import {
 	  restartRun,
 	  extractPrdDocuments,
   downloadEvaluationExportTask,
+  listBenchmarks,
+  getBenchmark,
+  listSabotageSkills,
+  startBenchmark,
+  abortBenchmark,
+  getBenchmarkSabotageLog,
+  getBenchmarkAgentSession,
 } from './client'
 
 const ok = (body: unknown, status = 200): Response =>
@@ -1010,5 +1017,66 @@ describe('api client', () => {
     } finally {
       ;(globalThis as { fetch: typeof fetch }).fetch = original
     }
+  })
+
+  it('listBenchmarks GETs the index', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(ok([{ benchmarkId: 'b1' }]))
+    await expect(listBenchmarks({ baseUrl: 'http://x', fetchImpl })).resolves.toEqual([{ benchmarkId: 'b1' }])
+    expect(fetchImpl).toHaveBeenCalledWith('http://x/api/benchmarks', { method: 'GET' })
+  })
+
+  it('getBenchmark GETs a single manifest, encoding the id', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(ok({ benchmarkId: 'b/1' }))
+    await expect(getBenchmark('b/1', { baseUrl: 'http://x', fetchImpl })).resolves.toEqual({ benchmarkId: 'b/1' })
+    expect(fetchImpl).toHaveBeenCalledWith('http://x/api/benchmarks/b%2F1', { method: 'GET' })
+  })
+
+  it('listSabotageSkills GETs the skills for a feature', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(ok([{ name: 'off-by-one' }]))
+    await expect(listSabotageSkills('a/b', { baseUrl: 'http://x', fetchImpl })).resolves.toEqual([{ name: 'off-by-one' }])
+    expect(fetchImpl).toHaveBeenCalledWith('http://x/api/benchmark-skills?feature=a%2Fb', { method: 'GET' })
+  })
+
+  it('startBenchmark POSTs the input as JSON', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(ok({ benchmarkId: 'bench-1' }))
+    const input = { feature: 'f', skill: 's', level: 'med' as const, iterations: 2, agent: 'claude' as const }
+    await expect(startBenchmark(input, { baseUrl: 'http://x', fetchImpl })).resolves.toEqual({ benchmarkId: 'bench-1' })
+    expect(fetchImpl).toHaveBeenCalledWith('http://x/api/benchmarks', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(input),
+    })
+  })
+
+  it('abortBenchmark POSTs to the abort endpoint', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(ok({ ok: true }))
+    await expect(abortBenchmark('b1', { baseUrl: 'http://x', fetchImpl })).resolves.toEqual({ ok: true })
+    expect(fetchImpl).toHaveBeenCalledWith('http://x/api/benchmarks/b1/abort', { method: 'POST' })
+  })
+
+  it('getBenchmarkSabotageLog GETs the captured log', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(ok({ log: 'output' }))
+    await expect(getBenchmarkSabotageLog('b1', { baseUrl: 'http://x', fetchImpl })).resolves.toEqual({ log: 'output' })
+    expect(fetchImpl).toHaveBeenCalledWith('http://x/api/benchmarks/b1/sabotage-log', { method: 'GET' })
+  })
+
+  it('getBenchmarkAgentSession returns the session on 200', async () => {
+    const session = { agent: 'claude', sessionId: 's1', events: [] }
+    const fetchImpl = vi.fn().mockResolvedValue(ok(session))
+    await expect(getBenchmarkAgentSession('b1', { baseUrl: 'http://x', fetchImpl })).resolves.toEqual(session)
+    expect(fetchImpl).toHaveBeenCalledWith('http://x/api/benchmarks/b1/agent-session', { method: 'GET' })
+  })
+
+  it('getBenchmarkAgentSession returns null on 404', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(fail(404, { reason: 'no-session' }))
+    await expect(getBenchmarkAgentSession('b1', { baseUrl: 'http://x', fetchImpl })).resolves.toBeNull()
+  })
+
+  it('getBenchmarkAgentSession rethrows non-404 errors', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(fail(500, { error: 'boom' }))
+    await expect(getBenchmarkAgentSession('b1', { baseUrl: 'http://x', fetchImpl })).rejects.toMatchObject({
+      name: 'ApiError',
+      status: 500,
+    })
   })
 })

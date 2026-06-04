@@ -59,4 +59,32 @@ describe('runSabotage', () => {
     ).rejects.toThrow(/aborted/i)
     expect(trialRan).toBe(false)
   })
+
+  it('bails right after the agent finishes when a stop arrives mid-attempt', async () => {
+    // isAborted is false at the top-of-loop check, then true after the agent —
+    // exercising the second abort guard before the no-cheat / validity gate.
+    let agentRan = false
+    let checked = 0
+    let untouchedRan = false
+    await expect(
+      runSabotage('r', deps({
+        isAborted: () => { checked++; return checked > 1 },
+        runSabotageAgent: async () => { agentRan = true },
+        testsUntouched: async () => { untouchedRan = true; return true },
+      })),
+    ).rejects.toThrow(/aborted/i)
+    expect(agentRan).toBe(true)
+    expect(untouchedRan).toBe(false)
+  })
+
+  it('defaults to 2 attempts when maxAttempts is unset', async () => {
+    let attempts = 0
+    await expect(
+      runSabotage('r', deps({
+        maxAttempts: undefined,
+        testsFail: async () => { attempts++; return false }, // never goes red
+      })),
+    ).rejects.toThrow(/failed to break/i)
+    expect(attempts).toBe(2)
+  })
 })
