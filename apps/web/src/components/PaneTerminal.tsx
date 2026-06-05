@@ -140,17 +140,32 @@ export function PaneTerminal({ runId, paneId, onExit, emptyState }: Props) {
       return true
     }
 
-    // If the web font (JetBrains Mono) finishes loading after the atlas is
-    // built, the cached atlas holds stale glyph metrics and text overlaps.
-    // Rebuild it once fonts are ready. Guarded for environments without the
-    // Font Loading API (e.g. the happy-dom test runner).
+    // FitAddon derives cols/rows from the measured character-cell width. The
+    // mono font (JetBrains Mono) loads from Google Fonts with `display=swap`,
+    // so the FIRST fit can measure the fallback font's cell width and compute a
+    // column count that doesn't match the real glyphs once the font swaps in.
+    // The wrong cols is then sent to the pty, and the Ink TUI (which wraps to
+    // whatever width it's told) renders lines that overflow the pane — trailing
+    // characters pile into the last column and continuations spill to the left.
+    // Re-fit once the real font is loaded, re-send the corrected size to the
+    // pty, and repaint the (now-stale) WebGL atlas. Guarded for environments
+    // without the Font Loading API (e.g. the happy-dom test runner).
+    const refitForFont = (): void => {
+      if (disposed || !opened) return
+      fitOnce()
+      conn?.sendResize(term.cols, term.rows)
+      webgl?.clearTextureAtlas()
+      term.refresh(0, term.rows - 1)
+    }
     const fonts = typeof document !== 'undefined' ? document.fonts : undefined
     if (fonts && typeof fonts.ready?.then === 'function') {
-      fonts.ready.then(() => {
-        if (disposed || !opened) return
-        webgl?.clearTextureAtlas()
-        term.refresh(0, term.rows - 1)
-      }).catch(() => { /* ignore */ })
+      // Explicitly kick the load (don't rely on `ready` alone — it only awaits
+      // fonts already in the loading set) at both weights xterm may use, then
+      // correct the grid. `ready` is the backstop for any remaining load.
+      const loads = typeof fonts.load === 'function'
+        ? [fonts.load('400 12px "JetBrains Mono"'), fonts.load('500 12px "JetBrains Mono"')]
+        : []
+      Promise.all([fonts.ready, ...loads]).then(refitForFont).catch(() => { /* ignore */ })
     }
 
     openTerminal()

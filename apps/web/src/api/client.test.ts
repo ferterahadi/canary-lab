@@ -20,6 +20,10 @@ import {
   deleteJournalEntry,
   deleteRun,
   cleanupRuns,
+  cleanupWorktrees,
+  openWorktreePath,
+  removeWorktree,
+  openBenchmarkWorktree,
   trimRun,
   getDraft,
   getDraftAgentLog,
@@ -823,6 +827,33 @@ describe('api client', () => {
     expect(r).toEqual(listing)
   })
 
+  it('cleanupWorktrees GETs /api/cleanup/worktrees', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(ok({ worktrees: [] }))
+    const r = await cleanupWorktrees({ fetchImpl })
+    expect(fetchImpl).toHaveBeenCalledWith('/api/cleanup/worktrees', { method: 'GET' })
+    expect(r).toEqual({ worktrees: [] })
+  })
+
+  it('openWorktreePath POSTs the path to the open endpoint', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(ok({ opened: true, path: '/wt', editor: 'vscode' }))
+    const r = await openWorktreePath('/wt', { fetchImpl })
+    expect(r).toEqual({ opened: true, path: '/wt', editor: 'vscode' })
+    const [url, init] = fetchImpl.mock.calls[0]
+    expect(url).toBe('/api/cleanup/worktrees/open')
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(init.body as string)).toEqual({ path: '/wt' })
+  })
+
+  it('removeWorktree DELETEs /api/cleanup/worktrees with the path body', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(ok({ removed: true, freedBytes: 42 }))
+    const r = await removeWorktree('/wt', { fetchImpl })
+    expect(r).toEqual({ removed: true, freedBytes: 42 })
+    const [url, init] = fetchImpl.mock.calls[0]
+    expect(url).toBe('/api/cleanup/worktrees')
+    expect(init.method).toBe('DELETE')
+    expect(JSON.parse(init.body as string)).toEqual({ path: '/wt' })
+  })
+
   it('trimRun POSTs /api/runs/:runId/trim and returns freedBytes', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(ok({ freedBytes: 1234 }))
     const r = await trimRun('r1', { fetchImpl })
@@ -1070,6 +1101,16 @@ describe('api client', () => {
   it('getBenchmarkAgentSession returns null on 404', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(fail(404, { reason: 'no-session' }))
     await expect(getBenchmarkAgentSession('b1', { baseUrl: 'http://x', fetchImpl })).resolves.toBeNull()
+  })
+
+  it('openBenchmarkWorktree POSTs the target to the open-worktree endpoint', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(ok({ opened: true, path: '/wt', editor: 'cursor' }))
+    const r = await openBenchmarkWorktree('b1', 'frozen', { baseUrl: 'http://x', fetchImpl })
+    expect(r).toEqual({ opened: true, path: '/wt', editor: 'cursor' })
+    const [url, init] = fetchImpl.mock.calls[0]
+    expect(url).toBe('http://x/api/benchmarks/b1/open-worktree')
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(init.body as string)).toEqual({ target: 'frozen' })
   })
 
   it('getBenchmarkAgentSession rethrows non-404 errors', async () => {

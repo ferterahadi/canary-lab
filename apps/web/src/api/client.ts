@@ -8,6 +8,7 @@ import type {
   FeatureTests,
   RunIndexEntry,
   CleanupListing,
+  CleanupWorktree,
   RunDetail,
   JournalEntry,
   CreateDraftPayload,
@@ -125,6 +126,24 @@ export function abortBenchmark(id: string, opts?: ClientOptions): Promise<{ ok: 
   return request<{ ok: boolean }>(
     `${baseUrl}/api/benchmarks/${encodeURIComponent(id)}/abort`,
     { method: 'POST' },
+    fetchImpl,
+  )
+}
+
+// Open one of a benchmark's worktrees in the user's editor. `target`:
+//   'frozen' → pristine checkout at the sabotage SHA (lazily created)
+//   'A' / 'B' → the live arm worktree (only while the benchmark runs)
+// Returns the resolved path even when the editor couldn't launch (opened:false)
+// so the UI can offer a copy-path fallback.
+export function openBenchmarkWorktree(
+  id: string,
+  target: 'frozen' | 'A' | 'B',
+  opts?: ClientOptions,
+): Promise<{ opened: boolean; path: string; editor?: string; error?: string }> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request(
+    `${baseUrl}/api/benchmarks/${encodeURIComponent(id)}/open-worktree`,
+    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ target }) },
     fetchImpl,
   )
 }
@@ -1025,6 +1044,37 @@ export async function deleteRun(runId: string, opts?: ClientOptions): Promise<vo
 export function cleanupRuns(opts?: ClientOptions): Promise<CleanupListing> {
   const { baseUrl, fetchImpl } = defaultOpts(opts)
   return request<CleanupListing>(`${baseUrl}/api/cleanup/runs`, { method: 'GET' }, fetchImpl)
+}
+
+// Every git worktree canary-lab created under the logs dir (inspect snapshots,
+// per-run isolation, benchmark arms, stale orphans), for the cleanup list.
+export function cleanupWorktrees(opts?: ClientOptions): Promise<{ worktrees: CleanupWorktree[] }> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request(`${baseUrl}/api/cleanup/worktrees`, { method: 'GET' }, fetchImpl)
+}
+
+// Open a worktree folder in the user's editor ("visit" from the cleanup list).
+export function openWorktreePath(
+  path: string,
+  opts?: ClientOptions,
+): Promise<{ opened: boolean; path: string; editor?: string; error?: string }> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request(
+    `${baseUrl}/api/cleanup/worktrees/open`,
+    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path }) },
+    fetchImpl,
+  )
+}
+
+// Remove one worktree via `git worktree remove` (+ prune). Server returns 409
+// when the worktree belongs to a still-active run/benchmark.
+export function removeWorktree(path: string, opts?: ClientOptions): Promise<{ removed: boolean; freedBytes: number }> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request(
+    `${baseUrl}/api/cleanup/worktrees`,
+    { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path }) },
+    fetchImpl,
+  )
 }
 
 // Reclaim a terminal run's Playwright artifacts (videos/traces) while keeping

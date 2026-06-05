@@ -408,6 +408,31 @@ export function buildServiceSpecs(
   return out
 }
 
+/**
+ * Manifest service entries for a *queued* run — built from the feature config
+ * before any process spawns, so the queued run's Overview lists the services
+ * that will boot once it leaves the queue (instead of "No services configured").
+ * Ports aren't allocated until promotion, so `allocatedPorts` and the
+ * port-templated `healthUrl` are intentionally omitted; status is 'queued'.
+ * Promotion later overwrites this with the real running manifest.
+ */
+export function buildQueuedServiceEntries(
+  feature: FeatureConfig,
+  runDir: string,
+  env?: string,
+): ServiceManifestEntry[] {
+  const paths = buildRunPaths(runDir)
+  return buildServiceSpecs(feature, runDir, env).map((s) => ({
+    repoName: s.repoName,
+    name: s.name,
+    safeName: s.safeName,
+    command: s.command,
+    cwd: s.cwd,
+    logPath: paths.serviceLog(s.safeName),
+    status: 'queued',
+  }))
+}
+
 export class RunOrchestrator extends EventEmitter {
   readonly runId: string
   readonly runDir: string

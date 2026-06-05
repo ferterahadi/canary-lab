@@ -1,5 +1,5 @@
 export type RunStatus = 'queued' | 'running' | 'passed' | 'failed' | 'healing' | 'aborted'
-export type ServiceStatus = 'starting' | 'ready' | 'timeout' | 'stopped'
+export type ServiceStatus = 'queued' | 'starting' | 'ready' | 'timeout' | 'stopped'
 
 export type RunLifecyclePhase =
   | 'starting-services'

@@ -4,7 +4,7 @@ import path from 'path'
 import { randomUUID } from 'crypto'
 import { spawn, type ChildProcess } from 'child_process'
 import type { FeatureConfig, RepoPrerequisite } from '../../../../../shared/launcher/types'
-import { runGit } from '../../git-repo'
+import { runGit, resolveRepoPath } from '../../git-repo'
 import { encodeClaudeProjectDir } from '../../agent-session-log'
 import { addWorktree, removeWorktree, type WorktreeHandle } from '../repo-worktree'
 import { RunOrchestrator, defaultPlaywrightSpawner, buildServiceSpecs } from '../orchestrator'
@@ -89,7 +89,12 @@ export function createBenchmarkRunner(deps: BenchmarkRunnerDeps) {
     // the untracked sample earlier). Scope the check to the feature dir so
     // unrelated repo-root churn (e.g. package.json from installs) doesn't block
     // a legitimate run. Refuse with a clear error before any work is done.
-    const repoStatus = await runGit(repo.localPath, ['status', '--porcelain', '--', '.'])
+    // Resolve a leading `~` before handing the path to git: execFile's `cwd`
+    // does no shell expansion, so a literal "~/Documents/foo" would point at a
+    // nonexistent dir and git would (wrongly) report "not a git repository".
+    // addWorktree() already resolves the same way (resolveRepoPath).
+    const repoPath = resolveRepoPath(repo.localPath)
+    const repoStatus = await runGit(repoPath, ['status', '--porcelain', '--', '.'])
     if (repoStatus.code !== 0) {
       throw Object.assign(
         new Error(`repo "${repo.name}" at ${repo.localPath} is not a git repository (worktrees require git)`),
@@ -239,6 +244,7 @@ export function createBenchmarkRunner(deps: BenchmarkRunnerDeps) {
       },
 
       setupArms: async (sabotageSha) => {
+        const paths: Partial<Record<'A' | 'B', string>> = {}
         for (const arm of ['A', 'B'] as const) {
           const handle = await addWorktree({
             repoName: repo.name,
@@ -248,7 +254,9 @@ export function createBenchmarkRunner(deps: BenchmarkRunnerDeps) {
           })
           linkNodeModules(handle)
           armHandles[arm] = handle
+          paths[arm] = handle.worktreeRoot
         }
+        return paths
       },
 
       runRace: async (ctx) => {

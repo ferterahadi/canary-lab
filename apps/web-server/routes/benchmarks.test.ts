@@ -1,9 +1,19 @@
-import { describe, it, expect } from 'vitest'
+import fs from 'fs'
+import os from 'os'
+import path from 'path'
+import { afterEach, describe, it, expect, vi } from 'vitest'
 import Fastify from 'fastify'
 import { benchmarkRoutes } from './benchmarks'
+import { launchEditorDir } from '../lib/editor-launch'
+import { addWorktree } from '../lib/runtime/repo-worktree'
+import { loadProjectConfig } from '../lib/runtime/launcher/project-config'
 import type { BenchmarkStore } from '../lib/runtime/benchmark/store'
 import type { SabotageSkill } from '../lib/runtime/benchmark/skills'
 import type { BenchmarkManifest, StartBenchmarkInput } from '../lib/runtime/benchmark/types'
+
+vi.mock('../lib/editor-launch', () => ({ launchEditorDir: vi.fn(() => 'vscode') }))
+vi.mock('../lib/runtime/repo-worktree', () => ({ addWorktree: vi.fn() }))
+vi.mock('../lib/runtime/launcher/project-config', () => ({ loadProjectConfig: vi.fn(() => ({ editor: 'cursor' })) }))
 
 function manifest(over: Partial<BenchmarkManifest> = {}): BenchmarkManifest {
   return {
@@ -34,6 +44,8 @@ function fakeStore(over: Partial<BenchmarkStore> = {}): BenchmarkStore {
 
 async function buildApp(deps: {
   store?: BenchmarkStore
+  logsDir?: string
+  projectRoot?: string
   startBenchmark?: (input: StartBenchmarkInput) => Promise<{ benchmarkId: string }>
   listSkills?: (feature: string) => SabotageSkill[]
   abortBenchmark?: (id: string) => void
@@ -43,6 +55,8 @@ async function buildApp(deps: {
   const app = Fastify()
   await app.register(benchmarkRoutes, {
     store: deps.store ?? fakeStore(),
+    logsDir: deps.logsDir ?? '/logs',
+    projectRoot: deps.projectRoot,
     startBenchmark: deps.startBenchmark ?? (async () => ({ benchmarkId: 'b1' })),
     listSkills: deps.listSkills ?? (() => []),
     abortBenchmark: deps.abortBenchmark ?? (() => {}),
@@ -215,5 +229,175 @@ describe('benchmarkRoutes', () => {
     const miss = await app.inject({ method: 'GET', url: '/api/benchmarks/nope' })
     expect(miss.statusCode).toBe(404)
     await app.close()
+  })
+
+  describe('POST /api/benchmarks/:id/open-worktree', () => {
+    afterEach(() => vi.clearAllMocks())
+
+    const openBody = (target?: string) => ({ method: 'POST' as const, url: '/api/benchmarks/b1/open-worktree', payload: { target } })
+
+    it('404s when the benchmark is unknown', async () => {
+      const app = await buildApp({ store: fakeStore({ get: () => null }) })
+      const res = await app.inject(openBody('frozen'))
+      expect(res.statusCode).toBe(404)
+      await app.close()
+    })
+
+    it('400s on an invalid target', async () => {
+      const app = await buildApp({ store: fakeStore({ get: () => manifest() }) })
+      const res = await app.inject(openBody('bogus'))
+      expect(res.statusCode).toBe(400)
+      expect(res.json()).toEqual({ error: 'target must be "frozen", "A", or "B"' })
+      await app.close()
+    })
+
+    it('frozen 409s when the bug is not frozen yet (no sabotageSha)', async () => {
+      const app = await buildApp({ store: fakeStore({ get: () => manifest({ sabotageSha: undefined }) }) })
+      const res = await app.inject(openBody('frozen'))
+      expect(res.statusCode).toBe(409)
+      expect(res.json()).toEqual({ error: 'the bug is not frozen yet' })
+      await app.close()
+    })
+
+    it('frozen 409s when the benchmark has no feature directory', async () => {
+      const app = await buildApp({ store: fakeStore({ get: () => manifest({ sabotageSha: 'sha', featureDir: undefined }) }) })
+      const res = await app.inject(openBody('frozen'))
+      expect(res.statusCode).toBe(409)
+      expect(res.json()).toEqual({ error: 'benchmark has no feature directory to inspect' })
+      await app.close()
+    })
+
+    it('frozen creates the inspect worktree and opens it', async () => {
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bench-route-'))
+      vi.mocked(addWorktree).mockResolvedValue({ repoName: 'example_todo_api', worktreeRoot: '/inspect/wt', sourceRoot: '/src', localPath: '/inspect/wt' })
+      const app = await buildApp({
+        logsDir: tmp,
+        store: fakeStore({ get: () => manifest({ sabotageSha: 'sha', featureDir: '/feat' }) }),
+      })
+      const res = await app.inject(openBody('frozen'))
+      expect(res.statusCode).toBe(200)
+      expect(res.json()).toEqual({ opened: true, path: '/inspect/wt', editor: 'vscode' })
+      expect(vi.mocked(addWorktree)).toHaveBeenCalledWith(
+        expect.objectContaining({ branch: 'sha', localPath: '/feat' }),
+      )
+      // No projectRoot → editor falls back to 'auto'.
+      expect(vi.mocked(launchEditorDir)).toHaveBeenCalledWith('auto', '/inspect/wt')
+      fs.rmSync(tmp, { recursive: true, force: true })
+      await app.close()
+    })
+
+    it('frozen reuses an existing inspect checkout without calling addWorktree', async () => {
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bench-route-'))
+      const inspectParent = path.join(tmp, 'benchmarks', 'b1', 'worktrees', 'inspect')
+      const existing = path.join(inspectParent, 'app')
+      fs.mkdirSync(existing, { recursive: true })
+      const app = await buildApp({
+        logsDir: tmp,
+        store: fakeStore({ get: () => manifest({ sabotageSha: 'sha', featureDir: '/feat' }) }),
+      })
+      const res = await app.inject(openBody('frozen'))
+      expect(res.statusCode).toBe(200)
+      expect(res.json()).toEqual({ opened: true, path: existing, editor: 'vscode' })
+      expect(vi.mocked(addWorktree)).not.toHaveBeenCalled()
+      fs.rmSync(tmp, { recursive: true, force: true })
+      await app.close()
+    })
+
+    it('frozen 500s when worktree creation throws', async () => {
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bench-route-'))
+      vi.mocked(addWorktree).mockRejectedValue(new Error('git exploded'))
+      const app = await buildApp({
+        logsDir: tmp,
+        store: fakeStore({ get: () => manifest({ sabotageSha: 'sha', featureDir: '/feat' }) }),
+      })
+      const res = await app.inject(openBody('frozen'))
+      expect(res.statusCode).toBe(500)
+      expect(res.json()).toEqual({ error: 'git exploded' })
+      fs.rmSync(tmp, { recursive: true, force: true })
+      await app.close()
+    })
+
+    it('frozen 500s with a stringified non-Error throw', async () => {
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bench-route-'))
+      vi.mocked(addWorktree).mockRejectedValue('plain string boom')
+      const app = await buildApp({
+        logsDir: tmp,
+        store: fakeStore({ get: () => manifest({ sabotageSha: 'sha', featureDir: '/feat' }) }),
+      })
+      const res = await app.inject(openBody('frozen'))
+      expect(res.statusCode).toBe(500)
+      expect(res.json()).toEqual({ error: 'plain string boom' })
+      fs.rmSync(tmp, { recursive: true, force: true })
+      await app.close()
+    })
+
+    it('frozen creates a worktree when the inspect dir exists but holds no checkout', async () => {
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bench-route-'))
+      const inspectParent = path.join(tmp, 'benchmarks', 'b1', 'worktrees', 'inspect')
+      fs.mkdirSync(inspectParent, { recursive: true })
+      fs.writeFileSync(path.join(inspectParent, 'stray.txt'), 'not a dir') // file, not a checkout
+      vi.mocked(addWorktree).mockResolvedValue({ repoName: 'example_todo_api', worktreeRoot: '/inspect/wt', sourceRoot: '/src', localPath: '/inspect/wt' })
+      const app = await buildApp({
+        logsDir: tmp,
+        store: fakeStore({ get: () => manifest({ sabotageSha: 'sha', featureDir: '/feat' }) }),
+      })
+      const res = await app.inject(openBody('frozen'))
+      expect(res.statusCode).toBe(200)
+      expect(res.json()).toEqual({ opened: true, path: '/inspect/wt', editor: 'vscode' })
+      expect(vi.mocked(addWorktree)).toHaveBeenCalledTimes(1)
+      fs.rmSync(tmp, { recursive: true, force: true })
+      await app.close()
+    })
+
+    it('arm 409s when the arm worktree is gone', async () => {
+      const app = await buildApp({
+        store: fakeStore({ get: () => manifest({ arms: [{ arm: 'A', mode: 'harness', runIds: [], worktreePath: '/does/not/exist' }] }) }),
+      })
+      const res = await app.inject(openBody('A'))
+      expect(res.statusCode).toBe(409)
+      expect(res.json()).toEqual({ error: 'arm worktree is no longer available — it is removed when the benchmark finishes' })
+      await app.close()
+    })
+
+    it('arm opens the live worktree, using the configured editor', async () => {
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bench-arm-'))
+      const app = await buildApp({
+        projectRoot: '/proj',
+        store: fakeStore({ get: () => manifest({ arms: [{ arm: 'B', mode: 'baseline', runIds: [], worktreePath: tmp }] }) }),
+      })
+      const res = await app.inject(openBody('B'))
+      expect(res.statusCode).toBe(200)
+      expect(res.json()).toEqual({ opened: true, path: tmp, editor: 'vscode' })
+      expect(vi.mocked(loadProjectConfig)).toHaveBeenCalledWith('/proj')
+      expect(vi.mocked(launchEditorDir)).toHaveBeenCalledWith('cursor', tmp)
+      fs.rmSync(tmp, { recursive: true, force: true })
+      await app.close()
+    })
+
+    it('reports opened:false (200) when the editor launch throws', async () => {
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bench-arm-'))
+      vi.mocked(launchEditorDir).mockImplementation(() => { throw new Error('no editor') })
+      const app = await buildApp({
+        store: fakeStore({ get: () => manifest({ arms: [{ arm: 'A', mode: 'harness', runIds: [], worktreePath: tmp }] }) }),
+      })
+      const res = await app.inject(openBody('A'))
+      expect(res.statusCode).toBe(200)
+      expect(res.json()).toEqual({ opened: false, path: tmp, error: 'no editor' })
+      fs.rmSync(tmp, { recursive: true, force: true })
+      await app.close()
+    })
+
+    it('stringifies a non-Error editor-launch throw in the opened:false body', async () => {
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bench-arm-'))
+      vi.mocked(launchEditorDir).mockImplementation(() => { throw 'spawn string boom' })
+      const app = await buildApp({
+        store: fakeStore({ get: () => manifest({ arms: [{ arm: 'A', mode: 'harness', runIds: [], worktreePath: tmp }] }) }),
+      })
+      const res = await app.inject(openBody('A'))
+      expect(res.statusCode).toBe(200)
+      expect(res.json()).toEqual({ opened: false, path: tmp, error: 'spawn string boom' })
+      fs.rmSync(tmp, { recursive: true, force: true })
+      await app.close()
+    })
   })
 })

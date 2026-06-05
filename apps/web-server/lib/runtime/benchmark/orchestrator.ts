@@ -26,8 +26,10 @@ export interface BenchmarkOrchestratorDeps {
   sabotage: () => Promise<{ sabotageSha: string; diff: string }>
   /** Persist the frozen sabotage diff artifact. */
   writeDiff: (diff: string) => void
-  /** Create the two arm worktrees checked out at the sabotage SHA. */
-  setupArms: (sabotageSha: string) => Promise<void>
+  /** Create the two arm worktrees checked out at the sabotage SHA. Returns each
+   *  arm's worktree root so the manifest can expose it (the UI opens it in the
+   *  user's editor to watch healing live). */
+  setupArms: (sabotageSha: string) => Promise<Partial<Record<'A' | 'B', string>>>
   /** Run the parallel-arms race; stream results back via the callbacks. */
   runRace: (ctx: RaceContext) => Promise<BenchmarkReport>
   /** ISO timestamp source (injected for determinism in tests). */
@@ -62,8 +64,14 @@ export class BenchmarkOrchestrator {
       m = { ...m, sabotageSha, status: 'running' }
       d.persist(m)
 
-      await d.setupArms(sabotageSha)
+      const armPaths = (await d.setupArms(sabotageSha)) ?? {}
       if (d.isAborted?.()) return finalizeAborted()
+      // Record each arm's worktree root so the UI can open it in the editor.
+      m = {
+        ...m,
+        arms: m.arms.map((a) => (armPaths[a.arm] ? { ...a, worktreePath: armPaths[a.arm] } : a)),
+      }
+      d.persist(m)
 
       const report = await d.runRace({
         sabotageSha,

@@ -72,6 +72,8 @@ describe('LogCleanupPage', () => {
 
   it('a preset selects matching rows and excludes active ones', async () => {
     await mount()
+    // Presets live behind the "Quick select" dropdown — open it, then pick one.
+    await act(async () => { buttonByText('Quick select')?.click() })
     await act(async () => { buttonByText('Orphaned folders')?.click() })
     expect(rowCheckbox('2026-05-04T1000-dddd')?.checked).toBe(true)
     expect(rowCheckbox('2026-05-01T1000-aaaa')?.checked).toBe(false)

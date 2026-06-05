@@ -7,6 +7,7 @@ import { EventEmitter } from 'events'
 import {
   RunOrchestrator,
   buildServiceSpecs,
+  buildQueuedServiceEntries,
   collectPortSlots,
   type ServiceSpec,
 } from './orchestrator'
@@ -230,6 +231,39 @@ describe('buildServiceSpecs', () => {
     })
     const specs = buildServiceSpecs(f, runDir, 'local', { repoPathOverrides: { r: '/wt/r' } })
     expect(specs[0].cwd).toBe('/wt/r')
+  })
+
+  it('buildQueuedServiceEntries lists feature services with queued status, no ports/url', () => {
+    const f = makeFeature({
+      repos: [{
+        name: 'r',
+        localPath: tmpDir,
+        startCommands: [{
+          command: 'serve',
+          name: 'svc',
+          ports: [{ name: 'api', env: 'PORT' }],
+          healthCheck: { http: { url: 'http://localhost:${port.api}/' } },
+        }],
+      }],
+    })
+    const entries = buildQueuedServiceEntries(f, runDir, 'local')
+    expect(entries).toHaveLength(1)
+    expect(entries[0]).toMatchObject({
+      repoName: 'r',
+      name: 'svc',
+      safeName: 'svc',
+      command: 'serve',
+      status: 'queued',
+    })
+    // No port allocated yet, so the run-specific allocation + http URL are absent.
+    expect(entries[0].allocatedPorts).toBeUndefined()
+    expect(entries[0].healthUrl).toBeUndefined()
+    expect(entries[0].logPath).toBe(buildRunPaths(runDir).serviceLog('svc'))
+  })
+
+  it('buildQueuedServiceEntries returns [] for a feature with no bootable services', () => {
+    const f = makeFeature({ repos: [{ name: 'r', localPath: tmpDir }] })
+    expect(buildQueuedServiceEntries(f, runDir, 'local')).toEqual([])
   })
 
   it('collectPortSlots gathers unique declared slots for the env', () => {

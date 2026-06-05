@@ -95,6 +95,28 @@ describe('BenchmarkOrchestrator.run', () => {
     expect(liveWithRunId).toBeDefined()
   })
 
+  it('records each arm worktree path returned by setupArms', async () => {
+    let final: BenchmarkManifest | undefined
+    const orch = new BenchmarkOrchestrator({
+      manifest: makeManifest({
+        arms: [
+          { arm: 'A', mode: 'harness', runIds: [] },
+          { arm: 'B', mode: 'baseline', runIds: [] },
+        ],
+      }),
+      persist: (m) => { final = m },
+      sabotage: async () => ({ sabotageSha: 'sha', diff: 'D' }),
+      writeDiff: () => {},
+      // Only arm A gets a path back — arm B is left untouched (falsy branch).
+      setupArms: async () => ({ A: '/wt/arm-A' }),
+      runRace: async () => REPORT,
+      now: () => 't',
+    })
+    await orch.run()
+    expect(final?.arms.find((a) => a.arm === 'A')?.worktreePath).toBe('/wt/arm-A')
+    expect(final?.arms.find((a) => a.arm === 'B')?.worktreePath).toBeUndefined()
+  })
+
   it('marks the run aborted (not done) when isAborted() is true', async () => {
     let final: BenchmarkManifest | undefined
     const orch = new BenchmarkOrchestrator({

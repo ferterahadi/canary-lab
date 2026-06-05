@@ -4,6 +4,10 @@ import path from 'path'
 import type { RunDetail } from '../lib/run-store'
 import type { RunStore, OrchestratorLike, RestartHealResult, RestartRunResult, StartRunOutcome } from '../lib/run-store'
 import { loadFeatures } from '../lib/feature-loader'
+import { getGitRoot, resolveRepoPath } from '../lib/git-repo'
+import { removeWorktree } from '../lib/runtime/repo-worktree'
+import { listWorktrees, isUnder } from '../lib/runtime/worktree-inventory'
+import { launchEditorDir } from '../lib/editor-launch'
 import { buildRunPaths, runDirFor } from '../lib/runtime/run-paths'
 import { generateEvaluationRewriteWithAgent, type EvaluationRewrite } from '../lib/test-review-export'
 import { buildEvaluationExportArchive } from '../lib/evaluation-export-archive'
@@ -71,6 +75,10 @@ export interface RunsRouteDeps {
   /** Cancel a run still waiting in the admission queue (no orchestrator yet).
    *  Returns true when it was queued and is now aborted. */
   cancelQueuedRun?(runId: string): boolean
+  /** Whether a worktree's owning run/benchmark is still active (non-terminal),
+   *  so the cleanup UI can refuse to remove a worktree in use. Wired in the
+   *  server factory where both the run + benchmark stores are in scope. */
+  isWorktreeOwnerActive?(kind: 'run' | 'benchmark', id: string): boolean
   broker?: Pick<ExternalHealBroker, 'claim'>
   workspaceEvents?: WorkspaceEventPublisher
   restartHeal?(runId: string, text: string): Promise<RestartHealResult>
@@ -660,6 +668,81 @@ export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Pro
     return deps.store.cleanupListing()
   })
 
+  // GET /api/cleanup/worktrees — every git worktree canary-lab created under the
+  // logs dir (per-run isolation, benchmark arm/staging, inspect snapshots, plus
+  // stale ones left by crashed runs). `active` worktrees belong to a still-
+  // running run/benchmark and must not be removed out from under it.
+  app.get('/api/cleanup/worktrees', async () => {
+    const sourceRoots = await featureRepoRoots(deps.featuresDir)
+    const entries = await listWorktrees({ logsDir: deps.store.logsDir, sourceRoots, now: Date.now() })
+    return {
+      worktrees: entries.map((e) => ({
+        ...e,
+        active:
+          (e.ownerKind === 'run' || e.ownerKind === 'benchmark') && e.ownerId
+            ? !!deps.isWorktreeOwnerActive?.(e.ownerKind, e.ownerId)
+            : false,
+      })),
+    }
+  })
+
+  // POST /api/cleanup/worktrees/open — open a worktree folder in the user's
+  // editor ("visit"). Guarded to paths inside the logs dir. Best-effort launch.
+  app.post<{ Body: { path?: string } }>('/api/cleanup/worktrees/open', async (req, reply) => {
+    const target = req.body?.path
+    if (!target || typeof target !== 'string') {
+      reply.code(400)
+      return { error: 'path is required' }
+    }
+    if (!isUnder(target, deps.store.logsDir)) {
+      reply.code(400)
+      return { error: 'path must be inside the logs directory' }
+    }
+    if (!fs.existsSync(target)) {
+      reply.code(404)
+      return { error: 'worktree directory not found' }
+    }
+    const editor = deps.projectRoot ? loadProjectConfig(deps.projectRoot).editor : 'auto'
+    try {
+      const usedEditor = launchEditorDir(editor, target)
+      return { opened: true, path: target, editor: usedEditor }
+    } catch (err) {
+      reply.code(200)
+      return { opened: false, path: target, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
+  // DELETE /api/cleanup/worktrees — remove one worktree via `git worktree
+  // remove` (+ prune), guarded to paths inside the logs dir and not in use.
+  app.delete<{ Body: { path?: string } }>('/api/cleanup/worktrees', async (req, reply) => {
+    const target = req.body?.path
+    if (!target || typeof target !== 'string') {
+      reply.code(400)
+      return { error: 'path is required' }
+    }
+    if (!isUnder(target, deps.store.logsDir)) {
+      reply.code(400)
+      return { error: 'path must be inside the logs directory' }
+    }
+    const sourceRoots = await featureRepoRoots(deps.featuresDir)
+    const entries = await listWorktrees({ logsDir: deps.store.logsDir, sourceRoots, now: Date.now() })
+    const entry = entries.find((e) => e.path === target)
+    if (!entry) {
+      reply.code(404)
+      return { error: 'worktree not found' }
+    }
+    const active =
+      (entry.ownerKind === 'run' || entry.ownerKind === 'benchmark') && entry.ownerId
+        ? !!deps.isWorktreeOwnerActive?.(entry.ownerKind, entry.ownerId)
+        : false
+    if (active) {
+      reply.code(409)
+      return { error: 'worktree belongs to an active run — abort it first' }
+    }
+    await removeWorktree({ sourceRoot: entry.sourceRoot, worktreeRoot: entry.path })
+    return { removed: true, freedBytes: entry.bytes }
+  })
+
   // POST /api/runs/:runId/trim — reclaim disk by deleting a terminal run's
   // Playwright artifact dirs while keeping the run in history. Same active/
   // stale policy as DELETE (enforced in `RunStore.trimArtifacts`), mapped to
@@ -680,6 +763,21 @@ export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Pro
     }
     return { freedBytes: result.freedBytes ?? 0 }
   })
+}
+
+// Distinct git toplevels for every repo declared by a feature — the source
+// repos whose `git worktree list` we scan for canary-lab worktrees.
+async function featureRepoRoots(featuresDir: string): Promise<string[]> {
+  const roots = new Set<string>()
+  for (const feature of loadFeatures(featuresDir)) {
+    for (const repo of feature.repos ?? []) {
+      try {
+        const root = await getGitRoot(resolveRepoPath(repo.localPath))
+        if (root) roots.add(root)
+      } catch { /* skip repos that aren't resolvable */ }
+    }
+  }
+  return [...roots]
 }
 
 function contentTypeFor(filePath: string): string {
