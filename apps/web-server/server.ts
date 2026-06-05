@@ -42,7 +42,7 @@ import {
 import { WizardAgentRegistry } from './lib/wizard-agent-registry'
 import { generateRunId } from './lib/runtime/run-id'
 import { runDirFor, buildRunPaths } from './lib/runtime/run-paths'
-import { RunOrchestrator, collectPortSlots, buildServiceSpecs } from './lib/runtime/orchestrator'
+import { RunOrchestrator, collectPortSlots, buildServiceSpecs, buildQueuedServiceEntries } from './lib/runtime/orchestrator'
 import { allocatePorts } from './lib/runtime/port-allocator'
 import { resolvePortTokens } from './lib/runtime/launcher/interpolate'
 import { RunScheduler, type SchedulerActiveRun } from './lib/runtime/run-scheduler'
@@ -563,7 +563,10 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
       startedAt,
       status: 'queued',
       healCycles: 0,
-      services: [],
+      // Surface the services that will boot on promotion (status 'queued', no
+      // ports yet) so the queued run's Overview isn't a bare "No services
+      // configured". Promotion overwrites this with the real running manifest.
+      services: buildQueuedServiceEntries(feature, runDirFor(logsDir, runId), env),
       repoPaths: normalizeRepoPaths((feature.repos ?? []).map((r) => r.localPath)),
       queueReason: reason,
       heartbeatAt: startedAt,
@@ -583,6 +586,14 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
 	    store: runStore,
 	    broker: externalHealBroker,
       workspaceEvents,
+      isWorktreeOwnerActive: (kind, id) => {
+        if (kind === 'run') {
+          const d = runStore.get(id)
+          return d ? isActiveRunStatus(d.manifest.status) : false
+        }
+        const m = benchmarkStore.get(id)
+        return m ? (m.status === 'running' || m.status === 'sabotaging' || m.status === 'ready') : false
+      },
 	    startRun: async (
       featureName: string,
       env?: string,
@@ -1083,6 +1094,8 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
   })
   await app.register(benchmarkRoutes, {
     store: benchmarkStore,
+    logsDir,
+    projectRoot: opts.projectRoot,
     startBenchmark: benchmarkRunner.startBenchmark,
     abortBenchmark: benchmarkRunner.abort,
     readSabotageLog: (id) => {

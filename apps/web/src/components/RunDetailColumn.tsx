@@ -1285,6 +1285,7 @@ function SectionHeader({ children }: { children: React.ReactNode }) {
 }
 
 const STATUS_COLOR: Record<ServiceStatus, string> = {
+  queued: 'var(--text-muted)',
   ready: 'var(--success)',
   starting: 'var(--warning)',
   timeout: 'var(--danger)',
@@ -1468,6 +1469,7 @@ function ServiceStatusDot({ status }: { status?: ServiceStatus }) {
     status === 'ready' ? 'var(--success)'      // green
     : status === 'starting' ? 'var(--warning)' // yellow (pulses)
     : status === 'timeout' ? 'var(--danger)'  // red
+    : status === 'queued' ? 'var(--text-muted)' // grey (waiting in queue)
     : 'transparent'                     // stopped or undefined
   return (
     <span

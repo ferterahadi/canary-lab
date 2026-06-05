@@ -1,4 +1,5 @@
 import { forwardRef, useCallback, useEffect, useRef, useState } from 'react'
+import type { ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import type { RunDetail } from '../api/types'
 import * as api from '../api/client'
@@ -10,7 +11,7 @@ import { WizardTaskStatus } from './WizardTaskStatus'
 import { RunsListDialog } from './RunsListDialog'
 import { ServicesDialog } from './ServicesDialog'
 import { BenchmarkWindow } from './BenchmarkWindow'
-import { StatusDot, type StatusDotState } from './config/atoms'
+import { StatusDot, ChevronRightIcon, type StatusDotState } from './config/atoms'
 
 interface Props {
   activeRunDetail: RunDetail | null
@@ -473,6 +474,7 @@ const McpHealthMenu = forwardRef<HTMLDivElement, {
           })}
         </div>
       </div>
+      <McpConnectGuide profile={selectedProfile} healthy={health.state === 'ready'} />
       <div className="border-b px-3 py-1.5" style={{ borderColor: 'var(--border-default)' }}>
         <div className="flex items-center justify-between gap-2 text-[10px] uppercase" style={{ color: 'var(--text-muted)', letterSpacing: 0 }}>
           <span>Tools</span>
@@ -512,6 +514,159 @@ const McpHealthMenu = forwardRef<HTMLDivElement, {
     </div>
   )
 })
+
+// Disclosure that rehearses the README "how to connect" steps without making
+// the user leave the UI. Collapsed by default so the tools list keeps its
+// real estate; the open/closed choice persists across opens. The endpoint URL
+// is derived from the live origin (UI + MCP share localhost:7421) and reflects
+// the currently-selected profile so a copied URL is ready to paste verbatim.
+function McpConnectGuide({ profile, healthy }: { profile: McpProfile; healthy: boolean }) {
+  const [open, setOpen] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('cl-mcp-connect-open') === 'true'
+    } catch {
+      return false
+    }
+  })
+  const endpoint = `${window.location.origin}/mcp?profile=${profile}`
+  const toggle = (): void => {
+    setOpen((current) => {
+      const next = !current
+      try {
+        localStorage.setItem('cl-mcp-connect-open', String(next))
+      } catch {
+        /* storage unavailable — non-fatal */
+      }
+      return next
+    })
+  }
+  return (
+    <div className="border-b" style={{ borderColor: 'var(--border-default)' }}>
+      <button
+        type="button"
+        onClick={toggle}
+        aria-expanded={open}
+        className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left"
+      >
+        <span
+          className="flex items-center gap-1.5 text-[10px] uppercase"
+          style={{ color: 'var(--text-muted)', letterSpacing: 0 }}
+        >
+          <PlugIcon />
+          Connect a client
+        </span>
+        <span
+          aria-hidden="true"
+          className="transition-transform duration-150"
+          style={{ color: 'var(--text-muted)', transform: open ? 'rotate(90deg)' : 'none' }}
+        >
+          <ChevronRightIcon />
+        </span>
+      </button>
+      {open && (
+        <ol className="flex flex-col gap-2 px-3 pb-3 pt-0.5">
+          <ConnectStep n={1} title="Run setup in your workspace">
+            <CopyField value="npx canary-lab setup --force" label="setup command" />
+            <p className="mt-1 text-[10px]" style={{ color: 'var(--text-muted)' }}>
+              Registers the Canary Lab tools with supported AI agents.
+            </p>
+          </ConnectStep>
+          <ConnectStep n={2} title="Or point a custom client here">
+            <CopyField value={endpoint} label="MCP endpoint URL" />
+            <p className="mt-1 text-[10px]" style={{ color: healthy ? 'var(--text-muted)' : 'var(--warning, var(--text-muted))' }}>
+              {healthy
+                ? 'Streamable HTTP. Switch the profile above to change the tool set.'
+                : 'Endpoint is offline — start the UI server, then re-check.'}
+            </p>
+          </ConnectStep>
+          <ConnectStep n={3} title="Restart your AI agent">
+            <p className="mt-0.5 text-[10px]" style={{ color: 'var(--text-muted)' }}>
+              Start a fresh session so it rediscovers the tools. <span style={{ fontFamily: 'var(--font-mono)' }}>--force</span> refreshes a registration that didn&apos;t take.
+            </p>
+          </ConnectStep>
+        </ol>
+      )}
+    </div>
+  )
+}
+
+function ConnectStep({ n, title, children }: { n: number; title: string; children: ReactNode }) {
+  return (
+    <li className="flex gap-2.5">
+      <span
+        className="mt-px flex h-4 w-4 shrink-0 items-center justify-center rounded text-[10px] font-semibold tabular-nums"
+        style={{
+          background: 'color-mix(in srgb, var(--accent) 16%, transparent)',
+          color: 'var(--text-secondary)',
+        }}
+      >
+        {n}
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="text-[11px] font-medium" style={{ color: 'var(--text-primary)' }}>
+          {title}
+        </div>
+        {children}
+      </div>
+    </li>
+  )
+}
+
+// Mono command box with a click-to-copy affordance; mirrors the Copy/Copied
+// text-button pattern from ManualHealBanner so the copy language is uniform.
+function CopyField({ value, label }: { value: string; label: string }) {
+  const [copied, setCopied] = useState(false)
+  const onCopy = async (): Promise<void> => {
+    try {
+      await navigator.clipboard.writeText(value)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    } catch {
+      /* clipboard unavailable — non-fatal */
+    }
+  }
+  return (
+    <div
+      className="mt-1 flex items-stretch overflow-hidden rounded border"
+      style={{
+        borderColor: 'var(--border-default)',
+        background: 'color-mix(in srgb, var(--bg-muted) 44%, transparent)',
+      }}
+    >
+      <code
+        className="min-w-0 flex-1 truncate px-2 py-1 text-[11px]"
+        style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }}
+        title={value}
+      >
+        {value}
+      </code>
+      <button
+        type="button"
+        onClick={onCopy}
+        aria-label={`Copy ${label}`}
+        className="shrink-0 border-l px-2 text-[10px] uppercase transition-colors"
+        style={{
+          borderColor: 'var(--border-default)',
+          color: copied ? 'var(--success)' : 'var(--text-muted)',
+          letterSpacing: 0,
+        }}
+      >
+        {copied ? 'Copied' : 'Copy'}
+      </button>
+    </div>
+  )
+}
+
+function PlugIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M9 2v6" />
+      <path d="M15 2v6" />
+      <path d="M6 8h12v3a6 6 0 0 1-12 0V8Z" />
+      <path d="M12 17v5" />
+    </svg>
+  )
+}
 
 function workspaceNameFromRoot(projectRoot?: string): string {
   if (!projectRoot) return 'Checking'

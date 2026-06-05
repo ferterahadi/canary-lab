@@ -281,6 +281,15 @@ body {
   to   { opacity: 1; transform: translateY(0); }
 }
 
+@keyframes cl-spin {
+  to { transform: rotate(360deg); }
+}
+
+.cl-menu-item:hover {
+  background: var(--bg-input);
+  color: var(--text-primary);
+}
+
 .feature-row__cog {
   opacity: 0;
   transition: opacity 150ms ease;

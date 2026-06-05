@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import * as api from '../api/client'
 import type { Feature } from '../api/types'
-import type { BenchmarkArm, BenchmarkManifest, SabotageLevel, SabotageSkillSummary } from '../api/benchmark-types'
+import type { BenchmarkArm, BenchmarkManifest, BenchmarkReport, SabotageLevel, SabotageSkillSummary } from '../api/benchmark-types'
 import { useBenchmark, useBenchmarks } from '../state/BenchmarkContext'
 import { RunDetailColumn } from './RunDetailColumn'
 import { AgentSessionView } from './AgentSessionView'
@@ -35,7 +35,7 @@ const ARM_MATRIX: { section: string; note: string; rows: ArmRow[] }[] = [
     ],
   },
   {
-    section: 'canary-lab failure context — harness only',
+    section: 'Canary Lab failure context — harness only',
     note: 'curated & captured by the harness — the one variable under test',
     rows: [
       { label: 'heal-index', detail: 'failed tests, assertions, editable repos, exact slice paths', harness: true, baseline: false },
@@ -93,7 +93,9 @@ function ArmMatrixTable() {
 // to breathe instead of cluttering the benchmark config form.
 function ArmComparisonPage({ onBack }: { onBack: () => void }) {
   return (
-    <div style={{ flex: 1, overflow: 'auto', padding: '20px 22px 56px', display: 'flex', justifyContent: 'center' }}>
+    // alignItems:flex-start: see ConfigScreen — default `stretch` would pin
+    // this child to the visible height and swallow the bottom padding.
+    <div style={{ flex: 1, overflow: 'auto', padding: '20px 22px 96px', display: 'flex', justifyContent: 'center', alignItems: 'flex-start' }}>
       <div style={{ width: 'min(820px, 100%)' }}>
         <button
           type="button"
@@ -206,7 +208,12 @@ function ConfigScreen({
   return (
     <>
       <BenchmarkHeader stage={0} title="New benchmark" onClose={onClose} />
-      <div style={{ flex: 1, overflow: 'auto', padding: '24px 22px 56px', display: 'flex', justifyContent: 'center' }}>
+      {/* alignItems:flex-start is load-bearing: without it the default `stretch`
+          pins this row-flex child to the container's *visible* height, so its
+          content overflows past the scroll region and the bottom padding (the
+          space under the Start-benchmark footer) is swallowed. flex-start lets
+          the child grow to content+padding so the footer gets real breathing room. */}
+      <div style={{ flex: 1, overflow: 'auto', padding: '24px 22px 96px', display: 'flex', justifyContent: 'center', alignItems: 'flex-start' }}>
         <div style={{ width: 'min(720px, 100%)' }}>
           <Label>Sabotage skill</Label>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
@@ -248,7 +255,17 @@ function ConfigScreen({
           )}
 
           <Field label="Feature">
-            <select value={feature} onChange={(e) => setFeature(e.target.value)} style={selectStyle}>
+            <select
+              value={feature}
+              onChange={(e) => {
+                // The start error (e.g. "uncommitted changes") is specific to
+                // the feature that was attempted — switching feature makes it
+                // stale, so drop it on change.
+                setError(null)
+                setFeature(e.target.value)
+              }}
+              style={selectStyle}
+            >
               {features.map((f) => <option key={f.name} value={f.name}>{f.name}</option>)}
             </select>
           </Field>
@@ -373,6 +390,19 @@ function BenchmarkDetail({ id, onClose, onNew }: { id: string; onClose: () => vo
         onClose={onClose}
       />
       <div style={{ flex: 1, overflow: 'auto', padding: 18 }}>
+        {m.sabotageSha && !sabotaging && m.status !== 'error' && (
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+            <button
+              type="button"
+              className="cl-button"
+              title="Open a pristine checkout of the frozen (destroyed) code in your editor"
+              onClick={() => void openWorktreeAction(m.benchmarkId, 'frozen')}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 7, padding: '6px 12px', fontSize: 12 }}
+            >
+              <OpenEditorIcon /> Open frozen bug
+            </button>
+          </div>
+        )}
         {sabotaging ? (
           <SetupView m={m} />
         ) : m.status === 'error' ? (
@@ -452,57 +482,218 @@ function CodexSabotageLog({ benchmarkId }: { benchmarkId: string }) {
 }
 
 function RaceView({ m, armFocus, setArmFocus }: { m: BenchmarkManifest; armFocus: BenchmarkArm; setArmFocus: (a: BenchmarkArm) => void }) {
-  const armRunId = useMemo(() => {
-    const arm = m.arms.find((a) => a.arm === armFocus)
-    return arm?.runIds[arm.runIds.length - 1] ?? null
-  }, [m, armFocus])
+  const focusArm = m.arms.find((a) => a.arm === armFocus)
+  const armRunId = focusArm?.runIds[focusArm.runIds.length - 1] ?? null
+  const isHarness = armFocus === 'A'
+  const accent = isHarness ? 'var(--boot)' : 'var(--accent)'
+  const armLabel = isHarness ? '🐤 Harness arm' : '⚙ Baseline arm'
 
   return (
     <>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
+      {/* The cards ARE the arm selector — click one to focus it; the focused
+          card carries an accent ring and drives the run detail below. We used
+          to render a second pill toggle here with the same two labels, but it
+          just duplicated the card headers, so it's gone. */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 14 }}>
         {(['A', 'B'] as const).map((arm) => (
           <ArmCard key={arm} m={m} arm={arm} focused={armFocus === arm} onClick={() => setArmFocus(arm)} />
         ))}
       </div>
-      <div style={{ display: 'inline-flex', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)', overflow: 'hidden', marginBottom: 11 }}>
-        {(['A', 'B'] as const).map((arm) => (
-          <button key={arm} onClick={() => setArmFocus(arm)} style={{
-            background: armFocus === arm ? 'var(--bg-selected)' : 'var(--bg-surface)',
-            color: armFocus === arm ? 'var(--text-primary)' : 'var(--text-secondary)',
-            border: 'none', borderRight: arm === 'A' ? '1px solid var(--border-default)' : 'none',
-            padding: '7px 15px', fontSize: 12, fontWeight: 500, cursor: 'pointer',
-          }}>{arm === 'A' ? '🐤 Harness arm' : '⚙ Baseline arm'}</button>
-        ))}
-      </div>
-      <div style={{ border: '1px solid var(--border-default)', borderRadius: 'var(--radius-lg)', overflow: 'hidden', height: 460 }}>
-        <RunDetailColumn runId={armRunId} />
+      <div style={{ border: '1px solid var(--border-default)', borderRadius: 'var(--radius-lg)', overflow: 'hidden', height: 460, display: 'flex', flexDirection: 'column' }}>
+        {/* Header strip names the arm whose run is shown — the identity moved
+            here (a label for the panel) instead of a redundant toggle. */}
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flex: 'none',
+          padding: '8px 12px', borderBottom: '1px solid var(--border-default)',
+          background: `color-mix(in srgb, ${accent} 7%, var(--bg-surface))`,
+        }}>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 12, fontWeight: 600, minWidth: 0 }}>
+            <span style={{ width: 7, height: 7, borderRadius: 9999, background: accent, flex: 'none' }} />
+            <span style={{ color: accent }}>{armLabel}</span>
+            <span style={{ color: 'var(--text-muted)', fontWeight: 500 }}>· run detail</span>
+          </span>
+          <span style={{ fontSize: 10.5, color: 'var(--text-muted)', flex: 'none', whiteSpace: 'nowrap' }}>
+            click an arm above to switch
+          </span>
+        </div>
+        <div style={{ flex: 1, minHeight: 0 }}>
+          {armRunId
+            ? <RunDetailColumn runId={armRunId} />
+            : <ArmEmptyState arm={armFocus} accent={accent} status={m.status} />}
+        </div>
       </div>
     </>
   )
 }
 
+// Benchmark-aware placeholder for the run-detail panel before an arm has any
+// run. Replaces RunDetailColumn's generic "Select a run" void, which was both
+// ugly (a 460px empty box) and misleading here — a card is always focused, the
+// arm just hasn't produced a run yet.
+function ArmEmptyState({ arm, accent, status }: { arm: BenchmarkArm; accent: string; status: BenchmarkManifest['status'] }) {
+  const isHarness = arm === 'A'
+  const label = isHarness ? 'Harness arm' : 'Baseline arm'
+  const emoji = isHarness ? '🐤' : '⚙'
+  const waiting = status === 'running' || status === 'sabotaging' || status === 'ready'
+  return (
+    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 11, padding: 24, textAlign: 'center' }}>
+      <div style={{
+        width: 46, height: 46, borderRadius: 9999, display: 'grid', placeItems: 'center', fontSize: 22,
+        background: `color-mix(in srgb, ${accent} 13%, transparent)`,
+        border: `1px solid color-mix(in srgb, ${accent} 34%, transparent)`,
+      }}>{emoji}</div>
+      <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>No run for the {label} yet</div>
+      <div style={{ fontSize: 11.5, color: 'var(--text-muted)', maxWidth: 300, lineHeight: 1.5 }}>
+        {waiting
+          ? 'Its run streams in here the moment this arm starts — sabotage finishes first, then both arms race.'
+          : 'This arm never produced a run.'}
+      </div>
+    </div>
+  )
+}
+
+// Open a benchmark worktree in the user's editor. Best-effort: if the editor
+// couldn't be launched, surface the path so it can be opened by hand.
+async function openWorktreeAction(id: string, target: 'frozen' | 'A' | 'B'): Promise<void> {
+  try {
+    const r = await api.openBenchmarkWorktree(id, target)
+    if (!r.opened) {
+      window.prompt('Could not launch your editor automatically — copy this path:', r.path)
+    }
+  } catch (e) {
+    window.alert(e instanceof Error ? e.message : String(e))
+  }
+}
+
+// Small "open in editor" affordance (↗ in a framed box) used on arm cards and
+// the frozen-bug button.
+function OpenEditorIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M15 3h6v6" />
+      <path d="M10 14 21 3" />
+      <path d="M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5" />
+    </svg>
+  )
+}
+
+// Outcome palette — shared by the per-iteration blocks and the aggregate.
+const HEALED = 'rgb(52,211,153)'
+const FAILED = 'rgb(251,113,133)'
+const RUNNING = 'rgb(251,191,36)'
+
+type IterState = 'healed' | 'failed' | 'running' | 'pending'
+
+/**
+ * One iteration's outcome as a self-describing block. Each iteration is its own
+ * cell — number on top, an outcome dot, then that iteration's heal-cycles and
+ * wall-clock — so "13s on which iteration?" is never ambiguous. Colour alone
+ * carries the state at a glance; the full breakdown lives in the tooltip.
+ */
+function IterationBlock({ iter, state, cycles, seconds, delayMs }: {
+  iter: number; state: IterState; cycles?: number; seconds?: number; delayMs: number
+}) {
+  const color = state === 'healed' ? HEALED : state === 'failed' ? FAILED : state === 'running' ? RUNNING : 'var(--text-muted)'
+  const tint = state === 'pending' ? 'transparent' : `color-mix(in srgb, ${color} 12%, transparent)`
+  const glyph = state === 'healed' ? '✓' : state === 'failed' ? '✗' : state === 'running' ? '' : '·'
+  const tip = `Iteration ${iter} · ${
+    state === 'healed' ? `healed in ${cycles} heal ${cycles === 1 ? 'cycle' : 'cycles'}, ${seconds}s`
+      : state === 'failed' ? `failed after ${cycles} heal ${cycles === 1 ? 'cycle' : 'cycles'}, ${seconds}s`
+        : state === 'running' ? 'in progress…' : 'not started yet'}`
+  return (
+    <div
+      title={tip}
+      style={{
+        flex: '1 1 0', minWidth: 48, borderRadius: 'var(--radius-md)',
+        border: `1px solid ${state === 'pending' ? 'var(--border-default)' : `color-mix(in srgb, ${color} 42%, transparent)`}`,
+        borderStyle: state === 'pending' ? 'dashed' : 'solid',
+        background: tint, padding: '6px 4px 5px', textAlign: 'center',
+        animation: 'fm-fade-up 200ms ease-out both', animationDelay: `${delayMs}ms`,
+      }}
+    >
+      <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: '.5px', color: 'var(--text-muted)', textTransform: 'uppercase' }}>iter {iter}</div>
+      <div style={{ height: 17, display: 'flex', alignItems: 'center', justifyContent: 'center', marginTop: 1 }}>
+        {state === 'running'
+          ? <span className="canary-pulse" style={{ width: 7, height: 7, borderRadius: 9999, background: RUNNING, display: 'inline-block' }} />
+          : <span style={{ fontSize: 13, lineHeight: 1, fontWeight: 700, color }}>{glyph}</span>}
+      </div>
+      <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 600, color: state === 'pending' ? 'var(--text-muted)' : 'var(--text-primary)', marginTop: 2 }}>
+        {state === 'healed' || state === 'failed' ? `${seconds}s` : state === 'running' ? '···' : '—'}
+      </div>
+      <div style={{ fontSize: 9.5, color: 'var(--text-muted)', marginTop: 1, minHeight: 12 }}>
+        {state === 'healed' || state === 'failed' ? `${cycles} cyc` : ''}
+      </div>
+    </div>
+  )
+}
+
 function ArmCard({ m, arm, focused, onClick }: { m: BenchmarkManifest; arm: BenchmarkArm; focused: boolean; onClick: () => void }) {
   const isHarness = arm === 'A'
+  const accent = isHarness ? 'var(--boot)' : 'var(--accent)'
   const results = m.results.filter((r) => r.arm === arm)
-  const last = results[results.length - 1]
-  const status = last ? (last.healed ? '✓ healed' : '✗ failed') : m.status === 'running' ? 'running…' : 'waiting…'
-  const statusColor = last ? (last.healed ? 'rgb(52,211,153)' : 'rgb(251,113,133)') : 'var(--text-muted)'
+  const byIter = new Map(results.map((r) => [r.iteration, r]))
+  const healedCount = results.filter((r) => r.healed).length
+  const done = m.status === 'done' || m.status === 'aborted' || m.status === 'error'
+
+  // Build one block per planned iteration. Iterations are 1-indexed; the first
+  // iteration still missing a result while the benchmark is live is the one
+  // in flight (the arm barrier guarantees earlier ones are already recorded).
+  let runningTaken = false
+  const blocks = Array.from({ length: m.iterations }, (_, i): { iter: number; state: IterState; cycles?: number; seconds?: number } => {
+    const iter = i + 1
+    const r = byIter.get(iter)
+    if (r) return { iter, state: r.healed ? 'healed' : 'failed', cycles: r.healCycles, seconds: Math.round(r.wallClockMs / 1000) }
+    if (m.status === 'running' && !runningTaken) { runningTaken = true; return { iter, state: 'running' } }
+    return { iter, state: 'pending' }
+  })
+
+  const aggColor = healedCount > 0 && healedCount === m.iterations ? HEALED
+    : results.length > 0 ? (done && healedCount === 0 ? FAILED : RUNNING)
+      : 'var(--text-muted)'
+
+  // The arm worktree (heal-edited) exists only while the benchmark runs — it's
+  // removed when the run finishes. So the live "open in editor" icon shows only
+  // when the arm has a recorded worktree path and the benchmark is still going.
+  const armLive = m.status === 'running' && Boolean(m.arms.find((a) => a.arm === arm)?.worktreePath)
+
   return (
     <div onClick={onClick} style={{
-      border: `1px solid ${focused ? (isHarness ? 'var(--boot)' : 'var(--accent)') : 'var(--border-default)'}`,
-      boxShadow: focused ? `0 0 0 1px ${isHarness ? 'var(--boot)' : 'var(--accent)'}` : 'none',
+      border: `1px solid ${focused ? accent : 'var(--border-default)'}`,
+      boxShadow: focused ? `0 0 0 1px ${accent}` : 'none',
       borderRadius: 'var(--radius-lg)', padding: '14px 16px', cursor: 'pointer', background: 'var(--bg-surface)',
     }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontWeight: 600, fontSize: 13.5 }}>
-        <span style={{ color: isHarness ? 'var(--boot)' : 'var(--text-primary)' }}>{isHarness ? '🐤 Harness arm' : '⚙ Baseline arm'}</span>
-        <span style={{ fontSize: 11.5, fontWeight: 600, color: statusColor }}>{status}</span>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', fontWeight: 600, fontSize: 13.5 }}>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}>
+          <span style={{ color: isHarness ? 'var(--boot)' : 'var(--text-primary)' }}>{isHarness ? '🐤 Harness arm' : '⚙ Baseline arm'}</span>
+          {armLive && (
+            <button
+              type="button"
+              title="Open this arm's worktree in your editor — watch it heal live (only while the benchmark runs)"
+              onClick={(e) => { e.stopPropagation(); void openWorktreeAction(m.benchmarkId, arm) }}
+              style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 22, height: 22, padding: 0, borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-default)', background: 'var(--bg-input)', color: 'var(--text-secondary)', cursor: 'pointer' }}
+            >
+              <OpenEditorIcon />
+            </button>
+          )}
+        </span>
+        {results.length > 0 || done ? (
+          <span style={{ fontSize: 11.5, fontWeight: 700, color: aggColor }}>
+            {healedCount}<span style={{ color: 'var(--text-muted)', fontWeight: 600 }}>/{m.iterations}</span> healed
+          </span>
+        ) : (
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11.5, fontWeight: 600, color: 'var(--text-muted)' }}>
+            {m.status === 'running' && <span className="canary-pulse" style={{ width: 6, height: 6, borderRadius: 9999, background: RUNNING }} />}
+            {m.status === 'running' ? 'running…' : 'queued'}
+          </span>
+        )}
       </div>
-      <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
-        {isHarness ? 'claude · sliced logs · trace-extracts · journal' : 'claude · Playwright MCP + trace only'}
-      </div>
-      <div style={{ display: 'flex', gap: 15, fontSize: 11, color: 'var(--text-muted)', marginTop: 10 }}>
-        <span>cycles <b style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>{last?.healCycles ?? '–'}</b></span>
-        <span>time <b style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>{last ? `${Math.round(last.wallClockMs / 1000)}s` : '–'}</b></span>
+      {/* auto-fit grid: blocks fill the card for 2–3 iterations and wrap onto
+          more rows for 5+, evenly sized, without stretching a lone orphan on
+          the last row (column count is fixed by the first row). */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(52px, 1fr))', gap: 6, marginTop: 12 }}>
+        {blocks.map((b, i) => (
+          <IterationBlock key={b.iter} iter={b.iter} state={b.state} cycles={b.cycles} seconds={b.seconds} delayMs={i * 45} />
+        ))}
       </div>
     </div>
   )
@@ -520,29 +711,51 @@ function ReportView({ m }: { m: BenchmarkManifest }) {
     return [...map.entries()].sort((a, b) => a[0] - b[0])
   }, [m.results])
   if (!rep) return <Centered>No report yet.</Centered>
-  const headline = rep.reliabilityMultiple != null
-    ? `${rep.reliabilityMultiple.toFixed(1)}× more reliable repair`
-    : rep.baseline.iterationsHealed === 0 && rep.harness.iterationsHealed > 0
-      ? 'Harness healed where the baseline never could'
-      : 'Comparison'
+  const verdict = benchmarkVerdict(rep)
+  const toneColor = verdict.tone === 'win' ? HEALED : verdict.tone === 'loss' ? FAILED : 'var(--text-primary)'
+  const heroBorder = verdict.tone === 'even'
+    ? 'var(--border-default)'
+    : `color-mix(in srgb, ${toneColor} 45%, var(--border-default))`
+  const heroBg = verdict.tone === 'even'
+    ? 'color-mix(in srgb, var(--text-muted) 5%, transparent)'
+    : `color-mix(in srgb, ${toneColor} 8%, transparent)`
+  const bothTokens = rep.harness.totalTokens != null && rep.baseline.totalTokens != null
   return (
-    <div style={{ maxWidth: 760 }}>
+    <div style={{ maxWidth: 880, margin: '0 auto' }}>
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 10 }}>
         <button
           className="cl-button"
           style={{ padding: '6px 12px' }}
-          onClick={() => downloadText(`${m.benchmarkId}.md`, benchmarkReportMarkdown(m, headline), 'text/markdown')}
+          onClick={() => downloadText(`${m.benchmarkId}.md`, benchmarkReportMarkdown(m, verdict.headline), 'text/markdown')}
         >
           ⬇ Export report
         </button>
       </div>
-      <div style={{ border: '1px solid color-mix(in srgb, rgb(52,211,153) 45%, var(--border-default))', background: 'rgba(16,185,129,0.07)', borderRadius: 'var(--radius-xl)', padding: '18px 20px', marginBottom: 16 }}>
-        <div style={{ fontSize: 24, fontWeight: 700, color: 'rgb(52,211,153)', lineHeight: 1 }}>{headline}</div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginTop: 16 }}>
-          <StatCard label="🐤 Harness arm" accent="var(--boot)" color="rgb(52,211,153)" s={rep.harness} />
-          <StatCard label="⚙ Baseline arm" accent="var(--border-default)" color="rgb(251,191,36)" s={rep.baseline} />
+      <div style={{ border: `1px solid ${heroBorder}`, background: heroBg, borderRadius: 'var(--radius-xl)', padding: '20px 22px', marginBottom: 16 }}>
+        <div style={{ fontSize: 25, fontWeight: 700, color: toneColor, lineHeight: 1.05, letterSpacing: '-.01em' }}>{verdict.headline}</div>
+        <div style={{ fontSize: 12.5, color: 'var(--text-secondary)', marginTop: 7, lineHeight: 1.5, maxWidth: 620 }}>{verdict.detail}</div>
+
+        {/* Head-to-head bars: each metric on a shared scale so the gap that
+            actually decides the winner is visible, not buried in fine print. */}
+        <div style={{ marginTop: 18, display: 'grid', gridTemplateColumns: '96px 1fr 1fr', alignItems: 'center', gap: '0 16px' }}>
+          <div />
+          <ArmHeading emoji="🐤" label="Harness" color="var(--boot)" />
+          <ArmHeading emoji="⚙" label="Baseline" color="rgb(251,191,36)" />
         </div>
-        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 12 }}>
+        <div style={{ marginTop: 2 }}>
+          <CompareRow label="Healed" hValue={rep.harness.iterationsHealed} bValue={rep.baseline.iterationsHealed}
+            hText={`${rep.harness.iterationsHealed}/${rep.harness.iterationsTotal}`} bText={`${rep.baseline.iterationsHealed}/${rep.baseline.iterationsTotal}`} betterIsLower={false} />
+          <CompareRow label="Repair time" hValue={rep.harness.totalWallClockMs} bValue={rep.baseline.totalWallClockMs}
+            hText={fmtSecs(rep.harness.totalWallClockMs)} bText={fmtSecs(rep.baseline.totalWallClockMs)} betterIsLower />
+          <CompareRow label="Avg cycles" hValue={rep.harness.avgHealCycles} bValue={rep.baseline.avgHealCycles}
+            hText={rep.harness.avgHealCycles.toFixed(1)} bText={rep.baseline.avgHealCycles.toFixed(1)} betterIsLower />
+          {bothTokens && (
+            <CompareRow label="Tokens" hValue={rep.harness.totalTokens!} bValue={rep.baseline.totalTokens!}
+              hText={fmtTokens(rep.harness.totalTokens!)} bText={fmtTokens(rep.baseline.totalTokens!)} betterIsLower />
+          )}
+        </div>
+
+        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 16, paddingTop: 12, borderTop: '1px solid var(--border-default)' }}>
           sabotage <span style={{ fontFamily: 'var(--font-mono)' }}>{m.sabotageSha?.slice(0, 7)}</span> · model <span style={{ fontFamily: 'var(--font-mono)' }}>{m.agent} (pinned)</span> · tests read-only ✓
         </div>
       </div>
@@ -568,18 +781,80 @@ function ReportView({ m }: { m: BenchmarkManifest }) {
   )
 }
 
-function StatCard({ label, accent, color, s }: { label: string; accent: string; color: string; s: { iterationsHealed: number; iterationsTotal: number; avgHealCycles: number; totalWallClockMs: number } }) {
+function ArmHeading({ emoji, label, color }: { emoji: string; label: string; color: string }) {
   return (
-    <div style={{ border: `1px solid ${accent}`, borderRadius: 'var(--radius-lg)', padding: '13px 15px', background: 'rgba(127,127,127,0.05)' }}>
-      <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8 }}>{label}</div>
-      <div style={{ fontSize: 26, fontWeight: 700, fontFamily: 'var(--font-mono)', lineHeight: 1, color }}>
-        {s.iterationsHealed}/{s.iterationsTotal} <small style={{ fontSize: 12, fontWeight: 500, fontFamily: 'var(--font-sans)', color: 'var(--text-muted)' }}>healed</small>
-      </div>
-      <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 8 }}>
-        avg <b style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>{s.avgHealCycles.toFixed(1)}</b> cycles · <b style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>{Math.round(s.totalWallClockMs / 1000)}s</b>
-      </div>
+    <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11.5, fontWeight: 600 }}>
+      <span>{emoji}</span><span style={{ color }}>{label}</span>
     </div>
   )
+}
+
+// One metric, harness vs baseline, on a shared scale (so bar lengths are
+// directly comparable across the row). The better value is flagged ✓ — for
+// time/cycles/tokens lower wins, for healed higher wins.
+function CompareRow({ label, hValue, bValue, hText, bText, betterIsLower }: {
+  label: string; hValue: number; bValue: number; hText: string; bText: string; betterIsLower: boolean
+}) {
+  const max = Math.max(hValue, bValue, 0.0001)
+  const hPct = Math.max(4, (hValue / max) * 100)
+  const bPct = Math.max(4, (bValue / max) * 100)
+  const tie = hValue === bValue
+  const hBetter = !tie && (betterIsLower ? hValue < bValue : hValue > bValue)
+  const bBetter = !tie && !hBetter
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: '96px 1fr 1fr', alignItems: 'center', gap: '0 16px', padding: '6px 0' }}>
+      <div style={{ fontSize: 10.5, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '.4px', fontWeight: 600 }}>{label}</div>
+      <Bar pct={hPct} color="var(--boot)" text={hText} better={hBetter} />
+      <Bar pct={bPct} color="rgb(251,191,36)" text={bText} better={bBetter} />
+    </div>
+  )
+}
+
+function Bar({ pct, color, text, better }: { pct: number; color: string; text: string; better: boolean }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+      <div style={{ flex: 1, minWidth: 0, height: 7, borderRadius: 9999, background: 'color-mix(in srgb, var(--text-muted) 16%, transparent)', overflow: 'hidden' }}>
+        <div style={{ width: `${pct}%`, height: '100%', borderRadius: 9999, background: color, transition: 'width 320ms cubic-bezier(.2,.7,.3,1)' }} />
+      </div>
+      <span style={{ fontSize: 12, fontFamily: 'var(--font-mono)', fontWeight: better ? 700 : 500, color: better ? 'var(--text-primary)' : 'var(--text-muted)', whiteSpace: 'nowrap', flex: 'none' }}>
+        {text}{better && <span style={{ color: HEALED, marginLeft: 4 }}>✓</span>}
+      </span>
+    </div>
+  )
+}
+
+// The honest verdict: lead with reliability when the arms differ on it, else
+// fall back to the speed gap (the real story on a reliability tie). Tone drives
+// the hero colour so a tie/loss isn't dressed up in win-green.
+function benchmarkVerdict(rep: BenchmarkReport): { headline: string; detail: string; tone: 'win' | 'even' | 'loss' } {
+  const h = rep.harness
+  const b = rep.baseline
+  const speedMult = h.totalWallClockMs > 0 && b.totalWallClockMs > 0 ? b.totalWallClockMs / h.totalWallClockMs : null
+  if (b.iterationsHealed === 0 && h.iterationsHealed > 0) {
+    return { headline: 'Healed where the baseline couldn’t', detail: `Harness fixed ${h.iterationsHealed}/${h.iterationsTotal}; the baseline never reached green.`, tone: 'win' }
+  }
+  if (h.iterationsHealed > b.iterationsHealed && rep.reliabilityMultiple != null) {
+    return { headline: `${rep.reliabilityMultiple.toFixed(1)}× more reliable repair`, detail: `Harness healed ${h.iterationsHealed}/${h.iterationsTotal} vs ${b.iterationsHealed}/${b.iterationsTotal} for the baseline.`, tone: 'win' }
+  }
+  if (h.iterationsHealed < b.iterationsHealed) {
+    return { headline: 'Baseline healed more often', detail: `Harness ${h.iterationsHealed}/${h.iterationsTotal} vs baseline ${b.iterationsHealed}/${b.iterationsTotal} — context didn’t help here.`, tone: 'loss' }
+  }
+  // Reliability tied — speed is the story.
+  if (speedMult != null && speedMult >= 1.15) {
+    return { headline: `${speedMult.toFixed(1)}× faster repair`, detail: `Same reliability (${h.iterationsHealed}/${h.iterationsTotal} healed) — harness reached green in ${fmtSecs(h.totalWallClockMs)} vs ${fmtSecs(b.totalWallClockMs)}.`, tone: 'win' }
+  }
+  if (speedMult != null && speedMult <= 1 / 1.15) {
+    return { headline: 'Matched on reliability', detail: `Both healed ${h.iterationsHealed}/${h.iterationsTotal}; the baseline was a touch faster (${fmtSecs(b.totalWallClockMs)} vs ${fmtSecs(h.totalWallClockMs)}).`, tone: 'even' }
+  }
+  return { headline: 'Matched the baseline', detail: `Both arms healed ${h.iterationsHealed}/${h.iterationsTotal} in comparable time.`, tone: 'even' }
+}
+
+function fmtSecs(ms: number): string {
+  return `${Math.round(ms / 1000)}s`
+}
+
+function fmtTokens(n: number): string {
+  return n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k` : `${n}`
 }
 
 // ─── small helpers ───────────────────────────────────────────────────────────

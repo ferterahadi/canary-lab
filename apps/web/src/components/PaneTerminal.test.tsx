@@ -333,6 +333,52 @@ describe('PaneTerminal', () => {
     expect(terminalState.fitCalls).toBeGreaterThanOrEqual(1)
   })
 
+  it('re-fits the agent pane and re-sends the pty size once the web font finishes loading', async () => {
+    // The mono font loads via `display=swap`, so the first fit can measure the
+    // fallback font and compute a column count that doesn't match the real
+    // glyphs — the pty is then told the wrong width and the Ink TUI wraps lines
+    // that overflow the pane. Once fonts are ready we must re-fit, re-send the
+    // corrected size, and repaint the stale WebGL atlas. happy-dom has no Font
+    // Loading API, so stub it here.
+    let resolveReady: () => void = () => {}
+    const ready = new Promise<void>((resolve) => { resolveReady = resolve })
+    const fontLoad = vi.fn(() => Promise.resolve([]))
+    Object.defineProperty(document, 'fonts', {
+      configurable: true,
+      value: { ready, load: fontLoad },
+    })
+    try {
+      await act(async () => {
+        root.render(<PaneTerminal runId="r1" paneId="agent" />)
+      })
+      // Socket open: the initial (possibly fallback-font) resize was sent.
+      act(() => {
+        paneState.options[0].onOpen?.()
+      })
+      // Fonts haven't finished yet — no correction should have happened.
+      expect(terminalState.clearTextureAtlasCalls).toBe(0)
+      const sendResizeBefore = paneState.connections[0].sendResize.mock.calls.length
+      const fitsBefore = terminalState.fitCalls
+
+      // Fonts finish loading — flush the fonts.ready / fonts.load microtasks.
+      await act(async () => {
+        resolveReady()
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+
+      // The real font was requested, the grid was re-fit, the corrected size
+      // was re-sent to the pty, and the WebGL atlas was repainted.
+      expect(fontLoad).toHaveBeenCalled()
+      expect(terminalState.fitCalls).toBeGreaterThan(fitsBefore)
+      expect(paneState.connections[0].sendResize.mock.calls.length).toBeGreaterThan(sendResizeBefore)
+      expect(terminalState.clearTextureAtlasCalls).toBe(1)
+      expect(terminalState.refreshCalls).toBe(1)
+    } finally {
+      delete (document as unknown as { fonts?: unknown }).fonts
+    }
+  })
+
   it('loads the WebGL renderer for the agent pane only', async () => {
     await act(async () => {
       root.render(<PaneTerminal runId="r1" paneId="agent" />)

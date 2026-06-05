@@ -1,11 +1,18 @@
+import fs from 'fs'
+import path from 'path'
 import type { FastifyInstance } from 'fastify'
 import type { BenchmarkStore } from '../lib/runtime/benchmark/store'
 import type { SabotageSkill } from '../lib/runtime/benchmark/skills'
 import type {
+  BenchmarkManifest,
   SabotageLevel,
   StartBenchmarkInput,
   StartBenchmarkResult,
 } from '../lib/runtime/benchmark/types'
+import { benchmarkDir } from '../lib/runtime/benchmark/paths'
+import { addWorktree } from '../lib/runtime/repo-worktree'
+import { launchEditorDir } from '../lib/editor-launch'
+import { loadProjectConfig, type EditorChoice } from '../lib/runtime/launcher/project-config'
 
 // REST surface for benchmarks, mirroring routes/runs.ts. Reads go through the
 // injected BenchmarkStore; the start path delegates to the injected
@@ -14,6 +21,10 @@ import type {
 
 export interface BenchmarkRouteDeps {
   store: BenchmarkStore
+  /** Logs root — used to resolve a benchmark's worktree dir for inspection. */
+  logsDir: string
+  /** Project root — used to read the configured editor for "open worktree". */
+  projectRoot?: string
   /** Kick off a benchmark; resolves once the run is registered (not on finish). */
   startBenchmark(input: StartBenchmarkInput): Promise<StartBenchmarkResult>
   /** Sabotage skills available for a feature (for the picker). */
@@ -98,6 +109,64 @@ export async function benchmarkRoutes(
     },
   )
 
+  // Open one of a benchmark's worktrees in the user's editor:
+  //   • 'frozen' → a pristine, never-heal-edited checkout at the sabotage SHA,
+  //     created lazily on first use (and re-creatable any time after the run,
+  //     since the SHA is a real commit). Removed via the cleanup worktree list.
+  //   • 'A' / 'B' → the live arm worktree (heal-edited), available only WHILE
+  //     the benchmark runs; auto-cleaned when it finishes.
+  app.post<{ Params: { benchmarkId: string }; Body: { target?: string } }>(
+    '/api/benchmarks/:benchmarkId/open-worktree',
+    async (req, reply) => {
+      const manifest = deps.store.get(req.params.benchmarkId)
+      if (!manifest) {
+        reply.code(404)
+        return { error: 'benchmark not found' }
+      }
+      const target = req.body?.target
+      if (target !== 'frozen' && target !== 'A' && target !== 'B') {
+        reply.code(400)
+        return { error: 'target must be "frozen", "A", or "B"' }
+      }
+
+      let dir: string
+      if (target === 'frozen') {
+        if (!manifest.sabotageSha) {
+          reply.code(409)
+          return { error: 'the bug is not frozen yet' }
+        }
+        if (!manifest.featureDir) {
+          reply.code(409)
+          return { error: 'benchmark has no feature directory to inspect' }
+        }
+        try {
+          dir = await ensureInspectWorktree(deps.logsDir, manifest)
+        } catch (err) {
+          reply.code(500)
+          return { error: err instanceof Error ? err.message : String(err) }
+        }
+      } else {
+        const arm = manifest.arms.find((a) => a.arm === target)
+        const armPath = arm?.worktreePath
+        if (!armPath || !fs.existsSync(armPath)) {
+          reply.code(409)
+          return { error: 'arm worktree is no longer available — it is removed when the benchmark finishes' }
+        }
+        dir = armPath
+      }
+
+      const editor: EditorChoice = deps.projectRoot ? loadProjectConfig(deps.projectRoot).editor : 'auto'
+      try {
+        const usedEditor = launchEditorDir(editor, dir)
+        return { opened: true, path: dir, editor: usedEditor }
+      } catch (err) {
+        // Best-effort: report the path so the UI can offer a copy-path fallback.
+        reply.code(200)
+        return { opened: false, path: dir, error: err instanceof Error ? err.message : String(err) }
+      }
+    },
+  )
+
   app.post<{ Body: StartBody }>('/api/benchmarks', async (req, reply) => {
     const body = req.body ?? {}
     const feature = typeof body.feature === 'string' ? body.feature.trim() : ''
@@ -120,4 +189,22 @@ export async function benchmarkRoutes(
       return { error: err instanceof Error ? err.message : String(err) }
     }
   })
+}
+
+// Lazily ensure a pristine checkout at the sabotage SHA under the benchmark's
+// `worktrees/inspect/` dir, returning the worktree root. Idempotent: reuses an
+// existing checkout if one is already there (a second click, or after the run).
+async function ensureInspectWorktree(logsDir: string, manifest: BenchmarkManifest): Promise<string> {
+  const inspectParent = path.join(benchmarkDir(logsDir, manifest.benchmarkId), 'worktrees', 'inspect')
+  if (fs.existsSync(inspectParent)) {
+    const existing = fs.readdirSync(inspectParent, { withFileTypes: true }).find((e) => e.isDirectory())
+    if (existing) return path.join(inspectParent, existing.name)
+  }
+  const handle = await addWorktree({
+    repoName: manifest.feature,
+    localPath: manifest.featureDir as string,
+    worktreesDir: inspectParent,
+    branch: manifest.sabotageSha,
+  })
+  return handle.worktreeRoot
 }
