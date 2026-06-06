@@ -6,7 +6,7 @@ import { spawn, type ChildProcess } from 'child_process'
 import type { FeatureConfig, RepoPrerequisite } from '../../../../../shared/launcher/types'
 import { runGit, resolveRepoPath } from '../../git-repo'
 import { encodeClaudeProjectDir } from '../../agent-session-log'
-import { addWorktree, removeWorktree, type WorktreeHandle } from '../repo-worktree'
+import { addWorktree, type WorktreeHandle } from '../repo-worktree'
 import { RunOrchestrator, defaultPlaywrightSpawner, buildServiceSpecs } from '../orchestrator'
 import { estimateRunCost } from '../admission'
 import { buildAgentSpawnCommand, buildOrchestratorHealPrompt, type HealAgent } from '../auto-heal'
@@ -22,6 +22,7 @@ import { BenchmarkRace } from './race'
 import { runSabotage } from './sabotage'
 import { buildBaselineHealPrompt, baselinePlaywrightSpawner } from './arm-config'
 import { loadBundledSabotageSkills } from './skills'
+import { worktreeFeatureDir } from './worktree-feature-dir'
 import type { ArmIterationResult } from './report'
 import type { ArmMode, BenchmarkManifest, StartBenchmarkInput, StartBenchmarkResult } from './types'
 
@@ -286,10 +287,14 @@ export function createBenchmarkRunner(deps: BenchmarkRunnerDeps) {
       },
 
       cleanup: async () => {
+        // Free the one-benchmark-at-a-time slot so a new benchmark can start.
         aborts.delete(benchmarkId)
-        for (const h of [stagingHandle, armHandles.A, armHandles.B]) {
-          if (h) await removeWorktree(h).catch(() => {})
-        }
+        // NOTE: worktrees (staging, arm-A, arm-B) are intentionally NOT removed
+        // here. They are kept after a run so "Open frozen bug" stays reachable
+        // (the sabotage commit lives only in these detached checkouts) and the
+        // healed arm worktrees can be inspected post-run. The user reclaims them
+        // explicitly via the report's "Clear worktrees" button (which routes to
+        // POST /api/benchmarks/:id/clear-worktrees) or the Log Cleanup page.
       },
     })
 
@@ -298,8 +303,16 @@ export function createBenchmarkRunner(deps: BenchmarkRunnerDeps) {
     // terminal status ('passed' = nothing broke, 'failed' = tests went red).
     // Not streamed to the UI (no attachRunStreams) — it's an internal check.
     async function runNoHealTrial(handle: WorktreeHandle): Promise<string> {
-      const featureDir = handle.localPath
-      const trialFeature: FeatureConfig = { ...feature, featureDir, repos: [{ ...repo, localPath: featureDir }] }
+      // Service boots from the worktree repo (handle.localPath); the test
+      // harness (playwright.config + e2e) only maps into the worktree when the
+      // feature dir lives inside the repo — an external feature dir stays
+      // canonical so Playwright finds its config. See worktreeFeatureDir.
+      const featureDir = worktreeFeatureDir({
+        repoLocalPath: resolveRepoPath(repo.localPath),
+        featureDir: resolveRepoPath(feature.featureDir),
+        worktreeRepoPath: handle.localPath,
+      })
+      const trialFeature: FeatureConfig = { ...feature, featureDir, repos: [{ ...repo, localPath: handle.localPath }] }
       const portMap = await deps.allocateRunPorts(trialFeature, env)
       if (env) {
         try { deps.applyFeatureEnvset(featureDir, env, portMap) } catch { /* best-effort */ }
@@ -344,8 +357,14 @@ export function createBenchmarkRunner(deps: BenchmarkRunnerDeps) {
       onStart: (runId: string) => void,
     ): Promise<ArmIterationResult> {
       const handle = armHandles[arm]!
-      const featureDir = handle.localPath
-      const armFeature: FeatureConfig = { ...feature, featureDir, repos: [{ ...repo, localPath: featureDir }] }
+      // See runNoHealTrial: boot from the worktree repo, run the test harness
+      // from the (canonical-or-mapped) feature dir.
+      const featureDir = worktreeFeatureDir({
+        repoLocalPath: resolveRepoPath(repo.localPath),
+        featureDir: resolveRepoPath(feature.featureDir),
+        worktreeRepoPath: handle.localPath,
+      })
+      const armFeature: FeatureConfig = { ...feature, featureDir, repos: [{ ...repo, localPath: handle.localPath }] }
       const portMap = await deps.allocateRunPorts(armFeature, env)
       if (env) {
         try { deps.applyFeatureEnvset(featureDir, env, portMap) } catch { /* best-effort */ }
@@ -355,8 +374,10 @@ export function createBenchmarkRunner(deps: BenchmarkRunnerDeps) {
       const runnerLog = new RunnerLog(buildRunPaths(runDir).runnerLogPath)
       // Baseline signals completion from a dir inside its OWN worktree, never
       // the run dir — so handing it the signal path doesn't expose harness-only
-      // artifacts (e2e-summary.json, svc-*.log) that sit in the run dir.
-      const baselineSignalsDir = path.join(featureDir, '.canary-signals')
+      // artifacts (e2e-summary.json, svc-*.log) that sit in the run dir. Anchor
+      // to the worktree (handle.localPath), not featureDir: an external feature
+      // dir is shared across arms, which would collide parallel arms' signals.
+      const baselineSignalsDir = path.join(handle.localPath, '.canary-signals')
       const baselinePaths = buildRunPaths(runDir, { signalsDir: baselineSignalsDir })
       const buildCyclePrompt =
         mode === 'harness'

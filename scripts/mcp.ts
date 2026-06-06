@@ -20,8 +20,19 @@ import {
   readWorkspaceRegistry,
   type CanaryLabWorkspaceRegistry,
 } from '../shared/runtime/workspace-registry'
+import { DEFAULT_PORT, loadProjectConfig, resolveProjectPort } from '../apps/web-server/lib/runtime/launcher/project-config'
 
-const DEFAULT_MCP_URL = 'http://127.0.0.1:7421/mcp'
+// Active-project port → URL. Bridges with no explicit --url resolve this so a
+// per-project port (canary-lab.config.json) is followed automatically.
+export function resolveDefaultMcpUrl(opts: {
+  cwd?: string
+  homeDir?: string
+  registry?: CanaryLabWorkspaceRegistry
+} = {}): string {
+  const projectRoot = resolveUiProjectRootForMcpAutostart(opts)
+  const port = projectRoot ? resolveProjectPort(loadProjectConfig(projectRoot)) : DEFAULT_PORT
+  return `http://127.0.0.1:${port}/mcp`
+}
 const DEFAULT_MCP_PROFILE: CanaryLabMcpProfile = 'full'
 const DEFAULT_UI_STARTUP_TIMEOUT_MS = 15_000
 const DEFAULT_UI_STARTUP_POLL_MS = 250
@@ -35,6 +46,9 @@ export interface McpCommandOptions {
   fetch?: typeof fetch
   exit?: (code: number) => void
   autoStartUi?: boolean
+  // True when the URL was auto-resolved (no explicit --url), so auto-starting
+  // the active project's UI is appropriate. Defaults to the local-URL heuristic.
+  autoStartEligible?: boolean
   startUi?: (stderr: Writable, projectRoot: string) => Promise<void> | void
   startupTimeoutMs?: number
   startupPollMs?: number
@@ -55,21 +69,27 @@ export async function main(
     exit(1)
     return
   }
+  const url = parsed.url ?? resolveDefaultMcpUrl({ cwd: opts.cwd, homeDir: opts.homeDir, registry: opts.registry })
+  // Only auto-start the UI when we resolved the default URL ourselves; an
+  // explicit --url means the caller is pointing at a specific server.
+  const autoStartEligible = opts.autoStartEligible ?? (parsed.url === undefined)
   if (parsed.command === 'doctor') {
-    const ok = await doctor(parsed.url, {
+    const ok = await doctor(url, {
       ...opts,
       profile: parsed.profile,
       clientKind: parsed.clientKind ?? opts.clientKind,
       autoStartUi: opts.autoStartUi ?? parsed.autoStartUi,
+      autoStartEligible,
     })
     exit(ok ? 0 : 1)
     return
   }
-  const ok = await bridge(parsed.url, {
+  const ok = await bridge(url, {
     ...opts,
     profile: parsed.profile,
     clientKind: parsed.clientKind ?? opts.clientKind,
     autoStartUi: opts.autoStartUi ?? parsed.autoStartUi,
+    autoStartEligible,
   })
   if (!ok) exit(1)
 }
@@ -161,10 +181,11 @@ export async function ensureMcpServerReachable(
 ): Promise<boolean> {
   const stderr = opts.stderr ?? process.stderr
   const fetchFn = opts.fetch ?? fetch
+  const eligible = opts.autoStartEligible ?? isDefaultLocalMcpUrl(url)
   const firstCheck = await checkHealth(url, fetchFn)
   if (firstCheck.ok) {
     if (
-      isDefaultLocalMcpUrl(url) &&
+      eligible &&
       firstCheck.projectRoot &&
       !isUsableUiProjectRoot(firstCheck.projectRoot)
     ) {
@@ -174,7 +195,7 @@ export async function ensureMcpServerReachable(
     return true
   }
 
-  if (opts.autoStartUi === false || !isDefaultLocalMcpUrl(url)) {
+  if (opts.autoStartUi === false || !eligible) {
     stderr.write(`Canary Lab MCP is not reachable at ${stripProfile(url)}: ${firstCheck.error}\n`)
     stderr.write('Start the UI first: canary-lab ui\n')
     return false
@@ -297,11 +318,12 @@ function resolveCliPath(): string {
   return process.argv[1] ?? siblingCli
 }
 
-function isDefaultLocalMcpUrl(url: string): boolean {
+// Port-agnostic: any localhost /mcp endpoint is treated as the auto-resolved
+// local server (auto-start eligible), since the port is now per-project.
+export function isDefaultLocalMcpUrl(url: string): boolean {
   try {
     const parsed = new URL(url)
     return (parsed.hostname === '127.0.0.1' || parsed.hostname === 'localhost') &&
-      parsed.port === '7421' &&
       parsed.pathname === '/mcp'
   } catch {
     return false
@@ -323,10 +345,11 @@ function sleep(ms: number): Promise<void> {
 }
 
 function parseArgs(argv: string[]):
-  | { ok: true; command: 'bridge' | 'doctor'; url: string; profile: CanaryLabMcpProfile; clientKind?: ExternalHealClientKind; autoStartUi: boolean }
+  | { ok: true; command: 'bridge' | 'doctor'; url?: string; profile: CanaryLabMcpProfile; clientKind?: ExternalHealClientKind; autoStartUi: boolean }
   | { ok: false; error: string } {
   let command: 'bridge' | 'doctor' = 'bridge'
-  let url = DEFAULT_MCP_URL
+  // Undefined → resolve the active project's port via resolveDefaultMcpUrl.
+  let url: string | undefined
   let profile: CanaryLabMcpProfile = DEFAULT_MCP_PROFILE
   let clientKind: ExternalHealClientKind | undefined
   let autoStartUi = true
@@ -367,13 +390,15 @@ function parseArgs(argv: string[]):
     }
     return { ok: false, error: `Unknown canary-lab mcp argument: ${arg}` }
   }
-  try {
-    // Validate early so stdio mode fails before protocol output starts.
-    new URL(url)
-  } catch {
-    return { ok: false, error: `Invalid MCP URL: ${url}` }
+  if (url !== undefined) {
+    try {
+      // Validate early so stdio mode fails before protocol output starts.
+      new URL(url)
+    } catch {
+      return { ok: false, error: `Invalid MCP URL: ${url}` }
+    }
   }
-  return { ok: true, command, url, profile, autoStartUi, ...(clientKind ? { clientKind } : {}) }
+  return { ok: true, command, profile, autoStartUi, ...(url ? { url } : {}), ...(clientKind ? { clientKind } : {}) }
 }
 
 async function forwardMessage(

@@ -15,9 +15,9 @@ Before calling Canary Lab MCP tools, make sure the workspace and UI server are a
 1. Read the user-level registry at `~/.canary-lab/workspaces.json`. On Windows, resolve it from the user's home directory, for example `%USERPROFILE%\.canary-lab\workspaces.json`.
 2. If the registry has exactly one workspace, use that workspace. If it has multiple workspaces, list their `name` and `path` values and ask which one to use.
 3. If the registry is missing or empty, ask the user to run `npx canary-lab setup` from the Canary Lab workspace.
-4. Check `http://127.0.0.1:7421/mcp/health`.
+4. Check the MCP health endpoint `/mcp/health` on the UI's port. The port defaults to `7421`, but a project may pin its own in `canary-lab.config.json`; if `7421` does not respond, run `npx canary-lab mcp doctor` to discover the active URL.
 5. If the health check succeeds, confirm `projectRoot` matches the selected workspace. If it points at a different workspace, ask the user whether to stop the existing Canary Lab server before continuing.
-6. If the health check fails, start `npx canary-lab ui` from the selected workspace in a visible long-running terminal when the host supports that. Do not add `--port`; Canary Lab uses port `7421` so MCP clients can connect consistently.
+6. If the health check fails, start `npx canary-lab ui` from the selected workspace in a visible long-running terminal when the host supports that. The port comes from `canary-lab.config.json` (default `7421`); do not pass `--port` (it was removed).
 7. Do not reflexively call `list_features` or `list_runs` after health. For random or new feature creation, call `create_feature` directly with a unique feature name. Use `list_features` only when you need to discover or choose an existing feature, and use `list_runs` only for run, heal, verification, or export workflows.
 
 ## External Run Loop

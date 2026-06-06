@@ -66,6 +66,7 @@ import {
   deleteEnvset,
   getProjectConfig,
   putProjectConfig,
+  changeProjectPort,
   openAgentApp,
 	  openEditor,
 	  sendAgentInput,
@@ -108,6 +109,28 @@ describe('api client', () => {
       status: 500,
       body: { error: 'boom' },
     })
+  })
+
+  it('changeProjectPort returns the restart payload on 200', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(ok({ restarting: true, port: 8300, newOrigin: 'http://localhost:8300' }))
+    const result = await changeProjectPort(8300, false, { baseUrl: 'http://x', fetchImpl })
+    expect(result).toEqual({ restarting: true, port: 8300, newOrigin: 'http://localhost:8300' })
+    expect(fetchImpl).toHaveBeenCalledWith('http://x/api/project-config/port', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ port: 8300, confirm: false }),
+    })
+  })
+
+  it('changeProjectPort surfaces a 409 confirmation payload instead of throwing', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(fail(409, { needsConfirm: true, activeRuns: 2 }))
+    const result = await changeProjectPort(8300, false, { fetchImpl })
+    expect(result).toEqual({ needsConfirm: true, activeRuns: 2 })
+  })
+
+  it('changeProjectPort rethrows non-409 errors', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(fail(400, { error: 'port must be an integer between 1 and 65535' }))
+    await expect(changeProjectPort(99999, false, { fetchImpl })).rejects.toMatchObject({ status: 400 })
   })
 
   it('getFeatureTests URL-encodes the feature name', async () => {

@@ -61,6 +61,11 @@ export interface BenchmarkManifest {
   results: ArmIterationResult[]
   report?: BenchmarkReport
   error?: string
+  /** True once the user reclaimed this benchmark's worktrees — open actions
+   *  ("Open frozen bug", arm inspection) are no longer available. */
+  worktreesCleared?: boolean
+  /** Disk reclaimed by the clear, for the post-clear receipt line. */
+  worktreesClearedBytes?: number
 }
 
 export interface BenchmarkIndexEntry {

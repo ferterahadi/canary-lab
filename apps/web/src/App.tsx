@@ -234,10 +234,10 @@ export function App() {
       collapsible: false,
       content: (
         <VerticalSplit
-          storageKey="canary-lab.runs-detail-split"
-          defaultTopPercent={42}
+          storageKey="canary-lab.runs-detail-split-v2"
+          defaultTopPercent={25}
           minTopPx={120}
-          minBottomPx={160}
+          minBottomPx={320}
           top={(
             <RunsColumn
               feature={selectedFeature}

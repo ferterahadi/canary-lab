@@ -56,15 +56,44 @@ const EDITOR_OPTIONS: { value: EditorChoice; label: string; description: string 
   },
 ]
 
-interface Props {
-  onClose: () => void
+const DEFAULT_PORT = 7421
+
+// Poll the new origin until it answers, then navigate the tab to it. The old
+// server shuts down ~moments after the port change, and the new one needs a
+// beat to bind, so an immediate redirect could hit a dead port.
+function defaultRedirect(newOrigin: string): void {
+  let tries = 0
+  const tick = (): void => {
+    tries += 1
+    fetch(`${newOrigin}/api/project-config`)
+      .then((r) => {
+        if (r.ok) { window.location.href = newOrigin; return }
+        throw new Error('not ready')
+      })
+      .catch(() => {
+        if (tries < 40) setTimeout(tick, 500)
+        else window.location.href = newOrigin
+      })
+  }
+  tick()
 }
 
-export function SettingsModal({ onClose }: Props) {
+interface Props {
+  onClose: () => void
+  // Injected in tests; production polls the new origin then navigates the tab.
+  onRedirect?: (url: string) => void
+}
+
+export function SettingsModal({ onClose, onRedirect }: Props) {
   const [config, setConfig] = useState<ProjectConfig | null>(null)
   const [draft, setDraft] = useState<ProjectConfig | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  const [portInput, setPortInput] = useState('')
+  const [portBusy, setPortBusy] = useState(false)
+  const [portError, setPortError] = useState<string | null>(null)
+  const [pendingConfirm, setPendingConfirm] = useState<number | null>(null)
+  const [restarting, setRestarting] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -76,6 +105,7 @@ export function SettingsModal({ onClose }: Props) {
         // shows a valid selection. Saving will persist the migrated value.
         setConfig(c)
         setDraft({ ...c, healAgent: migrateLegacyHealAgent(c.healAgent) })
+        setPortInput(String(c.port ?? DEFAULT_PORT))
       })
       .catch((e: unknown) => {
         if (cancelled) return
@@ -104,6 +134,33 @@ export function SettingsModal({ onClose }: Props) {
       setError(e instanceof Error ? e.message : 'Save failed')
     } finally {
       setSaving(false)
+    }
+  }
+
+  const redirect = onRedirect ?? defaultRedirect
+  const submitPort = async (confirm: boolean): Promise<void> => {
+    const port = Number(portInput)
+    if (!Number.isInteger(port) || port < 1 || port > 65535) {
+      setPortError('Port must be an integer between 1 and 65535')
+      return
+    }
+    setPortBusy(true)
+    setPortError(null)
+    try {
+      const res = await api.changeProjectPort(port, confirm)
+      if (res.needsConfirm) {
+        setPendingConfirm(res.activeRuns ?? 0)
+        return
+      }
+      setPendingConfirm(null)
+      if (res.restarting && res.newOrigin) {
+        setRestarting(true)
+        redirect(res.newOrigin)
+      }
+    } catch (e: unknown) {
+      setPortError(e instanceof Error ? e.message : 'Port change failed')
+    } finally {
+      setPortBusy(false)
     }
   }
 
@@ -204,6 +261,54 @@ export function SettingsModal({ onClose }: Props) {
                   </label>
                 ))}
               </div>
+              <div className="mt-4 text-[10px] uppercase tracking-wider mb-2" style={{ color: 'var(--text-muted)' }}>
+                Port
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  name="port"
+                  type="number"
+                  min={1}
+                  max={65535}
+                  value={portInput}
+                  onChange={(e) => setPortInput(e.target.value)}
+                  disabled={portBusy || restarting}
+                  className="cl-input w-28 px-2 py-1 text-sm"
+                  style={{ background: 'var(--bg-default)', color: 'var(--text-primary)', border: '1px solid var(--border-default)', borderRadius: 4 }}
+                />
+                <button
+                  type="button"
+                  onClick={() => { void submitPort(false) }}
+                  disabled={portBusy || restarting}
+                  className="cl-button px-3 py-1 text-xs"
+                >
+                  Change port
+                </button>
+              </div>
+              <div className="mt-1 text-xs" style={{ color: 'var(--text-muted)' }}>
+                The UI and MCP server bind this port (default {DEFAULT_PORT}). Changing it restarts Canary Lab; your MCP client may need to reconnect (restart it or toggle the connector) if it doesn&apos;t reconnect on its own.
+              </div>
+              {pendingConfirm != null && (
+                <div className="mt-2 text-xs" style={{ color: 'var(--danger)' }}>
+                  {pendingConfirm} active run{pendingConfirm === 1 ? '' : 's'} will be aborted by the restart.{' '}
+                  <button
+                    type="button"
+                    onClick={() => { void submitPort(true) }}
+                    disabled={portBusy || restarting}
+                    className="cl-button px-2 py-0.5 text-xs"
+                  >
+                    Restart anyway
+                  </button>
+                </div>
+              )}
+              {restarting && (
+                <div className="mt-2 text-xs" style={{ color: 'var(--text-muted)' }}>
+                  Restarting on the new port…
+                </div>
+              )}
+              {portError && (
+                <div className="mt-1 text-xs" style={{ color: 'var(--danger)' }}>{portError}</div>
+              )}
             </>
           )}
         </div>

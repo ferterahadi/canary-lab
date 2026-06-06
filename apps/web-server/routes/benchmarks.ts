@@ -10,7 +10,10 @@ import type {
   StartBenchmarkResult,
 } from '../lib/runtime/benchmark/types'
 import { benchmarkDir } from '../lib/runtime/benchmark/paths'
-import { addWorktree } from '../lib/runtime/repo-worktree'
+import { addWorktree, removeWorktree } from '../lib/runtime/repo-worktree'
+import { listWorktrees } from '../lib/runtime/worktree-inventory'
+import { loadFeatures } from '../lib/feature-loader'
+import { getGitRoot, resolveRepoPath } from '../lib/git-repo'
 import { launchEditorDir } from '../lib/editor-launch'
 import { loadProjectConfig, type EditorChoice } from '../lib/runtime/launcher/project-config'
 
@@ -23,6 +26,8 @@ export interface BenchmarkRouteDeps {
   store: BenchmarkStore
   /** Logs root — used to resolve a benchmark's worktree dir for inspection. */
   logsDir: string
+  /** Features root — used to resolve source repos when clearing worktrees. */
+  featuresDir: string
   /** Project root — used to read the configured editor for "open worktree". */
   projectRoot?: string
   /** Kick off a benchmark; resolves once the run is registered (not on finish). */
@@ -112,9 +117,10 @@ export async function benchmarkRoutes(
   // Open one of a benchmark's worktrees in the user's editor:
   //   • 'frozen' → a pristine, never-heal-edited checkout at the sabotage SHA,
   //     created lazily on first use (and re-creatable any time after the run,
-  //     since the SHA is a real commit). Removed via the cleanup worktree list.
-  //   • 'A' / 'B' → the live arm worktree (heal-edited), available only WHILE
-  //     the benchmark runs; auto-cleaned when it finishes.
+  //     since the SHA stays reachable through the retained arm worktrees).
+  //   • 'A' / 'B' → the arm worktree (heal-edited), available during AND after
+  //     the run for inspection.
+  // Both are gone once the user clears this benchmark's worktrees.
   app.post<{ Params: { benchmarkId: string }; Body: { target?: string } }>(
     '/api/benchmarks/:benchmarkId/open-worktree',
     async (req, reply) => {
@@ -127,6 +133,10 @@ export async function benchmarkRoutes(
       if (target !== 'frozen' && target !== 'A' && target !== 'B') {
         reply.code(400)
         return { error: 'target must be "frozen", "A", or "B"' }
+      }
+      if (manifest.worktreesCleared) {
+        reply.code(409)
+        return { error: 'worktrees have been cleared for this benchmark' }
       }
 
       let dir: string
@@ -150,7 +160,7 @@ export async function benchmarkRoutes(
         const armPath = arm?.worktreePath
         if (!armPath || !fs.existsSync(armPath)) {
           reply.code(409)
-          return { error: 'arm worktree is no longer available — it is removed when the benchmark finishes' }
+          return { error: 'arm worktree is not available (it may have been cleared)' }
         }
         dir = armPath
       }
@@ -164,6 +174,48 @@ export async function benchmarkRoutes(
         reply.code(200)
         return { opened: false, path: dir, error: err instanceof Error ? err.message : String(err) }
       }
+    },
+  )
+
+  // Reclaim a finished benchmark's worktrees (staging, arm-A, arm-B, and any
+  // lazily-created inspect checkout). Two-phase, gated on `confirm` (the codebase
+  // convention for destructive ops): the UI first POSTs without `confirm` to get
+  // the disk it would free (for the confirm dialog), then POSTs `confirm: true`
+  // to actually remove them. After clearing, "Open frozen bug" + arm inspection
+  // are no longer available (the sabotage SHA becomes unreachable).
+  app.post<{ Params: { benchmarkId: string }; Body: { confirm?: boolean } }>(
+    '/api/benchmarks/:benchmarkId/clear-worktrees',
+    async (req, reply) => {
+      const manifest = deps.store.get(req.params.benchmarkId)
+      if (!manifest) {
+        reply.code(404)
+        return { error: 'benchmark not found' }
+      }
+      const done = manifest.status === 'done' || manifest.status === 'aborted' || manifest.status === 'error'
+      if (!done) {
+        reply.code(409)
+        return { error: 'cannot clear worktrees while the benchmark is still running' }
+      }
+      if (manifest.worktreesCleared) {
+        return { confirmed: false, willClear: 0, cleared: 0, freedBytes: manifest.worktreesClearedBytes ?? 0, alreadyCleared: true }
+      }
+
+      const sourceRoots = await featureRepoRoots(deps.featuresDir)
+      const owned = (await listWorktrees({ logsDir: deps.logsDir, sourceRoots, now: Date.now() })).filter(
+        (e) => e.ownerKind === 'benchmark' && e.ownerId === manifest.benchmarkId,
+      )
+      const freedBytes = owned.reduce((sum, e) => sum + e.bytes, 0)
+
+      // Dry run: report what would be freed so the UI can show it in the confirm.
+      if (req.body?.confirm !== true) {
+        return { confirmed: false, willClear: owned.length, cleared: 0, freedBytes }
+      }
+
+      for (const e of owned) {
+        await removeWorktree({ sourceRoot: e.sourceRoot, worktreeRoot: e.path }).catch(() => {})
+      }
+      deps.store.save({ ...manifest, worktreesCleared: true, worktreesClearedBytes: freedBytes })
+      return { confirmed: true, willClear: owned.length, cleared: owned.length, freedBytes }
     },
   )
 
@@ -189,6 +241,22 @@ export async function benchmarkRoutes(
       return { error: err instanceof Error ? err.message : String(err) }
     }
   })
+}
+
+// Git toplevels of every configured feature repo — the source roots that
+// `git worktree remove` / `listWorktrees` operate against. Mirrors the helper
+// in routes/runs.ts (kept local to avoid a route→route import).
+async function featureRepoRoots(featuresDir: string): Promise<string[]> {
+  const roots = new Set<string>()
+  for (const feature of loadFeatures(featuresDir)) {
+    for (const repo of feature.repos ?? []) {
+      try {
+        const root = await getGitRoot(resolveRepoPath(repo.localPath))
+        if (root) roots.add(root)
+      } catch { /* skip repos that aren't resolvable */ }
+    }
+  }
+  return [...roots]
 }
 
 // Lazily ensure a pristine checkout at the sabotage SHA under the benchmark's

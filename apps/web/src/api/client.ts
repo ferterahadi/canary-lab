@@ -148,6 +148,23 @@ export function openBenchmarkWorktree(
   )
 }
 
+// Clear a finished benchmark's worktrees. Two-phase, mirroring the route: call
+// with `confirm: false` (default) for a dry run that returns the disk it would
+// free (shown in the confirm dialog), then `confirm: true` to actually remove
+// them. `cleared`/`freedBytes` reflect what was removed.
+export function clearBenchmarkWorktrees(
+  id: string,
+  confirm: boolean,
+  opts?: ClientOptions,
+): Promise<{ confirmed: boolean; willClear: number; cleared: number; freedBytes: number; alreadyCleared?: boolean }> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request(
+    `${baseUrl}/api/benchmarks/${encodeURIComponent(id)}/clear-worktrees`,
+    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ confirm }) },
+    fetchImpl,
+  )
+}
+
 export function getBenchmarkSabotageLog(id: string, opts?: ClientOptions): Promise<{ log: string }> {
   const { baseUrl, fetchImpl } = defaultOpts(opts)
   return request<{ log: string }>(
@@ -466,6 +483,16 @@ export interface ProjectConfig {
   healAgent: HealAgentChoice
   editor: EditorChoice
   personalWikiPath: string | null
+  port?: number
+}
+
+export interface PortChangeResult {
+  restarting: boolean
+  port?: number
+  newOrigin?: string
+  reason?: string
+  needsConfirm?: boolean
+  activeRuns?: number
 }
 
 export function getProjectConfig(opts?: ClientOptions): Promise<ProjectConfig> {
@@ -487,6 +514,33 @@ export function putProjectConfig(
     },
     fetchImpl,
   )
+}
+
+// Change the UI/MCP port. The server persists it and restarts the UI; a 409
+// surfaces as `{ needsConfirm, activeRuns }` so the caller can re-submit with
+// confirm:true after warning that active runs will be aborted.
+export async function changeProjectPort(
+  port: number,
+  confirm: boolean,
+  opts?: ClientOptions,
+): Promise<PortChangeResult> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  try {
+    return await request<PortChangeResult>(
+      `${baseUrl}/api/project-config/port`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ port, confirm }),
+      },
+      fetchImpl,
+    )
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 409 && e.body && typeof e.body === 'object') {
+      return e.body as PortChangeResult
+    }
+    throw e
+  }
 }
 
 export function openAgentApp(agent: 'claude' | 'codex', opts?: ClientOptions): Promise<{ opened: boolean }> {

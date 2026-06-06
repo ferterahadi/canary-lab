@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest'
+import fs from 'fs'
+import os from 'os'
 import path from 'path'
 import { Writable } from 'stream'
 import { createServer } from '../apps/web-server/server'
@@ -9,7 +11,9 @@ import {
   ensureMcpServerReachable,
   inferClientKindFromProcessLines,
   inferMcpClientKind,
+  isDefaultLocalMcpUrl,
   main,
+  resolveDefaultMcpUrl,
   resolveUiProjectRootForMcpAutostart,
 } from './mcp'
 
@@ -214,7 +218,7 @@ describe('canary-lab mcp', () => {
     expect(stderr.text()).toContain('Stop that server')
   })
 
-  it('does not auto-start the UI for custom MCP URLs', async () => {
+  it('does not auto-start the UI when the URL was explicitly provided (autoStartEligible: false)', async () => {
     const stderr = new BufferWritable()
     let started = false
     const fetchMock: typeof fetch = async () => {
@@ -222,6 +226,26 @@ describe('canary-lab mcp', () => {
     }
 
     await expect(ensureMcpServerReachable('http://127.0.0.1:9/mcp', {
+      stderr,
+      fetch: fetchMock,
+      autoStartEligible: false,
+      startUi: async () => { started = true },
+      startupPollMs: 1,
+      startupTimeoutMs: 5,
+    })).resolves.toBe(false)
+
+    expect(started).toBe(false)
+    expect(stderr.text()).toContain('Start the UI first: canary-lab ui')
+  })
+
+  it('does not auto-start the UI for non-local custom MCP URLs', async () => {
+    const stderr = new BufferWritable()
+    let started = false
+    const fetchMock: typeof fetch = async () => {
+      throw new TypeError('fetch failed')
+    }
+
+    await expect(ensureMcpServerReachable('http://example.com:9/mcp', {
       stderr,
       fetch: fetchMock,
       startUi: async () => { started = true },
@@ -285,5 +309,55 @@ describe('canary-lab mcp', () => {
     expect(inferMcpClientKind({
       CANARY_LAB_MCP_CLIENT_KIND: 'codex-desktop',
     }, 1)).toBe('codex-desktop')
+  })
+})
+
+describe('isDefaultLocalMcpUrl', () => {
+  it('matches localhost /mcp on any port and rejects non-local or non-/mcp urls', () => {
+    expect(isDefaultLocalMcpUrl('http://127.0.0.1:8500/mcp')).toBe(true)
+    expect(isDefaultLocalMcpUrl('http://localhost:7421/mcp')).toBe(true)
+    expect(isDefaultLocalMcpUrl('http://example.com:7421/mcp')).toBe(false)
+    expect(isDefaultLocalMcpUrl('http://127.0.0.1:8500/other')).toBe(false)
+    expect(isDefaultLocalMcpUrl('not a url')).toBe(false)
+  })
+})
+
+describe('resolveDefaultMcpUrl', () => {
+  const tmpDirs: string[] = []
+  function mkWorkspace(port?: number): string {
+    const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-default-')))
+    tmpDirs.push(dir)
+    fs.mkdirSync(path.join(dir, 'features'))
+    if (port !== undefined) {
+      fs.writeFileSync(path.join(dir, 'canary-lab.config.json'), JSON.stringify({ port }))
+    }
+    return dir
+  }
+  function cleanup() {
+    while (tmpDirs.length) fs.rmSync(tmpDirs.pop()!, { recursive: true, force: true })
+  }
+
+  it('builds the url from the active project config port', () => {
+    const projectRoot = mkWorkspace(8500)
+    const registry = { workspaces: [{ name: 'a', path: projectRoot, createdAt: '2024-01-01T00:00:00.000Z', updatedAt: '2024-01-01T00:00:00.000Z' }] }
+    try {
+      expect(resolveDefaultMcpUrl({ cwd: os.tmpdir(), registry })).toBe('http://127.0.0.1:8500/mcp')
+    } finally {
+      cleanup()
+    }
+  })
+
+  it('falls back to the default port when the active project pins none', () => {
+    const projectRoot = mkWorkspace()
+    const registry = { workspaces: [{ name: 'a', path: projectRoot, createdAt: '2024-01-01T00:00:00.000Z', updatedAt: '2024-01-01T00:00:00.000Z' }] }
+    try {
+      expect(resolveDefaultMcpUrl({ cwd: os.tmpdir(), registry })).toBe('http://127.0.0.1:7421/mcp')
+    } finally {
+      cleanup()
+    }
+  })
+
+  it('falls back to the default port when no project resolves', () => {
+    expect(resolveDefaultMcpUrl({ cwd: os.tmpdir(), registry: { workspaces: [] } })).toBe('http://127.0.0.1:7421/mcp')
   })
 })

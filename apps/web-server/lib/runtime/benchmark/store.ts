@@ -80,6 +80,9 @@ export interface BenchmarkStoreEvent {
 export interface BenchmarkStore {
   list(): BenchmarkIndexEntry[]
   get(benchmarkId: string): BenchmarkManifest | null
+  /** Persist a manifest and push a `changed` event to WS subscribers. Used by
+   *  routes that mutate a benchmark out-of-band (e.g. clearing worktrees). */
+  save(manifest: BenchmarkManifest): void
   onEvent(fn: (event: BenchmarkStoreEvent) => void): void
   offEvent(fn: (event: BenchmarkStoreEvent) => void): void
 }
