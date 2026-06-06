@@ -159,4 +159,51 @@ describe('BenchmarkRace.runRace', () => {
 
     expect(starts.sort()).toEqual(['A:1:run-A-1', 'B:1:run-B-1'])
   })
+
+  it('aborts as invalid when BOTH arms pass their first unhealed run (no-op sabotage)', async () => {
+    let ran = 0
+    const race = new BenchmarkRace({
+      iterations: 3,
+      sabotageSha: 's',
+      // healed with zero heal cycles = the broken state passed on first run.
+      runArm: async (arm, _mode, iteration) => {
+        ran++
+        return { arm, iteration, healed: true, healCycles: 0, wallClockMs: 1 }
+      },
+      resetArms: async () => {},
+    })
+
+    await expect(race.runRace()).rejects.toBeInstanceOf(SabotageNoopError)
+    // Detected after iteration 1's barrier — both arms ran once, no more.
+    expect(ran).toBe(2)
+  })
+
+  it('does NOT flag a no-op when only one arm passes without healing (flaky pass)', async () => {
+    const race = new BenchmarkRace({
+      iterations: 1,
+      sabotageSha: 's',
+      runArm: async (arm, _mode, iteration) =>
+        arm === 'A'
+          ? { arm, iteration, healed: true, healCycles: 0, wallClockMs: 1 } // flaky first-run pass
+          : { arm, iteration, healed: true, healCycles: 3, wallClockMs: 1 }, // real break, healed
+      resetArms: async () => {},
+    })
+
+    const report = await race.runRace()
+    expect(report.harness.iterationsTotal).toBe(1)
+    expect(report.baseline.iterationsTotal).toBe(1)
+  })
+
+  it('does NOT flag a no-op when both arms healed via real heal cycles', async () => {
+    const race = new BenchmarkRace({
+      iterations: 1,
+      sabotageSha: 's',
+      runArm: async (arm, _mode, iteration) => ({ arm, iteration, healed: true, healCycles: 2, wallClockMs: 1 }),
+      resetArms: async () => {},
+    })
+
+    const report = await race.runRace()
+    expect(report.harness.iterationsHealed).toBe(1)
+    expect(report.baseline.iterationsHealed).toBe(1)
+  })
 })

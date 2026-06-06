@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { BenchmarkOrchestrator } from './orchestrator'
+import { SabotageNoopError } from './race'
 import type { BenchmarkManifest } from './types'
 import type { BenchmarkReport } from './report'
 
@@ -258,5 +259,25 @@ describe('BenchmarkOrchestrator.run', () => {
     expect(final.status).toBe('error')
     expect(final.error).toMatch(/could not break it/)
     expect(cleaned).toBe(true)
+  })
+
+  it('maps a SabotageNoopError from the race to status=invalid (not error)', async () => {
+    let final: BenchmarkManifest | undefined
+    const orch = new BenchmarkOrchestrator({
+      manifest: makeManifest(),
+      persist: (m) => { final = m },
+      sabotage: async () => ({ sabotageSha: 'a1b2c3d', diff: 'D' }),
+      writeDiff: () => {},
+      setupArms: async () => {},
+      runRace: async () => { throw new SabotageNoopError('broke no test') },
+      now: () => '2026-06-03T02:00:00.000Z',
+    })
+
+    const result = await orch.run()
+
+    expect(result.status).toBe('invalid')
+    expect(result.error).toBe('broke no test')
+    expect(result.endedAt).toBe('2026-06-03T02:00:00.000Z')
+    expect(final?.status).toBe('invalid')
   })
 })
