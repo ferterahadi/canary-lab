@@ -8,10 +8,11 @@ export type BenchmarkArm = 'A' | 'B'
 export type ArmMode = 'harness' | 'baseline'
 
 export type BenchmarkStatus =
-  | 'sabotaging' // worktree + sabotage agent + validity gate
+  | 'sabotaging' // worktree + sabotage agent + freeze
   | 'ready' // frozen, arms set up, awaiting the race
   | 'running' // arms racing
   | 'done' // all iterations complete, report written
+  | 'invalid' // the frozen sabotage broke no test (caught in race iter 1) — re-run
   | 'aborted'
   | 'error'
 
@@ -28,6 +29,12 @@ export interface BenchmarkManifest {
   benchmarkId: string
   feature: string
   featureDir?: string
+  /** Resolved localPath of the sabotaged repo (feature.repos[0]). The sabotage
+   *  commit lives here — which may be a DIFFERENT git repo than `featureDir`
+   *  (external feature dirs are supported). "Open frozen bug" must worktree this
+   *  repo, not `featureDir`, or `git worktree add <sabotageSha>` fails with
+   *  "invalid reference" for multi-repo features. */
+  repoPath?: string
   /** Sabotage skill name (folder under sabotage-skills/). */
   skill: string
   level: SabotageLevel

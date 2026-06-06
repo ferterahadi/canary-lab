@@ -1,5 +1,6 @@
 import type { BenchmarkManifest } from './types'
 import type { ArmIterationResult, BenchmarkReport } from './report'
+import { SabotageNoopError } from './race'
 
 // Sequences the full benchmark lifecycle and owns the manifest as the source of
 // truth, persisting on every transition (which is also the WS push point).
@@ -104,10 +105,16 @@ export class BenchmarkOrchestrator {
       d.persist(m)
     } catch (err) {
       // A Stop that interrupts a phase surfaces as a throw — record it as
-      // 'aborted', not 'error'.
-      m = d.isAborted?.()
-        ? { ...m, status: 'aborted', endedAt: d.now() }
-        : { ...m, status: 'error', error: err instanceof Error ? err.message : String(err), endedAt: d.now() }
+      // 'aborted', not 'error'. A no-op sabotage (the race found the frozen
+      // edit broke nothing) is 'invalid' — a clean "re-run" outcome, not a
+      // crash. Everything else is a real 'error'.
+      if (d.isAborted?.()) {
+        m = { ...m, status: 'aborted', endedAt: d.now() }
+      } else if (err instanceof SabotageNoopError) {
+        m = { ...m, status: 'invalid', error: err.message, endedAt: d.now() }
+      } else {
+        m = { ...m, status: 'error', error: err instanceof Error ? err.message : String(err), endedAt: d.now() }
+      }
       d.persist(m)
     } finally {
       await d.cleanup?.()

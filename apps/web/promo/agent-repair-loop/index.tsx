@@ -120,41 +120,53 @@ function uiValue(frame: number, start: number, end: number, from: number, to: nu
   return from + (to - from) * t
 }
 
-// Hyperzoom targets in full-res (1920x1080) coords. Establish the whole app, then punch in hard.
-// Establish wide, then a fast hyperzoom into the FAILURE ("Expected $124.00 but received $112.00").
+// Hyperzoom targets in full-res (1920x1080) coords. Choreography:
+// 1) establish the whole app, 2) on failure punch into the FAILED run status header,
+// 3) pan (while zoomed) to the heal section, 4) hyperzoom the RUNNING run status and hold
+// till it flips to PASSED, 5) switch to the journal so an iteration fills the window.
+
+// Targets (full-res 1920x1080). The top Runs-panel ROW (~y104-156, x600-1890) is the hero
+// status element for both fail and pass; the heal beat focuses on the Heal-agent session.
+
+// Unified run-row anchor (the top Runs row only fits whole at ~1.46x; tighter clips the badge).
+const RUN_ROW: Pick<Shot, 'x' | 'y' | 'zoom'> = { x: 1245, y: 405, zoom: 1.46 }
+const HEAL_CARD: Pick<Shot, 'x' | 'y' | 'zoom'> = { x: 955, y: 662, zoom: 1.8 }
+
+// Hold the whole app perfectly still, then ONE clean zoom into the run row (flips to FAILED).
 function holdCamera(): Shot[] {
   return [
     { frame: timing.appIn, x: CENTER_X, y: CENTER_Y, zoom: 1.0 },
-    { frame: 104, x: 950, y: 524, zoom: 1.08 },
-    { frame: 116, x: 800, y: 690, zoom: 2.35 },
-    { frame: timing.healingStart, x: 808, y: 694, zoom: 2.5 },
+    { frame: 110, x: CENTER_X, y: CENTER_Y, zoom: 1.0 },
+    { frame: 122, ...RUN_ROW },
+    { frame: timing.healingStart, ...RUN_ROW },
   ]
 }
 
-// Punch into the AI Agent heal card (EXTERNAL HEAL SESSION · HEALING · cycles).
+// ONE clean pan+zoom from the run row to the Heal-agent card, then hold (no settle creep).
 function healingCamera(): Shot[] {
   return [
-    { frame: timing.healingStart, x: 940, y: 652, zoom: 1.3 },
-    { frame: timing.healingStart + 9, x: 952, y: 660, zoom: 1.9 },
-    { frame: timing.healingEnd + 24, x: 968, y: 666, zoom: 2.0 },
+    { frame: timing.healingStart, ...RUN_ROW },
+    { frame: timing.healingStart + 18, ...HEAL_CARD },
+    { frame: timing.healingEnd, ...HEAL_CARD },
   ]
 }
 
-// Punch into the test list as badges cascade to PASSED (green) — "going green".
+// ~t10: lock precisely on the run row and hold completely still — RUNNING flips to PASSED in place.
 function rerunCamera(): Shot[] {
   return [
-    { frame: timing.rerunIn, x: 900, y: 470, zoom: 1.2 },
-    { frame: timing.rerunIn + 9, x: 440, y: 430, zoom: 2.2 },
-    { frame: timing.journalIn, x: 470, y: 560, zoom: 2.26 },
+    { frame: timing.rerunIn, ...RUN_ROW },
+    { frame: timing.journalIn, ...RUN_ROW },
   ]
 }
 
-// Punch into the repair journal, then drift down through the iterations.
+// Hold the PASSED run row, then ONE clean pan into the journal (~t13) and LOCK. The captured
+// footage scrolls the iterations through the frame on its own — the camera stays still.
 function journalCamera(): Shot[] {
   return [
-    { frame: timing.journalIn, x: 950, y: 640, zoom: 1.22 },
-    { frame: timing.journalIn + 9, x: 950, y: 560, zoom: 1.95 },
-    { frame: timing.finalIn, x: 958, y: 720, zoom: 2.0 },
+    { frame: timing.journalIn, ...RUN_ROW },
+    { frame: timing.journalIn + 12, ...RUN_ROW },
+    { frame: timing.journalIn + 26, x: 958, y: 650, zoom: 2.4 },
+    { frame: timing.finalIn, x: 958, y: 650, zoom: 2.4 },
   ]
 }
 
@@ -256,7 +268,7 @@ function JournalWarpShot({ opacity }: { opacity: number }) {
       <LiveAppShot
         opacity={opacity}
         shots={journalCamera()}
-        blurRanges={[[timing.journalIn, timing.journalIn + 12]]}
+        blurRanges={[[timing.journalIn + 14, timing.journalIn + 26]]}
         brightness={1.0}
       />
     </>
@@ -276,17 +288,17 @@ function ProductScene() {
       <LiveAppShot
         opacity={frame < timing.healingStart ? opacity : fullOpacity}
         shots={holdCamera()}
-        blurRanges={[[110, 122]]}
+        blurRanges={[[112, 123]]}
       />
       <LiveAppShot
         opacity={healingOpacity}
         shots={healingCamera()}
-        blurRanges={[[timing.healingStart, timing.healingStart + 12]]}
+        blurRanges={[]}
       />
       <LiveAppShot
         opacity={rerunOpacity}
         shots={rerunCamera()}
-        blurRanges={[[timing.rerunIn, timing.rerunIn + 12]]}
+        blurRanges={[]}
       />
       <JournalWarpShot opacity={journalOpacity} />
     </>

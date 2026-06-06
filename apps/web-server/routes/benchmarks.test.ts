@@ -265,11 +265,28 @@ describe('benchmarkRoutes', () => {
       await app.close()
     })
 
-    it('frozen 409s when the benchmark has no feature directory', async () => {
-      const app = await buildApp({ store: fakeStore({ get: () => manifest({ sabotageSha: 'sha', featureDir: undefined }) }) })
+    it('frozen 409s when the benchmark has no repo to inspect', async () => {
+      const app = await buildApp({ store: fakeStore({ get: () => manifest({ sabotageSha: 'sha', featureDir: undefined, repoPath: undefined }) }) })
       const res = await app.inject(openBody('frozen'))
       expect(res.statusCode).toBe(409)
-      expect(res.json()).toEqual({ error: 'benchmark has no feature directory to inspect' })
+      expect(res.json()).toEqual({ error: 'benchmark has no repo to inspect' })
+      await app.close()
+    })
+
+    it('frozen worktrees the sabotaged repo (repoPath), not the external featureDir', async () => {
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bench-route-'))
+      vi.mocked(addWorktree).mockResolvedValue({ repoName: 'cns', worktreeRoot: '/inspect/wt', sourceRoot: '/repo', localPath: '/inspect/wt' })
+      const app = await buildApp({
+        logsDir: tmp,
+        // featureDir is an EXTERNAL dir; the sabotage commit lives in repoPath.
+        store: fakeStore({ get: () => manifest({ sabotageSha: 'sha', featureDir: '/workspace/features/cns', repoPath: '/repos/mighty-cns' }) }),
+      })
+      const res = await app.inject(openBody('frozen'))
+      expect(res.statusCode).toBe(200)
+      expect(vi.mocked(addWorktree)).toHaveBeenCalledWith(
+        expect.objectContaining({ branch: 'sha', localPath: '/repos/mighty-cns' }),
+      )
+      fs.rmSync(tmp, { recursive: true, force: true })
       await app.close()
     })
 

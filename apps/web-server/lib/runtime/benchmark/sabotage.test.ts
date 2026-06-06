@@ -6,38 +6,33 @@ function deps(over: Partial<SabotageDeps> = {}): SabotageDeps {
     createStagingWorktree: async () => '/wt/staging',
     runSabotageAgent: async () => {},
     testsUntouched: async () => true,
-    testsFail: async () => true,
-    resetWorktree: async () => {},
     freeze: async () => 'a1b2c3d',
     captureDiff: async () => '--- diff ---',
-    maxAttempts: 2,
     ...over,
   }
 }
 
 describe('runSabotage', () => {
-  it('breaks the app, validates tests go red, freezes and captures the diff', async () => {
+  it('breaks the app, checks tests are untouched, freezes and captures the diff', async () => {
     const calls: string[] = []
     const result = await runSabotage('recipe text', deps({
       runSabotageAgent: async (wt, recipe) => { calls.push(`agent:${wt}:${recipe}`) },
+      testsUntouched: async () => { calls.push('untouched'); return true },
       freeze: async () => { calls.push('freeze'); return 'a1b2c3d' },
       captureDiff: async () => { calls.push('diff'); return 'D' },
     }))
     expect(result.sabotageSha).toBe('a1b2c3d')
     expect(result.diff).toBe('D')
-    expect(result.attempts).toBe(1)
-    expect(calls).toEqual(['agent:/wt/staging:recipe text', 'freeze', 'diff'])
+    expect(result.worktreePath).toBe('/wt/staging')
+    // No boot+suite validity gate: agent → no-cheat check → freeze → diff, once.
+    expect(calls).toEqual(['agent:/wt/staging:recipe text', 'untouched', 'freeze', 'diff'])
   })
 
-  it('retries when the first sabotage attempt leaves tests green, resetting between attempts', async () => {
-    let attempt = 0
-    let resets = 0
-    const result = await runSabotage('r', deps({
-      testsFail: async () => { attempt++; return attempt >= 2 }, // green first, red second
-      resetWorktree: async () => { resets++ },
-    }))
-    expect(result.attempts).toBe(2)
-    expect(resets).toBe(1)
+  it('does NOT run the tests itself — validity is left to the race', async () => {
+    // The linear flow has no test-running dep at all; it freezes whatever the
+    // agent produced. A no-op break is caught later by the race, not here.
+    const result = await runSabotage('r', deps())
+    expect(result.sabotageSha).toBe('a1b2c3d')
   })
 
   it('rejects a sabotage that modified test files (no-cheat violation)', async () => {
@@ -46,23 +41,25 @@ describe('runSabotage', () => {
     ).rejects.toThrow(/test files/i)
   })
 
-  it('gives up with an error when the tests never go red', async () => {
+  it('propagates the freeze empty-diff guard when the agent edited nothing', async () => {
     await expect(
-      runSabotage('r', deps({ testsFail: async () => false, maxAttempts: 3 })),
-    ).rejects.toThrow(/never (failed|went red)|failed to break/i)
+      runSabotage('r', deps({
+        freeze: async () => { throw new Error('sabotage produced no file changes to freeze') },
+      })),
+    ).rejects.toThrow(/no file changes/i)
   })
 
-  it('aborts promptly when isAborted() is true, skipping the validity-gate trial', async () => {
-    let trialRan = false
+  it('aborts promptly when isAborted() is true before the agent runs', async () => {
+    let agentRan = false
     await expect(
-      runSabotage('r', deps({ isAborted: () => true, testsFail: async () => { trialRan = true; return true } })),
+      runSabotage('r', deps({ isAborted: () => true, runSabotageAgent: async () => { agentRan = true } })),
     ).rejects.toThrow(/aborted/i)
-    expect(trialRan).toBe(false)
+    expect(agentRan).toBe(false)
   })
 
-  it('bails right after the agent finishes when a stop arrives mid-attempt', async () => {
-    // isAborted is false at the top-of-loop check, then true after the agent —
-    // exercising the second abort guard before the no-cheat / validity gate.
+  it('bails right after the agent finishes when a stop arrives mid-phase', async () => {
+    // isAborted is false at the pre-agent check, then true after the agent —
+    // exercising the second abort guard before the no-cheat check / freeze.
     let agentRan = false
     let checked = 0
     let untouchedRan = false
@@ -75,16 +72,5 @@ describe('runSabotage', () => {
     ).rejects.toThrow(/aborted/i)
     expect(agentRan).toBe(true)
     expect(untouchedRan).toBe(false)
-  })
-
-  it('defaults to 2 attempts when maxAttempts is unset', async () => {
-    let attempts = 0
-    await expect(
-      runSabotage('r', deps({
-        maxAttempts: undefined,
-        testsFail: async () => { attempts++; return false }, // never goes red
-      })),
-    ).rejects.toThrow(/failed to break/i)
-    expect(attempts).toBe(2)
   })
 })
