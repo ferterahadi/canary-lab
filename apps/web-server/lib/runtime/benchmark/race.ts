@@ -15,6 +15,24 @@ import type { ArmMode } from './types'
 
 const ARM_MODES: Record<'A' | 'B', ArmMode> = { A: 'harness', B: 'baseline' }
 
+/** Thrown when iteration 1 reveals the frozen sabotage broke no test — the
+ *  benchmark can't run, so the orchestrator finalizes it as 'invalid' (not a
+ *  crash). Carries a user-facing explanation. */
+export class SabotageNoopError extends Error {
+  readonly code = 'sabotage-noop' as const
+  constructor(message: string) {
+    super(message)
+    this.name = 'SabotageNoopError'
+  }
+}
+
+// An arm "healed" with zero heal cycles means its very first, unhealed run
+// against the frozen state already passed — i.e. the sabotage didn't break a
+// tested behavior in that arm. healCycles only increments once a heal cycle
+// actually begins (orchestrator), so this is an exact signal, not a heuristic.
+const passedWithoutHealing = (r: ArmIterationResult): boolean =>
+  r.healed && r.healCycles === 0
+
 export interface BenchmarkRaceDeps {
   iterations: number
   sabotageSha: string
@@ -70,6 +88,16 @@ export class BenchmarkRace {
         this.deps.parallel === false
           ? [await this.runArmSafely('A', k), await this.runArmSafely('B', k)]
           : await Promise.all([this.runArmSafely('A', k), this.runArmSafely('B', k)])
+      // No-op sabotage check (iteration 1 only): if BOTH arms' first unhealed
+      // run passed, the frozen edit broke nothing — there's no benchmark to
+      // run. Require both (not either) so a single flaky pass can't kill a real
+      // break. Abort before streaming bogus passing results; the orchestrator
+      // finalizes this as 'invalid'.
+      if (k === 1 && armResults.length === 2 && armResults.every(passedWithoutHealing)) {
+        throw new SabotageNoopError(
+          'The sabotage changed code but broke no test: the frozen state passed its first run in both arms (harness + baseline). The agent’s edit likely didn’t affect a tested behavior. Re-run the benchmark to try a different break.',
+        )
+      }
       for (const r of armResults) {
         this.results.push(r)
         this.deps.onResult?.(r)

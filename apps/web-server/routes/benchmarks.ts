@@ -145,9 +145,12 @@ export async function benchmarkRoutes(
           reply.code(409)
           return { error: 'the bug is not frozen yet' }
         }
-        if (!manifest.featureDir) {
+        // The sabotage commit lives in the sabotaged repo (repoPath). Older
+        // manifests predate that field — fall back to featureDir (correct only
+        // when the feature dir lives inside the sabotaged repo).
+        if (!manifest.repoPath && !manifest.featureDir) {
           reply.code(409)
-          return { error: 'benchmark has no feature directory to inspect' }
+          return { error: 'benchmark has no repo to inspect' }
         }
         try {
           dir = await ensureInspectWorktree(deps.logsDir, manifest)
@@ -268,9 +271,13 @@ async function ensureInspectWorktree(logsDir: string, manifest: BenchmarkManifes
     const existing = fs.readdirSync(inspectParent, { withFileTypes: true }).find((e) => e.isDirectory())
     if (existing) return path.join(inspectParent, existing.name)
   }
+  // Worktree the SABOTAGED repo at the sabotage SHA — not featureDir, which for
+  // external feature dirs is a different git repo that lacks the commit (the
+  // cause of "git worktree add … invalid reference"). Fall back to featureDir
+  // for manifests written before repoPath existed.
   const handle = await addWorktree({
     repoName: manifest.feature,
-    localPath: manifest.featureDir as string,
+    localPath: (manifest.repoPath ?? manifest.featureDir) as string,
     worktreesDir: inspectParent,
     branch: manifest.sabotageSha,
   })

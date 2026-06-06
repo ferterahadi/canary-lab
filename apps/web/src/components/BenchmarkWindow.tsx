@@ -368,7 +368,7 @@ function BenchmarkDetail({ id, onClose, onNew }: { id: string; onClose: () => vo
   }
 
   const sabotaging = m.status === 'sabotaging' || m.status === 'ready'
-  const terminal = m.status === 'done' || m.status === 'aborted' || m.status === 'error'
+  const terminal = m.status === 'done' || m.status === 'aborted' || m.status === 'error' || m.status === 'invalid'
   // Worktrees are kept after a run so these stay usable; clearing is the user's
   // call (Report tab). Once cleared, the open actions are gone — show a receipt.
   const showFrozen = !!m.sabotageSha && !m.worktreesCleared && !sabotaging && m.status !== 'error'
@@ -433,6 +433,23 @@ function BenchmarkDetail({ id, onClose, onNew }: { id: string; onClose: () => vo
           <SetupView m={m} />
         ) : m.status === 'error' ? (
           <div style={{ color: 'rgb(251,113,133)', fontSize: 13 }}>Benchmark error: {m.error}</div>
+        ) : m.status === 'invalid' ? (
+          <div style={{ maxWidth: 640, display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'rgb(251,191,36)', fontSize: 13, fontWeight: 600 }}>
+              <span style={{ width: 9, height: 9, borderRadius: 9999, background: 'rgb(251,191,36)', flex: 'none' }} />
+              Sabotage didn’t land
+            </div>
+            <div style={{ color: 'var(--text-secondary)', fontSize: 13, lineHeight: 1.6 }}>
+              {m.error || 'The frozen sabotage broke no test, so there was nothing to race. Re-run the benchmark to try a different break.'}
+            </div>
+            {onNew && (
+              <div>
+                <button type="button" className="cl-button" onClick={onNew} style={{ padding: '6px 12px', fontSize: 12 }}>
+                  New benchmark
+                </button>
+              </div>
+            )}
+          </div>
         ) : tab === 'report' ? (
           <ReportView m={m} />
         ) : (
@@ -997,7 +1014,7 @@ function lifecycleStage(status?: BenchmarkManifest['status']): number {
   return 3
 }
 function isTerminal(status?: string): boolean {
-  return status === 'done' || status === 'aborted' || status === 'error'
+  return status === 'done' || status === 'aborted' || status === 'error' || status === 'invalid'
 }
 
 const STAGE_LABELS = ['Sabotage', 'Progress', 'Race', 'Report'] as const
@@ -1105,9 +1122,11 @@ function BenchmarkHeader({
     ? 'var(--accent)'
     : status === 'done'
       ? 'var(--accent)'
-      : status === 'error' || status === 'aborted'
-        ? 'rgb(251,113,133)'
-        : 'rgb(56,189,248)'
+      : status === 'invalid'
+        ? 'rgb(251,191,36)'
+        : status === 'error' || status === 'aborted'
+          ? 'rgb(251,113,133)'
+          : 'rgb(56,189,248)'
   return (
     <div style={{ borderBottom: '1px solid var(--border-default)', background: 'var(--bg-surface)' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 16px 8px' }}>

@@ -10,6 +10,7 @@ export type BenchmarkStatus =
   | 'ready'
   | 'running'
   | 'done'
+  | 'invalid' // frozen sabotage broke no test — re-run with a different break
   | 'aborted'
   | 'error'
 
@@ -47,6 +48,8 @@ export interface BenchmarkManifest {
   benchmarkId: string
   feature: string
   featureDir?: string
+  /** Resolved path of the sabotaged repo (where the sabotage commit lives). */
+  repoPath?: string
   skill: string
   level: SabotageLevel
   iterations: number

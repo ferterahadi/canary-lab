@@ -120,6 +120,9 @@ export function createBenchmarkRunner(deps: BenchmarkRunnerDeps) {
       benchmarkId,
       feature: feature.name,
       featureDir: feature.featureDir,
+      // The sabotaged repo (may differ from featureDir) — "Open frozen bug"
+      // worktrees THIS repo at the sabotage SHA, never featureDir.
+      repoPath: repo.localPath,
       skill: skill.name,
       level: skill.level,
       iterations: input.iterations,
@@ -169,8 +172,9 @@ export function createBenchmarkRunner(deps: BenchmarkRunnerDeps) {
             // NOTE: do NOT symlink node_modules into staging — a `node_modules`
             // symlink isn't matched by the `node_modules/` gitignore pattern, so
             // `git add -A` in freeze() would commit it and corrupt the sabotage
-            // SHA. The validity gate must instead boot the service via the
-            // orchestrator (which handles deps) — see runner TODO.
+            // SHA. Nothing in the sabotage phase boots services anymore (the old
+            // validity-gate trial was removed — see sabotage.ts), so staging
+            // never needs deps linked.
             return stagingHandle.worktreeRoot
           },
           runSabotageAgent: async (wtRoot, recipe) => {
@@ -188,21 +192,6 @@ export function createBenchmarkRunner(deps: BenchmarkRunnerDeps) {
             const res = await runGit(wtRoot, ['diff', '--name-only', 'HEAD'])
             const changed = res.stdout.split('\n').map((l) => l.trim()).filter(Boolean)
             return !changed.some((f) => /(^|\/)e2e\//.test(f) || /\.spec\.[tj]s$/.test(f))
-          },
-          testsFail: async () => {
-            // Sound validity gate: boot the services and run the suite ONCE with
-            // no auto-heal. A no-op sabotage leaves the tests green (status
-            // 'passed') → reject + retry; a real break makes them go red while
-            // the app is up. (The old standalone `npx playwright test` booted no
-            // services, so every test failed on connection-refused regardless of
-            // the sabotage — it could never detect a no-op break.)
-            linkNodeModules(stagingHandle!) // boot needs deps; freeze excludes the symlink
-            const status = await runNoHealTrial(stagingHandle!)
-            return status !== 'passed'
-          },
-          resetWorktree: async (wtRoot) => {
-            await runGit(wtRoot, ['reset', '--hard'])
-            await runGit(wtRoot, ['clean', '-fd'])
           },
           freeze: async (wtRoot) => {
             // Stage everything EXCEPT the node_modules symlink (not matched by
@@ -298,57 +287,6 @@ export function createBenchmarkRunner(deps: BenchmarkRunnerDeps) {
       },
     })
 
-    // Validity-gate trial: a no-autoHeal RunOrchestrator that boots the
-    // services and runs the suite once on the staging worktree, returning the
-    // terminal status ('passed' = nothing broke, 'failed' = tests went red).
-    // Not streamed to the UI (no attachRunStreams) — it's an internal check.
-    async function runNoHealTrial(handle: WorktreeHandle): Promise<string> {
-      // Service boots from the worktree repo (handle.localPath); the test
-      // harness (playwright.config + e2e) only maps into the worktree when the
-      // feature dir lives inside the repo — an external feature dir stays
-      // canonical so Playwright finds its config. See worktreeFeatureDir.
-      const featureDir = worktreeFeatureDir({
-        repoLocalPath: resolveRepoPath(repo.localPath),
-        featureDir: resolveRepoPath(feature.featureDir),
-        worktreeRepoPath: handle.localPath,
-      })
-      const trialFeature: FeatureConfig = { ...feature, featureDir, repos: [{ ...repo, localPath: handle.localPath }] }
-      const portMap = await deps.allocateRunPorts(trialFeature, env)
-      if (env) {
-        try { deps.applyFeatureEnvset(featureDir, env, portMap) } catch { /* best-effort */ }
-      }
-      const runId = generateRunId()
-      const runDir = runDirFor(deps.logsDir, runId)
-      const runnerLog = new RunnerLog(buildRunPaths(runDir).runnerLogPath)
-      const orch = new RunOrchestrator({
-        feature: trialFeature,
-        env,
-        runId,
-        runDir,
-        portMap,
-        // NOTE: do NOT pass `worktrees: [handle]` — the orchestrator's stop()
-        // removes any worktree it's handed, which would delete the staging
-        // worktree before freeze. We point the service cwd at the worktree via
-        // the repo's localPath instead; the benchmark owns the worktree's life.
-        ptyFactory: deps.ptyFactory,
-        runnerLog,
-        executionType: 'benchmark', // hidden from the global Runs list
-        runStateSink: deps.runStore as never,
-        // No autoHeal → boots services, runs tests once, returns passed/failed.
-      })
-      orchRefs.add(orch)
-      try {
-        const status = await orch.runFullCycle()
-        await orch.stop(status as never).catch(() => {})
-        return status
-      } catch {
-        return 'failed' // couldn't complete the trial → treat as "did not pass"
-      } finally {
-        orchRefs.delete(orch)
-        deps.registry.delete(runId)
-      }
-    }
-
     // One run per arm/iteration: a real RunOrchestrator in the arm's worktree.
     async function runArm(
       arm: 'A' | 'B',
@@ -357,8 +295,10 @@ export function createBenchmarkRunner(deps: BenchmarkRunnerDeps) {
       onStart: (runId: string) => void,
     ): Promise<ArmIterationResult> {
       const handle = armHandles[arm]!
-      // See runNoHealTrial: boot from the worktree repo, run the test harness
-      // from the (canonical-or-mapped) feature dir.
+      // Boot from the worktree repo (handle.localPath); the test harness
+      // (playwright.config + e2e) only maps into the worktree when the feature
+      // dir lives inside the repo — an external feature dir stays canonical so
+      // Playwright finds its config. See worktreeFeatureDir.
       const featureDir = worktreeFeatureDir({
         repoLocalPath: resolveRepoPath(repo.localPath),
         featureDir: resolveRepoPath(feature.featureDir),

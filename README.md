@@ -3,38 +3,35 @@
 [![npm](https://img.shields.io/npm/v/canary-lab.svg)](https://www.npmjs.com/package/canary-lab)
 [![license](https://img.shields.io/npm/l/canary-lab.svg)](LICENSE)
 
-The AI repair loop for Playwright.
+**The AI repair loop for Playwright.**
 
-Canary Lab runs your local Playwright tests, captures the evidence around each failure, and hands your AI agent the context it needs to fix the app and rerun the check. A failed test leaves behind enough to understand what broke and continue from the same run, instead of digging through terminal scrollback. It is built for teams using tests as the spec.
+A failing Playwright test scatters its evidence — service logs in one terminal, a trace file somewhere, a screenshot you have to go find. Canary Lab keeps the whole run in one place. It runs your tests locally, captures the context around each failure — logs, screenshots, traces, videos, which services were running, which env was applied — and hands that to your AI agent to fix the app and rerun from the same run. Built for teams that use tests as the spec.
 
 ![Canary Lab repair loop: failing Playwright test, saved details, AI Agent fix, passing rerun](docs/assets/canary-lab-repair-loop.gif)
 
 **Contents**
 
-- [Repair Loop](#repair-loop)
+- [How the Repair Loop Works](#how-the-repair-loop-works)
 - [Quick Start](#quick-start)
 - [Agent-First Workflow](#agent-first-workflow)
 - [What Canary Lab Owns](#what-canary-lab-owns)
 - [When to Use It](#when-to-use-it)
 - [Requirements](#requirements)
-- [Feature Folders](#feature-folders)
-- [Commands](#commands)
-- [Repairing a Failed Run](#repairing-a-failed-run)
 - [Limitations](#limitations)
 - [Documentation](#documentation)
 - [License](#license)
 
-## Repair Loop
+## How the Repair Loop Works
 
 1. Canary Lab applies the selected envset and starts your local services.
 2. Playwright runs the feature tests.
-3. Logs, screenshots, traces, videos, summaries, and failure slices are saved under `logs/runs/<runId>/`.
-4. The AI agent reads the failure context, fixes the app or test, and signals `rerun` or `restart`.
+3. Logs, screenshots, traces, videos, summaries, and failure slices land under `logs/runs/<runId>/`.
+4. Your AI agent reads the failure context, fixes the app or the test, and signals `rerun` or `restart`.
 5. Canary Lab continues from the same run until the check passes.
 
 ## Quick Start
 
-Create a Canary Lab workspace and open the local UI:
+Create a workspace and open the local UI:
 
 ```bash
 npx canary-lab init my-lab
@@ -45,15 +42,15 @@ npx canary-lab setup
 npx canary-lab ui
 ```
 
-This creates a workspace with sample features, installs Playwright browsers, registers AI agent tools, and opens the UI at `http://localhost:7421`. Use `npx canary-lab ui --no-open` to skip launching a browser.
+This scaffolds a workspace with sample features, installs Playwright browsers, registers your AI agent's tools, and opens the UI at `http://localhost:7421`. Add `--no-open` to skip launching a browser.
 
-The UI and MCP server share one port (default `7421`). Pin a different port per project with `npx canary-lab init my-lab --port 8200`, or change it later from the Project Settings dialog — Canary Lab restarts on the new port (your MCP client may need to reconnect).
+The UI and MCP server share one port (default `7421`). Pin a different port with `npx canary-lab init my-lab --port 8200`, or change it later in the Project Settings dialog — Canary Lab restarts on the new port, and your MCP client may need to reconnect.
 
-After `canary-lab setup`, restart your AI agent so it can discover the Canary Lab tools. If they do not show up, refresh setup and start a fresh agent session with `npx canary-lab setup --force`.
+After `canary-lab setup`, restart your AI agent so it discovers the Canary Lab tools. If they don't appear, rerun setup with `npx canary-lab setup --force` and start a fresh agent session.
 
 ## Agent-First Workflow
 
-Canary Lab is built for an agent-first workflow: an AI agent or other MCP client writes tests, starts or claims runs, reads failure context, makes fixes, and signals the next runner action. Canary Lab stays the local run monitor and source of truth for evidence; the agent is where diagnosis and code changes happen.
+Canary Lab is built for an agent to drive: an AI agent or other MCP client writes tests, starts or claims runs, reads failure context, makes fixes, and signals the next runner action. Canary Lab stays the local run monitor and the source of truth for evidence — diagnosis and code changes happen in the agent.
 
 From your workspace, just ask:
 
@@ -61,11 +58,11 @@ From your workspace, just ask:
 /canary-lab run checkout locally, fix it if it fails, and run it again until it passes
 ```
 
-Humans can also start runs from the UI, and custom clients can use the local HTTP API.
+You can also start runs by hand from the UI, and custom clients can drive the local HTTP API.
 
 ## What Canary Lab Owns
 
-Canary Lab has a narrow boundary. It does not define a new test language, assertion model, or browser runner — engineers and agents write normal Playwright tests, and Playwright still executes them. Canary Lab owns the run context around Playwright:
+Canary Lab keeps a narrow boundary. It doesn't invent a test language, an assertion model, or a browser runner — you write normal Playwright tests, and Playwright still runs them. What Canary Lab owns is the run context around Playwright:
 
 - Feature folder structure and scaffold conventions.
 - Envset application and cleanup.
@@ -74,80 +71,43 @@ Canary Lab has a narrow boundary. It does not define a new test language, assert
 - Failure slices, summaries, diagnosis journals, and agent handoff prompts.
 - Rerun and restart signals after a fix.
 
-Use plain Playwright when one command gives you enough context. Reach for Canary Lab when a failure depends on more than a browser assertion — which services were running, which env files were active, what the backend logged, and which artifacts were produced.
+Plain Playwright is enough when one command gives you the whole picture. Reach for Canary Lab when a failure depends on more than a browser assertion — which services were up, which env files were active, what the backend logged, and which artifacts the run produced.
 
 ## When to Use It
 
-Good fit when you want to:
+Canary Lab fits when you want to:
 
-- Run e2e tests and have an AI agent fix the application code when they fail.
+- Run e2e tests and let an AI agent fix the application code when they fail.
 - Keep logs, screenshots, traces, videos, summaries, and diagnosis notes per run.
 - Repair from saved run context instead of terminal scrollback.
-- Start a frontend, API, worker, and dependent service together, with each service log attached to the run that used it.
-- Run the same feature against `local`, `staging`, or `production` envsets without hand-editing `.env` files.
+- Boot a frontend, API, worker, and dependent service together, with each service's log attached to the run that used it.
+- Run one feature against `local`, `staging`, or `production` envsets without hand-editing `.env` files.
 
-Probably unnecessary if a plain `npx playwright test` gives you enough context, you want self-healing locators, you do not need service orchestration or env switching, or you want a hosted dashboard that manages tests for you.
+Skip it when `npx playwright test` already tells you enough, when you want self-healing locators, when you don't need service orchestration or env switching, or when you'd rather have a hosted dashboard manage your tests.
 
 ## Requirements
 
 - Node.js >= 20 and npm >= 9.
 - A modern browser: Chrome, Firefox, or Safari.
-- Local UI server on `http://localhost:7421` (the default; configurable per project via `--port` or Project Settings); service orchestration through `node-pty`.
+- Local UI server on `http://localhost:7421` (the default; set per project via `--port` or Project Settings), with service orchestration through `node-pty`.
 - Optional repair agents: supported AI agent CLIs (`claude`, `codex`) on `PATH`.
-
-## Feature Folders
-
-A feature lives under `features/<name>/` with `feature.config.cjs`, a Playwright config, specs under `e2e/`, and envsets under `envsets/`.
-
-Create one from the UI or with:
-
-```bash
-npx canary-lab new feature checkout-discounts --description "Validate checkout discounts"
-```
-
-The UI's Add Test flow can also turn a PRD or uploaded document into a generated plan and Playwright files for review. Generated tests still run through Playwright.
-
-## Commands
-
-```bash
-npx canary-lab init <folder> [--port <port>]
-npx canary-lab setup
-npx canary-lab ui
-npx canary-lab mcp [--profile repair|verify|author|full]
-npx canary-lab mcp doctor [--profile repair|verify|author|full]
-npx canary-lab new feature <name> --description "..."
-npx canary-lab env apply <feature> <set>
-npx canary-lab env revert <feature>
-npx canary-lab upgrade
-```
-
-- `ui` is the primary human workflow.
-- `setup` refreshes the agent/tool registration described in Quick Start.
-- `mcp` bridges local AI clients into the UI server, starting it if needed. It defaults to `repair`; use `--profile verify` for deployment checks, `--profile author` for authoring, or `--profile full` for the complete surface.
-- `new feature` and `env` are deterministic wrappers for scripts and agents.
-- `upgrade` syncs scaffolded docs and skills in an existing project (not a dependency upgrade).
-
-## Repairing a Failed Run
-
-When a run fails, Canary Lab pauses it, waits for a fix, and reruns from the same run — every fix ends in a `rerun` or `restart` signal. Two modes drive the fix:
-
-- **External heal** (default) — an external MCP client claims the run, reads the saved context, and signals the fix over MCP.
-- **Auto-heal** — Canary Lab spawns a local `claude`/`codex` CLI in a PTY tab (select Claude or Codex in Settings).
-
-See the [guide](docs/GUIDE.md#repairing-a-failed-run) for the full loop, MCP tool flow, and signal files.
 
 ## Limitations
 
-- Repairs depend on useful service logs.
-- Envset runs overwrite target files while active. If the process is killed during backup or restore, reopen the UI and use the envset controls to recover.
-- Envset values are not validated. Stale config can cause unclear test failures.
-- The Linux and Windows workflows are not polished yet.
+- Repairs are only as good as your service logs.
+- Envset runs overwrite target files while active. If the process is killed mid-backup or mid-restore, reopen the UI and use the envset controls to recover.
+- Envset values aren't validated — stale config can surface as unclear test failures.
+- The Linux and Windows workflows aren't polished yet.
 
 ## Documentation
 
-- [Guide](docs/GUIDE.md) — environment switching, run-output layout, repairing a failed run, evaluation reports, and external authoring.
-- [Contributing](docs/CONTRIBUTING.md) — code orientation, run architecture, and the build/test workflow.
-- [Changelog](docs/CHANGELOG.md) — release notes.
+| Doc | What's inside |
+| --- | --- |
+| [Guide](docs/GUIDE.md) | Environment switching, run-output layout, repairing a failed run, evaluation reports, and external authoring. |
+| [Commands](docs/COMMANDS.md) | Full CLI reference for every `canary-lab` subcommand. |
+| [Feature Folders](docs/FEATURES.md) | Feature structure, scaffold conventions, and creating a feature. |
+| [Contributing](docs/CONTRIBUTING.md) | Code orientation, run architecture, and the build/test workflow. |
+| [Changelog](docs/CHANGELOG.md) | Release notes. |
 
 ## License
 
