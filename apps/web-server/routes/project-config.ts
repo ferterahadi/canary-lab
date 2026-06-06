@@ -3,8 +3,10 @@ import fs from 'fs'
 import path from 'path'
 import { spawn, spawnSync } from 'child_process'
 import {
+  isValidPort,
   loadProjectConfig,
   normalizePersonalWikiPath,
+  resolveProjectPort,
   saveProjectConfig,
   type EditorChoice,
   type HealAgentChoice,
@@ -13,6 +15,12 @@ import {
 
 export interface ProjectConfigRouteDeps {
   projectRoot: string
+  // Count of in-flight runs a restart would abort. Used to gate port changes.
+  countActiveRuns?: () => number
+  // Invoked after a port change is persisted; the host process relaunches the
+  // UI on the new port and shuts the current one down. Fire-and-forget — the
+  // host defers the actual restart so the HTTP response can flush first.
+  onPortChange?: (port: number) => void | Promise<void>
 }
 
 const HEAL_AGENT_VALUES: HealAgentChoice[] = ['auto', 'claude', 'codex', 'manual', 'external']
@@ -53,6 +61,29 @@ export async function projectConfigRoutes(
     }
     saveProjectConfig(deps.projectRoot, next)
     return next
+  })
+
+  // ─── port change (restarts the UI on a new port) ─────────────────────
+  app.post<{ Body: { port?: number; confirm?: boolean } }>('/api/project-config/port', async (req, reply) => {
+    const port = req.body?.port
+    if (!isValidPort(port)) {
+      reply.code(400)
+      return { error: 'port must be an integer between 1 and 65535' }
+    }
+    const current = loadProjectConfig(deps.projectRoot)
+    if (resolveProjectPort(current) === port) {
+      return { restarting: false, port, reason: 'unchanged' as const }
+    }
+    const activeRuns = deps.countActiveRuns?.() ?? 0
+    if (activeRuns > 0 && req.body?.confirm !== true) {
+      reply.code(409)
+      return { needsConfirm: true, activeRuns }
+    }
+    saveProjectConfig(deps.projectRoot, { ...current, port })
+    // Fire-and-forget: the host process owns the relaunch + self-shutdown and
+    // defers it so this response reaches the browser before the port flips.
+    void deps.onPortChange?.(port)
+    return { restarting: true, port, newOrigin: `http://localhost:${port}` }
   })
 
   // ─── desktop-app launcher ─────────────────────────────────────────────

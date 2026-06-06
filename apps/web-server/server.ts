@@ -141,6 +141,10 @@ export interface CreateServerOptions {
   // the real node-pty factory; tests skip this branch by passing
   // `testsDraftDepsOverride` instead.
   ptyFactory?: PtyFactory
+  // Host hook invoked after a port change is persisted via the Project
+  // Settings dialog. The host (canary-lab ui) relaunches on the new port and
+  // shuts this process down. Absent in tests / non-CLI embeddings.
+  onPortChange?: (port: number) => void | Promise<void>
 }
 
 export interface CreateServerResult {
@@ -291,7 +295,11 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
     store: runStore,
     startVerification,
   })
-  await app.register(projectConfigRoutes, { projectRoot: opts.projectRoot })
+  await app.register(projectConfigRoutes, {
+    projectRoot: opts.projectRoot,
+    countActiveRuns: () => runStore.list().filter((run) => isActiveRunStatus(run.status)).length,
+    onPortChange: opts.onPortChange,
+  })
   await app.register(journalRoutes, { logsDir, journalPath })
   // `restartLocalHeal` deferred until after the runs route declares its
   // production restartHeal closure — defined below and threaded back in via
@@ -1095,6 +1103,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
   await app.register(benchmarkRoutes, {
     store: benchmarkStore,
     logsDir,
+    featuresDir,
     projectRoot: opts.projectRoot,
     startBenchmark: benchmarkRunner.startBenchmark,
     abortBenchmark: benchmarkRunner.abort,

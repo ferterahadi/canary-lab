@@ -110,6 +110,7 @@
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@playwright/mcp": "^0.0.75",
     "@playwright/test": "^1.54.2",
+    "@remotion/google-fonts": "^4.0.473",
     "ast-types": "^0.16.1",
     "dotenv": "^16.6.1",
     "fastify": "^5.8.5",

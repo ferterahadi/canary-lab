@@ -47,6 +47,13 @@ export interface BenchmarkManifest {
   results: ArmIterationResult[]
   report?: BenchmarkReport
   error?: string
+  /** True once the user has reclaimed this benchmark's worktrees (staging, arm,
+   *  inspect). Worktrees are kept after a run so "Open frozen bug" + arm
+   *  inspection keep working; clearing is an explicit, user-driven action. Once
+   *  set, those open actions are no longer available. */
+  worktreesCleared?: boolean
+  /** Disk reclaimed by the clear, for the post-clear receipt line. */
+  worktreesClearedBytes?: number
 }
 
 export interface BenchmarkIndexEntry {

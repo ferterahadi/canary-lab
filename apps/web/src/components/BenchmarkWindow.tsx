@@ -368,6 +368,13 @@ function BenchmarkDetail({ id, onClose, onNew }: { id: string; onClose: () => vo
   }
 
   const sabotaging = m.status === 'sabotaging' || m.status === 'ready'
+  const terminal = m.status === 'done' || m.status === 'aborted' || m.status === 'error'
+  // Worktrees are kept after a run so these stay usable; clearing is the user's
+  // call (Report tab). Once cleared, the open actions are gone — show a receipt.
+  const showFrozen = !!m.sabotageSha && !m.worktreesCleared && !sabotaging && m.status !== 'error'
+  const showClear = terminal && m.status !== 'error' && tab === 'report' && !m.worktreesCleared && !!m.sabotageSha
+  const showReceipt = !!m.worktreesCleared && tab === 'report'
+  const showTopRow = showFrozen || showClear || showReceipt
 
   return (
     <>
@@ -390,17 +397,36 @@ function BenchmarkDetail({ id, onClose, onNew }: { id: string; onClose: () => vo
         onClose={onClose}
       />
       <div style={{ flex: 1, overflow: 'auto', padding: 18 }}>
-        {m.sabotageSha && !sabotaging && m.status !== 'error' && (
-          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
-            <button
-              type="button"
-              className="cl-button"
-              title="Open a pristine checkout of the frozen (destroyed) code in your editor"
-              onClick={() => void openWorktreeAction(m.benchmarkId, 'frozen')}
-              style={{ display: 'inline-flex', alignItems: 'center', gap: 7, padding: '6px 12px', fontSize: 12 }}
-            >
-              <OpenEditorIcon /> Open frozen bug
-            </button>
+        {showTopRow && (
+          <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+            {showReceipt && (
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 11.5, color: 'var(--text-muted)' }}>
+                <CheckIcon /> Worktrees cleared
+                {m.worktreesClearedBytes ? ` · reclaimed ${formatBytes(m.worktreesClearedBytes)}` : ''}
+              </span>
+            )}
+            {showFrozen && (
+              <button
+                type="button"
+                className="cl-button"
+                title="Open a pristine checkout of the frozen (destroyed) code in your editor"
+                onClick={() => void openWorktreeAction(m.benchmarkId, 'frozen')}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 7, padding: '6px 12px', fontSize: 12 }}
+              >
+                <OpenEditorIcon /> Open frozen bug
+              </button>
+            )}
+            {showClear && (
+              <button
+                type="button"
+                className="cl-button"
+                title="Remove this benchmark's worktrees (staging + both arms) to reclaim disk — afterward the frozen bug and arm checkouts are no longer openable"
+                onClick={() => void clearWorktreesAction(m.benchmarkId)}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 7, padding: '6px 12px', fontSize: 12 }}
+              >
+                <TrashIcon /> Clear worktrees
+              </button>
+            )}
           </div>
         )}
         {sabotaging ? (
@@ -565,6 +591,56 @@ async function openWorktreeAction(id: string, target: 'frozen' | 'A' | 'B'): Pro
   }
 }
 
+// Reclaim a finished benchmark's worktrees. Two-phase: a dry run fetches the
+// disk it would free (named in the confirm), then the confirmed call removes
+// them. The manifest update flows back over the benchmark WS, so the buttons
+// hide on their own — nothing to refresh here.
+async function clearWorktreesAction(id: string): Promise<void> {
+  try {
+    const preview = await api.clearBenchmarkWorktrees(id, false)
+    if (preview.alreadyCleared) return
+    const size = formatBytes(preview.freedBytes)
+    const ok = window.confirm(
+      `Clear all worktrees for this benchmark? "Open frozen bug" and the arm checkouts will no longer be available. Reclaims ${size}.`,
+    )
+    if (!ok) return
+    await api.clearBenchmarkWorktrees(id, true)
+  } catch (e) {
+    window.alert(e instanceof Error ? e.message : String(e))
+  }
+}
+
+// Bytes → a short human size for the confirm + the post-clear receipt.
+function formatBytes(bytes: number): string {
+  if (!bytes || bytes <= 0) return 'no disk'
+  const mb = bytes / 1_000_000
+  if (mb < 1) return '<1 MB'
+  if (mb < 1000) return `~${Math.round(mb)} MB`
+  return `~${(mb / 1000).toFixed(1)} GB`
+}
+
+// A small trash affordance for the "Clear worktrees" button.
+function TrashIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M3 6h18" />
+      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
+      <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+      <path d="M10 11v6" />
+      <path d="M14 11v6" />
+    </svg>
+  )
+}
+
+// A check used by the post-clear receipt line.
+function CheckIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M20 6 9 17l-5-5" />
+    </svg>
+  )
+}
+
 // Small "open in editor" affordance (↗ in a framed box) used on arm cards and
 // the frozen-bug button.
 function OpenEditorIcon() {
@@ -651,10 +727,10 @@ function ArmCard({ m, arm, focused, onClick }: { m: BenchmarkManifest; arm: Benc
     : results.length > 0 ? (done && healedCount === 0 ? FAILED : RUNNING)
       : 'var(--text-muted)'
 
-  // The arm worktree (heal-edited) exists only while the benchmark runs — it's
-  // removed when the run finishes. So the live "open in editor" icon shows only
-  // when the arm has a recorded worktree path and the benchmark is still going.
-  const armLive = m.status === 'running' && Boolean(m.arms.find((a) => a.arm === arm)?.worktreePath)
+  // The arm worktree (heal-edited) is kept after the run for inspection, so the
+  // "open in editor" icon stays available once the arm has a recorded worktree
+  // path — during the race AND afterward — until the user clears the worktrees.
+  const canOpenArm = !m.worktreesCleared && Boolean(m.arms.find((a) => a.arm === arm)?.worktreePath)
 
   return (
     <div onClick={onClick} style={{
@@ -665,10 +741,12 @@ function ArmCard({ m, arm, focused, onClick }: { m: BenchmarkManifest; arm: Benc
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', fontWeight: 600, fontSize: 13.5 }}>
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}>
           <span style={{ color: isHarness ? 'var(--boot)' : 'var(--text-primary)' }}>{isHarness ? '🐤 Harness arm' : '⚙ Baseline arm'}</span>
-          {armLive && (
+          {canOpenArm && (
             <button
               type="button"
-              title="Open this arm's worktree in your editor — watch it heal live (only while the benchmark runs)"
+              title={m.status === 'running'
+                ? "Open this arm's worktree in your editor — watch it heal live"
+                : "Open this arm's worktree in your editor — inspect what it changed"}
               onClick={(e) => { e.stopPropagation(); void openWorktreeAction(m.benchmarkId, arm) }}
               style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 22, height: 22, padding: 0, borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-default)', background: 'var(--bg-input)', color: 'var(--text-secondary)', cursor: 'pointer' }}
             >

@@ -5,14 +5,17 @@ import { afterEach, describe, it, expect, vi } from 'vitest'
 import Fastify from 'fastify'
 import { benchmarkRoutes } from './benchmarks'
 import { launchEditorDir } from '../lib/editor-launch'
-import { addWorktree } from '../lib/runtime/repo-worktree'
+import { addWorktree, removeWorktree } from '../lib/runtime/repo-worktree'
+import { listWorktrees } from '../lib/runtime/worktree-inventory'
 import { loadProjectConfig } from '../lib/runtime/launcher/project-config'
 import type { BenchmarkStore } from '../lib/runtime/benchmark/store'
 import type { SabotageSkill } from '../lib/runtime/benchmark/skills'
 import type { BenchmarkManifest, StartBenchmarkInput } from '../lib/runtime/benchmark/types'
 
 vi.mock('../lib/editor-launch', () => ({ launchEditorDir: vi.fn(() => 'vscode') }))
-vi.mock('../lib/runtime/repo-worktree', () => ({ addWorktree: vi.fn() }))
+vi.mock('../lib/runtime/repo-worktree', () => ({ addWorktree: vi.fn(), removeWorktree: vi.fn(async () => {}) }))
+vi.mock('../lib/runtime/worktree-inventory', () => ({ listWorktrees: vi.fn(async () => []) }))
+vi.mock('../lib/feature-loader', () => ({ loadFeatures: vi.fn(() => []) }))
 vi.mock('../lib/runtime/launcher/project-config', () => ({ loadProjectConfig: vi.fn(() => ({ editor: 'cursor' })) }))
 
 function manifest(over: Partial<BenchmarkManifest> = {}): BenchmarkManifest {
@@ -36,6 +39,7 @@ function fakeStore(over: Partial<BenchmarkStore> = {}): BenchmarkStore {
   return {
     list: () => [],
     get: () => null,
+    save: () => {},
     onEvent: () => {},
     offEvent: () => {},
     ...over,
@@ -45,6 +49,7 @@ function fakeStore(over: Partial<BenchmarkStore> = {}): BenchmarkStore {
 async function buildApp(deps: {
   store?: BenchmarkStore
   logsDir?: string
+  featuresDir?: string
   projectRoot?: string
   startBenchmark?: (input: StartBenchmarkInput) => Promise<{ benchmarkId: string }>
   listSkills?: (feature: string) => SabotageSkill[]
@@ -56,6 +61,7 @@ async function buildApp(deps: {
   await app.register(benchmarkRoutes, {
     store: deps.store ?? fakeStore(),
     logsDir: deps.logsDir ?? '/logs',
+    featuresDir: deps.featuresDir ?? '/features',
     projectRoot: deps.projectRoot,
     startBenchmark: deps.startBenchmark ?? (async () => ({ benchmarkId: 'b1' })),
     listSkills: deps.listSkills ?? (() => []),
@@ -355,7 +361,7 @@ describe('benchmarkRoutes', () => {
       })
       const res = await app.inject(openBody('A'))
       expect(res.statusCode).toBe(409)
-      expect(res.json()).toEqual({ error: 'arm worktree is no longer available — it is removed when the benchmark finishes' })
+      expect(res.json()).toEqual({ error: 'arm worktree is not available (it may have been cleared)' })
       await app.close()
     })
 
@@ -397,6 +403,88 @@ describe('benchmarkRoutes', () => {
       expect(res.statusCode).toBe(200)
       expect(res.json()).toEqual({ opened: false, path: tmp, error: 'spawn string boom' })
       fs.rmSync(tmp, { recursive: true, force: true })
+      await app.close()
+    })
+
+    it('409s for any target once worktrees are cleared', async () => {
+      const app = await buildApp({
+        store: fakeStore({ get: () => manifest({ status: 'done', sabotageSha: 'sha', featureDir: '/feat', worktreesCleared: true }) }),
+      })
+      for (const target of ['frozen', 'A', 'B']) {
+        const res = await app.inject(openBody(target))
+        expect(res.statusCode).toBe(409)
+        expect(res.json()).toEqual({ error: 'worktrees have been cleared for this benchmark' })
+      }
+      await app.close()
+    })
+  })
+
+  describe('POST /api/benchmarks/:id/clear-worktrees', () => {
+    afterEach(() => vi.clearAllMocks())
+
+    const clear = (body?: { confirm?: boolean }) =>
+      ({ method: 'POST' as const, url: '/api/benchmarks/b1/clear-worktrees', payload: body ?? {} })
+
+    it('404s when the benchmark is unknown', async () => {
+      const app = await buildApp({ store: fakeStore({ get: () => null }) })
+      const res = await app.inject(clear())
+      expect(res.statusCode).toBe(404)
+      await app.close()
+    })
+
+    it('409s while the benchmark is still running', async () => {
+      const app = await buildApp({ store: fakeStore({ get: () => manifest({ status: 'running' }) }) })
+      const res = await app.inject(clear({ confirm: true }))
+      expect(res.statusCode).toBe(409)
+      expect(res.json()).toEqual({ error: 'cannot clear worktrees while the benchmark is still running' })
+      await app.close()
+    })
+
+    it('dry run (no confirm) reports the disk it would free without removing or saving', async () => {
+      const saved: BenchmarkManifest[] = []
+      vi.mocked(listWorktrees).mockResolvedValue([
+        { path: '/wt/a', sourceRoot: '/src', ref: 'sha', ownerKind: 'benchmark', ownerId: 'b1', slot: 'arm-A', bytes: 200, ageMs: 0, exists: true },
+        { path: '/wt/s', sourceRoot: '/src', ref: 'sha', ownerKind: 'benchmark', ownerId: 'b1', slot: 'staging', bytes: 112, ageMs: 0, exists: true },
+        { path: '/wt/other', sourceRoot: '/src', ref: 'sha', ownerKind: 'benchmark', ownerId: 'other', slot: 'arm-A', bytes: 999, ageMs: 0, exists: true },
+      ])
+      const app = await buildApp({
+        store: fakeStore({ get: () => manifest({ status: 'done' }), save: (m) => { saved.push(m) } }),
+      })
+      const res = await app.inject(clear())
+      expect(res.statusCode).toBe(200)
+      expect(res.json()).toEqual({ confirmed: false, willClear: 2, cleared: 0, freedBytes: 312 })
+      expect(vi.mocked(removeWorktree)).not.toHaveBeenCalled()
+      expect(saved).toHaveLength(0)
+      await app.close()
+    })
+
+    it('confirm removes the benchmark-owned worktrees and persists the cleared flag', async () => {
+      const saved: BenchmarkManifest[] = []
+      vi.mocked(listWorktrees).mockResolvedValue([
+        { path: '/wt/a', sourceRoot: '/src', ref: 'sha', ownerKind: 'benchmark', ownerId: 'b1', slot: 'arm-A', bytes: 200, ageMs: 0, exists: true },
+        { path: '/wt/s', sourceRoot: '/src', ref: 'sha', ownerKind: 'benchmark', ownerId: 'b1', slot: 'staging', bytes: 112, ageMs: 0, exists: true },
+      ])
+      const app = await buildApp({
+        store: fakeStore({ get: () => manifest({ status: 'done' }), save: (m) => { saved.push(m) } }),
+      })
+      const res = await app.inject(clear({ confirm: true }))
+      expect(res.statusCode).toBe(200)
+      expect(res.json()).toEqual({ confirmed: true, willClear: 2, cleared: 2, freedBytes: 312 })
+      expect(vi.mocked(removeWorktree)).toHaveBeenCalledTimes(2)
+      expect(vi.mocked(removeWorktree)).toHaveBeenCalledWith({ sourceRoot: '/src', worktreeRoot: '/wt/a' })
+      expect(saved).toHaveLength(1)
+      expect(saved[0]).toMatchObject({ worktreesCleared: true, worktreesClearedBytes: 312 })
+      await app.close()
+    })
+
+    it('is idempotent once cleared (no second removal)', async () => {
+      const app = await buildApp({
+        store: fakeStore({ get: () => manifest({ status: 'done', worktreesCleared: true, worktreesClearedBytes: 312 }) }),
+      })
+      const res = await app.inject(clear({ confirm: true }))
+      expect(res.statusCode).toBe(200)
+      expect(res.json()).toEqual({ confirmed: false, willClear: 0, cleared: 0, freedBytes: 312, alreadyCleared: true })
+      expect(vi.mocked(removeWorktree)).not.toHaveBeenCalled()
       await app.close()
     })
   })

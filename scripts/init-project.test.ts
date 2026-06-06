@@ -92,6 +92,21 @@ describe('parseArgs', () => {
     expect(parseArgs(['f', '--package-spec', 'file:../x.tgz']).packageSpec).toBe('file:../x.tgz')
   })
 
+  it('parses a valid --port and leaves it undefined when absent', () => {
+    expect(parseArgs(['f', '--port', '8000']).port).toBe(8000)
+    expect(parseArgs(['f', '--port=8001']).port).toBe(8001)
+    expect(parseArgs(['f']).port).toBeUndefined()
+  })
+
+  it('errors and exits on an invalid --port', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    vi.spyOn(process, 'exit').mockImplementation(((c?: number) => {
+      throw new Error(`__exit__${c}`)
+    }) as never)
+    expect(() => parseArgs(['f', '--port', 'abc'])).toThrow('__exit__1')
+    expect(() => parseArgs(['f', '--port', '99999'])).toThrow('__exit__1')
+  })
+
   it('errors and exits when folder missing', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
     vi.spyOn(process, 'exit').mockImplementation(((c?: number) => {
@@ -160,6 +175,29 @@ describe('main (init-project orchestration)', () => {
       dryRun: false,
       force: false,
     })
+  })
+
+  it('writes the chosen port into canary-lab.config.json when --port is given', async () => {
+    const workspace = mkTmp()
+    process.chdir(workspace)
+    vi.spyOn(console, 'log').mockImplementation(() => {})
+
+    await main(['my-project', '--package-spec', '^9.9.9', '--port', '8200'])
+
+    const config = JSON.parse(
+      fs.readFileSync(path.join(workspace, 'my-project', 'canary-lab.config.json'), 'utf-8'),
+    )
+    expect(config.port).toBe(8200)
+  })
+
+  it('does not write canary-lab.config.json when no --port is given', async () => {
+    const workspace = mkTmp()
+    process.chdir(workspace)
+    vi.spyOn(console, 'log').mockImplementation(() => {})
+
+    await main(['my-project', '--package-spec', '^9.9.9'])
+
+    expect(fs.existsSync(path.join(workspace, 'my-project', 'canary-lab.config.json'))).toBe(false)
   })
 
   it('scaffolds gitignore rules that keep feature envset values out of git', async () => {

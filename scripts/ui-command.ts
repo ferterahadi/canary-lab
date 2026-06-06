@@ -4,9 +4,12 @@
 
 import path from 'path'
 import readline from 'readline'
+import { spawn } from 'child_process'
 import { createServer } from '../apps/web-server/server'
 import { getProjectRoot } from '../shared/runtime/project-root'
 import { openBrowser } from '../apps/web-server/lib/open-browser'
+import { loadProjectConfig, resolveProjectPort } from '../apps/web-server/lib/runtime/launcher/project-config'
+import { upsertWorkspace } from '../shared/runtime/workspace-registry'
 
 export interface UiCommandOptions {
   projectRoot?: string
@@ -14,6 +17,12 @@ export interface UiCommandOptions {
   log?: (msg: string) => void
   exit?: (code: number) => void
   confirmShutdown?: () => Promise<boolean>
+  // Marks this workspace active so the MCP bridge connects to the running UI.
+  registerWorkspace?: (projectRoot: string) => void
+  // Spawns a fresh detached UI for this project (on the new port from config).
+  relaunch?: (projectRoot: string) => void
+  // Defers the relaunch+shutdown so the HTTP response can flush first.
+  schedule?: (fn: () => void) => void
 }
 
 export async function runUi(argv: string[], opts: UiCommandOptions = {}): Promise<void> {
@@ -27,10 +36,20 @@ export async function runUi(argv: string[], opts: UiCommandOptions = {}): Promis
   const portFromArgs = parsePort(argv, { log, exit: requestExit })
   if (exitRequested) return
   if (portFromArgs !== undefined) return
-  const port = 7421
   const noOpen = argv.includes('--no-open')
   const projectRoot = opts.projectRoot ?? getProjectRoot()
-  const { app, runStore, revertAllEnvsets, cancelAllWizardAgents } = await createServer({ projectRoot })
+  const port = resolveProjectPort(loadProjectConfig(projectRoot))
+  // Bump this workspace's recency so the single registered MCP bridge resolves
+  // *this* project (and its port) as the active target.
+  const registerWorkspace = opts.registerWorkspace ?? ((root: string) => { upsertWorkspace(root) })
+  registerWorkspace(projectRoot)
+  // Forward reference: the port-change hook needs `shutdown`, which is defined
+  // after the server exists. createServer captures this stable delegate.
+  let triggerPortChange: (port: number) => void = () => { /* assigned below */ }
+  const { app, runStore, revertAllEnvsets, cancelAllWizardAgents } = await createServer({
+    projectRoot,
+    onPortChange: (newPort) => triggerPortChange(newPort),
+  })
 
   // Stop active runs and revert any in-flight envset swaps if the user kills
   // the UI server before their runs finish. `orch.stop()` owns the process
@@ -48,6 +67,19 @@ export async function runUi(argv: string[], opts: UiCommandOptions = {}): Promis
     try { await app.close() } catch { /* already closed or never fully opened */ }
     exit(code)
   }
+
+  // A Project Settings port change persists the new port server-side, then asks
+  // us to relaunch the UI on it and stop this process. The new instance binds a
+  // different port, so both can coexist briefly; the browser redirects itself.
+  const relaunch = opts.relaunch ?? relaunchUiDetached
+  const schedule = opts.schedule ?? ((fn: () => void) => { setTimeout(fn, 150) })
+  triggerPortChange = (newPort: number): void => {
+    log(`Canary Lab port changed to ${newPort}. Relaunching…`)
+    schedule(() => {
+      try { relaunch(projectRoot) } finally { void shutdown(0) }
+    })
+  }
+
   const confirmShutdown = opts.confirmShutdown ?? confirmShutdownFromStdin
   let sigintConfirmationOpen = false
   process.on('SIGINT', () => {
@@ -71,7 +103,7 @@ export async function runUi(argv: string[], opts: UiCommandOptions = {}): Promis
   } catch (err) {
     try { await app.close() } catch { /* already closed or never fully opened */ }
     if (isAddressInUseError(err)) {
-      log('Canary Lab port 7421 is already in use. Stop the existing Canary Lab server or free the port, then run `npx canary-lab ui` again.')
+      log(`Canary Lab port ${port} is already in use. Stop the existing Canary Lab server or free the port, then run \`npx canary-lab ui\` again.`)
       requestExit(1)
       return
     }
@@ -83,6 +115,19 @@ export async function runUi(argv: string[], opts: UiCommandOptions = {}): Promis
   if (!noOpen) {
     openBrowser(url)
   }
+}
+
+// Spawn a fresh, detached `canary-lab ui` for the project. It reads the new
+// port from canary-lab.config.json and binds it; this process then exits.
+function relaunchUiDetached(projectRoot: string): void {
+  const cliPath = process.argv[1] ?? path.join(__dirname, 'cli.js')
+  const child = spawn(process.execPath, [cliPath, 'ui', '--no-open'], {
+    cwd: projectRoot,
+    detached: true,
+    env: { ...process.env, CANARY_LAB_PROJECT_ROOT: projectRoot },
+    stdio: 'ignore',
+  })
+  child.unref()
 }
 
 async function confirmShutdownFromStdin(): Promise<boolean> {
@@ -129,7 +174,7 @@ export function parsePort(
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]
     if (a === '--port' || a.startsWith('--port=')) {
-      log('`canary-lab ui --port` was removed. Canary Lab always uses port 7421 so MCP clients can connect consistently.')
+      log('`canary-lab ui --port` was removed. Set the port in canary-lab.config.json or the Project Settings dialog.')
       exit(1)
       return 'removed-port-option'
     }

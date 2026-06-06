@@ -47,6 +47,8 @@ npx canary-lab ui
 
 This creates a workspace with sample features, installs Playwright browsers, registers AI agent tools, and opens the UI at `http://localhost:7421`. Use `npx canary-lab ui --no-open` to skip launching a browser.
 
+The UI and MCP server share one port (default `7421`). Pin a different port per project with `npx canary-lab init my-lab --port 8200`, or change it later from the Project Settings dialog — Canary Lab restarts on the new port (your MCP client may need to reconnect).
+
 After `canary-lab setup`, restart your AI agent so it can discover the Canary Lab tools. If they do not show up, refresh setup and start a fresh agent session with `npx canary-lab setup --force`.
 
 ## Agent-First Workflow
@@ -90,7 +92,7 @@ Probably unnecessary if a plain `npx playwright test` gives you enough context, 
 
 - Node.js >= 20 and npm >= 9.
 - A modern browser: Chrome, Firefox, or Safari.
-- Local UI server on `http://localhost:7421`; service orchestration through `node-pty`.
+- Local UI server on `http://localhost:7421` (the default; configurable per project via `--port` or Project Settings); service orchestration through `node-pty`.
 - Optional repair agents: supported AI agent CLIs (`claude`, `codex`) on `PATH`.
 
 ## Feature Folders
@@ -108,7 +110,7 @@ The UI's Add Test flow can also turn a PRD or uploaded document into a generated
 ## Commands
 
 ```bash
-npx canary-lab init <folder>
+npx canary-lab init <folder> [--port <port>]
 npx canary-lab setup
 npx canary-lab ui
 npx canary-lab mcp [--profile repair|verify|author|full]

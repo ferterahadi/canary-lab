@@ -690,3 +690,84 @@ describe('POST /api/open-editor', () => {
     }
   })
 })
+
+describe('POST /api/project-config/port', () => {
+  async function makePortApp(deps: { countActiveRuns?: () => number; onPortChange?: (port: number) => void } = {}): Promise<FastifyInstance> {
+    const app = Fastify()
+    await app.register(async (a) => {
+      await projectConfigRoutes(a, { projectRoot, ...deps })
+    })
+    await app.ready()
+    return app
+  }
+
+  function readConfig() {
+    return JSON.parse(fs.readFileSync(path.join(projectRoot, 'canary-lab.config.json'), 'utf-8'))
+  }
+
+  it('rejects an invalid port', async () => {
+    const app = await makePortApp()
+    try {
+      const r = await app.inject({ method: 'POST', url: '/api/project-config/port', payload: { port: 99999 } })
+      expect(r.statusCode).toBe(400)
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('short-circuits when the port is unchanged', async () => {
+    fs.writeFileSync(path.join(projectRoot, 'canary-lab.config.json'), JSON.stringify({ port: 8200 }))
+    const onPortChange = vi.fn()
+    const app = await makePortApp({ onPortChange })
+    try {
+      const r = await app.inject({ method: 'POST', url: '/api/project-config/port', payload: { port: 8200 } })
+      expect(r.statusCode).toBe(200)
+      expect(r.json()).toMatchObject({ restarting: false })
+      expect(onPortChange).not.toHaveBeenCalled()
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('requires confirmation when runs are active', async () => {
+    const onPortChange = vi.fn()
+    const app = await makePortApp({ countActiveRuns: () => 2, onPortChange })
+    try {
+      const r = await app.inject({ method: 'POST', url: '/api/project-config/port', payload: { port: 8300 } })
+      expect(r.statusCode).toBe(409)
+      expect(r.json()).toMatchObject({ needsConfirm: true, activeRuns: 2 })
+      expect(onPortChange).not.toHaveBeenCalled()
+      expect(fs.existsSync(path.join(projectRoot, 'canary-lab.config.json'))).toBe(false)
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('saves the new port, returns the new origin, and triggers the restart hook', async () => {
+    const onPortChange = vi.fn()
+    const app = await makePortApp({ countActiveRuns: () => 0, onPortChange })
+    try {
+      const r = await app.inject({ method: 'POST', url: '/api/project-config/port', payload: { port: 8300 } })
+      expect(r.statusCode).toBe(200)
+      expect(r.json()).toMatchObject({ restarting: true, port: 8300, newOrigin: 'http://localhost:8300' })
+      expect(readConfig().port).toBe(8300)
+      expect(onPortChange).toHaveBeenCalledExactlyOnceWith(8300)
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('proceeds past the active-run guard when confirm is true', async () => {
+    const onPortChange = vi.fn()
+    const app = await makePortApp({ countActiveRuns: () => 3, onPortChange })
+    try {
+      const r = await app.inject({ method: 'POST', url: '/api/project-config/port', payload: { port: 8400, confirm: true } })
+      expect(r.statusCode).toBe(200)
+      expect(r.json()).toMatchObject({ restarting: true, port: 8400 })
+      expect(readConfig().port).toBe(8400)
+      expect(onPortChange).toHaveBeenCalledExactlyOnceWith(8400)
+    } finally {
+      await app.close()
+    }
+  })
+})
