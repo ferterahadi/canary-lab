@@ -93,6 +93,8 @@ export default defineConfig({
         'apps/web/vite.config.ts',
         'apps/web/dist/**',
         'apps/web/src/api/types.ts',
+        // Type-only module (no executable code) — v8 reports it as 0/0/0/0.
+        'apps/web/src/api/benchmark-types.ts',
         'dist/**',
         'templates/**',
       ],
