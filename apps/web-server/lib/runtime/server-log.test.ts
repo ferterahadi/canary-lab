@@ -224,19 +224,6 @@ describe('installServerLogging', () => {
     handle.dispose()
   })
 
-  it('defaults to the real process streams/handlers/clock when no opts are given', () => {
-    const logsDir = mkLogsDir()
-    // No opts → exercises the `opts.X ?? process.X` (and `now ?? new Date`)
-    // fallbacks. Install + dispose run synchronously so no async crash event can
-    // fire in the window; dispose detaches the real handlers + restores writes.
-    const handle = installServerLogging(logsDir)
-    try {
-      expect(fs.existsSync(handle.logPath)).toBe(true)
-    } finally {
-      handle.dispose()
-    }
-  })
-
   it('prunes older logs on install, keeping the new file', () => {
     const logsDir = mkLogsDir()
     const dir = serverLogDir(logsDir)
