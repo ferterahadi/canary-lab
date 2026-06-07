@@ -9,6 +9,7 @@ import { VerticalSplit } from './components/VerticalSplit'
 import { GlobalStatusBar } from './components/GlobalStatusBar'
 import { AddTestWizard } from './components/AddTestWizard'
 import { CollisionConfirmDialog } from './components/CollisionConfirmDialog'
+import { PortifyWizard } from './components/PortifyWizard'
 import { LogCleanupPage } from './components/LogCleanupPage'
 import type { RepoCollisionChoice } from './api/client'
 import * as api from './api/client'
@@ -23,7 +24,9 @@ export function App() {
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
   const [configFor, setConfigFor] = useState<string | null>(null)
   const [testsRefreshKey, setTestsRefreshKey] = useState(0)
-  const [collisionPrompt, setCollisionPrompt] = useState<{ feature: string; env?: string; mode?: 'test' | 'boot'; info: RepoCollisionChoice } | null>(null)
+  const [collisionPrompt, setCollisionPrompt] = useState<{ feature: string; env?: string; mode?: 'test' | 'boot'; info: RepoCollisionChoice; portsConfigured?: boolean } | null>(null)
+  // Feature whose ports we're making injectable (the port-ification wizard).
+  const [portifyFeature, setPortifyFeature] = useState<string | null>(null)
   // Top-level view: the normal workspace, or the full-screen Log Cleanup page.
   const [view, setView] = useState<'workspace' | 'cleanup'>('workspace')
   const pendingRunSelectionRef = useRef<string | null>(null)
@@ -112,7 +115,13 @@ export function App() {
     } catch (err) {
       const collision = api.asRepoCollision(err)
       if (collision) {
-        setCollisionPrompt({ feature: selectedFeature, env, mode, info: collision })
+        // A collision means a second concurrent run of the same app — the one
+        // case where hardcoded ports actually clash. Check whether ports are
+        // injectable so the dialog can offer the durable fix alongside
+        // worktree/queue. Best-effort: the dialog still works without the flag.
+        let portsConfigured: boolean | undefined
+        try { portsConfigured = (await api.benchmarkPreflight(selectedFeature, env)).portsConfigured } catch { /* ignore */ }
+        setCollisionPrompt({ feature: selectedFeature, env, mode, info: collision, portsConfigured })
         return
       }
       /* other errors surfaced via UI */
@@ -312,8 +321,18 @@ export function App() {
         <CollisionConfirmDialog
           info={collisionPrompt.info}
           feature={collisionPrompt.feature}
+          portsConfigured={collisionPrompt.portsConfigured}
+          onPortify={() => { const f = collisionPrompt.feature; setCollisionPrompt(null); setPortifyFeature(f) }}
           onChoose={resolveCollision}
           onCancel={() => setCollisionPrompt(null)}
+        />
+      )}
+      {portifyFeature && (
+        <PortifyWizard
+          feature={portifyFeature}
+          agent="claude"
+          onClose={() => setPortifyFeature(null)}
+          onCommitted={() => setPortifyFeature(null)}
         />
       )}
     </div>

@@ -68,4 +68,41 @@ describe('CollisionConfirmDialog', () => {
     await act(async () => clickButton('Cancel'))
     expect(onCancel).toHaveBeenCalled()
   })
+
+  it('offers "Make ports injectable" only when ports are unconfigured and onPortify is set', async () => {
+    const onPortify = vi.fn()
+    await act(async () => {
+      root.render(
+        <CollisionConfirmDialog
+          info={info} feature="cns" onChoose={() => {}} onCancel={() => {}}
+          portsConfigured={false} onPortify={onPortify}
+        />,
+      )
+    })
+    expect(container.textContent).toContain('hardcodes its ports')
+    await act(async () => clickButton('Make ports injectable'))
+    expect(onPortify).toHaveBeenCalled()
+  })
+
+  it('hides the port-ification option when ports are already configured', async () => {
+    await act(async () => {
+      root.render(
+        <CollisionConfirmDialog
+          info={info} feature="cns" onChoose={() => {}} onCancel={() => {}}
+          portsConfigured={true} onPortify={() => {}}
+        />,
+      )
+    })
+    expect([...container.querySelectorAll('button')].map((b) => b.textContent?.trim()))
+      .not.toContain('Make ports injectable')
+  })
+
+  it('hides the option when onPortify is not provided even if unconfigured', async () => {
+    await act(async () => {
+      root.render(
+        <CollisionConfirmDialog info={info} feature="cns" onChoose={() => {}} onCancel={() => {}} portsConfigured={false} />,
+      )
+    })
+    expect(container.textContent).not.toContain('hardcodes its ports')
+  })
 })

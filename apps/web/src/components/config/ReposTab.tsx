@@ -66,10 +66,16 @@ type Health =
   | { mode: 'single'; probe: Probe }
   | { mode: 'per-env'; byEnv: Record<string, Probe> }
 
+interface PortSlotSlice {
+  name: string
+  env?: string
+}
+
 interface CommandSlice {
   name: string
   command: string
   envs?: string[]
+  ports?: PortSlotSlice[]
   health: Health
 }
 
@@ -128,6 +134,22 @@ function parseHealth(v: ConfigValue | undefined): Health {
   return { mode: 'none' }
 }
 
+function parsePorts(v: ConfigValue | undefined): PortSlotSlice[] | undefined {
+  if (!Array.isArray(v)) return undefined
+  const slots = v
+    .map((item): PortSlotSlice | null => {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) return null
+      const obj = item as { [k: string]: ConfigValue }
+      if (typeof obj.name !== 'string') return null
+      return {
+        name: obj.name,
+        ...(typeof obj.env === 'string' ? { env: obj.env } : {}),
+      }
+    })
+    .filter((s): s is PortSlotSlice => s != null)
+  return slots.length > 0 ? slots : undefined
+}
+
 function parseCommand(v: ConfigValue): CommandSlice | null {
   if (typeof v === 'string') {
     return { name: '', command: v, health: { mode: 'none' } }
@@ -140,6 +162,7 @@ function parseCommand(v: ConfigValue): CommandSlice | null {
     envs: Array.isArray(obj.envs)
       ? obj.envs.filter((x): x is string => typeof x === 'string')
       : undefined,
+    ports: parsePorts(obj.ports),
     health: parseHealth(obj.healthCheck),
   }
 }
@@ -193,10 +216,24 @@ function serializeHealth(h: Health): ConfigValue | undefined {
   return out
 }
 
+function serializePorts(ports: PortSlotSlice[] | undefined): ConfigValue | undefined {
+  if (!ports) return undefined
+  const slots = ports
+    .filter((p) => p.name.trim())
+    .map((p): ConfigValue => {
+      const out: { [k: string]: ConfigValue } = { name: p.name.trim() }
+      if (p.env && p.env.trim()) out.env = p.env.trim()
+      return out
+    })
+  return slots.length > 0 ? slots : undefined
+}
+
 function serializeCommand(c: CommandSlice): ConfigValue {
   const out: { [k: string]: ConfigValue } = { command: c.command }
   if (c.name) out.name = c.name
   if (c.envs && c.envs.length > 0) out.envs = c.envs
+  const ports = serializePorts(c.ports)
+  if (ports !== undefined) out.ports = ports
   const hc = serializeHealth(c.health)
   if (hc !== undefined) out.healthCheck = hc
   return out
@@ -788,6 +825,17 @@ function CommandCard({
         />
       </FieldRow>
       <div className="mt-2">
+        <FieldRow
+          label="Port slots"
+          hint="Declare ports this command needs. Each slot gets a free port per run, injected as the env var the service reads (e.g. PORT). Reference it elsewhere with ${port.<name>} — in the command, health-check URL, or applied envset files. Lets benchmark arms and concurrent runs avoid clashing."
+        >
+          <PortSlotEditor
+            ports={cmd.ports ?? []}
+            onChange={(ports) => onChange({ ...cmd, ports: ports.length > 0 ? ports : undefined })}
+          />
+        </FieldRow>
+      </div>
+      <div className="mt-2">
         <HealthEditor
           feature={feature}
           health={cmd.health}
@@ -795,6 +843,62 @@ function CommandCard({
           onChange={(health) => onChange({ ...cmd, health })}
         />
       </div>
+    </div>
+  )
+}
+
+// ─── port-slot editor ──────────────────────────────────────────────────────
+
+function PortSlotEditor({
+  ports,
+  onChange,
+}: {
+  ports: PortSlotSlice[]
+  onChange: (next: PortSlotSlice[]) => void
+}) {
+  return (
+    <div className="flex flex-col gap-1.5">
+      {ports.length === 0 && (
+        <div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
+          (none — service uses its hardcoded port; can't run concurrently)
+        </div>
+      )}
+      {ports.map((slot, i) => (
+        <div key={i} className="flex items-center gap-1.5">
+          <div className="flex-1">
+            <TextInput
+              value={slot.name}
+              placeholder="api"
+              onChange={(name) => onChange(ports.map((s, j) => (j === i ? { ...s, name } : s)))}
+            />
+          </div>
+          <div className="flex-1">
+            <TextInput
+              value={slot.env ?? ''}
+              placeholder="PORT (env var, optional)"
+              onChange={(env) => onChange(ports.map((s, j) => (j === i ? { ...s, env: env || undefined } : s)))}
+            />
+          </div>
+          <IconButton
+            ariaLabel={`Remove port slot ${slot.name || 'item'}`}
+            variant="danger"
+            onClick={() => onChange(ports.filter((_, j) => j !== i))}
+          >
+            <TrashIcon />
+          </IconButton>
+        </div>
+      ))}
+      <button
+        type="button"
+        onClick={() => onChange([...ports, { name: '' }])}
+        className="self-start inline-flex items-center gap-1 rounded-md px-2 py-1 text-[10px] uppercase tracking-wider transition-colors duration-150"
+        style={{ color: 'var(--text-muted)', border: '1px dashed var(--border-default)' }}
+        onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--text-primary)' }}
+        onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-muted)' }}
+      >
+        <PlusIcon />
+        Add port slot
+      </button>
     </div>
   )
 }

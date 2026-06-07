@@ -5,6 +5,7 @@ import type { BenchmarkArm, BenchmarkManifest, BenchmarkReport, SabotageLevel, S
 import { useBenchmark, useBenchmarks } from '../state/BenchmarkContext'
 import { RunDetailColumn } from './RunDetailColumn'
 import { AgentSessionView } from './AgentSessionView'
+import { PortifyWizard } from './PortifyWizard'
 
 // The benchmark workspace window: a large portal-style overlay (config → setup →
 // race → report). Per-arm monitoring reuses the real RunDetailColumn.
@@ -163,6 +164,11 @@ function ConfigScreen({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [view, setView] = useState<'setup' | 'arms'>('setup')
+  // When the selected feature's apps aren't configured for injectable ports,
+  // the benchmark would clash on a hardcoded port (both arms boot it at once).
+  // We park the start here and offer the port-ification workflow.
+  const [gate, setGate] = useState<api.BenchmarkPreflight | null>(null)
+  const [portifyOpen, setPortifyOpen] = useState(false)
 
   useEffect(() => {
     api.listFeatures().then((f) => {
@@ -188,6 +194,14 @@ function ConfigScreen({
     if (!feature || !selected) return
     setBusy(true); setError(null)
     try {
+      // Gate: benchmark arms boot the same feature concurrently, so an app with
+      // hardcoded ports clashes. Block here and offer the port-ification flow.
+      const preflight = await api.benchmarkPreflight(feature)
+      if (!preflight.portsConfigured) {
+        setGate(preflight)
+        setBusy(false)
+        return
+      }
       const id = await startBenchmark({ feature, skill: selected.name, level: selected.level, iterations, agent })
       onStarted(id)
     } catch (e) {
@@ -335,7 +349,67 @@ function ConfigScreen({
           </div>
         </div>
       </div>
+
+      {gate && !portifyOpen && (
+        <DynamicPortsGate
+          feature={feature}
+          preflight={gate}
+          onSetup={() => setPortifyOpen(true)}
+          onCancel={() => setGate(null)}
+        />
+      )}
+      {portifyOpen && (
+        <PortifyWizard
+          feature={feature}
+          agent={agent}
+          onClose={() => setPortifyOpen(false)}
+          onCommitted={() => { setPortifyOpen(false); setGate(null) }}
+        />
+      )}
     </>
+  )
+}
+
+// ─── Dynamic-ports gate dialog ───────────────────────────────────────────────
+
+function DynamicPortsGate({
+  feature,
+  preflight,
+  onSetup,
+  onCancel,
+}: {
+  feature: string
+  preflight: api.BenchmarkPreflight
+  onSetup: () => void
+  onCancel: () => void
+}) {
+  const slotlessCommands = preflight.repos
+    .flatMap((r) => r.commands.filter((c) => c.declaredPorts.length === 0).map((c) => `${r.name} · ${c.name}`))
+  return (
+    <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.55)', display: 'grid', placeItems: 'center', zIndex: 70 }}>
+      <div style={{ width: 'min(480px, 92%)', background: 'var(--bg-surface)', border: '1px solid rgba(245,158,11,0.4)', borderRadius: 'var(--radius-lg)', padding: 22, boxShadow: '0 16px 48px rgba(0,0,0,0.5)' }}>
+        <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 8 }}>
+          ⚠️ <span style={{ marginLeft: 4 }}>This app isn’t set up for dynamic ports</span>
+        </div>
+        <div style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6, marginBottom: 14 }}>
+          Benchmark arms run in parallel and would collide on the same hardcoded port. Making{' '}
+          <b style={{ color: 'var(--text-secondary)' }}>{feature}</b>’s ports injectable also lets you run multiple Canary runs at once.
+        </div>
+        {slotlessCommands.length > 0 && (
+          <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-muted)', background: 'var(--bg-base)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)', padding: '8px 10px', marginBottom: 16 }}>
+            No port slots: {slotlessCommands.join(', ')}
+          </div>
+        )}
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+          <button type="button" onClick={onCancel} style={{ padding: '8px 14px', background: 'transparent', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)', color: 'var(--text-secondary)', fontSize: 12, cursor: 'pointer' }}>
+            Cancel
+          </button>
+          <button type="button" className="cl-button-primary" onClick={onSetup} style={{ padding: '8px 14px' }}>
+            Set up dynamic ports →
+          </button>
+        </div>
+      </div>
+    </div>
   )
 }
 

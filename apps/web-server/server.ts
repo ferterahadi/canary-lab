@@ -26,6 +26,11 @@ import { BenchmarkRunStore } from './lib/runtime/benchmark/store'
 import { createBenchmarkRunner } from './lib/runtime/benchmark/runner'
 import { loadBundledSabotageSkills, sabotageSkillsForFeature } from './lib/runtime/benchmark/skills'
 import { benchmarkDir } from './lib/runtime/benchmark/paths'
+import { portifyRoutes } from './routes/portify'
+import { PortifyRunStore } from './lib/runtime/portify/store'
+import { createPortifyRunner } from './lib/runtime/portify/runner'
+import { reclaimOrphanedPortify } from './lib/runtime/portify/reclaim'
+import { portifyDir } from './lib/runtime/portify/paths'
 import {
   parseAgentSessionRefFile,
   selectAgentSessionRef,
@@ -177,6 +182,12 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
   // process (this one just started) — flip it to 'aborted' so it doesn't resume
   // forever as running in the UI and so Stop isn't needed for it.
   benchmarkStore.reconcileInterrupted(() => new Date().toISOString())
+  const portifyStore = new PortifyRunStore(logsDir)
+  // A port-ification workflow left non-terminal belongs to a dead process.
+  // Reclaim removes its orphaned worktrees + branches and restores the config
+  // it edited in place, then flips the manifest to 'aborted' so the UI doesn't
+  // show a zombie workflow (and a stale worktree can't wedge the next run).
+  await reclaimOrphanedPortify(portifyStore, logsDir, () => new Date().toISOString())
   const workspaceEvents = new WorkspaceEventBus()
   // One-shot cleanup: a fresh UI server starts with an empty registry, so any
   // persisted 'running'/'healing' row is from a previous server process and is
@@ -1132,6 +1143,41 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
     listSkills: (feature) => sabotageSkillsForFeature(loadBundledSabotageSkills(), feature),
   })
   await app.register(benchmarkStreamRoutes, { store: benchmarkStore })
+
+  // Port-ification workflow: rewrite a feature's apps to use injectable ports,
+  // proven by a concurrent double-boot, ending at a user commit. Same agent
+  // selection policy as the benchmark (pin the chosen CLI; ignore global heal
+  // setting).
+  const portifyRunner = createPortifyRunner({
+    logsDir,
+    store: portifyStore,
+    ptyFactory,
+    loadFeatures: () => loadFeatures(featuresDir),
+    pickAgent: (preferred) => pickAvailableHealAgent(preferred),
+    now: () => new Date().toISOString(),
+  })
+  await app.register(portifyRoutes, {
+    store: portifyStore,
+    startPortify: portifyRunner.startPortify,
+    commitPortify: portifyRunner.commit,
+    cancelPortify: portifyRunner.cancel,
+    loadAgentSession: (id) => {
+      try {
+        const raw = fs.readFileSync(path.join(portifyDir(logsDir, id), 'agent-session.json'), 'utf-8')
+        const parsed = parseAgentSessionRefFile(raw)
+        const ref = parsed ? selectAgentSessionRef(parsed) : null
+        if (!ref) return null
+        const logPath = fs.existsSync(ref.logPath)
+          ? ref.logPath
+          : (ref.agent === 'claude' ? findClaudeLogBySessionId(ref.sessionId) : null)
+        if (!logPath) return null
+        return { agent: ref.agent, sessionId: ref.sessionId, events: loadAgentSessionLog({ ...ref, logPath }) }
+      } catch {
+        return null
+      }
+    },
+  })
+
   await app.register(workspaceStreamRoutes, { events: workspaceEvents })
   await app.register(draftAgentStreamRoutes, {
     brokerForDraft: (draftId) => draftBrokers.get(draftId) ?? null,

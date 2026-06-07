@@ -7,13 +7,19 @@ interface Props {
   feature: string
   onChoose: (isolation: 'worktree' | 'queue') => void
   onCancel: () => void
+  /** False when the feature's apps hardcode their ports — worktree isolation
+   *  can't relocate ports, so the durable fix is to make them injectable. When
+   *  false and `onPortify` is set, the dialog offers that path. */
+  portsConfigured?: boolean
+  onPortify?: () => void
 }
 
 // Shown when a start request hits a same-repo collision. The user picks how to
 // resolve it: isolate the new run in a git worktree (runs now, in parallel) or
 // queue it until the conflicting run finishes. Mirrors the RunsColumn confirm
 // modal pattern.
-export function CollisionConfirmDialog({ info, feature, onChoose, onCancel }: Props) {
+export function CollisionConfirmDialog({ info, feature, onChoose, onCancel, portsConfigured, onPortify }: Props) {
+  const offerPortify = portsConfigured === false && !!onPortify
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => { if (e.key === 'Escape') onCancel() }
     document.addEventListener('keydown', onKey)
@@ -40,10 +46,26 @@ export function CollisionConfirmDialog({ info, feature, onChoose, onCancel }: Pr
           in place could let one run’s fixes corrupt the other. Isolate this run
           in its own git worktree to run now, or queue it until the other finishes.
         </p>
+        {offerPortify && (
+          <p className="mt-2 text-[12px] leading-relaxed" style={{ color: 'var(--text-muted)' }}>
+            This app hardcodes its ports, so an isolated worktree still can’t boot a
+            second copy without clashing. Make its ports injectable to run copies in
+            parallel for good.
+          </p>
+        )}
         <div className="mt-4 flex justify-end gap-2">
           <button type="button" onClick={onCancel} className="cl-button px-3 py-1 text-xs">
             Cancel
           </button>
+          {offerPortify && (
+            <button
+              type="button"
+              onClick={onPortify}
+              className="cl-button px-3 py-1 text-xs"
+            >
+              Make ports injectable
+            </button>
+          )}
           <button
             type="button"
             onClick={() => onChoose('queue')}

@@ -20,6 +20,7 @@ export type AgentSessionSource =
   | { kind: 'run'; runId: string; live?: boolean }
   | { kind: 'draft'; draftId: string; stage: 'planning' | 'generating'; live?: boolean }
   | { kind: 'benchmark'; benchmarkId: string; live?: boolean }
+  | { kind: 'portify'; workflowId: string; live?: boolean }
 
 interface Props {
   source: AgentSessionSource
@@ -62,6 +63,7 @@ export function AgentSessionView({ source }: Props) {
     const fetchSnapshot = async (): Promise<AgentSessionResponse | null> => {
       if (source.kind === 'run') return api.getAgentSession(source.runId)
       if (source.kind === 'benchmark') return api.getBenchmarkAgentSession(source.benchmarkId)
+      if (source.kind === 'portify') return api.getPortifyAgentSession(source.workflowId)
       return api.getDraftAgentSession(source.draftId, source.stage)
     }
 
@@ -80,7 +82,9 @@ export function AgentSessionView({ source }: Props) {
             ? { kind: 'run', runId: source.runId }
             : source.kind === 'benchmark'
               ? { kind: 'benchmark', benchmarkId: source.benchmarkId }
-              : { kind: 'draft', draftId: source.draftId, stage: source.stage },
+              : source.kind === 'portify'
+                ? { kind: 'portify', workflowId: source.workflowId }
+                : { kind: 'draft', draftId: source.draftId, stage: source.stage },
           onSession: (session) => {
             if (cancelled) return
             setState((prev) => prev
@@ -231,6 +235,7 @@ export function AgentSessionView({ source }: Props) {
 function sourceCacheKey(source: AgentSessionSource): string {
   if (source.kind === 'run') return `run:${source.runId}:${source.live ? '1' : '0'}`
   if (source.kind === 'benchmark') return `benchmark:${source.benchmarkId}:${source.live ? '1' : '0'}`
+  if (source.kind === 'portify') return `portify:${source.workflowId}:${source.live ? '1' : '0'}`
   return `draft:${source.draftId}:${source.stage}:${source.live ? '1' : '0'}`
 }
 
