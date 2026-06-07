@@ -121,7 +121,7 @@ describe('SettingsModal', () => {
     await act(async () => {})
 
     expect(api.changeProjectPort).toHaveBeenCalledWith(9000, false)
-    expect(onRedirect).toHaveBeenCalledWith('http://localhost:9000')
+    expect(onRedirect).toHaveBeenCalledWith('http://localhost:9000', expect.any(Function))
   })
 
   it('defaults the port field to 7421 when none is configured', async () => {
@@ -160,6 +160,6 @@ describe('SettingsModal', () => {
 
     expect(api.changeProjectPort).toHaveBeenNthCalledWith(1, 9000, false)
     expect(api.changeProjectPort).toHaveBeenNthCalledWith(2, 9000, true)
-    expect(onRedirect).toHaveBeenCalledWith('http://localhost:9000')
+    expect(onRedirect).toHaveBeenCalledWith('http://localhost:9000', expect.any(Function))
   })
 })

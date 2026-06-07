@@ -10,6 +10,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import type { JSONRPCMessage } from '@modelcontextprotocol/sdk/types.js'
 import { runAsScript } from './run-as-script'
+import { refreshAgentIntegrationsQuietly } from './agent'
 import {
   normalizeCanaryLabMcpProfile,
   type CanaryLabMcpProfile,
@@ -55,6 +56,10 @@ export interface McpCommandOptions {
   cwd?: string
   homeDir?: string
   registry?: CanaryLabWorkspaceRegistry
+  // Brings the installed agent skill up to date with this package version
+  // before serving the bridge. Injected in tests so they never touch the real
+  // home dir.
+  refreshAgents?: () => void
 }
 
 export async function main(
@@ -84,6 +89,13 @@ export async function main(
     exit(ok ? 0 : 1)
     return
   }
+  // Refresh the installed agent skill to match this package before serving, so
+  // external clients launching via `npx canary-lab mcp` always pick up current
+  // behavior. Diagnostics-only `doctor` is exempt. Logs route to stderr —
+  // stdout is the JSON-RPC channel to the client.
+  const refreshAgents = opts.refreshAgents
+    ?? (() => { refreshAgentIntegrationsQuietly({ homeDir: opts.homeDir, log: (m) => stderr.write(`${m}\n`) }) })
+  refreshAgents()
   const ok = await bridge(url, {
     ...opts,
     profile: parsed.profile,
