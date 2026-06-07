@@ -109,4 +109,51 @@ describe('PortifyOrchestrator', () => {
     expect(m.status).toBe('aborted')
     expect(deps.cleanup).toHaveBeenCalledOnce()
   })
+
+  // The orchestrator checks isAborted at four points in attempt 1: after setup,
+  // at the loop top, after runAgent, and after verify. Abort at each so every
+  // guard's true-arm is exercised.
+  for (const checkpoint of [1, 2, 3, 4]) {
+    it(`aborts at checkpoint ${checkpoint} and finalizes as aborted`, async () => {
+      let calls = 0
+      const { deps } = makeDeps({ isAborted: () => { calls += 1; return calls >= checkpoint } })
+      const m = await new PortifyOrchestrator(deps).run()
+      expect(m.status).toBe('aborted')
+      expect(deps.cleanup).toHaveBeenCalledOnce()
+    })
+  }
+
+  it('records aborted (not failed) when a thrown error coincides with an abort', async () => {
+    const { deps } = makeDeps({
+      isAborted: () => true,
+      setup: async () => { throw new Error('boom during abort') },
+    })
+    const m = await new PortifyOrchestrator(deps).run()
+    expect(m.status).toBe('aborted')
+  })
+
+  it('stringifies a non-Error throw in the failure message', async () => {
+    // eslint-disable-next-line @typescript-eslint/only-throw-error
+    const { deps } = makeDeps({ setup: async () => { throw 'plain string failure' } })
+    const m = await new PortifyOrchestrator(deps).run()
+    expect(m.status).toBe('failed')
+    expect(m.error).toBe('plain string failure')
+  })
+
+  it('runs without optional isAborted / cleanup deps', async () => {
+    const saved: PortifyManifest[] = []
+    const deps: PortifyOrchestratorDeps = {
+      manifest: baseManifest(),
+      persist: (m) => saved.push(m),
+      now: () => 'now',
+      setup: async () => [{ name: 'r', path: '~/r' }],
+      runAgent: async () => {},
+      captureDiff: async () => 'd',
+      verify: async () => ({ ok: true, instances: [] }),
+      checkTestsUntouched: async () => ({ ok: true, offending: [] }),
+      // no isAborted, no cleanup
+    }
+    const m = await new PortifyOrchestrator(deps).run()
+    expect(m.status).toBe('ready-to-commit')
+  })
 })

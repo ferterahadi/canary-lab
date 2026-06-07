@@ -729,6 +729,19 @@ describe('POST /api/project-config/port', () => {
     }
   })
 
+  it('treats active runs as zero when no countActiveRuns dep is provided', async () => {
+    const onPortChange = vi.fn()
+    // No countActiveRuns → `deps.countActiveRuns?.() ?? 0` → 0 → no confirm gate.
+    const app = await makePortApp({ onPortChange })
+    try {
+      const r = await app.inject({ method: 'POST', url: '/api/project-config/port', payload: { port: 8300 } })
+      expect(r.statusCode).toBe(200)
+      expect(r.json()).toMatchObject({ restarting: true, port: 8300 })
+    } finally {
+      await app.close()
+    }
+  })
+
   it('requires confirmation when runs are active', async () => {
     const onPortChange = vi.fn()
     const app = await makePortApp({ countActiveRuns: () => 2, onPortChange })

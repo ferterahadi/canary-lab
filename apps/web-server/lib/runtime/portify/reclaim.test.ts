@@ -105,4 +105,29 @@ describe('reclaimOrphanedPortify', () => {
     fs.rmSync(path.join(logsDir, 'portify', 'a', 'portify.json'))
     await expect(reclaimOrphanedPortify(store, logsDir, () => 'x')).resolves.toBeUndefined()
   })
+
+  it('skips repos without a worktreePath and dedupes shared worktree paths', async () => {
+    const { logsDir, featureDir } = await fixture()
+    const store = new PortifyRunStore(logsDir)
+    // First repo has no worktreePath (skipped); next two share one path (deduped).
+    store.save(manifest({
+      workflowId: 'dup', featureDir,
+      repos: [
+        { name: 'no-wt', path: '/no/such/repo' },
+        { name: 'a', path: '/no/such/repo', worktreePath: '/no/such/wt' },
+        { name: 'b', path: '/no/such/repo', worktreePath: '/no/such/wt' },
+      ],
+    }))
+    await expect(reclaimOrphanedPortify(store, logsDir, () => 'x')).resolves.toBeUndefined()
+    expect(store.get('dup')?.status).toBe('aborted')
+  })
+
+  it('flips to aborted even when there is no config snapshot to restore', async () => {
+    const { logsDir, featureDir } = await fixture()
+    const store = new PortifyRunStore(logsDir)
+    // No original-config.snapshot written → the restore step is skipped.
+    store.save(manifest({ workflowId: 'nosnap', featureDir, repos: [] }))
+    await reclaimOrphanedPortify(store, logsDir, () => '2026-06-07T01:00:00.000Z')
+    expect(store.get('nosnap')?.status).toBe('aborted')
+  })
 })

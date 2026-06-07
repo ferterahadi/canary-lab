@@ -75,11 +75,18 @@ import {
   downloadEvaluationExportTask,
   listBenchmarks,
   getBenchmark,
+  clearBenchmarkWorktrees,
   listSabotageSkills,
   startBenchmark,
   abortBenchmark,
   getBenchmarkSabotageLog,
   getBenchmarkAgentSession,
+  benchmarkPreflight,
+  startPortify,
+  getPortify,
+  commitPortify,
+  cancelPortify,
+  getPortifyAgentSession,
 } from './client'
 
 const ok = (body: unknown, status = 200): Response =>
@@ -1142,5 +1149,63 @@ describe('api client', () => {
       name: 'ApiError',
       status: 500,
     })
+  })
+
+  it('benchmarkPreflight queries the feature (and env when given)', async () => {
+    const fetchImpl = vi.fn().mockImplementation(async () => ok({ portsConfigured: false, repos: [] }))
+    const r = await benchmarkPreflight('cns', undefined, { baseUrl: 'http://x', fetchImpl })
+    expect(r).toEqual({ portsConfigured: false, repos: [] })
+    expect(fetchImpl).toHaveBeenCalledWith('http://x/api/benchmarks/preflight?feature=cns', { method: 'GET' })
+    await benchmarkPreflight('cns', 'prod', { baseUrl: 'http://x', fetchImpl })
+    expect(fetchImpl).toHaveBeenLastCalledWith('http://x/api/benchmarks/preflight?feature=cns&env=prod', { method: 'GET' })
+  })
+
+  it('startPortify POSTs the feature/agent/maxAttempts', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(ok({ workflowId: 'w1' }))
+    const r = await startPortify({ feature: 'cns', agent: 'claude', maxAttempts: 2 }, { baseUrl: 'http://x', fetchImpl })
+    expect(r).toEqual({ workflowId: 'w1' })
+    const [url, init] = fetchImpl.mock.calls[0]
+    expect(url).toBe('http://x/api/portify')
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(init.body as string)).toEqual({ feature: 'cns', agent: 'claude', maxAttempts: 2 })
+  })
+
+  it('getPortify GETs the workflow manifest', async () => {
+    const m = { workflowId: 'w1', status: 'ready-to-commit' }
+    const fetchImpl = vi.fn().mockResolvedValue(ok(m))
+    await expect(getPortify('w1', { baseUrl: 'http://x', fetchImpl })).resolves.toEqual(m)
+    expect(fetchImpl).toHaveBeenCalledWith('http://x/api/portify/w1', { method: 'GET' })
+  })
+
+  it('commitPortify and cancelPortify POST to their endpoints', async () => {
+    const fetchImpl = vi.fn().mockImplementation(async () => ok({ workflowId: 'w1', status: 'committed' }))
+    await commitPortify('w1', { baseUrl: 'http://x', fetchImpl })
+    expect(fetchImpl).toHaveBeenLastCalledWith('http://x/api/portify/w1/commit', { method: 'POST' })
+    await cancelPortify('w1', { baseUrl: 'http://x', fetchImpl })
+    expect(fetchImpl).toHaveBeenLastCalledWith('http://x/api/portify/w1/cancel', { method: 'POST' })
+  })
+
+  it('getPortifyAgentSession returns the session on 200 and null on 404', async () => {
+    const session = { agent: 'claude', sessionId: 's', events: [] }
+    const okFetch = vi.fn().mockResolvedValue(ok(session))
+    await expect(getPortifyAgentSession('w1', { baseUrl: 'http://x', fetchImpl: okFetch })).resolves.toEqual(session)
+    expect(okFetch).toHaveBeenCalledWith('http://x/api/portify/w1/agent-session', { method: 'GET' })
+    const notFound = vi.fn().mockResolvedValue(fail(404, { reason: 'no-session' }))
+    await expect(getPortifyAgentSession('w1', { baseUrl: 'http://x', fetchImpl: notFound })).resolves.toBeNull()
+  })
+
+  it('getPortifyAgentSession rethrows non-404 errors', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(fail(500, { error: 'boom' }))
+    await expect(getPortifyAgentSession('w1', { baseUrl: 'http://x', fetchImpl })).rejects.toMatchObject({ status: 500 })
+  })
+
+  it('clearBenchmarkWorktrees POSTs the confirm flag', async () => {
+    const fetchImpl = vi.fn().mockImplementation(async () => ok({ confirmed: true, willClear: 2, cleared: 2, freedBytes: 9 }))
+    const r = await clearBenchmarkWorktrees('b1', true, { baseUrl: 'http://x', fetchImpl })
+    expect(r).toEqual({ confirmed: true, willClear: 2, cleared: 2, freedBytes: 9 })
+    const [url, init] = fetchImpl.mock.calls[0]
+    expect(url).toBe('http://x/api/benchmarks/b1/clear-worktrees')
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(init.body as string)).toEqual({ confirm: true })
   })
 })

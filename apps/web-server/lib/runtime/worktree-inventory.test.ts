@@ -49,6 +49,15 @@ describe('classifyWorktreePath', () => {
     expect(classifyWorktreePath(logs, '/ws/logs/benchmarks/bench-x/worktrees/inspect/app'))
       .toEqual({ ownerKind: 'benchmark', ownerId: 'bench-x', slot: 'inspect' })
   })
+  it('classifies portify worktrees with their slot', () => {
+    expect(classifyWorktreePath(logs, '/ws/logs/portify/portify-1/worktrees/g0-app'))
+      .toEqual({ ownerKind: 'portify', ownerId: 'portify-1', slot: 'g0-app' })
+    expect(classifyWorktreePath(logs, '/ws/logs/portify/portify-1'))
+      .toEqual({ ownerKind: 'portify', ownerId: 'portify-1', slot: null })
+    // worktrees segment but no repo segment → null slot (the `seg[3] ?? null` arm).
+    expect(classifyWorktreePath(logs, '/ws/logs/portify/portify-1/worktrees'))
+      .toEqual({ ownerKind: 'portify', ownerId: 'portify-1', slot: null })
+  })
   it('marks paths outside the logs layout as unknown', () => {
     expect(classifyWorktreePath(logs, '/somewhere/else'))
       .toEqual({ ownerKind: 'unknown', ownerId: null, slot: null })
@@ -57,10 +66,12 @@ describe('classifyWorktreePath', () => {
     expect(classifyWorktreePath(logs, '/ws/logs/scratch/app'))
       .toEqual({ ownerKind: 'unknown', ownerId: null, slot: null })
   })
-  it('treats runs/benchmarks roots without an id as unknown', () => {
+  it('treats runs/benchmarks/portify roots without an id as unknown', () => {
     expect(classifyWorktreePath(logs, '/ws/logs/runs'))
       .toEqual({ ownerKind: 'unknown', ownerId: null, slot: null })
     expect(classifyWorktreePath(logs, '/ws/logs/benchmarks'))
+      .toEqual({ ownerKind: 'unknown', ownerId: null, slot: null })
+    expect(classifyWorktreePath(logs, '/ws/logs/portify'))
       .toEqual({ ownerKind: 'unknown', ownerId: null, slot: null })
   })
   it('gives a benchmark a null slot when the path has no worktrees segment', () => {

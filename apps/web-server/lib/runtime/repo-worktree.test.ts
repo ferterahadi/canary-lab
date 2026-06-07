@@ -3,7 +3,7 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { addWorktree, isGitWorktreeCapable, removeWorktree } from './repo-worktree'
+import { addWorktree, isGitWorktreeCapable, linkNodeModules, removeWorktree } from './repo-worktree'
 
 let root: string
 let repo: string
@@ -93,5 +93,39 @@ describe('addWorktree / removeWorktree', () => {
     await expect(
       removeWorktree({ sourceRoot: repo, worktreeRoot: path.join(root, 'ghost-worktree') }),
     ).resolves.toBeUndefined()
+  })
+
+  describe('linkNodeModules', () => {
+    it('symlinks the source node_modules into the worktree when absent there', () => {
+      const src = path.join(root, 'src-repo')
+      const wt = path.join(root, 'wt-repo')
+      fs.mkdirSync(path.join(src, 'node_modules', 'pkg'), { recursive: true })
+      fs.mkdirSync(wt, { recursive: true })
+      linkNodeModules({ sourceRoot: src, worktreeRoot: wt })
+      const dst = path.join(wt, 'node_modules')
+      expect(fs.existsSync(dst)).toBe(true)
+      expect(fs.lstatSync(dst).isSymbolicLink()).toBe(true)
+      expect(fs.existsSync(path.join(dst, 'pkg'))).toBe(true)
+    })
+
+    it('is a no-op when the source has no node_modules', () => {
+      const src = path.join(root, 'src-empty')
+      const wt = path.join(root, 'wt-empty')
+      fs.mkdirSync(src, { recursive: true })
+      fs.mkdirSync(wt, { recursive: true })
+      linkNodeModules({ sourceRoot: src, worktreeRoot: wt })
+      expect(fs.existsSync(path.join(wt, 'node_modules'))).toBe(false)
+    })
+
+    it('leaves an existing worktree node_modules untouched', () => {
+      const src = path.join(root, 'src2')
+      const wt = path.join(root, 'wt2')
+      fs.mkdirSync(path.join(src, 'node_modules'), { recursive: true })
+      fs.mkdirSync(path.join(wt, 'node_modules', 'already'), { recursive: true })
+      linkNodeModules({ sourceRoot: src, worktreeRoot: wt })
+      // Real dir preserved (not replaced by a symlink).
+      expect(fs.lstatSync(path.join(wt, 'node_modules')).isSymbolicLink()).toBe(false)
+      expect(fs.existsSync(path.join(wt, 'node_modules', 'already'))).toBe(true)
+    })
   })
 })
