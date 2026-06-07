@@ -98,8 +98,10 @@ export async function verifyDoubleBoot(
   const failureDetail = ok
     ? undefined
     : instances
+        // A failed instance always carries failedService + detail (set by
+        // bootAndProbe), so no fallback is needed.
         .filter((i) => !i.ok)
-        .map((i) => `boot on ports {${fmtPorts(i.ports)}} failed: ${i.failedService ?? 'unknown'} — ${i.detail ?? ''}`)
+        .map((i) => `boot on ports {${fmtPorts(i.ports)}} failed: ${i.failedService} — ${i.detail}`)
         .join('\n')
 
   return { ok, instances, failureDetail }

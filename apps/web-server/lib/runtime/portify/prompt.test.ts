@@ -34,6 +34,12 @@ describe('buildPortifyPrompt', () => {
     const prompt = buildPortifyPrompt(f, [{ name: 'svc', editPath: '/wt/svc' }])
     expect(prompt).toContain('(no start commands)')
   })
+
+  it('handles a feature with no repos at all', () => {
+    const f: FeatureConfig = { ...feature, repos: undefined }
+    const prompt = buildPortifyPrompt(f, [])
+    expect(prompt).toContain('"cns"')
+  })
 })
 
 describe('buildPortifyRetryPrompt', () => {

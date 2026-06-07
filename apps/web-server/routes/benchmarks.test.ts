@@ -8,6 +8,8 @@ import { launchEditorDir } from '../lib/editor-launch'
 import { addWorktree, removeWorktree } from '../lib/runtime/repo-worktree'
 import { listWorktrees } from '../lib/runtime/worktree-inventory'
 import { loadProjectConfig } from '../lib/runtime/launcher/project-config'
+import { loadFeatures } from '../lib/feature-loader'
+import { getGitRoot } from '../lib/git-repo'
 import type { BenchmarkStore } from '../lib/runtime/benchmark/store'
 import type { SabotageSkill } from '../lib/runtime/benchmark/skills'
 import type { BenchmarkManifest, StartBenchmarkInput } from '../lib/runtime/benchmark/types'
@@ -16,6 +18,10 @@ vi.mock('../lib/editor-launch', () => ({ launchEditorDir: vi.fn(() => 'vscode') 
 vi.mock('../lib/runtime/repo-worktree', () => ({ addWorktree: vi.fn(), removeWorktree: vi.fn(async () => {}) }))
 vi.mock('../lib/runtime/worktree-inventory', () => ({ listWorktrees: vi.fn(async () => []) }))
 vi.mock('../lib/feature-loader', () => ({ loadFeatures: vi.fn(() => []) }))
+vi.mock('../lib/git-repo', async (orig) => ({
+  ...(await orig<typeof import('../lib/git-repo')>()),
+  getGitRoot: vi.fn().mockResolvedValue(null),
+}))
 vi.mock('../lib/runtime/launcher/project-config', () => ({ loadProjectConfig: vi.fn(() => ({ editor: 'cursor' })) }))
 
 function manifest(over: Partial<BenchmarkManifest> = {}): BenchmarkManifest {
@@ -104,6 +110,35 @@ describe('benchmarkRoutes', () => {
     const res = await app.inject({ method: 'POST', url: '/api/benchmarks' })
     expect(res.statusCode).toBe(400)
     expect(res.json()).toEqual({ error: 'feature is required' })
+    await app.close()
+  })
+
+  it('GET /api/benchmarks/preflight reports unconfigured + configured + env', async () => {
+    const app = await buildApp({})
+    vi.mocked(loadFeatures).mockReturnValue([
+      { name: 'cns', description: 'd', envs: ['local'], featureDir: '/f',
+        repos: [{ name: 'app', localPath: '~/app', startCommands: ['yarn start'] }] },
+    ])
+    const unconfigured = await app.inject({ method: 'GET', url: '/api/benchmarks/preflight?feature=cns' })
+    expect(unconfigured.statusCode).toBe(200)
+    expect(unconfigured.json()).toMatchObject({ portsConfigured: false })
+
+    vi.mocked(loadFeatures).mockReturnValue([
+      { name: 'cns', description: 'd', envs: ['local'], featureDir: '/f',
+        repos: [{ name: 'app', localPath: '~/app', startCommands: [{ command: 'x', ports: [{ name: 'api', env: 'PORT' }] }] }] },
+    ])
+    const configured = await app.inject({ method: 'GET', url: '/api/benchmarks/preflight?feature=cns&env=local' })
+    expect(configured.json()).toMatchObject({ portsConfigured: true })
+    await app.close()
+  })
+
+  it('GET /api/benchmarks/preflight 400s without a feature, 404s for an unknown one', async () => {
+    const app = await buildApp({})
+    vi.mocked(loadFeatures).mockReturnValue([])
+    const missing = await app.inject({ method: 'GET', url: '/api/benchmarks/preflight' })
+    expect(missing.statusCode).toBe(400)
+    const unknown = await app.inject({ method: 'GET', url: '/api/benchmarks/preflight?feature=nope' })
+    expect(unknown.statusCode).toBe(404)
     await app.close()
   })
 
@@ -477,6 +512,11 @@ describe('benchmarkRoutes', () => {
 
     it('confirm removes the benchmark-owned worktrees and persists the cleared flag', async () => {
       const saved: BenchmarkManifest[] = []
+      // A feature with a repo so featureRepoRoots() iterates (resolving git roots).
+      vi.mocked(loadFeatures).mockReturnValueOnce([
+        { name: 'f', description: 'd', envs: ['local'], featureDir: '/f',
+          repos: [{ name: 'r', localPath: '/tmp/portify-nonexistent-repo' }] },
+      ])
       vi.mocked(listWorktrees).mockResolvedValue([
         { path: '/wt/a', sourceRoot: '/src', ref: 'sha', ownerKind: 'benchmark', ownerId: 'b1', slot: 'arm-A', bytes: 200, ageMs: 0, exists: true },
         { path: '/wt/s', sourceRoot: '/src', ref: 'sha', ownerKind: 'benchmark', ownerId: 'b1', slot: 'staging', bytes: 112, ageMs: 0, exists: true },
@@ -491,6 +531,50 @@ describe('benchmarkRoutes', () => {
       expect(vi.mocked(removeWorktree)).toHaveBeenCalledWith({ sourceRoot: '/src', worktreeRoot: '/wt/a' })
       expect(saved).toHaveLength(1)
       expect(saved[0]).toMatchObject({ worktreesCleared: true, worktreesClearedBytes: 312 })
+      await app.close()
+    })
+
+    it('resolves feature repo roots, skipping unresolvable/throwing repos', async () => {
+      // Exercise featureRepoRoots: one repo resolves to a git root, one returns
+      // null (skipped), one throws (caught + skipped).
+      vi.mocked(loadFeatures).mockReturnValueOnce([
+        { name: 'f', description: 'd', envs: ['local'], featureDir: '/f',
+          repos: [{ name: 'a', localPath: '/a' }, { name: 'b', localPath: '/b' }, { name: 'c', localPath: '/c' }] },
+        // A feature with no repos at all → exercises the `repos ?? []` fallback.
+        { name: 'g', description: 'd', envs: ['local'], featureDir: '/g' },
+      ])
+      vi.mocked(getGitRoot)
+        .mockResolvedValueOnce('/git/root-a')
+        .mockResolvedValueOnce(null)
+        .mockRejectedValueOnce(new Error('not resolvable'))
+      vi.mocked(listWorktrees).mockResolvedValue([])
+      const app = await buildApp({ store: fakeStore({ get: () => manifest({ status: 'done' }), save: () => {} }) })
+      const res = await app.inject(clear({ confirm: true }))
+      expect(res.statusCode).toBe(200)
+      await app.close()
+    })
+
+    it('reports freedBytes 0 when an already-cleared benchmark has no recorded bytes', async () => {
+      const app = await buildApp({
+        store: fakeStore({ get: () => manifest({ status: 'done', worktreesCleared: true }) }),
+      })
+      const res = await app.inject(clear({ confirm: true }))
+      expect(res.json()).toEqual({ confirmed: false, willClear: 0, cleared: 0, freedBytes: 0, alreadyCleared: true })
+      await app.close()
+    })
+
+    it('swallows a worktree removal failure and still records the cleared flag', async () => {
+      const saved: BenchmarkManifest[] = []
+      vi.mocked(listWorktrees).mockResolvedValue([
+        { path: '/wt/a', sourceRoot: '/src', ref: 'sha', ownerKind: 'benchmark', ownerId: 'b1', slot: 'arm-A', bytes: 10, ageMs: 0, exists: true },
+      ])
+      vi.mocked(removeWorktree).mockRejectedValueOnce(new Error('rm failed'))
+      const app = await buildApp({
+        store: fakeStore({ get: () => manifest({ status: 'done' }), save: (m) => { saved.push(m) } }),
+      })
+      const res = await app.inject(clear({ confirm: true }))
+      expect(res.statusCode).toBe(200)
+      expect(saved).toHaveLength(1)
       await app.close()
     })
 

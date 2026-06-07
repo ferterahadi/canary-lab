@@ -67,6 +67,15 @@ export default defineConfig({
         'apps/web-server/lib/runtime/benchmark/runner.ts',
         'apps/web-server/lib/runtime/pty-spawner.ts',
         'apps/web-server/lib/runtime/**/types.ts',
+        // Port-ification git/subprocess wiring — same category as
+        // benchmark/runner.ts and runtime/orchestrator.ts above. runner.ts
+        // drives git worktrees + the subprocess agent + the verifier; git-ops.ts
+        // is raw git plumbing (worktree add/checkout/commit/diff/branch -D).
+        // Exercised by behavior tests (portify/runner.test.ts, git-ops.test.ts)
+        // but their defensive git-failure / `||`-fallback branches can't be
+        // driven deterministically under the strict 100% gate.
+        'apps/web-server/lib/runtime/portify/runner.ts',
+        'apps/web-server/lib/runtime/portify/git-ops.ts',
         // Race-condition and defence-in-depth guards: the uncovered branches
         // here are intentional closed-check / path-traversal / subprocess-timer
         // guards that can't be exercised deterministically through public APIs.

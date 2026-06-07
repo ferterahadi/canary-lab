@@ -85,6 +85,14 @@ describe('PortifyRunStore', () => {
     expect(store.list()).toEqual([])
   })
 
+  it('list returns [] when the index JSON is valid but not an array', () => {
+    const logs = tmpLogs()
+    const store = new PortifyRunStore(logs)
+    store.save(manifest())
+    fs.writeFileSync(path.join(logs, 'portify', 'index.json'), '{"not":"an array"}')
+    expect(store.list()).toEqual([])
+  })
+
   it('reconcileInterrupted flips non-terminal workflows to aborted, leaves terminal ones', () => {
     const store = new PortifyRunStore(tmpLogs())
     store.save(manifest({ workflowId: 'a', status: 'editing' }))

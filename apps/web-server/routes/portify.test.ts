@@ -157,6 +157,28 @@ describe('portifyRoutes', () => {
     expect(res.json()).toMatchObject({ error: 'nope' })
   })
 
+  it('POST /api/portify/:id/cancel defaults to 500 for a non-statusCode error', async () => {
+    const app = await build({ cancelPortify: async () => { throw new Error('teardown blew up') } })
+    const res = await app.inject({ method: 'POST', url: '/api/portify/portify-1/cancel' })
+    expect(res.statusCode).toBe(500)
+  })
+
+  it('stringifies a non-Error throw across start/commit/cancel', async () => {
+    // eslint-disable-next-line @typescript-eslint/only-throw-error
+    const startApp = await build({ startPortify: async () => { throw 'raw start failure' } })
+    const s = await startApp.inject({ method: 'POST', url: '/api/portify', payload: { feature: 'cns' } })
+    expect(s.statusCode).toBe(500)
+    expect(s.json()).toMatchObject({ error: 'raw start failure' })
+
+    // eslint-disable-next-line @typescript-eslint/only-throw-error
+    const commitApp = await build({ commitPortify: async () => { throw 'raw commit failure' } })
+    expect((await commitApp.inject({ method: 'POST', url: '/api/portify/w/commit' })).json()).toMatchObject({ error: 'raw commit failure' })
+
+    // eslint-disable-next-line @typescript-eslint/only-throw-error
+    const cancelApp = await build({ cancelPortify: async () => { throw 'raw cancel failure' } })
+    expect((await cancelApp.inject({ method: 'POST', url: '/api/portify/w/cancel' })).json()).toMatchObject({ error: 'raw cancel failure' })
+  })
+
   it('GET /api/portify/:id/agent-session returns the session when present', async () => {
     const app = await build({ loadAgentSession: () => ({ agent: 'claude', sessionId: 's', events: [] }) })
     const res = await app.inject({ method: 'GET', url: '/api/portify/portify-1/agent-session' })
