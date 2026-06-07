@@ -7,7 +7,9 @@ import type { FeatureConfig } from '../../../../../shared/launcher/types'
 import { runGit } from '../../git-repo'
 import { loadFeatures } from '../../feature-loader'
 import { PortifyRunStore } from './store'
-import { createPortifyRunner } from './runner'
+import { createPortifyRunner, safeKey } from './runner'
+import { runPortifyAgent } from './agent'
+import type { PortifyManifest } from './types'
 
 // Mock the agent so no real claude/codex spawns: simulate a source edit at the
 // worktree cwd (gives the commit something to commit). The fixture config
@@ -28,9 +30,25 @@ vi.mock('./agent', () => ({
   writePortifyClaudeRef: vi.fn(),
 }))
 
+// Default mocked-agent behavior: edit a source file in the worktree so there's
+// something to commit. Also register a fake child in the set the real agent
+// would populate, so abort()'s child-kill loop is exercised on cancel. Tests
+// can override per-case (e.g. the retry case).
+async function defaultAgentEdit(opts: { cwd: string; children?: Set<unknown> }): Promise<void> {
+  opts.children?.add({ kill: () => {} })
+  try {
+    fs.mkdirSync(path.join(opts.cwd, 'src'), { recursive: true })
+    fs.appendFileSync(path.join(opts.cwd, 'src', 'server.js'), '\n// port made injectable by agent\n')
+  } catch { /* best-effort */ }
+}
+
 // Block the REAL process.kill: verification teardown calls process.kill(-pid),
 // and a fake pid must never signal a real process group.
-beforeEach(() => { vi.spyOn(process, 'kill').mockImplementation(() => { throw new Error('blocked in test') }) })
+beforeEach(() => {
+  vi.spyOn(process, 'kill').mockImplementation(() => { throw new Error('blocked in test') })
+  // Reset the agent mock to the default each test (cases may override it).
+  vi.mocked(runPortifyAgent).mockImplementation(defaultAgentEdit as typeof runPortifyAgent)
+})
 afterEach(() => { vi.restoreAllMocks() })
 
 const fakePtyFactory: PtyFactory = (): PtyHandle => ({
@@ -56,41 +74,59 @@ async function gitInit(dir: string): Promise<void> {
   await runGit(dir, ['commit', '-q', '-m', 'init', '--no-verify'])
 }
 
-function repoStartCommand(name: string, slot: string, env: string): string {
+function repoStartCommand(name: string, slot: string, env: string, withPorts: boolean): string {
+  const ports = withPorts ? `      ports: [{ name: ${JSON.stringify(slot)}, env: ${JSON.stringify(env)} }],\n` : ''
   return (
     `    {\n` +
     `      command: 'node src/server.js',\n` +
     `      name: ${JSON.stringify(name)},\n` +
-    `      ports: [{ name: ${JSON.stringify(slot)}, env: ${JSON.stringify(env)} }],\n` +
+    ports +
     `      healthCheck: { http: { url: 'http://localhost:\${port.${slot}}/', timeoutMs: 30, deadlineMs: 250 } },\n` +
     `    }`
   )
 }
 
-function writeConfig(featureDir: string, repos: { name: string; localPath: string; slot: string; env: string }[]): void {
+function buildConfigSource(repos: { name: string; localPath: string; slot: string; env: string }[], withPorts: boolean): string {
   const reposSrc = repos.map((r) =>
     `  {\n` +
     `    name: ${JSON.stringify(r.name)},\n` +
     `    localPath: ${JSON.stringify(r.localPath)},\n` +
-    `    startCommands: [\n${repoStartCommand(r.name, r.slot, r.env)}\n    ],\n` +
+    `    startCommands: [\n${repoStartCommand(r.name, r.slot, r.env, withPorts)}\n    ],\n` +
     `  }`,
   ).join(',\n')
-  const cfg =
+  return (
     `const config = {\n` +
     `  name: 'myfeat',\n  description: 'test',\n  envs: ['local'],\n` +
     `  repos: [\n${reposSrc}\n  ],\n  featureDir: __dirname,\n}\n` +
     `module.exports = { config }\n`
-  fs.writeFileSync(path.join(featureDir, 'feature.config.cjs'), cfg)
+  )
 }
 
-function makeRunner(featuresDir: string, logsDir: string, healthy = true) {
+function writeConfig(
+  featureDir: string,
+  repos: { name: string; localPath: string; slot: string; env: string }[],
+  opts: { ext?: 'cjs' | 'js'; withPorts?: boolean } = {},
+): void {
+  fs.writeFileSync(
+    path.join(featureDir, `feature.config.${opts.ext ?? 'cjs'}`),
+    buildConfigSource(repos, opts.withPorts ?? true),
+  )
+}
+
+function makeRunner(
+  featuresDir: string,
+  logsDir: string,
+  healthy = true,
+  agent: 'claude' | 'codex' = 'claude',
+  loadFeaturesFn?: () => FeatureConfig[],
+) {
   const store = new PortifyRunStore(logsDir)
   const runner = createPortifyRunner({
     logsDir,
     store,
     ptyFactory: fakePtyFactory,
-    loadFeatures: () => loadFeatures(featuresDir),
-    pickAgent: () => 'claude',
+    loadFeatures: loadFeaturesFn ?? (() => loadFeatures(featuresDir)),
+    pickAgent: () => agent,
     now: () => '2026-06-07T00:00:00.000Z',
     healthCheck: async () => healthy,
     healthPollIntervalMs: 5,
@@ -276,6 +312,15 @@ describe('createPortifyRunner (integration)', () => {
       const runner = await runnerWith([feat({ repos: [{ name: 'r', localPath: dir }] })])
       await expect(runner.startPortify({ feature: 'myfeat' })).rejects.toMatchObject({ statusCode: 409 })
     })
+    it('409 when repos is undefined (no bootable repos)', async () => {
+      const runner = await runnerWith([feat({ repos: undefined })])
+      await expect(runner.startPortify({ feature: 'myfeat' })).rejects.toMatchObject({ statusCode: 409 })
+    })
+    it('names the requested agent in the error when that CLI is unavailable', async () => {
+      const runner = await runnerWith([feat({})], () => null)
+      await expect(runner.startPortify({ feature: 'myfeat', agent: 'codex' }))
+        .rejects.toThrow(/the codex CLI is not available/)
+    })
   })
 
   describe('commit / cancel guards', () => {
@@ -297,5 +342,163 @@ describe('createPortifyRunner (integration)', () => {
       const { runner } = makeRunner('x', fs.mkdtempSync(path.join(os.tmpdir(), 'portify-cc-')))
       await expect(runner.cancel('nope')).rejects.toMatchObject({ statusCode: 404 })
     })
+  })
+})
+
+function readyManifest(over: Partial<PortifyManifest> = {}): PortifyManifest {
+  return {
+    workflowId: 'w', feature: 'f', featureDir: '/f', repos: [], agent: 'claude',
+    branch: 'b', status: 'ready-to-commit', attempt: 1, maxAttempts: 3, startedAt: 'now', ...over,
+  }
+}
+
+describe('createPortifyRunner (branch coverage)', () => {
+  it('safeKey sanitizes and falls back to "root"', () => {
+    expect(safeKey('A b!')).toBe('A-b')
+    expect(safeKey('@@@')).toBe('root')
+  })
+
+  it('runs with the codex agent (no claude session id)', async () => {
+    const { featuresDir, logsDir } = await singleFixture()
+    const { store, runner } = makeRunner(featuresDir, logsDir, true, 'codex')
+    const { workflowId } = await runner.startPortify({ feature: 'myfeat', agent: 'codex', maxAttempts: 1 })
+    expect(await waitForStatus(store, workflowId, TERMINAL)).toBe('ready-to-commit')
+    await runner.cancel(workflowId)
+  })
+
+  it('clamps a non-positive maxAttempts to the default', async () => {
+    const { featuresDir, logsDir } = await singleFixture()
+    const { store, runner } = makeRunner(featuresDir, logsDir)
+    const { workflowId } = await runner.startPortify({ feature: 'myfeat', maxAttempts: -1 })
+    expect(await waitForStatus(store, workflowId, TERMINAL)).toBe('ready-to-commit')
+    expect(store.get(workflowId)!.maxAttempts).toBe(3)
+    await runner.cancel(workflowId)
+  })
+
+  it('retries with resume after a failed verify, then succeeds (and diffs the config)', async () => {
+    // Config starts WITHOUT port slots → attempt 1 verify fails ("no slots").
+    // The agent adds the slot to the (git-tracked) config on attempt 2 → passes.
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-retry-'))
+    roots.push(root)
+    const featuresDir = path.join(root, 'features')
+    const featureDir = path.join(featuresDir, 'myfeat')
+    const appRepo = path.join(root, 'app')
+    const logsDir = path.join(root, 'logs')
+    fs.mkdirSync(path.join(appRepo, 'src'), { recursive: true })
+    fs.mkdirSync(featureDir, { recursive: true })
+    fs.writeFileSync(path.join(appRepo, 'src', 'server.js'), 'const PORT = process.env.PORT\n')
+    await gitInit(appRepo)
+    writeConfig(featureDir, [{ name: 'app', localPath: appRepo, slot: 'api', env: 'PORT' }], { withPorts: false })
+    await gitInit(featureDir) // config is git-tracked so canonicalConfigDiff is non-empty
+
+    let call = 0
+    vi.mocked(runPortifyAgent).mockImplementation(async (opts: { cwd: string }) => {
+      call += 1
+      await defaultAgentEdit(opts)
+      if (call === 2) {
+        writeConfig(featureDir, [{ name: 'app', localPath: appRepo, slot: 'api', env: 'PORT' }], { withPorts: true })
+      }
+    })
+    const { store, runner } = makeRunner(featuresDir, logsDir)
+    const { workflowId } = await runner.startPortify({ feature: 'myfeat', maxAttempts: 2 })
+    expect(await waitForStatus(store, workflowId, TERMINAL)).toBe('ready-to-commit')
+    const m = store.get(workflowId)!
+    expect(m.attempt).toBe(2)
+    expect(m.diff).toContain('# feature config:')
+    await runner.cancel(workflowId)
+  })
+
+  it('falls back to the in-memory feature when the reload no longer finds it', async () => {
+    const { featuresDir, logsDir } = await singleFixture()
+    const feats = loadFeatures(featuresDir)
+    let n = 0
+    // First call (startPortify) sees the feature; the verify reload sees none.
+    const loadFeaturesFn = (): FeatureConfig[] => (++n === 1 ? feats : [])
+    const { store, runner } = makeRunner(featuresDir, logsDir, true, 'claude', loadFeaturesFn)
+    const { workflowId } = await runner.startPortify({ feature: 'myfeat', maxAttempts: 1 })
+    expect(await waitForStatus(store, workflowId, TERMINAL)).toBe('ready-to-commit')
+    await runner.cancel(workflowId)
+  })
+
+  it('skips the config snapshot/restore when there is no .cjs config (feature.config.js)', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-js-'))
+    roots.push(root)
+    const featuresDir = path.join(root, 'features')
+    const featureDir = path.join(featuresDir, 'myfeat')
+    const appRepo = path.join(root, 'app')
+    const logsDir = path.join(root, 'logs')
+    fs.mkdirSync(path.join(appRepo, 'src'), { recursive: true })
+    fs.mkdirSync(featureDir, { recursive: true })
+    fs.writeFileSync(path.join(appRepo, 'src', 'server.js'), 'const PORT = process.env.PORT\n')
+    await gitInit(appRepo)
+    writeConfig(featureDir, [{ name: 'app', localPath: appRepo, slot: 'api', env: 'PORT' }], { ext: 'js' })
+    const { store, runner } = makeRunner(featuresDir, logsDir)
+    const { workflowId } = await runner.startPortify({ feature: 'myfeat', maxAttempts: 1 })
+    expect(await waitForStatus(store, workflowId, TERMINAL)).toBe('ready-to-commit')
+    await runner.cancel(workflowId) // restoreConfig hits the originalConfig == null arm
+  })
+
+  it('commit 409s when the manifest is ready but the active state is gone', async () => {
+    const logsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-nostate-'))
+    roots.push(logsDir)
+    const { store, runner } = makeRunner('x', logsDir)
+    store.save(readyManifest({ workflowId: 'w' }))
+    await expect(runner.commit('w')).rejects.toMatchObject({ statusCode: 409 })
+  })
+
+  it('cancel marks a stateless workflow aborted, and returns a committed one untouched', async () => {
+    const logsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-cancel2-'))
+    roots.push(logsDir)
+    const { store, runner } = makeRunner('x', logsDir)
+    // No active state, no endedAt → aborted with now().
+    store.save(readyManifest({ workflowId: 'a', status: 'editing' }))
+    expect((await runner.cancel('a')).status).toBe('aborted')
+    // Already committed → returned untouched.
+    store.save(readyManifest({ workflowId: 'b', status: 'committed', endedAt: '2026-06-07T00:00:00.000Z' }))
+    expect((await runner.cancel('b')).status).toBe('committed')
+  })
+
+  it('handles a repo whose localPath IS its git root (empty edit subpath)', async () => {
+    const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'portify-root-')))
+    roots.push(root)
+    const featuresDir = path.join(root, 'features')
+    const featureDir = path.join(featuresDir, 'myfeat')
+    const appRepo = path.join(root, 'app')
+    const logsDir = path.join(root, 'logs')
+    fs.mkdirSync(path.join(appRepo, 'src'), { recursive: true })
+    fs.mkdirSync(featureDir, { recursive: true })
+    fs.writeFileSync(path.join(appRepo, 'src', 'server.js'), 'const PORT = process.env.PORT\n')
+    await gitInit(appRepo)
+    // Use the realpath'd root as localPath so it equals the git toplevel → the
+    // member's edit subpath is '' (the `: worktreeRoot` arm of the ternary).
+    writeConfig(featureDir, [{ name: 'app', localPath: fs.realpathSync(appRepo), slot: 'api', env: 'PORT' }])
+    const { store, runner } = makeRunner(featuresDir, logsDir)
+    const { workflowId } = await runner.startPortify({ feature: 'myfeat', maxAttempts: 1 })
+    expect(await waitForStatus(store, workflowId, TERMINAL)).toBe('ready-to-commit')
+    await runner.cancel(workflowId)
+  })
+
+  it('flags a modified test file (checkTestsUntouched) and fails', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-testedit-'))
+    roots.push(root)
+    const featuresDir = path.join(root, 'features')
+    const featureDir = path.join(featuresDir, 'myfeat')
+    const appRepo = path.join(root, 'app')
+    const logsDir = path.join(root, 'logs')
+    fs.mkdirSync(path.join(appRepo, 'src'), { recursive: true })
+    fs.mkdirSync(path.join(appRepo, 'e2e'), { recursive: true })
+    fs.mkdirSync(featureDir, { recursive: true })
+    fs.writeFileSync(path.join(appRepo, 'src', 'server.js'), 'const PORT = process.env.PORT\n')
+    fs.writeFileSync(path.join(appRepo, 'e2e', 'api.spec.js'), '// test\n')
+    await gitInit(appRepo)
+    writeConfig(featureDir, [{ name: 'app', localPath: appRepo, slot: 'api', env: 'PORT' }])
+    // Agent modifies a tracked test file → checkTestsUntouched flags it.
+    vi.mocked(runPortifyAgent).mockImplementation(async (opts: { cwd: string }) => {
+      fs.appendFileSync(path.join(opts.cwd, 'e2e', 'api.spec.js'), '\n// agent touched a test\n')
+    })
+    const { store, runner } = makeRunner(featuresDir, logsDir)
+    const { workflowId } = await runner.startPortify({ feature: 'myfeat', maxAttempts: 1 })
+    expect(await waitForStatus(store, workflowId, TERMINAL)).toBe('failed')
+    expect(store.get(workflowId)!.verification?.failureDetail).toContain('api.spec.js')
   })
 })

@@ -10,6 +10,8 @@ import { getProjectRoot } from '../shared/runtime/project-root'
 import { openBrowser } from '../apps/web-server/lib/open-browser'
 import { loadProjectConfig, resolveProjectPort } from '../apps/web-server/lib/runtime/launcher/project-config'
 import { upsertWorkspace } from '../shared/runtime/workspace-registry'
+import { refreshAgentIntegrationsQuietly } from './agent'
+import { installServerLogging, type ServerLogHandle } from '../apps/web-server/lib/runtime/server-log'
 
 export interface UiCommandOptions {
   projectRoot?: string
@@ -19,10 +21,16 @@ export interface UiCommandOptions {
   confirmShutdown?: () => Promise<boolean>
   // Marks this workspace active so the MCP bridge connects to the running UI.
   registerWorkspace?: (projectRoot: string) => void
+  // Brings the installed agent skill up to date with this package version.
+  // Injected as a no-op / spy in tests so they never touch the real home dir.
+  refreshAgents?: () => void
   // Spawns a fresh detached UI for this project (on the new port from config).
   relaunch?: (projectRoot: string) => void
   // Defers the relaunch+shutdown so the HTTP response can flush first.
   schedule?: (fn: () => void) => void
+  // Tees the server process's own stdout/stderr to <logsDir>/server/. Injected
+  // as a no-op in tests so the real process streams aren't captured.
+  setupServerLogging?: (logsDir: string) => ServerLogHandle | void
 }
 
 export async function runUi(argv: string[], opts: UiCommandOptions = {}): Promise<void> {
@@ -43,6 +51,19 @@ export async function runUi(argv: string[], opts: UiCommandOptions = {}): Promis
   // *this* project (and its port) as the active target.
   const registerWorkspace = opts.registerWorkspace ?? ((root: string) => { upsertWorkspace(root) })
   registerWorkspace(projectRoot)
+  // Keep the installed agent skill (~/.claude, ~/.codex) in lockstep with this
+  // package version. An `npm` bump that skips the postinstall `upgrade` hook
+  // would otherwise leave a stale skill pinning old behavior; this is the one
+  // command users run every session, so it's the reliable enforcement point.
+  // Cheap + silent when already current (content-compared, no-ops on match).
+  const refreshAgents = opts.refreshAgents
+    ?? (() => { refreshAgentIntegrationsQuietly({ log }) })
+  refreshAgents()
+  // Capture this server process's own output so crashes/misbehaviour can be
+  // diagnosed after the fact (the launching terminal's scrollback is the only
+  // other copy). Per-run service logs are captured separately by the runner.
+  const setupServerLogging = opts.setupServerLogging ?? ((dir: string) => installServerLogging(dir))
+  const serverLog = setupServerLogging(path.join(projectRoot, 'logs'))
   // Forward reference: the port-change hook needs `shutdown`, which is defined
   // after the server exists. createServer captures this stable delegate.
   let triggerPortChange: (port: number) => void = () => { /* assigned below */ }
@@ -112,6 +133,7 @@ export async function runUi(argv: string[], opts: UiCommandOptions = {}): Promis
   const url = `http://localhost:${port}`
   log(`Open ${url}`)
   log(`Project root: ${path.relative(process.cwd(), projectRoot) || '.'}`)
+  if (serverLog) log(`Server log: ${path.relative(process.cwd(), serverLog.logPath) || serverLog.logPath}`)
   if (!noOpen) {
     openBrowser(url)
   }

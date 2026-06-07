@@ -47,6 +47,7 @@ import {
 import { WizardAgentRegistry } from './lib/wizard-agent-registry'
 import { generateRunId } from './lib/runtime/run-id'
 import { runDirFor, buildRunPaths } from './lib/runtime/run-paths'
+import { pruneRuns } from './lib/runtime/retention'
 import { RunOrchestrator, collectPortSlots, buildServiceSpecs, buildQueuedServiceEntries } from './lib/runtime/orchestrator'
 import { allocatePorts } from './lib/runtime/port-allocator'
 import { resolvePortTokens } from './lib/runtime/launcher/interpolate'
@@ -194,6 +195,12 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
   // not controllable by this process. Finalize it immediately instead of
   // waiting for the heartbeat staleness window or requiring a manual Stop.
   await runStore.abortAllActiveOrStale()
+  // Keep only the most recent N run dirs on disk (CANARY_LAB_RUN_RETENTION,
+  // default 20). Prune once on bootstrap and again whenever a run finalizes
+  // (see the `finalized` listener below) so old runs don't accumulate forever.
+  // Best-effort: a prune failure must never block server boot.
+  const pruneOldRuns = (): void => { try { pruneRuns(logsDir) } catch { /* best-effort */ } }
+  pruneOldRuns()
   // Tracks which external AI client (Claude Desktop / Codex CLI etc.) holds
   // heal duty for each run. Routes hit this; the orchestrator subscribes to
   // claim-changed events through the run-store fan-out.
@@ -551,7 +558,13 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
     readResources: readSystemResources,
     config: admissionConfig,
   })
-  runStore.onEvent((e) => { if (e.kind === 'finalized') void scheduler.promote() })
+  runStore.onEvent((e) => {
+    if (e.kind === 'finalized') {
+      void scheduler.promote()
+      // The just-finalized run is the newest dir, so retention always keeps it.
+      pruneOldRuns()
+    }
+  })
 
   // Map a set of resolved repo paths back to feature.config repo names so we
   // know which repos to isolate in a worktree.

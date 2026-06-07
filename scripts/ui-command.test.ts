@@ -35,13 +35,25 @@ function restoreProcessListeners(): void {
   }
 }
 
+let agentHome: string | undefined
+let priorAgentHome: string | undefined
+
 beforeEach(() => {
   mocks.createServer.mockReset()
   mocks.openBrowser.mockReset()
+  // Point the boot-time skill refresh at a throwaway home so it can never touch
+  // the developer's real ~/.claude during the test run. The temp home has no
+  // installed skill, so refreshInstalled() is a guaranteed no-op.
+  priorAgentHome = process.env.CANARY_LAB_AGENT_HOME
+  agentHome = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-agent-home-'))
+  process.env.CANARY_LAB_AGENT_HOME = agentHome
 })
 
 afterEach(() => {
   restoreProcessListeners()
+  if (priorAgentHome === undefined) delete process.env.CANARY_LAB_AGENT_HOME
+  else process.env.CANARY_LAB_AGENT_HOME = priorAgentHome
+  if (agentHome) { fs.rmSync(agentHome, { recursive: true, force: true }); agentHome = undefined }
 })
 
 describe('runUi signal cleanup', () => {
@@ -87,6 +99,7 @@ describe('runUi signal cleanup', () => {
       projectRoot: '/tmp/canary-lab-workspace',
       log: () => {},
       exit,
+      setupServerLogging: () => undefined,
       confirmShutdown: async () => {
         events.push('confirm')
         return true
@@ -140,6 +153,7 @@ describe('runUi signal cleanup', () => {
       projectRoot: '/tmp/canary-lab-workspace',
       log: (msg) => { messages.push(msg) },
       exit,
+      setupServerLogging: () => undefined,
       confirmShutdown: async () => false,
     })
 
@@ -185,7 +199,7 @@ describe('runUi port resolution', () => {
     const projectRoot = mkProject({ port: 8200 })
     const app = mockServer()
 
-    await runUi(['--no-open'], { projectRoot, log: () => {}, exit: vi.fn(), registerWorkspace: () => {} })
+    await runUi(['--no-open'], { projectRoot, log: () => {}, exit: vi.fn(), registerWorkspace: () => {}, setupServerLogging: () => undefined })
 
     expect(app.listen).toHaveBeenCalledExactlyOnceWith({ port: 8200, host: '127.0.0.1' })
   })
@@ -194,7 +208,7 @@ describe('runUi port resolution', () => {
     const projectRoot = mkProject()
     const app = mockServer()
 
-    await runUi(['--no-open'], { projectRoot, log: () => {}, exit: vi.fn(), registerWorkspace: () => {} })
+    await runUi(['--no-open'], { projectRoot, log: () => {}, exit: vi.fn(), registerWorkspace: () => {}, setupServerLogging: () => undefined })
 
     expect(app.listen).toHaveBeenCalledExactlyOnceWith({ port: 7421, host: '127.0.0.1' })
   })
@@ -204,9 +218,40 @@ describe('runUi port resolution', () => {
     mockServer()
     const registerWorkspace = vi.fn()
 
-    await runUi(['--no-open'], { projectRoot, log: () => {}, exit: vi.fn(), registerWorkspace })
+    await runUi(['--no-open'], { projectRoot, log: () => {}, exit: vi.fn(), registerWorkspace, setupServerLogging: () => undefined })
 
     expect(registerWorkspace).toHaveBeenCalledExactlyOnceWith(projectRoot)
+  })
+
+  it('refreshes the installed agent skill on boot so it tracks the package version', async () => {
+    const projectRoot = mkProject()
+    mockServer()
+    const refreshAgents = vi.fn()
+
+    await runUi(['--no-open'], { projectRoot, log: () => {}, exit: vi.fn(), registerWorkspace: () => {}, setupServerLogging: () => undefined, refreshAgents })
+
+    expect(refreshAgents).toHaveBeenCalledOnce()
+  })
+
+  it('wires server logging at <projectRoot>/logs and surfaces the path', async () => {
+    const projectRoot = mkProject({ port: 8500 })
+    mockServer()
+    const messages: string[] = []
+    const setupServerLogging = vi.fn((dir: string) => ({
+      logPath: path.join(dir, 'server', 'canary-ui-test.log'),
+      dispose: () => {},
+    }))
+
+    await runUi(['--no-open'], {
+      projectRoot,
+      log: (m) => messages.push(m),
+      exit: vi.fn(),
+      registerWorkspace: () => {},
+      setupServerLogging,
+    })
+
+    expect(setupServerLogging).toHaveBeenCalledExactlyOnceWith(path.join(projectRoot, 'logs'))
+    expect(messages.some((m) => m.startsWith('Server log:'))).toBe(true)
   })
 
   it('relaunches the UI and shuts down when a port change is requested', async () => {
@@ -233,6 +278,7 @@ describe('runUi port resolution', () => {
       log: () => {},
       exit,
       registerWorkspace: () => {},
+      setupServerLogging: () => undefined,
       relaunch,
       schedule: (fn) => { fn() },
     })
@@ -260,7 +306,7 @@ describe('runUi port resolution', () => {
       draftBrokers: new Map(),
     })
 
-    await runUi(['--no-open'], { projectRoot, log: (m) => messages.push(m), exit: vi.fn(), registerWorkspace: () => {} })
+    await runUi(['--no-open'], { projectRoot, log: (m) => messages.push(m), exit: vi.fn(), registerWorkspace: () => {}, setupServerLogging: () => undefined })
 
     expect(messages.some((m) => m.includes('8400'))).toBe(true)
   })

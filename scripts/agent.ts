@@ -144,6 +144,29 @@ export function refreshInstalled(target: Target, opts: AgentInstallOptions = {})
   return updated
 }
 
+/**
+ * Boot-time convenience used by `canary-lab ui` / `canary-lab mcp`: refresh any
+ * already-installed agent skills so they match the running package version,
+ * swallowing any error. `refreshInstalled` only rewrites skills that already
+ * exist and whose content differs, so this is a cheap no-op when nothing
+ * changed — safe to call on every start. Honors CANARY_LAB_AGENT_HOME (tests /
+ * CI) before falling back to the real home dir. Returns the number of skills
+ * updated (0 when current or on error).
+ */
+export function refreshAgentIntegrationsQuietly(
+  opts: { homeDir?: string; log?: (msg: string) => void } = {},
+): number {
+  try {
+    return refreshInstalled('all', {
+      homeDir: opts.homeDir ?? process.env.CANARY_LAB_AGENT_HOME,
+      log: opts.log,
+    })
+  } catch {
+    // Best-effort: a missing/locked asset must never block the server boot.
+    return 0
+  }
+}
+
 function buildOperations(target: Target, home: string, assets: string): AgentOperation[] {
   const operations: AgentOperation[] = []
   if (target === 'codex' || target === 'all') {

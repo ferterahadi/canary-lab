@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -122,6 +122,32 @@ describe('canary-lab mcp', () => {
     const stderr = new BufferWritable()
     await expect(bridge('http://127.0.0.1:9/mcp', { stderr, autoStartUi: false })).resolves.toBe(false)
     expect(stderr.text()).toContain('Start the UI first: canary-lab ui')
+  })
+
+  it('refreshes the installed agent skill before serving the bridge', async () => {
+    const refreshAgents = vi.fn()
+    const failingFetch = (async () => { throw new Error('no server') }) as unknown as typeof fetch
+    await main(['--url', 'http://127.0.0.1:9/mcp'], {
+      refreshAgents,
+      stderr: new BufferWritable(),
+      fetch: failingFetch,
+      autoStartUi: false,
+      exit: () => { /* noop */ },
+    })
+    expect(refreshAgents).toHaveBeenCalledOnce()
+  })
+
+  it('does not refresh the agent skill for the diagnostic doctor command', async () => {
+    const refreshAgents = vi.fn()
+    const failingFetch = (async () => { throw new Error('no server') }) as unknown as typeof fetch
+    await main(['doctor', '--url', 'http://127.0.0.1:9/mcp', '--no-autostart'], {
+      refreshAgents,
+      stdout: new BufferWritable(),
+      stderr: new BufferWritable(),
+      fetch: failingFetch,
+      exit: () => { /* noop */ },
+    })
+    expect(refreshAgents).not.toHaveBeenCalled()
   })
 
   it('auto-starts the UI and waits for health when the default local MCP server is down', async () => {

@@ -74,7 +74,7 @@ interface ActiveWorkflow {
   abort: () => void
 }
 
-function safeKey(s: string): string {
+export function safeKey(s: string): string {
   return s.replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'root'
 }
 
@@ -210,8 +210,10 @@ export function createPortifyRunner(deps: PortifyRunnerDeps) {
       },
 
       runAgent: async (attempt, failureDetail) => {
-        const targets: RepoEditTarget[] = allMembers().map((m) => ({ name: m.name, editPath: m.editPath ?? m.path }))
-        const cwd = state.groups[0].handle?.worktreeRoot ?? state.groups[0].sourceRoot
+        // setup() ran (and fully succeeded) before any runAgent, so every
+        // member has an editPath and every group a handle.
+        const targets: RepoEditTarget[] = allMembers().map((m) => ({ name: m.name, editPath: m.editPath! }))
+        const cwd = state.groups[0].handle!.worktreeRoot
         if (sessionId) writePortifyClaudeRef(dir, cwd, sessionId)
         const prompt = attempt === 1 || !failureDetail
           ? buildPortifyPrompt(feature, targets)
@@ -225,8 +227,7 @@ export function createPortifyRunner(deps: PortifyRunnerDeps) {
       captureDiff: async () => {
         const blocks: string[] = []
         for (const group of state.groups) {
-          if (!group.handle) continue
-          const d = await captureDiff(group.handle.worktreeRoot, group.snapshotRef)
+          const d = await captureDiff(group.handle!.worktreeRoot, group.snapshotRef)
           if (d) blocks.push(`# repo: ${group.members.map((m) => m.name).join(', ')}\n${d}`)
         }
         const configDiff = await canonicalConfigDiff(feature.featureDir, state.configSnapshotRef)
@@ -239,9 +240,7 @@ export function createPortifyRunner(deps: PortifyRunnerDeps) {
         // health checks) are reflected. Source comes from each worktree.
         const fresh = deps.loadFeatures().find((f) => f.name === feature.name) ?? feature
         const overrides: Record<string, string> = {}
-        for (const member of allMembers()) {
-          if (member.editPath) overrides[member.name] = member.editPath
-        }
+        for (const member of allMembers()) overrides[member.name] = member.editPath!
         return verifyDoubleBoot(fresh, env, overrides, {
           ptyFactory: deps.ptyFactory,
           healthCheck: deps.healthCheck,
@@ -254,8 +253,7 @@ export function createPortifyRunner(deps: PortifyRunnerDeps) {
       checkTestsUntouched: async () => {
         const offending: string[] = []
         for (const group of state.groups) {
-          if (!group.handle) continue
-          const changed = await changedFiles(group.handle.worktreeRoot, group.snapshotRef)
+          const changed = await changedFiles(group.handle!.worktreeRoot, group.snapshotRef)
           offending.push(...changed.filter((f) => /(^|\/)e2e\//.test(f) || /\.spec\.[tj]s$/.test(f)).map((f) => `${group.key}:${f}`))
         }
         return { ok: offending.length === 0, offending }
@@ -292,15 +290,15 @@ export function createPortifyRunner(deps: PortifyRunnerDeps) {
     const message = `feat: make ${m.feature} ports injectable for concurrent boot`
     const shaByMember = new Map<string, string | undefined>()
     for (const group of state.groups) {
-      if (!group.handle) continue
-      const sha = await commitWorktree(group.handle.worktreeRoot, message)
+      // Reaching commit means setup fully succeeded → every group has a handle.
+      const sha = await commitWorktree(group.handle!.worktreeRoot, message)
       if (sha) {
         // Keep the branch (with the commit); free the worktree checkout.
         // removeWorktree drops the checkout but NOT the branch ref.
-        await removeWorktree(group.handle)
+        await removeWorktree(group.handle!)
       } else {
         // No source change in this group — drop the empty branch + worktree.
-        await discardWorktree(group.handle, state.branch)
+        await discardWorktree(group.handle!, state.branch)
       }
       for (const member of group.members) shaByMember.set(member.name, sha ?? undefined)
     }
