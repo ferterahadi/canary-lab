@@ -72,6 +72,12 @@ describe('git-ops worktree lifecycle', () => {
     expect(branches.stdout.trim()).toBe('')
   })
 
+  it('changedFiles returns [] when git diff fails (non-git path)', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-nogit-cf-'))
+    roots.push(dir)
+    expect(await changedFiles(dir, 'HEAD')).toEqual([])
+  })
+
   it('commitWorktree returns null when there is nothing to commit', async () => {
     const repo = await tmpRepo()
     const wt = await createBranchAndWorktree({
