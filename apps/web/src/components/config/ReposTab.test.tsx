@@ -98,7 +98,76 @@ describe('ReposTab', () => {
       }),
     )
   })
+
+  it('round-trips a startCommand port slot through parse → serialize', async () => {
+    const withPorts = docWithPorts()
+    vi.mocked(getFeatureConfigDoc).mockResolvedValue(withPorts)
+    vi.mocked(putFeatureConfigDoc).mockResolvedValue(withPorts)
+
+    await act(async () => {
+      root.render(<ReposTab feature="cns_exactly_once_fallback" />)
+    })
+
+    // Surface the declared slot in the UI.
+    const slotName = inputForLabel('Port slots')
+    expect(slotName.value).toBe('api')
+
+    // Edit the repo name to mark the slice dirty, then save.
+    const nameInput = inputForLabel('Name')
+    await act(async () => {
+      setInputValue(nameInput, 'renamed')
+      nameInput.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    const save = [...container.querySelectorAll('button')]
+      .find((button) => button.textContent === 'Save')
+    await act(async () => {
+      save!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+
+    expect(putFeatureConfigDoc).toHaveBeenCalledWith(
+      'cns_exactly_once_fallback',
+      expect.objectContaining({
+        repos: [
+          expect.objectContaining({
+            startCommands: [
+              expect.objectContaining({
+                command: 'yarn start',
+                ports: [{ name: 'api', env: 'PORT' }],
+              }),
+            ],
+          }),
+        ],
+      }),
+    )
+  })
 })
+
+function docWithPorts(): ParsedConfigDoc {
+  return {
+    path: '/features/cns_exactly_once_fallback/feature.config.cjs',
+    format: 'cjs',
+    content: '',
+    parsed: {
+      value: {
+        name: 'cns_exactly_once_fallback',
+        description: 'desc',
+        envs: ['local'],
+        repos: [
+          {
+            name: 'mighty-cns',
+            localPath: '~/Documents/mighty-cns',
+            startCommands: [
+              { command: 'yarn start', ports: [{ name: 'api', env: 'PORT' }] },
+            ],
+          },
+        ],
+        featureDir: { $expr: '__dirname' },
+      },
+      complexFields: [],
+      source: '',
+    },
+  }
+}
 
 function inputForLabel(label: string): HTMLInputElement {
   const field = [...container.querySelectorAll('label')]

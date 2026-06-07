@@ -13,6 +13,7 @@ import { benchmarkDir } from '../lib/runtime/benchmark/paths'
 import { addWorktree, removeWorktree } from '../lib/runtime/repo-worktree'
 import { listWorktrees } from '../lib/runtime/worktree-inventory'
 import { loadFeatures } from '../lib/feature-loader'
+import { computePortPreflight } from '../lib/runtime/port-preflight'
 import { getGitRoot, resolveRepoPath } from '../lib/git-repo'
 import { launchEditorDir } from '../lib/editor-launch'
 import { loadProjectConfig, type EditorChoice } from '../lib/runtime/launcher/project-config'
@@ -74,6 +75,29 @@ export async function benchmarkRoutes(
       description: s.description,
       recipe: s.recipe,
     })),
+  )
+
+  // Dynamic-ports preflight: does the selected feature declare port slots, so
+  // benchmark arms (which boot the same feature concurrently) won't clash on a
+  // hardcoded port? `portsConfigured: false` tells the UI to offer the
+  // port-ification workflow before starting. Static path — registered before
+  // `/:benchmarkId` so Fastify's router never treats "preflight" as an id.
+  app.get<{ Querystring: { feature?: string; env?: string } }>(
+    '/api/benchmarks/preflight',
+    async (req, reply) => {
+      const featureName = (req.query.feature ?? '').trim()
+      if (!featureName) {
+        reply.code(400)
+        return { error: 'feature is required' }
+      }
+      const feature = loadFeatures(deps.featuresDir).find((f) => f.name === featureName)
+      if (!feature) {
+        reply.code(404)
+        return { error: 'feature not found' }
+      }
+      const env = typeof req.query.env === 'string' && req.query.env.trim() ? req.query.env.trim() : undefined
+      return computePortPreflight(feature, env)
+    },
   )
 
   app.get<{ Params: { benchmarkId: string } }>(

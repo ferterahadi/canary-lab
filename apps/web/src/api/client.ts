@@ -109,6 +109,29 @@ export function listSabotageSkills(feature: string, opts?: ClientOptions): Promi
   )
 }
 
+export interface BenchmarkPreflight {
+  portsConfigured: boolean
+  repos: { name: string; commands: { name: string; declaredPorts: { name: string; env?: string }[] }[] }[]
+}
+
+// Does the feature declare injectable port slots? Benchmark arms boot the same
+// feature concurrently, so an app with hardcoded ports would clash. When
+// `portsConfigured` is false the UI offers the port-ification workflow.
+export function benchmarkPreflight(
+  feature: string,
+  env?: string,
+  opts?: ClientOptions,
+): Promise<BenchmarkPreflight> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  const q = new URLSearchParams({ feature })
+  if (env) q.set('env', env)
+  return request<BenchmarkPreflight>(
+    `${baseUrl}/api/benchmarks/preflight?${q.toString()}`,
+    { method: 'GET' },
+    fetchImpl,
+  )
+}
+
 export function startBenchmark(
   input: { feature: string; skill: string; level: SabotageLevel; iterations: number; agent?: 'claude' | 'codex' },
   opts?: ClientOptions,
@@ -182,6 +205,99 @@ export async function getBenchmarkAgentSession(
   try {
     return await request<AgentSessionResponse>(
       `${baseUrl}/api/benchmarks/${encodeURIComponent(id)}/agent-session`,
+      { method: 'GET' },
+      fetchImpl,
+    )
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) return null
+    throw err
+  }
+}
+
+// ─── Port-ification ──────────────────────────────────────────────────────
+
+export type PortifyStatus =
+  | 'planning' | 'editing' | 'verifying' | 'ready-to-commit'
+  | 'committed' | 'failed' | 'aborted'
+
+export interface PortifyBootInstance {
+  ports: Record<string, number>
+  ok: boolean
+  failedService?: string
+  detail?: string
+}
+
+export interface PortifyRepoState {
+  name: string
+  path: string
+  worktreePath?: string
+  baseSha?: string
+  commitSha?: string
+}
+
+export interface PortifyManifest {
+  workflowId: string
+  feature: string
+  repos: PortifyRepoState[]
+  agent: 'claude' | 'codex'
+  branch: string
+  status: PortifyStatus
+  attempt: number
+  maxAttempts: number
+  startedAt: string
+  endedAt?: string
+  diff?: string
+  verification?: { ok: boolean; instances: PortifyBootInstance[]; failureDetail?: string }
+  error?: string
+}
+
+export function startPortify(
+  input: { feature: string; agent?: 'claude' | 'codex'; maxAttempts?: number },
+  opts?: ClientOptions,
+): Promise<{ workflowId: string }> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<{ workflowId: string }>(
+    `${baseUrl}/api/portify`,
+    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) },
+    fetchImpl,
+  )
+}
+
+export function getPortify(workflowId: string, opts?: ClientOptions): Promise<PortifyManifest> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<PortifyManifest>(
+    `${baseUrl}/api/portify/${encodeURIComponent(workflowId)}`,
+    { method: 'GET' },
+    fetchImpl,
+  )
+}
+
+export function commitPortify(workflowId: string, opts?: ClientOptions): Promise<PortifyManifest> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<PortifyManifest>(
+    `${baseUrl}/api/portify/${encodeURIComponent(workflowId)}/commit`,
+    { method: 'POST' },
+    fetchImpl,
+  )
+}
+
+export function cancelPortify(workflowId: string, opts?: ClientOptions): Promise<PortifyManifest> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<PortifyManifest>(
+    `${baseUrl}/api/portify/${encodeURIComponent(workflowId)}/cancel`,
+    { method: 'POST' },
+    fetchImpl,
+  )
+}
+
+export async function getPortifyAgentSession(
+  workflowId: string,
+  opts?: ClientOptions,
+): Promise<AgentSessionResponse | null> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  try {
+    return await request<AgentSessionResponse>(
+      `${baseUrl}/api/portify/${encodeURIComponent(workflowId)}/agent-session`,
       { method: 'GET' },
       fetchImpl,
     )

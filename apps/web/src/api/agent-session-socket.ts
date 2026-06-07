@@ -10,6 +10,7 @@ export type AgentSessionSocketSource =
   | { kind: 'run'; runId: string }
   | { kind: 'draft'; draftId: string; stage: 'planning' | 'generating' }
   | { kind: 'benchmark'; benchmarkId: string }
+  | { kind: 'portify'; workflowId: string }
 
 export interface AgentSessionSocketMessage {
   type: 'session' | 'event' | 'error' | 'done'
@@ -46,6 +47,9 @@ function urlFor(base: string, source: AgentSessionSocketSource): string {
   }
   if (source.kind === 'benchmark') {
     return `${base}/ws/benchmarks/${encodeURIComponent(source.benchmarkId)}/agent-session`
+  }
+  if (source.kind === 'portify') {
+    return `${base}/ws/portify/${encodeURIComponent(source.workflowId)}/agent-session`
   }
   return `${base}/ws/draft/${encodeURIComponent(source.draftId)}/agent-session?stage=${encodeURIComponent(source.stage)}`
 }

@@ -13,6 +13,7 @@ import { resolveDraftStageSessionRef } from '../lib/draft-agent-session'
 import { readDraft, paths as draftPaths } from '../lib/draft-store'
 import { runDirFor, buildRunPaths } from '../lib/runtime/run-paths'
 import { benchmarkDir } from '../lib/runtime/benchmark/paths'
+import { portifyDir } from '../lib/runtime/portify/paths'
 import type { RunStore } from '../lib/run-store'
 
 // WebSocket route that streams live structured agent-session events.
@@ -122,8 +123,29 @@ export async function agentSessionStreamRoutes(
       socket.on('close', () => handle.close())
     },
   )
+
+  // Port-ification agent session — same ref-file convention as the benchmark,
+  // under the portify workflow dir.
+  app.get<{ Params: { workflowId: string } }>(
+    '/ws/portify/:workflowId/agent-session',
+    { websocket: true },
+    (socket, req) => {
+      const dir = portifyDir(deps.logsDir, req.params.workflowId)
+      const ref = resolveBenchmarkRef(dir)
+      const handle = tailAgentSession({
+        ref: ref ?? { agent: 'claude', sessionId: '', logPath: '' },
+        onReady: (readyRef) => sendJson(socket, { type: 'session', agent: readyRef.agent, sessionId: readyRef.sessionId }),
+        onEvent: (event) => sendJson(socket, { type: 'event', event }),
+        onError: (err) => sendJson(socket, { type: 'error', error: err.message }),
+        discoverRef: () => resolveBenchmarkRef(dir),
+      })
+      socket.on('close', () => handle.close())
+    },
+  )
 }
 
+// Resolve the agent-session ref written into a workflow dir (benchmark or
+// portify) — both use the same `<dir>/agent-session.json` convention.
 function resolveBenchmarkRef(benchDir: string): AgentSessionRef | null {
   let raw: string | null = null
   try { raw = fs.readFileSync(path.join(benchDir, 'agent-session.json'), 'utf-8') } catch { return null }

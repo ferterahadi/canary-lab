@@ -11,7 +11,7 @@ import { dirSizeBytes } from '../run-store'
 // removal must go through `git worktree remove` (see removeWorktree), never a
 // plain rmdir — otherwise the source repo accumulates stale registrations.
 
-export type WorktreeOwnerKind = 'run' | 'benchmark' | 'unknown'
+export type WorktreeOwnerKind = 'run' | 'benchmark' | 'portify' | 'unknown'
 
 export interface WorktreeEntry {
   /** Worktree root (absolute). */
@@ -92,6 +92,11 @@ export function classifyWorktreePath(logsDir: string, worktreePath: string): {
   if (seg[0] === 'benchmarks' && seg[1]) {
     const slot = seg[2] === 'worktrees' ? (seg[3] ?? null) : null
     return { ownerKind: 'benchmark', ownerId: seg[1], slot }
+  }
+  // <logsDir>/portify/<workflowId>/worktrees/<repo>
+  if (seg[0] === 'portify' && seg[1]) {
+    const slot = seg[2] === 'worktrees' ? (seg[3] ?? null) : null
+    return { ownerKind: 'portify', ownerId: seg[1], slot }
   }
   return { ownerKind: 'unknown', ownerId: null, slot: null }
 }
