@@ -1,5 +1,4 @@
-import { runGit } from '../../git-repo'
-import { snapshotWorkingTree, diffContentSinceSnapshot } from '../../git-repo'
+import { runGit, diffContentSinceSnapshot } from '../../git-repo'
 import { addWorktree, removeWorktree, linkNodeModules, type WorktreeHandle } from '../repo-worktree'
 
 // Branch + worktree + diff + commit/discard mechanics for the port-ification
@@ -39,11 +38,12 @@ export async function createBranchAndWorktree(opts: {
   const co = await runGit(handle.worktreeRoot, ['checkout', '-B', opts.branch])
   if (co.code !== 0) {
     await removeWorktree(handle) // best-effort; removeWorktree never rejects
-    throw new Error(`failed to create branch ${opts.branch}: ${(co.stderr || co.stdout).trim()}`)
+    throw new Error(`failed to create branch ${opts.branch}: ${`${co.stderr}${co.stdout}`.trim()}`)
   }
   linkNodeModules(handle)
-  const snapshotRef = (await snapshotWorkingTree(handle.worktreeRoot)) ?? 'HEAD'
-  return { handle, branch: opts.branch, baseSha, snapshotRef }
+  // The worktree was just created at HEAD and is clean, so HEAD is the diff
+  // baseline for the agent's (uncommitted) edits.
+  return { handle, branch: opts.branch, baseSha, snapshotRef: 'HEAD' }
 }
 
 /** Full unified diff of the agent's edits, scoped to the worktree. */
@@ -80,7 +80,7 @@ export async function commitWorktree(worktreeRoot: string, message: string): Pro
     'commit', '-m', message, '--no-verify',
   ])
   if (commit.code !== 0) {
-    throw new Error(`commit failed: ${(commit.stderr || commit.stdout).trim()}`)
+    throw new Error(`commit failed: ${`${commit.stderr}${commit.stdout}`.trim()}`)
   }
   const rev = await runGit(worktreeRoot, ['rev-parse', 'HEAD'])
   return rev.stdout.trim()
