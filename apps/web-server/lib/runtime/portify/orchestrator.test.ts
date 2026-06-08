@@ -28,6 +28,7 @@ function makeDeps(overrides: Partial<PortifyOrchestratorDeps>): {
     now: () => '2026-06-07T00:01:00.000Z',
     setup: async () => [{ name: 'r', path: '~/r', worktreePath: '/wt', baseSha: 'abc' }],
     runAgent: vi.fn(async () => {}),
+    runFeedbackAgent: vi.fn(async () => {}),
     captureDiff: async () => 'diff',
     verify: async (): Promise<PortifyVerification> => ({ ok: true, instances: [] }),
     checkTestsUntouched: async () => ({ ok: true, offending: [] }),
@@ -140,6 +141,72 @@ describe('PortifyOrchestrator', () => {
     expect(m.error).toBe('plain string failure')
   })
 
+  // ── revise: user-driven feedback pass (post ready-to-commit) ─────────────
+  function readyManifest(): PortifyManifest {
+    return { ...baseManifest(), status: 'ready-to-commit', attempt: 1, diff: 'old diff', verification: { ok: true, instances: [] } }
+  }
+
+  describe('revise', () => {
+    it('runs one pass and re-parks at ready-to-commit, incrementing feedbackRounds without touching attempt', async () => {
+      const runFeedbackAgent = vi.fn(async () => {})
+      const { deps, saved } = makeDeps({ runFeedbackAgent })
+      const m = await new PortifyOrchestrator(deps).revise(readyManifest(), 'use PORT not GATEWAY_PORT')
+      expect(runFeedbackAgent).toHaveBeenCalledWith('use PORT not GATEWAY_PORT')
+      expect(m.status).toBe('ready-to-commit')
+      expect(m.feedbackRounds).toBe(1)
+      expect(m.attempt).toBe(1)
+      expect(saved.map((s) => s.status)).toContain('editing')
+      expect(saved.map((s) => s.status)).toContain('verifying')
+      expect(deps.cleanup).not.toHaveBeenCalled()
+    })
+
+    it('re-parks at ready-to-commit with ok:false (never terminal, no cleanup) when the revise breaks the boot', async () => {
+      const { deps } = makeDeps({
+        verify: async () => ({ ok: false, instances: [], failureDetail: 'port 3000 still bound' }),
+      })
+      const m = await new PortifyOrchestrator(deps).revise(readyManifest(), 'tweak')
+      expect(m.status).toBe('ready-to-commit')
+      expect(m.verification?.ok).toBe(false)
+      expect(m.verification?.failureDetail).toContain('3000')
+      expect(deps.cleanup).not.toHaveBeenCalled()
+    })
+
+    it('flags a test-file edit made during a revise round', async () => {
+      const { deps } = makeDeps({
+        checkTestsUntouched: async () => ({ ok: false, offending: ['e2e/api.spec.ts'] }),
+      })
+      const m = await new PortifyOrchestrator(deps).revise(readyManifest(), 'tweak')
+      expect(m.status).toBe('ready-to-commit')
+      expect(m.verification?.ok).toBe(false)
+      expect(m.verification?.failureDetail).toContain('e2e/api.spec.ts')
+    })
+
+    it('re-parks (not failed) with an error when the agent throws mid-revise', async () => {
+      const { deps } = makeDeps({ runFeedbackAgent: vi.fn(async () => { throw new Error('agent died') }) })
+      const m = await new PortifyOrchestrator(deps).revise(readyManifest(), 'tweak')
+      expect(m.status).toBe('ready-to-commit')
+      expect(m.error).toContain('agent died')
+      expect(deps.cleanup).not.toHaveBeenCalled()
+    })
+
+    it('accumulates feedbackRounds across successive revises', async () => {
+      const { deps } = makeDeps({})
+      const orch = new PortifyOrchestrator(deps)
+      const r1 = await orch.revise(readyManifest(), 'a')
+      const r2 = await orch.revise(r1, 'b')
+      expect(r1.feedbackRounds).toBe(1)
+      expect(r2.feedbackRounds).toBe(2)
+    })
+
+    it('returns current untouched (no persist) when already aborted', async () => {
+      const { deps, saved } = makeDeps({ isAborted: () => true })
+      const current = readyManifest()
+      const m = await new PortifyOrchestrator(deps).revise(current, 'x')
+      expect(m).toBe(current)
+      expect(saved).toHaveLength(0)
+    })
+  })
+
   it('runs without optional isAborted / cleanup deps', async () => {
     const saved: PortifyManifest[] = []
     const deps: PortifyOrchestratorDeps = {
@@ -148,6 +215,7 @@ describe('PortifyOrchestrator', () => {
       now: () => 'now',
       setup: async () => [{ name: 'r', path: '~/r' }],
       runAgent: async () => {},
+      runFeedbackAgent: async () => {},
       captureDiff: async () => 'd',
       verify: async () => ({ ok: true, instances: [] }),
       checkTestsUntouched: async () => ({ ok: true, offending: [] }),
