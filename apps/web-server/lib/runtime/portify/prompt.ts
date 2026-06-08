@@ -5,6 +5,7 @@ import type { FeatureConfig } from '../../../../../shared/launcher/types'
 const PROMPTS_DIR = path.join(__dirname, '../../../prompts')
 const PORTIFY_TEMPLATE_PATH = path.join(PROMPTS_DIR, 'portify.md')
 const PORTIFY_RETRY_TEMPLATE_PATH = path.join(PROMPTS_DIR, 'portify-retry.md')
+const PORTIFY_FEEDBACK_TEMPLATE_PATH = path.join(PROMPTS_DIR, 'portify-feedback.md')
 
 export interface RepoEditTarget {
   name: string
@@ -54,5 +55,15 @@ export function buildPortifyRetryPrompt(feature: FeatureConfig, failureDetail: s
   return render(PORTIFY_RETRY_TEMPLATE_PATH, {
     featureConfigPath: featureConfigPath(feature),
     failureDetail,
+  })
+}
+
+// Prompt for a user-driven revise pass: the agent resumes its session (so it
+// keeps full context of its prior edits) and applies the human's feedback,
+// then the stack is re-verified.
+export function buildPortifyFeedbackPrompt(feature: FeatureConfig, feedback: string): string {
+  return render(PORTIFY_FEEDBACK_TEMPLATE_PATH, {
+    featureConfigPath: featureConfigPath(feature),
+    feedback,
   })
 }
