@@ -186,26 +186,37 @@ export function PlanReviewStep({ draft, onAccept, onReject, onRetry, onCancelGen
           {(status === 'plan-ready' || status === 'generating' || status === 'spec-ready' || status === 'accepted') && (
             <div className="space-y-5">
               <div>
-                <div className="mb-2 text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
-                  Intent summary
+                <div className="mb-3 flex items-center justify-between">
+                  <div className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
+                    Intent summary
+                  </div>
+                  <div
+                    className="text-[10.5px]"
+                    style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}
+                  >
+                    Saved to <code>docs/intent.md</code> on accept
+                  </div>
                 </div>
-                <textarea
-                  value={intentDraft}
-                  onChange={(e) => setIntentDraft(e.target.value)}
-                  readOnly={!editable}
-                  rows={6}
-                  placeholder={editable ? 'No intent summary produced — describe what this test is for.' : ''}
-                  className="cl-input min-h-32 w-full resize-y px-3 py-2 text-[11px] leading-5"
-                  style={{
-                    background: editable ? 'var(--bg-surface)' : 'var(--bg-overlay)',
-                  }}
-                  spellCheck={false}
-                />
                 <div
-                  className="mt-1 text-[10.5px]"
-                  style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}
+                  className="p-3"
+                  style={{
+                    border: '1px solid var(--border-default)',
+                    background: 'var(--bg-surface)',
+                    borderRadius: 6,
+                  }}
                 >
-                  Saved to <code>docs/intent.md</code> when you accept the plan.
+                  <textarea
+                    value={intentDraft}
+                    onChange={(e) => setIntentDraft(e.target.value)}
+                    readOnly={!editable}
+                    rows={10}
+                    placeholder={editable ? 'No intent summary produced — describe what this test is for.' : ''}
+                    className="cl-input max-h-[28rem] min-h-56 w-full resize-y overflow-y-auto px-3 py-2 text-[11px] leading-5"
+                    style={{
+                      background: editable ? 'var(--bg-surface)' : 'var(--bg-overlay)',
+                    }}
+                    spellCheck={false}
+                  />
                 </div>
               </div>
               <div>

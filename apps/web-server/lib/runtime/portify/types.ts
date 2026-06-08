@@ -56,6 +56,9 @@ export interface PortifyManifest {
   status: PortifyStatus
   attempt: number
   maxAttempts: number
+  /** User-driven revise passes after the first `ready-to-commit`. Separate from
+   *  `attempt` (the auto-retry budget) — feedback rounds are unbounded. */
+  feedbackRounds: number
   startedAt: string
   endedAt?: string
   /** Unified diff of the agent's edits (config + source), for the review screen. */

@@ -32,8 +32,8 @@ describe('buildPortifyPrompt', () => {
 
   it('instructs an exhaustive scan covering non-HTTP listeners', () => {
     const prompt = buildPortifyPrompt(feature, [{ name: 'mighty-cns', editPath: '/wt/mighty-cns' }])
-    expect(prompt).toContain('EVERY network listener')
-    for (const kind of ['gRPC', 'WebSocket', 'TCP', 'RabbitMQ/AMQP', 'Kafka']) {
+    expect(prompt).toContain('Scan EXHAUSTIVELY')
+    for (const kind of ['gRPC', 'WebSocket', 'TCP', 'RabbitMQ', 'Kafka']) {
       expect(prompt).toContain(kind)
     }
   })
