@@ -18,6 +18,8 @@ interface Props {
   activeRunExecutionType?: ExecutionType | null
   onSelectFeature: (name: string) => void
   onFeaturesChanged?: (preferredFeature?: string | null) => void
+  /** Opens the port-ification wizard for a feature (Service tab entry). */
+  onStartPortify?: (feature: string) => void
 }
 
 export function FeaturesColumn({
@@ -28,6 +30,7 @@ export function FeaturesColumn({
   activeRunExecutionType,
   onSelectFeature,
   onFeaturesChanged,
+  onStartPortify,
 }: Props) {
   const { startNewWizard } = useWizardDrafts()
   const { gatePromo } = useMcpPromo()
@@ -123,6 +126,7 @@ export function FeaturesColumn({
       {configFor && (
         <FeatureConfigEditor
           feature={configFor}
+          onStartPortify={onStartPortify}
           onClose={() => setConfigFor(null)}
           onRenamed={(_, nextFeature) => {
             setConfigFor(nextFeature)

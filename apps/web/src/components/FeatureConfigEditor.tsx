@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react'
 import { GeneralTab } from './config/GeneralTab'
 import { ReposTab } from './config/ReposTab'
+import { PortsTab } from './config/PortsTab'
 import { EnvsetsTab } from './config/EnvsetsTab'
 import { PlaywrightTab } from './config/PlaywrightTab'
 import { CloseIcon, ConfirmModal, TrashIcon } from './config/atoms'
 import * as api from '../api/client'
 
-type Tab = 'general' | 'repos' | 'envsets' | 'playwright'
+type Tab = 'general' | 'repos' | 'ports' | 'envsets' | 'playwright'
 
 interface Props {
   feature: string
@@ -99,13 +100,15 @@ export function FeatureConfigEditor({ feature, onClose, onDeleted, onRenamed, in
         >
           <TabButton active={tab === 'general'} onClick={() => setTab('general')}>General</TabButton>
           <TabButton active={tab === 'repos'} onClick={() => setTab('repos')}>Service</TabButton>
+          <TabButton active={tab === 'ports'} onClick={() => setTab('ports')}>Ports</TabButton>
           <TabButton active={tab === 'envsets'} onClick={() => setTab('envsets')}>Envsets</TabButton>
           <TabButton active={tab === 'playwright'} onClick={() => setTab('playwright')}>Playwright</TabButton>
         </nav>
 
         <div className="flex-1 min-h-0">
           {tab === 'general' && <GeneralTab feature={feature} onFeatureRenamed={(nextFeature) => onRenamed?.(feature, nextFeature)} />}
-          {tab === 'repos' && <ReposTab feature={feature} onStartPortify={onStartPortify} />}
+          {tab === 'repos' && <ReposTab feature={feature} />}
+          {tab === 'ports' && <PortsTab feature={feature} onStartPortify={onStartPortify} />}
           {tab === 'envsets' && <EnvsetsTab feature={feature} />}
           {tab === 'playwright' && <PlaywrightTab feature={feature} />}
         </div>
