@@ -3,6 +3,7 @@ import type { DraftRecord } from '../api/types'
 import { slugifyFeatureName } from '../lib/wizard-validation'
 import { isActiveWizardTask, useWizardDrafts } from '../state/WizardDraftContext'
 import { CloseIcon, StatusDot, type StatusDotState } from './config/atoms'
+import { StatusPill } from './StatusPill'
 
 function dotStateForDraft(status: DraftRecord['status']): StatusDotState {
   if (status === 'plan-ready' || status === 'spec-ready' || status === 'accepted') return 'success'
@@ -48,26 +49,14 @@ export function WizardTaskStatus() {
 
   return (
     <>
-      <div className="flex min-w-0 shrink-0 items-center">
-        <button
-          type="button"
-          onClick={() => setDialogOpen(true)}
-          className="cl-button flex min-w-0 max-w-[260px] items-center gap-2 px-2 py-0.5 text-[11px]"
-          style={{ color: 'var(--text-secondary)' }}
-          title={`${statusLabel(latestTask)}: ${taskTitle(latestTask)}`}
-        >
-          <StatusDot state={dotStateForDraft(latestTask.status)} />
-          <span className="shrink-0 font-medium" style={{ color: 'var(--text-primary)' }}>
-            Wizards
-          </span>
-          <span className="hidden min-w-0 truncate xl:inline" style={{ color: 'var(--text-muted)' }}>
-            {compactStatusLabel(latestTask)}
-          </span>
-          <span className="shrink-0 rounded px-1.5 py-0.5 text-[10px]" style={{ background: 'var(--bg-selected)', color: 'var(--text-muted)' }}>
-            {drafts.length}
-          </span>
-        </button>
-      </div>
+      <StatusPill
+        dotState={dotStateForDraft(latestTask.status)}
+        name="Wizards"
+        detail={compactStatusLabel(latestTask)}
+        count={drafts.length}
+        onClick={() => setDialogOpen(true)}
+        title={`${statusLabel(latestTask)}: ${taskTitle(latestTask)}`}
+      />
       {dialogOpen && (
         <WizardTaskDialog
           tasks={drafts}
