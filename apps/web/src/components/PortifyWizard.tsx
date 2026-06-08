@@ -57,6 +57,9 @@ export function PortifyWizard({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [confirmLeave, setConfirmLeave] = useState(false)
+  // Bumped after a revise pass to restart the poller (status flips back to
+  // editing, so polling — stopped at ready-to-commit — must resume).
+  const [pollNonce, setPollNonce] = useState(0)
   const pollRef = useRef<number | null>(null)
 
   const stopPolling = useCallback(() => {
@@ -76,7 +79,7 @@ export function PortifyWizard({
     void tick()
     pollRef.current = window.setInterval(tick, 1500)
     return stopPolling
-  }, [workflowId, stopPolling])
+  }, [workflowId, pollNonce, stopPolling])
 
   const start = async () => {
     if (!feature) return
@@ -99,6 +102,23 @@ export function PortifyWizard({
       onCommitted()
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
+      setBusy(false)
+    }
+  }
+
+  // Send review feedback: the agent resumes its session, the workflow flips
+  // back to editing, and the poller (restarted via pollNonce) takes it through
+  // verifying → ready-to-commit again.
+  const revise = async (feedback: string) => {
+    if (!workflowId) return
+    setBusy(true); setError(null)
+    try {
+      const next = await api.revisePortify(workflowId, feedback)
+      setM(next)
+      setPollNonce((n) => n + 1)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
       setBusy(false)
     }
   }
@@ -168,7 +188,7 @@ export function PortifyWizard({
             <ExerciseScreen m={m} />
           )}
           {workflowId && m && status === 'ready-to-commit' && (
-            <ReviewScreen m={m} busy={busy} onCommit={commit} onCancel={() => setConfirmLeave(true)} />
+            <ReviewScreen m={m} busy={busy} onCommit={commit} onRevise={revise} onCancel={() => setConfirmLeave(true)} />
           )}
           {workflowId && m && status === 'committed' && <CommittedScreen m={m} onDone={onCommitted} />}
           {workflowId && m && (status === 'failed' || status === 'aborted') && (
@@ -295,19 +315,97 @@ function VerificationBadge({ m }: { m: PortifyManifest }) {
   )
 }
 
-function ReviewScreen({ m, busy, onCommit, onCancel }: { m: PortifyManifest; busy: boolean; onCommit: () => void; onCancel: () => void }) {
+function ReviewScreen({ m, busy, onCommit, onRevise, onCancel }: { m: PortifyManifest; busy: boolean; onCommit: () => void; onRevise: (feedback: string) => void; onCancel: () => void }) {
+  const rounds = m.feedbackRounds ?? 0
+  // At ready-to-commit verification is always set; a prior revise round may have
+  // left it failed — in that case the diff isn't proven and can't be committed.
+  const proven = m.verification?.ok === true
   return (
     <div>
-      <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 12 }}>Review &amp; commit</div>
-      <VerificationBadge m={m} />
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 12 }}>
+        <div style={{ fontSize: 16, fontWeight: 600 }}>Review &amp; commit</div>
+        {rounds > 0 && (
+          <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' }}>
+            revision {rounds}
+          </span>
+        )}
+      </div>
+      {proven ? <VerificationBadge m={m} /> : <RevisionFailedBanner m={m} />}
       <DiffView diff={m.diff ?? ''} />
+      <FeedbackBox busy={busy} proven={proven} onRevise={onRevise} />
       <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 16 }}>
-        <button type="button" className="cl-button-primary" disabled={busy} onClick={onCommit} style={{ padding: '9px 16px' }}>
-          {busy ? 'Committing…' : 'Commit'}
+        <button
+          type="button"
+          className="cl-button-primary"
+          disabled={busy || !proven}
+          onClick={onCommit}
+          title={proven ? undefined : 'The latest changes did not pass verification — send feedback to fix them first'}
+          style={{ padding: '9px 16px', opacity: proven ? 1 : 0.5, cursor: proven && !busy ? 'pointer' : 'not-allowed' }}
+        >
+          {busy ? 'Working…' : 'Commit'}
         </button>
         <button type="button" onClick={onCancel} style={ghostBtn}>Cancel</button>
         <span style={{ fontSize: 11.5, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
           feat: make {m.feature} ports injectable · branch {m.branch}
+        </span>
+      </div>
+    </div>
+  )
+}
+
+// Amber warning shown on the review screen when the most recent revise pass
+// broke the double-boot (or touched tests) — mirrors the retry banner styling.
+function RevisionFailedBanner({ m }: { m: PortifyManifest }) {
+  return (
+    <div style={{ fontSize: 11.5, fontFamily: 'var(--font-mono)', color: 'rgb(251,191,36)', background: 'rgba(251,191,36,0.08)', border: '1px solid rgba(251,191,36,0.3)', borderRadius: 'var(--radius-md)', padding: '10px 12px', marginBottom: 14, whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>
+      ⚠ Your last change didn’t pass the double-boot — fix it with more feedback before committing.
+      {m.verification?.failureDetail ? `\n\n${m.verification.failureDetail}` : ''}
+      {m.error ? `\n\n${m.error}` : ''}
+    </div>
+  )
+}
+
+// Resume the agent with review feedback. Cmd/Ctrl+Enter submits.
+function FeedbackBox({ busy, proven, onRevise }: { busy: boolean; proven: boolean; onRevise: (feedback: string) => void }) {
+  const [text, setText] = useState('')
+  const trimmed = text.trim()
+  const send = () => { if (trimmed && !busy) { onRevise(trimmed); setText('') } }
+  return (
+    <div style={{ marginTop: 18, border: '1px solid var(--border-default)', borderLeft: '2px solid var(--accent)', borderRadius: 'var(--radius-lg)', background: 'var(--bg-surface)', padding: '14px 16px' }}>
+      <div style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '.4px', color: 'var(--text-muted)', fontWeight: 600, marginBottom: 8 }}>
+        Ask for changes
+      </div>
+      <textarea
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); send() } }}
+        placeholder={'e.g. “use PORT instead of GATEWAY_PORT”, or “also expose the bull-dashboard slot”'}
+        rows={3}
+        disabled={busy}
+        style={{
+          width: '100%', resize: 'vertical', boxSizing: 'border-box',
+          fontSize: 13, lineHeight: 1.55, fontFamily: 'var(--font-sans)', color: 'var(--text-primary)',
+          background: 'var(--bg-base)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)',
+          padding: '9px 11px', outline: 'none',
+        }}
+      />
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 10 }}>
+        <button
+          type="button"
+          onClick={send}
+          disabled={busy || !trimmed}
+          style={{
+            padding: '7px 14px', fontSize: 12.5, fontWeight: 600, borderRadius: 'var(--radius-md)', cursor: busy || !trimmed ? 'not-allowed' : 'pointer',
+            background: 'transparent', border: '1px solid var(--accent)', color: 'var(--accent)', opacity: busy || !trimmed ? 0.45 : 1,
+          }}
+        >
+          {busy ? 'Resuming agent…' : 'Send feedback ▶'}
+        </button>
+        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+          {proven
+            ? 'The agent resumes where it left off, re-edits, and re-runs the double-boot.'
+            : 'Describe what to fix — the agent resumes and re-verifies.'}
+          <span style={{ fontFamily: 'var(--font-mono)', marginLeft: 6, opacity: 0.8 }}>⌘↵</span>
         </span>
       </div>
     </div>

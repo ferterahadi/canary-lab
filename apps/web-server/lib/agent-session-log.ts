@@ -45,6 +45,16 @@ export type AgentEvent =
   | { kind: 'tool-call'; timestamp: string; toolId: string; name: string; input: unknown }
   | { kind: 'tool-result'; timestamp: string; toolId: string; output: string; isError?: boolean }
 
+// Session-level metadata that doesn't map to a timeline event: which model the
+// agent ran and (codex only) its reasoning effort. Both agents record this in
+// their JSONL but in different lines — codex in a `turn_context` record,
+// claude in each assistant message's `message.model`. Claude has no notion of
+// reasoning effort, so `effort` stays undefined for it.
+export interface AgentSessionMeta {
+  model?: string
+  effort?: string
+}
+
 export function parseAgentSessionRefFile(raw: string): AgentSessionRefFile | null {
   let parsed: unknown
   try { parsed = JSON.parse(raw) } catch { return null }
@@ -354,14 +364,58 @@ function safeMtimeMs(p: string): number {
 
 // ─── Reader / normalizer ───────────────────────────────────────────────────
 
-export function loadAgentSessionLog(ref: AgentSessionRef): AgentEvent[] {
+// Read + normalize a session log in a single pass, returning both the timeline
+// events and the session-level metadata (model/effort). Prefer this over
+// calling `loadAgentSessionLog` + `loadAgentSessionMeta` separately so the file
+// is only read and parsed once.
+export function loadAgentSession(ref: AgentSessionRef): { events: AgentEvent[]; meta: AgentSessionMeta } {
   let raw: string
-  try { raw = fs.readFileSync(ref.logPath, 'utf-8') } catch { return [] }
+  try { raw = fs.readFileSync(ref.logPath, 'utf-8') } catch { return { events: [], meta: {} } }
   const events: AgentEvent[] = []
+  const meta: AgentSessionMeta = {}
   for (const line of raw.split('\n')) {
     for (const ev of parseAgentSessionLine(ref.agent, line)) events.push(ev)
+    applyAgentSessionMetaLine(ref.agent, line, meta)
   }
-  return events
+  return { events, meta }
+}
+
+export function loadAgentSessionLog(ref: AgentSessionRef): AgentEvent[] {
+  return loadAgentSession(ref).events
+}
+
+// Extract just the session metadata. Used by the live WS handshake, which only
+// needs model/effort and not the full event list.
+export function loadAgentSessionMeta(ref: AgentSessionRef): AgentSessionMeta {
+  let raw: string
+  try { raw = fs.readFileSync(ref.logPath, 'utf-8') } catch { return {} }
+  const meta: AgentSessionMeta = {}
+  for (const line of raw.split('\n')) applyAgentSessionMetaLine(ref.agent, line, meta)
+  return meta
+}
+
+// Fold a single JSONL line into the accumulating session metadata. Last write
+// wins, so the returned model/effort reflect the most recent record — a session
+// that switches model mid-run shows where it ended up.
+//   - codex: `{ type: 'turn_context', payload: { model, effort, summary } }`
+//   - claude: `{ type: 'assistant', message: { model } }` (no effort concept)
+function applyAgentSessionMetaLine(agent: AgentKind, line: string, meta: AgentSessionMeta): void {
+  if (!line.trim()) return
+  let parsed: unknown
+  try { parsed = JSON.parse(line) } catch { return }
+  if (!parsed || typeof parsed !== 'object') return
+  if (agent === 'codex') {
+    const l = parsed as { type?: unknown; payload?: { model?: unknown; effort?: unknown } }
+    if (l.type === 'turn_context' && l.payload && typeof l.payload === 'object') {
+      if (typeof l.payload.model === 'string' && l.payload.model) meta.model = l.payload.model
+      if (typeof l.payload.effort === 'string' && l.payload.effort) meta.effort = l.payload.effort
+    }
+    return
+  }
+  const l = parsed as { type?: unknown; message?: { model?: unknown } }
+  if (l.type === 'assistant' && l.message && typeof l.message === 'object' && typeof l.message.model === 'string' && l.message.model) {
+    meta.model = l.message.model
+  }
 }
 
 // Parse a single JSONL line into 0..N normalized events. Shared by the batch

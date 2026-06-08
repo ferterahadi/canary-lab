@@ -12,13 +12,18 @@ export interface PortifyRouteDeps {
   startPortify(input: StartPortifyInput): Promise<StartPortifyResult>
   commitPortify(workflowId: string): Promise<PortifyManifest>
   cancelPortify(workflowId: string): Promise<PortifyManifest>
-  loadAgentSession(workflowId: string): { agent: string; sessionId: string; events: unknown[] } | null
+  revisePortify(workflowId: string, feedback: string): Promise<PortifyManifest>
+  loadAgentSession(workflowId: string): { agent: string; sessionId: string; model?: string; effort?: string; events: unknown[] } | null
 }
 
 interface StartBody {
   feature?: string
   agent?: string
   maxAttempts?: number
+}
+
+interface ReviseBody {
+  feedback?: string
 }
 
 export async function portifyRoutes(app: FastifyInstance, deps: PortifyRouteDeps): Promise<void> {
@@ -72,6 +77,22 @@ export async function portifyRoutes(app: FastifyInstance, deps: PortifyRouteDeps
   app.post<{ Params: { workflowId: string } }>('/api/portify/:workflowId/cancel', async (req, reply) => {
     try {
       return await deps.cancelPortify(req.params.workflowId)
+    } catch (err) {
+      reply.code((err as { statusCode?: number }).statusCode ?? 500)
+      return { error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
+  // Resume the agent with the reviewer's feedback (revise pass). The workflow
+  // cycles back through editing → verifying → ready-to-commit; the wizard polls.
+  app.post<{ Params: { workflowId: string }; Body: ReviseBody }>('/api/portify/:workflowId/revise', async (req, reply) => {
+    const feedback = typeof req.body?.feedback === 'string' ? req.body.feedback.trim() : ''
+    if (!feedback) {
+      reply.code(400)
+      return { error: 'feedback is required' }
+    }
+    try {
+      return await deps.revisePortify(req.params.workflowId, feedback)
     } catch (err) {
       reply.code((err as { statusCode?: number }).statusCode ?? 500)
       return { error: err instanceof Error ? err.message : String(err) }

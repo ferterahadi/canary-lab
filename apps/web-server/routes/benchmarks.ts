@@ -41,7 +41,7 @@ export interface BenchmarkRouteDeps {
   readSabotageLog(benchmarkId: string): string
   /** The sabotage agent's structured session (parsed native log) for the shared
    *  AgentSessionView timeline. Null when no session is locatable yet. */
-  loadAgentSession(benchmarkId: string): { agent: string; sessionId: string; events: unknown[] } | null
+  loadAgentSession(benchmarkId: string): { agent: string; sessionId: string; model?: string; effort?: string; events: unknown[] } | null
 }
 
 interface StartBody {

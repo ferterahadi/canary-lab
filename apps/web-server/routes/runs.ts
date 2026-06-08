@@ -28,7 +28,7 @@ import {
   type EvaluationExportTaskRecord,
 } from '../lib/evaluation-export-store'
 import {
-  loadAgentSessionLog,
+  loadAgentSession,
   locateMostRecentAgentSessionRef,
   parseAgentSessionRefFile,
   selectAgentSessionRef,
@@ -157,8 +157,8 @@ export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Pro
       reply.code(404)
       return { reason: 'session-log-missing' }
     }
-    const events = loadAgentSessionLog(ref)
-    return { agent: ref.agent, sessionId: ref.sessionId, events }
+    const { events, meta } = loadAgentSession(ref)
+    return { agent: ref.agent, sessionId: ref.sessionId, model: meta.model, effort: meta.effort, events }
   })
 
   const buildEvaluationZip = async (

@@ -35,7 +35,7 @@ import { portifyDir } from './lib/runtime/portify/paths'
 import {
   parseAgentSessionRefFile,
   selectAgentSessionRef,
-  loadAgentSessionLog,
+  loadAgentSession,
   findClaudeLogBySessionId,
 } from './lib/agent-session-log'
 import { WorkspaceEventBus } from './lib/workspace-events'
@@ -1149,7 +1149,8 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
           ? ref.logPath
           : (ref.agent === 'claude' ? findClaudeLogBySessionId(ref.sessionId) : null)
         if (!logPath) return null
-        return { agent: ref.agent, sessionId: ref.sessionId, events: loadAgentSessionLog({ ...ref, logPath }) }
+        const { events, meta } = loadAgentSession({ ...ref, logPath })
+        return { agent: ref.agent, sessionId: ref.sessionId, model: meta.model, effort: meta.effort, events }
       } catch {
         return null
       }
@@ -1175,6 +1176,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
     startPortify: portifyRunner.startPortify,
     commitPortify: portifyRunner.commit,
     cancelPortify: portifyRunner.cancel,
+    revisePortify: portifyRunner.revise,
     loadAgentSession: (id) => {
       try {
         const raw = fs.readFileSync(path.join(portifyDir(logsDir, id), 'agent-session.json'), 'utf-8')
@@ -1185,7 +1187,8 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
           ? ref.logPath
           : (ref.agent === 'claude' ? findClaudeLogBySessionId(ref.sessionId) : null)
         if (!logPath) return null
-        return { agent: ref.agent, sessionId: ref.sessionId, events: loadAgentSessionLog({ ...ref, logPath }) }
+        const { events, meta } = loadAgentSession({ ...ref, logPath })
+        return { agent: ref.agent, sessionId: ref.sessionId, model: meta.model, effort: meta.effort, events }
       } catch {
         return null
       }
@@ -1288,6 +1291,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
     getPortify: (workflowId) => portifyStore.get(workflowId),
     commitPortify: (workflowId) => portifyRunner.commit(workflowId),
     cancelPortify: (workflowId) => portifyRunner.cancel(workflowId),
+    revisePortify: (workflowId, feedback) => portifyRunner.revise(workflowId, feedback),
 	  })
 
   // Serve the built React frontend if it exists. In development the dist dir
