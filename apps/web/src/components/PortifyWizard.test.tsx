@@ -74,6 +74,18 @@ describe('PortifyWizard', () => {
     expect(container.textContent).toContain('app.listen(process.env.PORT)')
   })
 
+  it('revisit mode (workflowId) skips the plan screen and monitors the existing workflow', async () => {
+    vi.mocked(api.getPortify).mockResolvedValue(manifest('verifying'))
+    await act(async () => {
+      root.render(<PortifyWizard workflowId="w" onClose={vi.fn()} onCommitted={vi.fn()} />)
+    })
+    await flush()
+    expect(api.startPortify).not.toHaveBeenCalled()
+    expect(api.getPortify).toHaveBeenCalledWith('w')
+    expect(container.textContent).not.toContain('What will happen')
+    expect(container.textContent).toContain('Running the exercise')
+  })
+
   it('commits from the review screen and fires onCommitted', async () => {
     vi.mocked(api.startPortify).mockResolvedValue({ workflowId: 'w' })
     vi.mocked(api.getPortify).mockResolvedValue(readyManifest())

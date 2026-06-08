@@ -29,11 +29,17 @@ function reposSummary(feature: FeatureConfig, targets: RepoEditTarget[]): string
     .join('\n')
 }
 
-function render(templatePath: string, vars: Record<string, string>): string {
-  const template = fs.readFileSync(templatePath, 'utf-8')
+// Substitute `{{key}}` placeholders. An unknown placeholder (no matching var)
+// is left intact so an out-of-sync template degrades visibly rather than
+// silently dropping text. Exported for direct unit testing.
+export function applyTemplate(template: string, vars: Record<string, string>): string {
   return template.replace(/\{\{(\w+)\}\}/g, (match, key: string) =>
     Object.prototype.hasOwnProperty.call(vars, key) ? vars[key] : match,
   )
+}
+
+function render(templatePath: string, vars: Record<string, string>): string {
+  return applyTemplate(fs.readFileSync(templatePath, 'utf-8'), vars)
 }
 
 export function buildPortifyPrompt(feature: FeatureConfig, targets: RepoEditTarget[]): string {

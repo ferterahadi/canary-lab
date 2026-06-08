@@ -14,9 +14,11 @@ interface Props {
   onDeleted?: (feature: string) => void
   onRenamed?: (oldFeature: string, nextFeature: string) => void
   initialTab?: Tab
+  /** Launch the port-ification wizard for this feature (from the Service tab). */
+  onStartPortify?: (feature: string) => void
 }
 
-export function FeatureConfigEditor({ feature, onClose, onDeleted, onRenamed, initialTab = 'general' }: Props) {
+export function FeatureConfigEditor({ feature, onClose, onDeleted, onRenamed, initialTab = 'general', onStartPortify }: Props) {
   const [tab, setTab] = useState<Tab>(initialTab)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [confirmName, setConfirmName] = useState('')
@@ -103,7 +105,7 @@ export function FeatureConfigEditor({ feature, onClose, onDeleted, onRenamed, in
 
         <div className="flex-1 min-h-0">
           {tab === 'general' && <GeneralTab feature={feature} onFeatureRenamed={(nextFeature) => onRenamed?.(feature, nextFeature)} />}
-          {tab === 'repos' && <ReposTab feature={feature} />}
+          {tab === 'repos' && <ReposTab feature={feature} onStartPortify={onStartPortify} />}
           {tab === 'envsets' && <EnvsetsTab feature={feature} />}
           {tab === 'playwright' && <PlaywrightTab feature={feature} />}
         </div>

@@ -39,17 +39,20 @@ const STATUS_LABEL: Record<PortifyStatus, string> = {
 
 export function PortifyWizard({
   feature,
-  agent,
+  agent = 'claude',
+  workflowId: initialWorkflowId,
   onClose,
   onCommitted,
 }: {
-  feature: string
-  agent: 'claude' | 'codex'
+  /** New mode: the feature to port-ify (Plan screen → Start). */
+  feature?: string
+  agent?: 'claude' | 'codex'
+  /** Revisit mode: reopen an in-flight workflow by id (skip the Plan screen). */
+  workflowId?: string
   onClose: () => void
   onCommitted: () => void
 }) {
-  const [phase, setPhase] = useState<'plan'>('plan')
-  const [workflowId, setWorkflowId] = useState<string | null>(null)
+  const [workflowId, setWorkflowId] = useState<string | null>(initialWorkflowId ?? null)
   const [m, setM] = useState<PortifyManifest | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -76,6 +79,7 @@ export function PortifyWizard({
   }, [workflowId, stopPolling])
 
   const start = async () => {
+    if (!feature) return
     setBusy(true); setError(null)
     try {
       const { workflowId: id } = await api.startPortify({ feature, agent })
@@ -109,13 +113,13 @@ export function PortifyWizard({
   }
 
   const status = m?.status
-  const stepIdx = stepIndexFor(workflowId ? (status ?? 'planning') : phase)
+  const stepIdx = stepIndexFor(workflowId ? (status ?? 'planning') : 'plan')
 
   return (
     <div className="fixed inset-0 z-[80] flex flex-col" style={{ background: 'var(--bg-base)' }}>
       <header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 20px', borderBottom: '1px solid var(--border-default)' }}>
         <div style={{ fontWeight: 600, fontSize: 15 }}>
-          Make ports injectable <span style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontSize: 13, marginLeft: 8 }}>{feature}</span>
+          Make ports injectable <span style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontSize: 13, marginLeft: 8 }}>{m?.feature ?? feature ?? ''}</span>
         </div>
         <button type="button" onClick={() => setConfirmLeave(true)} style={{ background: 'transparent', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)', color: 'var(--text-secondary)', fontSize: 12, padding: '6px 12px', cursor: 'pointer' }}>
           Close ✕
@@ -126,7 +130,10 @@ export function PortifyWizard({
 
       <div style={{ flex: 1, overflow: 'auto', padding: '20px 22px 60px', display: 'flex', justifyContent: 'center', alignItems: 'flex-start' }}>
         <div style={{ width: 'min(820px, 100%)' }}>
-          {!workflowId && <PlanScreen feature={feature} agent={agent} busy={busy} onStart={start} />}
+          {!workflowId && feature && <PlanScreen feature={feature} agent={agent} busy={busy} onStart={start} />}
+          {workflowId && !m && (
+            <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>Loading…</div>
+          )}
           {workflowId && m && (status === 'planning' || status === 'editing' || status === 'verifying') && (
             <ExerciseScreen m={m} />
           )}

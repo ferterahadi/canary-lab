@@ -69,6 +69,7 @@ import {
   deriveRunActionAvailability,
 } from '../../../shared/run-state'
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../lib/workspace-events'
+import type { PortifyManifest } from '../lib/runtime/portify/types'
 
 // Every Canary Lab MCP tool is a thin wrapper around an existing internal
 // helper or REST handler. The translation pattern: validate input via zod,
@@ -163,6 +164,13 @@ export interface CanaryLabMcpDeps {
     sessionId: string | undefined,
     guidance: string | undefined,
   ) => Promise<{ statusCode: number; body: unknown }>
+  /** Port-ification workflow (make a feature's apps use injectable ports).
+   *  These reuse the in-process portify runner + store behind routes/portify.ts;
+   *  the start/commit/cancel calls throw with a `statusCode` the tools surface. */
+  startPortify?: (feature: string, agent?: 'claude' | 'codex', maxAttempts?: number) => Promise<{ workflowId: string }>
+  getPortify?: (workflowId: string) => PortifyManifest | null
+  commitPortify?: (workflowId: string) => Promise<PortifyManifest>
+  cancelPortify?: (workflowId: string) => Promise<PortifyManifest>
   workspaceEvents?: WorkspaceEventPublisher
 }
 
@@ -217,6 +225,10 @@ export type CanaryLabMcpToolName =
   | 'wait_for_heal_task'
   | 'signal_run'
   | 'handoff_heal'
+  | 'start_portify'
+  | 'get_portify'
+  | 'commit_portify'
+  | 'cancel_portify'
 
 const REPAIR_TOOLS = [
   'list_features',
@@ -271,6 +283,10 @@ const AUTHOR_TOOLS = [
   'start_external_draft',
   'update_external_draft_stage',
   'apply_external_draft',
+  'start_portify',
+  'get_portify',
+  'commit_portify',
+  'cancel_portify',
 ] as const satisfies readonly CanaryLabMcpToolName[]
 
 // Tools that exist only in the `full` profile — everything else is composed
@@ -924,6 +940,71 @@ export function registerCanaryLabTools(
       status: 'applied',
       written: applied.written,
     })
+  })
+
+  // ── Port-ification (make a feature's apps use injectable ports) ──────────
+  registerTool('start_portify', {
+    description: "Start a port-ification workflow: an agent rewrites a feature's apps so every network listener reads an injected port, proven by booting the stack twice concurrently. Async — returns a workflowId; poll get_portify, then commit_portify once it is ready-to-commit. One workflow at a time.",
+    inputSchema: {
+      feature: z.string().describe('Feature name (from list_features).'),
+      agent: z.enum(['claude', 'codex']).optional().describe('Which CLI does the rewrite. Defaults to an available local agent.'),
+      maxAttempts: z.number().int().positive().optional().describe('Edit→verify retries before giving up (default 3).'),
+    },
+  }, async ({ feature, agent, maxAttempts }) => {
+    if (!deps.startPortify) return errorResult('startPortify dependency is not configured')
+    try {
+      const { workflowId } = await deps.startPortify(feature, agent, maxAttempts)
+      return asJsonResult({
+        workflowId,
+        status: 'planning',
+        nextSteps: ['get_portify'],
+        next: `Poll get_portify with workflowId "${workflowId}" until status is "ready-to-commit", then commit_portify (or cancel_portify).`,
+      })
+    } catch (err) {
+      return errorResult(err instanceof Error ? err.message : String(err))
+    }
+  })
+
+  registerTool('get_portify', {
+    description: 'Read a port-ification workflow: status (planning/editing/verifying/ready-to-commit/committed/failed/aborted), attempt count, the diff, and the double-boot verification result.',
+    inputSchema: { workflowId: z.string() },
+  }, async ({ workflowId }) => {
+    if (!deps.getPortify) return errorResult('getPortify dependency is not configured')
+    const manifest = deps.getPortify(workflowId)
+    if (!manifest) return errorResult(`port-ification workflow not found: ${workflowId}`)
+    return asJsonResult(manifest)
+  })
+
+  registerTool('commit_portify', {
+    description: 'Commit a verified port-ification workflow — lands the rewrite on its branch in the product repo(s). Only valid when status is ready-to-commit. Requires confirm: true.',
+    inputSchema: {
+      workflowId: z.string(),
+      confirm: z.literal(true).describe('Must be true. Guards against committing an unreviewed rewrite.'),
+    },
+    annotations: { destructiveHint: true, idempotentHint: false },
+  }, async ({ workflowId }) => {
+    if (!deps.commitPortify) return errorResult('commitPortify dependency is not configured')
+    try {
+      return asJsonResult(await deps.commitPortify(workflowId))
+    } catch (err) {
+      return errorResult(err instanceof Error ? err.message : String(err))
+    }
+  })
+
+  registerTool('cancel_portify', {
+    description: 'Cancel a port-ification workflow — discards its worktree + branch and restores the feature config. Requires confirm: true.',
+    inputSchema: {
+      workflowId: z.string(),
+      confirm: z.literal(true).describe('Must be true. Guards against discarding in-flight work.'),
+    },
+    annotations: { destructiveHint: true, idempotentHint: false },
+  }, async ({ workflowId }) => {
+    if (!deps.cancelPortify) return errorResult('cancelPortify dependency is not configured')
+    try {
+      return asJsonResult(await deps.cancelPortify(workflowId))
+    } catch (err) {
+      return errorResult(err instanceof Error ? err.message : String(err))
+    }
   })
 
   registerTool('get_heal_context', {

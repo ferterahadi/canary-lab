@@ -258,7 +258,7 @@ interface Slice {
   rootEnvs: string[] // top-level envs[] used for the per-env health-check editor
 }
 
-export function ReposTab({ feature }: { feature: string }) {
+export function ReposTab({ feature, onStartPortify }: { feature: string; onStartPortify?: (feature: string) => void }) {
   const { runs } = useRuns()
   const activeRun = runs.some((run) =>
     run.feature === feature && isActiveRunStatus(run.status))
@@ -309,7 +309,21 @@ export function ReposTab({ feature }: { feature: string }) {
   return (
     <div className="flex h-full flex-col">
       <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin">
-        <SectionHeader>Services</SectionHeader>
+        <div className="flex items-center justify-between pr-3">
+          <SectionHeader>Services</SectionHeader>
+          {onStartPortify && (
+            <button
+              type="button"
+              onClick={() => onStartPortify(feature)}
+              className="shrink-0 inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-[11px]"
+              title="Make this feature's ports injectable so it can boot concurrently (benchmark arms / parallel runs)"
+              style={{ color: 'var(--accent)', border: '1px solid color-mix(in srgb, var(--accent) 45%, var(--border-default))' }}
+            >
+              <span aria-hidden>🔌</span>
+              Make ports injectable
+            </button>
+          )}
+        </div>
         <div className="px-4 py-3 flex flex-col gap-3">
           {repos.length === 0 && (
             <div className="text-xs" style={{ color: 'var(--text-muted)' }}>No services configured.</div>
@@ -879,6 +893,7 @@ function PortSlotEditor({
               onChange={(env) => onChange(ports.map((s, j) => (j === i ? { ...s, env: env || undefined } : s)))}
             />
           </div>
+          <PortSlotToken name={slot.name} env={slot.env} />
           <IconButton
             ariaLabel={`Remove port slot ${slot.name || 'item'}`}
             variant="danger"
@@ -899,6 +914,31 @@ function PortSlotEditor({
         <PlusIcon />
         Add port slot
       </button>
+    </div>
+  )
+}
+
+// Read-only display of what a slot injects at run time: the `${port.<name>}`
+// token to reference elsewhere (health-check URLs, inter-service config) and
+// the env var the service reads. The actual port number is allocated per run
+// and only exists while a run is active — settings shows the reference, not a
+// concrete number.
+function PortSlotToken({ name, env }: { name: string; env?: string }) {
+  const token = name.trim() ? `\${port.${name.trim()}}` : '${port.…}'
+  const label = env ? `Injected as ${env}; reference with ${token}` : `Reference with ${token}`
+  return (
+    <div
+      className="flex-1 truncate rounded-md px-2 py-1.5 text-xs"
+      title={label}
+      aria-label={label}
+      style={{
+        backgroundColor: 'var(--bg-surface)',
+        border: '1px dashed var(--border-default)',
+        color: name.trim() ? 'var(--text-secondary)' : 'var(--text-muted)',
+        fontFamily: 'var(--font-mono)',
+      }}
+    >
+      {token}
     </div>
   )
 }

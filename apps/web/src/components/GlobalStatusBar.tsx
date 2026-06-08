@@ -5,6 +5,7 @@ import type { RunDetail } from '../api/types'
 import * as api from '../api/client'
 import { useActiveBootSessions, useActiveRuns, useRuns } from '../state/RunsContext'
 import { useBenchmarks } from '../state/BenchmarkContext'
+import { useActivePortify } from '../state/PortifyContext'
 import { isActiveRunStatus } from '../../../../shared/run-state'
 import { EvaluationExportTaskStatus } from './EvaluationExportTaskToast'
 import { WizardTaskStatus } from './WizardTaskStatus'
@@ -17,6 +18,8 @@ interface Props {
   activeRunDetail: RunDetail | null
   onNavigateToRun?: (feature: string, runId: string) => void
   onOpenCleanup?: () => void
+  /** Reopen the in-flight port-ification workflow (by id) in the wizard. */
+  onOpenPortify?: (workflowId: string) => void
 }
 
 // Always-visible top bar showing whether any run is currently active across
@@ -28,8 +31,9 @@ interface Props {
 // "reconnecting" / "disconnected"). Push frames keep run state in sync;
 // when the channel drops, the user sees a banner so they know the data
 // they're looking at may be stale until the socket reconnects.
-export function GlobalStatusBar({ activeRunDetail, onNavigateToRun, onOpenCleanup }: Props) {
+export function GlobalStatusBar({ activeRunDetail, onNavigateToRun, onOpenCleanup, onOpenPortify }: Props) {
   const { connection } = useRuns()
+  const activePortify = useActivePortify()
   const { runs: activeRuns } = useActiveRuns()
   const { count: bootCount } = useActiveBootSessions()
   // Boots are NOT runs: the Runs button counts only test/verify runs; boot
@@ -59,7 +63,7 @@ export function GlobalStatusBar({ activeRunDetail, onNavigateToRun, onOpenCleanu
   // Aggregate "something's happening" count shown on the toggle when collapsed,
   // so an active benchmark / run / boot is never hidden behind the chevron.
   const actionsActiveCount =
-    (activeBenchmark ? 1 : 0) + (runsCount > 0 ? 1 : 0) + (bootCount > 0 ? 1 : 0)
+    (activeBenchmark ? 1 : 0) + (runsCount > 0 ? 1 : 0) + (bootCount > 0 ? 1 : 0) + (activePortify ? 1 : 0)
   const status = activeRunDetail?.manifest.status
 
   // Guard: only treat 'running' and 'healing' as truly active. The runs
@@ -160,6 +164,24 @@ export function GlobalStatusBar({ activeRunDetail, onNavigateToRun, onOpenCleanu
                 }}
               >
                 {runsCount}
+              </span>
+            </button>
+          )}
+          {/* Portify pill: shown only while a port-ification workflow is active
+              (Runs-style). It's one-at-a-time, so clicking reopens that single
+              workflow in the wizard. Amber = mid-flight, accent = ready to commit. */}
+          {activePortify && (
+            <button
+              type="button"
+              onClick={() => onOpenPortify?.(activePortify.workflowId)}
+              className="cl-button flex shrink-0 items-center gap-1.5 px-2.5 py-1"
+              title={`Port-ification of ${activePortify.feature} — click to view`}
+              aria-label={`Open port-ification of ${activePortify.feature}`}
+              style={{ color: 'var(--accent)', borderColor: 'color-mix(in srgb, var(--accent) 45%, var(--border-default))' }}
+            >
+              <span aria-hidden="true" className="inline-block h-1.5 w-1.5 animate-pulse rounded-full" style={{ background: 'var(--accent)' }} />
+              <span style={{ fontSize: 12, fontWeight: 500 }}>
+                {activePortify.status === 'ready-to-commit' ? 'Portify · ready' : 'Portify'}
               </span>
             </button>
           )}

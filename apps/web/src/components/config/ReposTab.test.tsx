@@ -111,6 +111,8 @@ describe('ReposTab', () => {
     // Surface the declared slot in the UI.
     const slotName = inputForLabel('Port slots')
     expect(slotName.value).toBe('api')
+    // The read-only injection token is shown for the slot.
+    expect(container.textContent).toContain('${port.api}')
 
     // Edit the repo name to mark the slice dirty, then save.
     const nameInput = inputForLabel('Name')

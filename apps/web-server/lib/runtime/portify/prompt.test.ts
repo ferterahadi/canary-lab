@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import type { FeatureConfig } from '../../../../../shared/launcher/types'
-import { buildPortifyPrompt, buildPortifyRetryPrompt } from './prompt'
+import { applyTemplate, buildPortifyPrompt, buildPortifyRetryPrompt } from './prompt'
+
+describe('applyTemplate', () => {
+  it('substitutes known placeholders and leaves unknown ones intact', () => {
+    expect(applyTemplate('a {{x}} b {{y}}', { x: '1' })).toBe('a 1 b {{y}}')
+  })
+})
 
 const feature: FeatureConfig = {
   name: 'cns',
@@ -22,6 +28,14 @@ describe('buildPortifyPrompt', () => {
     expect(prompt).toContain('/work/features/cns/feature.config.cjs')
     expect(prompt).toContain('yarn start:all:dev')
     expect(prompt).toContain('${port.<slot>}')
+  })
+
+  it('instructs an exhaustive scan covering non-HTTP listeners', () => {
+    const prompt = buildPortifyPrompt(feature, [{ name: 'mighty-cns', editPath: '/wt/mighty-cns' }])
+    expect(prompt).toContain('EVERY network listener')
+    for (const kind of ['gRPC', 'WebSocket', 'TCP', 'RabbitMQ/AMQP', 'Kafka']) {
+      expect(prompt).toContain(kind)
+    }
   })
 
   it('falls back to the canonical path when no edit target is given', () => {
@@ -48,5 +62,11 @@ describe('buildPortifyRetryPrompt', () => {
     expect(prompt).toContain('did not pass verification')
     expect(prompt).toContain('port 3007 still bound')
     expect(prompt).toContain('/work/features/cns/feature.config.cjs')
+  })
+
+  it('reminds the agent to re-check non-HTTP listeners', () => {
+    const prompt = buildPortifyRetryPrompt(feature, 'boot failed')
+    expect(prompt).toContain('NON-HTTP listener')
+    expect(prompt).toContain('gRPC')
   })
 })
