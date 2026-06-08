@@ -171,6 +171,7 @@ export interface CanaryLabMcpDeps {
   getPortify?: (workflowId: string) => PortifyManifest | null
   commitPortify?: (workflowId: string) => Promise<PortifyManifest>
   cancelPortify?: (workflowId: string) => Promise<PortifyManifest>
+  revisePortify?: (workflowId: string, feedback: string) => Promise<PortifyManifest>
   workspaceEvents?: WorkspaceEventPublisher
 }
 
@@ -229,6 +230,7 @@ export type CanaryLabMcpToolName =
   | 'get_portify'
   | 'commit_portify'
   | 'cancel_portify'
+  | 'revise_portify'
 
 const REPAIR_TOOLS = [
   'list_features',
@@ -287,6 +289,7 @@ const AUTHOR_TOOLS = [
   'get_portify',
   'commit_portify',
   'cancel_portify',
+  'revise_portify',
 ] as const satisfies readonly CanaryLabMcpToolName[]
 
 // Tools that exist only in the `full` profile — everything else is composed
@@ -986,6 +989,26 @@ export function registerCanaryLabTools(
     if (!deps.commitPortify) return errorResult('commitPortify dependency is not configured')
     try {
       return asJsonResult(await deps.commitPortify(workflowId))
+    } catch (err) {
+      return errorResult(err instanceof Error ? err.message : String(err))
+    }
+  })
+
+  registerTool('revise_portify', {
+    description: "Send review feedback to a ready-to-commit port-ification workflow: the agent resumes its session, applies your adjustments (e.g. rename an env var, expose another port slot), and the stack is re-booted twice to re-verify. Async — the workflow returns to editing, then verifying, then ready-to-commit; poll get_portify. Feedback rounds are unbounded and separate from the auto-retry budget. Only valid when status is ready-to-commit.",
+    inputSchema: {
+      workflowId: z.string(),
+      feedback: z.string().min(1).describe('Plain-language adjustments for the agent to apply to its port-ification diff.'),
+    },
+  }, async ({ workflowId, feedback }) => {
+    if (!deps.revisePortify) return errorResult('revisePortify dependency is not configured')
+    try {
+      const manifest = await deps.revisePortify(workflowId, feedback)
+      return asJsonResult({
+        ...manifest,
+        nextSteps: ['get_portify'],
+        next: `Poll get_portify with workflowId "${workflowId}" until status is "ready-to-commit" again, then commit_portify (or revise_portify once more).`,
+      })
     } catch (err) {
       return errorResult(err instanceof Error ? err.message : String(err))
     }

@@ -30,7 +30,7 @@ import {
 } from '../lib/wizard-agent-spawner'
 import { refForAgentSpawn } from '../lib/agent-session-tailer'
 import {
-  loadAgentSessionLog,
+  loadAgentSession,
 } from '../lib/agent-session-log'
 import { resolveDraftStageSessionRef } from '../lib/draft-agent-session'
 import { randomUUID } from 'crypto'
@@ -257,8 +257,8 @@ export async function testsDraftRoutes(
       reply.code(404)
       return { reason: 'session-log-missing' }
     }
-    const events = loadAgentSessionLog(resolved)
-    return { agent: resolved.agent, sessionId: resolved.sessionId, events }
+    const { events, meta } = loadAgentSession(resolved)
+    return { agent: resolved.agent, sessionId: resolved.sessionId, model: meta.model, effort: meta.effort, events }
   })
 
   app.post<{ Params: { id: string }; Body: { plan?: unknown; intentSummary?: string } }>(

@@ -252,6 +252,7 @@ export interface PortifyManifest {
   status: PortifyStatus
   attempt: number
   maxAttempts: number
+  feedbackRounds?: number
   startedAt: string
   endedAt?: string
   diff?: string
@@ -294,6 +295,19 @@ export function cancelPortify(workflowId: string, opts?: ClientOptions): Promise
   return request<PortifyManifest>(
     `${baseUrl}/api/portify/${encodeURIComponent(workflowId)}/cancel`,
     { method: 'POST' },
+    fetchImpl,
+  )
+}
+
+export function revisePortify(
+  workflowId: string,
+  feedback: string,
+  opts?: ClientOptions,
+): Promise<PortifyManifest> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<PortifyManifest>(
+    `${baseUrl}/api/portify/${encodeURIComponent(workflowId)}/revise`,
+    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ feedback }) },
     fetchImpl,
   )
 }
@@ -1055,6 +1069,9 @@ export type AgentSessionEvent =
 export interface AgentSessionResponse {
   agent: 'claude' | 'codex'
   sessionId: string
+  // Model the agent ran (both agents) and reasoning effort (codex only).
+  model?: string
+  effort?: string
   events: AgentSessionEvent[]
 }
 

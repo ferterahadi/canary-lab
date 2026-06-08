@@ -4,6 +4,7 @@ import type { FastifyInstance } from 'fastify'
 import {
   type AgentSessionRef,
   findClaudeLogBySessionId,
+  loadAgentSessionMeta,
   locateMostRecentAgentSessionRef,
   parseAgentSessionRefFile,
   selectAgentSessionRef,
@@ -52,7 +53,7 @@ export async function agentSessionStreamRoutes(
       const ref = resolveRunRef(runDir)
       const handle = tailAgentSession({
         ref: ref ?? { agent: 'claude', sessionId: '', logPath: '' },
-        onReady: (readyRef) => sendJson(socket, { type: 'session', agent: readyRef.agent, sessionId: readyRef.sessionId }),
+        onReady: (readyRef) => sendJson(socket, sessionMessage(readyRef)),
         onEvent: (event) => sendJson(socket, { type: 'event', event }),
         onError: (err) => sendJson(socket, { type: 'error', error: err.message }),
         discoverRef: () => resolveRunRef(runDir),
@@ -82,7 +83,7 @@ export async function agentSessionStreamRoutes(
       const p = draftPaths(deps.logsDir, req.params.draftId)
       const handle = tailAgentSession({
         ref: ref ?? { agent, sessionId: '', logPath: '' },
-        onReady: (readyRef) => sendJson(socket, { type: 'session', agent: readyRef.agent, sessionId: readyRef.sessionId }),
+        onReady: (readyRef) => sendJson(socket, sessionMessage(readyRef)),
         onEvent: (event) => sendJson(socket, { type: 'event', event }),
         onError: (err) => sendJson(socket, { type: 'error', error: err.message }),
         discoverRef: () => {
@@ -115,7 +116,7 @@ export async function agentSessionStreamRoutes(
       const ref = resolveBenchmarkRef(benchDir)
       const handle = tailAgentSession({
         ref: ref ?? { agent: 'claude', sessionId: '', logPath: '' },
-        onReady: (readyRef) => sendJson(socket, { type: 'session', agent: readyRef.agent, sessionId: readyRef.sessionId }),
+        onReady: (readyRef) => sendJson(socket, sessionMessage(readyRef)),
         onEvent: (event) => sendJson(socket, { type: 'event', event }),
         onError: (err) => sendJson(socket, { type: 'error', error: err.message }),
         discoverRef: () => resolveBenchmarkRef(benchDir),
@@ -134,7 +135,7 @@ export async function agentSessionStreamRoutes(
       const ref = resolveBenchmarkRef(dir)
       const handle = tailAgentSession({
         ref: ref ?? { agent: 'claude', sessionId: '', logPath: '' },
-        onReady: (readyRef) => sendJson(socket, { type: 'session', agent: readyRef.agent, sessionId: readyRef.sessionId }),
+        onReady: (readyRef) => sendJson(socket, sessionMessage(readyRef)),
         onEvent: (event) => sendJson(socket, { type: 'event', event }),
         onError: (err) => sendJson(socket, { type: 'error', error: err.message }),
         discoverRef: () => resolveBenchmarkRef(dir),
@@ -173,6 +174,20 @@ function parseStage(value: string | undefined): 'planning' | 'generating' | null
   if (value === undefined) return 'planning'
   if (value === 'planning' || value === 'generating') return value
   return null
+}
+
+// Build the `session` handshake message, reading model/effort from the log
+// once it's been located. The log exists by the time `onReady` fires, so a
+// codex `turn_context` (written right after `session_meta`) is already present.
+function sessionMessage(ref: AgentSessionRef): {
+  type: 'session'
+  agent: AgentSessionRef['agent']
+  sessionId: string
+  model?: string
+  effort?: string
+} {
+  const meta = loadAgentSessionMeta(ref)
+  return { type: 'session', agent: ref.agent, sessionId: ref.sessionId, model: meta.model, effort: meta.effort }
 }
 
 function sendJson(socket: { send(data: string): void }, payload: unknown): void {

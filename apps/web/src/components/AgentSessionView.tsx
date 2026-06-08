@@ -29,6 +29,8 @@ interface Props {
 interface ViewState {
   agent: 'claude' | 'codex' | null
   sessionId: string
+  model?: string
+  effort?: string
   events: AgentSessionEvent[]
 }
 
@@ -57,7 +59,7 @@ export function AgentSessionView({ source }: Props) {
         setState({ agent: null, sessionId: '', events: [] })
         return
       }
-      setState({ agent: snapshot.agent, sessionId: snapshot.sessionId, events: snapshot.events })
+      setState({ agent: snapshot.agent, sessionId: snapshot.sessionId, model: snapshot.model, effort: snapshot.effort, events: snapshot.events })
     }
 
     const fetchSnapshot = async (): Promise<AgentSessionResponse | null> => {
@@ -88,8 +90,8 @@ export function AgentSessionView({ source }: Props) {
           onSession: (session) => {
             if (cancelled) return
             setState((prev) => prev
-              ? { ...prev, agent: session.agent, sessionId: session.sessionId }
-              : { agent: session.agent, sessionId: session.sessionId, events: [] })
+              ? { ...prev, agent: session.agent, sessionId: session.sessionId, model: session.model, effort: session.effort }
+              : { agent: session.agent, sessionId: session.sessionId, model: session.model, effort: session.effort, events: [] })
           },
           onEvent: (event) => {
             if (cancelled) return
@@ -188,6 +190,18 @@ export function AgentSessionView({ source }: Props) {
             <span className="agentts-agent">{state.agent}</span>
             <span className="agentts-sep">/ session</span>
             <span className="agentts-sid">{shortSession(state.sessionId)}</span>
+            {state.model && (
+              <>
+                <span className="agentts-dot" aria-hidden="true">·</span>
+                <span className="agentts-model">{state.model}</span>
+              </>
+            )}
+            {state.effort && (
+              <>
+                <span className="agentts-dot" aria-hidden="true">·</span>
+                <span className="agentts-model">{state.effort}</span>
+              </>
+            )}
             <span style={{ flex: '1 1 auto' }} />
             <span className="agentts-count">{state.events.length} event{state.events.length === 1 ? '' : 's'}</span>
           </div>
@@ -438,6 +452,8 @@ const TIMELINE_CSS = `
 .agentts-agent{font-weight:600;color:var(--text-primary);text-transform:uppercase;letter-spacing:.07em;font-size:10.5px}
 .agentts-sep{color:var(--text-muted);text-transform:uppercase;letter-spacing:.08em;font-size:9.5px}
 .agentts-sid{font-family:var(--font-mono);color:var(--text-secondary);font-size:10.5px}
+.agentts-dot{color:var(--text-muted);font-size:10.5px}
+.agentts-model{font-family:var(--font-mono);color:var(--text-secondary);font-size:10.5px}
 .agentts-count{color:var(--text-muted);font-size:10px;font-variant-numeric:tabular-nums}
 .agentts-rail{margin:0;padding:14px 18px 18px;list-style:none}
 .agentts-row{position:relative;padding:0 0 15px 28px;animation:agentts-in .26s cubic-bezier(.22,1,.36,1) both}

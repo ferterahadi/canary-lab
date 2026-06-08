@@ -18,6 +18,8 @@ export interface PortifyOrchestratorDeps {
   setup: () => Promise<PortifyRepoState[]>
   /** Run the agent for this attempt; `failureDetail` is set on retries. */
   runAgent: (attempt: number, failureDetail?: string) => Promise<void>
+  /** Resume the agent session with the user's review feedback (revise pass). */
+  runFeedbackAgent: (feedback: string) => Promise<void>
   /** Unified diff of the agent's edits so far. */
   captureDiff: () => Promise<string>
   /** Boot twice on different ports; require both healthy. */
@@ -111,5 +113,61 @@ export class PortifyOrchestrator {
     }
 
     return m
+  }
+
+  // A user-driven revise pass, invoked after run() has parked at
+  // `ready-to-commit`. The agent resumes its session, applies the human's
+  // feedback, and the stack is re-verified. Unlike run()'s retry loop this
+  // NEVER goes terminal: it always re-parks at `ready-to-commit` (worktree
+  // preserved) carrying the latest verification — `verification.ok` gates
+  // whether the diff may be committed. `feedbackRounds` is its own budget,
+  // unbounded and independent of `attempt`/`maxAttempts`. `current` is the
+  // live manifest the caller read from the store (the source of truth after
+  // run() returned).
+  async revise(current: PortifyManifest, feedback: string): Promise<PortifyManifest> {
+    const d = this.deps
+    if (d.isAborted?.()) return current
+
+    let m: PortifyManifest = {
+      ...current,
+      status: 'editing',
+      feedbackRounds: (current.feedbackRounds ?? 0) + 1,
+      error: undefined,
+    }
+    d.persist(m)
+
+    try {
+      await d.runFeedbackAgent(feedback)
+      if (d.isAborted?.()) return m
+
+      const diff = await d.captureDiff()
+      m = { ...m, status: 'verifying', diff }
+      d.persist(m)
+
+      let verification = await d.verify()
+      if (d.isAborted?.()) return m
+
+      if (verification.ok) {
+        const tests = await d.checkTestsUntouched()
+        if (!tests.ok) {
+          verification = {
+            ok: false,
+            instances: verification.instances,
+            failureDetail: `You modified test files (${tests.offending.join(', ')}). Revert them — this change must be ports-only.`,
+          }
+        }
+      }
+
+      m = { ...m, status: 'ready-to-commit', diff, verification }
+      d.persist(m)
+      return m
+    } catch (err) {
+      if (d.isAborted?.()) return m
+      // Don't tear down on a revise error — re-park at ready-to-commit so the
+      // user can give more feedback or commit the last good diff.
+      m = { ...m, status: 'ready-to-commit', error: err instanceof Error ? err.message : String(err) }
+      d.persist(m)
+      return m
+    }
   }
 }

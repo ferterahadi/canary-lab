@@ -12,6 +12,8 @@ import {
   locateLatestSessionLogForAgent,
   locateMostRecentAgentSessionRef,
   loadAgentSessionLog,
+  loadAgentSession,
+  loadAgentSessionMeta,
   parseAgentSessionRefFile,
   renderAgentSessionContext,
   selectAgentSessionRef,
@@ -1164,5 +1166,64 @@ describe('loadAgentSessionLog (codex)', () => {
 describe('loadAgentSessionLog edge cases', () => {
   it('returns [] when the log file is missing', () => {
     expect(loadAgentSessionLog({ agent: 'claude', sessionId: 'x', logPath: '/no/such.jsonl' })).toEqual([])
+  })
+})
+
+describe('session metadata (model / effort)', () => {
+  function writeLog(lines: object[]): string {
+    const file = path.join(homeDir, `meta-${lines.length}-${Math.abs(JSON.stringify(lines).length)}.jsonl`)
+    fs.writeFileSync(file, lines.map((l) => JSON.stringify(l)).join('\n') + '\n')
+    return file
+  }
+
+  it('extracts model + effort from a codex turn_context line', () => {
+    const file = writeLog([
+      { type: 'session_meta', payload: { id: 's', cwd: '/x', timestamp: 't' } },
+      { type: 'turn_context', payload: { model: 'gpt-5.5', effort: 'high', summary: 'auto' } },
+    ])
+    expect(loadAgentSessionMeta({ agent: 'codex', sessionId: 's', logPath: file })).toEqual({
+      model: 'gpt-5.5',
+      effort: 'high',
+    })
+  })
+
+  it('takes the last codex turn_context when the model/effort changes mid-session', () => {
+    const file = writeLog([
+      { type: 'turn_context', payload: { model: 'gpt-5.5', effort: 'low' } },
+      { type: 'turn_context', payload: { model: 'gpt-5.5-codex', effort: 'high' } },
+    ])
+    expect(loadAgentSessionMeta({ agent: 'codex', sessionId: 's', logPath: file })).toEqual({
+      model: 'gpt-5.5-codex',
+      effort: 'high',
+    })
+  })
+
+  it('extracts model from claude assistant lines and leaves effort undefined', () => {
+    const file = writeLog([
+      { type: 'user', timestamp: 't', message: { content: 'hi' } },
+      { type: 'assistant', timestamp: 't', message: { model: 'claude-opus-4-8', content: [{ type: 'text', text: 'ok' }] } },
+    ])
+    const meta = loadAgentSessionMeta({ agent: 'claude', sessionId: 's', logPath: file })
+    expect(meta.model).toBe('claude-opus-4-8')
+    expect(meta.effort).toBeUndefined()
+  })
+
+  it('returns empty meta when no model/effort lines are present', () => {
+    const file = writeLog([{ type: 'event_msg', payload: { type: 'task_started' } }])
+    expect(loadAgentSessionMeta({ agent: 'codex', sessionId: 's', logPath: file })).toEqual({})
+  })
+
+  it('returns empty meta when the log file is missing', () => {
+    expect(loadAgentSessionMeta({ agent: 'codex', sessionId: 'x', logPath: '/no/such.jsonl' })).toEqual({})
+  })
+
+  it('loadAgentSession returns events and meta from a single read', () => {
+    const file = writeLog([
+      { type: 'turn_context', payload: { model: 'gpt-5.5', effort: 'medium' } },
+      { type: 'response_item', timestamp: 't', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'done' }] } },
+    ])
+    const { events, meta } = loadAgentSession({ agent: 'codex', sessionId: 's', logPath: file })
+    expect(meta).toEqual({ model: 'gpt-5.5', effort: 'medium' })
+    expect(events).toEqual([{ kind: 'assistant-message', timestamp: 't', text: 'done' }])
   })
 })

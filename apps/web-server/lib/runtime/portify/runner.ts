@@ -13,7 +13,7 @@ import { PortifyOrchestrator } from './orchestrator'
 import { buildPortifyPaths, portifyDir } from './paths'
 import { createBranchAndWorktree, captureDiff, changedFiles, commitWorktree, discardWorktree, portifyBranchName } from './git-ops'
 import { runPortifyAgent, writePortifyClaudeRef } from './agent'
-import { buildPortifyPrompt, buildPortifyRetryPrompt, type RepoEditTarget } from './prompt'
+import { buildPortifyPrompt, buildPortifyRetryPrompt, buildPortifyFeedbackPrompt, type RepoEditTarget } from './prompt'
 import { verifyDoubleBoot } from './verify'
 import type { PortifyManifest, PortifyRepoState, StartPortifyInput, StartPortifyResult } from './types'
 
@@ -72,6 +72,8 @@ interface ActiveWorkflow {
   /** Canonical featureDir diff baseline for the config edit. */
   configSnapshotRef: string
   abort: () => void
+  /** Set once the orchestrator is constructed; drives user-feedback revise passes. */
+  orchestrator?: PortifyOrchestrator
 }
 
 export function safeKey(s: string): string {
@@ -158,6 +160,7 @@ export function createPortifyRunner(deps: PortifyRunnerDeps) {
       status: 'planning',
       attempt: 0,
       maxAttempts: input.maxAttempts && input.maxAttempts > 0 ? input.maxAttempts : 3,
+      feedbackRounds: 0,
       startedAt: deps.now(),
     }
     deps.store.save(manifest)
@@ -180,6 +183,14 @@ export function createPortifyRunner(deps: PortifyRunnerDeps) {
     active.set(workflowId, state)
 
     const allMembers = (): GroupMember[] => state.groups.flatMap((g) => g.members)
+
+    // Run the agent in the first group's worktree with a given prompt. `resume`
+    // continues the pinned claude session (no-op for codex, which re-execs).
+    const runAgentWithPrompt = async (prompt: string, resume: boolean): Promise<void> => {
+      const cwd = state.groups[0].handle!.worktreeRoot
+      if (sessionId) writePortifyClaudeRef(dir, cwd, sessionId)
+      await runPortifyAgent({ agent, prompt, cwd, logPath: paths.agentLogPath, children, sessionId, resume })
+    }
 
     const orchestrator = new PortifyOrchestrator({
       manifest,
@@ -213,15 +224,17 @@ export function createPortifyRunner(deps: PortifyRunnerDeps) {
         // setup() ran (and fully succeeded) before any runAgent, so every
         // member has an editPath and every group a handle.
         const targets: RepoEditTarget[] = allMembers().map((m) => ({ name: m.name, editPath: m.editPath! }))
-        const cwd = state.groups[0].handle!.worktreeRoot
-        if (sessionId) writePortifyClaudeRef(dir, cwd, sessionId)
         const prompt = attempt === 1 || !failureDetail
           ? buildPortifyPrompt(feature, targets)
           : buildPortifyRetryPrompt(feature, failureDetail)
-        await runPortifyAgent({
-          agent, prompt, cwd, logPath: paths.agentLogPath, children, sessionId,
-          resume: attempt > 1,
-        })
+        await runAgentWithPrompt(prompt, attempt > 1)
+      },
+
+      // Revise pass: resume the session (claude) with the human's feedback.
+      // Codex has no --resume, so it re-execs against the already-edited
+      // worktree — context-light but it still sees and adjusts its prior work.
+      runFeedbackAgent: async (feedback) => {
+        await runAgentWithPrompt(buildPortifyFeedbackPrompt(feature, feedback), true)
       },
 
       captureDiff: async () => {
@@ -270,6 +283,8 @@ export function createPortifyRunner(deps: PortifyRunnerDeps) {
       },
     })
 
+    state.orchestrator = orchestrator
+
     // Fire-and-forget; the UI polls the manifest. orchestrator.run() handles all
     // its own errors internally (persisting 'failed' + cleanup), so it never
     // rejects — `void` marks the intentional float.
@@ -278,11 +293,43 @@ export function createPortifyRunner(deps: PortifyRunnerDeps) {
     return { workflowId }
   }
 
+  // User-driven revise pass from the review screen: resume the agent with the
+  // human's feedback, re-verify, and re-park at ready-to-commit. Fire-and-forget
+  // like the initial run — the UI polls the manifest as it cycles back through
+  // editing → verifying → ready-to-commit. Returns the manifest in its
+  // just-flipped `editing` state so the caller gets immediate feedback.
+  async function revise(workflowId: string, feedback: string): Promise<PortifyManifest> {
+    const m = deps.store.get(workflowId)
+    if (!m) throw Object.assign(new Error('workflow not found'), { statusCode: 404 })
+    if (m.status !== 'ready-to-commit') {
+      throw Object.assign(new Error(`cannot revise a workflow in status "${m.status}"`), { statusCode: 409 })
+    }
+    const trimmed = feedback.trim()
+    if (!trimmed) throw Object.assign(new Error('feedback is required'), { statusCode: 400 })
+    const state = active.get(workflowId)
+    if (!state?.orchestrator) {
+      throw Object.assign(
+        new Error('worktree is no longer available — the server may have restarted; start a new workflow'),
+        { statusCode: 409 },
+      )
+    }
+    // Float the pass; the orchestrator persists every transition and never
+    // rejects (it re-parks at ready-to-commit even on error).
+    void state.orchestrator.revise(m, trimmed)
+    return deps.store.get(workflowId) ?? m
+  }
+
   async function commit(workflowId: string): Promise<PortifyManifest> {
     const m = deps.store.get(workflowId)
     if (!m) throw Object.assign(new Error('workflow not found'), { statusCode: 404 })
     if (m.status !== 'ready-to-commit') {
       throw Object.assign(new Error(`cannot commit a workflow in status "${m.status}"`), { statusCode: 409 })
+    }
+    if (m.verification && !m.verification.ok) {
+      throw Object.assign(
+        new Error('the latest changes did not pass verification — give more feedback or cancel'),
+        { statusCode: 409 },
+      )
     }
     const state = active.get(workflowId)
     if (!state) throw Object.assign(new Error('worktree is no longer available'), { statusCode: 409 })
@@ -330,7 +377,7 @@ export function createPortifyRunner(deps: PortifyRunnerDeps) {
     return next
   }
 
-  return { startPortify, commit, cancel, abort: cancel }
+  return { startPortify, commit, cancel, revise, abort: cancel }
 }
 
 function readFileOrNull(p: string): string | null {
