@@ -63,7 +63,7 @@ export function CollisionConfirmDialog({ info, feature, onChoose, onCancel, port
               onClick={onPortify}
               className="cl-button px-3 py-1 text-xs"
             >
-              Make ports injectable
+              Portify
             </button>
           )}
           <button

@@ -221,6 +221,7 @@ export function App() {
             setSelectedRunId(allRuns.find((r) => r.feature === name && r.executionType !== 'boot' && r.executionType !== 'benchmark')?.runId ?? null)
           }}
           onFeaturesChanged={refreshFeatures}
+          onStartPortify={(f) => setPortifyTarget({ kind: 'new', feature: f })}
         />
       ),
     },

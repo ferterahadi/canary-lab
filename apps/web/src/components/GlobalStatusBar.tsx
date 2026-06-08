@@ -418,9 +418,6 @@ const McpHealthMenu = forwardRef<HTMLDivElement, {
   onSelectProfile,
 }, ref) {
   const tools = health.tools ?? []
-  const workspaceName = workspaceNameFromRoot(health.projectRoot)
-  const activeSessions = health.activeSessions ?? 0
-  const profile = MCP_PROFILES.find((candidate) => candidate.id === selectedProfile) ?? MCP_PROFILES[0]
   return (
     <div
       ref={ref}
@@ -457,15 +454,6 @@ const McpHealthMenu = forwardRef<HTMLDivElement, {
           >
             {health.toolCount ?? tools.length} tools
           </div>
-        </div>
-        <div className="mt-2 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[10px]" style={{ color: 'var(--text-muted)' }}>
-          <span className="truncate" title={health.projectRoot ?? 'Checking'}>{workspaceName}</span>
-          <span aria-hidden="true">/</span>
-          <span title={profile.detail}>{profile.label}</span>
-          <span aria-hidden="true">/</span>
-          <span>{activeSessions} active</span>
-          <span aria-hidden="true">/</span>
-          <span style={{ fontFamily: 'var(--font-mono)' }}>/mcp</span>
         </div>
       </div>
       <div className="border-b px-2 py-2" style={{ borderColor: 'var(--border-default)' }}>
@@ -688,12 +676,6 @@ function PlugIcon() {
       <path d="M12 17v5" />
     </svg>
   )
-}
-
-function workspaceNameFromRoot(projectRoot?: string): string {
-  if (!projectRoot) return 'Checking'
-  const normalized = projectRoot.replace(/\\/g, '/').replace(/\/+$/, '')
-  return normalized.split('/').pop() || normalized
 }
 
 function formatCheckedAt(date: Date): string {

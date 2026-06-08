@@ -99,7 +99,7 @@ describe('ReposTab', () => {
     )
   })
 
-  it('round-trips a startCommand port slot through parse → serialize', async () => {
+  it('preserves a startCommand port slot through a Service-tab save (ports edited in the Ports tab)', async () => {
     const withPorts = docWithPorts()
     vi.mocked(getFeatureConfigDoc).mockResolvedValue(withPorts)
     vi.mocked(putFeatureConfigDoc).mockResolvedValue(withPorts)
@@ -108,13 +108,12 @@ describe('ReposTab', () => {
       root.render(<ReposTab feature="cns_exactly_once_fallback" />)
     })
 
-    // Surface the declared slot in the UI.
-    const slotName = inputForLabel('Port slots')
-    expect(slotName.value).toBe('api')
-    // The read-only injection token is shown for the slot.
-    expect(container.textContent).toContain('${port.api}')
+    // Ports are no longer edited here — the Service tab does not render the
+    // port-slot editor or its injection token.
+    expect(container.textContent).not.toContain('${port.api}')
 
-    // Edit the repo name to mark the slice dirty, then save.
+    // Edit the repo name to mark the slice dirty, then save — the existing
+    // port slot must round-trip untouched through parse → serialize.
     const nameInput = inputForLabel('Name')
     await act(async () => {
       setInputValue(nameInput, 'renamed')

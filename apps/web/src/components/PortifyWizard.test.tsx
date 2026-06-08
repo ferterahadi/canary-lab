@@ -134,16 +134,29 @@ describe('PortifyWizard', () => {
     expect(container.textContent).toContain('still clashing')
   })
 
-  it('confirms before leaving and cancels the workflow on Leave', async () => {
+  it('minimizes on Close — keeps the workflow running, does not cancel', async () => {
+    vi.mocked(api.startPortify).mockResolvedValue({ workflowId: 'w' })
+    vi.mocked(api.getPortify).mockResolvedValue(readyManifest())
+    const { onClose } = await renderWizard()
+    await act(async () => clickButton('Start ▶'))
+    await flush()
+    await act(async () => clickButton('Close ✕'))
+    expect(onClose).toHaveBeenCalled()
+    expect(api.cancelPortify).not.toHaveBeenCalled()
+    // No discard confirmation — closing just minimizes.
+    expect(container.textContent).not.toContain('Discard this workflow?')
+  })
+
+  it('discards the workflow via Cancel → Discard', async () => {
     vi.mocked(api.startPortify).mockResolvedValue({ workflowId: 'w' })
     vi.mocked(api.getPortify).mockResolvedValue(readyManifest())
     vi.mocked(api.cancelPortify).mockResolvedValue(manifest('aborted'))
     const { onClose } = await renderWizard()
     await act(async () => clickButton('Start ▶'))
     await flush()
-    await act(async () => clickButton('Close ✕'))
-    expect(container.textContent).toContain('Leave this workflow?')
-    await act(async () => clickButton('Leave'))
+    await act(async () => clickButton('Cancel'))
+    expect(container.textContent).toContain('Discard this workflow?')
+    await act(async () => clickButton('Discard'))
     await flush()
     expect(api.cancelPortify).toHaveBeenCalledWith('w')
     expect(onClose).toHaveBeenCalled()

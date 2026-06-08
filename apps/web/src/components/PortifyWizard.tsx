@@ -103,8 +103,16 @@ export function PortifyWizard({
     }
   }
 
-  // Leave: discard the workflow (worktree + branch) if one is in flight.
-  const leave = async () => {
+  // Minimize: just close the overlay. The workflow keeps running on the
+  // server — reopen it from the GlobalStatusBar "Portify" pill (async/revisit).
+  const minimize = () => {
+    stopPolling()
+    onClose()
+  }
+
+  // Discard: explicitly tear the workflow down (worktree + branch) and close.
+  // Only reachable via the destructive "Cancel" → "Discard" confirmation.
+  const discard = async () => {
     stopPolling()
     if (workflowId && m && m.status !== 'committed') {
       try { await api.cancelPortify(workflowId) } catch { /* best-effort */ }
@@ -113,17 +121,39 @@ export function PortifyWizard({
   }
 
   const status = m?.status
+  // A workflow is "in flight" (cancellable / worth keeping alive) until terminal.
+  const isActive = Boolean(workflowId) && status != null
+    && status !== 'committed' && status !== 'failed' && status !== 'aborted'
   const stepIdx = stepIndexFor(workflowId ? (status ?? 'planning') : 'plan')
 
   return (
     <div className="fixed inset-0 z-[80] flex flex-col" style={{ background: 'var(--bg-base)' }}>
       <header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 20px', borderBottom: '1px solid var(--border-default)' }}>
         <div style={{ fontWeight: 600, fontSize: 15 }}>
-          Make ports injectable <span style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontSize: 13, marginLeft: 8 }}>{m?.feature ?? feature ?? ''}</span>
+          Portify <span style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontSize: 13, marginLeft: 8 }}>{m?.feature ?? feature ?? ''}</span>
         </div>
-        <button type="button" onClick={() => setConfirmLeave(true)} style={{ background: 'transparent', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)', color: 'var(--text-secondary)', fontSize: 12, padding: '6px 12px', cursor: 'pointer' }}>
-          Close ✕
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {isActive && (
+            <button
+              type="button"
+              onClick={() => setConfirmLeave(true)}
+              title="Discard this workflow — drops the branch + worktree and restores the config"
+              style={{ background: 'transparent', border: '1px solid rgba(251,113,133,0.4)', borderRadius: 'var(--radius-md)', color: 'rgb(251,113,133)', fontSize: 12, padding: '6px 12px', cursor: 'pointer' }}
+            >
+              Cancel
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={isActive ? minimize : discard}
+            title={isActive
+              ? 'Close — the workflow keeps running. Reopen it from the Portify pill in the top bar.'
+              : 'Close — a failed/aborted run is cleaned up; a committed one is left on its branch.'}
+            style={{ background: 'transparent', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)', color: 'var(--text-secondary)', fontSize: 12, padding: '6px 12px', cursor: 'pointer' }}
+          >
+            Close ✕
+          </button>
+        </div>
       </header>
 
       <Stepper current={stepIdx} />
@@ -142,7 +172,7 @@ export function PortifyWizard({
           )}
           {workflowId && m && status === 'committed' && <CommittedScreen m={m} onDone={onCommitted} />}
           {workflowId && m && (status === 'failed' || status === 'aborted') && (
-            <FailedScreen m={m} onClose={leave} />
+            <FailedScreen m={m} onClose={discard} />
           )}
           {error && <div style={{ color: 'rgb(251,113,133)', fontSize: 12, marginTop: 14 }}>{error}</div>}
         </div>
@@ -151,15 +181,13 @@ export function PortifyWizard({
       {confirmLeave && (
         <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.55)', display: 'grid', placeItems: 'center', zIndex: 90 }}>
           <div style={{ width: 'min(420px, 92%)', background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-lg)', padding: 20 }}>
-            <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 8 }}>Leave this workflow?</div>
+            <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 8 }}>Discard this workflow?</div>
             <div style={{ fontSize: 12.5, color: 'var(--text-muted)', lineHeight: 1.6, marginBottom: 16 }}>
-              {m && m.status === 'committed'
-                ? 'The change is committed. You can close safely.'
-                : 'The branch and worktree will be discarded and the feature config restored. Nothing is committed.'}
+              The branch and worktree will be discarded and the feature config restored. Nothing is committed. To keep it running instead, choose <b style={{ color: 'var(--text-secondary)' }}>Keep running</b> — it stays in the top-bar Portify pill.
             </div>
             <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
-              <button type="button" onClick={() => setConfirmLeave(false)} style={ghostBtn}>Stay</button>
-              <button type="button" onClick={leave} style={{ ...ghostBtn, color: 'rgb(251,113,133)', borderColor: 'rgba(251,113,133,0.4)' }}>Leave</button>
+              <button type="button" onClick={() => setConfirmLeave(false)} style={ghostBtn}>Keep running</button>
+              <button type="button" onClick={discard} style={{ ...ghostBtn, color: 'rgb(251,113,133)', borderColor: 'rgba(251,113,133,0.4)' }}>Discard</button>
             </div>
           </div>
         </div>
