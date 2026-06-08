@@ -27,6 +27,7 @@ import { createBenchmarkRunner } from './lib/runtime/benchmark/runner'
 import { loadBundledSabotageSkills, sabotageSkillsForFeature } from './lib/runtime/benchmark/skills'
 import { benchmarkDir } from './lib/runtime/benchmark/paths'
 import { portifyRoutes } from './routes/portify'
+import { portifyStreamRoutes } from './ws/portify-stream'
 import { PortifyRunStore } from './lib/runtime/portify/store'
 import { createPortifyRunner } from './lib/runtime/portify/runner'
 import { reclaimOrphanedPortify } from './lib/runtime/portify/reclaim'
@@ -1190,6 +1191,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
       }
     },
   })
+  await app.register(portifyStreamRoutes, { store: portifyStore })
 
   await app.register(workspaceStreamRoutes, { events: workspaceEvents })
   await app.register(draftAgentStreamRoutes, {
@@ -1279,6 +1281,13 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
       const body = (() => { try { return JSON.parse(resp.payload) } catch { return resp.payload } })()
       return { statusCode: resp.statusCode, body }
     },
+    // Port-ification workflow — reuse the in-process runner + store (the same
+    // ones behind routes/portify.ts). start/commit/cancel throw with a
+    // statusCode the MCP tools surface as errors.
+    startPortify: (feature, agent, maxAttempts) => portifyRunner.startPortify({ feature, agent, maxAttempts }),
+    getPortify: (workflowId) => portifyStore.get(workflowId),
+    commitPortify: (workflowId) => portifyRunner.commit(workflowId),
+    cancelPortify: (workflowId) => portifyRunner.cancel(workflowId),
 	  })
 
   // Serve the built React frontend if it exists. In development the dist dir

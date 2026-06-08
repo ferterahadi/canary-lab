@@ -31,6 +31,11 @@ vi.mock('../state/BenchmarkContext', () => ({
   useBenchmarks: () => ({ benchmarks: [], connection: 'live', startBenchmark: vi.fn(), abortBenchmark: vi.fn(), loadBenchmark: vi.fn() }),
 }))
 
+const mockActivePortify = { value: undefined as undefined | { workflowId: string; feature: string; status: string; startedAt: string } }
+vi.mock('../state/PortifyContext', () => ({
+  useActivePortify: () => mockActivePortify.value,
+}))
+
 vi.mock('./BenchmarkWindow', () => ({
   BenchmarkWindow: () => null,
 }))
@@ -75,7 +80,13 @@ afterEach(() => {
   })
   container.remove()
   vi.clearAllMocks()
+  mockActivePortify.value = undefined
 })
+
+function portifyButton(): HTMLButtonElement | undefined {
+  return [...container.querySelectorAll('button')]
+    .find((button) => button.getAttribute('aria-label')?.startsWith('Open port-ification')) as HTMLButtonElement | undefined
+}
 
 function runsButton(): HTMLButtonElement | undefined {
   return [...container.querySelectorAll('button')]
@@ -106,6 +117,32 @@ describe('GlobalStatusBar', () => {
     expect(button?.getAttribute('aria-label')).toBe('Show all runs (2 active)')
     expect(button?.textContent).toContain('Runs')
     expect(button?.textContent).toContain('2')
+  })
+
+  it('hides the Portify button when no port-ification is active', async () => {
+    mockActiveRuns.value = { runs: [], count: 0 }
+    mockActivePortify.value = undefined
+    await act(async () => { root.render(<GlobalStatusBar activeRunDetail={null} />) })
+    expect(portifyButton()).toBeUndefined()
+  })
+
+  it('shows the Portify button while active and opens that workflow on click', async () => {
+    mockActiveRuns.value = { runs: [], count: 0 }
+    mockActivePortify.value = { workflowId: 'portify-1', feature: 'cns', status: 'verifying', startedAt: 't' }
+    const onOpenPortify = vi.fn()
+    await act(async () => { root.render(<GlobalStatusBar activeRunDetail={null} onOpenPortify={onOpenPortify} />) })
+    const button = portifyButton()
+    expect(button).toBeTruthy()
+    expect(button?.textContent).toContain('Portify')
+    await act(async () => button!.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+    expect(onOpenPortify).toHaveBeenCalledWith('portify-1')
+  })
+
+  it('labels the Portify button "ready" when the workflow awaits commit', async () => {
+    mockActiveRuns.value = { runs: [], count: 0 }
+    mockActivePortify.value = { workflowId: 'portify-1', feature: 'cns', status: 'ready-to-commit', startedAt: 't' }
+    await act(async () => { root.render(<GlobalStatusBar activeRunDetail={null} />) })
+    expect(portifyButton()?.textContent).toContain('ready')
   })
 
   it('surfaces booted services in the Services pill, separate from the Runs button', async () => {

@@ -25,8 +25,11 @@ export function App() {
   const [configFor, setConfigFor] = useState<string | null>(null)
   const [testsRefreshKey, setTestsRefreshKey] = useState(0)
   const [collisionPrompt, setCollisionPrompt] = useState<{ feature: string; env?: string; mode?: 'test' | 'boot'; info: RepoCollisionChoice; portsConfigured?: boolean } | null>(null)
-  // Feature whose ports we're making injectable (the port-ification wizard).
-  const [portifyFeature, setPortifyFeature] = useState<string | null>(null)
+  // Port-ification wizard target: 'new' starts a fresh workflow for a feature;
+  // 'revisit' reopens an in-flight workflow (from the status bar) by id.
+  const [portifyTarget, setPortifyTarget] = useState<
+    { kind: 'new'; feature: string } | { kind: 'revisit'; workflowId: string } | null
+  >(null)
   // Top-level view: the normal workspace, or the full-screen Log Cleanup page.
   const [view, setView] = useState<'workspace' | 'cleanup'>('workspace')
   const pendingRunSelectionRef = useRef<string | null>(null)
@@ -276,6 +279,7 @@ export function App() {
           setView('workspace')
         }}
         onOpenCleanup={() => setView('cleanup')}
+        onOpenPortify={(workflowId) => setPortifyTarget({ kind: 'revisit', workflowId })}
       />
       <div className="min-h-0 flex-1">
         {view === 'cleanup'
@@ -286,6 +290,7 @@ export function App() {
         <FeatureConfigEditor
           feature={configFor}
           initialTab="playwright"
+          onStartPortify={(f) => setPortifyTarget({ kind: 'new', feature: f })}
           onClose={() => setConfigFor(null)}
           onRenamed={(_, nextFeature) => {
             setConfigFor(nextFeature)
@@ -322,17 +327,18 @@ export function App() {
           info={collisionPrompt.info}
           feature={collisionPrompt.feature}
           portsConfigured={collisionPrompt.portsConfigured}
-          onPortify={() => { const f = collisionPrompt.feature; setCollisionPrompt(null); setPortifyFeature(f) }}
+          onPortify={() => { const f = collisionPrompt.feature; setCollisionPrompt(null); setPortifyTarget({ kind: 'new', feature: f }) }}
           onChoose={resolveCollision}
           onCancel={() => setCollisionPrompt(null)}
         />
       )}
-      {portifyFeature && (
+      {portifyTarget && (
         <PortifyWizard
-          feature={portifyFeature}
-          agent="claude"
-          onClose={() => setPortifyFeature(null)}
-          onCommitted={() => setPortifyFeature(null)}
+          {...(portifyTarget.kind === 'new'
+            ? { feature: portifyTarget.feature, agent: 'claude' as const }
+            : { workflowId: portifyTarget.workflowId })}
+          onClose={() => setPortifyTarget(null)}
+          onCommitted={() => setPortifyTarget(null)}
         />
       )}
     </div>

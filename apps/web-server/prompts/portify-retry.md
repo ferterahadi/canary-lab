@@ -2,4 +2,4 @@ The previous port-ification attempt did not pass verification. The harness boote
 
 {{failureDetail}}
 
-A failed boot almost always means a service still binds a hardcoded port (ignoring its injected env var), an inter-service URL still points at a fixed port, or a port slot is missing its `env` field. Re-check the source AND {{featureConfigPath}}, fix what you missed, and make sure every listening service reads its injected env var. Do NOT touch test files.
+A failed boot almost always means SOME listener still binds a hardcoded port (ignoring its injected env var), an inter-service URL still points at a fixed port, or a port slot is missing its `env` field. The culprit is very often a NON-HTTP listener the first pass missed — a gRPC server, a WebSocket server, a raw TCP server, a RabbitMQ/AMQP or Kafka consumer, or a metrics/admin endpoint on its own port. Re-scan the source EXHAUSTIVELY for every `listen(` / `.port` / `createServer` / `bindAsync` / broker connection URL, make every one of them read its injected env var, and declare a matching `ports: [{ name, env }]` slot. Also re-check {{featureConfigPath}}. Do NOT touch test files.

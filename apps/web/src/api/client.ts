@@ -235,6 +235,14 @@ export interface PortifyRepoState {
   commitSha?: string
 }
 
+export interface PortifyIndexEntry {
+  workflowId: string
+  feature: string
+  status: PortifyStatus
+  startedAt: string
+  endedAt?: string
+}
+
 export interface PortifyManifest {
   workflowId: string
   feature: string

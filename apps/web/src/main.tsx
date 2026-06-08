@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import { App } from './App'
 import { RunsProvider } from './state/RunsContext'
 import { BenchmarkProvider } from './state/BenchmarkContext'
+import { PortifyProvider } from './state/PortifyContext'
 import { EvaluationExportProvider } from './state/EvaluationExportContext'
 import { WizardDraftProvider } from './state/WizardDraftContext'
 import { McpPromoProvider } from './state/McpPromoContext'
@@ -16,13 +17,15 @@ createRoot(container).render(
   <React.StrictMode>
     <RunsProvider>
       <BenchmarkProvider>
-        <WizardDraftProvider>
-          <McpPromoProvider>
-            <EvaluationExportProvider>
-              <App />
-            </EvaluationExportProvider>
-          </McpPromoProvider>
-        </WizardDraftProvider>
+        <PortifyProvider>
+          <WizardDraftProvider>
+            <McpPromoProvider>
+              <EvaluationExportProvider>
+                <App />
+              </EvaluationExportProvider>
+            </McpPromoProvider>
+          </WizardDraftProvider>
+        </PortifyProvider>
       </BenchmarkProvider>
     </RunsProvider>
   </React.StrictMode>,
