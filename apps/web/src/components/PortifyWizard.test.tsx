@@ -10,6 +10,7 @@ vi.mock('../api/client', () => ({
   getPortify: vi.fn(),
   commitPortify: vi.fn(),
   cancelPortify: vi.fn(),
+  revisePortify: vi.fn(),
 }))
 // AgentSessionView opens a WS / fetches — stub it out in the wizard test.
 vi.mock('./AgentSessionView', () => ({ AgentSessionView: () => null }))
@@ -51,6 +52,16 @@ function clickButton(label: string): void {
   btn.dispatchEvent(new MouseEvent('click', { bubbles: true }))
 }
 const flush = () => act(async () => { await Promise.resolve(); await Promise.resolve() })
+
+// Set a React-controlled textarea's value via the native setter, then fire the
+// input event React listens for.
+function fillTextarea(value: string): void {
+  const ta = container.querySelector('textarea')
+  if (!ta) throw new Error('textarea not found')
+  const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!
+  setter.call(ta, value)
+  ta.dispatchEvent(new Event('input', { bubbles: true }))
+}
 
 async function renderWizard(onClose = vi.fn(), onCommitted = vi.fn()) {
   await act(async () => {
@@ -97,6 +108,37 @@ describe('PortifyWizard', () => {
     await flush()
     expect(api.commitPortify).toHaveBeenCalledWith('w')
     expect(onCommitted).toHaveBeenCalled()
+  })
+
+  it('shows the feedback box on the review screen and resumes the agent on submit', async () => {
+    vi.mocked(api.startPortify).mockResolvedValue({ workflowId: 'w' })
+    vi.mocked(api.getPortify).mockResolvedValue(readyManifest())
+    vi.mocked(api.revisePortify).mockResolvedValue(manifest('editing', { feedbackRounds: 1 }))
+    await renderWizard()
+    await act(async () => clickButton('Start ▶'))
+    await flush()
+    expect(container.textContent).toContain('Ask for changes')
+
+    await act(async () => fillTextarea('  use PORT not GATEWAY_PORT  '))
+    await act(async () => clickButton('Send feedback ▶'))
+    await flush()
+    expect(api.revisePortify).toHaveBeenCalledWith('w', 'use PORT not GATEWAY_PORT') // trimmed
+  })
+
+  it('blocks commit and warns when the latest revision failed verification', async () => {
+    vi.mocked(api.startPortify).mockResolvedValue({ workflowId: 'w' })
+    vi.mocked(api.getPortify).mockResolvedValue(manifest('ready-to-commit', {
+      diff: '# repo: app\n+ x', feedbackRounds: 2,
+      verification: { ok: false, instances: [], failureDetail: 'port 3000 still bound' },
+    }))
+    await renderWizard()
+    await act(async () => clickButton('Start ▶'))
+    await flush()
+    expect(container.textContent).toContain('pass the double-boot')
+    expect(container.textContent).toContain('port 3000 still bound')
+    expect(container.textContent).toContain('revision 2')
+    const commitBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Commit') as HTMLButtonElement
+    expect(commitBtn.disabled).toBe(true)
   })
 
   it('surfaces a start error on the plan screen', async () => {

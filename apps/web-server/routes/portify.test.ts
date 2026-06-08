@@ -38,6 +38,7 @@ async function buildApp(deps: Partial<PortifyRouteDeps>) {
     startPortify: deps.startPortify ?? (async () => ({ workflowId: 'portify-1' })),
     commitPortify: deps.commitPortify ?? (async () => manifest({ status: 'committed' })),
     cancelPortify: deps.cancelPortify ?? (async () => manifest({ status: 'aborted' })),
+    revisePortify: deps.revisePortify ?? (async () => manifest({ status: 'editing', feedbackRounds: 1 })),
     loadAgentSession: deps.loadAgentSession ?? (() => null),
   })
   return app
@@ -126,6 +127,32 @@ describe('portifyRoutes', () => {
     const res = await app.inject({ method: 'POST', url: '/api/portify/portify-1/cancel' })
     expect(res.statusCode).toBe(200)
     expect(cancelled).toBe('portify-1')
+  })
+
+  it('POST /api/portify/:id/revise delegates feedback to the runner', async () => {
+    let seen: { id?: string; feedback?: string } = {}
+    const app = await build({
+      revisePortify: async (id, feedback) => { seen = { id, feedback }; return manifest({ status: 'editing', feedbackRounds: 1 }) },
+    })
+    const res = await app.inject({ method: 'POST', url: '/api/portify/portify-1/revise', payload: { feedback: '  use PORT  ' } })
+    expect(res.statusCode).toBe(200)
+    expect(seen).toEqual({ id: 'portify-1', feedback: 'use PORT' }) // trimmed
+    expect(res.json()).toMatchObject({ status: 'editing', feedbackRounds: 1 })
+  })
+
+  it('POST /api/portify/:id/revise 400s on empty/whitespace feedback', async () => {
+    const app = await build({})
+    expect((await app.inject({ method: 'POST', url: '/api/portify/portify-1/revise', payload: {} })).statusCode).toBe(400)
+    expect((await app.inject({ method: 'POST', url: '/api/portify/portify-1/revise', payload: { feedback: '   ' } })).statusCode).toBe(400)
+  })
+
+  it('POST /api/portify/:id/revise surfaces the runner statusCode (409 wrong status)', async () => {
+    const app = await build({
+      revisePortify: async () => { throw Object.assign(new Error('cannot revise a workflow in status "editing"'), { statusCode: 409 }) },
+    })
+    const res = await app.inject({ method: 'POST', url: '/api/portify/portify-1/revise', payload: { feedback: 'x' } })
+    expect(res.statusCode).toBe(409)
+    expect((res.json() as { error: string }).error).toContain('cannot revise')
   })
 
   it('POST /api/portify defaults to 500 for an error without a statusCode', async () => {

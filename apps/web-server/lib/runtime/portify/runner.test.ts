@@ -183,6 +183,36 @@ describe('createPortifyRunner (integration)', () => {
     expect(branches.stdout).toContain('canary/dynamic-ports-myfeat')
   })
 
+  it('applies review feedback by resuming the agent and re-verifying, then commits', async () => {
+    const { featuresDir, logsDir, appRepo } = await singleFixture()
+    const { store, runner } = makeRunner(featuresDir, logsDir)
+
+    const { workflowId } = await runner.startPortify({ feature: 'myfeat', maxAttempts: 1 })
+    expect(await waitForStatus(store, workflowId, TERMINAL)).toBe('ready-to-commit')
+    const agentCallsBefore = vi.mocked(runPortifyAgent).mock.calls.length
+
+    // Feedback flips back to editing synchronously, then re-runs to ready-to-commit.
+    const flipped = await runner.revise(workflowId, 'rename PORT to API_PORT')
+    expect(flipped.status).toBe('editing')
+    expect(await waitForStatus(store, workflowId, TERMINAL)).toBe('ready-to-commit')
+
+    const after = store.get(workflowId)!
+    expect(after.feedbackRounds).toBe(1)
+    expect(after.attempt).toBe(1) // auto-retry budget untouched
+    expect(after.verification?.ok).toBe(true)
+
+    // The agent ran once more, resuming its session.
+    const calls = vi.mocked(runPortifyAgent).mock.calls
+    expect(calls.length).toBe(agentCallsBefore + 1)
+    expect(calls[calls.length - 1][0]).toMatchObject({ resume: true })
+
+    // Worktree survived the revise — commit still lands the branch.
+    const committed = await runner.commit(workflowId)
+    expect(committed.status).toBe('committed')
+    const branches = await runGit(appRepo, ['branch', '--list', committed.branch])
+    expect(branches.stdout).toContain('canary/dynamic-ports-myfeat')
+  })
+
   it('fails after exhausting attempts, discards the worktree, and restores the config', async () => {
     const { featuresDir, logsDir, appRepo } = await singleFixture()
     const featureDir = path.join(featuresDir, 'myfeat')
@@ -341,6 +371,44 @@ describe('createPortifyRunner (integration)', () => {
     it('cancel 404s for an unknown workflow', async () => {
       const { runner } = makeRunner('x', fs.mkdtempSync(path.join(os.tmpdir(), 'portify-cc-')))
       await expect(runner.cancel('nope')).rejects.toMatchObject({ statusCode: 404 })
+    })
+
+    it('commit 409s when the latest revise left verification failing', async () => {
+      const logsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-unproven-'))
+      roots.push(logsDir)
+      const { store, runner } = makeRunner('x', logsDir)
+      store.save(readyManifest({ verification: { ok: false, instances: [], failureDetail: 'clash' } }))
+      await expect(runner.commit('w')).rejects.toMatchObject({ statusCode: 409 })
+    })
+
+    it('revise 404s for an unknown workflow', async () => {
+      const { runner } = makeRunner('x', fs.mkdtempSync(path.join(os.tmpdir(), 'portify-rv-')))
+      await expect(runner.revise('nope', 'do x')).rejects.toMatchObject({ statusCode: 404 })
+    })
+
+    it('revise 400s on empty feedback', async () => {
+      const logsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-rvb-'))
+      roots.push(logsDir)
+      const { store, runner } = makeRunner('x', logsDir)
+      store.save(readyManifest())
+      await expect(runner.revise('w', '   ')).rejects.toMatchObject({ statusCode: 400 })
+    })
+
+    it('revise 409s when the workflow is not ready-to-commit', async () => {
+      const logsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-rvs-'))
+      roots.push(logsDir)
+      const { store, runner } = makeRunner('x', logsDir)
+      store.save(readyManifest({ status: 'editing' }))
+      await expect(runner.revise('w', 'do x')).rejects.toMatchObject({ statusCode: 409 })
+    })
+
+    it('revise 409s when the worktree is no longer active (e.g. after a restart)', async () => {
+      const logsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-rvi-'))
+      roots.push(logsDir)
+      const { store, runner } = makeRunner('x', logsDir)
+      // Saved directly → never went through startPortify → not in the active map.
+      store.save(readyManifest())
+      await expect(runner.revise('w', 'do x')).rejects.toMatchObject({ statusCode: 409 })
     })
   })
 })

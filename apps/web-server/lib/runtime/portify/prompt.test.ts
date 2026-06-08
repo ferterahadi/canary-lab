@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { FeatureConfig } from '../../../../../shared/launcher/types'
-import { applyTemplate, buildPortifyPrompt, buildPortifyRetryPrompt } from './prompt'
+import { applyTemplate, buildPortifyPrompt, buildPortifyRetryPrompt, buildPortifyFeedbackPrompt } from './prompt'
 
 describe('applyTemplate', () => {
   it('substitutes known placeholders and leaves unknown ones intact', () => {
@@ -68,5 +68,16 @@ describe('buildPortifyRetryPrompt', () => {
     const prompt = buildPortifyRetryPrompt(feature, 'boot failed')
     expect(prompt).toContain('NON-HTTP listener')
     expect(prompt).toContain('gRPC')
+  })
+})
+
+describe('buildPortifyFeedbackPrompt', () => {
+  it('embeds the user feedback and the config path, and re-asserts the no-tests constraint', () => {
+    const prompt = buildPortifyFeedbackPrompt(feature, 'use PORT instead of GATEWAY_PORT')
+    expect(prompt).toContain('use PORT instead of GATEWAY_PORT')
+    expect(prompt).toContain('/work/features/cns/feature.config.cjs')
+    expect(prompt).toContain('Do NOT touch test files')
+    // It resumes prior work rather than starting over.
+    expect(prompt).toContain("don't start over")
   })
 })
