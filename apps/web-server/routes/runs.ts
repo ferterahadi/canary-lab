@@ -4,6 +4,7 @@ import path from 'path'
 import type { RunDetail } from '../lib/run-store'
 import type { RunStore, OrchestratorLike, RestartHealResult, RestartRunResult, StartRunOutcome } from '../lib/run-store'
 import { loadFeatures } from '../lib/feature-loader'
+import { isHealClaimAllowed } from '../lib/heal-claim-policy'
 import { getGitRoot, resolveRepoPath } from '../lib/git-repo'
 import { removeWorktree } from '../lib/runtime/repo-worktree'
 import { listWorktrees, isUnder } from '../lib/runtime/worktree-inventory'
@@ -466,6 +467,12 @@ export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Pro
       reply.code(400)
       return { error: healAgent.error }
     }
+    // Heal-claim policy: only Desktop clients may own a heal claim. For a
+    // disallowed (CLI / 'other') client we down-shift to a non-external start
+    // — the run still runs, it just isn't claimed. The reuse-active path below
+    // funnels through broker.claim, which rejects on its own.
+    const claimSuppressed = !!healAgent && !('error' in healAgent) && !isHealClaimAllowed(healAgent.clientKind)
+    const effectiveHealAgent = claimSuppressed ? null : healAgent
     if (healAgent) {
       const active = findActiveRunForFeature(deps.store, feature, env)
       if (active) {
@@ -482,6 +489,13 @@ export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Pro
           status: active.manifest.status,
           claimed: claim ? claim.accepted : false,
           claim,
+          ...(claimSuppressed
+            ? {
+                claimSuppressed: true,
+                message:
+                  'Heal claiming is restricted to Claude/Codex Desktop clients. CLI clients can run/verify but cannot own a heal claim.',
+              }
+            : {}),
           ...(req.body?.forceNew
             ? {
                 ignoredForceNew: true,
@@ -496,7 +510,7 @@ export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Pro
       : undefined
     const executionType: ExecutionType = req.body?.mode === 'boot' ? 'boot' : 'run'
     try {
-      const outcome = await deps.startRun(feature, env, healAgent ?? undefined, isolation, executionType)
+      const outcome = await deps.startRun(feature, env, effectiveHealAgent ?? undefined, isolation, executionType)
       if (outcome.kind === 'collision') {
         // Same-repo collision and the caller didn't choose how to handle it.
         // Nothing started — surface the choice so the UI / MCP client can ask.
@@ -518,7 +532,16 @@ export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Pro
       // registration is guaranteed regardless of factory implementation.
       deps.store.registry.set(outcome.orch.runId, outcome.orch)
       reply.code(201)
-      return { runId: outcome.orch.runId }
+      return {
+        runId: outcome.orch.runId,
+        ...(claimSuppressed
+          ? {
+              claimSuppressed: true,
+              message:
+                'Heal claiming is restricted to Claude/Codex Desktop clients; this run started without a heal claim. Drive heal from Desktop or the web UI.',
+            }
+          : {}),
+      }
     } catch (err) {
       const code = typeof (err as { statusCode?: unknown }).statusCode === 'number'
         ? (err as { statusCode: number }).statusCode

@@ -16,6 +16,7 @@ import {
   type NormalizedRunCounts,
 } from '../lib/external-heal-surface'
 import { loadFeatures } from '../lib/feature-loader'
+import { isHealClaimAllowed } from '../lib/heal-claim-policy'
 import { computePortPreflight } from '../lib/runtime/port-preflight'
 import {
   createVerificationConfig,
@@ -180,6 +181,8 @@ const CLIENT_KIND = z.enum(['claude-cli', 'claude-desktop', 'codex-cli', 'codex-
 const SIGNAL_KIND = z.enum(['rerun', 'restart', 'heal'])
 const HEAL_STATUS = z.enum(['connected', 'waiting', 'healing', 'running-tests', 'paused', 'disconnected'])
 const EXTERNAL_DRAFT_STAGE = z.enum(['scaffolding', 'authoring-tests', 'validating', 'ready', 'applied', 'error'])
+const CLAIM_SUPPRESSED_MESSAGE =
+  'Heal claiming is restricted to Claude/Codex Desktop clients, so this run was started without a heal claim. It still runs — drive heal from Desktop or the web UI.'
 const WAIT_FOR_HEAL_TASK_DEFAULT_TIMEOUT_MS = 15 * 60 * 1000
 const WAIT_FOR_HEAL_TASK_MAX_TIMEOUT_MS = 60 * 60 * 1000
 
@@ -1091,6 +1094,15 @@ export function registerCanaryLabTools(
   }, async ({ feature, env, runId, run_ref, claim_heal, session_id, client_kind, conversation_name, guidance, force_new, isolation }) => {
     try {
       const requestedRef = runId ?? run_ref
+      // Heal-claim policy: claiming is reserved for Desktop clients. A CLI (or
+      // undetected 'other') client may still start/verify the run, but must not
+      // own its heal loop — so we down-shift claim_heal to false and tell the
+      // caller, instead of grabbing heal duty behind their back.
+      const claimAllowed = claim_heal && isHealClaimAllowed(client_kind)
+      const claimSuppressed = claim_heal && !claimAllowed
+      const suppressionFields = claimSuppressed
+        ? { claimSuppressed: true, message: CLAIM_SUPPRESSED_MESSAGE }
+        : {}
       // Default (no explicit ref, no force_new): continue the run that's
       // already healing for this feature — the external-heal continuation
       // pattern. With concurrency, `force_new` (or targeting a different run)
@@ -1098,14 +1110,15 @@ export function registerCanaryLabTools(
       // same-repo collisions surface a worktree/queue choice.
       const healing = findHealingRunForFeature(deps, feature, env)
       if (healing && !force_new && !requestedRef) {
-        const claim = claim_heal ? claimRun(deps, healing.manifest.runId, session_id, client_kind, conversation_name) : null
+        const claim = claimAllowed ? claimRun(deps, healing.manifest.runId, session_id, client_kind, conversation_name) : null
         return asJsonResult({
           runId: healing.manifest.runId,
           reused: true,
           status: healing.manifest.status,
-          claimed: claim_heal ? claim?.accepted === true : false,
+          claimed: claimAllowed ? claim?.accepted === true : false,
           claim,
-          ...(claim_heal ? healWaitNext(healing.manifest.runId) : {}),
+          ...suppressionFields,
+          ...(claimAllowed ? healWaitNext(healing.manifest.runId) : {}),
         })
       }
       if (requestedRef) {
@@ -1126,14 +1139,15 @@ export function registerCanaryLabTools(
           return asJsonResult({ ...bootSessionValue(target), reused: true })
         }
         if (isActiveRunStatus(status)) {
-          const claim = claim_heal ? claimRun(deps, target.manifest.runId, session_id, client_kind, conversation_name) : null
+          const claim = claimAllowed ? claimRun(deps, target.manifest.runId, session_id, client_kind, conversation_name) : null
           return asJsonResult({
             runId: target.manifest.runId,
             reused: true,
             status,
-            claimed: claim_heal ? claim?.accepted === true : false,
+            claimed: claimAllowed ? claim?.accepted === true : false,
             claim,
-            ...(claim_heal ? healWaitNext(target.manifest.runId) : {}),
+            ...suppressionFields,
+            ...(claimAllowed ? healWaitNext(target.manifest.runId) : {}),
           })
         }
         if (status === 'passed') {
@@ -1148,6 +1162,19 @@ export function registerCanaryLabTools(
           return errorResult(`run-not-restartable: ${target.manifest.runId} status=${status}`)
         }
         if (!deps.restartExternalRun) return errorResult('restartExternalRun dependency is not configured')
+        // Restarting a failed run re-enters external heal — it builds an
+        // externalHealSession directly (bypassing broker.claim). That's heal
+        // ownership, so disallowed (CLI / 'other') clients are refused here
+        // rather than silently restarting into a session they own.
+        if (!isHealClaimAllowed(client_kind)) {
+          return asJsonResult({
+            type: 'claim_not_allowed',
+            runId: target.manifest.runId,
+            status,
+            claimSuppressed: true,
+            message: `${CLAIM_SUPPRESSED_MESSAGE} Restarting a failed run into external heal is Desktop-only — restart it from Claude/Codex Desktop or the web UI.`,
+          })
+        }
         const restarted = await deps.restartExternalRun(
           target.manifest.runId,
           {
@@ -1158,7 +1185,7 @@ export function registerCanaryLabTools(
           },
           guidance,
         )
-        const claim = claim_heal ? claimRun(deps, restarted.runId, session_id, client_kind, conversation_name) : null
+        const claim = claimAllowed ? claimRun(deps, restarted.runId, session_id, client_kind, conversation_name) : null
         const counts = normalizeRunCounts(target.summary ?? null)
         return asJsonResult({
           runId: restarted.runId,
@@ -1168,15 +1195,15 @@ export function registerCanaryLabTools(
           statusLine: counts.statusLine,
           counts,
           status: 'running',
-          claimed: claim_heal ? claim?.accepted === true : false,
+          claimed: claimAllowed ? claim?.accepted === true : false,
           claim,
-          ...(claim_heal ? healWaitNext(restarted.runId) : {}),
+          ...(claimAllowed ? healWaitNext(restarted.runId) : {}),
         })
       }
       const outcome = await deps.startRun(
         feature,
         env,
-        claim_heal
+        claimAllowed
           ? {
               kind: 'external',
               sessionId: session_id,
@@ -1205,15 +1232,17 @@ export function registerCanaryLabTools(
           reused: false,
           queued: true,
           queueReason: outcome.reason,
-          claimed: claim_heal,
-          ...(claim_heal ? healWaitNext(outcome.runId) : {}),
+          claimed: claimAllowed,
+          ...suppressionFields,
+          ...(claimAllowed ? healWaitNext(outcome.runId) : {}),
         })
       }
       return asJsonResult({
         runId: outcome.runId,
         reused: false,
-        claimed: claim_heal,
-        ...(claim_heal ? healWaitNext(outcome.runId) : {}),
+        claimed: claimAllowed,
+        ...suppressionFields,
+        ...(claimAllowed ? healWaitNext(outcome.runId) : {}),
       })
     } catch (err) {
       return errorResult(err instanceof Error ? err.message : String(err))
@@ -1317,6 +1346,11 @@ export function registerCanaryLabTools(
       ...(conversation_name ? { conversationName: conversation_name } : {}),
     })
     if (!result.accepted) {
+      if (result.reason === 'client-kind-not-allowed') {
+        return errorResult(
+          `client-kind-not-allowed: heal claiming is restricted to Claude/Codex Desktop (this client is ${result.clientKind}). The run can still be run/verified; drive heal from Desktop or the web UI.`,
+        )
+      }
       return errorResult(`already-claimed by session ${result.currentSession.sessionId} (${result.currentSession.clientKind})`)
     }
     return asJsonResult({ accepted: true, session: result.session })
@@ -1470,7 +1504,9 @@ function bootSessionValue(detail: RunDetail): Extract<WaitForHealTaskValue, { ty
   }
 }
 
-type ClaimResult = { accepted: true; session: unknown } | { accepted: false; reason: string; currentSession: unknown }
+type ClaimResult =
+  | { accepted: true; session: unknown }
+  | { accepted: false; reason: string; currentSession?: unknown }
 
 function claimRun(
   deps: CanaryLabMcpDeps,
@@ -1484,9 +1520,10 @@ function claimRun(
     clientKind,
     ...(conversationName ? { conversationName } : {}),
   })
-  return result.accepted
-    ? { accepted: true, session: result.session }
-    : { accepted: false, reason: result.reason, currentSession: result.currentSession }
+  if (result.accepted) return { accepted: true, session: result.session }
+  return result.reason === 'already-claimed'
+    ? { accepted: false, reason: result.reason, currentSession: result.currentSession }
+    : { accepted: false, reason: result.reason }
 }
 
 function findHealingRunForFeature(
