@@ -6,6 +6,7 @@ import type {
 } from './runtime/manifest'
 import type { RunStoreEvent } from './run-store'
 import { HEARTBEAT_STALE_MS } from '../../../shared/run-state'
+import { isHealClaimAllowed } from './heal-claim-policy'
 
 // `ExternalHealBroker` owns the in-memory state for which external AI client
 // (Claude Desktop, Codex CLI, etc.) currently holds heal duty for each run.
@@ -31,6 +32,9 @@ export interface ExternalHealBrokerDeps {
     patch: Partial<Pick<RunManifest, 'externalHealSession' | 'healMode'>>,
   ): void
   audit(runId: string, entry: ExternalHealAuditEntry): void
+  // Policy gate: which client kinds may own a heal claim. Injectable for
+  // tests; defaults to the env-aware module policy (desktops-only).
+  isClaimAllowed?(clientKind: ExternalHealClientKind): boolean
 }
 
 export interface ExternalHealAuditEntry {
@@ -52,6 +56,7 @@ export interface ClaimInput {
 export type ClaimResult =
   | { accepted: true; session: ExternalHealSession }
   | { accepted: false; reason: 'already-claimed'; currentSession: ExternalHealSession }
+  | { accepted: false; reason: 'client-kind-not-allowed'; clientKind: ExternalHealClientKind }
 
 export type OwnershipResult =
   | { ok: true }
@@ -77,6 +82,22 @@ export class ExternalHealBroker {
   claim(runId: string, input: ClaimInput): ClaimResult {
     const existing = this.sessions.get(runId)
     const nowIso = new Date(this.deps.now()).toISOString()
+
+    // Policy backstop: only allowlisted client kinds (desktops) may own a
+    // heal claim. CLI / undetected ('other') clients are rejected here — the
+    // single chokepoint for every broker-routed claim path (claim_heal tool,
+    // REST /claim, reclaim helper, claimRun reuse).
+    const claimAllowed = this.deps.isClaimAllowed ?? isHealClaimAllowed
+    if (!claimAllowed(input.clientKind)) {
+      this.deps.audit(runId, {
+        ts: nowIso,
+        sessionId: input.sessionId,
+        clientKind: input.clientKind,
+        action: 'claim-rejected',
+        args: { reason: 'client-kind-not-allowed' },
+      })
+      return { accepted: false, reason: 'client-kind-not-allowed', clientKind: input.clientKind }
+    }
 
     if (existing && existing.sessionId !== input.sessionId) {
       this.deps.audit(runId, {
