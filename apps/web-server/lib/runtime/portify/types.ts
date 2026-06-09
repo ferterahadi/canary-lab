@@ -72,6 +72,10 @@ export interface PortifyIndexEntry {
   workflowId: string
   feature: string
   status: PortifyStatus
+  /** Branch the rewrite lands on — surfaced in the history list so a committed
+   *  workflow's branch is findable without reopening it. Optional: index
+   *  entries persisted before this field existed deserialize without it. */
+  branch?: string
   startedAt: string
   endedAt?: string
 }

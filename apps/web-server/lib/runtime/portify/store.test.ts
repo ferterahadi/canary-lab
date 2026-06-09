@@ -43,7 +43,7 @@ describe('PortifyRunStore', () => {
     const got = store.get('portify-1')
     expect(got?.workflowId).toBe('portify-1')
     expect(store.list()).toEqual([
-      { workflowId: 'portify-1', feature: 'cns', status: 'planning', startedAt: '2026-06-07T00:00:00.000Z' },
+      { workflowId: 'portify-1', feature: 'cns', status: 'planning', branch: 'canary/dynamic-ports-cns', startedAt: '2026-06-07T00:00:00.000Z' },
     ])
   })
 
@@ -66,6 +66,22 @@ describe('PortifyRunStore', () => {
     store.offEvent(fn)
     store.save(manifest({ status: 'editing' }))
     expect(events).toHaveLength(1)
+  })
+
+  it('remove drops the index entry + run dir and emits a removed event', () => {
+    const logs = tmpLogs()
+    const store = new PortifyRunStore(logs)
+    const events: unknown[] = []
+    store.save(manifest())
+    store.onEvent((e) => events.push(e))
+    expect(store.get('portify-1')).not.toBeNull()
+
+    store.remove('portify-1')
+
+    expect(store.list()).toEqual([])
+    expect(store.get('portify-1')).toBeNull()
+    expect(fs.existsSync(path.join(logs, 'portify', 'portify-1'))).toBe(false)
+    expect(events).toEqual([{ kind: 'removed', workflowId: 'portify-1' }])
   })
 
   it('a throwing listener does not break persistence', () => {

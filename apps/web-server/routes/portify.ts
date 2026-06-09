@@ -13,6 +13,7 @@ export interface PortifyRouteDeps {
   commitPortify(workflowId: string): Promise<PortifyManifest>
   cancelPortify(workflowId: string): Promise<PortifyManifest>
   revisePortify(workflowId: string, feedback: string): Promise<PortifyManifest>
+  removePortify(workflowId: string): Promise<{ workflowId: string; removed: true }>
   loadAgentSession(workflowId: string): { agent: string; sessionId: string; model?: string; effort?: string; events: unknown[] } | null
 }
 
@@ -77,6 +78,16 @@ export async function portifyRoutes(app: FastifyInstance, deps: PortifyRouteDeps
   app.post<{ Params: { workflowId: string } }>('/api/portify/:workflowId/cancel', async (req, reply) => {
     try {
       return await deps.cancelPortify(req.params.workflowId)
+    } catch (err) {
+      reply.code((err as { statusCode?: number }).statusCode ?? 500)
+      return { error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
+  // Remove a finished workflow from history. Terminal-only (the runner guards).
+  app.delete<{ Params: { workflowId: string } }>('/api/portify/:workflowId', async (req, reply) => {
+    try {
+      return await deps.removePortify(req.params.workflowId)
     } catch (err) {
       reply.code((err as { statusCode?: number }).statusCode ?? 500)
       return { error: err instanceof Error ? err.message : String(err) }

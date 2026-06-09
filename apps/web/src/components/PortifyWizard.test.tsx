@@ -51,6 +51,12 @@ function clickButton(label: string): void {
   if (!btn) throw new Error(`button not found: ${label} (have: ${[...container.querySelectorAll('button')].map((b) => b.textContent?.trim()).join(' | ')})`)
   btn.dispatchEvent(new MouseEvent('click', { bubbles: true }))
 }
+function clickByTitle(title: string): void {
+  const el = container.querySelector(`[title="${title}"]`)
+  if (!el) throw new Error(`element not found by title: ${title}`)
+  el.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+}
+const buttonLabels = (): string[] => [...container.querySelectorAll('button')].map((b) => b.textContent?.trim() ?? '')
 const flush = () => act(async () => { await Promise.resolve(); await Promise.resolve() })
 
 // Set a React-controlled textarea's value via the native setter, then fire the
@@ -110,19 +116,49 @@ describe('PortifyWizard', () => {
     expect(onCommitted).toHaveBeenCalled()
   })
 
-  it('shows the feedback box on the review screen and resumes the agent on submit', async () => {
+  it('opens the feedback modal from Request changes and resumes the agent on submit', async () => {
     vi.mocked(api.startPortify).mockResolvedValue({ workflowId: 'w' })
     vi.mocked(api.getPortify).mockResolvedValue(readyManifest())
     vi.mocked(api.revisePortify).mockResolvedValue(manifest('editing', { feedbackRounds: 1 }))
     await renderWizard()
     await act(async () => clickButton('Start ▶'))
     await flush()
-    expect(container.textContent).toContain('Ask for changes')
+    // No composer until Request changes is pressed.
+    expect(container.querySelector('textarea')).toBeNull()
+
+    await act(async () => clickButton('Request changes'))
+    expect(container.textContent).toContain('Ask the agent for changes')
+    expect(container.querySelector('textarea')).not.toBeNull()
 
     await act(async () => fillTextarea('  use PORT not GATEWAY_PORT  '))
-    await act(async () => clickButton('Send feedback ▶'))
+    await act(async () => clickButton('Send & re-verify'))
     await flush()
     expect(api.revisePortify).toHaveBeenCalledWith('w', 'use PORT not GATEWAY_PORT') // trimmed
+  })
+
+  it('shows the worktree path on the review screen for local review', async () => {
+    vi.mocked(api.startPortify).mockResolvedValue({ workflowId: 'w' })
+    vi.mocked(api.getPortify).mockResolvedValue(manifest('ready-to-commit', {
+      diff: '# repo: app\n+ x',
+      repos: [{ name: 'app', path: '~/app', worktreePath: '/tmp/wt/app' }],
+      verification: { ok: true, instances: [{ ports: { api: 1 }, ok: true }, { ports: { api: 2 }, ok: true }] },
+    }))
+    await renderWizard()
+    await act(async () => clickButton('Start ▶'))
+    await flush()
+    expect(container.textContent).toContain('Review locally')
+    expect(container.textContent).toContain('/tmp/wt/app')
+  })
+
+  it('committed screen shows a copyable git merge command for the branch', async () => {
+    vi.mocked(api.startPortify).mockResolvedValue({ workflowId: 'w' })
+    vi.mocked(api.getPortify).mockResolvedValue(manifest('committed', {
+      repos: [{ name: 'app', path: '~/app', commitSha: 'abcdef1234' }],
+    }))
+    await renderWizard()
+    await act(async () => clickButton('Start ▶'))
+    await flush()
+    expect(container.textContent).toContain('git merge canary/dynamic-ports-cns')
   })
 
   it('blocks commit and warns when the latest revision failed verification', async () => {
@@ -216,5 +252,55 @@ describe('PortifyWizard', () => {
     expect(container.textContent).toContain('abcdef1234'.slice(0, 10))
     await act(async () => clickButton('Done'))
     expect(onCommitted).toHaveBeenCalled()
+  })
+
+  it('navigates Review ↔ Commit on a committed workflow via the stepper', async () => {
+    vi.mocked(api.startPortify).mockResolvedValue({ workflowId: 'w' })
+    vi.mocked(api.getPortify).mockResolvedValue(manifest('committed', {
+      diff: '# repo: app\n+ app.listen(process.env.PORT)',
+      repos: [{ name: 'app', path: '~/app', commitSha: 'abcdef1234' }],
+      verification: { ok: true, instances: [{ ports: { api: 1 }, ok: true }, { ports: { api: 2 }, ok: true }] },
+    }))
+    await renderWizard()
+    await act(async () => clickButton('Start ▶'))
+    await flush()
+    // Lands on the Commit screen, with the committed cue on the stepper.
+    expect(container.textContent).toContain('git merge canary/dynamic-ports-cns')
+    expect(container.textContent).toContain('committed ✓')
+
+    // Go back to Review — read-only: diff is shown, but no Commit / Request-changes.
+    await act(async () => clickByTitle('Go to Review'))
+    await flush()
+    expect(container.textContent).toContain('app.listen(process.env.PORT)')
+    expect(buttonLabels()).not.toContain('Commit')
+    expect(buttonLabels()).not.toContain('Request changes')
+    expect(buttonLabels()).toContain('View commit details →')
+
+    // The "View commit details" button returns to the Commit screen.
+    await act(async () => clickButton('View commit details →'))
+    await flush()
+    expect(container.textContent).toContain('git merge canary/dynamic-ports-cns')
+
+    // And the stepper Review number works too (Commit → Review again).
+    await act(async () => clickByTitle('Go to Review'))
+    await flush()
+    expect(buttonLabels()).toContain('View commit details →')
+  })
+
+  it('at ready-to-commit the stepper exposes Exercise but not Commit (not yet reached)', async () => {
+    vi.mocked(api.startPortify).mockResolvedValue({ workflowId: 'w' })
+    vi.mocked(api.getPortify).mockResolvedValue(readyManifest())
+    await renderWizard()
+    await act(async () => clickButton('Start ▶'))
+    await flush()
+    expect(container.querySelector('[title="Go to Exercise"]')).toBeTruthy()
+    expect(container.querySelector('[title="Go to Review"]')).toBeTruthy()
+    // Commit isn't reachable until the workflow is committed.
+    expect(container.querySelector('[title="Go to Commit"]')).toBeNull()
+
+    // Peek at the agent log (Exercise) and come back to Review.
+    await act(async () => clickByTitle('Go to Exercise'))
+    await flush()
+    expect(container.textContent).toContain('The exercise')
   })
 })

@@ -1,6 +1,8 @@
+import { useState } from 'react'
 import * as api from '../../api/client'
 import type { ConfigValue, ParsedConfigDoc } from '../../api/client'
 import { SaveBar } from './SaveBar'
+import { PortifyHistoryList } from '../PortifyHistoryList'
 import { useEditableSlice } from './useEditableSlice'
 import {
   deriveRepoName,
@@ -25,9 +27,12 @@ interface PortsSlice {
 export function PortsTab({
   feature,
   onStartPortify,
+  onOpenPortify,
 }: {
   feature: string
   onStartPortify?: (feature: string) => void
+  /** Reopen a past/active port-ification workflow (by id) in the wizard. */
+  onOpenPortify?: (workflowId: string) => void
 }) {
   const ed = useEditableSlice<ParsedConfigDoc, PortsSlice>({
     load: () => api.getFeatureConfigDoc(feature),
@@ -45,6 +50,7 @@ export function PortsTab({
     save: (payload) => api.putFeatureConfigDoc(feature, payload as ConfigValue),
     deps: [feature],
   })
+  const [confirmRerun, setConfirmRerun] = useState(false)
 
   if (ed.error && !ed.draft) {
     return <div className="p-4 text-xs" style={{ color: 'var(--danger)' }}>{ed.error}</div>
@@ -54,6 +60,20 @@ export function PortsTab({
   }
 
   const { repos } = ed.draft
+
+  // Shallow "portified" signal from the current (draft) config: any bootable
+  // start command declares ≥1 slot — or there's nothing bootable to clash.
+  // Mirrors the server's computePortPreflight, and updates live as slots change.
+  const commands = repos.flatMap((r) => r.startCommands)
+  const declaredSlots = commands.reduce((n, c) => n + (c.ports?.length ?? 0), 0)
+  const portsConfigured = commands.length === 0 || declaredSlots > 0
+  const portifyBranch = `canary/dynamic-ports-${feature.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'feature'}`
+
+  const launchPortify = (): void => {
+    // Re-running on a feature that already has slots resets its branch — confirm.
+    if (portsConfigured) setConfirmRerun(true)
+    else onStartPortify?.(feature)
+  }
 
   const setPorts = (ri: number, ci: number, ports: PortSlotSlice[]): void => {
     ed.setDraft((d) => ({
@@ -78,34 +98,73 @@ export function PortsTab({
             title here — Portify is positioned as this tab's headline action,
             top-right of its own explanation. */}
         <div
-          className="flex items-start justify-between gap-4 px-4 py-3"
-          style={{ borderBottom: '1px solid var(--border-default)' }}
+          className="px-4 py-3"
+          style={{
+            borderBottom: '1px solid var(--border-default)',
+            borderLeft: `2px solid ${portsConfigured ? 'rgb(52,211,153)' : 'color-mix(in srgb, var(--accent) 30%, var(--border-default))'}`,
+          }}
         >
-          <p className="text-[11px] leading-relaxed" style={{ color: 'var(--text-muted)' }}>
-            Declare the ports each service needs. Every slot gets a free port per run,
-            injected as the env var the service reads (e.g.{' '}
-            <code style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }}>PORT</code>),
-            and referenced elsewhere as{' '}
-            <code style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }}>{'${port.<name>}'}</code>{' '}
-            — in the start command, the health-check URL, or applied envset files. This lets
-            benchmark arms and concurrent runs boot the same app without clashing.
-          </p>
-          {onStartPortify && (
-            <button
-              type="button"
-              onClick={() => onStartPortify(feature)}
-              className="shrink-0 inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[11px] font-medium transition-colors duration-150"
-              title="Portify — not sure where a service binds? Detect and rewrite every listener to an injectable port automatically, so it can boot concurrently (benchmark arms / parallel runs)."
-              style={{
-                color: 'var(--accent)',
-                border: '1px solid color-mix(in srgb, var(--accent) 45%, var(--border-default))',
-                background: 'color-mix(in srgb, var(--accent) 8%, transparent)',
-              }}
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0">
+              {/* Status leads: a glanceable headline + one-line meaning. */}
+              <div className="flex items-center gap-2">
+                <span
+                  aria-hidden
+                  style={{
+                    display: 'inline-block', width: 8, height: 8, borderRadius: 9999,
+                    background: portsConfigured ? 'rgb(52,211,153)' : 'transparent',
+                    border: portsConfigured ? 'none' : '1.5px solid var(--text-muted)',
+                    boxShadow: portsConfigured ? '0 0 8px color-mix(in srgb, rgb(52,211,153) 55%, transparent)' : 'none',
+                  }}
+                />
+                <span style={{ fontSize: 13, fontWeight: 600, color: portsConfigured ? 'rgb(52,211,153)' : 'var(--text-primary)' }}>
+                  {portsConfigured ? 'Portified — ready for concurrent boot' : 'Not portified'}
+                </span>
+              </div>
+              <p className="mt-1 text-[11.5px] leading-relaxed" style={{ color: 'var(--text-muted)', maxWidth: 540 }}>
+                {portsConfigured
+                  ? 'Each service reads an injected port, so benchmark arms and parallel runs can boot this feature at once.'
+                  : 'Booting this feature more than once would clash on a hardcoded port. Portify rewrites its listeners to injectable ports so it can.'}
+              </p>
+            </div>
+            {onStartPortify && (
+              <button
+                type="button"
+                onClick={launchPortify}
+                className="shrink-0 inline-flex items-center gap-1.5 self-start rounded-md px-3 py-1.5 text-[11px] font-medium transition-colors duration-150"
+                title={portsConfigured
+                  ? 'Re-run Portify — resets the dynamic-ports branch and redoes the rewrite.'
+                  : 'Portify — detect and rewrite every listener to an injectable port automatically, so it can boot concurrently (benchmark arms / parallel runs).'}
+                style={{
+                  color: 'var(--accent)',
+                  border: '1px solid color-mix(in srgb, var(--accent) 45%, var(--border-default))',
+                  background: 'color-mix(in srgb, var(--accent) 8%, transparent)',
+                }}
+              >
+                <span aria-hidden>🔌</span>
+                {portsConfigured ? 'Re-run Portify' : 'Portify'}
+              </button>
+            )}
+          </div>
+
+          {/* Jargon demoted to a collapsible — present for the curious, out of
+              the way by default. The pill text stays for at-a-glance status. */}
+          <details className="mt-2.5">
+            <summary
+              className="cursor-pointer select-none text-[10px] font-semibold uppercase tracking-wider"
+              style={{ color: 'var(--text-muted)' }}
             >
-              <span aria-hidden>🔌</span>
-              Portify
-            </button>
-          )}
+              {portsConfigured ? 'PORTIFIED ✓' : 'NOT PORTIFIED'} · how injectable ports work
+            </summary>
+            <p className="mt-1.5 text-[11px] leading-relaxed" style={{ color: 'var(--text-muted)', maxWidth: 620 }}>
+              Declare the ports each service needs. Every slot gets a free port per run,
+              injected as the env var the service reads (e.g.{' '}
+              <code style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }}>PORT</code>),
+              and referenced elsewhere as{' '}
+              <code style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }}>{'${port.<name>}'}</code>{' '}
+              — in the start command, the health-check URL, or applied envset files.
+            </p>
+          </details>
         </div>
 
         <div className="flex flex-col gap-3 px-4 py-3">
@@ -156,6 +215,13 @@ export function PortsTab({
             </div>
           ))}
         </div>
+
+        {/* Portify history (all features). Lives here — where Portify is
+            launched — so a committed run's branch stays findable after its
+            window is closed. */}
+        <div className="px-4 py-3" style={{ borderTop: '1px solid var(--border-default)' }}>
+          <PortifyHistoryList onOpenPortify={onOpenPortify} />
+        </div>
       </div>
 
       <SaveBar
@@ -166,6 +232,39 @@ export function PortsTab({
         onSave={ed.doSave}
         onDiscard={ed.discard}
       />
+
+      {confirmRerun && (
+        <div
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', display: 'grid', placeItems: 'center', zIndex: 95 }}
+          onClick={() => setConfirmRerun(false)}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Re-run Portify"
+            onClick={(e) => e.stopPropagation()}
+            style={{ width: 'min(460px, 92%)', background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-lg)', padding: 20 }}
+          >
+            <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 8 }}>Re-run Portify?</div>
+            <div style={{ fontSize: 12.5, color: 'var(--text-muted)', lineHeight: 1.6, marginBottom: 16 }}>
+              <b style={{ color: 'var(--text-secondary)' }}>{feature}</b> already declares port slots. Re-running Portify resets the branch{' '}
+              <code style={{ fontFamily: 'var(--font-mono)', fontSize: 11.5, color: 'var(--text-secondary)' }}>{portifyBranch}</code>{' '}
+              to HEAD and redoes the rewrite from scratch — any earlier commit on that branch is overwritten.
+            </div>
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+              <button type="button" className="cl-button" onClick={() => setConfirmRerun(false)} style={{ padding: '7px 14px', fontSize: 12.5 }}>Cancel</button>
+              <button
+                type="button"
+                className="cl-button-primary"
+                onClick={() => { setConfirmRerun(false); onStartPortify?.(feature) }}
+                style={{ padding: '7px 14px', fontSize: 12.5 }}
+              >
+                Re-run Portify
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

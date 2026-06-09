@@ -8,7 +8,6 @@ export function BenchmarkPill({ active, onOpen }: { active: boolean; onOpen: () 
       onClick={onOpen}
       className="cl-button flex shrink-0 items-center gap-1.5 px-2.5 py-1"
       title={active ? 'A benchmark is running — click to view' : 'Run a benchmark — race two repair agents on a sabotaged codebase'}
-      style={{ color: 'var(--accent)', borderColor: 'color-mix(in srgb, var(--accent) 45%, var(--border-default))' }}
     >
       {active ? (
         <span aria-hidden="true" className="inline-block h-1.5 w-1.5 animate-pulse rounded-full" style={{ background: 'rgb(56,189,248)' }} />

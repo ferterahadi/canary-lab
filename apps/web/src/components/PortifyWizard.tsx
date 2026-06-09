@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import * as api from '../api/client'
 import type { PortifyManifest, PortifyStatus } from '../api/client'
 import { AgentSessionView } from './AgentSessionView'
+import { CopyButton } from './CopyButton'
 
 // Guided port-ification: an agent rewrites the feature's apps to use injectable
 // ports, proven by a concurrent double-boot, ending at a user commit. Full-
@@ -57,9 +58,14 @@ export function PortifyWizard({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [confirmLeave, setConfirmLeave] = useState(false)
+  const [feedbackOpen, setFeedbackOpen] = useState(false)
   // Bumped after a revise pass to restart the poller (status flips back to
   // editing, so polling — stopped at ready-to-commit — must resume).
   const [pollNonce, setPollNonce] = useState(0)
+  // Stepper navigation override: which step the user is *viewing*, when it
+  // differs from the status-derived step. Null = follow status. Only honored
+  // once Review is reached (ready-to-commit / committed).
+  const [viewStep, setViewStep] = useState<number | null>(null)
   const pollRef = useRef<number | null>(null)
 
   const stopPolling = useCallback(() => {
@@ -80,6 +86,13 @@ export function PortifyWizard({
     pollRef.current = window.setInterval(tick, 1500)
     return stopPolling
   }, [workflowId, pollNonce, stopPolling])
+
+  // Drop any stepper override whenever the run isn't in a navigable state
+  // (active again after a revise, or terminal-failed) so live progress shows.
+  useEffect(() => {
+    const s = m?.status
+    if (s !== 'ready-to-commit' && s !== 'committed') setViewStep(null)
+  }, [m?.status])
 
   const start = async () => {
     if (!feature) return
@@ -115,6 +128,7 @@ export function PortifyWizard({
     try {
       const next = await api.revisePortify(workflowId, feedback)
       setM(next)
+      setFeedbackOpen(false)
       setPollNonce((n) => n + 1)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -144,7 +158,11 @@ export function PortifyWizard({
   // A workflow is "in flight" (cancellable / worth keeping alive) until terminal.
   const isActive = Boolean(workflowId) && status != null
     && status !== 'committed' && status !== 'failed' && status !== 'aborted'
-  const stepIdx = stepIndexFor(workflowId ? (status ?? 'planning') : 'plan')
+  // statusStep = where the workflow's status puts it; effectiveStep = what the
+  // user is viewing (status, or a stepper override once Review is reached).
+  const statusStep = stepIndexFor(workflowId ? (status ?? 'planning') : 'plan')
+  const navigable = status === 'ready-to-commit' || status === 'committed'
+  const effectiveStep = navigable ? (viewStep ?? statusStep) : statusStep
 
   return (
     <div className="fixed inset-0 z-[80] flex flex-col" style={{ background: 'var(--bg-base)' }}>
@@ -176,7 +194,13 @@ export function PortifyWizard({
         </div>
       </header>
 
-      <Stepper current={stepIdx} />
+      <Stepper
+        current={workflowId ? effectiveStep : 0}
+        reachedMax={workflowId ? statusStep : 0}
+        committed={status === 'committed'}
+        navigable={navigable}
+        onStep={setViewStep}
+      />
 
       <div style={{ flex: 1, overflow: 'auto', padding: '20px 22px 60px', display: 'flex', justifyContent: 'center', alignItems: 'flex-start' }}>
         <div style={{ width: 'min(820px, 100%)' }}>
@@ -184,19 +208,33 @@ export function PortifyWizard({
           {workflowId && !m && (
             <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>Loading…</div>
           )}
-          {workflowId && m && (status === 'planning' || status === 'editing' || status === 'verifying') && (
-            <ExerciseScreen m={m} />
+          {/* Live, non-navigable states render straight from status. */}
+          {workflowId && m && !navigable && (status === 'planning' || status === 'editing' || status === 'verifying') && (
+            <ExerciseScreen m={m} live />
           )}
-          {workflowId && m && status === 'ready-to-commit' && (
-            <ReviewScreen m={m} busy={busy} onCommit={commit} onRevise={revise} onCancel={() => setConfirmLeave(true)} />
-          )}
-          {workflowId && m && status === 'committed' && <CommittedScreen m={m} onDone={onCommitted} />}
-          {workflowId && m && (status === 'failed' || status === 'aborted') && (
+          {workflowId && m && !navigable && (status === 'failed' || status === 'aborted') && (
             <FailedScreen m={m} onClose={discard} />
           )}
+          {/* Once Review is reached, the stepper drives which screen shows. */}
+          {workflowId && m && navigable && effectiveStep === 1 && <ExerciseScreen m={m} live={false} />}
+          {workflowId && m && navigable && effectiveStep === 2 && (
+            <ReviewScreen
+              m={m}
+              busy={busy}
+              committed={status === 'committed'}
+              onCommit={commit}
+              onRequestChanges={() => setFeedbackOpen(true)}
+              onViewCommit={() => setViewStep(3)}
+            />
+          )}
+          {workflowId && m && navigable && effectiveStep === 3 && <CommittedScreen m={m} onDone={onCommitted} />}
           {error && <div style={{ color: 'rgb(251,113,133)', fontSize: 12, marginTop: 14 }}>{error}</div>}
         </div>
       </div>
+
+      {feedbackOpen && (
+        <FeedbackModal busy={busy} onSend={revise} onClose={() => setFeedbackOpen(false)} />
+      )}
 
       {confirmLeave && (
         <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.55)', display: 'grid', placeItems: 'center', zIndex: 90 }}>
@@ -221,25 +259,70 @@ const ghostBtn: React.CSSProperties = {
   borderRadius: 'var(--radius-md)', color: 'var(--text-secondary)', fontSize: 12, cursor: 'pointer',
 }
 
-function Stepper({ current }: { current: number }) {
+function Stepper({
+  current,
+  reachedMax,
+  committed,
+  navigable,
+  onStep,
+}: {
+  /** The step currently being viewed (gets the accent highlight). */
+  current: number
+  /** Furthest step the workflow itself has reached (status-derived). */
+  reachedMax: number
+  /** Whether the workflow is committed (shows the ✓ cue on the Commit step). */
+  committed: boolean
+  /** Whether step navigation is enabled (Review reached). */
+  navigable: boolean
+  onStep: (i: number) => void
+}) {
+  // A step is clickable once Review is reached, for any reached step except
+  // Plan (the pre-start screen has no destination for an existing run).
+  const isClickable = (i: number): boolean => navigable && i >= 1 && i <= reachedMax
+  const COMMIT_STEP = 3
   return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0, padding: '14px 20px', borderBottom: '1px solid var(--border-default)' }}>
-      {STEPS.map((s, i) => (
-        <div key={s.key} style={{ display: 'flex', alignItems: 'center' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, opacity: i <= current ? 1 : 0.45 }}>
+      {STEPS.map((s, i) => {
+        const reached = i <= reachedMax
+        const isCurrent = i === current
+        const clickable = isClickable(i)
+        const showCommittedTick = committed && i === COMMIT_STEP
+        const circleColor = showCommittedTick ? 'rgb(52,211,153)' : isCurrent || reached ? 'var(--accent)' : 'var(--text-muted)'
+        const inner = (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, opacity: reached ? 1 : 0.45 }}>
             <span style={{
               width: 20, height: 20, borderRadius: 9999, display: 'grid', placeItems: 'center', fontSize: 11, fontWeight: 700,
-              border: `2px solid ${i <= current ? 'var(--accent)' : 'var(--border-default)'}`,
-              color: i <= current ? 'var(--accent)' : 'var(--text-muted)',
-            }}>{i + 1}</span>
+              border: `2px solid ${showCommittedTick ? 'rgb(52,211,153)' : isCurrent || reached ? 'var(--accent)' : 'var(--border-default)'}`,
+              color: circleColor,
+              background: isCurrent ? 'color-mix(in srgb, var(--accent) 14%, transparent)' : 'transparent',
+            }}>{showCommittedTick ? '✓' : i + 1}</span>
             <span style={{ fontSize: 12 }}>
-              <b style={{ color: 'var(--text-primary)' }}>{s.label}</b>
-              <span style={{ color: 'var(--text-muted)', marginLeft: 6 }}>{s.sub}</span>
+              <b style={{ color: isCurrent ? 'var(--accent)' : 'var(--text-primary)' }}>{s.label}</b>
+              <span style={{ color: 'var(--text-muted)', marginLeft: 6 }}>
+                {committed && i === COMMIT_STEP ? 'committed ✓' : s.sub}
+              </span>
             </span>
           </div>
-          {i < STEPS.length - 1 && <span style={{ width: 40, height: 2, background: 'var(--border-default)', margin: '0 12px' }} />}
-        </div>
-      ))}
+        )
+        return (
+          <div key={s.key} style={{ display: 'flex', alignItems: 'center' }}>
+            {clickable ? (
+              <button
+                type="button"
+                onClick={() => onStep(i)}
+                title={`Go to ${s.label}`}
+                aria-current={isCurrent ? 'step' : undefined}
+                style={{ background: 'transparent', border: 'none', padding: 0, cursor: 'pointer' }}
+              >
+                {inner}
+              </button>
+            ) : (
+              inner
+            )}
+            {i < STEPS.length - 1 && <span style={{ width: 40, height: 2, background: 'var(--border-default)', margin: '0 12px' }} />}
+          </div>
+        )
+      })}
     </div>
   )
 }
@@ -263,20 +346,22 @@ function PlanScreen({ feature, agent, busy, onStart }: { feature: string; agent:
   )
 }
 
-function ExerciseScreen({ m }: { m: PortifyManifest }) {
+function ExerciseScreen({ m, live }: { m: PortifyManifest; live: boolean }) {
+  // When viewed after the fact (live=false), every phase reads as done.
+  const settled = !live || m.status === 'ready-to-commit' || m.status === 'committed'
   return (
     <div>
-      <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 4 }}>Running the exercise</div>
+      <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 4 }}>{live ? 'Running the exercise' : 'The exercise'}</div>
       <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginBottom: 18 }}>
         Attempt {Math.max(1, m.attempt)} of {m.maxAttempts}
       </div>
       <div style={{ border: '1px solid var(--border-default)', borderRadius: 'var(--radius-lg)', overflow: 'hidden' }}>
-        <Phase done label="Branch + worktree created" active={m.status === 'planning'} />
-        <Phase done={m.status === 'verifying' || m.status === 'ready-to-commit'} active={m.status === 'editing'} label="Agent rewriting ports (source + config)" />
-        <Phase active={m.status === 'verifying'} label="Booting twice on different ports + health checks" />
+        <Phase done label="Branch + worktree created" active={live && m.status === 'planning'} />
+        <Phase done={settled || m.status === 'verifying'} active={live && m.status === 'editing'} label="Agent rewriting ports (source + config)" />
+        <Phase done={settled} active={live && m.status === 'verifying'} label="Booting twice on different ports + health checks" />
       </div>
       <div style={{ fontSize: 12.5, color: 'var(--accent)', marginTop: 14 }}>{STATUS_LABEL[m.status]}</div>
-      {m.verification && !m.verification.ok && m.verification.failureDetail && (
+      {live && m.verification && !m.verification.ok && m.verification.failureDetail && (
         <div style={{ marginTop: 12, fontSize: 11.5, fontFamily: 'var(--font-mono)', color: 'rgb(251,191,36)', background: 'var(--bg-base)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)', padding: '10px 12px', whiteSpace: 'pre-wrap' }}>
           Last attempt failed — retrying:{'\n'}{m.verification.failureDetail}
         </div>
@@ -286,7 +371,7 @@ function ExerciseScreen({ m }: { m: PortifyManifest }) {
           Agent
         </div>
         <div style={{ height: 360, border: '1px solid var(--border-default)', borderRadius: 'var(--radius-lg)', overflow: 'hidden' }}>
-          <AgentSessionView source={{ kind: 'portify', workflowId: m.workflowId, live: true }} />
+          <AgentSessionView source={{ kind: 'portify', workflowId: m.workflowId, live }} />
         </div>
       </div>
     </div>
@@ -315,7 +400,7 @@ function VerificationBadge({ m }: { m: PortifyManifest }) {
   )
 }
 
-function ReviewScreen({ m, busy, onCommit, onRevise, onCancel }: { m: PortifyManifest; busy: boolean; onCommit: () => void; onRevise: (feedback: string) => void; onCancel: () => void }) {
+function ReviewScreen({ m, busy, committed, onCommit, onRequestChanges, onViewCommit }: { m: PortifyManifest; busy: boolean; committed: boolean; onCommit: () => void; onRequestChanges: () => void; onViewCommit: () => void }) {
   const rounds = m.feedbackRounds ?? 0
   // At ready-to-commit verification is always set; a prior revise round may have
   // left it failed — in that case the diff isn't proven and can't be committed.
@@ -323,7 +408,7 @@ function ReviewScreen({ m, busy, onCommit, onRevise, onCancel }: { m: PortifyMan
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 12 }}>
-        <div style={{ fontSize: 16, fontWeight: 600 }}>Review &amp; commit</div>
+        <div style={{ fontSize: 16, fontWeight: 600 }}>{committed ? 'Review' : 'Review & commit'}</div>
         {rounds > 0 && (
           <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' }}>
             revision {rounds}
@@ -331,23 +416,84 @@ function ReviewScreen({ m, busy, onCommit, onRevise, onCancel }: { m: PortifyMan
         )}
       </div>
       {proven ? <VerificationBadge m={m} /> : <RevisionFailedBanner m={m} />}
+      {/* The worktree is gone after commit — review is read-only. */}
+      {!committed && <ReviewLocally m={m} />}
       <DiffView diff={m.diff ?? ''} />
-      <FeedbackBox busy={busy} proven={proven} onRevise={onRevise} />
-      <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 16 }}>
-        <button
-          type="button"
-          className="cl-button-primary"
-          disabled={busy || !proven}
-          onClick={onCommit}
-          title={proven ? undefined : 'The latest changes did not pass verification — send feedback to fix them first'}
-          style={{ padding: '9px 16px', opacity: proven ? 1 : 0.5, cursor: proven && !busy ? 'pointer' : 'not-allowed' }}
-        >
-          {busy ? 'Working…' : 'Commit'}
-        </button>
-        <button type="button" onClick={onCancel} style={ghostBtn}>Cancel</button>
-        <span style={{ fontSize: 11.5, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
-          feat: make {m.feature} ports injectable · branch {m.branch}
-        </span>
+      {committed ? (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 16, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 12.5, color: 'rgb(52,211,153)', fontWeight: 600 }}>✓ Committed</span>
+          <span style={{ fontSize: 11.5, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>
+            branch {m.branch}
+          </span>
+          <button
+            type="button"
+            onClick={onViewCommit}
+            style={{ marginLeft: 'auto', padding: '8px 14px', fontSize: 12.5, fontWeight: 600, borderRadius: 'var(--radius-md)', background: 'transparent', border: '1px solid var(--accent)', color: 'var(--accent)', cursor: 'pointer', whiteSpace: 'nowrap' }}
+          >
+            View commit details →
+          </button>
+        </div>
+      ) : (
+        /* Commit (far left) and Request changes (far right) sit at opposite ends
+           so the "I'm done" and "do more" actions can't be confused. */
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, marginTop: 16 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
+            <button
+              type="button"
+              className="cl-button-primary"
+              disabled={busy || !proven}
+              onClick={onCommit}
+              title={proven ? undefined : 'The latest changes did not pass verification — request changes to fix them first'}
+              style={{ padding: '9px 16px', opacity: proven ? 1 : 0.5, cursor: proven && !busy ? 'pointer' : 'not-allowed' }}
+            >
+              {busy ? 'Working…' : 'Commit'}
+            </button>
+            <span style={{ fontSize: 11.5, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              feat: make {m.feature} ports injectable · branch {m.branch}
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={onRequestChanges}
+            disabled={busy}
+            title="Send the agent feedback — it resumes its session and re-verifies"
+            style={{
+              padding: '9px 16px', fontSize: 12.5, fontWeight: 600, borderRadius: 'var(--radius-md)', whiteSpace: 'nowrap',
+              background: 'transparent', border: '1px solid var(--accent)', color: 'var(--accent)',
+              cursor: busy ? 'not-allowed' : 'pointer', opacity: busy ? 0.5 : 1,
+            }}
+          >
+            Request changes
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// "Not ready yet" path: point the user at the on-disk worktree so they can open
+// it in their own editor and review the full change before committing. The
+// workflow parks at ready-to-commit indefinitely; hand-edits in the worktree
+// are committed as-is.
+function ReviewLocally({ m }: { m: PortifyManifest }) {
+  const trees = m.repos.filter((r) => r.worktreePath)
+  if (trees.length === 0) return null
+  return (
+    <div style={{ marginBottom: 14, border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)', background: 'var(--bg-surface)', padding: '11px 13px' }}>
+      <div style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '.4px', color: 'var(--text-muted)', fontWeight: 600, marginBottom: 8 }}>
+        Review locally
+      </div>
+      <div style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.55, marginBottom: 10 }}>
+        Not ready? Open the worktree in your editor to review the full change first — it stays here until you commit. Hand-edits in the worktree are included in the commit.
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+        {trees.map((r) => (
+          <div key={r.name} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: 11.5, color: 'var(--text-secondary)', flexShrink: 0 }}>{r.name}</span>
+            <code style={{ ...mono, flex: '1 1 auto', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.worktreePath}</code>
+            <CopyButton value={r.worktreePath!} label="Copy path" style={{ flexShrink: 0 }} />
+          </div>
+        ))}
       </div>
     </div>
   )
@@ -358,55 +504,70 @@ function ReviewScreen({ m, busy, onCommit, onRevise, onCancel }: { m: PortifyMan
 function RevisionFailedBanner({ m }: { m: PortifyManifest }) {
   return (
     <div style={{ fontSize: 11.5, fontFamily: 'var(--font-mono)', color: 'rgb(251,191,36)', background: 'rgba(251,191,36,0.08)', border: '1px solid rgba(251,191,36,0.3)', borderRadius: 'var(--radius-md)', padding: '10px 12px', marginBottom: 14, whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>
-      ⚠ Your last change didn’t pass the double-boot — fix it with more feedback before committing.
+      ⚠ Your last change didn’t pass the double-boot — fix it with “Request changes” before committing.
       {m.verification?.failureDetail ? `\n\n${m.verification.failureDetail}` : ''}
       {m.error ? `\n\n${m.error}` : ''}
     </div>
   )
 }
 
-// Resume the agent with review feedback. Cmd/Ctrl+Enter submits.
-function FeedbackBox({ busy, proven, onRevise }: { busy: boolean; proven: boolean; onRevise: (feedback: string) => void }) {
+// Modal composer to send the agent review feedback. Autofocuses; Cmd/Ctrl+Enter
+// submits; Escape / backdrop / Cancel closes (unless a send is in flight).
+function FeedbackModal({ busy, onSend, onClose }: { busy: boolean; onSend: (feedback: string) => void; onClose: () => void }) {
   const [text, setText] = useState('')
+  const taRef = useRef<HTMLTextAreaElement | null>(null)
   const trimmed = text.trim()
-  const send = () => { if (trimmed && !busy) { onRevise(trimmed); setText('') } }
+  useEffect(() => { taRef.current?.focus() }, [])
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => { if (e.key === 'Escape' && !busy) onClose() }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [busy, onClose])
+  const send = (): void => { if (trimmed && !busy) onSend(trimmed) }
   return (
-    <div style={{ marginTop: 18, border: '1px solid var(--border-default)', borderLeft: '2px solid var(--accent)', borderRadius: 'var(--radius-lg)', background: 'var(--bg-surface)', padding: '14px 16px' }}>
-      <div style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '.4px', color: 'var(--text-muted)', fontWeight: 600, marginBottom: 8 }}>
-        Ask for changes
-      </div>
-      <textarea
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); send() } }}
-        placeholder={'e.g. “use PORT instead of GATEWAY_PORT”, or “also expose the bull-dashboard slot”'}
-        rows={3}
-        disabled={busy}
-        style={{
-          width: '100%', resize: 'vertical', boxSizing: 'border-box',
-          fontSize: 13, lineHeight: 1.55, fontFamily: 'var(--font-sans)', color: 'var(--text-primary)',
-          background: 'var(--bg-base)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)',
-          padding: '9px 11px', outline: 'none',
-        }}
-      />
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 10 }}>
-        <button
-          type="button"
-          onClick={send}
-          disabled={busy || !trimmed}
+    <div
+      style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.55)', display: 'grid', placeItems: 'center', zIndex: 90 }}
+      onClick={() => { if (!busy) onClose() }}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Ask the agent for changes"
+        style={{ width: 'min(560px, 92%)', background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-lg)', padding: 20 }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 6 }}>Ask the agent for changes</div>
+        <div style={{ fontSize: 12.5, color: 'var(--text-muted)', lineHeight: 1.6, marginBottom: 12 }}>
+          The agent resumes where it left off, applies your feedback, and re-runs the double-boot before it’s ready to commit again.
+        </div>
+        <textarea
+          ref={taRef}
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); send() } }}
+          placeholder={'e.g. “use PORT instead of GATEWAY_PORT”, or “also expose the bull-dashboard slot”'}
+          rows={4}
+          disabled={busy}
           style={{
-            padding: '7px 14px', fontSize: 12.5, fontWeight: 600, borderRadius: 'var(--radius-md)', cursor: busy || !trimmed ? 'not-allowed' : 'pointer',
-            background: 'transparent', border: '1px solid var(--accent)', color: 'var(--accent)', opacity: busy || !trimmed ? 0.45 : 1,
+            width: '100%', resize: 'vertical', boxSizing: 'border-box',
+            fontSize: 13, lineHeight: 1.55, fontFamily: 'var(--font-sans)', color: 'var(--text-primary)',
+            background: 'var(--bg-base)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)',
+            padding: '9px 11px', outline: 'none',
           }}
-        >
-          {busy ? 'Resuming agent…' : 'Send feedback ▶'}
-        </button>
-        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-          {proven
-            ? 'The agent resumes where it left off, re-edits, and re-runs the double-boot.'
-            : 'Describe what to fix — the agent resumes and re-verifies.'}
-          <span style={{ fontFamily: 'var(--font-mono)', marginLeft: 6, opacity: 0.8 }}>⌘↵</span>
-        </span>
+        />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 14 }}>
+          <span style={{ marginRight: 'auto', fontSize: 11, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>⌘↵ to send</span>
+          <button type="button" onClick={() => { if (!busy) onClose() }} disabled={busy} style={ghostBtn}>Cancel</button>
+          <button
+            type="button"
+            className="cl-button-primary"
+            onClick={send}
+            disabled={busy || !trimmed}
+            style={{ padding: '8px 16px', opacity: busy || !trimmed ? 0.55 : 1, cursor: busy || !trimmed ? 'not-allowed' : 'pointer' }}
+          >
+            {busy ? 'Resuming agent…' : 'Send & re-verify'}
+          </button>
+        </div>
       </div>
     </div>
   )
@@ -414,22 +575,45 @@ function FeedbackBox({ busy, proven, onRevise }: { busy: boolean; proven: boolea
 
 function CommittedScreen({ m, onDone }: { m: PortifyManifest; onDone: () => void }) {
   const committed = m.repos.filter((r) => r.commitSha)
+  const mergeCmd = `git merge ${m.branch}`
   return (
     <div>
       <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 8, color: 'rgb(52,211,153)' }}>✓ Committed</div>
-      <p style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6, marginBottom: 12 }}>
-        The port rewrite is committed to <code style={mono}>{m.branch}</code>. Re-open the benchmark to run it now — both arms will boot on distinct ports.
+      <p style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6, marginBottom: 14 }}>
+        The port rewrite is committed to its own branch. Your working tree wasn’t touched — bring it into your branch with a merge (or cherry-pick / a PR).
       </p>
-      <div style={{ marginBottom: 18 }}>
-        {committed.length === 0 && (
-          <div style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>No source changes were needed — the apps already honor injected ports; the config now declares the slots.</div>
-        )}
-        {committed.map((r) => (
-          <div key={r.name} style={{ fontSize: 12, fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }}>
-            {r.name} <code style={mono}>{r.commitSha!.slice(0, 10)}</code>
+
+      {committed.length === 0 ? (
+        <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginBottom: 18 }}>
+          No source changes were needed — the apps already honor injected ports; the config now declares the slots. Nothing to merge.
+        </div>
+      ) : (
+        <div style={{ border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)', background: 'var(--bg-surface)', padding: '13px 15px', marginBottom: 18 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+            <span style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '.4px', color: 'var(--text-muted)', fontWeight: 600 }}>Branch</span>
+            <code style={{ ...mono, flex: '0 1 auto', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.branch}</code>
+            <CopyButton value={m.branch} label="Copy" style={{ flexShrink: 0 }} />
           </div>
-        ))}
-      </div>
+          <div style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '.4px', color: 'var(--text-muted)', fontWeight: 600, marginBottom: 6 }}>
+            Bring it into your branch
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <code style={{ ...mono, flex: '1 1 auto', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', padding: '6px 9px' }}>{mergeCmd}</code>
+            <CopyButton value={mergeCmd} label="Copy" style={{ flexShrink: 0 }} />
+          </div>
+          <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 4 }}>
+            {committed.map((r) => (
+              <div key={r.name} style={{ fontSize: 12, fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }}>
+                {r.name} <code style={mono}>{r.commitSha!.slice(0, 10)}</code>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <p style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.6, marginBottom: 16 }}>
+        Tip: re-open the benchmark to run it now — both arms will boot on distinct ports.
+      </p>
       <button type="button" className="cl-button-primary" onClick={onDone} style={{ padding: '9px 16px' }}>Done</button>
     </div>
   )

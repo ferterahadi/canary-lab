@@ -30,6 +30,11 @@ vi.mock('../../state/RunsContext', () => ({
   useRuns: vi.fn(() => ({ runs: [] })),
 }))
 
+// PortsTab embeds the Portify history list, which reads PortifyContext.
+vi.mock('../../state/PortifyContext', () => ({
+  usePortify: () => ({ workflows: [] }),
+}))
+
 let container: HTMLDivElement
 let root: Root
 
@@ -100,14 +105,35 @@ describe('PortsTab', () => {
     )
   })
 
-  it('fires onStartPortify from the Portify button', async () => {
+  it('shows PORTIFIED ✓ and confirms a re-run before firing onStartPortify', async () => {
     vi.mocked(getFeatureConfigDoc).mockResolvedValue(docWithPorts())
     const onStartPortify = vi.fn()
     await act(async () => {
       root.render(<PortsTab feature="cns_exactly_once_fallback" onStartPortify={onStartPortify} />)
     })
-    await act(async () => clickButton('Portify'))
+    // Slots declared → portified badge + a re-run-style action that confirms first.
+    expect(container.textContent).toContain('PORTIFIED ✓')
+    await act(async () => clickButton('Re-run Portify'))
+    expect(onStartPortify).not.toHaveBeenCalled()
+    expect(container.textContent).toContain('Re-run Portify?')
+
+    // Confirm (the dialog's button) → launches.
+    const dlg = container.querySelector('[role="dialog"]')!
+    const confirmBtn = [...dlg.querySelectorAll('button')].find((b) => b.textContent?.includes('Re-run Portify'))!
+    await act(async () => confirmBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })))
     expect(onStartPortify).toHaveBeenCalledWith('cns_exactly_once_fallback')
+  })
+
+  it('shows NOT PORTIFIED and launches directly (no confirm) when no port slots are declared', async () => {
+    vi.mocked(getFeatureConfigDoc).mockResolvedValue(docNoPorts())
+    const onStartPortify = vi.fn()
+    await act(async () => {
+      root.render(<PortsTab feature="np_feature" onStartPortify={onStartPortify} />)
+    })
+    expect(container.textContent).toContain('NOT PORTIFIED')
+    await act(async () => clickButton('Portify'))
+    expect(onStartPortify).toHaveBeenCalledWith('np_feature')
+    expect(container.textContent).not.toContain('Re-run Portify?')
   })
 
   it('shows an empty state when there are no services', async () => {
@@ -154,6 +180,27 @@ function docWithPorts(): ParsedConfigDoc {
               { command: 'yarn start', ports: [{ name: 'api', env: 'PORT' }] },
             ],
           },
+        ],
+        featureDir: { $expr: '__dirname' },
+      },
+      complexFields: [],
+      source: '',
+    },
+  }
+}
+
+function docNoPorts(): ParsedConfigDoc {
+  return {
+    path: '/features/np_feature/feature.config.cjs',
+    format: 'cjs',
+    content: '',
+    parsed: {
+      value: {
+        name: 'np_feature',
+        description: 'desc',
+        envs: ['local'],
+        repos: [
+          { name: 'svc', localPath: '~/svc', startCommands: [{ command: 'yarn start' }] },
         ],
         featureDir: { $expr: '__dirname' },
       },

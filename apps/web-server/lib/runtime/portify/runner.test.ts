@@ -410,6 +410,28 @@ describe('createPortifyRunner (integration)', () => {
       store.save(readyManifest())
       await expect(runner.revise('w', 'do x')).rejects.toMatchObject({ statusCode: 409 })
     })
+
+    it('remove 404s for an unknown workflow', async () => {
+      const { runner } = makeRunner('x', fs.mkdtempSync(path.join(os.tmpdir(), 'portify-rm404-')))
+      await expect(runner.remove('nope')).rejects.toMatchObject({ statusCode: 404 })
+    })
+
+    it('remove 409s for a non-terminal workflow', async () => {
+      const logsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-rmne-'))
+      roots.push(logsDir)
+      const { store, runner } = makeRunner('x', logsDir)
+      store.save(readyManifest()) // ready-to-commit is non-terminal
+      await expect(runner.remove('w')).rejects.toMatchObject({ statusCode: 409 })
+    })
+
+    it('remove drops a terminal workflow from history', async () => {
+      const logsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-rmok-'))
+      roots.push(logsDir)
+      const { store, runner } = makeRunner('x', logsDir)
+      store.save(readyManifest({ status: 'committed', endedAt: 'now' }))
+      expect(await runner.remove('w')).toEqual({ workflowId: 'w', removed: true })
+      expect(store.list()).toEqual([])
+    })
   })
 })
 

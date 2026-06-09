@@ -222,6 +222,7 @@ export function App() {
           }}
           onFeaturesChanged={refreshFeatures}
           onStartPortify={(f) => setPortifyTarget({ kind: 'new', feature: f })}
+          onOpenPortify={(workflowId) => setPortifyTarget({ kind: 'revisit', workflowId })}
         />
       ),
     },
@@ -292,6 +293,7 @@ export function App() {
           feature={configFor}
           initialTab="playwright"
           onStartPortify={(f) => setPortifyTarget({ kind: 'new', feature: f })}
+          onOpenPortify={(workflowId) => setPortifyTarget({ kind: 'revisit', workflowId })}
           onClose={() => setConfigFor(null)}
           onRenamed={(_, nextFeature) => {
             setConfigFor(nextFeature)

@@ -20,6 +20,8 @@ interface Props {
   onFeaturesChanged?: (preferredFeature?: string | null) => void
   /** Opens the port-ification wizard for a feature (Service tab entry). */
   onStartPortify?: (feature: string) => void
+  /** Reopens a past/active port-ification workflow (Ports-tab history). */
+  onOpenPortify?: (workflowId: string) => void
 }
 
 export function FeaturesColumn({
@@ -31,6 +33,7 @@ export function FeaturesColumn({
   onSelectFeature,
   onFeaturesChanged,
   onStartPortify,
+  onOpenPortify,
 }: Props) {
   const { startNewWizard } = useWizardDrafts()
   const { gatePromo } = useMcpPromo()
@@ -127,6 +130,7 @@ export function FeaturesColumn({
         <FeatureConfigEditor
           feature={configFor}
           onStartPortify={onStartPortify}
+          onOpenPortify={(workflowId) => { setConfigFor(null); onOpenPortify?.(workflowId) }}
           onClose={() => setConfigFor(null)}
           onRenamed={(_, nextFeature) => {
             setConfigFor(nextFeature)

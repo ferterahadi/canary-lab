@@ -23,10 +23,9 @@
 
 ## Logging & Retention
 
-Logs live under `<workspace>/logs/`. Two distinct streams:
+Logs live under `<workspace>/logs/`:
 
 - **Per-run artifacts** — `logs/runs/<runId>/` holds `runner.log` (orchestrator narration), `svc-<name>.log` (each booted service's PTY output, captured programmatically — never echoed to the server's stdout), `playwright.log`, `external-commands.jsonl`, etc. Retention is count-based: keep the most recent `CANARY_LAB_RUN_RETENTION` runs (default 20) via `pruneRuns` (`lib/runtime/retention.ts`), called on `createServer` bootstrap and on every RunStore `finalized` event (`server.ts`). Status-agnostic + lexicographic by runId; concurrency caps keep active runs well under the limit.
-- **Server process output** — the `canary-lab ui` server's *own* stdout/stderr (console output, Fastify route errors, uncaught exceptions) is teed to `logs/server/canary-ui-<timestamp>.log` while still echoing to the terminal. This is for diagnosing why the *server* misbehaved/crashed, NOT service logs (those are the per-run `svc-*.log`). Set up in `runUi` (`scripts/ui-command.ts`, injectable `setupServerLogging` seam — no-op in tests) via `installServerLogging` (`lib/runtime/server-log.ts`). Synchronous `fs.writeSync` so a crash can't lose its own diagnostics. Uncaught exceptions use `uncaughtExceptionMonitor` (logs without altering Node's default crash-exit); unhandled rejections log then `exit(1)` to preserve Node's default termination. Count-based retention `CANARY_LAB_SERVER_LOG_RETENTION` (default 10), pruned per launch. Path is printed in the startup banner.
 
 ## Testing Against a Remote URL
 
