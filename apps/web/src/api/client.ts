@@ -239,6 +239,7 @@ export interface PortifyIndexEntry {
   workflowId: string
   feature: string
   status: PortifyStatus
+  branch?: string
   startedAt: string
   endedAt?: string
 }
@@ -308,6 +309,15 @@ export function revisePortify(
   return request<PortifyManifest>(
     `${baseUrl}/api/portify/${encodeURIComponent(workflowId)}/revise`,
     { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ feedback }) },
+    fetchImpl,
+  )
+}
+
+export function removePortify(workflowId: string, opts?: ClientOptions): Promise<{ workflowId: string; removed: true }> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<{ workflowId: string; removed: true }>(
+    `${baseUrl}/api/portify/${encodeURIComponent(workflowId)}`,
+    { method: 'DELETE' },
     fetchImpl,
   )
 }

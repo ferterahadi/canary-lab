@@ -40,14 +40,6 @@ export default defineConfig({
         'scripts/ui-command.ts',
         'apps/web-server/server.ts',
         'apps/web-server/ws/**',
-        // Same "process bootstrap glue" category as server.ts: its remaining
-        // uncovered branches are the `opts.{stdout,stderr,proc} ?? process.*`
-        // default-argument fallbacks, which can only be exercised by patching
-        // the real process.stdout + registering a real unhandledRejection→exit
-        // handler — that corrupts v8's own coverage collection. (Its testable
-        // logic — filenames, retention, prune, tee, crash formatting — is
-        // covered by server-log.test.ts.)
-        'apps/web-server/lib/runtime/server-log.ts',
         // Integration-heavy orchestration + the heaviest route handlers are
         // covered by dedicated behavior tests, but under the strict 100% gate
         // their defensive glue has branches that can't be exercised

@@ -1177,6 +1177,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
     commitPortify: portifyRunner.commit,
     cancelPortify: portifyRunner.cancel,
     revisePortify: portifyRunner.revise,
+    removePortify: portifyRunner.remove,
     loadAgentSession: (id) => {
       try {
         const raw = fs.readFileSync(path.join(portifyDir(logsDir, id), 'agent-session.json'), 'utf-8')

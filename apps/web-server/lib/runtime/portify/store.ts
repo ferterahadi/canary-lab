@@ -36,6 +36,7 @@ function indexEntryFromManifest(m: PortifyManifest): PortifyIndexEntry {
     workflowId: m.workflowId,
     feature: m.feature,
     status: m.status,
+    branch: m.branch,
     startedAt: m.startedAt,
     ...(m.endedAt ? { endedAt: m.endedAt } : {}),
   }
@@ -50,6 +51,7 @@ export interface PortifyStore {
   list(): PortifyIndexEntry[]
   get(workflowId: string): PortifyManifest | null
   save(manifest: PortifyManifest): void
+  remove(workflowId: string): void
   onEvent(fn: (event: PortifyStoreEvent) => void): void
   offEvent(fn: (event: PortifyStoreEvent) => void): void
 }
@@ -86,6 +88,19 @@ export class PortifyRunStore implements PortifyStore {
    * finish — flip it so the UI doesn't show it as live forever. (Orphaned
    * worktrees + branches are reclaimed separately via the worktree inventory.)
    */
+  /**
+   * Drop a workflow from history: remove its index entry and run directory,
+   * then emit `removed` so live clients prune it. Does NOT touch any git branch
+   * a committed workflow landed — that's the user's work in their own repo.
+   * No-op (still emits) if the entry is already gone.
+   */
+  remove(workflowId: string): void {
+    const entries = readIndex(this.logsDir).filter((e) => e.workflowId !== workflowId)
+    atomicWrite(portifyIndexPath(this.logsDir), JSON.stringify(entries, null, 2) + '\n')
+    try { fs.rmSync(portifyDir(this.logsDir, workflowId), { recursive: true, force: true }) } catch { /* best-effort */ }
+    this.emit({ kind: 'removed', workflowId })
+  }
+
   reconcileInterrupted(now: () => string): void {
     for (const entry of this.list()) {
       if (entry.status === 'committed' || entry.status === 'failed' || entry.status === 'aborted') continue

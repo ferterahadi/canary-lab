@@ -377,7 +377,24 @@ export function createPortifyRunner(deps: PortifyRunnerDeps) {
     return next
   }
 
-  return { startPortify, commit, cancel, revise, abort: cancel }
+  // Remove a finished workflow from history (index + run dir). Only terminal
+  // workflows can be removed — an active one must be committed or cancelled
+  // first. Removing a committed one keeps its git branch (the user's work).
+  async function remove(workflowId: string): Promise<{ workflowId: string; removed: true }> {
+    const m = deps.store.get(workflowId)
+    if (!m) throw Object.assign(new Error('workflow not found'), { statusCode: 404 })
+    const terminal = m.status === 'committed' || m.status === 'failed' || m.status === 'aborted'
+    if (!terminal) {
+      throw Object.assign(
+        new Error(`cannot remove a workflow in status "${m.status}" — commit or cancel it first`),
+        { statusCode: 409 },
+      )
+    }
+    deps.store.remove(workflowId)
+    return { workflowId, removed: true }
+  }
+
+  return { startPortify, commit, cancel, revise, remove, abort: cancel }
 }
 
 function readFileOrNull(p: string): string | null {

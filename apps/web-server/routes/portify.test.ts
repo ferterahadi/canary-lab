@@ -25,6 +25,7 @@ function fakeStore(over: Partial<PortifyStore> = {}): PortifyStore {
     list: () => [],
     get: () => null,
     save: () => {},
+    remove: () => {},
     onEvent: () => {},
     offEvent: () => {},
     ...over,
@@ -39,6 +40,7 @@ async function buildApp(deps: Partial<PortifyRouteDeps>) {
     commitPortify: deps.commitPortify ?? (async () => manifest({ status: 'committed' })),
     cancelPortify: deps.cancelPortify ?? (async () => manifest({ status: 'aborted' })),
     revisePortify: deps.revisePortify ?? (async () => manifest({ status: 'editing', feedbackRounds: 1 })),
+    removePortify: deps.removePortify ?? (async (workflowId) => ({ workflowId, removed: true as const })),
     loadAgentSession: deps.loadAgentSession ?? (() => null),
   })
   return app
@@ -153,6 +155,24 @@ describe('portifyRoutes', () => {
     const res = await app.inject({ method: 'POST', url: '/api/portify/portify-1/revise', payload: { feedback: 'x' } })
     expect(res.statusCode).toBe(409)
     expect((res.json() as { error: string }).error).toContain('cannot revise')
+  })
+
+  it('DELETE /api/portify/:id removes a finished workflow', async () => {
+    let removed: string | undefined
+    const app = await build({ removePortify: async (id) => { removed = id; return { workflowId: id, removed: true } } })
+    const res = await app.inject({ method: 'DELETE', url: '/api/portify/portify-1' })
+    expect(res.statusCode).toBe(200)
+    expect(removed).toBe('portify-1')
+    expect(res.json()).toMatchObject({ workflowId: 'portify-1', removed: true })
+  })
+
+  it('DELETE /api/portify/:id surfaces a 409 for a non-terminal workflow', async () => {
+    const app = await build({
+      removePortify: async () => { throw Object.assign(new Error('cannot remove a workflow in status "editing" — commit or cancel it first'), { statusCode: 409 }) },
+    })
+    const res = await app.inject({ method: 'DELETE', url: '/api/portify/portify-1' })
+    expect(res.statusCode).toBe(409)
+    expect((res.json() as { error: string }).error).toContain('cannot remove')
   })
 
   it('POST /api/portify defaults to 500 for an error without a statusCode', async () => {

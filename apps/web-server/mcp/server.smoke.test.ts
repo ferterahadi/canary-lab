@@ -77,6 +77,7 @@ const AUTHOR_TOOLS = uniqueSorted([
   'get_run_snapshot',
   'list_evaluation_exports',
   'list_features',
+  'list_portify_status',
   'list_runs',
   'revise_portify',
   'start_external_draft',
@@ -246,6 +247,31 @@ describe('MCP HTTP server (smoke)', () => {
       const featureNames = features.map((f) => f.name).sort()
       expect(featureNames).toContain('broken_todo_api')
       expect(featureNames).toContain('example_todo_api')
+    } finally {
+      if (client) await client.close().catch(() => undefined)
+      await app.close()
+    }
+  })
+
+  it('tools/call list_portify_status returns each feature with a portsConfigured flag + summary', async () => {
+    const projectRoot = path.resolve(__dirname, '..', '..', '..', 'templates', 'project')
+    const { app } = await createServer({ projectRoot, ptyFactory: inertPtyFactory })
+    let client: Client | null = null
+    try {
+      const address = await app.listen({ port: 0, host: '127.0.0.1' })
+      client = await connectClient(address)
+
+      const result = await client.callTool({ name: 'list_portify_status', arguments: {} })
+      const text = (result.content?.[0] as { type: string; text: string } | undefined)?.text ?? ''
+      const parsed = JSON.parse(text) as {
+        features: Array<{ feature: string; portsConfigured: boolean }>
+        summary: { total: number; portified: number; notPortified: number }
+      }
+      expect(parsed.features.length).toBeGreaterThan(0)
+      expect(parsed.features.map((f) => f.feature)).toContain('example_todo_api')
+      for (const f of parsed.features) expect(typeof f.portsConfigured).toBe('boolean')
+      expect(parsed.summary.total).toBe(parsed.features.length)
+      expect(parsed.summary.portified + parsed.summary.notPortified).toBe(parsed.summary.total)
     } finally {
       if (client) await client.close().catch(() => undefined)
       await app.close()

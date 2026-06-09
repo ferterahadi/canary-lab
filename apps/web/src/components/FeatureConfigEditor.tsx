@@ -17,9 +17,11 @@ interface Props {
   initialTab?: Tab
   /** Launch the port-ification wizard for this feature (from the Service tab). */
   onStartPortify?: (feature: string) => void
+  /** Reopen a past/active port-ification workflow (by id) from the Ports tab. */
+  onOpenPortify?: (workflowId: string) => void
 }
 
-export function FeatureConfigEditor({ feature, onClose, onDeleted, onRenamed, initialTab = 'general', onStartPortify }: Props) {
+export function FeatureConfigEditor({ feature, onClose, onDeleted, onRenamed, initialTab = 'general', onStartPortify, onOpenPortify }: Props) {
   const [tab, setTab] = useState<Tab>(initialTab)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [confirmName, setConfirmName] = useState('')
@@ -108,7 +110,7 @@ export function FeatureConfigEditor({ feature, onClose, onDeleted, onRenamed, in
         <div className="flex-1 min-h-0">
           {tab === 'general' && <GeneralTab feature={feature} onFeatureRenamed={(nextFeature) => onRenamed?.(feature, nextFeature)} />}
           {tab === 'repos' && <ReposTab feature={feature} />}
-          {tab === 'ports' && <PortsTab feature={feature} onStartPortify={onStartPortify} />}
+          {tab === 'ports' && <PortsTab feature={feature} onStartPortify={onStartPortify} onOpenPortify={onOpenPortify} />}
           {tab === 'envsets' && <EnvsetsTab feature={feature} />}
           {tab === 'playwright' && <PlaywrightTab feature={feature} />}
         </div>

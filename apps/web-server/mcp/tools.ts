@@ -16,6 +16,7 @@ import {
   type NormalizedRunCounts,
 } from '../lib/external-heal-surface'
 import { loadFeatures } from '../lib/feature-loader'
+import { computePortPreflight } from '../lib/runtime/port-preflight'
 import {
   createVerificationConfig,
   getVerificationConfig,
@@ -231,6 +232,7 @@ export type CanaryLabMcpToolName =
   | 'commit_portify'
   | 'cancel_portify'
   | 'revise_portify'
+  | 'list_portify_status'
 
 const REPAIR_TOOLS = [
   'list_features',
@@ -290,6 +292,7 @@ const AUTHOR_TOOLS = [
   'commit_portify',
   'cancel_portify',
   'revise_portify',
+  'list_portify_status',
 ] as const satisfies readonly CanaryLabMcpToolName[]
 
 // Tools that exist only in the `full` profile — everything else is composed
@@ -976,6 +979,21 @@ export function registerCanaryLabTools(
     const manifest = deps.getPortify(workflowId)
     if (!manifest) return errorResult(`port-ification workflow not found: ${workflowId}`)
     return asJsonResult(manifest)
+  })
+
+  registerTool('list_portify_status', {
+    description: "List every feature with whether it is PORTIFIED — i.e. declares injectable port slots so it can boot concurrently (benchmark arms / parallel runs) without an EADDRINUSE clash. Returns each feature's portsConfigured flag and its declared port slots per service/command, plus a summary count. Use it to see which features still need start_portify. The check is shallow (it trusts a declared slot); the deep proof is the double-boot inside the port-ification workflow.",
+    inputSchema: {},
+  }, async () => {
+    const features = loadFeatures(deps.featuresDir).map((f) => {
+      const pf = computePortPreflight(f)
+      return { feature: f.name, portsConfigured: pf.portsConfigured, repos: pf.repos }
+    })
+    const portified = features.filter((f) => f.portsConfigured).length
+    return asJsonResult({
+      features,
+      summary: { total: features.length, portified, notPortified: features.length - portified },
+    })
   })
 
   registerTool('commit_portify', {
