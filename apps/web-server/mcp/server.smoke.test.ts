@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import path from 'path'
 import fs from 'fs'
 import os from 'os'
@@ -154,6 +154,22 @@ async function createMcpHarness(opts: {
 }
 
 describe('MCP HTTP server (smoke)', () => {
+  // These E2E tests predate the desktop-only heal-claim policy and exercise
+  // claim flows across client kinds (codex-cli, 'other' auto-claims). Allow
+  // all kinds here via the documented override; the policy itself is asserted
+  // by heal-claim-policy / broker / route tests, and by the dedicated
+  // suppression test below which sets its own desktop-only override.
+  const ALL_KINDS = 'claude-cli,claude-desktop,codex-cli,codex-desktop,other'
+  let prevClaimClients: string | undefined
+  beforeAll(() => {
+    prevClaimClients = process.env.CANARY_LAB_HEAL_CLAIM_CLIENTS
+    process.env.CANARY_LAB_HEAL_CLAIM_CLIENTS = ALL_KINDS
+  })
+  afterAll(() => {
+    if (prevClaimClients === undefined) delete process.env.CANARY_LAB_HEAL_CLAIM_CLIENTS
+    else process.env.CANARY_LAB_HEAL_CLAIM_CLIENTS = prevClaimClients
+  })
+
   it('exposes /mcp/health with profile-specific tool counts', async () => {
     const projectRoot = path.resolve(__dirname, '..', '..', '..', 'templates', 'project')
     const { app } = await createServer({ projectRoot, ptyFactory: inertPtyFactory })
@@ -1252,6 +1268,62 @@ describe('MCP HTTP server (smoke)', () => {
         clientKind: 'claude-desktop',
       })
     } finally {
+      if (client) await client.close().catch(() => undefined)
+      await app.close()
+    }
+  })
+
+  it('start_run suppresses the heal claim for a CLI client (desktop-only policy)', async () => {
+    const projectRoot = path.resolve(__dirname, '..', '..', '..', 'templates', 'project')
+    const logsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-start-suppress-')))
+    const { app, runStore } = await createServer({ projectRoot, logsDir, ptyFactory: inertPtyFactory })
+    let client: Client | null = null
+    // Override the file-wide allow-all back to desktop-only for this test.
+    const savedClaimClients = process.env.CANARY_LAB_HEAL_CLAIM_CLIENTS
+    process.env.CANARY_LAB_HEAL_CLAIM_CLIENTS = 'claude-desktop,codex-desktop'
+    try {
+      const address = await app.listen({ port: 0, host: '127.0.0.1' })
+      client = await connectClient(address, '/mcp?profile=full')
+
+      runStore.bootstrap({
+        runId: 'suppress-active',
+        feature: 'broken_todo_api',
+        env: 'local',
+        startedAt: '2026-05-08T00:00:00.000Z',
+        status: 'healing',
+        healCycles: 1,
+        services: [],
+        healMode: 'external',
+      })
+
+      const result = await client.callTool({
+        name: 'start_run',
+        arguments: {
+          feature: 'broken_todo_api',
+          env: 'local',
+          claim_heal: true,
+          session_id: 'sess-cli',
+          client_kind: 'claude-cli',
+          conversation_name: 'cli should not claim',
+        },
+      })
+      const body = JSON.parse((result.content?.[0] as { text: string }).text)
+      expect(body).toMatchObject({
+        runId: 'suppress-active',
+        reused: true,
+        claimed: false,
+        claimSuppressed: true,
+      })
+      expect(typeof body.message).toBe('string')
+      // The CLI must NOT be steered into the heal wait loop.
+      expect(body.nextSteps ?? []).not.toContain('wait_for_heal_task')
+      expect(body.claim).toBeNull()
+      // The pre-existing external session (if any) is untouched — no CLI claim
+      // was recorded.
+      expect(runStore.get('suppress-active')?.manifest.externalHealSession).toBeUndefined()
+    } finally {
+      if (savedClaimClients === undefined) delete process.env.CANARY_LAB_HEAL_CLAIM_CLIENTS
+      else process.env.CANARY_LAB_HEAL_CLAIM_CLIENTS = savedClaimClients
       if (client) await client.close().catch(() => undefined)
       await app.close()
     }

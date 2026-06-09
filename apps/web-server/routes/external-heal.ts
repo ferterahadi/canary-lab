@@ -116,6 +116,15 @@ export async function externalHealRoutes(
       }
       const result = deps.broker.claim(req.params.runId, input)
       if (!result.accepted) {
+        if (result.reason === 'client-kind-not-allowed') {
+          reply.code(403)
+          return {
+            reason: result.reason,
+            clientKind: result.clientKind,
+            message:
+              'Heal claiming is restricted to Claude/Codex Desktop clients. CLI clients can run and verify, but cannot own a heal claim.',
+          }
+        }
         reply.code(409)
         return { reason: result.reason, currentSession: result.currentSession }
       }

@@ -1123,6 +1123,35 @@ describe('POST /api/runs', () => {
     })
   })
 
+  it('down-shifts a CLI healAgent to a non-external fresh start (claim suppressed)', async () => {
+    writeFeature('foo')
+    const stub = makeStub('new-run')
+    const startRun = vi.fn(async () => ({ kind: 'started' as const, orch: stub }))
+    const { app } = await build({ startRun })
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/runs',
+      payload: {
+        feature: 'foo',
+        healAgent: {
+          kind: 'external',
+          sessionId: 'sess-cli',
+          clientKind: 'claude-cli',
+          conversationName: 'cli should not own heal',
+        },
+      },
+    })
+
+    expect(res.statusCode).toBe(201)
+    expect(res.json()).toMatchObject({ runId: 'new-run', claimSuppressed: true })
+    expect(typeof res.json().message).toBe('string')
+    // startRun was invoked WITHOUT the external heal request — the run runs,
+    // but the CLI session does not own it.
+    expect(startRun).toHaveBeenCalledTimes(1)
+    expect(startRun.mock.calls[0][2]).toBeUndefined()
+  })
+
   it('500s with stringified non-Error rejection', async () => {
     writeFeature('foo')
     const { app } = await build({ startRun: async () => { throw 'plain string' } })
