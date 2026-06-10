@@ -86,6 +86,8 @@ import {
   getPortify,
   commitPortify,
   cancelPortify,
+  revisePortify,
+  removePortify,
   getPortifyAgentSession,
 } from './client'
 
@@ -1183,6 +1185,23 @@ describe('api client', () => {
     expect(fetchImpl).toHaveBeenLastCalledWith('http://x/api/portify/w1/commit', { method: 'POST' })
     await cancelPortify('w1', { baseUrl: 'http://x', fetchImpl })
     expect(fetchImpl).toHaveBeenLastCalledWith('http://x/api/portify/w1/cancel', { method: 'POST' })
+  })
+
+  it('revisePortify POSTs the trimmed feedback as JSON', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(ok({ workflowId: 'w1', status: 'editing' }))
+    const r = await revisePortify('w1', 'use PORT', { baseUrl: 'http://x', fetchImpl })
+    expect(r).toMatchObject({ workflowId: 'w1', status: 'editing' })
+    const [url, init] = fetchImpl.mock.calls[0]
+    expect(url).toBe('http://x/api/portify/w1/revise')
+    expect(init.method).toBe('POST')
+    expect(init.headers).toMatchObject({ 'Content-Type': 'application/json' })
+    expect(JSON.parse(init.body as string)).toEqual({ feedback: 'use PORT' })
+  })
+
+  it('removePortify DELETEs the workflow', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(ok({ workflowId: 'w1', removed: true }))
+    await expect(removePortify('w1', { baseUrl: 'http://x', fetchImpl })).resolves.toEqual({ workflowId: 'w1', removed: true })
+    expect(fetchImpl).toHaveBeenCalledWith('http://x/api/portify/w1', { method: 'DELETE' })
   })
 
   it('getPortifyAgentSession returns the session on 200 and null on 404', async () => {

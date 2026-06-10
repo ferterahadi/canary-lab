@@ -2,7 +2,6 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { execFileSync } from 'child_process'
 import {
   buildAgentSpawnCommand,
   buildClaudeMcpConfigArg,
@@ -14,10 +13,10 @@ import {
   readPriorSessionIdFromValue,
   renderPlaywrightMcpHint,
   renderTraceExtractHint,
+  resolveAgentBinary,
+  type AgentResolveDeps,
 } from './auto-heal'
 
-vi.mock('child_process', () => ({ execFileSync: vi.fn() }))
-const mockExecFileSync = vi.mocked(execFileSync)
 import { renderPersonalWikiMap } from '../../../../shared/runtime/personal-wiki'
 
 function writeRunManifest(runDir: string, body: Record<string, unknown>): void {
@@ -82,6 +81,22 @@ describe('buildAgentSpawnCommand', () => {
   it('claude REPL: omits --mcp-config when mcpOutputDir is missing', () => {
     const cmd = buildAgentSpawnCommand('claude', { sessionId: 'x' })
     expect(cmd.includes('--mcp-config')).toBe(false)
+  })
+
+  it('launches via the quoted absolute binaryPath when provided (restricted PATH)', () => {
+    const claudeCmd = buildAgentSpawnCommand('claude', {
+      binaryPath: '/Users/me/.local/bin/claude',
+      sessionId: 'abc-123',
+    })
+    expect(claudeCmd.startsWith('"/Users/me/.local/bin/claude"')).toBe(true)
+    expect(claudeCmd).toContain('--session-id "abc-123"')
+
+    const codexResume = buildAgentSpawnCommand('codex', {
+      binaryPath: '/opt/homebrew/bin/codex',
+      resume: true,
+      sessionId: 'b2160db2-89b8-49ff-a2ba-c0c97a52d63f',
+    })
+    expect(codexResume.startsWith('"/opt/homebrew/bin/codex" resume "b2160db2-89b8-49ff-a2ba-c0c97a52d63f"')).toBe(true)
   })
 
   it('claude REPL: throws when mcpOutputDir is set but mcpConfigFile is not', () => {
@@ -258,56 +273,139 @@ describe('readPriorSessionId', () => {
   })
 })
 
-describe('isAgentCliAvailable', () => {
-  beforeEach(() => { mockExecFileSync.mockReset() })
+// Deps that find nothing — `which` misses and no candidate path is executable.
+const NONE: AgentResolveDeps = {
+  which: () => null,
+  isExecutable: () => false,
+  homedir: () => '/no/such/home',
+  env: {},
+}
+// Deps where only the named agent resolves via `which`.
+const onPath = (present: HealAgent): AgentResolveDeps => ({
+  which: (agent) => (agent === present ? `/usr/local/bin/${agent}` : null),
+  isExecutable: () => false,
+  homedir: () => '/no/such/home',
+  env: {},
+})
 
-  it('returns true when `which <agent>` succeeds', () => {
-    mockExecFileSync.mockReturnValueOnce(Buffer.from('/usr/local/bin/claude'))
-    expect(isAgentCliAvailable('claude')).toBe(true)
-    expect(mockExecFileSync).toHaveBeenCalledWith('which', ['claude'], { stdio: 'ignore' })
+describe('resolveAgentBinary', () => {
+  it('returns the `which` path when the agent is on PATH', () => {
+    expect(resolveAgentBinary('claude', onPath('claude'))).toBe('/usr/local/bin/claude')
   })
 
-  it('returns false when `which <agent>` throws (not on PATH)', () => {
-    mockExecFileSync.mockImplementationOnce(() => { throw new Error('not found') })
-    expect(isAgentCliAvailable('codex')).toBe(false)
+  it('falls back to a well-known location when not on PATH (restricted PATH)', () => {
+    const localBin = '/home/me/.local/bin/claude'
+    const found = resolveAgentBinary('claude', {
+      which: () => null,
+      isExecutable: (p) => p === localBin,
+      homedir: () => '/home/me',
+      env: {},
+    })
+    expect(found).toBe(localBin)
+  })
+
+  it('honors an explicit CANARY_LAB_CLAUDE_BIN override', () => {
+    const found = resolveAgentBinary('claude', {
+      which: () => '/usr/local/bin/claude',
+      isExecutable: (p) => p === '/opt/custom/claude',
+      homedir: () => '/home/me',
+      env: { CANARY_LAB_CLAUDE_BIN: '/opt/custom/claude' },
+    })
+    expect(found).toBe('/opt/custom/claude')
+  })
+
+  it('returns null when nothing resolves', () => {
+    expect(resolveAgentBinary('codex', NONE)).toBeNull()
+  })
+
+  // Exercise the PRODUCTION default seams (real `which` / fs.accessSync) by
+  // leaving them un-injected. These run on unix CI where `which`, `/bin/sh`
+  // are present.
+  describe('default seams (real which / fs probe)', () => {
+    it('defaultWhich resolves a real binary on PATH', () => {
+      // `sh` is on PATH on any unix; leave `which` un-injected so defaultWhich
+      // shells out to the real `which`.
+      const found = resolveAgentBinary('sh' as unknown as HealAgent, {
+        env: {},
+        homedir: () => '/no/such/home',
+        isExecutable: () => false,
+      })
+      expect(found).toMatch(/sh$/)
+    })
+
+    it('defaultWhich returns null (catch arm) for a binary that is not on PATH', () => {
+      const found = resolveAgentBinary('canary-lab-no-such-binary-zzz' as unknown as HealAgent, {
+        env: {},
+        homedir: () => '/no/such/home',
+        isExecutable: () => false,
+      })
+      expect(found).toBeNull()
+    })
+
+    it('defaultIsExecutable returns true for a real executable (env override path)', () => {
+      const found = resolveAgentBinary('claude', {
+        which: () => null,
+        homedir: () => '/no/such/home',
+        env: { CANARY_LAB_CLAUDE_BIN: '/bin/sh' },
+      })
+      expect(found).toBe('/bin/sh')
+    })
+
+    it('falls back to process.env / os.homedir when neither is injected', () => {
+      // No `env` and no `homedir` deps → the `?? process.env` and
+      // `: os.homedir()` defaults are taken. which/isExecutable stubbed so the
+      // resolution is deterministic (and never finds anything).
+      const found = resolveAgentBinary('claude', { which: () => null, isExecutable: () => false })
+      expect(found).toBeNull()
+    })
+
+    it('defaultIsExecutable returns false (catch arm) for a missing path', () => {
+      const found = resolveAgentBinary('claude', {
+        which: () => null,
+        homedir: () => '/no/such/home',
+        env: { CANARY_LAB_CLAUDE_BIN: '/no/such/path/claude' },
+      })
+      expect(found).toBeNull()
+    })
+  })
+})
+
+describe('isAgentCliAvailable', () => {
+  it('returns true when the agent resolves', () => {
+    expect(isAgentCliAvailable('claude', onPath('claude'))).toBe(true)
+  })
+
+  it('returns false when the agent resolves nowhere', () => {
+    expect(isAgentCliAvailable('codex', NONE)).toBe(false)
   })
 })
 
 describe('pickAvailableHealAgent', () => {
-  beforeEach(() => { mockExecFileSync.mockReset() })
-
   it('returns null when env override names a missing CLI', () => {
-    mockExecFileSync.mockImplementationOnce(() => { throw new Error('not found') })
-    expect(pickAvailableHealAgent('claude')).toBe(null)
+    expect(pickAvailableHealAgent('claude', NONE)).toBe(null)
   })
 
-  it('returns the override agent when its CLI is on PATH', () => {
-    mockExecFileSync.mockReturnValueOnce(Buffer.from('/bin/codex'))
-    expect(pickAvailableHealAgent('codex')).toBe('codex')
+  it('returns the override agent when its CLI resolves', () => {
+    expect(pickAvailableHealAgent('codex', onPath('codex'))).toBe('codex')
   })
 
   it('returns null when override is unrelated to claude/codex (typo guard)', () => {
-    // Unrecognised non-empty override returns null without probing PATH.
-    expect(pickAvailableHealAgent('clauude')).toBe(null)
-    expect(mockExecFileSync).not.toHaveBeenCalled()
+    const which = vi.fn(() => null)
+    // Unrecognised non-empty override returns null without probing.
+    expect(pickAvailableHealAgent('clauude', { which })).toBe(null)
+    expect(which).not.toHaveBeenCalled()
   })
 
   it('auto-detects claude first when no override is set', () => {
-    mockExecFileSync.mockReturnValueOnce(Buffer.from('/bin/claude'))
-    expect(pickAvailableHealAgent('')).toBe('claude')
-    expect(mockExecFileSync).toHaveBeenCalledWith('which', ['claude'], { stdio: 'ignore' })
+    expect(pickAvailableHealAgent('', onPath('claude'))).toBe('claude')
   })
 
   it('falls back to codex when claude is absent but codex is present', () => {
-    mockExecFileSync
-      .mockImplementationOnce(() => { throw new Error('no claude') })
-      .mockReturnValueOnce(Buffer.from('/bin/codex'))
-    expect(pickAvailableHealAgent('')).toBe('codex')
+    expect(pickAvailableHealAgent('', onPath('codex'))).toBe('codex')
   })
 
-  it('returns null when neither claude nor codex is on PATH', () => {
-    mockExecFileSync.mockImplementation(() => { throw new Error('none') })
-    expect(pickAvailableHealAgent('')).toBe(null)
+  it('returns null when neither claude nor codex resolves', () => {
+    expect(pickAvailableHealAgent('', NONE)).toBe(null)
   })
 })
 

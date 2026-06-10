@@ -1213,6 +1213,16 @@ describe('session metadata (model / effort)', () => {
     expect(loadAgentSessionMeta({ agent: 'codex', sessionId: 's', logPath: file })).toEqual({})
   })
 
+  it('ignores a turn_context whose model/effort are empty strings or non-strings', () => {
+    // Each guard is `typeof x === 'string' && x` — empty strings fail the
+    // truthiness arm, non-strings fail the typeof arm. Neither sets meta.
+    const file = writeLog([
+      { type: 'turn_context', payload: { model: '', effort: '' } },
+      { type: 'turn_context', payload: { model: 123, effort: 456 } },
+    ])
+    expect(loadAgentSessionMeta({ agent: 'codex', sessionId: 's', logPath: file })).toEqual({})
+  })
+
   it('returns empty meta when the log file is missing', () => {
     expect(loadAgentSessionMeta({ agent: 'codex', sessionId: 'x', logPath: '/no/such.jsonl' })).toEqual({})
   })

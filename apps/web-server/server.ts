@@ -62,6 +62,7 @@ import {
   buildAgentSpawnCommand,
   buildOrchestratorHealPrompt,
   pickAvailableHealAgent,
+  resolveAgentBinary,
   type BuildHealCyclePrompt,
   type HealAgent,
 } from './lib/runtime/auto-heal'
@@ -731,6 +732,9 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
         runnerLog.info('Auto-heal disabled: project config is set to "external" — the run will wait for an external client to claim heal.')
       }
       if (agentChoice) {
+        // Resolve the absolute binary path once so the agent spawns even under
+        // a restricted PATH (e.g. a Desktop-launched UI server).
+        const agentBinary = resolveAgentBinary(agentChoice) ?? undefined
         try {
           autoHeal = {
             agent: agentChoice,
@@ -740,6 +744,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
               mcpOutputDir,
               mcpConfigFile: path.join(runDir, 'mcp-config.json'),
               promptFile,
+              binaryPath: agentBinary,
             }),
             buildCyclePrompt: buildOrchestratorHealPrompt({
               agent: agentChoice,
@@ -916,6 +921,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
       if (!preserveExternal && !preserveManual) {
         const agentChoice = pickConfiguredHealAgent(projectConfig.healAgent, manifest.healAgent)
         if (agentChoice) {
+          const agentBinary = resolveAgentBinary(agentChoice) ?? undefined
           try {
             autoHeal = {
               agent: agentChoice,
@@ -925,6 +931,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
                 mcpOutputDir,
                 mcpConfigFile: path.join(runDir, 'mcp-config.json'),
                 promptFile,
+                binaryPath: agentBinary,
               }),
               buildCyclePrompt: buildOrchestratorHealPrompt({
                 agent: agentChoice,
