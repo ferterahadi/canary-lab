@@ -226,6 +226,32 @@ describe('portifyRoutes', () => {
     expect((await cancelApp.inject({ method: 'POST', url: '/api/portify/w/cancel' })).json()).toMatchObject({ error: 'raw cancel failure' })
   })
 
+  it('DELETE /api/portify/:id defaults to 500 and stringifies a non-Error throw', async () => {
+    const app500 = await build({ removePortify: async () => { throw new Error('history corrupt') } })
+    const r500 = await app500.inject({ method: 'DELETE', url: '/api/portify/w' })
+    expect(r500.statusCode).toBe(500)
+    expect(r500.json()).toMatchObject({ error: 'history corrupt' })
+
+    // eslint-disable-next-line @typescript-eslint/only-throw-error
+    const appRaw = await build({ removePortify: async () => { throw 'raw remove failure' } })
+    const rRaw = await appRaw.inject({ method: 'DELETE', url: '/api/portify/w' })
+    expect(rRaw.statusCode).toBe(500)
+    expect(rRaw.json()).toMatchObject({ error: 'raw remove failure' })
+  })
+
+  it('POST /api/portify/:id/revise defaults to 500 and stringifies a non-Error throw', async () => {
+    const app500 = await build({ revisePortify: async () => { throw new Error('worktree gone') } })
+    const r500 = await app500.inject({ method: 'POST', url: '/api/portify/w/revise', payload: { feedback: 'x' } })
+    expect(r500.statusCode).toBe(500)
+    expect(r500.json()).toMatchObject({ error: 'worktree gone' })
+
+    // eslint-disable-next-line @typescript-eslint/only-throw-error
+    const appRaw = await build({ revisePortify: async () => { throw 'raw revise failure' } })
+    const rRaw = await appRaw.inject({ method: 'POST', url: '/api/portify/w/revise', payload: { feedback: 'x' } })
+    expect(rRaw.statusCode).toBe(500)
+    expect(rRaw.json()).toMatchObject({ error: 'raw revise failure' })
+  })
+
   it('GET /api/portify/:id/agent-session returns the session when present', async () => {
     const app = await build({ loadAgentSession: () => ({ agent: 'claude', sessionId: 's', events: [] }) })
     const res = await app.inject({ method: 'GET', url: '/api/portify/portify-1/agent-session' })

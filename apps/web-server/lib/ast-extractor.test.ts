@@ -63,6 +63,26 @@ describe('extractTestsFromSource', () => {
     expect(r.tests[0].bodySource).toContain('expect(x).toBe(1)')
   })
 
+  it('keeps bodySource line-for-line with the source so highlights map 1:1', () => {
+    // The live test view highlights the running line and resolves "open in
+    // editor" by adding a body-line offset to the test's start line, so body
+    // line N must correspond to source line N. A blank line between statements
+    // must therefore be preserved — re-printing the AST would drop it and
+    // shift every subsequent line.
+    const src = [
+      "test('mapping', async () => {",
+      '  const a = 1',
+      '',
+      '  expect(a).toBe(1)',
+      '})',
+    ].join('\n')
+    const body = extractTestsFromSource('a.spec.ts', src).tests[0].bodySource.split('\n')
+    expect(body[0]).toBe('{')
+    expect(body[1]).toContain('const a = 1')
+    expect(body[2]).toBe('') // blank line preserved
+    expect(body[3]).toContain('expect(a).toBe(1)')
+  })
+
   it('ignores test.describe groups but extracts inner tests', () => {
     const src = `
       test.describe('group', () => {

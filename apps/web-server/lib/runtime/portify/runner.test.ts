@@ -213,6 +213,29 @@ describe('createPortifyRunner (integration)', () => {
     expect(branches.stdout).toContain('canary/dynamic-ports-myfeat')
   })
 
+  it('revise falls back to the in-memory manifest when the post-float store read returns nothing', async () => {
+    const { featuresDir, logsDir } = await singleFixture()
+    const { store, runner } = makeRunner(featuresDir, logsDir)
+    const { workflowId } = await runner.startPortify({ feature: 'myfeat', maxAttempts: 1 })
+    expect(await waitForStatus(store, workflowId, TERMINAL)).toBe('ready-to-commit')
+
+    const real = store.get(workflowId)!
+    const realGet = store.get.bind(store)
+    // First read is the guard (manifest must exist); the post-float read
+    // returns undefined so the `?? m` fallback is taken. All later reads
+    // (the floated revise + waitForStatus) use the real store.
+    vi.spyOn(store, 'get')
+      .mockReturnValueOnce(real)
+      .mockReturnValueOnce(undefined)
+      .mockImplementation(realGet)
+
+    const flipped = await runner.revise(workflowId, 'tweak ports')
+    expect(flipped).toBe(real)
+
+    // Let the floated revise settle before teardown (process.kill stays mocked).
+    await waitForStatus(store, workflowId, TERMINAL)
+  })
+
   it('fails after exhausting attempts, discards the worktree, and restores the config', async () => {
     const { featuresDir, logsDir, appRepo } = await singleFixture()
     const featureDir = path.join(featuresDir, 'myfeat')

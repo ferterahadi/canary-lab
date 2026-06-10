@@ -189,6 +189,14 @@ describe('PortifyOrchestrator', () => {
       expect(deps.cleanup).not.toHaveBeenCalled()
     })
 
+    it('stringifies a non-Error throw mid-revise into the re-parked error', async () => {
+      // eslint-disable-next-line @typescript-eslint/only-throw-error
+      const { deps } = makeDeps({ runFeedbackAgent: vi.fn(async () => { throw 'raw revise failure' }) })
+      const m = await new PortifyOrchestrator(deps).revise(readyManifest(), 'tweak')
+      expect(m.status).toBe('ready-to-commit')
+      expect(m.error).toBe('raw revise failure')
+    })
+
     it('accumulates feedbackRounds across successive revises', async () => {
       const { deps } = makeDeps({})
       const orch = new PortifyOrchestrator(deps)
@@ -204,6 +212,41 @@ describe('PortifyOrchestrator', () => {
       const m = await new PortifyOrchestrator(deps).revise(current, 'x')
       expect(m).toBe(current)
       expect(saved).toHaveLength(0)
+    })
+
+    it('returns at the editing state when aborted right after the feedback agent', async () => {
+      // isAborted: false on entry, true on the post-runFeedbackAgent check —
+      // so revise bails before captureDiff.
+      let calls = 0
+      const captureDiff = vi.fn(async () => 'diff')
+      const { deps } = makeDeps({ isAborted: () => { calls += 1; return calls >= 2 }, captureDiff })
+      const m = await new PortifyOrchestrator(deps).revise(readyManifest(), 'tweak')
+      expect(m.status).toBe('editing')
+      expect(captureDiff).not.toHaveBeenCalled()
+    })
+
+    it('returns at the verifying state when aborted right after verify', async () => {
+      // isAborted: false on entry + post-feedback, true on the post-verify
+      // check — so revise bails before checkTestsUntouched / re-parking.
+      let calls = 0
+      const checkTestsUntouched = vi.fn(async () => ({ ok: true, offending: [] as string[] }))
+      const { deps } = makeDeps({ isAborted: () => { calls += 1; return calls >= 3 }, checkTestsUntouched })
+      const m = await new PortifyOrchestrator(deps).revise(readyManifest(), 'tweak')
+      expect(m.status).toBe('verifying')
+      expect(checkTestsUntouched).not.toHaveBeenCalled()
+    })
+
+    it('returns the in-flight manifest (no error) when an abort coincides with a revise error', async () => {
+      // runFeedbackAgent throws → catch arm; isAborted is true there, so the
+      // catch returns the editing manifest WITHOUT stamping the error / re-parking.
+      let calls = 0
+      const { deps } = makeDeps({
+        isAborted: () => { calls += 1; return calls >= 2 },
+        runFeedbackAgent: vi.fn(async () => { throw new Error('agent died mid-abort') }),
+      })
+      const m = await new PortifyOrchestrator(deps).revise(readyManifest(), 'tweak')
+      expect(m.status).toBe('editing')
+      expect(m.error).toBeUndefined()
     })
   })
 

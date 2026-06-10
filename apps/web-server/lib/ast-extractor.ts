@@ -1,5 +1,5 @@
 import ts from 'typescript'
-import { formatCodeForDisplay } from '../../../shared/code-display-format'
+import { formatSourceSnippetForDisplay } from '../../../shared/code-display-format'
 
 // Parse Playwright spec source and return every `test('name', …)` call along
 // with the `test.step('label', …)` invocations nested inside (recursively).
@@ -89,7 +89,7 @@ function getStepBody(call: ts.CallExpression): ts.Node | null {
 }
 
 function bodySourceFor(node: ts.Node, src: ts.SourceFile): string {
-  return formatCodeForDisplay(src.getFullText().slice(node.getStart(src), node.getEnd()))
+  return formatSourceSnippetForDisplay(src.getFullText().slice(node.getStart(src), node.getEnd()))
 }
 
 function lineFor(node: ts.Node, src: ts.SourceFile): number {
