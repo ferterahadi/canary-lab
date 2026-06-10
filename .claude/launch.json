@@ -3,6 +3,7 @@
   "configurations": [
     {
       "name": "canary-ui",
+      "autoPort": false,
       "runtimeExecutable": "sh",
       "runtimeArgs": ["-c", "cd /Users/oddle/Documents/canary-lab-workspace && if curl -sf -o /dev/null http://127.0.0.1:7420/; then echo 'canary-lab already serving on 7420; attaching'; while curl -sf -o /dev/null http://127.0.0.1:7420/; do sleep 5; done; else exec npx canary-lab ui --no-open; fi"],
       "port": 7420

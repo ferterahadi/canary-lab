@@ -106,7 +106,8 @@ Skip it when `npx playwright test` already tells you enough, when you want self-
 | [Guide](docs/GUIDE.md) | Environment switching, run-output layout, repairing a failed run, evaluation reports, and external authoring. |
 | [Commands](docs/COMMANDS.md) | Full CLI reference for every `canary-lab` subcommand. |
 | [Feature Folders](docs/FEATURES.md) | Feature structure, scaffold conventions, and creating a feature. |
-| [Contributing](docs/CONTRIBUTING.md) | Code orientation, run architecture, and the build/test workflow. |
+| [Architecture](docs/ARCHITECTURE.md) | Module map, run lifecycle, concurrency, heal system, and the MCP layer. |
+| [Contributing](docs/CONTRIBUTING.md) | Code orientation and the build/test workflow. |
 | [Changelog](docs/CHANGELOG.md) | Release notes. |
 
 ## License
