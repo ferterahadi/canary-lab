@@ -77,6 +77,9 @@ describe('PortsTab', () => {
     expect(container.textContent).toContain('yarn start')
     // The read-only injection token is rendered for the slot.
     expect(container.textContent).toContain('${port.api}')
+    // The one-line legend is keyed to the feature's own slot (name + env var).
+    expect(container.textContent).toContain('is assigned a free port')
+    expect(container.textContent).toContain('injected as PORT')
 
     // Rename the slot and save — it must round-trip through parse → serialize.
     const slotName = slotNameInput()
@@ -105,14 +108,14 @@ describe('PortsTab', () => {
     )
   })
 
-  it('shows PORTIFIED ✓ and confirms a re-run before firing onStartPortify', async () => {
+  it('shows the portified headline and confirms a re-run before firing onStartPortify', async () => {
     vi.mocked(getFeatureConfigDoc).mockResolvedValue(docWithPorts())
     const onStartPortify = vi.fn()
     await act(async () => {
       root.render(<PortsTab feature="cns_exactly_once_fallback" onStartPortify={onStartPortify} />)
     })
-    // Slots declared → portified badge + a re-run-style action that confirms first.
-    expect(container.textContent).toContain('PORTIFIED ✓')
+    // Slots declared → portified headline + a re-run-style action that confirms first.
+    expect(container.textContent).toContain('Portified — ready for concurrent boot')
     await act(async () => clickButton('Re-run Portify'))
     expect(onStartPortify).not.toHaveBeenCalled()
     expect(container.textContent).toContain('Re-run Portify?')
@@ -124,16 +127,30 @@ describe('PortsTab', () => {
     expect(onStartPortify).toHaveBeenCalledWith('cns_exactly_once_fallback')
   })
 
-  it('shows NOT PORTIFIED and launches directly (no confirm) when no port slots are declared', async () => {
+  it('shows Not portified and launches directly (no confirm) when no port slots are declared', async () => {
     vi.mocked(getFeatureConfigDoc).mockResolvedValue(docNoPorts())
     const onStartPortify = vi.fn()
     await act(async () => {
       root.render(<PortsTab feature="np_feature" onStartPortify={onStartPortify} />)
     })
-    expect(container.textContent).toContain('NOT PORTIFIED')
+    expect(container.textContent).toContain('Not portified')
+    // No declared slots → the legend falls back to the scaffold example.
+    expect(container.textContent).toContain('${port.api}')
     await act(async () => clickButton('Portify'))
     expect(onStartPortify).toHaveBeenCalledWith('np_feature')
     expect(container.textContent).not.toContain('Re-run Portify?')
+  })
+
+  it('copies the reference token to the clipboard on click', async () => {
+    vi.mocked(getFeatureConfigDoc).mockResolvedValue(docWithPorts())
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
+    await act(async () => {
+      root.render(<PortsTab feature="cns_exactly_once_fallback" />)
+    })
+    await act(async () => clickButton('${port.api}'))
+    expect(writeText).toHaveBeenCalledWith('${port.api}')
+    expect(container.textContent).toContain('copied ✓')
   })
 
   it('shows an empty state when there are no services', async () => {

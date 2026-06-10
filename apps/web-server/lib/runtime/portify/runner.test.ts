@@ -456,6 +456,112 @@ describe('createPortifyRunner (integration)', () => {
       expect(store.list()).toEqual([])
     })
   })
+
+  describe('merge', () => {
+    // Run a workflow to committed so there's a real branch in the user's repo.
+    async function committedFixture() {
+      const { featuresDir, logsDir, appRepo } = await singleFixture()
+      const { store, runner } = makeRunner(featuresDir, logsDir)
+      const { workflowId } = await runner.startPortify({ feature: 'myfeat', maxAttempts: 1 })
+      expect(await waitForStatus(store, workflowId, TERMINAL)).toBe('ready-to-commit')
+      await runner.commit(workflowId)
+      return { store, runner, workflowId, appRepo }
+    }
+
+    it('merge and mergeStatus 404 for an unknown workflow', async () => {
+      const { runner } = makeRunner('x', fs.mkdtempSync(path.join(os.tmpdir(), 'portify-mg404-')))
+      await expect(runner.merge('nope')).rejects.toMatchObject({ statusCode: 404 })
+      await expect(runner.mergeStatus('nope')).rejects.toMatchObject({ statusCode: 404 })
+    })
+
+    it('merge and mergeStatus 409 when the workflow is not committed', async () => {
+      const logsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-mg409-'))
+      roots.push(logsDir)
+      const { store, runner } = makeRunner('x', logsDir)
+      store.save(readyManifest())
+      await expect(runner.merge('w')).rejects.toMatchObject({ statusCode: 409 })
+      await expect(runner.mergeStatus('w')).rejects.toMatchObject({ statusCode: 409 })
+    })
+
+    it('reports readiness, merges into the user repo, and persists the merge', async () => {
+      const { store, runner, workflowId, appRepo } = await committedFixture()
+
+      const before = await runner.mergeStatus(workflowId)
+      expect(before.merged).toBe(false)
+      expect(before.nothingToMerge).toBe(false)
+      expect(before.repos).toHaveLength(1)
+      expect(before.repos[0]).toMatchObject({ branchExists: true, dirty: false, mergeInProgress: false, merged: false })
+      expect(before.repos[0].currentBranch).toBeTruthy()
+
+      const res = await runner.merge(workflowId)
+      expect(res.ok).toBe(true)
+      expect(res.results[0].mergeCommitSha).toMatch(/^[0-9a-f]{7,}$/)
+
+      // The user's actual checkout now has the agent's edit.
+      expect(fs.readFileSync(path.join(appRepo, 'src', 'server.js'), 'utf-8')).toContain('port made injectable by agent')
+
+      const m = store.get(workflowId)!
+      expect(m.mergedAt).toBe('2026-06-07T00:00:00.000Z')
+      expect(m.repos.find((r) => r.name === 'app')?.mergeCommitSha).toMatch(/^[0-9a-f]{7,}$/)
+      expect(store.list().find((e) => e.workflowId === workflowId)?.mergedAt).toBe('2026-06-07T00:00:00.000Z')
+
+      expect((await runner.mergeStatus(workflowId)).merged).toBe(true)
+    })
+
+    it('mergeStatus detects a merge done manually in a terminal', async () => {
+      const { store, runner, workflowId, appRepo } = await committedFixture()
+      const branch = store.get(workflowId)!.branch
+      await runGit(appRepo, ['merge', '--no-edit', branch])
+      expect((await runner.mergeStatus(workflowId)).merged).toBe(true)
+    })
+
+    it('reports conflicts per repo, leaves the repo clean, and does not persist a merge', async () => {
+      const { store, runner, workflowId, appRepo } = await committedFixture()
+      // Conflicting commit on the user's branch: same file, different content.
+      fs.writeFileSync(path.join(appRepo, 'src', 'server.js'), 'const PORT = 9999 // clash\n')
+      await runGit(appRepo, ['add', '-A'])
+      await runGit(appRepo, ['commit', '-q', '-m', 'clash', '--no-verify'])
+
+      const res = await runner.merge(workflowId)
+      expect(res.ok).toBe(false)
+      expect(res.results[0].conflictFiles).toContain('src/server.js')
+
+      const s = await runner.mergeStatus(workflowId)
+      expect(s.repos[0].dirty).toBe(false)
+      expect(s.repos[0].mergeInProgress).toBe(false)
+      expect(store.get(workflowId)!.mergedAt).toBeUndefined()
+    })
+
+    it('refuses a dirty user repo per-repo without touching it', async () => {
+      const { store, runner, workflowId, appRepo } = await committedFixture()
+      fs.appendFileSync(path.join(appRepo, 'src', 'server.js'), '// wip\n')
+
+      expect((await runner.mergeStatus(workflowId)).repos[0].dirty).toBe(true)
+      const res = await runner.merge(workflowId)
+      expect(res.ok).toBe(false)
+      expect(res.results[0].error).toMatch(/uncommitted changes/)
+      expect(store.get(workflowId)!.mergedAt).toBeUndefined()
+      // The wip edit is still there, untouched.
+      expect(fs.readFileSync(path.join(appRepo, 'src', 'server.js'), 'utf-8')).toContain('// wip')
+    })
+
+    it('reports nothingToMerge when no repo has a commit', async () => {
+      const logsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-mgnone-'))
+      roots.push(logsDir)
+      const { store, runner } = makeRunner('x', logsDir)
+      store.save(readyManifest({
+        status: 'committed', endedAt: 'now',
+        repos: [{ name: 'app', path: '/tmp/nowhere' }], // no commitSha
+      }))
+      const s = await runner.mergeStatus('w')
+      expect(s.nothingToMerge).toBe(true)
+      expect(s.merged).toBe(true)
+      expect(s.repos).toEqual([])
+      const res = await runner.merge('w')
+      expect(res.ok).toBe(true)
+      expect(res.results).toEqual([])
+    })
+  })
 })
 
 function readyManifest(over: Partial<PortifyManifest> = {}): PortifyManifest {

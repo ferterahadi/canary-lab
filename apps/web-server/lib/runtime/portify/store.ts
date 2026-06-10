@@ -39,6 +39,7 @@ function indexEntryFromManifest(m: PortifyManifest): PortifyIndexEntry {
     branch: m.branch,
     startedAt: m.startedAt,
     ...(m.endedAt ? { endedAt: m.endedAt } : {}),
+    ...(m.mergedAt ? { mergedAt: m.mergedAt } : {}),
   }
 }
 

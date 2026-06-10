@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify'
 import type { PortifyStore } from '../lib/runtime/portify/store'
-import type { PortifyManifest, StartPortifyInput, StartPortifyResult } from '../lib/runtime/portify/types'
+import type { PortifyManifest, PortifyMergeResult, PortifyMergeStatusResult, StartPortifyInput, StartPortifyResult } from '../lib/runtime/portify/types'
 import type { HealAgent } from '../lib/runtime/auto-heal'
 
 // REST surface for the port-ification workflow, mirroring routes/benchmarks.ts.
@@ -14,6 +14,8 @@ export interface PortifyRouteDeps {
   cancelPortify(workflowId: string): Promise<PortifyManifest>
   revisePortify(workflowId: string, feedback: string): Promise<PortifyManifest>
   removePortify(workflowId: string): Promise<{ workflowId: string; removed: true }>
+  mergePortify(workflowId: string): Promise<PortifyMergeResult>
+  portifyMergeStatus(workflowId: string): Promise<PortifyMergeStatusResult>
   loadAgentSession(workflowId: string): { agent: string; sessionId: string; model?: string; effort?: string; events: unknown[] } | null
 }
 
@@ -78,6 +80,28 @@ export async function portifyRoutes(app: FastifyInstance, deps: PortifyRouteDeps
   app.post<{ Params: { workflowId: string } }>('/api/portify/:workflowId/cancel', async (req, reply) => {
     try {
       return await deps.cancelPortify(req.params.workflowId)
+    } catch (err) {
+      reply.code((err as { statusCode?: number }).statusCode ?? 500)
+      return { error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
+  // Live merge readiness of the user's repos (clean? branch exists? merged?).
+  // Computed from git on every call — the Committed screen's Re-check button.
+  app.get<{ Params: { workflowId: string } }>('/api/portify/:workflowId/merge-status', async (req, reply) => {
+    try {
+      return await deps.portifyMergeStatus(req.params.workflowId)
+    } catch (err) {
+      reply.code((err as { statusCode?: number }).statusCode ?? 500)
+      return { error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
+  // Merge the committed branch into each repo's checked-out branch. Conflicts
+  // are aborted server-side (never left mid-merge) and reported per repo.
+  app.post<{ Params: { workflowId: string } }>('/api/portify/:workflowId/merge', async (req, reply) => {
+    try {
+      return await deps.mergePortify(req.params.workflowId)
     } catch (err) {
       reply.code((err as { statusCode?: number }).statusCode ?? 500)
       return { error: err instanceof Error ? err.message : String(err) }

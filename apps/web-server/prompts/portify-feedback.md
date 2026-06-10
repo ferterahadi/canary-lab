@@ -7,6 +7,7 @@ The human's feedback:
 Apply that feedback, keeping every constraint from the original task intact:
 
 - The goal is unchanged: every port the app BINDS must read an injectable env var (with the current value as fallback), and the feature config at {{featureConfigPath}} must declare a matching `ports: [{ name: '<slot>', env: '<ENV_VAR>' }]` slot for each, with `${port.<slot>}` tokens in the healthCheck / inter-service URLs.
+- Envset files under `envsets/<env>/` next to the feature config stay token-driven too: any value targeting a relocated listener uses `${port.<slot>}`, never a hardcoded port; values pointing at shared external infra (brokers, DBs) stay as-is.
 - Edit each repo's SOURCE in its worktree path and the feature config at its real path. Do NOT commit — the human reviews and commits.
 - Do NOT touch test files (anything under `e2e/` or matching `*.spec.[tj]s` / `*.test.[tj]s`).
 - If the feedback asks for something that would break a listener or leave a port hardcoded, prefer correctness and explain the tension rather than silently doing the wrong thing.

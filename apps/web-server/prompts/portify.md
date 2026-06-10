@@ -73,6 +73,14 @@ Ports hide outside `.ts`/`.js` source:
 
 Note: Canary Lab can resolve the `${port.<slot>}` token *inside applied envset files* at boot. So a config-file listen port can be driven by putting `${port.<slot>}` in the matching envset rather than hardcoding — but the SOURCE still needs to read the env var for that to take effect.
 
+## 6b. Rewrite the feature's envsets — a hardcoded URL there is silently broken
+
+The feature has envset files under `envsets/<env>/` next to {{featureConfigPath}}. They are applied at boot, BEFORE port injection, and `${port.<slot>}` tokens inside them resolve to the run's assigned ports. They are part of this job:
+
+- Scan EVERY envset file (`.env` / `.properties` / `.env.local`) for values that point at a listener you relocated — e.g. `GATEWAY_URL=http://localhost:3000`. After your rewrite that listener boots on an injected port, so the hardcoded value dials a dead (or worse, *another run's*) port. Verification will NOT catch this — health checks don't read these values; the feature's tests do, and they'd fail later for a reason nobody connects back to port-ification.
+- Rewrite each such value to the token form: `GATEWAY_URL=http://localhost:${port.gateway}`, using the slot you declared for that listener.
+- Apply the same three-bucket test as everywhere else: values pointing at SHARED external infra (broker URIs like `amqp://localhost:5672`, management consoles, DBs, Redis, OAuth issuers) are NOT per-run listeners — leave them hardcoded and list them in the report.
+
 ## 7. Do NOT touch test files
 
 Anything under `e2e/` or matching `*.spec.[tj]s` / `*.test.[tj]s` is off-limits. This is purely a port-injection change. (Test helpers already resolve the target as `CANARY_PORT_<slot>` → a URL env var → a hardcoded default; you don't need to edit them.)
@@ -88,6 +96,7 @@ Some ports are fixed by something outside the app and converting them won't help
 ## 9. Self-verify before finishing
 
 - Re-grep each worktree for the original hardcoded port literals; every remaining one should be a fallback default (`?? 3007`), a test file, or an item you justified in section 8.
+- Re-grep the feature's `envsets/` for `localhost:<digits>` (and the original port literals); every hit should be shared external infra (section 6b) — anything targeting a relocated listener must use `${port.<slot>}`.
 - Confirm each feature-config slot `env` matches a var the source actually reads, and each `${port.<slot>}` token names a slot you declared.
 - If a typecheck/build is cheap in the worktree, run it — the enum→const change is exactly the kind that breaks types at call sites.
 

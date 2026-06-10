@@ -86,6 +86,75 @@ export async function commitWorktree(worktreeRoot: string, message: string): Pro
   return rev.stdout.trim()
 }
 
+export interface RepoMergeStatus {
+  branchExists: boolean
+  /** Currently checked-out branch; null when HEAD is detached. */
+  currentBranch: string | null
+  dirty: boolean
+  mergeInProgress: boolean
+  /** The portify work (commitSha when given, else the branch tip) is an ancestor of HEAD. */
+  merged: boolean
+}
+
+/**
+ * Live merge readiness of the USER'S repo (not a worktree). `merged` is
+ * computed, not recorded — a manual `git merge` in a terminal counts. When the
+ * branch was deleted after merging, pass the commit sha so merged-ness still
+ * resolves.
+ */
+export async function mergeStatus(repoRoot: string, branch: string, commitSha?: string): Promise<RepoMergeStatus> {
+  const branchRes = await runGit(repoRoot, ['rev-parse', '-q', '--verify', `refs/heads/${branch}`])
+  const branchExists = branchRes.code === 0
+  const headRes = await runGit(repoRoot, ['symbolic-ref', '-q', '--short', 'HEAD'])
+  const currentBranch = headRes.code === 0 && headRes.stdout.trim() ? headRes.stdout.trim() : null
+  const statusRes = await runGit(repoRoot, ['status', '--porcelain', '--', '.'])
+  const dirty = Boolean(statusRes.stdout.trim())
+  const mergeHead = await runGit(repoRoot, ['rev-parse', '-q', '--verify', 'MERGE_HEAD'])
+  const mergeInProgress = mergeHead.code === 0
+  const ref = commitSha ?? (branchExists ? branch : null)
+  let merged = false
+  if (ref) {
+    const anc = await runGit(repoRoot, ['merge-base', '--is-ancestor', ref, 'HEAD'])
+    merged = anc.code === 0
+  }
+  return { branchExists, currentBranch, dirty, mergeInProgress, merged }
+}
+
+export type MergeOutcome =
+  | { ok: true; mergeCommitSha: string; alreadyMerged: boolean }
+  | { ok: false; conflictFiles: string[] }
+
+/**
+ * Merge the portify branch into the repo's currently checked-out branch — the
+ * one git operation that DOES touch the user's tree, so it refuses any state
+ * it can't merge cleanly from, and on conflict it aborts and reports rather
+ * than leaving conflict markers behind.
+ */
+export async function mergePortifyBranch(repoRoot: string, branch: string): Promise<MergeOutcome> {
+  const s = await mergeStatus(repoRoot, branch)
+  if (!s.branchExists) throw new Error(`branch ${branch} does not exist in ${repoRoot}`)
+  if (s.mergeInProgress) throw new Error(`a merge is already in progress in ${repoRoot} — conclude or abort it first`)
+  if (s.currentBranch == null) throw new Error(`HEAD is detached in ${repoRoot} — check out a branch to merge into`)
+  if (s.dirty) throw new Error(`${repoRoot} has uncommitted changes — commit or stash them before merging`)
+  if (s.merged) {
+    const head = await runGit(repoRoot, ['rev-parse', 'HEAD'])
+    return { ok: true, mergeCommitSha: head.stdout.trim(), alreadyMerged: true }
+  }
+  const merge = await runGit(repoRoot, [
+    '-c', 'user.name=canary-lab', '-c', 'user.email=portify@canary-lab',
+    'merge', '--no-edit', '--no-verify', branch,
+  ])
+  if (merge.code !== 0) {
+    const unmerged = await runGit(repoRoot, ['diff', '--name-only', '--diff-filter=U'])
+    const conflictFiles = unmerged.stdout.split(/\r?\n/).map((l) => l.trim()).filter(Boolean)
+    await runGit(repoRoot, ['merge', '--abort'])
+    if (conflictFiles.length > 0) return { ok: false, conflictFiles }
+    throw new Error(`merge failed: ${`${merge.stderr}${merge.stdout}`.trim()}`)
+  }
+  const head = await runGit(repoRoot, ['rev-parse', 'HEAD'])
+  return { ok: true, mergeCommitSha: head.stdout.trim(), alreadyMerged: false }
+}
+
 /** Remove the worktree and delete the (unmerged) branch from the source repo. */
 export async function discardWorktree(handle: WorktreeHandle, branch: string): Promise<void> {
   await removeWorktree(handle)

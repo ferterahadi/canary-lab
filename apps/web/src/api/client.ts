@@ -233,6 +233,7 @@ export interface PortifyRepoState {
   worktreePath?: string
   baseSha?: string
   commitSha?: string
+  mergeCommitSha?: string
 }
 
 export interface PortifyIndexEntry {
@@ -242,6 +243,7 @@ export interface PortifyIndexEntry {
   branch?: string
   startedAt: string
   endedAt?: string
+  mergedAt?: string
 }
 
 export interface PortifyManifest {
@@ -259,6 +261,41 @@ export interface PortifyManifest {
   diff?: string
   verification?: { ok: boolean; instances: PortifyBootInstance[]; failureDetail?: string }
   error?: string
+  mergedAt?: string
+}
+
+export interface PortifyRepoMergeStatus {
+  name: string
+  gitRoot: string
+  commitSha: string
+  branchExists: boolean
+  currentBranch: string | null
+  dirty: boolean
+  mergeInProgress: boolean
+  merged: boolean
+}
+
+export interface PortifyMergeStatusResult {
+  workflowId: string
+  branch: string
+  repos: PortifyRepoMergeStatus[]
+  merged: boolean
+  nothingToMerge: boolean
+}
+
+export interface PortifyRepoMergeResult {
+  name: string
+  ok: boolean
+  mergeCommitSha?: string
+  alreadyMerged?: boolean
+  conflictFiles?: string[]
+  error?: string
+}
+
+export interface PortifyMergeResult {
+  ok: boolean
+  results: PortifyRepoMergeResult[]
+  manifest: PortifyManifest
 }
 
 export function startPortify(
@@ -309,6 +346,24 @@ export function revisePortify(
   return request<PortifyManifest>(
     `${baseUrl}/api/portify/${encodeURIComponent(workflowId)}/revise`,
     { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ feedback }) },
+    fetchImpl,
+  )
+}
+
+export function getPortifyMergeStatus(workflowId: string, opts?: ClientOptions): Promise<PortifyMergeStatusResult> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<PortifyMergeStatusResult>(
+    `${baseUrl}/api/portify/${encodeURIComponent(workflowId)}/merge-status`,
+    { method: 'GET' },
+    fetchImpl,
+  )
+}
+
+export function mergePortify(workflowId: string, opts?: ClientOptions): Promise<PortifyMergeResult> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<PortifyMergeResult>(
+    `${baseUrl}/api/portify/${encodeURIComponent(workflowId)}/merge`,
+    { method: 'POST' },
     fetchImpl,
   )
 }

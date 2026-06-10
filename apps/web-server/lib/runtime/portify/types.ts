@@ -41,6 +41,8 @@ export interface PortifyRepoState {
   baseSha?: string
   /** Commit SHA on the branch once the user commits. */
   commitSha?: string
+  /** HEAD of the user's branch after merging via the UI/MCP merge action. */
+  mergeCommitSha?: string
 }
 
 export interface PortifyManifest {
@@ -66,6 +68,11 @@ export interface PortifyManifest {
   diff?: string
   verification?: PortifyVerification
   error?: string
+  /** When the branch was merged into the user's branch via the merge action.
+   *  Manual `git merge`s don't set this — merged-ness is COMPUTED live from git
+   *  (merge-base --is-ancestor); this only records the in-app action. Optional:
+   *  manifests persisted before this field existed deserialize without it. */
+  mergedAt?: string
 }
 
 export interface PortifyIndexEntry {
@@ -78,6 +85,46 @@ export interface PortifyIndexEntry {
   branch?: string
   startedAt: string
   endedAt?: string
+  /** Set when the branch was merged via the in-app merge action. */
+  mergedAt?: string
+}
+
+/** Live merge readiness of one git root holding portify commits. */
+export interface PortifyRepoMergeStatus {
+  /** Member repo names sharing this git root (comma-joined for display). */
+  name: string
+  gitRoot: string
+  commitSha: string
+  branchExists: boolean
+  currentBranch: string | null
+  dirty: boolean
+  mergeInProgress: boolean
+  merged: boolean
+}
+
+export interface PortifyMergeStatusResult {
+  workflowId: string
+  branch: string
+  repos: PortifyRepoMergeStatus[]
+  /** Every repo with portify commits has them in its HEAD's ancestry. */
+  merged: boolean
+  /** Committed without source changes — there is no branch to merge. */
+  nothingToMerge: boolean
+}
+
+export interface PortifyRepoMergeResult {
+  name: string
+  ok: boolean
+  mergeCommitSha?: string
+  alreadyMerged?: boolean
+  conflictFiles?: string[]
+  error?: string
+}
+
+export interface PortifyMergeResult {
+  ok: boolean
+  results: PortifyRepoMergeResult[]
+  manifest: PortifyManifest
 }
 
 export interface StartPortifyInput {

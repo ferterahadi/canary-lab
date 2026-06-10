@@ -11,11 +11,20 @@ import { removeWorktree, type WorktreeHandle } from '../repo-worktree'
 import { PortifyRunStore } from './store'
 import { PortifyOrchestrator } from './orchestrator'
 import { buildPortifyPaths, portifyDir } from './paths'
-import { createBranchAndWorktree, captureDiff, changedFiles, commitWorktree, discardWorktree, portifyBranchName } from './git-ops'
+import { createBranchAndWorktree, captureDiff, changedFiles, commitWorktree, discardWorktree, portifyBranchName, mergeStatus as repoMergeStatus, mergePortifyBranch } from './git-ops'
 import { runPortifyAgent, writePortifyClaudeRef } from './agent'
 import { buildPortifyPrompt, buildPortifyRetryPrompt, buildPortifyFeedbackPrompt, type RepoEditTarget } from './prompt'
 import { verifyDoubleBoot } from './verify'
-import type { PortifyManifest, PortifyRepoState, StartPortifyInput, StartPortifyResult } from './types'
+import type {
+  PortifyManifest,
+  PortifyMergeResult,
+  PortifyMergeStatusResult,
+  PortifyRepoMergeResult,
+  PortifyRepoMergeStatus,
+  PortifyRepoState,
+  StartPortifyInput,
+  StartPortifyResult,
+} from './types'
 
 // Wires the real I/O behind the (tested) PortifyOrchestrator: a git branch +
 // worktree per GIT ROOT, the port-ification agent, the double-boot verifier,
@@ -377,6 +386,98 @@ export function createPortifyRunner(deps: PortifyRunnerDeps) {
     return next
   }
 
+  // ── Merge: bring the committed branch into the USER'S checked-out branch ──
+  // The one portify action that touches the user's own working tree, so both
+  // entry points re-check live git state and never leave a repo mid-merge
+  // (mergePortifyBranch aborts on conflict).
+
+  function committedManifest(workflowId: string): PortifyManifest {
+    const m = deps.store.get(workflowId)
+    if (!m) throw Object.assign(new Error('workflow not found'), { statusCode: 404 })
+    if (m.status !== 'committed') {
+      throw Object.assign(new Error(`cannot merge a workflow in status "${m.status}" — commit it first`), { statusCode: 409 })
+    }
+    return m
+  }
+
+  // Repos that share a git root were committed as one (one worktree, one sha) —
+  // merge them as one too. Keyed by git root; falls back to the repo path when
+  // the root can't be resolved (the status read then reports it unmergeable).
+  async function committedGroups(m: PortifyManifest): Promise<Map<string, { names: string[]; sha: string }>> {
+    const byRoot = new Map<string, { names: string[]; sha: string }>()
+    for (const r of m.repos) {
+      if (!r.commitSha) continue
+      const repoPath = resolveRepoPath(r.path)
+      const root = (await getGitRoot(repoPath)) ?? repoPath
+      const group = byRoot.get(root) ?? { names: [], sha: r.commitSha }
+      group.names.push(r.name)
+      byRoot.set(root, group)
+    }
+    return byRoot
+  }
+
+  /** Live, per-git-root merge readiness — computed from git, never recorded. */
+  async function mergeStatusFor(workflowId: string): Promise<PortifyMergeStatusResult> {
+    const m = committedManifest(workflowId)
+    const groups = await committedGroups(m)
+    const repos: PortifyRepoMergeStatus[] = []
+    for (const [root, group] of groups) {
+      const s = await repoMergeStatus(root, m.branch, group.sha)
+      repos.push({ name: group.names.join(', '), gitRoot: root, commitSha: group.sha, ...s })
+    }
+    return {
+      workflowId,
+      branch: m.branch,
+      repos,
+      merged: repos.every((r) => r.merged),
+      nothingToMerge: repos.length === 0,
+    }
+  }
+
+  /**
+   * Merge the branch into each repo's current branch, sequentially; stop at the
+   * first repo that can't merge cleanly (its results entry says why — already-
+   * merged roots are skipped idempotently, so re-running after a fix is safe).
+   */
+  async function merge(workflowId: string): Promise<PortifyMergeResult> {
+    const m = committedManifest(workflowId)
+    const groups = await committedGroups(m)
+    const results: PortifyRepoMergeResult[] = []
+    const shaByMember = new Map<string, string>()
+    let allOk = true
+    for (const [root, group] of groups) {
+      const name = group.names.join(', ')
+      try {
+        const out = await mergePortifyBranch(root, m.branch)
+        if (out.ok) {
+          results.push({ name, ok: true, mergeCommitSha: out.mergeCommitSha, alreadyMerged: out.alreadyMerged })
+          for (const member of group.names) shaByMember.set(member, out.mergeCommitSha)
+        } else {
+          allOk = false
+          results.push({ name, ok: false, conflictFiles: out.conflictFiles })
+          break
+        }
+      } catch (err) {
+        allOk = false
+        results.push({ name, ok: false, error: err instanceof Error ? err.message : String(err) })
+        break
+      }
+    }
+    let next = m
+    if (allOk && shaByMember.size > 0) {
+      next = {
+        ...m,
+        mergedAt: deps.now(),
+        repos: m.repos.map((r) => {
+          const sha = shaByMember.get(r.name)
+          return sha ? { ...r, mergeCommitSha: sha } : r
+        }),
+      }
+      deps.store.save(next)
+    }
+    return { ok: allOk, results, manifest: next }
+  }
+
   // Remove a finished workflow from history (index + run dir). Only terminal
   // workflows can be removed — an active one must be committed or cancelled
   // first. Removing a committed one keeps its git branch (the user's work).
@@ -394,7 +495,7 @@ export function createPortifyRunner(deps: PortifyRunnerDeps) {
     return { workflowId, removed: true }
   }
 
-  return { startPortify, commit, cancel, revise, remove, abort: cancel }
+  return { startPortify, commit, cancel, revise, remove, merge, mergeStatus: mergeStatusFor, abort: cancel }
 }
 
 function readFileOrNull(p: string): string | null {

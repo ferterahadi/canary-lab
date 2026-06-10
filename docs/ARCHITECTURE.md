@@ -60,7 +60,6 @@ Key `apps/web-server/lib/runtime/` modules:
 | `repo-collision.ts`, `repo-worktree.ts` | Same-repo collision detection + per-run git worktree isolation |
 | `auto-heal.ts` | Local heal-agent binary resolution and spawn command building |
 | `heal-cycle.ts`, `heal-prompt-builder.ts` | Heal-cycle state machine and prompt assembly |
-| `retention.ts` | Count-based pruning of `logs/runs/` |
 | `manifest.ts`, `run-paths.ts`, `run-id.ts` | Run manifest schema and path/id conventions |
 | `summary-reporter.ts`, `log-enrichment.ts`, `trace-enrichment.ts` | Evidence capture and enrichment |
 | `portify/` | Agent-driven port-injection workflow (see [Portify](#portify-and-benchmark)) |
@@ -135,11 +134,10 @@ the same run until pass or terminal failure.
 Logs live under `<workspace>/logs/`. Per-run artifacts are in `logs/runs/<runId>/`:
 `runner.log` (orchestrator narration), `svc-<name>.log`, `playwright.log`,
 `external-commands.jsonl` (per-command audit for external heal), failure slices, and
-the manifest. Retention is count-based: keep the most recent `CANARY_LAB_RUN_RETENTION`
-runs (default 20) via `pruneRuns` (`apps/web-server/lib/runtime/retention.ts`), called
-on `createServer` bootstrap and on every RunStore `finalized` event (`server.ts`).
-Pruning is status-agnostic and lexicographic by runId; concurrency caps keep active
-runs well under the limit.
+the manifest. There is no automatic retention/pruning — runs persist on disk until
+removed manually via the Log Cleanup page (`GET /api/cleanup/runs`, backed by
+`RunStore.delete` / `trimArtifacts`), which deletes whole runs or trims Playwright
+artifacts while keeping the manifest and `runner.log`.
 
 ## Concurrency
 

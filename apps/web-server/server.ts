@@ -48,7 +48,6 @@ import {
 import { WizardAgentRegistry } from './lib/wizard-agent-registry'
 import { generateRunId } from './lib/runtime/run-id'
 import { runDirFor, buildRunPaths } from './lib/runtime/run-paths'
-import { pruneRuns } from './lib/runtime/retention'
 import { RunOrchestrator, collectPortSlots, buildServiceSpecs, buildQueuedServiceEntries } from './lib/runtime/orchestrator'
 import { allocatePorts } from './lib/runtime/port-allocator'
 import { resolvePortTokens } from './lib/runtime/launcher/interpolate'
@@ -197,12 +196,6 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
   // not controllable by this process. Finalize it immediately instead of
   // waiting for the heartbeat staleness window or requiring a manual Stop.
   await runStore.abortAllActiveOrStale()
-  // Keep only the most recent N run dirs on disk (CANARY_LAB_RUN_RETENTION,
-  // default 20). Prune once on bootstrap and again whenever a run finalizes
-  // (see the `finalized` listener below) so old runs don't accumulate forever.
-  // Best-effort: a prune failure must never block server boot.
-  const pruneOldRuns = (): void => { try { pruneRuns(logsDir) } catch { /* best-effort */ } }
-  pruneOldRuns()
   // Tracks which external AI client (Claude Desktop / Codex CLI etc.) holds
   // heal duty for each run. Routes hit this; the orchestrator subscribes to
   // claim-changed events through the run-store fan-out.
@@ -563,8 +556,6 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
   runStore.onEvent((e) => {
     if (e.kind === 'finalized') {
       void scheduler.promote()
-      // The just-finalized run is the newest dir, so retention always keeps it.
-      pruneOldRuns()
     }
   })
 
@@ -1185,6 +1176,8 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
     cancelPortify: portifyRunner.cancel,
     revisePortify: portifyRunner.revise,
     removePortify: portifyRunner.remove,
+    mergePortify: portifyRunner.merge,
+    portifyMergeStatus: portifyRunner.mergeStatus,
     loadAgentSession: (id) => {
       try {
         const raw = fs.readFileSync(path.join(portifyDir(logsDir, id), 'agent-session.json'), 'utf-8')
@@ -1300,6 +1293,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
     commitPortify: (workflowId) => portifyRunner.commit(workflowId),
     cancelPortify: (workflowId) => portifyRunner.cancel(workflowId),
     revisePortify: (workflowId, feedback) => portifyRunner.revise(workflowId, feedback),
+    mergePortify: (workflowId) => portifyRunner.merge(workflowId),
 	  })
 
   // Serve the built React frontend if it exists. In development the dist dir
