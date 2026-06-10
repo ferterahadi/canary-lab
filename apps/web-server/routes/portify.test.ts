@@ -41,6 +41,10 @@ async function buildApp(deps: Partial<PortifyRouteDeps>) {
     cancelPortify: deps.cancelPortify ?? (async () => manifest({ status: 'aborted' })),
     revisePortify: deps.revisePortify ?? (async () => manifest({ status: 'editing', feedbackRounds: 1 })),
     removePortify: deps.removePortify ?? (async (workflowId) => ({ workflowId, removed: true as const })),
+    mergePortify: deps.mergePortify ?? (async () => ({ ok: true, results: [], manifest: manifest({ status: 'committed' }) })),
+    portifyMergeStatus: deps.portifyMergeStatus ?? (async (workflowId) => ({
+      workflowId, branch: 'canary/dynamic-ports-cns', repos: [], merged: false, nothingToMerge: true,
+    })),
     loadAgentSession: deps.loadAgentSession ?? (() => null),
   })
   return app
@@ -250,6 +254,56 @@ describe('portifyRoutes', () => {
     const rRaw = await appRaw.inject({ method: 'POST', url: '/api/portify/w/revise', payload: { feedback: 'x' } })
     expect(rRaw.statusCode).toBe(500)
     expect(rRaw.json()).toMatchObject({ error: 'raw revise failure' })
+  })
+
+  it('GET /api/portify/:id/merge-status returns live readiness', async () => {
+    const app = await build({
+      portifyMergeStatus: async (id) => ({
+        workflowId: id,
+        branch: 'canary/dynamic-ports-cns',
+        repos: [{ name: 'mighty-cns', gitRoot: '/r', commitSha: 'abc', branchExists: true, currentBranch: 'main', dirty: false, mergeInProgress: false, merged: false }],
+        merged: false,
+        nothingToMerge: false,
+      }),
+    })
+    const res = await app.inject({ method: 'GET', url: '/api/portify/portify-1/merge-status' })
+    expect(res.statusCode).toBe(200)
+    expect(res.json()).toMatchObject({ workflowId: 'portify-1', merged: false, repos: [{ name: 'mighty-cns', currentBranch: 'main' }] })
+  })
+
+  it('GET /api/portify/:id/merge-status surfaces the runner statusCode (409 not committed)', async () => {
+    const app = await build({
+      portifyMergeStatus: async () => { throw Object.assign(new Error('cannot merge a workflow in status "editing" — commit it first'), { statusCode: 409 }) },
+    })
+    const res = await app.inject({ method: 'GET', url: '/api/portify/portify-1/merge-status' })
+    expect(res.statusCode).toBe(409)
+    expect((res.json() as { error: string }).error).toContain('cannot merge')
+  })
+
+  it('POST /api/portify/:id/merge delegates to the runner and returns per-repo results', async () => {
+    let merged: string | undefined
+    const app = await build({
+      mergePortify: async (id) => {
+        merged = id
+        return { ok: true, results: [{ name: 'mighty-cns', ok: true, mergeCommitSha: 'deadbeef00', alreadyMerged: false }], manifest: manifest({ status: 'committed', mergedAt: 'now' }) }
+      },
+    })
+    const res = await app.inject({ method: 'POST', url: '/api/portify/portify-1/merge' })
+    expect(res.statusCode).toBe(200)
+    expect(merged).toBe('portify-1')
+    expect(res.json()).toMatchObject({ ok: true, results: [{ mergeCommitSha: 'deadbeef00' }] })
+  })
+
+  it('POST /api/portify/:id/merge surfaces statusCode errors and defaults to 500', async () => {
+    const app404 = await build({
+      mergePortify: async () => { throw Object.assign(new Error('workflow not found'), { statusCode: 404 }) },
+    })
+    expect((await app404.inject({ method: 'POST', url: '/api/portify/w/merge' })).statusCode).toBe(404)
+
+    const app500 = await build({ mergePortify: async () => { throw new Error('git exploded') } })
+    const r500 = await app500.inject({ method: 'POST', url: '/api/portify/w/merge' })
+    expect(r500.statusCode).toBe(500)
+    expect(r500.json()).toMatchObject({ error: 'git exploded' })
   })
 
   it('GET /api/portify/:id/agent-session returns the session when present', async () => {

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import * as api from '../api/client'
-import type { PortifyManifest, PortifyStatus } from '../api/client'
+import type { PortifyManifest, PortifyMergeStatusResult, PortifyRepoMergeResult, PortifyStatus } from '../api/client'
 import { AgentSessionView } from './AgentSessionView'
 import { CopyButton } from './CopyButton'
 
@@ -12,7 +12,7 @@ const STEPS: { key: string; label: string; sub: string }[] = [
   { key: 'plan', label: 'Plan', sub: 'what changes' },
   { key: 'exercise', label: 'Exercise', sub: 'agent + verify' },
   { key: 'review', label: 'Review', sub: 'diff + proof' },
-  { key: 'commit', label: 'Commit', sub: 'to branch' },
+  { key: 'merge', label: 'Merge', sub: 'into your branch' },
 ]
 
 function stepIndexFor(phase: 'plan' | PortifyStatus): number {
@@ -33,7 +33,7 @@ const STATUS_LABEL: Record<PortifyStatus, string> = {
   editing: 'Agent is rewriting ports…',
   verifying: 'Booting twice on different ports…',
   'ready-to-commit': 'Verified — ready to commit',
-  committed: 'Committed',
+  committed: 'Committed — merge to finish',
   failed: 'Could not make it work',
   aborted: 'Cancelled',
 }
@@ -66,6 +66,12 @@ export function PortifyWizard({
   // differs from the status-derived step. Null = follow status. Only honored
   // once Review is reached (ready-to-commit / committed).
   const [viewStep, setViewStep] = useState<number | null>(null)
+  // Live merge readiness of the user's repos (fetched once committed; Re-check
+  // refetches). Null until the first read lands — the screen shows a pending row.
+  const [mergeInfo, setMergeInfo] = useState<PortifyMergeStatusResult | null>(null)
+  // Per-repo outcome of the last merge attempt (conflicts/errors to display).
+  const [mergeResults, setMergeResults] = useState<PortifyRepoMergeResult[] | null>(null)
+  const [mergeBusy, setMergeBusy] = useState(false)
   const pollRef = useRef<number | null>(null)
 
   const stopPolling = useCallback(() => {
@@ -119,6 +125,36 @@ export function PortifyWizard({
     }
   }
 
+  // Re-read live merge readiness (clean tree? branch exists? already merged —
+  // possibly by hand in a terminal?). Transient failures keep the last state;
+  // the screen always retains the manual-merge fallback.
+  const refreshMergeStatus = useCallback(async () => {
+    if (!workflowId) return
+    try {
+      const next = await api.getPortifyMergeStatus(workflowId)
+      if (next) setMergeInfo(next)
+    } catch { /* transient */ }
+  }, [workflowId])
+
+  useEffect(() => {
+    if (m?.status === 'committed') void refreshMergeStatus()
+  }, [m?.status, refreshMergeStatus])
+
+  const merge = async () => {
+    if (!workflowId) return
+    setMergeBusy(true); setError(null)
+    try {
+      const res = await api.mergePortify(workflowId)
+      setMergeResults(res.results)
+      if (res.manifest) setM(res.manifest)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setMergeBusy(false)
+      void refreshMergeStatus()
+    }
+  }
+
   // Send review feedback: the agent resumes its session, the workflow flips
   // back to editing, and the poller (restarted via pollNonce) takes it through
   // verifying → ready-to-commit again.
@@ -155,6 +191,9 @@ export function PortifyWizard({
   }
 
   const status = m?.status
+  // Merged-ness is computed live (manual terminal merges count); the persisted
+  // mergedAt is the hint shown until the first live read lands.
+  const merged = mergeInfo ? mergeInfo.merged : Boolean(m?.mergedAt)
   // A workflow is "in flight" (cancellable / worth keeping alive) until terminal.
   const isActive = Boolean(workflowId) && status != null
     && status !== 'committed' && status !== 'failed' && status !== 'aborted'
@@ -197,7 +236,7 @@ export function PortifyWizard({
       <Stepper
         current={workflowId ? effectiveStep : 0}
         reachedMax={workflowId ? statusStep : 0}
-        committed={status === 'committed'}
+        merged={merged && status === 'committed'}
         navigable={navigable}
         onStep={setViewStep}
       />
@@ -227,7 +266,17 @@ export function PortifyWizard({
               onViewCommit={() => setViewStep(3)}
             />
           )}
-          {workflowId && m && navigable && effectiveStep === 3 && <CommittedScreen m={m} onDone={onCommitted} />}
+          {workflowId && m && navigable && effectiveStep === 3 && (
+            <CommittedScreen
+              m={m}
+              mergeInfo={mergeInfo}
+              mergeResults={mergeResults}
+              busy={mergeBusy}
+              onMerge={merge}
+              onRecheck={() => void refreshMergeStatus()}
+              onDone={onCommitted}
+            />
+          )}
           {error && <div style={{ color: 'rgb(251,113,133)', fontSize: 12, marginTop: 14 }}>{error}</div>}
         </div>
       </div>
@@ -262,7 +311,7 @@ const ghostBtn: React.CSSProperties = {
 function Stepper({
   current,
   reachedMax,
-  committed,
+  merged,
   navigable,
   onStep,
 }: {
@@ -270,8 +319,10 @@ function Stepper({
   current: number
   /** Furthest step the workflow itself has reached (status-derived). */
   reachedMax: number
-  /** Whether the workflow is committed (shows the ✓ cue on the Commit step). */
-  committed: boolean
+  /** Whether the branch is merged into the user's branch (✓ on the Merge step).
+   *  A committed-but-unmerged workflow keeps the step active — the work isn't
+   *  done until the merge lands. */
+  merged: boolean
   /** Whether step navigation is enabled (Review reached). */
   navigable: boolean
   onStep: (i: number) => void
@@ -279,27 +330,27 @@ function Stepper({
   // A step is clickable once Review is reached, for any reached step except
   // Plan (the pre-start screen has no destination for an existing run).
   const isClickable = (i: number): boolean => navigable && i >= 1 && i <= reachedMax
-  const COMMIT_STEP = 3
+  const MERGE_STEP = 3
   return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0, padding: '14px 20px', borderBottom: '1px solid var(--border-default)' }}>
       {STEPS.map((s, i) => {
         const reached = i <= reachedMax
         const isCurrent = i === current
         const clickable = isClickable(i)
-        const showCommittedTick = committed && i === COMMIT_STEP
-        const circleColor = showCommittedTick ? 'rgb(52,211,153)' : isCurrent || reached ? 'var(--accent)' : 'var(--text-muted)'
+        const showMergedTick = merged && i === MERGE_STEP
+        const circleColor = showMergedTick ? 'rgb(52,211,153)' : isCurrent || reached ? 'var(--accent)' : 'var(--text-muted)'
         const inner = (
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, opacity: reached ? 1 : 0.45 }}>
             <span style={{
               width: 20, height: 20, borderRadius: 9999, display: 'grid', placeItems: 'center', fontSize: 11, fontWeight: 700,
-              border: `2px solid ${showCommittedTick ? 'rgb(52,211,153)' : isCurrent || reached ? 'var(--accent)' : 'var(--border-default)'}`,
+              border: `2px solid ${showMergedTick ? 'rgb(52,211,153)' : isCurrent || reached ? 'var(--accent)' : 'var(--border-default)'}`,
               color: circleColor,
               background: isCurrent ? 'color-mix(in srgb, var(--accent) 14%, transparent)' : 'transparent',
-            }}>{showCommittedTick ? '✓' : i + 1}</span>
+            }}>{showMergedTick ? '✓' : i + 1}</span>
             <span style={{ fontSize: 12 }}>
               <b style={{ color: isCurrent ? 'var(--accent)' : 'var(--text-primary)' }}>{s.label}</b>
               <span style={{ color: 'var(--text-muted)', marginLeft: 6 }}>
-                {committed && i === COMMIT_STEP ? 'committed ✓' : s.sub}
+                {showMergedTick ? 'merged ✓' : s.sub}
               </span>
             </span>
           </div>
@@ -430,7 +481,7 @@ function ReviewScreen({ m, busy, committed, onCommit, onRequestChanges, onViewCo
             onClick={onViewCommit}
             style={{ marginLeft: 'auto', padding: '8px 14px', fontSize: 12.5, fontWeight: 600, borderRadius: 'var(--radius-md)', background: 'transparent', border: '1px solid var(--accent)', color: 'var(--accent)', cursor: 'pointer', whiteSpace: 'nowrap' }}
           >
-            View commit details →
+            View merge details →
           </button>
         </div>
       ) : (
@@ -573,48 +624,179 @@ function FeedbackModal({ busy, onSend, onClose }: { busy: boolean; onSend: (feed
   )
 }
 
-function CommittedScreen({ m, onDone }: { m: PortifyManifest; onDone: () => void }) {
+// PR-style merge page: the wizard's last step. Committing landed the rewrite on
+// a branch — this screen owns the step that makes it real: merging that branch
+// into the user's checked-out branch. Readiness is checked live (Re-check), the
+// merge runs server-side with abort-on-conflict, and merged-ness is computed
+// from git so a manual terminal merge flips the screen too.
+function CommittedScreen({
+  m,
+  mergeInfo,
+  mergeResults,
+  busy,
+  onMerge,
+  onRecheck,
+  onDone,
+}: {
+  m: PortifyManifest
+  mergeInfo: PortifyMergeStatusResult | null
+  mergeResults: PortifyRepoMergeResult[] | null
+  busy: boolean
+  onMerge: () => void
+  onRecheck: () => void
+  onDone: () => void
+}) {
   const committed = m.repos.filter((r) => r.commitSha)
   const mergeCmd = `git merge ${m.branch}`
+  const merged = mergeInfo ? mergeInfo.merged : Boolean(m.mergedAt)
+
+  if (committed.length === 0) {
+    return (
+      <div>
+        <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 8, color: 'rgb(52,211,153)' }}>✓ Committed</div>
+        <p style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6, marginBottom: 18 }}>
+          No source changes were needed — the apps already honor injected ports; the config now declares the slots. Nothing to merge: this feature can already boot concurrently.
+        </p>
+        <button type="button" className="cl-button-primary" onClick={onDone} style={{ padding: '9px 16px' }}>Done</button>
+      </div>
+    )
+  }
+
+  if (merged) {
+    return (
+      <div>
+        <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 8, color: 'rgb(52,211,153)' }}>✓ Merged</div>
+        <p style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6, marginBottom: 14 }}>
+          The port rewrite is in your branch. <b style={{ color: 'var(--text-secondary)' }}>{m.feature}</b> can now boot concurrently — parallel runs and benchmark arms get distinct ports.
+        </p>
+        <div style={{ border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)', background: 'var(--bg-surface)', padding: '13px 15px', marginBottom: 18 }}>
+          {committed.map((r) => (
+            <div key={r.name} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)', padding: '3px 0' }}>
+              <span style={{ color: 'rgb(52,211,153)' }}>✓</span>
+              <span>{r.name}</span>
+              <code style={mono}>{(r.mergeCommitSha ?? r.commitSha!).slice(0, 10)}</code>
+              {r.mergeCommitSha && <span style={{ color: 'var(--text-muted)' }}>merge commit</span>}
+            </div>
+          ))}
+          <div style={{ fontSize: 11.5, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', marginTop: 8, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            from {m.branch}
+          </div>
+        </div>
+        <button type="button" className="cl-button-primary" onClick={onDone} style={{ padding: '9px 16px' }}>Done</button>
+      </div>
+    )
+  }
+
+  // Not merged yet: readiness checks + the merge action.
+  const repoChecks = mergeInfo?.repos ?? []
+  const blockers = repoChecks.filter((r) => !r.branchExists || r.dirty || r.mergeInProgress || r.currentBranch == null)
+  const canMerge = mergeInfo != null && repoChecks.length > 0 && blockers.length === 0 && !busy
+  const targets = [...new Set(repoChecks.map((r) => r.currentBranch).filter(Boolean))] as string[]
+  const mergeLabel = targets.length === 1 ? `Merge into ${targets[0]}` : 'Merge into current branches'
+  const failures = (mergeResults ?? []).filter((r) => !r.ok)
+
   return (
     <div>
-      <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 8, color: 'rgb(52,211,153)' }}>✓ Committed</div>
+      <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 8 }}>
+        <span style={{ color: 'rgb(52,211,153)' }}>✓ Committed</span> — one step left
+      </div>
       <p style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6, marginBottom: 14 }}>
-        The port rewrite is committed to its own branch. Your working tree wasn’t touched — bring it into your branch with a merge (or cherry-pick / a PR).
+        The rewrite lives on <code style={mono}>{m.branch}</code>. Your checkout doesn’t use it until it’s merged — until then, runs keep booting with the old hardcoded ports.
       </p>
 
-      {committed.length === 0 ? (
-        <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginBottom: 18 }}>
-          No source changes were needed — the apps already honor injected ports; the config now declares the slots. Nothing to merge.
+      <div style={{ border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)', background: 'var(--bg-surface)', marginBottom: 14 }}>
+        {m.verification?.ok && (
+          <CheckRow tone="ok" text="Double-boot verified — two copies ran concurrently on distinct ports" />
+        )}
+        {committed.map((r) => (
+          <CheckRow key={r.name} tone="ok" text={`Committed to ${r.name}`} trail={<code style={mono}>{r.commitSha!.slice(0, 10)}</code>} />
+        ))}
+        {mergeInfo == null && <CheckRow tone="pending" text="Checking your repo…" />}
+        {repoChecks.map((r) => {
+          const into = r.currentBranch ? ` — will merge into ${r.currentBranch}` : ''
+          if (!r.branchExists) return <CheckRow key={r.gitRoot} tone="bad" text={`The branch is missing in ${r.name} — was it deleted? Merge it manually if you still have it elsewhere.`} />
+          if (r.mergeInProgress) return <CheckRow key={r.gitRoot} tone="warn" text={`${r.name} is mid-merge — conclude or abort that merge first, then Re-check.`} />
+          if (r.currentBranch == null) return <CheckRow key={r.gitRoot} tone="warn" text={`${r.name} is on a detached HEAD — check out a branch to merge into, then Re-check.`} />
+          if (r.dirty) return <CheckRow key={r.gitRoot} tone="warn" text={`${r.name} has uncommitted changes — commit or stash them, then Re-check.`} />
+          return <CheckRow key={r.gitRoot} tone="ok" text={`Working tree clean in ${r.name}${into}`} />
+        })}
+        <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '8px 12px', borderTop: '1px solid var(--border-default)' }}>
+          <button type="button" onClick={onRecheck} style={{ ...ghostBtn, padding: '5px 11px', fontSize: 11.5 }}>Re-check</button>
         </div>
-      ) : (
-        <div style={{ border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)', background: 'var(--bg-surface)', padding: '13px 15px', marginBottom: 18 }}>
+      </div>
+
+      {failures.length > 0 && (
+        <div style={{ fontSize: 12, color: 'rgb(251,191,36)', background: 'rgba(251,191,36,0.08)', border: '1px solid rgba(251,191,36,0.3)', borderRadius: 'var(--radius-md)', padding: '10px 12px', marginBottom: 14, lineHeight: 1.6 }}>
+          {failures.map((f) => (
+            <div key={f.name}>
+              {f.conflictFiles?.length ? (
+                <>
+                  Merge aborted — your repo is unchanged. <b>{f.name}</b> conflicts with your branch in:
+                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11.5, marginTop: 4 }}>
+                    {f.conflictFiles.map((file) => <div key={file}>{file}</div>)}
+                  </div>
+                  <div style={{ marginTop: 6, color: 'var(--text-muted)' }}>
+                    Resolve by hand: run <code style={mono}>{mergeCmd}</code> in the repo and fix the conflicts in your editor.
+                  </div>
+                </>
+              ) : (
+                <>Could not merge {f.name}: {f.error ?? 'unknown error'}</>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 14 }}>
+        <button
+          type="button"
+          onClick={onMerge}
+          disabled={!canMerge}
+          title={canMerge ? `Runs git merge ${m.branch} locally in your repo` : 'Resolve the blockers above, then Re-check'}
+          style={{
+            padding: '9px 18px', fontSize: 12.5, fontWeight: 600, borderRadius: 'var(--radius-md)', whiteSpace: 'nowrap',
+            background: 'var(--success)', border: '1px solid var(--success)', color: '#fff',
+            cursor: canMerge ? 'pointer' : 'not-allowed', opacity: canMerge ? 1 : 0.5,
+          }}
+        >
+          {busy ? 'Merging…' : mergeLabel}
+        </button>
+        <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
+          Runs locally in your repo. If it can’t merge cleanly, nothing changes.
+        </span>
+      </div>
+
+      <details style={{ marginBottom: 16 }}>
+        <summary style={{ fontSize: 12, color: 'var(--text-secondary)', cursor: 'pointer' }}>Merge manually instead</summary>
+        <div style={{ border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)', background: 'var(--bg-surface)', padding: '13px 15px', marginTop: 8 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
             <span style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '.4px', color: 'var(--text-muted)', fontWeight: 600 }}>Branch</span>
             <code style={{ ...mono, flex: '0 1 auto', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.branch}</code>
             <CopyButton value={m.branch} label="Copy" style={{ flexShrink: 0 }} />
           </div>
-          <div style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '.4px', color: 'var(--text-muted)', fontWeight: 600, marginBottom: 6 }}>
-            Bring it into your branch
-          </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <code style={{ ...mono, flex: '1 1 auto', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', padding: '6px 9px' }}>{mergeCmd}</code>
             <CopyButton value={mergeCmd} label="Copy" style={{ flexShrink: 0 }} />
           </div>
-          <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 4 }}>
-            {committed.map((r) => (
-              <div key={r.name} style={{ fontSize: 12, fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }}>
-                {r.name} <code style={mono}>{r.commitSha!.slice(0, 10)}</code>
-              </div>
-            ))}
+          <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 8, lineHeight: 1.5 }}>
+            Run it in each repo, on the branch you want the rewrite in. Use Re-check afterwards — the screen detects manual merges.
           </div>
         </div>
-      )}
+      </details>
 
-      <p style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.6, marginBottom: 16 }}>
-        Tip: re-open the benchmark to run it now — both arms will boot on distinct ports.
-      </p>
-      <button type="button" className="cl-button-primary" onClick={onDone} style={{ padding: '9px 16px' }}>Done</button>
+      <button type="button" onClick={onDone} style={ghostBtn}>Done — merge later</button>
+    </div>
+  )
+}
+
+function CheckRow({ tone, text, trail }: { tone: 'ok' | 'warn' | 'bad' | 'pending'; text: string; trail?: React.ReactNode }) {
+  const color = tone === 'ok' ? 'rgb(52,211,153)' : tone === 'warn' ? 'rgb(251,191,36)' : tone === 'bad' ? 'rgb(251,113,133)' : 'var(--text-muted)'
+  const mark = tone === 'ok' ? '✓' : tone === 'warn' ? '⚠' : tone === 'bad' ? '✕' : '○'
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderBottom: '1px solid var(--border-default)' }}>
+      <span style={{ fontSize: 13, color, flexShrink: 0 }}>{mark}</span>
+      <span style={{ fontSize: 12.5, color: tone === 'pending' ? 'var(--text-muted)' : 'var(--text-primary)', lineHeight: 1.5 }}>{text}</span>
+      {trail && <span style={{ marginLeft: 'auto', flexShrink: 0 }}>{trail}</span>}
     </div>
   )
 }

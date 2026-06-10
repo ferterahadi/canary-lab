@@ -976,9 +976,18 @@ export function PortSlotEditor({
       )}
       {ports.length > 0 && (
         <div className="flex items-center gap-1.5 px-0.5 text-[9px] uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
-          <span className="flex-1">Slot name</span>
-          <span className="flex-1">Env var <span className="normal-case tracking-normal opacity-70">(optional)</span></span>
-          <span className="flex-1">Reference</span>
+          <span className="inline-flex flex-1 items-center gap-1">
+            Slot name
+            <HintIcon hint="Your label for one port this command listens on — not a number. Each run is assigned a fresh free port per slot, so concurrent runs never clash." />
+          </span>
+          <span className="inline-flex flex-1 items-center gap-1">
+            Env var <span className="normal-case tracking-normal opacity-70">(optional)</span>
+            <HintIcon hint="The environment variable the service reads its port from — the run injects the assigned number here when it boots this command. Optional because a slot can be consumed via ${port.<name>} instead (e.g. --port ${port.api} in the command, or a token in an envset file)." />
+          </span>
+          <span className="inline-flex flex-1 items-center gap-1">
+            Reference
+            <HintIcon hint="Read-only token that stands for this slot's port. Paste it into the start command, health-check URL, or envset files — it resolves to the assigned number at run time. Click to copy." />
+          </span>
           <span className="w-6 shrink-0" />
         </div>
       )}
@@ -1023,28 +1032,44 @@ export function PortSlotEditor({
   )
 }
 
-// Read-only display of what a slot injects at run time: the `${port.<name>}`
-// token to reference elsewhere (health-check URLs, inter-service config) and
-// the env var the service reads. The actual port number is allocated per run
-// and only exists while a run is active — settings shows the reference, not a
-// concrete number.
+// Display of what a slot injects at run time: the `${port.<name>}` token to
+// reference elsewhere (health-check URLs, envset files, inter-service config)
+// and the env var the service reads. The actual port number is allocated per
+// run and only exists while a run is active — settings shows the reference,
+// not a concrete number. Click copies the token for pasting where it's needed.
 function PortSlotToken({ name, env }: { name: string; env?: string }) {
-  const token = name.trim() ? `\${port.${name.trim()}}` : '${port.…}'
+  const [copied, setCopied] = useState(false)
+  const ready = name.trim().length > 0
+  const token = ready ? `\${port.${name.trim()}}` : '${port.…}'
   const label = env ? `Injected as ${env}; reference with ${token}` : `Reference with ${token}`
+  const copy = (): void => {
+    if (!ready) return
+    void navigator.clipboard
+      ?.writeText(token)
+      .then(() => {
+        setCopied(true)
+        window.setTimeout(() => setCopied(false), 1200)
+      })
+      .catch(() => {})
+  }
   return (
-    <div
-      className="flex-1 truncate rounded-md px-2 py-1.5 text-xs"
-      title={label}
-      aria-label={label}
+    <button
+      type="button"
+      onClick={copy}
+      disabled={!ready}
+      className="flex-1 truncate rounded-md px-2 py-1.5 text-left text-xs"
+      title={ready ? `${label} — click to copy` : label}
+      aria-label={ready ? `${label} — click to copy` : label}
       style={{
         backgroundColor: 'var(--bg-surface)',
         border: '1px dashed var(--border-default)',
-        color: name.trim() ? 'var(--text-secondary)' : 'var(--text-muted)',
+        color: ready ? 'var(--text-secondary)' : 'var(--text-muted)',
         fontFamily: 'var(--font-mono)',
+        cursor: ready ? 'copy' : 'default',
       }}
     >
-      {token}
-    </div>
+      {copied ? 'copied ✓' : token}
+    </button>
   )
 }
 

@@ -11,6 +11,8 @@ vi.mock('../api/client', () => ({
   commitPortify: vi.fn(),
   cancelPortify: vi.fn(),
   revisePortify: vi.fn(),
+  mergePortify: vi.fn(),
+  getPortifyMergeStatus: vi.fn(),
 }))
 // AgentSessionView opens a WS / fetches — stub it out in the wizard test.
 vi.mock('./AgentSessionView', () => ({ AgentSessionView: () => null }))
@@ -45,6 +47,20 @@ const readyManifest = (): PortifyManifest => manifest('ready-to-commit', {
   diff: '# repo: app\n+ app.listen(process.env.PORT)',
   verification: { ok: true, instances: [{ ports: { api: 5001 }, ok: true }, { ports: { api: 5002 }, ok: true }] },
 })
+
+function mergeStatusResult(over: Partial<api.PortifyMergeStatusResult> = {}): api.PortifyMergeStatusResult {
+  return {
+    workflowId: 'w',
+    branch: 'canary/dynamic-ports-cns',
+    repos: [{
+      name: 'app', gitRoot: '/repos/app', commitSha: 'abcdef1234',
+      branchExists: true, currentBranch: 'release/1.3.0', dirty: false, mergeInProgress: false, merged: false,
+    }],
+    merged: false,
+    nothingToMerge: false,
+    ...over,
+  }
+}
 
 function clickButton(label: string): void {
   const btn = [...container.querySelectorAll('button')].find((b) => b.textContent?.trim() === label)
@@ -250,7 +266,8 @@ describe('PortifyWizard', () => {
     await flush()
     expect(container.textContent).toContain('Committed')
     expect(container.textContent).toContain('abcdef1234'.slice(0, 10))
-    await act(async () => clickButton('Done'))
+    // Unmerged: closing is explicit about the remaining step.
+    await act(async () => clickButton('Done — merge later'))
     expect(onCommitted).toHaveBeenCalled()
   })
 
@@ -264,9 +281,9 @@ describe('PortifyWizard', () => {
     await renderWizard()
     await act(async () => clickButton('Start ▶'))
     await flush()
-    // Lands on the Commit screen, with the committed cue on the stepper.
+    // Lands on the Merge screen; merge is pending so no merged cue yet.
     expect(container.textContent).toContain('git merge canary/dynamic-ports-cns')
-    expect(container.textContent).toContain('committed ✓')
+    expect(container.textContent).not.toContain('merged ✓')
 
     // Go back to Review — read-only: diff is shown, but no Commit / Request-changes.
     await act(async () => clickByTitle('Go to Review'))
@@ -274,17 +291,17 @@ describe('PortifyWizard', () => {
     expect(container.textContent).toContain('app.listen(process.env.PORT)')
     expect(buttonLabels()).not.toContain('Commit')
     expect(buttonLabels()).not.toContain('Request changes')
-    expect(buttonLabels()).toContain('View commit details →')
+    expect(buttonLabels()).toContain('View merge details →')
 
-    // The "View commit details" button returns to the Commit screen.
-    await act(async () => clickButton('View commit details →'))
+    // The "View merge details" button returns to the Merge screen.
+    await act(async () => clickButton('View merge details →'))
     await flush()
     expect(container.textContent).toContain('git merge canary/dynamic-ports-cns')
 
-    // And the stepper Review number works too (Commit → Review again).
+    // And the stepper Review number works too (Merge → Review again).
     await act(async () => clickByTitle('Go to Review'))
     await flush()
-    expect(buttonLabels()).toContain('View commit details →')
+    expect(buttonLabels()).toContain('View merge details →')
   })
 
   it('at ready-to-commit the stepper exposes Exercise but not Commit (not yet reached)', async () => {
@@ -295,12 +312,93 @@ describe('PortifyWizard', () => {
     await flush()
     expect(container.querySelector('[title="Go to Exercise"]')).toBeTruthy()
     expect(container.querySelector('[title="Go to Review"]')).toBeTruthy()
-    // Commit isn't reachable until the workflow is committed.
-    expect(container.querySelector('[title="Go to Commit"]')).toBeNull()
+    // Merge isn't reachable until the workflow is committed.
+    expect(container.querySelector('[title="Go to Merge"]')).toBeNull()
 
     // Peek at the agent log (Exercise) and come back to Review.
     await act(async () => clickByTitle('Go to Exercise'))
     await flush()
     expect(container.textContent).toContain('The exercise')
+  })
+
+  describe('merge screen (PR-style)', () => {
+    const committedManifest = () => manifest('committed', {
+      repos: [{ name: 'app', path: '~/app', commitSha: 'abcdef1234' }],
+    })
+
+    async function renderCommitted() {
+      vi.mocked(api.startPortify).mockResolvedValue({ workflowId: 'w' })
+      vi.mocked(api.getPortify).mockResolvedValue(committedManifest())
+      await renderWizard()
+      await act(async () => clickButton('Start ▶'))
+      await flush()
+    }
+
+    it('shows live readiness checks and a merge button naming the target branch', async () => {
+      vi.mocked(api.getPortifyMergeStatus).mockResolvedValue(mergeStatusResult())
+      await renderCommitted()
+      expect(api.getPortifyMergeStatus).toHaveBeenCalledWith('w')
+      expect(container.textContent).toContain('release/1.3.0')
+      expect(container.textContent).toContain('Working tree clean')
+      expect(buttonLabels()).toContain('Merge into release/1.3.0')
+    })
+
+    it('merges on click and flips to the merged state', async () => {
+      vi.mocked(api.getPortifyMergeStatus)
+        .mockResolvedValueOnce(mergeStatusResult())
+        .mockResolvedValue(mergeStatusResult({ merged: true, repos: [{ ...mergeStatusResult().repos[0], merged: true }] }))
+      vi.mocked(api.mergePortify).mockResolvedValue({
+        ok: true,
+        results: [{ name: 'app', ok: true, mergeCommitSha: 'fedcba4321', alreadyMerged: false }],
+        manifest: manifest('committed', { mergedAt: 'now', repos: [{ name: 'app', path: '~/app', commitSha: 'abcdef1234', mergeCommitSha: 'fedcba4321' }] }),
+      })
+      await renderCommitted()
+      await act(async () => clickButton('Merge into release/1.3.0'))
+      await flush()
+      expect(api.mergePortify).toHaveBeenCalledWith('w')
+      expect(container.textContent).toContain('Merged')
+      expect(container.textContent).toContain('boot concurrently')
+      expect(container.textContent).toContain('merged ✓') // stepper cue
+    })
+
+    it('disables merging on a dirty tree and re-checks on demand', async () => {
+      vi.mocked(api.getPortifyMergeStatus).mockResolvedValue(mergeStatusResult({
+        repos: [{ ...mergeStatusResult().repos[0], dirty: true }],
+      }))
+      await renderCommitted()
+      expect(container.textContent).toContain('uncommitted changes')
+      const mergeBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.startsWith('Merge into')) as HTMLButtonElement
+      expect(mergeBtn.disabled).toBe(true)
+
+      const callsBefore = vi.mocked(api.getPortifyMergeStatus).mock.calls.length
+      await act(async () => clickButton('Re-check'))
+      await flush()
+      expect(vi.mocked(api.getPortifyMergeStatus).mock.calls.length).toBe(callsBefore + 1)
+    })
+
+    it('reports an aborted conflict with the conflicted files, repo left unchanged', async () => {
+      vi.mocked(api.getPortifyMergeStatus).mockResolvedValue(mergeStatusResult())
+      vi.mocked(api.mergePortify).mockResolvedValue({
+        ok: false,
+        results: [{ name: 'app', ok: false, conflictFiles: ['src/server.js'] }],
+        manifest: committedManifest(),
+      })
+      await renderCommitted()
+      await act(async () => clickButton('Merge into release/1.3.0'))
+      await flush()
+      expect(container.textContent).toContain('src/server.js')
+      expect(container.textContent).toContain('aborted')
+      expect(container.textContent).toContain('unchanged')
+    })
+
+    it('shows the merged state straight away when already merged (e.g. manually)', async () => {
+      vi.mocked(api.getPortifyMergeStatus).mockResolvedValue(mergeStatusResult({
+        merged: true,
+        repos: [{ ...mergeStatusResult().repos[0], merged: true }],
+      }))
+      await renderCommitted()
+      expect(container.textContent).toContain('Merged')
+      expect(buttonLabels().some((l) => l.startsWith('Merge into'))).toBe(false)
+    })
   })
 })

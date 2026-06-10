@@ -79,6 +79,7 @@ const AUTHOR_TOOLS = uniqueSorted([
   'list_features',
   'list_portify_status',
   'list_runs',
+  'merge_portify',
   'revise_portify',
   'start_external_draft',
   'start_portify',

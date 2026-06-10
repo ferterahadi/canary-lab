@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import type { ReactNode } from 'react'
 import * as api from '../../api/client'
 import type { ConfigValue, ParsedConfigDoc } from '../../api/client'
 import { SaveBar } from './SaveBar'
@@ -67,6 +68,13 @@ export function PortsTab({
   const commands = repos.flatMap((r) => r.startCommands)
   const declaredSlots = commands.reduce((n, c) => n + (c.ports?.length ?? 0), 0)
   const portsConfigured = commands.length === 0 || declaredSlots > 0
+  // Legend example: prefer a declared slot with both name and env var so the
+  // strip explains the exact rows below; fall back to the scaffold default.
+  const slots = commands.flatMap((c) => c.ports ?? [])
+  const exampleSlot =
+    slots.find((s) => s.name.trim() && s.env) ??
+    slots.find((s) => s.name.trim()) ??
+    { name: 'api', env: 'PORT' }
   const portifyBranch = `canary/dynamic-ports-${feature.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'feature'}`
 
   const launchPortify = (): void => {
@@ -147,24 +155,10 @@ export function PortsTab({
             )}
           </div>
 
-          {/* Jargon demoted to a collapsible — present for the curious, out of
-              the way by default. The pill text stays for at-a-glance status. */}
-          <details className="mt-2.5">
-            <summary
-              className="cursor-pointer select-none text-[10px] font-semibold uppercase tracking-wider"
-              style={{ color: 'var(--text-muted)' }}
-            >
-              {portsConfigured ? 'PORTIFIED ✓' : 'NOT PORTIFIED'} · how injectable ports work
-            </summary>
-            <p className="mt-1.5 text-[11px] leading-relaxed" style={{ color: 'var(--text-muted)', maxWidth: 620 }}>
-              Declare the ports each service needs. Every slot gets a free port per run,
-              injected as the env var the service reads (e.g.{' '}
-              <code style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }}>PORT</code>),
-              and referenced elsewhere as{' '}
-              <code style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }}>{'${port.<name>}'}</code>{' '}
-              — in the start command, the health-check URL, or applied envset files.
-            </p>
-          </details>
+          {/* One-sentence legend keyed to this feature's own first slot, so it
+              matches the rows it explains. (A collapsed prose explainer proved
+              unreadable; a multi-stage chip diagram proved a mouthful.) */}
+          <PortFlowLegend slot={exampleSlot} />
         </div>
 
         <div className="flex flex-col gap-3 px-4 py-3">
@@ -216,11 +210,11 @@ export function PortsTab({
           ))}
         </div>
 
-        {/* Portify history (all features). Lives here — where Portify is
+        {/* This feature's Portify history. Lives here — where Portify is
             launched — so a committed run's branch stays findable after its
             window is closed. */}
         <div className="px-4 py-3" style={{ borderTop: '1px solid var(--border-default)' }}>
-          <PortifyHistoryList onOpenPortify={onOpenPortify} />
+          <PortifyHistoryList feature={feature} onOpenPortify={onOpenPortify} />
         </div>
       </div>
 
@@ -266,5 +260,34 @@ export function PortsTab({
         </div>
       )}
     </div>
+  )
+}
+
+/**
+ * One-sentence legend for the slot table, keyed to one of the feature's own
+ * slots: assigned → injected → referenced. Depth lives in the column ⓘ hints;
+ * this only has to make the three columns scannable.
+ */
+function PortFlowLegend({ slot }: { slot: PortSlotSlice }) {
+  const name = slot.name.trim() || 'api'
+  const chip = (text: string): ReactNode => (
+    <code
+      className="rounded px-1 py-px text-[10.5px]"
+      style={{
+        fontFamily: 'var(--font-mono)',
+        color: 'var(--text-secondary)',
+        background: 'var(--bg-elevated)',
+        border: '1px solid var(--border-default)',
+      }}
+    >
+      {text}
+    </code>
+  )
+  return (
+    <p className="mt-2 text-[11px] leading-relaxed" style={{ color: 'var(--text-muted)', maxWidth: 640 }}>
+      Each boot, {chip(name)} is assigned a free port
+      {slot.env ? <>, injected as {chip(slot.env)}</> : null} — reference it anywhere as{' '}
+      {chip(`\${port.${name}}`)} (start command, health check, envset files).
+    </p>
   )
 }

@@ -100,8 +100,8 @@ invariants (see [ARCHITECTURE.md](ARCHITECTURE.md#keep-in-sync-invariants)).
    `counts.passed` — never computed as `total - failed`; tests absent from all
    result lists are *not run*, not passed.
 3. **Evidence durability.** Each run's logs, traces, summaries, and journal survive
-   under `logs/runs/<runId>/` with count-based retention; service output is captured
-   programmatically, never lost to a terminal.
+   under `logs/runs/<runId>/` and are never auto-pruned — removed only via manual Log
+   Cleanup; service output is captured programmatically, never lost to a terminal.
 4. **Result-driven agent steering.** An agent with no skill installed must still
    converge on the correct loop from `initialize` instructions and tool results
    (`nextSteps`, `boot_session`, collision choices) — blocking on

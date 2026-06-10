@@ -66,6 +66,21 @@ describe('PortifyHistoryList', () => {
     expect([...container.querySelectorAll('button')].some((b) => b.textContent?.includes('Copy merge'))).toBe(true)
   })
 
+  it('scopes the list to one feature when the feature prop is set', async () => {
+    workflows.push(entry({ workflowId: 'w1', feature: 'cns', status: 'committed' }))
+    workflows.push(entry({ workflowId: 'w2', feature: 'oms', status: 'committed', startedAt: '2026-06-02T10:00:00Z' }))
+    await act(async () => { root.render(<PortifyHistoryList feature="cns" onOpenPortify={vi.fn()} />) })
+    expect(container.textContent).toContain('cns')
+    expect(container.textContent).not.toContain('oms')
+  })
+
+  it('labels a workflow merged via the in-app merge as "merged", not "committed"', async () => {
+    workflows.push(entry({ workflowId: 'w1', feature: 'cns', mergedAt: '2026-06-03T10:00:00Z' }))
+    await render()
+    expect(container.textContent).toContain('merged')
+    expect(container.textContent).not.toContain('committed')
+  })
+
   it('reopens a workflow on row click', async () => {
     workflows.push(entry({ workflowId: 'w1', feature: 'cns' }))
     const { onOpenPortify } = await render()

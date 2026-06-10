@@ -71,7 +71,7 @@ import {
   deriveRunActionAvailability,
 } from '../../../shared/run-state'
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../lib/workspace-events'
-import type { PortifyManifest } from '../lib/runtime/portify/types'
+import type { PortifyManifest, PortifyMergeResult } from '../lib/runtime/portify/types'
 
 // Every Canary Lab MCP tool is a thin wrapper around an existing internal
 // helper or REST handler. The translation pattern: validate input via zod,
@@ -174,6 +174,7 @@ export interface CanaryLabMcpDeps {
   commitPortify?: (workflowId: string) => Promise<PortifyManifest>
   cancelPortify?: (workflowId: string) => Promise<PortifyManifest>
   revisePortify?: (workflowId: string, feedback: string) => Promise<PortifyManifest>
+  mergePortify?: (workflowId: string) => Promise<PortifyMergeResult>
   workspaceEvents?: WorkspaceEventPublisher
 }
 
@@ -235,6 +236,7 @@ export type CanaryLabMcpToolName =
   | 'commit_portify'
   | 'cancel_portify'
   | 'revise_portify'
+  | 'merge_portify'
   | 'list_portify_status'
 
 const REPAIR_TOOLS = [
@@ -295,6 +297,7 @@ const AUTHOR_TOOLS = [
   'commit_portify',
   'cancel_portify',
   'revise_portify',
+  'merge_portify',
   'list_portify_status',
 ] as const satisfies readonly CanaryLabMcpToolName[]
 
@@ -1009,7 +1012,39 @@ export function registerCanaryLabTools(
   }, async ({ workflowId }) => {
     if (!deps.commitPortify) return errorResult('commitPortify dependency is not configured')
     try {
-      return asJsonResult(await deps.commitPortify(workflowId))
+      const manifest = await deps.commitPortify(workflowId)
+      const hasCommits = manifest.repos.some((r) => r.commitSha)
+      return asJsonResult({
+        ...manifest,
+        ...(hasCommits ? {
+          nextSteps: ['merge_portify'],
+          next: `Committed to branch "${manifest.branch}" — the user's checkout is NOT yet using it. Call merge_portify (confirm: true) to merge it into each repo's current branch, or leave it for a manual merge.`,
+        } : {
+          next: 'Committed. No source changes were needed — the config now declares the port slots; there is no branch to merge.',
+        }),
+      })
+    } catch (err) {
+      return errorResult(err instanceof Error ? err.message : String(err))
+    }
+  })
+
+  registerTool('merge_portify', {
+    description: "Merge a COMMITTED port-ification branch into each product repo's currently checked-out branch — the step that makes the rewrite take effect for future runs. Safe by construction: refuses a dirty tree or detached HEAD, and a conflict is aborted server-side (the repo is never left mid-merge) and reported per repo in `results`. Re-running after a fix is safe — already-merged repos are skipped. Only valid when status is committed. Requires confirm: true.",
+    inputSchema: {
+      workflowId: z.string(),
+      confirm: z.literal(true).describe("Must be true. This is the one portify action that rewrites the user's own branch."),
+    },
+    annotations: { destructiveHint: true, idempotentHint: true },
+  }, async ({ workflowId }) => {
+    if (!deps.mergePortify) return errorResult('mergePortify dependency is not configured')
+    try {
+      const result = await deps.mergePortify(workflowId)
+      return asJsonResult({
+        ...result,
+        next: result.ok
+          ? 'Merged. The feature now boots with injectable ports on this branch — concurrent runs and benchmark arms will not clash.'
+          : 'Not merged. Fix the per-repo blocker in `results` (commit/stash a dirty tree, or resolve the listed conflict files manually with `git merge`), then call merge_portify again.',
+      })
     } catch (err) {
       return errorResult(err instanceof Error ? err.message : String(err))
     }

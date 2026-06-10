@@ -4,11 +4,12 @@ import { usePortify } from '../state/PortifyContext'
 import type { PortifyIndexEntry, PortifyStatus } from '../api/client'
 import { CopyButton } from './CopyButton'
 
-// Inline Portify history, embedded in the feature config Ports tab. Lists every
-// port-ification workflow (all features), most-recent first, so a committed
-// workflow's branch stays findable after its window is closed — right where you
-// launch Portify. Clicking a row reopens it in the wizard (committed rows land
-// on the screen with the branch + `git merge` command).
+// Inline Portify history, embedded in the feature config Ports tab. Lists
+// port-ification workflows most-recent first — scoped to `feature` when given,
+// since the tab is per-feature and other features' runs are noise there — so a
+// committed workflow's branch stays findable after its window is closed, right
+// where you launch Portify. Clicking a row reopens it in the wizard (committed
+// rows land on the screen with the branch + `git merge` command).
 
 const STATUS_META: Record<PortifyStatus, { label: string; color: string; pulse?: boolean }> = {
   planning: { label: 'planning', color: 'var(--accent)', pulse: true },
@@ -20,9 +21,18 @@ const STATUS_META: Record<PortifyStatus, { label: string; color: string; pulse?:
   aborted: { label: 'cancelled', color: 'var(--text-muted)' },
 }
 
-export function PortifyHistoryList({ onOpenPortify }: { onOpenPortify?: (workflowId: string) => void }) {
+export function PortifyHistoryList({
+  feature,
+  onOpenPortify,
+}: {
+  /** When set, only this feature's workflows are listed. */
+  feature?: string
+  onOpenPortify?: (workflowId: string) => void
+}) {
   const { workflows } = usePortify()
-  const sorted = [...workflows].sort((a, b) => (a.startedAt < b.startedAt ? 1 : -1))
+  const sorted = workflows
+    .filter((w) => !feature || w.feature === feature)
+    .sort((a, b) => (a.startedAt < b.startedAt ? 1 : -1))
 
   return (
     <div>
@@ -47,7 +57,12 @@ export function PortifyHistoryList({ onOpenPortify }: { onOpenPortify?: (workflo
 const TERMINAL: PortifyStatus[] = ['committed', 'failed', 'aborted']
 
 function PortifyRow({ entry, onOpen }: { entry: PortifyIndexEntry; onOpen?: (workflowId: string) => void }) {
-  const meta = STATUS_META[entry.status]
+  // A committed row whose branch was merged via the in-app action reads
+  // "merged" — the work is actually done. (Manual terminal merges don't set
+  // mergedAt; reopening the wizard shows the live, git-computed state.)
+  const meta = entry.status === 'committed' && entry.mergedAt
+    ? { label: 'merged', color: 'rgb(52,211,153)' }
+    : STATUS_META[entry.status]
   const showBranch = Boolean(entry.branch) && (entry.status === 'committed' || entry.status === 'ready-to-commit')
   const removable = TERMINAL.includes(entry.status)
   const open = (): void => onOpen?.(entry.workflowId)
