@@ -984,9 +984,10 @@ export function PortSlotEditor({
             Env var <span className="normal-case tracking-normal opacity-70">(optional)</span>
             <HintIcon hint="The environment variable the service reads its port from — the run injects the assigned number here when it boots this command. Optional because a slot can be consumed via ${port.<name>} instead (e.g. --port ${port.api} in the command, or a token in an envset file)." />
           </span>
+          <span className="w-3 shrink-0" />
           <span className="inline-flex flex-1 items-center gap-1">
             Reference
-            <HintIcon hint="Read-only token that stands for this slot's port. Paste it into the start command, health-check URL, or envset files — it resolves to the assigned number at run time. Click to copy." />
+            <HintIcon hint="Read-only token that stands for this slot's port — it always equals the injected env var; the two can't disagree. Paste it into the start command, health-check URL, or envset files; it resolves to the assigned number at run time. Click to copy." />
           </span>
           <span className="w-6 shrink-0" />
         </div>
@@ -1007,6 +1008,17 @@ export function PortSlotEditor({
               onChange={(env) => onChange(ports.map((s, j) => (j === i ? { ...s, env: env || undefined } : s)))}
             />
           </div>
+          {/* The env var and the token are two names for the same assigned
+              number — tie them visually. Hidden (but space kept, for column
+              alignment) when no env var is set and there's nothing to equate. */}
+          <span
+            aria-hidden={!slot.env}
+            className="w-3 shrink-0 text-center text-[11px]"
+            style={{ color: 'var(--text-muted)', opacity: slot.env ? 1 : 0 }}
+            title={slot.env ? `${slot.env} and \${port.${slot.name.trim() || '…'}} always carry the same assigned port` : undefined}
+          >
+            =
+          </span>
           <PortSlotToken name={slot.name} env={slot.env} />
           <IconButton
             ariaLabel={`Remove port slot ${slot.name || 'item'}`}

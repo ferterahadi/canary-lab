@@ -1,6 +1,7 @@
-// Benchmark pill: always present (it's an entry point as well as a status). A
-// sky pulse + "Benchmark running" label signals an active race; otherwise the
-// crossed-swords glyph invites starting one.
+// Benchmark pill: entry point as well as a status. Only rendered when the
+// internal benchmark surface is enabled (?showBenchmark=true — see
+// GlobalStatusBar). A sky pulse + "Benchmark running" label signals an active
+// race; otherwise the crossed-swords glyph invites starting one.
 export function BenchmarkPill({ active, onOpen }: { active: boolean; onOpen: () => void }) {
   return (
     <button

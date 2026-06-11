@@ -81,6 +81,7 @@ afterEach(() => {
   container.remove()
   vi.clearAllMocks()
   mockActivePortify.value = undefined
+  window.history.replaceState(null, '', '/')
 })
 
 function portifyButton(): HTMLButtonElement | undefined {
@@ -96,6 +97,11 @@ function runsButton(): HTMLButtonElement | undefined {
 function servicesButton(): HTMLButtonElement | undefined {
   return [...container.querySelectorAll('button')]
     .find((button) => button.getAttribute('aria-label')?.startsWith('Show booted services')) as HTMLButtonElement | undefined
+}
+
+function benchmarkButton(): HTMLButtonElement | undefined {
+  return [...container.querySelectorAll('button')]
+    .find((button) => button.textContent?.includes('Benchmark')) as HTMLButtonElement | undefined
 }
 
 describe('GlobalStatusBar', () => {
@@ -158,6 +164,23 @@ describe('GlobalStatusBar', () => {
     expect(svc?.textContent).toContain('Services')
     expect(svc?.textContent).toContain('1')
     expect(runsButton()).toBeUndefined()
+  })
+
+  it('hides the Benchmark pill by default', async () => {
+    await act(async () => {
+      root.render(<GlobalStatusBar activeRunDetail={null} />)
+    })
+    expect(benchmarkButton()).toBeUndefined()
+  })
+
+  it('shows the Benchmark pill when the URL has showBenchmark=true', async () => {
+    window.history.replaceState(null, '', '/?showBenchmark=true')
+    await act(async () => {
+      root.render(<GlobalStatusBar activeRunDetail={null} />)
+    })
+    const button = benchmarkButton()
+    expect(button).toBeTruthy()
+    expect(button?.textContent).toContain('Benchmark')
   })
 
   it('replaces the Playwright chip with a collapsed MCP indicator menu', async () => {

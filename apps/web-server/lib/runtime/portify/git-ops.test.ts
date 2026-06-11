@@ -211,6 +211,17 @@ describe('mergePortifyBranch', () => {
     expect(s.merged).toBe(false)
   })
 
+  it('refuses to merge when a merge is already in progress', async () => {
+    const repo = await repoWithBranch('canary/dynamic-ports-p', 'const PORT = process.env.PORT\n')
+    // Create a conflicting commit on main so the merge will fail and leave MERGE_HEAD.
+    fs.writeFileSync(path.join(repo, 'app.js'), 'const PORT = 9999\n')
+    await runGit(repo, ['add', '-A'])
+    await runGit(repo, ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', 'clash', '--no-verify'])
+    // Trigger the conflicting merge manually — it fails, leaving MERGE_HEAD set.
+    await runGit(repo, ['-c', 'user.name=t', '-c', 'user.email=t@t', 'merge', '--no-edit', 'canary/dynamic-ports-p'])
+    await expect(mergePortifyBranch(repo, 'canary/dynamic-ports-p')).rejects.toThrow(/merge is already in progress/)
+  })
+
   it('refuses to merge when the working tree is dirty', async () => {
     const repo = await repoWithBranch('canary/dynamic-ports-w')
     fs.appendFileSync(path.join(repo, 'app.js'), '// wip\n')

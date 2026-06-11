@@ -119,17 +119,23 @@ describe('PortifyWizard', () => {
     expect(container.textContent).toContain('Running the exercise')
   })
 
-  it('commits from the review screen and fires onCommitted', async () => {
+  it('commits from the review screen and advances to the merge step (does not close)', async () => {
     vi.mocked(api.startPortify).mockResolvedValue({ workflowId: 'w' })
     vi.mocked(api.getPortify).mockResolvedValue(readyManifest())
-    vi.mocked(api.commitPortify).mockResolvedValue(manifest('committed'))
+    vi.mocked(api.commitPortify).mockResolvedValue(manifest('committed', {
+      repos: [{ name: 'app', path: '~/app', commitSha: 'abcdef1234' }],
+    }))
+    vi.mocked(api.getPortifyMergeStatus).mockResolvedValue(mergeStatusResult())
     const { onCommitted } = await renderWizard()
     await act(async () => clickButton('Start ▶'))
     await flush()
     await act(async () => clickButton('Commit'))
     await flush()
     expect(api.commitPortify).toHaveBeenCalledWith('w')
-    expect(onCommitted).toHaveBeenCalled()
+    // Lands on the Merge step — the wizard stays open instead of closing.
+    expect(container.textContent).toContain('one step left')
+    expect(buttonLabels()).toContain('Merge into release/1.3.0')
+    expect(onCommitted).not.toHaveBeenCalled()
   })
 
   it('opens the feedback modal from Request changes and resumes the agent on submit', async () => {
@@ -166,7 +172,7 @@ describe('PortifyWizard', () => {
     expect(container.textContent).toContain('/tmp/wt/app')
   })
 
-  it('committed screen shows a copyable git merge command for the branch', async () => {
+  it('committed screen exposes a copyable git merge command via the Merge manually modal', async () => {
     vi.mocked(api.startPortify).mockResolvedValue({ workflowId: 'w' })
     vi.mocked(api.getPortify).mockResolvedValue(manifest('committed', {
       repos: [{ name: 'app', path: '~/app', commitSha: 'abcdef1234' }],
@@ -174,6 +180,9 @@ describe('PortifyWizard', () => {
     await renderWizard()
     await act(async () => clickButton('Start ▶'))
     await flush()
+    // The command lives behind the "Merge manually" modal now, not inline.
+    expect(container.textContent).not.toContain('git merge canary/dynamic-ports-cns')
+    await act(async () => clickButton('Merge manually'))
     expect(container.textContent).toContain('git merge canary/dynamic-ports-cns')
   })
 
@@ -282,7 +291,7 @@ describe('PortifyWizard', () => {
     await act(async () => clickButton('Start ▶'))
     await flush()
     // Lands on the Merge screen; merge is pending so no merged cue yet.
-    expect(container.textContent).toContain('git merge canary/dynamic-ports-cns')
+    expect(container.textContent).toContain('one step left')
     expect(container.textContent).not.toContain('merged ✓')
 
     // Go back to Review — read-only: diff is shown, but no Commit / Request-changes.
@@ -296,7 +305,7 @@ describe('PortifyWizard', () => {
     // The "View merge details" button returns to the Merge screen.
     await act(async () => clickButton('View merge details →'))
     await flush()
-    expect(container.textContent).toContain('git merge canary/dynamic-ports-cns')
+    expect(container.textContent).toContain('one step left')
 
     // And the stepper Review number works too (Merge → Review again).
     await act(async () => clickByTitle('Go to Review'))
@@ -361,7 +370,7 @@ describe('PortifyWizard', () => {
       expect(container.textContent).toContain('merged ✓') // stepper cue
     })
 
-    it('disables merging on a dirty tree and re-checks on demand', async () => {
+    it('disables merging on a dirty tree and explains the blocker', async () => {
       vi.mocked(api.getPortifyMergeStatus).mockResolvedValue(mergeStatusResult({
         repos: [{ ...mergeStatusResult().repos[0], dirty: true }],
       }))
@@ -369,11 +378,6 @@ describe('PortifyWizard', () => {
       expect(container.textContent).toContain('uncommitted changes')
       const mergeBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.startsWith('Merge into')) as HTMLButtonElement
       expect(mergeBtn.disabled).toBe(true)
-
-      const callsBefore = vi.mocked(api.getPortifyMergeStatus).mock.calls.length
-      await act(async () => clickButton('Re-check'))
-      await flush()
-      expect(vi.mocked(api.getPortifyMergeStatus).mock.calls.length).toBe(callsBefore + 1)
     })
 
     it('reports an aborted conflict with the conflicted files, repo left unchanged', async () => {

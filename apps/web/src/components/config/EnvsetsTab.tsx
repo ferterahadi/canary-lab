@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import * as api from '../../api/client'
 import { ConfirmModal, FieldRow, FolderIcon, HintIcon, IconButton, Modal, PlusIcon, SectionHeader, TextInput, TrashIcon } from './atoms'
+import { TemplatedInput } from './TemplatedInput'
 import { SaveBar } from './SaveBar'
 
 const NEW_ENV_SENTINEL = '__new_env__'
@@ -579,17 +580,15 @@ function SlotEditor({
               />
               <span style={{ color: 'var(--text-muted)' }}>=</span>
               <div className="relative flex-1">
-                <input
-                  type="text"
+                {/* Values support the per-run `${port.<slot>}` token (the only
+                    namespace that resolves inside applied envset files) —
+                    typing `${` offers the feature's declared port slots. */}
+                <TemplatedInput
                   value={entry.value}
-                  onChange={(e) => setDraft(draft.map((x, j) => j === i ? { ...x, value: e.target.value } : x))}
-                  className="w-full rounded-md py-1.5 pl-2.5 pr-8 text-xs outline-none focus:ring-1"
-                  style={{
-                    backgroundColor: 'var(--bg-elevated)',
-                    border: '1px solid var(--border-default)',
-                    color: 'var(--text-primary)',
-                    fontFamily: 'var(--font-mono)',
-                  }}
+                  onChange={(v) => setDraft(draft.map((x, j) => j === i ? { ...x, value: v } : x))}
+                  feature={feature}
+                  namespaces={['port']}
+                  style={{ paddingRight: '2rem' }}
                 />
                 <button
                   type="button"

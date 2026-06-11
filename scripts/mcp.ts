@@ -18,18 +18,33 @@ import {
 import type { ExternalHealClientKind } from '../apps/web-server/lib/runtime/manifest'
 import { looksLikeProjectRoot } from '../shared/runtime/project-root'
 import {
+  canaryLabHome,
   readWorkspaceRegistry,
   type CanaryLabWorkspaceRegistry,
 } from '../shared/runtime/workspace-registry'
+import {
+  resolveActiveServer,
+  type ActiveServerEntry,
+} from '../shared/runtime/active-servers'
 import { DEFAULT_PORT, loadProjectConfig, resolveProjectPort } from '../apps/web-server/lib/runtime/launcher/project-config'
 
-// Active-project port → URL. Bridges with no explicit --url resolve this so a
-// per-project port (canary-lab.config.json) is followed automatically.
+// Resolve the bridge's target /mcp URL with no explicit --url. A *live* server
+// (recorded in ~/.canary-lab/active-servers.json by `canary-lab ui`) always
+// wins, so the bridge follows whatever port the running UI actually bound —
+// even after the user switched it. Only when nothing is running do we fall back
+// to the most-recent workspace's configured port (which auto-start will boot).
 export function resolveDefaultMcpUrl(opts: {
   cwd?: string
   homeDir?: string
   registry?: CanaryLabWorkspaceRegistry
+  activeServers?: ActiveServerEntry[]
 } = {}): string {
+  const live = resolveActiveServer({
+    homeDir: opts.homeDir,
+    cwd: opts.cwd,
+    ...(opts.activeServers ? { servers: opts.activeServers } : {}),
+  })
+  if (live) return `http://127.0.0.1:${live.port}/mcp`
   const projectRoot = resolveUiProjectRootForMcpAutostart(opts)
   const port = projectRoot ? resolveProjectPort(loadProjectConfig(projectRoot)) : DEFAULT_PORT
   return `http://127.0.0.1:${port}/mcp`
@@ -60,7 +75,32 @@ export interface McpCommandOptions {
   // before serving the bridge. Injected in tests so they never touch the real
   // home dir.
   refreshAgents?: () => void
+  // Bridge transport seams + reconnect tuning. Injected in tests to drive the
+  // reconnect loop deterministically without real stdio/HTTP transports.
+  createHttpTransport?: (url: string) => BridgeTransport
+  createStdioTransport?: () => BridgeTransport
+  // Re-resolves the HTTP target when reconnecting (default re-reads the
+  // live-server record so a switched port is followed automatically).
+  reResolveUrl?: () => string
+  reconnectAttempts?: number
+  reconnectDelayMs?: number
 }
+
+// Structural transport shape shared by the SDK's stdio + streamable-HTTP
+// transports — just enough for the bridge to forward and reconnect.
+export interface BridgeTransport {
+  start(): Promise<void>
+  send(message: JSONRPCMessage): Promise<void>
+  close(): Promise<void>
+  onmessage?: (message: JSONRPCMessage) => void
+  onclose?: () => void
+  onerror?: (error: Error) => void
+  setProtocolVersion?: (version: string) => void
+}
+
+// Sentinel id for the bridge's internal re-initialize handshake on reconnect.
+// Its response is swallowed so the client never sees a second initialize reply.
+export const REINIT_ID = '__canary-lab-reinit__'
 
 export async function main(
   argv: string[] = process.argv.slice(2),
@@ -151,37 +191,100 @@ export async function doctor(url: string, opts: McpCommandOptions = {}): Promise
 export async function bridge(url: string, opts: McpCommandOptions = {}): Promise<boolean> {
   const stderr = opts.stderr ?? process.stderr
   const fetchFn = opts.fetch ?? fetch
-  const profileUrl = urlWithContext(
-    url,
-    opts.profile ?? DEFAULT_MCP_PROFILE,
-    opts.clientKind ?? inferMcpClientKind() ?? 'other',
-  )
-  if (!await ensureMcpServerReachable(profileUrl, opts)) return false
+  const profile = opts.profile ?? DEFAULT_MCP_PROFILE
+  const clientKind = opts.clientKind ?? inferMcpClientKind() ?? 'other'
+  const initialUrl = urlWithContext(url, profile, clientKind)
+  if (!await ensureMcpServerReachable(initialUrl, opts)) return false
 
-  const stdio = new StdioServerTransport(opts.stdin, opts.stdout)
-  const http = new StreamableHTTPClientTransport(new URL(profileUrl), { fetch: fetchFn })
+  const createHttp = opts.createHttpTransport
+    ?? ((target: string) =>
+      new StreamableHTTPClientTransport(new URL(target), { fetch: fetchFn }) as unknown as BridgeTransport)
+  const stdio: BridgeTransport = opts.createStdioTransport
+    ? opts.createStdioTransport()
+    : (new StdioServerTransport(opts.stdin, opts.stdout) as unknown as BridgeTransport)
+
+  // When reconnecting, re-resolve the target. An explicit --url pins the same
+  // server; otherwise re-read the live-server record so a switched port (or
+  // relaunched UI) is followed without restarting the client.
+  const reResolveUrl = opts.reResolveUrl
+    ?? (opts.autoStartEligible === false
+      ? () => initialUrl
+      : () => urlWithContext(
+          resolveDefaultMcpUrl({ cwd: opts.cwd, homeDir: opts.homeDir, registry: opts.registry }),
+          profile,
+          clientKind,
+        ))
+  const reconnectAttempts = opts.reconnectAttempts ?? 120
+  const reconnectDelayMs = opts.reconnectDelayMs ?? 500
+
+  let http = createHttp(initialUrl)
+  let cachedInitialize: JSONRPCMessage | null = null
+  let stdioClosing = false
+  let reconnecting = false
+
+  const wireHttp = (transport: BridgeTransport): void => {
+    transport.onmessage = (message) => {
+      // The client already initialized against the previous server; drop the
+      // reply to our internal re-initialize so it never sees a duplicate.
+      if (isResponseTo(message, REINIT_ID)) return
+      if (isInitializeResult(message)) transport.setProtocolVersion?.(message.result.protocolVersion)
+      forwardMessage(stdio, message).catch((err) => transport.onerror?.(err as Error))
+    }
+    transport.onclose = () => { void reconnect('UI server connection closed') }
+    transport.onerror = (err) => { stderr.write(`Canary Lab MCP HTTP error: ${err.message}\n`) }
+  }
+
+  const reinitialize = async (transport: BridgeTransport): Promise<void> => {
+    const params = (cachedInitialize as { params?: unknown } | null)?.params
+    await transport.send({ jsonrpc: '2.0', id: REINIT_ID, method: 'initialize', params } as JSONRPCMessage)
+    await transport.send({ jsonrpc: '2.0', method: 'notifications/initialized' } as JSONRPCMessage)
+  }
+
+  const reconnect = async (reason: string): Promise<void> => {
+    if (stdioClosing || reconnecting) return
+    reconnecting = true
+    stderr.write(`Canary Lab MCP lost the UI server (${reason}); reconnecting…\n`)
+    try { await http.close() } catch { /* already closed */ }
+    for (let attempt = 0; attempt < reconnectAttempts && !stdioClosing; attempt += 1) {
+      const target = reResolveUrl()
+      if ((await checkHealth(target, fetchFn)).ok) {
+        const next = createHttp(target)
+        wireHttp(next)
+        try {
+          await next.start()
+          if (cachedInitialize) await reinitialize(next)
+          // Tell the client to re-list tools against the new server.
+          await forwardMessage(stdio, { jsonrpc: '2.0', method: 'notifications/tools/list_changed' } as JSONRPCMessage)
+          http = next
+          reconnecting = false
+          stderr.write(`Canary Lab MCP reconnected at ${stripProfile(target)}\n`)
+          return
+        } catch (err) {
+          stderr.write(`Canary Lab MCP reconnect attempt failed: ${(err as Error).message}\n`)
+          try { await next.close() } catch { /* ignore */ }
+        }
+      }
+      await sleep(reconnectDelayMs)
+    }
+    // Out of attempts: stay idle. The next client message retriggers reconnect.
+    reconnecting = false
+  }
 
   stdio.onmessage = (message) => {
-    forwardMessage(http, message).catch((err) => stdio.onerror?.(err as Error))
+    if (isInitializeRequest(message)) cachedInitialize = message
+    forwardMessage(http, message).catch((err) => {
+      stdio.onerror?.(err as Error)
+      void reconnect('forwarding to UI server failed')
+    })
   }
-  http.onmessage = (message) => {
-    if (isInitializeResult(message)) {
-      http.setProtocolVersion(message.result.protocolVersion)
-    }
-    forwardMessage(stdio, message).catch((err) => http.onerror?.(err as Error))
-  }
-  let closing = false
-  const closeBoth = (): void => {
-    if (closing) return
-    closing = true
+  stdio.onclose = () => {
+    stdioClosing = true
     void stdio.close().catch(() => undefined)
     void http.close().catch(() => undefined)
   }
-  stdio.onclose = closeBoth
-  http.onclose = closeBoth
   stdio.onerror = (err) => stderr.write(`Canary Lab MCP stdio error: ${err.message}\n`)
-  http.onerror = (err) => stderr.write(`Canary Lab MCP HTTP error: ${err.message}\n`)
 
+  wireHttp(http)
   await http.start()
   await stdio.start()
   return true
@@ -291,7 +394,7 @@ export function resolveUiProjectRootForMcpAutostart(opts: {
   const fromCwd = findUsableUiProjectRootUpward(cwd)
   if (fromCwd) return fromCwd
 
-  const registry = opts.registry ?? readWorkspaceRegistry(opts.homeDir ?? os.homedir())
+  const registry = opts.registry ?? readWorkspaceRegistry(opts.homeDir ?? canaryLabHome())
   const candidates = registry.workspaces
     .filter((workspace) => isUsableUiProjectRoot(workspace.path))
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
@@ -453,6 +556,18 @@ function isInitializeResult(message: JSONRPCMessage): message is JSONRPCMessage 
     typeof message.result === 'object' &&
     'protocolVersion' in message.result &&
     typeof (message.result as { protocolVersion?: unknown }).protocolVersion === 'string'
+}
+
+function isInitializeRequest(message: JSONRPCMessage): boolean {
+  return 'method' in message &&
+    (message as { method?: unknown }).method === 'initialize' &&
+    'id' in message
+}
+
+function isResponseTo(message: JSONRPCMessage, id: string): boolean {
+  return 'id' in message &&
+    (message as { id?: unknown }).id === id &&
+    ('result' in message || 'error' in message)
 }
 
 export function inferMcpClientKind(

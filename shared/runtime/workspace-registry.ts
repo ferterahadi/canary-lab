@@ -14,11 +14,20 @@ export interface CanaryLabWorkspaceRegistry {
   workspaces: CanaryLabWorkspace[]
 }
 
-export function registryDir(homeDir: string = os.homedir()): string {
+// The directory that holds Canary Lab's user-level state (workspace registry,
+// active-server records, agent integrations). Defaults to the home dir, but an
+// explicit CANARY_LAB_HOME wins so isolated processes — smoke tests, CI — never
+// touch the real `~/.canary-lab`.
+export function canaryLabHome(env: NodeJS.ProcessEnv = process.env): string {
+  const override = env.CANARY_LAB_HOME?.trim()
+  return override ? override : os.homedir()
+}
+
+export function registryDir(homeDir: string = canaryLabHome()): string {
   return path.join(homeDir, '.canary-lab')
 }
 
-export function registryPath(homeDir: string = os.homedir()): string {
+export function registryPath(homeDir: string = canaryLabHome()): string {
   return path.join(registryDir(homeDir), 'workspaces.json')
 }
 
@@ -57,6 +66,13 @@ export function upsertWorkspace(
   const resolved = realpathOrResolve(workspacePath)
   const now = (opts.now ?? new Date()).toISOString()
   const registry = readWorkspaceRegistry(opts.homeDir)
+  // GC entries whose path has vanished (deleted temp/smoke workspaces) so the
+  // recency heuristic and bridge resolution never chase a dead directory. The
+  // workspace being upserted is always kept, even on a transiently-missing
+  // mount, because it is re-added below.
+  registry.workspaces = registry.workspaces.filter(
+    (workspace) => samePath(workspace.path, resolved) || fs.existsSync(workspace.path),
+  )
   const existing = registry.workspaces.find((workspace) => samePath(workspace.path, resolved))
 
   if (existing) {
