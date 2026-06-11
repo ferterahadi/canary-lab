@@ -280,6 +280,20 @@ describe('portifyRoutes', () => {
     expect((res.json() as { error: string }).error).toContain('cannot merge')
   })
 
+  it('GET /api/portify/:id/merge-status defaults to 500 and stringifies non-Error throws', async () => {
+    const app = await build({ portifyMergeStatus: async () => { throw 'unexpected merge-status failure' } })
+    const res = await app.inject({ method: 'GET', url: '/api/portify/portify-1/merge-status' })
+    expect(res.statusCode).toBe(500)
+    expect((res.json() as { error: string }).error).toBe('unexpected merge-status failure')
+  })
+
+  it('POST /api/portify/:id/merge stringifies non-Error throws', async () => {
+    const app = await build({ mergePortify: async () => { throw 'unexpected merge failure' } })
+    const res = await app.inject({ method: 'POST', url: '/api/portify/portify-1/merge' })
+    expect(res.statusCode).toBe(500)
+    expect((res.json() as { error: string }).error).toBe('unexpected merge failure')
+  })
+
   it('POST /api/portify/:id/merge delegates to the runner and returns per-repo results', async () => {
     let merged: string | undefined
     const app = await build({

@@ -14,6 +14,13 @@ function run(command, args, cwd, extraEnv = {}) {
     env: {
       ...process.env,
       npm_config_cache: cacheDir,
+      // Keep the smoke run's workspace registry + active-server records inside
+      // the throwaway temp dir so it never pollutes the real ~/.canary-lab
+      // (stale `smoke-project` entries used to skew MCP bridge port resolution).
+      // CANARY_LAB_HOME covers the registry/active-server reads; setup/upgrade
+      // resolve the registry write through CANARY_LAB_AGENT_HOME, so pin both.
+      CANARY_LAB_HOME: tempRoot,
+      CANARY_LAB_AGENT_HOME: tempRoot,
       ...extraEnv,
     },
   })

@@ -285,9 +285,16 @@ function PortFlowLegend({ slot }: { slot: PortSlotSlice }) {
   )
   return (
     <p className="mt-2 text-[11px] leading-relaxed" style={{ color: 'var(--text-muted)', maxWidth: 640 }}>
-      Each boot, {chip(name)} is assigned a free port
-      {slot.env ? <>, injected as {chip(slot.env)}</> : null} — reference it anywhere as{' '}
-      {chip(`\${port.${name}}`)} (start command, health check, envset files).
+      Each boot, {chip(name)} gets one free port.{' '}
+      {slot.env ? (
+        <>
+          {chip(slot.env)} = {chip(`\${port.${name}}`)} are two names for that same number — the env
+          var is what the service reads; the token is for everything else (start command, health
+          check, envset files).
+        </>
+      ) : (
+        <>Reference it as {chip(`\${port.${name}}`)} in the start command, health check, or envset files.</>
+      )}
     </p>
   )
 }

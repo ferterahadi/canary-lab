@@ -113,14 +113,20 @@ export function PortifyWizard({
     }
   }
 
+  // Commit lands the rewrite on the branch (status → committed) but the work
+  // isn't done — the user still has to merge. Show the returned manifest and
+  // advance to the Merge step; onCommitted (which closes the wizard) is the
+  // "Done" handler reached from the Merge screen, not commit itself.
   const commit = async () => {
     if (!workflowId) return
     setBusy(true); setError(null)
     try {
-      await api.commitPortify(workflowId)
-      onCommitted()
+      const next = await api.commitPortify(workflowId)
+      setM(next)
+      setViewStep(3)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
+    } finally {
       setBusy(false)
     }
   }
@@ -273,7 +279,6 @@ export function PortifyWizard({
               mergeResults={mergeResults}
               busy={mergeBusy}
               onMerge={merge}
-              onRecheck={() => void refreshMergeStatus()}
               onDone={onCommitted}
             />
           )}
@@ -485,24 +490,7 @@ function ReviewScreen({ m, busy, committed, onCommit, onRequestChanges, onViewCo
           </button>
         </div>
       ) : (
-        /* Commit (far left) and Request changes (far right) sit at opposite ends
-           so the "I'm done" and "do more" actions can't be confused. */
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, marginTop: 16 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
-            <button
-              type="button"
-              className="cl-button-primary"
-              disabled={busy || !proven}
-              onClick={onCommit}
-              title={proven ? undefined : 'The latest changes did not pass verification — request changes to fix them first'}
-              style={{ padding: '9px 16px', opacity: proven ? 1 : 0.5, cursor: proven && !busy ? 'pointer' : 'not-allowed' }}
-            >
-              {busy ? 'Working…' : 'Commit'}
-            </button>
-            <span style={{ fontSize: 11.5, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              feat: make {m.feature} ports injectable · branch {m.branch}
-            </span>
-          </div>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 12, marginTop: 16 }}>
           <button
             type="button"
             onClick={onRequestChanges}
@@ -515,6 +503,16 @@ function ReviewScreen({ m, busy, committed, onCommit, onRequestChanges, onViewCo
             }}
           >
             Request changes
+          </button>
+          <button
+            type="button"
+            className="cl-button-primary"
+            disabled={busy || !proven}
+            onClick={onCommit}
+            title={proven ? undefined : 'The latest changes did not pass verification — request changes to fix them first'}
+            style={{ padding: '9px 16px', opacity: proven ? 1 : 0.5, cursor: proven && !busy ? 'pointer' : 'not-allowed' }}
+          >
+            {busy ? 'Working…' : 'Commit'}
           </button>
         </div>
       )}
@@ -555,7 +553,7 @@ function ReviewLocally({ m }: { m: PortifyManifest }) {
 function RevisionFailedBanner({ m }: { m: PortifyManifest }) {
   return (
     <div style={{ fontSize: 11.5, fontFamily: 'var(--font-mono)', color: 'rgb(251,191,36)', background: 'rgba(251,191,36,0.08)', border: '1px solid rgba(251,191,36,0.3)', borderRadius: 'var(--radius-md)', padding: '10px 12px', marginBottom: 14, whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>
-      ⚠ Your last change didn’t pass the double-boot — fix it with “Request changes” before committing.
+      ⚠ Your last change didn't pass the double-boot — fix it with “Request changes” before committing.
       {m.verification?.failureDetail ? `\n\n${m.verification.failureDetail}` : ''}
       {m.error ? `\n\n${m.error}` : ''}
     </div>
@@ -589,7 +587,7 @@ function FeedbackModal({ busy, onSend, onClose }: { busy: boolean; onSend: (feed
       >
         <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 6 }}>Ask the agent for changes</div>
         <div style={{ fontSize: 12.5, color: 'var(--text-muted)', lineHeight: 1.6, marginBottom: 12 }}>
-          The agent resumes where it left off, applies your feedback, and re-runs the double-boot before it’s ready to commit again.
+          The agent resumes where it left off, applies your feedback, and re-runs the double-boot before it's ready to commit again.
         </div>
         <textarea
           ref={taRef}
@@ -624,18 +622,47 @@ function FeedbackModal({ busy, onSend, onClose }: { busy: boolean; onSend: (feed
   )
 }
 
+function MergeManuallyModal({ mergeCmd, onClose }: { mergeCmd: string; onClose: () => void }) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => { if (e.key === 'Escape') onClose() }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [onClose])
+  return (
+    <div
+      style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.55)', display: 'grid', placeItems: 'center', zIndex: 90 }}
+      onClick={onClose}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Merge manually"
+        style={{ width: 'min(520px, 92%)', background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-lg)', padding: 20 }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 14 }}>Merge manually</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+          <code style={{ ...mono, flex: '1 1 auto', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', padding: '8px 10px' }}>{mergeCmd}</code>
+          <CopyButton value={mergeCmd} label="Copy" style={{ flexShrink: 0 }} />
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+          <button type="button" onClick={onClose} style={ghostBtn}>Close</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // PR-style merge page: the wizard's last step. Committing landed the rewrite on
 // a branch — this screen owns the step that makes it real: merging that branch
-// into the user's checked-out branch. Readiness is checked live (Re-check), the
-// merge runs server-side with abort-on-conflict, and merged-ness is computed
-// from git so a manual terminal merge flips the screen too.
+// into the user's checked-out branch. Merge runs server-side with abort-on-conflict,
+// and merged-ness is computed from git so a manual terminal merge flips the screen too.
 function CommittedScreen({
   m,
   mergeInfo,
   mergeResults,
   busy,
   onMerge,
-  onRecheck,
   onDone,
 }: {
   m: PortifyManifest
@@ -643,9 +670,9 @@ function CommittedScreen({
   mergeResults: PortifyRepoMergeResult[] | null
   busy: boolean
   onMerge: () => void
-  onRecheck: () => void
   onDone: () => void
 }) {
+  const [manualOpen, setManualOpen] = useState(false)
   const committed = m.repos.filter((r) => r.commitSha)
   const mergeCmd = `git merge ${m.branch}`
   const merged = mergeInfo ? mergeInfo.merged : Boolean(m.mergedAt)
@@ -701,7 +728,7 @@ function CommittedScreen({
         <span style={{ color: 'rgb(52,211,153)' }}>✓ Committed</span> — one step left
       </div>
       <p style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6, marginBottom: 14 }}>
-        The rewrite lives on <code style={mono}>{m.branch}</code>. Your checkout doesn’t use it until it’s merged — until then, runs keep booting with the old hardcoded ports.
+        The rewrite lives on <code style={mono}>{m.branch}</code>. Your checkout doesn't use it until it's merged — until then, runs keep booting with the old hardcoded ports.
       </p>
 
       <div style={{ border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)', background: 'var(--bg-surface)', marginBottom: 14 }}>
@@ -715,14 +742,11 @@ function CommittedScreen({
         {repoChecks.map((r) => {
           const into = r.currentBranch ? ` — will merge into ${r.currentBranch}` : ''
           if (!r.branchExists) return <CheckRow key={r.gitRoot} tone="bad" text={`The branch is missing in ${r.name} — was it deleted? Merge it manually if you still have it elsewhere.`} />
-          if (r.mergeInProgress) return <CheckRow key={r.gitRoot} tone="warn" text={`${r.name} is mid-merge — conclude or abort that merge first, then Re-check.`} />
-          if (r.currentBranch == null) return <CheckRow key={r.gitRoot} tone="warn" text={`${r.name} is on a detached HEAD — check out a branch to merge into, then Re-check.`} />
-          if (r.dirty) return <CheckRow key={r.gitRoot} tone="warn" text={`${r.name} has uncommitted changes — commit or stash them, then Re-check.`} />
+          if (r.mergeInProgress) return <CheckRow key={r.gitRoot} tone="warn" text={`${r.name} is mid-merge — conclude or abort that merge first.`} />
+          if (r.currentBranch == null) return <CheckRow key={r.gitRoot} tone="warn" text={`${r.name} is on a detached HEAD — check out a branch to merge into.`} />
+          if (r.dirty) return <CheckRow key={r.gitRoot} tone="warn" text={`${r.name} has uncommitted changes — commit or stash them.`} />
           return <CheckRow key={r.gitRoot} tone="ok" text={`Working tree clean in ${r.name}${into}`} />
         })}
-        <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '8px 12px', borderTop: '1px solid var(--border-default)' }}>
-          <button type="button" onClick={onRecheck} style={{ ...ghostBtn, padding: '5px 11px', fontSize: 11.5 }}>Re-check</button>
-        </div>
       </div>
 
       {failures.length > 0 && (
@@ -747,12 +771,16 @@ function CommittedScreen({
         </div>
       )}
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 14 }}>
+      {manualOpen && <MergeManuallyModal mergeCmd={mergeCmd} onClose={() => setManualOpen(false)} />}
+
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 10, marginTop: 16 }}>
+        <button type="button" onClick={onDone} style={ghostBtn}>Done — merge later</button>
+        <button type="button" onClick={() => setManualOpen(true)} style={ghostBtn}>Merge manually</button>
         <button
           type="button"
           onClick={onMerge}
           disabled={!canMerge}
-          title={canMerge ? `Runs git merge ${m.branch} locally in your repo` : 'Resolve the blockers above, then Re-check'}
+          title={canMerge ? `Runs git merge ${m.branch} locally in your repo` : 'Resolve the blockers above first'}
           style={{
             padding: '9px 18px', fontSize: 12.5, fontWeight: 600, borderRadius: 'var(--radius-md)', whiteSpace: 'nowrap',
             background: 'var(--success)', border: '1px solid var(--success)', color: '#fff',
@@ -761,30 +789,7 @@ function CommittedScreen({
         >
           {busy ? 'Merging…' : mergeLabel}
         </button>
-        <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
-          Runs locally in your repo. If it can’t merge cleanly, nothing changes.
-        </span>
       </div>
-
-      <details style={{ marginBottom: 16 }}>
-        <summary style={{ fontSize: 12, color: 'var(--text-secondary)', cursor: 'pointer' }}>Merge manually instead</summary>
-        <div style={{ border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)', background: 'var(--bg-surface)', padding: '13px 15px', marginTop: 8 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
-            <span style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '.4px', color: 'var(--text-muted)', fontWeight: 600 }}>Branch</span>
-            <code style={{ ...mono, flex: '0 1 auto', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.branch}</code>
-            <CopyButton value={m.branch} label="Copy" style={{ flexShrink: 0 }} />
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <code style={{ ...mono, flex: '1 1 auto', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', padding: '6px 9px' }}>{mergeCmd}</code>
-            <CopyButton value={mergeCmd} label="Copy" style={{ flexShrink: 0 }} />
-          </div>
-          <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 8, lineHeight: 1.5 }}>
-            Run it in each repo, on the branch you want the rewrite in. Use Re-check afterwards — the screen detects manual merges.
-          </div>
-        </div>
-      </details>
-
-      <button type="button" onClick={onDone} style={ghostBtn}>Done — merge later</button>
     </div>
   )
 }

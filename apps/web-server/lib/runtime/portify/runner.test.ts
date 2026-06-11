@@ -545,6 +545,33 @@ describe('createPortifyRunner (integration)', () => {
       expect(fs.readFileSync(path.join(appRepo, 'src', 'server.js'), 'utf-8')).toContain('// wip')
     })
 
+    it('falls back to repoPath when getGitRoot returns null (non-git path), and surfaces the error per repo', async () => {
+      const logsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-mgngit-'))
+      roots.push(logsDir)
+      const { store, runner } = makeRunner('x', logsDir)
+      // Path does not exist → getGitRoot returns null → ?? repoPath fallback (line 411)
+      // mergePortifyBranch on a non-git dir throws an Error → caught at line 462
+      store.save(readyManifest({
+        status: 'committed', endedAt: 'now',
+        repos: [{ name: 'app', path: '/tmp/canary-no-git-dir-nonexistent', commitSha: 'abc123' }],
+      }))
+      const res = await runner.merge('w')
+      expect(res.ok).toBe(false)
+      expect(res.results[0].error).toBeTruthy()
+    })
+
+    it('preserves repos with no commitSha as-is when updating the manifest after merge', async () => {
+      const { store, runner, workflowId } = await committedFixture()
+      const m = store.get(workflowId)!
+      // Add a second repo with no commitSha: committedGroups skips it,
+      // but repos.map still iterates over it → the `: r` fallback on line 473
+      store.save({ ...m, repos: [...m.repos, { name: 'extra', path: '/nonexistent' }] })
+      const res = await runner.merge(workflowId)
+      expect(res.ok).toBe(true)
+      const saved = store.get(workflowId)!
+      expect(saved.repos.find((r) => r.name === 'extra')?.mergeCommitSha).toBeUndefined()
+    })
+
     it('reports nothingToMerge when no repo has a commit', async () => {
       const logsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-mgnone-'))
       roots.push(logsDir)

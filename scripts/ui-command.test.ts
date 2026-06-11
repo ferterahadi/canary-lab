@@ -84,6 +84,7 @@ describe('runUi signal cleanup', () => {
     const revertAllEnvsets = vi.fn(() => { events.push('revert') })
     const cancelAllWizardAgents = vi.fn(() => { events.push('cancel-wizard') })
     const exit = vi.fn((code: number) => { events.push(`exit-${code}`) })
+    const clearActiveServer = vi.fn()
 
     mocks.createServer.mockResolvedValue({
       app,
@@ -99,6 +100,9 @@ describe('runUi signal cleanup', () => {
       projectRoot: '/tmp/canary-lab-workspace',
       log: () => {},
       exit,
+      registerWorkspace: () => {},
+      recordActiveServer: () => {},
+      clearActiveServer,
       confirmShutdown: async () => {
         events.push('confirm')
         return true
@@ -110,6 +114,7 @@ describe('runUi signal cleanup', () => {
     process.emit('SIGINT')
     await new Promise((resolve) => setTimeout(resolve, 0))
 
+    expect(clearActiveServer).toHaveBeenCalledOnce()
     expect(cancelAllWizardAgents).toHaveBeenCalledOnce()
     expect(runStore.abortAllActiveOrStale).toHaveBeenCalledOnce()
     expect(revertAllEnvsets).toHaveBeenCalledOnce()
@@ -152,6 +157,9 @@ describe('runUi signal cleanup', () => {
       projectRoot: '/tmp/canary-lab-workspace',
       log: (msg) => { messages.push(msg) },
       exit,
+      registerWorkspace: () => {},
+      recordActiveServer: () => {},
+      clearActiveServer: () => {},
       confirmShutdown: async () => false,
     })
 
@@ -193,11 +201,13 @@ describe('runUi port resolution', () => {
     return app
   }
 
+  const noopActiveServer = { recordActiveServer: () => {}, clearActiveServer: () => {} }
+
   it('binds the port configured in the project canary-lab.config.json', async () => {
     const projectRoot = mkProject({ port: 8200 })
     const app = mockServer()
 
-    await runUi(['--no-open'], { projectRoot, log: () => {}, exit: vi.fn(), registerWorkspace: () => {} })
+    await runUi(['--no-open'], { projectRoot, log: () => {}, exit: vi.fn(), registerWorkspace: () => {}, ...noopActiveServer })
 
     expect(app.listen).toHaveBeenCalledExactlyOnceWith({ port: 8200, host: '127.0.0.1' })
   })
@@ -206,7 +216,7 @@ describe('runUi port resolution', () => {
     const projectRoot = mkProject()
     const app = mockServer()
 
-    await runUi(['--no-open'], { projectRoot, log: () => {}, exit: vi.fn(), registerWorkspace: () => {} })
+    await runUi(['--no-open'], { projectRoot, log: () => {}, exit: vi.fn(), registerWorkspace: () => {}, ...noopActiveServer })
 
     expect(app.listen).toHaveBeenCalledExactlyOnceWith({ port: 7421, host: '127.0.0.1' })
   })
@@ -216,9 +226,19 @@ describe('runUi port resolution', () => {
     mockServer()
     const registerWorkspace = vi.fn()
 
-    await runUi(['--no-open'], { projectRoot, log: () => {}, exit: vi.fn(), registerWorkspace })
+    await runUi(['--no-open'], { projectRoot, log: () => {}, exit: vi.fn(), registerWorkspace, ...noopActiveServer })
 
     expect(registerWorkspace).toHaveBeenCalledExactlyOnceWith(projectRoot)
+  })
+
+  it('records the live server with its bound port once it is listening', async () => {
+    const projectRoot = mkProject({ port: 8300 })
+    mockServer()
+    const recordActiveServer = vi.fn()
+
+    await runUi(['--no-open'], { projectRoot, log: () => {}, exit: vi.fn(), registerWorkspace: () => {}, recordActiveServer, clearActiveServer: () => {} })
+
+    expect(recordActiveServer).toHaveBeenCalledExactlyOnceWith(projectRoot, 8300)
   })
 
   it('refreshes the installed agent skill on boot so it tracks the package version', async () => {
@@ -226,7 +246,7 @@ describe('runUi port resolution', () => {
     mockServer()
     const refreshAgents = vi.fn()
 
-    await runUi(['--no-open'], { projectRoot, log: () => {}, exit: vi.fn(), registerWorkspace: () => {}, refreshAgents })
+    await runUi(['--no-open'], { projectRoot, log: () => {}, exit: vi.fn(), registerWorkspace: () => {}, refreshAgents, ...noopActiveServer })
 
     expect(refreshAgents).toHaveBeenCalledOnce()
   })
@@ -255,6 +275,7 @@ describe('runUi port resolution', () => {
       log: () => {},
       exit,
       registerWorkspace: () => {},
+      ...noopActiveServer,
       relaunch,
       schedule: (fn) => { fn() },
     })
@@ -282,7 +303,7 @@ describe('runUi port resolution', () => {
       draftBrokers: new Map(),
     })
 
-    await runUi(['--no-open'], { projectRoot, log: (m) => messages.push(m), exit: vi.fn(), registerWorkspace: () => {} })
+    await runUi(['--no-open'], { projectRoot, log: (m) => messages.push(m), exit: vi.fn(), registerWorkspace: () => {}, ...noopActiveServer })
 
     expect(messages.some((m) => m.includes('8400'))).toBe(true)
   })

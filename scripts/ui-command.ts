@@ -10,6 +10,7 @@ import { getProjectRoot } from '../shared/runtime/project-root'
 import { openBrowser } from '../apps/web-server/lib/open-browser'
 import { loadProjectConfig, resolveProjectPort } from '../apps/web-server/lib/runtime/launcher/project-config'
 import { upsertWorkspace } from '../shared/runtime/workspace-registry'
+import { registerActiveServer, unregisterActiveServer } from '../shared/runtime/active-servers'
 import { refreshAgentIntegrationsQuietly } from './agent'
 
 export interface UiCommandOptions {
@@ -20,6 +21,10 @@ export interface UiCommandOptions {
   confirmShutdown?: () => Promise<boolean>
   // Marks this workspace active so the MCP bridge connects to the running UI.
   registerWorkspace?: (projectRoot: string) => void
+  // Records/clears the live server (projectRoot+port+pid) the MCP bridge follows.
+  // Injected as spies in tests so they never touch the real ~/.canary-lab.
+  recordActiveServer?: (projectRoot: string, port: number) => void
+  clearActiveServer?: () => void
   // Brings the installed agent skill up to date with this package version.
   // Injected as a no-op / spy in tests so they never touch the real home dir.
   refreshAgents?: () => void
@@ -47,6 +52,10 @@ export async function runUi(argv: string[], opts: UiCommandOptions = {}): Promis
   // *this* project (and its port) as the active target.
   const registerWorkspace = opts.registerWorkspace ?? ((root: string) => { upsertWorkspace(root) })
   registerWorkspace(projectRoot)
+  const recordActiveServer = opts.recordActiveServer
+    ?? ((root: string, p: number) => { registerActiveServer({ projectRoot: root, port: p, pid: process.pid }) })
+  const clearActiveServer = opts.clearActiveServer
+    ?? (() => { unregisterActiveServer({ pid: process.pid }) })
   // Keep the installed agent skill (~/.claude, ~/.codex) in lockstep with this
   // package version. An `npm` bump that skips the postinstall `upgrade` hook
   // would otherwise leave a stale skill pinning old behavior; this is the one
@@ -70,6 +79,9 @@ export async function runUi(argv: string[], opts: UiCommandOptions = {}): Promis
   const cleanup = async (): Promise<void> => {
     if (cleanedUp) return
     cleanedUp = true
+    // Stop advertising this server to the MCP bridge before tearing down, so a
+    // bridge re-resolving mid-shutdown never targets a port that's going away.
+    clearActiveServer()
     cancelAllWizardAgents()
     await runStore.abortAllActiveOrStale()
     revertAllEnvsets()
@@ -121,6 +133,9 @@ export async function runUi(argv: string[], opts: UiCommandOptions = {}): Promis
     }
     throw err
   }
+  // The server is now listening: advertise it so the single registered MCP
+  // bridge follows *this* port, even if the user switched it from the default.
+  recordActiveServer(projectRoot, port)
   const url = `http://localhost:${port}`
   log(`Open ${url}`)
   log(`Project root: ${path.relative(process.cwd(), projectRoot) || '.'}`)

@@ -69,10 +69,13 @@ export function GlobalStatusBar({ activeRunDetail, onNavigateToRun, onOpenCleanu
   }, [actionsExpanded])
   const { benchmarks } = useBenchmarks()
   const activeBenchmark = benchmarks.find((b) => b.status === 'sabotaging' || b.status === 'running')
+  // Benchmark is an internal-experiment surface (product surface retired in
+  // 1.0.0) — hidden unless explicitly requested via ?showBenchmark=true.
+  const showBenchmark = new URLSearchParams(window.location.search).get('showBenchmark') === 'true'
   // Aggregate "something's happening" count shown on the toggle when collapsed,
   // so an active benchmark / run / boot is never hidden behind the chevron.
   const actionsActiveCount =
-    (activeBenchmark ? 1 : 0) + (runsCount > 0 ? 1 : 0) + (bootCount > 0 ? 1 : 0) + (activePortify ? 1 : 0)
+    (showBenchmark && activeBenchmark ? 1 : 0) + (runsCount > 0 ? 1 : 0) + (bootCount > 0 ? 1 : 0) + (activePortify ? 1 : 0)
   const status = activeRunDetail?.manifest.status
 
   // Guard: only treat 'running' and 'healing' as truly active. The runs
@@ -138,7 +141,7 @@ export function GlobalStatusBar({ activeRunDetail, onNavigateToRun, onOpenCleanu
           <PortifyPill portify={activePortify} onOpen={(workflowId) => onOpenPortify?.(workflowId)} />
           <WizardTaskStatus />
           <EvaluationExportTaskStatus />
-          <BenchmarkPill active={Boolean(activeBenchmark)} onOpen={() => setBenchmarkOpen(true)} />
+          {showBenchmark && <BenchmarkPill active={Boolean(activeBenchmark)} onOpen={() => setBenchmarkOpen(true)} />}
           <CleanupPill onOpen={() => onOpenCleanup?.()} />
         </div>
         <button

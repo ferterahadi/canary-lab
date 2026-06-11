@@ -77,9 +77,9 @@ describe('PortsTab', () => {
     expect(container.textContent).toContain('yarn start')
     // The read-only injection token is rendered for the slot.
     expect(container.textContent).toContain('${port.api}')
-    // The one-line legend is keyed to the feature's own slot (name + env var).
-    expect(container.textContent).toContain('is assigned a free port')
-    expect(container.textContent).toContain('injected as PORT')
+    // The one-line legend is keyed to the feature's own slot (name + env var)
+    // and states that the env var and the token carry the same number.
+    expect(container.textContent).toContain('two names for that same number')
 
     // Rename the slot and save — it must round-trip through parse → serialize.
     const slotName = slotNameInput()
