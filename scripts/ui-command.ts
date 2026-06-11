@@ -6,10 +6,9 @@ import path from 'path'
 import readline from 'readline'
 import { spawn } from 'child_process'
 import { createServer } from '../apps/web-server/server'
-import { getProjectRoot } from '../shared/runtime/project-root'
+import { getProjectRoot, isCanaryLabWorkspace } from '../shared/runtime/project-root'
 import { openBrowser } from '../apps/web-server/lib/open-browser'
 import { loadProjectConfig, resolveProjectPort } from '../apps/web-server/lib/runtime/launcher/project-config'
-import { upsertWorkspace } from '../shared/runtime/workspace-registry'
 import { registerActiveServer, unregisterActiveServer } from '../shared/runtime/active-servers'
 import { refreshAgentIntegrationsQuietly } from './agent'
 
@@ -19,8 +18,6 @@ export interface UiCommandOptions {
   log?: (msg: string) => void
   exit?: (code: number) => void
   confirmShutdown?: () => Promise<boolean>
-  // Marks this workspace active so the MCP bridge connects to the running UI.
-  registerWorkspace?: (projectRoot: string) => void
   // Records/clears the live server (projectRoot+port+pid) the MCP bridge follows.
   // Injected as spies in tests so they never touch the real ~/.canary-lab.
   recordActiveServer?: (projectRoot: string, port: number) => void
@@ -47,11 +44,19 @@ export async function runUi(argv: string[], opts: UiCommandOptions = {}): Promis
   if (portFromArgs !== undefined) return
   const noOpen = argv.includes('--no-open')
   const projectRoot = opts.projectRoot ?? getProjectRoot()
+  // Refuse to boot outside a Canary Lab workspace. `getProjectRoot` walks up
+  // and matches any dir with a `features/` folder, so a stray `features/` (e.g.
+  // one accidentally scaffolded into the home dir) would otherwise let
+  // `canary-lab ui` root a server at `~`. Require the init-only dependency
+  // marker instead. The workspace registry is owned solely by `canary-lab init`;
+  // `ui` never writes it — it only advertises the running server via the
+  // active-server record below.
+  if (!isCanaryLabWorkspace(projectRoot)) {
+    log(`Canary Lab is not set up in ${projectRoot}. Run \`npx canary-lab init\` here first.`)
+    requestExit(1)
+    return
+  }
   const port = resolveProjectPort(loadProjectConfig(projectRoot))
-  // Bump this workspace's recency so the single registered MCP bridge resolves
-  // *this* project (and its port) as the active target.
-  const registerWorkspace = opts.registerWorkspace ?? ((root: string) => { upsertWorkspace(root) })
-  registerWorkspace(projectRoot)
   const recordActiveServer = opts.recordActiveServer
     ?? ((root: string, p: number) => { registerActiveServer({ projectRoot: root, port: p, pid: process.pid }) })
   const clearActiveServer = opts.clearActiveServer

@@ -1274,6 +1274,174 @@ describe('MCP HTTP server (smoke)', () => {
     }
   })
 
+  it('start_run starts a fresh CLI run as external-origin with claimable:false (desktop-only policy)', async () => {
+    const projectRoot = path.resolve(__dirname, '..', '..', '..', 'templates', 'project')
+    const logsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-start-cli-fresh-')))
+    const featuresDir = path.join(projectRoot, 'features')
+    const calls: Array<Parameters<NonNullable<Parameters<typeof registerMcpRoutes>[1]['startRun']>>> = []
+    const { app } = await createMcpHarness({
+      logsDir,
+      projectRoot,
+      featuresDir,
+      startRun: async (...args) => {
+        calls.push(args)
+        return { runId: 'new-run' }
+      },
+    })
+    let client: Client | null = null
+    // Desktop-only policy: a CLI start can't claim, but the run must still be
+    // external-origin so it uses External-client heal, not the project agent.
+    const saved = process.env.CANARY_LAB_HEAL_CLAIM_CLIENTS
+    process.env.CANARY_LAB_HEAL_CLAIM_CLIENTS = 'claude-desktop,codex-desktop'
+    try {
+      const address = await app.listen({ port: 0, host: '127.0.0.1' })
+      client = await connectClient(address, '/mcp?profile=full')
+      const result = await client.callTool({
+        name: 'start_run',
+        arguments: {
+          feature: 'broken_todo_api',
+          env: 'local',
+          claim_heal: true,
+          session_id: 'sess-cli',
+          client_kind: 'claude-cli',
+          conversation_name: 'cli fresh start',
+        },
+      })
+      const body = JSON.parse((result.content?.[0] as { text: string }).text)
+      expect(body).toMatchObject({ runId: 'new-run', reused: false, claimed: false, claimSuppressed: true })
+      expect(body.nextSteps ?? []).not.toContain('wait_for_heal_task')
+      // The run is still external-origin (claimable:false) — it must NOT fall
+      // back to the project Heal Agent.
+      expect(calls).toHaveLength(1)
+      expect(calls[0][2]).toEqual({
+        kind: 'external',
+        sessionId: 'sess-cli',
+        clientKind: 'claude-cli',
+        conversationName: 'cli fresh start',
+        claimable: false,
+      })
+    } finally {
+      if (saved === undefined) delete process.env.CANARY_LAB_HEAL_CLAIM_CLIENTS
+      else process.env.CANARY_LAB_HEAL_CLAIM_CLIENTS = saved
+      if (client) await client.close().catch(() => undefined)
+      await app.close()
+    }
+  })
+
+  it('start_run starts a fresh Desktop run as claimable external origin', async () => {
+    const projectRoot = path.resolve(__dirname, '..', '..', '..', 'templates', 'project')
+    const logsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-start-desktop-fresh-')))
+    const featuresDir = path.join(projectRoot, 'features')
+    const calls: Array<Parameters<NonNullable<Parameters<typeof registerMcpRoutes>[1]['startRun']>>> = []
+    const { app } = await createMcpHarness({
+      logsDir,
+      projectRoot,
+      featuresDir,
+      startRun: async (...args) => {
+        calls.push(args)
+        return { runId: 'new-run' }
+      },
+    })
+    let client: Client | null = null
+    const saved = process.env.CANARY_LAB_HEAL_CLAIM_CLIENTS
+    process.env.CANARY_LAB_HEAL_CLAIM_CLIENTS = 'claude-desktop,codex-desktop'
+    try {
+      const address = await app.listen({ port: 0, host: '127.0.0.1' })
+      client = await connectClient(address, '/mcp?profile=full')
+      const result = await client.callTool({
+        name: 'start_run',
+        arguments: {
+          feature: 'broken_todo_api',
+          env: 'local',
+          claim_heal: true,
+          session_id: 'sess-desktop',
+          client_kind: 'claude-desktop',
+        },
+      })
+      const body = JSON.parse((result.content?.[0] as { text: string }).text)
+      expect(body).toMatchObject({ runId: 'new-run', reused: false, claimed: true })
+      expect(body.claimSuppressed).toBeUndefined()
+      expect(calls).toHaveLength(1)
+      expect(calls[0][2]).toEqual({
+        kind: 'external',
+        sessionId: 'sess-desktop',
+        clientKind: 'claude-desktop',
+        claimable: true,
+      })
+    } finally {
+      if (saved === undefined) delete process.env.CANARY_LAB_HEAL_CLAIM_CLIENTS
+      else process.env.CANARY_LAB_HEAL_CLAIM_CLIENTS = saved
+      if (client) await client.close().catch(() => undefined)
+      await app.close()
+    }
+  })
+
+  it('start_run restarts a failed run for a CLI client as external-origin (claimable:false, not refused)', async () => {
+    const projectRoot = path.resolve(__dirname, '..', '..', '..', 'templates', 'project')
+    const logsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-restart-cli-')))
+    const featuresDir = path.join(projectRoot, 'features')
+    const restartCalls: Array<Parameters<NonNullable<Parameters<typeof registerMcpRoutes>[1]['restartExternalRun']>>> = []
+    const { app, runStore } = await createMcpHarness({
+      logsDir,
+      projectRoot,
+      featuresDir,
+      restartExternalRun: async (runId, healAgent, guidance) => {
+        restartCalls.push([runId, healAgent, guidance])
+        runStore.patchManifest(runId, { status: 'running' })
+        return { runId }
+      },
+    })
+    let client: Client | null = null
+    const saved = process.env.CANARY_LAB_HEAL_CLAIM_CLIENTS
+    process.env.CANARY_LAB_HEAL_CLAIM_CLIENTS = 'claude-desktop,codex-desktop'
+    try {
+      const address = await app.listen({ port: 0, host: '127.0.0.1' })
+      client = await connectClient(address, '/mcp?profile=full')
+      runStore.bootstrap({
+        runId: '2026-05-19T0841-7cvh',
+        feature: 'broken_todo_api',
+        env: 'local',
+        startedAt: '2026-05-19T08:41:00.000Z',
+        status: 'failed',
+        healCycles: 2,
+        services: [],
+      })
+      const result = await client.callTool({
+        name: 'start_run',
+        arguments: {
+          feature: 'broken_todo_api',
+          env: 'local',
+          run_ref: '7cvh',
+          claim_heal: true,
+          session_id: 'sess-restart-cli',
+          client_kind: 'claude-cli',
+        },
+      })
+      const body = JSON.parse((result.content?.[0] as { text: string }).text)
+      // Not refused (no claim_not_allowed): the run restarts into external mode.
+      expect(body).toMatchObject({
+        runId: '2026-05-19T0841-7cvh',
+        restarted: true,
+        claimed: false,
+        claimSuppressed: true,
+      })
+      expect(body.type).toBeUndefined()
+      expect(body.nextSteps ?? []).not.toContain('wait_for_heal_task')
+      expect(restartCalls).toHaveLength(1)
+      expect(restartCalls[0][1]).toEqual({
+        kind: 'external',
+        sessionId: 'sess-restart-cli',
+        clientKind: 'claude-cli',
+        claimable: false,
+      })
+    } finally {
+      if (saved === undefined) delete process.env.CANARY_LAB_HEAL_CLAIM_CLIENTS
+      else process.env.CANARY_LAB_HEAL_CLAIM_CLIENTS = saved
+      if (client) await client.close().catch(() => undefined)
+      await app.close()
+    }
+  })
+
   it('start_run suppresses the heal claim for a CLI client (desktop-only policy)', async () => {
     const projectRoot = path.resolve(__dirname, '..', '..', '..', 'templates', 'project')
     const logsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-start-suppress-')))

@@ -164,7 +164,9 @@ describe("main (upgrade orchestration)", () => {
 
     const pkg = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf-8"))
     expect(pkg.scripts.postinstall).toBe("canary-lab upgrade --silent")
-    expect(readWorkspaceRegistry(home).workspaces[0].path).toBe(root)
+    // The workspace registry is owned solely by `canary-lab init`; upgrade must
+    // not introduce or re-stamp entries.
+    expect(readWorkspaceRegistry(home).workspaces).toEqual([])
   })
 
   it("re-points already-configured MCP clients on upgrade", async () => {
