@@ -1123,7 +1123,7 @@ describe('POST /api/runs', () => {
     })
   })
 
-  it('down-shifts a CLI healAgent to a non-external fresh start (claim suppressed)', async () => {
+  it('starts a CLI healAgent as external-origin with claimable:false (claim suppressed)', async () => {
     writeFeature('foo')
     const stub = makeStub('new-run')
     const startRun = vi.fn(async () => ({ kind: 'started' as const, orch: stub }))
@@ -1146,10 +1146,17 @@ describe('POST /api/runs', () => {
     expect(res.statusCode).toBe(201)
     expect(res.json()).toMatchObject({ runId: 'new-run', claimSuppressed: true })
     expect(typeof res.json().message).toBe('string')
-    // startRun was invoked WITHOUT the external heal request — the run runs,
-    // but the CLI session does not own it.
+    // The run is still external-origin (so it uses External-client heal, not the
+    // project Heal Agent), but the CLI session can't own it: claimable:false ⇒
+    // no session/claim, the run waits for a Desktop/UI drive.
     expect(startRun).toHaveBeenCalledTimes(1)
-    expect(startRun.mock.calls[0][2]).toBeUndefined()
+    expect(startRun.mock.calls[0][2]).toEqual({
+      kind: 'external',
+      sessionId: 'sess-cli',
+      clientKind: 'claude-cli',
+      conversationName: 'cli should not own heal',
+      claimable: false,
+    })
   })
 
   it('500s with stringified non-Error rejection', async () => {

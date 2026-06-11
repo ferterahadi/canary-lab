@@ -52,6 +52,11 @@ export interface ExternalHealAgentRequest {
   clientKind: 'claude-cli' | 'claude-desktop' | 'codex-cli' | 'codex-desktop' | 'other'
   clientVersion?: string
   conversationName?: string
+  /** Whether this external client may *own* the heal loop (Desktop-only per
+   *  heal-claim-policy). Defaults to true. When false, the run still uses
+   *  External-client heal mode (external origin), but gets no externalHealSession
+   *  and no broker claim — it waits for a Desktop/UI drive instead. */
+  claimable?: boolean
 }
 
 export interface RunsRouteDeps {
@@ -467,12 +472,15 @@ export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Pro
       reply.code(400)
       return { error: healAgent.error }
     }
-    // Heal-claim policy: only Desktop clients may own a heal claim. For a
-    // disallowed (CLI / 'other') client we down-shift to a non-external start
-    // — the run still runs, it just isn't claimed. The reuse-active path below
-    // funnels through broker.claim, which rejects on its own.
+    // Heal-claim policy: only Desktop clients may own a heal claim. A
+    // disallowed (CLI / 'other') client still triggers an external-origin run
+    // (so it uses External-client heal, not the project Heal Agent) — it just
+    // can't claim, so it starts with `claimable: false` and waits for a
+    // Desktop/UI drive. A request with no healAgent body (e.g. the UI Run
+    // button) is left untouched and uses the project config. The reuse-active
+    // path below funnels through broker.claim, which rejects on its own.
     const claimSuppressed = !!healAgent && !('error' in healAgent) && !isHealClaimAllowed(healAgent.clientKind)
-    const effectiveHealAgent = claimSuppressed ? null : healAgent
+    const externalRunReq = healAgent ? { ...healAgent, claimable: !claimSuppressed } : undefined
     if (healAgent) {
       const active = findActiveRunForFeature(deps.store, feature, env)
       if (active) {
@@ -510,7 +518,7 @@ export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Pro
       : undefined
     const executionType: ExecutionType = req.body?.mode === 'boot' ? 'boot' : 'run'
     try {
-      const outcome = await deps.startRun(feature, env, effectiveHealAgent ?? undefined, isolation, executionType)
+      const outcome = await deps.startRun(feature, env, externalRunReq, isolation, executionType)
       if (outcome.kind === 'collision') {
         // Same-repo collision and the caller didn't choose how to handle it.
         // Nothing started — surface the choice so the UI / MCP client can ask.

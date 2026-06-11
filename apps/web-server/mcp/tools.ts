@@ -129,6 +129,7 @@ export interface CanaryLabMcpDeps {
       clientKind: 'claude-cli' | 'claude-desktop' | 'codex-cli' | 'codex-desktop' | 'other'
       clientVersion?: string
       conversationName?: string
+      claimable?: boolean
     },
     isolation?: 'worktree' | 'queue',
     executionType?: 'run' | 'boot',
@@ -141,6 +142,7 @@ export interface CanaryLabMcpDeps {
       clientKind: 'claude-cli' | 'claude-desktop' | 'codex-cli' | 'codex-desktop' | 'other'
       clientVersion?: string
       conversationName?: string
+      claimable?: boolean
     },
     guidance?: string,
   ) => Promise<{ runId: string; mode?: 'remaining' }>
@@ -1197,19 +1199,11 @@ export function registerCanaryLabTools(
           return errorResult(`run-not-restartable: ${target.manifest.runId} status=${status}`)
         }
         if (!deps.restartExternalRun) return errorResult('restartExternalRun dependency is not configured')
-        // Restarting a failed run re-enters external heal — it builds an
-        // externalHealSession directly (bypassing broker.claim). That's heal
-        // ownership, so disallowed (CLI / 'other') clients are refused here
-        // rather than silently restarting into a session they own.
-        if (!isHealClaimAllowed(client_kind)) {
-          return asJsonResult({
-            type: 'claim_not_allowed',
-            runId: target.manifest.runId,
-            status,
-            claimSuppressed: true,
-            message: `${CLAIM_SUPPRESSED_MESSAGE} Restarting a failed run into external heal is Desktop-only — restart it from Claude/Codex Desktop or the web UI.`,
-          })
-        }
+        // Restarting a failed run re-enters external heal. A disallowed (CLI /
+        // 'other') client may still trigger the restart — it just can't own the
+        // loop: `claimable: false` restarts into external mode with no session
+        // and no broker claim, so the run waits for a Desktop/UI drive rather
+        // than silently restarting into a session the client owns.
         const restarted = await deps.restartExternalRun(
           target.manifest.runId,
           {
@@ -1217,6 +1211,7 @@ export function registerCanaryLabTools(
             sessionId: session_id,
             clientKind: client_kind,
             ...(conversation_name ? { conversationName: conversation_name } : {}),
+            claimable: claimAllowed,
           },
           guidance,
         )
@@ -1232,20 +1227,26 @@ export function registerCanaryLabTools(
           status: 'running',
           claimed: claimAllowed ? claim?.accepted === true : false,
           claim,
+          ...suppressionFields,
           ...(claimAllowed ? healWaitNext(restarted.runId) : {}),
         })
       }
+      // Any MCP-triggered run is external-origin: it must use External-client
+      // heal regardless of the project's Heal Agent setting (which only governs
+      // UI-triggered runs). `claimable` is what splits a Desktop client that
+      // owns the loop from a CLI/'other' client that can't — the latter still
+      // runs in external mode and waits for a Desktop/UI drive instead of
+      // falling back to a locally-spawned auto-heal agent.
       const outcome = await deps.startRun(
         feature,
         env,
-        claimAllowed
-          ? {
-              kind: 'external',
-              sessionId: session_id,
-              clientKind: client_kind,
-              ...(conversation_name ? { conversationName: conversation_name } : {}),
-            }
-          : undefined,
+        {
+          kind: 'external',
+          sessionId: session_id,
+          clientKind: client_kind,
+          ...(conversation_name ? { conversationName: conversation_name } : {}),
+          claimable: claimAllowed,
+        },
         isolation,
       )
       if (outcome.kind === 'collision') {

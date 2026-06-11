@@ -37,6 +37,9 @@ function restoreProcessListeners(): void {
 
 let agentHome: string | undefined
 let priorAgentHome: string | undefined
+// A valid Canary Lab workspace (has a `features/` dir) so runUi's
+// enabled-workspace guard passes for lifecycle tests.
+let wsRoot: string
 
 beforeEach(() => {
   mocks.createServer.mockReset()
@@ -47,6 +50,9 @@ beforeEach(() => {
   priorAgentHome = process.env.CANARY_LAB_AGENT_HOME
   agentHome = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-agent-home-'))
   process.env.CANARY_LAB_AGENT_HOME = agentHome
+  wsRoot = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-ui-ws-')))
+  fs.mkdirSync(path.join(wsRoot, 'features'))
+  fs.writeFileSync(path.join(wsRoot, 'package.json'), JSON.stringify({ devDependencies: { 'canary-lab': 'file:x' } }))
 })
 
 afterEach(() => {
@@ -54,6 +60,7 @@ afterEach(() => {
   if (priorAgentHome === undefined) delete process.env.CANARY_LAB_AGENT_HOME
   else process.env.CANARY_LAB_AGENT_HOME = priorAgentHome
   if (agentHome) { fs.rmSync(agentHome, { recursive: true, force: true }); agentHome = undefined }
+  if (wsRoot) fs.rmSync(wsRoot, { recursive: true, force: true })
 })
 
 describe('runUi signal cleanup', () => {
@@ -97,10 +104,9 @@ describe('runUi signal cleanup', () => {
     })
 
     await runUi(['--no-open'], {
-      projectRoot: '/tmp/canary-lab-workspace',
+      projectRoot: wsRoot,
       log: () => {},
       exit,
-      registerWorkspace: () => {},
       recordActiveServer: () => {},
       clearActiveServer,
       confirmShutdown: async () => {
@@ -154,10 +160,9 @@ describe('runUi signal cleanup', () => {
     })
 
     await runUi(['--no-open'], {
-      projectRoot: '/tmp/canary-lab-workspace',
+      projectRoot: wsRoot,
       log: (msg) => { messages.push(msg) },
       exit,
-      registerWorkspace: () => {},
       recordActiveServer: () => {},
       clearActiveServer: () => {},
       confirmShutdown: async () => false,
@@ -180,6 +185,10 @@ describe('runUi port resolution', () => {
   function mkProject(config?: Record<string, unknown>): string {
     const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-ui-port-')))
     tmpDirs.push(dir)
+    // A real workspace declares canary-lab as a dependency (what `init` writes);
+    // the boot guard requires that, not merely a `features/` dir.
+    fs.mkdirSync(path.join(dir, 'features'))
+    fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ devDependencies: { 'canary-lab': 'file:x' } }))
     if (config) fs.writeFileSync(path.join(dir, 'canary-lab.config.json'), JSON.stringify(config))
     return dir
   }
@@ -207,7 +216,7 @@ describe('runUi port resolution', () => {
     const projectRoot = mkProject({ port: 8200 })
     const app = mockServer()
 
-    await runUi(['--no-open'], { projectRoot, log: () => {}, exit: vi.fn(), registerWorkspace: () => {}, ...noopActiveServer })
+    await runUi(['--no-open'], { projectRoot, log: () => {}, exit: vi.fn(), ...noopActiveServer })
 
     expect(app.listen).toHaveBeenCalledExactlyOnceWith({ port: 8200, host: '127.0.0.1' })
   })
@@ -216,19 +225,32 @@ describe('runUi port resolution', () => {
     const projectRoot = mkProject()
     const app = mockServer()
 
-    await runUi(['--no-open'], { projectRoot, log: () => {}, exit: vi.fn(), registerWorkspace: () => {}, ...noopActiveServer })
+    await runUi(['--no-open'], { projectRoot, log: () => {}, exit: vi.fn(), ...noopActiveServer })
 
     expect(app.listen).toHaveBeenCalledExactlyOnceWith({ port: 7421, host: '127.0.0.1' })
   })
 
-  it('marks the workspace active on boot so the MCP bridge follows the running UI', async () => {
-    const projectRoot = mkProject({ port: 8300 })
-    mockServer()
-    const registerWorkspace = vi.fn()
+  it('refuses to boot in a dir with a stray features/ but no canary-lab dependency, and never writes the registry', async () => {
+    const homeDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-ui-home-')))
+    tmpDirs.push(homeDir)
+    vi.stubEnv('CANARY_LAB_HOME', homeDir)
+    vi.stubEnv('CANARY_LAB_AGENT_HOME', homeDir)
+    // Mirrors the real bug: a dir that happens to have features/ (e.g. a feature
+    // accidentally scaffolded into ~) but is NOT an init'd workspace.
+    const strayDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-ui-stray-')))
+    tmpDirs.push(strayDir)
+    fs.mkdirSync(path.join(strayDir, 'features'))
+    const app = mockServer()
+    const exit = vi.fn()
+    const messages: string[] = []
 
-    await runUi(['--no-open'], { projectRoot, log: () => {}, exit: vi.fn(), registerWorkspace, ...noopActiveServer })
+    await runUi(['--no-open'], { projectRoot: strayDir, log: (m) => messages.push(m), exit, ...noopActiveServer })
 
-    expect(registerWorkspace).toHaveBeenCalledExactlyOnceWith(projectRoot)
+    expect(app.listen).not.toHaveBeenCalled()
+    expect(exit).toHaveBeenCalledExactlyOnceWith(1)
+    expect(messages.some((m) => m.includes('canary-lab init'))).toBe(true)
+    expect(fs.existsSync(path.join(homeDir, '.canary-lab', 'workspaces.json'))).toBe(false)
+    vi.unstubAllEnvs()
   })
 
   it('records the live server with its bound port once it is listening', async () => {
@@ -236,7 +258,7 @@ describe('runUi port resolution', () => {
     mockServer()
     const recordActiveServer = vi.fn()
 
-    await runUi(['--no-open'], { projectRoot, log: () => {}, exit: vi.fn(), registerWorkspace: () => {}, recordActiveServer, clearActiveServer: () => {} })
+    await runUi(['--no-open'], { projectRoot, log: () => {}, exit: vi.fn(), recordActiveServer, clearActiveServer: () => {} })
 
     expect(recordActiveServer).toHaveBeenCalledExactlyOnceWith(projectRoot, 8300)
   })
@@ -246,7 +268,7 @@ describe('runUi port resolution', () => {
     mockServer()
     const refreshAgents = vi.fn()
 
-    await runUi(['--no-open'], { projectRoot, log: () => {}, exit: vi.fn(), registerWorkspace: () => {}, refreshAgents, ...noopActiveServer })
+    await runUi(['--no-open'], { projectRoot, log: () => {}, exit: vi.fn(), refreshAgents, ...noopActiveServer })
 
     expect(refreshAgents).toHaveBeenCalledOnce()
   })
@@ -274,7 +296,6 @@ describe('runUi port resolution', () => {
       projectRoot,
       log: () => {},
       exit,
-      registerWorkspace: () => {},
       ...noopActiveServer,
       relaunch,
       schedule: (fn) => { fn() },
@@ -303,7 +324,7 @@ describe('runUi port resolution', () => {
       draftBrokers: new Map(),
     })
 
-    await runUi(['--no-open'], { projectRoot, log: (m) => messages.push(m), exit: vi.fn(), registerWorkspace: () => {}, ...noopActiveServer })
+    await runUi(['--no-open'], { projectRoot, log: (m) => messages.push(m), exit: vi.fn(), ...noopActiveServer })
 
     expect(messages.some((m) => m.includes('8400'))).toBe(true)
   })

@@ -434,9 +434,14 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
 
   const restartExternalRun = async (
     runId: string,
-    healAgentReq: { kind: 'external'; sessionId: string; clientKind: 'claude-cli' | 'claude-desktop' | 'codex-cli' | 'codex-desktop' | 'other'; clientVersion?: string; conversationName?: string },
+    healAgentReq: { kind: 'external'; sessionId: string; clientKind: 'claude-cli' | 'claude-desktop' | 'codex-cli' | 'codex-desktop' | 'other'; clientVersion?: string; conversationName?: string; claimable?: boolean },
     guidance?: string,
   ): Promise<OrchestratorLike> => {
+    // `claimable === false` means an external client *triggered* the restart but
+    // may not own the heal loop (CLI / 'other'). The run still re-enters external
+    // mode and waits for a Desktop/UI drive — it just gets no session + no broker
+    // claim, so nothing spawns a local auto-heal agent behind the user's back.
+    const canClaim = healAgentReq.claimable !== false
     const detail = runStore.get(runId)
     if (!detail) throw Object.assign(new Error('run-not-found'), { statusCode: 404 })
     const manifest = detail.manifest
@@ -473,16 +478,18 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
     }
 
     const nowIso = new Date().toISOString()
-    const externalHealSession: import('./lib/runtime/manifest').ExternalHealSession = {
-      sessionId: healAgentReq.sessionId,
-      clientKind: healAgentReq.clientKind,
-      ...(healAgentReq.clientVersion ? { clientVersion: healAgentReq.clientVersion } : {}),
-      ...(healAgentReq.conversationName ? { conversationName: healAgentReq.conversationName } : {}),
-      claimedAt: nowIso,
-      lastHeartbeatAt: nowIso,
-      status: 'connected',
-      cycleCount: 0,
-    }
+    const externalHealSession: import('./lib/runtime/manifest').ExternalHealSession | undefined = canClaim
+      ? {
+          sessionId: healAgentReq.sessionId,
+          clientKind: healAgentReq.clientKind,
+          ...(healAgentReq.clientVersion ? { clientVersion: healAgentReq.clientVersion } : {}),
+          ...(healAgentReq.conversationName ? { conversationName: healAgentReq.conversationName } : {}),
+          claimedAt: nowIso,
+          lastHeartbeatAt: nowIso,
+          status: 'connected',
+          cycleCount: 0,
+        }
+      : undefined
 
     let orch: RunOrchestrator
     try {
@@ -506,12 +513,14 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
       throw Object.assign(err instanceof Error ? err : new Error(String(err)), { statusCode: 500 })
     }
 
-    externalHealBroker.claim(runId, {
-      sessionId: healAgentReq.sessionId,
-      clientKind: healAgentReq.clientKind,
-      ...(healAgentReq.clientVersion ? { clientVersion: healAgentReq.clientVersion } : {}),
-      ...(healAgentReq.conversationName ? { conversationName: healAgentReq.conversationName } : {}),
-    })
+    if (canClaim) {
+      externalHealBroker.claim(runId, {
+        sessionId: healAgentReq.sessionId,
+        clientKind: healAgentReq.clientKind,
+        ...(healAgentReq.clientVersion ? { clientVersion: healAgentReq.clientVersion } : {}),
+        ...(healAgentReq.conversationName ? { conversationName: healAgentReq.conversationName } : {}),
+      })
+    }
 
     attachRunStreams(orch, runnerLog, feature.name, backups)
     const broker = brokers.get(runId)!
@@ -622,7 +631,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
 	    startRun: async (
       featureName: string,
       env?: string,
-      healAgentReq?: { kind: 'external'; sessionId: string; clientKind: 'claude-cli' | 'claude-desktop' | 'codex-cli' | 'codex-desktop' | 'other'; clientVersion?: string; conversationName?: string },
+      healAgentReq?: { kind: 'external'; sessionId: string; clientKind: 'claude-cli' | 'claude-desktop' | 'codex-cli' | 'codex-desktop' | 'other'; clientVersion?: string; conversationName?: string; claimable?: boolean },
       isolation?: 'worktree' | 'queue',
       executionType: ExecutionType = 'run',
     ): Promise<StartRunOutcome> => {
@@ -669,23 +678,27 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
         }
       }
 
-      // Wire the heal loop based on the project's heal-agent setting (or an
-      // explicit per-request override):
-      //   - body `healAgent.kind === 'external'` → skip auto-heal, set
-      //     externalHeal mode, claim the broker for the supplied session.
-      //   - project 'auto' (default) → prefer claude, fall back to codex.
-      //   - project 'claude' / 'codex' → require that exact CLI on PATH.
-      //   - project 'manual' → skip auto-heal entirely; the orchestrator's
-      //     signal polling handles the user's hand-driven fix instead.
-      //   - project 'external' → treated like manual at startup; the
-      //     external client typically registers explicitly via the body
-      //     override or `POST /heal-agent/claim` post-start.
+      // Wire the heal loop. The run's *trigger source* decides the mode, not
+      // just the project setting:
+      //   - external origin (any MCP-triggered run, `healAgent.kind ===
+      //     'external'`) → skip project auto-heal, set externalHeal mode. The
+      //     project Heal Agent setting applies ONLY to UI/REST-triggered runs.
+      //   - of those, only a *claimable* request (Desktop, `claimable !==
+      //     false`) gets an externalHealSession + broker claim. A non-claimable
+      //     external origin (CLI / 'other') still runs in external mode and
+      //     waits for a Desktop/UI drive — Canary Lab does not spawn its own
+      //     auto-heal agent for it.
+      //   - UI/REST run with no external request → project config decides:
+      //     'auto' prefers claude→codex; 'claude'/'codex' require that CLI;
+      //     'manual' skips auto-heal (signal polling drives); 'external' waits
+      //     for a client to claim.
       // If the chosen CLI isn't available, autoHeal stays undefined and the
       // run still works without the self-fixing cycle.
       const projectConfig = loadProjectConfig(opts.projectRoot)
-      const isExternalRequest = healAgentReq?.kind === 'external'
+      const externalOrigin = healAgentReq?.kind === 'external'
+      const canClaim = externalOrigin && healAgentReq?.claimable !== false
       let externalHealSession: import('./lib/runtime/manifest').ExternalHealSession | undefined
-      if (isExternalRequest && healAgentReq) {
+      if (canClaim && healAgentReq) {
         const nowIso = new Date().toISOString()
         externalHealSession = {
           sessionId: healAgentReq.sessionId,
@@ -708,14 +721,18 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
         }) => string
         buildCyclePrompt: BuildHealCyclePrompt
       } | undefined
-      const agentChoice = (isExternalRequest || isBoot)
+      const agentChoice = (externalOrigin || isBoot)
         ? null
         : pickConfiguredHealAgent(projectConfig.healAgent)
       if (isBoot) {
         runnerLog.info('Boot-only session: booting services and holding them — no tests, no heal.')
-      } else if (isExternalRequest) {
+      } else if (externalOrigin && canClaim) {
         runnerLog.info(
-          `Auto-heal disabled: external client (${healAgentReq?.clientKind}, session ${healAgentReq?.sessionId.slice(0, 8)}) will drive the heal loop.`,
+          `Auto-heal disabled: external client (${healAgentReq?.clientKind}, session ${healAgentReq?.sessionId.slice(0, 8)}) claimed and will drive the heal loop.`,
+        )
+      } else if (externalOrigin) {
+        runnerLog.info(
+          `Auto-heal disabled: run triggered by an external client (${healAgentReq?.clientKind}) that can't claim heal — waiting in external mode for a Desktop/UI drive.`,
         )
       } else if (projectConfig.healAgent === 'manual') {
         runnerLog.info('Auto-heal disabled: project config is set to "manual" — the run will pause for hand-driven fixes.')
@@ -778,8 +795,8 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
           // heal modes off regardless of project config.
           autoHeal: isBoot ? undefined : autoHeal,
           manualHeal:
-            !isBoot && !isExternalRequest && projectConfig.healAgent === 'manual',
-          externalHeal: !isBoot && (isExternalRequest || projectConfig.healAgent === 'external'),
+            !isBoot && !externalOrigin && projectConfig.healAgent === 'manual',
+          externalHeal: !isBoot && (externalOrigin || projectConfig.healAgent === 'external'),
           externalHealSession,
           repoBranchSnapshots,
           // Route every manifest/index write through RunStore so its event
@@ -796,7 +813,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
       // recognised. The session was already baked into the initial manifest
       // by passing it to the orchestrator constructor; this call ensures the
       // in-memory map agrees and the audit log records the claim.
-      if (isExternalRequest && healAgentReq) {
+      if (canClaim && healAgentReq) {
         externalHealBroker.claim(runId, {
           sessionId: healAgentReq.sessionId,
           clientKind: healAgentReq.clientKind,

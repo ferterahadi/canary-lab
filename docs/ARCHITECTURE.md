@@ -242,6 +242,18 @@ repo code. It's an **allowlist** (`apps/web-server/lib/heal-claim-policy.ts`,
 Client kind is heuristically detected from process lineage in `scripts/mcp.ts`
 (`inferMcpClientKind`).
 
+**Trigger source decides the heal mode** (not the claim). Any run started by an MCP
+client is *external-origin* and uses External‑client heal **regardless of the project
+`healAgent` setting** — that setting governs only **UI/REST‑triggered** runs. The
+`server.ts` `startRun` closure splits two flags: `externalOrigin`
+(`healAgentReq.kind === 'external'`) disables project auto‑heal and forces
+`externalHeal` mode; `canClaim` (`externalOrigin && claimable !== false`, i.e. a
+Desktop client) is what actually creates the `externalHealSession` + broker claim. So a
+non‑claiming MCP client (CLI / `other`) passes `claimable: false`: the run enters
+external mode with **no** session and **waits** for a Desktop/UI drive — it does *not*
+fall back to a locally‑spawned auto‑heal agent. A CLI restart of a failed run follows
+the same path (`restartExternalRun` with `claimable: false`) rather than being refused.
+
 ### Handoff
 
 `handoff_heal`: active runs can only hand off to `manual` (the orchestrator can't add
