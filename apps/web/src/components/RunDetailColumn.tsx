@@ -48,9 +48,11 @@ type PlaywrightView = 'terminal' | 'playback'
 export function RunDetailColumn({
   runId,
   onOpenPlaywrightSettings,
+  totalTests,
 }: {
   runId: string | null
   onOpenPlaywrightSettings?: (feature: string) => void
+  totalTests?: number
 }) {
   const [tab, setTab] = useState<Tab>('overview')
   const [serviceIdx, setServiceIdx] = useState(0)
@@ -214,6 +216,7 @@ export function RunDetailColumn({
             onOpenArtifactSettings={() => onOpenPlaywrightSettings?.(m.feature)}
             summary={detail.summary}
             diagnostics={m.verification?.diagnostics}
+            totalTests={totalTests}
           />
         )}
         {/* Always rendered, hidden via display:none when another tab is active.
@@ -655,6 +658,7 @@ function PlaywrightPanel({
   onOpenArtifactSettings,
   summary,
   diagnostics,
+  totalTests,
 }: {
   runId: string
   view: PlaywrightView
@@ -665,6 +669,7 @@ function PlaywrightPanel({
   onOpenArtifactSettings?: () => void
   summary?: RunSummary
   diagnostics?: VerificationDiagnostics
+  totalTests?: number
 }) {
   return (
     <div className="flex h-full flex-col">
@@ -683,7 +688,7 @@ function PlaywrightPanel({
         {view === 'playback' && (
           <div className="h-full overflow-y-auto scrollbar-thin" style={{ background: 'var(--bg-base)' }}>
             {diagnostics && <VerificationDiagnosticsPanel diagnostics={diagnostics} />}
-            <PlaywrightPlayback events={events} artifactGroups={artifactGroups} artifactPolicy={artifactPolicy} onOpenArtifactSettings={onOpenArtifactSettings} summary={summary} embedded />
+            <PlaywrightPlayback events={events} artifactGroups={artifactGroups} artifactPolicy={artifactPolicy} onOpenArtifactSettings={onOpenArtifactSettings} summary={summary} totalTests={totalTests} embedded />
           </div>
         )}
       </div>
@@ -907,6 +912,7 @@ export function PlaywrightPlayback({
   artifactPolicy,
   onOpenArtifactSettings,
   summary,
+  totalTests,
   embedded = false,
 }: {
   events?: PlaywrightPlaybackEvent[]
@@ -914,6 +920,7 @@ export function PlaywrightPlayback({
   artifactPolicy?: PlaywrightArtifactPolicy
   onOpenArtifactSettings?: () => void
   summary?: RunSummary
+  totalTests?: number
   embedded?: boolean
 }) {
   const tests = playbackTests(events)
@@ -936,7 +943,7 @@ export function PlaywrightPlayback({
             >
               <div className="flex min-w-0 flex-wrap items-start gap-3">
                 <div className="min-w-0 flex-1">
-                  <PlaybackHeader test={test} current={isCurrent} index={idx} total={tests.length} />
+                  <PlaybackHeader test={test} current={isCurrent} index={idx} total={totalTests || tests.length} />
                 </div>
                 <TraceActions artifacts={traceArtifacts} />
               </div>

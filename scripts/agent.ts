@@ -77,14 +77,14 @@ export function install(target: Target, opts: AgentInstallOptions = {}): void {
   log('  npx -y canary-lab mcp --profile full')
   log('')
   log('Codex config snippet:')
-  log('[mcp_servers.canary_lab]')
+  log('[mcp_servers.Canary_Lab]')
   log('command = "npx"')
   log('args = ["-y", "canary-lab", "mcp", "--profile", "full"]')
   log('')
   log('Claude Code config snippet:')
   log(JSON.stringify({
     mcpServers: {
-      'canary-lab': {
+      'Canary_Lab': {
         command: 'npx',
         args: ['-y', 'canary-lab', 'mcp', '--profile', 'full'],
       },

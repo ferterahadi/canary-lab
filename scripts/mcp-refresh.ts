@@ -19,6 +19,15 @@ export interface RefreshOptions {
 // absolute path self-heals. Never adds canary-lab to a client that was not
 // already configured (first-time setup stays explicit via `canary-lab setup`).
 export function refreshCanaryLabMcp(opts: RefreshOptions = {}): void {
+  // Same guard as `setup` (see setup.ts): the tarball smoke test runs
+  // `upgrade` (which calls this) inside a throwaway temp install, and these
+  // refreshes write to the real ~/.claude.json / ~/.codex / Desktop configs.
+  // Skip so a smoke run never re-points a developer's live client at a temp path.
+  if (process.env.CANARY_LAB_SKIP_CLIENT_MCP === '1') {
+    opts.log?.('Skipping client MCP refresh (CANARY_LAB_SKIP_CLIENT_MCP=1).')
+    return
+  }
+
   const base = {
     refreshOnly: true as const,
     force: true as const,

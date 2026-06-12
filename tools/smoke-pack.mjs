@@ -21,6 +21,12 @@ function run(command, args, cwd, extraEnv = {}) {
       // resolve the registry write through CANARY_LAB_AGENT_HOME, so pin both.
       CANARY_LAB_HOME: tempRoot,
       CANARY_LAB_AGENT_HOME: tempRoot,
+      // CANARY_LAB_HOME only redirects our own registry/active-server records.
+      // `claude mcp add` / `codex mcp add` (and Claude Desktop) write to the
+      // real user client configs, which would leave a dangling temp `cli.js`
+      // entry after this throwaway install is removed. Skip client registration
+      // so the smoke run never touches the developer's live MCP clients.
+      CANARY_LAB_SKIP_CLIENT_MCP: '1',
       ...extraEnv,
     },
   })

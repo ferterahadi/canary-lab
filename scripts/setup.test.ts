@@ -31,7 +31,9 @@ function cliAvailable(command: string): void {
   const lookup = process.platform === 'win32' ? 'where' : 'which'
   mocks.execFileSync.mockImplementation((cmd: string, args: string[]) => {
     if (cmd === lookup && args[0] === command) return Buffer.from('')
-    if (cmd === command && args.join(' ') === 'mcp get canary-lab') {
+    // No server configured under any key (incl. legacy `canary-lab`) → migration
+    // stays inert and registration takes the add path.
+    if (cmd === command && args[0] === 'mcp' && args[1] === 'get') {
       throw new Error('missing MCP server')
     }
     return Buffer.from('')
@@ -44,6 +46,7 @@ beforeEach(() => {
     throw new Error('missing command')
   })
   delete process.env.CODEX_HOME
+  delete process.env.CANARY_LAB_SKIP_CLIENT_MCP
 })
 
 afterEach(() => {
@@ -143,7 +146,7 @@ describe('setup', () => {
     expect(fs.existsSync(path.join(home, '.codex', 'skills', 'canary-lab', 'SKILL.md'))).toBe(true)
     expect(mocks.execFileSync).toHaveBeenCalledWith(
       'codex',
-      ['mcp', 'add', 'canary-lab', '--', '/usr/bin/node', '/opt/canary-lab/dist/scripts/cli.js', 'mcp', '--profile', 'full'],
+      ['mcp', 'add', 'Canary_Lab', '--', '/usr/bin/node', '/opt/canary-lab/dist/scripts/cli.js', 'mcp', '--profile', 'full'],
       { stdio: 'ignore' },
     )
   })
@@ -164,7 +167,7 @@ describe('setup', () => {
     expect(fs.existsSync(path.join(home, '.claude', 'skills', 'canary-lab', 'SKILL.md'))).toBe(true)
     expect(mocks.execFileSync).toHaveBeenCalledWith(
       'claude',
-      ['mcp', 'add', '--scope', 'user', 'canary-lab', '--', '/usr/bin/node', '/opt/canary-lab/dist/scripts/cli.js', 'mcp', '--profile', 'full'],
+      ['mcp', 'add', '--scope', 'user', 'Canary_Lab', '--', '/usr/bin/node', '/opt/canary-lab/dist/scripts/cli.js', 'mcp', '--profile', 'full'],
       { stdio: 'ignore' },
     )
   })
@@ -175,7 +178,7 @@ describe('setup', () => {
     const lookup = process.platform === 'win32' ? 'where' : 'which'
     mocks.execFileSync.mockImplementation((cmd: string, args: string[]) => {
       if (cmd === lookup && (args[0] === 'codex' || args[0] === 'claude')) return Buffer.from('')
-      if ((cmd === 'codex' || cmd === 'claude') && args.join(' ') === 'mcp get canary-lab') {
+      if ((cmd === 'codex' || cmd === 'claude') && args[0] === 'mcp' && args[1] === 'get') {
         throw new Error('missing MCP server')
       }
       return Buffer.from('')
@@ -191,12 +194,12 @@ describe('setup', () => {
 
     expect(mocks.execFileSync).toHaveBeenCalledWith(
       'codex',
-      ['mcp', 'add', 'canary-lab', '--', '/usr/bin/node', '/opt/canary-lab/dist/scripts/cli.js', 'mcp', '--profile', 'full'],
+      ['mcp', 'add', 'Canary_Lab', '--', '/usr/bin/node', '/opt/canary-lab/dist/scripts/cli.js', 'mcp', '--profile', 'full'],
       { stdio: 'ignore' },
     )
     expect(mocks.execFileSync).toHaveBeenCalledWith(
       'claude',
-      ['mcp', 'add', '--scope', 'user', 'canary-lab', '--', '/usr/bin/node', '/opt/canary-lab/dist/scripts/cli.js', 'mcp', '--profile', 'full'],
+      ['mcp', 'add', '--scope', 'user', 'Canary_Lab', '--', '/usr/bin/node', '/opt/canary-lab/dist/scripts/cli.js', 'mcp', '--profile', 'full'],
       { stdio: 'ignore' },
     )
   })
@@ -217,9 +220,9 @@ describe('setup', () => {
     })
 
     const cfg = JSON.parse(fs.readFileSync(desktopConfigPath, 'utf-8'))
-    expect(cfg.mcpServers['canary-lab'].command).toBe('/usr/bin/node')
-    expect(cfg.mcpServers['canary-lab'].args).toEqual(['/opt/canary-lab/dist/scripts/cli.js', 'mcp', '--profile', 'full'])
-    expect(cfg.mcpServers['canary-lab'].env.PATH).toContain('/usr/bin')
+    expect(cfg.mcpServers['Canary_Lab'].command).toBe('/usr/bin/node')
+    expect(cfg.mcpServers['Canary_Lab'].args).toEqual(['/opt/canary-lab/dist/scripts/cli.js', 'mcp', '--profile', 'full'])
+    expect(cfg.mcpServers['Canary_Lab'].env.PATH).toContain('/usr/bin')
   })
 
   it('does not touch Claude Desktop when its config directory is absent', () => {
@@ -234,6 +237,31 @@ describe('setup', () => {
       verifyMcp: verifiedStub,
     })
 
+    expect(fs.existsSync(desktopConfigPath)).toBe(false)
+  })
+
+  it('CANARY_LAB_SKIP_CLIENT_MCP installs the skill but never touches client configs', () => {
+    process.env.CANARY_LAB_SKIP_CLIENT_MCP = '1'
+    const home = mkTmp()
+    const workspace = mkWorkspace()
+    cliAvailable('claude')
+    const desktopConfigPath = path.join(mkTmp(), 'Claude', 'claude_desktop_config.json')
+    fs.mkdirSync(path.dirname(desktopConfigPath), { recursive: true })
+    const lines: string[] = []
+
+    setup({ workspace, agent: 'claude', dryRun: false, force: false }, {
+      homeDir: home,
+      log: (line) => { lines.push(line) },
+      execPath: '/usr/bin/node',
+      cliPath: '/opt/canary-lab/dist/scripts/cli.js',
+      claudeDesktopConfigPath: desktopConfigPath,
+      verifyMcp: verifiedStub,
+    })
+
+    // Scaffolding still happens — only the live-client MCP registration is skipped.
+    expect(fs.existsSync(path.join(home, '.claude', 'skills', 'canary-lab', 'SKILL.md'))).toBe(true)
+    expect(lines.join('\n')).toContain('Skipping client MCP registration')
+    expect(mocks.execFileSync).not.toHaveBeenCalledWith('claude', expect.arrayContaining(['add']), expect.anything())
     expect(fs.existsSync(desktopConfigPath)).toBe(false)
   })
 

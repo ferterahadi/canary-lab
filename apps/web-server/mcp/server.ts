@@ -44,13 +44,15 @@ const SERVER_INFO = { name: 'canary-lab', version: '1.0.0', title: 'Canary Lab' 
 // and never pick up the needs_heal handoff.
 const REPAIR_INSTRUCTIONS = `Canary Lab — external repair loop. Fix failing runs by editing app/service code (not tests, unless a test is provably wrong).
 
-1. start_run with claim_heal:true, a stable session_id reused for the whole conversation, client_kind, and conversation_name. For "rerun <id>" pass run_ref (e.g. "7cvh").
+1. start_run with claim_heal:true, a stable session_id reused for the whole conversation, and conversation_name. Do NOT pass client_kind — the MCP bridge auto-detects it (CLI vs Desktop) from the connection; passing it yourself can mis-set it and suppress heal claim. For "rerun <id>" pass run_ref (e.g. "7cvh").
    - If start_run returns type:"repo_collision_requires_choice", another run is using the same app/repo. ASK THE USER whether to run isolated (a per-run git worktree, concurrent) or queue until the other run finishes, then re-call start_run with isolation:"worktree" or isolation:"queue". Do not guess.
    - If start_run returns queued:true, the run is parked (queueReason tells you why) and will start automatically when capacity frees; wait_for_heal_task still works — it blocks until the run starts and needs fixes.
    - If start_run (or wait_for_heal_task) returns type:"boot_session" (executionType:"boot"), the run is a held boot-only session: services are up, no tests run, and there is NO heal task. Do not wait for heal — report that services are ready and that abort_run (confirm:true) stops them.
 2. wait_for_heal_task with the same runId + session_id. This BLOCKS until the run needs fixes, passes, fails, or times out, and heartbeats for you while it waits. Always wait this way — never poll get_run_snapshot or get_run in a loop to wait for a result.
 3. On needs_heal: read context.healPrompt.startHere first, fix the code, then signal_run (kind:"rerun" for test-only/app-code fixes, "restart" when services or env must restart) with hypothesis + fixDescription.
 4. wait_for_heal_task again on the same run. Repeat until passed or terminal failure.
+
+To re-execute a run, reuse it rather than tearing it down: for an active healing run use signal_run (re-runs the failed tests in place); to retry a failed/aborted run pass its run_ref to start_run (reruns failed → skipped → pending/not-run only). Do not abort_run then start a fresh run as a way to re-run — a fresh start re-runs the whole suite and is only worth it when prior passes are invalidated (e.g. a global data/state change), and even then you rarely need to abort first.
 
 get_run_snapshot is for verbose debugging only, not for waiting. Read pass counts from result.counts.statusLine / result.counts.passed, never total - failed.`
 
