@@ -22,7 +22,18 @@ export interface McpRegistrationOptions {
   refreshOnly?: boolean
 }
 
-const SERVER_NAME = 'canary-lab'
+// Client config key + display name. Claude Code/Codex show the registered key
+// verbatim (the server's advertised title is ignored), so this drives what the
+// user sees in `/mcp`. Tool prefixes normalize it to `mcp__Canary_Lab__*`.
+const SERVER_NAME = 'Canary_Lab'
+// npm package id used in the portable `npx <pkg>@latest` invocation — must stay
+// the publishable package name, not the display key.
+const PACKAGE_NAME = 'canary-lab'
+
+// Older builds registered the server under this key. `setup`/`upgrade` migrate
+// any such entry to SERVER_NAME so existing users pick up the rename
+// automatically — no manual `claude mcp remove canary-lab -s user` needed.
+export const LEGACY_SERVER_NAMES = ['canary-lab']
 
 // After build, dist/scripts/mcp-registration.js sits next to cli.js, so the
 // running install can hand clients an absolute path to the exact version that
@@ -47,7 +58,7 @@ export function resolveMcpInvocation(opts: {
   pathEnv?: string
 }): ResolvedMcpInvocation {
   if (isEphemeralNpxInstall(opts.cliPath)) {
-    return { command: 'npx', args: ['-y', `${SERVER_NAME}@latest`, 'mcp', '--profile', 'full'] }
+    return { command: 'npx', args: ['-y', `${PACKAGE_NAME}@latest`, 'mcp', '--profile', 'full'] }
   }
   const invocation: ResolvedMcpInvocation = {
     command: opts.execPath,
@@ -85,10 +96,19 @@ export function registerCanaryLabMcp(
     cliPath: opts.cliPath ?? resolveCliPath(),
   })
   const addArgs = addArgsFor(target, invocation)
+  const legacyPresent = LEGACY_SERVER_NAMES.filter((name) => clientHasServer(target, name))
 
   if (opts.dryRun) {
+    for (const name of legacyPresent) {
+      log(`[dry-run] migrate ${label} MCP: ${renderCommand(command, removeServerArgs(target, name))}`)
+    }
     log(`[dry-run] configure ${label} MCP: ${renderCommand(command, addArgs)}`)
     return
+  }
+
+  for (const name of legacyPresent) {
+    execFileSync(command, removeServerArgs(target, name), { stdio: 'ignore' })
+    log(`${label} MCP: migrated legacy "${name}" entry to "${SERVER_NAME}"`)
   }
 
   const current = getExistingConfig(target, invocation)
@@ -97,7 +117,9 @@ export function registerCanaryLabMcp(
     return
   }
 
-  if (current.status === 'missing' && opts.refreshOnly) {
+  // refreshOnly never adds to a client that was never configured — but a legacy
+  // entry we just removed counts as "was configured", so the rename still lands.
+  if (current.status === 'missing' && opts.refreshOnly && legacyPresent.length === 0) {
     return
   }
 
@@ -128,6 +150,17 @@ function getExistingConfig(
   }
 }
 
+// True when the client has any entry under `name` (used to detect legacy keys
+// to migrate). A non-zero `mcp get` exit means no such server.
+function clientHasServer(target: McpRegistrationTarget, name: string): boolean {
+  try {
+    execFileSync(target, ['mcp', 'get', name], { stdio: ['ignore', 'pipe', 'pipe'] })
+    return true
+  } catch {
+    return false
+  }
+}
+
 // The registered command is now machine-specific (absolute node + cli.js), so
 // match the live `mcp get` output against the invocation we would write rather
 // than a fixed string. A legacy `npx -y canary-lab mcp` config therefore reads
@@ -154,9 +187,13 @@ function addArgsFor(target: McpRegistrationTarget, invocation: ResolvedMcpInvoca
 }
 
 function removeArgsFor(target: McpRegistrationTarget): string[] {
+  return removeServerArgs(target, SERVER_NAME)
+}
+
+function removeServerArgs(target: McpRegistrationTarget, name: string): string[] {
   return target === 'codex'
-    ? ['mcp', 'remove', SERVER_NAME]
-    : ['mcp', 'remove', SERVER_NAME, '-s', 'user']
+    ? ['mcp', 'remove', name]
+    : ['mcp', 'remove', name, '-s', 'user']
 }
 
 function renderCommand(command: string, args: string[]): string {

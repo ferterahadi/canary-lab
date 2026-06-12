@@ -11,9 +11,10 @@ interface Props {
   activeRunSummary: RunSummary | undefined
   activeRunStatus: RunStatus | undefined
   refreshKey?: number
+  onTotalTestsChange?: (n: number) => void
 }
 
-export function TestCasesColumn({ feature, activeRunSummary, activeRunStatus, refreshKey = 0 }: Props) {
+export function TestCasesColumn({ feature, activeRunSummary, activeRunStatus, refreshKey = 0, onTotalTestsChange }: Props) {
   const [specs, setSpecs] = useState<FeatureSpecFile[] | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [expandedTest, setExpandedTest] = useState<string | null>(null)
@@ -40,6 +41,11 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunStatus, re
     return () => { cancelled = true }
   }, [feature, refreshKey])
 
+  const totalTests = specs?.reduce((acc, s) => acc + s.tests.length, 0) ?? 0
+  useEffect(() => {
+    onTotalTestsChange?.(totalTests)
+  }, [totalTests, onTotalTestsChange])
+
   if (!feature) {
     return (
       <div className="flex h-full items-center justify-center text-sm" style={{ color: 'var(--text-muted)' }}>
@@ -49,7 +55,6 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunStatus, re
   }
 
   const displaySpecs = specs
-  const totalTests = displaySpecs?.reduce((acc, s) => acc + s.tests.length, 0) ?? 0
   const isRunActivelyTesting = activeRunStatus === 'running'
   const passedCount = (displaySpecs ?? []).reduce(
     (acc, spec) => acc + spec.tests.filter(

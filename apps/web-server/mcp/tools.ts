@@ -1114,7 +1114,7 @@ export function registerCanaryLabTools(
 
   registerTool('start_run', {
     description:
-      'Smart entrypoint for Canary Lab runs. If a matching run is healing, this returns that run and blocks fresh/different starts until `cancel_heal` stops it. If `runId` or `run_ref` targets a failed/aborted run and no heal is active, this restarts that same run in remaining-test mode: failed first, then skipped, then pending/not-run. Otherwise it starts a new run. After code changes, call `signal_run` with hypothesis and fixDescription, then `wait_for_heal_task` on the same run.',
+      'Smart entrypoint for Canary Lab runs. If a matching run is healing, this returns that run and blocks fresh/different starts until `cancel_heal` stops it. If `runId` or `run_ref` targets a failed/aborted run and no heal is active, this restarts that same run in remaining-test mode: failed first, then skipped, then pending/not-run. Otherwise it starts a new run. To retry a failed/aborted run, prefer this rerun path (pass `run_ref`) over `abort_run` + a fresh start — a fresh start re-runs the whole suite and is only worth it when prior passes are invalidated (e.g. a global data/state change). After code changes, call `signal_run` with hypothesis and fixDescription, then `wait_for_heal_task` on the same run.',
     inputSchema: {
       feature: z.string().describe('Feature name (from list_features).'),
       env: z.string().optional().describe('Envset name. Defaults to the feature\'s first declared env.'),
@@ -1349,7 +1349,7 @@ export function registerCanaryLabTools(
 
   registerTool('abort_run', {
     description:
-      'Hard-abort an active run. Requires `confirm: true` because this kills Playwright + services and cannot be undone.',
+      'Hard-abort an active run. Requires `confirm: true` because this kills Playwright + services and cannot be undone. Do not abort just to re-run: for an active healing run use `signal_run`, and to retry a failed/aborted run pass its `run_ref` to `start_run` (rerun, remaining-test mode). Abort is for killing a run you no longer want.',
     inputSchema: {
       runId: z.string(),
       confirm: z.literal(true).describe('Must be true. Guard against accidental aborts.'),

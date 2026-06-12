@@ -24,6 +24,7 @@ export function App() {
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
   const [configFor, setConfigFor] = useState<string | null>(null)
   const [testsRefreshKey, setTestsRefreshKey] = useState(0)
+  const [specTotalTests, setSpecTotalTests] = useState(0)
   const [collisionPrompt, setCollisionPrompt] = useState<{ feature: string; env?: string; mode?: 'test' | 'boot'; info: RepoCollisionChoice; portsConfigured?: boolean } | null>(null)
   // Port-ification wizard target: 'new' starts a fresh workflow for a feature;
   // 'revisit' reopens an in-flight workflow (from the status bar) by id.
@@ -238,6 +239,7 @@ export function App() {
           activeRunSummary={summaryForSelectedFeature}
           activeRunStatus={statusForSelectedFeature}
           refreshKey={testsRefreshKey}
+          onTotalTestsChange={setSpecTotalTests}
         />
       ),
     },
@@ -264,7 +266,7 @@ export function App() {
               runDisabled={false}
             />
           )}
-          bottom={<RunDetailColumn runId={selectedRunId} onOpenPlaywrightSettings={setConfigFor} />}
+          bottom={<RunDetailColumn runId={selectedRunId} onOpenPlaywrightSettings={setConfigFor} totalTests={specTotalTests} />}
         />
       ),
     },
