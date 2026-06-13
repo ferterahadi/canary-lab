@@ -276,6 +276,7 @@ export function App() {
     <div className="flex h-full w-full flex-col">
       <GlobalStatusBar
         activeRunDetail={activeRunDetail}
+        features={features}
         onNavigateToRun={(feature, runId) => {
           pendingRunSelectionRef.current = null
           setSelectedFeature(feature)
@@ -283,6 +284,7 @@ export function App() {
           setView('workspace')
         }}
         onOpenCleanup={() => setView('cleanup')}
+        onStartPortify={(f) => setPortifyTarget({ kind: 'new', feature: f })}
         onOpenPortify={(workflowId) => setPortifyTarget({ kind: 'revisit', workflowId })}
       />
       <div className="min-h-0 flex-1">

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { RunDetail } from '../api/types'
+import type { Feature, RunDetail } from '../api/types'
 import { useActiveBootSessions, useActiveRuns, useRuns } from '../state/RunsContext'
 import { useBenchmarks } from '../state/BenchmarkContext'
 import { useActivePortify } from '../state/PortifyContext'
@@ -15,13 +15,19 @@ import { StatusChip } from './StatusChip'
 import { ServicesPill } from './ServicesPill'
 import { RunsPill } from './RunsPill'
 import { PortifyPill } from './PortifyPill'
+import { PortifyLauncherPill } from './PortifyLauncherPill'
+import { PortifyPickerDialog } from './PortifyPickerDialog'
 import { BenchmarkPill } from './BenchmarkPill'
 import { CleanupPill } from './CleanupPill'
 
 interface Props {
   activeRunDetail: RunDetail | null
+  /** Every feature — feeds the always-on Portify launcher's picker. */
+  features?: Feature[]
   onNavigateToRun?: (feature: string, runId: string) => void
   onOpenCleanup?: () => void
+  /** Start port-ification for a feature (opens the wizard's Plan screen). */
+  onStartPortify?: (feature: string) => void
   /** Reopen the in-flight port-ification workflow (by id) in the wizard. */
   onOpenPortify?: (workflowId: string) => void
 }
@@ -40,9 +46,10 @@ interface Props {
 // dialog wiring, and composes presentational pills (ServicesPill, RunsPill,
 // PortifyPill, BenchmarkPill, CleanupPill) and badges (ConnectionBadge,
 // McpHealthBadge, StatusChip) that each live in their own file.
-export function GlobalStatusBar({ activeRunDetail, onNavigateToRun, onOpenCleanup, onOpenPortify }: Props) {
+export function GlobalStatusBar({ activeRunDetail, features = [], onNavigateToRun, onOpenCleanup, onStartPortify, onOpenPortify }: Props) {
   const { connection } = useRuns()
   const activePortify = useActivePortify()
+  const [portifyPickerOpen, setPortifyPickerOpen] = useState(false)
   const { runs: activeRuns } = useActiveRuns()
   const { count: bootCount } = useActiveBootSessions()
   // Boots are NOT runs: the Runs button counts only test/verify runs; boot
@@ -142,6 +149,7 @@ export function GlobalStatusBar({ activeRunDetail, onNavigateToRun, onOpenCleanu
           <WizardTaskStatus />
           <EvaluationExportTaskStatus />
           {showBenchmark && <BenchmarkPill active={Boolean(activeBenchmark)} onOpen={() => setBenchmarkOpen(true)} />}
+          <PortifyLauncherPill onOpen={() => setPortifyPickerOpen(true)} />
           <CleanupPill onOpen={() => onOpenCleanup?.()} />
         </div>
         <button
@@ -192,6 +200,13 @@ export function GlobalStatusBar({ activeRunDetail, onNavigateToRun, onOpenCleanu
       )}
       {servicesOpen && <ServicesDialog onClose={() => setServicesOpen(false)} />}
       {benchmarkOpen && <BenchmarkWindow onClose={() => setBenchmarkOpen(false)} />}
+      {portifyPickerOpen && (
+        <PortifyPickerDialog
+          features={features}
+          onPick={(feature) => onStartPortify?.(feature)}
+          onClose={() => setPortifyPickerOpen(false)}
+        />
+      )}
     </div>
   )
 }
