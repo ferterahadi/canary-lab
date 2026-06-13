@@ -345,7 +345,12 @@ export function App() {
             ? { feature: portifyTarget.feature, agent: 'claude' as const }
             : { workflowId: portifyTarget.workflowId })}
           onClose={() => setPortifyTarget(null)}
-          onSaved={() => setPortifyTarget(null)}
+          onSaved={() => {
+            setPortifyTarget(null)
+            // The overlay now exists — refresh /api/features so the "Portified"
+            // badge + Ports-tab indicator reflect it immediately.
+            refreshFeatures(selectedFeatureRef.current)
+          }}
         />
       )}
     </div>
