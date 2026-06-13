@@ -8,11 +8,9 @@ import type { PortifyManifest, PortifyStatus } from '../api/client'
 vi.mock('../api/client', () => ({
   startPortify: vi.fn(),
   getPortify: vi.fn(),
-  commitPortify: vi.fn(),
+  savePortify: vi.fn(),
   cancelPortify: vi.fn(),
   revisePortify: vi.fn(),
-  mergePortify: vi.fn(),
-  getPortifyMergeStatus: vi.fn(),
 }))
 // AgentSessionView opens a WS / fetches — stub it out in the wizard test.
 vi.mock('./AgentSessionView', () => ({ AgentSessionView: () => null }))
@@ -43,24 +41,10 @@ function manifest(status: PortifyStatus, over: Partial<PortifyManifest> = {}): P
     startedAt: 't', ...over,
   }
 }
-const readyManifest = (): PortifyManifest => manifest('ready-to-commit', {
+const readyManifest = (): PortifyManifest => manifest('ready-to-save', {
   diff: '# repo: app\n+ app.listen(process.env.PORT)',
   verification: { ok: true, instances: [{ ports: { api: 5001 }, ok: true }, { ports: { api: 5002 }, ok: true }] },
 })
-
-function mergeStatusResult(over: Partial<api.PortifyMergeStatusResult> = {}): api.PortifyMergeStatusResult {
-  return {
-    workflowId: 'w',
-    branch: 'canary/dynamic-ports-cns',
-    repos: [{
-      name: 'app', gitRoot: '/repos/app', commitSha: 'abcdef1234',
-      branchExists: true, currentBranch: 'release/1.3.0', dirty: false, mergeInProgress: false, merged: false,
-    }],
-    merged: false,
-    nothingToMerge: false,
-    ...over,
-  }
-}
 
 function clickButton(label: string): void {
   const btn = [...container.querySelectorAll('button')].find((b) => b.textContent?.trim() === label)
@@ -85,11 +69,11 @@ function fillTextarea(value: string): void {
   ta.dispatchEvent(new Event('input', { bubbles: true }))
 }
 
-async function renderWizard(onClose = vi.fn(), onCommitted = vi.fn()) {
+async function renderWizard(onClose = vi.fn(), onSaved = vi.fn()) {
   await act(async () => {
-    root.render(<PortifyWizard feature="cns" agent="claude" onClose={onClose} onCommitted={onCommitted} />)
+    root.render(<PortifyWizard feature="cns" agent="claude" onClose={onClose} onSaved={onSaved} />)
   })
-  return { onClose, onCommitted }
+  return { onClose, onSaved }
 }
 
 describe('PortifyWizard', () => {
@@ -110,7 +94,7 @@ describe('PortifyWizard', () => {
   it('revisit mode (workflowId) skips the plan screen and monitors the existing workflow', async () => {
     vi.mocked(api.getPortify).mockResolvedValue(manifest('verifying'))
     await act(async () => {
-      root.render(<PortifyWizard workflowId="w" onClose={vi.fn()} onCommitted={vi.fn()} />)
+      root.render(<PortifyWizard workflowId="w" onClose={vi.fn()} onSaved={vi.fn()} />)
     })
     await flush()
     expect(api.startPortify).not.toHaveBeenCalled()
@@ -119,23 +103,20 @@ describe('PortifyWizard', () => {
     expect(container.textContent).toContain('Running the exercise')
   })
 
-  it('commits from the review screen and advances to the merge step (does not close)', async () => {
+  it('saves from the review screen and advances to the Save step (does not close)', async () => {
     vi.mocked(api.startPortify).mockResolvedValue({ workflowId: 'w' })
     vi.mocked(api.getPortify).mockResolvedValue(readyManifest())
-    vi.mocked(api.commitPortify).mockResolvedValue(manifest('committed', {
-      repos: [{ name: 'app', path: '~/app', commitSha: 'abcdef1234' }],
-    }))
-    vi.mocked(api.getPortifyMergeStatus).mockResolvedValue(mergeStatusResult())
-    const { onCommitted } = await renderWizard()
+    vi.mocked(api.savePortify).mockResolvedValue(manifest('saved'))
+    const { onSaved } = await renderWizard()
     await act(async () => clickButton('Start ▶'))
     await flush()
-    await act(async () => clickButton('Commit'))
+    await act(async () => clickButton('Save overlay'))
     await flush()
-    expect(api.commitPortify).toHaveBeenCalledWith('w')
-    // Lands on the Merge step — the wizard stays open instead of closing.
-    expect(container.textContent).toContain('one step left')
-    expect(buttonLabels()).toContain('Merge into release/1.3.0')
-    expect(onCommitted).not.toHaveBeenCalled()
+    expect(api.savePortify).toHaveBeenCalledWith('w')
+    // Lands on the Save step — the wizard stays open instead of closing.
+    expect(container.textContent).toContain('Saved as overlay')
+    expect(container.textContent).toContain('features/cns/portify/')
+    expect(onSaved).not.toHaveBeenCalled()
   })
 
   it('opens the feedback modal from Request changes and resumes the agent on submit', async () => {
@@ -160,7 +141,7 @@ describe('PortifyWizard', () => {
 
   it('shows the worktree path on the review screen for local review', async () => {
     vi.mocked(api.startPortify).mockResolvedValue({ workflowId: 'w' })
-    vi.mocked(api.getPortify).mockResolvedValue(manifest('ready-to-commit', {
+    vi.mocked(api.getPortify).mockResolvedValue(manifest('ready-to-save', {
       diff: '# repo: app\n+ x',
       repos: [{ name: 'app', path: '~/app', worktreePath: '/tmp/wt/app' }],
       verification: { ok: true, instances: [{ ports: { api: 1 }, ok: true }, { ports: { api: 2 }, ok: true }] },
@@ -172,23 +153,9 @@ describe('PortifyWizard', () => {
     expect(container.textContent).toContain('/tmp/wt/app')
   })
 
-  it('committed screen exposes a copyable git merge command via the Merge manually modal', async () => {
+  it('blocks save and warns when the latest revision failed verification', async () => {
     vi.mocked(api.startPortify).mockResolvedValue({ workflowId: 'w' })
-    vi.mocked(api.getPortify).mockResolvedValue(manifest('committed', {
-      repos: [{ name: 'app', path: '~/app', commitSha: 'abcdef1234' }],
-    }))
-    await renderWizard()
-    await act(async () => clickButton('Start ▶'))
-    await flush()
-    // The command lives behind the "Merge manually" modal now, not inline.
-    expect(container.textContent).not.toContain('git merge canary/dynamic-ports-cns')
-    await act(async () => clickButton('Merge manually'))
-    expect(container.textContent).toContain('git merge canary/dynamic-ports-cns')
-  })
-
-  it('blocks commit and warns when the latest revision failed verification', async () => {
-    vi.mocked(api.startPortify).mockResolvedValue({ workflowId: 'w' })
-    vi.mocked(api.getPortify).mockResolvedValue(manifest('ready-to-commit', {
+    vi.mocked(api.getPortify).mockResolvedValue(manifest('ready-to-save', {
       diff: '# repo: app\n+ x', feedbackRounds: 2,
       verification: { ok: false, instances: [], failureDetail: 'port 3000 still bound' },
     }))
@@ -198,8 +165,8 @@ describe('PortifyWizard', () => {
     expect(container.textContent).toContain('pass the double-boot')
     expect(container.textContent).toContain('port 3000 still bound')
     expect(container.textContent).toContain('revision 2')
-    const commitBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Commit') as HTMLButtonElement
-    expect(commitBtn.disabled).toBe(true)
+    const saveBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Save overlay') as HTMLButtonElement
+    expect(saveBtn.disabled).toBe(true)
   })
 
   it('surfaces a start error on the plan screen', async () => {
@@ -265,55 +232,46 @@ describe('PortifyWizard', () => {
     expect(onClose).toHaveBeenCalled()
   })
 
-  it('shows the committed screen when the workflow is already committed', async () => {
+  it('shows the save screen when the workflow is already saved, and Done calls onSaved', async () => {
     vi.mocked(api.startPortify).mockResolvedValue({ workflowId: 'w' })
-    vi.mocked(api.getPortify).mockResolvedValue(manifest('committed', {
-      repos: [{ name: 'app', path: '~/app', commitSha: 'abcdef1234' }],
-    }))
-    const { onCommitted } = await renderWizard()
+    vi.mocked(api.getPortify).mockResolvedValue(manifest('saved'))
+    const { onSaved } = await renderWizard()
     await act(async () => clickButton('Start ▶'))
     await flush()
-    expect(container.textContent).toContain('Committed')
-    expect(container.textContent).toContain('abcdef1234'.slice(0, 10))
-    // Unmerged: closing is explicit about the remaining step.
-    await act(async () => clickButton('Done — merge later'))
-    expect(onCommitted).toHaveBeenCalled()
+    expect(container.textContent).toContain('Saved as overlay')
+    expect(container.textContent).toContain('features/cns/portify/')
+    await act(async () => clickButton('Done'))
+    expect(onSaved).toHaveBeenCalled()
   })
 
-  it('navigates Review ↔ Commit on a committed workflow via the stepper', async () => {
+  it('navigates Review ↔ Save on a saved workflow via the stepper', async () => {
     vi.mocked(api.startPortify).mockResolvedValue({ workflowId: 'w' })
-    vi.mocked(api.getPortify).mockResolvedValue(manifest('committed', {
+    vi.mocked(api.getPortify).mockResolvedValue(manifest('saved', {
       diff: '# repo: app\n+ app.listen(process.env.PORT)',
-      repos: [{ name: 'app', path: '~/app', commitSha: 'abcdef1234' }],
       verification: { ok: true, instances: [{ ports: { api: 1 }, ok: true }, { ports: { api: 2 }, ok: true }] },
     }))
     await renderWizard()
     await act(async () => clickButton('Start ▶'))
     await flush()
-    // Lands on the Merge screen; merge is pending so no merged cue yet.
-    expect(container.textContent).toContain('one step left')
-    expect(container.textContent).not.toContain('merged ✓')
+    // Lands on the Save screen with the saved cue.
+    expect(container.textContent).toContain('Saved as overlay')
+    expect(container.textContent).toContain('saved ✓')
 
-    // Go back to Review — read-only: diff is shown, but no Commit / Request-changes.
+    // Go back to Review — read-only: diff is shown, but no Save / Request-changes.
     await act(async () => clickByTitle('Go to Review'))
     await flush()
     expect(container.textContent).toContain('app.listen(process.env.PORT)')
-    expect(buttonLabels()).not.toContain('Commit')
+    expect(buttonLabels()).not.toContain('Save overlay')
     expect(buttonLabels()).not.toContain('Request changes')
-    expect(buttonLabels()).toContain('View merge details →')
+    expect(buttonLabels()).toContain('View save details →')
 
-    // The "View merge details" button returns to the Merge screen.
-    await act(async () => clickButton('View merge details →'))
+    // The "View save details" button returns to the Save screen.
+    await act(async () => clickButton('View save details →'))
     await flush()
-    expect(container.textContent).toContain('one step left')
-
-    // And the stepper Review number works too (Merge → Review again).
-    await act(async () => clickByTitle('Go to Review'))
-    await flush()
-    expect(buttonLabels()).toContain('View merge details →')
+    expect(container.textContent).toContain('Saved as overlay')
   })
 
-  it('at ready-to-commit the stepper exposes Exercise but not Commit (not yet reached)', async () => {
+  it('at ready-to-save the stepper exposes Exercise but not Save (not yet reached)', async () => {
     vi.mocked(api.startPortify).mockResolvedValue({ workflowId: 'w' })
     vi.mocked(api.getPortify).mockResolvedValue(readyManifest())
     await renderWizard()
@@ -321,88 +279,12 @@ describe('PortifyWizard', () => {
     await flush()
     expect(container.querySelector('[title="Go to Exercise"]')).toBeTruthy()
     expect(container.querySelector('[title="Go to Review"]')).toBeTruthy()
-    // Merge isn't reachable until the workflow is committed.
-    expect(container.querySelector('[title="Go to Merge"]')).toBeNull()
+    // Save isn't reachable until the overlay is saved.
+    expect(container.querySelector('[title="Go to Save"]')).toBeNull()
 
     // Peek at the agent log (Exercise) and come back to Review.
     await act(async () => clickByTitle('Go to Exercise'))
     await flush()
     expect(container.textContent).toContain('The exercise')
-  })
-
-  describe('merge screen (PR-style)', () => {
-    const committedManifest = () => manifest('committed', {
-      repos: [{ name: 'app', path: '~/app', commitSha: 'abcdef1234' }],
-    })
-
-    async function renderCommitted() {
-      vi.mocked(api.startPortify).mockResolvedValue({ workflowId: 'w' })
-      vi.mocked(api.getPortify).mockResolvedValue(committedManifest())
-      await renderWizard()
-      await act(async () => clickButton('Start ▶'))
-      await flush()
-    }
-
-    it('shows live readiness checks and a merge button naming the target branch', async () => {
-      vi.mocked(api.getPortifyMergeStatus).mockResolvedValue(mergeStatusResult())
-      await renderCommitted()
-      expect(api.getPortifyMergeStatus).toHaveBeenCalledWith('w')
-      expect(container.textContent).toContain('release/1.3.0')
-      expect(container.textContent).toContain('Working tree clean')
-      expect(buttonLabels()).toContain('Merge into release/1.3.0')
-    })
-
-    it('merges on click and flips to the merged state', async () => {
-      vi.mocked(api.getPortifyMergeStatus)
-        .mockResolvedValueOnce(mergeStatusResult())
-        .mockResolvedValue(mergeStatusResult({ merged: true, repos: [{ ...mergeStatusResult().repos[0], merged: true }] }))
-      vi.mocked(api.mergePortify).mockResolvedValue({
-        ok: true,
-        results: [{ name: 'app', ok: true, mergeCommitSha: 'fedcba4321', alreadyMerged: false }],
-        manifest: manifest('committed', { mergedAt: 'now', repos: [{ name: 'app', path: '~/app', commitSha: 'abcdef1234', mergeCommitSha: 'fedcba4321' }] }),
-      })
-      await renderCommitted()
-      await act(async () => clickButton('Merge into release/1.3.0'))
-      await flush()
-      expect(api.mergePortify).toHaveBeenCalledWith('w')
-      expect(container.textContent).toContain('Merged')
-      expect(container.textContent).toContain('boot concurrently')
-      expect(container.textContent).toContain('merged ✓') // stepper cue
-    })
-
-    it('disables merging on a dirty tree and explains the blocker', async () => {
-      vi.mocked(api.getPortifyMergeStatus).mockResolvedValue(mergeStatusResult({
-        repos: [{ ...mergeStatusResult().repos[0], dirty: true }],
-      }))
-      await renderCommitted()
-      expect(container.textContent).toContain('uncommitted changes')
-      const mergeBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.startsWith('Merge into')) as HTMLButtonElement
-      expect(mergeBtn.disabled).toBe(true)
-    })
-
-    it('reports an aborted conflict with the conflicted files, repo left unchanged', async () => {
-      vi.mocked(api.getPortifyMergeStatus).mockResolvedValue(mergeStatusResult())
-      vi.mocked(api.mergePortify).mockResolvedValue({
-        ok: false,
-        results: [{ name: 'app', ok: false, conflictFiles: ['src/server.js'] }],
-        manifest: committedManifest(),
-      })
-      await renderCommitted()
-      await act(async () => clickButton('Merge into release/1.3.0'))
-      await flush()
-      expect(container.textContent).toContain('src/server.js')
-      expect(container.textContent).toContain('aborted')
-      expect(container.textContent).toContain('unchanged')
-    })
-
-    it('shows the merged state straight away when already merged (e.g. manually)', async () => {
-      vi.mocked(api.getPortifyMergeStatus).mockResolvedValue(mergeStatusResult({
-        merged: true,
-        repos: [{ ...mergeStatusResult().repos[0], merged: true }],
-      }))
-      await renderCommitted()
-      expect(container.textContent).toContain('Merged')
-      expect(buttonLabels().some((l) => l.startsWith('Merge into'))).toBe(false)
-    })
   })
 })

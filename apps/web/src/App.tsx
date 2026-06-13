@@ -343,7 +343,7 @@ export function App() {
             ? { feature: portifyTarget.feature, agent: 'claude' as const }
             : { workflowId: portifyTarget.workflowId })}
           onClose={() => setPortifyTarget(null)}
-          onCommitted={() => setPortifyTarget(null)}
+          onSaved={() => setPortifyTarget(null)}
         />
       )}
     </div>

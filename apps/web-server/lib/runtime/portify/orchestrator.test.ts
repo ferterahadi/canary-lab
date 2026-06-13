@@ -39,10 +39,10 @@ function makeDeps(overrides: Partial<PortifyOrchestratorDeps>): {
 }
 
 describe('PortifyOrchestrator', () => {
-  it('reaches ready-to-commit when the first verification passes', async () => {
+  it('reaches ready-to-save when the first verification passes', async () => {
     const { deps } = makeDeps({})
     const m = await new PortifyOrchestrator(deps).run()
-    expect(m.status).toBe('ready-to-commit')
+    expect(m.status).toBe('ready-to-save')
     expect(m.attempt).toBe(1)
     expect(m.diff).toBe('diff')
     expect(deps.cleanup).not.toHaveBeenCalled() // worktree kept for commit
@@ -55,7 +55,7 @@ describe('PortifyOrchestrator', () => {
     const runAgent = vi.fn(async () => {})
     const { deps } = makeDeps({ verify, runAgent })
     const m = await new PortifyOrchestrator(deps).run()
-    expect(m.status).toBe('ready-to-commit')
+    expect(m.status).toBe('ready-to-save')
     expect(m.attempt).toBe(2)
     // Retry carried the failure detail back into the agent prompt.
     expect(runAgent).toHaveBeenNthCalledWith(2, 2, 'port 3007 still bound')
@@ -79,7 +79,7 @@ describe('PortifyOrchestrator', () => {
     const runAgent = vi.fn(async () => {})
     const { deps } = makeDeps({ checkTestsUntouched, runAgent })
     const m = await new PortifyOrchestrator(deps).run()
-    expect(m.status).toBe('ready-to-commit')
+    expect(m.status).toBe('ready-to-save')
     expect(m.attempt).toBe(2)
     expect(runAgent.mock.calls[1][1]).toContain('e2e/api.spec.ts')
   })
@@ -141,18 +141,18 @@ describe('PortifyOrchestrator', () => {
     expect(m.error).toBe('plain string failure')
   })
 
-  // ── revise: user-driven feedback pass (post ready-to-commit) ─────────────
+  // ── revise: user-driven feedback pass (post ready-to-save) ─────────────
   function readyManifest(): PortifyManifest {
-    return { ...baseManifest(), status: 'ready-to-commit', attempt: 1, diff: 'old diff', verification: { ok: true, instances: [] } }
+    return { ...baseManifest(), status: 'ready-to-save', attempt: 1, diff: 'old diff', verification: { ok: true, instances: [] } }
   }
 
   describe('revise', () => {
-    it('runs one pass and re-parks at ready-to-commit, incrementing feedbackRounds without touching attempt', async () => {
+    it('runs one pass and re-parks at ready-to-save, incrementing feedbackRounds without touching attempt', async () => {
       const runFeedbackAgent = vi.fn(async () => {})
       const { deps, saved } = makeDeps({ runFeedbackAgent })
       const m = await new PortifyOrchestrator(deps).revise(readyManifest(), 'use PORT not GATEWAY_PORT')
       expect(runFeedbackAgent).toHaveBeenCalledWith('use PORT not GATEWAY_PORT')
-      expect(m.status).toBe('ready-to-commit')
+      expect(m.status).toBe('ready-to-save')
       expect(m.feedbackRounds).toBe(1)
       expect(m.attempt).toBe(1)
       expect(saved.map((s) => s.status)).toContain('editing')
@@ -160,12 +160,12 @@ describe('PortifyOrchestrator', () => {
       expect(deps.cleanup).not.toHaveBeenCalled()
     })
 
-    it('re-parks at ready-to-commit with ok:false (never terminal, no cleanup) when the revise breaks the boot', async () => {
+    it('re-parks at ready-to-save with ok:false (never terminal, no cleanup) when the revise breaks the boot', async () => {
       const { deps } = makeDeps({
         verify: async () => ({ ok: false, instances: [], failureDetail: 'port 3000 still bound' }),
       })
       const m = await new PortifyOrchestrator(deps).revise(readyManifest(), 'tweak')
-      expect(m.status).toBe('ready-to-commit')
+      expect(m.status).toBe('ready-to-save')
       expect(m.verification?.ok).toBe(false)
       expect(m.verification?.failureDetail).toContain('3000')
       expect(deps.cleanup).not.toHaveBeenCalled()
@@ -176,7 +176,7 @@ describe('PortifyOrchestrator', () => {
         checkTestsUntouched: async () => ({ ok: false, offending: ['e2e/api.spec.ts'] }),
       })
       const m = await new PortifyOrchestrator(deps).revise(readyManifest(), 'tweak')
-      expect(m.status).toBe('ready-to-commit')
+      expect(m.status).toBe('ready-to-save')
       expect(m.verification?.ok).toBe(false)
       expect(m.verification?.failureDetail).toContain('e2e/api.spec.ts')
     })
@@ -184,7 +184,7 @@ describe('PortifyOrchestrator', () => {
     it('re-parks (not failed) with an error when the agent throws mid-revise', async () => {
       const { deps } = makeDeps({ runFeedbackAgent: vi.fn(async () => { throw new Error('agent died') }) })
       const m = await new PortifyOrchestrator(deps).revise(readyManifest(), 'tweak')
-      expect(m.status).toBe('ready-to-commit')
+      expect(m.status).toBe('ready-to-save')
       expect(m.error).toContain('agent died')
       expect(deps.cleanup).not.toHaveBeenCalled()
     })
@@ -193,7 +193,7 @@ describe('PortifyOrchestrator', () => {
       // eslint-disable-next-line @typescript-eslint/only-throw-error
       const { deps } = makeDeps({ runFeedbackAgent: vi.fn(async () => { throw 'raw revise failure' }) })
       const m = await new PortifyOrchestrator(deps).revise(readyManifest(), 'tweak')
-      expect(m.status).toBe('ready-to-commit')
+      expect(m.status).toBe('ready-to-save')
       expect(m.error).toBe('raw revise failure')
     })
 
@@ -265,6 +265,6 @@ describe('PortifyOrchestrator', () => {
       // no isAborted, no cleanup
     }
     const m = await new PortifyOrchestrator(deps).run()
-    expect(m.status).toBe('ready-to-commit')
+    expect(m.status).toBe('ready-to-save')
   })
 })

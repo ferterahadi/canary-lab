@@ -18,7 +18,7 @@ import type { PortifyManifest, PortifyStatus } from './types'
 // This supersedes the store's pure-manifest `reconcileInterrupted` at startup;
 // it does the disk cleanup the store can't (the store does no git/fs I/O).
 
-const TERMINAL: ReadonlySet<PortifyStatus> = new Set<PortifyStatus>(['committed', 'failed', 'aborted'])
+const TERMINAL: ReadonlySet<PortifyStatus> = new Set<PortifyStatus>(['saved', 'failed', 'aborted'])
 
 export async function reclaimOrphanedPortify(
   store: PortifyRunStore,

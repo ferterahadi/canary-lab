@@ -55,6 +55,7 @@ import { RunScheduler, type SchedulerActiveRun } from './lib/runtime/run-schedul
 import { estimateRunCost, resolveAdmissionConfig, readSystemResources } from './lib/runtime/admission'
 import { detectRepoCollision, normalizeRepoPaths } from './lib/runtime/repo-collision'
 import { addWorktree, type WorktreeHandle } from './lib/runtime/repo-worktree'
+import { overlayExists as portifyOverlayExists } from './lib/runtime/portify/overlay'
 import type { QueueReason } from '../../shared/run-state'
 import type { FeatureConfig } from '../../shared/launcher/types'
 import {
@@ -644,8 +645,13 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
       const runDir = runDirFor(logsDir, runId)
       const sourceRepoPaths = normalizeRepoPaths((feature.repos ?? []).map((r) => r.localPath))
       const cost = estimateRunCost(buildServiceSpecs(feature, runDir, env).length)
+      // A portified feature ALWAYS runs worktree-isolated: its saved overlay is
+      // applied into per-run worktrees so two boots get disjoint injected ports.
+      // That makes it inherently collision-free, so we auto-isolate (no user
+      // prompt) and isolate EVERY repo, not just the colliding ones.
+      const portified = portifyOverlayExists(feature.featureDir)
       const collision = detectRepoCollision(sourceRepoPaths, listActiveForScheduler())
-      if (collision && !isolation) {
+      if (collision && !isolation && !portified) {
         return {
           kind: 'collision',
           conflictingRunId: collision.conflictingRunId,
@@ -653,8 +659,10 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
           repoPaths: collision.repoPaths,
         }
       }
-      const useWorktree = Boolean(collision) && isolation === 'worktree'
-      const worktreeRepoNames = useWorktree && collision ? repoNamesForPaths(feature, collision.repoPaths) : []
+      const useWorktree = portified || (Boolean(collision) && isolation === 'worktree')
+      const worktreeRepoNames = portified
+        ? (feature.repos ?? []).map((r) => r.name)
+        : useWorktree && collision ? repoNamesForPaths(feature, collision.repoPaths) : []
 
       // The actual launch: envset apply, worktree isolation, orchestrator
       // construction + kickoff. Deferred and reused by the queue when the run
@@ -776,6 +784,13 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
           worktrees.push(await addWorktree({ repoName, localPath: repo.localPath, worktreesDir: path.join(runDir, 'worktrees') }))
           runnerLog.info(`Isolated repo "${repoName}" in a per-run worktree.`)
         } catch (err) {
+          // A portified run MUST have a worktree for every repo — without one
+          // its overlay can't apply and it would boot un-portified (EADDRINUSE
+          // on a concurrent boot). Fail loud instead of silently running bare.
+          if (portified) {
+            if (backups) restore(backups)
+            throw new Error(`worktree isolation failed for portified repo "${repoName}": ${(err as Error).message}`)
+          }
           runnerLog.warn(`Worktree isolation failed for "${repoName}"; running in place: ${(err as Error).message}`)
         }
       }
@@ -1189,12 +1204,10 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
   await app.register(portifyRoutes, {
     store: portifyStore,
     startPortify: portifyRunner.startPortify,
-    commitPortify: portifyRunner.commit,
+    savePortify: portifyRunner.save,
     cancelPortify: portifyRunner.cancel,
     revisePortify: portifyRunner.revise,
     removePortify: portifyRunner.remove,
-    mergePortify: portifyRunner.merge,
-    portifyMergeStatus: portifyRunner.mergeStatus,
     loadAgentSession: (id) => {
       try {
         const raw = fs.readFileSync(path.join(portifyDir(logsDir, id), 'agent-session.json'), 'utf-8')
@@ -1303,14 +1316,13 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
       return { statusCode: resp.statusCode, body }
     },
     // Port-ification workflow — reuse the in-process runner + store (the same
-    // ones behind routes/portify.ts). start/commit/cancel throw with a
+    // ones behind routes/portify.ts). start/save/cancel throw with a
     // statusCode the MCP tools surface as errors.
     startPortify: (feature, agent, maxAttempts) => portifyRunner.startPortify({ feature, agent, maxAttempts }),
     getPortify: (workflowId) => portifyStore.get(workflowId),
-    commitPortify: (workflowId) => portifyRunner.commit(workflowId),
+    savePortify: (workflowId) => portifyRunner.save(workflowId),
     cancelPortify: (workflowId) => portifyRunner.cancel(workflowId),
     revisePortify: (workflowId, feedback) => portifyRunner.revise(workflowId, feedback),
-    mergePortify: (workflowId) => portifyRunner.merge(workflowId),
 	  })
 
   // Serve the built React frontend if it exists. In development the dist dir

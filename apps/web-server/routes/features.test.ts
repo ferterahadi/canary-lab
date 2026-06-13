@@ -80,6 +80,23 @@ describe('GET /api/features', () => {
     expect(body).toHaveLength(1)
     expect(body[0]).toMatchObject({ name: 'alpha', description: 'desc', envs: ['local'] })
     expect(body[0].repos).toHaveLength(1)
+    // No saved overlay → not portified.
+    expect(body[0].portified).toBe(false)
+  })
+
+  it('flags portified=true when the feature has a saved port overlay', async () => {
+    const dir = writeFeature('ported')
+    const overlayDir = path.join(dir, 'portify')
+    fs.mkdirSync(overlayDir, { recursive: true })
+    fs.writeFileSync(path.join(overlayDir, 'repo1.patch'), 'diff --git a/x b/x\n')
+    fs.writeFileSync(path.join(overlayDir, 'meta.json'), JSON.stringify({
+      version: 1, featureName: 'ported', agent: 'claude', capturedAt: 't',
+      repos: [{ name: 'repo1', baseSha: 's', patch: 'repo1.patch', touchedFiles: [] }],
+    }))
+    const app = await build()
+    const res = await app.inject({ method: 'GET', url: '/api/features' })
+    const body = res.json() as Array<{ name: string; portified: boolean }>
+    expect(body.find((f) => f.name === 'ported')?.portified).toBe(true)
   })
 
   it('substitutes empty arrays when a feature has no repos / envs declared', async () => {

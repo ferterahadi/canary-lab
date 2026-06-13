@@ -146,7 +146,7 @@ describe('GlobalStatusBar', () => {
 
   it('labels the Portify button "ready" when the workflow awaits commit', async () => {
     mockActiveRuns.value = { runs: [], count: 0 }
-    mockActivePortify.value = { workflowId: 'portify-1', feature: 'cns', status: 'ready-to-commit', startedAt: 't' }
+    mockActivePortify.value = { workflowId: 'portify-1', feature: 'cns', status: 'ready-to-save', startedAt: 't' }
     await act(async () => { root.render(<GlobalStatusBar activeRunDetail={null} />) })
     expect(portifyButton()?.textContent).toContain('ready')
   })

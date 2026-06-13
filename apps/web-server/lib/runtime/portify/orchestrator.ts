@@ -5,9 +5,10 @@ import type { PortifyManifest, PortifyRepoState, PortifyVerification } from './t
 // injected so the lifecycle + retry loop are unit-testable.
 //
 // run() resolves when the workflow reaches a state that awaits the USER:
-// `ready-to-commit` (success), `failed` (gave up), or `aborted`. The commit and
+// `ready-to-save` (success), `failed` (gave up), or `aborted`. The save and
 // cancel actions are driven separately by the runner (which holds the worktree
-// handle), since they happen after run() returns.
+// handle), since they happen after run() returns. `save` captures the verified
+// edits as the feature's ephemeral overlay — nothing is committed or merged.
 
 export interface PortifyOrchestratorDeps {
   manifest: PortifyManifest
@@ -82,7 +83,7 @@ export class PortifyOrchestrator {
             d.persist(m)
             continue
           }
-          m = { ...m, status: 'ready-to-commit', diff, verification }
+          m = { ...m, status: 'ready-to-save', diff, verification }
           d.persist(m)
           return m
         }
@@ -116,11 +117,11 @@ export class PortifyOrchestrator {
   }
 
   // A user-driven revise pass, invoked after run() has parked at
-  // `ready-to-commit`. The agent resumes its session, applies the human's
+  // `ready-to-save`. The agent resumes its session, applies the human's
   // feedback, and the stack is re-verified. Unlike run()'s retry loop this
-  // NEVER goes terminal: it always re-parks at `ready-to-commit` (worktree
+  // NEVER goes terminal: it always re-parks at `ready-to-save` (worktree
   // preserved) carrying the latest verification — `verification.ok` gates
-  // whether the diff may be committed. `feedbackRounds` is its own budget,
+  // whether the diff may be saved. `feedbackRounds` is its own budget,
   // unbounded and independent of `attempt`/`maxAttempts`. `current` is the
   // live manifest the caller read from the store (the source of truth after
   // run() returned).
@@ -158,14 +159,14 @@ export class PortifyOrchestrator {
         }
       }
 
-      m = { ...m, status: 'ready-to-commit', diff, verification }
+      m = { ...m, status: 'ready-to-save', diff, verification }
       d.persist(m)
       return m
     } catch (err) {
       if (d.isAborted?.()) return m
-      // Don't tear down on a revise error — re-park at ready-to-commit so the
+      // Don't tear down on a revise error — re-park at ready-to-save so the
       // user can give more feedback or commit the last good diff.
-      m = { ...m, status: 'ready-to-commit', error: err instanceof Error ? err.message : String(err) }
+      m = { ...m, status: 'ready-to-save', error: err instanceof Error ? err.message : String(err) }
       d.persist(m)
       return m
     }

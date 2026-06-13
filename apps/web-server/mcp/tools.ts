@@ -71,7 +71,8 @@ import {
   deriveRunActionAvailability,
 } from '../../../shared/run-state'
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../lib/workspace-events'
-import type { PortifyManifest, PortifyMergeResult } from '../lib/runtime/portify/types'
+import type { PortifyManifest } from '../lib/runtime/portify/types'
+import { overlayExists as portifyOverlayExists } from '../lib/runtime/portify/overlay'
 
 // Every Canary Lab MCP tool is a thin wrapper around an existing internal
 // helper or REST handler. The translation pattern: validate input via zod,
@@ -170,13 +171,12 @@ export interface CanaryLabMcpDeps {
   ) => Promise<{ statusCode: number; body: unknown }>
   /** Port-ification workflow (make a feature's apps use injectable ports).
    *  These reuse the in-process portify runner + store behind routes/portify.ts;
-   *  the start/commit/cancel calls throw with a `statusCode` the tools surface. */
+   *  the start/save/cancel calls throw with a `statusCode` the tools surface. */
   startPortify?: (feature: string, agent?: 'claude' | 'codex', maxAttempts?: number) => Promise<{ workflowId: string }>
   getPortify?: (workflowId: string) => PortifyManifest | null
-  commitPortify?: (workflowId: string) => Promise<PortifyManifest>
+  savePortify?: (workflowId: string) => Promise<PortifyManifest>
   cancelPortify?: (workflowId: string) => Promise<PortifyManifest>
   revisePortify?: (workflowId: string, feedback: string) => Promise<PortifyManifest>
-  mergePortify?: (workflowId: string) => Promise<PortifyMergeResult>
   workspaceEvents?: WorkspaceEventPublisher
 }
 
@@ -235,10 +235,9 @@ export type CanaryLabMcpToolName =
   | 'handoff_heal'
   | 'start_portify'
   | 'get_portify'
-  | 'commit_portify'
+  | 'save_portify'
   | 'cancel_portify'
   | 'revise_portify'
-  | 'merge_portify'
   | 'list_portify_status'
 
 const REPAIR_TOOLS = [
@@ -296,10 +295,9 @@ const AUTHOR_TOOLS = [
   'apply_external_draft',
   'start_portify',
   'get_portify',
-  'commit_portify',
+  'save_portify',
   'cancel_portify',
   'revise_portify',
-  'merge_portify',
   'list_portify_status',
 ] as const satisfies readonly CanaryLabMcpToolName[]
 
@@ -958,7 +956,7 @@ export function registerCanaryLabTools(
 
   // ── Port-ification (make a feature's apps use injectable ports) ──────────
   registerTool('start_portify', {
-    description: "Start a port-ification workflow: an agent rewrites a feature's apps so every network listener reads an injected port, proven by booting the stack twice concurrently. Async — returns a workflowId; poll get_portify, then commit_portify once it is ready-to-commit. One workflow at a time.",
+    description: "Start a port-ification workflow: an agent rewrites a feature's apps so every network listener reads an injected port, proven by booting the stack twice concurrently. The verified edits are saved as an EPHEMERAL OVERLAY (a captured patch under features/<feature>/portify/) — never committed or merged, so the product repo stays pristine; at run time the overlay is applied into a per-run worktree and reverse-applied at teardown. Async — returns a workflowId; poll get_portify, then save_portify once it is ready-to-save. One workflow at a time.",
     inputSchema: {
       feature: z.string().describe('Feature name (from list_features).'),
       agent: z.enum(['claude', 'codex']).optional().describe('Which CLI does the rewrite. Defaults to an available local agent.'),
@@ -972,7 +970,7 @@ export function registerCanaryLabTools(
         workflowId,
         status: 'planning',
         nextSteps: ['get_portify'],
-        next: `Poll get_portify with workflowId "${workflowId}" until status is "ready-to-commit", then commit_portify (or cancel_portify).`,
+        next: `Poll get_portify with workflowId "${workflowId}" until status is "ready-to-save", then save_portify (or cancel_portify).`,
       })
     } catch (err) {
       return errorResult(err instanceof Error ? err.message : String(err))
@@ -980,7 +978,7 @@ export function registerCanaryLabTools(
   })
 
   registerTool('get_portify', {
-    description: 'Read a port-ification workflow: status (planning/editing/verifying/ready-to-commit/committed/failed/aborted), attempt count, the diff, and the double-boot verification result.',
+    description: 'Read a port-ification workflow: status (planning/editing/verifying/ready-to-save/saved/failed/aborted), attempt count, the diff, and the double-boot verification result.',
     inputSchema: { workflowId: z.string() },
   }, async ({ workflowId }) => {
     if (!deps.getPortify) return errorResult('getPortify dependency is not configured')
@@ -990,62 +988,34 @@ export function registerCanaryLabTools(
   })
 
   registerTool('list_portify_status', {
-    description: "List every feature with whether it is PORTIFIED — i.e. declares injectable port slots so it can boot concurrently (benchmark arms / parallel runs) without an EADDRINUSE clash. Returns each feature's portsConfigured flag and its declared port slots per service/command, plus a summary count. Use it to see which features still need start_portify. The check is shallow (it trusts a declared slot); the deep proof is the double-boot inside the port-ification workflow.",
+    description: "List every feature with whether it is PORTIFIED — i.e. has a saved port overlay (features/<feature>/portify/) so it can boot concurrently (benchmark arms / parallel runs) without an EADDRINUSE clash. `portified` is the source of truth: a VERIFIED overlay exists (proven by the double-boot at save time). `declaredSlots` lists the port slots each service/command declares (informational). Use it to see which features still need start_portify.",
     inputSchema: {},
   }, async () => {
     const features = loadFeatures(deps.featuresDir).map((f) => {
       const pf = computePortPreflight(f)
-      return { feature: f.name, portsConfigured: pf.portsConfigured, repos: pf.repos }
+      return { feature: f.name, portified: portifyOverlayExists(f.featureDir), declaredSlots: pf.repos }
     })
-    const portified = features.filter((f) => f.portsConfigured).length
+    const portified = features.filter((f) => f.portified).length
     return asJsonResult({
       features,
       summary: { total: features.length, portified, notPortified: features.length - portified },
     })
   })
 
-  registerTool('commit_portify', {
-    description: 'Commit a verified port-ification workflow — lands the rewrite on its branch in the product repo(s). Only valid when status is ready-to-commit. Requires confirm: true.',
+  registerTool('save_portify', {
+    description: "Save a verified port-ification workflow as the feature's EPHEMERAL OVERLAY (captured patch under features/<feature>/portify/) and discard the scratch worktree — NOTHING is committed or merged; the product repo stays pristine. The overlay is applied into a fresh per-run worktree before each run and reverse-applied at teardown. Only valid when status is ready-to-save. Requires confirm: true.",
     inputSchema: {
       workflowId: z.string(),
-      confirm: z.literal(true).describe('Must be true. Guards against committing an unreviewed rewrite.'),
+      confirm: z.literal(true).describe('Must be true. Guards against saving an unreviewed rewrite.'),
     },
-    annotations: { destructiveHint: true, idempotentHint: false },
+    annotations: { destructiveHint: false, idempotentHint: false },
   }, async ({ workflowId }) => {
-    if (!deps.commitPortify) return errorResult('commitPortify dependency is not configured')
+    if (!deps.savePortify) return errorResult('savePortify dependency is not configured')
     try {
-      const manifest = await deps.commitPortify(workflowId)
-      const hasCommits = manifest.repos.some((r) => r.commitSha)
+      const manifest = await deps.savePortify(workflowId)
       return asJsonResult({
         ...manifest,
-        ...(hasCommits ? {
-          nextSteps: ['merge_portify'],
-          next: `Committed to branch "${manifest.branch}" — the user's checkout is NOT yet using it. Call merge_portify (confirm: true) to merge it into each repo's current branch, or leave it for a manual merge.`,
-        } : {
-          next: 'Committed. No source changes were needed — the config now declares the port slots; there is no branch to merge.',
-        }),
-      })
-    } catch (err) {
-      return errorResult(err instanceof Error ? err.message : String(err))
-    }
-  })
-
-  registerTool('merge_portify', {
-    description: "Merge a COMMITTED port-ification branch into each product repo's currently checked-out branch — the step that makes the rewrite take effect for future runs. Safe by construction: refuses a dirty tree or detached HEAD, and a conflict is aborted server-side (the repo is never left mid-merge) and reported per repo in `results`. Re-running after a fix is safe — already-merged repos are skipped. Only valid when status is committed. Requires confirm: true.",
-    inputSchema: {
-      workflowId: z.string(),
-      confirm: z.literal(true).describe("Must be true. This is the one portify action that rewrites the user's own branch."),
-    },
-    annotations: { destructiveHint: true, idempotentHint: true },
-  }, async ({ workflowId }) => {
-    if (!deps.mergePortify) return errorResult('mergePortify dependency is not configured')
-    try {
-      const result = await deps.mergePortify(workflowId)
-      return asJsonResult({
-        ...result,
-        next: result.ok
-          ? 'Merged. The feature now boots with injectable ports on this branch — concurrent runs and benchmark arms will not clash.'
-          : 'Not merged. Fix the per-repo blocker in `results` (commit/stash a dirty tree, or resolve the listed conflict files manually with `git merge`), then call merge_portify again.',
+        next: `Overlay saved to features/${manifest.feature}/portify/. The feature now boots with injectable ports on every run — concurrent runs and benchmark arms will not clash — without ever modifying the product repo.`,
       })
     } catch (err) {
       return errorResult(err instanceof Error ? err.message : String(err))
@@ -1053,7 +1023,7 @@ export function registerCanaryLabTools(
   })
 
   registerTool('revise_portify', {
-    description: "Send review feedback to a ready-to-commit port-ification workflow: the agent resumes its session, applies your adjustments (e.g. rename an env var, expose another port slot), and the stack is re-booted twice to re-verify. Async — the workflow returns to editing, then verifying, then ready-to-commit; poll get_portify. Feedback rounds are unbounded and separate from the auto-retry budget. Only valid when status is ready-to-commit.",
+    description: "Send review feedback to a ready-to-save port-ification workflow: the agent resumes its session, applies your adjustments (e.g. rename an env var, expose another port slot), and the stack is re-booted twice to re-verify. Async — the workflow returns to editing, then verifying, then ready-to-save; poll get_portify. Feedback rounds are unbounded and separate from the auto-retry budget. Only valid when status is ready-to-save.",
     inputSchema: {
       workflowId: z.string(),
       feedback: z.string().min(1).describe('Plain-language adjustments for the agent to apply to its port-ification diff.'),
@@ -1065,7 +1035,7 @@ export function registerCanaryLabTools(
       return asJsonResult({
         ...manifest,
         nextSteps: ['get_portify'],
-        next: `Poll get_portify with workflowId "${workflowId}" until status is "ready-to-commit" again, then commit_portify (or revise_portify once more).`,
+        next: `Poll get_portify with workflowId "${workflowId}" until status is "ready-to-save" again, then save_portify (or revise_portify once more).`,
       })
     } catch (err) {
       return errorResult(err instanceof Error ? err.message : String(err))
@@ -1073,7 +1043,7 @@ export function registerCanaryLabTools(
   })
 
   registerTool('cancel_portify', {
-    description: 'Cancel a port-ification workflow — discards its worktree + branch and restores the feature config. Requires confirm: true.',
+    description: 'Cancel a port-ification workflow — discards its scratch worktree + branch and restores the feature config. Requires confirm: true.',
     inputSchema: {
       workflowId: z.string(),
       confirm: z.literal(true).describe('Must be true. Guards against discarding in-flight work.'),

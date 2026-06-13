@@ -7,20 +7,17 @@ import { runGit, resolveRepoPath, snapshotWorkingTree, getGitRoot } from '../../
 import type { PtyFactory } from '../pty-spawner'
 import type { HealAgent } from '../auto-heal'
 import { generateRunId } from '../run-id'
-import { removeWorktree, type WorktreeHandle } from '../repo-worktree'
+import { type WorktreeHandle } from '../repo-worktree'
 import { PortifyRunStore } from './store'
 import { PortifyOrchestrator } from './orchestrator'
 import { buildPortifyPaths, portifyDir } from './paths'
-import { createBranchAndWorktree, captureDiff, changedFiles, commitWorktree, discardWorktree, portifyBranchName, mergeStatus as repoMergeStatus, mergePortifyBranch } from './git-ops'
+import { createBranchAndWorktree, captureDiff, changedFiles, discardWorktree, portifyBranchName } from './git-ops'
+import { writeOverlay, captureTouchedFiles, type OverlayRepoInput } from './overlay'
 import { runPortifyAgent, writePortifyClaudeRef } from './agent'
 import { buildPortifyPrompt, buildPortifyRetryPrompt, buildPortifyFeedbackPrompt, type RepoEditTarget } from './prompt'
 import { verifyDoubleBoot } from './verify'
 import type {
   PortifyManifest,
-  PortifyMergeResult,
-  PortifyMergeStatusResult,
-  PortifyRepoMergeResult,
-  PortifyRepoMergeStatus,
   PortifyRepoState,
   StartPortifyInput,
   StartPortifyResult,
@@ -303,14 +300,14 @@ export function createPortifyRunner(deps: PortifyRunnerDeps) {
   }
 
   // User-driven revise pass from the review screen: resume the agent with the
-  // human's feedback, re-verify, and re-park at ready-to-commit. Fire-and-forget
+  // human's feedback, re-verify, and re-park at ready-to-save. Fire-and-forget
   // like the initial run — the UI polls the manifest as it cycles back through
-  // editing → verifying → ready-to-commit. Returns the manifest in its
+  // editing → verifying → ready-to-save. Returns the manifest in its
   // just-flipped `editing` state so the caller gets immediate feedback.
   async function revise(workflowId: string, feedback: string): Promise<PortifyManifest> {
     const m = deps.store.get(workflowId)
     if (!m) throw Object.assign(new Error('workflow not found'), { statusCode: 404 })
-    if (m.status !== 'ready-to-commit') {
+    if (m.status !== 'ready-to-save') {
       throw Object.assign(new Error(`cannot revise a workflow in status "${m.status}"`), { statusCode: 409 })
     }
     const trimmed = feedback.trim()
@@ -323,16 +320,25 @@ export function createPortifyRunner(deps: PortifyRunnerDeps) {
       )
     }
     // Float the pass; the orchestrator persists every transition and never
-    // rejects (it re-parks at ready-to-commit even on error).
+    // rejects (it re-parks at ready-to-save even on error).
     void state.orchestrator.revise(m, trimmed)
     return deps.store.get(workflowId) ?? m
   }
 
-  async function commit(workflowId: string): Promise<PortifyManifest> {
+  /**
+   * Ephemeral-overlay terminal action (replaces commit/merge). Captures the
+   * agent's verified edits as a unified diff per git-root group and writes them
+   * as the feature's saved overlay under `features/<feature>/portify/`. The
+   * scratch worktree + branch are then discarded — unlike commit, NOTHING lands
+   * in the product repo's history. At run time the overlay is `git apply`-ed
+   * into a fresh per-run worktree and reverse-applied at teardown (see the
+   * RunOrchestrator).
+   */
+  async function save(workflowId: string): Promise<PortifyManifest> {
     const m = deps.store.get(workflowId)
     if (!m) throw Object.assign(new Error('workflow not found'), { statusCode: 404 })
-    if (m.status !== 'ready-to-commit') {
-      throw Object.assign(new Error(`cannot commit a workflow in status "${m.status}"`), { statusCode: 409 })
+    if (m.status !== 'ready-to-save') {
+      throw Object.assign(new Error(`cannot save a workflow in status "${m.status}"`), { statusCode: 409 })
     }
     if (m.verification && !m.verification.ok) {
       throw Object.assign(
@@ -343,27 +349,34 @@ export function createPortifyRunner(deps: PortifyRunnerDeps) {
     const state = active.get(workflowId)
     if (!state) throw Object.assign(new Error('worktree is no longer available'), { statusCode: 409 })
 
-    const message = `feat: make ${m.feature} ports injectable for concurrent boot`
-    const shaByMember = new Map<string, string | undefined>()
+    // One captured diff per git-root group; every member repo in the group
+    // shares that group's worktree (so the same patch + base SHA). Run time
+    // forces one worktree per repo NAME and applies the repo's patch into it.
+    const overlayRepos: OverlayRepoInput[] = []
     for (const group of state.groups) {
-      // Reaching commit means setup fully succeeded → every group has a handle.
-      const sha = await commitWorktree(group.handle!.worktreeRoot, message)
-      if (sha) {
-        // Keep the branch (with the commit); free the worktree checkout.
-        // removeWorktree drops the checkout but NOT the branch ref.
-        await removeWorktree(group.handle!)
-      } else {
-        // No source change in this group — drop the empty branch + worktree.
-        await discardWorktree(group.handle!, state.branch)
+      const wt = group.handle! // reaching save means setup fully succeeded
+      const patch = await captureDiff(wt.worktreeRoot, group.snapshotRef)
+      const baseSha = (await runGit(wt.worktreeRoot, ['rev-parse', 'HEAD'])).stdout.trim()
+      const changed = await changedFiles(wt.worktreeRoot, group.snapshotRef)
+      const touchedFiles = await captureTouchedFiles(wt.worktreeRoot, baseSha, changed)
+      for (const member of group.members) {
+        overlayRepos.push({ name: member.name, baseSha, patch, touchedFiles })
       }
-      for (const member of group.members) shaByMember.set(member.name, sha ?? undefined)
+    }
+    writeOverlay(m.featureDir, {
+      featureName: m.feature,
+      agent: m.agent,
+      capturedAt: deps.now(),
+      repos: overlayRepos,
+    })
+
+    // The scratch worktree + branch have served their purpose (the diff is
+    // captured) — discard them so nothing lingers in the product repo.
+    for (const group of state.groups) {
+      if (group.handle) await discardWorktree(group.handle, state.branch)
     }
     active.delete(workflowId)
-    const repoStates: PortifyRepoState[] = m.repos.map((r) => {
-      const sha = shaByMember.get(r.name)
-      return sha ? { ...r, commitSha: sha } : r
-    })
-    const next: PortifyManifest = { ...m, repos: repoStates, status: 'committed', endedAt: deps.now() }
+    const next: PortifyManifest = { ...m, status: 'saved', endedAt: deps.now() }
     deps.store.save(next)
     return next
   }
@@ -380,114 +393,22 @@ export function createPortifyRunner(deps: PortifyRunnerDeps) {
       restoreConfig(state)
       active.delete(workflowId)
     }
-    if (m.status === 'committed') return m
+    // A finished (saved) workflow is returned untouched.
+    if (m.status === 'saved') return m
     const next: PortifyManifest = { ...m, status: 'aborted', endedAt: m.endedAt ?? deps.now() }
     deps.store.save(next)
     return next
   }
 
-  // ── Merge: bring the committed branch into the USER'S checked-out branch ──
-  // The one portify action that touches the user's own working tree, so both
-  // entry points re-check live git state and never leave a repo mid-merge
-  // (mergePortifyBranch aborts on conflict).
-
-  function committedManifest(workflowId: string): PortifyManifest {
-    const m = deps.store.get(workflowId)
-    if (!m) throw Object.assign(new Error('workflow not found'), { statusCode: 404 })
-    if (m.status !== 'committed') {
-      throw Object.assign(new Error(`cannot merge a workflow in status "${m.status}" — commit it first`), { statusCode: 409 })
-    }
-    return m
-  }
-
-  // Repos that share a git root were committed as one (one worktree, one sha) —
-  // merge them as one too. Keyed by git root; falls back to the repo path when
-  // the root can't be resolved (the status read then reports it unmergeable).
-  async function committedGroups(m: PortifyManifest): Promise<Map<string, { names: string[]; sha: string }>> {
-    const byRoot = new Map<string, { names: string[]; sha: string }>()
-    for (const r of m.repos) {
-      if (!r.commitSha) continue
-      const repoPath = resolveRepoPath(r.path)
-      const root = (await getGitRoot(repoPath)) ?? repoPath
-      const group = byRoot.get(root) ?? { names: [], sha: r.commitSha }
-      group.names.push(r.name)
-      byRoot.set(root, group)
-    }
-    return byRoot
-  }
-
-  /** Live, per-git-root merge readiness — computed from git, never recorded. */
-  async function mergeStatusFor(workflowId: string): Promise<PortifyMergeStatusResult> {
-    const m = committedManifest(workflowId)
-    const groups = await committedGroups(m)
-    const repos: PortifyRepoMergeStatus[] = []
-    for (const [root, group] of groups) {
-      const s = await repoMergeStatus(root, m.branch, group.sha)
-      repos.push({ name: group.names.join(', '), gitRoot: root, commitSha: group.sha, ...s })
-    }
-    return {
-      workflowId,
-      branch: m.branch,
-      repos,
-      merged: repos.every((r) => r.merged),
-      nothingToMerge: repos.length === 0,
-    }
-  }
-
-  /**
-   * Merge the branch into each repo's current branch, sequentially; stop at the
-   * first repo that can't merge cleanly (its results entry says why — already-
-   * merged roots are skipped idempotently, so re-running after a fix is safe).
-   */
-  async function merge(workflowId: string): Promise<PortifyMergeResult> {
-    const m = committedManifest(workflowId)
-    const groups = await committedGroups(m)
-    const results: PortifyRepoMergeResult[] = []
-    const shaByMember = new Map<string, string>()
-    let allOk = true
-    for (const [root, group] of groups) {
-      const name = group.names.join(', ')
-      try {
-        const out = await mergePortifyBranch(root, m.branch)
-        if (out.ok) {
-          results.push({ name, ok: true, mergeCommitSha: out.mergeCommitSha, alreadyMerged: out.alreadyMerged })
-          for (const member of group.names) shaByMember.set(member, out.mergeCommitSha)
-        } else {
-          allOk = false
-          results.push({ name, ok: false, conflictFiles: out.conflictFiles })
-          break
-        }
-      } catch (err) {
-        allOk = false
-        results.push({ name, ok: false, error: err instanceof Error ? err.message : String(err) })
-        break
-      }
-    }
-    let next = m
-    if (allOk && shaByMember.size > 0) {
-      next = {
-        ...m,
-        mergedAt: deps.now(),
-        repos: m.repos.map((r) => {
-          const sha = shaByMember.get(r.name)
-          return sha ? { ...r, mergeCommitSha: sha } : r
-        }),
-      }
-      deps.store.save(next)
-    }
-    return { ok: allOk, results, manifest: next }
-  }
-
   // Remove a finished workflow from history (index + run dir). Only terminal
-  // workflows can be removed — an active one must be committed or cancelled
-  // first. Removing a committed one keeps its git branch (the user's work).
+  // workflows can be removed — an active one must be saved or cancelled first.
   async function remove(workflowId: string): Promise<{ workflowId: string; removed: true }> {
     const m = deps.store.get(workflowId)
     if (!m) throw Object.assign(new Error('workflow not found'), { statusCode: 404 })
-    const terminal = m.status === 'committed' || m.status === 'failed' || m.status === 'aborted'
+    const terminal = m.status === 'saved' || m.status === 'failed' || m.status === 'aborted'
     if (!terminal) {
       throw Object.assign(
-        new Error(`cannot remove a workflow in status "${m.status}" — commit or cancel it first`),
+        new Error(`cannot remove a workflow in status "${m.status}" — save or cancel it first`),
         { statusCode: 409 },
       )
     }
@@ -495,7 +416,7 @@ export function createPortifyRunner(deps: PortifyRunnerDeps) {
     return { workflowId, removed: true }
   }
 
-  return { startPortify, commit, cancel, revise, remove, merge, mergeStatus: mergeStatusFor, abort: cancel }
+  return { startPortify, save, cancel, revise, remove, abort: cancel }
 }
 
 function readFileOrNull(p: string): string | null {

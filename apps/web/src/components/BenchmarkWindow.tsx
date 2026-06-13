@@ -363,7 +363,7 @@ function ConfigScreen({
           feature={feature}
           agent={agent}
           onClose={() => setPortifyOpen(false)}
-          onCommitted={() => { setPortifyOpen(false); setGate(null) }}
+          onSaved={() => { setPortifyOpen(false); setGate(null) }}
         />
       )}
     </>

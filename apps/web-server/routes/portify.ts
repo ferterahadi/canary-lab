@@ -1,21 +1,19 @@
 import type { FastifyInstance } from 'fastify'
 import type { PortifyStore } from '../lib/runtime/portify/store'
-import type { PortifyManifest, PortifyMergeResult, PortifyMergeStatusResult, StartPortifyInput, StartPortifyResult } from '../lib/runtime/portify/types'
+import type { PortifyManifest, StartPortifyInput, StartPortifyResult } from '../lib/runtime/portify/types'
 import type { HealAgent } from '../lib/runtime/auto-heal'
 
 // REST surface for the port-ification workflow, mirroring routes/benchmarks.ts.
-// Reads go through the injected store; start/commit/cancel delegate to the
+// Reads go through the injected store; start/save/cancel delegate to the
 // injected runner. The wizard polls GET /api/portify/:id for live status.
 
 export interface PortifyRouteDeps {
   store: PortifyStore
   startPortify(input: StartPortifyInput): Promise<StartPortifyResult>
-  commitPortify(workflowId: string): Promise<PortifyManifest>
+  savePortify(workflowId: string): Promise<PortifyManifest>
   cancelPortify(workflowId: string): Promise<PortifyManifest>
   revisePortify(workflowId: string, feedback: string): Promise<PortifyManifest>
   removePortify(workflowId: string): Promise<{ workflowId: string; removed: true }>
-  mergePortify(workflowId: string): Promise<PortifyMergeResult>
-  portifyMergeStatus(workflowId: string): Promise<PortifyMergeStatusResult>
   loadAgentSession(workflowId: string): { agent: string; sessionId: string; model?: string; effort?: string; events: unknown[] } | null
 }
 
@@ -68,9 +66,12 @@ export async function portifyRoutes(app: FastifyInstance, deps: PortifyRouteDeps
     return session
   })
 
-  app.post<{ Params: { workflowId: string } }>('/api/portify/:workflowId/commit', async (req, reply) => {
+  // Save the verified edits as the feature's ephemeral overlay (replaces the
+  // old commit/merge). The scratch worktree is discarded; nothing lands in the
+  // product repo.
+  app.post<{ Params: { workflowId: string } }>('/api/portify/:workflowId/save', async (req, reply) => {
     try {
-      return await deps.commitPortify(req.params.workflowId)
+      return await deps.savePortify(req.params.workflowId)
     } catch (err) {
       reply.code((err as { statusCode?: number }).statusCode ?? 500)
       return { error: err instanceof Error ? err.message : String(err) }
@@ -80,28 +81,6 @@ export async function portifyRoutes(app: FastifyInstance, deps: PortifyRouteDeps
   app.post<{ Params: { workflowId: string } }>('/api/portify/:workflowId/cancel', async (req, reply) => {
     try {
       return await deps.cancelPortify(req.params.workflowId)
-    } catch (err) {
-      reply.code((err as { statusCode?: number }).statusCode ?? 500)
-      return { error: err instanceof Error ? err.message : String(err) }
-    }
-  })
-
-  // Live merge readiness of the user's repos (clean? branch exists? merged?).
-  // Computed from git on every call — the Committed screen's Re-check button.
-  app.get<{ Params: { workflowId: string } }>('/api/portify/:workflowId/merge-status', async (req, reply) => {
-    try {
-      return await deps.portifyMergeStatus(req.params.workflowId)
-    } catch (err) {
-      reply.code((err as { statusCode?: number }).statusCode ?? 500)
-      return { error: err instanceof Error ? err.message : String(err) }
-    }
-  })
-
-  // Merge the committed branch into each repo's checked-out branch. Conflicts
-  // are aborted server-side (never left mid-merge) and reported per repo.
-  app.post<{ Params: { workflowId: string } }>('/api/portify/:workflowId/merge', async (req, reply) => {
-    try {
-      return await deps.mergePortify(req.params.workflowId)
     } catch (err) {
       reply.code((err as { statusCode?: number }).statusCode ?? 500)
       return { error: err instanceof Error ? err.message : String(err) }
@@ -119,7 +98,7 @@ export async function portifyRoutes(app: FastifyInstance, deps: PortifyRouteDeps
   })
 
   // Resume the agent with the reviewer's feedback (revise pass). The workflow
-  // cycles back through editing → verifying → ready-to-commit; the wizard polls.
+  // cycles back through editing → verifying → ready-to-save; the wizard polls.
   app.post<{ Params: { workflowId: string }; Body: ReviseBody }>('/api/portify/:workflowId/revise', async (req, reply) => {
     const feedback = typeof req.body?.feedback === 'string' ? req.body.feedback.trim() : ''
     if (!feedback) {

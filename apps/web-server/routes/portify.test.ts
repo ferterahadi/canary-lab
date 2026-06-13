@@ -12,7 +12,7 @@ function manifest(over: Partial<PortifyManifest> = {}): PortifyManifest {
     repos: [{ name: 'mighty-cns', path: '~/mighty-cns' }],
     agent: 'claude',
     branch: 'canary/dynamic-ports-cns',
-    status: 'ready-to-commit',
+    status: 'ready-to-save',
     attempt: 1,
     maxAttempts: 3,
     startedAt: '2026-06-07T00:00:00.000Z',
@@ -37,14 +37,10 @@ async function buildApp(deps: Partial<PortifyRouteDeps>) {
   await app.register(portifyRoutes, {
     store: deps.store ?? fakeStore(),
     startPortify: deps.startPortify ?? (async () => ({ workflowId: 'portify-1' })),
-    commitPortify: deps.commitPortify ?? (async () => manifest({ status: 'committed' })),
+    savePortify: deps.savePortify ?? (async () => manifest({ status: 'saved' })),
     cancelPortify: deps.cancelPortify ?? (async () => manifest({ status: 'aborted' })),
     revisePortify: deps.revisePortify ?? (async () => manifest({ status: 'editing', feedbackRounds: 1 })),
     removePortify: deps.removePortify ?? (async (workflowId) => ({ workflowId, removed: true as const })),
-    mergePortify: deps.mergePortify ?? (async () => ({ ok: true, results: [], manifest: manifest({ status: 'committed' }) })),
-    portifyMergeStatus: deps.portifyMergeStatus ?? (async (workflowId) => ({
-      workflowId, branch: 'canary/dynamic-ports-cns', repos: [], merged: false, nothingToMerge: true,
-    })),
     loadAgentSession: deps.loadAgentSession ?? (() => null),
   })
   return app
@@ -96,7 +92,7 @@ describe('portifyRoutes', () => {
     const found = await build({ store: fakeStore({ get: () => manifest() }) })
     const ok = await found.inject({ method: 'GET', url: '/api/portify/portify-1' })
     expect(ok.statusCode).toBe(200)
-    expect(ok.json()).toMatchObject({ workflowId: 'portify-1', status: 'ready-to-commit' })
+    expect(ok.json()).toMatchObject({ workflowId: 'portify-1', status: 'ready-to-save' })
 
     const missing = await build({ store: fakeStore({ get: () => null }) })
     const res = await missing.inject({ method: 'GET', url: '/api/portify/nope' })
@@ -104,26 +100,26 @@ describe('portifyRoutes', () => {
   })
 
   it('GET /api/portify lists workflows', async () => {
-    const app = await build({ store: fakeStore({ list: () => [{ workflowId: 'portify-1', feature: 'cns', status: 'committed', startedAt: 'x' }] }) })
+    const app = await build({ store: fakeStore({ list: () => [{ workflowId: 'portify-1', feature: 'cns', status: 'saved', startedAt: 'x' }] }) })
     const res = await app.inject({ method: 'GET', url: '/api/portify' })
     expect(res.statusCode).toBe(200)
     expect(res.json()).toHaveLength(1)
   })
 
-  it('POST /api/portify/:id/commit delegates to the runner', async () => {
-    let committed: string | undefined
-    const app = await build({ commitPortify: async (id) => { committed = id; return manifest({ status: 'committed' }) } })
-    const res = await app.inject({ method: 'POST', url: '/api/portify/portify-1/commit' })
+  it('POST /api/portify/:id/save delegates to the runner', async () => {
+    let saved: string | undefined
+    const app = await build({ savePortify: async (id) => { saved = id; return manifest({ status: 'saved' }) } })
+    const res = await app.inject({ method: 'POST', url: '/api/portify/portify-1/save' })
     expect(res.statusCode).toBe(200)
-    expect(committed).toBe('portify-1')
-    expect(res.json()).toMatchObject({ status: 'committed' })
+    expect(saved).toBe('portify-1')
+    expect(res.json()).toMatchObject({ status: 'saved' })
   })
 
-  it('POST /api/portify/:id/commit surfaces a 409 when not ready', async () => {
+  it('POST /api/portify/:id/save surfaces a 409 when not ready', async () => {
     const app = await build({
-      commitPortify: async () => { throw Object.assign(new Error('cannot commit a workflow in status "editing"'), { statusCode: 409 }) },
+      savePortify: async () => { throw Object.assign(new Error('cannot save a workflow in status "editing"'), { statusCode: 409 }) },
     })
-    const res = await app.inject({ method: 'POST', url: '/api/portify/portify-1/commit' })
+    const res = await app.inject({ method: 'POST', url: '/api/portify/portify-1/save' })
     expect(res.statusCode).toBe(409)
   })
 
@@ -192,11 +188,11 @@ describe('portifyRoutes', () => {
     expect(res.statusCode).toBe(400)
   })
 
-  it('POST /api/portify/:id/commit defaults to 500 for a non-statusCode error', async () => {
-    const app = await build({ commitPortify: async () => { throw new Error('git exploded') } })
-    const res = await app.inject({ method: 'POST', url: '/api/portify/portify-1/commit' })
+  it('POST /api/portify/:id/save defaults to 500 for a non-statusCode error', async () => {
+    const app = await build({ savePortify: async () => { throw new Error('disk exploded') } })
+    const res = await app.inject({ method: 'POST', url: '/api/portify/portify-1/save' })
     expect(res.statusCode).toBe(500)
-    expect(res.json()).toMatchObject({ error: 'git exploded' })
+    expect(res.json()).toMatchObject({ error: 'disk exploded' })
   })
 
   it('POST /api/portify/:id/cancel surfaces runner errors', async () => {
@@ -214,7 +210,7 @@ describe('portifyRoutes', () => {
     expect(res.statusCode).toBe(500)
   })
 
-  it('stringifies a non-Error throw across start/commit/cancel', async () => {
+  it('stringifies a non-Error throw across start/save/cancel', async () => {
     // eslint-disable-next-line @typescript-eslint/only-throw-error
     const startApp = await build({ startPortify: async () => { throw 'raw start failure' } })
     const s = await startApp.inject({ method: 'POST', url: '/api/portify', payload: { feature: 'cns' } })
@@ -222,8 +218,8 @@ describe('portifyRoutes', () => {
     expect(s.json()).toMatchObject({ error: 'raw start failure' })
 
     // eslint-disable-next-line @typescript-eslint/only-throw-error
-    const commitApp = await build({ commitPortify: async () => { throw 'raw commit failure' } })
-    expect((await commitApp.inject({ method: 'POST', url: '/api/portify/w/commit' })).json()).toMatchObject({ error: 'raw commit failure' })
+    const saveApp = await build({ savePortify: async () => { throw 'raw save failure' } })
+    expect((await saveApp.inject({ method: 'POST', url: '/api/portify/w/save' })).json()).toMatchObject({ error: 'raw save failure' })
 
     // eslint-disable-next-line @typescript-eslint/only-throw-error
     const cancelApp = await build({ cancelPortify: async () => { throw 'raw cancel failure' } })
@@ -254,70 +250,6 @@ describe('portifyRoutes', () => {
     const rRaw = await appRaw.inject({ method: 'POST', url: '/api/portify/w/revise', payload: { feedback: 'x' } })
     expect(rRaw.statusCode).toBe(500)
     expect(rRaw.json()).toMatchObject({ error: 'raw revise failure' })
-  })
-
-  it('GET /api/portify/:id/merge-status returns live readiness', async () => {
-    const app = await build({
-      portifyMergeStatus: async (id) => ({
-        workflowId: id,
-        branch: 'canary/dynamic-ports-cns',
-        repos: [{ name: 'mighty-cns', gitRoot: '/r', commitSha: 'abc', branchExists: true, currentBranch: 'main', dirty: false, mergeInProgress: false, merged: false }],
-        merged: false,
-        nothingToMerge: false,
-      }),
-    })
-    const res = await app.inject({ method: 'GET', url: '/api/portify/portify-1/merge-status' })
-    expect(res.statusCode).toBe(200)
-    expect(res.json()).toMatchObject({ workflowId: 'portify-1', merged: false, repos: [{ name: 'mighty-cns', currentBranch: 'main' }] })
-  })
-
-  it('GET /api/portify/:id/merge-status surfaces the runner statusCode (409 not committed)', async () => {
-    const app = await build({
-      portifyMergeStatus: async () => { throw Object.assign(new Error('cannot merge a workflow in status "editing" — commit it first'), { statusCode: 409 }) },
-    })
-    const res = await app.inject({ method: 'GET', url: '/api/portify/portify-1/merge-status' })
-    expect(res.statusCode).toBe(409)
-    expect((res.json() as { error: string }).error).toContain('cannot merge')
-  })
-
-  it('GET /api/portify/:id/merge-status defaults to 500 and stringifies non-Error throws', async () => {
-    const app = await build({ portifyMergeStatus: async () => { throw 'unexpected merge-status failure' } })
-    const res = await app.inject({ method: 'GET', url: '/api/portify/portify-1/merge-status' })
-    expect(res.statusCode).toBe(500)
-    expect((res.json() as { error: string }).error).toBe('unexpected merge-status failure')
-  })
-
-  it('POST /api/portify/:id/merge stringifies non-Error throws', async () => {
-    const app = await build({ mergePortify: async () => { throw 'unexpected merge failure' } })
-    const res = await app.inject({ method: 'POST', url: '/api/portify/portify-1/merge' })
-    expect(res.statusCode).toBe(500)
-    expect((res.json() as { error: string }).error).toBe('unexpected merge failure')
-  })
-
-  it('POST /api/portify/:id/merge delegates to the runner and returns per-repo results', async () => {
-    let merged: string | undefined
-    const app = await build({
-      mergePortify: async (id) => {
-        merged = id
-        return { ok: true, results: [{ name: 'mighty-cns', ok: true, mergeCommitSha: 'deadbeef00', alreadyMerged: false }], manifest: manifest({ status: 'committed', mergedAt: 'now' }) }
-      },
-    })
-    const res = await app.inject({ method: 'POST', url: '/api/portify/portify-1/merge' })
-    expect(res.statusCode).toBe(200)
-    expect(merged).toBe('portify-1')
-    expect(res.json()).toMatchObject({ ok: true, results: [{ mergeCommitSha: 'deadbeef00' }] })
-  })
-
-  it('POST /api/portify/:id/merge surfaces statusCode errors and defaults to 500', async () => {
-    const app404 = await build({
-      mergePortify: async () => { throw Object.assign(new Error('workflow not found'), { statusCode: 404 }) },
-    })
-    expect((await app404.inject({ method: 'POST', url: '/api/portify/w/merge' })).statusCode).toBe(404)
-
-    const app500 = await build({ mergePortify: async () => { throw new Error('git exploded') } })
-    const r500 = await app500.inject({ method: 'POST', url: '/api/portify/w/merge' })
-    expect(r500.statusCode).toBe(500)
-    expect(r500.json()).toMatchObject({ error: 'git exploded' })
   })
 
   it('GET /api/portify/:id/agent-session returns the session when present', async () => {

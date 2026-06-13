@@ -50,6 +50,10 @@ export interface Feature {
   description?: string
   repos: FeatureRepo[]
   envs: string[]
+  /** A saved port overlay exists (features/<feature>/portify/) → boots
+   *  concurrently. Drives the "Portified" badge. Optional: absent in older
+   *  payloads. */
+  portified?: boolean
 }
 
 export interface ExtractedStep {

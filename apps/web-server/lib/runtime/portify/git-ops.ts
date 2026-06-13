@@ -1,10 +1,13 @@
+import fs from 'fs'
 import { runGit, diffContentSinceSnapshot } from '../../git-repo'
 import { addWorktree, removeWorktree, linkNodeModules, type WorktreeHandle } from '../repo-worktree'
 
-// Branch + worktree + diff + commit/discard mechanics for the port-ification
-// workflow. The agent edits on a dedicated branch in an isolated worktree cut
-// off committed HEAD; the commit (on user confirm) lands on that branch in the
-// product repo, leaving the user's main working tree untouched.
+// Branch + worktree + diff + overlay-apply/reverse mechanics for the
+// port-ification workflow. The agent edits on a dedicated scratch branch in an
+// isolated worktree cut off committed HEAD; the verified diff is captured as the
+// feature's ephemeral overlay (the scratch worktree+branch are then discarded —
+// NOTHING lands in the product repo). At run time the overlay is applied into a
+// fresh per-run worktree and reverse-applied at teardown.
 
 export function portifyBranchName(feature: string): string {
   const slug = feature.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'feature'
@@ -58,101 +61,87 @@ export async function changedFiles(worktreeRoot: string, snapshotRef: string): P
   return res.stdout.split(/\r?\n/).map((l) => l.trim()).filter(Boolean)
 }
 
-/**
- * Stage + commit the agent's edits on the branch. Returns the new commit SHA,
- * or null when this worktree has no changes to commit (e.g. a repo whose app
- * already honored an injected port — only the config changed, which lives
- * outside the worktree). The caller decides what to do with an empty repo.
- */
-export async function commitWorktree(worktreeRoot: string, message: string): Promise<string | null> {
-  await runGit(worktreeRoot, [
-    'add', '-A', '--', '.',
-    ':(exclude)node_modules',
-    ':(exclude)test-results',
-    ':(exclude)playwright-report',
-    ':(exclude)blob-report',
-    ':(exclude).cache',
-  ])
-  const staged = await runGit(worktreeRoot, ['diff', '--cached', '--name-only'])
-  if (!staged.stdout.trim()) return null
-  const commit = await runGit(worktreeRoot, [
-    '-c', 'user.name=canary-lab', '-c', 'user.email=portify@canary-lab',
-    'commit', '-m', message, '--no-verify',
-  ])
-  if (commit.code !== 0) {
-    throw new Error(`commit failed: ${`${commit.stderr}${commit.stdout}`.trim()}`)
+// --- Ephemeral overlay apply/reverse ------------------------------------------
+//
+// The ephemeral-overlay model NEVER commits or merges. Instead a captured patch
+// is applied into a per-run worktree before boot and reverse-applied at
+// teardown. These helpers are the git mechanics for that; they never remove the
+// worktree (the worktree outlives the overlay — it holds the heal agent's
+// repair edits we must preserve).
+
+export type ApplyOutcome =
+  | { kind: 'ok' }
+  /** The patch couldn't apply cleanly because the target lines drifted (e.g. a
+   *  heal edit on the same lines). For reverse, the file is left INTACT. */
+  | { kind: 'conflict'; files: string[]; detail: string }
+  /** A hard failure (corrupt patch, missing base blob) — nothing was applied. */
+  | { kind: 'error'; detail: string }
+
+function isBlankPatch(patchPath: string): boolean {
+  try {
+    return fs.readFileSync(patchPath, 'utf-8').trim().length === 0
+  } catch {
+    return false
   }
-  const rev = await runGit(worktreeRoot, ['rev-parse', 'HEAD'])
-  return rev.stdout.trim()
 }
 
-export interface RepoMergeStatus {
-  branchExists: boolean
-  /** Currently checked-out branch; null when HEAD is detached. */
-  currentBranch: string | null
-  dirty: boolean
-  mergeInProgress: boolean
-  /** The portify work (commitSha when given, else the branch tip) is an ancestor of HEAD. */
-  merged: boolean
+/** Repo-relative paths a patch touches, parsed without applying it. */
+async function patchFiles(worktreeRoot: string, patchPath: string): Promise<string[]> {
+  const res = await runGit(worktreeRoot, ['apply', '--numstat', '-z', patchPath])
+  if (res.code !== 0) return []
+  // `--numstat -z`: NUL-separated records of `added \t removed \t path`.
+  return res.stdout
+    .split('\0')
+    .map((rec) => rec.split('\t')[2]?.trim())
+    .filter((p): p is string => Boolean(p))
+}
+
+/** Conflicted paths reported by `git apply --3way` (lines like `U path`). */
+function parseUnmergedFiles(stderr: string): string[] {
+  return stderr
+    .split(/\r?\n/)
+    .map((l) => /^U\s+(.+)$/.exec(l.trim())?.[1])
+    .filter((p): p is string => Boolean(p))
 }
 
 /**
- * Live merge readiness of the USER'S repo (not a worktree). `merged` is
- * computed, not recorded — a manual `git merge` in a terminal counts. When the
- * branch was deleted after merging, pass the commit sha so merged-ness still
- * resolves.
+ * Apply the overlay patch into a worktree. Tries a plain working-tree apply
+ * first (no `--index`, so it doesn't require the worktree to match the git
+ * index — a per-run worktree boots, it isn't committed), then falls back to
+ * `--3way` to tolerate benign base drift via the recorded blobs. A blank patch
+ * is a no-op `ok` (the repo's app already honored the injected port). On true
+ * conflict the 3-way merge leaves markers — surfaced as `conflict`; the caller
+ * must NOT boot.
  */
-export async function mergeStatus(repoRoot: string, branch: string, commitSha?: string): Promise<RepoMergeStatus> {
-  const branchRes = await runGit(repoRoot, ['rev-parse', '-q', '--verify', `refs/heads/${branch}`])
-  const branchExists = branchRes.code === 0
-  const headRes = await runGit(repoRoot, ['symbolic-ref', '-q', '--short', 'HEAD'])
-  const currentBranch = headRes.code === 0 && headRes.stdout.trim() ? headRes.stdout.trim() : null
-  const statusRes = await runGit(repoRoot, ['status', '--porcelain', '--', '.'])
-  const dirty = Boolean(statusRes.stdout.trim())
-  const mergeHead = await runGit(repoRoot, ['rev-parse', '-q', '--verify', 'MERGE_HEAD'])
-  const mergeInProgress = mergeHead.code === 0
-  const ref = commitSha ?? (branchExists ? branch : null)
-  let merged = false
-  if (ref) {
-    const anc = await runGit(repoRoot, ['merge-base', '--is-ancestor', ref, 'HEAD'])
-    merged = anc.code === 0
-  }
-  return { branchExists, currentBranch, dirty, mergeInProgress, merged }
+export async function applyOverlay(worktreeRoot: string, patchPath: string): Promise<ApplyOutcome> {
+  if (isBlankPatch(patchPath)) return { kind: 'ok' }
+  const plain = await runGit(worktreeRoot, ['apply', patchPath])
+  if (plain.code === 0) return { kind: 'ok' }
+  // Plain apply failed (e.g. the user's HEAD drifted under the patch) — retry
+  // with a 3-way merge, which reconstructs via the blobs recorded in the patch.
+  const three = await runGit(worktreeRoot, ['apply', '--3way', patchPath])
+  if (three.code === 0) return { kind: 'ok' }
+  const detail = `${three.stderr}${three.stdout}`.trim()
+  const files = parseUnmergedFiles(three.stderr)
+  if (files.length > 0) return { kind: 'conflict', files, detail }
+  return { kind: 'error', detail: detail || `${plain.stderr}${plain.stdout}`.trim() }
 }
 
-export type MergeOutcome =
-  | { ok: true; mergeCommitSha: string; alreadyMerged: boolean }
-  | { ok: false; conflictFiles: string[] }
-
 /**
- * Merge the portify branch into the repo's currently checked-out branch — the
- * one git operation that DOES touch the user's tree, so it refuses any state
- * it can't merge cleanly from, and on conflict it aborts and reports rather
- * than leaving conflict markers behind.
+ * Reverse-apply the overlay patch (`git apply -R`) at teardown. Plain reverse is
+ * ATOMIC — on failure the files are left untouched, preserving the heal agent's
+ * edits even when they overlap the patched lines (surfaced as `conflict`). Never
+ * removes the worktree. A blank patch is a no-op `ok`.
  */
-export async function mergePortifyBranch(repoRoot: string, branch: string): Promise<MergeOutcome> {
-  const s = await mergeStatus(repoRoot, branch)
-  if (!s.branchExists) throw new Error(`branch ${branch} does not exist in ${repoRoot}`)
-  if (s.mergeInProgress) throw new Error(`a merge is already in progress in ${repoRoot} — conclude or abort it first`)
-  if (s.currentBranch == null) throw new Error(`HEAD is detached in ${repoRoot} — check out a branch to merge into`)
-  if (s.dirty) throw new Error(`${repoRoot} has uncommitted changes — commit or stash them before merging`)
-  if (s.merged) {
-    const head = await runGit(repoRoot, ['rev-parse', 'HEAD'])
-    return { ok: true, mergeCommitSha: head.stdout.trim(), alreadyMerged: true }
-  }
-  const merge = await runGit(repoRoot, [
-    '-c', 'user.name=canary-lab', '-c', 'user.email=portify@canary-lab',
-    'merge', '--no-edit', '--no-verify', branch,
-  ])
-  if (merge.code !== 0) {
-    const unmerged = await runGit(repoRoot, ['diff', '--name-only', '--diff-filter=U'])
-    const conflictFiles = unmerged.stdout.split(/\r?\n/).map((l) => l.trim()).filter(Boolean)
-    await runGit(repoRoot, ['merge', '--abort'])
-    if (conflictFiles.length > 0) return { ok: false, conflictFiles }
-    throw new Error(`merge failed: ${`${merge.stderr}${merge.stdout}`.trim()}`)
-  }
-  const head = await runGit(repoRoot, ['rev-parse', 'HEAD'])
-  return { ok: true, mergeCommitSha: head.stdout.trim(), alreadyMerged: false }
+export async function reverseOverlay(worktreeRoot: string, patchPath: string): Promise<ApplyOutcome> {
+  if (isBlankPatch(patchPath)) return { kind: 'ok' }
+  const res = await runGit(worktreeRoot, ['apply', '-R', patchPath])
+  if (res.code === 0) return { kind: 'ok' }
+  const detail = `${res.stderr}${res.stdout}`.trim()
+  // Plain `git apply -R` is atomic: a non-zero exit means nothing changed, so
+  // the heal edits are intact. Report which files the patch covers.
+  const files = await patchFiles(worktreeRoot, patchPath)
+  return { kind: 'conflict', files, detail }
 }
 
 /** Remove the worktree and delete the (unmerged) branch from the source repo. */

@@ -26,7 +26,7 @@ export type PortifyStreamFrame =
   | { type: 'removed'; workflowId: string }
 
 function isActivePortifyStatus(status: PortifyStatus): boolean {
-  return status === 'planning' || status === 'editing' || status === 'verifying' || status === 'ready-to-commit'
+  return status === 'planning' || status === 'editing' || status === 'verifying' || status === 'ready-to-save'
 }
 
 export async function portifyStreamRoutes(
