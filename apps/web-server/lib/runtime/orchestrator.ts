@@ -64,6 +64,8 @@ import { planRestart } from './restart-planner'
 import { interpolateConfigTokens, makeTokenCache } from './launcher/interpolate'
 import { releasePorts } from './port-allocator'
 import { removeWorktree, type WorktreeHandle } from './repo-worktree'
+import { overlayExists, readOverlay, checkStaleness, overlayDir } from './portify/overlay'
+import { applyOverlay, reverseOverlay } from './portify/git-ops'
 import { readPlaywrightArtifactPolicy } from './playwright-artifact-policy'
 import { slugify } from './summary-reporter'
 import { listSpecFiles, loadFeatures } from '../feature-loader'
@@ -470,6 +472,13 @@ export class RunOrchestrator extends EventEmitter {
   private readonly portMap?: Map<string, number>
   private readonly worktreeHandles: WorktreeHandle[]
   private readonly repoPathOverrides: Record<string, string>
+  // Ephemeral port overlay: when the feature has a saved overlay, its captured
+  // patch is `git apply`-ed into each per-run worktree before boot and
+  // reverse-applied at teardown — the target repo is never permanently changed.
+  private readonly portified: boolean
+  // Overlays applied this run, recorded so stop() can reverse exactly what it
+  // applied (and so a failed partial apply reverses only what landed).
+  private appliedOverlays: { repoName: string; worktreeRoot: string; patchPath: string }[] = []
   private readonly signalGate = new HealSignalGate()
   private healCycleHistory: Array<{ cycle: number; restarted: string[]; kept: string[] }> = []
 
@@ -533,6 +542,7 @@ export class RunOrchestrator extends EventEmitter {
     for (const handle of this.worktreeHandles) {
       this.repoPathOverrides[handle.repoName] = handle.localPath
     }
+    this.portified = overlayExists(opts.feature.featureDir)
     this.services = buildServiceSpecs(opts.feature, opts.runDir, opts.env, {
       portMap: this.portMap,
       repoPathOverrides: this.repoPathOverrides,
@@ -610,7 +620,93 @@ export class RunOrchestrator extends EventEmitter {
   // server show "services up" before tests start.
   async start(): Promise<void> {
     this.prepareRun('starting')
+    // Apply the ephemeral port overlay BEFORE any service spawns. A failure
+    // here throws out of start() so the caller's `.catch` runs stop('aborted')
+    // — we must never boot a portified feature un-portified (the second
+    // concurrent boot would EADDRINUSE on the un-injected port).
+    await this.applyPortifyOverlay()
     await this.ensureServicesRunning()
+  }
+
+  /**
+   * Apply the feature's saved port overlay into each per-run worktree. No-op
+   * unless the feature is portified. Checks staleness first (the user's repo
+   * may have moved since the overlay was captured) and fails loud — with an
+   * actionable "re-run Portify" message — on staleness, a missing worktree, or
+   * a patch that won't apply. Records what it applied for reverse at teardown.
+   */
+  private async applyPortifyOverlay(): Promise<void> {
+    if (!this.portified) return
+    const featureDir = this.feature.featureDir
+    const overlay = readOverlay(featureDir)
+    if (!overlay) {
+      // overlayExists was true at construction but the overlay is now
+      // unreadable (e.g. a patch file vanished) — refuse rather than boot bare.
+      throw new Error(
+        `saved port overlay for "${this.feature.name}" is missing or corrupt — re-run Portify to refresh it`,
+      )
+    }
+    // Worktree must cover every overlay repo; otherwise a service would boot
+    // from un-patched source. Map repo name → its per-run worktree root.
+    const worktreeByRepo: Record<string, string> = {}
+    for (const handle of this.worktreeHandles) worktreeByRepo[handle.repoName] = handle.worktreeRoot
+    const sourceByRepo: Record<string, string> = {}
+    for (const repo of overlay.meta.repos) {
+      const handle = this.worktreeHandles.find((h) => h.repoName === repo.name)
+      if (!handle) {
+        throw new Error(
+          `portified run requires a per-run worktree for repo "${repo.name}" but none was created — this run cannot apply its port overlay safely`,
+        )
+      }
+      sourceByRepo[repo.name] = handle.sourceRoot
+    }
+
+    // Staleness: did the user's repo move under the captured patch?
+    const staleness = await checkStaleness(featureDir, sourceByRepo)
+    if (staleness.stale) {
+      const files = staleness.changedFiles.map((c) => `${c.repo}:${c.path}`).join(', ')
+      throw new Error(
+        `saved port overlay no longer applies (${files} changed since capture) — re-run Portify to refresh it`,
+      )
+    }
+
+    const dir = overlayDir(featureDir)
+    for (const repo of overlay.meta.repos) {
+      const worktreeRoot = worktreeByRepo[repo.name]
+      const patchPath = path.join(dir, repo.patch)
+      const outcome = await applyOverlay(worktreeRoot, patchPath)
+      if (outcome.kind === 'ok') {
+        this.appliedOverlays.push({ repoName: repo.name, worktreeRoot, patchPath })
+        this.runnerLog?.info(`Applied port overlay for "${repo.name}".`)
+        continue
+      }
+      // Apply failed — reverse whatever already landed, then abort loud.
+      await this.reversePortifyOverlay()
+      const detail = outcome.kind === 'conflict' ? `conflicts in ${outcome.files.join(', ')}` : outcome.detail
+      throw new Error(
+        `failed to apply the saved port overlay for "${repo.name}" (${detail}) — re-run Portify to refresh it`,
+      )
+    }
+  }
+
+  /**
+   * Reverse every overlay this run applied (`git apply -R`), keeping the
+   * worktree intact — it holds the heal agent's repair edits. Reverse is atomic
+   * per repo: a conflict (a heal edit on the same lines) leaves that file
+   * untouched and is surfaced as a warning, not a throw.
+   */
+  private async reversePortifyOverlay(): Promise<void> {
+    for (const applied of this.appliedOverlays.splice(0)) {
+      const outcome = await reverseOverlay(applied.worktreeRoot, applied.patchPath)
+      if (outcome.kind === 'ok') {
+        this.runnerLog?.info(`Reverted port overlay for "${applied.repoName}".`)
+      } else {
+        const detail = outcome.kind === 'conflict' ? outcome.files.join(', ') : outcome.detail
+        this.runnerLog?.warn(
+          `port overlay for "${applied.repoName}" could not be reverted (${detail}) — heal edits preserved; the worktree keeps the injected ports`,
+        )
+      }
+    }
   }
 
   private prepareRun(serviceStatus: ServiceManifestEntry['status']): void {
@@ -2360,12 +2456,19 @@ export class RunOrchestrator extends EventEmitter {
       this.servicePtys.delete(name)
     }
     this.logFiles.clear()
-    // Release per-run isolation resources. Ports go back to the pool; worktrees
-    // are torn down (best-effort) so the source repo doesn't accumulate stale
-    // checkouts. Failures here must not block run finalization.
+    // Release per-run isolation resources. Ports go back to the pool. For a
+    // PORTIFIED run we reverse the overlay but KEEP the worktree — it holds the
+    // heal agent's repair edits, and it follows the normal run-worktree
+    // lifecycle (the Cleanup page lists/opens/removes it). For a non-portified
+    // worktree run, tear the worktree down so the source repo doesn't
+    // accumulate stale checkouts. Failures here must not block finalization.
     if (this.portMap) releasePorts(this.portMap.values())
-    for (const handle of this.worktreeHandles) {
-      await removeWorktree(handle).catch(() => {})
+    if (this.portified) {
+      await this.reversePortifyOverlay().catch(() => {})
+    } else {
+      for (const handle of this.worktreeHandles) {
+        await removeWorktree(handle).catch(() => {})
+      }
     }
     const endedAt = new Date().toISOString()
     this.status = finalStatus

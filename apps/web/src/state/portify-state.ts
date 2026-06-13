@@ -92,7 +92,8 @@ export function frameToAction(frame: PortifyStreamFrame): PortifyAction | null {
   }
 }
 
-/** Active = a workflow the user can still act on (not committed/failed/aborted). */
+/** Active = a workflow the user can still act on (not saved/failed/aborted). */
 export function isActivePortify(status: PortifyIndexEntry['status']): boolean {
-  return status === 'planning' || status === 'editing' || status === 'verifying' || status === 'ready-to-commit'
+  return status === 'planning' || status === 'editing' || status === 'verifying'
+    || status === 'ready-to-save'
 }

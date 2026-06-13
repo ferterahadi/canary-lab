@@ -51,11 +51,11 @@ describe('portifyReducer', () => {
   it('carries endedAt into the index entry and keeps both on a startedAt tie', () => {
     let s = portifyReducer(initialPortifyState, {
       type: 'update', workflowId: 'a',
-      manifest: m({ workflowId: 'a', status: 'committed', startedAt: '2026-06-08T00:00:00.000Z', endedAt: '2026-06-08T00:05:00.000Z' }),
+      manifest: m({ workflowId: 'a', status: 'saved', startedAt: '2026-06-08T00:00:00.000Z', endedAt: '2026-06-08T00:05:00.000Z' }),
     })
     s = portifyReducer(s, {
       type: 'update', workflowId: 'b',
-      manifest: m({ workflowId: 'b', status: 'committed', startedAt: '2026-06-08T00:00:00.000Z', endedAt: '2026-06-08T00:06:00.000Z' }),
+      manifest: m({ workflowId: 'b', status: 'saved', startedAt: '2026-06-08T00:00:00.000Z', endedAt: '2026-06-08T00:06:00.000Z' }),
     })
     expect(s.workflows.find((w) => w.workflowId === 'a')?.endedAt).toBe('2026-06-08T00:05:00.000Z')
     expect(s.workflows.map((w) => w.workflowId).sort()).toEqual(['a', 'b'])
@@ -93,10 +93,10 @@ describe('frameToAction', () => {
 
 describe('isActivePortify', () => {
   it('treats planning/editing/verifying/ready-to-commit as active, terminal otherwise', () => {
-    for (const s of ['planning', 'editing', 'verifying', 'ready-to-commit'] as const) {
+    for (const s of ['planning', 'editing', 'verifying', 'ready-to-save'] as const) {
       expect(isActivePortify(s)).toBe(true)
     }
-    for (const s of ['committed', 'failed', 'aborted'] as const) {
+    for (const s of ['saved', 'failed', 'aborted'] as const) {
       expect(isActivePortify(s)).toBe(false)
     }
   })

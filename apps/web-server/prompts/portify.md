@@ -1,6 +1,6 @@
 You are making the app(s) for the Canary Lab feature "{{featureName}}" use INJECTABLE, DYNAMIC ports so the SAME app can boot multiple times concurrently (benchmark arms / parallel runs) on one machine without an `EADDRINUSE` clash.
 
-You are working on a dedicated branch inside isolated git worktrees. Edit each repo's SOURCE in the worktree path listed below (NOT the original repo path), and edit the feature config at its real path. Do NOT commit — a human reviews and commits.
+You are working inside an isolated, throwaway git worktree. Edit each repo's SOURCE in the worktree path listed below (NOT the original repo path), and edit the feature config at its real path. Do NOT commit and do NOT merge: your source edits are captured as an EPHEMERAL OVERLAY (a saved patch) — the product repo is never modified. On every future run Canary Lab applies that overlay into a fresh per-run worktree before boot and reverse-applies it at teardown. A human reviews the diff and SAVES it; the worktree itself is then discarded. (The feature-config + envset edits, by contrast, are permanent — they declare the injectable port slots Canary Lab reads to allocate ports, so they must persist.)
 
 Repos / start commands in this feature:
 {{reposSummary}}

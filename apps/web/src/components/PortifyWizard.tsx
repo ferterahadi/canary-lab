@@ -1,18 +1,21 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import * as api from '../api/client'
-import type { PortifyManifest, PortifyMergeStatusResult, PortifyRepoMergeResult, PortifyStatus } from '../api/client'
+import type { PortifyManifest, PortifyStatus } from '../api/client'
 import { AgentSessionView } from './AgentSessionView'
 import { CopyButton } from './CopyButton'
 
 // Guided port-ification: an agent rewrites the feature's apps to use injectable
-// ports, proven by a concurrent double-boot, ending at a user commit. Full-
-// screen overlay mirroring the benchmark window. Auto-polls the manifest.
+// ports, proven by a concurrent double-boot, ending when the user SAVES the
+// verified edits as the feature's ephemeral overlay (a captured patch under
+// features/<feature>/portify/). Nothing is committed or merged — at run time
+// the overlay is applied into a per-run worktree and reverse-applied at
+// teardown. Full-screen overlay mirroring the benchmark window; auto-polls.
 
 const STEPS: { key: string; label: string; sub: string }[] = [
   { key: 'plan', label: 'Plan', sub: 'what changes' },
   { key: 'exercise', label: 'Exercise', sub: 'agent + verify' },
   { key: 'review', label: 'Review', sub: 'diff + proof' },
-  { key: 'merge', label: 'Merge', sub: 'into your branch' },
+  { key: 'save', label: 'Save', sub: 'as overlay' },
 ]
 
 function stepIndexFor(phase: 'plan' | PortifyStatus): number {
@@ -21,19 +24,19 @@ function stepIndexFor(phase: 'plan' | PortifyStatus): number {
     case 'planning':
     case 'editing':
     case 'verifying': return 1
-    case 'ready-to-commit':
+    case 'ready-to-save':
     case 'failed': return 2
-    case 'committed': return 3
+    case 'saved': return 3
     default: return 1
   }
 }
 
 const STATUS_LABEL: Record<PortifyStatus, string> = {
-  planning: 'Setting up branch + worktree…',
+  planning: 'Setting up scratch worktree…',
   editing: 'Agent is rewriting ports…',
   verifying: 'Booting twice on different ports…',
-  'ready-to-commit': 'Verified — ready to commit',
-  committed: 'Committed — merge to finish',
+  'ready-to-save': 'Verified — ready to save',
+  saved: 'Saved — boots concurrently from now on',
   failed: 'Could not make it work',
   aborted: 'Cancelled',
 }
@@ -43,7 +46,7 @@ export function PortifyWizard({
   agent = 'claude',
   workflowId: initialWorkflowId,
   onClose,
-  onCommitted,
+  onSaved,
 }: {
   /** New mode: the feature to port-ify (Plan screen → Start). */
   feature?: string
@@ -51,7 +54,7 @@ export function PortifyWizard({
   /** Revisit mode: reopen an in-flight workflow by id (skip the Plan screen). */
   workflowId?: string
   onClose: () => void
-  onCommitted: () => void
+  onSaved: () => void
 }) {
   const [workflowId, setWorkflowId] = useState<string | null>(initialWorkflowId ?? null)
   const [m, setM] = useState<PortifyManifest | null>(null)
@@ -60,18 +63,12 @@ export function PortifyWizard({
   const [confirmLeave, setConfirmLeave] = useState(false)
   const [feedbackOpen, setFeedbackOpen] = useState(false)
   // Bumped after a revise pass to restart the poller (status flips back to
-  // editing, so polling — stopped at ready-to-commit — must resume).
+  // editing, so polling — stopped at ready-to-save — must resume).
   const [pollNonce, setPollNonce] = useState(0)
   // Stepper navigation override: which step the user is *viewing*, when it
   // differs from the status-derived step. Null = follow status. Only honored
-  // once Review is reached (ready-to-commit / committed).
+  // once Review is reached (ready-to-save / saved).
   const [viewStep, setViewStep] = useState<number | null>(null)
-  // Live merge readiness of the user's repos (fetched once committed; Re-check
-  // refetches). Null until the first read lands — the screen shows a pending row.
-  const [mergeInfo, setMergeInfo] = useState<PortifyMergeStatusResult | null>(null)
-  // Per-repo outcome of the last merge attempt (conflicts/errors to display).
-  const [mergeResults, setMergeResults] = useState<PortifyRepoMergeResult[] | null>(null)
-  const [mergeBusy, setMergeBusy] = useState(false)
   const pollRef = useRef<number | null>(null)
 
   const stopPolling = useCallback(() => {
@@ -85,7 +82,7 @@ export function PortifyWizard({
       try {
         const next = await api.getPortify(workflowId)
         setM(next)
-        if (['ready-to-commit', 'committed', 'failed', 'aborted'].includes(next.status)) stopPolling()
+        if (isTerminalOrParked(next.status)) stopPolling()
       } catch { /* transient */ }
     }
     void tick()
@@ -96,8 +93,7 @@ export function PortifyWizard({
   // Drop any stepper override whenever the run isn't in a navigable state
   // (active again after a revise, or terminal-failed) so live progress shows.
   useEffect(() => {
-    const s = m?.status
-    if (s !== 'ready-to-commit' && s !== 'committed') setViewStep(null)
+    if (!isNavigable(m?.status)) setViewStep(null)
   }, [m?.status])
 
   const start = async () => {
@@ -113,15 +109,13 @@ export function PortifyWizard({
     }
   }
 
-  // Commit lands the rewrite on the branch (status → committed) but the work
-  // isn't done — the user still has to merge. Show the returned manifest and
-  // advance to the Merge step; onCommitted (which closes the wizard) is the
-  // "Done" handler reached from the Merge screen, not commit itself.
-  const commit = async () => {
+  // Save captures the verified edits as the feature's ephemeral overlay (status
+  // → saved) and discards the scratch worktree. Advance to the Save step.
+  const save = async () => {
     if (!workflowId) return
     setBusy(true); setError(null)
     try {
-      const next = await api.commitPortify(workflowId)
+      const next = await api.savePortify(workflowId)
       setM(next)
       setViewStep(3)
     } catch (e) {
@@ -131,39 +125,9 @@ export function PortifyWizard({
     }
   }
 
-  // Re-read live merge readiness (clean tree? branch exists? already merged —
-  // possibly by hand in a terminal?). Transient failures keep the last state;
-  // the screen always retains the manual-merge fallback.
-  const refreshMergeStatus = useCallback(async () => {
-    if (!workflowId) return
-    try {
-      const next = await api.getPortifyMergeStatus(workflowId)
-      if (next) setMergeInfo(next)
-    } catch { /* transient */ }
-  }, [workflowId])
-
-  useEffect(() => {
-    if (m?.status === 'committed') void refreshMergeStatus()
-  }, [m?.status, refreshMergeStatus])
-
-  const merge = async () => {
-    if (!workflowId) return
-    setMergeBusy(true); setError(null)
-    try {
-      const res = await api.mergePortify(workflowId)
-      setMergeResults(res.results)
-      if (res.manifest) setM(res.manifest)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
-    } finally {
-      setMergeBusy(false)
-      void refreshMergeStatus()
-    }
-  }
-
   // Send review feedback: the agent resumes its session, the workflow flips
   // back to editing, and the poller (restarted via pollNonce) takes it through
-  // verifying → ready-to-commit again.
+  // verifying → ready-to-save again.
   const revise = async (feedback: string) => {
     if (!workflowId) return
     setBusy(true); setError(null)
@@ -186,27 +150,25 @@ export function PortifyWizard({
     onClose()
   }
 
-  // Discard: explicitly tear the workflow down (worktree + branch) and close.
-  // Only reachable via the destructive "Cancel" → "Discard" confirmation.
+  // Discard: explicitly tear the workflow down (scratch worktree + branch) and
+  // close. Only reachable via the destructive "Cancel" → "Discard" confirmation.
   const discard = async () => {
     stopPolling()
-    if (workflowId && m && m.status !== 'committed') {
+    if (workflowId && m && !isSaved(m.status)) {
       try { await api.cancelPortify(workflowId) } catch { /* best-effort */ }
     }
     onClose()
   }
 
   const status = m?.status
-  // Merged-ness is computed live (manual terminal merges count); the persisted
-  // mergedAt is the hint shown until the first live read lands.
-  const merged = mergeInfo ? mergeInfo.merged : Boolean(m?.mergedAt)
-  // A workflow is "in flight" (cancellable / worth keeping alive) until terminal.
+  // A workflow is "in flight" (cancellable / worth keeping alive) until it is
+  // saved or terminal.
   const isActive = Boolean(workflowId) && status != null
-    && status !== 'committed' && status !== 'failed' && status !== 'aborted'
+    && !isSaved(status) && status !== 'failed' && status !== 'aborted'
   // statusStep = where the workflow's status puts it; effectiveStep = what the
   // user is viewing (status, or a stepper override once Review is reached).
   const statusStep = stepIndexFor(workflowId ? (status ?? 'planning') : 'plan')
-  const navigable = status === 'ready-to-commit' || status === 'committed'
+  const navigable = isNavigable(status)
   const effectiveStep = navigable ? (viewStep ?? statusStep) : statusStep
 
   return (
@@ -220,7 +182,7 @@ export function PortifyWizard({
             <button
               type="button"
               onClick={() => setConfirmLeave(true)}
-              title="Discard this workflow — drops the branch + worktree and restores the config"
+              title="Discard this workflow — drops the scratch branch + worktree and restores the config"
               style={{ background: 'transparent', border: '1px solid rgba(251,113,133,0.4)', borderRadius: 'var(--radius-md)', color: 'rgb(251,113,133)', fontSize: 12, padding: '6px 12px', cursor: 'pointer' }}
             >
               Cancel
@@ -231,7 +193,7 @@ export function PortifyWizard({
             onClick={isActive ? minimize : discard}
             title={isActive
               ? 'Close — the workflow keeps running. Reopen it from the Portify pill in the top bar.'
-              : 'Close — a failed/aborted run is cleaned up; a committed one is left on its branch.'}
+              : 'Close — a failed/aborted run is cleaned up; a saved one keeps its overlay.'}
             style={{ background: 'transparent', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)', color: 'var(--text-secondary)', fontSize: 12, padding: '6px 12px', cursor: 'pointer' }}
           >
             Close ✕
@@ -242,7 +204,7 @@ export function PortifyWizard({
       <Stepper
         current={workflowId ? effectiveStep : 0}
         reachedMax={workflowId ? statusStep : 0}
-        merged={merged && status === 'committed'}
+        saved={isSaved(status)}
         navigable={navigable}
         onStep={setViewStep}
       />
@@ -266,21 +228,14 @@ export function PortifyWizard({
             <ReviewScreen
               m={m}
               busy={busy}
-              committed={status === 'committed'}
-              onCommit={commit}
+              saved={isSaved(status)}
+              onSave={save}
               onRequestChanges={() => setFeedbackOpen(true)}
-              onViewCommit={() => setViewStep(3)}
+              onViewSave={() => setViewStep(3)}
             />
           )}
           {workflowId && m && navigable && effectiveStep === 3 && (
-            <CommittedScreen
-              m={m}
-              mergeInfo={mergeInfo}
-              mergeResults={mergeResults}
-              busy={mergeBusy}
-              onMerge={merge}
-              onDone={onCommitted}
-            />
+            <SaveScreen m={m} onDone={onSaved} />
           )}
           {error && <div style={{ color: 'rgb(251,113,133)', fontSize: 12, marginTop: 14 }}>{error}</div>}
         </div>
@@ -295,7 +250,7 @@ export function PortifyWizard({
           <div style={{ width: 'min(420px, 92%)', background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-lg)', padding: 20 }}>
             <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 8 }}>Discard this workflow?</div>
             <div style={{ fontSize: 12.5, color: 'var(--text-muted)', lineHeight: 1.6, marginBottom: 16 }}>
-              The branch and worktree will be discarded and the feature config restored. Nothing is committed. To keep it running instead, choose <b style={{ color: 'var(--text-secondary)' }}>Keep running</b> — it stays in the top-bar Portify pill.
+              The scratch branch and worktree will be discarded and the feature config restored. Nothing is saved. To keep it running instead, choose <b style={{ color: 'var(--text-secondary)' }}>Keep running</b> — it stays in the top-bar Portify pill.
             </div>
             <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
               <button type="button" onClick={() => setConfirmLeave(false)} style={ghostBtn}>Keep running</button>
@@ -308,6 +263,21 @@ export function PortifyWizard({
   )
 }
 
+/** Status reached a point where polling stops (parked for the user or terminal). */
+function isTerminalOrParked(s: PortifyStatus): boolean {
+  return s === 'ready-to-save' || s === 'saved' || s === 'failed' || s === 'aborted'
+}
+
+/** The saved terminal state. */
+function isSaved(s: PortifyStatus | undefined): boolean {
+  return s === 'saved'
+}
+
+/** Review reached → stepper navigation is enabled. */
+function isNavigable(s: PortifyStatus | undefined): boolean {
+  return s === 'ready-to-save' || s === 'saved'
+}
+
 const ghostBtn: React.CSSProperties = {
   padding: '8px 14px', background: 'transparent', border: '1px solid var(--border-default)',
   borderRadius: 'var(--radius-md)', color: 'var(--text-secondary)', fontSize: 12, cursor: 'pointer',
@@ -316,7 +286,7 @@ const ghostBtn: React.CSSProperties = {
 function Stepper({
   current,
   reachedMax,
-  merged,
+  saved,
   navigable,
   onStep,
 }: {
@@ -324,10 +294,8 @@ function Stepper({
   current: number
   /** Furthest step the workflow itself has reached (status-derived). */
   reachedMax: number
-  /** Whether the branch is merged into the user's branch (✓ on the Merge step).
-   *  A committed-but-unmerged workflow keeps the step active — the work isn't
-   *  done until the merge lands. */
-  merged: boolean
+  /** Whether the overlay has been saved (✓ on the Save step). */
+  saved: boolean
   /** Whether step navigation is enabled (Review reached). */
   navigable: boolean
   onStep: (i: number) => void
@@ -335,27 +303,27 @@ function Stepper({
   // A step is clickable once Review is reached, for any reached step except
   // Plan (the pre-start screen has no destination for an existing run).
   const isClickable = (i: number): boolean => navigable && i >= 1 && i <= reachedMax
-  const MERGE_STEP = 3
+  const SAVE_STEP = 3
   return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0, padding: '14px 20px', borderBottom: '1px solid var(--border-default)' }}>
       {STEPS.map((s, i) => {
         const reached = i <= reachedMax
         const isCurrent = i === current
         const clickable = isClickable(i)
-        const showMergedTick = merged && i === MERGE_STEP
-        const circleColor = showMergedTick ? 'rgb(52,211,153)' : isCurrent || reached ? 'var(--accent)' : 'var(--text-muted)'
+        const showSavedTick = saved && i === SAVE_STEP
+        const circleColor = showSavedTick ? 'rgb(52,211,153)' : isCurrent || reached ? 'var(--accent)' : 'var(--text-muted)'
         const inner = (
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, opacity: reached ? 1 : 0.45 }}>
             <span style={{
               width: 20, height: 20, borderRadius: 9999, display: 'grid', placeItems: 'center', fontSize: 11, fontWeight: 700,
-              border: `2px solid ${showMergedTick ? 'rgb(52,211,153)' : isCurrent || reached ? 'var(--accent)' : 'var(--border-default)'}`,
+              border: `2px solid ${showSavedTick ? 'rgb(52,211,153)' : isCurrent || reached ? 'var(--accent)' : 'var(--border-default)'}`,
               color: circleColor,
               background: isCurrent ? 'color-mix(in srgb, var(--accent) 14%, transparent)' : 'transparent',
-            }}>{showMergedTick ? '✓' : i + 1}</span>
+            }}>{showSavedTick ? '✓' : i + 1}</span>
             <span style={{ fontSize: 12 }}>
               <b style={{ color: isCurrent ? 'var(--accent)' : 'var(--text-primary)' }}>{s.label}</b>
               <span style={{ color: 'var(--text-muted)', marginLeft: 6 }}>
-                {showMergedTick ? 'merged ✓' : s.sub}
+                {showSavedTick ? 'saved ✓' : s.sub}
               </span>
             </span>
           </div>
@@ -388,12 +356,13 @@ function PlanScreen({ feature, agent, busy, onStart }: { feature: string; agent:
     <div>
       <div style={{ fontSize: 18, fontWeight: 600, marginBottom: 8 }}>What will happen</div>
       <p style={{ fontSize: 13.5, color: 'var(--text-muted)', lineHeight: 1.6, marginBottom: 16, maxWidth: 640 }}>
-        The <b style={{ color: 'var(--text-secondary)' }}>{agent}</b> agent will edit <b style={{ color: 'var(--text-secondary)' }}>{feature}</b> on a dedicated branch in an isolated worktree so each app reads its listen port from an injected env var, and declares matching <code style={mono}>ports</code> slots in the feature config. Then the harness boots the stack <b style={{ color: 'var(--text-secondary)' }}>twice at once on different ports</b> and requires both to pass health checks — proof the rewrite works. You review the diff and commit.
+        The <b style={{ color: 'var(--text-secondary)' }}>{agent}</b> agent will edit <b style={{ color: 'var(--text-secondary)' }}>{feature}</b> in an isolated scratch worktree so each app reads its listen port from an injected env var, and declares matching <code style={mono}>ports</code> slots in the feature config. Then the harness boots the stack <b style={{ color: 'var(--text-secondary)' }}>twice at once on different ports</b> and requires both to pass health checks — proof the rewrite works. You review the diff and save it.
       </p>
       <ul style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.8, marginBottom: 22 }}>
-        <li>Source edits land on branch <code style={mono}>canary/dynamic-ports-…</code> (your main tree is untouched).</li>
+        <li>Saving captures the edits as an <b style={{ color: 'var(--text-secondary)' }}>ephemeral overlay</b> — your product repo is never modified.</li>
+        <li>On every run the overlay is applied into a per-run worktree and reverse-applied at teardown.</li>
         <li>Test files are never modified.</li>
-        <li>Nothing is committed until you approve the verified diff.</li>
+        <li>Nothing is saved until you approve the verified diff.</li>
       </ul>
       <button type="button" className="cl-button-primary" disabled={busy} onClick={onStart} style={{ padding: '9px 18px' }}>
         {busy ? 'Starting…' : 'Start ▶'}
@@ -404,7 +373,7 @@ function PlanScreen({ feature, agent, busy, onStart }: { feature: string; agent:
 
 function ExerciseScreen({ m, live }: { m: PortifyManifest; live: boolean }) {
   // When viewed after the fact (live=false), every phase reads as done.
-  const settled = !live || m.status === 'ready-to-commit' || m.status === 'committed'
+  const settled = !live || isNavigable(m.status)
   return (
     <div>
       <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 4 }}>{live ? 'Running the exercise' : 'The exercise'}</div>
@@ -412,7 +381,7 @@ function ExerciseScreen({ m, live }: { m: PortifyManifest; live: boolean }) {
         Attempt {Math.max(1, m.attempt)} of {m.maxAttempts}
       </div>
       <div style={{ border: '1px solid var(--border-default)', borderRadius: 'var(--radius-lg)', overflow: 'hidden' }}>
-        <Phase done label="Branch + worktree created" active={live && m.status === 'planning'} />
+        <Phase done label="Scratch worktree created" active={live && m.status === 'planning'} />
         <Phase done={settled || m.status === 'verifying'} active={live && m.status === 'editing'} label="Agent rewriting ports (source + config)" />
         <Phase done={settled} active={live && m.status === 'verifying'} label="Booting twice on different ports + health checks" />
       </div>
@@ -456,15 +425,15 @@ function VerificationBadge({ m }: { m: PortifyManifest }) {
   )
 }
 
-function ReviewScreen({ m, busy, committed, onCommit, onRequestChanges, onViewCommit }: { m: PortifyManifest; busy: boolean; committed: boolean; onCommit: () => void; onRequestChanges: () => void; onViewCommit: () => void }) {
+function ReviewScreen({ m, busy, saved, onSave, onRequestChanges, onViewSave }: { m: PortifyManifest; busy: boolean; saved: boolean; onSave: () => void; onRequestChanges: () => void; onViewSave: () => void }) {
   const rounds = m.feedbackRounds ?? 0
-  // At ready-to-commit verification is always set; a prior revise round may have
-  // left it failed — in that case the diff isn't proven and can't be committed.
+  // At ready-to-save verification is always set; a prior revise round may have
+  // left it failed — in that case the diff isn't proven and can't be saved.
   const proven = m.verification?.ok === true
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 12 }}>
-        <div style={{ fontSize: 16, fontWeight: 600 }}>{committed ? 'Review' : 'Review & commit'}</div>
+        <div style={{ fontSize: 16, fontWeight: 600 }}>{saved ? 'Review' : 'Review & save'}</div>
         {rounds > 0 && (
           <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' }}>
             revision {rounds}
@@ -472,21 +441,18 @@ function ReviewScreen({ m, busy, committed, onCommit, onRequestChanges, onViewCo
         )}
       </div>
       {proven ? <VerificationBadge m={m} /> : <RevisionFailedBanner m={m} />}
-      {/* The worktree is gone after commit — review is read-only. */}
-      {!committed && <ReviewLocally m={m} />}
+      {/* The scratch worktree is gone after save — review is read-only. */}
+      {!saved && <ReviewLocally m={m} />}
       <DiffView diff={m.diff ?? ''} />
-      {committed ? (
+      {saved ? (
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 16, flexWrap: 'wrap' }}>
-          <span style={{ fontSize: 12.5, color: 'rgb(52,211,153)', fontWeight: 600 }}>✓ Committed</span>
-          <span style={{ fontSize: 11.5, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>
-            branch {m.branch}
-          </span>
+          <span style={{ fontSize: 12.5, color: 'rgb(52,211,153)', fontWeight: 600 }}>✓ Saved as overlay</span>
           <button
             type="button"
-            onClick={onViewCommit}
+            onClick={onViewSave}
             style={{ marginLeft: 'auto', padding: '8px 14px', fontSize: 12.5, fontWeight: 600, borderRadius: 'var(--radius-md)', background: 'transparent', border: '1px solid var(--accent)', color: 'var(--accent)', cursor: 'pointer', whiteSpace: 'nowrap' }}
           >
-            View merge details →
+            View save details →
           </button>
         </div>
       ) : (
@@ -508,11 +474,11 @@ function ReviewScreen({ m, busy, committed, onCommit, onRequestChanges, onViewCo
             type="button"
             className="cl-button-primary"
             disabled={busy || !proven}
-            onClick={onCommit}
+            onClick={onSave}
             title={proven ? undefined : 'The latest changes did not pass verification — request changes to fix them first'}
             style={{ padding: '9px 16px', opacity: proven ? 1 : 0.5, cursor: proven && !busy ? 'pointer' : 'not-allowed' }}
           >
-            {busy ? 'Working…' : 'Commit'}
+            {busy ? 'Saving…' : 'Save overlay'}
           </button>
         </div>
       )}
@@ -520,10 +486,10 @@ function ReviewScreen({ m, busy, committed, onCommit, onRequestChanges, onViewCo
   )
 }
 
-// "Not ready yet" path: point the user at the on-disk worktree so they can open
-// it in their own editor and review the full change before committing. The
-// workflow parks at ready-to-commit indefinitely; hand-edits in the worktree
-// are committed as-is.
+// "Not ready yet" path: point the user at the on-disk scratch worktree so they
+// can open it in their own editor and review the full change before saving. The
+// workflow parks at ready-to-save indefinitely; hand-edits in the worktree are
+// captured into the saved overlay.
 function ReviewLocally({ m }: { m: PortifyManifest }) {
   const trees = m.repos.filter((r) => r.worktreePath)
   if (trees.length === 0) return null
@@ -533,7 +499,7 @@ function ReviewLocally({ m }: { m: PortifyManifest }) {
         Review locally
       </div>
       <div style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.55, marginBottom: 10 }}>
-        Not ready? Open the worktree in your editor to review the full change first — it stays here until you commit. Hand-edits in the worktree are included in the commit.
+        Not ready? Open the scratch worktree in your editor to review the full change first — it stays here until you save. Hand-edits in the worktree are captured into the overlay.
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
         {trees.map((r) => (
@@ -553,7 +519,7 @@ function ReviewLocally({ m }: { m: PortifyManifest }) {
 function RevisionFailedBanner({ m }: { m: PortifyManifest }) {
   return (
     <div style={{ fontSize: 11.5, fontFamily: 'var(--font-mono)', color: 'rgb(251,191,36)', background: 'rgba(251,191,36,0.08)', border: '1px solid rgba(251,191,36,0.3)', borderRadius: 'var(--radius-md)', padding: '10px 12px', marginBottom: 14, whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>
-      ⚠ Your last change didn't pass the double-boot — fix it with “Request changes” before committing.
+      ⚠ Your last change didn't pass the double-boot — fix it with “Request changes” before saving.
       {m.verification?.failureDetail ? `\n\n${m.verification.failureDetail}` : ''}
       {m.error ? `\n\n${m.error}` : ''}
     </div>
@@ -587,7 +553,7 @@ function FeedbackModal({ busy, onSend, onClose }: { busy: boolean; onSend: (feed
       >
         <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 6 }}>Ask the agent for changes</div>
         <div style={{ fontSize: 12.5, color: 'var(--text-muted)', lineHeight: 1.6, marginBottom: 12 }}>
-          The agent resumes where it left off, applies your feedback, and re-runs the double-boot before it's ready to commit again.
+          The agent resumes where it left off, applies your feedback, and re-runs the double-boot before it's ready to save again.
         </div>
         <textarea
           ref={taRef}
@@ -622,186 +588,33 @@ function FeedbackModal({ busy, onSend, onClose }: { busy: boolean; onSend: (feed
   )
 }
 
-function MergeManuallyModal({ mergeCmd, onClose }: { mergeCmd: string; onClose: () => void }) {
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent): void => { if (e.key === 'Escape') onClose() }
-    document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
-  }, [onClose])
-  return (
-    <div
-      style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.55)', display: 'grid', placeItems: 'center', zIndex: 90 }}
-      onClick={onClose}
-    >
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-label="Merge manually"
-        style={{ width: 'min(520px, 92%)', background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-lg)', padding: 20 }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 14 }}>Merge manually</div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
-          <code style={{ ...mono, flex: '1 1 auto', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', padding: '8px 10px' }}>{mergeCmd}</code>
-          <CopyButton value={mergeCmd} label="Copy" style={{ flexShrink: 0 }} />
-        </div>
-        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-          <button type="button" onClick={onClose} style={ghostBtn}>Close</button>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-// PR-style merge page: the wizard's last step. Committing landed the rewrite on
-// a branch — this screen owns the step that makes it real: merging that branch
-// into the user's checked-out branch. Merge runs server-side with abort-on-conflict,
-// and merged-ness is computed from git so a manual terminal merge flips the screen too.
-function CommittedScreen({
-  m,
-  mergeInfo,
-  mergeResults,
-  busy,
-  onMerge,
-  onDone,
-}: {
-  m: PortifyManifest
-  mergeInfo: PortifyMergeStatusResult | null
-  mergeResults: PortifyRepoMergeResult[] | null
-  busy: boolean
-  onMerge: () => void
-  onDone: () => void
-}) {
-  const [manualOpen, setManualOpen] = useState(false)
-  const committed = m.repos.filter((r) => r.commitSha)
-  const mergeCmd = `git merge ${m.branch}`
-  const merged = mergeInfo ? mergeInfo.merged : Boolean(m.mergedAt)
-
-  if (committed.length === 0) {
-    return (
-      <div>
-        <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 8, color: 'rgb(52,211,153)' }}>✓ Committed</div>
-        <p style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6, marginBottom: 18 }}>
-          No source changes were needed — the apps already honor injected ports; the config now declares the slots. Nothing to merge: this feature can already boot concurrently.
-        </p>
-        <button type="button" className="cl-button-primary" onClick={onDone} style={{ padding: '9px 16px' }}>Done</button>
-      </div>
-    )
-  }
-
-  if (merged) {
-    return (
-      <div>
-        <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 8, color: 'rgb(52,211,153)' }}>✓ Merged</div>
-        <p style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6, marginBottom: 14 }}>
-          The port rewrite is in your branch. <b style={{ color: 'var(--text-secondary)' }}>{m.feature}</b> can now boot concurrently — parallel runs and benchmark arms get distinct ports.
-        </p>
-        <div style={{ border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)', background: 'var(--bg-surface)', padding: '13px 15px', marginBottom: 18 }}>
-          {committed.map((r) => (
-            <div key={r.name} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)', padding: '3px 0' }}>
-              <span style={{ color: 'rgb(52,211,153)' }}>✓</span>
-              <span>{r.name}</span>
-              <code style={mono}>{(r.mergeCommitSha ?? r.commitSha!).slice(0, 10)}</code>
-              {r.mergeCommitSha && <span style={{ color: 'var(--text-muted)' }}>merge commit</span>}
-            </div>
-          ))}
-          <div style={{ fontSize: 11.5, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', marginTop: 8, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            from {m.branch}
-          </div>
-        </div>
-        <button type="button" className="cl-button-primary" onClick={onDone} style={{ padding: '9px 16px' }}>Done</button>
-      </div>
-    )
-  }
-
-  // Not merged yet: readiness checks + the merge action.
-  const repoChecks = mergeInfo?.repos ?? []
-  const blockers = repoChecks.filter((r) => !r.branchExists || r.dirty || r.mergeInProgress || r.currentBranch == null)
-  const canMerge = mergeInfo != null && repoChecks.length > 0 && blockers.length === 0 && !busy
-  const targets = [...new Set(repoChecks.map((r) => r.currentBranch).filter(Boolean))] as string[]
-  const mergeLabel = targets.length === 1 ? `Merge into ${targets[0]}` : 'Merge into current branches'
-  const failures = (mergeResults ?? []).filter((r) => !r.ok)
-
+// The wizard's last step: the overlay is saved. Nothing to merge — the feature
+// now boots concurrently on every run, applying the overlay into a per-run
+// worktree and reverse-applying it at teardown. The product repo is untouched.
+function SaveScreen({ m, onDone }: { m: PortifyManifest; onDone: () => void }) {
+  const overlayPath = `features/${m.feature}/portify/`
   return (
     <div>
-      <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 8 }}>
-        <span style={{ color: 'rgb(52,211,153)' }}>✓ Committed</span> — one step left
-      </div>
+      <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 8, color: 'rgb(52,211,153)' }}>✓ Saved as overlay</div>
       <p style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6, marginBottom: 14 }}>
-        The rewrite lives on <code style={mono}>{m.branch}</code>. Your checkout doesn't use it until it's merged — until then, runs keep booting with the old hardcoded ports.
+        The verified port rewrite is captured as an ephemeral overlay. <b style={{ color: 'var(--text-secondary)' }}>{m.feature}</b> now boots concurrently — parallel runs and benchmark arms get distinct ports — and your product repo is never modified. On every run the overlay is applied into a per-run worktree before boot and reverse-applied at teardown.
       </p>
-
-      <div style={{ border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)', background: 'var(--bg-surface)', marginBottom: 14 }}>
-        {m.verification?.ok && (
-          <CheckRow tone="ok" text="Double-boot verified — two copies ran concurrently on distinct ports" />
-        )}
-        {committed.map((r) => (
-          <CheckRow key={r.name} tone="ok" text={`Committed to ${r.name}`} trail={<code style={mono}>{r.commitSha!.slice(0, 10)}</code>} />
-        ))}
-        {mergeInfo == null && <CheckRow tone="pending" text="Checking your repo…" />}
-        {repoChecks.map((r) => {
-          const into = r.currentBranch ? ` — will merge into ${r.currentBranch}` : ''
-          if (!r.branchExists) return <CheckRow key={r.gitRoot} tone="bad" text={`The branch is missing in ${r.name} — was it deleted? Merge it manually if you still have it elsewhere.`} />
-          if (r.mergeInProgress) return <CheckRow key={r.gitRoot} tone="warn" text={`${r.name} is mid-merge — conclude or abort that merge first.`} />
-          if (r.currentBranch == null) return <CheckRow key={r.gitRoot} tone="warn" text={`${r.name} is on a detached HEAD — check out a branch to merge into.`} />
-          if (r.dirty) return <CheckRow key={r.gitRoot} tone="warn" text={`${r.name} has uncommitted changes — commit or stash them.`} />
-          return <CheckRow key={r.gitRoot} tone="ok" text={`Working tree clean in ${r.name}${into}`} />
-        })}
-      </div>
-
-      {failures.length > 0 && (
-        <div style={{ fontSize: 12, color: 'rgb(251,191,36)', background: 'rgba(251,191,36,0.08)', border: '1px solid rgba(251,191,36,0.3)', borderRadius: 'var(--radius-md)', padding: '10px 12px', marginBottom: 14, lineHeight: 1.6 }}>
-          {failures.map((f) => (
-            <div key={f.name}>
-              {f.conflictFiles?.length ? (
-                <>
-                  Merge aborted — your repo is unchanged. <b>{f.name}</b> conflicts with your branch in:
-                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11.5, marginTop: 4 }}>
-                    {f.conflictFiles.map((file) => <div key={file}>{file}</div>)}
-                  </div>
-                  <div style={{ marginTop: 6, color: 'var(--text-muted)' }}>
-                    Resolve by hand: run <code style={mono}>{mergeCmd}</code> in the repo and fix the conflicts in your editor.
-                  </div>
-                </>
-              ) : (
-                <>Could not merge {f.name}: {f.error ?? 'unknown error'}</>
-              )}
-            </div>
-          ))}
+      <div style={{ border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)', background: 'var(--bg-surface)', padding: '13px 15px', marginBottom: 18 }}>
+        <div style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '.4px', color: 'var(--text-muted)', fontWeight: 600, marginBottom: 8 }}>
+          Overlay
         </div>
-      )}
-
-      {manualOpen && <MergeManuallyModal mergeCmd={mergeCmd} onClose={() => setManualOpen(false)} />}
-
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 10, marginTop: 16 }}>
-        <button type="button" onClick={onDone} style={ghostBtn}>Done — merge later</button>
-        <button type="button" onClick={() => setManualOpen(true)} style={ghostBtn}>Merge manually</button>
-        <button
-          type="button"
-          onClick={onMerge}
-          disabled={!canMerge}
-          title={canMerge ? `Runs git merge ${m.branch} locally in your repo` : 'Resolve the blockers above first'}
-          style={{
-            padding: '9px 18px', fontSize: 12.5, fontWeight: 600, borderRadius: 'var(--radius-md)', whiteSpace: 'nowrap',
-            background: 'var(--success)', border: '1px solid var(--success)', color: '#fff',
-            cursor: canMerge ? 'pointer' : 'not-allowed', opacity: canMerge ? 1 : 0.5,
-          }}
-        >
-          {busy ? 'Merging…' : mergeLabel}
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+          <code style={{ ...mono, flex: '1 1 auto', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{overlayPath}</code>
+          <CopyButton value={overlayPath} label="Copy path" style={{ flexShrink: 0 }} />
+        </div>
+        {m.repos.map((r) => (
+          <div key={r.name} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)', padding: '3px 0' }}>
+            <span style={{ color: 'rgb(52,211,153)' }}>✓</span>
+            <span>{r.name}</span>
+          </div>
+        ))}
       </div>
-    </div>
-  )
-}
-
-function CheckRow({ tone, text, trail }: { tone: 'ok' | 'warn' | 'bad' | 'pending'; text: string; trail?: React.ReactNode }) {
-  const color = tone === 'ok' ? 'rgb(52,211,153)' : tone === 'warn' ? 'rgb(251,191,36)' : tone === 'bad' ? 'rgb(251,113,133)' : 'var(--text-muted)'
-  const mark = tone === 'ok' ? '✓' : tone === 'warn' ? '⚠' : tone === 'bad' ? '✕' : '○'
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderBottom: '1px solid var(--border-default)' }}>
-      <span style={{ fontSize: 13, color, flexShrink: 0 }}>{mark}</span>
-      <span style={{ fontSize: 12.5, color: tone === 'pending' ? 'var(--text-muted)' : 'var(--text-primary)', lineHeight: 1.5 }}>{text}</span>
-      {trail && <span style={{ marginLeft: 'auto', flexShrink: 0 }}>{trail}</span>}
+      <button type="button" className="cl-button-primary" onClick={onDone} style={{ padding: '9px 16px' }}>Done</button>
     </div>
   )
 }

@@ -50,10 +50,10 @@ describe('PortifyRunStore', () => {
   it('save upserts an existing index entry (status + endedAt update in place)', () => {
     const store = new PortifyRunStore(tmpLogs())
     store.save(manifest())
-    store.save(manifest({ status: 'committed', endedAt: '2026-06-07T00:05:00.000Z' }))
+    store.save(manifest({ status: 'saved', endedAt: '2026-06-07T00:05:00.000Z' }))
     const list = store.list()
     expect(list).toHaveLength(1)
-    expect(list[0]).toMatchObject({ status: 'committed', endedAt: '2026-06-07T00:05:00.000Z' })
+    expect(list[0]).toMatchObject({ status: 'saved', endedAt: '2026-06-07T00:05:00.000Z' })
   })
 
   it('emits a changed event on save, and offEvent unsubscribes', () => {
@@ -112,13 +112,13 @@ describe('PortifyRunStore', () => {
   it('reconcileInterrupted flips non-terminal workflows to aborted, leaves terminal ones', () => {
     const store = new PortifyRunStore(tmpLogs())
     store.save(manifest({ workflowId: 'a', status: 'editing' }))
-    store.save(manifest({ workflowId: 'b', status: 'ready-to-commit' }))
-    store.save(manifest({ workflowId: 'c', status: 'committed' }))
+    store.save(manifest({ workflowId: 'b', status: 'ready-to-save' }))
+    store.save(manifest({ workflowId: 'c', status: 'saved' }))
     store.reconcileInterrupted(() => '2026-06-07T01:00:00.000Z')
     expect(store.get('a')?.status).toBe('aborted')
     expect(store.get('a')?.error).toContain('Interrupted by server restart')
     expect(store.get('b')?.status).toBe('aborted')
-    expect(store.get('c')?.status).toBe('committed')
+    expect(store.get('c')?.status).toBe('saved')
   })
 
   it('reconcileInterrupted skips an index entry whose manifest is missing', () => {

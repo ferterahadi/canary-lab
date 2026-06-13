@@ -300,13 +300,26 @@ a local autoHeal mid-flight); `auto`/`claude`/`codex` require a failed/aborted r
 
 ## Portify and Benchmark
 
-**Portify** (`apps/web-server/lib/runtime/portify/`, ~10 files) is an agent-driven
+**Portify** (`apps/web-server/lib/runtime/portify/`, ~11 files) is an agent-driven
 workflow that rewrites a feature's services so every network listener reads an
 injected port, proven by a concurrent double-boot — making the feature eligible for
 concurrent runs and benchmark arms. Lifecycle: `start_portify` →
-`get_portify` polling (`editing → verifying → ready-to-commit`) →
-`commit_portify`/`cancel_portify`, with unbounded `revise_portify` feedback rounds.
-One workflow at a time; `list_portify_status` shows which features are portified.
+`get_portify` polling (`editing → verifying → ready-to-save`) →
+`save_portify`/`cancel_portify`, with unbounded `revise_portify` feedback rounds.
+One workflow at a time; `list_portify_status` shows which features have a saved overlay.
+
+**Ephemeral overlay model** (the source edits never touch the product repo): the
+agent edits source in a throwaway scratch worktree and the verified diff is captured
+as a per-repo patch under `features/<feature>/portify/` (`overlay.ts`: `writeOverlay`/
+`readOverlay`/`overlayExists`/`checkStaleness`). `save_portify` writes the overlay and
+discards the scratch worktree — nothing is committed or merged. At RUN time the
+`RunOrchestrator` force-isolates every repo in a per-run worktree, `applyOverlay`s the
+patch (plain `git apply`, `--3way` fallback) before boot after a staleness check, and
+`reverseOverlay`s it (atomic `git apply -R`) at teardown while KEEPING the worktree
+(it holds heal edits). Apply/staleness failure aborts the run loudly ("re-run Portify")
+— it never boots un-portified. The feature-config `ports` slots + envset tokenization
+the agent also writes are PERMANENT (Canary Lab reads the slots in `allocateRunPorts`
+before the overlay applies), so only the product-repo source is ephemeral.
 
 **Benchmark** (`apps/web-server/lib/runtime/benchmark/`, ~10 files) ran multi-arm
 self-heal benchmarking (race/sabotage verification). The product surface was retired

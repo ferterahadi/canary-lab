@@ -58,7 +58,8 @@ These mirror the CHANGELOG area tags.
   stages and validates on apply.
 - Env capture from a source repo with secret redaction.
 - Portify: agent-driven rewrite of a feature's services to accept injected ports,
-  verified by a concurrent double-boot.
+  verified by a concurrent double-boot and saved as an ephemeral overlay (applied
+  per-run, reverse-applied at teardown) so the product repo is never modified.
 
 ### [Export evaluation]
 

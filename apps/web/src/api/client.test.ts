@@ -84,13 +84,11 @@ import {
   benchmarkPreflight,
   startPortify,
   getPortify,
-  commitPortify,
+  savePortify,
   cancelPortify,
   revisePortify,
   removePortify,
   getPortifyAgentSession,
-  getPortifyMergeStatus,
-  mergePortify,
 } from './client'
 
 const ok = (body: unknown, status = 200): Response =>
@@ -1175,16 +1173,16 @@ describe('api client', () => {
   })
 
   it('getPortify GETs the workflow manifest', async () => {
-    const m = { workflowId: 'w1', status: 'ready-to-commit' }
+    const m = { workflowId: 'w1', status: 'ready-to-save' }
     const fetchImpl = vi.fn().mockResolvedValue(ok(m))
     await expect(getPortify('w1', { baseUrl: 'http://x', fetchImpl })).resolves.toEqual(m)
     expect(fetchImpl).toHaveBeenCalledWith('http://x/api/portify/w1', { method: 'GET' })
   })
 
-  it('commitPortify and cancelPortify POST to their endpoints', async () => {
-    const fetchImpl = vi.fn().mockImplementation(async () => ok({ workflowId: 'w1', status: 'committed' }))
-    await commitPortify('w1', { baseUrl: 'http://x', fetchImpl })
-    expect(fetchImpl).toHaveBeenLastCalledWith('http://x/api/portify/w1/commit', { method: 'POST' })
+  it('savePortify and cancelPortify POST to their endpoints', async () => {
+    const fetchImpl = vi.fn().mockImplementation(async () => ok({ workflowId: 'w1', status: 'saved' }))
+    await savePortify('w1', { baseUrl: 'http://x', fetchImpl })
+    expect(fetchImpl).toHaveBeenLastCalledWith('http://x/api/portify/w1/save', { method: 'POST' })
     await cancelPortify('w1', { baseUrl: 'http://x', fetchImpl })
     expect(fetchImpl).toHaveBeenLastCalledWith('http://x/api/portify/w1/cancel', { method: 'POST' })
   })
@@ -1218,20 +1216,6 @@ describe('api client', () => {
   it('getPortifyAgentSession rethrows non-404 errors', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(fail(500, { error: 'boom' }))
     await expect(getPortifyAgentSession('w1', { baseUrl: 'http://x', fetchImpl })).rejects.toMatchObject({ status: 500 })
-  })
-
-  it('getPortifyMergeStatus GETs the merge status', async () => {
-    const status = { workflowId: 'w1', branch: 'canary/dynamic-ports-cns', repos: [], merged: false, nothingToMerge: true }
-    const fetchImpl = vi.fn().mockResolvedValue(ok(status))
-    await expect(getPortifyMergeStatus('w1', { baseUrl: 'http://x', fetchImpl })).resolves.toEqual(status)
-    expect(fetchImpl).toHaveBeenCalledWith('http://x/api/portify/w1/merge-status', { method: 'GET' })
-  })
-
-  it('mergePortify POSTs to the merge endpoint', async () => {
-    const result = { ok: true, results: [], manifest: { workflowId: 'w1' } }
-    const fetchImpl = vi.fn().mockResolvedValue(ok(result))
-    await expect(mergePortify('w1', { baseUrl: 'http://x', fetchImpl })).resolves.toEqual(result)
-    expect(fetchImpl).toHaveBeenCalledWith('http://x/api/portify/w1/merge', { method: 'POST' })
   })
 
   it('clearBenchmarkWorktrees POSTs the confirm flag', async () => {

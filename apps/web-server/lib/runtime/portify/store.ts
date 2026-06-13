@@ -39,7 +39,6 @@ function indexEntryFromManifest(m: PortifyManifest): PortifyIndexEntry {
     branch: m.branch,
     startedAt: m.startedAt,
     ...(m.endedAt ? { endedAt: m.endedAt } : {}),
-    ...(m.mergedAt ? { mergedAt: m.mergedAt } : {}),
   }
 }
 
@@ -104,9 +103,9 @@ export class PortifyRunStore implements PortifyStore {
 
   reconcileInterrupted(now: () => string): void {
     for (const entry of this.list()) {
-      if (entry.status === 'committed' || entry.status === 'failed' || entry.status === 'aborted') continue
-      // 'ready-to-commit' is also non-terminal but awaits a user action; a dead
-      // process can't hold that worktree, so it too becomes aborted.
+      if (entry.status === 'saved' || entry.status === 'failed' || entry.status === 'aborted') continue
+      // 'ready-to-save' is also non-terminal but awaits a user action; a dead
+      // process can't hold that scratch worktree, so it too becomes aborted.
       const m = this.get(entry.workflowId)
       if (!m) continue
       this.save({

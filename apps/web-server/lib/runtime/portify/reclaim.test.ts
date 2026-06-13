@@ -82,9 +82,9 @@ describe('reclaimOrphanedPortify', () => {
   it('leaves terminal workflows untouched', async () => {
     const { logsDir } = await fixture()
     const store = new PortifyRunStore(logsDir)
-    store.save(manifest({ workflowId: 'done', status: 'committed' }))
+    store.save(manifest({ workflowId: 'done', status: 'saved' }))
     await reclaimOrphanedPortify(store, logsDir, () => 'x')
-    expect(store.get('done')?.status).toBe('committed')
+    expect(store.get('done')?.status).toBe('saved')
   })
 
   it('is best-effort when a repo no longer resolves to a git root', async () => {

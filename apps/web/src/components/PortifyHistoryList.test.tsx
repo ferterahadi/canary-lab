@@ -33,7 +33,7 @@ afterEach(() => {
 })
 
 const entry = (over: Partial<PortifyIndexEntry>): PortifyIndexEntry => ({
-  workflowId: 'w1', feature: 'cns', status: 'committed', branch: 'canary/dynamic-ports-cns', startedAt: '2026-06-01T10:00:00Z', ...over,
+  workflowId: 'w1', feature: 'cns', status: 'saved', branch: 'canary/dynamic-ports-cns', startedAt: '2026-06-01T10:00:00Z', ...over,
 })
 
 async function render(onOpenPortify = vi.fn()) {
@@ -53,32 +53,23 @@ describe('PortifyHistoryList', () => {
     expect(container.textContent).toContain('No Portify runs yet')
   })
 
-  it('lists all workflows with status and a copy-merge for committed ones', async () => {
-    workflows.push(entry({ workflowId: 'w1', feature: 'cns', status: 'committed', branch: 'canary/dynamic-ports-cns' }))
-    workflows.push(entry({ workflowId: 'w2', feature: 'oms', status: 'editing', branch: 'canary/dynamic-ports-oms', startedAt: '2026-06-02T10:00:00Z' }))
+  it('lists all workflows with their status label', async () => {
+    workflows.push(entry({ workflowId: 'w1', feature: 'cns', status: 'saved' }))
+    workflows.push(entry({ workflowId: 'w2', feature: 'oms', status: 'editing', startedAt: '2026-06-02T10:00:00Z' }))
     await render()
     expect(container.textContent).toContain('cns')
-    expect(container.textContent).toContain('committed')
-    expect(container.textContent).toContain('canary/dynamic-ports-cns')
-    // An in-flight (editing) workflow doesn't surface a branch chip.
-    expect(container.textContent).not.toContain('canary/dynamic-ports-oms')
-    // The committed row exposes a copy-merge control.
-    expect([...container.querySelectorAll('button')].some((b) => b.textContent?.includes('Copy merge'))).toBe(true)
+    expect(container.textContent).toContain('saved')
+    expect(container.textContent).toContain('editing')
+    // No merge/branch affordance in the ephemeral-overlay model.
+    expect([...container.querySelectorAll('button')].some((b) => b.textContent?.includes('Copy merge'))).toBe(false)
   })
 
   it('scopes the list to one feature when the feature prop is set', async () => {
-    workflows.push(entry({ workflowId: 'w1', feature: 'cns', status: 'committed' }))
-    workflows.push(entry({ workflowId: 'w2', feature: 'oms', status: 'committed', startedAt: '2026-06-02T10:00:00Z' }))
+    workflows.push(entry({ workflowId: 'w1', feature: 'cns', status: 'saved' }))
+    workflows.push(entry({ workflowId: 'w2', feature: 'oms', status: 'saved', startedAt: '2026-06-02T10:00:00Z' }))
     await act(async () => { root.render(<PortifyHistoryList feature="cns" onOpenPortify={vi.fn()} />) })
     expect(container.textContent).toContain('cns')
     expect(container.textContent).not.toContain('oms')
-  })
-
-  it('labels a workflow merged via the in-app merge as "merged", not "committed"', async () => {
-    workflows.push(entry({ workflowId: 'w1', feature: 'cns', mergedAt: '2026-06-03T10:00:00Z' }))
-    await render()
-    expect(container.textContent).toContain('merged')
-    expect(container.textContent).not.toContain('committed')
   })
 
   it('reopens a workflow on row click', async () => {
@@ -97,7 +88,7 @@ describe('PortifyHistoryList', () => {
   })
 
   it('removes a finished run from history (and does not open it)', async () => {
-    workflows.push(entry({ workflowId: 'w1', feature: 'cns', status: 'committed' }))
+    workflows.push(entry({ workflowId: 'w1', feature: 'cns', status: 'saved' }))
     const { onOpenPortify } = await render()
     const removeBtn = [...container.querySelectorAll('button')].find((b) => b.getAttribute('aria-label')?.startsWith('Remove cns'))
     expect(removeBtn).toBeTruthy()

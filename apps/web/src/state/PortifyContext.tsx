@@ -20,14 +20,14 @@ import {
 } from './portify-state'
 
 // Port-ification store, mirroring BenchmarkContext: a `/ws/portify`-fed reducer
-// for the index + per-workflow manifests, plus one-shot start/commit/cancel
+// for the index + per-workflow manifests, plus one-shot start/save/cancel
 // actions. The GlobalStatusBar button reads the active workflow from here; the
 // wizard reads a single manifest via usePortifyWorkflow.
 
 interface PortifyContextValue {
   state: PortifyState
   startPortify: (input: { feature: string; agent?: 'claude' | 'codex'; maxAttempts?: number }) => Promise<string>
-  commitPortify: (id: string) => Promise<void>
+  savePortify: (id: string) => Promise<void>
   cancelPortify: (id: string) => Promise<void>
   /** Hydrate a terminal workflow's manifest (the WS snapshot omits details for
    *  terminal ones); WS `update`s keep active workflows fresh. */
@@ -120,8 +120,8 @@ export function PortifyProvider({
     [],
   )
 
-  const commitPortify = useCallback(async (id: string) => {
-    await api.commitPortify(id)
+  const savePortify = useCallback(async (id: string) => {
+    await api.savePortify(id)
   }, [])
 
   const cancelPortify = useCallback(async (id: string) => {
@@ -138,8 +138,8 @@ export function PortifyProvider({
   }, [])
 
   const value = useMemo<PortifyContextValue>(
-    () => ({ state, startPortify, commitPortify, cancelPortify, loadPortify }),
-    [state, startPortify, commitPortify, cancelPortify, loadPortify],
+    () => ({ state, startPortify, savePortify, cancelPortify, loadPortify }),
+    [state, startPortify, savePortify, cancelPortify, loadPortify],
   )
   return <PortifyContext.Provider value={value}>{children}</PortifyContext.Provider>
 }
@@ -156,7 +156,7 @@ export function usePortify() {
     workflows: ctx.state.workflows,
     connection: ctx.state.connection,
     startPortify: ctx.startPortify,
-    commitPortify: ctx.commitPortify,
+    savePortify: ctx.savePortify,
     cancelPortify: ctx.cancelPortify,
     loadPortify: ctx.loadPortify,
   }

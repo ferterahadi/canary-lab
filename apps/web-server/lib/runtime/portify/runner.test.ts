@@ -9,6 +9,7 @@ import { loadFeatures } from '../../feature-loader'
 import { PortifyRunStore } from './store'
 import { createPortifyRunner, safeKey } from './runner'
 import { runPortifyAgent } from './agent'
+import { overlayExists, readOverlay, overlayDir } from './overlay'
 import type { PortifyManifest } from './types'
 
 // Mock the agent so no real claude/codex spawns: simulate a source edit at the
@@ -145,7 +146,7 @@ async function waitForStatus(store: PortifyRunStore, id: string, until: string[]
   return store.get(id)?.status ?? 'missing'
 }
 
-const TERMINAL = ['ready-to-commit', 'failed', 'aborted']
+const TERMINAL = ['ready-to-save', 'failed', 'aborted']
 
 // Single-repo fixture (the common case).
 async function singleFixture(): Promise<{ featuresDir: string; logsDir: string; appRepo: string }> {
@@ -164,37 +165,72 @@ async function singleFixture(): Promise<{ featuresDir: string; logsDir: string; 
 }
 
 describe('createPortifyRunner (integration)', () => {
-  it('runs to ready-to-commit, then commits a branch in the repo', async () => {
-    const { featuresDir, logsDir, appRepo } = await singleFixture()
+  it('runs to ready-to-save with a passing double-boot verification and a captured diff', async () => {
+    const { featuresDir, logsDir } = await singleFixture()
     const { store, runner } = makeRunner(featuresDir, logsDir)
 
     const { workflowId } = await runner.startPortify({ feature: 'myfeat', agent: 'claude', maxAttempts: 1 })
-    expect(await waitForStatus(store, workflowId, TERMINAL)).toBe('ready-to-commit')
+    expect(await waitForStatus(store, workflowId, TERMINAL)).toBe('ready-to-save')
 
     const ready = store.get(workflowId)!
     expect(ready.verification?.ok).toBe(true)
     expect(ready.verification?.instances).toHaveLength(2)
     expect(ready.diff).toContain('port made injectable by agent')
-
-    const committed = await runner.commit(workflowId)
-    expect(committed.status).toBe('committed')
-    expect(committed.repos.find((r) => r.name === 'app')?.commitSha).toMatch(/^[0-9a-f]{7,}$/)
-    const branches = await runGit(appRepo, ['branch', '--list', committed.branch])
-    expect(branches.stdout).toContain('canary/dynamic-ports-myfeat')
   })
 
-  it('applies review feedback by resuming the agent and re-verifying, then commits', async () => {
+  it('save() captures the verified edits as an ephemeral overlay and discards the scratch worktree', async () => {
     const { featuresDir, logsDir, appRepo } = await singleFixture()
     const { store, runner } = makeRunner(featuresDir, logsDir)
 
+    const { workflowId } = await runner.startPortify({ feature: 'myfeat', agent: 'claude', maxAttempts: 1 })
+    expect(await waitForStatus(store, workflowId, TERMINAL)).toBe('ready-to-save')
+    const featureDir = path.join(featuresDir, 'myfeat')
+
+    const saved = await runner.save(workflowId)
+    expect(saved.status).toBe('saved')
+
+    // The overlay was written to features/<feature>/portify/ ...
+    expect(overlayExists(featureDir)).toBe(true)
+    const overlay = readOverlay(featureDir)!
+    expect(overlay.meta.featureName).toBe('myfeat')
+    expect(overlay.meta.agent).toBe('claude')
+    expect(overlay.meta.repos.map((r) => r.name)).toEqual(['app'])
+    expect(overlay.patches['app']).toContain('port made injectable by agent')
+    expect(fs.existsSync(path.join(overlayDir(featureDir), 'app.patch'))).toBe(true)
+
+    // ... and NOTHING landed in the product repo: no commit, no portify branch,
+    // and the scratch worktree/branch are gone.
+    const branches = await runGit(appRepo, ['branch', '--list', 'canary/dynamic-ports-myfeat'])
+    expect(branches.stdout.trim()).toBe('')
+    const log = await runGit(appRepo, ['log', '--oneline'])
+    expect(log.stdout.trim().split('\n')).toHaveLength(1) // only the fixture's init commit
+  })
+
+  it('save() 404s for an unknown workflow and 409s when not ready', async () => {
+    const { featuresDir, logsDir } = await singleFixture()
+    const { store, runner } = makeRunner(featuresDir, logsDir)
+    await expect(runner.save('nope')).rejects.toMatchObject({ statusCode: 404 })
+
+    store.save({
+      workflowId: 'w', feature: 'f', featureDir: '/f', repos: [], agent: 'claude',
+      branch: 'b', status: 'editing', attempt: 1, maxAttempts: 1, startedAt: 'now',
+    } as PortifyManifest)
+    await expect(runner.save('w')).rejects.toMatchObject({ statusCode: 409 })
+  })
+
+  it('applies review feedback by resuming the agent and re-verifying, then saves the overlay', async () => {
+    const { featuresDir, logsDir } = await singleFixture()
+    const featureDir = path.join(featuresDir, 'myfeat')
+    const { store, runner } = makeRunner(featuresDir, logsDir)
+
     const { workflowId } = await runner.startPortify({ feature: 'myfeat', maxAttempts: 1 })
-    expect(await waitForStatus(store, workflowId, TERMINAL)).toBe('ready-to-commit')
+    expect(await waitForStatus(store, workflowId, TERMINAL)).toBe('ready-to-save')
     const agentCallsBefore = vi.mocked(runPortifyAgent).mock.calls.length
 
-    // Feedback flips back to editing synchronously, then re-runs to ready-to-commit.
+    // Feedback flips back to editing synchronously, then re-runs to ready-to-save.
     const flipped = await runner.revise(workflowId, 'rename PORT to API_PORT')
     expect(flipped.status).toBe('editing')
-    expect(await waitForStatus(store, workflowId, TERMINAL)).toBe('ready-to-commit')
+    expect(await waitForStatus(store, workflowId, TERMINAL)).toBe('ready-to-save')
 
     const after = store.get(workflowId)!
     expect(after.feedbackRounds).toBe(1)
@@ -206,18 +242,17 @@ describe('createPortifyRunner (integration)', () => {
     expect(calls.length).toBe(agentCallsBefore + 1)
     expect(calls[calls.length - 1][0]).toMatchObject({ resume: true })
 
-    // Worktree survived the revise — commit still lands the branch.
-    const committed = await runner.commit(workflowId)
-    expect(committed.status).toBe('committed')
-    const branches = await runGit(appRepo, ['branch', '--list', committed.branch])
-    expect(branches.stdout).toContain('canary/dynamic-ports-myfeat')
+    // Scratch worktree survived the revise — save still writes the overlay.
+    const saved = await runner.save(workflowId)
+    expect(saved.status).toBe('saved')
+    expect(overlayExists(featureDir)).toBe(true)
   })
 
   it('revise falls back to the in-memory manifest when the post-float store read returns nothing', async () => {
     const { featuresDir, logsDir } = await singleFixture()
     const { store, runner } = makeRunner(featuresDir, logsDir)
     const { workflowId } = await runner.startPortify({ feature: 'myfeat', maxAttempts: 1 })
-    expect(await waitForStatus(store, workflowId, TERMINAL)).toBe('ready-to-commit')
+    expect(await waitForStatus(store, workflowId, TERMINAL)).toBe('ready-to-save')
 
     const real = store.get(workflowId)!
     const realGet = store.get.bind(store)
@@ -286,15 +321,17 @@ describe('createPortifyRunner (integration)', () => {
       ])
       const { store, runner } = makeRunner(featuresDir, logsDir)
       const { workflowId } = await runner.startPortify({ feature: 'myfeat', maxAttempts: 1 })
-      expect(await waitForStatus(store, workflowId, TERMINAL)).toBe('ready-to-commit')
+      expect(await waitForStatus(store, workflowId, TERMINAL)).toBe('ready-to-save')
       // Two distinct worktree paths recorded (one per root).
       const ready = store.get(workflowId)!
       const wts = new Set(ready.repos.map((r) => r.worktreePath))
       expect(wts.size).toBe(2)
-      const committed = await runner.commit(workflowId)
-      expect(committed.status).toBe('committed')
-      // The edited group (cwd = first group) committed; the other had no edit.
-      expect(committed.repos.some((r) => r.commitSha)).toBe(true)
+      const saved = await runner.save(workflowId)
+      expect(saved.status).toBe('saved')
+      // The overlay records both repos; the edited group's patch is non-empty.
+      const overlay = readOverlay(featureDir)!
+      expect(overlay.meta.repos.map((r) => r.name).sort()).toEqual(['a', 'b'])
+      expect(Object.values(overlay.patches).some((p) => p.includes('port made injectable by agent'))).toBe(true)
     })
 
     it('handles two repos in the SAME git root (one shared worktree, no branch clash)', async () => {
@@ -317,8 +354,8 @@ describe('createPortifyRunner (integration)', () => {
       const { store, runner } = makeRunner(featuresDir, logsDir)
       const { workflowId } = await runner.startPortify({ feature: 'myfeat', maxAttempts: 1 })
       // Same-root previously failed at setup with "branch already checked out".
-      // Grouping fixes it: one worktree, no clash → reaches ready-to-commit.
-      expect(await waitForStatus(store, workflowId, TERMINAL)).toBe('ready-to-commit')
+      // Grouping fixes it: one worktree, no clash → reaches ready-to-save.
+      expect(await waitForStatus(store, workflowId, TERMINAL)).toBe('ready-to-save')
       const ready = store.get(workflowId)!
       expect(new Set(ready.repos.map((r) => r.worktreePath)).size).toBe(1)
       await runner.cancel(workflowId)
@@ -376,32 +413,18 @@ describe('createPortifyRunner (integration)', () => {
     })
   })
 
-  describe('commit / cancel guards', () => {
-    it('commit 404s for an unknown workflow', async () => {
-      const { runner } = makeRunner(path.join(os.tmpdir(), 'nope-f'), fs.mkdtempSync(path.join(os.tmpdir(), 'portify-c-')))
-      await expect(runner.commit('nope')).rejects.toMatchObject({ statusCode: 404 })
-    })
-    it('commit 409s when the workflow is not ready-to-commit', async () => {
-      const logsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-nr-'))
-      roots.push(logsDir)
-      const { store, runner } = makeRunner('x', logsDir)
-      store.save({
-        workflowId: 'w', feature: 'f', featureDir: '/f', repos: [], agent: 'claude',
-        branch: 'b', status: 'editing', attempt: 1, maxAttempts: 3, startedAt: 'now',
-      })
-      await expect(runner.commit('w')).rejects.toMatchObject({ statusCode: 409 })
-    })
+  describe('save / cancel guards', () => {
     it('cancel 404s for an unknown workflow', async () => {
       const { runner } = makeRunner('x', fs.mkdtempSync(path.join(os.tmpdir(), 'portify-cc-')))
       await expect(runner.cancel('nope')).rejects.toMatchObject({ statusCode: 404 })
     })
 
-    it('commit 409s when the latest revise left verification failing', async () => {
+    it('save 409s when the latest revise left verification failing', async () => {
       const logsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-unproven-'))
       roots.push(logsDir)
       const { store, runner } = makeRunner('x', logsDir)
       store.save(readyManifest({ verification: { ok: false, instances: [], failureDetail: 'clash' } }))
-      await expect(runner.commit('w')).rejects.toMatchObject({ statusCode: 409 })
+      await expect(runner.save('w')).rejects.toMatchObject({ statusCode: 409 })
     })
 
     it('revise 404s for an unknown workflow', async () => {
@@ -417,7 +440,7 @@ describe('createPortifyRunner (integration)', () => {
       await expect(runner.revise('w', '   ')).rejects.toMatchObject({ statusCode: 400 })
     })
 
-    it('revise 409s when the workflow is not ready-to-commit', async () => {
+    it('revise 409s when the workflow is not ready-to-save', async () => {
       const logsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-rvs-'))
       roots.push(logsDir)
       const { store, runner } = makeRunner('x', logsDir)
@@ -443,7 +466,7 @@ describe('createPortifyRunner (integration)', () => {
       const logsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-rmne-'))
       roots.push(logsDir)
       const { store, runner } = makeRunner('x', logsDir)
-      store.save(readyManifest()) // ready-to-commit is non-terminal
+      store.save(readyManifest()) // ready-to-save is non-terminal
       await expect(runner.remove('w')).rejects.toMatchObject({ statusCode: 409 })
     })
 
@@ -451,150 +474,18 @@ describe('createPortifyRunner (integration)', () => {
       const logsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-rmok-'))
       roots.push(logsDir)
       const { store, runner } = makeRunner('x', logsDir)
-      store.save(readyManifest({ status: 'committed', endedAt: 'now' }))
+      store.save(readyManifest({ status: 'saved', endedAt: 'now' }))
       expect(await runner.remove('w')).toEqual({ workflowId: 'w', removed: true })
       expect(store.list()).toEqual([])
     })
   })
 
-  describe('merge', () => {
-    // Run a workflow to committed so there's a real branch in the user's repo.
-    async function committedFixture() {
-      const { featuresDir, logsDir, appRepo } = await singleFixture()
-      const { store, runner } = makeRunner(featuresDir, logsDir)
-      const { workflowId } = await runner.startPortify({ feature: 'myfeat', maxAttempts: 1 })
-      expect(await waitForStatus(store, workflowId, TERMINAL)).toBe('ready-to-commit')
-      await runner.commit(workflowId)
-      return { store, runner, workflowId, appRepo }
-    }
-
-    it('merge and mergeStatus 404 for an unknown workflow', async () => {
-      const { runner } = makeRunner('x', fs.mkdtempSync(path.join(os.tmpdir(), 'portify-mg404-')))
-      await expect(runner.merge('nope')).rejects.toMatchObject({ statusCode: 404 })
-      await expect(runner.mergeStatus('nope')).rejects.toMatchObject({ statusCode: 404 })
-    })
-
-    it('merge and mergeStatus 409 when the workflow is not committed', async () => {
-      const logsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-mg409-'))
-      roots.push(logsDir)
-      const { store, runner } = makeRunner('x', logsDir)
-      store.save(readyManifest())
-      await expect(runner.merge('w')).rejects.toMatchObject({ statusCode: 409 })
-      await expect(runner.mergeStatus('w')).rejects.toMatchObject({ statusCode: 409 })
-    })
-
-    it('reports readiness, merges into the user repo, and persists the merge', async () => {
-      const { store, runner, workflowId, appRepo } = await committedFixture()
-
-      const before = await runner.mergeStatus(workflowId)
-      expect(before.merged).toBe(false)
-      expect(before.nothingToMerge).toBe(false)
-      expect(before.repos).toHaveLength(1)
-      expect(before.repos[0]).toMatchObject({ branchExists: true, dirty: false, mergeInProgress: false, merged: false })
-      expect(before.repos[0].currentBranch).toBeTruthy()
-
-      const res = await runner.merge(workflowId)
-      expect(res.ok).toBe(true)
-      expect(res.results[0].mergeCommitSha).toMatch(/^[0-9a-f]{7,}$/)
-
-      // The user's actual checkout now has the agent's edit.
-      expect(fs.readFileSync(path.join(appRepo, 'src', 'server.js'), 'utf-8')).toContain('port made injectable by agent')
-
-      const m = store.get(workflowId)!
-      expect(m.mergedAt).toBe('2026-06-07T00:00:00.000Z')
-      expect(m.repos.find((r) => r.name === 'app')?.mergeCommitSha).toMatch(/^[0-9a-f]{7,}$/)
-      expect(store.list().find((e) => e.workflowId === workflowId)?.mergedAt).toBe('2026-06-07T00:00:00.000Z')
-
-      expect((await runner.mergeStatus(workflowId)).merged).toBe(true)
-    })
-
-    it('mergeStatus detects a merge done manually in a terminal', async () => {
-      const { store, runner, workflowId, appRepo } = await committedFixture()
-      const branch = store.get(workflowId)!.branch
-      await runGit(appRepo, ['merge', '--no-edit', branch])
-      expect((await runner.mergeStatus(workflowId)).merged).toBe(true)
-    })
-
-    it('reports conflicts per repo, leaves the repo clean, and does not persist a merge', async () => {
-      const { store, runner, workflowId, appRepo } = await committedFixture()
-      // Conflicting commit on the user's branch: same file, different content.
-      fs.writeFileSync(path.join(appRepo, 'src', 'server.js'), 'const PORT = 9999 // clash\n')
-      await runGit(appRepo, ['add', '-A'])
-      await runGit(appRepo, ['commit', '-q', '-m', 'clash', '--no-verify'])
-
-      const res = await runner.merge(workflowId)
-      expect(res.ok).toBe(false)
-      expect(res.results[0].conflictFiles).toContain('src/server.js')
-
-      const s = await runner.mergeStatus(workflowId)
-      expect(s.repos[0].dirty).toBe(false)
-      expect(s.repos[0].mergeInProgress).toBe(false)
-      expect(store.get(workflowId)!.mergedAt).toBeUndefined()
-    })
-
-    it('refuses a dirty user repo per-repo without touching it', async () => {
-      const { store, runner, workflowId, appRepo } = await committedFixture()
-      fs.appendFileSync(path.join(appRepo, 'src', 'server.js'), '// wip\n')
-
-      expect((await runner.mergeStatus(workflowId)).repos[0].dirty).toBe(true)
-      const res = await runner.merge(workflowId)
-      expect(res.ok).toBe(false)
-      expect(res.results[0].error).toMatch(/uncommitted changes/)
-      expect(store.get(workflowId)!.mergedAt).toBeUndefined()
-      // The wip edit is still there, untouched.
-      expect(fs.readFileSync(path.join(appRepo, 'src', 'server.js'), 'utf-8')).toContain('// wip')
-    })
-
-    it('falls back to repoPath when getGitRoot returns null (non-git path), and surfaces the error per repo', async () => {
-      const logsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-mgngit-'))
-      roots.push(logsDir)
-      const { store, runner } = makeRunner('x', logsDir)
-      // Path does not exist → getGitRoot returns null → ?? repoPath fallback (line 411)
-      // mergePortifyBranch on a non-git dir throws an Error → caught at line 462
-      store.save(readyManifest({
-        status: 'committed', endedAt: 'now',
-        repos: [{ name: 'app', path: '/tmp/canary-no-git-dir-nonexistent', commitSha: 'abc123' }],
-      }))
-      const res = await runner.merge('w')
-      expect(res.ok).toBe(false)
-      expect(res.results[0].error).toBeTruthy()
-    })
-
-    it('preserves repos with no commitSha as-is when updating the manifest after merge', async () => {
-      const { store, runner, workflowId } = await committedFixture()
-      const m = store.get(workflowId)!
-      // Add a second repo with no commitSha: committedGroups skips it,
-      // but repos.map still iterates over it → the `: r` fallback on line 473
-      store.save({ ...m, repos: [...m.repos, { name: 'extra', path: '/nonexistent' }] })
-      const res = await runner.merge(workflowId)
-      expect(res.ok).toBe(true)
-      const saved = store.get(workflowId)!
-      expect(saved.repos.find((r) => r.name === 'extra')?.mergeCommitSha).toBeUndefined()
-    })
-
-    it('reports nothingToMerge when no repo has a commit', async () => {
-      const logsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-mgnone-'))
-      roots.push(logsDir)
-      const { store, runner } = makeRunner('x', logsDir)
-      store.save(readyManifest({
-        status: 'committed', endedAt: 'now',
-        repos: [{ name: 'app', path: '/tmp/nowhere' }], // no commitSha
-      }))
-      const s = await runner.mergeStatus('w')
-      expect(s.nothingToMerge).toBe(true)
-      expect(s.merged).toBe(true)
-      expect(s.repos).toEqual([])
-      const res = await runner.merge('w')
-      expect(res.ok).toBe(true)
-      expect(res.results).toEqual([])
-    })
-  })
 })
 
 function readyManifest(over: Partial<PortifyManifest> = {}): PortifyManifest {
   return {
     workflowId: 'w', feature: 'f', featureDir: '/f', repos: [], agent: 'claude',
-    branch: 'b', status: 'ready-to-commit', attempt: 1, maxAttempts: 3, startedAt: 'now', ...over,
+    branch: 'b', status: 'ready-to-save', attempt: 1, maxAttempts: 3, startedAt: 'now', ...over,
   }
 }
 
@@ -608,7 +499,7 @@ describe('createPortifyRunner (branch coverage)', () => {
     const { featuresDir, logsDir } = await singleFixture()
     const { store, runner } = makeRunner(featuresDir, logsDir, true, 'codex')
     const { workflowId } = await runner.startPortify({ feature: 'myfeat', agent: 'codex', maxAttempts: 1 })
-    expect(await waitForStatus(store, workflowId, TERMINAL)).toBe('ready-to-commit')
+    expect(await waitForStatus(store, workflowId, TERMINAL)).toBe('ready-to-save')
     await runner.cancel(workflowId)
   })
 
@@ -616,7 +507,7 @@ describe('createPortifyRunner (branch coverage)', () => {
     const { featuresDir, logsDir } = await singleFixture()
     const { store, runner } = makeRunner(featuresDir, logsDir)
     const { workflowId } = await runner.startPortify({ feature: 'myfeat', maxAttempts: -1 })
-    expect(await waitForStatus(store, workflowId, TERMINAL)).toBe('ready-to-commit')
+    expect(await waitForStatus(store, workflowId, TERMINAL)).toBe('ready-to-save')
     expect(store.get(workflowId)!.maxAttempts).toBe(3)
     await runner.cancel(workflowId)
   })
@@ -647,7 +538,7 @@ describe('createPortifyRunner (branch coverage)', () => {
     })
     const { store, runner } = makeRunner(featuresDir, logsDir)
     const { workflowId } = await runner.startPortify({ feature: 'myfeat', maxAttempts: 2 })
-    expect(await waitForStatus(store, workflowId, TERMINAL)).toBe('ready-to-commit')
+    expect(await waitForStatus(store, workflowId, TERMINAL)).toBe('ready-to-save')
     const m = store.get(workflowId)!
     expect(m.attempt).toBe(2)
     expect(m.diff).toContain('# feature config:')
@@ -662,7 +553,7 @@ describe('createPortifyRunner (branch coverage)', () => {
     const loadFeaturesFn = (): FeatureConfig[] => (++n === 1 ? feats : [])
     const { store, runner } = makeRunner(featuresDir, logsDir, true, 'claude', loadFeaturesFn)
     const { workflowId } = await runner.startPortify({ feature: 'myfeat', maxAttempts: 1 })
-    expect(await waitForStatus(store, workflowId, TERMINAL)).toBe('ready-to-commit')
+    expect(await waitForStatus(store, workflowId, TERMINAL)).toBe('ready-to-save')
     await runner.cancel(workflowId)
   })
 
@@ -680,28 +571,28 @@ describe('createPortifyRunner (branch coverage)', () => {
     writeConfig(featureDir, [{ name: 'app', localPath: appRepo, slot: 'api', env: 'PORT' }], { ext: 'js' })
     const { store, runner } = makeRunner(featuresDir, logsDir)
     const { workflowId } = await runner.startPortify({ feature: 'myfeat', maxAttempts: 1 })
-    expect(await waitForStatus(store, workflowId, TERMINAL)).toBe('ready-to-commit')
+    expect(await waitForStatus(store, workflowId, TERMINAL)).toBe('ready-to-save')
     await runner.cancel(workflowId) // restoreConfig hits the originalConfig == null arm
   })
 
-  it('commit 409s when the manifest is ready but the active state is gone', async () => {
+  it('save 409s when the manifest is ready but the active state is gone', async () => {
     const logsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-nostate-'))
     roots.push(logsDir)
     const { store, runner } = makeRunner('x', logsDir)
     store.save(readyManifest({ workflowId: 'w' }))
-    await expect(runner.commit('w')).rejects.toMatchObject({ statusCode: 409 })
+    await expect(runner.save('w')).rejects.toMatchObject({ statusCode: 409 })
   })
 
-  it('cancel marks a stateless workflow aborted, and returns a committed one untouched', async () => {
+  it('cancel marks a stateless workflow aborted, and returns a saved one untouched', async () => {
     const logsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-cancel2-'))
     roots.push(logsDir)
     const { store, runner } = makeRunner('x', logsDir)
     // No active state, no endedAt → aborted with now().
     store.save(readyManifest({ workflowId: 'a', status: 'editing' }))
     expect((await runner.cancel('a')).status).toBe('aborted')
-    // Already committed → returned untouched.
-    store.save(readyManifest({ workflowId: 'b', status: 'committed', endedAt: '2026-06-07T00:00:00.000Z' }))
-    expect((await runner.cancel('b')).status).toBe('committed')
+    // Already saved → returned untouched.
+    store.save(readyManifest({ workflowId: 'b', status: 'saved', endedAt: '2026-06-07T00:00:00.000Z' }))
+    expect((await runner.cancel('b')).status).toBe('saved')
   })
 
   it('handles a repo whose localPath IS its git root (empty edit subpath)', async () => {
@@ -720,7 +611,7 @@ describe('createPortifyRunner (branch coverage)', () => {
     writeConfig(featureDir, [{ name: 'app', localPath: fs.realpathSync(appRepo), slot: 'api', env: 'PORT' }])
     const { store, runner } = makeRunner(featuresDir, logsDir)
     const { workflowId } = await runner.startPortify({ feature: 'myfeat', maxAttempts: 1 })
-    expect(await waitForStatus(store, workflowId, TERMINAL)).toBe('ready-to-commit')
+    expect(await waitForStatus(store, workflowId, TERMINAL)).toBe('ready-to-save')
     await runner.cancel(workflowId)
   })
 

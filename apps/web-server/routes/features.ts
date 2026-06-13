@@ -5,6 +5,7 @@ import { loadFeatures, listSpecFiles } from '../lib/feature-loader'
 import { extractTestsFromSource, type ExtractedTest } from '../lib/ast-extractor'
 import { listPlaywrightTests, type PlaywrightListSpawner } from '../lib/playwright-list'
 import { parseDotenv } from '../lib/dotenv-edit'
+import { overlayExists as portifyOverlayExists } from '../lib/runtime/portify/overlay'
 import {
   getEnvSetsDir,
   loadConfig,
@@ -26,6 +27,9 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
       description: f.description,
       repos: (f.repos ?? []).map((r) => ({ name: r.name, localPath: r.localPath })),
       envs: f.envs ?? [],
+      // A saved port overlay exists → the feature boots concurrently. Surfaced
+      // as the "Portified" badge in the features column.
+      portified: portifyOverlayExists(f.featureDir),
     }))
   })
 
