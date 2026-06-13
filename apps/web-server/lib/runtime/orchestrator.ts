@@ -830,6 +830,19 @@ export class RunOrchestrator extends EventEmitter {
     const detail = transport === 'http'
       ? `url=${(probe as { http: HttpProbe }).http.url}`
       : `port=${(probe as { tcp: TcpProbe }).tcp.port}`
+    // Boot-only sessions hold whatever came up. A service that fails its
+    // readiness probe is marked `timeout` (red) and surfaced as a non-fatal
+    // warning, but the session is NOT aborted — the user keeps the healthy
+    // services up to exercise while they debug the failed one, and only
+    // abort_run / Stop tears the session down. A normal run still aborts: a
+    // missing service makes the Playwright suite meaningless.
+    if (this.executionType === 'boot') {
+      this.recordLifecycle('starting-services', `Health failed: ${svc.name} — kept up`, {
+        detail: `Timed out waiting for ${transport.toUpperCase()} readiness (${detail}). Marked failed; boot session held — other services stay up. Stop with abort_run to tear down.`,
+        severity: 'warning',
+      })
+      return
+    }
     this.pendingAbortReason = { reason: 'service-health-failed', service: svc.name }
     this.recordLifecycle('aborted', `Health failed: ${svc.name}`, {
       detail: `Timed out waiting for ${transport.toUpperCase()} readiness (${detail}).`,
