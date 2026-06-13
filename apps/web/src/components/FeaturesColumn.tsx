@@ -143,6 +143,7 @@ export function FeaturesColumn({
       {configFor && (
         <FeatureConfigEditor
           feature={configFor}
+          portified={features.find((f) => f.name === configFor)?.portified ?? false}
           onStartPortify={onStartPortify}
           onOpenPortify={(workflowId) => { setConfigFor(null); onOpenPortify?.(workflowId) }}
           onClose={() => setConfigFor(null)}

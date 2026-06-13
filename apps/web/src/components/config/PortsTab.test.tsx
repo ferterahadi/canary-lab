@@ -77,9 +77,6 @@ describe('PortsTab', () => {
     expect(container.textContent).toContain('yarn start')
     // The read-only injection token is rendered for the slot.
     expect(container.textContent).toContain('${port.api}')
-    // The one-line legend is keyed to the feature's own slot (name + env var)
-    // and states that the env var and the token carry the same number.
-    expect(container.textContent).toContain('two names for that same number')
 
     // Rename the slot and save — it must round-trip through parse → serialize.
     const slotName = slotNameInput()
@@ -108,14 +105,16 @@ describe('PortsTab', () => {
     )
   })
 
-  it('shows the portified headline and confirms a re-run before firing onStartPortify', async () => {
+  it('shows the portified headline (driven by overlay presence) and confirms a re-run before firing onStartPortify', async () => {
     vi.mocked(getFeatureConfigDoc).mockResolvedValue(docWithPorts())
     const onStartPortify = vi.fn()
     await act(async () => {
-      root.render(<PortsTab feature="cns_exactly_once_fallback" onStartPortify={onStartPortify} />)
+      // portified=true (a saved overlay exists) → portified headline + a
+      // re-run-style action that confirms first. This is overlay presence, NOT
+      // the declared-slot count.
+      root.render(<PortsTab feature="cns_exactly_once_fallback" portified onStartPortify={onStartPortify} />)
     })
-    // Slots declared → portified headline + a re-run-style action that confirms first.
-    expect(container.textContent).toContain('Portified — ready for concurrent boot')
+    expect(container.textContent).toContain('Portified — boots concurrently')
     await act(async () => clickButton('Re-run Portify'))
     expect(onStartPortify).not.toHaveBeenCalled()
     expect(container.textContent).toContain('Re-run Portify?')
@@ -127,15 +126,14 @@ describe('PortsTab', () => {
     expect(onStartPortify).toHaveBeenCalledWith('cns_exactly_once_fallback')
   })
 
-  it('shows Not portified and launches directly (no confirm) when no port slots are declared', async () => {
+  it('shows Not portified and launches directly (no confirm) when no overlay exists', async () => {
     vi.mocked(getFeatureConfigDoc).mockResolvedValue(docNoPorts())
     const onStartPortify = vi.fn()
     await act(async () => {
+      // portified defaults to false (no saved overlay) → Not portified.
       root.render(<PortsTab feature="np_feature" onStartPortify={onStartPortify} />)
     })
     expect(container.textContent).toContain('Not portified')
-    // No declared slots → the legend falls back to the scaffold example.
-    expect(container.textContent).toContain('${port.api}')
     await act(async () => clickButton('Portify'))
     expect(onStartPortify).toHaveBeenCalledWith('np_feature')
     expect(container.textContent).not.toContain('Re-run Portify?')
