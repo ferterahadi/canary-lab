@@ -1318,7 +1318,7 @@ export function registerCanaryLabTools(
       return asJsonResult({
         runId: outcome.runId,
         booted: true,
-        nextSteps: ['services are booting and will be held — exercise them, then call abort_run (confirm:true) to stop services + revert the envset'],
+        nextSteps: ['services are booting and will be held — exercise them, then call abort_run (confirm:true) to stop services + revert the envset. A service that fails its readiness probe is marked failed (status "timeout") but the session stays held; boot does not self-abort on a health-check failure'],
       })
     } catch (err) {
       return errorResult(err instanceof Error ? err.message : String(err))
@@ -1513,7 +1513,7 @@ function healWaitNext(runId: string): { nextSteps: string[]; next: string } {
 }
 
 const BOOT_SESSION_MESSAGE =
-  'Boot-only session: services are up and held. No tests run and there is no heal task. Stop with abort_run (confirm:true) when done.'
+  'Boot-only session: services are up and held. No tests run and there is no heal task. A service that fails its readiness probe is marked failed (status "timeout") but the session stays held — boot does not self-abort on a health-check failure. Stop with abort_run (confirm:true) when done.'
 
 // A boot run (started via boot_services) holds its services up with no Playwright
 // tests and no heal loop. Following or waiting on one must not claim heal or block
@@ -1536,7 +1536,7 @@ function bootSessionValue(detail: RunDetail): Extract<WaitForHealTaskValue, { ty
     claimed: false,
     lifecycle: detail.manifest.lifecycle ?? null,
     message: BOOT_SESSION_MESSAGE,
-    nextSteps: ['boot session — services are up and held; exercise them, then abort_run (confirm:true) when done'],
+    nextSteps: ['boot session — services are up and held; a service that failed its readiness probe shows status "timeout" but the session stays held (boot does not self-abort on health failure); exercise the live ones, then abort_run (confirm:true) when done'],
   }
 }
 

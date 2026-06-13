@@ -310,7 +310,7 @@ function RunOverviewTab({
   }, [gatePromo, manifest.runId, startExport])
 
   return (
-    <div className="h-full overflow-hidden p-4 text-sm">
+    <div className="h-full overflow-y-auto scrollbar-thin p-4 text-sm">
       <div className="mb-2 flex items-center justify-between gap-3">
         <h2 className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-secondary)' }}>
           Run
@@ -456,7 +456,7 @@ function VerifyOverviewTab({
   const verification = manifest.verification
   const targets = verification?.targets ?? []
   return (
-    <div className="h-full overflow-hidden p-4 text-sm">
+    <div className="h-full overflow-y-auto scrollbar-thin p-4 text-sm">
       <div className="mb-2">
         <h2 className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-secondary)' }}>
           Verify
