@@ -73,6 +73,25 @@ export class PortifyOrchestrator {
         verification = await d.verify()
         if (d.isAborted?.()) return await finalizeAborted()
 
+        // An environment failure (e.g. the stack crashed on an unreachable DB)
+        // can't be fixed by editing port code — stop now instead of burning the
+        // remaining attempts re-running the agent against the same wall.
+        if (!verification.ok && verification.notPortFixable) {
+          await d.cleanup?.()
+          m = {
+            ...m,
+            status: 'failed',
+            diff,
+            verification,
+            endedAt: d.now(),
+            error:
+              'The stack could not boot because a dependency was unreachable (e.g. the database is down). ' +
+              'This is an environment problem, not the port rewrite — fix the environment and re-run portify.',
+          }
+          d.persist(m)
+          return m
+        }
+
         if (verification.ok) {
           const tests = await d.checkTestsUntouched()
           if (!tests.ok) {

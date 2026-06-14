@@ -62,7 +62,7 @@ export function runPortifyAgent(opts: {
     // simply made no edits — record it to the log and reject so the caller can
     // report it instead of letting verify mislabel it "no port slots declared".
     child.on('error', (err) => {
-      const msg = `could not launch the ${agent} CLI (${bin}): ${err instanceof Error ? err.message : String(err)}`
+      const msg = `could not launch the ${agent} CLI (${bin}): ${err.message}`
       if (typeof out === 'number') { try { fs.writeSync(out, `\n${msg}\n`) } catch { /* noop */ } }
       cleanup()
       reject(new Error(msg))

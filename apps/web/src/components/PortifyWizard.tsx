@@ -729,10 +729,19 @@ function SaveScreen({ m, onDone }: { m: PortifyManifest; onDone: () => void }) {
 }
 
 function FailedScreen({ m, onClose }: { m: PortifyManifest; onClose: () => void }) {
+  // An environment failure (e.g. the DB is down) isn't a fault in the port
+  // rewrite — title it so the user knows to fix the env and re-run, not to
+  // expect a different agent attempt.
+  const title =
+    m.status === 'aborted'
+      ? 'Cancelled'
+      : m.verification?.notPortFixable
+        ? 'Stack could not boot (environment)'
+        : 'Could not make it work'
   return (
     <div>
       <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 8, color: 'rgb(251,113,133)' }}>
-        {m.status === 'aborted' ? 'Cancelled' : 'Could not make it work'}
+        {title}
       </div>
       {m.error && <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 12 }}>{m.error}</p>}
       {m.verification?.failureDetail && (

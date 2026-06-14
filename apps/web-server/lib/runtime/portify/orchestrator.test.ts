@@ -84,6 +84,25 @@ describe('PortifyOrchestrator', () => {
     expect(runAgent.mock.calls[1][1]).toContain('e2e/api.spec.ts')
   })
 
+  it('fails fast (no retries) when the boot failure is an unreachable dependency, not ports', async () => {
+    const verify = vi.fn(async (): Promise<PortifyVerification> => ({
+      ok: false,
+      instances: [{ ports: { api: 1 }, ok: false, failedService: 'api', detail: "Can't reach database server" }],
+      failureDetail: "boot failed: api — Can't reach database server",
+      notPortFixable: true,
+    }))
+    const runAgent = vi.fn(async () => {})
+    const { deps } = makeDeps({ verify, runAgent })
+    const m = await new PortifyOrchestrator(deps).run()
+    expect(m.status).toBe('failed')
+    expect(runAgent).toHaveBeenCalledOnce() // attempt 1 only — no wasted port-fix retries
+    expect(verify).toHaveBeenCalledOnce()
+    expect(deps.cleanup).toHaveBeenCalledOnce()
+    expect(m.error).toMatch(/environment|dependenc/i)
+    // The diagnosed reason is preserved on the manifest for the user.
+    expect(m.verification?.failureDetail).toContain("Can't reach database server")
+  })
+
   it('fails (not throws) and cleans up when a dependency throws', async () => {
     const { deps } = makeDeps({ setup: async () => { throw new Error('worktree create failed') } })
     const m = await new PortifyOrchestrator(deps).run()

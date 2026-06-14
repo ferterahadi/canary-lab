@@ -373,7 +373,7 @@ export function createPortifyRunner(deps: PortifyRunnerDeps) {
     // The scratch worktree + branch have served their purpose (the diff is
     // captured) — discard them so nothing lingers in the product repo.
     for (const group of state.groups) {
-      if (group.handle) await discardWorktree(group.handle, state.branch)
+      await discardWorktree(group.handle!, state.branch)
     }
     active.delete(workflowId)
     const next: PortifyManifest = { ...m, status: 'saved', endedAt: deps.now() }

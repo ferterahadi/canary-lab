@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { EventEmitter } from 'events'
 import type { PtyFactory, PtyHandle, PtySpawnOptions } from './pty-spawner'
 import type { ServiceSpec } from './orchestrator'
-import { bootAndProbe, fileTee } from './boot-probe'
+import { bootAndProbe, fileTee, diagnoseBootOutput } from './boot-probe'
 
 // Teardown calls process.kill(-pid). Block the REAL process.kill so a fake pty
 // can never signal a real process group; killTree falls back to pty.kill, which
@@ -29,6 +29,21 @@ function fakeFactory(): { factory: PtyFactory; spawned: PtySpawnOptions[]; kille
     }
   }
   return { factory, spawned, killed }
+}
+
+// A pty whose stream emits the given chunk(s) once subscribed — for asserting
+// that bootAndProbe captures process output and surfaces it on a failed boot.
+function emittingFactory(...chunks: string[]): PtyFactory {
+  return (): PtyHandle => {
+    const data = new EventEmitter()
+    queueMicrotask(() => { for (const c of chunks) data.emit('data', c) })
+    return {
+      pid: 7_100_001,
+      onData: (cb) => { data.on('data', cb); return { dispose: () => {} } },
+      onExit: () => ({ dispose: () => {} }),
+      write: () => {}, resize: () => {}, kill: () => {},
+    }
+  }
 }
 
 function httpSpec(name: string, url: string): ServiceSpec {
@@ -136,6 +151,65 @@ describe('bootAndProbe', () => {
     res.teardown()
     expect(fs.readFileSync(path.join(dir, 'a-api.log'), 'utf-8')).toContain('hello-log')
     fs.rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('captures the crash reason and classifies a dependency failure on timeout', async () => {
+    // The gateway maps its routes then dies in bootstrap because a downstream
+    // DB is unreachable — so it never binds and the readiness probe times out.
+    const factory = emittingFactory(
+      "[0m[0][0m Mapped {/healthz, GET} route\n" +
+        "[0m[0][0m Init-Failed {\n  app: 'gateway',\n  reason: \"Can't reach database server at `34.87.54.225:3306`\"\n}\n",
+    )
+    const res = await bootAndProbe({
+      specs: [httpSpec('gateway', 'http://localhost:5000/healthz')],
+      ptyFactory: factory,
+      healthCheck: async () => false,
+      healthPollIntervalMs: 5,
+    })
+    expect(res.ok).toBe(false)
+    if (!res.ok) {
+      expect(res.kind).toBe('dependency')
+      // The probe symptom is preserved AND the real cause is surfaced.
+      expect(res.detail).toContain('http://localhost:5000/healthz')
+      expect(res.detail).toContain("Can't reach database server")
+    }
+    res.teardown()
+  })
+
+  it('classifies an EADDRINUSE crash as a port conflict', async () => {
+    const factory = emittingFactory('Error: listen EADDRINUSE: address already in use 0.0.0.0:5000\n')
+    const res = await bootAndProbe({
+      specs: [httpSpec('api', 'http://localhost:5000/')],
+      ptyFactory: factory,
+      healthCheck: async () => false,
+      healthPollIntervalMs: 5,
+    })
+    expect(res.ok).toBe(false)
+    if (!res.ok) {
+      expect(res.kind).toBe('port-conflict')
+      expect(res.detail).toContain('EADDRINUSE')
+    }
+    res.teardown()
+  })
+
+  it('falls back to a log tail (kind unknown) when no known crash marker is present', async () => {
+    const factory = emittingFactory('booting\nwarming caches\nstill starting up\n')
+    const res = await bootAndProbe({
+      specs: [httpSpec('api', 'http://localhost:5000/')],
+      ptyFactory: factory,
+      healthCheck: async () => false,
+      healthPollIntervalMs: 5,
+    })
+    expect(res.ok).toBe(false)
+    if (!res.ok) {
+      expect(res.kind).toBe('unknown')
+      expect(res.detail).toContain('warming caches')
+    }
+    res.teardown()
+  })
+
+  it('diagnoseBootOutput returns no evidence and unknown kind for empty output', () => {
+    expect(diagnoseBootOutput('')).toEqual({ kind: 'unknown' })
   })
 
   it('teardown kills every spawned process group', async () => {

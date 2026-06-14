@@ -1,5 +1,6 @@
 import os from 'os'
 import path from 'path'
+import { EventEmitter } from 'events'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { FeatureConfig } from '../../../../../shared/launcher/types'
 import type { PtyFactory, PtyHandle } from '../pty-spawner'
@@ -71,5 +72,34 @@ describe('verifyDoubleBoot', () => {
     expect(res.ok).toBe(false)
     expect(res.failureDetail).toContain('api')
     expect(res.instances.some((i) => !i.ok)).toBe(true)
+    // A bare health timeout (no crash output) is not classifiable as an
+    // environment failure — leave the door open for a port-fix retry.
+    expect(res.notPortFixable).toBeFalsy()
+  })
+
+  it('flags a dependency crash as not port-fixable and surfaces the reason', async () => {
+    // The stack crashes during bootstrap on an unreachable DB, so it never
+    // binds — that is an environment failure, not something the port rewrite
+    // can fix, and the reason should reach failureDetail.
+    const crashPty: PtyFactory = (): PtyHandle => {
+      const data = new EventEmitter()
+      queueMicrotask(() => data.emit('data',
+        "Init-Failed {\n  app: 'gateway',\n  reason: \"Can't reach database server at `34.87.54.225:3306`\"\n}\n"))
+      return {
+        pid: 9_999_998, onData: (cb) => { data.on('data', cb); return { dispose: () => {} } },
+        onExit: () => ({ dispose: () => {} }), write: () => {}, resize: () => {}, kill: () => {},
+      }
+    }
+    const res = await verifyDoubleBoot(
+      feature({ repos: [{ name: 'app', localPath: '~/app', startCommands: [{
+        command: 'node server.js', name: 'api', ports: [{ name: 'api', env: 'PORT' }],
+        healthCheck: { http: { url: 'http://localhost:${port.api}/', timeoutMs: 10, deadlineMs: 60 } },
+      }] }] }),
+      'local', { app: '/wt/app' },
+      { ptyFactory: crashPty, healthCheck: async () => false, healthPollIntervalMs: 3, staggerMs: 0, verifyLogDir },
+    )
+    expect(res.ok).toBe(false)
+    expect(res.notPortFixable).toBe(true)
+    expect(res.failureDetail).toContain("Can't reach database server")
   })
 })

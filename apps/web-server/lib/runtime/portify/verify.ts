@@ -104,7 +104,13 @@ export async function verifyDoubleBoot(
         .map((i) => `boot on ports {${fmtPorts(i.ports)}} failed: ${i.failedService} — ${i.detail}`)
         .join('\n')
 
-  return { ok, instances, failureDetail }
+  // If EVERY failed boot died on an unreachable dependency, this is an
+  // environment problem, not a port one — no point retrying the rewrite.
+  const failedBoots = [resA!, resB!].filter((r) => !r.ok)
+  const notPortFixable =
+    !ok && failedBoots.length > 0 && failedBoots.every((r) => !r.ok && r.kind === 'dependency')
+
+  return { ok, instances, failureDetail, notPortFixable }
 }
 
 function instanceFrom(portMap: Map<string, number>, res: BootProbeResult): PortifyBootInstance {
