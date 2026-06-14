@@ -97,6 +97,12 @@ describe('applyOverlay', () => {
     expect(out.kind).toBe('ok')
     expect(read(repo)).toBe(BASE)
   })
+
+  it('returns error when the patch path does not exist (exercises isBlankPatch catch)', async () => {
+    const repo = await tmpRepo(BASE)
+    const out = await applyOverlay(repo, path.join(repo, 'nonexistent.patch'))
+    expect(out.kind).toBe('error')
+  })
 })
 
 describe('reverseOverlay', () => {

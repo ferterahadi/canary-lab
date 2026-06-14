@@ -97,6 +97,18 @@ describe('overlay write/read round-trip', () => {
 })
 
 describe('overlayExists / readOverlay edge cases', () => {
+  it('treats a meta.json whose repos field is not an array as absent', () => {
+    const featureDir = tmpDir('portify-overlay-feat-')
+    const dir = path.join(featureDir, 'portify')
+    fs.mkdirSync(dir, { recursive: true })
+    fs.writeFileSync(
+      path.join(dir, 'meta.json'),
+      JSON.stringify({ version: 1, featureName: 'f', agent: 'claude', capturedAt: 't', repos: 'not-an-array' }),
+    )
+    expect(overlayExists(featureDir)).toBe(false)
+    expect(readOverlay(featureDir)).toBeNull()
+  })
+
   it('reports false with no overlay and null on read', () => {
     const featureDir = tmpDir('portify-overlay-feat-')
     expect(overlayExists(featureDir)).toBe(false)

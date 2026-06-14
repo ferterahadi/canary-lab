@@ -11,6 +11,14 @@ import { isHealthy, isTcpListening } from './launcher/startup'
 // that ports are honored per-process and won't clash. The orchestrator keeps
 // its own copy for now (this is additive); collapsing the two is a follow-up.
 
+// Why a boot never became ready, inferred from the process's own output:
+//  - 'dependency'    — the app crashed reaching a downstream (DB/queue/host
+//                      unreachable). NOT fixable by editing port code; the
+//                      stack simply can't boot in this environment right now.
+//  - 'port-conflict' — a listener hit EADDRINUSE. Genuinely port-related.
+//  - 'unknown'       — timed out with no recognizable crash (e.g. slow start).
+export type BootFailureKind = 'dependency' | 'port-conflict' | 'unknown'
+
 export interface BootProbeOk {
   ok: true
   teardown: () => void
@@ -22,6 +30,8 @@ export interface BootProbeFail {
   failedService: string
   transport?: 'http' | 'tcp'
   detail: string
+  /** Classification of the failure, inferred from the service's output. */
+  kind: BootFailureKind
   teardown: () => void
 }
 
@@ -53,6 +63,62 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
+// Most recent bytes of a service's output to keep for crash diagnosis — bounded
+// so a chatty stack can't grow this without limit.
+const DIAG_BUFFER_CAP = 16_384
+const DIAG_EVIDENCE_LINES = 12
+
+// ANSI colour/cursor escapes, and the `concurrently` `[3]` stream prefix —
+// stripped so identical lines from interleaved processes dedupe cleanly.
+const ANSI = /\[[0-9;?]*[A-Za-z]/g
+const STREAM_PREFIX = /^\s*\[\d+\]\s?/
+
+// A downstream/dependency failure (DB, queue, host) is an ENVIRONMENT problem,
+// not a port problem — editing port code won't fix it.
+const DEPENDENCY_MARKERS = [
+  /Init-Failed/i,
+  /can'?t reach .*(database|server)/i,
+  /ECONNREFUSED/i,
+  /ENOTFOUND/i,
+  /EAI_AGAIN/i,
+  /getaddrinfo/i,
+  /connection refused/i,
+  /database server/i,
+  /MongoNetworkError/i,
+]
+const PORT_CONFLICT_MARKERS = [/EADDRINUSE/i, /address already in use/i]
+
+/**
+ * Inspect a service's captured stdout/stderr and pull out WHY it never became
+ * ready: a human- and agent-readable evidence snippet plus a classification.
+ * Returns `{ kind: 'unknown' }` (no evidence) for empty output.
+ */
+export function diagnoseBootOutput(raw: string): { evidence?: string; kind: BootFailureKind } {
+  const lines = raw
+    .replace(ANSI, '')
+    .split('\n')
+    .map((l) => l.replace(STREAM_PREFIX, '').trimEnd())
+    .filter((l) => l.trim().length > 0)
+  if (lines.length === 0) return { kind: 'unknown' }
+
+  const pick = (markers: RegExp[]): string[] => {
+    const hits: string[] = []
+    for (const l of lines) {
+      if (markers.some((m) => m.test(l)) && !hits.includes(l)) hits.push(l)
+    }
+    return hits
+  }
+
+  const portHits = pick(PORT_CONFLICT_MARKERS)
+  if (portHits.length > 0) return { evidence: portHits.slice(0, DIAG_EVIDENCE_LINES).join('\n'), kind: 'port-conflict' }
+
+  const depHits = pick(DEPENDENCY_MARKERS)
+  if (depHits.length > 0) return { evidence: depHits.slice(0, DIAG_EVIDENCE_LINES).join('\n'), kind: 'dependency' }
+
+  // No recognized crash — show the tail so the user still has something to act on.
+  return { evidence: lines.slice(-DIAG_EVIDENCE_LINES).join('\n'), kind: 'unknown' }
+}
+
 /**
  * Boot all `specs` and resolve once every service with a readiness probe
  * passes, or reject-shaped (ok:false) on the first that times out. Either way
@@ -65,6 +131,9 @@ export async function bootAndProbe(opts: BootProbeOptions): Promise<BootProbeRes
   const fallbackDeadline = opts.healthDeadlineMs ?? 60000
   const ptys: PtyHandle[] = []
   let torndown = false
+  // Tail of each service's output, kept so a timeout can report WHY it failed
+  // (e.g. a crash on an unreachable dependency) rather than just "timed out".
+  const buffers = new Map<string, string>()
 
   const teardown = (): void => {
     if (torndown) return
@@ -79,11 +148,14 @@ export async function bootAndProbe(opts: BootProbeOptions): Promise<BootProbeRes
       env: { LOG_MODE: 'plain', ...(svc.env ?? {}) },
     })
     ptys.push(pty)
-    if (opts.onOutput) {
-      pty.onData((chunk) => {
-        try { opts.onOutput!(svc.safeName, chunk) } catch { /* ignore */ }
-      })
-    }
+    // Always capture for diagnostics; tee to the caller's sink too if provided.
+    pty.onData((chunk) => {
+      const next = (buffers.get(svc.safeName) ?? '') + chunk
+      buffers.set(svc.safeName, next.length > DIAG_BUFFER_CAP ? next.slice(-DIAG_BUFFER_CAP) : next)
+      if (opts.onOutput) {
+        try { opts.onOutput(svc.safeName, chunk) } catch { /* ignore */ }
+      }
+    })
   }
 
   for (const svc of opts.specs) {
@@ -106,11 +178,15 @@ export async function bootAndProbe(opts: BootProbeOptions): Promise<BootProbeRes
       await delay(pollInterval)
     }
     if (!ready) {
+      const { evidence, kind } = diagnoseBootOutput(buffers.get(svc.safeName) ?? '')
       return {
         ok: false,
         failedService: svc.name,
         transport,
-        detail: `Timed out waiting for ${transport.toUpperCase()} readiness (${detail}).`,
+        detail:
+          `Timed out waiting for ${transport.toUpperCase()} readiness (${detail}).` +
+          (evidence ? `\nProcess output:\n${evidence}` : ''),
+        kind,
         teardown,
       }
     }

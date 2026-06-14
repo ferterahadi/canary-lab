@@ -32,6 +32,10 @@ export interface PortifyVerification {
   instances: PortifyBootInstance[]
   /** Aggregated failure context fed back to the agent on retry. */
   failureDetail?: string
+  /** True when the boot failed only because a downstream dependency was
+   *  unreachable (e.g. the DB is down) — an ENVIRONMENT problem the port
+   *  rewrite cannot fix. Signals the orchestrator to stop retrying. */
+  notPortFixable?: boolean
 }
 
 export interface PortifyRepoState {

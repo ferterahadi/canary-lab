@@ -174,8 +174,7 @@ export function removeOverlay(featureDir: string): void {
 export async function blobShaAt(repoRoot: string, rev: string, relPath: string): Promise<string | null> {
   const res = await runGit(repoRoot, ['rev-parse', `${rev}:${relPath}`])
   if (res.code !== 0) return null
-  const sha = res.stdout.trim()
-  return sha || null
+  return res.stdout.trim()
 }
 
 /** Build touched-file records for a repo from a list of changed paths. */

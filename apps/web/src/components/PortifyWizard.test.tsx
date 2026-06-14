@@ -245,6 +245,26 @@ describe('PortifyWizard', () => {
     expect(container.textContent).toContain('still clashing')
   })
 
+  it('shows an environment-failure title (not a port-rewrite failure) when notPortFixable', async () => {
+    vi.mocked(api.startPortify).mockResolvedValue({ workflowId: 'w' })
+    vi.mocked(api.getPortify).mockResolvedValue(manifest('failed', {
+      error: 'The stack could not boot because a dependency was unreachable (e.g. the database is down).',
+      verification: {
+        ok: false,
+        instances: [],
+        failureDetail: "boot failed: gateway — Can't reach database server at 34.87.54.225:3306",
+        notPortFixable: true,
+      },
+    }))
+    await renderWizard()
+    await act(async () => clickButton('Start ▶'))
+    await flush()
+    // Title must NOT blame the port rewrite — it's an environment problem.
+    expect(container.textContent).toContain('Stack could not boot')
+    expect(container.textContent).not.toContain('Could not make it work')
+    expect(container.textContent).toContain("Can't reach database server")
+  })
+
   it('minimizes on Close — keeps the workflow running, does not cancel', async () => {
     vi.mocked(api.startPortify).mockResolvedValue({ workflowId: 'w' })
     vi.mocked(api.getPortify).mockResolvedValue(readyManifest())
