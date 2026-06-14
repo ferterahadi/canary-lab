@@ -7,8 +7,7 @@ import type { FeatureConfig, RepoPrerequisite } from '../../../../../shared/laun
 import { runGit, resolveRepoPath } from '../../git-repo'
 import { encodeClaudeProjectDir } from '../../agent-session-log'
 import { addWorktree, type WorktreeHandle } from '../repo-worktree'
-import { RunOrchestrator, defaultPlaywrightSpawner, buildServiceSpecs } from '../orchestrator'
-import { estimateRunCost } from '../admission'
+import { RunOrchestrator, defaultPlaywrightSpawner } from '../orchestrator'
 import { buildAgentSpawnCommand, buildOrchestratorHealPrompt, type HealAgent } from '../auto-heal'
 import { generateRunId } from '../run-id'
 import { runDirFor, buildRunPaths } from '../run-paths'
@@ -250,15 +249,13 @@ export function createBenchmarkRunner(deps: BenchmarkRunnerDeps) {
       },
 
       runRace: async (ctx) => {
-        // Admission: can the box host BOTH arm runs at once? If not, degrade to
-        // sequential so we don't thrash a busy machine. (Arms run in isolated
-        // worktrees → no repo collision; gate on resources only.)
-        const perArmCost = estimateRunCost(buildServiceSpecs(feature, benchDir, env).length)
-        const parallel = deps.scheduler.fits({ repoPaths: [], cost: perArmCost * 2 }).ok
         return new BenchmarkRace({
           iterations: input.iterations,
           sabotageSha: ctx.sabotageSha,
-          parallel,
+          // Arms always run one at a time (A finishes, then B). The box is never
+          // oversubscribed, and heal-cycle count stays the fair metric regardless
+          // — only wall-clock is contention-sensitive.
+          parallel: false,
           onResult: ctx.onResult,
           onIterationComplete: ctx.onIterationComplete,
           onArmStart: ctx.onArmStart,
