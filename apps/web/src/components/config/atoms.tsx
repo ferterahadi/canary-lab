@@ -112,20 +112,30 @@ const inputStyle: CSSProperties = {
 export function FieldRow({
   label,
   hint,
+  hintAsIcon,
   htmlFor,
   children,
   layout = 'stacked',
+  labelWidth = 140,
 }: {
   label: string
   hint?: string
+  /** Render the hint as a compact hover `ⓘ` instead of long inline text.
+   *  Keeps dense, hint-heavy forms (e.g. the Service tab) scannable. */
+  hintAsIcon?: boolean
   htmlFor?: string
   children: ReactNode
   layout?: 'stacked' | 'inline'
+  /** Width (px) of the inline label column. Defaults to 140 for the Service
+   *  tab's aligned forms; shrink it for short-label sub-editors (e.g. the
+   *  health-check probe fields) so the label sits next to its input instead
+   *  of across a dead gap. */
+  labelWidth?: number
 }) {
   if (layout === 'inline') {
     return (
       <label htmlFor={htmlFor} className="flex items-center gap-3 py-1.5">
-        <span className="min-w-[140px] inline-flex items-center gap-1.5 text-[11px] uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
+        <span className="inline-flex items-center gap-1.5 text-[11px] uppercase tracking-wider" style={{ color: 'var(--text-muted)', minWidth: labelWidth }}>
           {label}
           {hint && <HintIcon hint={hint} />}
         </span>
@@ -135,10 +145,11 @@ export function FieldRow({
   }
   return (
     <label htmlFor={htmlFor} className="flex flex-col gap-1.5 py-1.5">
-      <span className="text-[10px] uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
+      <span className="inline-flex items-center gap-1.5 text-[10px] uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
         {label}
-        {hint && (
-          <span className="ml-2 normal-case tracking-normal" style={{ color: 'var(--text-muted)' }}>
+        {hint && hintAsIcon && <HintIcon hint={hint} />}
+        {hint && !hintAsIcon && (
+          <span className="ml-1 normal-case tracking-normal" style={{ color: 'var(--text-muted)' }}>
             — {hint}
           </span>
         )}
@@ -421,6 +432,52 @@ export function Select<T extends string>({
         <option key={o.value} value={o.value}>{o.label}</option>
       ))}
     </select>
+  )
+}
+
+/** Inline segmented control — all options visible at once, one click to pick.
+ *  Use instead of `Select` for short, discoverable choices (2-4 options) where
+ *  seeing every option beats a dropdown's hidden list. The active segment uses
+ *  `--bg-selected` so it reads clearly even inside an elevated card. */
+export function Segmented<T extends string>({
+  value,
+  onChange,
+  options,
+  ariaLabel,
+}: {
+  value: T
+  onChange: (v: T) => void
+  options: ReadonlyArray<{ value: T; label: string }>
+  ariaLabel?: string
+}) {
+  return (
+    <div
+      role="radiogroup"
+      aria-label={ariaLabel}
+      className="inline-flex shrink-0 rounded-md"
+      style={{ border: '1px solid var(--border-default)' }}
+    >
+      {options.map((o, i) => {
+        const active = o.value === value
+        return (
+          <button
+            key={o.value}
+            type="button"
+            role="radio"
+            aria-checked={active}
+            onClick={() => onChange(o.value)}
+            className="px-2.5 py-1 text-[10px] uppercase tracking-wider transition-colors"
+            style={{
+              color: active ? 'var(--text-primary)' : 'var(--text-muted)',
+              background: active ? 'var(--bg-selected)' : 'transparent',
+              borderLeft: i === 0 ? 'none' : '1px solid var(--border-default)',
+            }}
+          >
+            {o.label}
+          </button>
+        )
+      })}
+    </div>
   )
 }
 

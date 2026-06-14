@@ -9,6 +9,13 @@ import {
   staticFile,
   useCurrentFrame,
 } from 'remotion'
+import { loadFont as loadDisplay } from '@remotion/google-fonts/BricolageGrotesque'
+import { loadFont as loadSans } from '@remotion/google-fonts/Sora'
+import { loadFont as loadMono } from '@remotion/google-fonts/JetBrainsMono'
+
+const { fontFamily: DISPLAY } = loadDisplay('normal', { weights: ['600', '700', '800'], subsets: ['latin'] })
+const { fontFamily: SANS } = loadSans('normal', { weights: ['400', '500', '600', '700'], subsets: ['latin'] })
+const { fontFamily: MONO } = loadMono('normal', { weights: ['400', '500', '700'], subsets: ['latin'] })
 
 const WIDTH = 1920
 const HEIGHT = 1080
@@ -17,6 +24,7 @@ const DURATION = FPS * 20
 const CENTER_X = WIDTH / 2
 const CENTER_Y = HEIGHT / 2
 
+// Timing boundaries are locked to the captured live-app frames (see capture-live-app.mjs).
 const timing = {
   introIn: 0,
   introOut: 72,
@@ -33,6 +41,22 @@ const timing = {
 }
 
 const journalScrollEnd = timing.finalIn - 3
+
+// Neutral, near-black product base (matches the real Canary Lab UI). Color is used
+// sparingly as functional accents only: teal/green = pass, blue = running, amber = heal.
+const C = {
+  bgDeep: '#08090B',
+  ink: '#ECEFF1',
+  inkMid: '#99A2A6',
+  inkLow: '#646D71',
+  green: '#34E2AE',
+  cyan: '#54E6DF',
+  blue: '#5B9DF9',
+  amber: '#F2B85C',
+  glassBorder: 'rgba(255, 255, 255, 0.08)',
+  glassBorderActive: 'rgba(52, 226, 174, 0.28)',
+}
+const ACCENT = 'linear-gradient(135deg, #34E2AE 0%, #54E6DF 100%)'
 
 type Shot = {
   frame: number
@@ -75,52 +99,85 @@ function eased(frame: number, start: number, end: number): number {
   return Easing.out(Easing.cubic)(t)
 }
 
-function snapEased(frame: number, start: number, end: number): number {
+// Gentle, symmetric ease for UI elements — no overshoot, no snap.
+function softEased(frame: number, start: number, end: number): number {
   const t = interpolate(frame, [start, end], [0, 1], {
     extrapolateLeft: 'clamp',
     extrapolateRight: 'clamp',
   })
-  return Easing.bezier(0.14, 0.86, 0.2, 1)(t)
+  return Easing.inOut(Easing.cubic)(t)
 }
 
-function valueBetween(frame: number, start: number, end: number, from: number, to: number): number {
-  const t = snapEased(frame, start, end)
+// Promotional camera: fast, punchy ease-out (rapid move, hard settle) for hyperzooms.
+const punch = Easing.bezier(0.16, 1, 0.3, 1)
+function cameraValue(frame: number, start: number, end: number, from: number, to: number): number {
+  const t = punch(interpolate(frame, [start, end], [0, 1], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' }))
   return from + (to - from) * t
 }
 
+function uiValue(frame: number, start: number, end: number, from: number, to: number): number {
+  const t = softEased(frame, start, end)
+  return from + (to - from) * t
+}
+
+// Hyperzoom targets in full-res (1920x1080) coords. Choreography:
+// 1) establish the whole app, 2) on failure punch into the FAILED run status header,
+// 3) pan (while zoomed) to the heal section, 4) hyperzoom the RUNNING run status and hold
+// till it flips to PASSED, 5) switch to the journal so an iteration fills the window.
+
+// Targets (full-res 1920x1080). The top Runs-panel ROW (~y104-156, x600-1890) is the hero
+// status element for both fail and pass; the heal beat focuses on the Heal-agent session.
+
+// Unified run-row anchor (the top Runs row only fits whole at ~1.46x; tighter clips the badge).
+const RUN_ROW: Pick<Shot, 'x' | 'y' | 'zoom'> = { x: 1245, y: 405, zoom: 1.46 }
+const HEAL_CARD: Pick<Shot, 'x' | 'y' | 'zoom'> = { x: 955, y: 662, zoom: 1.8 }
+
+// Hold the whole app perfectly still, then ONE clean zoom into the run row (flips to FAILED).
 function holdCamera(): Shot[] {
   return [
-    { frame: timing.appIn, x: CENTER_X, y: CENTER_Y, zoom: 1 },
-    { frame: timing.appOut, x: CENTER_X, y: CENTER_Y, zoom: 1 },
+    { frame: timing.appIn, x: CENTER_X, y: CENTER_Y, zoom: 1.0 },
+    { frame: 110, x: CENTER_X, y: CENTER_Y, zoom: 1.0 },
+    { frame: 122, ...RUN_ROW },
+    { frame: timing.healingStart, ...RUN_ROW },
   ]
 }
 
+// ONE clean pan+zoom from the run row to the Heal-agent card, then hold (no settle creep).
 function healingCamera(): Shot[] {
   return [
-    { frame: timing.healingStart, x: CENTER_X, y: CENTER_Y, zoom: 1 },
-    { frame: timing.healingStart + 5, x: 1040, y: 575, zoom: 1.86 },
-    { frame: timing.healingStart + 9, x: 1050, y: 585, zoom: 1.68 },
-    { frame: timing.healingEnd, x: 1050, y: 585, zoom: 1.68 },
+    { frame: timing.healingStart, ...RUN_ROW },
+    { frame: timing.healingStart + 18, ...HEAL_CARD },
+    { frame: timing.healingEnd, ...HEAL_CARD },
   ]
 }
 
+// ~t10: lock precisely on the run row and hold completely still — RUNNING flips to PASSED in place.
 function rerunCamera(): Shot[] {
   return [
-    { frame: timing.rerunIn, x: 1050, y: 585, zoom: 1.68 },
-    { frame: timing.rerunIn + 6, x: 940, y: 532, zoom: 0.92 },
-    { frame: timing.rerunIn + 10, x: CENTER_X, y: CENTER_Y, zoom: 1 },
-    { frame: timing.journalIn, x: CENTER_X, y: CENTER_Y, zoom: 1 },
+    { frame: timing.rerunIn, ...RUN_ROW },
+    { frame: timing.journalIn, ...RUN_ROW },
   ]
 }
 
+// Hold the PASSED run row, then ONE clean pan into the journal (~t13) and LOCK. The captured
+// footage scrolls the iterations through the frame on its own — the camera stays still.
 function journalCamera(): Shot[] {
   return [
-    { frame: timing.journalIn, x: CENTER_X, y: CENTER_Y, zoom: 1 },
-    { frame: timing.journalIn + 8, x: 1200, y: 695, zoom: 1.58 },
-    { frame: timing.journalIn + 13, x: 1210, y: 705, zoom: 1.48 },
-    { frame: journalScrollEnd, x: 1210, y: 740, zoom: 1.48 },
-    { frame: timing.finalIn, x: 1210, y: 748, zoom: 1.48 },
+    { frame: timing.journalIn, ...RUN_ROW },
+    { frame: timing.journalIn + 12, ...RUN_ROW },
+    { frame: timing.journalIn + 26, x: 958, y: 650, zoom: 2.4 },
+    { frame: timing.finalIn, x: 958, y: 650, zoom: 2.4 },
   ]
+}
+
+// Short, strong motion blur centered on each hyperzoom — sells the speed of the move.
+function cameraBlur(frame: number, ranges: Array<[number, number]>): number {
+  const strength = ranges.reduce((max, [start, end]) => {
+    const mid = start + (end - start) / 2
+    const distance = Math.abs(frame - mid) / ((end - start) / 2)
+    return Math.max(max, clamp(1 - distance, 0, 1))
+  }, 0)
+  return strength * 8
 }
 
 function cameraAt(frame: number, shots: Shot[]): Shot {
@@ -132,51 +189,13 @@ function cameraAt(frame: number, shots: Shot[]): Shot {
     if (frame >= from.frame && frame <= to.frame) {
       return {
         frame,
-        x: valueBetween(frame, from.frame, to.frame, from.x, to.x),
-        y: valueBetween(frame, from.frame, to.frame, from.y, to.y),
-        zoom: valueBetween(frame, from.frame, to.frame, from.zoom, to.zoom),
+        x: cameraValue(frame, from.frame, to.frame, from.x, to.x),
+        y: cameraValue(frame, from.frame, to.frame, from.y, to.y),
+        zoom: cameraValue(frame, from.frame, to.frame, from.zoom, to.zoom),
       }
     }
   }
   return shots[shots.length - 1]
-}
-
-function cameraBlur(frame: number, ranges: Array<[number, number]>): number {
-  const strength = ranges.reduce((max, [start, end]) => {
-    const mid = start + (end - start) / 2
-    const distance = Math.abs(frame - mid) / ((end - start) / 2)
-    return Math.max(max, clamp(1 - distance, 0, 1))
-  }, 0)
-  return strength * 4.2
-}
-
-function agentWindowMotion(frame: number, start: number, end: number): CSSProperties {
-  const enter = snapEased(frame, start, start + 8)
-  const settle = snapEased(frame, start + 6, start + 13)
-  const exit = interpolate(frame, [end - 7, end], [1, 0], {
-    extrapolateLeft: 'clamp',
-    extrapolateRight: 'clamp',
-  })
-  const presence = Math.min(enter, exit)
-  const y = (1 - enter) * 16
-  const scale = 0.96 + enter * 0.04 + (1 - settle) * enter * 0.01
-  const blur = (1 - presence) * 4.5
-  return {
-    transform: `translate3d(0, ${y}px, 0) scale(${scale})`,
-    filter: `blur(${blur}px)`,
-  }
-}
-
-function sceneKick(frame: number, start: number, end: number): CSSProperties {
-  const kickIn = snapEased(frame, start, start + 7)
-  const kickOut = snapEased(frame, end - 8, end)
-  const opacity = Math.min(kickIn, 1 - kickOut)
-  const scale = 0.982 + kickIn * 0.018 - kickOut * 0.012
-  const blur = (1 - opacity) * 2.2
-  return {
-    transform: `scale(${scale})`,
-    filter: `blur(${blur}px)`,
-  }
 }
 
 function frameSource(frame: number): string {
@@ -187,12 +206,12 @@ function frameSource(frame: number): string {
 function LiveAppShot({
   opacity,
   shots,
-  blurRanges,
-  brightness = 0.92,
+  blurRanges = [],
+  brightness = 0.96,
 }: {
   opacity: number
   shots: Shot[]
-  blurRanges: Array<[number, number]>
+  blurRanges?: Array<[number, number]>
   brightness?: number
 }) {
   const frame = useCurrentFrame()
@@ -206,8 +225,8 @@ function LiveAppShot({
       style={{
         overflow: 'hidden',
         opacity,
-        background: '#020403',
-        filter: `blur(${blur}px) brightness(${brightness})`,
+        background: C.bgDeep,
+        filter: `blur(${blur}px) brightness(${brightness}) saturate(1.05) contrast(1.02)`,
       }}
     >
       <Img
@@ -220,18 +239,15 @@ function LiveAppShot({
           transformOrigin: '0 0',
         }}
       />
-      <div style={scanlineStyle} />
+      <div style={screenGradeStyle} />
+      <div style={vignetteStyle} />
     </AbsoluteFill>
   )
 }
 
 function JournalWarpShot({ opacity }: { opacity: number }) {
   const frame = useCurrentFrame()
-  const progress = interpolate(frame, [timing.journalIn, journalScrollEnd], [0, 1], {
-    extrapolateLeft: 'clamp',
-    extrapolateRight: 'clamp',
-  })
-  const backgroundY = valueBetween(frame, timing.journalIn, timing.finalIn, -46, 104)
+  const backgroundY = uiValue(frame, timing.journalIn, timing.finalIn, -30, 60)
 
   return (
     <>
@@ -239,29 +255,21 @@ function JournalWarpShot({ opacity }: { opacity: number }) {
         style={{
           overflow: 'hidden',
           opacity: opacity * fade(frame, timing.journalIn, timing.finalIn, 1, 10),
-          background: '#020403',
-          filter: 'blur(11px) brightness(0.42) saturate(0.9)',
-          transform: `translate3d(0, ${backgroundY}px, 0) scale(1.05)`,
+          background: C.bgDeep,
+          filter: 'blur(13px) brightness(0.5) saturate(0.95)',
+          transform: `translate3d(0, ${backgroundY}px, 0) scale(1.06)`,
         }}
       >
         <Img
           src={frameSource(frame)}
-          style={{
-            width: WIDTH,
-            height: HEIGHT,
-            objectFit: 'cover',
-          }}
+          style={{ width: WIDTH, height: HEIGHT, objectFit: 'cover' }}
         />
-        <div style={scanlineStyle} />
       </AbsoluteFill>
       <LiveAppShot
         opacity={opacity}
         shots={journalCamera()}
-        blurRanges={[
-          [timing.journalIn, timing.journalIn + 13],
-          [journalScrollEnd - 4, timing.finalIn],
-        ]}
-        brightness={0.98 + progress * 0.02}
+        blurRanges={[[timing.journalIn + 14, timing.journalIn + 26]]}
+        brightness={1.0}
       />
     </>
   )
@@ -269,10 +277,10 @@ function JournalWarpShot({ opacity }: { opacity: number }) {
 
 function ProductScene() {
   const frame = useCurrentFrame()
-  const opacity = fade(frame, timing.appIn, timing.appOut, 6, 10)
+  const opacity = fade(frame, timing.appIn, timing.appOut, 8, 10)
   const fullOpacity = frame < timing.healingStart ? opacity : 0
   const healingOpacity = opacity * fade(frame, timing.healingStart, timing.healingEnd, 0, 6)
-  const rerunOpacity = opacity * fade(frame, timing.rerunIn, timing.journalIn + 5, 2, 5)
+  const rerunOpacity = opacity * fade(frame, timing.rerunIn, timing.journalIn + 5, 4, 5)
   const journalOpacity = opacity * fade(frame, timing.journalIn, timing.finalIn, 1, 8)
 
   return (
@@ -280,19 +288,17 @@ function ProductScene() {
       <LiveAppShot
         opacity={frame < timing.healingStart ? opacity : fullOpacity}
         shots={holdCamera()}
-        blurRanges={[]}
+        blurRanges={[[112, 123]]}
       />
       <LiveAppShot
         opacity={healingOpacity}
         shots={healingCamera()}
-        blurRanges={[[timing.healingStart, timing.healingStart + 11]]}
-        brightness={0.96}
+        blurRanges={[]}
       />
       <LiveAppShot
         opacity={rerunOpacity}
         shots={rerunCamera()}
-        blurRanges={[[timing.rerunIn, timing.rerunIn + 10]]}
-        brightness={0.96}
+        blurRanges={[]}
       />
       <JournalWarpShot opacity={journalOpacity} />
     </>
@@ -301,37 +307,33 @@ function ProductScene() {
 
 function AgentIntro() {
   const frame = useCurrentFrame()
-  const opacity = fade(frame, timing.introIn, timing.introOut, 8, 6)
+  const opacity = fade(frame, timing.introIn, timing.introOut, 9, 7)
   const command = '/canary-lab run checkout. Fix failures. Rerun until green.'
   const typed = command.slice(0, Math.round(command.length * eased(frame, seconds(0.45), seconds(1.55))))
-  const replyOpacity = fade(frame, seconds(1.6), timing.introOut - 3, 5, 5)
-  const bootOpacity = fade(frame, seconds(2.05), timing.introOut, 5, 5)
+  const replyOpacity = fade(frame, seconds(1.6), timing.introOut - 3, 6, 5)
+  const bootOpacity = fade(frame, seconds(2.05), timing.introOut, 6, 5)
 
   return (
     <AbsoluteFill style={{ ...agentSceneStyle, opacity, ...sceneKick(frame, timing.introIn, timing.introOut) }}>
-      <AgentGlow />
+      <Atmosphere accent="teal" />
       <div style={{ ...agentWindowStyle, ...agentWindowMotion(frame, timing.introIn, timing.introOut) }}>
-        <AgentTitleBar label="AI Agent" status="Canary Lab connected" />
+        <AgentTitleBar status="Canary Lab connected" />
         <div style={agentBodyStyle}>
-          <div style={agentSidebarStyle}>
-            <div style={sidebarHeadingStyle}>Workspace</div>
-            <div style={sidebarItemActiveStyle}>canary-lab</div>
-            <div style={sidebarItemStyle}>checkout</div>
-            <div style={sidebarItemStyle}>payments</div>
-          </div>
+          <Sidebar heading="Workspace" items={['canary-lab', 'checkout', 'payments']} active={0} />
           <div style={chatPaneStyle}>
             <Message author="You" text={typed} active />
             <div style={{ opacity: replyOpacity }}>
               <Message
                 author="AI Agent"
-                text="Starting Canary Lab. I will read the evidence, fix the app, and rerun."
+                text="Starting Canary Lab. I'll read the evidence, fix the app, and rerun until it's green."
               />
             </div>
-            <div style={{ ...agentStatusRowStyle, opacity: bootOpacity }}>
-              <span style={pulseDotStyle} />
+            <div style={{ ...statusRowStyle, opacity: bootOpacity }}>
+              <PulseDot frame={frame} />
               Canary Lab run is starting
             </div>
           </div>
+          <RunRail stage="intro" frame={frame} reveal={fade(frame, seconds(0.7), timing.introOut, 8, 5)} />
         </div>
       </div>
     </AbsoluteFill>
@@ -340,23 +342,18 @@ function AgentIntro() {
 
 function AgentFixScene() {
   const frame = useCurrentFrame()
-  const opacity = fade(frame, timing.agentFixIn, timing.agentFixOut, 6, 6)
-  const first = fade(frame, timing.agentFixIn + 5, timing.agentFixOut, 4, 6)
-  const second = fade(frame, timing.agentFixIn + 18, timing.agentFixOut, 4, 6)
-  const patch = fade(frame, timing.agentFixIn + 30, timing.agentFixOut, 4, 6)
+  const opacity = fade(frame, timing.agentFixIn, timing.agentFixOut, 7, 7)
+  const first = fade(frame, timing.agentFixIn + 5, timing.agentFixOut, 5, 6)
+  const second = fade(frame, timing.agentFixIn + 18, timing.agentFixOut, 5, 6)
+  const patch = fade(frame, timing.agentFixIn + 30, timing.agentFixOut, 5, 6)
 
   return (
     <AbsoluteFill style={{ ...agentSceneStyle, opacity, ...sceneKick(frame, timing.agentFixIn, timing.agentFixOut) }}>
-      <AgentGlow />
+      <Atmosphere accent="teal" />
       <div style={{ ...agentWindowStyle, ...agentWindowMotion(frame, timing.agentFixIn, timing.agentFixOut) }}>
-        <AgentTitleBar label="AI Agent" status="Reading Canary Lab context" />
+        <AgentTitleBar status="Reading Canary Lab context" />
         <div style={agentBodyStyle}>
-          <div style={agentSidebarStyle}>
-            <div style={sidebarHeadingStyle}>Context</div>
-            <div style={sidebarItemActiveStyle}>failed test</div>
-            <div style={sidebarItemStyle}>screenshot</div>
-            <div style={sidebarItemStyle}>app logs</div>
-          </div>
+          <Sidebar heading="Context" items={['failed test', 'screenshot', 'app logs']} active={0} />
           <div style={chatPaneStyle}>
             <div style={{ opacity: first }}>
               <Message author="AI Agent" text="I read the saved error, screenshot, and app logs." />
@@ -364,16 +361,17 @@ function AgentFixScene() {
             <div style={{ opacity: second }}>
               <Message author="AI Agent" text="Found the checkout total bug and patched it." />
             </div>
-            <div style={{ ...patchBlockStyle, opacity: patch }}>
+            <div style={{ ...patchBlockStyle, opacity: patch, transform: `translate3d(0, ${(1 - patch) * 12}px, 0)` }}>
               <div style={patchHeaderStyle}>checkout-total.ts</div>
               <div style={codeLineStyle}><span style={minusStyle}>-</span> return subtotal</div>
               <div style={codeLineStyle}><span style={plusStyle}>+</span> return subtotal + tax - discount</div>
             </div>
-            <div style={{ ...agentStatusRowStyle, opacity: patch }}>
-              <span style={pulseDotStyle} />
+            <div style={{ ...statusRowStyle, opacity: patch }}>
+              <PulseDot frame={frame} />
               Asking Canary Lab to rerun
             </div>
           </div>
+          <RunRail stage="fix" frame={frame} reveal={fade(frame, timing.agentFixIn + 8, timing.agentFixOut, 8, 6)} />
         </div>
       </div>
     </AbsoluteFill>
@@ -382,38 +380,43 @@ function AgentFixScene() {
 
 function FinalScene() {
   const frame = useCurrentFrame()
-  const opacity = fade(frame, timing.finalIn, timing.finalOut, 7, 0)
-  const snapIn = snapEased(frame, timing.finalIn, timing.finalIn + 9)
-  const settle = snapEased(frame, timing.finalIn + 7, timing.finalIn + 15)
-  const scale = 0.94 + snapIn * 0.072 - settle * 0.012
+  const opacity = fade(frame, timing.finalIn, timing.finalOut, 8, 0)
+  const snapIn = softEased(frame, timing.finalIn, timing.finalIn + 14)
+  const scale = 0.97 + snapIn * 0.03
   const itemMotion = (index: number): CSSProperties => {
-    const start = timing.finalIn + 18 + index * 3
-    const enter = snapEased(frame, start, start + 5)
+    const start = timing.finalIn + 20 + index * 4
+    const enter = softEased(frame, start, start + 9)
     return {
-      opacity: fade(frame, start, timing.finalOut, 3, 0),
-      transform: `translate3d(0, ${(1 - enter) * 18}px, 0) scale(${0.982 + enter * 0.018})`,
+      opacity: fade(frame, start, timing.finalOut, 4, 0),
+      transform: `translate3d(0, ${(1 - enter) * 16}px, 0)`,
     }
   }
 
   return (
     <AbsoluteFill style={{ ...finalSceneStyle, opacity }}>
-      <AgentGlow />
-      <div style={{ ...finalContentStyle, transform: `scale(${scale})` }}>
-        <div style={finalKickerStyle}>Canary Lab + AI Agent</div>
-        <h1 style={finalTitleStyle}>Run tests. Capture context. Fix fast.</h1>
+      <Atmosphere accent="final" />
+      <LoopGraphic frame={frame} />
+      <div style={{ ...finalContentStyle, transform: `translateY(${(1 - snapIn) * 14}px) scale(${scale})` }}>
+        <div style={{ ...finalKickerStyle, opacity: fade(frame, timing.finalIn, timing.finalOut, 6, 0) }}>
+          <span style={kickerDotStyle} />
+          CANARY LAB &times; AI AGENT
+        </div>
+        <h1 style={finalTitleStyle}>
+          Run tests.<br />Capture context.<br /><span style={titleAccentStyle}>Fix fast.</span>
+        </h1>
         <p style={finalCopyStyle}>
-          Local Playwright repair loop for apps that span services and repos.
+          A local Playwright repair loop for apps that span services and repos.
         </p>
         <div style={finalGridStyle}>
           {[
             'Run local Playwright tests',
             'Save failure evidence',
-            'Let AI Agent fix and rerun',
+            'Let an AI agent fix & rerun',
             'Keep the repair journal',
           ].map((item, index) => (
             <div key={item} style={{ ...finalItemStyle, ...itemMotion(index) }}>
               <span style={finalItemDotStyle} />
-              {item}
+              <span>{item}</span>
             </div>
           ))}
         </div>
@@ -422,7 +425,167 @@ function FinalScene() {
   )
 }
 
-function AgentTitleBar({ label, status }: { label: string; status: string }) {
+function Sidebar({ heading, items, active }: { heading: string; items: string[]; active: number }) {
+  return (
+    <div style={agentSidebarStyle}>
+      <div style={sidebarHeadingStyle}>{heading}</div>
+      {items.map((item, index) => (
+        <div key={item} style={index === active ? sidebarItemActiveStyle : sidebarItemStyle}>
+          {index === active ? <span style={sidebarTickStyle} /> : <span style={sidebarBulletStyle} />}
+          {item}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function RunRail({ stage, frame, reveal }: { stage: 'intro' | 'fix'; frame: number; reveal: number }) {
+  const isFix = stage === 'fix'
+  const rows = isFix
+    ? [
+      { label: 'Run failed', value: '1 test', tone: 'fail' as const },
+      { label: 'Heal cycle', value: '06', tone: 'heal' as const },
+      { label: 'Evidence', value: 'trace · shot · logs', tone: 'mute' as const },
+    ]
+    : [
+      { label: 'Services', value: '3 booting', tone: 'mute' as const },
+      { label: 'Env', value: 'local', tone: 'mute' as const },
+      { label: 'Tests', value: '0 / 22', tone: 'mute' as const },
+    ]
+  const status = isFix ? 'HEALING' : 'STARTING'
+  const passed = isFix ? 5 : 0
+  const total = 22
+
+  return (
+    <div style={{ ...runRailStyle, opacity: reveal, transform: `translate3d(${(1 - reveal) * 18}px, 0, 0)` }}>
+      <div style={railLabelStyle}>Canary Lab Run</div>
+      <div style={railRunIdStyle}>2026-06-01 · checkout</div>
+      <div style={{ ...railStatusStyle, color: isFix ? C.amber : C.blue, borderColor: isFix ? 'rgba(242,184,92,0.3)' : 'rgba(91,157,249,0.3)', background: isFix ? 'rgba(242,184,92,0.08)' : 'rgba(91,157,249,0.08)' }}>
+        <span style={{ ...railStatusDotStyle, background: isFix ? C.amber : C.blue }} />
+        {status}
+      </div>
+
+      <div style={railMetersStyle}>
+        {rows.map((row) => (
+          <div key={row.label} style={railRowStyle}>
+            <span style={railRowLabelStyle}>{row.label}</span>
+            <span style={{
+              ...railRowValueStyle,
+              color: row.tone === 'fail' ? '#ff8aa6' : row.tone === 'heal' ? C.amber : C.ink,
+            }}>{row.value}</span>
+          </div>
+        ))}
+      </div>
+
+      <div style={railProgressLabelStyle}>
+        <span>Checkout suite</span>
+        <span>{passed} / {total}</span>
+      </div>
+      <div style={railProgressTrackStyle}>
+        <div style={{
+          ...railProgressFillStyle,
+          width: `${(passed / total) * 100}%`,
+        }} />
+      </div>
+
+      <div style={railSparkStyle}>
+        {Array.from({ length: 14 }).map((_, index) => {
+          const wobble = (Math.sin(frame / 7 + index) + 1) / 2
+          const lit = isFix ? index < 9 : index < 2
+          return (
+            <span
+              key={index}
+              style={{
+                ...railSparkBarStyle,
+                height: 8 + wobble * (lit ? 26 : 10),
+                background: lit ? ACCENT : 'rgba(255,255,255,0.09)',
+                opacity: lit ? 0.55 + wobble * 0.45 : 0.5,
+              }}
+            />
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+function LoopGraphic({ frame }: { frame: number }) {
+  const reveal = fade(frame, timing.finalIn + 14, timing.finalOut, 14, 0)
+  const rot = (frame - timing.finalIn) * 0.45
+  const pulse = (Math.sin(frame / 9) + 1) / 2
+  const nodes = ['RUN', 'FAIL', 'HEAL', 'RERUN', 'PASS']
+  const R = 168
+  const cx = 280
+  const cy = 280
+
+  return (
+    <div style={{ ...loopWrapStyle, opacity: reveal, transform: `translateY(${(1 - reveal) * 24}px) scale(${0.92 + reveal * 0.08})` }}>
+      <div style={loopGlowStyle} />
+      <svg width={560} height={560} viewBox="0 0 560 560" style={{ position: 'absolute', inset: 0 }}>
+        <defs>
+          <linearGradient id="loopAccent" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stopColor="#2EE6B0" />
+            <stop offset="1" stopColor="#54E6DF" />
+          </linearGradient>
+        </defs>
+        <circle cx={cx} cy={cy} r={R} fill="none" stroke="rgba(255,255,255,0.1)" strokeWidth={1.5} />
+        <circle
+          cx={cx}
+          cy={cy}
+          r={R}
+          fill="none"
+          stroke="url(#loopAccent)"
+          strokeWidth={2.5}
+          strokeLinecap="round"
+          strokeDasharray="150 906"
+          transform={`rotate(${rot} ${cx} ${cy})`}
+          opacity={0.9}
+        />
+        {nodes.map((label, index) => {
+          const angle = (index / nodes.length) * Math.PI * 2 - Math.PI / 2
+          const nx = cx + Math.cos(angle) * R
+          const ny = cy + Math.sin(angle) * R
+          const isPass = label === 'PASS'
+          return (
+            <g key={label}>
+              <circle
+                cx={nx}
+                cy={ny}
+                r={isPass ? 9 + pulse * 2 : 5}
+                fill={isPass ? '#2EE6B0' : '#0a1a17'}
+                stroke={isPass ? '#7dffd9' : 'rgba(255,255,255,0.28)'}
+                strokeWidth={isPass ? 2 : 1.5}
+              />
+              <text
+                x={nx}
+                y={ny + (Math.sin(angle) >= 0 ? 30 : -22)}
+                textAnchor="middle"
+                fontFamily={MONO}
+                fontSize={17}
+                fontWeight={500}
+                letterSpacing={1.5}
+                fill={isPass ? '#9affe0' : C.inkLow}
+              >
+                {label}
+              </text>
+            </g>
+          )
+        })}
+      </svg>
+      <div style={loopCenterStyle}>
+        <div style={loopCheckStyle}>
+          <svg width={34} height={34} viewBox="0 0 24 24" fill="none">
+            <path d="M4 12.5l5 5L20 6" stroke="#03100D" strokeWidth={3} strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </div>
+        <div style={loopCountStyle}>22 / 22</div>
+        <div style={loopCountLabelStyle}>TESTS GREEN</div>
+      </div>
+    </div>
+  )
+}
+
+function AgentTitleBar({ status }: { status: string }) {
   return (
     <div style={agentTitleBarStyle}>
       <div style={windowDotsStyle}>
@@ -430,11 +593,15 @@ function AgentTitleBar({ label, status }: { label: string; status: string }) {
         <span style={{ ...windowDotStyle, background: '#febc2e' }} />
         <span style={{ ...windowDotStyle, background: '#28c840' }} />
       </div>
-      <div style={agentTitleStyle}>{label}</div>
+      <div style={agentTitleStyle}>
+        <span style={agentMarkStyle} />
+        AI&nbsp;Agent
+      </div>
       <div style={agentStatusPillStyle}>
         <span style={statusDotStyle} />
         {status}
       </div>
+      <div style={titleBarAccentStyle} />
     </div>
   )
 }
@@ -448,14 +615,53 @@ function Message({ author, text, active = false }: { author: string; text: strin
   )
 }
 
-function AgentGlow() {
+function PulseDot({ frame }: { frame: number }) {
+  const pulse = (Math.sin(frame / 6) + 1) / 2
+  return (
+    <span style={{
+      ...pulseDotStyle,
+      boxShadow: `0 0 ${10 + pulse * 16}px rgba(46,230,176,${0.5 + pulse * 0.4})`,
+      transform: `scale(${0.85 + pulse * 0.3})`,
+    }} />
+  )
+}
+
+function Atmosphere({ accent }: { accent: 'teal' | 'final' }) {
+  const frame = useCurrentFrame()
+  const sweep = ((frame % 240) / 240) * 160 - 30
   return (
     <>
-      <div style={glowOneStyle} />
-      <div style={glowTwoStyle} />
+      <div style={accent === 'final' ? glowFinalOneStyle : glowOneStyle} />
+      <div style={accent === 'final' ? glowFinalTwoStyle : glowTwoStyle} />
       <div style={gridStyle} />
+      <div style={{ ...sweepStyle, transform: `translateY(${sweep}%)` }} />
+      <div style={grainStyle} />
+      <div style={vignetteStyle} />
     </>
   )
+}
+
+function sceneKick(frame: number, start: number, end: number): CSSProperties {
+  const kickIn = softEased(frame, start, start + 10)
+  const kickOut = softEased(frame, end - 9, end)
+  const opacity = Math.min(kickIn, 1 - kickOut)
+  const scale = 0.99 + kickIn * 0.01 - kickOut * 0.008
+  return { transform: `scale(${scale})`, opacity }
+}
+
+function agentWindowMotion(frame: number, start: number, end: number): CSSProperties {
+  const enter = softEased(frame, start, start + 11)
+  const exit = interpolate(frame, [end - 8, end], [1, 0], {
+    extrapolateLeft: 'clamp',
+    extrapolateRight: 'clamp',
+  })
+  const presence = Math.min(enter, exit)
+  const y = (1 - enter) * 20
+  const scale = 0.975 + enter * 0.025
+  return {
+    transform: `translate3d(0, ${y}px, 0) scale(${scale})`,
+    opacity: presence,
+  }
 }
 
 function CanaryLabAgentPromo() {
@@ -483,62 +689,169 @@ function RemotionRoot() {
 }
 
 const rootStyle: CSSProperties = {
-  fontFamily: 'Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
-  color: '#f6fbff',
-  background: '#030706',
+  fontFamily: SANS,
+  color: C.ink,
+  background: C.bgDeep,
 }
 
-const scanlineStyle: CSSProperties = {
+// ---------- Product-scene grade ----------
+
+const screenGradeStyle: CSSProperties = {
   position: 'absolute',
   inset: 0,
   pointerEvents: 'none',
-  background: 'linear-gradient(180deg, rgba(255,255,255,0.035), rgba(255,255,255,0) 14%, rgba(0,0,0,0.08))',
-  boxShadow: 'inset 0 0 90px rgba(0,0,0,0.38)',
+  background: 'linear-gradient(180deg, rgba(255,255,255,0.02) 0%, rgba(0,0,0,0) 22%, rgba(8,9,11,0.18) 100%)',
 }
 
+const vignetteStyle: CSSProperties = {
+  position: 'absolute',
+  inset: 0,
+  pointerEvents: 'none',
+  background: 'radial-gradient(120% 120% at 50% 42%, rgba(0,0,0,0) 52%, rgba(0,0,0,0.32) 86%, rgba(0,0,0,0.55) 100%)',
+}
+
+// ---------- Atmosphere ----------
+
+const glowOneStyle: CSSProperties = {
+  position: 'absolute',
+  left: '4%',
+  top: '-18%',
+  width: 680,
+  height: 680,
+  borderRadius: 999,
+  background: 'radial-gradient(circle, rgba(52,226,174,0.08), rgba(52,226,174,0) 60%)',
+  filter: 'blur(30px)',
+}
+
+const glowTwoStyle: CSSProperties = {
+  position: 'absolute',
+  right: '-8%',
+  bottom: '-22%',
+  width: 760,
+  height: 760,
+  borderRadius: 999,
+  background: 'radial-gradient(circle, rgba(91,157,249,0.06), rgba(91,157,249,0) 60%)',
+  filter: 'blur(34px)',
+}
+
+const glowFinalOneStyle: CSSProperties = {
+  ...glowOneStyle,
+  left: '-10%',
+  top: '-22%',
+  width: 820,
+  height: 820,
+  background: 'radial-gradient(circle, rgba(52,226,174,0.07), rgba(52,226,174,0) 58%)',
+}
+
+const glowFinalTwoStyle: CSSProperties = {
+  ...glowTwoStyle,
+  right: '2%',
+  top: '6%',
+  bottom: 'auto',
+  width: 860,
+  height: 860,
+  background: 'radial-gradient(circle, rgba(91,157,249,0.05), rgba(91,157,249,0) 60%)',
+}
+
+const gridStyle: CSSProperties = {
+  position: 'absolute',
+  inset: 0,
+  opacity: 0.6,
+  backgroundImage:
+    'linear-gradient(rgba(255,255,255,0.022) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.022) 1px, transparent 1px)',
+  backgroundSize: '76px 76px',
+  maskImage: 'radial-gradient(circle at 50% 40%, black 0%, transparent 72%)',
+  WebkitMaskImage: 'radial-gradient(circle at 50% 40%, black 0%, transparent 72%)',
+}
+
+const sweepStyle: CSSProperties = {
+  position: 'absolute',
+  left: 0,
+  right: 0,
+  top: 0,
+  height: '40%',
+  pointerEvents: 'none',
+  background: 'linear-gradient(180deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.018) 50%, rgba(255,255,255,0) 100%)',
+  mixBlendMode: 'screen',
+}
+
+// Static film grain via fractal-noise SVG data URI.
+const grainStyle: CSSProperties = {
+  position: 'absolute',
+  inset: 0,
+  pointerEvents: 'none',
+  opacity: 0.045,
+  mixBlendMode: 'overlay',
+  backgroundImage:
+    "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E\")",
+  backgroundSize: '180px 180px',
+}
+
+// ---------- Agent window ----------
+
 const agentSceneStyle: CSSProperties = {
-  background: 'radial-gradient(circle at 50% 35%, #172323 0%, #08110f 44%, #020303 100%)',
+  background: 'radial-gradient(130% 100% at 50% 24%, #121418 0%, #0c0d10 48%, #08090b 100%)',
   overflow: 'hidden',
 }
 
 const agentWindowStyle: CSSProperties = {
   position: 'absolute',
   left: 175,
-  top: 105,
+  top: 110,
   width: 1570,
-  height: 850,
-  borderRadius: 28,
-  background: 'rgba(10, 14, 17, 0.91)',
-  border: '1px solid rgba(255,255,255,0.13)',
-  boxShadow: '0 44px 120px rgba(0,0,0,0.56), 0 0 70px rgba(32,231,176,0.08)',
+  height: 840,
+  borderRadius: 26,
+  background: 'linear-gradient(180deg, rgba(22,24,28,0.95) 0%, rgba(13,14,17,0.96) 100%)',
+  border: `1px solid ${C.glassBorder}`,
+  boxShadow: '0 50px 130px rgba(0,0,0,0.62), inset 0 1px 0 rgba(255,255,255,0.06)',
   overflow: 'hidden',
 }
 
 const agentTitleBarStyle: CSSProperties = {
+  position: 'relative',
   height: 72,
   display: 'flex',
   alignItems: 'center',
-  padding: '0 26px',
+  padding: '0 28px',
   gap: 20,
-  background: 'rgba(255,255,255,0.035)',
-  borderBottom: '1px solid rgba(255,255,255,0.1)',
+  background: 'linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.01))',
+  borderBottom: `1px solid ${C.glassBorder}`,
 }
 
-const windowDotsStyle: CSSProperties = {
-  display: 'flex',
-  gap: 9,
+const titleBarAccentStyle: CSSProperties = {
+  position: 'absolute',
+  left: 0,
+  right: 0,
+  bottom: -1,
+  height: 1,
+  background: 'linear-gradient(90deg, rgba(52,226,174,0) 0%, rgba(52,226,174,0.22) 22%, rgba(84,230,223,0.22) 50%, rgba(52,226,174,0) 90%)',
 }
+
+const windowDotsStyle: CSSProperties = { display: 'flex', gap: 9 }
 
 const windowDotStyle: CSSProperties = {
-  width: 13,
-  height: 13,
+  width: 12,
+  height: 12,
   borderRadius: 999,
 }
 
 const agentTitleStyle: CSSProperties = {
-  fontSize: 25,
-  fontWeight: 800,
-  color: '#f4f7fa',
+  display: 'flex',
+  alignItems: 'center',
+  gap: 12,
+  fontFamily: DISPLAY,
+  fontSize: 24,
+  fontWeight: 700,
+  color: '#f4fbf8',
+  letterSpacing: -0.2,
+}
+
+const agentMarkStyle: CSSProperties = {
+  width: 18,
+  height: 18,
+  borderRadius: 6,
+  background: ACCENT,
+  boxShadow: '0 0 16px rgba(46,230,176,0.55)',
 }
 
 const agentStatusPillStyle: CSSProperties = {
@@ -546,262 +859,423 @@ const agentStatusPillStyle: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
   gap: 10,
-  padding: '9px 14px',
+  padding: '9px 15px',
   borderRadius: 999,
-  background: 'rgba(32, 231, 176, 0.1)',
-  border: '1px solid rgba(32, 231, 176, 0.22)',
+  background: 'rgba(46,230,176,0.1)',
+  border: '1px solid rgba(46,230,176,0.24)',
   color: '#bffbe9',
-  fontSize: 18,
-  fontWeight: 700,
+  fontFamily: MONO,
+  fontSize: 15,
+  fontWeight: 500,
+  letterSpacing: 0.3,
 }
 
 const statusDotStyle: CSSProperties = {
-  width: 10,
-  height: 10,
+  width: 9,
+  height: 9,
   borderRadius: 999,
-  background: '#20e7b0',
-  boxShadow: '0 0 20px rgba(32,231,176,0.9)',
+  background: C.green,
+  boxShadow: '0 0 18px rgba(46,230,176,0.9)',
 }
 
 const agentBodyStyle: CSSProperties = {
   display: 'grid',
-  gridTemplateColumns: '310px 1fr',
-  height: 778,
+  gridTemplateColumns: '290px 1fr 372px',
+  height: 768,
 }
 
 const agentSidebarStyle: CSSProperties = {
-  borderRight: '1px solid rgba(255,255,255,0.1)',
+  borderRight: `1px solid ${C.glassBorder}`,
   padding: 26,
-  background: 'rgba(255,255,255,0.02)',
+  background: 'rgba(255,255,255,0.015)',
 }
 
 const sidebarHeadingStyle: CSSProperties = {
-  marginBottom: 24,
-  color: '#8da0a2',
-  fontSize: 18,
-  fontWeight: 800,
+  marginBottom: 22,
+  color: C.inkLow,
+  fontFamily: MONO,
+  fontSize: 14,
+  fontWeight: 500,
   textTransform: 'uppercase',
   letterSpacing: 3,
 }
 
 const sidebarItemStyle: CSSProperties = {
-  padding: '17px 18px',
-  borderRadius: 14,
-  color: '#aebabc',
-  fontSize: 21,
-  fontWeight: 650,
-  marginBottom: 10,
+  display: 'flex',
+  alignItems: 'center',
+  gap: 13,
+  padding: '16px 16px',
+  borderRadius: 13,
+  color: C.inkMid,
+  fontSize: 20,
+  fontWeight: 500,
+  marginBottom: 8,
 }
 
 const sidebarItemActiveStyle: CSSProperties = {
   ...sidebarItemStyle,
-  color: '#f5fbff',
-  background: 'rgba(32,231,176,0.12)',
-  border: '1px solid rgba(32,231,176,0.22)',
+  color: '#f3fcf9',
+  background: 'rgba(46,230,176,0.1)',
+  border: '1px solid rgba(46,230,176,0.22)',
+}
+
+const sidebarBulletStyle: CSSProperties = {
+  width: 7,
+  height: 7,
+  borderRadius: 999,
+  background: 'rgba(150,240,215,0.28)',
+  flexShrink: 0,
+}
+
+const sidebarTickStyle: CSSProperties = {
+  width: 7,
+  height: 7,
+  borderRadius: 999,
+  background: C.green,
+  boxShadow: '0 0 12px rgba(46,230,176,0.8)',
+  flexShrink: 0,
 }
 
 const chatPaneStyle: CSSProperties = {
-  padding: 42,
+  padding: '40px 44px',
 }
 
-const messageStyle: CSSProperties = {
-  marginBottom: 28,
-}
+const messageStyle: CSSProperties = { marginBottom: 26 }
 
 const messageAuthorStyle: CSSProperties = {
   marginBottom: 10,
-  color: '#8fa1a4',
-  fontSize: 18,
-  fontWeight: 800,
+  color: C.inkLow,
+  fontFamily: MONO,
+  fontSize: 14,
+  fontWeight: 500,
   textTransform: 'uppercase',
   letterSpacing: 2.5,
 }
 
 const messageBubbleStyle: CSSProperties = {
   width: 'fit-content',
-  maxWidth: 880,
-  padding: '24px 28px',
-  borderRadius: 24,
-  background: 'rgba(255,255,255,0.07)',
-  border: '1px solid rgba(255,255,255,0.1)',
-  color: '#ecf3f6',
-  fontSize: 32,
-  lineHeight: 1.34,
-  fontWeight: 700,
-  letterSpacing: 0,
+  maxWidth: 760,
+  padding: '22px 28px',
+  borderRadius: '22px 22px 22px 8px',
+  background: 'rgba(255,255,255,0.05)',
+  border: '1px solid rgba(255,255,255,0.08)',
+  color: '#eaf4f1',
+  fontSize: 29,
+  lineHeight: 1.36,
+  fontWeight: 500,
 }
 
 const messageBubbleActiveStyle: CSSProperties = {
   ...messageBubbleStyle,
-  background: 'linear-gradient(135deg, rgba(38,122,255,0.28), rgba(32,231,176,0.16))',
-  border: '1px solid rgba(118,175,255,0.35)',
+  borderRadius: '22px 22px 8px 22px',
+  background: 'rgba(255,255,255,0.07)',
+  border: '1px solid rgba(52,226,174,0.22)',
+  color: '#f4fffb',
 }
 
-const agentStatusRowStyle: CSSProperties = {
+const statusRowStyle: CSSProperties = {
   display: 'inline-flex',
   alignItems: 'center',
-  gap: 13,
-  marginTop: 14,
-  padding: '13px 18px',
+  gap: 12,
+  marginTop: 12,
+  padding: '12px 18px',
   borderRadius: 999,
   color: '#c8fbef',
-  background: 'rgba(32,231,176,0.1)',
-  border: '1px solid rgba(32,231,176,0.22)',
-  fontSize: 22,
-  fontWeight: 750,
+  background: 'rgba(46,230,176,0.08)',
+  border: '1px solid rgba(46,230,176,0.2)',
+  fontFamily: MONO,
+  fontSize: 18,
+  fontWeight: 500,
 }
 
 const pulseDotStyle: CSSProperties = {
-  width: 12,
-  height: 12,
+  width: 11,
+  height: 11,
   borderRadius: 999,
-  background: '#20e7b0',
-  boxShadow: '0 0 24px rgba(32,231,176,0.9)',
+  background: C.green,
+  flexShrink: 0,
 }
 
 const patchBlockStyle: CSSProperties = {
-  width: 840,
-  marginTop: 24,
-  borderRadius: 20,
+  width: 720,
+  marginTop: 22,
+  borderRadius: 18,
   overflow: 'hidden',
-  background: 'rgba(2,6,7,0.72)',
-  border: '1px solid rgba(255,255,255,0.12)',
-  boxShadow: '0 24px 80px rgba(0,0,0,0.32)',
+  background: 'rgba(2,8,7,0.78)',
+  border: '1px solid rgba(255,255,255,0.08)',
+  boxShadow: '0 24px 70px rgba(0,0,0,0.36)',
 }
 
 const patchHeaderStyle: CSSProperties = {
-  padding: '15px 22px',
-  color: '#9eb0b5',
-  background: 'rgba(255,255,255,0.055)',
-  fontSize: 18,
-  fontWeight: 800,
-  letterSpacing: 1,
+  padding: '14px 22px',
+  color: C.inkMid,
+  background: 'rgba(255,255,255,0.04)',
+  fontFamily: MONO,
+  fontSize: 16,
+  fontWeight: 500,
+  letterSpacing: 0.5,
+  borderBottom: '1px solid rgba(255,255,255,0.07)',
 }
 
 const codeLineStyle: CSSProperties = {
-  padding: '13px 22px',
-  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
-  fontSize: 24,
-  color: '#dce8eb',
+  padding: '12px 22px',
+  fontFamily: MONO,
+  fontSize: 22,
+  color: '#d6e6e2',
 }
 
-const minusStyle: CSSProperties = {
-  color: '#ff6b8f',
-  marginRight: 16,
+const minusStyle: CSSProperties = { color: '#ff7d9c', marginRight: 16, fontWeight: 700 }
+const plusStyle: CSSProperties = { color: C.green, marginRight: 16, fontWeight: 700 }
+
+// ---------- Run rail ----------
+
+const runRailStyle: CSSProperties = {
+  borderLeft: `1px solid ${C.glassBorder}`,
+  padding: '32px 30px',
+  background: 'rgba(255,255,255,0.012)',
+  display: 'flex',
+  flexDirection: 'column',
 }
 
-const plusStyle: CSSProperties = {
-  color: '#20e7b0',
-  marginRight: 16,
+const railLabelStyle: CSSProperties = {
+  fontFamily: MONO,
+  fontSize: 14,
+  fontWeight: 500,
+  letterSpacing: 3,
+  textTransform: 'uppercase',
+  color: C.inkLow,
 }
 
-const glowOneStyle: CSSProperties = {
-  position: 'absolute',
-  left: 250,
-  top: 30,
-  width: 520,
-  height: 520,
+const railRunIdStyle: CSSProperties = {
+  marginTop: 8,
+  fontFamily: MONO,
+  fontSize: 17,
+  color: C.inkMid,
+}
+
+const railStatusStyle: CSSProperties = {
+  marginTop: 18,
+  alignSelf: 'flex-start',
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 9,
+  padding: '8px 14px',
   borderRadius: 999,
-  background: 'radial-gradient(circle, rgba(32,231,176,0.16), rgba(32,231,176,0) 64%)',
-  filter: 'blur(12px)',
+  border: '1px solid',
+  fontFamily: MONO,
+  fontSize: 15,
+  fontWeight: 700,
+  letterSpacing: 1.5,
 }
 
-const glowTwoStyle: CSSProperties = {
-  position: 'absolute',
-  right: 140,
-  bottom: 20,
-  width: 560,
-  height: 560,
+const railStatusDotStyle: CSSProperties = { width: 9, height: 9, borderRadius: 999 }
+
+const railMetersStyle: CSSProperties = {
+  marginTop: 26,
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 2,
+}
+
+const railRowStyle: CSSProperties = {
+  display: 'flex',
+  justifyContent: 'space-between',
+  alignItems: 'center',
+  padding: '14px 0',
+  borderBottom: '1px solid rgba(255,255,255,0.06)',
+}
+
+const railRowLabelStyle: CSSProperties = { color: C.inkLow, fontSize: 18, fontWeight: 500 }
+const railRowValueStyle: CSSProperties = { fontFamily: MONO, fontSize: 18, fontWeight: 500 }
+
+const railProgressLabelStyle: CSSProperties = {
+  marginTop: 30,
+  display: 'flex',
+  justifyContent: 'space-between',
+  color: C.inkMid,
+  fontFamily: MONO,
+  fontSize: 15,
+  letterSpacing: 0.5,
+}
+
+const railProgressTrackStyle: CSSProperties = {
+  marginTop: 12,
+  height: 8,
   borderRadius: 999,
-  background: 'radial-gradient(circle, rgba(65,137,255,0.17), rgba(65,137,255,0) 64%)',
-  filter: 'blur(14px)',
+  background: 'rgba(255,255,255,0.07)',
+  overflow: 'hidden',
 }
 
-const gridStyle: CSSProperties = {
-  position: 'absolute',
-  inset: 0,
-  opacity: 0.16,
-  backgroundImage:
-    'linear-gradient(rgba(255,255,255,0.08) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.08) 1px, transparent 1px)',
-  backgroundSize: '64px 64px',
-  maskImage: 'radial-gradient(circle at 50% 45%, black 0%, transparent 72%)',
+const railProgressFillStyle: CSSProperties = {
+  height: '100%',
+  borderRadius: 999,
+  background: ACCENT,
+  boxShadow: '0 0 18px rgba(46,230,176,0.6)',
 }
+
+const railSparkStyle: CSSProperties = {
+  marginTop: 'auto',
+  display: 'flex',
+  alignItems: 'flex-end',
+  gap: 7,
+  height: 40,
+}
+
+const railSparkBarStyle: CSSProperties = {
+  flex: 1,
+  borderRadius: 3,
+}
+
+// ---------- Final scene ----------
 
 const finalSceneStyle: CSSProperties = {
-  background: 'linear-gradient(135deg, #06130f 0%, #081315 45%, #030405 100%)',
+  background: 'radial-gradient(120% 110% at 24% 28%, #14161a 0%, #0c0e11 48%, #08090b 100%)',
   overflow: 'hidden',
 }
 
 const finalContentStyle: CSSProperties = {
   position: 'absolute',
-  left: 180,
-  top: 172,
-  width: 1260,
-  transformOrigin: 'left center',
+  left: 150,
+  top: 158,
+  width: 1060,
+  transformOrigin: 'left top',
 }
 
 const finalKickerStyle: CSSProperties = {
   display: 'inline-flex',
-  padding: '12px 18px',
+  alignItems: 'center',
+  gap: 11,
+  padding: '11px 18px',
   borderRadius: 999,
-  background: 'rgba(32,231,176,0.12)',
-  border: '1px solid rgba(32,231,176,0.22)',
+  background: 'rgba(46,230,176,0.1)',
+  border: '1px solid rgba(46,230,176,0.24)',
   color: '#c7fbec',
-  fontSize: 24,
-  fontWeight: 850,
-  letterSpacing: 0,
+  fontFamily: MONO,
+  fontSize: 19,
+  fontWeight: 500,
+  letterSpacing: 2,
+}
+
+const kickerDotStyle: CSSProperties = {
+  width: 9,
+  height: 9,
+  borderRadius: 999,
+  background: C.green,
+  boxShadow: '0 0 14px rgba(46,230,176,0.9)',
 }
 
 const finalTitleStyle: CSSProperties = {
-  margin: '34px 0 22px',
-  maxWidth: 1180,
-  color: '#f7fbff',
-  fontSize: 94,
-  lineHeight: 0.98,
-  fontWeight: 900,
-  letterSpacing: 0,
+  margin: '30px 0 22px',
+  color: '#f6fffb',
+  fontFamily: DISPLAY,
+  fontSize: 92,
+  lineHeight: 1.0,
+  fontWeight: 800,
+  letterSpacing: -1.5,
+}
+
+const titleAccentStyle: CSSProperties = {
+  background: ACCENT,
+  WebkitBackgroundClip: 'text',
+  backgroundClip: 'text',
+  WebkitTextFillColor: 'transparent',
+  color: 'transparent',
 }
 
 const finalCopyStyle: CSSProperties = {
   margin: 0,
-  maxWidth: 920,
-  color: '#bdd0d3',
-  fontSize: 34,
-  lineHeight: 1.3,
-  fontWeight: 650,
-  letterSpacing: 0,
+  maxWidth: 760,
+  color: C.inkMid,
+  fontSize: 30,
+  lineHeight: 1.4,
+  fontWeight: 400,
 }
 
 const finalGridStyle: CSSProperties = {
   display: 'grid',
   gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
-  gap: 18,
-  width: 960,
-  marginTop: 56,
+  gap: 16,
+  width: 880,
+  marginTop: 50,
 }
 
 const finalItemStyle: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
   gap: 16,
-  minHeight: 82,
+  minHeight: 78,
   padding: '0 24px',
-  borderRadius: 18,
-  background: 'rgba(255,255,255,0.07)',
-  border: '1px solid rgba(255,255,255,0.12)',
-  color: '#eef6f8',
-  fontSize: 26,
-  fontWeight: 800,
-  letterSpacing: 0,
+  borderRadius: 16,
+  background: 'linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02))',
+  border: `1px solid ${C.glassBorder}`,
+  color: '#edf6f3',
+  fontSize: 24,
+  fontWeight: 600,
 }
 
 const finalItemDotStyle: CSSProperties = {
-  width: 12,
-  height: 12,
+  width: 11,
+  height: 11,
   borderRadius: 999,
-  background: '#20e7b0',
-  boxShadow: '0 0 18px rgba(32,231,176,0.78)',
+  background: ACCENT,
+  boxShadow: '0 0 16px rgba(46,230,176,0.7)',
   flexShrink: 0,
+}
+
+// ---------- Loop graphic ----------
+
+const loopWrapStyle: CSSProperties = {
+  position: 'absolute',
+  right: 150,
+  top: 250,
+  width: 560,
+  height: 560,
+}
+
+const loopGlowStyle: CSSProperties = {
+  position: 'absolute',
+  inset: 40,
+  borderRadius: 999,
+  background: 'radial-gradient(circle, rgba(46,230,176,0.18), rgba(46,230,176,0) 64%)',
+  filter: 'blur(20px)',
+}
+
+const loopCenterStyle: CSSProperties = {
+  position: 'absolute',
+  inset: 0,
+  display: 'flex',
+  flexDirection: 'column',
+  alignItems: 'center',
+  justifyContent: 'center',
+  gap: 8,
+}
+
+const loopCheckStyle: CSSProperties = {
+  width: 60,
+  height: 60,
+  borderRadius: 999,
+  background: ACCENT,
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  boxShadow: '0 0 34px rgba(46,230,176,0.55)',
+  marginBottom: 6,
+}
+
+const loopCountStyle: CSSProperties = {
+  fontFamily: DISPLAY,
+  fontSize: 56,
+  fontWeight: 800,
+  color: '#f6fffb',
+  letterSpacing: -1,
+}
+
+const loopCountLabelStyle: CSSProperties = {
+  fontFamily: MONO,
+  fontSize: 16,
+  fontWeight: 500,
+  letterSpacing: 3,
+  color: C.green,
 }
 
 registerRoot(RemotionRoot)

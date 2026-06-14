@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import type { ReactNode } from 'react'
 import * as api from '../../api/client'
 import type { ConfigValue, ParsedConfigDoc } from '../../api/client'
 import {
@@ -10,7 +11,7 @@ import {
   NumberInput,
   PlusIcon,
   SectionHeader,
-  Select,
+  Segmented,
   TextInput,
   TrashIcon,
 } from './atoms'
@@ -23,7 +24,7 @@ import { isActiveRunStatus } from '../../../../../shared/run-state'
 
 /** Derive a repo's display name from its localPath basename, falling back
  *  to the cloneUrl basename (strip `.git`). Returns '' if neither yields one. */
-function deriveRepoName(localPath: ProbePath, cloneUrl: string | undefined): string {
+export function deriveRepoName(localPath: ProbePath, cloneUrl: string | undefined): string {
   if (typeof localPath === 'string' && localPath.trim()) {
     const base = localPath.replace(/\/$/, '').split('/').pop()
     if (base) return base
@@ -55,7 +56,7 @@ function sameProbePath(a: ProbePath, b: ProbePath): boolean {
 
 // ─── slice types ─────────────────────────────────────────────────────────
 
-type ProbePath = string | { $expr: string }
+export type ProbePath = string | { $expr: string }
 
 interface HttpProbe { url: string; timeoutMs?: number; deadlineMs?: number }
 interface TcpProbe { port: number; host?: string; timeoutMs?: number; deadlineMs?: number }
@@ -66,14 +67,20 @@ type Health =
   | { mode: 'single'; probe: Probe }
   | { mode: 'per-env'; byEnv: Record<string, Probe> }
 
-interface CommandSlice {
+export interface PortSlotSlice {
+  name: string
+  env?: string
+}
+
+export interface CommandSlice {
   name: string
   command: string
   envs?: string[]
+  ports?: PortSlotSlice[]
   health: Health
 }
 
-interface RepoSlice {
+export interface RepoSlice {
   name: string
   localPath: ProbePath
   cloneUrl?: string
@@ -128,6 +135,22 @@ function parseHealth(v: ConfigValue | undefined): Health {
   return { mode: 'none' }
 }
 
+function parsePorts(v: ConfigValue | undefined): PortSlotSlice[] | undefined {
+  if (!Array.isArray(v)) return undefined
+  const slots = v
+    .map((item): PortSlotSlice | null => {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) return null
+      const obj = item as { [k: string]: ConfigValue }
+      if (typeof obj.name !== 'string') return null
+      return {
+        name: obj.name,
+        ...(typeof obj.env === 'string' ? { env: obj.env } : {}),
+      }
+    })
+    .filter((s): s is PortSlotSlice => s != null)
+  return slots.length > 0 ? slots : undefined
+}
+
 function parseCommand(v: ConfigValue): CommandSlice | null {
   if (typeof v === 'string') {
     return { name: '', command: v, health: { mode: 'none' } }
@@ -140,11 +163,12 @@ function parseCommand(v: ConfigValue): CommandSlice | null {
     envs: Array.isArray(obj.envs)
       ? obj.envs.filter((x): x is string => typeof x === 'string')
       : undefined,
+    ports: parsePorts(obj.ports),
     health: parseHealth(obj.healthCheck),
   }
 }
 
-function parseRepo(v: ConfigValue): RepoSlice | null {
+export function parseRepo(v: ConfigValue): RepoSlice | null {
   if (!v || typeof v !== 'object' || Array.isArray(v)) return null
   const obj = v as { [k: string]: ConfigValue }
   const lp = obj.localPath
@@ -193,16 +217,30 @@ function serializeHealth(h: Health): ConfigValue | undefined {
   return out
 }
 
+function serializePorts(ports: PortSlotSlice[] | undefined): ConfigValue | undefined {
+  if (!ports) return undefined
+  const slots = ports
+    .filter((p) => p.name.trim())
+    .map((p): ConfigValue => {
+      const out: { [k: string]: ConfigValue } = { name: p.name.trim() }
+      if (p.env && p.env.trim()) out.env = p.env.trim()
+      return out
+    })
+  return slots.length > 0 ? slots : undefined
+}
+
 function serializeCommand(c: CommandSlice): ConfigValue {
   const out: { [k: string]: ConfigValue } = { command: c.command }
   if (c.name) out.name = c.name
   if (c.envs && c.envs.length > 0) out.envs = c.envs
+  const ports = serializePorts(c.ports)
+  if (ports !== undefined) out.ports = ports
   const hc = serializeHealth(c.health)
   if (hc !== undefined) out.healthCheck = hc
   return out
 }
 
-function serializeRepo(r: RepoSlice): ConfigValue {
+export function serializeRepo(r: RepoSlice): ConfigValue {
   const out: { [k: string]: ConfigValue } = {
     name: r.name,
     localPath: r.localPath as ConfigValue,
@@ -324,6 +362,102 @@ export function ReposTab({ feature }: { feature: string }) {
   )
 }
 
+// ─── layout primitives ─────────────────────────────────────────────────────
+
+/** A collapsible zone with a tree-style left rule when open and a compact
+ *  one-line summary when collapsed. Keeps the dense Service form navigable
+ *  without nesting boxes inside boxes. */
+function Disclosure({
+  title,
+  summary,
+  defaultOpen = true,
+  children,
+}: {
+  title: string
+  summary?: ReactNode
+  defaultOpen?: boolean
+  children: ReactNode
+}) {
+  const [open, setOpen] = useState(defaultOpen)
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center gap-1.5 py-1 text-left"
+        aria-expanded={open}
+      >
+        <span
+          className="inline-flex h-4 w-4 shrink-0 items-center justify-center transition-transform duration-150"
+          style={{ color: 'var(--text-muted)', transform: open ? 'rotate(90deg)' : 'rotate(0deg)' }}
+        >
+          <ChevronRightIcon />
+        </span>
+        <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-secondary)' }}>
+          {title}
+        </span>
+        {!open && summary != null && (
+          <span className="ml-2 min-w-0 flex-1 truncate text-[11px]" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+            {summary}
+          </span>
+        )}
+      </button>
+      {open && (
+        <div
+          className="mt-1 flex flex-col"
+          style={{ marginLeft: 7, paddingLeft: 13, borderLeft: '1px solid var(--border-default)' }}
+        >
+          {children}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** Small mono pill used in the collapsed repo-card overview. */
+function Chip({ children, title, tone = 'muted' }: { children: ReactNode; title?: string; tone?: 'muted' | 'accent' }) {
+  return (
+    <span
+      title={title}
+      className="inline-flex max-w-[200px] items-center gap-1 truncate rounded px-1.5 py-0.5 text-[10px]"
+      style={{
+        background: 'var(--bg-surface)',
+        border: '1px solid var(--border-default)',
+        color: tone === 'accent' ? 'var(--accent)' : 'var(--text-muted)',
+        fontFamily: 'var(--font-mono)',
+      }}
+    >
+      {children}
+    </span>
+  )
+}
+
+interface RepoSummary {
+  path: string
+  branch?: string
+  ports: string[]
+  health?: string
+  command?: string
+}
+
+function summarizeRepo(repo: RepoSlice): RepoSummary {
+  const path = typeof repo.localPath === 'string'
+    ? (repo.localPath.replace(/\/$/, '').split('/').pop() || repo.localPath)
+    : 'expr'
+  const ports = repo.startCommands
+    .flatMap((c) => (c.ports ?? []).map((p) => p.name.trim()))
+    .filter((n): n is string => Boolean(n))
+  const healthCmd = repo.startCommands.find((c) => c.health.mode !== 'none')
+  const health = ((): string | undefined => {
+    const h = healthCmd?.health
+    if (!h || h.mode === 'none') return undefined
+    if (h.mode === 'per-env') return 'per-env'
+    return h.probe.type === 'http' ? (h.probe.http.url || 'http') : `tcp:${h.probe.tcp.port}`
+  })()
+  const command = repo.startCommands.map((c) => c.command.trim()).filter(Boolean)[0]
+  return { path, branch: repo.branch, ports, health, command }
+}
+
 // ─── repo card ────────────────────────────────────────────────────────────
 
 function RepoCard({
@@ -352,6 +486,7 @@ function RepoCard({
   const derivedName = deriveRepoName(repo.localPath, repo.cloneUrl)
   const isExpr = typeof repo.localPath === 'object' && repo.localPath != null && '$expr' in repo.localPath
   const localPathStr = typeof repo.localPath === 'string' ? repo.localPath : ''
+  const summary = summarizeRepo(repo)
 
   // Probe whether the configured localPath actually exists on this machine.
   // Drives the "missing folder — clone?" warning below.
@@ -406,127 +541,151 @@ function RepoCard({
   return (
     <div className="rounded-md" style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border-default)' }}>
       <header
-        className="flex items-center gap-2 px-3 py-2"
+        className="flex items-start gap-2 px-3 py-2"
         style={{ borderBottom: open ? '1px solid var(--border-default)' : 'none' }}
       >
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
           aria-label={open ? 'Collapse' : 'Expand'}
-          className="inline-flex h-5 w-5 items-center justify-center rounded transition-transform duration-150"
+          className="mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded transition-transform duration-150"
           style={{ color: 'var(--text-muted)', transform: open ? 'rotate(90deg)' : 'rotate(0deg)' }}
         >
           <ChevronRightIcon />
         </button>
-        <span className="flex-1 truncate text-sm font-medium" style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>
-          {repo.name || derivedName || '(unnamed repo)'}
-        </span>
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          className="min-w-0 flex-1 text-left"
+        >
+          <span className="block truncate text-sm font-medium" style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>
+            {repo.name || derivedName || '(unnamed repo)'}
+          </span>
+          {!open && (
+            <span className="mt-1.5 flex flex-wrap items-center gap-1.5">
+              <Chip title="Local path">{summary.path}</Chip>
+              {summary.branch && <Chip title="Branch">⎇ {summary.branch}</Chip>}
+              {summary.ports.length > 0 && (
+                <Chip title="Port slots" tone="accent">🔌 {summary.ports.join(' · ')}</Chip>
+              )}
+              {summary.health && <Chip title="Health check">⊳ {summary.health}</Chip>}
+              {summary.command && <Chip title="Start command">▸ {summary.command}</Chip>}
+            </span>
+          )}
+        </button>
         <IconButton ariaLabel="Remove repo" variant="danger" onClick={onRemove}>
           <TrashIcon />
         </IconButton>
       </header>
 
       {open && (
-        <div className="px-3 pb-3">
-          <FieldRow label="Name">
-            <TextInput
-              value={repo.name}
-              placeholder={derivedName || 'service-name'}
-              onChange={(name) => onChange({ ...repo, name })}
+        <div className="flex flex-col gap-3 px-3 pb-3 pt-2.5">
+          <Disclosure
+            title="Source"
+            summary={[summary.path, summary.branch].filter(Boolean).join(' · ')}
+          >
+            <FieldRow label="Name">
+              <TextInput
+                value={repo.name}
+                placeholder={derivedName || 'service-name'}
+                onChange={(name) => onChange({ ...repo, name })}
+              />
+            </FieldRow>
+
+            <FieldRow label="Local path" hint="Click to pick a folder">
+              {isExpr ? (
+                <div className="flex items-center gap-2">
+                  <ComplexValueBadge source={(repo.localPath as { $expr: string }).$expr} />
+                  <button
+                    type="button"
+                    onClick={() => onChange({ ...repo, localPath: '' })}
+                    className="rounded-md px-2 py-1 text-[10px] uppercase tracking-wider"
+                    style={{ color: 'var(--text-muted)', border: '1px solid var(--border-default)' }}
+                  >
+                    Override
+                  </button>
+                </div>
+              ) : (
+                <FolderPicker value={localPathStr} onChange={handleLocalPathChange} />
+              )}
+            </FieldRow>
+
+            <BranchControl
+              feature={feature}
+              repo={repo}
+              repoLookupName={repoLookupName}
+              localPathStr={localPathStr}
+              isExpr={isExpr}
+              activeRun={activeRun}
+              onChange={onChange}
             />
-          </FieldRow>
 
-          <FieldRow label="Local path" hint="Click to pick a folder">
-            {isExpr ? (
-              <div className="flex items-center gap-2">
-                <ComplexValueBadge source={(repo.localPath as { $expr: string }).$expr} />
-                <button
-                  type="button"
-                  onClick={() => onChange({ ...repo, localPath: '' })}
-                  className="rounded-md px-2 py-1 text-[10px] uppercase tracking-wider"
-                  style={{ color: 'var(--text-muted)', border: '1px solid var(--border-default)' }}
-                >
-                  Override
-                </button>
-              </div>
-            ) : (
-              <FolderPicker value={localPathStr} onChange={handleLocalPathChange} />
-            )}
-          </FieldRow>
-
-          <BranchControl
-            feature={feature}
-            repo={repo}
-            repoLookupName={repoLookupName}
-            localPathStr={localPathStr}
-            isExpr={isExpr}
-            activeRun={activeRun}
-            onChange={onChange}
-          />
-
-          {pathExists === false && repo.cloneUrl && !isExpr && (
-            <div
-              className="mt-1 mb-2 flex items-center gap-2 rounded-md px-2.5 py-2 text-[11px]"
-              style={{
-                background: 'color-mix(in srgb, #f59e0b 8%, transparent)',
-                border: '1px solid color-mix(in srgb, #f59e0b 40%, transparent)',
-                color: '#f59e0b',
-              }}
-            >
-              <span className="flex-1">Folder not found on this machine.</span>
-              <button
-                type="button"
-                disabled={cloning}
-                onClick={() => setCloneTargetOpen(true)}
-                className="rounded-md px-2 py-1 text-[10px] uppercase tracking-wider"
+            {pathExists === false && repo.cloneUrl && !isExpr && (
+              <div
+                className="mt-1 mb-2 flex items-center gap-2 rounded-md px-2.5 py-2 text-[11px]"
                 style={{
+                  background: 'color-mix(in srgb, #f59e0b 8%, transparent)',
+                  border: '1px solid color-mix(in srgb, #f59e0b 40%, transparent)',
                   color: '#f59e0b',
-                  border: '1px solid color-mix(in srgb, #f59e0b 50%, transparent)',
-                  opacity: cloning ? 0.5 : 1,
                 }}
               >
-                {cloning ? 'Cloning…' : 'Clone…'}
-              </button>
-            </div>
-          )}
-          {cloneError && (
-            <div className="mt-1 mb-2 text-[10px]" style={{ color: 'var(--danger)' }}>{cloneError}</div>
-          )}
-          {cloneTargetOpen && (
-            <FolderPickerModal
-              initialPath=""
-              title={`Choose parent folder for ${deriveRepoName(repo.localPath, repo.cloneUrl) || 'repo'}`}
-              confirmLabel="Clone here"
-              onCancel={() => setCloneTargetOpen(false)}
-              onConfirm={handleClone}
-            />
-          )}
-
-          <FieldRow label="Clone URL" hint="Auto-filled from .git/config when present">
-            <TextInput
-              value={repo.cloneUrl ?? ''}
-              placeholder="git@github.com:org/repo.git"
-              onChange={(s) => onChange({ ...repo, cloneUrl: s || undefined })}
-            />
-          </FieldRow>
-
-          <div className="mt-3 mb-1 text-[10px] uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
-            Start command
-          </div>
-          <div className="flex flex-col gap-2">
-            {repo.startCommands.map((cmd, i) => (
-              <CommandCard
-                key={i}
-                feature={feature}
-                cmd={cmd}
-                rootEnvs={rootEnvs}
-                onChange={(next) => onChange({
-                  ...repo,
-                  startCommands: repo.startCommands.map((c, j) => j === i ? next : c),
-                })}
+                <span className="flex-1">Folder not found on this machine.</span>
+                <button
+                  type="button"
+                  disabled={cloning}
+                  onClick={() => setCloneTargetOpen(true)}
+                  className="rounded-md px-2 py-1 text-[10px] uppercase tracking-wider"
+                  style={{
+                    color: '#f59e0b',
+                    border: '1px solid color-mix(in srgb, #f59e0b 50%, transparent)',
+                    opacity: cloning ? 0.5 : 1,
+                  }}
+                >
+                  {cloning ? 'Cloning…' : 'Clone…'}
+                </button>
+              </div>
+            )}
+            {cloneError && (
+              <div className="mt-1 mb-2 text-[10px]" style={{ color: 'var(--danger)' }}>{cloneError}</div>
+            )}
+            {cloneTargetOpen && (
+              <FolderPickerModal
+                initialPath=""
+                title={`Choose parent folder for ${deriveRepoName(repo.localPath, repo.cloneUrl) || 'repo'}`}
+                confirmLabel="Clone here"
+                onCancel={() => setCloneTargetOpen(false)}
+                onConfirm={handleClone}
               />
-            ))}
-          </div>
+            )}
+
+            <FieldRow label="Clone URL" hint="Auto-filled from .git/config when present">
+              <TextInput
+                value={repo.cloneUrl ?? ''}
+                placeholder="git@github.com:org/repo.git"
+                onChange={(s) => onChange({ ...repo, cloneUrl: s || undefined })}
+              />
+            </FieldRow>
+          </Disclosure>
+
+          <Disclosure
+            title="Runtime"
+            summary={summary.command ?? '(no start command)'}
+          >
+            <div className="flex flex-col gap-2 pt-1">
+              {repo.startCommands.map((cmd, i) => (
+                <CommandCard
+                  key={i}
+                  feature={feature}
+                  cmd={cmd}
+                  rootEnvs={rootEnvs}
+                  onChange={(next) => onChange({
+                    ...repo,
+                    startCommands: repo.startCommands.map((c, j) => j === i ? next : c),
+                  })}
+                />
+              ))}
+            </div>
+          </Disclosure>
         </div>
       )}
     </div>
@@ -779,7 +938,7 @@ function CommandCard({
       className="rounded-md p-2.5"
       style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-default)' }}
     >
-      <FieldRow label="Command" hint="Runs in the repo's local path. Chain with && for multiple steps. Use ${slot.key} to reference envset values.">
+      <FieldRow label="Command" hintAsIcon hint="Runs in the repo's local path. Chain with && for multiple steps. Use ${slot.key} to reference envset values. Declare injectable ports in the Ports tab.">
         <TemplatedInput
           value={cmd.command}
           feature={feature}
@@ -799,6 +958,140 @@ function CommandCard({
   )
 }
 
+// ─── port-slot editor ──────────────────────────────────────────────────────
+
+export function PortSlotEditor({
+  ports,
+  onChange,
+  emptyHint,
+}: {
+  ports: PortSlotSlice[]
+  onChange: (next: PortSlotSlice[]) => void
+  /** Overrides the default "(none — …)" line shown when there are no slots.
+   *  The Ports tab passes a Portify-aware hint here for not-yet-portified
+   *  features; ReposTab leaves it default. */
+  emptyHint?: ReactNode
+}) {
+  return (
+    <div className="flex flex-col gap-1.5">
+      {ports.length === 0 && (
+        emptyHint ?? (
+          <div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
+            (none — service uses its hardcoded port; can't run concurrently)
+          </div>
+        )
+      )}
+      {ports.length > 0 && (
+        <div className="flex items-center gap-1.5 px-0.5 text-[9px] uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
+          <span className="inline-flex flex-1 items-center gap-1">
+            Slot name
+            <HintIcon hint="Your label for one port this command listens on — not a number. Each run is assigned a fresh free port per slot, so concurrent runs never clash." />
+          </span>
+          <span className="inline-flex flex-1 items-center gap-1">
+            Env var <span className="normal-case tracking-normal opacity-70">(optional)</span>
+            <HintIcon hint="The environment variable the service reads its port from — the run injects the assigned number here when it boots this command. Optional because a slot can be consumed via ${port.<name>} instead (e.g. --port ${port.api} in the command, or a token in an envset file)." />
+          </span>
+          <span className="w-3 shrink-0" />
+          <span className="inline-flex flex-1 items-center gap-1">
+            Reference
+            <HintIcon hint="Read-only token that stands for this slot's port — it always equals the injected env var; the two can't disagree. Paste it into the start command, health-check URL, or envset files; it resolves to the assigned number at run time. Click to copy." />
+          </span>
+          <span className="w-6 shrink-0" />
+        </div>
+      )}
+      {ports.map((slot, i) => (
+        <div key={i} className="flex items-center gap-1.5">
+          <div className="flex-1">
+            <TextInput
+              value={slot.name}
+              placeholder="api"
+              onChange={(name) => onChange(ports.map((s, j) => (j === i ? { ...s, name } : s)))}
+            />
+          </div>
+          <div className="flex-1">
+            <TextInput
+              value={slot.env ?? ''}
+              placeholder="PORT"
+              onChange={(env) => onChange(ports.map((s, j) => (j === i ? { ...s, env: env || undefined } : s)))}
+            />
+          </div>
+          {/* The env var and the token are two names for the same assigned
+              number — tie them visually. Hidden (but space kept, for column
+              alignment) when no env var is set and there's nothing to equate. */}
+          <span
+            aria-hidden={!slot.env}
+            className="w-3 shrink-0 text-center text-[11px]"
+            style={{ color: 'var(--text-muted)', opacity: slot.env ? 1 : 0 }}
+            title={slot.env ? `${slot.env} and \${port.${slot.name.trim() || '…'}} always carry the same assigned port` : undefined}
+          >
+            =
+          </span>
+          <PortSlotToken name={slot.name} env={slot.env} />
+          <IconButton
+            ariaLabel={`Remove port slot ${slot.name || 'item'}`}
+            variant="danger"
+            onClick={() => onChange(ports.filter((_, j) => j !== i))}
+          >
+            <TrashIcon />
+          </IconButton>
+        </div>
+      ))}
+      <button
+        type="button"
+        onClick={() => onChange([...ports, { name: '' }])}
+        className="self-start inline-flex items-center gap-1 rounded-md px-2 py-1 text-[10px] uppercase tracking-wider transition-colors duration-150"
+        style={{ color: 'var(--text-muted)', border: '1px dashed var(--border-default)' }}
+        onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--text-primary)' }}
+        onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-muted)' }}
+      >
+        <PlusIcon />
+        Add port slot
+      </button>
+    </div>
+  )
+}
+
+// Display of what a slot injects at run time: the `${port.<name>}` token to
+// reference elsewhere (health-check URLs, envset files, inter-service config)
+// and the env var the service reads. The actual port number is allocated per
+// run and only exists while a run is active — settings shows the reference,
+// not a concrete number. Click copies the token for pasting where it's needed.
+function PortSlotToken({ name, env }: { name: string; env?: string }) {
+  const [copied, setCopied] = useState(false)
+  const ready = name.trim().length > 0
+  const token = ready ? `\${port.${name.trim()}}` : '${port.…}'
+  const label = env ? `Injected as ${env}; reference with ${token}` : `Reference with ${token}`
+  const copy = (): void => {
+    if (!ready) return
+    void navigator.clipboard
+      ?.writeText(token)
+      .then(() => {
+        setCopied(true)
+        window.setTimeout(() => setCopied(false), 1200)
+      })
+      .catch(() => {})
+  }
+  return (
+    <button
+      type="button"
+      onClick={copy}
+      disabled={!ready}
+      className="flex-1 truncate rounded-md px-2 py-1.5 text-left text-xs"
+      title={ready ? `${label} — click to copy` : label}
+      aria-label={ready ? `${label} — click to copy` : label}
+      style={{
+        backgroundColor: 'var(--bg-surface)',
+        border: '1px dashed var(--border-default)',
+        color: ready ? 'var(--text-secondary)' : 'var(--text-muted)',
+        fontFamily: 'var(--font-mono)',
+        cursor: ready ? 'copy' : 'default',
+      }}
+    >
+      {copied ? 'copied ✓' : token}
+    </button>
+  )
+}
+
 // ─── health-check editor ─────────────────────────────────────────────────
 
 function HealthEditor({
@@ -813,8 +1106,8 @@ function HealthEditor({
   onChange: (next: Health) => void
 }) {
   const modeOptions: ReadonlyArray<{ value: Health['mode']; label: string }> = [
-    { value: 'none', label: 'No health check' },
-    { value: 'single', label: 'Single probe' },
+    { value: 'none', label: 'Off' },
+    { value: 'single', label: 'Single' },
     ...(rootEnvs.length > 1 ? [{ value: 'per-env' as const, label: 'Per env' }] : []),
   ]
 
@@ -836,7 +1129,7 @@ function HealthEditor({
 
   return (
     <div className="rounded-md" style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border-default)' }}>
-      <div className="flex items-center gap-2 px-2.5 py-1.5" style={{ borderBottom: health.mode === 'none' ? 'none' : '1px solid var(--border-default)' }}>
+      <div className="flex items-center justify-between gap-2 px-2.5 py-1.5" style={{ borderBottom: health.mode === 'none' ? 'none' : '1px solid var(--border-default)' }}>
         <span className="inline-flex items-center gap-1.5 text-[10px] uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
           health check
           <HintIcon
@@ -844,7 +1137,8 @@ function HealthEditor({
             hint="A probe the runner uses to decide when this service is ready. Playwright tests start only after every health check passes; if a probe fails before its deadline, the run aborts."
           />
         </span>
-        <Select<Health['mode']>
+        <Segmented<Health['mode']>
+          ariaLabel="Health check mode"
           value={health.mode}
           onChange={setMode}
           options={modeOptions}
@@ -892,88 +1186,103 @@ function ProbeEditor({
     if (t === 'http') onChange({ type: 'http', http: { url: '' } })
     else onChange({ type: 'tcp', tcp: { port: 0 } })
   }
-  return (
-    <div>
-      <div className="mb-2 inline-flex rounded-md" style={{ border: '1px solid var(--border-default)' }}>
-        {(['http', 'tcp'] as const).map((t) => (
-          <button
-            key={t}
-            type="button"
-            onClick={() => switchType(t)}
-            className="px-2.5 py-1 text-[10px] uppercase tracking-wider"
-            style={{
-              color: probe.type === t ? 'var(--text-primary)' : 'var(--text-muted)',
-              background: probe.type === t ? 'var(--bg-elevated)' : 'transparent',
-            }}
-          >
-            {t}
-          </button>
-        ))}
+  // The type toggle prefixes the address field so "what kind of probe + where"
+  // reads as one left-to-right unit instead of two stacked rows.
+  const typeToggle = (
+    <Segmented<'http' | 'tcp'>
+      ariaLabel="Probe type"
+      value={probe.type}
+      onChange={switchType}
+      options={[
+        { value: 'http', label: 'HTTP' },
+        { value: 'tcp', label: 'TCP' },
+      ]}
+    />
+  )
+  return probe.type === 'http' ? (
+    <div className="flex flex-col gap-1.5">
+      <div className="flex items-center gap-2">
+        {typeToggle}
+        <span className="flex-1">
+          <TemplatedInput
+            value={probe.http.url}
+            feature={feature}
+            placeholder="http://localhost:4000/"
+            onChange={(url) => onChange({ ...probe, http: { ...probe.http, url } })}
+          />
+        </span>
       </div>
-      {probe.type === 'http' ? (
-        <div className="flex flex-col gap-1.5">
-          <FieldRow label="URL" layout="inline">
-            <TemplatedInput
-              value={probe.http.url}
-              feature={feature}
-              placeholder="http://localhost:4000/"
-              onChange={(url) => onChange({ ...probe, http: { ...probe.http, url } })}
-            />
-          </FieldRow>
-          <FieldRow
-            label="Timeout (ms)"
-            layout="inline"
-            hint="How long to wait for a single probe attempt before treating it as failed. Lower = fail-fast per try."
-          >
-            <NumberInput
-              value={probe.http.timeoutMs ?? 1500}
-              min={0}
-              onChange={(n) => onChange({ ...probe, http: { ...probe.http, timeoutMs: n } })}
-            />
-          </FieldRow>
-          <FieldRow
-            label="Deadline (ms)"
-            layout="inline"
-            hint="Total budget to keep retrying the probe until it succeeds. If the service isn't ready by then, the run aborts."
-          >
-            <NumberInput
-              value={probe.http.deadlineMs ?? 60000}
-              min={0}
-              onChange={(n) => onChange({ ...probe, http: { ...probe.http, deadlineMs: n } })}
-            />
-          </FieldRow>
-        </div>
-      ) : (
-        <div className="flex flex-col gap-1.5">
-          <FieldRow label="Port" layout="inline">
-            <NumberInput
-              value={probe.tcp.port}
-              min={1}
-              max={65535}
-              onChange={(port) => onChange({ ...probe, tcp: { ...probe.tcp, port } })}
-            />
-          </FieldRow>
-          <FieldRow label="Host" layout="inline">
-            <TemplatedInput
-              value={probe.tcp.host ?? ''}
-              feature={feature}
-              placeholder="127.0.0.1"
-              onChange={(host) => onChange({ ...probe, tcp: { ...probe.tcp, host: host || undefined } })}
-            />
-          </FieldRow>
-          <FieldRow
-            label="Timeout (ms)"
-            layout="inline"
-            hint="How long to wait for a single TCP connect attempt before treating it as failed."
-          >
-            <NumberInput
-              value={probe.tcp.timeoutMs ?? 1500}
-              min={0}
-              onChange={(n) => onChange({ ...probe, tcp: { ...probe.tcp, timeoutMs: n } })}
-            />
-          </FieldRow>
-        </div>
-      )}
+      <Disclosure
+        title="Advanced"
+        defaultOpen={false}
+        summary={`${probe.http.timeoutMs ?? 1500}ms per try · ${probe.http.deadlineMs ?? 60000}ms total`}
+      >
+        <FieldRow
+          label="Timeout (ms)"
+          layout="inline"
+          labelWidth={104}
+          hint="How long to wait for a single probe attempt before treating it as failed. Lower = fail-fast per try."
+        >
+          <NumberInput
+            value={probe.http.timeoutMs ?? 1500}
+            min={0}
+            onChange={(n) => onChange({ ...probe, http: { ...probe.http, timeoutMs: n } })}
+          />
+        </FieldRow>
+        <FieldRow
+          label="Deadline (ms)"
+          layout="inline"
+          labelWidth={104}
+          hint="Total budget to keep retrying the probe until it succeeds. If the service isn't ready by then, the run aborts."
+        >
+          <NumberInput
+            value={probe.http.deadlineMs ?? 60000}
+            min={0}
+            onChange={(n) => onChange({ ...probe, http: { ...probe.http, deadlineMs: n } })}
+          />
+        </FieldRow>
+      </Disclosure>
+    </div>
+  ) : (
+    <div className="flex flex-col gap-1.5">
+      <div className="flex items-center gap-2">
+        {typeToggle}
+        <span className="text-[10px] uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>port</span>
+        <span style={{ width: 120 }}>
+          <NumberInput
+            value={probe.tcp.port}
+            min={1}
+            max={65535}
+            onChange={(port) => onChange({ ...probe, tcp: { ...probe.tcp, port } })}
+          />
+        </span>
+      </div>
+      <FieldRow label="Host" layout="inline" labelWidth={56}>
+        <TemplatedInput
+          value={probe.tcp.host ?? ''}
+          feature={feature}
+          placeholder="127.0.0.1"
+          onChange={(host) => onChange({ ...probe, tcp: { ...probe.tcp, host: host || undefined } })}
+        />
+      </FieldRow>
+      <Disclosure
+        title="Advanced"
+        defaultOpen={false}
+        summary={`${probe.tcp.timeoutMs ?? 1500}ms per try`}
+      >
+        <FieldRow
+          label="Timeout (ms)"
+          layout="inline"
+          labelWidth={104}
+          hint="How long to wait for a single TCP connect attempt before treating it as failed."
+        >
+          <NumberInput
+            value={probe.tcp.timeoutMs ?? 1500}
+            min={0}
+            onChange={(n) => onChange({ ...probe, tcp: { ...probe.tcp, timeoutMs: n } })}
+          />
+        </FieldRow>
+      </Disclosure>
     </div>
   )
 }

@@ -5,12 +5,15 @@ import path from 'path'
 import {
   encodeClaudeProjectDir,
   locateClaudeSessionLog,
+  findClaudeLogBySessionId,
   locateLatestClaudeSessionLog,
   locateCodexSessionLog,
   locateLatestCodexSessionLog,
   locateLatestSessionLogForAgent,
   locateMostRecentAgentSessionRef,
   loadAgentSessionLog,
+  loadAgentSession,
+  loadAgentSessionMeta,
   parseAgentSessionRefFile,
   renderAgentSessionContext,
   selectAgentSessionRef,
@@ -55,6 +58,32 @@ describe('locateClaudeSessionLog', () => {
 
   it('returns null when sessionId is falsy', () => {
     expect(locateClaudeSessionLog('/some/dir', '', homeDir)).toBeNull()
+  })
+})
+
+describe('findClaudeLogBySessionId', () => {
+  it('returns null when sessionId is falsy', () => {
+    expect(findClaudeLogBySessionId('', homeDir)).toBeNull()
+  })
+
+  it('returns null when the projects directory does not exist', () => {
+    expect(findClaudeLogBySessionId('sid', path.join(homeDir, 'missing-home'))).toBeNull()
+  })
+
+  it('scans every project dir and returns the matching session log regardless of encoding', () => {
+    const sessionId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
+    const base = path.join(homeDir, '.claude', 'projects')
+    fs.mkdirSync(path.join(base, '-some-other-proj'), { recursive: true })
+    const target = path.join(base, '-folded_slug-proj')
+    fs.mkdirSync(target, { recursive: true })
+    const jsonl = path.join(target, `${sessionId}.jsonl`)
+    fs.writeFileSync(jsonl, '')
+    expect(findClaudeLogBySessionId(sessionId, homeDir)).toBe(jsonl)
+  })
+
+  it('returns null when no project dir holds the session', () => {
+    fs.mkdirSync(path.join(homeDir, '.claude', 'projects', '-proj'), { recursive: true })
+    expect(findClaudeLogBySessionId('no-such-session', homeDir)).toBeNull()
   })
 
   it('finds the newest Claude session for a run directory without a sidecar id', () => {
@@ -1137,5 +1166,74 @@ describe('loadAgentSessionLog (codex)', () => {
 describe('loadAgentSessionLog edge cases', () => {
   it('returns [] when the log file is missing', () => {
     expect(loadAgentSessionLog({ agent: 'claude', sessionId: 'x', logPath: '/no/such.jsonl' })).toEqual([])
+  })
+})
+
+describe('session metadata (model / effort)', () => {
+  function writeLog(lines: object[]): string {
+    const file = path.join(homeDir, `meta-${lines.length}-${Math.abs(JSON.stringify(lines).length)}.jsonl`)
+    fs.writeFileSync(file, lines.map((l) => JSON.stringify(l)).join('\n') + '\n')
+    return file
+  }
+
+  it('extracts model + effort from a codex turn_context line', () => {
+    const file = writeLog([
+      { type: 'session_meta', payload: { id: 's', cwd: '/x', timestamp: 't' } },
+      { type: 'turn_context', payload: { model: 'gpt-5.5', effort: 'high', summary: 'auto' } },
+    ])
+    expect(loadAgentSessionMeta({ agent: 'codex', sessionId: 's', logPath: file })).toEqual({
+      model: 'gpt-5.5',
+      effort: 'high',
+    })
+  })
+
+  it('takes the last codex turn_context when the model/effort changes mid-session', () => {
+    const file = writeLog([
+      { type: 'turn_context', payload: { model: 'gpt-5.5', effort: 'low' } },
+      { type: 'turn_context', payload: { model: 'gpt-5.5-codex', effort: 'high' } },
+    ])
+    expect(loadAgentSessionMeta({ agent: 'codex', sessionId: 's', logPath: file })).toEqual({
+      model: 'gpt-5.5-codex',
+      effort: 'high',
+    })
+  })
+
+  it('extracts model from claude assistant lines and leaves effort undefined', () => {
+    const file = writeLog([
+      { type: 'user', timestamp: 't', message: { content: 'hi' } },
+      { type: 'assistant', timestamp: 't', message: { model: 'claude-opus-4-8', content: [{ type: 'text', text: 'ok' }] } },
+    ])
+    const meta = loadAgentSessionMeta({ agent: 'claude', sessionId: 's', logPath: file })
+    expect(meta.model).toBe('claude-opus-4-8')
+    expect(meta.effort).toBeUndefined()
+  })
+
+  it('returns empty meta when no model/effort lines are present', () => {
+    const file = writeLog([{ type: 'event_msg', payload: { type: 'task_started' } }])
+    expect(loadAgentSessionMeta({ agent: 'codex', sessionId: 's', logPath: file })).toEqual({})
+  })
+
+  it('ignores a turn_context whose model/effort are empty strings or non-strings', () => {
+    // Each guard is `typeof x === 'string' && x` — empty strings fail the
+    // truthiness arm, non-strings fail the typeof arm. Neither sets meta.
+    const file = writeLog([
+      { type: 'turn_context', payload: { model: '', effort: '' } },
+      { type: 'turn_context', payload: { model: 123, effort: 456 } },
+    ])
+    expect(loadAgentSessionMeta({ agent: 'codex', sessionId: 's', logPath: file })).toEqual({})
+  })
+
+  it('returns empty meta when the log file is missing', () => {
+    expect(loadAgentSessionMeta({ agent: 'codex', sessionId: 'x', logPath: '/no/such.jsonl' })).toEqual({})
+  })
+
+  it('loadAgentSession returns events and meta from a single read', () => {
+    const file = writeLog([
+      { type: 'turn_context', payload: { model: 'gpt-5.5', effort: 'medium' } },
+      { type: 'response_item', timestamp: 't', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'done' }] } },
+    ])
+    const { events, meta } = loadAgentSession({ agent: 'codex', sessionId: 's', logPath: file })
+    expect(meta).toEqual({ model: 'gpt-5.5', effort: 'medium' })
+    expect(events).toEqual([{ kind: 'assistant-message', timestamp: 't', text: 'done' }])
   })
 })

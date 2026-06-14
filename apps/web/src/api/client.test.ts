@@ -19,6 +19,12 @@ import {
   deleteEnvsetSlot,
   deleteJournalEntry,
   deleteRun,
+  cleanupRuns,
+  cleanupWorktrees,
+  openWorktreePath,
+  removeWorktree,
+  openBenchmarkWorktree,
+  trimRun,
   getDraft,
   getDraftAgentLog,
   getDraftFile,
@@ -60,12 +66,29 @@ import {
   deleteEnvset,
   getProjectConfig,
   putProjectConfig,
+  changeProjectPort,
   openAgentApp,
 	  openEditor,
 	  sendAgentInput,
 	  restartRun,
 	  extractPrdDocuments,
   downloadEvaluationExportTask,
+  listBenchmarks,
+  getBenchmark,
+  clearBenchmarkWorktrees,
+  listSabotageSkills,
+  startBenchmark,
+  abortBenchmark,
+  getBenchmarkSabotageLog,
+  getBenchmarkAgentSession,
+  benchmarkPreflight,
+  startPortify,
+  getPortify,
+  savePortify,
+  cancelPortify,
+  revisePortify,
+  removePortify,
+  getPortifyAgentSession,
 } from './client'
 
 const ok = (body: unknown, status = 200): Response =>
@@ -95,6 +118,28 @@ describe('api client', () => {
       status: 500,
       body: { error: 'boom' },
     })
+  })
+
+  it('changeProjectPort returns the restart payload on 200', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(ok({ restarting: true, port: 8300, newOrigin: 'http://localhost:8300' }))
+    const result = await changeProjectPort(8300, false, { baseUrl: 'http://x', fetchImpl })
+    expect(result).toEqual({ restarting: true, port: 8300, newOrigin: 'http://localhost:8300' })
+    expect(fetchImpl).toHaveBeenCalledWith('http://x/api/project-config/port', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ port: 8300, confirm: false }),
+    })
+  })
+
+  it('changeProjectPort surfaces a 409 confirmation payload instead of throwing', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(fail(409, { needsConfirm: true, activeRuns: 2 }))
+    const result = await changeProjectPort(8300, false, { fetchImpl })
+    expect(result).toEqual({ needsConfirm: true, activeRuns: 2 })
+  })
+
+  it('changeProjectPort rethrows non-409 errors', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(fail(400, { error: 'port must be an integer between 1 and 65535' }))
+    await expect(changeProjectPort(99999, false, { fetchImpl })).rejects.toMatchObject({ status: 400 })
   })
 
   it('getFeatureTests URL-encodes the feature name', async () => {
@@ -806,6 +851,48 @@ describe('api client', () => {
     expect(fetchImpl).toHaveBeenCalledWith('/api/runs/r1', { method: 'DELETE' })
   })
 
+  it('cleanupRuns GETs /api/cleanup/runs', async () => {
+    const listing = { runs: [], orphans: [], totals: { totalBytes: 0, reclaimableTrimBytes: 0, reclaimableDeleteBytes: 0 } }
+    const fetchImpl = vi.fn().mockResolvedValue(ok(listing))
+    const r = await cleanupRuns({ fetchImpl })
+    expect(fetchImpl).toHaveBeenCalledWith('/api/cleanup/runs', { method: 'GET' })
+    expect(r).toEqual(listing)
+  })
+
+  it('cleanupWorktrees GETs /api/cleanup/worktrees', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(ok({ worktrees: [] }))
+    const r = await cleanupWorktrees({ fetchImpl })
+    expect(fetchImpl).toHaveBeenCalledWith('/api/cleanup/worktrees', { method: 'GET' })
+    expect(r).toEqual({ worktrees: [] })
+  })
+
+  it('openWorktreePath POSTs the path to the open endpoint', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(ok({ opened: true, path: '/wt', editor: 'vscode' }))
+    const r = await openWorktreePath('/wt', { fetchImpl })
+    expect(r).toEqual({ opened: true, path: '/wt', editor: 'vscode' })
+    const [url, init] = fetchImpl.mock.calls[0]
+    expect(url).toBe('/api/cleanup/worktrees/open')
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(init.body as string)).toEqual({ path: '/wt' })
+  })
+
+  it('removeWorktree DELETEs /api/cleanup/worktrees with the path body', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(ok({ removed: true, freedBytes: 42 }))
+    const r = await removeWorktree('/wt', { fetchImpl })
+    expect(r).toEqual({ removed: true, freedBytes: 42 })
+    const [url, init] = fetchImpl.mock.calls[0]
+    expect(url).toBe('/api/cleanup/worktrees')
+    expect(init.method).toBe('DELETE')
+    expect(JSON.parse(init.body as string)).toEqual({ path: '/wt' })
+  })
+
+  it('trimRun POSTs /api/runs/:runId/trim and returns freedBytes', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(ok({ freedBytes: 1234 }))
+    const r = await trimRun('r1', { fetchImpl })
+    expect(fetchImpl).toHaveBeenCalledWith('/api/runs/r1/trim', { method: 'POST' })
+    expect(r).toEqual({ freedBytes: 1234 })
+  })
+
   it('createEnvset POSTs the env name', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(ok({ env: 'staging' }))
     const r = await createEnvset('alpha', 'staging', { fetchImpl })
@@ -993,5 +1080,151 @@ describe('api client', () => {
     } finally {
       ;(globalThis as { fetch: typeof fetch }).fetch = original
     }
+  })
+
+  it('listBenchmarks GETs the index', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(ok([{ benchmarkId: 'b1' }]))
+    await expect(listBenchmarks({ baseUrl: 'http://x', fetchImpl })).resolves.toEqual([{ benchmarkId: 'b1' }])
+    expect(fetchImpl).toHaveBeenCalledWith('http://x/api/benchmarks', { method: 'GET' })
+  })
+
+  it('getBenchmark GETs a single manifest, encoding the id', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(ok({ benchmarkId: 'b/1' }))
+    await expect(getBenchmark('b/1', { baseUrl: 'http://x', fetchImpl })).resolves.toEqual({ benchmarkId: 'b/1' })
+    expect(fetchImpl).toHaveBeenCalledWith('http://x/api/benchmarks/b%2F1', { method: 'GET' })
+  })
+
+  it('listSabotageSkills GETs the skills for a feature', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(ok([{ name: 'off-by-one' }]))
+    await expect(listSabotageSkills('a/b', { baseUrl: 'http://x', fetchImpl })).resolves.toEqual([{ name: 'off-by-one' }])
+    expect(fetchImpl).toHaveBeenCalledWith('http://x/api/benchmark-skills?feature=a%2Fb', { method: 'GET' })
+  })
+
+  it('startBenchmark POSTs the input as JSON', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(ok({ benchmarkId: 'bench-1' }))
+    const input = { feature: 'f', skill: 's', level: 'med' as const, iterations: 2, agent: 'claude' as const }
+    await expect(startBenchmark(input, { baseUrl: 'http://x', fetchImpl })).resolves.toEqual({ benchmarkId: 'bench-1' })
+    expect(fetchImpl).toHaveBeenCalledWith('http://x/api/benchmarks', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(input),
+    })
+  })
+
+  it('abortBenchmark POSTs to the abort endpoint', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(ok({ ok: true }))
+    await expect(abortBenchmark('b1', { baseUrl: 'http://x', fetchImpl })).resolves.toEqual({ ok: true })
+    expect(fetchImpl).toHaveBeenCalledWith('http://x/api/benchmarks/b1/abort', { method: 'POST' })
+  })
+
+  it('getBenchmarkSabotageLog GETs the captured log', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(ok({ log: 'output' }))
+    await expect(getBenchmarkSabotageLog('b1', { baseUrl: 'http://x', fetchImpl })).resolves.toEqual({ log: 'output' })
+    expect(fetchImpl).toHaveBeenCalledWith('http://x/api/benchmarks/b1/sabotage-log', { method: 'GET' })
+  })
+
+  it('getBenchmarkAgentSession returns the session on 200', async () => {
+    const session = { agent: 'claude', sessionId: 's1', events: [] }
+    const fetchImpl = vi.fn().mockResolvedValue(ok(session))
+    await expect(getBenchmarkAgentSession('b1', { baseUrl: 'http://x', fetchImpl })).resolves.toEqual(session)
+    expect(fetchImpl).toHaveBeenCalledWith('http://x/api/benchmarks/b1/agent-session', { method: 'GET' })
+  })
+
+  it('getBenchmarkAgentSession returns null on 404', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(fail(404, { reason: 'no-session' }))
+    await expect(getBenchmarkAgentSession('b1', { baseUrl: 'http://x', fetchImpl })).resolves.toBeNull()
+  })
+
+  it('openBenchmarkWorktree POSTs the target to the open-worktree endpoint', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(ok({ opened: true, path: '/wt', editor: 'cursor' }))
+    const r = await openBenchmarkWorktree('b1', 'frozen', { baseUrl: 'http://x', fetchImpl })
+    expect(r).toEqual({ opened: true, path: '/wt', editor: 'cursor' })
+    const [url, init] = fetchImpl.mock.calls[0]
+    expect(url).toBe('http://x/api/benchmarks/b1/open-worktree')
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(init.body as string)).toEqual({ target: 'frozen' })
+  })
+
+  it('getBenchmarkAgentSession rethrows non-404 errors', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(fail(500, { error: 'boom' }))
+    await expect(getBenchmarkAgentSession('b1', { baseUrl: 'http://x', fetchImpl })).rejects.toMatchObject({
+      name: 'ApiError',
+      status: 500,
+    })
+  })
+
+  it('benchmarkPreflight queries the feature (and env when given)', async () => {
+    const fetchImpl = vi.fn().mockImplementation(async () => ok({ portsConfigured: false, repos: [] }))
+    const r = await benchmarkPreflight('cns', undefined, { baseUrl: 'http://x', fetchImpl })
+    expect(r).toEqual({ portsConfigured: false, repos: [] })
+    expect(fetchImpl).toHaveBeenCalledWith('http://x/api/benchmarks/preflight?feature=cns', { method: 'GET' })
+    await benchmarkPreflight('cns', 'prod', { baseUrl: 'http://x', fetchImpl })
+    expect(fetchImpl).toHaveBeenLastCalledWith('http://x/api/benchmarks/preflight?feature=cns&env=prod', { method: 'GET' })
+  })
+
+  it('startPortify POSTs the feature/agent/maxAttempts', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(ok({ workflowId: 'w1' }))
+    const r = await startPortify({ feature: 'cns', agent: 'claude', maxAttempts: 2 }, { baseUrl: 'http://x', fetchImpl })
+    expect(r).toEqual({ workflowId: 'w1' })
+    const [url, init] = fetchImpl.mock.calls[0]
+    expect(url).toBe('http://x/api/portify')
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(init.body as string)).toEqual({ feature: 'cns', agent: 'claude', maxAttempts: 2 })
+  })
+
+  it('getPortify GETs the workflow manifest', async () => {
+    const m = { workflowId: 'w1', status: 'ready-to-save' }
+    const fetchImpl = vi.fn().mockResolvedValue(ok(m))
+    await expect(getPortify('w1', { baseUrl: 'http://x', fetchImpl })).resolves.toEqual(m)
+    expect(fetchImpl).toHaveBeenCalledWith('http://x/api/portify/w1', { method: 'GET' })
+  })
+
+  it('savePortify and cancelPortify POST to their endpoints', async () => {
+    const fetchImpl = vi.fn().mockImplementation(async () => ok({ workflowId: 'w1', status: 'saved' }))
+    await savePortify('w1', { baseUrl: 'http://x', fetchImpl })
+    expect(fetchImpl).toHaveBeenLastCalledWith('http://x/api/portify/w1/save', { method: 'POST' })
+    await cancelPortify('w1', { baseUrl: 'http://x', fetchImpl })
+    expect(fetchImpl).toHaveBeenLastCalledWith('http://x/api/portify/w1/cancel', { method: 'POST' })
+  })
+
+  it('revisePortify POSTs the trimmed feedback as JSON', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(ok({ workflowId: 'w1', status: 'editing' }))
+    const r = await revisePortify('w1', 'use PORT', { baseUrl: 'http://x', fetchImpl })
+    expect(r).toMatchObject({ workflowId: 'w1', status: 'editing' })
+    const [url, init] = fetchImpl.mock.calls[0]
+    expect(url).toBe('http://x/api/portify/w1/revise')
+    expect(init.method).toBe('POST')
+    expect(init.headers).toMatchObject({ 'Content-Type': 'application/json' })
+    expect(JSON.parse(init.body as string)).toEqual({ feedback: 'use PORT' })
+  })
+
+  it('removePortify DELETEs the workflow', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(ok({ workflowId: 'w1', removed: true }))
+    await expect(removePortify('w1', { baseUrl: 'http://x', fetchImpl })).resolves.toEqual({ workflowId: 'w1', removed: true })
+    expect(fetchImpl).toHaveBeenCalledWith('http://x/api/portify/w1', { method: 'DELETE' })
+  })
+
+  it('getPortifyAgentSession returns the session on 200 and null on 404', async () => {
+    const session = { agent: 'claude', sessionId: 's', events: [] }
+    const okFetch = vi.fn().mockResolvedValue(ok(session))
+    await expect(getPortifyAgentSession('w1', { baseUrl: 'http://x', fetchImpl: okFetch })).resolves.toEqual(session)
+    expect(okFetch).toHaveBeenCalledWith('http://x/api/portify/w1/agent-session', { method: 'GET' })
+    const notFound = vi.fn().mockResolvedValue(fail(404, { reason: 'no-session' }))
+    await expect(getPortifyAgentSession('w1', { baseUrl: 'http://x', fetchImpl: notFound })).resolves.toBeNull()
+  })
+
+  it('getPortifyAgentSession rethrows non-404 errors', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(fail(500, { error: 'boom' }))
+    await expect(getPortifyAgentSession('w1', { baseUrl: 'http://x', fetchImpl })).rejects.toMatchObject({ status: 500 })
+  })
+
+  it('clearBenchmarkWorktrees POSTs the confirm flag', async () => {
+    const fetchImpl = vi.fn().mockImplementation(async () => ok({ confirmed: true, willClear: 2, cleared: 2, freedBytes: 9 }))
+    const r = await clearBenchmarkWorktrees('b1', true, { baseUrl: 'http://x', fetchImpl })
+    expect(r).toEqual({ confirmed: true, willClear: 2, cleared: 2, freedBytes: 9 })
+    const [url, init] = fetchImpl.mock.calls[0]
+    expect(url).toBe('http://x/api/benchmarks/b1/clear-worktrees')
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(init.body as string)).toEqual({ confirm: true })
   })
 })

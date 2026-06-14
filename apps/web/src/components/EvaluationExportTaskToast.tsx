@@ -1,6 +1,7 @@
 import { useEvaluationExports } from '../state/EvaluationExportContext'
 import type { EvaluationExportMode, EvaluationExportTask } from '../api/types'
 import { CloseIcon, DownloadIcon, StatusDot, type StatusDotState } from './config/atoms'
+import { StatusPill } from './StatusPill'
 
 function dotStateForExport(status: EvaluationExportTask['status']): StatusDotState {
   if (status === 'completed') return 'success'
@@ -28,28 +29,14 @@ export function EvaluationExportTaskStatus() {
 
   return (
     <>
-      <div className="flex min-w-0 shrink-0 items-center">
-        <button
-          type="button"
-          onClick={() => openTask(latestTask.taskId)}
-          className="cl-button flex min-w-0 max-w-[260px] items-center gap-2 px-2 py-0.5 text-[11px]"
-          style={{ color: 'var(--text-secondary)' }}
-          title={`${statusLabel(latestTask)}: ${latestRunLabel} (${modeLabel(latestTask.mode)} · ${latestTask.runId})`}
-        >
-          <StatusDot state={dotStateForExport(latestTask.status)} />
-          <span className="shrink-0 font-medium" style={{ color: 'var(--text-primary)' }}>
-            {compactStatusLabel(latestTask)}
-          </span>
-          <span className="hidden min-w-0 truncate xl:inline" style={{ color: 'var(--text-muted)' }}>
-            {latestRunLabel}
-          </span>
-          {tasks.length > 1 && (
-            <span className="shrink-0 rounded px-1.5 py-0.5 text-[10px]" style={{ background: 'var(--bg-selected)', color: 'var(--text-muted)' }}>
-              {tasks.length}
-            </span>
-          )}
-        </button>
-      </div>
+      <StatusPill
+        dotState={dotStateForExport(latestTask.status)}
+        name="Exports"
+        detail={compactStatusLabel(latestTask)}
+        count={tasks.length > 1 ? tasks.length : undefined}
+        onClick={() => openTask(latestTask.taskId)}
+        title={`${statusLabel(latestTask)} · ${latestRunLabel}`}
+      />
       {dialogOpen && task && (
         <EvaluationExportDialog
           tasks={tasks}
@@ -196,9 +183,11 @@ function statusLabel(task: EvaluationExportTask): string {
   return `Exporting ${modeLabel(task.mode).toLowerCase()}`
 }
 
+// Short status word shown as the pill's muted detail. The pill name already
+// says "Exports", so this drops the redundant "Export" prefix.
 function compactStatusLabel(task: EvaluationExportTask): string {
-  if (task.status === 'completed') return 'Export ready'
-  if (task.status === 'failed') return 'Export failed'
+  if (task.status === 'completed') return 'Ready'
+  if (task.status === 'failed') return 'Failed'
   return 'Exporting'
 }
 

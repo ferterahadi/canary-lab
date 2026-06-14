@@ -7,6 +7,8 @@ import type {
   Feature,
   FeatureTests,
   RunIndexEntry,
+  CleanupListing,
+  CleanupWorktree,
   RunDetail,
   JournalEntry,
   CreateDraftPayload,
@@ -19,6 +21,12 @@ import type {
   VerificationConfig,
   VerificationTarget,
 } from './types'
+import type {
+  BenchmarkIndexEntry,
+  BenchmarkManifest,
+  SabotageLevel,
+  SabotageSkillSummary,
+} from './benchmark-types'
 
 export class ApiError extends Error {
   readonly status: number
@@ -59,7 +67,14 @@ async function request<T>(
     }
   }
   if (!res.ok) {
-    throw new ApiError(res.status, body)
+    // Surface the server's `{ error }` message (most routes return one) as the
+    // Error message so callers showing `e.message` get the real reason, not a
+    // bare "HTTP 409".
+    const message =
+      body && typeof body === 'object' && typeof (body as { error?: unknown }).error === 'string'
+        ? (body as { error: string }).error
+        : undefined
+    throw new ApiError(res.status, body, message)
   }
   return body as T
 }
@@ -67,6 +82,260 @@ async function request<T>(
 export function listFeatures(opts?: ClientOptions): Promise<Feature[]> {
   const { baseUrl, fetchImpl } = defaultOpts(opts)
   return request<Feature[]>(`${baseUrl}/api/features`, { method: 'GET' }, fetchImpl)
+}
+
+// ─── Benchmark ─────────────────────────────────────────────────────────────
+
+export function listBenchmarks(opts?: ClientOptions): Promise<BenchmarkIndexEntry[]> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<BenchmarkIndexEntry[]>(`${baseUrl}/api/benchmarks`, { method: 'GET' }, fetchImpl)
+}
+
+export function getBenchmark(id: string, opts?: ClientOptions): Promise<BenchmarkManifest> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<BenchmarkManifest>(
+    `${baseUrl}/api/benchmarks/${encodeURIComponent(id)}`,
+    { method: 'GET' },
+    fetchImpl,
+  )
+}
+
+export function listSabotageSkills(feature: string, opts?: ClientOptions): Promise<SabotageSkillSummary[]> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<SabotageSkillSummary[]>(
+    `${baseUrl}/api/benchmark-skills?feature=${encodeURIComponent(feature)}`,
+    { method: 'GET' },
+    fetchImpl,
+  )
+}
+
+export interface BenchmarkPreflight {
+  portsConfigured: boolean
+  repos: { name: string; commands: { name: string; declaredPorts: { name: string; env?: string }[] }[] }[]
+}
+
+// Does the feature declare injectable port slots? Benchmark arms boot the same
+// feature concurrently, so an app with hardcoded ports would clash. When
+// `portsConfigured` is false the UI offers the port-ification workflow.
+export function benchmarkPreflight(
+  feature: string,
+  env?: string,
+  opts?: ClientOptions,
+): Promise<BenchmarkPreflight> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  const q = new URLSearchParams({ feature })
+  if (env) q.set('env', env)
+  return request<BenchmarkPreflight>(
+    `${baseUrl}/api/benchmarks/preflight?${q.toString()}`,
+    { method: 'GET' },
+    fetchImpl,
+  )
+}
+
+export function startBenchmark(
+  input: { feature: string; skill: string; level: SabotageLevel; iterations: number; agent?: 'claude' | 'codex' },
+  opts?: ClientOptions,
+): Promise<{ benchmarkId: string }> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<{ benchmarkId: string }>(
+    `${baseUrl}/api/benchmarks`,
+    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) },
+    fetchImpl,
+  )
+}
+
+export function abortBenchmark(id: string, opts?: ClientOptions): Promise<{ ok: boolean }> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<{ ok: boolean }>(
+    `${baseUrl}/api/benchmarks/${encodeURIComponent(id)}/abort`,
+    { method: 'POST' },
+    fetchImpl,
+  )
+}
+
+// Open one of a benchmark's worktrees in the user's editor. `target`:
+//   'frozen' → pristine checkout at the sabotage SHA (lazily created)
+//   'A' / 'B' → the live arm worktree (only while the benchmark runs)
+// Returns the resolved path even when the editor couldn't launch (opened:false)
+// so the UI can offer a copy-path fallback.
+export function openBenchmarkWorktree(
+  id: string,
+  target: 'frozen' | 'A' | 'B',
+  opts?: ClientOptions,
+): Promise<{ opened: boolean; path: string; editor?: string; error?: string }> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request(
+    `${baseUrl}/api/benchmarks/${encodeURIComponent(id)}/open-worktree`,
+    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ target }) },
+    fetchImpl,
+  )
+}
+
+// Clear a finished benchmark's worktrees. Two-phase, mirroring the route: call
+// with `confirm: false` (default) for a dry run that returns the disk it would
+// free (shown in the confirm dialog), then `confirm: true` to actually remove
+// them. `cleared`/`freedBytes` reflect what was removed.
+export function clearBenchmarkWorktrees(
+  id: string,
+  confirm: boolean,
+  opts?: ClientOptions,
+): Promise<{ confirmed: boolean; willClear: number; cleared: number; freedBytes: number; alreadyCleared?: boolean }> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request(
+    `${baseUrl}/api/benchmarks/${encodeURIComponent(id)}/clear-worktrees`,
+    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ confirm }) },
+    fetchImpl,
+  )
+}
+
+export function getBenchmarkSabotageLog(id: string, opts?: ClientOptions): Promise<{ log: string }> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<{ log: string }>(
+    `${baseUrl}/api/benchmarks/${encodeURIComponent(id)}/sabotage-log`,
+    { method: 'GET' },
+    fetchImpl,
+  )
+}
+
+export async function getBenchmarkAgentSession(
+  id: string,
+  opts?: ClientOptions,
+): Promise<AgentSessionResponse | null> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  try {
+    return await request<AgentSessionResponse>(
+      `${baseUrl}/api/benchmarks/${encodeURIComponent(id)}/agent-session`,
+      { method: 'GET' },
+      fetchImpl,
+    )
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) return null
+    throw err
+  }
+}
+
+// ─── Port-ification ──────────────────────────────────────────────────────
+
+export type PortifyStatus =
+  | 'planning' | 'editing' | 'verifying' | 'ready-to-save' | 'saved'
+  | 'failed' | 'aborted'
+
+export interface PortifyBootInstance {
+  ports: Record<string, number>
+  ok: boolean
+  failedService?: string
+  detail?: string
+}
+
+export interface PortifyRepoState {
+  name: string
+  path: string
+  worktreePath?: string
+  baseSha?: string
+}
+
+export interface PortifyIndexEntry {
+  workflowId: string
+  feature: string
+  status: PortifyStatus
+  branch?: string
+  startedAt: string
+  endedAt?: string
+}
+
+export interface PortifyManifest {
+  workflowId: string
+  feature: string
+  repos: PortifyRepoState[]
+  agent: 'claude' | 'codex'
+  branch: string
+  status: PortifyStatus
+  attempt: number
+  maxAttempts: number
+  feedbackRounds?: number
+  startedAt: string
+  endedAt?: string
+  diff?: string
+  verification?: { ok: boolean; instances: PortifyBootInstance[]; failureDetail?: string }
+  error?: string
+}
+
+export function startPortify(
+  input: { feature: string; agent?: 'claude' | 'codex'; maxAttempts?: number },
+  opts?: ClientOptions,
+): Promise<{ workflowId: string }> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<{ workflowId: string }>(
+    `${baseUrl}/api/portify`,
+    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) },
+    fetchImpl,
+  )
+}
+
+export function getPortify(workflowId: string, opts?: ClientOptions): Promise<PortifyManifest> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<PortifyManifest>(
+    `${baseUrl}/api/portify/${encodeURIComponent(workflowId)}`,
+    { method: 'GET' },
+    fetchImpl,
+  )
+}
+
+export function savePortify(workflowId: string, opts?: ClientOptions): Promise<PortifyManifest> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<PortifyManifest>(
+    `${baseUrl}/api/portify/${encodeURIComponent(workflowId)}/save`,
+    { method: 'POST' },
+    fetchImpl,
+  )
+}
+
+export function cancelPortify(workflowId: string, opts?: ClientOptions): Promise<PortifyManifest> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<PortifyManifest>(
+    `${baseUrl}/api/portify/${encodeURIComponent(workflowId)}/cancel`,
+    { method: 'POST' },
+    fetchImpl,
+  )
+}
+
+export function revisePortify(
+  workflowId: string,
+  feedback: string,
+  opts?: ClientOptions,
+): Promise<PortifyManifest> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<PortifyManifest>(
+    `${baseUrl}/api/portify/${encodeURIComponent(workflowId)}/revise`,
+    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ feedback }) },
+    fetchImpl,
+  )
+}
+
+export function removePortify(workflowId: string, opts?: ClientOptions): Promise<{ workflowId: string; removed: true }> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<{ workflowId: string; removed: true }>(
+    `${baseUrl}/api/portify/${encodeURIComponent(workflowId)}`,
+    { method: 'DELETE' },
+    fetchImpl,
+  )
+}
+
+export async function getPortifyAgentSession(
+  workflowId: string,
+  opts?: ClientOptions,
+): Promise<AgentSessionResponse | null> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  try {
+    return await request<AgentSessionResponse>(
+      `${baseUrl}/api/portify/${encodeURIComponent(workflowId)}/agent-session`,
+      { method: 'GET' },
+      fetchImpl,
+    )
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) return null
+    throw err
+  }
 }
 
 export function getFeatureTests(name: string, opts?: ClientOptions): Promise<FeatureTests> {
@@ -361,6 +630,16 @@ export interface ProjectConfig {
   healAgent: HealAgentChoice
   editor: EditorChoice
   personalWikiPath: string | null
+  port?: number
+}
+
+export interface PortChangeResult {
+  restarting: boolean
+  port?: number
+  newOrigin?: string
+  reason?: string
+  needsConfirm?: boolean
+  activeRuns?: number
 }
 
 export function getProjectConfig(opts?: ClientOptions): Promise<ProjectConfig> {
@@ -382,6 +661,33 @@ export function putProjectConfig(
     },
     fetchImpl,
   )
+}
+
+// Change the UI/MCP port. The server persists it and restarts the UI; a 409
+// surfaces as `{ needsConfirm, activeRuns }` so the caller can re-submit with
+// confirm:true after warning that active runs will be aborted.
+export async function changeProjectPort(
+  port: number,
+  confirm: boolean,
+  opts?: ClientOptions,
+): Promise<PortChangeResult> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  try {
+    return await request<PortChangeResult>(
+      `${baseUrl}/api/project-config/port`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ port, confirm }),
+      },
+      fetchImpl,
+    )
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 409 && e.body && typeof e.body === 'object') {
+      return e.body as PortChangeResult
+    }
+    throw e
+  }
 }
 
 export function openAgentApp(agent: 'claude' | 'codex', opts?: ClientOptions): Promise<{ opened: boolean }> {
@@ -772,6 +1078,9 @@ export type AgentSessionEvent =
 export interface AgentSessionResponse {
   agent: 'claude' | 'codex'
   sessionId: string
+  // Model the agent ran (both agents) and reasoning effort (codex only).
+  model?: string
+  effort?: string
   events: AgentSessionEvent[]
 }
 
@@ -930,6 +1239,55 @@ export async function deleteRun(runId: string, opts?: ClientOptions): Promise<vo
   await request<unknown>(
     `${baseUrl}/api/runs/${encodeURIComponent(runId)}`,
     { method: 'DELETE' },
+    fetchImpl,
+  )
+}
+
+// Disk-usage listing for the Log Cleanup page: every run + orphan dir with
+// folder/artifact byte sizes and reclaimable totals.
+export function cleanupRuns(opts?: ClientOptions): Promise<CleanupListing> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<CleanupListing>(`${baseUrl}/api/cleanup/runs`, { method: 'GET' }, fetchImpl)
+}
+
+// Every git worktree canary-lab created under the logs dir (inspect snapshots,
+// per-run isolation, benchmark arms, stale orphans), for the cleanup list.
+export function cleanupWorktrees(opts?: ClientOptions): Promise<{ worktrees: CleanupWorktree[] }> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request(`${baseUrl}/api/cleanup/worktrees`, { method: 'GET' }, fetchImpl)
+}
+
+// Open a worktree folder in the user's editor ("visit" from the cleanup list).
+export function openWorktreePath(
+  path: string,
+  opts?: ClientOptions,
+): Promise<{ opened: boolean; path: string; editor?: string; error?: string }> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request(
+    `${baseUrl}/api/cleanup/worktrees/open`,
+    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path }) },
+    fetchImpl,
+  )
+}
+
+// Remove one worktree via `git worktree remove` (+ prune). Server returns 409
+// when the worktree belongs to a still-active run/benchmark.
+export function removeWorktree(path: string, opts?: ClientOptions): Promise<{ removed: boolean; freedBytes: number }> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request(
+    `${baseUrl}/api/cleanup/worktrees`,
+    { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path }) },
+    fetchImpl,
+  )
+}
+
+// Reclaim a terminal run's Playwright artifacts (videos/traces) while keeping
+// the run in history. Server returns 409 if the run is still active.
+export async function trimRun(runId: string, opts?: ClientOptions): Promise<{ freedBytes: number }> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<{ freedBytes: number }>(
+    `${baseUrl}/api/runs/${encodeURIComponent(runId)}/trim`,
+    { method: 'POST' },
     fetchImpl,
   )
 }

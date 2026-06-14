@@ -1,0 +1,7 @@
+{
+  "name": "off-by-one",
+  "title": "Subtle logic bug",
+  "level": "min",
+  "summary": "One subtle logic error in a single handler. The app still boots; one test goes red.",
+  "appliesTo": ["*"]
+}

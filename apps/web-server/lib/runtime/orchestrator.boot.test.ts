@@ -91,6 +91,31 @@ describe('RunOrchestrator boot-only mode', () => {
     expect(manifest.lifecycle?.phase).toBe('services-ready')
   })
 
+  it('holds the session when a service fails its readiness probe — boot never self-aborts', async () => {
+    const { factory } = makeServiceFactory()
+    const orch = new RunOrchestrator({
+      feature: feature(),
+      runId: RUN_ID,
+      runDir,
+      ptyFactory: factory,
+      executionType: 'boot',
+      healthCheck: async () => false, // probe never passes
+      healthDeadlineMs: 0, // … so it times out on the first tick
+      delay: async () => undefined,
+      playwrightSpawner: vi.fn<PlaywrightSpawner>(),
+    })
+
+    // A failed probe is non-fatal for a boot session: bootOnly resolves rather
+    // than throwing, so the server never tears the session down.
+    await expect(orch.bootOnly()).resolves.toBeUndefined()
+
+    const manifest = readManifest(path.join(runDir, 'manifest.json'))!
+    expect(manifest.status).toBe('running')
+    // The failed service is marked timeout (red dot) but the session is held.
+    expect(manifest.services[0]).toMatchObject({ name: 'api', status: 'timeout' })
+    expect(manifest.lifecycle?.phase).toBe('services-ready')
+  })
+
   it('tears the services down and finalizes on stop', async () => {
     const { factory } = makeServiceFactory()
     const orch = new RunOrchestrator({

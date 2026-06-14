@@ -12,7 +12,6 @@ import {
 } from './upgrade-migration'
 import { refreshInstalled as refreshInstalledAgentIntegrations } from './agent'
 import { refreshCanaryLabMcp } from './mcp-refresh'
-import { upsertWorkspace } from '../shared/runtime/workspace-registry'
 
 const MARKER_START = '<!-- managed:canary-lab:start -->'
 const MARKER_END = '<!-- managed:canary-lab:end -->'
@@ -224,11 +223,9 @@ export async function main(
   const templateRoot = getTemplateRoot()
   let updated = 0
 
-  // Keep the user-level workspace registry current so agent skills can find
-  // Canary Lab projects without relying on shell-specific environment files.
-  upsertWorkspace(projectRoot, {
-    homeDir: extras.agentHomeDir ?? process.env.CANARY_LAB_AGENT_HOME,
-  })
+  // The user-level workspace registry is owned solely by `canary-lab init`
+  // (setup). `upgrade` is a maintenance pass on an already-set-up project and
+  // must not introduce or re-stamp registry entries.
 
   // 1. Fully-managed files: overwrite from templates
   for (const relPath of FULLY_MANAGED) {

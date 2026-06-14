@@ -18,6 +18,10 @@ interface Props {
   activeRunExecutionType?: ExecutionType | null
   onSelectFeature: (name: string) => void
   onFeaturesChanged?: (preferredFeature?: string | null) => void
+  /** Opens the port-ification wizard for a feature (Service tab entry). */
+  onStartPortify?: (feature: string) => void
+  /** Reopens a past/active port-ification workflow (Ports-tab history). */
+  onOpenPortify?: (workflowId: string) => void
 }
 
 export function FeaturesColumn({
@@ -28,6 +32,8 @@ export function FeaturesColumn({
   activeRunExecutionType,
   onSelectFeature,
   onFeaturesChanged,
+  onStartPortify,
+  onOpenPortify,
 }: Props) {
   const { startNewWizard } = useWizardDrafts()
   const { gatePromo } = useMcpPromo()
@@ -85,6 +91,20 @@ export function FeaturesColumn({
                   {runState && (
                     <span className="sr-only">{runState === 'healing' ? 'Healing' : runState === 'booted' ? 'Services up' : 'Running'}</span>
                   )}
+                  {f.portified && (
+                    <span
+                      title="Portified — a saved port overlay lets this feature boot concurrently"
+                      aria-label="Portified"
+                      className="mr-1 shrink-0 self-center rounded px-1.5 py-0.5 text-[9.5px] font-semibold uppercase tracking-wide"
+                      style={{
+                        color: 'rgb(52,211,153)',
+                        background: 'color-mix(in srgb, rgb(52,211,153) 14%, transparent)',
+                        border: '1px solid color-mix(in srgb, rgb(52,211,153) 35%, transparent)',
+                      }}
+                    >
+                      ⇄ ports
+                    </span>
+                  )}
                   <button
                     type="button"
                     onClick={() => setConfigFor(f.name)}
@@ -123,6 +143,9 @@ export function FeaturesColumn({
       {configFor && (
         <FeatureConfigEditor
           feature={configFor}
+          portified={features.find((f) => f.name === configFor)?.portified ?? false}
+          onStartPortify={onStartPortify}
+          onOpenPortify={(workflowId) => { setConfigFor(null); onOpenPortify?.(workflowId) }}
           onClose={() => setConfigFor(null)}
           onRenamed={(_, nextFeature) => {
             setConfigFor(nextFeature)

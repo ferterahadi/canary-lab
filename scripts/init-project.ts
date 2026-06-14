@@ -5,6 +5,7 @@ import { ok, section, step, line, path as ansiPath } from '../shared/cli-ui/ui'
 import { fail } from '../shared/cli-ui/ui'
 import { runAsScript } from './run-as-script'
 import { setup as setupCanaryLab } from './setup'
+import { isValidPort } from '../apps/web-server/lib/runtime/launcher/project-config'
 
 export function resolveFirstExisting(pathsToTry: string[]): string {
   const match = pathsToTry.find((candidate) => fs.existsSync(candidate))
@@ -57,19 +58,32 @@ function readPackageVersion(): string {
   return JSON.parse(fs.readFileSync(pkgPath, 'utf-8')).version
 }
 
-export function parseArgs(args: string[]): { folder: string; packageSpec: string } {
+export function parseArgs(args: string[]): { folder: string; packageSpec: string; port?: number } {
   const folder = args[0]
   if (!folder) {
-    fail('Usage: canary-lab init <folder> [--package-spec <spec>]')
+    fail('Usage: canary-lab init <folder> [--package-spec <spec>] [--port <port>]')
     process.exit(1)
   }
 
   let packageSpec = `^${readPackageVersion()}`
+  let port: number | undefined
 
   for (let i = 1; i < args.length; i += 1) {
-    if (args[i] === '--package-spec') {
+    const arg = args[i]
+    if (arg === '--package-spec') {
       packageSpec = args[i + 1]
       i += 1
+      continue
+    }
+    if (arg === '--port' || arg.startsWith('--port=')) {
+      const raw = arg.startsWith('--port=') ? arg.slice('--port='.length) : args[++i]
+      const parsed = Number(raw)
+      if (!isValidPort(parsed)) {
+        fail(`Invalid --port value: ${raw ?? ''} (expected an integer between 1 and 65535)`)
+        process.exit(1)
+      }
+      port = parsed
+      continue
     }
   }
 
@@ -78,7 +92,7 @@ export function parseArgs(args: string[]): { folder: string; packageSpec: string
     process.exit(1)
   }
 
-  return { folder, packageSpec }
+  return { folder, packageSpec, ...(port === undefined ? {} : { port }) }
 }
 
 export function buildPackageJson(projectName: string, packageSpec: string): string {
@@ -114,7 +128,7 @@ export async function main(
   args = process.argv.slice(2),
   extras: InitProjectExtras = {},
 ): Promise<void> {
-  const { folder, packageSpec } = parseArgs(args)
+  const { folder, packageSpec, port } = parseArgs(args)
   const targetDir = path.resolve(process.cwd(), folder)
 
   if (fs.existsSync(targetDir)) {
@@ -137,6 +151,14 @@ export async function main(
     path.join(targetDir, 'package.json'),
     buildPackageJson(projectName, packageSpec),
   )
+
+  // Pin the chosen port so `canary-lab ui` and the MCP bridge use it.
+  if (port !== undefined) {
+    fs.writeFileSync(
+      path.join(targetDir, 'canary-lab.config.json'),
+      JSON.stringify({ port }, null, 2) + '\n',
+    )
+  }
 
   // Initialize a git repo so agent tools (e.g. claude --dangerously-skip-permissions)
   // that require a trusted/git-backed workspace can run unattended.

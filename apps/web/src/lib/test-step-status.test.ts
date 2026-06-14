@@ -531,6 +531,104 @@ describe('activeBodyLineForTest', () => {
       },
     })).toBeNull()
   })
+
+  it('prefers the spec-body call site over a helper line that also maps in range', () => {
+    // Both locations fall inside the displayed body range, but only the spec
+    // file is the code shown in the card. Without file awareness the deepest
+    // (helper) location would win and highlight the wrong line.
+    expect(activeBodyLineForTest({
+      testName: 'Creates a TODO',
+      testLine: 10,
+      bodySource: '{\n  await page.goto(\"/\")\n  await redeemCode(page)\n}',
+      sourceFile: '/todo.spec.ts',
+      summary: {
+        ...summary,
+        running: {
+          ...summary.running!,
+          step: {
+            ...summary.running!.step!,
+            location: '/helpers/voucher.ts:11',
+            locations: ['/helpers/voucher.ts:11', '/todo.spec.ts:12'],
+          },
+        },
+      },
+    })).toBe(3)
+  })
+
+  it('returns null while running inside a helper with no spec-body location', () => {
+    // Mirrors the real Playwright shape: a pw:api step deep in a helper reports
+    // only the helper file, even when its line happens to map into the body
+    // range. We must not highlight a line that is not the shown source.
+    expect(activeBodyLineForTest({
+      testName: 'Creates a TODO',
+      testLine: 10,
+      bodySource: '{\n  await page.goto(\"/\")\n  await redeemCode(page)\n}',
+      sourceFile: '/todo.spec.ts',
+      summary: {
+        ...summary,
+        running: {
+          ...summary.running!,
+          step: {
+            ...summary.running!.step!,
+            location: '/helpers/voucher.ts:12',
+            locations: ['/helpers/voucher.ts:12'],
+          },
+        },
+      },
+    })).toBeNull()
+  })
+
+  it('returns null when the matching spec-file location is outside the body range', () => {
+    // The location is in the shown source file but its line maps outside the
+    // body range, so there is no in-range line to highlight.
+    expect(activeBodyLineForTest({
+      testName: 'Creates a TODO',
+      testLine: 10,
+      bodySource: '{\n  await page.goto(\"/\")\n}',
+      sourceFile: '/todo.spec.ts',
+      summary: {
+        ...summary,
+        running: {
+          ...summary.running!,
+          step: { ...summary.running!.step!, location: '/todo.spec.ts:9999', locations: ['/todo.spec.ts:9999'] },
+        },
+      },
+    })).toBeNull()
+  })
+
+  it('ignores locations with no line suffix or an empty file path', () => {
+    // 'noline' has no :line → no file parsed; ':12' has an empty file path.
+    // Neither can match the shown source, so nothing is highlighted.
+    expect(activeBodyLineForTest({
+      testName: 'Creates a TODO',
+      testLine: 10,
+      bodySource: '{\n  await page.goto(\"/\")\n}',
+      sourceFile: '/todo.spec.ts',
+      summary: {
+        ...summary,
+        running: {
+          ...summary.running!,
+          step: { ...summary.running!.step!, location: 'noline', locations: ['noline', ':12'] },
+        },
+      },
+    })).toBeNull()
+  })
+
+  it('matches the spec file by basename when paths differ in prefix', () => {
+    expect(activeBodyLineForTest({
+      testName: 'Creates a TODO',
+      testLine: 10,
+      bodySource: '{\n  await page.goto(\"/\")\n  await expect(locator).toBeVisible()\n}',
+      sourceFile: '/abs/features/x/e2e/todo.spec.ts',
+      summary: {
+        ...summary,
+        running: {
+          ...summary.running!,
+          step: { ...summary.running!.step!, location: '/todo.spec.ts:12', locations: ['/todo.spec.ts:12'] },
+        },
+      },
+    })).toBe(3)
+  })
 })
 
 describe('sourceLineForBodyLine', () => {

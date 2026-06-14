@@ -86,37 +86,91 @@ export function PaneTerminal({ runId, paneId, onExit, emptyState }: Props) {
     })
     const fit = new FitAddon()
     term.loadAddon(fit)
-    term.open(container)
 
-    // Use the WebGL renderer on the agent pane. Codex and Claude TUIs (Ink)
-    // emit full-screen ANSI redraws on every keystroke and every generated
-    // token — dozens per second. The default DOM renderer repaints one node
-    // per cell and visibly flickers under that load; WebGL paints via a
-    // single batched canvas. Falls back silently to DOM if the context can't
-    // be created (headless env, no GPU) or is later lost.
+    // Renderer lifecycle. `term.open()` and the WebGL atlas are deferred until
+    // the container actually has layout (see openTerminal). The PTY socket
+    // below connects immediately regardless — xterm buffers writes before
+    // open(), so streamed output isn't lost while we wait to be measured.
     let webgl: WebglAddon | null = null
-    if (isAgentPane) {
-      try {
-        const addon = new WebglAddon()
-        addon.onContextLoss(() => {
-          addon.dispose()
-          webgl = null
-        })
-        term.loadAddon(addon)
-        webgl = addon
-      } catch {
-        webgl = null
-      }
-    }
+    let opened = false
+    let disposed = false
+    let conn: PaneConnection | null = null
 
     const fitOnce = (): void => {
+      if (!opened) return
       if (container.clientWidth === 0 || container.clientHeight === 0) return
       try { fit.fit() } catch { /* ignore */ }
     }
 
-    fitOnce()
+    // Open the renderer exactly once, and only after the container has non-zero
+    // dimensions. The agent pane mounts inside a `hidden` (display:none) tab and
+    // the benchmark window animates open, so at mount the container is 0×0.
+    // Opening — and especially constructing the WebGL texture atlas — against a
+    // 0-size element bakes in the wrong canvas backing store and DPR scaling,
+    // which renders as smeared, overlapping glyphs that a later
+    // clearTextureAtlas() can't recover. Returns true the first time it opens.
+    const openTerminal = (): boolean => {
+      if (opened || disposed) return false
+      if (container.clientWidth === 0 || container.clientHeight === 0) return false
+      term.open(container)
+      // Use the WebGL renderer on the agent pane. Codex and Claude TUIs (Ink)
+      // emit full-screen ANSI redraws on every keystroke and every generated
+      // token — dozens per second. The default DOM renderer repaints one node
+      // per cell and visibly flickers under that load; WebGL paints via a
+      // single batched canvas. Falls back silently to DOM if the context can't
+      // be created (headless env, no GPU) or is later lost.
+      if (isAgentPane) {
+        try {
+          const addon = new WebglAddon()
+          addon.onContextLoss(() => {
+            addon.dispose()
+            webgl = null
+          })
+          term.loadAddon(addon)
+          webgl = addon
+        } catch {
+          webgl = null
+        }
+      }
+      opened = true
+      fitOnce()
+      // The socket may already be open with output buffered into the pre-open
+      // terminal; sync the PTY to the grid we just measured.
+      conn?.sendResize(term.cols, term.rows)
+      return true
+    }
 
-    const conn: PaneConnection = connectPane({
+    // FitAddon derives cols/rows from the measured character-cell width. The
+    // mono font (JetBrains Mono) loads from Google Fonts with `display=swap`,
+    // so the FIRST fit can measure the fallback font's cell width and compute a
+    // column count that doesn't match the real glyphs once the font swaps in.
+    // The wrong cols is then sent to the pty, and the Ink TUI (which wraps to
+    // whatever width it's told) renders lines that overflow the pane — trailing
+    // characters pile into the last column and continuations spill to the left.
+    // Re-fit once the real font is loaded, re-send the corrected size to the
+    // pty, and repaint the (now-stale) WebGL atlas. Guarded for environments
+    // without the Font Loading API (e.g. the happy-dom test runner).
+    const refitForFont = (): void => {
+      if (disposed || !opened) return
+      fitOnce()
+      conn?.sendResize(term.cols, term.rows)
+      webgl?.clearTextureAtlas()
+      term.refresh(0, term.rows - 1)
+    }
+    const fonts = typeof document !== 'undefined' ? document.fonts : undefined
+    if (fonts && typeof fonts.ready?.then === 'function') {
+      // Explicitly kick the load (don't rely on `ready` alone — it only awaits
+      // fonts already in the loading set) at both weights xterm may use, then
+      // correct the grid. `ready` is the backstop for any remaining load.
+      const loads = typeof fonts.load === 'function'
+        ? [fonts.load('400 12px "JetBrains Mono"'), fonts.load('500 12px "JetBrains Mono"')]
+        : []
+      Promise.all([fonts.ready, ...loads]).then(refitForFont).catch(() => { /* ignore */ })
+    }
+
+    openTerminal()
+
+    conn = connectPane({
       runId,
       paneId,
       onData: (chunk) => {
@@ -151,7 +205,7 @@ export function PaneTerminal({ runId, paneId, onExit, emptyState }: Props) {
         }
       },
       onOpen: () => {
-        conn.sendResize(term.cols, term.rows)
+        conn?.sendResize(term.cols, term.rows)
       },
     })
 
@@ -175,51 +229,72 @@ export function PaneTerminal({ runId, paneId, onExit, emptyState }: Props) {
     // Forward keystrokes to the server-side pty. Only the `agent` pane has a
     // live REPL on the other end; other panes ignore input server-side, so
     // wiring it unconditionally is harmless and keeps the component simple.
-    const inputDisposable = term.onData((data) => conn.sendInput(data))
+    const inputDisposable = term.onData((data) => conn?.sendInput(data))
 
-    // Re-fit non-agent panes on container resize. Two cases matter:
+    // Re-fit panes on container resize. Two cases matter:
     // 1. Initial mount after a tab switch — the inline fit.fit() above can
     //    silently fail because the container has 0 dims before layout
     //    settles. The observer fires once the container is measured, so xterm
     //    catches up to the real pane size and forwards one stable PTY resize.
     // 2. Later in-app resizes — splitter drag, sidebar toggle, etc. The
     //    old window 'resize' listener missed these.
-    //
-    // The heal-agent pane is intentionally excluded. Codex and Claude render
-    // full-screen TUIs that redraw on SIGWINCH; live ResizeObserver fitting can
-    // loop with xterm's own DOM changes and make the prompt blink while typing.
     let observer: ResizeObserver | null = null
+    let resizeTimer: ReturnType<typeof setTimeout> | null = null
     if (typeof ResizeObserver !== 'undefined') {
       if (isAgentPane) {
-        // One-shot fit on the agent pane. PaneTerminal now stays mounted
-        // across tab switches (hidden via the parent's `hidden` attribute),
-        // so on first mount the container is 0×0 and the inline fitOnce()
-        // above short-circuits; onOpen then forwards the default 80×24 to
-        // the pty. Observe until the container reports real dims, fit once,
-        // push the new size to the pty, then disconnect — we don't keep
-        // observing because the Ink TUI redraws on every SIGWINCH and a
-        // live observer would loop with xterm's own DOM mutations, flickering
-        // the prompt while typing.
-        observer = new ResizeObserver(() => {
+        // The agent pane runs an Ink TUI (Claude/Codex) that redraws the whole
+        // screen on every SIGWINCH. A naive live observer that fit + resized on
+        // each fire would spam SIGWINCH during a splitter drag and make the
+        // prompt blink while typing — which is why this used to fit once and
+        // then disconnect, leaving the pane frozen at its first-measured size.
+        //
+        // Instead, keep observing but guard the two flicker sources:
+        //   • Debounce so a continuous drag collapses into a single fit at the
+        //     end, not one per animation frame.
+        //   • Only forward a PTY resize when the character grid actually
+        //     changes (proposeDimensions vs current cols/rows). Typing and
+        //     token streaming never change the grid, so they never trigger a
+        //     SIGWINCH redraw — only real geometry changes do.
+        const refitAgent = (): void => {
           if (container.clientWidth === 0 || container.clientHeight === 0) return
+          // First measured fire after mounting hidden: open now (openTerminal
+          // fits and forwards the resize itself), nothing more to do this pass.
+          if (openTerminal()) return
+          const proposed = fit.proposeDimensions()
+          if (!proposed) return
+          if (proposed.cols === term.cols && proposed.rows === term.rows) return
           fitOnce()
-          conn.sendResize(term.cols, term.rows)
-          observer?.disconnect()
-          observer = null
+          conn?.sendResize(term.cols, term.rows)
+          // The WebGL renderer keeps a texture atlas and per-cell geometry that
+          // can desync from the new grid after a resize (most visibly across
+          // Retina DPR), leaving stale glyphs smeared at their pre-resize
+          // positions — and because the buffer is already correct, the Ink
+          // TUI's own redraws never overwrite the bad paint. Clear the atlas
+          // and force a full repaint so xterm draws the new grid from scratch.
+          webgl?.clearTextureAtlas()
+          term.refresh(0, term.rows - 1)
+        }
+        observer = new ResizeObserver(() => {
+          if (resizeTimer) clearTimeout(resizeTimer)
+          resizeTimer = setTimeout(refitAgent, 120)
         })
       } else {
         observer = new ResizeObserver(() => {
-          fitOnce()
+          // Open on the first measured fire (covers mounting in a hidden tab),
+          // then plain re-fit on later resizes.
+          if (!openTerminal()) fitOnce()
         })
       }
       observer.observe(container)
     }
     return () => {
+      disposed = true
       clearTimeout(graceTimer)
+      if (resizeTimer) clearTimeout(resizeTimer)
       observer?.disconnect()
       unsubscribeTheme()
       inputDisposable.dispose()
-      conn.close()
+      conn?.close()
       webgl?.dispose()
       term.dispose()
     }

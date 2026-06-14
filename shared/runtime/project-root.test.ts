@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach, vi } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { looksLikeProjectRoot, getProjectRoot, getFeaturesDir } from './project-root'
+import { looksLikeProjectRoot, isCanaryLabWorkspace, getProjectRoot, getFeaturesDir } from './project-root'
 
 const tmpDirs: string[] = []
 function mkTmp(): string {
@@ -29,6 +29,41 @@ describe('looksLikeProjectRoot', () => {
 
   it('returns false when features/ does not exist', () => {
     expect(looksLikeProjectRoot(mkTmp())).toBe(false)
+  })
+})
+
+describe('isCanaryLabWorkspace', () => {
+  it('returns true when package.json declares a canary-lab dependency', () => {
+    for (const block of ['dependencies', 'devDependencies']) {
+      const dir = mkTmp()
+      fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ [block]: { 'canary-lab': 'file:x' } }))
+      expect(isCanaryLabWorkspace(dir)).toBe(true)
+    }
+  })
+
+  it('returns true for the canary-lab package itself', () => {
+    const dir = mkTmp()
+    fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: 'canary-lab' }))
+    expect(isCanaryLabWorkspace(dir)).toBe(true)
+  })
+
+  it('returns false for a stray features/ dir with no package.json (the ~ case)', () => {
+    const dir = mkTmp()
+    fs.mkdirSync(path.join(dir, 'features'))
+    expect(looksLikeProjectRoot(dir)).toBe(true)
+    expect(isCanaryLabWorkspace(dir)).toBe(false)
+  })
+
+  it('returns false when package.json does not depend on canary-lab', () => {
+    const dir = mkTmp()
+    fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: 'something', dependencies: { lodash: '^4' } }))
+    expect(isCanaryLabWorkspace(dir)).toBe(false)
+  })
+
+  it('returns false on malformed package.json', () => {
+    const dir = mkTmp()
+    fs.writeFileSync(path.join(dir, 'package.json'), '{ not json')
+    expect(isCanaryLabWorkspace(dir)).toBe(false)
   })
 })
 

@@ -17,9 +17,13 @@ beforeEach(() => {
 function cliAvailable(command: string, outputByGet?: string): void {
   mocks.execFileSync.mockImplementation((cmd: string, args: string[], opts?: { encoding?: string }) => {
     if (cmd === lookup && args[0] === command) return Buffer.from('')
-    if (cmd === command && args.join(' ') === 'mcp get canary-lab') {
-      if (outputByGet === undefined) throw new Error('missing MCP server')
-      return opts?.encoding === 'utf-8' ? outputByGet : Buffer.from(outputByGet)
+    // `mcp get` probes: only the new key may be present; any other key (incl.
+    // the legacy `canary-lab`) reports absent so migration doesn't falsely fire.
+    if (cmd === command && args[0] === 'mcp' && args[1] === 'get') {
+      if (args[2] === 'Canary_Lab' && outputByGet !== undefined) {
+        return opts?.encoding === 'utf-8' ? outputByGet : Buffer.from(outputByGet)
+      }
+      throw new Error('missing MCP server')
     }
     return Buffer.from('')
   })
@@ -48,10 +52,10 @@ describe('registerCanaryLabMcp', () => {
       cliPath: '/opt/canary-lab/dist/scripts/cli.js',
     })
 
-    expect(mocks.execFileSync).toHaveBeenCalledWith('codex', ['mcp', 'get', 'canary-lab'], expect.anything())
+    expect(mocks.execFileSync).toHaveBeenCalledWith('codex', ['mcp', 'get', 'Canary_Lab'], expect.anything())
     expect(mocks.execFileSync).toHaveBeenCalledWith(
       'codex',
-      ['mcp', 'add', 'canary-lab', '--', '/usr/bin/node', '/opt/canary-lab/dist/scripts/cli.js', 'mcp', '--profile', 'full'],
+      ['mcp', 'add', 'Canary_Lab', '--', '/usr/bin/node', '/opt/canary-lab/dist/scripts/cli.js', 'mcp', '--profile', 'full'],
       { stdio: 'ignore' },
     )
     expect(lines).toContain('Codex MCP configured')
@@ -120,10 +124,10 @@ describe('registerCanaryLabMcp', () => {
       cliPath: '/opt/canary-lab/dist/scripts/cli.js',
     })
 
-    expect(mocks.execFileSync).toHaveBeenCalledWith('codex', ['mcp', 'remove', 'canary-lab'], { stdio: 'ignore' })
+    expect(mocks.execFileSync).toHaveBeenCalledWith('codex', ['mcp', 'remove', 'Canary_Lab'], { stdio: 'ignore' })
     expect(mocks.execFileSync).toHaveBeenCalledWith(
       'codex',
-      ['mcp', 'add', 'canary-lab', '--', '/usr/bin/node', '/opt/canary-lab/dist/scripts/cli.js', 'mcp', '--profile', 'full'],
+      ['mcp', 'add', 'Canary_Lab', '--', '/usr/bin/node', '/opt/canary-lab/dist/scripts/cli.js', 'mcp', '--profile', 'full'],
       { stdio: 'ignore' },
     )
     expect(lines).toContain('Codex MCP configured')
@@ -152,7 +156,7 @@ describe('registerCanaryLabMcp', () => {
 
     expect(mocks.execFileSync).toHaveBeenCalledWith(
       'claude',
-      ['mcp', 'add', '--scope', 'user', 'canary-lab', '--', '/usr/bin/node', '/opt/canary-lab/dist/scripts/cli.js', 'mcp', '--profile', 'full'],
+      ['mcp', 'add', '--scope', 'user', 'Canary_Lab', '--', '/usr/bin/node', '/opt/canary-lab/dist/scripts/cli.js', 'mcp', '--profile', 'full'],
       { stdio: 'ignore' },
     )
     expect(lines).toContain('Claude MCP configured')
@@ -193,10 +197,10 @@ describe('registerCanaryLabMcp', () => {
       cliPath: '/opt/canary-lab/dist/scripts/cli.js',
     })
 
-    expect(mocks.execFileSync).toHaveBeenCalledWith('claude', ['mcp', 'remove', 'canary-lab', '-s', 'user'], { stdio: 'ignore' })
+    expect(mocks.execFileSync).toHaveBeenCalledWith('claude', ['mcp', 'remove', 'Canary_Lab', '-s', 'user'], { stdio: 'ignore' })
     expect(mocks.execFileSync).toHaveBeenCalledWith(
       'claude',
-      ['mcp', 'add', '--scope', 'user', 'canary-lab', '--', '/usr/bin/node', '/opt/canary-lab/dist/scripts/cli.js', 'mcp', '--profile', 'full'],
+      ['mcp', 'add', '--scope', 'user', 'Canary_Lab', '--', '/usr/bin/node', '/opt/canary-lab/dist/scripts/cli.js', 'mcp', '--profile', 'full'],
       { stdio: 'ignore' },
     )
     expect(lines).toContain('Claude MCP configured')
@@ -214,7 +218,7 @@ describe('registerCanaryLabMcp', () => {
     })
 
     expect(lines).toEqual([
-      '[dry-run] configure Codex MCP: codex mcp add canary-lab -- /usr/bin/node /opt/canary-lab/dist/scripts/cli.js mcp --profile full',
+      '[dry-run] configure Codex MCP: codex mcp add Canary_Lab -- /usr/bin/node /opt/canary-lab/dist/scripts/cli.js mcp --profile full',
     ])
     expect(mocks.execFileSync).not.toHaveBeenCalledWith('codex', expect.arrayContaining(['add']), expect.anything())
     expect(mocks.execFileSync).not.toHaveBeenCalledWith('codex', expect.arrayContaining(['remove']), expect.anything())
@@ -245,12 +249,59 @@ describe('registerCanaryLabMcp refresh', () => {
       cliPath: '/opt/canary-lab/dist/scripts/cli.js',
     })
 
-    expect(mocks.execFileSync).toHaveBeenCalledWith('codex', ['mcp', 'remove', 'canary-lab'], { stdio: 'ignore' })
+    expect(mocks.execFileSync).toHaveBeenCalledWith('codex', ['mcp', 'remove', 'Canary_Lab'], { stdio: 'ignore' })
     expect(mocks.execFileSync).toHaveBeenCalledWith(
       'codex',
-      ['mcp', 'add', 'canary-lab', '--', '/usr/bin/node', '/opt/canary-lab/dist/scripts/cli.js', 'mcp', '--profile', 'full'],
+      ['mcp', 'add', 'Canary_Lab', '--', '/usr/bin/node', '/opt/canary-lab/dist/scripts/cli.js', 'mcp', '--profile', 'full'],
       { stdio: 'ignore' },
     )
+  })
+})
+
+describe('registerCanaryLabMcp legacy migration', () => {
+  function withServers(command: string, present: Set<string>): void {
+    mocks.execFileSync.mockImplementation((cmd: string, args: string[]) => {
+      if (cmd === lookup && args[0] === command) return Buffer.from('')
+      if (cmd === command && args[0] === 'mcp' && args[1] === 'get') {
+        if (present.has(args[2])) return Buffer.from('present')
+        throw new Error('missing MCP server')
+      }
+      return Buffer.from('')
+    })
+  }
+
+  it('migrates a legacy canary-lab entry to Canary_Lab even under refreshOnly', () => {
+    const lines: string[] = []
+    withServers('claude', new Set(['canary-lab']))
+
+    registerCanaryLabMcp('claude', {
+      refreshOnly: true,
+      log: (l) => lines.push(l),
+      execPath: '/usr/bin/node',
+      cliPath: '/opt/canary-lab/dist/scripts/cli.js',
+    })
+
+    expect(mocks.execFileSync).toHaveBeenCalledWith('claude', ['mcp', 'remove', 'canary-lab', '-s', 'user'], { stdio: 'ignore' })
+    expect(mocks.execFileSync).toHaveBeenCalledWith(
+      'claude',
+      ['mcp', 'add', '--scope', 'user', 'Canary_Lab', '--', '/usr/bin/node', '/opt/canary-lab/dist/scripts/cli.js', 'mcp', '--profile', 'full'],
+      { stdio: 'ignore' },
+    )
+    expect(lines.join('\n')).toContain('migrated legacy "canary-lab"')
+  })
+
+  it('does not add for refreshOnly when neither legacy nor new key exists', () => {
+    withServers('codex', new Set())
+
+    registerCanaryLabMcp('codex', {
+      refreshOnly: true,
+      log: () => {},
+      execPath: '/usr/bin/node',
+      cliPath: '/opt/canary-lab/dist/scripts/cli.js',
+    })
+
+    expect(mocks.execFileSync).not.toHaveBeenCalledWith('codex', expect.arrayContaining(['add']), expect.anything())
+    expect(mocks.execFileSync).not.toHaveBeenCalledWith('codex', expect.arrayContaining(['remove']), expect.anything())
   })
 })
 

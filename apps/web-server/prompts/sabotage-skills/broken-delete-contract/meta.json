@@ -1,0 +1,7 @@
+{
+  "name": "broken-delete-contract",
+  "title": "Silent contract violation",
+  "level": "med",
+  "summary": "An operation responds OK but the underlying state is wrong. The root cause shows in the service log, not the browser.",
+  "appliesTo": ["*"]
+}

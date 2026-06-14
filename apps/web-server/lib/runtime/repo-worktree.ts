@@ -76,6 +76,20 @@ export async function addWorktree(opts: {
   }
 }
 
+// Git worktrees don't include gitignored deps, so a fresh worktree has no
+// node_modules — services (`npx tsx ...`) and Playwright can't resolve. Symlink
+// the source repo's node_modules into the worktree root so resolution works.
+// Best-effort: boot surfaces a clearer error if deps are genuinely missing.
+export function linkNodeModules(handle: Pick<WorktreeHandle, 'sourceRoot' | 'worktreeRoot'>): void {
+  const src = path.join(handle.sourceRoot, 'node_modules')
+  const dst = path.join(handle.worktreeRoot, 'node_modules')
+  try {
+    if (fs.existsSync(src) && !fs.existsSync(dst)) fs.symlinkSync(src, dst, 'dir')
+  } catch {
+    /* best-effort */
+  }
+}
+
 /** Remove a worktree. Best-effort: prunes stale metadata if the dir is gone. */
 export async function removeWorktree(handle: Pick<WorktreeHandle, 'sourceRoot' | 'worktreeRoot'>): Promise<void> {
   const res = await runGit(handle.sourceRoot, ['worktree', 'remove', '--force', handle.worktreeRoot])

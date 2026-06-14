@@ -64,6 +64,8 @@ import { planRestart } from './restart-planner'
 import { interpolateConfigTokens, makeTokenCache } from './launcher/interpolate'
 import { releasePorts } from './port-allocator'
 import { removeWorktree, type WorktreeHandle } from './repo-worktree'
+import { overlayExists, readOverlay, checkStaleness, overlayDir } from './portify/overlay'
+import { applyOverlay, reverseOverlay } from './portify/git-ops'
 import { readPlaywrightArtifactPolicy } from './playwright-artifact-policy'
 import { slugify } from './summary-reporter'
 import { listSpecFiles, loadFeatures } from '../feature-loader'
@@ -179,6 +181,11 @@ export interface OrchestratorOptions {
    *  orchestrator redirects affected services' cwd into the worktree, records
    *  them in the manifest, and removes them on stop. */
   worktrees?: WorktreeHandle[]
+  /** Relocate the heal-signal directory away from `<runDir>/signals`. The
+   *  benchmark baseline arm points this at the agent's own worktree so the
+   *  agent can signal completion without being handed a path into the run dir
+   *  (where harness-only artifacts live). Omit for the default location. */
+  signalsDir?: string
 }
 
 export type PauseResult =
@@ -403,6 +410,31 @@ export function buildServiceSpecs(
   return out
 }
 
+/**
+ * Manifest service entries for a *queued* run — built from the feature config
+ * before any process spawns, so the queued run's Overview lists the services
+ * that will boot once it leaves the queue (instead of "No services configured").
+ * Ports aren't allocated until promotion, so `allocatedPorts` and the
+ * port-templated `healthUrl` are intentionally omitted; status is 'queued'.
+ * Promotion later overwrites this with the real running manifest.
+ */
+export function buildQueuedServiceEntries(
+  feature: FeatureConfig,
+  runDir: string,
+  env?: string,
+): ServiceManifestEntry[] {
+  const paths = buildRunPaths(runDir)
+  return buildServiceSpecs(feature, runDir, env).map((s) => ({
+    repoName: s.repoName,
+    name: s.name,
+    safeName: s.safeName,
+    command: s.command,
+    cwd: s.cwd,
+    logPath: paths.serviceLog(s.safeName),
+    status: 'queued',
+  }))
+}
+
 export class RunOrchestrator extends EventEmitter {
   readonly runId: string
   readonly runDir: string
@@ -440,6 +472,13 @@ export class RunOrchestrator extends EventEmitter {
   private readonly portMap?: Map<string, number>
   private readonly worktreeHandles: WorktreeHandle[]
   private readonly repoPathOverrides: Record<string, string>
+  // Ephemeral port overlay: when the feature has a saved overlay, its captured
+  // patch is `git apply`-ed into each per-run worktree before boot and
+  // reverse-applied at teardown — the target repo is never permanently changed.
+  private readonly portified: boolean
+  // Overlays applied this run, recorded so stop() can reverse exactly what it
+  // applied (and so a failed partial apply reverses only what landed).
+  private appliedOverlays: { repoName: string; worktreeRoot: string; patchPath: string }[] = []
   private readonly signalGate = new HealSignalGate()
   private healCycleHistory: Array<{ cycle: number; restarted: string[]; kept: string[] }> = []
 
@@ -496,13 +535,14 @@ export class RunOrchestrator extends EventEmitter {
     this.env = opts.env
     this.runId = opts.runId
     this.runDir = opts.runDir
-    this.paths = buildRunPaths(opts.runDir)
+    this.paths = buildRunPaths(opts.runDir, opts.signalsDir ? { signalsDir: opts.signalsDir } : undefined)
     this.portMap = opts.portMap
     this.worktreeHandles = opts.worktrees ?? []
     this.repoPathOverrides = {}
     for (const handle of this.worktreeHandles) {
       this.repoPathOverrides[handle.repoName] = handle.localPath
     }
+    this.portified = overlayExists(opts.feature.featureDir)
     this.services = buildServiceSpecs(opts.feature, opts.runDir, opts.env, {
       portMap: this.portMap,
       repoPathOverrides: this.repoPathOverrides,
@@ -580,7 +620,93 @@ export class RunOrchestrator extends EventEmitter {
   // server show "services up" before tests start.
   async start(): Promise<void> {
     this.prepareRun('starting')
+    // Apply the ephemeral port overlay BEFORE any service spawns. A failure
+    // here throws out of start() so the caller's `.catch` runs stop('aborted')
+    // — we must never boot a portified feature un-portified (the second
+    // concurrent boot would EADDRINUSE on the un-injected port).
+    await this.applyPortifyOverlay()
     await this.ensureServicesRunning()
+  }
+
+  /**
+   * Apply the feature's saved port overlay into each per-run worktree. No-op
+   * unless the feature is portified. Checks staleness first (the user's repo
+   * may have moved since the overlay was captured) and fails loud — with an
+   * actionable "re-run Portify" message — on staleness, a missing worktree, or
+   * a patch that won't apply. Records what it applied for reverse at teardown.
+   */
+  private async applyPortifyOverlay(): Promise<void> {
+    if (!this.portified) return
+    const featureDir = this.feature.featureDir
+    const overlay = readOverlay(featureDir)
+    if (!overlay) {
+      // overlayExists was true at construction but the overlay is now
+      // unreadable (e.g. a patch file vanished) — refuse rather than boot bare.
+      throw new Error(
+        `saved port overlay for "${this.feature.name}" is missing or corrupt — re-run Portify to refresh it`,
+      )
+    }
+    // Worktree must cover every overlay repo; otherwise a service would boot
+    // from un-patched source. Map repo name → its per-run worktree root.
+    const worktreeByRepo: Record<string, string> = {}
+    for (const handle of this.worktreeHandles) worktreeByRepo[handle.repoName] = handle.worktreeRoot
+    const sourceByRepo: Record<string, string> = {}
+    for (const repo of overlay.meta.repos) {
+      const handle = this.worktreeHandles.find((h) => h.repoName === repo.name)
+      if (!handle) {
+        throw new Error(
+          `portified run requires a per-run worktree for repo "${repo.name}" but none was created — this run cannot apply its port overlay safely`,
+        )
+      }
+      sourceByRepo[repo.name] = handle.sourceRoot
+    }
+
+    // Staleness: did the user's repo move under the captured patch?
+    const staleness = await checkStaleness(featureDir, sourceByRepo)
+    if (staleness.stale) {
+      const files = staleness.changedFiles.map((c) => `${c.repo}:${c.path}`).join(', ')
+      throw new Error(
+        `saved port overlay no longer applies (${files} changed since capture) — re-run Portify to refresh it`,
+      )
+    }
+
+    const dir = overlayDir(featureDir)
+    for (const repo of overlay.meta.repos) {
+      const worktreeRoot = worktreeByRepo[repo.name]
+      const patchPath = path.join(dir, repo.patch)
+      const outcome = await applyOverlay(worktreeRoot, patchPath)
+      if (outcome.kind === 'ok') {
+        this.appliedOverlays.push({ repoName: repo.name, worktreeRoot, patchPath })
+        this.runnerLog?.info(`Applied port overlay for "${repo.name}".`)
+        continue
+      }
+      // Apply failed — reverse whatever already landed, then abort loud.
+      await this.reversePortifyOverlay()
+      const detail = outcome.kind === 'conflict' ? `conflicts in ${outcome.files.join(', ')}` : outcome.detail
+      throw new Error(
+        `failed to apply the saved port overlay for "${repo.name}" (${detail}) — re-run Portify to refresh it`,
+      )
+    }
+  }
+
+  /**
+   * Reverse every overlay this run applied (`git apply -R`), keeping the
+   * worktree intact — it holds the heal agent's repair edits. Reverse is atomic
+   * per repo: a conflict (a heal edit on the same lines) leaves that file
+   * untouched and is surfaced as a warning, not a throw.
+   */
+  private async reversePortifyOverlay(): Promise<void> {
+    for (const applied of this.appliedOverlays.splice(0)) {
+      const outcome = await reverseOverlay(applied.worktreeRoot, applied.patchPath)
+      if (outcome.kind === 'ok') {
+        this.runnerLog?.info(`Reverted port overlay for "${applied.repoName}".`)
+      } else {
+        const detail = outcome.kind === 'conflict' ? outcome.files.join(', ') : outcome.detail
+        this.runnerLog?.warn(
+          `port overlay for "${applied.repoName}" could not be reverted (${detail}) — heal edits preserved; the worktree keeps the injected ports`,
+        )
+      }
+    }
   }
 
   private prepareRun(serviceStatus: ServiceManifestEntry['status']): void {
@@ -800,6 +926,19 @@ export class RunOrchestrator extends EventEmitter {
     const detail = transport === 'http'
       ? `url=${(probe as { http: HttpProbe }).http.url}`
       : `port=${(probe as { tcp: TcpProbe }).tcp.port}`
+    // Boot-only sessions hold whatever came up. A service that fails its
+    // readiness probe is marked `timeout` (red) and surfaced as a non-fatal
+    // warning, but the session is NOT aborted — the user keeps the healthy
+    // services up to exercise while they debug the failed one, and only
+    // abort_run / Stop tears the session down. A normal run still aborts: a
+    // missing service makes the Playwright suite meaningless.
+    if (this.executionType === 'boot') {
+      this.recordLifecycle('starting-services', `Health failed: ${svc.name} — kept up`, {
+        detail: `Timed out waiting for ${transport.toUpperCase()} readiness (${detail}). Marked failed; boot session held — other services stay up. Stop with abort_run to tear down.`,
+        severity: 'warning',
+      })
+      return
+    }
     this.pendingAbortReason = { reason: 'service-health-failed', service: svc.name }
     this.recordLifecycle('aborted', `Health failed: ${svc.name}`, {
       detail: `Timed out waiting for ${transport.toUpperCase()} readiness (${detail}).`,
@@ -2057,6 +2196,14 @@ export class RunOrchestrator extends EventEmitter {
             }
             break
           }
+          // This rerun spawns NO heal agent — it just re-executes the
+          // not-yet-passed tests. That can only make progress on genuinely
+          // not-run (pending) tests; a deterministically skipped test
+          // (`test.skip(cond)`) re-runs to the same skipped result every time.
+          // Capture the not-passed set before the rerun so a no-progress cycle
+          // terminates the run instead of re-running the identical summary
+          // forever (the skipped-test infinite-rerun bug).
+          const beforeSignature = nonPassedSignatureFromPlan(pendingPlan)
           this.setStatus('running')
           const exitCode = await this.runPlaywright(selectionForPlan(pendingPlan))
           if (this.stopped) return this.status
@@ -2068,6 +2215,20 @@ export class RunOrchestrator extends EventEmitter {
           finalStatus = decideRunStatus(this.feature.featureDir, this.paths.summaryPath, exitCode)
           this.setStatus(finalStatus)
           if (finalStatus === 'passed') break
+          const afterSummary = readSummary(this.paths.summaryPath)
+          if (
+            extractFailedSlugs(afterSummary).length === 0 &&
+            nonPassedSignatureFromPlan(computeVerificationPlan(this.feature.featureDir, afterSummary)) === beforeSignature
+          ) {
+            const skippedCount = pendingPlan.kind === 'targeted' ? pendingPlan.skipped.length : 0
+            this.recordLifecycle('rerunning-tests', 'Stopped: not-yet-passed tests stayed unchanged after rerun', {
+              detail: skippedCount > 0
+                ? `${skippedCount} test${skippedCount === 1 ? '' : 's'} remained skipped; a rerun without a code fix cannot turn skipped tests green. Stopping instead of re-running indefinitely.`
+                : 'A rerun made no progress on the not-yet-passed tests; stopping instead of re-running indefinitely.',
+              severity: 'warning',
+            })
+            break
+          }
           continue
         }
         const signature = failedSlugs.slice().sort().join('|')
@@ -2295,12 +2456,19 @@ export class RunOrchestrator extends EventEmitter {
       this.servicePtys.delete(name)
     }
     this.logFiles.clear()
-    // Release per-run isolation resources. Ports go back to the pool; worktrees
-    // are torn down (best-effort) so the source repo doesn't accumulate stale
-    // checkouts. Failures here must not block run finalization.
+    // Release per-run isolation resources. Ports go back to the pool. For a
+    // PORTIFIED run we reverse the overlay but KEEP the worktree — it holds the
+    // heal agent's repair edits, and it follows the normal run-worktree
+    // lifecycle (the Cleanup page lists/opens/removes it). For a non-portified
+    // worktree run, tear the worktree down so the source repo doesn't
+    // accumulate stale checkouts. Failures here must not block finalization.
     if (this.portMap) releasePorts(this.portMap.values())
-    for (const handle of this.worktreeHandles) {
-      await removeWorktree(handle).catch(() => {})
+    if (this.portified) {
+      await this.reversePortifyOverlay().catch(() => {})
+    } else {
+      for (const handle of this.worktreeHandles) {
+        await removeWorktree(handle).catch(() => {})
+      }
     }
     const endedAt = new Date().toISOString()
     this.status = finalStatus
@@ -2767,6 +2935,20 @@ function isSpecLocation(location: string): boolean {
 
 function selectionForPlan(plan: VerificationPlan): PlaywrightRerunSelection | undefined {
   return plan.kind === 'targeted' ? plan.selection : undefined
+}
+
+// Stable signature of the not-yet-passed test set a plan would re-run. Used by
+// the auto-heal no-agent rerun branch to detect a no-progress cycle: if a rerun
+// leaves this set unchanged, re-running again would produce the identical
+// result (e.g. the only remaining tests are deterministically skipped via
+// `test.skip(cond)`), so the loop must stop instead of spinning forever.
+function nonPassedSignatureFromPlan(plan: VerificationPlan): string {
+  if (plan.kind === 'all-passed') return ''
+  if (plan.kind === 'full-suite') return `full-suite:${plan.total}`
+  return [...plan.failedFirst, ...plan.skipped, ...plan.pending]
+    .map((test) => test.name)
+    .sort()
+    .join('|')
 }
 
 function normalizeRerunSelection(rerun?: readonly string[] | PlaywrightRerunSelection): PlaywrightRerunSelection | undefined {

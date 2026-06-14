@@ -1,0 +1,5 @@
+The previous port-ification attempt did not pass verification. The harness booted the stack twice on different injected ports and at least one boot failed:
+
+{{failureDetail}}
+
+A failed boot almost always means SOME listener still binds a hardcoded port (ignoring its injected env var), an inter-service URL still points at a fixed port, or a port slot is missing its `env` field. The culprit is very often a NON-HTTP listener the first pass missed — a gRPC server, a WebSocket server, a raw TCP server, a RabbitMQ/AMQP or Kafka consumer, or a metrics/admin endpoint on its own port. Re-scan the source EXHAUSTIVELY for every `listen(` / `.port` / `createServer` / `bindAsync` / broker connection URL, make every one of them read its injected env var, and declare a matching `ports: [{ name, env }]` slot. Also re-check {{featureConfigPath}}, and the feature's `envsets/` files next to it — any value still pointing at a relocated listener's old hardcoded port (e.g. `GATEWAY_URL=http://localhost:3000`) must use the `${port.<slot>}` token instead. Do NOT touch test files.

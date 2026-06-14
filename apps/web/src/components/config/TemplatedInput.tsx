@@ -1,18 +1,31 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import type { CSSProperties } from 'react'
 import { createPortal } from 'react-dom'
 import * as api from '../../api/client'
 
-// A drop-in TextInput replacement that supports `${slot.key}` tokens which
-// resolve from the current envset's slot files at run time. Tokens render as
-// inline pills inside a contentEditable shell; typing `${` opens a slot/key
-// picker, clicking a pill reopens the picker pre-filled, clicking the × on a
-// pill turns it back into the literal `${slot.key}` text the user can edit.
+// A drop-in TextInput replacement that supports `${...}` tokens rendered as
+// inline pills inside a contentEditable shell; typing `${` opens a picker,
+// clicking a pill reopens the picker pre-filled, clicking the × on a pill
+// turns it back into literal text the user can edit.
+//
+// Two token namespaces exist, offered per the `namespaces` prop:
+//   - `envset`: `${slot.key}` — resolves from the selected env's slot files,
+//     in feature-config values (commands, health checks) ONLY.
+//   - `port`: `${port.<slot>}` — the per-run injected port; resolves in
+//     feature-config values AND inside applied envset files. It is the only
+//     namespace that resolves inside envset files, so envset value editors
+//     pass `namespaces={['port']}`.
 //
 // The string value is the single source of truth — every keystroke reads the
 // DOM back into a string and calls onChange. External value changes only
 // re-render the DOM when the serialized DOM differs.
 
 const TOKEN_RE = /\$\{([a-zA-Z0-9._-]+)\.([a-zA-Z0-9_-]+)\}/g
+
+/** Reserved first segment of the per-run port namespace (`${port.api}`). */
+const PORT_NS = 'port'
+
+export type TokenNamespace = 'envset' | 'port'
 
 interface PickerState {
   caret: { top: number; left: number }
@@ -28,12 +41,18 @@ export function TemplatedInput({
   feature,
   placeholder,
   disabled,
+  namespaces = ['envset', 'port'],
+  style,
 }: {
   value: string
   onChange: (v: string) => void
   feature: string
   placeholder?: string
   disabled?: boolean
+  /** Which token namespaces the picker offers (see file header). */
+  namespaces?: TokenNamespace[]
+  /** Extra styles merged over the defaults (e.g. paddingRight for an overlay button). */
+  style?: CSSProperties
 }) {
   const editorRef = useRef<HTMLDivElement>(null)
   const [picker, setPicker] = useState<PickerState | null>(null)
@@ -131,6 +150,7 @@ export function TemplatedInput({
           opacity: disabled ? 0.55 : 1,
           whiteSpace: 'pre-wrap',
           wordBreak: 'break-word',
+          ...style,
         }}
       />
       <style>{`
@@ -173,6 +193,7 @@ export function TemplatedInput({
         <TokenPicker
           feature={feature}
           state={picker}
+          namespaces={namespaces}
           onClose={() => setPicker(null)}
           onPick={handlePick}
         />
@@ -304,25 +325,42 @@ function insertNodeAtSelection(root: HTMLElement, node: Node): void {
 function TokenPicker({
   feature,
   state,
+  namespaces,
   onClose,
   onPick,
 }: {
   feature: string
   state: PickerState
+  namespaces: TokenNamespace[]
   onClose: () => void
   onPick: (slot: string, key: string) => void
 }) {
+  const wantEnvset = namespaces.includes('envset')
+  const wantPort = namespaces.includes('port')
   const [index, setIndex] = useState<api.EnvsetIndex | null>(null)
-  const [slot, setSlot] = useState<string | null>(state.initialSlot ?? null)
+  // A `${port.x}` pill reopens at the top level — port picks are one click,
+  // there is no key sub-list to descend into.
+  const [slot, setSlot] = useState<string | null>(
+    state.initialSlot && state.initialSlot !== PORT_NS ? state.initialSlot : null,
+  )
   const [keys, setKeys] = useState<string[] | null>(null)
+  const [portSlots, setPortSlots] = useState<string[] | null>(wantPort ? null : [])
   const [error, setError] = useState<string | null>(null)
   const popRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
+    if (!wantEnvset) return
     api.getEnvsetsIndex(feature)
       .then(setIndex)
       .catch((e: unknown) => setError(e instanceof Error ? e.message : 'Load failed'))
-  }, [feature])
+  }, [feature, wantEnvset])
+
+  useEffect(() => {
+    if (!wantPort) return
+    api.getFeatureConfigDoc(feature)
+      .then((doc) => setPortSlots(extractPortSlots(doc)))
+      .catch((e: unknown) => setError(e instanceof Error ? e.message : 'Load failed'))
+  }, [feature, wantPort])
 
   useEffect(() => {
     if (!slot || !index || index.envs.length === 0) return
@@ -361,29 +399,70 @@ function TokenPicker({
       }}
     >
       <div className="mb-1 text-[10px] uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
-        {slot ? `Pick a key from ${slot}` : 'Pick a slot'}
+        {slot ? `Pick a key from ${slot}` : wantEnvset && wantPort ? 'Pick a token' : wantPort ? 'Pick a port slot' : 'Pick a slot'}
       </div>
       {error && <div className="mb-1 text-[11px]" style={{ color: 'var(--danger)' }}>{error}</div>}
       {!slot ? (
-        slots.length === 0 ? (
-          <div className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
-            No slots in this feature. Add one in the Envsets tab.
-          </div>
-        ) : (
-          <div className="max-h-60 overflow-y-auto scrollbar-thin">
-            {slots.map((s) => (
-              <button
-                key={s}
-                type="button"
-                onClick={() => setSlot(s)}
-                className="block w-full truncate rounded px-2 py-1 text-left text-[11px] hover:opacity-80"
-                style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}
-              >
-                {s}
-              </button>
-            ))}
-          </div>
-        )
+        <>
+          {wantPort && (
+            <div className={wantEnvset ? 'mb-1.5' : undefined}>
+              {wantEnvset && (
+                <div className="mb-0.5 text-[9px] uppercase tracking-wider" style={{ color: 'var(--text-muted)', opacity: 0.8 }}>
+                  Port slots · injected per run
+                </div>
+              )}
+              {portSlots === null ? (
+                <div className="text-[11px]" style={{ color: 'var(--text-muted)' }}>Loading…</div>
+              ) : portSlots.length === 0 ? (
+                <div className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
+                  No port slots declared. Declare them in the Ports tab (or run Portify).
+                </div>
+              ) : (
+                <div className="max-h-40 overflow-y-auto scrollbar-thin">
+                  {portSlots.map((p) => (
+                    <button
+                      key={p}
+                      type="button"
+                      onClick={() => onPick(PORT_NS, p)}
+                      className="block w-full truncate rounded px-2 py-1 text-left text-[11px] hover:opacity-80"
+                      style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}
+                    >
+                      {`\${port.${p}}`}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+          {wantEnvset && (
+            <>
+              {wantPort && (
+                <div className="mb-0.5 text-[9px] uppercase tracking-wider" style={{ color: 'var(--text-muted)', opacity: 0.8 }}>
+                  Envset slots · values from env files
+                </div>
+              )}
+              {slots.length === 0 ? (
+                <div className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
+                  No slots in this feature. Add one in the Envsets tab.
+                </div>
+              ) : (
+                <div className="max-h-60 overflow-y-auto scrollbar-thin">
+                  {slots.map((s) => (
+                    <button
+                      key={s}
+                      type="button"
+                      onClick={() => setSlot(s)}
+                      className="block w-full truncate rounded px-2 py-1 text-left text-[11px] hover:opacity-80"
+                      style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}
+                    >
+                      {s}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+        </>
       ) : keys === null ? (
         <div className="text-[11px]" style={{ color: 'var(--text-muted)' }}>Loading…</div>
       ) : keys.length === 0 ? (
@@ -418,4 +497,30 @@ function TokenPicker({
     </div>,
     document.body,
   )
+}
+
+/** Unique port-slot names declared across every start command in the feature
+ *  config (duck-typed walk of the parsed doc — same shape PortsTab edits). */
+function extractPortSlots(doc: api.ParsedConfigDoc): string[] {
+  const out: string[] = []
+  const root = doc.parsed.value
+  if (!root || typeof root !== 'object' || Array.isArray(root)) return out
+  const repos = (root as Record<string, unknown>).repos
+  if (!Array.isArray(repos)) return out
+  for (const repo of repos) {
+    if (!repo || typeof repo !== 'object') continue
+    const commands = (repo as Record<string, unknown>).startCommands
+    if (!Array.isArray(commands)) continue
+    for (const cmd of commands) {
+      if (!cmd || typeof cmd !== 'object') continue
+      const ports = (cmd as Record<string, unknown>).ports
+      if (!Array.isArray(ports)) continue
+      for (const p of ports) {
+        if (!p || typeof p !== 'object') continue
+        const name = (p as Record<string, unknown>).name
+        if (typeof name === 'string' && name.trim() && !out.includes(name)) out.push(name)
+      }
+    }
+  }
+  return out
 }

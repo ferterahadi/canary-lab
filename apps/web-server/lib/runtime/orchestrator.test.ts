@@ -7,6 +7,7 @@ import { EventEmitter } from 'events'
 import {
   RunOrchestrator,
   buildServiceSpecs,
+  buildQueuedServiceEntries,
   collectPortSlots,
   type ServiceSpec,
 } from './orchestrator'
@@ -230,6 +231,39 @@ describe('buildServiceSpecs', () => {
     })
     const specs = buildServiceSpecs(f, runDir, 'local', { repoPathOverrides: { r: '/wt/r' } })
     expect(specs[0].cwd).toBe('/wt/r')
+  })
+
+  it('buildQueuedServiceEntries lists feature services with queued status, no ports/url', () => {
+    const f = makeFeature({
+      repos: [{
+        name: 'r',
+        localPath: tmpDir,
+        startCommands: [{
+          command: 'serve',
+          name: 'svc',
+          ports: [{ name: 'api', env: 'PORT' }],
+          healthCheck: { http: { url: 'http://localhost:${port.api}/' } },
+        }],
+      }],
+    })
+    const entries = buildQueuedServiceEntries(f, runDir, 'local')
+    expect(entries).toHaveLength(1)
+    expect(entries[0]).toMatchObject({
+      repoName: 'r',
+      name: 'svc',
+      safeName: 'svc',
+      command: 'serve',
+      status: 'queued',
+    })
+    // No port allocated yet, so the run-specific allocation + http URL are absent.
+    expect(entries[0].allocatedPorts).toBeUndefined()
+    expect(entries[0].healthUrl).toBeUndefined()
+    expect(entries[0].logPath).toBe(buildRunPaths(runDir).serviceLog('svc'))
+  })
+
+  it('buildQueuedServiceEntries returns [] for a feature with no bootable services', () => {
+    const f = makeFeature({ repos: [{ name: 'r', localPath: tmpDir }] })
+    expect(buildQueuedServiceEntries(f, runDir, 'local')).toEqual([])
   })
 
   it('collectPortSlots gathers unique declared slots for the env', () => {
@@ -1160,6 +1194,46 @@ describe('RunOrchestrator.runFullCycle', () => {
     const status = await promise
     expect(status).toBe('passed')
     await orch.stop('passed')
+  })
+
+  it('stops instead of re-running forever when only skipped tests remain (auto-heal)', async () => {
+    // Regression: a run that ends 6-passed / 1-skipped / 0-failed is treated as
+    // 'failed' (a skipped test is not verified), so auto-heal enters the
+    // failedSlugs===0 "pending" branch. That branch re-runs the not-yet-passed
+    // tests with NO heal agent — but a `test.skip(cond)` re-runs to the same
+    // skipped result every time, so the branch used to loop forever (the
+    // symptom the user saw: "Targeted rerun selected → exit 0 → Run failed",
+    // repeating every ~1s). The no-progress guard must terminate the run after
+    // a rerun that doesn't change the not-yet-passed set.
+    const f = makeFakeFactory()
+    const orch = bootForFullCycle({ spawned: f, pwExitCodes: [], autoHeal: true })
+    fs.mkdirSync(runDir, { recursive: true })
+    fs.writeFileSync(orch.paths.summaryPath, JSON.stringify({
+      passed: 1,
+      passedNames: ['test-case-passes'],
+      skipped: 1,
+      skippedNames: ['test-case-skipped'],
+      total: 2,
+      knownTests: [
+        { name: 'test-case-passes', title: 'passes', location: 'tests/demo.spec.ts:3' },
+        { name: 'test-case-skipped', title: 'skipped', location: 'tests/demo.spec.ts:7' },
+      ],
+    }))
+
+    const promise = orch.runFullCycle()
+    // [0]=service, [1]=initial playwright run.
+    while (f.spawned.length < 2) await new Promise((r) => setTimeout(r, 5))
+    f.spawned[1].emitExit(0)
+    // The pending branch performs exactly ONE rerun ([2]) before detecting that
+    // the not-yet-passed set is unchanged and stopping.
+    while (f.spawned.length < 3) await new Promise((r) => setTimeout(r, 5))
+    f.spawned[2].emitExit(0)
+
+    const status = await promise
+    expect(status).toBe('failed')
+    // No third rerun ([3]) — the loop terminated rather than spinning.
+    expect(f.spawned).toHaveLength(3)
+    await orch.stop('failed')
   })
 
   it('abort during auto-heal-eligible run does NOT spawn a heal agent', async () => {

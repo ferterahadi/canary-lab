@@ -1,7 +1,10 @@
 import fs from 'fs'
+import path from 'path'
 import type { FastifyInstance } from 'fastify'
 import {
   type AgentSessionRef,
+  findClaudeLogBySessionId,
+  loadAgentSessionMeta,
   locateMostRecentAgentSessionRef,
   parseAgentSessionRefFile,
   selectAgentSessionRef,
@@ -10,6 +13,8 @@ import { tailAgentSession } from '../lib/agent-session-tailer'
 import { resolveDraftStageSessionRef } from '../lib/draft-agent-session'
 import { readDraft, paths as draftPaths } from '../lib/draft-store'
 import { runDirFor, buildRunPaths } from '../lib/runtime/run-paths'
+import { benchmarkDir } from '../lib/runtime/benchmark/paths'
+import { portifyDir } from '../lib/runtime/portify/paths'
 import type { RunStore } from '../lib/run-store'
 
 // WebSocket route that streams live structured agent-session events.
@@ -48,7 +53,7 @@ export async function agentSessionStreamRoutes(
       const ref = resolveRunRef(runDir)
       const handle = tailAgentSession({
         ref: ref ?? { agent: 'claude', sessionId: '', logPath: '' },
-        onReady: (readyRef) => sendJson(socket, { type: 'session', agent: readyRef.agent, sessionId: readyRef.sessionId }),
+        onReady: (readyRef) => sendJson(socket, sessionMessage(readyRef)),
         onEvent: (event) => sendJson(socket, { type: 'event', event }),
         onError: (err) => sendJson(socket, { type: 'error', error: err.message }),
         discoverRef: () => resolveRunRef(runDir),
@@ -78,7 +83,7 @@ export async function agentSessionStreamRoutes(
       const p = draftPaths(deps.logsDir, req.params.draftId)
       const handle = tailAgentSession({
         ref: ref ?? { agent, sessionId: '', logPath: '' },
-        onReady: (readyRef) => sendJson(socket, { type: 'session', agent: readyRef.agent, sessionId: readyRef.sessionId }),
+        onReady: (readyRef) => sendJson(socket, sessionMessage(readyRef)),
         onEvent: (event) => sendJson(socket, { type: 'event', event }),
         onError: (err) => sendJson(socket, { type: 'error', error: err.message }),
         discoverRef: () => {
@@ -100,6 +105,59 @@ export async function agentSessionStreamRoutes(
       socket.on('close', () => handle.close())
     },
   )
+
+  // Benchmark sabotage-agent session — resolves the ref the runner wrote into
+  // the benchmark dir and tails the native claude log, same as runs/drafts.
+  app.get<{ Params: { benchmarkId: string } }>(
+    '/ws/benchmarks/:benchmarkId/agent-session',
+    { websocket: true },
+    (socket, req) => {
+      const benchDir = benchmarkDir(deps.logsDir, req.params.benchmarkId)
+      const ref = resolveBenchmarkRef(benchDir)
+      const handle = tailAgentSession({
+        ref: ref ?? { agent: 'claude', sessionId: '', logPath: '' },
+        onReady: (readyRef) => sendJson(socket, sessionMessage(readyRef)),
+        onEvent: (event) => sendJson(socket, { type: 'event', event }),
+        onError: (err) => sendJson(socket, { type: 'error', error: err.message }),
+        discoverRef: () => resolveBenchmarkRef(benchDir),
+      })
+      socket.on('close', () => handle.close())
+    },
+  )
+
+  // Port-ification agent session — same ref-file convention as the benchmark,
+  // under the portify workflow dir.
+  app.get<{ Params: { workflowId: string } }>(
+    '/ws/portify/:workflowId/agent-session',
+    { websocket: true },
+    (socket, req) => {
+      const dir = portifyDir(deps.logsDir, req.params.workflowId)
+      const ref = resolveBenchmarkRef(dir)
+      const handle = tailAgentSession({
+        ref: ref ?? { agent: 'claude', sessionId: '', logPath: '' },
+        onReady: (readyRef) => sendJson(socket, sessionMessage(readyRef)),
+        onEvent: (event) => sendJson(socket, { type: 'event', event }),
+        onError: (err) => sendJson(socket, { type: 'error', error: err.message }),
+        discoverRef: () => resolveBenchmarkRef(dir),
+      })
+      socket.on('close', () => handle.close())
+    },
+  )
+}
+
+// Resolve the agent-session ref written into a workflow dir (benchmark or
+// portify) — both use the same `<dir>/agent-session.json` convention.
+function resolveBenchmarkRef(benchDir: string): AgentSessionRef | null {
+  let raw: string | null = null
+  try { raw = fs.readFileSync(path.join(benchDir, 'agent-session.json'), 'utf-8') } catch { return null }
+  const parsed = raw ? parseAgentSessionRefFile(raw) : null
+  const ref = parsed ? selectAgentSessionRef(parsed) : null
+  if (!ref) return null
+  // The cwd-derived logPath can be wrong (Claude's project-dir slug folds more
+  // than `/`). Once the log exists, locate it by session id instead.
+  if (ref.logPath && fs.existsSync(ref.logPath)) return ref
+  const found = ref.agent === 'claude' ? findClaudeLogBySessionId(ref.sessionId) : null
+  return found ? { ...ref, logPath: found } : ref
 }
 
 function resolveRunRef(runDir: string): AgentSessionRef | null {
@@ -116,6 +174,20 @@ function parseStage(value: string | undefined): 'planning' | 'generating' | null
   if (value === undefined) return 'planning'
   if (value === 'planning' || value === 'generating') return value
   return null
+}
+
+// Build the `session` handshake message, reading model/effort from the log
+// once it's been located. The log exists by the time `onReady` fires, so a
+// codex `turn_context` (written right after `session_meta`) is already present.
+function sessionMessage(ref: AgentSessionRef): {
+  type: 'session'
+  agent: AgentSessionRef['agent']
+  sessionId: string
+  model?: string
+  effort?: string
+} {
+  const meta = loadAgentSessionMeta(ref)
+  return { type: 'session', agent: ref.agent, sessionId: ref.sessionId, model: meta.model, effort: meta.effort }
 }
 
 function sendJson(socket: { send(data: string): void }, payload: unknown): void {

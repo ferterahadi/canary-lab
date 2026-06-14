@@ -281,6 +281,22 @@ body {
   to   { opacity: 1; transform: translateY(0); }
 }
 
+@keyframes cl-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Indeterminate progress sweep: a short bar that slides across its track. Used
+   by the restart progress card to signal ongoing, unmeasured work. */
+@keyframes cl-indeterminate {
+  0%   { transform: translateX(-120%); }
+  100% { transform: translateX(320%); }
+}
+
+.cl-menu-item:hover {
+  background: var(--bg-input);
+  color: var(--text-primary);
+}
+
 .feature-row__cog {
   opacity: 0;
   transition: opacity 150ms ease;
@@ -413,6 +429,14 @@ body {
   border-color: var(--border-strong);
   color: var(--text-primary);
   outline: none;
+}
+
+.cl-sort-th {
+  transition: color 120ms ease;
+}
+
+.cl-sort-th:hover {
+  color: var(--text-secondary);
 }
 
 .cl-button-primary {

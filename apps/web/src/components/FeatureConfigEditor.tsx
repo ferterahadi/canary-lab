@@ -1,22 +1,30 @@
 import { useEffect, useState } from 'react'
 import { GeneralTab } from './config/GeneralTab'
 import { ReposTab } from './config/ReposTab'
+import { PortsTab } from './config/PortsTab'
 import { EnvsetsTab } from './config/EnvsetsTab'
 import { PlaywrightTab } from './config/PlaywrightTab'
 import { CloseIcon, ConfirmModal, TrashIcon } from './config/atoms'
 import * as api from '../api/client'
 
-type Tab = 'general' | 'repos' | 'envsets' | 'playwright'
+type Tab = 'general' | 'repos' | 'ports' | 'envsets' | 'playwright'
 
 interface Props {
   feature: string
+  /** Whether a saved port overlay exists for this feature (overlay presence,
+   *  from `/api/features`). Drives the Ports tab's Portified indicator. */
+  portified?: boolean
   onClose: () => void
   onDeleted?: (feature: string) => void
   onRenamed?: (oldFeature: string, nextFeature: string) => void
   initialTab?: Tab
+  /** Launch the port-ification wizard for this feature (from the Service tab). */
+  onStartPortify?: (feature: string) => void
+  /** Reopen a past/active port-ification workflow (by id) from the Ports tab. */
+  onOpenPortify?: (workflowId: string) => void
 }
 
-export function FeatureConfigEditor({ feature, onClose, onDeleted, onRenamed, initialTab = 'general' }: Props) {
+export function FeatureConfigEditor({ feature, portified = false, onClose, onDeleted, onRenamed, initialTab = 'general', onStartPortify, onOpenPortify }: Props) {
   const [tab, setTab] = useState<Tab>(initialTab)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [confirmName, setConfirmName] = useState('')
@@ -97,6 +105,7 @@ export function FeatureConfigEditor({ feature, onClose, onDeleted, onRenamed, in
         >
           <TabButton active={tab === 'general'} onClick={() => setTab('general')}>General</TabButton>
           <TabButton active={tab === 'repos'} onClick={() => setTab('repos')}>Service</TabButton>
+          <TabButton active={tab === 'ports'} onClick={() => setTab('ports')}>Ports</TabButton>
           <TabButton active={tab === 'envsets'} onClick={() => setTab('envsets')}>Envsets</TabButton>
           <TabButton active={tab === 'playwright'} onClick={() => setTab('playwright')}>Playwright</TabButton>
         </nav>
@@ -104,6 +113,7 @@ export function FeatureConfigEditor({ feature, onClose, onDeleted, onRenamed, in
         <div className="flex-1 min-h-0">
           {tab === 'general' && <GeneralTab feature={feature} onFeatureRenamed={(nextFeature) => onRenamed?.(feature, nextFeature)} />}
           {tab === 'repos' && <ReposTab feature={feature} />}
+          {tab === 'ports' && <PortsTab feature={feature} portified={portified} onStartPortify={onStartPortify} onOpenPortify={onOpenPortify} />}
           {tab === 'envsets' && <EnvsetsTab feature={feature} />}
           {tab === 'playwright' && <PlaywrightTab feature={feature} />}
         </div>

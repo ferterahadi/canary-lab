@@ -1,8 +1,9 @@
 # Contributing to Canary Lab
 
-Thanks for working on Canary Lab. This guide covers the repository layout, local
-development, and the build and test workflow. For user-facing usage, see the
-[README](../README.md). For deeper internal notes, see [AGENTS.md](../AGENTS.md).
+Thanks for working on Canary Lab. This guide covers local development and the build
+and test workflow. For user-facing usage, see the [README](../README.md). For the
+module map, run lifecycle, and internal mechanisms, see
+[ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Code Orientation
 
@@ -16,58 +17,8 @@ Everything under `apps/`, `scripts/`, and `shared/` is internal unless exposed t
 
 ## Run Architecture
 
-This diagram shows the code path for a run started from `canary-lab ui`.
-
-```mermaid
-%%{init: {"theme": "base", "themeVariables": {"fontFamily": "Inter, ui-sans-serif, system-ui, sans-serif", "primaryTextColor": "#0f172a", "lineColor": "#64748b", "clusterBkg": "#ffffff", "clusterBorder": "#cbd5e1"}}}%%
-flowchart TD
-    user(["Run button in canary-lab ui"])
-    web["Web server + run store<br/>server.ts + run-store.ts"]
-    runtime["Run orchestrator<br/>orchestrator.ts + run-paths.ts"]
-    setup["Env + service startup<br/>env-switcher/switch.ts + pty-spawner.ts + launcher/startup.ts"]
-    playwright(["Playwright"])
-    capture["Run capture<br/>log-marker-fixture.ts + summary-reporter.ts"]
-    autoheal["Auto-heal command builder<br/>auto-heal.ts"]
-    agent(["AI Agent"])
-
-    subgraph runDir["logs/runs/{{runId}}/"]
-        state[/"manifest.json + runner.log"/]
-        logs[/"svc-*.log + playwright.log"/]
-        evidence[/"playwright-events.jsonl + playwright-artifacts/ + e2e-summary.json"/]
-        healctx[/"failed/{{slug}}/ + heal-index.md + diagnosis-journal.md"/]
-        session[/"agent-session.json + agent-session-id.txt"/]
-        signals[/"signals/.heal + .rerun + .restart"/]
-    end
-
-    user --> web --> runtime --> setup --> playwright
-    runtime --> state
-    setup --> logs
-    playwright --> logs
-    playwright --> capture
-    capture --> evidence
-    capture --> healctx
-    evidence --> autoheal
-    healctx -.-> autoheal
-    autoheal --> agent
-    agent --> session
-    agent -.-> healctx
-    agent --> signals
-    signals --> runtime
-
-    classDef entry fill:#e0f2fe,stroke:#0284c7,color:#0c4a6e,stroke-width:2px
-    classDef core fill:#eef2ff,stroke:#4f46e5,color:#312e81,stroke-width:2px
-    classDef runtime fill:#f0fdf4,stroke:#16a34a,color:#14532d,stroke-width:2px
-    classDef test fill:#fef3c7,stroke:#d97706,color:#78350f,stroke-width:2px
-    classDef heal fill:#fee2e2,stroke:#dc2626,color:#7f1d1d,stroke-width:2px
-    classDef artifact fill:#f8fafc,stroke:#64748b,color:#334155,stroke-width:1.5px
-
-    class user entry
-    class web core
-    class runtime,setup runtime
-    class playwright,capture test
-    class autoheal,agent heal
-    class state,logs,evidence,healctx,session,signals artifact
-```
+The run code path (with diagram) lives in
+[ARCHITECTURE.md → Run Lifecycle](ARCHITECTURE.md#run-lifecycle).
 
 ## Local Development
 
@@ -78,15 +29,10 @@ npm run build
 
 ## Repository Layout
 
-- `scripts/`: CLI entry, scaffold/setup/upgrade commands, and MCP bridge
-- `apps/web-server/`: local server, API routes, runtime orchestrator, run store, and PTY streams
-- `apps/web/`: React UI
-- `shared/e2e-runner/`: Playwright fixture support
-- `shared/configs/`: base Playwright config and env loader
-- `shared/runtime/`: shared project-root resolver
-- `templates/project/`: scaffolded project files
-
-The package exposes `canary-lab/feature-support/...` through `package.json` exports.
+The full module map lives in
+[ARCHITECTURE.md → Module Map](ARCHITECTURE.md#module-map). The package exposes
+`canary-lab/feature-support/...` through `package.json` exports; everything else is
+internal.
 
 ## Build and Test
 
