@@ -134,6 +134,9 @@ describe('PortsTab', () => {
       root.render(<PortsTab feature="np_feature" onStartPortify={onStartPortify} />)
     })
     expect(container.textContent).toContain('Not portified')
+    // The per-command empty state nudges to Portify and clarifies that a manual
+    // slot alone isn't the fix (it only sets an env var the service must read).
+    expect(container.textContent).toContain('only sets an env var')
     await act(async () => clickButton('Portify'))
     expect(onStartPortify).toHaveBeenCalledWith('np_feature')
     expect(container.textContent).not.toContain('Re-run Portify?')

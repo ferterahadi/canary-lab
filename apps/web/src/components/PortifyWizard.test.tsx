@@ -15,6 +15,13 @@ vi.mock('../api/client', () => ({
 // AgentSessionView opens a WS / fetches — stub it out in the wizard test.
 vi.mock('./AgentSessionView', () => ({ AgentSessionView: () => null }))
 
+// The wizard reads the single in-flight workflow to gate the Plan screen.
+// Default to "nothing active" so existing Plan/Start tests are unaffected.
+const mockActivePortify = vi.hoisted(() => ({ value: undefined as undefined | { workflowId: string; feature: string; status: PortifyStatus; startedAt: string } }))
+vi.mock('../state/PortifyContext', () => ({
+  useActivePortify: () => mockActivePortify.value,
+}))
+
 import * as api from '../api/client'
 import { PortifyWizard } from './PortifyWizard'
 
@@ -32,6 +39,7 @@ afterEach(() => {
   act(() => root.unmount())
   container.remove()
   vi.clearAllMocks()
+  mockActivePortify.value = undefined
 })
 
 function manifest(status: PortifyStatus, over: Partial<PortifyManifest> = {}): PortifyManifest {
@@ -175,6 +183,39 @@ describe('PortifyWizard', () => {
     await act(async () => clickButton('Start ▶'))
     await flush()
     expect(container.textContent).toContain('already running')
+    // The error renders in the dismissable banner, which can be cleared.
+    const dismiss = container.querySelector('[aria-label="Dismiss error"]') as HTMLButtonElement
+    expect(dismiss).toBeTruthy()
+    await act(async () => dismiss.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+    expect(container.textContent).not.toContain('already running')
+  })
+
+  it('blocks the Plan screen and routes to the running workflow when one is active', async () => {
+    mockActivePortify.value = { workflowId: 'w-active', feature: 'oms', status: 'editing', startedAt: 't' }
+    const onOpenActive = vi.fn()
+    await act(async () => {
+      root.render(<PortifyWizard feature="cns" agent="claude" onOpenActive={onOpenActive} onClose={vi.fn()} onSaved={vi.fn()} />)
+    })
+    // Plan screen is gated — no Start button, the running feature is named.
+    expect(buttonLabels()).not.toContain('Start ▶')
+    expect(container.textContent).toContain('already running')
+    expect(container.textContent).toContain('oms')
+    // start_run is never even attempted while blocked.
+    await act(async () => clickButton('Open oms →'))
+    expect(onOpenActive).toHaveBeenCalledWith('w-active')
+    expect(api.startPortify).not.toHaveBeenCalled()
+  })
+
+  it('does not block its own workflow when reopened (revisit mode)', async () => {
+    // Even with an active workflow, revisit mode (workflowId set) shows the run.
+    mockActivePortify.value = { workflowId: 'w', feature: 'cns', status: 'verifying', startedAt: 't' }
+    vi.mocked(api.getPortify).mockResolvedValue(manifest('verifying'))
+    await act(async () => {
+      root.render(<PortifyWizard workflowId="w" onClose={vi.fn()} onSaved={vi.fn()} />)
+    })
+    await flush()
+    expect(container.textContent).toContain('Running the exercise')
+    expect(container.textContent).not.toContain('already running')
   })
 
   it('renders the exercise screen while editing/verifying', async () => {

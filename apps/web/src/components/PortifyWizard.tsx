@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import * as api from '../api/client'
-import type { PortifyManifest, PortifyStatus } from '../api/client'
+import type { PortifyIndexEntry, PortifyManifest, PortifyStatus } from '../api/client'
+import { useActivePortify } from '../state/PortifyContext'
 import { AgentSessionView } from './AgentSessionView'
 import { CopyButton } from './CopyButton'
 
@@ -45,6 +46,7 @@ export function PortifyWizard({
   feature,
   agent = 'claude',
   workflowId: initialWorkflowId,
+  onOpenActive,
   onClose,
   onSaved,
 }: {
@@ -53,9 +55,12 @@ export function PortifyWizard({
   agent?: 'claude' | 'codex'
   /** Revisit mode: reopen an in-flight workflow by id (skip the Plan screen). */
   workflowId?: string
+  /** Jump to the already-running workflow (used by the blocked Plan screen). */
+  onOpenActive?: (workflowId: string) => void
   onClose: () => void
   onSaved: () => void
 }) {
+  const activePortify = useActivePortify()
   const [workflowId, setWorkflowId] = useState<string | null>(initialWorkflowId ?? null)
   const [m, setM] = useState<PortifyManifest | null>(null)
   const [busy, setBusy] = useState(false)
@@ -161,6 +166,11 @@ export function PortifyWizard({
   }
 
   const status = m?.status
+  // Port-ification is one-at-a-time. In Plan mode (this wizard hasn't started
+  // its own workflow yet), another in-flight workflow blocks the Start screen
+  // entirely — we route the user to the running one instead of letting Start
+  // fail. Once this wizard owns a workflowId, it's the active one, so no block.
+  const blockedBy: PortifyIndexEntry | null = !workflowId && activePortify ? activePortify : null
   // A workflow is "in flight" (cancellable / worth keeping alive) until it is
   // saved or terminal.
   const isActive = Boolean(workflowId) && status != null
@@ -211,7 +221,14 @@ export function PortifyWizard({
 
       <div style={{ flex: 1, overflow: 'auto', padding: '20px 22px 60px', display: 'flex', justifyContent: 'center', alignItems: 'flex-start' }}>
         <div style={{ width: 'min(820px, 100%)' }}>
-          {!workflowId && feature && <PlanScreen feature={feature} agent={agent} busy={busy} onStart={start} />}
+          {!workflowId && blockedBy && (
+            <BlockedScreen
+              active={blockedBy}
+              onOpen={() => onOpenActive?.(blockedBy.workflowId)}
+              onClose={onClose}
+            />
+          )}
+          {!workflowId && !blockedBy && feature && <PlanScreen feature={feature} agent={agent} busy={busy} onStart={start} />}
           {workflowId && !m && (
             <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>Loading…</div>
           )}
@@ -237,9 +254,13 @@ export function PortifyWizard({
           {workflowId && m && navigable && effectiveStep === 3 && (
             <SaveScreen m={m} onDone={onSaved} />
           )}
-          {error && <div style={{ color: 'rgb(251,113,133)', fontSize: 12, marginTop: 14 }}>{error}</div>}
         </div>
       </div>
+
+      {/* Errors anchor to the bottom of the wizard as a dismissable banner —
+          always visible regardless of scroll, instead of trailing far below a
+          vertically-centered screen where it reads as detached. */}
+      {error && <ErrorBanner message={error} onDismiss={() => setError(null)} />}
 
       {feedbackOpen && (
         <FeedbackModal busy={busy} onSend={revise} onClose={() => setFeedbackOpen(false)} />
@@ -351,22 +372,110 @@ function Stepper({
   )
 }
 
-function PlanScreen({ feature, agent, busy, onStart }: { feature: string; agent: string; busy: boolean; onStart: () => void }) {
+// Shown instead of the Plan screen when another port-ification is already in
+// flight (one runs at a time). Rather than let Start fail with an error, we gate
+// the page and route the user straight to the running workflow.
+function BlockedScreen({ active, onOpen, onClose }: { active: PortifyIndexEntry; onOpen: () => void; onClose: () => void }) {
   return (
-    <div>
-      <div style={{ fontSize: 18, fontWeight: 600, marginBottom: 8 }}>What will happen</div>
-      <p style={{ fontSize: 13.5, color: 'var(--text-muted)', lineHeight: 1.6, marginBottom: 16, maxWidth: 640 }}>
-        The <b style={{ color: 'var(--text-secondary)' }}>{agent}</b> agent will edit <b style={{ color: 'var(--text-secondary)' }}>{feature}</b> in an isolated scratch worktree so each app reads its listen port from an injected env var, and declares matching <code style={mono}>ports</code> slots in the feature config. Then the harness boots the stack <b style={{ color: 'var(--text-secondary)' }}>twice at once on different ports</b> and requires both to pass health checks — proof the rewrite works. You review the diff and save it.
-      </p>
-      <ul style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.8, marginBottom: 22 }}>
-        <li>Saving captures the edits as an <b style={{ color: 'var(--text-secondary)' }}>ephemeral overlay</b> — your product repo is never modified.</li>
-        <li>On every run the overlay is applied into a per-run worktree and reverse-applied at teardown.</li>
-        <li>Test files are never modified.</li>
-        <li>Nothing is saved until you approve the verified diff.</li>
-      </ul>
-      <button type="button" className="cl-button-primary" disabled={busy} onClick={onStart} style={{ padding: '9px 18px' }}>
-        {busy ? 'Starting…' : 'Start ▶'}
+    <div style={{ minHeight: 'calc(100dvh - 200px)', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+      <div style={{ width: 'min(520px, 100%)', margin: '0 auto', textAlign: 'center' }}>
+        <div style={{ fontSize: 34, marginBottom: 14, opacity: 0.9 }}>🔌</div>
+        <h2 style={{ fontSize: 21, fontWeight: 600, letterSpacing: '-0.01em', margin: '0 0 12px' }}>
+          A port-ification is already running
+        </h2>
+        <p style={{ fontSize: 14, color: 'var(--text-secondary)', lineHeight: 1.65, margin: '0 0 6px' }}>
+          Only one workflow runs at a time. <b style={{ color: 'var(--text-primary)' }}>{active.feature}</b> is in progress
+          {' '}— <span style={{ color: 'var(--accent)' }}>{STATUS_LABEL[active.status]}</span>.
+        </p>
+        <p style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6, margin: '0 0 26px' }}>
+          Finish or cancel it before starting another.
+        </p>
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
+          <button type="button" className="cl-button-primary" onClick={onOpen} style={{ padding: '10px 20px' }}>
+            Open {active.feature} →
+          </button>
+          <button type="button" onClick={onClose} style={{ ...ghostBtn, padding: '10px 18px' }}>Close</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// Bottom-anchored, dismissable error banner for the full-screen wizard.
+function ErrorBanner({ message, onDismiss }: { message: string; onDismiss: () => void }) {
+  return (
+    <div
+      role="alert"
+      style={{
+        position: 'absolute', left: '50%', bottom: 24, transform: 'translateX(-50%)',
+        maxWidth: 'min(560px, calc(100% - 40px))',
+        display: 'flex', alignItems: 'flex-start', gap: 10,
+        padding: '11px 12px 11px 14px', borderRadius: 'var(--radius-md)',
+        background: 'var(--bg-surface)', border: '1px solid rgba(251,113,133,0.45)',
+        color: 'rgb(251,113,133)', fontSize: 12.5, lineHeight: 1.5,
+        boxShadow: '0 10px 34px rgba(0,0,0,0.4)', zIndex: 70,
+      }}
+    >
+      <span aria-hidden="true" style={{ marginTop: 1 }}>⚠</span>
+      <span style={{ flex: 1, minWidth: 0 }}>{message}</span>
+      <button
+        type="button"
+        onClick={onDismiss}
+        aria-label="Dismiss error"
+        style={{ background: 'transparent', border: 'none', color: 'rgb(251,113,133)', cursor: 'pointer', fontSize: 13, lineHeight: 1, padding: '0 2px', flexShrink: 0 }}
+      >
+        ✕
       </button>
+    </div>
+  )
+}
+
+function PlanScreen({ feature, agent, busy, onStart }: { feature: string; agent: string; busy: boolean; onStart: () => void }) {
+  const guarantees: React.ReactNode[] = [
+    <>Saving captures the edits as an <b style={{ color: 'var(--text-secondary)' }}>ephemeral overlay</b> — your product repo is never modified.</>,
+    <>On every run the overlay is applied into a per-run worktree and reverse-applied at teardown.</>,
+    <>Test files are never modified.</>,
+    <>Nothing is saved until you approve the verified diff.</>,
+  ]
+  // Fullscreen overlay → center the composition in the area below the header +
+  // stepper so it owns the space instead of clinging to the top-left corner.
+  return (
+    <div style={{ minHeight: 'calc(100dvh - 200px)', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+      <div style={{ width: 'min(600px, 100%)', margin: '0 auto' }}>
+        <div style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '.5px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontWeight: 600, marginBottom: 12 }}>
+          Guided port-ification
+        </div>
+        <h2 style={{ fontSize: 22, fontWeight: 600, letterSpacing: '-0.01em', margin: '0 0 14px' }}>What will happen</h2>
+        <p style={{ fontSize: 14, color: 'var(--text-secondary)', lineHeight: 1.65, margin: '0 0 10px' }}>
+          The <b style={{ color: 'var(--text-primary)' }}>{agent}</b> agent edits <b style={{ color: 'var(--text-primary)' }}>{feature}</b> in an isolated scratch worktree so each app reads its listen port from an injected env var, and declares matching <code style={mono}>ports</code> slots in the feature config.
+        </p>
+        <p style={{ fontSize: 14, color: 'var(--text-secondary)', lineHeight: 1.65, margin: '0 0 24px' }}>
+          The harness then boots the stack <b style={{ color: 'var(--text-primary)' }}>twice at once on different ports</b> and requires both to pass health checks — proof the rewrite works. You review the diff and save it.
+        </p>
+
+        <div style={{ border: '1px solid var(--border-default)', borderRadius: 'var(--radius-lg)', background: 'var(--bg-surface)', overflow: 'hidden', marginBottom: 26 }}>
+          <div style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '.5px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontWeight: 600, padding: '11px 16px', borderBottom: '1px solid var(--border-subtle)' }}>
+            Guarantees
+          </div>
+          {guarantees.map((node, i) => (
+            <div
+              key={i}
+              style={{
+                display: 'grid', gridTemplateColumns: 'auto 1fr', gap: 10, alignItems: 'start',
+                padding: '10px 16px', fontSize: 13, lineHeight: 1.55, color: 'var(--text-muted)',
+                borderTop: i === 0 ? 'none' : '1px solid var(--border-subtle)',
+              }}
+            >
+              <span style={{ color: 'var(--success)', fontSize: 12, marginTop: 2 }}>✓</span>
+              <span>{node}</span>
+            </div>
+          ))}
+        </div>
+
+        <button type="button" className="cl-button-primary" disabled={busy} onClick={onStart} style={{ padding: '10px 20px' }}>
+          {busy ? 'Starting…' : 'Start ▶'}
+        </button>
+      </div>
     </div>
   )
 }

@@ -84,11 +84,6 @@ afterEach(() => {
   window.history.replaceState(null, '', '/')
 })
 
-function portifyButton(): HTMLButtonElement | undefined {
-  return [...container.querySelectorAll('button')]
-    .find((button) => button.getAttribute('aria-label')?.startsWith('Open port-ification')) as HTMLButtonElement | undefined
-}
-
 function portifyLauncherButton(): HTMLButtonElement | undefined {
   return [...container.querySelectorAll('button')]
     .find((button) => button.getAttribute('aria-label') === 'Open Portify feature picker') as HTMLButtonElement | undefined
@@ -130,30 +125,33 @@ describe('GlobalStatusBar', () => {
     expect(button?.textContent).toContain('2')
   })
 
-  it('hides the Portify button when no port-ification is active', async () => {
+  it('keeps the Portify launcher idle (🔌, no "ready") when nothing is active', async () => {
     mockActiveRuns.value = { runs: [], count: 0 }
     mockActivePortify.value = undefined
     await act(async () => { root.render(<GlobalStatusBar activeRunDetail={null} />) })
-    expect(portifyButton()).toBeUndefined()
+    const button = portifyLauncherButton()
+    expect(button).toBeTruthy()
+    expect(button?.textContent).toContain('🔌')
+    expect(button?.textContent).not.toContain('ready')
+    expect(button?.getAttribute('title')).toContain('make a feature')
   })
 
-  it('shows the Portify button while active and opens that workflow on click', async () => {
+  it('surfaces the in-flight feature on the Portify launcher while active', async () => {
     mockActiveRuns.value = { runs: [], count: 0 }
     mockActivePortify.value = { workflowId: 'portify-1', feature: 'cns', status: 'verifying', startedAt: 't' }
-    const onOpenPortify = vi.fn()
-    await act(async () => { root.render(<GlobalStatusBar activeRunDetail={null} onOpenPortify={onOpenPortify} />) })
-    const button = portifyButton()
+    await act(async () => { root.render(<GlobalStatusBar activeRunDetail={null} />) })
+    const button = portifyLauncherButton()
     expect(button).toBeTruthy()
-    expect(button?.textContent).toContain('Portify')
-    await act(async () => button!.dispatchEvent(new MouseEvent('click', { bubbles: true })))
-    expect(onOpenPortify).toHaveBeenCalledWith('portify-1')
+    // The 🔌 gives way to a live dot; the feature name moves into the tooltip.
+    expect(button?.textContent).not.toContain('🔌')
+    expect(button?.getAttribute('title')).toContain('cns')
   })
 
-  it('labels the Portify button "ready" when the workflow awaits save', async () => {
+  it('labels the Portify launcher "ready" when the workflow awaits save', async () => {
     mockActiveRuns.value = { runs: [], count: 0 }
     mockActivePortify.value = { workflowId: 'portify-1', feature: 'cns', status: 'ready-to-save', startedAt: 't' }
     await act(async () => { root.render(<GlobalStatusBar activeRunDetail={null} />) })
-    expect(portifyButton()?.textContent).toContain('ready')
+    expect(portifyLauncherButton()?.textContent).toContain('ready')
   })
 
   it('surfaces booted services in the Services pill, separate from the Runs button', async () => {
@@ -177,8 +175,6 @@ describe('GlobalStatusBar', () => {
     const launcher = portifyLauncherButton()
     expect(launcher).toBeTruthy()
     expect(launcher?.textContent).toContain('Portify')
-    // The status pill (reopen active workflow) is still absent when idle.
-    expect(portifyButton()).toBeUndefined()
   })
 
   it('launcher opens a feature picker; picking a feature starts port-ification', async () => {
@@ -205,6 +201,38 @@ describe('GlobalStatusBar', () => {
     expect(onStartPortify).toHaveBeenCalledWith('cns')
     // Picker closes after selection.
     expect(document.body.querySelector('[aria-label="Portify a feature"]')).toBeNull()
+  })
+
+  it('picker shows the in-flight feature with a live status and reopens it on click', async () => {
+    mockActivePortify.value = { workflowId: 'portify-1', feature: 'cns', status: 'verifying', startedAt: 't' }
+    const onStartPortify = vi.fn()
+    const onOpenPortify = vi.fn()
+    const features = [
+      { name: 'cns', repos: [], envs: [], portified: false },
+      { name: 'oms', repos: [], envs: [], portified: false },
+    ]
+    await act(async () => {
+      root.render(
+        <GlobalStatusBar
+          activeRunDetail={null}
+          features={features}
+          onStartPortify={onStartPortify}
+          onOpenPortify={onOpenPortify}
+        />,
+      )
+    })
+    await act(async () => portifyLauncherButton()!.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+
+    const picker = document.body.querySelector('[aria-label="Portify a feature"]')
+    expect(picker?.textContent).toContain('verifying') // live phase on the active row
+
+    // The active row reopens the workflow instead of starting a new one.
+    const cnsRow = [...document.body.querySelectorAll('button')]
+      .find((b) => b.getAttribute('title') === 'View port-ification of cns')
+    expect(cnsRow).toBeTruthy()
+    await act(async () => cnsRow!.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+    expect(onOpenPortify).toHaveBeenCalledWith('portify-1')
+    expect(onStartPortify).not.toHaveBeenCalled()
   })
 
   it('hides the Benchmark pill by default', async () => {

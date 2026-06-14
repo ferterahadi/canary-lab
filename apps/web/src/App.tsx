@@ -341,9 +341,14 @@ export function App() {
       )}
       {portifyTarget && (
         <PortifyWizard
+          // Key on the target identity so switching new→revisit (e.g. the blocked
+          // Plan screen's "Open running workflow") remounts with fresh state —
+          // workflowId is seeded from a prop via useState, which only runs at mount.
+          key={portifyTarget.kind === 'new' ? `new:${portifyTarget.feature}` : `revisit:${portifyTarget.workflowId}`}
           {...(portifyTarget.kind === 'new'
             ? { feature: portifyTarget.feature, agent: 'claude' as const }
             : { workflowId: portifyTarget.workflowId })}
+          onOpenActive={(workflowId) => setPortifyTarget({ kind: 'revisit', workflowId })}
           onClose={() => setPortifyTarget(null)}
           onSaved={() => {
             setPortifyTarget(null)
