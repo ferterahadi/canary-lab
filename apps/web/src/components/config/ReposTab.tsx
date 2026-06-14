@@ -963,16 +963,23 @@ function CommandCard({
 export function PortSlotEditor({
   ports,
   onChange,
+  emptyHint,
 }: {
   ports: PortSlotSlice[]
   onChange: (next: PortSlotSlice[]) => void
+  /** Overrides the default "(none — …)" line shown when there are no slots.
+   *  The Ports tab passes a Portify-aware hint here for not-yet-portified
+   *  features; ReposTab leaves it default. */
+  emptyHint?: ReactNode
 }) {
   return (
     <div className="flex flex-col gap-1.5">
       {ports.length === 0 && (
-        <div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
-          (none — service uses its hardcoded port; can't run concurrently)
-        </div>
+        emptyHint ?? (
+          <div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
+            (none — service uses its hardcoded port; can't run concurrently)
+          </div>
+        )
       )}
       {ports.length > 0 && (
         <div className="flex items-center gap-1.5 px-0.5 text-[9px] uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>

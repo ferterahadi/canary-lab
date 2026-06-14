@@ -92,6 +92,16 @@ describe('PortifyOrchestrator', () => {
     expect(deps.cleanup).toHaveBeenCalledOnce()
   })
 
+  it('fails fast (no retries) and surfaces the message when the agent CLI cannot launch', async () => {
+    const runAgent = vi.fn(async () => { throw new Error('could not launch the claude CLI (claude): spawn claude ENOENT') })
+    const { deps } = makeDeps({ runAgent })
+    const m = await new PortifyOrchestrator(deps).run()
+    expect(m.status).toBe('failed')
+    expect(m.error).toContain('could not launch the claude CLI')
+    expect(runAgent).toHaveBeenCalledOnce() // bailed on attempt 1, no empty retries
+    expect(deps.cleanup).toHaveBeenCalledOnce()
+  })
+
   it('persists the verifying transition with the captured diff', async () => {
     const saved: PortifyManifest[] = []
     const { deps } = makeDeps({ persist: (m) => saved.push(m), captureDiff: async () => 'THE DIFF' })

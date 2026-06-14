@@ -14,7 +14,6 @@ import { ConnectionBadge } from './ConnectionBadge'
 import { StatusChip } from './StatusChip'
 import { ServicesPill } from './ServicesPill'
 import { RunsPill } from './RunsPill'
-import { PortifyPill } from './PortifyPill'
 import { PortifyLauncherPill } from './PortifyLauncherPill'
 import { PortifyPickerDialog } from './PortifyPickerDialog'
 import { BenchmarkPill } from './BenchmarkPill'
@@ -44,7 +43,7 @@ interface Props {
 //
 // This component is the orchestrator: it owns the cross-feature state and
 // dialog wiring, and composes presentational pills (ServicesPill, RunsPill,
-// PortifyPill, BenchmarkPill, CleanupPill) and badges (ConnectionBadge,
+// PortifyLauncherPill, BenchmarkPill, CleanupPill) and badges (ConnectionBadge,
 // McpHealthBadge, StatusChip) that each live in their own file.
 export function GlobalStatusBar({ activeRunDetail, features = [], onNavigateToRun, onOpenCleanup, onStartPortify, onOpenPortify }: Props) {
   const { connection } = useRuns()
@@ -145,11 +144,10 @@ export function GlobalStatusBar({ activeRunDetail, features = [], onNavigateToRu
         >
           <ServicesPill count={bootCount} onOpen={() => setServicesOpen(true)} />
           <RunsPill count={runsCount} onOpen={() => setRunsOpen(true)} />
-          <PortifyPill portify={activePortify} onOpen={(workflowId) => onOpenPortify?.(workflowId)} />
           <WizardTaskStatus />
           <EvaluationExportTaskStatus />
           {showBenchmark && <BenchmarkPill active={Boolean(activeBenchmark)} onOpen={() => setBenchmarkOpen(true)} />}
-          <PortifyLauncherPill onOpen={() => setPortifyPickerOpen(true)} />
+          <PortifyLauncherPill activePortify={activePortify} onOpen={() => setPortifyPickerOpen(true)} />
           <CleanupPill onOpen={() => onOpenCleanup?.()} />
         </div>
         <button
@@ -203,7 +201,9 @@ export function GlobalStatusBar({ activeRunDetail, features = [], onNavigateToRu
       {portifyPickerOpen && (
         <PortifyPickerDialog
           features={features}
+          activePortify={activePortify}
           onPick={(feature) => onStartPortify?.(feature)}
+          onOpenActive={(workflowId) => onOpenPortify?.(workflowId)}
           onClose={() => setPortifyPickerOpen(false)}
         />
       )}

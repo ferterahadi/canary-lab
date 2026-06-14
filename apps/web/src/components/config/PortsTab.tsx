@@ -185,6 +185,22 @@ export function PortsTab({
                     <PortSlotEditor
                       ports={cmd.ports ?? []}
                       onChange={(ports) => setPorts(ri, ci, ports)}
+                      emptyHint={!portified ? (
+                        <div className="text-[10px] leading-relaxed" style={{ color: 'var(--text-muted)' }}>
+                          Uses its hardcoded port.{' '}
+                          {onStartPortify ? (
+                            <button
+                              type="button"
+                              onClick={launchPortify}
+                              className="underline underline-offset-2"
+                              style={{ color: 'var(--accent)' }}
+                            >
+                              Run Portify
+                            </button>
+                          ) : 'Run Portify'}{' '}
+                          to make it injectable — adding a slot by hand only sets an env var, which helps only if the service already reads it.
+                        </div>
+                      ) : undefined}
                     />
                   </div>
                 ))}

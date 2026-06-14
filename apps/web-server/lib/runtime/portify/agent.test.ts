@@ -67,11 +67,22 @@ describe('runPortifyAgent', () => {
     await runPortifyAgent({ agent: 'codex', prompt: 'x', cwd: dir, logPath: path.join(dir, 'no', 'such', 'dir', 'a.log') })
   })
 
-  it('resolves (not rejects) when the agent binary is missing', async () => {
+  it('rejects with a clear message when the agent CLI cannot be launched', async () => {
     const dir = tmp()
     await expect(
       runPortifyAgent({ agent: 'definitely-not-a-binary' as HealAgent, prompt: 'x', cwd: dir }),
-    ).resolves.toBeUndefined()
+    ).rejects.toThrow(/could not launch the definitely-not-a-binary CLI/)
+  })
+
+  it('records the launch failure to the log so it is not mistaken for an empty run', async () => {
+    const dir = tmp()
+    const logPath = path.join(dir, 'agent.log')
+    const children = new Set<ChildProcess>()
+    await expect(
+      runPortifyAgent({ agent: 'definitely-not-a-binary' as HealAgent, prompt: 'x', cwd: dir, logPath, children }),
+    ).rejects.toThrow()
+    expect(fs.readFileSync(logPath, 'utf-8')).toMatch(/could not launch the definitely-not-a-binary CLI/)
+    expect(children.size).toBe(0) // child removed even on launch failure
   })
 })
 
