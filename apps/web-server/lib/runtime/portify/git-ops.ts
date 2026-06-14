@@ -121,10 +121,10 @@ export async function applyOverlay(worktreeRoot: string, patchPath: string): Pro
   // with a 3-way merge, which reconstructs via the blobs recorded in the patch.
   const three = await runGit(worktreeRoot, ['apply', '--3way', patchPath])
   if (three.code === 0) return { kind: 'ok' }
-  const detail = `${three.stderr}${three.stdout}`.trim()
+  const detail = `${three.stderr}${three.stdout}${plain.stderr}${plain.stdout}`.trim()
   const files = parseUnmergedFiles(three.stderr)
   if (files.length > 0) return { kind: 'conflict', files, detail }
-  return { kind: 'error', detail: detail || `${plain.stderr}${plain.stdout}`.trim() }
+  return { kind: 'error', detail }
 }
 
 /**
