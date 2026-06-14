@@ -20,6 +20,24 @@ import { draftAgentStreamRoutes } from './ws/draft-agent-stream'
 import { agentSessionStreamRoutes } from './ws/agent-session-stream'
 import { workspaceStreamRoutes } from './ws/workspace-stream'
 import { createRegistry, RunStore, type OrchestratorRegistry, type OrchestratorLike, type StartRunOutcome } from './lib/run-store'
+import { benchmarkRoutes } from './routes/benchmarks'
+import { benchmarkStreamRoutes } from './ws/benchmark-stream'
+import { BenchmarkRunStore } from './lib/runtime/benchmark/store'
+import { createBenchmarkRunner } from './lib/runtime/benchmark/runner'
+import { loadBundledSabotageSkills, sabotageSkillsForFeature } from './lib/runtime/benchmark/skills'
+import { benchmarkDir } from './lib/runtime/benchmark/paths'
+import { portifyRoutes } from './routes/portify'
+import { portifyStreamRoutes } from './ws/portify-stream'
+import { PortifyRunStore } from './lib/runtime/portify/store'
+import { createPortifyRunner } from './lib/runtime/portify/runner'
+import { reclaimOrphanedPortify } from './lib/runtime/portify/reclaim'
+import { portifyDir } from './lib/runtime/portify/paths'
+import {
+  parseAgentSessionRefFile,
+  selectAgentSessionRef,
+  loadAgentSession,
+  findClaudeLogBySessionId,
+} from './lib/agent-session-log'
 import { WorkspaceEventBus } from './lib/workspace-events'
 import { PaneBroker } from './lib/pane-broker'
 import { loadFeatures } from './lib/feature-loader'
@@ -30,19 +48,21 @@ import {
 import { WizardAgentRegistry } from './lib/wizard-agent-registry'
 import { generateRunId } from './lib/runtime/run-id'
 import { runDirFor, buildRunPaths } from './lib/runtime/run-paths'
-import { RunOrchestrator, collectPortSlots, buildServiceSpecs } from './lib/runtime/orchestrator'
+import { RunOrchestrator, collectPortSlots, buildServiceSpecs, buildQueuedServiceEntries } from './lib/runtime/orchestrator'
 import { allocatePorts } from './lib/runtime/port-allocator'
 import { resolvePortTokens } from './lib/runtime/launcher/interpolate'
 import { RunScheduler, type SchedulerActiveRun } from './lib/runtime/run-scheduler'
 import { estimateRunCost, resolveAdmissionConfig, readSystemResources } from './lib/runtime/admission'
 import { detectRepoCollision, normalizeRepoPaths } from './lib/runtime/repo-collision'
 import { addWorktree, type WorktreeHandle } from './lib/runtime/repo-worktree'
+import { overlayExists as portifyOverlayExists } from './lib/runtime/portify/overlay'
 import type { QueueReason } from '../../shared/run-state'
 import type { FeatureConfig } from '../../shared/launcher/types'
 import {
   buildAgentSpawnCommand,
   buildOrchestratorHealPrompt,
   pickAvailableHealAgent,
+  resolveAgentBinary,
   type BuildHealCyclePrompt,
   type HealAgent,
 } from './lib/runtime/auto-heal'
@@ -129,6 +149,10 @@ export interface CreateServerOptions {
   // the real node-pty factory; tests skip this branch by passing
   // `testsDraftDepsOverride` instead.
   ptyFactory?: PtyFactory
+  // Host hook invoked after a port change is persisted via the Project
+  // Settings dialog. The host (canary-lab ui) relaunches on the new port and
+  // shuts this process down. Absent in tests / non-CLI embeddings.
+  onPortChange?: (port: number) => void | Promise<void>
 }
 
 export interface CreateServerResult {
@@ -156,6 +180,17 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
 
   const registry = createRegistry()
   const runStore = new RunStore(logsDir, registry)
+  const benchmarkStore = new BenchmarkRunStore(logsDir)
+  // A benchmark left 'running'/'sabotaging' in the index belongs to a dead
+  // process (this one just started) — flip it to 'aborted' so it doesn't resume
+  // forever as running in the UI and so Stop isn't needed for it.
+  benchmarkStore.reconcileInterrupted(() => new Date().toISOString())
+  const portifyStore = new PortifyRunStore(logsDir)
+  // A port-ification workflow left non-terminal belongs to a dead process.
+  // Reclaim removes its orphaned worktrees + branches and restores the config
+  // it edited in place, then flips the manifest to 'aborted' so the UI doesn't
+  // show a zombie workflow (and a stale worktree can't wedge the next run).
+  await reclaimOrphanedPortify(portifyStore, logsDir, () => new Date().toISOString())
   const workspaceEvents = new WorkspaceEventBus()
   // One-shot cleanup: a fresh UI server starts with an empty registry, so any
   // persisted 'running'/'healing' row is from a previous server process and is
@@ -274,7 +309,11 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
     store: runStore,
     startVerification,
   })
-  await app.register(projectConfigRoutes, { projectRoot: opts.projectRoot })
+  await app.register(projectConfigRoutes, {
+    projectRoot: opts.projectRoot,
+    countActiveRuns: () => runStore.list().filter((run) => isActiveRunStatus(run.status)).length,
+    onPortChange: opts.onPortChange,
+  })
   await app.register(journalRoutes, { logsDir, journalPath })
   // `restartLocalHeal` deferred until after the runs route declares its
   // production restartHeal closure — defined below and threaded back in via
@@ -396,9 +435,14 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
 
   const restartExternalRun = async (
     runId: string,
-    healAgentReq: { kind: 'external'; sessionId: string; clientKind: 'claude-cli' | 'claude-desktop' | 'codex-cli' | 'codex-desktop' | 'other'; clientVersion?: string; conversationName?: string },
+    healAgentReq: { kind: 'external'; sessionId: string; clientKind: 'claude-cli' | 'claude-desktop' | 'codex-cli' | 'codex-desktop' | 'other'; clientVersion?: string; conversationName?: string; claimable?: boolean },
     guidance?: string,
   ): Promise<OrchestratorLike> => {
+    // `claimable === false` means an external client *triggered* the restart but
+    // may not own the heal loop (CLI / 'other'). The run still re-enters external
+    // mode and waits for a Desktop/UI drive — it just gets no session + no broker
+    // claim, so nothing spawns a local auto-heal agent behind the user's back.
+    const canClaim = healAgentReq.claimable !== false
     const detail = runStore.get(runId)
     if (!detail) throw Object.assign(new Error('run-not-found'), { statusCode: 404 })
     const manifest = detail.manifest
@@ -435,16 +479,18 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
     }
 
     const nowIso = new Date().toISOString()
-    const externalHealSession: import('./lib/runtime/manifest').ExternalHealSession = {
-      sessionId: healAgentReq.sessionId,
-      clientKind: healAgentReq.clientKind,
-      ...(healAgentReq.clientVersion ? { clientVersion: healAgentReq.clientVersion } : {}),
-      ...(healAgentReq.conversationName ? { conversationName: healAgentReq.conversationName } : {}),
-      claimedAt: nowIso,
-      lastHeartbeatAt: nowIso,
-      status: 'connected',
-      cycleCount: 0,
-    }
+    const externalHealSession: import('./lib/runtime/manifest').ExternalHealSession | undefined = canClaim
+      ? {
+          sessionId: healAgentReq.sessionId,
+          clientKind: healAgentReq.clientKind,
+          ...(healAgentReq.clientVersion ? { clientVersion: healAgentReq.clientVersion } : {}),
+          ...(healAgentReq.conversationName ? { conversationName: healAgentReq.conversationName } : {}),
+          claimedAt: nowIso,
+          lastHeartbeatAt: nowIso,
+          status: 'connected',
+          cycleCount: 0,
+        }
+      : undefined
 
     let orch: RunOrchestrator
     try {
@@ -468,12 +514,14 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
       throw Object.assign(err instanceof Error ? err : new Error(String(err)), { statusCode: 500 })
     }
 
-    externalHealBroker.claim(runId, {
-      sessionId: healAgentReq.sessionId,
-      clientKind: healAgentReq.clientKind,
-      ...(healAgentReq.clientVersion ? { clientVersion: healAgentReq.clientVersion } : {}),
-      ...(healAgentReq.conversationName ? { conversationName: healAgentReq.conversationName } : {}),
-    })
+    if (canClaim) {
+      externalHealBroker.claim(runId, {
+        sessionId: healAgentReq.sessionId,
+        clientKind: healAgentReq.clientKind,
+        ...(healAgentReq.clientVersion ? { clientVersion: healAgentReq.clientVersion } : {}),
+        ...(healAgentReq.conversationName ? { conversationName: healAgentReq.conversationName } : {}),
+      })
+    }
 
     attachRunStreams(orch, runnerLog, feature.name, backups)
     const broker = brokers.get(runId)!
@@ -515,7 +563,11 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
     readResources: readSystemResources,
     config: admissionConfig,
   })
-  runStore.onEvent((e) => { if (e.kind === 'finalized') void scheduler.promote() })
+  runStore.onEvent((e) => {
+    if (e.kind === 'finalized') {
+      void scheduler.promote()
+    }
+  })
 
   // Map a set of resolved repo paths back to feature.config repo names so we
   // know which repos to isolate in a worktree.
@@ -546,7 +598,10 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
       startedAt,
       status: 'queued',
       healCycles: 0,
-      services: [],
+      // Surface the services that will boot on promotion (status 'queued', no
+      // ports yet) so the queued run's Overview isn't a bare "No services
+      // configured". Promotion overwrites this with the real running manifest.
+      services: buildQueuedServiceEntries(feature, runDirFor(logsDir, runId), env),
       repoPaths: normalizeRepoPaths((feature.repos ?? []).map((r) => r.localPath)),
       queueReason: reason,
       heartbeatAt: startedAt,
@@ -566,10 +621,18 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
 	    store: runStore,
 	    broker: externalHealBroker,
       workspaceEvents,
+      isWorktreeOwnerActive: (kind, id) => {
+        if (kind === 'run') {
+          const d = runStore.get(id)
+          return d ? isActiveRunStatus(d.manifest.status) : false
+        }
+        const m = benchmarkStore.get(id)
+        return m ? (m.status === 'running' || m.status === 'sabotaging' || m.status === 'ready') : false
+      },
 	    startRun: async (
       featureName: string,
       env?: string,
-      healAgentReq?: { kind: 'external'; sessionId: string; clientKind: 'claude-cli' | 'claude-desktop' | 'codex-cli' | 'codex-desktop' | 'other'; clientVersion?: string; conversationName?: string },
+      healAgentReq?: { kind: 'external'; sessionId: string; clientKind: 'claude-cli' | 'claude-desktop' | 'codex-cli' | 'codex-desktop' | 'other'; clientVersion?: string; conversationName?: string; claimable?: boolean },
       isolation?: 'worktree' | 'queue',
       executionType: ExecutionType = 'run',
     ): Promise<StartRunOutcome> => {
@@ -582,8 +645,13 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
       const runDir = runDirFor(logsDir, runId)
       const sourceRepoPaths = normalizeRepoPaths((feature.repos ?? []).map((r) => r.localPath))
       const cost = estimateRunCost(buildServiceSpecs(feature, runDir, env).length)
+      // A portified feature ALWAYS runs worktree-isolated: its saved overlay is
+      // applied into per-run worktrees so two boots get disjoint injected ports.
+      // That makes it inherently collision-free, so we auto-isolate (no user
+      // prompt) and isolate EVERY repo, not just the colliding ones.
+      const portified = portifyOverlayExists(feature.featureDir)
       const collision = detectRepoCollision(sourceRepoPaths, listActiveForScheduler())
-      if (collision && !isolation) {
+      if (collision && !isolation && !portified) {
         return {
           kind: 'collision',
           conflictingRunId: collision.conflictingRunId,
@@ -591,8 +659,10 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
           repoPaths: collision.repoPaths,
         }
       }
-      const useWorktree = Boolean(collision) && isolation === 'worktree'
-      const worktreeRepoNames = useWorktree && collision ? repoNamesForPaths(feature, collision.repoPaths) : []
+      const useWorktree = portified || (Boolean(collision) && isolation === 'worktree')
+      const worktreeRepoNames = portified
+        ? (feature.repos ?? []).map((r) => r.name)
+        : useWorktree && collision ? repoNamesForPaths(feature, collision.repoPaths) : []
 
       // The actual launch: envset apply, worktree isolation, orchestrator
       // construction + kickoff. Deferred and reused by the queue when the run
@@ -616,23 +686,27 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
         }
       }
 
-      // Wire the heal loop based on the project's heal-agent setting (or an
-      // explicit per-request override):
-      //   - body `healAgent.kind === 'external'` → skip auto-heal, set
-      //     externalHeal mode, claim the broker for the supplied session.
-      //   - project 'auto' (default) → prefer claude, fall back to codex.
-      //   - project 'claude' / 'codex' → require that exact CLI on PATH.
-      //   - project 'manual' → skip auto-heal entirely; the orchestrator's
-      //     signal polling handles the user's hand-driven fix instead.
-      //   - project 'external' → treated like manual at startup; the
-      //     external client typically registers explicitly via the body
-      //     override or `POST /heal-agent/claim` post-start.
+      // Wire the heal loop. The run's *trigger source* decides the mode, not
+      // just the project setting:
+      //   - external origin (any MCP-triggered run, `healAgent.kind ===
+      //     'external'`) → skip project auto-heal, set externalHeal mode. The
+      //     project Heal Agent setting applies ONLY to UI/REST-triggered runs.
+      //   - of those, only a *claimable* request (Desktop, `claimable !==
+      //     false`) gets an externalHealSession + broker claim. A non-claimable
+      //     external origin (CLI / 'other') still runs in external mode and
+      //     waits for a Desktop/UI drive — Canary Lab does not spawn its own
+      //     auto-heal agent for it.
+      //   - UI/REST run with no external request → project config decides:
+      //     'auto' prefers claude→codex; 'claude'/'codex' require that CLI;
+      //     'manual' skips auto-heal (signal polling drives); 'external' waits
+      //     for a client to claim.
       // If the chosen CLI isn't available, autoHeal stays undefined and the
       // run still works without the self-fixing cycle.
       const projectConfig = loadProjectConfig(opts.projectRoot)
-      const isExternalRequest = healAgentReq?.kind === 'external'
+      const externalOrigin = healAgentReq?.kind === 'external'
+      const canClaim = externalOrigin && healAgentReq?.claimable !== false
       let externalHealSession: import('./lib/runtime/manifest').ExternalHealSession | undefined
-      if (isExternalRequest && healAgentReq) {
+      if (canClaim && healAgentReq) {
         const nowIso = new Date().toISOString()
         externalHealSession = {
           sessionId: healAgentReq.sessionId,
@@ -655,14 +729,18 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
         }) => string
         buildCyclePrompt: BuildHealCyclePrompt
       } | undefined
-      const agentChoice = (isExternalRequest || isBoot)
+      const agentChoice = (externalOrigin || isBoot)
         ? null
         : pickConfiguredHealAgent(projectConfig.healAgent)
       if (isBoot) {
         runnerLog.info('Boot-only session: booting services and holding them — no tests, no heal.')
-      } else if (isExternalRequest) {
+      } else if (externalOrigin && canClaim) {
         runnerLog.info(
-          `Auto-heal disabled: external client (${healAgentReq?.clientKind}, session ${healAgentReq?.sessionId.slice(0, 8)}) will drive the heal loop.`,
+          `Auto-heal disabled: external client (${healAgentReq?.clientKind}, session ${healAgentReq?.sessionId.slice(0, 8)}) claimed and will drive the heal loop.`,
+        )
+      } else if (externalOrigin) {
+        runnerLog.info(
+          `Auto-heal disabled: run triggered by an external client (${healAgentReq?.clientKind}) that can't claim heal — waiting in external mode for a Desktop/UI drive.`,
         )
       } else if (projectConfig.healAgent === 'manual') {
         runnerLog.info('Auto-heal disabled: project config is set to "manual" — the run will pause for hand-driven fixes.')
@@ -670,6 +748,9 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
         runnerLog.info('Auto-heal disabled: project config is set to "external" — the run will wait for an external client to claim heal.')
       }
       if (agentChoice) {
+        // Resolve the absolute binary path once so the agent spawns even under
+        // a restricted PATH (e.g. a Desktop-launched UI server).
+        const agentBinary = resolveAgentBinary(agentChoice) ?? undefined
         try {
           autoHeal = {
             agent: agentChoice,
@@ -679,6 +760,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
               mcpOutputDir,
               mcpConfigFile: path.join(runDir, 'mcp-config.json'),
               promptFile,
+              binaryPath: agentBinary,
             }),
             buildCyclePrompt: buildOrchestratorHealPrompt({
               agent: agentChoice,
@@ -702,6 +784,13 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
           worktrees.push(await addWorktree({ repoName, localPath: repo.localPath, worktreesDir: path.join(runDir, 'worktrees') }))
           runnerLog.info(`Isolated repo "${repoName}" in a per-run worktree.`)
         } catch (err) {
+          // A portified run MUST have a worktree for every repo — without one
+          // its overlay can't apply and it would boot un-portified (EADDRINUSE
+          // on a concurrent boot). Fail loud instead of silently running bare.
+          if (portified) {
+            if (backups) restore(backups)
+            throw new Error(`worktree isolation failed for portified repo "${repoName}": ${(err as Error).message}`)
+          }
           runnerLog.warn(`Worktree isolation failed for "${repoName}"; running in place: ${(err as Error).message}`)
         }
       }
@@ -721,8 +810,8 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
           // heal modes off regardless of project config.
           autoHeal: isBoot ? undefined : autoHeal,
           manualHeal:
-            !isBoot && !isExternalRequest && projectConfig.healAgent === 'manual',
-          externalHeal: !isBoot && (isExternalRequest || projectConfig.healAgent === 'external'),
+            !isBoot && !externalOrigin && projectConfig.healAgent === 'manual',
+          externalHeal: !isBoot && (externalOrigin || projectConfig.healAgent === 'external'),
           externalHealSession,
           repoBranchSnapshots,
           // Route every manifest/index write through RunStore so its event
@@ -739,7 +828,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
       // recognised. The session was already baked into the initial manifest
       // by passing it to the orchestrator constructor; this call ensures the
       // in-memory map agrees and the audit log records the claim.
-      if (isExternalRequest && healAgentReq) {
+      if (canClaim && healAgentReq) {
         externalHealBroker.claim(runId, {
           sessionId: healAgentReq.sessionId,
           clientKind: healAgentReq.clientKind,
@@ -855,6 +944,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
       if (!preserveExternal && !preserveManual) {
         const agentChoice = pickConfiguredHealAgent(projectConfig.healAgent, manifest.healAgent)
         if (agentChoice) {
+          const agentBinary = resolveAgentBinary(agentChoice) ?? undefined
           try {
             autoHeal = {
               agent: agentChoice,
@@ -864,6 +954,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
                 mcpOutputDir,
                 mcpConfigFile: path.join(runDir, 'mcp-config.json'),
                 promptFile,
+                binaryPath: agentBinary,
               }),
               buildCyclePrompt: buildOrchestratorHealPrompt({
                 agent: agentChoice,
@@ -1044,6 +1135,98 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
     logsDir,
   })
   await app.register(runsStreamRoutes, { store: runStore })
+
+  // Benchmark: race two repair arms on a sabotaged codebase. The runner closes
+  // over the same primitives startRun uses (ptyFactory, registry, attachRunStreams).
+  const benchmarkRunner = createBenchmarkRunner({
+    projectRoot: opts.projectRoot,
+    logsDir,
+    store: benchmarkStore,
+    ptyFactory,
+    runStore,
+    registry,
+    scheduler,
+    attachRunStreams,
+    allocateRunPorts,
+    applyFeatureEnvset,
+    loadFeatures: () => loadFeatures(featuresDir),
+    // Benchmark pins its own agent (per-run choice), NOT the project's global
+    // heal-agent setting — keeps a benchmark reproducible + always local-auto.
+    pickAgent: (preferred) => pickAvailableHealAgent(preferred),
+    now: () => new Date().toISOString(),
+  })
+  await app.register(benchmarkRoutes, {
+    store: benchmarkStore,
+    logsDir,
+    featuresDir,
+    projectRoot: opts.projectRoot,
+    startBenchmark: benchmarkRunner.startBenchmark,
+    abortBenchmark: benchmarkRunner.abort,
+    readSabotageLog: (id) => {
+      try {
+        return fs.readFileSync(path.join(benchmarkDir(logsDir, id), 'sabotage-agent.log'), 'utf-8')
+      } catch {
+        return ''
+      }
+    },
+    loadAgentSession: (id) => {
+      try {
+        const raw = fs.readFileSync(path.join(benchmarkDir(logsDir, id), 'agent-session.json'), 'utf-8')
+        const parsed = parseAgentSessionRefFile(raw)
+        const ref = parsed ? selectAgentSessionRef(parsed) : null
+        if (!ref) return null
+        const logPath = fs.existsSync(ref.logPath)
+          ? ref.logPath
+          : (ref.agent === 'claude' ? findClaudeLogBySessionId(ref.sessionId) : null)
+        if (!logPath) return null
+        const { events, meta } = loadAgentSession({ ...ref, logPath })
+        return { agent: ref.agent, sessionId: ref.sessionId, model: meta.model, effort: meta.effort, events }
+      } catch {
+        return null
+      }
+    },
+    listSkills: (feature) => sabotageSkillsForFeature(loadBundledSabotageSkills(), feature),
+  })
+  await app.register(benchmarkStreamRoutes, { store: benchmarkStore })
+
+  // Port-ification workflow: rewrite a feature's apps to use injectable ports,
+  // proven by a concurrent double-boot, ending at a user commit. Same agent
+  // selection policy as the benchmark (pin the chosen CLI; ignore global heal
+  // setting).
+  const portifyRunner = createPortifyRunner({
+    logsDir,
+    store: portifyStore,
+    ptyFactory,
+    loadFeatures: () => loadFeatures(featuresDir),
+    pickAgent: (preferred) => pickAvailableHealAgent(preferred),
+    now: () => new Date().toISOString(),
+  })
+  await app.register(portifyRoutes, {
+    store: portifyStore,
+    startPortify: portifyRunner.startPortify,
+    savePortify: portifyRunner.save,
+    cancelPortify: portifyRunner.cancel,
+    revisePortify: portifyRunner.revise,
+    removePortify: portifyRunner.remove,
+    loadAgentSession: (id) => {
+      try {
+        const raw = fs.readFileSync(path.join(portifyDir(logsDir, id), 'agent-session.json'), 'utf-8')
+        const parsed = parseAgentSessionRefFile(raw)
+        const ref = parsed ? selectAgentSessionRef(parsed) : null
+        if (!ref) return null
+        const logPath = fs.existsSync(ref.logPath)
+          ? ref.logPath
+          : (ref.agent === 'claude' ? findClaudeLogBySessionId(ref.sessionId) : null)
+        if (!logPath) return null
+        const { events, meta } = loadAgentSession({ ...ref, logPath })
+        return { agent: ref.agent, sessionId: ref.sessionId, model: meta.model, effort: meta.effort, events }
+      } catch {
+        return null
+      }
+    },
+  })
+  await app.register(portifyStreamRoutes, { store: portifyStore })
+
   await app.register(workspaceStreamRoutes, { events: workspaceEvents })
   await app.register(draftAgentStreamRoutes, {
     brokerForDraft: (draftId) => draftBrokers.get(draftId) ?? null,
@@ -1132,6 +1315,14 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
       const body = (() => { try { return JSON.parse(resp.payload) } catch { return resp.payload } })()
       return { statusCode: resp.statusCode, body }
     },
+    // Port-ification workflow — reuse the in-process runner + store (the same
+    // ones behind routes/portify.ts). start/save/cancel throw with a
+    // statusCode the MCP tools surface as errors.
+    startPortify: (feature, agent, maxAttempts) => portifyRunner.startPortify({ feature, agent, maxAttempts }),
+    getPortify: (workflowId) => portifyStore.get(workflowId),
+    savePortify: (workflowId) => portifyRunner.save(workflowId),
+    cancelPortify: (workflowId) => portifyRunner.cancel(workflowId),
+    revisePortify: (workflowId, feedback) => portifyRunner.revise(workflowId, feedback),
 	  })
 
   // Serve the built React frontend if it exists. In development the dist dir

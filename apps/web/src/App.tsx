@@ -9,6 +9,8 @@ import { VerticalSplit } from './components/VerticalSplit'
 import { GlobalStatusBar } from './components/GlobalStatusBar'
 import { AddTestWizard } from './components/AddTestWizard'
 import { CollisionConfirmDialog } from './components/CollisionConfirmDialog'
+import { PortifyWizard } from './components/PortifyWizard'
+import { LogCleanupPage } from './components/LogCleanupPage'
 import type { RepoCollisionChoice } from './api/client'
 import * as api from './api/client'
 import { connectWorkspaceEvents } from './api/workspace-socket'
@@ -22,7 +24,15 @@ export function App() {
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
   const [configFor, setConfigFor] = useState<string | null>(null)
   const [testsRefreshKey, setTestsRefreshKey] = useState(0)
-  const [collisionPrompt, setCollisionPrompt] = useState<{ feature: string; env?: string; mode?: 'test' | 'boot'; info: RepoCollisionChoice } | null>(null)
+  const [specTotalTests, setSpecTotalTests] = useState(0)
+  const [collisionPrompt, setCollisionPrompt] = useState<{ feature: string; env?: string; mode?: 'test' | 'boot'; info: RepoCollisionChoice; portsConfigured?: boolean } | null>(null)
+  // Port-ification wizard target: 'new' starts a fresh workflow for a feature;
+  // 'revisit' reopens an in-flight workflow (from the status bar) by id.
+  const [portifyTarget, setPortifyTarget] = useState<
+    { kind: 'new'; feature: string } | { kind: 'revisit'; workflowId: string } | null
+  >(null)
+  // Top-level view: the normal workspace, or the full-screen Log Cleanup page.
+  const [view, setView] = useState<'workspace' | 'cleanup'>('workspace')
   const pendingRunSelectionRef = useRef<string | null>(null)
   const selectedFeatureRef = useRef<string | null>(null)
 
@@ -49,7 +59,7 @@ export function App() {
   // sessions are excluded — they're not test runs and live in the global
   // Services surface, not the Runs list.
   const featureRuns = useMemo(
-    () => allRuns.filter((r) => r.feature === selectedFeature && r.executionType !== 'boot'),
+    () => allRuns.filter((r) => r.feature === selectedFeature && r.executionType !== 'boot' && r.executionType !== 'benchmark'),
     [allRuns, selectedFeature],
   )
 
@@ -109,7 +119,13 @@ export function App() {
     } catch (err) {
       const collision = api.asRepoCollision(err)
       if (collision) {
-        setCollisionPrompt({ feature: selectedFeature, env, mode, info: collision })
+        // A collision means a second concurrent run of the same app — the one
+        // case where hardcoded ports actually clash. Check whether ports are
+        // injectable so the dialog can offer the durable fix alongside
+        // worktree/queue. Best-effort: the dialog still works without the flag.
+        let portsConfigured: boolean | undefined
+        try { portsConfigured = (await api.benchmarkPreflight(selectedFeature, env)).portsConfigured } catch { /* ignore */ }
+        setCollisionPrompt({ feature: selectedFeature, env, mode, info: collision, portsConfigured })
         return
       }
       /* other errors surfaced via UI */
@@ -146,12 +162,12 @@ export function App() {
       if (preferredFeature && data.some((f) => f.name === preferredFeature)) {
         pendingRunSelectionRef.current = null
         setSelectedFeature(preferredFeature)
-        setSelectedRunId(allRuns.find((r) => r.feature === preferredFeature && r.executionType !== 'boot')?.runId ?? null)
+        setSelectedRunId(allRuns.find((r) => r.feature === preferredFeature && r.executionType !== 'boot' && r.executionType !== 'benchmark')?.runId ?? null)
       } else if (!selectedFeature || !data.some((f) => f.name === selectedFeature)) {
         const nextFeature = data[0]?.name ?? null
         pendingRunSelectionRef.current = null
         setSelectedFeature(nextFeature)
-        setSelectedRunId(nextFeature ? allRuns.find((r) => r.feature === nextFeature && r.executionType !== 'boot')?.runId ?? null : null)
+        setSelectedRunId(nextFeature ? allRuns.find((r) => r.feature === nextFeature && r.executionType !== 'boot' && r.executionType !== 'benchmark')?.runId ?? null : null)
       }
     }).catch(() => {})
   }, [allRuns, selectedFeature])
@@ -203,9 +219,11 @@ export function App() {
           onSelectFeature={(name) => {
             pendingRunSelectionRef.current = null
             setSelectedFeature(name)
-            setSelectedRunId(allRuns.find((r) => r.feature === name && r.executionType !== 'boot')?.runId ?? null)
+            setSelectedRunId(allRuns.find((r) => r.feature === name && r.executionType !== 'boot' && r.executionType !== 'benchmark')?.runId ?? null)
           }}
           onFeaturesChanged={refreshFeatures}
+          onStartPortify={(f) => setPortifyTarget({ kind: 'new', feature: f })}
+          onOpenPortify={(workflowId) => setPortifyTarget({ kind: 'revisit', workflowId })}
         />
       ),
     },
@@ -221,6 +239,7 @@ export function App() {
           activeRunSummary={summaryForSelectedFeature}
           activeRunStatus={statusForSelectedFeature}
           refreshKey={testsRefreshKey}
+          onTotalTestsChange={setSpecTotalTests}
         />
       ),
     },
@@ -231,10 +250,10 @@ export function App() {
       collapsible: false,
       content: (
         <VerticalSplit
-          storageKey="canary-lab.runs-detail-split"
-          defaultTopPercent={42}
+          storageKey="canary-lab.runs-detail-split-v2"
+          defaultTopPercent={25}
           minTopPx={120}
-          minBottomPx={160}
+          minBottomPx={320}
           top={(
             <RunsColumn
               feature={selectedFeature}
@@ -247,7 +266,7 @@ export function App() {
               runDisabled={false}
             />
           )}
-          bottom={<RunDetailColumn runId={selectedRunId} onOpenPlaywrightSettings={setConfigFor} />}
+          bottom={<RunDetailColumn runId={selectedRunId} onOpenPlaywrightSettings={setConfigFor} totalTests={specTotalTests} />}
         />
       ),
     },
@@ -257,19 +276,28 @@ export function App() {
     <div className="flex h-full w-full flex-col">
       <GlobalStatusBar
         activeRunDetail={activeRunDetail}
+        features={features}
         onNavigateToRun={(feature, runId) => {
           pendingRunSelectionRef.current = null
           setSelectedFeature(feature)
           setSelectedRunId(runId)
+          setView('workspace')
         }}
+        onOpenCleanup={() => setView('cleanup')}
+        onStartPortify={(f) => setPortifyTarget({ kind: 'new', feature: f })}
+        onOpenPortify={(workflowId) => setPortifyTarget({ kind: 'revisit', workflowId })}
       />
       <div className="min-h-0 flex-1">
-        <ResizablePanels panels={panels} />
+        {view === 'cleanup'
+          ? <LogCleanupPage onClose={() => setView('workspace')} />
+          : <ResizablePanels panels={panels} />}
       </div>
       {configFor && (
         <FeatureConfigEditor
           feature={configFor}
           initialTab="playwright"
+          onStartPortify={(f) => setPortifyTarget({ kind: 'new', feature: f })}
+          onOpenPortify={(workflowId) => setPortifyTarget({ kind: 'revisit', workflowId })}
           onClose={() => setConfigFor(null)}
           onRenamed={(_, nextFeature) => {
             setConfigFor(nextFeature)
@@ -277,7 +305,7 @@ export function App() {
               setFeatures(data)
               pendingRunSelectionRef.current = null
               setSelectedFeature(nextFeature)
-              setSelectedRunId(allRuns.find((r) => r.feature === nextFeature && r.executionType !== 'boot')?.runId ?? null)
+              setSelectedRunId(allRuns.find((r) => r.feature === nextFeature && r.executionType !== 'boot' && r.executionType !== 'benchmark')?.runId ?? null)
             }).catch(() => {})
           }}
           onDeleted={(deletedFeature) => {
@@ -288,7 +316,7 @@ export function App() {
                 const nextFeature = data[0]?.name ?? null
                 pendingRunSelectionRef.current = null
                 setSelectedFeature(nextFeature)
-                setSelectedRunId(nextFeature ? allRuns.find((r) => r.feature === nextFeature && r.executionType !== 'boot')?.runId ?? null : null)
+                setSelectedRunId(nextFeature ? allRuns.find((r) => r.feature === nextFeature && r.executionType !== 'boot' && r.executionType !== 'benchmark')?.runId ?? null : null)
               }
             }).catch(() => {})
           }}
@@ -305,8 +333,29 @@ export function App() {
         <CollisionConfirmDialog
           info={collisionPrompt.info}
           feature={collisionPrompt.feature}
+          portsConfigured={collisionPrompt.portsConfigured}
+          onPortify={() => { const f = collisionPrompt.feature; setCollisionPrompt(null); setPortifyTarget({ kind: 'new', feature: f }) }}
           onChoose={resolveCollision}
           onCancel={() => setCollisionPrompt(null)}
+        />
+      )}
+      {portifyTarget && (
+        <PortifyWizard
+          // Key on the target identity so switching new→revisit (e.g. the blocked
+          // Plan screen's "Open running workflow") remounts with fresh state —
+          // workflowId is seeded from a prop via useState, which only runs at mount.
+          key={portifyTarget.kind === 'new' ? `new:${portifyTarget.feature}` : `revisit:${portifyTarget.workflowId}`}
+          {...(portifyTarget.kind === 'new'
+            ? { feature: portifyTarget.feature, agent: 'claude' as const }
+            : { workflowId: portifyTarget.workflowId })}
+          onOpenActive={(workflowId) => setPortifyTarget({ kind: 'revisit', workflowId })}
+          onClose={() => setPortifyTarget(null)}
+          onSaved={() => {
+            setPortifyTarget(null)
+            // The overlay now exists — refresh /api/features so the "Portified"
+            // badge + Ports-tab indicator reflect it immediately.
+            refreshFeatures(selectedFeatureRef.current)
+          }}
         />
       )}
     </div>

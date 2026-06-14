@@ -117,11 +117,10 @@ function patchObjectLiteral(
 /** Convert a Babel AST node to a ConfigValue tree. Non-literal expressions
  *  collapse into `{ $expr: '<source-snippet>' }`. */
 function nodeToValue(
-  node: K.ExpressionKind | null | undefined,
+  node: K.ExpressionKind,
   complex: string[],
   path: string,
 ): ConfigValue {
-  if (!node) return null
   switch (node.type) {
     case 'NullLiteral':
       return null

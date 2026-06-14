@@ -3,9 +3,11 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import {
+  DEFAULT_PORT,
   loadProjectConfig,
   normalizePersonalWikiPath,
   projectConfigPath,
+  resolveProjectPort,
   saveProjectConfig,
 } from './project-config'
 
@@ -103,9 +105,48 @@ describe('project config', () => {
     expect(normalizePersonalWikiPath('~/Documents')).toBe(fs.realpathSync(documents))
   })
 
+  it('expands ~\\ (Windows-style) personal wiki paths', () => {
+    const documents = path.join(os.homedir(), 'Documents')
+    expect(normalizePersonalWikiPath('~\\Documents')).toBe(fs.realpathSync(documents))
+  })
+
   it('loads missing or invalid stored personal wiki paths as null', () => {
     const projectRoot = mkProject()
     fs.writeFileSync(projectConfigPath(projectRoot), JSON.stringify({ personalWikiPath: path.join(projectRoot, 'missing') }))
     expect(loadProjectConfig(projectRoot)).toEqual({ healAgent: 'external', editor: 'auto', personalWikiPath: null })
+  })
+
+  it('loads a valid port and omits invalid or out-of-range ports', () => {
+    const projectRoot = mkProject()
+    fs.writeFileSync(projectConfigPath(projectRoot), JSON.stringify({ port: 8000 }))
+    expect(loadProjectConfig(projectRoot).port).toBe(8000)
+
+    for (const bad of [0, 70000, -1, 3000.5, '3000', null, {}]) {
+      fs.writeFileSync(projectConfigPath(projectRoot), JSON.stringify({ port: bad }))
+      expect(loadProjectConfig(projectRoot).port).toBeUndefined()
+    }
+  })
+
+  it('does not add a port key to config files that omit it', () => {
+    const projectRoot = mkProject()
+    saveProjectConfig(projectRoot, { healAgent: 'codex', editor: 'auto', personalWikiPath: null })
+    expect(fs.readFileSync(projectConfigPath(projectRoot), 'utf-8')).toBe(
+      '{\n  "healAgent": "codex",\n  "editor": "auto",\n  "personalWikiPath": null\n}\n',
+    )
+  })
+
+  it('persists a valid port and drops invalid ones', () => {
+    const projectRoot = mkProject()
+    saveProjectConfig(projectRoot, { healAgent: 'external', editor: 'auto', personalWikiPath: null, port: 8080 })
+    expect(loadProjectConfig(projectRoot).port).toBe(8080)
+
+    saveProjectConfig(projectRoot, { healAgent: 'external', editor: 'auto', personalWikiPath: null, port: 99999 })
+    expect(loadProjectConfig(projectRoot).port).toBeUndefined()
+  })
+
+  it('resolves the configured port or falls back to the default', () => {
+    expect(resolveProjectPort({ healAgent: 'external', editor: 'auto', personalWikiPath: null, port: 8000 })).toBe(8000)
+    expect(resolveProjectPort({ healAgent: 'external', editor: 'auto', personalWikiPath: null })).toBe(DEFAULT_PORT)
+    expect(DEFAULT_PORT).toBe(7421)
   })
 })

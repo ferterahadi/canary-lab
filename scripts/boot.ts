@@ -1,10 +1,19 @@
 import { banner, section, ok, fail, info, dim, line } from '../shared/cli-ui/ui'
 import { runAsScript } from './run-as-script'
+import { getProjectRoot } from '../shared/runtime/project-root'
+import { DEFAULT_PORT, loadProjectConfig, resolveProjectPort } from '../apps/web-server/lib/runtime/launcher/project-config'
 
-// Canary Lab always serves on 7421 (see ui-command.ts) so MCP + CLI clients
-// connect consistently. The boot command is a thin client over the same REST
-// surface the web UI uses, so it requires `canary-lab ui` to be running.
-const SERVER = 'http://localhost:7421'
+// The boot command is a thin client over the same REST surface the web UI uses,
+// so it requires `canary-lab ui` to be running. The port comes from this
+// project's canary-lab.config.json (default 7421).
+function resolveServerBase(): string {
+  try {
+    return `http://localhost:${resolveProjectPort(loadProjectConfig(getProjectRoot()))}`
+  } catch {
+    return `http://localhost:${DEFAULT_PORT}`
+  }
+}
+const SERVER = resolveServerBase()
 
 function usage(): void {
   banner('Canary Lab — boot')
@@ -24,7 +33,7 @@ async function postJson(url: string, body: unknown): Promise<{ status: number; j
       body: JSON.stringify(body),
     })
   } catch {
-    fail('Could not reach the Canary Lab server on port 7421. Start it with `npx canary-lab ui`, then retry.')
+    fail(`Could not reach the Canary Lab server at ${SERVER}. Start it with \`npx canary-lab ui\`, then retry.`)
     process.exit(1)
   }
   const json = (await resp.json().catch(() => ({}))) as Record<string, unknown>

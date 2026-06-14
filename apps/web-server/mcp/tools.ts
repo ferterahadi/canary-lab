@@ -16,6 +16,8 @@ import {
   type NormalizedRunCounts,
 } from '../lib/external-heal-surface'
 import { loadFeatures } from '../lib/feature-loader'
+import { isHealClaimAllowed } from '../lib/heal-claim-policy'
+import { computePortPreflight } from '../lib/runtime/port-preflight'
 import {
   createVerificationConfig,
   getVerificationConfig,
@@ -69,6 +71,8 @@ import {
   deriveRunActionAvailability,
 } from '../../../shared/run-state'
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../lib/workspace-events'
+import type { PortifyManifest } from '../lib/runtime/portify/types'
+import { overlayExists as portifyOverlayExists } from '../lib/runtime/portify/overlay'
 
 // Every Canary Lab MCP tool is a thin wrapper around an existing internal
 // helper or REST handler. The translation pattern: validate input via zod,
@@ -126,6 +130,7 @@ export interface CanaryLabMcpDeps {
       clientKind: 'claude-cli' | 'claude-desktop' | 'codex-cli' | 'codex-desktop' | 'other'
       clientVersion?: string
       conversationName?: string
+      claimable?: boolean
     },
     isolation?: 'worktree' | 'queue',
     executionType?: 'run' | 'boot',
@@ -138,6 +143,7 @@ export interface CanaryLabMcpDeps {
       clientKind: 'claude-cli' | 'claude-desktop' | 'codex-cli' | 'codex-desktop' | 'other'
       clientVersion?: string
       conversationName?: string
+      claimable?: boolean
     },
     guidance?: string,
   ) => Promise<{ runId: string; mode?: 'remaining' }>
@@ -163,6 +169,14 @@ export interface CanaryLabMcpDeps {
     sessionId: string | undefined,
     guidance: string | undefined,
   ) => Promise<{ statusCode: number; body: unknown }>
+  /** Port-ification workflow (make a feature's apps use injectable ports).
+   *  These reuse the in-process portify runner + store behind routes/portify.ts;
+   *  the start/save/cancel calls throw with a `statusCode` the tools surface. */
+  startPortify?: (feature: string, agent?: 'claude' | 'codex', maxAttempts?: number) => Promise<{ workflowId: string }>
+  getPortify?: (workflowId: string) => PortifyManifest | null
+  savePortify?: (workflowId: string) => Promise<PortifyManifest>
+  cancelPortify?: (workflowId: string) => Promise<PortifyManifest>
+  revisePortify?: (workflowId: string, feedback: string) => Promise<PortifyManifest>
   workspaceEvents?: WorkspaceEventPublisher
 }
 
@@ -170,6 +184,8 @@ const CLIENT_KIND = z.enum(['claude-cli', 'claude-desktop', 'codex-cli', 'codex-
 const SIGNAL_KIND = z.enum(['rerun', 'restart', 'heal'])
 const HEAL_STATUS = z.enum(['connected', 'waiting', 'healing', 'running-tests', 'paused', 'disconnected'])
 const EXTERNAL_DRAFT_STAGE = z.enum(['scaffolding', 'authoring-tests', 'validating', 'ready', 'applied', 'error'])
+const CLAIM_SUPPRESSED_MESSAGE =
+  'Heal claiming is restricted to Claude/Codex Desktop clients, so this run was started without a heal claim. It still runs — drive heal from Desktop or the web UI.'
 const WAIT_FOR_HEAL_TASK_DEFAULT_TIMEOUT_MS = 15 * 60 * 1000
 const WAIT_FOR_HEAL_TASK_MAX_TIMEOUT_MS = 60 * 60 * 1000
 
@@ -217,6 +233,12 @@ export type CanaryLabMcpToolName =
   | 'wait_for_heal_task'
   | 'signal_run'
   | 'handoff_heal'
+  | 'start_portify'
+  | 'get_portify'
+  | 'save_portify'
+  | 'cancel_portify'
+  | 'revise_portify'
+  | 'list_portify_status'
 
 const REPAIR_TOOLS = [
   'list_features',
@@ -271,6 +293,12 @@ const AUTHOR_TOOLS = [
   'start_external_draft',
   'update_external_draft_stage',
   'apply_external_draft',
+  'start_portify',
+  'get_portify',
+  'save_portify',
+  'cancel_portify',
+  'revise_portify',
+  'list_portify_status',
 ] as const satisfies readonly CanaryLabMcpToolName[]
 
 // Tools that exist only in the `full` profile — everything else is composed
@@ -926,6 +954,110 @@ export function registerCanaryLabTools(
     })
   })
 
+  // ── Port-ification (make a feature's apps use injectable ports) ──────────
+  registerTool('start_portify', {
+    description: "Start a port-ification workflow: an agent rewrites a feature's apps so every network listener reads an injected port, proven by booting the stack twice concurrently. The verified edits are saved as an EPHEMERAL OVERLAY (a captured patch under features/<feature>/portify/) — never committed or merged, so the product repo stays pristine; at run time the overlay is applied into a per-run worktree and reverse-applied at teardown. Async — returns a workflowId; poll get_portify, then save_portify once it is ready-to-save. One workflow at a time.",
+    inputSchema: {
+      feature: z.string().describe('Feature name (from list_features).'),
+      agent: z.enum(['claude', 'codex']).optional().describe('Which CLI does the rewrite. Defaults to an available local agent.'),
+      maxAttempts: z.number().int().positive().optional().describe('Edit→verify retries before giving up (default 3).'),
+    },
+  }, async ({ feature, agent, maxAttempts }) => {
+    if (!deps.startPortify) return errorResult('startPortify dependency is not configured')
+    try {
+      const { workflowId } = await deps.startPortify(feature, agent, maxAttempts)
+      return asJsonResult({
+        workflowId,
+        status: 'planning',
+        nextSteps: ['get_portify'],
+        next: `Poll get_portify with workflowId "${workflowId}" until status is "ready-to-save", then save_portify (or cancel_portify).`,
+      })
+    } catch (err) {
+      return errorResult(err instanceof Error ? err.message : String(err))
+    }
+  })
+
+  registerTool('get_portify', {
+    description: 'Read a port-ification workflow: status (planning/editing/verifying/ready-to-save/saved/failed/aborted), attempt count, the diff, and the double-boot verification result.',
+    inputSchema: { workflowId: z.string() },
+  }, async ({ workflowId }) => {
+    if (!deps.getPortify) return errorResult('getPortify dependency is not configured')
+    const manifest = deps.getPortify(workflowId)
+    if (!manifest) return errorResult(`port-ification workflow not found: ${workflowId}`)
+    return asJsonResult(manifest)
+  })
+
+  registerTool('list_portify_status', {
+    description: "List every feature with whether it is PORTIFIED — i.e. has a saved port overlay (features/<feature>/portify/) so it can boot concurrently (benchmark arms / parallel runs) without an EADDRINUSE clash. `portified` is the source of truth: a VERIFIED overlay exists (proven by the double-boot at save time). `declaredSlots` lists the port slots each service/command declares (informational). Use it to see which features still need start_portify.",
+    inputSchema: {},
+  }, async () => {
+    const features = loadFeatures(deps.featuresDir).map((f) => {
+      const pf = computePortPreflight(f)
+      return { feature: f.name, portified: portifyOverlayExists(f.featureDir), declaredSlots: pf.repos }
+    })
+    const portified = features.filter((f) => f.portified).length
+    return asJsonResult({
+      features,
+      summary: { total: features.length, portified, notPortified: features.length - portified },
+    })
+  })
+
+  registerTool('save_portify', {
+    description: "Save a verified port-ification workflow as the feature's EPHEMERAL OVERLAY (captured patch under features/<feature>/portify/) and discard the scratch worktree — NOTHING is committed or merged; the product repo stays pristine. The overlay is applied into a fresh per-run worktree before each run and reverse-applied at teardown. Only valid when status is ready-to-save. Requires confirm: true.",
+    inputSchema: {
+      workflowId: z.string(),
+      confirm: z.literal(true).describe('Must be true. Guards against saving an unreviewed rewrite.'),
+    },
+    annotations: { destructiveHint: false, idempotentHint: false },
+  }, async ({ workflowId }) => {
+    if (!deps.savePortify) return errorResult('savePortify dependency is not configured')
+    try {
+      const manifest = await deps.savePortify(workflowId)
+      return asJsonResult({
+        ...manifest,
+        next: `Overlay saved to features/${manifest.feature}/portify/. The feature now boots with injectable ports on every run — concurrent runs and benchmark arms will not clash — without ever modifying the product repo.`,
+      })
+    } catch (err) {
+      return errorResult(err instanceof Error ? err.message : String(err))
+    }
+  })
+
+  registerTool('revise_portify', {
+    description: "Send review feedback to a ready-to-save port-ification workflow: the agent resumes its session, applies your adjustments (e.g. rename an env var, expose another port slot), and the stack is re-booted twice to re-verify. Async — the workflow returns to editing, then verifying, then ready-to-save; poll get_portify. Feedback rounds are unbounded and separate from the auto-retry budget. Only valid when status is ready-to-save.",
+    inputSchema: {
+      workflowId: z.string(),
+      feedback: z.string().min(1).describe('Plain-language adjustments for the agent to apply to its port-ification diff.'),
+    },
+  }, async ({ workflowId, feedback }) => {
+    if (!deps.revisePortify) return errorResult('revisePortify dependency is not configured')
+    try {
+      const manifest = await deps.revisePortify(workflowId, feedback)
+      return asJsonResult({
+        ...manifest,
+        nextSteps: ['get_portify'],
+        next: `Poll get_portify with workflowId "${workflowId}" until status is "ready-to-save" again, then save_portify (or revise_portify once more).`,
+      })
+    } catch (err) {
+      return errorResult(err instanceof Error ? err.message : String(err))
+    }
+  })
+
+  registerTool('cancel_portify', {
+    description: 'Cancel a port-ification workflow — discards its scratch worktree + branch and restores the feature config. Requires confirm: true.',
+    inputSchema: {
+      workflowId: z.string(),
+      confirm: z.literal(true).describe('Must be true. Guards against discarding in-flight work.'),
+    },
+    annotations: { destructiveHint: true, idempotentHint: false },
+  }, async ({ workflowId }) => {
+    if (!deps.cancelPortify) return errorResult('cancelPortify dependency is not configured')
+    try {
+      return asJsonResult(await deps.cancelPortify(workflowId))
+    } catch (err) {
+      return errorResult(err instanceof Error ? err.message : String(err))
+    }
+  })
+
   registerTool('get_heal_context', {
     description: 'Compact failure handoff packet an external heal agent needs first: current failures, artifact URLs, heal-index, journal, repo branches, lifecycle, and heal prompt map. Use get_run_snapshot for verbose raw summary/debugging fields.',
     inputSchema: {
@@ -952,7 +1084,7 @@ export function registerCanaryLabTools(
 
   registerTool('start_run', {
     description:
-      'Smart entrypoint for Canary Lab runs. If a matching run is healing, this returns that run and blocks fresh/different starts until `cancel_heal` stops it. If `runId` or `run_ref` targets a failed/aborted run and no heal is active, this restarts that same run in remaining-test mode: failed first, then skipped, then pending/not-run. Otherwise it starts a new run. After code changes, call `signal_run` with hypothesis and fixDescription, then `wait_for_heal_task` on the same run.',
+      'Smart entrypoint for Canary Lab runs. If a matching run is healing, this returns that run and blocks fresh/different starts until `cancel_heal` stops it. If `runId` or `run_ref` targets a failed/aborted run and no heal is active, this restarts that same run in remaining-test mode: failed first, then skipped, then pending/not-run. Otherwise it starts a new run. To retry a failed/aborted run, prefer this rerun path (pass `run_ref`) over `abort_run` + a fresh start — a fresh start re-runs the whole suite and is only worth it when prior passes are invalidated (e.g. a global data/state change). After code changes, call `signal_run` with hypothesis and fixDescription, then `wait_for_heal_task` on the same run.',
     inputSchema: {
       feature: z.string().describe('Feature name (from list_features).'),
       env: z.string().optional().describe('Envset name. Defaults to the feature\'s first declared env.'),
@@ -969,6 +1101,15 @@ export function registerCanaryLabTools(
   }, async ({ feature, env, runId, run_ref, claim_heal, session_id, client_kind, conversation_name, guidance, force_new, isolation }) => {
     try {
       const requestedRef = runId ?? run_ref
+      // Heal-claim policy: claiming is reserved for Desktop clients. A CLI (or
+      // undetected 'other') client may still start/verify the run, but must not
+      // own its heal loop — so we down-shift claim_heal to false and tell the
+      // caller, instead of grabbing heal duty behind their back.
+      const claimAllowed = claim_heal && isHealClaimAllowed(client_kind)
+      const claimSuppressed = claim_heal && !claimAllowed
+      const suppressionFields = claimSuppressed
+        ? { claimSuppressed: true, message: CLAIM_SUPPRESSED_MESSAGE }
+        : {}
       // Default (no explicit ref, no force_new): continue the run that's
       // already healing for this feature — the external-heal continuation
       // pattern. With concurrency, `force_new` (or targeting a different run)
@@ -976,14 +1117,15 @@ export function registerCanaryLabTools(
       // same-repo collisions surface a worktree/queue choice.
       const healing = findHealingRunForFeature(deps, feature, env)
       if (healing && !force_new && !requestedRef) {
-        const claim = claim_heal ? claimRun(deps, healing.manifest.runId, session_id, client_kind, conversation_name) : null
+        const claim = claimAllowed ? claimRun(deps, healing.manifest.runId, session_id, client_kind, conversation_name) : null
         return asJsonResult({
           runId: healing.manifest.runId,
           reused: true,
           status: healing.manifest.status,
-          claimed: claim_heal ? claim?.accepted === true : false,
+          claimed: claimAllowed ? claim?.accepted === true : false,
           claim,
-          ...(claim_heal ? healWaitNext(healing.manifest.runId) : {}),
+          ...suppressionFields,
+          ...(claimAllowed ? healWaitNext(healing.manifest.runId) : {}),
         })
       }
       if (requestedRef) {
@@ -998,15 +1140,21 @@ export function registerCanaryLabTools(
         }
         const target = resolved.detail
         const status = target.manifest.status
+        if (isActiveBootRun(target)) {
+          // Boot-only sessions hold services up with no tests and no heal loop.
+          // Don't claim heal or tell the caller to wait_for_heal_task.
+          return asJsonResult({ ...bootSessionValue(target), reused: true })
+        }
         if (isActiveRunStatus(status)) {
-          const claim = claim_heal ? claimRun(deps, target.manifest.runId, session_id, client_kind, conversation_name) : null
+          const claim = claimAllowed ? claimRun(deps, target.manifest.runId, session_id, client_kind, conversation_name) : null
           return asJsonResult({
             runId: target.manifest.runId,
             reused: true,
             status,
-            claimed: claim_heal ? claim?.accepted === true : false,
+            claimed: claimAllowed ? claim?.accepted === true : false,
             claim,
-            ...(claim_heal ? healWaitNext(target.manifest.runId) : {}),
+            ...suppressionFields,
+            ...(claimAllowed ? healWaitNext(target.manifest.runId) : {}),
           })
         }
         if (status === 'passed') {
@@ -1021,6 +1169,11 @@ export function registerCanaryLabTools(
           return errorResult(`run-not-restartable: ${target.manifest.runId} status=${status}`)
         }
         if (!deps.restartExternalRun) return errorResult('restartExternalRun dependency is not configured')
+        // Restarting a failed run re-enters external heal. A disallowed (CLI /
+        // 'other') client may still trigger the restart — it just can't own the
+        // loop: `claimable: false` restarts into external mode with no session
+        // and no broker claim, so the run waits for a Desktop/UI drive rather
+        // than silently restarting into a session the client owns.
         const restarted = await deps.restartExternalRun(
           target.manifest.runId,
           {
@@ -1028,10 +1181,11 @@ export function registerCanaryLabTools(
             sessionId: session_id,
             clientKind: client_kind,
             ...(conversation_name ? { conversationName: conversation_name } : {}),
+            claimable: claimAllowed,
           },
           guidance,
         )
-        const claim = claim_heal ? claimRun(deps, restarted.runId, session_id, client_kind, conversation_name) : null
+        const claim = claimAllowed ? claimRun(deps, restarted.runId, session_id, client_kind, conversation_name) : null
         const counts = normalizeRunCounts(target.summary ?? null)
         return asJsonResult({
           runId: restarted.runId,
@@ -1041,22 +1195,28 @@ export function registerCanaryLabTools(
           statusLine: counts.statusLine,
           counts,
           status: 'running',
-          claimed: claim_heal ? claim?.accepted === true : false,
+          claimed: claimAllowed ? claim?.accepted === true : false,
           claim,
-          ...(claim_heal ? healWaitNext(restarted.runId) : {}),
+          ...suppressionFields,
+          ...(claimAllowed ? healWaitNext(restarted.runId) : {}),
         })
       }
+      // Any MCP-triggered run is external-origin: it must use External-client
+      // heal regardless of the project's Heal Agent setting (which only governs
+      // UI-triggered runs). `claimable` is what splits a Desktop client that
+      // owns the loop from a CLI/'other' client that can't — the latter still
+      // runs in external mode and waits for a Desktop/UI drive instead of
+      // falling back to a locally-spawned auto-heal agent.
       const outcome = await deps.startRun(
         feature,
         env,
-        claim_heal
-          ? {
-              kind: 'external',
-              sessionId: session_id,
-              clientKind: client_kind,
-              ...(conversation_name ? { conversationName: conversation_name } : {}),
-            }
-          : undefined,
+        {
+          kind: 'external',
+          sessionId: session_id,
+          clientKind: client_kind,
+          ...(conversation_name ? { conversationName: conversation_name } : {}),
+          claimable: claimAllowed,
+        },
         isolation,
       )
       if (outcome.kind === 'collision') {
@@ -1078,15 +1238,17 @@ export function registerCanaryLabTools(
           reused: false,
           queued: true,
           queueReason: outcome.reason,
-          claimed: claim_heal,
-          ...(claim_heal ? healWaitNext(outcome.runId) : {}),
+          claimed: claimAllowed,
+          ...suppressionFields,
+          ...(claimAllowed ? healWaitNext(outcome.runId) : {}),
         })
       }
       return asJsonResult({
         runId: outcome.runId,
         reused: false,
-        claimed: claim_heal,
-        ...(claim_heal ? healWaitNext(outcome.runId) : {}),
+        claimed: claimAllowed,
+        ...suppressionFields,
+        ...(claimAllowed ? healWaitNext(outcome.runId) : {}),
       })
     } catch (err) {
       return errorResult(err instanceof Error ? err.message : String(err))
@@ -1126,7 +1288,7 @@ export function registerCanaryLabTools(
       return asJsonResult({
         runId: outcome.runId,
         booted: true,
-        nextSteps: ['services are booting and will be held — exercise them, then call abort_run (confirm:true) to stop services + revert the envset'],
+        nextSteps: ['services are booting and will be held — exercise them, then call abort_run (confirm:true) to stop services + revert the envset. A service that fails its readiness probe is marked failed (status "timeout") but the session stays held; boot does not self-abort on a health-check failure'],
       })
     } catch (err) {
       return errorResult(err instanceof Error ? err.message : String(err))
@@ -1157,7 +1319,7 @@ export function registerCanaryLabTools(
 
   registerTool('abort_run', {
     description:
-      'Hard-abort an active run. Requires `confirm: true` because this kills Playwright + services and cannot be undone.',
+      'Hard-abort an active run. Requires `confirm: true` because this kills Playwright + services and cannot be undone. Do not abort just to re-run: for an active healing run use `signal_run`, and to retry a failed/aborted run pass its `run_ref` to `start_run` (rerun, remaining-test mode). Abort is for killing a run you no longer want.',
     inputSchema: {
       runId: z.string(),
       confirm: z.literal(true).describe('Must be true. Guard against accidental aborts.'),
@@ -1190,6 +1352,11 @@ export function registerCanaryLabTools(
       ...(conversation_name ? { conversationName: conversation_name } : {}),
     })
     if (!result.accepted) {
+      if (result.reason === 'client-kind-not-allowed') {
+        return errorResult(
+          `client-kind-not-allowed: heal claiming is restricted to Claude/Codex Desktop (this client is ${result.clientKind}). The run can still be run/verified; drive heal from Desktop or the web UI.`,
+        )
+      }
       return errorResult(`already-claimed by session ${result.currentSession.sessionId} (${result.currentSession.clientKind})`)
     }
     return asJsonResult({ accepted: true, session: result.session })
@@ -1315,7 +1482,37 @@ function healWaitNext(runId: string): { nextSteps: string[]; next: string } {
   }
 }
 
-type ClaimResult = { accepted: true; session: unknown } | { accepted: false; reason: string; currentSession: unknown }
+const BOOT_SESSION_MESSAGE =
+  'Boot-only session: services are up and held. No tests run and there is no heal task. A service that fails its readiness probe is marked failed (status "timeout") but the session stays held — boot does not self-abort on a health-check failure. Stop with abort_run (confirm:true) when done.'
+
+// A boot run (started via boot_services) holds its services up with no Playwright
+// tests and no heal loop. Following or waiting on one must not claim heal or block
+// on wait_for_heal_task — surface a boot_session result so skill-less clients stop
+// here too instead of dead-waiting until timeout.
+function isActiveBootRun(detail: RunDetail | null | undefined): boolean {
+  return (
+    !!detail &&
+    (detail.manifest.executionType ?? 'run') === 'boot' &&
+    isActiveRunStatus(detail.manifest.status)
+  )
+}
+
+function bootSessionValue(detail: RunDetail): Extract<WaitForHealTaskValue, { type: 'boot_session' }> {
+  return {
+    type: 'boot_session',
+    runId: detail.manifest.runId,
+    executionType: 'boot',
+    status: detail.manifest.status,
+    claimed: false,
+    lifecycle: detail.manifest.lifecycle ?? null,
+    message: BOOT_SESSION_MESSAGE,
+    nextSteps: ['boot session — services are up and held; a service that failed its readiness probe shows status "timeout" but the session stays held (boot does not self-abort on health failure); exercise the live ones, then abort_run (confirm:true) when done'],
+  }
+}
+
+type ClaimResult =
+  | { accepted: true; session: unknown }
+  | { accepted: false; reason: string; currentSession?: unknown }
 
 function claimRun(
   deps: CanaryLabMcpDeps,
@@ -1329,9 +1526,10 @@ function claimRun(
     clientKind,
     ...(conversationName ? { conversationName } : {}),
   })
-  return result.accepted
-    ? { accepted: true, session: result.session }
-    : { accepted: false, reason: result.reason, currentSession: result.currentSession }
+  if (result.accepted) return { accepted: true, session: result.session }
+  return result.reason === 'already-claimed'
+    ? { accepted: false, reason: result.reason, currentSession: result.currentSession }
+    : { accepted: false, reason: result.reason }
 }
 
 function findHealingRunForFeature(
@@ -1489,6 +1687,16 @@ type WaitForHealTaskValue =
   | { type: 'passed'; runId: string; summary: RunDetail['summary'] | null; counts: NormalizedRunCounts }
   | { type: 'failed'; runId: string; status: string; summary: RunDetail['summary'] | null; counts: NormalizedRunCounts }
   | { type: 'timeout'; runId: string; status: string | null; lifecycle: RunDetail['manifest']['lifecycle'] | null }
+  | {
+      type: 'boot_session'
+      runId: string
+      executionType: 'boot'
+      status: string
+      claimed: false
+      lifecycle: RunDetail['manifest']['lifecycle'] | null
+      message: string
+      nextSteps: string[]
+    }
 
 type WaitForHealTaskResult =
   | { ok: true; value: WaitForHealTaskValue }
@@ -1501,6 +1709,8 @@ function classifyWaitForHealTask(
 ): WaitForHealTaskResult | null {
   const detail = deps.store.get(runId)
   if (!detail) return { ok: false, error: `run not found: ${runId}` }
+
+  if (isActiveBootRun(detail)) return { ok: true, value: bootSessionValue(detail) }
 
   const status = detail.manifest.status
   if (status === 'passed') {
@@ -1570,6 +1780,10 @@ async function waitForHealTask(
   clientKind: ExternalHealClientKind,
   timeoutMs: number,
 ): Promise<WaitForHealTaskResult> {
+  // A boot-only session never produces a heal task — return immediately instead
+  // of claiming heal and blocking until timeout.
+  const bootDetail = deps.store.get(runId)
+  if (bootDetail && isActiveBootRun(bootDetail)) return { ok: true, value: bootSessionValue(bootDetail) }
   ensureExternalClaimForMcpCall(deps, runId, sessionId, clientKind)
   const immediate = classifyWaitForHealTask(deps, runId, sessionId)
   if (immediate) return immediate

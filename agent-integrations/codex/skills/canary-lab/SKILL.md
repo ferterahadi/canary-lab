@@ -14,20 +14,20 @@ Before calling Canary Lab MCP tools, make sure the workspace and UI server are a
 1. Read the user-level registry at `~/.canary-lab/workspaces.json`. On Windows, resolve it from the user's home directory, for example `%USERPROFILE%\.canary-lab\workspaces.json`.
 2. If the registry has exactly one workspace, use that workspace. If it has multiple workspaces, list their `name` and `path` values and ask which one to use.
 3. If the registry is missing or empty, ask the user to run `npx canary-lab setup` from the Canary Lab workspace.
-4. Check `http://127.0.0.1:7421/mcp/health`.
+4. Check the MCP health endpoint `/mcp/health` on the UI's port. The port defaults to `7421`, but a project may pin its own in `canary-lab.config.json`; if `7421` does not respond, run `npx canary-lab mcp doctor` to discover the active URL.
 5. If the health check succeeds, confirm `projectRoot` matches the selected workspace. If it points at a different workspace, ask the user whether to stop the existing Canary Lab server before continuing.
-6. If the health check fails, start `npx canary-lab ui` from the selected workspace in a visible long-running terminal when the host supports that. Do not add `--port`; Canary Lab uses port `7421` so MCP clients can connect consistently.
+6. If the health check fails, start `npx canary-lab ui` from the selected workspace in a visible long-running terminal when the host supports that. The port comes from `canary-lab.config.json` (default `7421`); do not pass `--port` (it was removed).
 7. Do not reflexively call `list_features` or `list_runs` after health. For random or new feature creation, call `create_feature` directly with a unique feature name. Use `list_features` only when you need to discover or choose an existing feature, and use `list_runs` only for run, heal, verification, or export workflows.
 
 ## External Run Loop
 
 1. Call `list_features` and choose the requested feature.
-2. Call `start_run` with `claim_heal: true`, a stable `session_id`, `client_kind: "codex-cli"` or `"codex-desktop"`, and a useful `conversation_name`. For requests like "rerun 7cvh", pass `run_ref: "7cvh"`.
+2. Call `start_run` with `claim_heal: true`, a stable `session_id`, and a useful `conversation_name`. Do **not** pass `client_kind` — the MCP bridge auto-detects it (CLI vs Desktop) from the connection; guessing it yourself can mis-set it and suppress heal claim. For requests like "rerun 7cvh", pass `run_ref: "7cvh"`.
 3. If `start_run` returns `type: "repo_collision_requires_choice"`, another run is using the same app/repo. Ask the user whether to run this one isolated in a per-run git worktree (runs now, concurrently) or queue it until the other run finishes, then re-call `start_run` with `isolation: "worktree"` or `isolation: "queue"`. Do not guess. If `start_run` returns `queued: true`, tell the user the run is parked (`queueReason`) and will start automatically when capacity frees; `wait_for_heal_task` still blocks until it starts and needs fixes.
-4. If `start_run` returns an active run, continue that run.
-5. If `start_run` reports `already-claimed`, stop and tell the user which session owns the run.
+4. If `start_run` returns an active run, continue that run. But if it returns `type: "boot_session"` (or `executionType: "boot"`), the run is a held boot-only session — services are up, no tests run, and there is no heal task. Do not claim heal or call `wait_for_heal_task`; report that services are ready and that the user can stop them with `abort_run` (confirm:true) when done. A service that fails its readiness probe is marked failed (its status shows `timeout`) but the session stays held — boot never self-aborts on a health-check failure, so report which services came up and which failed; only `abort_run` tears it down.
+5. If `start_run` reports `already-claimed`, stop and tell the user which session owns the run. If it returns `claimSuppressed: true`, heal claiming is reserved for Claude/Codex **Desktop** clients — this CLI session cannot own the heal loop. The run still runs in External-client heal mode (it does **not** fall back to the project's configured heal agent — it waits for a drive); do not call `wait_for_heal_task`. Report the run id and tell the user to drive heal from Claude/Codex Desktop or the web UI.
 6. Handle user interrupts explicitly: "pause", "intercept", or "pause and heal" means call `pause_run`; "stop heal" or "cancel repair" means call `cancel_heal`; "abort", "kill the run", or "stop everything" means call `abort_run` only with the required confirmation.
-7. Call `wait_for_heal_task` with the same `session_id`.
+7. Call `wait_for_heal_task` with the same `session_id`. (If it ever returns `type: "boot_session"`, the run is a held boot-only session — report services are up and stop here; do not wait again.)
 8. If it returns `passed`, summarize using `result.counts.statusLine` and stop.
 9. If it returns `failed`, report the terminal status using `result.counts.statusLine` and relevant failure summary.
 10. If it returns `needs_heal`, treat the returned heal context as the compact first-stop packet: inspect `context.healPrompt.startHere` first, then use `context.healPrompt.resources`, current failures, and the checked-out source code. Call `get_run_snapshot` only when you need the verbose raw summary, full counts, or deeper debugging fields.
@@ -49,7 +49,7 @@ Use the MCP `author` profile, or `full`, when the user asks to create a feature,
    ```ts
    import { test, expect } from 'canary-lab/feature-support/log-marker-fixture'
    ```
-5. Call `start_external_draft` with a stable `session_id`, `client_kind: "codex-cli"` or `"codex-desktop"`, and a useful `conversation_name`. This only creates a visible Canary Lab task so the user sees that this external client is authoring tests; it does not start an internal wizard agent.
+5. Call `start_external_draft` with a stable `session_id` and a useful `conversation_name` (do not pass `client_kind` — the bridge auto-detects it). This only creates a visible Canary Lab task so the user sees that this external client is authoring tests; it does not start an internal wizard agent.
 6. After `start_external_draft` returns, tell the user you are authoring tests and they can wait in this external client. Continue writing specs locally, then call `update_external_draft_stage` as work progresses: `scaffolding`, `authoring-tests`, `validating`, `ready`, `applied`, or `error`.
 7. Call `apply_external_draft` with the externally authored files, or after writing them locally, so Canary Lab validates and records the applied draft. Do not ask Canary Lab to spawn another Claude/Codex agent for MCP-created authoring.
 
@@ -66,6 +66,7 @@ Use the MCP `author` profile, or `full`, when the user asks to create a feature,
 - `heartbeat` is a low-level liveness refresh for long local repair stretches. `wait_for_heal_task` heartbeats while waiting, and `signal_run` and `get_heal_context` refresh liveness, so call explicit `heartbeat` only before or after a long stretch of local `Read` / `Edit` / `Write` / `Bash` work.
 - `start_run` is the single entrypoint for start/resume/restart intent. With no `run_ref`/`force_new`, a healing run for the feature is continued by default. Concurrent runs are allowed: a same-app collision returns `repo_collision_requires_choice` (resolve with `isolation: "worktree"` or `"queue"`); over the resource budget, the run is `queued` and starts automatically.
 - For requests like "rerun 7cvh", `start_run` resolves the run suffix and restarts that same failed/aborted run in remaining-test mode. Canary Lab reruns failed tests first, then skipped tests, then pending/not-run tests; do not tell the user no test filter exists.
+- To re-execute a run, reuse it: prefer this rerun (`start_run` with `run_ref`) over `abort_run` + a fresh start — rerun re-executes only the failed/skipped/pending tests and avoids the abort + repo-collision dance. Start a fresh full run only when prior passes are genuinely invalidated (e.g. a global data/state change), and you rarely need to `abort_run` first to do so.
 - After changing code or tests, never call `start_run` to verify. Verification means `signal_run` with `hypothesis` and `fixDescription`, then `wait_for_heal_task` on the same `runId`.
 - During normal healing, omit `run_ref`/`force_new` so `start_run` continues the healing run. Use `force_new` only when the user explicitly wants a separate concurrent run on the same feature (it resolves through the collision choice).
 - Never compute passed count as `summary.total - summary.failed.length`.

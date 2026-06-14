@@ -7,10 +7,28 @@ Each entry is tagged with the area it touches:
 - **[Test Runner]** — running tests, run history, auto-heal, services, logs
 - **[Test Generation]** — Add Test wizard, PRD/plan/spec drafting
 - **[Export evaluation]** — exported evaluation reports
-- **[Benchmark]** — self-heal benchmarking (retired in 1.0.0)
+- **[Portify]** — port-ification wizard, converting features to dynamic port allocation
+- **[Cleanup]** — log and run history cleanup
+- **[Benchmark]** — measuring how the repair loop performs compared to running tests without Canary Lab
 - **[General]** — UI shell, CLI, scaffolding, packaging
 
 ---
+
+## 1.3.0 — 2026-06-14
+
+> MCP server is renamed to `Canary_Lab` — run `npx canary-lab setup --force` and restart your agent after upgrading.
+
+- **[Portify]** **Run a feature that was never built for concurrency.** If a feature has hardcoded ports, it'll collide with anything else running at the same time. The port-ification wizard fixes that: an agent rewrites the ports to dynamic allocation, you review and revise, and the change lands as a reversible overlay before anything is committed.
+- **[Cleanup]** **Reclaim disk space without leaving the UI.** Old run logs pile up fast. A new cleanup panel lets you see what's there, filter to boot sessions, and remove what you no longer need — no file manager required.
+- **[Benchmark]** **Groundwork for pluggable harnesses** *(preview — enable with `?showBenchmark=true`).* The goal is a future where you can slot in any harness and measure whether it actually helps. For now it runs the same tests with and without Canary Lab and puts the outcomes side by side.
+- **[Test Runner]** **Know which services came up without reading the logs.** Boot-only runs now show a readiness result per service the moment startup finishes — pass, fail, or timeout at a glance.
+- **[General]** **MCP server renamed to `Canary_Lab`.** Run `npx canary-lab setup --force` and restart your agent after upgrading, otherwise the tools won't appear.
+- **[General]** **MCP health badge and connect guide.** The UI now shows whether your agent is connected, and a new guide walks you through linking Claude Desktop, Codex, or other clients when it isn't.
+- **[General]** **Heal claims limited to Desktop clients.** CLI-connected agents can read run state and failure evidence but can no longer claim heals — that stays with the Desktop client driving the session.
+- **[General]** **Port changes no longer break your agent session.** The MCP bridge now watches the live server record and reconnects automatically when the port changes.
+
+---
+
 ## 1.2.0 — 2026-06-01
 
 > Run `npx canary-lab upgrade` to refresh your sample features so they pick up per-run ports for concurrent runs.

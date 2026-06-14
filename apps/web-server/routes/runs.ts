@@ -4,6 +4,11 @@ import path from 'path'
 import type { RunDetail } from '../lib/run-store'
 import type { RunStore, OrchestratorLike, RestartHealResult, RestartRunResult, StartRunOutcome } from '../lib/run-store'
 import { loadFeatures } from '../lib/feature-loader'
+import { isHealClaimAllowed } from '../lib/heal-claim-policy'
+import { getGitRoot, resolveRepoPath } from '../lib/git-repo'
+import { removeWorktree } from '../lib/runtime/repo-worktree'
+import { listWorktrees, isUnder } from '../lib/runtime/worktree-inventory'
+import { launchEditorDir } from '../lib/editor-launch'
 import { buildRunPaths, runDirFor } from '../lib/runtime/run-paths'
 import { generateEvaluationRewriteWithAgent, type EvaluationRewrite } from '../lib/test-review-export'
 import { buildEvaluationExportArchive } from '../lib/evaluation-export-archive'
@@ -24,7 +29,7 @@ import {
   type EvaluationExportTaskRecord,
 } from '../lib/evaluation-export-store'
 import {
-  loadAgentSessionLog,
+  loadAgentSession,
   locateMostRecentAgentSessionRef,
   parseAgentSessionRefFile,
   selectAgentSessionRef,
@@ -47,6 +52,11 @@ export interface ExternalHealAgentRequest {
   clientKind: 'claude-cli' | 'claude-desktop' | 'codex-cli' | 'codex-desktop' | 'other'
   clientVersion?: string
   conversationName?: string
+  /** Whether this external client may *own* the heal loop (Desktop-only per
+   *  heal-claim-policy). Defaults to true. When false, the run still uses
+   *  External-client heal mode (external origin), but gets no externalHealSession
+   *  and no broker claim — it waits for a Desktop/UI drive instead. */
+  claimable?: boolean
 }
 
 export interface RunsRouteDeps {
@@ -71,6 +81,10 @@ export interface RunsRouteDeps {
   /** Cancel a run still waiting in the admission queue (no orchestrator yet).
    *  Returns true when it was queued and is now aborted. */
   cancelQueuedRun?(runId: string): boolean
+  /** Whether a worktree's owning run/benchmark is still active (non-terminal),
+   *  so the cleanup UI can refuse to remove a worktree in use. Wired in the
+   *  server factory where both the run + benchmark stores are in scope. */
+  isWorktreeOwnerActive?(kind: 'run' | 'benchmark', id: string): boolean
   broker?: Pick<ExternalHealBroker, 'claim'>
   workspaceEvents?: WorkspaceEventPublisher
   restartHeal?(runId: string, text: string): Promise<RestartHealResult>
@@ -149,8 +163,8 @@ export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Pro
       reply.code(404)
       return { reason: 'session-log-missing' }
     }
-    const events = loadAgentSessionLog(ref)
-    return { agent: ref.agent, sessionId: ref.sessionId, events }
+    const { events, meta } = loadAgentSession(ref)
+    return { agent: ref.agent, sessionId: ref.sessionId, model: meta.model, effort: meta.effort, events }
   })
 
   const buildEvaluationZip = async (
@@ -458,6 +472,15 @@ export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Pro
       reply.code(400)
       return { error: healAgent.error }
     }
+    // Heal-claim policy: only Desktop clients may own a heal claim. A
+    // disallowed (CLI / 'other') client still triggers an external-origin run
+    // (so it uses External-client heal, not the project Heal Agent) — it just
+    // can't claim, so it starts with `claimable: false` and waits for a
+    // Desktop/UI drive. A request with no healAgent body (e.g. the UI Run
+    // button) is left untouched and uses the project config. The reuse-active
+    // path below funnels through broker.claim, which rejects on its own.
+    const claimSuppressed = !!healAgent && !('error' in healAgent) && !isHealClaimAllowed(healAgent.clientKind)
+    const externalRunReq = healAgent ? { ...healAgent, claimable: !claimSuppressed } : undefined
     if (healAgent) {
       const active = findActiveRunForFeature(deps.store, feature, env)
       if (active) {
@@ -474,6 +497,13 @@ export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Pro
           status: active.manifest.status,
           claimed: claim ? claim.accepted : false,
           claim,
+          ...(claimSuppressed
+            ? {
+                claimSuppressed: true,
+                message:
+                  'Heal claiming is restricted to Claude/Codex Desktop clients. CLI clients can run/verify but cannot own a heal claim.',
+              }
+            : {}),
           ...(req.body?.forceNew
             ? {
                 ignoredForceNew: true,
@@ -488,7 +518,7 @@ export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Pro
       : undefined
     const executionType: ExecutionType = req.body?.mode === 'boot' ? 'boot' : 'run'
     try {
-      const outcome = await deps.startRun(feature, env, healAgent ?? undefined, isolation, executionType)
+      const outcome = await deps.startRun(feature, env, externalRunReq, isolation, executionType)
       if (outcome.kind === 'collision') {
         // Same-repo collision and the caller didn't choose how to handle it.
         // Nothing started — surface the choice so the UI / MCP client can ask.
@@ -510,7 +540,16 @@ export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Pro
       // registration is guaranteed regardless of factory implementation.
       deps.store.registry.set(outcome.orch.runId, outcome.orch)
       reply.code(201)
-      return { runId: outcome.orch.runId }
+      return {
+        runId: outcome.orch.runId,
+        ...(claimSuppressed
+          ? {
+              claimSuppressed: true,
+              message:
+                'Heal claiming is restricted to Claude/Codex Desktop clients; this run started without a heal claim. Drive heal from Desktop or the web UI.',
+            }
+          : {}),
+      }
     } catch (err) {
       const code = typeof (err as { statusCode?: unknown }).statusCode === 'number'
         ? (err as { statusCode: number }).statusCode
@@ -650,6 +689,126 @@ export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Pro
     reply.code(204)
     return ''
   })
+
+  // GET /api/cleanup/runs — disk-usage view for the Log Cleanup page: every
+  // indexed run annotated with folder/artifact byte sizes + an `active` flag,
+  // plus orphan directories (on disk, missing from index.json), plus
+  // reclaimable totals. Walks each run dir on demand (the page is opened
+  // rarely; sizes must be accurate after a trim).
+  app.get('/api/cleanup/runs', async () => {
+    return deps.store.cleanupListing()
+  })
+
+  // GET /api/cleanup/worktrees — every git worktree canary-lab created under the
+  // logs dir (per-run isolation, benchmark arm/staging, inspect snapshots, plus
+  // stale ones left by crashed runs). `active` worktrees belong to a still-
+  // running run/benchmark and must not be removed out from under it.
+  app.get('/api/cleanup/worktrees', async () => {
+    const sourceRoots = await featureRepoRoots(deps.featuresDir)
+    const entries = await listWorktrees({ logsDir: deps.store.logsDir, sourceRoots, now: Date.now() })
+    return {
+      worktrees: entries.map((e) => ({
+        ...e,
+        active:
+          (e.ownerKind === 'run' || e.ownerKind === 'benchmark') && e.ownerId
+            ? !!deps.isWorktreeOwnerActive?.(e.ownerKind, e.ownerId)
+            : false,
+      })),
+    }
+  })
+
+  // POST /api/cleanup/worktrees/open — open a worktree folder in the user's
+  // editor ("visit"). Guarded to paths inside the logs dir. Best-effort launch.
+  app.post<{ Body: { path?: string } }>('/api/cleanup/worktrees/open', async (req, reply) => {
+    const target = req.body?.path
+    if (!target || typeof target !== 'string') {
+      reply.code(400)
+      return { error: 'path is required' }
+    }
+    if (!isUnder(target, deps.store.logsDir)) {
+      reply.code(400)
+      return { error: 'path must be inside the logs directory' }
+    }
+    if (!fs.existsSync(target)) {
+      reply.code(404)
+      return { error: 'worktree directory not found' }
+    }
+    const editor = deps.projectRoot ? loadProjectConfig(deps.projectRoot).editor : 'auto'
+    try {
+      const usedEditor = launchEditorDir(editor, target)
+      return { opened: true, path: target, editor: usedEditor }
+    } catch (err) {
+      reply.code(200)
+      return { opened: false, path: target, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
+  // DELETE /api/cleanup/worktrees — remove one worktree via `git worktree
+  // remove` (+ prune), guarded to paths inside the logs dir and not in use.
+  app.delete<{ Body: { path?: string } }>('/api/cleanup/worktrees', async (req, reply) => {
+    const target = req.body?.path
+    if (!target || typeof target !== 'string') {
+      reply.code(400)
+      return { error: 'path is required' }
+    }
+    if (!isUnder(target, deps.store.logsDir)) {
+      reply.code(400)
+      return { error: 'path must be inside the logs directory' }
+    }
+    const sourceRoots = await featureRepoRoots(deps.featuresDir)
+    const entries = await listWorktrees({ logsDir: deps.store.logsDir, sourceRoots, now: Date.now() })
+    const entry = entries.find((e) => e.path === target)
+    if (!entry) {
+      reply.code(404)
+      return { error: 'worktree not found' }
+    }
+    const active =
+      (entry.ownerKind === 'run' || entry.ownerKind === 'benchmark') && entry.ownerId
+        ? !!deps.isWorktreeOwnerActive?.(entry.ownerKind, entry.ownerId)
+        : false
+    if (active) {
+      reply.code(409)
+      return { error: 'worktree belongs to an active run — abort it first' }
+    }
+    await removeWorktree({ sourceRoot: entry.sourceRoot, worktreeRoot: entry.path })
+    return { removed: true, freedBytes: entry.bytes }
+  })
+
+  // POST /api/runs/:runId/trim — reclaim disk by deleting a terminal run's
+  // Playwright artifact dirs while keeping the run in history. Same active/
+  // stale policy as DELETE (enforced in `RunStore.trimArtifacts`), mapped to
+  // HTTP codes here.
+  app.post<{ Params: { runId: string } }>('/api/runs/:runId/trim', async (req, reply) => {
+    const result = deps.store.trimArtifacts(req.params.runId)
+    if (!result.ok) {
+      if (result.reason === 'not-found') {
+        reply.code(404)
+        return { error: 'run not found' }
+      }
+      reply.code(409)
+      return {
+        error: result.reason === 'active'
+          ? 'run is still active; abort it first'
+          : 'run is still active; reap or abort first',
+      }
+    }
+    return { freedBytes: result.freedBytes ?? 0 }
+  })
+}
+
+// Distinct git toplevels for every repo declared by a feature — the source
+// repos whose `git worktree list` we scan for canary-lab worktrees.
+async function featureRepoRoots(featuresDir: string): Promise<string[]> {
+  const roots = new Set<string>()
+  for (const feature of loadFeatures(featuresDir)) {
+    for (const repo of feature.repos ?? []) {
+      try {
+        const root = await getGitRoot(resolveRepoPath(repo.localPath))
+        if (root) roots.add(root)
+      } catch { /* skip repos that aren't resolvable */ }
+    }
+  }
+  return [...roots]
 }
 
 function contentTypeFor(filePath: string): string {

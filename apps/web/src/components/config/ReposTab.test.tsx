@@ -98,7 +98,77 @@ describe('ReposTab', () => {
       }),
     )
   })
+
+  it('preserves a startCommand port slot through a Service-tab save (ports edited in the Ports tab)', async () => {
+    const withPorts = docWithPorts()
+    vi.mocked(getFeatureConfigDoc).mockResolvedValue(withPorts)
+    vi.mocked(putFeatureConfigDoc).mockResolvedValue(withPorts)
+
+    await act(async () => {
+      root.render(<ReposTab feature="cns_exactly_once_fallback" />)
+    })
+
+    // Ports are no longer edited here — the Service tab does not render the
+    // port-slot editor or its injection token.
+    expect(container.textContent).not.toContain('${port.api}')
+
+    // Edit the repo name to mark the slice dirty, then save — the existing
+    // port slot must round-trip untouched through parse → serialize.
+    const nameInput = inputForLabel('Name')
+    await act(async () => {
+      setInputValue(nameInput, 'renamed')
+      nameInput.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    const save = [...container.querySelectorAll('button')]
+      .find((button) => button.textContent === 'Save')
+    await act(async () => {
+      save!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+
+    expect(putFeatureConfigDoc).toHaveBeenCalledWith(
+      'cns_exactly_once_fallback',
+      expect.objectContaining({
+        repos: [
+          expect.objectContaining({
+            startCommands: [
+              expect.objectContaining({
+                command: 'yarn start',
+                ports: [{ name: 'api', env: 'PORT' }],
+              }),
+            ],
+          }),
+        ],
+      }),
+    )
+  })
 })
+
+function docWithPorts(): ParsedConfigDoc {
+  return {
+    path: '/features/cns_exactly_once_fallback/feature.config.cjs',
+    format: 'cjs',
+    content: '',
+    parsed: {
+      value: {
+        name: 'cns_exactly_once_fallback',
+        description: 'desc',
+        envs: ['local'],
+        repos: [
+          {
+            name: 'mighty-cns',
+            localPath: '~/Documents/mighty-cns',
+            startCommands: [
+              { command: 'yarn start', ports: [{ name: 'api', env: 'PORT' }] },
+            ],
+          },
+        ],
+        featureDir: { $expr: '__dirname' },
+      },
+      complexFields: [],
+      source: '',
+    },
+  }
+}
 
 function inputForLabel(label: string): HTMLInputElement {
   const field = [...container.querySelectorAll('label')]

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -7,12 +7,16 @@ import {
   buildClaudeMcpConfigArg,
   buildHealPromptMap,
   buildOrchestratorHealPrompt,
+  isAgentCliAvailable,
   pickAvailableHealAgent,
   readPriorSessionId,
   readPriorSessionIdFromValue,
   renderPlaywrightMcpHint,
   renderTraceExtractHint,
+  resolveAgentBinary,
+  type AgentResolveDeps,
 } from './auto-heal'
+
 import { renderPersonalWikiMap } from '../../../../shared/runtime/personal-wiki'
 
 function writeRunManifest(runDir: string, body: Record<string, unknown>): void {
@@ -77,6 +81,22 @@ describe('buildAgentSpawnCommand', () => {
   it('claude REPL: omits --mcp-config when mcpOutputDir is missing', () => {
     const cmd = buildAgentSpawnCommand('claude', { sessionId: 'x' })
     expect(cmd.includes('--mcp-config')).toBe(false)
+  })
+
+  it('launches via the quoted absolute binaryPath when provided (restricted PATH)', () => {
+    const claudeCmd = buildAgentSpawnCommand('claude', {
+      binaryPath: '/Users/me/.local/bin/claude',
+      sessionId: 'abc-123',
+    })
+    expect(claudeCmd.startsWith('"/Users/me/.local/bin/claude"')).toBe(true)
+    expect(claudeCmd).toContain('--session-id "abc-123"')
+
+    const codexResume = buildAgentSpawnCommand('codex', {
+      binaryPath: '/opt/homebrew/bin/codex',
+      resume: true,
+      sessionId: 'b2160db2-89b8-49ff-a2ba-c0c97a52d63f',
+    })
+    expect(codexResume.startsWith('"/opt/homebrew/bin/codex" resume "b2160db2-89b8-49ff-a2ba-c0c97a52d63f"')).toBe(true)
   })
 
   it('claude REPL: throws when mcpOutputDir is set but mcpConfigFile is not', () => {
@@ -253,17 +273,140 @@ describe('readPriorSessionId', () => {
   })
 })
 
-describe('pickAvailableHealAgent', () => {
-  it('returns null when env override names a missing CLI', () => {
-    expect(pickAvailableHealAgent('definitely-not-a-real-cli-xyz' as never)).toBe(null)
+// Deps that find nothing — `which` misses and no candidate path is executable.
+const NONE: AgentResolveDeps = {
+  which: () => null,
+  isExecutable: () => false,
+  homedir: () => '/no/such/home',
+  env: {},
+}
+// Deps where only the named agent resolves via `which`.
+const onPath = (present: HealAgent): AgentResolveDeps => ({
+  which: (agent) => (agent === present ? `/usr/local/bin/${agent}` : null),
+  isExecutable: () => false,
+  homedir: () => '/no/such/home',
+  env: {},
+})
+
+describe('resolveAgentBinary', () => {
+  it('returns the `which` path when the agent is on PATH', () => {
+    expect(resolveAgentBinary('claude', onPath('claude'))).toBe('/usr/local/bin/claude')
   })
 
-  it('returns null when override is unrelated to claude/codex', () => {
-    expect(pickAvailableHealAgent('something-else')).toBe(null)
+  it('falls back to a well-known location when not on PATH (restricted PATH)', () => {
+    const localBin = '/home/me/.local/bin/claude'
+    const found = resolveAgentBinary('claude', {
+      which: () => null,
+      isExecutable: (p) => p === localBin,
+      homedir: () => '/home/me',
+      env: {},
+    })
+    expect(found).toBe(localBin)
   })
-  // We deliberately don't assert "claude is preferred" because the result
-  // depends on what's installed on the host running the test. The contract
-  // is covered by isAgentCliAvailable + the explicit override branches.
+
+  it('honors an explicit CANARY_LAB_CLAUDE_BIN override', () => {
+    const found = resolveAgentBinary('claude', {
+      which: () => '/usr/local/bin/claude',
+      isExecutable: (p) => p === '/opt/custom/claude',
+      homedir: () => '/home/me',
+      env: { CANARY_LAB_CLAUDE_BIN: '/opt/custom/claude' },
+    })
+    expect(found).toBe('/opt/custom/claude')
+  })
+
+  it('returns null when nothing resolves', () => {
+    expect(resolveAgentBinary('codex', NONE)).toBeNull()
+  })
+
+  // Exercise the PRODUCTION default seams (real `which` / fs.accessSync) by
+  // leaving them un-injected. These run on unix CI where `which`, `/bin/sh`
+  // are present.
+  describe('default seams (real which / fs probe)', () => {
+    it('defaultWhich resolves a real binary on PATH', () => {
+      // `sh` is on PATH on any unix; leave `which` un-injected so defaultWhich
+      // shells out to the real `which`.
+      const found = resolveAgentBinary('sh' as unknown as HealAgent, {
+        env: {},
+        homedir: () => '/no/such/home',
+        isExecutable: () => false,
+      })
+      expect(found).toMatch(/sh$/)
+    })
+
+    it('defaultWhich returns null (catch arm) for a binary that is not on PATH', () => {
+      const found = resolveAgentBinary('canary-lab-no-such-binary-zzz' as unknown as HealAgent, {
+        env: {},
+        homedir: () => '/no/such/home',
+        isExecutable: () => false,
+      })
+      expect(found).toBeNull()
+    })
+
+    it('defaultIsExecutable returns true for a real executable (env override path)', () => {
+      const found = resolveAgentBinary('claude', {
+        which: () => null,
+        homedir: () => '/no/such/home',
+        env: { CANARY_LAB_CLAUDE_BIN: '/bin/sh' },
+      })
+      expect(found).toBe('/bin/sh')
+    })
+
+    it('falls back to process.env / os.homedir when neither is injected', () => {
+      // No `env` and no `homedir` deps → the `?? process.env` and
+      // `: os.homedir()` defaults are taken. which/isExecutable stubbed so the
+      // resolution is deterministic (and never finds anything).
+      const found = resolveAgentBinary('claude', { which: () => null, isExecutable: () => false })
+      expect(found).toBeNull()
+    })
+
+    it('defaultIsExecutable returns false (catch arm) for a missing path', () => {
+      const found = resolveAgentBinary('claude', {
+        which: () => null,
+        homedir: () => '/no/such/home',
+        env: { CANARY_LAB_CLAUDE_BIN: '/no/such/path/claude' },
+      })
+      expect(found).toBeNull()
+    })
+  })
+})
+
+describe('isAgentCliAvailable', () => {
+  it('returns true when the agent resolves', () => {
+    expect(isAgentCliAvailable('claude', onPath('claude'))).toBe(true)
+  })
+
+  it('returns false when the agent resolves nowhere', () => {
+    expect(isAgentCliAvailable('codex', NONE)).toBe(false)
+  })
+})
+
+describe('pickAvailableHealAgent', () => {
+  it('returns null when env override names a missing CLI', () => {
+    expect(pickAvailableHealAgent('claude', NONE)).toBe(null)
+  })
+
+  it('returns the override agent when its CLI resolves', () => {
+    expect(pickAvailableHealAgent('codex', onPath('codex'))).toBe('codex')
+  })
+
+  it('returns null when override is unrelated to claude/codex (typo guard)', () => {
+    const which = vi.fn(() => null)
+    // Unrecognised non-empty override returns null without probing.
+    expect(pickAvailableHealAgent('clauude', { which })).toBe(null)
+    expect(which).not.toHaveBeenCalled()
+  })
+
+  it('auto-detects claude first when no override is set', () => {
+    expect(pickAvailableHealAgent('', onPath('claude'))).toBe('claude')
+  })
+
+  it('falls back to codex when claude is absent but codex is present', () => {
+    expect(pickAvailableHealAgent('', onPath('codex'))).toBe('codex')
+  })
+
+  it('returns null when neither claude nor codex resolves', () => {
+    expect(pickAvailableHealAgent('', NONE)).toBe(null)
+  })
 })
 
 describe('buildHealPromptMap', () => {
@@ -639,5 +782,175 @@ describe('buildPersonalWikiMap', () => {
   it('returns an empty section for unset paths', () => {
     expect(renderPersonalWikiMap(null)).toBe('')
     expect(renderPersonalWikiMap('')).toBe('')
+  })
+})
+
+describe('auto-heal branch edge cases', () => {
+  let tmp: string
+
+  beforeEach(() => {
+    tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-edge-')))
+  })
+
+  afterEach(() => {
+    fs.rmSync(tmp, { recursive: true, force: true })
+  })
+
+  it('buildHealPromptMap: runDirRel falls back to runDir when projectRoot === runDir', () => {
+    // path.relative(x, x) === '' so the `|| opts.runDir` branch is taken.
+    const runDir = tmp
+    writeRunManifest(runDir, { repoPaths: ['/repo/app'] })
+    const map = buildHealPromptMap({ projectRoot: runDir, runDir })
+    expect(map.runDirRel).toBe(runDir)
+  })
+
+  it('buildOrchestratorHealPrompt: runDirRel falls back to runDir when projectRoot === runDir', () => {
+    const runDir = tmp
+    const build = buildOrchestratorHealPrompt({ agent: 'claude', projectRoot: runDir, runDir })
+    const prompt = build({ cycle: 0, outputDir: path.join(runDir, 'out') })
+    // Renders `<runDir> (`<runDir>` from the project root)` — RHS of the `||`.
+    expect(prompt).toContain(`Run directory:\n- \`${runDir}\` (\`${runDir}\` from the project root)`)
+  })
+
+  it('skips a stray non-directory entry alongside failure dirs (failure-log / trace / mcp scans)', () => {
+    const runDir = path.join(tmp, 'run')
+    const failedDir = path.join(runDir, 'failed')
+    fs.mkdirSync(failedDir, { recursive: true })
+    // Stray file directly under failedDir — must be skipped by `!isDirectory()`.
+    // Named so it sorts BEFORE the real failure dir; readdirSync yields it
+    // first, so the `!isDirectory() continue` runs before the dir match returns.
+    fs.writeFileSync(path.join(failedDir, '0-stray.txt'), 'not a dir')
+    // A real failure dir with all three artifact kinds so the scans iterate
+    // past the stray file and still find the directory entry.
+    const slug = path.join(failedDir, 'case-1')
+    fs.mkdirSync(path.join(slug, 'trace-extract'), { recursive: true })
+    fs.writeFileSync(path.join(slug, 'api.log'), 'slice')
+    fs.writeFileSync(path.join(slug, 'trace-extract', 'failure-summary.md'), 'trace')
+    fs.mkdirSync(path.join(slug, 'playwright-mcp'), { recursive: true })
+    fs.writeFileSync(path.join(slug, 'playwright-mcp', 'snap.png'), 'png')
+    writeRunManifest(runDir, { repoPaths: ['/repo/app'] })
+
+    const map = buildHealPromptMap({ projectRoot: tmp, runDir })
+    const ids = map.resources.map((r) => r.id)
+    // failed-slices (hasAnyFailureLog), trace-extract (hasAnyFailureWith),
+    // playwright-mcp (hasAnyFailureWithNonEmptyDir) all reached past the stray.
+    expect(ids).toContain('failed-slices')
+    expect(ids).toContain('trace-extract')
+    expect(ids).toContain('playwright-mcp')
+  })
+
+  it('featureDocsDir returns null when the docs dir is missing (directoryExists catch)', () => {
+    // featureDir set but no `docs` subdir → statSync throws → directoryExists
+    // returns false via its catch → no feature-docs resource.
+    const runDir = path.join(tmp, 'run')
+    fs.mkdirSync(runDir, { recursive: true })
+    const featureDir = path.join(tmp, 'features', 'no_docs')
+    fs.mkdirSync(featureDir, { recursive: true })
+    writeRunManifest(runDir, { featureDir, repoPaths: ['/repo/app'] })
+
+    const map = buildHealPromptMap({ projectRoot: tmp, runDir })
+    expect(map.resources.map((r) => r.id)).not.toContain('feature-docs')
+  })
+
+  it('renderPromptTemplate drops a placeholder-only line whose key is absent from values', () => {
+    // Custom template with a placeholder-only line referencing a key that is
+    // NOT in the values map buildOrchestratorHealPrompt passes. The
+    // `values[m[1]] ?? ''` nullish fallback makes its length 0, so the line
+    // is dropped (covers the `?? ''` RHS branch).
+    const runDir = path.join(tmp, 'run')
+    fs.mkdirSync(runDir, { recursive: true })
+    const templatePath = path.join(tmp, 'tmpl.md')
+    fs.writeFileSync(
+      templatePath,
+      [
+        'Run dir: {{runDir}}',
+        '{{notAKnownKey}}',
+        // Mixed line (not placeholder-only) referencing an unknown key — kept,
+        // and the replace callback returns `match` for the missing key (the
+        // `?? match` RHS branch).
+        'mixed prefix {{alsoUnknown}} suffix',
+        'tail line',
+      ].join('\n'),
+    )
+    writeRunManifest(runDir, { repoPaths: ['/repo/app'] })
+    const build = buildOrchestratorHealPrompt({
+      agent: 'claude',
+      projectRoot: tmp,
+      runDir,
+      promptPath: templatePath,
+    })
+    const prompt = build({ cycle: 0, outputDir: path.join(runDir, 'out') })
+    expect(prompt).toContain(`Run dir: ${runDir}`)
+    expect(prompt).toContain('tail line')
+    // The unknown-key placeholder line was dropped entirely.
+    expect(prompt).not.toContain('{{notAKnownKey}}')
+    // The mixed line is kept; the unknown placeholder is left verbatim.
+    expect(prompt).toContain('mixed prefix {{alsoUnknown}} suffix')
+  })
+
+  it('failure-artifact scans return false when failedDir exists but is not a directory', () => {
+    // failedDir exists (existsSync true) but readdirSync throws ENOTDIR — the
+    // `catch { return false }` arms in hasAnyFailureWith /
+    // hasAnyFailureWithNonEmptyDir / hasAnyFailureLog are exercised.
+    const runDir = path.join(tmp, 'run')
+    fs.mkdirSync(runDir, { recursive: true })
+    // buildRunPaths derives failedDir = <runDir>/failed; make it a FILE.
+    fs.writeFileSync(path.join(runDir, 'failed'), 'i am a file, not a dir')
+    writeRunManifest(runDir, { repoPaths: ['/repo/app'] })
+
+    const map = buildHealPromptMap({ projectRoot: tmp, runDir })
+    const ids = map.resources.map((r) => r.id)
+    expect(ids).not.toContain('failed-slices')
+    expect(ids).not.toContain('trace-extract')
+    expect(ids).not.toContain('playwright-mcp')
+  })
+
+  it('hasAnyFailureLog skips a failure dir whose contents cannot be read (inner catch)', () => {
+    // A failure dir entry that is itself unreadable (chmod 000) makes the
+    // inner readdirSync throw EACCES — the `catch { continue }` arm runs and
+    // the scan moves on, finding the readable sibling's .log.
+    const runDir = path.join(tmp, 'run')
+    const failedDir = path.join(runDir, 'failed')
+    fs.mkdirSync(failedDir, { recursive: true })
+    const blocked = path.join(failedDir, '0-blocked')
+    fs.mkdirSync(blocked, { recursive: true })
+    fs.writeFileSync(path.join(blocked, 'x.log'), 'log')
+    const readable = path.join(failedDir, 'z-readable')
+    fs.mkdirSync(readable, { recursive: true })
+    fs.writeFileSync(path.join(readable, 'y.log'), 'log')
+    writeRunManifest(runDir, { repoPaths: ['/repo/app'] })
+    fs.chmodSync(blocked, 0o000)
+    try {
+      const map = buildHealPromptMap({ projectRoot: tmp, runDir })
+      expect(map.resources.map((r) => r.id)).toContain('failed-slices')
+    } finally {
+      fs.chmodSync(blocked, 0o755)
+    }
+  })
+
+  it('hasAnyServiceLog returns false when the run dir cannot be read', () => {
+    // runDir exists but is unreadable — readdirSync throws and the
+    // `catch { return false }` in hasAnyServiceLog is exercised.
+    const runDir = path.join(tmp, 'run')
+    fs.mkdirSync(runDir, { recursive: true })
+    writeRunManifest(runDir, { repoPaths: ['/repo/app'] })
+    fs.chmodSync(runDir, 0o000)
+    try {
+      const map = buildHealPromptMap({ projectRoot: tmp, runDir })
+      expect(map.resources.map((r) => r.id)).not.toContain('full-service-log')
+    } finally {
+      fs.chmodSync(runDir, 0o755)
+    }
+  })
+
+  it('detectHealMode (via prompt) treats a manifest without repoPaths as test mode', () => {
+    // manifest present but repoPaths absent → Array.isArray(undefined) is
+    // false → `: []` branch → length 0 → test mode.
+    const runDir = path.join(tmp, 'run')
+    fs.mkdirSync(runDir, { recursive: true })
+    writeRunManifest(runDir, {})
+    const build = buildOrchestratorHealPrompt({ agent: 'claude', projectRoot: tmp, runDir })
+    const prompt = build({ cycle: 0, outputDir: path.join(runDir, 'out') })
+    expect(prompt).toContain('This feature has no editable service repos')
   })
 })

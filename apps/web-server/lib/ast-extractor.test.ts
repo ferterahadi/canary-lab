@@ -63,6 +63,26 @@ describe('extractTestsFromSource', () => {
     expect(r.tests[0].bodySource).toContain('expect(x).toBe(1)')
   })
 
+  it('keeps bodySource line-for-line with the source so highlights map 1:1', () => {
+    // The live test view highlights the running line and resolves "open in
+    // editor" by adding a body-line offset to the test's start line, so body
+    // line N must correspond to source line N. A blank line between statements
+    // must therefore be preserved — re-printing the AST would drop it and
+    // shift every subsequent line.
+    const src = [
+      "test('mapping', async () => {",
+      '  const a = 1',
+      '',
+      '  expect(a).toBe(1)',
+      '})',
+    ].join('\n')
+    const body = extractTestsFromSource('a.spec.ts', src).tests[0].bodySource.split('\n')
+    expect(body[0]).toBe('{')
+    expect(body[1]).toContain('const a = 1')
+    expect(body[2]).toBe('') // blank line preserved
+    expect(body[3]).toContain('expect(a).toBe(1)')
+  })
+
   it('ignores test.describe groups but extracts inner tests', () => {
     const src = `
       test.describe('group', () => {
@@ -114,6 +134,45 @@ describe('extractTestsFromSource', () => {
     expect(steps[0].children).toEqual([])
     // Function-expression body still captures source.
     expect(steps[1].bodySource).toContain('fn expr')
+  })
+
+  it('ignores a test() call with no arguments', () => {
+    // getStringArg returns null on a missing first arg.
+    const r = extractTestsFromSource('a.spec.ts', `test()`)
+    expect(r.tests).toEqual([])
+  })
+
+  it('accepts a no-substitution template literal title and no body', () => {
+    // Covers the NoSubstitutionTemplateLiteral title path and the bodyless
+    // test branches (empty bodySource + no steps).
+    const r = extractTestsFromSource('a.spec.ts', 'test(`plain title`)')
+    expect(r.tests).toHaveLength(1)
+    expect(r.tests[0].name).toBe('plain title')
+    expect(r.tests[0].bodySource).toBe('')
+    expect(r.tests[0].steps).toEqual([])
+  })
+
+  it('stringifies a non-Error thrown during parsing', () => {
+    // A source whose `.length` getter throws a primitive makes
+    // ts.createSourceFile throw a non-Error, exercising the String(err) fallback.
+    const hostile = { get length(): number { throw 'plain string failure' } }
+    const r = extractTestsFromSource('a.spec.ts', hostile as unknown as string)
+    expect(r.parseError).toBe('plain string failure')
+    expect(r.tests).toEqual([])
+  })
+
+  it('treats a test.step whose second arg is not a function as bodyless', () => {
+    // getStepBody hits its non-arrow/non-function-expression fallthrough.
+    const src = `
+      test('outer', async () => {
+        await test.step('weird', 123)
+      })
+    `
+    const r = extractTestsFromSource('a.spec.ts', src)
+    const steps = r.tests[0].steps
+    expect(steps.map((s) => s.label)).toEqual(['weird'])
+    expect(steps[0].bodySource).toBe('')
+    expect(steps[0].children).toEqual([])
   })
 
   it('still returns gracefully on syntactically odd input', () => {

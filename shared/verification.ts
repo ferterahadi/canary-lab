@@ -4,7 +4,10 @@
 //            Playwright, no heal) until the run is stopped, which tears the
 //            services down and reverts the envset. Its RunStatus stays
 //            `running` while held; the distinct identity is derived from this.
-export type ExecutionType = 'run' | 'verify' | 'boot'
+// `benchmark` — a run spawned by the benchmark (an arm or the validity-gate
+//            trial). Behaves like `run`, but is hidden from the global Runs
+//            list/count — it's surfaced only inside the benchmark window.
+export type ExecutionType = 'run' | 'verify' | 'boot' | 'benchmark'
 
 export interface VerificationTarget {
   id: string

@@ -50,6 +50,10 @@ export interface Feature {
   description?: string
   repos: FeatureRepo[]
   envs: string[]
+  /** A saved port overlay exists (features/<feature>/portify/) → boots
+   *  concurrently. Drives the "Portified" badge. Optional: absent in older
+   *  payloads. */
+  portified?: boolean
 }
 
 export interface ExtractedStep {
@@ -89,6 +93,51 @@ export interface RunIndexEntry {
   verificationConfigName?: string
   verificationPlaywrightEnvsetId?: string
   verificationTargetUrls?: Record<string, string>
+}
+
+// ─── Log cleanup ─────────────────────────────────────────────────────────
+
+export interface CleanupRunEntry {
+  runId: string
+  feature: string
+  executionType: ExecutionType
+  status: RunStatus
+  startedAt: string
+  endedAt?: string
+  folderBytes: number
+  artifactBytes: number
+  active: boolean
+}
+
+export interface CleanupOrphan {
+  runId: string
+  folderBytes: number
+}
+
+export interface CleanupListing {
+  runs: CleanupRunEntry[]
+  orphans: CleanupOrphan[]
+  totals: {
+    totalBytes: number
+    reclaimableTrimBytes: number
+    reclaimableDeleteBytes: number
+  }
+}
+
+// A git worktree canary-lab created under the logs dir (mirrors the server
+// WorktreeEntry, plus `active`). Surfaced in the Log Cleanup worktree list.
+export interface CleanupWorktree {
+  path: string
+  sourceRoot: string
+  ref: string
+  ownerKind: 'run' | 'benchmark' | 'unknown'
+  ownerId: string | null
+  slot: string | null
+  bytes: number
+  ageMs: number | null
+  exists: boolean
+  /** Owner run/benchmark is still running — removal is refused. */
+  active: boolean
 }
 
 export type EvaluationExportMode = 'raw' | 'localized'

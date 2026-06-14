@@ -9,6 +9,8 @@ export interface ProjectConfig {
   healAgent: HealAgentChoice
   editor: EditorChoice
   personalWikiPath: string | null
+  /** Localhost port for the UI + MCP HTTP server. Absent → DEFAULT_PORT. */
+  port?: number
 }
 
 // Default to `external` — the modern Claude/Codex via MCP flow. `auto` is
@@ -16,6 +18,21 @@ export interface ProjectConfig {
 // configs, but new installs and the settings UI prefer external.
 const DEFAULT: ProjectConfig = { healAgent: 'external', editor: 'auto', personalWikiPath: null }
 const FILENAME = 'canary-lab.config.json'
+
+// The historical fixed port. Used whenever a project does not pin its own.
+export const DEFAULT_PORT = 7421
+
+export function isValidPort(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 65535
+}
+
+export function normalizePort(value: unknown): number | undefined {
+  return isValidPort(value) ? value : undefined
+}
+
+export function resolveProjectPort(config: ProjectConfig): number {
+  return config.port ?? DEFAULT_PORT
+}
 
 export function projectConfigPath(projectRoot: string): string {
   return path.join(projectRoot, FILENAME)
@@ -63,10 +80,12 @@ export function loadProjectConfig(projectRoot: string): ProjectConfig {
   if (!fs.existsSync(file)) return { ...DEFAULT }
   try {
     const json = JSON.parse(fs.readFileSync(file, 'utf-8'))
+    const port = normalizePort(json?.port)
     return {
       healAgent: isHealAgentChoice(json?.healAgent) ? json.healAgent : DEFAULT.healAgent,
       editor: isEditorChoice(json?.editor) ? json.editor : DEFAULT.editor,
       personalWikiPath: normalizePersonalWikiPath(json?.personalWikiPath),
+      ...(port === undefined ? {} : { port }),
     }
   } catch {
     return { ...DEFAULT }
@@ -74,10 +93,12 @@ export function loadProjectConfig(projectRoot: string): ProjectConfig {
 }
 
 export function saveProjectConfig(projectRoot: string, config: ProjectConfig): void {
+  const port = normalizePort(config.port)
   const next: ProjectConfig = {
     healAgent: isHealAgentChoice(config.healAgent) ? config.healAgent : DEFAULT.healAgent,
     editor: isEditorChoice(config.editor) ? config.editor : DEFAULT.editor,
     personalWikiPath: normalizePersonalWikiPath(config.personalWikiPath),
+    ...(port === undefined ? {} : { port }),
   }
   fs.writeFileSync(projectConfigPath(projectRoot), JSON.stringify(next, null, 2) + '\n')
 }

@@ -46,16 +46,16 @@ describe('registerClaudeDesktopMcp', () => {
     const cfg = read(configPath)
     expect(cfg.preferences).toEqual({ a: 1 })
     expect(cfg.coworkUserFilesPath).toBe('/x')
-    expect(cfg.mcpServers['canary-lab'].command).toBe(EXEC)
-    expect(cfg.mcpServers['canary-lab'].args).toEqual([CLI, 'mcp', '--profile', 'full'])
-    expect(cfg.mcpServers['canary-lab'].env.PATH).toContain('/usr/bin')
+    expect(cfg.mcpServers['Canary_Lab'].command).toBe(EXEC)
+    expect(cfg.mcpServers['Canary_Lab'].args).toEqual([CLI, 'mcp', '--profile', 'full'])
+    expect(cfg.mcpServers['Canary_Lab'].env.PATH).toContain('/usr/bin')
     expect(lines).toContain('Claude Desktop MCP configured')
   })
 
   it('creates the config file when none exists', () => {
     const configPath = tmpConfig()
     registerClaudeDesktopMcp({ configPath, execPath: EXEC, cliPath: CLI, log: () => {} })
-    expect(read(configPath).mcpServers['canary-lab'].command).toBe(EXEC)
+    expect(read(configPath).mcpServers['Canary_Lab'].command).toBe(EXEC)
   })
 
   it('is idempotent when the entry already matches', () => {
@@ -70,13 +70,13 @@ describe('registerClaudeDesktopMcp', () => {
     const configPath = tmpConfig()
     fs.mkdirSync(path.dirname(configPath), { recursive: true })
     fs.writeFileSync(configPath, JSON.stringify({
-      mcpServers: { 'canary-lab': { command: 'npx', args: ['-y', 'canary-lab', 'mcp'] } },
+      mcpServers: { 'Canary_Lab': { command: 'npx', args: ['-y', 'canary-lab', 'mcp'] } },
     }))
     const lines: string[] = []
 
     registerClaudeDesktopMcp({ configPath, execPath: EXEC, cliPath: CLI, log: (l) => lines.push(l) })
 
-    expect(read(configPath).mcpServers['canary-lab'].command).toBe('npx')
+    expect(read(configPath).mcpServers['Canary_Lab'].command).toBe('npx')
     expect(lines[0]).toContain('already configured differently')
   })
 
@@ -84,12 +84,12 @@ describe('registerClaudeDesktopMcp', () => {
     const configPath = tmpConfig()
     fs.mkdirSync(path.dirname(configPath), { recursive: true })
     fs.writeFileSync(configPath, JSON.stringify({
-      mcpServers: { 'canary-lab': { command: 'npx', args: ['-y', 'canary-lab', 'mcp'] } },
+      mcpServers: { 'Canary_Lab': { command: 'npx', args: ['-y', 'canary-lab', 'mcp'] } },
     }))
 
     registerClaudeDesktopMcp({ configPath, force: true, execPath: EXEC, cliPath: CLI, log: () => {} })
 
-    expect(read(configPath).mcpServers['canary-lab'].command).toBe(EXEC)
+    expect(read(configPath).mcpServers['Canary_Lab'].command).toBe(EXEC)
   })
 
   it('dry-run does not write the file', () => {
@@ -103,7 +103,7 @@ describe('registerClaudeDesktopMcp', () => {
   it('uses the npx@latest form without env for an ephemeral install', () => {
     const configPath = tmpConfig()
     registerClaudeDesktopMcp({ configPath, execPath: EXEC, cliPath: EPHEMERAL_CLI, log: () => {} })
-    expect(read(configPath).mcpServers['canary-lab']).toEqual({
+    expect(read(configPath).mcpServers['Canary_Lab']).toEqual({
       command: 'npx',
       args: ['-y', 'canary-lab@latest', 'mcp', '--profile', 'full'],
     })
@@ -126,12 +126,28 @@ describe('registerClaudeDesktopMcp refresh', () => {
     const configPath = tmpConfig()
     fs.mkdirSync(path.dirname(configPath), { recursive: true })
     fs.writeFileSync(configPath, JSON.stringify({
-      mcpServers: { 'canary-lab': { command: 'npx', args: ['-y', 'canary-lab', 'mcp'] } },
+      mcpServers: { 'Canary_Lab': { command: 'npx', args: ['-y', 'canary-lab', 'mcp'] } },
     }))
 
     registerClaudeDesktopMcp({ configPath, refreshOnly: true, execPath: EXEC, cliPath: CLI, log: () => {} })
 
-    expect(read(configPath).mcpServers['canary-lab'].command).toBe(EXEC)
+    expect(read(configPath).mcpServers['Canary_Lab'].command).toBe(EXEC)
+  })
+
+  it('migrates a legacy canary-lab entry to Canary_Lab', () => {
+    const configPath = tmpConfig()
+    fs.mkdirSync(path.dirname(configPath), { recursive: true })
+    fs.writeFileSync(configPath, JSON.stringify({
+      mcpServers: { 'canary-lab': { command: 'npx', args: ['-y', 'canary-lab', 'mcp'] } },
+    }))
+    const lines: string[] = []
+
+    registerClaudeDesktopMcp({ configPath, refreshOnly: true, execPath: EXEC, cliPath: CLI, log: (l) => lines.push(l) })
+
+    const cfg = read(configPath)
+    expect(cfg.mcpServers['canary-lab']).toBeUndefined()
+    expect(cfg.mcpServers['Canary_Lab'].command).toBe(EXEC)
+    expect(lines.join('\n')).toContain('migrated legacy entry')
   })
 })
 

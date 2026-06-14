@@ -1,9 +1,11 @@
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { resolveMcpInvocation, resolveCliPath, type ResolvedMcpInvocation } from './mcp-registration'
+import { resolveMcpInvocation, resolveCliPath, LEGACY_SERVER_NAMES, type ResolvedMcpInvocation } from './mcp-registration'
 
-const SERVER_NAME = 'canary-lab'
+// Claude Desktop shows this mcpServers key verbatim; keep it aligned with the
+// CLI registration display key (mcp-registration.ts SERVER_NAME).
+const SERVER_NAME = 'Canary_Lab'
 
 export interface DesktopRegistrationOptions {
   dryRun?: boolean
@@ -59,25 +61,43 @@ export function registerClaudeDesktopMcp(opts: DesktopRegistrationOptions = {}):
   const servers = config.mcpServers && typeof config.mcpServers === 'object'
     ? config.mcpServers as Record<string, unknown>
     : {}
+
+  // Migrate any legacy-named entry to SERVER_NAME so existing Desktop users pick
+  // up the rename automatically. A legacy entry counts as "already configured",
+  // so the migration proceeds even under refreshOnly.
+  const legacyKeys = LEGACY_SERVER_NAMES.filter((name) => name !== SERVER_NAME && name in servers)
+  for (const key of legacyKeys) delete servers[key]
+  const migratedLegacy = legacyKeys.length > 0
+  const migrateLog = `Claude Desktop MCP: migrated legacy entry to "${SERVER_NAME}"`
+
   const existing = servers[SERVER_NAME]
 
-  if (existing !== undefined) {
-    if (sameEntry(existing, invocation)) {
+  if (existing !== undefined && sameEntry(existing, invocation)) {
+    // New key already correct — but if we removed a legacy duplicate we still
+    // have to persist that deletion.
+    if (migratedLegacy) {
+      config.mcpServers = servers
+      writeConfig(configPath, config)
+      log(migrateLog)
+    } else {
       log('Claude Desktop MCP already configured')
-      return
     }
-    if (!opts.force && !opts.refreshOnly) {
-      log('Claude Desktop MCP is already configured differently. Rerun `npx canary-lab setup --force` to replace it.')
-      return
-    }
-  } else if (opts.refreshOnly) {
+    return
+  }
+
+  if (existing !== undefined && !opts.force && !opts.refreshOnly) {
+    log('Claude Desktop MCP is already configured differently. Rerun `npx canary-lab setup --force` to replace it.')
+    return
+  }
+
+  if (existing === undefined && opts.refreshOnly && !migratedLegacy) {
     return
   }
 
   servers[SERVER_NAME] = invocationEntry(invocation)
   config.mcpServers = servers
   writeConfig(configPath, config)
-  log('Claude Desktop MCP configured')
+  log(migratedLegacy ? migrateLog : 'Claude Desktop MCP configured')
 }
 
 function invocationEntry(invocation: ResolvedMcpInvocation): Record<string, unknown> {

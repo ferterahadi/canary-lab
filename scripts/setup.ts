@@ -89,6 +89,15 @@ export function setup(args: ParsedArgs, opts: SetupOptions = {}): void {
   const cliPath = opts.cliPath ?? resolveCliPath()
   let registered = false
 
+  // `claude mcp add` / `codex mcp add` write to the real client configs
+  // (~/.claude.json, ~/.codex) regardless of CANARY_LAB_HOME — those shell out
+  // to the client CLIs, which don't honor our home override. The tarball smoke
+  // test runs `init` against a throwaway temp install, so without this guard it
+  // registers a temp `cli.js` path into the user's live client config; once the
+  // temp dir is GC'd that entry dangles ("Server disconnected"). Skip-flag lets
+  // the smoke test exercise scaffolding + skill install without touching them.
+  const skipClientMcp = process.env.CANARY_LAB_SKIP_CLIENT_MCP === '1'
+
   const target = resolveAgentTarget(args.agent, homeDir)
   if (target) {
     installOrRefresh(target, {
@@ -97,14 +106,18 @@ export function setup(args: ParsedArgs, opts: SetupOptions = {}): void {
       force: args.force,
       log,
     })
-    registerMcpTargets(target, {
-      dryRun: args.dryRun,
-      force: args.force,
-      log,
-      execPath,
-      cliPath,
-    })
-    registered = true
+    if (skipClientMcp) {
+      log('Skipping client MCP registration (CANARY_LAB_SKIP_CLIENT_MCP=1).')
+    } else {
+      registerMcpTargets(target, {
+        dryRun: args.dryRun,
+        force: args.force,
+        log,
+        execPath,
+        cliPath,
+      })
+      registered = true
+    }
   } else {
     log('No Codex or Claude installation detected. Skipping agent integration setup.')
   }
@@ -112,7 +125,7 @@ export function setup(args: ParsedArgs, opts: SetupOptions = {}): void {
   // Claude Desktop keeps MCP servers in its own config file, not via
   // `claude mcp add`, so configure it independently whenever it is installed.
   const desktopConfigPath = opts.claudeDesktopConfigPath ?? claudeDesktopConfigPath(homeDir)
-  if (claudeDesktopInstalled(desktopConfigPath)) {
+  if (!skipClientMcp && claudeDesktopInstalled(desktopConfigPath)) {
     registerClaudeDesktopMcp({
       dryRun: args.dryRun,
       force: args.force,

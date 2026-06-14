@@ -107,7 +107,7 @@ function writeSummary(runId: string): void {
   fs.writeFileSync(paths.diagnosisJournalPath, '# Journal\n')
 }
 
-async function build() {
+async function build(opts: { isClaimAllowed?: (kind: string) => boolean } = {}) {
   const store = new RunStore(logsDir, createRegistry())
   const events: RunStoreEvent[] = []
   const audit: Array<{ runId: string; entry: ExternalHealAuditEntry }> = []
@@ -116,6 +116,9 @@ async function build() {
     emit: (event) => { events.push(event) },
     patchManifest: (runId, patch) => { store.patchManifest(runId, patch) },
     audit: (runId, entry) => { audit.push({ runId, entry }) },
+    // Most route tests exercise claim mechanics across client kinds; allow all
+    // by default. The desktop-only policy is asserted in its own test below.
+    isClaimAllowed: opts.isClaimAllowed ?? (() => true),
   }
   const broker = new ExternalHealBroker(deps)
   const acceptedSignals: Array<{ runId: string; kind: HealSignalKind; body: Record<string, unknown> }> = []
@@ -183,6 +186,32 @@ describe('external heal routes', () => {
     })
     expect(release.statusCode).toBe(204)
     expect(broker.getSession('run-1')).toBeNull()
+  })
+
+  it('rejects a CLI claim with 403 client-kind-not-allowed under the default policy', async () => {
+    writeRun('run-1', 'running')
+    const { app, broker } = await build({
+      isClaimAllowed: (kind) => kind === 'claude-desktop' || kind === 'codex-desktop',
+    })
+
+    const cliClaim = await app.inject({
+      method: 'POST',
+      url: '/api/runs/run-1/heal-agent/claim',
+      payload: { sessionId: 'sess-cli', clientKind: 'claude-cli' },
+    })
+    expect(cliClaim.statusCode).toBe(403)
+    expect(cliClaim.json().reason).toBe('client-kind-not-allowed')
+    expect(cliClaim.json().clientKind).toBe('claude-cli')
+    expect(broker.getSession('run-1')).toBeNull()
+
+    // A desktop client can still claim the same run afterwards.
+    const desktopClaim = await app.inject({
+      method: 'POST',
+      url: '/api/runs/run-1/heal-agent/claim',
+      payload: { sessionId: 'sess-desk', clientKind: 'claude-desktop' },
+    })
+    expect(desktopClaim.statusCode).toBe(200)
+    expect(broker.getSession('run-1')?.clientKind).toBe('claude-desktop')
   })
 
   it('validates claim, heartbeat, and release requests', async () => {

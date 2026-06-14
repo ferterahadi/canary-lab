@@ -2,22 +2,10 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "web-dev",
-      "runtimeExecutable": "npx",
-      "runtimeArgs": ["vite", "--config", "apps/web/vite.config.ts", "--port", "5173"],
+      "name": "canary-web-dev",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": ["-c", "CANARY_DEV_API=http://127.0.0.1:7420 npm run dev:web"],
       "port": 5173
-    },
-    {
-      "name": "docs",
-      "runtimeExecutable": "python3",
-      "runtimeArgs": ["-m", "http.server", "5174", "--directory", "docs"],
-      "port": 5174
-    },
-    {
-      "name": "boot-mockup",
-      "runtimeExecutable": "python3",
-      "runtimeArgs": ["-m", "http.server", "5180", "--directory", ".superpowers/boot-mockup"],
-      "port": 5180
     }
   ]
 }

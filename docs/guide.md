@@ -8,6 +8,15 @@ Envsets are temporary environment files for a feature. During a run, Canary Lab 
 
 Feature configs can make service startup env-specific — for example, a `local` env starts services while a `production` env skips local startup and points tests at a deployed URL.
 
+### Testing Against a Remote URL
+
+To run a feature's tests against a deployed environment without booting the local server:
+
+1. Add the env to `feature.config.cjs` → `envs: ['local', 'production']`.
+2. Gate each `startCommand` (or whole `repo`) with `envs: ['local']` so it only boots locally.
+3. Add a matching envset under `envsets/<env>/<feature>.env` with the remote target — e.g. `GATEWAY_URL=https://api.example.com`. Tests read this via `process.env.GATEWAY_URL` (see `e2e/helpers/api.ts`).
+4. Pick the env at the runner prompt (`canary-lab run`) or from the env dropdown in the web UI (`canary-lab ui`). Both flows apply/revert the envset and skip booting filtered services.
+
 ### Environment Variable Safety
 
 Envset files often contain credentials copied from local app configs. The default `.gitignore` ignores `features/*/envsets/*/*` so value files are not committed by accident. If you override this or use `git add -f`, review the files before pushing.
