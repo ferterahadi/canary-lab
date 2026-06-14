@@ -103,6 +103,21 @@ describe('applyOverlay', () => {
     const out = await applyOverlay(repo, path.join(repo, 'nonexistent.patch'))
     expect(out.kind).toBe('error')
   })
+
+  it('reports conflict when --3way hits a genuine merge conflict on the same line', async () => {
+    const repo = await tmpRepo(BASE)
+    const patch = writePatch(repo, await capturePatch(repo, PORTED))
+
+    // Change the TARGET line (same line the patch modifies) so --3way cannot
+    // auto-merge — both patch and current HEAD modified the same hunk.
+    const conflicting = BASE.replace('const PORT = 3007', 'const PORT = 9000 // user change')
+    fs.writeFileSync(path.join(repo, 'app.js'), conflicting)
+    await runGit(repo, ['commit', '-aqm', 'conflict-change', '--no-verify'])
+
+    const out = await applyOverlay(repo, patch)
+    expect(out.kind).toBe('conflict')
+    if (out.kind === 'conflict') expect(out.files).toContain('app.js')
+  })
 })
 
 describe('reverseOverlay', () => {
@@ -143,5 +158,12 @@ describe('reverseOverlay', () => {
     const patch = writePatch(repo, '   ')
     const out = await reverseOverlay(repo, patch)
     expect(out.kind).toBe('ok')
+  })
+
+  it('returns conflict with empty files when the patch path does not exist (exercises patchFiles code-nonzero)', async () => {
+    const repo = await tmpRepo(BASE)
+    const out = await reverseOverlay(repo, path.join(repo, 'nonexistent.patch'))
+    expect(out.kind).toBe('conflict')
+    if (out.kind === 'conflict') expect(out.files).toEqual([])
   })
 })

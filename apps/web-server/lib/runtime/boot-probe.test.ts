@@ -212,6 +212,20 @@ describe('bootAndProbe', () => {
     expect(diagnoseBootOutput('')).toEqual({ kind: 'unknown' })
   })
 
+  it('truncates the diagnostic buffer when output exceeds the cap', async () => {
+    // Send slightly more than DIAG_BUFFER_CAP (16 384 bytes) so the slice(-cap) arm is taken.
+    const bigChunk = 'x'.repeat(17_000)
+    const factory = emittingFactory(bigChunk)
+    const res = await bootAndProbe({
+      specs: [httpSpec('api', 'http://localhost:5000/')],
+      ptyFactory: factory,
+      healthCheck: async () => false,
+      healthPollIntervalMs: 5,
+    })
+    expect(res.ok).toBe(false)
+    res.teardown()
+  })
+
   it('teardown kills every spawned process group', async () => {
     const { factory, killed } = fakeFactory()
     const res = await bootAndProbe({

@@ -11,6 +11,7 @@ AI agents are good at editing code and bad at proving the edit works. Canary Lab
 
 **Contents**
 
+- [What's New](#changelog)
 - [How the Repair Loop Works](#how-the-repair-loop-works)
 - [Why a Harness? Your Agent Already Has a Terminal](#why-a-harness-your-agent-already-has-a-terminal)
 - [Canary Lab and docker-compose](#canary-lab-and-docker-compose)
@@ -120,12 +121,12 @@ Skip it when `npx playwright test` already tells you enough, when you want self-
 
 | Doc | What's inside |
 | --- | --- |
+| [Changelog](docs/CHANGELOG.md) | What changed in each release. |
 | [Guide](docs/GUIDE.md) | Environment switching, run-output layout, repairing a failed run, evaluation reports, and external authoring. |
 | [Commands](docs/COMMANDS.md) | Full CLI reference for every `canary-lab` subcommand. |
 | [Feature Folders](docs/FEATURES.md) | Feature structure, scaffold conventions, and creating a feature. |
 | [Architecture](docs/ARCHITECTURE.md) | Module map, run lifecycle, concurrency, heal system, and the MCP layer. |
 | [Contributing](docs/CONTRIBUTING.md) | Code orientation and the build/test workflow. |
-| [Changelog](docs/CHANGELOG.md) | Release notes. |
 
 ## License
 
