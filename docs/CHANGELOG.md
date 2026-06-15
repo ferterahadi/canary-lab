@@ -14,6 +14,13 @@ Each entry is tagged with the area it touches:
 
 ---
 
+## 1.3.1 — 2026-06-15
+
+- **[General]** **Lighter install.** Trimmed the packages shipped with Canary Lab so installing it downloads less and finishes faster.
+- **[General]** **Fuller getting-started guide.** Expanded the README with more setup and usage details so new users can find their footing without digging.
+
+---
+
 ## 1.3.0 — 2026-06-14
 
 > MCP server is renamed to `Canary_Lab` — run `npx canary-lab setup --force` and restart your agent after upgrading.
