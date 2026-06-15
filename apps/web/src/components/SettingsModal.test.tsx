@@ -55,7 +55,7 @@ describe('SettingsModal', () => {
     vi.mocked(api.getProjectConfig).mockResolvedValue({
       healAgent: 'auto',
       editor: 'auto',
-      personalWikiPath: '/Users/oddle/Documents/wiki/wiki',
+      personalWikiPath: '/Users/dev/Documents/wiki/wiki',
     })
     vi.mocked(api.putProjectConfig).mockResolvedValue({
       healAgent: 'auto',
@@ -69,7 +69,7 @@ describe('SettingsModal', () => {
     await act(async () => {})
 
     const pickerButton = [...container.querySelectorAll('button')]
-      .find((b) => b.textContent?.includes('/Users/oddle/Documents/wiki/wiki'))
+      .find((b) => b.textContent?.includes('/Users/dev/Documents/wiki/wiki'))
     expect(pickerButton).toBeTruthy()
 
     await act(async () => {

@@ -161,7 +161,7 @@ Playwright process as `CANARY_PORT_<slot>`.
    via `applySet`'s resolver (`resolvePortTokens`).
 
 So inter-service URLs and config-file listen ports (e.g. Spring
-`server.port=${port.mpass}`, `oddle.oms.url=http://localhost:${port.oms}`) follow the
+`server.port=${port.api}`, `dev.url=http://localhost:${port.web}`) follow the
 run's allocation. Test helpers resolve the target as
 `CANARY_PORT_api → GATEWAY_URL → hardcoded default` (see any sample
 `e2e/helpers/api.ts`). The CLI `env` switching path passes no resolver, so it stays a

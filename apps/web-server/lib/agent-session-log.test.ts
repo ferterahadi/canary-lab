@@ -30,8 +30,8 @@ afterEach(() => {
 })
 
 describe('encodeClaudeProjectDir', () => {
-  it('replaces every / with - so /Users/oddle/foo becomes -Users-oddle-foo', () => {
-    expect(encodeClaudeProjectDir('/Users/oddle/foo')).toBe('-Users-oddle-foo')
+  it('replaces every / with - so /Users/dev/foo becomes -Users-dev-foo', () => {
+    expect(encodeClaudeProjectDir('/Users/dev/foo')).toBe('-Users-dev-foo')
   })
 
   it('preserves dots, hyphens, and underscores', () => {
