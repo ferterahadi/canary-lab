@@ -64,11 +64,11 @@ describe('ReposTab', () => {
     vi.mocked(putFeatureConfigDoc).mockResolvedValue(doc('customer-notifications'))
 
     await act(async () => {
-      root.render(<ReposTab feature="cns_exactly_once_fallback" />)
+      root.render(<ReposTab feature="exactly_once_fallback" />)
     })
 
     const nameInput = inputForLabel('Name')
-    expect(nameInput.value).toBe('mighty-cns')
+    expect(nameInput.value).toBe('canary-lab')
     expect(container.textContent).not.toContain('repos[].name')
 
     await act(async () => {
@@ -87,12 +87,12 @@ describe('ReposTab', () => {
     })
 
     expect(putFeatureConfigDoc).toHaveBeenCalledWith(
-      'cns_exactly_once_fallback',
+      'exactly_once_fallback',
       expect.objectContaining({
         repos: [
           expect.objectContaining({
             name: 'customer-notifications',
-            localPath: '~/Documents/mighty-cns',
+            localPath: '~/Documents/canary-lab',
           }),
         ],
       }),
@@ -105,7 +105,7 @@ describe('ReposTab', () => {
     vi.mocked(putFeatureConfigDoc).mockResolvedValue(withPorts)
 
     await act(async () => {
-      root.render(<ReposTab feature="cns_exactly_once_fallback" />)
+      root.render(<ReposTab feature="exactly_once_fallback" />)
     })
 
     // Ports are no longer edited here — the Service tab does not render the
@@ -126,7 +126,7 @@ describe('ReposTab', () => {
     })
 
     expect(putFeatureConfigDoc).toHaveBeenCalledWith(
-      'cns_exactly_once_fallback',
+      'exactly_once_fallback',
       expect.objectContaining({
         repos: [
           expect.objectContaining({
@@ -145,18 +145,18 @@ describe('ReposTab', () => {
 
 function docWithPorts(): ParsedConfigDoc {
   return {
-    path: '/features/cns_exactly_once_fallback/feature.config.cjs',
+    path: '/features/exactly_once_fallback/feature.config.cjs',
     format: 'cjs',
     content: '',
     parsed: {
       value: {
-        name: 'cns_exactly_once_fallback',
+        name: 'exactly_once_fallback',
         description: 'desc',
         envs: ['local'],
         repos: [
           {
-            name: 'mighty-cns',
-            localPath: '~/Documents/mighty-cns',
+            name: 'canary-lab',
+            localPath: '~/Documents/canary-lab',
             startCommands: [
               { command: 'yarn start', ports: [{ name: 'api', env: 'PORT' }] },
             ],
@@ -183,22 +183,22 @@ function setInputValue(input: HTMLInputElement, value: string): void {
   setter?.call(input, value)
 }
 
-function doc(repoName = 'mighty-cns'): ParsedConfigDoc {
+function doc(repoName = 'canary-lab'): ParsedConfigDoc {
   return {
-    path: '/features/cns_exactly_once_fallback/feature.config.cjs',
+    path: '/features/exactly_once_fallback/feature.config.cjs',
     format: 'cjs',
     content: '',
     parsed: {
       value: {
-        name: 'cns_exactly_once_fallback',
+        name: 'exactly_once_fallback',
         description: 'desc',
         envs: ['local'],
         repos: [
           {
             name: repoName,
-            localPath: '~/Documents/mighty-cns',
+            localPath: '~/Documents/canary-lab',
             branch: 'release/2.8.2',
-            cloneUrl: 'git@github.com:oddle-engineering/mighty-cns.git',
+            cloneUrl: 'git@github.com:ferterahadi/canary-lab.git',
           },
         ],
         featureDir: { $expr: '__dirname' },

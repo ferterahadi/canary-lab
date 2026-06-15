@@ -69,7 +69,7 @@ beforeEach(() => {
       toolCount: tools.length,
       tools,
       activeSessions: 0,
-      projectRoot: '/Users/oddle/Documents/canary-lab-workspace',
+      projectRoot: '/Users/dev/Documents/canary-lab-workspace',
     }
   })
 })

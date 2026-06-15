@@ -83,23 +83,23 @@ describe('interpolateFeatureTokens', () => {
 })
 
 describe('resolvePortTokens', () => {
-  const ports = new Map([['mpass', 51001], ['oms', 51002]])
+  const ports = new Map([['api', 51001], ['web', 51002]])
 
   it('resolves multiple ${port.<slot>} tokens in envset-style content', () => {
     const content = [
-      'server.port=${port.mpass}',
-      'oddle.oms.url=http://localhost:${port.oms}/',
-      'MP_BASE_URL=http://localhost:${port.mpass}',
+      'server.port=${port.api}',
+      'dev.url=http://localhost:${port.web}/',
+      'API_BASE_URL=http://localhost:${port.api}',
     ].join('\n')
     expect(resolvePortTokens(content, ports)).toBe([
       'server.port=51001',
-      'oddle.oms.url=http://localhost:51002/',
-      'MP_BASE_URL=http://localhost:51001',
+      'dev.url=http://localhost:51002/',
+      'API_BASE_URL=http://localhost:51001',
     ].join('\n'))
   })
 
   it('leaves non-port tokens and unknown slots literal', () => {
-    const content = 'A=${port.mpass}\nB=${secret.KEY}\nC=${port.unknown}'
+    const content = 'A=${port.api}\nB=${secret.KEY}\nC=${port.unknown}'
     expect(resolvePortTokens(content, ports)).toBe('A=51001\nB=${secret.KEY}\nC=${port.unknown}')
   })
 

@@ -3,7 +3,7 @@ import { featuresRoutes } from './apps/web-server/routes/features.ts'
 
 const app = Fastify()
 await app.register(featuresRoutes, {
-  featuresDir: '/Users/oddle/Documents/canary-lab-workspace/features',
+  featuresDir: process.env.FEATURES_DIR ?? process.argv[2],
 })
 const res = await app.inject({ method: 'GET', url: '/api/features/shop_redeeming_eats_voucher/tests' })
 const body = res.json()

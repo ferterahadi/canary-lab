@@ -23,8 +23,8 @@ beforeEach(() => {
   document.body.appendChild(container)
   root = createRoot(container)
   vi.mocked(listWorkspaceDirs).mockReset().mockResolvedValue({
-    absolute: '/Users/oddle/Documents/mighty-cns',
-    parent: '/Users/oddle/Documents',
+    absolute: '/Users/dev/Documents/mighty-cns',
+    parent: '/Users/dev/Documents',
     dirs: ['apps'],
   })
 })
@@ -46,7 +46,7 @@ describe('FolderPickerModal', () => {
       await act(async () => {
         root.render(
           <FolderPickerModal
-            initialPath="/Users/oddle/Documents/mighty-cns"
+            initialPath="/Users/dev/Documents/mighty-cns"
             title="Select a folder"
             confirmLabel="Use this folder"
             onConfirm={() => {}}

@@ -66,7 +66,7 @@ describe('evaluation export helpers', () => {
 
 describe('shortLocation', () => {
   it('keeps the final two path segments for compact runtime labels', () => {
-    expect(shortLocation('/Users/oddle/workspace/e2e/helpers/login.ts:209')).toBe('helpers/login.ts:209')
+    expect(shortLocation('/Users/dev/workspace/e2e/helpers/login.ts:209')).toBe('helpers/login.ts:209')
     expect(shortLocation('checkout.spec.ts:12')).toBe('checkout.spec.ts:12')
   })
 })
@@ -78,7 +78,7 @@ describe('service labels', () => {
       name: 'mighty-cns gateway stack',
       safeName: 'mighty-cns-gateway-stack',
       command: 'yarn start:all:dev',
-      cwd: '/Users/oddle/Documents/mighty-cns',
+      cwd: '/Users/dev/Documents/mighty-cns',
       logPath: '/tmp/svc.log',
     }
 
@@ -102,7 +102,7 @@ describe('service labels', () => {
       name: 'mighty-cns gateway stack',
       safeName: 'mighty-cns-gateway-stack',
       command: 'yarn start:all:dev',
-      cwd: '/Users/oddle/Documents/mighty-cns',
+      cwd: '/Users/dev/Documents/mighty-cns',
       logPath: '/tmp/svc.log',
     }
 
@@ -115,13 +115,13 @@ describe('service labels', () => {
       name: 'mighty-cns gateway stack',
       safeName: 'mighty-cns-gateway-stack',
       command: 'yarn start:all:dev',
-      cwd: '/Users/oddle/Documents/mighty-cns',
+      cwd: '/Users/dev/Documents/mighty-cns',
       logPath: '/tmp/svc.log',
     }
 
     expect(serviceTabLabelParts(service, {
       name: 'mighty-cns',
-      path: '/Users/oddle/Documents/mighty-cns',
+      path: '/Users/dev/Documents/mighty-cns',
       branch: 'release/2.8.2',
       expectedBranch: 'release/2.8.2',
       detached: false,

@@ -103,7 +103,7 @@ function normalizeAgentSessionRef(value: unknown): AgentSessionRef | null {
 // ─── Claude locator ────────────────────────────────────────────────────────
 
 // Claude encodes a project directory as the absolute path with every `/`
-// replaced by `-`. So `/Users/oddle/foo` becomes `-Users-oddle-foo`. Dots,
+// replaced by `-`. So `/Users/dev/foo` becomes `-Users-dev-foo`. Dots,
 // hyphens, and underscores pass through. Verified against a live install.
 export function encodeClaudeProjectDir(cwd: string): string {
   return cwd.replace(/\//g, '-')
