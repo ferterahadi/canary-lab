@@ -1,6 +1,6 @@
 {
   "name": "canary-lab",
-  "version": "1.3.0",
+  "version": "1.3.1",
   "description": "Independent local harness for AI coding agents: boots your services in dev mode, runs Playwright tests itself, keeps per-run evidence, and reruns until green.",
   "keywords": [
     "playwright",
@@ -81,7 +81,11 @@
     "tag:force": "node tools/tag-release.mjs --force"
   },
   "devDependencies": {
+    "@dnd-kit/core": "^6.3.1",
+    "@dnd-kit/sortable": "^10.0.0",
+    "@dnd-kit/utilities": "^3.2.2",
     "@remotion/cli": "^4.0.469",
+    "@remotion/google-fonts": "^4.0.473",
     "@tailwindcss/postcss": "^4.2.4",
     "@types/node": "^25.5.2",
     "@types/react": "^19.2.14",
@@ -105,16 +109,11 @@
   },
   "dependencies": {
     "@babel/parser": "^7.29.2",
-    "@dnd-kit/core": "^6.3.1",
-    "@dnd-kit/sortable": "^10.0.0",
-    "@dnd-kit/utilities": "^3.2.2",
     "@fastify/multipart": "^10.0.0",
     "@fastify/static": "^9.1.3",
     "@fastify/websocket": "^11.2.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
-    "@playwright/mcp": "^0.0.75",
     "@playwright/test": "^1.54.2",
-    "@remotion/google-fonts": "^4.0.473",
     "ast-types": "^0.16.1",
     "dotenv": "^16.6.1",
     "fastify": "^5.8.5",
