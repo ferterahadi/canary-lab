@@ -13,8 +13,10 @@ AI agents are good at editing code and bad at proving the edit works. Canary Lab
 
 - [What's New](#changelog)
 - [How the Repair Loop Works](#how-the-repair-loop-works)
+- [What You Write](#what-you-write)
 - [Why a Harness? Your Agent Already Has a Terminal](#why-a-harness-your-agent-already-has-a-terminal)
 - [Canary Lab and docker-compose](#canary-lab-and-docker-compose)
+- [How It Compares](#how-it-compares)
 - [Quick Start](#quick-start)
 - [Agent-First Workflow](#agent-first-workflow)
 - [What Canary Lab Owns](#what-canary-lab-owns)
@@ -32,6 +34,51 @@ AI agents are good at editing code and bad at proving the edit works. Canary Lab
 4. Your AI agent reads the failure context, fixes the app or the test, and signals `rerun` or `restart` — Canary Lab, not the agent, reruns the tests.
 5. Canary Lab continues from the same run until the check passes.
 
+## What You Write
+
+A feature is a folder with two things: a config that says how to boot your services, and normal Playwright tests. There's no new test language to learn.
+
+The config is where the per-run isolation comes from — you describe the dev command you already run, and Canary Lab fills in a free port for each run:
+
+```js
+// features/checkout/feature.config.cjs
+const config = {
+  name: 'checkout',
+  envs: ['local'],
+  repos: [{
+    name: 'checkout',
+    localPath: __dirname,
+    startCommands: [{
+      command: 'npm run dev',
+      // Canary Lab allocates a free port per run and injects it as PORT, so two
+      // runs of this service never collide. Reference it anywhere as ${port.api}.
+      ports: [{ name: 'api', env: 'PORT' }],
+      healthCheck: { http: { url: 'http://localhost:${port.api}/', timeoutMs: 3000 } },
+    }],
+  }],
+  featureDir: __dirname,
+}
+
+module.exports = { config }
+```
+
+The tests are ordinary Playwright. The only Canary Lab-specific line is the import — a thin fixture that tags each test's output in the run log so failures map back to the right test:
+
+```ts
+// features/checkout/e2e/checkout.spec.ts
+import { test, expect } from 'canary-lab/feature-support/log-marker-fixture'
+
+test('applying SAVE10 produces a 10% discount on the summary', async ({ request }) => {
+  const { orderId } = await (await request.post('/order')).json()
+  await request.post(`/order/${orderId}/items`, { data: { sku: 'X', qty: 1, price: 100 } })
+  await request.post(`/order/${orderId}/coupon`, { data: { code: 'SAVE10' } })
+  const summary = await (await request.get(`/order/${orderId}/summary`)).json()
+  expect(summary.discount).toBe(10)
+})
+```
+
+The scaffold ships working sample features (including some intentionally broken ones) so you can watch a full repair loop before writing your own.
+
 ## Why a Harness? Your Agent Already Has a Terminal
 
 A good coding agent can start a dev server and run Playwright by itself. Three things it can't do alone:
@@ -45,6 +92,22 @@ A good coding agent can start a dev server and run Playwright by itself. Three t
 They work together, not against each other. Compose runs your services as images — so after the agent fixes a line of code, you usually wait for a rebuild before you can test again. Compose Watch can shorten that wait, but only after you write and maintain a dev image and watch rules for every service. Canary Lab skips all of that: it runs the dev commands you already use (`npm run dev`, `./gradlew bootRun`), so a fix is picked up by hot reload and retested in seconds — no Dockerfile needed. And because each run gets its own ports, several runs can share one machine, which compose can't do out of the box.
 
 Compose is still the better tool for databases and queues (Postgres, Redis, Kafka) and for CI. Use both: put `docker compose up postgres redis` in a Canary Lab `startCommand` for the infrastructure, and let Canary Lab run your app services in dev mode.
+
+## How It Compares
+
+Each of these is the right tool for some jobs. The table is about where Canary Lab's particular niche — an AI agent repairing local, multi-service e2e tests — sits next to them.
+
+| | Plain Playwright | docker-compose (watch) | Hosted test dashboard | Canary Lab |
+| --- | :---: | :---: | :---: | :---: |
+| Runs your existing dev commands, hot reload intact | ✓ | needs a dev image + watch rules | — | ✓ |
+| Fix → retest in seconds, no image rebuild | ✓ (one service) | after rebuild/sync | — | ✓ |
+| Boots & orchestrates several services together | you script it | ✓ | varies | ✓ |
+| Concurrent runs on one machine (auto ports + git worktrees) | manual | not out of the box | hosted, not local | ✓ |
+| Per-run evidence the agent can't fake | — | — | ✓ (in the cloud) | ✓ (on your machine) |
+| Env-file switching with backup/restore | manual | manual | — | ✓ |
+| Runs fully local / offline | ✓ | ✓ | — | ✓ |
+
+If `npx playwright test` already tells you what you need, or you'd rather a hosted service manage your tests, you don't need Canary Lab. It earns its place when a failure depends on more than a browser assertion — which services were up, which env was active, what the backend logged — and you want an agent to fix it without you babysitting the loop.
 
 ## Quick Start
 
@@ -109,6 +172,8 @@ Skip it when `npx playwright test` already tells you enough, when you want self-
 - A modern browser: Chrome, Firefox, or Safari.
 - Local UI server on `http://localhost:7421` (the default; set per project via `--port` or Project Settings), with service orchestration through `node-pty`.
 - Optional repair agents: supported AI agent CLIs (`claude`, `codex`) on `PATH`.
+
+`node-pty` is a native module — it's how Canary Lab gives each service a real terminal (PTY) so interactive dev servers behave the way they do in your own shell. It ships prebuilt binaries, so a normal install doesn't compile anything. The one postinstall step (`fix-node-pty-permissions.mjs`) only re-adds the execute bit to node-pty's `spawn-helper`, which its npm tarball drops on some platforms ([known upstream packaging bug](https://github.com/microsoft/node-pty/issues)); it's a `chmod`, touches nothing outside `node-modules/node-pty`, and is a silent no-op on Windows or if node-pty isn't installed.
 
 ## Limitations
 
