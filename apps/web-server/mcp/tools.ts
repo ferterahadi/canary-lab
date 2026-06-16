@@ -37,6 +37,12 @@ import {
   type EnvFileSource,
 } from '../lib/feature-authoring'
 import {
+  FeatureNotFoundError,
+  computeFeatureCoverage,
+  listFeatureDocs,
+  regeneratePrdSummary,
+} from '../lib/coverage/service'
+import {
   createDraft,
   paths as draftPaths,
   readDraft,
@@ -206,6 +212,9 @@ export type CanaryLabMcpToolName =
   | 'get_verification_result'
   | 'create_feature'
   | 'write_feature_doc'
+  | 'get_feature_coverage'
+  | 'list_feature_docs'
+  | 'regenerate_prd_summary'
   | 'get_feature_envset_summary'
   | 'capture_feature_env_files'
   | 'write_envset'
@@ -278,6 +287,9 @@ const AUTHOR_TOOLS = [
   'get_run_snapshot',
   'create_feature',
   'write_feature_doc',
+  'get_feature_coverage',
+  'list_feature_docs',
+  'regenerate_prd_summary',
   'get_feature_envset_summary',
   'capture_feature_env_files',
   'write_envset',
@@ -605,6 +617,59 @@ export function registerCanaryLabTools(
     )
     if (!result.ok) return errorResult(result.error)
     return asJsonResult({ written: true, path: result.writtenPath, relativePath: result.relativePath })
+  })
+
+  registerTool('get_feature_coverage', {
+    description:
+      'Get the Verified Coverage Ledger for a feature: PRD requirements → annotated tests → last passing run + gap type (untested / unverified / path-incomplete / verified / shallow-verified) with a grounded coverage %, PLUS per-requirement rigor (tierReached / tierAvailable / strictness / weakestAssertion / suggestedStrongerCheck) and docs-drift status. The coverage % and strictness are evidence-based math over passing runs — never an opinion. Use this to find untested/unverified requirements and to see which passing tests are too lax (and what stronger check to write).',
+    inputSchema: { feature: z.string().describe('Existing feature name (from list_features).') },
+  }, async ({ feature }) => {
+    try {
+      return asJsonResult(computeFeatureCoverage({
+        featuresDir: deps.featuresDir,
+        logsDir: deps.store.logsDir,
+        feature,
+      }))
+    } catch (err) {
+      if (err instanceof FeatureNotFoundError) return errorResult(err.message)
+      throw err
+    }
+  })
+
+  registerTool('list_feature_docs', {
+    description:
+      'List the docs in a feature\'s docs/ directory (source docs the user added plus generated _prd-* PRD artifacts), with the PRD summary status and docs-drift flag. The UI Docs tab shows the same list — use this to see what source material the PRD summary was built from before regenerating it.',
+    inputSchema: { feature: z.string().describe('Existing feature name (from list_features).') },
+  }, async ({ feature }) => {
+    try {
+      return asJsonResult(listFeatureDocs(deps.featuresDir, feature))
+    } catch (err) {
+      if (err instanceof FeatureNotFoundError) return errorResult(err.message)
+      throw err
+    }
+  })
+
+  registerTool('regenerate_prd_summary', {
+    description:
+      'Regenerate a feature\'s PRD summary from its current source docs (after you add or edit docs with write_feature_doc, or when get_feature_coverage reports docsDrift). Existing requirement ids are PRESERVED so inline @requirement annotations keep resolving; new requirements get new ids, removed ones are marked deprecated. Writes docs/_prd-summary.{json,md}. Same action as the UI Docs-tab "Regenerate" button.',
+    inputSchema: {
+      feature: z.string().describe('Existing feature name (from list_features).'),
+      adapter: z.enum(['auto', 'claude', 'codex', 'deterministic']).optional()
+        .describe('Summarizer backend. Omit for auto (prefers an available agent CLI, falls back to deterministic heading extraction).'),
+    },
+  }, async ({ feature, adapter }) => {
+    try {
+      const result = await regeneratePrdSummary({
+        featuresDir: deps.featuresDir,
+        feature,
+        adapter,
+        cwd: deps.projectRoot,
+      })
+      return asJsonResult(result)
+    } catch (err) {
+      if (err instanceof FeatureNotFoundError) return errorResult(err.message)
+      throw err
+    }
   })
 
   registerTool('get_feature_envset_summary', {

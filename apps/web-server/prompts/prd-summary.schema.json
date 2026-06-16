@@ -1,0 +1,36 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "requirements": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string" },
+          "title": { "type": "string" },
+          "text": { "type": "string" },
+          "pathTypes": {
+            "type": "array",
+            "items": { "enum": ["happy", "sad", "edge"] }
+          },
+          "strictnessLadder": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "tier": { "type": "integer", "enum": [1, 2, 3, 4] },
+                "description": { "type": "string" }
+              },
+              "required": ["tier", "description"]
+            }
+          }
+        },
+        "required": ["title", "text", "pathTypes"]
+      }
+    }
+  },
+  "required": ["requirements"]
+}

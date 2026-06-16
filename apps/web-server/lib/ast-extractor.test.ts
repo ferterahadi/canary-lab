@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { extractTestsFromSource } from './ast-extractor'
+import { extractTestsFromSource, parseTestAnnotations } from './ast-extractor'
 
 describe('extractTestsFromSource', () => {
   it('returns empty array when no tests are present', () => {
@@ -196,5 +196,103 @@ describe('extractTestsFromSource', () => {
     const r = extractTestsFromSource('bad.ts', undefined as unknown as string)
     expect(r.parseError).toBeTruthy()
     expect(r.tests).toEqual([])
+  })
+})
+
+describe('parseTestAnnotations', () => {
+  it('parses @requirement (repeatable, deduped, order preserved)', () => {
+    const out = parseTestAnnotations('// @requirement R2\n// @requirement R1\n// @requirement R2')
+    expect(out.requirements).toEqual(['R2', 'R1'])
+  })
+
+  it('parses @path single, list, and repeated forms; canonical order', () => {
+    expect(parseTestAnnotations('// @path sad').pathTypes).toEqual(['sad'])
+    expect(parseTestAnnotations('// @path sad, happy').pathTypes).toEqual(['happy', 'sad'])
+    expect(parseTestAnnotations('// @path edge\n// @path happy').pathTypes).toEqual(['happy', 'edge'])
+  })
+
+  it('ignores invalid path tokens', () => {
+    expect(parseTestAnnotations('// @path bogus happy').pathTypes).toEqual(['happy'])
+    expect(parseTestAnnotations('// @path nothing-valid').pathTypes).toBeUndefined()
+  })
+
+  it('returns undefined fields when nothing is annotated', () => {
+    expect(parseTestAnnotations('// just a normal comment')).toEqual({
+      requirements: undefined,
+      pathTypes: undefined,
+    })
+  })
+})
+
+describe('extractTestsFromSource — coverage annotations', () => {
+  it('attaches requirements + pathTypes from a // block above the test', () => {
+    const src = `
+      import { test } from '@playwright/test'
+      // @requirement R1
+      // @path happy, sad
+      test('login works', async () => { expect(1).toBe(1) })
+    `
+    const r = extractTestsFromSource('a.spec.ts', src)
+    expect(r.tests[0].requirements).toEqual(['R1'])
+    expect(r.tests[0].pathTypes).toEqual(['happy', 'sad'])
+  })
+
+  it('supports a /* */ block annotation', () => {
+    const src = `
+      /* @requirement R3
+         @path edge */
+      test('boundary', async () => {})
+    `
+    const r = extractTestsFromSource('a.spec.ts', src)
+    expect(r.tests[0].requirements).toEqual(['R3'])
+    expect(r.tests[0].pathTypes).toEqual(['edge'])
+  })
+
+  it('multiple requirements on one test', () => {
+    const src = `
+      // @requirement R1
+      // @requirement R2
+      test('cross-cutting', async () => {})
+    `
+    const r = extractTestsFromSource('a.spec.ts', src)
+    expect(r.tests[0].requirements).toEqual(['R1', 'R2'])
+  })
+
+  it('leaves fields undefined for an un-annotated test', () => {
+    const src = `test('plain', async () => {})`
+    const r = extractTestsFromSource('a.spec.ts', src)
+    expect(r.tests[0].requirements).toBeUndefined()
+    expect(r.tests[0].pathTypes).toBeUndefined()
+    expect(r.tests[0].assertions).toBeUndefined()
+  })
+
+  it('collects expect() matcher chains and navigation/network/db/file calls', () => {
+    const src = `
+      test('send', async () => {
+        await page.goto('https://line.com/inbox')
+        await expect(page.locator('.msg')).toBeVisible()
+        const row = await prisma.message.findFirst({ where: { id } })
+        const log = fs.readFileSync('app.log', 'utf-8')
+        expect(total).toBe(1)
+      })
+    `
+    const r = extractTestsFromSource('a.spec.ts', src)
+    const asserts = r.tests[0].assertions ?? []
+    expect(asserts.some((a) => a.includes("page.goto('https://line.com/inbox')"))).toBe(true)
+    expect(asserts.some((a) => a.includes('expect(page.locator') && a.includes('toBeVisible'))).toBe(true)
+    expect(asserts.some((a) => a.includes('prisma.message.findFirst'))).toBe(true)
+    expect(asserts.some((a) => a.includes("fs.readFileSync('app.log'"))).toBe(true)
+    expect(asserts.some((a) => a.includes('expect(total).toBe(1)'))).toBe(true)
+  })
+
+  it('does not bleed annotations from one test onto the next', () => {
+    const src = `
+      // @requirement R1
+      test('annotated', async () => {})
+      test('bare', async () => {})
+    `
+    const r = extractTestsFromSource('a.spec.ts', src)
+    expect(r.tests[0].requirements).toEqual(['R1'])
+    expect(r.tests[1].requirements).toBeUndefined()
   })
 })
