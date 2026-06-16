@@ -1,3 +1,4 @@
+import path from 'path'
 import type { FeatureConfig } from '../../../../../shared/launcher/types'
 import { collectPortSlots, buildServiceSpecs } from '../orchestrator'
 import { allocatePorts, releasePorts } from '../port-allocator'
@@ -75,10 +76,20 @@ export async function verifyDoubleBoot(
   let resB: BootProbeResult | undefined
   try {
     ;[resA, resB] = await Promise.all([
-      bootAndProbe({ ...bootOpts, specs: specsA, onOutput: fileTee(deps.verifyLogDir, 'a') }),
+      bootAndProbe({
+        ...bootOpts,
+        specs: specsA,
+        onOutput: fileTee(deps.verifyLogDir, 'a'),
+        fullLogPathFor: (safeName) => path.join(deps.verifyLogDir, `a-${safeName}.log`),
+      }),
       (async () => {
         await delay(deps.staggerMs ?? 250)
-        return bootAndProbe({ ...bootOpts, specs: specsB, onOutput: fileTee(deps.verifyLogDir, 'b') })
+        return bootAndProbe({
+          ...bootOpts,
+          specs: specsB,
+          onOutput: fileTee(deps.verifyLogDir, 'b'),
+          fullLogPathFor: (safeName) => path.join(deps.verifyLogDir, `b-${safeName}.log`),
+        })
       })(),
     ])
   } finally {

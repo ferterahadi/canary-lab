@@ -16,6 +16,7 @@ import {
   loadAgentSessionMeta,
   parseAgentSessionRefFile,
   renderAgentSessionContext,
+  writeFullSessionTranscript,
   selectAgentSessionRef,
 } from './agent-session-log'
 
@@ -980,7 +981,50 @@ describe('renderAgentSessionContext', () => {
 
     expect(rendered).toContain('THINKING: many details')
     expect(rendered).toContain('TOOL CALL Read: {"file_path":"/tmp/a.txt"}')
-    expect(rendered).toContain('[Previous session context truncated]')
+    expect(rendered).toContain('[Previous session context truncated — full transcript:')
+    // Even when truncated, the receiving agent is pointed at the full transcript.
+    const transcript = file.replace(/\.jsonl$/, '.transcript.txt')
+    expect(rendered).toContain(transcript)
+  })
+
+  it('points at a full transcript (envelope stripped, uncapped) even when not truncated', () => {
+    const file = path.join(homeDir, 'claude-context-pointer.jsonl')
+    fs.writeFileSync(file, JSON.stringify({
+      type: 'assistant',
+      timestamp: 't1',
+      message: { content: [{ type: 'text', text: 'short reply' }] },
+    }) + '\n')
+
+    const rendered = renderAgentSessionContext({
+      agent: 'claude',
+      sessionId: 'sid-pointer',
+      logPath: file,
+    })
+
+    const transcript = path.join(homeDir, 'claude-context-pointer.transcript.txt')
+    expect(rendered).toContain('ASSISTANT: short reply')
+    expect(rendered).toContain(`[Full session transcript (untruncated): ${transcript}]`)
+    expect(rendered).not.toContain('context truncated')
+    // The transcript file is materialized on disk with the full content.
+    expect(fs.existsSync(transcript)).toBe(true)
+    expect(fs.readFileSync(transcript, 'utf-8')).toContain('ASSISTANT: short reply')
+  })
+
+  it('writes an uncapped, newline-preserving transcript that drops the JSONL envelope', () => {
+    const file = path.join(homeDir, 'claude-context-full.jsonl')
+    const longText = 'line one\nline two\n' + 'x'.repeat(5_000)
+    fs.writeFileSync(file, JSON.stringify({
+      type: 'assistant',
+      timestamp: 't1',
+      message: { content: [{ type: 'text', text: longText }] },
+    }) + '\n')
+
+    const out = writeFullSessionTranscript({ agent: 'claude', sessionId: 'sid-full', logPath: file })
+    expect(out).toBe(path.join(homeDir, 'claude-context-full.transcript.txt'))
+    const body = fs.readFileSync(out!, 'utf-8')
+    // Uncapped (> the 1200-char digest cap) and newlines preserved (not collapsed).
+    expect(body.length).toBeGreaterThan(5_000)
+    expect(body).toContain('line one\nline two')
   })
 
   it('renders tool results with and without error markers when timestamps are absent', () => {

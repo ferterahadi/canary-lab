@@ -445,30 +445,82 @@ export function renderAgentSessionContext(ref: AgentSessionRef, maxChars = 12_00
     lines.push(renderAgentEventLine(event))
   }
   const rendered = lines.join('\n')
-  if (rendered.length <= maxChars) return rendered
-  return `${rendered.slice(0, maxChars)}\n[Previous session context truncated]`
+  // Point at a full transcript instead of the raw JSONL. The digest above caps
+  // each event and the total; the transcript carries every event uncapped with
+  // newlines preserved, but strips the JSONL envelope (tool schemas, base64
+  // blobs, repeated system reminders) — losslessly cheaper for the agent to
+  // Read than the raw log. Falls back to the raw log path on write failure.
+  const fullPath = writeFullSessionTranscript(ref, events) ?? ref.logPath
+  if (rendered.length <= maxChars) return `${rendered}\n[Full session transcript (untruncated): ${fullPath}]`
+  return `${rendered.slice(0, maxChars)}\n[Previous session context truncated — full transcript: ${fullPath}]`
 }
 
-function renderAgentEventLine(event: AgentEvent): string {
+/**
+ * Render the COMPLETE session as a plain-text transcript: every event, no
+ * per-event or total cap, internal newlines preserved. This is the on-disk
+ * companion the heal agent Reads when the in-prompt digest isn't enough — it
+ * drops the JSONL envelope but keeps all the meaning, so it's a lossless
+ * (token-cheaper) substitute for the raw `*.jsonl`.
+ */
+export function buildFullSessionTranscript(
+  ref: AgentSessionRef,
+  events: AgentEvent[] = loadAgentSessionLog(ref),
+): string {
+  if (events.length === 0) return ''
+  const lines = [`Previous ${ref.agent} session ${ref.sessionId} (full transcript):`]
+  for (const event of events) lines.push(renderAgentEventLine(event, { full: true }))
+  return lines.join('\n\n')
+}
+
+/**
+ * Materialize the full transcript next to the raw log (`<name>.transcript.txt`)
+ * and return its path, or null if there's nothing to write / the write fails.
+ */
+export function writeFullSessionTranscript(
+  ref: AgentSessionRef,
+  events?: AgentEvent[],
+): string | null {
+  const transcript = buildFullSessionTranscript(ref, events)
+  if (!transcript) return null
+  const base = ref.logPath.endsWith('.jsonl')
+    ? ref.logPath.slice(0, -'.jsonl'.length)
+    : ref.logPath
+  const file = `${base}.transcript.txt`
+  try {
+    fs.writeFileSync(file, transcript.endsWith('\n') ? transcript : `${transcript}\n`)
+    return file
+  } catch {
+    return null
+  }
+}
+
+function renderAgentEventLine(event: AgentEvent, opts: { full?: boolean } = {}): string {
   const prefix = event.timestamp ? `[${event.timestamp}] ` : ''
+  const t = (s: string): string => compactText(s, opts.full)
   switch (event.kind) {
     case 'user-message':
-      return `${prefix}USER: ${compactText(event.text)}`
+      return `${prefix}USER: ${t(event.text)}`
     case 'assistant-message':
-      return `${prefix}ASSISTANT: ${compactText(event.text)}`
+      return `${prefix}ASSISTANT: ${t(event.text)}`
     case 'assistant-thinking':
-      return `${prefix}THINKING: ${compactText(event.text)}`
+      return `${prefix}THINKING: ${t(event.text)}`
     case 'tool-call':
-      return `${prefix}TOOL CALL ${event.name}: ${compactText(JSON.stringify(event.input))}`
+      return `${prefix}TOOL CALL ${event.name}: ${t(JSON.stringify(event.input))}`
     case 'tool-result': {
       const marker = event.isError ? ' ERROR' : ''
-      return `${prefix}TOOL RESULT${marker}: ${compactText(event.output)}`
+      return `${prefix}TOOL RESULT${marker}: ${t(event.output)}`
     }
   }
 }
 
-function compactText(text: string, max = 1_200): string {
+// Digest mode (full=false): collapse all whitespace to single spaces and cap at
+// 1200 chars — one tight line per event for the in-prompt summary. Full mode
+// (full=true): trim only, preserving internal newlines, with no length cap —
+// for the on-disk transcript the agent Reads when the digest isn't enough.
+function compactText(text: string, full = false): string {
+  if (full) return text.trim()
   const compact = text.replace(/\s+/g, ' ').trim()
+  const max = 1_200
   if (compact.length <= max) return compact
   return `${compact.slice(0, max)}...`
 }

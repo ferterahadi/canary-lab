@@ -7,6 +7,7 @@ import {
   ROOT,
   getSummaryPath,
 } from './paths'
+import { compressLogByTemplate } from './log-template'
 
 // Cap each per-test slice at head + tail to keep per-failure files readable in
 // a single Read tool call. Errors are almost always near the end of the window,
@@ -19,10 +20,25 @@ export function capSlice(
   fullLogRelPath: string,
 ): string {
   const bytes = Buffer.byteLength(snippet, 'utf-8')
+  // Small enough to read in one call → keep it byte-for-byte (lossless).
   if (bytes <= SLICE_HALF_BYTES * 2) return snippet
-  const head = snippet.slice(0, SLICE_HALF_BYTES)
-  const tail = snippet.slice(-SLICE_HALF_BYTES)
-  const elided = bytes - Buffer.byteLength(head, 'utf-8') - Buffer.byteLength(tail, 'utf-8')
+
+  // Over budget. Collapse repeated noise by template FIRST — this keeps full
+  // temporal coverage of the slice, which beats dropping the middle. If that
+  // gets us under budget, we never truncate at all.
+  const { text: compact, collapsedLines } = compressLogByTemplate(snippet)
+  const compactBytes = Buffer.byteLength(compact, 'utf-8')
+  if (compactBytes <= SLICE_HALF_BYTES * 2) {
+    return collapsedLines > 0
+      ? `${compact}\n… [${collapsedLines} repeated line(s) collapsed by template — full log at ${fullLogRelPath}] …`
+      : compact
+  }
+
+  // Still too big even after collapsing → head+tail the compressed text. The
+  // elision marker keeps pointing at the full, uncompressed log.
+  const head = compact.slice(0, SLICE_HALF_BYTES)
+  const tail = compact.slice(-SLICE_HALF_BYTES)
+  const elided = compactBytes - Buffer.byteLength(head, 'utf-8') - Buffer.byteLength(tail, 'utf-8')
   const marker = ELISION_MARKER
     .replace('{n}', String(elided))
     .replace('{path}', fullLogRelPath)
@@ -84,6 +100,34 @@ export function writeFailureSlices(
   return writeSlicesToDisk(slug, extractLogsForTest(slug, serviceLogs), failedDir)
 }
 
+// Write the full (untruncated) failure error — assertion message plus the
+// code-frame snippet — to `<failedDir>/<slug>/error.txt`. Returns the
+// repo-relative path, or null when there's nothing to write / a write fails.
+// The heal-index points the agent here so a large assertion diff is never lost
+// to the one-line preview.
+export function writeErrorFile(
+  slug: string,
+  error: { message?: string; snippet?: string } | undefined,
+  failedDir: string = path.join(path.dirname(getSummaryPath()), 'failed'),
+): string | null {
+  const message = error?.message?.trim() ?? ''
+  const snippet = error?.snippet?.trim() ?? ''
+  if (!message && !snippet) return null
+  const parts: string[] = []
+  if (message) parts.push(message)
+  if (snippet) parts.push('--- snippet ---', snippet)
+  const body = parts.join('\n\n')
+  try {
+    const dir = path.join(failedDir, slug)
+    fs.mkdirSync(dir, { recursive: true })
+    const filePath = path.join(dir, 'error.txt')
+    fs.writeFileSync(filePath, body.endsWith('\n') ? body : `${body}\n`)
+    return path.relative(ROOT, filePath) || filePath
+  } catch {
+    return null
+  }
+}
+
 function writeSlicesToDisk(
   slug: string,
   slices: Record<string, string>,
@@ -117,6 +161,10 @@ interface FailedEntry {
   // reads the curated trace summary as its first stop for "what went wrong".
   traceSummaryFile?: string
   error?: { message?: string; snippet?: string }
+  // Repo-relative path to `failed/<slug>/error.txt` — the full, untruncated
+  // assertion message + code-frame snippet. The heal-index shows a one-line
+  // preview of `error.message`; this file is the complete source for the agent.
+  errorFile?: string
   location?: string
   durationMs?: number
   retry?: number
@@ -204,6 +252,10 @@ export function enrichSummaryWithLogs(): { manifest: Manifest; summary: Enriched
       if (logFiles.length > 0) {
         base.logFiles = logFiles
       }
+      const errorFile = writeErrorFile(base.name, base.error, failedDir)
+      if (errorFile) {
+        base.errorFile = errorFile
+      }
       return base
     },
   )
@@ -251,6 +303,26 @@ export function truncateDiffForJournal(text: string, max = MAX_JOURNAL_DIFF_BYTE
   const safeHead = lastNewline > 0 ? head.slice(0, lastNewline) : head
   const remaining = byteLen - Buffer.byteLength(safeHead, 'utf-8')
   return `${safeHead}\n... (truncated, ${remaining} more bytes)`
+}
+
+// When a cycle's diff exceeds the in-journal cap, write the FULL unified diff
+// to `<runDir>/diffs/iteration-<n>.patch` so the truncated journal block can
+// point the heal agent at the complete edit. Returns the repo-relative path,
+// or null on write failure (the journal still carries the truncated head).
+export function writeFullDiffPatch(
+  journalPath: string,
+  iteration: number,
+  diff: string,
+): string | null {
+  try {
+    const dir = path.join(path.dirname(journalPath), 'diffs')
+    fs.mkdirSync(dir, { recursive: true })
+    const file = path.join(dir, `iteration-${iteration}.patch`)
+    fs.writeFileSync(file, diff.endsWith('\n') ? diff : `${diff}\n`)
+    return path.relative(ROOT, file) || file
+  } catch {
+    return null
+  }
 }
 
 // Parse the Markdown journal format:
@@ -453,6 +525,9 @@ export function writeHealIndex(parsed?: {
       if (entry.error?.message) {
         const errorMessage = normalizeErrorKey(entry.error.message)
         lines.push(`  - error: ${truncateOneLine(errorMessage, 400)}`)
+      }
+      if (entry.errorFile) {
+        lines.push(`  - full error: ${entry.errorFile}`)
       }
       if (entry.logFiles && entry.logFiles.length > 0) {
         lines.push(`  - slice: ${entry.logFiles.join(', ')}`)
@@ -699,8 +774,9 @@ export function appendJournalIteration(input: JournalAppendInput): void {
     ? input.filesChanged.filter((f) => typeof f === 'string').join(', ')
     : ''
 
+  const iteration = nextIterationNumber(journalPath)
   const section: string[] = []
-  section.push(`## Iteration ${nextIterationNumber(journalPath)} — ${new Date().toISOString()}`)
+  section.push(`## Iteration ${iteration} — ${new Date().toISOString()}`)
   section.push('')
   if (input.runId) section.push(`- run: ${input.runId}`)
   if (featureName) section.push(`- feature: ${featureName}`)
@@ -725,6 +801,13 @@ export function appendJournalIteration(input: JournalAppendInput): void {
     section.push('```diff')
     section.push(truncateDiffForJournal(diffContent))
     section.push('```')
+    // The journal block is capped for readability; when the diff overflows it,
+    // persist the full patch and point the agent at it so no edit context is
+    // lost across cycles.
+    if (Buffer.byteLength(diffContent, 'utf-8') > MAX_JOURNAL_DIFF_BYTES) {
+      const patchPath = writeFullDiffPatch(journalPath, iteration, diffContent)
+      if (patchPath) section.push(`Full diff: ${patchPath}`)
+    }
     section.push('')
   }
 
