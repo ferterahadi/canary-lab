@@ -445,8 +445,12 @@ export function renderAgentSessionContext(ref: AgentSessionRef, maxChars = 12_00
     lines.push(renderAgentEventLine(event))
   }
   const rendered = lines.join('\n')
-  if (rendered.length <= maxChars) return rendered
-  return `${rendered.slice(0, maxChars)}\n[Previous session context truncated]`
+  // Always cite the raw session log on disk. This digest compacts each event
+  // (per-event cap) and bounds the total, so even the un-truncated form is
+  // lossy vs. the source. The receiving agent can `Read` the full JSONL.
+  const fullLogPointer = `\n[Full session log (untruncated): ${ref.logPath}]`
+  if (rendered.length <= maxChars) return rendered + fullLogPointer
+  return `${rendered.slice(0, maxChars)}\n[Previous session context truncated — full log: ${ref.logPath}]`
 }
 
 function renderAgentEventLine(event: AgentEvent): string {

@@ -176,6 +176,37 @@ describe('bootAndProbe', () => {
     res.teardown()
   })
 
+  it('appends a Full boot log pointer to the failure detail when fullLogPathFor is set', async () => {
+    const factory = emittingFactory('booting\nwarming caches\nstill starting up\n')
+    const res = await bootAndProbe({
+      specs: [httpSpec('api', 'http://localhost:5000/')],
+      ptyFactory: factory,
+      healthCheck: async () => false,
+      healthPollIntervalMs: 5,
+      fullLogPathFor: (safeName) => `/runs/X/verify/a-${safeName}.log`,
+    })
+    expect(res.ok).toBe(false)
+    if (!res.ok) {
+      // The 12-line evidence slice is preserved AND the agent is pointed at the full log.
+      expect(res.detail).toContain('warming caches')
+      expect(res.detail).toContain('Full boot log: /runs/X/verify/a-api.log')
+    }
+    res.teardown()
+  })
+
+  it('omits the Full boot log pointer when fullLogPathFor is not provided', async () => {
+    const factory = emittingFactory('booting\nstill starting up\n')
+    const res = await bootAndProbe({
+      specs: [httpSpec('api', 'http://localhost:5000/')],
+      ptyFactory: factory,
+      healthCheck: async () => false,
+      healthPollIntervalMs: 5,
+    })
+    expect(res.ok).toBe(false)
+    if (!res.ok) expect(res.detail).not.toContain('Full boot log:')
+    res.teardown()
+  })
+
   it('classifies an EADDRINUSE crash as a port conflict', async () => {
     const factory = emittingFactory('Error: listen EADDRINUSE: address already in use 0.0.0.0:5000\n')
     const res = await bootAndProbe({

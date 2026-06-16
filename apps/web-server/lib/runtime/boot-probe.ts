@@ -47,6 +47,11 @@ export interface BootProbeOptions {
   healthDeadlineMs?: number
   /** Tee each service's output somewhere (e.g. a per-instance log file). */
   onOutput?: (safeName: string, chunk: string) => void
+  /** Where the FULL (untruncated) boot log for a service lives, when teed to
+   *  disk. The diagnostic `evidence` in a boot failure is a 12-line slice; when
+   *  this resolver is provided we append a pointer to the full log so the agent
+   *  reading the failure can `Read` the complete output instead of guessing. */
+  fullLogPathFor?: (safeName: string) => string | undefined
 }
 
 function killTree(pty: PtyHandle, signal: NodeJS.Signals = 'SIGTERM'): void {
@@ -179,13 +184,15 @@ export async function bootAndProbe(opts: BootProbeOptions): Promise<BootProbeRes
     }
     if (!ready) {
       const { evidence, kind } = diagnoseBootOutput(buffers.get(svc.safeName) ?? '')
+      const fullLog = opts.fullLogPathFor?.(svc.safeName)
       return {
         ok: false,
         failedService: svc.name,
         transport,
         detail:
           `Timed out waiting for ${transport.toUpperCase()} readiness (${detail}).` +
-          (evidence ? `\nProcess output:\n${evidence}` : ''),
+          (evidence ? `\nProcess output:\n${evidence}` : '') +
+          (fullLog ? `\nFull boot log: ${fullLog}` : ''),
         kind,
         teardown,
       }
