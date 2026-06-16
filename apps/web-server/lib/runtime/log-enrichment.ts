@@ -7,6 +7,7 @@ import {
   ROOT,
   getSummaryPath,
 } from './paths'
+import { compressLogByTemplate } from './log-template'
 
 // Cap each per-test slice at head + tail to keep per-failure files readable in
 // a single Read tool call. Errors are almost always near the end of the window,
@@ -19,10 +20,25 @@ export function capSlice(
   fullLogRelPath: string,
 ): string {
   const bytes = Buffer.byteLength(snippet, 'utf-8')
+  // Small enough to read in one call → keep it byte-for-byte (lossless).
   if (bytes <= SLICE_HALF_BYTES * 2) return snippet
-  const head = snippet.slice(0, SLICE_HALF_BYTES)
-  const tail = snippet.slice(-SLICE_HALF_BYTES)
-  const elided = bytes - Buffer.byteLength(head, 'utf-8') - Buffer.byteLength(tail, 'utf-8')
+
+  // Over budget. Collapse repeated noise by template FIRST — this keeps full
+  // temporal coverage of the slice, which beats dropping the middle. If that
+  // gets us under budget, we never truncate at all.
+  const { text: compact, collapsedLines } = compressLogByTemplate(snippet)
+  const compactBytes = Buffer.byteLength(compact, 'utf-8')
+  if (compactBytes <= SLICE_HALF_BYTES * 2) {
+    return collapsedLines > 0
+      ? `${compact}\n… [${collapsedLines} repeated line(s) collapsed by template — full log at ${fullLogRelPath}] …`
+      : compact
+  }
+
+  // Still too big even after collapsing → head+tail the compressed text. The
+  // elision marker keeps pointing at the full, uncompressed log.
+  const head = compact.slice(0, SLICE_HALF_BYTES)
+  const tail = compact.slice(-SLICE_HALF_BYTES)
+  const elided = compactBytes - Buffer.byteLength(head, 'utf-8') - Buffer.byteLength(tail, 'utf-8')
   const marker = ELISION_MARKER
     .replace('{n}', String(elided))
     .replace('{path}', fullLogRelPath)
