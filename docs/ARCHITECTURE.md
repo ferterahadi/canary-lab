@@ -64,6 +64,7 @@ Key `apps/web-server/lib/runtime/` modules:
 | `summary-reporter.ts`, `log-enrichment.ts`, `trace-enrichment.ts` | Evidence capture and enrichment |
 | `portify/` | Agent-driven port-injection workflow (see [Portify](#portify-and-benchmark)) |
 | `benchmark/` | Multi-arm self-heal benchmarking (retired from the product in 1.0.0; code retained) |
+| `coverage/` (in `apps/web-server/lib/`) | Verified Coverage Ledger: PRD summarization (`prd-summary.ts`), docs hash (`docs-collection.ts`), grounding index (`grounding.ts`), breadth computation (`ledger.ts`), rigor/strictness (`rigor.ts`), and the shared service both REST and MCP call (`service.ts`). Shared output types live in `shared/coverage/types.ts`. See [Verified Coverage](#verified-coverage). |
 
 ## Run Lifecycle
 
@@ -325,6 +326,38 @@ before the overlay applies), so only the product-repo source is ephemeral.
 self-heal benchmarking (race/sabotage verification). The product surface was retired
 in 1.0.0; the code remains for internal experiments.
 
+## Verified Coverage
+
+The Verified Coverage Ledger (`apps/web-server/lib/coverage/`) attests two grounded
+facts about a feature's tests, both computed as math over evidence — never an agent's
+opinion:
+
+- **Breadth** — which PRD requirements are covered by a *passing run*. Source docs in
+  `features/<feature>/docs/` are summarized by an agent (`prd-summary.ts`, reusing the
+  evaluation-export spawn pattern; deterministic heading-extraction fallback) into a
+  `_prd-summary.json` sidecar of `Requirement`s. Tests link to requirements via
+  `@requirement <id>` / `@path happy|sad|edge` comments parsed by `ast-extractor.ts`.
+  `grounding.ts` indexes each test's most-recent passing run from `RunSummary.passedNames[]`
+  over run history (name is the durable join key — `passedIds[]` drift with line numbers).
+  `ledger.ts` joins these into per-requirement gap types (`untested` / `unverified` /
+  `path-incomplete` / `verified`) and the grounded coverage % (verified ÷ active total).
+- **Depth (rigor)** — how strict each covering test is. `rigor.ts` classifies every
+  assertion snippet (collected by `ast-extractor.ts`) into a stack-layer tier (log → 1,
+  DB/state → 2, app API/UI → 3, browser-at-real-destination → 4) by structural heuristics
+  (no agent), then scores strictness = highest tier reached by a *verified* test ÷ the
+  agent-proposed ladder ceiling. A verified-but-below-ceiling requirement is the
+  `shallow-verified` gap, returned with a `suggestedStrongerCheck`.
+
+`service.ts` is the single computation layer; `routes/coverage.ts` (REST) and the
+`get_feature_coverage` / `list_feature_docs` / `regenerate_prd_summary` MCP tools both
+call it, so the UI and an agent can't diverge. The agent's role is bounded to *generate
+and map* (summarize docs, propose the ladder, resolve `unknown` assertions); canary
+*grounds and attests* (computes the %, the tier, and the evidence). The single
+highest-risk invariant is **requirement-id stability across PRD regeneration** —
+`reconcileRequirementIds` (in `prd-summary.ts`) preserves a surviving requirement's id
+(by echoed id or exact title match) and carries dropped ones as `deprecated`, because a
+renumber would silently break every inline `@requirement` annotation.
+
 ## Keep-in-Sync Invariants
 
 The canonical table. Each row is a set of files that must change together — nothing
@@ -338,4 +371,6 @@ procedure.
 | Boot-session / collision / queue / claim semantics | `start_run` + `wait_for_heal_task` result shapes (`mcp/tools.ts`) ↔ instructions ↔ skills (same five surfaces as above) | partial: tool unit tests | `cl_sync-agent-surfaces` |
 | Heal-claim policy | `apps/web-server/lib/heal-claim-policy.ts` ↔ `broker.claim()` backstop ↔ `start_run`/`POST /api/runs` suppression ↔ skill prose | policy + broker unit tests | `cl_sync-agent-surfaces` |
 | Templates ↔ shipped package | `templates/project/**` ↔ `dist/templates/` copy (`tools/prepare-assets.mjs`) ↔ consumer `canary-lab upgrade` | `npm run smoke:pack` | `cl_add-sample-feature` |
+| Coverage ledger single computation layer | `lib/coverage/service.ts` ↔ `routes/coverage.ts` (REST) ↔ `get_feature_coverage`/`list_feature_docs`/`regenerate_prd_summary` (`mcp/tools.ts`) — both surfaces call the service, never recompute | route + MCP tests; `server.smoke.test.ts` tool count | `cl_add-mcp-tool` / `cl_sync-agent-surfaces` |
+| Requirement-id stability | `reconcileRequirementIds` (`lib/coverage/prd-summary.ts`) ↔ inline `@requirement` annotations (`ast-extractor.ts`) — regen must preserve surviving ids | `prd-summary.test.ts` before/after fixture | — |
 | Contributor docs single-source | `CLAUDE.md` (commands + rules) ↔ this file (mechanisms) ↔ `docs/PRD.md` (intent) — AGENTS.md is a pointer only | grep audit (see `cl_verify-changes`) | — |

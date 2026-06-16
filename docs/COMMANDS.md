@@ -19,3 +19,13 @@ npx canary-lab upgrade
 - `mcp` bridges local AI clients into the UI server, starting it if needed. It defaults to `repair`; use `--profile verify` for deployment checks, `--profile author` for authoring, or `--profile full` for the complete surface.
 - `new feature` and `env` are deterministic wrappers for scripts and agents.
 - `upgrade` syncs scaffolded docs and skills in an existing project (not a dependency upgrade).
+
+## Verified Coverage (MCP, `author`/`full` profiles)
+
+The Coverage ledger is reachable over MCP as well as the UI — both read the same computation, so they can't diverge:
+
+- `get_feature_coverage(feature)` — the full ledger: each requirement → its annotated tests → the last passing run + a gap type (`untested` / `unverified` / `path-incomplete` / `verified` / `shallow-verified`), the grounded coverage %, the per-requirement rigor (`tierReached` / `tierAvailable` / `strictness` / `weakestAssertion` / `suggestedStrongerCheck`), and a `docsDrift` flag.
+- `list_feature_docs(feature)` — the docs that feed the PRD (source vs generated), plus the summary status.
+- `regenerate_prd_summary(feature)` — re-summarize the source docs into requirements (preserving existing ids). Add docs first with `write_feature_doc`.
+
+Tests link to requirements via `@requirement <id>` / `@path happy|sad|edge` comments above each `test()` (see [FEATURES](FEATURES.md#verified-coverage)). Canary attests; it never writes a requirement's test for you.

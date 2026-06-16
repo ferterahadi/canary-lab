@@ -11,6 +11,7 @@ import { AddTestWizard } from './components/AddTestWizard'
 import { CollisionConfirmDialog } from './components/CollisionConfirmDialog'
 import { PortifyWizard } from './components/PortifyWizard'
 import { LogCleanupPage } from './components/LogCleanupPage'
+import { CoverageLedgerPage } from './components/CoverageLedgerPage'
 import type { RepoCollisionChoice } from './api/client'
 import * as api from './api/client'
 import { connectWorkspaceEvents } from './api/workspace-socket'
@@ -32,7 +33,7 @@ export function App() {
     { kind: 'new'; feature: string } | { kind: 'revisit'; workflowId: string } | null
   >(null)
   // Top-level view: the normal workspace, or the full-screen Log Cleanup page.
-  const [view, setView] = useState<'workspace' | 'cleanup'>('workspace')
+  const [view, setView] = useState<'workspace' | 'cleanup' | 'coverage'>('workspace')
   const pendingRunSelectionRef = useRef<string | null>(null)
   const selectedFeatureRef = useRef<string | null>(null)
 
@@ -284,12 +285,16 @@ export function App() {
           setView('workspace')
         }}
         onOpenCleanup={() => setView('cleanup')}
+        onOpenCoverage={() => { if (selectedFeature) setView('coverage') }}
+        coverageAvailable={Boolean(selectedFeature)}
         onStartPortify={(f) => setPortifyTarget({ kind: 'new', feature: f })}
         onOpenPortify={(workflowId) => setPortifyTarget({ kind: 'revisit', workflowId })}
       />
       <div className="min-h-0 flex-1">
         {view === 'cleanup'
           ? <LogCleanupPage onClose={() => setView('workspace')} />
+          : view === 'coverage' && selectedFeature
+          ? <CoverageLedgerPage feature={selectedFeature} onClose={() => setView('workspace')} />
           : <ResizablePanels panels={panels} />}
       </div>
       {configFor && (

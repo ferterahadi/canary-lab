@@ -544,6 +544,35 @@ describe('readRunSummary', () => {
     expect(readRunSummary(tmpDir)).toEqual({ complete: false, total: 0, passed: 0, failed: [] })
   })
 
+  it('preserves verified-coverage linkage on knownTests entries', () => {
+    fs.writeFileSync(
+      path.join(tmpDir, 'e2e-summary.json'),
+      JSON.stringify({
+        complete: true,
+        total: 1,
+        passed: 1,
+        passedNames: ['login works'],
+        passedIds: ['t1'],
+        knownTests: [
+          {
+            id: 't1',
+            name: 'login works',
+            title: 'login works',
+            location: '/spec.ts:5',
+            requirements: ['R1'],
+            pathTypes: ['happy', 'sad'],
+          },
+        ],
+        failed: [],
+      }),
+    )
+    expect(readRunSummary(tmpDir)?.knownTests?.[0]).toMatchObject({
+      id: 't1',
+      requirements: ['R1'],
+      pathTypes: ['happy', 'sad'],
+    })
+  })
+
   it('normalizes duplicate knownTests from line-drifted targeted reruns', () => {
     fs.writeFileSync(
       path.join(tmpDir, 'e2e-summary.json'),

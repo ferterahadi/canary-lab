@@ -441,3 +441,34 @@ export interface JournalEntry {
   hypothesis: string | null
   body: string
 }
+
+// Verified Coverage Ledger — the computed shapes are shared with the server.
+export type {
+  CoverageLedger,
+  CoverageTotals,
+  GapType,
+  LastPassingRun,
+  PathCoverage,
+  PathType,
+  PrdSummary,
+  Requirement,
+  RequirementCoverage,
+  RequirementRigor,
+  StrictnessTier,
+  TestCoverage,
+} from '../../../../shared/coverage/types'
+
+export interface FeatureDoc {
+  relPath: string
+  generated: boolean
+  sizeBytes: number
+}
+
+export interface FeatureDocsListing {
+  feature: string
+  docs: FeatureDoc[]
+  hasPrdSummary: boolean
+  prdSummaryGeneratedAt?: string
+  sourceDocCount: number
+  docsDrift: boolean
+}

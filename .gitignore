@@ -9,7 +9,10 @@ node_modules/
 !templates/**/*.env
 
 # Testing
-coverage/
+# Anchored to the repo root so it only ignores the vitest coverage-output dir —
+# an unanchored `coverage/` also swallowed source dirs named coverage
+# (shared/coverage, apps/web-server/lib/coverage).
+/coverage/
 .nyc_output/
 *.log
 

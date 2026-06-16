@@ -53,6 +53,15 @@ Use the MCP `author` profile, or `full`, when the user asks to create a feature,
 6. After `start_external_draft` returns, tell the user you are authoring tests and they can wait in this external client. Continue writing specs locally, then call `update_external_draft_stage` as work progresses: `scaffolding`, `authoring-tests`, `validating`, `ready`, `applied`, or `error`.
 7. Call `apply_external_draft` with the externally authored files, or after writing them locally, so Canary Lab validates and records the applied draft. Do not ask Canary Lab to spawn another Claude/Codex agent for MCP-created authoring.
 
+### Verified Coverage Ledger
+
+Use this to answer "what's actually tested and how strictly?" — coverage is grounded math, never an opinion.
+
+1. Drop source docs (specs, tickets, notes) into the feature with `write_feature_doc`, then call `regenerate_prd_summary(feature)` to summarize them into requirements with stable ids. Re-run it whenever `get_feature_coverage` reports `docsDrift` — ids are preserved, so existing annotations keep resolving. `list_feature_docs(feature)` shows what feeds the PRD.
+2. Annotate each `test()` with comments directly above it: `// @requirement <id>` (repeatable) and `// @path happy|sad|edge`. This is how a test claims to cover a requirement; Canary Lab reads the annotations — it never writes the test for you.
+3. Call `get_feature_coverage(feature)` for the ledger: per requirement → annotated tests → last passing run + `gapType` (`untested` / `unverified` / `path-incomplete` / `verified` / `shallow-verified`), a grounded coverage % (verified ÷ total), plus rigor (`tierReached` / `tierAvailable` / `strictness` / `weakestAssertion` / `suggestedStrongerCheck`).
+4. Act on gaps: `unverified` means the test exists but has no passing run (heal/run it); `path-incomplete` means a sad/edge path is missing; `shallow-verified` means it passes but only reaches a weak assertion tier (write a stronger check toward `suggestedStrongerCheck`, e.g. a browser confirming the real external effect rather than an app log). The UI's full-screen Coverage ledger shows the same data — both surfaces read the same computation.
+
 ### Export an Evaluation
 
 1. After the relevant run is terminal (passed, failed, or aborted), call `start_external_evaluation_export` with the run id and requested language. If the user asks to export a failed or aborted run as-is, preserve that status in the report instead of trying to heal first.

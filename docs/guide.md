@@ -44,6 +44,10 @@ Completed runs can export an Evaluation Report from the run detail Overview tab 
 
 ![Evaluation Report sample](assets/assertion-review.png)
 
+## Verified Coverage
+
+Open the **Coverage** view (the 🎯 pill in the top bar) for a feature to see which of its PRD requirements are actually covered by *passing* runs — not just which tests exist. Requirements sit on the left, tests on the right, with synced colour highlighting between them and a grounded coverage % in the header. Gap badges (Untested, Unverified, Path-incomplete, Shallow-verified) filter the view; the **rigor** badge on each requirement shows how strict its tests are and suggests a stronger check when one is achievable. The Docs tab holds the source material the requirements are summarized from, with a "Regenerate" action that preserves requirement ids. See [Verified Coverage in FEATURES](FEATURES.md#verified-coverage) for how to annotate tests, and [COMMANDS](COMMANDS.md#verified-coverage-mcp-authorfull-profiles) for the matching MCP tools.
+
 ## Repairing a Failed Run
 
 When a run fails, Canary Lab pauses it and waits for a fix, then reruns from the same run. Every fix ends in a `rerun` (test or config-only changes) or `restart` (service or app changes) signal. Two modes drive the fix:

@@ -5,6 +5,7 @@ import websocketPlugin from '@fastify/websocket'
 import fastifyStatic from '@fastify/static'
 import { isActiveRunStatus, isRestartableRunStatus } from '../../shared/run-state'
 import { featuresRoutes } from './routes/features'
+import { coverageRoutes } from './routes/coverage'
 import { featureConfigRoutes } from './routes/feature-config'
 import { verificationRoutes } from './routes/verification'
 import { projectConfigRoutes } from './routes/project-config'
@@ -225,6 +226,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
   const activeEnvsets = new Map<string, BackupRecord[]>()
 
   await app.register(featuresRoutes, { featuresDir })
+  await app.register(coverageRoutes, { featuresDir, logsDir, projectRoot: opts.projectRoot })
   await app.register(featureConfigRoutes, {
     featuresDir,
     workspaceEvents,

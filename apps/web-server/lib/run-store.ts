@@ -1,6 +1,7 @@
 import fs from 'fs'
 import path from 'path'
 import { EventEmitter } from 'events'
+import type { PathType } from '../../../shared/coverage/types'
 import {
   readManifest,
   readRunsIndex,
@@ -273,6 +274,14 @@ export interface RunSummary {
     title?: string
     titlePath?: string[]
     location?: string
+    // Verified-coverage linkage. Optional / forward-compat: the Playwright
+    // reporter (a subprocess) builds knownTests from TestCase objects and does
+    // not parse comment annotations, so these are normally resolved at coverage-
+    // computation time by joining test identity (name + location) against the
+    // current spec's `@requirement`/`@path` annotations. Kept on the type so the
+    // join result can be attached and a future reporter could stamp them.
+    requirements?: string[]
+    pathTypes?: PathType[]
   }>
   /** Currently-running Playwright test, emitted by the reporter on
    *  onTestBegin. Cleared when the matching onTestEnd lands. */

@@ -18,6 +18,7 @@ import { PortifyLauncherPill } from './PortifyLauncherPill'
 import { PortifyPickerDialog } from './PortifyPickerDialog'
 import { BenchmarkPill } from './BenchmarkPill'
 import { CleanupPill } from './CleanupPill'
+import { CoveragePill } from './CoveragePill'
 
 interface Props {
   activeRunDetail: RunDetail | null
@@ -25,6 +26,10 @@ interface Props {
   features?: Feature[]
   onNavigateToRun?: (feature: string, runId: string) => void
   onOpenCleanup?: () => void
+  /** Open the Verified Coverage Ledger for the selected feature. */
+  onOpenCoverage?: () => void
+  /** Whether a feature is selected (gates the Coverage pill). */
+  coverageAvailable?: boolean
   /** Start port-ification for a feature (opens the wizard's Plan screen). */
   onStartPortify?: (feature: string) => void
   /** Reopen the in-flight port-ification workflow (by id) in the wizard. */
@@ -45,7 +50,7 @@ interface Props {
 // dialog wiring, and composes presentational pills (ServicesPill, RunsPill,
 // PortifyLauncherPill, BenchmarkPill, CleanupPill) and badges (ConnectionBadge,
 // McpHealthBadge, StatusChip) that each live in their own file.
-export function GlobalStatusBar({ activeRunDetail, features = [], onNavigateToRun, onOpenCleanup, onStartPortify, onOpenPortify }: Props) {
+export function GlobalStatusBar({ activeRunDetail, features = [], onNavigateToRun, onOpenCleanup, onOpenCoverage, coverageAvailable, onStartPortify, onOpenPortify }: Props) {
   const { connection } = useRuns()
   const activePortify = useActivePortify()
   const [portifyPickerOpen, setPortifyPickerOpen] = useState(false)
@@ -148,6 +153,7 @@ export function GlobalStatusBar({ activeRunDetail, features = [], onNavigateToRu
           <EvaluationExportTaskStatus />
           {showBenchmark && <BenchmarkPill active={Boolean(activeBenchmark)} onOpen={() => setBenchmarkOpen(true)} />}
           <PortifyLauncherPill activePortify={activePortify} onOpen={() => setPortifyPickerOpen(true)} />
+          <CoveragePill onOpen={() => onOpenCoverage?.()} disabled={!coverageAvailable} />
           <CleanupPill onOpen={() => onOpenCleanup?.()} />
         </div>
         <button

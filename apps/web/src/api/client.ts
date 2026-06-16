@@ -20,6 +20,9 @@ import type {
   DraftPrdDocument,
   VerificationConfig,
   VerificationTarget,
+  CoverageLedger,
+  FeatureDocsListing,
+  PrdSummary,
 } from './types'
 import type {
   BenchmarkIndexEntry,
@@ -82,6 +85,53 @@ async function request<T>(
 export function listFeatures(opts?: ClientOptions): Promise<Feature[]> {
   const { baseUrl, fetchImpl } = defaultOpts(opts)
   return request<Feature[]>(`${baseUrl}/api/features`, { method: 'GET' }, fetchImpl)
+}
+
+// ─── Verified Coverage Ledger ────────────────────────────────────────────────
+
+export function getFeatureCoverage(feature: string, opts?: ClientOptions): Promise<CoverageLedger> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<CoverageLedger>(
+    `${baseUrl}/api/features/${encodeURIComponent(feature)}/coverage`,
+    { method: 'GET' },
+    fetchImpl,
+  )
+}
+
+export function listFeatureDocs(feature: string, opts?: ClientOptions): Promise<FeatureDocsListing> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<FeatureDocsListing>(
+    `${baseUrl}/api/features/${encodeURIComponent(feature)}/docs`,
+    { method: 'GET' },
+    fetchImpl,
+  )
+}
+
+export function writeFeatureDoc(
+  feature: string,
+  relPath: string,
+  content: string,
+  opts?: ClientOptions,
+): Promise<{ written: boolean; relativePath: string }> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request(
+    `${baseUrl}/api/features/${encodeURIComponent(feature)}/docs`,
+    { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ relPath, content }) },
+    fetchImpl,
+  )
+}
+
+export function regeneratePrdSummary(
+  feature: string,
+  adapter?: 'auto' | 'claude' | 'codex' | 'deterministic',
+  opts?: ClientOptions,
+): Promise<{ feature: string; summary: PrdSummary; written: string[] }> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request(
+    `${baseUrl}/api/features/${encodeURIComponent(feature)}/prd-summary/regenerate`,
+    { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(adapter ? { adapter } : {}) },
+    fetchImpl,
+  )
 }
 
 // ─── Benchmark ─────────────────────────────────────────────────────────────
