@@ -290,7 +290,7 @@ describe('SummaryReporter', () => {
     expect(out.passedIds).toEqual([out.knownTests[0].id])
   })
 
-  it('strips ANSI noise and truncates large error fields', () => {
+  it('strips ANSI noise; keeps the full error on the summary, trims only playback', () => {
     const reporter = new SummaryReporter()
     reporter.onTestEnd(
       mkTest('ANSI fail'),
@@ -303,10 +303,17 @@ describe('SummaryReporter', () => {
       }),
     )
 
+    // Heal-facing summary keeps the FULL error (ANSI stripped, not length-capped):
+    // the agent needs the complete assertion diff to diagnose.
     const out = readSummary()
-    expect(out.failed[0].error.message).toHaveLength(1000)
-    expect(out.failed[0].error.snippet).toHaveLength(500)
+    expect(out.failed[0].error.message).toHaveLength(1200)
+    expect(out.failed[0].error.snippet).toHaveLength(700)
     expect(JSON.stringify(out)).not.toMatch(/\x1b\[/)
+
+    // Playback (UI replay) keeps a bounded copy so playwright-events.jsonl stays small.
+    const testEnd = readEvents().find((e) => e.type === 'test-end' && e.error)
+    expect(testEnd.error.message).toHaveLength(1000)
+    expect(testEnd.error.snippet).toHaveLength(500)
   })
 
   it('falls back to an empty error message when Playwright omits message text', () => {

@@ -15,7 +15,9 @@ import {
   stripAnsi,
   truncateDiffForJournal,
   updateLatestPendingJournalOutcome,
+  writeErrorFile,
   writeFailureSlices,
+  writeFullDiffPatch,
   writeHealIndex,
 } from './log-enrichment'
 import {
@@ -270,6 +272,65 @@ describe('appendJournalIteration', () => {
     expect(body).not.toContain('### Diff')
     expect(body).not.toContain('```diff')
   })
+
+  it('persists the full diff to a patch file and points at it when over the cap', () => {
+    const journalPath = path.join(tmpDir, 'j.md')
+    const manifestPath = path.join(tmpDir, 'm.json')
+    const summaryPath = path.join(tmpDir, 's.json')
+    fs.writeFileSync(manifestPath, '{}')
+    fs.writeFileSync(summaryPath, '{}')
+
+    const huge = `diff --git a/a.ts b/a.ts\n${'+added line\n'.repeat(2000)}`
+    expect(Buffer.byteLength(huge, 'utf-8')).toBeGreaterThan(MAX_JOURNAL_DIFF_BYTES)
+    appendJournalIteration({
+      signal: '.restart',
+      hypothesis: 'broken',
+      diffContent: huge,
+      journalPath,
+      manifestPath,
+      summaryPath,
+    })
+
+    const body = fs.readFileSync(journalPath, 'utf-8')
+    // In-journal block is still truncated for readability...
+    expect(body).toMatch(/\.\.\. \(truncated, \d+ more bytes\)/)
+    // ...but a `Full diff:` pointer is emitted to the persisted patch file.
+    expect(body).toMatch(/Full diff: .*iteration-1\.patch/)
+    const patchFile = path.join(tmpDir, 'diffs', 'iteration-1.patch')
+    expect(fs.existsSync(patchFile)).toBe(true)
+    expect(fs.readFileSync(patchFile, 'utf-8')).toContain(huge)
+  })
+})
+
+describe('writeFullDiffPatch', () => {
+  it('writes the full diff under <runDir>/diffs and returns a path', () => {
+    const journalPath = path.join(tmpDir, 'diagnosis-journal.md')
+    const rel = writeFullDiffPatch(journalPath, 3, 'diff --git a/x b/x\n+y')
+    expect(rel).not.toBeNull()
+    const file = path.join(tmpDir, 'diffs', 'iteration-3.patch')
+    expect(fs.existsSync(file)).toBe(true)
+    expect(fs.readFileSync(file, 'utf-8').endsWith('\n')).toBe(true)
+  })
+})
+
+describe('writeErrorFile', () => {
+  it('writes the full message + snippet and returns a path', () => {
+    const message = 'Expected x but got y\n'.repeat(200) // well over any preview cap
+    const rel = writeErrorFile('a-test', { message, snippet: 'await expect(...)' }, tmpDir)
+    expect(rel).not.toBeNull()
+    const file = path.join(tmpDir, 'a-test', 'error.txt')
+    const body = fs.readFileSync(file, 'utf-8')
+    expect(body).toContain('Expected x but got y')
+    expect(body).toContain('--- snippet ---')
+    expect(body).toContain('await expect(...)')
+    // Nothing trimmed — the full message survives.
+    expect(body).toContain(message.trim())
+  })
+
+  it('returns null when there is no message or snippet', () => {
+    expect(writeErrorFile('a-test', undefined, tmpDir)).toBeNull()
+    expect(writeErrorFile('a-test', { message: '   ' }, tmpDir)).toBeNull()
+  })
 })
 
 describe('truncateDiffForJournal', () => {
@@ -380,6 +441,21 @@ describe('capSlice', () => {
     expect(result.length).toBeLessThan(big.length)
     expect(result).toContain('logs/x.log')
     expect(result).toContain('eliding')
+  })
+
+  it('collapses repeated lines by template instead of truncating when that fits', () => {
+    // ~28 KB of retry spam (> the 20 KB budget) that shares one template.
+    const lines: string[] = []
+    for (let i = 1; i <= 1_000; i++) lines.push(`waiting for db (attempt ${i})`)
+    const snippet = lines.join('\n')
+    expect(Buffer.byteLength(snippet, 'utf-8')).toBeGreaterThan(20_480)
+
+    const result = capSlice(snippet, 'logs/runs/X/svc-api.log')
+    // Collapsed to a single representative + count + range, no middle dropped.
+    expect(result).toContain('waiting for db (attempt 1)  (×1000; 1–1000)')
+    expect(result).not.toContain('eliding')
+    // Collapse is reversible: the full log is still pointed at.
+    expect(result).toContain('collapsed by template — full log at logs/runs/X/svc-api.log')
   })
 })
 
@@ -531,6 +607,25 @@ describe('writeHealIndex with journal tail and various manifest shapes', () => {
     const body = fs.readFileSync(healIndexPath, 'utf-8')
     expect(body).toContain('- **click-checkout**')
     expect(body).toMatch(/- trace: logs\/runs\/X\/failed\/click-checkout\/trace-extract\/failure-summary\.md/)
+  })
+
+  it('emits a `full error` pointer when errorFile is set on a failed entry', () => {
+    const healIndexPath = path.join(tmpDir, 'heal-index.md')
+    writeHealIndex({
+      manifest: { featureName: 'demo' },
+      summary: {
+        failed: [
+          {
+            name: 'a-test',
+            error: { message: 'AssertionError: very long ...' },
+            errorFile: 'logs/runs/X/failed/a-test/error.txt',
+          },
+        ],
+      },
+      healIndexPath,
+    })
+    const body = fs.readFileSync(healIndexPath, 'utf-8')
+    expect(body).toContain('- full error: logs/runs/X/failed/a-test/error.txt')
   })
 
   it('renders the previous heal-cycle note when history has restarts/keeps', () => {

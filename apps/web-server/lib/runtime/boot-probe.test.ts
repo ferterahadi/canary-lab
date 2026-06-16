@@ -176,6 +176,65 @@ describe('bootAndProbe', () => {
     res.teardown()
   })
 
+  it('appends a Full boot log pointer to the failure detail when fullLogPathFor is set', async () => {
+    const factory = emittingFactory('booting\nwarming caches\nstill starting up\n')
+    const res = await bootAndProbe({
+      specs: [httpSpec('api', 'http://localhost:5000/')],
+      ptyFactory: factory,
+      healthCheck: async () => false,
+      healthPollIntervalMs: 5,
+      fullLogPathFor: (safeName) => `/runs/X/verify/a-${safeName}.log`,
+    })
+    expect(res.ok).toBe(false)
+    if (!res.ok) {
+      // The 12-line evidence slice is preserved AND the agent is pointed at the full log.
+      expect(res.detail).toContain('warming caches')
+      expect(res.detail).toContain('Full boot log: /runs/X/verify/a-api.log')
+    }
+    res.teardown()
+  })
+
+  it('points the failure detail at a cleaned (ANSI-stripped, deduped) full log when the raw log exists', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'boot-clean-'))
+    const raw =
+      '\x1b[32mstarting\x1b[0m\n' +
+      'waiting for db\n'.repeat(5) +
+      'still down\n'
+    const factory = emittingFactory(raw)
+    const res = await bootAndProbe({
+      specs: [httpSpec('api', 'http://localhost:5000/')],
+      ptyFactory: factory,
+      healthCheck: async () => false,
+      healthPollIntervalMs: 5,
+      onOutput: fileTee(dir, 'a'),
+      fullLogPathFor: (safeName) => path.join(dir, `a-${safeName}.log`),
+    })
+    expect(res.ok).toBe(false)
+    if (!res.ok) {
+      const cleanPath = path.join(dir, 'a-api.clean.log')
+      expect(res.detail).toContain(`Full boot log: ${cleanPath}`)
+      const clean = fs.readFileSync(cleanPath, 'utf-8')
+      expect(clean).not.toMatch(/\x1b\[/)             // ANSI stripped
+      expect(clean).toContain('waiting for db  (×5)') // consecutive lines deduped
+      expect(clean).toContain('starting')
+    }
+    res.teardown()
+    fs.rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('omits the Full boot log pointer when fullLogPathFor is not provided', async () => {
+    const factory = emittingFactory('booting\nstill starting up\n')
+    const res = await bootAndProbe({
+      specs: [httpSpec('api', 'http://localhost:5000/')],
+      ptyFactory: factory,
+      healthCheck: async () => false,
+      healthPollIntervalMs: 5,
+    })
+    expect(res.ok).toBe(false)
+    if (!res.ok) expect(res.detail).not.toContain('Full boot log:')
+    res.teardown()
+  })
+
   it('classifies an EADDRINUSE crash as a port conflict', async () => {
     const factory = emittingFactory('Error: listen EADDRINUSE: address already in use 0.0.0.0:5000\n')
     const res = await bootAndProbe({

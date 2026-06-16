@@ -3,6 +3,7 @@ import path from 'path'
 import type { ServiceSpec } from './orchestrator'
 import type { PtyFactory, PtyHandle } from './pty-spawner'
 import { isHealthy, isTcpListening } from './launcher/startup'
+import { compressLogByTemplate } from './log-template'
 
 // Standalone "boot these services, wait for health, then tear down" primitive,
 // lifted from RunOrchestrator's private spawn/health loop minus the run-state
@@ -47,6 +48,11 @@ export interface BootProbeOptions {
   healthDeadlineMs?: number
   /** Tee each service's output somewhere (e.g. a per-instance log file). */
   onOutput?: (safeName: string, chunk: string) => void
+  /** Where the FULL (untruncated) boot log for a service lives, when teed to
+   *  disk. The diagnostic `evidence` in a boot failure is a 12-line slice; when
+   *  this resolver is provided we append a pointer to the full log so the agent
+   *  reading the failure can `Read` the complete output instead of guessing. */
+  fullLogPathFor?: (safeName: string) => string | undefined
 }
 
 function killTree(pty: PtyHandle, signal: NodeJS.Signals = 'SIGTERM'): void {
@@ -93,12 +99,42 @@ const PORT_CONFLICT_MARKERS = [/EADDRINUSE/i, /address already in use/i]
  * ready: a human- and agent-readable evidence snippet plus a classification.
  * Returns `{ kind: 'unknown' }` (no evidence) for empty output.
  */
-export function diagnoseBootOutput(raw: string): { evidence?: string; kind: BootFailureKind } {
-  const lines = raw
+// Strip ANSI/cursor escapes and the `concurrently` `[N]` stream prefix, drop
+// blank lines. Shared by the diagnostic snippet and the clean full-log writer.
+function cleanBootLines(raw: string): string[] {
+  return raw
     .replace(ANSI, '')
     .split('\n')
     .map((l) => l.replace(STREAM_PREFIX, '').trimEnd())
     .filter((l) => l.trim().length > 0)
+}
+
+// Write an ANSI-stripped, template-compressed copy of a raw boot log to
+// `<name>.clean.log` and return its path. The raw teed log keeps PTY control
+// codes (for xterm replay) and spams the same "waiting for X" line hundreds of
+// times; the clean copy strips the codes and collapses repeated lines by
+// template (`compressLogByTemplate`) — a losslessly cheaper read for the heal
+// agent. Returns null if the raw log is missing/empty or the write fails (the
+// caller falls back to the raw path).
+export function writeCleanBootLog(rawLogPath: string): string | null {
+  let raw: string
+  try { raw = fs.readFileSync(rawLogPath, 'utf-8') } catch { return null }
+  const lines = cleanBootLines(raw)
+  if (lines.length === 0) return null
+  const cleaned = compressLogByTemplate(lines.join('\n')).text
+  const cleanPath = rawLogPath.endsWith('.log')
+    ? `${rawLogPath.slice(0, -'.log'.length)}.clean.log`
+    : `${rawLogPath}.clean.log`
+  try {
+    fs.writeFileSync(cleanPath, `${cleaned}\n`)
+    return cleanPath
+  } catch {
+    return null
+  }
+}
+
+export function diagnoseBootOutput(raw: string): { evidence?: string; kind: BootFailureKind } {
+  const lines = cleanBootLines(raw)
   if (lines.length === 0) return { kind: 'unknown' }
 
   const pick = (markers: RegExp[]): string[] => {
@@ -179,13 +215,18 @@ export async function bootAndProbe(opts: BootProbeOptions): Promise<BootProbeRes
     }
     if (!ready) {
       const { evidence, kind } = diagnoseBootOutput(buffers.get(svc.safeName) ?? '')
+      const rawLog = opts.fullLogPathFor?.(svc.safeName)
+      // Prefer an ANSI-stripped, deduped copy; fall back to the raw path when
+      // the log isn't on disk (e.g. no tee wired) or can't be cleaned.
+      const fullLog = rawLog ? (writeCleanBootLog(rawLog) ?? rawLog) : undefined
       return {
         ok: false,
         failedService: svc.name,
         transport,
         detail:
           `Timed out waiting for ${transport.toUpperCase()} readiness (${detail}).` +
-          (evidence ? `\nProcess output:\n${evidence}` : ''),
+          (evidence ? `\nProcess output:\n${evidence}` : '') +
+          (fullLog ? `\nFull boot log: ${fullLog}` : ''),
         kind,
         teardown,
       }

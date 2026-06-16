@@ -40,6 +40,10 @@ interface TestEntry {
   locations?: string[]
   retry?: number
   logFiles?: string[]
+  /** Repo-relative path to `failed/<slug>/error.txt` — the full, untruncated
+   *  error message + snippet. Populated by enrichment; the in-JSON `error`
+   *  stays full too, this is the agent-friendly direct pointer. */
+  errorFile?: string
   /** Repo-relative path to the curated failure-summary.md produced from this
    *  test's Playwright trace.zip. Populated in onEnd after async extraction. */
   traceSummaryFile?: string
@@ -199,12 +203,23 @@ class SummaryReporter implements Reporter {
     this.runningTests.delete(known.id)
     this.stepStacksByTest.delete(known.id)
     this.removeResult(known.id, name)
+    // Heal-facing copy: full, untrimmed. The agent needs the complete
+    // assertion diff / stack to diagnose, so the summary entry carries it all
+    // (and enrichment writes it to `failed/<slug>/error.txt` with a pointer).
     const error = !passed && result.error
       ? {
-          message: stripAnsi(result.error.message ?? '').slice(0, 1000),
+          message: stripAnsi(result.error.message ?? ''),
           ...(result.error.snippet
-            ? { snippet: stripAnsi(result.error.snippet).slice(0, 500) }
+            ? { snippet: stripAnsi(result.error.snippet) }
             : {}),
+        }
+      : undefined
+    // Playback (UI replay) keeps a bounded copy so playback.jsonl stays small;
+    // the heal path never reads it, so trimming here loses nothing for healing.
+    const playbackError = error
+      ? {
+          message: error.message.slice(0, 1000),
+          ...(error.snippet ? { snippet: error.snippet.slice(0, 500) } : {}),
         }
       : undefined
     const locations = failed
@@ -240,7 +255,7 @@ class SummaryReporter implements Reporter {
       passed,
       durationMs: result.duration,
       retry: result.retry,
-      ...(error ? { error } : {}),
+      ...(playbackError ? { error: playbackError } : {}),
       ...(result.attachments?.length
         ? {
             attachments: result.attachments.map((a) => ({
@@ -282,11 +297,13 @@ class SummaryReporter implements Reporter {
     const parsed = enrichSummaryWithLogs()
     if (parsed?.summary.failed) {
       const byName = new Map(
-        parsed.summary.failed.map((f) => [f.name, f.logFiles] as const),
+        parsed.summary.failed.map((f) => [f.name, { logFiles: f.logFiles, errorFile: f.errorFile }] as const),
       )
       for (const r of this.results) {
         if (isFailureResult(r) && byName.has(r.name)) {
-          r.logFiles = byName.get(r.name)
+          const enriched = byName.get(r.name)!
+          r.logFiles = enriched.logFiles
+          r.errorFile = enriched.errorFile
         }
       }
     }
@@ -376,6 +393,7 @@ class SummaryReporter implements Reporter {
           ...(r.locations?.length ? { locations: r.locations } : {}),
           ...(typeof r.retry === 'number' ? { retry: r.retry } : {}),
           ...(r.logFiles ? { logFiles: r.logFiles } : {}),
+          ...(r.errorFile ? { errorFile: r.errorFile } : {}),
           ...(r.traceSummaryFile ? { traceSummaryFile: r.traceSummaryFile } : {}),
         })),
     }
