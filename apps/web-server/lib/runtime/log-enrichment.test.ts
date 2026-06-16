@@ -442,6 +442,21 @@ describe('capSlice', () => {
     expect(result).toContain('logs/x.log')
     expect(result).toContain('eliding')
   })
+
+  it('collapses repeated lines by template instead of truncating when that fits', () => {
+    // ~28 KB of retry spam (> the 20 KB budget) that shares one template.
+    const lines: string[] = []
+    for (let i = 1; i <= 1_000; i++) lines.push(`waiting for db (attempt ${i})`)
+    const snippet = lines.join('\n')
+    expect(Buffer.byteLength(snippet, 'utf-8')).toBeGreaterThan(20_480)
+
+    const result = capSlice(snippet, 'logs/runs/X/svc-api.log')
+    // Collapsed to a single representative + count + range, no middle dropped.
+    expect(result).toContain('waiting for db (attempt 1)  (×1000; 1–1000)')
+    expect(result).not.toContain('eliding')
+    // Collapse is reversible: the full log is still pointed at.
+    expect(result).toContain('collapsed by template — full log at logs/runs/X/svc-api.log')
+  })
 })
 
 describe('extractAllSlices / extractLogsForTest', () => {

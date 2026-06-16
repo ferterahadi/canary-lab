@@ -14,6 +14,13 @@ Each entry is tagged with the area it touches:
 
 ---
 
+## 1.3.2 — 2026-06-16
+
+- **[Test Runner]** **The healing agent sees the whole picture.** Failure evidence used to get clipped to fit — long error messages, prior-agent context, code diffs, and boot logs could lose their tail. Now nothing useful is dropped: the agent always gets the full content, or a clear pointer to the complete file on disk.
+- **[Test Runner]** **Less noise in the failure logs.** Repetitive log lines (retry loops, health-check polls) are collapsed into a single line with a count and range, so the agent reads less and gets to the real signal faster. Identifiers like request IDs and IP addresses are kept intact, and the full untouched log is always one click away.
+
+---
+
 ## 1.3.1 — 2026-06-15
 
 - **[General]** **Lighter install.** Trimmed the packages shipped with Canary Lab so installing it downloads less and finishes faster.
