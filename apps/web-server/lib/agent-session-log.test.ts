@@ -980,7 +980,28 @@ describe('renderAgentSessionContext', () => {
 
     expect(rendered).toContain('THINKING: many details')
     expect(rendered).toContain('TOOL CALL Read: {"file_path":"/tmp/a.txt"}')
-    expect(rendered).toContain('[Previous session context truncated]')
+    expect(rendered).toContain('[Previous session context truncated — full log:')
+    // Even when truncated, the receiving agent is pointed at the full JSONL.
+    expect(rendered).toContain(file)
+  })
+
+  it('appends a pointer to the full session log even when not truncated', () => {
+    const file = path.join(homeDir, 'claude-context-pointer.jsonl')
+    fs.writeFileSync(file, JSON.stringify({
+      type: 'assistant',
+      timestamp: 't1',
+      message: { content: [{ type: 'text', text: 'short reply' }] },
+    }) + '\n')
+
+    const rendered = renderAgentSessionContext({
+      agent: 'claude',
+      sessionId: 'sid-pointer',
+      logPath: file,
+    })
+
+    expect(rendered).toContain('ASSISTANT: short reply')
+    expect(rendered).toContain(`[Full session log (untruncated): ${file}]`)
+    expect(rendered).not.toContain('context truncated')
   })
 
   it('renders tool results with and without error markers when timestamps are absent', () => {
