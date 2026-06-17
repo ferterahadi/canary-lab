@@ -1,0 +1,28 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "mappings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "testName": { "type": "string" },
+          "requirements": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "pathTypes": {
+            "type": "array",
+            "items": { "enum": ["happy", "sad", "edge"] }
+          },
+          "rationale": { "type": "string" },
+          "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+        },
+        "required": ["testName", "requirements"]
+      }
+    }
+  },
+  "required": ["mappings"]
+}

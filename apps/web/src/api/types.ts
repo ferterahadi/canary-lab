@@ -444,17 +444,28 @@ export interface JournalEntry {
 
 // Verified Coverage Ledger — the computed shapes are shared with the server.
 export type {
+  CoverageJobIndexEntry,
+  CoverageJobKind,
+  CoverageJobManifest,
+  CoverageJobResult,
+  CoverageJobStatus,
   CoverageLedger,
+  CoverageStateView,
+  CoverageStatus,
   CoverageTotals,
+  DriftDetail,
   GapType,
   LastPassingRun,
   PathCoverage,
   PathType,
   PrdSummary,
+  ProposedMapping,
   Requirement,
   RequirementCoverage,
   RequirementRigor,
   StrictnessTier,
+  SummaryState,
+  CoverageState,
   TestCoverage,
 } from '../../../../shared/coverage/types'
 

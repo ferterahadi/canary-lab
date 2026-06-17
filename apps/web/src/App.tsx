@@ -225,6 +225,7 @@ export function App() {
           onFeaturesChanged={refreshFeatures}
           onStartPortify={(f) => setPortifyTarget({ kind: 'new', feature: f })}
           onOpenPortify={(workflowId) => setPortifyTarget({ kind: 'revisit', workflowId })}
+          onOpenCoverage={(f) => { setSelectedFeature(f); setView('coverage') }}
         />
       ),
     },
@@ -285,8 +286,7 @@ export function App() {
           setView('workspace')
         }}
         onOpenCleanup={() => setView('cleanup')}
-        onOpenCoverage={() => { if (selectedFeature) setView('coverage') }}
-        coverageAvailable={Boolean(selectedFeature)}
+        onOpenCoverage={(feature) => { setSelectedFeature(feature); setView('coverage') }}
         onStartPortify={(f) => setPortifyTarget({ kind: 'new', feature: f })}
         onOpenPortify={(workflowId) => setPortifyTarget({ kind: 'revisit', workflowId })}
       />

@@ -1,6 +1,14 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import * as api from '../api/client'
-import type { CoverageLedger, GapType, RequirementCoverage, TestCoverage } from '../api/types'
+import type {
+  CoverageJobKind,
+  CoverageLedger,
+  CoverageStatus,
+  GapType,
+  ProposedMapping,
+  RequirementCoverage,
+  TestCoverage,
+} from '../api/types'
 import { CoverageDocsTab } from './CoverageDocsTab'
 
 interface Props {
@@ -21,6 +29,10 @@ const GAP_META: Record<GapType, { label: string; color: string }> = {
 
 const BADGE_ORDER: GapType[] = ['untested', 'unverified', 'path-incomplete', 'shallow-verified']
 
+// Requirements list is ordered worst-first (uncovered → partial → covered) so the
+// gaps that need work sit at the top — the whole point of the ledger.
+const STATUS_RANK: Record<CoverageStatus, number> = { uncovered: 0, partial: 1, covered: 2 }
+
 // Golden-angle hue rotation gives each test a distinct, stable colour regardless
 // of how many there are. Mid lightness reads on both light and dark themes.
 function testColor(index: number): string {
@@ -39,6 +51,20 @@ export function CoverageLedgerPage({ feature, onClose }: Props) {
   const [hovered, setHovered] = useState<Hovered | null>(null)
   const [gapFilter, setGapFilter] = useState<GapType | null>(null)
   const [tab, setTab] = useState<'ledger' | 'docs'>('ledger')
+  // Source-doc count drives the setup guide (step ② unlocks once ≥1 doc exists).
+  const [sourceDocCount, setSourceDocCount] = useState<number | null>(null)
+
+  // Async generation (R4 jobs): a running job streams its log; the last ledger
+  // stays visible (dimmed) so a regen never blanks the screen.
+  const [job, setJob] = useState<{ id: string; kind: CoverageJobKind; status: string; log: string } | null>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
+  const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const loadDocsCount = useCallback(() => {
+    api.listFeatureDocs(feature)
+      .then((d) => setSourceDocCount(d.sourceDocCount))
+      .catch(() => {})
+  }, [feature])
 
   const refresh = useCallback(() => {
     setLoading(true)
@@ -46,7 +72,8 @@ export function CoverageLedgerPage({ feature, onClose }: Props) {
       .then((data) => { setLedger(data); setError(null) })
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => setLoading(false))
-  }, [feature])
+    loadDocsCount()
+  }, [feature, loadDocsCount])
 
   useEffect(() => { refresh() }, [refresh])
 
@@ -55,6 +82,41 @@ export function CoverageLedgerPage({ feature, onClose }: Props) {
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
   }, [onClose])
+
+  useEffect(() => () => { if (pollRef.current) clearTimeout(pollRef.current) }, [])
+
+  const pollJob = useCallback((jobId: string) => {
+    const tick = () => {
+      api.getCoverageJob(jobId)
+        .then((m) => {
+          setJob({ id: m.jobId, kind: m.kind, status: m.status, log: m.log })
+          if (m.status === 'running') {
+            pollRef.current = setTimeout(tick, 800)
+          } else {
+            if (m.status === 'failed') setActionError(m.error ?? 'job failed')
+            setJob(null)
+            refresh()
+          }
+        })
+        .catch((e: unknown) => { setActionError(e instanceof Error ? e.message : String(e)); setJob(null) })
+    }
+    tick()
+  }, [refresh])
+
+  const startJob = useCallback((kind: CoverageJobKind, reviewMode?: boolean) => {
+    setActionError(null)
+    api.startCoverageJob(feature, kind, { reviewMode })
+      .then((m) => { setJob({ id: m.jobId, kind: m.kind, status: m.status, log: m.log }); pollJob(m.jobId) })
+      .catch((e: unknown) => setActionError(e instanceof Error ? e.message : String(e)))
+  }, [feature, pollJob])
+
+  const resolveMapping = useCallback((testName: string, accept: boolean) => {
+    setActionError(null)
+    const call = accept ? api.acceptCoverageMapping : api.rejectCoverageMapping
+    call(feature, testName)
+      .then((res) => { if (res.ledger) setLedger(res.ledger); else refresh() })
+      .catch((e: unknown) => setActionError(e instanceof Error ? e.message : String(e)))
+  }, [feature, refresh])
 
   // Stable colour per test name (by position in the ledger's test list).
   const colorByTest = useMemo(() => {
@@ -85,8 +147,15 @@ export function CoverageLedgerPage({ feature, onClose }: Props) {
 
   const visibleReqs = useMemo(() => {
     if (!ledger) return []
-    return gapFilter ? ledger.requirements.filter((r) => r.gapType === gapFilter) : ledger.requirements
+    const filtered = gapFilter ? ledger.requirements.filter((r) => r.gapType === gapFilter) : ledger.requirements
+    // Worst-first: uncovered → partial → covered, stable within a rank.
+    return [...filtered].sort((a, b) => STATUS_RANK[statusOf(a)] - STATUS_RANK[statusOf(b)])
   }, [ledger, gapFilter])
+
+  const orphanTests = useMemo(
+    () => ledger?.tests.filter((t) => t.requirements.length === 0) ?? [],
+    [ledger],
+  )
 
   return (
     <div className="fixed inset-0 z-[60] flex flex-col" style={{ background: 'var(--bg-base)' }} data-testid="coverage-ledger">
@@ -116,36 +185,52 @@ export function CoverageLedgerPage({ feature, onClose }: Props) {
         <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
           Verified Coverage · <strong style={{ color: 'var(--text-primary)' }}>{feature}</strong>
         </span>
-        {ledger?.docsDrift && (
-          <span
-            data-testid="drift-banner"
-            title="Source docs changed since the PRD summary was generated"
-            style={{ fontSize: 12, color: 'rgb(251, 191, 36)', border: '1px solid rgb(251,191,36)', borderRadius: 'var(--radius-md)', padding: '2px 8px' }}
-          >
-            Docs changed — regenerate
-          </span>
-        )}
+        {ledger?.state && <HeadlinePill headline={ledger.state.headline} />}
         <button type="button" onClick={onClose} className="cl-button ml-auto px-3 py-1.5" aria-label="Close coverage">
           Close ✕
         </button>
       </div>
 
-      {loading && <div className="p-6" style={{ color: 'var(--text-secondary)' }}>Loading coverage…</div>}
+      {loading && !ledger && <div className="p-6" style={{ color: 'var(--text-secondary)' }}>Loading coverage…</div>}
       {error && <div className="p-6" style={{ color: 'rgb(251, 113, 133)' }}>Failed to load coverage: {error}</div>}
 
-      {!loading && !error && ledger && tab === 'docs' && (
-        <CoverageDocsTab feature={feature} onRegenerated={refresh} />
+      {!error && ledger && tab === 'docs' && (
+        <CoverageDocsTab feature={feature} onRegenerated={refresh} onDocsChanged={loadDocsCount} />
       )}
 
-      {!loading && !error && ledger && tab === 'ledger' && (
+      {/* ABSENT summary → the setup guide IS the content (no dead-end panes). */}
+      {!error && ledger && tab === 'ledger' && ledger.state?.summary === 'absent' && (
+        <CoverageSetupGuide
+          sourceDocCount={sourceDocCount}
+          generating={Boolean(job)}
+          jobLog={job?.kind === 'summary' ? job.log : null}
+          actionError={actionError}
+          onAddDocs={() => setTab('docs')}
+          onGenerate={() => startJob('summary')}
+        />
+      )}
+
+      {!error && ledger && tab === 'ledger' && ledger.state?.summary !== 'absent' && (
         <>
+          {ledger.state && (
+            <StateBanner
+              ledger={ledger}
+              generating={Boolean(job)}
+              onGenerate={startJob}
+              actionError={actionError}
+            />
+          )}
+          {job && <JobStream kind={job.kind} log={job.log} />}
+          {ledger.proposedMappings && ledger.proposedMappings.length > 0 && (
+            <ProposedMappingsPanel mappings={ledger.proposedMappings} onResolve={resolveMapping} />
+          )}
           <CoverageHeader ledger={ledger} gapFilter={gapFilter} onToggleGap={(g) => setGapFilter((cur) => (cur === g ? null : g))} />
-          <div className="flex min-h-0 flex-1">
+          <div className="flex min-h-0 flex-1" style={{ opacity: job ? 0.55 : 1, transition: 'opacity 150ms' }}>
             {/* PRD / requirements pane */}
             <div className="min-h-0 flex-1 overflow-auto border-r p-4" style={{ borderColor: 'var(--border-default)' }} data-testid="prd-pane">
               {visibleReqs.length === 0 && (
                 <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>
-                  {ledger.requirements.length === 0 ? 'No PRD requirements yet. Add docs and regenerate the PRD summary in the Docs tab.' : 'No requirements match this filter.'}
+                  {ledger.requirements.length === 0 ? 'No PRD requirements yet. Add docs and generate the PRD summary.' : 'No requirements match this filter.'}
                 </div>
               )}
               {visibleReqs.map((rc) => (
@@ -164,6 +249,11 @@ export function CoverageLedgerPage({ feature, onClose }: Props) {
               {ledger.tests.length === 0 && (
                 <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>No tests found in this feature&apos;s specs.</div>
               )}
+              {orphanTests.length > 0 && (
+                <div data-testid="orphan-tests-note" style={{ marginBottom: 10, fontSize: 11, color: 'rgb(251, 191, 36)' }}>
+                  {orphanTests.length} orphan test{orphanTests.length > 1 ? 's' : ''} (no requirement) — run the coverage engine to map them.
+                </div>
+              )}
               {ledger.tests.map((t) => (
                 <TestCard
                   key={t.name}
@@ -178,6 +268,268 @@ export function CoverageLedgerPage({ feature, onClose }: Props) {
           </div>
         </>
       )}
+    </div>
+  )
+}
+
+function statusOf(rc: RequirementCoverage): CoverageStatus {
+  if (rc.coverageStatus) return rc.coverageStatus
+  if (rc.gapType === 'verified') return 'covered'
+  if (rc.gapType === 'untested') return 'uncovered'
+  return 'partial'
+}
+
+// One-line headline pill (Generating / Setup needed / Stale / No coverage / Covered N%).
+function HeadlinePill({ headline }: { headline: string }) {
+  const tone = headline.startsWith('Covered')
+    ? 'rgb(52, 211, 153)'
+    : headline === 'Generating'
+      ? 'rgb(56, 189, 248)'
+      : headline === 'Stale'
+        ? 'rgb(251, 191, 36)'
+        : 'var(--text-muted)'
+  return (
+    <span
+      data-testid="coverage-state-headline"
+      style={{ fontSize: 12, fontWeight: 600, color: tone, border: `1px solid ${tone}`, borderRadius: 'var(--radius-md)', padding: '2px 8px' }}
+    >
+      {headline}
+    </span>
+  )
+}
+
+// State-driven action bar — never a dead end. Shows the right generate action for
+// the current (summary × coverage) state and, when stale, names the changed docs
+// + affected artifacts.
+function StateBanner({ ledger, generating, onGenerate, actionError }: {
+  ledger: CoverageLedger
+  generating: boolean
+  onGenerate: (kind: CoverageJobKind, reviewMode?: boolean) => void
+  actionError: string | null
+}) {
+  const state = ledger.state!
+  const drift = state.drift
+  const summaryAbsent = state.summary === 'absent'
+  const summaryStale = state.summary === 'stale'
+  const coverageActionable = state.summary === 'fresh'
+  return (
+    <div
+      data-testid="coverage-state-banner"
+      className="flex shrink-0 flex-wrap items-center gap-3 border-b px-5 py-2.5"
+      style={{ borderColor: 'var(--border-default)', background: 'var(--bg-surface)' }}
+    >
+      {summaryAbsent && (
+        <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+          No PRD summary yet — add docs, then generate requirements.
+        </span>
+      )}
+      {summaryStale && (
+        <span data-testid="drift-banner" style={{ fontSize: 12, color: 'rgb(251, 191, 36)' }}>
+          Stale: {drift.changedDocs.length ? `${drift.changedDocs.join(', ')} changed` : 'docs changed'}
+          {drift.affectedArtifacts.length ? ` → affects ${drift.affectedArtifacts.join(' + ')}` : ''}
+        </span>
+      )}
+      {state.coverage === 'stale' && !summaryStale && (
+        <span data-testid="coverage-stale-note" style={{ fontSize: 12, color: 'rgb(251, 191, 36)' }}>
+          Requirements changed since the engine last ran — re-run coverage.
+        </span>
+      )}
+      <div className="ml-auto flex items-center gap-2">
+        <button
+          type="button"
+          data-testid="generate-summary"
+          disabled={generating}
+          onClick={() => onGenerate('summary')}
+          className="cl-button px-3 py-1"
+          style={{ fontSize: 12, opacity: generating ? 0.5 : 1 }}
+        >
+          {summaryAbsent ? 'Generate summary' : 'Regenerate summary'}
+        </button>
+        <button
+          type="button"
+          data-testid="generate-coverage"
+          disabled={generating || !coverageActionable}
+          onClick={() => onGenerate('coverage', true)}
+          className="cl-button px-3 py-1"
+          title={coverageActionable ? 'Infer covers tags for untagged tests (review)' : 'Generate a fresh PRD summary first'}
+          style={{ fontSize: 12, opacity: generating || !coverageActionable ? 0.5 : 1 }}
+        >
+          Run coverage engine
+        </button>
+      </div>
+      {actionError && <span style={{ width: '100%', fontSize: 11, color: 'rgb(251, 113, 133)' }}>{actionError}</span>}
+    </div>
+  )
+}
+
+// Guided empty state for the ABSENT summary — the two-step setup flow. Step ②
+// stays locked until ≥1 source doc exists, so the next action is always obvious.
+function CoverageSetupGuide({ sourceDocCount, generating, jobLog, actionError, onAddDocs, onGenerate }: {
+  sourceDocCount: number | null
+  generating: boolean
+  jobLog: string | null
+  actionError: string | null
+  onAddDocs: () => void
+  onGenerate: () => void
+}) {
+  const hasDocs = (sourceDocCount ?? 0) > 0
+  return (
+    <div className="min-h-0 flex-1 overflow-auto" data-testid="coverage-setup-guide">
+      <div style={{ maxWidth: 520, margin: '48px auto 0', padding: '0 24px' }}>
+        <div style={{ fontSize: 12, fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--accent)' }}>
+          Set up Verified Coverage
+        </div>
+        <h2 style={{ fontSize: 20, fontWeight: 700, color: 'var(--text-primary)', margin: '6px 0 6px' }}>
+          Two steps to a grounded coverage ledger
+        </h2>
+        <p style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.5, marginBottom: 22 }}>
+          Canary extracts testable requirements from your docs, then grounds each one against the tests that actually pass.
+        </p>
+
+        <SetupStep
+          n={1}
+          active={!hasDocs}
+          done={hasDocs}
+          title="Add source docs"
+          body="Drop in a spec, ticket, or notes file (.md / .txt / .pdf / .docx). Requirements are extracted from these."
+          cta={hasDocs ? `${sourceDocCount} source doc${sourceDocCount! > 1 ? 's' : ''} added — add more` : 'Add docs'}
+          ctaTestId="setup-add-docs"
+          onClick={onAddDocs}
+          disabled={generating}
+        />
+        <SetupStep
+          n={2}
+          active={hasDocs}
+          done={false}
+          title="Generate the PRD summary"
+          body="Canary summarizes the docs into requirements with stable ids. You can regenerate any time — ids are preserved."
+          cta={generating ? 'Generating…' : 'Generate summary'}
+          ctaTestId="setup-generate-summary"
+          onClick={onGenerate}
+          disabled={generating || !hasDocs}
+          disabledHint={!hasDocs ? 'Add a source doc first' : undefined}
+          primary
+        />
+
+        {actionError && <div style={{ marginTop: 14, fontSize: 12, color: 'rgb(251, 113, 133)' }}>{actionError}</div>}
+        {generating && jobLog != null && (
+          <pre
+            data-testid="setup-job-log"
+            style={{ marginTop: 16, maxHeight: 160, overflow: 'auto', fontSize: 11, lineHeight: 1.45, fontFamily: 'var(--font-mono, monospace)', color: 'var(--text-secondary)', whiteSpace: 'pre-wrap', background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)', padding: 10 }}
+          >
+            {jobLog || '…'}
+          </pre>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function SetupStep({ n, active, done, title, body, cta, ctaTestId, onClick, disabled, disabledHint, primary }: {
+  n: number
+  active: boolean
+  done: boolean
+  title: string
+  body: string
+  cta: string
+  ctaTestId: string
+  onClick: () => void
+  disabled?: boolean
+  disabledHint?: string
+  primary?: boolean
+}) {
+  return (
+    <div
+      data-testid={`setup-step-${n}`}
+      data-active={active ? 'true' : 'false'}
+      style={{
+        display: 'flex', gap: 14, padding: 16, marginBottom: 12,
+        borderRadius: 'var(--radius-md)',
+        border: `1px solid ${active ? 'color-mix(in srgb, var(--accent) 45%, var(--border-default))' : 'var(--border-default)'}`,
+        background: active ? 'color-mix(in srgb, var(--accent) 7%, var(--bg-surface))' : 'var(--bg-surface)',
+        opacity: !active && !done ? 0.6 : 1,
+        transition: 'opacity 150ms, border-color 150ms, background 150ms',
+      }}
+    >
+      <div
+        aria-hidden="true"
+        style={{
+          flexShrink: 0, width: 26, height: 26, borderRadius: '50%',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          fontSize: 13, fontWeight: 700,
+          background: done ? 'rgb(52, 211, 153)' : active ? 'var(--accent)' : 'var(--bg-base)',
+          color: done || active ? '#0b0f17' : 'var(--text-muted)',
+          border: done || active ? 'none' : '1px solid var(--border-default)',
+        }}
+      >
+        {done ? '✓' : n}
+      </div>
+      <div style={{ minWidth: 0, flex: 1 }}>
+        <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)' }}>{title}</div>
+        <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.45, margin: '4px 0 10px' }}>{body}</div>
+        <button
+          type="button"
+          data-testid={ctaTestId}
+          onClick={onClick}
+          disabled={disabled}
+          title={disabled && disabledHint ? disabledHint : undefined}
+          className="cl-button px-3 py-1.5"
+          style={primary && !disabled ? { background: 'var(--accent)', color: '#0b0f17', borderColor: 'var(--accent)', fontWeight: 600 } : undefined}
+        >
+          {cta}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// Live job log while a background job runs — never blanks the ledger (rendered
+// above the dimmed last result). Mirrors the AgentSessionView log aesthetic.
+function JobStream({ kind, log }: { kind: CoverageJobKind; log: string }) {
+  return (
+    <div
+      data-testid="job-stream"
+      className="shrink-0 border-b px-5 py-2"
+      style={{ borderColor: 'var(--border-default)', background: 'var(--bg-base)' }}
+    >
+      <div style={{ fontSize: 11, color: 'rgb(56, 189, 248)', marginBottom: 4 }}>
+        <span className="cl-pulse" aria-hidden="true">●</span> Generating {kind === 'summary' ? 'PRD summary' : 'coverage'}…
+      </div>
+      <pre
+        style={{
+          maxHeight: 120, overflow: 'auto', margin: 0, fontSize: 11, lineHeight: 1.45,
+          fontFamily: 'var(--font-mono, monospace)', color: 'var(--text-secondary)', whiteSpace: 'pre-wrap',
+        }}
+      >
+        {log || '…'}
+      </pre>
+    </div>
+  )
+}
+
+// Pending agent-proposed mappings (review-flag flow) — accept writes the tag,
+// reject drops it.
+function ProposedMappingsPanel({ mappings, onResolve }: {
+  mappings: ProposedMapping[]
+  onResolve: (testName: string, accept: boolean) => void
+}) {
+  return (
+    <div data-testid="proposed-mappings" className="shrink-0 border-b px-5 py-2.5" style={{ borderColor: 'var(--border-default)', background: 'var(--bg-surface)' }}>
+      <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 6 }}>
+        {mappings.length} proposed mapping{mappings.length > 1 ? 's' : ''} — review
+      </div>
+      <div className="flex flex-col gap-1.5">
+        {mappings.map((m) => (
+          <div key={m.testName} data-testid={`proposal-${m.testName}`} className="flex items-center gap-2" style={{ fontSize: 12 }}>
+            <strong style={{ color: 'var(--text-primary)' }}>{m.testName}</strong>
+            <span style={{ color: 'var(--text-secondary)' }}>→ {m.requirements.join(', ')}</span>
+            {m.confidence != null && <span style={{ color: 'var(--text-muted)', fontSize: 10 }}>({Math.round(m.confidence * 100)}%)</span>}
+            <span style={{ color: 'var(--text-muted)', fontSize: 10 }}>{m.source}</span>
+            <button type="button" data-testid={`accept-${m.testName}`} onClick={() => onResolve(m.testName, true)} className="cl-button ml-auto px-2 py-0.5" style={{ fontSize: 11 }}>Accept</button>
+            <button type="button" data-testid={`reject-${m.testName}`} onClick={() => onResolve(m.testName, false)} className="cl-button px-2 py-0.5" style={{ fontSize: 11 }}>Reject</button>
+          </div>
+        ))}
+      </div>
     </div>
   )
 }
@@ -317,6 +669,8 @@ function RequirementCard({ rc, colors, active, dimmed, onHover }: {
   )
 }
 
+// R9: no decorative accent border — the verified dot + covers tags carry the
+// meaning. The test's `@req-*` / `@path-*` tags are surfaced as chips.
 function TestCard({ test, color, active, dimmed, onHover }: {
   test: TestCoverage
   color: string
@@ -336,9 +690,9 @@ function TestCard({ test, color, active, dimmed, onHover }: {
         borderRadius: 'var(--radius-md)',
         background: active ? 'var(--bg-selected)' : 'var(--bg-surface)',
         border: '1px solid var(--border-default)',
-        borderLeft: `4px solid ${color}`,
+        boxShadow: active ? `inset 3px 0 0 ${color}` : 'none',
         opacity: dimmed ? 0.45 : 1,
-        transition: 'opacity 120ms, background 120ms',
+        transition: 'opacity 120ms, background 120ms, box-shadow 120ms',
       }}
     >
       <div className="flex items-center gap-2">
@@ -347,20 +701,20 @@ function TestCard({ test, color, active, dimmed, onHover }: {
           style={{ width: 9, height: 9, borderRadius: '50%', background: test.verified ? 'rgb(52,211,153)' : 'rgb(251,113,133)', flexShrink: 0 }}
         />
         <strong style={{ fontSize: 13, color: 'var(--text-primary)' }}>{test.name}</strong>
-      </div>
-      <div className="flex flex-wrap items-center gap-2" style={{ marginTop: 5 }}>
-        {test.requirements.length === 0 && (
-          <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>no @requirement annotation</span>
-        )}
-        {test.requirements.map((id) => (
-          <span key={id} style={{ fontSize: 10, padding: '1px 6px', borderRadius: 6, background: 'color-mix(in srgb, var(--bg-base) 70%, transparent)', border: '1px solid var(--border-default)', color: 'var(--text-secondary)' }}>{id}</span>
-        ))}
-        {test.pathTypes.map((p) => (
-          <span key={p} style={{ fontSize: 10, color: 'var(--text-muted)' }}>{p}</span>
-        ))}
         {test.file && (
           <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--text-muted)' }}>{test.file}{test.line ? `:${test.line}` : ''}</span>
         )}
+      </div>
+      <div className="flex flex-wrap items-center gap-1.5" style={{ marginTop: 6 }}>
+        {test.requirements.length === 0 && (
+          <span data-testid={`orphan-${test.name}`} style={{ fontSize: 10, color: 'rgb(251, 191, 36)' }}>orphan — no covers tag</span>
+        )}
+        {test.requirements.map((id) => (
+          <span key={id} style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: 10, padding: '1px 6px', borderRadius: 6, background: 'color-mix(in srgb, var(--bg-base) 70%, transparent)', border: `1px solid ${color}`, color: 'var(--text-secondary)' }}>@req-{id}</span>
+        ))}
+        {test.pathTypes.map((p) => (
+          <span key={p} style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: 10, padding: '1px 6px', borderRadius: 6, border: '1px solid var(--border-default)', color: 'var(--text-muted)' }}>@path-{p}</span>
+        ))}
       </div>
       {test.verified && test.lastPassingRun && (
         <div style={{ marginTop: 4, fontSize: 10, color: 'var(--text-muted)' }}>

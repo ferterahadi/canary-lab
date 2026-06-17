@@ -14,6 +14,7 @@ import {
   docsDirFor,
   type DocsCollection,
 } from './docs-collection'
+import { withFingerprints } from './fingerprints'
 
 // PRD summarization: turn a feature's source docs into structured requirements
 // with STABLE ids. Modeled on the evaluation-export agent pattern
@@ -449,12 +450,15 @@ export async function summarizePrd(
     requirements = deterministicPrdRequirements(args.collection, previous)
   }
 
-  return {
+  const summary: PrdSummary = {
     requirements,
     docsHash: args.collection.docsHash,
     sourceDocs: args.collection.entries.map((e) => e.relPath),
     generatedAt: args.now ?? new Date().toISOString(),
   }
+  // Persist per-doc + per-requirement fingerprints (R3) so drift can name which
+  // docs changed and coverage staleness can key on the requirements set.
+  return withFingerprints(summary, args.collection.entries)
 }
 
 // ---------------------------------------------------------------------------

@@ -137,7 +137,10 @@ export function applyRigor(
       ? 'shallow-verified'
       : rc.gapType
 
-    return { ...rc, gapType, rigor }
+    // A flip to shallow-verified drops the coarse status from covered → partial.
+    const coverageStatus = gapType === 'shallow-verified' ? 'partial' : rc.coverageStatus
+
+    return { ...rc, gapType, coverageStatus, rigor }
   })
 
   const verifiedBreadth = reqs.filter((r) => r.gapType === 'verified' || r.gapType === 'shallow-verified').length

@@ -138,6 +138,93 @@ describe('coverage routes', () => {
     expect(res.statusCode).toBe(400)
   })
 
+  it('starts a coverage job (202), polls it to done, and rejects a concurrent one (409)', async () => {
+    writeFeature('checkout', SPEC, { 'spec.md': '# Cart adds an item\nuser adds an item to the cart' })
+    await app.inject({ method: 'POST', url: '/api/features/checkout/prd-summary/regenerate', payload: { adapter: 'deterministic' } })
+
+    const start = await app.inject({
+      method: 'POST',
+      url: '/api/features/checkout/coverage/jobs',
+      payload: { kind: 'coverage', adapter: 'deterministic' },
+    })
+    expect(start.statusCode).toBe(202)
+    const jobId = (start.json() as { jobId: string }).jobId
+    expect(jobId).toBeTruthy()
+
+    // Poll until the (fast, deterministic) job finishes.
+    let manifest: { status: string } = { status: 'running' }
+    for (let i = 0; i < 50 && manifest.status === 'running'; i++) {
+      manifest = (await app.inject({ method: 'GET', url: `/api/coverage/jobs/${jobId}` })).json() as { status: string }
+      if (manifest.status === 'running') await new Promise((r) => setTimeout(r, 10))
+    }
+    expect(manifest.status).toBe('done')
+
+    // It appears in the feature's job list.
+    const jobs = (await app.inject({ method: 'GET', url: '/api/features/checkout/coverage/jobs' })).json() as unknown[]
+    expect(jobs.length).toBe(1)
+  })
+
+  it('rejects a job with an invalid kind (400) and an unknown feature (404)', async () => {
+    writeFeature('checkout', SPEC)
+    const bad = await app.inject({ method: 'POST', url: '/api/features/checkout/coverage/jobs', payload: { kind: 'nope' } })
+    expect(bad.statusCode).toBe(400)
+    const missing = await app.inject({ method: 'POST', url: '/api/features/ghost/coverage/jobs', payload: { kind: 'summary' } })
+    expect(missing.statusCode).toBe(404)
+  })
+
+  it('404s polling an unknown job', async () => {
+    const res = await app.inject({ method: 'GET', url: '/api/coverage/jobs/missing' })
+    expect(res.statusCode).toBe(404)
+  })
+
+  it('imports an uploaded doc (extracted to markdown) then lists it', async () => {
+    writeFeature('checkout', SPEC)
+    const base64 = Buffer.from('# Imported brief\nbody text').toString('base64')
+    const imp = await app.inject({ method: 'POST', url: '/api/features/checkout/docs/import', payload: { filename: 'brief.md', base64 } })
+    expect(imp.statusCode).toBe(200)
+    expect((imp.json() as { relativePath: string }).relativePath).toContain('brief.md')
+    const docs = (await app.inject({ method: 'GET', url: '/api/features/checkout/docs' })).json() as { docs: { relPath: string }[] }
+    expect(docs.docs.map((d) => d.relPath)).toContain('brief.md')
+  })
+
+  it('deletes a source doc but refuses a generated artifact', async () => {
+    const dir = writeFeature('checkout', SPEC, { 'spec.md': '# Cart adds an item\nbody' })
+    await app.inject({ method: 'POST', url: '/api/features/checkout/prd-summary/regenerate', payload: { adapter: 'deterministic' } })
+
+    const ok = await app.inject({ method: 'DELETE', url: '/api/features/checkout/docs/spec.md' })
+    expect(ok.statusCode).toBe(200)
+    expect(fs.existsSync(path.join(dir, 'docs', 'spec.md'))).toBe(false)
+
+    const refused = await app.inject({ method: 'DELETE', url: '/api/features/checkout/docs/_prd-summary.md' })
+    expect(refused.statusCode).toBe(400)
+  })
+
+  it('clears the generated PRD summary (back to no-summary state)', async () => {
+    writeFeature('checkout', SPEC, { 'spec.md': '# Cart adds an item\nbody' })
+    await app.inject({ method: 'POST', url: '/api/features/checkout/prd-summary/regenerate', payload: { adapter: 'deterministic' } })
+    // Summary exists.
+    let docs = (await app.inject({ method: 'GET', url: '/api/features/checkout/docs' })).json() as { hasPrdSummary: boolean }
+    expect(docs.hasPrdSummary).toBe(true)
+
+    const cleared = await app.inject({ method: 'DELETE', url: '/api/features/checkout/prd-summary' })
+    expect(cleared.statusCode).toBe(200)
+    expect((cleared.json() as { removed: string[] }).removed).toContain('_prd-summary.json')
+
+    // Back to no summary; source doc untouched.
+    docs = (await app.inject({ method: 'GET', url: '/api/features/checkout/docs' })).json() as { hasPrdSummary: boolean }
+    expect(docs.hasPrdSummary).toBe(false)
+    const cov = (await app.inject({ method: 'GET', url: '/api/features/checkout/coverage' })).json() as CoverageLedger
+    expect(cov.state?.summary).toBe('absent')
+  })
+
+  it('reports per-feature coverage headlines via /coverage/states', async () => {
+    writeFeature('checkout', SPEC)
+    const states = (await app.inject({ method: 'GET', url: '/api/coverage/states' })).json() as Array<{ feature: string; headline: string | null }>
+    const entry = states.find((s) => s.feature === 'checkout')
+    expect(entry).toBeTruthy()
+    expect(entry?.headline).toBe('Setup needed') // no summary yet
+  })
+
   it('preserves requirement ids across a regenerate cycle', async () => {
     const dir = writeFeature('checkout', SPEC, { 'spec.md': '# Cart adds an item\nbody' })
     const first = (await app.inject({ method: 'POST', url: '/api/features/checkout/prd-summary/regenerate', payload: { adapter: 'deterministic' } })).json() as { summary: PrdSummary }

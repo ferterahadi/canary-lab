@@ -1,5 +1,6 @@
 import type {
   CoverageLedger,
+  CoverageStatus,
   CoverageTotals,
   GapType,
   PathCoverage,
@@ -23,6 +24,13 @@ import type { LastPassingRun, PassingRunIndex } from './grounding'
 export type { CoverageLedger, RequirementCoverage }
 
 const DEFAULT_PATHS: PathType[] = ['happy']
+
+/** Roll the fine-grained gap type up to the coarse covered/partial/uncovered. */
+function coverageStatusFor(gapType: GapType): CoverageStatus {
+  if (gapType === 'verified') return 'covered'
+  if (gapType === 'untested') return 'uncovered'
+  return 'partial' // unverified | path-incomplete | shallow-verified
+}
 
 /** A test as the coverage layer needs it (mapped from ExtractedTest upstream). */
 export interface CoverageTestInput {
@@ -110,8 +118,15 @@ export function computeCoverageLedger(args: ComputeCoverageArgs): CoverageLedger
       lastPassingRun: pickMostRecent(verified.map((t) => t.lastPassingRun!).filter(Boolean)),
       pathCoverage,
       gapType,
+      coverageStatus: coverageStatusFor(gapType),
     }
   })
+
+  // Orphan tests = no requirement linkage at all (the annotate-pass candidates).
+  const orphanTestNames = testCoverage
+    .filter((tc) => tc.requirements.length === 0)
+    .map((tc) => tc.name)
+    .sort()
 
   const totals: CoverageTotals = {
     total: active.length,
@@ -120,6 +135,7 @@ export function computeCoverageLedger(args: ComputeCoverageArgs): CoverageLedger
     unverified: reqCoverage.filter((r) => r.gapType === 'unverified').length,
     pathIncomplete: reqCoverage.filter((r) => r.gapType === 'path-incomplete').length,
     shallowVerified: 0, // populated by the rigor layer (Phase 3B)
+    orphanTests: orphanTestNames.length,
   }
 
   const coveragePct = totals.total === 0
@@ -142,5 +158,6 @@ export function computeCoverageLedger(args: ComputeCoverageArgs): CoverageLedger
     totals,
     coveragePct,
     orphanRequirementIds: [...orphanSet].sort(),
+    orphanTestNames,
   }
 }

@@ -30,6 +30,7 @@ import { benchmarkDir } from './lib/runtime/benchmark/paths'
 import { portifyRoutes } from './routes/portify'
 import { portifyStreamRoutes } from './ws/portify-stream'
 import { PortifyRunStore } from './lib/runtime/portify/store'
+import { CoverageJobRunStore } from './lib/coverage/jobs/store'
 import { createPortifyRunner } from './lib/runtime/portify/runner'
 import { reclaimOrphanedPortify } from './lib/runtime/portify/reclaim'
 import { portifyDir } from './lib/runtime/portify/paths'
@@ -192,6 +193,11 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
   // it edited in place, then flips the manifest to 'aborted' so the UI doesn't
   // show a zombie workflow (and a stale worktree can't wedge the next run).
   await reclaimOrphanedPortify(portifyStore, logsDir, () => new Date().toISOString())
+  // Coverage background jobs (R4): a job left 'running' belongs to a dead
+  // process — flip it to 'aborted' so it doesn't hold the single-flight lock or
+  // show as live forever.
+  const coverageJobStore = new CoverageJobRunStore(logsDir)
+  coverageJobStore.reconcileInterrupted(() => new Date().toISOString())
   const workspaceEvents = new WorkspaceEventBus()
   // One-shot cleanup: a fresh UI server starts with an empty registry, so any
   // persisted 'running'/'healing' row is from a previous server process and is
@@ -226,7 +232,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
   const activeEnvsets = new Map<string, BackupRecord[]>()
 
   await app.register(featuresRoutes, { featuresDir })
-  await app.register(coverageRoutes, { featuresDir, logsDir, projectRoot: opts.projectRoot })
+  await app.register(coverageRoutes, { featuresDir, logsDir, projectRoot: opts.projectRoot, coverageJobStore })
   await app.register(featureConfigRoutes, {
     featuresDir,
     workspaceEvents,

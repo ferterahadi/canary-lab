@@ -19,6 +19,8 @@ import { PortifyPickerDialog } from './PortifyPickerDialog'
 import { BenchmarkPill } from './BenchmarkPill'
 import { CleanupPill } from './CleanupPill'
 import { CoveragePill } from './CoveragePill'
+import * as api from '../api/client'
+import type { CoverageJobIndexEntry } from '../api/types'
 
 interface Props {
   activeRunDetail: RunDetail | null
@@ -26,10 +28,8 @@ interface Props {
   features?: Feature[]
   onNavigateToRun?: (feature: string, runId: string) => void
   onOpenCleanup?: () => void
-  /** Open the Verified Coverage Ledger for the selected feature. */
-  onOpenCoverage?: () => void
-  /** Whether a feature is selected (gates the Coverage pill). */
-  coverageAvailable?: boolean
+  /** Open the Verified Coverage Ledger for a feature (from the pill task menu). */
+  onOpenCoverage?: (feature: string) => void
   /** Start port-ification for a feature (opens the wizard's Plan screen). */
   onStartPortify?: (feature: string) => void
   /** Reopen the in-flight port-ification workflow (by id) in the wizard. */
@@ -50,8 +50,18 @@ interface Props {
 // dialog wiring, and composes presentational pills (ServicesPill, RunsPill,
 // PortifyLauncherPill, BenchmarkPill, CleanupPill) and badges (ConnectionBadge,
 // McpHealthBadge, StatusChip) that each live in their own file.
-export function GlobalStatusBar({ activeRunDetail, features = [], onNavigateToRun, onOpenCleanup, onOpenCoverage, coverageAvailable, onStartPortify, onOpenPortify }: Props) {
+export function GlobalStatusBar({ activeRunDetail, features = [], onNavigateToRun, onOpenCleanup, onOpenCoverage, onStartPortify, onOpenPortify }: Props) {
   const { connection } = useRuns()
+  // Poll coverage background jobs so the pill can show only while one is running
+  // (R7). Lightweight (an index read); 2s cadence matches the dialog's poll.
+  const [coverageJobs, setCoverageJobs] = useState<CoverageJobIndexEntry[]>([])
+  useEffect(() => {
+    let alive = true
+    const tick = () => { api.listAllCoverageJobs().then((j) => { if (alive) setCoverageJobs(j) }).catch(() => {}) }
+    tick()
+    const id = setInterval(tick, 2000)
+    return () => { alive = false; clearInterval(id) }
+  }, [])
   const activePortify = useActivePortify()
   const [portifyPickerOpen, setPortifyPickerOpen] = useState(false)
   const { runs: activeRuns } = useActiveRuns()
@@ -153,7 +163,7 @@ export function GlobalStatusBar({ activeRunDetail, features = [], onNavigateToRu
           <EvaluationExportTaskStatus />
           {showBenchmark && <BenchmarkPill active={Boolean(activeBenchmark)} onOpen={() => setBenchmarkOpen(true)} />}
           <PortifyLauncherPill activePortify={activePortify} onOpen={() => setPortifyPickerOpen(true)} />
-          <CoveragePill onOpen={() => onOpenCoverage?.()} disabled={!coverageAvailable} />
+          <CoveragePill jobs={coverageJobs} features={features} onOpenFeature={(f) => onOpenCoverage?.(f)} />
           <CleanupPill onOpen={() => onOpenCleanup?.()} />
         </div>
         <button
