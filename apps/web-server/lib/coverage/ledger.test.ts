@@ -163,4 +163,35 @@ describe('computeCoverageLedger — tests + orphans', () => {
     expect(ledger.tests.find((t) => t.name === 'passing')?.verified).toBe(true)
     expect(ledger.tests.find((t) => t.name === 'never ran')?.verified).toBe(false)
   })
+
+  it('lists tests with no requirement linkage as orphan tests', () => {
+    const tests: CoverageTestInput[] = [
+      { name: 'mapped', requirements: ['R1'], pathTypes: ['happy'] },
+      { name: 'zzz orphan', pathTypes: ['happy'] },
+      { name: 'aaa orphan' },
+    ]
+    const ledger = computeCoverageLedger({
+      feature: 'f',
+      requirements: [req('R1', ['happy'])],
+      tests,
+      index: indexOf('mapped'),
+    })
+    expect(ledger.orphanTestNames).toEqual(['aaa orphan', 'zzz orphan']) // sorted
+    expect(ledger.totals.orphanTests).toBe(2)
+  })
+})
+
+describe('computeCoverageLedger — coverageStatus roll-up', () => {
+  const cases: Array<[string, CoverageTestInput[], Requirement, string[], string]> = [
+    ['covered (verified)', [{ name: 't', requirements: ['R1'], pathTypes: ['happy'] }], req('R1', ['happy']), ['t'], 'covered'],
+    ['uncovered (untested)', [], req('R1', ['happy']), [], 'uncovered'],
+    ['partial (unverified)', [{ name: 't', requirements: ['R1'], pathTypes: ['happy'] }], req('R1', ['happy']), [], 'partial'],
+    ['partial (path-incomplete)', [{ name: 't', requirements: ['R1'], pathTypes: ['happy'] }], req('R1', ['happy', 'sad']), ['t'], 'partial'],
+  ]
+  for (const [label, tests, requirement, passing, expected] of cases) {
+    it(label, () => {
+      const ledger = computeCoverageLedger({ feature: 'f', requirements: [requirement], tests, index: indexOf(...passing) })
+      expect(ledger.requirements[0].coverageStatus).toBe(expected)
+    })
+  }
 })

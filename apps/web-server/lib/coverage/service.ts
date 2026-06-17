@@ -2,10 +2,32 @@ import fs from 'fs'
 import path from 'path'
 import { loadFeatures, listSpecFiles } from '../feature-loader'
 import { extractTestsFromSource } from '../ast-extractor'
-import type { CoverageLedger, PrdSummary } from '../../../../shared/coverage/types'
+import type {
+  CoverageLedger,
+  PrdSummary,
+  ProposedMapping,
+  Requirement,
+} from '../../../../shared/coverage/types'
 import { buildLastPassingRunIndex } from './grounding'
 import { computeCoverageLedger, type CoverageTestInput } from './ledger'
 import { applyRigor, type TestAssertions } from './rigor'
+import {
+  proposeCoverageMappings,
+  type AnnotateAdapter,
+  type AnnotateTestInput,
+} from './annotate-engine'
+import { writeCoversTag } from './tag-writer'
+import {
+  MAPPINGS_JSON,
+  clearProposedMappings,
+  readProposedMappings,
+  removeProposal,
+  writeProposedMappings,
+} from './proposed-mappings'
+import { changedDocPaths, changedRequirementIds, diffDocs, fingerprintDocs, requirementFingerprintMap, requirementsSetHash } from './fingerprints'
+import { deriveCoverageStateView, type DeriveStateInput } from './state'
+import { COVERAGE_STATE_JSON, readCoverageRunState, writeCoverageRunState } from './run-state'
+import { CoverageJobRunStore } from './jobs/store'
 import {
   GENERATED_DOC_PREFIX,
   docsDirFor,
@@ -38,14 +60,36 @@ function resolveFeatureDir(featuresDir: string, feature: string): string {
   return found.featureDir
 }
 
+/** True when a feature with this name is discoverable (cheap existence guard for
+ *  the async job start path, which would otherwise fail deep in the driver). */
+export function featureExists(featuresDir: string, feature: string): boolean {
+  const found = loadFeatures(featuresDir).find((f) => f.name === feature)
+  return Boolean(found && found.featureDir)
+}
+
+interface CollectedTest {
+  input: CoverageTestInput
+  assertions: Set<string>
+  bodySource: string
+  /** Absolute path of the spec that defines the test (for tag-writing). */
+  absFile: string
+}
+
+interface CollectedTests {
+  tests: CoverageTestInput[]
+  assertions: TestAssertions[]
+  collected: CollectedTest[]
+}
+
 /** Merge per-test annotation/assertion data across all of a feature's specs. */
-function collectTests(featureDir: string): { tests: CoverageTestInput[]; assertions: TestAssertions[] } {
-  const byName = new Map<string, { input: CoverageTestInput; assertions: Set<string> }>()
+function collectTests(featureDir: string): CollectedTests {
+  const byName = new Map<string, CollectedTest>()
   for (const file of listSpecFiles(featureDir)) {
     let source = ''
     try { source = fs.readFileSync(file, 'utf-8') } catch { continue }
     const extracted = extractTestsFromSource(file, source)
     for (const t of extracted.tests) {
+      const absFile = t.sourceFile ?? file
       const existing = byName.get(t.name)
       if (existing) {
         // Same test name in two specs — union the linkage, concat assertions.
@@ -59,20 +103,24 @@ function collectTests(featureDir: string): { tests: CoverageTestInput[]; asserti
           name: t.name,
           requirements: t.requirements,
           pathTypes: t.pathTypes,
-          file: path.relative(featureDir, t.sourceFile ?? file),
+          file: path.relative(featureDir, absFile),
           line: t.line,
         },
         assertions: new Set(t.assertions ?? []),
+        bodySource: t.bodySource,
+        absFile,
       })
     }
   }
   const tests: CoverageTestInput[] = []
   const assertions: TestAssertions[] = []
-  for (const { input, assertions: set } of byName.values()) {
-    tests.push(input)
-    assertions.push({ name: input.name, assertions: [...set] })
+  const collected: CollectedTest[] = []
+  for (const entry of byName.values()) {
+    tests.push(entry.input)
+    assertions.push({ name: entry.input.name, assertions: [...entry.assertions] })
+    collected.push(entry)
   }
-  return { tests, assertions }
+  return { tests, assertions, collected }
 }
 
 function isDrifted(featureDir: string, summary: PrdSummary | null): boolean {
@@ -101,8 +149,188 @@ export function computeFeatureCoverage(args: ComputeFeatureCoverageArgs): Covera
 
   const breadth = computeCoverageLedger({ feature: args.feature, requirements, tests, index })
   const ledger = applyRigor(breadth, requirements, assertions)
-  ledger.docsDrift = isDrifted(featureDir, summary)
+
+  // --- State model (R3): summary × coverage axes + drift detail. ---
+  const live = readDocsCollection(featureDir)
+  const summaryDrifted = summary ? live.docsHash !== summary.docsHash : false
+  const docsDelta = diffDocs(fingerprintDocs(live.entries), summary?.docFingerprints)
+  const runState = readCoverageRunState(featureDir)
+  const coverageStale = Boolean(
+    runState && summary?.requirementsHash && runState.requirementsHash !== summary.requirementsHash,
+  )
+  // A running background job (R4) overlays the persisted state with GENERATING.
+  const jobStore = new CoverageJobRunStore(args.logsDir)
+  const activeJob: DeriveStateInput['activeJob'] = jobStore.activeFor(args.feature, 'summary')
+    ? 'summary'
+    : jobStore.activeFor(args.feature, 'coverage')
+      ? 'coverage'
+      : null
+  const stateInput: DeriveStateInput = {
+    hasSummary: Boolean(summary),
+    summaryDrifted,
+    changedDocs: summaryDrifted ? changedDocPaths(docsDelta) : [],
+    hasAnnotatedTests: tests.some((t) => (t.requirements?.length ?? 0) > 0),
+    coverageStale,
+    coveragePct: ledger.coveragePct,
+    activeJob,
+  }
+  ledger.state = deriveCoverageStateView(stateInput)
+  ledger.docsDrift = summaryDrifted // back-compat mirror
+
+  const pending = readProposedMappings(featureDir)
+  if (pending && pending.proposals.length) ledger.proposedMappings = pending.proposals
   return ledger
+}
+
+// ---------------------------------------------------------------------------
+// Coverage engine — annotate-pass (R2). Infers which requirement(s) each
+// untagged test verifies and either writes the `covers` tag straight away
+// (auto) or stores the proposals for human accept/reject (review flag on).
+// ---------------------------------------------------------------------------
+
+export interface RunCoverageEngineArgs {
+  featuresDir: string
+  logsDir: string
+  feature: string
+  adapter?: AnnotateAdapter
+  /** When true, store proposals for accept/reject instead of writing tags. */
+  reviewMode?: boolean
+  /** 'full' re-infers against every active requirement; 'delta' (R10) re-infers
+   *  only requirements whose fingerprint changed since the last engine run — and
+   *  no-ops entirely when nothing changed. Default 'full'. */
+  mode?: 'full' | 'delta'
+  cwd?: string
+  now?: string
+  signal?: AbortSignal
+  onOutput?: (chunk: string) => void
+}
+
+export interface RunCoverageEngineResult {
+  feature: string
+  /** Mappings whose tags were written immediately (auto mode). */
+  applied: ProposedMapping[]
+  /** Mappings stored awaiting accept/reject (review mode). */
+  proposed: ProposedMapping[]
+  /** Test names that were orphans before the pass. */
+  orphanTestsBefore: string[]
+  /** delta mode: the requirement ids re-inferred this pass (the changed set). */
+  reconciledRequirementIds?: string[]
+  /** The recomputed ledger after applying (auto) or storing (review). */
+  ledger: CoverageLedger
+}
+
+/** Resolve a relative spec path under the feature and write a covers tag onto a
+ *  test. Returns true when the file changed. */
+function applyTagToFile(
+  featureDir: string,
+  relFile: string,
+  testName: string,
+  requirements: string[],
+  pathTypes: ProposedMapping['pathTypes'],
+): boolean {
+  const abs = path.join(featureDir, relFile)
+  if (!fs.existsSync(abs)) return false
+  const source = fs.readFileSync(abs, 'utf-8')
+  const next = writeCoversTag(source, testName, { requirements, pathTypes })
+  if (next === source) return false
+  fs.writeFileSync(abs, next)
+  return true
+}
+
+export async function runCoverageEngine(args: RunCoverageEngineArgs): Promise<RunCoverageEngineResult> {
+  const featureDir = resolveFeatureDir(args.featuresDir, args.feature)
+  const summary = readPrdSummary(featureDir)
+  const requirements: Requirement[] = summary?.requirements ?? []
+
+  const { collected } = collectTests(featureDir)
+  const orphans = collected.filter((c) => !(c.input.requirements?.length))
+  const orphanTestsBefore = orphans.map((c) => c.input.name).sort()
+
+  const engineInputs: AnnotateTestInput[] = orphans.map((c) => ({
+    name: c.input.name,
+    file: c.input.file,
+    bodySource: c.bodySource,
+    assertions: [...c.assertions],
+  }))
+
+  // Reconcile-by-delta (R10): in delta mode, restrict the candidate requirements
+  // to those whose fingerprint changed since the last engine run — unchanged reqs
+  // keep their existing mappings, and an unchanged set is a no-op.
+  let candidateRequirements = requirements
+  let reconciledRequirementIds: string[] | undefined
+  if (args.mode === 'delta') {
+    const prior = readCoverageRunState(featureDir)
+    const changedIds = changedRequirementIds(requirements, prior?.requirementFingerprints)
+    reconciledRequirementIds = changedIds
+    if (changedIds.length === 0) {
+      args.onOutput?.('[delta] requirements unchanged — nothing to reconcile\n')
+      return { feature: args.feature, applied: [], proposed: [], orphanTestsBefore, reconciledRequirementIds, ledger: computeFeatureCoverage(args) }
+    }
+    args.onOutput?.(`[delta] reconciling ${changedIds.length} changed requirement(s): ${changedIds.join(', ')}\n`)
+    const changedSet = new Set(changedIds)
+    candidateRequirements = requirements.filter((r) => changedSet.has(r.id))
+  }
+
+  const proposals = await proposeCoverageMappings(
+    { requirements: candidateRequirements, tests: engineInputs, adapter: args.adapter, cwd: args.cwd, signal: args.signal, onOutput: args.onOutput },
+  )
+
+  const applied: ProposedMapping[] = []
+  let proposed: ProposedMapping[] = []
+
+  if (args.reviewMode) {
+    proposed = proposals
+    if (proposals.length) {
+      writeProposedMappings(featureDir, { generatedAt: args.now ?? new Date().toISOString(), proposals })
+    } else {
+      clearProposedMappings(featureDir)
+    }
+  } else {
+    for (const m of proposals) {
+      if (!m.file) continue
+      if (applyTagToFile(featureDir, m.file, m.testName, m.requirements, m.pathTypes)) applied.push(m)
+    }
+    // Auto mode supersedes any pending review proposals.
+    clearProposedMappings(featureDir)
+  }
+
+  // Record the requirements set the engine just ran against — coverage drops to
+  // STALE when the set later moves (R3 signal; R10 turns it into a delta re-infer).
+  writeCoverageRunState(featureDir, {
+    requirementsHash: summary?.requirementsHash ?? requirementsSetHash(requirements),
+    requirementFingerprints: requirementFingerprintMap(requirements),
+    ranAt: args.now ?? new Date().toISOString(),
+  })
+
+  const ledger = computeFeatureCoverage({ featuresDir: args.featuresDir, logsDir: args.logsDir, feature: args.feature })
+  return { feature: args.feature, applied, proposed, orphanTestsBefore, reconciledRequirementIds, ledger }
+}
+
+export interface ResolveProposalArgs {
+  featuresDir: string
+  logsDir: string
+  feature: string
+  testName: string
+}
+
+/** Accept a pending proposal: write its `covers` tag, drop it from the store. */
+export function acceptProposedMapping(args: ResolveProposalArgs): { applied: ProposedMapping | null; ledger: CoverageLedger } {
+  const featureDir = resolveFeatureDir(args.featuresDir, args.feature)
+  const store = readProposedMappings(featureDir)
+  const proposal = store?.proposals.find((p) => p.testName === args.testName)
+  if (!proposal || !proposal.file) {
+    return { applied: null, ledger: computeFeatureCoverage(args) }
+  }
+  applyTagToFile(featureDir, proposal.file, proposal.testName, proposal.requirements, proposal.pathTypes)
+  removeProposal(featureDir, args.testName)
+  return { applied: proposal, ledger: computeFeatureCoverage(args) }
+}
+
+/** Reject a pending proposal: drop it from the store, write no tag. */
+export function rejectProposedMapping(args: ResolveProposalArgs): { rejected: ProposedMapping | null; ledger: CoverageLedger } {
+  const featureDir = resolveFeatureDir(args.featuresDir, args.feature)
+  const rejected = removeProposal(featureDir, args.testName) ?? null
+  return { rejected, ledger: computeFeatureCoverage(args) }
 }
 
 export interface FeatureDoc {
@@ -186,6 +414,23 @@ export async function regeneratePrdSummary(args: RegeneratePrdSummaryArgs): Prom
     summary: written,
     written: [path.join('docs', PRD_SUMMARY_JSON), path.join('docs', PRD_SUMMARY_MD)],
   }
+}
+
+/**
+ * Remove a feature's generated PRD summary and the coverage sidecars tied to it
+ * (run-state, pending mappings). Source docs are untouched. After this the
+ * summary state returns to ABSENT — and, if no source docs remain, the whole
+ * surface is back to its initial empty state.
+ */
+export function clearPrdSummary(args: { featuresDir: string; feature: string }): { feature: string; removed: string[] } {
+  const featureDir = resolveFeatureDir(args.featuresDir, args.feature)
+  const docsDir = docsDirFor(featureDir)
+  const removed: string[] = []
+  for (const name of [PRD_SUMMARY_JSON, PRD_SUMMARY_MD, MAPPINGS_JSON, COVERAGE_STATE_JSON]) {
+    const p = path.join(docsDir, name)
+    if (fs.existsSync(p)) { fs.rmSync(p); removed.push(name) }
+  }
+  return { feature: args.feature, removed }
 }
 
 export { GENERATED_DOC_PREFIX }

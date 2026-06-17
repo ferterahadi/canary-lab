@@ -11,7 +11,12 @@ import { CoverageDocsTab } from './CoverageDocsTab'
 
 vi.mock('../api/client', async () => {
   const actual = await vi.importActual<typeof import('../api/client')>('../api/client')
-  return { ...actual, listFeatureDocs: vi.fn(), regeneratePrdSummary: vi.fn(), writeFeatureDoc: vi.fn() }
+  return {
+    ...actual,
+    listFeatureDocs: vi.fn(), regeneratePrdSummary: vi.fn(), writeFeatureDoc: vi.fn(),
+    importFeatureDoc: vi.fn(), deleteFeatureDoc: vi.fn(), clearPrdSummary: vi.fn(),
+    startCoverageJob: vi.fn(), getCoverageJob: vi.fn(),
+  }
 })
 
 const LISTING: FeatureDocsListing = {
@@ -36,6 +41,11 @@ beforeEach(() => {
   vi.mocked(api.listFeatureDocs).mockResolvedValue(structuredClone(LISTING))
   vi.mocked(api.regeneratePrdSummary).mockResolvedValue({ feature: 'checkout', summary: { requirements: [], docsHash: 'h', sourceDocs: [], generatedAt: 'n' }, written: [] })
   vi.mocked(api.writeFeatureDoc).mockResolvedValue({ written: true, relativePath: 'docs/notes.md' })
+  vi.mocked(api.importFeatureDoc).mockResolvedValue({ written: true, relativePath: 'docs/spec.md' })
+  vi.mocked(api.deleteFeatureDoc).mockResolvedValue({ deleted: true })
+  vi.mocked(api.clearPrdSummary).mockResolvedValue({ feature: 'checkout', removed: ['_prd-summary.md'] })
+  vi.mocked(api.startCoverageJob).mockResolvedValue({ jobId: 'j', feature: 'checkout', kind: 'summary', status: 'running', startedAt: 'n', log: '' })
+  vi.mocked(api.getCoverageJob).mockResolvedValue({ jobId: 'j', feature: 'checkout', kind: 'summary', status: 'done', startedAt: 'n', log: 'done' })
 })
 
 afterEach(() => {
@@ -57,29 +67,70 @@ describe('CoverageDocsTab', () => {
     expect(container.querySelector('[data-testid="docs-tab-drift"]')).toBeTruthy()
   })
 
-  it('regenerate calls the API and notifies the parent', async () => {
+  it('regenerate runs an async summary job (streams) and notifies the parent on done', async () => {
     const onRegenerated = vi.fn()
     await mount(onRegenerated)
     await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="regenerate-prd"]')?.click() })
-    await act(async () => { await Promise.resolve() })
-    expect(api.regeneratePrdSummary).toHaveBeenCalledWith('checkout')
+    await act(async () => { await new Promise((r) => setTimeout(r, 10)) })
+    expect(api.startCoverageJob).toHaveBeenCalledWith('checkout', 'summary')
+    expect(api.getCoverageJob).toHaveBeenCalledWith('j')
     expect(onRegenerated).toHaveBeenCalled()
   })
 
-  it('adds a doc through the form', async () => {
+  it('has a single add affordance (no Add-doc form, no header Upload button)', async () => {
     await mount()
-    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="add-doc-toggle"]')?.click() })
-    const relInput = container.querySelector<HTMLInputElement>('[data-testid="add-doc-relpath"]')!
-    const contentInput = container.querySelector<HTMLTextAreaElement>('[data-testid="add-doc-content"]')!
-    const setValue = (el: HTMLInputElement | HTMLTextAreaElement, v: string) => {
-      const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype
-      Object.getOwnPropertyDescriptor(proto, 'value')!.set!.call(el, v)
-      act(() => { el.dispatchEvent(new Event('input', { bubbles: true })) })
-    }
-    setValue(relInput, 'notes.md')
-    setValue(contentInput, '# Notes')
-    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="add-doc-save"]')?.click() })
+    expect(container.querySelector('[data-testid="add-doc-toggle"]')).toBeNull()
+    expect(container.querySelector('[data-testid="upload-doc"]')).toBeNull()
+    // With docs present, the lone add affordance is the compact "add another" row.
+    expect(container.querySelector('[data-testid="add-another-doc"]')).toBeTruthy()
+    expect(container.querySelector('[data-testid="doc-file-input"]')).toBeTruthy()
+  })
+
+  it('labels the action "Generate" (enabled) when docs exist but no summary', async () => {
+    vi.mocked(api.listFeatureDocs).mockResolvedValue({ feature: 'checkout', docs: [{ relPath: 'spec.md', generated: false, sizeBytes: 9 }], hasPrdSummary: false, sourceDocCount: 1, docsDrift: false })
+    await mount()
+    const btn = container.querySelector<HTMLButtonElement>('[data-testid="regenerate-prd"]')
+    expect(btn?.disabled).toBe(false)
+    expect(btn?.textContent).toBe('Generate PRD summary')
+  })
+
+  it('disables generation when there are no source docs', async () => {
+    vi.mocked(api.listFeatureDocs).mockResolvedValue({ feature: 'checkout', docs: [], hasPrdSummary: false, sourceDocCount: 0, docsDrift: false })
+    await mount()
+    expect(container.querySelector<HTMLButtonElement>('[data-testid="regenerate-prd"]')?.disabled).toBe(true)
+  })
+
+  it('shows a centered dropzone empty state when there are no docs', async () => {
+    vi.mocked(api.listFeatureDocs).mockResolvedValue({ feature: 'checkout', docs: [], hasPrdSummary: false, sourceDocCount: 0, docsDrift: false })
+    await mount()
+    expect(container.querySelector('[data-testid="empty-dropzone"]')).toBeTruthy()
+  })
+
+  it('imports an uploaded file (picker → import endpoint)', async () => {
+    await mount()
+    const input = container.querySelector<HTMLInputElement>('[data-testid="doc-file-input"]')!
+    const file = new File(['# Hello'], 'brief.md', { type: 'text/markdown' })
+    Object.defineProperty(input, 'files', { value: [file], configurable: true })
+    await act(async () => { input.dispatchEvent(new Event('change', { bubbles: true })) })
+    await act(async () => { await new Promise((r) => setTimeout(r, 20)) })
+    expect(api.importFeatureDoc).toHaveBeenCalled()
+    expect(vi.mocked(api.importFeatureDoc).mock.calls[0][0]).toBe('checkout')
+    expect(vi.mocked(api.importFeatureDoc).mock.calls[0][1].filename).toBe('brief.md')
+  })
+
+  it('removes a source doc via the pill ✕', async () => {
+    await mount()
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="remove-doc-spec.md"]')?.click() })
     await act(async () => { await Promise.resolve() })
-    expect(api.writeFeatureDoc).toHaveBeenCalledWith('checkout', 'notes.md', '# Notes')
+    expect(api.deleteFeatureDoc).toHaveBeenCalledWith('checkout', 'spec.md')
+  })
+
+  it('clears the generated PRD summary via its ✕', async () => {
+    await mount()
+    expect(container.querySelector('[data-testid="remove-doc-_prd-summary.md"]')).toBeTruthy()
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="remove-doc-_prd-summary.md"]')?.click() })
+    await act(async () => { await Promise.resolve() })
+    expect(api.clearPrdSummary).toHaveBeenCalledWith('checkout')
+    expect(api.deleteFeatureDoc).not.toHaveBeenCalled()
   })
 })

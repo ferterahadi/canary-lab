@@ -1,10 +1,12 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import * as api from '../api/client'
 import type { ExecutionType, Feature, RunStatus } from '../api/types'
 import { useWizardDrafts } from '../state/WizardDraftContext'
 import { useMcpPromo } from '../state/McpPromoContext'
 import { FeatureConfigEditor } from './FeatureConfigEditor'
 import { ThemeToggle } from './ThemeToggle'
 import { SettingsModal } from './SettingsModal'
+import { Tooltip } from './Tooltip'
 
 interface Props {
   features: Feature[]
@@ -22,6 +24,19 @@ interface Props {
   onStartPortify?: (feature: string) => void
   /** Reopens a past/active port-ification workflow (Ports-tab history). */
   onOpenPortify?: (workflowId: string) => void
+  /** Opens the Verified Coverage ledger for a feature (R8 column entry point). */
+  onOpenCoverage?: (feature: string) => void
+}
+
+// Colour the Coverage icon by the derived headline (R8). Neutral (inherit) for
+// setup-needed / no-coverage / unknown so the column stays calm until there's
+// real signal; green when covered, sky while generating, amber when stale.
+function coverageHeadlineColor(headline: string | null | undefined): string | undefined {
+  if (!headline) return undefined
+  if (headline.startsWith('Covered')) return 'rgb(52, 211, 153)'
+  if (headline === 'Generating') return 'rgb(56, 189, 248)'
+  if (headline === 'Stale') return 'rgb(251, 191, 36)'
+  return undefined
 }
 
 export function FeaturesColumn({
@@ -34,11 +49,31 @@ export function FeaturesColumn({
   onFeaturesChanged,
   onStartPortify,
   onOpenPortify,
+  onOpenCoverage,
 }: Props) {
   const { startNewWizard } = useWizardDrafts()
   const { gatePromo } = useMcpPromo()
   const [configFor, setConfigFor] = useState<string | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  // Per-feature coverage headline → colours the column's Coverage icon (R8).
+  // Fetched on mount + when the feature set changes (not polled — generating
+  // state is surfaced by the status-bar pill instead, which avoids recomputing
+  // every feature's coverage on a tight loop).
+  const [coverageHeadlines, setCoverageHeadlines] = useState<Record<string, string | null>>({})
+  const featureKey = features.map((f) => f.name).join(',')
+  useEffect(() => {
+    if (!onOpenCoverage || features.length === 0) return
+    let alive = true
+    api.listCoverageStates()
+      .then((states) => {
+        if (!alive) return
+        const map: Record<string, string | null> = {}
+        for (const s of states) map[s.feature] = s.headline
+        setCoverageHeadlines(map)
+      })
+      .catch(() => {})
+    return () => { alive = false }
+  }, [featureKey, onOpenCoverage, features.length])
 
   return (
     <div className="cl-panel flex h-full flex-col">
@@ -79,11 +114,27 @@ export function FeaturesColumn({
                   }}
                   title={runState ? (runState === 'healing' ? 'Healing now' : runState === 'booted' ? 'Services up (boot-only)' : 'Running now') : undefined}
                 >
+                  {f.portified && (
+                    <Tooltip label="Portified">
+                      <span
+                        aria-label="Portified"
+                        data-testid={`portified-badge-${f.name}`}
+                        className="ml-1.5 flex h-4 w-4 shrink-0 items-center justify-center self-center rounded text-[11px] leading-none"
+                        style={{
+                          color: 'rgb(52,211,153)',
+                          background: 'color-mix(in srgb, rgb(52,211,153) 14%, transparent)',
+                          border: '1px solid color-mix(in srgb, rgb(52,211,153) 35%, transparent)',
+                        }}
+                      >
+                        ⇄
+                      </span>
+                    </Tooltip>
+                  )}
                   <button
                     type="button"
                     onClick={() => onSelectFeature(f.name)}
                     title={f.name}
-                    className="min-w-0 flex-1 truncate rounded-md px-3 py-2 text-left"
+                    className="min-w-0 flex-1 truncate rounded-md px-2 py-2 text-left"
                     style={{ color: 'inherit', fontWeight: 'inherit' }}
                   >
                     {f.name}
@@ -91,32 +142,38 @@ export function FeaturesColumn({
                   {runState && (
                     <span className="sr-only">{runState === 'healing' ? 'Healing' : runState === 'booted' ? 'Services up' : 'Running'}</span>
                   )}
-                  {f.portified && (
-                    <span
-                      title="Portified — a saved port overlay lets this feature boot concurrently"
-                      aria-label="Portified"
-                      className="mr-1 shrink-0 self-center rounded px-1.5 py-0.5 text-[9.5px] font-semibold uppercase tracking-wide"
-                      style={{
-                        color: 'rgb(52,211,153)',
-                        background: 'color-mix(in srgb, rgb(52,211,153) 14%, transparent)',
-                        border: '1px solid color-mix(in srgb, rgb(52,211,153) 35%, transparent)',
-                      }}
-                    >
-                      ⇄ ports
-                    </span>
+                  {onOpenCoverage && (
+                    <Tooltip label="Coverage">
+                      <button
+                        type="button"
+                        onClick={() => { onSelectFeature(f.name); onOpenCoverage(f.name) }}
+                        aria-label={`Open coverage for ${f.name}`}
+                        data-testid={`coverage-action-${f.name}`}
+                        data-headline={coverageHeadlines[f.name] ?? ''}
+                        className="feature-row__cog cl-icon-button mr-0.5 h-7 w-7 shrink-0 self-center"
+                        style={{ color: coverageHeadlineColor(coverageHeadlines[f.name]) }}
+                      >
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                          <circle cx="12" cy="12" r="9" />
+                          <circle cx="12" cy="12" r="4.5" />
+                          <circle cx="12" cy="12" r="0.6" fill="currentColor" />
+                        </svg>
+                      </button>
+                    </Tooltip>
                   )}
-                  <button
-                    type="button"
-                    onClick={() => setConfigFor(f.name)}
-                    aria-label={`Configure ${f.name}`}
-                    title="View feature config"
-                    className="feature-row__cog cl-icon-button mr-1.5 h-7 w-7 shrink-0 self-center"
-                  >
+                  <Tooltip label="Config">
+                    <button
+                      type="button"
+                      onClick={() => setConfigFor(f.name)}
+                      aria-label={`Configure ${f.name}`}
+                      className="feature-row__cog cl-icon-button mr-1.5 h-7 w-7 shrink-0 self-center"
+                    >
                     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                       <circle cx="12" cy="12" r="3" />
                       <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
                     </svg>
-                  </button>
+                    </button>
+                  </Tooltip>
                 </li>
               )
             })}

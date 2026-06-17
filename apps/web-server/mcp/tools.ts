@@ -34,14 +34,21 @@ import {
   getFeatureEnvsetSummary,
   getFeatureRepoStatus,
   writeFeatureDoc,
+  deleteFeatureDoc,
   type EnvFileSource,
 } from '../lib/feature-authoring'
 import {
   FeatureNotFoundError,
+  acceptProposedMapping,
+  clearPrdSummary,
   computeFeatureCoverage,
+  featureExists,
   listFeatureDocs,
   regeneratePrdSummary,
+  rejectProposedMapping,
 } from '../lib/coverage/service'
+import { CoverageJobRunStore } from '../lib/coverage/jobs/store'
+import { startCoverageJob, CoverageJobConflictError } from '../lib/coverage/jobs/runner'
 import {
   createDraft,
   paths as draftPaths,
@@ -212,9 +219,15 @@ export type CanaryLabMcpToolName =
   | 'get_verification_result'
   | 'create_feature'
   | 'write_feature_doc'
+  | 'delete_feature_doc'
   | 'get_feature_coverage'
   | 'list_feature_docs'
   | 'regenerate_prd_summary'
+  | 'clear_prd_summary'
+  | 'start_coverage_job'
+  | 'get_coverage_job'
+  | 'accept_coverage_mapping'
+  | 'reject_coverage_mapping'
   | 'get_feature_envset_summary'
   | 'capture_feature_env_files'
   | 'write_envset'
@@ -287,9 +300,15 @@ const AUTHOR_TOOLS = [
   'get_run_snapshot',
   'create_feature',
   'write_feature_doc',
+  'delete_feature_doc',
   'get_feature_coverage',
   'list_feature_docs',
   'regenerate_prd_summary',
+  'clear_prd_summary',
+  'start_coverage_job',
+  'get_coverage_job',
+  'accept_coverage_mapping',
+  'reject_coverage_mapping',
   'get_feature_envset_summary',
   'capture_feature_env_files',
   'write_envset',
@@ -619,6 +638,22 @@ export function registerCanaryLabTools(
     return asJsonResult({ written: true, path: result.writtenPath, relativePath: result.relativePath })
   })
 
+  registerTool('delete_feature_doc', {
+    description:
+      'Delete a SOURCE doc from a feature\'s docs/ directory (the UI Docs-tab pill\'s remove action). Refuses generated artifacts (the _prd-* / _coverage-* files canary manages). After removing docs, regenerate the PRD summary so coverage reflects the change.',
+    inputSchema: {
+      feature: z.string().describe('Existing feature name (from list_features).'),
+      relPath: z.string().describe('Path of the source doc relative to docs/, e.g. "notes.md". A leading "docs/" is optional.'),
+    },
+  }, async ({ feature, relPath }) => {
+    const result = deleteFeatureDoc(
+      { projectRoot: deps.projectRoot, featuresDir: deps.featuresDir },
+      { feature, relPath },
+    )
+    if (!result.ok) return errorResult(result.error)
+    return asJsonResult({ deleted: true, relativePath: result.relativePath })
+  })
+
   registerTool('get_feature_coverage', {
     description:
       'Get the Verified Coverage Ledger for a feature: PRD requirements → annotated tests → last passing run + gap type (untested / unverified / path-incomplete / verified / shallow-verified) with a grounded coverage %, PLUS per-requirement rigor (tierReached / tierAvailable / strictness / weakestAssertion / suggestedStrongerCheck) and docs-drift status. The coverage % and strictness are evidence-based math over passing runs — never an opinion. Use this to find untested/unverified requirements and to see which passing tests are too lax (and what stronger check to write).',
@@ -666,6 +701,93 @@ export function registerCanaryLabTools(
         cwd: deps.projectRoot,
       })
       return asJsonResult(result)
+    } catch (err) {
+      if (err instanceof FeatureNotFoundError) return errorResult(err.message)
+      throw err
+    }
+  })
+
+  registerTool('clear_prd_summary', {
+    description:
+      'Remove a feature\'s generated PRD summary and the coverage sidecars tied to it (pending mappings, run-state). Source docs are left untouched; the feature returns to the "no summary" state (and the whole surface to its initial empty state if no source docs remain). Same action as the UI Docs-tab ✕ on the generated summary card.',
+    inputSchema: { feature: z.string().describe('Existing feature name (from list_features).') },
+  }, async ({ feature }) => {
+    try {
+      return asJsonResult(clearPrdSummary({ featuresDir: deps.featuresDir, feature }))
+    } catch (err) {
+      if (err instanceof FeatureNotFoundError) return errorResult(err.message)
+      throw err
+    }
+  })
+
+  registerTool('start_coverage_job', {
+    description:
+      'Start an ASYNC background job for a feature: kind:"summary" regenerates the PRD summary from source docs (preserving requirement ids); kind:"coverage" runs the coverage engine — it infers which requirement(s) each untagged test verifies and either writes the @req-* covers tag straight away or, with reviewMode:true, stores proposals for accept/reject. Non-blocking and single-flight: a second job of the same kind for the same feature is rejected while one is running. Poll get_coverage_job with the returned jobId. Same action as the UI Coverage dialog\'s Generate buttons.',
+    inputSchema: {
+      feature: z.string().describe('Existing feature name (from list_features).'),
+      kind: z.enum(['summary', 'coverage']).describe('summary = regenerate the PRD summary; coverage = run the annotate-pass engine.'),
+      reviewMode: z.boolean().optional().describe('coverage only: store proposed mappings for accept/reject instead of writing tags immediately.'),
+      adapter: z.enum(['auto', 'claude', 'codex', 'deterministic']).optional()
+        .describe('Agent backend. Omit for auto (prefers an available agent CLI, falls back to deterministic).'),
+    },
+  }, async ({ feature, kind, reviewMode, adapter }) => {
+    if (!featureExists(deps.featuresDir, feature)) return errorResult(`feature not found: ${feature}`)
+    try {
+      const { manifest } = startCoverageJob(
+        {
+          featuresDir: deps.featuresDir,
+          logsDir: deps.store.logsDir,
+          feature,
+          kind,
+          reviewMode,
+          adapter: adapter as never,
+          cwd: deps.projectRoot,
+        },
+        { store: new CoverageJobRunStore(deps.store.logsDir) },
+      )
+      return asJsonResult(manifest)
+    } catch (err) {
+      if (err instanceof CoverageJobConflictError) return errorResult(`${err.message} (existing job ${err.existingJobId})`)
+      throw err
+    }
+  })
+
+  registerTool('get_coverage_job', {
+    description:
+      'Poll a coverage background job by jobId (from start_coverage_job). Returns the manifest: status (running / done / failed / aborted), captured log, and on done a result summary (requirementCount for summary jobs; applied/proposed counts for coverage jobs). Then call get_feature_coverage for the updated ledger.',
+    inputSchema: { jobId: z.string().describe('Job id returned by start_coverage_job.') },
+  }, async ({ jobId }) => {
+    const manifest = new CoverageJobRunStore(deps.store.logsDir).get(jobId)
+    if (!manifest) return errorResult(`job not found: ${jobId}`)
+    return asJsonResult(manifest)
+  })
+
+  registerTool('accept_coverage_mapping', {
+    description:
+      'Accept a pending agent-proposed coverage mapping (from a reviewMode coverage job): writes the @req-* covers tag onto the named test and drops the proposal. Returns the recomputed ledger. Same action as the UI Coverage dialog\'s "accept" on a proposed mapping.',
+    inputSchema: {
+      feature: z.string().describe('Existing feature name (from list_features).'),
+      testName: z.string().describe('Exact test name of the pending proposal (see ledger.proposedMappings).'),
+    },
+  }, async ({ feature, testName }) => {
+    try {
+      return asJsonResult(acceptProposedMapping({ featuresDir: deps.featuresDir, logsDir: deps.store.logsDir, feature, testName }))
+    } catch (err) {
+      if (err instanceof FeatureNotFoundError) return errorResult(err.message)
+      throw err
+    }
+  })
+
+  registerTool('reject_coverage_mapping', {
+    description:
+      'Reject a pending agent-proposed coverage mapping (from a reviewMode coverage job): drops the proposal without writing any tag. Returns the recomputed ledger. Same action as the UI Coverage dialog\'s "reject" on a proposed mapping.',
+    inputSchema: {
+      feature: z.string().describe('Existing feature name (from list_features).'),
+      testName: z.string().describe('Exact test name of the pending proposal (see ledger.proposedMappings).'),
+    },
+  }, async ({ feature, testName }) => {
+    try {
+      return asJsonResult(rejectProposedMapping({ featuresDir: deps.featuresDir, logsDir: deps.store.logsDir, feature, testName }))
     } catch (err) {
       if (err instanceof FeatureNotFoundError) return errorResult(err.message)
       throw err

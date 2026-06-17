@@ -16,9 +16,7 @@ const baseUrl = process.env.CANARY_PORT_api
   : (process.env.GATEWAY_URL ?? 'http://localhost:4000')
 
 test.describe('example_todo_api coverage rigor demo', () => {
-  // @requirement R1
-  // @path happy
-  test('create is confirmed by an independent read (tier 3)', async () => {
+  test('create is confirmed by an independent read (tier 3)', { tag: ['@req-R1', '@path-happy'] }, async () => {
     await fetch(`${baseUrl}/todos`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -29,9 +27,7 @@ test.describe('example_todo_api coverage rigor demo', () => {
     expect(todos.some((t) => t.title === 'Rigor demo item')).toBe(true)
   })
 
-  // @requirement R3
-  // @path happy
-  test('delete is confirmed via the app API (tier 3, not the UI)', async () => {
+  test('delete is confirmed via the app API (tier 3, not the UI)', { tag: ['@req-R3', '@path-happy'] }, async () => {
     const created = await fetch(`${baseUrl}/todos`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

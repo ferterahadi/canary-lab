@@ -21,6 +21,9 @@ import type {
   VerificationConfig,
   VerificationTarget,
   CoverageLedger,
+  CoverageJobIndexEntry,
+  CoverageJobKind,
+  CoverageJobManifest,
   FeatureDocsListing,
   PrdSummary,
 } from './types'
@@ -121,6 +124,43 @@ export function writeFeatureDoc(
   )
 }
 
+/** Upload a source doc file (.md/.txt/.pdf/.docx); the server extracts text and
+ *  stores it as a markdown source doc. */
+export function importFeatureDoc(
+  feature: string,
+  file: { filename: string; contentType?: string; base64: string },
+  opts?: ClientOptions,
+): Promise<{ written: boolean; relativePath: string }> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request(
+    `${baseUrl}/api/features/${encodeURIComponent(feature)}/docs/import`,
+    { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(file) },
+    fetchImpl,
+  )
+}
+
+export function deleteFeatureDoc(feature: string, relPath: string, opts?: ClientOptions): Promise<{ deleted: boolean }> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request(
+    `${baseUrl}/api/features/${encodeURIComponent(feature)}/docs/${encodeURIComponent(relPath)}`,
+    { method: 'DELETE' },
+    fetchImpl,
+  )
+}
+
+export interface CoverageStateSummary {
+  feature: string
+  headline: string | null
+  summary: string | null
+  coverage: string | null
+  coveragePct: number | null
+}
+
+export function listCoverageStates(opts?: ClientOptions): Promise<CoverageStateSummary[]> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<CoverageStateSummary[]>(`${baseUrl}/api/coverage/states`, { method: 'GET' }, fetchImpl)
+}
+
 export function regeneratePrdSummary(
   feature: string,
   adapter?: 'auto' | 'claude' | 'codex' | 'deterministic',
@@ -130,6 +170,74 @@ export function regeneratePrdSummary(
   return request(
     `${baseUrl}/api/features/${encodeURIComponent(feature)}/prd-summary/regenerate`,
     { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(adapter ? { adapter } : {}) },
+    fetchImpl,
+  )
+}
+
+// ─── Verified Coverage — async jobs + proposed mappings (R4) ─────────────────
+
+export function startCoverageJob(
+  feature: string,
+  kind: CoverageJobKind,
+  opts?: ClientOptions & { reviewMode?: boolean; adapter?: 'auto' | 'claude' | 'codex' | 'deterministic' },
+): Promise<CoverageJobManifest> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  const body: Record<string, unknown> = { kind }
+  if (opts?.reviewMode) body.reviewMode = true
+  if (opts?.adapter) body.adapter = opts.adapter
+  return request<CoverageJobManifest>(
+    `${baseUrl}/api/features/${encodeURIComponent(feature)}/coverage/jobs`,
+    { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) },
+    fetchImpl,
+  )
+}
+
+export function listCoverageJobs(feature: string, opts?: ClientOptions): Promise<CoverageJobIndexEntry[]> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<CoverageJobIndexEntry[]>(
+    `${baseUrl}/api/features/${encodeURIComponent(feature)}/coverage/jobs`,
+    { method: 'GET' },
+    fetchImpl,
+  )
+}
+
+export function listAllCoverageJobs(opts?: ClientOptions): Promise<CoverageJobIndexEntry[]> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<CoverageJobIndexEntry[]>(`${baseUrl}/api/coverage/jobs`, { method: 'GET' }, fetchImpl)
+}
+
+export function getCoverageJob(jobId: string, opts?: ClientOptions): Promise<CoverageJobManifest> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<CoverageJobManifest>(
+    `${baseUrl}/api/coverage/jobs/${encodeURIComponent(jobId)}`,
+    { method: 'GET' },
+    fetchImpl,
+  )
+}
+
+export function acceptCoverageMapping(feature: string, testName: string, opts?: ClientOptions): Promise<{ ledger: CoverageLedger }> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request(
+    `${baseUrl}/api/features/${encodeURIComponent(feature)}/coverage/proposals/${encodeURIComponent(testName)}/accept`,
+    { method: 'POST' },
+    fetchImpl,
+  )
+}
+
+export function rejectCoverageMapping(feature: string, testName: string, opts?: ClientOptions): Promise<{ ledger: CoverageLedger }> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request(
+    `${baseUrl}/api/features/${encodeURIComponent(feature)}/coverage/proposals/${encodeURIComponent(testName)}/reject`,
+    { method: 'POST' },
+    fetchImpl,
+  )
+}
+
+export function clearPrdSummary(feature: string, opts?: ClientOptions): Promise<{ feature: string; removed: string[] }> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request(
+    `${baseUrl}/api/features/${encodeURIComponent(feature)}/prd-summary`,
+    { method: 'DELETE' },
     fetchImpl,
   )
 }

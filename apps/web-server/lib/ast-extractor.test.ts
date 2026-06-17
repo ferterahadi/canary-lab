@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { extractTestsFromSource, parseTestAnnotations } from './ast-extractor'
+import { extractTestsFromSource, parseTestAnnotations, parseTestTagList } from './ast-extractor'
 
 describe('extractTestsFromSource', () => {
   it('returns empty array when no tests are present', () => {
@@ -294,5 +294,77 @@ describe('extractTestsFromSource — coverage annotations', () => {
     const r = extractTestsFromSource('a.spec.ts', src)
     expect(r.tests[0].requirements).toEqual(['R1'])
     expect(r.tests[1].requirements).toBeUndefined()
+  })
+})
+
+describe('parseTestTagList', () => {
+  it('maps @req-<id> tags to requirements (deduped, order preserved)', () => {
+    expect(parseTestTagList(['@req-R2', '@req-R1', '@req-R2']).requirements).toEqual(['R2', 'R1'])
+  })
+
+  it('maps @path-<type> tags to canonically-ordered path types', () => {
+    expect(parseTestTagList(['@path-sad', '@path-happy']).pathTypes).toEqual(['happy', 'sad'])
+  })
+
+  it('preserves hyphenated requirement ids after the @req- prefix', () => {
+    expect(parseTestTagList(['@req-CHK-3']).requirements).toEqual(['CHK-3'])
+  })
+
+  it('ignores unrelated tags and invalid path types', () => {
+    const out = parseTestTagList(['@smoke', '@path-bogus', '@req-R1'])
+    expect(out.requirements).toEqual(['R1'])
+    expect(out.pathTypes).toBeUndefined()
+  })
+
+  it('returns undefined fields when no coverage tags are present', () => {
+    expect(parseTestTagList(['@smoke', '@slow'])).toEqual({
+      requirements: undefined,
+      pathTypes: undefined,
+    })
+  })
+})
+
+describe('extractTestsFromSource — Playwright tag linkage (R1)', () => {
+  it('reads requirements + paths from an array tag on the details object', () => {
+    const src = `
+      test('tagged', { tag: ['@req-R3', '@path-happy', '@path-edge'] }, async () => {
+        expect(1).toBe(1)
+      })
+    `
+    const r = extractTestsFromSource('a.spec.ts', src)
+    expect(r.tests[0].requirements).toEqual(['R3'])
+    expect(r.tests[0].pathTypes).toEqual(['happy', 'edge'])
+  })
+
+  it('reads a single string tag', () => {
+    const src = `test('one', { tag: '@req-R5' }, async () => {})`
+    const r = extractTestsFromSource('a.spec.ts', src)
+    expect(r.tests[0].requirements).toEqual(['R5'])
+  })
+
+  it('extracts body steps + assertions through the 3-arg details form', () => {
+    // Regression: the body is arguments[2] when a details object is present, so
+    // the body finder must scan past the object literal.
+    const src = `
+      test('with details', { tag: ['@req-R1'] }, async () => {
+        await test.step('go', async () => { await page.goto('https://line.com') })
+        await expect(page.locator('.ok')).toBeVisible()
+      })
+    `
+    const r = extractTestsFromSource('a.spec.ts', src)
+    expect(r.tests[0].steps.map((s) => s.label)).toEqual(['go'])
+    expect((r.tests[0].assertions ?? []).some((a) => a.includes('toBeVisible'))).toBe(true)
+    expect((r.tests[0].assertions ?? []).some((a) => a.includes("page.goto('https://line.com')"))).toBe(true)
+  })
+
+  it('unions Playwright tags with comment annotations (migration fallback)', () => {
+    const src = `
+      // @requirement R9
+      // @path sad
+      test('mixed', { tag: ['@req-R1', '@path-happy'] }, async () => {})
+    `
+    const r = extractTestsFromSource('a.spec.ts', src)
+    expect(r.tests[0].requirements).toEqual(['R1', 'R9'])
+    expect(r.tests[0].pathTypes).toEqual(['happy', 'sad'])
   })
 })

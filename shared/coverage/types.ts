@@ -47,6 +47,10 @@ export interface Requirement {
   /** Set when a requirement present in a prior summary was dropped on regen.
    *  Kept (not deleted) so existing annotations don't dangle silently. */
   deprecated?: boolean
+  /** Content fingerprint (title+text+paths) stored at generation time (R3). The
+   *  id is the durable spine; this captures whether the MEANING shifted, so a
+   *  regen can (R10) re-infer only the requirements that actually changed. */
+  fingerprint?: string
 }
 
 /**
@@ -61,6 +65,41 @@ export interface PrdSummary {
   sourceDocs: string[]
   /** ISO timestamp of generation. */
   generatedAt: string
+  /** Per-doc fingerprints at generation time (R3) — relPath → hash. Lets drift
+   *  name WHICH docs changed, not just THAT something did. */
+  docFingerprints?: Record<string, string>
+  /** Hash over the active requirements set — the key coverage staleness is
+   *  measured against (changes on add/remove/edit of a requirement). */
+  requirementsHash?: string
+}
+
+// --- Coverage state model (R3). Summary and Coverage are independent axes; the
+// UI shows one derived headline and every (summary × coverage) combination has a
+// non-dead-end rendering. ---
+
+/** Summary axis: the PRD summary's lifecycle. */
+export type SummaryState = 'absent' | 'generating' | 'fresh' | 'stale'
+
+/** Coverage axis: BLOCKED until the summary is FRESH, then absent→…→stale. */
+export type CoverageState = 'blocked' | 'absent' | 'generating' | 'fresh' | 'stale'
+
+/** What changed and what it invalidated — staleness never just says "stale". */
+export interface DriftDetail {
+  drifted: boolean
+  /** Source docs added/edited/removed since the summary was generated. */
+  changedDocs: string[]
+  /** Human-named artifacts the change invalidates (PRD summary / coverage). */
+  affectedArtifacts: string[]
+}
+
+/** The derived state view surfaced on the ledger (drives the compact UI). */
+export interface CoverageStateView {
+  summary: SummaryState
+  coverage: CoverageState
+  /** One-line derived headline: Generating / Setup needed / Stale / No coverage
+   *  / Covered N%. */
+  headline: string
+  drift: DriftDetail
 }
 
 // --- Computed coverage ledger (the output of the breadth + depth computation,
@@ -72,6 +111,16 @@ export type GapType =
   | 'unverified'
   | 'path-incomplete'
   | 'shallow-verified'
+
+/**
+ * Coarse tri-state the coverage engine compiles per requirement — the headline
+ * the agent and the ledger pane group on, derived from the finer `GapType`:
+ *   • covered   — verified (a passing run behind every implied path)
+ *   • uncovered — untested (no test linked at all)
+ *   • partial   — anything in between (unverified / path-incomplete /
+ *                 shallow-verified)
+ */
+export type CoverageStatus = 'covered' | 'partial' | 'uncovered'
 
 /** The most-recent run in which a test actually passed — the evidence pointer. */
 export interface LastPassingRun {
@@ -119,6 +168,8 @@ export interface RequirementCoverage {
   lastPassingRun?: LastPassingRun
   pathCoverage: PathCoverage[]
   gapType: GapType
+  /** Coarse covered/partial/uncovered roll-up of `gapType` (engine headline). */
+  coverageStatus: CoverageStatus
   /** Present once the rigor layer has run over a verified requirement. */
   rigor?: RequirementRigor
 }
@@ -130,6 +181,24 @@ export interface CoverageTotals {
   unverified: number
   pathIncomplete: number
   shallowVerified: number
+  /** Tests carrying no requirement linkage (covered/partial/uncovered ignore
+   *  these — they're candidates for the annotate-pass). */
+  orphanTests: number
+}
+
+/** One coverage-engine-proposed test→requirement mapping (the annotate-pass
+ *  output). When the review flag is on these await human accept/reject; the
+ *  agent only ever proposes a MAPPING, never a test body. */
+export interface ProposedMapping {
+  testName: string
+  file?: string
+  requirements: string[]
+  pathTypes?: PathType[]
+  rationale?: string
+  /** 0–1 confidence (deterministic lane = token-overlap ratio). */
+  confidence?: number
+  /** Which lane produced it. */
+  source: 'agent' | 'deterministic'
 }
 
 export interface CoverageLedger {
@@ -141,6 +210,50 @@ export interface CoverageLedger {
   coveragePct: number
   /** Requirement ids annotated on tests but absent from the PRD (drift signal). */
   orphanRequirementIds: string[]
-  /** True when the live docs hash differs from the summary's stored hash. */
+  /** Test names with no requirement linkage — the annotate-pass works this set. */
+  orphanTestNames: string[]
+  /** Pending agent-proposed mappings awaiting accept/reject (review flag on). */
+  proposedMappings?: ProposedMapping[]
+  /** Derived (summary × coverage) state + drift detail (R3). */
+  state?: CoverageStateView
+  /** True when the live docs hash differs from the summary's stored hash.
+   *  @deprecated superseded by `state.drift.drifted` — kept for back-compat. */
   docsDrift?: boolean
+}
+
+// --- Async background jobs (R4). Shared so the UI dialog/pill and the MCP tools
+// read the same manifest shape. ---
+
+export type CoverageJobKind = 'summary' | 'coverage'
+
+export type CoverageJobStatus = 'running' | 'done' | 'failed' | 'aborted'
+
+export interface CoverageJobResult {
+  requirementCount?: number
+  applied?: number
+  proposed?: number
+  reviewMode?: boolean
+}
+
+export interface CoverageJobManifest {
+  jobId: string
+  feature: string
+  kind: CoverageJobKind
+  status: CoverageJobStatus
+  reviewMode?: boolean
+  startedAt: string
+  endedAt?: string
+  /** Captured agent/driver output — fed to the AgentSessionView (R6). */
+  log: string
+  result?: CoverageJobResult
+  error?: string
+}
+
+export interface CoverageJobIndexEntry {
+  jobId: string
+  feature: string
+  kind: CoverageJobKind
+  status: CoverageJobStatus
+  startedAt: string
+  endedAt?: string
 }

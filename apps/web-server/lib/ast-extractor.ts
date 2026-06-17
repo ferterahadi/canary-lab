@@ -26,9 +26,10 @@ export interface ExtractedTest {
   // that owns it (e.g. a factory helper). UI uses this to link the code
   // viewer at the real definition site instead of the importing spec.
   sourceFile?: string
-  // Verified-coverage linkage parsed from `@requirement <id>` / `@path
-  // happy|sad|edge` annotations in the comment block directly above the test.
-  // Absent when the test carries no annotations.
+  // Verified-coverage linkage. Primary source is Playwright tags on the test
+  // (`{ tag: ['@req-R3', '@path-happy'] }`); `@requirement <id>` / `@path
+  // happy|sad|edge` comment annotations are honoured as a migration fallback and
+  // unioned in. Absent when the test carries no linkage at all.
   requirements?: string[]
   pathTypes?: PathType[]
   // Assertion / check snippets collected from the test body — `expect(...)`
@@ -98,6 +99,16 @@ function getStepBody(call: ts.CallExpression): ts.Node | null {
   return null
 }
 
+// The test callback can be the 2nd or 3rd argument: `test(title, fn)` or, with a
+// Playwright details object, `test(title, { tag }, fn)`. Scan all args for the
+// function so the body (steps + assertions) is found in both shapes.
+function getCallableBody(call: ts.CallExpression): ts.Node | null {
+  for (const arg of call.arguments) {
+    if (ts.isArrowFunction(arg) || ts.isFunctionExpression(arg)) return arg.body
+  }
+  return null
+}
+
 const PATH_TYPE_VALUES: PathType[] = ['happy', 'sad', 'edge']
 
 export interface TestAnnotations {
@@ -125,6 +136,81 @@ export function parseTestAnnotations(commentText: string): TestAnnotations {
       if ((PATH_TYPE_VALUES as string[]).includes(v)) pathSet.add(v as PathType)
     }
   }
+  const pathTypes = PATH_TYPE_VALUES.filter((p) => pathSet.has(p))
+  return {
+    requirements: requirements.length ? requirements : undefined,
+    pathTypes: pathTypes.length ? pathTypes : undefined,
+  }
+}
+
+// Map Playwright test tags to coverage linkage. The convention (R1):
+//   • `@req-<id>`        → requirement id (`@req-R3` → "R3")
+//   • `@path-<type>`     → path type (`@path-happy` → "happy")
+// Both greppable and rename-proof (they live ON the test, not in a comment).
+// Ids dedupe preserving first-seen order; path types are canonically ordered.
+export function parseTestTagList(tags: string[]): TestAnnotations {
+  const requirements: string[] = []
+  const pathSet = new Set<PathType>()
+  for (const raw of tags) {
+    const tag = raw.trim()
+    const reqM = /^@req-(.+)$/.exec(tag)
+    if (reqM) {
+      const id = reqM[1].trim()
+      if (id && !requirements.includes(id)) requirements.push(id)
+      continue
+    }
+    const pathM = /^@path-(.+)$/.exec(tag)
+    if (pathM) {
+      const v = pathM[1].trim().toLowerCase()
+      if ((PATH_TYPE_VALUES as string[]).includes(v)) pathSet.add(v as PathType)
+    }
+  }
+  const pathTypes = PATH_TYPE_VALUES.filter((p) => pathSet.has(p))
+  return {
+    requirements: requirements.length ? requirements : undefined,
+    pathTypes: pathTypes.length ? pathTypes : undefined,
+  }
+}
+
+// Pull the string values out of a `tag` property in the test's details object
+// (`test('…', { tag: '@req-R1' }, …)` or `{ tag: ['@req-R1', '@path-happy'] }`).
+function readTagPropertyStrings(value: ts.Expression): string[] {
+  const out: string[] = []
+  if (ts.isStringLiteralLike(value)) {
+    out.push(value.text)
+  } else if (ts.isArrayLiteralExpression(value)) {
+    for (const el of value.elements) {
+      if (ts.isStringLiteralLike(el)) out.push(el.text)
+    }
+  }
+  return out
+}
+
+// Read coverage tags from a `test(...)` call's Playwright details object (the
+// argument that is an object literal). Absent / non-object → no tags.
+function parseTestTags(call: ts.CallExpression): TestAnnotations {
+  const detail = call.arguments.find((a) => ts.isObjectLiteralExpression(a)) as
+    | ts.ObjectLiteralExpression
+    | undefined
+  if (!detail) return {}
+  for (const prop of detail.properties) {
+    if (!ts.isPropertyAssignment(prop)) continue
+    const key = ts.isIdentifier(prop.name) || ts.isStringLiteralLike(prop.name) ? prop.name.text : ''
+    if (key !== 'tag' && key !== 'tags') continue
+    return parseTestTagList(readTagPropertyStrings(prop.initializer))
+  }
+  return {}
+}
+
+// Union two annotation sources (Playwright tags take precedence in order, then
+// comment annotations as a migration fallback). Requirements dedupe preserving
+// first-seen order; path types are canonically ordered.
+function mergeAnnotations(primary: TestAnnotations, fallback: TestAnnotations): TestAnnotations {
+  const requirements: string[] = []
+  for (const id of [...(primary.requirements ?? []), ...(fallback.requirements ?? [])]) {
+    if (!requirements.includes(id)) requirements.push(id)
+  }
+  const pathSet = new Set<PathType>([...(primary.pathTypes ?? []), ...(fallback.pathTypes ?? [])])
   const pathTypes = PATH_TYPE_VALUES.filter((p) => pathSet.has(p))
   return {
     requirements: requirements.length ? requirements : undefined,
@@ -234,8 +320,13 @@ export function extractTestsFromSource(file: string, source: string): ExtractRes
       if (ts.isCallExpression(n) && isTestCall(n)) {
         const name = getStringArg(n, src)
         if (name !== null) {
-          const body = getStepBody(n)
-          const annotations = parseTestAnnotations(leadingCommentText(n, src))
+          const body = getCallableBody(n)
+          // Playwright tags are primary (R1); comment annotations are the
+          // migration fallback. Union both so a half-migrated spec still works.
+          const annotations = mergeAnnotations(
+            parseTestTags(n),
+            parseTestAnnotations(leadingCommentText(n, src)),
+          )
           const assertions = body ? collectAssertionSnippets(body, src) : []
           tests.push({
             name,

@@ -300,6 +300,28 @@ export function writeFeatureDoc(ctx: FeatureAuthoringContext, input: {
   return { ok: true, writtenPath: dest, relativePath: path.relative(feature.featureDir, dest) }
 }
 
+// Delete a SOURCE doc from a feature's `docs/`. Refuses generated artifacts
+// (`_`-prefixed: _prd-*, _coverage-*) — those are engine-managed, not user docs —
+// and is path-traversal hardened the same way as writeFeatureDoc.
+export function deleteFeatureDoc(ctx: FeatureAuthoringContext, input: {
+  feature: string
+  relPath: string
+}): { ok: true; relativePath: string } | { ok: false; error: string } {
+  const feature = findFeature(ctx.featuresDir, input.feature)
+  if (!feature?.featureDir) return { ok: false, error: 'feature not found' }
+  const resolved = resolveDocRelPath(input.relPath)
+  if (!resolved.ok) return { ok: false, error: resolved.error }
+  if (path.basename(resolved.rel).startsWith('_')) {
+    return { ok: false, error: 'cannot delete a generated artifact' }
+  }
+  const docsDir = path.join(feature.featureDir, 'docs')
+  const dest = path.join(docsDir, resolved.rel)
+  if (!isWithin(docsDir, dest)) return { ok: false, error: 'relPath must not escape the docs directory' }
+  if (!fs.existsSync(dest)) return { ok: false, error: 'doc not found' }
+  fs.rmSync(dest)
+  return { ok: true, relativePath: path.relative(feature.featureDir, dest) }
+}
+
 export function externalTestFileRules(): Record<string, unknown> {
   return {
     specs: 'Place Playwright specs directly under e2e/*.spec.ts.',
