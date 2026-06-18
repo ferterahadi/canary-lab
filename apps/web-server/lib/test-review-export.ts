@@ -1757,15 +1757,17 @@ const ASSERTION_HTML_SCRIPT = `
       else link.removeAttribute('aria-current')
     }
   }
-  const visible = new Map()
+  const visible = new Set()
   const observer = new IntersectionObserver((entries) => {
     for (const entry of entries) {
-      if (entry.isIntersecting) visible.set(entry.target.id, entry.boundingClientRect.top)
-      else visible.delete(entry.target.id)
+      if (entry.isIntersecting) visible.add(entry.target)
+      else visible.delete(entry.target)
     }
-    const active = [...visible.entries()].sort((a, b) => Math.abs(a[1]) - Math.abs(b[1]))[0]
-    if (active) setActive(active[0])
-  }, { rootMargin: '-20% 0px -65% 0px', threshold: [0, 0.1, 0.5] })
+    const active = [...visible]
+      .map((el) => ({ id: el.id, top: el.getBoundingClientRect().top }))
+      .sort((a, b) => Math.abs(a.top) - Math.abs(b.top))[0]
+    if (active) setActive(active.id)
+  }, { rootMargin: '-20% 0px -65% 0px', threshold: 0 })
   for (const section of sections) observer.observe(section)
   if (location.hash) setActive(location.hash.slice(1))
 })()

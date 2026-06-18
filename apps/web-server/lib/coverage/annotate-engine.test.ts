@@ -128,6 +128,16 @@ describe('normalizeRequirements (via parseAnnotateOutput) — non-string items',
     )
     expect(out![0].requirements).toEqual(['R1'])
   })
+
+  it('returns [] and drops mapping when requirements is not an array (line 86 branch)', () => {
+    // requirements: "R1" (a string, not an array) → normalizeRequirements returns [] →
+    // requirements.length=0 → the mapping is skipped entirely
+    const out = parseAnnotateOutput(
+      JSON.stringify({ mappings: [{ testName: 't', requirements: 'R1' }] }),
+      KNOWN,
+    )
+    expect(out).toEqual([])
+  })
 })
 
 describe('overlapScore — empty set guard (line 155 branch)', () => {

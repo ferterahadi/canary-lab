@@ -30,14 +30,16 @@ export function Stepper({ current }: { current: WizardStep }) {
           : 'var(--text-muted)'
         const pillBg =
           state === 'current' ? 'var(--accent)'
-          : state === 'done' ? 'var(--accent)'
+          : state === 'done' ? 'var(--accent-soft)'
           : 'transparent'
         const pillColor =
           state === 'current' ? '#ffffff'
-          : state === 'done' ? '#ffffff'
+          : state === 'done' ? 'var(--accent)'
           : 'var(--text-muted)'
         const pillBorder =
-          state === 'upcoming' ? '1px solid var(--border-default)' : '1px solid transparent'
+          state === 'upcoming' ? '1px solid var(--border-default)'
+          : state === 'done' ? '1px solid color-mix(in srgb, var(--accent) 40%, transparent)'
+          : '1px solid transparent'
         const isLast = i === STEPS.length - 1
         return (
           <li key={s.key} className="flex items-center gap-2">
@@ -64,7 +66,7 @@ export function Stepper({ current }: { current: WizardStep }) {
               <span
                 aria-hidden="true"
                 className="mx-1 inline-block h-px w-6"
-                style={{ background: 'var(--border-default)' }}
+                style={{ background: i < currentIdx ? 'var(--accent)' : 'var(--border-default)', opacity: i < currentIdx ? 0.5 : 1 }}
               />
             )}
           </li>

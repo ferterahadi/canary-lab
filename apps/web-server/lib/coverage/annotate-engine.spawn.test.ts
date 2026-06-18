@@ -452,6 +452,31 @@ describe('defaultRunAgent — close with non-null signal (line 323 ?? branch)', 
   })
 })
 
+describe('defaultRunAgent — Error thrown in catch (line 377 err.message branch)', () => {
+  it('uses err.message when an Error is thrown and onOutput is provided', async () => {
+    // Inject a runAgent that throws a real Error.
+    // proposeCoverageMappings catches → args.onOutput is provided → ternary evaluated
+    // → err instanceof Error is TRUE → err.message is used.
+    const outputChunks: string[] = []
+    const result = await proposeCoverageMappings(
+      {
+        requirements: REQS,
+        tests: [{ name: 'delete removes the todo item' }],
+        onOutput: (chunk) => outputChunks.push(chunk),
+      },
+      {
+        resolveAgents: () => ['claude'],
+        runAgent: async () => { throw new Error('agent exploded') },
+      },
+    )
+
+    // Exception caught → fell back to deterministic
+    expect(result[0].source).toBe('deterministic')
+    // onOutput received the err.message
+    expect(outputChunks.some((c) => c.includes('agent exploded'))).toBe(true)
+  })
+})
+
 describe('defaultRunAgent — non-Error thrown in catch (line 377 String(err) branch)', () => {
   it('uses String(err) when a non-Error value is thrown by the injected runAgent', async () => {
     // Use the injected runAgent hook to throw a non-Error (a plain string).

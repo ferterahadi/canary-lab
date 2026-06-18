@@ -1087,26 +1087,28 @@ describe('renderAgentSessionContext', () => {
   })
 
   it('falls back to ref.logPath when writeFullSessionTranscript fails (line 481 ?? branch)', () => {
-    // Create a valid log file.
-    const logFile = path.join(homeDir, 'fallback.jsonl')
+    // Create a valid log file whose sibling transcript cannot be written:
+    // name the log file so that its base name (stripped of .jsonl) is a path
+    // into a directory that exists as a FILE, making writeFileSync fail.
+    //
+    // file = <homeDir>/blocker.transcript.txt (created as a file)
+    // logPath = <homeDir>/blocker.transcript.txt.jsonl
+    // transcript write target = <homeDir>/blocker.transcript.txt.transcript.txt
+    // → that path is unwritable because homeDir/<blocker.transcript.txt> is already a file,
+    //   so the sub-path doesn't exist and the write fails.
+    //
+    // Actually simpler: create a directory at the transcript path location.
+    const transcriptPath = path.join(homeDir, 'fs-block.transcript.txt')
+    // Make the transcript target path into a DIRECTORY so writeFileSync throws EISDIR.
+    fs.mkdirSync(transcriptPath, { recursive: true })
+    const logFile = path.join(homeDir, 'fs-block.jsonl')
     fs.writeFileSync(logFile, JSON.stringify({
       type: 'assistant',
-      message: { content: [{ type: 'text', text: 'hello' }] },
+      message: { content: [{ type: 'text', text: 'hello fs-block' }] },
     }) + '\n')
-    // Spy on fs.writeFileSync to throw only for transcript writes so the ?? branch fires.
-    const writeSpy = vi.spyOn(fs, 'writeFileSync').mockImplementation((p: fs.PathOrFileDescriptor, ...args: unknown[]) => {
-      if (typeof p === 'string' && p.endsWith('.transcript.txt')) {
-        throw Object.assign(new Error('EROFS'), { code: 'EROFS' })
-      }
-      return (fs.writeFileSync as Function)(p, ...args)
-    })
-    try {
-      const rendered = renderAgentSessionContext({ agent: 'claude', sessionId: 'fb-sid', logPath: logFile })
-      // writeFullSessionTranscript fails → falls back to ref.logPath (line 481 ?? branch).
-      expect(rendered).toContain(logFile)
-    } finally {
-      writeSpy.mockRestore()
-    }
+    const rendered = renderAgentSessionContext({ agent: 'claude', sessionId: 'fs-block-sid', logPath: logFile })
+    // writeFullSessionTranscript fails (EISDIR) → falls back to ref.logPath (line 481 ?? branch).
+    expect(rendered).toContain(logFile)
   })
 })
 
@@ -1414,6 +1416,16 @@ describe('writeFullSessionTranscript', () => {
     expect(writeFullSessionTranscript(ref, [])).toBeNull()
   })
 
+  it('uses logPath as base when logPath does not end with .jsonl (line 513 else branch)', () => {
+    // The ternary `ref.logPath.endsWith('.jsonl') ? ... : ref.logPath` else branch:
+    // when logPath has no .jsonl extension, base = ref.logPath and transcript is written to
+    // <logPath>.transcript.txt.
+    const logNoExt = path.join(homeDir, 'session-log')
+    const events = [{ kind: 'user-message' as const, text: 'no-ext test' }]
+    const result = writeFullSessionTranscript({ agent: 'claude', sessionId: 'sid-ne', logPath: logNoExt }, events)
+    expect(result).toBe(`${logNoExt}.transcript.txt`)
+    if (result) expect(fs.existsSync(result)).toBe(true)
+  })
 })
 
 describe('writeFullSessionTranscript — catch branch (line 521)', () => {

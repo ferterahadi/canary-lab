@@ -47,6 +47,7 @@ export function ConfigureStep({
   const [repoAddError, setRepoAddError] = useState<string | null>(null)
   const [repoAdding, setRepoAdding] = useState(false)
   const [featureName, setFeatureName] = useState(initial?.featureName ?? '')
+  const [dragOver, setDragOver] = useState(false)
 
   // Flatten all repos across features into the multiselect list, deduped by
   // (name, localPath).
@@ -186,17 +187,23 @@ export function ConfigureStep({
               <div
                 className="mt-3 p-4 text-xs"
                 style={{
-                  border: '1px dashed var(--border-strong)',
-                  background: 'var(--bg-input)',
-                  color: 'var(--text-secondary)',
-                  borderRadius: 6,
+                  border: dragOver ? '1px dashed var(--accent)' : '1px dashed var(--border-strong)',
+                  background: dragOver ? 'var(--accent-soft)' : 'var(--bg-input)',
+                  color: dragOver ? 'var(--text-primary)' : 'var(--text-secondary)',
+                  borderRadius: 'var(--radius-md)',
+                  transition: 'border-color 120ms ease, background 120ms ease, color 120ms ease',
                 }}
                 onDragOver={(e) => {
                   e.preventDefault()
                   e.dataTransfer.dropEffect = 'copy'
+                  setDragOver(true)
+                }}
+                onDragLeave={(e) => {
+                  if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragOver(false)
                 }}
                 onDrop={(e) => {
                   e.preventDefault()
+                  setDragOver(false)
                   addFiles(e.dataTransfer.files)
                 }}
               >
@@ -225,7 +232,7 @@ export function ConfigureStep({
                       <li
                         key={`${file.name}:${i}`}
                         className="flex items-center gap-2 px-2 py-1 font-mono text-[11px]"
-                        style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)', borderRadius: 2 }}
+                        style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-sm)' }}
                       >
                         <span className="min-w-0 flex-1 truncate">{file.name}</span>
                         <span className="opacity-70">{formatBytes(file.size)}</span>
@@ -241,12 +248,12 @@ export function ConfigureStep({
                 )}
                 {extractError && <div className="mt-2 text-[11px]" style={{ color: 'var(--danger)' }}>{extractError}</div>}
               </div>
-              <label className="cl-frame-heading mt-4 block" htmlFor="prd">
+              <label className="cl-frame-heading mt-3 block" htmlFor="prd">
                 Additional notes only
               </label>
               <textarea
                 id="prd"
-                rows={10}
+                rows={4}
                 value={prdText}
                 onChange={(e) => setPrdText(e.target.value)}
                 placeholder="Paste extra requirements, links, user flows, acceptance criteria, or edge cases. Uploaded docs stay attached above and will not be copied here."
@@ -262,7 +269,7 @@ export function ConfigureStep({
 
               <div
                 className="mt-3 p-3"
-                style={{ border: '1px solid var(--border-subtle)', borderRadius: 2 }}
+                style={{ border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-sm)' }}
               >
                 <div className="cl-frame-heading">Add a repo folder</div>
                 <div className="mt-2">
@@ -313,7 +320,7 @@ export function ConfigureStep({
                           style={{
                             border: '1px solid var(--accent)',
                             background: 'var(--accent-soft)',
-                            borderRadius: 6,
+                            borderRadius: 'var(--radius-md)',
                           }}
                         >
                           <div className="flex items-center gap-2">
@@ -331,7 +338,7 @@ export function ConfigureStep({
 
               <div className="mt-3">
                 <div className="cl-frame-heading">Known from existing features</div>
-                <div className="mt-2 max-h-72 space-y-1 overflow-y-auto">
+                <div className="mt-2 max-h-72 space-y-1 overflow-y-auto" style={{ scrollbarGutter: 'stable' }}>
                   {allRepos.length === 0 ? (
                     <div className="text-xs">No existing feature repos yet. Add a folder above.</div>
                   ) : (
@@ -346,7 +353,7 @@ export function ConfigureStep({
                             border: `1px solid ${selected ? 'var(--accent)' : 'var(--border-default)'}`,
                             background: selected ? 'var(--accent-soft)' : 'var(--bg-input)',
                             color: 'var(--text-primary)',
-                            borderRadius: 6,
+                            borderRadius: 'var(--radius-md)',
                           }}
                         >
                           <input type="checkbox" checked={selected} onChange={() => toggleRepo(repo)} />
@@ -378,7 +385,6 @@ export function ConfigureStep({
                 onChange={(e) => setFeatureName(e.target.value)}
                 placeholder={featureNamePlaceholder}
                 className="cl-input mt-2 w-full px-2 py-1.5 text-xs"
-                style={{ fontFamily: 'var(--font-sans)' }}
               />
               {validation.errors.featureName && <div className="mt-1 text-xs" style={{ color: 'var(--danger)' }}>{validation.errors.featureName}</div>}
             </section>
@@ -515,7 +521,7 @@ function RepoBranchPicker({
       style={{
         border: '1px solid var(--border-subtle)',
         background: 'var(--bg-overlay)',
-        borderRadius: 6,
+        borderRadius: 'var(--radius-md)',
       }}
     >
       <div className="flex flex-wrap items-center gap-2">

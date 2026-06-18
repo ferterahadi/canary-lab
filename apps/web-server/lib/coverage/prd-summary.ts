@@ -378,7 +378,7 @@ function defaultRunAgent(agent: HealAgent, prompt: string, opts: RunAgentOpts): 
       idleTimer?.stop()
       cleanup()
       if (err) reject(err)
-      else resolve(output ?? '')
+      else resolve(output as string)
     }
     const abort = () => {
       child.kill('SIGTERM')

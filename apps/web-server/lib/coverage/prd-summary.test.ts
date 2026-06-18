@@ -45,6 +45,103 @@ describe('parsePrdSummaryOutput', () => {
     expect(parsePrdSummaryOutput('not json at all')).toBeNull()
     expect(parsePrdSummaryOutput('{"nope": 1}')).toBeNull()
   })
+
+  it('skips null/non-object items in requirements array (line 138 branch)', () => {
+    // A null element in the requirements array → `!raw || ...` TRUE → continue (skip)
+    const out = parsePrdSummaryOutput(
+      JSON.stringify({ requirements: [null, { title: 'A', text: 'a', pathTypes: ['happy'] }] }),
+    )
+    expect(out).toHaveLength(1)
+    expect(out![0].title).toBe('A')
+  })
+
+  it('skips items with non-string title or text (line 140 branch)', () => {
+    // title is a number → `typeof r.title !== 'string'` TRUE → continue (skip)
+    const out = parsePrdSummaryOutput(
+      JSON.stringify({ requirements: [{ title: 42, text: 'a', pathTypes: ['happy'] }] }),
+    )
+    expect(out).toEqual([])
+  })
+
+  it('normalizePathTypes returns happy when not an array (line 91 branch)', () => {
+    // pathTypes is a string, not an array → normalizePathTypes returns ['happy']
+    const out = parsePrdSummaryOutput(
+      JSON.stringify({ requirements: [{ title: 'A', text: 'a', pathTypes: 'happy' }] }),
+    )
+    expect(out![0].pathTypes).toEqual(['happy'])
+  })
+
+  it('normalizeLadder: skips null items in ladder array (line 108 branch)', () => {
+    // strictnessLadder contains null → `!item` TRUE → continue (skip)
+    const out = parsePrdSummaryOutput(
+      JSON.stringify({
+        requirements: [{
+          title: 'A', text: 'a', pathTypes: ['happy'],
+          strictnessLadder: [null, { tier: 1, description: 'log' }],
+        }],
+      }),
+    )
+    expect(out![0].strictnessLadder).toEqual([{ tier: 1, description: 'log' }])
+  })
+
+  it('normalizeLadder: skips items with invalid tier (line 111 branch)', () => {
+    // tier 99 is not in TIERS → `!(TIERS as number[]).includes(tier)` TRUE → continue
+    const out = parsePrdSummaryOutput(
+      JSON.stringify({
+        requirements: [{
+          title: 'A', text: 'a', pathTypes: ['happy'],
+          strictnessLadder: [{ tier: 99, description: 'invalid' }, { tier: 1, description: 'log' }],
+        }],
+      }),
+    )
+    expect(out![0].strictnessLadder).toEqual([{ tier: 1, description: 'log' }])
+  })
+
+  it('normalizeLadder: skips duplicate tiers (line 112 branch)', () => {
+    // Two rungs with tier=1 → second is a duplicate → seenTiers.has(tier) TRUE → skipped
+    const out = parsePrdSummaryOutput(
+      JSON.stringify({
+        requirements: [{
+          title: 'A', text: 'a', pathTypes: ['happy'],
+          strictnessLadder: [
+            { tier: 1, description: 'first log' },
+            { tier: 1, description: 'duplicate log' },
+          ],
+        }],
+      }),
+    )
+    expect(out![0].strictnessLadder).toHaveLength(1)
+    expect(out![0].strictnessLadder![0].description).toBe('first log')
+  })
+
+  it('normalizeLadder: skips items with empty description (line 113 branch)', () => {
+    // description is '   ' → trim() is '' → falsy → continue (skip)
+    const out = parsePrdSummaryOutput(
+      JSON.stringify({
+        requirements: [{
+          title: 'A', text: 'a', pathTypes: ['happy'],
+          strictnessLadder: [
+            { tier: 1, description: '   ' },  // empty after trim
+            { tier: 4, description: 'browser' },
+          ],
+        }],
+      }),
+    )
+    expect(out![0].strictnessLadder).toEqual([{ tier: 4, description: 'browser' }])
+  })
+
+  it('normalizeLadder: returns undefined when no valid rungs (line 118 branch)', () => {
+    // All ladder items have invalid tiers → rungs = [] → return undefined
+    const out = parsePrdSummaryOutput(
+      JSON.stringify({
+        requirements: [{
+          title: 'A', text: 'a', pathTypes: ['happy'],
+          strictnessLadder: [{ tier: 99, description: 'nope' }],
+        }],
+      }),
+    )
+    expect(out![0].strictnessLadder).toBeUndefined()
+  })
 })
 
 describe('reconcileRequirementIds — the id spine', () => {
@@ -182,6 +279,37 @@ describe('deterministicPrdRequirements', () => {
     expect(reqs).toHaveLength(1)
     expect(reqs[0].title).toBe('notes')
     expect(reqs[0].text).toBe('just a flat note')
+  })
+
+  it('uses relPath as text when doc has no headings and no non-empty first line (line 259 branch)', () => {
+    // Content is only whitespace/blank → firstBody is falsy → text = entry.relPath
+    const c = collection([{ relPath: 'empty.md', content: '   \n   ' }])
+    const reqs = deterministicPrdRequirements(c, [])
+    expect(reqs[0].text).toBe('empty.md')
+  })
+
+  it('uses title as body fallback when heading body is empty (line 271 branch)', () => {
+    // Heading with no body lines → body = '' → text = title (the heading text)
+    const c = collection([{ relPath: 'spec.md', content: '# Just a heading\n' }])
+    const reqs = deterministicPrdRequirements(c, [])
+    expect(reqs[0].title).toBe('Just a heading')
+    expect(reqs[0].text).toBe('Just a heading')
+  })
+
+  it('maxIdNumber handles non-Rn ids (line 161 false branch)', () => {
+    // Previous ids include a non-matching id like 'CUSTOM-1' → regex match fails →
+    // max stays 0 → fresh id starts at R1.
+    const previous: Requirement[] = [
+      { id: 'CUSTOM-1', title: 'Custom req', text: 'custom', pathTypes: ['happy'] },
+    ]
+    const parsed: ParsedRequirement[] = [
+      { title: 'New req', text: 'new', pathTypes: ['happy'] },
+    ]
+    const out = reconcileRequirementIds(previous, parsed)
+    // Fresh id starts at R1 since maxIdNumber('CUSTOM-1') returns 0
+    expect(out.find((r) => r.title === 'New req')?.id).toBe('R1')
+    // The old custom id is deprecated
+    expect(out.find((r) => r.id === 'CUSTOM-1')?.deprecated).toBe(true)
   })
 })
 

@@ -211,6 +211,33 @@ describe('buildExternalFailureDetail', () => {
       buildExternalFailureDetail({ detail: detailFor('run-1'), logsDir, failureId: 'nope' }),
     ).toBeNull()
   })
+
+  it('truncates errorText when the error file exceeds FAILURE_DETAIL_MAX_BYTES (line 369)', () => {
+    // safeReadCapped caps content at 24 * 1024 bytes. Write an error.txt that is
+    // larger than that limit → the truncation path at line 369 fires.
+    const runId = 'run-1'
+    const paths = buildRunPaths(runDirFor(logsDir, runId))
+    const failedSlug = 'checkout fails'
+    const errorDir = path.join(paths.failedDir, failedSlug)
+    fs.mkdirSync(errorDir, { recursive: true })
+
+    // Write > 24 * 1024 bytes of content.
+    const oversized = 'x'.repeat(24 * 1024 + 100)
+    fs.writeFileSync(path.join(errorDir, 'error.txt'), oversized)
+
+    const detail = buildExternalFailureDetail({
+      detail: detailFor(runId),
+      logsDir,
+      failureId: failedSlug,
+    })
+
+    expect(detail).not.toBeNull()
+    expect(detail?.errorText).toContain('[truncated')
+    // The first 24 * 1024 bytes are preserved; the tail is replaced by the truncation suffix.
+    expect(detail?.errorText?.startsWith('x'.repeat(24 * 1024))).toBe(true)
+    // The oversized tail ('x'.repeat(100)) is NOT in the output (it was cut off).
+    expect(detail?.errorText?.endsWith('x'.repeat(100))).toBe(false)
+  })
 })
 
 describe('buildExternalRunSnapshot', () => {

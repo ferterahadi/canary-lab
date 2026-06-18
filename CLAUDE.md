@@ -45,6 +45,10 @@ are easy to miss by hand. (Claude: via the Skill tool. Codex: skills load
 natively.)
 
 **Process / how to work**
+- `cl_reuse-shared-logic` — about to add code/UI that resembles something already
+  here (a 2nd agent spawn, pill/dialog, store, parser, timeout): reuse or extend
+  one shared helper/component/primitive instead of copy-pasting a variant. Lists
+  the existing primitives + the agent-process-runner duplication still owed.
 - `cl_scope-the-ask` — vague "improve/fix/polish X" request: look at the target
   first, ask one open question; never fire an options menu guessing the goal.
 - `cl_verify-changes` — which checks a change needs before claiming it works;
