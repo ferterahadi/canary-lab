@@ -15,6 +15,15 @@ function indexOf(...names: string[]): PassingRunIndex {
   return { byTestName }
 }
 
+/** Build an index with explicit `at` timestamps for pickMostRecent branch coverage. */
+function indexOfWithAt(entries: { name: string; at: string }[]): PassingRunIndex {
+  const byTestName = new Map<string, LastPassingRun>()
+  for (const { name, at } of entries) {
+    byTestName.set(name, { testName: name, runId: `run-${name}`, at })
+  }
+  return { byTestName }
+}
+
 describe('computeCoverageLedger — gap classes', () => {
   it('untested: requirement with no annotated test', () => {
     const ledger = computeCoverageLedger({
@@ -178,6 +187,68 @@ describe('computeCoverageLedger — tests + orphans', () => {
     })
     expect(ledger.orphanTestNames).toEqual(['aaa orphan', 'zzz orphan']) // sorted
     expect(ledger.totals.orphanTests).toBe(2)
+  })
+})
+
+describe('computeCoverageLedger — pickMostRecent (lines 51-53)', () => {
+  it('pickMostRecent TRUE branch: selects the run with the newer at timestamp', () => {
+    // Two verified tests for the same requirement; t2 has a newer at → should win.
+    const tests: CoverageTestInput[] = [
+      { name: 't1', requirements: ['R1'], pathTypes: ['happy'] },
+      { name: 't2', requirements: ['R1'], pathTypes: ['happy'] },
+    ]
+    const index = indexOfWithAt([
+      { name: 't1', at: '2026-01-01T00:00:00Z' },
+      { name: 't2', at: '2026-06-01T00:00:00Z' }, // newer → a > b is true for this run
+    ])
+    const ledger = computeCoverageLedger({ feature: 'f', requirements: [req('R1', ['happy'])], tests, index })
+    expect(ledger.requirements[0].lastPassingRun?.testName).toBe('t2')
+  })
+
+  it('pickMostRecent FALSE branch: keeps first when second is older', () => {
+    // t1 is newer; t2 is older → when processing t2, a > b is false, best stays t1.
+    const tests: CoverageTestInput[] = [
+      { name: 't1', requirements: ['R1'], pathTypes: ['happy'] },
+      { name: 't2', requirements: ['R1'], pathTypes: ['happy'] },
+    ]
+    const index = indexOfWithAt([
+      { name: 't1', at: '2026-06-01T00:00:00Z' }, // set first → becomes initial best
+      { name: 't2', at: '2026-01-01T00:00:00Z' }, // older → a > b is false, best unchanged
+    ])
+    const ledger = computeCoverageLedger({ feature: 'f', requirements: [req('R1', ['happy'])], tests, index })
+    expect(ledger.requirements[0].lastPassingRun?.testName).toBe('t1')
+  })
+
+  it('pickMostRecent ?? branches: falls back to empty string when at is undefined (lines 51-52)', () => {
+    // Two runs with no `at` field → a ?? '' and b ?? '' both resolve to '' →
+    // a > b is false, best stays as the first run encountered.
+    const tests: CoverageTestInput[] = [
+      { name: 't1', requirements: ['R1'], pathTypes: ['happy'] },
+      { name: 't2', requirements: ['R1'], pathTypes: ['happy'] },
+    ]
+    const index: PassingRunIndex = {
+      byTestName: new Map([
+        ['t1', { testName: 't1', runId: 'run-t1', env: 'local' }], // at is undefined
+        ['t2', { testName: 't2', runId: 'run-t2', env: 'local' }], // at is undefined
+      ]),
+    }
+    const ledger = computeCoverageLedger({ feature: 'f', requirements: [req('R1', ['happy'])], tests, index })
+    // With both at undefined, a ?? '' === b ?? '' === '' → a > b is false → first run wins
+    expect(ledger.requirements[0].lastPassingRun).toBeDefined()
+  })
+
+  it('falls back to DEFAULT_PATHS when requirement.pathTypes is empty (line 98 branch)', () => {
+    // req with [] pathTypes → impliedPaths = DEFAULT_PATHS (['happy'])
+    const tests: CoverageTestInput[] = [{ name: 't', requirements: ['R1'], pathTypes: ['happy'] }]
+    const ledger = computeCoverageLedger({
+      feature: 'f',
+      requirements: [req('R1', [])],
+      tests,
+      index: indexOf('t'),
+    })
+    // Default path is 'happy', test covers it → verified
+    expect(ledger.requirements[0].gapType).toBe('verified')
+    expect(ledger.requirements[0].pathCoverage).toEqual([{ path: 'happy', verified: true }])
   })
 })
 

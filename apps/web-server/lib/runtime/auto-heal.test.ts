@@ -18,6 +18,7 @@ import {
 } from './auto-heal'
 
 import { renderPersonalWikiMap } from '../../../../shared/runtime/personal-wiki'
+import { HEAL_MODELS } from '../agent-models'
 
 function writeRunManifest(runDir: string, body: Record<string, unknown>): void {
   fs.writeFileSync(path.join(runDir, 'manifest.json'), JSON.stringify({
@@ -215,6 +216,18 @@ describe('buildAgentSpawnCommand', () => {
     expect(cmd.includes('@')).toBe(false)
     // No `--` separator either when there's no positional to protect.
     expect(cmd.includes(' -- ')).toBe(false)
+  })
+
+  it('splices --model <id> when HEAL_MODELS has a pinned model for the agent (line 301 true branch)', () => {
+    // Temporarily pin a model so the modelFlag branch is exercised.
+    const prev = HEAL_MODELS.claude
+    try {
+      HEAL_MODELS.claude = 'claude-haiku-4-5'
+      const cmd = buildAgentSpawnCommand('claude', { sessionId: 'x' })
+      expect(cmd).toContain('--model "claude-haiku-4-5"')
+    } finally {
+      HEAL_MODELS.claude = prev
+    }
   })
 })
 

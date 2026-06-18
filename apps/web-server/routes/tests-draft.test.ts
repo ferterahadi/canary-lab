@@ -479,10 +479,9 @@ The test covers the login flow and asserts the dashboard greeting renders.
     await app.close()
   })
 
-  it('stores the plan agent session id when the formatter exposes one', async () => {
+  it('stores the pinned claude session id for the plan agent', async () => {
     const deps = makeDeps({
-      spawnPlanAgent: async () => `[[canary-lab:wizard-session agent=claude id=sess-plan-123]]
-<plan-output>[
+      spawnPlanAgent: async () => `<plan-output>[
   {"step":"Open","actions":["go"],"expectedOutcome":"visible"}
 ]</plan-output>`,
     })
@@ -499,8 +498,12 @@ The test covers the login flow and asserts the dashboard greeting renders.
     await new Promise((r) => setTimeout(r, 10))
     const rec = readDraft(logsDir, id)!
     expect(rec.status).toBe('plan-ready')
-    expect(rec.planAgentSessionId).toBe('sess-plan-123')
+    // claude pins its session id; the route resolves it without parsing the
+    // stream (no formatter marker anymore). It's a generated UUID, so assert
+    // shape, not an exact value, and that it matches the pre-spawn ref.
     expect(rec.planAgentSessionKind).toBe('claude')
+    expect(typeof rec.planAgentSessionId).toBe('string')
+    expect(rec.planAgentSessionId).toBeTruthy()
     await app.close()
   })
 
@@ -668,9 +671,8 @@ describe('POST /api/tests/draft/:id/accept-plan', () => {
   it('starts spec stage and returns 202', async () => {
     let specCalled = 0
     const deps = makeDeps({
-      spawnSpecAgent: async (input) => {
+      spawnSpecAgent: async () => {
         specCalled++
-        expect(input.resumeSessionId).toBeUndefined()
         return '<file path="feature.config.cjs">module.exports={};</file>'
       },
     })
@@ -706,8 +708,7 @@ describe('POST /api/tests/draft/:id/accept-plan', () => {
     ]
     const deps = makeDeps({
       pickAgent: () => ({ ok: true, agent: 'claude' }),
-      spawnPlanAgent: async () => `[[canary-lab:wizard-session agent=claude id=sess-plan-123]]
-<plan-output>[
+      spawnPlanAgent: async () => `<plan-output>[
   {"step":"Original","actions":["go"],"expectedOutcome":"visible"}
 ]</plan-output>`,
       spawnSpecAgent: async (input) => {
@@ -726,6 +727,10 @@ describe('POST /api/tests/draft/:id/accept-plan', () => {
     })
     const id = post.json().draftId
     await new Promise((r) => setTimeout(r, 10))
+    // claude pins its session id during planning; the spec stage resumes that
+    // exact (generated) id — not a hardcoded value.
+    const expectedResume = readDraft(logsDir, id)!.planAgentSessionId
+    expect(expectedResume).toBeTruthy()
     const r = await app.inject({
       method: 'POST',
       url: `/api/tests/draft/${id}/accept-plan`,
@@ -733,7 +738,7 @@ describe('POST /api/tests/draft/:id/accept-plan', () => {
     })
     expect(r.statusCode).toBe(202)
     await new Promise((r) => setTimeout(r, 10))
-    expect(specInput?.resumeSessionId).toBe('sess-plan-123')
+    expect(specInput?.resumeSessionId).toBe(expectedResume)
     expect(specInput?.plan).toEqual(editedPlan)
     await app.close()
   })

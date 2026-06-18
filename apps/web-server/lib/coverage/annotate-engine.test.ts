@@ -46,6 +46,97 @@ describe('parseAnnotateOutput', () => {
   it('returns null on garbage', () => {
     expect(parseAnnotateOutput('not json at all', KNOWN)).toBeNull()
   })
+
+  it('returns null when mappings is not an array (line 114 branch)', () => {
+    // `{ mappings: "string" }` → Array.isArray("string") is false → return null
+    expect(parseAnnotateOutput(JSON.stringify({ mappings: 'not an array' }), KNOWN)).toBeNull()
+  })
+
+  it('skips null/primitive items in the mappings array (line 117 branch)', () => {
+    // A null element in mappings → `!raw || typeof raw !== 'object'` TRUE → continue (skip)
+    const out = parseAnnotateOutput(
+      JSON.stringify({ mappings: [null, { testName: 't', requirements: ['R1'] }] }),
+      KNOWN,
+    )
+    expect(out).toHaveLength(1)
+    expect(out![0].testName).toBe('t')
+  })
+
+  it('skips a mapping with a non-string testName (line 119 false branch → empty string → line 120 continue)', () => {
+    // testName is a number → ternary FALSE → '' → !testName is true → continue (skip)
+    const out = parseAnnotateOutput(
+      JSON.stringify({ mappings: [{ testName: 42, requirements: ['R1'] }] }),
+      KNOWN,
+    )
+    expect(out).toEqual([])
+  })
+
+  it('sets rationale to undefined when it is an empty string (line 127 ||undefined branch)', () => {
+    // rationale is a string but trim() yields '' → `r.rationale.trim() || undefined` → undefined
+    const out = parseAnnotateOutput(
+      JSON.stringify({ mappings: [{ testName: 't', requirements: ['R1'], rationale: '   ' }] }),
+      KNOWN,
+    )
+    expect(out![0].rationale).toBeUndefined()
+  })
+
+  it('sets rationale to undefined when it is not a string (line 127 ternary false branch)', () => {
+    // rationale is a number → typeof !== 'string' → ternary FALSE → undefined
+    const out = parseAnnotateOutput(
+      JSON.stringify({ mappings: [{ testName: 't', requirements: ['R1'], rationale: 99 }] }),
+      KNOWN,
+    )
+    expect(out![0].rationale).toBeUndefined()
+  })
+})
+
+describe('normalizePathTypes (via parseAnnotateOutput) — edge cases', () => {
+  it('returns undefined when pathTypes is not an array (line 76 branch)', () => {
+    // pathTypes: "happy" → !Array.isArray("happy") TRUE → normalizePathTypes returns undefined
+    const out = parseAnnotateOutput(
+      JSON.stringify({ mappings: [{ testName: 't', requirements: ['R1'], pathTypes: 'happy' }] }),
+      KNOWN,
+    )
+    expect(out![0].pathTypes).toBeUndefined()
+  })
+
+  it('returns undefined when pathTypes items are all unknown strings (ordered.length=0 branch)', () => {
+    // pathTypes: ['unknown-path'] → none in PATH_TYPES → ordered = [] → return undefined
+    const out = parseAnnotateOutput(
+      JSON.stringify({ mappings: [{ testName: 't', requirements: ['R1'], pathTypes: ['unknown-path-type'] }] }),
+      KNOWN,
+    )
+    expect(out![0].pathTypes).toBeUndefined()
+  })
+
+  it('skips non-string items in pathTypes array (line 79 else branch)', () => {
+    // pathTypes: [42] → typeof 42 !== 'string' → item skipped → no valid paths → undefined
+    const out = parseAnnotateOutput(
+      JSON.stringify({ mappings: [{ testName: 't', requirements: ['R1'], pathTypes: [42] }] }),
+      KNOWN,
+    )
+    expect(out![0].pathTypes).toBeUndefined()
+  })
+})
+
+describe('normalizeRequirements (via parseAnnotateOutput) — non-string items', () => {
+  it('skips non-string entries in requirements array (line 89 else branch)', () => {
+    // requirements: [42, 'R1'] → typeof 42 !== 'string' → skipped; 'R1' is valid
+    const out = parseAnnotateOutput(
+      JSON.stringify({ mappings: [{ testName: 't', requirements: [42, 'R1'] }] }),
+      KNOWN,
+    )
+    expect(out![0].requirements).toEqual(['R1'])
+  })
+})
+
+describe('overlapScore — empty set guard (line 155 branch)', () => {
+  it('returns 0 and skips mapping when test has no tokens (both sets empty)', () => {
+    // Test name '' tokenizes to an empty set → overlapScore returns 0 immediately.
+    // With score=0, best stays null → deterministicMappings returns [].
+    const out = deterministicMappings(REQS, [{ name: '' }])
+    expect(out).toEqual([])
+  })
 })
 
 describe('deterministicMappings', () => {
@@ -68,6 +159,14 @@ describe('deterministicMappings', () => {
   it('never maps to a deprecated requirement', () => {
     const out = deterministicMappings(REQS, [{ name: 'old removed gone thing' }])
     expect(out.every((m) => m.requirements[0] !== 'R9')).toBe(true)
+  })
+
+  it('does not map when best score exists but is below a raised threshold (line 178 false branch)', () => {
+    // overlapScore = shared / min(|a|, |b|). With 3 tokens where only 1 matches,
+    // score ≈ 0.33 — above 0 (so best is non-null) but below threshold=0.99.
+    // Exercises the `best && best.score >= threshold` FALSE branch.
+    const out = deterministicMappings(REQS, [{ name: 'delete foobar bazqux' }], 0.99)
+    expect(out).toEqual([])
   })
 })
 
@@ -113,5 +212,28 @@ describe('buildAnnotatePrompt', () => {
     expect(prompt).toContain('"id": "R2"')
     expect(prompt).not.toContain('"id": "R9"')
     expect(prompt).toContain('creates a todo')
+  })
+
+  it('returns unknown {{key}} placeholders unchanged (return match branch)', () => {
+    // Pass a custom templatePath by writing a temp file with an unknown placeholder.
+    // This hits the `return match` else branch in the replace callback.
+    const os = require('os') as typeof import('os')
+    const fs = require('fs') as typeof import('fs')
+    const path = require('path') as typeof import('path')
+    const tmpFile = path.join(os.tmpdir(), `canary-annotate-tmpl-${Date.now()}.md`)
+    try {
+      fs.writeFileSync(tmpFile, '{{requirements}} {{unknown}}')
+      const prompt = buildAnnotatePrompt(REQS, [], tmpFile)
+      expect(prompt).toContain('{{unknown}}')
+    } finally {
+      fs.rmSync(tmpFile, { force: true })
+    }
+  })
+})
+
+describe('parseAnnotateOutput — invalid JSON catch branch', () => {
+  it('returns null when JSON.parse throws (invalid JSON with braces)', () => {
+    // `{invalid}` has { and } so start/end checks pass, but JSON.parse throws.
+    expect(parseAnnotateOutput('{invalid json}', KNOWN)).toBeNull()
   })
 })

@@ -81,6 +81,28 @@ describe('connectAgentSessionStream', () => {
     expect(FakeWebSocket.instances[0].url).toBe('ws://h/ws/draft/d-1/agent-session?stage=generating')
   })
 
+  it('opens /ws/coverage/jobs/:jobId/agent-session for coverage sources (line 59)', () => {
+    reset()
+    connectAgentSessionStream({
+      source: { kind: 'coverage', jobId: 'job/1' },
+      onEvent: () => {},
+      wsBase: 'ws://h',
+      WebSocketImpl: FakeWebSocket as unknown as typeof WebSocket,
+    })
+    expect(FakeWebSocket.instances[0].url).toBe('ws://h/ws/coverage/jobs/job%2F1/agent-session')
+  })
+
+  it('opens /ws/evaluation-exports/:taskId/agent-session for evaluation sources (line 62)', () => {
+    reset()
+    connectAgentSessionStream({
+      source: { kind: 'evaluation', taskId: 'task/1' },
+      onEvent: () => {},
+      wsBase: 'ws://h',
+      WebSocketImpl: FakeWebSocket as unknown as typeof WebSocket,
+    })
+    expect(FakeWebSocket.instances[0].url).toBe('ws://h/ws/evaluation-exports/task%2F1/agent-session')
+  })
+
   it('forwards event messages to onEvent', () => {
     reset()
     const onEvent = vi.fn()

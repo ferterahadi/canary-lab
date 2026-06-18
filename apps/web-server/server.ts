@@ -17,7 +17,6 @@ import { ExternalHealBroker } from './lib/external-heal-broker'
 import { registerMcpRoutes } from './mcp/server'
 import { paneStreamRoutes } from './ws/pane-stream'
 import { runsStreamRoutes } from './ws/runs-stream'
-import { draftAgentStreamRoutes } from './ws/draft-agent-stream'
 import { agentSessionStreamRoutes } from './ws/agent-session-stream'
 import { workspaceStreamRoutes } from './ws/workspace-stream'
 import { createRegistry, RunStore, type OrchestratorRegistry, type OrchestratorLike, type StartRunOutcome } from './lib/run-store'
@@ -168,7 +167,6 @@ export interface CreateServerResult {
   // SIGINT/SIGTERM so a crashed/killed run doesn't leave the user's `.env`
   // pointing at production.
   revertAllEnvsets: () => void
-  draftBrokers: Map<string, PaneBroker>
   cancelAllWizardAgents: () => void
 }
 
@@ -225,7 +223,6 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
   // would prevent `canary-lab ui` from exiting cleanly on SIGINT/SIGTERM.
   if (typeof externalHealWatchdog.unref === 'function') externalHealWatchdog.unref()
   const brokers = new Map<string, PaneBroker>()
-  const draftBrokers = new Map<string, PaneBroker>()
   const wizardAgents = new WizardAgentRegistry()
   // Tracks runs with an active envset so we can revert on run-complete or on
   // process termination. Cleared as runs finish.
@@ -333,26 +330,13 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
   await app.register(externalHealRoutes, externalHealDeps)
 
   // Wizard route deps. Production: real claude -p via node-pty + on-demand
-  // PaneBroker per draft so the WebSocket route can stream live agent output.
   const ptyFactory = opts.ptyFactory ?? realPtyFactory()
-  const ensureDraftBroker = (draftId: string): PaneBroker => {
-    let b = draftBrokers.get(draftId)
-    if (!b) {
-      b = new PaneBroker(Number.POSITIVE_INFINITY)
-      draftBrokers.set(draftId, b)
-    }
-    return b
-  }
 
   const productionTestsDraftDeps: TestsDraftRouteDeps = {
     logsDir,
     projectRoot: opts.projectRoot,
     workspaceEvents,
-    newDraftId: () => {
-      const id = generateRunId()
-      ensureDraftBroker(id)
-      return id
-    },
+    newDraftId: () => generateRunId(),
     pickAgent: () => {
       const projectConfig = loadProjectConfig(opts.projectRoot)
       if (projectConfig.healAgent === 'manual') {
@@ -372,14 +356,8 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
       }
       return { ok: true, agent }
     },
-    spawnPlanAgent: async (input) => {
-      const broker = ensureDraftBroker(input.draftId)
-      return makePlanAgentSpawner({ ptyFactory, broker, registry: wizardAgents })(input)
-    },
-    spawnSpecAgent: async (input) => {
-      const broker = ensureDraftBroker(input.draftId)
-      return makeSpecAgentSpawner({ ptyFactory, broker, registry: wizardAgents })(input)
-    },
+    spawnPlanAgent: (input) => makePlanAgentSpawner({ registry: wizardAgents })(input),
+    spawnSpecAgent: (input) => makeSpecAgentSpawner({ registry: wizardAgents })(input),
     cancelGeneration: (draftId: string) => wizardAgents.cancel(draftId),
   }
 
@@ -1236,9 +1214,6 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
   await app.register(portifyStreamRoutes, { store: portifyStore })
 
   await app.register(workspaceStreamRoutes, { events: workspaceEvents })
-  await app.register(draftAgentStreamRoutes, {
-    brokerForDraft: (draftId) => draftBrokers.get(draftId) ?? null,
-  })
   await app.register(agentSessionStreamRoutes, {
     store: runStore,
     logsDir,
@@ -1375,8 +1350,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
 
   const cancelAllWizardAgents = (): void => {
     wizardAgents.cancelAll()
-    for (const broker of draftBrokers.values()) broker.destroy()
   }
 
-  return { app, registry, runStore, brokers, draftBrokers, revertAllEnvsets, cancelAllWizardAgents }
+  return { app, registry, runStore, brokers, revertAllEnvsets, cancelAllWizardAgents }
 }

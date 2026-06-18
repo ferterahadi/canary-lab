@@ -1,5 +1,7 @@
 Rewrite the human-facing text slots from this generated evaluation report into clear, product-accessible English.
 
+How to work: work as an agent, not a one-shot. Before rewriting, use your tools to **read the test spec files and any artifacts** named in the evidence below, so each rewrite reflects the real behavior rather than guessing from the slot text. Read first, then return the JSON. This is read-only analysis: do not edit any file.
+
 Rules:
 - Do not invent behavior, outcomes, business context, or missing pass/fail data.
 - For report titles, summaries, test titles, and flowchart labels, describe the user-visible or business behavior in plain English instead of copying implementation names.

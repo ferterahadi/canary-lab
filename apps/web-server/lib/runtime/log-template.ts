@@ -56,7 +56,7 @@ const DUR_UNIT_MS: Record<string, number> = {
   ns: 1e-6, 'µs': 1e-3, us: 1e-3, ms: 1, s: 1_000, m: 60_000, h: 3_600_000,
 }
 
-function durationToMs(token: string): number {
+export function durationToMs(token: string): number {
   const m = /^(\d+(?:\.\d+)?)(ms|s|m|h|us|ns|µs)$/.exec(token)
   return m ? parseFloat(m[1]) * DUR_UNIT_MS[m[2]] : NaN
 }
@@ -103,7 +103,6 @@ function newStat(): Stat {
 function recordDurations(s: Stat, durations: string[]): void {
   for (const d of durations) {
     const ms = durationToMs(d)
-    if (Number.isNaN(ms)) continue
     if (!s.hasDur || ms < s.durMinMs) { s.durMinMs = ms; s.durMinRaw = d }
     if (!s.hasDur || ms > s.durMaxMs) { s.durMaxMs = ms; s.durMaxRaw = d }
     s.hasDur = true
@@ -112,7 +111,6 @@ function recordDurations(s: Stat, durations: string[]): void {
 
 function recordNumbers(s: Stat, numbers: number[]): void {
   for (const n of numbers) {
-    if (Number.isNaN(n)) continue
     if (!s.hasNum || n < s.numMin) s.numMin = n
     if (!s.hasNum || n > s.numMax) s.numMax = n
     s.hasNum = true

@@ -4,6 +4,7 @@ import os from 'os'
 import path from 'path'
 import { CoverageJobRunStore } from './store'
 import { startCoverageJob, CoverageJobConflictError } from './runner'
+import type { CoverageJobStore } from './store'
 
 let tmpDir: string
 let store: CoverageJobRunStore
@@ -128,5 +129,136 @@ describe('CoverageJobRunStore.reconcileInterrupted', () => {
     store.reconcileInterrupted(now)
     expect(store.get('j1')?.status).toBe('aborted')
     expect(store.activeFor('f', 'summary')).toBeNull() // lock freed
+  })
+})
+
+describe('startCoverageJob — non-Error throw paths', () => {
+  it('records String(err) as error message when a non-Error is thrown from runEngine', async () => {
+    const { manifest, completion } = startCoverageJob(
+      { featuresDir: 'f', logsDir: tmpDir, feature: 'checkout', kind: 'coverage' },
+      {
+        store,
+        now,
+        newJobId: ids,
+        runEngine: async () => { throw 'string-error-value' as unknown as Error },
+      },
+    )
+    await completion
+    const failed = store.get(manifest.jobId)!
+    expect(failed.status).toBe('failed')
+    expect(failed.error).toBe('string-error-value')
+  })
+
+  it('records String(chainErr) in the log when the chain throws a non-Error', async () => {
+    // Wrap the real store so that activeFor throws a non-Error on the second call
+    // (the first call is the single-flight guard for the summary job; the second
+    // is made inside startCoverageJob for the chained coverage job).
+    let activeForCalls = 0
+    const wrappedStore: CoverageJobStore = {
+      list: () => store.list(),
+      get: (id) => store.get(id),
+      save: (m) => store.save(m),
+      remove: (id) => store.remove(id),
+      reconcileInterrupted: (fn) => store.reconcileInterrupted(fn),
+      onEvent: (fn) => store.onEvent(fn),
+      offEvent: (fn) => store.offEvent(fn),
+      activeFor: (feature, kind) => {
+        activeForCalls += 1
+        // Second call is from the chained startCoverageJob — throw a non-Error.
+        if (activeForCalls >= 2) throw 'non-error-chain-value'
+        return store.activeFor(feature, kind)
+      },
+    }
+
+    const { manifest, completion } = startCoverageJob(
+      { featuresDir: 'f', logsDir: tmpDir, feature: 'checkout', kind: 'summary' },
+      {
+        store: wrappedStore,
+        now,
+        newJobId: ids,
+        regenerate: async ({ onOutput }) => {
+          onOutput?.('done\n')
+          return {
+            feature: 'checkout',
+            summary: { requirements: [], docsHash: 'h', sourceDocs: [], generatedAt: now() },
+            written: [],
+          }
+        },
+        runEngine: async () => ({ feature: 'checkout', applied: [], orphanTestsBefore: [], ledger: {} as never }),
+      },
+    )
+    await completion
+    const summary = store.get(manifest.jobId)!
+    expect(summary.status).toBe('done')
+    expect(summary.log).toContain('coverage not started')
+    expect(summary.log).toContain('non-error-chain-value')
+  })
+})
+
+describe('startCoverageJob — onAgentSession + chain-conflict path', () => {
+  it('records sessionRef when onAgentSession fires (R17)', async () => {
+    const { manifest, completion } = startCoverageJob(
+      { featuresDir: 'f', logsDir: tmpDir, feature: 'checkout', kind: 'coverage' },
+      {
+        store,
+        now,
+        newJobId: ids,
+        runEngine: async ({ onAgentSession }) => {
+          onAgentSession?.({ agent: 'claude', sessionId: 's1' })
+          return { feature: 'checkout', applied: [], orphanTestsBefore: [], ledger: {} as never }
+        },
+      },
+    )
+    await completion
+    const saved = store.get(manifest.jobId)!
+    expect(saved.sessionRef).toEqual({ agent: 'claude', sessionId: 's1' })
+  })
+
+  it('logs a message but continues when the coverage chain job already runs (CoverageJobConflictError)', async () => {
+    // Hold a coverage slot open so the summary→chain attempt hits a conflict.
+    let releaseCoverage!: () => void
+    const coverageGate = new Promise<void>((r) => { releaseCoverage = r })
+
+    // Start a standalone coverage job that never finishes (holds the single-flight slot).
+    const blocker = startCoverageJob(
+      { featuresDir: 'f', logsDir: tmpDir, feature: 'checkout', kind: 'coverage' },
+      {
+        store,
+        now,
+        newJobId: ids,
+        runEngine: async () => { await coverageGate; return { feature: 'checkout', applied: [], orphanTestsBefore: [], ledger: {} as never } },
+      },
+    )
+
+    // Now start a summary job for the same feature — it will try to chain a
+    // coverage job after finishing, but the slot is occupied → CoverageJobConflictError.
+    const { manifest: summaryManifest, completion: summaryCompletion } = startCoverageJob(
+      { featuresDir: 'f', logsDir: tmpDir, feature: 'checkout', kind: 'summary' },
+      {
+        store,
+        now,
+        newJobId: ids,
+        regenerate: async ({ onOutput }) => {
+          onOutput?.('done\n')
+          return { feature: 'checkout', summary: { requirements: [{ id: 'R1', title: 't', text: 'x', pathTypes: ['happy'] }], docsHash: 'h', sourceDocs: [], generatedAt: now() }, written: [] }
+        },
+        // The chained coverage job is started via the same deps object; the
+        // runEngine stub is not called because the slot is occupied.
+        runEngine: async () => { throw new Error('should not be called') },
+      },
+    )
+
+    await summaryCompletion
+
+    const summary = store.get(summaryManifest.jobId)!
+    expect(summary.status).toBe('done')
+    // The chain was skipped — no chainedJobId recorded.
+    expect(summary.chainedJobId).toBeUndefined()
+    // Log must mention the skip.
+    expect(summary.log).toContain('coverage not started')
+
+    // Clean up the blocker.
+    releaseCoverage()
+    await blocker.completion
   })
 })

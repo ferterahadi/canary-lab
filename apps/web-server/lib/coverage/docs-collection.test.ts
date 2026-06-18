@@ -113,4 +113,12 @@ describe('readDocsCollection', () => {
     const after = readDocsCollection(featureDir).docsHash
     expect(after).not.toBe(before)
   })
+
+  it('skips entries whose name ends in .md but are directories (line 48 branch)', () => {
+    // A directory named "test.md" passes the .md check but fails isFile() → continue.
+    fs.mkdirSync(path.join(featureDir, 'docs', 'test.md'))
+    writeDoc('real.md', 'real content')
+    const collection = readDocsCollection(featureDir)
+    expect(collection.entries.map((e) => e.relPath)).toEqual(['real.md'])
+  })
 })

@@ -1,5 +1,20 @@
 import { describe, it, expect } from 'vitest'
-import { lineTemplate, compressLogByTemplate } from './log-template'
+import { lineTemplate, compressLogByTemplate, durationToMs } from './log-template'
+
+describe('durationToMs', () => {
+  it('returns NaN when the token does not match the duration regex (line 61 NaN branch)', () => {
+    expect(Number.isNaN(durationToMs('notaduration'))).toBe(true)
+    expect(Number.isNaN(durationToMs(''))).toBe(true)
+    expect(Number.isNaN(durationToMs('123'))).toBe(true) // no unit
+  })
+
+  it('parses known units correctly', () => {
+    expect(durationToMs('1ms')).toBe(1)
+    expect(durationToMs('1s')).toBe(1000)
+    expect(durationToMs('1m')).toBe(60000)
+    expect(durationToMs('500µs')).toBeCloseTo(0.5)
+  })
+})
 
 describe('lineTemplate', () => {
   it('masks timestamps, durations, and bare numbers', () => {
@@ -96,5 +111,16 @@ describe('compressLogByTemplate', () => {
     // attempt-number range.
     expect(text).toBe(['waiting for db (attempt 1)  (×200; 1–200)', 'connected'].join('\n'))
     expect(collapsedLines).toBe(199)
+  })
+
+  it('numMax stays unchanged when a later value is smaller (line 117 FALSE branch)', () => {
+    // tick 3 → first, numMin=numMax=3
+    // tick 1 → 1 < 3 → numMin=1; 1 > 3 is FALSE → numMax stays 3
+    // tick 2 → 2 < 1 is false → numMin stays 1; 2 > 3 is FALSE → numMax stays 3
+    // After minRepeat=3: range should be shown as 1–3
+    const log = 'tick 3\ntick 1\ntick 2'
+    const { text } = compressLogByTemplate(log, 3)
+    expect(text).toContain('×3')
+    expect(text).toContain('1–3')
   })
 })

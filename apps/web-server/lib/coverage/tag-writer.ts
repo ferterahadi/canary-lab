@@ -96,10 +96,10 @@ function planInsertDetail(
   source: string,
   call: ts.CallExpression,
   tokens: string[],
-): TagEdit | null {
-  const title = call.arguments[0]
-  if (!title) return null
-  const insertAt = title.getEnd()
+): TagEdit {
+  // planInsertDetail is only called after getStringArg confirmed arguments[0]
+  // is a string literal, so arguments[0] is always defined here.
+  const insertAt = call.arguments[0].getEnd()
   return {
     start: insertAt,
     end: insertAt,

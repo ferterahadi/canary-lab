@@ -138,6 +138,23 @@ describe('reconcileRequirementIds — the id spine', () => {
     expect(ids).toContain('R1')
     expect(ids).toContain('R3') // second login got fresh id beyond max
   })
+
+  it('skips duplicate normalized titles in previous when building the title map (line 183 false branch)', () => {
+    // Two previous requirements with the same normalized title → the second iteration
+    // hits the FALSE branch of `if (!prevByTitle.has(key))` (already set, so skip).
+    const dupPrevious: Requirement[] = [
+      { id: 'R1', title: 'Login Feature', text: 'log in', pathTypes: ['happy'] },
+      { id: 'R2', title: 'Login Feature', text: 'also login', pathTypes: ['happy'] }, // same normalized title
+    ]
+    const parsed: ParsedRequirement[] = [
+      { title: 'Login Feature', text: 'updated', pathTypes: ['happy'] },
+    ]
+    const out = reconcileRequirementIds(dupPrevious, parsed)
+    // Title match resolves to R1 (the first one stored under that normalized key)
+    expect(out.find((r) => r.id === 'R1')?.title).toBe('Login Feature')
+    // R2 survives as deprecated since it wasn't matched
+    expect(out.find((r) => r.id === 'R2')?.deprecated).toBe(true)
+  })
 })
 
 describe('deterministicPrdRequirements', () => {
@@ -174,6 +191,29 @@ describe('buildPrdSummaryPrompt', () => {
     const prompt = buildPrdSummaryPrompt(c, [{ id: 'R1', title: 'X', text: 'b', pathTypes: ['happy'] }])
     expect(prompt).toContain('spec.md')
     expect(prompt).toContain('"id": "R1"')
+  })
+
+  it('returns unknown {{key}} placeholders unchanged (return match branch)', () => {
+    // Pass a custom templatePath with an unknown placeholder to hit `return match`.
+    const os = require('os') as typeof import('os')
+    const fs = require('fs') as typeof import('fs')
+    const path = require('path') as typeof import('path')
+    const tmpFile = path.join(os.tmpdir(), `canary-prd-tmpl-${Date.now()}.md`)
+    try {
+      fs.writeFileSync(tmpFile, '{{docs}} {{unknown}}')
+      const c = collection([{ relPath: 'spec.md', content: 'content' }])
+      const prompt = buildPrdSummaryPrompt(c, [], tmpFile)
+      expect(prompt).toContain('{{unknown}}')
+    } finally {
+      fs.rmSync(tmpFile, { force: true })
+    }
+  })
+})
+
+describe('parsePrdSummaryOutput — invalid JSON catch branch', () => {
+  it('returns null when JSON.parse throws (invalid JSON with braces)', () => {
+    // `{invalid}` has { and } so start/end checks pass, but JSON.parse throws.
+    expect(parsePrdSummaryOutput('{invalid json}')).toBeNull()
   })
 })
 

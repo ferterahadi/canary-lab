@@ -207,4 +207,14 @@ describe('evaluation-export-store', () => {
       expect(readEvaluationExportTask(tmpDir, `eval-${clientKind}`)?.clientKind).toBe(clientKind)
     }
   })
+
+  it('rejects a persisted record with sessionRef: null (isSessionRef line 235 falsy branch)', () => {
+    // Write a task.json directly with sessionRef: null to exercise isSessionRef(null) → false.
+    const taskId = 'eval-bad-ref'
+    const p = evaluationExportTaskPaths(tmpDir, taskId)!
+    fs.mkdirSync(p.taskDir, { recursive: true })
+    fs.writeFileSync(p.taskJson, JSON.stringify({ ...makeRecord({ taskId }), sessionRef: null }), 'utf8')
+    // normalizeTaskRecord calls isSessionRef(null) → false → returns null
+    expect(readEvaluationExportTask(tmpDir, taskId)).toBeNull()
+  })
 })

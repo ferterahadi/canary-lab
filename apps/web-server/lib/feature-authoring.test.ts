@@ -9,6 +9,7 @@ import {
   checkoutFeatureRepoBranch,
   createFeatureSkeleton,
   deleteFeature,
+  deleteFeatureDoc,
   envsetSchema,
   externalTestFileRules,
   getFeatureEnvsetSummary,
@@ -515,5 +516,50 @@ describe('writeFeatureDoc', () => {
     expect(writeFeatureDoc(ctx(), { feature: 'line_integration', relPath: '../escape.md', content: 'x' }))
       .toEqual({ ok: false, error: 'relPath must not escape the docs directory' })
     expect(fs.existsSync(path.join(featureDir, 'escape.md'))).toBe(false)
+  })
+})
+
+describe('deleteFeatureDoc', () => {
+  it('deletes an existing doc and reports its relative path', () => {
+    const featureDir = writeFeatureConfig('del_test')
+    const docsDir = path.join(featureDir, 'docs')
+    fs.mkdirSync(docsDir, { recursive: true })
+    fs.writeFileSync(path.join(docsDir, 'notes.md'), 'content')
+    const res = deleteFeatureDoc(ctx(), { feature: 'del_test', relPath: 'notes.md' })
+    expect(res).toEqual({ ok: true, relativePath: path.join('docs', 'notes.md') })
+    expect(fs.existsSync(path.join(docsDir, 'notes.md'))).toBe(false)
+  })
+
+  it('returns feature-not-found when the feature does not exist (line 311)', () => {
+    expect(deleteFeatureDoc(ctx(), { feature: 'no-such-feature', relPath: 'notes.md' }))
+      .toEqual({ ok: false, error: 'feature not found' })
+  })
+
+  it('rejects an invalid relPath via resolveDocRelPath (line 313)', () => {
+    writeFeatureConfig('del_test2')
+    // Absolute paths fail resolveDocRelPath → resolved.ok === false
+    const res = deleteFeatureDoc(ctx(), { feature: 'del_test2', relPath: '/etc/passwd.md' })
+    expect(res).toMatchObject({ ok: false })
+  })
+
+  it('refuses to delete a _-prefixed generated artifact (line 314-316)', () => {
+    const featureDir = writeFeatureConfig('del_test3')
+    const docsDir = path.join(featureDir, 'docs')
+    fs.mkdirSync(docsDir, { recursive: true })
+    fs.writeFileSync(path.join(docsDir, '_prd-summary.md'), 'generated')
+    expect(deleteFeatureDoc(ctx(), { feature: 'del_test3', relPath: '_prd-summary.md' }))
+      .toEqual({ ok: false, error: 'cannot delete a generated artifact' })
+  })
+
+  it('rejects a path-traversal attempt (line 319)', () => {
+    writeFeatureConfig('del_test4')
+    expect(deleteFeatureDoc(ctx(), { feature: 'del_test4', relPath: '../escape.md' }))
+      .toEqual({ ok: false, error: 'relPath must not escape the docs directory' })
+  })
+
+  it('returns doc-not-found when the file does not exist (line 320)', () => {
+    writeFeatureConfig('del_test5')
+    expect(deleteFeatureDoc(ctx(), { feature: 'del_test5', relPath: 'missing.md' }))
+      .toEqual({ ok: false, error: 'doc not found' })
   })
 })

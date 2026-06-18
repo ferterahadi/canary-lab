@@ -33,6 +33,14 @@ the PREVIOUS requirements (with ids) when regenerating.
 
 {{previousRequirements}}
 
+## How to work
+
+Work as an agent, not a one-shot. The documents are summarized inline below, but
+use your tools to **read the full source files** at the `relPath`s shown — and any
+specs, configs, or code they reference — before extracting requirements. Ground
+every requirement in what you actually read. This is read-only analysis: do not
+edit any file.
+
 ## Source documents
 
 {{docs}}
