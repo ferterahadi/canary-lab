@@ -33,8 +33,46 @@ copied to `dist/templates/` during build.
   table.
 - [docs/PRD.md](docs/PRD.md) — product intent, non-goals, and quality bars
   (reverse-engineered; the tie-breaker for product-questionable changes).
-- `.claude/skills/cl_*` — contributor workflows (MCP tools, agent-surface sync,
-  verification ladder, sample features, release).
 - [docs/GUIDE.md](docs/GUIDE.md) / [docs/FEATURES.md](docs/FEATURES.md) /
   [docs/COMMANDS.md](docs/COMMANDS.md) — user-facing docs (env switching incl.
   remote-URL testing, run output, CLI reference).
+
+## Skills — `.claude/skills/cl_*` (read before you touch the matching area)
+
+These encode the project's conventions and taste. Whenever a task matches one,
+invoke the skill **before** acting — they hold invariants and design rules that
+are easy to miss by hand. (Claude: via the Skill tool. Codex: skills load
+natively.)
+
+**Process / how to work**
+- `cl_scope-the-ask` — vague "improve/fix/polish X" request: look at the target
+  first, ask one open question; never fire an options menu guessing the goal.
+- `cl_verify-changes` — which checks a change needs before claiming it works;
+  the canary-apply hand-off; coverage/template/stale-server gotchas.
+- `cl_release` — publishing the package (`npm run publish:package`).
+
+**Run loop & MCP layer**
+- `cl_add-mcp-tool` — add/remove/rename/move a tool in
+  `apps/web-server/mcp/tools.ts`, or fix tool-count / unknown-tool smoke fails.
+- `cl_sync-agent-surfaces` — after changing run-loop semantics (collision,
+  queue, boot sessions, heal claims, signal/rerun, pass counts): keep MCP
+  instructions, tool results, and shipped `SKILL.md` files in agreement.
+- `cl_add-sample-feature` — editing sample features under `templates/project/`
+  (feature.config.cjs, envsets, e2e specs); template changes ship via build.
+- `cl_async-task-ux` — adding a long-running background task (coverage,
+  portify, gen): the non-blocking · persistent · recoverable · re-openable ·
+  single-flight contract and the file-backed store pattern.
+
+**Web UI (`apps/web`) — design language & live behavior**
+- `cl_ui-design-philosophy` — building/restyling any panel, dialog, pill, card,
+  or full-screen view: reuse the token system and layout precedents; no new
+  component library; meaning carries the style.
+- `cl_design-feedback` — critiquing a UI (screenshot, live screen, Figma,
+  component): ground every finding in the component source + tokens before
+  voicing it; don't flag a shared primitive or intentional choice as a defect.
+- `cl_live-state-sync` — a UI that must react in real time to a backend state
+  change, or anything that "only updates after refresh": picking
+  broadcast-push vs task-scoped stream vs refetch.
+- `cl_surfacing-agent-work` — any UI showing an agent's progress/output (live
+  or historical): know what the agent actually produces before designing the
+  viewer.

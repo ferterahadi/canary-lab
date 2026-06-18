@@ -1,6 +1,7 @@
 import fs from 'fs'
 import path from 'path'
 import type { PaneBroker } from './pane-broker'
+import { modelArgs } from './agent-models'
 
 // Pure helpers for the Add Test wizard's plan / spec agents:
 //
@@ -132,24 +133,26 @@ export function createTeeSink(opts: {
 // `sessionId` pins the JSONL log path written by the claude CLI to
 // `~/.claude/projects/<encoded-cwd>/<sessionId>.jsonl` so the live structured
 // session WS can tail it from the moment of spawn.
-export function buildClaudeArgs(prompt: string, sessionId?: string): string[] {
+export function buildClaudeArgs(prompt: string, sessionId?: string, model?: string | null): string[] {
   const base = [
     '--dangerously-skip-permissions',
     '--output-format=stream-json',
     '--include-partial-messages',
     '--verbose',
+    ...modelArgs(model ?? null),
   ]
   if (sessionId) base.push('--session-id', sessionId)
   base.push('-p', prompt)
   return base
 }
 
-export function buildClaudeResumeArgs(prompt: string, sessionId: string): string[] {
+export function buildClaudeResumeArgs(prompt: string, sessionId: string, model?: string | null): string[] {
   return [
     '--dangerously-skip-permissions',
     '--output-format=stream-json',
     '--include-partial-messages',
     '--verbose',
+    ...modelArgs(model ?? null),
     '--resume',
     sessionId,
     '-p',
@@ -165,36 +168,36 @@ export function shellQuote(arg: string): string {
   return `'${arg.replace(/'/g, `'\\''`)}'`
 }
 
-export function buildClaudeCommand(prompt: string, claudeBin = 'claude', resumeSessionId?: string, pinSessionId?: string): string {
+export function buildClaudeCommand(prompt: string, claudeBin = 'claude', resumeSessionId?: string, pinSessionId?: string, model?: string | null): string {
   const args = resumeSessionId
-    ? buildClaudeResumeArgs(prompt, resumeSessionId)
-    : buildClaudeArgs(prompt, pinSessionId)
+    ? buildClaudeResumeArgs(prompt, resumeSessionId, model)
+    : buildClaudeArgs(prompt, pinSessionId, model)
   return `set -o pipefail; ${claudeBin} ${args.map(shellQuote).join(' ')} | node ${shellQuote(WIZARD_CLAUDE_FORMATTER_FILE)}`
 }
 
-export function buildCodexArgs(prompt: string): string[] {
-  return ['exec', '--skip-git-repo-check', '--full-auto', '--json', prompt]
+export function buildCodexArgs(prompt: string, model?: string | null): string[] {
+  return ['exec', '--skip-git-repo-check', '--full-auto', ...modelArgs(model ?? null), '--json', prompt]
 }
 
-export function buildCodexResumeArgs(prompt: string, sessionId: string): string[] {
-  return ['exec', 'resume', '--skip-git-repo-check', '--full-auto', '--json', sessionId, prompt]
+export function buildCodexResumeArgs(prompt: string, sessionId: string, model?: string | null): string[] {
+  return ['exec', 'resume', '--skip-git-repo-check', '--full-auto', ...modelArgs(model ?? null), '--json', sessionId, prompt]
 }
 
-export function buildCodexCommand(prompt: string, codexBin = 'codex', resumeSessionId?: string): string {
+export function buildCodexCommand(prompt: string, codexBin = 'codex', resumeSessionId?: string, model?: string | null): string {
   const args = resumeSessionId
-    ? buildCodexResumeArgs(prompt, resumeSessionId)
-    : buildCodexArgs(prompt)
+    ? buildCodexResumeArgs(prompt, resumeSessionId, model)
+    : buildCodexArgs(prompt, model)
   return `set -o pipefail; ${codexBin} ${args.map(shellQuote).join(' ')} | node ${shellQuote(WIZARD_CODEX_FORMATTER_FILE)}`
 }
 
 export function buildWizardCommand(
   agent: WizardAgentKind,
   prompt: string,
-  bins: { claudeBin?: string; codexBin?: string; resumeSessionId?: string; pinSessionId?: string } = {},
+  bins: { claudeBin?: string; codexBin?: string; resumeSessionId?: string; pinSessionId?: string; model?: string | null } = {},
 ): string {
   return agent === 'claude'
-    ? buildClaudeCommand(prompt, bins.claudeBin, bins.resumeSessionId, bins.pinSessionId)
-    : buildCodexCommand(prompt, bins.codexBin, bins.resumeSessionId)
+    ? buildClaudeCommand(prompt, bins.claudeBin, bins.resumeSessionId, bins.pinSessionId, bins.model)
+    : buildCodexCommand(prompt, bins.codexBin, bins.resumeSessionId, bins.model)
 }
 
 export function paneIdForDraft(draftId: string, stage: WizardAgentStage = 'planning'): string {

@@ -16,6 +16,7 @@ import {
   loadTemplate,
   paneIdForDraft,
 } from './wizard-agent-spawner'
+import { WIZARD_PLAN_MODELS, WIZARD_SPEC_MODELS, modelFor } from './agent-models'
 
 // Pty driver for the wizard agents. Excluded from coverage in
 // vitest.config.ts — the pure helpers in `wizard-agent-spawner.ts` are what
@@ -133,6 +134,7 @@ export function spawnPlanAgent(
       claudeBin: deps.claudeBin,
       codexBin: deps.codexBin,
       pinSessionId: input.pinSessionId,
+      model: modelFor(WIZARD_PLAN_MODELS, input.agent),
     })
     return runAgent({
       draftId: input.draftId,
@@ -165,6 +167,7 @@ export function spawnSpecAgent(
       codexBin: deps.codexBin,
       resumeSessionId: input.resumeSessionId,
       pinSessionId: input.pinSessionId,
+      model: modelFor(WIZARD_SPEC_MODELS, input.agent),
     })
     return runAgent({
       draftId: input.draftId,

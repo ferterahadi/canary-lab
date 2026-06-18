@@ -60,7 +60,8 @@
     "access": "public"
   },
   "scripts": {
-    "build": "node tools/clean-dist.mjs && tsc -p tsconfig.build.json && node tools/prepare-assets.mjs && vite build --config apps/web/vite.config.ts",
+    "build": "node tools/gen-agents-md.mjs && node tools/clean-dist.mjs && tsc -p tsconfig.build.json && node tools/prepare-assets.mjs && vite build --config apps/web/vite.config.ts",
+    "gen:agents": "node tools/gen-agents-md.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",

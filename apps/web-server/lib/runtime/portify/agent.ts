@@ -4,6 +4,7 @@ import path from 'path'
 import { spawn, type ChildProcess } from 'child_process'
 import { encodeClaudeProjectDir } from '../../agent-session-log'
 import { resolveAgentBinary, type HealAgent } from '../auto-heal'
+import { PORTIFY_MODELS, modelArgs } from '../../agent-models'
 
 // One-shot, headless agent run for the port-ification edits (mirrors the
 // benchmark sabotage agent). Resolves on process exit; permissions auto-accept
@@ -36,9 +37,10 @@ export function runPortifyAgent(opts: {
       agent === 'claude'
         ? [
             '-p', prompt, '--dangerously-skip-permissions',
+            ...modelArgs(PORTIFY_MODELS.claude),
             ...(sessionId ? (resume ? ['--resume', sessionId] : ['--session-id', sessionId]) : []),
           ]
-        : ['exec', '--full-auto', prompt]
+        : ['exec', '--full-auto', ...modelArgs(PORTIFY_MODELS.codex), prompt]
     // Absolute path when resolvable; bare name otherwise so spawn surfaces a
     // real ENOENT through the 'error' handler below.
     const bin = resolveAgentBinary(agent) ?? agent
