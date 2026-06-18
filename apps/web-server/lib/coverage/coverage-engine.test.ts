@@ -154,6 +154,25 @@ describe('collectTests — duplicate test name union', () => {
   })
 })
 
+describe('collectTests — unreadable spec file (catch { continue } branch)', () => {
+  it('skips a spec file that cannot be read and continues processing others', async () => {
+    // chmod 000 the spec file so fs.readFileSync throws → the catch { continue }
+    // branch in collectTests fires (service.ts line 83).
+    const dir = writeFeature('checkout')
+    await seedSummary('checkout')
+    const specFile = path.join(dir, 'e2e', 'a.spec.ts')
+    fs.chmodSync(specFile, 0o000)
+    try {
+      const res = await runCoverageEngine({ featuresDir, logsDir, feature: 'checkout', adapter: 'deterministic' })
+      expect(res.feature).toBe('checkout')
+      // No readable tests → no orphans → nothing applied.
+      expect(res.applied).toEqual([])
+    } finally {
+      fs.chmodSync(specFile, 0o644)
+    }
+  })
+})
+
 describe('runCoverageEngine — no PRD summary (summary null branch)', () => {
   it('records requirementsSetHash (not summary.requirementsHash) when no summary exists', async () => {
     // Write a feature with an untagged test but NO prd-summary.json — summary is null.
