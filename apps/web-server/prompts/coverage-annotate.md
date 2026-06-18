@@ -15,6 +15,14 @@ For each mapped test, also state which path(s) it exercises:
 - `sad` — the unhappy / negative / error flow (invalid input, failure, denial).
 - `edge` — a boundary or extreme case within a path.
 
+## How to work
+
+Work as an agent, not a one-shot. Before mapping, use your tools to **read the
+actual test files** (each test's `file` below) and grep the source they touch, so
+each mapping reflects what the test really exercises — not just the summaries
+here. Read first, then decide the mappings. This is read-only analysis: do not
+edit any file.
+
 ## Requirements (map only to these ids)
 
 {{requirements}}

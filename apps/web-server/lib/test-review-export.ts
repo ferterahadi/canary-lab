@@ -8,6 +8,9 @@ import ts from 'typescript'
 import type { RunDetail, PlaywrightPlaybackEvent } from './run-store'
 import { pickAvailableHealAgent, type HealAgent } from './runtime/auto-heal'
 import { EVALUATION_REWRITE_MODELS, modelArgs, modelFor } from './agent-models'
+import { startIdleTimer, type IdleTimer } from './agent-idle-timer'
+import { claudeSessionLogPath } from './agent-session-log'
+import { recoverClaudeFinalText } from './agent-stream'
 import { formatCodeForDisplay } from '../../../shared/code-display-format'
 
 export type AssertionQuality = 'strict' | 'moderate' | 'shallow' | 'unknown'
@@ -223,7 +226,16 @@ export async function generateEvaluationRewriteWithAgent(
     })),
   })
   const failures: string[] = []
-  for (const agent of agents) {
+  for (let i = 0; i < agents.length; i++) {
+    const agent = agents[i]
+    const nextAgent = agents[i + 1]
+    const recordFailure = (reason: string) => {
+      failures.push(`${agent}: ${reason}`)
+      // Surface WHY this agent dropped out — otherwise the live log just shows
+      // one agent start, then the next, with no explanation for the handoff.
+      const handoff = nextAgent ? ` — falling back to ${nextAgent}` : ''
+      options.onOutput?.(`[agent:${agent}] rewrite failed: ${reason}${handoff}\n`)
+    }
     try {
       options.onOutput?.(`[agent:${agent}] starting localized rewrite (model: ${evaluationAgentModel(agent) ?? 'agent default'})\n`)
       const output = await runEvaluationAgent(agent, prompt, cwd, options.onOutput, options.signal, options.onSession)
@@ -238,9 +250,9 @@ export async function generateEvaluationRewriteWithAgent(
         options.onOutput?.(`[agent:${agent}] localized rewrite completed\n`)
         return rewrite
       }
-      failures.push(`${agent}: unparseable output: ${previewAgentOutput(output)}`)
+      recordFailure(`unparseable output: ${previewAgentOutput(output)}`)
     } catch (err) {
-      failures.push(`${agent}: ${err instanceof Error ? err.message : String(err)}`)
+      recordFailure(err instanceof Error ? err.message : String(err))
     }
   }
   throw new Error(`evaluation rewrite failed with all available agents: ${failures.join(' | ')}`)
@@ -273,6 +285,10 @@ function evaluationAgentModel(agent: HealAgent): string | null {
   return modelFor(EVALUATION_REWRITE_MODELS, agent)
 }
 
+// Idle (inactivity) window: the rewrite agent is killed only after this long
+// with NO activity, not on a fixed wall-clock deadline (see agent-idle-timer.ts).
+const EVALUATION_IDLE_TIMEOUT_MS = 5 * 60 * 1000
+
 function runEvaluationAgent(
   agent: HealAgent,
   prompt: string,
@@ -284,21 +300,24 @@ function runEvaluationAgent(
   const outputDir = agent === 'codex' ? fs.mkdtempSync(path.join(os.tmpdir(), 'canary-evaluation-rewrite-')) : undefined
   const outputPath = outputDir ? path.join(outputDir, 'last-message.txt') : undefined
   // Pin a session id for claude so the CLI's JSONL session log is locatable and
-  // the export dialog can stream it via AgentSessionView. `-p` still writes the
-  // session log. Codex has no --session-id; it's located later by cwd + start.
+  // AgentSessionView can tail it (the live view comes from that JSONL, not stdout).
+  // Codex has no --session-id; it's located later by cwd + start.
   const claudeSessionId = agent === 'claude' ? crypto.randomUUID() : undefined
+  // Agentic (Portify-style): `--dangerously-skip-permissions` lets the agent read
+  // the run's specs/artifacts with its tools. stream-json keeps stdout flowing
+  // (token deltas) so the idle clock resets during a long claude inference;
+  // consumed only for liveness + answer recovery (display is the JSONL tail).
+  // codex `exec` already streams progress; read-only sandbox.
   const args = agent === 'claude'
-    ? [...modelArgs(EVALUATION_REWRITE_MODELS.claude), '--session-id', claudeSessionId!, '-p', prompt]
+    ? ['-p', prompt, '--dangerously-skip-permissions', '--output-format=stream-json', '--include-partial-messages', '--verbose', ...modelArgs(EVALUATION_REWRITE_MODELS.claude), '--session-id', claudeSessionId!]
     : evaluationCodexArgs('-', outputPath, EVALUATION_REWRITE_SCHEMA_PATH)
   onSession?.(agent === 'claude' ? { agent: 'claude', sessionId: claudeSessionId! } : { agent: 'codex', sessionId: '' })
   return new Promise((resolve, reject) => {
     let stdout = ''
     let stderr = ''
     let settled = false
-    let lastOutputAt = Date.now()
     const child = spawn(agent, args, { cwd, stdio: ['pipe', 'pipe', 'pipe'] })
-    let timer: ReturnType<typeof setTimeout> | undefined
-    let heartbeat: ReturnType<typeof setInterval> | undefined
+    let idleTimer: IdleTimer | undefined
     const abort = () => {
       child.kill('SIGTERM')
       finish(new Error('evaluation rewrite cancelled'))
@@ -310,20 +329,28 @@ function runEvaluationAgent(
     const finish = (err?: Error, output?: string) => {
       if (settled) return
       settled = true
-      if (timer) clearTimeout(timer)
-      if (heartbeat) clearInterval(heartbeat)
+      idleTimer?.stop()
       cleanup()
       if (err) reject(err)
       else resolve(output ?? '')
     }
-    timer = setTimeout(() => {
-      child.kill('SIGTERM')
-      finish(new Error('evaluation rewrite agent timed out after 180000ms'))
-    }, 180_000)
-    heartbeat = setInterval(() => {
-      const idleSeconds = Math.floor((Date.now() - lastOutputAt) / 1000)
-      if (idleSeconds >= 10) onOutput?.(`[agent:${agent}] still running; waiting for CLI output (${idleSeconds}s idle)\n`)
-    }, 10_000)
+    // Idle timeout, not a wall-clock deadline. Activity signal: codex prints to
+    // stdout (bumped below); claude `-p` is silent until done, so its tool work is
+    // tracked by the session-JSONL growing.
+    const claudeLogPath = agent === 'claude' && claudeSessionId && cwd
+      ? claudeSessionLogPath(cwd, claudeSessionId)
+      : undefined
+    idleTimer = startIdleTimer({
+      idleMs: EVALUATION_IDLE_TIMEOUT_MS,
+      activity: claudeLogPath ? () => { try { return fs.statSync(claudeLogPath).size } catch { return 0 } } : undefined,
+      onIdle: (idleMs) => {
+        child.kill('SIGTERM')
+        finish(new Error(`evaluation rewrite agent idle for ${idleMs}ms`))
+      },
+      onTick: (idleMs) => {
+        if (idleMs >= 10_000) onOutput?.(`[agent:${agent}] still running; waiting for CLI output (${Math.floor(idleMs / 1000)}s idle)\n`)
+      },
+    })
     if (signal?.aborted) {
       abort()
       return
@@ -333,13 +360,13 @@ function runEvaluationAgent(
     child.stdout.on('data', (chunk) => {
       const text = chunk.toString('utf-8')
       stdout += text
-      lastOutputAt = Date.now()
+      idleTimer?.bump()
       onOutput?.(text)
     })
     child.stderr.on('data', (chunk) => {
       const text = chunk.toString('utf-8')
       stderr += text
-      lastOutputAt = Date.now()
+      idleTimer?.bump()
       onOutput?.(text)
     })
     child.on('error', (error) => {
@@ -350,7 +377,9 @@ function runEvaluationAgent(
         finish(new Error(`evaluation rewrite agent failed with ${signal ?? `exit code ${code}`}${stderr ? `\n${stderr}` : ''}`))
         return
       }
-      let finalOutput = stdout
+      // claude's stdout is stream-json envelopes → recover the final message;
+      // codex's authoritative answer is the --output-last-message file below.
+      let finalOutput = agent === 'claude' ? recoverClaudeFinalText(stdout) : stdout
       if (outputPath && fs.existsSync(outputPath)) {
         const fromFile = fs.readFileSync(outputPath, 'utf-8')
         if (fromFile.trim()) finalOutput = fromFile

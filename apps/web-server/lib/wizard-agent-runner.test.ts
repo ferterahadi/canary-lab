@@ -1,40 +1,47 @@
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
+import { EventEmitter } from 'events'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { PaneBroker } from './pane-broker'
-import type { PtyFactory, PtyHandle } from './runtime/pty-spawner'
+import type { ChildProcess } from 'child_process'
 import { spawnPlanAgent, spawnSpecAgent } from './wizard-agent-runner'
 import { WizardAgentCancelledError, WizardAgentRegistry } from './wizard-agent-registry'
 
-class FakePty implements PtyHandle {
+class FakeChild extends EventEmitter {
   pid = 4242
-  killed: string | null = null
-  private dataCbs: Array<(chunk: string) => void> = []
-  private exitCbs: Array<(e: { exitCode: number; signal?: number }) => void> = []
-
-  onData(cb: (chunk: string) => void): { dispose(): void } {
-    this.dataCbs.push(cb)
-    return { dispose: () => {} }
-  }
-
-  onExit(cb: (e: { exitCode: number; signal?: number }) => void): { dispose(): void } {
-    this.exitCbs.push(cb)
-    return { dispose: () => {} }
-  }
-
-  write(): void {}
-  resize(): void {}
-  kill(signal?: string): void {
-    this.killed = signal ?? 'SIGTERM'
+  stdout = new EventEmitter()
+  stderr = new EventEmitter()
+  signals: NodeJS.Signals[] = []
+  kill(signal?: NodeJS.Signals): boolean {
+    this.signals.push(signal ?? 'SIGTERM')
+    return true
   }
 
   emitData(chunk: string): void {
-    for (const cb of this.dataCbs) cb(chunk)
+    this.stdout.emit('data', Buffer.from(chunk, 'utf-8'))
   }
 
-  emitExit(exitCode: number): void {
-    for (const cb of this.exitCbs) cb({ exitCode })
+  close(code: number): void {
+    this.emit('close', code)
+  }
+}
+
+// A spawn() stand-in that records the call and returns our fake child.
+function fakeSpawn(child: FakeChild): {
+  impl: (cmd: string, args: string[]) => ChildProcess
+  bin: () => string
+  args: () => string[]
+} {
+  let capturedBin = ''
+  let capturedArgs: string[] = []
+  return {
+    impl: ((cmd: string, args: string[]) => {
+      capturedBin = cmd
+      capturedArgs = args
+      return child as unknown as ChildProcess
+    }) as never,
+    bin: () => capturedBin,
+    args: () => capturedArgs,
   }
 }
 
@@ -55,18 +62,15 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-describe('wizard agent runner cancellation', () => {
-  it('registers active ptys, clears on normal exit, and streams output', async () => {
+describe('wizard agent runner (headless)', () => {
+  it('registers the agent, clears on normal exit, and streams output to the log', async () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'wizard-runner-'))
-    const pty = new FakePty()
-    const factory: PtyFactory = () => pty
+    const child = new FakeChild()
+    const spawn = fakeSpawn(child)
     const registry = new WizardAgentRegistry()
-    const broker = new PaneBroker()
-    broker.push('draft:d1:planning', 'stale output')
     const run = spawnPlanAgent({
-      ptyFactory: factory,
+      spawnImpl: spawn.impl as never,
       registry,
-      broker,
       planTemplate: writePlanTemplate(tmp),
     })({
       draftId: 'd1',
@@ -78,25 +82,24 @@ describe('wizard agent runner cancellation', () => {
     })
 
     expect(registry.has('d1')).toBe(true)
-    pty.emitData('<plan-output>[]</plan-output>')
-    pty.emitExit(0)
+    expect(spawn.bin()).toBe('claude')
+    child.emitData('<plan-output>[]</plan-output>')
+    child.close(0)
     await expect(run).resolves.toContain('<plan-output>[]</plan-output>')
     expect(registry.has('d1')).toBe(false)
-    expect(fs.readFileSync(path.join(tmp, 'agent.log'), 'utf8')).toContain('<plan-output>')
-    expect(fs.readFileSync(path.join(tmp, 'agent.log'), 'utf8')).toContain('claude plan agent started')
-    expect(broker.snapshot('draft:d1:planning')).toContain('<plan-output>')
-    expect(broker.snapshot('draft:d1:planning')).not.toContain('stale output')
+    const log = fs.readFileSync(path.join(tmp, 'agent.log'), 'utf8')
+    expect(log).toContain('<plan-output>')
+    expect(log).toContain('claude plan agent started')
     fs.rmSync(tmp, { recursive: true, force: true })
   })
 
-  it('SIGTERMs the process group and rejects as cancelled', async () => {
-    vi.useFakeTimers()
-    const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => true)
+  it('kills the child and rejects as cancelled', async () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'wizard-runner-'))
-    const pty = new FakePty()
+    const child = new FakeChild()
+    const spawn = fakeSpawn(child)
     const registry = new WizardAgentRegistry()
     const run = spawnPlanAgent({
-      ptyFactory: () => pty,
+      spawnImpl: spawn.impl as never,
       registry,
       planTemplate: writePlanTemplate(tmp),
     })({
@@ -109,10 +112,8 @@ describe('wizard agent runner cancellation', () => {
     })
 
     expect(registry.cancel('d2')).toBe(true)
-    expect(killSpy).toHaveBeenCalledWith(-pty.pid, 'SIGTERM')
-    await vi.advanceTimersByTimeAsync(2000)
-    expect(killSpy).toHaveBeenCalledWith(-pty.pid, 'SIGKILL')
-    pty.emitExit(143)
+    expect(child.signals).toContain('SIGTERM')
+    child.close(143)
     await expect(run).rejects.toBeInstanceOf(WizardAgentCancelledError)
     expect(registry.has('d2')).toBe(false)
     expect(fs.readFileSync(path.join(tmp, 'agent.log'), 'utf8')).toContain('Generation cancelled by user')
@@ -121,9 +122,10 @@ describe('wizard agent runner cancellation', () => {
 
   it('rejects non-zero exits as failures when not cancelled', async () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'wizard-runner-'))
-    const pty = new FakePty()
+    const child = new FakeChild()
+    const spawn = fakeSpawn(child)
     const run = spawnPlanAgent({
-      ptyFactory: () => pty,
+      spawnImpl: spawn.impl as never,
       planTemplate: writePlanTemplate(tmp),
     })({
       draftId: 'd3',
@@ -134,17 +136,18 @@ describe('wizard agent runner cancellation', () => {
       agentLogPath: path.join(tmp, 'agent.log'),
     })
 
-    pty.emitData('bad output')
-    pty.emitExit(2)
+    child.emitData('bad output')
+    child.close(2)
     await expect(run).rejects.toThrow(/wizard agent exited with code 2/)
     fs.rmSync(tmp, { recursive: true, force: true })
   })
 
-  it('hides misleading restored-session notices from planning output', async () => {
+  it('pins a fresh claude session id for planning (no resume)', async () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'wizard-runner-'))
-    const pty = new FakePty()
+    const child = new FakeChild()
+    const spawn = fakeSpawn(child)
     const run = spawnPlanAgent({
-      ptyFactory: () => pty,
+      spawnImpl: spawn.impl as never,
       planTemplate: writePlanTemplate(tmp),
     })({
       draftId: 'd4',
@@ -153,76 +156,24 @@ describe('wizard agent runner cancellation', () => {
       repos: [{ name: 'app', localPath: '/app' }],
       draftDir: tmp,
       agentLogPath: path.join(tmp, 'agent.log'),
-    })
-
-    pty.emitData('Restored session: Wed 6 May 2026\n<plan-output>[]</plan-output>')
-    pty.emitExit(0)
-    await expect(run).resolves.not.toContain('Restored session')
-    expect(fs.readFileSync(path.join(tmp, 'agent.log'), 'utf8')).not.toContain('Restored session')
-    fs.rmSync(tmp, { recursive: true, force: true })
-  })
-
-  it('starts planning with a fresh command instead of resuming an older session', async () => {
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'wizard-runner-'))
-    const pty = new FakePty()
-    let command = ''
-    const run = spawnPlanAgent({
-      ptyFactory: (opts) => {
-        command = opts.command
-        return pty
-      },
-      planTemplate: writePlanTemplate(tmp),
-    })({
-      draftId: 'd4-fresh',
-      agent: 'claude',
-      prdText: 'Login',
-      repos: [{ name: 'app', localPath: '/app' }],
-      draftDir: tmp,
-      agentLogPath: path.join(tmp, 'agent.log'),
       pinSessionId: 'new-plan-session',
     })
 
-    pty.emitData('<plan-output>[]</plan-output>')
-    pty.emitExit(0)
+    child.emitData('<plan-output>[]</plan-output>')
+    child.close(0)
     await expect(run).resolves.toContain('<plan-output>')
-    expect(command).toContain(`'--session-id' 'new-plan-session'`)
-    expect(command).not.toContain(`'--resume'`)
-    fs.rmSync(tmp, { recursive: true, force: true })
-  })
-
-  it('hides misleading restored-session notices from spec output', async () => {
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'wizard-runner-'))
-    const pty = new FakePty()
-    const run = spawnSpecAgent({
-      ptyFactory: () => pty,
-      specTemplate: writeSpecTemplate(tmp),
-    })({
-      draftId: 'd5',
-      agent: 'claude',
-      featureName: 'login',
-      plan: [],
-      repos: [{ name: 'app', localPath: '/app' }],
-      draftDir: tmp,
-      agentLogPath: path.join(tmp, 'agent.log'),
-      resumeSessionId: 'sess-123',
-    })
-
-    pty.emitData('Restored session: Wed 6 May 2026\n<file path="x.ts">x</file>')
-    pty.emitExit(0)
-    await expect(run).resolves.not.toContain('Restored session')
-    expect(fs.readFileSync(path.join(tmp, 'agent.log'), 'utf8')).not.toContain('Restored session')
+    expect(spawn.args()).toContain('--session-id')
+    expect(spawn.args()).toContain('new-plan-session')
+    expect(spawn.args()).not.toContain('--resume')
     fs.rmSync(tmp, { recursive: true, force: true })
   })
 
   it('resumes the matching planning session during spec generation', async () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'wizard-runner-'))
-    const pty = new FakePty()
-    let command = ''
+    const child = new FakeChild()
+    const spawn = fakeSpawn(child)
     const run = spawnSpecAgent({
-      ptyFactory: (opts) => {
-        command = opts.command
-        return pty
-      },
+      spawnImpl: spawn.impl as never,
       specTemplate: writeSpecTemplate(tmp),
     })({
       draftId: 'd5-resume',
@@ -236,36 +187,12 @@ describe('wizard agent runner cancellation', () => {
       pinSessionId: 'must-not-be-used',
     })
 
-    pty.emitData('<file path="x.ts">x</file>')
-    pty.emitExit(0)
+    child.emitData('<file path="x.ts">x</file>')
+    child.close(0)
     await expect(run).resolves.toContain('<file path="x.ts">')
-    expect(command).toContain(`'--resume' 'sess-123'`)
-    expect(command).not.toContain(`'--session-id' 'must-not-be-used'`)
-    fs.rmSync(tmp, { recursive: true, force: true })
-  })
-
-  it('prints a waiting heartbeat when an agent produces no output for a while', async () => {
-    vi.useFakeTimers()
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'wizard-runner-'))
-    const pty = new FakePty()
-    const run = spawnSpecAgent({
-      ptyFactory: () => pty,
-      specTemplate: writeSpecTemplate(tmp),
-    })({
-      draftId: 'd6',
-      agent: 'claude',
-      featureName: 'login',
-      plan: [],
-      repos: [{ name: 'app', localPath: '/app' }],
-      draftDir: tmp,
-      agentLogPath: path.join(tmp, 'agent.log'),
-    })
-
-    await vi.advanceTimersByTimeAsync(5000)
-    expect(fs.readFileSync(path.join(tmp, 'agent.log'), 'utf8')).toContain('waiting for agent output')
-    pty.emitData('<file path="x.ts">x</file>')
-    pty.emitExit(0)
-    await expect(run).resolves.toContain('<file path="x.ts">')
+    expect(spawn.args()).toContain('--resume')
+    expect(spawn.args()).toContain('sess-123')
+    expect(spawn.args()).not.toContain('must-not-be-used')
     fs.rmSync(tmp, { recursive: true, force: true })
   })
 })

@@ -109,6 +109,16 @@ export function encodeClaudeProjectDir(cwd: string): string {
   return cwd.replace(/\//g, '-')
 }
 
+// The path claude writes its session JSONL to for a pinned session id — computed
+// even before the file exists (for idle-timer activity polling). Uses the real
+// path because claude encodes the resolved cwd. Best-effort: callers stat it and
+// treat a missing file as zero activity.
+export function claudeSessionLogPath(cwd: string, sessionId: string, homeDir: string = os.homedir()): string {
+  let real = cwd
+  try { real = fs.realpathSync(cwd) } catch { /* fall back to the raw cwd */ }
+  return path.join(homeDir, '.claude', 'projects', encodeClaudeProjectDir(real), `${sessionId}.jsonl`)
+}
+
 export function locateClaudeSessionLog(
   runDir: string,
   sessionId: string,
@@ -505,7 +515,7 @@ export function writeFullSessionTranscript(
     : ref.logPath
   const file = `${base}.transcript.txt`
   try {
-    fs.writeFileSync(file, transcript.endsWith('\n') ? transcript : `${transcript}\n`)
+    fs.writeFileSync(file, `${transcript}\n`)
     return file
   } catch {
     return null

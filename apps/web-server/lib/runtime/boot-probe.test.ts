@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { EventEmitter } from 'events'
 import type { PtyFactory, PtyHandle, PtySpawnOptions } from './pty-spawner'
 import type { ServiceSpec } from './orchestrator'
-import { bootAndProbe, fileTee, diagnoseBootOutput } from './boot-probe'
+import { bootAndProbe, fileTee, diagnoseBootOutput, writeCleanBootLog } from './boot-probe'
 
 // Teardown calls process.kill(-pid). Block the REAL process.kill so a fake pty
 // can never signal a real process group; killTree falls back to pty.kill, which
@@ -270,6 +270,66 @@ describe('bootAndProbe', () => {
   it('diagnoseBootOutput returns no evidence and unknown kind for empty output', () => {
     expect(diagnoseBootOutput('')).toEqual({ kind: 'unknown' })
   })
+})
+
+describe('writeCleanBootLog', () => {
+  it('returns null when the raw log file is missing', () => {
+    expect(writeCleanBootLog('/no/such/path.log')).toBeNull()
+  })
+
+  it('returns null when the raw log is empty (no meaningful lines)', () => {
+    const tmp = fs.realpathSync(fs.mkdtempSync(os.tmpdir()))
+    try {
+      const rawLog = path.join(tmp, 'boot.log')
+      fs.writeFileSync(rawLog, '')
+      expect(writeCleanBootLog(rawLog)).toBeNull()
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true })
+    }
+  })
+
+  it('writes a clean log and returns its path on success', () => {
+    const tmp = fs.realpathSync(fs.mkdtempSync(os.tmpdir()))
+    try {
+      const rawLog = path.join(tmp, 'boot.log')
+      fs.writeFileSync(rawLog, 'server started on port 3000\n')
+      const cleanPath = writeCleanBootLog(rawLog)
+      expect(cleanPath).toBe(path.join(tmp, 'boot.clean.log'))
+      expect(fs.existsSync(cleanPath!)).toBe(true)
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true })
+    }
+  })
+
+  it('appends .clean.log to paths that do not end in .log (line 125 false branch)', () => {
+    const tmp = fs.realpathSync(fs.mkdtempSync(os.tmpdir()))
+    try {
+      // A path ending in something other than `.log` gets `.clean.log` appended.
+      const rawLog = path.join(tmp, 'boot.txt')
+      fs.writeFileSync(rawLog, 'server started on port 3000\n')
+      const cleanPath = writeCleanBootLog(rawLog)
+      expect(cleanPath).toBe(path.join(tmp, 'boot.txt.clean.log'))
+      expect(fs.existsSync(cleanPath!)).toBe(true)
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true })
+    }
+  })
+
+  it('returns null when writeFileSync throws (line 132 catch branch)', () => {
+    const tmp = fs.realpathSync(fs.mkdtempSync(os.tmpdir()))
+    try {
+      const rawLog = path.join(tmp, 'boot.log')
+      fs.writeFileSync(rawLog, 'server started\n')
+      vi.spyOn(fs, 'writeFileSync').mockImplementationOnce(() => { throw new Error('ENOENT') })
+      expect(writeCleanBootLog(rawLog)).toBeNull()
+    } finally {
+      vi.restoreAllMocks()
+      fs.rmSync(tmp, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('bootAndProbe (continued)', () => {
 
   it('truncates the diagnostic buffer when output exceeds the cap', async () => {
     // Send slightly more than DIAG_BUFFER_CAP (16 384 bytes) so the slice(-cap) arm is taken.

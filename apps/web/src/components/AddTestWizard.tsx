@@ -39,7 +39,7 @@ export function AddTestWizard({ features, onClose, onAcceptedFeature }: Props) {
   // ----- step transitions driven by status -----
   useEffect(() => {
     if (!draft) {
-      setStep('configure')
+      if (step !== 'done') setStep('configure')
       return
     }
     const next = nextStepForStatus(draft.status)
@@ -93,6 +93,7 @@ export function AddTestWizard({ features, onClose, onAcceptedFeature }: Props) {
       const featureName = configureInput?.featureName ?? draft.featureName ?? slugifyFeatureName(draft.prdText)
       await acceptSpec(draft.draftId, featureName)
       onAcceptedFeature?.(featureName)
+      setStep('done')
     } catch (e) {
       setErrorMessage(e instanceof Error ? e.message : 'Accept failed')
     } finally {

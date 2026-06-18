@@ -1,7 +1,7 @@
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import type { ChildProcess } from 'child_process'
 import type { HealAgent } from '../auto-heal'
 import { runPortifyAgent, writePortifyClaudeRef } from './agent'
@@ -65,6 +65,28 @@ describe('runPortifyAgent', () => {
     const dir = tmp()
     // logPath points into a non-existent directory → openSync throws → ignored.
     await runPortifyAgent({ agent: 'codex', prompt: 'x', cwd: dir, logPath: path.join(dir, 'no', 'such', 'dir', 'a.log') })
+  })
+
+  it('calls the activity callback (covers the fs.statSync lambda) and onIdle', async () => {
+    // Mock startIdleTimer to capture and immediately invoke both callbacks so
+    // the inline arrow functions at lines 75-76 are covered.
+    const idleTimerModule = await import('../../agent-idle-timer')
+    const captured: { activity?: () => number; onIdle?: (ms: number) => void } = {}
+    vi.spyOn(idleTimerModule, 'startIdleTimer').mockImplementationOnce((opts) => {
+      captured.activity = opts.activity
+      captured.onIdle = opts.onIdle
+      return { bump: () => {}, stop: () => {} }
+    })
+    const dir = tmp()
+    const logPath = path.join(dir, 'agent.log')
+    // claude + sessionId → activityPath = claudeSessionLogPath → activity is defined
+    const promise = runPortifyAgent({ agent: 'claude', prompt: 'go', cwd: dir, logPath, sessionId: 's2', resume: false })
+    // Call the activity callback — file won't exist so statSync throws → returns 0
+    expect(captured.activity?.()).toBe(0)
+    // Call onIdle — sends SIGTERM to the child; child still exits normally via stub
+    captured.onIdle?.(5 * 60 * 1000)
+    await promise
+    vi.restoreAllMocks()
   })
 
   it('rejects with a clear message when the agent CLI cannot be launched', async () => {

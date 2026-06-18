@@ -1,27 +1,19 @@
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { PaneBroker } from './pane-broker'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   STAGE1_DIFF_TEMPLATE,
   STAGE1_TEMPLATE,
   STAGE2_TEMPLATE,
-  buildClaudeArgs,
-  buildClaudeCommand,
-  buildClaudeResumeArgs,
-  buildCodexArgs,
-  buildCodexCommand,
-  buildCodexResumeArgs,
+  buildWizardArgs,
+  resolveWizardSessionId,
   buildPlanPrompt,
   buildSpecPrompt,
-  buildWizardCommand,
   createTeeSink,
-  paneIdForDraft,
   formatPlan,
   formatRepos,
   loadTemplate,
-  shellQuote,
   substitute,
 } from './wizard-agent-spawner'
 
@@ -209,115 +201,74 @@ describe('buildSpecPrompt', () => {
   })
 })
 
-describe('shellQuote / buildClaudeArgs / buildClaudeCommand', () => {
-  it('quotes simple strings safely', () => {
-    expect(shellQuote('hello')).toBe(`'hello'`)
+const CLAUDE_BASE = ['-p', 'hi', '--dangerously-skip-permissions', '--output-format=stream-json', '--include-partial-messages', '--verbose']
+
+describe('buildWizardArgs', () => {
+  it('builds headless agentic claude args with stream-json (for liveness)', () => {
+    expect(buildWizardArgs('claude', 'hi')).toEqual(CLAUDE_BASE)
+    expect(buildWizardArgs('claude', 'hi')).not.toContain('--resume')
+    expect(buildWizardArgs('claude', 'hi')).not.toContain('--session-id')
   })
 
-  it('escapes embedded single quotes', () => {
-    expect(shellQuote(`it's`)).toBe(`'it'\\''s'`)
-  })
-
-  it('passes prompt as positional arg with -p', () => {
-    expect(buildClaudeArgs('hi')).toEqual([
-      '--dangerously-skip-permissions',
-      '--output-format=stream-json',
-      '--include-partial-messages',
-      '--verbose',
-      '-p',
-      'hi',
-    ])
-    expect(buildClaudeArgs('hi')).not.toContain('--resume')
-    expect(buildClaudeArgs('hi')).not.toContain('--continue')
-  })
-
-  it('includes --session-id when provided', () => {
-    expect(buildClaudeArgs('hi', 'sess-42')).toContain('--session-id')
-    expect(buildClaudeArgs('hi', 'sess-42')).toContain('sess-42')
-  })
-
-  it('builds claude resume args for spec generation', () => {
-    expect(buildClaudeResumeArgs('hi', 'sess-123')).toEqual([
-      '--dangerously-skip-permissions',
-      '--output-format=stream-json',
-      '--include-partial-messages',
-      '--verbose',
-      '--resume',
-      'sess-123',
-      '-p',
-      'hi',
+  it('pins the claude session id when provided', () => {
+    expect(buildWizardArgs('claude', 'hi', { pinSessionId: 'sess-42' })).toEqual([
+      ...CLAUDE_BASE, '--session-id', 'sess-42',
     ])
   })
 
-  it('builds a bash-safe command line', () => {
-    const cmd = buildClaudeCommand(`hello "world" it's me`)
-    expect(cmd.startsWith('set -o pipefail; claude ')).toBe(true)
-    expect(cmd).toContain(`--output-format=stream-json`)
-    expect(cmd).toContain(`wizard-claude-formatter.js`)
-    expect(cmd).toContain(`'-p'`)
-    // Embedded single quote must be escaped via the standard close/escape/open trick.
-    expect(cmd).toContain(`'\\''`)
+  it('resumes the claude session for the spec stage (over a pin)', () => {
+    expect(buildWizardArgs('claude', 'hi', { resumeSessionId: 'sess-123', pinSessionId: 'ignored' })).toEqual([
+      ...CLAUDE_BASE, '--resume', 'sess-123',
+    ])
   })
 
-  it('honors a custom claude binary path', () => {
-    const cmd = buildClaudeCommand('hi', '/opt/bin/claude')
-    expect(cmd.startsWith('set -o pipefail; /opt/bin/claude ')).toBe(true)
+  it('builds headless agentic codex exec args — no --json', () => {
+    expect(buildWizardArgs('codex', 'hi')).toEqual(['exec', '--skip-git-repo-check', '--full-auto', 'hi'])
+    expect(buildWizardArgs('codex', 'hi')).not.toContain('--json')
   })
 
-  it('builds a claude resume command when a session id is supplied', () => {
-    const cmd = buildClaudeCommand('hi', 'claude', 'sess-123')
-    expect(cmd).toContain(`'--resume' 'sess-123'`)
-    expect(cmd).not.toContain('--no-session-persistence')
+  it('resumes the codex session for the spec stage', () => {
+    expect(buildWizardArgs('codex', 'hi', { resumeSessionId: 'thread-123' })).toEqual([
+      'exec', 'resume', '--skip-git-repo-check', '--full-auto', 'thread-123', 'hi',
+    ])
   })
 })
 
-describe('buildCodexArgs / buildCodexCommand / buildWizardCommand', () => {
-  it('builds codex exec args', () => {
-    expect(buildCodexArgs('hi')).toEqual(['exec', '--skip-git-repo-check', '--full-auto', '--json', 'hi'])
+describe('resolveWizardSessionId', () => {
+  it('returns the pinned claude id', () => {
+    expect(resolveWizardSessionId({ agent: 'claude', cwd: tmp, pinSessionId: 'sess-9', spawnedAt: '2026-01-01T00:00:00.000Z' }))
+      .toEqual({ kind: 'claude', id: 'sess-9' })
   })
 
-  it('builds codex resume args for spec generation', () => {
-    expect(buildCodexResumeArgs('hi', 'thread-123')).toEqual([
-      'exec',
-      'resume',
-      '--skip-git-repo-check',
-      '--full-auto',
-      '--json',
-      'thread-123',
-      'hi',
-    ])
+  it('returns null for claude without a pinned id', () => {
+    expect(resolveWizardSessionId({ agent: 'claude', cwd: tmp, spawnedAt: '2026-01-01T00:00:00.000Z' })).toBeNull()
   })
 
-  it('builds a bash-safe codex command line', () => {
-    const cmd = buildCodexCommand(`hello it's me`)
-    expect(cmd.startsWith('set -o pipefail; codex ')).toBe(true)
-    expect(cmd).toContain(`'exec'`)
-    expect(cmd).toContain(`'--json'`)
-    expect(cmd).toContain(`wizard-codex-formatter.js`)
-    expect(cmd).toContain(`'\\''`)
+  it('returns null for codex when no session log matches the cwd', () => {
+    expect(resolveWizardSessionId({ agent: 'codex', cwd: tmp, spawnedAt: '2026-01-01T00:00:00.000Z' })).toBeNull()
   })
 
-  it('dispatches by agent', () => {
-    expect(buildWizardCommand('claude', 'hi')).toMatch(/^set -o pipefail; claude /)
-    expect(buildWizardCommand('codex', 'hi')).toMatch(/^set -o pipefail; codex /)
-  })
-
-  it('dispatches resume by agent', () => {
-    expect(buildWizardCommand('claude', 'hi', { resumeSessionId: 'sess-123' }))
-      .toContain(`'--resume' 'sess-123'`)
-    expect(buildWizardCommand('codex', 'hi', { resumeSessionId: 'thread-123' }))
-      .toContain(`'exec' 'resume'`)
-  })
-})
-
-describe('paneIdForDraft', () => {
-  it('namespaces draft pane ids by stage', () => {
-    expect(paneIdForDraft('d-1', 'planning')).toBe('draft:d-1:planning')
-    expect(paneIdForDraft('d-1', 'generating')).toBe('draft:d-1:generating')
-  })
-
-  it('defaults to planning for compatibility', () => {
-    expect(paneIdForDraft('d-1')).toBe('draft:d-1:planning')
+  it('returns the codex session ref when a matching session log exists (line 167 true branch)', () => {
+    // locateCodexSessionLog uses os.homedir() for the sessions root. Redirect it
+    // to a tmp dir so we can create a matching session log without touching ~.
+    const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'wizard-spawner-home-'))
+    const sessionDir = path.join(fakeHome, '.codex', 'sessions', '2026', '01', '01')
+    fs.mkdirSync(sessionDir, { recursive: true })
+    const sessionFile = path.join(sessionDir, 'sess-codex-xyz.jsonl')
+    const meta = {
+      timestamp: '2026-01-01T00:00:01.000Z',
+      type: 'session_meta',
+      payload: { id: 'sess-codex-xyz', cwd: fs.realpathSync(tmp), timestamp: '2026-01-01T00:00:01.000Z' },
+    }
+    fs.writeFileSync(sessionFile, JSON.stringify(meta) + '\n')
+    const spy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome)
+    try {
+      const ref = resolveWizardSessionId({ agent: 'codex', cwd: tmp, spawnedAt: '2026-01-01T00:00:00.000Z' })
+      expect(ref).toEqual({ kind: 'codex', id: 'sess-codex-xyz' })
+    } finally {
+      spy.mockRestore()
+      fs.rmSync(fakeHome, { recursive: true, force: true })
+    }
   })
 })
 
@@ -345,24 +296,6 @@ describe('createTeeSink', () => {
     sink.push('x')
     expect(fs.existsSync(logPath)).toBe(true)
     expect(fs.readFileSync(logPath, 'utf8')).toBe('x')
-  })
-
-  it('pushes chunks to the broker when paneId+broker are supplied', () => {
-    const logPath = path.join(tmp, 'agent.log')
-    const broker = new PaneBroker()
-    const sink = createTeeSink({ logPath, broker, paneId: 'draft:d1' })
-    sink.push('chunk-1')
-    sink.push('chunk-2')
-    expect(broker.snapshot('draft:d1')).toBe('chunk-1chunk-2')
-  })
-
-  it('does not push to broker when paneId is missing', () => {
-    const logPath = path.join(tmp, 'agent.log')
-    const broker = new PaneBroker()
-    const sink = createTeeSink({ logPath, broker })
-    sink.push('x')
-    // No pane was ever opened — broker has no panes.
-    expect(broker.paneIds()).toEqual([])
   })
 
   it('survives a transient append failure without losing the accumulated stream', () => {

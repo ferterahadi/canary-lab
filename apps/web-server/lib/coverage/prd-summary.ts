@@ -6,7 +6,9 @@ import { spawn } from 'child_process'
 import { pickAvailableHealAgent, type HealAgent } from '../runtime/auto-heal'
 import { PRD_SUMMARY_MODELS, modelArgs } from '../agent-models'
 import type { CoverageAgentSession } from './annotate-engine'
-import { makeClaudeStreamSink } from './agent-stream'
+import { startIdleTimer, type IdleTimer } from '../agent-idle-timer'
+import { claudeSessionLogPath } from '../agent-session-log'
+import { recoverClaudeFinalText } from '../agent-stream'
 import type {
   PathType,
   PrdSummary,
@@ -28,7 +30,9 @@ import { withFingerprints } from './fingerprints'
 
 const PRD_SUMMARY_TEMPLATE_PATH = path.join(__dirname, '../../prompts/prd-summary.md')
 const PRD_SUMMARY_SCHEMA_PATH = path.join(__dirname, '../../prompts/prd-summary.schema.json')
-const PRD_SUMMARY_TIMEOUT_MS = 180_000
+// Idle (inactivity) window: the summary agent is killed only after this long
+// with NO activity, not on a fixed wall-clock deadline (see agent-idle-timer.ts).
+const PRD_SUMMARY_IDLE_TIMEOUT_MS = 5 * 60 * 1000
 
 /** Generated artifact filenames under docs/. */
 export const PRD_SUMMARY_JSON = '_prd-summary.json'
@@ -346,20 +350,24 @@ function defaultRunAgent(agent: HealAgent, prompt: string, opts: RunAgentOpts): 
     ? fs.mkdtempSync(path.join(os.tmpdir(), 'canary-prd-summary-'))
     : undefined
   const outputPath = outputDir ? path.join(outputDir, 'last-message.txt') : undefined
-  // Pin a claude session id so the JSONL session log is locatable for R17.
+  // Pin a claude session id so the CLI's JSONL session log is locatable and
+  // AgentSessionView can tail it (the live view comes from that JSONL, not stdout).
   const claudeSessionId = agent === 'claude' ? crypto.randomUUID() : undefined
-  // Stream-json → live token stream on stdout (R: live agent output); the sink
-  // renders readable text to onOutput and recovers the final answer.
+  // Agentic (Portify-style): `--dangerously-skip-permissions` lets the agent read
+  // the actual PRD docs with its tools. stream-json keeps stdout flowing (token
+  // deltas) so the idle clock resets during a long claude inference; consumed only
+  // for liveness + answer recovery (display is the JSONL tail). codex `exec`
+  // already streams progress; read-only sandbox.
   const args = agent === 'claude'
-    ? [...modelArgs(PRD_SUMMARY_MODELS.claude), '--output-format=stream-json', '--include-partial-messages', '--verbose', '--session-id', claudeSessionId!, '-p', prompt]
+    ? ['-p', prompt, '--dangerously-skip-permissions', '--output-format=stream-json', '--include-partial-messages', '--verbose', ...modelArgs(PRD_SUMMARY_MODELS.claude), '--session-id', claudeSessionId!]
     : codexArgs(outputPath!)
   opts.onSession?.(agent === 'claude' ? { agent: 'claude', sessionId: claudeSessionId! } : { agent: 'codex', sessionId: '' })
   return new Promise((resolve, reject) => {
     let stdout = ''
     let stderr = ''
     let settled = false
-    const claudeSink = agent === 'claude' ? makeClaudeStreamSink(opts.onOutput) : null
     const child = spawn(agent, args, { cwd: opts.cwd, stdio: ['pipe', 'pipe', 'pipe'] })
+    let idleTimer: IdleTimer | undefined
     const cleanup = () => {
       opts.signal?.removeEventListener('abort', abort)
       if (outputDir) fs.rmSync(outputDir, { recursive: true, force: true })
@@ -367,7 +375,7 @@ function defaultRunAgent(agent: HealAgent, prompt: string, opts: RunAgentOpts): 
     const finish = (err?: Error, output?: string) => {
       if (settled) return
       settled = true
-      clearTimeout(timer)
+      idleTimer?.stop()
       cleanup()
       if (err) reject(err)
       else resolve(output ?? '')
@@ -376,10 +384,20 @@ function defaultRunAgent(agent: HealAgent, prompt: string, opts: RunAgentOpts): 
       child.kill('SIGTERM')
       finish(new Error('prd summary cancelled'))
     }
-    const timer = setTimeout(() => {
-      child.kill('SIGTERM')
-      finish(new Error(`prd summary agent timed out after ${PRD_SUMMARY_TIMEOUT_MS}ms`))
-    }, PRD_SUMMARY_TIMEOUT_MS)
+    // Idle timeout, not a wall-clock deadline. Activity signal: codex prints to
+    // stdout (bumped below); claude `-p` is silent until done, so its tool work is
+    // tracked by the session-JSONL growing.
+    const claudeLogPath = agent === 'claude' && claudeSessionId && opts.cwd
+      ? claudeSessionLogPath(opts.cwd, claudeSessionId)
+      : undefined
+    idleTimer = startIdleTimer({
+      idleMs: PRD_SUMMARY_IDLE_TIMEOUT_MS,
+      activity: claudeLogPath ? () => { try { return fs.statSync(claudeLogPath).size } catch { return 0 } } : undefined,
+      onIdle: (idleMs) => {
+        child.kill('SIGTERM')
+        finish(new Error(`prd summary agent idle for ${idleMs}ms`))
+      },
+    })
     if (opts.signal?.aborted) {
       abort()
       return
@@ -388,12 +406,13 @@ function defaultRunAgent(agent: HealAgent, prompt: string, opts: RunAgentOpts): 
     child.stdout.on('data', (chunk) => {
       const t = chunk.toString('utf-8')
       stdout += t
-      if (claudeSink) claudeSink.push(t)
-      else opts.onOutput?.(t)
+      idleTimer?.bump()
+      opts.onOutput?.(t)
     })
     child.stderr.on('data', (chunk) => {
       const t = chunk.toString('utf-8')
       stderr += t
+      idleTimer?.bump()
       opts.onOutput?.(t)
     })
     child.on('error', (error) => finish(new Error(`prd summary agent failed: ${error.message}`)))
@@ -402,7 +421,9 @@ function defaultRunAgent(agent: HealAgent, prompt: string, opts: RunAgentOpts): 
         finish(new Error(`prd summary agent failed with ${sig ?? `exit code ${code}`}${stderr ? `\n${stderr}` : ''}`))
         return
       }
-      let finalOutput = claudeSink ? claudeSink.finalText() : stdout
+      // codex's --output-last-message file is the authoritative final answer;
+      // claude's stdout is stream-json envelopes → recover the final message.
+      let finalOutput = agent === 'claude' ? recoverClaudeFinalText(stdout) : stdout
       if (outputPath && fs.existsSync(outputPath)) {
         const fromFile = fs.readFileSync(outputPath, 'utf-8')
         if (fromFile.trim()) finalOutput = fromFile

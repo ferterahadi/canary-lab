@@ -124,4 +124,43 @@ describe('applyRigor — grounded strictness', () => {
     expect(out.requirements[0].gapType).toBe('unverified')
     expect(out.requirements[0].rigor).toBeUndefined()
   })
+
+  it('handles verified test with no assertions entry — ?? [] branch (line 103)', () => {
+    // testAssertions is empty; assertionsByTest.get(name) → undefined → ?? []
+    const requirements = [req('R1', 4)]
+    const tests: CoverageTestInput[] = [{ name: 't', requirements: ['R1'], pathTypes: ['happy'] }]
+    const out = applyRigor(ledgerFor(requirements, tests, indexOf('t')), requirements, [])
+    // No assertions → no classified tiers → tierReached undefined → rigor present but shallow check skipped
+    expect(out.requirements[0].gapType).toBe('verified') // no reclassification without tier
+    expect(out.requirements[0].rigor?.tierReached).toBeUndefined()
+  })
+
+  it('requirement absent from byReqId map → tierAvailable undefined (line 108 FALSE branch)', () => {
+    // ledger has R1, but we pass a DIFFERENT requirement id ('R-other') to applyRigor.
+    // byReqId.get('R1') returns undefined → tierAvailable = undefined → no shallow flag.
+    const requirements = [req('R-other', 4)] // not R1
+    const ledgerReq: Requirement = { id: 'R1', title: 'R1', text: 'R1', pathTypes: ['happy'], strictnessLadder: [{ tier: 4, description: 'tier 4' }] }
+    const tests: CoverageTestInput[] = [{ name: 't', requirements: ['R1'], pathTypes: ['happy'] }]
+    const base = ledgerFor([ledgerReq], tests, indexOf('t'))
+    // pass requirements that don't include R1 → byReqId.get('R1') === undefined
+    const out = applyRigor(base, requirements, [{ name: 't', assertions: ["expect(fs.readFileSync('app.log')).toContain('x')"] }])
+    // tierAvailable is undefined → strictness undefined → no shallow-verified reclassification
+    expect(out.requirements[0].gapType).toBe('verified')
+    expect(out.requirements[0].rigor?.tierAvailable).toBeUndefined()
+  })
+
+  it('reduce max FALSE branch: second assertion has a lower tier than current max (line 113)', () => {
+    // [tier4, tier3]: tier4 > 1 → TRUE (max=4); tier3 > 4 → FALSE (max stays 4).
+    const requirements = [req('R1', 4)]
+    const tests: CoverageTestInput[] = [{ name: 't', requirements: ['R1'], pathTypes: ['happy'] }]
+    const assertions: TestAssertions[] = [{
+      name: 't',
+      assertions: [
+        "await page.goto('https://line.com/inbox')", // tier 4
+        "await expect(page.locator('.msg')).toBeVisible()", // tier 3 → c.tier > max is FALSE
+      ],
+    }]
+    const out = applyRigor(ledgerFor(requirements, tests, indexOf('t')), requirements, assertions)
+    expect(out.requirements[0].rigor?.tierReached).toBe(4) // max is tier 4
+  })
 })

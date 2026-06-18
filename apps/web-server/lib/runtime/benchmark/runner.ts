@@ -5,7 +5,8 @@ import { randomUUID } from 'crypto'
 import { spawn, type ChildProcess } from 'child_process'
 import type { FeatureConfig, RepoPrerequisite } from '../../../../../shared/launcher/types'
 import { runGit, resolveRepoPath } from '../../git-repo'
-import { encodeClaudeProjectDir } from '../../agent-session-log'
+import { claudeSessionLogPath, encodeClaudeProjectDir } from '../../agent-session-log'
+import { startIdleTimer, type IdleTimer } from '../../agent-idle-timer'
 import { addWorktree, type WorktreeHandle } from '../repo-worktree'
 import { RunOrchestrator, defaultPlaywrightSpawner } from '../orchestrator'
 import { buildAgentSpawnCommand, buildOrchestratorHealPrompt, type HealAgent } from '../auto-heal'
@@ -426,22 +427,45 @@ function runAgentHeadless(
   return new Promise((resolve) => {
     const args =
       agent === 'claude'
-        ? ['-p', prompt, '--dangerously-skip-permissions', ...(sessionId ? ['--session-id', sessionId] : [])]
+        ? [
+            '-p', prompt, '--dangerously-skip-permissions',
+            // stream-json keeps stdout flowing so the idle clock resets during a
+            // long claude inference — same liveness mechanism as every other
+            // agent runner. Consumed only for liveness (the diff is the arbiter).
+            '--output-format=stream-json', '--include-partial-messages', '--verbose',
+            ...(sessionId ? ['--session-id', sessionId] : []),
+          ]
         : ['exec', '--full-auto', prompt]
-    let out: number | 'ignore' = 'ignore'
+    let out: number | null = null
     if (logPath) {
-      try { out = fs.openSync(logPath, 'a') } catch { out = 'ignore' }
+      try { out = fs.openSync(logPath, 'a') } catch { out = null }
     }
-    const child = spawn(agent, args, {
-      cwd,
-      stdio: typeof out === 'number' ? ['ignore', out, out] : 'ignore',
-    })
+    const child = spawn(agent, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] })
     children?.add(child)
+    let idleTimer: IdleTimer | undefined
+    // Tee output to the debug log and reset the idle clock on every chunk — the
+    // primary liveness signal, same as the wizard/coverage/portify runners.
+    const onChunk = (chunk: Buffer): void => {
+      idleTimer?.bump()
+      if (out !== null) { try { fs.writeSync(out, chunk) } catch { /* best effort */ } }
+    }
+    child.stdout?.on('data', onChunk)
+    child.stderr?.on('data', onChunk)
     const done = () => {
+      idleTimer?.stop()
       children?.delete(child)
-      if (typeof out === 'number') { try { fs.closeSync(out) } catch { /* noop */ } }
+      if (out !== null) { try { fs.closeSync(out) } catch { /* noop */ } }
       resolve()
     }
+    // Backstop activity signal: session-JSONL growth (claude) / log growth (codex).
+    const activityPath = agent === 'claude' && sessionId
+      ? claudeSessionLogPath(cwd, sessionId)
+      : logPath
+    idleTimer = startIdleTimer({
+      idleMs: 5 * 60 * 1000,
+      activity: activityPath ? () => { try { return fs.statSync(activityPath).size } catch { return 0 } } : undefined,
+      onIdle: () => { child.kill('SIGTERM') },
+    })
     child.on('close', done)
     child.on('error', done)
   })

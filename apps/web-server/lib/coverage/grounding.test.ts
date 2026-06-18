@@ -118,4 +118,36 @@ describe('buildLastPassingRunIndex', () => {
     ])
     expect(index.byTestName.size).toBe(0)
   })
+
+  it('env cache hit: skips manifest read when the same runId is seen a second time (line 56 FALSE branch)', () => {
+    // Write one run with a manifest so the first visit populates envByRunId.
+    // Then inject a custom listRuns that returns the same runId twice;
+    // on the second iteration envByRunId.has(runId) is true → the if on line 56 is false.
+    const runId = 'r-dup'
+    const runDir = runDirFor(logsDir, runId)
+    fs.mkdirSync(runDir, { recursive: true })
+    const paths = buildRunPaths(runDir)
+    fs.writeFileSync(paths.manifestPath, JSON.stringify({ runId, feature: 'checkout', env: 'staging', startedAt: '2026-01-01T00:00:00Z', status: 'passed', services: [] }))
+    fs.writeFileSync(paths.summaryPath, JSON.stringify({ complete: true, total: 1, passed: 1, passedNames: ['buy now'], failed: [] }))
+
+    let manifestReadCount = 0
+    const index = buildLastPassingRunIndex(logsDir, 'checkout', {
+      listRuns: () => [
+        { runId, feature: 'checkout', startedAt: '2026-01-01T00:00:00Z', status: 'passed' as never },
+        { runId, feature: 'checkout', startedAt: '2026-01-01T00:00:00Z', status: 'passed' as never },
+      ],
+      readRunSummary: (dir) => {
+        const p = buildRunPaths(dir)
+        try { return JSON.parse(fs.readFileSync(p.summaryPath, 'utf-8')) } catch { return undefined }
+      },
+      readManifest: (p) => {
+        manifestReadCount++
+        try { return JSON.parse(fs.readFileSync(p, 'utf-8')) } catch { return undefined }
+      },
+    })
+    // The test name is seen on first iteration; second iteration hits byTestName.has(name) → continue.
+    // The manifest is read on first iteration; second hits the cache (manifestReadCount stays 1).
+    expect(manifestReadCount).toBe(1)
+    expect(index.byTestName.get('buy now')?.runId).toBe(runId)
+  })
 })

@@ -1,7 +1,7 @@
 import fs from 'fs'
 import path from 'path'
-import type { PaneBroker } from './pane-broker'
 import { modelArgs } from './agent-models'
+import { locateCodexSessionLog } from './agent-session-log'
 
 // Pure helpers for the Add Test wizard's plan / spec agents:
 //
@@ -21,8 +21,6 @@ export const PROMPTS_DIR = path.resolve(__dirname, '..', 'prompts')
 export const STAGE1_TEMPLATE = path.join(PROMPTS_DIR, 'stage1-plan.md')
 export const STAGE1_DIFF_TEMPLATE = path.join(PROMPTS_DIR, 'stage1-diff-plan.md')
 export const STAGE2_TEMPLATE = path.join(PROMPTS_DIR, 'stage2-spec.md')
-export const WIZARD_CLAUDE_FORMATTER_FILE = path.join(__dirname, 'runtime', 'wizard-claude-formatter.js')
-export const WIZARD_CODEX_FORMATTER_FILE = path.join(__dirname, 'runtime', 'wizard-codex-formatter.js')
 
 export type WizardAgentStage = 'planning' | 'generating'
 export type WizardAgentKind = 'claude' | 'codex'
@@ -85,11 +83,11 @@ export function buildSpecPrompt(input: {
   })
 }
 
-// Tee reducer: every chunk produced by the pty is appended to `logPath` and
-// optionally pushed to a PaneBroker keyed by `paneId`. Returned object exposes
-// the accumulated stream so the route layer can parse it once the agent exits.
+// Tee reducer: every chunk the headless agent writes to stdout/stderr is
+// appended to `logPath` and accumulated. The route parses the accumulated
+// stream once the agent exits (the live view is the JSONL tail, not this log).
 //
-// Kept synchronous (`appendFileSync`) because pty chunks are small and the
+// Kept synchronous (`appendFileSync`) because chunks are small and the
 // alternative — async writes — opens up out-of-order writes and lost output
 // if the process exits before the queue drains.
 export interface TeeSink {
@@ -97,11 +95,7 @@ export interface TeeSink {
   fullStream(): string
 }
 
-export function createTeeSink(opts: {
-  logPath: string
-  broker?: PaneBroker | null
-  paneId?: string
-}): TeeSink {
+export function createTeeSink(opts: { logPath: string }): TeeSink {
   // Ensure the log directory exists & file is truncated for this run.
   fs.mkdirSync(path.dirname(opts.logPath), { recursive: true })
   fs.writeFileSync(opts.logPath, '', 'utf8')
@@ -116,9 +110,6 @@ export function createTeeSink(opts: {
         // fail the run. The accumulated `acc` is the source of truth for
         // downstream parsers.
       }
-      if (opts.broker && opts.paneId) {
-        opts.broker.push(opts.paneId, chunk)
-      }
     },
     fullStream(): string {
       return acc
@@ -126,80 +117,52 @@ export function createTeeSink(opts: {
   }
 }
 
-// Build the argv used to invoke Claude in streaming JSON mode. The wizard
-// pipes that JSON through a formatter so users see progress immediately while
-// the final assistant text remains parseable by the draft output parser.
-//
-// `sessionId` pins the JSONL log path written by the claude CLI to
-// `~/.claude/projects/<encoded-cwd>/<sessionId>.jsonl` so the live structured
-// session WS can tail it from the moment of spawn.
-export function buildClaudeArgs(prompt: string, sessionId?: string, model?: string | null): string[] {
-  const base = [
-    '--dangerously-skip-permissions',
-    '--output-format=stream-json',
-    '--include-partial-messages',
-    '--verbose',
-    ...modelArgs(model ?? null),
-  ]
-  if (sessionId) base.push('--session-id', sessionId)
-  base.push('-p', prompt)
-  return base
-}
-
-export function buildClaudeResumeArgs(prompt: string, sessionId: string, model?: string | null): string[] {
-  return [
-    '--dangerously-skip-permissions',
-    '--output-format=stream-json',
-    '--include-partial-messages',
-    '--verbose',
-    ...modelArgs(model ?? null),
-    '--resume',
-    sessionId,
-    '-p',
-    prompt,
-  ]
-}
-
-// Shell-escape a single argument for /bin/bash. The pty wrapper invokes
-// `bash -c <cmd>`, so we need the full command as a string.
-export function shellQuote(arg: string): string {
-  // Wrap in single quotes; escape any embedded single quotes by closing,
-  // inserting an escaped quote, and reopening. Standard POSIX trick.
-  return `'${arg.replace(/'/g, `'\\''`)}'`
-}
-
-export function buildClaudeCommand(prompt: string, claudeBin = 'claude', resumeSessionId?: string, pinSessionId?: string, model?: string | null): string {
-  const args = resumeSessionId
-    ? buildClaudeResumeArgs(prompt, resumeSessionId, model)
-    : buildClaudeArgs(prompt, pinSessionId, model)
-  return `set -o pipefail; ${claudeBin} ${args.map(shellQuote).join(' ')} | node ${shellQuote(WIZARD_CLAUDE_FORMATTER_FILE)}`
-}
-
-export function buildCodexArgs(prompt: string, model?: string | null): string[] {
-  return ['exec', '--skip-git-repo-check', '--full-auto', ...modelArgs(model ?? null), '--json', prompt]
-}
-
-export function buildCodexResumeArgs(prompt: string, sessionId: string, model?: string | null): string[] {
-  return ['exec', 'resume', '--skip-git-repo-check', '--full-auto', ...modelArgs(model ?? null), '--json', sessionId, prompt]
-}
-
-export function buildCodexCommand(prompt: string, codexBin = 'codex', resumeSessionId?: string, model?: string | null): string {
-  const args = resumeSessionId
-    ? buildCodexResumeArgs(prompt, resumeSessionId, model)
-    : buildCodexArgs(prompt, model)
-  return `set -o pipefail; ${codexBin} ${args.map(shellQuote).join(' ')} | node ${shellQuote(WIZARD_CODEX_FORMATTER_FILE)}`
-}
-
-export function buildWizardCommand(
+// Headless agentic argv — the Portify model. No formatter pipe, no stream-json:
+// the agent uses its tools and writes a session JSONL (the live timeline that
+// AgentSessionView tails); its final stdout message carries the parseable output.
+// `pinSessionId` (claude) fixes the JSONL path so the tail can attach from spawn;
+// codex has no pinned id and is located later by cwd + start.
+export function buildWizardArgs(
   agent: WizardAgentKind,
   prompt: string,
-  bins: { claudeBin?: string; codexBin?: string; resumeSessionId?: string; pinSessionId?: string; model?: string | null } = {},
-): string {
-  return agent === 'claude'
-    ? buildClaudeCommand(prompt, bins.claudeBin, bins.resumeSessionId, bins.pinSessionId, bins.model)
-    : buildCodexCommand(prompt, bins.codexBin, bins.resumeSessionId, bins.model)
+  opts: { resumeSessionId?: string; pinSessionId?: string; model?: string | null } = {},
+): string[] {
+  if (agent === 'claude') {
+    return [
+      '-p', prompt,
+      '--dangerously-skip-permissions',
+      // stream-json so stdout streams token-by-token — claude `-p` is otherwise
+      // silent for the whole final-message composition, which trips the idle
+      // timer. Consumed ONLY for liveness + answer recovery; display = JSONL tail.
+      '--output-format=stream-json',
+      '--include-partial-messages',
+      '--verbose',
+      ...modelArgs(opts.model ?? null),
+      ...(opts.resumeSessionId
+        ? ['--resume', opts.resumeSessionId]
+        : opts.pinSessionId
+          ? ['--session-id', opts.pinSessionId]
+          : []),
+    ]
+  }
+  if (opts.resumeSessionId) {
+    return ['exec', 'resume', '--skip-git-repo-check', '--full-auto', ...modelArgs(opts.model ?? null), opts.resumeSessionId, prompt]
+  }
+  return ['exec', '--skip-git-repo-check', '--full-auto', ...modelArgs(opts.model ?? null), prompt]
 }
 
-export function paneIdForDraft(draftId: string, stage: WizardAgentStage = 'planning'): string {
-  return `draft:${draftId}:${stage}`
+// The agent's persisted session id for the spec stage to `--resume`. claude's is
+// the id we pinned; codex's is discovered from its session log by cwd + spawn time
+// (replaces the old formatter SESSION_MARKER parse).
+export function resolveWizardSessionId(opts: {
+  agent: WizardAgentKind
+  cwd: string
+  pinSessionId?: string
+  spawnedAt: string
+}): { kind: WizardAgentKind; id: string } | null {
+  if (opts.agent === 'claude') {
+    return opts.pinSessionId ? { kind: 'claude', id: opts.pinSessionId } : null
+  }
+  const ref = locateCodexSessionLog(opts.cwd, opts.spawnedAt)
+  return ref ? { kind: 'codex', id: ref.sessionId } : null
 }

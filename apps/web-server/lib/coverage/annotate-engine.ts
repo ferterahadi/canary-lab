@@ -5,7 +5,9 @@ import path from 'path'
 import { spawn } from 'child_process'
 import { pickAvailableHealAgent, type HealAgent } from '../runtime/auto-heal'
 import { ANNOTATE_MODELS, modelArgs } from '../agent-models'
-import { makeClaudeStreamSink } from './agent-stream'
+import { startIdleTimer, type IdleTimer } from '../agent-idle-timer'
+import { claudeSessionLogPath } from '../agent-session-log'
+import { recoverClaudeFinalText } from '../agent-stream'
 import type { PathType, ProposedMapping, Requirement } from '../../../../shared/coverage/types'
 
 /** The agent CLI session backing a coverage/summary run — pinned at spawn so the
@@ -26,7 +28,9 @@ export type { ProposedMapping }
 
 const ANNOTATE_TEMPLATE_PATH = path.join(__dirname, '../../prompts/coverage-annotate.md')
 const ANNOTATE_SCHEMA_PATH = path.join(__dirname, '../../prompts/coverage-annotate.schema.json')
-const ANNOTATE_TIMEOUT_MS = 180_000
+// Idle (inactivity) window: the annotate agent is killed only after this long
+// with NO activity, not on a fixed wall-clock deadline (see agent-idle-timer.ts).
+const ANNOTATE_IDLE_TIMEOUT_MS = 5 * 60 * 1000
 
 const PATH_TYPES: PathType[] = ['happy', 'sad', 'edge']
 
@@ -249,21 +253,23 @@ function defaultRunAgent(agent: HealAgent, prompt: string, opts: RunAgentOpts): 
     : undefined
   const outputPath = outputDir ? path.join(outputDir, 'last-message.txt') : undefined
   // Pin a session id for claude so the CLI's JSONL session log is locatable and
-  // the Generating screen can stream it (R17). `-p` still writes the session log.
+  // AgentSessionView can tail it (the live view comes from that JSONL, not stdout).
   const claudeSessionId = agent === 'claude' ? crypto.randomUUID() : undefined
-  // Stream-json gives a live token stream on stdout (R: live agent output) — the
-  // sink renders readable text to onOutput as the model writes and recovers the
-  // final answer. `--session-id` still pins the on-disk session for the timeline.
+  // Agentic (Portify-style): `--dangerously-skip-permissions` lets the agent use
+  // its read/grep tools to ground the mapping in the real source. stream-json
+  // keeps stdout flowing (token deltas) so the idle clock resets during a long
+  // claude inference; it's consumed only for liveness + answer recovery (display
+  // is the JSONL tail). codex `exec` already streams progress; read-only sandbox.
   const args = agent === 'claude'
-    ? [...modelArgs(ANNOTATE_MODELS.claude), '--output-format=stream-json', '--include-partial-messages', '--verbose', '--session-id', claudeSessionId!, '-p', prompt]
+    ? ['-p', prompt, '--dangerously-skip-permissions', '--output-format=stream-json', '--include-partial-messages', '--verbose', ...modelArgs(ANNOTATE_MODELS.claude), '--session-id', claudeSessionId!]
     : codexArgs(outputPath!)
   opts.onSession?.(agent === 'claude' ? { agent: 'claude', sessionId: claudeSessionId! } : { agent: 'codex', sessionId: '' })
   return new Promise((resolve, reject) => {
     let stdout = ''
     let stderr = ''
     let settled = false
-    const claudeSink = agent === 'claude' ? makeClaudeStreamSink(opts.onOutput) : null
     const child = spawn(agent, args, { cwd: opts.cwd, stdio: ['pipe', 'pipe', 'pipe'] })
+    let idleTimer: IdleTimer | undefined
     const cleanup = () => {
       opts.signal?.removeEventListener('abort', abort)
       if (outputDir) fs.rmSync(outputDir, { recursive: true, force: true })
@@ -271,7 +277,7 @@ function defaultRunAgent(agent: HealAgent, prompt: string, opts: RunAgentOpts): 
     const finish = (err?: Error, output?: string) => {
       if (settled) return
       settled = true
-      clearTimeout(timer)
+      idleTimer?.stop()
       cleanup()
       if (err) reject(err)
       else resolve(output ?? '')
@@ -280,10 +286,20 @@ function defaultRunAgent(agent: HealAgent, prompt: string, opts: RunAgentOpts): 
       child.kill('SIGTERM')
       finish(new Error('coverage annotate cancelled'))
     }
-    const timer = setTimeout(() => {
-      child.kill('SIGTERM')
-      finish(new Error(`coverage annotate agent timed out after ${ANNOTATE_TIMEOUT_MS}ms`))
-    }, ANNOTATE_TIMEOUT_MS)
+    // Idle timeout, not a wall-clock deadline. Activity signal: codex prints to
+    // stdout (bumped below); claude `-p` is silent until done, so its tool work is
+    // tracked by the session-JSONL growing.
+    const claudeLogPath = agent === 'claude' && claudeSessionId && opts.cwd
+      ? claudeSessionLogPath(opts.cwd, claudeSessionId)
+      : undefined
+    idleTimer = startIdleTimer({
+      idleMs: ANNOTATE_IDLE_TIMEOUT_MS,
+      activity: claudeLogPath ? () => { try { return fs.statSync(claudeLogPath).size } catch { return 0 } } : undefined,
+      onIdle: (idleMs) => {
+        child.kill('SIGTERM')
+        finish(new Error(`coverage annotate agent idle for ${idleMs}ms`))
+      },
+    })
     if (opts.signal?.aborted) {
       abort()
       return
@@ -292,13 +308,13 @@ function defaultRunAgent(agent: HealAgent, prompt: string, opts: RunAgentOpts): 
     child.stdout.on('data', (chunk) => {
       const t = chunk.toString('utf-8')
       stdout += t
-      // claude: parse the stream-json + stream readable text; codex: raw passthrough.
-      if (claudeSink) claudeSink.push(t)
-      else opts.onOutput?.(t)
+      idleTimer?.bump()
+      opts.onOutput?.(t)
     })
     child.stderr.on('data', (chunk) => {
       const t = chunk.toString('utf-8')
       stderr += t
+      idleTimer?.bump()
       opts.onOutput?.(t)
     })
     child.on('error', (error) => finish(new Error(`coverage annotate agent failed: ${error.message}`)))
@@ -307,7 +323,9 @@ function defaultRunAgent(agent: HealAgent, prompt: string, opts: RunAgentOpts): 
         finish(new Error(`coverage annotate agent failed with ${sig ?? `exit code ${code}`}${stderr ? `\n${stderr}` : ''}`))
         return
       }
-      let finalOutput = claudeSink ? claudeSink.finalText() : stdout
+      // codex's --output-last-message file is the authoritative final answer;
+      // claude's stdout is stream-json envelopes → recover the final message.
+      let finalOutput = agent === 'claude' ? recoverClaudeFinalText(stdout) : stdout
       if (outputPath && fs.existsSync(outputPath)) {
         const fromFile = fs.readFileSync(outputPath, 'utf-8')
         if (fromFile.trim()) finalOutput = fromFile

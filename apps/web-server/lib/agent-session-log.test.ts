@@ -4,6 +4,7 @@ import os from 'os'
 import path from 'path'
 import {
   encodeClaudeProjectDir,
+  claudeSessionLogPath,
   locateClaudeSessionLog,
   findClaudeLogBySessionId,
   locateLatestClaudeSessionLog,
@@ -16,8 +17,10 @@ import {
   loadAgentSessionMeta,
   parseAgentSessionRefFile,
   renderAgentSessionContext,
+  buildFullSessionTranscript,
   writeFullSessionTranscript,
   selectAgentSessionRef,
+  resolveManifestSessionRef,
 } from './agent-session-log'
 
 let homeDir: string
@@ -28,6 +31,20 @@ beforeEach(() => {
 
 afterEach(() => {
   try { fs.rmSync(homeDir, { recursive: true, force: true }) } catch { /* best-effort */ }
+})
+
+describe('claudeSessionLogPath', () => {
+  it('returns the expected path for a real directory', () => {
+    const result = claudeSessionLogPath(homeDir, 'sess-1', homeDir)
+    expect(result).toBe(path.join(homeDir, '.claude', 'projects', encodeClaudeProjectDir(homeDir), 'sess-1.jsonl'))
+  })
+
+  it('falls back to raw cwd when realpathSync throws (lines 118-119 catch branch)', () => {
+    // Pass a non-existent path so realpathSync throws ENOENT.
+    const fakeCwd = '/this/path/does/not/exist'
+    const result = claudeSessionLogPath(fakeCwd, 'sess-2', homeDir)
+    expect(result).toBe(path.join(homeDir, '.claude', 'projects', encodeClaudeProjectDir(fakeCwd), 'sess-2.jsonl'))
+  })
 })
 
 describe('encodeClaudeProjectDir', () => {
@@ -1068,6 +1085,29 @@ describe('renderAgentSessionContext', () => {
     expect(rendered).toContain('ASSISTANT: real output')
     expect(rendered).not.toContain('not-array')
   })
+
+  it('falls back to ref.logPath when writeFullSessionTranscript fails (line 481 ?? branch)', () => {
+    // Create a valid log file.
+    const logFile = path.join(homeDir, 'fallback.jsonl')
+    fs.writeFileSync(logFile, JSON.stringify({
+      type: 'assistant',
+      message: { content: [{ type: 'text', text: 'hello' }] },
+    }) + '\n')
+    // Spy on fs.writeFileSync to throw only for transcript writes so the ?? branch fires.
+    const writeSpy = vi.spyOn(fs, 'writeFileSync').mockImplementation((p: fs.PathOrFileDescriptor, ...args: unknown[]) => {
+      if (typeof p === 'string' && p.endsWith('.transcript.txt')) {
+        throw Object.assign(new Error('EROFS'), { code: 'EROFS' })
+      }
+      return (fs.writeFileSync as Function)(p, ...args)
+    })
+    try {
+      const rendered = renderAgentSessionContext({ agent: 'claude', sessionId: 'fb-sid', logPath: logFile })
+      // writeFullSessionTranscript fails → falls back to ref.logPath (line 481 ?? branch).
+      expect(rendered).toContain(logFile)
+    } finally {
+      writeSpy.mockRestore()
+    }
+  })
 })
 
 describe('loadAgentSessionLog (codex)', () => {
@@ -1279,5 +1319,114 @@ describe('session metadata (model / effort)', () => {
     const { events, meta } = loadAgentSession({ agent: 'codex', sessionId: 's', logPath: file })
     expect(meta).toEqual({ model: 'gpt-5.5', effort: 'medium' })
     expect(events).toEqual([{ kind: 'assistant-message', timestamp: 't', text: 'done' }])
+  })
+})
+
+describe('resolveManifestSessionRef', () => {
+  it('returns null when sessionRef is undefined', () => {
+    expect(resolveManifestSessionRef(undefined, {})).toBeNull()
+  })
+
+  it('returns null for a claude ref when sessionId is empty (line 301)', () => {
+    expect(resolveManifestSessionRef({ agent: 'claude', sessionId: '' }, {})).toBeNull()
+  })
+
+  it('returns null for a codex ref when opts lacks projectRoot (line 305-306)', () => {
+    // codex branch requires opts.projectRoot and opts.startedAt; without them → null
+    expect(resolveManifestSessionRef(
+      { agent: 'codex', sessionId: 'sess-1' },
+      { startedAt: '2026-01-01T00:00:00Z' }, // no projectRoot
+    )).toBeNull()
+  })
+
+  it('returns null for a codex ref when opts lacks startedAt (line 305-306)', () => {
+    expect(resolveManifestSessionRef(
+      { agent: 'codex', sessionId: 'sess-1' },
+      { projectRoot: '/some/project' }, // no startedAt
+    )).toBeNull()
+  })
+
+  it('returns a claude ref when findClaudeLogBySessionId finds a log (line 303 truthy branch)', () => {
+    // Create a real .claude/projects/<encoded-dir>/<sessionId>.jsonl so findClaudeLogBySessionId returns it.
+    const sessionId = 'test-session-abc123'
+    const runDir = homeDir
+    const encoded = encodeClaudeProjectDir(runDir)
+    const projectDir = path.join(homeDir, '.claude', 'projects', encoded)
+    fs.mkdirSync(projectDir, { recursive: true })
+    const logFile = path.join(projectDir, `${sessionId}.jsonl`)
+    fs.writeFileSync(logFile, '')
+    // Mock os.homedir to return homeDir so findClaudeLogBySessionId scans our temp dir.
+    const homedirSpy = vi.spyOn(os, 'homedir').mockReturnValue(homeDir)
+    try {
+      const result = resolveManifestSessionRef({ agent: 'claude', sessionId }, {})
+      expect(result).toMatchObject({ agent: 'claude', sessionId, logPath: logFile })
+    } finally {
+      homedirSpy.mockRestore()
+    }
+  })
+
+  it('calls locateCodexSessionLog when both projectRoot and startedAt are provided (line 306)', () => {
+    // Provide both opts → the codex path reaches line 306: return locateCodexSessionLog(...)
+    // No Codex sessions exist in homeDir, so locateCodexSessionLog returns null — that's fine;
+    // the important thing is that line 306 executes.
+    const result = resolveManifestSessionRef(
+      { agent: 'codex', sessionId: 'sess-1' },
+      { projectRoot: homeDir, startedAt: '2026-01-01T00:00:00.000Z' },
+    )
+    // locateCodexSessionLog finds nothing in the empty homeDir, so null is returned via line 306.
+    expect(result).toBeNull()
+  })
+
+  it('returns null for a claude ref when findClaudeLogBySessionId finds no log (line 302-303 null arm)', () => {
+    // Spy on readdirSync: throw ENOENT for any .claude path → findClaudeLogBySessionId returns null.
+    const readdirSpy = vi.spyOn(fs, 'readdirSync').mockImplementation((p, opts) => {
+      if (String(p).includes('.claude')) throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' })
+      return (fs.readdirSync as Function)(p, opts)
+    })
+    try {
+      const result = resolveManifestSessionRef({ agent: 'claude', sessionId: 'sid-abc' }, {})
+      expect(result).toBeNull()
+    } finally {
+      readdirSpy.mockRestore()
+    }
+  })
+})
+
+describe('buildFullSessionTranscript', () => {
+  it('returns empty string when events array is empty (line 497 branch)', () => {
+    const ref = { agent: 'claude' as const, sessionId: 'sid', logPath: '/fake/path.jsonl' }
+    expect(buildFullSessionTranscript(ref, [])).toBe('')
+  })
+
+  it('returns a non-empty transcript when events are provided', () => {
+    const ref = { agent: 'claude' as const, sessionId: 'sid-t', logPath: '/fake/t.jsonl' }
+    const events = [{ kind: 'user-message' as const, text: 'ping' }]
+    const result = buildFullSessionTranscript(ref, events)
+    expect(result).toContain('claude session sid-t')
+    expect(result).toContain('ping')
+  })
+})
+
+describe('writeFullSessionTranscript', () => {
+  it('returns null when transcript is empty (line 512 branch — events array is empty)', () => {
+    const ref = { agent: 'claude' as const, sessionId: 'sid', logPath: path.join(homeDir, 'empty.jsonl') }
+    // Pass empty events → buildFullSessionTranscript returns '' → if (!transcript) return null
+    expect(writeFullSessionTranscript(ref, [])).toBeNull()
+  })
+
+})
+
+describe('writeFullSessionTranscript — catch branch (line 521)', () => {
+  it('returns null when the transcript file cannot be written', () => {
+    // Pass events directly so buildFullSessionTranscript produces a non-empty transcript
+    // (otherwise line 512 `if (!transcript) return null` fires first and the catch is never reached).
+    // Then point logPath at a directory that doesn't exist → writeFileSync throws → catch returns null.
+    const missingParent = path.join(homeDir, 'no-such-dir', 'claude.jsonl')
+    const events = [{ kind: 'user-message' as const, text: 'hello' }]
+    const result = writeFullSessionTranscript(
+      { agent: 'claude', sessionId: 'sid', logPath: missingParent },
+      events,
+    )
+    expect(result).toBeNull()
   })
 })

@@ -22,11 +22,11 @@ import {
   extractGeneratedSpecOutput,
   extractIntentSummary,
   extractPlan,
-  extractWizardSessionRef,
 } from '../lib/wizard-output-parser'
 import {
   STAGE1_DIFF_TEMPLATE,
   STAGE1_TEMPLATE,
+  resolveWizardSessionId,
 } from '../lib/wizard-agent-spawner'
 import { refForAgentSpawn } from '../lib/agent-session-tailer'
 import {
@@ -441,11 +441,12 @@ async function runPlanStage(deps: TestsDraftRouteDeps, draftId: string): Promise
   // session WS can tail the JSONL log from the moment of spawn.
   const pinSessionId = picked.agent === 'claude' ? randomUUID() : undefined
   const planAgentSessionRef = refForAgentSpawn({ agent: picked.agent, cwd: p.draftDir, sessionId: pinSessionId })
+  const planSpawnedAt = new Date().toISOString()
   patchDraft(deps, draftId, {
     wizardAgent: picked.agent,
     activeAgentStage: 'planning',
     planAgentSessionRef,
-    planAgentSpawnedAt: new Date().toISOString(),
+    planAgentSpawnedAt: planSpawnedAt,
   })
   if (!isStageCurrent(deps.logsDir, draftId, 'planning')) return
   const planTemplate = selectPlanTemplate(rec)
@@ -479,7 +480,15 @@ async function runPlanStage(deps: TestsDraftRouteDeps, draftId: string): Promise
   const intent = extractIntentSummary(stream)
   const intentSummary = intent.ok ? intent.value : 'No intent summary produced by agent.'
   fs.writeFileSync(p.intentMd, intentSummary, 'utf8')
-  const sessionRef = extractWizardSessionRef(stream)
+  // Resolve the agent's persisted session id for the spec stage to `--resume`:
+  // claude's is the id we pinned; codex's is located from its session log by
+  // cwd + spawn time (no formatter marker to parse anymore).
+  const sessionRef = resolveWizardSessionId({
+    agent: picked.agent,
+    cwd: p.draftDir,
+    pinSessionId,
+    spawnedAt: planSpawnedAt,
+  })
   transitionDraft(deps, draftId, 'plan-ready', {
     plan: parsed.value,
     intentSummary,

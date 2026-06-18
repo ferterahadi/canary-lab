@@ -82,6 +82,16 @@ describe('changedRequirementIds (R10 delta)', () => {
   })
 })
 
+describe('requirementFingerprintMap', () => {
+  it('excludes deprecated requirements (line 86 branch)', () => {
+    const active = r('R1')
+    const deprecated = r('R2', { deprecated: true })
+    const map = requirementFingerprintMap([active, deprecated])
+    expect(Object.keys(map)).toEqual(['R1'])
+    expect('R2' in map).toBe(false)
+  })
+})
+
 describe('withFingerprints', () => {
   it('attaches doc + requirement fingerprints and a set hash', () => {
     const summary: PrdSummary = {

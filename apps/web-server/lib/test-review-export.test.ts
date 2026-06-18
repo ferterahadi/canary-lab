@@ -27,6 +27,7 @@ describe('test review export', () => {
     ])
     expect(evaluationCodexArgs('rewrite prompt')).not.toContain('--full-auto')
     expect(evaluationCodexArgs('rewrite prompt')).not.toContain('--model')
+    expect(evaluationCodexArgs('rewrite prompt')).not.toContain('--json')
     expect(evaluationCodexArgs('rewrite prompt', '/tmp/evaluation-output.txt', '/tmp/evaluation-schema.json')).toEqual([
       'exec',
       '--skip-git-repo-check',

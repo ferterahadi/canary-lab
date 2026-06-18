@@ -519,6 +519,28 @@ describe('EvaluationExportProvider', () => {
     expect(captured.value?.tasks.map((t) => t.taskId)).toEqual(['t3', 't1'])
   })
 
+  it('calls refreshTask when a data chunk signals an agent session ref (line 76 true branch)', async () => {
+    // The onData handler only calls refreshTask when:
+    // 1. the task has no sessionRef yet, AND
+    // 2. the chunk matches `[agent:xxx] starting localized rewrite|still running`
+    const running = task({ taskId: 'ref-task', runId: 'run-ref', status: 'running' })
+    const withRef = { ...running, sessionRef: { agent: 'claude' as const, sessionId: 'sid', logPath: '/tmp/x.jsonl' } }
+    vi.mocked(api.startEvaluationExport).mockResolvedValue(running)
+    vi.mocked(api.getEvaluationExportTask).mockResolvedValue(withRef)
+
+    const captured = renderProbe()
+    await act(async () => {
+      await captured.value?.startExport('run-ref', 'localized')
+    })
+
+    // Fire a chunk matching the regex (no sessionRef yet → refreshTask fires)
+    await act(async () => {
+      taskSocket('ref-task').fire({ type: 'data', chunk: '[agent:claude] starting localized rewrite\n' })
+      await Promise.resolve()
+    })
+    expect(api.getEvaluationExportTask).toHaveBeenCalledWith('ref-task')
+  })
+
   it('throws when the hook is used outside the provider', () => {
     function OutsideProviderProbe() {
       useEvaluationExports()

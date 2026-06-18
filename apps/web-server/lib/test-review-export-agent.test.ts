@@ -92,13 +92,46 @@ describe('evaluation rewrite agent path', () => {
       }))
       child.close(0)
     })
+    const onOutput = vi.fn()
     const { generateEvaluationRewriteWithAgent } = await import('./test-review-export')
 
-    const rewrite = await generateEvaluationRewriteWithAgent(detail(), 'claude', tmpDir)
+    const rewrite = await generateEvaluationRewriteWithAgent(detail(), 'claude', tmpDir, { onOutput })
 
     expect(spawnCalls.map((call) => call.command)).toEqual(['claude', 'codex'])
     expect(rewrite?.summary).toBe('Parsed rewrite summary.')
     expect(rewrite?.cases[0].title).toBe('Parsed case')
+    expect(onOutput).toHaveBeenCalledWith(
+      expect.stringMatching(/^\[agent:claude\] rewrite failed: unparseable output:.*— falling back to codex\n$/),
+    )
+  })
+
+  it('runs Claude as an agentic loop with stream-json and recovers the rewrite from the result envelope', async () => {
+    availableAgents = ['claude']
+    const rewriteJson = JSON.stringify({
+      summary: 'Agentic rewrite summary.',
+      cases: [{
+        title: 'Agentic case',
+        whatWasChecked: 'Agentic check.',
+        whyItMatters: 'Agentic impact.',
+        confidence: 'Agentic confidence.',
+      }],
+    })
+    mockAgentModules(({ child }) => {
+      // stream-json: a token delta (liveness) then the terminal result envelope.
+      child.stdout.emit('data', `${JSON.stringify({ type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'writing…' } } })}\n`)
+      child.stdout.emit('data', `${JSON.stringify({ type: 'result', result: rewriteJson })}\n`)
+      child.close(0)
+    })
+    const { generateEvaluationRewriteWithAgent } = await import('./test-review-export')
+
+    const rewrite = await generateEvaluationRewriteWithAgent(detail(), 'claude', tmpDir)
+
+    expect(spawnCalls[0].command).toBe('claude')
+    expect(spawnCalls[0].args).toContain('-p')
+    expect(spawnCalls[0].args).toContain('--dangerously-skip-permissions')
+    expect(spawnCalls[0].args).toContain('--output-format=stream-json')
+    expect(rewrite?.summary).toBe('Agentic rewrite summary.')
+    expect(rewrite?.cases[0].title).toBe('Agentic case')
   })
 
   it('rejects when every available agent fails or returns unusable output', async () => {

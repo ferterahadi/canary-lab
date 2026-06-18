@@ -8,6 +8,18 @@ describe('extractTestsFromSource', () => {
     expect(r.parseError).toBeUndefined()
   })
 
+  it('extracts a template-literal test name (lines 60-61 branch)', () => {
+    // getNameArg: when the first argument is a template expression (backtick string),
+    // lines 60-61 read its source text and strip the surrounding backticks.
+    const src = `
+      const x = 'world'
+      test(\`hello \${x}\`, async () => {})
+    `
+    const r = extractTestsFromSource('a.spec.ts', src)
+    expect(r.tests).toHaveLength(1)
+    expect(r.tests[0].name).toBe('hello ${x}')
+  })
+
   it('extracts a flat test with no steps', () => {
     const src = `
       import { test } from '@playwright/test'
@@ -366,5 +378,94 @@ describe('extractTestsFromSource — Playwright tag linkage (R1)', () => {
     const r = extractTestsFromSource('a.spec.ts', src)
     expect(r.tests[0].requirements).toEqual(['R1', 'R9'])
     expect(r.tests[0].pathTypes).toEqual(['happy', 'sad'])
+  })
+
+  it('returns empty annotations when the details object has no tag/tags property (line 202 branch)', () => {
+    // The details object has `annotation` but no `tag`/`tags` key — the loop
+    // hits `if (key !== 'tag' && key !== 'tags') continue` for every property
+    // and falls through to `return {}` (line 202).
+    const src = `test('no tag', { annotation: { type: 'issue', description: 'abc' } }, async () => {})`
+    const r = extractTestsFromSource('a.spec.ts', src)
+    expect(r.tests[0].requirements).toBeUndefined()
+    expect(r.tests[0].pathTypes).toBeUndefined()
+  })
+
+  it('skips non-PropertyAssignment nodes in details object (line 197 continue branch)', () => {
+    // A spread element ({ ...base }) produces a SpreadAssignment, not a PropertyAssignment.
+    // The loop hits `if (!ts.isPropertyAssignment(prop)) continue` and skips it.
+    const src = `
+      const base = {}
+      test('spread', { ...base }, async () => {})
+    `
+    const r = extractTestsFromSource('a.spec.ts', src)
+    expect(r.tests[0].requirements).toBeUndefined()
+  })
+
+  it('ignores non-string array elements in tag value (line 183 FALSE branch)', () => {
+    // readTagPropertyStrings: when the tag value is an array containing a non-string element,
+    // `if (ts.isStringLiteralLike(el))` is false for that element and it is skipped.
+    const src = `test('mixed', { tag: [1, '@req-R7'] }, async () => {})`
+    const r = extractTestsFromSource('a.spec.ts', src)
+    // The numeric `1` is skipped; only '@req-R7' is read.
+    expect(r.tests[0].requirements).toEqual(['R7'])
+  })
+
+  it('reads tag when the property key is a quoted string literal (line 198 isStringLiteralLike branch)', () => {
+    // parseTestTags line 198: `ts.isIdentifier(prop.name) || ts.isStringLiteralLike(prop.name)`
+    // When the key is written as a quoted string ('tag') rather than an identifier (tag),
+    // isIdentifier is false but isStringLiteralLike is true.
+    const src = `test('quoted key', { 'tag': '@req-R8' }, async () => {})`
+    const r = extractTestsFromSource('a.spec.ts', src)
+    expect(r.tests[0].requirements).toEqual(['R8'])
+  })
+
+  it('ignores computed property name keys in details object (line 198 fallback branch)', () => {
+    // parseTestTags line 198: `ts.isIdentifier(prop.name) || ts.isStringLiteralLike(prop.name) ? prop.name.text : ''`
+    // A computed property name [k] is neither Identifier nor StringLiteralLike → key falls back to '',
+    // which matches neither 'tag' nor 'tags' → no coverage tags extracted.
+    const src = `
+      const k = 'tag'
+      test('computed key', { [k]: '@req-R9' }, async () => {})
+    `
+    const r = extractTestsFromSource('a.spec.ts', src)
+    expect(r.tests[0].requirements).toBeUndefined()
+  })
+
+  it('returns empty when tag value is neither string nor array (line 181 else-if FALSE branch)', () => {
+    // readTagPropertyStrings: when the tag value is not a string literal and not an array,
+    // both branches are false and the function returns [].
+    const src = `test('obj tag', { tag: {} }, async () => {})`
+    const r = extractTestsFromSource('a.spec.ts', src)
+    expect(r.tests[0].requirements).toBeUndefined()
+    expect(r.tests[0].pathTypes).toBeUndefined()
+  })
+
+  it('deduplicates requirement ids when the same id appears in both tag and comment (line 211 FALSE branch)', () => {
+    // mergeAnnotations: iterating over [...primary.requirements, ...fallback.requirements],
+    // if R1 appears in both, the second encounter hits `if (!requirements.includes(id))` as FALSE.
+    const src = `
+      // @requirement R1
+      test('dup req', { tag: ['@req-R1'] }, async () => {})
+    `
+    const r = extractTestsFromSource('a.spec.ts', src)
+    // R1 from both sources → should appear exactly once after dedup
+    expect(r.tests[0].requirements).toEqual(['R1'])
+  })
+})
+
+describe('extractTestsFromSource — duplicate assertion dedup (line 259 FALSE branch)', () => {
+  it('deduplicates identical expect(...) snippets in the collected assertions', () => {
+    // The same expect call written twice → seen.has(text) is true on second encounter → not added again.
+    const src = `
+      test('dup assert', async () => {
+        expect(total).toBe(42)
+        expect(total).toBe(42)
+      })
+    `
+    const r = extractTestsFromSource('a.spec.ts', src)
+    const assertions = r.tests[0].assertions ?? []
+    // Only one unique snippet should be collected
+    const count = assertions.filter((a) => a.includes('total')).length
+    expect(count).toBe(1)
   })
 })

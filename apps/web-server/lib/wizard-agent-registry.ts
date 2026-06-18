@@ -1,13 +1,10 @@
 import fs from 'fs'
 import path from 'path'
-import type { PaneBroker } from './pane-broker'
-import type { PtyHandle } from './runtime/pty-spawner'
+import type { ChildProcess } from 'child_process'
 
 interface ActiveWizardAgent {
-  pty: PtyHandle
+  child: ChildProcess
   logPath: string
-  broker?: PaneBroker | null
-  paneId: string
   cancelled: boolean
 }
 
@@ -22,16 +19,12 @@ export class WizardAgentRegistry {
 
   register(input: {
     draftId: string
-    pty: PtyHandle
+    child: ChildProcess
     logPath: string
-    broker?: PaneBroker | null
-    paneId: string
   }): { isCancelled: () => boolean; clear: () => void } {
     const entry: ActiveWizardAgent = {
-      pty: input.pty,
+      child: input.child,
       logPath: input.logPath,
-      broker: input.broker,
-      paneId: input.paneId,
       cancelled: false,
     }
     this.active.set(input.draftId, entry)
@@ -46,13 +39,13 @@ export class WizardAgentRegistry {
   cancel(draftId: string): boolean {
     const entry = this.active.get(draftId)
     if (!entry) return false
-    this.cancelEntry(draftId, entry)
+    this.cancelEntry(entry)
     return true
   }
 
   cancelAll(): void {
-    for (const [draftId, entry] of this.active) {
-      this.cancelEntry(draftId, entry)
+    for (const entry of this.active.values()) {
+      this.cancelEntry(entry)
     }
   }
 
@@ -60,7 +53,7 @@ export class WizardAgentRegistry {
     return this.active.has(draftId)
   }
 
-  private cancelEntry(draftId: string, entry: ActiveWizardAgent): void {
+  private cancelEntry(entry: ActiveWizardAgent): void {
     if (entry.cancelled) return
     entry.cancelled = true
     const msg = '\n[wizard] Generation cancelled by user.\n'
@@ -70,24 +63,14 @@ export class WizardAgentRegistry {
     } catch {
       // Best effort; cancellation should still kill the process.
     }
-    entry.broker?.push(entry.paneId, msg)
-    killTree(entry.pty, 'SIGTERM')
-    scheduleSigkillFallback(entry.pty)
+    killChild(entry.child)
   }
 }
 
-export function killTree(pty: PtyHandle, signal: NodeJS.Signals | number): void {
-  try {
-    process.kill(-pty.pid, signal)
-    return
-  } catch {
-    // Fall back to signalling the pty's immediate process.
-  }
-  try { pty.kill(typeof signal === 'string' ? signal : undefined) } catch { /* already dead */ }
-}
-
-export function scheduleSigkillFallback(pty: PtyHandle, ms = 2000): void {
+// SIGTERM, then SIGKILL after a grace window if the agent ignored it.
+export function killChild(child: ChildProcess, signal: NodeJS.Signals = 'SIGTERM'): void {
+  try { child.kill(signal) } catch { /* already dead */ }
   setTimeout(() => {
-    try { process.kill(-pty.pid, 'SIGKILL') } catch { /* already dead */ }
-  }, ms).unref?.()
+    try { child.kill('SIGKILL') } catch { /* already dead */ }
+  }, 2000).unref?.()
 }
