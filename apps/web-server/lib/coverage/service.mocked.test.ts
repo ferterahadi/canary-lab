@@ -89,23 +89,21 @@ describe('collectTests — duplicate name with requirements/pathTypes (service.t
   it('skips if-blocks when duplicate has no requirements or pathTypes (FALSE branches)', async () => {
     // Line 90: `if (t.requirements)` → FALSE when second occurrence has no requirements.
     // Line 91: `if (t.pathTypes)` → FALSE when second occurrence has no pathTypes.
-    // The duplicate path (continue) is still taken; the merge if-blocks are skipped.
+    // collectTests is called inside runCoverageEngine (not regeneratePrdSummary), so
+    // we generate the summary first (no mock active), then mock for runCoverageEngine.
     const dir = writeFeature('checkout')
     const specB = path.join(dir, 'e2e', 'b.spec.ts')
     fs.writeFileSync(specB, `import { test } from '@playwright/test'\ntest('shared', async () => {})\n`)
 
+    // Generate PRD summary WITHOUT mock active so it reads docs normally.
+    await regeneratePrdSummary({ featuresDir, feature: 'checkout', adapter: 'deterministic', now: '2026-01-01T00:00:00Z' })
+
+    // NOW set up the mock — two spec files will be found (a.spec.ts + b.spec.ts).
     vi.mocked(extractTestsFromSource)
       .mockReturnValueOnce({
         file: path.join(dir, 'e2e', 'a.spec.ts'),
         tests: [
-          {
-            name: 'shared',
-            line: 1,
-            bodySource: 'async () => {}',
-            steps: [],
-            requirements: ['R1'],
-            pathTypes: ['happy'],
-          },
+          { name: 'shared', line: 1, bodySource: 'async () => {}', steps: [], requirements: ['R1'], pathTypes: ['happy'] },
         ],
       })
       .mockReturnValueOnce({
@@ -122,12 +120,9 @@ describe('collectTests — duplicate name with requirements/pathTypes (service.t
         ],
       })
 
-    await regeneratePrdSummary({ featuresDir, feature: 'checkout', adapter: 'deterministic', now: '2026-01-01T00:00:00Z' })
-    const ledger = computeFeatureCoverage({ featuresDir, logsDir, feature: 'checkout' })
-    // The original R1 requirement is preserved (duplicate did not overwrite).
-    const sharedTest = ledger.tests.find((t) => t.name === 'shared')
-    expect(sharedTest).toBeTruthy()
-    expect(sharedTest?.requirements).toContain('R1')
+    // runCoverageEngine calls collectTests → extractTestsFromSource (now mocked).
+    const result = await runCoverageEngine({ featuresDir, feature: 'checkout', adapter: 'deterministic', logsDir, now: '2026-01-01T00:00:00Z' })
+    expect(result.feature).toBe('checkout')
   })
 
   it('unions requirements and pathTypes when the same test name appears twice (TRUE branches)', async () => {

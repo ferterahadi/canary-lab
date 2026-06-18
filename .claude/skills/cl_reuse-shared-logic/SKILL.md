@@ -24,39 +24,33 @@ slightly different" is how five slightly-different copies are born.
 | --- | --- | --- |
 | Colour / spacing / radius / type | CSS tokens + layout precedents → `cl_ui-design-philosophy` | hardcode hex, add a UI kit |
 | Long-running background task | file-backed store pattern → `cl_async-task-ux` | bespoke job tracking |
+| **Spawn an agent CLI** (claude/codex) | `runAgentProcess` + `buildClaudeAgenticArgs` (`lib/agent-process.ts`) | re-implement spawn + tee + idle |
 | Idle / liveness timeout | `startIdleTimer` (`lib/agent-idle-timer.ts`) | inline `setInterval` + `lastOutputAt` |
 | Recover claude's answer from stream-json stdout | `recoverClaudeFinalText` (`lib/agent-stream.ts`) | re-parse envelopes inline |
 | Path of claude's session JSONL | `claudeSessionLogPath` (`lib/agent-session-log.ts`) | recompute `~/.claude/projects/...` |
 | Show an agent's progress/output | `AgentSessionView` + `tailAgentSession` → `cl_surfacing-agent-work` | a new viewer |
 | MCP tool surface | `mcp/tools.ts` registry → `cl_add-mcp-tool` | a parallel tool path |
 
-## Known open debt — the agent-process runner
+## The agent-process runner (consolidated — keep it that way)
 
-There are **six** near-identical "spawn agent CLI → pipe stdout → tee to
-log/`onOutput` → bump the idle clock → handle cancel → recover the answer" blocks:
+All **six** agent-spawn sites now compose `runAgentProcess` (`lib/agent-process.ts`)
+instead of each re-implementing "spawn → pipe stdout → tee → bump idle → cancel →
+recover answer":
 
-- `lib/wizard-agent-runner.ts`
-- `lib/coverage/annotate-engine.ts`
-- `lib/coverage/prd-summary.ts`
-- `lib/test-review-export.ts`
-- `lib/runtime/portify/agent.ts`
-- `lib/runtime/benchmark/runner.ts` (sabotage)
+- `lib/wizard-agent-runner.ts`, `lib/coverage/annotate-engine.ts`,
+  `lib/coverage/prd-summary.ts`, `lib/test-review-export.ts`,
+  `lib/runtime/portify/agent.ts`, `lib/runtime/benchmark/runner.ts` (sabotage)
 
-They drifted and the same fixes (idle, stream-json, stdout-bump) had to be applied
-six times. They should be **one** `runAgentProcess(...)` primitive:
+The primitive owns the shared core: spawn; pipe + tee stdout/stderr; bump the idle
+clock on every chunk; `startIdleTimer` with the session-JSONL-growth backstop. The
+claude agentic argv comes from `buildClaudeAgenticArgs`. Each caller passes only
+its differences as params/closures: `onChunk` (sink), `captureStdout`, `stdin`
+(codex `-`), `activityPath`, `onIdle`/`onTick`, and maps `handle.done` to its own
+return shape + cancellation source (registry / `AbortSignal` / `children` set).
 
-- **Shared core:** spawn; pipe + tee stdout/stderr; bump idle on every chunk;
-  `startIdleTimer` with the session-JSONL-growth backstop; the claude agentic
-  argv (`-p --dangerously-skip-permissions --output-format=stream-json
-  --include-partial-messages --verbose [--session-id|--resume]`) via one
-  `buildClaudeAgenticArgs` builder.
-- **Per-caller adapters (params):** output sink (`onOutput` vs logfile vs both),
-  final-answer handling (`recoverClaudeFinalText` vs `--output-last-message` file
-  vs none), cancellation source (registry vs `AbortSignal` vs `children` set),
-  return shape (string vs void).
-
-Until that lands, **any change to one spawn must be applied to all six** — and
-that recurring pain is the reason to consolidate them.
+**Rule:** a new agent feature, or any change to spawn/idle/stream behaviour, goes
+through `runAgentProcess` / `buildClaudeAgenticArgs` — never a seventh copy. If the
+runner can't express a need, add a param to it.
 
 ## Rule
 
