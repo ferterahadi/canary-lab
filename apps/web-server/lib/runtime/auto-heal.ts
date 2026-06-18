@@ -6,6 +6,7 @@ import { buildHealAddendum, type HealMode } from './heal-prompt-builder'
 import { readManifest } from './manifest'
 import { buildRunPaths } from './run-paths'
 import { renderPersonalWikiMap } from '../../../../shared/runtime/personal-wiki'
+import { HEAL_MODELS } from '../agent-models'
 
 // Heal-agent command builders for the web-server orchestrator. The orchestrator
 // runs claude / codex as a long-lived interactive REPL (no `-p`, no formatter
@@ -293,6 +294,12 @@ export function buildAgentSpawnCommand(agent: HealAgent, args: AgentSpawnArgs = 
   // under a restricted PATH), otherwise the bare agent name (PATH lookup).
   const head = args.binaryPath ? JSON.stringify(args.binaryPath) : agent
 
+  // Optional `--model` — placed right after the binary so it reads as a global
+  // flag for both claude and codex (before codex's `resume` subcommand). Empty
+  // string when the feature runs on the agent default (HEAL_MODELS).
+  const model = HEAL_MODELS[agent]
+  const modelFlag = model ? ` --model ${JSON.stringify(model)}` : ''
+
   if (agent === 'claude') {
     const sid = args.sessionId
       ? (args.resume
@@ -308,17 +315,17 @@ export function buildAgentSpawnCommand(agent: HealAgent, args: AgentSpawnArgs = 
     }
     // No `--dangerously-skip-permissions` — REPL hands tool approval back
     // to the user.
-    return `${head}${sid}${mcp}${promptArg}`
+    return `${head}${modelFlag}${sid}${mcp}${promptArg}`
   }
   // codex interactive REPL. No `--full-auto`: tool approvals stay
   // interactive in the pane. Codex has no `--session-id` analogue, so the
   // first run starts normally. Once the orchestrator discovers Codex's
   // persisted session id, Restart Heal can use `codex resume <id>`.
   if (args.resume && args.sessionId) {
-    return `${head} resume ${JSON.stringify(args.sessionId)}${promptArg}`
+    return `${head}${modelFlag} resume ${JSON.stringify(args.sessionId)}${promptArg}`
   }
   // Codex accepts a positional prompt the same way as claude.
-  return `${head}${promptArg}`
+  return `${head}${modelFlag}${promptArg}`
 }
 
 /**
