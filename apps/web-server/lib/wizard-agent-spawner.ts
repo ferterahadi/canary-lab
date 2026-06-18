@@ -2,6 +2,7 @@ import fs from 'fs'
 import path from 'path'
 import { modelArgs } from './agent-models'
 import { locateCodexSessionLog } from './agent-session-log'
+import { buildClaudeAgenticArgs } from './agent-process'
 
 // Pure helpers for the Add Test wizard's plan / spec agents:
 //
@@ -128,22 +129,13 @@ export function buildWizardArgs(
   opts: { resumeSessionId?: string; pinSessionId?: string; model?: string | null } = {},
 ): string[] {
   if (agent === 'claude') {
-    return [
-      '-p', prompt,
-      '--dangerously-skip-permissions',
-      // stream-json so stdout streams token-by-token — claude `-p` is otherwise
-      // silent for the whole final-message composition, which trips the idle
-      // timer. Consumed ONLY for liveness + answer recovery; display = JSONL tail.
-      '--output-format=stream-json',
-      '--include-partial-messages',
-      '--verbose',
-      ...modelArgs(opts.model ?? null),
-      ...(opts.resumeSessionId
-        ? ['--resume', opts.resumeSessionId]
-        : opts.pinSessionId
-          ? ['--session-id', opts.pinSessionId]
-          : []),
-    ]
+    // Shared claude agentic argv (stream-json for liveness + answer recovery;
+    // display = JSONL tail). spec stage resumes the plan session; plan pins one.
+    return buildClaudeAgenticArgs(prompt, {
+      model: opts.model,
+      sessionId: opts.resumeSessionId ?? opts.pinSessionId,
+      resume: Boolean(opts.resumeSessionId),
+    })
   }
   if (opts.resumeSessionId) {
     return ['exec', 'resume', '--skip-git-repo-check', '--full-auto', ...modelArgs(opts.model ?? null), opts.resumeSessionId, prompt]

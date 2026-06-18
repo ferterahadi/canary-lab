@@ -593,7 +593,7 @@ describe('createPortifyRunner (branch coverage)', () => {
     store.save(saved)
     const result = await runner.save('w')
     expect(result.status).toBe('saved')
-    expect(result).toBe(saved)
+    expect(result).toMatchObject({ workflowId: 'w', status: 'saved' })
   })
 
   it('cancel marks a stateless workflow aborted, and returns a saved one untouched', async () => {

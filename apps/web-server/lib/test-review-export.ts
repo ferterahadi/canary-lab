@@ -2,15 +2,14 @@ import fs from 'fs'
 import path from 'path'
 import os from 'os'
 import crypto from 'crypto'
-import { spawn } from 'child_process'
 import { codeToHtml } from 'shiki'
 import ts from 'typescript'
 import type { RunDetail, PlaywrightPlaybackEvent } from './run-store'
 import { pickAvailableHealAgent, type HealAgent } from './runtime/auto-heal'
 import { EVALUATION_REWRITE_MODELS, modelArgs, modelFor } from './agent-models'
-import { startIdleTimer, type IdleTimer } from './agent-idle-timer'
 import { claudeSessionLogPath } from './agent-session-log'
 import { recoverClaudeFinalText } from './agent-stream'
+import { runAgentProcess, buildClaudeAgenticArgs } from './agent-process'
 import { formatCodeForDisplay } from '../../../shared/code-display-format'
 
 export type AssertionQuality = 'strict' | 'moderate' | 'shallow' | 'unknown'
@@ -303,92 +302,69 @@ function runEvaluationAgent(
   // AgentSessionView can tail it (the live view comes from that JSONL, not stdout).
   // Codex has no --session-id; it's located later by cwd + start.
   const claudeSessionId = agent === 'claude' ? crypto.randomUUID() : undefined
-  // Agentic (Portify-style): `--dangerously-skip-permissions` lets the agent read
-  // the run's specs/artifacts with its tools. stream-json keeps stdout flowing
-  // (token deltas) so the idle clock resets during a long claude inference;
-  // consumed only for liveness + answer recovery (display is the JSONL tail).
-  // codex `exec` already streams progress; read-only sandbox.
+  // Agentic spawn via the shared runner. claude: stream-json for liveness +
+  // answer recovery (display is the JSONL tail); codex: `exec` reads the prompt
+  // from stdin (`-`) and writes the final message to --output-last-message.
   const args = agent === 'claude'
-    ? ['-p', prompt, '--dangerously-skip-permissions', '--output-format=stream-json', '--include-partial-messages', '--verbose', ...modelArgs(EVALUATION_REWRITE_MODELS.claude), '--session-id', claudeSessionId!]
+    ? buildClaudeAgenticArgs(prompt, { model: EVALUATION_REWRITE_MODELS.claude, sessionId: claudeSessionId })
     : evaluationCodexArgs('-', outputPath, EVALUATION_REWRITE_SCHEMA_PATH)
   onSession?.(agent === 'claude' ? { agent: 'claude', sessionId: claudeSessionId! } : { agent: 'codex', sessionId: '' })
-  return new Promise((resolve, reject) => {
-    let stdout = ''
-    let stderr = ''
+
+  let idled = false
+  const handle = runAgentProcess({
+    command: agent,
+    args,
+    cwd,
+    stdin: agent === 'codex' ? prompt : undefined,
+    onChunk: (text) => onOutput?.(text),
+    idleMs: EVALUATION_IDLE_TIMEOUT_MS,
+    activityPath: agent === 'claude' && claudeSessionId && cwd ? claudeSessionLogPath(cwd, claudeSessionId) : undefined,
+    onIdle: () => { idled = true },
+    onTick: (idleMs) => {
+      if (idleMs >= 10_000) onOutput?.(`[agent:${agent}] still running; waiting for CLI output (${Math.floor(idleMs / 1000)}s idle)\n`)
+    },
+  })
+
+  return new Promise<string>((resolve, reject) => {
     let settled = false
-    const child = spawn(agent, args, { cwd, stdio: ['pipe', 'pipe', 'pipe'] })
-    let idleTimer: IdleTimer | undefined
-    const abort = () => {
-      child.kill('SIGTERM')
-      finish(new Error('evaluation rewrite cancelled'))
-    }
-    const cleanup = () => {
-      signal?.removeEventListener('abort', abort)
-      if (outputDir) fs.rmSync(outputDir, { recursive: true, force: true })
-    }
-    const finish = (err?: Error, output?: string) => {
+    const rmOutputDir = (): void => { if (outputDir) fs.rmSync(outputDir, { recursive: true, force: true }) }
+    const settleErr = (err: Error): void => {
       if (settled) return
       settled = true
-      idleTimer?.stop()
-      cleanup()
-      if (err) reject(err)
-      else resolve(output ?? '')
+      signal?.removeEventListener('abort', onAbort)
+      rmOutputDir()
+      reject(err)
     }
-    // Idle timeout, not a wall-clock deadline. Activity signal: codex prints to
-    // stdout (bumped below); claude `-p` is silent until done, so its tool work is
-    // tracked by the session-JSONL growing.
-    const claudeLogPath = agent === 'claude' && claudeSessionId && cwd
-      ? claudeSessionLogPath(cwd, claudeSessionId)
-      : undefined
-    idleTimer = startIdleTimer({
-      idleMs: EVALUATION_IDLE_TIMEOUT_MS,
-      activity: claudeLogPath ? () => { try { return fs.statSync(claudeLogPath).size } catch { return 0 } } : undefined,
-      onIdle: (idleMs) => {
-        child.kill('SIGTERM')
-        finish(new Error(`evaluation rewrite agent idle for ${idleMs}ms`))
-      },
-      onTick: (idleMs) => {
-        if (idleMs >= 10_000) onOutput?.(`[agent:${agent}] still running; waiting for CLI output (${Math.floor(idleMs / 1000)}s idle)\n`)
-      },
-    })
-    if (signal?.aborted) {
-      abort()
-      return
+    const settleOk = (output: string): void => {
+      if (settled) return
+      settled = true
+      signal?.removeEventListener('abort', onAbort)
+      rmOutputDir()
+      resolve(output)
     }
-    signal?.addEventListener('abort', abort, { once: true })
+    // Abort rejects immediately (don't wait for the child to close) — the caller
+    // races multiple agents and shouldn't block on a killed process draining.
+    function onAbort(): void { handle.stop(); settleErr(new Error('evaluation rewrite cancelled')) }
+    if (signal?.aborted) { onAbort(); return }
+    signal?.addEventListener('abort', onAbort, { once: true })
 
-    child.stdout.on('data', (chunk) => {
-      const text = chunk.toString('utf-8')
-      stdout += text
-      idleTimer?.bump()
-      onOutput?.(text)
-    })
-    child.stderr.on('data', (chunk) => {
-      const text = chunk.toString('utf-8')
-      stderr += text
-      idleTimer?.bump()
-      onOutput?.(text)
-    })
-    child.on('error', (error) => {
-      finish(new Error(`evaluation rewrite agent failed: ${error.message}`))
-    })
-    child.on('close', (code, signal) => {
-      if (code !== 0) {
-        finish(new Error(`evaluation rewrite agent failed with ${signal ?? `exit code ${code}`}${stderr ? `\n${stderr}` : ''}`))
-        return
-      }
-      // claude's stdout is stream-json envelopes → recover the final message;
-      // codex's authoritative answer is the --output-last-message file below.
-      let finalOutput = agent === 'claude' ? recoverClaudeFinalText(stdout) : stdout
-      if (outputPath && fs.existsSync(outputPath)) {
-        const fromFile = fs.readFileSync(outputPath, 'utf-8')
-        if (fromFile.trim()) finalOutput = fromFile
-      }
-      finish(undefined, finalOutput)
-    })
-
-    if (agent === 'codex') child.stdin.end(prompt)
-    else child.stdin.end()
+    handle.done.then(
+      ({ code, signal: sig, stdout, stderr }) => {
+        if (idled) { settleErr(new Error(`evaluation rewrite agent idle for ${EVALUATION_IDLE_TIMEOUT_MS}ms`)); return }
+        if (code !== 0) {
+          settleErr(new Error(`evaluation rewrite agent failed with ${sig ?? `exit code ${code}`}${stderr ? `\n${stderr}` : ''}`))
+          return
+        }
+        // Read the codex output file BEFORE settleOk() removes the temp dir.
+        let finalOutput = agent === 'claude' ? recoverClaudeFinalText(stdout) : stdout
+        if (outputPath && fs.existsSync(outputPath)) {
+          const fromFile = fs.readFileSync(outputPath, 'utf-8')
+          if (fromFile.trim()) finalOutput = fromFile
+        }
+        settleOk(finalOutput)
+      },
+      (err: Error) => settleErr(new Error(`evaluation rewrite agent failed: ${err.message}`)),
+    )
   })
 }
 

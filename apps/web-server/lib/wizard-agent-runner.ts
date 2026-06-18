@@ -1,12 +1,10 @@
-import fs from 'fs'
-import { spawn as nodeSpawn, type ChildProcess } from 'child_process'
+import { spawn as nodeSpawn } from 'child_process'
 import type {
   PlanAgentInput,
   SpecAgentInput,
 } from '../routes/tests-draft'
 import {
   WizardAgentCancelledError,
-  killChild,
   type WizardAgentRegistry,
 } from './wizard-agent-registry'
 import {
@@ -18,9 +16,9 @@ import {
   type WizardAgentKind,
 } from './wizard-agent-spawner'
 import { WIZARD_PLAN_MODELS, WIZARD_SPEC_MODELS, modelFor } from './agent-models'
-import { startIdleTimer, type IdleTimer } from './agent-idle-timer'
 import { claudeSessionLogPath } from './agent-session-log'
 import { recoverClaudeFinalText } from './agent-stream'
+import { runAgentProcess } from './agent-process'
 
 // Headless driver for the wizard agents (the Portify model). Spawns the agent
 // CLI directly, tees stdout/stderr to the agent log, and returns the final
@@ -64,58 +62,43 @@ function runAgent(opts: {
 }): Promise<string> {
   const sink = createTeeSink({ logPath: opts.agentLogPath })
   sink.push(`[wizard] ${opts.label}\n`)
-  return new Promise<string>((resolve, reject) => {
-    let settled = false
-    let child: ChildProcess
-    try {
-      child = opts.spawnImpl(opts.bin, opts.args, { cwd: opts.cwd, stdio: ['ignore', 'pipe', 'pipe'] })
-    } catch (e) {
-      reject(new Error(`wizard agent spawn failed: ${(e as Error).message}`))
-      return
-    }
-    const lease = opts.registry?.register({ draftId: opts.draftId, child, logPath: opts.agentLogPath })
-
-    // Activity signal: claude `-p` is silent on stdout, so watch its session-JSONL
-    // growth; codex's stdout is teed to the log, so watch that.
-    const activityPath = opts.agent === 'claude' && opts.claudeSessionId
-      ? claudeSessionLogPath(opts.cwd, opts.claudeSessionId)
-      : opts.agentLogPath
-    let idleTimer: IdleTimer | undefined
-    const finish = (err: Error | null, stream?: string): void => {
-      if (settled) return
-      settled = true
-      idleTimer?.stop()
-      lease?.clear()
-      if (err) reject(err)
-      else resolve(stream ?? '')
-    }
-    idleTimer = startIdleTimer({
+  // Activity signal: claude `-p` is silent on stdout, so watch its session-JSONL
+  // growth; codex's stdout is teed to the log, so watch that.
+  const activityPath = opts.agent === 'claude' && opts.claudeSessionId
+    ? claudeSessionLogPath(opts.cwd, opts.claudeSessionId)
+    : opts.agentLogPath
+  let handle
+  try {
+    handle = runAgentProcess({
+      command: opts.bin,
+      args: opts.args,
+      cwd: opts.cwd,
+      captureStdout: false,        // the tee sink accumulates; recover from it
+      onChunk: (text) => sink.push(text),
       idleMs: WIZARD_IDLE_TIMEOUT_MS,
-      activity: () => { try { return fs.statSync(activityPath).size } catch { return 0 } },
-      onIdle: () => { killChild(child) },
+      activityPath,
+      spawnImpl: opts.spawnImpl,
     })
-
-    // Any output resets the idle clock (the primary liveness signal). claude's
-    // is stream-json deltas; codex's is its own readable progress.
-    child.stdout?.on('data', (chunk: Buffer) => { idleTimer?.bump(); sink.push(chunk.toString('utf-8')) })
-    child.stderr?.on('data', (chunk: Buffer) => { idleTimer?.bump(); sink.push(chunk.toString('utf-8')) })
-    child.on('error', (err) => finish(new Error(`wizard agent spawn failed: ${err.message}`)))
-    child.on('close', (code) => {
+  } catch (e) {
+    return Promise.reject(new Error(`wizard agent spawn failed: ${(e as Error).message}`))
+  }
+  const lease = opts.registry?.register({ draftId: opts.draftId, child: handle.child, logPath: opts.agentLogPath })
+  return handle.done.then(
+    ({ code }) => {
       const cancelled = lease?.isCancelled() ?? false
-      if (cancelled) {
-        finish(new WizardAgentCancelledError(opts.draftId))
-        return
-      }
-      if (code === 0) {
-        // claude stdout is stream-json envelopes → recover the final message;
-        // codex stdout is already the plain answer text.
-        const stream = sink.fullStream()
-        finish(null, opts.agent === 'claude' ? recoverClaudeFinalText(stream) : stream)
-      } else {
-        finish(new Error(`wizard agent exited with code ${code}. Tail of agent log:\n${sink.fullStream().slice(-2000)}`))
-      }
-    })
-  })
+      lease?.clear()
+      if (cancelled) throw new WizardAgentCancelledError(opts.draftId)
+      // claude stdout is stream-json envelopes → recover the final message;
+      // codex stdout is already the plain answer text.
+      const stream = sink.fullStream()
+      if (code === 0) return opts.agent === 'claude' ? recoverClaudeFinalText(stream) : stream
+      throw new Error(`wizard agent exited with code ${code}. Tail of agent log:\n${stream.slice(-2000)}`)
+    },
+    (err: Error) => {
+      lease?.clear()
+      throw new Error(`wizard agent spawn failed: ${err.message}`)
+    },
+  )
 }
 
 export function spawnPlanAgent(
