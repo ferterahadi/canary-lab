@@ -359,6 +359,32 @@ describe('coverage routes', () => {
     expect(typeof (res.json() as { error: string }).error).toBe('string')
   })
 
+  it('agent-session: returns null (200) for a claude sessionRef with an empty sessionId (line 231 null branch)', async () => {
+    // ref.agent === 'claude' but ref.sessionId is '' (falsy) → the ternary
+    // `ref.sessionId ? findClaudeLogBySessionId(...) : null` takes the null branch.
+    writeFeature('checkout', SPEC, { 'spec.md': '# Cart\nuser adds an item' })
+    await app.close()
+
+    const store = new CoverageJobRunStore(logsDir)
+    app = Fastify()
+    await app.register(coverageRoutes, { featuresDir, logsDir, projectRoot: tmpDir, coverageJobStore: store })
+    await app.ready()
+
+    store.save({
+      jobId: 'cj-claude-no-session',
+      feature: 'checkout',
+      kind: 'coverage',
+      status: 'done',
+      startedAt: '2026-01-01T00:00:00Z',
+      log: '',
+      sessionRef: { agent: 'claude', sessionId: '' },
+    })
+
+    const res = await app.inject({ method: 'GET', url: '/api/coverage/jobs/cj-claude-no-session/agent-session' })
+    expect(res.statusCode).toBe(200)
+    expect(res.json()).toBeNull()
+  })
+
   it('agent-session: returns null (200) for a codex sessionRef when no session is on disk', async () => {
     writeFeature('checkout', SPEC, { 'spec.md': '# Cart\nuser adds an item' })
     await app.close()
@@ -414,6 +440,38 @@ describe('coverage routes', () => {
     })
     expect(res.statusCode).toBe(400)
     expect((res.json() as { error: string }).error).toMatch(/required/)
+  })
+
+  it('POST /docs/import returns 400 when body is absent entirely', async () => {
+    // No body → req.body is null → `?? {}` fires → filename/base64 both undefined → 400.
+    writeFeature('checkout', SPEC)
+    const res = await app.inject({ method: 'POST', url: '/api/features/checkout/docs/import' })
+    expect(res.statusCode).toBe(400)
+    expect((res.json() as { error: string }).error).toMatch(/required/)
+  })
+
+  it('POST /docs/import sanitizes a filename to "doc.md" when base produces no valid characters', async () => {
+    // A filename like "-----.md" sanitizes to empty string → falls back to "doc".
+    // This exercises the `|| "doc"` fallback branch in the base-name computation.
+    writeFeature('checkout', SPEC)
+    // Use a filename whose base (before extension) has only dashes — sanitized to empty.
+    const base64 = Buffer.from('# Brief\nbody').toString('base64')
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/features/checkout/docs/import',
+      payload: { filename: '----.md', base64 },
+    })
+    expect(res.statusCode).toBe(200)
+    // The stored path uses "doc.md" as the fallback.
+    expect((res.json() as { relativePath: string }).relativePath).toContain('doc.md')
+  })
+
+  it('DELETE /docs/:relPath returns 404 when the feature itself is not found', async () => {
+    // deleteFeatureDoc on a missing feature returns { ok: false, error: '...not found...' }
+    // → result.error.includes("not found") is true → 404.
+    const res = await app.inject({ method: 'DELETE', url: '/api/features/ghost/docs/spec.md' })
+    expect(res.statusCode).toBe(404)
+    expect((res.json() as { error: string }).error).toMatch(/not found/)
   })
 
   it('POST /docs/import returns 400 when the file type is unsupported', async () => {

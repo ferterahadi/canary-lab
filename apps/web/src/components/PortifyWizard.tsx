@@ -473,9 +473,11 @@ function PlanScreen({ feature, agent, busy, onStart }: { feature: string; agent:
           ))}
         </div>
 
-        <button type="button" className="cl-button-primary" disabled={busy} onClick={onStart} style={{ padding: '10px 20px' }}>
-          {busy ? 'Starting…' : 'Start ▶'}
-        </button>
+        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+          <button type="button" className="cl-button-primary" disabled={busy} onClick={onStart} style={{ padding: '10px 20px' }}>
+            {busy ? 'Starting…' : 'Start ▶'}
+          </button>
+        </div>
     </div>
   )
 }
