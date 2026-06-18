@@ -65,7 +65,17 @@ export function EvaluationExportProvider({ children, wsBase, WebSocketImpl }: Ev
         taskId,
         wsBase,
         WebSocketImpl,
-        onData: (chunk) => appendLog(taskId, chunk),
+        onData: (chunk) => {
+          appendLog(taskId, chunk)
+          // The localized-rewrite agent pins its session ref the moment it
+          // spawns — right at this marker. Pull the task so the dialog can swap
+          // to the live AgentSessionView even when the workspace-event push is
+          // delayed/unavailable; this per-task log stream is the reliable
+          // channel. Self-limiting: once sessionRef lands we stop refetching.
+          if (!tasksByIdRef.current[taskId]?.sessionRef && /\[agent:[^\]]+\] (starting localized rewrite|still running)/.test(chunk)) {
+            void refreshTask(taskId)
+          }
+        },
         onExit: () => {
           delete connectionsRef.current[taskId]
           void refreshTask(taskId)

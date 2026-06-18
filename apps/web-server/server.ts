@@ -1242,6 +1242,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
   await app.register(agentSessionStreamRoutes, {
     store: runStore,
     logsDir,
+    coverageProjectRoot: opts.projectRoot,
   })
 
   // MCP HTTP server — mounts at /mcp so Claude/Codex Desktop/CLI can connect

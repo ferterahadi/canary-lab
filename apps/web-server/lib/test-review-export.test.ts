@@ -23,18 +23,15 @@ describe('test review export', () => {
       '--skip-git-repo-check',
       '--sandbox',
       'read-only',
-      '--model',
-      'gpt-5.4-mini',
       'rewrite prompt',
     ])
     expect(evaluationCodexArgs('rewrite prompt')).not.toContain('--full-auto')
+    expect(evaluationCodexArgs('rewrite prompt')).not.toContain('--model')
     expect(evaluationCodexArgs('rewrite prompt', '/tmp/evaluation-output.txt', '/tmp/evaluation-schema.json')).toEqual([
       'exec',
       '--skip-git-repo-check',
       '--sandbox',
       'read-only',
-      '--model',
-      'gpt-5.4-mini',
       '--output-last-message',
       '/tmp/evaluation-output.txt',
       '--output-schema',
@@ -878,8 +875,8 @@ function unknownUtility(page) {
     expect(__testReviewExportInternals.previewAgentOutput('')).toBe('<empty output>')
     expect(__testReviewExportInternals.previewAgentOutput('x'.repeat(510))).toBe(`${'x'.repeat(500)}...`)
     expect(__testReviewExportInternals.renderPromptTemplate('{{known}} {{missing}}', { known: 'yes' })).toBe('yes {{missing}}')
-    expect(__testReviewExportInternals.evaluationAgentModel('claude')).toBe('haiku')
-    expect(__testReviewExportInternals.evaluationAgentModel('codex')).toBe('gpt-5.4-mini')
+    expect(__testReviewExportInternals.evaluationAgentModel('claude')).toBeNull()
+    expect(__testReviewExportInternals.evaluationAgentModel('codex')).toBeNull()
 
     expect(__testReviewExportInternals.normalizeEvaluationRewrite(undefined, packet)).toBeNull()
     expect(__testReviewExportInternals.normalizeEvaluationRewrite({ summary: 'x', cases: [] }, packet)).toBeNull()

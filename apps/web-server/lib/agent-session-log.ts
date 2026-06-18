@@ -278,6 +278,24 @@ export function locateCodexSessionLog(
   return { agent: 'codex', sessionId: best.sessionId, logPath: best.logPath }
 }
 
+// Resolve a session ref a background job pinned on its manifest into a locatable
+// log ref — claude by its globally-unique session id, codex by cwd (project
+// root) + the job's start time. Shared by the coverage and evaluation-export
+// agent-session surfaces.
+export function resolveManifestSessionRef(
+  sessionRef: { agent: AgentKind; sessionId: string } | undefined,
+  opts: { projectRoot?: string; startedAt?: string },
+): AgentSessionRef | null {
+  if (!sessionRef) return null
+  if (sessionRef.agent === 'claude') {
+    if (!sessionRef.sessionId) return null
+    const logPath = findClaudeLogBySessionId(sessionRef.sessionId)
+    return logPath ? { agent: 'claude', sessionId: sessionRef.sessionId, logPath } : null
+  }
+  if (!opts.projectRoot || !opts.startedAt) return null
+  return locateCodexSessionLog(opts.projectRoot, opts.startedAt)
+}
+
 // Find the newest Codex session for a run directory without requiring a cycle
 // start timestamp. Older/interrupted runs can lack the `agent-session-id.txt`
 // sidecar; Codex's own JSONL session store is the only durable record in that

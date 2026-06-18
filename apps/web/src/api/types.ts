@@ -160,6 +160,10 @@ export interface EvaluationExportTask {
   language?: string
   externalSessionUrl?: string
   error?: string
+  /** Present once the localized-rewrite agent is spawned — the export dialog
+   *  renders its live AgentSessionView instead of the text progress panel.
+   *  Absent for raw/external/cached runs (no live agent). */
+  sessionRef?: { agent: 'claude' | 'codex'; sessionId: string }
 }
 
 export interface ServiceManifestEntry {

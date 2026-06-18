@@ -24,6 +24,16 @@ export interface EvaluationExportTaskRecord {
   language?: string
   externalSessionUrl?: string
   error?: string
+  /** Set once the localized-rewrite agent is spawned, so the export dialog can
+   *  stream its JSONL through AgentSessionView (claude: a pinned session id;
+   *  codex: '' — located by cwd + start). Absent for raw/external/cached runs,
+   *  which have no live agent and keep the text progress panel. */
+  sessionRef?: EvaluationExportSessionRef
+}
+
+export interface EvaluationExportSessionRef {
+  agent: 'claude' | 'codex'
+  sessionId: string
 }
 
 export interface EvaluationExportTaskView {
@@ -42,6 +52,7 @@ export interface EvaluationExportTaskView {
   language?: string
   externalSessionUrl?: string
   error?: string
+  sessionRef?: EvaluationExportSessionRef
 }
 
 export interface EvaluationExportTaskPaths {
@@ -191,6 +202,7 @@ export function evaluationExportTaskView(record: EvaluationExportTaskRecord): Ev
     ...(record.language ? { language: record.language } : {}),
     ...(record.externalSessionUrl ? { externalSessionUrl: record.externalSessionUrl } : {}),
     ...(record.error ? { error: record.error } : {}),
+    ...(record.sessionRef ? { sessionRef: record.sessionRef } : {}),
   }
 }
 
@@ -211,11 +223,18 @@ function normalizeTaskRecord(value: EvaluationExportTaskRecord): EvaluationExpor
   if (value.language !== undefined && typeof value.language !== 'string') return null
   if (value.externalSessionUrl !== undefined && typeof value.externalSessionUrl !== 'string') return null
   if (value.error !== undefined && typeof value.error !== 'string') return null
+  if (value.sessionRef !== undefined && !isSessionRef(value.sessionRef)) return null
   return { ...value, producer: value.producer ?? 'internal' }
 }
 
 function isSafeTaskId(taskId: string): boolean {
   return /^eval-[a-z0-9-]+$/.test(taskId)
+}
+
+function isSessionRef(value: unknown): value is EvaluationExportSessionRef {
+  if (!value || typeof value !== 'object') return false
+  const ref = value as Record<string, unknown>
+  return (ref.agent === 'claude' || ref.agent === 'codex') && typeof ref.sessionId === 'string'
 }
 
 function validateArchivePath(filePath: string): string {

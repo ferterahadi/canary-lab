@@ -5,16 +5,20 @@ import {
   type AgentSessionRef,
   findClaudeLogBySessionId,
   loadAgentSessionMeta,
+  locateCodexSessionLog,
   locateMostRecentAgentSessionRef,
   parseAgentSessionRefFile,
+  resolveManifestSessionRef,
   selectAgentSessionRef,
 } from '../lib/agent-session-log'
+import { readEvaluationExportTask } from '../lib/evaluation-export-store'
 import { tailAgentSession } from '../lib/agent-session-tailer'
 import { resolveDraftStageSessionRef } from '../lib/draft-agent-session'
 import { readDraft, paths as draftPaths } from '../lib/draft-store'
 import { runDirFor, buildRunPaths } from '../lib/runtime/run-paths'
 import { benchmarkDir } from '../lib/runtime/benchmark/paths'
 import { portifyDir } from '../lib/runtime/portify/paths'
+import { CoverageJobRunStore } from '../lib/coverage/jobs/store'
 import type { RunStore } from '../lib/run-store'
 
 // WebSocket route that streams live structured agent-session events.
@@ -33,6 +37,8 @@ import type { RunStore } from '../lib/run-store'
 export interface AgentSessionStreamDeps {
   store: RunStore
   logsDir: string
+  /** Project root — used to locate a coverage job's codex session by cwd (R17). */
+  coverageProjectRoot?: string
 }
 
 export async function agentSessionStreamRoutes(
@@ -125,6 +131,45 @@ export async function agentSessionStreamRoutes(
     },
   )
 
+  // Coverage/summary job agent session (R17). The job persists its pinned
+  // sessionRef on the manifest; resolve it (claude by id, codex by cwd + start)
+  // and tail the agent CLI's JSONL, same as runs/drafts.
+  app.get<{ Params: { jobId: string } }>(
+    '/ws/coverage/jobs/:jobId/agent-session',
+    { websocket: true },
+    (socket, req) => {
+      const jobStore = new CoverageJobRunStore(deps.logsDir)
+      const resolve = () => resolveCoverageJobRef(jobStore, req.params.jobId, deps.coverageProjectRoot)
+      const handle = tailAgentSession({
+        ref: resolve() ?? { agent: 'claude', sessionId: '', logPath: '' },
+        onReady: (readyRef) => sendJson(socket, sessionMessage(readyRef)),
+        onEvent: (event) => sendJson(socket, { type: 'event', event }),
+        onError: (err) => sendJson(socket, { type: 'error', error: err.message }),
+        discoverRef: resolve,
+      })
+      socket.on('close', () => handle.close())
+    },
+  )
+
+  // Evaluation-export localized-rewrite agent session. The export task persists
+  // its pinned sessionRef on the task record; resolve it (claude by id, codex by
+  // project root + start) and tail the agent CLI's JSONL, same as coverage.
+  app.get<{ Params: { taskId: string } }>(
+    '/ws/evaluation-exports/:taskId/agent-session',
+    { websocket: true },
+    (socket, req) => {
+      const resolve = () => resolveEvaluationExportRef(deps.logsDir, req.params.taskId, deps.coverageProjectRoot)
+      const handle = tailAgentSession({
+        ref: resolve() ?? { agent: 'claude', sessionId: '', logPath: '' },
+        onReady: (readyRef) => sendJson(socket, sessionMessage(readyRef)),
+        onEvent: (event) => sendJson(socket, { type: 'event', event }),
+        onError: (err) => sendJson(socket, { type: 'error', error: err.message }),
+        discoverRef: resolve,
+      })
+      socket.on('close', () => handle.close())
+    },
+  )
+
   // Port-ification agent session — same ref-file convention as the benchmark,
   // under the portify workflow dir.
   app.get<{ Params: { workflowId: string } }>(
@@ -158,6 +203,38 @@ function resolveBenchmarkRef(benchDir: string): AgentSessionRef | null {
   if (ref.logPath && fs.existsSync(ref.logPath)) return ref
   const found = ref.agent === 'claude' ? findClaudeLogBySessionId(ref.sessionId) : null
   return found ? { ...ref, logPath: found } : ref
+}
+
+// Resolve the agent session a coverage/summary job pinned on its manifest.
+// claude: by globally-unique session id; codex: by cwd (project root) + start.
+function resolveCoverageJobRef(
+  store: CoverageJobRunStore,
+  jobId: string,
+  projectRoot: string | undefined,
+): AgentSessionRef | null {
+  const manifest = store.get(jobId)
+  const ref = manifest?.sessionRef
+  if (!ref) return null
+  if (ref.agent === 'claude') {
+    if (!ref.sessionId) return null
+    const logPath = findClaudeLogBySessionId(ref.sessionId)
+    return logPath ? { agent: 'claude', sessionId: ref.sessionId, logPath } : null
+  }
+  if (!projectRoot || !manifest) return null
+  return locateCodexSessionLog(projectRoot, manifest.startedAt)
+}
+
+// Resolve the localized-rewrite agent session an evaluation-export task pinned
+// on its record. claude: by session id; codex: by project root + the task's
+// creation time (≈ spawn time).
+function resolveEvaluationExportRef(
+  logsDir: string,
+  taskId: string,
+  projectRoot: string | undefined,
+): AgentSessionRef | null {
+  const task = readEvaluationExportTask(logsDir, taskId)
+  if (!task) return null
+  return resolveManifestSessionRef(task.sessionRef, { projectRoot, startedAt: task.createdAt })
 }
 
 function resolveRunRef(runDir: string): AgentSessionRef | null {

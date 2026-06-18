@@ -5,6 +5,9 @@ import { formatBytes, timeAgo } from '../lib/format'
 
 interface Props {
   onClose: () => void
+  // Opens a run in the workspace (selects its feature + run, leaves cleanup).
+  // Absent for orphans, which have no manifest/feature to open.
+  onNavigateToRun?: (feature: string, runId: string) => void
 }
 
 // A unified table row covering both indexed runs and orphan directories.
@@ -179,7 +182,7 @@ function SortHeader({
   )
 }
 
-export function LogCleanupPage({ onClose }: Props) {
+export function LogCleanupPage({ onClose, onNavigateToRun }: Props) {
   const [listing, setListing] = useState<CleanupListing | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -387,7 +390,20 @@ export function LogCleanupPage({ onClose }: Props) {
                       aria-label={`Select ${r.runId}`}
                     />
                   </td>
-                  <td className="py-1 pr-3" style={{ fontFamily: 'var(--font-mono, monospace)', color: 'var(--text-primary)' }}>{r.runId}</td>
+                  <td className="py-1 pr-3" style={{ fontFamily: 'var(--font-mono, monospace)', color: 'var(--text-primary)' }}>
+                    {onNavigateToRun && !r.isOrphan
+                      ? (
+                        <button
+                          type="button"
+                          className="cl-run-link"
+                          onClick={() => onNavigateToRun(r.feature, r.runId)}
+                          title="Open this run in the workspace"
+                        >
+                          {r.runId}
+                        </button>
+                      )
+                      : r.runId}
+                  </td>
                   <td className="py-1 pr-3">
                     <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: 0.4, color: 'var(--text-muted)' }}>{KIND_LABEL[r.kind]}</span>
                   </td>

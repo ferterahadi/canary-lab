@@ -21,6 +21,8 @@ export type AgentSessionSource =
   | { kind: 'draft'; draftId: string; stage: 'planning' | 'generating'; live?: boolean }
   | { kind: 'benchmark'; benchmarkId: string; live?: boolean }
   | { kind: 'portify'; workflowId: string; live?: boolean }
+  | { kind: 'coverage'; jobId: string; live?: boolean }
+  | { kind: 'evaluation'; taskId: string; live?: boolean }
 
 interface Props {
   source: AgentSessionSource
@@ -66,6 +68,8 @@ export function AgentSessionView({ source }: Props) {
       if (source.kind === 'run') return api.getAgentSession(source.runId)
       if (source.kind === 'benchmark') return api.getBenchmarkAgentSession(source.benchmarkId)
       if (source.kind === 'portify') return api.getPortifyAgentSession(source.workflowId)
+      if (source.kind === 'coverage') return api.getCoverageAgentSession(source.jobId)
+      if (source.kind === 'evaluation') return api.getEvaluationAgentSession(source.taskId)
       return api.getDraftAgentSession(source.draftId, source.stage)
     }
 
@@ -86,7 +90,11 @@ export function AgentSessionView({ source }: Props) {
               ? { kind: 'benchmark', benchmarkId: source.benchmarkId }
               : source.kind === 'portify'
                 ? { kind: 'portify', workflowId: source.workflowId }
-                : { kind: 'draft', draftId: source.draftId, stage: source.stage },
+                : source.kind === 'coverage'
+                  ? { kind: 'coverage', jobId: source.jobId }
+                  : source.kind === 'evaluation'
+                    ? { kind: 'evaluation', taskId: source.taskId }
+                    : { kind: 'draft', draftId: source.draftId, stage: source.stage },
           onSession: (session) => {
             if (cancelled) return
             setState((prev) => prev
@@ -250,6 +258,8 @@ function sourceCacheKey(source: AgentSessionSource): string {
   if (source.kind === 'run') return `run:${source.runId}:${source.live ? '1' : '0'}`
   if (source.kind === 'benchmark') return `benchmark:${source.benchmarkId}:${source.live ? '1' : '0'}`
   if (source.kind === 'portify') return `portify:${source.workflowId}:${source.live ? '1' : '0'}`
+  if (source.kind === 'coverage') return `coverage:${source.jobId}:${source.live ? '1' : '0'}`
+  if (source.kind === 'evaluation') return `evaluation:${source.taskId}:${source.live ? '1' : '0'}`
   return `draft:${source.draftId}:${source.stage}:${source.live ? '1' : '0'}`
 }
 

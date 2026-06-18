@@ -1,8 +1,12 @@
+import crypto from 'crypto'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { spawn } from 'child_process'
 import { pickAvailableHealAgent, type HealAgent } from '../runtime/auto-heal'
+import { PRD_SUMMARY_MODELS, modelArgs } from '../agent-models'
+import type { CoverageAgentSession } from './annotate-engine'
+import { makeClaudeStreamSink } from './agent-stream'
 import type {
   PathType,
   PrdSummary,
@@ -24,8 +28,6 @@ import { withFingerprints } from './fingerprints'
 
 const PRD_SUMMARY_TEMPLATE_PATH = path.join(__dirname, '../../prompts/prd-summary.md')
 const PRD_SUMMARY_SCHEMA_PATH = path.join(__dirname, '../../prompts/prd-summary.schema.json')
-const PRD_SUMMARY_CLAUDE_MODEL = 'haiku'
-const PRD_SUMMARY_CODEX_MODEL = 'gpt-5.4-mini'
 const PRD_SUMMARY_TIMEOUT_MS = 180_000
 
 /** Generated artifact filenames under docs/. */
@@ -55,6 +57,8 @@ export interface SummarizePrdArgs {
   cwd?: string
   signal?: AbortSignal
   onOutput?: (chunk: string) => void
+  /** Fired when an agent spawns with a pinned session (R17 — see annotate-engine). */
+  onSession?: (session: CoverageAgentSession) => void
   /** Injectable ISO timestamp for deterministic tests. */
   now?: string
 }
@@ -68,6 +72,7 @@ interface RunAgentOpts {
   cwd?: string
   signal?: AbortSignal
   onOutput?: (chunk: string) => void
+  onSession?: (session: CoverageAgentSession) => void
 }
 
 // ---------------------------------------------------------------------------
@@ -327,8 +332,7 @@ function codexArgs(outputPath: string): string[] {
     '--skip-git-repo-check',
     '--sandbox',
     'read-only',
-    '--model',
-    PRD_SUMMARY_CODEX_MODEL,
+    ...modelArgs(PRD_SUMMARY_MODELS.codex),
     '--output-last-message',
     outputPath,
     '--output-schema',
@@ -342,13 +346,19 @@ function defaultRunAgent(agent: HealAgent, prompt: string, opts: RunAgentOpts): 
     ? fs.mkdtempSync(path.join(os.tmpdir(), 'canary-prd-summary-'))
     : undefined
   const outputPath = outputDir ? path.join(outputDir, 'last-message.txt') : undefined
+  // Pin a claude session id so the JSONL session log is locatable for R17.
+  const claudeSessionId = agent === 'claude' ? crypto.randomUUID() : undefined
+  // Stream-json → live token stream on stdout (R: live agent output); the sink
+  // renders readable text to onOutput and recovers the final answer.
   const args = agent === 'claude'
-    ? ['--model', PRD_SUMMARY_CLAUDE_MODEL, '-p', prompt]
+    ? [...modelArgs(PRD_SUMMARY_MODELS.claude), '--output-format=stream-json', '--include-partial-messages', '--verbose', '--session-id', claudeSessionId!, '-p', prompt]
     : codexArgs(outputPath!)
+  opts.onSession?.(agent === 'claude' ? { agent: 'claude', sessionId: claudeSessionId! } : { agent: 'codex', sessionId: '' })
   return new Promise((resolve, reject) => {
     let stdout = ''
     let stderr = ''
     let settled = false
+    const claudeSink = agent === 'claude' ? makeClaudeStreamSink(opts.onOutput) : null
     const child = spawn(agent, args, { cwd: opts.cwd, stdio: ['pipe', 'pipe', 'pipe'] })
     const cleanup = () => {
       opts.signal?.removeEventListener('abort', abort)
@@ -378,7 +388,8 @@ function defaultRunAgent(agent: HealAgent, prompt: string, opts: RunAgentOpts): 
     child.stdout.on('data', (chunk) => {
       const t = chunk.toString('utf-8')
       stdout += t
-      opts.onOutput?.(t)
+      if (claudeSink) claudeSink.push(t)
+      else opts.onOutput?.(t)
     })
     child.stderr.on('data', (chunk) => {
       const t = chunk.toString('utf-8')
@@ -391,7 +402,7 @@ function defaultRunAgent(agent: HealAgent, prompt: string, opts: RunAgentOpts): 
         finish(new Error(`prd summary agent failed with ${sig ?? `exit code ${code}`}${stderr ? `\n${stderr}` : ''}`))
         return
       }
-      let finalOutput = stdout
+      let finalOutput = claudeSink ? claudeSink.finalText() : stdout
       if (outputPath && fs.existsSync(outputPath)) {
         const fromFile = fs.readFileSync(outputPath, 'utf-8')
         if (fromFile.trim()) finalOutput = fromFile
@@ -433,6 +444,7 @@ export async function summarizePrd(
           cwd: args.cwd,
           signal: args.signal,
           onOutput: args.onOutput,
+          onSession: args.onSession,
         })
         const parsed = parsePrdSummaryOutput(output)
         if (parsed && parsed.length) {
