@@ -85,92 +85,51 @@ describe('collectTests — sourceFile override (service.ts line 86)', () => {
   })
 })
 
-describe('collectTests — duplicate name with requirements/pathTypes (service.ts lines 90-91)', () => {
-  it('skips if-blocks when duplicate has no requirements or pathTypes (FALSE branches)', async () => {
-    // Line 90: `if (t.requirements)` → FALSE when second occurrence has no requirements.
-    // Line 91: `if (t.pathTypes)` → FALSE when second occurrence has no pathTypes.
-    // collectTests is called inside runCoverageEngine (not regeneratePrdSummary), so
-    // we generate the summary first (no mock active), then mock for runCoverageEngine.
+describe('collectTests — duplicate name merge (service.ts unionList)', () => {
+  it('keeps existing requirements unchanged when duplicate has none (unionList b=undefined path)', async () => {
+    // a.spec.ts returns requirements=['R1']; b.spec.ts returns no requirements.
+    // unionList(existing=['R1'], b=undefined) → returns ['R1'] unchanged.
     const dir = writeFeature('checkout')
     const specB = path.join(dir, 'e2e', 'b.spec.ts')
     fs.writeFileSync(specB, `import { test } from '@playwright/test'\ntest('shared', async () => {})\n`)
 
-    // Generate PRD summary WITHOUT mock active so it reads docs normally.
     await regeneratePrdSummary({ featuresDir, feature: 'checkout', adapter: 'deterministic', now: '2026-01-01T00:00:00Z' })
 
-    // NOW set up the mock — two spec files will be found (a.spec.ts + b.spec.ts).
     vi.mocked(extractTestsFromSource)
       .mockReturnValueOnce({
         file: path.join(dir, 'e2e', 'a.spec.ts'),
-        tests: [
-          { name: 'shared', line: 1, bodySource: 'async () => {}', steps: [], requirements: ['R1'], pathTypes: ['happy'] },
-        ],
+        tests: [{ name: 'shared', line: 1, bodySource: 'async () => {}', steps: [], requirements: ['R1'], pathTypes: ['happy'] }],
       })
       .mockReturnValueOnce({
         file: specB,
-        tests: [
-          {
-            name: 'shared', // duplicate — triggers the merge branch
-            line: 1,
-            bodySource: 'async () => {}',
-            steps: [],
-            // requirements: undefined → line 90 FALSE branch
-            // pathTypes: undefined → line 91 FALSE branch
-          },
-        ],
+        tests: [{ name: 'shared', line: 1, bodySource: 'async () => {}', steps: [] }],
       })
 
-    // runCoverageEngine calls collectTests → extractTestsFromSource (now mocked).
     const result = await runCoverageEngine({ featuresDir, feature: 'checkout', adapter: 'deterministic', logsDir, now: '2026-01-01T00:00:00Z' })
     expect(result.feature).toBe('checkout')
   })
 
-  it('unions requirements and pathTypes when the same test name appears twice (TRUE branches)', async () => {
-    // Simulate two spec files each returning the same test name with different
-    // requirements/pathTypes. The second call to extractTestsFromSource returns
-    // the duplicate. collectTests detects `existing` is truthy → merges linkage.
-    // Lines 90-91: `if (t.requirements)` and `if (t.pathTypes)` both take TRUE path.
+  it('unions requirements and pathTypes when the same test name appears twice (unionList merge path)', async () => {
+    // a.spec.ts returns R1+happy; b.spec.ts returns R2+sad.
+    // unionList(['R1'], ['R2']) → ['R1', 'R2']; same for pathTypes.
     const dir = writeFeature('checkout')
     const specA = path.join(dir, 'e2e', 'a.spec.ts')
     const specB = path.join(dir, 'e2e', 'b.spec.ts')
     fs.writeFileSync(specB, `import { test } from '@playwright/test'\ntest('shared', async () => {})\n`)
 
-    // First call (specA): test with R1 + happy.
-    // Second call (specB): same name, R2 + sad → triggers the merge branch.
     vi.mocked(extractTestsFromSource)
       .mockReturnValueOnce({
         file: specA,
-        tests: [
-          {
-            name: 'shared',
-            line: 1,
-            bodySource: 'async () => {}',
-            steps: [],
-            requirements: ['R1'],
-            pathTypes: ['happy'],
-          },
-        ],
+        tests: [{ name: 'shared', line: 1, bodySource: 'async () => {}', steps: [], requirements: ['R1'], pathTypes: ['happy'] }],
       })
       .mockReturnValueOnce({
         file: specB,
-        tests: [
-          {
-            name: 'shared',
-            line: 1,
-            bodySource: 'async () => {}',
-            steps: [],
-            requirements: ['R2'],     // triggers line 90 TRUE branch
-            pathTypes: ['sad'],        // triggers line 91 TRUE branch
-          },
-        ],
+        tests: [{ name: 'shared', line: 1, bodySource: 'async () => {}', steps: [], requirements: ['R2'], pathTypes: ['sad'] }],
       })
 
     await regeneratePrdSummary({ featuresDir, feature: 'checkout', adapter: 'deterministic', now: '2026-01-01T00:00:00Z' })
     const ledger = computeFeatureCoverage({ featuresDir, logsDir, feature: 'checkout' })
-    // Both R1 and R2 should be associated with "shared" after the union.
     const sharedTest = ledger.tests.find((t) => t.name === 'shared')
-    expect(sharedTest).toBeTruthy()
-    // The test is tagged with both requirements after the union merge.
     expect(sharedTest?.requirements).toContain('R1')
     expect(sharedTest?.requirements).toContain('R2')
   })
