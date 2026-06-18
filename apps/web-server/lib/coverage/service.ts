@@ -75,6 +75,15 @@ interface CollectedTests {
   collected: CollectedTest[]
 }
 
+/** Union two optional lists, deduplicating preserving first-seen order.
+ *  Returns `a` unchanged (including undefined) when `b` is empty/absent. */
+function unionList<T>(a: T[] | undefined, b: T[] | undefined): T[] | undefined {
+  if (!b?.length) return a
+  const s = new Set(a)
+  for (const v of b) s.add(v)
+  return [...s]
+}
+
 /** Merge per-test annotation/assertion data across all of a feature's specs. */
 function collectTests(featureDir: string): CollectedTests {
   const byName = new Map<string, CollectedTest>()
@@ -87,8 +96,8 @@ function collectTests(featureDir: string): CollectedTests {
       const existing = byName.get(t.name)
       if (existing) {
         // Same test name in two specs — union the linkage, concat assertions.
-        if (t.requirements) existing.input.requirements = [...new Set([...(existing.input.requirements ?? []), ...t.requirements])]
-        if (t.pathTypes) existing.input.pathTypes = [...new Set([...(existing.input.pathTypes ?? []), ...t.pathTypes])]
+        existing.input.requirements = unionList(existing.input.requirements, t.requirements)
+        existing.input.pathTypes = unionList(existing.input.pathTypes, t.pathTypes)
         for (const a of t.assertions ?? []) existing.assertions.add(a)
         continue
       }

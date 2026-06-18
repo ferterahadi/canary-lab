@@ -3,6 +3,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ChildProcess } from 'child_process'
 import { buildClaudeAgenticArgs, runAgentProcess } from './agent-process'
 
+// hoisted so the factory can reference mockNodeSpawn before imports resolve
+const { mockNodeSpawn } = vi.hoisted(() => ({ mockNodeSpawn: vi.fn() }))
+vi.mock('child_process', () => ({ spawn: mockNodeSpawn }))
+
 class FakeChild extends EventEmitter {
   pid = 4242
   stdout = new EventEmitter()
@@ -184,5 +188,17 @@ describe('runAgentProcess', () => {
     child.close(1)  // second close — should be ignored by settled guard
     const res = await h.done
     expect(res.code).toBe(0)  // resolves with first close value
+  })
+
+  it('uses nodeSpawn when spawnImpl is omitted (covers the ?? nodeSpawn branch)', async () => {
+    // All other tests supply spawnImpl to avoid the real spawn. This one omits it
+    // so opts.spawnImpl ?? nodeSpawn takes the right side (nodeSpawn = mocked spawn).
+    const child = new FakeChild()
+    mockNodeSpawn.mockReturnValueOnce(child as unknown as ChildProcess)
+    const h = runAgentProcess({ command: 'claude', args: ['-p', 'hi'], idleMs: 1000 })
+    child.close(0)
+    const res = await h.done
+    expect(res.code).toBe(0)
+    expect(mockNodeSpawn).toHaveBeenCalledWith('claude', ['-p', 'hi'], expect.anything())
   })
 })

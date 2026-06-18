@@ -71,6 +71,27 @@ describe('runCoverageEngine — auto mode', () => {
 })
 
 describe('collectTests — duplicate test name union', () => {
+  it('passes undefined requirements to unionList when the duplicate has no tags', async () => {
+    // a.spec.ts has @requirement/@path; b.spec.ts has the same test name but NO tags.
+    // collectTests calls unionList(existing.requirements=['R1'], b.requirements=undefined)
+    // → b?.length short-circuits (FALSE branch of ?.) → returns a unchanged.
+    const dir = writeFeature('multi-spec-false')
+    fs.writeFileSync(
+      path.join(dir, 'e2e', 'a.spec.ts'),
+      `import { test, expect } from '@playwright/test'\n// @requirement R1\n// @path happy\ntest('shared test name', async () => { expect(1).toBe(1) })\n`,
+    )
+    fs.writeFileSync(
+      path.join(dir, 'e2e', 'b.spec.ts'),
+      `import { test, expect } from '@playwright/test'\ntest('shared test name', async () => { expect(2).toBe(2) })\n`,
+    )
+    fs.mkdirSync(path.join(dir, 'docs'), { recursive: true })
+    fs.writeFileSync(path.join(dir, 'docs', 'spec.md'), '# First feature\na user can do the first thing')
+    await regeneratePrdSummary({ featuresDir, feature: 'multi-spec-false', adapter: 'deterministic', now: '2026-01-01T00:00:00Z' })
+    const res = await runCoverageEngine({ featuresDir, logsDir, feature: 'multi-spec-false', adapter: 'deterministic' })
+    // The merged test keeps R1 (from a.spec.ts); b.spec.ts added nothing new.
+    expect(res.feature).toBe('multi-spec-false')
+  })
+
   it('unions requirements when the same test name appears in two top-level spec files', async () => {
     const dir = writeFeature('multi-spec')
     // writeFeature writes a.spec.ts — override it with a version tagged R1.
