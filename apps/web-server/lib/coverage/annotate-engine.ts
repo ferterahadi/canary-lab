@@ -1,9 +1,19 @@
+import crypto from 'crypto'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { spawn } from 'child_process'
 import { pickAvailableHealAgent, type HealAgent } from '../runtime/auto-heal'
+import { ANNOTATE_MODELS, modelArgs } from '../agent-models'
+import { makeClaudeStreamSink } from './agent-stream'
 import type { PathType, ProposedMapping, Requirement } from '../../../../shared/coverage/types'
+
+/** The agent CLI session backing a coverage/summary run — pinned at spawn so the
+ *  Generating screen can stream the structured AgentSessionView (R17). */
+export interface CoverageAgentSession {
+  agent: 'claude' | 'codex'
+  sessionId: string
+}
 
 export type { ProposedMapping }
 
@@ -16,8 +26,6 @@ export type { ProposedMapping }
 
 const ANNOTATE_TEMPLATE_PATH = path.join(__dirname, '../../prompts/coverage-annotate.md')
 const ANNOTATE_SCHEMA_PATH = path.join(__dirname, '../../prompts/coverage-annotate.schema.json')
-const ANNOTATE_CLAUDE_MODEL = 'haiku'
-const ANNOTATE_CODEX_MODEL = 'gpt-5.4-mini'
 const ANNOTATE_TIMEOUT_MS = 180_000
 
 const PATH_TYPES: PathType[] = ['happy', 'sad', 'edge']
@@ -39,6 +47,9 @@ export interface ProposeMappingsArgs {
   cwd?: string
   signal?: AbortSignal
   onOutput?: (chunk: string) => void
+  /** Fired when an agent spawns with a pinned session — lets the job persist a
+   *  ref the Generating screen streams via AgentSessionView (R17). */
+  onSession?: (session: CoverageAgentSession) => void
 }
 
 export interface ProposeMappingsDeps {
@@ -50,6 +61,7 @@ interface RunAgentOpts {
   cwd?: string
   signal?: AbortSignal
   onOutput?: (chunk: string) => void
+  onSession?: (session: CoverageAgentSession) => void
 }
 
 // ---------------------------------------------------------------------------
@@ -224,7 +236,7 @@ function defaultResolveAgents(adapter: AnnotateAdapter): HealAgent[] {
 function codexArgs(outputPath: string): string[] {
   return [
     'exec', '--skip-git-repo-check', '--sandbox', 'read-only',
-    '--model', ANNOTATE_CODEX_MODEL,
+    ...modelArgs(ANNOTATE_MODELS.codex),
     '--output-last-message', outputPath,
     '--output-schema', ANNOTATE_SCHEMA_PATH,
     '-',
@@ -236,13 +248,21 @@ function defaultRunAgent(agent: HealAgent, prompt: string, opts: RunAgentOpts): 
     ? fs.mkdtempSync(path.join(os.tmpdir(), 'canary-coverage-annotate-'))
     : undefined
   const outputPath = outputDir ? path.join(outputDir, 'last-message.txt') : undefined
+  // Pin a session id for claude so the CLI's JSONL session log is locatable and
+  // the Generating screen can stream it (R17). `-p` still writes the session log.
+  const claudeSessionId = agent === 'claude' ? crypto.randomUUID() : undefined
+  // Stream-json gives a live token stream on stdout (R: live agent output) — the
+  // sink renders readable text to onOutput as the model writes and recovers the
+  // final answer. `--session-id` still pins the on-disk session for the timeline.
   const args = agent === 'claude'
-    ? ['--model', ANNOTATE_CLAUDE_MODEL, '-p', prompt]
+    ? [...modelArgs(ANNOTATE_MODELS.claude), '--output-format=stream-json', '--include-partial-messages', '--verbose', '--session-id', claudeSessionId!, '-p', prompt]
     : codexArgs(outputPath!)
+  opts.onSession?.(agent === 'claude' ? { agent: 'claude', sessionId: claudeSessionId! } : { agent: 'codex', sessionId: '' })
   return new Promise((resolve, reject) => {
     let stdout = ''
     let stderr = ''
     let settled = false
+    const claudeSink = agent === 'claude' ? makeClaudeStreamSink(opts.onOutput) : null
     const child = spawn(agent, args, { cwd: opts.cwd, stdio: ['pipe', 'pipe', 'pipe'] })
     const cleanup = () => {
       opts.signal?.removeEventListener('abort', abort)
@@ -272,7 +292,9 @@ function defaultRunAgent(agent: HealAgent, prompt: string, opts: RunAgentOpts): 
     child.stdout.on('data', (chunk) => {
       const t = chunk.toString('utf-8')
       stdout += t
-      opts.onOutput?.(t)
+      // claude: parse the stream-json + stream readable text; codex: raw passthrough.
+      if (claudeSink) claudeSink.push(t)
+      else opts.onOutput?.(t)
     })
     child.stderr.on('data', (chunk) => {
       const t = chunk.toString('utf-8')
@@ -285,7 +307,7 @@ function defaultRunAgent(agent: HealAgent, prompt: string, opts: RunAgentOpts): 
         finish(new Error(`coverage annotate agent failed with ${sig ?? `exit code ${code}`}${stderr ? `\n${stderr}` : ''}`))
         return
       }
-      let finalOutput = stdout
+      let finalOutput = claudeSink ? claudeSink.finalText() : stdout
       if (outputPath && fs.existsSync(outputPath)) {
         const fromFile = fs.readFileSync(outputPath, 'utf-8')
         if (fromFile.trim()) finalOutput = fromFile
@@ -328,6 +350,7 @@ export async function proposeCoverageMappings(
           cwd: args.cwd,
           signal: args.signal,
           onOutput: args.onOutput,
+          onSession: args.onSession,
         })
         const parsed = parseAnnotateOutput(output, knownIds)
         if (parsed) return parsed // [] is a valid answer (nothing maps)

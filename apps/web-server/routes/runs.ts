@@ -32,6 +32,7 @@ import {
   loadAgentSession,
   locateMostRecentAgentSessionRef,
   parseAgentSessionRefFile,
+  resolveManifestSessionRef,
   selectAgentSessionRef,
 } from '../lib/agent-session-log'
 import { isTerminalRunStatus } from '../../../shared/run-state'
@@ -172,6 +173,7 @@ export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Pro
     mode: EvaluationExportMode,
     log?: (chunk: string) => void,
     signal?: AbortSignal,
+    onSession?: (session: { agent: 'claude' | 'codex'; sessionId: string }) => void,
   ): Promise<{ archiveBase: string; zip: Buffer }> => {
     throwIfAborted(signal)
     log?.(`[evaluation] preparing ${mode === 'raw' ? 'raw output' : 'localized output'} export\n`)
@@ -185,7 +187,7 @@ export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Pro
       projectHealAgent === 'external' ? 'deterministic' : projectHealAgent
     const runDir = runDirFor(deps.store.logsDir, detail.runId)
     const rewrite = mode === 'localized'
-      ? await loadEvaluationRewrite(detail, runDir, audienceAdapter, deps.projectRoot, deps.generateEvaluationRewrite, app.log, log, signal)
+      ? await loadEvaluationRewrite(detail, runDir, audienceAdapter, deps.projectRoot, deps.generateEvaluationRewrite, app.log, log, signal, onSession)
       : undefined
     throwIfAborted(signal)
     const built = await buildEvaluationExportArchive(detail, {
@@ -257,10 +259,18 @@ export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Pro
       appendEvaluationExportLog(deps.store.logsDir, task.taskId, chunk)
       active.broker.push('export', chunk)
     }
+    // Persist the rewrite agent's session ref the moment it's spawned, so the
+    // export dialog can swap from the text panel to the live AgentSessionView.
+    const onSession = (session: { agent: 'claude' | 'codex'; sessionId: string }): void => {
+      const patched = patchEvaluationExportTask(deps.store.logsDir, task.taskId, { sessionRef: session })
+      if (patched) {
+        publishWorkspaceEvent(deps.workspaceEvents, { type: 'evaluation-export-updated', task: evaluationExportTaskView(patched) })
+      }
+    }
     push(`[evaluation] task ${task.taskId} started\n`)
     void (async () => {
       try {
-        const built = await buildEvaluationZip(detail, mode, push, active.abortController.signal)
+        const built = await buildEvaluationZip(detail, mode, push, active.abortController.signal, onSession)
         if (!readEvaluationExportTask(deps.store.logsDir, task.taskId)) return
         writeEvaluationExportZip(deps.store.logsDir, task.taskId, built.zip)
         const patched = patchEvaluationExportTask(deps.store.logsDir, task.taskId, {
@@ -334,6 +344,29 @@ export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Pro
       return { error: 'evaluation export task not found' }
     }
     return evaluationExportTaskView(task)
+  })
+
+  // Structured rewrite-agent session for the export dialog's AgentSessionView.
+  // Resolves the session ref the localized-rewrite agent pinned on the task
+  // (claude by id, codex by project root + start) and parses its JSONL. 404s
+  // with a `reason` for every miss so the dialog falls back to the text panel.
+  app.get<{ Params: { taskId: string } }>('/api/evaluation-exports/:taskId/agent-session', async (req, reply) => {
+    const task = readEvaluationExportTask(deps.store.logsDir, req.params.taskId)
+    if (!task) {
+      reply.code(404)
+      return { reason: 'task-not-found' }
+    }
+    const ref = resolveManifestSessionRef(task.sessionRef, { projectRoot: deps.projectRoot, startedAt: task.createdAt })
+    if (!ref) {
+      reply.code(404)
+      return { reason: 'no-session-ref' }
+    }
+    if (!fs.existsSync(ref.logPath)) {
+      reply.code(404)
+      return { reason: 'session-log-missing' }
+    }
+    const { events, meta } = loadAgentSession(ref)
+    return { agent: ref.agent, sessionId: ref.sessionId, model: meta.model, effort: meta.effort, events }
   })
 
   app.get<{ Params: { taskId: string } }>('/api/evaluation-exports/:taskId/download', async (req, reply) => {
@@ -835,6 +868,7 @@ async function loadEvaluationRewrite(
   log?: Pick<FastifyInstance['log'], 'warn'>,
   onOutput?: (chunk: string) => void,
   signal?: AbortSignal,
+  onSession?: (session: { agent: 'claude' | 'codex'; sessionId: string }) => void,
 ): Promise<EvaluationRewrite | undefined> {
   throwIfAborted(signal)
   const cached = readCachedEvaluationRewrite(runDir)
@@ -844,7 +878,7 @@ async function loadEvaluationRewrite(
   }
   try {
     onOutput?.('[evaluation] generating localized wording\n')
-    const generated = await (generate ?? generateEvaluationRewriteWithAgent)(detail, audienceAdapter, projectRoot, { onOutput, signal })
+    const generated = await (generate ?? generateEvaluationRewriteWithAgent)(detail, audienceAdapter, projectRoot, { onOutput, signal, onSession })
     throwIfAborted(signal)
     if (generated) {
       clearEvaluationRewriteError(runDir)

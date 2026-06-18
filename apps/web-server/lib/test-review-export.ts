@@ -1,11 +1,13 @@
 import fs from 'fs'
 import path from 'path'
 import os from 'os'
+import crypto from 'crypto'
 import { spawn } from 'child_process'
 import { codeToHtml } from 'shiki'
 import ts from 'typescript'
 import type { RunDetail, PlaywrightPlaybackEvent } from './run-store'
 import { pickAvailableHealAgent, type HealAgent } from './runtime/auto-heal'
+import { EVALUATION_REWRITE_MODELS, modelArgs, modelFor } from './agent-models'
 import { formatCodeForDisplay } from '../../../shared/code-display-format'
 
 export type AssertionQuality = 'strict' | 'moderate' | 'shallow' | 'unknown'
@@ -55,6 +57,10 @@ export interface AssertionHtmlOptions {
 export interface EvaluationRewriteAgentOptions {
   onOutput?: (chunk: string) => void
   signal?: AbortSignal
+  /** Fired once the rewrite agent is spawned, with the pinned session ref so
+   *  the caller can persist it and stream the agent's JSONL via AgentSessionView
+   *  (claude: a pinned --session-id UUID; codex: '' — located by cwd + start). */
+  onSession?: (session: { agent: HealAgent; sessionId: string }) => void
 }
 
 export interface EvaluationRewriteFlowStep {
@@ -219,8 +225,8 @@ export async function generateEvaluationRewriteWithAgent(
   const failures: string[] = []
   for (const agent of agents) {
     try {
-      options.onOutput?.(`[agent:${agent}] starting localized rewrite (model: ${evaluationAgentModel(agent)})\n`)
-      const output = await runEvaluationAgent(agent, prompt, cwd, options.onOutput, options.signal)
+      options.onOutput?.(`[agent:${agent}] starting localized rewrite (model: ${evaluationAgentModel(agent) ?? 'agent default'})\n`)
+      const output = await runEvaluationAgent(agent, prompt, cwd, options.onOutput, options.signal, options.onSession)
       const slotRewrite = parseEvaluationTextSlotRewrite(output)
       if (slotRewrite) {
         options.onOutput?.(`[agent:${agent}] localized rewrite completed\n`)
@@ -242,9 +248,6 @@ export async function generateEvaluationRewriteWithAgent(
 
 const EVALUATION_REWRITE_TEMPLATE_PATH = path.join(__dirname, '../prompts/evaluation-rewrite.md')
 const EVALUATION_REWRITE_SCHEMA_PATH = path.join(__dirname, '../prompts/evaluation-rewrite.schema.json')
-const EVALUATION_REWRITE_CODEX_MODEL = 'gpt-5.4-mini'
-const EVALUATION_REWRITE_CLAUDE_MODEL = 'haiku'
-
 function loadEvaluationRewriteTemplate(templatePath: string = EVALUATION_REWRITE_TEMPLATE_PATH): string {
   return fs.readFileSync(templatePath, 'utf-8').trim()
 }
@@ -266,8 +269,8 @@ function resolveEvaluationAgents(adapter: AssertionHtmlOptions['audienceAdapter'
   return [...new Set(agents)]
 }
 
-function evaluationAgentModel(agent: HealAgent): string {
-  return agent === 'claude' ? EVALUATION_REWRITE_CLAUDE_MODEL : EVALUATION_REWRITE_CODEX_MODEL
+function evaluationAgentModel(agent: HealAgent): string | null {
+  return modelFor(EVALUATION_REWRITE_MODELS, agent)
 }
 
 function runEvaluationAgent(
@@ -276,12 +279,18 @@ function runEvaluationAgent(
   cwd?: string,
   onOutput?: (chunk: string) => void,
   signal?: AbortSignal,
+  onSession?: (session: { agent: HealAgent; sessionId: string }) => void,
 ): Promise<string> {
   const outputDir = agent === 'codex' ? fs.mkdtempSync(path.join(os.tmpdir(), 'canary-evaluation-rewrite-')) : undefined
   const outputPath = outputDir ? path.join(outputDir, 'last-message.txt') : undefined
+  // Pin a session id for claude so the CLI's JSONL session log is locatable and
+  // the export dialog can stream it via AgentSessionView. `-p` still writes the
+  // session log. Codex has no --session-id; it's located later by cwd + start.
+  const claudeSessionId = agent === 'claude' ? crypto.randomUUID() : undefined
   const args = agent === 'claude'
-    ? ['--model', EVALUATION_REWRITE_CLAUDE_MODEL, '-p', prompt]
+    ? [...modelArgs(EVALUATION_REWRITE_MODELS.claude), '--session-id', claudeSessionId!, '-p', prompt]
     : evaluationCodexArgs('-', outputPath, EVALUATION_REWRITE_SCHEMA_PATH)
+  onSession?.(agent === 'claude' ? { agent: 'claude', sessionId: claudeSessionId! } : { agent: 'codex', sessionId: '' })
   return new Promise((resolve, reject) => {
     let stdout = ''
     let stderr = ''
@@ -360,8 +369,7 @@ export function evaluationCodexArgs(prompt: string, outputPath?: string, outputS
     '--skip-git-repo-check',
     '--sandbox',
     'read-only',
-    '--model',
-    EVALUATION_REWRITE_CODEX_MODEL,
+    ...modelArgs(EVALUATION_REWRITE_MODELS.codex),
     ...(outputPath ? ['--output-last-message', outputPath] : []),
     ...(outputSchemaPath ? ['--output-schema', outputSchemaPath] : []),
     prompt,

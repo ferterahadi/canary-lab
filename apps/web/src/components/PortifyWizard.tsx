@@ -437,11 +437,12 @@ function PlanScreen({ feature, agent, busy, onStart }: { feature: string; agent:
     <>Test files are never modified.</>,
     <>Nothing is saved until you approve the verified diff.</>,
   ]
-  // Fullscreen overlay → center the composition in the area below the header +
-  // stepper so it owns the space instead of clinging to the top-left corner.
+  // Fullscreen overlay → a centered reading column that starts near the top.
+  // Don't vertically center: this screen is content-tall (intro + guarantees +
+  // CTA), so centering floats the Start button with a dead gap beneath it.
+  // Horizontal `margin: 0 auto` still lets it own the width.
   return (
-    <div style={{ minHeight: 'calc(100dvh - 200px)', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-      <div style={{ width: 'min(600px, 100%)', margin: '0 auto' }}>
+    <div style={{ width: 'min(600px, 100%)', margin: '0 auto', paddingTop: 40 }}>
         <div style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '.5px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontWeight: 600, marginBottom: 12 }}>
           Guided port-ification
         </div>
@@ -475,7 +476,6 @@ function PlanScreen({ feature, agent, busy, onStart }: { feature: string; agent:
         <button type="button" className="cl-button-primary" disabled={busy} onClick={onStart} style={{ padding: '10px 20px' }}>
           {busy ? 'Starting…' : 'Start ▶'}
         </button>
-      </div>
     </div>
   )
 }

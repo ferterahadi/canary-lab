@@ -18,6 +18,7 @@ vi.mock('../api/client', async () => {
     regeneratePrdSummary: vi.fn(),
     startCoverageJob: vi.fn(),
     getCoverageJob: vi.fn(),
+    listCoverageJobs: vi.fn(),
   }
 })
 
@@ -78,6 +79,7 @@ beforeEach(() => {
   root = createRoot(container)
   vi.mocked(api.getFeatureCoverage).mockResolvedValue(structuredClone(LEDGER))
   vi.mocked(api.listFeatureDocs).mockResolvedValue({ feature: 'checkout', docs: [], hasPrdSummary: true, sourceDocCount: 1, docsDrift: true })
+  vi.mocked(api.listCoverageJobs).mockResolvedValue([]) // no running job by default
 })
 
 afterEach(() => {
@@ -108,19 +110,27 @@ describe('CoverageLedgerPage', () => {
     expect(container.querySelector('[data-testid="coverage-ring"]')?.getAttribute('aria-label')).toBe('66.7% verified')
   })
 
-  it('shows gap badges with counts and the drift banner', async () => {
+  it('shows gap badges with counts and the drift indicator (in the docs rail)', async () => {
     await mount()
     expect(container.querySelector('[data-testid="gap-badge-untested"]')?.textContent).toContain('1')
     expect(container.querySelector('[data-testid="gap-badge-path-incomplete"]')?.textContent).toContain('1')
     expect(container.querySelector('[data-testid="gap-badge-shallow-verified"]')?.textContent).toContain('1')
-    expect(container.querySelector('[data-testid="drift-banner"]')).toBeTruthy()
+    expect(container.querySelector('[data-testid="docs-rail-drift"]')).toBeTruthy()
   })
 
-  it('shows the derived state headline and names the changed docs', async () => {
+  it('shows the derived state headline and names the changed docs (R22 — drift in the rail)', async () => {
     await mount()
     expect(container.querySelector('[data-testid="coverage-state-headline"]')?.textContent).toBe('Stale')
-    expect(container.querySelector('[data-testid="drift-banner"]')?.textContent).toContain('prd.md changed')
-    expect(container.querySelector('[data-testid="drift-banner"]')?.textContent).toContain('PRD summary + coverage ledger')
+    expect(container.querySelector('[data-testid="docs-rail-drift"]')?.textContent).toContain('prd.md changed')
+    expect(container.querySelector('[data-testid="docs-rail-drift"]')?.textContent).toContain('PRD summary + coverage ledger')
+  })
+
+  it('renders the unified layout: docs rail + requirements + tests, no tabs (R22)', async () => {
+    await mount()
+    expect(container.querySelector('[data-testid="docs-rail"]')).toBeTruthy()
+    expect(container.querySelector('[data-testid="prd-pane"]')).toBeTruthy()
+    expect(container.querySelector('[data-testid="tests-pane"]')).toBeTruthy()
+    expect(container.querySelector('[role="tablist"]')).toBeNull()
   })
 
   it('orders requirements worst-first (uncovered before partial)', async () => {
@@ -169,6 +179,8 @@ describe('CoverageLedgerPage', () => {
     vi.mocked(api.startCoverageJob).mockResolvedValue({ jobId: 'j1', feature: 'checkout', kind: 'summary', status: 'done', startedAt: 'now', log: '' })
     vi.mocked(api.getCoverageJob).mockResolvedValue({ jobId: 'j1', feature: 'checkout', kind: 'summary', status: 'done', startedAt: 'now', log: 'done' })
     await mount()
+    // The rail loads its doc list async; flush so its generate button renders.
+    await act(async () => { await Promise.resolve() })
     await act(async () => {
       container.querySelector<HTMLButtonElement>('[data-testid="generate-summary"]')?.click()
       await Promise.resolve()
@@ -192,6 +204,22 @@ describe('CoverageLedgerPage', () => {
     // Avoid leaking the pending getCoverageJob promise.
     resolveJob?.({ jobId: 'j1', feature: 'checkout', kind: 'summary', status: 'done', startedAt: 'now', log: 'done' })
   })
+
+  it('rehydrates a running job on mount so a refresh restores the Generating screen (R18)', async () => {
+    // Server says a coverage job is still running for this feature.
+    vi.mocked(api.listCoverageJobs).mockResolvedValue([
+      { jobId: 'jX', feature: 'checkout', kind: 'coverage', status: 'running', startedAt: '2026-01-01T00:00:01Z' },
+    ])
+    let resolveJob: ((m: import('../api/types').CoverageJobManifest) => void) | null = null
+    vi.mocked(api.getCoverageJob).mockImplementation(() => new Promise((res) => { resolveJob = res }))
+    await mount()
+    await act(async () => { await Promise.resolve(); await Promise.resolve() })
+    // Without any click, the Generating screen is restored from the running job.
+    expect(api.listCoverageJobs).toHaveBeenCalledWith('checkout')
+    expect(container.querySelector('[data-testid="coverage-generating"]')).toBeTruthy()
+    expect(container.querySelector('[data-testid="prd-pane"]')).toBeNull()
+    resolveJob?.({ jobId: 'jX', feature: 'checkout', kind: 'coverage', status: 'done', startedAt: '2026-01-01T00:00:01Z', log: 'done' })
+  })
 })
 
 const EMPTY_LEDGER: CoverageLedger = {
@@ -205,24 +233,26 @@ const EMPTY_LEDGER: CoverageLedger = {
   state: { summary: 'absent', coverage: 'blocked', headline: 'Setup needed', drift: { drifted: false, changedDocs: [], affectedArtifacts: [] } },
 }
 
-describe('CoverageLedgerPage — setup guide (ABSENT summary)', () => {
-  it('shows the two-step guide and locks step ② until a doc exists', async () => {
+describe('CoverageLedgerPage — empty (ABSENT summary)', () => {
+  it('shows the empty main + the docs rail (no setup-guide tab) (R22)', async () => {
     vi.mocked(api.getFeatureCoverage).mockResolvedValue(structuredClone(EMPTY_LEDGER))
     vi.mocked(api.listFeatureDocs).mockResolvedValue({ feature: 'checkout', docs: [], hasPrdSummary: false, sourceDocCount: 0, docsDrift: false })
     await mount()
-    expect(container.querySelector('[data-testid="coverage-setup-guide"]')).toBeTruthy()
-    expect(container.querySelector('[data-testid="setup-step-1"]')?.getAttribute('data-active')).toBe('true')
-    expect(container.querySelector<HTMLButtonElement>('[data-testid="setup-generate-summary"]')?.disabled).toBe(true)
+    await act(async () => { await Promise.resolve() })
+    expect(container.querySelector('[data-testid="coverage-empty-main"]')).toBeTruthy()
+    expect(container.querySelector('[data-testid="docs-rail"]')).toBeTruthy()
+    // No ledger panes while the summary is absent.
+    expect(container.querySelector('[data-testid="prd-pane"]')).toBeNull()
   })
 
-  it('unlocks Generate summary once docs exist and starts the job', async () => {
+  it('generates from the rail once a doc exists and starts the chained job', async () => {
     vi.mocked(api.getFeatureCoverage).mockResolvedValue(structuredClone(EMPTY_LEDGER))
     vi.mocked(api.listFeatureDocs).mockResolvedValue({ feature: 'checkout', docs: [{ relPath: 'spec.md', generated: false, sizeBytes: 9 }], hasPrdSummary: false, sourceDocCount: 1, docsDrift: false })
     vi.mocked(api.startCoverageJob).mockResolvedValue({ jobId: 'j', feature: 'checkout', kind: 'summary', status: 'done', startedAt: 'n', log: '' })
     vi.mocked(api.getCoverageJob).mockResolvedValue({ jobId: 'j', feature: 'checkout', kind: 'summary', status: 'done', startedAt: 'n', log: 'done' })
     await mount()
-    expect(container.querySelector('[data-testid="setup-step-2"]')?.getAttribute('data-active')).toBe('true')
-    const gen = container.querySelector<HTMLButtonElement>('[data-testid="setup-generate-summary"]')
+    await act(async () => { await Promise.resolve() })
+    const gen = container.querySelector<HTMLButtonElement>('[data-testid="generate-summary"]')
     expect(gen?.disabled).toBe(false)
     await act(async () => { gen?.click(); await Promise.resolve() })
     expect(api.startCoverageJob).toHaveBeenCalledWith('checkout', 'summary')

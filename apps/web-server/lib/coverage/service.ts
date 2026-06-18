@@ -15,6 +15,7 @@ import {
   proposeCoverageMappings,
   type AnnotateAdapter,
   type AnnotateTestInput,
+  type CoverageAgentSession,
 } from './annotate-engine'
 import { writeCoversTag } from './tag-writer'
 import { changedDocPaths, changedRequirementIds, diffDocs, fingerprintDocs, requirementFingerprintMap, requirementsSetHash } from './fingerprints'
@@ -195,6 +196,7 @@ export interface RunCoverageEngineArgs {
   now?: string
   signal?: AbortSignal
   onOutput?: (chunk: string) => void
+  onAgentSession?: (session: CoverageAgentSession) => void
 }
 
 export interface RunCoverageEngineResult {
@@ -262,7 +264,7 @@ export async function runCoverageEngine(args: RunCoverageEngineArgs): Promise<Ru
   }
 
   const proposals = await proposeCoverageMappings(
-    { requirements: candidateRequirements, tests: engineInputs, adapter: args.adapter, cwd: args.cwd, signal: args.signal, onOutput: args.onOutput },
+    { requirements: candidateRequirements, tests: engineInputs, adapter: args.adapter, cwd: args.cwd, signal: args.signal, onOutput: args.onOutput, onSession: args.onAgentSession },
   )
 
   // No review gate (R16): every inferred mapping's `covers` tag is written now.
@@ -331,6 +333,7 @@ export interface RegeneratePrdSummaryArgs {
   cwd?: string
   now?: string
   onOutput?: (chunk: string) => void
+  onAgentSession?: (session: CoverageAgentSession) => void
 }
 
 export interface RegeneratePrdSummaryResult {
@@ -358,6 +361,7 @@ export async function regeneratePrdSummary(args: RegeneratePrdSummaryArgs): Prom
     cwd: args.cwd,
     now: args.now,
     onOutput: args.onOutput,
+    onSession: args.onAgentSession,
   })
   const written = writePrdSummary(featureDir, found.name, summary)
   return {

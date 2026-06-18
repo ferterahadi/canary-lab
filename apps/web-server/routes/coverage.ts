@@ -14,6 +14,12 @@ import type { CoverageJobKind } from '../lib/coverage/jobs/types'
 import { writeFeatureDoc, deleteFeatureDoc } from '../lib/feature-authoring'
 import { extractPrdDocument } from '../lib/prd-document-extractor'
 import { loadFeatures } from '../lib/feature-loader'
+import {
+  findClaudeLogBySessionId,
+  loadAgentSession,
+  locateCodexSessionLog,
+  type AgentSessionRef,
+} from '../lib/agent-session-log'
 
 export interface CoverageRouteDeps {
   featuresDir: string
@@ -208,6 +214,31 @@ export async function coverageRoutes(app: FastifyInstance, deps: CoverageRouteDe
     return manifest
   })
 
+  // Structured agent-session snapshot for a coverage/summary job (R17) — the
+  // initial render the Generating screen's AgentSessionView fetches before the
+  // live WS takes over. Returns null when the job has no agent session (a
+  // deterministic-fallback run, or the log not on disk yet).
+  app.get<{ Params: { jobId: string } }>('/api/coverage/jobs/:jobId/agent-session', async (req, reply) => {
+    const manifest = jobStore.get(req.params.jobId)
+    if (!manifest) {
+      reply.code(404)
+      return { error: 'job not found' }
+    }
+    const ref = manifest.sessionRef
+    if (!ref) return null
+    let located: AgentSessionRef | null = null
+    if (ref.agent === 'claude') {
+      const logPath = ref.sessionId ? findClaudeLogBySessionId(ref.sessionId) : null
+      if (logPath) located = { agent: 'claude', sessionId: ref.sessionId, logPath }
+    } else {
+      // Codex has no pinned id — locate by the job's cwd (project root) + start.
+      located = locateCodexSessionLog(deps.projectRoot, manifest.startedAt)
+    }
+    if (!located) return null
+    const { events, meta } = loadAgentSession(located)
+    return { agent: located.agent, sessionId: located.sessionId, model: meta.model, effort: meta.effort, events }
+  })
+
   app.post<{ Params: { name: string }; Body: { kind?: CoverageJobKind; adapter?: SummarizeAdapter } | undefined }>(
     '/api/features/:name/coverage/jobs',
     async (req, reply) => {
@@ -228,6 +259,9 @@ export async function coverageRoutes(app: FastifyInstance, deps: CoverageRouteDe
             feature: req.params.name,
             kind,
             adapter: req.body?.adapter as never,
+            // Run the agent in the project root so its session log + cwd-based
+            // codex session location resolve (R17).
+            cwd: deps.projectRoot,
           },
           { store: jobStore },
         )

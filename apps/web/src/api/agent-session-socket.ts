@@ -11,6 +11,8 @@ export type AgentSessionSocketSource =
   | { kind: 'draft'; draftId: string; stage: 'planning' | 'generating' }
   | { kind: 'benchmark'; benchmarkId: string }
   | { kind: 'portify'; workflowId: string }
+  | { kind: 'coverage'; jobId: string }
+  | { kind: 'evaluation'; taskId: string }
 
 export interface AgentSessionSocketMessage {
   type: 'session' | 'event' | 'error' | 'done'
@@ -52,6 +54,12 @@ function urlFor(base: string, source: AgentSessionSocketSource): string {
   }
   if (source.kind === 'portify') {
     return `${base}/ws/portify/${encodeURIComponent(source.workflowId)}/agent-session`
+  }
+  if (source.kind === 'coverage') {
+    return `${base}/ws/coverage/jobs/${encodeURIComponent(source.jobId)}/agent-session`
+  }
+  if (source.kind === 'evaluation') {
+    return `${base}/ws/evaluation-exports/${encodeURIComponent(source.taskId)}/agent-session`
   }
   return `${base}/ws/draft/${encodeURIComponent(source.draftId)}/agent-session?stage=${encodeURIComponent(source.stage)}`
 }

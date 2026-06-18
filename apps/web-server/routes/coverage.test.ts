@@ -177,6 +177,25 @@ describe('coverage routes', () => {
     expect(res.statusCode).toBe(404)
   })
 
+  it('agent-session: 404s an unknown job and returns null when a job has no session (R17)', async () => {
+    writeFeature('checkout', SPEC, { 'spec.md': '# Cart\nuser adds an item' })
+    // Unknown job → 404.
+    const missing = await app.inject({ method: 'GET', url: '/api/coverage/jobs/nope/agent-session' })
+    expect(missing.statusCode).toBe(404)
+    // A real deterministic job has no agent session ref → null (200).
+    await app.inject({ method: 'POST', url: '/api/features/checkout/prd-summary/regenerate', payload: { adapter: 'deterministic' } })
+    const start = await app.inject({ method: 'POST', url: '/api/features/checkout/coverage/jobs', payload: { kind: 'coverage', adapter: 'deterministic' } })
+    const jobId = (start.json() as { jobId: string }).jobId
+    let m: { status: string } = { status: 'running' }
+    for (let i = 0; i < 50 && m.status === 'running'; i++) {
+      m = (await app.inject({ method: 'GET', url: `/api/coverage/jobs/${jobId}` })).json() as { status: string }
+      if (m.status === 'running') await new Promise((r) => setTimeout(r, 10))
+    }
+    const session = await app.inject({ method: 'GET', url: `/api/coverage/jobs/${jobId}/agent-session` })
+    expect(session.statusCode).toBe(200)
+    expect(session.json()).toBeNull()
+  })
+
   it('imports an uploaded doc (extracted to markdown) then lists it', async () => {
     writeFeature('checkout', SPEC)
     const base64 = Buffer.from('# Imported brief\nbody text').toString('base64')

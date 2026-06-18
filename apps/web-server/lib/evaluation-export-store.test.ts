@@ -112,11 +112,28 @@ describe('evaluation-export-store', () => {
       { taskId: ID, runId: 'r', feature: 'f', mode: 'raw', status: 'running', createdAt: 'a', updatedAt: 'b', downloadReady: false, archiveBase: 'x', language: 7 },
       { taskId: ID, runId: 'r', feature: 'f', mode: 'raw', status: 'running', createdAt: 'a', updatedAt: 'b', downloadReady: false, archiveBase: 'x', externalSessionUrl: 7 },
       { taskId: ID, runId: 'r', feature: 'f', mode: 'raw', status: 'running', createdAt: 'a', updatedAt: 'b', downloadReady: false, archiveBase: 'x', error: 7 },
+      { taskId: ID, runId: 'r', feature: 'f', mode: 'raw', status: 'running', createdAt: 'a', updatedAt: 'b', downloadReady: false, archiveBase: 'x', sessionRef: { agent: 'gpt', sessionId: 'x' } },
+      { taskId: ID, runId: 'r', feature: 'f', mode: 'raw', status: 'running', createdAt: 'a', updatedAt: 'b', downloadReady: false, archiveBase: 'x', sessionRef: { agent: 'claude', sessionId: 7 } },
     ]
     for (const v of variants) {
       fs.writeFileSync(p.taskJson, JSON.stringify(v), 'utf8')
       expect(readEvaluationExportTask(tmpDir, ID)).toBeNull()
     }
+  })
+
+  it('persists and exposes the rewrite-agent sessionRef through patch and view', () => {
+    createEvaluationExportTask(tmpDir, makeRecord({ mode: 'localized', producer: 'internal' }))
+    const patched = patchEvaluationExportTask(tmpDir, ID, { sessionRef: { agent: 'claude', sessionId: 'abc-123' } })
+    expect(patched?.sessionRef).toEqual({ agent: 'claude', sessionId: 'abc-123' })
+    expect(readEvaluationExportTask(tmpDir, ID)?.sessionRef).toEqual({ agent: 'claude', sessionId: 'abc-123' })
+    expect(evaluationExportTaskView(patched!).sessionRef).toEqual({ agent: 'claude', sessionId: 'abc-123' })
+
+    const codex = patchEvaluationExportTask(tmpDir, ID, { sessionRef: { agent: 'codex', sessionId: '' } })
+    expect(evaluationExportTaskView(codex!).sessionRef).toEqual({ agent: 'codex', sessionId: '' })
+  })
+
+  it('omits sessionRef from the view when no agent ran', () => {
+    expect(evaluationExportTaskView(makeRecord()).sessionRef).toBeUndefined()
   })
 
   it('full lifecycle: create, patch, list, log, zip, view, delete', () => {

@@ -81,6 +81,13 @@ export function startCoverageJob(args: StartCoverageJobArgs, deps: CoverageJobRu
     store.save(manifest)
   }
 
+  // R17: record the agent CLI session the moment it's pinned, so the Generating
+  // screen can stream the structured AgentSessionView while the job runs.
+  const onAgentSession = (session: { agent: 'claude' | 'codex'; sessionId: string }) => {
+    manifest = { ...manifest, sessionRef: session }
+    store.save(manifest)
+  }
+
   const finishOk = (result: CoverageJobManifest['result'], extra?: Partial<CoverageJobManifest>) => {
     manifest = { ...manifest, ...extra, status: 'done', endedAt: now(), result }
     store.save(manifest)
@@ -99,6 +106,7 @@ export function startCoverageJob(args: StartCoverageJobArgs, deps: CoverageJobRu
           adapter: args.adapter,
           cwd: args.cwd,
           onOutput: append,
+          onAgentSession,
         })
         // Summary + Coverage are one exercise (R14): on a successful summary,
         // immediately chain the coverage engine so mappings refresh against the
@@ -124,6 +132,7 @@ export function startCoverageJob(args: StartCoverageJobArgs, deps: CoverageJobRu
           adapter: args.adapter,
           cwd: args.cwd,
           onOutput: append,
+          onAgentSession,
         })
         finishOk({ applied: res.applied.length })
       }

@@ -42,10 +42,14 @@ afterEach(() => {
   vi.clearAllMocks()
 })
 
-async function mount(): Promise<void> {
-  await act(async () => { root.render(<LogCleanupPage onClose={() => {}} />) })
+async function mount(onNavigateToRun?: (feature: string, runId: string) => void): Promise<void> {
+  await act(async () => { root.render(<LogCleanupPage onClose={() => {}} onNavigateToRun={onNavigateToRun} />) })
   // flush the cleanupRuns().then
   await act(async () => { await Promise.resolve() })
+}
+
+function runLink(runId: string): HTMLButtonElement | undefined {
+  return [...container.querySelectorAll<HTMLButtonElement>('button.cl-run-link')].find((b) => b.textContent === runId)
 }
 
 function rowCheckbox(runId: string): HTMLInputElement | undefined {
@@ -91,6 +95,24 @@ describe('LogCleanupPage', () => {
     await act(async () => { confirmBtn.click() })
     await act(async () => { await Promise.resolve() })
     expect(api.trimRun).toHaveBeenCalledWith('2026-05-01T1000-aaaa')
+  })
+
+  it('clicking a run id navigates to that run', async () => {
+    const onNavigateToRun = vi.fn()
+    await mount(onNavigateToRun)
+    await act(async () => { runLink('2026-05-01T1000-aaaa')?.click() })
+    expect(onNavigateToRun).toHaveBeenCalledWith('shop', '2026-05-01T1000-aaaa')
+  })
+
+  it('orphans are not navigable (plain text, no run link)', async () => {
+    await mount(() => {})
+    expect(container.textContent).toContain('2026-05-04T1000-dddd')
+    expect(runLink('2026-05-04T1000-dddd')).toBeUndefined()
+  })
+
+  it('run ids stay plain text when onNavigateToRun is absent', async () => {
+    await mount()
+    expect(runLink('2026-05-01T1000-aaaa')).toBeUndefined()
   })
 
   it('bulk delete via action bar calls api.deleteRun for each selected', async () => {

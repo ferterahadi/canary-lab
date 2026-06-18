@@ -1,5 +1,6 @@
 import { useEvaluationExports } from '../state/EvaluationExportContext'
 import type { EvaluationExportMode, EvaluationExportTask } from '../api/types'
+import { AgentSessionView } from './AgentSessionView'
 import { CloseIcon, DownloadIcon, StatusDot, type StatusDotState } from './config/atoms'
 import { StatusPill } from './StatusPill'
 
@@ -160,16 +161,33 @@ function EvaluationExportDialog({
               )
             })}
           </aside>
-          <section className="min-w-0">
-            <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
-              {panel.heading}
-            </h3>
-            <pre
-              className="max-h-[52vh] min-h-[260px] overflow-auto rounded-md border p-3 text-[11px] leading-relaxed scrollbar-thin"
-              style={{ borderColor: 'var(--border-default)', background: 'var(--bg-base)', color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}
-            >
-              {panel.text}
-            </pre>
+          <section className="flex min-h-0 min-w-0 flex-col">
+            {task.sessionRef ? (
+              // A localized-rewrite agent ran for this task — stream its JSONL
+              // through the shared agent timeline, same as every other agent
+              // surface. Raw/external/cached runs have no sessionRef and keep
+              // the text panel below.
+              <div
+                className="min-h-[260px] flex-1 overflow-hidden rounded-md border"
+                style={{ borderColor: 'var(--border-default)', maxHeight: '52vh' }}
+              >
+                <AgentSessionView
+                  source={{ kind: 'evaluation', taskId: task.taskId, live: task.status === 'running' }}
+                />
+              </div>
+            ) : (
+              <>
+                <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
+                  {panel.heading}
+                </h3>
+                <pre
+                  className="max-h-[52vh] min-h-[260px] overflow-auto rounded-md border p-3 text-[11px] leading-relaxed scrollbar-thin"
+                  style={{ borderColor: 'var(--border-default)', background: 'var(--bg-base)', color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}
+                >
+                  {panel.text}
+                </pre>
+              </>
+            )}
           </section>
         </div>
       </section>

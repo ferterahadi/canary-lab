@@ -84,7 +84,7 @@ describe('evaluationOutputPanel', () => {
       { mode: 'localized' },
       [
         '[evaluation] generating localized wording',
-        '[agent:codex] starting localized rewrite (model: gpt-5.4-mini)',
+        '[agent:codex] starting localized rewrite (model: agent default)',
         '{"slots":[{"id":"summary","text":"Readable summary"}]}',
         '[agent:codex] localized rewrite completed',
       ].join('\n'),
@@ -97,7 +97,7 @@ describe('evaluationOutputPanel', () => {
 
   it('keeps already fenced claude json output unchanged', () => {
     const log = [
-      '[agent:claude] starting localized rewrite (model: haiku)',
+      '[agent:claude] starting localized rewrite (model: agent default)',
       '```json',
       '{"slots":[]}',
       '```',

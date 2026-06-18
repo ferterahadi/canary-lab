@@ -309,7 +309,15 @@ export function App() {
       />
       <div className="min-h-0 flex-1">
         {view === 'cleanup'
-          ? <LogCleanupPage onClose={() => setView('workspace')} />
+          ? <LogCleanupPage
+              onClose={() => setView('workspace')}
+              onNavigateToRun={(feature, runId) => {
+                pendingRunSelectionRef.current = null
+                setSelectedFeature(feature)
+                setSelectedRunId(runId)
+                setView('workspace')
+              }}
+            />
           : view === 'coverage' && selectedFeature
           ? <CoverageLedgerPage feature={selectedFeature} onClose={() => setView('workspace')} />
           : <ResizablePanels panels={panels} />}

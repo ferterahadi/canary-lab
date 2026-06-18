@@ -1,14 +1,17 @@
 import { useEffect, useRef, useState } from 'react'
 import type { CoverageJobManifest } from '../api/types'
+import { AgentSessionView } from './AgentSessionView'
 
 // R13/R15: the dedicated Generating screen. While a coverage/summary job runs, the
 // Coverage tab shows THIS and nothing else — never the ledger, never the empty
 // state. Summary + Coverage are one exercise (R14), so the screen is phase-aware:
 // it walks ① Summarizing docs → ② Mapping coverage as the chained job advances.
 //
-// The live agent output streams into a condensed tail; "View agent activity"
-// expands the full log. (R17 mount point: when the job carries a structured
-// agent session ref, swap the expanded log for <AgentSessionView source=coverage>.)
+// Collapsed (default) the screen stays clean: just the phase stepper + a hint.
+// "View agent activity" expands the real agent timeline (R17) — when the job
+// carries a structured session ref we mount <AgentSessionView source=coverage>;
+// a deterministic / no-agent run has no session, so we fall back to the
+// condensed raw log so the panel is never empty.
 
 interface Props {
   feature: string
@@ -23,35 +26,58 @@ const PHASES: Array<{ key: Phase; title: string; body: string }> = [
 ]
 
 export function CoverageGeneratingPane({ feature, job }: Props) {
-  const [expanded, setExpanded] = useState(false)
+  // Agent activity is shown by DEFAULT — seeing the model work is the point.
+  const [expanded, setExpanded] = useState(true)
+  // 'live' = the stream-json token stream (watch the answer being written);
+  // 'timeline' = the structured session (prompt + final). Live is the default
+  // because for a single-completion agent it's the only thing that streams.
+  const [actView, setActView] = useState<'live' | 'timeline'>('live')
   const logRef = useRef<HTMLPreElement | null>(null)
   // The active phase is just the running job's kind. A standalone coverage job
   // (no summary phase) shows ① as already-done.
   const activeIndex = job.kind === 'summary' ? 0 : 1
   const standaloneCoverage = job.kind === 'coverage' && !job.chainedFromJobId
 
-  // Keep the streaming tail pinned to the newest output.
+  const hasSession = Boolean(job.sessionRef)
+
+  // Elapsed timer — a single inference has no intermediate steps to stream, so a
+  // ticking "working… Ns" is what tells the user it's alive, not frozen.
+  const [elapsed, setElapsed] = useState(0)
   useEffect(() => {
+    const started = Date.parse(job.startedAt)
+    const tick = () => setElapsed(Number.isFinite(started) ? Math.max(0, Math.round((Date.now() - started) / 1000)) : 0)
+    tick()
+    const id = setInterval(tick, 1000)
+    return () => clearInterval(id)
+  }, [job.startedAt])
+
+  // Keep the live log pinned to the newest streamed output.
+  const showingLog = expanded && (actView === 'live' || !hasSession)
+  useEffect(() => {
+    if (!showingLog) return
     const el = logRef.current
     if (el) el.scrollTop = el.scrollHeight
-  }, [job.log, expanded])
+  }, [job.log, showingLog])
 
-  const tail = condenseTail(job.log, expanded ? 400 : 8)
+  const tail = condenseTail(job.log, 400)
 
   return (
-    <div className="min-h-0 flex-1 overflow-auto" data-testid="coverage-generating">
-      <div style={{ maxWidth: 640, margin: '44px auto 0', padding: '0 24px 40px' }}>
+    // scrollbarGutter:stable reserves the scrollbar track so toggling the agent
+    // activity (which grows past the column) doesn't shift the layout.
+    <div className="min-h-0 h-full overflow-auto" data-testid="coverage-generating" style={{ scrollbarGutter: 'stable' }}>
+      <div style={{ maxWidth: 720, margin: '0 auto', padding: '26px 24px 40px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
           <span className="cl-pulse" aria-hidden="true" style={{ width: 9, height: 9, borderRadius: '50%', background: 'rgb(56, 189, 248)', boxShadow: '0 0 10px rgb(56,189,248)' }} />
           <span style={{ fontSize: 12, fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'rgb(56, 189, 248)' }}>
             Generating
           </span>
+          <span data-testid="generating-elapsed" style={{ fontSize: 11, color: 'var(--text-muted)', fontVariantNumeric: 'tabular-nums' }}>· {elapsed}s</span>
         </div>
-        <h2 style={{ fontSize: 20, fontWeight: 700, color: 'var(--text-primary)', margin: '6px 0 4px' }}>
+        <h2 style={{ fontSize: 19, fontWeight: 700, color: 'var(--text-primary)', margin: '6px 0 4px' }}>
           {job.kind === 'summary' ? 'Summarizing & mapping coverage' : 'Mapping coverage'}
         </h2>
-        <p style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.5, marginBottom: 24 }}>
-          Summary and coverage run as one exercise for <strong style={{ color: 'var(--text-primary)' }}>{feature}</strong>. This can take a minute — it keeps running if you close this view.
+        <p style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.5, marginBottom: 22 }}>
+          Summary and coverage run as one exercise for <strong style={{ color: 'var(--text-primary)' }}>{feature}</strong>. Keeps running if you close this view.
         </p>
 
         {/* Phase stepper — current phase pulses, earlier phases are done. */}
@@ -63,7 +89,7 @@ export function CoverageGeneratingPane({ feature, job }: Props) {
           })}
         </div>
 
-        <div style={{ marginTop: 22 }}>
+        <div style={{ marginTop: 18, display: 'flex', alignItems: 'center', gap: 12 }}>
           <button
             type="button"
             data-testid="toggle-agent-activity"
@@ -72,32 +98,70 @@ export function CoverageGeneratingPane({ feature, job }: Props) {
             aria-expanded={expanded}
             style={{ fontSize: 12 }}
           >
-            {expanded ? 'Hide agent activity' : 'View agent activity'}
+            {expanded ? 'Hide agent activity' : 'Show agent activity'}
           </button>
         </div>
 
-        <pre
-          ref={logRef}
-          data-testid="generating-log"
-          style={{
-            marginTop: 12,
-            maxHeight: expanded ? 420 : 132,
-            overflow: 'auto',
-            fontSize: 11,
-            lineHeight: 1.5,
-            fontFamily: 'var(--font-mono, monospace)',
-            color: 'var(--text-secondary)',
-            whiteSpace: 'pre-wrap',
-            wordBreak: 'break-word',
-            background: 'var(--bg-base)',
-            border: '1px solid var(--border-default)',
-            borderRadius: 'var(--radius-md)',
-            padding: 12,
-            transition: 'max-height 150ms',
-          }}
-        >
-          {tail || 'Starting the agent…'}
-        </pre>
+        {expanded && (
+          <>
+            {/* Two ways to watch: the LIVE token stream (default — the model's
+                answer as it writes) or the structured session timeline. */}
+            {hasSession && (
+              <div role="tablist" style={{ display: 'inline-flex', gap: 2, marginTop: 12, padding: 3, borderRadius: 'var(--radius-md)', background: 'var(--bg-base)', border: '1px solid var(--border-default)' }}>
+                {(['live', 'timeline'] as const).map((v) => (
+                  <button
+                    key={v}
+                    type="button"
+                    data-testid={`activity-${v}`}
+                    data-on={actView === v ? 'true' : 'false'}
+                    onClick={() => setActView(v)}
+                    style={{
+                      appearance: 'none', border: 'none', cursor: 'pointer',
+                      padding: '4px 12px', fontSize: 11.5, fontWeight: 600, borderRadius: 'calc(var(--radius-md) - 3px)',
+                      background: actView === v ? 'var(--bg-selected)' : 'transparent',
+                      color: actView === v ? 'var(--text-primary)' : 'var(--text-secondary)',
+                    }}
+                  >
+                    {v === 'live' ? 'Live output' : 'Timeline'}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {hasSession && actView === 'timeline' ? (
+              <div
+                data-testid="coverage-agent-session"
+                style={{
+                  marginTop: 12, position: 'relative', height: 360, overflow: 'hidden',
+                  background: 'var(--bg-base)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)',
+                }}
+              >
+                <AgentSessionView source={{ kind: 'coverage', jobId: job.jobId, live: true }} />
+              </div>
+            ) : (
+              <pre
+                ref={logRef}
+                data-testid="generating-log"
+                style={{
+                  marginTop: 12, marginBottom: 0,
+                  maxHeight: 360, overflow: 'auto',
+                  fontSize: 11, lineHeight: 1.5,
+                  fontFamily: 'var(--font-mono, monospace)', color: 'var(--text-secondary)',
+                  whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                  background: 'var(--bg-base)', border: '1px solid var(--border-default)',
+                  borderRadius: 'var(--radius-md)', padding: 12, scrollbarGutter: 'stable',
+                }}
+              >
+                {tail || 'Starting the agent…'}
+              </pre>
+            )}
+            {/* Honest framing — these agents are single completions (no tool/read
+                steps); Live output is the model's answer streaming in. */}
+            <p style={{ fontSize: 11, color: 'var(--text-muted)', margin: '8px 2px 0', lineHeight: 1.5 }}>
+              {job.kind === 'summary' ? 'Summarizing' : 'Mapping'} is a single model inference — Live output is its response streaming in (no intermediate tool steps).
+            </p>
+          </>
+        )}
       </div>
     </div>
   )
