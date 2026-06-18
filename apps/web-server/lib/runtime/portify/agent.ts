@@ -1,11 +1,11 @@
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { spawn, type ChildProcess } from 'child_process'
+import { type ChildProcess } from 'child_process'
 import { claudeSessionLogPath, encodeClaudeProjectDir } from '../../agent-session-log'
 import { resolveAgentBinary, type HealAgent } from '../auto-heal'
 import { PORTIFY_MODELS, modelArgs } from '../../agent-models'
-import { startIdleTimer, type IdleTimer } from '../../agent-idle-timer'
+import { runAgentProcess, buildClaudeAgenticArgs } from '../../agent-process'
 
 // Idle window: kill a wedged port-ify agent after this long with NO activity
 // (no session-JSONL / log growth). No hard wall-clock — a slow-but-working agent
@@ -37,66 +37,47 @@ export function runPortifyAgent(opts: {
   /** true on a retry: resume the prior claude session instead of starting one. */
   resume?: boolean
 }): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const { agent, prompt, cwd, logPath, children, sessionId, resume } = opts
-    const args =
-      agent === 'claude'
-        ? [
-            '-p', prompt, '--dangerously-skip-permissions',
-            // stream-json keeps stdout flowing (token deltas) so the idle clock
-            // resets during a long claude inference — same liveness mechanism as
-            // every other agent runner. Consumed only for liveness; the verifier
-            // judges the result, so we don't parse the output.
-            '--output-format=stream-json', '--include-partial-messages', '--verbose',
-            ...modelArgs(PORTIFY_MODELS.claude),
-            ...(sessionId ? (resume ? ['--resume', sessionId] : ['--session-id', sessionId]) : []),
-          ]
-        : ['exec', '--full-auto', ...modelArgs(PORTIFY_MODELS.codex), prompt]
-    // Absolute path when resolvable; bare name otherwise so spawn surfaces a
-    // real ENOENT through the 'error' handler below.
-    const bin = resolveAgentBinary(agent) ?? agent
-    let out: number | null = null
-    if (logPath) {
-      try { out = fs.openSync(logPath, 'a') } catch { out = null }
-    }
-    const child = spawn(bin, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] })
-    children?.add(child)
-    let idleTimer: IdleTimer | undefined
-    // Tee output to the debug log and reset the idle clock on every chunk — the
-    // primary liveness signal, same as the wizard/coverage runners.
-    const onChunk = (chunk: Buffer): void => {
-      idleTimer?.bump()
-      if (out !== null) { try { fs.writeSync(out, chunk) } catch { /* best effort */ } }
-    }
-    child.stdout?.on('data', onChunk)
-    child.stderr?.on('data', onChunk)
-    const cleanup = (): void => {
-      idleTimer?.stop()
-      children?.delete(child)
-      if (out !== null) { try { fs.closeSync(out) } catch { /* noop */ } }
-    }
-    // Backstop activity signal: session-JSONL growth (claude) / log growth (codex).
-    const activityPath = agent === 'claude' && sessionId
-      ? claudeSessionLogPath(cwd, sessionId)
-      : logPath
-    idleTimer = startIdleTimer({
-      idleMs: PORTIFY_IDLE_TIMEOUT_MS,
-      activity: activityPath ? () => { try { return fs.statSync(activityPath).size } catch { return 0 } } : undefined,
-      onIdle: () => { child.kill('SIGTERM') },
-    })
+  const { agent, prompt, cwd, logPath, children, sessionId, resume } = opts
+  // Shared agent-process runner (spawn + tee + idle). claude gets stream-json for
+  // liveness; the double-boot verifier judges the result, so we don't parse output.
+  const args = agent === 'claude'
+    ? buildClaudeAgenticArgs(prompt, { model: PORTIFY_MODELS.claude, sessionId, resume })
+    : ['exec', '--full-auto', ...modelArgs(PORTIFY_MODELS.codex), prompt]
+  // Absolute path when resolvable; bare name otherwise so spawn surfaces a real
+  // ENOENT through the runner's 'error' (rejection) path.
+  const bin = resolveAgentBinary(agent) ?? agent
+  let out: number | null = null
+  if (logPath) {
+    try { out = fs.openSync(logPath, 'a') } catch { out = null }
+  }
+  const handle = runAgentProcess({
+    command: bin,
+    args,
+    cwd,
+    captureStdout: false,
+    onChunk: (text) => { if (out !== null) { try { fs.writeSync(out, text) } catch { /* best effort */ } } },
+    idleMs: PORTIFY_IDLE_TIMEOUT_MS,
+    activityPath: agent === 'claude' && sessionId ? claudeSessionLogPath(cwd, sessionId) : (logPath ?? undefined),
+  })
+  children?.add(handle.child)
+  const cleanup = (): void => {
+    children?.delete(handle.child)
+    if (out !== null) { try { fs.closeSync(out) } catch { /* noop */ } }
+  }
+  return handle.done.then(
     // Normal exit (any code) resolves — a non-zero agent still may have made
     // useful edits; the double-boot verifier is the real arbiter.
-    child.on('close', () => { cleanup(); resolve() })
+    () => { cleanup() },
     // A spawn failure (CLI missing / not launchable) is NOT a normal run that
     // simply made no edits — record it to the log and reject so the caller can
     // report it instead of letting verify mislabel it "no port slots declared".
-    child.on('error', (err) => {
+    (err: Error) => {
       const msg = `could not launch the ${agent} CLI (${bin}): ${err.message}`
       if (out !== null) { try { fs.writeSync(out, `\n${msg}\n`) } catch { /* noop */ } }
       cleanup()
-      reject(new Error(msg))
-    })
-  })
+      throw new Error(msg)
+    },
+  )
 }
 
 // Write `<workflowDir>/agent-session.json` pointing at the claude native session

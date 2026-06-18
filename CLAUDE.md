@@ -74,6 +74,10 @@ natively.)
 - `cl_design-feedback` — critiquing a UI (screenshot, live screen, Figma,
   component): ground every finding in the component source + tokens before
   voicing it; don't flag a shared primitive or intentional choice as a defect.
+- `cl_ws-driven-state` — adding any server-side mutation (route, background job,
+  MCP tool) that changes visible UI state: emit a `WorkspaceEvent` so the client
+  updates live. Covers the full chain + checklist + the two gaps fixed in 1.4.0
+  (portify save, coverage job completion).
 - `cl_live-state-sync` — a UI that must react in real time to a backend state
   change, or anything that "only updates after refresh": picking
   broadcast-push vs task-scoped stream vs refetch.

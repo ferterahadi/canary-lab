@@ -238,6 +238,190 @@ describe('buildExternalFailureDetail', () => {
     // The oversized tail ('x'.repeat(100)) is NOT in the output (it was cut off).
     expect(detail?.errorText?.endsWith('x'.repeat(100))).toBe(false)
   })
+
+  it('omits traceSummaryMarkdown when pointer.traceDir is null (line 216 FALSE branch)', () => {
+    // No trace-extract dir created → existingDir returns null → pointer.traceDir is
+    // undefined → the ternary `pointer.traceDir ? ... : null` takes the null path.
+    const runId = 'run-1'
+    const paths = buildRunPaths(runDirFor(logsDir, runId))
+    const failedSlug = 'checkout fails'
+    // Only create the error file; leave trace-extract absent entirely.
+    const errorDir = path.join(paths.failedDir, failedSlug)
+    fs.mkdirSync(errorDir, { recursive: true })
+    fs.writeFileSync(path.join(errorDir, 'error.txt'), 'boom\n')
+
+    const detail = buildExternalFailureDetail({
+      detail: detailFor(runId),
+      logsDir,
+      failureId: failedSlug,
+    })
+
+    expect(detail).not.toBeNull()
+    // traceDir absent → traceSummaryMarkdown not inlined.
+    expect(detail).not.toHaveProperty('traceSummaryMarkdown')
+    expect(detail?.traceDir).toBeUndefined()
+  })
+
+  it('omits traceSummaryMarkdown when trace-extract is a file not a dir (existingDir FALSE branch)', () => {
+    // existingDir: `fs.statSync(dir).isDirectory()` returns false when the path is a
+    // file → returns null → pointer.traceDir is undefined → no traceSummaryMarkdown.
+    const runId = 'run-1'
+    const paths = buildRunPaths(runDirFor(logsDir, runId))
+    const failedSlug = 'checkout fails'
+    const errorDir = path.join(paths.failedDir, failedSlug)
+    fs.mkdirSync(errorDir, { recursive: true })
+    // Write a FILE at the path that existingDir expects to be a directory.
+    fs.writeFileSync(path.join(errorDir, 'trace-extract'), 'not-a-dir\n')
+    fs.writeFileSync(path.join(errorDir, 'error.txt'), 'boom\n')
+
+    const detail = buildExternalFailureDetail({
+      detail: detailFor(runId),
+      logsDir,
+      failureId: failedSlug,
+    })
+
+    expect(detail).not.toBeNull()
+    expect(detail?.traceDir).toBeUndefined()
+  })
+
+  it('omits playwrightMcpDir when playwright-mcp is an empty dir (nonEmptyDir FALSE branch)', () => {
+    // nonEmptyDir: `fs.readdirSync(dir).length > 0` is false for an empty dir → returns
+    // null → pointer.playwrightMcpDir is undefined.
+    const runId = 'run-1'
+    const paths = buildRunPaths(runDirFor(logsDir, runId))
+    const failedSlug = 'checkout fails'
+    const errorDir = path.join(paths.failedDir, failedSlug)
+    // Create an EMPTY playwright-mcp dir — no files inside.
+    const pwMcpDir = path.join(errorDir, 'playwright-mcp')
+    fs.mkdirSync(pwMcpDir, { recursive: true })
+    fs.writeFileSync(path.join(errorDir, 'error.txt'), 'boom\n')
+
+    const detail = buildExternalFailureDetail({
+      detail: detailFor(runId),
+      logsDir,
+      failureId: failedSlug,
+    })
+
+    expect(detail).not.toBeNull()
+    expect(detail?.playwrightMcpDir).toBeUndefined()
+  })
+
+  it('returns null traceSummaryMarkdown when failure-summary.md is missing (safeReadCapped null branch, line 367)', () => {
+    // traceDir EXISTS (so line 216 takes the TRUE ternary branch and calls safeReadCapped),
+    // but failure-summary.md is absent → safeRead returns null → line 367 TRUE fires.
+    const runId = 'run-1'
+    const paths = buildRunPaths(runDirFor(logsDir, runId))
+    const failedSlug = 'checkout fails'
+    const errorDir = path.join(paths.failedDir, failedSlug)
+    // Create a NON-EMPTY trace-extract dir but WITHOUT failure-summary.md.
+    const traceDir = path.join(errorDir, 'trace-extract')
+    fs.mkdirSync(traceDir, { recursive: true })
+    fs.writeFileSync(path.join(traceDir, 'other-file.txt'), 'not-summary\n') // keeps dir non-empty
+    fs.writeFileSync(path.join(errorDir, 'error.txt'), 'boom\n')
+
+    const detail = buildExternalFailureDetail({
+      detail: detailFor(runId),
+      logsDir,
+      failureId: failedSlug,
+    })
+
+    expect(detail).not.toBeNull()
+    expect(detail?.traceDir).toBe(traceDir)
+    // failure-summary.md absent → safeReadCapped returns null → not inlined.
+    expect(detail).not.toHaveProperty('traceSummaryMarkdown')
+  })
+
+  it('omits errorText when error.txt is absent (line 228 FALSE branch)', () => {
+    // safeReadCapped for error.txt returns null when the file does not exist.
+    // Line 228: `...(errorText !== null ? { errorText } : {})` → FALSE branch.
+    const runId = 'run-1'
+    const paths = buildRunPaths(runDirFor(logsDir, runId))
+    const failedSlug = 'checkout fails'
+    // Create the failure dir but leave error.txt absent entirely.
+    const errorDir = path.join(paths.failedDir, failedSlug)
+    fs.mkdirSync(errorDir, { recursive: true })
+
+    const detail = buildExternalFailureDetail({
+      detail: detailFor(runId),
+      logsDir,
+      failureId: failedSlug,
+    })
+
+    expect(detail).not.toBeNull()
+    // error.txt absent → safeReadCapped returns null → errorText not inlined.
+    expect(detail).not.toHaveProperty('errorText')
+  })
+
+  it('omits errorPath and falls back to empty artifacts when entry fields are absent (lines 192/196 FALSE branches)', () => {
+    // Line 192: `...(entry.errorFile ? { errorPath: entry.errorFile } : {})` → FALSE when no errorFile.
+    // Line 196: `playwrightArtifacts?.find(...)` → `?? []` when playwrightArtifacts is undefined.
+    const runId = 'run-2'
+    const detail: RunDetail = {
+      runId,
+      manifest: {
+        runId,
+        feature: 'checkout',
+        env: 'local',
+        startedAt: '2026-05-25T08:00:00.000Z',
+        status: 'healing',
+        healCycles: 1,
+        services: [],
+        repoBranches: [],
+        lifecycle: { phase: 'waiting-for-signal', updatedAt: '2026-05-25T08:01:00.000Z', message: 'Waiting', severity: 'info' },
+      },
+      summary: {
+        complete: false,
+        total: 1,
+        passed: 0,
+        // failed entry has NO errorFile and NO logFiles — exercises the FALSE branches.
+        failed: [{ name: 'checkout fails', error: { message: 'boom', snippet: '' }, location: 'e2e/a.ts:1:1', retry: 0 }],
+      },
+      // playwrightArtifacts is undefined → the `?? []` fallback (line 196 FALSE branch).
+      playwrightArtifacts: undefined,
+    }
+
+    const paths = buildRunPaths(runDirFor(logsDir, runId))
+    const failedSlug = 'checkout fails'
+    const errorDir = path.join(paths.failedDir, failedSlug)
+    fs.mkdirSync(errorDir, { recursive: true })
+    fs.writeFileSync(path.join(errorDir, 'error.txt'), 'boom\n')
+
+    const result = buildExternalFailureDetail({ detail, logsDir, failureId: failedSlug })
+
+    expect(result).not.toBeNull()
+    // No errorFile on the entry → errorPath is absent.
+    expect(result).not.toHaveProperty('errorPath')
+    // playwrightArtifacts is undefined → artifacts falls back to [].
+    expect(result?.artifacts).toEqual([])
+  })
+
+  it('falls back to empty failed list when summary is absent (line 216 FALSE branch)', () => {
+    // Line 216: `(detail.summary?.failed ?? []).find(...)` — when detail.summary is undefined,
+    // `detail.summary?.failed` is undefined → the `?? []` branch fires → find returns undefined → null.
+    const runId = 'run-3'
+    const detail: RunDetail = {
+      runId,
+      manifest: {
+        runId,
+        feature: 'checkout',
+        env: 'local',
+        startedAt: '2026-05-25T08:00:00.000Z',
+        status: 'healing',
+        healCycles: 0,
+        services: [],
+        repoBranches: [],
+        lifecycle: { phase: 'waiting-for-signal', updatedAt: '2026-05-25T08:00:00.000Z', message: 'Waiting', severity: 'info' },
+      },
+      // summary is undefined → detail.summary?.failed is undefined → ?? [] fires.
+      summary: undefined,
+      playwrightArtifacts: undefined,
+    }
+
+    const result = buildExternalFailureDetail({ detail, logsDir, failureId: 'any-failure' })
+
+    // summary is undefined → failed list is [] → find returns undefined → result is null.
+    expect(result).toBeNull()
+  })
 })
 
 describe('buildExternalRunSnapshot', () => {

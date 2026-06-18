@@ -20,6 +20,7 @@ import {
   locateCodexSessionLog,
   type AgentSessionRef,
 } from '../lib/agent-session-log'
+import type { WorkspaceEventPublisher } from '../lib/workspace-events'
 
 export interface CoverageRouteDeps {
   featuresDir: string
@@ -28,6 +29,7 @@ export interface CoverageRouteDeps {
   /** Shared job store (so the WS layer + restart-reconcile see the same instance).
    *  Omitted in tests → a fresh file-backed store over logsDir. */
   coverageJobStore?: CoverageJobStore
+  workspaceEvents?: WorkspaceEventPublisher
 }
 
 // The Verified Coverage Ledger REST surface — the single computation layer the
@@ -263,7 +265,7 @@ export async function coverageRoutes(app: FastifyInstance, deps: CoverageRouteDe
             // codex session location resolve (R17).
             cwd: deps.projectRoot,
           },
-          { store: jobStore },
+          { store: jobStore, workspaceEvents: deps.workspaceEvents },
         )
         reply.code(202)
         return manifest

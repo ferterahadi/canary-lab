@@ -30,6 +30,7 @@ export function App() {
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
   const [configFor, setConfigFor] = useState<string | null>(null)
   const [testsRefreshKey, setTestsRefreshKey] = useState(0)
+  const [coverageRefreshKey, setCoverageRefreshKey] = useState(0)
   const [specTotalTests, setSpecTotalTests] = useState(0)
   const [collisionPrompt, setCollisionPrompt] = useState<{ feature: string; env?: string; mode?: 'test' | 'boot'; info: RepoCollisionChoice; portsConfigured?: boolean } | null>(null)
   // Port-ification wizard target: 'new' starts a fresh workflow for a feature;
@@ -209,6 +210,9 @@ export function App() {
           if (event.type === 'envsets-changed') {
             refreshFeatures(selectedFeatureRef.current)
           }
+          if (event.type === 'coverage-changed') {
+            setCoverageRefreshKey((key) => key + 1)
+          }
         },
       })
     } catch {
@@ -240,6 +244,7 @@ export function App() {
             setSelectedRunId(allRuns.find((r) => r.feature === name && r.executionType !== 'boot' && r.executionType !== 'benchmark')?.runId ?? null)
           }}
           onFeaturesChanged={refreshFeatures}
+          coverageRefreshKey={coverageRefreshKey}
           onStartPortify={(f) => setPortifyTarget({ kind: 'new', feature: f })}
           onOpenPortify={(workflowId) => setPortifyTarget({ kind: 'revisit', workflowId })}
           onOpenCoverage={(f) => { setSelectedFeature(f); setView('coverage') }}

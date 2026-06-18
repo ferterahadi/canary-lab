@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import type { PortifyStore } from '../lib/runtime/portify/store'
 import type { PortifyManifest, StartPortifyInput, StartPortifyResult } from '../lib/runtime/portify/types'
 import type { HealAgent } from '../lib/runtime/auto-heal'
+import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../lib/workspace-events'
 
 // REST surface for the port-ification workflow, mirroring routes/benchmarks.ts.
 // Reads go through the injected store; start/save/cancel delegate to the
@@ -15,6 +16,7 @@ export interface PortifyRouteDeps {
   revisePortify(workflowId: string, feedback: string): Promise<PortifyManifest>
   removePortify(workflowId: string): Promise<{ workflowId: string; removed: true }>
   loadAgentSession(workflowId: string): { agent: string; sessionId: string; model?: string; effort?: string; events: unknown[] } | null
+  workspaceEvents?: WorkspaceEventPublisher
 }
 
 interface StartBody {
@@ -71,7 +73,9 @@ export async function portifyRoutes(app: FastifyInstance, deps: PortifyRouteDeps
   // product repo.
   app.post<{ Params: { workflowId: string } }>('/api/portify/:workflowId/save', async (req, reply) => {
     try {
-      return await deps.savePortify(req.params.workflowId)
+      const manifest = await deps.savePortify(req.params.workflowId)
+      publishWorkspaceEvent(deps.workspaceEvents, { type: 'features-changed' })
+      return manifest
     } catch (err) {
       reply.code((err as { statusCode?: number }).statusCode ?? 500)
       return { error: err instanceof Error ? err.message : String(err) }

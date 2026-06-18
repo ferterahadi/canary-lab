@@ -2,13 +2,12 @@ import crypto from 'crypto'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { spawn } from 'child_process'
 import { pickAvailableHealAgent, type HealAgent } from '../runtime/auto-heal'
 import { PRD_SUMMARY_MODELS, modelArgs } from '../agent-models'
 import type { CoverageAgentSession } from './annotate-engine'
-import { startIdleTimer, type IdleTimer } from '../agent-idle-timer'
 import { claudeSessionLogPath } from '../agent-session-log'
 import { recoverClaudeFinalText } from '../agent-stream'
+import { runAgentProcess, buildClaudeAgenticArgs } from '../agent-process'
 import type {
   PathType,
   PrdSummary,
@@ -353,86 +352,60 @@ function defaultRunAgent(agent: HealAgent, prompt: string, opts: RunAgentOpts): 
   // Pin a claude session id so the CLI's JSONL session log is locatable and
   // AgentSessionView can tail it (the live view comes from that JSONL, not stdout).
   const claudeSessionId = agent === 'claude' ? crypto.randomUUID() : undefined
-  // Agentic (Portify-style): `--dangerously-skip-permissions` lets the agent read
-  // the actual PRD docs with its tools. stream-json keeps stdout flowing (token
-  // deltas) so the idle clock resets during a long claude inference; consumed only
-  // for liveness + answer recovery (display is the JSONL tail). codex `exec`
-  // already streams progress; read-only sandbox.
+  // Agentic spawn via the shared runner. claude: stream-json for liveness +
+  // answer recovery (display is the JSONL tail); codex: `exec` reads the prompt
+  // from stdin (`-`) and writes the final message to --output-last-message.
   const args = agent === 'claude'
-    ? ['-p', prompt, '--dangerously-skip-permissions', '--output-format=stream-json', '--include-partial-messages', '--verbose', ...modelArgs(PRD_SUMMARY_MODELS.claude), '--session-id', claudeSessionId!]
+    ? buildClaudeAgenticArgs(prompt, { model: PRD_SUMMARY_MODELS.claude, sessionId: claudeSessionId })
     : codexArgs(outputPath!)
   opts.onSession?.(agent === 'claude' ? { agent: 'claude', sessionId: claudeSessionId! } : { agent: 'codex', sessionId: '' })
-  return new Promise((resolve, reject) => {
-    let stdout = ''
-    let stderr = ''
-    let settled = false
-    const child = spawn(agent, args, { cwd: opts.cwd, stdio: ['pipe', 'pipe', 'pipe'] })
-    let idleTimer: IdleTimer | undefined
-    const cleanup = () => {
-      opts.signal?.removeEventListener('abort', abort)
-      if (outputDir) fs.rmSync(outputDir, { recursive: true, force: true })
-    }
-    const finish = (err?: Error, output?: string) => {
-      if (settled) return
-      settled = true
-      idleTimer?.stop()
-      cleanup()
-      if (err) reject(err)
-      else resolve(output as string)
-    }
-    const abort = () => {
-      child.kill('SIGTERM')
-      finish(new Error('prd summary cancelled'))
-    }
-    // Idle timeout, not a wall-clock deadline. Activity signal: codex prints to
-    // stdout (bumped below); claude `-p` is silent until done, so its tool work is
-    // tracked by the session-JSONL growing.
-    const claudeLogPath = agent === 'claude' && claudeSessionId && opts.cwd
-      ? claudeSessionLogPath(opts.cwd, claudeSessionId)
-      : undefined
-    idleTimer = startIdleTimer({
-      idleMs: PRD_SUMMARY_IDLE_TIMEOUT_MS,
-      activity: claudeLogPath ? () => { try { return fs.statSync(claudeLogPath).size } catch { return 0 } } : undefined,
-      onIdle: (idleMs) => {
-        child.kill('SIGTERM')
-        finish(new Error(`prd summary agent idle for ${idleMs}ms`))
-      },
-    })
-    if (opts.signal?.aborted) {
-      abort()
-      return
-    }
-    opts.signal?.addEventListener('abort', abort, { once: true })
-    child.stdout.on('data', (chunk) => {
-      const t = chunk.toString('utf-8')
-      stdout += t
-      idleTimer?.bump()
-      opts.onOutput?.(t)
-    })
-    child.stderr.on('data', (chunk) => {
-      const t = chunk.toString('utf-8')
-      stderr += t
-      idleTimer?.bump()
-      opts.onOutput?.(t)
-    })
-    child.on('error', (error) => finish(new Error(`prd summary agent failed: ${error.message}`)))
-    child.on('close', (code, sig) => {
-      if (code !== 0) {
-        finish(new Error(`prd summary agent failed with ${sig ?? `exit code ${code}`}${stderr ? `\n${stderr}` : ''}`))
-        return
-      }
-      // codex's --output-last-message file is the authoritative final answer;
-      // claude's stdout is stream-json envelopes → recover the final message.
-      let finalOutput = agent === 'claude' ? recoverClaudeFinalText(stdout) : stdout
-      if (outputPath && fs.existsSync(outputPath)) {
-        const fromFile = fs.readFileSync(outputPath, 'utf-8')
-        if (fromFile.trim()) finalOutput = fromFile
-      }
-      finish(undefined, finalOutput)
-    })
-    if (agent === 'codex') child.stdin.end(prompt)
-    else child.stdin.end()
+
+  let idled = false
+  const handle = runAgentProcess({
+    command: agent,
+    args,
+    cwd: opts.cwd,
+    stdin: agent === 'codex' ? prompt : undefined,
+    onChunk: (text) => opts.onOutput?.(text),
+    idleMs: PRD_SUMMARY_IDLE_TIMEOUT_MS,
+    activityPath: agent === 'claude' && claudeSessionId && opts.cwd ? claudeSessionLogPath(opts.cwd, claudeSessionId) : undefined,
+    onIdle: () => { idled = true },
   })
+
+  const onAbort = (): void => handle.stop()
+  if (opts.signal?.aborted) handle.stop()
+  else opts.signal?.addEventListener('abort', onAbort, { once: true })
+  const detach = (): void => opts.signal?.removeEventListener('abort', onAbort)
+  const rmOutputDir = (): void => { if (outputDir) fs.rmSync(outputDir, { recursive: true, force: true }) }
+
+  return handle.done.then(
+    ({ code, signal, stdout, stderr }) => {
+      detach()
+      try {
+        if (opts.signal?.aborted) throw new Error('prd summary cancelled')
+        if (idled) throw new Error(`prd summary agent idle for ${PRD_SUMMARY_IDLE_TIMEOUT_MS}ms`)
+        if (code !== 0) {
+          throw new Error(`prd summary agent failed with ${signal ?? `exit code ${code}`}${stderr ? `\n${stderr}` : ''}`)
+        }
+        // codex's --output-last-message file is the authoritative final answer;
+        // claude's stdout is stream-json envelopes → recover the final message.
+        // Read it BEFORE rmOutputDir() (in finally) clears the temp dir.
+        let finalOutput = agent === 'claude' ? recoverClaudeFinalText(stdout) : stdout
+        if (outputPath && fs.existsSync(outputPath)) {
+          const fromFile = fs.readFileSync(outputPath, 'utf-8')
+          if (fromFile.trim()) finalOutput = fromFile
+        }
+        return finalOutput
+      } finally {
+        rmOutputDir()
+      }
+    },
+    (err: Error) => {
+      detach()
+      rmOutputDir()
+      throw new Error(`prd summary agent failed: ${err.message}`)
+    },
+  )
 }
 
 // ---------------------------------------------------------------------------

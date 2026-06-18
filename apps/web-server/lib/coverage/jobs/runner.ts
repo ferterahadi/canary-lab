@@ -9,6 +9,7 @@ import type { AnnotateAdapter } from '../annotate-engine'
 import type { SummarizeAdapter } from '../prd-summary'
 import type { CoverageJobStore } from './store'
 import type { CoverageJobKind, CoverageJobManifest } from './types'
+import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../workspace-events'
 
 // Background driver + single-flight gate for coverage jobs. The start path
 // rejects a second job of the same kind for the same feature while one runs
@@ -41,6 +42,7 @@ export interface CoverageJobRunnerDeps {
   newJobId?: () => string
   regenerate?: typeof regeneratePrdSummary
   runEngine?: typeof runCoverageEngine
+  workspaceEvents?: WorkspaceEventPublisher
 }
 
 export interface StartCoverageJobResult {
@@ -91,10 +93,12 @@ export function startCoverageJob(args: StartCoverageJobArgs, deps: CoverageJobRu
   const finishOk = (result: CoverageJobManifest['result'], extra?: Partial<CoverageJobManifest>) => {
     manifest = { ...manifest, ...extra, status: 'done', endedAt: now(), result }
     store.save(manifest)
+    publishWorkspaceEvent(deps.workspaceEvents, { type: 'coverage-changed', feature: args.feature })
   }
   const finishErr = (err: unknown) => {
     manifest = { ...manifest, status: 'failed', endedAt: now(), error: err instanceof Error ? err.message : String(err) }
     store.save(manifest)
+    publishWorkspaceEvent(deps.workspaceEvents, { type: 'coverage-changed', feature: args.feature })
   }
 
   const completion = (async () => {

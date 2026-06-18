@@ -586,10 +586,11 @@ describe('coverage routes', () => {
   })
 
   it('GET /api/coverage/jobs returns all jobs sorted newest-first (line 184)', async () => {
-    // Populate two jobs for different features so the all-jobs endpoint has something
-    // to return. The endpoint sorts by startedAt descending.
+    // Populate three jobs with distinct timestamps so the sort comparator is called
+    // in both directions — covering both the `1` (a < b) and `-1` (a >= b) branches.
     writeFeature('checkout', SPEC)
     writeFeature('checkout2', SPEC)
+    writeFeature('checkout3', SPEC)
     await app.close()
 
     const store = new CoverageJobRunStore(logsDir)
@@ -598,15 +599,17 @@ describe('coverage routes', () => {
     await app.ready()
 
     store.save({ jobId: 'cj-a', feature: 'checkout', kind: 'summary', status: 'done', startedAt: '2026-01-01T00:00:00Z', log: '' })
-    store.save({ jobId: 'cj-b', feature: 'checkout2', kind: 'coverage', status: 'done', startedAt: '2026-01-02T00:00:00Z', log: '' })
+    store.save({ jobId: 'cj-b', feature: 'checkout2', kind: 'coverage', status: 'done', startedAt: '2026-01-03T00:00:00Z', log: '' })
+    store.save({ jobId: 'cj-c', feature: 'checkout3', kind: 'summary', status: 'done', startedAt: '2026-01-02T00:00:00Z', log: '' })
 
     const res = await app.inject({ method: 'GET', url: '/api/coverage/jobs' })
     expect(res.statusCode).toBe(200)
     const jobs = res.json() as Array<{ jobId: string; startedAt: string }>
-    expect(jobs.length).toBeGreaterThanOrEqual(2)
-    // Newest first (2026-01-02 before 2026-01-01).
+    expect(jobs.length).toBeGreaterThanOrEqual(3)
+    // Newest first: cj-b (Jan 3) → cj-c (Jan 2) → cj-a (Jan 1).
     const ids = jobs.map((j) => j.jobId)
-    expect(ids.indexOf('cj-b')).toBeLessThan(ids.indexOf('cj-a'))
+    expect(ids.indexOf('cj-b')).toBeLessThan(ids.indexOf('cj-c'))
+    expect(ids.indexOf('cj-c')).toBeLessThan(ids.indexOf('cj-a'))
   })
 
   it('POST /docs/import returns 404 when extraction succeeds but writeFeatureDoc fails (line 119)', async () => {

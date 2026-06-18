@@ -20,6 +20,8 @@ interface Props {
   activeRunExecutionType?: ExecutionType | null
   onSelectFeature: (name: string) => void
   onFeaturesChanged?: (preferredFeature?: string | null) => void
+  /** Incremented by App when a coverage job finishes → re-fetches headlines. */
+  coverageRefreshKey?: number
   /** Opens the port-ification wizard for a feature (Service tab entry). */
   onStartPortify?: (feature: string) => void
   /** Reopens a past/active port-ification workflow (Ports-tab history). */
@@ -47,6 +49,7 @@ export function FeaturesColumn({
   activeRunExecutionType,
   onSelectFeature,
   onFeaturesChanged,
+  coverageRefreshKey,
   onStartPortify,
   onOpenPortify,
   onOpenCoverage,
@@ -73,7 +76,7 @@ export function FeaturesColumn({
       })
       .catch(() => {})
     return () => { alive = false }
-  }, [featureKey, onOpenCoverage, features.length])
+  }, [featureKey, onOpenCoverage, features.length, coverageRefreshKey])
 
   return (
     <div className="cl-panel flex h-full flex-col">
