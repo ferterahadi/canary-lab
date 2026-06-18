@@ -229,7 +229,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
   const activeEnvsets = new Map<string, BackupRecord[]>()
 
   await app.register(featuresRoutes, { featuresDir })
-  await app.register(coverageRoutes, { featuresDir, logsDir, projectRoot: opts.projectRoot, coverageJobStore })
+  await app.register(coverageRoutes, { featuresDir, logsDir, projectRoot: opts.projectRoot, coverageJobStore, workspaceEvents })
   await app.register(featureConfigRoutes, {
     featuresDir,
     workspaceEvents,
@@ -1194,6 +1194,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
     cancelPortify: portifyRunner.cancel,
     revisePortify: portifyRunner.revise,
     removePortify: portifyRunner.remove,
+    workspaceEvents,
     loadAgentSession: (id) => {
       try {
         const raw = fs.readFileSync(path.join(portifyDir(logsDir, id), 'agent-session.json'), 'utf-8')

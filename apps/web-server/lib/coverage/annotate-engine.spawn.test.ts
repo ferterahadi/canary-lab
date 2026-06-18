@@ -523,8 +523,9 @@ describe('defaultRunAgent — onIdle fires child.kill and rejects (lines 297-298
     child.stdout = new EventEmitter()
     child.stderr = new EventEmitter()
     child.stdin = { end: vi.fn() }
-    child.kill = vi.fn()
-    // Do NOT emit close — the rejection comes from onIdle
+    // Real SIGTERM closes the process; the runner resolves on close, and the
+    // idled flag turns that into the idle rejection → deterministic fallback.
+    child.kill = vi.fn(() => { child.emit('close', null, 'SIGTERM') })
     mockSpawn.mockReturnValue(child)
 
     const result = await proposeCoverageMappings(
@@ -536,7 +537,7 @@ describe('defaultRunAgent — onIdle fires child.kill and rejects (lines 297-298
       { resolveAgents: () => ['claude'] },
     )
 
-    // onIdle rejects → proposeCoverageMappings catches → falls back to deterministic
+    // onIdle → kill → close → idled rejection → proposeCoverageMappings falls back
     expect(result[0].source).toBe('deterministic')
     expect(child.kill).toHaveBeenCalledWith('SIGTERM')
   })

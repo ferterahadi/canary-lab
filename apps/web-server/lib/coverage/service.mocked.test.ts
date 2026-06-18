@@ -86,6 +86,50 @@ describe('collectTests — sourceFile override (service.ts line 86)', () => {
 })
 
 describe('collectTests — duplicate name with requirements/pathTypes (service.ts lines 90-91)', () => {
+  it('skips if-blocks when duplicate has no requirements or pathTypes (FALSE branches)', async () => {
+    // Line 90: `if (t.requirements)` → FALSE when second occurrence has no requirements.
+    // Line 91: `if (t.pathTypes)` → FALSE when second occurrence has no pathTypes.
+    // The duplicate path (continue) is still taken; the merge if-blocks are skipped.
+    const dir = writeFeature('checkout')
+    const specB = path.join(dir, 'e2e', 'b.spec.ts')
+    fs.writeFileSync(specB, `import { test } from '@playwright/test'\ntest('shared', async () => {})\n`)
+
+    vi.mocked(extractTestsFromSource)
+      .mockReturnValueOnce({
+        file: path.join(dir, 'e2e', 'a.spec.ts'),
+        tests: [
+          {
+            name: 'shared',
+            line: 1,
+            bodySource: 'async () => {}',
+            steps: [],
+            requirements: ['R1'],
+            pathTypes: ['happy'],
+          },
+        ],
+      })
+      .mockReturnValueOnce({
+        file: specB,
+        tests: [
+          {
+            name: 'shared', // duplicate — triggers the merge branch
+            line: 1,
+            bodySource: 'async () => {}',
+            steps: [],
+            // requirements: undefined → line 90 FALSE branch
+            // pathTypes: undefined → line 91 FALSE branch
+          },
+        ],
+      })
+
+    await regeneratePrdSummary({ featuresDir, feature: 'checkout', adapter: 'deterministic', now: '2026-01-01T00:00:00Z' })
+    const ledger = computeFeatureCoverage({ featuresDir, logsDir, feature: 'checkout' })
+    // The original R1 requirement is preserved (duplicate did not overwrite).
+    const sharedTest = ledger.tests.find((t) => t.name === 'shared')
+    expect(sharedTest).toBeTruthy()
+    expect(sharedTest?.requirements).toContain('R1')
+  })
+
   it('unions requirements and pathTypes when the same test name appears twice (TRUE branches)', async () => {
     // Simulate two spec files each returning the same test name with different
     // requirements/pathTypes. The second call to extractTestsFromSource returns

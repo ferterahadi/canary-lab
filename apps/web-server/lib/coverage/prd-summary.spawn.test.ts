@@ -594,8 +594,9 @@ describe('defaultRunAgent — onIdle fires child.kill and rejects (lines 394-395
     child.stdout = new EventEmitter()
     child.stderr = new EventEmitter()
     child.stdin = { end: vi.fn() }
-    child.kill = vi.fn()
-    // Do NOT emit close — the rejection comes from onIdle
+    // Real SIGTERM closes the process; the runner resolves on close, and the
+    // idled flag turns that into the idle rejection → deterministic fallback.
+    child.kill = vi.fn(() => { child.emit('close', null, 'SIGTERM') })
     mockSpawn.mockReturnValue(child)
 
     const result = await summarizePrd(

@@ -337,6 +337,8 @@ export function createPortifyRunner(deps: PortifyRunnerDeps) {
   async function save(workflowId: string): Promise<PortifyManifest> {
     const m = deps.store.get(workflowId)
     if (!m) throw Object.assign(new Error('workflow not found'), { statusCode: 404 })
+    // Idempotent: if already saved (e.g. a double-save race), return as-is.
+    if (m.status === 'saved') return m
     if (m.status !== 'ready-to-save') {
       throw Object.assign(new Error(`cannot save a workflow in status "${m.status}"`), { statusCode: 409 })
     }

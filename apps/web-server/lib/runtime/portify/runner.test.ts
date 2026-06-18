@@ -583,6 +583,19 @@ describe('createPortifyRunner (branch coverage)', () => {
     await expect(runner.save('w')).rejects.toMatchObject({ statusCode: 409 })
   })
 
+  it('save returns idempotently when the workflow is already saved (line 341 TRUE branch)', async () => {
+    // Line 341: `if (m.status === 'saved') return m` — double-save guard.
+    // If the workflow was already saved (e.g. a race) it is returned unchanged.
+    const logsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-saved2-'))
+    roots.push(logsDir)
+    const { store, runner } = makeRunner('x', logsDir)
+    const saved = readyManifest({ workflowId: 'w', status: 'saved', endedAt: 'now' })
+    store.save(saved)
+    const result = await runner.save('w')
+    expect(result.status).toBe('saved')
+    expect(result).toBe(saved)
+  })
+
   it('cancel marks a stateless workflow aborted, and returns a saved one untouched', async () => {
     const logsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-cancel2-'))
     roots.push(logsDir)
