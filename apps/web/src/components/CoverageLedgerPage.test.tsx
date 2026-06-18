@@ -18,8 +18,6 @@ vi.mock('../api/client', async () => {
     regeneratePrdSummary: vi.fn(),
     startCoverageJob: vi.fn(),
     getCoverageJob: vi.fn(),
-    acceptCoverageMapping: vi.fn(),
-    rejectCoverageMapping: vi.fn(),
   }
 })
 
@@ -167,7 +165,7 @@ describe('CoverageLedgerPage', () => {
     expect(container.querySelector('[data-testid="req-R1"]')).toBeNull() // filtered out
   })
 
-  it('Generate summary starts an async job', async () => {
+  it('Regenerate summary starts an async job (which chains coverage)', async () => {
     vi.mocked(api.startCoverageJob).mockResolvedValue({ jobId: 'j1', feature: 'checkout', kind: 'summary', status: 'done', startedAt: 'now', log: '' })
     vi.mocked(api.getCoverageJob).mockResolvedValue({ jobId: 'j1', feature: 'checkout', kind: 'summary', status: 'done', startedAt: 'now', log: 'done' })
     await mount()
@@ -175,21 +173,24 @@ describe('CoverageLedgerPage', () => {
       container.querySelector<HTMLButtonElement>('[data-testid="generate-summary"]')?.click()
       await Promise.resolve()
     })
-    expect(api.startCoverageJob).toHaveBeenCalledWith('checkout', 'summary', { reviewMode: undefined })
+    expect(api.startCoverageJob).toHaveBeenCalledWith('checkout', 'summary')
   })
 
-  it('renders proposed mappings and accepting one calls the API', async () => {
-    const withProposals = structuredClone(LEDGER)
-    withProposals.proposedMappings = [{ testName: 'sends receipt', requirements: ['R2'], source: 'agent', confidence: 0.9 }]
-    vi.mocked(api.getFeatureCoverage).mockResolvedValue(withProposals)
-    vi.mocked(api.acceptCoverageMapping).mockResolvedValue({ ledger: structuredClone(LEDGER) })
+  it('shows the dedicated Generating screen while a job runs, not the ledger (R13)', async () => {
+    let resolveJob: ((m: import('../api/types').CoverageJobManifest) => void) | null = null
+    vi.mocked(api.startCoverageJob).mockResolvedValue({ jobId: 'j1', feature: 'checkout', kind: 'summary', status: 'running', startedAt: 'now', log: 'summarizing…' })
+    vi.mocked(api.getCoverageJob).mockImplementation(() => new Promise((res) => { resolveJob = res }))
     await mount()
-    expect(container.querySelector('[data-testid="proposed-mappings"]')).toBeTruthy()
     await act(async () => {
-      container.querySelector<HTMLButtonElement>('[data-testid="accept-sends receipt"]')?.click()
+      container.querySelector<HTMLButtonElement>('[data-testid="generate-summary"]')?.click()
       await Promise.resolve()
     })
-    expect(api.acceptCoverageMapping).toHaveBeenCalledWith('checkout', 'sends receipt')
+    // The generating pane owns the screen; the ledger panes are gone.
+    expect(container.querySelector('[data-testid="coverage-generating"]')).toBeTruthy()
+    expect(container.querySelector('[data-testid="prd-pane"]')).toBeNull()
+    expect(container.querySelector('[data-testid="generating-phases"]')).toBeTruthy()
+    // Avoid leaking the pending getCoverageJob promise.
+    resolveJob?.({ jobId: 'j1', feature: 'checkout', kind: 'summary', status: 'done', startedAt: 'now', log: 'done' })
   })
 })
 
@@ -224,6 +225,6 @@ describe('CoverageLedgerPage — setup guide (ABSENT summary)', () => {
     const gen = container.querySelector<HTMLButtonElement>('[data-testid="setup-generate-summary"]')
     expect(gen?.disabled).toBe(false)
     await act(async () => { gen?.click(); await Promise.resolve() })
-    expect(api.startCoverageJob).toHaveBeenCalledWith('checkout', 'summary', { reviewMode: undefined })
+    expect(api.startCoverageJob).toHaveBeenCalledWith('checkout', 'summary')
   })
 })

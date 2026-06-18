@@ -17,13 +17,6 @@ import {
   type AnnotateTestInput,
 } from './annotate-engine'
 import { writeCoversTag } from './tag-writer'
-import {
-  MAPPINGS_JSON,
-  clearProposedMappings,
-  readProposedMappings,
-  removeProposal,
-  writeProposedMappings,
-} from './proposed-mappings'
 import { changedDocPaths, changedRequirementIds, diffDocs, fingerprintDocs, requirementFingerprintMap, requirementsSetHash } from './fingerprints'
 import { deriveCoverageStateView, type DeriveStateInput } from './state'
 import { COVERAGE_STATE_JSON, readCoverageRunState, writeCoverageRunState } from './run-state'
@@ -176,16 +169,17 @@ export function computeFeatureCoverage(args: ComputeFeatureCoverageArgs): Covera
   }
   ledger.state = deriveCoverageStateView(stateInput)
   ledger.docsDrift = summaryDrifted // back-compat mirror
-
-  const pending = readProposedMappings(featureDir)
-  if (pending && pending.proposals.length) ledger.proposedMappings = pending.proposals
   return ledger
 }
 
+// Legacy review-queue sidecar (removed with the accept/reject flow). Still named
+// here so `clearPrdSummary` cleans up any file left by an older build.
+const LEGACY_MAPPINGS_JSON = '_coverage-mappings.json'
+
 // ---------------------------------------------------------------------------
 // Coverage engine — annotate-pass (R2). Infers which requirement(s) each
-// untagged test verifies and either writes the `covers` tag straight away
-// (auto) or stores the proposals for human accept/reject (review flag on).
+// untagged test verifies and writes the `covers` tag straight away. Summary +
+// Coverage are one exercise (R16): there is no review gate — mappings auto-apply.
 // ---------------------------------------------------------------------------
 
 export interface RunCoverageEngineArgs {
@@ -193,8 +187,6 @@ export interface RunCoverageEngineArgs {
   logsDir: string
   feature: string
   adapter?: AnnotateAdapter
-  /** When true, store proposals for accept/reject instead of writing tags. */
-  reviewMode?: boolean
   /** 'full' re-infers against every active requirement; 'delta' (R10) re-infers
    *  only requirements whose fingerprint changed since the last engine run — and
    *  no-ops entirely when nothing changed. Default 'full'. */
@@ -207,10 +199,8 @@ export interface RunCoverageEngineArgs {
 
 export interface RunCoverageEngineResult {
   feature: string
-  /** Mappings whose tags were written immediately (auto mode). */
+  /** Mappings whose `covers` tags were written this pass. */
   applied: ProposedMapping[]
-  /** Mappings stored awaiting accept/reject (review mode). */
-  proposed: ProposedMapping[]
   /** Test names that were orphans before the pass. */
   orphanTestsBefore: string[]
   /** delta mode: the requirement ids re-inferred this pass (the changed set). */
@@ -264,7 +254,7 @@ export async function runCoverageEngine(args: RunCoverageEngineArgs): Promise<Ru
     reconciledRequirementIds = changedIds
     if (changedIds.length === 0) {
       args.onOutput?.('[delta] requirements unchanged — nothing to reconcile\n')
-      return { feature: args.feature, applied: [], proposed: [], orphanTestsBefore, reconciledRequirementIds, ledger: computeFeatureCoverage(args) }
+      return { feature: args.feature, applied: [], orphanTestsBefore, reconciledRequirementIds, ledger: computeFeatureCoverage(args) }
     }
     args.onOutput?.(`[delta] reconciling ${changedIds.length} changed requirement(s): ${changedIds.join(', ')}\n`)
     const changedSet = new Set(changedIds)
@@ -275,23 +265,11 @@ export async function runCoverageEngine(args: RunCoverageEngineArgs): Promise<Ru
     { requirements: candidateRequirements, tests: engineInputs, adapter: args.adapter, cwd: args.cwd, signal: args.signal, onOutput: args.onOutput },
   )
 
+  // No review gate (R16): every inferred mapping's `covers` tag is written now.
   const applied: ProposedMapping[] = []
-  let proposed: ProposedMapping[] = []
-
-  if (args.reviewMode) {
-    proposed = proposals
-    if (proposals.length) {
-      writeProposedMappings(featureDir, { generatedAt: args.now ?? new Date().toISOString(), proposals })
-    } else {
-      clearProposedMappings(featureDir)
-    }
-  } else {
-    for (const m of proposals) {
-      if (!m.file) continue
-      if (applyTagToFile(featureDir, m.file, m.testName, m.requirements, m.pathTypes)) applied.push(m)
-    }
-    // Auto mode supersedes any pending review proposals.
-    clearProposedMappings(featureDir)
+  for (const m of proposals) {
+    if (!m.file) continue
+    if (applyTagToFile(featureDir, m.file, m.testName, m.requirements, m.pathTypes)) applied.push(m)
   }
 
   // Record the requirements set the engine just ran against — coverage drops to
@@ -303,34 +281,7 @@ export async function runCoverageEngine(args: RunCoverageEngineArgs): Promise<Ru
   })
 
   const ledger = computeFeatureCoverage({ featuresDir: args.featuresDir, logsDir: args.logsDir, feature: args.feature })
-  return { feature: args.feature, applied, proposed, orphanTestsBefore, reconciledRequirementIds, ledger }
-}
-
-export interface ResolveProposalArgs {
-  featuresDir: string
-  logsDir: string
-  feature: string
-  testName: string
-}
-
-/** Accept a pending proposal: write its `covers` tag, drop it from the store. */
-export function acceptProposedMapping(args: ResolveProposalArgs): { applied: ProposedMapping | null; ledger: CoverageLedger } {
-  const featureDir = resolveFeatureDir(args.featuresDir, args.feature)
-  const store = readProposedMappings(featureDir)
-  const proposal = store?.proposals.find((p) => p.testName === args.testName)
-  if (!proposal || !proposal.file) {
-    return { applied: null, ledger: computeFeatureCoverage(args) }
-  }
-  applyTagToFile(featureDir, proposal.file, proposal.testName, proposal.requirements, proposal.pathTypes)
-  removeProposal(featureDir, args.testName)
-  return { applied: proposal, ledger: computeFeatureCoverage(args) }
-}
-
-/** Reject a pending proposal: drop it from the store, write no tag. */
-export function rejectProposedMapping(args: ResolveProposalArgs): { rejected: ProposedMapping | null; ledger: CoverageLedger } {
-  const featureDir = resolveFeatureDir(args.featuresDir, args.feature)
-  const rejected = removeProposal(featureDir, args.testName) ?? null
-  return { rejected, ledger: computeFeatureCoverage(args) }
+  return { feature: args.feature, applied, orphanTestsBefore, reconciledRequirementIds, ledger }
 }
 
 export interface FeatureDoc {
@@ -426,7 +377,7 @@ export function clearPrdSummary(args: { featuresDir: string; feature: string }):
   const featureDir = resolveFeatureDir(args.featuresDir, args.feature)
   const docsDir = docsDirFor(featureDir)
   const removed: string[] = []
-  for (const name of [PRD_SUMMARY_JSON, PRD_SUMMARY_MD, MAPPINGS_JSON, COVERAGE_STATE_JSON]) {
+  for (const name of [PRD_SUMMARY_JSON, PRD_SUMMARY_MD, LEGACY_MAPPINGS_JSON, COVERAGE_STATE_JSON]) {
     const p = path.join(docsDir, name)
     if (fs.existsSync(p)) { fs.rmSync(p); removed.push(name) }
   }

@@ -285,13 +285,14 @@ describe('external heal routes', () => {
         statusLine: '0/3 passed, 2 failed, 1 not run',
       },
       healIndex: {
-        markdown: '# Heal Index\n',
+        path: expect.stringContaining('heal-index.md'),
       },
       journal: {
-        markdown: '# Journal\n',
+        path: expect.stringContaining('diagnosis-journal.md'),
       },
       failedTests: [
         {
+          failureId: 'checkout fails',
           name: 'checkout fails',
           error: { message: 'Expected total to match', snippet: 'expect(total).toBe(12)' },
           location: 'e2e/checkout.spec.ts:12:3',

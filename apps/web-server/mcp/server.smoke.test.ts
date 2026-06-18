@@ -32,6 +32,7 @@ const REPAIR_TOOLS = uniqueSorted([
   'abort_run',
   'boot_services',
   'cancel_heal',
+  'get_failure_detail',
   'get_heal_context',
   'get_run',
   'get_run_snapshot',
@@ -69,7 +70,6 @@ const AUTHOR_TOOLS = uniqueSorted([
   'delete_feature',
   'delete_feature_doc',
   'download_evaluation_export',
-  'accept_coverage_mapping',
   'clear_prd_summary',
   'get_coverage_job',
   'get_evaluation_export',
@@ -77,7 +77,6 @@ const AUTHOR_TOOLS = uniqueSorted([
   'get_feature_envset_summary',
   'get_feature_repo_status',
   'list_feature_docs',
-  'reject_coverage_mapping',
   'regenerate_prd_summary',
   'start_coverage_job',
   'get_portify',
@@ -106,6 +105,7 @@ const FULL_TOOLS = uniqueSorted([
   'claim_heal',
   'create_verification_config',
   'execute_verification',
+  'get_failure_detail',
   'get_heal_context',
   'get_run',
   'get_run_actions',
@@ -697,19 +697,21 @@ describe('MCP HTTP server (smoke)', () => {
         },
         healIndex: {
           path: path.join(runDir, 'heal-index.md'),
-          markdown: '# Heal Index\n',
         },
         journal: {
           path: path.join(runDir, 'diagnosis-journal.md'),
-          markdown: '# Journal\n',
         },
         failedTests: [
           {
+            failureId: 'test-2',
             name: 'test-2',
             logFiles: ['failed/test-2/svc-app.log'],
           },
         ],
       })
+      expect(body.healIndex).not.toHaveProperty('markdown')
+      expect(body.journal).not.toHaveProperty('markdown')
+      expect(JSON.stringify(body)).not.toContain('# Heal Index')
       expect(body).not.toHaveProperty('summary')
       expect(body).not.toHaveProperty('healIndexMarkdown')
       expect(body).not.toHaveProperty('journalMarkdown')
@@ -760,6 +762,74 @@ describe('MCP HTTP server (smoke)', () => {
         journalMarkdown: '# Journal\n',
         artifactsBase: '/api/runs/context-map/artifacts/',
       })
+    } finally {
+      if (client) await client.close().catch(() => undefined)
+      await app.close()
+    }
+  })
+
+  it('get_failure_detail returns one failure slice and errors on an unknown failureId', async () => {
+    const projectRoot = path.resolve(__dirname, '..', '..', '..', 'templates', 'project')
+    const logsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-failure-')))
+    const { app, runStore } = await createServer({ projectRoot, logsDir, ptyFactory: inertPtyFactory })
+    let client: Client | null = null
+    try {
+      const address = await app.listen({ port: 0, host: '127.0.0.1' })
+      client = await connectClient(address)
+
+      runStore.bootstrap({
+        runId: 'failure-detail',
+        feature: 'broken_todo_api',
+        startedAt: '2026-05-08T00:00:00.000Z',
+        status: 'healing',
+        healCycles: 1,
+        services: [],
+        healMode: 'external',
+      })
+      const runDir = runDirFor(logsDir, 'failure-detail')
+      fs.writeFileSync(path.join(runDir, 'e2e-summary.json'), JSON.stringify({
+        complete: false,
+        total: 2,
+        passed: 1,
+        passedNames: ['test-1'],
+        knownTests: [{ name: 'test-1' }, { name: 'test-2' }],
+        failed: [
+          {
+            name: 'test-2',
+            error: { message: 'boom' },
+            location: 'e2e/example.spec.ts:10',
+            logFiles: ['failed/test-2/svc-app.log'],
+            errorFile: 'failed/test-2/error.txt',
+          },
+        ],
+      }))
+      const traceDir = path.join(runDir, 'failed', 'test-2', 'trace-extract')
+      fs.mkdirSync(traceDir, { recursive: true })
+      fs.writeFileSync(path.join(traceDir, 'failure-summary.md'), '# curated trace\n')
+      fs.writeFileSync(path.join(runDir, 'failed', 'test-2', 'error.txt'), 'AssertionError: boom\n')
+
+      const ok = await client.callTool({
+        name: 'get_failure_detail',
+        arguments: { runId: 'failure-detail', failureId: 'test-2' },
+      })
+      const okBody = JSON.parse((ok.content?.[0] as { text: string }).text)
+      expect(okBody).toMatchObject({
+        runId: 'failure-detail',
+        failureId: 'test-2',
+        name: 'test-2',
+        location: 'e2e/example.spec.ts:10',
+        errorPath: 'failed/test-2/error.txt',
+        traceDir,
+        traceSummaryMarkdown: '# curated trace\n',
+        errorText: 'AssertionError: boom\n',
+      })
+
+      const missing = await client.callTool({
+        name: 'get_failure_detail',
+        arguments: { runId: 'failure-detail', failureId: 'no-such-test' },
+      })
+      expect(missing.isError).toBe(true)
+      expect((missing.content?.[0] as { text: string }).text).toContain('failure not found')
     } finally {
       if (client) await client.close().catch(() => undefined)
       await app.close()
@@ -1011,7 +1081,7 @@ describe('MCP HTTP server (smoke)', () => {
     }
   })
 
-  it('wait_for_heal_task reports needs_heal, terminal states, and timeout', async () => {
+  it('wait_for_heal_task reports needs_heal, terminal states, and still_waiting', async () => {
     const projectRoot = path.resolve(__dirname, '..', '..', '..', 'templates', 'project')
     const logsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-wait-')))
     const { app, runStore } = await createServer({ projectRoot, logsDir, ptyFactory: inertPtyFactory })
@@ -1160,15 +1230,19 @@ describe('MCP HTTP server (smoke)', () => {
           client_kind: 'codex-cli',
         },
       })
-      const timeout = await client.callTool({
+      const stillWaiting = await client.callTool({
         name: 'wait_for_heal_task',
         arguments: { runId: 'wait-timeout', session_id: 'sess-timeout', timeout_ms: 10 },
       })
-      expect(JSON.parse((timeout.content?.[0] as { text: string }).text)).toMatchObject({
-        type: 'timeout',
+      const stillWaitingBody = JSON.parse((stillWaiting.content?.[0] as { text: string }).text)
+      expect(stillWaitingBody).toMatchObject({
+        type: 'still_waiting',
         runId: 'wait-timeout',
         status: 'running',
+        nextSteps: ['wait_for_heal_task'],
       })
+      // Not terminal, and tells the agent to loop.
+      expect(typeof stillWaitingBody.cursor).toBe('string')
     } finally {
       if (client) await client.close().catch(() => undefined)
       await app.close()
@@ -1213,10 +1287,12 @@ describe('MCP HTTP server (smoke)', () => {
         context: {
           runId: 'wait-claim',
           healIndex: {
-            markdown: '# Heal Index\n',
+            path: expect.stringContaining('heal-index.md'),
           },
         },
       })
+      expect(body.context.healIndex).not.toHaveProperty('markdown')
+      expect(JSON.stringify(body.context)).not.toContain('# Heal Index')
       expect(body.context).not.toHaveProperty('summary')
       expect(body.context).not.toHaveProperty('healIndexMarkdown')
       expect(runStore.get('wait-claim')?.manifest.externalHealSession).toMatchObject({

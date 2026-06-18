@@ -8,6 +8,7 @@ import type { RunDetail, RunStoreEvent } from '../lib/run-store'
 import type { ExternalHealBroker } from '../lib/external-heal-broker'
 import type { ExternalHealClientKind } from '../lib/runtime/manifest'
 import {
+  buildExternalFailureDetail,
   buildExternalHealContext,
   buildExternalRunSnapshot,
   normalizeRunCounts,
@@ -39,13 +40,11 @@ import {
 } from '../lib/feature-authoring'
 import {
   FeatureNotFoundError,
-  acceptProposedMapping,
   clearPrdSummary,
   computeFeatureCoverage,
   featureExists,
   listFeatureDocs,
   regeneratePrdSummary,
-  rejectProposedMapping,
 } from '../lib/coverage/service'
 import { CoverageJobRunStore } from '../lib/coverage/jobs/store'
 import { startCoverageJob, CoverageJobConflictError } from '../lib/coverage/jobs/runner'
@@ -199,8 +198,18 @@ const HEAL_STATUS = z.enum(['connected', 'waiting', 'healing', 'running-tests', 
 const EXTERNAL_DRAFT_STAGE = z.enum(['scaffolding', 'authoring-tests', 'validating', 'ready', 'applied', 'error'])
 const CLAIM_SUPPRESSED_MESSAGE =
   'Heal claiming is restricted to Claude/Codex Desktop clients, so this run was started without a heal claim. It still runs — drive heal from Desktop or the web UI.'
-const WAIT_FOR_HEAL_TASK_DEFAULT_TIMEOUT_MS = 15 * 60 * 1000
+// `timeout_ms` is the per-call block budget — how long ONE wait_for_heal_task
+// request may hold open. It is NOT the overall heal budget: when the window
+// elapses with the run still active, the call returns `still_waiting` and the
+// agent immediately re-calls. This keeps every request well under any client
+// JSON-RPC request timeout (the cause of the -32001 the long-poll used to hit),
+// while the logical wait stays unbounded across re-calls.
+const WAIT_FOR_HEAL_TASK_DEFAULT_TIMEOUT_MS = 90 * 1000
 const WAIT_FOR_HEAL_TASK_MAX_TIMEOUT_MS = 60 * 60 * 1000
+// Hard cap on a single block regardless of the requested timeout_ms. Large
+// requested values are clamped to this (not rejected) so older clients keep
+// working — they just get a `still_waiting` to loop on sooner.
+const WAIT_FOR_HEAL_TASK_WINDOW_MS = 120 * 1000
 
 export const CANARY_LAB_MCP_PROFILES = ['repair', 'verify', 'author', 'full'] as const
 export type CanaryLabMcpProfile = typeof CANARY_LAB_MCP_PROFILES[number]
@@ -226,8 +235,6 @@ export type CanaryLabMcpToolName =
   | 'clear_prd_summary'
   | 'start_coverage_job'
   | 'get_coverage_job'
-  | 'accept_coverage_mapping'
-  | 'reject_coverage_mapping'
   | 'get_feature_envset_summary'
   | 'capture_feature_env_files'
   | 'write_envset'
@@ -244,6 +251,7 @@ export type CanaryLabMcpToolName =
   | 'update_external_draft_stage'
   | 'apply_external_draft'
   | 'get_heal_context'
+  | 'get_failure_detail'
   | 'start_run'
   | 'boot_services'
   | 'pause_run'
@@ -269,6 +277,7 @@ const REPAIR_TOOLS = [
   'boot_services',
   'wait_for_heal_task',
   'get_heal_context',
+  'get_failure_detail',
   'get_run_snapshot',
   'get_run',
   'signal_run',
@@ -307,8 +316,6 @@ const AUTHOR_TOOLS = [
   'clear_prd_summary',
   'start_coverage_job',
   'get_coverage_job',
-  'accept_coverage_mapping',
-  'reject_coverage_mapping',
   'get_feature_envset_summary',
   'capture_feature_env_files',
   'write_envset',
@@ -722,15 +729,14 @@ export function registerCanaryLabTools(
 
   registerTool('start_coverage_job', {
     description:
-      'Start an ASYNC background job for a feature: kind:"summary" regenerates the PRD summary from source docs (preserving requirement ids); kind:"coverage" runs the coverage engine — it infers which requirement(s) each untagged test verifies and either writes the @req-* covers tag straight away or, with reviewMode:true, stores proposals for accept/reject. Non-blocking and single-flight: a second job of the same kind for the same feature is rejected while one is running. Poll get_coverage_job with the returned jobId. Same action as the UI Coverage dialog\'s Generate buttons.',
+      'Start an ASYNC background job for a feature: kind:"summary" regenerates the PRD summary from source docs (preserving requirement ids) AND then auto-chains the coverage engine (Summary + Coverage are one exercise); kind:"coverage" runs only the coverage engine — it infers which requirement(s) each untagged test verifies and writes the @req-* covers tag immediately (no review gate). Non-blocking and single-flight: a second job of the same kind for the same feature is rejected while one is running. A summary job records its chained coverage job id as chainedJobId. Poll get_coverage_job with the returned jobId. Same action as the UI Coverage dialog\'s Regenerate buttons.',
     inputSchema: {
       feature: z.string().describe('Existing feature name (from list_features).'),
-      kind: z.enum(['summary', 'coverage']).describe('summary = regenerate the PRD summary; coverage = run the annotate-pass engine.'),
-      reviewMode: z.boolean().optional().describe('coverage only: store proposed mappings for accept/reject instead of writing tags immediately.'),
+      kind: z.enum(['summary', 'coverage']).describe('summary = regenerate the PRD summary, then auto-run coverage; coverage = run only the annotate-pass engine.'),
       adapter: z.enum(['auto', 'claude', 'codex', 'deterministic']).optional()
         .describe('Agent backend. Omit for auto (prefers an available agent CLI, falls back to deterministic).'),
     },
-  }, async ({ feature, kind, reviewMode, adapter }) => {
+  }, async ({ feature, kind, adapter }) => {
     if (!featureExists(deps.featuresDir, feature)) return errorResult(`feature not found: ${feature}`)
     try {
       const { manifest } = startCoverageJob(
@@ -739,7 +745,6 @@ export function registerCanaryLabTools(
           logsDir: deps.store.logsDir,
           feature,
           kind,
-          reviewMode,
           adapter: adapter as never,
           cwd: deps.projectRoot,
         },
@@ -754,44 +759,12 @@ export function registerCanaryLabTools(
 
   registerTool('get_coverage_job', {
     description:
-      'Poll a coverage background job by jobId (from start_coverage_job). Returns the manifest: status (running / done / failed / aborted), captured log, and on done a result summary (requirementCount for summary jobs; applied/proposed counts for coverage jobs). Then call get_feature_coverage for the updated ledger.',
+      'Poll a coverage background job by jobId (from start_coverage_job). Returns the manifest: status (running / done / failed / aborted), captured log, chainedJobId (for a summary job, the coverage job it auto-started — poll that next to follow the full exercise), and on done a result summary (requirementCount for summary jobs; applied tag-write count for coverage jobs). Then call get_feature_coverage for the updated ledger.',
     inputSchema: { jobId: z.string().describe('Job id returned by start_coverage_job.') },
   }, async ({ jobId }) => {
     const manifest = new CoverageJobRunStore(deps.store.logsDir).get(jobId)
     if (!manifest) return errorResult(`job not found: ${jobId}`)
     return asJsonResult(manifest)
-  })
-
-  registerTool('accept_coverage_mapping', {
-    description:
-      'Accept a pending agent-proposed coverage mapping (from a reviewMode coverage job): writes the @req-* covers tag onto the named test and drops the proposal. Returns the recomputed ledger. Same action as the UI Coverage dialog\'s "accept" on a proposed mapping.',
-    inputSchema: {
-      feature: z.string().describe('Existing feature name (from list_features).'),
-      testName: z.string().describe('Exact test name of the pending proposal (see ledger.proposedMappings).'),
-    },
-  }, async ({ feature, testName }) => {
-    try {
-      return asJsonResult(acceptProposedMapping({ featuresDir: deps.featuresDir, logsDir: deps.store.logsDir, feature, testName }))
-    } catch (err) {
-      if (err instanceof FeatureNotFoundError) return errorResult(err.message)
-      throw err
-    }
-  })
-
-  registerTool('reject_coverage_mapping', {
-    description:
-      'Reject a pending agent-proposed coverage mapping (from a reviewMode coverage job): drops the proposal without writing any tag. Returns the recomputed ledger. Same action as the UI Coverage dialog\'s "reject" on a proposed mapping.',
-    inputSchema: {
-      feature: z.string().describe('Existing feature name (from list_features).'),
-      testName: z.string().describe('Exact test name of the pending proposal (see ledger.proposedMappings).'),
-    },
-  }, async ({ feature, testName }) => {
-    try {
-      return asJsonResult(rejectProposedMapping({ featuresDir: deps.featuresDir, logsDir: deps.store.logsDir, feature, testName }))
-    } catch (err) {
-      if (err instanceof FeatureNotFoundError) return errorResult(err.message)
-      throw err
-    }
   })
 
   registerTool('get_feature_envset_summary', {
@@ -1267,6 +1240,27 @@ export function registerCanaryLabTools(
     return asJsonResult(context)
   })
 
+  registerTool('get_failure_detail', {
+    description:
+      'One failing test\'s bounded detail: error, location, resolved pointer dirs (trace-extract, playwright-mcp), plus the curated trace summary and full error text inlined (capped). Use `failureId` from a failedTests[] entry in get_heal_context / wait_for_heal_task. Built for fan-out: when several tests fail, hand each failureId to its own read-only sub-agent so they investigate in parallel without pulling the whole heal context each.',
+    inputSchema: {
+      runId: z.string(),
+      failureId: z.string().describe('The failureId (== failed test name) from a failedTests[] entry.'),
+      session_id: z.string().optional().describe('External heal session id. When provided, refreshes the session heartbeat.'),
+      client_kind: clientKindInput.describe('Which kind of client is requesting detail. Defaults to the MCP client type when known.'),
+    },
+  }, async ({ runId, failureId, session_id, client_kind }) => {
+    const detail = deps.store.get(runId)
+    if (!detail) return errorResult(`run not found: ${runId}`)
+    if (session_id) {
+      ensureExternalClaimForMcpCall(deps, runId, session_id, client_kind)
+    }
+    const failure = buildExternalFailureDetail({ detail, logsDir: deps.store.logsDir, failureId })
+    if (!failure) return errorResult(`failure not found: ${failureId} (use a failureId from failedTests[])`)
+    if (session_id) deps.broker.touch(runId, session_id)
+    return asJsonResult(failure)
+  })
+
   // ─── run lifecycle ────────────────────────────────────────────────────
 
   registerTool('start_run', {
@@ -1574,14 +1568,14 @@ export function registerCanaryLabTools(
 
   registerTool('wait_for_heal_task', {
     description:
-      'Wait until a claimed external run needs code fixes, reaches a terminal result, or times out. Use this after start_run/claim_heal and again after signal_run.',
+      'Wait until a claimed external run needs code fixes or reaches a terminal result. Use after start_run/claim_heal and again after signal_run. This blocks for a short bounded window and heartbeats for you. If the run is still active when the window elapses it returns type:"still_waiting" (NOT terminal) — immediately call wait_for_heal_task again with the same runId + session_id to keep waiting. Loop on still_waiting until you get needs_heal / passed / failed. Never poll get_run_snapshot or get_run to wait.',
     inputSchema: {
       runId: z.string(),
       session_id: z.string().describe('External heal session id that owns this run.'),
       client_kind: clientKindInput.describe('Which kind of client is waiting. Defaults to the MCP client type when known.'),
       timeout_ms: z.number().int().positive().max(WAIT_FOR_HEAL_TASK_MAX_TIMEOUT_MS)
         .default(WAIT_FOR_HEAL_TASK_DEFAULT_TIMEOUT_MS)
-        .describe('How long to wait. Defaults to 15 minutes and is capped at 60 minutes.'),
+        .describe('Per-call block budget in ms (default 90s). A single call blocks at most ~2 minutes regardless; larger values are clamped, then you get still_waiting to loop on. This is not the overall heal budget — that is unbounded across re-calls.'),
     },
   }, async ({ runId, session_id, client_kind, timeout_ms }) => {
     const result = await waitForHealTask(deps, runId, session_id, client_kind, timeout_ms)
@@ -1665,7 +1659,7 @@ export function registerCanaryLabTools(
 function healWaitNext(runId: string): { nextSteps: string[]; next: string } {
   return {
     nextSteps: ['wait_for_heal_task'],
-    next: `Call wait_for_heal_task with runId "${runId}" and the same session_id to wait for the result — it blocks and heartbeats for you. Do not poll get_run_snapshot or get_run in a loop to wait.`,
+    next: `Call wait_for_heal_task with runId "${runId}" and the same session_id to wait for the result — it blocks for a short window and heartbeats for you. If it returns type:"still_waiting", call it again (not terminal). Do not poll get_run_snapshot or get_run in a loop to wait.`,
   }
 }
 
@@ -1682,6 +1676,29 @@ function isActiveBootRun(detail: RunDetail | null | undefined): boolean {
     (detail.manifest.executionType ?? 'run') === 'boot' &&
     isActiveRunStatus(detail.manifest.status)
   )
+}
+
+// Emitted when a single wait_for_heal_task block elapses while the run is still
+// active. NOT terminal — the agent must re-call wait_for_heal_task (same runId +
+// session_id) to keep waiting. The cursor is informational (phase:cycles:status);
+// re-calling is stateless and safe because classifyWaitForHealTask reads durable
+// run state, so any transition during the gap is caught on the next immediate check.
+function stillWaitingValue(
+  runId: string,
+  detail: RunDetail | null,
+): Extract<WaitForHealTaskValue, { type: 'still_waiting' }> {
+  const status = detail?.manifest.status ?? null
+  const phase = detail?.manifest.lifecycle?.phase ?? 'unknown'
+  const cycles = detail?.manifest.healCycles ?? 0
+  return {
+    type: 'still_waiting',
+    runId,
+    status,
+    lifecycle: detail?.manifest.lifecycle ?? null,
+    cursor: `${phase}:${cycles}:${status ?? 'unknown'}`,
+    nextSteps: ['wait_for_heal_task'],
+    next: `Run "${runId}" is still active (no heal task yet). This is NOT terminal — call wait_for_heal_task again with the same runId + session_id to keep waiting. Do not poll get_run_snapshot or get_run.`,
+  }
 }
 
 function bootSessionValue(detail: RunDetail): Extract<WaitForHealTaskValue, { type: 'boot_session' }> {
@@ -1873,7 +1890,15 @@ type WaitForHealTaskValue =
   | { type: 'needs_heal'; runId: string; cycle: number; context: ExternalHealContext }
   | { type: 'passed'; runId: string; summary: RunDetail['summary'] | null; counts: NormalizedRunCounts }
   | { type: 'failed'; runId: string; status: string; summary: RunDetail['summary'] | null; counts: NormalizedRunCounts }
-  | { type: 'timeout'; runId: string; status: string | null; lifecycle: RunDetail['manifest']['lifecycle'] | null }
+  | {
+      type: 'still_waiting'
+      runId: string
+      status: string | null
+      lifecycle: RunDetail['manifest']['lifecycle'] | null
+      cursor: string
+      nextSteps: string[]
+      next: string
+    }
   | {
       type: 'boot_session'
       runId: string
@@ -2000,18 +2025,15 @@ async function waitForHealTask(
       deps.broker.heartbeat(runId, sessionId, 'waiting')
     }
     deps.store.onEvent(onEvent)
+    // Clamp the actual block to the window cap regardless of the requested
+    // timeout_ms — bounds the request lifetime so it can't outlive a client's
+    // JSON-RPC request timeout. On elapse we return `still_waiting`, not a
+    // terminal `timeout`: the run is still going, the agent just re-calls.
+    const windowMs = Math.min(Math.max(timeoutMs, 1), WAIT_FOR_HEAL_TASK_WINDOW_MS)
     const timeout = setTimeout(() => {
       const detail = deps.store.get(runId)
-      finish({
-        ok: true,
-        value: {
-          type: 'timeout',
-          runId,
-          status: detail?.manifest.status ?? null,
-          lifecycle: detail?.manifest.lifecycle ?? null,
-        },
-      })
-    }, timeoutMs)
+      finish({ ok: true, value: stillWaitingValue(runId, detail ?? null) })
+    }, windowMs)
     const heartbeat = setInterval(beat, 5_000)
     if (typeof timeout.unref === 'function') timeout.unref()
     if (typeof heartbeat.unref === 'function') heartbeat.unref()

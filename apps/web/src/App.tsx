@@ -18,10 +18,15 @@ import { connectWorkspaceEvents } from './api/workspace-socket'
 import { useRuns, useRun, useGlobalActiveRun } from './state/RunsContext'
 import { useWizardDrafts } from './state/WizardDraftContext'
 import type { Feature } from './api/types'
+import { readPersistedView, persistView, onViewChangedInOtherTab } from './lib/workspace-view-state'
+
+// R12: hydrate the open view + selected feature from the URL/localStorage so a
+// refresh or a second tab restores where you were, not a blank workspace.
+const PERSISTED_VIEW = readPersistedView()
 
 export function App() {
   const [features, setFeatures] = useState<Feature[]>([])
-  const [selectedFeature, setSelectedFeature] = useState<string | null>(null)
+  const [selectedFeature, setSelectedFeature] = useState<string | null>(PERSISTED_VIEW.feature)
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
   const [configFor, setConfigFor] = useState<string | null>(null)
   const [testsRefreshKey, setTestsRefreshKey] = useState(0)
@@ -32,10 +37,22 @@ export function App() {
   const [portifyTarget, setPortifyTarget] = useState<
     { kind: 'new'; feature: string } | { kind: 'revisit'; workflowId: string } | null
   >(null)
-  // Top-level view: the normal workspace, or the full-screen Log Cleanup page.
-  const [view, setView] = useState<'workspace' | 'cleanup' | 'coverage'>('workspace')
+  // Top-level view: the normal workspace, or a full-screen page (cleanup /
+  // coverage). Hydrated from the URL/localStorage (R12) so it survives refresh.
+  const [view, setView] = useState<'workspace' | 'cleanup' | 'coverage'>(PERSISTED_VIEW.view)
   const pendingRunSelectionRef = useRef<string | null>(null)
   const selectedFeatureRef = useRef<string | null>(null)
+
+  // R12: persist the open view + feature (URL + localStorage) on every change so
+  // a refresh restores it; and mirror changes from other tabs so all tabs agree.
+  useEffect(() => {
+    persistView({ view, feature: selectedFeature })
+  }, [view, selectedFeature])
+
+  useEffect(() => onViewChangedInOtherTab((s) => {
+    setView(s.view)
+    if (s.feature) setSelectedFeature(s.feature)
+  }), [])
 
   // Initial features load + auto-select first feature.
   useEffect(() => {

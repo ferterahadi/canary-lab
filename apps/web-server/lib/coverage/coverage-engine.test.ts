@@ -4,11 +4,8 @@ import os from 'os'
 import path from 'path'
 import {
   runCoverageEngine,
-  acceptProposedMapping,
-  rejectProposedMapping,
   regeneratePrdSummary,
 } from './service'
-import { readProposedMappings } from './proposed-mappings'
 
 let tmpDir: string
 let featuresDir: string
@@ -59,7 +56,6 @@ describe('runCoverageEngine — auto mode', () => {
     const res = await runCoverageEngine({ featuresDir, logsDir, feature: 'checkout', adapter: 'deterministic' })
     expect(res.orphanTestsBefore).toContain('create makes a new todo item')
     expect(res.applied.map((m) => m.testName)).toContain('create makes a new todo item')
-    expect(res.proposed).toEqual([])
 
     // The spec file now carries the @req- tag (mapping written, body untouched).
     const spec = fs.readFileSync(path.join(dir, 'e2e', 'a.spec.ts'), 'utf-8')
@@ -69,42 +65,6 @@ describe('runCoverageEngine — auto mode', () => {
     // The recomputed ledger sees the test as annotated, no longer an orphan.
     expect(res.ledger.orphanTestNames).not.toContain('create makes a new todo item')
     expect(res.ledger.requirements[0].annotatedTestNames).toContain('create makes a new todo item')
-  })
-})
-
-describe('runCoverageEngine — review mode', () => {
-  it('stores proposals without touching the spec, then accept writes the tag', async () => {
-    const dir = writeFeature('checkout')
-    await seedSummary('checkout')
-
-    const res = await runCoverageEngine({
-      featuresDir, logsDir, feature: 'checkout', adapter: 'deterministic', reviewMode: true, now: '2026-01-01T00:00:00Z',
-    })
-    expect(res.applied).toEqual([])
-    expect(res.proposed.map((m) => m.testName)).toContain('create makes a new todo item')
-    // Spec untouched in review mode.
-    expect(fs.readFileSync(path.join(dir, 'e2e', 'a.spec.ts'), 'utf-8')).not.toContain('@req-')
-    // Proposals persisted + surfaced on the ledger.
-    expect(readProposedMappings(dir)?.proposals.length).toBe(1)
-    expect(res.ledger.proposedMappings?.length).toBe(1)
-
-    // Accept → tag written, store cleared.
-    const accepted = acceptProposedMapping({ featuresDir, logsDir, feature: 'checkout', testName: 'create makes a new todo item' })
-    expect(accepted.applied?.requirements).toEqual(['R1'])
-    expect(fs.readFileSync(path.join(dir, 'e2e', 'a.spec.ts'), 'utf-8')).toContain('@req-R1')
-    expect(readProposedMappings(dir)).toBeNull()
-    expect(accepted.ledger.proposedMappings).toBeUndefined()
-  })
-
-  it('reject drops the proposal and never writes a tag', async () => {
-    const dir = writeFeature('checkout')
-    await seedSummary('checkout')
-    await runCoverageEngine({ featuresDir, logsDir, feature: 'checkout', adapter: 'deterministic', reviewMode: true })
-
-    const rejected = rejectProposedMapping({ featuresDir, logsDir, feature: 'checkout', testName: 'create makes a new todo item' })
-    expect(rejected.rejected?.testName).toBe('create makes a new todo item')
-    expect(fs.readFileSync(path.join(dir, 'e2e', 'a.spec.ts'), 'utf-8')).not.toContain('@req-')
-    expect(readProposedMappings(dir)).toBeNull()
   })
 })
 

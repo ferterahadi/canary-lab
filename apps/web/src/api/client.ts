@@ -174,16 +174,17 @@ export function regeneratePrdSummary(
   )
 }
 
-// ─── Verified Coverage — async jobs + proposed mappings (R4) ─────────────────
+// ─── Verified Coverage — async jobs (R4). Summary + Coverage are one exercise:
+// a `summary` job auto-chains a `coverage` job server-side (R14), so there is no
+// review/accept step. ─────────────────────────────────────────────────────────
 
 export function startCoverageJob(
   feature: string,
   kind: CoverageJobKind,
-  opts?: ClientOptions & { reviewMode?: boolean; adapter?: 'auto' | 'claude' | 'codex' | 'deterministic' },
+  opts?: ClientOptions & { adapter?: 'auto' | 'claude' | 'codex' | 'deterministic' },
 ): Promise<CoverageJobManifest> {
   const { baseUrl, fetchImpl } = defaultOpts(opts)
   const body: Record<string, unknown> = { kind }
-  if (opts?.reviewMode) body.reviewMode = true
   if (opts?.adapter) body.adapter = opts.adapter
   return request<CoverageJobManifest>(
     `${baseUrl}/api/features/${encodeURIComponent(feature)}/coverage/jobs`,
@@ -211,24 +212,6 @@ export function getCoverageJob(jobId: string, opts?: ClientOptions): Promise<Cov
   return request<CoverageJobManifest>(
     `${baseUrl}/api/coverage/jobs/${encodeURIComponent(jobId)}`,
     { method: 'GET' },
-    fetchImpl,
-  )
-}
-
-export function acceptCoverageMapping(feature: string, testName: string, opts?: ClientOptions): Promise<{ ledger: CoverageLedger }> {
-  const { baseUrl, fetchImpl } = defaultOpts(opts)
-  return request(
-    `${baseUrl}/api/features/${encodeURIComponent(feature)}/coverage/proposals/${encodeURIComponent(testName)}/accept`,
-    { method: 'POST' },
-    fetchImpl,
-  )
-}
-
-export function rejectCoverageMapping(feature: string, testName: string, opts?: ClientOptions): Promise<{ ledger: CoverageLedger }> {
-  const { baseUrl, fetchImpl } = defaultOpts(opts)
-  return request(
-    `${baseUrl}/api/features/${encodeURIComponent(feature)}/coverage/proposals/${encodeURIComponent(testName)}/reject`,
-    { method: 'POST' },
     fetchImpl,
   )
 }

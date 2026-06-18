@@ -118,6 +118,61 @@ describe('CoverageDocsTab', () => {
     expect(vi.mocked(api.importFeatureDoc).mock.calls[0][1].filename).toBe('brief.md')
   })
 
+  it('imports multiple selected files (picker → one import per file)', async () => {
+    await mount()
+    const input = container.querySelector<HTMLInputElement>('[data-testid="doc-file-input"]')!
+    expect(input.multiple).toBe(true)
+    const files = [
+      new File(['# A'], 'a.md', { type: 'text/markdown' }),
+      new File(['# B'], 'b.md', { type: 'text/markdown' }),
+      new File(['# C'], 'c.md', { type: 'text/markdown' }),
+    ]
+    Object.defineProperty(input, 'files', { value: files, configurable: true })
+    await act(async () => { input.dispatchEvent(new Event('change', { bubbles: true })) })
+    await act(async () => { await new Promise((r) => setTimeout(r, 30)) })
+    expect(api.importFeatureDoc).toHaveBeenCalledTimes(3)
+    const names = vi.mocked(api.importFeatureDoc).mock.calls.map((c) => c[1].filename)
+    expect(names).toEqual(['a.md', 'b.md', 'c.md'])
+  })
+
+  it('imports every dropped file', async () => {
+    await mount()
+    const tab = container.querySelector<HTMLDivElement>('[data-testid="coverage-docs-tab"]')!
+    const files = [
+      new File(['# A'], 'a.md', { type: 'text/markdown' }),
+      new File(['# B'], 'b.md', { type: 'text/markdown' }),
+    ]
+    const event = new Event('drop', { bubbles: true }) as Event & { dataTransfer: unknown }
+    Object.defineProperty(event, 'dataTransfer', { value: { files }, configurable: true })
+    await act(async () => { tab.dispatchEvent(event) })
+    await act(async () => { await new Promise((r) => setTimeout(r, 30)) })
+    expect(api.importFeatureDoc).toHaveBeenCalledTimes(2)
+    const names = vi.mocked(api.importFeatureDoc).mock.calls.map((c) => c[1].filename)
+    expect(names).toEqual(['a.md', 'b.md'])
+  })
+
+  it('a failing file does not abort the batch and surfaces a combined error', async () => {
+    vi.mocked(api.importFeatureDoc)
+      .mockResolvedValueOnce({ written: true, relativePath: 'docs/a.md' })
+      .mockRejectedValueOnce(new Error('unsupported'))
+      .mockResolvedValueOnce({ written: true, relativePath: 'docs/c.md' })
+    await mount()
+    const input = container.querySelector<HTMLInputElement>('[data-testid="doc-file-input"]')!
+    const files = [
+      new File(['# A'], 'a.md', { type: 'text/markdown' }),
+      new File(['x'], 'b.docx', { type: '' }),
+      new File(['# C'], 'c.md', { type: 'text/markdown' }),
+    ]
+    Object.defineProperty(input, 'files', { value: files, configurable: true })
+    await act(async () => { input.dispatchEvent(new Event('change', { bubbles: true })) })
+    await act(async () => { await new Promise((r) => setTimeout(r, 30)) })
+    // All three were attempted — the middle failure did not stop the rest.
+    expect(api.importFeatureDoc).toHaveBeenCalledTimes(3)
+    const err = container.querySelector('[data-testid="docs-error"]')
+    expect(err?.textContent).toContain('1 of 3 docs failed')
+    expect(err?.textContent).toContain('b.docx')
+  })
+
   it('removes a source doc via the pill ✕', async () => {
     await mount()
     await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="remove-doc-spec.md"]')?.click() })

@@ -3,7 +3,7 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import type { RunDetail } from './run-store'
-import { buildExternalHealContext, buildExternalRunSnapshot, normalizeRunCounts, writeHealSignal } from './external-heal-surface'
+import { buildExternalFailureDetail, buildExternalHealContext, buildExternalRunSnapshot, normalizeRunCounts, writeHealSignal } from './external-heal-surface'
 import { buildRunPaths, runDirFor } from './runtime/run-paths'
 
 let tmpDir: string
@@ -50,6 +50,7 @@ function detailFor(runId: string): RunDetail {
           location: 'e2e/checkout.spec.ts:12:3',
           retry: 1,
           logFiles: ['failed/checkout-fails/svc-app.log'],
+          errorFile: 'failed/checkout-fails/error.txt',
         },
       ],
       skipped: 0,
@@ -81,6 +82,14 @@ describe('buildExternalHealContext', () => {
     fs.writeFileSync(paths.manifestPath, JSON.stringify(detailFor(runId).manifest))
     fs.writeFileSync(paths.healIndexPath, '# Heal Index\n')
     fs.writeFileSync(paths.diagnosisJournalPath, '# Journal\n')
+    // Per-failure artifact dirs so the pointer bundle resolves traceDir / playwrightMcpDir.
+    const failedSlug = 'checkout fails'
+    const traceDir = path.join(paths.failedDir, failedSlug, 'trace-extract')
+    const pwMcpDir = path.join(paths.failedDir, failedSlug, 'playwright-mcp')
+    fs.mkdirSync(traceDir, { recursive: true })
+    fs.writeFileSync(path.join(traceDir, 'failure-summary.md'), '# failure\n')
+    fs.mkdirSync(pwMcpDir, { recursive: true })
+    fs.writeFileSync(path.join(pwMcpDir, 'console-errors.txt'), 'boom\n')
 
     const context = buildExternalHealContext({
       detail: detailFor(runId),
@@ -94,21 +103,19 @@ describe('buildExternalHealContext', () => {
       env: 'local',
       status: 'healing',
       counts: { statusLine: '1/3 passed, 1 failed, 1 not run' },
-      healIndex: {
-        path: paths.healIndexPath,
-        markdown: '# Heal Index\n',
-      },
-      journal: {
-        path: paths.diagnosisJournalPath,
-        markdown: '# Journal\n',
-      },
+      healIndex: { path: paths.healIndexPath },
+      journal: { path: paths.diagnosisJournalPath },
       failedTests: [
         {
+          failureId: 'checkout fails',
           name: 'checkout fails',
           error: { message: 'boom', snippet: 'expect(x)' },
           location: 'e2e/checkout.spec.ts:12:3',
           retry: 1,
           logFiles: ['failed/checkout-fails/svc-app.log'],
+          errorPath: 'failed/checkout-fails/error.txt',
+          traceDir,
+          playwrightMcpDir: pwMcpDir,
           artifacts: [
             {
               name: 'trace',
@@ -122,6 +129,11 @@ describe('buildExternalHealContext', () => {
         source: 'canary-lab/heal-agent-map',
       },
     })
+    // Slim packet: markdown blobs are deferred to paths, never inlined in the compact context.
+    expect(context.healIndex).not.toHaveProperty('markdown')
+    expect(context.journal).not.toHaveProperty('markdown')
+    expect(JSON.stringify(context)).not.toContain('# Heal Index')
+    expect(JSON.stringify(context)).not.toContain('# Journal')
     expect(context).not.toHaveProperty('summary')
     expect(context).not.toHaveProperty('healIndexMarkdown')
     expect(context).not.toHaveProperty('journalMarkdown')
@@ -159,6 +171,45 @@ describe('buildExternalHealContext', () => {
       statusLine: '1/2 passed, 0 failed, 1 not run',
     })
     expect(context.counts).not.toHaveProperty('notRunNames')
+  })
+})
+
+describe('buildExternalFailureDetail', () => {
+  it('returns one failure with pointers plus the capped inline trace summary and error text', () => {
+    const runId = 'run-1'
+    const paths = buildRunPaths(runDirFor(logsDir, runId))
+    const failedSlug = 'checkout fails'
+    const traceDir = path.join(paths.failedDir, failedSlug, 'trace-extract')
+    const pwMcpDir = path.join(paths.failedDir, failedSlug, 'playwright-mcp')
+    fs.mkdirSync(traceDir, { recursive: true })
+    fs.writeFileSync(path.join(traceDir, 'failure-summary.md'), '# curated\n')
+    fs.mkdirSync(pwMcpDir, { recursive: true })
+    fs.writeFileSync(path.join(pwMcpDir, 'console-errors.txt'), 'boom\n')
+    fs.writeFileSync(path.join(paths.failedDir, failedSlug, 'error.txt'), 'AssertionError: boom\n')
+
+    const detail = buildExternalFailureDetail({
+      detail: detailFor(runId),
+      logsDir,
+      failureId: failedSlug,
+    })
+
+    expect(detail).toMatchObject({
+      runId,
+      failureId: failedSlug,
+      name: failedSlug,
+      location: 'e2e/checkout.spec.ts:12:3',
+      errorPath: 'failed/checkout-fails/error.txt',
+      traceDir,
+      playwrightMcpDir: pwMcpDir,
+      traceSummaryMarkdown: '# curated\n',
+      errorText: 'AssertionError: boom\n',
+    })
+  })
+
+  it('returns null for an unknown failureId', () => {
+    expect(
+      buildExternalFailureDetail({ detail: detailFor('run-1'), logsDir, failureId: 'nope' }),
+    ).toBeNull()
   })
 })
 

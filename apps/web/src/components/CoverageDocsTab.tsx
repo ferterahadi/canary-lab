@@ -47,10 +47,12 @@ export function CoverageDocsTab({ feature, onRegenerated, onDocsChanged }: Props
   const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  const load = useCallback(() => {
+  // `keepError` lets a refetch that follows a partially-failed batch import
+  // preserve the combined error message instead of clearing it on success.
+  const load = useCallback((keepError = false) => {
     setLoading(true)
     api.listFeatureDocs(feature)
-      .then((data) => { setListing(data); setError(null) })
+      .then((data) => { setListing(data); if (!keepError) setError(null) })
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => setLoading(false))
   }, [feature])
@@ -94,19 +96,33 @@ export function CoverageDocsTab({ feature, onRegenerated, onDocsChanged }: Props
       .finally(() => setBusy(false))
   }, [feature, load, onRegenerated, onDocsChanged])
 
-  const importFile = useCallback(async (file: File) => {
+  // Import each file SEQUENTIALLY — the md-only extractor + single-flight summary
+  // job must not be hammered concurrently. A per-file failure does not abort the
+  // batch: we record it, keep going, and surface a combined error at the end.
+  const importFiles = useCallback(async (files: File[] | FileList) => {
+    const list = Array.from(files)
+    if (list.length === 0) return
     setBusy(true)
     setError(null)
-    try {
-      const base64 = await readAsBase64(file)
-      await api.importFeatureDoc(feature, { filename: file.name, contentType: file.type || undefined, base64 })
-      load()
-      onDocsChanged?.()
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e))
-    } finally {
-      setBusy(false)
+    const failures: string[] = []
+    let imported = 0
+    for (const file of list) {
+      try {
+        const base64 = await readAsBase64(file)
+        await api.importFeatureDoc(feature, { filename: file.name, contentType: file.type || undefined, base64 })
+        imported += 1
+      } catch (e: unknown) {
+        failures.push(`${file.name} (${e instanceof Error ? e.message : String(e)})`)
+      }
     }
+    if (failures.length > 0) {
+      setError(`${failures.length} of ${list.length} docs failed: ${failures.join(', ')}`)
+    }
+    if (imported > 0) {
+      load(failures.length > 0)
+      onDocsChanged?.()
+    }
+    setBusy(false)
   }, [feature, load, onDocsChanged])
 
   const removeDoc = useCallback((relPath: string) => {
@@ -120,9 +136,9 @@ export function CoverageDocsTab({ feature, onRegenerated, onDocsChanged }: Props
   const onDrop = useCallback((e: DragEvent) => {
     e.preventDefault()
     setDragging(false)
-    const file = e.dataTransfer.files?.[0]
-    if (file) void importFile(file)
-  }, [importFile])
+    const files = e.dataTransfer.files
+    if (files && files.length > 0) void importFiles(files)
+  }, [importFiles])
 
   const sourceCount = listing?.sourceDocCount ?? 0
   const dirPrefix = `features/${feature}/docs/`
@@ -140,11 +156,12 @@ export function CoverageDocsTab({ feature, onRegenerated, onDocsChanged }: Props
         ref={fileInputRef}
         data-testid="doc-file-input"
         type="file"
+        multiple
         accept=".md,.markdown,.txt,.pdf,.docx"
         style={{ display: 'none' }}
         onChange={(e) => {
-          const file = e.target.files?.[0]
-          if (file) void importFile(file)
+          const files = e.target.files
+          if (files && files.length > 0) void importFiles(files)
           e.target.value = ''
         }}
       />
@@ -185,7 +202,7 @@ export function CoverageDocsTab({ feature, onRegenerated, onDocsChanged }: Props
           })()}
         </div>
         <p style={{ fontSize: 12.5, color: 'var(--text-secondary)', lineHeight: 1.5, marginBottom: 22 }}>
-          The PRD requirements are extracted from these. Upload a spec, ticket, or notes file — or drop one anywhere on this panel.
+          The PRD requirements are extracted from these. Upload spec, ticket, or notes files — or drop them anywhere on this panel.
         </p>
 
         {job && (
@@ -239,7 +256,7 @@ export function CoverageDocsTab({ feature, onRegenerated, onDocsChanged }: Props
                 }}
               >
                 <span aria-hidden="true" style={{ fontSize: 14, lineHeight: 1 }}>+</span>
-                Add another doc — drop a file or click to browse
+                Add docs — drop files or click to browse
               </button>
             </div>
           )
@@ -260,7 +277,7 @@ export function CoverageDocsTab({ feature, onRegenerated, onDocsChanged }: Props
           className="pointer-events-none absolute inset-0 flex items-center justify-center"
           style={{ background: 'color-mix(in srgb, var(--accent) 10%, transparent)', border: '2px dashed var(--accent)', borderRadius: 'var(--radius-md)' }}
         >
-          <span style={{ fontSize: 15, fontWeight: 600, color: 'var(--accent)' }}>Drop to add a source doc</span>
+          <span style={{ fontSize: 15, fontWeight: 600, color: 'var(--accent)' }}>Drop to add source docs</span>
         </div>
       )}
     </div>
@@ -351,9 +368,9 @@ function EmptyDropzone({ onPick, dragging, busy }: { onPick: () => void; draggin
           <path d="M12 5v14M5 12h14" />
         </svg>
       </span>
-      <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)' }}>Add a source doc</span>
+      <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)' }}>Add source docs</span>
       <span style={{ fontSize: 12.5, color: 'var(--text-secondary)', maxWidth: 360 }}>
-        Drop a spec, ticket, or notes file here — or click to browse. Accepts <code>.md</code>, <code>.txt</code>, <code>.pdf</code>, <code>.docx</code>.
+        Drop spec, ticket, or notes files here — or click to browse. Accepts <code>.md</code>, <code>.txt</code>, <code>.pdf</code>, <code>.docx</code>.
       </span>
     </button>
   )
