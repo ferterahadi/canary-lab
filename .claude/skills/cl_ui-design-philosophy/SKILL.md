@@ -30,6 +30,7 @@ native*, not *novel*. Apply `frontend-design` polish **inside** these constraint
 | Modal with tabs | `FeatureConfigEditor` (`.cl-modal-backdrop` + `.cl-modal` + `<nav>` tabs) |
 | Status-bar launcher | the `*Pill` components in `GlobalStatusBar` |
 | Background-task surface | the Portify pill + dialog (see `cl_async-task-ux`) |
+| Long async generation | the Coverage **Generating** screen — a dedicated full pane (phase stepper + live agent log) that OWNS the view while a job runs; not a banner over a dimmed result |
 
 ## Principles that make it feel designed
 
@@ -39,8 +40,19 @@ native*, not *novel*. Apply `frontend-design` polish **inside** these constraint
 - **Worst-first ordering.** Lists of work (gaps, failures) sort the items that need
   attention to the top; "all good" sinks to the bottom.
 - **Never dead-end, never blank.** Every state has a rendering with a next action
-  (a `Setup needed` empty state offers Generate; a regen keeps the last result
-  visible, dimmed, rather than blanking — see the coverage state model).
+  (a `Setup needed` empty state offers Generate). While a long job runs, give it a
+  dedicated screen that owns the view (the Coverage Generating pane) instead of a
+  stale/empty ledger behind a banner — the work-in-progress IS the content.
+- **One exercise, not exposed seams.** When two steps are really one user goal
+  (PRD summary → coverage mapping), present one flow with chained progress and one
+  set of actions (Regenerate summary / Regenerate coverage) — don't leak the
+  internal two-job boundary or a per-item review gate the user must babysit.
+- **Durable selection survives refresh + tabs.** UI selection the user would expect
+  to persist (which feature, which full-screen view, which sub-tab) lives in the URL
+  (source of truth) + `localStorage`, NOT only React state — so a refresh restores
+  it and a second tab reflects it. Broadcast cross-tab changes via `storage` events;
+  see `lib/workspace-view-state.ts`. Ephemeral UI (hover, transient filters) stays
+  in React state.
 - **Density with breathing room.** Tight vertical rhythm (8–12px gaps), small type
   (10–13px), monospace for ids/tags/paths. Information-rich, not cramped.
 - **Restrained motion.** Subtle opacity/background transitions (~120ms) for

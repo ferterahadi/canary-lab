@@ -7,11 +7,21 @@ import { buildRunPaths, runDirFor } from './runtime/run-paths'
 import type { HealSignalKind } from '../../../shared/run-state'
 
 export interface ExternalHealFailedTest {
+  /** Stable per-failure id — equals the on-disk `failed/<failureId>/` dir name
+   *  (and the failed entry `name`). Pass to `get_failure_detail` to pull just
+   *  this failure's slice. */
+  failureId: string
   name: string
   error?: unknown
   location?: string
   retry?: number
   logFiles?: string[]
+  /** Repo-relative path to this failure's full `error.txt`, when written. */
+  errorPath?: string
+  /** Absolute path to `failed/<failureId>/trace-extract/`, when it exists. */
+  traceDir?: string
+  /** Absolute path to `failed/<failureId>/playwright-mcp/`, when non-empty. */
+  playwrightMcpDir?: string
   artifacts: Array<{ name: string; kind: string; url: string }>
 }
 
@@ -51,8 +61,11 @@ export interface ExternalHealContext {
   externalHealSession: RunDetail['manifest']['externalHealSession'] | null
   counts: CompactRunCounts
   failedTests: ExternalHealFailedTest[]
-  healIndex: { path: string; markdown: string } | null
-  journal: { path: string; markdown: string } | null
+  // Slim packet: the markdown blobs are deferred to paths the agent `Read`s on
+  // demand (they grow with #failures × #cycles). `get_run_snapshot` still inlines
+  // them for verbose debugging.
+  healIndex: { path: string } | null
+  journal: { path: string } | null
   healPrompt?: HealPromptMap
 }
 
@@ -74,11 +87,29 @@ export interface ExternalRunSnapshot {
   healPrompt?: HealPromptMap
 }
 
+export interface ExternalFailureDetail extends ExternalHealFailedTest {
+  runId: string
+  /** Curated `trace-extract/failure-summary.md` content (capped), when present. */
+  traceSummaryMarkdown?: string | null
+  /** Full `error.txt` content (capped), when present. */
+  errorText?: string | null
+}
+
 export interface BuildExternalHealContextInput {
   detail: RunDetail
   logsDir: string
   projectRoot?: string
 }
+
+export interface BuildExternalFailureDetailInput {
+  detail: RunDetail
+  logsDir: string
+  failureId: string
+}
+
+// Keep per-failure inlined content bounded so get_failure_detail can never blow
+// up an MCP response — deeper detail stays on disk behind the pointer dirs.
+const FAILURE_DETAIL_MAX_BYTES = 24 * 1024
 
 export function buildExternalHealContext(input: BuildExternalHealContextInput): ExternalHealContext {
   const snapshot = buildExternalRunSnapshot(input)
@@ -96,12 +127,10 @@ export function buildExternalHealContext(input: BuildExternalHealContextInput): 
     externalHealSession: snapshot.externalHealSession,
     counts: compactCounts(snapshot.counts),
     failedTests: snapshot.failedTests,
-    healIndex: snapshot.healIndexMarkdown === null
-      ? null
-      : { path: paths.healIndexPath, markdown: snapshot.healIndexMarkdown },
-    journal: snapshot.journalMarkdown === null
-      ? null
-      : { path: paths.diagnosisJournalPath, markdown: snapshot.journalMarkdown },
+    // Path only — the agent `Read`s the file when it needs the content. Presence
+    // mirrors whether the markdown file exists on disk.
+    healIndex: snapshot.healIndexMarkdown === null ? null : { path: paths.healIndexPath },
+    journal: snapshot.journalMarkdown === null ? null : { path: paths.diagnosisJournalPath },
     ...(snapshot.healPrompt ? { healPrompt: snapshot.healPrompt } : {}),
   }
 }
@@ -123,7 +152,7 @@ export function buildExternalRunSnapshot(input: BuildExternalHealContextInput): 
     externalHealSession: detail.manifest.externalHealSession ?? null,
     summary: summary ?? null,
     counts: normalizeRunCounts(summary ?? null),
-    failedTests: buildFailedTests(detail),
+    failedTests: buildFailedTests(detail, paths.failedDir),
     healIndexMarkdown: safeRead(paths.healIndexPath),
     journalMarkdown: safeRead(paths.diagnosisJournalPath),
     artifactsBase: `/api/runs/${encodeURIComponent(runId)}/artifacts/`,
@@ -139,22 +168,81 @@ export function buildExternalRunSnapshot(input: BuildExternalHealContextInput): 
   return context
 }
 
-function buildFailedTests(detail: RunDetail): ExternalHealFailedTest[] {
-  return (detail.summary?.failed ?? []).map((entry) => ({
+function buildFailedTests(detail: RunDetail, failedDir: string): ExternalHealFailedTest[] {
+  return (detail.summary?.failed ?? []).map((entry) =>
+    buildFailedTestPointer(entry, failedDir, detail.playwrightArtifacts),
+  )
+}
+
+function buildFailedTestPointer(
+  entry: NonNullable<RunDetail['summary']>['failed'][number],
+  failedDir: string,
+  playwrightArtifacts: RunDetail['playwrightArtifacts'],
+): ExternalHealFailedTest {
+  // The failed entry `name` is already the on-disk `failed/<slug>/` dir name.
+  const traceDir = existingDir(path.join(failedDir, entry.name, 'trace-extract'))
+  const playwrightMcpDir = nonEmptyDir(path.join(failedDir, entry.name, 'playwright-mcp'))
+  return {
+    failureId: entry.name,
     name: entry.name,
     ...(entry.error ? { error: entry.error } : {}),
     ...(entry.location ? { location: entry.location } : {}),
     ...(typeof entry.retry === 'number' ? { retry: entry.retry } : {}),
     ...(entry.logFiles?.length ? { logFiles: entry.logFiles } : {}),
+    ...(entry.errorFile ? { errorPath: entry.errorFile } : {}),
+    ...(traceDir ? { traceDir } : {}),
+    ...(playwrightMcpDir ? { playwrightMcpDir } : {}),
     artifacts:
-      detail.playwrightArtifacts
+      playwrightArtifacts
         ?.find((group) => group.testName === entry.name)
         ?.artifacts.map((artifact) => ({
           name: artifact.name,
           kind: artifact.kind,
           url: artifact.url,
         })) ?? [],
-  }))
+  }
+}
+
+/**
+ * One failure's bounded detail — lets a sub-agent pull just its slice instead of
+ * the whole heal context. Returns null when `failureId` is not a current failure.
+ * Inlines the two highest-signal per-failure files (curated trace summary + full
+ * error), each capped, with the rest left as pointer dirs the agent can `Read`.
+ */
+export function buildExternalFailureDetail(
+  input: BuildExternalFailureDetailInput,
+): ExternalFailureDetail | null {
+  const { detail, logsDir, failureId } = input
+  const entry = (detail.summary?.failed ?? []).find((e) => e.name === failureId)
+  if (!entry) return null
+  const paths = buildRunPaths(runDirFor(logsDir, detail.manifest.runId))
+  const pointer = buildFailedTestPointer(entry, paths.failedDir, detail.playwrightArtifacts)
+  const traceSummaryMarkdown = pointer.traceDir
+    ? safeReadCapped(path.join(pointer.traceDir, 'failure-summary.md'))
+    : null
+  const errorText = safeReadCapped(path.join(paths.failedDir, failureId, 'error.txt'))
+  return {
+    runId: detail.manifest.runId,
+    ...pointer,
+    ...(traceSummaryMarkdown !== null ? { traceSummaryMarkdown } : {}),
+    ...(errorText !== null ? { errorText } : {}),
+  }
+}
+
+function existingDir(dir: string): string | null {
+  try {
+    return fs.statSync(dir).isDirectory() ? dir : null
+  } catch {
+    return null
+  }
+}
+
+function nonEmptyDir(dir: string): string | null {
+  try {
+    return fs.readdirSync(dir).length > 0 ? dir : null
+  } catch {
+    return null
+  }
 }
 
 function compactCounts(counts: NormalizedRunCounts): CompactRunCounts {
@@ -272,4 +360,11 @@ function safeRead(file: string): string | null {
   } catch {
     return null
   }
+}
+
+function safeReadCapped(file: string): string | null {
+  const content = safeRead(file)
+  if (content === null) return null
+  if (content.length <= FAILURE_DETAIL_MAX_BYTES) return content
+  return `${content.slice(0, FAILURE_DETAIL_MAX_BYTES)}\n…[truncated — read ${file} for the full content]`
 }

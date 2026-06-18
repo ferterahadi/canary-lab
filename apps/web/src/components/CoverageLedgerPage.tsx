@@ -2,14 +2,15 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import * as api from '../api/client'
 import type {
   CoverageJobKind,
+  CoverageJobManifest,
   CoverageLedger,
   CoverageStatus,
   GapType,
-  ProposedMapping,
   RequirementCoverage,
   TestCoverage,
 } from '../api/types'
 import { CoverageDocsTab } from './CoverageDocsTab'
+import { CoverageGeneratingPane } from './CoverageGeneratingPane'
 
 interface Props {
   feature: string
@@ -50,15 +51,20 @@ export function CoverageLedgerPage({ feature, onClose }: Props) {
   const [error, setError] = useState<string | null>(null)
   const [hovered, setHovered] = useState<Hovered | null>(null)
   const [gapFilter, setGapFilter] = useState<GapType | null>(null)
-  const [tab, setTab] = useState<'ledger' | 'docs'>('ledger')
+  // Sub-tab persists across refresh (R12) so reopening lands where you left off.
+  const [tab, setTab] = useState<'ledger' | 'docs'>(() => (readTabPref() === 'docs' ? 'docs' : 'ledger'))
   // Source-doc count drives the setup guide (step ② unlocks once ≥1 doc exists).
   const [sourceDocCount, setSourceDocCount] = useState<number | null>(null)
 
-  // Async generation (R4 jobs): a running job streams its log; the last ledger
-  // stays visible (dimmed) so a regen never blanks the screen.
-  const [job, setJob] = useState<{ id: string; kind: CoverageJobKind; status: string; log: string } | null>(null)
+  // Async generation (R4 jobs). Summary + Coverage are ONE exercise (R14): a
+  // summary job auto-chains a coverage job, and we follow that chain so the
+  // single `job` here represents whichever phase is live. While a job runs the
+  // Coverage tab shows a dedicated Generating screen (R13) — not the ledger.
+  const [job, setJob] = useState<CoverageJobManifest | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
   const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const selectTab = useCallback((t: 'ledger' | 'docs') => { setTab(t); writeTabPref(t) }, [])
 
   const loadDocsCount = useCallback(() => {
     api.listFeatureDocs(feature)
@@ -89,11 +95,16 @@ export function CoverageLedgerPage({ feature, onClose }: Props) {
     const tick = () => {
       api.getCoverageJob(jobId)
         .then((m) => {
-          setJob({ id: m.jobId, kind: m.kind, status: m.status, log: m.log })
+          setJob(m)
           if (m.status === 'running') {
             pollRef.current = setTimeout(tick, 800)
+          } else if (m.status === 'done' && m.chainedJobId) {
+            // Summary done → follow the auto-chained coverage job (R14): keep the
+            // Generating screen up across both phases, no second click.
+            refresh()
+            pollJob(m.chainedJobId)
           } else {
-            if (m.status === 'failed') setActionError(m.error ?? 'job failed')
+            if (m.status === 'failed') setActionError(m.error ?? 'generation failed')
             setJob(null)
             refresh()
           }
@@ -103,20 +114,12 @@ export function CoverageLedgerPage({ feature, onClose }: Props) {
     tick()
   }, [refresh])
 
-  const startJob = useCallback((kind: CoverageJobKind, reviewMode?: boolean) => {
+  const startJob = useCallback((kind: CoverageJobKind) => {
     setActionError(null)
-    api.startCoverageJob(feature, kind, { reviewMode })
-      .then((m) => { setJob({ id: m.jobId, kind: m.kind, status: m.status, log: m.log }); pollJob(m.jobId) })
+    api.startCoverageJob(feature, kind)
+      .then((m) => { setJob(m); pollJob(m.jobId) })
       .catch((e: unknown) => setActionError(e instanceof Error ? e.message : String(e)))
   }, [feature, pollJob])
-
-  const resolveMapping = useCallback((testName: string, accept: boolean) => {
-    setActionError(null)
-    const call = accept ? api.acceptCoverageMapping : api.rejectCoverageMapping
-    call(feature, testName)
-      .then((res) => { if (res.ledger) setLedger(res.ledger); else refresh() })
-      .catch((e: unknown) => setActionError(e instanceof Error ? e.message : String(e)))
-  }, [feature, refresh])
 
   // Stable colour per test name (by position in the ledger's test list).
   const colorByTest = useMemo(() => {
@@ -165,7 +168,7 @@ export function CoverageLedgerPage({ feature, onClose }: Props) {
             <button
               key={t}
               type="button"
-              onClick={() => setTab(t)}
+              onClick={() => selectTab(t)}
               aria-pressed={tab === t}
               style={{
                 background: tab === t ? 'var(--bg-selected)' : 'var(--bg-surface)',
@@ -198,34 +201,34 @@ export function CoverageLedgerPage({ feature, onClose }: Props) {
         <CoverageDocsTab feature={feature} onRegenerated={refresh} onDocsChanged={loadDocsCount} />
       )}
 
+      {/* Generating (R13): while a job runs, the Coverage tab is ONE dedicated
+          screen — never the ledger, never the empty/setup state. Summary + Coverage
+          are one exercise, so this spans both phases (R14). */}
+      {!error && ledger && tab === 'ledger' && job && (
+        <CoverageGeneratingPane feature={feature} job={job} />
+      )}
+
       {/* ABSENT summary → the setup guide IS the content (no dead-end panes). */}
-      {!error && ledger && tab === 'ledger' && ledger.state?.summary === 'absent' && (
+      {!error && ledger && tab === 'ledger' && !job && ledger.state?.summary === 'absent' && (
         <CoverageSetupGuide
           sourceDocCount={sourceDocCount}
-          generating={Boolean(job)}
-          jobLog={job?.kind === 'summary' ? job.log : null}
           actionError={actionError}
-          onAddDocs={() => setTab('docs')}
+          onAddDocs={() => selectTab('docs')}
           onGenerate={() => startJob('summary')}
         />
       )}
 
-      {!error && ledger && tab === 'ledger' && ledger.state?.summary !== 'absent' && (
+      {!error && ledger && tab === 'ledger' && !job && ledger.state?.summary !== 'absent' && (
         <>
           {ledger.state && (
             <StateBanner
               ledger={ledger}
-              generating={Boolean(job)}
               onGenerate={startJob}
               actionError={actionError}
             />
           )}
-          {job && <JobStream kind={job.kind} log={job.log} />}
-          {ledger.proposedMappings && ledger.proposedMappings.length > 0 && (
-            <ProposedMappingsPanel mappings={ledger.proposedMappings} onResolve={resolveMapping} />
-          )}
           <CoverageHeader ledger={ledger} gapFilter={gapFilter} onToggleGap={(g) => setGapFilter((cur) => (cur === g ? null : g))} />
-          <div className="flex min-h-0 flex-1" style={{ opacity: job ? 0.55 : 1, transition: 'opacity 150ms' }}>
+          <div className="flex min-h-0 flex-1">
             {/* PRD / requirements pane */}
             <div className="min-h-0 flex-1 overflow-auto border-r p-4" style={{ borderColor: 'var(--border-default)' }} data-testid="prd-pane">
               {visibleReqs.length === 0 && (
@@ -251,7 +254,7 @@ export function CoverageLedgerPage({ feature, onClose }: Props) {
               )}
               {orphanTests.length > 0 && (
                 <div data-testid="orphan-tests-note" style={{ marginBottom: 10, fontSize: 11, color: 'rgb(251, 191, 36)' }}>
-                  {orphanTests.length} orphan test{orphanTests.length > 1 ? 's' : ''} (no requirement) — run the coverage engine to map them.
+                  {orphanTests.length} orphan test{orphanTests.length > 1 ? 's' : ''} (no requirement) — regenerate coverage to map them.
                 </div>
               )}
               {ledger.tests.map((t) => (
@@ -301,15 +304,13 @@ function HeadlinePill({ headline }: { headline: string }) {
 // State-driven action bar — never a dead end. Shows the right generate action for
 // the current (summary × coverage) state and, when stale, names the changed docs
 // + affected artifacts.
-function StateBanner({ ledger, generating, onGenerate, actionError }: {
+function StateBanner({ ledger, onGenerate, actionError }: {
   ledger: CoverageLedger
-  generating: boolean
-  onGenerate: (kind: CoverageJobKind, reviewMode?: boolean) => void
+  onGenerate: (kind: CoverageJobKind) => void
   actionError: string | null
 }) {
   const state = ledger.state!
   const drift = state.drift
-  const summaryAbsent = state.summary === 'absent'
   const summaryStale = state.summary === 'stale'
   const coverageActionable = state.summary === 'fresh'
   return (
@@ -318,43 +319,42 @@ function StateBanner({ ledger, generating, onGenerate, actionError }: {
       className="flex shrink-0 flex-wrap items-center gap-3 border-b px-5 py-2.5"
       style={{ borderColor: 'var(--border-default)', background: 'var(--bg-surface)' }}
     >
-      {summaryAbsent && (
-        <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
-          No PRD summary yet — add docs, then generate requirements.
-        </span>
-      )}
       {summaryStale && (
         <span data-testid="drift-banner" style={{ fontSize: 12, color: 'rgb(251, 191, 36)' }}>
           Stale: {drift.changedDocs.length ? `${drift.changedDocs.join(', ')} changed` : 'docs changed'}
           {drift.affectedArtifacts.length ? ` → affects ${drift.affectedArtifacts.join(' + ')}` : ''}
+          {' — regenerate the summary to refresh coverage.'}
         </span>
       )}
       {state.coverage === 'stale' && !summaryStale && (
         <span data-testid="coverage-stale-note" style={{ fontSize: 12, color: 'rgb(251, 191, 36)' }}>
-          Requirements changed since the engine last ran — re-run coverage.
+          Requirements changed since the engine last ran — regenerate coverage.
         </span>
       )}
       <div className="ml-auto flex items-center gap-2">
+        {/* Summary + Coverage are one exercise: regenerating the summary re-runs
+            coverage automatically (R16). "Regenerate coverage" re-maps against the
+            current summary only. */}
         <button
           type="button"
           data-testid="generate-summary"
-          disabled={generating}
           onClick={() => onGenerate('summary')}
           className="cl-button px-3 py-1"
-          style={{ fontSize: 12, opacity: generating ? 0.5 : 1 }}
+          title="Re-summarize the docs, then re-map coverage (one exercise)"
+          style={{ fontSize: 12 }}
         >
-          {summaryAbsent ? 'Generate summary' : 'Regenerate summary'}
+          Regenerate summary
         </button>
         <button
           type="button"
           data-testid="generate-coverage"
-          disabled={generating || !coverageActionable}
-          onClick={() => onGenerate('coverage', true)}
+          disabled={!coverageActionable}
+          onClick={() => onGenerate('coverage')}
           className="cl-button px-3 py-1"
-          title={coverageActionable ? 'Infer covers tags for untagged tests (review)' : 'Generate a fresh PRD summary first'}
-          style={{ fontSize: 12, opacity: generating || !coverageActionable ? 0.5 : 1 }}
+          title={coverageActionable ? 'Re-map covers tags against the current summary' : 'Generate a fresh PRD summary first'}
+          style={{ fontSize: 12, opacity: coverageActionable ? 1 : 0.5 }}
         >
-          Run coverage engine
+          Regenerate coverage
         </button>
       </div>
       {actionError && <span style={{ width: '100%', fontSize: 11, color: 'rgb(251, 113, 133)' }}>{actionError}</span>}
@@ -364,10 +364,8 @@ function StateBanner({ ledger, generating, onGenerate, actionError }: {
 
 // Guided empty state for the ABSENT summary — the two-step setup flow. Step ②
 // stays locked until ≥1 source doc exists, so the next action is always obvious.
-function CoverageSetupGuide({ sourceDocCount, generating, jobLog, actionError, onAddDocs, onGenerate }: {
+function CoverageSetupGuide({ sourceDocCount, actionError, onAddDocs, onGenerate }: {
   sourceDocCount: number | null
-  generating: boolean
-  jobLog: string | null
   actionError: string | null
   onAddDocs: () => void
   onGenerate: () => void
@@ -391,35 +389,26 @@ function CoverageSetupGuide({ sourceDocCount, generating, jobLog, actionError, o
           active={!hasDocs}
           done={hasDocs}
           title="Add source docs"
-          body="Drop in a spec, ticket, or notes file (.md / .txt / .pdf / .docx). Requirements are extracted from these."
+          body="Drop in specs, tickets, or notes (.md / .txt / .pdf / .docx — multiple at once). Requirements are extracted from these."
           cta={hasDocs ? `${sourceDocCount} source doc${sourceDocCount! > 1 ? 's' : ''} added — add more` : 'Add docs'}
           ctaTestId="setup-add-docs"
           onClick={onAddDocs}
-          disabled={generating}
         />
         <SetupStep
           n={2}
           active={hasDocs}
           done={false}
-          title="Generate the PRD summary"
-          body="Canary summarizes the docs into requirements with stable ids. You can regenerate any time — ids are preserved."
-          cta={generating ? 'Generating…' : 'Generate summary'}
+          title="Generate the PRD summary + coverage"
+          body="Canary summarizes the docs into requirements with stable ids, then maps your tests to them — one exercise. Regenerate any time; ids are preserved."
+          cta="Generate"
           ctaTestId="setup-generate-summary"
           onClick={onGenerate}
-          disabled={generating || !hasDocs}
+          disabled={!hasDocs}
           disabledHint={!hasDocs ? 'Add a source doc first' : undefined}
           primary
         />
 
         {actionError && <div style={{ marginTop: 14, fontSize: 12, color: 'rgb(251, 113, 133)' }}>{actionError}</div>}
-        {generating && jobLog != null && (
-          <pre
-            data-testid="setup-job-log"
-            style={{ marginTop: 16, maxHeight: 160, overflow: 'auto', fontSize: 11, lineHeight: 1.45, fontFamily: 'var(--font-mono, monospace)', color: 'var(--text-secondary)', whiteSpace: 'pre-wrap', background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)', padding: 10 }}
-          >
-            {jobLog || '…'}
-          </pre>
-        )}
       </div>
     </div>
   )
@@ -483,55 +472,13 @@ function SetupStep({ n, active, done, title, body, cta, ctaTestId, onClick, disa
   )
 }
 
-// Live job log while a background job runs — never blanks the ledger (rendered
-// above the dimmed last result). Mirrors the AgentSessionView log aesthetic.
-function JobStream({ kind, log }: { kind: CoverageJobKind; log: string }) {
-  return (
-    <div
-      data-testid="job-stream"
-      className="shrink-0 border-b px-5 py-2"
-      style={{ borderColor: 'var(--border-default)', background: 'var(--bg-base)' }}
-    >
-      <div style={{ fontSize: 11, color: 'rgb(56, 189, 248)', marginBottom: 4 }}>
-        <span className="cl-pulse" aria-hidden="true">●</span> Generating {kind === 'summary' ? 'PRD summary' : 'coverage'}…
-      </div>
-      <pre
-        style={{
-          maxHeight: 120, overflow: 'auto', margin: 0, fontSize: 11, lineHeight: 1.45,
-          fontFamily: 'var(--font-mono, monospace)', color: 'var(--text-secondary)', whiteSpace: 'pre-wrap',
-        }}
-      >
-        {log || '…'}
-      </pre>
-    </div>
-  )
+// Persisted Coverage sub-tab (R12) — reopening/refresh lands on the last tab.
+const TAB_PREF_KEY = 'cl.coverage.subtab'
+function readTabPref(): string | null {
+  try { return localStorage.getItem(TAB_PREF_KEY) } catch { return null }
 }
-
-// Pending agent-proposed mappings (review-flag flow) — accept writes the tag,
-// reject drops it.
-function ProposedMappingsPanel({ mappings, onResolve }: {
-  mappings: ProposedMapping[]
-  onResolve: (testName: string, accept: boolean) => void
-}) {
-  return (
-    <div data-testid="proposed-mappings" className="shrink-0 border-b px-5 py-2.5" style={{ borderColor: 'var(--border-default)', background: 'var(--bg-surface)' }}>
-      <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 6 }}>
-        {mappings.length} proposed mapping{mappings.length > 1 ? 's' : ''} — review
-      </div>
-      <div className="flex flex-col gap-1.5">
-        {mappings.map((m) => (
-          <div key={m.testName} data-testid={`proposal-${m.testName}`} className="flex items-center gap-2" style={{ fontSize: 12 }}>
-            <strong style={{ color: 'var(--text-primary)' }}>{m.testName}</strong>
-            <span style={{ color: 'var(--text-secondary)' }}>→ {m.requirements.join(', ')}</span>
-            {m.confidence != null && <span style={{ color: 'var(--text-muted)', fontSize: 10 }}>({Math.round(m.confidence * 100)}%)</span>}
-            <span style={{ color: 'var(--text-muted)', fontSize: 10 }}>{m.source}</span>
-            <button type="button" data-testid={`accept-${m.testName}`} onClick={() => onResolve(m.testName, true)} className="cl-button ml-auto px-2 py-0.5" style={{ fontSize: 11 }}>Accept</button>
-            <button type="button" data-testid={`reject-${m.testName}`} onClick={() => onResolve(m.testName, false)} className="cl-button px-2 py-0.5" style={{ fontSize: 11 }}>Reject</button>
-          </div>
-        ))}
-      </div>
-    </div>
-  )
+function writeTabPref(tab: 'ledger' | 'docs'): void {
+  try { localStorage.setItem(TAB_PREF_KEY, tab) } catch { /* ignore */ }
 }
 
 function CoverageHeader({ ledger, gapFilter, onToggleGap }: { ledger: CoverageLedger; gapFilter: GapType | null; onToggleGap: (g: GapType) => void }) {

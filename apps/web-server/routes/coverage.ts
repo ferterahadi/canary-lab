@@ -1,13 +1,11 @@
 import type { FastifyInstance } from 'fastify'
 import {
   FeatureNotFoundError,
-  acceptProposedMapping,
   clearPrdSummary,
   computeFeatureCoverage,
   featureExists,
   listFeatureDocs,
   regeneratePrdSummary,
-  rejectProposedMapping,
 } from '../lib/coverage/service'
 import type { SummarizeAdapter } from '../lib/coverage/prd-summary'
 import { CoverageJobRunStore, type CoverageJobStore } from '../lib/coverage/jobs/store'
@@ -210,7 +208,7 @@ export async function coverageRoutes(app: FastifyInstance, deps: CoverageRouteDe
     return manifest
   })
 
-  app.post<{ Params: { name: string }; Body: { kind?: CoverageJobKind; reviewMode?: boolean; adapter?: SummarizeAdapter } | undefined }>(
+  app.post<{ Params: { name: string }; Body: { kind?: CoverageJobKind; adapter?: SummarizeAdapter } | undefined }>(
     '/api/features/:name/coverage/jobs',
     async (req, reply) => {
       const kind = req.body?.kind
@@ -229,7 +227,6 @@ export async function coverageRoutes(app: FastifyInstance, deps: CoverageRouteDe
             logsDir: deps.logsDir,
             feature: req.params.name,
             kind,
-            reviewMode: req.body?.reviewMode,
             adapter: req.body?.adapter as never,
           },
           { store: jobStore },
@@ -240,48 +237,6 @@ export async function coverageRoutes(app: FastifyInstance, deps: CoverageRouteDe
         if (err instanceof CoverageJobConflictError) {
           reply.code(409)
           return { error: err.message, existingJobId: err.existingJobId }
-        }
-        throw err
-      }
-    },
-  )
-
-  // --- Proposed-mapping accept/reject (R2 surface; review-flag flow). ---
-
-  app.post<{ Params: { name: string; testName: string } }>(
-    '/api/features/:name/coverage/proposals/:testName/accept',
-    async (req, reply) => {
-      try {
-        return acceptProposedMapping({
-          featuresDir: deps.featuresDir,
-          logsDir: deps.logsDir,
-          feature: req.params.name,
-          testName: decodeURIComponent(req.params.testName),
-        })
-      } catch (err) {
-        if (err instanceof FeatureNotFoundError) {
-          reply.code(404)
-          return { error: err.message }
-        }
-        throw err
-      }
-    },
-  )
-
-  app.post<{ Params: { name: string; testName: string } }>(
-    '/api/features/:name/coverage/proposals/:testName/reject',
-    async (req, reply) => {
-      try {
-        return rejectProposedMapping({
-          featuresDir: deps.featuresDir,
-          logsDir: deps.logsDir,
-          feature: req.params.name,
-          testName: decodeURIComponent(req.params.testName),
-        })
-      } catch (err) {
-        if (err instanceof FeatureNotFoundError) {
-          reply.code(404)
-          return { error: err.message }
         }
         throw err
       }

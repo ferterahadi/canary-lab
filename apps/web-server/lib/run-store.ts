@@ -245,6 +245,10 @@ export interface RunSummaryFailedEntry {
   location?: string
   retry?: number
   logFiles?: string[]
+  /** Repo-relative path to `failed/<slug>/error.txt` — the full, untruncated
+   *  error message + code-frame written by log enrichment. Persisted in the
+   *  summary JSON; surfaced as `errorPath` in the heal pointer bundle. */
+  errorFile?: string
 }
 
 export interface RunSummaryRunningStep {

@@ -28,10 +28,11 @@ export interface StartCoverageJobArgs {
   logsDir: string
   feature: string
   kind: CoverageJobKind
-  /** coverage jobs: store proposals for accept/reject instead of writing tags. */
-  reviewMode?: boolean
   adapter?: SummarizeAdapter & AnnotateAdapter
   cwd?: string
+  /** Internal: set when this job was auto-spawned by a finishing summary job so
+   *  the chain doesn't recurse. Not part of the public start contract. */
+  chainedFromJobId?: string
 }
 
 export interface CoverageJobRunnerDeps {
@@ -68,7 +69,7 @@ export function startCoverageJob(args: StartCoverageJobArgs, deps: CoverageJobRu
     jobId,
     feature: args.feature,
     kind: args.kind,
-    ...(args.kind === 'coverage' ? { reviewMode: Boolean(args.reviewMode) } : {}),
+    ...(args.chainedFromJobId ? { chainedFromJobId: args.chainedFromJobId } : {}),
     status: 'running',
     startedAt: now(),
     log: '',
@@ -80,8 +81,8 @@ export function startCoverageJob(args: StartCoverageJobArgs, deps: CoverageJobRu
     store.save(manifest)
   }
 
-  const finishOk = (result: CoverageJobManifest['result']) => {
-    manifest = { ...manifest, status: 'done', endedAt: now(), result }
+  const finishOk = (result: CoverageJobManifest['result'], extra?: Partial<CoverageJobManifest>) => {
+    manifest = { ...manifest, ...extra, status: 'done', endedAt: now(), result }
     store.save(manifest)
   }
   const finishErr = (err: unknown) => {
@@ -99,18 +100,32 @@ export function startCoverageJob(args: StartCoverageJobArgs, deps: CoverageJobRu
           cwd: args.cwd,
           onOutput: append,
         })
-        finishOk({ requirementCount: res.summary.requirements.filter((r) => !r.deprecated).length })
+        // Summary + Coverage are one exercise (R14): on a successful summary,
+        // immediately chain the coverage engine so mappings refresh against the
+        // new requirements with no second click. Single-flight still applies —
+        // if a coverage job is somehow already running, skip the chain quietly.
+        let chainedJobId: string | undefined
+        try {
+          append('\n[chain] summary done — starting coverage engine…\n')
+          const chained = startCoverageJob(
+            { featuresDir: args.featuresDir, logsDir: args.logsDir, feature: args.feature, kind: 'coverage', adapter: args.adapter, cwd: args.cwd, chainedFromJobId: jobId },
+            deps,
+          )
+          chainedJobId = chained.manifest.jobId
+        } catch (chainErr) {
+          append(`[chain] coverage not started: ${chainErr instanceof Error ? chainErr.message : String(chainErr)}\n`)
+        }
+        finishOk({ requirementCount: res.summary.requirements.filter((r) => !r.deprecated).length }, chainedJobId ? { chainedJobId } : undefined)
       } else {
         const res: RunCoverageEngineResult = await runEngine({
           featuresDir: args.featuresDir,
           logsDir: args.logsDir,
           feature: args.feature,
           adapter: args.adapter,
-          reviewMode: args.reviewMode,
           cwd: args.cwd,
           onOutput: append,
         })
-        finishOk({ applied: res.applied.length, proposed: res.proposed.length, reviewMode: Boolean(args.reviewMode) })
+        finishOk({ applied: res.applied.length })
       }
     } catch (err) {
       finishErr(err)

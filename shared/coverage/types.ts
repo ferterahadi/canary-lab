@@ -186,9 +186,10 @@ export interface CoverageTotals {
   orphanTests: number
 }
 
-/** One coverage-engine-proposed test→requirement mapping (the annotate-pass
- *  output). When the review flag is on these await human accept/reject; the
- *  agent only ever proposes a MAPPING, never a test body. */
+/** One coverage-engine test→requirement mapping (the annotate-pass output).
+ *  The engine writes the `covers` tag for each immediately (no review gate); the
+ *  agent only ever proposes a MAPPING, never a test body. Internal to the engine
+ *  + the applied-count surface — not a UI review queue. */
 export interface ProposedMapping {
   testName: string
   file?: string
@@ -212,8 +213,6 @@ export interface CoverageLedger {
   orphanRequirementIds: string[]
   /** Test names with no requirement linkage — the annotate-pass works this set. */
   orphanTestNames: string[]
-  /** Pending agent-proposed mappings awaiting accept/reject (review flag on). */
-  proposedMappings?: ProposedMapping[]
   /** Derived (summary × coverage) state + drift detail (R3). */
   state?: CoverageStateView
   /** True when the live docs hash differs from the summary's stored hash.
@@ -229,10 +228,10 @@ export type CoverageJobKind = 'summary' | 'coverage'
 export type CoverageJobStatus = 'running' | 'done' | 'failed' | 'aborted'
 
 export interface CoverageJobResult {
+  /** summary jobs: active requirement count after the regen. */
   requirementCount?: number
+  /** coverage jobs: number of `covers` tags written this pass. */
   applied?: number
-  proposed?: number
-  reviewMode?: boolean
 }
 
 export interface CoverageJobManifest {
@@ -240,11 +239,20 @@ export interface CoverageJobManifest {
   feature: string
   kind: CoverageJobKind
   status: CoverageJobStatus
-  reviewMode?: boolean
   startedAt: string
   endedAt?: string
-  /** Captured agent/driver output — fed to the AgentSessionView (R6). */
+  /** Captured agent/driver output — streamed into the Generating screen. */
   log: string
+  /** Summary + Coverage are one exercise: a `summary` job auto-starts a follow-on
+   *  `coverage` job on success and records its id here, so the UI can keep
+   *  streaming across both phases without a second click (R14). */
+  chainedJobId?: string
+  /** Set on the chained coverage job, pointing back at the summary job that
+   *  spawned it. */
+  chainedFromJobId?: string
+  /** The agent CLI session backing this job, when one was pinned — lets the
+   *  Generating screen mount the structured AgentSessionView (R17). */
+  sessionRef?: { agent: 'claude' | 'codex'; sessionId: string }
   result?: CoverageJobResult
   error?: string
 }
