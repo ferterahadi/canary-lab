@@ -14,24 +14,24 @@ const feature: FeatureConfig = {
   envs: ['local'],
   featureDir: '/work/features/cns',
   repos: [{
-    name: 'mighty-cns',
-    localPath: '~/mighty-cns',
+    name: 'my-backend',
+    localPath: '~/my-backend',
     startCommands: ['yarn start:all:dev', { command: 'yarn worker', name: 'worker' }],
   }],
 }
 
 describe('buildPortifyPrompt', () => {
   it('names the feature, lists repos with their worktree edit path, and the config path', () => {
-    const prompt = buildPortifyPrompt(feature, [{ name: 'mighty-cns', editPath: '/wt/mighty-cns' }])
+    const prompt = buildPortifyPrompt(feature, [{ name: 'my-backend', editPath: '/wt/my-backend' }])
     expect(prompt).toContain('"cns"')
-    expect(prompt).toContain('edit source in: /wt/mighty-cns')
+    expect(prompt).toContain('edit source in: /wt/my-backend')
     expect(prompt).toContain('/work/features/cns/feature.config.cjs')
     expect(prompt).toContain('yarn start:all:dev')
     expect(prompt).toContain('${port.<slot>}')
   })
 
   it('instructs an exhaustive scan covering non-HTTP listeners', () => {
-    const prompt = buildPortifyPrompt(feature, [{ name: 'mighty-cns', editPath: '/wt/mighty-cns' }])
+    const prompt = buildPortifyPrompt(feature, [{ name: 'my-backend', editPath: '/wt/my-backend' }])
     expect(prompt).toContain('Scan EXHAUSTIVELY')
     for (const kind of ['gRPC', 'WebSocket', 'TCP', 'RabbitMQ', 'Kafka']) {
       expect(prompt).toContain(kind)
@@ -40,7 +40,7 @@ describe('buildPortifyPrompt', () => {
 
   it('falls back to the canonical path when no edit target is given', () => {
     const prompt = buildPortifyPrompt(feature, [])
-    expect(prompt).toContain('edit source in: ~/mighty-cns')
+    expect(prompt).toContain('edit source in: ~/my-backend')
   })
 
   it('handles a repo with no start commands', () => {

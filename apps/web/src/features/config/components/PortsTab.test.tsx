@@ -73,7 +73,7 @@ describe('PortsTab', () => {
     })
 
     // Service name + the command the slots attach to are both shown.
-    expect(container.textContent).toContain('mighty-cns')
+    expect(container.textContent).toContain('my-backend')
     expect(container.textContent).toContain('yarn start')
     // The read-only injection token is rendered for the slot.
     expect(container.textContent).toContain('${port.api}')
@@ -192,8 +192,8 @@ function docWithPorts(): ParsedConfigDoc {
         envs: ['local'],
         repos: [
           {
-            name: 'mighty-cns',
-            localPath: '~/Documents/mighty-cns',
+            name: 'my-backend',
+            localPath: '~/Documents/my-backend',
             startCommands: [
               { command: 'yarn start', ports: [{ name: 'api', env: 'PORT' }] },
             ],

@@ -329,7 +329,7 @@ export function writeFullDiffPatch(
 //
 //   ## Iteration 1 — 2026-04-22T01:20:11Z
 //
-//   - feature: mpass_oauth
+//   - feature: shop_oauth
 //   - hypothesis: refresh_token missing from metadata
 //   - fix.file: /path/to/a.java
 //   - fix.description: Added field.

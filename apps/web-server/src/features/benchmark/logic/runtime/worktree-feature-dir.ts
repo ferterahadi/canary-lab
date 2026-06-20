@@ -12,7 +12,7 @@ import path from 'path'
  *    directory that *is* the repo. Worktreeing the repo brings the harness
  *    along, so the feature dir maps into the worktree.
  *
- *  - **External** (e.g. `mighty-cns`): `featureDir` is a separate directory
+ *  - **External** (e.g. `my-backend`): `featureDir` is a separate directory
  *    that merely points `repos[].localPath` at another checkout. The harness is
  *    NOT inside the repo, so it is never part of the worktree — the canonical
  *    feature dir must be kept, exactly as a non-benchmark `canary-lab run` uses

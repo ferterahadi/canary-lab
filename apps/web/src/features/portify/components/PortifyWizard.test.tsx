@@ -252,7 +252,7 @@ describe('PortifyWizard', () => {
       verification: {
         ok: false,
         instances: [],
-        failureDetail: "boot failed: gateway — Can't reach database server at 34.87.54.225:3306",
+        failureDetail: "boot failed: gateway — Can't reach database server at 10.0.1.42:3306",
         notPortFixable: true,
       },
     }))

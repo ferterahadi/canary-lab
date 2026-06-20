@@ -314,12 +314,12 @@ describe('benchmarkRoutes', () => {
       const app = await buildApp({
         logsDir: tmp,
         // featureDir is an EXTERNAL dir; the sabotage commit lives in repoPath.
-        store: fakeStore({ get: () => manifest({ sabotageSha: 'sha', featureDir: '/workspace/features/cns', repoPath: '/repos/mighty-cns' }) }),
+        store: fakeStore({ get: () => manifest({ sabotageSha: 'sha', featureDir: '/workspace/features/cns', repoPath: '/repos/my-backend' }) }),
       })
       const res = await app.inject(openBody('frozen'))
       expect(res.statusCode).toBe(200)
       expect(vi.mocked(addWorktree)).toHaveBeenCalledWith(
-        expect.objectContaining({ branch: 'sha', localPath: '/repos/mighty-cns' }),
+        expect.objectContaining({ branch: 'sha', localPath: '/repos/my-backend' }),
       )
       fs.rmSync(tmp, { recursive: true, force: true })
       await app.close()
