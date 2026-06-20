@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
-import * as api from '../../../../api/client'
-import type { DraftRecord } from '../../../../api/types'
+import * as api from '../../../../shared/api/client'
+import type { DraftRecord } from '../../../../shared/api/types'
 import { AgentSessionView } from '../../../agent-sessions/components/AgentSessionView'
 import { ExternalDraftAgentPanel } from '../../../runs/components/ExternalDraftAgentPanel'
-import { useTheme } from '../../../../lib/theme'
+import { useTheme } from '../../../../shared/lib/theme'
 
 interface Props {
   draft: DraftRecord

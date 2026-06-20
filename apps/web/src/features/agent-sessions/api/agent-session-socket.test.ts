@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { connectAgentSessionStream } from './agent-session-socket'
-import type { AgentSessionEvent } from '../../../api/client'
+import type { AgentSessionEvent } from '../../../shared/api/client'
 
 // Tiny fake WebSocket that records the url it was constructed with and
 // exposes hooks for tests to drive `onmessage` / `onclose` / `onerror`.

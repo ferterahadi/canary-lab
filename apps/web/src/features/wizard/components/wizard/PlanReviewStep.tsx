@@ -15,7 +15,7 @@ import {
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import type { DraftRecord, PlanStep } from '../../../../api/types'
+import type { DraftRecord, PlanStep } from '../../../../shared/api/types'
 import { AgentSessionView } from '../../../agent-sessions/components/AgentSessionView'
 import { ExternalDraftAgentPanel } from '../../../runs/components/ExternalDraftAgentPanel'
 import {

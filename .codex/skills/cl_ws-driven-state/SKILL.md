@@ -17,9 +17,9 @@ Forgetting this is the primary cause of "I had to refresh to see X."
 ```
 Server mutation (route / job runner / MCP tool)
   → publishWorkspaceEvent(deps.workspaceEvents, { type: '...' })
-  → WorkspaceEventBus  (apps/web-server/src/features/orchestration/logic/workspace-events.ts)
+  → WorkspaceEventBus  (apps/web-server/src/shared/workspace-events.ts)
   → ws/workspace-stream.ts  broadcasts JSON to every open client socket
-  → apps/web/src/api/workspace-socket.ts  parses the frame
+  → apps/web/src/features/runs/api/workspace-socket.ts  parses the frame
   → App.tsx  onEvent handler  dispatches to state setter
   → component re-renders with fresh REST data
 ```
@@ -64,8 +64,8 @@ Before closing a PR for any route, job runner, or MCP tool that writes to disk:
    the catch — a failed write should not signal a change).
 
 5. **Add the type to both sides** if it's new:
-   - `apps/web-server/src/features/orchestration/logic/workspace-events.ts` — `WorkspaceEvent` union
-   - `apps/web/src/api/workspace-socket.ts` — client `WorkspaceEvent` union
+   - `apps/web-server/src/shared/workspace-events.ts` — `WorkspaceEvent` union
+   - `apps/web/src/features/runs/api/workspace-socket.ts` — client `WorkspaceEvent` union
 
 6. **Handle it in `App.tsx`** — add a branch in the `onEvent` handler:
    - For feature-list changes: call `refreshFeatures()`

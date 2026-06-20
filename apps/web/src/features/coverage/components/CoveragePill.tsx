@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
-import * as api from '../../../api/client'
-import type { CoverageJobIndexEntry } from '../../../api/types'
-import { StatusDot } from '../../../components/config/atoms'
+import * as api from '../../../shared/api/client'
+import type { CoverageJobIndexEntry } from '../../../shared/api/types'
+import { StatusDot } from '../../config/components/atoms'
 
 // Coverage pill (R7): an ALWAYS-VISIBLE launcher. Idle, it's a neutral "Coverage"
 // launcher; while a coverage/summary job runs it takes the in-flight treatment

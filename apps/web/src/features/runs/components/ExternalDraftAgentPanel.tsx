@@ -1,4 +1,4 @@
-import type { DraftRecord, ExternalDraftStage, ExternalHealClientKind } from '../../../api/types'
+import type { DraftRecord, ExternalDraftStage, ExternalHealClientKind } from '../../../shared/api/types'
 
 interface Props {
   draft: DraftRecord

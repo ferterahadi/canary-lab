@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { SpecReviewStep } from './SpecReviewStep'
-import type { DraftRecord } from '../../../../api/types'
+import type { DraftRecord } from '../../../../shared/api/types'
 
 function draft(overrides: Partial<DraftRecord> = {}): DraftRecord {
   return {

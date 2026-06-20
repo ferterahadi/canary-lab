@@ -7,7 +7,7 @@ import type {
   PlaywrightScreenshotMode,
   RepoBranchSnapshot,
   ServiceManifestEntry,
-} from '../../../api/types'
+} from '../../../shared/api/types'
 
 export interface PlaybackTest {
   name: string

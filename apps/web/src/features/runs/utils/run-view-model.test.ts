@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { RunDetail, RunIndexEntry, RunStatus, TransientAction } from '../../../api/types'
+import type { RunDetail, RunIndexEntry, RunStatus, TransientAction } from '../../../shared/api/types'
 import { deriveRunViewModel } from './run-view-model'
 
 function detail(overrides: Partial<RunDetail['manifest']> = {}): RunDetail {
@@ -131,7 +131,7 @@ describe('deriveRunViewModel', () => {
           headline: 'Restart plan ready',
           updatedAt: '2026-05-08T00:00:05.000Z',
           restartPlan: {
-            restarted: ['mighty-cns gateway stack'],
+            restarted: ['my-backend gateway stack'],
             kept: ['ngrok tunnel'],
             startedBecauseMissing: ['ngrok tunnel'],
           },

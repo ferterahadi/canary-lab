@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
-import * as api from '../../../../api/client'
+import * as api from '../../../../shared/api/client'
 import type {
   DraftPrdDocument,
   DraftRepo,
   Feature,
-} from '../../../../api/types'
+} from '../../../../shared/api/types'
 import { slugifyFeatureName, validateConfigure } from '../../utils/wizard-validation'
-import { FolderPicker } from '../../../../components/config/FolderPicker'
+import { FolderPicker } from '../../../config/components/FolderPicker'
 
 export interface ConfigureSubmit {
   prdText: string

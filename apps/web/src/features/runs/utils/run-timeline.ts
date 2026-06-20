@@ -1,6 +1,6 @@
-import type { AuditEntry, ExternalHealClientKind, RunLifecycleEvent } from '../../../api/types'
+import type { AuditEntry, ExternalHealClientKind, RunLifecycleEvent } from '../../../shared/api/types'
 import type { RunLifecyclePhase, RunLifecycleSeverity } from '../../../../../../shared/run-state'
-import { formatDuration } from '../../../lib/format'
+import { formatDuration } from '../../../shared/lib/format'
 
 export type TimelineRowSource = 'engine' | 'external'
 

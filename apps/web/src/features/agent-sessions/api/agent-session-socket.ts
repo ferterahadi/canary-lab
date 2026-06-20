@@ -1,4 +1,4 @@
-import type { AgentSessionEvent } from '../../../api/client'
+import type { AgentSessionEvent } from '../../../shared/api/client'
 
 // WebSocket wrapper for live structured agent-session events. Source is
 // either a run id or a (draftId, stage) pair — the server routes are

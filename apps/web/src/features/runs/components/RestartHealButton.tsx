@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import * as api from '../../../api/client'
-import { ApiError } from '../../../api/client'
+import * as api from '../../../shared/api/client'
+import { ApiError } from '../../../shared/api/client'
 
 // Shared terminal-run restart action. It keeps the same run id and asks the
 // server to retest failed, skipped, and pending tests before any full-suite

@@ -3,17 +3,17 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { PortifyIndexEntry } from '../../../api/client'
+import type { PortifyIndexEntry } from '../../../shared/api/client'
 
 const workflows: PortifyIndexEntry[] = []
 vi.mock('../state/PortifyContext', () => ({
   usePortify: () => ({ workflows }),
 }))
-vi.mock('../../../api/client', () => ({
+vi.mock('../../../shared/api/client', () => ({
   removePortify: vi.fn(async () => ({ workflowId: 'w1', removed: true as const })),
 }))
 
-import * as api from '../../../api/client'
+import * as api from '../../../shared/api/client'
 import { PortifyHistoryList } from './PortifyHistoryList'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true

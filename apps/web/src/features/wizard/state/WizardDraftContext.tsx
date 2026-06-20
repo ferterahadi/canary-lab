@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
-import * as api from '../../../api/client'
+import * as api from '../../../shared/api/client'
 import { connectWorkspaceEvents } from '../../runs/api/workspace-socket'
-import type { CreateDraftPayload, DraftRecord, PlanStep } from '../../../api/types'
+import type { CreateDraftPayload, DraftRecord, PlanStep } from '../../../shared/api/types'
 
 interface WizardDraftContextValue {
   drafts: DraftRecord[]

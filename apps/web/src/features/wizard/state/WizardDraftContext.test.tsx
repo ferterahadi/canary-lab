@@ -3,14 +3,14 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import * as api from '../../../api/client'
-import type { DraftRecord } from '../../../api/types'
+import * as api from '../../../shared/api/client'
+import type { DraftRecord } from '../../../shared/api/types'
 import { WizardDraftProvider, useWizardDrafts } from './WizardDraftContext'
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
-vi.mock('../../../api/client', async () => {
-  const actual = await vi.importActual<typeof import('../../../api/client')>('../../../api/client')
+vi.mock('../../../shared/api/client', async () => {
+  const actual = await vi.importActual<typeof import('../../../shared/api/client')>('../../../shared/api/client')
   return {
     ...actual,
     listDrafts: vi.fn(),

@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import type { RepoCollisionChoice } from '../../../api/client'
+import type { RepoCollisionChoice } from '../../../shared/api/client'
 
 interface Props {
   info: RepoCollisionChoice
