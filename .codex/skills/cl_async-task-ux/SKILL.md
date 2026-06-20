@@ -15,8 +15,8 @@ don't invent a new lifecycle.
 
 | Subsystem | Store | Runner / lifecycle |
 | --- | --- | --- |
-| Verified Coverage jobs | `apps/web-server/src/features/coverage-verification/logic/coverage/jobs/store.ts` | `…/jobs/runner.ts` (`startCoverageJob`) |
-| Port-ification | `apps/web-server/src/features/orchestration/logic/runtime/portify/store.ts` | `…/portify/*` + `src/features/orchestration/routes/portify.ts` |
+| Verified Coverage jobs | `apps/web-server/src/features/coverage/logic/coverage/jobs/store.ts` | `…/jobs/runner.ts` (`startCoverageJob`) |
+| Port-ification | `apps/web-server/src/features/portify/logic/runtime/store.ts` | `…/portify/*` + `src/features/portify/routes/portify.ts` |
 
 Coverage jobs are the smallest complete example — read those two files first.
 
