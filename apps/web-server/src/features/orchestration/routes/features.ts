@@ -5,7 +5,7 @@ import { loadFeatures, listSpecFiles } from '../logic/feature-loader'
 import { extractTestsFromSource, type ExtractedTest } from '../logic/ast-extractor'
 import { listPlaywrightTests, type PlaywrightListSpawner } from '../logic/playwright-list'
 import { parseDotenv } from '../logic/dotenv-edit'
-import { overlayExists as portifyOverlayExists } from '../logic/runtime/portify/overlay'
+import { overlayExists as portifyOverlayExists } from '../../portify/logic/runtime/overlay'
 import {
   getEnvSetsDir,
   loadConfig,

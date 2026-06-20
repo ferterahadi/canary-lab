@@ -83,8 +83,8 @@ import {
   deriveRunActionAvailability,
 } from '../../../shared/run-state'
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../src/features/orchestration/logic/workspace-events'
-import type { PortifyManifest } from '../src/features/orchestration/logic/runtime/portify/types'
-import { overlayExists as portifyOverlayExists } from '../src/features/orchestration/logic/runtime/portify/overlay'
+import type { PortifyManifest } from '../src/features/portify/logic/runtime/types'
+import { overlayExists as portifyOverlayExists } from '../src/features/portify/logic/runtime/overlay'
 
 // Every Canary Lab MCP tool is a thin wrapper around an existing internal
 // helper or REST handler. The translation pattern: validate input via zod,

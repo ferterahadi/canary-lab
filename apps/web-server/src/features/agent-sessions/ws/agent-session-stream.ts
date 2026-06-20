@@ -16,8 +16,8 @@ import { tailAgentSession } from '../../agent-sessions/logic/agent-session-taile
 import { resolveDraftStageSessionRef } from '../../evaluation-artifacts/logic/draft-agent-session'
 import { readDraft, paths as draftPaths } from '../../evaluation-artifacts/logic/draft-store'
 import { runDirFor, buildRunPaths } from '../../orchestration/logic/runtime/run-paths'
-import { benchmarkDir } from '../../orchestration/logic/runtime/benchmark/paths'
-import { portifyDir } from '../../orchestration/logic/runtime/portify/paths'
+import { benchmarkDir } from '../../benchmark/logic/runtime/paths'
+import { portifyDir } from '../../portify/logic/runtime/paths'
 import { CoverageJobRunStore } from '../../coverage/logic/coverage/jobs/store'
 import type { RunStore } from '../../orchestration/logic/run-store'
 

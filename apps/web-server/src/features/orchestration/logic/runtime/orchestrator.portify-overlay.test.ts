@@ -9,7 +9,7 @@ import type { FeatureConfig } from '../../../../../../../shared/launcher/types'
 import { runDirFor } from './run-paths'
 import { runGit, diffContentSinceSnapshot } from '../git-repo'
 import { addWorktree, type WorktreeHandle } from './repo-worktree'
-import { writeOverlay, captureTouchedFiles, overlayDir } from './portify/overlay'
+import { writeOverlay, captureTouchedFiles, overlayDir } from '../../../portify/logic/runtime/overlay'
 
 // Phase C: the run-time apply-before-boot / reverse-at-teardown hook. These
 // drive a REAL git repo + worktree + saved overlay through the orchestrator's
