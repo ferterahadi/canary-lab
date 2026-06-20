@@ -7,11 +7,17 @@ module map, run lifecycle, and internal mechanisms, see
 
 ## Code Orientation
 
-- `server.ts`: local Fastify app, UI assets, routes, and WebSocket streams
-- `orchestrator.ts`: service startup, health checks, Playwright runs, manifests, envset cleanup, and heal-loop signals
-- `run-store.ts`: per-run manifests, summaries, Playwright events, and artifacts for the UI
-- `env-switcher/switch.ts`: low-level env-file apply and revert logic
-- `feature-support/`: public import surface for generated projects
+Both apps are organized by feature, not by layer. `apps/web-server/src/features/` and
+`apps/web/src/features/` share one taxonomy — `runs`, `agent-sessions`, `coverage`,
+`wizard`, `evaluation`, `config`, `portify`, `benchmark` (web also has UI-only `logs`)
+— so a feature traces client↔server. Cross-feature infra lives in each app's
+`src/shared/`. Key entry points:
+
+- `apps/web-server/server.ts`: local Fastify app, UI assets, routes, and WebSocket streams
+- `apps/web-server/src/features/runs/logic/runtime/orchestrator.ts`: service startup, health checks, Playwright runs, manifests, envset cleanup, and heal-loop signals
+- `apps/web-server/src/features/runs/logic/run-store.ts`: per-run manifests, summaries, Playwright events, and artifacts for the UI
+- `apps/web-server/src/features/runs/logic/runtime/env-switcher/switch.ts`: low-level env-file apply and revert logic
+- `feature-support/`: public import surface for generated projects (`shared/` exposed via `package.json` exports)
 
 Everything under `apps/`, `scripts/`, and `shared/` is internal unless exposed through `canary-lab/feature-support/...`.
 
