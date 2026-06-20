@@ -2,7 +2,7 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { resolveDraftStageSessionRef } from '../../evaluation-artifacts/logic/draft-agent-session'
+import { resolveDraftStageSessionRef } from '../../wizard/logic/draft-agent-session'
 
 let tmpDir: string
 let draftDir: string

@@ -11,10 +11,10 @@ import {
   resolveManifestSessionRef,
   selectAgentSessionRef,
 } from '../../agent-sessions/logic/agent-session-log'
-import { readEvaluationExportTask } from '../../evaluation-artifacts/logic/evaluation-export-store'
+import { readEvaluationExportTask } from '../../evaluation/logic/evaluation-export-store'
 import { tailAgentSession } from '../../agent-sessions/logic/agent-session-tailer'
-import { resolveDraftStageSessionRef } from '../../evaluation-artifacts/logic/draft-agent-session'
-import { readDraft, paths as draftPaths } from '../../evaluation-artifacts/logic/draft-store'
+import { resolveDraftStageSessionRef } from '../../wizard/logic/draft-agent-session'
+import { readDraft, paths as draftPaths } from '../../wizard/logic/draft-store'
 import { runDirFor, buildRunPaths } from '../../runs/logic/runtime/run-paths'
 import { benchmarkDir } from '../../benchmark/logic/runtime/paths'
 import { portifyDir } from '../../portify/logic/runtime/paths'

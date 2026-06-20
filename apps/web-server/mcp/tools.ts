@@ -55,7 +55,7 @@ import {
   writeDraft,
   type DraftRecord,
   type ExternalDraftStage,
-} from '../src/features/evaluation-artifacts/logic/draft-store'
+} from '../src/features/wizard/logic/draft-store'
 import {
   appendEvaluationExportLog,
   createEvaluationExportTask,
@@ -67,8 +67,8 @@ import {
   readEvaluationExportZip,
   writeEvaluationExportZip,
   type EvaluationExportTaskRecord,
-} from '../src/features/evaluation-artifacts/logic/evaluation-export-store'
-import { buildEvaluationExportArchive } from '../src/features/evaluation-artifacts/logic/evaluation-export-archive'
+} from '../src/features/evaluation/logic/evaluation-export-store'
+import { buildEvaluationExportArchive } from '../src/features/evaluation/logic/evaluation-export-archive'
 import {
   applyEvaluationTextSlotRewrite,
   buildTestReviewPacket,
@@ -76,7 +76,7 @@ import {
   evaluationTextSlots,
   normalizeEvaluationRewrite,
   type EvaluationRewrite,
-} from '../src/features/evaluation-artifacts/logic/test-review-export'
+} from '../src/features/evaluation/logic/test-review-export'
 import {
   isActiveRunStatus,
   isTerminalRunStatus,

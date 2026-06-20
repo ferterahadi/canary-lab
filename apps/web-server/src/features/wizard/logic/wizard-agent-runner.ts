@@ -6,7 +6,7 @@ import type {
 import {
   WizardAgentCancelledError,
   type WizardAgentRegistry,
-} from './wizard-agent-registry'
+} from '../../wizard/logic/wizard-agent-registry'
 import {
   buildWizardArgs,
   buildPlanPrompt,

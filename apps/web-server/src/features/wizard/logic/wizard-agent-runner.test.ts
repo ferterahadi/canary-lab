@@ -5,7 +5,7 @@ import { EventEmitter } from 'events'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ChildProcess } from 'child_process'
 import { spawnPlanAgent, spawnSpecAgent } from './wizard-agent-runner'
-import { WizardAgentCancelledError, WizardAgentRegistry } from './wizard-agent-registry'
+import { WizardAgentCancelledError, WizardAgentRegistry } from '../../wizard/logic/wizard-agent-registry'
 
 class FakeChild extends EventEmitter {
   pid = 4242

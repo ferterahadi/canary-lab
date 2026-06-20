@@ -10,7 +10,7 @@ import type { AgentSessionRef } from '../../agent-sessions/logic/agent-session-l
 // log file no longer exists by the time the handler stats it).
 let resolveSessionRefOverride: (() => AgentSessionRef | null) | null = null
 vi.mock('../logic/draft-agent-session', async () => {
-  const actual = await vi.importActual<typeof import('../logic/draft-agent-session')>('../logic/draft-agent-session')
+  const actual = await vi.importActual<typeof import('../../wizard/logic/draft-agent-session')>('../logic/draft-agent-session')
   return {
     ...actual,
     resolveDraftStageSessionRef: (input: Parameters<typeof actual.resolveDraftStageSessionRef>[0]) => {
@@ -33,7 +33,7 @@ let applyToProjectOverride: (() => { ok: false; error: string; details?: string;
 // so the resolver never actually emits outside-draft from route input).
 let resolveDraftFileOverride: (() => { ok: false; reason: 'invalid-path' | 'outside-draft' | 'not-found' }) | null = null
 vi.mock('../logic/draft-store', async () => {
-  const actual = await vi.importActual<typeof import('../logic/draft-store')>('../logic/draft-store')
+  const actual = await vi.importActual<typeof import('../../wizard/logic/draft-store')>('../logic/draft-store')
   return {
     ...actual,
     applyToProject: (input: Parameters<typeof actual.applyToProject>[0]) => {
@@ -47,7 +47,7 @@ vi.mock('../logic/draft-store', async () => {
   }
 })
 vi.mock('../logic/draft-file-resolver', async () => {
-  const actual = await vi.importActual<typeof import('../logic/draft-file-resolver')>('../logic/draft-file-resolver')
+  const actual = await vi.importActual<typeof import('../../wizard/logic/draft-file-resolver')>('../logic/draft-file-resolver')
   return {
     ...actual,
     resolveDraftFile: (logsDir: string, draftId: string, requestPath: string) => {
@@ -60,7 +60,7 @@ vi.mock('../logic/draft-file-resolver', async () => {
     },
   }
 })
-import { paths as draftPaths, readDraft, writeDraft } from '../logic/draft-store'
+import { paths as draftPaths, readDraft, writeDraft } from '../../wizard/logic/draft-store'
 import {
   runPlanStage,
   runSpecStage,
@@ -71,7 +71,7 @@ import {
 import {
   STAGE1_DIFF_TEMPLATE,
   STAGE1_TEMPLATE,
-} from '../logic/wizard-agent-spawner'
+} from '../../wizard/logic/wizard-agent-spawner'
 import { buildFeatureScaffold, canonicalScaffoldPaths, type GeneratedFeatureFile } from '../../../../../../shared/feature-scaffold'
 
 let logsDir: string
@@ -1869,7 +1869,7 @@ describe('cancellation races inside pipeline drivers', () => {
 async function seedPlanningDraft(deps: TestsDraftRouteDeps): Promise<string> {
   // Build a planning draft without firing runPlanStage (we drive it directly).
   const id = `seed-plan-${++counter}`
-  const { createDraft, transition } = await import('../logic/draft-store')
+  const { createDraft, transition } = await import('../../wizard/logic/draft-store')
   createDraft(logsDir, { draftId: id, prdText: 'seed', repos: [{ name: 'app', localPath: '/p' }] })
   transition(logsDir, id, 'planning')
   void deps
@@ -1878,7 +1878,7 @@ async function seedPlanningDraft(deps: TestsDraftRouteDeps): Promise<string> {
 
 async function seedGeneratingDraft(deps: TestsDraftRouteDeps): Promise<string> {
   const id = `seed-gen-${++counter}`
-  const { createDraft, transition } = await import('../logic/draft-store')
+  const { createDraft, transition } = await import('../../wizard/logic/draft-store')
   createDraft(logsDir, { draftId: id, prdText: 'seed', repos: [{ name: 'app', localPath: '/p' }] })
   transition(logsDir, id, 'planning')
   transition(logsDir, id, 'plan-ready', { plan: [{ step: 'x', actions: ['a'], expectedOutcome: 'y' }] })
@@ -1892,7 +1892,7 @@ describe('pipeline-driver guard branches', () => {
     const spawnSpecAgent = vi.fn(async () => '<file path="feature.config.cjs">x</file>')
     const deps = makeDeps({ spawnSpecAgent })
     const id = `not-generating-${++counter}`
-    const { createDraft, transition } = await import('../logic/draft-store')
+    const { createDraft, transition } = await import('../../wizard/logic/draft-store')
     createDraft(logsDir, { draftId: id, prdText: 'x', repos: [{ name: 'a', localPath: '/' }] })
     transition(logsDir, id, 'planning')
     transition(logsDir, id, 'plan-ready', { plan: [] })
@@ -1904,7 +1904,7 @@ describe('pipeline-driver guard branches', () => {
 
   it('runPlanStage patchDraft bails when the draft is deleted mid-flight', async () => {
     const id = `deleted-mid-${++counter}`
-    const { createDraft, transition, deleteDraft } = await import('../logic/draft-store')
+    const { createDraft, transition, deleteDraft } = await import('../../wizard/logic/draft-store')
     const deps = makeDeps({
       // pickAgent runs after the initial readDraft but before patchDraft; delete
       // the draft here so patchDraft's own readDraft returns null.
@@ -1987,7 +1987,7 @@ describe('helper-level branches', () => {
       },
     })
     const id = `no-repo-${++counter}`
-    const { createDraft, transition } = await import('../logic/draft-store')
+    const { createDraft, transition } = await import('../../wizard/logic/draft-store')
     createDraft(logsDir, { draftId: id, prdText: '!!!', repos: [{ name: 'app', localPath: '/p' }] })
     transition(logsDir, id, 'planning')
     transition(logsDir, id, 'plan-ready', { plan: [] })
@@ -2032,7 +2032,7 @@ describe('helper-level branches', () => {
     const deps = makeDeps()
     const app = await makeApp(deps)
     const id = `spec-ready-${++counter}`
-    const { createDraft, transition } = await import('../logic/draft-store')
+    const { createDraft, transition } = await import('../../wizard/logic/draft-store')
     createDraft(logsDir, {
       draftId: id,
       prdText: 'X',
@@ -2077,7 +2077,7 @@ describe('helper-level branches', () => {
     const deps = makeDeps()
     const app = await makeApp(deps)
     const id = `no-generated-${++counter}`
-    const { createDraft, transition } = await import('../logic/draft-store')
+    const { createDraft, transition } = await import('../../wizard/logic/draft-store')
     createDraft(logsDir, {
       draftId: id,
       prdText: 'X',
