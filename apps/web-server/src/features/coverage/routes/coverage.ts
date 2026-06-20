@@ -11,16 +11,16 @@ import type { SummarizeAdapter } from '../../coverage/logic/coverage/prd-summary
 import { CoverageJobRunStore, type CoverageJobStore } from '../../coverage/logic/coverage/jobs/store'
 import { startCoverageJob, CoverageJobConflictError } from '../../coverage/logic/coverage/jobs/runner'
 import type { CoverageJobKind } from '../../coverage/logic/coverage/jobs/types'
-import { writeFeatureDoc, deleteFeatureDoc } from '../../orchestration/logic/feature-authoring'
+import { writeFeatureDoc, deleteFeatureDoc } from '../../config/logic/feature-authoring'
 import { extractPrdDocument } from '../../coverage/logic/prd-document-extractor'
-import { loadFeatures } from '../../orchestration/logic/feature-loader'
+import { loadFeatures } from '../../config/logic/feature-loader'
 import {
   findClaudeLogBySessionId,
   loadAgentSession,
   locateCodexSessionLog,
   type AgentSessionRef,
 } from '../../agent-sessions/logic/agent-session-log'
-import type { WorkspaceEventPublisher } from '../../orchestration/logic/workspace-events'
+import type { WorkspaceEventPublisher } from '../../../shared/workspace-events'
 
 export interface CoverageRouteDeps {
   featuresDir: string

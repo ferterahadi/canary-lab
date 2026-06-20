@@ -1,6 +1,6 @@
 import fs from 'fs'
-import { runGit, diffContentSinceSnapshot } from '../../../orchestration/logic/git-repo'
-import { addWorktree, removeWorktree, linkNodeModules, type WorktreeHandle } from '../../../orchestration/logic/runtime/repo-worktree'
+import { runGit, diffContentSinceSnapshot } from '../../../../shared/git-repo'
+import { addWorktree, removeWorktree, linkNodeModules, type WorktreeHandle } from '../../../runs/logic/runtime/repo-worktree'
 
 // Branch + worktree + diff + overlay-apply/reverse mechanics for the
 // port-ification workflow. The agent edits on a dedicated scratch branch in an

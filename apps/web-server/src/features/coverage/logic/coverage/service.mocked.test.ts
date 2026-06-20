@@ -6,8 +6,8 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 
-vi.mock('../../../orchestration/logic/ast-extractor', async (importOriginal) => {
-  const original = await importOriginal<typeof import('../../../orchestration/logic/ast-extractor')>()
+vi.mock('../../../config/logic/ast-extractor', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../../../config/logic/ast-extractor')>()
   return {
     ...original,
     extractTestsFromSource: vi.fn(original.extractTestsFromSource),
@@ -15,7 +15,7 @@ vi.mock('../../../orchestration/logic/ast-extractor', async (importOriginal) => 
 })
 
 import { computeFeatureCoverage, runCoverageEngine, regeneratePrdSummary } from './service'
-import { extractTestsFromSource } from '../../../orchestration/logic/ast-extractor'
+import { extractTestsFromSource } from '../../../config/logic/ast-extractor'
 
 let tmpDir: string
 let featuresDir: string

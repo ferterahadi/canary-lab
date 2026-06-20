@@ -1,7 +1,7 @@
 import fs from 'fs'
 import path from 'path'
-import { loadFeatures, listSpecFiles } from '../../../orchestration/logic/feature-loader'
-import { extractTestsFromSource } from '../../../orchestration/logic/ast-extractor'
+import { loadFeatures, listSpecFiles } from '../../../config/logic/feature-loader'
+import { extractTestsFromSource } from '../../../config/logic/ast-extractor'
 import type {
   CoverageLedger,
   PrdSummary,

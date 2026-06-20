@@ -10,13 +10,13 @@ import type {
   StartBenchmarkResult,
 } from '../../benchmark/logic/runtime/types'
 import { benchmarkDir } from '../../benchmark/logic/runtime/paths'
-import { addWorktree, removeWorktree } from '../../orchestration/logic/runtime/repo-worktree'
-import { listWorktrees } from '../../orchestration/logic/runtime/worktree-inventory'
-import { loadFeatures } from '../../orchestration/logic/feature-loader'
-import { computePortPreflight } from '../../orchestration/logic/runtime/port-preflight'
-import { getGitRoot, resolveRepoPath } from '../../orchestration/logic/git-repo'
-import { launchEditorDir } from '../../orchestration/logic/editor-launch'
-import { loadProjectConfig, type EditorChoice } from '../../orchestration/logic/runtime/launcher/project-config'
+import { addWorktree, removeWorktree } from '../../runs/logic/runtime/repo-worktree'
+import { listWorktrees } from '../../runs/logic/runtime/worktree-inventory'
+import { loadFeatures } from '../../config/logic/feature-loader'
+import { computePortPreflight } from '../../runs/logic/runtime/port-preflight'
+import { getGitRoot, resolveRepoPath } from '../../../shared/git-repo'
+import { launchEditorDir } from '../../../shared/editor-launch'
+import { loadProjectConfig, type EditorChoice } from '../../runs/logic/runtime/launcher/project-config'
 
 // REST surface for benchmarks, mirroring routes/runs.ts. Reads go through the
 // injected BenchmarkStore; the start path delegates to the injected

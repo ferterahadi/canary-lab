@@ -2,8 +2,8 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { writeRunsIndex } from '../../../orchestration/logic/runtime/manifest'
-import { buildRunPaths, runDirFor } from '../../../orchestration/logic/runtime/run-paths'
+import { writeRunsIndex } from '../../../runs/logic/runtime/manifest'
+import { buildRunPaths, runDirFor } from '../../../runs/logic/runtime/run-paths'
 import { computeFeatureCoverage } from './service'
 
 // Pins the shipped `example_todo_api` sample: its annotations + PRD summary must

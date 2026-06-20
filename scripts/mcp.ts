@@ -15,7 +15,7 @@ import {
   normalizeCanaryLabMcpProfile,
   type CanaryLabMcpProfile,
 } from '../apps/web-server/mcp/tools'
-import type { ExternalHealClientKind } from '../apps/web-server/src/features/orchestration/logic/runtime/manifest'
+import type { ExternalHealClientKind } from '../apps/web-server/src/features/runs/logic/runtime/manifest'
 import { looksLikeProjectRoot } from '../shared/runtime/project-root'
 import {
   canaryLabHome,
@@ -26,7 +26,7 @@ import {
   resolveActiveServer,
   type ActiveServerEntry,
 } from '../shared/runtime/active-servers'
-import { DEFAULT_PORT, loadProjectConfig, resolveProjectPort } from '../apps/web-server/src/features/orchestration/logic/runtime/launcher/project-config'
+import { DEFAULT_PORT, loadProjectConfig, resolveProjectPort } from '../apps/web-server/src/features/runs/logic/runtime/launcher/project-config'
 
 // Resolve the bridge's target /mcp URL with no explicit --url. A *live* server
 // (recorded in ~/.canary-lab/active-servers.json by `canary-lab ui`) always

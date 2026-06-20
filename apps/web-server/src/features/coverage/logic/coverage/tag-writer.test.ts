@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { writeCoversTag, writeCoversTags, coversTagTokens } from './tag-writer'
-import { extractTestsFromSource } from '../../../orchestration/logic/ast-extractor'
+import { extractTestsFromSource } from '../../../config/logic/ast-extractor'
 
 describe('coversTagTokens', () => {
   it('renders requirement + path tokens', () => {

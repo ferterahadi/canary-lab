@@ -1,9 +1,9 @@
 import path from 'path'
 import type { FeatureConfig } from '../../../../../../../shared/launcher/types'
-import { collectPortSlots, buildServiceSpecs } from '../../../orchestration/logic/runtime/orchestrator'
-import { allocatePorts, releasePorts } from '../../../orchestration/logic/runtime/port-allocator'
-import { bootAndProbe, fileTee, type BootProbeResult } from '../../../orchestration/logic/runtime/boot-probe'
-import type { PtyFactory } from '../../../orchestration/logic/runtime/pty-spawner'
+import { collectPortSlots, buildServiceSpecs } from '../../../runs/logic/runtime/orchestrator'
+import { allocatePorts, releasePorts } from '../../../runs/logic/runtime/port-allocator'
+import { bootAndProbe, fileTee, type BootProbeResult } from '../../../runs/logic/runtime/boot-probe'
+import type { PtyFactory } from '../../../runs/logic/runtime/pty-spawner'
 import type { PortifyBootInstance, PortifyVerification } from './types'
 
 // Proof that a feature's ports are injectable: boot the whole stack TWICE

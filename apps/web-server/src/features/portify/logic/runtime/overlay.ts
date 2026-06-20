@@ -1,7 +1,7 @@
 import fs from 'fs'
 import path from 'path'
-import { runGit } from '../../../orchestration/logic/git-repo'
-import type { HealAgent } from '../../../orchestration/logic/runtime/auto-heal'
+import { runGit } from '../../../../shared/git-repo'
+import type { HealAgent } from '../../../runs/logic/runtime/auto-heal'
 
 // The ephemeral port overlay: a captured set of unified diffs (one per product
 // repo) that make a feature's services read canary-lab-injected ports. Unlike

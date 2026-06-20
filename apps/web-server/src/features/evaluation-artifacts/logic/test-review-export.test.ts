@@ -4,7 +4,7 @@ import os from 'os'
 import path from 'path'
 import ts from 'typescript'
 import { __testReviewExportInternals, buildEvaluationLlmPrompt, buildTestReviewPacket, createAssertionExport, createAssertionHtml, createEvaluationExport, createEvaluationHtml, evaluationCodexArgs } from './test-review-export'
-import type { RunDetail } from '../../orchestration/logic/run-store'
+import type { RunDetail } from '../../runs/logic/run-store'
 
 let tmpDir: string
 

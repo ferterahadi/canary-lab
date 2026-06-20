@@ -1,9 +1,9 @@
 import fs from 'fs'
 import path from 'path'
-import type { PlaywrightArtifact, RunDetail } from '../../orchestration/logic/run-store'
-import { buildRunPaths, runDirFor } from '../../orchestration/logic/runtime/run-paths'
+import type { PlaywrightArtifact, RunDetail } from '../../runs/logic/run-store'
+import { buildRunPaths, runDirFor } from '../../runs/logic/runtime/run-paths'
 import { createEvaluationExport, type AssertionHtmlOptions } from './test-review-export'
-import { createZip } from '../../orchestration/logic/simple-zip'
+import { createZip } from '../../../shared/simple-zip'
 
 export interface EvaluationExportArchiveOptions {
   logsDir: string

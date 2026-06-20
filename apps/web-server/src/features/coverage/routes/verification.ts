@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify'
-import { loadFeatures } from '../../orchestration/logic/feature-loader'
-import type { OrchestratorLike, RunStore } from '../../orchestration/logic/run-store'
+import { loadFeatures } from '../../config/logic/feature-loader'
+import type { OrchestratorLike, RunStore } from '../../runs/logic/run-store'
 import {
   createVerificationConfig,
   deriveVerificationTargets,

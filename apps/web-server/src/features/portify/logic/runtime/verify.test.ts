@@ -3,7 +3,7 @@ import path from 'path'
 import { EventEmitter } from 'events'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { FeatureConfig } from '../../../../../../../shared/launcher/types'
-import type { PtyFactory, PtyHandle } from '../../../orchestration/logic/runtime/pty-spawner'
+import type { PtyFactory, PtyHandle } from '../../../runs/logic/runtime/pty-spawner'
 import { verifyDoubleBoot } from './verify'
 
 // Teardown calls process.kill(-pid). Block the REAL process.kill so a fake pty

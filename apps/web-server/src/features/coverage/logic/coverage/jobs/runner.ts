@@ -9,7 +9,7 @@ import type { AnnotateAdapter } from '../../../../coverage/logic/coverage/annota
 import type { SummarizeAdapter } from '../prd-summary'
 import type { CoverageJobStore } from './store'
 import type { CoverageJobKind, CoverageJobManifest } from './types'
-import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../../orchestration/logic/workspace-events'
+import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../../../shared/workspace-events'
 
 // Background driver + single-flight gate for coverage jobs. The start path
 // rejects a second job of the same kind for the same feature while one runs

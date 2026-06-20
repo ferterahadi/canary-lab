@@ -2,7 +2,7 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { runGit, diffContentSinceSnapshot } from '../../../orchestration/logic/git-repo'
+import { runGit, diffContentSinceSnapshot } from '../../../../shared/git-repo'
 import { applyOverlay, reverseOverlay } from './git-ops'
 
 const roots: string[] = []

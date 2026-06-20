@@ -1,4 +1,4 @@
-import type { HealAgent } from '../../../orchestration/logic/runtime/auto-heal'
+import type { HealAgent } from '../../../runs/logic/runtime/auto-heal'
 
 // Port-ification workflow: rewrite a feature's apps so their listen ports are
 // injectable (read from an env var, declared as `ports` slots in the config),

@@ -1,5 +1,5 @@
 import type { ArmIterationResult, BenchmarkReport } from './report'
-import type { LocalHealAgent } from '../../../orchestration/logic/runtime/manifest'
+import type { LocalHealAgent } from '../../../runs/logic/runtime/manifest'
 
 export type SabotageLevel = 'min' | 'med' | 'max'
 
