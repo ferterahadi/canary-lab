@@ -6,7 +6,7 @@ import type {
   Feature,
 } from '../../../../api/types'
 import { slugifyFeatureName, validateConfigure } from '../../utils/wizard-validation'
-import { FolderPicker } from '../../../../components/config/FolderPicker'
+import { FolderPicker } from '../../../config/components/FolderPicker'
 
 export interface ConfigureSubmit {
   prdText: string

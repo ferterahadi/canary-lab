@@ -27,7 +27,7 @@ vi.mock('../features/runs/state/RunsContext', () => ({
   useRunDetails: () => ({}),
 }))
 
-vi.mock('../state/BenchmarkContext', () => ({
+vi.mock('../features/benchmark/state/BenchmarkContext', () => ({
   useBenchmarks: () => ({ benchmarks: [], connection: 'live', startBenchmark: vi.fn(), abortBenchmark: vi.fn(), loadBenchmark: vi.fn() }),
 }))
 
@@ -36,7 +36,7 @@ vi.mock('../features/portify/state/PortifyContext', () => ({
   useActivePortify: () => mockActivePortify.value,
 }))
 
-vi.mock('./BenchmarkWindow', () => ({
+vi.mock('../features/benchmark/components/BenchmarkWindow', () => ({
   BenchmarkWindow: () => null,
 }))
 
@@ -44,7 +44,7 @@ vi.mock('../features/wizard/components/WizardTaskStatus', () => ({
   WizardTaskStatus: () => null,
 }))
 
-vi.mock('../features/evaluation-export/components/EvaluationExportTaskToast', () => ({
+vi.mock('../features/evaluation/components/EvaluationExportTaskToast', () => ({
   EvaluationExportTaskStatus: () => null,
 }))
 

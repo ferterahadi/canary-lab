@@ -18,11 +18,11 @@ vi.mock('../state/McpPromoContext', () => ({
   useMcpPromo: () => ({ gatePromo }),
 }))
 
-vi.mock('./FeatureConfigEditor', () => ({
+vi.mock('../features/config/components/FeatureConfigEditor', () => ({
   FeatureConfigEditor: () => <div>feature config</div>,
 }))
 
-vi.mock('./SettingsModal', () => ({
+vi.mock('../features/config/components/SettingsModal', () => ({
   SettingsModal: () => <div>settings</div>,
 }))
 

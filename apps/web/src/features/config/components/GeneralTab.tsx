@@ -1,5 +1,5 @@
-import * as api from '../../api/client'
-import type { ConfigValue, ParsedConfigDoc } from '../../api/client'
+import * as api from '../../../api/client'
+import type { ConfigValue, ParsedConfigDoc } from '../../../api/client'
 import { FieldRow, NumberInput, SectionHeader, TextInput, Textarea, Toggle } from './atoms'
 import { SaveBar } from './SaveBar'
 import { useEditableSlice } from './useEditableSlice'

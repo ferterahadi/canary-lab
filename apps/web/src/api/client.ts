@@ -32,7 +32,7 @@ import type {
   BenchmarkManifest,
   SabotageLevel,
   SabotageSkillSummary,
-} from './benchmark-types'
+} from '../features/benchmark/api/benchmark-types'
 
 export class ApiError extends Error {
   readonly status: number

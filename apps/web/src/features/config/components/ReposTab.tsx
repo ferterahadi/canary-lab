@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
-import * as api from '../../api/client'
-import type { ConfigValue, ParsedConfigDoc } from '../../api/client'
+import * as api from '../../../api/client'
+import type { ConfigValue, ParsedConfigDoc } from '../../../api/client'
 import {
   ChevronRightIcon,
   ComplexValueBadge,
@@ -19,8 +19,8 @@ import { FolderPicker, FolderPickerModal } from './FolderPicker'
 import { SaveBar } from './SaveBar'
 import { TemplatedInput } from './TemplatedInput'
 import { useEditableSlice } from './useEditableSlice'
-import { useRuns } from '../../features/runs/state/RunsContext'
-import { isActiveRunStatus } from '../../../../../shared/run-state'
+import { useRuns } from '../../runs/state/RunsContext'
+import { isActiveRunStatus } from '../../../../../../shared/run-state'
 
 /** Derive a repo's display name from its localPath basename, falling back
  *  to the cloneUrl basename (strip `.git`). Returns '' if neither yields one. */

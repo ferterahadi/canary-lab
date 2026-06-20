@@ -1,11 +1,11 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
-import * as api from '../api/client'
-import type { Feature } from '../api/types'
+import * as api from '../../../api/client'
+import type { Feature } from '../../../api/types'
 import type { BenchmarkArm, BenchmarkManifest, BenchmarkReport, SabotageLevel, SabotageSkillSummary } from '../api/benchmark-types'
 import { useBenchmark, useBenchmarks } from '../state/BenchmarkContext'
-import { RunDetailColumn } from '../features/runs/components/RunDetailColumn'
-import { AgentSessionView } from '../features/agent-sessions/components/AgentSessionView'
-import { PortifyWizard } from '../features/portify/components/PortifyWizard'
+import { RunDetailColumn } from '../../runs/components/RunDetailColumn'
+import { AgentSessionView } from '../../agent-sessions/components/AgentSessionView'
+import { PortifyWizard } from '../../portify/components/PortifyWizard'
 
 // The benchmark workspace window: a large portal-style overlay (config → setup →
 // race → report). Per-arm monitoring reuses the real RunDetailColumn.

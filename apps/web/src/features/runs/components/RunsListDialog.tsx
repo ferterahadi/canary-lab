@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { ExecutionType, RunDetail, RunIndexEntry, RunStatus } from '../../../api/types'
-import { ChevronRightIcon, StatusDot, type StatusDotState } from '../../../components/config/atoms'
+import { ChevronRightIcon, StatusDot, type StatusDotState } from '../../config/components/atoms'
 import { useRunDetails, useRuns } from '../state/RunsContext'
 import { shortTime } from '../../../lib/format'
 

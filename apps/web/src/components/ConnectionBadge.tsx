@@ -1,4 +1,4 @@
-import { StatusDot, type StatusDotState } from './config/atoms'
+import { StatusDot, type StatusDotState } from '../features/config/components/atoms'
 
 // Compact pill: green = WS open, amber pulse = reconnecting/connecting,
 // rose = disconnected. Sits left of the MCP/services chips so the

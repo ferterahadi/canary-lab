@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
-import * as api from '../api/client'
-import type { EditorChoice, HealAgentChoice, ProjectConfig } from '../api/client'
-import { CloseIcon } from './config/atoms'
-import { FolderPicker } from './config/FolderPicker'
+import * as api from '../../../api/client'
+import type { EditorChoice, HealAgentChoice, ProjectConfig } from '../../../api/client'
+import { CloseIcon } from './atoms'
+import { FolderPicker } from './FolderPicker'
 
 // `auto` and `manual` are intentionally omitted from the settings UI. The
 // server still accepts them for old config files and run-level compatibility,
