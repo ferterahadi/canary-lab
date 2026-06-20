@@ -2,7 +2,7 @@ import { useState } from 'react'
 import * as api from '../../api/client'
 import type { ConfigValue, ParsedConfigDoc } from '../../api/client'
 import { SaveBar } from './SaveBar'
-import { PortifyHistoryList } from '../PortifyHistoryList'
+import { PortifyHistoryList } from '../../features/portify/components/PortifyHistoryList'
 import { useEditableSlice } from './useEditableSlice'
 import {
   deriveRepoName,
