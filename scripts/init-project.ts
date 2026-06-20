@@ -5,7 +5,7 @@ import { ok, section, step, line, path as ansiPath } from '../shared/cli-ui/ui'
 import { fail } from '../shared/cli-ui/ui'
 import { runAsScript } from './run-as-script'
 import { setup as setupCanaryLab } from './setup'
-import { isValidPort } from '../apps/web-server/lib/runtime/launcher/project-config'
+import { isValidPort } from '../apps/web-server/src/features/orchestration/logic/runtime/launcher/project-config'
 
 export function resolveFirstExisting(pathsToTry: string[]): string {
   const match = pathsToTry.find((candidate) => fs.existsSync(candidate))

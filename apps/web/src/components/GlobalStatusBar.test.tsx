@@ -19,7 +19,7 @@ vi.mock('../api/client', async () => {
 const mockActiveRuns = vi.hoisted(() => ({ value: { runs: [] as unknown[], count: 0 } }))
 const mockBootSessions = vi.hoisted(() => ({ value: { sessions: [] as unknown[], count: 0 } }))
 
-vi.mock('../state/RunsContext', () => ({
+vi.mock('../features/runs/state/RunsContext', () => ({
   useRuns: () => ({ connection: 'live', runs: [], abort: vi.fn() }),
   useActiveRuns: () => mockActiveRuns.value,
   useActiveBootSessions: () => mockBootSessions.value,
@@ -32,7 +32,7 @@ vi.mock('../state/BenchmarkContext', () => ({
 }))
 
 const mockActivePortify = { value: undefined as undefined | { workflowId: string; feature: string; status: string; startedAt: string } }
-vi.mock('../state/PortifyContext', () => ({
+vi.mock('../features/portify/state/PortifyContext', () => ({
   useActivePortify: () => mockActivePortify.value,
 }))
 
@@ -40,11 +40,11 @@ vi.mock('./BenchmarkWindow', () => ({
   BenchmarkWindow: () => null,
 }))
 
-vi.mock('./WizardTaskStatus', () => ({
+vi.mock('../features/wizard/components/WizardTaskStatus', () => ({
   WizardTaskStatus: () => null,
 }))
 
-vi.mock('./EvaluationExportTaskToast', () => ({
+vi.mock('../features/evaluation-export/components/EvaluationExportTaskToast', () => ({
   EvaluationExportTaskStatus: () => null,
 }))
 

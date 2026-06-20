@@ -26,12 +26,12 @@ vi.mock('../../api/client', async () => {
 })
 
 // PortsTab imports parsers/components from ReposTab, which imports RunsContext.
-vi.mock('../../state/RunsContext', () => ({
+vi.mock('../../features/runs/state/RunsContext', () => ({
   useRuns: vi.fn(() => ({ runs: [] })),
 }))
 
 // PortsTab embeds the Portify history list, which reads PortifyContext.
-vi.mock('../../state/PortifyContext', () => ({
+vi.mock('../../features/portify/state/PortifyContext', () => ({
   usePortify: () => ({ workflows: [] }),
 }))
 

@@ -25,7 +25,7 @@ vi.mock('../../api/client', async () => {
   }
 })
 
-vi.mock('../../state/RunsContext', () => ({
+vi.mock('../../features/runs/state/RunsContext', () => ({
   useRuns: vi.fn(() => ({ runs: [] })),
 }))
 

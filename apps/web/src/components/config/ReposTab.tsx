@@ -19,7 +19,7 @@ import { FolderPicker, FolderPickerModal } from './FolderPicker'
 import { SaveBar } from './SaveBar'
 import { TemplatedInput } from './TemplatedInput'
 import { useEditableSlice } from './useEditableSlice'
-import { useRuns } from '../../state/RunsContext'
+import { useRuns } from '../../features/runs/state/RunsContext'
 import { isActiveRunStatus } from '../../../../../shared/run-state'
 
 /** Derive a repo's display name from its localPath basename, falling back
