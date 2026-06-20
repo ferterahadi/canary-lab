@@ -74,15 +74,15 @@ describe('shortLocation', () => {
 describe('service labels', () => {
   it('uses only the repo name when the command has its own name', () => {
     const service = {
-      repoName: 'mighty-cns',
-      name: 'mighty-cns gateway stack',
-      safeName: 'mighty-cns-gateway-stack',
+      repoName: 'my-backend',
+      name: 'my-backend gateway stack',
+      safeName: 'my-backend-gateway-stack',
       command: 'yarn start:all:dev',
-      cwd: '/Users/dev/Documents/mighty-cns',
+      cwd: '/Users/dev/Documents/my-backend',
       logPath: '/tmp/svc.log',
     }
 
-    expect(servicePrimaryLabel(service)).toBe('mighty-cns')
+    expect(servicePrimaryLabel(service)).toBe('my-backend')
   })
 
   it('falls back to the service name for older manifests', () => {
@@ -99,36 +99,36 @@ describe('service labels', () => {
 
   it('can use a repo fallback for older manifests that have branch snapshots', () => {
     const service = {
-      name: 'mighty-cns gateway stack',
-      safeName: 'mighty-cns-gateway-stack',
+      name: 'my-backend gateway stack',
+      safeName: 'my-backend-gateway-stack',
       command: 'yarn start:all:dev',
-      cwd: '/Users/dev/Documents/mighty-cns',
+      cwd: '/Users/dev/Documents/my-backend',
       logPath: '/tmp/svc.log',
     }
 
-    expect(servicePrimaryLabel(service, 'mighty-cns')).toBe('mighty-cns')
+    expect(servicePrimaryLabel(service, 'my-backend')).toBe('my-backend')
   })
 
   it('builds service tab labels from repo name and branch only', () => {
     const service = {
-      repoName: 'mighty-cns',
-      name: 'mighty-cns gateway stack',
-      safeName: 'mighty-cns-gateway-stack',
+      repoName: 'my-backend',
+      name: 'my-backend gateway stack',
+      safeName: 'my-backend-gateway-stack',
       command: 'yarn start:all:dev',
-      cwd: '/Users/dev/Documents/mighty-cns',
+      cwd: '/Users/dev/Documents/my-backend',
       logPath: '/tmp/svc.log',
     }
 
     expect(serviceTabLabelParts(service, {
-      name: 'mighty-cns',
-      path: '/Users/dev/Documents/mighty-cns',
+      name: 'my-backend',
+      path: '/Users/dev/Documents/my-backend',
       branch: 'release/2.8.2',
       expectedBranch: 'release/2.8.2',
       detached: false,
       dirty: false,
       dirtyFiles: [],
     })).toEqual({
-      primary: 'mighty-cns',
+      primary: 'my-backend',
       branch: 'release/2.8.2',
     })
   })

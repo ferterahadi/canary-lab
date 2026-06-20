@@ -195,7 +195,7 @@ multi-service app still can't both boot, so they queue. Apps that hardcode a por
 source (ignoring `PORT`/`--port`/config) can't be relocated — that's what
 [Portify](#portify-and-benchmark) fixes. OAuth issuer + redirect URIs are
 pre-registered with the provider for a fixed host:port, so OAuth features (e.g.
-`mpass_oauth`) run one at a time regardless of any rewiring. The `${port}` envset
+`shop_oauth`) run one at a time regardless of any rewiring. The `${port}` envset
 resolver unlocks *different* multi-service features running concurrently (each gets
 distinct ports) and cleaner single multi-service runs — not same-app concurrent
 isolation.

@@ -9,7 +9,7 @@ function manifest(over: Partial<PortifyManifest> = {}): PortifyManifest {
     workflowId: 'portify-1',
     feature: 'cns',
     featureDir: '/f/cns',
-    repos: [{ name: 'mighty-cns', path: '~/mighty-cns' }],
+    repos: [{ name: 'my-backend', path: '~/my-backend' }],
     agent: 'claude',
     branch: 'canary/dynamic-ports-cns',
     status: 'ready-to-save',

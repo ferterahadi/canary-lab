@@ -158,7 +158,7 @@ describe('bootAndProbe', () => {
     // DB is unreachable — so it never binds and the readiness probe times out.
     const factory = emittingFactory(
       "[0m[0][0m Mapped {/healthz, GET} route\n" +
-        "[0m[0][0m Init-Failed {\n  app: 'gateway',\n  reason: \"Can't reach database server at `34.87.54.225:3306`\"\n}\n",
+        "[0m[0][0m Init-Failed {\n  app: 'gateway',\n  reason: \"Can't reach database server at `10.0.1.42:3306`\"\n}\n",
     )
     const res = await bootAndProbe({
       specs: [httpSpec('gateway', 'http://localhost:5000/healthz')],

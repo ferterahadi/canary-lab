@@ -84,7 +84,7 @@ describe('verifyDoubleBoot', () => {
     const crashPty: PtyFactory = (): PtyHandle => {
       const data = new EventEmitter()
       queueMicrotask(() => data.emit('data',
-        "Init-Failed {\n  app: 'gateway',\n  reason: \"Can't reach database server at `34.87.54.225:3306`\"\n}\n"))
+        "Init-Failed {\n  app: 'gateway',\n  reason: \"Can't reach database server at `10.0.1.42:3306`\"\n}\n"))
       return {
         pid: 9_999_998, onData: (cb) => { data.on('data', cb); return { dispose: () => {} } },
         onExit: () => ({ dispose: () => {} }), write: () => {}, resize: () => {}, kill: () => {},

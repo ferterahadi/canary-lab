@@ -24,14 +24,14 @@ describe('worktreeFeatureDir', () => {
   })
 
   it('keeps an EXTERNAL feature dir canonical (harness lives outside the repo worktree)', () => {
-    // The mighty-cns case: feature dir holds playwright.config + e2e; the repo
+    // The my-backend case: feature dir holds playwright.config + e2e; the repo
     // under test is a separate checkout. The harness is not in the worktree, so
     // Playwright must run from the canonical feature dir.
     expect(
       worktreeFeatureDir({
-        repoLocalPath: '/Users/dev/Documents/mighty-cns',
+        repoLocalPath: '/Users/dev/Documents/my-backend',
         featureDir: '/Users/dev/Documents/canary-lab-workspace/features/cns_batch_queue_resilience',
-        worktreeRepoPath: '/bench/worktrees/arm-A/mighty-cns',
+        worktreeRepoPath: '/bench/worktrees/arm-A/my-backend',
       }),
     ).toBe('/Users/dev/Documents/canary-lab-workspace/features/cns_batch_queue_resilience')
   })
