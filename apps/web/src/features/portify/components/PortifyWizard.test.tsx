@@ -3,9 +3,9 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { PortifyManifest, PortifyStatus } from '../../../api/client'
+import type { PortifyManifest, PortifyStatus } from '../../../shared/api/client'
 
-vi.mock('../../../api/client', () => ({
+vi.mock('../../../shared/api/client', () => ({
   startPortify: vi.fn(),
   getPortify: vi.fn(),
   savePortify: vi.fn(),
@@ -22,7 +22,7 @@ vi.mock('../state/PortifyContext', () => ({
   useActivePortify: () => mockActivePortify.value,
 }))
 
-import * as api from '../../../api/client'
+import * as api from '../../../shared/api/client'
 import { PortifyWizard } from './PortifyWizard'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true

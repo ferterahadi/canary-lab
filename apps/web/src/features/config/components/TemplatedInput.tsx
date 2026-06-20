@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { createPortal } from 'react-dom'
-import * as api from '../../../api/client'
+import * as api from '../../../shared/api/client'
 
 // A drop-in TextInput replacement that supports `${...}` tokens rendered as
 // inline pills inside a contentEditable shell; typing `${` opens a picker,

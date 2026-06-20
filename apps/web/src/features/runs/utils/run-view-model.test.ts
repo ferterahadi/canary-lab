@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { RunDetail, RunIndexEntry, RunStatus, TransientAction } from '../../../api/types'
+import type { RunDetail, RunIndexEntry, RunStatus, TransientAction } from '../../../shared/api/types'
 import { deriveRunViewModel } from './run-view-model'
 
 function detail(overrides: Partial<RunDetail['manifest']> = {}): RunDetail {

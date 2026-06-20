@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import * as api from '../../../api/client'
-import type { EditorChoice, HealAgentChoice, ProjectConfig } from '../../../api/client'
+import * as api from '../../../shared/api/client'
+import type { EditorChoice, HealAgentChoice, ProjectConfig } from '../../../shared/api/client'
 import { CloseIcon } from './atoms'
 import { FolderPicker } from './FolderPicker'
 

@@ -1,7 +1,7 @@
 import { useState } from 'react'
-import * as api from '../../../api/client'
+import * as api from '../../../shared/api/client'
 import { usePortify } from '../state/PortifyContext'
-import type { PortifyIndexEntry, PortifyStatus } from '../../../api/client'
+import type { PortifyIndexEntry, PortifyStatus } from '../../../shared/api/client'
 
 // Inline Portify history, embedded in the feature config Ports tab. Lists
 // port-ification workflows most-recent first — scoped to `feature` when given,

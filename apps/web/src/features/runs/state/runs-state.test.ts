@@ -6,8 +6,8 @@ import {
   runsReducer,
   type RunsState,
 } from './runs-state'
-import { ApiError } from '../../../api/client'
-import type { RunDetail, RunIndexEntry } from '../../../api/types'
+import { ApiError } from '../../../shared/api/client'
+import type { RunDetail, RunIndexEntry } from '../../../shared/api/types'
 
 // Helpers — small constructors for the shapes the reducer tests need.
 

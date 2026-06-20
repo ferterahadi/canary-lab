@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { RunDetail, RunIndexEntry } from '../../../api/types'
+import type { RunDetail, RunIndexEntry } from '../../../shared/api/types'
 import { useActiveBootSessions, useRun, useRuns } from '../state/RunsContext'
 import { StatusDot } from '../../config/components/atoms'
 import { RunDetailColumn } from './RunDetailColumn'

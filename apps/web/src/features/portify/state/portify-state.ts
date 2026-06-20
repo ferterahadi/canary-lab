@@ -1,4 +1,4 @@
-import type { PortifyManifest, PortifyIndexEntry } from '../../../api/client'
+import type { PortifyManifest, PortifyIndexEntry } from '../../../shared/api/client'
 
 // Pure reducer driving PortifyContext. Mirrors benchmark-state.ts so it
 // unit-tests in the node vitest config (no jsdom). The server pushes the full

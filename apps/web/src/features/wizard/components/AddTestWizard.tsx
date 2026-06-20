@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
-import * as api from '../../../api/client'
-import type { Feature, PlanStep } from '../../../api/types'
+import * as api from '../../../shared/api/client'
+import type { Feature, PlanStep } from '../../../shared/api/types'
 import { nextStepForStatus, type WizardStep } from '../utils/wizard-state'
 import { slugifyFeatureName } from '../utils/wizard-validation'
 import { useWizardDrafts } from '../state/WizardDraftContext'

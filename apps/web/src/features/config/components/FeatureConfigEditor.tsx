@@ -5,7 +5,7 @@ import { PortsTab } from './PortsTab'
 import { EnvsetsTab } from './EnvsetsTab'
 import { PlaywrightTab } from './PlaywrightTab'
 import { CloseIcon, ConfirmModal, TrashIcon } from './atoms'
-import * as api from '../../../api/client'
+import * as api from '../../../shared/api/client'
 
 type Tab = 'general' | 'repos' | 'ports' | 'envsets' | 'playwright'
 

@@ -3,8 +3,8 @@ import { Terminal, type ITheme } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebglAddon } from '@xterm/addon-webgl'
 import { connectPane, type PaneConnection } from '../api/pane-socket'
-import * as api from '../../../api/client'
-import { currentResolvedTheme, subscribeTheme, type ResolvedTheme } from '../../../lib/theme'
+import * as api from '../../../shared/api/client'
+import { currentResolvedTheme, subscribeTheme, type ResolvedTheme } from '../../../shared/lib/theme'
 import { paneTerminalNotice } from '../utils/pane-terminal-message'
 
 const TERM_THEMES: Record<ResolvedTheme, ITheme> = {

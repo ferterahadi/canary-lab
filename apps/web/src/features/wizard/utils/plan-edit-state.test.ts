@@ -10,7 +10,7 @@ import {
   updateStep,
   validatePlan,
 } from './plan-edit-state'
-import type { PlanStep } from '../../../api/types'
+import type { PlanStep } from '../../../shared/api/types'
 
 const seed: PlanStep[] = [
   { step: 'a', actions: ['a1'], expectedOutcome: 'oa' },

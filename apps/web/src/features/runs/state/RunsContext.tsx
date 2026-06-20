@@ -1,12 +1,12 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useRef, type ReactNode } from 'react'
-import * as api from '../../../api/client'
+import * as api from '../../../shared/api/client'
 import type {
   DisplayStatus,
   RunDetail,
   RunIndexEntry,
   RunStatus,
   TransientAction,
-} from '../../../api/types'
+} from '../../../shared/api/types'
 import { deriveDisplayStatus } from '../utils/run-actions'
 import { isActiveRunStatus } from '../../../../../../shared/run-state'
 import {

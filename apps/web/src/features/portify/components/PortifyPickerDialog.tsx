@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
-import type { Feature } from '../../../api/types'
-import type { PortifyIndexEntry, PortifyStatus } from '../../../api/client'
+import type { Feature } from '../../../shared/api/types'
+import type { PortifyIndexEntry, PortifyStatus } from '../../../shared/api/client'
 import { StatusDot } from '../../config/components/atoms'
 
 interface Props {

@@ -8,8 +8,8 @@ import {
   useRef,
   type ReactNode,
 } from 'react'
-import * as api from '../../../api/client'
-import type { PortifyManifest, PortifyIndexEntry } from '../../../api/client'
+import * as api from '../../../shared/api/client'
+import type { PortifyManifest, PortifyIndexEntry } from '../../../shared/api/client'
 import {
   portifyReducer,
   initialPortifyState,

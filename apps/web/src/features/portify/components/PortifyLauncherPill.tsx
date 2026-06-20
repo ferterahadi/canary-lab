@@ -1,4 +1,4 @@
-import type { PortifyIndexEntry } from '../../../api/client'
+import type { PortifyIndexEntry } from '../../../shared/api/client'
 import { StatusDot } from '../../config/components/atoms'
 
 // Portify launcher pill: ALWAYS visible in the GlobalStatusBar action cluster

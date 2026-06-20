@@ -8,7 +8,7 @@ import {
   useRef,
   type ReactNode,
 } from 'react'
-import * as api from '../../../api/client'
+import * as api from '../../../shared/api/client'
 import type { BenchmarkManifest, SabotageLevel } from '../api/benchmark-types'
 import {
   benchmarkReducer,

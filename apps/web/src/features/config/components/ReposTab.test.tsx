@@ -10,11 +10,11 @@ import {
   getRepoGitStatus,
   putFeatureConfigDoc,
   type ParsedConfigDoc,
-} from '../../../api/client'
+} from '../../../shared/api/client'
 import { ReposTab } from './ReposTab'
 
-vi.mock('../../../api/client', async () => {
-  const actual = await vi.importActual<typeof import('../../../api/client')>('../../../api/client')
+vi.mock('../../../shared/api/client', async () => {
+  const actual = await vi.importActual<typeof import('../../../shared/api/client')>('../../../shared/api/client')
   return {
     ...actual,
     checkPathExists: vi.fn(),

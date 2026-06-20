@@ -10,23 +10,23 @@ import { FeaturesColumn } from './FeaturesColumn'
 const startNewWizard = vi.fn()
 const gatePromo = vi.fn((_action: string, continueAction: () => void) => continueAction())
 
-vi.mock('../features/wizard/state/WizardDraftContext', () => ({
+vi.mock('../../features/wizard/state/WizardDraftContext', () => ({
   useWizardDrafts: () => ({ startNewWizard }),
 }))
 
-vi.mock('../state/McpPromoContext', () => ({
+vi.mock('./McpPromoContext', () => ({
   useMcpPromo: () => ({ gatePromo }),
 }))
 
-vi.mock('../features/config/components/FeatureConfigEditor', () => ({
+vi.mock('../../features/config/components/FeatureConfigEditor', () => ({
   FeatureConfigEditor: () => <div>feature config</div>,
 }))
 
-vi.mock('../features/config/components/SettingsModal', () => ({
+vi.mock('../../features/config/components/SettingsModal', () => ({
   SettingsModal: () => <div>settings</div>,
 }))
 
-vi.mock('./ThemeToggle', () => ({
+vi.mock('../ui/ThemeToggle', () => ({
   ThemeToggle: () => <button type="button">theme</button>,
 }))
 

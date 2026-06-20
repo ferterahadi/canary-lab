@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { ExternalHealPanel } from './ExternalHealPanel'
-import type { ExternalHealSession } from '../../../api/types'
+import type { ExternalHealSession } from '../../../shared/api/types'
 
 describe('ExternalHealPanel', () => {
   it('shows the terminal run status instead of stale session status once the run is terminal', () => {

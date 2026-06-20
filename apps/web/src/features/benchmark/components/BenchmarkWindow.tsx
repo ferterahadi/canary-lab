@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
-import * as api from '../../../api/client'
-import type { Feature } from '../../../api/types'
+import * as api from '../../../shared/api/client'
+import type { Feature } from '../../../shared/api/types'
 import type { BenchmarkArm, BenchmarkManifest, BenchmarkReport, SabotageLevel, SabotageSkillSummary } from '../api/benchmark-types'
 import { useBenchmark, useBenchmarks } from '../state/BenchmarkContext'
 import { RunDetailColumn } from '../../runs/components/RunDetailColumn'

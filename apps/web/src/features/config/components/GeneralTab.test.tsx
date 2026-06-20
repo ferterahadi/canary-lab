@@ -3,11 +3,11 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { getFeatureConfigDoc, putFeatureConfigDoc, type ParsedConfigDoc } from '../../../api/client'
+import { getFeatureConfigDoc, putFeatureConfigDoc, type ParsedConfigDoc } from '../../../shared/api/client'
 import { GeneralTab } from './GeneralTab'
 
-vi.mock('../../../api/client', async () => {
-  const actual = await vi.importActual<typeof import('../../../api/client')>('../../../api/client')
+vi.mock('../../../shared/api/client', async () => {
+  const actual = await vi.importActual<typeof import('../../../shared/api/client')>('../../../shared/api/client')
   return {
     ...actual,
     getFeatureConfigDoc: vi.fn(),

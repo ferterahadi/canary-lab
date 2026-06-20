@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import * as api from '../../../api/client'
+import * as api from '../../../shared/api/client'
 import { ConfirmModal, FieldRow, FolderIcon, HintIcon, IconButton, Modal, PlusIcon, SectionHeader, TextInput, TrashIcon } from './atoms'
 import { TemplatedInput } from './TemplatedInput'
 import { SaveBar } from './SaveBar'

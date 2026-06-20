@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { ExternalDraftAgentPanel } from './ExternalDraftAgentPanel'
-import type { DraftRecord, ExternalDraftStage, ExternalHealClientKind } from '../../../api/types'
+import type { DraftRecord, ExternalDraftStage, ExternalHealClientKind } from '../../../shared/api/types'
 
 function draft(overrides: Partial<DraftRecord> = {}): DraftRecord {
   return {
