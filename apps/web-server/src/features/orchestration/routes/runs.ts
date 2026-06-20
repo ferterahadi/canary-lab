@@ -34,7 +34,7 @@ import {
   parseAgentSessionRefFile,
   resolveManifestSessionRef,
   selectAgentSessionRef,
-} from '../../agent-management/logic/agent-session-log'
+} from '../../agent-sessions/logic/agent-session-log'
 import { isTerminalRunStatus } from '../../../../../../shared/run-state'
 import type { ExecutionType } from '../../../../../../shared/verification'
 import type { ExternalHealBroker } from '../../external-heal/logic/external-heal-broker'

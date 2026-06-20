@@ -53,7 +53,7 @@ import {
   renderAgentSessionContext,
   type AgentSessionRef,
   type AgentSessionRefFile,
-} from '../../../agent-management/logic/agent-session-log'
+} from '../../../agent-sessions/logic/agent-session-log'
 import type { RunnerLog } from './runner-log'
 import {
   resolveMcpOutputDir,

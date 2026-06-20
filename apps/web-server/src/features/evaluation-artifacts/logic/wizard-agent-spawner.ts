@@ -1,8 +1,8 @@
 import fs from 'fs'
 import path from 'path'
-import { modelArgs } from '../../agent-management/logic/agent-models'
-import { locateCodexSessionLog } from '../../agent-management/logic/agent-session-log'
-import { buildClaudeAgenticArgs } from '../../agent-management/logic/agent-process'
+import { modelArgs } from '../../agent-sessions/logic/agent-models'
+import { locateCodexSessionLog } from '../../agent-sessions/logic/agent-session-log'
+import { buildClaudeAgenticArgs } from '../../agent-sessions/logic/agent-process'
 
 // Pure helpers for the Add Test wizard's plan / spec agents:
 //

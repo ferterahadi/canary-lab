@@ -25,7 +25,7 @@ import {
   listVerificationConfigs,
   updateVerificationConfig,
   type ResolveVerificationInput,
-} from '../src/features/coverage-verification/logic/verification'
+} from '../src/features/coverage/logic/verification'
 import {
   applyExternalDraftFiles,
   captureFeatureEnvFiles,
@@ -45,9 +45,9 @@ import {
   featureExists,
   listFeatureDocs,
   regeneratePrdSummary,
-} from '../src/features/coverage-verification/logic/coverage/service'
-import { CoverageJobRunStore } from '../src/features/coverage-verification/logic/coverage/jobs/store'
-import { startCoverageJob, CoverageJobConflictError } from '../src/features/coverage-verification/logic/coverage/jobs/runner'
+} from '../src/features/coverage/logic/coverage/service'
+import { CoverageJobRunStore } from '../src/features/coverage/logic/coverage/jobs/store'
+import { startCoverageJob, CoverageJobConflictError } from '../src/features/coverage/logic/coverage/jobs/runner'
 import {
   createDraft,
   paths as draftPaths,

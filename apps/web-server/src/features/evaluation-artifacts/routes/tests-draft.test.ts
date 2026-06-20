@@ -3,7 +3,7 @@ import os from 'os'
 import path from 'path'
 import Fastify from 'fastify'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { AgentSessionRef } from '../../agent-management/logic/agent-session-log'
+import type { AgentSessionRef } from '../../agent-sessions/logic/agent-session-log'
 
 // Pass-through mock for the session-ref resolver. Tests can install a one-shot
 // override to exercise the route's TOCTOU guard (a ref that resolves but whose

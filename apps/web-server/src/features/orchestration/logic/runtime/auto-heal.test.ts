@@ -18,7 +18,7 @@ import {
 } from './auto-heal'
 
 import { renderPersonalWikiMap } from '../../../../../../../shared/runtime/personal-wiki'
-import { HEAL_MODELS } from '../../../agent-management/logic/agent-models'
+import { HEAL_MODELS } from '../../../agent-sessions/logic/agent-models'
 
 function writeRunManifest(runDir: string, body: Record<string, unknown>): void {
   fs.writeFileSync(path.join(runDir, 'manifest.json'), JSON.stringify({

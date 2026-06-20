@@ -5,9 +5,9 @@ import websocketPlugin from '@fastify/websocket'
 import fastifyStatic from '@fastify/static'
 import { isActiveRunStatus, isRestartableRunStatus } from '../../shared/run-state'
 import { featuresRoutes } from './src/features/orchestration/routes/features'
-import { coverageRoutes } from './src/features/coverage-verification/routes/coverage'
+import { coverageRoutes } from './src/features/coverage/routes/coverage'
 import { featureConfigRoutes } from './src/features/orchestration/routes/feature-config'
-import { verificationRoutes } from './src/features/coverage-verification/routes/verification'
+import { verificationRoutes } from './src/features/coverage/routes/verification'
 import { projectConfigRoutes } from './src/features/orchestration/routes/project-config'
 import { runsRoutes, type ExternalHealAgentRequest } from './src/features/orchestration/routes/runs'
 import { journalRoutes } from './src/features/orchestration/routes/journal'
@@ -17,7 +17,7 @@ import { ExternalHealBroker } from './src/features/external-heal/logic/external-
 import { registerMcpRoutes } from './mcp/server'
 import { paneStreamRoutes } from './src/features/orchestration/ws/pane-stream'
 import { runsStreamRoutes } from './src/features/orchestration/ws/runs-stream'
-import { agentSessionStreamRoutes } from './src/features/agent-management/ws/agent-session-stream'
+import { agentSessionStreamRoutes } from './src/features/agent-sessions/ws/agent-session-stream'
 import { workspaceStreamRoutes } from './src/features/orchestration/ws/workspace-stream'
 import { createRegistry, RunStore, type OrchestratorRegistry, type OrchestratorLike, type StartRunOutcome } from './src/features/orchestration/logic/run-store'
 import { benchmarkRoutes } from './src/features/orchestration/routes/benchmarks'
@@ -29,7 +29,7 @@ import { benchmarkDir } from './src/features/orchestration/logic/runtime/benchma
 import { portifyRoutes } from './src/features/orchestration/routes/portify'
 import { portifyStreamRoutes } from './src/features/orchestration/ws/portify-stream'
 import { PortifyRunStore } from './src/features/orchestration/logic/runtime/portify/store'
-import { CoverageJobRunStore } from './src/features/coverage-verification/logic/coverage/jobs/store'
+import { CoverageJobRunStore } from './src/features/coverage/logic/coverage/jobs/store'
 import { createPortifyRunner } from './src/features/orchestration/logic/runtime/portify/runner'
 import { reclaimOrphanedPortify } from './src/features/orchestration/logic/runtime/portify/reclaim'
 import { portifyDir } from './src/features/orchestration/logic/runtime/portify/paths'
@@ -38,7 +38,7 @@ import {
   selectAgentSessionRef,
   loadAgentSession,
   findClaudeLogBySessionId,
-} from './src/features/agent-management/logic/agent-session-log'
+} from './src/features/agent-sessions/logic/agent-session-log'
 import { WorkspaceEventBus } from './src/features/orchestration/logic/workspace-events'
 import { PaneBroker } from './src/features/orchestration/logic/pane-broker'
 import { loadFeatures } from './src/features/orchestration/logic/feature-loader'
@@ -84,7 +84,7 @@ import {
   buildVerificationDiagnostics,
   resolveVerificationRun,
   type ResolveVerificationInput,
-} from './src/features/coverage-verification/logic/verification'
+} from './src/features/coverage/logic/verification'
 import type { HealAgentChoice } from './src/features/orchestration/logic/runtime/launcher/project-config'
 import type { LocalHealAgent } from './src/features/orchestration/logic/runtime/manifest'
 import type { ExecutionType } from '../../shared/verification'

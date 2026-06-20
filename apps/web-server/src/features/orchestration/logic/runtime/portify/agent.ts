@@ -2,10 +2,10 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { type ChildProcess } from 'child_process'
-import { claudeSessionLogPath, encodeClaudeProjectDir } from '../../../../agent-management/logic/agent-session-log'
+import { claudeSessionLogPath, encodeClaudeProjectDir } from '../../../../agent-sessions/logic/agent-session-log'
 import { resolveAgentBinary, type HealAgent } from '../auto-heal'
-import { PORTIFY_MODELS, modelArgs } from '../../../../agent-management/logic/agent-models'
-import { runAgentProcess, buildClaudeAgenticArgs } from '../../../../agent-management/logic/agent-process'
+import { PORTIFY_MODELS, modelArgs } from '../../../../agent-sessions/logic/agent-models'
+import { runAgentProcess, buildClaudeAgenticArgs } from '../../../../agent-sessions/logic/agent-process'
 
 // Idle window: kill a wedged port-ify agent after this long with NO activity
 // (no session-JSONL / log growth). No hard wall-clock — a slow-but-working agent

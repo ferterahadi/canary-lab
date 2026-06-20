@@ -5,7 +5,7 @@ import {
   validateFeatureTarget as validateScaffoldTarget,
   type ApplyFeatureScaffoldResult,
 } from '../../../../../../shared/feature-scaffold'
-import type { AgentSessionRef } from '../../agent-management/logic/agent-session-log'
+import type { AgentSessionRef } from '../../agent-sessions/logic/agent-session-log'
 
 // Draft storage for the Add Test wizard. Each draft lives at
 // `<logsDir>/drafts/<draftId>/` with a JSON state file plus the raw PRD,
