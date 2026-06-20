@@ -10,11 +10,11 @@ import {
   getRepoGitStatus,
   putFeatureConfigDoc,
   type ParsedConfigDoc,
-} from '../../api/client'
+} from '../../../api/client'
 import { PortsTab } from './PortsTab'
 
-vi.mock('../../api/client', async () => {
-  const actual = await vi.importActual<typeof import('../../api/client')>('../../api/client')
+vi.mock('../../../api/client', async () => {
+  const actual = await vi.importActual<typeof import('../../../api/client')>('../../../api/client')
   return {
     ...actual,
     checkPathExists: vi.fn(),
@@ -26,12 +26,12 @@ vi.mock('../../api/client', async () => {
 })
 
 // PortsTab imports parsers/components from ReposTab, which imports RunsContext.
-vi.mock('../../features/runs/state/RunsContext', () => ({
+vi.mock('../../runs/state/RunsContext', () => ({
   useRuns: vi.fn(() => ({ runs: [] })),
 }))
 
 // PortsTab embeds the Portify history list, which reads PortifyContext.
-vi.mock('../../features/portify/state/PortifyContext', () => ({
+vi.mock('../../portify/state/PortifyContext', () => ({
   usePortify: () => ({ workflows: [] }),
 }))
 

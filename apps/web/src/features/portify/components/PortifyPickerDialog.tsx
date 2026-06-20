@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { Feature } from '../../../api/types'
 import type { PortifyIndexEntry, PortifyStatus } from '../../../api/client'
-import { StatusDot } from '../../../components/config/atoms'
+import { StatusDot } from '../../config/components/atoms'
 
 interface Props {
   features: Feature[]

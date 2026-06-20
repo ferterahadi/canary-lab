@@ -1,5 +1,5 @@
 import type { PortifyIndexEntry } from '../../../api/client'
-import { StatusDot } from '../../../components/config/atoms'
+import { StatusDot } from '../../config/components/atoms'
 
 // Portify launcher pill: ALWAYS visible in the GlobalStatusBar action cluster
 // (next to Cleanup) to promote port-ification. Clicking opens the feature picker

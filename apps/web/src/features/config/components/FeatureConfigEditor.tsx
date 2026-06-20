@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react'
-import { GeneralTab } from './config/GeneralTab'
-import { ReposTab } from './config/ReposTab'
-import { PortsTab } from './config/PortsTab'
-import { EnvsetsTab } from './config/EnvsetsTab'
-import { PlaywrightTab } from './config/PlaywrightTab'
-import { CloseIcon, ConfirmModal, TrashIcon } from './config/atoms'
-import * as api from '../api/client'
+import { GeneralTab } from './GeneralTab'
+import { ReposTab } from './ReposTab'
+import { PortsTab } from './PortsTab'
+import { EnvsetsTab } from './EnvsetsTab'
+import { PlaywrightTab } from './PlaywrightTab'
+import { CloseIcon, ConfirmModal, TrashIcon } from './atoms'
+import * as api from '../../../api/client'
 
 type Tab = 'general' | 'repos' | 'ports' | 'envsets' | 'playwright'
 

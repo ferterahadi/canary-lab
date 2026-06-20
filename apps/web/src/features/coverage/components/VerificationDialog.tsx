@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
-import * as api from '../api/client'
-import type { VerificationConfig, VerificationTarget } from '../api/types'
-import { CloseIcon } from './config/atoms'
+import * as api from '../../../api/client'
+import type { VerificationConfig, VerificationTarget } from '../../../api/types'
+import { CloseIcon } from '../../config/components/atoms'
 
 interface VerificationDialogProps {
   feature: string

@@ -3,11 +3,11 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { getEnvsetsIndex, getFeatureConfigDoc, type ParsedConfigDoc } from '../../api/client'
+import { getEnvsetsIndex, getFeatureConfigDoc, type ParsedConfigDoc } from '../../../api/client'
 import { TemplatedInput } from './TemplatedInput'
 
-vi.mock('../../api/client', async () => {
-  const actual = await vi.importActual<typeof import('../../api/client')>('../../api/client')
+vi.mock('../../../api/client', async () => {
+  const actual = await vi.importActual<typeof import('../../../api/client')>('../../../api/client')
   return {
     ...actual,
     getEnvsetsIndex: vi.fn(),

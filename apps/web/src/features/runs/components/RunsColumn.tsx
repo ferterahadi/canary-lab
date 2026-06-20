@@ -8,7 +8,7 @@ import { deriveRunViewModel, type RunViewModel } from '../utils/run-view-model'
 import { useMcpPromo } from '../../../state/McpPromoContext'
 import { useRuns } from '../state/RunsContext'
 import { RunStatusIndicator } from './RunStatusIndicator'
-import { VerificationDialog } from '../../../components/VerificationDialog'
+import { VerificationDialog } from '../../coverage/components/VerificationDialog'
 
 interface Props {
   feature: string | null

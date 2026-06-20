@@ -3,9 +3,9 @@ import * as api from '../api/client'
 import type { ExecutionType, Feature, RunStatus } from '../api/types'
 import { useWizardDrafts } from '../features/wizard/state/WizardDraftContext'
 import { useMcpPromo } from '../state/McpPromoContext'
-import { FeatureConfigEditor } from './FeatureConfigEditor'
+import { FeatureConfigEditor } from '../features/config/components/FeatureConfigEditor'
 import { ThemeToggle } from './ThemeToggle'
-import { SettingsModal } from './SettingsModal'
+import { SettingsModal } from '../features/config/components/SettingsModal'
 import { Tooltip } from './Tooltip'
 
 interface Props {

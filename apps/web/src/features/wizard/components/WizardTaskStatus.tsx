@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import type { DraftRecord } from '../../../api/types'
 import { slugifyFeatureName } from '../utils/wizard-validation'
 import { isActiveWizardTask, useWizardDrafts } from '../state/WizardDraftContext'
-import { CloseIcon, StatusDot, type StatusDotState } from '../../../components/config/atoms'
+import { CloseIcon, StatusDot, type StatusDotState } from '../../config/components/atoms'
 import { StatusPill } from '../../../components/StatusPill'
 
 function dotStateForDraft(status: DraftRecord['status']): StatusDotState {

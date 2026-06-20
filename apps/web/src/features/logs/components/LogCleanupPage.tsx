@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import * as api from '../api/client'
-import type { CleanupListing, CleanupWorktree, ExecutionType, RunStatus } from '../api/types'
-import { formatBytes, timeAgo } from '../lib/format'
+import * as api from '../../../api/client'
+import type { CleanupListing, CleanupWorktree, ExecutionType, RunStatus } from '../../../api/types'
+import { formatBytes, timeAgo } from '../../../lib/format'
 
 interface Props {
   onClose: () => void

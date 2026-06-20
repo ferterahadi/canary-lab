@@ -2,7 +2,7 @@ import { forwardRef, useCallback, useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import * as api from '../api/client'
-import { StatusDot, ChevronRightIcon, type StatusDotState } from './config/atoms'
+import { StatusDot, ChevronRightIcon, type StatusDotState } from '../features/config/components/atoms'
 
 const MCP_PROFILES = [
   { id: 'repair', label: 'Repair', detail: 'Run healing' },

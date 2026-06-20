@@ -17,7 +17,7 @@ vi.mock('../../../api/client', async () => {
     getCoverageAgentSession: vi.fn(async () => null),
   }
 })
-vi.mock('../api/agent-session-socket', () => ({
+vi.mock('../../agent-sessions/api/agent-session-socket', () => ({
   connectAgentSessionStream: vi.fn(() => ({ close() {} })),
 }))
 

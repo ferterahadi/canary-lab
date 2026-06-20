@@ -1,4 +1,4 @@
-import { StatusPill } from './StatusPill'
+import { StatusPill } from '../../../components/StatusPill'
 
 // Services pill: held boot sessions, distinct from runs. Appears whenever
 // something is booted; the teal count + a one-shot pulse (keyed on the count)
