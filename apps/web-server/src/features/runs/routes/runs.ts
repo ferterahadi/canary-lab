@@ -10,8 +10,8 @@ import { removeWorktree } from '../../runs/logic/runtime/repo-worktree'
 import { listWorktrees, isUnder } from '../../runs/logic/runtime/worktree-inventory'
 import { launchEditorDir } from '../../../shared/editor-launch'
 import { buildRunPaths, runDirFor } from '../../runs/logic/runtime/run-paths'
-import { generateEvaluationRewriteWithAgent, type EvaluationRewrite } from '../../evaluation-artifacts/logic/test-review-export'
-import { buildEvaluationExportArchive } from '../../evaluation-artifacts/logic/evaluation-export-archive'
+import { generateEvaluationRewriteWithAgent, type EvaluationRewrite } from '../../evaluation/logic/test-review-export'
+import { buildEvaluationExportArchive } from '../../evaluation/logic/evaluation-export-archive'
 import { loadProjectConfig } from '../../runs/logic/runtime/launcher/project-config'
 import { PaneBroker, type PaneSubscriber } from '../../runs/logic/pane-broker'
 import {
@@ -27,7 +27,7 @@ import {
   writeEvaluationExportZip,
   type EvaluationExportMode,
   type EvaluationExportTaskRecord,
-} from '../../evaluation-artifacts/logic/evaluation-export-store'
+} from '../../evaluation/logic/evaluation-export-store'
 import {
   loadAgentSession,
   locateMostRecentAgentSessionRef,

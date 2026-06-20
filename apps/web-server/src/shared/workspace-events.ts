@@ -1,6 +1,6 @@
 import { EventEmitter } from 'events'
-import type { DraftRecord } from '../features/evaluation-artifacts/logic/draft-store'
-import type { EvaluationExportTaskView } from '../features/evaluation-artifacts/logic/evaluation-export-store'
+import type { DraftRecord } from '../features/wizard/logic/draft-store'
+import type { EvaluationExportTaskView } from '../features/evaluation/logic/evaluation-export-store'
 
 export type WorkspaceEvent =
   | { type: 'feature-created'; feature: string }
