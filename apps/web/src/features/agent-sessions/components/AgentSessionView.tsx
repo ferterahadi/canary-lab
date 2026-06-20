@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import * as api from '../../../api/client'
-import type { AgentSessionEvent, AgentSessionResponse } from '../../../api/client'
+import * as api from '../../../shared/api/client'
+import type { AgentSessionEvent, AgentSessionResponse } from '../../../shared/api/client'
 import { connectAgentSessionStream } from '../api/agent-session-socket'
 
 // Single agent viewer for the wizard (draft planning/generating) and the run

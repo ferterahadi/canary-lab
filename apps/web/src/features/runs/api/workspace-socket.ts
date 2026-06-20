@@ -1,4 +1,4 @@
-import type { DraftRecord, EvaluationExportTask } from '../../../api/types'
+import type { DraftRecord, EvaluationExportTask } from '../../../shared/api/types'
 
 export type WorkspaceEvent =
   | { type: 'connected' }

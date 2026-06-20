@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import * as api from '../../../api/client'
+import * as api from '../../../shared/api/client'
 import type {
   CoverageJobKind,
   CoverageJobManifest,
@@ -8,7 +8,7 @@ import type {
   GapType,
   RequirementCoverage,
   TestCoverage,
-} from '../../../api/types'
+} from '../../../shared/api/types'
 import { CoverageDocsRail } from './CoverageDocsRail'
 import { CoverageGeneratingPane } from './CoverageGeneratingPane'
 

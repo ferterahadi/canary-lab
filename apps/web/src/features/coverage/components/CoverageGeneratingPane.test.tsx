@@ -3,21 +3,21 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { CoverageJobManifest } from '../../../api/types'
+import type { CoverageJobManifest } from '../../../shared/api/types'
 import { CoverageGeneratingPane } from './CoverageGeneratingPane'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
 // AgentSessionView pulls a REST snapshot and (when live) opens a WS. Stub both so
 // the mount is inert — we only assert that the pane reaches into AgentSessionView.
-vi.mock('../../../api/client', async () => {
-  const actual = await vi.importActual<typeof import('../../../api/client')>('../../../api/client')
+vi.mock('../../../shared/api/client', async () => {
+  const actual = await vi.importActual<typeof import('../../../shared/api/client')>('../../../shared/api/client')
   return {
     ...actual,
     getCoverageAgentSession: vi.fn(async () => null),
   }
 })
-vi.mock('../api/agent-session-socket', () => ({
+vi.mock('../../agent-sessions/api/agent-session-socket', () => ({
   connectAgentSessionStream: vi.fn(() => ({ close() {} })),
 }))
 

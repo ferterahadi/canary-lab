@@ -3,10 +3,10 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { createServer } from './server'
-import type { TestsDraftRouteDeps } from './src/features/evaluation-artifacts/routes/tests-draft'
-import { writeManifest, writeRunsIndex, readManifest, readRunsIndex } from './src/features/orchestration/logic/runtime/manifest'
-import { runDirFor } from './src/features/orchestration/logic/runtime/run-paths'
-import type { PtyFactory } from './src/features/orchestration/logic/runtime/pty-spawner'
+import type { TestsDraftRouteDeps } from './src/features/wizard/routes/tests-draft'
+import { writeManifest, writeRunsIndex, readManifest, readRunsIndex } from './src/features/runs/logic/runtime/manifest'
+import { runDirFor } from './src/features/runs/logic/runtime/run-paths'
+import type { PtyFactory } from './src/features/runs/logic/runtime/pty-spawner'
 
 // Smoke test: exercises createServer() against the real templates/project
 // tree, hitting every read-side endpoint via inject(). Lives next to the

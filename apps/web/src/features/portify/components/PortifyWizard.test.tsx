@@ -3,9 +3,9 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { PortifyManifest, PortifyStatus } from '../../../api/client'
+import type { PortifyManifest, PortifyStatus } from '../../../shared/api/client'
 
-vi.mock('../../../api/client', () => ({
+vi.mock('../../../shared/api/client', () => ({
   startPortify: vi.fn(),
   getPortify: vi.fn(),
   savePortify: vi.fn(),
@@ -13,7 +13,7 @@ vi.mock('../../../api/client', () => ({
   revisePortify: vi.fn(),
 }))
 // AgentSessionView opens a WS / fetches — stub it out in the wizard test.
-vi.mock('./AgentSessionView', () => ({ AgentSessionView: () => null }))
+vi.mock('../../agent-sessions/components/AgentSessionView', () => ({ AgentSessionView: () => null }))
 
 // The wizard reads the single in-flight workflow to gate the Plan screen.
 // Default to "nothing active" so existing Plan/Start tests are unaffected.
@@ -22,7 +22,7 @@ vi.mock('../state/PortifyContext', () => ({
   useActivePortify: () => mockActivePortify.value,
 }))
 
-import * as api from '../../../api/client'
+import * as api from '../../../shared/api/client'
 import { PortifyWizard } from './PortifyWizard'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
@@ -252,7 +252,7 @@ describe('PortifyWizard', () => {
       verification: {
         ok: false,
         instances: [],
-        failureDetail: "boot failed: gateway — Can't reach database server at 34.87.54.225:3306",
+        failureDetail: "boot failed: gateway — Can't reach database server at 10.0.1.42:3306",
         notPortFixable: true,
       },
     }))

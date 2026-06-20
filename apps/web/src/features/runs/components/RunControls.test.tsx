@@ -3,7 +3,7 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { RunDetail } from '../../../api/types'
+import type { RunDetail } from '../../../shared/api/types'
 import { RunDetailColumn } from './RunDetailColumn'
 import { RunsColumn } from './RunsColumn'
 
@@ -22,14 +22,14 @@ vi.mock('../state/RunsContext', () => ({
   })),
 }))
 
-vi.mock('../../evaluation-export/state/EvaluationExportContext', () => ({
+vi.mock('../../evaluation/state/EvaluationExportContext', () => ({
   useEvaluationExports: vi.fn(() => ({
     startExport: vi.fn(),
   })),
 }))
 
 const gatePromo = vi.fn((_action: string, continueAction: () => void) => continueAction())
-vi.mock('../../../state/McpPromoContext', () => ({
+vi.mock('../../../shared/shell/McpPromoContext', () => ({
   useMcpPromo: () => ({ gatePromo }),
 }))
 
@@ -41,7 +41,7 @@ vi.mock('./PaneTerminal', () => ({
   PaneTerminal: () => <div>terminal</div>,
 }))
 
-vi.mock('../../../components/VerificationDialog', () => ({
+vi.mock('../../coverage/components/VerificationDialog', () => ({
   VerificationDialog: () => <div data-testid="verification-dialog">verification dialog</div>,
 }))
 
@@ -239,7 +239,7 @@ describe('run launch controls', () => {
 describe('run overview', () => {
   it('gates raw and localized evaluation exports through the MCP promo', async () => {
     const { useRun } = await import('../state/RunsContext')
-    const { useEvaluationExports } = await import('../../evaluation-export/state/EvaluationExportContext')
+    const { useEvaluationExports } = await import('../../evaluation/state/EvaluationExportContext')
     const startExport = vi.fn()
     vi.mocked(useEvaluationExports).mockReturnValue({ startExport } as ReturnType<typeof useEvaluationExports>)
     vi.mocked(useRun).mockReturnValue({

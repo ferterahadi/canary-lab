@@ -10,7 +10,7 @@ import {
   statusPillClassForStatus,
 } from './test-step-status'
 import { sourceLineForBodyLine } from './editor-location'
-import type { RunSummary } from '../../../api/types'
+import type { RunSummary } from '../../../shared/api/types'
 
 const completeWithFailure = (msg: string): RunSummary => ({
   complete: true,

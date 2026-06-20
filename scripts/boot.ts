@@ -1,7 +1,7 @@
 import { banner, section, ok, fail, info, dim, line } from '../shared/cli-ui/ui'
 import { runAsScript } from './run-as-script'
 import { getProjectRoot } from '../shared/runtime/project-root'
-import { DEFAULT_PORT, loadProjectConfig, resolveProjectPort } from '../apps/web-server/src/features/orchestration/logic/runtime/launcher/project-config'
+import { DEFAULT_PORT, loadProjectConfig, resolveProjectPort } from '../apps/web-server/src/features/runs/logic/runtime/launcher/project-config'
 
 // The boot command is a thin client over the same REST surface the web UI uses,
 // so it requires `canary-lab ui` to be running. The port comes from this

@@ -1,4 +1,4 @@
-import { StatusPill } from '../../../components/StatusPill'
+import { StatusPill } from '../../../shared/ui/StatusPill'
 
 // Runs pill: surfaced only while a test/verify run is running, healing, or
 // queued. Self-guards: renders nothing when no such run is active.

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { RunStatusIndicator } from './RunStatusIndicator'
-import type { RunStatus } from '../../../api/types'
+import type { RunStatus } from '../../../shared/api/types'
 
 // We don't have @testing-library/react in this workspace and the vitest
 // environment is `node`, so use renderToStaticMarkup to assert the output

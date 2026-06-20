@@ -6,7 +6,7 @@ import type {
   RunLifecycleEvent,
   RunStatus,
   TransientAction,
-} from '../../../api/types'
+} from '../../../shared/api/types'
 import {
   deriveDisplayStatus,
   deriveRunActionAvailability,

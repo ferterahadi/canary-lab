@@ -5,7 +5,7 @@ import {
   frameToAction,
   isActivePortify,
 } from './portify-state'
-import type { PortifyManifest } from '../../../api/client'
+import type { PortifyManifest } from '../../../shared/api/client'
 
 function m(over: Partial<PortifyManifest> = {}): PortifyManifest {
   return {

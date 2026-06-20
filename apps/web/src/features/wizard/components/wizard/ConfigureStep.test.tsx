@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ApiError } from '../../../../api/client'
+import { ApiError } from '../../../../shared/api/client'
 import { repoPathAddErrorMessage } from './ConfigureStep'
 
 describe('repoPathAddErrorMessage', () => {

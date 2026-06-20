@@ -1,4 +1,4 @@
-import type { PlanStep } from '../../../api/types'
+import type { PlanStep } from '../../../shared/api/types'
 
 // Pure helpers for the wizard's Plan Review step. The React glue calls these
 // to manipulate an immutable plan; nothing here touches the DOM, the API, or

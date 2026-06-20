@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import type { CoverageJobManifest } from '../../../api/types'
+import type { CoverageJobManifest } from '../../../shared/api/types'
 import { AgentSessionView } from '../../agent-sessions/components/AgentSessionView'
 
 // R13/R15: the dedicated Generating screen. While a coverage/summary job runs, the

@@ -3,7 +3,7 @@
 // side too so the in-place "show all runs" toggle and the optimistic-after-
 // delete refresh don't always need a round trip.
 
-import type { JournalEntry } from '../../../api/types'
+import type { JournalEntry } from '../../../shared/api/types'
 
 // Newest first by iteration. Entries with a null iteration sink to the
 // bottom (this is also what the server returns, but we re-sort to be safe

@@ -4,7 +4,7 @@
 // status. Once a per-step reporter lands we can refine `statusForStep` to take
 // the step path and look it up individually.
 
-import type { RunSummary } from '../../../api/types'
+import type { RunSummary } from '../../../shared/api/types'
 
 export type StepStatus = 'pending' | 'testing' | 'passed' | 'failed' | 'skipped' | 'timedout'
 export type RunningTestSummary = NonNullable<RunSummary['running']>
