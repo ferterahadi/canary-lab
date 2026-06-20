@@ -28,15 +28,15 @@ import {
   STAGE1_TEMPLATE,
   resolveWizardSessionId,
 } from '../logic/wizard-agent-spawner'
-import { refForAgentSpawn } from '../../agent-management/logic/agent-session-tailer'
+import { refForAgentSpawn } from '../../agent-sessions/logic/agent-session-tailer'
 import {
   loadAgentSession,
-} from '../../agent-management/logic/agent-session-log'
+} from '../../agent-sessions/logic/agent-session-log'
 import { resolveDraftStageSessionRef } from '../logic/draft-agent-session'
 import { randomUUID } from 'crypto'
 import { validateGeneratedFeatureFiles } from '../../../../../../shared/feature-scaffold'
 import { resolveDraftFile } from '../logic/draft-file-resolver'
-import { combinePrdText, extractPrdDocument } from '../../coverage-verification/logic/prd-document-extractor'
+import { combinePrdText, extractPrdDocument } from '../../coverage/logic/prd-document-extractor'
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../orchestration/logic/workspace-events'
 
 // Wizard pipeline ports. The agent spawners are injected — production wires

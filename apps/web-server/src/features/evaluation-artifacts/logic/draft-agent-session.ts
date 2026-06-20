@@ -1,5 +1,5 @@
 import fs from 'fs'
-import { locateCodexSessionLog, type AgentKind, type AgentSessionRef } from '../../agent-management/logic/agent-session-log'
+import { locateCodexSessionLog, type AgentKind, type AgentSessionRef } from '../../agent-sessions/logic/agent-session-log'
 
 export function resolveDraftStageSessionRef(input: {
   ref?: AgentSessionRef

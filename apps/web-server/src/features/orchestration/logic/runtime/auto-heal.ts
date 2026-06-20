@@ -6,7 +6,7 @@ import { buildHealAddendum, type HealMode } from './heal-prompt-builder'
 import { readManifest } from './manifest'
 import { buildRunPaths } from './run-paths'
 import { renderPersonalWikiMap } from '../../../../../../../shared/runtime/personal-wiki'
-import { HEAL_MODELS } from '../../../agent-management/logic/agent-models'
+import { HEAL_MODELS } from '../../../agent-sessions/logic/agent-models'
 
 // Heal-agent command builders for the web-server orchestrator. The orchestrator
 // runs claude / codex as a long-lived interactive REPL (no `-p`, no formatter

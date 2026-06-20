@@ -15,10 +15,10 @@ import {
   loadTemplate,
   type WizardAgentKind,
 } from './wizard-agent-spawner'
-import { WIZARD_PLAN_MODELS, WIZARD_SPEC_MODELS, modelFor } from '../../agent-management/logic/agent-models'
-import { claudeSessionLogPath } from '../../agent-management/logic/agent-session-log'
-import { recoverClaudeFinalText } from '../../agent-management/logic/agent-stream'
-import { runAgentProcess } from '../../agent-management/logic/agent-process'
+import { WIZARD_PLAN_MODELS, WIZARD_SPEC_MODELS, modelFor } from '../../agent-sessions/logic/agent-models'
+import { claudeSessionLogPath } from '../../agent-sessions/logic/agent-session-log'
+import { recoverClaudeFinalText } from '../../agent-sessions/logic/agent-stream'
+import { runAgentProcess } from '../../agent-sessions/logic/agent-process'
 
 // Headless driver for the wizard agents (the Portify model). Spawns the agent
 // CLI directly, tees stdout/stderr to the agent log, and returns the final

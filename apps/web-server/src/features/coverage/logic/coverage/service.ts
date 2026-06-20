@@ -1,0 +1,400 @@
+import fs from 'fs'
+import path from 'path'
+import { loadFeatures, listSpecFiles } from '../../../orchestration/logic/feature-loader'
+import { extractTestsFromSource } from '../../../orchestration/logic/ast-extractor'
+import type {
+  CoverageLedger,
+  PrdSummary,
+  ProposedMapping,
+  Requirement,
+} from '../../../../../../../shared/coverage/types'
+import { buildLastPassingRunIndex } from '../../../coverage/logic/coverage/grounding'
+import { computeCoverageLedger, type CoverageTestInput } from '../../../coverage/logic/coverage/ledger'
+import { applyRigor, type TestAssertions } from '../../../coverage/logic/coverage/rigor'
+import {
+  proposeCoverageMappings,
+  type AnnotateAdapter,
+  type AnnotateTestInput,
+  type CoverageAgentSession,
+} from '../../../coverage/logic/coverage/annotate-engine'
+import { writeCoversTag } from './tag-writer'
+import { changedDocPaths, changedRequirementIds, diffDocs, fingerprintDocs, requirementFingerprintMap, requirementsSetHash } from '../../../coverage/logic/coverage/fingerprints'
+import { deriveCoverageStateView, type DeriveStateInput } from './state'
+import { COVERAGE_STATE_JSON, readCoverageRunState, writeCoverageRunState } from '../../../coverage/logic/coverage/run-state'
+import { CoverageJobRunStore } from '../../../coverage/logic/coverage/jobs/store'
+import {
+  GENERATED_DOC_PREFIX,
+  docsDirFor,
+  isGeneratedDoc,
+  readDocsCollection,
+} from '../../../coverage/logic/coverage/docs-collection'
+import {
+  PRD_SUMMARY_JSON,
+  PRD_SUMMARY_MD,
+  readPrdSummary,
+  summarizePrd,
+  writePrdSummary,
+  type SummarizeAdapter,
+} from '../../../coverage/logic/coverage/prd-summary'
+
+// The single computation layer for the Verified Coverage Ledger. Both the REST
+// route (routes/coverage.ts) and the MCP tools (mcp/tools.ts) call these — so
+// the UI and an agent always see the same numbers (dual-surface parity).
+
+export class FeatureNotFoundError extends Error {
+  constructor(public readonly feature: string) {
+    super(`feature not found: ${feature}`)
+    this.name = 'FeatureNotFoundError'
+  }
+}
+
+function resolveFeatureDir(featuresDir: string, feature: string): string {
+  const found = loadFeatures(featuresDir).find((f) => f.name === feature)
+  if (!found || !found.featureDir) throw new FeatureNotFoundError(feature)
+  return found.featureDir
+}
+
+/** True when a feature with this name is discoverable (cheap existence guard for
+ *  the async job start path, which would otherwise fail deep in the driver). */
+export function featureExists(featuresDir: string, feature: string): boolean {
+  const found = loadFeatures(featuresDir).find((f) => f.name === feature)
+  return Boolean(found && found.featureDir)
+}
+
+interface CollectedTest {
+  input: CoverageTestInput
+  assertions: Set<string>
+  bodySource: string
+  /** Absolute path of the spec that defines the test (for tag-writing). */
+  absFile: string
+}
+
+interface CollectedTests {
+  tests: CoverageTestInput[]
+  assertions: TestAssertions[]
+  collected: CollectedTest[]
+}
+
+/** Union two optional lists, deduplicating preserving first-seen order.
+ *  Returns `a` unchanged (including undefined) when `b` is empty/absent. */
+function unionList<T>(a: T[] | undefined, b: T[] | undefined): T[] | undefined {
+  if (!b?.length) return a
+  const s = new Set(a)
+  for (const v of b) s.add(v)
+  return [...s]
+}
+
+/** Merge per-test annotation/assertion data across all of a feature's specs. */
+function collectTests(featureDir: string): CollectedTests {
+  const byName = new Map<string, CollectedTest>()
+  for (const file of listSpecFiles(featureDir)) {
+    let source = ''
+    try { source = fs.readFileSync(file, 'utf-8') } catch { continue }
+    const extracted = extractTestsFromSource(file, source)
+    for (const t of extracted.tests) {
+      const absFile = t.sourceFile ?? file
+      const existing = byName.get(t.name)
+      if (existing) {
+        // Same test name in two specs — union the linkage, concat assertions.
+        existing.input.requirements = unionList(existing.input.requirements, t.requirements)
+        existing.input.pathTypes = unionList(existing.input.pathTypes, t.pathTypes)
+        for (const a of t.assertions ?? []) existing.assertions.add(a)
+        continue
+      }
+      byName.set(t.name, {
+        input: {
+          name: t.name,
+          requirements: t.requirements,
+          pathTypes: t.pathTypes,
+          file: path.relative(featureDir, absFile),
+          line: t.line,
+        },
+        assertions: new Set(t.assertions ?? []),
+        bodySource: t.bodySource,
+        absFile,
+      })
+    }
+  }
+  const tests: CoverageTestInput[] = []
+  const assertions: TestAssertions[] = []
+  const collected: CollectedTest[] = []
+  for (const entry of byName.values()) {
+    tests.push(entry.input)
+    assertions.push({ name: entry.input.name, assertions: [...entry.assertions] })
+    collected.push(entry)
+  }
+  return { tests, assertions, collected }
+}
+
+function isDrifted(featureDir: string, summary: PrdSummary | null): boolean {
+  const live = readDocsCollection(featureDir).docsHash
+  if (!summary) {
+    // No summary yet but source docs exist → needs an initial generation.
+    return readDocsCollection(featureDir).entries.length > 0
+  }
+  return live !== summary.docsHash
+}
+
+export interface ComputeFeatureCoverageArgs {
+  featuresDir: string
+  logsDir: string
+  feature: string
+}
+
+/** Assemble the full ledger (breadth + rigor + drift) for one feature. */
+export function computeFeatureCoverage(args: ComputeFeatureCoverageArgs): CoverageLedger {
+  const featureDir = resolveFeatureDir(args.featuresDir, args.feature)
+  const summary = readPrdSummary(featureDir)
+  const requirements = summary?.requirements ?? []
+
+  const { tests, assertions } = collectTests(featureDir)
+  const index = buildLastPassingRunIndex(args.logsDir, args.feature)
+
+  const breadth = computeCoverageLedger({ feature: args.feature, requirements, tests, index })
+  const ledger = applyRigor(breadth, requirements, assertions)
+
+  // --- State model (R3): summary × coverage axes + drift detail. ---
+  const live = readDocsCollection(featureDir)
+  const summaryDrifted = summary ? live.docsHash !== summary.docsHash : false
+  const docsDelta = diffDocs(fingerprintDocs(live.entries), summary?.docFingerprints)
+  const runState = readCoverageRunState(featureDir)
+  const coverageStale = Boolean(
+    runState && summary?.requirementsHash && runState.requirementsHash !== summary.requirementsHash,
+  )
+  // A running background job (R4) overlays the persisted state with GENERATING.
+  const jobStore = new CoverageJobRunStore(args.logsDir)
+  const activeJob: DeriveStateInput['activeJob'] = jobStore.activeFor(args.feature, 'summary')
+    ? 'summary'
+    : jobStore.activeFor(args.feature, 'coverage')
+      ? 'coverage'
+      : null
+  const stateInput: DeriveStateInput = {
+    hasSummary: Boolean(summary),
+    summaryDrifted,
+    changedDocs: summaryDrifted ? changedDocPaths(docsDelta) : [],
+    hasAnnotatedTests: tests.some((t) => (t.requirements?.length ?? 0) > 0),
+    coverageStale,
+    coveragePct: ledger.coveragePct,
+    activeJob,
+  }
+  ledger.state = deriveCoverageStateView(stateInput)
+  ledger.docsDrift = summaryDrifted // back-compat mirror
+  return ledger
+}
+
+// Legacy review-queue sidecar (removed with the accept/reject flow). Still named
+// here so `clearPrdSummary` cleans up any file left by an older build.
+const LEGACY_MAPPINGS_JSON = '_coverage-mappings.json'
+
+// ---------------------------------------------------------------------------
+// Coverage engine — annotate-pass (R2). Infers which requirement(s) each
+// untagged test verifies and writes the `covers` tag straight away. Summary +
+// Coverage are one exercise (R16): there is no review gate — mappings auto-apply.
+// ---------------------------------------------------------------------------
+
+export interface RunCoverageEngineArgs {
+  featuresDir: string
+  logsDir: string
+  feature: string
+  adapter?: AnnotateAdapter
+  /** 'full' re-infers against every active requirement; 'delta' (R10) re-infers
+   *  only requirements whose fingerprint changed since the last engine run — and
+   *  no-ops entirely when nothing changed. Default 'full'. */
+  mode?: 'full' | 'delta'
+  cwd?: string
+  now?: string
+  signal?: AbortSignal
+  onOutput?: (chunk: string) => void
+  onAgentSession?: (session: CoverageAgentSession) => void
+}
+
+export interface RunCoverageEngineResult {
+  feature: string
+  /** Mappings whose `covers` tags were written this pass. */
+  applied: ProposedMapping[]
+  /** Test names that were orphans before the pass. */
+  orphanTestsBefore: string[]
+  /** delta mode: the requirement ids re-inferred this pass (the changed set). */
+  reconciledRequirementIds?: string[]
+  /** The recomputed ledger after applying (auto) or storing (review). */
+  ledger: CoverageLedger
+}
+
+/** Resolve a relative spec path under the feature and write a covers tag onto a
+ *  test. Returns true when the file changed. */
+function applyTagToFile(
+  featureDir: string,
+  relFile: string,
+  testName: string,
+  requirements: string[],
+  pathTypes: ProposedMapping['pathTypes'],
+): boolean {
+  const abs = path.join(featureDir, relFile)
+  if (!fs.existsSync(abs)) return false
+  const source = fs.readFileSync(abs, 'utf-8')
+  const next = writeCoversTag(source, testName, { requirements, pathTypes })
+  if (next === source) return false
+  fs.writeFileSync(abs, next)
+  return true
+}
+
+export async function runCoverageEngine(args: RunCoverageEngineArgs): Promise<RunCoverageEngineResult> {
+  const featureDir = resolveFeatureDir(args.featuresDir, args.feature)
+  const summary = readPrdSummary(featureDir)
+  const requirements: Requirement[] = summary?.requirements ?? []
+
+  const { collected } = collectTests(featureDir)
+  const orphans = collected.filter((c) => !(c.input.requirements?.length))
+  const orphanTestsBefore = orphans.map((c) => c.input.name).sort()
+
+  const engineInputs: AnnotateTestInput[] = orphans.map((c) => ({
+    name: c.input.name,
+    file: c.input.file,
+    bodySource: c.bodySource,
+    assertions: [...c.assertions],
+  }))
+
+  // Reconcile-by-delta (R10): in delta mode, restrict the candidate requirements
+  // to those whose fingerprint changed since the last engine run — unchanged reqs
+  // keep their existing mappings, and an unchanged set is a no-op.
+  let candidateRequirements = requirements
+  let reconciledRequirementIds: string[] | undefined
+  if (args.mode === 'delta') {
+    const prior = readCoverageRunState(featureDir)
+    const changedIds = changedRequirementIds(requirements, prior?.requirementFingerprints)
+    reconciledRequirementIds = changedIds
+    if (changedIds.length === 0) {
+      args.onOutput?.('[delta] requirements unchanged — nothing to reconcile\n')
+      return { feature: args.feature, applied: [], orphanTestsBefore, reconciledRequirementIds, ledger: computeFeatureCoverage(args) }
+    }
+    args.onOutput?.(`[delta] reconciling ${changedIds.length} changed requirement(s): ${changedIds.join(', ')}\n`)
+    const changedSet = new Set(changedIds)
+    candidateRequirements = requirements.filter((r) => changedSet.has(r.id))
+  }
+
+  const proposals = await proposeCoverageMappings(
+    { requirements: candidateRequirements, tests: engineInputs, adapter: args.adapter, cwd: args.cwd, signal: args.signal, onOutput: args.onOutput, onSession: args.onAgentSession },
+  )
+
+  // No review gate (R16): every inferred mapping's `covers` tag is written now.
+  const applied: ProposedMapping[] = []
+  for (const m of proposals) {
+    if (!m.file) continue
+    if (applyTagToFile(featureDir, m.file, m.testName, m.requirements, m.pathTypes)) applied.push(m)
+  }
+
+  // Record the requirements set the engine just ran against — coverage drops to
+  // STALE when the set later moves (R3 signal; R10 turns it into a delta re-infer).
+  writeCoverageRunState(featureDir, {
+    requirementsHash: summary?.requirementsHash ?? requirementsSetHash(requirements),
+    requirementFingerprints: requirementFingerprintMap(requirements),
+    ranAt: args.now ?? new Date().toISOString(),
+  })
+
+  const ledger = computeFeatureCoverage({ featuresDir: args.featuresDir, logsDir: args.logsDir, feature: args.feature })
+  return { feature: args.feature, applied, orphanTestsBefore, reconciledRequirementIds, ledger }
+}
+
+export interface FeatureDoc {
+  relPath: string
+  /** A generated PRD artifact (`_prd-*`) vs a source doc the user added. */
+  generated: boolean
+  sizeBytes: number
+}
+
+export interface FeatureDocsListing {
+  feature: string
+  docs: FeatureDoc[]
+  hasPrdSummary: boolean
+  prdSummaryGeneratedAt?: string
+  /** Source-doc count (excludes generated artifacts). */
+  sourceDocCount: number
+  docsDrift: boolean
+}
+
+export function listFeatureDocs(featuresDir: string, feature: string): FeatureDocsListing {
+  const featureDir = resolveFeatureDir(featuresDir, feature)
+  const docsDir = docsDirFor(featureDir)
+  const docs: FeatureDoc[] = []
+  if (fs.existsSync(docsDir)) {
+    for (const name of fs.readdirSync(docsDir).sort()) {
+      const full = path.join(docsDir, name)
+      if (!fs.statSync(full).isFile() || !name.toLowerCase().endsWith('.md')) continue
+      docs.push({ relPath: name, generated: isGeneratedDoc(name), sizeBytes: fs.statSync(full).size })
+    }
+  }
+  const summary = readPrdSummary(featureDir)
+  const sourceDocCount = docs.filter((d) => !d.generated).length
+  return {
+    feature,
+    docs,
+    hasPrdSummary: Boolean(summary),
+    prdSummaryGeneratedAt: summary?.generatedAt,
+    sourceDocCount,
+    docsDrift: isDrifted(featureDir, summary),
+  }
+}
+
+export interface RegeneratePrdSummaryArgs {
+  featuresDir: string
+  feature: string
+  adapter?: SummarizeAdapter
+  cwd?: string
+  now?: string
+  onOutput?: (chunk: string) => void
+  onAgentSession?: (session: CoverageAgentSession) => void
+}
+
+export interface RegeneratePrdSummaryResult {
+  feature: string
+  summary: PrdSummary
+  /** Relative paths of the written generated artifacts. */
+  written: string[]
+}
+
+/**
+ * Regenerate the PRD summary from the current source docs, preserving existing
+ * requirement ids (the spine). Writes the sidecar + markdown back into docs/.
+ */
+export async function regeneratePrdSummary(args: RegeneratePrdSummaryArgs): Promise<RegeneratePrdSummaryResult> {
+  const found = loadFeatures(args.featuresDir).find((f) => f.name === args.feature)
+  if (!found || !found.featureDir) throw new FeatureNotFoundError(args.feature)
+  const featureDir = found.featureDir
+
+  const collection = readDocsCollection(featureDir)
+  const previous = readPrdSummary(featureDir)
+  const summary = await summarizePrd({
+    collection,
+    previous,
+    adapter: args.adapter,
+    cwd: args.cwd,
+    now: args.now,
+    onOutput: args.onOutput,
+    onSession: args.onAgentSession,
+  })
+  const written = writePrdSummary(featureDir, found.name, summary)
+  return {
+    feature: args.feature,
+    summary: written,
+    written: [path.join('docs', PRD_SUMMARY_JSON), path.join('docs', PRD_SUMMARY_MD)],
+  }
+}
+
+/**
+ * Remove a feature's generated PRD summary and the coverage sidecars tied to it
+ * (run-state, pending mappings). Source docs are untouched. After this the
+ * summary state returns to ABSENT — and, if no source docs remain, the whole
+ * surface is back to its initial empty state.
+ */
+export function clearPrdSummary(args: { featuresDir: string; feature: string }): { feature: string; removed: string[] } {
+  const featureDir = resolveFeatureDir(args.featuresDir, args.feature)
+  const docsDir = docsDirFor(featureDir)
+  const removed: string[] = []
+  for (const name of [PRD_SUMMARY_JSON, PRD_SUMMARY_MD, LEGACY_MAPPINGS_JSON, COVERAGE_STATE_JSON]) {
+    const p = path.join(docsDir, name)
+    if (fs.existsSync(p)) { fs.rmSync(p); removed.push(name) }
+  }
+  return { feature: args.feature, removed }
+}
+
+export { GENERATED_DOC_PREFIX }

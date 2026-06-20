@@ -70,7 +70,7 @@ describe('runPortifyAgent', () => {
   it('calls the activity callback (covers the fs.statSync lambda) and onIdle', async () => {
     // Mock startIdleTimer to capture and immediately invoke both callbacks so
     // the inline arrow functions at lines 75-76 are covered.
-    const idleTimerModule = await import('../../../../agent-management/logic/agent-idle-timer')
+    const idleTimerModule = await import('../../../../agent-sessions/logic/agent-idle-timer')
     const captured: { activity?: () => number; onIdle?: (ms: number) => void } = {}
     vi.spyOn(idleTimerModule, 'startIdleTimer').mockImplementationOnce((opts) => {
       captured.activity = opts.activity
