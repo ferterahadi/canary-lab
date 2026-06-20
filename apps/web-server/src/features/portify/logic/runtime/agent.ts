@@ -3,7 +3,7 @@ import os from 'os'
 import path from 'path'
 import { type ChildProcess } from 'child_process'
 import { claudeSessionLogPath, encodeClaudeProjectDir } from '../../../agent-sessions/logic/agent-session-log'
-import { resolveAgentBinary, type HealAgent } from '../../../orchestration/logic/runtime/auto-heal'
+import { resolveAgentBinary, type HealAgent } from '../../../runs/logic/runtime/auto-heal'
 import { PORTIFY_MODELS, modelArgs } from '../../../agent-sessions/logic/agent-models'
 import { runAgentProcess, buildClaudeAgenticArgs } from '../../../agent-sessions/logic/agent-process'
 

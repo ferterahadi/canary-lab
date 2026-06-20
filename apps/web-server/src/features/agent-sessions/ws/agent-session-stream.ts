@@ -15,11 +15,11 @@ import { readEvaluationExportTask } from '../../evaluation-artifacts/logic/evalu
 import { tailAgentSession } from '../../agent-sessions/logic/agent-session-tailer'
 import { resolveDraftStageSessionRef } from '../../evaluation-artifacts/logic/draft-agent-session'
 import { readDraft, paths as draftPaths } from '../../evaluation-artifacts/logic/draft-store'
-import { runDirFor, buildRunPaths } from '../../orchestration/logic/runtime/run-paths'
+import { runDirFor, buildRunPaths } from '../../runs/logic/runtime/run-paths'
 import { benchmarkDir } from '../../benchmark/logic/runtime/paths'
 import { portifyDir } from '../../portify/logic/runtime/paths'
 import { CoverageJobRunStore } from '../../coverage/logic/coverage/jobs/store'
-import type { RunStore } from '../../orchestration/logic/run-store'
+import type { RunStore } from '../../runs/logic/run-store'
 
 // WebSocket route that streams live structured agent-session events.
 // Mirrors `draft-agent-stream.ts` (pty bytes) but emits normalized

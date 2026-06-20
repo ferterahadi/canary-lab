@@ -4,25 +4,25 @@ import path from 'path'
 import { afterEach, describe, it, expect, vi } from 'vitest'
 import Fastify from 'fastify'
 import { benchmarkRoutes } from '../../benchmark/routes/benchmarks'
-import { launchEditorDir } from '../../orchestration/logic/editor-launch'
-import { addWorktree, removeWorktree } from '../../orchestration/logic/runtime/repo-worktree'
-import { listWorktrees } from '../../orchestration/logic/runtime/worktree-inventory'
-import { loadProjectConfig } from '../../orchestration/logic/runtime/launcher/project-config'
-import { loadFeatures } from '../../orchestration/logic/feature-loader'
-import { getGitRoot } from '../../orchestration/logic/git-repo'
+import { launchEditorDir } from '../../../shared/editor-launch'
+import { addWorktree, removeWorktree } from '../../runs/logic/runtime/repo-worktree'
+import { listWorktrees } from '../../runs/logic/runtime/worktree-inventory'
+import { loadProjectConfig } from '../../runs/logic/runtime/launcher/project-config'
+import { loadFeatures } from '../../config/logic/feature-loader'
+import { getGitRoot } from '../../../shared/git-repo'
 import type { BenchmarkStore } from '../../benchmark/logic/runtime/store'
 import type { SabotageSkill } from '../../benchmark/logic/runtime/skills'
 import type { BenchmarkManifest, StartBenchmarkInput } from '../../benchmark/logic/runtime/types'
 
-vi.mock('../../orchestration/logic/editor-launch', () => ({ launchEditorDir: vi.fn(() => 'vscode') }))
-vi.mock('../../orchestration/logic/runtime/repo-worktree', () => ({ addWorktree: vi.fn(), removeWorktree: vi.fn(async () => {}) }))
-vi.mock('../../orchestration/logic/runtime/worktree-inventory', () => ({ listWorktrees: vi.fn(async () => []) }))
-vi.mock('../../orchestration/logic/feature-loader', () => ({ loadFeatures: vi.fn(() => []) }))
-vi.mock('../../orchestration/logic/git-repo', async (orig) => ({
-  ...(await orig<typeof import('../../orchestration/logic/git-repo')>()),
+vi.mock('../../../shared/editor-launch', () => ({ launchEditorDir: vi.fn(() => 'vscode') }))
+vi.mock('../../runs/logic/runtime/repo-worktree', () => ({ addWorktree: vi.fn(), removeWorktree: vi.fn(async () => {}) }))
+vi.mock('../../runs/logic/runtime/worktree-inventory', () => ({ listWorktrees: vi.fn(async () => []) }))
+vi.mock('../../config/logic/feature-loader', () => ({ loadFeatures: vi.fn(() => []) }))
+vi.mock('../../../shared/git-repo', async (orig) => ({
+  ...(await orig<typeof import('../../../shared/git-repo')>()),
   getGitRoot: vi.fn().mockResolvedValue(null),
 }))
-vi.mock('../../orchestration/logic/runtime/launcher/project-config', () => ({ loadProjectConfig: vi.fn(() => ({ editor: 'cursor' })) }))
+vi.mock('../../runs/logic/runtime/launcher/project-config', () => ({ loadProjectConfig: vi.fn(() => ({ editor: 'cursor' })) }))
 
 function manifest(over: Partial<BenchmarkManifest> = {}): BenchmarkManifest {
   return {

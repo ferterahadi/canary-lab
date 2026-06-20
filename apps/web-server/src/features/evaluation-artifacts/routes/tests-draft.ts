@@ -37,7 +37,7 @@ import { randomUUID } from 'crypto'
 import { validateGeneratedFeatureFiles } from '../../../../../../shared/feature-scaffold'
 import { resolveDraftFile } from '../logic/draft-file-resolver'
 import { combinePrdText, extractPrdDocument } from '../../coverage/logic/prd-document-extractor'
-import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../orchestration/logic/workspace-events'
+import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../shared/workspace-events'
 
 // Wizard pipeline ports. The agent spawners are injected — production wires
 // them to real `claude -p` pty invocations; tests pass synchronous stubs.

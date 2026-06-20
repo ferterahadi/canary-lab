@@ -1,8 +1,8 @@
 import type { FastifyInstance } from 'fastify'
 import type { PortifyStore } from '../../portify/logic/runtime/store'
 import type { PortifyManifest, StartPortifyInput, StartPortifyResult } from '../../portify/logic/runtime/types'
-import type { HealAgent } from '../../orchestration/logic/runtime/auto-heal'
-import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../orchestration/logic/workspace-events'
+import type { HealAgent } from '../../runs/logic/runtime/auto-heal'
+import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../shared/workspace-events'
 
 // REST surface for the port-ification workflow, mirroring routes/benchmarks.ts.
 // Reads go through the injected store; start/save/cancel delegate to the

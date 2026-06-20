@@ -3,7 +3,7 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { baselinePlaywrightSpawner, buildBaselineHealPrompt } from './arm-config'
-import type { PlaywrightSpawner } from '../../../orchestration/logic/runtime/orchestrator'
+import type { PlaywrightSpawner } from '../../../runs/logic/runtime/orchestrator'
 
 describe('baselinePlaywrightSpawner', () => {
   it('prepends CANARY_LAB_BENCHMARK_MODE=baseline to the Playwright command (per-child, parallel-safe)', () => {

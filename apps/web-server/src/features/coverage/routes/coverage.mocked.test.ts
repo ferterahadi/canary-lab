@@ -25,8 +25,8 @@ vi.mock('../logic/coverage/service', async (importOriginal) => {
   }
 })
 
-vi.mock('../../orchestration/logic/feature-authoring', async (importOriginal) => {
-  const original = await importOriginal<typeof import('../../orchestration/logic/feature-authoring')>()
+vi.mock('../../config/logic/feature-authoring', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../../config/logic/feature-authoring')>()
   return {
     ...original,
     writeFeatureDoc: vi.fn(original.writeFeatureDoc),
@@ -36,7 +36,7 @@ vi.mock('../../orchestration/logic/feature-authoring', async (importOriginal) =>
 import Fastify, { type FastifyInstance } from 'fastify'
 import { coverageRoutes } from './coverage'
 import { computeFeatureCoverage, listFeatureDocs, clearPrdSummary, regeneratePrdSummary } from '../../coverage/logic/coverage/service'
-import { writeFeatureDoc } from '../../orchestration/logic/feature-authoring'
+import { writeFeatureDoc } from '../../config/logic/feature-authoring'
 import { extractPrdDocument } from '../../coverage/logic/prd-document-extractor'
 
 let tmpDir: string

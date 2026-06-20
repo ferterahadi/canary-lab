@@ -17,7 +17,7 @@ vi.mock('../../../agent-sessions/logic/agent-idle-timer', () => ({
 
 // Mock pickAvailableHealAgent so defaultResolveAgents is exercisable without
 // requiring real agent binaries on PATH.
-vi.mock('../../../orchestration/logic/runtime/auto-heal', () => ({
+vi.mock('../../../runs/logic/runtime/auto-heal', () => ({
   pickAvailableHealAgent: vi.fn(() => null),
 }))
 

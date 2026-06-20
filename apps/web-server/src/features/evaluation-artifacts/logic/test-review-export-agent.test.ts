@@ -3,7 +3,7 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { RunDetail } from '../../orchestration/logic/run-store'
+import type { RunDetail } from '../../runs/logic/run-store'
 
 let tmpDir: string
 let spawnCalls: Array<{ command: string; args: string[]; child: FakeChild }> = []
@@ -154,7 +154,7 @@ describe('evaluation rewrite agent path', () => {
 
   it('records non-Error spawn failures from an available agent', async () => {
     availableAgents = ['claude']
-    vi.doMock('../../orchestration/logic/runtime/auto-heal', () => ({
+    vi.doMock('../../runs/logic/runtime/auto-heal', () => ({
       pickAvailableHealAgent: () => 'claude',
     }))
     vi.doMock('child_process', () => ({
@@ -220,7 +220,7 @@ describe('evaluation rewrite agent path', () => {
 })
 
 function mockAgentModules(onSpawn?: (ctx: { command: string; args: string[]; child: FakeChild }) => void): void {
-  vi.doMock('../../orchestration/logic/runtime/auto-heal', () => ({
+  vi.doMock('../../runs/logic/runtime/auto-heal', () => ({
     pickAvailableHealAgent: (preferred?: string) => {
       if (preferred === 'claude' || preferred === 'codex') return availableAgents.includes(preferred) ? preferred : null
       return availableAgents[0] ?? null

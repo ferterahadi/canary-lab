@@ -1,7 +1,7 @@
 import fs from 'fs'
 import path from 'path'
-import type { BuildHealCyclePrompt } from '../../../orchestration/logic/runtime/auto-heal'
-import type { PlaywrightSpawner } from '../../../orchestration/logic/runtime/orchestrator'
+import type { BuildHealCyclePrompt } from '../../../runs/logic/runtime/auto-heal'
+import type { PlaywrightSpawner } from '../../../runs/logic/runtime/orchestrator'
 
 // The harness-vs-baseline knob. Both arms run the SAME agent + model + Playwright
 // MCP; the ONLY differences are (1) whether the failure-evidence enrichment runs

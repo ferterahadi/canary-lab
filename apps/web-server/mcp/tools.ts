@@ -3,10 +3,10 @@ import fs from 'fs'
 import path from 'path'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
-import type { RunStore } from '../src/features/orchestration/logic/run-store'
-import type { RunDetail, RunStoreEvent } from '../src/features/orchestration/logic/run-store'
-import type { ExternalHealBroker } from '../src/features/external-heal/logic/external-heal-broker'
-import type { ExternalHealClientKind } from '../src/features/orchestration/logic/runtime/manifest'
+import type { RunStore } from '../src/features/runs/logic/run-store'
+import type { RunDetail, RunStoreEvent } from '../src/features/runs/logic/run-store'
+import type { ExternalHealBroker } from '../src/features/runs/logic/heal/external-heal-broker'
+import type { ExternalHealClientKind } from '../src/features/runs/logic/runtime/manifest'
 import {
   buildExternalFailureDetail,
   buildExternalHealContext,
@@ -15,10 +15,10 @@ import {
   writeHealSignal,
   type ExternalHealContext,
   type NormalizedRunCounts,
-} from '../src/features/external-heal/logic/external-heal-surface'
-import { loadFeatures } from '../src/features/orchestration/logic/feature-loader'
-import { isHealClaimAllowed } from '../src/features/external-heal/logic/heal-claim-policy'
-import { computePortPreflight } from '../src/features/orchestration/logic/runtime/port-preflight'
+} from '../src/features/runs/logic/heal/external-heal-surface'
+import { loadFeatures } from '../src/features/config/logic/feature-loader'
+import { isHealClaimAllowed } from '../src/features/runs/logic/heal/heal-claim-policy'
+import { computePortPreflight } from '../src/features/runs/logic/runtime/port-preflight'
 import {
   createVerificationConfig,
   getVerificationConfig,
@@ -37,7 +37,7 @@ import {
   writeFeatureDoc,
   deleteFeatureDoc,
   type EnvFileSource,
-} from '../src/features/orchestration/logic/feature-authoring'
+} from '../src/features/config/logic/feature-authoring'
 import {
   FeatureNotFoundError,
   clearPrdSummary,
@@ -82,7 +82,7 @@ import {
   isTerminalRunStatus,
   deriveRunActionAvailability,
 } from '../../../shared/run-state'
-import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../src/features/orchestration/logic/workspace-events'
+import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../src/shared/workspace-events'
 import type { PortifyManifest } from '../src/features/portify/logic/runtime/types'
 import { overlayExists as portifyOverlayExists } from '../src/features/portify/logic/runtime/overlay'
 
