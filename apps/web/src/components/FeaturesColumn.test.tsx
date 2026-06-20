@@ -10,7 +10,7 @@ import { FeaturesColumn } from './FeaturesColumn'
 const startNewWizard = vi.fn()
 const gatePromo = vi.fn((_action: string, continueAction: () => void) => continueAction())
 
-vi.mock('../state/WizardDraftContext', () => ({
+vi.mock('../features/wizard/state/WizardDraftContext', () => ({
   useWizardDrafts: () => ({ startNewWizard }),
 }))
 

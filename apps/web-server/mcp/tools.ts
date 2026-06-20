@@ -3,10 +3,10 @@ import fs from 'fs'
 import path from 'path'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
-import type { RunStore } from '../lib/run-store'
-import type { RunDetail, RunStoreEvent } from '../lib/run-store'
-import type { ExternalHealBroker } from '../lib/external-heal-broker'
-import type { ExternalHealClientKind } from '../lib/runtime/manifest'
+import type { RunStore } from '../src/features/orchestration/logic/run-store'
+import type { RunDetail, RunStoreEvent } from '../src/features/orchestration/logic/run-store'
+import type { ExternalHealBroker } from '../src/features/external-heal/logic/external-heal-broker'
+import type { ExternalHealClientKind } from '../src/features/orchestration/logic/runtime/manifest'
 import {
   buildExternalFailureDetail,
   buildExternalHealContext,
@@ -15,17 +15,17 @@ import {
   writeHealSignal,
   type ExternalHealContext,
   type NormalizedRunCounts,
-} from '../lib/external-heal-surface'
-import { loadFeatures } from '../lib/feature-loader'
-import { isHealClaimAllowed } from '../lib/heal-claim-policy'
-import { computePortPreflight } from '../lib/runtime/port-preflight'
+} from '../src/features/external-heal/logic/external-heal-surface'
+import { loadFeatures } from '../src/features/orchestration/logic/feature-loader'
+import { isHealClaimAllowed } from '../src/features/external-heal/logic/heal-claim-policy'
+import { computePortPreflight } from '../src/features/orchestration/logic/runtime/port-preflight'
 import {
   createVerificationConfig,
   getVerificationConfig,
   listVerificationConfigs,
   updateVerificationConfig,
   type ResolveVerificationInput,
-} from '../lib/verification'
+} from '../src/features/coverage-verification/logic/verification'
 import {
   applyExternalDraftFiles,
   captureFeatureEnvFiles,
@@ -37,7 +37,7 @@ import {
   writeFeatureDoc,
   deleteFeatureDoc,
   type EnvFileSource,
-} from '../lib/feature-authoring'
+} from '../src/features/orchestration/logic/feature-authoring'
 import {
   FeatureNotFoundError,
   clearPrdSummary,
@@ -45,9 +45,9 @@ import {
   featureExists,
   listFeatureDocs,
   regeneratePrdSummary,
-} from '../lib/coverage/service'
-import { CoverageJobRunStore } from '../lib/coverage/jobs/store'
-import { startCoverageJob, CoverageJobConflictError } from '../lib/coverage/jobs/runner'
+} from '../src/features/coverage-verification/logic/coverage/service'
+import { CoverageJobRunStore } from '../src/features/coverage-verification/logic/coverage/jobs/store'
+import { startCoverageJob, CoverageJobConflictError } from '../src/features/coverage-verification/logic/coverage/jobs/runner'
 import {
   createDraft,
   paths as draftPaths,
@@ -55,7 +55,7 @@ import {
   writeDraft,
   type DraftRecord,
   type ExternalDraftStage,
-} from '../lib/draft-store'
+} from '../src/features/evaluation-artifacts/logic/draft-store'
 import {
   appendEvaluationExportLog,
   createEvaluationExportTask,
@@ -67,8 +67,8 @@ import {
   readEvaluationExportZip,
   writeEvaluationExportZip,
   type EvaluationExportTaskRecord,
-} from '../lib/evaluation-export-store'
-import { buildEvaluationExportArchive } from '../lib/evaluation-export-archive'
+} from '../src/features/evaluation-artifacts/logic/evaluation-export-store'
+import { buildEvaluationExportArchive } from '../src/features/evaluation-artifacts/logic/evaluation-export-archive'
 import {
   applyEvaluationTextSlotRewrite,
   buildTestReviewPacket,
@@ -76,15 +76,15 @@ import {
   evaluationTextSlots,
   normalizeEvaluationRewrite,
   type EvaluationRewrite,
-} from '../lib/test-review-export'
+} from '../src/features/evaluation-artifacts/logic/test-review-export'
 import {
   isActiveRunStatus,
   isTerminalRunStatus,
   deriveRunActionAvailability,
 } from '../../../shared/run-state'
-import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../lib/workspace-events'
-import type { PortifyManifest } from '../lib/runtime/portify/types'
-import { overlayExists as portifyOverlayExists } from '../lib/runtime/portify/overlay'
+import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../src/features/orchestration/logic/workspace-events'
+import type { PortifyManifest } from '../src/features/orchestration/logic/runtime/portify/types'
+import { overlayExists as portifyOverlayExists } from '../src/features/orchestration/logic/runtime/portify/overlay'
 
 // Every Canary Lab MCP tool is a thin wrapper around an existing internal
 // helper or REST handler. The translation pattern: validate input via zod,

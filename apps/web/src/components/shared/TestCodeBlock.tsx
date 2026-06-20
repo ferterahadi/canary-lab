@@ -3,8 +3,8 @@ import type { ReactNode } from 'react'
 import { useTheme } from '../../lib/theme'
 import type { ExtractedStep } from '../../api/types'
 import * as api from '../../api/client'
-import { sourceLineForBodyLine } from '../../lib/editor-location'
-import { colorClassForStatus, statusLabel, statusPillClassForStatus, type StepStatus } from '../../lib/test-step-status'
+import { sourceLineForBodyLine } from '../../features/runs/utils/editor-location'
+import { colorClassForStatus, statusLabel, statusPillClassForStatus, type StepStatus } from '../../features/runs/utils/test-step-status'
 
 type Highlighter = { codeToHtml: (code: string, opts: { lang: string; theme: string }) => string }
 let highlighterPromise: Promise<Highlighter> | null = null

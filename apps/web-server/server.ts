@@ -4,59 +4,59 @@ import Fastify, { type FastifyInstance } from 'fastify'
 import websocketPlugin from '@fastify/websocket'
 import fastifyStatic from '@fastify/static'
 import { isActiveRunStatus, isRestartableRunStatus } from '../../shared/run-state'
-import { featuresRoutes } from './routes/features'
-import { coverageRoutes } from './routes/coverage'
-import { featureConfigRoutes } from './routes/feature-config'
-import { verificationRoutes } from './routes/verification'
-import { projectConfigRoutes } from './routes/project-config'
-import { runsRoutes, type ExternalHealAgentRequest } from './routes/runs'
-import { journalRoutes } from './routes/journal'
-import { testsDraftRoutes, type TestsDraftRouteDeps } from './routes/tests-draft'
-import { externalHealRoutes, makeExternalHealAuditLogger } from './routes/external-heal'
-import { ExternalHealBroker } from './lib/external-heal-broker'
+import { featuresRoutes } from './src/features/orchestration/routes/features'
+import { coverageRoutes } from './src/features/coverage-verification/routes/coverage'
+import { featureConfigRoutes } from './src/features/orchestration/routes/feature-config'
+import { verificationRoutes } from './src/features/coverage-verification/routes/verification'
+import { projectConfigRoutes } from './src/features/orchestration/routes/project-config'
+import { runsRoutes, type ExternalHealAgentRequest } from './src/features/orchestration/routes/runs'
+import { journalRoutes } from './src/features/orchestration/routes/journal'
+import { testsDraftRoutes, type TestsDraftRouteDeps } from './src/features/evaluation-artifacts/routes/tests-draft'
+import { externalHealRoutes, makeExternalHealAuditLogger } from './src/features/external-heal/routes/external-heal'
+import { ExternalHealBroker } from './src/features/external-heal/logic/external-heal-broker'
 import { registerMcpRoutes } from './mcp/server'
-import { paneStreamRoutes } from './ws/pane-stream'
-import { runsStreamRoutes } from './ws/runs-stream'
-import { agentSessionStreamRoutes } from './ws/agent-session-stream'
-import { workspaceStreamRoutes } from './ws/workspace-stream'
-import { createRegistry, RunStore, type OrchestratorRegistry, type OrchestratorLike, type StartRunOutcome } from './lib/run-store'
-import { benchmarkRoutes } from './routes/benchmarks'
-import { benchmarkStreamRoutes } from './ws/benchmark-stream'
-import { BenchmarkRunStore } from './lib/runtime/benchmark/store'
-import { createBenchmarkRunner } from './lib/runtime/benchmark/runner'
-import { loadBundledSabotageSkills, sabotageSkillsForFeature } from './lib/runtime/benchmark/skills'
-import { benchmarkDir } from './lib/runtime/benchmark/paths'
-import { portifyRoutes } from './routes/portify'
-import { portifyStreamRoutes } from './ws/portify-stream'
-import { PortifyRunStore } from './lib/runtime/portify/store'
-import { CoverageJobRunStore } from './lib/coverage/jobs/store'
-import { createPortifyRunner } from './lib/runtime/portify/runner'
-import { reclaimOrphanedPortify } from './lib/runtime/portify/reclaim'
-import { portifyDir } from './lib/runtime/portify/paths'
+import { paneStreamRoutes } from './src/features/orchestration/ws/pane-stream'
+import { runsStreamRoutes } from './src/features/orchestration/ws/runs-stream'
+import { agentSessionStreamRoutes } from './src/features/agent-management/ws/agent-session-stream'
+import { workspaceStreamRoutes } from './src/features/orchestration/ws/workspace-stream'
+import { createRegistry, RunStore, type OrchestratorRegistry, type OrchestratorLike, type StartRunOutcome } from './src/features/orchestration/logic/run-store'
+import { benchmarkRoutes } from './src/features/orchestration/routes/benchmarks'
+import { benchmarkStreamRoutes } from './src/features/orchestration/ws/benchmark-stream'
+import { BenchmarkRunStore } from './src/features/orchestration/logic/runtime/benchmark/store'
+import { createBenchmarkRunner } from './src/features/orchestration/logic/runtime/benchmark/runner'
+import { loadBundledSabotageSkills, sabotageSkillsForFeature } from './src/features/orchestration/logic/runtime/benchmark/skills'
+import { benchmarkDir } from './src/features/orchestration/logic/runtime/benchmark/paths'
+import { portifyRoutes } from './src/features/orchestration/routes/portify'
+import { portifyStreamRoutes } from './src/features/orchestration/ws/portify-stream'
+import { PortifyRunStore } from './src/features/orchestration/logic/runtime/portify/store'
+import { CoverageJobRunStore } from './src/features/coverage-verification/logic/coverage/jobs/store'
+import { createPortifyRunner } from './src/features/orchestration/logic/runtime/portify/runner'
+import { reclaimOrphanedPortify } from './src/features/orchestration/logic/runtime/portify/reclaim'
+import { portifyDir } from './src/features/orchestration/logic/runtime/portify/paths'
 import {
   parseAgentSessionRefFile,
   selectAgentSessionRef,
   loadAgentSession,
   findClaudeLogBySessionId,
-} from './lib/agent-session-log'
-import { WorkspaceEventBus } from './lib/workspace-events'
-import { PaneBroker } from './lib/pane-broker'
-import { loadFeatures } from './lib/feature-loader'
+} from './src/features/agent-management/logic/agent-session-log'
+import { WorkspaceEventBus } from './src/features/orchestration/logic/workspace-events'
+import { PaneBroker } from './src/features/orchestration/logic/pane-broker'
+import { loadFeatures } from './src/features/orchestration/logic/feature-loader'
 import {
   spawnPlanAgent as makePlanAgentSpawner,
   spawnSpecAgent as makeSpecAgentSpawner,
-} from './lib/wizard-agent-runner'
-import { WizardAgentRegistry } from './lib/wizard-agent-registry'
-import { generateRunId } from './lib/runtime/run-id'
-import { runDirFor, buildRunPaths } from './lib/runtime/run-paths'
-import { RunOrchestrator, collectPortSlots, buildServiceSpecs, buildQueuedServiceEntries } from './lib/runtime/orchestrator'
-import { allocatePorts } from './lib/runtime/port-allocator'
-import { resolvePortTokens } from './lib/runtime/launcher/interpolate'
-import { RunScheduler, type SchedulerActiveRun } from './lib/runtime/run-scheduler'
-import { estimateRunCost, resolveAdmissionConfig, readSystemResources } from './lib/runtime/admission'
-import { detectRepoCollision, normalizeRepoPaths } from './lib/runtime/repo-collision'
-import { addWorktree, type WorktreeHandle } from './lib/runtime/repo-worktree'
-import { overlayExists as portifyOverlayExists } from './lib/runtime/portify/overlay'
+} from './src/features/evaluation-artifacts/logic/wizard-agent-runner'
+import { WizardAgentRegistry } from './src/features/evaluation-artifacts/logic/wizard-agent-registry'
+import { generateRunId } from './src/features/orchestration/logic/runtime/run-id'
+import { runDirFor, buildRunPaths } from './src/features/orchestration/logic/runtime/run-paths'
+import { RunOrchestrator, collectPortSlots, buildServiceSpecs, buildQueuedServiceEntries } from './src/features/orchestration/logic/runtime/orchestrator'
+import { allocatePorts } from './src/features/orchestration/logic/runtime/port-allocator'
+import { resolvePortTokens } from './src/features/orchestration/logic/runtime/launcher/interpolate'
+import { RunScheduler, type SchedulerActiveRun } from './src/features/orchestration/logic/runtime/run-scheduler'
+import { estimateRunCost, resolveAdmissionConfig, readSystemResources } from './src/features/orchestration/logic/runtime/admission'
+import { detectRepoCollision, normalizeRepoPaths } from './src/features/orchestration/logic/runtime/repo-collision'
+import { addWorktree, type WorktreeHandle } from './src/features/orchestration/logic/runtime/repo-worktree'
+import { overlayExists as portifyOverlayExists } from './src/features/orchestration/logic/runtime/portify/overlay'
 import type { QueueReason } from '../../shared/run-state'
 import type { FeatureConfig } from '../../shared/launcher/types'
 import {
@@ -66,11 +66,11 @@ import {
   resolveAgentBinary,
   type BuildHealCyclePrompt,
   type HealAgent,
-} from './lib/runtime/auto-heal'
-import { loadProjectConfig } from './lib/runtime/launcher/project-config'
-import { collectRepoBranchSnapshots, validateConfiguredRepoBranches } from './lib/git-repo'
-import { RunnerLog } from './lib/runtime/runner-log'
-import { realPtyFactory, type PtyFactory } from './lib/runtime/pty-spawner'
+} from './src/features/orchestration/logic/runtime/auto-heal'
+import { loadProjectConfig } from './src/features/orchestration/logic/runtime/launcher/project-config'
+import { collectRepoBranchSnapshots, validateConfiguredRepoBranches } from './src/features/orchestration/logic/git-repo'
+import { RunnerLog } from './src/features/orchestration/logic/runtime/runner-log'
+import { realPtyFactory, type PtyFactory } from './src/features/orchestration/logic/runtime/pty-spawner'
 import {
   applySet,
   backup,
@@ -78,15 +78,15 @@ import {
   loadConfig,
   resolveVars,
   restore,
-} from './lib/runtime/env-switcher/switch'
-import type { BackupRecord } from './lib/runtime/env-switcher/types'
+} from './src/features/orchestration/logic/runtime/env-switcher/switch'
+import type { BackupRecord } from './src/features/orchestration/logic/runtime/env-switcher/types'
 import {
   buildVerificationDiagnostics,
   resolveVerificationRun,
   type ResolveVerificationInput,
-} from './lib/verification'
-import type { HealAgentChoice } from './lib/runtime/launcher/project-config'
-import type { LocalHealAgent } from './lib/runtime/manifest'
+} from './src/features/coverage-verification/logic/verification'
+import type { HealAgentChoice } from './src/features/orchestration/logic/runtime/launcher/project-config'
+import type { LocalHealAgent } from './src/features/orchestration/logic/runtime/manifest'
 import type { ExecutionType } from '../../shared/verification'
 
 // Allocate one free TCP port per declared port slot for this run so concurrent
@@ -465,7 +465,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
     }
 
     const nowIso = new Date().toISOString()
-    const externalHealSession: import('./lib/runtime/manifest').ExternalHealSession | undefined = canClaim
+    const externalHealSession: import('./src/features/orchestration/logic/runtime/manifest').ExternalHealSession | undefined = canClaim
       ? {
           sessionId: healAgentReq.sessionId,
           clientKind: healAgentReq.clientKind,
@@ -691,7 +691,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
       const projectConfig = loadProjectConfig(opts.projectRoot)
       const externalOrigin = healAgentReq?.kind === 'external'
       const canClaim = externalOrigin && healAgentReq?.claimable !== false
-      let externalHealSession: import('./lib/runtime/manifest').ExternalHealSession | undefined
+      let externalHealSession: import('./src/features/orchestration/logic/runtime/manifest').ExternalHealSession | undefined
       if (canClaim && healAgentReq) {
         const nowIso = new Date().toISOString()
         externalHealSession = {

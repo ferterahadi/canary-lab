@@ -56,7 +56,7 @@ current path.
 
 | Change touches | Run tiers |
 | --- | --- |
-| `shared/`, `apps/web-server/lib/**` logic | 1 |
+| `shared/`, `apps/web-server/src/features/**` logic | 1 |
 | `templates/`, `tools/`, packaging | 1 + 2 |
 | `apps/web-server/**` / `apps/web/**` needing live proof | 1 (+2 if templates) + 3 |
 | MCP run-loop semantics | 1 + 3 + 4, plus `cl_sync-agent-surfaces` |

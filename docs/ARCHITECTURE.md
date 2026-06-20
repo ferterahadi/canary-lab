@@ -39,8 +39,8 @@ For product intent, see [PRD.md](PRD.md). For user-facing usage, see the
 | `scripts/` | CLI entry, scaffold/setup/upgrade/env commands, MCP bridge (`scripts/mcp.ts` includes `inferMcpClientKind` client-kind detection) |
 | `apps/web-server/server.ts` | Fastify app: UI assets, REST routes, WebSocket streams, the `startRun` factory, scheduler wiring |
 | `apps/web-server/mcp/` | MCP HTTP server (`server.ts`: transports, profile instructions) and tools (`tools.ts`: thin wrappers + profile arrays) |
-| `apps/web-server/lib/` | Run store, external heal broker, heal-claim policy, feature authoring, external heal surface |
-| `apps/web-server/lib/runtime/` | The run orchestrator and its ~57 modules (see [Run Lifecycle](#run-lifecycle) and below) |
+| `apps/web-server/src/features/` | Feature-based modules, each with `logic/`, `routes/`, `ws/` subdirs: `agent-management` (agent process, stream, session log/tailer, idle timer), `coverage-verification` (coverage ledger, PRD extractor, verification), `evaluation-artifacts` (draft/wizard/export pipeline), `external-heal` (broker, surface, claim policy), `orchestration` (run store, runtime, feature authoring, workspace events, and all other infrastructure) |
+| `apps/web-server/src/features/orchestration/logic/runtime/` | The run orchestrator and its ~57 modules (see [Run Lifecycle](#run-lifecycle) and below) |
 | `apps/web/` | React UI (Vite, Tailwind) |
 | `shared/e2e-runner/` | Playwright fixture support (`log-marker-fixture`, summary reporter) |
 | `shared/configs/` | Base Playwright config and env loader |
@@ -48,7 +48,7 @@ For product intent, see [PRD.md](PRD.md). For user-facing usage, see the
 | `templates/project/` | Scaffolded workspace files, incl. five sample features: `example_todo_api` (happy path), `broken_todo_api` (heal target), `flaky_orders_api`, `tricky_checkout_api`, `acme_cart_checkout` |
 | `tools/` | Build/publish utilities: `clean-dist`, `prepare-assets`, `smoke-pack`, `publish-package`, `generate-changelog`, `tag-release`, `fix-node-pty-permissions` |
 
-Key `apps/web-server/lib/runtime/` modules:
+Key `apps/web-server/src/features/orchestration/logic/runtime/` modules:
 
 | Module | Role |
 | --- | --- |
@@ -64,7 +64,7 @@ Key `apps/web-server/lib/runtime/` modules:
 | `summary-reporter.ts`, `log-enrichment.ts`, `trace-enrichment.ts` | Evidence capture and enrichment |
 | `portify/` | Agent-driven port-injection workflow (see [Portify](#portify-and-benchmark)) |
 | `benchmark/` | Multi-arm self-heal benchmarking (retired from the product in 1.0.0; code retained) |
-| `coverage/` (in `apps/web-server/lib/`) | Verified Coverage Ledger: PRD summarization (`prd-summary.ts`), docs hash (`docs-collection.ts`), grounding index (`grounding.ts`), breadth computation (`ledger.ts`), rigor/strictness (`rigor.ts`), and the shared service both REST and MCP call (`service.ts`). Shared output types live in `shared/coverage/types.ts`. See [Verified Coverage](#verified-coverage). |
+| `apps/web-server/src/features/coverage-verification/logic/coverage/` | Verified Coverage Ledger: PRD summarization (`prd-summary.ts`), docs hash (`docs-collection.ts`), grounding index (`grounding.ts`), breadth computation (`ledger.ts`), rigor/strictness (`rigor.ts`), and the shared service both REST and MCP call (`service.ts`). Shared output types live in `shared/coverage/types.ts`. See [Verified Coverage](#verified-coverage). |
 
 ## Run Lifecycle
 
@@ -149,12 +149,12 @@ Multiple runs can be active at once (since 1.2.0). The top-right **Runs** dialog
 
 A `startCommand` declares `ports: [{ name: 'api', env: 'PORT' }]` (env optional). The
 orchestrator allocates a free TCP port per slot per run
-(`apps/web-server/lib/runtime/port-allocator.ts`), injects it as the service's `env`
+(`apps/web-server/src/features/orchestration/logic/runtime/port-allocator.ts`), injects it as the service's `env`
 var (`PORT`), exposes it to config via the reserved token `${port.api}`, and to the
 Playwright process as `CANARY_PORT_<slot>`.
 
 `${port.<slot>}` resolves in **three places** (the `port` token namespace lives in
-`apps/web-server/lib/runtime/launcher/interpolate.ts`):
+`apps/web-server/src/features/orchestration/logic/runtime/launcher/interpolate.ts`):
 
 1. the **command** (`--port ${port.api}`),
 2. the **`healthCheck`** URL,
@@ -175,7 +175,7 @@ each other. Starting a second run on an active repo returns
 `repo_collision_requires_choice` (REST 409 / MCP result). The user chooses
 **worktree** (isolate the run in a per-run `git worktree` under `<runDir>/worktrees/`
 and run now) or **queue** (wait until the conflicting run finishes). Different-repo
-runs never collide. See `apps/web-server/lib/runtime/repo-collision.ts` +
+runs never collide. See `apps/web-server/src/features/orchestration/logic/runtime/repo-collision.ts` +
 `repo-worktree.ts`.
 
 ### Admission and queue
@@ -183,7 +183,7 @@ runs never collide. See `apps/web-server/lib/runtime/repo-collision.ts` +
 Runs beyond a CPU/free-RAM heuristic are parked as `queued` (status `queued`, with
 `manifest.queueReason`) and promoted FIFO on run-end. Optional hard ceiling via env
 `CANARY_MAX_CONCURRENT_RUNS`. The scheduler is
-`apps/web-server/lib/runtime/run-scheduler.ts` (decision logic in `admission.ts`);
+`apps/web-server/src/features/orchestration/logic/runtime/run-scheduler.ts` (decision logic in `admission.ts`);
 it's wired into the `startRun` factory in `server.ts` and promotes on the RunStore
 `finalized` event.
 
@@ -205,7 +205,7 @@ isolation.
 
 With `healAgent: 'claude'|'codex'|'auto'`, the orchestrator spawns a local agent CLI.
 The agent's **absolute path** is resolved by `resolveAgentBinary`
-(`apps/web-server/lib/runtime/auto-heal.ts`): explicit override
+(`apps/web-server/src/features/orchestration/logic/runtime/auto-heal.ts`): explicit override
 (`CANARY_LAB_CLAUDE_BIN` / `CANARY_LAB_CODEX_BIN`) → `which` (PATH) → well-known
 locations (`~/.local/bin`, homebrew, `/usr/local/bin`, npm-global, pnpm, nvm
 `node/*/bin`). The resolved path is threaded into `buildAgentSpawnCommand` as
@@ -221,7 +221,7 @@ prompt.
 When `manifest.healMode === 'external'` the orchestrator parks at
 `waiting-for-signal` and an MCP client drives `claim_heal` → `get_heal_context` →
 edit code → `signal_run`. `ExternalHealBroker`
-(`apps/web-server/lib/external-heal-broker.ts`) owns the single-claim lock + 15s
+(`apps/web-server/src/features/external-heal/logic/external-heal-broker.ts`) owns the single-claim lock + 15s
 heartbeat staleness. Every external command is audited at
 `<runDir>/external-commands.jsonl`.
 
@@ -230,7 +230,7 @@ heartbeat staleness. Every external command is audited at
 Only **Desktop** client kinds (`claude-desktop`, `codex-desktop`) may *own* a heal
 claim. CLI clients (`claude-cli`, `codex-cli`) — and undetected `other` — can
 run/verify but never claim, so a stray CLI session can't silently grab a run and edit
-repo code. It's an **allowlist** (`apps/web-server/lib/heal-claim-policy.ts`,
+repo code. It's an **allowlist** (`apps/web-server/src/features/external-heal/logic/heal-claim-policy.ts`,
 `isHealClaimAllowed`), so detection failures (`other`) fail safe. Override via
 `CANARY_LAB_HEAL_CLAIM_CLIENTS` (comma-separated kinds). Enforced at two layers:
 
@@ -272,7 +272,7 @@ a local autoHeal mid-flight); `auto`/`claude`/`codex` require a failed/aborted r
 - Tools live in `apps/web-server/mcp/tools.ts` — thin wrappers over existing REST
   routes/helpers. `start_run`/`write_envset`/etc. reuse handlers via `app.inject()`;
   don't duplicate orchestrator logic. Author-profile tools call
-  `apps/web-server/lib/feature-authoring.ts` directly.
+  `apps/web-server/src/features/orchestration/logic/feature-authoring.ts` directly.
 - Profile membership = the `REPAIR_TOOLS`/`VERIFY_TOOLS`/`AUTHOR_TOOLS` arrays
   (`tools.ts:240–307`). `FULL_TOOLS` auto-dedupes their union + `FULL_ONLY_TOOLS`
   (`get_run_actions`, `claim_heal`, `release_heal`). Adding/moving a tool also
@@ -301,7 +301,7 @@ a local autoHeal mid-flight); `auto`/`claude`/`codex` require a failed/aborted r
 
 ## Portify and Benchmark
 
-**Portify** (`apps/web-server/lib/runtime/portify/`, ~11 files) is an agent-driven
+**Portify** (`apps/web-server/src/features/orchestration/logic/runtime/portify/`, ~11 files) is an agent-driven
 workflow that rewrites a feature's services so every network listener reads an
 injected port, proven by a concurrent double-boot — making the feature eligible for
 concurrent runs and benchmark arms. Lifecycle: `start_portify` →
@@ -322,13 +322,13 @@ patch (plain `git apply`, `--3way` fallback) before boot after a staleness check
 the agent also writes are PERMANENT (Canary Lab reads the slots in `allocateRunPorts`
 before the overlay applies), so only the product-repo source is ephemeral.
 
-**Benchmark** (`apps/web-server/lib/runtime/benchmark/`, ~10 files) ran multi-arm
+**Benchmark** (`apps/web-server/src/features/orchestration/logic/runtime/benchmark/`, ~10 files) ran multi-arm
 self-heal benchmarking (race/sabotage verification). The product surface was retired
 in 1.0.0; the code remains for internal experiments.
 
 ## Verified Coverage
 
-The Verified Coverage Ledger (`apps/web-server/lib/coverage/`) attests two grounded
+The Verified Coverage Ledger (`apps/web-server/src/features/coverage-verification/logic/coverage/`) attests two grounded
 facts about a feature's tests, both computed as math over evidence — never an agent's
 opinion:
 
@@ -369,8 +369,8 @@ procedure.
 | MCP tool ↔ profile membership | `apps/web-server/mcp/tools.ts` (`REPAIR_TOOLS`/`VERIFY_TOOLS`/`AUTHOR_TOOLS`/`FULL_ONLY_TOOLS`) ↔ mirror arrays in `apps/web-server/mcp/server.smoke.test.ts` | `npx vitest run apps/web-server/mcp/server.smoke.test.ts` | `cl_add-mcp-tool` |
 | Run-loop semantics across agent surfaces | `INSTRUCTIONS_BY_PROFILE` (`apps/web-server/mcp/server.ts`) ↔ result steering (`healWaitNext`, `bootSessionValue` in `mcp/tools.ts`) ↔ all three `agent-integrations/{claude,codex,plugin}/.../SKILL.md` run loops | nothing automated — discipline only | `cl_sync-agent-surfaces` |
 | Boot-session / collision / queue / claim semantics | `start_run` + `wait_for_heal_task` result shapes (`mcp/tools.ts`) ↔ instructions ↔ skills (same five surfaces as above) | partial: tool unit tests | `cl_sync-agent-surfaces` |
-| Heal-claim policy | `apps/web-server/lib/heal-claim-policy.ts` ↔ `broker.claim()` backstop ↔ `start_run`/`POST /api/runs` suppression ↔ skill prose | policy + broker unit tests | `cl_sync-agent-surfaces` |
+| Heal-claim policy | `apps/web-server/src/features/external-heal/logic/heal-claim-policy.ts` ↔ `broker.claim()` backstop ↔ `start_run`/`POST /api/runs` suppression ↔ skill prose | policy + broker unit tests | `cl_sync-agent-surfaces` |
 | Templates ↔ shipped package | `templates/project/**` ↔ `dist/templates/` copy (`tools/prepare-assets.mjs`) ↔ consumer `canary-lab upgrade` | `npm run smoke:pack` | `cl_add-sample-feature` |
-| Coverage ledger single computation layer | `lib/coverage/service.ts` ↔ `routes/coverage.ts` (REST) ↔ `get_feature_coverage`/`list_feature_docs`/`regenerate_prd_summary` (`mcp/tools.ts`) — both surfaces call the service, never recompute | route + MCP tests; `server.smoke.test.ts` tool count | `cl_add-mcp-tool` / `cl_sync-agent-surfaces` |
-| Requirement-id stability | `reconcileRequirementIds` (`lib/coverage/prd-summary.ts`) ↔ inline `@requirement` annotations (`ast-extractor.ts`) — regen must preserve surviving ids | `prd-summary.test.ts` before/after fixture | — |
+| Coverage ledger single computation layer | `src/features/coverage-verification/logic/coverage/service.ts` ↔ `src/features/coverage-verification/routes/coverage.ts` (REST) ↔ `get_feature_coverage`/`list_feature_docs`/`regenerate_prd_summary` (`mcp/tools.ts`) — both surfaces call the service, never recompute | route + MCP tests; `server.smoke.test.ts` tool count | `cl_add-mcp-tool` / `cl_sync-agent-surfaces` |
+| Requirement-id stability | `reconcileRequirementIds` (`src/features/coverage-verification/logic/coverage/prd-summary.ts`) ↔ inline `@requirement` annotations (`ast-extractor.ts`) — regen must preserve surviving ids | `prd-summary.test.ts` before/after fixture | — |
 | Contributor docs single-source | `CLAUDE.md` (commands + rules) ↔ this file (mechanisms) ↔ `docs/PRD.md` (intent) — AGENTS.md is a pointer only | grep audit (see `cl_verify-changes`) | — |

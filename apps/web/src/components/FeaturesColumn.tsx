@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import * as api from '../api/client'
 import type { ExecutionType, Feature, RunStatus } from '../api/types'
-import { useWizardDrafts } from '../state/WizardDraftContext'
+import { useWizardDrafts } from '../features/wizard/state/WizardDraftContext'
 import { useMcpPromo } from '../state/McpPromoContext'
 import { FeatureConfigEditor } from './FeatureConfigEditor'
 import { ThemeToggle } from './ThemeToggle'

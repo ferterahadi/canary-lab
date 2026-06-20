@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import * as api from '../api/client'
 import type { FeatureSpecFile, RunStatus } from '../api/types'
-import { activeBodyLineForTest, colorClassForStatus, runningTestForSummaryName, statusForTest, summaryEntryName, type StepStatus } from '../lib/test-step-status'
+import { activeBodyLineForTest, colorClassForStatus, runningTestForSummaryName, statusForTest, summaryEntryName, type StepStatus } from '../features/runs/utils/test-step-status'
 import type { RunSummary, RunSummaryRunningStep } from '../api/types'
 import { ShikiCode, StatusPill, StepBlock } from './shared/TestCodeBlock'
 import { ChevronRightIcon, StatusDot } from './config/atoms'

@@ -14,7 +14,7 @@ Keep-in-Sync Invariants](../../../docs/ARCHITECTURE.md#keep-in-sync-invariants).
 
 1. **Implement as a thin wrapper** in `apps/web-server/mcp/tools.ts`. Reuse the REST
    route via `app.inject()` — never duplicate orchestrator logic. Author-profile
-   tools call `apps/web-server/lib/feature-authoring.ts` directly.
+   tools call `apps/web-server/src/features/orchestration/logic/feature-authoring.ts` directly.
 2. **Add the name to the `CanaryLabMcpToolName` union** (top of `tools.ts`).
 3. **Add to exactly one profile array** — `REPAIR_TOOLS`, `VERIFY_TOOLS`,
    `AUTHOR_TOOLS`, or `FULL_ONLY_TOOLS` (`tools.ts:240–307`). A tool may appear in
