@@ -6,8 +6,8 @@ import { BenchmarkProvider } from './features/benchmark/state/BenchmarkContext'
 import { PortifyProvider } from './features/portify/state/PortifyContext'
 import { EvaluationExportProvider } from './features/evaluation/state/EvaluationExportContext'
 import { WizardDraftProvider } from './features/wizard/state/WizardDraftContext'
-import { McpPromoProvider } from './state/McpPromoContext'
-import { bootstrapTheme } from './lib/theme'
+import { McpPromoProvider } from './shared/shell/McpPromoContext'
+import { bootstrapTheme } from './shared/lib/theme'
 import './styles.css'
 
 bootstrapTheme()

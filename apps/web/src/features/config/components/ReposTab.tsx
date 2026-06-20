@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
-import * as api from '../../../api/client'
-import type { ConfigValue, ParsedConfigDoc } from '../../../api/client'
+import * as api from '../../../shared/api/client'
+import type { ConfigValue, ParsedConfigDoc } from '../../../shared/api/client'
 import {
   ChevronRightIcon,
   ComplexValueBadge,

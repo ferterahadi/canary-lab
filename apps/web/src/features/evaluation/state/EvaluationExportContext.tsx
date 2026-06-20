@@ -1,8 +1,8 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import * as api from '../../../api/client'
+import * as api from '../../../shared/api/client'
 import { connectEvaluationExport, type EvaluationExportConnection } from '../api/evaluation-export-socket'
 import { connectWorkspaceEvents, type WorkspaceEventsConnection } from '../../runs/api/workspace-socket'
-import type { EvaluationExportMode, EvaluationExportTask } from '../../../api/types'
+import type { EvaluationExportMode, EvaluationExportTask } from '../../../shared/api/types'
 
 interface EvaluationExportContextValue {
   tasks: EvaluationExportTask[]

@@ -14,9 +14,9 @@ import type {
   RunStatus,
   RunSummary,
   VerificationDiagnostics,
-} from '../../../api/types'
-import { getRunAudit } from '../../../api/client'
-import { formatDuration, durationBetween } from '../../../lib/format'
+} from '../../../shared/api/types'
+import { getRunAudit } from '../../../shared/api/client'
+import { formatDuration, durationBetween } from '../../../shared/lib/format'
 import { buildTimelineRows, isTerminalLifecyclePhase, type TimelineRow } from '../utils/run-timeline'
 import {
   artifactsForPlayback,
@@ -29,7 +29,7 @@ import {
 import { statusFromPlaybackResult, statusLabel, statusPillClassForStatus } from '../utils/test-step-status'
 import { useRun } from '../state/RunsContext'
 import { useEvaluationExports } from '../../evaluation/state/EvaluationExportContext'
-import { useMcpPromo } from '../../../state/McpPromoContext'
+import { useMcpPromo } from '../../../shared/shell/McpPromoContext'
 import { deriveRunViewModel, type RunViewModel } from '../utils/run-view-model'
 import { RunStatusIndicator } from './RunStatusIndicator'
 import { PaneTerminal } from './PaneTerminal'

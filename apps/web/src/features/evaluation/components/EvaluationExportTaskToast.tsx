@@ -1,8 +1,8 @@
 import { useEvaluationExports } from '../state/EvaluationExportContext'
-import type { EvaluationExportMode, EvaluationExportTask } from '../../../api/types'
+import type { EvaluationExportMode, EvaluationExportTask } from '../../../shared/api/types'
 import { AgentSessionView } from '../../agent-sessions/components/AgentSessionView'
 import { CloseIcon, DownloadIcon, StatusDot, type StatusDotState } from '../../config/components/atoms'
-import { StatusPill } from '../../../components/StatusPill'
+import { StatusPill } from '../../../shared/ui/StatusPill'
 
 function dotStateForExport(status: EvaluationExportTask['status']): StatusDotState {
   if (status === 'completed') return 'success'

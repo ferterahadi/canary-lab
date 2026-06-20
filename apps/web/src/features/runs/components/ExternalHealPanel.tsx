@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
-import * as api from '../../../api/client'
+import * as api from '../../../shared/api/client'
 import type {
   ExternalHealSession,
   ExternalHealSessionStatus,
   RunStatus,
-} from '../../../api/types'
+} from '../../../shared/api/types'
 import { isTerminalRunStatus } from '../../../../../../shared/run-state'
 
 interface Props {

@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import * as api from '../../../api/client'
-import type { PortifyIndexEntry, PortifyManifest, PortifyStatus } from '../../../api/client'
+import * as api from '../../../shared/api/client'
+import type { PortifyIndexEntry, PortifyManifest, PortifyStatus } from '../../../shared/api/client'
 import { useActivePortify } from '../state/PortifyContext'
 import { AgentSessionView } from '../../agent-sessions/components/AgentSessionView'
-import { CopyButton } from '../../../components/CopyButton'
+import { CopyButton } from '../../../shared/ui/CopyButton'
 
 // Guided port-ification: an agent rewrites the feature's apps to use injectable
 // ports, proven by a concurrent double-boot, ending when the user SAVES the

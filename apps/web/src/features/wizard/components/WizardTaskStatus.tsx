@@ -1,9 +1,9 @@
 import { useMemo, useState } from 'react'
-import type { DraftRecord } from '../../../api/types'
+import type { DraftRecord } from '../../../shared/api/types'
 import { slugifyFeatureName } from '../utils/wizard-validation'
 import { isActiveWizardTask, useWizardDrafts } from '../state/WizardDraftContext'
 import { CloseIcon, StatusDot, type StatusDotState } from '../../config/components/atoms'
-import { StatusPill } from '../../../components/StatusPill'
+import { StatusPill } from '../../../shared/ui/StatusPill'
 
 function dotStateForDraft(status: DraftRecord['status']): StatusDotState {
   if (status === 'plan-ready' || status === 'spec-ready' || status === 'accepted') return 'success'

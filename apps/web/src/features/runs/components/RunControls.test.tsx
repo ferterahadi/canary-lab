@@ -3,7 +3,7 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { RunDetail } from '../../../api/types'
+import type { RunDetail } from '../../../shared/api/types'
 import { RunDetailColumn } from './RunDetailColumn'
 import { RunsColumn } from './RunsColumn'
 
@@ -29,7 +29,7 @@ vi.mock('../../evaluation/state/EvaluationExportContext', () => ({
 }))
 
 const gatePromo = vi.fn((_action: string, continueAction: () => void) => continueAction())
-vi.mock('../../../state/McpPromoContext', () => ({
+vi.mock('../../../shared/shell/McpPromoContext', () => ({
   useMcpPromo: () => ({ gatePromo }),
 }))
 

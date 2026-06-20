@@ -1,5 +1,5 @@
-import { ApiError } from '../../../api/client'
-import type { RunDetail, RunIndexEntry, TransientAction } from '../../../api/types'
+import { ApiError } from '../../../shared/api/client'
+import type { RunDetail, RunIndexEntry, TransientAction } from '../../../shared/api/types'
 import { isTerminalRunStatus } from '../../../../../../shared/run-state'
 
 // Pure module: the reducer + frame-applier that drives RunsContext. Lives

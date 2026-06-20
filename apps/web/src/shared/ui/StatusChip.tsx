@@ -1,4 +1,4 @@
-import { StatusDot, type StatusDotState } from '../features/config/components/atoms'
+import { StatusDot, type StatusDotState } from '../../features/config/components/atoms'
 
 // Labelled status chip: a semantic dot + label + state word. Used in the status
 // bar for the active run's service count.

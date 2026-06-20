@@ -3,11 +3,11 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import * as api from '../../../api/client'
+import * as api from '../../../shared/api/client'
 import { SettingsModal } from './SettingsModal'
 
-vi.mock('../../../api/client', async () => {
-  const actual = await vi.importActual<typeof import('../../../api/client')>('../../../api/client')
+vi.mock('../../../shared/api/client', async () => {
+  const actual = await vi.importActual<typeof import('../../../shared/api/client')>('../../../shared/api/client')
   return {
     ...actual,
     getProjectConfig: vi.fn(),

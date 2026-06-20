@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
-import * as api from '../../../api/client'
-import type { JournalEntry } from '../../../api/types'
+import * as api from '../../../shared/api/client'
+import type { JournalEntry } from '../../../shared/api/types'
 import {
   classifyOutcome,
   newestFirst,

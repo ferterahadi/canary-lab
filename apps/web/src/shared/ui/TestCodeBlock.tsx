@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
-import { useTheme } from '../../lib/theme'
-import type { ExtractedStep } from '../../api/types'
-import * as api from '../../api/client'
+import { useTheme } from '../lib/theme'
+import type { ExtractedStep } from '../api/types'
+import * as api from '../api/client'
 import { sourceLineForBodyLine } from '../../features/runs/utils/editor-location'
 import { colorClassForStatus, statusLabel, statusPillClassForStatus, type StepStatus } from '../../features/runs/utils/test-step-status'
 

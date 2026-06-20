@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react'
 import * as api from '../api/client'
 import type { ExecutionType, Feature, RunStatus } from '../api/types'
-import { useWizardDrafts } from '../features/wizard/state/WizardDraftContext'
-import { useMcpPromo } from '../state/McpPromoContext'
-import { FeatureConfigEditor } from '../features/config/components/FeatureConfigEditor'
-import { ThemeToggle } from './ThemeToggle'
-import { SettingsModal } from '../features/config/components/SettingsModal'
-import { Tooltip } from './Tooltip'
+import { useWizardDrafts } from '../../features/wizard/state/WizardDraftContext'
+import { useMcpPromo } from './McpPromoContext'
+import { FeatureConfigEditor } from '../../features/config/components/FeatureConfigEditor'
+import { ThemeToggle } from '../ui/ThemeToggle'
+import { SettingsModal } from '../../features/config/components/SettingsModal'
+import { Tooltip } from '../ui/Tooltip'
 
 interface Props {
   features: Feature[]

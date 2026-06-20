@@ -8,14 +8,14 @@ import type {
   RunLifecycleSnapshot,
   RunStatus,
   ServiceStatus,
-} from '../../../../shared/run-state'
+} from '../../../../../shared/run-state'
 import type {
   ExecutionType,
   VerificationConfig,
   VerificationDiagnostics,
   VerificationRunMetadata,
   VerificationTarget,
-} from '../../../../shared/verification'
+} from '../../../../../shared/verification'
 export type {
   DisplayStatus,
   RunLifecycleAbortReason,
@@ -30,14 +30,14 @@ export type {
   RunStatus,
   ServiceStatus,
   TransientAction,
-} from '../../../../shared/run-state'
+} from '../../../../../shared/run-state'
 export type {
   ExecutionType,
   VerificationConfig,
   VerificationDiagnostics,
   VerificationRunMetadata,
   VerificationTarget,
-} from '../../../../shared/verification'
+} from '../../../../../shared/verification'
 
 export interface FeatureRepo {
   name: string
@@ -471,7 +471,7 @@ export type {
   SummaryState,
   CoverageState,
   TestCoverage,
-} from '../../../../shared/coverage/types'
+} from '../../../../../shared/coverage/types'
 
 export interface FeatureDoc {
   relPath: string

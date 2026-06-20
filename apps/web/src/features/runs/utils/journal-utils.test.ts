@@ -8,7 +8,7 @@ import {
   formatJournalFieldKey,
   presentJournalFields,
 } from './journal-utils'
-import type { JournalEntry } from '../../../api/types'
+import type { JournalEntry } from '../../../shared/api/types'
 
 const entry = (overrides: Partial<JournalEntry>): JournalEntry => ({
   iteration: 1,
