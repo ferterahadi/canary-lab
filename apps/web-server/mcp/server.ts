@@ -3,8 +3,8 @@ import { randomUUID } from 'crypto'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js'
-import type { RunStore } from '../lib/run-store'
-import type { ExternalHealBroker } from '../lib/external-heal-broker'
+import type { RunStore } from '../src/features/orchestration/logic/run-store'
+import type { ExternalHealBroker } from '../src/features/external-heal/logic/external-heal-broker'
 import {
   normalizeCanaryLabMcpProfile,
   registerCanaryLabTools,
@@ -12,7 +12,7 @@ import {
   type CanaryLabMcpDeps,
   type CanaryLabMcpProfile,
 } from './tools'
-import type { ExternalHealClientKind } from '../lib/runtime/manifest'
+import type { ExternalHealClientKind } from '../src/features/orchestration/logic/runtime/manifest'
 
 // Singleton MCP server mounted on the existing Fastify instance at `/mcp`.
 // Uses the streamable HTTP transport so Claude Desktop / Codex Desktop and

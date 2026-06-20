@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 import type { RunDetail, RunIndexEntry } from '../api/types'
-import { useActiveBootSessions, useRun, useRuns } from '../state/RunsContext'
+import { useActiveBootSessions, useRun, useRuns } from '../features/runs/state/RunsContext'
 import { StatusDot } from './config/atoms'
-import { RunDetailColumn } from './RunDetailColumn'
+import { RunDetailColumn } from '../features/runs/components/RunDetailColumn'
 
 interface Props {
   onClose: () => void

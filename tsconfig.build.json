@@ -6,6 +6,6 @@
     "rootDir": ".",
     "declaration": true
   },
-  "include": ["shared/**/*", "scripts/**/*", "apps/web-server/lib/runtime/**/*.ts"],
+  "include": ["shared/**/*", "scripts/**/*", "apps/web-server/src/features/orchestration/logic/runtime/**/*.ts"],
   "exclude": ["node_modules", "dist", "templates", "tools", "**/*.test.ts"]
 }
