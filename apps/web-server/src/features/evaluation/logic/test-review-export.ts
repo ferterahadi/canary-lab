@@ -7,8 +7,7 @@ import ts from 'typescript'
 import type { RunDetail, PlaywrightPlaybackEvent } from '../../runs/logic/run-store'
 import { pickAvailableHealAgent, type HealAgent } from '../../runs/logic/runtime/auto-heal'
 import { EVALUATION_REWRITE_MODELS, modelArgs, modelFor } from '../../agent-sessions/logic/agent-models'
-import { claudeSessionLogPath } from '../../agent-sessions/logic/agent-session-log'
-import { recoverClaudeFinalText } from '../../agent-sessions/logic/agent-stream'
+import { recoverAgentAnswer, agentActivityPath } from '../../agent-sessions/logic/agent-producer'
 import { runAgentProcess, buildClaudeAgenticArgs } from '../../agent-sessions/logic/agent-process'
 import { formatCodeForDisplay } from '../../../../../../shared/code-display-format'
 
@@ -318,7 +317,7 @@ function runEvaluationAgent(
     stdin: agent === 'codex' ? prompt : undefined,
     onChunk: (text) => onOutput?.(text),
     idleMs: EVALUATION_IDLE_TIMEOUT_MS,
-    activityPath: agent === 'claude' && claudeSessionId && cwd ? claudeSessionLogPath(cwd, claudeSessionId) : undefined,
+    activityPath: agentActivityPath(agent, cwd, claudeSessionId),
     onIdle: () => { idled = true },
     onTick: (idleMs) => {
       if (idleMs >= 10_000) onOutput?.(`[agent:${agent}] still running; waiting for CLI output (${Math.floor(idleMs / 1000)}s idle)\n`)
@@ -356,7 +355,7 @@ function runEvaluationAgent(
           return
         }
         // Read the codex output file BEFORE settleOk() removes the temp dir.
-        let finalOutput = agent === 'claude' ? recoverClaudeFinalText(stdout) : stdout
+        let finalOutput = recoverAgentAnswer(agent, stdout)
         if (outputPath && fs.existsSync(outputPath)) {
           const fromFile = fs.readFileSync(outputPath, 'utf-8')
           if (fromFile.trim()) finalOutput = fromFile

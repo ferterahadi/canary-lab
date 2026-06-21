@@ -2,7 +2,8 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { type ChildProcess } from 'child_process'
-import { claudeSessionLogPath, encodeClaudeProjectDir } from '../../../agent-sessions/logic/agent-session-log'
+import { encodeClaudeProjectDir } from '../../../agent-sessions/logic/agent-session-log'
+import { agentActivityPath } from '../../../agent-sessions/logic/agent-producer'
 import { resolveAgentBinary, type HealAgent } from '../../../runs/logic/runtime/auto-heal'
 import { PORTIFY_MODELS, modelArgs } from '../../../agent-sessions/logic/agent-models'
 import { runAgentProcess, buildClaudeAgenticArgs } from '../../../agent-sessions/logic/agent-process'
@@ -57,7 +58,7 @@ export function runPortifyAgent(opts: {
     captureStdout: false,
     onChunk: (text) => { if (out !== null) { try { fs.writeSync(out, text) } catch { /* best effort */ } } },
     idleMs: PORTIFY_IDLE_TIMEOUT_MS,
-    activityPath: agent === 'claude' && sessionId ? claudeSessionLogPath(cwd, sessionId) : (logPath ?? undefined),
+    activityPath: agentActivityPath(agent, cwd, sessionId, logPath ?? undefined),
   })
   children?.add(handle.child)
   const cleanup = (): void => {

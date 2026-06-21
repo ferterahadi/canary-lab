@@ -5,8 +5,7 @@ import path from 'path'
 import { pickAvailableHealAgent, type HealAgent } from '../../../runs/logic/runtime/auto-heal'
 import { PRD_SUMMARY_MODELS, modelArgs } from '../../../agent-sessions/logic/agent-models'
 import type { CoverageAgentSession } from '../../../coverage/logic/coverage/annotate-engine'
-import { claudeSessionLogPath } from '../../../agent-sessions/logic/agent-session-log'
-import { recoverClaudeFinalText } from '../../../agent-sessions/logic/agent-stream'
+import { recoverAgentAnswer, agentActivityPath } from '../../../agent-sessions/logic/agent-producer'
 import { runAgentProcess, buildClaudeAgenticArgs } from '../../../agent-sessions/logic/agent-process'
 import type {
   PathType,
@@ -372,7 +371,7 @@ function defaultRunAgent(agent: HealAgent, prompt: string, opts: RunAgentOpts): 
     stdin: agent === 'codex' ? prompt : undefined,
     onChunk: (text) => opts.onOutput?.(text),
     idleMs: PRD_SUMMARY_IDLE_TIMEOUT_MS,
-    activityPath: agent === 'claude' && claudeSessionId && opts.cwd ? claudeSessionLogPath(opts.cwd, claudeSessionId) : undefined,
+    activityPath: agentActivityPath(agent, opts.cwd, claudeSessionId),
     onIdle: () => { idled = true },
   })
 
@@ -394,7 +393,7 @@ function defaultRunAgent(agent: HealAgent, prompt: string, opts: RunAgentOpts): 
         // codex's --output-last-message file is the authoritative final answer;
         // claude's stdout is stream-json envelopes → recover the final message.
         // Read it BEFORE rmOutputDir() (in finally) clears the temp dir.
-        let finalOutput = agent === 'claude' ? recoverClaudeFinalText(stdout) : stdout
+        let finalOutput = recoverAgentAnswer(agent, stdout)
         if (outputPath && fs.existsSync(outputPath)) {
           const fromFile = fs.readFileSync(outputPath, 'utf-8')
           if (fromFile.trim()) finalOutput = fromFile

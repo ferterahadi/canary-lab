@@ -16,8 +16,7 @@ import {
   type WizardAgentKind,
 } from './wizard-agent-spawner'
 import { WIZARD_PLAN_MODELS, WIZARD_SPEC_MODELS, modelFor } from '../../agent-sessions/logic/agent-models'
-import { claudeSessionLogPath } from '../../agent-sessions/logic/agent-session-log'
-import { recoverClaudeFinalText } from '../../agent-sessions/logic/agent-stream'
+import { recoverAgentAnswer, agentActivityPath } from '../../agent-sessions/logic/agent-producer'
 import { runAgentProcess } from '../../agent-sessions/logic/agent-process'
 
 // Headless driver for the wizard agents (the Portify model). Spawns the agent
@@ -64,9 +63,7 @@ function runAgent(opts: {
   sink.push(`[wizard] ${opts.label}\n`)
   // Activity signal: claude `-p` is silent on stdout, so watch its session-JSONL
   // growth; codex's stdout is teed to the log, so watch that.
-  const activityPath = opts.agent === 'claude' && opts.claudeSessionId
-    ? claudeSessionLogPath(opts.cwd, opts.claudeSessionId)
-    : opts.agentLogPath
+  const activityPath = agentActivityPath(opts.agent, opts.cwd, opts.claudeSessionId, opts.agentLogPath)
   let handle
   try {
     handle = runAgentProcess({
@@ -91,7 +88,7 @@ function runAgent(opts: {
       // claude stdout is stream-json envelopes → recover the final message;
       // codex stdout is already the plain answer text.
       const stream = sink.fullStream()
-      if (code === 0) return opts.agent === 'claude' ? recoverClaudeFinalText(stream) : stream
+      if (code === 0) return recoverAgentAnswer(opts.agent, stream)
       throw new Error(`wizard agent exited with code ${code}. Tail of agent log:\n${stream.slice(-2000)}`)
     },
     (err: Error) => {
