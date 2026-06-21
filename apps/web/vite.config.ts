@@ -34,5 +34,6 @@ export default defineConfig({
   build: {
     outDir: path.resolve(__dirname, '../../dist/apps/web/dist'),
     emptyOutDir: true,
+    chunkSizeWarningLimit: 1500,
   },
 })

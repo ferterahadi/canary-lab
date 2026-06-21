@@ -118,6 +118,8 @@ describe('computeCoverageLedger — totals + %', () => {
     // R1 verified, R2 unverified, R3 untested → 1/3
     expect(ledger.totals).toMatchObject({ total: 3, verified: 1, unverified: 1, untested: 1, pathIncomplete: 0 })
     expect(ledger.coveragePct).toBe(33.3)
+    // Breadth: R1 + R2 have a test mapped (only R3 untested) → 2/3 mapped.
+    expect(ledger.mappedPct).toBe(66.7)
   })
 
   it('excludes deprecated requirements from the denominator', () => {
@@ -131,6 +133,7 @@ describe('computeCoverageLedger — totals + %', () => {
   it('empty requirement set yields 0% (no divide-by-zero)', () => {
     const ledger = computeCoverageLedger({ feature: 'f', requirements: [], tests: [], index: indexOf() })
     expect(ledger.coveragePct).toBe(0)
+    expect(ledger.mappedPct).toBe(0)
   })
 })
 

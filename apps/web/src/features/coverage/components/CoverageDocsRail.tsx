@@ -101,25 +101,53 @@ export function CoverageDocsRail(props: Props): JSX.Element {
       .finally(() => setBusy(false))
   }, [feature, load, onDocsChanged])
 
-  const clearSummary = useCallback(() => {
+  // Open a doc in the user's configured editor (same launcher the run/test views
+  // use). Best-effort — surface a failure in the docs error slot.
+  const openDoc = useCallback((absPath: string) => {
+    api.openEditor({ file: absPath })
+      .catch((e: unknown) => setError(e instanceof Error ? e.message : 'Failed to open in editor'))
+  }, [])
+
+  // "Redo from the start" — a full reset to a blank slate: drop the generated PRD
+  // summary + coverage AND every uploaded source doc, returning to the empty
+  // "Add source docs" dropzone. Destructive, so it's behind an inline confirm.
+  const [confirmingRedo, setConfirmingRedo] = useState(false)
+  const redoFromStart = useCallback(async () => {
+    setConfirmingRedo(false)
     setBusy(true)
-    api.clearPrdSummary(feature)
-      .then(() => { load(); onDocsChanged() })
-      .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
-      .finally(() => setBusy(false))
-  }, [feature, load, onDocsChanged])
+    setError(null)
+    const failures: string[] = []
+    try {
+      try { await api.clearPrdSummary(feature) } catch (e) { failures.push(`summary (${e instanceof Error ? e.message : String(e)})`) }
+      for (const d of listing?.docs ?? []) {
+        if (d.generated) continue // already removed by clearPrdSummary
+        try { await api.deleteFeatureDoc(feature, d.relPath) } catch (e) { failures.push(`${d.relPath} (${e instanceof Error ? e.message : String(e)})`) }
+      }
+    } finally {
+      if (failures.length) setError(`Reset incomplete: ${failures.join(', ')}`)
+      load(failures.length > 0)
+      onDocsChanged()
+      setBusy(false)
+    }
+  }, [feature, listing, load, onDocsChanged])
 
   // Doc add/remove are state-changing — lock them while a generation job runs
   // (the job reads the current docs); only the always-safe Close stays live.
   const locked = busy || generating
+  // Once a PRD summary exists the source set is FROZEN against the generated
+  // ledger: silently adding/removing docs would desync the coverage mapping. The
+  // only way to change docs is "Redo from the start", which re-runs the whole
+  // exercise. (Opening a doc in the editor stays available — it's read-only.)
+  const docsFrozen = !summaryAbsent
+  const docsLocked = locked || docsFrozen
 
   const onDrop = useCallback((e: DragEvent) => {
     e.preventDefault()
     setDragging(false)
-    if (busy || generating) return
+    if (locked || docsFrozen) return
     const files = e.dataTransfer.files
     if (files && files.length > 0) void importFiles(files)
-  }, [importFiles, busy, generating])
+  }, [importFiles, locked, docsFrozen])
 
   const sourceCount = listing?.sourceDocCount ?? 0
   const dirPrefix = `features/${feature}/docs/`
@@ -180,7 +208,7 @@ export function CoverageDocsRail(props: Props): JSX.Element {
         background: 'var(--bg-surface)', position: 'relative',
         transition: 'width 140ms ease',
       }}
-      onDragOver={(e) => { e.preventDefault(); if (!dragging) setDragging(true) }}
+      onDragOver={(e) => { e.preventDefault(); if (docsFrozen || locked) return; if (!dragging) setDragging(true) }}
       onDragLeave={(e) => { if (e.currentTarget === e.target) setDragging(false) }}
       onDrop={onDrop}
     >
@@ -267,25 +295,28 @@ export function CoverageDocsRail(props: Props): JSX.Element {
                   generated={d.generated}
                   sizeBytes={d.sizeBytes}
                   busy={locked}
-                  onRemove={() => (d.generated ? clearSummary() : removeDoc(d.relPath))}
-                  removeTitle={d.generated ? 'Remove the generated PRD summary' : 'Remove source doc'}
+                  onOpen={() => openDoc(d.absPath)}
+                  onRemove={docsFrozen ? undefined : () => removeDoc(d.relPath)}
+                  removeTitle="Remove source doc"
                 />
               ))}
-              <button
-                type="button"
-                data-testid="add-another-doc"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={locked}
-                className="flex w-full items-center justify-center gap-2"
-                style={{
-                  padding: '10px 12px', borderRadius: 'var(--radius-md)',
-                  border: '1px dashed var(--border-default)', background: 'transparent',
-                  color: 'var(--text-muted)', cursor: 'pointer', fontSize: 11.5,
-                }}
-              >
-                <span aria-hidden="true" style={{ fontSize: 13, lineHeight: 1 }}>+</span>
-                Add docs — drop files or click to browse
-              </button>
+              {!docsFrozen && (
+                <button
+                  type="button"
+                  data-testid="add-another-doc"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={locked}
+                  className="flex w-full items-center justify-center gap-2"
+                  style={{
+                    padding: '10px 12px', borderRadius: 'var(--radius-md)',
+                    border: '1px dashed var(--border-default)', background: 'transparent',
+                    color: 'var(--text-muted)', cursor: 'pointer', fontSize: 11.5,
+                  }}
+                >
+                  <span aria-hidden="true" style={{ fontSize: 13, lineHeight: 1 }}>+</span>
+                  Add docs — drop files or click to browse
+                </button>
+              )}
             </div>
           )
         )}
@@ -310,29 +341,42 @@ export function CoverageDocsRail(props: Props): JSX.Element {
           >
             {generating ? 'Generating…' : 'Generate'}
           </button>
-        ) : (
+        ) : confirmingRedo ? (
           <>
+            <div style={{ fontSize: 11, color: 'var(--text-secondary)', lineHeight: 1.45, marginBottom: 2 }}>
+              Delete the generated summary <strong style={{ color: 'var(--text-primary)' }}>and all source docs</strong>? You&apos;ll start over from an empty doc list.
+            </div>
             <button
               type="button"
-              data-testid="generate-summary"
-              onClick={() => onGenerate('summary')}
-              disabled={generating}
+              data-testid="confirm-redo"
+              onClick={() => void redoFromStart()}
+              disabled={locked}
               className="cl-button w-full px-3 py-1.5"
-              title="Re-summarize docs, then re-map coverage"
+              style={{ background: 'rgb(251, 113, 133)', color: '#0b0f17', borderColor: 'rgb(251, 113, 133)', fontWeight: 600 }}
             >
-              {generating ? 'Generating…' : 'Regenerate summary'}
+              Wipe everything &amp; start over
             </button>
             <button
               type="button"
-              data-testid="generate-coverage"
-              onClick={() => onGenerate('coverage')}
-              disabled={generating || !coverageActionable}
+              data-testid="cancel-redo"
+              onClick={() => setConfirmingRedo(false)}
+              disabled={locked}
               className="cl-button w-full px-3 py-1.5"
-              title={coverageActionable ? 'Re-map coverage from the current summary' : 'Generate a PRD summary first'}
             >
-              Regenerate coverage
+              Cancel
             </button>
           </>
+        ) : (
+          <button
+            type="button"
+            data-testid="redo-from-start"
+            onClick={() => setConfirmingRedo(true)}
+            disabled={locked}
+            className="cl-button w-full px-3 py-1.5"
+            title="Delete the summary + all source docs and start over from scratch"
+          >
+            {generating ? 'Generating…' : 'Redo from the start'}
+          </button>
         )}
       </div>
 
@@ -350,24 +394,36 @@ export function CoverageDocsRail(props: Props): JSX.Element {
   )
 }
 
-function DocPill({ relPath, dirPrefix, generated, sizeBytes, busy, onRemove, removeTitle }: {
+function DocPill({ relPath, dirPrefix, generated, sizeBytes, busy, onOpen, onRemove, removeTitle }: {
   relPath: string
   dirPrefix: string
   generated: boolean
   sizeBytes: number
   busy: boolean
-  onRemove: () => void
+  onOpen: () => void
+  /** Omitted when the doc set is frozen (a summary exists) — the pill is read-only. */
+  onRemove?: () => void
   removeTitle: string
 }) {
+  const [hover, setHover] = useState(false)
   return (
     <div
       data-testid={`doc-pill-${relPath}`}
       className="flex items-center gap-2.5"
+      onClick={onOpen}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen() } }}
+      title={`Open ${dirPrefix}${relPath} in editor`}
       style={{
         padding: '9px 11px',
         borderRadius: 'var(--radius-md)',
-        background: 'var(--bg-base)',
-        border: '1px solid var(--border-default)',
+        background: hover ? 'var(--bg-selected)' : 'var(--bg-base)',
+        border: `1px solid ${hover ? 'color-mix(in srgb, var(--text-muted) 38%, var(--border-default))' : 'var(--border-default)'}`,
+        cursor: 'pointer',
+        transition: 'background 120ms, border-color 120ms',
       }}
     >
       <span
@@ -391,18 +447,20 @@ function DocPill({ relPath, dirPrefix, generated, sizeBytes, busy, onRemove, rem
           {generated ? 'Generated PRD artifact' : 'Source doc'} · {formatBytes(sizeBytes)}
         </div>
       </div>
-      <button
-        type="button"
-        data-testid={`remove-doc-${relPath}`}
-        onClick={onRemove}
-        disabled={busy}
-        aria-label={`Remove ${relPath}`}
-        title={removeTitle}
-        className="cl-icon-button h-6 w-6 shrink-0"
-        style={{ color: 'var(--text-muted)' }}
-      >
-        ✕
-      </button>
+      {onRemove && (
+        <button
+          type="button"
+          data-testid={`remove-doc-${relPath}`}
+          onClick={(e) => { e.stopPropagation(); onRemove() }}
+          disabled={busy}
+          aria-label={`Remove ${relPath}`}
+          title={removeTitle}
+          className="cl-icon-button h-6 w-6 shrink-0"
+          style={{ color: 'var(--text-muted)' }}
+        >
+          ✕
+        </button>
+      )}
     </div>
   )
 }

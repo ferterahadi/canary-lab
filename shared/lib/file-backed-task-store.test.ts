@@ -104,6 +104,30 @@ describe('FileBackedTaskStore', () => {
     expect(store.get('b')!.status).toBe('done')
   })
 
+  it('reconcileInterrupted tolerates legacy index entries lacking an id', () => {
+    // A pre-refactor store wrote index rows keyed by a feature-specific field
+    // (e.g. jobId) with no generic `id`/`createdAt`. reconcileInterrupted must
+    // skip those rather than path.join(undefined,…) and crash server boot.
+    const store = makeStore(dir)
+    store.save({ id: 'a', status: 'running', feature: 'f', createdAt: '2026-01-02' })
+    const indexPath = path.join(dir, 'widgets', 'index.json')
+    const rows = JSON.parse(fs.readFileSync(indexPath, 'utf8'))
+    rows.push({ jobId: 'legacy', status: 'done', feature: 'f' })
+    fs.writeFileSync(indexPath, JSON.stringify(rows))
+    expect(() => store.reconcileInterrupted(() => '2026-02-02')).not.toThrow()
+    expect(store.get('a')).toMatchObject({ status: 'failed' })
+  })
+
+  it('list tolerates legacy index entries lacking createdAt when sorting', () => {
+    const store = makeStore(dir)
+    store.save({ id: 'a', status: 'done', feature: 'f', createdAt: '2026-01-02' })
+    const indexPath = path.join(dir, 'widgets', 'index.json')
+    const rows = JSON.parse(fs.readFileSync(indexPath, 'utf8'))
+    rows.push({ jobId: 'legacy', status: 'done', feature: 'f' })
+    fs.writeFileSync(indexPath, JSON.stringify(rows))
+    expect(() => store.list()).not.toThrow()
+  })
+
   it('a throwing listener does not break persistence', () => {
     const store = makeStore(dir)
     store.onEvent(() => { throw new Error('bad listener') })

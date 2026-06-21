@@ -16,16 +16,15 @@ The UI's Add Test flow can also turn a PRD or uploaded document into a generated
 
 A feature can also carry a `docs/` folder of source material (specs, tickets, notes as `*.md`). Canary Lab summarizes that collection into a **PRD** — a list of requirements, each with a stable id — stored back in `docs/` as `_prd-summary.json` (+ a readable `_prd-summary.md`). Regeneration preserves existing requirement ids, so the links below never break as the docs evolve.
 
-Tie tests to requirements with comments directly above a `test()`:
+Tie tests to requirements with Playwright tags **on** the `test()` (greppable, rename-proof):
 
 ```ts
-// @requirement R3
-// @path happy
-test('DELETE /todos/:id removes a todo', async () => { /* ... */ })
+test('DELETE /todos/:id removes a todo', { tag: ['@req-R3', '@path-happy'] }, async () => { /* ... */ })
 ```
 
-- `@requirement <id>` — repeatable; a test may cover several requirements.
-- `@path happy|sad|edge` — happy = the expected flow, sad = the negative/error flow, edge = a boundary case.
+- `@req-<id>` — repeatable; a test may cover several requirements.
+- `@path-happy|sad|edge` — happy = the expected flow, sad = the negative/error flow, edge = a boundary case.
+- Legacy `// @requirement <id>` / `// @path happy` comments above the test still parse as a fallback.
 
 Open the **Coverage** view (the 🎯 pill in the top bar, per selected feature) for the ledger: requirements on the left, tests on the right, synced colour highlighting between them. A requirement is **Verified** only when a test annotated to it has actually passed in a run (ground truth from run history) — so the headline coverage % is evidence, not opinion. Gaps are flagged as:
 

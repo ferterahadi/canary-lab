@@ -28,4 +28,4 @@ The Coverage ledger is reachable over MCP as well as the UI — both read the sa
 - `list_feature_docs(feature)` — the docs that feed the PRD (source vs generated), plus the summary status.
 - `regenerate_prd_summary(feature)` — re-summarize the source docs into requirements (preserving existing ids). Add docs first with `write_feature_doc`.
 
-Tests link to requirements via `@requirement <id>` / `@path happy|sad|edge` comments above each `test()` (see [FEATURES](FEATURES.md#verified-coverage)). Canary attests; it never writes a requirement's test for you.
+Tests link to requirements via Playwright tags on each `test()` — `{ tag: ['@req-<id>', '@path-happy|sad|edge'] }` (legacy `@requirement`/`@path` comments still parse); see [FEATURES](FEATURES.md#verified-coverage). Canary attests; it never writes a requirement's test for you.

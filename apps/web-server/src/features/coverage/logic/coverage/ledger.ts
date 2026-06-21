@@ -142,6 +142,12 @@ export function computeCoverageLedger(args: ComputeCoverageArgs): CoverageLedger
     ? 0
     : Math.round((totals.verified / totals.total) * 1000) / 10
 
+  // Breadth: requirements that have at least one annotated test (everything
+  // except 'untested'). Independent of whether those tests pass.
+  const mappedPct = totals.total === 0
+    ? 0
+    : Math.round(((totals.total - totals.untested) / totals.total) * 1000) / 10
+
   // Annotations pointing at ids the PRD doesn't know about — surfaces stale
   // annotations after a requirement was renamed/removed without a regen.
   const orphanSet = new Set<string>()
@@ -157,6 +163,7 @@ export function computeCoverageLedger(args: ComputeCoverageArgs): CoverageLedger
     tests: testCoverage,
     totals,
     coveragePct,
+    mappedPct,
     orphanRequirementIds: [...orphanSet].sort(),
     orphanTestNames,
   }

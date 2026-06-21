@@ -93,7 +93,7 @@ export class FileBackedTaskStore<T> {
   list(): TaskIndexEntry[] {
     const entries = this.readIndex()
     if (!this.config.sortNewestFirst) return entries
-    return entries.sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+    return entries.sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''))
   }
 
   private readIndex(): TaskIndexEntry[] {
@@ -159,6 +159,10 @@ export class FileBackedTaskStore<T> {
     const r = this.config.reconcile
     if (!r) return
     for (const entry of this.list()) {
+      // Legacy/foreign rows written before this store keyed records by `id`
+      // (e.g. a feature store that only persisted its own jobId) are not
+      // addressable here; skip rather than path.join(undefined,…) on boot.
+      if (!entry.id) continue
       const rec = this.get(entry.id)
       if (!rec || !r.isInterrupted(rec)) continue
       this.save(r.mark(rec, now()))

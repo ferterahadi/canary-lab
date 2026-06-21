@@ -9,8 +9,11 @@
         "additionalProperties": false,
         "properties": {
           "id": { "type": "string" },
+          "kind": { "enum": ["functional", "non-functional"] },
           "title": { "type": "string" },
           "text": { "type": "string" },
+          "happyPath": { "type": "string" },
+          "unhappyPath": { "type": "string" },
           "pathTypes": {
             "type": "array",
             "items": { "enum": ["happy", "sad", "edge"] }

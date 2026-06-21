@@ -6,6 +6,7 @@ import type {
   RunStatus,
 } from '../../../shared/api/types'
 import { isTerminalRunStatus } from '../../../../../../shared/run-state'
+import { BrandMark, clientLabel as brandingClientLabel, clientTint } from './external-client-branding'
 
 interface Props {
   runId: string
@@ -73,7 +74,7 @@ export function ExternalHealPanel({ runId: _runId, runStatus, session }: Props) 
         }}
       >
         <div className="flex items-start gap-3 @[480px]:gap-4">
-          <BrandMark clientKind={clientKind} tint={tint} />
+          <BrandMark clientKind={clientKind} tint={tint} elevated />
           <div className="min-w-0 flex-1 pt-0.5">
             <div
               className="text-[9px] font-medium uppercase @[320px]:text-[10px]"
@@ -187,87 +188,6 @@ function StatusPill({ status }: { status: PanelStatus }) {
   )
 }
 
-function BrandMark({
-  clientKind,
-  tint,
-}: {
-  clientKind: ExternalHealSession['clientKind']
-  tint: string
-}) {
-  const isClaude = clientKind.startsWith('claude')
-  const isCodex = clientKind.startsWith('codex')
-
-  if (isClaude || isCodex) {
-    const src = isClaude ? '/brand/claude.webp' : '/brand/codex.webp'
-    const alt = clientLabel(clientKind)
-    return (
-      <div
-        className="relative h-10 w-10 shrink-0 overflow-hidden rounded-lg @[320px]:h-12 @[320px]:w-12 @[320px]:rounded-xl @[480px]:h-14 @[480px]:w-14"
-        style={{
-          border: `1px solid color-mix(in srgb, ${tint} 30%, var(--border-default))`,
-        }}
-      >
-        <img src={src} alt={alt} className="h-full w-full object-cover" />
-      </div>
-    )
-  }
-
-  return (
-    <div
-      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg @[320px]:h-12 @[320px]:w-12 @[320px]:rounded-xl @[480px]:h-14 @[480px]:w-14"
-      style={{
-        background: `linear-gradient(135deg, color-mix(in srgb, ${tint} 22%, transparent), color-mix(in srgb, ${tint} 8%, transparent))`,
-        border: `1px solid color-mix(in srgb, ${tint} 38%, var(--border-default))`,
-        color: tint,
-        boxShadow: `inset 0 0 0 1px color-mix(in srgb, white 7%, transparent), 0 10px 24px color-mix(in srgb, ${tint} 14%, transparent)`,
-      }}
-      role="img"
-      aria-label="External client"
-    >
-      <svg
-        viewBox="0 0 32 32"
-        width="30"
-        height="30"
-        fill="none"
-        aria-hidden="true"
-        className="h-7 w-7 @[320px]:h-8 @[320px]:w-8"
-      >
-        <rect
-          x="6"
-          y="8"
-          width="20"
-          height="14"
-          rx="3"
-          fill="currentColor"
-          opacity="0.13"
-        />
-        <rect
-          x="6"
-          y="8"
-          width="20"
-          height="14"
-          rx="3"
-          stroke="currentColor"
-          strokeWidth="2"
-        />
-        <path
-          d="M11 13h10M11 17h6"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          opacity="0.72"
-        />
-        <path
-          d="M16 22v3M11.5 25h9"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-        />
-      </svg>
-    </div>
-  )
-}
-
 function statusLabel(status: PanelStatus): string {
   switch (status) {
     case 'passed': return 'Passed'
@@ -349,14 +269,10 @@ function ageColor(ageMs: number | null): string {
   return 'var(--text-secondary)'
 }
 
+// This surface labels an unknown client "AI Agent" (not the shared default
+// "External Client") — keep that copy while reusing the shared switch.
 function clientLabel(kind: ExternalHealSession['clientKind']): string {
-  switch (kind) {
-    case 'claude-cli': return 'Claude CLI'
-    case 'claude-desktop': return 'Claude Desktop'
-    case 'codex-cli': return 'Codex CLI'
-    case 'codex-desktop': return 'Codex Desktop'
-    case 'other': return 'AI Agent'
-  }
+  return brandingClientLabel(kind, 'AI Agent')
 }
 
 function headlineFor(
@@ -365,12 +281,6 @@ function headlineFor(
 ): string {
   if (!hasSession) return 'AI Agent'
   return kind === 'other' ? 'AI Agent' : clientLabel(kind)
-}
-
-function clientTint(kind: ExternalHealSession['clientKind']): string {
-  if (kind.startsWith('claude')) return '#d39965'
-  if (kind.startsWith('codex')) return '#7aa2f7'
-  return 'var(--border-focus)'
 }
 
 function clientKindToDesktopAgent(

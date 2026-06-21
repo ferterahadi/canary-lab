@@ -109,6 +109,7 @@ describe('runUi signal cleanup', () => {
       exit,
       recordActiveServer: () => {},
       clearActiveServer,
+      countActiveRuns: () => 1,
       confirmShutdown: async () => {
         events.push('confirm')
         return true
@@ -165,6 +166,7 @@ describe('runUi signal cleanup', () => {
       exit,
       recordActiveServer: () => {},
       clearActiveServer: () => {},
+      countActiveRuns: () => 1,
       confirmShutdown: async () => false,
     })
 
@@ -177,6 +179,45 @@ describe('runUi signal cleanup', () => {
     expect(app.close).not.toHaveBeenCalled()
     expect(exit).not.toHaveBeenCalled()
     expect(messages).toContain('Shutdown cancelled. Canary Lab is still running.')
+  })
+
+  it('exits immediately on SIGINT without prompting when no runs are active', async () => {
+    const runStore = {
+      abortAllActiveOrStale: vi.fn(async () => {}),
+    }
+    const app = {
+      listen: vi.fn(async () => {}),
+      close: vi.fn(async () => {}),
+    }
+    const confirmShutdown = vi.fn(async () => true)
+    const exit = vi.fn()
+
+    mocks.createServer.mockResolvedValue({
+      app,
+      registry: {},
+      revertAllEnvsets: vi.fn(),
+      cancelAllWizardAgents: vi.fn(),
+      runStore,
+      brokers: new Map(),
+      draftBrokers: new Map(),
+    })
+
+    await runUi(['--no-open'], {
+      projectRoot: wsRoot,
+      log: () => {},
+      exit,
+      recordActiveServer: () => {},
+      clearActiveServer: () => {},
+      countActiveRuns: () => 0,
+      confirmShutdown,
+    })
+
+    process.emit('SIGINT')
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(confirmShutdown).not.toHaveBeenCalled()
+    expect(app.close).toHaveBeenCalledOnce()
+    expect(exit).toHaveBeenCalledExactlyOnceWith(130)
   })
 })
 

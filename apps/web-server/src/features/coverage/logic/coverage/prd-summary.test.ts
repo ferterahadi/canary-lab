@@ -36,6 +36,13 @@ describe('parsePrdSummaryOutput', () => {
     ])
   })
 
+  it('parses kind + happy/unhappy path prose', () => {
+    const out = parsePrdSummaryOutput('{"requirements":[{"id":"R1","kind":"non-functional","title":"Hash","text":"It should hash at rest","happyPath":"stored as digest","unhappyPath":"  ","pathTypes":["happy"]}]}')
+    expect(out).toEqual([
+      { id: 'R1', kind: 'non-functional', title: 'Hash', text: 'It should hash at rest', happyPath: 'stored as digest', pathTypes: ['happy'] },
+    ])
+  })
+
   it('defaults pathTypes to happy when none usable, drops untitled', () => {
     const out = parsePrdSummaryOutput('{"requirements":[{"title":"A","text":"a","pathTypes":[]},{"title":"","text":"x","pathTypes":["happy"]}]}')
     expect(out).toEqual([{ id: undefined, title: 'A', text: 'a', pathTypes: ['happy'], strictnessLadder: undefined }])
@@ -408,5 +415,30 @@ describe('renderPrdSummaryMarkdown', () => {
       const range = req.sourceRange!
       expect(markdown.slice(range.start, range.end)).toBe(req.text)
     }
+  })
+
+  it('groups by functional/non-functional, enumerates, and spells out happy + unhappy paths', () => {
+    const s = summary([
+      { id: 'R1', kind: 'functional', title: 'Issue PAT', text: 'It should issue a token on approval', happyPath: 'approver clicks approve → token issued', unhappyPath: 'rejection returns 403, no token', pathTypes: ['happy', 'sad'] },
+      { id: 'R2', kind: 'non-functional', title: 'Hash at rest', text: 'It should store only a hashed token', happyPath: 'secret stored as SHA-256 digest', pathTypes: ['happy'] },
+    ])
+    const { markdown } = renderPrdSummaryMarkdown(s, 'pat')
+    // No problem-statement preamble — opens straight into grouped requirements.
+    expect(markdown).toContain('## Functional requirements')
+    expect(markdown).toContain('## Non-functional requirements')
+    expect(markdown).toContain('### 1. R1 — Issue PAT')
+    expect(markdown).toContain('### 1. R2 — Hash at rest') // re-enumerated per section
+    expect(markdown).toContain('**Happy path:** approver clicks approve → token issued')
+    expect(markdown).toContain('**Unhappy path:** rejection returns 403, no token')
+    // A requirement without an unhappy path omits the line rather than inventing one.
+    const r2Block = markdown.slice(markdown.indexOf('### 1. R2'))
+    expect(r2Block).not.toContain('**Unhappy path:**')
+  })
+
+  it('defaults an unclassified requirement into the functional section', () => {
+    const s = summary([{ id: 'R1', title: 'Legacy', text: 'no kind set', pathTypes: ['happy'] }])
+    const { markdown } = renderPrdSummaryMarkdown(s, 'legacy')
+    expect(markdown).toContain('## Functional requirements')
+    expect(markdown).not.toContain('## Non-functional requirements')
   })
 })

@@ -471,6 +471,8 @@ export type {
 
 export interface FeatureDoc {
   relPath: string
+  /** Absolute path on disk — used to open the doc in the configured editor. */
+  absPath: string
   generated: boolean
   sizeBytes: number
 }

@@ -10,6 +10,7 @@ import { getProjectRoot, isCanaryLabWorkspace } from '../shared/runtime/project-
 import { openBrowser } from '../apps/web-server/src/shared/open-browser'
 import { loadProjectConfig, resolveProjectPort } from '../apps/web-server/src/features/runs/logic/runtime/launcher/project-config'
 import { registerActiveServer, unregisterActiveServer } from '../shared/runtime/active-servers'
+import { isActiveRunStatus } from '../shared/run-state'
 import { refreshAgentIntegrationsQuietly } from './agent'
 
 export interface UiCommandOptions {
@@ -18,6 +19,9 @@ export interface UiCommandOptions {
   log?: (msg: string) => void
   exit?: (code: number) => void
   confirmShutdown?: () => Promise<boolean>
+  // Number of runs that would actually be killed by a shutdown. When zero, a
+  // SIGINT skips the confirm prompt and exits immediately. Injectable for tests.
+  countActiveRuns?: () => number
   // Records/clears the live server (projectRoot+port+pid) the MCP bridge follows.
   // Injected as spies in tests so they never touch the real ~/.canary-lab.
   recordActiveServer?: (projectRoot: string, port: number) => void
@@ -110,9 +114,18 @@ export async function runUi(argv: string[], opts: UiCommandOptions = {}): Promis
   }
 
   const confirmShutdown = opts.confirmShutdown ?? confirmShutdownFromStdin
+  const countActiveRuns = opts.countActiveRuns
+    ?? (() => runStore.list().filter((run) => isActiveRunStatus(run.status)).length)
   let sigintConfirmationOpen = false
   process.on('SIGINT', () => {
     if (sigintConfirmationOpen || cleanedUp) return
+    // With nothing in flight, Ctrl+C should just exit — the "kill active runs?"
+    // prompt only earns its friction (a blocking, un-echoed keypress) when a
+    // run would actually be lost. Otherwise a freshly-launched UI looks hung.
+    if (countActiveRuns() === 0) {
+      void shutdown(130)
+      return
+    }
     sigintConfirmationOpen = true
     void (async () => {
       const confirmed = await confirmShutdown()
