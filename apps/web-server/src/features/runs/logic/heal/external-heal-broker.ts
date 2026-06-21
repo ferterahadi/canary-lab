@@ -1,11 +1,11 @@
 import type {
-  ExternalHealClientKind,
   ExternalHealSession,
   ExternalHealSessionStatus,
   RunManifest,
 } from '../runtime/manifest'
 import type { RunStoreEvent } from '../run-store'
 import { HEARTBEAT_STALE_MS } from '../../../../../../../shared/run-state'
+import type { ClientKind } from '../../../../../../../shared/run-mode'
 import { isHealClaimAllowed } from './heal-claim-policy'
 
 // `ExternalHealBroker` owns the in-memory state for which external AI client
@@ -34,13 +34,13 @@ export interface ExternalHealBrokerDeps {
   audit(runId: string, entry: ExternalHealAuditEntry): void
   // Policy gate: which client kinds may own a heal claim. Injectable for
   // tests; defaults to the env-aware module policy (desktops-only).
-  isClaimAllowed?(clientKind: ExternalHealClientKind): boolean
+  isClaimAllowed?(clientKind: ClientKind): boolean
 }
 
 export interface ExternalHealAuditEntry {
   ts: string
   sessionId: string | null
-  clientKind: ExternalHealClientKind | null
+  clientKind: ClientKind | null
   action: string
   args?: Record<string, unknown>
   result?: Record<string, unknown>
@@ -48,7 +48,7 @@ export interface ExternalHealAuditEntry {
 
 export interface ClaimInput {
   sessionId: string
-  clientKind: ExternalHealClientKind
+  clientKind: ClientKind
   clientVersion?: string
   conversationName?: string
 }
@@ -56,7 +56,7 @@ export interface ClaimInput {
 export type ClaimResult =
   | { accepted: true; session: ExternalHealSession }
   | { accepted: false; reason: 'already-claimed'; currentSession: ExternalHealSession }
-  | { accepted: false; reason: 'client-kind-not-allowed'; clientKind: ExternalHealClientKind }
+  | { accepted: false; reason: 'client-kind-not-allowed'; clientKind: ClientKind }
 
 export type OwnershipResult =
   | { ok: true }

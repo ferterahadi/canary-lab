@@ -2,13 +2,7 @@ import fs from 'fs'
 import path from 'path'
 import { benchmarksIndexPath, benchmarkDir, buildBenchmarkPaths } from './paths'
 import type { BenchmarkManifest, BenchmarkIndexEntry } from './types'
-
-function atomicWrite(file: string, body: string): void {
-  fs.mkdirSync(path.dirname(file), { recursive: true })
-  const tmp = `${file}.tmp`
-  fs.writeFileSync(tmp, body)
-  fs.renameSync(tmp, file)
-}
+import { atomicWrite } from '../../../../../../../shared/lib/atomic-write'
 
 export function writeBenchmarkManifest(
   manifestPath: string,

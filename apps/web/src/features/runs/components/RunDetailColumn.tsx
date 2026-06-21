@@ -27,6 +27,8 @@ import {
   type PlaybackTest,
 } from '../utils/run-detail-playback'
 import { statusFromPlaybackResult, statusLabel, statusPillClassForStatus } from '../utils/test-step-status'
+import { TestIdBadge } from '../../../shared/ui/TestIdBadge'
+import { buildTestNumbering, parseLocation, stripLeadingTestOrdinal, testNumberKey } from '../../../shared/test-numbering'
 import { useRun } from '../state/RunsContext'
 import { useEvaluationExports } from '../../evaluation/state/EvaluationExportContext'
 import { useMcpPromo } from '../../../shared/shell/McpPromoContext'
@@ -928,6 +930,16 @@ export function PlaywrightPlayback({
     return <EmptyPane title="No playback events captured yet." body="Use Terminal for older runs or runs that ended before structured Playwright events were written." />
   }
   const activeIndex = currentPlaybackIndex(tests, summary?.running?.name)
+  // Stable per-test ids, shared with the Tests column + Coverage Ledger. Number
+  // against the run's full known set so a partial/targeted rerun keeps each
+  // test's canonical id; fall back to the played-back tests when absent.
+  const knownLocations = summary?.knownTests
+    ?.map((t) => parseLocation(t.location))
+    .filter((p): p is { file: string; line: number } => p !== null) ?? []
+  const numberingSource = knownLocations.length > 0
+    ? knownLocations
+    : tests.map((t) => parseLocation(t.location)).filter((p): p is { file: string; line: number } => p !== null)
+  const testNumbering = buildTestNumbering(numberingSource)
   return (
     <div className={`${embedded ? '' : 'h-full overflow-y-auto scrollbar-thin'} p-3 text-xs`} style={{ background: 'var(--bg-base)' }}>
       <div className="space-y-2">
@@ -943,7 +955,11 @@ export function PlaywrightPlayback({
             >
               <div className="flex min-w-0 flex-wrap items-start gap-3">
                 <div className="min-w-0 flex-1">
-                  <PlaybackHeader test={test} current={isCurrent} index={idx} total={totalTests || tests.length} />
+                  <PlaybackHeader
+                    test={test}
+                    current={isCurrent}
+                    testNumber={(() => { const p = parseLocation(test.location); return p ? testNumbering.get(testNumberKey(p.file, p.line)) : undefined })()}
+                  />
                 </div>
                 <TraceActions artifacts={traceArtifacts} />
               </div>
@@ -991,25 +1007,21 @@ function TraceActions({ artifacts }: { artifacts: PlaywrightArtifact[] }) {
 function PlaybackHeader({
   test,
   current,
-  index,
-  total,
+  testNumber,
 }: {
   test: PlaybackTest
   current: boolean
-  index: number
-  total: number
+  testNumber?: number
 }) {
   return (
     <div className="flex min-w-0 items-start gap-2">
       <StatusPill passed={test.passed} status={test.status} current={current} />
+      <TestIdBadge n={testNumber} />
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 items-center gap-2">
           <div className="truncate font-medium" style={{ color: 'var(--text-primary)' }} title={test.title}>
-            {test.title}
+            {stripLeadingTestOrdinal(test.title)}
           </div>
-          <span className="shrink-0 rounded px-1 py-0.5 text-[10px]" style={{ background: 'var(--bg-selected)', color: current ? 'var(--accent)' : 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
-            {index + 1}/{total}
-          </span>
         </div>
         <div className="mt-0.5 flex flex-wrap gap-x-3 gap-y-1 text-[11px]" style={{ color: 'var(--text-muted)' }}>
           {typeof test.durationMs === 'number' && <span>{formatDuration(test.durationMs)}</span>}

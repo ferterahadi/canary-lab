@@ -422,7 +422,7 @@ describe('MCP HTTP server (smoke)', () => {
       const draftBody = JSON.parse((draft.content?.[0] as { text: string }).text)
       expect(draftBody).toMatchObject({
         feature: 'checkout_flow',
-        source: 'external',
+        producer: 'external',
         externalStage: 'authoring-tests',
         sessionId: 'sess-author-1',
         canaryLabBehavior: 'tracking-only',

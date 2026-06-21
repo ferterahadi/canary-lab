@@ -2,6 +2,7 @@
 // functions — they accept a `fetch` impl via injection so tests can stub it.
 // Production callers use the default (the global `fetch`).
 
+import type { ClientKind, RunProducer } from '../../../../../shared/run-mode'
 import type {
   AuditList,
   Feature,
@@ -410,9 +411,9 @@ export interface PortifyIndexEntry {
   endedAt?: string
 }
 
-export type PortifyProducer = 'local' | 'external'
+export type PortifyProducer = RunProducer
 
-export type PortifyClientKind = 'claude-cli' | 'claude-desktop' | 'codex-cli' | 'codex-desktop' | 'other'
+export type PortifyClientKind = ClientKind
 
 export interface PortifyExternalSession {
   clientKind: PortifyClientKind
@@ -426,7 +427,7 @@ export interface PortifyManifest {
   feature: string
   repos: PortifyRepoState[]
   agent: 'claude' | 'codex'
-  /** Defaults to 'local' on legacy manifests. 'external' = agent ran in the
+  /** Defaults to 'internal' on legacy manifests. 'external' = agent ran in the
    *  user's own client and edited the worktree in place. */
   producer?: PortifyProducer
   external?: PortifyExternalSession

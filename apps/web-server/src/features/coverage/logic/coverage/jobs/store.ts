@@ -2,18 +2,12 @@ import fs from 'fs'
 import path from 'path'
 import { coverageJobsIndexPath, coverageJobDir, buildCoverageJobPaths } from '../../../../coverage/logic/coverage/jobs/paths'
 import type { CoverageJobManifest, CoverageJobIndexEntry, CoverageJobKind } from './types'
+import { atomicWrite } from '../../../../../../../../shared/lib/atomic-write'
 
 // File-backed, event-emitting store for coverage background jobs. Mirrors
 // PortifyRunStore: `save()` writes the manifest + upserts the index, then emits
 // `changed` (the WS/poll push point). Reads come straight off disk so a restart
 // recovers history; `reconcileInterrupted` flips jobs a dead process abandoned.
-
-function atomicWrite(file: string, body: string): void {
-  fs.mkdirSync(path.dirname(file), { recursive: true })
-  const tmp = `${file}.tmp`
-  fs.writeFileSync(tmp, body)
-  fs.renameSync(tmp, file)
-}
 
 function readManifestAt(manifestPath: string): CoverageJobManifest | null {
   try {

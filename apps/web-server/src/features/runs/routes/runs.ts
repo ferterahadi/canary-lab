@@ -5,6 +5,7 @@ import type { RunDetail } from '../../runs/logic/run-store'
 import type { RunStore, OrchestratorLike, RestartHealResult, RestartRunResult, StartRunOutcome } from '../../runs/logic/run-store'
 import { loadFeatures } from '../../config/logic/feature-loader'
 import { isHealClaimAllowed } from '../logic/heal/heal-claim-policy'
+import type { ClientKind } from '../../../../../../shared/run-mode'
 import { getGitRoot, resolveRepoPath } from '../../../shared/git-repo'
 import { removeWorktree } from '../../runs/logic/runtime/repo-worktree'
 import { listWorktrees, isUnder } from '../../runs/logic/runtime/worktree-inventory'
@@ -50,7 +51,7 @@ interface ActiveEvaluationExportTask {
 export interface ExternalHealAgentRequest {
   kind: 'external'
   sessionId: string
-  clientKind: 'claude-cli' | 'claude-desktop' | 'codex-cli' | 'codex-desktop' | 'other'
+  clientKind: ClientKind
   clientVersion?: string
   conversationName?: string
   /** Whether this external client may *own* the heal loop (Desktop-only per

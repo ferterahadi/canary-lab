@@ -10,7 +10,7 @@ function draft(overrides: Partial<DraftRecord> = {}): DraftRecord {
     prdDocuments: [],
     repos: [],
     featureName: 'checkout',
-    source: 'external',
+    producer: 'external',
     externalStage: 'authoring-tests' as ExternalDraftStage,
     externalClientKind: 'claude-desktop',
     externalSessionId: 'sess-abcdef-12345',

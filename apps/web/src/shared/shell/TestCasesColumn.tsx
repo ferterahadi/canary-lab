@@ -1,9 +1,11 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import * as api from '../api/client'
 import type { FeatureSpecFile, RunStatus } from '../api/types'
 import { activeBodyLineForTest, colorClassForStatus, runningTestForSummaryName, statusForTest, summaryEntryName, type StepStatus } from '../../features/runs/utils/test-step-status'
 import type { RunSummary, RunSummaryRunningStep } from '../api/types'
 import { ShikiCode, StatusPill, StepBlock } from '../ui/TestCodeBlock'
+import { TestIdBadge } from '../ui/TestIdBadge'
+import { buildTestNumbering, stripLeadingTestOrdinal, testNumberKey } from '../test-numbering'
 import { ChevronRightIcon, StatusDot } from '../../features/config/components/atoms'
 
 interface Props {
@@ -45,6 +47,14 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunStatus, re
   useEffect(() => {
     onTotalTestsChange?.(totalTests)
   }, [totalTests, onTotalTestsChange])
+
+  // Canonical per-test ids, shared with Playback + the Coverage Ledger.
+  const testNumbering = useMemo(
+    () => buildTestNumbering(
+      (specs ?? []).flatMap((s) => s.tests.map((t) => ({ file: t.sourceFile ?? s.file, line: t.line }))),
+    ),
+    [specs],
+  )
 
   if (!feature) {
     return (
@@ -114,6 +124,7 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunStatus, re
                   <TestCard
                     key={key}
                     sourceFile={t.sourceFile ?? spec.file}
+                    testNumber={testNumbering.get(testNumberKey(t.sourceFile ?? spec.file, t.line))}
                     test={t}
                     status={statusForTest(
                       summaryIdentityForWorkspaceTest(t.name, t.line, t.sourceFile ?? spec.file, activeRunSummary),
@@ -173,6 +184,7 @@ function formatLoadError(err: unknown): string {
 
 function TestCard({
   sourceFile,
+  testNumber,
   test,
   status,
   runningLocation,
@@ -184,6 +196,7 @@ function TestCard({
   onToggle,
 }: {
   sourceFile: string
+  testNumber?: number
   test: ExtractedTest
   status: StepStatus
   runningLocation?: string
@@ -213,12 +226,13 @@ function TestCard({
         >
           <ChevronRightIcon />
         </span>
+        <TestIdBadge n={testNumber} />
         <div
           className="flex-1 min-w-0 truncate text-sm font-medium"
           title={test.name}
           style={{ color: 'var(--text-primary)' }}
         >
-          {test.name}
+          {stripLeadingTestOrdinal(test.name)}
         </div>
         <span
           className="shrink-0"

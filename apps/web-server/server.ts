@@ -4,6 +4,7 @@ import Fastify, { type FastifyInstance } from 'fastify'
 import websocketPlugin from '@fastify/websocket'
 import fastifyStatic from '@fastify/static'
 import { isActiveRunStatus, isRestartableRunStatus } from '../../shared/run-state'
+import type { ClientKind } from '../../shared/run-mode'
 import { featuresRoutes } from './src/features/config/routes/features'
 import { coverageRoutes } from './src/features/coverage/routes/coverage'
 import { featureConfigRoutes } from './src/features/config/routes/feature-config'
@@ -419,7 +420,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
 
   const restartExternalRun = async (
     runId: string,
-    healAgentReq: { kind: 'external'; sessionId: string; clientKind: 'claude-cli' | 'claude-desktop' | 'codex-cli' | 'codex-desktop' | 'other'; clientVersion?: string; conversationName?: string; claimable?: boolean },
+    healAgentReq: { kind: 'external'; sessionId: string; clientKind: ClientKind; clientVersion?: string; conversationName?: string; claimable?: boolean },
     guidance?: string,
   ): Promise<OrchestratorLike> => {
     // `claimable === false` means an external client *triggered* the restart but
@@ -616,7 +617,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
 	    startRun: async (
       featureName: string,
       env?: string,
-      healAgentReq?: { kind: 'external'; sessionId: string; clientKind: 'claude-cli' | 'claude-desktop' | 'codex-cli' | 'codex-desktop' | 'other'; clientVersion?: string; conversationName?: string; claimable?: boolean },
+      healAgentReq?: { kind: 'external'; sessionId: string; clientKind: ClientKind; clientVersion?: string; conversationName?: string; claimable?: boolean },
       isolation?: 'worktree' | 'queue',
       executionType: ExecutionType = 'run',
     ): Promise<StartRunOutcome> => {

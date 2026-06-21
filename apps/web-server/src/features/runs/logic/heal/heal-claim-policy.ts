@@ -14,42 +14,30 @@
 // Override via `CANARY_LAB_HEAL_CLAIM_CLIENTS` (comma-separated client kinds)
 // for the rare case someone wants CLI claiming back without a code change.
 
-import type { ExternalHealClientKind } from '../runtime/manifest'
+import { isClientKind, type ClientKind } from '../../../../../../../shared/run-mode'
 
-export const HEAL_CLAIM_ALLOWED_KINDS: readonly ExternalHealClientKind[] = [
+export const HEAL_CLAIM_ALLOWED_KINDS: readonly ClientKind[] = [
   'claude-desktop',
   'codex-desktop',
 ]
-
-const VALID_KINDS: readonly ExternalHealClientKind[] = [
-  'claude-cli',
-  'claude-desktop',
-  'codex-cli',
-  'codex-desktop',
-  'other',
-]
-
-function isClientKind(value: string): value is ExternalHealClientKind {
-  return (VALID_KINDS as readonly string[]).includes(value)
-}
 
 // Parse the env override into a set of valid client kinds. Unknown/garbage
 // tokens are ignored; an empty/whitespace-only override falls back to the
 // built-in default (we never want a typo to lock everyone out).
 export function resolveAllowedClaimKinds(
   env: NodeJS.ProcessEnv = process.env,
-): readonly ExternalHealClientKind[] {
+): readonly ClientKind[] {
   const raw = env.CANARY_LAB_HEAL_CLAIM_CLIENTS
   if (typeof raw !== 'string' || raw.trim() === '') return HEAL_CLAIM_ALLOWED_KINDS
   const parsed = raw
     .split(',')
     .map((s) => s.trim())
-    .filter((s): s is ExternalHealClientKind => s.length > 0 && isClientKind(s))
+    .filter((s): s is ClientKind => s.length > 0 && isClientKind(s))
   return parsed.length > 0 ? parsed : HEAL_CLAIM_ALLOWED_KINDS
 }
 
 export function isHealClaimAllowed(
-  kind: ExternalHealClientKind,
+  kind: ClientKind,
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
   return resolveAllowedClaimKinds(env).includes(kind)

@@ -40,7 +40,7 @@ export function SpecReviewStep({
       <div className={bodyClassName}>
         <div className={`mx-auto max-w-3xl ${status === 'generating' ? 'flex h-full min-h-0 flex-col gap-4' : 'space-y-5'}`}>
           {status === 'generating' && (
-            draft.source === 'external' ? (
+            draft.producer === 'external' ? (
               <div className="cl-frame flex min-h-0 flex-1 flex-col overflow-hidden">
                 <ExternalDraftAgentPanel draft={draft} stageView="generating" />
               </div>
@@ -106,7 +106,7 @@ export function SpecReviewStep({
                 <div className="mb-2 font-semibold">Generation stopped.</div>
                 <div className="text-[11px] opacity-90">{draft.errorMessage ?? 'Generation cancelled by user'}</div>
               </div>
-              {draft.source === 'external' ? (
+              {draft.producer === 'external' ? (
                 <div className="cl-frame flex min-h-[24rem] max-h-[min(70vh,44rem)] flex-col overflow-hidden">
                   <ExternalDraftAgentPanel draft={draft} stageView="generating" />
                 </div>

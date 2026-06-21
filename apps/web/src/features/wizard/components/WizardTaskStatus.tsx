@@ -234,7 +234,7 @@ function TaskRow({
     >
       <button
         type="button"
-        onClick={() => task.source === 'external' ? onOpenExternal(task) : onOpen(task.draftId)}
+        onClick={() => task.producer === 'external' ? onOpenExternal(task) : onOpen(task.draftId)}
         className="min-w-0 flex-1 rounded-md px-3 py-2 text-left"
       >
         <span className="flex min-w-0 items-center gap-2">
@@ -246,11 +246,11 @@ function TaskRow({
         </span>
         <span className="mt-1 flex min-w-0 items-center gap-2 truncate text-[11px]" style={{ color: 'var(--text-muted)' }}>
           <span className="truncate">{stageLabel(task)}</span>
-          {(task.source === 'external' ? task.externalClientKind : task.wizardAgent) && (
+          {(task.producer === 'external' ? task.externalClientKind : task.wizardAgent) && (
             <>
               <Sep />
               <span className="font-mono text-[10px] uppercase tracking-wide">
-                {task.source === 'external' ? task.externalClientKind : task.wizardAgent}
+                {task.producer === 'external' ? task.externalClientKind : task.wizardAgent}
               </span>
             </>
           )}
@@ -467,7 +467,7 @@ function taskTitle(task: DraftRecord): string {
 }
 
 function stageLabel(task: DraftRecord): string {
-  if (task.source === 'external' && task.externalStage) return task.externalStage
+  if (task.producer === 'external' && task.externalStage) return task.externalStage
   if (task.activeAgentStage === 'planning' || task.status === 'planning') return 'Plan stage'
   if (task.activeAgentStage === 'generating' || task.status === 'generating') return 'Spec stage'
   if (task.status === 'plan-ready') return 'Plan review'

@@ -11,6 +11,8 @@ import type {
   ExecutionType,
   VerificationRunMetadata,
 } from '../../../../../../../shared/verification'
+import { atomicWrite } from '../../../../../../../shared/lib/atomic-write'
+import type { ClientKind, ExternalSessionMeta } from '../../../../../../../shared/run-mode'
 export type {
   QueueReason,
   RunLifecycleAbortReason,
@@ -76,13 +78,6 @@ export interface StoppedEarlyInfo {
   suiteTotal: number
 }
 
-export type ExternalHealClientKind =
-  | 'claude-cli'
-  | 'claude-desktop'
-  | 'codex-cli'
-  | 'codex-desktop'
-  | 'other'
-
 export type LocalHealAgent = 'claude' | 'codex'
 
 export type ExternalHealSessionStatus =
@@ -100,11 +95,8 @@ export type ExternalHealSessionStatus =
  * agent PTY in that mode — it parks at `waiting-for-signal` and lets the
  * external client write signals through `POST /api/runs/:runId/signal`.
  */
-export interface ExternalHealSession {
-  sessionId: string
-  clientKind: ExternalHealClientKind
+export interface ExternalHealSession extends ExternalSessionMeta {
   clientVersion?: string
-  conversationName?: string
   claimedAt: string
   lastHeartbeatAt: string
   status: ExternalHealSessionStatus
@@ -165,13 +157,6 @@ export interface RunManifest {
    *  recovery flow narration; runner.log remains the human-readable audit. */
   lifecycle?: RunLifecycleSnapshot
   verification?: VerificationRunMetadata
-}
-
-function atomicWrite(file: string, body: string): void {
-  fs.mkdirSync(path.dirname(file), { recursive: true })
-  const tmp = `${file}.tmp`
-  fs.writeFileSync(tmp, body)
-  fs.renameSync(tmp, file)
 }
 
 export function writeManifest(manifestPath: string, manifest: RunManifest): void {

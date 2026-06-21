@@ -740,7 +740,7 @@ describe('createPortifyRunner (branch coverage)', () => {
 
       store.save({
         workflowId: 'w', feature: 'f', featureDir: '/f', repos: [], agent: 'claude',
-        producer: 'local', branch: 'b', status: 'editing', attempt: 1, maxAttempts: 1, startedAt: 'now',
+        producer: 'internal', branch: 'b', status: 'editing', attempt: 1, maxAttempts: 1, startedAt: 'now',
       } as PortifyManifest)
       await expect(runner.submitExternalPortify('w')).rejects.toMatchObject({ statusCode: 409 })
     })

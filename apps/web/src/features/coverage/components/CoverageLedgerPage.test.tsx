@@ -110,6 +110,13 @@ describe('CoverageLedgerPage', () => {
     expect(container.querySelector('[data-testid="coverage-ring"]')?.getAttribute('aria-label')).toBe('66.7% verified')
   })
 
+  it('numbers test cards by source order (shared cross-view id)', async () => {
+    await mount()
+    // cart.spec.ts:10 → #1, receipt.spec.ts:5 → #2 (sorted by file then line).
+    expect(container.querySelector('[data-testid="test-adds item"]')?.textContent).toContain('#1')
+    expect(container.querySelector('[data-testid="test-sends receipt"]')?.textContent).toContain('#2')
+  })
+
   it('shows gap badges with counts and the drift indicator (in the docs rail)', async () => {
     await mount()
     expect(container.querySelector('[data-testid="gap-badge-untested"]')?.textContent).toContain('1')

@@ -2,17 +2,11 @@ import fs from 'fs'
 import path from 'path'
 import { portifyIndexPath, portifyDir, buildPortifyPaths } from './paths'
 import type { PortifyManifest, PortifyIndexEntry } from './types'
+import { atomicWrite } from '../../../../../../../shared/lib/atomic-write'
 
 // File-backed, event-emitting store for port-ification workflows. Mirrors
 // BenchmarkRunStore: `save()` writes the manifest + upserts the index, then
 // emits `changed` (the WS/poll push point). Reads come straight off disk.
-
-function atomicWrite(file: string, body: string): void {
-  fs.mkdirSync(path.dirname(file), { recursive: true })
-  const tmp = `${file}.tmp`
-  fs.writeFileSync(tmp, body)
-  fs.renameSync(tmp, file)
-}
 
 function readManifestAt(manifestPath: string): PortifyManifest | null {
   try {

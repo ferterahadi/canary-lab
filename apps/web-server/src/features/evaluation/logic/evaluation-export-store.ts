@@ -1,11 +1,11 @@
 import fs from 'fs'
 import path from 'path'
 import { createZip } from '../../../shared/simple-zip'
-import type { ExternalHealClientKind } from '../../runs/logic/runtime/manifest'
+import { isClientKind, type ClientKind, type RunProducer } from '../../../../../../shared/run-mode'
 
 export type EvaluationExportMode = 'raw' | 'localized'
 export type EvaluationExportStatus = 'running' | 'completed' | 'failed'
-export type EvaluationExportProducer = 'internal' | 'external'
+export type EvaluationExportProducer = RunProducer
 
 export interface EvaluationExportTaskRecord {
   taskId: string
@@ -18,7 +18,7 @@ export interface EvaluationExportTaskRecord {
   updatedAt: string
   downloadReady: boolean
   archiveBase: string
-  clientKind?: ExternalHealClientKind
+  clientKind?: ClientKind
   sessionId?: string
   conversationName?: string
   language?: string
@@ -46,7 +46,7 @@ export interface EvaluationExportTaskView {
   createdAt: string
   updatedAt: string
   downloadReady: boolean
-  clientKind?: ExternalHealClientKind
+  clientKind?: ClientKind
   sessionId?: string
   conversationName?: string
   language?: string
@@ -217,7 +217,7 @@ function normalizeTaskRecord(value: EvaluationExportTaskRecord): EvaluationExpor
   if (typeof value.createdAt !== 'string' || typeof value.updatedAt !== 'string') return null
   if (typeof value.downloadReady !== 'boolean') return null
   if (typeof value.archiveBase !== 'string') return null
-  if (value.clientKind !== undefined && !isExternalHealClientKind(value.clientKind)) return null
+  if (value.clientKind !== undefined && !isClientKind(value.clientKind)) return null
   if (value.sessionId !== undefined && typeof value.sessionId !== 'string') return null
   if (value.conversationName !== undefined && typeof value.conversationName !== 'string') return null
   if (value.language !== undefined && typeof value.language !== 'string') return null
@@ -245,12 +245,4 @@ function validateArchivePath(filePath: string): string {
     throw new Error(`archive file path "${filePath}" must stay inside the archive`)
   }
   return normalized
-}
-
-function isExternalHealClientKind(value: unknown): value is ExternalHealClientKind {
-  return value === 'claude-cli' ||
-    value === 'claude-desktop' ||
-    value === 'codex-cli' ||
-    value === 'codex-desktop' ||
-    value === 'other'
 }

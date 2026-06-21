@@ -12,7 +12,7 @@ import {
   type CanaryLabMcpDeps,
   type CanaryLabMcpProfile,
 } from './tools'
-import type { ExternalHealClientKind } from '../src/features/runs/logic/runtime/manifest'
+import { isClientKind, type ClientKind } from '../../../shared/run-mode'
 
 // Singleton MCP server mounted on the existing Fastify instance at `/mcp`.
 // Uses the streamable HTTP transport so Claude Desktop / Codex Desktop and
@@ -99,7 +99,7 @@ export async function registerMcpRoutes(
 
   const newSession = async (
     profile: CanaryLabMcpProfile,
-    defaultClientKind: ExternalHealClientKind,
+    defaultClientKind: ClientKind,
   ): Promise<StreamableHTTPServerTransport> => {
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: () => randomUUID(),
@@ -202,14 +202,14 @@ function countToolsForProfile(deps: McpRouteDeps, profile: CanaryLabMcpProfile):
 }
 
 function contextFromUrl(url: string):
-  | { ok: true; profile: CanaryLabMcpProfile; clientKind: ExternalHealClientKind }
+  | { ok: true; profile: CanaryLabMcpProfile; clientKind: ClientKind }
   | { ok: false; error: string } {
   const params = new URL(url, 'http://localhost').searchParams
   const rawProfile = params.get('profile') ?? undefined
   const profile = normalizeCanaryLabMcpProfile(rawProfile)
   if (!profile) return { ok: false, error: `invalid MCP profile: ${rawProfile}` }
   const rawClientKind = params.get('client_kind') ?? 'other'
-  if (!isExternalHealClientKind(rawClientKind)) {
+  if (!isClientKind(rawClientKind)) {
     return { ok: false, error: `invalid MCP client_kind: ${rawClientKind}` }
   }
   return { ok: true, profile, clientKind: rawClientKind }
@@ -223,10 +223,3 @@ function countTools(mcp: McpServer): number {
   return tools ? Object.keys(tools).length : 0
 }
 
-function isExternalHealClientKind(value: string): value is ExternalHealClientKind {
-  return value === 'claude-cli' ||
-    value === 'claude-desktop' ||
-    value === 'codex-cli' ||
-    value === 'codex-desktop' ||
-    value === 'other'
-}

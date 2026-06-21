@@ -11,6 +11,8 @@ import type {
 } from '../../../shared/api/types'
 import { CoverageDocsRail } from './CoverageDocsRail'
 import { CoverageGeneratingPane } from './CoverageGeneratingPane'
+import { TestIdBadge } from '../../../shared/ui/TestIdBadge'
+import { buildTestNumbering, stripLeadingTestOrdinal, testNumberKey } from '../../../shared/test-numbering'
 
 interface Props {
   feature: string
@@ -158,6 +160,12 @@ export function CoverageLedgerPage({ feature, onClose }: Props) {
     return map
   }, [ledger])
 
+  // Canonical per-test ids, shared with the Tests column + Playback.
+  const testNumbering = useMemo(
+    () => buildTestNumbering((ledger?.tests ?? []).map((t) => ({ file: t.file, line: t.line }))),
+    [ledger],
+  )
+
   // The two-way highlight relation: a hovered test lights its requirements; a
   // hovered requirement lights its tests.
   const { activeReqIds, activeTestNames } = useMemo(() => {
@@ -221,6 +229,7 @@ export function CoverageLedgerPage({ feature, onClose }: Props) {
         <TestCard
           key={t.name}
           test={t}
+          testNumber={testNumbering.get(testNumberKey(t.file, t.line))}
           color={colorByTest.get(t.name)!}
           loading={generating}
           active={!generating && activeTestNames.has(t.name)}
@@ -528,8 +537,9 @@ function RequirementCard({ rc, colors, active, dimmed, onHover }: {
 
 // R9: no decorative accent border — the verified dot + covers tags carry the
 // meaning. The test's `@req-*` / `@path-*` tags are surfaced as chips.
-function TestCard({ test, color, active, dimmed, loading, onHover }: {
+function TestCard({ test, testNumber, color, active, dimmed, loading, onHover }: {
   test: TestCoverage
+  testNumber?: number
   color: string
   active: boolean
   dimmed: boolean
@@ -559,7 +569,8 @@ function TestCard({ test, color, active, dimmed, loading, onHover }: {
           title={test.verified ? 'Has a passing run' : 'No passing run yet'}
           style={{ width: 8, height: 8, borderRadius: '50%', flexShrink: 0, background: test.verified ? 'rgb(52,211,153)' : 'rgb(251,113,133)', boxShadow: test.verified ? '0 0 6px color-mix(in srgb, rgb(52,211,153) 70%, transparent)' : 'none' }}
         />
-        <strong style={{ fontSize: 13, color: 'var(--text-primary)' }}>{test.name}</strong>
+        <TestIdBadge n={testNumber} />
+        <strong style={{ fontSize: 13, color: 'var(--text-primary)' }}>{stripLeadingTestOrdinal(test.name)}</strong>
         {test.file && (
           <span style={{ marginLeft: 'auto', fontFamily: 'var(--font-mono, monospace)', fontSize: 10, color: 'var(--text-muted)' }}>{test.file}{test.line ? `:${test.line}` : ''}</span>
         )}

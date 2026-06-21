@@ -12,6 +12,8 @@ import type {
 export interface PlaybackTest {
   name: string
   title: string
+  /** Source location (`file:line[:col]`) — used to resolve the stable test id. */
+  location?: string
   startedAt?: string
   endedAt?: string
   status?: string
@@ -86,9 +88,13 @@ export function playbackTests(events?: PlaywrightPlaybackEvent[]): PlaybackTest[
     latestKeyByIdentity.set(identity, key)
   }
   return [...latestKeyByIdentity.values()]
-    .map((key) => tests.get(key))
-    .filter((test): test is PlaybackTest => test !== undefined)
-    .map((test) => ({ ...test, steps: compactPlaybackSteps(test.steps) }))
+    .map((key) => (tests.has(key) ? { key, test: tests.get(key)! } : null))
+    .filter((entry): entry is { key: string; test: PlaybackTest } => entry !== null)
+    .map(({ key, test }) => ({
+      ...test,
+      location: test.location ?? locationByKey.get(key),
+      steps: compactPlaybackSteps(test.steps),
+    }))
 }
 
 export function artifactsForPlayback(
