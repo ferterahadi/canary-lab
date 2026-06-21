@@ -48,6 +48,25 @@ export interface PortifyRepoState {
   baseSha?: string
 }
 
+/** Who drives the port-ification edits.
+ *  - `local`: an agent spawned IN the app process edits the scratch worktree.
+ *  - `external`: the agent runs in the user's OWN Claude/Codex client (via MCP)
+ *    and edits the scratch worktree IN PLACE; the app process only sets up the
+ *    worktree, verifies (double-boot), and saves the overlay. Mirrors external
+ *    heal/wizard/eval — the transcript lives in the user's client, not here. */
+export type PortifyProducer = 'local' | 'external'
+
+export type PortifyClientKind = 'claude-cli' | 'claude-desktop' | 'codex-cli' | 'codex-desktop' | 'other'
+
+/** The external client that owns an external-producer workflow. Surfaced
+ *  status-only in the UI (the agent's transcript lives in the user's client). */
+export interface PortifyExternalSession {
+  clientKind: PortifyClientKind
+  sessionId: string
+  conversationName?: string
+  sessionUrl?: string
+}
+
 export interface PortifyManifest {
   workflowId: string
   feature: string
@@ -56,6 +75,11 @@ export interface PortifyManifest {
   repos: PortifyRepoState[]
   env?: string
   agent: HealAgent
+  /** Defaults to `local` (legacy manifests have no field). `external` means the
+   *  agent runs in the user's own client and edits the worktree in place. */
+  producer?: PortifyProducer
+  /** Set only for `producer: 'external'` — the claiming client's identity. */
+  external?: PortifyExternalSession
   /** Ephemeral scratch-branch name created in the scratch worktree(s) and
    *  discarded on save/cancel — it never lands in the product repo. */
   branch: string
@@ -94,4 +118,30 @@ export interface StartPortifyInput {
 
 export interface StartPortifyResult {
   workflowId: string
+}
+
+export interface StartExternalPortifyInput {
+  feature: string
+  clientKind: PortifyClientKind
+  sessionId: string
+  conversationName?: string
+  sessionUrl?: string
+}
+
+/** Where the external client edits a repo's source — its path inside the scratch
+ *  worktree the app process created. */
+export interface ExternalPortifyEditTarget {
+  name: string
+  editPath: string
+}
+
+export interface StartExternalPortifyResult {
+  workflowId: string
+  /** The scratch worktree path to edit each repo's source in. */
+  targets: ExternalPortifyEditTarget[]
+  /** Absolute path of the feature config to edit in place (declare `ports` slots). */
+  configPath: string
+  /** The port-ification task instructions for the external client (same prompt
+   *  the local agent would receive). */
+  instructions: string
 }

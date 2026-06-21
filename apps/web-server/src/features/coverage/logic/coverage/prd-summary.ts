@@ -295,8 +295,12 @@ export function buildPrdSummaryPrompt(
   templatePath: string = PRD_SUMMARY_TEMPLATE_PATH,
 ): string {
   const template = fs.readFileSync(templatePath, 'utf-8').trim()
+  // Agentic: list the resolvable file paths and make the agent READ them with its
+  // tools, rather than inlining the bodies (which lets the model shortcut to a
+  // one-shot answer and leaves the AgentSessionView timeline empty). The server
+  // still reads the collection itself for fingerprints + the deterministic fallback.
   const docs = collection.entries.length
-    ? collection.entries.map((e) => `### ${e.relPath}\n\n${e.content}`).join('\n\n')
+    ? collection.entries.map((e) => `- ${path.join(collection.docsDir, e.relPath)}`).join('\n')
     : '(no documents)'
   const previousJson = previous.length
     ? JSON.stringify(

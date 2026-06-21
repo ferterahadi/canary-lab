@@ -306,6 +306,74 @@ export function resolveManifestSessionRef(
   return locateCodexSessionLog(opts.projectRoot, opts.startedAt)
 }
 
+// ─── Workflow-dir agent-session ref (benchmark, portify) ─────────────────────
+//
+// Benchmark + portify both spawn a one-shot agent in a scratch worktree and
+// surface its session through the shared AgentSessionView. They write a
+// `<dir>/agent-session.json` the endpoint/WS resolve from:
+//   - claude: the log path is fully determined by cwd + the pinned session id,
+//     so persist the ref eagerly.
+//   - codex:  there is no `--session-id` flag, so the log path isn't known at
+//     spawn — persist the cwd + spawn time and discover the session post-hoc
+//     (live), exactly like the heal/draft codex path.
+
+interface CodexDiscoveryHint {
+  cwd: string
+  spawnedAt: string
+}
+
+export function writeWorkflowAgentRef(
+  dir: string,
+  opts: { agent: AgentKind; cwd: string; spawnedAt: string; sessionId?: string },
+  homeDir: string = os.homedir(),
+): void {
+  try {
+    const file =
+      opts.agent === 'claude' && opts.sessionId
+        ? {
+            activeAgent: 'claude' as const,
+            sessions: {
+              claude: {
+                agent: 'claude' as const,
+                sessionId: opts.sessionId,
+                logPath: claudeSessionLogPath(opts.cwd, opts.sessionId, homeDir),
+              },
+            },
+          }
+        : { activeAgent: 'codex' as const, codexDiscovery: { cwd: realpathOrSelf(opts.cwd), spawnedAt: opts.spawnedAt } }
+    fs.writeFileSync(path.join(dir, 'agent-session.json'), JSON.stringify(file, null, 2))
+  } catch {
+    /* best-effort — the surface falls back to its empty state */
+  }
+}
+
+export function resolveWorkflowAgentRef(dir: string, homeDir: string = os.homedir()): AgentSessionRef | null {
+  let raw: string | null = null
+  try { raw = fs.readFileSync(path.join(dir, 'agent-session.json'), 'utf-8') } catch { return null }
+  // codex: discover the session by cwd + spawn time (the log path isn't pinned).
+  const hint = readCodexDiscoveryHint(raw)
+  if (hint) return locateCodexSessionLog(hint.cwd, hint.spawnedAt, homeDir)
+  // claude: the persisted ref's logPath is cwd-derived, which can be wrong (the
+  // project-dir slug folds more than `/`). Once the log exists, prefer locating
+  // it by the globally-unique session id.
+  const parsed = parseAgentSessionRefFile(raw)
+  const ref = parsed ? selectAgentSessionRef(parsed) : null
+  if (!ref) return null
+  if (ref.logPath && fs.existsSync(ref.logPath)) return ref
+  const found = ref.agent === 'claude' ? findClaudeLogBySessionId(ref.sessionId, homeDir) : null
+  return found ? { ...ref, logPath: found } : ref
+}
+
+function readCodexDiscoveryHint(raw: string): CodexDiscoveryHint | null {
+  let obj: unknown
+  try { obj = JSON.parse(raw) } catch { return null }
+  const disc = (obj as { codexDiscovery?: unknown })?.codexDiscovery
+  if (!disc || typeof disc !== 'object') return null
+  const { cwd, spawnedAt } = disc as { cwd?: unknown; spawnedAt?: unknown }
+  if (typeof cwd !== 'string' || typeof spawnedAt !== 'string') return null
+  return { cwd, spawnedAt }
+}
+
 // Find the newest Codex session for a run directory without requiring a cycle
 // start timestamp. Older/interrupted runs can lack the `agent-session-id.txt`
 // sidecar; Codex's own JSONL session store is the only durable record in that

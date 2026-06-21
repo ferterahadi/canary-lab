@@ -190,4 +190,87 @@ export class PortifyOrchestrator {
       return m
     }
   }
+
+  // External producer: create the scratch worktree(s) and PARK at `editing` —
+  // no agent is spawned here. The external client (running in the user's own
+  // Claude/Codex) edits the worktree in place, then calls submit, which drives
+  // `verifyExternalEdits`. Mirrors run()'s setup but stops before the agent.
+  async startExternal(): Promise<PortifyManifest> {
+    const d = this.deps
+    let m: PortifyManifest = { ...d.manifest, status: 'planning' }
+    d.persist(m)
+    try {
+      const repos = await d.setup()
+      if (d.isAborted?.()) {
+        await d.cleanup?.()
+        m = { ...m, status: 'aborted', endedAt: d.now() }
+        d.persist(m)
+        return m
+      }
+      m = { ...m, repos, status: 'editing' }
+      d.persist(m)
+      return m
+    } catch (err) {
+      await d.cleanup?.()
+      m = { ...m, status: 'failed', endedAt: d.now(), error: err instanceof Error ? err.message : String(err) }
+      d.persist(m)
+      return m
+    }
+  }
+
+  // External producer: verify the edits the client made IN PLACE in the scratch
+  // worktree. Like revise() but with no agent step (the editing already happened
+  // out-of-band). On pass → `ready-to-save`; on fail → re-park at `editing` so
+  // the client can adjust and submit again. Never terminal (the client chooses
+  // to save or cancel). `current` is the live manifest the caller read.
+  async verifyExternalEdits(current: PortifyManifest): Promise<PortifyManifest> {
+    const d = this.deps
+    if (d.isAborted?.()) return current
+
+    let m: PortifyManifest = { ...current, status: 'verifying', error: undefined }
+    d.persist(m)
+
+    try {
+      const diff = await d.captureDiff()
+      if (!diff.trim()) {
+        // No edits to verify — booting the unchanged stack would just re-fail on
+        // the port clash. Tell the client to make the rewrite first.
+        m = {
+          ...m,
+          status: 'editing',
+          diff,
+          verification: { ok: false, instances: [], failureDetail: 'No edits detected in the worktree — rewrite the listeners to read injected ports, then submit again.' },
+        }
+        d.persist(m)
+        return m
+      }
+      m = { ...m, diff }
+      d.persist(m)
+
+      let verification = await d.verify()
+      if (d.isAborted?.()) return m
+
+      if (verification.ok) {
+        const tests = await d.checkTestsUntouched()
+        if (!tests.ok) {
+          verification = {
+            ok: false,
+            instances: verification.instances,
+            failureDetail: `You modified test files (${tests.offending.join(', ')}). Revert them — this change must be ports-only.`,
+          }
+        }
+      }
+
+      m = verification.ok
+        ? { ...m, status: 'ready-to-save', diff, verification }
+        : { ...m, status: 'editing', diff, verification }
+      d.persist(m)
+      return m
+    } catch (err) {
+      // Re-park at editing so the client can fix + resubmit (or cancel).
+      m = { ...m, status: 'editing', error: err instanceof Error ? err.message : String(err) }
+      d.persist(m)
+      return m
+    }
+  }
 }

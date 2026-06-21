@@ -34,10 +34,8 @@ import { createPortifyRunner } from './src/features/portify/logic/runtime/runner
 import { reclaimOrphanedPortify } from './src/features/portify/logic/runtime/reclaim'
 import { portifyDir } from './src/features/portify/logic/runtime/paths'
 import {
-  parseAgentSessionRefFile,
-  selectAgentSessionRef,
   loadAgentSession,
-  findClaudeLogBySessionId,
+  resolveWorkflowAgentRef,
 } from './src/features/agent-sessions/logic/agent-session-log'
 import { WorkspaceEventBus } from './src/shared/workspace-events'
 import { PaneBroker } from './src/features/runs/logic/pane-broker'
@@ -1148,28 +1146,11 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
     projectRoot: opts.projectRoot,
     startBenchmark: benchmarkRunner.startBenchmark,
     abortBenchmark: benchmarkRunner.abort,
-    readSabotageLog: (id) => {
-      try {
-        return fs.readFileSync(path.join(benchmarkDir(logsDir, id), 'sabotage-agent.log'), 'utf-8')
-      } catch {
-        return ''
-      }
-    },
     loadAgentSession: (id) => {
-      try {
-        const raw = fs.readFileSync(path.join(benchmarkDir(logsDir, id), 'agent-session.json'), 'utf-8')
-        const parsed = parseAgentSessionRefFile(raw)
-        const ref = parsed ? selectAgentSessionRef(parsed) : null
-        if (!ref) return null
-        const logPath = fs.existsSync(ref.logPath)
-          ? ref.logPath
-          : (ref.agent === 'claude' ? findClaudeLogBySessionId(ref.sessionId) : null)
-        if (!logPath) return null
-        const { events, meta } = loadAgentSession({ ...ref, logPath })
-        return { agent: ref.agent, sessionId: ref.sessionId, model: meta.model, effort: meta.effort, events }
-      } catch {
-        return null
-      }
+      const ref = resolveWorkflowAgentRef(benchmarkDir(logsDir, id))
+      if (!ref) return null
+      const { events, meta } = loadAgentSession(ref)
+      return { agent: ref.agent, sessionId: ref.sessionId, model: meta.model, effort: meta.effort, events }
     },
     listSkills: (feature) => sabotageSkillsForFeature(loadBundledSabotageSkills(), feature),
   })
@@ -1196,20 +1177,10 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
     removePortify: portifyRunner.remove,
     workspaceEvents,
     loadAgentSession: (id) => {
-      try {
-        const raw = fs.readFileSync(path.join(portifyDir(logsDir, id), 'agent-session.json'), 'utf-8')
-        const parsed = parseAgentSessionRefFile(raw)
-        const ref = parsed ? selectAgentSessionRef(parsed) : null
-        if (!ref) return null
-        const logPath = fs.existsSync(ref.logPath)
-          ? ref.logPath
-          : (ref.agent === 'claude' ? findClaudeLogBySessionId(ref.sessionId) : null)
-        if (!logPath) return null
-        const { events, meta } = loadAgentSession({ ...ref, logPath })
-        return { agent: ref.agent, sessionId: ref.sessionId, model: meta.model, effort: meta.effort, events }
-      } catch {
-        return null
-      }
+      const ref = resolveWorkflowAgentRef(portifyDir(logsDir, id))
+      if (!ref) return null
+      const { events, meta } = loadAgentSession(ref)
+      return { agent: ref.agent, sessionId: ref.sessionId, model: meta.model, effort: meta.effort, events }
     },
   })
   await app.register(portifyStreamRoutes, { store: portifyStore })
@@ -1304,6 +1275,8 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
     // ones behind routes/portify.ts). start/save/cancel throw with a
     // statusCode the MCP tools surface as errors.
     startPortify: (feature, agent, maxAttempts) => portifyRunner.startPortify({ feature, agent, maxAttempts }),
+    startExternalPortify: (input) => portifyRunner.startExternalPortify(input),
+    submitExternalPortify: (workflowId) => portifyRunner.submitExternalPortify(workflowId),
     getPortify: (workflowId) => portifyStore.get(workflowId),
     savePortify: (workflowId) => portifyRunner.save(workflowId),
     cancelPortify: (workflowId) => portifyRunner.cancel(workflowId),

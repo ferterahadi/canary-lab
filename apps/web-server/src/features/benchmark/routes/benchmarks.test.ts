@@ -60,7 +60,6 @@ async function buildApp(deps: {
   startBenchmark?: (input: StartBenchmarkInput) => Promise<{ benchmarkId: string }>
   listSkills?: (feature: string) => SabotageSkill[]
   abortBenchmark?: (id: string) => void
-  readSabotageLog?: (id: string) => string
   loadAgentSession?: (id: string) => { agent: string; sessionId: string; events: unknown[] } | null
 }) {
   const app = Fastify()
@@ -72,7 +71,6 @@ async function buildApp(deps: {
     startBenchmark: deps.startBenchmark ?? (async () => ({ benchmarkId: 'b1' })),
     listSkills: deps.listSkills ?? (() => []),
     abortBenchmark: deps.abortBenchmark ?? (() => {}),
-    readSabotageLog: deps.readSabotageLog ?? (() => ''),
     loadAgentSession: deps.loadAgentSession ?? (() => null),
   })
   return app
@@ -233,14 +231,6 @@ describe('benchmarkRoutes', () => {
     const res = await app.inject({ method: 'POST', url: '/api/benchmarks', payload: { feature: 'f' } })
     expect(res.statusCode).toBe(500)
     expect(res.json()).toEqual({ error: 'boom' })
-    await app.close()
-  })
-
-  it('GET /api/benchmarks/:id/sabotage-log returns the captured log', async () => {
-    const app = await buildApp({ readSabotageLog: (id) => `log for ${id}` })
-    const res = await app.inject({ method: 'GET', url: '/api/benchmarks/b1/sabotage-log' })
-    expect(res.statusCode).toBe(200)
-    expect(res.json()).toEqual({ log: 'log for b1' })
     await app.close()
   })
 

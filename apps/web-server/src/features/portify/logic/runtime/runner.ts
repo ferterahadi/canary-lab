@@ -19,8 +19,13 @@ import { verifyDoubleBoot } from './verify'
 import type {
   PortifyManifest,
   PortifyRepoState,
+  PortifyProducer,
+  PortifyExternalSession,
   StartPortifyInput,
   StartPortifyResult,
+  StartExternalPortifyInput,
+  StartExternalPortifyResult,
+  ExternalPortifyEditTarget,
 } from './types'
 
 // Wires the real I/O behind the (tested) PortifyOrchestrator: a git branch +
@@ -90,24 +95,19 @@ export function createPortifyRunner(deps: PortifyRunnerDeps) {
   const active = new Map<string, ActiveWorkflow>()
   const healthDeadlineMs = deps.healthDeadlineMs ?? 60000
 
-  async function startPortify(input: StartPortifyInput): Promise<StartPortifyResult> {
-    if (active.size > 0) {
-      throw Object.assign(
-        new Error('A port-ification workflow is already running — finish or cancel it first.'),
-        { statusCode: 409 },
-      )
-    }
-    const feature = deps.loadFeatures().find((f) => f.name === input.feature)
-    if (!feature) throw Object.assign(new Error(`feature not found: ${input.feature}`), { statusCode: 404 })
-
+  // Validate + set up a workflow (git checks, scratch worktrees, manifest, the
+  // orchestrator + its injected I/O) and register it in `active`. Shared by the
+  // local path (which then run()s the agent) and the external path (which parks
+  // at `editing` for the user's own client to edit the worktree in place). The
+  // caller resolves the feature + agent; this returns the live orchestrator so
+  // the caller decides run() vs startExternal().
+  async function prepareWorkflow(
+    feature: FeatureConfig,
+    agent: HealAgent,
+    opts: { maxAttempts?: number; producer: PortifyProducer; external?: PortifyExternalSession },
+  ): Promise<{ workflowId: string; state: ActiveWorkflow; orchestrator: PortifyOrchestrator }> {
     const repos: RepoPrerequisite[] = feature.repos ?? []
     if (repos.length === 0) throw Object.assign(new Error(`feature "${feature.name}" declares no repos`), { statusCode: 409 })
-
-    const agent = deps.pickAgent(input.agent)
-    if (!agent) {
-      const want = input.agent ? `the ${input.agent} CLI` : 'a claude/codex CLI'
-      throw Object.assign(new Error(`${want} is not available`), { statusCode: 409 })
-    }
 
     // Validate each repo is a clean git working tree and resolve its git root.
     // Worktrees only see committed files, so a dirty tree would benchmark a
@@ -162,10 +162,12 @@ export function createPortifyRunner(deps: PortifyRunnerDeps) {
       repos: repos.map((r) => ({ name: r.name, path: r.localPath })),
       env,
       agent,
+      producer: opts.producer,
+      ...(opts.external ? { external: opts.external } : {}),
       branch,
       status: 'planning',
       attempt: 0,
-      maxAttempts: input.maxAttempts && input.maxAttempts > 0 ? input.maxAttempts : 3,
+      maxAttempts: opts.maxAttempts && opts.maxAttempts > 0 ? opts.maxAttempts : 3,
       feedbackRounds: 0,
       startedAt: deps.now(),
     }
@@ -173,7 +175,8 @@ export function createPortifyRunner(deps: PortifyRunnerDeps) {
 
     let aborted = false
     const children = new Set<ChildProcess>()
-    const sessionId = agent === 'claude' ? randomUUID() : undefined
+    // External edits happen in the user's own client — no local session to pin.
+    const sessionId = opts.producer === 'local' && agent === 'claude' ? randomUUID() : undefined
     const state: ActiveWorkflow = {
       groups,
       branch,
@@ -216,7 +219,11 @@ export function createPortifyRunner(deps: PortifyRunnerDeps) {
           group.handle = wt.handle
           group.snapshotRef = wt.snapshotRef
           for (const member of group.members) {
-            const rel = path.relative(group.sourceRoot, resolveRepoPath(member.path))
+            // `group.sourceRoot` is symlink-resolved (git rev-parse --show-toplevel),
+            // so resolve the member path the same way before diffing — otherwise a
+            // symlinked ancestor (e.g. macOS /var → /private/var) makes path.relative
+            // emit a bogus `../..` traversal and editPath points outside the worktree.
+            const rel = path.relative(group.sourceRoot, realpathOrSelf(resolveRepoPath(member.path)))
             member.editPath = rel ? path.join(wt.handle.worktreeRoot, rel) : wt.handle.worktreeRoot
             states.push({ name: member.name, path: member.path, worktreePath: wt.handle.worktreeRoot, baseSha: wt.baseSha })
           }
@@ -290,13 +297,102 @@ export function createPortifyRunner(deps: PortifyRunnerDeps) {
     })
 
     state.orchestrator = orchestrator
+    return { workflowId, state, orchestrator }
+  }
 
+  async function startPortify(input: StartPortifyInput): Promise<StartPortifyResult> {
+    if (active.size > 0) {
+      throw Object.assign(
+        new Error('A port-ification workflow is already running — finish or cancel it first.'),
+        { statusCode: 409 },
+      )
+    }
+    const feature = deps.loadFeatures().find((f) => f.name === input.feature)
+    if (!feature) throw Object.assign(new Error(`feature not found: ${input.feature}`), { statusCode: 404 })
+    const agent = deps.pickAgent(input.agent)
+    if (!agent) {
+      const want = input.agent ? `the ${input.agent} CLI` : 'a claude/codex CLI'
+      throw Object.assign(new Error(`${want} is not available`), { statusCode: 409 })
+    }
+    const { workflowId, orchestrator } = await prepareWorkflow(feature, agent, {
+      maxAttempts: input.maxAttempts,
+      producer: 'local',
+    })
     // Fire-and-forget; the UI polls the manifest. orchestrator.run() handles all
     // its own errors internally (persisting 'failed' + cleanup), so it never
     // rejects — `void` marks the intentional float.
     void orchestrator.run()
-
     return { workflowId }
+  }
+
+  // External producer: the port-ification agent runs in the user's OWN Claude/
+  // Codex client (via MCP) and edits the scratch worktree IN PLACE. We set the
+  // worktree up, park at `editing`, and hand the client the edit paths + the
+  // task prompt; the app process never spawns an agent. Mirrors external
+  // heal/wizard/eval. submitExternalPortify drives verification afterwards.
+  async function startExternalPortify(input: StartExternalPortifyInput): Promise<StartExternalPortifyResult> {
+    if (active.size > 0) {
+      throw Object.assign(
+        new Error('A port-ification workflow is already running — finish or cancel it first.'),
+        { statusCode: 409 },
+      )
+    }
+    const feature = deps.loadFeatures().find((f) => f.name === input.feature)
+    if (!feature) throw Object.assign(new Error(`feature not found: ${input.feature}`), { statusCode: 404 })
+    // The client doing the edits IS a claude or codex session — record which so
+    // the saved overlay's audit reflects the producer.
+    const agent: HealAgent = input.clientKind.startsWith('codex') ? 'codex' : 'claude'
+    const external: PortifyExternalSession = {
+      clientKind: input.clientKind,
+      sessionId: input.sessionId,
+      ...(input.conversationName ? { conversationName: input.conversationName } : {}),
+      ...(input.sessionUrl ? { sessionUrl: input.sessionUrl } : {}),
+    }
+    const { workflowId, state, orchestrator } = await prepareWorkflow(feature, agent, {
+      maxAttempts: 1,
+      producer: 'external',
+      external,
+    })
+    const m = await orchestrator.startExternal()
+    if (m.status !== 'editing') {
+      throw Object.assign(
+        new Error(m.error ?? 'failed to set up the external port-ification worktree'),
+        { statusCode: 409 },
+      )
+    }
+    const targets: ExternalPortifyEditTarget[] = state.groups
+      .flatMap((g) => g.members)
+      .map((member) => ({ name: member.name, editPath: member.editPath! }))
+    return {
+      workflowId,
+      targets,
+      configPath: path.join(feature.featureDir, 'feature.config.cjs'),
+      instructions: buildPortifyPrompt(feature, targets.map((t) => ({ name: t.name, editPath: t.editPath }))),
+    }
+  }
+
+  // External producer: verify the edits the client made in place, then park at
+  // ready-to-save (pass) or back at editing (fail, so the client can fix +
+  // resubmit). Fire-and-forget like the local run/revise — the client polls
+  // get_portify. Returns the manifest as it stood when submit was accepted.
+  async function submitExternalPortify(workflowId: string): Promise<PortifyManifest> {
+    const m = deps.store.get(workflowId)
+    if (!m) throw Object.assign(new Error('workflow not found'), { statusCode: 404 })
+    if (m.producer !== 'external') {
+      throw Object.assign(new Error('not an external port-ification workflow'), { statusCode: 409 })
+    }
+    if (m.status !== 'editing') {
+      throw Object.assign(new Error(`cannot submit a workflow in status "${m.status}"`), { statusCode: 409 })
+    }
+    const state = active.get(workflowId)
+    if (!state?.orchestrator) {
+      throw Object.assign(
+        new Error('worktree is no longer available — the server may have restarted; start a new workflow'),
+        { statusCode: 409 },
+      )
+    }
+    void state.orchestrator.verifyExternalEdits(m)
+    return deps.store.get(workflowId) ?? m
   }
 
   // User-driven revise pass from the review screen: resume the agent with the
@@ -418,11 +514,15 @@ export function createPortifyRunner(deps: PortifyRunnerDeps) {
     return { workflowId, removed: true }
   }
 
-  return { startPortify, save, cancel, revise, remove, abort: cancel }
+  return { startPortify, startExternalPortify, submitExternalPortify, save, cancel, revise, remove, abort: cancel }
 }
 
 function readFileOrNull(p: string): string | null {
   try { return fs.readFileSync(p, 'utf-8') } catch { return null }
+}
+
+function realpathOrSelf(p: string): string {
+  try { return fs.realpathSync(p) } catch { return p }
 }
 
 function restoreConfig(state: ActiveWorkflow): void {

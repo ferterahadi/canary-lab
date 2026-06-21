@@ -205,6 +205,50 @@ describe('CoverageLedgerPage', () => {
     resolveJob?.({ jobId: 'j1', feature: 'checkout', kind: 'summary', status: 'done', startedAt: 'now', log: 'done' })
   })
 
+  it('puts the Tests pane (3rd column) in a loading state while generating — skeleton mapping, not stale chips', async () => {
+    let resolveJob: ((m: import('../../../shared/api/types').CoverageJobManifest) => void) | null = null
+    vi.mocked(api.startCoverageJob).mockResolvedValue({ jobId: 'j1', feature: 'checkout', kind: 'summary', status: 'running', startedAt: 'now', log: 'summarizing…' })
+    vi.mocked(api.getCoverageJob).mockImplementation(() => new Promise((res) => { resolveJob = res }))
+    await mount()
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="generate-summary"]')?.click()
+      await Promise.resolve()
+    })
+    // Tests pane stays mounted (the test SET doesn't change)…
+    expect(container.querySelector('[data-testid="tests-pane"]')).toBeTruthy()
+    expect(container.querySelector('[data-testid="test-adds item"]')).toBeTruthy()
+    // …but the mapping it shows is being recomputed: skeleton chips + a remapping
+    // note, NOT the stale @req chips that would read as "already done".
+    expect(container.querySelector('[data-testid="tests-remapping-note"]')).toBeTruthy()
+    expect(container.querySelector('[data-testid="test-mapping-loading-adds item"]')).toBeTruthy()
+    expect(container.querySelector('[data-testid="test-adds item"]')?.textContent).not.toContain('@req-R1')
+    expect(container.querySelector('[data-testid="orphan-tests-note"]')).toBeNull()
+    // Avoid leaking the pending getCoverageJob promise.
+    resolveJob?.({ jobId: 'j1', feature: 'checkout', kind: 'summary', status: 'done', startedAt: 'now', log: 'done' })
+  })
+
+  it('re-lists the rail docs when generation completes so the generated PRD doc appears (items 1+2)', async () => {
+    // A summary job that completes and chains a coverage job, which also completes.
+    vi.mocked(api.startCoverageJob).mockResolvedValue({ jobId: 'j1', feature: 'checkout', kind: 'summary', status: 'running', startedAt: 'now', log: '' })
+    vi.mocked(api.getCoverageJob).mockImplementation(async (id: string) => (
+      id === 'j1'
+        ? { jobId: 'j1', feature: 'checkout', kind: 'summary', status: 'done', chainedJobId: 'j2', startedAt: 'now', log: 'summary done' }
+        : { jobId: 'j2', feature: 'checkout', kind: 'coverage', status: 'done', startedAt: 'now', log: 'coverage done' }
+    ))
+    await mount()
+    await act(async () => { await Promise.resolve() })
+    const before = vi.mocked(api.listFeatureDocs).mock.calls.length
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="generate-summary"]')?.click()
+      await Promise.resolve()
+    })
+    // Flush the pollJob chain + the rail's reload effect.
+    for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve() })
+    // The rail re-fetched its doc list on completion — no manual refresh needed,
+    // so the generated _prd-summary.md pill shows up live.
+    expect(vi.mocked(api.listFeatureDocs).mock.calls.length).toBeGreaterThan(before)
+  })
+
   it('rehydrates a running job on mount so a refresh restores the Generating screen (R18)', async () => {
     // Server says a coverage job is still running for this feature.
     vi.mocked(api.listCoverageJobs).mockResolvedValue([

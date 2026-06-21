@@ -51,13 +51,6 @@ function render(job: CoverageJobManifest): void {
   })
 }
 
-function clickToggle(): void {
-  const btn = container.querySelector('[data-testid="toggle-agent-activity"]') as HTMLButtonElement
-  act(() => {
-    btn.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-  })
-}
-
 describe('CoverageGeneratingPane', () => {
   it('shows the stepper + an elapsed timer', () => {
     render(BASE_JOB)
@@ -66,39 +59,19 @@ describe('CoverageGeneratingPane', () => {
     expect(container.querySelector('[data-testid="generating-elapsed"]')).toBeTruthy()
   })
 
-  it('defaults to the LIVE output (streamed log), with a Timeline switch when a session exists', () => {
+  it('always mounts the AgentSessionView — no Hide/Show button, no Live/Timeline toggle, no raw log (items 3+4)', () => {
+    // The summary + mapping agents are agentic, so their work streams through the
+    // one agent timeline (AgentSessionView), always visible: no toggles, no <pre>.
     render({ ...BASE_JOB, sessionRef: { agent: 'claude', sessionId: 's1' } })
-    // Live output (the streaming log) is the default — that's what token-streams.
-    expect(container.querySelector('[data-testid="generating-log"]')).toBeTruthy()
-    expect(container.querySelector('[data-testid="coverage-agent-session"]')).toBeNull()
-    // Both view options are offered.
-    expect(container.querySelector('[data-testid="activity-live"]')).toBeTruthy()
-    expect(container.querySelector('[data-testid="activity-timeline"]')).toBeTruthy()
-  })
-
-  it('switching to Timeline mounts the structured AgentSessionView', () => {
-    render({ ...BASE_JOB, sessionRef: { agent: 'claude', sessionId: 's1' } })
-    const timeline = container.querySelector('[data-testid="activity-timeline"]') as HTMLButtonElement
-    act(() => { timeline.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
     expect(container.querySelector('[data-testid="coverage-agent-session"]')).toBeTruthy()
+    expect(container.querySelector('[data-testid="toggle-agent-activity"]')).toBeNull()
+    expect(container.querySelector('[data-testid="activity-live"]')).toBeNull()
+    expect(container.querySelector('[data-testid="activity-timeline"]')).toBeNull()
     expect(container.querySelector('[data-testid="generating-log"]')).toBeNull()
   })
 
-  it('no structured session: shows the live log with no view switch', () => {
-    render(BASE_JOB)
-    expect(container.querySelector('[data-testid="coverage-agent-session"]')).toBeNull()
-    expect(container.querySelector('[data-testid="activity-timeline"]')).toBeNull()
-    const log = container.querySelector('[data-testid="generating-log"]')
-    expect(log).toBeTruthy()
-    expect(log?.textContent).toContain('mapping coverage')
-  })
-
-  it('the toggle hides + reshows the agent activity', () => {
-    render(BASE_JOB)
-    expect(container.querySelector('[data-testid="generating-log"]')).toBeTruthy() // shown by default
-    clickToggle()
-    expect(container.querySelector('[data-testid="generating-log"]')).toBeNull()  // hidden
-    clickToggle()
-    expect(container.querySelector('[data-testid="generating-log"]')).toBeTruthy() // shown again
+  it('mounts the AgentSessionView even before a session is pinned (live waiting state)', () => {
+    render(BASE_JOB) // no sessionRef yet
+    expect(container.querySelector('[data-testid="coverage-agent-session"]')).toBeTruthy()
   })
 })

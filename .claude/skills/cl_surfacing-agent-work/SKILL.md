@@ -18,12 +18,22 @@ completion?**
 
 | Shape | How to spot it | What it can show |
 | --- | --- | --- |
-| **Agentic loop** | spawned to use tools / iterate (the heal agent): no `-p`, long-running, writes tool_use / tool_result / thinking to its session log | A genuine timeline — reads, thinks, tool calls, results, multiple turns |
-| **One-shot completion** | `claude -p <prompt>` / `codex exec` returning one answer (coverage map, PRD summary, eval judge) — haiku, seconds, no tools | **Only** the prompt + one final answer. No reads. No thinking trace. No tool steps. |
+| **Agentic loop** | spawned to read/iterate with tools: the heal agent, **and PRD-summary + coverage-mapping** (their prompts list file paths and make the agent read the docs/specs itself) — long-running, writes tool_use / tool_result / thinking to its session log | A genuine timeline — reads, thinks, tool calls, results, multiple turns |
+| **One-shot completion** | `codex exec`, or a prompt that **inlines all context** so the model answers in one turn (the evaluation rewrite, eval judge) — seconds, no tool calls | **Only** the prompt + one final answer. No reads. No thinking trace. No tool steps. |
+
+**Don't classify by spawn flags alone.** `claude -p --dangerously-skip-permissions`
+already has tools ON — what makes a spawn one-shot *in practice* is a prompt that
+inlines every input, so the model never needs to call a tool. PRD-summary +
+coverage-mapping were one-shot until their prompts were changed (June 2026) to list
+file *paths* and require reading them — now they stream a real read/think/tool
+timeline through `AgentSessionView`. The evaluation rewrite still inlines its evidence
+packet, so it stays one-shot.
 
 If it's one-shot, **say so up front** and scope the view to reality. Do NOT mount a
 tool-loop timeline on it and hope — you'll ship "1 event, looks frozen", the user
-will bounce, and you'll rebuild it (this happened 3×).
+will bounce, and you'll rebuild it (this happened 3× before PRD/coverage were made
+agentic). The durable fix for a one-shot you want to *watch* is to make it agentic
+(stop inlining; hand it paths to read), not to dress up the empty timeline.
 
 ## Two transports — pick the one that fits the shape
 

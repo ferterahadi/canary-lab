@@ -17,17 +17,17 @@ For each mapped test, also state which path(s) it exercises:
 
 ## How to work
 
-Work as an agent, not a one-shot. Before mapping, use your tools to **read the
-actual test files** (each test's `file` below) and grep the source they touch, so
-each mapping reflects what the test really exercises — not just the summaries
-here. Read first, then decide the mappings. This is read-only analysis: do not
-edit any file.
+Work as an agent, not a one-shot. The test bodies are **not** inlined here — each
+test below is just a name + the path to its spec file. Use your tools to **read the
+actual test file** (the `file` shown) and grep the source it touches, so each
+mapping reflects what the test really exercises. Read first, then decide the
+mappings. This is read-only analysis: do not edit any file.
 
 ## Requirements (map only to these ids)
 
 {{requirements}}
 
-## Tests to map (currently untagged)
+## Tests to map (currently untagged — read each `file` before mapping)
 
 {{tests}}
 

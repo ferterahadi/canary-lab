@@ -560,40 +560,8 @@ function SetupView({ m }: { m: BenchmarkManifest }) {
       </div>
       <div style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '.4px', color: 'var(--text-muted)', marginBottom: 7, fontWeight: 600 }}>Sabotage agent</div>
       <div style={{ flex: 1, minHeight: 200, border: '1px solid var(--border-default)', borderRadius: 'var(--radius-lg)', overflow: 'hidden' }}>
-        {m.agent === 'codex'
-          ? <CodexSabotageLog benchmarkId={m.benchmarkId} />
-          : <AgentSessionView source={{ kind: 'benchmark', benchmarkId: m.benchmarkId, live: true }} />}
+        <AgentSessionView source={{ kind: 'benchmark', benchmarkId: m.benchmarkId, live: true }} />
       </div>
-    </div>
-  )
-}
-
-// Codex doesn't write a locatable native session log we can feed to
-// AgentSessionView, so it keeps the simple tailed-text view.
-function CodexSabotageLog({ benchmarkId }: { benchmarkId: string }) {
-  const [log, setLog] = useState('')
-  const logRef = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    let cancelled = false
-    const poll = () => {
-      api.getBenchmarkSabotageLog(benchmarkId).then((r) => { if (!cancelled) setLog(r.log) }).catch(() => {})
-    }
-    poll()
-    const t = setInterval(poll, 1500)
-    return () => { cancelled = true; clearInterval(t) }
-  }, [benchmarkId])
-  useEffect(() => {
-    if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight
-  }, [log])
-  return (
-    <div
-      ref={logRef}
-      style={{
-        fontFamily: 'var(--font-mono)', fontSize: 11.5, background: '#000', height: '100%',
-        padding: '11px 13px', lineHeight: 1.6, whiteSpace: 'pre-wrap', color: '#cfd6dd', overflow: 'auto',
-      }}
-    >
-      {log || 'Waiting for the sabotage agent to start…'}
     </div>
   )
 }

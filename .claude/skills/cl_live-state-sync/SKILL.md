@@ -57,6 +57,13 @@ onData: (chunk) => {
 }
 ```
 
+**Second instance (coverage dialog, items 1+2):** the Docs rail must show the
+generated `_prd-summary.md` the moment generation finishes — not after a manual
+refresh. The fix was *not* the `coverage-changed` broadcast; it was bumping a
+`docsReloadKey` off the **reliable `pollJob` completion** (the per-task poll the
+dialog already holds), which the rail watches to re-list itself. Same rule: a
+must-happen update rides the channel you can trust, not the fan-out push.
+
 ## Verify the transition, not just the persistence
 
 The trap that let this ship: claiming "it'll swap live" after only confirming the

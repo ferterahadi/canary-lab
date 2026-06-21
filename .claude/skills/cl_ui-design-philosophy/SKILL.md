@@ -30,7 +30,7 @@ native*, not *novel*. Apply `frontend-design` polish **inside** these constraint
 | Modal with tabs | `FeatureConfigEditor` (`.cl-modal-backdrop` + `.cl-modal` + `<nav>` tabs) |
 | Status-bar launcher | the `*Pill` components in `GlobalStatusBar` |
 | Background-task surface | the Portify pill + dialog (see `cl_async-task-ux`) |
-| Long async generation | the Coverage **Generating** screen — a dedicated full pane (phase stepper + live agent log) that OWNS the view while a job runs; not a banner over a dimmed result |
+| Long async generation | the Coverage **Generating** screen — a dedicated full pane (phase stepper + the agent timeline via `AgentSessionView`, always on) that OWNS the view while a job runs; not a banner over a dimmed result |
 | Live agent progress / CLI output | **`AgentSessionView`** — never a raw log `<pre>` |
 
 ## Principles that make it feel designed
@@ -92,9 +92,8 @@ native*, not *novel*. Apply `frontend-design` polish **inside** these constraint
 - **Two-way affordances.** Hovering one side of a relation lights the other and
   dims the rest (the ledger's test↔requirement highlight) — makes structure legible.
 - **No layout shift from a scrollbar.** On any scroller whose content grows/shrinks
-  with a toggle or filter (a disclosure, a gap filter, the generating "show agent
-  activity"), set `scrollbar-gutter: stable` so the appearing scrollbar doesn't eat
-  content width and jump the layout sideways.
+  with a toggle or filter (a disclosure, a gap filter), set `scrollbar-gutter: stable`
+  so the appearing scrollbar doesn't eat content width and jump the layout sideways.
 
 ## Verify
 
