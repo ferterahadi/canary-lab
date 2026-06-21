@@ -204,39 +204,46 @@ export function CoverageLedgerPage({ feature, onClose }: Props) {
   const summaryAbsent = state?.summary === 'absent'
 
   // Tests pane — shown in BOTH the final ledger and (R: 3-column generating) while
-  // a job runs, since generation doesn't change the test SET, only its mapping.
-  // While generating, the mapping (@req/@path chips) is exactly what's being
-  // recomputed, so showing the stale chips reads as "already done" against the
-  // middle pane's "Mapping coverage…". Instead the cards keep their grounded,
-  // stable bits (name, verified dot, file) and the mapping row becomes a skeleton
-  // — the pane is honestly in the loading state until the new ledger lands.
+  // a job runs. While generating, the whole mapping is being recomputed, so the
+  // cards are held back entirely: real names + chips would read as "already done"
+  // against the middle pane's "Mapping coverage…". The pane is honestly loading,
+  // so it renders placeholder skeleton cards (one per known test) — same shell, so
+  // they resolve into the real cards in place once the new ledger lands.
   const testsPaneEl = ledger ? (
     <div className="min-h-0 flex-1 overflow-auto p-4" style={{ scrollbarGutter: 'stable' }} data-testid="tests-pane">
-      {ledger.tests.length === 0 && (
-        <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>No tests found in this feature&apos;s specs.</div>
-      )}
       {generating ? (
-        <div data-testid="tests-remapping-note" style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 10, fontSize: 11, color: 'rgb(56, 189, 248)' }}>
-          <span className="cl-pulse" aria-hidden="true" style={{ width: 6, height: 6, borderRadius: '50%', background: 'rgb(56, 189, 248)' }} />
-          Remapping coverage for these tests…
-        </div>
-      ) : orphanTests.length > 0 ? (
-        <div data-testid="orphan-tests-note" style={{ marginBottom: 10, fontSize: 11, color: 'rgb(251, 191, 36)' }}>
-          {orphanTests.length} orphan test{orphanTests.length > 1 ? 's' : ''} (no requirement) — regenerate coverage to map them.
-        </div>
-      ) : null}
-      {ledger.tests.map((t) => (
-        <TestCard
-          key={t.name}
-          test={t}
-          testNumber={testNumbering.get(testNumberKey(t.file, t.line))}
-          color={colorByTest.get(t.name)!}
-          loading={generating}
-          active={!generating && activeTestNames.has(t.name)}
-          dimmed={!generating && Boolean(hovered) && !activeTestNames.has(t.name)}
-          onHover={(on) => setHovered(on ? { kind: 'test', key: t.name } : null)}
-        />
-      ))}
+        <>
+          <div data-testid="tests-remapping-note" style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 10, fontSize: 11, color: 'rgb(56, 189, 248)' }}>
+            <span className="cl-pulse" aria-hidden="true" style={{ width: 6, height: 6, borderRadius: '50%', background: 'rgb(56, 189, 248)' }} />
+            Mapping coverage to your tests…
+          </div>
+          {(ledger.tests.length > 0 ? ledger.tests : [null, null, null]).map((_, i) => (
+            <TestCardSkeleton key={i} index={i} />
+          ))}
+        </>
+      ) : (
+        <>
+          {ledger.tests.length === 0 && (
+            <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>No tests found in this feature&apos;s specs.</div>
+          )}
+          {orphanTests.length > 0 && (
+            <div data-testid="orphan-tests-note" style={{ marginBottom: 10, fontSize: 11, color: 'rgb(251, 191, 36)' }}>
+              {orphanTests.length} orphan test{orphanTests.length > 1 ? 's' : ''} (no requirement) — regenerate coverage to map them.
+            </div>
+          )}
+          {ledger.tests.map((t) => (
+            <TestCard
+              key={t.name}
+              test={t}
+              testNumber={testNumbering.get(testNumberKey(t.file, t.line))}
+              color={colorByTest.get(t.name)!}
+              active={activeTestNames.has(t.name)}
+              dimmed={Boolean(hovered) && !activeTestNames.has(t.name)}
+              onHover={(on) => setHovered(on ? { kind: 'test', key: t.name } : null)}
+            />
+          ))}
+        </>
+      )}
     </div>
   ) : null
 
@@ -423,14 +430,22 @@ function CoverageHeader({ ledger, gapFilter, onToggleGap }: { ledger: CoverageLe
           )
         })}
       </div>
-      <div className="clcov-verified ml-auto">
-        <span className="clcov-verified-n"><strong>{ledger.totals.verified}</strong><span>/{ledger.totals.total}</span></span>
-        <span className="clcov-verified-label">requirements verified</span>
-        {ledger.orphanRequirementIds.length > 0 && (
-          <span data-testid="orphan-note" className="clcov-orphan-note" title={ledger.orphanRequirementIds.join(', ')}>
-            {ledger.orphanRequirementIds.length} orphan annotation{ledger.orphanRequirementIds.length > 1 ? 's' : ''}
-          </span>
-        )}
+      <div className="ml-auto flex items-start" style={{ gap: 22 }}>
+        {/* Breadth: how many requirements have a corresponding test at all —
+            independent of whether it passes (that's the verified ring/stat). */}
+        <div className="clcov-verified" data-testid="mapped-stat" title="Requirements with at least one test mapped to them">
+          <span className="clcov-verified-n"><strong>{ledger.mappedPct}</strong><span>%</span></span>
+          <span className="clcov-verified-label">{ledger.totals.total - ledger.totals.untested}/{ledger.totals.total} mapped</span>
+        </div>
+        <div className="clcov-verified" title="Requirements with a passing run behind every path">
+          <span className="clcov-verified-n"><strong>{ledger.totals.verified}</strong><span>/{ledger.totals.total}</span></span>
+          <span className="clcov-verified-label">requirements verified</span>
+          {ledger.orphanRequirementIds.length > 0 && (
+            <span data-testid="orphan-note" className="clcov-orphan-note" title={ledger.orphanRequirementIds.join(', ')}>
+              {ledger.orphanRequirementIds.length} orphan annotation{ledger.orphanRequirementIds.length > 1 ? 's' : ''}
+            </span>
+          )}
+        </div>
       </div>
     </div>
   )
@@ -537,13 +552,12 @@ function RequirementCard({ rc, colors, active, dimmed, onHover }: {
 
 // R9: no decorative accent border — the verified dot + covers tags carry the
 // meaning. The test's `@req-*` / `@path-*` tags are surfaced as chips.
-function TestCard({ test, testNumber, color, active, dimmed, loading, onHover }: {
+function TestCard({ test, testNumber, color, active, dimmed, onHover }: {
   test: TestCoverage
   testNumber?: number
   color: string
   active: boolean
   dimmed: boolean
-  loading?: boolean
   onHover: (on: boolean) => void
 }) {
   return (
@@ -551,8 +565,8 @@ function TestCard({ test, testNumber, color, active, dimmed, loading, onHover }:
       className="clcov-card"
       data-testid={`test-${test.name}`}
       data-active={active ? 'true' : 'false'}
-      onMouseEnter={loading ? undefined : () => onHover(true)}
-      onMouseLeave={loading ? undefined : () => onHover(false)}
+      onMouseEnter={() => onHover(true)}
+      onMouseLeave={() => onHover(false)}
       style={{
         marginBottom: 8,
         padding: '11px 13px',
@@ -575,31 +589,57 @@ function TestCard({ test, testNumber, color, active, dimmed, loading, onHover }:
           <span style={{ marginLeft: 'auto', fontFamily: 'var(--font-mono, monospace)', fontSize: 10, color: 'var(--text-muted)' }}>{test.file}{test.line ? `:${test.line}` : ''}</span>
         )}
       </div>
-      {loading ? (
-        // The mapping is being recomputed — show skeleton chips, not stale ones.
-        <div data-testid={`test-mapping-loading-${test.name}`} className="flex items-center gap-1.5" style={{ marginTop: 7 }} aria-hidden="true">
-          <span className="clcov-skel" style={{ width: 56, height: 15 }} />
-          <span className="clcov-skel" style={{ width: 42, height: 15 }} />
-          <span className="clcov-skel" style={{ width: 68, height: 15 }} />
-        </div>
-      ) : (
-        <div className="flex flex-wrap items-center gap-1.5" style={{ marginTop: 7 }}>
-          {test.requirements.length === 0 && (
-            <span data-testid={`orphan-${test.name}`} style={{ fontSize: 10, fontWeight: 600, color: 'rgb(251, 191, 36)', background: 'color-mix(in srgb, rgb(251,191,36) 12%, transparent)', border: '1px solid color-mix(in srgb, rgb(251,191,36) 40%, transparent)', borderRadius: 999, padding: '1px 8px' }}>orphan — no covers tag</span>
-          )}
-          {test.requirements.map((id) => (
-            <span key={id} style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: 10, padding: '1px 6px', borderRadius: 5, background: `color-mix(in srgb, ${color} 14%, transparent)`, border: `1px solid color-mix(in srgb, ${color} 55%, transparent)`, color: 'var(--text-primary)' }}>@req-{id}</span>
-          ))}
-          {test.pathTypes.map((p) => (
-            <span key={p} style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: 10, padding: '1px 6px', borderRadius: 5, border: '1px solid var(--border-default)', color: 'var(--text-muted)' }}>@path-{p}</span>
-          ))}
-        </div>
-      )}
-      {!loading && test.verified && test.lastPassingRun && (
+      <div className="flex flex-wrap items-center gap-1.5" style={{ marginTop: 7 }}>
+        {test.requirements.length === 0 && (
+          <span data-testid={`orphan-${test.name}`} style={{ fontSize: 10, fontWeight: 600, color: 'rgb(251, 191, 36)', background: 'color-mix(in srgb, rgb(251,191,36) 12%, transparent)', border: '1px solid color-mix(in srgb, rgb(251,191,36) 40%, transparent)', borderRadius: 999, padding: '1px 8px' }}>orphan — no covers tag</span>
+        )}
+        {test.requirements.map((id) => (
+          <span key={id} style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: 10, padding: '1px 6px', borderRadius: 5, background: `color-mix(in srgb, ${color} 14%, transparent)`, border: `1px solid color-mix(in srgb, ${color} 55%, transparent)`, color: 'var(--text-primary)' }}>@req-{id}</span>
+        ))}
+        {test.pathTypes.map((p) => (
+          <span key={p} style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: 10, padding: '1px 6px', borderRadius: 5, border: '1px solid var(--border-default)', color: 'var(--text-muted)' }}>@path-{p}</span>
+        ))}
+      </div>
+      {test.verified && test.lastPassingRun && (
         <div style={{ marginTop: 5, fontSize: 10, color: 'var(--text-muted)' }}>
           last pass: run {test.lastPassingRun.runId}{test.lastPassingRun.env ? ` · ${test.lastPassingRun.env}` : ''}
         </div>
       )}
+    </div>
+  )
+}
+
+// Placeholder card shown in the Tests pane while a coverage job runs. Same shell as
+// TestCard (so it resolves into the real card in place), but every meaningful bit —
+// dot, id badge, name, file, mapping chips — is a skeleton: the pane is honestly
+// loading, not half-revealing the test set against the middle pane's "Mapping…".
+// Widths vary per index so the column reads as a list of real cards, not a grid.
+const SKEL_NAME_W = [172, 132, 198, 150, 116, 184, 142, 164]
+function TestCardSkeleton({ index }: { index: number }) {
+  return (
+    <div
+      className="clcov-card"
+      data-testid="test-skeleton"
+      aria-hidden="true"
+      style={{
+        marginBottom: 8,
+        padding: '11px 13px',
+        borderRadius: 'var(--radius-md)',
+        background: 'var(--bg-surface)',
+        border: '1px solid var(--border-default)',
+      }}
+    >
+      <div className="flex items-center gap-2">
+        <span className="clcov-skel" style={{ width: 8, height: 8, borderRadius: '50%', flexShrink: 0 }} />
+        <span className="clcov-skel" style={{ width: 22, height: 16, borderRadius: 5 }} />
+        <span className="clcov-skel" style={{ width: SKEL_NAME_W[index % SKEL_NAME_W.length], height: 13 }} />
+        <span className="clcov-skel" style={{ marginLeft: 'auto', width: 84, height: 10 }} />
+      </div>
+      <div className="flex items-center gap-1.5" style={{ marginTop: 7 }}>
+        <span className="clcov-skel" style={{ width: 56, height: 15 }} />
+        <span className="clcov-skel" style={{ width: 42, height: 15 }} />
+        <span className="clcov-skel" style={{ width: 68, height: 15 }} />
+      </div>
     </div>
   )
 }

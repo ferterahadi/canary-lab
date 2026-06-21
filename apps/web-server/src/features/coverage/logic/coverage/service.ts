@@ -247,7 +247,13 @@ export async function runCoverageEngine(args: RunCoverageEngineArgs): Promise<Ru
   const orphans = collected.filter((c) => !(c.input.requirements?.length))
   const orphanTestsBefore = orphans.map((c) => c.input.name).sort()
 
-  const engineInputs: AnnotateTestInput[] = orphans.map((c) => ({
+  // Re-map EVERY test each run — not just the untagged orphans. The agent
+  // re-examines every requirement↔test pair so the mapping is genuinely
+  // re-derived (and the "Mapping coverage" phase is real, visible agent work,
+  // not an instant no-op when specs already carry tags). Tag-writes are
+  // idempotent + additive (tag-writer.ts), so a re-confirmed mapping doesn't
+  // churn the spec; only new/changed linkages produce a diff.
+  const engineInputs: AnnotateTestInput[] = collected.map((c) => ({
     name: c.input.name,
     file: c.input.file,
     bodySource: c.bodySource,
@@ -302,6 +308,8 @@ export async function runCoverageEngine(args: RunCoverageEngineArgs): Promise<Ru
 
 export interface FeatureDoc {
   relPath: string
+  /** Absolute path on disk — used to open the doc in the configured editor. */
+  absPath: string
   /** A generated PRD artifact (`_prd-*`) vs a source doc the user added. */
   generated: boolean
   sizeBytes: number
@@ -325,7 +333,7 @@ export function listFeatureDocs(featuresDir: string, feature: string): FeatureDo
     for (const name of fs.readdirSync(docsDir).sort()) {
       const full = path.join(docsDir, name)
       if (!fs.statSync(full).isFile() || !name.toLowerCase().endsWith('.md')) continue
-      docs.push({ relPath: name, generated: isGeneratedDoc(name), sizeBytes: fs.statSync(full).size })
+      docs.push({ relPath: name, absPath: path.resolve(full), generated: isGeneratedDoc(name), sizeBytes: fs.statSync(full).size })
     }
   }
   const summary = readPrdSummary(featureDir)

@@ -39,7 +39,7 @@ For product intent, see [PRD.md](PRD.md). For user-facing usage, see the
 | `scripts/` | CLI entry, scaffold/setup/upgrade/env commands, MCP bridge (`scripts/mcp.ts` includes `inferMcpClientKind` client-kind detection) |
 | `apps/web-server/server.ts` | Fastify app: UI assets, REST routes, WebSocket streams, the `startRun` factory, scheduler wiring |
 | `apps/web-server/mcp/` | MCP HTTP server (`server.ts`: transports, profile instructions) and tools (`tools.ts`: thin wrappers + profile arrays) |
-| `apps/web-server/src/features/` | Feature-based modules, each with `logic/`, `routes/`, `ws/` subdirs: `runs` (run store, runtime/orchestrator, panes, journal, and `logic/heal/` external-heal broker/surface/claim-policy), `agent-sessions` (agent process, stream, session log/tailer, idle timer), `coverage` (coverage ledger, PRD extractor, verification), `wizard` (draft + wizard-agent pipeline, tests-draft route), `evaluation` (export archive/store, test-review export), `config` (feature/project config authoring, AST, dotenv), `portify`, `benchmark` |
+| `apps/web-server/src/features/` | Feature-based modules, each with some of `logic/`, `routes/`, `ws/` subdirs (which ones vary per feature): `runs` (run store, runtime/orchestrator, panes, journal, and `logic/heal/` external-heal broker/surface/claim-policy), `agent-sessions` (agent process, stream, session log/tailer, idle timer), `coverage` (coverage ledger, PRD extractor, verification), `wizard` (draft + wizard-agent pipeline, tests-draft route), `evaluation` (export archive/store, test-review export), `config` (feature/project config authoring, AST, dotenv), `portify`, `benchmark` |
 | `apps/web-server/src/shared/` | Web-server-local shared infra: `git-repo`, `ring-buffer`, `simple-zip`, `workspace-events`, `editor-launch`, `open-browser`, and `ws/workspace-stream` |
 | `apps/web-server/src/features/runs/logic/runtime/` | The run orchestrator and its modules (see [Run Lifecycle](#run-lifecycle) and below) |
 | `apps/web/` | React UI (Vite, Tailwind) |
@@ -222,7 +222,7 @@ prompt.
 When `manifest.healMode === 'external'` the orchestrator parks at
 `waiting-for-signal` and an MCP client drives `claim_heal` → `get_heal_context` →
 edit code → `signal_run`. `ExternalHealBroker`
-(`apps/web-server/src/features/external-heal/logic/external-heal-broker.ts`) owns the single-claim lock + 15s
+(`apps/web-server/src/features/runs/logic/heal/external-heal-broker.ts`) owns the single-claim lock + 15s
 heartbeat staleness. Every external command is audited at
 `<runDir>/external-commands.jsonl`.
 
@@ -231,7 +231,7 @@ heartbeat staleness. Every external command is audited at
 Only **Desktop** client kinds (`claude-desktop`, `codex-desktop`) may *own* a heal
 claim. CLI clients (`claude-cli`, `codex-cli`) — and undetected `other` — can
 run/verify but never claim, so a stray CLI session can't silently grab a run and edit
-repo code. It's an **allowlist** (`apps/web-server/src/features/external-heal/logic/heal-claim-policy.ts`,
+repo code. It's an **allowlist** (`apps/web-server/src/features/runs/logic/heal/heal-claim-policy.ts`,
 `isHealClaimAllowed`), so detection failures (`other`) fail safe. Override via
 `CANARY_LAB_HEAL_CLAIM_CLIENTS` (comma-separated kinds). Enforced at two layers:
 
@@ -370,8 +370,8 @@ procedure.
 | MCP tool ↔ profile membership | `apps/web-server/mcp/tools.ts` (`REPAIR_TOOLS`/`VERIFY_TOOLS`/`AUTHOR_TOOLS`/`FULL_ONLY_TOOLS`) ↔ mirror arrays in `apps/web-server/mcp/server.smoke.test.ts` | `npx vitest run apps/web-server/mcp/server.smoke.test.ts` | `cl_add-mcp-tool` |
 | Run-loop semantics across agent surfaces | `INSTRUCTIONS_BY_PROFILE` (`apps/web-server/mcp/server.ts`) ↔ result steering (`healWaitNext`, `bootSessionValue` in `mcp/tools.ts`) ↔ all three `agent-integrations/{claude,codex,plugin}/.../SKILL.md` run loops | nothing automated — discipline only | `cl_sync-agent-surfaces` |
 | Boot-session / collision / queue / claim semantics | `start_run` + `wait_for_heal_task` result shapes (`mcp/tools.ts`) ↔ instructions ↔ skills (same five surfaces as above) | partial: tool unit tests | `cl_sync-agent-surfaces` |
-| Heal-claim policy | `apps/web-server/src/features/external-heal/logic/heal-claim-policy.ts` ↔ `broker.claim()` backstop ↔ `start_run`/`POST /api/runs` suppression ↔ skill prose | policy + broker unit tests | `cl_sync-agent-surfaces` |
+| Heal-claim policy | `apps/web-server/src/features/runs/logic/heal/heal-claim-policy.ts` ↔ `broker.claim()` backstop ↔ `start_run`/`POST /api/runs` suppression ↔ skill prose | policy + broker unit tests | `cl_sync-agent-surfaces` |
 | Templates ↔ shipped package | `templates/project/**` ↔ `dist/templates/` copy (`tools/prepare-assets.mjs`) ↔ consumer `canary-lab upgrade` | `npm run smoke:pack` | `cl_add-sample-feature` |
-| Coverage ledger single computation layer | `src/features/coverage/logic/coverage/service.ts` ↔ `src/features/coverage/routes/coverage.ts` (REST) ↔ `get_feature_coverage`/`list_feature_docs`/`regenerate_prd_summary` (`mcp/tools.ts`) — both surfaces call the service, never recompute | route + MCP tests; `server.smoke.test.ts` tool count | `cl_add-mcp-tool` / `cl_sync-agent-surfaces` |
-| Requirement-id stability | `reconcileRequirementIds` (`src/features/coverage/logic/coverage/prd-summary.ts`) ↔ inline `@requirement` annotations (`ast-extractor.ts`) — regen must preserve surviving ids | `prd-summary.test.ts` before/after fixture | — |
+| Coverage ledger single computation layer | `apps/web-server/src/features/coverage/logic/coverage/service.ts` ↔ `apps/web-server/src/features/coverage/routes/coverage.ts` (REST) ↔ `get_feature_coverage`/`list_feature_docs`/`regenerate_prd_summary` (`mcp/tools.ts`) — both surfaces call the service, never recompute | route + MCP tests; `server.smoke.test.ts` tool count | `cl_add-mcp-tool` / `cl_sync-agent-surfaces` |
+| Requirement-id stability | `reconcileRequirementIds` (`apps/web-server/src/features/coverage/logic/coverage/prd-summary.ts`) ↔ inline `@requirement` annotations (`ast-extractor.ts`) — regen must preserve surviving ids | `prd-summary.test.ts` before/after fixture | — |
 | Contributor docs single-source | `CLAUDE.md` (commands + rules) ↔ this file (mechanisms) ↔ `docs/PRD.md` (intent) — AGENTS.md is a pointer only | grep audit (see `cl_verify-changes`) | — |

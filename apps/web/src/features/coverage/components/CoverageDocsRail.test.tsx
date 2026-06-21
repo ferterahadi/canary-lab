@@ -17,14 +17,15 @@ vi.mock('../../../shared/api/client', async () => {
     importFeatureDoc: vi.fn(),
     deleteFeatureDoc: vi.fn(),
     clearPrdSummary: vi.fn(),
+    openEditor: vi.fn(),
   }
 })
 
 const LISTING: FeatureDocsListing = {
   feature: 'checkout',
   docs: [
-    { relPath: 'prd.md', generated: false, sizeBytes: 1200 },
-    { relPath: '_prd-summary.json', generated: true, sizeBytes: 800 },
+    { relPath: 'prd.md', absPath: '/repo/features/checkout/docs/prd.md', generated: false, sizeBytes: 1200 },
+    { relPath: '_prd-summary.json', absPath: '/repo/features/checkout/docs/_prd-summary.json', generated: true, sizeBytes: 800 },
   ],
   hasPrdSummary: true,
   sourceDocCount: 1,
@@ -54,6 +55,7 @@ beforeEach(() => {
   vi.mocked(api.importFeatureDoc).mockResolvedValue({ written: true, relativePath: 'features/checkout/docs/x.md' })
   vi.mocked(api.deleteFeatureDoc).mockResolvedValue({ deleted: true })
   vi.mocked(api.clearPrdSummary).mockResolvedValue({ feature: 'checkout', removed: ['_prd-summary.json'] })
+  vi.mocked(api.openEditor).mockResolvedValue({ opened: true, editor: 'auto' })
 })
 
 afterEach(() => {
@@ -165,53 +167,70 @@ describe('CoverageDocsRail', () => {
     expect(container.querySelector<HTMLButtonElement>('[data-testid="generate-summary"]')?.disabled).toBe(true)
   })
 
-  it('non-absent renders both generate buttons; coverage disabled when not actionable', async () => {
-    const onGenerate = vi.fn()
-    await mount({ open: true, summaryAbsent: false, coverageActionable: false, onGenerate })
-    expect(container.querySelector('[data-testid="generate-summary"]')).toBeTruthy()
-    const cov = container.querySelector<HTMLButtonElement>('[data-testid="generate-coverage"]')
-    expect(cov?.disabled).toBe(true)
+  it('non-absent renders a single "Redo from the start" button (no separate coverage button)', async () => {
+    await mount({ open: true, summaryAbsent: false })
+    const redo = container.querySelector<HTMLButtonElement>('[data-testid="redo-from-start"]')
+    expect(redo?.textContent).toBe('Redo from the start')
+    expect(container.querySelector('[data-testid="generate-coverage"]')).toBeNull()
+    expect(container.querySelector('[data-testid="generate-summary"]')).toBeNull()
   })
 
-  it('Regenerate coverage calls onGenerate(coverage) when actionable', async () => {
-    const onGenerate = vi.fn()
-    await mount({ open: true, summaryAbsent: false, coverageActionable: true, onGenerate })
-    const cov = container.querySelector<HTMLButtonElement>('[data-testid="generate-coverage"]')
-    expect(cov?.disabled).toBe(false)
-    act(() => { cov?.click() })
-    expect(onGenerate).toHaveBeenCalledWith('coverage')
+  it('"Redo from the start" confirms, then wipes the summary + all source docs', async () => {
+    await mount({ open: true, summaryAbsent: false })
+    // First click only arms the confirm — nothing destructive yet.
+    act(() => { container.querySelector<HTMLButtonElement>('[data-testid="redo-from-start"]')?.click() })
+    expect(container.querySelector('[data-testid="confirm-redo"]')).toBeTruthy()
+    expect(api.clearPrdSummary).not.toHaveBeenCalled()
+    // Confirm → clears the generated summary and deletes each source doc.
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="confirm-redo"]')?.click()
+      await Promise.resolve()
+    })
+    expect(api.clearPrdSummary).toHaveBeenCalledWith('checkout')
+    expect(api.deleteFeatureDoc).toHaveBeenCalledWith('checkout', 'prd.md')
   })
 
-  it('generating=true disables both generate buttons', async () => {
-    await mount({ open: true, summaryAbsent: false, coverageActionable: true, generating: true })
-    expect(container.querySelector<HTMLButtonElement>('[data-testid="generate-summary"]')?.disabled).toBe(true)
-    expect(container.querySelector<HTMLButtonElement>('[data-testid="generate-coverage"]')?.disabled).toBe(true)
+  it('Cancel dismisses the redo confirm without deleting anything', async () => {
+    await mount({ open: true, summaryAbsent: false })
+    act(() => { container.querySelector<HTMLButtonElement>('[data-testid="redo-from-start"]')?.click() })
+    act(() => { container.querySelector<HTMLButtonElement>('[data-testid="cancel-redo"]')?.click() })
+    expect(container.querySelector('[data-testid="redo-from-start"]')).toBeTruthy()
+    expect(api.clearPrdSummary).not.toHaveBeenCalled()
+    expect(api.deleteFeatureDoc).not.toHaveBeenCalled()
   })
 
-  it('generating=true also disables the destructive doc actions (add + remove)', async () => {
-    await mount({ open: true, summaryAbsent: false, coverageActionable: true, generating: true })
+  it('generating=true disables the redo button', async () => {
+    await mount({ open: true, summaryAbsent: false, generating: true })
+    expect(container.querySelector<HTMLButtonElement>('[data-testid="redo-from-start"]')?.disabled).toBe(true)
+  })
+
+  it('with a summary present the doc set is frozen — no add/remove affordances', async () => {
+    await mount({ open: true, summaryAbsent: false })
+    expect(container.querySelector('[data-testid="add-another-doc"]')).toBeNull()
+    expect(container.querySelector('[data-testid="remove-doc-prd.md"]')).toBeNull()
+  })
+
+  it('clicking a doc pill opens it in the configured editor', async () => {
+    await mount({ open: true, summaryAbsent: false })
+    act(() => { container.querySelector<HTMLElement>('[data-testid="doc-pill-prd.md"]')?.click() })
+    expect(api.openEditor).toHaveBeenCalledWith({ file: '/repo/features/checkout/docs/prd.md' })
+  })
+
+  it('before a summary exists, generating=true disables the editable add + remove', async () => {
+    await mount({ open: true, summaryAbsent: true, generating: true })
     expect(container.querySelector<HTMLButtonElement>('[data-testid="add-another-doc"]')?.disabled).toBe(true)
     expect(container.querySelector<HTMLButtonElement>('[data-testid="remove-doc-prd.md"]')?.disabled).toBe(true)
   })
 
-  it('removing a source doc calls deleteFeatureDoc + onDocsChanged', async () => {
+  it('removing a source doc (before a summary exists) calls deleteFeatureDoc + onDocsChanged', async () => {
     const onDocsChanged = vi.fn()
-    await mount({ open: true, onDocsChanged })
+    await mount({ open: true, summaryAbsent: true, onDocsChanged })
     await act(async () => {
       container.querySelector<HTMLButtonElement>('[data-testid="remove-doc-prd.md"]')?.click()
       await Promise.resolve()
     })
     expect(api.deleteFeatureDoc).toHaveBeenCalledWith('checkout', 'prd.md')
     expect(onDocsChanged).toHaveBeenCalled()
-  })
-
-  it('removing the generated artifact calls clearPrdSummary', async () => {
-    await mount({ open: true })
-    await act(async () => {
-      container.querySelector<HTMLButtonElement>('[data-testid="remove-doc-_prd-summary.json"]')?.click()
-      await Promise.resolve()
-    })
-    expect(api.clearPrdSummary).toHaveBeenCalledWith('checkout')
   })
 
   it('shows the stale drift line naming changed docs + affected artifacts', async () => {

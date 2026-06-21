@@ -1,4 +1,5 @@
 import type { AuditEntry, ExternalHealClientKind, RunLifecycleEvent } from '../../../shared/api/types'
+import { clientLabel as brandingClientLabel } from '../components/external-client-branding'
 import type { RunLifecyclePhase, RunLifecycleSeverity } from '../../../../../../shared/run-state'
 import { formatDuration } from '../../../shared/lib/format'
 
@@ -135,12 +136,8 @@ function truncate(value: string, max: number): string {
   return value.length <= max ? value : `${value.slice(0, max - 1)}…`
 }
 
+// This surface labels an unknown client "External" (terser than the shared
+// default "External Client") — reuse the shared switch for the named clients.
 export function clientLabel(kind: ExternalHealClientKind): string {
-  switch (kind) {
-    case 'claude-cli': return 'Claude CLI'
-    case 'claude-desktop': return 'Claude Desktop'
-    case 'codex-cli': return 'Codex CLI'
-    case 'codex-desktop': return 'Codex Desktop'
-    case 'other': return 'External'
-  }
+  return brandingClientLabel(kind, 'External')
 }

@@ -59,6 +59,7 @@ const LEDGER: CoverageLedger = {
   ],
   totals: { total: 3, verified: 2, untested: 1, unverified: 0, pathIncomplete: 1, shallowVerified: 1, orphanTests: 0 },
   coveragePct: 66.7,
+  mappedPct: 66.7,
   orphanRequirementIds: [],
   orphanTestNames: [],
   state: {
@@ -68,6 +69,22 @@ const LEDGER: CoverageLedger = {
     drift: { drifted: true, changedDocs: ['prd.md'], affectedArtifacts: ['PRD summary', 'coverage ledger'] },
   },
   docsDrift: true,
+}
+
+// Summary-absent ledger: the only state whose rail exposes a "Generate" button
+// (once a summary exists the footer is the destructive "Redo from the start"
+// wipe, not an in-place regenerate). The generation/chain flow is driven from
+// here.
+const ABSENT_LEDGER: CoverageLedger = {
+  feature: 'checkout',
+  requirements: [],
+  tests: [],
+  totals: { total: 0, verified: 0, untested: 0, unverified: 0, pathIncomplete: 0, shallowVerified: 0, orphanTests: 0 },
+  coveragePct: 0,
+  mappedPct: 0,
+  orphanRequirementIds: [],
+  orphanTestNames: [],
+  state: { summary: 'absent', coverage: 'blocked', headline: 'Setup needed', drift: { drifted: false, changedDocs: [], affectedArtifacts: [] } },
 }
 
 let container: HTMLDivElement
@@ -108,6 +125,14 @@ describe('CoverageLedgerPage', () => {
     expect(container.querySelector('[data-testid="req-R1"]')?.textContent).toContain('Add to cart')
     expect(container.querySelector('[data-testid="test-adds item"]')?.textContent).toContain('adds item')
     expect(container.querySelector('[data-testid="coverage-ring"]')?.getAttribute('aria-label')).toBe('66.7% verified')
+  })
+
+  it('surfaces a Mapped % stat (breadth) alongside the verified ring', async () => {
+    await mount()
+    const mapped = container.querySelector('[data-testid="mapped-stat"]')
+    // LEDGER: 3 reqs, 1 untested → 2 mapped → 66.7%.
+    expect(mapped?.textContent).toContain('66.7')
+    expect(mapped?.textContent).toContain('2/3 mapped')
   })
 
   it('numbers test cards by source order (shared cross-view id)', async () => {
@@ -182,7 +207,8 @@ describe('CoverageLedgerPage', () => {
     expect(container.querySelector('[data-testid="req-R1"]')).toBeNull() // filtered out
   })
 
-  it('Regenerate summary starts an async job (which chains coverage)', async () => {
+  it('Generate (summary-absent) starts an async job (which chains coverage)', async () => {
+    vi.mocked(api.getFeatureCoverage).mockResolvedValue(structuredClone(ABSENT_LEDGER))
     vi.mocked(api.startCoverageJob).mockResolvedValue({ jobId: 'j1', feature: 'checkout', kind: 'summary', status: 'done', startedAt: 'now', log: '' })
     vi.mocked(api.getCoverageJob).mockResolvedValue({ jobId: 'j1', feature: 'checkout', kind: 'summary', status: 'done', startedAt: 'now', log: 'done' })
     await mount()
@@ -197,6 +223,7 @@ describe('CoverageLedgerPage', () => {
 
   it('shows the dedicated Generating screen while a job runs, not the ledger (R13)', async () => {
     let resolveJob: ((m: import('../../../shared/api/types').CoverageJobManifest) => void) | null = null
+    vi.mocked(api.getFeatureCoverage).mockResolvedValue(structuredClone(ABSENT_LEDGER))
     vi.mocked(api.startCoverageJob).mockResolvedValue({ jobId: 'j1', feature: 'checkout', kind: 'summary', status: 'running', startedAt: 'now', log: 'summarizing…' })
     vi.mocked(api.getCoverageJob).mockImplementation(() => new Promise((res) => { resolveJob = res }))
     await mount()
@@ -212,8 +239,9 @@ describe('CoverageLedgerPage', () => {
     resolveJob?.({ jobId: 'j1', feature: 'checkout', kind: 'summary', status: 'done', startedAt: 'now', log: 'done' })
   })
 
-  it('puts the Tests pane (3rd column) in a loading state while generating — skeleton mapping, not stale chips', async () => {
+  it('puts the Tests pane (3rd column) in a loading state while generating — skeleton cards, no real test cases', async () => {
     let resolveJob: ((m: import('../../../shared/api/types').CoverageJobManifest) => void) | null = null
+    vi.mocked(api.getFeatureCoverage).mockResolvedValue(structuredClone(ABSENT_LEDGER))
     vi.mocked(api.startCoverageJob).mockResolvedValue({ jobId: 'j1', feature: 'checkout', kind: 'summary', status: 'running', startedAt: 'now', log: 'summarizing…' })
     vi.mocked(api.getCoverageJob).mockImplementation(() => new Promise((res) => { resolveJob = res }))
     await mount()
@@ -221,14 +249,13 @@ describe('CoverageLedgerPage', () => {
       container.querySelector<HTMLButtonElement>('[data-testid="generate-summary"]')?.click()
       await Promise.resolve()
     })
-    // Tests pane stays mounted (the test SET doesn't change)…
+    // Tests pane stays mounted, but the whole mapping is being recomputed, so the
+    // test cards are held back entirely: a mapping note + placeholder skeleton
+    // cards, NOT the real test names/chips that would read as "already done".
     expect(container.querySelector('[data-testid="tests-pane"]')).toBeTruthy()
-    expect(container.querySelector('[data-testid="test-adds item"]')).toBeTruthy()
-    // …but the mapping it shows is being recomputed: skeleton chips + a remapping
-    // note, NOT the stale @req chips that would read as "already done".
     expect(container.querySelector('[data-testid="tests-remapping-note"]')).toBeTruthy()
-    expect(container.querySelector('[data-testid="test-mapping-loading-adds item"]')).toBeTruthy()
-    expect(container.querySelector('[data-testid="test-adds item"]')?.textContent).not.toContain('@req-R1')
+    expect(container.querySelectorAll('[data-testid="test-skeleton"]').length).toBeGreaterThan(0)
+    expect(container.querySelector('[data-testid="test-adds item"]')).toBeNull()
     expect(container.querySelector('[data-testid="orphan-tests-note"]')).toBeNull()
     // Avoid leaking the pending getCoverageJob promise.
     resolveJob?.({ jobId: 'j1', feature: 'checkout', kind: 'summary', status: 'done', startedAt: 'now', log: 'done' })
@@ -236,6 +263,7 @@ describe('CoverageLedgerPage', () => {
 
   it('re-lists the rail docs when generation completes so the generated PRD doc appears (items 1+2)', async () => {
     // A summary job that completes and chains a coverage job, which also completes.
+    vi.mocked(api.getFeatureCoverage).mockResolvedValue(structuredClone(ABSENT_LEDGER))
     vi.mocked(api.startCoverageJob).mockResolvedValue({ jobId: 'j1', feature: 'checkout', kind: 'summary', status: 'running', startedAt: 'now', log: '' })
     vi.mocked(api.getCoverageJob).mockImplementation(async (id: string) => (
       id === 'j1'
@@ -279,6 +307,7 @@ const EMPTY_LEDGER: CoverageLedger = {
   tests: [],
   totals: { total: 0, verified: 0, untested: 0, unverified: 0, pathIncomplete: 0, shallowVerified: 0, orphanTests: 0 },
   coveragePct: 0,
+  mappedPct: 0,
   orphanRequirementIds: [],
   orphanTestNames: [],
   state: { summary: 'absent', coverage: 'blocked', headline: 'Setup needed', drift: { drifted: false, changedDocs: [], affectedArtifacts: [] } },
@@ -298,7 +327,7 @@ describe('CoverageLedgerPage — empty (ABSENT summary)', () => {
 
   it('generates from the rail once a doc exists and starts the chained job', async () => {
     vi.mocked(api.getFeatureCoverage).mockResolvedValue(structuredClone(EMPTY_LEDGER))
-    vi.mocked(api.listFeatureDocs).mockResolvedValue({ feature: 'checkout', docs: [{ relPath: 'spec.md', generated: false, sizeBytes: 9 }], hasPrdSummary: false, sourceDocCount: 1, docsDrift: false })
+    vi.mocked(api.listFeatureDocs).mockResolvedValue({ feature: 'checkout', docs: [{ relPath: 'spec.md', absPath: '/repo/features/checkout/docs/spec.md', generated: false, sizeBytes: 9 }], hasPrdSummary: false, sourceDocCount: 1, docsDrift: false })
     vi.mocked(api.startCoverageJob).mockResolvedValue({ jobId: 'j', feature: 'checkout', kind: 'summary', status: 'done', startedAt: 'n', log: '' })
     vi.mocked(api.getCoverageJob).mockResolvedValue({ jobId: 'j', feature: 'checkout', kind: 'summary', status: 'done', startedAt: 'n', log: 'done' })
     await mount()

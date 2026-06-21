@@ -8,13 +8,17 @@ import type { ClientKind } from '../../../../../../shared/run-mode'
 
 export type ExternalClientKind = ClientKind
 
-export function clientLabel(kind: ExternalClientKind): string {
+// The four named clients render identically everywhere; only the label for an
+// unknown ('other') client is surface-specific — the heal hero card says
+// "AI Agent", the run timeline says "External", the draft/portify cards say
+// "External Client" (the default). Callers pass `otherLabel` to keep their copy.
+export function clientLabel(kind: ExternalClientKind, otherLabel = 'External Client'): string {
   switch (kind) {
     case 'claude-cli': return 'Claude CLI'
     case 'claude-desktop': return 'Claude Desktop'
     case 'codex-cli': return 'Codex CLI'
     case 'codex-desktop': return 'Codex Desktop'
-    case 'other': return 'External Client'
+    case 'other': return otherLabel
   }
 }
 
@@ -32,9 +36,14 @@ export function shortSession(sessionId: string): string {
 export function BrandMark({
   clientKind,
   tint,
+  elevated = false,
 }: {
   clientKind: ExternalClientKind
   tint: string
+  // The standalone heal hero card lifts the generic ('other') monogram with a
+  // soft shadow; the embedded draft/portify cards stay flat. No effect on the
+  // claude/codex monogram (which is flat everywhere).
+  elevated?: boolean
 }) {
   const isClaude = clientKind.startsWith('claude')
   const isCodex = clientKind.startsWith('codex')
@@ -61,6 +70,9 @@ export function BrandMark({
         background: `linear-gradient(135deg, color-mix(in srgb, ${tint} 22%, transparent), color-mix(in srgb, ${tint} 8%, transparent))`,
         border: `1px solid color-mix(in srgb, ${tint} 38%, var(--border-default))`,
         color: tint,
+        ...(elevated
+          ? { boxShadow: `inset 0 0 0 1px color-mix(in srgb, white 7%, transparent), 0 10px 24px color-mix(in srgb, ${tint} 14%, transparent)` }
+          : {}),
       }}
       role="img"
       aria-label="External client"

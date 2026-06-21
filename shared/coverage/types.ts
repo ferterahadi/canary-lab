@@ -34,8 +34,16 @@ export interface Requirement {
    *  inline `@requirement` annotations point at — never renumbered. */
   id: string
   title: string
-  /** The requirement statement. */
+  /** The requirement statement, phrased as an "it should …" expectation. */
   text: string
+  /** Functional (a behavior the feature does/supports) vs non-functional (a
+   *  quality constraint). Drives PRD-summary section grouping. Defaults to
+   *  functional when absent (older summaries / deterministic fallback). */
+  kind?: 'functional' | 'non-functional'
+  /** Expected flow when inputs are valid and everything works. */
+  happyPath?: string
+  /** Error / edge / failure handling: invalid input, denial, conflicts, limits. */
+  unhappyPath?: string
   /** Char offset range within the rendered PRD summary markdown, for UI
    *  highlighting. Optional — absent when the summary text isn't span-mapped. */
   sourceRange?: { start: number; end: number }
@@ -207,8 +215,13 @@ export interface CoverageLedger {
   requirements: RequirementCoverage[]
   tests: TestCoverage[]
   totals: CoverageTotals
-  /** verified ÷ total active requirements, 0–100, one decimal. */
+  /** verified ÷ total active requirements, 0–100, one decimal. Depth/quality:
+   *  the share with a *passing run* behind every path. */
   coveragePct: number
+  /** Breadth: requirements with ≥1 annotated test ÷ total active, 0–100, one
+   *  decimal. "How many requirements have a corresponding test case" — answers
+   *  coverage existence independent of whether the test passes. */
+  mappedPct: number
   /** Requirement ids annotated on tests but absent from the PRD (drift signal). */
   orphanRequirementIds: string[]
   /** Test names with no requirement linkage — the annotate-pass works this set. */
