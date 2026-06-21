@@ -1,4 +1,5 @@
 import type { HealAgent } from '../../../runs/logic/runtime/auto-heal'
+import type { ClientKind, ExternalSessionMeta, RunProducer } from '../../../../../../../shared/run-mode'
 
 // Port-ification workflow: rewrite a feature's apps so their listen ports are
 // injectable (read from an env var, declared as `ports` slots in the config),
@@ -49,23 +50,18 @@ export interface PortifyRepoState {
 }
 
 /** Who drives the port-ification edits.
- *  - `local`: an agent spawned IN the app process edits the scratch worktree.
+ *  - `internal`: an agent spawned IN the app process edits the scratch worktree.
  *  - `external`: the agent runs in the user's OWN Claude/Codex client (via MCP)
  *    and edits the scratch worktree IN PLACE; the app process only sets up the
  *    worktree, verifies (double-boot), and saves the overlay. Mirrors external
  *    heal/wizard/eval — the transcript lives in the user's client, not here. */
-export type PortifyProducer = 'local' | 'external'
+export type PortifyProducer = RunProducer
 
-export type PortifyClientKind = 'claude-cli' | 'claude-desktop' | 'codex-cli' | 'codex-desktop' | 'other'
+export type PortifyClientKind = ClientKind
 
 /** The external client that owns an external-producer workflow. Surfaced
  *  status-only in the UI (the agent's transcript lives in the user's client). */
-export interface PortifyExternalSession {
-  clientKind: PortifyClientKind
-  sessionId: string
-  conversationName?: string
-  sessionUrl?: string
-}
+export type PortifyExternalSession = ExternalSessionMeta
 
 export interface PortifyManifest {
   workflowId: string
@@ -75,7 +71,7 @@ export interface PortifyManifest {
   repos: PortifyRepoState[]
   env?: string
   agent: HealAgent
-  /** Defaults to `local` (legacy manifests have no field). `external` means the
+  /** Defaults to `internal` (legacy manifests have no field). `external` means the
    *  agent runs in the user's own client and edits the worktree in place. */
   producer?: PortifyProducer
   /** Set only for `producer: 'external'` — the claiming client's identity. */

@@ -4,7 +4,9 @@
 // shortener, and brand monogram live here once instead of being copied per
 // panel.
 
-export type ExternalClientKind = 'claude-cli' | 'claude-desktop' | 'codex-cli' | 'codex-desktop' | 'other'
+import type { ClientKind } from '../../../../../../shared/run-mode'
+
+export type ExternalClientKind = ClientKind
 
 export function clientLabel(kind: ExternalClientKind): string {
   switch (kind) {

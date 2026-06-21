@@ -6,6 +6,7 @@ import {
   type ApplyFeatureScaffoldResult,
 } from '../../../../../../shared/feature-scaffold'
 import type { AgentSessionRef } from '../../agent-sessions/logic/agent-session-log'
+import type { ClientKind, RunProducer } from '../../../../../../shared/run-mode'
 
 // Draft storage for the Add Test wizard. Each draft lives at
 // `<logsDir>/drafts/<draftId>/` with a JSON state file plus the raw PRD,
@@ -28,7 +29,7 @@ export type DraftStatus =
   | 'cancelled'
   | 'error'
 
-export type DraftSource = 'internal' | 'external'
+export type DraftSource = RunProducer
 export type ExternalDraftStage =
   | 'scaffolding'
   | 'authoring-tests'
@@ -70,9 +71,9 @@ export interface DraftRecord {
   prdDocuments: DraftPrdDocument[]
   repos: DraftRepo[]
   featureName?: string
-  source?: DraftSource
+  producer?: DraftSource
   externalStage?: ExternalDraftStage
-  externalClientKind?: 'claude-cli' | 'claude-desktop' | 'codex-cli' | 'codex-desktop' | 'other'
+  externalClientKind?: ClientKind
   externalSessionId?: string
   externalConversationName?: string
   externalSessionUrl?: string
@@ -131,9 +132,9 @@ export interface CreateDraftInput {
   prdDocuments?: DraftPrdDocument[]
   repos: DraftRepo[]
   featureName?: string
-  source?: DraftSource
+  producer?: DraftSource
   externalStage?: ExternalDraftStage
-  externalClientKind?: 'claude-cli' | 'claude-desktop' | 'codex-cli' | 'codex-desktop' | 'other'
+  externalClientKind?: ClientKind
   externalSessionId?: string
   externalConversationName?: string
   externalSessionUrl?: string
@@ -152,7 +153,7 @@ export function createDraft(logsDir: string, input: CreateDraftInput): DraftReco
     prdDocuments: input.prdDocuments ?? [],
     repos: input.repos,
     featureName: input.featureName,
-    source: input.source,
+    producer: input.producer,
     externalStage: input.externalStage,
     externalClientKind: input.externalClientKind,
     externalSessionId: input.externalSessionId,
@@ -212,9 +213,9 @@ export interface TransitionPatch {
   generatedFiles?: string[]
   devDependencies?: string[]
   featureName?: string
-  source?: DraftSource
+  producer?: DraftSource
   externalStage?: ExternalDraftStage
-  externalClientKind?: 'claude-cli' | 'claude-desktop' | 'codex-cli' | 'codex-desktop' | 'other'
+  externalClientKind?: ClientKind
   externalSessionId?: string
   externalConversationName?: string
   externalSessionUrl?: string

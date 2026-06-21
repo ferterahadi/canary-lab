@@ -176,7 +176,7 @@ export function createPortifyRunner(deps: PortifyRunnerDeps) {
     let aborted = false
     const children = new Set<ChildProcess>()
     // External edits happen in the user's own client — no local session to pin.
-    const sessionId = opts.producer === 'local' && agent === 'claude' ? randomUUID() : undefined
+    const sessionId = opts.producer === 'internal' && agent === 'claude' ? randomUUID() : undefined
     const state: ActiveWorkflow = {
       groups,
       branch,
@@ -316,7 +316,7 @@ export function createPortifyRunner(deps: PortifyRunnerDeps) {
     }
     const { workflowId, orchestrator } = await prepareWorkflow(feature, agent, {
       maxAttempts: input.maxAttempts,
-      producer: 'local',
+      producer: 'internal',
     })
     // Fire-and-forget; the UI polls the manifest. orchestrator.run() handles all
     // its own errors internally (persisting 'failed' + cleanup), so it never

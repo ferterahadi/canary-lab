@@ -59,6 +59,7 @@ describe('playbackTests', () => {
       {
         name: 'auth.spec.ts:login',
         title: 'logs in after retry',
+        location: 'auth.spec.ts:1',
         startedAt: '2026-01-01T00:00:00.000Z',
         endedAt: '2026-01-01T00:00:04.000Z',
         status: 'passed',
@@ -161,6 +162,7 @@ describe('playbackTests', () => {
       {
         name: 'setup.spec.ts:seed',
         title: 'seeds data',
+        location: 'setup.spec.ts:1',
         status: 'failed',
         passed: false,
         durationMs: 20,

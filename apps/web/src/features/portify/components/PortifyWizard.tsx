@@ -733,7 +733,9 @@ function SaveScreen({ m, onDone }: { m: PortifyManifest; onDone: () => void }) {
           </div>
         ))}
       </div>
-      <button type="button" className="cl-button-primary" onClick={onDone} style={{ padding: '9px 16px' }}>Done</button>
+      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+        <button type="button" className="cl-button-primary" onClick={onDone} style={{ padding: '9px 16px' }}>Done</button>
+      </div>
     </div>
   )
 }

@@ -81,6 +81,35 @@ describe('TestCasesColumn', () => {
     expect(container.textContent).not.toContain('Loading...')
   })
 
+  it('numbers tests by source order and strips a baked-in ordinal from the title', async () => {
+    vi.mocked(getFeatureTests).mockResolvedValue([
+      {
+        file: '/tmp/features/alpha/e2e/b.spec.ts',
+        tests: [{ name: 'zeta runs last alphabetically', line: 1, bodySource: '', steps: [] }],
+      },
+      {
+        file: '/tmp/features/alpha/e2e/a.spec.ts',
+        tests: [
+          { name: '1. gateway is healthy', line: 30, bodySource: '', steps: [] },
+          { name: 'happy path', line: 5, bodySource: '', steps: [] },
+        ],
+      },
+    ])
+
+    await act(async () => {
+      root.render(<TestCasesColumn feature="alpha" activeRunSummary={undefined} activeRunStatus={undefined} />)
+    })
+
+    const rows = [...container.querySelectorAll('button')].map((el) => el.textContent ?? '')
+    // a.spec.ts:5 → #1, a.spec.ts:30 → #2, b.spec.ts:1 → #3 (sorted by file then line).
+    expect(rows.find((t) => t.includes('happy path'))).toContain('#1')
+    expect(rows.find((t) => t.includes('gateway is healthy'))).toContain('#2')
+    expect(rows.find((t) => t.includes('zeta runs last'))).toContain('#3')
+    // The literal "1. " prefix is stripped for display; the badge owns numbering.
+    expect(container.textContent).not.toContain('1. gateway is healthy')
+    expect(container.textContent).toContain('gateway is healthy')
+  })
+
   it('places the no-run test count on the right side of the header', async () => {
     vi.mocked(getFeatureTests).mockResolvedValue([
       {

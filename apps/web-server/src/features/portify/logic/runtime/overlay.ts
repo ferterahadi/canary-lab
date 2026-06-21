@@ -1,6 +1,7 @@
 import fs from 'fs'
 import path from 'path'
 import { runGit } from '../../../../shared/git-repo'
+import { atomicWrite } from '../../../../../../../shared/lib/atomic-write'
 import type { HealAgent } from '../../../runs/logic/runtime/auto-heal'
 
 // The ephemeral port overlay: a captured set of unified diffs (one per product
@@ -103,13 +104,6 @@ function readMeta(featureDir: string): OverlayMeta | null {
   } catch {
     return null
   }
-}
-
-function atomicWrite(file: string, body: string): void {
-  fs.mkdirSync(path.dirname(file), { recursive: true })
-  const tmp = `${file}.tmp`
-  fs.writeFileSync(tmp, body)
-  fs.renameSync(tmp, file)
 }
 
 /**

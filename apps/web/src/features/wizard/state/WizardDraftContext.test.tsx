@@ -97,7 +97,7 @@ describe('WizardDraftProvider', () => {
     const external = draft({
       draftId: 'external-a',
       status: 'planning',
-      source: 'external',
+      producer: 'external',
       externalStage: 'scaffolding',
       createdAt: '2026-01-02T00:00:00.000Z',
     })
@@ -114,7 +114,7 @@ describe('WizardDraftProvider', () => {
     })
 
     expect(captured.value?.drafts.map((item) => item.draftId)).toEqual(['external-a'])
-    expect(captured.value?.latestTask?.source).toBe('external')
+    expect(captured.value?.latestTask?.producer).toBe('external')
   })
 
   it('reconciles hidden draft records after the page is already open', async () => {

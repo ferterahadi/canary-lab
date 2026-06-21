@@ -6,7 +6,7 @@ import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import type { RunStore } from '../src/features/runs/logic/run-store'
 import type { RunDetail, RunStoreEvent } from '../src/features/runs/logic/run-store'
 import type { ExternalHealBroker } from '../src/features/runs/logic/heal/external-heal-broker'
-import type { ExternalHealClientKind } from '../src/features/runs/logic/runtime/manifest'
+import type { ClientKind } from '../../../shared/run-mode'
 import {
   buildExternalFailureDetail,
   buildExternalHealContext,
@@ -143,7 +143,7 @@ export interface CanaryLabMcpDeps {
     healAgent?: {
       kind: 'external'
       sessionId: string
-      clientKind: 'claude-cli' | 'claude-desktop' | 'codex-cli' | 'codex-desktop' | 'other'
+      clientKind: ClientKind
       clientVersion?: string
       conversationName?: string
       claimable?: boolean
@@ -156,7 +156,7 @@ export interface CanaryLabMcpDeps {
     healAgent: {
       kind: 'external'
       sessionId: string
-      clientKind: 'claude-cli' | 'claude-desktop' | 'codex-cli' | 'codex-desktop' | 'other'
+      clientKind: ClientKind
       clientVersion?: string
       conversationName?: string
       claimable?: boolean
@@ -396,7 +396,7 @@ export function toolsForCanaryLabMcpProfile(profile: CanaryLabMcpProfile): reado
 
 export interface CanaryLabMcpToolOptions {
   profile?: CanaryLabMcpProfile
-  defaultClientKind?: ExternalHealClientKind
+  defaultClientKind?: ClientKind
 }
 
 export function registerCanaryLabTools(
@@ -1039,7 +1039,7 @@ export function registerCanaryLabTools(
         ...(repo.branch ? { branch: repo.branch } : {}),
       })),
       featureName: feature,
-      source: 'external',
+      producer: 'external',
       externalStage: stage as ExternalDraftStage,
       externalClientKind: client_kind,
       externalSessionId: session_id,
@@ -1071,7 +1071,7 @@ export function registerCanaryLabTools(
   }, async ({ draftId, stage, message }) => {
     const current = readDraft(deps.store.logsDir, draftId)
     if (!current) return errorResult(`draft not found: ${draftId}`)
-    if ((current.source ?? 'internal') !== 'external') return errorResult('draft is not external-owned')
+    if ((current.producer ?? 'internal') !== 'external') return errorResult('draft is not external-owned')
     const next: DraftRecord = {
       ...current,
       externalStage: stage as ExternalDraftStage,
@@ -1095,7 +1095,7 @@ export function registerCanaryLabTools(
   }, async ({ draftId, files }) => {
     const current = readDraft(deps.store.logsDir, draftId)
     if (!current) return errorResult(`draft not found: ${draftId}`)
-    if ((current.source ?? 'internal') !== 'external') return errorResult('draft is not external-owned')
+    if ((current.producer ?? 'internal') !== 'external') return errorResult('draft is not external-owned')
     if (!current.featureName) return errorResult('external draft has no featureName')
     const feature = loadFeatures(deps.featuresDir).find((candidate) => candidate.name === current.featureName)
     if (!feature?.featureDir) return errorResult(`feature not found: ${current.featureName}`)
@@ -1894,7 +1894,7 @@ function externalDraftView(record: DraftRecord): Record<string, unknown> {
     draftId: record.draftId,
     feature: record.featureName,
     featureName: record.featureName,
-    source: record.source ?? 'internal',
+    producer: record.producer ?? 'internal',
     externalStage: record.externalStage,
     status: record.status,
     clientKind: record.externalClientKind,
@@ -2053,7 +2053,7 @@ async function waitForHealTask(
   deps: CanaryLabMcpDeps,
   runId: string,
   sessionId: string,
-  clientKind: ExternalHealClientKind,
+  clientKind: ClientKind,
   timeoutMs: number,
 ): Promise<WaitForHealTaskResult> {
   // A boot-only session never produces a heal task — return immediately instead
@@ -2110,7 +2110,7 @@ function ensureExternalClaimForMcpCall(
   deps: CanaryLabMcpDeps,
   runId: string,
   sessionId: string,
-  clientKind: ExternalHealClientKind,
+  clientKind: ClientKind,
 ): void {
   const detail = deps.store.get(runId)
   if (!detail || detail.manifest.healMode !== 'external' || isTerminalRunStatus(detail.manifest.status)) {

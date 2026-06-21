@@ -7,10 +7,8 @@ import {
   type ClaimInput,
   type ExternalHealAuditEntry,
 } from '../../runs/logic/heal/external-heal-broker'
-import type {
-  ExternalHealClientKind,
-  ExternalHealSessionStatus,
-} from '../../runs/logic/runtime/manifest'
+import type { ExternalHealSessionStatus } from '../../runs/logic/runtime/manifest'
+import { isClientKind, type ClientKind } from '../../../../../../shared/run-mode'
 import { buildExternalHealContext, buildExternalRunSnapshot, writeHealSignal } from '../../runs/logic/heal/external-heal-surface'
 import { runDirFor } from '../../runs/logic/runtime/run-paths'
 import {
@@ -21,7 +19,7 @@ import {
   type HealSignalKind,
 } from '../../../../../../shared/run-state'
 
-const VALID_CLIENT_KINDS: ExternalHealClientKind[] = [
+const VALID_CLIENT_KINDS: ClientKind[] = [
   'claude-cli',
   'claude-desktop',
   'codex-cli',
@@ -385,10 +383,6 @@ export async function externalHealRoutes(
       }
     },
   )
-}
-
-function isClientKind(value: unknown): value is ExternalHealClientKind {
-  return typeof value === 'string' && (VALID_CLIENT_KINDS as string[]).includes(value)
 }
 
 function isSessionStatus(value: unknown): value is ExternalHealSessionStatus {

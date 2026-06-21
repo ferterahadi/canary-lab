@@ -15,7 +15,7 @@ import {
   normalizeCanaryLabMcpProfile,
   type CanaryLabMcpProfile,
 } from '../apps/web-server/mcp/tools'
-import type { ExternalHealClientKind } from '../apps/web-server/src/features/runs/logic/runtime/manifest'
+import { isClientKind, type ClientKind } from '../shared/run-mode'
 import { looksLikeProjectRoot } from '../shared/runtime/project-root'
 import {
   canaryLabHome,
@@ -55,7 +55,7 @@ const DEFAULT_UI_STARTUP_POLL_MS = 250
 
 export interface McpCommandOptions {
   profile?: CanaryLabMcpProfile
-  clientKind?: ExternalHealClientKind
+  clientKind?: ClientKind
   stdin?: Readable
   stdout?: Writable
   stderr?: Writable
@@ -460,13 +460,13 @@ function sleep(ms: number): Promise<void> {
 }
 
 function parseArgs(argv: string[]):
-  | { ok: true; command: 'bridge' | 'doctor'; url?: string; profile: CanaryLabMcpProfile; clientKind?: ExternalHealClientKind; autoStartUi: boolean }
+  | { ok: true; command: 'bridge' | 'doctor'; url?: string; profile: CanaryLabMcpProfile; clientKind?: ClientKind; autoStartUi: boolean }
   | { ok: false; error: string } {
   let command: 'bridge' | 'doctor' = 'bridge'
   // Undefined → resolve the active project's port via resolveDefaultMcpUrl.
   let url: string | undefined
   let profile: CanaryLabMcpProfile = DEFAULT_MCP_PROFILE
-  let clientKind: ExternalHealClientKind | undefined
+  let clientKind: ClientKind | undefined
   let autoStartUi = true
   const args = [...argv]
   if (args[0] === 'doctor') {
@@ -496,7 +496,7 @@ function parseArgs(argv: string[]):
     }
     if (arg === '--client-kind') {
       const value = args[i + 1]
-      if (!isExternalHealClientKind(value)) {
+      if (!isClientKind(value)) {
         return { ok: false, error: `Invalid MCP client kind: ${value ?? ''}` }
       }
       clientKind = value
@@ -533,7 +533,7 @@ function healthUrlFor(url: string): string {
 function urlWithContext(
   url: string,
   profile: CanaryLabMcpProfile,
-  clientKind: ExternalHealClientKind,
+  clientKind: ClientKind,
 ): string {
   const parsed = new URL(url)
   parsed.searchParams.set('profile', profile)
@@ -573,14 +573,14 @@ function isResponseTo(message: JSONRPCMessage, id: string): boolean {
 export function inferMcpClientKind(
   env: NodeJS.ProcessEnv = process.env,
   startPid = process.ppid,
-): ExternalHealClientKind | null {
-  if (isExternalHealClientKind(env.CANARY_LAB_MCP_CLIENT_KIND)) {
+): ClientKind | null {
+  if (isClientKind(env.CANARY_LAB_MCP_CLIENT_KIND)) {
     return env.CANARY_LAB_MCP_CLIENT_KIND
   }
   return inferClientKindFromProcessLines(readProcessLineage(startPid))
 }
 
-export function inferClientKindFromProcessLines(lines: string[]): ExternalHealClientKind | null {
+export function inferClientKindFromProcessLines(lines: string[]): ClientKind | null {
   const haystack = lines.join('\n')
   if (/\/Applications\/Claude\.app\b|Claude Helper|Claude\.app/i.test(haystack)) return 'claude-desktop'
   if (/\/Applications\/Codex\.app\b|Codex Helper|Codex\.app/i.test(haystack)) return 'codex-desktop'
@@ -616,12 +616,5 @@ function readProcessEntry(pid: number): { ppid: number; command: string } | null
   }
 }
 
-function isExternalHealClientKind(value: unknown): value is ExternalHealClientKind {
-  return value === 'claude-cli' ||
-    value === 'claude-desktop' ||
-    value === 'codex-cli' ||
-    value === 'codex-desktop' ||
-    value === 'other'
-}
 
 runAsScript(module, main)

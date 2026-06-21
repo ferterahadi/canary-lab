@@ -16,6 +16,7 @@ import type {
   VerificationRunMetadata,
   VerificationTarget,
 } from '../../../../../shared/verification'
+import type { ClientKind, RunProducer } from '../../../../../shared/run-mode'
 export type {
   DisplayStatus,
   RunLifecycleAbortReason,
@@ -142,7 +143,7 @@ export interface CleanupWorktree {
 
 export type EvaluationExportMode = 'raw' | 'localized'
 export type EvaluationExportStatus = 'running' | 'completed' | 'failed'
-export type EvaluationExportProducer = 'internal' | 'external'
+export type EvaluationExportProducer = RunProducer
 
 export interface EvaluationExportTask {
   taskId: string
@@ -197,12 +198,7 @@ export interface PlaywrightArtifactPolicy {
   trace: PlaywrightRetainedArtifactMode
 }
 
-export type ExternalHealClientKind =
-  | 'claude-cli'
-  | 'claude-desktop'
-  | 'codex-cli'
-  | 'codex-desktop'
-  | 'other'
+export type ExternalHealClientKind = ClientKind
 
 export type ExternalHealSessionStatus =
   | 'connected'
@@ -351,7 +347,7 @@ export type DraftStatus =
   | 'cancelled'
   | 'error'
 
-export type DraftSource = 'internal' | 'external'
+export type DraftSource = RunProducer
 export type ExternalDraftStage =
   | 'scaffolding'
   | 'authoring-tests'
@@ -380,7 +376,7 @@ export interface DraftRecord {
   prdDocuments: DraftPrdDocument[]
   repos: DraftRepo[]
   featureName?: string
-  source?: DraftSource
+  producer?: DraftSource
   externalStage?: ExternalDraftStage
   externalClientKind?: ExternalHealClientKind
   externalSessionId?: string

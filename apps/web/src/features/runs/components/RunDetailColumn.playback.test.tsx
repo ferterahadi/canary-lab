@@ -41,6 +41,26 @@ describe('PlaywrightPlayback', () => {
     expect(container.textContent).not.toContain('Clicked Redeem')
   })
 
+  it('numbers a played-back test by its canonical source-order id from knownTests', () => {
+    // The run knows two tests; only the second (by source order) played back.
+    // Its badge must read #2 — the stable id, not row position 1.
+    const summary = {
+      knownTests: [
+        { name: 'a.spec.ts:first', title: 'first', location: 'a.spec.ts:5' },
+        { name: 'b.spec.ts:second', title: 'second', location: 'b.spec.ts:5' },
+      ],
+    } as unknown as RunSummary
+    const playedSecond: PlaywrightPlaybackEvent[] = [
+      { type: 'test-begin', time: '2026-01-01T00:00:00.000Z', test: { name: 'b.spec.ts:second', title: 'second', location: 'b.spec.ts:5' } },
+      { type: 'test-end', time: '2026-01-01T00:00:01.000Z', test: { name: 'b.spec.ts:second', title: 'second', location: 'b.spec.ts:5' }, status: 'passed', passed: true, durationMs: 10, retry: 0 },
+    ]
+    act(() => {
+      root.render(<PlaywrightPlayback events={playedSecond} summary={summary} />)
+    })
+    expect(container.textContent).toContain('#2')
+    expect(container.textContent).not.toContain('#1')
+  })
+
   it('expands retained screenshots only when requested', () => {
     renderPlayback()
 
@@ -204,7 +224,6 @@ describe('PlaywrightPlayback', () => {
     expect(container.textContent).toContain('checkout rerun now')
     expect(container.textContent).not.toContain('Now running:')
     expect(container.textContent).toContain('Currently executing in this Playwright process.')
-    expect(container.textContent).toContain('1/1')
     const runningPill = [...container.querySelectorAll('span')]
       .find((candidate) => candidate.textContent === 'running')
     expect(runningPill).toBeTruthy()
