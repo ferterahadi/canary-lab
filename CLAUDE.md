@@ -53,6 +53,10 @@ natively.)
   first, ask one open question; never fire an options menu guessing the goal.
 - `cl_verify-changes` — which checks a change needs before claiming it works;
   the canary-apply hand-off; coverage/template/stale-server gotchas.
+- `cl_verify-the-premise` — about to act on a claim you didn't confirm (a plan /
+  spec / "follow-up" item, a "known gap", a "doesn't update live / isn't wired /
+  X is missing" report, a "these N are identical" assumption): confirm the
+  premise is true in today's code before building — the fix is often unneeded.
 - `cl_release` — publishing the package (`npm run publish:package`).
 
 **Run loop & MCP layer**
