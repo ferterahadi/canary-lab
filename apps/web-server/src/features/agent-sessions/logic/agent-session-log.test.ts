@@ -21,6 +21,8 @@ import {
   writeFullSessionTranscript,
   selectAgentSessionRef,
   resolveManifestSessionRef,
+  writeWorkflowAgentRef,
+  resolveWorkflowAgentRef,
 } from './agent-session-log'
 
 let homeDir: string
@@ -1440,5 +1442,60 @@ describe('writeFullSessionTranscript — catch branch (line 521)', () => {
       events,
     )
     expect(result).toBeNull()
+  })
+})
+
+describe('writeWorkflowAgentRef + resolveWorkflowAgentRef', () => {
+  function workflowDir(): string {
+    return fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-wf-')))
+  }
+
+  it('returns null when no ref file has been written', () => {
+    expect(resolveWorkflowAgentRef(workflowDir(), homeDir)).toBeNull()
+  })
+
+  it('writes a claude ref and resolves it by session id once the log exists', () => {
+    const dir = workflowDir()
+    const cwd = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-wf-cwd-')))
+    writeWorkflowAgentRef(dir, { agent: 'claude', cwd, sessionId: 'sid-claude', spawnedAt: '2026-05-11T01:00:00.000Z' }, homeDir)
+
+    // No log on disk yet → falls back to the cwd-derived ref (logPath as written).
+    const before = resolveWorkflowAgentRef(dir, homeDir)
+    expect(before).toEqual({ agent: 'claude', sessionId: 'sid-claude', logPath: claudeSessionLogPath(cwd, 'sid-claude', homeDir) })
+
+    // Write the log under a DIFFERENT project slug so the by-id scan is what finds it.
+    const projDir = path.join(homeDir, '.claude', 'projects', 'some-other-slug')
+    fs.mkdirSync(projDir, { recursive: true })
+    const logPath = path.join(projDir, 'sid-claude.jsonl')
+    fs.writeFileSync(logPath, '{}\n')
+
+    expect(resolveWorkflowAgentRef(dir, homeDir)).toEqual({ agent: 'claude', sessionId: 'sid-claude', logPath })
+  })
+
+  it('writes a codex hint and discovers the session by cwd + spawn time', () => {
+    const dir = workflowDir()
+    const cwd = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-wf-cwd-')))
+    writeWorkflowAgentRef(dir, { agent: 'codex', cwd, spawnedAt: '2026-05-11T01:00:00.000Z' }, homeDir)
+
+    // No codex session on disk yet → null (the WS keeps polling discoverRef).
+    expect(resolveWorkflowAgentRef(dir, homeDir)).toBeNull()
+
+    const sessionsDir = path.join(homeDir, '.codex', 'sessions', '2026', '05', '11')
+    fs.mkdirSync(sessionsDir, { recursive: true })
+    const logPath = path.join(sessionsDir, 'rollout-2026-05-11T01-05-00-bbbb.jsonl')
+    fs.writeFileSync(
+      logPath,
+      JSON.stringify({ timestamp: '2026-05-11T01:05:00.000Z', type: 'session_meta', payload: { id: 'sess-bbbb', cwd, timestamp: '2026-05-11T01:05:00.000Z' } }) + '\n',
+    )
+
+    expect(resolveWorkflowAgentRef(dir, homeDir)).toEqual({ agent: 'codex', sessionId: 'sess-bbbb', logPath })
+
+    try { fs.rmSync(cwd, { recursive: true, force: true }) } catch { /* best-effort */ }
+  })
+
+  it('ignores a malformed ref file', () => {
+    const dir = workflowDir()
+    fs.writeFileSync(path.join(dir, 'agent-session.json'), 'not json')
+    expect(resolveWorkflowAgentRef(dir, homeDir)).toBeNull()
   })
 })

@@ -48,6 +48,10 @@ are easy to miss by hand. (Claude: via the Skill tool. Codex: skills load
 natively.)
 
 **Process / how to work**
+- `cl_reuse-shared-logic` — about to add code/UI that resembles something already
+  here (a 2nd agent spawn, pill/dialog, store, parser, timeout): reuse or extend
+  one shared helper/component/primitive instead of copy-pasting a variant. Lists
+  the existing primitives + the agent-process-runner duplication still owed.
 - `cl_scope-the-ask` — vague "improve/fix/polish X" request: look at the target
   first, ask one open question; never fire an options menu guessing the goal.
 - `cl_verify-changes` — which checks a change needs before claiming it works;
@@ -73,6 +77,10 @@ natively.)
 - `cl_design-feedback` — critiquing a UI (screenshot, live screen, Figma,
   component): ground every finding in the component source + tokens before
   voicing it; don't flag a shared primitive or intentional choice as a defect.
+- `cl_ws-driven-state` — adding any server-side mutation (route, background job,
+  MCP tool) that changes visible UI state: emit a `WorkspaceEvent` so the client
+  updates live. Covers the full chain + checklist + the two gaps fixed in 1.4.0
+  (portify save, coverage job completion).
 - `cl_live-state-sync` — a UI that must react in real time to a backend state
   change, or anything that "only updates after refresh": picking
   broadcast-push vs task-scoped stream vs refetch.

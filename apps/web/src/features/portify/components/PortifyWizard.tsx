@@ -3,6 +3,7 @@ import * as api from '../../../shared/api/client'
 import type { PortifyIndexEntry, PortifyManifest, PortifyStatus } from '../../../shared/api/client'
 import { useActivePortify } from '../state/PortifyContext'
 import { AgentSessionView } from '../../agent-sessions/components/AgentSessionView'
+import { ExternalPortifyPanel } from './ExternalPortifyPanel'
 import { CopyButton } from '../../../shared/ui/CopyButton'
 
 // Guided port-ification: an agent rewrites the feature's apps to use injectable
@@ -485,29 +486,36 @@ function PlanScreen({ feature, agent, busy, onStart }: { feature: string; agent:
 function ExerciseScreen({ m, live }: { m: PortifyManifest; live: boolean }) {
   // When viewed after the fact (live=false), every phase reads as done.
   const settled = !live || isNavigable(m.status)
+  // External producer: the agent runs in the user's own client and edits the
+  // worktree in place — there's no local agent session, no auto-retry loop.
+  const external = m.producer === 'external'
   return (
     <div>
-      <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 4 }}>{live ? 'Running the exercise' : 'The exercise'}</div>
+      <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 4 }}>
+        {external ? 'External port-ification' : live ? 'Running the exercise' : 'The exercise'}
+      </div>
       <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginBottom: 18 }}>
-        Attempt {Math.max(1, m.attempt)} of {m.maxAttempts}
+        {external ? 'The agent runs in your own client and edits the scratch worktree in place.' : `Attempt ${Math.max(1, m.attempt)} of ${m.maxAttempts}`}
       </div>
       <div style={{ border: '1px solid var(--border-default)', borderRadius: 'var(--radius-lg)', overflow: 'hidden' }}>
         <Phase done label="Scratch worktree created" active={live && m.status === 'planning'} />
-        <Phase done={settled || m.status === 'verifying'} active={live && m.status === 'editing'} label="Agent rewriting ports (source + config)" />
+        <Phase done={settled || m.status === 'verifying'} active={live && m.status === 'editing'} label={external ? 'You rewrite ports in your client (source + config)' : 'Agent rewriting ports (source + config)'} />
         <Phase done={settled} active={live && m.status === 'verifying'} label="Booting twice on different ports + health checks" />
       </div>
       <div style={{ fontSize: 12.5, color: 'var(--accent)', marginTop: 14 }}>{STATUS_LABEL[m.status]}</div>
-      {live && m.verification && !m.verification.ok && m.verification.failureDetail && (
+      {!external && live && m.verification && !m.verification.ok && m.verification.failureDetail && (
         <div style={{ marginTop: 12, fontSize: 11.5, fontFamily: 'var(--font-mono)', color: 'rgb(251,191,36)', background: 'var(--bg-base)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)', padding: '10px 12px', whiteSpace: 'pre-wrap' }}>
           Last attempt failed — retrying:{'\n'}{m.verification.failureDetail}
         </div>
       )}
       <div style={{ marginTop: 18 }}>
         <div style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '.4px', color: 'var(--text-muted)', fontWeight: 600, marginBottom: 8 }}>
-          Agent
+          {external ? 'Session' : 'Agent'}
         </div>
         <div style={{ height: 360, border: '1px solid var(--border-default)', borderRadius: 'var(--radius-lg)', overflow: 'hidden' }}>
-          <AgentSessionView source={{ kind: 'portify', workflowId: m.workflowId, live }} />
+          {external
+            ? <ExternalPortifyPanel m={m} />
+            : <AgentSessionView source={{ kind: 'portify', workflowId: m.workflowId, live }} />}
         </div>
       </div>
     </div>

@@ -90,6 +90,8 @@ const AUTHOR_TOOLS = uniqueSorted([
   'save_portify',
   'start_external_draft',
   'start_portify',
+  'start_external_portify',
+  'submit_external_portify',
   'start_external_evaluation_export',
   'submit_external_evaluation_export',
   'update_external_draft_stage',

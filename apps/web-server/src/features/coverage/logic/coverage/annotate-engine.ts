@@ -47,6 +47,8 @@ export interface ProposeMappingsArgs {
   requirements: Requirement[]
   tests: AnnotateTestInput[]
   adapter?: AnnotateAdapter
+  /** Absolute feature dir — used to show the agent resolvable spec paths to read. */
+  featureDir?: string
   cwd?: string
   signal?: AbortSignal
   onOutput?: (chunk: string) => void
@@ -196,6 +198,7 @@ export function deterministicMappings(
 export function buildAnnotatePrompt(
   requirements: Requirement[],
   tests: AnnotateTestInput[],
+  featureDir?: string,
   templatePath: string = ANNOTATE_TEMPLATE_PATH,
 ): string {
   const template = fs.readFileSync(templatePath, 'utf-8').trim()
@@ -205,11 +208,13 @@ export function buildAnnotatePrompt(
     null,
     2,
   )
+  // Agentic: list each test's name + resolvable file path so the agent READS the
+  // real body with its tools, instead of inlining a truncated body (which lets the
+  // model shortcut to one-shot and leaves the AgentSessionView timeline empty).
   const testJson = JSON.stringify(
     tests.map((t) => ({
       testName: t.name,
-      file: t.file,
-      body: t.bodySource?.slice(0, 2000),
+      file: t.file && featureDir ? path.join(featureDir, t.file) : t.file,
       assertions: t.assertions,
     })),
     null,
@@ -333,7 +338,7 @@ export async function proposeCoverageMappings(
   const agents = resolveAgents(args.adapter ?? 'auto')
 
   if (agents.length) {
-    const prompt = buildAnnotatePrompt(args.requirements, args.tests)
+    const prompt = buildAnnotatePrompt(args.requirements, args.tests, args.featureDir)
     for (const agent of agents) {
       try {
         args.onOutput?.(`[agent:${agent}] inferring coverage mappings\n`)

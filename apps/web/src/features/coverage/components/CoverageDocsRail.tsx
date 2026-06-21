@@ -32,6 +32,10 @@ interface Props {
   drift: { changedDocs: string[]; affectedArtifacts: string[] } | null
   onGenerate: (kind: 'summary' | 'coverage') => void
   onDocsChanged: () => void // call after a successful import/delete/clear so the parent refetches
+  /** Bumped by the parent when a generation job completes — the generated
+   *  _prd-summary.md now exists, so re-list the docs (items 1+2: the pill must
+   *  appear live, without a manual refresh). */
+  reloadKey?: number
 }
 
 // CoverageDocsRail — a collapsible LEFT RAIL that owns ONLY source-doc CRUD for a
@@ -40,7 +44,7 @@ interface Props {
 // onGenerate callbacks and never polls jobs or holds any job state. Wired to the
 // SAME REST endpoints the MCP tools use so UI and agents stay in sync.
 export function CoverageDocsRail(props: Props): JSX.Element {
-  const { feature, open, onToggle, generating, summaryAbsent, summaryStale, coverageActionable, drift, onGenerate, onDocsChanged } = props
+  const { feature, open, onToggle, generating, summaryAbsent, summaryStale, coverageActionable, drift, onGenerate, onDocsChanged, reloadKey } = props
 
   const [listing, setListing] = useState<FeatureDocsListing | null>(null)
   const [busy, setBusy] = useState(false)
@@ -56,7 +60,9 @@ export function CoverageDocsRail(props: Props): JSX.Element {
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
   }, [feature])
 
-  useEffect(() => { load() }, [load])
+  // Re-list on mount, on feature change, and whenever the parent bumps reloadKey
+  // (a generation job completed → the generated PRD artifact now exists).
+  useEffect(() => { load() }, [load, reloadKey])
 
   // Import each file SEQUENTIALLY — the md-only extractor + single-flight summary
   // job must not be hammered concurrently. A per-file failure does not abort the

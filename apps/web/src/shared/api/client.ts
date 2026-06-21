@@ -363,14 +363,6 @@ export function clearBenchmarkWorktrees(
   )
 }
 
-export function getBenchmarkSabotageLog(id: string, opts?: ClientOptions): Promise<{ log: string }> {
-  const { baseUrl, fetchImpl } = defaultOpts(opts)
-  return request<{ log: string }>(
-    `${baseUrl}/api/benchmarks/${encodeURIComponent(id)}/sabotage-log`,
-    { method: 'GET' },
-    fetchImpl,
-  )
-}
 
 export async function getBenchmarkAgentSession(
   id: string,
@@ -418,11 +410,26 @@ export interface PortifyIndexEntry {
   endedAt?: string
 }
 
+export type PortifyProducer = 'local' | 'external'
+
+export type PortifyClientKind = 'claude-cli' | 'claude-desktop' | 'codex-cli' | 'codex-desktop' | 'other'
+
+export interface PortifyExternalSession {
+  clientKind: PortifyClientKind
+  sessionId: string
+  conversationName?: string
+  sessionUrl?: string
+}
+
 export interface PortifyManifest {
   workflowId: string
   feature: string
   repos: PortifyRepoState[]
   agent: 'claude' | 'codex'
+  /** Defaults to 'local' on legacy manifests. 'external' = agent ran in the
+   *  user's own client and edited the worktree in place. */
+  producer?: PortifyProducer
+  external?: PortifyExternalSession
   branch: string
   status: PortifyStatus
   attempt: number
@@ -431,7 +438,7 @@ export interface PortifyManifest {
   startedAt: string
   endedAt?: string
   diff?: string
-  verification?: { ok: boolean; instances: PortifyBootInstance[]; failureDetail?: string }
+  verification?: { ok: boolean; instances: PortifyBootInstance[]; failureDetail?: string; notPortFixable?: boolean }
   error?: string
 }
 

@@ -216,12 +216,20 @@ describe('proposeCoverageMappings', () => {
 })
 
 describe('buildAnnotatePrompt', () => {
-  it('injects active requirements and tests, excluding deprecated reqs', () => {
-    const prompt = buildAnnotatePrompt(REQS, [{ name: 'creates a todo', bodySource: 'body' }])
+  it('lists test names + file paths to read (no inlined body) + active requirements', () => {
+    const prompt = buildAnnotatePrompt(
+      REQS,
+      [{ name: 'creates a todo', file: 'e2e/todo.spec.ts', bodySource: 'UNIQUE_TEST_BODY_TOKEN' }],
+      '/repo/features/todo',
+    )
     expect(prompt).toContain('"id": "R1"')
     expect(prompt).toContain('"id": "R2"')
     expect(prompt).not.toContain('"id": "R9"')
     expect(prompt).toContain('creates a todo')
+    // Agentic: the prompt lists the resolvable spec path so the agent READS the
+    // real test body with its tools — the body is NOT inlined.
+    expect(prompt).toContain('/repo/features/todo/e2e/todo.spec.ts')
+    expect(prompt).not.toContain('UNIQUE_TEST_BODY_TOKEN')
   })
 
   it('returns unknown {{key}} placeholders unchanged (return match branch)', () => {
@@ -233,7 +241,7 @@ describe('buildAnnotatePrompt', () => {
     const tmpFile = path.join(os.tmpdir(), `canary-annotate-tmpl-${Date.now()}.md`)
     try {
       fs.writeFileSync(tmpFile, '{{requirements}} {{unknown}}')
-      const prompt = buildAnnotatePrompt(REQS, [], tmpFile)
+      const prompt = buildAnnotatePrompt(REQS, [], undefined, tmpFile)
       expect(prompt).toContain('{{unknown}}')
     } finally {
       fs.rmSync(tmpFile, { force: true })

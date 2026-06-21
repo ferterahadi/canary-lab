@@ -296,4 +296,63 @@ describe('PortifyOrchestrator', () => {
     const m = await new PortifyOrchestrator(deps).run()
     expect(m.status).toBe('ready-to-save')
   })
+
+  describe('external producer', () => {
+    it('startExternal sets up worktrees and parks at editing — no agent runs', async () => {
+      const { deps } = makeDeps({})
+      const m = await new PortifyOrchestrator(deps).startExternal()
+      expect(m.status).toBe('editing')
+      expect(m.repos[0].worktreePath).toBe('/wt')
+      expect(deps.runAgent).not.toHaveBeenCalled()
+      expect(deps.cleanup).not.toHaveBeenCalled()
+    })
+
+    it('startExternal fails + cleans up when setup throws', async () => {
+      const { deps } = makeDeps({ setup: async () => { throw new Error('worktree boom') } })
+      const m = await new PortifyOrchestrator(deps).startExternal()
+      expect(m.status).toBe('failed')
+      expect(m.error).toContain('worktree boom')
+      expect(deps.cleanup).toHaveBeenCalledOnce()
+    })
+
+    it('verifyExternalEdits parks at ready-to-save when the in-place edits verify', async () => {
+      const { deps } = makeDeps({})
+      const orch = new PortifyOrchestrator(deps)
+      const current = await orch.startExternal()
+      const verifyAgent = deps.runAgent as ReturnType<typeof vi.fn>
+      const m = await orch.verifyExternalEdits(current)
+      expect(m.status).toBe('ready-to-save')
+      expect(m.diff).toBe('diff')
+      expect(m.verification?.ok).toBe(true)
+      expect(verifyAgent).not.toHaveBeenCalled() // editing happened out-of-band
+    })
+
+    it('verifyExternalEdits re-parks at editing (not terminal) when verification fails', async () => {
+      const { deps } = makeDeps({ verify: async () => ({ ok: false, instances: [], failureDetail: 'port 3007 still bound' }) })
+      const orch = new PortifyOrchestrator(deps)
+      const m = await orch.verifyExternalEdits(await orch.startExternal())
+      expect(m.status).toBe('editing')
+      expect(m.verification?.failureDetail).toContain('port 3007')
+      expect(deps.cleanup).not.toHaveBeenCalled() // worktree kept so the client can fix + resubmit
+    })
+
+    it('verifyExternalEdits rejects a test-file edit as a ports-only violation', async () => {
+      const { deps } = makeDeps({ checkTestsUntouched: async () => ({ ok: false, offending: ['e2e/api.spec.ts'] }) })
+      const orch = new PortifyOrchestrator(deps)
+      const m = await orch.verifyExternalEdits(await orch.startExternal())
+      expect(m.status).toBe('editing')
+      expect(m.verification?.failureDetail).toContain('e2e/api.spec.ts')
+    })
+
+    it('verifyExternalEdits parks at editing with a clear message when nothing was edited', async () => {
+      const { deps } = makeDeps({ captureDiff: async () => '   ' })
+      const orch = new PortifyOrchestrator(deps)
+      const verifySpy = vi.fn(async () => ({ ok: true, instances: [] }))
+      deps.verify = verifySpy
+      const m = await orch.verifyExternalEdits(await orch.startExternal())
+      expect(m.status).toBe('editing')
+      expect(m.verification?.failureDetail).toMatch(/no edits detected/i)
+      expect(verifySpy).not.toHaveBeenCalled() // don't boot an unchanged stack
+    })
+  })
 })

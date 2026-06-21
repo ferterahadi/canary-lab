@@ -79,7 +79,6 @@ import {
   listSabotageSkills,
   startBenchmark,
   abortBenchmark,
-  getBenchmarkSabotageLog,
   getBenchmarkAgentSession,
   benchmarkPreflight,
   startPortify,
@@ -1129,12 +1128,6 @@ describe('api client', () => {
     const fetchImpl = vi.fn().mockResolvedValue(ok({ ok: true }))
     await expect(abortBenchmark('b1', { baseUrl: 'http://x', fetchImpl })).resolves.toEqual({ ok: true })
     expect(fetchImpl).toHaveBeenCalledWith('http://x/api/benchmarks/b1/abort', { method: 'POST' })
-  })
-
-  it('getBenchmarkSabotageLog GETs the captured log', async () => {
-    const fetchImpl = vi.fn().mockResolvedValue(ok({ log: 'output' }))
-    await expect(getBenchmarkSabotageLog('b1', { baseUrl: 'http://x', fetchImpl })).resolves.toEqual({ log: 'output' })
-    expect(fetchImpl).toHaveBeenCalledWith('http://x/api/benchmarks/b1/sabotage-log', { method: 'GET' })
   })
 
   it('getBenchmarkAgentSession returns the session on 200', async () => {

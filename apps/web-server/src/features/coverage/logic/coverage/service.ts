@@ -273,14 +273,19 @@ export async function runCoverageEngine(args: RunCoverageEngineArgs): Promise<Ru
   }
 
   const proposals = await proposeCoverageMappings(
-    { requirements: candidateRequirements, tests: engineInputs, adapter: args.adapter, cwd: args.cwd, signal: args.signal, onOutput: args.onOutput, onSession: args.onAgentSession },
+    { requirements: candidateRequirements, tests: engineInputs, adapter: args.adapter, featureDir, cwd: args.cwd, signal: args.signal, onOutput: args.onOutput, onSession: args.onAgentSession },
   )
 
   // No review gate (R16): every inferred mapping's `covers` tag is written now.
+  // Agent proposals report only a testName (the agent reads the spec but doesn't
+  // echo its path), so backfill `file` by name from the engine's orphan inputs —
+  // without this the entire agentic mapping path is a no-op at tag-writing.
+  const fileByTestName = new Map(engineInputs.map((t) => [t.name, t.file]))
   const applied: ProposedMapping[] = []
   for (const m of proposals) {
-    if (!m.file) continue
-    if (applyTagToFile(featureDir, m.file, m.testName, m.requirements, m.pathTypes)) applied.push(m)
+    const file = m.file ?? fileByTestName.get(m.testName)
+    if (!file) continue
+    if (applyTagToFile(featureDir, file, m.testName, m.requirements, m.pathTypes)) applied.push({ ...m, file })
   }
 
   // Record the requirements set the engine just ran against — coverage drops to

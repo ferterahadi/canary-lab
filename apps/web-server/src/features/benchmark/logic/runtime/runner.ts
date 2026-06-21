@@ -1,11 +1,10 @@
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { randomUUID } from 'crypto'
 import { type ChildProcess } from 'child_process'
 import type { FeatureConfig, RepoPrerequisite } from '../../../../../../../shared/launcher/types'
 import { runGit, resolveRepoPath } from '../../../../shared/git-repo'
-import { claudeSessionLogPath, encodeClaudeProjectDir } from '../../../agent-sessions/logic/agent-session-log'
+import { claudeSessionLogPath, writeWorkflowAgentRef } from '../../../agent-sessions/logic/agent-session-log'
 import { runAgentProcess, buildClaudeAgenticArgs } from '../../../agent-sessions/logic/agent-process'
 import { addWorktree, type WorktreeHandle } from '../../../runs/logic/runtime/repo-worktree'
 import { RunOrchestrator, defaultPlaywrightSpawner } from '../../../runs/logic/runtime/orchestrator'
@@ -180,12 +179,12 @@ export function createBenchmarkRunner(deps: BenchmarkRunnerDeps) {
           runSabotageAgent: async (wtRoot, recipe) => {
             const featureSub = path.relative(stagingHandle!.worktreeRoot, stagingHandle!.localPath)
             const cwd = featureSub ? path.join(wtRoot, featureSub) : wtRoot
-            // For claude, pin a session id so we can locate the native session
-            // JSONL and render it through the shared AgentSessionView (the same
-            // timeline the Heal-agent tab + wizard use). Write the ref the
-            // benchmark agent-session endpoint/WS resolve from.
+            // Pin claude's session id so its native JSONL is locatable; codex has
+            // no such flag, so persist the cwd + spawn time and discover it
+            // post-hoc. Either way the sabotage agent renders through the shared
+            // AgentSessionView (the same timeline the Heal-agent tab + wizard use).
             const sessionId = agent === 'claude' ? randomUUID() : undefined
-            if (sessionId) writeBenchmarkClaudeRef(benchDir, cwd, sessionId)
+            writeWorkflowAgentRef(benchDir, { agent, cwd, sessionId, spawnedAt: deps.now() })
             await runAgentHeadless(agent, recipe, cwd, path.join(benchDir, 'sabotage-agent.log'), children, sessionId)
           },
           testsUntouched: async (wtRoot) => {
@@ -415,7 +414,8 @@ export function createBenchmarkRunner(deps: BenchmarkRunnerDeps) {
 // completion and resolve on exit. Permissions are auto-accepted because there
 // is no human in this loop. `claude` gets a pinned `--session-id` so we can
 // locate + render its native session log via AgentSessionView. Raw stdout is
-// still teed to `sabotage-agent.log` (debug + the codex fallback view).
+// still teed to `sabotage-agent.log` for debugging + the codex idle-activity
+// signal.
 function runAgentHeadless(
   agent: HealAgent,
   prompt: string,
@@ -450,20 +450,6 @@ function runAgentHeadless(
   // Sabotage swallows a failed/non-zero agent (it may still have edited code;
   // the diff is the arbiter), so resolve void on close OR spawn error.
   return handle.done.then(cleanup, cleanup)
-}
-
-// Write `<benchDir>/agent-session.json` pointing at the sabotage agent's native
-// claude session log (path is fully determined by the real cwd + session id),
-// so the benchmark agent-session endpoint/WS can serve it to AgentSessionView.
-function writeBenchmarkClaudeRef(benchDir: string, cwd: string, sessionId: string): void {
-  try {
-    const realCwd = fs.realpathSync(cwd)
-    const logPath = path.join(os.homedir(), '.claude', 'projects', encodeClaudeProjectDir(realCwd), `${sessionId}.jsonl`)
-    const ref = { activeAgent: 'claude', sessions: { claude: { agent: 'claude', sessionId, logPath } } }
-    fs.writeFileSync(path.join(benchDir, 'agent-session.json'), JSON.stringify(ref, null, 2))
-  } catch {
-    /* best-effort — the setup view falls back to the text log */
-  }
 }
 
 // Git worktrees don't include gitignored deps, so the arm/staging worktrees have

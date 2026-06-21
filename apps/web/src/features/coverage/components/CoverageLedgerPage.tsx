@@ -62,6 +62,10 @@ export function CoverageLedgerPage({ feature, onClose }: Props) {
   // While a job runs the view is a full-screen Generating takeover (R13).
   const [job, setJob] = useState<CoverageJobManifest | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
+  // Bumped when a generation job completes so the Docs rail re-lists itself and
+  // the generated _prd-summary.md pill shows up live (items 1+2). Driven off the
+  // reliable pollJob completion, not a best-effort broadcast (cl_live-state-sync).
+  const [docsReloadKey, setDocsReloadKey] = useState(0)
   const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const toggleRail = useCallback(() => setRailOpen((v) => { writeRailPref(!v); return !v }), [])
@@ -92,14 +96,17 @@ export function CoverageLedgerPage({ feature, onClose }: Props) {
           if (m.status === 'running') {
             pollRef.current = setTimeout(tick, 800)
           } else if (m.status === 'done' && m.chainedJobId) {
-            // Summary done → follow the auto-chained coverage job (R14): keep the
-            // Generating screen up across both phases, no second click.
+            // Summary done → the generated _prd-summary.md now exists; re-list the
+            // rail so its pill appears immediately (items 1+2), then follow the
+            // auto-chained coverage job (R14) — Generating screen stays up.
             refresh()
+            setDocsReloadKey((k) => k + 1)
             pollJob(m.chainedJobId)
           } else {
             if (m.status === 'failed') setActionError(m.error ?? 'generation failed')
             setJob(null)
             refresh()
+            setDocsReloadKey((k) => k + 1)
           }
         })
         .catch((e: unknown) => { setActionError(e instanceof Error ? e.message : String(e)); setJob(null) })
@@ -189,24 +196,35 @@ export function CoverageLedgerPage({ feature, onClose }: Props) {
   const summaryAbsent = state?.summary === 'absent'
 
   // Tests pane — shown in BOTH the final ledger and (R: 3-column generating) while
-  // a job runs, since generation doesn't change the test set, only its mapping.
+  // a job runs, since generation doesn't change the test SET, only its mapping.
+  // While generating, the mapping (@req/@path chips) is exactly what's being
+  // recomputed, so showing the stale chips reads as "already done" against the
+  // middle pane's "Mapping coverage…". Instead the cards keep their grounded,
+  // stable bits (name, verified dot, file) and the mapping row becomes a skeleton
+  // — the pane is honestly in the loading state until the new ledger lands.
   const testsPaneEl = ledger ? (
     <div className="min-h-0 flex-1 overflow-auto p-4" style={{ scrollbarGutter: 'stable' }} data-testid="tests-pane">
       {ledger.tests.length === 0 && (
         <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>No tests found in this feature&apos;s specs.</div>
       )}
-      {orphanTests.length > 0 && (
+      {generating ? (
+        <div data-testid="tests-remapping-note" style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 10, fontSize: 11, color: 'rgb(56, 189, 248)' }}>
+          <span className="cl-pulse" aria-hidden="true" style={{ width: 6, height: 6, borderRadius: '50%', background: 'rgb(56, 189, 248)' }} />
+          Remapping coverage for these tests…
+        </div>
+      ) : orphanTests.length > 0 ? (
         <div data-testid="orphan-tests-note" style={{ marginBottom: 10, fontSize: 11, color: 'rgb(251, 191, 36)' }}>
           {orphanTests.length} orphan test{orphanTests.length > 1 ? 's' : ''} (no requirement) — regenerate coverage to map them.
         </div>
-      )}
+      ) : null}
       {ledger.tests.map((t) => (
         <TestCard
           key={t.name}
           test={t}
           color={colorByTest.get(t.name)!}
-          active={activeTestNames.has(t.name)}
-          dimmed={Boolean(hovered) && !activeTestNames.has(t.name)}
+          loading={generating}
+          active={!generating && activeTestNames.has(t.name)}
+          dimmed={!generating && Boolean(hovered) && !activeTestNames.has(t.name)}
           onHover={(on) => setHovered(on ? { kind: 'test', key: t.name } : null)}
         />
       ))}
@@ -246,6 +264,7 @@ export function CoverageLedgerPage({ feature, onClose }: Props) {
             drift={state?.summary === 'stale' ? state.drift : null}
             onGenerate={startJob}
             onDocsChanged={refresh}
+            reloadKey={docsReloadKey}
           />
           <div className="flex min-h-0 flex-1 flex-col">
             {actionError && (
@@ -509,11 +528,12 @@ function RequirementCard({ rc, colors, active, dimmed, onHover }: {
 
 // R9: no decorative accent border — the verified dot + covers tags carry the
 // meaning. The test's `@req-*` / `@path-*` tags are surfaced as chips.
-function TestCard({ test, color, active, dimmed, onHover }: {
+function TestCard({ test, color, active, dimmed, loading, onHover }: {
   test: TestCoverage
   color: string
   active: boolean
   dimmed: boolean
+  loading?: boolean
   onHover: (on: boolean) => void
 }) {
   return (
@@ -521,8 +541,8 @@ function TestCard({ test, color, active, dimmed, onHover }: {
       className="clcov-card"
       data-testid={`test-${test.name}`}
       data-active={active ? 'true' : 'false'}
-      onMouseEnter={() => onHover(true)}
-      onMouseLeave={() => onHover(false)}
+      onMouseEnter={loading ? undefined : () => onHover(true)}
+      onMouseLeave={loading ? undefined : () => onHover(false)}
       style={{
         marginBottom: 8,
         padding: '11px 13px',
@@ -544,18 +564,27 @@ function TestCard({ test, color, active, dimmed, onHover }: {
           <span style={{ marginLeft: 'auto', fontFamily: 'var(--font-mono, monospace)', fontSize: 10, color: 'var(--text-muted)' }}>{test.file}{test.line ? `:${test.line}` : ''}</span>
         )}
       </div>
-      <div className="flex flex-wrap items-center gap-1.5" style={{ marginTop: 7 }}>
-        {test.requirements.length === 0 && (
-          <span data-testid={`orphan-${test.name}`} style={{ fontSize: 10, fontWeight: 600, color: 'rgb(251, 191, 36)', background: 'color-mix(in srgb, rgb(251,191,36) 12%, transparent)', border: '1px solid color-mix(in srgb, rgb(251,191,36) 40%, transparent)', borderRadius: 999, padding: '1px 8px' }}>orphan — no covers tag</span>
-        )}
-        {test.requirements.map((id) => (
-          <span key={id} style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: 10, padding: '1px 6px', borderRadius: 5, background: `color-mix(in srgb, ${color} 14%, transparent)`, border: `1px solid color-mix(in srgb, ${color} 55%, transparent)`, color: 'var(--text-primary)' }}>@req-{id}</span>
-        ))}
-        {test.pathTypes.map((p) => (
-          <span key={p} style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: 10, padding: '1px 6px', borderRadius: 5, border: '1px solid var(--border-default)', color: 'var(--text-muted)' }}>@path-{p}</span>
-        ))}
-      </div>
-      {test.verified && test.lastPassingRun && (
+      {loading ? (
+        // The mapping is being recomputed — show skeleton chips, not stale ones.
+        <div data-testid={`test-mapping-loading-${test.name}`} className="flex items-center gap-1.5" style={{ marginTop: 7 }} aria-hidden="true">
+          <span className="clcov-skel" style={{ width: 56, height: 15 }} />
+          <span className="clcov-skel" style={{ width: 42, height: 15 }} />
+          <span className="clcov-skel" style={{ width: 68, height: 15 }} />
+        </div>
+      ) : (
+        <div className="flex flex-wrap items-center gap-1.5" style={{ marginTop: 7 }}>
+          {test.requirements.length === 0 && (
+            <span data-testid={`orphan-${test.name}`} style={{ fontSize: 10, fontWeight: 600, color: 'rgb(251, 191, 36)', background: 'color-mix(in srgb, rgb(251,191,36) 12%, transparent)', border: '1px solid color-mix(in srgb, rgb(251,191,36) 40%, transparent)', borderRadius: 999, padding: '1px 8px' }}>orphan — no covers tag</span>
+          )}
+          {test.requirements.map((id) => (
+            <span key={id} style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: 10, padding: '1px 6px', borderRadius: 5, background: `color-mix(in srgb, ${color} 14%, transparent)`, border: `1px solid color-mix(in srgb, ${color} 55%, transparent)`, color: 'var(--text-primary)' }}>@req-{id}</span>
+          ))}
+          {test.pathTypes.map((p) => (
+            <span key={p} style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: 10, padding: '1px 6px', borderRadius: 5, border: '1px solid var(--border-default)', color: 'var(--text-muted)' }}>@path-{p}</span>
+          ))}
+        </div>
+      )}
+      {!loading && test.verified && test.lastPassingRun && (
         <div style={{ marginTop: 5, fontSize: 10, color: 'var(--text-muted)' }}>
           last pass: run {test.lastPassingRun.runId}{test.lastPassingRun.env ? ` · ${test.lastPassingRun.env}` : ''}
         </div>
@@ -593,4 +622,10 @@ const COVERAGE_CSS = `
 .clcov-verified-label{font-size:9px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--text-muted);margin-top:2px}
 .clcov-orphan-note{margin-top:4px;font-size:10px;color:rgb(251,191,36)}
 .clcov-card:hover{border-color:color-mix(in srgb,var(--text-muted) 38%,var(--border-default))}
+.cl-pulse{animation:clcov-pulse 1.4s ease-in-out infinite}
+@keyframes clcov-pulse{0%,100%{opacity:1}50%{opacity:.4}}
+.clcov-skel{display:inline-block;border-radius:5px;background:color-mix(in srgb,var(--text-muted) 16%,var(--bg-base));position:relative;overflow:hidden}
+.clcov-skel::after{content:'';position:absolute;inset:0;transform:translateX(-100%);background:linear-gradient(90deg,transparent,color-mix(in srgb,var(--text-muted) 22%,transparent),transparent);animation:clcov-skel-sweep 1.3s ease-in-out infinite}
+@keyframes clcov-skel-sweep{100%{transform:translateX(100%)}}
+@media (prefers-reduced-motion:reduce){.cl-pulse{animation:none}.clcov-skel::after{animation:none}}
 `

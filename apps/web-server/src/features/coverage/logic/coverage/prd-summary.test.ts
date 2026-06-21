@@ -314,10 +314,13 @@ describe('deterministicPrdRequirements', () => {
 })
 
 describe('buildPrdSummaryPrompt', () => {
-  it('injects docs + previous requirement ids', () => {
-    const c = collection([{ relPath: 'spec.md', content: '# X\nbody' }])
+  it('lists source doc paths to read (no inlined body) + previous requirement ids', () => {
+    const c = collection([{ relPath: 'spec.md', content: '# X\nUNIQUE_DOC_BODY_TOKEN' }])
     const prompt = buildPrdSummaryPrompt(c, [{ id: 'R1', title: 'X', text: 'b', pathTypes: ['happy'] }])
-    expect(prompt).toContain('spec.md')
+    // Agentic: the prompt lists the resolvable file path so the agent READS it
+    // with its tools — the body is NOT inlined, so it can't shortcut to one-shot.
+    expect(prompt).toContain('/tmp/docs/spec.md')
+    expect(prompt).not.toContain('UNIQUE_DOC_BODY_TOKEN')
     expect(prompt).toContain('"id": "R1"')
   })
 

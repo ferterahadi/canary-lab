@@ -54,19 +54,19 @@ function writeFeature(name: string): string {
   return dir
 }
 
-describe('runCoverageEngine — agent proposal without file (line 273)', () => {
-  it('skips a proposal that has no file field (agent-sourced mapping)', async () => {
-    // Agent proposals (parsed from JSON output) omit `file` because the agent
-    // only knows the test name, not which spec file it came from. The engine
-    // must skip those proposals via `if (!m.file) continue` (line 273).
-    writeFeature('checkout')
+describe('runCoverageEngine — agent proposal file backfill', () => {
+  it('backfills file by test name for an agent proposal so its covers tag applies', async () => {
+    // Agent proposals (parsed from JSON output) omit `file` — the agent reports a
+    // testName, not which spec it lives in. The engine knows each orphan test's
+    // file, so it backfills by name and writes the tag (otherwise the entire
+    // agentic mapping path would be a no-op at tag-writing).
+    const dir = writeFeature('checkout')
     await regeneratePrdSummary({ featuresDir, feature: 'checkout', adapter: 'deterministic', now: '2026-01-01T00:00:00Z' })
 
-    // Return a proposal with no file (agent-sourced shape — file is undefined).
+    // Agent-sourced shape: no `file`, but the testName matches a known orphan.
     vi.mocked(proposeCoverageMappings).mockResolvedValue([
       {
         testName: 'create makes a new todo item',
-        // file intentionally omitted — exercises the !m.file branch
         requirements: ['R1'],
         pathTypes: ['happy'],
         source: 'agent',
@@ -74,10 +74,28 @@ describe('runCoverageEngine — agent proposal without file (line 273)', () => {
     ])
 
     const res = await runCoverageEngine({ featuresDir, logsDir, feature: 'checkout', adapter: 'deterministic' })
-    // The proposal was skipped (no file → cannot write tag) so applied is empty.
+    // Backfilled file → tag written → mapping applied.
+    expect(res.applied.map((m) => m.testName)).toContain('create makes a new todo item')
+    expect(fs.readFileSync(path.join(dir, 'e2e', 'a.spec.ts'), 'utf-8')).toContain('@req-R1')
+  })
+
+  it('skips an agent proposal whose test name is unknown (no file to backfill)', async () => {
+    // testName not among the engine's orphan inputs → nothing to backfill →
+    // `if (!file) continue` (the proposal is dropped, no tag written).
+    writeFeature('checkout')
+    await regeneratePrdSummary({ featuresDir, feature: 'checkout', adapter: 'deterministic', now: '2026-01-01T00:00:00Z' })
+
+    vi.mocked(proposeCoverageMappings).mockResolvedValue([
+      {
+        testName: 'a test that does not exist in this feature',
+        requirements: ['R1'],
+        pathTypes: ['happy'],
+        source: 'agent',
+      },
+    ])
+
+    const res = await runCoverageEngine({ featuresDir, logsDir, feature: 'checkout', adapter: 'deterministic' })
     expect(res.applied).toEqual([])
-    // The test is still an orphan since no tag was written.
-    expect(res.orphanTestsBefore).toContain('create makes a new todo item')
   })
 
   it('skips a proposal whose file does not exist on disk (applyTagToFile early-return)', async () => {

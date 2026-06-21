@@ -37,8 +37,6 @@ export interface BenchmarkRouteDeps {
   listSkills(feature: string): SabotageSkill[]
   /** Stop a running benchmark (kills its sabotage child + arm runs). */
   abortBenchmark(benchmarkId: string): void
-  /** The sabotage agent's captured output (for live visibility during setup). */
-  readSabotageLog(benchmarkId: string): string
   /** The sabotage agent's structured session (parsed native log) for the shared
    *  AgentSessionView timeline. Null when no session is locatable yet. */
   loadAgentSession(benchmarkId: string): { agent: string; sessionId: string; model?: string; effort?: string; events: unknown[] } | null
@@ -110,11 +108,6 @@ export async function benchmarkRoutes(
       }
       return manifest
     },
-  )
-
-  app.get<{ Params: { benchmarkId: string } }>(
-    '/api/benchmarks/:benchmarkId/sabotage-log',
-    async (req) => ({ log: deps.readSabotageLog(req.params.benchmarkId) }),
   )
 
   // Structured sabotage-agent session for the shared AgentSessionView timeline.

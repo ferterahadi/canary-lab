@@ -83,7 +83,11 @@ import {
   deriveRunActionAvailability,
 } from '../../../shared/run-state'
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../src/shared/workspace-events'
-import type { PortifyManifest } from '../src/features/portify/logic/runtime/types'
+import type {
+  PortifyManifest,
+  StartExternalPortifyInput,
+  StartExternalPortifyResult,
+} from '../src/features/portify/logic/runtime/types'
 import { overlayExists as portifyOverlayExists } from '../src/features/portify/logic/runtime/overlay'
 
 // Every Canary Lab MCP tool is a thin wrapper around an existing internal
@@ -185,6 +189,13 @@ export interface CanaryLabMcpDeps {
    *  These reuse the in-process portify runner + store behind routes/portify.ts;
    *  the start/save/cancel calls throw with a `statusCode` the tools surface. */
   startPortify?: (feature: string, agent?: 'claude' | 'codex', maxAttempts?: number) => Promise<{ workflowId: string }>
+  /** External producer: set up the worktree, park at `editing`, and hand the
+   *  external client the edit paths + the task prompt. No local agent is spawned —
+   *  the client (running in the user's own Claude/Codex) edits the worktree in place. */
+  startExternalPortify?: (input: StartExternalPortifyInput) => Promise<StartExternalPortifyResult>
+  /** External producer: verify the client's in-place edits (double-boot) and park
+   *  at ready-to-save (pass) or back at editing (fail). */
+  submitExternalPortify?: (workflowId: string) => Promise<PortifyManifest>
   getPortify?: (workflowId: string) => PortifyManifest | null
   savePortify?: (workflowId: string) => Promise<PortifyManifest>
   cancelPortify?: (workflowId: string) => Promise<PortifyManifest>
@@ -264,6 +275,8 @@ export type CanaryLabMcpToolName =
   | 'signal_run'
   | 'handoff_heal'
   | 'start_portify'
+  | 'start_external_portify'
+  | 'submit_external_portify'
   | 'get_portify'
   | 'save_portify'
   | 'cancel_portify'
@@ -332,6 +345,8 @@ const AUTHOR_TOOLS = [
   'update_external_draft_stage',
   'apply_external_draft',
   'start_portify',
+  'start_external_portify',
+  'submit_external_portify',
   'get_portify',
   'save_portify',
   'cancel_portify',
@@ -1131,6 +1146,55 @@ export function registerCanaryLabTools(
         status: 'planning',
         nextSteps: ['get_portify'],
         next: `Poll get_portify with workflowId "${workflowId}" until status is "ready-to-save", then save_portify (or cancel_portify).`,
+      })
+    } catch (err) {
+      return errorResult(err instanceof Error ? err.message : String(err))
+    }
+  })
+
+  registerTool('start_external_portify', {
+    description: "Start a port-ification workflow that YOU (this external client) drive — no local agent is spawned. Canary Lab sets up an isolated scratch worktree per repo and hands you the edit paths + the task. You edit the listeners to read injected ports IN PLACE in those worktrees (use your file tools), edit the feature config to declare the `ports` slots, then call submit_external_portify to verify (a concurrent double-boot). The verified edits save as an EPHEMERAL OVERLAY (features/<feature>/portify/) — never committed or merged. Async — returns a workflowId + targets; one workflow at a time.",
+    inputSchema: {
+      feature: z.string().describe('Feature name (from list_features).'),
+      session_id: z.string().describe('Stable id for your conversation — reuse it across calls.'),
+      client_kind: clientKindInput,
+      conversation_name: z.string().optional(),
+      external_session_url: z.string().optional(),
+    },
+  }, async ({ feature, session_id, client_kind, conversation_name, external_session_url }) => {
+    if (!deps.startExternalPortify) return errorResult('startExternalPortify dependency is not configured')
+    try {
+      const result = await deps.startExternalPortify({
+        feature,
+        clientKind: client_kind,
+        sessionId: session_id,
+        ...(conversation_name ? { conversationName: conversation_name } : {}),
+        ...(external_session_url ? { sessionUrl: external_session_url } : {}),
+      })
+      return asJsonResult({
+        ...result,
+        status: 'editing',
+        canaryLabBehavior: 'tracking-only',
+        statusMeaning: 'You edit the scratch worktrees in place; Canary Lab is not running a local agent — it verifies + saves.',
+        nextSteps: ['submit_external_portify'],
+        next: `Edit each target's source (in its worktree path) so the listener reads an injected port, declare the matching \`ports\` slots in ${result.configPath}, then call submit_external_portify with workflowId "${result.workflowId}". Poll get_portify; save_portify once status is "ready-to-save".`,
+      })
+    } catch (err) {
+      return errorResult(err instanceof Error ? err.message : String(err))
+    }
+  })
+
+  registerTool('submit_external_portify', {
+    description: 'Submit your in-place edits for an external port-ification workflow: Canary Lab captures the worktree diff and boots the stack twice concurrently on different ports to verify. Async — the workflow goes to verifying, then ready-to-save (passed) or back to editing (failed — read verification.failureDetail, fix the worktree, and submit again). Poll get_portify. Only valid while the workflow is in "editing".',
+    inputSchema: { workflowId: z.string() },
+  }, async ({ workflowId }) => {
+    if (!deps.submitExternalPortify) return errorResult('submitExternalPortify dependency is not configured')
+    try {
+      const manifest = await deps.submitExternalPortify(workflowId)
+      return asJsonResult({
+        ...manifest,
+        nextSteps: ['get_portify'],
+        next: `Poll get_portify with workflowId "${workflowId}": on "ready-to-save" call save_portify; if it returns to "editing", read verification.failureDetail, fix the worktree, and submit_external_portify again. cancel_portify discards the workflow.`,
       })
     } catch (err) {
       return errorResult(err instanceof Error ? err.message : String(err))

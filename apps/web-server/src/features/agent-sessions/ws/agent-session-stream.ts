@@ -9,6 +9,7 @@ import {
   locateMostRecentAgentSessionRef,
   parseAgentSessionRefFile,
   resolveManifestSessionRef,
+  resolveWorkflowAgentRef,
   selectAgentSessionRef,
 } from '../../agent-sessions/logic/agent-session-log'
 import { readEvaluationExportTask } from '../../evaluation/logic/evaluation-export-store'
@@ -119,13 +120,13 @@ export async function agentSessionStreamRoutes(
     { websocket: true },
     (socket, req) => {
       const benchDir = benchmarkDir(deps.logsDir, req.params.benchmarkId)
-      const ref = resolveBenchmarkRef(benchDir)
+      const ref = resolveWorkflowAgentRef(benchDir)
       const handle = tailAgentSession({
         ref: ref ?? { agent: 'claude', sessionId: '', logPath: '' },
         onReady: (readyRef) => sendJson(socket, sessionMessage(readyRef)),
         onEvent: (event) => sendJson(socket, { type: 'event', event }),
         onError: (err) => sendJson(socket, { type: 'error', error: err.message }),
-        discoverRef: () => resolveBenchmarkRef(benchDir),
+        discoverRef: () => resolveWorkflowAgentRef(benchDir),
       })
       socket.on('close', () => handle.close())
     },
@@ -177,32 +178,17 @@ export async function agentSessionStreamRoutes(
     { websocket: true },
     (socket, req) => {
       const dir = portifyDir(deps.logsDir, req.params.workflowId)
-      const ref = resolveBenchmarkRef(dir)
+      const ref = resolveWorkflowAgentRef(dir)
       const handle = tailAgentSession({
         ref: ref ?? { agent: 'claude', sessionId: '', logPath: '' },
         onReady: (readyRef) => sendJson(socket, sessionMessage(readyRef)),
         onEvent: (event) => sendJson(socket, { type: 'event', event }),
         onError: (err) => sendJson(socket, { type: 'error', error: err.message }),
-        discoverRef: () => resolveBenchmarkRef(dir),
+        discoverRef: () => resolveWorkflowAgentRef(dir),
       })
       socket.on('close', () => handle.close())
     },
   )
-}
-
-// Resolve the agent-session ref written into a workflow dir (benchmark or
-// portify) — both use the same `<dir>/agent-session.json` convention.
-function resolveBenchmarkRef(benchDir: string): AgentSessionRef | null {
-  let raw: string | null = null
-  try { raw = fs.readFileSync(path.join(benchDir, 'agent-session.json'), 'utf-8') } catch { return null }
-  const parsed = raw ? parseAgentSessionRefFile(raw) : null
-  const ref = parsed ? selectAgentSessionRef(parsed) : null
-  if (!ref) return null
-  // The cwd-derived logPath can be wrong (Claude's project-dir slug folds more
-  // than `/`). Once the log exists, locate it by session id instead.
-  if (ref.logPath && fs.existsSync(ref.logPath)) return ref
-  const found = ref.agent === 'claude' ? findClaudeLogBySessionId(ref.sessionId) : null
-  return found ? { ...ref, logPath: found } : ref
 }
 
 // Resolve the agent session a coverage/summary job pinned on its manifest.
