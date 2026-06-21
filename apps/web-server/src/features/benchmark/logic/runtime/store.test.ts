@@ -2,16 +2,9 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import {
-  writeBenchmarkManifest,
-  readBenchmarkManifest,
-  updateBenchmarkManifest,
-  readBenchmarksIndex,
-  upsertBenchmarkIndexEntry,
-  BenchmarkRunStore,
-  type BenchmarkStoreEvent,
-} from './store'
-import { benchmarkDir, buildBenchmarkPaths, benchmarksIndexPath } from './paths'
+import { BenchmarkRunStore, type BenchmarkStoreEvent } from './store'
+import { benchmarksIndexPath } from './paths'
+import { atomicWrite } from '../../../../../../../shared/lib/atomic-write'
 import type { BenchmarkManifest } from './types'
 
 let logsDir: string
@@ -36,68 +29,6 @@ function makeManifest(over: Partial<BenchmarkManifest> = {}): BenchmarkManifest 
   }
 }
 
-describe('benchmark store', () => {
-  it('writes and reads back a manifest', () => {
-    const { manifestPath } = buildBenchmarkPaths(benchmarkDir(logsDir, 'b1'))
-    const m = makeManifest()
-    writeBenchmarkManifest(manifestPath, m)
-    expect(readBenchmarkManifest(manifestPath)).toEqual(m)
-  })
-
-  it('returns null reading a missing manifest', () => {
-    expect(readBenchmarkManifest(path.join(logsDir, 'nope.json'))).toBeNull()
-  })
-
-  it('patches an existing manifest', () => {
-    const { manifestPath } = buildBenchmarkPaths(benchmarkDir(logsDir, 'b1'))
-    writeBenchmarkManifest(manifestPath, makeManifest())
-    const next = updateBenchmarkManifest(manifestPath, {
-      status: 'running',
-      sabotageSha: 'a1b2c3d',
-    })
-    expect(next?.status).toBe('running')
-    expect(next?.sabotageSha).toBe('a1b2c3d')
-    expect(readBenchmarkManifest(manifestPath)?.status).toBe('running')
-  })
-
-  it('upserts index entries (insert, then update in place)', () => {
-    upsertBenchmarkIndexEntry(logsDir, {
-      benchmarkId: 'b1',
-      feature: 'f',
-      level: 'med',
-      status: 'running',
-      startedAt: 't',
-    })
-    upsertBenchmarkIndexEntry(logsDir, {
-      benchmarkId: 'b1',
-      feature: 'f',
-      level: 'med',
-      status: 'done',
-      startedAt: 't',
-      endedAt: 't2',
-    })
-    const idx = readBenchmarksIndex(logsDir)
-    expect(idx).toHaveLength(1)
-    expect(idx[0].status).toBe('done')
-    expect(idx[0].endedAt).toBe('t2')
-  })
-
-  it('returns [] for a missing index', () => {
-    expect(readBenchmarksIndex(logsDir)).toEqual([])
-  })
-
-  it('returns null patching a manifest that does not exist', () => {
-    expect(updateBenchmarkManifest(path.join(logsDir, 'nope.json'), { status: 'done' })).toBeNull()
-  })
-
-  it('returns [] when the index file holds non-array JSON', () => {
-    const file = benchmarksIndexPath(logsDir)
-    fs.mkdirSync(path.dirname(file), { recursive: true })
-    fs.writeFileSync(file, JSON.stringify({ not: 'an array' }))
-    expect(readBenchmarksIndex(logsDir)).toEqual([])
-  })
-})
-
 describe('BenchmarkRunStore', () => {
   it('save() persists the manifest + index; get()/list() read it back', () => {
     const store = new BenchmarkRunStore(logsDir)
@@ -106,6 +37,15 @@ describe('BenchmarkRunStore', () => {
     expect(store.get('b1')).toEqual(m)
     expect(store.list().map((e) => e.benchmarkId)).toEqual(['b1'])
     expect(store.list()[0].status).toBe('sabotaging')
+  })
+
+  it('save() upserts the index entry in place (no duplicate rows)', () => {
+    const store = new BenchmarkRunStore(logsDir)
+    store.save(makeManifest({ status: 'running' }))
+    store.save(makeManifest({ status: 'done', endedAt: '2026-06-03T01:00:00.000Z' }))
+    expect(store.list()).toHaveLength(1)
+    expect(store.list()[0].status).toBe('done')
+    expect(store.list()[0].endedAt).toBe('2026-06-03T01:00:00.000Z')
   })
 
   it('get() returns null for an unknown benchmark', () => {
@@ -147,13 +87,10 @@ describe('BenchmarkRunStore', () => {
     const store = new BenchmarkRunStore(logsDir)
     // An index entry left as 'running' but with no manifest on disk (a partially
     // written benchmark). reconcile must skip it, not crash.
-    upsertBenchmarkIndexEntry(logsDir, {
-      benchmarkId: 'orphan',
-      feature: 'f',
-      level: 'med',
-      status: 'running',
-      startedAt: 't',
-    })
+    atomicWrite(
+      benchmarksIndexPath(logsDir),
+      JSON.stringify([{ id: 'orphan', createdAt: 't', benchmarkId: 'orphan', feature: 'f', level: 'med', status: 'running', startedAt: 't' }], null, 2),
+    )
     const events: BenchmarkStoreEvent[] = []
     store.onEvent((e) => events.push(e))
     store.reconcileInterrupted(() => 'now')

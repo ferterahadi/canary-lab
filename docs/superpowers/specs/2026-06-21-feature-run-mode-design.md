@@ -254,6 +254,41 @@ No lifecycle change → no `cl_sync-agent-surfaces` trigger.
 - `cl_ws-driven-state`: draft/eval gain live events — confirm their UIs react
   without refresh after migration.
 
+## Implementation status (2026-06-21)
+
+Implemented and verified (full suite green: 3625 passed, 1 skipped; tsc.build
+clean; web-client tsc clean of all renamed symbols):
+
+- **Layer 1 — shared types.** `shared/run-mode.ts` (`ClientKind`, `RunProducer`,
+  `ExternalSessionMeta`, `isClientKind`) imported by both apps. `atomicWrite`
+  consolidated (5 copies → `shared/lib/atomic-write.ts`). Clean-break renames:
+  `ExternalHealClientKind`/`PortifyClientKind`/inline unions → `ClientKind`;
+  `DraftSource`/`EvaluationExportProducer`/`PortifyProducer` → `RunProducer`;
+  portify producer value `'local'` → `'internal'`; draft field `source` →
+  `producer`. Heal `ExternalHealSession extends ExternalSessionMeta`.
+- **Layer 2 — `FileBackedTaskStore`** (`shared/lib/file-backed-task-store.ts`),
+  TDD'd (9 unit tests). All five stores migrated to delegate to it, public APIs
+  unchanged: portify, coverage-jobs, benchmark (thin class wrappers); draft,
+  evaluation (free-function facades). draft + evaluation gained an `index.json`.
+  Per-store `atomicWrite`/index/CRUD duplication removed.
+
+Deferred to a focused follow-up (deliberate — not abandoned):
+
+- **Layer 3 — `FeatureRunMode` contract + `runInternalProducer`.** The
+  spawn/tee/idle/stream mechanics are already one home (`runAgentProcess`), so a
+  shared internal-producer runner adds low marginal value, while the four
+  internal paths are structurally diverse (benchmark sabotage agent; coverage's
+  two agents; wizard's plan+spec two-stage; portify's verify-double-boot) — they
+  do not fit one runner cleanly. Retrofitting it touches the most critical
+  agent-orchestration code at high regression risk and warrants its own design
+  pass. The `FeatureRunMode` interface (documentation of the produce→submit
+  shape) and any `runInternalProducer` extraction should land as a separate,
+  independently-verified change.
+- **draft/evaluation live WS events.** The migrated free-function facades
+  construct a store per call, so they do not yet emit `changed`/`removed` to a
+  WorkspaceEventBus. Wiring a singleton store + bus (per `cl_ws-driven-state`)
+  is a follow-up; behavior is unchanged from before this work.
+
 ## Open items for the implementation plan
 
 - Final home for the Layer 1 shared module (new `features/shared/run-mode/` vs an

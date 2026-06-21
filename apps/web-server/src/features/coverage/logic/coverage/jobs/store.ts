@@ -1,41 +1,11 @@
-import fs from 'fs'
-import path from 'path'
-import { coverageJobsIndexPath, coverageJobDir, buildCoverageJobPaths } from '../../../../coverage/logic/coverage/jobs/paths'
 import type { CoverageJobManifest, CoverageJobIndexEntry, CoverageJobKind } from './types'
-import { atomicWrite } from '../../../../../../../../shared/lib/atomic-write'
+import { FileBackedTaskStore, type TaskStoreEvent } from '../../../../../../../../shared/lib/file-backed-task-store'
 
-// File-backed, event-emitting store for coverage background jobs. Mirrors
-// PortifyRunStore: `save()` writes the manifest + upserts the index, then emits
-// `changed` (the WS/poll push point). Reads come straight off disk so a restart
-// recovers history; `reconcileInterrupted` flips jobs a dead process abandoned.
-
-function readManifestAt(manifestPath: string): CoverageJobManifest | null {
-  try {
-    return JSON.parse(fs.readFileSync(manifestPath, 'utf-8')) as CoverageJobManifest
-  } catch {
-    return null
-  }
-}
-
-function readIndex(logsDir: string): CoverageJobIndexEntry[] {
-  try {
-    const parsed = JSON.parse(fs.readFileSync(coverageJobsIndexPath(logsDir), 'utf-8'))
-    return Array.isArray(parsed) ? parsed : []
-  } catch {
-    return []
-  }
-}
-
-function indexEntryFromManifest(m: CoverageJobManifest): CoverageJobIndexEntry {
-  return {
-    jobId: m.jobId,
-    feature: m.feature,
-    kind: m.kind,
-    status: m.status,
-    startedAt: m.startedAt,
-    ...(m.endedAt ? { endedAt: m.endedAt } : {}),
-  }
-}
+// File-backed, event-emitting store for coverage background jobs. A thin
+// wrapper over the shared FileBackedTaskStore: it owns the coverage-specific
+// index shape, single-flight lookup, and reconcile policy; the generic store
+// owns the layout (<logs>/coverage-jobs/<id>/job.json + index.json), atomic
+// writes, index upsert, events, and crash recovery.
 
 export interface CoverageJobStoreEvent {
   kind: 'changed' | 'removed'
@@ -54,18 +24,54 @@ export interface CoverageJobStore {
   offEvent(fn: (event: CoverageJobStoreEvent) => void): void
 }
 
+function indexEntryFromManifest(m: CoverageJobManifest) {
+  return {
+    id: m.jobId,
+    createdAt: m.startedAt,
+    jobId: m.jobId,
+    feature: m.feature,
+    kind: m.kind,
+    status: m.status,
+    startedAt: m.startedAt,
+    ...(m.endedAt ? { endedAt: m.endedAt } : {}),
+  }
+}
+
 export class CoverageJobRunStore implements CoverageJobStore {
   private readonly listeners = new Set<(event: CoverageJobStoreEvent) => void>()
+  private readonly store: FileBackedTaskStore<CoverageJobManifest>
 
-  constructor(private readonly logsDir: string) {}
+  constructor(logsDir: string) {
+    this.store = new FileBackedTaskStore<CoverageJobManifest>({
+      logsDir,
+      dirName: 'coverage-jobs',
+      recordFile: 'job.json',
+      idOf: (m) => m.jobId,
+      statusOf: (m) => m.status,
+      indexEntryOf: indexEntryFromManifest,
+      reconcile: {
+        isInterrupted: (m) => m.status === 'running',
+        mark: (m, now) => ({
+          ...m,
+          status: 'aborted',
+          endedAt: m.endedAt ?? now,
+          error: m.error ?? 'Interrupted by server restart',
+        }),
+      },
+    })
+    this.store.onEvent((e: TaskStoreEvent) => this.emit({ kind: e.kind, jobId: e.id }))
+  }
 
   list(): CoverageJobIndexEntry[] {
-    return readIndex(this.logsDir)
+    // Drop the generic store's bookkeeping fields (id/createdAt mirror
+    // jobId/startedAt) so the public index shape stays exactly CoverageJobIndexEntry.
+    return this.store.list().map(({ id: _id, createdAt: _createdAt, ...rest }) =>
+      rest as unknown as CoverageJobIndexEntry,
+    )
   }
 
   get(jobId: string): CoverageJobManifest | null {
-    const { manifestPath } = buildCoverageJobPaths(coverageJobDir(this.logsDir, jobId))
-    return readManifestAt(manifestPath)
+    return this.store.get(jobId)
   }
 
   activeFor(feature: string, kind: CoverageJobKind): CoverageJobIndexEntry | null {
@@ -75,39 +81,18 @@ export class CoverageJobRunStore implements CoverageJobStore {
   }
 
   save(manifest: CoverageJobManifest): void {
-    const { manifestPath } = buildCoverageJobPaths(coverageJobDir(this.logsDir, manifest.jobId))
-    atomicWrite(manifestPath, JSON.stringify(manifest, null, 2) + '\n')
-    const entries = readIndex(this.logsDir)
-    const idx = entries.findIndex((e) => e.jobId === manifest.jobId)
-    const entry = indexEntryFromManifest(manifest)
-    if (idx === -1) entries.push(entry)
-    else entries[idx] = { ...entries[idx], ...entry }
-    atomicWrite(coverageJobsIndexPath(this.logsDir), JSON.stringify(entries, null, 2) + '\n')
-    this.emit({ kind: 'changed', jobId: manifest.jobId })
+    this.store.save(manifest)
   }
 
   remove(jobId: string): void {
-    const entries = readIndex(this.logsDir).filter((e) => e.jobId !== jobId)
-    atomicWrite(coverageJobsIndexPath(this.logsDir), JSON.stringify(entries, null, 2) + '\n')
-    try { fs.rmSync(coverageJobDir(this.logsDir, jobId), { recursive: true, force: true }) } catch { /* best-effort */ }
-    this.emit({ kind: 'removed', jobId })
+    this.store.remove(jobId)
   }
 
   /** Flip any job left `running` by a dead process to `aborted` — its in-memory
    *  driver was killed on restart, so it can never finish. Frees the single-
    *  flight lock so the user can start a fresh job. */
   reconcileInterrupted(now: () => string): void {
-    for (const entry of this.list()) {
-      if (entry.status !== 'running') continue
-      const m = this.get(entry.jobId)
-      if (!m) continue
-      this.save({
-        ...m,
-        status: 'aborted',
-        endedAt: m.endedAt ?? now(),
-        error: m.error ?? 'Interrupted by server restart',
-      })
-    }
+    this.store.reconcileInterrupted(now)
   }
 
   onEvent(fn: (event: CoverageJobStoreEvent) => void): void {

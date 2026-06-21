@@ -7,6 +7,7 @@ import {
 } from '../../../../../../shared/feature-scaffold'
 import type { AgentSessionRef } from '../../agent-sessions/logic/agent-session-log'
 import type { ClientKind, RunProducer } from '../../../../../../shared/run-mode'
+import { FileBackedTaskStore } from '../../../../../../shared/lib/file-backed-task-store'
 
 // Draft storage for the Add Test wizard. Each draft lives at
 // `<logsDir>/drafts/<draftId>/` with a JSON state file plus the raw PRD,
@@ -125,6 +126,29 @@ export function paths(logsDir: string, draftId: string): DraftPaths {
   }
 }
 
+// Record I/O delegates to the shared FileBackedTaskStore. Layout (drafts/<id>/
+// draft.json) matches `paths()` so the per-draft sidecars (prd.md, plan.json,
+// agent logs, generated/) still live alongside the record. The draft-specific
+// state machine + IllegalTransitionError stay below in `transition()`.
+function draftStore(logsDir: string): FileBackedTaskStore<DraftRecord> {
+  return new FileBackedTaskStore<DraftRecord>({
+    logsDir,
+    dirName: 'drafts',
+    recordFile: 'draft.json',
+    idOf: (r) => r.draftId,
+    statusOf: (r) => r.status,
+    indexEntryOf: (r) => ({
+      id: r.draftId,
+      createdAt: r.createdAt,
+      draftId: r.draftId,
+      status: r.status,
+      ...(r.featureName ? { featureName: r.featureName } : {}),
+      updatedAt: r.updatedAt,
+    }),
+    sortNewestFirst: true,
+  })
+}
+
 export interface CreateDraftInput {
   draftId: string
   prdText: string
@@ -168,33 +192,20 @@ export function createDraft(logsDir: string, input: CreateDraftInput): DraftReco
 }
 
 export function readDraft(logsDir: string, draftId: string): DraftRecord | null {
-  const p = paths(logsDir, draftId)
-  if (!fs.existsSync(p.draftJson)) return null
-  const raw = fs.readFileSync(p.draftJson, 'utf8')
-  return JSON.parse(raw) as DraftRecord
+  return draftStore(logsDir).get(draftId)
 }
 
 export function writeDraft(logsDir: string, record: DraftRecord, now?: () => string): void {
-  const p = paths(logsDir, record.draftId)
-  fs.mkdirSync(p.draftDir, { recursive: true })
   const next: DraftRecord = { ...record, updatedAt: (now ?? (() => new Date().toISOString()))() }
-  const tmp = `${p.draftJson}.tmp`
-  fs.writeFileSync(tmp, JSON.stringify(next, null, 2), 'utf8')
-  fs.renameSync(tmp, p.draftJson)
+  draftStore(logsDir).save(next)
 }
 
 export function listDrafts(logsDir: string): DraftRecord[] {
-  const dir = path.join(logsDir, 'drafts')
-  if (!fs.existsSync(dir)) return []
-  const entries = fs.readdirSync(dir, { withFileTypes: true })
-  const out: DraftRecord[] = []
-  for (const e of entries) {
-    if (!e.isDirectory()) continue
-    const rec = readDraft(logsDir, e.name)
-    if (rec) out.push(rec)
-  }
-  out.sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-  return out
+  const store = draftStore(logsDir)
+  return store
+    .list()
+    .map((e) => store.get(String(e.id)))
+    .filter((r): r is DraftRecord => r !== null)
 }
 
 export class IllegalTransitionError extends Error {
@@ -248,7 +259,8 @@ export function transition(
 export function deleteDraft(logsDir: string, draftId: string): boolean {
   const p = paths(logsDir, draftId)
   if (!fs.existsSync(p.draftDir)) return false
-  fs.rmSync(p.draftDir, { recursive: true, force: true })
+  // Drops the draft dir (sidecars included) AND the index entry.
+  draftStore(logsDir).remove(draftId)
   return true
 }
 
