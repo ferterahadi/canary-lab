@@ -393,7 +393,7 @@ describe('runPlanStage', () => {
         repos: [{ name: 'app', localPath: '/p' }],
       },
     })
-    const id = fs.readdirSync(path.join(logsDir, 'drafts'))[0]
+    const id = fs.readdirSync(path.join(logsDir, 'drafts')).filter((n) => n !== 'index.json')[0]
     await new Promise((r) => setTimeout(r, 10))
     const rec = readDraft(logsDir, id)!
     expect(rec.status).toBe('error')
@@ -416,7 +416,7 @@ describe('runPlanStage', () => {
         repos: [{ name: 'app', localPath: '/p' }],
       },
     })
-    const drafts = fs.readdirSync(path.join(logsDir, 'drafts'))
+    const drafts = fs.readdirSync(path.join(logsDir, 'drafts')).filter((n) => n !== 'index.json')
     const id = drafts[0]
     await runPlanStage(deps, id) // explicit second invocation OK; transition guards prevent double-fire
       .catch(() => undefined)
@@ -444,7 +444,7 @@ The test covers the login flow and asserts the dashboard greeting renders.
         repos: [{ name: 'app', localPath: '/p' }],
       },
     })
-    const id = fs.readdirSync(path.join(logsDir, 'drafts'))[0]
+    const id = fs.readdirSync(path.join(logsDir, 'drafts')).filter((n) => n !== 'index.json')[0]
     await new Promise((r) => setTimeout(r, 10))
     const rec = readDraft(logsDir, id)!
     expect(rec.status).toBe('plan-ready')
@@ -470,7 +470,7 @@ The test covers the login flow and asserts the dashboard greeting renders.
         repos: [{ name: 'app', localPath: '/p' }],
       },
     })
-    const id = fs.readdirSync(path.join(logsDir, 'drafts'))[0]
+    const id = fs.readdirSync(path.join(logsDir, 'drafts')).filter((n) => n !== 'index.json')[0]
     await new Promise((r) => setTimeout(r, 10))
     const rec = readDraft(logsDir, id)!
     expect(rec.status).toBe('plan-ready')
@@ -494,7 +494,7 @@ The test covers the login flow and asserts the dashboard greeting renders.
         repos: [{ name: 'app', localPath: '/p' }],
       },
     })
-    const id = fs.readdirSync(path.join(logsDir, 'drafts'))[0]
+    const id = fs.readdirSync(path.join(logsDir, 'drafts')).filter((n) => n !== 'index.json')[0]
     await new Promise((r) => setTimeout(r, 10))
     const rec = readDraft(logsDir, id)!
     expect(rec.status).toBe('plan-ready')
@@ -520,7 +520,7 @@ The test covers the login flow and asserts the dashboard greeting renders.
         repos: [{ name: 'app', localPath: '/p' }],
       },
     })
-    const id = fs.readdirSync(path.join(logsDir, 'drafts'))[0]
+    const id = fs.readdirSync(path.join(logsDir, 'drafts')).filter((n) => n !== 'index.json')[0]
     // Wait for fire-and-forget to settle
     await new Promise((r) => setTimeout(r, 10))
     const rec = readDraft(logsDir, id)!
@@ -542,7 +542,7 @@ The test covers the login flow and asserts the dashboard greeting renders.
         repos: [{ name: 'app', localPath: '/p' }],
       },
     })
-    const id = fs.readdirSync(path.join(logsDir, 'drafts'))[0]
+    const id = fs.readdirSync(path.join(logsDir, 'drafts')).filter((n) => n !== 'index.json')[0]
     await new Promise((r) => setTimeout(r, 10))
     const rec = readDraft(logsDir, id)!
     expect(rec.status).toBe('error')
@@ -1781,7 +1781,7 @@ describe('cancellation races inside pipeline drivers', () => {
     })
     await runPlanStage(deps, await seedPlanningDraft(deps))
     // Re-read: status stays cancelled, no error transition.
-    const id = fs.readdirSync(path.join(logsDir, 'drafts'))[0]
+    const id = fs.readdirSync(path.join(logsDir, 'drafts')).filter((n) => n !== 'index.json')[0]
     expect(readDraft(logsDir, id)!.status).toBe('cancelled')
     expect(readDraft(logsDir, id)!.errorMessage).toBeUndefined()
   })

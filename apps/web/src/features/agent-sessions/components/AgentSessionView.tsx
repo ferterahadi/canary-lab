@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import * as api from '../../../shared/api/client'
 import type { AgentSessionEvent, AgentSessionResponse } from '../../../shared/api/client'
 import { connectAgentSessionStream } from '../api/agent-session-socket'
@@ -345,8 +347,20 @@ function ProseBody({ label, text, timestamp }: { label: string; text: string; ti
   return (
     <>
       <RowHead label={label} timestamp={timestamp} />
-      <div className="agentts-prose">{text}</div>
+      <Markdown text={text} />
     </>
+  )
+}
+
+// Assistant/prompt prose is genuine markdown (headers, GFM tables, status
+// bullets, inline code). Render it as such; tool payloads stay raw <pre>.
+// react-markdown does not emit raw HTML by default, so untrusted-ish agent
+// output can't inject markup.
+export function Markdown({ text }: { text: string }) {
+  return (
+    <div className="agentts-prose agentts-md">
+      <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
+    </div>
   )
 }
 
@@ -357,10 +371,15 @@ const CLAMP_3: React.CSSProperties = {
 function PromptBody({ text, timestamp }: { text: string; timestamp: string }) {
   const [expanded, setExpanded] = useState(false)
   const long = text.length > 260
+  // Collapsed preview stays plain text — `-webkit-line-clamp` only clamps
+  // inline content, so it can't truncate markdown's block children. The
+  // expanded view renders the full markdown.
   return (
     <>
       <RowHead label="Prompt" timestamp={timestamp} />
-      <div className="agentts-prose" style={!expanded && long ? CLAMP_3 : undefined}>{text}</div>
+      {!expanded && long
+        ? <div className="agentts-prose" style={CLAMP_3}>{text}</div>
+        : <Markdown text={text} />}
       {long && (
         <button type="button" className="agentts-morebtn" onClick={() => setExpanded((v) => !v)}>
           {expanded ? 'Show less' : 'Show more'}
@@ -379,7 +398,7 @@ function ThinkingBody({ text, timestamp }: { text: string; timestamp: string }) 
         <span>Thinking</span>
         <Timestamp value={timestamp} />
       </button>
-      {expanded && <div className="agentts-thinkbody">{text}</div>}
+      {expanded && <div className="agentts-thinkbody agentts-md">{text && <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>}</div>}
     </div>
   )
 }
@@ -486,6 +505,29 @@ const TIMELINE_CSS = `
 .agentts-think{margin-top:1px}
 .agentts-thinkbtn{display:inline-flex;align-items:center;gap:6px;background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:10px;text-transform:uppercase;letter-spacing:.07em;font-weight:600;padding:0}
 .agentts-thinkbody{margin-top:6px;color:var(--text-muted);font-size:12px;line-height:1.55;font-style:italic;white-space:pre-wrap;border-left:2px solid var(--border-default);padding-left:11px}
+.agentts-md{white-space:normal}
+.agentts-md>*:first-child{margin-top:0}
+.agentts-md>*:last-child{margin-bottom:0}
+.agentts-md p{margin:0 0 8px}
+.agentts-md h1,.agentts-md h2,.agentts-md h3,.agentts-md h4,.agentts-md h5,.agentts-md h6{margin:14px 0 6px;font-weight:650;line-height:1.3;color:var(--text-primary)}
+.agentts-md h1{font-size:15px}
+.agentts-md h2{font-size:14px}
+.agentts-md h3{font-size:13px}
+.agentts-md h4,.agentts-md h5,.agentts-md h6{font-size:12.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--text-secondary)}
+.agentts-md ul,.agentts-md ol{margin:0 0 8px;padding-left:20px}
+.agentts-md li{margin:2px 0}
+.agentts-md li>ul,.agentts-md li>ol{margin:2px 0}
+.agentts-md a{color:var(--accent);text-decoration:none}
+.agentts-md a:hover{text-decoration:underline}
+.agentts-md code{font-family:var(--font-mono);font-size:.88em;background:color-mix(in srgb,var(--bg-elevated) 70%,transparent);border:1px solid var(--border-default);border-radius:var(--radius-sm,4px);padding:1px 4px}
+.agentts-md pre{margin:0 0 8px;border:1px solid var(--border-default);border-radius:var(--radius-md);background:var(--bg-base);padding:9px 12px;overflow:auto;max-height:300px}
+.agentts-md pre code{background:none;border:none;padding:0;font-size:11px;line-height:1.55}
+.agentts-md blockquote{margin:0 0 8px;border-left:2px solid var(--border-default);padding-left:11px;color:var(--text-secondary)}
+.agentts-md hr{border:none;border-top:1px solid var(--border-default);margin:12px 0}
+.agentts-md table{border-collapse:collapse;margin:0 0 8px;font-size:12px;display:block;overflow-x:auto;max-width:100%}
+.agentts-md th,.agentts-md td{border:1px solid var(--border-default);padding:5px 9px;text-align:left;vertical-align:top}
+.agentts-md th{background:color-mix(in srgb,var(--bg-elevated) 60%,transparent);font-weight:600;color:var(--text-primary)}
+.agentts-md img{max-width:100%}
 @keyframes agentts-in{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
 @media (prefers-reduced-motion:reduce){.agentts-row{animation:none}}
 `

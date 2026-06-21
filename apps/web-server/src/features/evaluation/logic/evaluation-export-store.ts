@@ -2,6 +2,7 @@ import fs from 'fs'
 import path from 'path'
 import { createZip } from '../../../shared/simple-zip'
 import { isClientKind, type ClientKind, type RunProducer } from '../../../../../../shared/run-mode'
+import { FileBackedTaskStore } from '../../../../../../shared/lib/file-backed-task-store'
 
 export type EvaluationExportMode = 'raw' | 'localized'
 export type EvaluationExportStatus = 'running' | 'completed' | 'failed'
@@ -78,6 +79,31 @@ export function evaluationExportTaskPaths(logsDir: string, taskId: string): Eval
   }
 }
 
+// Record I/O delegates to the shared FileBackedTaskStore. Layout
+// (evaluation-exports/<taskId>/task.json) matches `evaluationExportTaskPaths` so
+// the per-task sidecars (export.log, export.zip) still live alongside the record.
+// The isSafeTaskId guard stays at the free-function boundary so an unsafe id
+// never reaches the store's path join.
+function evalStore(logsDir: string): FileBackedTaskStore<EvaluationExportTaskRecord> {
+  return new FileBackedTaskStore<EvaluationExportTaskRecord>({
+    logsDir,
+    dirName: 'evaluation-exports',
+    recordFile: 'task.json',
+    idOf: (r) => r.taskId,
+    statusOf: (r) => r.status,
+    validate: (raw) => normalizeTaskRecord(raw as EvaluationExportTaskRecord),
+    indexEntryOf: (r) => ({
+      id: r.taskId,
+      createdAt: r.createdAt,
+      taskId: r.taskId,
+      runId: r.runId,
+      feature: r.feature,
+      status: r.status,
+    }),
+    sortNewestFirst: true,
+  })
+}
+
 export function createEvaluationExportTask(
   logsDir: string,
   record: EvaluationExportTaskRecord,
@@ -88,23 +114,13 @@ export function createEvaluationExportTask(
 }
 
 export function readEvaluationExportTask(logsDir: string, taskId: string): EvaluationExportTaskRecord | null {
-  const p = evaluationExportTaskPaths(logsDir, taskId)
-  if (!p || !fs.existsSync(p.taskJson)) return null
-  try {
-    const parsed = JSON.parse(fs.readFileSync(p.taskJson, 'utf8')) as EvaluationExportTaskRecord
-    return normalizeTaskRecord(parsed)
-  } catch {
-    return null
-  }
+  if (!isSafeTaskId(taskId)) return null
+  return evalStore(logsDir).get(taskId)
 }
 
 export function writeEvaluationExportTask(logsDir: string, record: EvaluationExportTaskRecord): void {
-  const p = evaluationExportTaskPaths(logsDir, record.taskId)
-  if (!p) throw new Error(`Invalid evaluation export task id: ${record.taskId}`)
-  fs.mkdirSync(p.taskDir, { recursive: true })
-  const tmp = `${p.taskJson}.tmp`
-  fs.writeFileSync(tmp, `${JSON.stringify(record, null, 2)}\n`, 'utf8')
-  fs.renameSync(tmp, p.taskJson)
+  if (!isSafeTaskId(record.taskId)) throw new Error(`Invalid evaluation export task id: ${record.taskId}`)
+  evalStore(logsDir).save(record)
 }
 
 export function patchEvaluationExportTask(
@@ -127,17 +143,12 @@ export function listEvaluationExportTasks(
   logsDir: string,
   opts: { runId?: string } = {},
 ): EvaluationExportTaskRecord[] {
-  const root = evaluationExportsDir(logsDir)
-  if (!fs.existsSync(root)) return []
-  const out: EvaluationExportTaskRecord[] = []
-  for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
-    if (!entry.isDirectory()) continue
-    const task = readEvaluationExportTask(logsDir, entry.name)
-    if (!task) continue
-    if (opts.runId && task.runId !== opts.runId) continue
-    out.push(task)
-  }
-  return out.sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+  const store = evalStore(logsDir)
+  return store
+    .list()
+    .map((e) => store.get(String(e.id)))
+    .filter((task): task is EvaluationExportTaskRecord => task !== null)
+    .filter((task) => !opts.runId || task.runId === opts.runId)
 }
 
 export function appendEvaluationExportLog(logsDir: string, taskId: string, chunk: string): void {
@@ -181,7 +192,8 @@ export function readEvaluationExportZip(logsDir: string, taskId: string): Buffer
 export function deleteEvaluationExportTask(logsDir: string, taskId: string): boolean {
   const p = evaluationExportTaskPaths(logsDir, taskId)
   if (!p || !fs.existsSync(p.taskDir)) return false
-  fs.rmSync(p.taskDir, { recursive: true, force: true })
+  // Drops the task dir (export.log/export.zip included) AND the index entry.
+  evalStore(logsDir).remove(taskId)
   return true
 }
 
