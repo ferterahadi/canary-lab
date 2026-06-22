@@ -113,36 +113,36 @@ export interface CoverageStateView {
 // --- Computed coverage ledger (the output of the breadth + depth computation,
 // consumed by both the REST/UI surface and the MCP tool). ---
 
+// Semantic coverage is decoupled from test RUNS (R: 1.4.0): it asks "does a test
+// exist that claims to exercise this requirement's paths?", never "did a run pass?".
 export type GapType =
-  | 'verified'
-  | 'untested'
-  | 'unverified'
+  | 'covered'
   | 'path-incomplete'
-  | 'shallow-verified'
+  | 'untested'
 
 /**
- * Coarse tri-state the coverage engine compiles per requirement — the headline
- * the agent and the ledger pane group on, derived from the finer `GapType`:
- *   • covered   — verified (a passing run behind every implied path)
- *   • uncovered — untested (no test linked at all)
- *   • partial   — anything in between (unverified / path-incomplete /
- *                 shallow-verified)
+ * Coarse tri-state per requirement — derived from the finer `GapType`:
+ *   • covered   — every declared path is claimed by a mapped test
+ *   • uncovered — untested (no test mapped at all)
+ *   • partial   — path-incomplete (some declared paths unclaimed)
  */
 export type CoverageStatus = 'covered' | 'partial' | 'uncovered'
 
-/** The most-recent run in which a test actually passed — the evidence pointer. */
-export interface LastPassingRun {
-  testName: string
-  runId: string
-  env?: string
-  /** When the run ended (or started, as a fallback). */
-  at?: string
-}
-
 export interface PathCoverage {
   path: PathType
-  verified: boolean
+  /** A mapped test claims (declares) this path. */
+  covered: boolean
 }
+
+/**
+ * How strong a test's coverage is — graded off the strongest stack layer its
+ * assertions actually touch (the tier classifier). Independent of test runs:
+ *   • strong (tier 4) — a real external destination / browser confirms the effect
+ *   • solid  (tier 3) — an app/internal API or UI assertion reports success
+ *   • basic  (tier 2) — internal state changed (DB row / fixture)
+ *   • shallow(tier 1) — only the app's own log / self-report (or no classifiable tier)
+ */
+export type TestStrength = 'strong' | 'solid' | 'basic' | 'shallow'
 
 export interface TestCoverage {
   name: string
@@ -150,47 +150,25 @@ export interface TestCoverage {
   line?: number
   requirements: string[]
   pathTypes: PathType[]
-  /** Has a passing run behind it. */
-  verified: boolean
-  lastPassingRun?: LastPassingRun
-}
-
-/** Grounded depth signal for one requirement (the "test fairness" report). */
-export interface RequirementRigor {
-  /** Highest assertion tier reached by a VERIFIED covering test. */
-  tierReached?: StrictnessTier
-  /** Highest tier the requirement's agent-proposed ladder allows. */
-  tierAvailable?: StrictnessTier
-  /** tierReached ÷ tierAvailable, 0–1, when both known. */
-  strictness?: number
-  /** The lowest-tier assertion among verified tests — the weak link. */
-  weakestAssertion?: string
-  /** What a top-of-ladder check looks like (rung at tierAvailable). */
-  suggestedStrongerCheck?: string
+  /** Static coverage strength, graded from the test's own assertions (strength.ts). */
+  strength?: TestStrength
 }
 
 export interface RequirementCoverage {
   requirement: Requirement
   annotatedTestNames: string[]
-  verifiedTestNames: string[]
-  lastPassingRun?: LastPassingRun
   pathCoverage: PathCoverage[]
   gapType: GapType
-  /** Coarse covered/partial/uncovered roll-up of `gapType` (engine headline). */
+  /** Coarse covered/partial/uncovered roll-up of `gapType`. */
   coverageStatus: CoverageStatus
-  /** Present once the rigor layer has run over a verified requirement. */
-  rigor?: RequirementRigor
 }
 
 export interface CoverageTotals {
   total: number
-  verified: number
-  untested: number
-  unverified: number
+  covered: number
   pathIncomplete: number
-  shallowVerified: number
-  /** Tests carrying no requirement linkage (covered/partial/uncovered ignore
-   *  these — they're candidates for the annotate-pass). */
+  untested: number
+  /** Tests carrying no requirement linkage — candidates for the annotate-pass. */
   orphanTests: number
 }
 
@@ -215,8 +193,8 @@ export interface CoverageLedger {
   requirements: RequirementCoverage[]
   tests: TestCoverage[]
   totals: CoverageTotals
-  /** verified ÷ total active requirements, 0–100, one decimal. Depth/quality:
-   *  the share with a *passing run* behind every path. */
+  /** covered ÷ total active requirements, 0–100, one decimal. A requirement is
+   *  covered when every declared path is claimed by a mapped test. */
   coveragePct: number
   /** Breadth: requirements with ≥1 annotated test ÷ total active, 0–100, one
    *  decimal. "How many requirements have a corresponding test case" — answers

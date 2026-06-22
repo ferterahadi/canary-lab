@@ -109,7 +109,6 @@ describe('runUi signal cleanup', () => {
       exit,
       recordActiveServer: () => {},
       clearActiveServer,
-      countActiveRuns: () => 1,
       confirmShutdown: async () => {
         events.push('confirm')
         return true
@@ -129,9 +128,9 @@ describe('runUi signal cleanup', () => {
     expect(exit).toHaveBeenCalledExactlyOnceWith(130)
     expect(events).toEqual([
       'confirm',
+      'revert',
       'cancel-wizard',
       'abort-all',
-      'revert',
       'close',
       'exit-130',
     ])
@@ -166,7 +165,6 @@ describe('runUi signal cleanup', () => {
       exit,
       recordActiveServer: () => {},
       clearActiveServer: () => {},
-      countActiveRuns: () => 1,
       confirmShutdown: async () => false,
     })
 
@@ -181,21 +179,21 @@ describe('runUi signal cleanup', () => {
     expect(messages).toContain('Shutdown cancelled. Canary Lab is still running.')
   })
 
-  it('exits immediately on SIGINT without prompting when no runs are active', async () => {
-    const runStore = {
-      abortAllActiveOrStale: vi.fn(async () => {}),
-    }
+  it('forces exit when graceful shutdown stalls past the timeout', async () => {
+    const messages: string[] = []
+    // app.close() never resolves — simulates a socket that won't drain.
+    const runStore = { abortAllActiveOrStale: vi.fn(async () => {}) }
     const app = {
       listen: vi.fn(async () => {}),
-      close: vi.fn(async () => {}),
+      close: vi.fn(() => new Promise<void>(() => { /* never resolves */ })),
     }
-    const confirmShutdown = vi.fn(async () => true)
+    const revertAllEnvsets = vi.fn()
     const exit = vi.fn()
 
     mocks.createServer.mockResolvedValue({
       app,
       registry: {},
-      revertAllEnvsets: vi.fn(),
+      revertAllEnvsets,
       cancelAllWizardAgents: vi.fn(),
       runStore,
       brokers: new Map(),
@@ -204,20 +202,22 @@ describe('runUi signal cleanup', () => {
 
     await runUi(['--no-open'], {
       projectRoot: wsRoot,
-      log: () => {},
+      log: (msg) => { messages.push(msg) },
       exit,
       recordActiveServer: () => {},
       clearActiveServer: () => {},
-      countActiveRuns: () => 0,
-      confirmShutdown,
+      confirmShutdown: async () => true,
+      shutdownTimeoutMs: 20,
     })
 
     process.emit('SIGINT')
-    await new Promise((resolve) => setTimeout(resolve, 0))
+    await new Promise((resolve) => setTimeout(resolve, 80))
 
-    expect(confirmShutdown).not.toHaveBeenCalled()
-    expect(app.close).toHaveBeenCalledOnce()
-    expect(exit).toHaveBeenCalledExactlyOnceWith(130)
+    // The safety-critical envset revert still ran before the stall, and the
+    // watchdog forced the process out despite app.close() hanging.
+    expect(revertAllEnvsets).toHaveBeenCalledOnce()
+    expect(exit).toHaveBeenCalledWith(130)
+    expect(messages).toContain('Shutdown is taking longer than expected; forcing exit.')
   })
 })
 

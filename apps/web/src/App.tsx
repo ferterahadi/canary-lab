@@ -27,28 +27,62 @@ const PERSISTED_VIEW = readPersistedView()
 export function App() {
   const [features, setFeatures] = useState<Feature[]>([])
   const [selectedFeature, setSelectedFeature] = useState<string | null>(PERSISTED_VIEW.feature)
-  const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
-  const [configFor, setConfigFor] = useState<string | null>(null)
+  // R24: hydrate the selected run from the URL so a deep-linked / refreshed run
+  // reopens. The run loads async over the WS, so we also seed the pending ref
+  // below to stop the stale-run guard from clearing it before runs arrive.
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(PERSISTED_VIEW.run)
+  const [configFor, setConfigFor] = useState<string | null>(
+    PERSISTED_VIEW.dialog === 'config' ? PERSISTED_VIEW.feature : null,
+  )
   const [testsRefreshKey, setTestsRefreshKey] = useState(0)
   const [coverageRefreshKey, setCoverageRefreshKey] = useState(0)
   const [specTotalTests, setSpecTotalTests] = useState(0)
   const [collisionPrompt, setCollisionPrompt] = useState<{ feature: string; env?: string; mode?: 'test' | 'boot'; info: RepoCollisionChoice; portsConfigured?: boolean } | null>(null)
   // Port-ification wizard target: 'new' starts a fresh workflow for a feature;
   // 'revisit' reopens an in-flight workflow (from the status bar) by id.
+  // R24: hydrate from the URL — `wf` present = revisit, absent = start-new.
   const [portifyTarget, setPortifyTarget] = useState<
     { kind: 'new'; feature: string } | { kind: 'revisit'; workflowId: string } | null
-  >(null)
+  >(() => {
+    if (PERSISTED_VIEW.dialog !== 'portify') return null
+    if (PERSISTED_VIEW.wf) return { kind: 'revisit', workflowId: PERSISTED_VIEW.wf }
+    if (PERSISTED_VIEW.feature) return { kind: 'new', feature: PERSISTED_VIEW.feature }
+    return null
+  })
+  // R24: the Verify-config dialog (in the runs column) is route-driven too.
+  const [verifyOpen, setVerifyOpen] = useState(PERSISTED_VIEW.dialog === 'verification')
   // Top-level view: the normal workspace, or a full-screen page (cleanup /
   // coverage). Hydrated from the URL/localStorage (R12) so it survives refresh.
   const [view, setView] = useState<'workspace' | 'cleanup' | 'coverage'>(PERSISTED_VIEW.view)
-  const pendingRunSelectionRef = useRef<string | null>(null)
+  const pendingRunSelectionRef = useRef<string | null>(PERSISTED_VIEW.run)
   const selectedFeatureRef = useRef<string | null>(null)
 
-  // R12: persist the open view + feature (URL + localStorage) on every change so
-  // a refresh restores it; and mirror changes from other tabs so all tabs agree.
+  // Runs come from the WebSocket-backed RunsProvider — no polling here.
+  // `runs` is the full index across all features; the per-feature filter
+  // happens at render time. Declared here (above the persist effect) because the
+  // route serialization below reads `wizardOpen`.
+  const { runs: allRuns, startRun: startRunAction, startVerification: startVerificationAction } = useRuns()
+  const { entry: globalActiveRunEntry, detail: activeRunDetail } = useGlobalActiveRun()
+  const { wizardOpen, closeWizard, startNewWizard } = useWizardDrafts()
+
+  // R12/R24: persist the full route (view + feature + selected run + open routed
+  // dialog) to the URL on every change so a refresh / deep link restores it. The
+  // durable tier (view + feature) also mirrors to localStorage for cross-tab sync.
+  // Dialog precedence follows z-order: the full-screen overlays (portify > config
+  // > wizard) sit above the in-column verify dialog, so the topmost open one owns
+  // the URL.
+  const routedDialog = portifyTarget ? 'portify' : configFor ? 'config' : wizardOpen ? 'add-test' : verifyOpen ? 'verification' : null
+  const routedWf = portifyTarget?.kind === 'revisit' ? portifyTarget.workflowId : null
   useEffect(() => {
-    persistView({ view, feature: selectedFeature })
-  }, [view, selectedFeature])
+    persistView({ view, feature: selectedFeature, run: selectedRunId, dialog: routedDialog, wf: routedWf })
+  }, [view, selectedFeature, selectedRunId, routedDialog, routedWf])
+
+  // R24: the Add-Test wizard's open-state lives in WizardDraftContext, not in
+  // PERSISTED_VIEW-seeded local state — so reopen it from the URL on first load.
+  useEffect(() => {
+    if (PERSISTED_VIEW.dialog === 'add-test') startNewWizard()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   useEffect(() => onViewChangedInOtherTab((s) => {
     setView(s.view)
@@ -66,13 +100,6 @@ export function App() {
     return () => { cancelled = true }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
-
-  // Runs come from the WebSocket-backed RunsProvider — no polling here.
-  // `runs` is the full index across all features; the per-feature filter
-  // happens at render time.
-  const { runs: allRuns, startRun: startRunAction, startVerification: startVerificationAction } = useRuns()
-  const { entry: globalActiveRunEntry, detail: activeRunDetail } = useGlobalActiveRun()
-  const { wizardOpen, closeWizard } = useWizardDrafts()
 
   // Column 3 lists runs scoped to the currently-selected feature. Boot-only
   // sessions are excluded — they're not test runs and live in the global
@@ -288,6 +315,8 @@ export function App() {
               onStartRun={handleStartRun}
               onStartVerification={handleStartVerification}
               runDisabled={false}
+              verifyOpen={verifyOpen}
+              onVerifyOpenChange={setVerifyOpen}
             />
           )}
           bottom={<RunDetailColumn runId={selectedRunId} onOpenPlaywrightSettings={setConfigFor} totalTests={specTotalTests} />}

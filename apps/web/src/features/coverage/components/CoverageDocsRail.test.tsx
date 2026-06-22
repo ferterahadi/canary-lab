@@ -216,10 +216,16 @@ describe('CoverageDocsRail', () => {
     expect(api.openEditor).toHaveBeenCalledWith({ file: '/repo/features/checkout/docs/prd.md' })
   })
 
-  it('before a summary exists, generating=true disables the editable add + remove', async () => {
+  it('before a summary exists, generating=true HIDES the editable add + remove (not just disables)', async () => {
     await mount({ open: true, summaryAbsent: true, generating: true })
-    expect(container.querySelector<HTMLButtonElement>('[data-testid="add-another-doc"]')?.disabled).toBe(true)
-    expect(container.querySelector<HTMLButtonElement>('[data-testid="remove-doc-prd.md"]')?.disabled).toBe(true)
+    expect(container.querySelector('[data-testid="add-another-doc"]')).toBeNull()
+    expect(container.querySelector('[data-testid="remove-doc-prd.md"]')).toBeNull()
+  })
+
+  it('summary-absent + idle still shows the editable add + remove', async () => {
+    await mount({ open: true, summaryAbsent: true, generating: false })
+    expect(container.querySelector('[data-testid="add-another-doc"]')).toBeTruthy()
+    expect(container.querySelector('[data-testid="remove-doc-prd.md"]')).toBeTruthy()
   })
 
   it('removing a source doc (before a summary exists) calls deleteFeatureDoc + onDocsChanged', async () => {

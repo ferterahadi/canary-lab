@@ -7,8 +7,24 @@ expected to do** — its requirements — NOT the problem it solves.
 A flat, enumerated list of **requirements**. Two kinds:
 - `functional` — something the feature must DO or SUPPORT (a behavior, an action,
   a rule). The bulk of the list.
-- `non-functional` — a quality constraint: security, performance, auditability,
-  data handling, limits, compatibility.
+- `non-functional` — a quality constraint **explicitly stated in the documents**:
+  security, performance, auditability, data handling, limits, compatibility.
+
+## Grounding — extract, do NOT invent
+
+Every requirement must be **stated or directly implied by the source documents**.
+- **Do not invent requirements.** If the docs don't discuss it, it is not a
+  requirement — no matter how standard or sensible it seems.
+- This applies especially to **non-functional** requirements: do NOT add generic
+  boilerplate ("it should be performant", "it should be secure", "it should be
+  accessible", "it should log errors") unless the documents actually call for it.
+  If the documents describe no non-functional constraints, emit **zero**
+  non-functional requirements — an all-functional list is correct and expected.
+- The two `kind` buckets are a *classification* of what you found, NOT a quota to
+  fill. Never manufacture a requirement to populate a section.
+- If a detail is ambiguous, prefer fewer, well-grounded requirements over more,
+  speculative ones. Coverage is measured against this list, so an invented
+  requirement becomes a permanent phantom gap.
 
 Hard rules on framing:
 - **Do NOT write a problem statement, background, or narrative preamble.** No
@@ -61,9 +77,10 @@ PREVIOUS requirements (with ids) when regenerating.
 
 Work as an agent, not a one-shot. The source documents are **not** inlined here —
 only their file paths are listed below. Use your tools to **read each file** (and
-any specs, configs, or code they reference) before extracting requirements. Ground
-every requirement in what you actually read. This is read-only analysis: do not
-edit any file.
+any specs, configs, or code they reference) before extracting requirements. Every
+requirement you emit must trace back to something you actually read (see
+"Grounding" above) — if you can't point to where a document says it, leave it out.
+This is read-only analysis: do not edit any file.
 
 ## Source documents to read
 

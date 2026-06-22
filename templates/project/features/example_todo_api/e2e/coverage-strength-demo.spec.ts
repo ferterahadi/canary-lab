@@ -1,22 +1,21 @@
 import { test, expect } from 'canary-lab/feature-support/log-marker-fixture'
 
-// Demonstrates the Verified Coverage rigor (strictness) dimension. These tests
-// make their checks directly in the body (not via the helper) so the assertion-
-// tier classifier can read which stack layer they touch:
-//   • hitting the app's own API and asserting on its response = tier 3
-//     ("the system reports success") — the honest ceiling for an API-only test.
-//   • the PRD says deletion should ultimately be confirmed from the user-facing
-//     surface (a browser) = tier 4 — which these tests do NOT reach.
-// So after a passing run requirement R3 shows up as "shallow-verified": real
-// passing evidence, but a stronger check (a browser confirming the list UI)
-// exists and is unused.
+// Demonstrates per-test coverage STRENGTH (the depth dimension). These tests make
+// their checks directly in the body (not via a helper) so the assertion-tier
+// classifier can read which stack layer they touch:
+//   • hitting the app's own API and asserting on its response = tier 3 → the test
+//     grades as "Solid" (the system reports success).
+//   • a check that only read a log would be tier 1 → "Shallow"; a real external
+//     destination would be tier 4 → "Strong". This local API has none, so Solid
+//     is the honest ceiling here.
+// Strength is independent of test runs — it grades what the test WOULD prove.
 
 const baseUrl = process.env.CANARY_PORT_api
   ? `http://localhost:${process.env.CANARY_PORT_api}`
   : (process.env.GATEWAY_URL ?? 'http://localhost:4000')
 
-test.describe('example_todo_api coverage rigor demo', () => {
-  test('create is confirmed by an independent read (tier 3)', { tag: ['@req-R1', '@path-happy'] }, async () => {
+test.describe('example_todo_api coverage strength demo', () => {
+  test('create is confirmed by an independent read (tier 3 → Solid)', { tag: ['@req-R1', '@path-happy'] }, async () => {
     await fetch(`${baseUrl}/todos`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -27,7 +26,7 @@ test.describe('example_todo_api coverage rigor demo', () => {
     expect(todos.some((t) => t.title === 'Rigor demo item')).toBe(true)
   })
 
-  test('delete is confirmed via the app API (tier 3, not the UI)', { tag: ['@req-R3', '@path-happy'] }, async () => {
+  test('delete is confirmed via the app API (tier 3 → Solid, not a browser)', { tag: ['@req-R3', '@path-happy'] }, async () => {
     const created = await fetch(`${baseUrl}/todos`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

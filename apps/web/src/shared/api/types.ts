@@ -455,18 +455,17 @@ export type {
   CoverageTotals,
   DriftDetail,
   GapType,
-  LastPassingRun,
   PathCoverage,
   PathType,
   PrdSummary,
   ProposedMapping,
   Requirement,
   RequirementCoverage,
-  RequirementRigor,
   StrictnessTier,
   SummaryState,
   CoverageState,
   TestCoverage,
+  TestStrength,
 } from '../../../../../shared/coverage/types'
 
 export interface FeatureDoc {

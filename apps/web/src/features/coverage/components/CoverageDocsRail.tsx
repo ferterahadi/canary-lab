@@ -140,6 +140,10 @@ export function CoverageDocsRail(props: Props): JSX.Element {
   // exercise. (Opening a doc in the editor stays available — it's read-only.)
   const docsFrozen = !summaryAbsent
   const docsLocked = locked || docsFrozen
+  // Hide (not just disable) the remove ✕ + "Add docs" affordances whenever the
+  // docs are frozen (a summary exists) OR a job is running — during generation
+  // the agent is reading the current docs, so mutating them is never valid.
+  const docsReadOnly = docsFrozen || generating
 
   const onDrop = useCallback((e: DragEvent) => {
     e.preventDefault()
@@ -296,11 +300,11 @@ export function CoverageDocsRail(props: Props): JSX.Element {
                   sizeBytes={d.sizeBytes}
                   busy={locked}
                   onOpen={() => openDoc(d.absPath)}
-                  onRemove={docsFrozen ? undefined : () => removeDoc(d.relPath)}
+                  onRemove={docsReadOnly ? undefined : () => removeDoc(d.relPath)}
                   removeTitle="Remove source doc"
                 />
               ))}
-              {!docsFrozen && (
+              {!docsReadOnly && (
                 <button
                   type="button"
                   data-testid="add-another-doc"

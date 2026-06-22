@@ -28,37 +28,31 @@ const LEDGER: CoverageLedger = {
     {
       requirement: { id: 'R1', title: 'Add to cart', text: 'user can add an item', pathTypes: ['happy', 'sad'] },
       annotatedTestNames: ['adds item'],
-      verifiedTestNames: ['adds item'],
-      pathCoverage: [{ path: 'happy', verified: true }, { path: 'sad', verified: false }],
+      pathCoverage: [{ path: 'happy', covered: true }, { path: 'sad', covered: false }],
       gapType: 'path-incomplete',
       coverageStatus: 'partial',
-      lastPassingRun: { testName: 'adds item', runId: 'r1', env: 'local', at: '2026-01-01' },
     },
     {
-      requirement: { id: 'R2', title: 'Send receipt', text: 'send a receipt email', pathTypes: ['happy'], strictnessLadder: [{ tier: 1, description: 'log' }, { tier: 4, description: 'browser at mailbox' }] },
+      requirement: { id: 'R2', title: 'Send receipt', text: 'send a receipt email', pathTypes: ['happy'] },
       annotatedTestNames: ['sends receipt'],
-      verifiedTestNames: ['sends receipt'],
-      pathCoverage: [{ path: 'happy', verified: true }],
-      gapType: 'shallow-verified',
-      coverageStatus: 'partial',
-      lastPassingRun: { testName: 'sends receipt', runId: 'r2', at: '2026-01-02' },
-      rigor: { tierReached: 1, tierAvailable: 4, strictness: 0.25, weakestAssertion: "fs.readFileSync('app.log')", suggestedStrongerCheck: 'browser at mailbox' },
+      pathCoverage: [{ path: 'happy', covered: true }],
+      gapType: 'covered',
+      coverageStatus: 'covered',
     },
     {
       requirement: { id: 'R3', title: 'Apply coupon', text: 'coupon reduces total', pathTypes: ['happy'] },
       annotatedTestNames: [],
-      verifiedTestNames: [],
-      pathCoverage: [{ path: 'happy', verified: false }],
+      pathCoverage: [{ path: 'happy', covered: false }],
       gapType: 'untested',
       coverageStatus: 'uncovered',
     },
   ],
   tests: [
-    { name: 'adds item', requirements: ['R1'], pathTypes: ['happy'], verified: true, lastPassingRun: { testName: 'adds item', runId: 'r1', at: '2026-01-01' }, file: 'e2e/cart.spec.ts', line: 10 },
-    { name: 'sends receipt', requirements: ['R2'], pathTypes: ['happy'], verified: true, file: 'e2e/receipt.spec.ts', line: 5 },
+    { name: 'adds item', requirements: ['R1'], pathTypes: ['happy'], strength: 'solid', file: 'e2e/cart.spec.ts', line: 10 },
+    { name: 'sends receipt', requirements: ['R2'], pathTypes: ['happy'], strength: 'shallow', file: 'e2e/receipt.spec.ts', line: 5 },
   ],
-  totals: { total: 3, verified: 2, untested: 1, unverified: 0, pathIncomplete: 1, shallowVerified: 1, orphanTests: 0 },
-  coveragePct: 66.7,
+  totals: { total: 3, covered: 1, pathIncomplete: 1, untested: 1, orphanTests: 0 },
+  coveragePct: 33.3,
   mappedPct: 66.7,
   orphanRequirementIds: [],
   orphanTestNames: [],
@@ -79,7 +73,7 @@ const ABSENT_LEDGER: CoverageLedger = {
   feature: 'checkout',
   requirements: [],
   tests: [],
-  totals: { total: 0, verified: 0, untested: 0, unverified: 0, pathIncomplete: 0, shallowVerified: 0, orphanTests: 0 },
+  totals: { total: 0, covered: 0, pathIncomplete: 0, untested: 0, orphanTests: 0 },
   coveragePct: 0,
   mappedPct: 0,
   orphanRequirementIds: [],
@@ -124,15 +118,28 @@ describe('CoverageLedgerPage', () => {
     await mount()
     expect(container.querySelector('[data-testid="req-R1"]')?.textContent).toContain('Add to cart')
     expect(container.querySelector('[data-testid="test-adds item"]')?.textContent).toContain('adds item')
-    expect(container.querySelector('[data-testid="coverage-ring"]')?.getAttribute('aria-label')).toBe('66.7% verified')
+    expect(container.querySelector('[data-testid="coverage-ring"]')?.getAttribute('aria-label')).toBe('33.3% covered')
   })
 
-  it('surfaces a Mapped % stat (breadth) alongside the verified ring', async () => {
+  it('surfaces a Mapped % stat (breadth) alongside the Covered ring', async () => {
     await mount()
     const mapped = container.querySelector('[data-testid="mapped-stat"]')
     // LEDGER: 3 reqs, 1 untested → 2 mapped → 66.7%.
     expect(mapped?.textContent).toContain('66.7')
     expect(mapped?.textContent).toContain('2/3 mapped')
+  })
+
+  it('renders the proportional coverage breakdown bar', async () => {
+    await mount()
+    expect(container.querySelector('[data-testid="coverage-breakdown"]')).toBeTruthy()
+  })
+
+  it('names the missing path on a path-incomplete requirement', async () => {
+    await mount()
+    // R1: happy claimed, sad declared but unclaimed → "needs sad" + a "no test" chip.
+    const r1 = container.querySelector('[data-testid="req-R1"]')
+    expect(r1?.textContent).toContain('needs sad')
+    expect(r1?.textContent).toContain('sad · no test')
   })
 
   it('numbers test cards by source order (shared cross-view id)', async () => {
@@ -146,7 +153,7 @@ describe('CoverageLedgerPage', () => {
     await mount()
     expect(container.querySelector('[data-testid="gap-badge-untested"]')?.textContent).toContain('1')
     expect(container.querySelector('[data-testid="gap-badge-path-incomplete"]')?.textContent).toContain('1')
-    expect(container.querySelector('[data-testid="gap-badge-shallow-verified"]')?.textContent).toContain('1')
+    expect(container.querySelector('[data-testid="gap-badge-shallow-verified"]')).toBeNull()
     expect(container.querySelector('[data-testid="docs-rail-drift"]')).toBeTruthy()
   })
 
@@ -171,11 +178,24 @@ describe('CoverageLedgerPage', () => {
     expect(cards[0]?.getAttribute('data-testid')).toBe('req-R3') // untested/uncovered first
   })
 
-  it('shows a strictness badge for a shallow-verified requirement', async () => {
+  it('shows a per-test strength chip', async () => {
     await mount()
-    const badge = container.querySelector('[data-testid="strictness-R2"]')
-    expect(badge?.textContent).toContain('tier 1/4')
-    expect(badge?.getAttribute('title')).toContain('browser at mailbox')
+    expect(container.querySelector('[data-testid="strength-adds item"]')?.textContent).toContain('Solid')
+    expect(container.querySelector('[data-testid="strength-sends receipt"]')?.textContent).toContain('Shallow')
+  })
+
+  it('filters the tests pane by strength', async () => {
+    await mount()
+    // Both tests visible initially.
+    expect(container.querySelector('[data-testid="test-adds item"]')).toBeTruthy()
+    expect(container.querySelector('[data-testid="test-sends receipt"]')).toBeTruthy()
+    // Filter to Shallow → only the shallow test remains.
+    act(() => { container.querySelector<HTMLButtonElement>('[data-testid="strength-badge-shallow"]')?.click() })
+    expect(container.querySelector('[data-testid="test-sends receipt"]')).toBeTruthy()
+    expect(container.querySelector('[data-testid="test-adds item"]')).toBeNull()
+    // Toggling off restores both.
+    act(() => { container.querySelector<HTMLButtonElement>('[data-testid="strength-badge-shallow"]')?.click() })
+    expect(container.querySelector('[data-testid="test-adds item"]')).toBeTruthy()
   })
 
   it('surfaces covers tags on the test card (R9)', async () => {
@@ -305,7 +325,7 @@ const EMPTY_LEDGER: CoverageLedger = {
   feature: 'checkout',
   requirements: [],
   tests: [],
-  totals: { total: 0, verified: 0, untested: 0, unverified: 0, pathIncomplete: 0, shallowVerified: 0, orphanTests: 0 },
+  totals: { total: 0, covered: 0, pathIncomplete: 0, untested: 0, orphanTests: 0 },
   coveragePct: 0,
   mappedPct: 0,
   orphanRequirementIds: [],
