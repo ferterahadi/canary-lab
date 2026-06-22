@@ -11,6 +11,7 @@ import type {
 import { computeCoverageLedger, type CoverageTestInput } from '../../../coverage/logic/coverage/ledger'
 import { applyTestStrength, type TestAssertions } from '../../../coverage/logic/coverage/strength'
 import {
+  buildAnnotatePrompt,
   proposeCoverageMappings,
   type AnnotateAdapter,
   type AnnotateTestInput,
@@ -302,6 +303,117 @@ export async function runCoverageEngine(args: RunCoverageEngineArgs): Promise<Ru
 
   const ledger = computeFeatureCoverage({ featuresDir: args.featuresDir, logsDir: args.logsDir, feature: args.feature })
   return { feature: args.feature, applied, orphanTestsBefore, reconciledRequirementIds, ledger }
+}
+
+// ---------------------------------------------------------------------------
+// External (offloaded) coverage — the SAME annotate exercise, but the calling
+// MCP client does the inference instead of a Canary-spawned agent. Canary hands
+// the client the mapping context (below), the client returns `mappings`, and
+// `applyExternalCoverageMappings` writes the tags through the canonical
+// tag-writer + recomputes — so the offload path never re-implements either the
+// prompt or the tag-write. The ledger recompute is producer-agnostic.
+// ---------------------------------------------------------------------------
+
+export interface CoverageMappingTest {
+  testName: string
+  /** Absolute spec path the client should read before mapping. */
+  file?: string
+  assertions: string[]
+}
+
+export interface CoverageMappingContext {
+  feature: string
+  /** Active requirements the client may map to (deprecated ones excluded). */
+  requirements: Requirement[]
+  /** The feature's tests, with resolvable file paths to read. */
+  tests: CoverageMappingTest[]
+  /** The full mapping prompt (instructions + requirements + test paths + the
+   *  expected `{ mappings: [...] }` output shape) — hand this to the client
+   *  verbatim. Reuses the internal annotate prompt so both surfaces agree. */
+  prompt: string
+}
+
+/** True when a feature has a PRD summary — required before coverage mapping (the
+ *  requirements are the spine the mappings link to). */
+export function hasPrdSummary(featuresDir: string, feature: string): boolean {
+  return Boolean(readPrdSummary(resolveFeatureDir(featuresDir, feature)))
+}
+
+/** Assemble the read-only context an offloaded client needs to map tests →
+ *  requirements. Throws FeatureNotFoundError for an unknown feature; the caller
+ *  is responsible for checking hasPrdSummary first. */
+export function buildCoverageMappingContext(args: { featuresDir: string; feature: string }): CoverageMappingContext {
+  const featureDir = resolveFeatureDir(args.featuresDir, args.feature)
+  const summary = readPrdSummary(featureDir)
+  const requirements = (summary?.requirements ?? []).filter((r) => !r.deprecated)
+  const { collected } = collectTests(featureDir)
+  const engineInputs: AnnotateTestInput[] = collected.map((c) => ({
+    name: c.input.name,
+    file: c.input.file,
+    assertions: [...c.assertions],
+  }))
+  const prompt = buildAnnotatePrompt(summary?.requirements ?? [], engineInputs, featureDir)
+  return {
+    feature: args.feature,
+    requirements,
+    tests: engineInputs.map((t) => ({
+      testName: t.name,
+      file: t.file && featureDir ? path.join(featureDir, t.file) : t.file,
+      assertions: t.assertions ?? [],
+    })),
+    prompt,
+  }
+}
+
+export interface ApplyExternalCoverageArgs {
+  featuresDir: string
+  logsDir: string
+  feature: string
+  mappings: ProposedMapping[]
+  now?: string
+}
+
+export interface ApplyExternalCoverageResult {
+  feature: string
+  applied: ProposedMapping[]
+  ledger: CoverageLedger
+}
+
+/** Apply a client-supplied set of mappings: write each `covers` tag through the
+ *  canonical tag-writer (idempotent/additive) and recompute the ledger. Mirrors
+ *  the apply-tail of `runCoverageEngine` but spawns NO agent — the inference
+ *  already happened on the client. Mappings pointing at unknown requirement ids
+ *  or unknown test names are dropped (no inventing the spine). */
+export function applyExternalCoverageMappings(args: ApplyExternalCoverageArgs): ApplyExternalCoverageResult {
+  const featureDir = resolveFeatureDir(args.featuresDir, args.feature)
+  const summary = readPrdSummary(featureDir)
+  const requirements: Requirement[] = summary?.requirements ?? []
+  const knownIds = new Set(requirements.filter((r) => !r.deprecated).map((r) => r.id))
+
+  const { collected } = collectTests(featureDir)
+  const fileByTestName = new Map(collected.map((c) => [c.input.name, c.input.file]))
+
+  const applied: ProposedMapping[] = []
+  for (const m of args.mappings) {
+    const requirementsFiltered = (m.requirements ?? []).filter((id) => knownIds.has(id))
+    if (!requirementsFiltered.length) continue
+    const file = m.file ?? fileByTestName.get(m.testName)
+    if (!file) continue // unknown test name → not a mapping
+    if (applyTagToFile(featureDir, file, m.testName, requirementsFiltered, m.pathTypes)) {
+      applied.push({ ...m, requirements: requirementsFiltered, file })
+    }
+  }
+
+  // Mirror runCoverageEngine: record the requirements set this pass ran against,
+  // so coverage drops to STALE when the set later moves.
+  writeCoverageRunState(featureDir, {
+    requirementsHash: summary?.requirementsHash ?? requirementsSetHash(requirements),
+    requirementFingerprints: requirementFingerprintMap(requirements),
+    ranAt: args.now ?? new Date().toISOString(),
+  })
+
+  const ledger = computeFeatureCoverage({ featuresDir: args.featuresDir, logsDir: args.logsDir, feature: args.feature })
+  return { feature: args.feature, applied, ledger }
 }
 
 export interface FeatureDoc {

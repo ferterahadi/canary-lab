@@ -29,6 +29,10 @@ export function CoverageGeneratingPane({ feature, job }: Props) {
   // (no summary phase) shows ① as already-done.
   const activeIndex = job.kind === 'summary' ? 0 : 1
   const standaloneCoverage = job.kind === 'coverage' && !job.chainedFromJobId
+  // External (offloaded) jobs: the mapping runs in the user's own client, so
+  // there is NO Canary-spawned agent session to stream. Render the job
+  // monitor-only (client metadata + tracked log) instead of AgentSessionView.
+  const isExternal = job.producer === 'external'
 
   // Elapsed timer — a constant liveness signal even before the agent pins its
   // session and the timeline starts streaming, so the screen never reads frozen.
@@ -67,21 +71,66 @@ export function CoverageGeneratingPane({ feature, job }: Props) {
           })}
         </div>
 
-        {/* The agent reads the docs/specs with its tools; its work streams here —
-            one agent timeline everywhere, always visible (no toggle). */}
+        {/* Internal: the agent reads the docs/specs with its tools; its work
+            streams here. External (offload): no Canary agent — show the tracked
+            job log + the client driving it (monitor-only). */}
         <p style={{ fontSize: 11, color: 'var(--text-muted)', margin: '18px 2px 8px', lineHeight: 1.5 }}>
-          {job.kind === 'summary' ? 'Reading the source docs' : 'Reading the test specs'} and reasoning — the agent&apos;s steps stream below.
+          {isExternal
+            ? 'Mapping runs in your connected client — Canary tracks it here and recomputes the ledger when the client submits.'
+            : `${job.kind === 'summary' ? 'Reading the source docs' : 'Reading the test specs'} and reasoning — the agent’s steps stream below.`}
         </p>
-        <div
-          data-testid="coverage-agent-session"
-          style={{
-            position: 'relative', height: 360, overflow: 'hidden',
-            background: 'var(--bg-base)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)',
-          }}
-        >
-          <AgentSessionView source={{ kind: 'coverage', jobId: job.jobId, live: true }} />
-        </div>
+        {isExternal ? (
+          <ExternalMonitorPanel job={job} />
+        ) : (
+          <div
+            data-testid="coverage-agent-session"
+            style={{
+              position: 'relative', height: 360, overflow: 'hidden',
+              background: 'var(--bg-base)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)',
+            }}
+          >
+            <AgentSessionView source={{ kind: 'coverage', jobId: job.jobId, live: true }} />
+          </div>
+        )}
       </div>
+    </div>
+  )
+}
+
+// Monitor-only view for an offloaded (external-producer) coverage job: the
+// mapping happens in the user's own client, so we show who is driving it +
+// Canary's tracked log instead of a (non-existent) agent session stream.
+function ExternalMonitorPanel({ job }: { job: CoverageJobManifest }) {
+  const rows: Array<[string, string | undefined]> = [
+    ['Client', job.externalClientKind],
+    ['Session', job.externalSessionId],
+    ['Conversation', job.externalConversationName],
+  ]
+  const visible = rows.filter(([, v]) => v)
+  return (
+    <div
+      data-testid="coverage-external-monitor"
+      style={{ background: 'var(--bg-base)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)', padding: 16 }}
+    >
+      {visible.length > 0 && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 20px', marginBottom: 12 }}>
+          {visible.map(([k, v]) => (
+            <div key={k} style={{ fontSize: 12, minWidth: 0 }}>
+              <span style={{ color: 'var(--text-muted)' }}>{k}: </span>
+              <span style={{ color: 'var(--text-secondary)', fontVariantNumeric: 'tabular-nums', wordBreak: 'break-word' }}>{v}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      <pre
+        data-testid="coverage-external-log"
+        style={{
+          margin: 0, maxHeight: 300, overflow: 'auto', fontSize: 12, lineHeight: 1.5,
+          color: 'var(--text-secondary)', whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+        }}
+      >
+        {job.log || 'Waiting for the client to submit mappings…'}
+      </pre>
     </div>
   )
 }
