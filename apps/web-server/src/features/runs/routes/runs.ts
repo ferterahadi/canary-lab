@@ -193,6 +193,7 @@ export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Pro
     throwIfAborted(signal)
     const built = await buildEvaluationExportArchive(detail, {
       logsDir: deps.store.logsDir,
+      featuresDir: deps.featuresDir,
       audienceAdapter,
       rewrite,
     })

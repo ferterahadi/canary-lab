@@ -78,6 +78,10 @@ natively.)
 - `cl_design-feedback` — critiquing a UI (screenshot, live screen, Figma,
   component): ground every finding in the component source + tokens before
   voicing it; don't flag a shared primitive or intentional choice as a defect.
+- `cl_route-every-surface` — adding a new page/view or a dialog/modal to
+  `apps/web`: assign it a URL param so it's deep-linkable and survives refresh.
+  Covers the cold-load test (which dialogs to route), the two-tier URL schema,
+  and the hydration checklist + gotchas.
 - `cl_ws-driven-state` — adding any server-side mutation (route, background job,
   MCP tool) that changes visible UI state: emit a `WorkspaceEvent` so the client
   updates live. Covers the full chain + checklist + the two gaps fixed in 1.4.0

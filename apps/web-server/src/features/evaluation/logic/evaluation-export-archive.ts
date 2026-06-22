@@ -3,10 +3,14 @@ import path from 'path'
 import type { PlaywrightArtifact, RunDetail } from '../../runs/logic/run-store'
 import { buildRunPaths, runDirFor } from '../../runs/logic/runtime/run-paths'
 import { createEvaluationExport, type AssertionHtmlOptions } from './test-review-export'
+import { computeFeatureCoverage } from '../../coverage/logic/coverage/service'
 import { createZip } from '../../../shared/simple-zip'
 
 export interface EvaluationExportArchiveOptions {
   logsDir: string
+  /** Feature root — when set, the report attaches semantic coverage (if the
+   *  feature has a generated PRD summary). Absent → Playwright-only grading. */
+  featuresDir?: string
   audienceAdapter?: AssertionHtmlOptions['audienceAdapter']
   rewrite?: AssertionHtmlOptions['rewrite']
 }
@@ -22,10 +26,21 @@ export async function buildEvaluationExportArchive(
     runPaths.playwrightArtifactsKeepDir,
     detail.runId,
   )
+  // Attach semantic coverage when the feature has a generated ledger (≥1
+  // requirement). It's run-free + per-feature, so the report can lead with
+  // coverage strength; otherwise it falls back to the Playwright grading.
+  let coverage: AssertionHtmlOptions['coverage']
+  if (options.featuresDir) {
+    try {
+      const ledger = computeFeatureCoverage({ featuresDir: options.featuresDir, logsDir: options.logsDir, feature: detail.manifest.feature })
+      if (ledger.requirements.length > 0) coverage = ledger
+    } catch { /* no feature dir / summary — fall back to Playwright grading */ }
+  }
   const exported = await createEvaluationExport(detail, {
     audienceAdapter: options.audienceAdapter,
     rewrite: options.rewrite,
     videoLinksByTestName: videoLinksByTestName(videos),
+    coverage,
   })
   return {
     archiveBase: `canary-lab-evaluation-${safeFilename(detail.manifest.feature)}-${safeFilename(detail.runId)}`,

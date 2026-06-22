@@ -5,6 +5,22 @@ import path from 'path'
 import ts from 'typescript'
 import { __testReviewExportInternals, buildEvaluationLlmPrompt, buildTestReviewPacket, createAssertionExport, createAssertionHtml, createEvaluationExport, createEvaluationHtml, evaluationCodexArgs } from './test-review-export'
 import type { RunDetail } from '../../runs/logic/run-store'
+import type { CoverageLedger } from '../../../../../../shared/coverage/types'
+
+function coverageLedgerFor(testTitle: string): CoverageLedger {
+  return {
+    feature: 'checkout',
+    requirements: [
+      { requirement: { id: 'R1', title: 'Checkout', text: 'x', pathTypes: ['happy'] }, annotatedTestNames: [testTitle], pathCoverage: [{ path: 'happy', covered: true }], gapType: 'covered', coverageStatus: 'covered' },
+    ],
+    tests: [{ name: testTitle, requirements: ['R1'], pathTypes: ['happy'], strength: 'solid' }],
+    totals: { total: 1, covered: 1, pathIncomplete: 0, untested: 0, orphanTests: 0 },
+    coveragePct: 100,
+    mappedPct: 100,
+    orphanRequirementIds: [],
+    orphanTestNames: [],
+  }
+}
 
 let tmpDir: string
 
@@ -17,6 +33,25 @@ afterEach(() => {
 })
 
 describe('test review export', () => {
+  it('leads with coverage strength + a Semantic Coverage section when a ledger is provided (A)', async () => {
+    const html = await createEvaluationHtml(detail({ featureDir: tmpDir, title: 'passes checkout' }), {
+      coverage: coverageLedgerFor('passes checkout'),
+    })
+    expect(html).toContain('Semantic Coverage')
+    expect(html).toContain('Coverage strength')
+    expect(html).toContain('Solid')
+    expect(html).toContain('@req-R1')
+    // Specificity is demoted, not removed, and relabeled so it doesn't compete.
+    expect(html).toContain('Assertion specificity')
+  })
+
+  it('falls back to Playwright assertion-specificity when no coverage ledger is provided', async () => {
+    const html = await createEvaluationHtml(detail({ featureDir: tmpDir }))
+    expect(html).toContain('Check specificity')
+    expect(html).not.toContain('Coverage strength')
+    expect(html).not.toContain('Semantic Coverage')
+  })
+
   it('builds Codex rewrite args with supported read-only flags', () => {
     expect(evaluationCodexArgs('rewrite prompt')).toEqual([
       'exec',
@@ -438,7 +473,7 @@ const sharedCheck = (page) => {
     expect(html).toContain('Helper functions used')
     expect(html).toContain('<a href="#local-codebase-implementations" data-section-id="local-codebase-implementations">Helper functions used</a>')
     expect(html).toContain('helper: <code>expectReadyAlias</code>')
-    expect(html).toContain('nested strong:')
+    expect(html).toContain('nested exact:')
     expect(html).not.toContain('<h3>External Imports</h3>')
     expect(html).not.toContain('<h3>expectCheckoutReady</h3>')
     expect(html).toContain('@playwright/test')
@@ -620,7 +655,7 @@ test('second shared helper', async ({ page }) => {
       }))
       expect(packet.tests[0].assertions).toContainEqual(expect.objectContaining({
         helperName: 'expectInline',
-        quality: 'strict',
+        quality: 'unknown',
       }))
       expect(packet.tests[0].assertions).toContainEqual(expect.objectContaining({
         helperName: 'expectVarDecl',
@@ -850,7 +885,7 @@ function unknownUtility(page) {
     expect(html).toContain('Check linked records')
     expect(html).toContain('Click the relevant control')
     expect(html).toContain('Enter the required value')
-    expect(html).toContain('Confidence: 4 strong, 4 not graded')
+    expect(html).toContain('Confidence: 3 exact, 1 behavioral, 4 not graded')
     expect(html).toContain('Helper implementation could not be resolved statically')
   })
 
@@ -998,7 +1033,7 @@ function unknownUtility(page) {
     expect(__testReviewExportInternals.audienceTitle('B. authAPI warn incl auto-resolved -> done')).toBe('Auth api warning including automatically resolved then done')
     expect(__testReviewExportInternals.audienceFlowDetail('2 nested assertions')).toBe('2 checks inside this shared step')
     expect(__testReviewExportInternals.audienceFlowDetail('1 nested assertion')).toBe('1 check inside this shared step')
-    expect(__testReviewExportInternals.audienceFlowDetail('strict unknown nested assertion')).toBe('strong not graded included checks')
+    expect(__testReviewExportInternals.audienceFlowDetail('strict unknown nested assertion')).toBe('exact not graded included checks')
     expect(__testReviewExportInternals.audienceFlowDetail('const ids = makeIds()')).toBe('Uses the recorded test step.')
     expect(__testReviewExportInternals.audienceFlowTitle({ kind: 'start', title: 'Checkout starts' } as never, packet.tests[0])).toBe('Start the scenario')
     expect(__testReviewExportInternals.audienceFlowTitle({ kind: 'end', title: 'Result: failed' } as never, packet.tests[0])).toBe('Run result: failed')
@@ -1041,11 +1076,11 @@ function unknownUtility(page) {
     expect(__testReviewExportInternals.classifyAssertion('expect(count).toBeTruthy()')).toBe('shallow')
     expect(__testReviewExportInternals.classifyAssertion('expect(foo).toBeTruthy()')).toBe('unknown')
 
-    expect(__testReviewExportInternals.confidenceForAssertions([{ kind: 'direct', label: 'x', quality: 'moderate', rationale: '', snippet: '' }])).toContain('moderate')
+    expect(__testReviewExportInternals.confidenceForAssertions([{ kind: 'direct', label: 'x', quality: 'moderate', rationale: '', snippet: '' }])).toContain('behavioral')
     expect(__testReviewExportInternals.confidenceForAssertions([{ kind: 'direct', label: 'x', quality: 'unknown', rationale: '', snippet: '' }])).toContain('Review the engineering evidence')
-    expect(__testReviewExportInternals.qualityLabel('moderate')).toBe('moderate')
+    expect(__testReviewExportInternals.qualityLabel('moderate')).toBe('behavioral')
     expect(__testReviewExportInternals.qualitySummary([])).toBe('')
-    expect(__testReviewExportInternals.qualitySummaryForAudience([{ kind: 'direct', label: 'x', quality: 'shallow', rationale: '', snippet: '' }])).toBe('1 shallow')
+    expect(__testReviewExportInternals.qualitySummaryForAudience([{ kind: 'direct', label: 'x', quality: 'shallow', rationale: '', snippet: '' }])).toBe('1 surface-level')
     expect(__testReviewExportInternals.rationaleForAudience('Static analysis could not confidently classify this assertion.')).toContain("couldn't auto-rate")
     expect(__testReviewExportInternals.rationaleForAudience('other')).toBe('other')
 

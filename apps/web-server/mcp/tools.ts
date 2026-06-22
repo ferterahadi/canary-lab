@@ -678,7 +678,7 @@ export function registerCanaryLabTools(
 
   registerTool('get_feature_coverage', {
     description:
-      'Get the Verified Coverage Ledger for a feature: PRD requirements → annotated tests → last passing run + gap type (untested / unverified / path-incomplete / verified / shallow-verified) with a grounded coverage %, PLUS per-requirement rigor (tierReached / tierAvailable / strictness / weakestAssertion / suggestedStrongerCheck) and docs-drift status. The coverage % and strictness are evidence-based math over passing runs — never an opinion. Use this to find untested/unverified requirements and to see which passing tests are too lax (and what stronger check to write).',
+      'Get the Semantic Coverage Ledger for a feature: PRD requirements → mapped tests → gap type (untested / path-incomplete / covered) with a coverage % (covered ÷ total — every declared path claimed by a mapped test) and a mapped % (requirements with ≥1 test), PLUS per-test strength (strong / solid / basic / shallow, graded from each test\'s assertion tiers) and docs-drift status. Coverage is DECOUPLED from test runs — it measures whether a test maps to each requirement+path, never whether a run passed. Use this to find untested/path-incomplete requirements and shallow tests (and what stronger check to write).',
     inputSchema: { feature: z.string().describe('Existing feature name (from list_features).') },
   }, async ({ feature }) => {
     try {

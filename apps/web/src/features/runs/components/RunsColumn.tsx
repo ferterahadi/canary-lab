@@ -24,6 +24,11 @@ interface Props {
   }) => Promise<void>
   runDisabled?: boolean
   runDisabledReason?: string
+  // R24: the Verify-config dialog is route-driven (`?dialog=verification`) when
+  // these are supplied — controlled by App. Omitted (e.g. in unit tests) → the
+  // column falls back to its own internal open-state.
+  verifyOpen?: boolean
+  onVerifyOpenChange?: (open: boolean) => void
 }
 
 // Inline SVG icons (no new dependency). Sizes are tuned to align with the
@@ -45,14 +50,20 @@ const ICON_PAUSE = (
 // pops over with the same options.
 const COMPACT_THRESHOLD_PX = 360
 
-export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRun, onStartRun, onStartVerification, runDisabled, runDisabledReason }: Props) {
+export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRun, onStartRun, onStartVerification, runDisabled, runDisabledReason, verifyOpen, onVerifyOpenChange }: Props) {
   const [pendingPause, setPendingPause] = useState<RunIndexEntry | null>(null)
   const [pendingStop, setPendingStop] = useState<RunIndexEntry | null>(null)
   const [pendingDelete, setPendingDelete] = useState<RunIndexEntry | null>(null)
   const [pendingCancelHeal, setPendingCancelHeal] = useState<RunIndexEntry | null>(null)
   const [openMenuRunId, setOpenMenuRunId] = useState<string | null>(null)
   const [runPopoverOpen, setRunPopoverOpen] = useState(false)
-  const [verifyDialogOpen, setVerifyDialogOpen] = useState(false)
+  // Controlled when App drives it from the route; uncontrolled otherwise.
+  const [verifyDialogOpenInternal, setVerifyDialogOpenInternal] = useState(false)
+  const verifyDialogOpen = verifyOpen ?? verifyDialogOpenInternal
+  const setVerifyDialogOpen = useCallback((open: boolean) => {
+    if (onVerifyOpenChange) onVerifyOpenChange(open)
+    else setVerifyDialogOpenInternal(open)
+  }, [onVerifyOpenChange])
   const [compact, setCompact] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
   const { gatePromo } = useMcpPromo()

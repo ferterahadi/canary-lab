@@ -5,8 +5,6 @@ import path from 'path'
 import Fastify, { type FastifyInstance } from 'fastify'
 import { coverageRoutes } from './coverage'
 import { CoverageJobRunStore, type CoverageJobStore, type CoverageJobStoreEvent } from '../../coverage/logic/coverage/jobs/store'
-import { writeRunsIndex } from '../../runs/logic/runtime/manifest'
-import { buildRunPaths, runDirFor } from '../../runs/logic/runtime/run-paths'
 import type { CoverageLedger, PrdSummary } from '../../../../../../shared/coverage/types'
 import type { CoverageJobManifest, CoverageJobIndexEntry, CoverageJobKind } from '../../coverage/logic/coverage/jobs/types'
 
@@ -48,15 +46,6 @@ function writeFeature(name: string, spec: string, docs: Record<string, string> =
   return dir
 }
 
-function writePassingRun(feature: string, runId: string, passedNames: string[]) {
-  writeRunsIndex(logsDir, [{ runId, feature, startedAt: '2026-01-01T00:00:00Z', status: 'passed' as never }])
-  const runDir = runDirFor(logsDir, runId)
-  fs.mkdirSync(runDir, { recursive: true })
-  const paths = buildRunPaths(runDir)
-  fs.writeFileSync(paths.manifestPath, JSON.stringify({ runId, feature, env: 'local', startedAt: '2026-01-01T00:00:00Z', status: 'passed', services: [] }))
-  fs.writeFileSync(paths.summaryPath, JSON.stringify({ complete: true, total: passedNames.length, passed: passedNames.length, passedNames, failed: [] }))
-}
-
 const SPEC = `
   import { test, expect } from '@playwright/test'
   // @requirement R1
@@ -73,7 +62,7 @@ describe('coverage routes', () => {
     expect(res.statusCode).toBe(404)
   })
 
-  it('regenerate (deterministic) → coverage reflects a grounded passing run', async () => {
+  it('regenerate (deterministic) → a mapped test makes the requirement covered (run-free)', async () => {
     writeFeature('checkout', SPEC, { 'spec.md': '# Cart adds an item\nuser adds an item to the cart' })
 
     // Generate the PRD summary deterministically (heading → requirement R1).
@@ -87,17 +76,11 @@ describe('coverage routes', () => {
     expect(summary.requirements[0].id).toBe('R1')
     expect(summary.requirements[0].title).toBe('Cart adds an item')
 
-    // Before any run: requirement is unverified (test exists, no passing run).
-    let cov = (await app.inject({ method: 'GET', url: '/api/features/checkout/coverage' })).json() as CoverageLedger
-    expect(cov.requirements[0].gapType).toBe('unverified')
-    expect(cov.coveragePct).toBe(0)
-
-    // Record a passing run for the test → requirement becomes verified.
-    writePassingRun('checkout', 'r1', ['Cart adds an item'])
-    cov = (await app.inject({ method: 'GET', url: '/api/features/checkout/coverage' })).json() as CoverageLedger
-    expect(cov.requirements[0].gapType).toBe('verified')
+    // The test maps to R1 and claims its only declared path (happy) → covered.
+    // No run is involved — coverage is semantic.
+    const cov = (await app.inject({ method: 'GET', url: '/api/features/checkout/coverage' })).json() as CoverageLedger
+    expect(cov.requirements[0].gapType).toBe('covered')
     expect(cov.coveragePct).toBe(100)
-    expect(cov.requirements[0].lastPassingRun?.runId).toBe('r1')
     expect(cov.docsDrift).toBe(false)
   })
 

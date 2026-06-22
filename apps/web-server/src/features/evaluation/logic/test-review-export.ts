@@ -10,8 +10,19 @@ import { EVALUATION_REWRITE_MODELS, modelArgs, modelFor } from '../../agent-sess
 import { recoverAgentAnswer, agentActivityPath } from '../../agent-sessions/logic/agent-producer'
 import { runAgentProcess, buildClaudeAgenticArgs } from '../../agent-sessions/logic/agent-process'
 import { formatCodeForDisplay } from '../../../../../../shared/code-display-format'
+import type { CoverageLedger, TestCoverage, TestStrength } from '../../../../../../shared/coverage/types'
 
 export type AssertionQuality = 'strict' | 'moderate' | 'shallow' | 'unknown'
+
+// Display labels for coverage's per-test STRENGTH (depth axis), used when a feature
+// has a generated coverage ledger. Distinct vocabulary from AssertionQuality
+// ("specificity" axis) so the report carries two non-competing signals.
+const STRENGTH_LABEL: Record<TestStrength, string> = {
+  strong: 'Strong',
+  solid: 'Solid',
+  basic: 'Basic',
+  shallow: 'Shallow',
+}
 
 export interface TestReviewAssertion {
   kind: 'direct' | 'helper'
@@ -53,6 +64,10 @@ export interface AssertionHtmlOptions {
   audienceAdapter?: 'auto' | 'claude' | 'codex' | 'manual' | 'deterministic'
   rewrite?: EvaluationRewrite
   narrative?: EvaluationRewrite
+  /** Semantic coverage ledger for the feature, when one exists. Present → the
+   *  report leads with per-requirement coverage + per-test STRENGTH; absent →
+   *  falls back to the Playwright assertion-specificity grading. */
+  coverage?: CoverageLedger
 }
 
 export interface EvaluationRewriteAgentOptions {
@@ -759,9 +774,17 @@ function assertionFor(
   }
 }
 
+// AssertionQuality measures the SPECIFICITY of a check — how exact a value it
+// pins (exact value/text/URL → strict; a UI condition → moderate; mere existence
+// → shallow). It is orthogonal to coverage's per-test STRENGTH (which stack layer
+// the test reaches): a check can be deep-but-vague or shallow-but-exact.
 function classifyAssertion(snippet: string, matcher?: string): AssertionQuality {
   const text = snippet.toLowerCase()
-  const strictMatchers = new Set([
+  const m = matcher?.toLowerCase()
+  // A bare boolean/nullish `toBe` (toBe(true), toBe(null)) pins almost nothing —
+  // it reads as "exact" by matcher but proves little, so don't over-credit it.
+  if (m === 'tobe' && /\.tobe\(\s*(true|false|null|undefined)\s*\)/.test(text)) return 'moderate'
+  const exactMatchers = new Set([
     'tohavetext',
     'tocontaintext',
     'tohaveurl',
@@ -776,9 +799,10 @@ function classifyAssertion(snippet: string, matcher?: string): AssertionQuality 
     'tostrictEqual'.toLowerCase(),
     'tobe',
   ])
-  if (matcher && strictMatchers.has(matcher.toLowerCase())) return 'strict'
-  if (/thank|success|error|expired|redeemed|not\s+found|cannot|reject|order|voucher|url|toast/.test(text)) return 'strict'
-  if (matcher && ['tobevisible', 'tobehidden', 'toBeAttached'.toLowerCase()].includes(matcher.toLowerCase())) return 'moderate'
+  // Specificity is read from the MATCHER (structural), not from domain keywords —
+  // no hardcoded business vocabulary, so it generalizes across every feature.
+  if (m && exactMatchers.has(m)) return 'strict'
+  if (m && ['tobevisible', 'tobehidden', 'toBeAttached'.toLowerCase()].includes(m)) return 'moderate'
   if (/visible|hidden|attached|enabled|disabled/.test(text)) return 'moderate'
   if (/count|length|exist|present/.test(text)) return 'shallow'
   return 'unknown'
@@ -893,7 +917,7 @@ function audienceFlowDetail(detail: string): string {
     .replace(/\bassertions?\b/gi, 'checks')
     .replace(/\bnested assertion(s)?\b/gi, 'checks inside this shared step')
     .replace(/\bnested\b/gi, 'included')
-    .replace(/\bstrict\b/gi, 'strong')
+    .replace(/\bstrict\b/gi, 'exact')
     .replace(/\bunknown\b/gi, 'not graded')
 }
 
@@ -1006,6 +1030,9 @@ async function renderHtml(packet: TestReviewPacket, options: AssertionHtmlOption
   const displayFeature = rewrite.featureTitle?.trim() || titleCaseFeatureName(packet.feature)
   const testIds = uniqueSectionIds(packet.tests.map((test, idx) => `${idx + 1}-${test.title}`))
   const flowchartByTestName = new Map(flowcharts.map((flowchart) => [flowchart.testName, flowchart]))
+  // Coverage strength is keyed by the source test title (== ledger test name).
+  const coverageByTitle = new Map<string, TestCoverage>()
+  if (options.coverage) for (const t of options.coverage.tests) coverageByTitle.set(t.name, t)
   const implementationId = 'local-codebase-implementations'
   const tocItems: TocItem[] = [
     { level: 1, id: 'evaluation-report', label: displayFeature },
@@ -1020,12 +1047,16 @@ async function renderHtml(packet: TestReviewPacket, options: AssertionHtmlOption
     const videoLinks = options.videoLinksByTestName?.[test.name] ?? []
     const flowchart = flowchartByTestName.get(test.name)
     const audienceCase = rewrite.cases[idx]
+    const cov = coverageByTitle.get(test.title)
+    // When coverage exists it's the headline (depth); specificity is demoted to a
+    // secondary, clearly-different axis. Without coverage, specificity stands alone.
     return `
       <section class="test-case" id="${escapeAttr(testIds[idx])}">
         <h2>${idx + 1}. ${escapeHtml(audienceCase.title)}</h2>
         <dl class="case-meta">
           <div><dt>Result</dt><dd><span class="status status-${escapeAttr(statusClass(test.status))}">${escapeHtml(test.status)}</span>${typeof test.durationMs === 'number' ? ` <span class="muted">(${escapeHtml(formatMs(test.durationMs))})</span>` : ''}</dd></div>
-          <div><dt>Check strength</dt><dd>${escapeHtml(qualitySummaryForAudience(test.assertions))}</dd></div>
+          ${cov ? `<div><dt>Coverage strength</dt><dd>${renderCoverageStrength(cov)}</dd></div>` : ''}
+          <div><dt>${cov ? 'Assertion specificity' : 'Check specificity'}</dt><dd>${escapeHtml(qualitySummaryForAudience(test.assertions))}</dd></div>
         </dl>
         <p class="case-explainer">${escapeHtml(audienceCase.whatWasChecked)}</p>
         ${flowchart ? renderFlowchartSection(flowchart, audienceCase.title) : ''}
@@ -1073,6 +1104,7 @@ async function renderHtml(packet: TestReviewPacket, options: AssertionHtmlOption
           <div><dt>Started</dt><dd>${escapeHtml(packet.startedAt)}</dd></div>
           ${packet.endedAt ? `<div><dt>Ended</dt><dd>${escapeHtml(packet.endedAt)}</dd></div>` : ''}
         </dl>
+        ${options.coverage ? renderCoverageOverview(options.coverage) : ''}
       </header>
       <section aria-labelledby="test-cases" id="test-cases">
         <h2 class="section-title">Test Cases</h2>
@@ -1085,6 +1117,32 @@ async function renderHtml(packet: TestReviewPacket, options: AssertionHtmlOption
 </body>
 </html>
 `
+}
+
+// Per-test coverage strength (depth) + the requirements it maps to. The headline
+// quality signal when a coverage ledger exists.
+function renderCoverageStrength(tc: TestCoverage): string {
+  const strength = tc.strength ?? 'shallow'
+  const label = STRENGTH_LABEL[strength]
+  const reqs = tc.requirements.length
+    ? `covers ${tc.requirements.map((id) => `@req-${id}`).join(', ')}`
+    : 'unmapped'
+  return `<strong class="strength strength-${escapeAttr(strength)}">${escapeHtml(label)}</strong> <span class="muted">${escapeHtml(reqs)}</span>`
+}
+
+// Feature-level Semantic Coverage banner: breadth (mapped) vs depth-by-paths
+// (covered), independent of whether the run passed.
+function renderCoverageOverview(coverage: CoverageLedger): string {
+  const t = coverage.totals
+  return `<section class="coverage-overview" aria-label="Semantic coverage">
+    <h2>Semantic Coverage</h2>
+    <div class="summary-strip">
+      <div><span class="summary-value">${coverage.coveragePct}%</span><span class="summary-label">covered (every path)</span></div>
+      <div><span class="summary-value">${coverage.mappedPct}%</span><span class="summary-label">mapped (has a test)</span></div>
+      <div><span class="summary-value">${t.covered}/${t.total}</span><span class="summary-label">requirements covered</span></div>
+    </div>
+    <p class="muted">Coverage is run-free — it measures whether a test maps to each requirement's declared paths, separate from whether the run passed (${t.untested} untested, ${t.pathIncomplete} path-incomplete).</p>
+  </section>`
 }
 
 function renderToc(items: TocItem[]): string {
@@ -1399,10 +1457,13 @@ function renderAssertionHtml(assertion: TestReviewAssertion): string {
   </li>`
 }
 
+// Specificity vocabulary — deliberately NOT "strong/solid/…" so it never reads as
+// a rival to coverage's per-test STRENGTH. This axis is "how exact is the check".
 function qualityLabel(quality: AssertionQuality): string {
-  if (quality === 'strict') return 'strong'
-  if (quality === 'unknown') return 'not graded'
-  return quality
+  if (quality === 'strict') return 'exact'
+  if (quality === 'moderate') return 'behavioral'
+  if (quality === 'shallow') return 'surface-level'
+  return 'not graded'
 }
 
 function rationaleForAudience(rationale: string): string {
@@ -1553,6 +1614,15 @@ h1 { font-size: 28px; line-height: 1.15; margin-bottom: 16px; }
   gap: 10px;
   margin-bottom: 14px;
 }
+.coverage-overview { margin-top: 18px; }
+.coverage-overview h2 { font-size: 13px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); margin-bottom: 8px; }
+.coverage-overview .summary-strip { margin-bottom: 8px; }
+.coverage-overview p { font-size: 12.5px; color: var(--muted); }
+.strength { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; font-weight: 700; border: 1px solid; }
+.strength-strong { color: #047857; background: #ecfdf5; border-color: #6ee7b7; }
+.strength-solid  { color: #0369a1; background: #f0f9ff; border-color: #7dd3fc; }
+.strength-basic  { color: #92400e; background: #fffbeb; border-color: #fcd34d; }
+.strength-shallow{ color: #c2410c; background: #fff7ed; border-color: #fdba74; }
 .summary-strip div {
   padding: 10px 12px;
   background: linear-gradient(180deg, #ffffff, #f8fafc);

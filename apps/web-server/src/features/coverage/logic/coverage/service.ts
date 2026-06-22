@@ -8,9 +8,8 @@ import type {
   ProposedMapping,
   Requirement,
 } from '../../../../../../../shared/coverage/types'
-import { buildLastPassingRunIndex } from '../../../coverage/logic/coverage/grounding'
 import { computeCoverageLedger, type CoverageTestInput } from '../../../coverage/logic/coverage/ledger'
-import { applyRigor, type TestAssertions } from '../../../coverage/logic/coverage/rigor'
+import { applyTestStrength, type TestAssertions } from '../../../coverage/logic/coverage/strength'
 import {
   proposeCoverageMappings,
   type AnnotateAdapter,
@@ -148,10 +147,9 @@ export function computeFeatureCoverage(args: ComputeFeatureCoverageArgs): Covera
   const requirements = summary?.requirements ?? []
 
   const { tests, assertions } = collectTests(featureDir)
-  const index = buildLastPassingRunIndex(args.logsDir, args.feature)
 
-  const breadth = computeCoverageLedger({ feature: args.feature, requirements, tests, index })
-  const ledger = applyRigor(breadth, requirements, assertions)
+  const breadth = computeCoverageLedger({ feature: args.feature, requirements, tests })
+  const ledger = applyTestStrength(breadth, assertions)
 
   // --- State model (R3): summary × coverage axes + drift detail. ---
   const live = readDocsCollection(featureDir)

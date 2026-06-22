@@ -8,6 +8,7 @@ import type {
   GapType,
   RequirementCoverage,
   TestCoverage,
+  TestStrength,
 } from '../../../shared/api/types'
 import { CoverageDocsRail } from './CoverageDocsRail'
 import { CoverageGeneratingPane } from './CoverageGeneratingPane'
@@ -19,18 +20,26 @@ interface Props {
   onClose: () => void
 }
 
-// Each gap class gets a stable label + colour. `unverified` is the dangerous one
-// (a test exists but no passing run backs it) so it borrows the danger hue;
-// `shallow-verified` is amber (passes, but only a weak assertion tier).
+// Each gap class gets a stable label + colour. Coverage is semantic (run-free):
+// `untested` (no test maps to it) is the gap; `path-incomplete` (some declared
+// paths unclaimed) is partial; `covered` (every path claimed) is the good state.
 const GAP_META: Record<GapType, { label: string; color: string }> = {
-  verified: { label: 'Verified', color: 'rgb(52, 211, 153)' },
-  'shallow-verified': { label: 'Shallow', color: 'rgb(251, 191, 36)' },
+  covered: { label: 'Covered', color: 'rgb(52, 211, 153)' },
   'path-incomplete': { label: 'Path-incomplete', color: 'rgb(56, 189, 248)' },
-  unverified: { label: 'Unverified', color: 'rgb(251, 113, 133)' },
   untested: { label: 'Untested', color: 'var(--text-muted)' },
 }
 
-const BADGE_ORDER: GapType[] = ['untested', 'unverified', 'path-incomplete', 'shallow-verified']
+// Per-test coverage strength — graded off the strongest stack layer a test's
+// assertions touch (tier classifier), independent of runs. Hues reuse the status
+// language: orange/amber weak, sky mid, green strong.
+const STRENGTH_META: Record<TestStrength, { label: string; color: string; title: string }> = {
+  strong: { label: 'Strong', color: 'rgb(52, 211, 153)', title: 'Tier 4 — a real external destination / browser confirmed the effect' },
+  solid: { label: 'Solid', color: 'rgb(56, 189, 248)', title: 'Tier 3 — an app/internal API or UI assertion reported success' },
+  basic: { label: 'Basic', color: 'rgb(251, 191, 36)', title: 'Tier 2 — internal state changed (DB row / fixture)' },
+  shallow: { label: 'Shallow', color: 'rgb(251, 146, 60)', title: 'Tier 1 — only the app’s own log / self-report (or no classifiable depth)' },
+}
+// Worst-first: the weakest tests sort to the front of the filter.
+const STRENGTH_ORDER: TestStrength[] = ['shallow', 'basic', 'solid', 'strong']
 
 // Requirements list is ordered worst-first (uncovered → partial → covered) so the
 // gaps that need work sit at the top — the whole point of the ledger.
@@ -53,6 +62,7 @@ export function CoverageLedgerPage({ feature, onClose }: Props) {
   const [error, setError] = useState<string | null>(null)
   const [hovered, setHovered] = useState<Hovered | null>(null)
   const [gapFilter, setGapFilter] = useState<GapType | null>(null)
+  const [strengthFilter, setStrengthFilter] = useState<TestStrength | null>(null)
   // R22: one unified view (no tabs). Docs is a collapsible left rail; its
   // open/closed state persists across refresh (R12).
   const [railOpen, setRailOpen] = useState<boolean>(() => readRailPref())
@@ -231,7 +241,34 @@ export function CoverageLedgerPage({ feature, onClose }: Props) {
               {orphanTests.length} orphan test{orphanTests.length > 1 ? 's' : ''} (no requirement) — regenerate coverage to map them.
             </div>
           )}
-          {ledger.tests.map((t) => (
+          {ledger.tests.length > 0 && (
+            <div className="clcov-chips" data-testid="strength-filter" style={{ marginBottom: 12 }}>
+              {STRENGTH_ORDER.map((s) => {
+                const count = ledger.tests.filter((t) => (t.strength ?? 'shallow') === s).length
+                const meta = STRENGTH_META[s]
+                const on = strengthFilter === s
+                return (
+                  <button
+                    key={s}
+                    type="button"
+                    className="clcov-chip"
+                    data-testid={`strength-badge-${s}`}
+                    aria-pressed={on}
+                    data-on={on ? 'true' : 'false'}
+                    data-empty={count === 0 ? 'true' : 'false'}
+                    title={meta.title}
+                    onClick={() => setStrengthFilter((cur) => (cur === s ? null : s))}
+                    style={{ ['--chip' as string]: meta.color }}
+                  >
+                    <span className="clcov-chip-dot" style={{ background: meta.color }} />
+                    {meta.label}
+                    <strong className="clcov-chip-n">{count}</strong>
+                  </button>
+                )
+              })}
+            </div>
+          )}
+          {(strengthFilter ? ledger.tests.filter((t) => (t.strength ?? 'shallow') === strengthFilter) : ledger.tests).map((t) => (
             <TestCard
               key={t.name}
               test={t}
@@ -252,7 +289,7 @@ export function CoverageLedgerPage({ feature, onClose }: Props) {
       <style>{COVERAGE_CSS}</style>
       <header className="clcov-head" data-generating={generating ? 'true' : 'false'}>
         <div className="clcov-title">
-          <span className="clcov-eyebrow">Verified Coverage</span>
+          <span className="clcov-eyebrow">Semantic Coverage</span>
           <span className="clcov-feature">{feature}</span>
         </div>
         {state && <HeadlinePill headline={state.headline} />}
@@ -355,7 +392,7 @@ function CoverageEmptyMain({ railOpen }: { railOpen: boolean }) {
 
 function statusOf(rc: RequirementCoverage): CoverageStatus {
   if (rc.coverageStatus) return rc.coverageStatus
-  if (rc.gapType === 'verified') return 'covered'
+  if (rc.gapType === 'covered') return 'covered'
   if (rc.gapType === 'untested') return 'uncovered'
   return 'partial'
 }
@@ -401,48 +438,63 @@ function writeRailPref(open: boolean): void {
   try { localStorage.setItem(RAIL_PREF_KEY, open ? 'open' : 'closed') } catch { /* ignore */ }
 }
 
+// Bar/legend order reads good → gap: the green of `covered` leads, the work sinks
+// right. The legend doubles as the requirement filter.
+const SEG_ORDER: GapType[] = ['covered', 'path-incomplete', 'untested']
+
 function CoverageHeader({ ledger, gapFilter, onToggleGap }: { ledger: CoverageLedger; gapFilter: GapType | null; onToggleGap: (g: GapType) => void }) {
+  const { total, untested } = ledger.totals
+  const covered = countFor(ledger, 'covered')
+  const mapped = total - untested
+  const orphans = ledger.orphanRequirementIds.length
   return (
     <div className="clcov-statbar shrink-0">
       <CoverageRing pct={ledger.coveragePct} />
-      <div className="clcov-chips">
-        {BADGE_ORDER.map((g) => {
-          const count = countFor(ledger, g)
-          const meta = GAP_META[g]
-          const on = gapFilter === g
-          const empty = count === 0
-          return (
-            <button
-              key={g}
-              type="button"
-              className="clcov-chip"
-              data-testid={`gap-badge-${g}`}
-              aria-pressed={on}
-              data-on={on ? 'true' : 'false'}
-              data-empty={empty ? 'true' : 'false'}
-              onClick={() => onToggleGap(g)}
-              style={{ ['--chip' as string]: meta.color }}
-            >
-              <span className="clcov-chip-dot" style={{ background: meta.color }} />
-              {meta.label}
-              <strong className="clcov-chip-n">{count}</strong>
-            </button>
-          )
-        })}
-      </div>
-      <div className="ml-auto flex items-start" style={{ gap: 22 }}>
-        {/* Breadth: how many requirements have a corresponding test at all —
-            independent of whether it passes (that's the verified ring/stat). */}
-        <div className="clcov-verified" data-testid="mapped-stat" title="Requirements with at least one test mapped to them">
-          <span className="clcov-verified-n"><strong>{ledger.mappedPct}</strong><span>%</span></span>
-          <span className="clcov-verified-label">{ledger.totals.total - ledger.totals.untested}/{ledger.totals.total} mapped</span>
+      <div className="clcov-breakdown">
+        {/* One proportional bar makes the nesting self-evident: covered ⊂ mapped ⊂ total. */}
+        <div className="clcov-bar" data-testid="coverage-breakdown" role="img" aria-label={`${covered} covered, ${countFor(ledger, 'path-incomplete')} path-incomplete, ${untested} untested of ${total}`}>
+          {total === 0
+            ? <span className="clcov-bar-seg" style={{ flexGrow: 1, background: 'var(--border-default)' }} />
+            : SEG_ORDER.map((g) => {
+                const count = countFor(ledger, g)
+                return count === 0 ? null : <span key={g} className="clcov-bar-seg" style={{ flexGrow: count, background: GAP_META[g].color }} />
+              })}
         </div>
-        <div className="clcov-verified" title="Requirements with a passing run behind every path">
-          <span className="clcov-verified-n"><strong>{ledger.totals.verified}</strong><span>/{ledger.totals.total}</span></span>
-          <span className="clcov-verified-label">requirements verified</span>
-          {ledger.orphanRequirementIds.length > 0 && (
-            <span data-testid="orphan-note" className="clcov-orphan-note" title={ledger.orphanRequirementIds.join(', ')}>
-              {ledger.orphanRequirementIds.length} orphan annotation{ledger.orphanRequirementIds.length > 1 ? 's' : ''}
+        {/* Legend = filter. Clicking a class isolates those requirements. */}
+        <div className="clcov-legend">
+          {SEG_ORDER.map((g) => {
+            const count = countFor(ledger, g)
+            const meta = GAP_META[g]
+            const on = gapFilter === g
+            return (
+              <button
+                key={g}
+                type="button"
+                className="clcov-legend-item"
+                data-testid={`gap-badge-${g}`}
+                aria-pressed={on}
+                data-on={on ? 'true' : 'false'}
+                data-empty={count === 0 ? 'true' : 'false'}
+                onClick={() => onToggleGap(g)}
+                style={{ ['--seg' as string]: meta.color }}
+              >
+                <span className="clcov-legend-dot" style={{ background: meta.color }} />
+                {meta.label}
+                <span className="clcov-legend-n">{count}</span>
+              </button>
+            )
+          })}
+          <CoverageGlossary />
+        </div>
+        {/* Plain-language ratios — the two headline numbers, side by side, so the
+            "32 mapped but 27 covered" gap reads itself. */}
+        <div className="clcov-cap">
+          <span title="Requirements where every declared path has a mapped test"><strong>{covered}/{total}</strong> covered · {ledger.coveragePct}%</span>
+          <span className="clcov-cap-sep" aria-hidden="true">·</span>
+          <span data-testid="mapped-stat" title="Requirements with at least one test mapped to them"><strong>{mapped}/{total}</strong> mapped · {ledger.mappedPct}%</span>
+          {orphans > 0 && (
+            <span data-testid="orphan-note" className="clcov-stale" title={`These test tags point at requirements that no longer exist — re-map to clear:\n${ledger.orphanRequirementIds.join(', ')}`}>
+              ⚠ {orphans} stale tag{orphans > 1 ? 's' : ''}
             </span>
           )}
         </div>
@@ -451,13 +503,27 @@ function CoverageHeader({ ledger, gapFilter, onToggleGap }: { ledger: CoverageLe
   )
 }
 
+// One-hover glossary so the vocabulary never needs to be asked about.
+function CoverageGlossary() {
+  return (
+    <span className="clcov-info" tabIndex={0} role="note" aria-label="What these terms mean">
+      <span aria-hidden="true" className="clcov-info-i">i</span>
+      <span className="clcov-info-pop" role="tooltip">
+        <span><strong style={{ color: GAP_META.covered.color }}>Covered</strong> — every path the requirement declares (happy/sad/edge) has a mapped test.</span>
+        <span><strong style={{ color: GAP_META['path-incomplete'].color }}>Path-incomplete</strong> — a test exists, but some declared path has none.</span>
+        <span><strong style={{ color: 'var(--text-secondary)' }}>Untested</strong> — no test maps to the requirement.</span>
+        <span><strong>Mapped</strong> — has ≥1 test (covered + path-incomplete). Coverage is decoupled from test runs.</span>
+        <span><strong>Strength</strong> — how deep a test's assertions reach (Shallow → Strong).</span>
+      </span>
+    </span>
+  )
+}
+
 function countFor(ledger: CoverageLedger, g: GapType): number {
   switch (g) {
     case 'untested': return ledger.totals.untested
-    case 'unverified': return ledger.totals.unverified
     case 'path-incomplete': return ledger.totals.pathIncomplete
-    case 'shallow-verified': return ledger.totals.shallowVerified
-    case 'verified': return ledger.totals.verified
+    case 'covered': return ledger.totals.covered
   }
 }
 
@@ -471,7 +537,7 @@ function CoverageRing({ pct }: { pct: number }) {
   const offset = c * (1 - clamped / 100)
   const hue = clamped >= 80 ? 'rgb(52, 211, 153)' : clamped >= 40 ? 'rgb(251, 191, 36)' : clamped > 0 ? 'rgb(251, 113, 133)' : 'var(--text-muted)'
   return (
-    <div style={{ position: 'relative', width: 66, height: 66, flexShrink: 0 }} data-testid="coverage-ring" aria-label={`${pct}% verified`}>
+    <div style={{ position: 'relative', width: 66, height: 66, flexShrink: 0 }} data-testid="coverage-ring" aria-label={`${pct}% covered`}>
       <svg width={66} height={66} viewBox="0 0 66 66">
         <circle cx={33} cy={33} r={r} fill="none" stroke="var(--border-default)" strokeWidth={5} />
         <circle
@@ -482,7 +548,7 @@ function CoverageRing({ pct }: { pct: number }) {
       </svg>
       <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', lineHeight: 1 }}>
         <span style={{ fontSize: 16, fontWeight: 700, color: 'var(--text-primary)' }}>{Math.round(pct)}<span style={{ fontSize: 9, fontWeight: 600 }}>%</span></span>
-        <span style={{ fontSize: 8, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-muted)', marginTop: 2 }}>verified</span>
+        <span style={{ fontSize: 8, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-muted)', marginTop: 2 }}>covered</span>
       </div>
     </div>
   )
@@ -496,7 +562,7 @@ function RequirementCard({ rc, colors, active, dimmed, onHover }: {
   onHover: (on: boolean) => void
 }) {
   const meta = GAP_META[rc.gapType]
-  const rigor = rc.rigor
+  const missing = rc.pathCoverage.filter((p) => !p.covered).map((p) => p.path)
   return (
     <div
       className="clcov-card"
@@ -520,38 +586,31 @@ function RequirementCard({ rc, colors, active, dimmed, onHover }: {
         <span style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: 10.5, fontWeight: 600, color: 'var(--text-muted)', background: 'var(--bg-base)', border: '1px solid var(--border-default)', borderRadius: 5, padding: '1px 5px' }}>{rc.requirement.id}</span>
         <strong style={{ fontSize: 13, color: 'var(--text-primary)' }}>{rc.requirement.title}</strong>
         {rc.requirement.deprecated && <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>(deprecated)</span>}
-        <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 10, fontWeight: 600, color: meta.color, background: `color-mix(in srgb, ${meta.color} 12%, transparent)`, border: `1px solid color-mix(in srgb, ${meta.color} 40%, transparent)`, borderRadius: 999, padding: '2px 8px' }}>
+        <span data-testid={`gap-${rc.requirement.id}`} style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 10, fontWeight: 600, color: meta.color, background: `color-mix(in srgb, ${meta.color} 12%, transparent)`, border: `1px solid color-mix(in srgb, ${meta.color} 40%, transparent)`, borderRadius: 999, padding: '2px 8px' }}>
           <span style={{ width: 6, height: 6, borderRadius: '50%', background: meta.color }} />
-          {meta.label}
+          {meta.label}{rc.gapType === 'path-incomplete' && missing.length > 0 ? ` · needs ${missing.join(', ')}` : ''}
         </span>
       </div>
       <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.45 }}>{rc.requirement.text}</div>
       <div className="flex flex-wrap items-center gap-2" style={{ marginTop: 7 }}>
         {rc.pathCoverage.map((p) => (
-          <span key={p.path} style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: 9.5, letterSpacing: '0.02em', padding: '1px 6px', borderRadius: 5, border: `1px solid ${p.verified ? 'color-mix(in srgb, rgb(52,211,153) 40%, var(--border-default))' : 'var(--border-default)'}`, color: p.verified ? 'rgb(52,211,153)' : 'var(--text-muted)' }}>
-            {p.path} {p.verified ? '✓' : '○'}
-          </span>
+          p.covered ? (
+            <span key={p.path} style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: 9.5, letterSpacing: '0.02em', padding: '1px 7px', borderRadius: 5, background: 'color-mix(in srgb, rgb(52,211,153) 10%, transparent)', border: '1px solid color-mix(in srgb, rgb(52,211,153) 40%, var(--border-default))', color: 'rgb(52,211,153)' }}>
+              {p.path} ✓
+            </span>
+          ) : (
+            <span key={p.path} style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: 9.5, letterSpacing: '0.02em', padding: '1px 7px', borderRadius: 5, border: '1px dashed color-mix(in srgb, var(--text-muted) 55%, var(--border-default))', color: 'var(--text-muted)' }}>
+              {p.path} · no test
+            </span>
+          )
         ))}
-        {rigor && rigor.tierReached != null && rigor.tierAvailable != null && (
-          <span
-            data-testid={`strictness-${rc.requirement.id}`}
-            title={rigor.suggestedStrongerCheck ? `Stronger check: ${rigor.suggestedStrongerCheck}` : undefined}
-            style={{
-              fontSize: 10, padding: '1px 6px', borderRadius: 6, marginLeft: 'auto',
-              border: `1px solid ${rc.gapType === 'shallow-verified' ? 'rgb(251,191,36)' : 'var(--border-default)'}`,
-              color: rc.gapType === 'shallow-verified' ? 'rgb(251,191,36)' : 'var(--text-secondary)',
-            }}
-          >
-            strictness tier {rigor.tierReached}/{rigor.tierAvailable}
-          </span>
-        )}
       </div>
     </div>
   )
 }
 
-// R9: no decorative accent border — the verified dot + covers tags carry the
-// meaning. The test's `@req-*` / `@path-*` tags are surfaced as chips.
+// The test's strength chip + `@req-*` / `@path-*` tags carry the meaning — no
+// decorative accent border, and no run-coupled "verified" dot (coverage is semantic).
 function TestCard({ test, testNumber, color, active, dimmed, onHover }: {
   test: TestCoverage
   testNumber?: number
@@ -579,10 +638,6 @@ function TestCard({ test, testNumber, color, active, dimmed, onHover }: {
       }}
     >
       <div className="flex items-center gap-2">
-        <span
-          title={test.verified ? 'Has a passing run' : 'No passing run yet'}
-          style={{ width: 8, height: 8, borderRadius: '50%', flexShrink: 0, background: test.verified ? 'rgb(52,211,153)' : 'rgb(251,113,133)', boxShadow: test.verified ? '0 0 6px color-mix(in srgb, rgb(52,211,153) 70%, transparent)' : 'none' }}
-        />
         <TestIdBadge n={testNumber} />
         <strong style={{ fontSize: 13, color: 'var(--text-primary)' }}>{stripLeadingTestOrdinal(test.name)}</strong>
         {test.file && (
@@ -590,6 +645,17 @@ function TestCard({ test, testNumber, color, active, dimmed, onHover }: {
         )}
       </div>
       <div className="flex flex-wrap items-center gap-1.5" style={{ marginTop: 7 }}>
+        {test.strength && (
+          <span
+            data-testid={`strength-${test.name}`}
+            title={STRENGTH_META[test.strength].title}
+            className="flex items-center gap-1"
+            style={{ fontSize: 10, fontWeight: 600, color: STRENGTH_META[test.strength].color, background: `color-mix(in srgb, ${STRENGTH_META[test.strength].color} 14%, transparent)`, border: `1px solid color-mix(in srgb, ${STRENGTH_META[test.strength].color} 45%, transparent)`, borderRadius: 999, padding: '1px 8px' }}
+          >
+            <span aria-hidden="true" style={{ width: 6, height: 6, borderRadius: '50%', background: STRENGTH_META[test.strength].color }} />
+            {STRENGTH_META[test.strength].label}
+          </span>
+        )}
         {test.requirements.length === 0 && (
           <span data-testid={`orphan-${test.name}`} style={{ fontSize: 10, fontWeight: 600, color: 'rgb(251, 191, 36)', background: 'color-mix(in srgb, rgb(251,191,36) 12%, transparent)', border: '1px solid color-mix(in srgb, rgb(251,191,36) 40%, transparent)', borderRadius: 999, padding: '1px 8px' }}>orphan — no covers tag</span>
         )}
@@ -600,11 +666,6 @@ function TestCard({ test, testNumber, color, active, dimmed, onHover }: {
           <span key={p} style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: 10, padding: '1px 6px', borderRadius: 5, border: '1px solid var(--border-default)', color: 'var(--text-muted)' }}>@path-{p}</span>
         ))}
       </div>
-      {test.verified && test.lastPassingRun && (
-        <div style={{ marginTop: 5, fontSize: 10, color: 'var(--text-muted)' }}>
-          last pass: run {test.lastPassingRun.runId}{test.lastPassingRun.env ? ` · ${test.lastPassingRun.env}` : ''}
-        </div>
-      )}
     </div>
   )
 }
@@ -666,12 +727,28 @@ const COVERAGE_CSS = `
 .clcov-chip[data-on='true']{background:color-mix(in srgb,var(--chip) 14%,var(--bg-surface));border-color:color-mix(in srgb,var(--chip) 60%,transparent);box-shadow:0 0 0 1px color-mix(in srgb,var(--chip) 30%,transparent) inset}
 .clcov-chip-dot{width:7px;height:7px;border-radius:50%;flex:none}
 .clcov-chip-n{font-variant-numeric:tabular-nums}
-.clcov-verified{display:flex;flex-direction:column;align-items:flex-end;line-height:1.2}
-.clcov-verified-n{font-size:15px;color:var(--text-secondary)}
-.clcov-verified-n strong{font-size:18px;color:var(--text-primary);font-variant-numeric:tabular-nums}
-.clcov-verified-n span{margin-left:1px}
-.clcov-verified-label{font-size:9px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--text-muted);margin-top:2px}
-.clcov-orphan-note{margin-top:4px;font-size:10px;color:rgb(251,191,36)}
+/* Coverage breakdown: a proportional bar + legend-filter + plain-language ratios.
+   Makes covered ⊂ mapped ⊂ total legible at a glance — no question needed. */
+.clcov-breakdown{flex:1;min-width:0;display:flex;flex-direction:column;gap:8px;max-width:560px}
+.clcov-bar{display:flex;height:9px;border-radius:999px;overflow:hidden;background:var(--bg-base);border:1px solid var(--border-default)}
+.clcov-bar-seg{height:100%;min-width:3px;transition:flex-grow .35s ease}
+.clcov-bar-seg+.clcov-bar-seg{box-shadow:-1px 0 0 color-mix(in srgb,var(--bg-base) 70%,transparent)}
+.clcov-legend{display:flex;flex-wrap:wrap;align-items:center;gap:4px}
+.clcov-legend-item{display:inline-flex;align-items:center;gap:6px;appearance:none;cursor:pointer;font-size:11.5px;color:var(--text-secondary);background:transparent;border:1px solid transparent;border-radius:7px;padding:3px 8px;transition:background .14s,color .14s,border-color .14s,opacity .14s}
+.clcov-legend-item:hover{color:var(--text-primary);background:var(--bg-surface)}
+.clcov-legend-item[data-empty='true']{opacity:.4}
+.clcov-legend-item[data-on='true']{color:var(--text-primary);background:color-mix(in srgb,var(--seg) 15%,var(--bg-surface));border-color:color-mix(in srgb,var(--seg) 50%,transparent)}
+.clcov-legend-dot{width:9px;height:9px;border-radius:3px;flex:none}
+.clcov-legend-n{font-variant-numeric:tabular-nums;font-weight:700;color:var(--text-primary)}
+.clcov-cap{display:flex;flex-wrap:wrap;align-items:center;gap:9px;font-size:11px;color:var(--text-muted)}
+.clcov-cap strong{color:var(--text-secondary);font-variant-numeric:tabular-nums;font-weight:700}
+.clcov-cap-sep{color:var(--border-default)}
+.clcov-stale{color:rgb(251,191,36);cursor:help;border-bottom:1px dotted color-mix(in srgb,rgb(251,191,36) 55%,transparent)}
+.clcov-info{position:relative;display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;margin-left:2px;border-radius:50%;border:1px solid var(--border-default);color:var(--text-muted);cursor:help;outline:none}
+.clcov-info:hover,.clcov-info:focus-visible{color:var(--text-primary);border-color:color-mix(in srgb,var(--text-muted) 45%,var(--border-default))}
+.clcov-info-i{font-size:10px;font-weight:700;font-style:italic;font-family:Georgia,serif;line-height:1}
+.clcov-info-pop{position:absolute;top:calc(100% + 8px);left:0;z-index:10;width:330px;display:flex;flex-direction:column;gap:6px;padding:12px 13px;border-radius:var(--radius-md);background:var(--bg-surface);border:1px solid var(--border-default);box-shadow:var(--shadow-lg,0 8px 28px rgba(0,0,0,.4));font-size:11.5px;line-height:1.5;color:var(--text-secondary);opacity:0;visibility:hidden;transform:translateY(-3px);transition:opacity .14s,transform .14s,visibility .14s}
+.clcov-info:hover .clcov-info-pop,.clcov-info:focus-within .clcov-info-pop,.clcov-info:focus-visible .clcov-info-pop{opacity:1;visibility:visible;transform:translateY(0)}
 .clcov-card:hover{border-color:color-mix(in srgb,var(--text-muted) 38%,var(--border-default))}
 .cl-pulse{animation:clcov-pulse 1.4s ease-in-out infinite}
 @keyframes clcov-pulse{0%,100%{opacity:1}50%{opacity:.4}}
