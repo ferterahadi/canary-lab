@@ -659,14 +659,18 @@ function reviewTestBody(
         assertions.push(assertionFor(node, src, 'direct'))
       } else {
         const name = calledIdentifier(node)
-        if (name && !isPlaywrightTestCall(node) && !isNoiseHelper(name)) {
+        // A bare `expect(...)` node is the receiver of an assertion chain we
+        // already counted on the outer call — it is not a helper call, nor a
+        // check of its own. Skip the built-in by name so it never registers as
+        // a phantom unresolvable helper; custom assertion helpers like
+        // `expectLoggedIn(...)` keep their distinct name and are still graded.
+        if (name && name !== 'expect' && !isPlaywrightTestCall(node) && !isNoiseHelper(name)) {
           helperCalls.push(cleanSnippet(node.getText(src)))
           const helper = helperFor(name)
           if (helper) helperDefinitions.push(helper)
-        }
-        if (name?.startsWith('expect')) {
-          const helper = helperFor(name)
-          assertions.push(helperAssertion(node, src, helper))
+          if (name.startsWith('expect')) {
+            assertions.push(helperAssertion(node, src, helper))
+          }
         }
       }
     }
@@ -784,6 +788,10 @@ function classifyAssertion(snippet: string, matcher?: string): AssertionQuality 
   // A bare boolean/nullish `toBe` (toBe(true), toBe(null)) pins almost nothing —
   // it reads as "exact" by matcher but proves little, so don't over-credit it.
   if (m === 'tobe' && /\.tobe\(\s*(true|false|null|undefined)\s*\)/.test(text)) return 'moderate'
+  // Specificity is read from the MATCHER (structural), not from domain keywords —
+  // no hardcoded business vocabulary, so it generalizes across every feature.
+  // STRICT — pins a concrete expected value, text, URL, count, or object/array
+  // shape: the check proves a specific outcome.
   const exactMatchers = new Set([
     'tohavetext',
     'tocontaintext',
@@ -791,20 +799,50 @@ function classifyAssertion(snippet: string, matcher?: string): AssertionQuality 
     'tohavevalue',
     'tohaveattribute',
     'tohavecount',
+    'tohavelength',
     'tobechecked',
     'tobedisabled',
     'tobeenabled',
     'waitforurl',
     'toequal',
-    'tostrictEqual'.toLowerCase(),
+    'tostrictequal',
     'tobe',
+    'tomatchobject',
+    'tomatch',
+    'tocontain',
+    'tocontainequal',
+    'tohaveproperty',
+    'tobecloseto',
   ])
-  // Specificity is read from the MATCHER (structural), not from domain keywords —
-  // no hardcoded business vocabulary, so it generalizes across every feature.
   if (m && exactMatchers.has(m)) return 'strict'
-  if (m && ['tobevisible', 'tobehidden', 'toBeAttached'.toLowerCase()].includes(m)) return 'moderate'
+  // MODERATE — a meaningful condition, but the evidence is indirect: visibility
+  // or a thrown error.
+  const behavioralMatchers = new Set([
+    'tobevisible',
+    'tobehidden',
+    'tobeattached',
+    'tothrow',
+    'tothrowerror',
+  ])
+  if (m && behavioralMatchers.has(m)) return 'moderate'
   if (/visible|hidden|attached|enabled|disabled/.test(text)) return 'moderate'
+  // SHALLOW — weak existence / truthiness / quantity evidence that doesn't pin the
+  // business outcome (incl. numeric bounds, which only prove a quantity threshold).
+  const shallowMatchers = new Set([
+    'tobetruthy',
+    'tobefalsy',
+    'tobenull',
+    'tobeundefined',
+    'tobedefined',
+    'tobenan',
+    'tobegreaterthan',
+    'tobegreaterthanorequal',
+    'tobelessthan',
+    'tobelessthanorequal',
+  ])
+  if (m && shallowMatchers.has(m)) return 'shallow'
   if (/count|length|exist|present/.test(text)) return 'shallow'
+  // UNKNOWN is a true last resort — an unrecognized matcher we won't misgrade.
   return 'unknown'
 }
 
@@ -812,7 +850,7 @@ function rationaleFor(quality: AssertionQuality, snippet: string, matcher?: stri
   if (quality === 'strict') {
     return `Uses ${matcher} against concrete expected behavior or copy.`
   }
-  if (quality === 'moderate') return 'Checks a meaningful UI condition, but the static evidence is indirect.'
+  if (quality === 'moderate') return 'Checks a meaningful condition, but the static evidence is indirect.'
   if (quality === 'shallow') return 'Checks weak existence or quantity evidence without proving the business outcome.'
   return 'Static analysis could not confidently classify this assertion.'
 }

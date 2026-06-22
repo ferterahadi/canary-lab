@@ -48,6 +48,8 @@ import {
 } from '../src/features/coverage/logic/coverage/service'
 import { CoverageJobRunStore } from '../src/features/coverage/logic/coverage/jobs/store'
 import { startCoverageJob, CoverageJobConflictError } from '../src/features/coverage/logic/coverage/jobs/runner'
+import { startExternalCoverage, submitExternalCoverage } from '../src/features/coverage/logic/coverage/jobs/external'
+import type { ProposedMapping } from '../../../shared/coverage/types'
 import {
   createDraft,
   paths as draftPaths,
@@ -101,6 +103,17 @@ import { overlayExists as portifyOverlayExists } from '../src/features/portify/l
 const evaluationTextSlotInput = z.object({
   id: z.string(),
   text: z.string(),
+})
+
+// One mapping the offloaded client produces for submit_external_coverage —
+// matches the internal annotate output shape (coverage-annotate.schema.json).
+const coverageMappingInput = z.object({
+  testName: z.string().describe('Exact test name as given in the start context.'),
+  requirements: z.array(z.string()).describe('Requirement id(s) this test verifies (e.g. ["R1"]). Unknown ids are dropped.'),
+  pathTypes: z.array(z.enum(['happy', 'sad', 'edge'])).optional(),
+  file: z.string().optional().describe('Relative spec path; omit and Canary resolves it by test name.'),
+  rationale: z.string().optional(),
+  confidence: z.number().optional(),
 })
 
 const evaluationRewriteInput = z.object({
@@ -246,6 +259,8 @@ export type CanaryLabMcpToolName =
   | 'clear_prd_summary'
   | 'start_coverage_job'
   | 'get_coverage_job'
+  | 'start_external_coverage'
+  | 'submit_external_coverage'
   | 'get_feature_envset_summary'
   | 'capture_feature_env_files'
   | 'write_envset'
@@ -329,6 +344,8 @@ const AUTHOR_TOOLS = [
   'clear_prd_summary',
   'start_coverage_job',
   'get_coverage_job',
+  'start_external_coverage',
+  'submit_external_coverage',
   'get_feature_envset_summary',
   'capture_feature_env_files',
   'write_envset',
@@ -780,6 +797,86 @@ export function registerCanaryLabTools(
     const manifest = new CoverageJobRunStore(deps.store.logsDir).get(jobId)
     if (!manifest) return errorResult(`job not found: ${jobId}`)
     return asJsonResult(manifest)
+  })
+
+  registerTool('start_external_coverage', {
+    description:
+      'Start a coverage annotate-pass that YOU (this external client) drive — no local agent is spawned. Canary returns a mapping context (the active requirements, the feature\'s tests with resolvable file paths, and a `prompt`): READ each test file, decide which requirement id(s) each test verifies, then call submit_external_coverage with the mappings. Canary writes the @req-* covers tags through its canonical tag-writer and recomputes the (grounded) ledger — it never re-derives the mapping. Single-flight: rejected if a coverage job is already running for the feature. If the feature has no PRD summary yet, returns status:"needs-summary" — call regenerate_prd_summary first. The job is monitor-only in the UI (no agent stream).',
+    inputSchema: {
+      feature: z.string().describe('Existing feature name (from list_features).'),
+      session_id: z.string().describe('Stable id for your conversation — reuse it across calls.'),
+      client_kind: clientKindInput,
+      conversation_name: z.string().optional(),
+      external_session_url: z.string().optional(),
+    },
+  }, async ({ feature, session_id, client_kind, conversation_name, external_session_url }) => {
+    try {
+      const res = startExternalCoverage(
+        {
+          featuresDir: deps.featuresDir,
+          logsDir: deps.store.logsDir,
+          feature,
+          sessionId: session_id,
+          clientKind: client_kind,
+          ...(conversation_name ? { conversationName: conversation_name } : {}),
+          ...(external_session_url ? { sessionUrl: external_session_url } : {}),
+        },
+        { store: new CoverageJobRunStore(deps.store.logsDir), workspaceEvents: deps.workspaceEvents },
+      )
+      if (res.kind === 'needs-summary') {
+        return asJsonResult({
+          status: 'needs-summary',
+          feature,
+          next: `No PRD summary for "${feature}". Call regenerate_prd_summary first, then start_external_coverage again.`,
+        })
+      }
+      return asJsonResult({
+        jobId: res.manifest.jobId,
+        status: res.manifest.status,
+        canaryLabBehavior: 'tracking-only',
+        statusMeaning: 'You do the mapping using context.prompt; Canary spawns no agent — submit_external_coverage writes the tags + recomputes the ledger.',
+        context: res.context,
+        nextSteps: ['submit_external_coverage'],
+        next: `Follow context.prompt: read each test\'s file, decide its requirement id(s), then call submit_external_coverage with jobId "${res.manifest.jobId}" and mappings[].`,
+      })
+    } catch (err) {
+      if (err instanceof FeatureNotFoundError) return errorResult(err.message)
+      if (err instanceof CoverageJobConflictError) return errorResult(`${err.message} (existing job ${err.existingJobId})`)
+      throw err
+    }
+  })
+
+  registerTool('submit_external_coverage', {
+    description:
+      'Submit your test→requirement mappings for an external coverage job (from start_external_coverage). Canary writes each @req-* covers tag through its canonical tag-writer (idempotent/additive — never rewrites a test body), marks the job done, and recomputes the grounded ledger. Mappings to unknown requirement ids or unknown test names are dropped. Then call get_feature_coverage for the updated ledger.',
+    inputSchema: {
+      jobId: z.string().describe('Job id returned by start_external_coverage.'),
+      mappings: z.array(coverageMappingInput).describe('One entry per test you could map. Omit tests you cannot confidently map.'),
+    },
+  }, async ({ jobId, mappings }) => {
+    try {
+      const { manifest, result } = submitExternalCoverage(
+        {
+          featuresDir: deps.featuresDir,
+          logsDir: deps.store.logsDir,
+          jobId,
+          mappings: mappings as ProposedMapping[],
+        },
+        { store: new CoverageJobRunStore(deps.store.logsDir), workspaceEvents: deps.workspaceEvents },
+      )
+      return asJsonResult({
+        jobId: manifest.jobId,
+        feature: manifest.feature,
+        status: manifest.status,
+        applied: result.applied.length,
+        coveragePct: result.ledger.coveragePct,
+        nextSteps: ['get_feature_coverage'],
+        next: `Wrote ${result.applied.length} covers tag(s). Call get_feature_coverage("${manifest.feature}") for the updated ledger.`,
+      })
+    } catch (err) {
+      if (err instanceof FeatureNotFoundError) return errorResult(err.message)
+      return errorResult(err instanceof Error ? err.message : String(err))
+    }
   })
 
   registerTool('get_feature_envset_summary', {

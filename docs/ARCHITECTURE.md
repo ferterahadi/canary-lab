@@ -64,7 +64,7 @@ Key `apps/web-server/src/features/runs/logic/runtime/` modules:
 | `manifest.ts`, `run-paths.ts`, `run-id.ts` | Run manifest schema and path/id conventions |
 | `summary-reporter.ts`, `log-enrichment.ts`, `trace-enrichment.ts` | Evidence capture and enrichment |
 | `features/portify/logic/runtime/` | Agent-driven port-injection workflow, now its own feature (see [Portify](#portify-and-benchmark)) |
-| `features/benchmark/logic/runtime/` | Multi-arm self-heal benchmarking, now its own feature (retired from the product in 1.0.0; code retained) |
+| `features/benchmark/logic/runtime/` | Multi-arm self-heal benchmarking, its own feature (retired in 1.0.0, **revived in 1.3.0** as a preview behind `?showBenchmark=true`) |
 | `apps/web-server/src/features/coverage/logic/coverage/` | Verified Coverage Ledger: PRD summarization (`prd-summary.ts`), docs hash (`docs-collection.ts`), grounding index (`grounding.ts`), breadth computation (`ledger.ts`), rigor/strictness (`rigor.ts`), and the shared service both REST and MCP call (`service.ts`). Shared output types live in `shared/coverage/types.ts`. See [Verified Coverage](#verified-coverage). |
 
 ## Run Lifecycle
@@ -323,9 +323,12 @@ patch (plain `git apply`, `--3way` fallback) before boot after a staleness check
 the agent also writes are PERMANENT (Canary Lab reads the slots in `allocateRunPorts`
 before the overlay applies), so only the product-repo source is ephemeral.
 
-**Benchmark** (`apps/web-server/src/features/benchmark/logic/runtime/`, ~10 files) ran multi-arm
-self-heal benchmarking (race/sabotage verification). The product surface was retired
-in 1.0.0; the code remains for internal experiments.
+**Benchmark** (`apps/web-server/src/features/benchmark/logic/runtime/`, ~10 files) runs multi-arm
+self-heal benchmarking (race/sabotage verification) — measuring how the repair loop
+performs vs running tests without Canary Lab. The product surface was retired in 1.0.0
+and **revived in 1.3.0** as a preview (groundwork for pluggable harnesses), gated behind
+`?showBenchmark=true`. UI: `BenchmarkWindow`/`BenchmarkPill` (`apps/web/src/features/benchmark/`);
+internal-only (no MCP tools); the sabotage agent streams through `AgentSessionView`.
 
 ## Verified Coverage
 
@@ -353,7 +356,20 @@ opinion:
 `get_feature_coverage` / `list_feature_docs` / `regenerate_prd_summary` MCP tools both
 call it, so the UI and an agent can't diverge. The agent's role is bounded to *generate
 and map* (summarize docs, propose the ladder, resolve `unknown` assertions); canary
-*grounds and attests* (computes the %, the tier, and the evidence). The single
+*grounds and attests* (computes the %, the tier, and the evidence).
+
+The annotate-pass (mapping tests → requirements) has two execution models. **Internal**
+(`start_coverage_job`, the default): canary spawns its own `claude`/`codex` CLI
+(`annotate-engine.ts`) — even when triggered by an MCP client, the agent runs on the
+server and streams through `AgentSessionView`. **External / offloaded**
+(`start_external_coverage` → `submit_external_coverage`, `jobs/external.ts`): canary
+spawns **no** LLM — it hands the calling client the mapping context
+(`buildCoverageMappingContext`, reusing the internal annotate prompt), the client does
+the inference itself, and canary writes the tags through the canonical tag-writer
+(`applyExternalCoverageMappings`) and recomputes. Such jobs carry `producer: 'external'`,
+have no `sessionRef`, and render monitor-only in the Generating pane. Both models feed the
+*same* deterministic ledger recompute, which is producer-agnostic (it only reads on-disk
+tags + run history). The single
 highest-risk invariant is **requirement-id stability across PRD regeneration** —
 `reconcileRequirementIds` (in `prd-summary.ts`) preserves a surviving requirement's id
 (by echoed id or exact title match) and carries dropped ones as `deprecated`, because a

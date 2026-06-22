@@ -463,7 +463,7 @@ const sharedCheck = (page) => {
       expect.objectContaining({ label: 'waitForURL', quality: 'strict' }),
       expect.objectContaining({ label: 'toBeVisible', quality: 'moderate' }),
       expect.objectContaining({ label: 'toBeGreaterThan', quality: 'shallow' }),
-      expect.objectContaining({ label: 'toBeTruthy', quality: 'unknown' }),
+      expect.objectContaining({ label: 'toBeTruthy', quality: 'shallow' }),
       expect.objectContaining({ helperName: 'expectReadyAlias', quality: 'strict' }),
     ]))
     expect(html).toContain('<summary>Test code</summary>')
@@ -655,7 +655,7 @@ test('second shared helper', async ({ page }) => {
       }))
       expect(packet.tests[0].assertions).toContainEqual(expect.objectContaining({
         helperName: 'expectInline',
-        quality: 'unknown',
+        quality: 'shallow',
       }))
       expect(packet.tests[0].assertions).toContainEqual(expect.objectContaining({
         helperName: 'expectVarDecl',
@@ -788,6 +788,7 @@ function expectOneNested(page) {
     fs.mkdirSync(e2eDir, { recursive: true })
     const spec = path.join(e2eDir, 'actions.spec.ts')
     const specSource = `import { test, expect } from '@playwright/test'
+import { expectFromLib } from 'external-assertions'
 
 test('A. authAPI -> warning incl auto-resolved', async ({ page }) => {
   test.skip(!process.env.E2E_USER, 'missing user')
@@ -810,6 +811,7 @@ test('A. authAPI -> warning incl auto-resolved', async ({ page }) => {
   await expect(page.locator('.toast')).toBeVisible()
   await expect(page.locator('.rows')).toHaveCount(1)
   await expectUnknownOutcome(page)
+  await expectFromLib(page)
   await unknownUtility(page)
   void start
 })
@@ -885,8 +887,17 @@ function unknownUtility(page) {
     expect(html).toContain('Check linked records')
     expect(html).toContain('Click the relevant control')
     expect(html).toContain('Enter the required value')
-    expect(html).toContain('Confidence: 3 exact, 1 behavioral, 4 not graded')
+    // expectUnknownOutcome resolves to a nested toBeTruthy (surface-level), so it
+    // is graded; only expectFromLib is genuinely unresolvable and not graded. The
+    // built-in `expect(...)` receiver of each real assertion must NOT be counted
+    // as its own ungradeable helper check.
+    expect(html).toContain('Confidence: 3 exact, 1 behavioral, 1 surface-level, 1 not graded')
+    expect(html).toContain('Helper resolves to 1 nested assertion')
+    // The "could not be resolved statically" message fires only for the truly
+    // unresolvable helper — never once per built-in expect() sub-expression.
     expect(html).toContain('Helper implementation could not be resolved statically')
+    expect((html.match(/Helper implementation could not be resolved statically/g) ?? []).length).toBe(1)
+    expect(html).not.toContain('<code>expect(page.getByText(&#39;Success&#39;))</code>')
   })
 
   it('covers internal rewrite parsing and audience wording branches', () => {

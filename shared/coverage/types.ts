@@ -246,6 +246,16 @@ export interface CoverageJobManifest {
   sessionRef?: { agent: 'claude' | 'codex'; sessionId: string }
   result?: CoverageJobResult
   error?: string
+  /** Execution model. Absent / 'internal' = Canary spawned its own agent CLI
+   *  (the default coverage flow). 'external' = an MCP client did the annotation
+   *  itself (offload model) and Canary only tracks + recomputes the ledger; such
+   *  a job has NO sessionRef, so the Generating screen renders it monitor-only. */
+  producer?: 'internal' | 'external'
+  /** External-producer metadata, set only when producer === 'external'. */
+  externalClientKind?: string
+  externalSessionId?: string
+  externalConversationName?: string
+  externalSessionUrl?: string
 }
 
 export interface CoverageJobIndexEntry {

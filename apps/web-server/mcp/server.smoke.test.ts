@@ -79,6 +79,8 @@ const AUTHOR_TOOLS = uniqueSorted([
   'list_feature_docs',
   'regenerate_prd_summary',
   'start_coverage_job',
+  'start_external_coverage',
+  'submit_external_coverage',
   'get_portify',
   'get_run',
   'get_run_snapshot',
