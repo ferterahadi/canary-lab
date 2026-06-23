@@ -65,6 +65,12 @@ export function CoverageLedgerPage({ feature, onClose }: Props) {
   const [hovered, setHovered] = useState<Hovered | null>(null)
   const [gapFilter, setGapFilter] = useState<GapType | null>(null)
   const [strengthFilter, setStrengthFilter] = useState<TestStrength | null>(null)
+  // A @req tag on a test card jumps to (and briefly rings) its requirement card in
+  // the PRD pane. Nonce so re-clicking the same id re-fires the scroll/flash.
+  const [focusReq, setFocusReq] = useState<{ id: string; n: number } | null>(null)
+  const prdPaneRef = useRef<HTMLDivElement>(null)
+  const focusClearRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const focusNonce = useRef(0)
   // R22: one unified view (no tabs). Docs is a collapsible left rail; its
   // open/closed state persists across refresh (R12).
   const [railOpen, setRailOpen] = useState<boolean>(() => readRailPref())
@@ -100,7 +106,10 @@ export function CoverageLedgerPage({ feature, onClose }: Props) {
     return () => document.removeEventListener('keydown', onKey)
   }, [onClose])
 
-  useEffect(() => () => { if (pollRef.current) clearTimeout(pollRef.current) }, [])
+  useEffect(() => () => {
+    if (pollRef.current) clearTimeout(pollRef.current)
+    if (focusClearRef.current) clearTimeout(focusClearRef.current)
+  }, [])
 
   const pollJob = useCallback((jobId: string) => {
     const tick = () => {
@@ -123,7 +132,13 @@ export function CoverageLedgerPage({ feature, onClose }: Props) {
             setDocsReloadKey((k) => k + 1)
           }
         })
-        .catch((e: unknown) => { setActionError(e instanceof Error ? e.message : String(e)); setJob(null) })
+        .catch(() => {
+          // Transient fetch error (network blip, server restart) — do NOT assume the
+          // job ended (setJob(null) here would flip to a stale ledger) and do NOT
+          // leave the chain dead. Re-arm so the poll recovers; the reconcile backstop
+          // below owns the authoritative "is it actually over" decision.
+          pollRef.current = setTimeout(tick, 1500)
+        })
     }
     tick()
   }, [refresh])
@@ -164,6 +179,35 @@ export function CoverageLedgerPage({ feature, onClose }: Props) {
       .catch(() => {})
     return () => { cancelled = true }
   }, [feature, pollJob])
+
+  // Self-healing backstop for the Generating screen. The per-job poll above is an
+  // in-memory setTimeout chain: if a single getCoverageJob fetch HANGS (a server
+  // restart from a redeploy, a suspended tab, a throttled-network stall) the chain
+  // wedges and the screen shows GENERATING forever even though the job finished long
+  // ago. A lost completion can't be tolerated, so independently reconcile against the
+  // authoritative, file-backed job index on a fixed interval (setInterval — a hung
+  // fetch just skips a tick, the next still fires). Once the server reports no running
+  // job for this feature on two consecutive checks (the 2nd guards the brief
+  // summary→coverage chain-handoff window so we don't clear mid-chain), the job is
+  // over: drop the Generating screen and pull the fresh ledger. Self-limiting — the
+  // effect only exists while generating and tears down the moment the screen clears.
+  const isGenerating = job !== null
+  useEffect(() => {
+    if (!isGenerating) return
+    let stop = false
+    let idleChecks = 0
+    const id = setInterval(() => {
+      api.listCoverageJobs(feature)
+        .then((jobs) => {
+          if (stop) return
+          if (jobs.some((j) => j.status === 'running')) { idleChecks = 0; return }
+          idleChecks += 1
+          if (idleChecks >= 2) { setJob(null); refresh(); setDocsReloadKey((k) => k + 1) }
+        })
+        .catch(() => {})
+    }, 3000)
+    return () => { stop = true; clearInterval(id) }
+  }, [isGenerating, feature, refresh])
 
   // Stable colour per test name (by position in the ledger's test list).
   const colorByTest = useMemo(() => {
@@ -262,6 +306,27 @@ export function CoverageLedgerPage({ feature, onClose }: Props) {
     [ledger],
   )
 
+  // Jump a test's `@req` tag to its requirement card. If a gap filter is hiding the
+  // target, lift it first so the card is reachable, then scroll + ring it (the scroll
+  // effect re-runs once visibleReqs reflects the lifted filter).
+  const focusRequirement = useCallback((id: string) => {
+    setGapFilter((cur) => {
+      if (!cur) return cur
+      const rc = ledger?.requirements.find((r) => r.requirement.id === id)
+      return rc && rc.gapType === cur ? cur : null
+    })
+    focusNonce.current += 1
+    setFocusReq({ id, n: focusNonce.current })
+    if (focusClearRef.current) clearTimeout(focusClearRef.current)
+    focusClearRef.current = setTimeout(() => setFocusReq(null), 1800)
+  }, [ledger])
+
+  useEffect(() => {
+    if (!focusReq) return
+    const el = prdPaneRef.current?.querySelector<HTMLElement>(`[data-testid="req-${focusReq.id}"]`)
+    el?.scrollIntoView?.({ block: 'center', behavior: 'smooth' })
+  }, [focusReq, visibleReqs])
+
   const generating = Boolean(job)
 
   const state = ledger?.state
@@ -336,6 +401,7 @@ export function CoverageLedgerPage({ feature, onClose }: Props) {
               sourceLoading={specSourceLoading}
               sourceError={specSourceError}
               onOpenEditor={openTestInEditor}
+              onReqClick={focusRequirement}
             />
           ))}
         </>
@@ -400,7 +466,7 @@ export function CoverageLedgerPage({ feature, onClose }: Props) {
                 <CoverageHeader ledger={ledger} gapFilter={gapFilter} onToggleGap={(g) => setGapFilter((cur) => (cur === g ? null : g))} />
                 <div className="flex min-h-0 flex-1">
                   {/* PRD / requirements pane */}
-                  <div className="min-h-0 flex-1 overflow-auto border-r p-4" style={{ borderColor: 'var(--border-default)', scrollbarGutter: 'stable' }} data-testid="prd-pane">
+                  <div ref={prdPaneRef} className="min-h-0 flex-1 overflow-auto border-r p-4" style={{ borderColor: 'var(--border-default)', scrollbarGutter: 'stable' }} data-testid="prd-pane">
                     {visibleReqs.length === 0 && (
                       <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>
                         {ledger.requirements.length === 0 ? 'No PRD requirements yet — regenerate the summary.' : 'No requirements match this filter.'}
@@ -412,6 +478,7 @@ export function CoverageLedgerPage({ feature, onClose }: Props) {
                         rc={rc}
                         colors={(ledger.tests.filter((t) => t.requirements.includes(rc.requirement.id)).map((t) => colorByTest.get(t.name)!))}
                         active={activeReqIds.has(rc.requirement.id)}
+                        focused={focusReq?.id === rc.requirement.id}
                         dimmed={Boolean(hovered) && !activeReqIds.has(rc.requirement.id)}
                         onHover={(on) => setHovered(on ? { kind: 'req', key: rc.requirement.id } : null)}
                       />
@@ -572,7 +639,6 @@ function CoverageGlossary() {
         <span><strong style={{ color: GAP_META['path-incomplete'].color }}>Path-incomplete</strong> — a test exists, but some declared path has none.</span>
         <span><strong style={{ color: 'var(--text-secondary)' }}>Untested</strong> — no test maps to the requirement.</span>
         <span><strong>Mapped</strong> — has ≥1 test (covered + path-incomplete). Coverage is decoupled from test runs.</span>
-        <span><strong>Strength</strong> — how deep a test's assertions reach (Shallow → Strong).</span>
       </span>
     </span>
   )
@@ -613,10 +679,11 @@ function CoverageRing({ pct }: { pct: number }) {
   )
 }
 
-function RequirementCard({ rc, colors, active, dimmed, onHover }: {
+function RequirementCard({ rc, colors, active, focused, dimmed, onHover }: {
   rc: RequirementCoverage
   colors: string[]
   active: boolean
+  focused: boolean
   dimmed: boolean
   onHover: (on: boolean) => void
 }) {
@@ -632,6 +699,7 @@ function RequirementCard({ rc, colors, active, dimmed, onHover }: {
       className="clcov-card"
       data-testid={`req-${rc.requirement.id}`}
       data-active={active ? 'true' : 'false'}
+      data-focus={focused ? 'true' : 'false'}
       onMouseEnter={() => onHover(true)}
       onMouseLeave={() => onHover(false)}
       style={{
@@ -643,7 +711,7 @@ function RequirementCard({ rc, colors, active, dimmed, onHover }: {
         border: '1px solid var(--border-default)',
         borderLeft: `3px solid ${colors[0] ?? 'var(--border-default)'}`,
         opacity: dimmed ? 0.4 : 1,
-        transition: 'opacity 120ms, background 120ms, border-color 140ms',
+        transition: 'opacity 120ms, background 120ms, border-color 140ms, box-shadow 140ms',
       }}
     >
       <div
@@ -666,19 +734,21 @@ function RequirementCard({ rc, colors, active, dimmed, onHover }: {
         {rc.requirement.deprecated && <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>(deprecated)</span>}
         <span data-testid={`gap-${rc.requirement.id}`} style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 10, fontWeight: 600, color: meta.color, background: `color-mix(in srgb, ${meta.color} 12%, transparent)`, border: `1px solid color-mix(in srgb, ${meta.color} 40%, transparent)`, borderRadius: 999, padding: '2px 8px' }}>
           <span style={{ width: 6, height: 6, borderRadius: '50%', background: meta.color }} />
-          {meta.label}{rc.gapType === 'path-incomplete' && missing.length > 0 ? ` · needs ${missing.join(', ')}` : ''}
+          {meta.label}{rc.gapType === 'path-incomplete' && missing.length > 0 ? ` · ${missing.join('/')}` : ''}
         </span>
       </div>
       <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.45 }}>{rc.requirement.text}</div>
       <div className="flex flex-wrap items-center gap-2" style={{ marginTop: 7 }}>
         {rc.pathCoverage.map((p) => (
           p.covered ? (
-            <span key={p.path} style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: 9.5, letterSpacing: '0.02em', padding: '1px 7px', borderRadius: 5, background: 'color-mix(in srgb, rgb(52,211,153) 10%, transparent)', border: '1px solid color-mix(in srgb, rgb(52,211,153) 40%, var(--border-default))', color: 'rgb(52,211,153)' }}>
+            <span key={p.path} data-testid={`path-${rc.requirement.id}-${p.path}`} title={`${p.path} path has a mapped test`} style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: 9.5, letterSpacing: '0.02em', padding: '1px 7px', borderRadius: 5, background: 'color-mix(in srgb, rgb(52,211,153) 10%, transparent)', border: '1px solid color-mix(in srgb, rgb(52,211,153) 40%, var(--border-default))', color: 'rgb(52,211,153)' }}>
               {p.path} ✓
             </span>
           ) : (
-            <span key={p.path} style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: 9.5, letterSpacing: '0.02em', padding: '1px 7px', borderRadius: 5, border: '1px dashed color-mix(in srgb, var(--text-muted) 55%, var(--border-default))', color: 'var(--text-muted)' }}>
-              {p.path} · no test
+            // No test for this path — the dashed/muted treatment carries that; the
+            // word "no test" was redundant with the pill's "· {path}" gap note.
+            <span key={p.path} data-testid={`path-${rc.requirement.id}-${p.path}`} title={`No test maps to the ${p.path} path`} style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: 9.5, letterSpacing: '0.02em', padding: '1px 7px', borderRadius: 5, border: '1px dashed color-mix(in srgb, var(--text-muted) 55%, var(--border-default))', color: 'var(--text-muted)' }}>
+              {p.path}
             </span>
           )
         ))}
@@ -709,7 +779,7 @@ function RequirementCard({ rc, colors, active, dimmed, onHover }: {
 // The test's strength chip + `@req-*` / `@path-*` tags carry the meaning — no
 // decorative accent border, and no run-coupled "verified" dot (coverage is semantic).
 // Click the header to disclose the actual test source (lazily fetched by the parent).
-function TestCard({ test, testNumber, color, active, dimmed, onHover, onExpand, source, sourceLoading, sourceError, onOpenEditor }: {
+function TestCard({ test, testNumber, color, active, dimmed, onHover, onExpand, source, sourceLoading, sourceError, onOpenEditor, onReqClick }: {
   test: TestCoverage
   testNumber?: number
   color: string
@@ -721,6 +791,7 @@ function TestCard({ test, testNumber, color, active, dimmed, onHover, onExpand, 
   sourceLoading: boolean
   sourceError: string | null
   onOpenEditor: (absFile: string, line?: number) => void
+  onReqClick: (id: string) => void
 }) {
   const [expanded, setExpanded] = useState(false)
   const toggle = () => {
@@ -779,7 +850,15 @@ function TestCard({ test, testNumber, color, active, dimmed, onHover, onExpand, 
           <span data-testid={`orphan-${test.name}`} style={{ fontSize: 10, fontWeight: 600, color: 'rgb(251, 191, 36)', background: 'color-mix(in srgb, rgb(251,191,36) 12%, transparent)', border: '1px solid color-mix(in srgb, rgb(251,191,36) 40%, transparent)', borderRadius: 999, padding: '1px 8px' }}>orphan — no covers tag</span>
         )}
         {test.requirements.map((id) => (
-          <span key={id} style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: 10, padding: '1px 6px', borderRadius: 5, background: `color-mix(in srgb, ${color} 14%, transparent)`, border: `1px solid color-mix(in srgb, ${color} 55%, transparent)`, color: 'var(--text-primary)' }}>@req-{id}</span>
+          <button
+            key={id}
+            type="button"
+            className="clcov-reqtag"
+            data-testid={`reqtag-${test.name}-${id}`}
+            title={`Jump to ${id}`}
+            onClick={(e) => { e.stopPropagation(); onReqClick(id) }}
+            style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: 10, padding: '1px 6px', borderRadius: 5, background: `color-mix(in srgb, ${color} 14%, transparent)`, border: `1px solid color-mix(in srgb, ${color} 55%, transparent)`, color: 'var(--text-primary)' }}
+          >@req-{id}</button>
         ))}
         {test.pathTypes.map((p) => (
           <span key={p} style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: 10, padding: '1px 6px', borderRadius: 5, border: '1px solid var(--border-default)', color: 'var(--text-muted)' }}>@path-{p}</span>
@@ -898,6 +977,12 @@ const COVERAGE_CSS = `
 .clcov-info-pop{position:absolute;top:calc(100% + 8px);left:0;z-index:10;width:330px;display:flex;flex-direction:column;gap:6px;padding:12px 13px;border-radius:var(--radius-md);background:var(--bg-surface);border:1px solid var(--border-default);box-shadow:var(--shadow-lg,0 8px 28px rgba(0,0,0,.4));font-size:11.5px;line-height:1.5;color:var(--text-secondary);opacity:0;visibility:hidden;transform:translateY(-3px);transition:opacity .14s,transform .14s,visibility .14s}
 .clcov-info:hover .clcov-info-pop,.clcov-info:focus-within .clcov-info-pop,.clcov-info:focus-visible .clcov-info-pop{opacity:1;visibility:visible;transform:translateY(0)}
 .clcov-card:hover{border-color:color-mix(in srgb,var(--text-muted) 38%,var(--border-default))}
+/* A @req tag jumped-to from a test card: a brief accent ring locates the card. */
+.clcov-card[data-focus='true']{box-shadow:0 0 0 2px color-mix(in srgb,var(--accent,rgb(56,189,248)) 70%,transparent)}
+/* Clickable @req tags on a test card — jump to the matching requirement. */
+.clcov-reqtag{appearance:none;cursor:pointer;transition:transform .1s,filter .12s}
+.clcov-reqtag:hover{transform:translateY(-1px);filter:brightness(1.18)}
+.clcov-reqtag:focus-visible{outline:none;box-shadow:0 0 0 2px color-mix(in srgb,var(--accent,rgb(56,189,248)) 55%,transparent)}
 .cl-pulse{animation:clcov-pulse 1.4s ease-in-out infinite}
 @keyframes clcov-pulse{0%,100%{opacity:1}50%{opacity:.4}}
 .clcov-skel{display:inline-block;border-radius:5px;background:color-mix(in srgb,var(--text-muted) 16%,var(--bg-base));position:relative;overflow:hidden}

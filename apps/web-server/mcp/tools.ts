@@ -235,7 +235,7 @@ const WAIT_FOR_HEAL_TASK_MAX_TIMEOUT_MS = 60 * 60 * 1000
 // working — they just get a `still_waiting` to loop on sooner.
 const WAIT_FOR_HEAL_TASK_WINDOW_MS = 120 * 1000
 
-export const CANARY_LAB_MCP_PROFILES = ['repair', 'verify', 'author', 'full'] as const
+export const CANARY_LAB_MCP_PROFILES = ['repair', 'verify', 'author', 'portify', 'lifecycle', 'full'] as const
 export type CanaryLabMcpProfile = typeof CANARY_LAB_MCP_PROFILES[number]
 
 export type CanaryLabMcpToolName =
@@ -361,6 +361,15 @@ const AUTHOR_TOOLS = [
   'start_external_draft',
   'update_external_draft_stage',
   'apply_external_draft',
+] as const satisfies readonly CanaryLabMcpToolName[]
+
+// Portify is a specialized, infrequent operation (make a feature's ports
+// injectable so it can boot concurrently). It lives in its own profile so the
+// everyday authoring/lifecycle surface stays lean; clients that need it connect
+// with profile=portify (or full).
+const PORTIFY_TOOLS = [
+  'list_features',
+  'list_runs',
   'start_portify',
   'start_external_portify',
   'submit_external_portify',
@@ -371,18 +380,19 @@ const AUTHOR_TOOLS = [
   'list_portify_status',
 ] as const satisfies readonly CanaryLabMcpToolName[]
 
-// Tools that exist only in the `full` profile — everything else is composed
-// from the per-workflow profiles above.
+// Tools that exist only in the `full`/`lifecycle` profiles — everything else is
+// composed from the per-workflow profiles above.
 const FULL_ONLY_TOOLS = [
   'get_run_actions',
   'claim_heal',
   'release_heal',
 ] as const satisfies readonly CanaryLabMcpToolName[]
 
-// `full` is the deduplicated union of every profile plus the full-only tools.
-// Defining it as a union means adding a tool to any profile surfaces it in
-// `full` automatically — no second edit, no drift, no duplicate entries.
-const FULL_TOOLS: readonly CanaryLabMcpToolName[] = Array.from(
+// `lifecycle` is the end-to-end authoring → run → heal → verify → export surface
+// MINUS portify — the everyday one-session profile. `full` is `lifecycle` plus
+// portify. Both are deduplicated unions, so adding a tool to any workflow array
+// surfaces it automatically — no second edit, no drift, no duplicate entries.
+const LIFECYCLE_TOOLS: readonly CanaryLabMcpToolName[] = Array.from(
   new Set<CanaryLabMcpToolName>([
     ...REPAIR_TOOLS,
     ...VERIFY_TOOLS,
@@ -391,10 +401,19 @@ const FULL_TOOLS: readonly CanaryLabMcpToolName[] = Array.from(
   ]),
 )
 
+const FULL_TOOLS: readonly CanaryLabMcpToolName[] = Array.from(
+  new Set<CanaryLabMcpToolName>([
+    ...LIFECYCLE_TOOLS,
+    ...PORTIFY_TOOLS,
+  ]),
+)
+
 const TOOLS_BY_PROFILE: Record<CanaryLabMcpProfile, readonly CanaryLabMcpToolName[]> = {
   repair: REPAIR_TOOLS,
   verify: VERIFY_TOOLS,
   author: AUTHOR_TOOLS,
+  portify: PORTIFY_TOOLS,
+  lifecycle: LIFECYCLE_TOOLS,
   full: FULL_TOOLS,
 }
 
@@ -662,7 +681,7 @@ export function registerCanaryLabTools(
 
   registerTool('write_feature_doc', {
     description:
-      'Write a prose doc (distilled session, plan, notes) into a feature\'s docs/ directory — the home for feature-scoped documentation. Create-or-replace: pick a descriptive relPath (e.g. "2026-05-28-line-integration-notes.md"); re-writing the same path overwrites. Markdown only (.md/.markdown). Use this for "add this plan/distillation to feature <name>".',
+      'Write a prose doc (session, plan, notes) into a feature\'s docs/ dir. Create-or-replace (re-writing the same relPath overwrites); markdown only (.md/.markdown). Use for "add this plan/distillation to feature <name>".',
     inputSchema: {
       feature: z.string().describe('Existing feature name (from list_features).'),
       relPath: z.string().describe('Path relative to the feature docs/ dir, e.g. "notes.md" or "sessions/2026-05-28.md". A leading "docs/" is optional. Must end in .md or .markdown.'),
@@ -679,7 +698,7 @@ export function registerCanaryLabTools(
 
   registerTool('delete_feature_doc', {
     description:
-      'Delete a SOURCE doc from a feature\'s docs/ directory (the UI Docs-tab pill\'s remove action). Refuses generated artifacts (the _prd-* / _coverage-* files canary manages). After removing docs, regenerate the PRD summary so coverage reflects the change.',
+      'Delete a SOURCE doc from a feature\'s docs/ dir. Refuses generated artifacts (_prd-* / _coverage-* files canary manages). After removing docs, regenerate the PRD summary so coverage reflects the change.',
     inputSchema: {
       feature: z.string().describe('Existing feature name (from list_features).'),
       relPath: z.string().describe('Path of the source doc relative to docs/, e.g. "notes.md". A leading "docs/" is optional.'),
@@ -695,7 +714,7 @@ export function registerCanaryLabTools(
 
   registerTool('get_feature_coverage', {
     description:
-      'Get the Semantic Coverage Ledger for a feature: PRD requirements → mapped tests → gap type (untested / path-incomplete / covered) with a coverage % (covered ÷ total — every declared path claimed by a mapped test) and a mapped % (requirements with ≥1 test), PLUS per-test strength (strong / solid / basic / shallow, graded from each test\'s assertion tiers) and docs-drift status. Coverage is DECOUPLED from test runs — it measures whether a test maps to each requirement+path, never whether a run passed. Use this to find untested/path-incomplete requirements and shallow tests (and what stronger check to write).',
+      'Get the Semantic Coverage Ledger: PRD requirements → mapped tests → gap type (untested / path-incomplete / covered) with a coverage % (covered ÷ total declared paths) and mapped % (requirements with ≥1 test), per-test strength (strong/solid/basic/shallow from assertion tiers), and docs-drift. DECOUPLED from test runs — measures test→requirement+path mapping, never whether a run passed. Use it to find untested/path-incomplete requirements and shallow tests.',
     inputSchema: { feature: z.string().describe('Existing feature name (from list_features).') },
   }, async ({ feature }) => {
     try {
@@ -725,7 +744,7 @@ export function registerCanaryLabTools(
 
   registerTool('regenerate_prd_summary', {
     description:
-      'Regenerate a feature\'s PRD summary from its current source docs (after you add or edit docs with write_feature_doc, or when get_feature_coverage reports docsDrift). Existing requirement ids are PRESERVED so inline @requirement annotations keep resolving; new requirements get new ids, removed ones are marked deprecated. Writes docs/_prd-summary.{json,md}. Same action as the UI Docs-tab "Regenerate" button.',
+      'Regenerate a feature\'s PRD summary from its source docs (after doc edits, or when get_feature_coverage reports docsDrift). Existing requirement ids are PRESERVED (new ones get new ids; removed ones marked deprecated). Writes docs/_prd-summary.{json,md}.',
     inputSchema: {
       feature: z.string().describe('Existing feature name (from list_features).'),
       adapter: z.enum(['auto', 'claude', 'codex']).optional()
@@ -748,7 +767,7 @@ export function registerCanaryLabTools(
 
   registerTool('clear_prd_summary', {
     description:
-      'Reset a feature\'s coverage to a blank slate: remove the generated PRD summary and the coverage sidecars tied to it (pending mappings, run-state), AND strip the @req-*/@path-* coverage tags the engine wrote into the spec files (other tags are kept; emptied tag lists/details objects are removed so specs revert to their pre-coverage shape). Source docs (uploaded PRD docs) are untouched; the feature returns to the "no summary" state (and the whole surface to its initial empty state if no source docs remain). Returns { removed, untagged } — untagged lists the specs whose tags were cleared. Same action as the UI "Redo from the start".',
+      'Reset a feature\'s coverage to a blank slate: remove the generated PRD summary + its coverage sidecars (pending mappings, run-state) and strip the @req-*/@path-* tags from the specs (other tags kept; specs revert to pre-coverage shape). Source docs are untouched; the feature returns to the "no summary" state. Returns { removed, untagged } (untagged = specs whose tags were cleared).',
     inputSchema: { feature: z.string().describe('Existing feature name (from list_features).') },
   }, async ({ feature }) => {
     try {
@@ -761,7 +780,7 @@ export function registerCanaryLabTools(
 
   registerTool('start_coverage_job', {
     description:
-      'Start an ASYNC background job for a feature: kind:"summary" regenerates the PRD summary from source docs (preserving requirement ids) AND then auto-chains the coverage engine (Summary + Coverage are one exercise); kind:"coverage" runs only the coverage engine — it infers which requirement(s) each untagged test verifies and writes the @req-* covers tag immediately (no review gate). Non-blocking and single-flight: a second job of the same kind for the same feature is rejected while one is running. A summary job records its chained coverage job id as chainedJobId. Poll get_coverage_job with the returned jobId. Same action as the UI Coverage dialog\'s Regenerate buttons.',
+      'Start an ASYNC coverage job. kind:"summary" regenerates the PRD summary (preserving ids) then auto-chains the coverage engine; kind:"coverage" runs only the engine, which infers each untagged test\'s requirement(s) and writes the @req-* tag immediately (no review gate). Non-blocking + single-flight (same kind+feature rejected while running). A summary job records its chained coverage job as chainedJobId. Poll get_coverage_job(jobId).',
     inputSchema: {
       feature: z.string().describe('Existing feature name (from list_features).'),
       kind: z.enum(['summary', 'coverage']).describe('summary = regenerate the PRD summary, then auto-run coverage; coverage = run only the annotate-pass engine.'),
@@ -791,7 +810,7 @@ export function registerCanaryLabTools(
 
   registerTool('get_coverage_job', {
     description:
-      'Poll a coverage background job by jobId (from start_coverage_job). Returns the manifest: status (running / done / failed / aborted), captured log, chainedJobId (for a summary job, the coverage job it auto-started — poll that next to follow the full exercise), and on done a result summary (requirementCount for summary jobs; applied tag-write count for coverage jobs). Then call get_feature_coverage for the updated ledger.',
+      'Poll a coverage job by jobId. Returns status (running/done/failed/aborted), captured log, chainedJobId (a summary job\'s auto-started coverage job — poll that next), and on done a result summary (requirementCount for summary; applied tag-write count for coverage). Then call get_feature_coverage.',
     inputSchema: { jobId: z.string().describe('Job id returned by start_coverage_job.') },
   }, async ({ jobId }) => {
     const manifest = new CoverageJobRunStore(deps.store.logsDir).get(jobId)
@@ -801,7 +820,7 @@ export function registerCanaryLabTools(
 
   registerTool('start_external_coverage', {
     description:
-      'Start a coverage annotate-pass that YOU (this external client) drive — no local agent is spawned. Canary returns a mapping context (the active requirements, the feature\'s tests with resolvable file paths, and a `prompt`): READ each test file, decide which requirement id(s) each test verifies, then call submit_external_coverage with the mappings. Canary writes the @req-* covers tags through its canonical tag-writer and recomputes the (grounded) ledger — it never re-derives the mapping. Single-flight: rejected if a coverage job is already running for the feature. If the feature has no PRD summary yet, returns status:"needs-summary" — call regenerate_prd_summary first. The job is monitor-only in the UI (no agent stream).',
+      'Start a coverage mapping pass YOU drive — no local agent. Returns the active requirements, the feature\'s tests (with file paths to read), and a `prompt`: read each test, decide its requirement id(s), then call submit_external_coverage with the mappings. Canary writes the @req-* tags via its canonical tag-writer and recomputes the ledger (never re-derives the mapping). Single-flight (rejected if a coverage job is running). No PRD summary yet → status:"needs-summary" (call regenerate_prd_summary first).',
     inputSchema: {
       feature: z.string().describe('Existing feature name (from list_features).'),
       session_id: z.string().describe('Stable id for your conversation — reuse it across calls.'),
@@ -848,7 +867,7 @@ export function registerCanaryLabTools(
 
   registerTool('submit_external_coverage', {
     description:
-      'Submit your test→requirement mappings for an external coverage job (from start_external_coverage). Canary writes each @req-* covers tag through its canonical tag-writer (idempotent/additive — never rewrites a test body), marks the job done, and recomputes the grounded ledger. Mappings to unknown requirement ids or unknown test names are dropped. Then call get_feature_coverage for the updated ledger.',
+      'Submit your test→requirement mappings for an external coverage job. Canary writes each @req-* tag via its canonical tag-writer (idempotent/additive — never rewrites a test body), marks the job done, and recomputes the ledger; unknown ids/test names are dropped. Then call get_feature_coverage.',
     inputSchema: {
       jobId: z.string().describe('Job id returned by start_external_coverage.'),
       mappings: z.array(coverageMappingInput).describe('One entry per test you could map. Omit tests you cannot confidently map.'),
@@ -1228,7 +1247,7 @@ export function registerCanaryLabTools(
 
   // ── Port-ification (make a feature's apps use injectable ports) ──────────
   registerTool('start_portify', {
-    description: "Start a port-ification workflow: an agent rewrites a feature's apps so every network listener reads an injected port, proven by booting the stack twice concurrently. The verified edits are saved as an EPHEMERAL OVERLAY (a captured patch under features/<feature>/portify/) — never committed or merged, so the product repo stays pristine; at run time the overlay is applied into a per-run worktree and reverse-applied at teardown. Async — returns a workflowId; poll get_portify, then save_portify once it is ready-to-save. One workflow at a time.",
+    description: "Start a port-ification workflow: a LOCAL agent rewrites a feature's network listeners to read an injected port, proven by a concurrent double-boot. Async — returns a workflowId; poll get_portify, then save_portify once ready-to-save. Verified edits save as an ephemeral overlay (features/<feature>/portify/) — never committed; applied per-run at boot, reverse-applied at teardown. One workflow at a time.",
     inputSchema: {
       feature: z.string().describe('Feature name (from list_features).'),
       agent: z.enum(['claude', 'codex']).optional().describe('Which CLI does the rewrite. Defaults to an available local agent.'),
@@ -1250,7 +1269,7 @@ export function registerCanaryLabTools(
   })
 
   registerTool('start_external_portify', {
-    description: "Start a port-ification workflow that YOU (this external client) drive — no local agent is spawned. Canary Lab sets up an isolated scratch worktree per repo and hands you the edit paths + the task. You edit the listeners to read injected ports IN PLACE in those worktrees (use your file tools), edit the feature config to declare the `ports` slots, then call submit_external_portify to verify (a concurrent double-boot). The verified edits save as an EPHEMERAL OVERLAY (features/<feature>/portify/) — never committed or merged. Async — returns a workflowId + targets; one workflow at a time.",
+    description: "Start a port-ification workflow YOU drive — no local agent. Canary sets up a scratch worktree per repo and returns the edit paths + task. Edit the listeners to read injected ports IN PLACE, declare the `ports` slots in the feature config, then submit_external_portify to verify (concurrent double-boot). Verified edits save as an ephemeral overlay (features/<feature>/portify/) — never committed. Async — returns a workflowId + targets; one workflow at a time.",
     inputSchema: {
       feature: z.string().describe('Feature name (from list_features).'),
       session_id: z.string().describe('Stable id for your conversation — reuse it across calls.'),
@@ -1384,7 +1403,7 @@ export function registerCanaryLabTools(
     inputSchema: {
       runId: z.string(),
       session_id: z.string().optional().describe('External heal session id. When provided, refreshes the session heartbeat.'),
-      client_kind: clientKindInput.describe('Which kind of client is requesting context. Defaults to the MCP client type when known.'),
+      client_kind: clientKindInput,
     },
   }, async ({ runId, session_id, client_kind }) => {
     const detail = deps.store.get(runId)
@@ -1403,12 +1422,12 @@ export function registerCanaryLabTools(
 
   registerTool('get_failure_detail', {
     description:
-      'One failing test\'s bounded detail: error, location, resolved pointer dirs (trace-extract, playwright-mcp), plus the curated trace summary and full error text inlined (capped). Use `failureId` from a failedTests[] entry in get_heal_context / wait_for_heal_task. Built for fan-out: when several tests fail, hand each failureId to its own read-only sub-agent so they investigate in parallel without pulling the whole heal context each.',
+      'One failing test\'s bounded detail: error, location, resolved pointer dirs (trace-extract, playwright-mcp), curated trace summary, and capped full error text. Use `failureId` from a failedTests[] entry (get_heal_context / wait_for_heal_task). Built for fan-out: hand each failureId to its own read-only sub-agent to investigate in parallel.',
     inputSchema: {
       runId: z.string(),
       failureId: z.string().describe('The failureId (== failed test name) from a failedTests[] entry.'),
       session_id: z.string().optional().describe('External heal session id. When provided, refreshes the session heartbeat.'),
-      client_kind: clientKindInput.describe('Which kind of client is requesting detail. Defaults to the MCP client type when known.'),
+      client_kind: clientKindInput,
     },
   }, async ({ runId, failureId, session_id, client_kind }) => {
     const detail = deps.store.get(runId)
@@ -1426,15 +1445,15 @@ export function registerCanaryLabTools(
 
   registerTool('start_run', {
     description:
-      'Smart entrypoint for Canary Lab runs. If a matching run is healing, this returns that run and blocks fresh/different starts until `cancel_heal` stops it. If `runId` or `run_ref` targets a failed/aborted run and no heal is active, this restarts that same run in remaining-test mode: failed first, then skipped, then pending/not-run. Otherwise it starts a new run. To retry a failed/aborted run, prefer this rerun path (pass `run_ref`) over `abort_run` + a fresh start — a fresh start re-runs the whole suite and is only worth it when prior passes are invalidated (e.g. a global data/state change). After code changes, call `signal_run` with hypothesis and fixDescription, then `wait_for_heal_task` on the same run.',
+      'Smart entrypoint for runs. If a matching run is healing, returns it and blocks fresh/different starts until cancel_heal stops it. If runId/run_ref targets a failed/aborted run and no heal is active, restarts it in remaining-test mode (failed → skipped → pending/not-run). Otherwise starts a new run. To retry a failed/aborted run prefer this rerun path (pass run_ref) over abort_run + a fresh start — a fresh start re-runs the whole suite, only worth it when prior passes are invalidated (e.g. a global data/state change). After code changes call signal_run (hypothesis + fixDescription), then wait_for_heal_task on the same run.',
     inputSchema: {
       feature: z.string().describe('Feature name (from list_features).'),
       env: z.string().optional().describe('Envset name. Defaults to the feature\'s first declared env.'),
-      runId: z.string().optional().describe('Optional exact run id to resume or restart. If a different run is currently healing, the active heal blocks this request.'),
-      run_ref: z.string().optional().describe('Optional exact run id or unique suffix such as "7cvh" to resume or restart. If a different run is currently healing, the active heal blocks this request.'),
-      claim_heal: z.boolean().default(true).describe('Whether to claim this run\'s heal duty for the current MCP session.'),
-      session_id: z.string().describe('Stable id identifying this MCP/agent session. Reuse the same id across calls within one conversation to enable reconnects.'),
-      client_kind: clientKindInput.describe('Which kind of client is starting the run. Defaults to the MCP client type when known.'),
+      runId: z.string().optional().describe('Exact run id to resume/restart. A different run currently healing blocks this.'),
+      run_ref: z.string().optional().describe('Exact run id or unique suffix (e.g. "7cvh") to resume/restart. A different run currently healing blocks this.'),
+      claim_heal: z.boolean().default(true).describe('Claim this run\'s heal duty for the current MCP session.'),
+      session_id: z.string().describe('Stable id for this MCP/agent session. Reuse across calls in one conversation to enable reconnects.'),
+      client_kind: clientKindInput,
       conversation_name: z.string().optional().describe('Human label shown in the Canary Lab UI (e.g. "fix checkout").'),
       guidance: z.string().optional().describe('Optional user guidance when restarting a failed/aborted run by runId or run_ref.'),
       force_new: z.boolean().default(false).describe('Start a fresh concurrent run even if a matching run is healing (it continues independently). A same-repo collision still asks you to choose isolation.'),
@@ -1713,11 +1732,11 @@ export function registerCanaryLabTools(
   })
 
   registerTool('heartbeat', {
-    description: 'Refresh the external heal session liveness. Sessions auto-disconnect after 10 minutes without any MCP traffic; any signal_run / get_heal_context call also refreshes liveness, so you usually do not need to call this explicitly during normal healing.',
+    description: 'Refresh external heal session liveness. Sessions auto-disconnect after 10 min without MCP traffic; signal_run / get_heal_context also refresh it, so you rarely need to call this explicitly.',
     inputSchema: {
       runId: z.string(),
       session_id: z.string(),
-      client_kind: clientKindInput.describe('Which kind of client is heartbeating. Defaults to the MCP client type when known.'),
+      client_kind: clientKindInput,
       status: HEAL_STATUS.default('connected'),
     },
   }, async ({ runId, session_id, client_kind, status }) => {
@@ -1729,11 +1748,11 @@ export function registerCanaryLabTools(
 
   registerTool('wait_for_heal_task', {
     description:
-      'Wait until a claimed external run needs code fixes or reaches a terminal result. Use after start_run/claim_heal and again after signal_run. This blocks for a short bounded window and heartbeats for you. If the run is still active when the window elapses it returns type:"still_waiting" (NOT terminal) — immediately call wait_for_heal_task again with the same runId + session_id to keep waiting. Loop on still_waiting until you get needs_heal / passed / failed. Never poll get_run_snapshot or get_run to wait.',
+      'Wait until a claimed run needs code fixes or reaches a terminal result. Use after start_run/claim_heal and again after signal_run. Blocks for a short bounded window and heartbeats for you. If still active when the window elapses it returns type:"still_waiting" (NOT terminal) — immediately call wait_for_heal_task again with the same runId + session_id. Loop on still_waiting until needs_heal / passed / failed. Never poll get_run_snapshot or get_run to wait.',
     inputSchema: {
       runId: z.string(),
       session_id: z.string().describe('External heal session id that owns this run.'),
-      client_kind: clientKindInput.describe('Which kind of client is waiting. Defaults to the MCP client type when known.'),
+      client_kind: clientKindInput,
       timeout_ms: z.number().int().positive().max(WAIT_FOR_HEAL_TASK_MAX_TIMEOUT_MS)
         .default(WAIT_FOR_HEAL_TASK_DEFAULT_TIMEOUT_MS)
         .describe('Per-call block budget in ms (default 90s). A single call blocks at most ~2 minutes regardless; larger values are clamped, then you get still_waiting to loop on. This is not the overall heal budget — that is unbounded across re-calls.'),
@@ -1750,7 +1769,7 @@ export function registerCanaryLabTools(
       runId: z.string(),
       kind: SIGNAL_KIND,
       session_id: z.string().optional().describe('Required when the run holds an external claim; must match the claim holder.'),
-      client_kind: clientKindInput.describe('Which kind of client is sending the signal. Defaults to the MCP client type when known.'),
+      client_kind: clientKindInput,
       hypothesis: z.string().optional().describe('Required for restart/rerun. Concise diagnosis of what was wrong.'),
       fixDescription: z.string().optional().describe('Required for restart/rerun. Concise summary of what the fix changed.'),
     },

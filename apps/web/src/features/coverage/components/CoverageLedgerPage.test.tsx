@@ -158,12 +158,40 @@ describe('CoverageLedgerPage', () => {
     expect(container.querySelector('[data-testid="coverage-breakdown"]')).toBeTruthy()
   })
 
-  it('names the missing path on a path-incomplete requirement', async () => {
+  it('names the missing path on a path-incomplete requirement (terse)', async () => {
     await mount()
-    // R1: happy claimed, sad declared but unclaimed → "needs sad" + a "no test" chip.
-    const r1 = container.querySelector('[data-testid="req-R1"]')
-    expect(r1?.textContent).toContain('needs sad')
-    expect(r1?.textContent).toContain('sad · no test')
+    // R1: happy claimed, sad declared but unclaimed → gap pill reads "Path-incomplete · sad".
+    const gap = container.querySelector('[data-testid="gap-R1"]')
+    expect(gap?.textContent).toContain('Path-incomplete')
+    expect(gap?.textContent).toContain('· sad')
+    // The path chips are just the path name (the dashed/muted style carries "no test"):
+    // covered shows a ✓, uncovered shows neither "✓" nor the old "· no test".
+    expect(container.querySelector('[data-testid="path-R1-happy"]')?.textContent?.trim()).toBe('happy ✓')
+    expect(container.querySelector('[data-testid="path-R1-sad"]')?.textContent?.trim()).toBe('sad')
+  })
+
+  it('clicking a @req tag on a test card focuses + scrolls to that requirement', async () => {
+    const scrollSpy = vi.fn()
+    // happy-dom has no scrollIntoView; provide one so the focus effect can run.
+    ;(Element.prototype as unknown as { scrollIntoView: () => void }).scrollIntoView = scrollSpy
+    await mount()
+    const tag = container.querySelector<HTMLButtonElement>('[data-testid="reqtag-adds item-R1"]')
+    expect(tag).toBeTruthy()
+    act(() => { tag?.click() })
+    expect(container.querySelector('[data-testid="req-R1"]')?.getAttribute('data-focus')).toBe('true')
+    expect(scrollSpy).toHaveBeenCalled()
+  })
+
+  it('clicking a @req tag lifts a gap filter that hides the target requirement', async () => {
+    ;(Element.prototype as unknown as { scrollIntoView: () => void }).scrollIntoView = vi.fn()
+    await mount()
+    // Filter to covered → R1 (path-incomplete) is hidden.
+    act(() => { container.querySelector<HTMLButtonElement>('[data-testid="gap-badge-covered"]')?.click() })
+    expect(container.querySelector('[data-testid="req-R1"]')).toBeNull()
+    // Clicking @req-R1 on its test lifts the filter so R1 is reachable + focused.
+    act(() => { container.querySelector<HTMLButtonElement>('[data-testid="reqtag-adds item-R1"]')?.click() })
+    expect(container.querySelector('[data-testid="req-R1"]')).toBeTruthy()
+    expect(container.querySelector('[data-testid="req-R1"]')?.getAttribute('data-focus')).toBe('true')
   })
 
   it('numbers test cards by source order (shared cross-view id)', async () => {
@@ -342,6 +370,31 @@ describe('CoverageLedgerPage', () => {
     expect(container.querySelector('[data-testid="coverage-generating"]')).toBeTruthy()
     expect(container.querySelector('[data-testid="prd-pane"]')).toBeNull()
     resolveJob?.({ jobId: 'jX', feature: 'checkout', kind: 'coverage', status: 'done', startedAt: '2026-01-01T00:00:01Z', log: 'done' })
+  })
+
+  it('self-heals a wedged poll: a hung getCoverageJob never leaves the Generating screen stuck', async () => {
+    vi.useFakeTimers()
+    try {
+      // Rehydrate finds a running job; the per-job poll then HANGS forever (the real
+      // bug: a getCoverageJob fetch that never resolves wedges the setTimeout chain).
+      // Meanwhile the authoritative job index shows the job actually finished.
+      vi.mocked(api.listCoverageJobs)
+        .mockResolvedValueOnce([{ jobId: 'jW', feature: 'checkout', kind: 'coverage', status: 'running', startedAt: '2026-01-01T00:00:01Z' }])
+        .mockResolvedValue([{ jobId: 'jW', feature: 'checkout', kind: 'coverage', status: 'done', startedAt: '2026-01-01T00:00:01Z', endedAt: '2026-01-01T00:01:00Z' }])
+      vi.mocked(api.getCoverageJob).mockImplementation(() => new Promise(() => {})) // never resolves → wedge
+      await act(async () => { root.render(<CoverageLedgerPage feature="checkout" onClose={() => {}} />) })
+      await act(async () => { await Promise.resolve(); await Promise.resolve() })
+      // Generating screen is up and the poll is wedged.
+      expect(container.querySelector('[data-testid="coverage-generating"]')).toBeTruthy()
+      expect(container.querySelector('[data-testid="prd-pane"]')).toBeNull()
+      // The reconcile backstop (3s interval) sees "no running job" on two consecutive
+      // checks and clears the screen — without the wedged poll ever resolving.
+      await act(async () => { await vi.advanceTimersByTimeAsync(7000) })
+      expect(container.querySelector('[data-testid="coverage-generating"]')).toBeNull()
+      expect(container.querySelector('[data-testid="prd-pane"]')).toBeTruthy()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('expands a requirement to reveal its kind + happy/unhappy paths', async () => {

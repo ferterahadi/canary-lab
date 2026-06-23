@@ -62,7 +62,6 @@ const VERIFY_TOOLS = uniqueSorted([
 
 const AUTHOR_TOOLS = uniqueSorted([
   'apply_external_draft',
-  'cancel_portify',
   'capture_feature_env_files',
   'checkout_feature_repo_branch',
   'create_feature',
@@ -81,19 +80,12 @@ const AUTHOR_TOOLS = uniqueSorted([
   'start_coverage_job',
   'start_external_coverage',
   'submit_external_coverage',
-  'get_portify',
   'get_run',
   'get_run_snapshot',
   'list_evaluation_exports',
   'list_features',
-  'list_portify_status',
   'list_runs',
-  'revise_portify',
-  'save_portify',
   'start_external_draft',
-  'start_portify',
-  'start_external_portify',
-  'submit_external_portify',
   'start_external_evaluation_export',
   'submit_external_evaluation_export',
   'update_external_draft_stage',
@@ -101,8 +93,20 @@ const AUTHOR_TOOLS = uniqueSorted([
   'write_feature_doc',
 ])
 
-const FULL_TOOLS = uniqueSorted([
-  ...AUTHOR_TOOLS,
+const PORTIFY_TOOLS = uniqueSorted([
+  'list_features',
+  'list_runs',
+  'start_portify',
+  'start_external_portify',
+  'submit_external_portify',
+  'get_portify',
+  'save_portify',
+  'cancel_portify',
+  'revise_portify',
+  'list_portify_status',
+])
+
+const FULL_ONLY_TOOLS = [
   'abort_run',
   'boot_services',
   'cancel_heal',
@@ -127,7 +131,12 @@ const FULL_TOOLS = uniqueSorted([
   'start_run',
   'update_verification_config',
   'wait_for_heal_task',
-])
+]
+
+// lifecycle = everything except portify; full = lifecycle + portify.
+const LIFECYCLE_TOOLS = uniqueSorted([...AUTHOR_TOOLS, ...FULL_ONLY_TOOLS])
+
+const FULL_TOOLS = uniqueSorted([...LIFECYCLE_TOOLS, ...PORTIFY_TOOLS])
 
 async function connectClient(address: string, pathAndQuery = '/mcp'): Promise<Client> {
   const client = new Client(
@@ -216,6 +225,19 @@ describe('MCP HTTP server (smoke)', () => {
         profile: 'author',
         toolCount: AUTHOR_TOOLS.length,
       })
+
+      const lifecycle = await app.inject({ method: 'GET', url: '/mcp/health?profile=lifecycle' })
+      expect(lifecycle.statusCode).toBe(200)
+      expect((lifecycle.json() as { profile: string; tools: string[] })).toMatchObject({
+        profile: 'lifecycle',
+      })
+      expect([...(lifecycle.json() as { tools: string[] }).tools].sort()).toEqual(LIFECYCLE_TOOLS)
+      // lifecycle is full minus portify — no portify tool leaks in.
+      expect((lifecycle.json() as { tools: string[] }).tools).not.toContain('start_portify')
+
+      const portify = await app.inject({ method: 'GET', url: '/mcp/health?profile=portify' })
+      expect(portify.statusCode).toBe(200)
+      expect([...(portify.json() as { tools: string[] }).tools].sort()).toEqual(PORTIFY_TOOLS)
     } finally {
       await app.close()
     }
