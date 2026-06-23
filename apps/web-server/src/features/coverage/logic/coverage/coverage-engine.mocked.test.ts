@@ -14,8 +14,14 @@ vi.mock('./annotate-engine', async (importOriginal) => {
   }
 })
 
-import { runCoverageEngine, regeneratePrdSummary } from './service'
+import { runCoverageEngine, regeneratePrdSummary as regeneratePrdSummaryReal } from './service'
 import { proposeCoverageMappings } from '../../../coverage/logic/coverage/annotate-engine'
+import { fakeSummarize } from './__fixtures__/fake-coverage-agents'
+
+// Summary is LLM-only; inject the fake summarizer. (proposeCoverageMappings is
+// vi.mocked above, so runCoverageEngine's mapping side is already controlled.)
+const regeneratePrdSummary = (args: Parameters<typeof regeneratePrdSummaryReal>[0]) =>
+  regeneratePrdSummaryReal(args, { summarize: fakeSummarize })
 
 let tmpDir: string
 let featuresDir: string
@@ -61,7 +67,7 @@ describe('runCoverageEngine — agent proposal file backfill', () => {
     // file, so it backfills by name and writes the tag (otherwise the entire
     // agentic mapping path would be a no-op at tag-writing).
     const dir = writeFeature('checkout')
-    await regeneratePrdSummary({ featuresDir, feature: 'checkout', adapter: 'deterministic', now: '2026-01-01T00:00:00Z' })
+    await regeneratePrdSummary({ featuresDir, feature: 'checkout', now: '2026-01-01T00:00:00Z' })
 
     // Agent-sourced shape: no `file`, but the testName matches a known orphan.
     vi.mocked(proposeCoverageMappings).mockResolvedValue([
@@ -73,7 +79,7 @@ describe('runCoverageEngine — agent proposal file backfill', () => {
       },
     ])
 
-    const res = await runCoverageEngine({ featuresDir, logsDir, feature: 'checkout', adapter: 'deterministic' })
+    const res = await runCoverageEngine({ featuresDir, logsDir, feature: 'checkout' })
     // Backfilled file → tag written → mapping applied.
     expect(res.applied.map((m) => m.testName)).toContain('create makes a new todo item')
     expect(fs.readFileSync(path.join(dir, 'e2e', 'a.spec.ts'), 'utf-8')).toContain('@req-R1')
@@ -83,7 +89,7 @@ describe('runCoverageEngine — agent proposal file backfill', () => {
     // testName not among the engine's orphan inputs → nothing to backfill →
     // `if (!file) continue` (the proposal is dropped, no tag written).
     writeFeature('checkout')
-    await regeneratePrdSummary({ featuresDir, feature: 'checkout', adapter: 'deterministic', now: '2026-01-01T00:00:00Z' })
+    await regeneratePrdSummary({ featuresDir, feature: 'checkout', now: '2026-01-01T00:00:00Z' })
 
     vi.mocked(proposeCoverageMappings).mockResolvedValue([
       {
@@ -94,7 +100,7 @@ describe('runCoverageEngine — agent proposal file backfill', () => {
       },
     ])
 
-    const res = await runCoverageEngine({ featuresDir, logsDir, feature: 'checkout', adapter: 'deterministic' })
+    const res = await runCoverageEngine({ featuresDir, logsDir, feature: 'checkout' })
     expect(res.applied).toEqual([])
   })
 
@@ -102,7 +108,7 @@ describe('runCoverageEngine — agent proposal file backfill', () => {
     // A proposal with a `file` that doesn't exist on disk → applyTagToFile returns
     // false on fs.existsSync → the proposal is NOT pushed to applied.
     writeFeature('checkout')
-    await regeneratePrdSummary({ featuresDir, feature: 'checkout', adapter: 'deterministic', now: '2026-01-01T00:00:00Z' })
+    await regeneratePrdSummary({ featuresDir, feature: 'checkout', now: '2026-01-01T00:00:00Z' })
 
     vi.mocked(proposeCoverageMappings).mockResolvedValue([
       {
@@ -114,7 +120,7 @@ describe('runCoverageEngine — agent proposal file backfill', () => {
       },
     ])
 
-    const res = await runCoverageEngine({ featuresDir, logsDir, feature: 'checkout', adapter: 'deterministic' })
+    const res = await runCoverageEngine({ featuresDir, logsDir, feature: 'checkout' })
     // The file doesn't exist → applyTagToFile returns false → applied is empty.
     expect(res.applied).toEqual([])
   })
@@ -130,7 +136,7 @@ describe('runCoverageEngine — agent proposal file backfill', () => {
       `import { test, expect } from '@playwright/test'\n` +
       `test('create makes a new todo item', { tag: ['@req-R1', '@path-happy'] }, async () => {\n  expect(1).toBe(1)\n})\n`,
     )
-    await regeneratePrdSummary({ featuresDir, feature: 'checkout', adapter: 'deterministic', now: '2026-01-01T00:00:00Z' })
+    await regeneratePrdSummary({ featuresDir, feature: 'checkout', now: '2026-01-01T00:00:00Z' })
 
     vi.mocked(proposeCoverageMappings).mockResolvedValue([
       {
@@ -142,7 +148,7 @@ describe('runCoverageEngine — agent proposal file backfill', () => {
       },
     ])
 
-    const res = await runCoverageEngine({ featuresDir, logsDir, feature: 'checkout', adapter: 'deterministic' })
+    const res = await runCoverageEngine({ featuresDir, logsDir, feature: 'checkout' })
     // writeCoversTag returned unchanged source → applyTagToFile returns false → not in applied.
     expect(res.applied).toEqual([])
   })

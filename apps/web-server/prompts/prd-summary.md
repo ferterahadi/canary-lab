@@ -10,6 +10,41 @@ A flat, enumerated list of **requirements**. Two kinds:
 - `non-functional` — a quality constraint **explicitly stated in the documents**:
   security, performance, auditability, data handling, limits, compatibility.
 
+## What is NOT a requirement — never emit these
+
+PRDs carry sections that explain **why** or **how**, not **what the feature must
+do**. These are NOT requirements — never emit a requirement for them, and never
+turn their heading into a requirement:
+
+- Goals / Objectives
+- Background / Context
+- Problem statement / Motivation / Why
+- Overview / Introduction / Summary
+- Architecture / Design / Implementation / Technical approach
+- Non-goals / Out-of-scope
+- Glossary / Definitions
+- Open questions
+- Milestones / Timeline / Rollout
+- Success metrics
+
+A markdown heading is **not** automatically a requirement. Judge by content, not
+structure.
+
+**Balance — do not lose a real requirement hiding in one of these sections.** If a
+"Goals" or "Architecture" section states a concrete, testable expectation (e.g.
+"the API must paginate at 10k rows"), extract THAT expectation as a requirement —
+but never the goal/section framing itself. The litmus test for every entry: *could
+a Playwright test pass or fail against this statement?* If no, it is not a
+requirement.
+
+## Completeness
+
+Enumerate **every** functional and non-functional requirement as its own atomic
+line item. Decompose multi-part bullets, tables, and prose paragraphs into one
+requirement each — a requirement omitted is a permanent coverage blind spot. Be
+exhaustive over the requirement-bearing sections (while still inventing nothing —
+see Grounding below).
+
 ## Grounding — extract, do NOT invent
 
 Every requirement must be **stated or directly implied by the source documents**.

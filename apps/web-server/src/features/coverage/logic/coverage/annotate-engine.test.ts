@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
   parseAnnotateOutput,
-  deterministicMappings,
   proposeCoverageMappings,
   buildAnnotatePrompt,
 } from './annotate-engine'
@@ -140,46 +139,6 @@ describe('normalizeRequirements (via parseAnnotateOutput) — non-string items',
   })
 })
 
-describe('overlapScore — empty set guard (line 155 branch)', () => {
-  it('returns 0 and skips mapping when test has no tokens (both sets empty)', () => {
-    // Test name '' tokenizes to an empty set → overlapScore returns 0 immediately.
-    // With score=0, best stays null → deterministicMappings returns [].
-    const out = deterministicMappings(REQS, [{ name: '' }])
-    expect(out).toEqual([])
-  })
-})
-
-describe('deterministicMappings', () => {
-  it('maps a test to the requirement with the strongest token overlap', () => {
-    const out = deterministicMappings(REQS, [
-      { name: 'delete removes the todo item' },
-      { name: 'create makes a new todo' },
-    ])
-    const byTest = Object.fromEntries(out.map((m) => [m.testName, m.requirements[0]]))
-    expect(byTest['delete removes the todo item']).toBe('R2')
-    expect(byTest['create makes a new todo']).toBe('R1')
-    expect(out.every((m) => m.source === 'deterministic')).toBe(true)
-  })
-
-  it('does not map a test below the overlap threshold', () => {
-    const out = deterministicMappings(REQS, [{ name: 'completely unrelated xyzzy plugh' }])
-    expect(out).toEqual([])
-  })
-
-  it('never maps to a deprecated requirement', () => {
-    const out = deterministicMappings(REQS, [{ name: 'old removed gone thing' }])
-    expect(out.every((m) => m.requirements[0] !== 'R9')).toBe(true)
-  })
-
-  it('does not map when best score exists but is below a raised threshold (line 178 false branch)', () => {
-    // overlapScore = shared / min(|a|, |b|). With 3 tokens where only 1 matches,
-    // score ≈ 0.33 — above 0 (so best is non-null) but below threshold=0.99.
-    // Exercises the `best && best.score >= threshold` FALSE branch.
-    const out = deterministicMappings(REQS, [{ name: 'delete foobar bazqux' }], 0.99)
-    expect(out).toEqual([])
-  })
-})
-
 describe('proposeCoverageMappings', () => {
   it('uses the injected agent runner and parses its output', async () => {
     const out = await proposeCoverageMappings(
@@ -193,20 +152,22 @@ describe('proposeCoverageMappings', () => {
     expect(out[0]).toMatchObject({ testName: 'creates a todo', requirements: ['R1'], source: 'agent' })
   })
 
-  it('falls back to deterministic when the agent output is unparseable', async () => {
-    const out = await proposeCoverageMappings(
-      { requirements: REQS, tests: [{ name: 'delete removes the todo item' }] },
-      { resolveAgents: () => ['claude'], runAgent: async () => 'garbage' },
-    )
-    expect(out[0].source).toBe('deterministic')
-    expect(out[0].requirements).toEqual(['R2'])
+  it('throws (LLM-only) when every agent returns unparseable output', async () => {
+    await expect(
+      proposeCoverageMappings(
+        { requirements: REQS, tests: [{ name: 'delete removes the todo item' }] },
+        { resolveAgents: () => ['claude'], runAgent: async () => 'garbage' },
+      ),
+    ).rejects.toThrow(/requires the claude or codex agent/)
   })
 
-  it('falls back to deterministic when no agent is available', async () => {
-    const out = await proposeCoverageMappings(
-      { requirements: REQS, tests: [{ name: 'create makes a new todo' }], adapter: 'deterministic' },
-    )
-    expect(out[0].source).toBe('deterministic')
+  it('throws (LLM-only) when no agent is available', async () => {
+    await expect(
+      proposeCoverageMappings(
+        { requirements: REQS, tests: [{ name: 'create makes a new todo' }] },
+        { resolveAgents: () => [] },
+      ),
+    ).rejects.toThrow(/requires the claude or codex agent/)
   })
 
   it('returns [] when there are no tests or no active requirements', async () => {

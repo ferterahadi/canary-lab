@@ -60,7 +60,7 @@ function normalizeProse(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined
 }
 
-export type SummarizeAdapter = 'auto' | 'claude' | 'codex' | 'deterministic'
+export type SummarizeAdapter = 'auto' | 'claude' | 'codex'
 
 export interface SummarizePrdArgs {
   collection: DocsCollection
@@ -250,58 +250,6 @@ export function reconcileRequirementIds(
 }
 
 // ---------------------------------------------------------------------------
-// Deterministic fallback (no agent on PATH, or adapter:'deterministic')
-// ---------------------------------------------------------------------------
-
-interface RawRequirement {
-  title: string
-  text: string
-}
-
-/** Pull heading-anchored requirements out of one markdown doc. */
-function extractRawRequirements(collection: DocsCollection): RawRequirement[] {
-  const raw: RawRequirement[] = []
-  for (const entry of collection.entries) {
-    const lines = entry.content.split(/\r?\n/)
-    const headingIdxs: number[] = []
-    lines.forEach((line, i) => {
-      if (/^#{1,6}\s+\S/.test(line)) headingIdxs.push(i)
-    })
-    if (!headingIdxs.length) {
-      const firstBody = lines.find((l) => l.trim())?.trim()
-      raw.push({
-        title: entry.relPath.replace(/\.md$/i, ''),
-        text: firstBody || entry.relPath,
-      })
-      continue
-    }
-    headingIdxs.forEach((start, n) => {
-      const endLine = headingIdxs[n + 1] ?? lines.length
-      const title = lines[start].replace(/^#{1,6}\s+/, '').trim()
-      const body = lines
-        .slice(start + 1, endLine)
-        .map((l) => l.trim())
-        .filter(Boolean)
-        .join(' ')
-      raw.push({ title, text: body || title })
-    })
-  }
-  return raw
-}
-
-export function deterministicPrdRequirements(
-  collection: DocsCollection,
-  previous: Requirement[],
-): Requirement[] {
-  const parsed: ParsedRequirement[] = extractRawRequirements(collection).map((r) => ({
-    title: r.title,
-    text: r.text,
-    pathTypes: ['happy'],
-  }))
-  return reconcileRequirementIds(previous, parsed)
-}
-
-// ---------------------------------------------------------------------------
 // Prompt construction
 // ---------------------------------------------------------------------------
 
@@ -337,7 +285,6 @@ export function buildPrdSummaryPrompt(
 // ---------------------------------------------------------------------------
 
 function defaultResolveAgents(adapter: SummarizeAdapter): HealAgent[] {
-  if (adapter === 'deterministic') return []
   const preferred = adapter === 'claude' || adapter === 'codex'
     ? pickAvailableHealAgent(adapter)
     : pickAvailableHealAgent()
@@ -473,7 +420,12 @@ export async function summarizePrd(
   }
 
   if (!requirements) {
-    requirements = deterministicPrdRequirements(args.collection, previous)
+    // LLM-only: no agent on PATH, or every agent failed / returned unparseable
+    // output. We never fabricate requirements from headings — that produced
+    // phantom requirements (goals/context/architecture) and tanked coverage.
+    throw new Error(
+      'PRD summary requires the claude or codex agent — none produced a usable result. Ensure claude or codex is on PATH.',
+    )
   }
 
   const summary: PrdSummary = {

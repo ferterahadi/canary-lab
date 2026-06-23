@@ -728,8 +728,8 @@ export function registerCanaryLabTools(
       'Regenerate a feature\'s PRD summary from its current source docs (after you add or edit docs with write_feature_doc, or when get_feature_coverage reports docsDrift). Existing requirement ids are PRESERVED so inline @requirement annotations keep resolving; new requirements get new ids, removed ones are marked deprecated. Writes docs/_prd-summary.{json,md}. Same action as the UI Docs-tab "Regenerate" button.',
     inputSchema: {
       feature: z.string().describe('Existing feature name (from list_features).'),
-      adapter: z.enum(['auto', 'claude', 'codex', 'deterministic']).optional()
-        .describe('Summarizer backend. Omit for auto (prefers an available agent CLI, falls back to deterministic heading extraction).'),
+      adapter: z.enum(['auto', 'claude', 'codex']).optional()
+        .describe('Agent backend. Omit for auto (uses an available agent CLI — claude or codex). LLM-only; errors if none is available.'),
     },
   }, async ({ feature, adapter }) => {
     try {
@@ -765,8 +765,8 @@ export function registerCanaryLabTools(
     inputSchema: {
       feature: z.string().describe('Existing feature name (from list_features).'),
       kind: z.enum(['summary', 'coverage']).describe('summary = regenerate the PRD summary, then auto-run coverage; coverage = run only the annotate-pass engine.'),
-      adapter: z.enum(['auto', 'claude', 'codex', 'deterministic']).optional()
-        .describe('Agent backend. Omit for auto (prefers an available agent CLI, falls back to deterministic).'),
+      adapter: z.enum(['auto', 'claude', 'codex']).optional()
+        .describe('Agent backend. Omit for auto (uses an available agent CLI — claude or codex). LLM-only; errors if none is available.'),
     },
   }, async ({ feature, kind, adapter }) => {
     if (!featureExists(deps.featuresDir, feature)) return errorResult(`feature not found: ${feature}`)

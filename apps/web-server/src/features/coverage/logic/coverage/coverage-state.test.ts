@@ -2,7 +2,14 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { computeFeatureCoverage, regeneratePrdSummary, runCoverageEngine } from './service'
+import { computeFeatureCoverage, regeneratePrdSummary as regeneratePrdSummaryReal, runCoverageEngine as runCoverageEngineReal } from './service'
+import { fakeSummarize, fakePropose } from './__fixtures__/fake-coverage-agents'
+
+// Coverage generation is LLM-only; inject the fake agent via the dep seams.
+const regeneratePrdSummary = (args: Parameters<typeof regeneratePrdSummaryReal>[0]) =>
+  regeneratePrdSummaryReal(args, { summarize: fakeSummarize })
+const runCoverageEngine = (args: Parameters<typeof runCoverageEngineReal>[0]) =>
+  runCoverageEngineReal(args, { propose: fakePropose })
 
 let tmpDir: string
 let featuresDir: string
@@ -51,7 +58,7 @@ describe('coverage state model (R3) — through the service', () => {
 
   it('fresh summary, no tags → coverage:absent (No coverage)', async () => {
     writeFeature('checkout')
-    await regeneratePrdSummary({ featuresDir, feature: 'checkout', adapter: 'deterministic', now: '2026-01-01T00:00:00Z' })
+    await regeneratePrdSummary({ featuresDir, feature: 'checkout', now: '2026-01-01T00:00:00Z' })
     const ledger = cov('checkout')
     expect(ledger.state?.summary).toBe('fresh')
     expect(ledger.state?.coverage).toBe('absent')
@@ -59,15 +66,15 @@ describe('coverage state model (R3) — through the service', () => {
 
   it('after the engine writes tags → coverage:fresh', async () => {
     writeFeature('checkout')
-    await regeneratePrdSummary({ featuresDir, feature: 'checkout', adapter: 'deterministic', now: '2026-01-01T00:00:00Z' })
-    await runCoverageEngine({ featuresDir, logsDir, feature: 'checkout', adapter: 'deterministic', now: '2026-01-01T00:00:00Z' })
+    await regeneratePrdSummary({ featuresDir, feature: 'checkout', now: '2026-01-01T00:00:00Z' })
+    await runCoverageEngine({ featuresDir, logsDir, feature: 'checkout', now: '2026-01-01T00:00:00Z' })
     const ledger = cov('checkout')
     expect(ledger.state?.coverage).toBe('fresh')
   })
 
   it('editing a source doc → summary:stale + drift names the changed doc', async () => {
     const dir = writeFeature('checkout')
-    await regeneratePrdSummary({ featuresDir, feature: 'checkout', adapter: 'deterministic', now: '2026-01-01T00:00:00Z' })
+    await regeneratePrdSummary({ featuresDir, feature: 'checkout', now: '2026-01-01T00:00:00Z' })
     fs.writeFileSync(path.join(dir, 'docs', 'spec.md'), '# Create todo\nedited body')
     const ledger = cov('checkout')
     expect(ledger.state?.summary).toBe('stale')
@@ -78,12 +85,12 @@ describe('coverage state model (R3) — through the service', () => {
 
   it('adding a requirement after the engine ran → coverage:stale', async () => {
     const dir = writeFeature('checkout')
-    await regeneratePrdSummary({ featuresDir, feature: 'checkout', adapter: 'deterministic', now: '2026-01-01T00:00:00Z' })
-    await runCoverageEngine({ featuresDir, logsDir, feature: 'checkout', adapter: 'deterministic', now: '2026-01-01T00:00:00Z' })
+    await regeneratePrdSummary({ featuresDir, feature: 'checkout', now: '2026-01-01T00:00:00Z' })
+    await runCoverageEngine({ featuresDir, logsDir, feature: 'checkout', now: '2026-01-01T00:00:00Z' })
 
     // Add a second requirement section + regenerate → requirements set moved.
     fs.writeFileSync(path.join(dir, 'docs', 'spec.md'), '# Create todo\nbody\n# Delete todo\na user can delete a todo')
-    await regeneratePrdSummary({ featuresDir, feature: 'checkout', adapter: 'deterministic', now: '2026-01-02T00:00:00Z' })
+    await regeneratePrdSummary({ featuresDir, feature: 'checkout', now: '2026-01-02T00:00:00Z' })
 
     const ledger = cov('checkout')
     expect(ledger.state?.summary).toBe('fresh') // docs match the new summary

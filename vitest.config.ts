@@ -37,6 +37,8 @@ export default defineConfig({
       exclude: [
         '**/*.test.{ts,tsx}',
         '**/*.d.ts',
+        // Test-only fixtures (e.g. fake coverage agents injected via deps seams).
+        '**/__fixtures__/**',
         'apps/web-server/server.ts',
         // WebSocket transport glue (thin I/O), incl. the shared workspace stream.
         'apps/web-server/src/features/**/ws/**',

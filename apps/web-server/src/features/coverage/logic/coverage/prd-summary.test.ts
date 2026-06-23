@@ -2,7 +2,6 @@ import { describe, it, expect } from 'vitest'
 import { computeDocsHash, type DocsCollection } from '../../../coverage/logic/coverage/docs-collection'
 import {
   buildPrdSummaryPrompt,
-  deterministicPrdRequirements,
   parsePrdSummaryOutput,
   reconcileRequirementIds,
   renderPrdSummaryMarkdown,
@@ -261,48 +260,7 @@ describe('reconcileRequirementIds — the id spine', () => {
   })
 })
 
-describe('deterministicPrdRequirements', () => {
-  it('extracts one requirement per heading and preserves ids across regen', () => {
-    const before = collection([
-      { relPath: 'spec.md', content: '# Login\nuser logs in\n# Logout\nuser logs out' },
-    ])
-    const first = deterministicPrdRequirements(before, [])
-    expect(first.map((r) => r.id)).toEqual(['R1', 'R2'])
-    expect(first.map((r) => r.title)).toEqual(['Login', 'Logout'])
-
-    // Regenerate after appending a new section — existing ids must hold.
-    const after = collection([
-      { relPath: 'spec.md', content: '# Login\nuser logs in\n# Logout\nuser logs out\n# Reset\nreset pw' },
-    ])
-    const second = deterministicPrdRequirements(after, first)
-    expect(second.find((r) => r.title === 'Login')?.id).toBe('R1')
-    expect(second.find((r) => r.title === 'Logout')?.id).toBe('R2')
-    expect(second.find((r) => r.title === 'Reset')?.id).toBe('R3')
-  })
-
-  it('falls back to one requirement per doc when there are no headings', () => {
-    const c = collection([{ relPath: 'notes.md', content: 'just a flat note' }])
-    const reqs = deterministicPrdRequirements(c, [])
-    expect(reqs).toHaveLength(1)
-    expect(reqs[0].title).toBe('notes')
-    expect(reqs[0].text).toBe('just a flat note')
-  })
-
-  it('uses relPath as text when doc has no headings and no non-empty first line (line 259 branch)', () => {
-    // Content is only whitespace/blank → firstBody is falsy → text = entry.relPath
-    const c = collection([{ relPath: 'empty.md', content: '   \n   ' }])
-    const reqs = deterministicPrdRequirements(c, [])
-    expect(reqs[0].text).toBe('empty.md')
-  })
-
-  it('uses title as body fallback when heading body is empty (line 271 branch)', () => {
-    // Heading with no body lines → body = '' → text = title (the heading text)
-    const c = collection([{ relPath: 'spec.md', content: '# Just a heading\n' }])
-    const reqs = deterministicPrdRequirements(c, [])
-    expect(reqs[0].title).toBe('Just a heading')
-    expect(reqs[0].text).toBe('Just a heading')
-  })
-
+describe('reconcileRequirementIds — id stability', () => {
   it('maxIdNumber handles non-Rn ids (line 161 false branch)', () => {
     // Previous ids include a non-matching id like 'CUSTOM-1' → regex match fails →
     // max stays 0 → fresh id starts at R1.
@@ -374,28 +332,37 @@ describe('summarizePrd orchestrator', () => {
     expect(out.generatedAt).toBe('2026-06-16T00:00:00.000Z')
   })
 
-  it('falls back to deterministic when the agent yields garbage', async () => {
+  it('throws (LLM-only) when every agent returns unparseable output', async () => {
     const c = collection([{ relPath: 'spec.md', content: '# Login\nlog in' }])
-    const out = await summarizePrd(
-      { collection: c, now: 'n' },
-      { resolveAgents: () => ['claude'], runAgent: async () => 'totally not json' },
-    )
-    expect(out.requirements[0].title).toBe('Login')
-    expect(out.requirements[0].id).toBe('R1')
+    await expect(
+      summarizePrd(
+        { collection: c, now: 'n' },
+        { resolveAgents: () => ['claude'], runAgent: async () => 'totally not json' },
+      ),
+    ).rejects.toThrow(/requires the claude or codex agent/)
   })
 
-  it('falls back to deterministic when no agent is available', async () => {
+  it('throws (LLM-only) when no agent is available', async () => {
     const c = collection([{ relPath: 'spec.md', content: '# A\nx' }])
-    const out = await summarizePrd({ collection: c, adapter: 'deterministic', now: 'n' }, { resolveAgents: () => [] })
-    expect(out.requirements[0].id).toBe('R1')
+    await expect(
+      summarizePrd({ collection: c, now: 'n' }, { resolveAgents: () => [] }),
+    ).rejects.toThrow(/requires the claude or codex agent/)
   })
 
-  it('preserves ids across a real regenerate cycle (before/after docs pair)', async () => {
+  it('preserves ids across a real regenerate cycle (agent output, before/after docs pair)', async () => {
+    const reqsJson = (titles: string[]) =>
+      JSON.stringify({ requirements: titles.map((t) => ({ title: t, text: t.toLowerCase(), pathTypes: ['happy'] })) })
     const before = collection([{ relPath: 'spec.md', content: '# Login\nlog in\n# Logout\nlog out' }])
-    const first = await summarizePrd({ collection: before, adapter: 'deterministic', now: 'n' }, { resolveAgents: () => [] })
+    const first = await summarizePrd(
+      { collection: before, now: 'n' },
+      { resolveAgents: () => ['claude'], runAgent: async () => reqsJson(['Login', 'Logout']) },
+    )
 
     const after = collection([{ relPath: 'spec.md', content: '# Logout\nlog out\n# Login\nlog in\n# Reset\nreset' }])
-    const second = await summarizePrd({ collection: after, previous: first, adapter: 'deterministic', now: 'n' }, { resolveAgents: () => [] })
+    const second = await summarizePrd(
+      { collection: after, previous: first, now: 'n' },
+      { resolveAgents: () => ['claude'], runAgent: async () => reqsJson(['Logout', 'Login', 'Reset']) },
+    )
 
     expect(second.requirements.find((r) => r.title === 'Login')?.id).toBe('R1')
     expect(second.requirements.find((r) => r.title === 'Logout')?.id).toBe('R2')
