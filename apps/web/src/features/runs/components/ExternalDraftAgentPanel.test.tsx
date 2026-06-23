@@ -12,7 +12,7 @@ function draft(overrides: Partial<DraftRecord> = {}): DraftRecord {
     featureName: 'checkout',
     producer: 'external',
     externalStage: 'authoring-tests' as ExternalDraftStage,
-    externalClientKind: 'claude-desktop',
+    externalClientKind: 'claude',
     externalSessionId: 'sess-abcdef-12345',
     externalConversationName: 'Add checkout tests',
     externalSessionUrl: 'codex://session/sess-abcdef',
@@ -28,7 +28,7 @@ describe('ExternalDraftAgentPanel', () => {
     const html = renderToStaticMarkup(
       <ExternalDraftAgentPanel draft={draft()} stageView="generating" />,
     )
-    expect(html).toContain('Claude Desktop')
+    expect(html).toContain('Claude')
     expect(html).toContain('Authoring tests')
     expect(html).toContain('Add checkout tests')
   })
@@ -63,8 +63,8 @@ describe('ExternalDraftAgentPanel', () => {
   })
 
   it.each([
-    ['claude-cli', 'Claude CLI'],
-    ['codex-desktop', 'Codex Desktop'],
+    ['claude', 'Claude'],
+    ['codex-pty', 'Codex (runner)'],
     ['other', 'External Client'],
   ] as Array<[ExternalHealClientKind, string]>)('renders the %s client label', (kind, label) => {
     const html = renderToStaticMarkup(
@@ -78,7 +78,7 @@ describe('ExternalDraftAgentPanel', () => {
       <ExternalDraftAgentPanel draft={draft()} stageView="generating" />,
     )
     expect(html).toContain('codex://session/sess-abcdef')
-    expect(html).toContain('Open Claude Desktop')
+    expect(html).toContain('Open Claude')
   })
 
   it('omits the open-session link when externalSessionUrl is missing', () => {
@@ -88,6 +88,6 @@ describe('ExternalDraftAgentPanel', () => {
         stageView="generating"
       />,
     )
-    expect(html).not.toContain('Open Claude Desktop')
+    expect(html).not.toContain('Open Claude')
   })
 })

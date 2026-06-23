@@ -70,13 +70,31 @@ export interface RunAgentProcessOpts {
   spawnImpl?: typeof nodeSpawn
 }
 
+// Every CLI spawned through here is a runner-spawned agent (benchmark sabotage,
+// portify, coverage, wizard, …). If such an agent connects back to Canary Lab's
+// MCP it must be tagged a PTY client so the heal-claim policy blocks it from
+// claiming its own run — see heal-claim-policy.ts. Tagging here (rather than at
+// each call site) makes it impossible to forget: any new agent feature inherits
+// the block for free. `CANARY_LAB_MCP_CLIENT_KIND` is read first by the MCP
+// bridge's `inferMcpClientKind`, so this wins over process-lineage sniffing.
+function runnerPtyClientKind(command: string): 'claude-pty' | 'codex-pty' | null {
+  const base = command.split('/').pop() ?? command
+  if (/claude/i.test(base)) return 'claude-pty'
+  if (/codex/i.test(base)) return 'codex-pty'
+  return null
+}
+
 export function runAgentProcess(opts: RunAgentProcessOpts): AgentProcessHandle {
   const spawnImpl = opts.spawnImpl ?? nodeSpawn
   const captureStdout = opts.captureStdout ?? true
   const useStdin = opts.stdin !== undefined
+  const ptyKind = runnerPtyClientKind(opts.command)
   const child = spawnImpl(opts.command, opts.args, {
     cwd: opts.cwd,
     stdio: [useStdin ? 'pipe' : 'ignore', 'pipe', 'pipe'],
+    env: ptyKind
+      ? { ...process.env, CANARY_LAB_MCP_CLIENT_KIND: ptyKind }
+      : process.env,
   })
 
   let stdout = ''

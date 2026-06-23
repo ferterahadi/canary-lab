@@ -659,7 +659,7 @@ describe('createPortifyRunner (branch coverage)', () => {
       const agentCallsBefore = vi.mocked(runPortifyAgent).mock.calls.length
 
       const result = await runner.startExternalPortify({
-        feature: 'myfeat', clientKind: 'claude-cli', sessionId: 's1', conversationName: 'port work',
+        feature: 'myfeat', clientKind: 'claude', sessionId: 's1', conversationName: 'port work',
       })
       expect(result.workflowId).toMatch(/^portify-/)
       expect(result.targets).toHaveLength(1)
@@ -671,7 +671,7 @@ describe('createPortifyRunner (branch coverage)', () => {
       const m = store.get(result.workflowId)!
       expect(m.status).toBe('editing')
       expect(m.producer).toBe('external')
-      expect(m.external).toMatchObject({ clientKind: 'claude-cli', sessionId: 's1', conversationName: 'port work' })
+      expect(m.external).toMatchObject({ clientKind: 'claude', sessionId: 's1', conversationName: 'port work' })
       expect(m.repos[0].worktreePath).toBeTruthy()
       // No local agent is spawned for an external workflow.
       expect(vi.mocked(runPortifyAgent).mock.calls.length).toBe(agentCallsBefore)
@@ -684,7 +684,7 @@ describe('createPortifyRunner (branch coverage)', () => {
       const featureDir = path.join(featuresDir, 'myfeat')
       const { store, runner } = makeRunner(featuresDir, logsDir)
 
-      const result = await runner.startExternalPortify({ feature: 'myfeat', clientKind: 'claude-cli', sessionId: 's1' })
+      const result = await runner.startExternalPortify({ feature: 'myfeat', clientKind: 'claude', sessionId: 's1' })
       // Simulate the external client editing the scratch worktree IN PLACE.
       fs.appendFileSync(
         path.join(result.targets[0].editPath, 'src', 'server.js'),
@@ -708,7 +708,7 @@ describe('createPortifyRunner (branch coverage)', () => {
       const { featuresDir, logsDir } = await singleFixture()
       const { store, runner } = makeRunner(featuresDir, logsDir)
 
-      const result = await runner.startExternalPortify({ feature: 'myfeat', clientKind: 'codex-cli', sessionId: 's1' })
+      const result = await runner.startExternalPortify({ feature: 'myfeat', clientKind: 'codex', sessionId: 's1' })
       await runner.submitExternalPortify(result.workflowId)
 
       const deadline = Date.now() + 4000
@@ -725,9 +725,9 @@ describe('createPortifyRunner (branch coverage)', () => {
     it('enforces one workflow at a time across local + external', async () => {
       const { featuresDir, logsDir } = await singleFixture()
       const { runner } = makeRunner(featuresDir, logsDir)
-      const result = await runner.startExternalPortify({ feature: 'myfeat', clientKind: 'claude-cli', sessionId: 's1' })
+      const result = await runner.startExternalPortify({ feature: 'myfeat', clientKind: 'claude', sessionId: 's1' })
       await expect(
-        runner.startExternalPortify({ feature: 'myfeat', clientKind: 'claude-cli', sessionId: 's2' }),
+        runner.startExternalPortify({ feature: 'myfeat', clientKind: 'claude', sessionId: 's2' }),
       ).rejects.toMatchObject({ statusCode: 409 })
       await expect(runner.startPortify({ feature: 'myfeat' })).rejects.toMatchObject({ statusCode: 409 })
       await runner.cancel(result.workflowId)

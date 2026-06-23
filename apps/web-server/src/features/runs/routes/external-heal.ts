@@ -20,10 +20,10 @@ import {
 } from '../../../../../../shared/run-state'
 
 const VALID_CLIENT_KINDS: ClientKind[] = [
-  'claude-cli',
-  'claude-desktop',
-  'codex-cli',
-  'codex-desktop',
+  'claude',
+  'codex',
+  'claude-pty',
+  'codex-pty',
   'other',
 ]
 

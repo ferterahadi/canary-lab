@@ -122,8 +122,9 @@ cross-cutting and not separately tagged in the CHANGELOG.
 These are the expectations that shape review decisions; several are encoded as code
 invariants (see [ARCHITECTURE.md](ARCHITECTURE.md#keep-in-sync-invariants)).
 
-1. **Heal safety.** Only Desktop client kinds may own a heal claim (allowlist that
-   fails safe on detection failure); destructive tools require an explicit
+1. **Heal safety.** Every interactive client may own a heal claim; only the
+   runner-spawned PTY agents are blocked (denylist, since the runner tags its own
+   spawns deterministically); destructive tools require an explicit
    `confirm: true`; the repair rule is "fix app/service code, not tests, unless a
    test is provably wrong"; every external command is audited per run.
 2. **Honest counts.** Pass counts come from `result.counts.statusLine` /

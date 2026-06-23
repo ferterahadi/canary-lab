@@ -44,7 +44,7 @@ describe('evaluationOutputPanel', () => {
       {
         mode: 'localized',
         producer: 'external',
-        clientKind: 'codex-cli',
+        clientKind: 'codex',
         conversationName: 'Export this into evaluation',
       },
       '[agent:codex] internal transcript that should not render\n',
@@ -52,7 +52,7 @@ describe('evaluationOutputPanel', () => {
 
     expect(panel.heading).toBe('Export progress')
     expect(panel.text).toContain('Generated using external client')
-    expect(panel.text).toContain('codex-cli')
+    expect(panel.text).toContain('codex')
     expect(panel.text).toContain('Export this into evaluation')
     expect(panel.text).not.toContain('internal transcript')
   })

@@ -14,6 +14,12 @@ Each entry is tagged with the area it touches:
 
 ---
 
+## 1.4.0 — unreleased
+
+- **[General]** **Healing from the CLI is back.** Heal claiming is no longer limited to Desktop clients — any interactive Claude or Codex session (Desktop *or* CLI) can own a heal loop again. The only sessions still blocked are the ones Canary Lab spawns itself for benchmarks and Portify, which must never claim the very run they're working on.
+
+---
+
 ## 1.3.2 — 2026-06-16
 
 - **[Test Runner]** **The healing agent sees the whole picture.** Failure evidence used to get clipped to fit — long error messages, prior-agent context, code diffs, and boot logs could lose their tail. Now nothing useful is dropped: the agent always gets the full content, or a clear pointer to the complete file on disk.
