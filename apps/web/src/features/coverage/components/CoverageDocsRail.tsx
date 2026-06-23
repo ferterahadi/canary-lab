@@ -348,7 +348,7 @@ export function CoverageDocsRail(props: Props): JSX.Element {
         ) : confirmingRedo ? (
           <>
             <div style={{ fontSize: 11, color: 'var(--text-secondary)', lineHeight: 1.45, marginBottom: 2 }}>
-              Delete the generated summary <strong style={{ color: 'var(--text-primary)' }}>and all source docs</strong>? You&apos;ll start over from an empty doc list.
+              Delete the generated summary <strong style={{ color: 'var(--text-primary)' }}>and all source docs</strong>, and strip the <strong style={{ color: 'var(--text-primary)' }}>@req-/@path- tags</strong> from your specs? You&apos;ll start over from an empty doc list.
             </div>
             <button
               type="button"

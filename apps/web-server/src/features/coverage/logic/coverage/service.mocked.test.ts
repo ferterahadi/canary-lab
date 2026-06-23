@@ -14,7 +14,7 @@ vi.mock('../../../config/logic/ast-extractor', async (importOriginal) => {
   }
 })
 
-import { computeFeatureCoverage, runCoverageEngine, regeneratePrdSummary } from './service'
+import { computeFeatureCoverage, runCoverageEngine, regeneratePrdSummary, clearPrdSummary } from './service'
 import { extractTestsFromSource } from '../../../config/logic/ast-extractor'
 
 let tmpDir: string
@@ -47,6 +47,35 @@ function writeFeature(name: string): string {
   fs.writeFileSync(path.join(dir, 'docs', 'spec.md'), '# Create todo\na user can create a new todo item')
   return dir
 }
+
+describe('clearPrdSummary — strips coverage tags from specs', () => {
+  it('removes the summary/sidecars AND the @req/@path tags, reporting untagged specs', () => {
+    const dir = writeFeature('checkout')
+    const specPath = path.join(dir, 'e2e', 'a.spec.ts')
+    // Spec carries coverage tags + a user tag that must survive.
+    fs.writeFileSync(
+      specPath,
+      `import { test } from '@playwright/test'\ntest('shared', { tag: ['@req-R1', '@path-happy', '@smoke'] }, async () => {})\n`,
+    )
+    // Drop a generated summary sidecar so `removed` has something to report.
+    fs.writeFileSync(path.join(dir, 'docs', '_prd-summary.json'), '{"requirements":[]}')
+
+    const result = clearPrdSummary({ featuresDir, feature: 'checkout' })
+
+    expect(result.removed).toContain('_prd-summary.json')
+    expect(result.untagged).toEqual([path.join('e2e', 'a.spec.ts')])
+    const after = fs.readFileSync(specPath, 'utf-8')
+    expect(after).not.toContain('@req-R1')
+    expect(after).not.toContain('@path-happy')
+    expect(after).toContain('@smoke') // user tag preserved
+  })
+
+  it('reports no untagged specs when none carry coverage tags', () => {
+    writeFeature('checkout') // default spec has no tags
+    const result = clearPrdSummary({ featuresDir, feature: 'checkout' })
+    expect(result.untagged).toEqual([])
+  })
+})
 
 describe('collectTests — sourceFile override (service.ts line 86)', () => {
   it('uses t.sourceFile as absFile when the extractor sets it (FALSE branch of t.sourceFile ?? file)', async () => {

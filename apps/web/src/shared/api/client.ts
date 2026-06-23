@@ -251,7 +251,7 @@ export async function getEvaluationAgentSession(
   }
 }
 
-export function clearPrdSummary(feature: string, opts?: ClientOptions): Promise<{ feature: string; removed: string[] }> {
+export function clearPrdSummary(feature: string, opts?: ClientOptions): Promise<{ feature: string; removed: string[]; untagged: string[] }> {
   const { baseUrl, fetchImpl } = defaultOpts(opts)
   return request(
     `${baseUrl}/api/features/${encodeURIComponent(feature)}/prd-summary`,

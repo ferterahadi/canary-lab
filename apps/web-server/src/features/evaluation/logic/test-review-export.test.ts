@@ -482,6 +482,38 @@ const sharedCheck = (page) => {
     expect(html).toContain('passed</span> <span class="muted">(250ms)</span>')
   })
 
+  it('parses the 3-arg test(title, { tag }, body) form the coverage annotator writes', async () => {
+    const featureDir = path.join(tmpDir, 'tagged-feature')
+    const e2eDir = path.join(featureDir, 'e2e')
+    fs.mkdirSync(e2eDir, { recursive: true })
+    const spec = path.join(e2eDir, 'tagged.spec.ts')
+    // The coverage tag-writer inserts a { tag: [...] } details object after the
+    // title, which shifts the callback to the third argument. The export must
+    // still locate the body — otherwise every annotated test reads as
+    // "Source unavailable".
+    const specSource = `import { test, expect } from '@playwright/test'
+
+test.describe('PAT suite', () => {
+  test('issues a token', { tag: ['@req-R1', '@path-happy'] }, async ({ request }) => {
+    const res = await request.post('/pats')
+    expect(res.status()).toBe(201)
+  })
+})
+`
+    fs.writeFileSync(spec, specSource)
+    const packet = buildTestReviewPacket(detail({
+      featureDir,
+      eventLocation: `${spec}:${lineOf(specSource, "test('issues a token'")}`,
+      title: 'issues a token',
+    }))
+
+    expect(packet.tests[0].testBody).toContain('request.post')
+    expect(packet.tests[0].assertions).toContainEqual(expect.objectContaining({ label: 'toBe', quality: 'strict' }))
+    expect(packet.tests[0].assertions).not.toContainEqual(
+      expect.objectContaining({ rationale: expect.stringContaining('No static assertion') }),
+    )
+  })
+
   it('handles local helpers, template titles, skipped callback bodies, unresolved imports, and read failures', () => {
     const featureDir = path.join(tmpDir, 'edge-feature')
     const e2eDir = path.join(featureDir, 'e2e')
@@ -898,6 +930,66 @@ function unknownUtility(page) {
     expect(html).toContain('Helper implementation could not be resolved statically')
     expect((html.match(/Helper implementation could not be resolved statically/g) ?? []).length).toBe(1)
     expect(html).not.toContain('<code>expect(page.getByText(&#39;Success&#39;))</code>')
+  })
+
+  it('descends into try/blocks, surfaces meaningful inner steps, drops literal-only decls', async () => {
+    const featureDir = path.join(tmpDir, 'flow-descend')
+    fs.mkdirSync(path.join(featureDir, 'e2e'), { recursive: true })
+    const spec = path.join(featureDir, 'e2e', 'flow.spec.ts')
+    const specSource = `import { test, expect } from '@playwright/test'
+
+test('wrapped in try', async ({ page }) => {
+  try {
+    const noise = 'literal only'
+    await page.goto('/start')
+    const created = await page.request.post('/api/x')
+    expect(created.status()).toBe(201)
+    await expect(page.locator('.done')).toBeVisible()
+  } finally {
+    await page.close()
+  }
+})
+`
+    fs.writeFileSync(spec, specSource)
+    const packet = buildTestReviewPacket(detail({
+      featureDir,
+      feature: 'flow_descend',
+      eventLocation: `${spec}:${lineOf(specSource, "test('wrapped in try'")}`,
+      title: 'wrapped in try',
+    }))
+    const nodes = __testReviewExportInternals.flowNodesForTest(packet.tests[0])
+    // Before the fix the whole try{} collapsed → start + 1 node + end = 3.
+    expect(nodes.length).toBeGreaterThan(4)
+    expect(nodes[0].kind).toBe('start')
+    expect(nodes[nodes.length - 1].kind).toBe('end')
+    // Inner assertions inside the try are surfaced (≥2), not collapsed.
+    expect(nodes.filter((n) => n.kind === 'assertion').length).toBeGreaterThanOrEqual(2)
+    // The literal-only declaration is not a flow step.
+    expect(nodes.some((n) => (n.detail ?? '').includes('literal only'))).toBe(false)
+  })
+
+  it('soft-caps a very long flow with a "+N more steps" node', async () => {
+    const featureDir = path.join(tmpDir, 'flow-cap')
+    fs.mkdirSync(path.join(featureDir, 'e2e'), { recursive: true })
+    const spec = path.join(featureDir, 'e2e', 'big.spec.ts')
+    const steps = Array.from({ length: 30 }, (_, i) => `  await page.goto('/step-${i}')`).join('\n')
+    const specSource = `import { test, expect } from '@playwright/test'
+
+test('many steps', async ({ page }) => {
+${steps}
+})
+`
+    fs.writeFileSync(spec, specSource)
+    const packet = buildTestReviewPacket(detail({
+      featureDir,
+      feature: 'flow_cap',
+      eventLocation: `${spec}:${lineOf(specSource, "test('many steps'")}`,
+      title: 'many steps',
+    }))
+    const nodes = __testReviewExportInternals.flowNodesForTest(packet.tests[0])
+    expect(nodes.some((n) => /\+\d+ more steps/.test(n.title))).toBe(true)
+    // start + 24 capped steps + summary + end.
+    expect(nodes.length).toBe(27)
   })
 
   it('covers internal rewrite parsing and audience wording branches', () => {

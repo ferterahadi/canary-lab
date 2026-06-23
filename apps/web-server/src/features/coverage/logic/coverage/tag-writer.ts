@@ -173,3 +173,88 @@ export function writeCoversTags(
   for (const e of edits) out = out.slice(0, e.start) + e.text + out.slice(e.end)
   return out
 }
+
+// The inverse of writeCoversTag: the only tokens coverage owns are `@req-*` and
+// `@path-*`. Anything else (a user's `@smoke`, `@slow`) is theirs to keep.
+const COVERAGE_TOKEN = /^@(req|path)-/
+
+/**
+ * Compute the edit that removes coverage-owned tokens from one `test(...)`
+ * details object. Returns null when there's nothing coverage owns (no-op keeps
+ * the file untouched). When stripping empties the structure, the edit unwinds
+ * one level at a time so the test returns to its original shape:
+ *   `{ tag: ['@req-R1'] }`            → details object removed   (`, { … }` gone)
+ *   `{ tag: ['@req-R1'], timeout: 1 }`→ `tag` property removed   (object kept)
+ *   `{ tag: ['@req-R1', '@smoke'] }`  → `tag: ['@smoke']`        (user token kept)
+ */
+function planStripEdit(
+  source: string,
+  call: ts.CallExpression,
+  detail: ts.ObjectLiteralExpression,
+): TagEdit | null {
+  const tagProp = detail.properties.find(
+    (p): p is ts.PropertyAssignment =>
+      ts.isPropertyAssignment(p) &&
+      (ts.isIdentifier(p.name) || ts.isStringLiteralLike(p.name)) &&
+      (p.name.text === 'tag' || p.name.text === 'tags'),
+  )
+  if (!tagProp) return null
+
+  const value = tagProp.initializer
+  const existing: string[] = []
+  if (ts.isStringLiteralLike(value)) existing.push(value.text)
+  else if (ts.isArrayLiteralExpression(value)) {
+    for (const el of value.elements) if (ts.isStringLiteralLike(el)) existing.push(el.text)
+  }
+  const kept = existing.filter((t) => !COVERAGE_TOKEN.test(t))
+  if (kept.length === existing.length) return null // nothing coverage-owned — no-op
+
+  // Some non-coverage tokens survive → rewrite the tag value, leave everything else.
+  if (kept.length > 0) {
+    return { start: value.getStart(), end: value.getEnd(), text: renderTagArray(kept) }
+  }
+
+  // The tag list is now empty. If `tag` was the only property, drop the whole
+  // details object argument; otherwise drop just the `tag` property.
+  const otherProps = detail.properties.filter((p) => p !== tagProp)
+  if (otherProps.length === 0) {
+    // Remove from the end of the title arg through the end of the details object,
+    // taking the `, ` separator with it: `('name', { tag: [...] }, fn)` → `('name', fn)`.
+    const titleArg = call.arguments[0]
+    return { start: titleArg.getEnd(), end: detail.getEnd(), text: '' }
+  }
+  // Drop the `tag` property and a trailing comma/whitespace up to the next property.
+  const next = otherProps.find((p) => p.getStart() > tagProp.getEnd())
+  const end = next ? next.getStart() : tagProp.getEnd()
+  return { start: tagProp.getStart(), end, text: '' }
+}
+
+/**
+ * Return `source` with every coverage-owned tag (`@req-*` / `@path-*`) removed
+ * from every test, unwinding emptied `tag` lists / details objects so specs go
+ * back to their pre-coverage shape. Non-coverage tags are preserved. Idempotent:
+ * a spec with no coverage tags returns unchanged. This is the inverse used by the
+ * "Redo from the start" reset to truly blank the slate.
+ */
+export function stripCoverageTags(source: string): string {
+  const src = ts.createSourceFile('spec.ts', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
+  const edits: TagEdit[] = []
+  const visit = (node: ts.Node): void => {
+    if (ts.isCallExpression(node) && isTestCall(node) && getStringArg(node) !== null) {
+      const detail = node.arguments.find((a) => ts.isObjectLiteralExpression(a)) as
+        | ts.ObjectLiteralExpression
+        | undefined
+      if (detail) {
+        const edit = planStripEdit(source, node, detail)
+        if (edit) edits.push(edit)
+      }
+    }
+    node.forEachChild(visit)
+  }
+  visit(src)
+  if (!edits.length) return source
+  edits.sort((a, b) => b.start - a.start)
+  let out = source
+  for (const e of edits) out = out.slice(0, e.start) + e.text + out.slice(e.end)
+  return out
+}

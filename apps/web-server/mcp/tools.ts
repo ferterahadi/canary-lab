@@ -748,7 +748,7 @@ export function registerCanaryLabTools(
 
   registerTool('clear_prd_summary', {
     description:
-      'Remove a feature\'s generated PRD summary and the coverage sidecars tied to it (pending mappings, run-state). Source docs are left untouched; the feature returns to the "no summary" state (and the whole surface to its initial empty state if no source docs remain). Same action as the UI Docs-tab ✕ on the generated summary card.',
+      'Reset a feature\'s coverage to a blank slate: remove the generated PRD summary and the coverage sidecars tied to it (pending mappings, run-state), AND strip the @req-*/@path-* coverage tags the engine wrote into the spec files (other tags are kept; emptied tag lists/details objects are removed so specs revert to their pre-coverage shape). Source docs (uploaded PRD docs) are untouched; the feature returns to the "no summary" state (and the whole surface to its initial empty state if no source docs remain). Returns { removed, untagged } — untagged lists the specs whose tags were cleared. Same action as the UI "Redo from the start".',
     inputSchema: { feature: z.string().describe('Existing feature name (from list_features).') },
   }, async ({ feature }) => {
     try {
