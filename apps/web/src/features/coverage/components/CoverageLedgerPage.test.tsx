@@ -19,6 +19,8 @@ vi.mock('../../../shared/api/client', async () => {
     startCoverageJob: vi.fn(),
     getCoverageJob: vi.fn(),
     listCoverageJobs: vi.fn(),
+    getFeatureTests: vi.fn(),
+    openEditor: vi.fn(),
   }
 })
 
@@ -26,7 +28,7 @@ const LEDGER: CoverageLedger = {
   feature: 'checkout',
   requirements: [
     {
-      requirement: { id: 'R1', title: 'Add to cart', text: 'user can add an item', pathTypes: ['happy', 'sad'] },
+      requirement: { id: 'R1', title: 'Add to cart', text: 'user can add an item', pathTypes: ['happy', 'sad'], kind: 'functional', happyPath: 'item appears in the cart with the right qty', unhappyPath: 'out-of-stock item is rejected with a message' },
       annotatedTestNames: ['adds item'],
       pathCoverage: [{ path: 'happy', covered: true }, { path: 'sad', covered: false }],
       gapType: 'path-incomplete',
@@ -91,6 +93,10 @@ beforeEach(() => {
   vi.mocked(api.getFeatureCoverage).mockResolvedValue(structuredClone(LEDGER))
   vi.mocked(api.listFeatureDocs).mockResolvedValue({ feature: 'checkout', docs: [], hasPrdSummary: true, sourceDocCount: 1, docsDrift: true })
   vi.mocked(api.listCoverageJobs).mockResolvedValue([]) // no running job by default
+  vi.mocked(api.getFeatureTests).mockResolvedValue([
+    { file: '/repo/features/checkout/e2e/cart.spec.ts', tests: [{ name: 'adds item', line: 10, bodySource: 'await page.goto("/cart")\nexpect(items).toHaveLength(1)', steps: [] }] },
+  ])
+  vi.mocked(api.openEditor).mockResolvedValue({ opened: true, editor: 'vscode' })
 })
 
 afterEach(() => {
@@ -318,6 +324,60 @@ describe('CoverageLedgerPage', () => {
     expect(container.querySelector('[data-testid="coverage-generating"]')).toBeTruthy()
     expect(container.querySelector('[data-testid="prd-pane"]')).toBeNull()
     resolveJob?.({ jobId: 'jX', feature: 'checkout', kind: 'coverage', status: 'done', startedAt: '2026-01-01T00:00:01Z', log: 'done' })
+  })
+
+  it('expands a requirement to reveal its kind + happy/unhappy paths', async () => {
+    await mount()
+    // Collapsed: the detail block is absent.
+    expect(container.querySelector('[data-testid="req-detail-R1"]')).toBeNull()
+    act(() => { container.querySelector<HTMLElement>('[data-testid="req-toggle-R1"]')?.click() })
+    const detail = container.querySelector('[data-testid="req-detail-R1"]')
+    expect(detail?.textContent).toContain('Functional')
+    expect(detail?.textContent).toContain('item appears in the cart')
+    expect(detail?.textContent).toContain('out-of-stock item is rejected')
+    // Toggling again collapses it.
+    act(() => { container.querySelector<HTMLElement>('[data-testid="req-toggle-R1"]')?.click() })
+    expect(container.querySelector('[data-testid="req-detail-R1"]')).toBeNull()
+  })
+
+  it('offers no expand toggle for a requirement with no extra detail', async () => {
+    await mount()
+    // R3 has no kind/happyPath/unhappyPath → not disclosable.
+    expect(container.querySelector('[data-testid="req-toggle-R3"]')).toBeNull()
+  })
+
+  it('expands a test to fetch and render its source, lazily', async () => {
+    await mount()
+    // Not fetched until first expand.
+    expect(api.getFeatureTests).not.toHaveBeenCalled()
+    await act(async () => {
+      container.querySelector<HTMLElement>('[data-testid="test-toggle-adds item"]')?.click()
+      await Promise.resolve()
+    })
+    expect(api.getFeatureTests).toHaveBeenCalledWith('checkout')
+    const src = container.querySelector('[data-testid="test-source-adds item"]')
+    expect(src?.textContent).toContain('await page.goto("/cart")')
+    expect(src?.textContent).toContain('expect(items).toHaveLength(1)')
+  })
+
+  it('opens the test in the editor at its source location', async () => {
+    await mount()
+    await act(async () => {
+      container.querySelector<HTMLElement>('[data-testid="test-toggle-adds item"]')?.click()
+      await Promise.resolve()
+    })
+    act(() => { container.querySelector<HTMLButtonElement>('[data-testid="test-open-editor-adds item"]')?.click() })
+    expect(api.openEditor).toHaveBeenCalledWith({ file: '/repo/features/checkout/e2e/cart.spec.ts', line: 10 })
+  })
+
+  it('shows a not-found note when a test has no extractable source', async () => {
+    await mount()
+    // 'sends receipt' (receipt.spec.ts:5) is absent from the getFeatureTests mock.
+    await act(async () => {
+      container.querySelector<HTMLElement>('[data-testid="test-toggle-sends receipt"]')?.click()
+      await Promise.resolve()
+    })
+    expect(container.querySelector('[data-testid="test-source-sends receipt"]')?.textContent).toContain('Source not found')
   })
 })
 

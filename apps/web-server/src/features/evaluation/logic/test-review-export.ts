@@ -1251,6 +1251,10 @@ function applyFlowStepRewrite(nodes: FlowNode[], steps: EvaluationRewriteFlowSte
   })
 }
 
+// Cap the flow at a readable length; an overflow is summarized in one node so even
+// a huge test stays scannable.
+const MAX_FLOW_STEPS = 24
+
 function flowNodesForTest(test: TestReviewCase): FlowNode[] {
   if (!test.testBody) {
     return [
@@ -1259,11 +1263,32 @@ function flowNodesForTest(test: TestReviewCase): FlowNode[] {
       { kind: 'end', title: `Result: ${test.status}` },
     ]
   }
+  const allSteps = testBodyStatements(test).map((statement) => flowNodeForStatement(statement.text, test, statement.line))
+  const stepNodes: FlowNode[] = allSteps.length > MAX_FLOW_STEPS
+    ? [
+        ...allSteps.slice(0, MAX_FLOW_STEPS),
+        { kind: 'setup', title: `+${allSteps.length - MAX_FLOW_STEPS} more steps`, detail: 'further statements omitted for brevity' },
+      ]
+    : allSteps
   return [
     { kind: 'start', title: test.title },
-    ...testBodyStatements(test).map((statement) => flowNodeForStatement(statement.text, test, statement.line)),
+    ...stepNodes,
     { kind: 'end', title: `Result: ${test.status}` },
   ]
+}
+
+// A leaf statement reads as a flow step when it DOES something — an `await` or a
+// call (awaited actions, helper calls, `expect(...)` assertions). Pure literal /
+// identifier declarations (`const url = '…'`) are flow noise and are dropped.
+function isMeaningfulFlowStatement(node: ts.Node): boolean {
+  let found = false
+  const visit = (n: ts.Node): void => {
+    if (found) return
+    if (ts.isCallExpression(n) || ts.isAwaitExpression(n) || ts.isNewExpression(n)) { found = true; return }
+    n.forEachChild(visit)
+  }
+  visit(node)
+  return found
 }
 
 function testBodyStatements(test: TestReviewCase): Array<{ text: string; line: number }> {
@@ -1276,10 +1301,34 @@ function testBodyStatements(test: TestReviewCase): Array<{ text: string; line: n
       .map((line, idx) => ({ text: cleanSnippet(line), line: idx + 1 }))
       .filter((item) => item.text)
   }
-  return fn.body.statements.map((statement) => ({
-    text: cleanSnippet(statement.getText(src)),
-    line: src.getLineAndCharacterOfPosition(statement.getStart(src)).line + 1,
-  }))
+  // Flatten control-flow containers so a test wrapped in `try {…}` (or if/loops)
+  // surfaces its real steps in source order instead of collapsing into one node.
+  // We descend into statement containers only — never into expressions / arrow
+  // callbacks — so a leaf stays one node.
+  const leaves: ts.Statement[] = []
+  const walk = (stmt: ts.Statement): void => {
+    if (ts.isBlock(stmt)) { stmt.statements.forEach(walk); return }
+    if (ts.isTryStatement(stmt)) {
+      walk(stmt.tryBlock)
+      if (stmt.catchClause) walk(stmt.catchClause.block)
+      if (stmt.finallyBlock) walk(stmt.finallyBlock)
+      return
+    }
+    if (ts.isIfStatement(stmt)) {
+      walk(stmt.thenStatement)
+      if (stmt.elseStatement) walk(stmt.elseStatement)
+      return
+    }
+    if (ts.isIterationStatement(stmt, false)) { walk(stmt.statement); return }
+    leaves.push(stmt)
+  }
+  fn.body.statements.forEach(walk)
+  return leaves
+    .filter(isMeaningfulFlowStatement)
+    .map((statement) => ({
+      text: cleanSnippet(statement.getText(src)),
+      line: src.getLineAndCharacterOfPosition(statement.getStart(src)).line + 1,
+    }))
 }
 
 function flowNodeForStatement(statement: string, test: TestReviewCase, codeLine: number): FlowNode {
@@ -1976,9 +2025,16 @@ function stringArg(node: ts.CallExpression, src: ts.SourceFile): string | undefi
 }
 
 function functionBody(node: ts.CallExpression): ts.ConciseBody | undefined {
-  const fn = node.arguments[1]
-  if (!fn) return undefined
-  return ts.isArrowFunction(fn) || ts.isFunctionExpression(fn) ? fn.body : undefined
+  // Playwright accepts both test(title, body) and test(title, details, body),
+  // where the 3-arg form carries a { tag, annotation } object — exactly what the
+  // coverage annotator (tag-writer.ts) inserts after the title. That shifts the
+  // callback to the last argument, so scan from the end rather than assuming
+  // arguments[1], or every tag-annotated test reads as "Source unavailable".
+  for (let i = node.arguments.length - 1; i >= 1; i -= 1) {
+    const arg = node.arguments[i]
+    if (ts.isArrowFunction(arg) || ts.isFunctionExpression(arg)) return arg.body
+  }
+  return undefined
 }
 
 function functionName(node: ts.Node): string | undefined {

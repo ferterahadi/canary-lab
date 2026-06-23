@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { writeCoversTag, writeCoversTags, coversTagTokens } from './tag-writer'
+import { writeCoversTag, writeCoversTags, coversTagTokens, stripCoverageTags } from './tag-writer'
 import { extractTestsFromSource } from '../../../config/logic/ast-extractor'
 
 describe('coversTagTokens', () => {
@@ -166,6 +166,63 @@ describe('writeCoversTag — remaining branch coverage', () => {
     const src = `test('t', { tag: getMyTags() }, async () => {})`
     const out = writeCoversTag(src, 't', { requirements: ['R8'] })
     expect(out).toContain('@req-R8')
+  })
+})
+
+describe('stripCoverageTags', () => {
+  it('removes the details object when @req/@path were the only tags', () => {
+    const src = `test('t', { tag: ['@req-R1', '@path-happy'] }, async () => { expect(1).toBe(1) })`
+    const out = stripCoverageTags(src)
+    expect(out).toBe(`test('t', async () => { expect(1).toBe(1) })`)
+    // Reparses cleanly with no coverage linkage.
+    const tests = extractTestsFromSource('a.spec.ts', out).tests
+    expect(tests[0].requirements).toBeUndefined()
+    expect(tests[0].pathTypes).toBeUndefined()
+  })
+
+  it('preserves non-coverage tags, dropping only @req/@path tokens', () => {
+    const src = `test('t', { tag: ['@req-R1', '@smoke', '@path-sad'] }, async () => {})`
+    const out = stripCoverageTags(src)
+    expect(out).toContain("['@smoke']")
+    expect(out).not.toContain('@req-R1')
+    expect(out).not.toContain('@path-sad')
+  })
+
+  it('drops only the tag property when the details object has other props', () => {
+    const src = `test('t', { tag: ['@req-R1'], timeout: 1000 }, async () => {})`
+    const out = stripCoverageTags(src)
+    expect(out).not.toContain('@req-R1')
+    expect(out).toContain('timeout: 1000')
+    // Still a valid 3-arg test with a details object.
+    expect(extractTestsFromSource('a.spec.ts', out).tests).toHaveLength(1)
+  })
+
+  it('is idempotent — source with no coverage tags is returned unchanged', () => {
+    const src = `test('t', { tag: ['@smoke'] }, async () => {})`
+    expect(stripCoverageTags(src)).toBe(src)
+    const plain = `test('t', async () => {})`
+    expect(stripCoverageTags(plain)).toBe(plain)
+  })
+
+  it('strips across multiple tests in one pass', () => {
+    const src = [
+      `test('a', { tag: ['@req-R1'] }, async () => {})`,
+      `test('b', { tag: ['@req-R2', '@smoke'] }, async () => {})`,
+      `test('c', async () => {})`,
+    ].join('\n')
+    const out = stripCoverageTags(src)
+    expect(out).not.toContain('@req-R1')
+    expect(out).not.toContain('@req-R2')
+    expect(out).toContain('@smoke')
+    const tests = extractTestsFromSource('a.spec.ts', out).tests
+    expect(tests.map((t) => t.requirements)).toEqual([undefined, undefined, undefined])
+  })
+
+  it('round-trips with writeCoversTag (write then strip returns to original)', () => {
+    const original = `test('creates a todo', async () => { expect(1).toBe(1) })`
+    const tagged = writeCoversTag(original, 'creates a todo', { requirements: ['R1'], pathTypes: ['happy'] })
+    expect(tagged).not.toBe(original)
+    expect(stripCoverageTags(tagged)).toBe(original)
   })
 })
 

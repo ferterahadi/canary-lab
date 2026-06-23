@@ -17,7 +17,7 @@ import {
   type AnnotateTestInput,
   type CoverageAgentSession,
 } from '../../../coverage/logic/coverage/annotate-engine'
-import { writeCoversTag } from './tag-writer'
+import { writeCoversTag, stripCoverageTags } from './tag-writer'
 import { changedDocPaths, changedRequirementIds, diffDocs, fingerprintDocs, requirementFingerprintMap, requirementsSetHash } from '../../../coverage/logic/coverage/fingerprints'
 import { deriveCoverageStateView, type DeriveStateInput } from './state'
 import { COVERAGE_STATE_JSON, readCoverageRunState, writeCoverageRunState } from '../../../coverage/logic/coverage/run-state'
@@ -504,12 +504,17 @@ export async function regeneratePrdSummary(args: RegeneratePrdSummaryArgs): Prom
 }
 
 /**
- * Remove a feature's generated PRD summary and the coverage sidecars tied to it
- * (run-state, pending mappings). Source docs are untouched. After this the
- * summary state returns to ABSENT — and, if no source docs remain, the whole
- * surface is back to its initial empty state.
+ * Reset a feature's coverage to a blank slate: remove the generated PRD summary
+ * and the coverage sidecars tied to it (run-state, pending mappings) AND strip
+ * the `@req-*` / `@path-*` tags the engine wrote into the spec files. Source docs
+ * (the uploaded PRD docs) are untouched; only the generated summary + the
+ * coverage-owned tags in test specs are cleared. Without the tag strip, those
+ * annotations would survive the reset and immediately read as "stale" (their
+ * requirement ids no longer exist) — tag-writes are additive, so nothing else
+ * ever removes them. After this the summary state returns to ABSENT and, if no
+ * source docs remain, the whole surface is back to its initial empty state.
  */
-export function clearPrdSummary(args: { featuresDir: string; feature: string }): { feature: string; removed: string[] } {
+export function clearPrdSummary(args: { featuresDir: string; feature: string }): { feature: string; removed: string[]; untagged: string[] } {
   const featureDir = resolveFeatureDir(args.featuresDir, args.feature)
   const docsDir = docsDirFor(featureDir)
   const removed: string[] = []
@@ -517,7 +522,17 @@ export function clearPrdSummary(args: { featuresDir: string; feature: string }):
     const p = path.join(docsDir, name)
     if (fs.existsSync(p)) { fs.rmSync(p); removed.push(name) }
   }
-  return { feature: args.feature, removed }
+  const untagged: string[] = []
+  for (const file of listSpecFiles(featureDir)) {
+    let source = ''
+    try { source = fs.readFileSync(file, 'utf-8') } catch { continue }
+    const next = stripCoverageTags(source)
+    if (next !== source) {
+      fs.writeFileSync(file, next)
+      untagged.push(path.relative(featureDir, file))
+    }
+  }
+  return { feature: args.feature, removed, untagged: untagged.sort() }
 }
 
 export { GENERATED_DOC_PREFIX }

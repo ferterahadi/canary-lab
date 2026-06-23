@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { type KeyboardEvent as ReactKeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import * as api from '../../../shared/api/client'
 import type {
   CoverageJobKind,
   CoverageJobManifest,
   CoverageLedger,
   CoverageStatus,
+  FeatureTests,
   GapType,
   RequirementCoverage,
   TestCoverage,
@@ -176,6 +177,58 @@ export function CoverageLedgerPage({ feature, onClose }: Props) {
     [ledger],
   )
 
+  // Test SOURCE is not in the ledger (it carries name/file/line/strength only).
+  // Lazily fetch the feature's spec bodies the FIRST time any test card is
+  // expanded — most sessions never expand one, so we don't pay the parse cost up
+  // front. One fetch, cached; cards read the result via the lookup below.
+  const [specSource, setSpecSource] = useState<FeatureTests | null>(null)
+  const [specSourceLoading, setSpecSourceLoading] = useState(false)
+  const [specSourceError, setSpecSourceError] = useState<string | null>(null)
+  const specSourceReq = useRef(false)
+  const ensureSpecSource = useCallback(() => {
+    if (specSourceReq.current) return
+    specSourceReq.current = true
+    setSpecSourceLoading(true)
+    api.getFeatureTests(feature)
+      .then((r) => { setSpecSource(r); setSpecSourceError(null) })
+      .catch((e: unknown) => setSpecSourceError(e instanceof Error ? e.message : 'Failed to load test source'))
+      .finally(() => setSpecSourceLoading(false))
+  }, [feature])
+
+  // Match a ledger test to its extracted body. The ledger's `file` is relative
+  // and prefers a helper `sourceFile` (so does the route via `sourceFile ?? file`),
+  // so key on (basename, line) — identical AST line on both sides — with an exact
+  // name as a secondary fallback. Each entry keeps the ABSOLUTE file for open-in-editor.
+  const sourceByTest = useMemo(() => {
+    const base = (p: string) => p.split(/[\\/]/).pop() ?? p
+    const byLoc = new Map<string, { body: string; absFile: string; line: number }>()
+    const byName = new Map<string, { body: string; absFile: string; line: number }>()
+    for (const sf of specSource ?? []) {
+      for (const t of sf.tests) {
+        const absFile = t.sourceFile ?? sf.file
+        const entry = { body: t.bodySource, absFile, line: t.line }
+        byLoc.set(`${base(absFile)}:${t.line}`, entry)
+        if (!byName.has(t.name)) byName.set(t.name, entry)
+      }
+    }
+    return { base, byLoc, byName }
+  }, [specSource])
+
+  const lookupSource = useCallback(
+    (t: TestCoverage) => {
+      if (t.file && t.line != null) {
+        const hit = sourceByTest.byLoc.get(`${sourceByTest.base(t.file)}:${t.line}`)
+        if (hit) return hit
+      }
+      return sourceByTest.byName.get(t.name) ?? null
+    },
+    [sourceByTest],
+  )
+
+  const openTestInEditor = useCallback((absFile: string, line?: number) => {
+    api.openEditor({ file: absFile, line }).catch(() => {})
+  }, [])
+
   // The two-way highlight relation: a hovered test lights its requirements; a
   // hovered requirement lights its tests.
   const { activeReqIds, activeTestNames } = useMemo(() => {
@@ -277,6 +330,11 @@ export function CoverageLedgerPage({ feature, onClose }: Props) {
               active={activeTestNames.has(t.name)}
               dimmed={Boolean(hovered) && !activeTestNames.has(t.name)}
               onHover={(on) => setHovered(on ? { kind: 'test', key: t.name } : null)}
+              onExpand={ensureSpecSource}
+              source={lookupSource(t)}
+              sourceLoading={specSourceLoading}
+              sourceError={specSourceError}
+              onOpenEditor={openTestInEditor}
             />
           ))}
         </>
@@ -563,6 +621,11 @@ function RequirementCard({ rc, colors, active, dimmed, onHover }: {
 }) {
   const meta = GAP_META[rc.gapType]
   const missing = rc.pathCoverage.filter((p) => !p.covered).map((p) => p.path)
+  const { kind, happyPath, unhappyPath } = rc.requirement
+  // Only offer expansion when the summary actually carried extra detail.
+  const hasDetail = Boolean(happyPath || unhappyPath || kind)
+  const [expanded, setExpanded] = useState(false)
+  const toggle = () => { if (hasDetail) setExpanded((c) => !c) }
   return (
     <div
       className="clcov-card"
@@ -582,7 +645,21 @@ function RequirementCard({ rc, colors, active, dimmed, onHover }: {
         transition: 'opacity 120ms, background 120ms, border-color 140ms',
       }}
     >
-      <div className="flex items-center gap-2" style={{ marginBottom: 5 }}>
+      <div
+        className={hasDetail ? 'clcov-disclose flex items-center gap-2' : 'flex items-center gap-2'}
+        style={{ marginBottom: 5 }}
+        {...(hasDetail
+          ? {
+              role: 'button' as const,
+              tabIndex: 0,
+              'aria-expanded': expanded,
+              'data-testid': `req-toggle-${rc.requirement.id}`,
+              onClick: toggle,
+              onKeyDown: (e: ReactKeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle() } },
+            }
+          : {})}
+      >
+        {hasDetail && <span aria-hidden="true" className="clcov-caret">{expanded ? '▾' : '▸'}</span>}
         <span style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: 10.5, fontWeight: 600, color: 'var(--text-muted)', background: 'var(--bg-base)', border: '1px solid var(--border-default)', borderRadius: 5, padding: '1px 5px' }}>{rc.requirement.id}</span>
         <strong style={{ fontSize: 13, color: 'var(--text-primary)' }}>{rc.requirement.title}</strong>
         {rc.requirement.deprecated && <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>(deprecated)</span>}
@@ -605,20 +682,52 @@ function RequirementCard({ rc, colors, active, dimmed, onHover }: {
           )
         ))}
       </div>
+      {hasDetail && expanded && (
+        <div className="clcov-reqdetail" data-testid={`req-detail-${rc.requirement.id}`}>
+          {kind && (
+            <span className="clcov-kind" data-kind={kind}>{kind === 'non-functional' ? 'Non-functional' : 'Functional'}</span>
+          )}
+          {happyPath && (
+            <div className="clcov-path-block">
+              <span className="clcov-path-label clcov-path-happy">Happy path</span>
+              <p className="clcov-path-text">{happyPath}</p>
+            </div>
+          )}
+          {unhappyPath && (
+            <div className="clcov-path-block">
+              <span className="clcov-path-label clcov-path-unhappy">Unhappy path</span>
+              <p className="clcov-path-text">{unhappyPath}</p>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }
 
 // The test's strength chip + `@req-*` / `@path-*` tags carry the meaning — no
 // decorative accent border, and no run-coupled "verified" dot (coverage is semantic).
-function TestCard({ test, testNumber, color, active, dimmed, onHover }: {
+// Click the header to disclose the actual test source (lazily fetched by the parent).
+function TestCard({ test, testNumber, color, active, dimmed, onHover, onExpand, source, sourceLoading, sourceError, onOpenEditor }: {
   test: TestCoverage
   testNumber?: number
   color: string
   active: boolean
   dimmed: boolean
   onHover: (on: boolean) => void
+  onExpand: () => void
+  source: { body: string; absFile: string; line: number } | null
+  sourceLoading: boolean
+  sourceError: string | null
+  onOpenEditor: (absFile: string, line?: number) => void
 }) {
+  const [expanded, setExpanded] = useState(false)
+  const toggle = () => {
+    setExpanded((cur) => {
+      if (!cur) onExpand() // trigger the lazy source fetch on first open
+      return !cur
+    })
+  }
   return (
     <div
       className="clcov-card"
@@ -637,7 +746,16 @@ function TestCard({ test, testNumber, color, active, dimmed, onHover }: {
         transition: 'opacity 120ms, background 120ms, box-shadow 120ms, border-color 140ms',
       }}
     >
-      <div className="flex items-center gap-2">
+      <div
+        className="clcov-disclose flex items-center gap-2"
+        role="button"
+        tabIndex={0}
+        aria-expanded={expanded}
+        data-testid={`test-toggle-${test.name}`}
+        onClick={toggle}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle() } }}
+      >
+        <span aria-hidden="true" className="clcov-caret">{expanded ? '▾' : '▸'}</span>
         <TestIdBadge n={testNumber} />
         <strong style={{ fontSize: 13, color: 'var(--text-primary)' }}>{stripLeadingTestOrdinal(test.name)}</strong>
         {test.file && (
@@ -666,6 +784,34 @@ function TestCard({ test, testNumber, color, active, dimmed, onHover }: {
           <span key={p} style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: 10, padding: '1px 6px', borderRadius: 5, border: '1px solid var(--border-default)', color: 'var(--text-muted)' }}>@path-{p}</span>
         ))}
       </div>
+      {expanded && (
+        <div className="clcov-source" data-testid={`test-source-${test.name}`}>
+          {source ? (
+            <>
+              <div className="clcov-source-head">
+                <span className="clcov-source-path">{test.file}{test.line ? `:${test.line}` : ''}</span>
+                <button
+                  type="button"
+                  className="clcov-source-open"
+                  data-testid={`test-open-editor-${test.name}`}
+                  onClick={() => onOpenEditor(source.absFile, source.line)}
+                >
+                  Open in editor ↗
+                </button>
+              </div>
+              <div className="clcov-source-scroll">
+                <pre className="clcov-source-pre">{source.body}</pre>
+              </div>
+            </>
+          ) : sourceLoading ? (
+            <div className="clcov-source-note">Loading source…</div>
+          ) : sourceError ? (
+            <div className="clcov-source-note">Couldn’t load source: {sourceError}</div>
+          ) : (
+            <div className="clcov-source-note">Source not found for this test.</div>
+          )}
+        </div>
+      )}
     </div>
   )
 }
@@ -756,4 +902,26 @@ const COVERAGE_CSS = `
 .clcov-skel::after{content:'';position:absolute;inset:0;transform:translateX(-100%);background:linear-gradient(90deg,transparent,color-mix(in srgb,var(--text-muted) 22%,transparent),transparent);animation:clcov-skel-sweep 1.3s ease-in-out infinite}
 @keyframes clcov-skel-sweep{100%{transform:translateX(100%)}}
 @media (prefers-reduced-motion:reduce){.cl-pulse{animation:none}.clcov-skel::after{animation:none}}
+/* Click-to-expand cards: a quiet caret leads the header; the row is the hit target. */
+.clcov-disclose{cursor:pointer;outline:none;border-radius:6px;margin:-2px -4px;padding:2px 4px;transition:background .12s}
+.clcov-disclose:hover{background:color-mix(in srgb,var(--text-muted) 9%,transparent)}
+.clcov-disclose:focus-visible{box-shadow:0 0 0 2px color-mix(in srgb,var(--accent,rgb(56,189,248)) 60%,transparent)}
+.clcov-caret{flex:none;width:10px;font-size:10px;line-height:1;color:var(--text-muted)}
+/* Test source disclosure. */
+.clcov-source{margin-top:9px;border-top:1px solid var(--border-default);padding-top:9px}
+.clcov-source-head{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+.clcov-source-path{font-family:var(--font-mono,monospace);font-size:10px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.clcov-source-open{margin-left:auto;flex:none;appearance:none;cursor:pointer;font-size:10px;font-weight:600;color:var(--text-secondary);background:var(--bg-base);border:1px solid var(--border-default);border-radius:6px;padding:2px 8px;transition:background .12s,color .12s,border-color .12s}
+.clcov-source-open:hover{color:var(--text-primary);background:var(--bg-selected);border-color:color-mix(in srgb,var(--text-muted) 45%,var(--border-default))}
+.clcov-source-scroll{max-height:360px;overflow:auto;border-radius:var(--radius-md);border:1px solid var(--border-default);background:var(--bg-base)}
+.clcov-source-pre{margin:0;padding:10px 12px;font-family:var(--font-mono,monospace);font-size:11.5px;line-height:1.55;color:var(--text-secondary);white-space:pre;tab-size:2}
+.clcov-source-note{font-size:11.5px;color:var(--text-muted);font-style:italic}
+/* Requirement detail disclosure: kind chip + happy / unhappy paths. */
+.clcov-reqdetail{margin-top:9px;border-top:1px solid var(--border-default);padding-top:9px;display:flex;flex-direction:column;gap:8px}
+.clcov-kind{align-self:flex-start;font-size:9.5px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--text-muted);background:var(--bg-base);border:1px solid var(--border-default);border-radius:999px;padding:2px 9px}
+.clcov-path-block{display:flex;flex-direction:column;gap:3px}
+.clcov-path-label{align-self:flex-start;font-size:9.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase}
+.clcov-path-happy{color:rgb(52,211,153)}
+.clcov-path-unhappy{color:rgb(56,189,248)}
+.clcov-path-text{margin:0;font-size:12px;line-height:1.5;color:var(--text-secondary)}
 `
