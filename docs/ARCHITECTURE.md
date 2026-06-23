@@ -269,14 +269,17 @@ a local autoHeal mid-flight); `auto`/`claude`/`codex` require a failed/aborted r
   dynamically rather than assuming a fixed value (default 7421 if unset).
 - **Profiles** pick the tool subset via `?profile=`: `repair` (heal loop, default),
   `verify` (verification configs), `author` (feature/envset/draft/eval authoring),
-  `full` (union). Optional `?client_kind=claude-desktop|codex-cli|...`.
+  `portify` (port-injection workflow), `lifecycle` (everyday end-to-end loop —
+  repair + author + verify, no portify), `full` (lifecycle + portify). Optional
+  `?client_kind=claude-desktop|codex-cli|...`.
 - Tools live in `apps/web-server/mcp/tools.ts` — thin wrappers over existing REST
   routes/helpers. `start_run`/`write_envset`/etc. reuse handlers via `app.inject()`;
   don't duplicate orchestrator logic. Author-profile tools call
   `apps/web-server/src/features/config/logic/feature-authoring.ts` directly.
-- Profile membership = the `REPAIR_TOOLS`/`VERIFY_TOOLS`/`AUTHOR_TOOLS` arrays
-  (`tools.ts:240–307`). `FULL_TOOLS` auto-dedupes their union + `FULL_ONLY_TOOLS`
-  (`get_run_actions`, `claim_heal`, `release_heal`). Adding/moving a tool also
+- Profile membership = the `REPAIR_TOOLS`/`VERIFY_TOOLS`/`AUTHOR_TOOLS`/`PORTIFY_TOOLS`
+  arrays (`tools.ts`). `LIFECYCLE_TOOLS` auto-dedupes repair+verify+author union +
+  `FULL_ONLY_TOOLS` (`get_run_actions`, `claim_heal`, `release_heal`); `FULL_TOOLS`
+  is `LIFECYCLE_TOOLS` + `PORTIFY_TOOLS`. Adding/moving a tool also
   requires updating the mirror arrays in `mcp/server.smoke.test.ts` — see the
   [invariants table](#keep-in-sync-invariants) and the `cl_add-mcp-tool` skill.
 - Each MCP session gets its own transport (`mcp/server.ts`) — a singleton would
@@ -383,7 +386,7 @@ procedure.
 
 | Invariant | Files involved | Enforced by | Owning skill |
 | --- | --- | --- | --- |
-| MCP tool ↔ profile membership | `apps/web-server/mcp/tools.ts` (`REPAIR_TOOLS`/`VERIFY_TOOLS`/`AUTHOR_TOOLS`/`FULL_ONLY_TOOLS`) ↔ mirror arrays in `apps/web-server/mcp/server.smoke.test.ts` | `npx vitest run apps/web-server/mcp/server.smoke.test.ts` | `cl_add-mcp-tool` |
+| MCP tool ↔ profile membership | `apps/web-server/mcp/tools.ts` (`REPAIR_TOOLS`/`VERIFY_TOOLS`/`AUTHOR_TOOLS`/`PORTIFY_TOOLS`/`FULL_ONLY_TOOLS`) ↔ mirror arrays in `apps/web-server/mcp/server.smoke.test.ts` | `npx vitest run apps/web-server/mcp/server.smoke.test.ts` | `cl_add-mcp-tool` |
 | Run-loop semantics across agent surfaces | `INSTRUCTIONS_BY_PROFILE` (`apps/web-server/mcp/server.ts`) ↔ result steering (`healWaitNext`, `bootSessionValue` in `mcp/tools.ts`) ↔ all three `agent-integrations/{claude,codex,plugin}/.../SKILL.md` run loops | nothing automated — discipline only | `cl_sync-agent-surfaces` |
 | Boot-session / collision / queue / claim semantics | `start_run` + `wait_for_heal_task` result shapes (`mcp/tools.ts`) ↔ instructions ↔ skills (same five surfaces as above) | partial: tool unit tests | `cl_sync-agent-surfaces` |
 | Heal-claim policy | `apps/web-server/src/features/runs/logic/heal/heal-claim-policy.ts` ↔ `broker.claim()` backstop ↔ `start_run`/`POST /api/runs` suppression ↔ skill prose | policy + broker unit tests | `cl_sync-agent-surfaces` |

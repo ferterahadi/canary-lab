@@ -8,6 +8,8 @@ const MCP_PROFILES = [
   { id: 'repair', label: 'Repair', detail: 'Run healing' },
   { id: 'verify', label: 'Verify', detail: 'Run checks' },
   { id: 'author', label: 'Author', detail: 'Feature setup' },
+  { id: 'lifecycle', label: 'Lifecycle', detail: 'End-to-end, no portify' },
+  { id: 'portify', label: 'Portify', detail: 'Make ports injectable' },
   { id: 'full', label: 'Full', detail: 'All tools' },
 ] as const
 
@@ -200,7 +202,7 @@ const McpHealthMenu = forwardRef<HTMLDivElement, {
         <div className="mb-1 px-1 text-[10px] uppercase" style={{ color: 'var(--text-muted)', letterSpacing: 0 }}>
           Profiles
         </div>
-        <div className="grid grid-cols-4 gap-1">
+        <div className="grid grid-cols-3 gap-1">
           {MCP_PROFILES.map((candidate) => {
             const selected = candidate.id === selectedProfile
             return (
