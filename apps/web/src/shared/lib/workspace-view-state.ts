@@ -17,8 +17,10 @@ export type WorkspaceView = 'workspace' | 'cleanup' | 'coverage'
 // Routed dialogs — only those that are coherent on a cold load (fresh tab, no
 // prior in-memory state). Transient dialogs (collision confirm, services/runs
 // pickers) are deliberately NOT routed. `verification` is feature-scoped and
-// lives in the workspace runs column.
-export type RouteDialog = 'config' | 'portify' | 'add-test' | 'verification'
+// lives in the workspace runs column. `evaluation` is the export-progress dialog
+// (status-bar toast) — its task record persists server-side, so a deep link
+// re-opens it.
+export type RouteDialog = 'config' | 'portify' | 'add-test' | 'verification' | 'evaluation'
 
 export interface PersistedView {
   view: WorkspaceView
@@ -29,6 +31,8 @@ export interface PersistedView {
   dialog: RouteDialog | null
   /** Workflow id qualifier for `dialog: 'portify'` — present = revisit, absent = start-new. */
   wf: string | null
+  /** Task id qualifier for `dialog: 'evaluation'` — which export task to re-open. */
+  task: string | null
 }
 
 /** The cross-tab/localStorage-mirrored subset — the durable nav tier only. */
@@ -36,7 +40,7 @@ export type DurableView = Pick<PersistedView, 'view' | 'feature'>
 
 const STORAGE_KEY = 'cl.workspace.view'
 const VIEWS: WorkspaceView[] = ['workspace', 'cleanup', 'coverage']
-const DIALOGS: RouteDialog[] = ['config', 'portify', 'add-test', 'verification']
+const DIALOGS: RouteDialog[] = ['config', 'portify', 'add-test', 'verification', 'evaluation']
 
 function isView(v: string | null): v is WorkspaceView {
   return v != null && (VIEWS as string[]).includes(v)
@@ -51,7 +55,7 @@ function setOrDelete(params: URLSearchParams, key: string, value: string | null)
   else params.delete(key)
 }
 
-const EMPTY: PersistedView = { view: 'workspace', feature: null, run: null, dialog: null, wf: null }
+const EMPTY: PersistedView = { view: 'workspace', feature: null, run: null, dialog: null, wf: null, task: null }
 
 /** Read the persisted view, URL first (authoritative on load), then localStorage
  *  (durable tier only — run/dialog/wf are never mirrored there). */
@@ -64,10 +68,11 @@ export function readPersistedView(): PersistedView {
     const run = params.get('run') || null
     const dialog = parseDialog(params.get('dialog'))
     const wf = dialog === 'portify' ? params.get('wf') || null : null
+    const task = dialog === 'evaluation' ? params.get('task') || null : null
     // A bare `view` (workspace) is omitted from the URL, so treat any other
     // routed param as evidence the URL is authoritative for this load too.
-    if (isView(v)) return { view: v, feature, run, dialog, wf }
-    if (feature || run || dialog) return { view: 'workspace', feature, run, dialog, wf }
+    if (isView(v)) return { view: v, feature, run, dialog, wf, task }
+    if (feature || run || dialog) return { view: 'workspace', feature, run, dialog, wf, task }
   } catch { /* ignore */ }
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
@@ -92,6 +97,8 @@ export function persistView(state: PersistedView): void {
     setOrDelete(params, 'dialog', state.dialog)
     // `wf` only qualifies the portify revisit dialog — drop it otherwise.
     setOrDelete(params, 'wf', state.dialog === 'portify' ? state.wf : null)
+    // `task` only qualifies the evaluation export dialog — drop it otherwise.
+    setOrDelete(params, 'task', state.dialog === 'evaluation' ? state.task : null)
     const qs = params.toString()
     const url = `${window.location.pathname}${qs ? `?${qs}` : ''}${window.location.hash}`
     window.history.replaceState(null, '', url)

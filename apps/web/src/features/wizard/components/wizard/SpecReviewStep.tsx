@@ -4,6 +4,7 @@ import type { DraftRecord } from '../../../../shared/api/types'
 import { AgentSessionView } from '../../../agent-sessions/components/AgentSessionView'
 import { ExternalDraftAgentPanel } from '../../../runs/components/ExternalDraftAgentPanel'
 import { useTheme } from '../../../../shared/lib/theme'
+import { getCodeHighlighter, codeThemeFor } from '../../../../shared/ui/code-highlighter'
 
 interface Props {
   draft: DraftRecord
@@ -299,12 +300,14 @@ function FilePreview({
       setHtml(null)
       return
     }
-    const themeName = resolved === 'dark' ? 'github-dark' : 'github-light'
-    getHighlighter()
+    const themeName = codeThemeFor(resolved)
+    getCodeHighlighter()
       .then((hl) => {
         if (cancelled) return
         try {
-          setHtml(hl.codeToHtml(content, { lang, theme: themeName }))
+          // The shared highlighter loads only the TypeScript grammar (a superset
+          // of JS for our specs), so highlight both .ts and .js as 'typescript'.
+          setHtml(hl.codeToHtml(content, { lang: 'typescript', theme: themeName }))
         } catch {
           setHtml(null)
         }
@@ -364,33 +367,3 @@ function pickLang(filePath: string): 'typescript' | 'javascript' | null {
   return null
 }
 
-// Lazy Shiki — same dynamic-import pattern as TestStepsTab. The highlighter
-// loads the typescript grammar and github-dark theme. JS files reuse the TS
-// grammar (Shiki's typescript covers a strict superset of JS for our use).
-type Highlighter = {
-  codeToHtml: (code: string, opts: { lang: string; theme: string }) => string
-}
-let highlighterPromise: Promise<Highlighter> | null = null
-function getHighlighter(): Promise<Highlighter> {
-  if (!highlighterPromise) {
-    highlighterPromise = (async () => {
-      const [{ createHighlighterCore }, { createOnigurumaEngine }, ts, dark, light, wasm] = await Promise.all([
-        import('shiki/core'),
-        import('shiki/engine/oniguruma'),
-        import('shiki/langs/typescript.mjs'),
-        import('shiki/themes/github-dark.mjs'),
-        import('shiki/themes/github-light.mjs'),
-        import('shiki/wasm'),
-      ])
-      const hl = await createHighlighterCore({
-        themes: [dark.default, light.default],
-        langs: [ts.default],
-        engine: createOnigurumaEngine(wasm.default),
-      })
-      return {
-        codeToHtml: (code, opts) => hl.codeToHtml(code, opts),
-      }
-    })()
-  }
-  return highlighterPromise
-}
