@@ -283,10 +283,13 @@ function headlineFor(
   return kind === 'other' ? 'AI Agent' : clientLabel(kind)
 }
 
+// The "Open Claude/Codex" CTA targets an interactive client the user can
+// launch. Runner-spawned PTY agents (`*-pty`) and undetected (`other`) clients
+// have no app to open, so they get no CTA.
 function clientKindToDesktopAgent(
   kind: ExternalHealSession['clientKind'],
 ): 'claude' | 'codex' | null {
-  if (kind === 'claude-desktop') return 'claude'
-  if (kind === 'codex-desktop') return 'codex'
+  if (kind === 'claude') return 'claude'
+  if (kind === 'codex') return 'codex'
   return null
 }

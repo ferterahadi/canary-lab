@@ -28,7 +28,7 @@ function manifest(status: PortifyStatus, over: Partial<PortifyManifest> = {}): P
     repos: [{ name: 'app', path: '~/app', worktreePath: '/logs/portify/w/worktrees/g0-app' }],
     agent: 'claude',
     producer: 'external',
-    external: { clientKind: 'claude-cli', sessionId: 'sess-123456789', conversationName: 'make ports injectable' },
+    external: { clientKind: 'claude', sessionId: 'sess-123456789', conversationName: 'make ports injectable' },
     branch: 'canary/dynamic-ports-cns',
     status,
     attempt: 0,
@@ -46,7 +46,7 @@ describe('ExternalPortifyPanel', () => {
   it('shows the client identity, conversation name, and status pill', () => {
     render(manifest('editing'))
     const text = container.textContent ?? ''
-    expect(text).toContain('Claude CLI')
+    expect(text).toContain('Claude')
     expect(text).toContain('make ports injectable')
     expect(text).toContain('Editing')
     expect(text).toContain('External port-ification session')
@@ -74,9 +74,9 @@ describe('ExternalPortifyPanel', () => {
   })
 
   it('renders an "Open" link to the external session when a url is present', () => {
-    render(manifest('editing', { external: { clientKind: 'claude-desktop', sessionId: 's1', sessionUrl: 'https://claude.ai/x' } }))
+    render(manifest('editing', { external: { clientKind: 'claude', sessionId: 's1', sessionUrl: 'https://claude.ai/x' } }))
     const link = container.querySelector('a[href="https://claude.ai/x"]')
     expect(link).not.toBeNull()
-    expect(link?.textContent).toContain('Open Claude Desktop')
+    expect(link?.textContent).toContain('Open Claude')
   })
 })

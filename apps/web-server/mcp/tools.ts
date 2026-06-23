@@ -216,12 +216,12 @@ export interface CanaryLabMcpDeps {
   workspaceEvents?: WorkspaceEventPublisher
 }
 
-const CLIENT_KIND = z.enum(['claude-cli', 'claude-desktop', 'codex-cli', 'codex-desktop', 'other'])
+const CLIENT_KIND = z.enum(['claude', 'codex', 'claude-pty', 'codex-pty', 'other'])
 const SIGNAL_KIND = z.enum(['rerun', 'restart', 'heal'])
 const HEAL_STATUS = z.enum(['connected', 'waiting', 'healing', 'running-tests', 'paused', 'disconnected'])
 const EXTERNAL_DRAFT_STAGE = z.enum(['scaffolding', 'authoring-tests', 'validating', 'ready', 'applied', 'error'])
 const CLAIM_SUPPRESSED_MESSAGE =
-  'Heal claiming is restricted to Claude/Codex Desktop clients, so this run was started without a heal claim. It still runs — drive heal from Desktop or the web UI.'
+  'Heal claiming is blocked for runner-spawned agents (the benchmark/portify PTY sessions Canary Lab launches itself), so this run was started without a heal claim. It still runs — drive heal from an interactive Claude/Codex client or the web UI.'
 // `timeout_ms` is the per-call block budget — how long ONE wait_for_heal_task
 // request may hold open. It is NOT the overall heal budget: when the window
 // elapses with the run still active, the call returns `still_waiting` and the

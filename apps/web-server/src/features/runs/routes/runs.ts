@@ -555,10 +555,10 @@ function contentTypeFor(filePath: string): string {
 }
 
 const EXTERNAL_CLIENT_KINDS: ExternalHealAgentRequest['clientKind'][] = [
-  'claude-cli',
-  'claude-desktop',
-  'codex-cli',
-  'codex-desktop',
+  'claude',
+  'codex',
+  'claude-pty',
+  'codex-pty',
   'other',
 ]
 

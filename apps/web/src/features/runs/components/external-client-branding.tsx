@@ -14,10 +14,10 @@ export type ExternalClientKind = ClientKind
 // "External Client" (the default). Callers pass `otherLabel` to keep their copy.
 export function clientLabel(kind: ExternalClientKind, otherLabel = 'External Client'): string {
   switch (kind) {
-    case 'claude-cli': return 'Claude CLI'
-    case 'claude-desktop': return 'Claude Desktop'
-    case 'codex-cli': return 'Codex CLI'
-    case 'codex-desktop': return 'Codex Desktop'
+    case 'claude': return 'Claude'
+    case 'codex': return 'Codex'
+    case 'claude-pty': return 'Claude (runner)'
+    case 'codex-pty': return 'Codex (runner)'
     case 'other': return otherLabel
   }
 }

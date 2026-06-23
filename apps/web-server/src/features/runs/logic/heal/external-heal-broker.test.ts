@@ -26,7 +26,7 @@ function makeDeps(now = () => new Date('2026-05-18T10:00:00.000Z').getTime()): {
     },
     audit: (runId, entry) => { captured.audit.push({ runId, entry }) },
     // Existing tests exercise claim *mechanics* across client kinds; allow all
-    // so the desktop-only policy doesn't interfere. Policy enforcement has its
+    // so the denylist policy doesn't interfere. Policy enforcement has its
     // own dedicated describe block below.
     isClaimAllowed: () => true,
   }
@@ -43,13 +43,13 @@ describe('ExternalHealBroker.claim', () => {
     const broker = new ExternalHealBroker(deps)
     const res = broker.claim('run-1', {
       sessionId: 'sess-A',
-      clientKind: 'claude-desktop',
+      clientKind: 'claude',
       conversationName: 'fix checkout',
     })
     expect(res.accepted).toBe(true)
     if (!res.accepted) throw new Error('unreachable')
     expect(res.session.sessionId).toBe('sess-A')
-    expect(res.session.clientKind).toBe('claude-desktop')
+    expect(res.session.clientKind).toBe('claude')
     expect(res.session.status).toBe('connected')
     expect(res.session.cycleCount).toBe(0)
     expect(res.session.claimedAt).toBe('2026-05-18T10:00:00.000Z')
@@ -64,11 +64,11 @@ describe('ExternalHealBroker.claim', () => {
   it('is idempotent when the same sessionId reclaims', () => {
     const { deps, captured } = makeDeps(() => now)
     const broker = new ExternalHealBroker(deps)
-    broker.claim('run-1', { sessionId: 'sess-A', clientKind: 'claude-desktop' })
+    broker.claim('run-1', { sessionId: 'sess-A', clientKind: 'claude' })
     captured.events.length = 0
     captured.audit.length = 0
     now = new Date('2026-05-18T10:00:05.000Z').getTime()
-    const res = broker.claim('run-1', { sessionId: 'sess-A', clientKind: 'claude-desktop' })
+    const res = broker.claim('run-1', { sessionId: 'sess-A', clientKind: 'claude' })
     expect(res.accepted).toBe(true)
     if (!res.accepted) throw new Error('unreachable')
     expect(res.session.sessionId).toBe('sess-A')
@@ -80,11 +80,11 @@ describe('ExternalHealBroker.claim', () => {
   it('updates optional metadata when the same session reconnects', () => {
     const { deps } = makeDeps(() => now)
     const broker = new ExternalHealBroker(deps)
-    broker.claim('run-1', { sessionId: 'sess-A', clientKind: 'claude-desktop' })
+    broker.claim('run-1', { sessionId: 'sess-A', clientKind: 'claude' })
 
     const res = broker.claim('run-1', {
       sessionId: 'sess-A',
-      clientKind: 'claude-desktop',
+      clientKind: 'claude',
       clientVersion: '2.0.0',
       conversationName: 'new tab',
     })
@@ -103,18 +103,18 @@ describe('ExternalHealBroker.claim', () => {
     const broker = new ExternalHealBroker(deps)
     broker.claim('run-1', { sessionId: 'sess-A', clientKind: 'other' })
 
-    const res = broker.claim('run-1', { sessionId: 'sess-A', clientKind: 'claude-desktop' })
+    const res = broker.claim('run-1', { sessionId: 'sess-A', clientKind: 'claude' })
 
     expect(res.accepted).toBe(true)
     if (!res.accepted) throw new Error('unreachable')
-    expect(res.session.clientKind).toBe('claude-desktop')
+    expect(res.session.clientKind).toBe('claude')
   })
 
   it('rejects a different sessionId with 409 already-claimed', () => {
     const { deps, captured } = makeDeps(() => now)
     const broker = new ExternalHealBroker(deps)
-    broker.claim('run-1', { sessionId: 'sess-A', clientKind: 'claude-desktop', conversationName: 'first' })
-    const res = broker.claim('run-1', { sessionId: 'sess-B', clientKind: 'codex-cli' })
+    broker.claim('run-1', { sessionId: 'sess-A', clientKind: 'claude', conversationName: 'first' })
+    const res = broker.claim('run-1', { sessionId: 'sess-B', clientKind: 'codex' })
     expect(res.accepted).toBe(false)
     if (res.accepted) throw new Error('unreachable')
     expect(res.reason).toBe('already-claimed')
@@ -125,9 +125,9 @@ describe('ExternalHealBroker.claim', () => {
   it('allows a fresh claim after release', () => {
     const { deps } = makeDeps(() => now)
     const broker = new ExternalHealBroker(deps)
-    broker.claim('run-1', { sessionId: 'sess-A', clientKind: 'claude-desktop' })
+    broker.claim('run-1', { sessionId: 'sess-A', clientKind: 'claude' })
     broker.release('run-1', 'sess-A')
-    const res = broker.claim('run-1', { sessionId: 'sess-B', clientKind: 'codex-cli' })
+    const res = broker.claim('run-1', { sessionId: 'sess-B', clientKind: 'codex' })
     expect(res.accepted).toBe(true)
   })
 })
@@ -136,7 +136,7 @@ describe('ExternalHealBroker.release', () => {
   it('clears the claim when sessionId matches', () => {
     const { deps, captured } = makeDeps()
     const broker = new ExternalHealBroker(deps)
-    broker.claim('run-1', { sessionId: 'sess-A', clientKind: 'claude-desktop' })
+    broker.claim('run-1', { sessionId: 'sess-A', clientKind: 'claude' })
     captured.events.length = 0
     const res = broker.release('run-1', 'sess-A')
     expect(res.released).toBe(true)
@@ -150,7 +150,7 @@ describe('ExternalHealBroker.release', () => {
   it('no-ops when sessionId does not match', () => {
     const { deps, captured } = makeDeps()
     const broker = new ExternalHealBroker(deps)
-    broker.claim('run-1', { sessionId: 'sess-A', clientKind: 'claude-desktop' })
+    broker.claim('run-1', { sessionId: 'sess-A', clientKind: 'claude' })
     captured.events.length = 0
     const res = broker.release('run-1', 'sess-B')
     expect(res.released).toBe(false)
@@ -171,7 +171,7 @@ describe('ExternalHealBroker.heartbeat', () => {
     let now = new Date('2026-05-18T10:00:00.000Z').getTime()
     const { deps, captured } = makeDeps(() => now)
     const broker = new ExternalHealBroker(deps)
-    broker.claim('run-1', { sessionId: 'sess-A', clientKind: 'claude-desktop' })
+    broker.claim('run-1', { sessionId: 'sess-A', clientKind: 'claude' })
 
     now = new Date('2026-05-18T10:00:07.000Z').getTime()
     const res = broker.heartbeat('run-1', 'sess-A', 'healing')
@@ -191,7 +191,7 @@ describe('ExternalHealBroker.heartbeat', () => {
     let now = new Date('2026-05-18T10:00:00.000Z').getTime()
     const { deps, captured } = makeDeps(() => now)
     const broker = new ExternalHealBroker(deps)
-    broker.claim('run-1', { sessionId: 'sess-A', clientKind: 'claude-desktop' })
+    broker.claim('run-1', { sessionId: 'sess-A', clientKind: 'claude' })
     captured.events.length = 0
 
     // Mark stale → status flips to 'disconnected', should emit.
@@ -209,7 +209,7 @@ describe('ExternalHealBroker.heartbeat', () => {
   it('rejects heartbeat with wrong sessionId', () => {
     const { deps } = makeDeps()
     const broker = new ExternalHealBroker(deps)
-    broker.claim('run-1', { sessionId: 'sess-A', clientKind: 'claude-desktop' })
+    broker.claim('run-1', { sessionId: 'sess-A', clientKind: 'claude' })
     const res = broker.heartbeat('run-1', 'sess-B', 'connected')
     expect(res.ok).toBe(false)
     if (res.ok) throw new Error('unreachable')
@@ -231,7 +231,7 @@ describe('ExternalHealBroker.touch', () => {
     let now = new Date('2026-05-18T10:00:00.000Z').getTime()
     const { deps, captured } = makeDeps(() => now)
     const broker = new ExternalHealBroker(deps)
-    broker.claim('run-1', { sessionId: 'sess-A', clientKind: 'claude-desktop' })
+    broker.claim('run-1', { sessionId: 'sess-A', clientKind: 'claude' })
     broker.heartbeat('run-1', 'sess-A', 'healing')
     captured.events.length = 0
 
@@ -248,7 +248,7 @@ describe('ExternalHealBroker.touch', () => {
     let now = new Date('2026-05-18T10:00:00.000Z').getTime()
     const { deps, captured } = makeDeps(() => now)
     const broker = new ExternalHealBroker(deps)
-    broker.claim('run-1', { sessionId: 'sess-A', clientKind: 'claude-desktop' })
+    broker.claim('run-1', { sessionId: 'sess-A', clientKind: 'claude' })
 
     now = new Date('2026-05-18T10:11:00.000Z').getTime()
     broker.markStaleClaims()
@@ -267,7 +267,7 @@ describe('ExternalHealBroker.touch', () => {
   it('rejects with session-mismatch when sessionId differs', () => {
     const { deps } = makeDeps()
     const broker = new ExternalHealBroker(deps)
-    broker.claim('run-1', { sessionId: 'sess-A', clientKind: 'claude-desktop' })
+    broker.claim('run-1', { sessionId: 'sess-A', clientKind: 'claude' })
     const res = broker.touch('run-1', 'sess-B')
     expect(res.ok).toBe(false)
     if (res.ok) throw new Error('unreachable')
@@ -289,7 +289,7 @@ describe('ExternalHealBroker.markStaleClaims', () => {
     let now = new Date('2026-05-18T10:00:00.000Z').getTime()
     const { deps } = makeDeps(() => now)
     const broker = new ExternalHealBroker(deps)
-    broker.claim('run-1', { sessionId: 'sess-A', clientKind: 'claude-desktop' })
+    broker.claim('run-1', { sessionId: 'sess-A', clientKind: 'claude' })
 
     now = new Date('2026-05-18T10:09:59.000Z').getTime() // just under 10min, still fresh
     const fresh = broker.markStaleClaims()
@@ -306,7 +306,7 @@ describe('ExternalHealBroker.markStaleClaims', () => {
     let now = new Date('2026-05-18T10:00:00.000Z').getTime()
     const { deps, captured } = makeDeps(() => now)
     const broker = new ExternalHealBroker(deps)
-    broker.claim('run-1', { sessionId: 'sess-A', clientKind: 'claude-desktop' })
+    broker.claim('run-1', { sessionId: 'sess-A', clientKind: 'claude' })
 
     now = new Date('2026-05-18T10:11:00.000Z').getTime()
     broker.markStaleClaims()
@@ -326,7 +326,7 @@ describe('ExternalHealBroker.markStaleClaims', () => {
     const broker = new ExternalHealBroker(deps)
     broker.rehydrate('run-1', {
       sessionId: 'sess-A',
-      clientKind: 'codex-cli',
+      clientKind: 'codex',
       claimedAt: '2026-05-18T10:00:00.000Z',
       lastHeartbeatAt: 'not-a-date',
       status: 'connected',
@@ -346,7 +346,7 @@ describe('ExternalHealBroker.bumpCycle', () => {
   it('increments the cycleCount on the active session', () => {
     const { deps } = makeDeps()
     const broker = new ExternalHealBroker(deps)
-    broker.claim('run-1', { sessionId: 'sess-A', clientKind: 'claude-desktop' })
+    broker.claim('run-1', { sessionId: 'sess-A', clientKind: 'claude' })
     expect(broker.getSession('run-1')?.cycleCount).toBe(0)
     broker.bumpCycle('run-1')
     expect(broker.getSession('run-1')?.cycleCount).toBe(1)
@@ -365,14 +365,14 @@ describe('ExternalHealBroker.assertOwnership', () => {
   it('passes when the sessionId matches the current claim', () => {
     const { deps } = makeDeps()
     const broker = new ExternalHealBroker(deps)
-    broker.claim('run-1', { sessionId: 'sess-A', clientKind: 'claude-desktop' })
+    broker.claim('run-1', { sessionId: 'sess-A', clientKind: 'claude' })
     expect(broker.assertOwnership('run-1', 'sess-A').ok).toBe(true)
   })
 
   it('fails with session-mismatch when sessionId differs', () => {
     const { deps } = makeDeps()
     const broker = new ExternalHealBroker(deps)
-    broker.claim('run-1', { sessionId: 'sess-A', clientKind: 'claude-desktop' })
+    broker.claim('run-1', { sessionId: 'sess-A', clientKind: 'claude' })
     const res = broker.assertOwnership('run-1', 'sess-B')
     expect(res.ok).toBe(false)
     if (res.ok) throw new Error('unreachable')
@@ -402,7 +402,7 @@ describe('ExternalHealBroker.transferTo', () => {
   it('releases the active claim and patches healMode in one go', () => {
     const { deps, captured } = makeDeps()
     const broker = new ExternalHealBroker(deps)
-    broker.claim('run-1', { sessionId: 'sess-A', clientKind: 'claude-desktop' })
+    broker.claim('run-1', { sessionId: 'sess-A', clientKind: 'claude' })
     captured.manifestPatches.length = 0
     captured.events.length = 0
     captured.audit.length = 0
@@ -421,7 +421,7 @@ describe('ExternalHealBroker.transferTo', () => {
       action: 'handoff',
       args: { to: 'manual' },
       sessionId: 'sess-A',
-      clientKind: 'claude-desktop',
+      clientKind: 'claude',
     })
   })
 
@@ -451,7 +451,7 @@ describe('ExternalHealBroker.rehydrate and listClaims', () => {
     const broker = new ExternalHealBroker(deps)
     const session: ExternalHealSession = {
       sessionId: 'sess-A',
-      clientKind: 'codex-desktop',
+      clientKind: 'codex',
       clientVersion: '1.0.0',
       conversationName: 'resume checkout',
       claimedAt: '2026-05-18T09:00:00.000Z',
@@ -468,7 +468,7 @@ describe('ExternalHealBroker.rehydrate and listClaims', () => {
 })
 
 describe('ExternalHealBroker.claim — client-kind policy', () => {
-  // Build deps that defer to the real (default) desktop-only policy by NOT
+  // Build deps that defer to the real (default) denylist policy by NOT
   // overriding isClaimAllowed.
   function makePolicyDeps() {
     const captured: Captured = { events: [], manifestPatches: [], audit: [] }
@@ -477,13 +477,13 @@ describe('ExternalHealBroker.claim — client-kind policy', () => {
       emit: (e) => { captured.events.push(e) },
       patchManifest: (runId, patch) => { captured.manifestPatches.push({ runId, ...patch }) },
       audit: (runId, entry) => { captured.audit.push({ runId, entry }) },
-      isClaimAllowed: (kind) => kind === 'claude-desktop' || kind === 'codex-desktop',
+      isClaimAllowed: (kind) => kind !== 'claude-pty' && kind !== 'codex-pty',
     }
     return { deps, captured }
   }
 
-  it.each(['claude-cli', 'codex-cli', 'other'] as const)(
-    'rejects a claim from %s with client-kind-not-allowed and writes no session',
+  it.each(['claude-pty', 'codex-pty'] as const)(
+    'rejects a claim from runner PTY agent %s with client-kind-not-allowed and writes no session',
     (kind) => {
       const { deps, captured } = makePolicyDeps()
       const broker = new ExternalHealBroker(deps)
@@ -502,8 +502,8 @@ describe('ExternalHealBroker.claim — client-kind policy', () => {
     },
   )
 
-  it.each(['claude-desktop', 'codex-desktop'] as const)(
-    'accepts a claim from desktop client %s',
+  it.each(['claude', 'codex', 'other'] as const)(
+    'accepts a claim from interactive client %s',
     (kind) => {
       const { deps } = makePolicyDeps()
       const broker = new ExternalHealBroker(deps)

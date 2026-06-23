@@ -160,7 +160,7 @@ describe('WizardTaskStatus', () => {
         featureName: 'external-flow',
         producer: 'external',
         externalStage: 'authoring-tests',
-        externalClientKind: 'codex-cli',
+        externalClientKind: 'codex',
         externalSessionId: 'sess-ext-1',
         externalConversationName: 'Add tests externally',
         externalSessionUrl: 'codex://session/sess-ext-1',
@@ -177,7 +177,7 @@ describe('WizardTaskStatus', () => {
 
     expect(container.textContent).toContain('external-flow')
     expect(container.textContent).toContain('authoring-tests')
-    expect(container.textContent).toContain('codex-cli')
+    expect(container.textContent).toContain('codex')
 
     const externalButton = Array.from(container.querySelectorAll('button'))
       .find((button) => button.textContent?.includes('external-flow'))
@@ -198,7 +198,7 @@ describe('WizardTaskStatus', () => {
         featureName: 'handoff-flow',
         producer: 'external',
         externalStage: 'ready',
-        externalClientKind: 'claude-desktop',
+        externalClientKind: 'claude',
         externalSessionId: 'sess-handoff',
         externalConversationName: 'Add handoff tests',
       }),

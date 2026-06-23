@@ -582,12 +582,15 @@ export function inferMcpClientKind(
   return inferClientKindFromProcessLines(readProcessLineage(startPid))
 }
 
+// Detection only ever produces the human-driven kinds: `claude` / `codex`
+// (Desktop and CLI are no longer distinguished — both may heal) or `null`
+// (→ `other`, also allowed). The runner-spawned `*-pty` kinds are NEVER
+// sniffed: the runner sets `CANARY_LAB_MCP_CLIENT_KIND` explicitly (read first
+// in `inferMcpClientKind`), so the only blocked case is set, not guessed.
 export function inferClientKindFromProcessLines(lines: string[]): ClientKind | null {
   const haystack = lines.join('\n')
-  if (/\/Applications\/Claude\.app\b|Claude Helper|Claude\.app/i.test(haystack)) return 'claude-desktop'
-  if (/\/Applications\/Codex\.app\b|Codex Helper|Codex\.app/i.test(haystack)) return 'codex-desktop'
-  if (/(^|[\s/])claude(?:\s|$)|claude-code/i.test(haystack)) return 'claude-cli'
-  if (/(^|[\s/])codex(?:\s|$)/i.test(haystack)) return 'codex-cli'
+  if (/\/Applications\/Claude\.app\b|Claude Helper|Claude\.app|(^|[\s/])claude(?:\s|$)|claude-code/i.test(haystack)) return 'claude'
+  if (/\/Applications\/Codex\.app\b|Codex Helper|Codex\.app|(^|[\s/])codex(?:\s|$)/i.test(haystack)) return 'codex'
   return null
 }
 

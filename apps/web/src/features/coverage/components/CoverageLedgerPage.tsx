@@ -834,35 +834,47 @@ function TestCard({ test, testNumber, color, active, dimmed, onHover, onExpand, 
           <span style={{ marginLeft: 'auto', fontFamily: 'var(--font-mono, monospace)', fontSize: 10, color: 'var(--text-muted)' }}>{test.file}{test.line ? `:${test.line}` : ''}</span>
         )}
       </div>
-      <div className="flex flex-wrap items-center gap-1.5" style={{ marginTop: 7 }}>
-        {test.strength && (
-          <span
-            data-testid={`strength-${test.name}`}
-            title={STRENGTH_META[test.strength].title}
-            className="flex items-center gap-1"
-            style={{ fontSize: 10, fontWeight: 600, color: STRENGTH_META[test.strength].color, background: `color-mix(in srgb, ${STRENGTH_META[test.strength].color} 14%, transparent)`, border: `1px solid color-mix(in srgb, ${STRENGTH_META[test.strength].color} 45%, transparent)`, borderRadius: 999, padding: '1px 8px' }}
-          >
-            <span aria-hidden="true" style={{ width: 6, height: 6, borderRadius: '50%', background: STRENGTH_META[test.strength].color }} />
-            {STRENGTH_META[test.strength].label}
-          </span>
-        )}
-        {test.requirements.length === 0 && (
+      {/* Tier 1 — what this test IS: its strength + the paths it exercises. */}
+      {(test.strength || test.pathTypes.length > 0) && (
+        <div className="flex flex-wrap items-center gap-1.5" style={{ marginTop: 7 }}>
+          {test.strength && (
+            <span
+              data-testid={`strength-${test.name}`}
+              title={STRENGTH_META[test.strength].title}
+              className="flex items-center gap-1"
+              style={{ fontSize: 10, fontWeight: 600, color: STRENGTH_META[test.strength].color, background: `color-mix(in srgb, ${STRENGTH_META[test.strength].color} 14%, transparent)`, border: `1px solid color-mix(in srgb, ${STRENGTH_META[test.strength].color} 45%, transparent)`, borderRadius: 999, padding: '1px 8px' }}
+            >
+              <span aria-hidden="true" style={{ width: 6, height: 6, borderRadius: '50%', background: STRENGTH_META[test.strength].color }} />
+              {STRENGTH_META[test.strength].label}
+            </span>
+          )}
+          {test.pathTypes.map((p) => (
+            <span key={p} style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: 10, padding: '1px 6px', borderRadius: 5, border: '1px solid var(--border-default)', color: 'var(--text-muted)' }}>@path-{p}</span>
+          ))}
+        </div>
+      )}
+      {/* Tier 2 — what this test COVERS: the requirement links (click to jump).
+          A muted "covers" label + calmer chip weight keeps a long list legible
+          instead of reading as a wall of identical bordered tags. */}
+      <div className="clcov-covers flex flex-wrap items-center gap-1.5" style={{ marginTop: 6 }}>
+        {test.requirements.length === 0 ? (
           <span data-testid={`orphan-${test.name}`} style={{ fontSize: 10, fontWeight: 600, color: 'rgb(251, 191, 36)', background: 'color-mix(in srgb, rgb(251,191,36) 12%, transparent)', border: '1px solid color-mix(in srgb, rgb(251,191,36) 40%, transparent)', borderRadius: 999, padding: '1px 8px' }}>orphan — no covers tag</span>
+        ) : (
+          <>
+            <span className="clcov-covers-label" aria-hidden="true">covers</span>
+            {test.requirements.map((id) => (
+              <button
+                key={id}
+                type="button"
+                className="clcov-reqtag"
+                data-testid={`reqtag-${test.name}-${id}`}
+                title={`Jump to requirement ${id}`}
+                onClick={(e) => { e.stopPropagation(); onReqClick(id) }}
+                style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: 10, padding: '1px 6px', borderRadius: 5, background: `color-mix(in srgb, ${color} 11%, transparent)`, border: `1px solid color-mix(in srgb, ${color} 30%, var(--border-default))`, color: 'var(--text-primary)' }}
+              >@req-{id}</button>
+            ))}
+          </>
         )}
-        {test.requirements.map((id) => (
-          <button
-            key={id}
-            type="button"
-            className="clcov-reqtag"
-            data-testid={`reqtag-${test.name}-${id}`}
-            title={`Jump to ${id}`}
-            onClick={(e) => { e.stopPropagation(); onReqClick(id) }}
-            style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: 10, padding: '1px 6px', borderRadius: 5, background: `color-mix(in srgb, ${color} 14%, transparent)`, border: `1px solid color-mix(in srgb, ${color} 55%, transparent)`, color: 'var(--text-primary)' }}
-          >@req-{id}</button>
-        ))}
-        {test.pathTypes.map((p) => (
-          <span key={p} style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: 10, padding: '1px 6px', borderRadius: 5, border: '1px solid var(--border-default)', color: 'var(--text-muted)' }}>@path-{p}</span>
-        ))}
       </div>
       {expanded && (
         <div className="clcov-source" data-testid={`test-source-${test.name}`}>
@@ -979,6 +991,8 @@ const COVERAGE_CSS = `
 .clcov-card:hover{border-color:color-mix(in srgb,var(--text-muted) 38%,var(--border-default))}
 /* A @req tag jumped-to from a test card: a brief accent ring locates the card. */
 .clcov-card[data-focus='true']{box-shadow:0 0 0 2px color-mix(in srgb,var(--accent,rgb(56,189,248)) 70%,transparent)}
+/* Coverage-links row: a quiet label groups the @req tags as "what this covers". */
+.clcov-covers-label{flex:none;font-size:9px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--text-muted);margin-right:2px}
 /* Clickable @req tags on a test card — jump to the matching requirement. */
 .clcov-reqtag{appearance:none;cursor:pointer;transition:transform .1s,filter .12s}
 .clcov-reqtag:hover{transform:translateY(-1px);filter:brightness(1.18)}

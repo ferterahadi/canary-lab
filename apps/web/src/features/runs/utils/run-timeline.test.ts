@@ -54,8 +54,8 @@ describe('buildTimelineRows', () => {
         engine({ phase: 'failed', headline: 'Run failed', updatedAt: '2026-05-26T10:19:17.600Z', severity: 'error' }),
       ],
       [
-        audit({ ts: '2026-05-26T10:19:05.000Z', action: 'claim', clientKind: 'claude-cli', sessionId: 'claude-001' }),
-        audit({ ts: '2026-05-26T10:19:10.000Z', action: 'stale-disconnect', clientKind: 'claude-cli', sessionId: 'claude-001' }),
+        audit({ ts: '2026-05-26T10:19:05.000Z', action: 'claim', clientKind: 'claude', sessionId: 'claude-001' }),
+        audit({ ts: '2026-05-26T10:19:10.000Z', action: 'stale-disconnect', clientKind: 'claude', sessionId: 'claude-001' }),
       ],
       { now: NOW },
     )
@@ -78,21 +78,21 @@ describe('buildTimelineRows', () => {
     const rows = buildTimelineRows(
       [],
       [
-        audit({ ts: '2026-05-26T10:19:05.000Z', action: 'claim', clientKind: 'claude-cli', sessionId: 'claude-001', args: { conversationName: 'test line integration' } }),
-        audit({ ts: '2026-05-26T10:19:06.000Z', action: 'stale-disconnect', clientKind: 'claude-cli', sessionId: 'claude-001' }),
-        audit({ ts: '2026-05-26T10:19:07.000Z', action: 'claim-reconnect', clientKind: 'claude-cli', sessionId: 'claude-001' }),
-        audit({ ts: '2026-05-26T10:19:08.000Z', action: 'claim-rejected', clientKind: 'codex-cli', sessionId: 'codex-001' }),
-        audit({ ts: '2026-05-26T10:19:09.000Z', action: 'release', clientKind: 'claude-cli', sessionId: 'claude-001' }),
-        audit({ ts: '2026-05-26T10:19:10.000Z', action: 'handoff', clientKind: 'claude-cli', sessionId: 'claude-001' }),
+        audit({ ts: '2026-05-26T10:19:05.000Z', action: 'claim', clientKind: 'claude', sessionId: 'claude-001', args: { conversationName: 'test line integration' } }),
+        audit({ ts: '2026-05-26T10:19:06.000Z', action: 'stale-disconnect', clientKind: 'claude', sessionId: 'claude-001' }),
+        audit({ ts: '2026-05-26T10:19:07.000Z', action: 'claim-reconnect', clientKind: 'claude', sessionId: 'claude-001' }),
+        audit({ ts: '2026-05-26T10:19:08.000Z', action: 'claim-rejected', clientKind: 'codex', sessionId: 'codex-001' }),
+        audit({ ts: '2026-05-26T10:19:09.000Z', action: 'release', clientKind: 'claude', sessionId: 'claude-001' }),
+        audit({ ts: '2026-05-26T10:19:10.000Z', action: 'handoff', clientKind: 'claude', sessionId: 'claude-001' }),
       ],
       { now: NOW },
     )
 
-    expect(rows[0]).toMatchObject({ source: 'external', severity: 'success', headline: 'Claimed the heal', clientLabel: 'Claude CLI', durationLabel: null })
+    expect(rows[0]).toMatchObject({ source: 'external', severity: 'success', headline: 'Claimed the heal', clientLabel: 'Claude', durationLabel: null })
     expect(rows[0].detail).toContain('conversationName=test line integration')
     expect(rows[1]).toMatchObject({ severity: 'warning', headline: 'Went stale — disconnected' })
     expect(rows[2]).toMatchObject({ severity: 'success', headline: 'Reconnected to the heal' })
-    expect(rows[3]).toMatchObject({ severity: 'error', headline: 'Heal claim rejected', clientLabel: 'Codex CLI' })
+    expect(rows[3]).toMatchObject({ severity: 'error', headline: 'Heal claim rejected', clientLabel: 'Codex' })
     expect(rows[4]).toMatchObject({ severity: 'info', headline: 'Released the heal' })
     expect(rows[5]).toMatchObject({ severity: 'info', headline: 'Handed off the heal' })
   })
@@ -126,7 +126,7 @@ describe('buildTimelineRows', () => {
   it('orders engine before external when timestamps tie', () => {
     const rows = buildTimelineRows(
       [engine({ phase: 'starting-services', headline: 'Starting services', updatedAt: '2026-05-26T10:19:05.000Z' })],
-      [audit({ ts: '2026-05-26T10:19:05.000Z', action: 'claim', clientKind: 'claude-cli' })],
+      [audit({ ts: '2026-05-26T10:19:05.000Z', action: 'claim', clientKind: 'claude' })],
       { now: NOW },
     )
     expect(rows.map((r) => r.source)).toEqual(['engine', 'external'])
@@ -146,17 +146,17 @@ describe('buildTimelineRows', () => {
     expect(rows[1].detail).toBe('target={"id":7}')
   })
 
-  it('maps desktop client kinds to their labels', () => {
+  it('maps interactive client kinds to their labels', () => {
     const rows = buildTimelineRows(
       [],
       [
-        audit({ ts: '2026-05-26T10:19:05.000Z', action: 'claim', clientKind: 'claude-desktop' }),
-        audit({ ts: '2026-05-26T10:19:06.000Z', action: 'claim', clientKind: 'codex-desktop' }),
+        audit({ ts: '2026-05-26T10:19:05.000Z', action: 'claim', clientKind: 'claude' }),
+        audit({ ts: '2026-05-26T10:19:06.000Z', action: 'claim', clientKind: 'codex' }),
       ],
       { now: NOW },
     )
-    expect(rows[0].clientLabel).toBe('Claude Desktop')
-    expect(rows[1].clientLabel).toBe('Codex Desktop')
+    expect(rows[0].clientLabel).toBe('Claude')
+    expect(rows[1].clientLabel).toBe('Codex')
   })
 
   it('leaves detail null when every arg value is null', () => {

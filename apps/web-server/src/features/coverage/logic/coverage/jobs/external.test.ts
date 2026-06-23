@@ -77,7 +77,7 @@ describe('startExternalCoverage', () => {
     await seedSummary('checkout')
     const store = new CoverageJobRunStore(logsDir)
     const res = startExternalCoverage(
-      { featuresDir, logsDir, feature: 'checkout', sessionId: 's1', clientKind: 'claude-desktop', conversationName: 'cov chat' },
+      { featuresDir, logsDir, feature: 'checkout', sessionId: 's1', clientKind: 'claude', conversationName: 'cov chat' },
       { store },
     )
     expect(res.kind).toBe('started')
@@ -86,7 +86,7 @@ describe('startExternalCoverage', () => {
     expect(res.manifest.kind).toBe('coverage')
     expect(res.manifest.status).toBe('running')
     expect(res.manifest.sessionRef).toBeUndefined()
-    expect(res.manifest.externalClientKind).toBe('claude-desktop')
+    expect(res.manifest.externalClientKind).toBe('claude')
     expect(res.manifest.externalSessionId).toBe('s1')
     // Context carries the requirements, the tests, and the reusable mapping prompt.
     expect(res.context.requirements.map((r) => r.id)).toContain('R1')

@@ -323,21 +323,36 @@ describe('canary-lab mcp', () => {
     expect(stderr.text()).toContain('Invalid MCP profile: nope')
   })
 
-  it('infers desktop client kind from the launching process tree', () => {
+  it('infers the interactive client kind from the launching process tree (Desktop and CLI both collapse to claude/codex)', () => {
     expect(inferClientKindFromProcessLines([
       '/Applications/Claude.app/Contents/Frameworks/Claude Helper.app/Contents/MacOS/Claude Helper',
       '/sbin/launchd',
-    ])).toBe('claude-desktop')
+    ])).toBe('claude')
     expect(inferClientKindFromProcessLines([
       '/Applications/Codex.app/Contents/Resources/codex sandbox macos',
       '/sbin/launchd',
-    ])).toBe('codex-desktop')
+    ])).toBe('codex')
+    expect(inferClientKindFromProcessLines([
+      'node /usr/local/bin/claude-code',
+      '/bin/zsh',
+    ])).toBe('claude')
+    expect(inferClientKindFromProcessLines([
+      'codex exec --full-auto',
+      '/bin/zsh',
+    ])).toBe('codex')
+  })
+
+  it('never sniffs the runner-spawned PTY kinds — they are only ever set explicitly', () => {
+    // A bare `claude`/`codex` in the lineage must resolve to the interactive
+    // kind, NOT a -pty kind; the -pty tag comes solely from the env var the
+    // runner injects.
+    expect(inferClientKindFromProcessLines(['claude'])).toBe('claude')
   })
 
   it('prefers explicit CANARY_LAB_MCP_CLIENT_KIND over process inference', () => {
     expect(inferMcpClientKind({
-      CANARY_LAB_MCP_CLIENT_KIND: 'codex-desktop',
-    }, 1)).toBe('codex-desktop')
+      CANARY_LAB_MCP_CLIENT_KIND: 'codex-pty',
+    }, 1)).toBe('codex-pty')
   })
 })
 

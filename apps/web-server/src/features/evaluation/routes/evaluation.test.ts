@@ -593,7 +593,7 @@ test('records checkout', async ({ page }) => {
       updatedAt: '2026-01-01T00:00:00.000Z',
       downloadReady: false,
       archiveBase: 'canary-lab-evaluation-checkout-r-external-pending',
-      clientKind: 'codex-cli',
+      clientKind: 'codex',
       sessionId: 'sess-export',
       conversationName: 'Export evaluation',
       language: 'English',
@@ -608,7 +608,7 @@ test('records checkout', async ({ page }) => {
       producer: 'external',
       status: 'running',
       downloadReady: false,
-      clientKind: 'codex-cli',
+      clientKind: 'codex',
       sessionId: 'sess-export',
     })
     expect(fetched.json()).toMatchObject({ status: 'running', producer: 'external' })

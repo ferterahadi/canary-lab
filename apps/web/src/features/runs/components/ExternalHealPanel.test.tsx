@@ -32,10 +32,10 @@ describe('ExternalHealPanel', () => {
   })
 
   it.each([
-    ['claude-desktop', 'Claude Desktop', 'Open Claude'],
-    ['claude-cli', 'Claude CLI', null],
-    ['codex-desktop', 'Codex Desktop', 'Open Codex'],
-    ['codex-cli', 'Codex CLI', null],
+    ['claude', 'Claude', 'Open Claude'],
+    ['codex', 'Codex', 'Open Codex'],
+    ['claude-pty', 'Claude (runner)', null],
+    ['codex-pty', 'Codex (runner)', null],
   ] as const)('renders the exact external client kind for %s', (clientKind, label, openButton) => {
     const html = renderToStaticMarkup(
       <ExternalHealPanel
@@ -93,7 +93,7 @@ describe('ExternalHealPanel', () => {
 function session(overrides: Partial<ExternalHealSession> = {}): ExternalHealSession {
   return {
     sessionId: 's-1',
-    clientKind: 'claude-desktop',
+    clientKind: 'claude',
     conversationName: 'Healing via Claude',
     claimedAt: '2026-01-01T00:00:00.000Z',
     lastHeartbeatAt: '2026-01-01T00:01:00.000Z',

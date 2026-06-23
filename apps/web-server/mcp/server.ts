@@ -16,9 +16,9 @@ import {
 import { isClientKind, type ClientKind } from '../../../shared/run-mode'
 
 // Singleton MCP server mounted on the existing Fastify instance at `/mcp`.
-// Uses the streamable HTTP transport so Claude Desktop / Codex Desktop and
-// other MCP clients (claude-cli, codex-cli, mcp-inspector, custom scripts)
-// can connect over plain HTTP at localhost:7421/mcp.
+// Uses the streamable HTTP transport so Claude / Codex clients (Desktop or
+// CLI) and other MCP clients (mcp-inspector, custom scripts) can connect over
+// plain HTTP at localhost:7421/mcp.
 //
 // The implementation is intentionally thin: every tool is a wrapper around an
 // existing REST endpoint or internal helper. The MCP server doesn't own
@@ -45,7 +45,7 @@ const SERVER_INFO = { name: 'canary-lab', version: '1.0.0', title: 'Canary Lab' 
 // and never pick up the needs_heal handoff.
 const REPAIR_INSTRUCTIONS = `Canary Lab — external repair loop. Fix failing runs by editing app/service code (not tests, unless a test is provably wrong).
 
-1. start_run with claim_heal:true, a stable session_id reused for the whole conversation, and conversation_name. Do NOT pass client_kind — the MCP bridge auto-detects it (CLI vs Desktop) from the connection; passing it yourself can mis-set it and suppress heal claim. For "rerun <id>" pass run_ref (e.g. "7cvh").
+1. start_run with claim_heal:true, a stable session_id reused for the whole conversation, and conversation_name. Do NOT pass client_kind — the MCP bridge auto-detects it from the connection; passing it yourself can mis-set it and suppress heal claim. Heal claiming is open to interactive Claude/Codex clients (Desktop or CLI); it is suppressed only for runner-spawned PTY agents Canary Lab launches itself. For "rerun <id>" pass run_ref (e.g. "7cvh").
    - If start_run returns type:"repo_collision_requires_choice", another run is using the same app/repo. ASK THE USER whether to run isolated (a per-run git worktree, concurrent) or queue until the other run finishes, then re-call start_run with isolation:"worktree" or isolation:"queue". Do not guess.
    - If start_run returns queued:true, the run is parked (queueReason tells you why) and will start automatically when capacity frees; wait_for_heal_task still works — it blocks until the run starts and needs fixes.
    - If start_run (or wait_for_heal_task) returns type:"boot_session" (executionType:"boot"), the run is a held boot-only session: services are up, no tests run, and there is NO heal task. Do not wait for heal — report that services are ready and that abort_run (confirm:true) stops them. A service that fails its readiness probe is marked failed (its status shows "timeout") but the session stays held — boot never self-aborts on a health-check failure, so report which services came up and which failed; only abort_run tears it down.

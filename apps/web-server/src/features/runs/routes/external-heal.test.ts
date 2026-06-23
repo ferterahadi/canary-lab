@@ -117,7 +117,7 @@ async function build(opts: { isClaimAllowed?: (kind: string) => boolean } = {}) 
     patchManifest: (runId, patch) => { store.patchManifest(runId, patch) },
     audit: (runId, entry) => { audit.push({ runId, entry }) },
     // Most route tests exercise claim mechanics across client kinds; allow all
-    // by default. The desktop-only policy is asserted in its own test below.
+    // by default. The denylist policy is asserted in its own test below.
     isClaimAllowed: opts.isClaimAllowed ?? (() => true),
   }
   const broker = new ExternalHealBroker(deps)
@@ -141,7 +141,7 @@ describe('external heal routes', () => {
       url: '/api/runs/run-1/heal-agent/claim',
       payload: {
         sessionId: 'sess-A',
-        clientKind: 'codex-desktop',
+        clientKind: 'codex',
         clientVersion: '1.2.3',
         conversationName: 'fix checkout',
       },
@@ -149,7 +149,7 @@ describe('external heal routes', () => {
     expect(claim.statusCode).toBe(200)
     expect(claim.json().session).toMatchObject({
       sessionId: 'sess-A',
-      clientKind: 'codex-desktop',
+      clientKind: 'codex',
       clientVersion: '1.2.3',
       conversationName: 'fix checkout',
       status: 'connected',
@@ -158,7 +158,7 @@ describe('external heal routes', () => {
     const conflict = await app.inject({
       method: 'POST',
       url: '/api/runs/run-1/heal-agent/claim',
-      payload: { sessionId: 'sess-B', clientKind: 'claude-cli' },
+      payload: { sessionId: 'sess-B', clientKind: 'claude' },
     })
     expect(conflict.statusCode).toBe(409)
     expect(conflict.json().reason).toBe('already-claimed')
@@ -188,30 +188,30 @@ describe('external heal routes', () => {
     expect(broker.getSession('run-1')).toBeNull()
   })
 
-  it('rejects a CLI claim with 403 client-kind-not-allowed under the default policy', async () => {
+  it('rejects a runner PTY claim with 403 client-kind-not-allowed under the default policy', async () => {
     writeRun('run-1', 'running')
     const { app, broker } = await build({
-      isClaimAllowed: (kind) => kind === 'claude-desktop' || kind === 'codex-desktop',
+      isClaimAllowed: (kind) => kind !== 'claude-pty' && kind !== 'codex-pty',
     })
 
-    const cliClaim = await app.inject({
+    const ptyClaim = await app.inject({
       method: 'POST',
       url: '/api/runs/run-1/heal-agent/claim',
-      payload: { sessionId: 'sess-cli', clientKind: 'claude-cli' },
+      payload: { sessionId: 'sess-pty', clientKind: 'claude-pty' },
     })
-    expect(cliClaim.statusCode).toBe(403)
-    expect(cliClaim.json().reason).toBe('client-kind-not-allowed')
-    expect(cliClaim.json().clientKind).toBe('claude-cli')
+    expect(ptyClaim.statusCode).toBe(403)
+    expect(ptyClaim.json().reason).toBe('client-kind-not-allowed')
+    expect(ptyClaim.json().clientKind).toBe('claude-pty')
     expect(broker.getSession('run-1')).toBeNull()
 
-    // A desktop client can still claim the same run afterwards.
-    const desktopClaim = await app.inject({
+    // An interactive client can still claim the same run afterwards.
+    const interactiveClaim = await app.inject({
       method: 'POST',
       url: '/api/runs/run-1/heal-agent/claim',
-      payload: { sessionId: 'sess-desk', clientKind: 'claude-desktop' },
+      payload: { sessionId: 'sess-interactive', clientKind: 'claude' },
     })
-    expect(desktopClaim.statusCode).toBe(200)
-    expect(broker.getSession('run-1')?.clientKind).toBe('claude-desktop')
+    expect(interactiveClaim.statusCode).toBe(200)
+    expect(broker.getSession('run-1')?.clientKind).toBe('claude')
   })
 
   it('validates claim, heartbeat, and release requests', async () => {
@@ -221,12 +221,12 @@ describe('external heal routes', () => {
     expect((await app.inject({
       method: 'POST',
       url: '/api/runs/missing/heal-agent/claim',
-      payload: { sessionId: 'sess-A', clientKind: 'codex-cli' },
+      payload: { sessionId: 'sess-A', clientKind: 'codex' },
     })).statusCode).toBe(404)
     expect((await app.inject({
       method: 'POST',
       url: '/api/runs/run-1/heal-agent/claim',
-      payload: { clientKind: 'codex-cli' },
+      payload: { clientKind: 'codex' },
     })).json()).toEqual({ error: 'sessionId is required' })
     expect((await app.inject({
       method: 'POST',
@@ -374,7 +374,7 @@ describe('external heal routes', () => {
   it('validates and writes restart, rerun, and heal signal files', async () => {
     writeRun('run-1')
     const { app, broker, acceptedSignals } = await build()
-    broker.claim('run-1', { sessionId: 'sess-A', clientKind: 'codex-cli' })
+    broker.claim('run-1', { sessionId: 'sess-A', clientKind: 'codex' })
 
     const mismatch = await app.inject({
       method: 'POST',
@@ -484,7 +484,7 @@ describe('external heal routes', () => {
   it('hands off active external runs to manual mode and rejects local-agent targets for active runs', async () => {
     writeRun('run-1', 'running')
     const { app, broker, audit } = await build()
-    broker.claim('run-1', { sessionId: 'sess-A', clientKind: 'codex-cli' })
+    broker.claim('run-1', { sessionId: 'sess-A', clientKind: 'codex' })
 
     const manual = await app.inject({
       method: 'POST',
@@ -495,14 +495,14 @@ describe('external heal routes', () => {
     expect(manual.json()).toMatchObject({
       accepted: true,
       to: 'manual',
-      previousSession: { sessionId: 'sess-A', clientKind: 'codex-cli' },
+      previousSession: { sessionId: 'sess-A', clientKind: 'codex' },
     })
     expect(broker.getSession('run-1')).toBeNull()
     expect(audit.at(-1)?.entry.action).toBe('handoff')
 
     // After release the run no longer holds a claim — patch the manifest's
     // healMode field for the next case to mirror that.
-    broker.claim('run-1', { sessionId: 'sess-B', clientKind: 'claude-desktop' })
+    broker.claim('run-1', { sessionId: 'sess-B', clientKind: 'claude' })
     const blocked = await app.inject({
       method: 'POST',
       url: '/api/runs/run-1/heal-agent/handoff',
@@ -517,7 +517,7 @@ describe('external heal routes', () => {
   it('rejects handoff with mismatched session id', async () => {
     writeRun('run-1', 'running')
     const { app, broker } = await build()
-    broker.claim('run-1', { sessionId: 'sess-A', clientKind: 'codex-cli' })
+    broker.claim('run-1', { sessionId: 'sess-A', clientKind: 'codex' })
 
     const res = await app.inject({
       method: 'POST',
@@ -542,7 +542,7 @@ describe('external heal routes', () => {
       audit: (runId, entry) => { audit.push({ runId, entry }) },
     }
     const broker = new ExternalHealBroker(deps)
-    broker.claim('run-1', { sessionId: 'sess-A', clientKind: 'claude-desktop' })
+    broker.claim('run-1', { sessionId: 'sess-A', clientKind: 'claude' })
     const app = Fastify()
     await app.register(externalHealRoutes, {
       store,
@@ -599,8 +599,8 @@ describe('external heal routes', () => {
       patchManifest: (runId, patch) => { store.patchManifest(runId, patch) },
       audit: () => {},
     })
-    broker.claim('run-spawn', { sessionId: 'sess-A', clientKind: 'claude-desktop' })
-    broker.claim('run-busy', { sessionId: 'sess-B', clientKind: 'claude-desktop' })
+    broker.claim('run-spawn', { sessionId: 'sess-A', clientKind: 'claude' })
+    broker.claim('run-busy', { sessionId: 'sess-B', clientKind: 'claude' })
     const app = Fastify()
     await app.register(externalHealRoutes, {
       store,
@@ -654,20 +654,20 @@ describe('external heal routes', () => {
   it('returns parsed audit entries from external-commands.jsonl', async () => {
     writeRun('run-1')
     const { app, broker } = await build()
-    broker.claim('run-1', { sessionId: 'sess-A', clientKind: 'claude-desktop' })
+    broker.claim('run-1', { sessionId: 'sess-A', clientKind: 'claude' })
     // Force a few audit entries by exercising the broker.
     broker.release('run-1', 'sess-A')
     const logger = makeExternalHealAuditLogger(logsDir)
     logger('run-1', {
       ts: '2026-05-18T10:00:00.000Z',
       sessionId: 'sess-A',
-      clientKind: 'claude-desktop',
+      clientKind: 'claude',
       action: 'claim',
     })
     logger('run-1', {
       ts: '2026-05-18T10:00:05.000Z',
       sessionId: 'sess-A',
-      clientKind: 'claude-desktop',
+      clientKind: 'claude',
       action: 'release',
     })
 
@@ -677,13 +677,13 @@ describe('external heal routes', () => {
       {
         ts: '2026-05-18T10:00:00.000Z',
         sessionId: 'sess-A',
-        clientKind: 'claude-desktop',
+        clientKind: 'claude',
         action: 'claim',
       },
       {
         ts: '2026-05-18T10:00:05.000Z',
         sessionId: 'sess-A',
-        clientKind: 'claude-desktop',
+        clientKind: 'claude',
         action: 'release',
       },
     ])
@@ -729,7 +729,7 @@ describe('makeExternalHealAuditLogger', () => {
     logger('run-1', {
       ts: '2026-05-18T10:00:00.000Z',
       sessionId: 'sess-A',
-      clientKind: 'codex-cli',
+      clientKind: 'codex',
       action: 'claim',
     })
 
@@ -737,7 +737,7 @@ describe('makeExternalHealAuditLogger', () => {
     expect(body).toBe(JSON.stringify({
       ts: '2026-05-18T10:00:00.000Z',
       sessionId: 'sess-A',
-      clientKind: 'codex-cli',
+      clientKind: 'codex',
       action: 'claim',
     }) + '\n')
   })

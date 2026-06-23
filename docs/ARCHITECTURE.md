@@ -226,14 +226,19 @@ edit code → `signal_run`. `ExternalHealBroker`
 heartbeat staleness. Every external command is audited at
 `<runDir>/external-commands.jsonl`.
 
-### Heal-claim policy (desktop-only)
+### Heal-claim policy (block runner PTYs)
 
-Only **Desktop** client kinds (`claude-desktop`, `codex-desktop`) may *own* a heal
-claim. CLI clients (`claude-cli`, `codex-cli`) — and undetected `other` — can
-run/verify but never claim, so a stray CLI session can't silently grab a run and edit
-repo code. It's an **allowlist** (`apps/web-server/src/features/runs/logic/heal/heal-claim-policy.ts`,
-`isHealClaimAllowed`), so detection failures (`other`) fail safe. Override via
-`CANARY_LAB_HEAL_CLAIM_CLIENTS` (comma-separated kinds). Enforced at two layers:
+Every **interactive** client kind may *own* a heal claim: `claude`, `codex` (Desktop
+and CLI both collapse to these — we no longer distinguish), and even undetected
+`other` (assumed to be a person at a terminal). The only kinds blocked are the
+runner-spawned PTY agents — `claude-pty`, `codex-pty` — which Canary Lab itself spawns
+(benchmark sabotage, portify, …); letting one claim heal would have it claim its own
+run. It's a **denylist** (`apps/web-server/src/features/runs/logic/heal/heal-claim-policy.ts`,
+`isHealClaimAllowed`), because the dangerous case is the one we fully control: the
+runner tags its spawns `*-pty` deterministically via `CANARY_LAB_MCP_CLIENT_KIND`
+(set in `runAgentProcess`), so we never rely on heuristic detection to block it —
+everything else fails *open* so a person can always heal. Override via
+`CANARY_LAB_HEAL_CLAIM_BLOCKED_CLIENTS` (comma-separated kinds). Enforced at two layers:
 
 1. a hard backstop in `broker.claim()` (covers `claim_heal`, REST `/claim`, the
    reclaim helper → returns `client-kind-not-allowed`), and
@@ -249,11 +254,11 @@ client is *external-origin* and uses External‑client heal **regardless of the 
 `healAgent` setting** — that setting governs only **UI/REST‑triggered** runs. The
 `server.ts` `startRun` closure splits two flags: `externalOrigin`
 (`healAgentReq.kind === 'external'`) disables project auto‑heal and forces
-`externalHeal` mode; `canClaim` (`externalOrigin && claimable !== false`, i.e. a
-Desktop client) is what actually creates the `externalHealSession` + broker claim. So a
-non‑claiming MCP client (CLI / `other`) passes `claimable: false`: the run enters
-external mode with **no** session and **waits** for a Desktop/UI drive — it does *not*
-fall back to a locally‑spawned auto‑heal agent. A CLI restart of a failed run follows
+`externalHeal` mode; `canClaim` (`externalOrigin && claimable !== false`, i.e. an
+interactive client) is what actually creates the `externalHealSession` + broker claim. So a
+non‑claiming MCP client (a runner PTY agent) passes `claimable: false`: the run enters
+external mode with **no** session and **waits** for an interactive/UI drive — it does *not*
+fall back to a locally‑spawned auto‑heal agent. A PTY restart of a failed run follows
 the same path (`restartExternalRun` with `claimable: false`) rather than being refused.
 
 ### Handoff
@@ -271,7 +276,7 @@ a local autoHeal mid-flight); `auto`/`claude`/`codex` require a failed/aborted r
   `verify` (verification configs), `author` (feature/envset/draft/eval authoring),
   `portify` (port-injection workflow), `lifecycle` (everyday end-to-end loop —
   repair + author + verify, no portify), `full` (lifecycle + portify). Optional
-  `?client_kind=claude-desktop|codex-cli|...`.
+  `?client_kind=claude|codex|other|...` (the `*-pty` kinds are set by the runner, not passed by clients).
 - Tools live in `apps/web-server/mcp/tools.ts` — thin wrappers over existing REST
   routes/helpers. `start_run`/`write_envset`/etc. reuse handlers via `app.inject()`;
   don't duplicate orchestrator logic. Author-profile tools call

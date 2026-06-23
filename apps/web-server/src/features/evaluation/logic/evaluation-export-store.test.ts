@@ -202,7 +202,7 @@ describe('evaluation-export-store', () => {
   })
 
   it('accepts every external client kind in persisted task metadata', () => {
-    for (const clientKind of ['claude-cli', 'claude-desktop', 'codex-cli', 'codex-desktop', 'other'] as const) {
+    for (const clientKind of ['claude', 'codex', 'claude-pty', 'codex-pty', 'other'] as const) {
       writeEvaluationExportTask(tmpDir, makeRecord({ taskId: `eval-${clientKind}`, clientKind }))
       expect(readEvaluationExportTask(tmpDir, `eval-${clientKind}`)?.clientKind).toBe(clientKind)
     }

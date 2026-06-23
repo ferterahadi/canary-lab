@@ -176,20 +176,20 @@ async function createMcpHarness(opts: {
 }
 
 describe('MCP HTTP server (smoke)', () => {
-  // These E2E tests predate the desktop-only heal-claim policy and exercise
-  // claim flows across client kinds (codex-cli, 'other' auto-claims). Allow
-  // all kinds here via the documented override; the policy itself is asserted
-  // by heal-claim-policy / broker / route tests, and by the dedicated
-  // suppression test below which sets its own desktop-only override.
-  const ALL_KINDS = 'claude-cli,claude-desktop,codex-cli,codex-desktop,other'
+  // These E2E tests exercise claim flows across interactive client kinds
+  // (codex, 'other' auto-claims), which the default denylist policy allows.
+  // Pin the default block list explicitly so an ambient override can't leak in;
+  // the policy itself is asserted by heal-claim-policy / broker / route tests,
+  // and by the dedicated suppression tests below which start a runner PTY kind.
+  const BLOCKED_PTY_KINDS = 'claude-pty,codex-pty'
   let prevClaimClients: string | undefined
   beforeAll(() => {
-    prevClaimClients = process.env.CANARY_LAB_HEAL_CLAIM_CLIENTS
-    process.env.CANARY_LAB_HEAL_CLAIM_CLIENTS = ALL_KINDS
+    prevClaimClients = process.env.CANARY_LAB_HEAL_CLAIM_BLOCKED_CLIENTS
+    process.env.CANARY_LAB_HEAL_CLAIM_BLOCKED_CLIENTS = BLOCKED_PTY_KINDS
   })
   afterAll(() => {
-    if (prevClaimClients === undefined) delete process.env.CANARY_LAB_HEAL_CLAIM_CLIENTS
-    else process.env.CANARY_LAB_HEAL_CLAIM_CLIENTS = prevClaimClients
+    if (prevClaimClients === undefined) delete process.env.CANARY_LAB_HEAL_CLAIM_BLOCKED_CLIENTS
+    else process.env.CANARY_LAB_HEAL_CLAIM_BLOCKED_CLIENTS = prevClaimClients
   })
 
   it('exposes /mcp/health with profile-specific tool counts', async () => {
@@ -390,7 +390,7 @@ describe('MCP HTTP server (smoke)', () => {
     let client: Client | null = null
     try {
       const address = await app.listen({ port: 0, host: '127.0.0.1' })
-      client = await connectClient(address, '/mcp?profile=author&client_kind=codex-cli')
+      client = await connectClient(address, '/mcp?profile=author&client_kind=codex')
 
       const created = await client.callTool({
         name: 'create_feature',
@@ -1131,7 +1131,7 @@ describe('MCP HTTP server (smoke)', () => {
         arguments: {
           runId: 'wait-needs-heal',
           session_id: 'sess-1',
-          client_kind: 'codex-cli',
+          client_kind: 'codex',
         },
       })
       runStore.recordLifecycleEvent('wait-needs-heal', {
@@ -1253,7 +1253,7 @@ describe('MCP HTTP server (smoke)', () => {
         arguments: {
           runId: 'wait-timeout',
           session_id: 'sess-timeout',
-          client_kind: 'codex-cli',
+          client_kind: 'codex',
         },
       })
       const stillWaiting = await client.callTool({
@@ -1282,7 +1282,7 @@ describe('MCP HTTP server (smoke)', () => {
     let client: Client | null = null
     try {
       const address = await app.listen({ port: 0, host: '127.0.0.1' })
-      client = await connectClient(address, '/mcp?profile=full&client_kind=claude-desktop')
+      client = await connectClient(address, '/mcp?profile=full&client_kind=claude')
 
       runStore.bootstrap({
         runId: 'wait-claim',
@@ -1323,7 +1323,7 @@ describe('MCP HTTP server (smoke)', () => {
       expect(body.context).not.toHaveProperty('healIndexMarkdown')
       expect(runStore.get('wait-claim')?.manifest.externalHealSession).toMatchObject({
         sessionId: 'sess-claude',
-        clientKind: 'claude-desktop',
+        clientKind: 'claude',
       })
     } finally {
       if (client) await client.close().catch(() => undefined)
@@ -1362,7 +1362,7 @@ describe('MCP HTTP server (smoke)', () => {
           env: 'local',
           claim_heal: true,
           session_id: 'sess-reuse',
-          client_kind: 'claude-desktop',
+          client_kind: 'claude',
           conversation_name: 'resume existing run',
         },
       })
@@ -1376,7 +1376,7 @@ describe('MCP HTTP server (smoke)', () => {
       expect(runStore.list({ feature: 'broken_todo_api' }).map((entry) => entry.runId)).toEqual(['reuse-active'])
       expect(runStore.get('reuse-active')?.manifest.externalHealSession).toMatchObject({
         sessionId: 'sess-reuse',
-        clientKind: 'claude-desktop',
+        clientKind: 'claude',
       })
     } finally {
       if (client) await client.close().catch(() => undefined)
@@ -1384,7 +1384,7 @@ describe('MCP HTTP server (smoke)', () => {
     }
   })
 
-  it('start_run starts a fresh CLI run as external-origin with claimable:false (desktop-only policy)', async () => {
+  it('start_run starts a fresh runner-PTY run as external-origin with claimable:false (denylist policy)', async () => {
     const projectRoot = path.resolve(__dirname, '..', '..', '..', 'templates', 'project')
     const logsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-start-cli-fresh-')))
     const featuresDir = path.join(projectRoot, 'features')
@@ -1399,10 +1399,9 @@ describe('MCP HTTP server (smoke)', () => {
       },
     })
     let client: Client | null = null
-    // Desktop-only policy: a CLI start can't claim, but the run must still be
-    // external-origin so it uses External-client heal, not the project agent.
-    const saved = process.env.CANARY_LAB_HEAL_CLAIM_CLIENTS
-    process.env.CANARY_LAB_HEAL_CLAIM_CLIENTS = 'claude-desktop,codex-desktop'
+    // Denylist policy: a runner-spawned PTY agent can't claim, but the run must
+    // still be external-origin so it uses External-client heal, not the project
+    // agent. (The file-wide default already blocks the *-pty kinds.)
     try {
       const address = await app.listen({ port: 0, host: '127.0.0.1' })
       client = await connectClient(address, '/mcp?profile=full')
@@ -1412,9 +1411,9 @@ describe('MCP HTTP server (smoke)', () => {
           feature: 'broken_todo_api',
           env: 'local',
           claim_heal: true,
-          session_id: 'sess-cli',
-          client_kind: 'claude-cli',
-          conversation_name: 'cli fresh start',
+          session_id: 'sess-pty',
+          client_kind: 'claude-pty',
+          conversation_name: 'pty fresh start',
         },
       })
       const body = JSON.parse((result.content?.[0] as { text: string }).text)
@@ -1425,20 +1424,18 @@ describe('MCP HTTP server (smoke)', () => {
       expect(calls).toHaveLength(1)
       expect(calls[0][2]).toEqual({
         kind: 'external',
-        sessionId: 'sess-cli',
-        clientKind: 'claude-cli',
-        conversationName: 'cli fresh start',
+        sessionId: 'sess-pty',
+        clientKind: 'claude-pty',
+        conversationName: 'pty fresh start',
         claimable: false,
       })
     } finally {
-      if (saved === undefined) delete process.env.CANARY_LAB_HEAL_CLAIM_CLIENTS
-      else process.env.CANARY_LAB_HEAL_CLAIM_CLIENTS = saved
       if (client) await client.close().catch(() => undefined)
       await app.close()
     }
   })
 
-  it('start_run starts a fresh Desktop run as claimable external origin', async () => {
+  it('start_run starts a fresh interactive Claude run as claimable external origin', async () => {
     const projectRoot = path.resolve(__dirname, '..', '..', '..', 'templates', 'project')
     const logsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-start-desktop-fresh-')))
     const featuresDir = path.join(projectRoot, 'features')
@@ -1453,8 +1450,6 @@ describe('MCP HTTP server (smoke)', () => {
       },
     })
     let client: Client | null = null
-    const saved = process.env.CANARY_LAB_HEAL_CLAIM_CLIENTS
-    process.env.CANARY_LAB_HEAL_CLAIM_CLIENTS = 'claude-desktop,codex-desktop'
     try {
       const address = await app.listen({ port: 0, host: '127.0.0.1' })
       client = await connectClient(address, '/mcp?profile=full')
@@ -1464,8 +1459,8 @@ describe('MCP HTTP server (smoke)', () => {
           feature: 'broken_todo_api',
           env: 'local',
           claim_heal: true,
-          session_id: 'sess-desktop',
-          client_kind: 'claude-desktop',
+          session_id: 'sess-interactive',
+          client_kind: 'claude',
         },
       })
       const body = JSON.parse((result.content?.[0] as { text: string }).text)
@@ -1474,19 +1469,17 @@ describe('MCP HTTP server (smoke)', () => {
       expect(calls).toHaveLength(1)
       expect(calls[0][2]).toEqual({
         kind: 'external',
-        sessionId: 'sess-desktop',
-        clientKind: 'claude-desktop',
+        sessionId: 'sess-interactive',
+        clientKind: 'claude',
         claimable: true,
       })
     } finally {
-      if (saved === undefined) delete process.env.CANARY_LAB_HEAL_CLAIM_CLIENTS
-      else process.env.CANARY_LAB_HEAL_CLAIM_CLIENTS = saved
       if (client) await client.close().catch(() => undefined)
       await app.close()
     }
   })
 
-  it('start_run restarts a failed run for a CLI client as external-origin (claimable:false, not refused)', async () => {
+  it('start_run restarts a failed run for a runner PTY agent as external-origin (claimable:false, not refused)', async () => {
     const projectRoot = path.resolve(__dirname, '..', '..', '..', 'templates', 'project')
     const logsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-restart-cli-')))
     const featuresDir = path.join(projectRoot, 'features')
@@ -1502,8 +1495,6 @@ describe('MCP HTTP server (smoke)', () => {
       },
     })
     let client: Client | null = null
-    const saved = process.env.CANARY_LAB_HEAL_CLAIM_CLIENTS
-    process.env.CANARY_LAB_HEAL_CLAIM_CLIENTS = 'claude-desktop,codex-desktop'
     try {
       const address = await app.listen({ port: 0, host: '127.0.0.1' })
       client = await connectClient(address, '/mcp?profile=full')
@@ -1523,8 +1514,8 @@ describe('MCP HTTP server (smoke)', () => {
           env: 'local',
           run_ref: '7cvh',
           claim_heal: true,
-          session_id: 'sess-restart-cli',
-          client_kind: 'claude-cli',
+          session_id: 'sess-restart-pty',
+          client_kind: 'claude-pty',
         },
       })
       const body = JSON.parse((result.content?.[0] as { text: string }).text)
@@ -1540,26 +1531,21 @@ describe('MCP HTTP server (smoke)', () => {
       expect(restartCalls).toHaveLength(1)
       expect(restartCalls[0][1]).toEqual({
         kind: 'external',
-        sessionId: 'sess-restart-cli',
-        clientKind: 'claude-cli',
+        sessionId: 'sess-restart-pty',
+        clientKind: 'claude-pty',
         claimable: false,
       })
     } finally {
-      if (saved === undefined) delete process.env.CANARY_LAB_HEAL_CLAIM_CLIENTS
-      else process.env.CANARY_LAB_HEAL_CLAIM_CLIENTS = saved
       if (client) await client.close().catch(() => undefined)
       await app.close()
     }
   })
 
-  it('start_run suppresses the heal claim for a CLI client (desktop-only policy)', async () => {
+  it('start_run suppresses the heal claim for a runner PTY agent (denylist policy)', async () => {
     const projectRoot = path.resolve(__dirname, '..', '..', '..', 'templates', 'project')
     const logsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-start-suppress-')))
     const { app, runStore } = await createServer({ projectRoot, logsDir, ptyFactory: inertPtyFactory })
     let client: Client | null = null
-    // Override the file-wide allow-all back to desktop-only for this test.
-    const savedClaimClients = process.env.CANARY_LAB_HEAL_CLAIM_CLIENTS
-    process.env.CANARY_LAB_HEAL_CLAIM_CLIENTS = 'claude-desktop,codex-desktop'
     try {
       const address = await app.listen({ port: 0, host: '127.0.0.1' })
       client = await connectClient(address, '/mcp?profile=full')
@@ -1581,9 +1567,9 @@ describe('MCP HTTP server (smoke)', () => {
           feature: 'broken_todo_api',
           env: 'local',
           claim_heal: true,
-          session_id: 'sess-cli',
-          client_kind: 'claude-cli',
-          conversation_name: 'cli should not claim',
+          session_id: 'sess-pty',
+          client_kind: 'claude-pty',
+          conversation_name: 'pty should not claim',
         },
       })
       const body = JSON.parse((result.content?.[0] as { text: string }).text)
@@ -1594,15 +1580,13 @@ describe('MCP HTTP server (smoke)', () => {
         claimSuppressed: true,
       })
       expect(typeof body.message).toBe('string')
-      // The CLI must NOT be steered into the heal wait loop.
+      // The PTY agent must NOT be steered into the heal wait loop.
       expect(body.nextSteps ?? []).not.toContain('wait_for_heal_task')
       expect(body.claim).toBeNull()
-      // The pre-existing external session (if any) is untouched — no CLI claim
+      // The pre-existing external session (if any) is untouched — no PTY claim
       // was recorded.
       expect(runStore.get('suppress-active')?.manifest.externalHealSession).toBeUndefined()
     } finally {
-      if (savedClaimClients === undefined) delete process.env.CANARY_LAB_HEAL_CLAIM_CLIENTS
-      else process.env.CANARY_LAB_HEAL_CLAIM_CLIENTS = savedClaimClients
       if (client) await client.close().catch(() => undefined)
       await app.close()
     }
@@ -1643,7 +1627,7 @@ describe('MCP HTTP server (smoke)', () => {
           env: 'local',
           claim_heal: true,
           session_id: 'sess-block',
-          client_kind: 'claude-desktop',
+          client_kind: 'claude',
         },
       })
       expect(JSON.parse((collision.content?.[0] as { text: string }).text)).toMatchObject({
@@ -1703,7 +1687,7 @@ describe('MCP HTTP server (smoke)', () => {
           env: 'local',
           claim_heal: true,
           session_id: 'sess-heal-first',
-          client_kind: 'claude-desktop',
+          client_kind: 'claude',
         },
       })
 
@@ -1762,7 +1746,7 @@ describe('MCP HTTP server (smoke)', () => {
           run_ref: '7cvh',
           claim_heal: true,
           session_id: 'sess-restart',
-          client_kind: 'claude-desktop',
+          client_kind: 'claude',
         },
       })
 
@@ -1819,7 +1803,7 @@ describe('MCP HTTP server (smoke)', () => {
           run_ref: '6qdm',
           claim_heal: true,
           session_id: 'sess-boot',
-          client_kind: 'claude-cli',
+          client_kind: 'claude',
         },
       })
       const body = JSON.parse((result.content?.[0] as { text: string }).text)
@@ -1913,7 +1897,7 @@ describe('MCP HTTP server (smoke)', () => {
           run_ref: '7cvh',
           claim_heal: true,
           session_id: 'sess-ambiguous',
-          client_kind: 'claude-desktop',
+          client_kind: 'claude',
         },
       })
 
@@ -1962,7 +1946,7 @@ describe('MCP HTTP server (smoke)', () => {
           env: 'local',
           claim_heal: true,
           session_id: 'sess-new',
-          client_kind: 'claude-desktop',
+          client_kind: 'claude',
         },
       })
 

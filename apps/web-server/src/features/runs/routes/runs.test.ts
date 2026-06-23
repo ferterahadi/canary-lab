@@ -462,7 +462,7 @@ describe('POST /api/runs', () => {
       accepted: true as const,
       session: {
         sessionId: 'sess-1',
-        clientKind: 'claude-desktop' as const,
+        clientKind: 'claude' as const,
         claimedAt: '2026-05-19T00:00:02.000Z',
         lastHeartbeatAt: '2026-05-19T00:00:02.000Z',
         status: 'connected' as const,
@@ -480,7 +480,7 @@ describe('POST /api/runs', () => {
         healAgent: {
           kind: 'external',
           sessionId: 'sess-1',
-          clientKind: 'claude-desktop',
+          clientKind: 'claude',
           conversationName: 'resume run',
         },
         forceNew: true,
@@ -499,12 +499,12 @@ describe('POST /api/runs', () => {
     expect(startRun).not.toHaveBeenCalled()
     expect(claim).toHaveBeenCalledWith('active-heal', {
       sessionId: 'sess-1',
-      clientKind: 'claude-desktop',
+      clientKind: 'claude',
       conversationName: 'resume run',
     })
   })
 
-  it('starts a CLI healAgent as external-origin with claimable:false (claim suppressed)', async () => {
+  it('starts a runner PTY healAgent as external-origin with claimable:false (claim suppressed)', async () => {
     writeFeature('foo')
     const stub = makeStub('new-run')
     const startRun = vi.fn(async () => ({ kind: 'started' as const, orch: stub }))
@@ -517,9 +517,9 @@ describe('POST /api/runs', () => {
         feature: 'foo',
         healAgent: {
           kind: 'external',
-          sessionId: 'sess-cli',
-          clientKind: 'claude-cli',
-          conversationName: 'cli should not own heal',
+          sessionId: 'sess-pty',
+          clientKind: 'claude-pty',
+          conversationName: 'pty should not own heal',
         },
       },
     })
@@ -528,14 +528,14 @@ describe('POST /api/runs', () => {
     expect(res.json()).toMatchObject({ runId: 'new-run', claimSuppressed: true })
     expect(typeof res.json().message).toBe('string')
     // The run is still external-origin (so it uses External-client heal, not the
-    // project Heal Agent), but the CLI session can't own it: claimable:false ⇒
-    // no session/claim, the run waits for a Desktop/UI drive.
+    // project Heal Agent), but the runner PTY session can't own it: claimable:false
+    // ⇒ no session/claim, the run waits for an interactive/UI drive.
     expect(startRun).toHaveBeenCalledTimes(1)
     expect(startRun.mock.calls[0][2]).toEqual({
       kind: 'external',
-      sessionId: 'sess-cli',
-      clientKind: 'claude-cli',
-      conversationName: 'cli should not own heal',
+      sessionId: 'sess-pty',
+      clientKind: 'claude-pty',
+      conversationName: 'pty should not own heal',
       claimable: false,
     })
   })
