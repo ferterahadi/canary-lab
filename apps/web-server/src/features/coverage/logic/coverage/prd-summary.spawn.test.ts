@@ -107,70 +107,60 @@ describe('defaultRunAgent — claude success path', () => {
 })
 
 describe('defaultRunAgent — claude non-zero exit', () => {
-  it('falls back to deterministic on non-zero exit code', async () => {
+  it('throws (LLM-only) on non-zero exit code', async () => {
     mockSpawn.mockReturnValue(makeFakeChild({ exitCode: 1, stderr: 'agent error' }))
 
-    const result = await summarizePrd(
+    await expect(summarizePrd(
       { collection: TEST_COLLECTION, now: '2026-01-01T00:00:00.000Z' },
       { resolveAgents: () => ['claude'] },
-    )
-
-    // deterministic extracts heading from spec.md
-    expect(result.requirements[0].title).toBe('Send message')
-    expect(result.requirements[0].id).toBe('R1')
+    )).rejects.toThrow(/requires the claude or codex agent/)
   })
 })
 
 describe('defaultRunAgent — spawn error event', () => {
-  it('falls back to deterministic when child emits error', async () => {
+  it('throws (LLM-only) when child emits error', async () => {
     mockSpawn.mockReturnValue(makeFakeChild({ error: new Error('ENOENT') }))
 
-    const result = await summarizePrd(
+    await expect(summarizePrd(
       { collection: TEST_COLLECTION, now: '2026-01-01T00:00:00.000Z' },
       { resolveAgents: () => ['claude'] },
-    )
-
-    expect(result.requirements[0].id).toBe('R1')
+    )).rejects.toThrow(/requires the claude or codex agent/)
   })
 })
 
 describe('defaultRunAgent — pre-aborted signal', () => {
-  it('falls back to deterministic when signal is already aborted before call', async () => {
+  it('throws (LLM-only) when signal is already aborted before call', async () => {
     const controller = new AbortController()
     controller.abort()
 
     mockSpawn.mockReturnValue(makeFakeChild({ stdout: VALID_STDOUT, delayMs: 50 }))
 
-    const result = await summarizePrd(
+    await expect(summarizePrd(
       {
         collection: TEST_COLLECTION,
         now: '2026-01-01T00:00:00.000Z',
         signal: controller.signal,
       },
       { resolveAgents: () => ['claude'] },
-    )
-
-    expect(result.requirements[0].id).toBe('R1')
+    )).rejects.toThrow(/requires the claude or codex agent/)
   })
 })
 
 describe('defaultRunAgent — abort signal during run', () => {
-  it('falls back to deterministic when aborted mid-run', async () => {
+  it('throws (LLM-only) when aborted mid-run', async () => {
     const controller = new AbortController()
 
     mockSpawn.mockReturnValue(makeFakeChild({ stdout: VALID_STDOUT, delayMs: 100 }))
     setTimeout(() => controller.abort(), 20)
 
-    const result = await summarizePrd(
+    await expect(summarizePrd(
       {
         collection: TEST_COLLECTION,
         now: '2026-01-01T00:00:00.000Z',
         signal: controller.signal,
       },
       { resolveAgents: () => ['claude'] },
-    )
-
-    expect(result.requirements[0].id).toBe('R1')
+    )).rejects.toThrow(/requires the claude or codex agent/)
   })
 })
 
@@ -199,32 +189,17 @@ describe('defaultRunAgent — codex success path', () => {
   })
 })
 
-describe('defaultResolveAgents — deterministic adapter', () => {
-  it('returns [] for deterministic adapter, falls through to deterministic extraction', async () => {
-    // No deps injected at all — exercises defaultResolveAgents('deterministic')
-    const result = await summarizePrd({
-      collection: TEST_COLLECTION,
-      adapter: 'deterministic',
-      now: '2026-01-01T00:00:00.000Z',
-    })
-
-    expect(mockSpawn).not.toHaveBeenCalled()
-    expect(result.requirements[0].id).toBe('R1')
-    expect(result.requirements[0].title).toBe('Send message')
-  })
-})
-
 describe('defaultResolveAgents — claude adapter (no binary available)', () => {
-  it('exercises defaultResolveAgents body with claude adapter when no binary is on PATH', async () => {
-    // pickAvailableHealAgent is mocked to return null — no agents available
-    const result = await summarizePrd({
+  it('throws (LLM-only) when the selected agent binary is not on PATH', async () => {
+    // pickAvailableHealAgent is mocked to return null — no agents available, so
+    // summarizePrd never spawns and throws the agent-required error.
+    await expect(summarizePrd({
       collection: TEST_COLLECTION,
       adapter: 'claude',
       now: '2026-01-01T00:00:00.000Z',
-    })
+    })).rejects.toThrow(/requires the claude or codex agent/)
 
     expect(mockSpawn).not.toHaveBeenCalled()
-    expect(result.requirements[0].id).toBe('R1')
   })
 })
 
@@ -392,19 +367,15 @@ describe('defaultRunAgent — claudeLogPath activity callback is invoked', () =>
 })
 
 describe('defaultRunAgent — success with empty stdout (line 381 ?? branch)', () => {
-  it('resolves with empty string when agent emits no stdout (output ?? "" fallback)', async () => {
-    // Close with code=0 but no stdout → finalOutput = '' → parsePrdOutput('', ...) → null/empty →
-    // falls back to deterministic. Covers the output ?? '' branch at line 381.
+  it('throws (LLM-only) when the agent emits no stdout (unparseable)', async () => {
+    // Close with code=0 but no stdout → finalOutput = '' → parse → null → no agent
+    // produced requirements → summarizePrd throws. Covers the output ?? '' branch.
     mockSpawn.mockReturnValue(makeFakeChild({ stdout: '', exitCode: 0 }))
 
-    const result = await summarizePrd(
+    await expect(summarizePrd(
       { collection: TEST_COLLECTION, now: '2026-01-01T00:00:00.000Z' },
       { resolveAgents: () => ['claude'] },
-    )
-
-    // Empty stdout → unparseable → falls back to deterministic
-    expect(result.requirements).toBeDefined()
-    expect(result.requirements[0].id).toBe('R1')
+    )).rejects.toThrow(/requires the claude or codex agent/)
   })
 })
 
@@ -425,13 +396,11 @@ describe('defaultRunAgent — close with non-null signal (line 421 ?? branch)', 
     setTimeout(() => child.emit('close', null, 'SIGTERM'), 0)
     mockSpawn.mockReturnValue(child)
 
-    const result = await summarizePrd(
+    // Non-zero / signal exit → the only agent failed → throws (LLM-only).
+    await expect(summarizePrd(
       { collection: TEST_COLLECTION, now: '2026-01-01T00:00:00.000Z' },
       { resolveAgents: () => ['claude'] },
-    )
-
-    // Non-zero / signal exit → falls back to deterministic
-    expect(result.requirements[0].id).toBe('R1')
+    )).rejects.toThrow(/requires the claude or codex agent/)
   })
 })
 
@@ -440,7 +409,7 @@ describe('defaultRunAgent — non-Error thrown in catch (line 477 String(err) br
     // Use the injected runAgent hook to throw a non-Error (a plain string).
     // summarizePrd catches → calls onOutput with String(err).
     const outputChunks: string[] = []
-    const result = await summarizePrd(
+    await expect(summarizePrd(
       {
         collection: TEST_COLLECTION,
         now: '2026-01-01T00:00:00.000Z',
@@ -451,11 +420,9 @@ describe('defaultRunAgent — non-Error thrown in catch (line 477 String(err) br
         // eslint-disable-next-line @typescript-eslint/only-throw-error
         runAgent: async () => { throw 'non-error string' },
       },
-    )
+    )).rejects.toThrow(/requires the claude or codex agent/)
 
-    // Exception caught → fell back to deterministic
-    expect(result.requirements[0].id).toBe('R1')
-    // onOutput received the String(err) message
+    // onOutput received the String(err) message before the throw
     expect(outputChunks.some((c) => c.includes('non-error string'))).toBe(true)
   })
 })
@@ -463,13 +430,14 @@ describe('defaultRunAgent — non-Error thrown in catch (line 477 String(err) br
 describe('summarizePrd — now ?? new Date() branch (line 490)', () => {
   it('uses current date when now is not provided', async () => {
     // When `args.now` is undefined, `args.now ?? new Date().toISOString()` falls back
-    // to a live timestamp. Verify by checking generatedAt is a valid ISO string.
+    // to a live timestamp. A successful agent run produces the summary to check.
+    mockSpawn.mockReturnValue(makeFakeChild({ stdout: VALID_STDOUT }))
     const result = await summarizePrd(
       {
         collection: TEST_COLLECTION,
         // no `now` → exercises the ?? branch
       },
-      { resolveAgents: () => [] }, // no agents → deterministic immediately
+      { resolveAgents: () => ['claude'] },
     )
 
     expect(result.generatedAt).toBeTruthy()
@@ -504,16 +472,15 @@ describe('defaultRunAgent — settled guard: finish called twice (line 376 true 
     setTimeout(() => child.emit('close', 0, null), 0)
     mockSpawn.mockReturnValue(child)
 
-    const result = await summarizePrd(
+    // onIdle settled first → close(0) is a no-op → the agent failed → throws.
+    await expect(summarizePrd(
       {
         collection: TEST_COLLECTION,
         now: '2026-01-01T00:00:00.000Z',
         cwd: '/tmp/nonexistent-canary-test-dir',
       },
       { resolveAgents: () => ['claude'] },
-    )
-
-    expect(result.requirements[0].id).toBe('R1')
+    )).rejects.toThrow(/requires the claude or codex agent/)
   })
 })
 
@@ -521,15 +488,14 @@ describe('defaultResolveAgents — auto adapter (line 322 false branches)', () =
   it('exercises the auto-detect path where neither claude nor codex is pinned', async () => {
     // No adapter specified → adapter defaults to 'auto' → defaultResolveAgents('auto')
     // → condition `adapter === 'claude' || adapter === 'codex'` is FALSE
-    // pickAvailableHealAgent is mocked to return null → no agents → deterministic.
-    const result = await summarizePrd({
+    // pickAvailableHealAgent is mocked to return null → no agents → throws (LLM-only).
+    await expect(summarizePrd({
       collection: TEST_COLLECTION,
       now: '2026-01-01T00:00:00.000Z',
       // no adapter → 'auto'
-    })
+    })).rejects.toThrow(/requires the claude or codex agent/)
 
     expect(mockSpawn).not.toHaveBeenCalled()
-    expect(result.requirements[0].id).toBe('R1')
   })
 })
 
@@ -556,7 +522,7 @@ describe('defaultRunAgent — codex success with onSession (line 364 codex branc
 describe('defaultRunAgent — Error thrown in catch (line 477 err.message branch)', () => {
   it('uses err.message when an Error is thrown and onOutput is provided', async () => {
     const outputChunks: string[] = []
-    const result = await summarizePrd(
+    await expect(summarizePrd(
       {
         collection: TEST_COLLECTION,
         now: '2026-01-01T00:00:00.000Z',
@@ -566,15 +532,14 @@ describe('defaultRunAgent — Error thrown in catch (line 477 err.message branch
         resolveAgents: () => ['claude'],
         runAgent: async () => { throw new Error('prd agent exploded') },
       },
-    )
+    )).rejects.toThrow(/requires the claude or codex agent/)
 
-    expect(result.requirements[0].id).toBe('R1')
     expect(outputChunks.some((c) => c.includes('prd agent exploded'))).toBe(true)
   })
 })
 
 describe('defaultRunAgent — onIdle fires child.kill and rejects (lines 394-395)', () => {
-  it('falls back to deterministic when the idle timer fires onIdle', async () => {
+  it('throws (LLM-only) when the idle timer fires onIdle', async () => {
     // Override the module-level mock for this one test: call onIdle synchronously
     // so the code path at lines 394-395 (child.kill + finish(Error)) is executed.
     vi.mocked(startIdleTimer).mockImplementationOnce(
@@ -599,17 +564,15 @@ describe('defaultRunAgent — onIdle fires child.kill and rejects (lines 394-395
     child.kill = vi.fn(() => { child.emit('close', null, 'SIGTERM') })
     mockSpawn.mockReturnValue(child)
 
-    const result = await summarizePrd(
+    // onIdle rejects → the only agent failed → summarizePrd throws (LLM-only).
+    await expect(summarizePrd(
       {
         collection: TEST_COLLECTION,
         now: '2026-01-01T00:00:00.000Z',
         cwd: '/tmp/nonexistent-canary-test-dir',
       },
       { resolveAgents: () => ['claude'] },
-    )
-
-    // onIdle rejects → summarizePrd catches → falls back to deterministic
-    expect(result.requirements[0].id).toBe('R1')
+    )).rejects.toThrow(/requires the claude or codex agent/)
     expect(child.kill).toHaveBeenCalledWith('SIGTERM')
   })
 })

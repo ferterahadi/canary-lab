@@ -32,7 +32,7 @@ const ANNOTATE_IDLE_TIMEOUT_MS = 5 * 60 * 1000
 
 const PATH_TYPES: PathType[] = ['happy', 'sad', 'edge']
 
-export type AnnotateAdapter = 'auto' | 'claude' | 'codex' | 'deterministic'
+export type AnnotateAdapter = 'auto' | 'claude' | 'codex'
 
 /** A test the engine may map — name + enough body/assertions to reason over. */
 export interface AnnotateTestInput {
@@ -132,63 +132,6 @@ export function parseAnnotateOutput(output: string, knownIds: Set<string>): Prop
   return out
 }
 
-// ---------------------------------------------------------------------------
-// Deterministic fallback — token-overlap heuristic (no agent on PATH)
-// ---------------------------------------------------------------------------
-
-const STOP_WORDS = new Set([
-  'the', 'a', 'an', 'to', 'of', 'and', 'or', 'is', 'are', 'be', 'in', 'on', 'for',
-  'with', 'that', 'this', 'it', 'as', 'by', 'from', 'should', 'must', 'when', 'then',
-  'test', 'tests', 'verify', 'verifies', 'check', 'checks', 'via',
-])
-
-function tokenize(text: string): Set<string> {
-  const out = new Set<string>()
-  for (const raw of text.toLowerCase().split(/[^a-z0-9]+/)) {
-    const t = raw.trim()
-    if (t.length >= 3 && !STOP_WORDS.has(t)) out.add(t)
-  }
-  return out
-}
-
-function overlapScore(a: Set<string>, b: Set<string>): number {
-  if (!a.size || !b.size) return 0
-  let shared = 0
-  for (const t of a) if (b.has(t)) shared += 1
-  return shared / Math.min(a.size, b.size)
-}
-
-/** Map each test to its single best-matching requirement by token overlap.
- *  Conservative — only proposes when overlap clears the threshold. */
-export function deterministicMappings(
-  requirements: Requirement[],
-  tests: AnnotateTestInput[],
-  threshold = 0.3,
-): ProposedMapping[] {
-  const active = requirements.filter((r) => !r.deprecated)
-  const reqTokens = active.map((r) => ({ req: r, tokens: tokenize(`${r.title} ${r.text}`) }))
-  const out: ProposedMapping[] = []
-  for (const test of tests) {
-    const testTokens = tokenize(`${test.name} ${test.bodySource ?? ''}`)
-    let best: { id: string; score: number } | null = null
-    for (const { req, tokens } of reqTokens) {
-      const score = overlapScore(testTokens, tokens)
-      if (score > 0 && (!best || score > best.score)) best = { id: req.id, score }
-    }
-    if (best && best.score >= threshold) {
-      out.push({
-        testName: test.name,
-        file: test.file,
-        requirements: [best.id],
-        pathTypes: ['happy'],
-        rationale: `token overlap ${Math.round(best.score * 100)}% with requirement ${best.id}`,
-        confidence: Math.round(best.score * 100) / 100,
-        source: 'deterministic',
-      })
-    }
-  }
-  return out
-}
 
 // ---------------------------------------------------------------------------
 // Prompt construction
@@ -231,7 +174,6 @@ export function buildAnnotatePrompt(
 // ---------------------------------------------------------------------------
 
 function defaultResolveAgents(adapter: AnnotateAdapter): HealAgent[] {
-  if (adapter === 'deterministic') return []
   const preferred = adapter === 'claude' || adapter === 'codex'
     ? pickAvailableHealAgent(adapter)
     : pickAvailableHealAgent()
@@ -356,5 +298,9 @@ export async function proposeCoverageMappings(
     }
   }
 
-  return deterministicMappings(args.requirements, args.tests)
+  // LLM-only: no agent on PATH, or every agent failed / returned unparseable
+  // output. We never guess mappings by token overlap — that mis-links tests.
+  throw new Error(
+    'Coverage mapping requires the claude or codex agent — none produced a usable result. Ensure claude or codex is on PATH.',
+  )
 }

@@ -14,8 +14,15 @@ vi.mock('../../../config/logic/ast-extractor', async (importOriginal) => {
   }
 })
 
-import { computeFeatureCoverage, runCoverageEngine, regeneratePrdSummary, clearPrdSummary } from './service'
+import { computeFeatureCoverage, runCoverageEngine as runCoverageEngineReal, regeneratePrdSummary as regeneratePrdSummaryReal, clearPrdSummary } from './service'
 import { extractTestsFromSource } from '../../../config/logic/ast-extractor'
+import { fakeSummarize, fakePropose } from './__fixtures__/fake-coverage-agents'
+
+// Coverage generation is LLM-only; inject the fake agent via the dep seams.
+const regeneratePrdSummary = (args: Parameters<typeof regeneratePrdSummaryReal>[0]) =>
+  regeneratePrdSummaryReal(args, { summarize: fakeSummarize })
+const runCoverageEngine = (args: Parameters<typeof runCoverageEngineReal>[0]) =>
+  runCoverageEngineReal(args, { propose: fakePropose })
 
 let tmpDir: string
 let featuresDir: string
@@ -101,7 +108,7 @@ describe('collectTests — sourceFile override (service.ts line 86)', () => {
       ],
     })
 
-    await regeneratePrdSummary({ featuresDir, feature: 'checkout', adapter: 'deterministic', now: '2026-01-01T00:00:00Z' })
+    await regeneratePrdSummary({ featuresDir, feature: 'checkout', now: '2026-01-01T00:00:00Z' })
 
     // computeFeatureCoverage calls collectTests which calls extractTestsFromSource;
     // absFile is helperFile (not realSpecFile) because sourceFile was set.
@@ -122,7 +129,7 @@ describe('collectTests — duplicate name merge (service.ts unionList)', () => {
     const specB = path.join(dir, 'e2e', 'b.spec.ts')
     fs.writeFileSync(specB, `import { test } from '@playwright/test'\ntest('shared', async () => {})\n`)
 
-    await regeneratePrdSummary({ featuresDir, feature: 'checkout', adapter: 'deterministic', now: '2026-01-01T00:00:00Z' })
+    await regeneratePrdSummary({ featuresDir, feature: 'checkout', now: '2026-01-01T00:00:00Z' })
 
     vi.mocked(extractTestsFromSource)
       .mockReturnValueOnce({
@@ -134,7 +141,7 @@ describe('collectTests — duplicate name merge (service.ts unionList)', () => {
         tests: [{ name: 'shared', line: 1, bodySource: 'async () => {}', steps: [] }],
       })
 
-    const result = await runCoverageEngine({ featuresDir, feature: 'checkout', adapter: 'deterministic', logsDir, now: '2026-01-01T00:00:00Z' })
+    const result = await runCoverageEngine({ featuresDir, feature: 'checkout', logsDir, now: '2026-01-01T00:00:00Z' })
     expect(result.feature).toBe('checkout')
   })
 
@@ -156,7 +163,7 @@ describe('collectTests — duplicate name merge (service.ts unionList)', () => {
         tests: [{ name: 'shared', line: 1, bodySource: 'async () => {}', steps: [], requirements: ['R2'], pathTypes: ['sad'] }],
       })
 
-    await regeneratePrdSummary({ featuresDir, feature: 'checkout', adapter: 'deterministic', now: '2026-01-01T00:00:00Z' })
+    await regeneratePrdSummary({ featuresDir, feature: 'checkout', now: '2026-01-01T00:00:00Z' })
     const ledger = computeFeatureCoverage({ featuresDir, logsDir, feature: 'checkout' })
     const sharedTest = ledger.tests.find((t) => t.name === 'shared')
     expect(sharedTest?.requirements).toContain('R1')

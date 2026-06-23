@@ -5,8 +5,13 @@ import path from 'path'
 import { startExternalCoverage, submitExternalCoverage } from './external'
 import { CoverageJobConflictError } from './runner'
 import { CoverageJobRunStore } from './store'
-import { regeneratePrdSummary } from '../service'
+import { regeneratePrdSummary as regeneratePrdSummaryReal } from '../service'
+import { fakeSummarize } from '../__fixtures__/fake-coverage-agents'
 import type { WorkspaceEvent, WorkspaceEventPublisher } from '../../../../../shared/workspace-events'
+
+// Coverage generation is LLM-only; inject the fake summarizer via the dep seam.
+const regeneratePrdSummary = (args: Parameters<typeof regeneratePrdSummaryReal>[0]) =>
+  regeneratePrdSummaryReal(args, { summarize: fakeSummarize })
 
 let tmpDir: string
 let featuresDir: string
@@ -46,7 +51,7 @@ function writeFeature(name: string): string {
 }
 
 async function seedSummary(name: string) {
-  await regeneratePrdSummary({ featuresDir, feature: name, adapter: 'deterministic', now: '2026-01-01T00:00:00Z' })
+  await regeneratePrdSummary({ featuresDir, feature: name, now: '2026-01-01T00:00:00Z' })
 }
 
 function collector() {

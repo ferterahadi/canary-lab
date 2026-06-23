@@ -3,11 +3,19 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import {
-  runCoverageEngine,
-  regeneratePrdSummary,
+  runCoverageEngine as runCoverageEngineReal,
+  regeneratePrdSummary as regeneratePrdSummaryReal,
   computeFeatureCoverage,
 } from './service'
 import { CoverageJobRunStore } from './jobs/store'
+import { fakeSummarize, fakePropose } from './__fixtures__/fake-coverage-agents'
+
+// Coverage generation is LLM-only; unit tests inject the fake agent through the
+// `summarize` / `propose` dep seams instead of spawning a real claude/codex.
+const regeneratePrdSummary = (args: Parameters<typeof regeneratePrdSummaryReal>[0]) =>
+  regeneratePrdSummaryReal(args, { summarize: fakeSummarize })
+const runCoverageEngine = (args: Parameters<typeof runCoverageEngineReal>[0]) =>
+  runCoverageEngineReal(args, { propose: fakePropose })
 
 let tmpDir: string
 let featuresDir: string
@@ -47,7 +55,7 @@ function writeFeature(name: string): string {
 }
 
 async function seedSummary(name: string) {
-  await regeneratePrdSummary({ featuresDir, feature: name, adapter: 'deterministic', now: '2026-01-01T00:00:00Z' })
+  await regeneratePrdSummary({ featuresDir, feature: name, now: '2026-01-01T00:00:00Z' })
 }
 
 describe('runCoverageEngine — auto mode', () => {
@@ -55,7 +63,7 @@ describe('runCoverageEngine — auto mode', () => {
     const dir = writeFeature('checkout')
     await seedSummary('checkout')
 
-    const res = await runCoverageEngine({ featuresDir, logsDir, feature: 'checkout', adapter: 'deterministic' })
+    const res = await runCoverageEngine({ featuresDir, logsDir, feature: 'checkout' })
     expect(res.orphanTestsBefore).toContain('create makes a new todo item')
     expect(res.applied.map((m) => m.testName)).toContain('create makes a new todo item')
 
@@ -86,8 +94,8 @@ describe('collectTests — duplicate test name union', () => {
     )
     fs.mkdirSync(path.join(dir, 'docs'), { recursive: true })
     fs.writeFileSync(path.join(dir, 'docs', 'spec.md'), '# First feature\na user can do the first thing')
-    await regeneratePrdSummary({ featuresDir, feature: 'multi-spec-false', adapter: 'deterministic', now: '2026-01-01T00:00:00Z' })
-    const res = await runCoverageEngine({ featuresDir, logsDir, feature: 'multi-spec-false', adapter: 'deterministic' })
+    await regeneratePrdSummary({ featuresDir, feature: 'multi-spec-false', now: '2026-01-01T00:00:00Z' })
+    const res = await runCoverageEngine({ featuresDir, logsDir, feature: 'multi-spec-false' })
     // The merged test keeps R1 (from a.spec.ts); b.spec.ts added nothing new.
     expect(res.feature).toBe('multi-spec-false')
   })
@@ -126,7 +134,7 @@ describe('collectTests — duplicate test name union', () => {
       path.join(dir, 'docs', 'spec.md'),
       '# First feature\na user can do the first thing\n# Second feature\na user can do the second thing',
     )
-    await regeneratePrdSummary({ featuresDir, feature: 'multi-spec', adapter: 'deterministic', now: '2026-01-01T00:00:00Z' })
+    await regeneratePrdSummary({ featuresDir, feature: 'multi-spec', now: '2026-01-01T00:00:00Z' })
 
     // The merged test already has requirements, so the engine treats it as
     // annotated (not an orphan). computeFeatureCoverage uses the same collectTests
@@ -135,7 +143,6 @@ describe('collectTests — duplicate test name union', () => {
       featuresDir,
       logsDir,
       feature: 'multi-spec',
-      adapter: 'deterministic',
     })
 
     // Both requirements should show the shared test in their annotatedTestNames
@@ -163,7 +170,7 @@ describe('collectTests — unreadable spec file (catch { continue } branch)', ()
     const specFile = path.join(dir, 'e2e', 'a.spec.ts')
     fs.chmodSync(specFile, 0o000)
     try {
-      const res = await runCoverageEngine({ featuresDir, logsDir, feature: 'checkout', adapter: 'deterministic' })
+      const res = await runCoverageEngine({ featuresDir, logsDir, feature: 'checkout' })
       expect(res.feature).toBe('checkout')
       // No readable tests → no orphans → nothing applied.
       expect(res.applied).toEqual([])
@@ -182,7 +189,7 @@ describe('runCoverageEngine — no PRD summary (summary null branch)', () => {
     const dir = writeFeature('checkout')
     // Do NOT call seedSummary — leave featureDir without _prd-summary.json.
 
-    const res = await runCoverageEngine({ featuresDir, logsDir, feature: 'checkout', adapter: 'deterministic', now: '2026-01-01T00:00:00Z' })
+    const res = await runCoverageEngine({ featuresDir, logsDir, feature: 'checkout', now: '2026-01-01T00:00:00Z' })
     // No requirements → no proposals → applied is empty.
     expect(res.applied).toEqual([])
     expect(res.feature).toBe('checkout')
@@ -200,9 +207,9 @@ describe('runCoverageEngine — reconcile-by-delta (R10)', () => {
   it('no-ops when the requirements set is unchanged since the last run', async () => {
     writeFeature('checkout')
     await seedSummary('checkout')
-    await runCoverageEngine({ featuresDir, logsDir, feature: 'checkout', adapter: 'deterministic', now: '2026-01-01T00:00:00Z' })
+    await runCoverageEngine({ featuresDir, logsDir, feature: 'checkout', now: '2026-01-01T00:00:00Z' })
 
-    const delta = await runCoverageEngine({ featuresDir, logsDir, feature: 'checkout', adapter: 'deterministic', mode: 'delta', now: '2026-01-02T00:00:00Z' })
+    const delta = await runCoverageEngine({ featuresDir, logsDir, feature: 'checkout', mode: 'delta', now: '2026-01-02T00:00:00Z' })
     expect(delta.reconciledRequirementIds).toEqual([])
     expect(delta.applied).toEqual([])
   })
@@ -210,13 +217,13 @@ describe('runCoverageEngine — reconcile-by-delta (R10)', () => {
   it('reconciles only the changed requirements after a summary regen', async () => {
     const dir = writeFeature('checkout')
     await seedSummary('checkout')
-    await runCoverageEngine({ featuresDir, logsDir, feature: 'checkout', adapter: 'deterministic', now: '2026-01-01T00:00:00Z' })
+    await runCoverageEngine({ featuresDir, logsDir, feature: 'checkout', now: '2026-01-01T00:00:00Z' })
 
     // Append a second requirement section (R1's body unchanged) + regenerate → R2 is new.
     fs.writeFileSync(path.join(dir, 'docs', 'spec.md'), '# Create todo\na user can create a new todo item\n# Delete todo\na user can delete a todo item')
-    await regeneratePrdSummary({ featuresDir, feature: 'checkout', adapter: 'deterministic', now: '2026-01-02T00:00:00Z' })
+    await regeneratePrdSummary({ featuresDir, feature: 'checkout', now: '2026-01-02T00:00:00Z' })
 
-    const delta = await runCoverageEngine({ featuresDir, logsDir, feature: 'checkout', adapter: 'deterministic', mode: 'delta', now: '2026-01-03T00:00:00Z' })
+    const delta = await runCoverageEngine({ featuresDir, logsDir, feature: 'checkout', mode: 'delta', now: '2026-01-03T00:00:00Z' })
     // Only the new/changed requirement is in scope (not the unchanged R1).
     expect(delta.reconciledRequirementIds).toEqual(['R2'])
   })
@@ -248,9 +255,9 @@ describe('collectTests — duplicate test with no requirements / pathTypes (line
     )
     fs.mkdirSync(path.join(dir, 'docs'), { recursive: true })
     fs.writeFileSync(path.join(dir, 'docs', 'spec.md'), '# First feature\na user can do the first thing')
-    await regeneratePrdSummary({ featuresDir, feature: 'dup-untagged', adapter: 'deterministic', now: '2026-01-01T00:00:00Z' })
+    await regeneratePrdSummary({ featuresDir, feature: 'dup-untagged', now: '2026-01-01T00:00:00Z' })
 
-    const res = await runCoverageEngine({ featuresDir, logsDir, feature: 'dup-untagged', adapter: 'deterministic' })
+    const res = await runCoverageEngine({ featuresDir, logsDir, feature: 'dup-untagged' })
     // The first occurrence's requirements/pathTypes survive (second didn't overwrite them).
     const r1 = res.ledger.requirements.find((r) => r.requirement.id === 'R1')
     expect(r1).toBeTruthy()
@@ -286,9 +293,9 @@ describe('collectTests — duplicate test with no requirements / pathTypes (line
     )
     fs.mkdirSync(path.join(dir, 'docs'), { recursive: true })
     fs.writeFileSync(path.join(dir, 'docs', 'spec.md'), '# First feature\na user can do the first thing')
-    await regeneratePrdSummary({ featuresDir, feature: 'dup-req-on-second', adapter: 'deterministic', now: '2026-01-01T00:00:00Z' })
+    await regeneratePrdSummary({ featuresDir, feature: 'dup-req-on-second', now: '2026-01-01T00:00:00Z' })
 
-    const res = await runCoverageEngine({ featuresDir, logsDir, feature: 'dup-req-on-second', adapter: 'deterministic' })
+    const res = await runCoverageEngine({ featuresDir, logsDir, feature: 'dup-req-on-second' })
     // The union must now include R1 from the second occurrence.
     const r1 = res.ledger.requirements.find((r) => r.requirement.id === 'R1')
     expect(r1?.annotatedTestNames).toContain('late-tagged test')
@@ -303,7 +310,7 @@ describe('computeFeatureCoverage — active summary job (line 157)', () => {
     const dir = writeFeature('checkout')
     fs.mkdirSync(path.join(dir, 'docs'), { recursive: true })
     fs.writeFileSync(path.join(dir, 'docs', 'spec.md'), '# Cart adds an item\nbody')
-    await regeneratePrdSummary({ featuresDir, feature: 'checkout', adapter: 'deterministic', now: '2026-01-01T00:00:00Z' })
+    await regeneratePrdSummary({ featuresDir, feature: 'checkout', now: '2026-01-01T00:00:00Z' })
 
     // Seed a running 'summary' job via the same-logsDir store.
     const store = new CoverageJobRunStore(logsDir)

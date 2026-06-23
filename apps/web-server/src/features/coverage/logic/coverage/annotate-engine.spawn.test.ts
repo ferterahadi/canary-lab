@@ -102,60 +102,54 @@ describe('defaultRunAgent — claude success path', () => {
 })
 
 describe('defaultRunAgent — claude non-zero exit', () => {
-  it('falls back to deterministic on non-zero exit code', async () => {
+  it('throws (LLM-only) on non-zero exit code', async () => {
     mockSpawn.mockReturnValue(makeFakeChild({ exitCode: 1, stderr: 'agent error' }))
 
-    const result = await proposeCoverageMappings(
+    await expect(proposeCoverageMappings(
       {
         requirements: REQS,
         tests: [{ name: 'delete removes the todo item' }],
       },
       { resolveAgents: () => ['claude'] },
-    )
-
-    expect(result[0].source).toBe('deterministic')
+    )).rejects.toThrow(/requires the claude or codex agent/)
   })
 })
 
 describe('defaultRunAgent — spawn error event', () => {
-  it('falls back to deterministic when child emits error', async () => {
+  it('throws (LLM-only) when child emits error', async () => {
     mockSpawn.mockReturnValue(makeFakeChild({ error: new Error('ENOENT') }))
 
-    const result = await proposeCoverageMappings(
+    await expect(proposeCoverageMappings(
       {
         requirements: REQS,
         tests: [{ name: 'create makes a new todo' }],
       },
       { resolveAgents: () => ['claude'] },
-    )
-
-    expect(result[0].source).toBe('deterministic')
+    )).rejects.toThrow(/requires the claude or codex agent/)
   })
 })
 
 describe('defaultRunAgent — pre-aborted signal', () => {
-  it('falls back to deterministic when signal is already aborted before call', async () => {
+  it('throws (LLM-only) when signal is already aborted before call', async () => {
     const controller = new AbortController()
     controller.abort()
 
     // spawn still returns a fake child but abort path should kick in before events
     mockSpawn.mockReturnValue(makeFakeChild({ stdout: VALID_STDOUT, delayMs: 50 }))
 
-    const result = await proposeCoverageMappings(
+    await expect(proposeCoverageMappings(
       {
         requirements: REQS,
         tests: [{ name: 'create makes a new todo' }],
         signal: controller.signal,
       },
       { resolveAgents: () => ['claude'] },
-    )
-
-    expect(result[0].source).toBe('deterministic')
+    )).rejects.toThrow(/requires the claude or codex agent/)
   })
 })
 
 describe('defaultRunAgent — abort signal during run', () => {
-  it('falls back to deterministic when aborted mid-run', async () => {
+  it('throws (LLM-only) when aborted mid-run', async () => {
     const controller = new AbortController()
 
     // Delay the fake child so we can abort before it resolves
@@ -164,16 +158,14 @@ describe('defaultRunAgent — abort signal during run', () => {
     // Abort after a short delay, before the child would naturally close
     setTimeout(() => controller.abort(), 20)
 
-    const result = await proposeCoverageMappings(
+    await expect(proposeCoverageMappings(
       {
         requirements: REQS,
         tests: [{ name: 'delete removes the todo item' }],
         signal: controller.signal,
       },
       { resolveAgents: () => ['claude'] },
-    )
-
-    expect(result[0].source).toBe('deterministic')
+    )).rejects.toThrow(/requires the claude or codex agent/)
   })
 })
 
@@ -210,51 +202,32 @@ describe('defaultRunAgent — codex success path', () => {
   })
 })
 
-describe('defaultResolveAgents — deterministic adapter', () => {
-  it('returns [] for deterministic adapter, falls through to deterministic mappings', async () => {
-    // No deps injected at all — exercises defaultResolveAgents('deterministic')
-    const result = await proposeCoverageMappings({
-      requirements: REQS,
-      tests: [{ name: 'create makes a new todo' }],
-      adapter: 'deterministic',
-    })
-
-    // spawn should NOT be called (no agents resolved)
-    expect(mockSpawn).not.toHaveBeenCalled()
-    expect(result[0].source).toBe('deterministic')
-  })
-})
-
 describe('defaultResolveAgents — auto adapter (line 232 false branch)', () => {
-  it('exercises the auto-detect path where neither claude nor codex is pinned', async () => {
-    // No adapter specified → adapter defaults to 'auto' → defaultResolveAgents('auto')
-    // → condition `adapter === 'claude' || adapter === 'codex'` is FALSE
-    // → pickAvailableHealAgent() (no arg) called instead.
-    // pickAvailableHealAgent is mocked to return null → no agents → deterministic.
-    const result = await proposeCoverageMappings({
+  it('throws (LLM-only) on the auto-detect path when neither claude nor codex is pinned', async () => {
+    // No adapter specified → 'auto' → defaultResolveAgents('auto') → the
+    // `adapter === 'claude' || adapter === 'codex'` branch is FALSE →
+    // pickAvailableHealAgent() (mocked null) → no agents → throws.
+    await expect(proposeCoverageMappings({
       requirements: REQS,
       tests: [{ name: 'create makes a new todo' }],
       // no adapter → 'auto'
-    })
+    })).rejects.toThrow(/requires the claude or codex agent/)
 
     expect(mockSpawn).not.toHaveBeenCalled()
-    expect(result[0].source).toBe('deterministic')
   })
 })
 
 describe('defaultResolveAgents — claude adapter (no binary available)', () => {
-  it('exercises defaultResolveAgents body with claude adapter when no binary is on PATH', async () => {
-    // pickAvailableHealAgent is mocked to return null — no agents available
-    // defaultResolveAgents('claude') will be called and return []
-    const result = await proposeCoverageMappings({
+  it('throws (LLM-only) when the selected agent binary is not on PATH', async () => {
+    // pickAvailableHealAgent is mocked to return null → defaultResolveAgents('claude')
+    // returns [] → no agents → throws.
+    await expect(proposeCoverageMappings({
       requirements: REQS,
       tests: [{ name: 'create makes a new todo' }],
       adapter: 'claude',
-    })
+    })).rejects.toThrow(/requires the claude or codex agent/)
 
-    // spawn should NOT be called (no agents resolved)
     expect(mockSpawn).not.toHaveBeenCalled()
-    expect(result[0].source).toBe('deterministic')
   })
 })
 
@@ -409,16 +382,14 @@ describe('defaultRunAgent — settled guard: finish called twice (line 278 true 
     setTimeout(() => child.emit('close', 0, null), 0)
     mockSpawn.mockReturnValue(child)
 
-    const result = await proposeCoverageMappings(
+    await expect(proposeCoverageMappings(
       {
         requirements: REQS,
         tests: [{ name: 'delete removes the todo item' }],
         cwd: '/tmp/nonexistent-canary-test-dir',
       },
       { resolveAgents: () => ['claude'] },
-    )
-
-    expect(result[0].source).toBe('deterministic')
+    )).rejects.toThrow(/requires the claude or codex agent/)
   })
 })
 
@@ -439,16 +410,14 @@ describe('defaultRunAgent — close with non-null signal (line 323 ?? branch)', 
     setTimeout(() => child.emit('close', null, 'SIGTERM'), 0)
     mockSpawn.mockReturnValue(child)
 
-    const result = await proposeCoverageMappings(
+    // Non-zero / signal exit → the only agent failed → throws (LLM-only).
+    await expect(proposeCoverageMappings(
       {
         requirements: REQS,
         tests: [{ name: 'delete removes the todo item' }],
       },
       { resolveAgents: () => ['claude'] },
-    )
-
-    // Non-zero / signal exit → falls back to deterministic
-    expect(result[0].source).toBe('deterministic')
+    )).rejects.toThrow(/requires the claude or codex agent/)
   })
 })
 
@@ -458,7 +427,7 @@ describe('defaultRunAgent — Error thrown in catch (line 377 err.message branch
     // proposeCoverageMappings catches → args.onOutput is provided → ternary evaluated
     // → err instanceof Error is TRUE → err.message is used.
     const outputChunks: string[] = []
-    const result = await proposeCoverageMappings(
+    await expect(proposeCoverageMappings(
       {
         requirements: REQS,
         tests: [{ name: 'delete removes the todo item' }],
@@ -468,11 +437,9 @@ describe('defaultRunAgent — Error thrown in catch (line 377 err.message branch
         resolveAgents: () => ['claude'],
         runAgent: async () => { throw new Error('agent exploded') },
       },
-    )
+    )).rejects.toThrow(/requires the claude or codex agent/)
 
-    // Exception caught → fell back to deterministic
-    expect(result[0].source).toBe('deterministic')
-    // onOutput received the err.message
+    // onOutput received the err.message before the throw
     expect(outputChunks.some((c) => c.includes('agent exploded'))).toBe(true)
   })
 })
@@ -482,7 +449,7 @@ describe('defaultRunAgent — non-Error thrown in catch (line 377 String(err) br
     // Use the injected runAgent hook to throw a non-Error (a plain string).
     // proposeCoverageMappings catches → calls onOutput with String(err).
     const outputChunks: string[] = []
-    const result = await proposeCoverageMappings(
+    await expect(proposeCoverageMappings(
       {
         requirements: REQS,
         tests: [{ name: 'delete removes the todo item' }],
@@ -493,17 +460,15 @@ describe('defaultRunAgent — non-Error thrown in catch (line 377 String(err) br
         // eslint-disable-next-line @typescript-eslint/only-throw-error
         runAgent: async () => { throw 'non-error string' },
       },
-    )
+    )).rejects.toThrow(/requires the claude or codex agent/)
 
-    // Exception caught → fell back to deterministic
-    expect(result[0].source).toBe('deterministic')
-    // onOutput received the String(err) message
+    // onOutput received the String(err) message before the throw
     expect(outputChunks.some((c) => c.includes('non-error string'))).toBe(true)
   })
 })
 
 describe('defaultRunAgent — onIdle fires child.kill and rejects (lines 297-298)', () => {
-  it('falls back to deterministic when the idle timer fires onIdle', async () => {
+  it('throws (LLM-only) when the idle timer fires onIdle', async () => {
     // Override the module-level mock for this one test: call onIdle synchronously
     // so the code path at lines 297-298 (child.kill + finish(Error)) is executed.
     vi.mocked(startIdleTimer).mockImplementationOnce(
@@ -528,17 +493,15 @@ describe('defaultRunAgent — onIdle fires child.kill and rejects (lines 297-298
     child.kill = vi.fn(() => { child.emit('close', null, 'SIGTERM') })
     mockSpawn.mockReturnValue(child)
 
-    const result = await proposeCoverageMappings(
+    // onIdle → kill → close → idled rejection → the only agent failed → throws.
+    await expect(proposeCoverageMappings(
       {
         requirements: REQS,
         tests: [{ name: 'delete removes the todo item' }],
         cwd: '/tmp/nonexistent-canary-test-dir',
       },
       { resolveAgents: () => ['claude'] },
-    )
-
-    // onIdle → kill → close → idled rejection → proposeCoverageMappings falls back
-    expect(result[0].source).toBe('deterministic')
+    )).rejects.toThrow(/requires the claude or codex agent/)
     expect(child.kill).toHaveBeenCalledWith('SIGTERM')
   })
 })

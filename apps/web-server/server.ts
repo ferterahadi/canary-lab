@@ -11,6 +11,7 @@ import { featureConfigRoutes } from './src/features/config/routes/feature-config
 import { verificationRoutes } from './src/features/coverage/routes/verification'
 import { projectConfigRoutes } from './src/features/config/routes/project-config'
 import { runsRoutes, type ExternalHealAgentRequest } from './src/features/runs/routes/runs'
+import { evaluationRoutes } from './src/features/evaluation/routes/evaluation'
 import { journalRoutes } from './src/features/runs/routes/journal'
 import { testsDraftRoutes, type TestsDraftRouteDeps } from './src/features/wizard/routes/tests-draft'
 import { externalHealRoutes, makeExternalHealAuditLogger } from './src/features/runs/routes/external-heal'
@@ -997,6 +998,16 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
       return { ok: true as const, mode: 'remaining' as const }
     },
     restartHeal: restartLocalHealClosure,
+  })
+  // Evaluation export (HTML/zip + task lifecycle + live agent-session) — its own
+  // feature router. Reads finished runs through the shared run store; defaults to
+  // the built-in localized-rewrite agent (the `generateEvaluationRewrite` dep is a
+  // test-only seam).
+  await app.register(evaluationRoutes, {
+    featuresDir,
+    projectRoot: opts.projectRoot,
+    store: runStore,
+    workspaceEvents,
   })
   // Re-export the local-heal restart closure to the external-heal handoff
   // route now that it's defined. The route captures `deps.restartLocalHeal`

@@ -237,7 +237,17 @@ function applyTagToFile(
   return true
 }
 
-export async function runCoverageEngine(args: RunCoverageEngineArgs): Promise<RunCoverageEngineResult> {
+/** Test seam: inject a fake mapper so unit tests don't spawn a real agent
+ *  (production always uses the real, agent-backed `proposeCoverageMappings`). */
+export interface RunCoverageEngineDeps {
+  propose?: typeof proposeCoverageMappings
+}
+
+export async function runCoverageEngine(
+  args: RunCoverageEngineArgs,
+  deps: RunCoverageEngineDeps = {},
+): Promise<RunCoverageEngineResult> {
+  const propose = deps.propose ?? proposeCoverageMappings
   const featureDir = resolveFeatureDir(args.featuresDir, args.feature)
   const summary = readPrdSummary(featureDir)
   const requirements: Requirement[] = summary?.requirements ?? []
@@ -277,7 +287,7 @@ export async function runCoverageEngine(args: RunCoverageEngineArgs): Promise<Ru
     candidateRequirements = requirements.filter((r) => changedSet.has(r.id))
   }
 
-  const proposals = await proposeCoverageMappings(
+  const proposals = await propose(
     { requirements: candidateRequirements, tests: engineInputs, adapter: args.adapter, featureDir, cwd: args.cwd, signal: args.signal, onOutput: args.onOutput, onSession: args.onAgentSession },
   )
 
@@ -475,18 +485,28 @@ export interface RegeneratePrdSummaryResult {
   written: string[]
 }
 
+/** Test seam: inject a fake summarizer so unit tests don't spawn a real agent
+ *  (production always uses the real, agent-backed `summarizePrd`). */
+export interface RegeneratePrdSummaryDeps {
+  summarize?: typeof summarizePrd
+}
+
 /**
  * Regenerate the PRD summary from the current source docs, preserving existing
  * requirement ids (the spine). Writes the sidecar + markdown back into docs/.
  */
-export async function regeneratePrdSummary(args: RegeneratePrdSummaryArgs): Promise<RegeneratePrdSummaryResult> {
+export async function regeneratePrdSummary(
+  args: RegeneratePrdSummaryArgs,
+  deps: RegeneratePrdSummaryDeps = {},
+): Promise<RegeneratePrdSummaryResult> {
   const found = loadFeatures(args.featuresDir).find((f) => f.name === args.feature)
   if (!found || !found.featureDir) throw new FeatureNotFoundError(args.feature)
   const featureDir = found.featureDir
 
+  const summarize = deps.summarize ?? summarizePrd
   const collection = readDocsCollection(featureDir)
   const previous = readPrdSummary(featureDir)
-  const summary = await summarizePrd({
+  const summary = await summarize({
     collection,
     previous,
     adapter: args.adapter,

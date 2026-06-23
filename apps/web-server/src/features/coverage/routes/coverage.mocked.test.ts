@@ -107,7 +107,7 @@ describe('coverage route re-throw branches', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/features/checkout/prd-summary/regenerate',
-      payload: { adapter: 'deterministic' },
+      payload: {},
     })
     expect(res.statusCode).toBe(500)
   })

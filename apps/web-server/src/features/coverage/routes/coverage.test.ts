@@ -1,8 +1,22 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import Fastify, { type FastifyInstance } from 'fastify'
+
+// Coverage generation is LLM-only; the route drives the real service, so swap the
+// agent-backed summarizer/mapper for the test fakes at the module boundary.
+vi.mock('../../coverage/logic/coverage/prd-summary', async (importActual) => {
+  const actual = await importActual<typeof import('../../coverage/logic/coverage/prd-summary')>()
+  const { fakeSummarize } = await import('../../coverage/logic/coverage/__fixtures__/fake-coverage-agents')
+  return { ...actual, summarizePrd: fakeSummarize }
+})
+vi.mock('../../coverage/logic/coverage/annotate-engine', async (importActual) => {
+  const actual = await importActual<typeof import('../../coverage/logic/coverage/annotate-engine')>()
+  const { fakePropose } = await import('../../coverage/logic/coverage/__fixtures__/fake-coverage-agents')
+  return { ...actual, proposeCoverageMappings: fakePropose }
+})
+
 import { coverageRoutes } from './coverage'
 import { CoverageJobRunStore, type CoverageJobStore, type CoverageJobStoreEvent } from '../../coverage/logic/coverage/jobs/store'
 import type { CoverageLedger, PrdSummary } from '../../../../../../shared/coverage/types'
@@ -69,7 +83,7 @@ describe('coverage routes', () => {
     const regen = await app.inject({
       method: 'POST',
       url: '/api/features/checkout/prd-summary/regenerate',
-      payload: { adapter: 'deterministic' },
+      payload: {},
     })
     expect(regen.statusCode).toBe(200)
     const summary = (regen.json() as { summary: PrdSummary }).summary
@@ -86,7 +100,7 @@ describe('coverage routes', () => {
 
   it('lists docs and reports drift after a source doc changes', async () => {
     const dir = writeFeature('checkout', SPEC, { 'spec.md': '# Cart adds an item\nbody' })
-    await app.inject({ method: 'POST', url: '/api/features/checkout/prd-summary/regenerate', payload: { adapter: 'deterministic' } })
+    await app.inject({ method: 'POST', url: '/api/features/checkout/prd-summary/regenerate', payload: {} })
 
     const docs = (await app.inject({ method: 'GET', url: '/api/features/checkout/docs' })).json() as {
       docs: { relPath: string; generated: boolean }[]
@@ -125,12 +139,12 @@ describe('coverage routes', () => {
 
   it('starts a coverage job (202), polls it to done, and rejects a concurrent one (409)', async () => {
     writeFeature('checkout', SPEC, { 'spec.md': '# Cart adds an item\nuser adds an item to the cart' })
-    await app.inject({ method: 'POST', url: '/api/features/checkout/prd-summary/regenerate', payload: { adapter: 'deterministic' } })
+    await app.inject({ method: 'POST', url: '/api/features/checkout/prd-summary/regenerate', payload: {} })
 
     const start = await app.inject({
       method: 'POST',
       url: '/api/features/checkout/coverage/jobs',
-      payload: { kind: 'coverage', adapter: 'deterministic' },
+      payload: { kind: 'coverage' },
     })
     expect(start.statusCode).toBe(202)
     const jobId = (start.json() as { jobId: string }).jobId
@@ -168,8 +182,8 @@ describe('coverage routes', () => {
     const missing = await app.inject({ method: 'GET', url: '/api/coverage/jobs/nope/agent-session' })
     expect(missing.statusCode).toBe(404)
     // A real deterministic job has no agent session ref → null (200).
-    await app.inject({ method: 'POST', url: '/api/features/checkout/prd-summary/regenerate', payload: { adapter: 'deterministic' } })
-    const start = await app.inject({ method: 'POST', url: '/api/features/checkout/coverage/jobs', payload: { kind: 'coverage', adapter: 'deterministic' } })
+    await app.inject({ method: 'POST', url: '/api/features/checkout/prd-summary/regenerate', payload: {} })
+    const start = await app.inject({ method: 'POST', url: '/api/features/checkout/coverage/jobs', payload: { kind: 'coverage' } })
     const jobId = (start.json() as { jobId: string }).jobId
     let m: { status: string } = { status: 'running' }
     for (let i = 0; i < 50 && m.status === 'running'; i++) {
@@ -193,7 +207,7 @@ describe('coverage routes', () => {
 
   it('deletes a source doc but refuses a generated artifact', async () => {
     const dir = writeFeature('checkout', SPEC, { 'spec.md': '# Cart adds an item\nbody' })
-    await app.inject({ method: 'POST', url: '/api/features/checkout/prd-summary/regenerate', payload: { adapter: 'deterministic' } })
+    await app.inject({ method: 'POST', url: '/api/features/checkout/prd-summary/regenerate', payload: {} })
 
     const ok = await app.inject({ method: 'DELETE', url: '/api/features/checkout/docs/spec.md' })
     expect(ok.statusCode).toBe(200)
@@ -205,7 +219,7 @@ describe('coverage routes', () => {
 
   it('clears the generated PRD summary (back to no-summary state)', async () => {
     writeFeature('checkout', SPEC, { 'spec.md': '# Cart adds an item\nbody' })
-    await app.inject({ method: 'POST', url: '/api/features/checkout/prd-summary/regenerate', payload: { adapter: 'deterministic' } })
+    await app.inject({ method: 'POST', url: '/api/features/checkout/prd-summary/regenerate', payload: {} })
     // Summary exists.
     let docs = (await app.inject({ method: 'GET', url: '/api/features/checkout/docs' })).json() as { hasPrdSummary: boolean }
     expect(docs.hasPrdSummary).toBe(true)
@@ -335,7 +349,7 @@ describe('coverage routes', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/features/checkout/coverage/jobs',
-      payload: { kind: 'coverage', adapter: 'deterministic' },
+      payload: { kind: 'coverage' },
     })
     expect(res.statusCode).toBe(409)
     expect((res.json() as { existingJobId: string }).existingJobId).toBe(fakeJobId)
@@ -480,7 +494,7 @@ describe('coverage routes', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/features/ghost/prd-summary/regenerate',
-      payload: { adapter: 'deterministic' },
+      payload: {},
     })
     expect(res.statusCode).toBe(404)
     expect((res.json() as { error: string }).error).toMatch(/ghost/)
@@ -488,12 +502,12 @@ describe('coverage routes', () => {
 
   it('preserves requirement ids across a regenerate cycle', async () => {
     const dir = writeFeature('checkout', SPEC, { 'spec.md': '# Cart adds an item\nbody' })
-    const first = (await app.inject({ method: 'POST', url: '/api/features/checkout/prd-summary/regenerate', payload: { adapter: 'deterministic' } })).json() as { summary: PrdSummary }
+    const first = (await app.inject({ method: 'POST', url: '/api/features/checkout/prd-summary/regenerate', payload: {} })).json() as { summary: PrdSummary }
     expect(first.summary.requirements.map((r) => r.id)).toEqual(['R1'])
 
     // Add a second section, regenerate — R1 must hold, new section becomes R2.
     fs.writeFileSync(path.join(dir, 'docs', 'spec.md'), '# Cart adds an item\nbody\n# Checkout completes\npay')
-    const second = (await app.inject({ method: 'POST', url: '/api/features/checkout/prd-summary/regenerate', payload: { adapter: 'deterministic' } })).json() as { summary: PrdSummary }
+    const second = (await app.inject({ method: 'POST', url: '/api/features/checkout/prd-summary/regenerate', payload: {} })).json() as { summary: PrdSummary }
     expect(second.summary.requirements.find((r) => r.title === 'Cart adds an item')?.id).toBe('R1')
     expect(second.summary.requirements.find((r) => r.title === 'Checkout completes')?.id).toBe('R2')
   })
@@ -632,7 +646,7 @@ describe('coverage routes', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/features/checkout/coverage/jobs',
-      payload: { kind: 'coverage', adapter: 'deterministic' },
+      payload: { kind: 'coverage' },
     })
     expect(res.statusCode).toBe(500)
   })
