@@ -138,24 +138,48 @@ function fire(el: Element | null | undefined, kind: 'enter' | 'leave') {
 }
 
 describe('CoverageLedgerPage', () => {
-  it('renders requirements, tests, and the coverage %', async () => {
+  it('renders requirements, tests, and the coverage breakdown', async () => {
     await mount()
     expect(container.querySelector('[data-testid="req-R1"]')?.textContent).toContain('Add to cart')
     expect(container.querySelector('[data-testid="test-adds item"]')?.textContent).toContain('adds item')
-    expect(container.querySelector('[data-testid="coverage-ring"]')?.getAttribute('aria-label')).toBe('33.3% covered')
+    expect(container.querySelector('[data-testid="coverage-breakdown"]')).toBeTruthy()
   })
 
-  it('surfaces a Mapped % stat (breadth) alongside the Covered ring', async () => {
+  it('surfaces a Mapped breadth ratio (concrete, no redundant %)', async () => {
     await mount()
     const mapped = container.querySelector('[data-testid="mapped-stat"]')
-    // LEDGER: 3 reqs, 1 untested → 2 mapped → 66.7%.
-    expect(mapped?.textContent).toContain('66.7')
+    // LEDGER: 3 reqs, 1 untested → 2 mapped. Ratio only — the % restated it.
     expect(mapped?.textContent).toContain('2/3 mapped')
+    expect(mapped?.textContent).not.toContain('%')
   })
 
   it('renders the proportional coverage breakdown bar', async () => {
     await mount()
     expect(container.querySelector('[data-testid="coverage-breakdown"]')).toBeTruthy()
+  })
+
+  it('shows the coverage % as a ring left of the bar', async () => {
+    await mount()
+    const ring = container.querySelector('[data-testid="coverage-ring"]')
+    expect(ring?.getAttribute('aria-label')).toBe('33.3% covered')
+    expect(container.querySelector('[data-testid="coverage-hero"]')).toBeNull() // hero number gone
+    expect(container.querySelector('[data-testid="coverage-breakdown"]')).toBeTruthy()
+  })
+
+  it('suppresses the state pill in the covered state (the ring owns the %)', async () => {
+    const led = structuredClone(LEDGER)
+    led.state = { ...led.state!, summary: 'fresh', headline: 'Covered 36.7%' }
+    vi.mocked(api.getFeatureCoverage).mockResolvedValue(led)
+    await mount()
+    // Covered → no redundant pill; the ring carries it.
+    expect(container.querySelector('[data-testid="coverage-state-headline"]')).toBeNull()
+    expect(container.querySelector('[data-testid="coverage-ring"]')?.getAttribute('aria-label')).toBe('33.3% covered')
+  })
+
+  it('places the strength filter in the stat header, above the tests column (not in the tests pane)', async () => {
+    await mount()
+    expect(container.querySelector('[data-testid="strength-filter"]')).toBeTruthy()
+    expect(container.querySelector('[data-testid="tests-pane"] [data-testid="strength-filter"]')).toBeNull()
   })
 
   it('names the missing path on a path-incomplete requirement (terse)', async () => {
@@ -397,18 +421,48 @@ describe('CoverageLedgerPage', () => {
     }
   })
 
-  it('expands a requirement to reveal its kind + happy/unhappy paths', async () => {
+  it('shows the requirement kind without expanding the card', async () => {
+    await mount()
+    // Kind lives on the always-visible header, not behind the disclosure.
+    expect(container.querySelector('[data-testid="req-detail-R1"]')).toBeNull()
+    expect(container.querySelector('[data-testid="kind-R1"]')?.textContent).toContain('Functional')
+  })
+
+  it('expands a requirement to reveal its happy/unhappy paths', async () => {
     await mount()
     // Collapsed: the detail block is absent.
     expect(container.querySelector('[data-testid="req-detail-R1"]')).toBeNull()
     act(() => { container.querySelector<HTMLElement>('[data-testid="req-toggle-R1"]')?.click() })
     const detail = container.querySelector('[data-testid="req-detail-R1"]')
-    expect(detail?.textContent).toContain('Functional')
     expect(detail?.textContent).toContain('item appears in the cart')
     expect(detail?.textContent).toContain('out-of-stock item is rejected')
+    // Kind is no longer duplicated inside the detail (it's on the header now).
+    expect(detail?.textContent).not.toContain('Functional')
     // Toggling again collapses it.
     act(() => { container.querySelector<HTMLElement>('[data-testid="req-toggle-R1"]')?.click() })
     expect(container.querySelector('[data-testid="req-detail-R1"]')).toBeNull()
+  })
+
+  it('hides an N/A path block instead of rendering a hollow "N/A"', async () => {
+    const led = structuredClone(LEDGER)
+    led.requirements[0].requirement.happyPath = 'token matches the pattern'
+    led.requirements[0].requirement.unhappyPath = 'N/A — internal bug, format tests catch it'
+    vi.mocked(api.getFeatureCoverage).mockResolvedValue(led)
+    await mount()
+    act(() => { container.querySelector<HTMLElement>('[data-testid="req-toggle-R1"]')?.click() })
+    const detail = container.querySelector('[data-testid="req-detail-R1"]')
+    expect(detail?.textContent).toContain('token matches the pattern')
+    expect(detail?.textContent).not.toContain('N/A')
+    expect(detail?.textContent).not.toContain('Unhappy path')
+  })
+
+  it('does not make a card expandable when every path prose is N/A', async () => {
+    const led = structuredClone(LEDGER)
+    led.requirements[0].requirement.happyPath = 'N/A'
+    led.requirements[0].requirement.unhappyPath = 'n/a — nothing to assert'
+    vi.mocked(api.getFeatureCoverage).mockResolvedValue(led)
+    await mount()
+    expect(container.querySelector('[data-testid="req-toggle-R1"]')).toBeNull()
   })
 
   it('offers no expand toggle for a requirement with no extra detail', async () => {

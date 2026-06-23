@@ -43,6 +43,10 @@ const STRENGTH_META: Record<TestStrength, { label: string; color: string; title:
 // Worst-first: the weakest tests sort to the front of the filter.
 const STRENGTH_ORDER: TestStrength[] = ['shallow', 'basic', 'solid', 'strong']
 
+// Plain-language gloss for the `@path-*` tags on a test card (tooltip only — the
+// tag itself stays terse). These mirror a requirement's declared happy/sad/edge.
+const PATH_DESC: Record<string, string> = { happy: 'happy', sad: 'unhappy (sad)', edge: 'edge-case' }
+
 // Requirements list is ordered worst-first (uncovered → partial → covered) so the
 // gaps that need work sit at the top — the whole point of the ledger.
 const STATUS_RANK: Record<CoverageStatus, number> = { uncovered: 0, partial: 1, covered: 2 }
@@ -360,33 +364,8 @@ export function CoverageLedgerPage({ feature, onClose }: Props) {
               {orphanTests.length} orphan test{orphanTests.length > 1 ? 's' : ''} (no requirement) — regenerate coverage to map them.
             </div>
           )}
-          {ledger.tests.length > 0 && (
-            <div className="clcov-chips" data-testid="strength-filter" style={{ marginBottom: 12 }}>
-              {STRENGTH_ORDER.map((s) => {
-                const count = ledger.tests.filter((t) => (t.strength ?? 'shallow') === s).length
-                const meta = STRENGTH_META[s]
-                const on = strengthFilter === s
-                return (
-                  <button
-                    key={s}
-                    type="button"
-                    className="clcov-chip"
-                    data-testid={`strength-badge-${s}`}
-                    aria-pressed={on}
-                    data-on={on ? 'true' : 'false'}
-                    data-empty={count === 0 ? 'true' : 'false'}
-                    title={meta.title}
-                    onClick={() => setStrengthFilter((cur) => (cur === s ? null : s))}
-                    style={{ ['--chip' as string]: meta.color }}
-                  >
-                    <span className="clcov-chip-dot" style={{ background: meta.color }} />
-                    {meta.label}
-                    <strong className="clcov-chip-n">{count}</strong>
-                  </button>
-                )
-              })}
-            </div>
-          )}
+          {/* The strength summary/filter moved up to the stat header (above the
+              tests column), mirroring the gap legend above the requirements column. */}
           {(strengthFilter ? ledger.tests.filter((t) => (t.strength ?? 'shallow') === strengthFilter) : ledger.tests).map((t) => (
             <TestCard
               key={t.name}
@@ -463,7 +442,13 @@ export function CoverageLedgerPage({ feature, onClose }: Props) {
               <CoverageEmptyMain railOpen={railOpen} />
             ) : (
               <>
-                <CoverageHeader ledger={ledger} gapFilter={gapFilter} onToggleGap={(g) => setGapFilter((cur) => (cur === g ? null : g))} />
+                <CoverageHeader
+                  ledger={ledger}
+                  gapFilter={gapFilter}
+                  onToggleGap={(g) => setGapFilter((cur) => (cur === g ? null : g))}
+                  strengthFilter={strengthFilter}
+                  onToggleStrength={(s) => setStrengthFilter((cur) => (cur === s ? null : s))}
+                />
                 <div className="flex min-h-0 flex-1">
                   {/* PRD / requirements pane */}
                   <div ref={prdPaneRef} className="min-h-0 flex-1 overflow-auto border-r p-4" style={{ borderColor: 'var(--border-default)', scrollbarGutter: 'stable' }} data-testid="prd-pane">
@@ -516,6 +501,46 @@ function CoverageEmptyMain({ railOpen }: { railOpen: boolean }) {
   )
 }
 
+// Hero gauge: the grounded coverage %, as a donut to the left of the breakdown bar
+// (the donut is the headline number; the bar is the 3-way composition). Static SVG —
+// headless preview forces reduced-motion. Hue tracks the number: green high, amber
+// mid, rose low — the colour reads the health at a glance.
+function CoverageRing({ pct }: { pct: number }) {
+  const size = 82
+  const mid = size / 2
+  const r = 32
+  const c = 2 * Math.PI * r
+  const clamped = Math.max(0, Math.min(100, pct))
+  const offset = c * (1 - clamped / 100)
+  const hue = clamped >= 80 ? 'rgb(52, 211, 153)' : clamped >= 40 ? 'rgb(251, 191, 36)' : clamped > 0 ? 'rgb(251, 113, 133)' : 'var(--text-muted)'
+  return (
+    <div style={{ position: 'relative', width: size, height: size, flexShrink: 0 }} data-testid="coverage-ring" aria-label={`${pct}% covered`}>
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+        <circle cx={mid} cy={mid} r={r} fill="none" stroke="var(--border-default)" strokeWidth={6} />
+        <circle
+          cx={mid} cy={mid} r={r} fill="none" stroke={hue} strokeWidth={6}
+          strokeDasharray={c} strokeDashoffset={offset} strokeLinecap="round"
+          transform={`rotate(-90 ${mid} ${mid})`}
+        />
+      </svg>
+      <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', lineHeight: 1 }}>
+        <span style={{ fontSize: 19, fontWeight: 700, color: 'var(--text-primary)' }}>{Math.round(pct)}<span style={{ fontSize: 10, fontWeight: 600 }}>%</span></span>
+        <span style={{ fontSize: 8.5, fontWeight: 600, letterSpacing: '0.07em', textTransform: 'uppercase', color: 'var(--text-muted)', marginTop: 3 }}>covered</span>
+      </div>
+    </div>
+  )
+}
+
+// A path prose value is effectively "absent" when the summary couldn't state one —
+// the agent often returns "N/A — …" rather than omitting the field. Treat those as no
+// path so the block hides instead of rendering a hollow "N/A".
+function meaningfulPath(s?: string): string | null {
+  const t = s?.trim()
+  if (!t) return null
+  if (/^(n\/?a|none|not applicable)\b/i.test(t)) return null
+  return t
+}
+
 function statusOf(rc: RequirementCoverage): CoverageStatus {
   if (rc.coverageStatus) return rc.coverageStatus
   if (rc.gapType === 'covered') return 'covered'
@@ -526,6 +551,10 @@ function statusOf(rc: RequirementCoverage): CoverageStatus {
 // One-line headline pill (Generating / Setup needed / Stale / No coverage / Covered N%).
 // A coloured dot carries the state; the dot pulses while generating.
 function HeadlinePill({ headline }: { headline: string }) {
+  // The coverage ring now carries the "Covered N%" headline, so the pill would just
+  // repeat it — suppress it in that state. Non-covered states (Stale / Generating /
+  // Setup needed / No coverage) still need the badge as the only signal of that state.
+  if (headline.startsWith('Covered')) return null
   const generating = headline === 'Generating'
   const tone = headline.startsWith('Covered')
     ? 'rgb(52, 211, 153)'
@@ -568,13 +597,21 @@ function writeRailPref(open: boolean): void {
 // right. The legend doubles as the requirement filter.
 const SEG_ORDER: GapType[] = ['covered', 'path-incomplete', 'untested']
 
-function CoverageHeader({ ledger, gapFilter, onToggleGap }: { ledger: CoverageLedger; gapFilter: GapType | null; onToggleGap: (g: GapType) => void }) {
+function CoverageHeader({ ledger, gapFilter, onToggleGap, strengthFilter, onToggleStrength }: {
+  ledger: CoverageLedger
+  gapFilter: GapType | null
+  onToggleGap: (g: GapType) => void
+  strengthFilter: TestStrength | null
+  onToggleStrength: (s: TestStrength) => void
+}) {
   const { total, untested } = ledger.totals
   const covered = countFor(ledger, 'covered')
   const mapped = total - untested
   const orphans = ledger.orphanRequirementIds.length
   return (
     <div className="clcov-statbar shrink-0">
+      {/* Donut headline % to the left of the bar — balances the row and replaces the
+          "Covered N%" pill (which is suppressed in the covered state, see HeadlinePill). */}
       <CoverageRing pct={ledger.coveragePct} />
       <div className="clcov-breakdown">
         {/* One proportional bar makes the nesting self-evident: covered ⊂ mapped ⊂ total. */}
@@ -615,9 +652,11 @@ function CoverageHeader({ ledger, gapFilter, onToggleGap }: { ledger: CoverageLe
         {/* Plain-language ratios — the two headline numbers, side by side, so the
             "32 mapped but 27 covered" gap reads itself. */}
         <div className="clcov-cap">
-          <span title="Requirements where every declared path has a mapped test"><strong>{covered}/{total}</strong> covered · {ledger.coveragePct}%</span>
+          {/* Two concrete ratios; the % lives once, in the state pill. The mapped %
+              just restated the 32/49 ratio, so it's dropped. */}
+          <span title="Requirements where every declared path has a mapped test"><strong>{covered}/{total}</strong> covered</span>
           <span className="clcov-cap-sep" aria-hidden="true">·</span>
-          <span data-testid="mapped-stat" title="Requirements with at least one test mapped to them"><strong>{mapped}/{total}</strong> mapped · {ledger.mappedPct}%</span>
+          <span data-testid="mapped-stat" title="Requirements with at least one test mapped to them"><strong>{mapped}/{total}</strong> mapped</span>
           {orphans > 0 && (
             <span data-testid="orphan-note" className="clcov-stale" title={`These test tags point at requirements that no longer exist — re-map to clear:\n${ledger.orphanRequirementIds.join(', ')}`}>
               ⚠ {orphans} stale tag{orphans > 1 ? 's' : ''}
@@ -625,6 +664,42 @@ function CoverageHeader({ ledger, gapFilter, onToggleGap }: { ledger: CoverageLe
           )}
         </div>
       </div>
+      {/* Test strength summary/filter — right-aligned so it sits above the tests
+          column, the way the gap legend sits above the requirements column. */}
+      <StrengthFilter tests={ledger.tests} value={strengthFilter} onToggle={onToggleStrength} />
+    </div>
+  )
+}
+
+// Per-test strength summary + filter (moved out of the Tests pane into the stat
+// header). Each chip toggles the tests-pane filter; the count is the tally per tier.
+function StrengthFilter({ tests, value, onToggle }: { tests: TestCoverage[]; value: TestStrength | null; onToggle: (s: TestStrength) => void }) {
+  if (tests.length === 0) return null
+  return (
+    <div className="clcov-chips clcov-strength" data-testid="strength-filter">
+      {STRENGTH_ORDER.map((s) => {
+        const count = tests.filter((t) => (t.strength ?? 'shallow') === s).length
+        const meta = STRENGTH_META[s]
+        const on = value === s
+        return (
+          <button
+            key={s}
+            type="button"
+            className="clcov-chip"
+            data-testid={`strength-badge-${s}`}
+            aria-pressed={on}
+            data-on={on ? 'true' : 'false'}
+            data-empty={count === 0 ? 'true' : 'false'}
+            title={meta.title}
+            onClick={() => onToggle(s)}
+            style={{ ['--chip' as string]: meta.color }}
+          >
+            <span className="clcov-chip-dot" style={{ background: meta.color }} />
+            {meta.label}
+            <strong className="clcov-chip-n">{count}</strong>
+          </button>
+        )
+      })}
     </div>
   )
 }
@@ -652,33 +727,6 @@ function countFor(ledger: CoverageLedger, g: GapType): number {
   }
 }
 
-// Hero stat: the grounded coverage %. Static SVG (no animation — headless preview
-// forces reduced-motion). Ring hue tracks the number: green high, amber mid, muted
-// low — the colour itself reads the health at a glance.
-function CoverageRing({ pct }: { pct: number }) {
-  const r = 26
-  const c = 2 * Math.PI * r
-  const clamped = Math.max(0, Math.min(100, pct))
-  const offset = c * (1 - clamped / 100)
-  const hue = clamped >= 80 ? 'rgb(52, 211, 153)' : clamped >= 40 ? 'rgb(251, 191, 36)' : clamped > 0 ? 'rgb(251, 113, 133)' : 'var(--text-muted)'
-  return (
-    <div style={{ position: 'relative', width: 66, height: 66, flexShrink: 0 }} data-testid="coverage-ring" aria-label={`${pct}% covered`}>
-      <svg width={66} height={66} viewBox="0 0 66 66">
-        <circle cx={33} cy={33} r={r} fill="none" stroke="var(--border-default)" strokeWidth={5} />
-        <circle
-          cx={33} cy={33} r={r} fill="none" stroke={hue} strokeWidth={5}
-          strokeDasharray={c} strokeDashoffset={offset} strokeLinecap="round"
-          transform="rotate(-90 33 33)"
-        />
-      </svg>
-      <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', lineHeight: 1 }}>
-        <span style={{ fontSize: 16, fontWeight: 700, color: 'var(--text-primary)' }}>{Math.round(pct)}<span style={{ fontSize: 9, fontWeight: 600 }}>%</span></span>
-        <span style={{ fontSize: 8, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-muted)', marginTop: 2 }}>covered</span>
-      </div>
-    </div>
-  )
-}
-
 function RequirementCard({ rc, colors, active, focused, dimmed, onHover }: {
   rc: RequirementCoverage
   colors: string[]
@@ -690,8 +738,11 @@ function RequirementCard({ rc, colors, active, focused, dimmed, onHover }: {
   const meta = GAP_META[rc.gapType]
   const missing = rc.pathCoverage.filter((p) => !p.covered).map((p) => p.path)
   const { kind, happyPath, unhappyPath } = rc.requirement
-  // Only offer expansion when the summary actually carried extra detail.
-  const hasDetail = Boolean(happyPath || unhappyPath || kind)
+  const happyText = meaningfulPath(happyPath)
+  const unhappyText = meaningfulPath(unhappyPath)
+  // Only offer expansion when the summary carried meaningful path prose. `kind` is now
+  // shown in the always-visible header, so it no longer makes a card disclosable alone.
+  const hasDetail = Boolean(happyText || unhappyText)
   const [expanded, setExpanded] = useState(false)
   const toggle = () => { if (hasDetail) setExpanded((c) => !c) }
   return (
@@ -732,9 +783,18 @@ function RequirementCard({ rc, colors, active, focused, dimmed, onHover }: {
         <span style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: 10.5, fontWeight: 600, color: 'var(--text-muted)', background: 'var(--bg-base)', border: '1px solid var(--border-default)', borderRadius: 5, padding: '1px 5px' }}>{rc.requirement.id}</span>
         <strong style={{ fontSize: 13, color: 'var(--text-primary)' }}>{rc.requirement.title}</strong>
         {rc.requirement.deprecated && <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>(deprecated)</span>}
-        <span data-testid={`gap-${rc.requirement.id}`} style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 10, fontWeight: 600, color: meta.color, background: `color-mix(in srgb, ${meta.color} 12%, transparent)`, border: `1px solid color-mix(in srgb, ${meta.color} 40%, transparent)`, borderRadius: 999, padding: '2px 8px' }}>
-          <span style={{ width: 6, height: 6, borderRadius: '50%', background: meta.color }} />
-          {meta.label}{rc.gapType === 'path-incomplete' && missing.length > 0 ? ` · ${missing.join('/')}` : ''}
+        {/* Kind + gap status, grouped on the right. Kind is now visible without
+            expanding the card (it used to live only in the disclosed detail). */}
+        <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 6, flex: 'none' }}>
+          {kind && (
+            <span className="clcov-kind" data-kind={kind} data-testid={`kind-${rc.requirement.id}`} style={{ alignSelf: 'center' }}>
+              {kind === 'non-functional' ? 'Non-functional' : 'Functional'}
+            </span>
+          )}
+          <span data-testid={`gap-${rc.requirement.id}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 10, fontWeight: 600, color: meta.color, background: `color-mix(in srgb, ${meta.color} 12%, transparent)`, border: `1px solid color-mix(in srgb, ${meta.color} 40%, transparent)`, borderRadius: 999, padding: '2px 8px' }}>
+            <span style={{ width: 6, height: 6, borderRadius: '50%', background: meta.color }} />
+            {meta.label}{rc.gapType === 'path-incomplete' && missing.length > 0 ? ` · ${missing.join('/')}` : ''}
+          </span>
         </span>
       </div>
       <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.45 }}>{rc.requirement.text}</div>
@@ -755,19 +815,16 @@ function RequirementCard({ rc, colors, active, focused, dimmed, onHover }: {
       </div>
       {hasDetail && expanded && (
         <div className="clcov-reqdetail" data-testid={`req-detail-${rc.requirement.id}`}>
-          {kind && (
-            <span className="clcov-kind" data-kind={kind}>{kind === 'non-functional' ? 'Non-functional' : 'Functional'}</span>
-          )}
-          {happyPath && (
+          {happyText && (
             <div className="clcov-path-block">
               <span className="clcov-path-label clcov-path-happy">Happy path</span>
-              <p className="clcov-path-text">{happyPath}</p>
+              <p className="clcov-path-text">{happyText}</p>
             </div>
           )}
-          {unhappyPath && (
+          {unhappyText && (
             <div className="clcov-path-block">
               <span className="clcov-path-label clcov-path-unhappy">Unhappy path</span>
-              <p className="clcov-path-text">{unhappyPath}</p>
+              <p className="clcov-path-text">{unhappyText}</p>
             </div>
           )}
         </div>
@@ -829,10 +886,9 @@ function TestCard({ test, testNumber, color, active, dimmed, onHover, onExpand, 
       >
         <span aria-hidden="true" className="clcov-caret">{expanded ? '▾' : '▸'}</span>
         <TestIdBadge n={testNumber} />
+        {/* Name is the identity; the file:line locator lives on the expanded
+            source head (with Open-in-editor), so it's not repeated here. */}
         <strong style={{ fontSize: 13, color: 'var(--text-primary)' }}>{stripLeadingTestOrdinal(test.name)}</strong>
-        {test.file && (
-          <span style={{ marginLeft: 'auto', fontFamily: 'var(--font-mono, monospace)', fontSize: 10, color: 'var(--text-muted)' }}>{test.file}{test.line ? `:${test.line}` : ''}</span>
-        )}
       </div>
       {/* Tier 1 — what this test IS: its strength + the paths it exercises. */}
       {(test.strength || test.pathTypes.length > 0) && (
@@ -849,31 +905,28 @@ function TestCard({ test, testNumber, color, active, dimmed, onHover, onExpand, 
             </span>
           )}
           {test.pathTypes.map((p) => (
-            <span key={p} style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: 10, padding: '1px 6px', borderRadius: 5, border: '1px solid var(--border-default)', color: 'var(--text-muted)' }}>@path-{p}</span>
+            <span key={p} title={`Exercises the ${PATH_DESC[p] ?? p} path`} style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: 10, padding: '1px 6px', borderRadius: 5, border: '1px solid var(--border-default)', color: 'var(--text-muted)' }}>@path-{p}</span>
           ))}
         </div>
       )}
       {/* Tier 2 — what this test COVERS: the requirement links (click to jump).
-          A muted "covers" label + calmer chip weight keeps a long list legible
-          instead of reading as a wall of identical bordered tags. */}
-      <div className="clcov-covers flex flex-wrap items-center gap-1.5" style={{ marginTop: 6 }}>
+          Calmer chip weight + the colored tint (vs the muted @path chips above)
+          keep a long list legible without a label. */}
+      <div className="flex flex-wrap items-center gap-1.5" style={{ marginTop: 6 }}>
         {test.requirements.length === 0 ? (
           <span data-testid={`orphan-${test.name}`} style={{ fontSize: 10, fontWeight: 600, color: 'rgb(251, 191, 36)', background: 'color-mix(in srgb, rgb(251,191,36) 12%, transparent)', border: '1px solid color-mix(in srgb, rgb(251,191,36) 40%, transparent)', borderRadius: 999, padding: '1px 8px' }}>orphan — no covers tag</span>
         ) : (
-          <>
-            <span className="clcov-covers-label" aria-hidden="true">covers</span>
-            {test.requirements.map((id) => (
-              <button
-                key={id}
-                type="button"
-                className="clcov-reqtag"
-                data-testid={`reqtag-${test.name}-${id}`}
-                title={`Jump to requirement ${id}`}
-                onClick={(e) => { e.stopPropagation(); onReqClick(id) }}
-                style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: 10, padding: '1px 6px', borderRadius: 5, background: `color-mix(in srgb, ${color} 11%, transparent)`, border: `1px solid color-mix(in srgb, ${color} 30%, var(--border-default))`, color: 'var(--text-primary)' }}
-              >@req-{id}</button>
-            ))}
-          </>
+          test.requirements.map((id) => (
+            <button
+              key={id}
+              type="button"
+              className="clcov-reqtag"
+              data-testid={`reqtag-${test.name}-${id}`}
+              title={`Jump to requirement ${id}`}
+              onClick={(e) => { e.stopPropagation(); onReqClick(id) }}
+              style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: 10, padding: '1px 6px', borderRadius: 5, background: `color-mix(in srgb, ${color} 11%, transparent)`, border: `1px solid color-mix(in srgb, ${color} 30%, var(--border-default))`, color: 'var(--text-primary)' }}
+            >@req-{id}</button>
+          ))
         )}
       </div>
       {expanded && (
@@ -960,7 +1013,12 @@ const COVERAGE_CSS = `
 .clcov-close:hover{color:var(--text-primary);background:var(--bg-selected);border-color:color-mix(in srgb,var(--text-muted) 45%,var(--border-default))}
 .clcov-statbar{display:flex;align-items:center;gap:20px;padding:13px 18px;border-bottom:1px solid var(--border-default);background:color-mix(in srgb,var(--bg-surface) 30%,var(--bg-base))}
 .clcov-chips{display:flex;flex-wrap:wrap;align-items:center;gap:7px}
-.clcov-chip{display:inline-flex;align-items:center;gap:7px;appearance:none;cursor:pointer;font-size:11.5px;color:var(--text-primary);background:var(--bg-surface);border:1px solid var(--border-default);border-radius:999px;padding:4px 11px;transition:background .14s,border-color .14s,opacity .14s,transform .1s}
+/* Strength filter sits over the tests column. The breakdown's flex-grow pushes it to
+   the right edge — do NOT use margin-left:auto here (it cancels that grow). A light
+   full-height rule separates the two summaries (requirements coverage | test strength),
+   echoing the column divider below. */
+.clcov-strength{flex:none;align-self:stretch;justify-content:flex-end;padding-left:24px;border-left:1px solid var(--border-default)}
+.clcov-chip{display:inline-flex;align-items:center;gap:7px;white-space:nowrap;appearance:none;cursor:pointer;font-size:11.5px;color:var(--text-primary);background:var(--bg-surface);border:1px solid var(--border-default);border-radius:999px;padding:4px 11px;transition:background .14s,border-color .14s,opacity .14s,transform .1s}
 .clcov-chip:hover{transform:translateY(-1px)}
 .clcov-chip[data-empty='true']{opacity:.5}
 .clcov-chip[data-on='true']{background:color-mix(in srgb,var(--chip) 14%,var(--bg-surface));border-color:color-mix(in srgb,var(--chip) 60%,transparent);box-shadow:0 0 0 1px color-mix(in srgb,var(--chip) 30%,transparent) inset}
@@ -968,12 +1026,15 @@ const COVERAGE_CSS = `
 .clcov-chip-n{font-variant-numeric:tabular-nums}
 /* Coverage breakdown: a proportional bar + legend-filter + plain-language ratios.
    Makes covered ⊂ mapped ⊂ total legible at a glance — no question needed. */
-.clcov-breakdown{flex:1;min-width:0;display:flex;flex-direction:column;gap:8px;max-width:560px}
-.clcov-bar{display:flex;height:9px;border-radius:999px;overflow:hidden;background:var(--bg-base);border:1px solid var(--border-default)}
+/* Breakdown grows to fill (pushing the strength cluster to the right edge); the BAR
+   is what's capped, not the column — capping the column zeroed its flex-grow when the
+   strength cluster used margin-left:auto, collapsing the legend into a wrapped stack. */
+.clcov-breakdown{flex:1;min-width:0;display:flex;flex-direction:column;gap:8px}
+.clcov-bar{display:flex;height:9px;width:100%;max-width:520px;border-radius:999px;overflow:hidden;background:var(--bg-base);border:1px solid var(--border-default)}
 .clcov-bar-seg{height:100%;min-width:3px;transition:flex-grow .35s ease}
 .clcov-bar-seg+.clcov-bar-seg{box-shadow:-1px 0 0 color-mix(in srgb,var(--bg-base) 70%,transparent)}
 .clcov-legend{display:flex;flex-wrap:wrap;align-items:center;gap:4px}
-.clcov-legend-item{display:inline-flex;align-items:center;gap:6px;appearance:none;cursor:pointer;font-size:11.5px;color:var(--text-secondary);background:transparent;border:1px solid transparent;border-radius:7px;padding:3px 8px;transition:background .14s,color .14s,border-color .14s,opacity .14s}
+.clcov-legend-item{display:inline-flex;align-items:center;gap:6px;white-space:nowrap;appearance:none;cursor:pointer;font-size:11.5px;color:var(--text-secondary);background:transparent;border:1px solid transparent;border-radius:7px;padding:3px 8px;transition:background .14s,color .14s,border-color .14s,opacity .14s}
 .clcov-legend-item:hover{color:var(--text-primary);background:var(--bg-surface)}
 .clcov-legend-item[data-empty='true']{opacity:.4}
 .clcov-legend-item[data-on='true']{color:var(--text-primary);background:color-mix(in srgb,var(--seg) 15%,var(--bg-surface));border-color:color-mix(in srgb,var(--seg) 50%,transparent)}
@@ -991,8 +1052,6 @@ const COVERAGE_CSS = `
 .clcov-card:hover{border-color:color-mix(in srgb,var(--text-muted) 38%,var(--border-default))}
 /* A @req tag jumped-to from a test card: a brief accent ring locates the card. */
 .clcov-card[data-focus='true']{box-shadow:0 0 0 2px color-mix(in srgb,var(--accent,rgb(56,189,248)) 70%,transparent)}
-/* Coverage-links row: a quiet label groups the @req tags as "what this covers". */
-.clcov-covers-label{flex:none;font-size:9px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--text-muted);margin-right:2px}
 /* Clickable @req tags on a test card — jump to the matching requirement. */
 .clcov-reqtag{appearance:none;cursor:pointer;transition:transform .1s,filter .12s}
 .clcov-reqtag:hover{transform:translateY(-1px);filter:brightness(1.18)}
