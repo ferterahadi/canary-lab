@@ -13,6 +13,7 @@ import type {
 } from '../../../shared/api/types'
 import { CoverageDocsRail } from './CoverageDocsRail'
 import { CoverageGeneratingPane } from './CoverageGeneratingPane'
+import { ShikiCode } from '../../../shared/ui/TestCodeBlock'
 import { TestIdBadge } from '../../../shared/ui/TestIdBadge'
 import { buildTestNumbering, stripLeadingTestOrdinal, testNumberKey } from '../../../shared/test-numbering'
 
@@ -799,9 +800,10 @@ function TestCard({ test, testNumber, color, active, dimmed, onHover, onExpand, 
                   Open in editor ↗
                 </button>
               </div>
-              <div className="clcov-source-scroll">
-                <pre className="clcov-source-pre">{source.body}</pre>
-              </div>
+              {/* Same syntax-highlighted code block as the run/playback view
+                  (ShikiCode), but static: no activeLine / runningHighlight, so it
+                  never shows a "currently running" line — coverage isn't a run. */}
+              <ShikiCode source={source.body} />
             </>
           ) : sourceLoading ? (
             <div className="clcov-source-note">Loading source…</div>
@@ -913,8 +915,8 @@ const COVERAGE_CSS = `
 .clcov-source-path{font-family:var(--font-mono,monospace);font-size:10px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .clcov-source-open{margin-left:auto;flex:none;appearance:none;cursor:pointer;font-size:10px;font-weight:600;color:var(--text-secondary);background:var(--bg-base);border:1px solid var(--border-default);border-radius:6px;padding:2px 8px;transition:background .12s,color .12s,border-color .12s}
 .clcov-source-open:hover{color:var(--text-primary);background:var(--bg-selected);border-color:color-mix(in srgb,var(--text-muted) 45%,var(--border-default))}
-.clcov-source-scroll{max-height:360px;overflow:auto;border-radius:var(--radius-md);border:1px solid var(--border-default);background:var(--bg-base)}
-.clcov-source-pre{margin:0;padding:10px 12px;font-family:var(--font-mono,monospace);font-size:11.5px;line-height:1.55;color:var(--text-secondary);white-space:pre;tab-size:2}
+/* The shared ShikiCode block frames itself (.shiki-block pre); just cap its height so a long body scrolls in place. */
+.clcov-source .shiki-block pre{max-height:360px;overflow:auto}
 .clcov-source-note{font-size:11.5px;color:var(--text-muted);font-style:italic}
 /* Requirement detail disclosure: kind chip + happy / unhappy paths. */
 .clcov-reqdetail{margin-top:9px;border-top:1px solid var(--border-default);padding-top:9px;display:flex;flex-direction:column;gap:8px}

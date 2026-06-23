@@ -17,6 +17,7 @@ import * as api from './shared/api/client'
 import { connectWorkspaceEvents } from './features/runs/api/workspace-socket'
 import { useRuns, useRun, useGlobalActiveRun } from './features/runs/state/RunsContext'
 import { useWizardDrafts } from './features/wizard/state/WizardDraftContext'
+import { useEvaluationExports } from './features/evaluation/state/EvaluationExportContext'
 import type { Feature } from './shared/api/types'
 import { readPersistedView, persistView, onViewChangedInOtherTab } from './shared/lib/workspace-view-state'
 
@@ -64,6 +65,10 @@ export function App() {
   const { runs: allRuns, startRun: startRunAction, startVerification: startVerificationAction } = useRuns()
   const { entry: globalActiveRunEntry, detail: activeRunDetail } = useGlobalActiveRun()
   const { wizardOpen, closeWizard, startNewWizard } = useWizardDrafts()
+  // R24: the evaluation export dialog's open-state lives in EvaluationExportContext
+  // (mounted in the status bar). Read it here — above the persist effect — so the
+  // route serializes it, and seed it from the URL on first load below.
+  const { dialogOpen: evaluationOpen, selectedTask: evaluationTask, openTask: openEvaluationTask } = useEvaluationExports()
 
   // R12/R24: persist the full route (view + feature + selected run + open routed
   // dialog) to the URL on every change so a refresh / deep link restores it. The
@@ -71,16 +76,19 @@ export function App() {
   // Dialog precedence follows z-order: the full-screen overlays (portify > config
   // > wizard) sit above the in-column verify dialog, so the topmost open one owns
   // the URL.
-  const routedDialog = portifyTarget ? 'portify' : configFor ? 'config' : wizardOpen ? 'add-test' : verifyOpen ? 'verification' : null
+  const routedDialog = portifyTarget ? 'portify' : configFor ? 'config' : wizardOpen ? 'add-test' : verifyOpen ? 'verification' : evaluationOpen ? 'evaluation' : null
   const routedWf = portifyTarget?.kind === 'revisit' ? portifyTarget.workflowId : null
+  const routedTask = evaluationOpen ? evaluationTask?.taskId ?? null : null
   useEffect(() => {
-    persistView({ view, feature: selectedFeature, run: selectedRunId, dialog: routedDialog, wf: routedWf })
-  }, [view, selectedFeature, selectedRunId, routedDialog, routedWf])
+    persistView({ view, feature: selectedFeature, run: selectedRunId, dialog: routedDialog, wf: routedWf, task: routedTask })
+  }, [view, selectedFeature, selectedRunId, routedDialog, routedWf, routedTask])
 
-  // R24: the Add-Test wizard's open-state lives in WizardDraftContext, not in
-  // PERSISTED_VIEW-seeded local state — so reopen it from the URL on first load.
+  // R24: the Add-Test wizard and the evaluation export dialog keep their open-state
+  // in a context, not PERSISTED_VIEW-seeded local state — so reopen them from the
+  // URL on first load.
   useEffect(() => {
     if (PERSISTED_VIEW.dialog === 'add-test') startNewWizard()
+    if (PERSISTED_VIEW.dialog === 'evaluation') openEvaluationTask(PERSISTED_VIEW.task ?? undefined)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 

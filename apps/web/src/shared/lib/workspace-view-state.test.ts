@@ -7,7 +7,7 @@ const KEY = 'cl.workspace.view'
 
 /** Build a full PersistedView with sensible defaults for the fields under test. */
 function view(partial: Partial<PersistedView>): PersistedView {
-  return { view: 'workspace', feature: null, run: null, dialog: null, wf: null, ...partial }
+  return { view: 'workspace', feature: null, run: null, dialog: null, wf: null, task: null, ...partial }
 }
 
 beforeEach(() => {
@@ -193,6 +193,19 @@ describe('workspace-view-state — run + dialog routing (R24)', () => {
   it('drops a stray wf when the dialog is not portify', () => {
     persistView(view({ feature: 'checkout', dialog: 'config', wf: 'wf_abc' }))
     expect(window.location.search).not.toContain('wf=')
+    expect(readPersistedView()).toEqual(view({ feature: 'checkout', dialog: 'config' }))
+  })
+
+  it('round-trips an evaluation export dialog (dialog + task qualifier)', () => {
+    persistView(view({ feature: 'checkout', dialog: 'evaluation', task: 'task_abc' }))
+    expect(window.location.search).toContain('dialog=evaluation')
+    expect(window.location.search).toContain('task=task_abc')
+    expect(readPersistedView()).toEqual(view({ feature: 'checkout', dialog: 'evaluation', task: 'task_abc' }))
+  })
+
+  it('drops a stray task when the dialog is not evaluation', () => {
+    persistView(view({ feature: 'checkout', dialog: 'config', task: 'task_abc' }))
+    expect(window.location.search).not.toContain('task=')
     expect(readPersistedView()).toEqual(view({ feature: 'checkout', dialog: 'config' }))
   })
 

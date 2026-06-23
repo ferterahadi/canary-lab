@@ -9,6 +9,24 @@ import { CoverageLedgerPage } from './CoverageLedgerPage'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
+// TestCard expands to the shared ShikiCode block, which lazily imports Shiki.
+// Mock the modules (same as TestCasesColumn.test) so the highlighter resolves
+// deterministically with line spans instead of loading the real wasm.
+vi.mock('shiki/core', () => ({
+  createHighlighterCore: async () => ({
+    codeToHtml: (code: string) => (
+      `<pre class="shiki one-dark-pro"><code>${
+        code.split('\n').map((line) => `<span class="line">${line}</span>`).join('\n')
+      }</code></pre>`
+    ),
+  }),
+}))
+vi.mock('shiki/engine/oniguruma', () => ({ createOnigurumaEngine: () => ({}) }))
+vi.mock('shiki/langs/typescript.mjs', () => ({ default: {} }))
+vi.mock('shiki/themes/one-dark-pro.mjs', () => ({ default: {} }))
+vi.mock('shiki/themes/one-light.mjs', () => ({ default: {} }))
+vi.mock('shiki/wasm', () => ({ default: {} }))
+
 vi.mock('../../../shared/api/client', async () => {
   const actual = await vi.importActual<typeof import('../../../shared/api/client')>('../../../shared/api/client')
   return {

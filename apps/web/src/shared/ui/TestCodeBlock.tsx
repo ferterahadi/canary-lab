@@ -3,34 +3,9 @@ import type { ReactNode } from 'react'
 import { useTheme } from '../lib/theme'
 import type { ExtractedStep } from '../api/types'
 import * as api from '../api/client'
+import { getCodeHighlighter, codeThemeFor } from './code-highlighter'
 import { sourceLineForBodyLine } from '../../features/runs/utils/editor-location'
 import { colorClassForStatus, statusLabel, statusPillClassForStatus, type StepStatus } from '../../features/runs/utils/test-step-status'
-
-type Highlighter = { codeToHtml: (code: string, opts: { lang: string; theme: string }) => string }
-let highlighterPromise: Promise<Highlighter> | null = null
-function getHighlighter(): Promise<Highlighter> {
-  if (!highlighterPromise) {
-    highlighterPromise = (async () => {
-      const [{ createHighlighterCore }, { createOnigurumaEngine }, ts, dark, light, wasm] = await Promise.all([
-        import('shiki/core'),
-        import('shiki/engine/oniguruma'),
-        import('shiki/langs/typescript.mjs'),
-        import('shiki/themes/one-dark-pro.mjs'),
-        import('shiki/themes/one-light.mjs'),
-        import('shiki/wasm'),
-      ])
-      const hl = await createHighlighterCore({
-        themes: [dark.default, light.default],
-        langs: [ts.default],
-        engine: createOnigurumaEngine(wasm.default),
-      })
-      return {
-        codeToHtml: (code, opts) => hl.codeToHtml(code, opts),
-      }
-    })()
-  }
-  return highlighterPromise
-}
 
 interface SourceLocation {
   file: string
@@ -56,8 +31,8 @@ export function ShikiCode({
   const [openError, setOpenError] = useState<string | null>(null)
   useEffect(() => {
     let cancelled = false
-    const themeName = resolved === 'dark' ? 'one-dark-pro' : 'one-light'
-    getHighlighter().then((hl) => {
+    const themeName = codeThemeFor(resolved)
+    getCodeHighlighter().then((hl) => {
       if (cancelled) return
       try {
         setHtml(hl.codeToHtml(source, { lang: 'typescript', theme: themeName }))
