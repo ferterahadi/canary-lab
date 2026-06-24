@@ -354,5 +354,48 @@ describe('PortifyOrchestrator', () => {
       expect(m.verification?.failureDetail).toMatch(/no edits detected/i)
       expect(verifySpy).not.toHaveBeenCalled() // don't boot an unchanged stack
     })
+
+    it('startExternal aborts and cleans up when isAborted fires after setup', async () => {
+      const { deps } = makeDeps({ isAborted: () => true })
+      const m = await new PortifyOrchestrator(deps).startExternal()
+      expect(m.status).toBe('aborted')
+      expect(deps.cleanup).toHaveBeenCalledOnce()
+    })
+
+    it('stringifies a non-Error throw in startExternal failure message', async () => {
+      // eslint-disable-next-line @typescript-eslint/only-throw-error
+      const { deps } = makeDeps({ setup: async () => { throw 'network failure' } })
+      const m = await new PortifyOrchestrator(deps).startExternal()
+      expect(m.status).toBe('failed')
+      expect(m.error).toBe('network failure')
+      expect(deps.cleanup).toHaveBeenCalledOnce()
+    })
+
+    it('verifyExternalEdits returns current immediately when isAborted at entry', async () => {
+      const { deps } = makeDeps({ isAborted: () => true })
+      const current = { ...baseManifest(), status: 'editing' as const }
+      const m = await new PortifyOrchestrator(deps).verifyExternalEdits(current)
+      expect(m).toBe(current)
+    })
+
+    it('verifyExternalEdits bails after verify when isAborted fires post-verify', async () => {
+      let calls = 0
+      // startExternal consumes call 1 (post-setup); verifyExternalEdits entry is
+      // call 2 (must pass); post-verify check is call 3 — bail there.
+      const { deps } = makeDeps({ isAborted: () => { calls += 1; return calls >= 3 } })
+      const orch = new PortifyOrchestrator(deps)
+      const current = await orch.startExternal()
+      const m = await orch.verifyExternalEdits(current)
+      expect(m.status).toBe('verifying') // bailed before re-parking
+    })
+
+    it('verifyExternalEdits re-parks at editing when captureDiff throws', async () => {
+      const { deps } = makeDeps({ captureDiff: async () => { throw new Error('diff failed') } })
+      const orch = new PortifyOrchestrator(deps)
+      const current = await orch.startExternal()
+      const m = await orch.verifyExternalEdits(current)
+      expect(m.status).toBe('editing')
+      expect(m.error).toContain('diff failed')
+    })
   })
 })

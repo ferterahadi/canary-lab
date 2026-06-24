@@ -148,4 +148,10 @@ describe('CoverageJobRunStore', () => {
     // missing file. The `if (!m) continue` guard must prevent a throw.
     expect(() => store.reconcileInterrupted(now)).not.toThrow()
   })
+
+  it('statusOf config callback extracts the manifest status field', () => {
+    const statusOf = (store as any).store.config.statusOf as (m: CoverageJobManifest) => string
+    expect(statusOf(makeManifest('j1', { status: 'running' }))).toBe('running')
+    expect(statusOf(makeManifest('j1', { status: 'done', endedAt: 'e' }))).toBe('done')
+  })
 })

@@ -126,6 +126,8 @@ export function paths(logsDir: string, draftId: string): DraftPaths {
   }
 }
 
+export function draftStatusOf(r: DraftRecord): string { return r.status }
+
 // Record I/O delegates to the shared FileBackedTaskStore. Layout (drafts/<id>/
 // draft.json) matches `paths()` so the per-draft sidecars (prd.md, plan.json,
 // agent logs, generated/) still live alongside the record. The draft-specific
@@ -136,7 +138,7 @@ function draftStore(logsDir: string): FileBackedTaskStore<DraftRecord> {
     dirName: 'drafts',
     recordFile: 'draft.json',
     idOf: (r) => r.draftId,
-    statusOf: (r) => r.status,
+    statusOf: draftStatusOf,
     indexEntryOf: (r) => ({
       id: r.draftId,
       createdAt: r.createdAt,

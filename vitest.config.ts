@@ -2,13 +2,35 @@ import { defineConfig } from 'vitest/config'
 
 export default defineConfig({
   test: {
-    include: [
-      'scripts/**/*.test.ts',
-      'shared/**/*.test.ts',
-      'apps/**/*.test.{ts,tsx}',
-      'tools/**/*.test.ts',
+    bail: 1,
+    projects: [
+      {
+        test: {
+          name: 'node',
+          include: [
+            'scripts/**/*.test.ts',
+            'shared/**/*.test.ts',
+            'tools/**/*.test.ts',
+            'apps/web-server/**/*.test.{ts,tsx}',
+            'apps/web/**/*.test.ts',
+          ],
+          exclude: [
+            'apps/web/src/shared/lib/workspace-view-state.test.ts',
+          ],
+          environment: 'node',
+        },
+      },
+      {
+        test: {
+          name: 'dom',
+          include: [
+            'apps/web/**/*.test.tsx',
+            'apps/web/src/shared/lib/workspace-view-state.test.ts',
+          ],
+          environment: 'happy-dom',
+        },
+      },
     ],
-    environment: 'node',
     coverage: {
       provider: 'v8',
       reporter: ['text', 'html', 'lcov'],
