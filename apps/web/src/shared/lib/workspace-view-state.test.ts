@@ -225,4 +225,12 @@ describe('workspace-view-state — run + dialog routing (R24)', () => {
     expect(window.location.search).not.toContain('dialog=')
     expect(window.location.search).toContain('feature=checkout')
   })
+
+  it('reads the task param when dialog=evaluation', () => {
+    window.history.replaceState(null, '', '/?dialog=evaluation&task=eval-task-abc&feature=checkout')
+    const state = readPersistedView()
+    expect(state.dialog).toBe('evaluation')
+    expect(state.task).toBe('eval-task-abc')
+    expect(state.feature).toBe('checkout')
+  })
 })

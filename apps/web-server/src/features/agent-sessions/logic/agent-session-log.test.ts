@@ -1498,4 +1498,41 @@ describe('writeWorkflowAgentRef + resolveWorkflowAgentRef', () => {
     fs.writeFileSync(path.join(dir, 'agent-session.json'), 'not json')
     expect(resolveWorkflowAgentRef(dir, homeDir)).toBeNull()
   })
+
+  it('returns ref unchanged when logPath is empty (falsy) and agent is claude with no log on disk', () => {
+    // Write a legacy-format ref with logPath: '' so ref.logPath is falsy → skips existsSync check
+    // and falls through to findClaudeLogBySessionId which returns null → returns ref as-is.
+    const dir = workflowDir()
+    fs.writeFileSync(
+      path.join(dir, 'agent-session.json'),
+      JSON.stringify({ agent: 'claude', sessionId: 'sid-empty-path', logPath: '' }),
+    )
+    const result = resolveWorkflowAgentRef(dir, homeDir)
+    // ref.logPath is '' (falsy) → line362 branch0 covered; claude → findClaudeLogBySessionId → null
+    expect(result).toEqual({ agent: 'claude', sessionId: 'sid-empty-path', logPath: '' })
+  })
+
+  it('returns ref unchanged when logPath is empty and agent is codex (non-claude branch)', () => {
+    // Legacy-format codex ref with logPath: '' → ref.logPath is falsy (line362 branch0),
+    // then ref.agent !== 'claude' → found = null (line363 branch1) → returns ref.
+    const dir = workflowDir()
+    fs.writeFileSync(
+      path.join(dir, 'agent-session.json'),
+      JSON.stringify({ agent: 'codex', sessionId: 'sess-codex-empty', logPath: '' }),
+    )
+    const result = resolveWorkflowAgentRef(dir, homeDir)
+    expect(result).toEqual({ agent: 'codex', sessionId: 'sess-codex-empty', logPath: '' })
+  })
+
+  it('returns null from readCodexDiscoveryHint when codexDiscovery.cwd is not a string', () => {
+    // codexDiscovery present but cwd is a number → typeof cwd !== 'string' → returns null (line373).
+    // The file also lacks the legacy agent/sessionId/logPath fields, so parseAgentSessionRefFile
+    // returns null too → resolveWorkflowAgentRef returns null.
+    const dir = workflowDir()
+    fs.writeFileSync(
+      path.join(dir, 'agent-session.json'),
+      JSON.stringify({ codexDiscovery: { cwd: 123, spawnedAt: '2026-01-01T00:00:00Z' } }),
+    )
+    expect(resolveWorkflowAgentRef(dir, homeDir)).toBeNull()
+  })
 })

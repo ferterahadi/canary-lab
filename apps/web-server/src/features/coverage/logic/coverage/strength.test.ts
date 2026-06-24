@@ -61,4 +61,23 @@ describe('applyTestStrength — attaches per-test strength to the ledger', () =>
     expect(byName.get('strong t')).toBe('strong')
     expect(byName.get('shallow t')).toBe('shallow')
   })
+
+  it('falls back to empty assertions when a test name is not in the assertions map', () => {
+    const req = (id: string): Requirement => ({ id, title: id, text: id, pathTypes: ['happy'] })
+    const tests: CoverageTestInput[] = [
+      { name: 'known test', requirements: ['R1'], pathTypes: ['happy'] },
+      { name: 'unknown test', requirements: ['R1'], pathTypes: ['happy'] },
+    ]
+    // 'unknown test' is NOT in the assertions array → byName.get('unknown test') ?? [] → []
+    const assertions: TestAssertions[] = [
+      { name: 'known test', assertions: ["await page.goto('https://example.com')"] },
+    ]
+    const ledger = applyTestStrength(
+      computeCoverageLedger({ feature: 'f', requirements: [req('R1')], tests }),
+      assertions,
+    )
+    const byName = new Map(ledger.tests.map((t) => [t.name, t.strength]))
+    expect(byName.get('known test')).toBe('strong')
+    expect(byName.get('unknown test')).toBe('shallow') // empty assertions → no strong signals
+  })
 })

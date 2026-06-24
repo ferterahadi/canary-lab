@@ -397,5 +397,15 @@ describe('PortifyOrchestrator', () => {
       expect(m.status).toBe('editing')
       expect(m.error).toContain('diff failed')
     })
+
+    it('stringifies a non-Error throw in verifyExternalEdits catch (String(err) branch)', async () => {
+      // eslint-disable-next-line @typescript-eslint/only-throw-error
+      const { deps } = makeDeps({ captureDiff: async () => { throw 'capture string error' } })
+      const orch = new PortifyOrchestrator(deps)
+      const current = await orch.startExternal()
+      const m = await orch.verifyExternalEdits(current)
+      expect(m.status).toBe('editing')
+      expect(m.error).toBe('capture string error')
+    })
   })
 })
