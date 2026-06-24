@@ -190,6 +190,34 @@ describe('runAgentProcess', () => {
     expect(res.code).toBe(0)  // resolves with first close value
   })
 
+  it('tags a full-path claude command as claude-pty by extracting the basename', async () => {
+    const child = new FakeChild()
+    const spawn = fakeSpawn(child)
+    runAgentProcess({ command: '/usr/local/bin/claude', args: [], idleMs: 1000, spawnImpl: spawn.impl })
+    child.close(0)
+    expect((spawn.calls[0].opts as { env: NodeJS.ProcessEnv }).env).toMatchObject({
+      CANARY_LAB_MCP_CLIENT_KIND: 'claude-pty',
+    })
+  })
+
+  it('tags a full-path codex command as codex-pty', async () => {
+    const child = new FakeChild()
+    const spawn = fakeSpawn(child)
+    runAgentProcess({ command: '/home/user/.nvm/bin/codex', args: [], idleMs: 1000, spawnImpl: spawn.impl })
+    child.close(0)
+    expect((spawn.calls[0].opts as { env: NodeJS.ProcessEnv }).env).toMatchObject({
+      CANARY_LAB_MCP_CLIENT_KIND: 'codex-pty',
+    })
+  })
+
+  it('does not tag an unrelated command even if claude appears in the path prefix', async () => {
+    const child = new FakeChild()
+    const spawn = fakeSpawn(child)
+    runAgentProcess({ command: '/home/claude/bin/other-tool', args: [], idleMs: 1000, spawnImpl: spawn.impl })
+    child.close(0)
+    expect((spawn.calls[0].opts as { env: NodeJS.ProcessEnv }).env).toBe(process.env)
+  })
+
   it('uses nodeSpawn when spawnImpl is omitted (covers the ?? nodeSpawn branch)', async () => {
     // All other tests supply spawnImpl to avoid the real spawn. This one omits it
     // so opts.spawnImpl ?? nodeSpawn takes the right side (nodeSpawn = mocked spawn).

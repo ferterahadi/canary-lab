@@ -3,7 +3,7 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import type { RunDetail } from '../run-store'
-import { buildExternalFailureDetail, buildExternalHealContext, buildExternalRunSnapshot, normalizeRunCounts, writeHealSignal } from './external-heal-surface'
+import { buildExternalFailureDetail, buildExternalHealContext, buildExternalRunSnapshot, normalizeRunCounts, slimRepeatHealContext, writeHealSignal } from './external-heal-surface'
 import { buildRunPaths, runDirFor } from '../runtime/run-paths'
 
 let tmpDir: string
@@ -171,6 +171,32 @@ describe('buildExternalHealContext', () => {
       statusLine: '1/2 passed, 0 failed, 1 not run',
     })
     expect(context.counts).not.toHaveProperty('notRunNames')
+  })
+})
+
+describe('slimRepeatHealContext', () => {
+  it('drops the static procedure + map and leaves the failure packet plus a guidance breadcrumb', () => {
+    const runId = 'run-1'
+    const runDir = runDirFor(logsDir, runId)
+    const paths = buildRunPaths(runDir)
+    fs.mkdirSync(runDir, { recursive: true })
+    fs.writeFileSync(paths.manifestPath, JSON.stringify(detailFor(runId).manifest))
+    fs.writeFileSync(paths.healIndexPath, '# Heal Index\n')
+
+    const full = buildExternalHealContext({ detail: detailFor(runId), logsDir, projectRoot: tmpDir })
+    // Sanity: cycle-1 context carries both static blobs.
+    expect(full.nextSteps?.length).toBeGreaterThan(0)
+    expect(full.healPrompt).toBeDefined()
+
+    const slim = slimRepeatHealContext(full)
+    // Static guidance + map are stripped; the breadcrumb points back to get_heal_context.
+    expect(slim).not.toHaveProperty('nextSteps')
+    expect(slim).not.toHaveProperty('healPrompt')
+    expect(slim.guidance).toContain('get_heal_context')
+    // The per-cycle failure packet is preserved.
+    expect(slim.failedTests).toEqual(full.failedTests)
+    expect(slim.counts).toEqual(full.counts)
+    expect(slim.healIndex).toEqual(full.healIndex)
   })
 })
 

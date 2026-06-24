@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -118,6 +118,23 @@ describe('dirSizeBytes', () => {
     fs.writeFileSync(path.join(dir, 'sub', 'b.txt'), 'world!') // 6 bytes
     fs.symlinkSync(path.join(dir, 'a.txt'), path.join(dir, 'link'))
     expect(dirSizeBytes(dir)).toBe(11)
+  })
+
+  it('tolerates a file that vanishes between readdir and stat', () => {
+    const dir = path.join(tmpDir, 'vanish-guard')
+    const doomed = path.join(dir, 'doomed.txt')
+    fs.mkdirSync(dir, { recursive: true })
+    fs.writeFileSync(doomed, 'data')
+    const originalStatSync = fs.statSync
+    const statSpy = vi.spyOn(fs, 'statSync').mockImplementation((candidate) => {
+      if (candidate === doomed) throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' })
+      return originalStatSync(candidate as fs.PathLike)
+    })
+    try {
+      expect(dirSizeBytes(dir)).toBe(0)
+    } finally {
+      statSpy.mockRestore()
+    }
   })
 })
 

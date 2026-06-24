@@ -197,6 +197,18 @@ describe('useTheme', () => {
     expect(document.documentElement.classList.contains('dark')).toBe(false)
   })
 
+  it('does not throw when localStorage.setItem is unavailable during setChoice', () => {
+    const throwingStorage = Object.assign(createStorage(), {
+      setItem: () => { throw new Error('storage blocked') },
+    })
+    installStorage(throwingStorage)
+    const { captured, Probe } = captureHook()
+    act(() => { root.render(<Probe />) })
+    expect(() => {
+      act(() => { captured.current?.setChoice('light') })
+    }).not.toThrow()
+  })
+
   it('subscribes to matchMedia change when choice is system', () => {
     const handlers: Array<(e: MediaQueryListEvent) => void> = []
     let removed = 0

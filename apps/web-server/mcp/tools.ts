@@ -12,6 +12,7 @@ import {
   buildExternalHealContext,
   buildExternalRunSnapshot,
   normalizeRunCounts,
+  slimRepeatHealContext,
   writeHealSignal,
   type ExternalHealContext,
   type NormalizedRunCounts,
@@ -238,6 +239,14 @@ const WAIT_FOR_HEAL_TASK_WINDOW_MS = 120 * 1000
 export const CANARY_LAB_MCP_PROFILES = ['repair', 'verify', 'author', 'portify', 'lifecycle', 'full'] as const
 export type CanaryLabMcpProfile = typeof CANARY_LAB_MCP_PROFILES[number]
 
+// The default profile when a client connects without an explicit one (bare
+// `canary-lab mcp`, the registered Desktop/CLI invocation, a profile-less
+// /mcp request). `lifecycle` is the everyday end-to-end surface (repair +
+// author + verify + export) MINUS portify — the specialized, infrequent
+// port-injection workflow. Portify clients opt in with `--profile portify`
+// (or `full`), keeping the common surface leaner in tools + instructions.
+export const DEFAULT_CANARY_LAB_MCP_PROFILE: CanaryLabMcpProfile = 'lifecycle'
+
 export type CanaryLabMcpToolName =
   | 'list_features'
   | 'list_runs'
@@ -422,7 +431,7 @@ export function isCanaryLabMcpProfile(value: string | undefined): value is Canar
 }
 
 export function normalizeCanaryLabMcpProfile(value: string | undefined): CanaryLabMcpProfile | null {
-  if (!value) return 'full'
+  if (!value) return DEFAULT_CANARY_LAB_MCP_PROFILE
   return isCanaryLabMcpProfile(value) ? value : null
 }
 
@@ -440,7 +449,7 @@ export function registerCanaryLabTools(
   deps: CanaryLabMcpDeps,
   opts: CanaryLabMcpToolOptions = {},
 ): void {
-  const profile = opts.profile ?? 'full'
+  const profile = opts.profile ?? DEFAULT_CANARY_LAB_MCP_PROFILE
   const defaultClientKind = opts.defaultClientKind ?? 'other'
   const clientKindInput = CLIENT_KIND.default(defaultClientKind)
   const enabled = new Set<CanaryLabMcpToolName>(TOOLS_BY_PROFILE[profile])
@@ -1247,7 +1256,7 @@ export function registerCanaryLabTools(
 
   // ── Port-ification (make a feature's apps use injectable ports) ──────────
   registerTool('start_portify', {
-    description: "Start a port-ification workflow: a LOCAL agent rewrites a feature's network listeners to read an injected port, proven by a concurrent double-boot. Async — returns a workflowId; poll get_portify, then save_portify once ready-to-save. Verified edits save as an ephemeral overlay (features/<feature>/portify/) — never committed; applied per-run at boot, reverse-applied at teardown. One workflow at a time.",
+    description: "Start a port-ification workflow: a LOCAL agent rewrites a feature's network listeners to read an injected port, proven by a concurrent double-boot. Async — returns a workflowId; poll get_portify, then save_portify once ready-to-save (it captures the verified edits as the feature's overlay). One workflow at a time.",
     inputSchema: {
       feature: z.string().describe('Feature name (from list_features).'),
       agent: z.enum(['claude', 'codex']).optional().describe('Which CLI does the rewrite. Defaults to an available local agent.'),
@@ -1269,7 +1278,7 @@ export function registerCanaryLabTools(
   })
 
   registerTool('start_external_portify', {
-    description: "Start a port-ification workflow YOU drive — no local agent. Canary sets up a scratch worktree per repo and returns the edit paths + task. Edit the listeners to read injected ports IN PLACE, declare the `ports` slots in the feature config, then submit_external_portify to verify (concurrent double-boot). Verified edits save as an ephemeral overlay (features/<feature>/portify/) — never committed. Async — returns a workflowId + targets; one workflow at a time.",
+    description: "Start a port-ification workflow YOU drive — no local agent. Canary sets up a scratch worktree per repo and returns the edit paths + task. Edit the listeners to read injected ports IN PLACE, declare the `ports` slots in the feature config, then submit_external_portify to verify (concurrent double-boot); save_portify captures the result as the feature's overlay. Async — returns a workflowId + targets; one workflow at a time.",
     inputSchema: {
       feature: z.string().describe('Feature name (from list_features).'),
       session_id: z.string().describe('Stable id for your conversation — reuse it across calls.'),
@@ -1486,7 +1495,7 @@ export function registerCanaryLabTools(
           claimed: claimAllowed ? claim?.accepted === true : false,
           claim,
           ...suppressionFields,
-          ...(claimAllowed ? healWaitNext(healing.manifest.runId) : {}),
+          ...(claimAllowed ? healWaitNext() : {}),
         })
       }
       if (requestedRef) {
@@ -1515,7 +1524,7 @@ export function registerCanaryLabTools(
             claimed: claimAllowed ? claim?.accepted === true : false,
             claim,
             ...suppressionFields,
-            ...(claimAllowed ? healWaitNext(target.manifest.runId) : {}),
+            ...(claimAllowed ? healWaitNext() : {}),
           })
         }
         if (status === 'passed') {
@@ -1559,7 +1568,7 @@ export function registerCanaryLabTools(
           claimed: claimAllowed ? claim?.accepted === true : false,
           claim,
           ...suppressionFields,
-          ...(claimAllowed ? healWaitNext(restarted.runId) : {}),
+          ...(claimAllowed ? healWaitNext() : {}),
         })
       }
       // Any MCP-triggered run is external-origin: it must use External-client
@@ -1601,7 +1610,7 @@ export function registerCanaryLabTools(
           queueReason: outcome.reason,
           claimed: claimAllowed,
           ...suppressionFields,
-          ...(claimAllowed ? healWaitNext(outcome.runId) : {}),
+          ...(claimAllowed ? healWaitNext() : {}),
         })
       }
       return asJsonResult({
@@ -1609,7 +1618,7 @@ export function registerCanaryLabTools(
         reused: false,
         claimed: claimAllowed,
         ...suppressionFields,
-        ...(claimAllowed ? healWaitNext(outcome.runId) : {}),
+        ...(claimAllowed ? healWaitNext() : {}),
       })
     } catch (err) {
       return errorResult(err instanceof Error ? err.message : String(err))
@@ -1798,7 +1807,7 @@ export function registerCanaryLabTools(
       return errorResult(`could not write signal: ${(err as Error).message}`)
     }
     deps.broker.bumpCycle(runId)
-    return asJsonResult({ accepted: true, kind, path: signal.path, runId, ...healWaitNext(runId) })
+    return asJsonResult({ accepted: true, kind, path: signal.path, runId, ...healWaitNext() })
   })
 
   registerTool('handoff_heal', {
@@ -1835,12 +1844,11 @@ export function registerCanaryLabTools(
 // Emitted in start_run / signal_run results so result-driven external clients
 // (which may not carry the Canary Lab skill) block on wait_for_heal_task
 // instead of inventing a get_run_snapshot poll loop. Mirrors the create_feature
-// nextSteps convention.
-function healWaitNext(runId: string): { nextSteps: string[]; next: string } {
-  return {
-    nextSteps: ['wait_for_heal_task'],
-    next: `Call wait_for_heal_task with runId "${runId}" and the same session_id to wait for the result — it blocks for a short window and heartbeats for you. If it returns type:"still_waiting", call it again (not terminal). Do not poll get_run_snapshot or get_run in a loop to wait.`,
-  }
+// nextSteps convention. Machine-readable nextSteps only — the prose "how" lives
+// once in REPAIR_INSTRUCTIONS (session init) and the wait_for_heal_task tool
+// description, so re-emitting it on every start_run/signal_run was dead weight.
+function healWaitNext(): { nextSteps: string[] } {
+  return { nextSteps: ['wait_for_heal_task'] }
 }
 
 const BOOT_SESSION_MESSAGE =
@@ -1876,8 +1884,10 @@ function stillWaitingValue(
     status,
     lifecycle: detail?.manifest.lifecycle ?? null,
     cursor: `${phase}:${cycles}:${status ?? 'unknown'}`,
+    // nextSteps is the machine-readable contract; the "not terminal, re-call"
+    // prose lives in the wait_for_heal_task tool description, so we don't repay
+    // it on every elapsed window (a long run loops still_waiting many times).
     nextSteps: ['wait_for_heal_task'],
-    next: `Run "${runId}" is still active (no heal task yet). This is NOT terminal — call wait_for_heal_task again with the same runId + session_id to keep waiting. Do not poll get_run_snapshot or get_run.`,
   }
 }
 
@@ -2077,7 +2087,6 @@ type WaitForHealTaskValue =
       lifecycle: RunDetail['manifest']['lifecycle'] | null
       cursor: string
       nextSteps: string[]
-      next: string
     }
   | {
       type: 'boot_session'
@@ -2146,17 +2155,22 @@ function classifyWaitForHealTask(
   ) {
     const latest = deps.store.get(runId)
     if (!latest) return { ok: false, error: `run not found: ${runId}` }
-    const context = buildExternalHealContext({
+    const full = buildExternalHealContext({
       detail: latest,
       logsDir: deps.store.logsDir,
       projectRoot: deps.projectRoot,
     })
+    // The procedure (nextSteps) and resource map (healPrompt) are static across
+    // cycles — ship them on cycle 1 only; later cycles get the slim variant
+    // (failure packet + breadcrumb). get_heal_context re-fetches the full map.
+    const cycle = detail.manifest.lifecycle.activeCycle ?? detail.manifest.healCycles
+    const context = cycle >= 2 ? slimRepeatHealContext(full) : full
     return {
       ok: true,
       value: {
         type: 'needs_heal',
         runId,
-        cycle: detail.manifest.lifecycle.activeCycle ?? detail.manifest.healCycles,
+        cycle,
         context,
       },
     }
@@ -2248,7 +2262,9 @@ function ensureExternalClaimForMcpCall(
 }
 
 function asJsonResult(value: unknown): CallToolResult {
-  return { content: [{ type: 'text', text: JSON.stringify(value, null, 2) }] }
+  // Compact (no indentation): the model parses JSON regardless, and the 2-space
+  // pretty-print was pure whitespace tokens on every result across all tools.
+  return { content: [{ type: 'text', text: JSON.stringify(value) }] }
 }
 
 function errorResult(message: string): CallToolResult {

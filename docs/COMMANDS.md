@@ -16,7 +16,7 @@ npx canary-lab upgrade
 
 - `ui` is the primary human workflow.
 - `setup` refreshes the agent/tool registration described in [Quick Start](../README.md#quick-start).
-- `mcp` bridges local AI clients into the UI server, starting it if needed. It defaults to `repair`; use `--profile verify` for deployment checks, `--profile author` for authoring, `--profile lifecycle` for the everyday end-to-end loop (authoring + run/heal + verify + export, no portify), `--profile portify` for the specialized port-injection workflow, or `--profile full` for the complete surface (lifecycle + portify).
+- `mcp` bridges local AI clients into the UI server, starting it if needed. It defaults to `lifecycle` — the everyday end-to-end loop (authoring + run/heal + verify + export, no portify). Narrow it with `--profile repair` for run/heal only, `--profile verify` for deployment checks, `--profile author` for authoring; use `--profile portify` for the specialized port-injection workflow, or `--profile full` for the complete surface (lifecycle + portify).
 - `new feature` and `env` are deterministic wrappers for scripts and agents.
 - `upgrade` syncs scaffolded docs and skills in an existing project (not a dependency upgrade).
 

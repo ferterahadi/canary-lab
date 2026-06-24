@@ -82,6 +82,18 @@ describe('clearPrdSummary — strips coverage tags from specs', () => {
     const result = clearPrdSummary({ featuresDir, feature: 'checkout' })
     expect(result.untagged).toEqual([])
   })
+
+  it('skips a spec file that cannot be read (catch { continue } branch)', () => {
+    const dir = writeFeature('checkout')
+    const specPath = path.join(dir, 'e2e', 'a.spec.ts')
+    fs.chmodSync(specPath, 0o000)
+    try {
+      const result = clearPrdSummary({ featuresDir, feature: 'checkout' })
+      expect(result.untagged).toEqual([])
+    } finally {
+      fs.chmodSync(specPath, 0o644)
+    }
+  })
 })
 
 describe('collectTests — sourceFile override (service.ts line 86)', () => {

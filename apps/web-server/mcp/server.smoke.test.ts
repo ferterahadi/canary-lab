@@ -201,9 +201,10 @@ describe('MCP HTTP server (smoke)', () => {
       const body = res.json() as { ok: boolean; server: { name: string }; toolCount: number; profile: string; tools: string[] }
       expect(body.ok).toBe(true)
       expect(body.server.name).toBe('canary-lab')
-      expect(body.profile).toBe('full')
-      expect(body.toolCount).toBe(FULL_TOOLS.length)
-      expect([...body.tools].sort()).toEqual(FULL_TOOLS)
+      // No-param default is `lifecycle` (everyday surface, no portify).
+      expect(body.profile).toBe('lifecycle')
+      expect(body.toolCount).toBe(LIFECYCLE_TOOLS.length)
+      expect([...body.tools].sort()).toEqual(LIFECYCLE_TOOLS)
 
       const full = await app.inject({ method: 'GET', url: '/mcp/health?profile=full' })
       expect(full.statusCode).toBe(200)
@@ -279,7 +280,7 @@ describe('MCP HTTP server (smoke)', () => {
     }
   })
 
-  it('answers tools/list with the default full profile and tools/call over the streamable HTTP transport', async () => {
+  it('answers tools/list with the default lifecycle profile and tools/call over the streamable HTTP transport', async () => {
     const projectRoot = path.resolve(__dirname, '..', '..', '..', 'templates', 'project')
     const { app } = await createServer({ projectRoot, ptyFactory: inertPtyFactory })
     let client: Client | null = null
@@ -289,7 +290,7 @@ describe('MCP HTTP server (smoke)', () => {
 
       const tools = await client.listTools()
       const names = tools.tools.map((t) => t.name).sort()
-      expect(names).toEqual(FULL_TOOLS)
+      expect(names).toEqual(LIFECYCLE_TOOLS)
 
       // tools/call list_features — should return the templates/project scaffold.
       const result = await client.callTool({ name: 'list_features', arguments: {} })
@@ -310,7 +311,9 @@ describe('MCP HTTP server (smoke)', () => {
     let client: Client | null = null
     try {
       const address = await app.listen({ port: 0, host: '127.0.0.1' })
-      client = await connectClient(address)
+      // list_portify_status lives in the portify surface, not the lifecycle
+      // default — connect with the full profile to exercise it.
+      client = await connectClient(address, '/mcp?profile=full')
 
       const result = await client.callTool({ name: 'list_portify_status', arguments: {} })
       const text = (result.content?.[0] as { type: string; text: string } | undefined)?.text ?? ''
@@ -1154,6 +1157,33 @@ describe('MCP HTTP server (smoke)', () => {
         id: 'heal-index',
         field: 'healIndexMarkdown',
       })
+      expect(needsHealBody.context.nextSteps?.length).toBeGreaterThan(0)
+
+      // Repeat cycle (activeCycle 2): the static procedure + map are dropped;
+      // the context carries only the changed failure packet plus a breadcrumb.
+      runStore.recordLifecycleEvent('wait-needs-heal', {
+        phase: 'waiting-for-signal',
+        headline: 'Waiting for heal signal',
+        updatedAt: '2026-05-08T00:00:02.000Z',
+        activeCycle: 2,
+      })
+      const repeatHeal = await client.callTool({
+        name: 'wait_for_heal_task',
+        arguments: { runId: 'wait-needs-heal', session_id: 'sess-1', timeout_ms: 1000 },
+      })
+      const repeatBody = JSON.parse((repeatHeal.content?.[0] as { text: string }).text)
+      expect(repeatBody).toMatchObject({ type: 'needs_heal', cycle: 2 })
+      expect(repeatBody.context).not.toHaveProperty('healPrompt')
+      expect(repeatBody.context).not.toHaveProperty('nextSteps')
+      expect(repeatBody.context.guidance).toContain('get_heal_context')
+      // get_heal_context still re-fetches the full map on demand.
+      const refetch = await client.callTool({
+        name: 'get_heal_context',
+        arguments: { runId: 'wait-needs-heal', session_id: 'sess-1' },
+      })
+      const refetchBody = JSON.parse((refetch.content?.[0] as { text: string }).text)
+      expect(refetchBody.healPrompt).toBeDefined()
+      expect(refetchBody.nextSteps?.length).toBeGreaterThan(0)
 
       runStore.bootstrap({
         runId: 'wait-passed',

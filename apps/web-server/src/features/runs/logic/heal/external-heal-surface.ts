@@ -70,7 +70,13 @@ export interface ExternalHealContext {
   // The needs-heal procedure for external (often skill-less) clients. Carried on
   // the context so it loads on demand with the failure packet, instead of sitting
   // in the always-on MCP profile instructions where every connection pays for it.
-  nextSteps: string[]
+  // Optional because repeat heal cycles (cycle >= 2) ship the slim variant —
+  // see slimRepeatHealContext — which drops the procedure + map the agent
+  // already received on cycle 1.
+  nextSteps?: string[]
+  // Present only on the slim repeat-cycle variant: a one-line breadcrumb that
+  // recovers a forgetful/stateless client without re-sending the full procedure.
+  guidance?: string
 }
 
 export interface ExternalRunSnapshot {
@@ -126,6 +132,21 @@ const EXTERNAL_HEAL_NEXT_STEPS: readonly string[] = [
   'Then call wait_for_heal_task again on the same runId + session_id (loop on still_waiting). Repeat until passed or terminal failure.',
   'To re-execute, reuse the run rather than tearing it down: signal_run re-runs the failed tests in place for an active healing run; for a failed/aborted run pass its run_ref to start_run (reruns failed → skipped → pending/not-run only). Do not abort_run then start a fresh run — a fresh start re-runs the whole suite and is only worth it when prior passes are invalidated.',
 ]
+
+// The breadcrumb shipped on repeat heal cycles in place of the full nextSteps +
+// healPrompt map. The procedure and resource map are STATIC across cycles, so
+// they go out once on cycle 1 (and on any explicit get_heal_context re-fetch);
+// later cycles only carry the changing failure packet plus this pointer.
+const REPEAT_HEAL_GUIDANCE =
+  'Repeat heal cycle — the heal procedure and resource map were sent on cycle 1. Investigate the failures below, apply the fixes yourself, then signal_run ONCE (rerun for test/app-code fixes, restart when services must restart) with hypothesis + fixDescription, and wait_for_heal_task again. Call get_heal_context if you need the full healPrompt resource map back.'
+
+// Strip the static guidance (nextSteps + healPrompt map) from a context for a
+// repeat heal cycle, leaving the per-cycle failure packet plus a one-line
+// breadcrumb. get_heal_context still returns the full context on demand.
+export function slimRepeatHealContext(context: ExternalHealContext): ExternalHealContext {
+  const { healPrompt: _healPrompt, nextSteps: _nextSteps, ...rest } = context
+  return { ...rest, guidance: REPEAT_HEAL_GUIDANCE }
+}
 
 export function buildExternalHealContext(input: BuildExternalHealContextInput): ExternalHealContext {
   const snapshot = buildExternalRunSnapshot(input)

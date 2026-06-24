@@ -41,7 +41,7 @@ class BufferWritable extends Writable {
 }
 
 describe('canary-lab mcp', () => {
-  it('doctor verifies a running UI MCP server and the default full profile', async () => {
+  it('doctor verifies a running UI MCP server and the default lifecycle profile', async () => {
     const projectRoot = path.resolve(__dirname, '..', 'templates', 'project')
     const { app } = await createServer({ projectRoot, ptyFactory: inertPtyFactory })
     const stdout = new BufferWritable()
@@ -50,13 +50,13 @@ describe('canary-lab mcp', () => {
       const address = await app.listen({ port: 0, host: '127.0.0.1' })
       await expect(doctor(`${address}/mcp`, { stdout, stderr })).resolves.toBe(true)
       expect(stdout.text()).toContain('Canary Lab MCP is reachable')
-      expect(stdout.text()).toContain('Profile: full')
-      expect(stdout.text()).toContain('start_external_evaluation_export')
+      expect(stdout.text()).toContain('Profile: lifecycle')
+      expect(stdout.text()).toContain('create_feature')
       expect(stdout.text()).toContain('execute_verification')
       expect(stderr.text()).toBe('')
       const health = await fetch(`${address}/mcp/health`).then((res) => res.json()) as { projectRoot?: string; profile?: string }
       expect(health.projectRoot).toBe(projectRoot)
-      expect(health.profile).toBe('full')
+      expect(health.profile).toBe('lifecycle')
     } finally {
       await app.close()
     }
