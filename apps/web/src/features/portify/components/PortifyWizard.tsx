@@ -189,7 +189,7 @@ export function PortifyWizard({
           Portify <span style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontSize: 13, marginLeft: 8 }}>{m?.feature ?? feature ?? ''}</span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          {isActive && (
+          {isActive && m?.producer !== 'external' && (
             <button
               type="button"
               onClick={() => setConfirmLeave(true)}

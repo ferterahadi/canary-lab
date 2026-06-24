@@ -61,6 +61,13 @@ function collector() {
 }
 
 describe('startExternalCoverage', () => {
+  it('throws FeatureNotFoundError for an unknown feature', () => {
+    const store = new CoverageJobRunStore(logsDir)
+    expect(() =>
+      startExternalCoverage({ featuresDir, logsDir, feature: 'nonexistent', sessionId: 's1' }, { store }),
+    ).toThrow('nonexistent')
+  })
+
   it('returns needs-summary (and creates no job) when the feature has no PRD summary', () => {
     writeFeature('checkout')
     const store = new CoverageJobRunStore(logsDir)
@@ -94,6 +101,19 @@ describe('startExternalCoverage', () => {
     expect(res.context.prompt).toContain('create makes a new todo item')
     // Job is persisted and visible to a fresh store instance (file-backed).
     expect(new CoverageJobRunStore(logsDir).get(res.manifest.jobId)?.producer).toBe('external')
+  })
+
+  it('includes externalSessionUrl in the manifest when sessionUrl is provided', async () => {
+    writeFeature('checkout')
+    await seedSummary('checkout')
+    const store = new CoverageJobRunStore(logsDir)
+    const res = startExternalCoverage(
+      { featuresDir, logsDir, feature: 'checkout', sessionId: 's1', sessionUrl: 'https://claude.ai/chat/abc' },
+      { store },
+    )
+    expect(res.kind).toBe('started')
+    if (res.kind !== 'started') return
+    expect(res.manifest.externalSessionUrl).toBe('https://claude.ai/chat/abc')
   })
 
   it('is single-flight: rejects when a coverage job is already running for the feature', async () => {
