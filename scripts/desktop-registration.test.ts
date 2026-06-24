@@ -47,7 +47,7 @@ describe('registerClaudeDesktopMcp', () => {
     expect(cfg.preferences).toEqual({ a: 1 })
     expect(cfg.coworkUserFilesPath).toBe('/x')
     expect(cfg.mcpServers['Canary_Lab'].command).toBe(EXEC)
-    expect(cfg.mcpServers['Canary_Lab'].args).toEqual([CLI, 'mcp', '--profile', 'full'])
+    expect(cfg.mcpServers['Canary_Lab'].args).toEqual([CLI, 'mcp', '--profile', 'lifecycle'])
     expect(cfg.mcpServers['Canary_Lab'].env.PATH).toContain('/usr/bin')
     expect(lines).toContain('Claude Desktop MCP configured')
   })
@@ -105,7 +105,7 @@ describe('registerClaudeDesktopMcp', () => {
     registerClaudeDesktopMcp({ configPath, execPath: EXEC, cliPath: EPHEMERAL_CLI, log: () => {} })
     expect(read(configPath).mcpServers['Canary_Lab']).toEqual({
       command: 'npx',
-      args: ['-y', 'canary-lab@latest', 'mcp', '--profile', 'full'],
+      args: ['-y', 'canary-lab@latest', 'mcp', '--profile', 'lifecycle'],
     })
   })
 })

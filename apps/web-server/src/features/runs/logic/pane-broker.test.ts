@@ -133,6 +133,22 @@ describe('PaneBroker', () => {
     expect(() => b.resetPane('missing')).not.toThrow()
   })
 
+  it('resetPane silently ignores subscribers that throw on send or close', () => {
+    const b = new PaneBroker()
+    const throwOnSend: PaneSubscriber = {
+      send: () => { throw new Error('network error') },
+      close: () => {},
+    }
+    const throwOnClose: PaneSubscriber = {
+      send: () => {},
+      close: () => { throw new Error('close error') },
+    }
+    b.subscribe('x', throwOnSend, { replay: false })
+    b.subscribe('x', throwOnClose, { replay: false })
+    expect(() => b.resetPane('x')).not.toThrow()
+    expect(b.subscriberCount('x')).toBe(0)
+  })
+
   it('after-exit subscribe path returns a no-op unsubscribe', () => {
     const b = new PaneBroker()
     b.markExit('p', 0)

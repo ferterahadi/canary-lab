@@ -78,7 +78,7 @@ export interface RunAgentProcessOpts {
 // the block for free. `CANARY_LAB_MCP_CLIENT_KIND` is read first by the MCP
 // bridge's `inferMcpClientKind`, so this wins over process-lineage sniffing.
 function runnerPtyClientKind(command: string): 'claude-pty' | 'codex-pty' | null {
-  const base = command.split('/').pop() ?? command
+  const base = command.split('/').pop()!
   if (/claude/i.test(base)) return 'claude-pty'
   if (/codex/i.test(base)) return 'codex-pty'
   return null

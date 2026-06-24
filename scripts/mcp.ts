@@ -12,6 +12,7 @@ import type { JSONRPCMessage } from '@modelcontextprotocol/sdk/types.js'
 import { runAsScript } from './run-as-script'
 import { refreshAgentIntegrationsQuietly } from './agent'
 import {
+  DEFAULT_CANARY_LAB_MCP_PROFILE,
   normalizeCanaryLabMcpProfile,
   type CanaryLabMcpProfile,
 } from '../apps/web-server/mcp/tools'
@@ -49,7 +50,7 @@ export function resolveDefaultMcpUrl(opts: {
   const port = projectRoot ? resolveProjectPort(loadProjectConfig(projectRoot)) : DEFAULT_PORT
   return `http://127.0.0.1:${port}/mcp`
 }
-const DEFAULT_MCP_PROFILE: CanaryLabMcpProfile = 'full'
+const DEFAULT_MCP_PROFILE: CanaryLabMcpProfile = DEFAULT_CANARY_LAB_MCP_PROFILE
 const DEFAULT_UI_STARTUP_TIMEOUT_MS = 15_000
 const DEFAULT_UI_STARTUP_POLL_MS = 250
 

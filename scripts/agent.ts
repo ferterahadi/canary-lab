@@ -4,6 +4,7 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { runAsScript } from './run-as-script'
+import { DEFAULT_CANARY_LAB_MCP_PROFILE } from '../apps/web-server/mcp/tools'
 
 type Target = 'codex' | 'claude' | 'all'
 export type AgentInstallTarget = Target
@@ -74,19 +75,19 @@ export function install(target: Target, opts: AgentInstallOptions = {}): void {
 
   log('')
   log('MCP command for local clients:')
-  log('  npx -y canary-lab mcp --profile full')
+  log(`  npx -y canary-lab mcp --profile ${DEFAULT_CANARY_LAB_MCP_PROFILE}`)
   log('')
   log('Codex config snippet:')
   log('[mcp_servers.Canary_Lab]')
   log('command = "npx"')
-  log('args = ["-y", "canary-lab", "mcp", "--profile", "full"]')
+  log(`args = ["-y", "canary-lab", "mcp", "--profile", "${DEFAULT_CANARY_LAB_MCP_PROFILE}"]`)
   log('')
   log('Claude Code config snippet:')
   log(JSON.stringify({
     mcpServers: {
       'Canary_Lab': {
         command: 'npx',
-        args: ['-y', 'canary-lab', 'mcp', '--profile', 'full'],
+        args: ['-y', 'canary-lab', 'mcp', '--profile', DEFAULT_CANARY_LAB_MCP_PROFILE],
       },
     },
   }, null, 2))
