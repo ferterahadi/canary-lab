@@ -103,6 +103,27 @@ describe('startExternalCoverage', () => {
     expect(new CoverageJobRunStore(logsDir).get(res.manifest.jobId)?.producer).toBe('external')
   })
 
+  it('emits coverage-changed on start so an open UI flips to Generating live', async () => {
+    writeFeature('checkout')
+    await seedSummary('checkout')
+    const store = new CoverageJobRunStore(logsDir)
+    const { events, publisher } = collector()
+    const res = startExternalCoverage(
+      { featuresDir, logsDir, feature: 'checkout', sessionId: 's1' },
+      { store, workspaceEvents: publisher },
+    )
+    expect(res.kind).toBe('started')
+    expect(events).toEqual([{ type: 'coverage-changed', feature: 'checkout' }])
+  })
+
+  it('does not emit when start is rejected for a missing summary', () => {
+    writeFeature('checkout')
+    const store = new CoverageJobRunStore(logsDir)
+    const { events, publisher } = collector()
+    startExternalCoverage({ featuresDir, logsDir, feature: 'checkout', sessionId: 's1' }, { store, workspaceEvents: publisher })
+    expect(events).toHaveLength(0)
+  })
+
   it('includes externalSessionUrl in the manifest when sessionUrl is provided', async () => {
     writeFeature('checkout')
     await seedSummary('checkout')

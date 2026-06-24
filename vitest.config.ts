@@ -1,12 +1,45 @@
 import { defineConfig } from 'vitest/config'
 
+// Known, intentional test noise. Each entry collapses a class of expected
+// log lines (asserted-around or deliberately provoked by tests) into a single
+// short tag, printed once per worker instead of hundreds of full stack dumps.
+// To see the raw logs again, run with VITEST_VERBOSE=1 (e.g.
+// `VITEST_VERBOSE=1 npx vitest run`) — that disables this filter entirely.
+const EXPECTED_LOG_NOISE: { match: (log: string) => boolean; tag: string }[] = [
+  { match: (l) => l.includes('act(...)'), tag: 'React act() warning' },
+  {
+    match: (l) => l.includes('ECONNREFUSED') && l.includes(':3000'),
+    tag: 'ECONNREFUSED :3000 (HTTP-fallback path under test)',
+  },
+  {
+    match: (l) => l.includes('[playwright-list] exit 2: boom'),
+    tag: 'playwright-list fixture failure',
+  },
+]
+const announcedNoise = new Set<string>()
+
 export default defineConfig({
   test: {
     bail: 1,
+    onConsoleLog(log) {
+      if (process.env.VITEST_VERBOSE) return undefined // full raw logs
+      const hit = EXPECTED_LOG_NOISE.find((n) => n.match(log))
+      if (!hit) return undefined // unknown log — always print
+      if (!announcedNoise.has(hit.tag)) {
+        announcedNoise.add(hit.tag)
+        process.stdout.write(
+          `· suppressed expected noise: ${hit.tag} (VITEST_VERBOSE=1 to show)\n`,
+        )
+      }
+      return false // drop the raw line
+    },
     projects: [
       {
         test: {
           name: 'node',
+          // Filters expected stderr noise that bypasses onConsoleLog (direct
+          // process.stderr.write + unhandled-rejection dumps). See file header.
+          setupFiles: ['./vitest.setup.ts'],
           include: [
             'scripts/**/*.test.ts',
             'shared/**/*.test.ts',
@@ -23,6 +56,7 @@ export default defineConfig({
       {
         test: {
           name: 'dom',
+          setupFiles: ['./vitest.setup.ts'],
           include: [
             'apps/web/**/*.test.tsx',
             'apps/web/src/shared/lib/workspace-view-state.test.ts',

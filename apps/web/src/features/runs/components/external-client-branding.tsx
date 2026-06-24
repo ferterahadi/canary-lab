@@ -33,6 +33,16 @@ export function shortSession(sessionId: string): string {
   return `${sessionId.slice(0, 6)}…${sessionId.slice(-4)}`
 }
 
+// The "Open Claude/Codex" CTA targets an interactive client the user can launch.
+// Runner-spawned PTY agents (`*-pty`) and undetected (`other`) clients have no
+// app to open, so they get no CTA. Shared by every external panel that offers
+// the jump-to-agent affordance (heal, coverage).
+export function clientKindToDesktopAgent(kind: ExternalClientKind): 'claude' | 'codex' | null {
+  if (kind === 'claude') return 'claude'
+  if (kind === 'codex') return 'codex'
+  return null
+}
+
 export function BrandMark({
   clientKind,
   tint,

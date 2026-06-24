@@ -11,6 +11,7 @@ vi.mock('../../../shared/api/client', () => ({
   savePortify: vi.fn(),
   cancelPortify: vi.fn(),
   revisePortify: vi.fn(),
+  openPortifyProject: vi.fn(),
 }))
 // AgentSessionView opens a WS / fetches — stub it out in the wizard test.
 vi.mock('../../agent-sessions/components/AgentSessionView', () => ({ AgentSessionView: () => null }))
@@ -97,6 +98,31 @@ describe('PortifyWizard', () => {
     expect(container.textContent).toContain('Review')
     expect(container.textContent).toContain('Booted twice')
     expect(container.textContent).toContain('app.listen(process.env.PORT)')
+  })
+
+  it('opens the project in the editor from the review screen', async () => {
+    vi.mocked(api.startPortify).mockResolvedValue({ workflowId: 'w' })
+    vi.mocked(api.getPortify).mockResolvedValue(readyManifest())
+    vi.mocked(api.openPortifyProject).mockResolvedValue({ opened: true, paths: ['/wt'], editor: 'vscode' })
+    await renderWizard()
+    await act(async () => clickButton('Start ▶'))
+    await flush()
+    await act(async () => clickByTitle('Open project in editor'))
+    await flush()
+    expect(api.openPortifyProject).toHaveBeenCalledWith('w')
+    expect(container.textContent).not.toContain('Failed to open editor')
+  })
+
+  it('surfaces a launch failure from the open-in-editor button', async () => {
+    vi.mocked(api.startPortify).mockResolvedValue({ workflowId: 'w' })
+    vi.mocked(api.getPortify).mockResolvedValue(readyManifest())
+    vi.mocked(api.openPortifyProject).mockResolvedValue({ opened: false, paths: ['/repo'], error: 'no editor' })
+    await renderWizard()
+    await act(async () => clickButton('Start ▶'))
+    await flush()
+    await act(async () => clickByTitle('Open project in editor'))
+    await flush()
+    expect(container.textContent).toContain('no editor')
   })
 
   it('revisit mode (workflowId) skips the plan screen and monitors the existing workflow', async () => {
@@ -305,7 +331,24 @@ describe('PortifyWizard', () => {
     expect(onSaved).toHaveBeenCalled()
   })
 
-  it('navigates Review ↔ Save on a saved workflow via the stepper', async () => {
+  it('shows the "no changes needed" success state for a proven empty diff', async () => {
+    vi.mocked(api.startPortify).mockResolvedValue({ workflowId: 'w' })
+    vi.mocked(api.getPortify).mockResolvedValue(manifest('ready-to-save', {
+      diff: '',
+      verification: { ok: true, instances: [{ ports: { api: 5001 }, ok: true }, { ports: { api: 5002 }, ok: true }] },
+    }))
+    await renderWizard()
+    await act(async () => clickButton('Start ▶'))
+    await flush()
+    // Empty diff + verified boot = the apps already read injected ports. Reassure,
+    // don't apologise with a bare "(no diff captured)".
+    expect(container.textContent).toContain('No changes needed')
+    expect(container.textContent).not.toContain('no diff captured')
+    // Still saveable — the empty overlay is a valid no-op.
+    expect(buttonLabels()).toContain('Save overlay')
+  })
+
+  it('shows one saved Review screen — diff, overlay path, and Done — under both stepper nodes', async () => {
     vi.mocked(api.startPortify).mockResolvedValue({ workflowId: 'w' })
     vi.mocked(api.getPortify).mockResolvedValue(manifest('saved', {
       diff: '# repo: app\n+ app.listen(process.env.PORT)',
@@ -314,22 +357,21 @@ describe('PortifyWizard', () => {
     await renderWizard()
     await act(async () => clickButton('Start ▶'))
     await flush()
-    // Lands on the Save screen with the saved cue.
+    // Review and Save are folded into one saved screen: the confirmation, the
+    // overlay path, and the diff all show together — and it's read-only (no
+    // Save / Request-changes).
     expect(container.textContent).toContain('Saved as overlay')
     expect(container.textContent).toContain('saved ✓')
-
-    // Go back to Review — read-only: diff is shown, but no Save / Request-changes.
-    await act(async () => clickByTitle('Go to Review'))
-    await flush()
+    expect(container.textContent).toContain('features/cns/portify/')
     expect(container.textContent).toContain('app.listen(process.env.PORT)')
     expect(buttonLabels()).not.toContain('Save overlay')
     expect(buttonLabels()).not.toContain('Request changes')
-    expect(buttonLabels()).toContain('View save details →')
 
-    // The "View save details" button returns to the Save screen.
-    await act(async () => clickButton('View save details →'))
+    // The same saved screen is reachable from the Review stepper node.
+    await act(async () => clickByTitle('Go to Review'))
     await flush()
     expect(container.textContent).toContain('Saved as overlay')
+    expect(container.textContent).toContain('app.listen(process.env.PORT)')
   })
 
   it('at ready-to-save the stepper exposes Exercise but not Save (not yet reached)', async () => {

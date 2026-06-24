@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
-import * as api from '../../../shared/api/client'
 import type {
   ExternalHealSession,
   ExternalHealSessionStatus,
   RunStatus,
 } from '../../../shared/api/types'
 import { isTerminalRunStatus } from '../../../../../../shared/run-state'
-import { BrandMark, clientLabel as brandingClientLabel, clientTint } from './external-client-branding'
+import { clientKindToDesktopAgent, clientLabel as brandingClientLabel, clientTint } from './external-client-branding'
+import { ExternalAgentCard, ExternalClientCta, StatusPill, useOpenAgentApp } from './ExternalAgentCard'
 
 interface Props {
   runId: string
@@ -20,8 +20,7 @@ interface Props {
 // that parked state explicit instead of rendering an empty local terminal.
 export function ExternalHealPanel({ runId: _runId, runStatus, session }: Props) {
   const [now, setNow] = useState(() => Date.now())
-  const [opening, setOpening] = useState<'claude' | 'codex' | null>(null)
-  const [openError, setOpenError] = useState<string | null>(null)
+  const { opening, error: openError, open: onOpenAgent } = useOpenAgentApp()
 
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 1000)
@@ -50,57 +49,23 @@ export function ExternalHealPanel({ runId: _runId, runStatus, session }: Props) 
   const clientKind = session?.clientKind ?? 'other'
   const desktopAgent = session ? clientKindToDesktopAgent(session.clientKind) : null
 
-  const onOpenAgent = async (agent: 'claude' | 'codex'): Promise<void> => {
-    setOpening(agent)
-    setOpenError(null)
-    try {
-      await api.openAgentApp(agent)
-    } catch (err) {
-      setOpenError(err instanceof Error ? err.message : `Could not open ${agent}`)
-    } finally {
-      setOpening(null)
-    }
-  }
-
   const tint = clientTint(clientKind)
 
   return (
-    <div className="@container flex h-full min-h-0 flex-col overflow-y-auto p-3 @[400px]:p-4">
-      <div
-        className="relative overflow-hidden rounded-xl p-3.5 @[320px]:rounded-2xl @[320px]:p-4 @[480px]:p-6"
-        style={{
-          background: `radial-gradient(120% 90% at 0% 0%, color-mix(in srgb, ${tint} 14%, transparent) 0%, transparent 55%), var(--bg-elevated)`,
-          border: `1px solid color-mix(in srgb, ${tint} 24%, var(--border-default))`,
-        }}
-      >
-        <div className="flex items-start gap-3 @[480px]:gap-4">
-          <BrandMark clientKind={clientKind} tint={tint} elevated />
-          <div className="min-w-0 flex-1 pt-0.5">
-            <div
-              className="text-[9px] font-medium uppercase @[320px]:text-[10px]"
-              style={{ color: 'var(--text-muted)', letterSpacing: '0.14em' }}
-            >
-              External heal session
-            </div>
-            <h2
-              className="mt-0.5 text-sm font-semibold @[320px]:mt-1 @[320px]:text-base @[480px]:mt-1.5 @[480px]:text-xl"
-              style={{
-                color: 'var(--text-primary)',
-                letterSpacing: '-0.01em',
-                lineHeight: 1.2,
-              }}
-            >
-              {headlineFor(clientKind, Boolean(session))}
-            </h2>
-          </div>
-        </div>
-
-        <div className="mt-2.5 flex flex-wrap items-center gap-x-2 gap-y-1.5 text-[10px] @[320px]:mt-3 @[320px]:gap-x-2.5 @[320px]:text-[11px] @[480px]:mt-3.5">
-          {displayedStatus && <StatusPill status={displayedStatus} />}
-          <span
-            className="inline-flex items-center gap-1.5"
-            style={{ color: heartbeatColor }}
-          >
+    <ExternalAgentCard
+      clientKind={clientKind}
+      brandElevated
+      fill
+      eyebrow="External heal session"
+      headline={headlineFor(clientKind, Boolean(session))}
+      statusPill={
+        displayedStatus && (
+          <StatusPill label={statusLabel(displayedStatus)} palette={statusPalette(displayedStatus)} />
+        )
+      }
+      meta={
+        <>
+          <span className="inline-flex items-center gap-1.5" style={{ color: heartbeatColor }}>
             <span
               className="inline-block h-1.5 w-1.5 rounded-full"
               style={{
@@ -112,81 +77,43 @@ export function ExternalHealPanel({ runId: _runId, runStatus, session }: Props) 
             {heartbeatLabel}
           </span>
           {session && session.cycleCount > 0 && (
-            <span
-              className="inline-flex items-center gap-1.5"
-              style={{ color: 'var(--text-muted)' }}
-            >
+            <span className="inline-flex items-center gap-1.5" style={{ color: 'var(--text-muted)' }}>
               <span aria-hidden style={{ opacity: 0.55 }}>·</span>
               {session.cycleCount} {session.cycleCount === 1 ? 'cycle' : 'cycles'}
             </span>
           )}
+        </>
+      }
+      body={
+        terminalStatus
+          ? terminalMessage(terminalStatus, clientKind, Boolean(session))
+          : isDisconnected
+          ? `Lost connection to ${clientLabel(session.clientKind)}. The run is paused waiting for you to reconnect — Canary Lab keeps the claim, so the same session id can resume right where it left off.`
+          : !session
+          ? 'No external client has claimed this run yet. Canary Lab is waiting for an AI Agent MCP session to claim the run and send a restart or rerun signal.'
+          : `Agent output is streaming in your ${clientLabel(session.clientKind)} window. This panel tracks the run; open your conversation to follow the agent's reasoning.`
+      }
+    >
+      {desktopAgent && (
+        <div className="mt-3 @[320px]:mt-4 @[480px]:mt-5">
+          <ExternalClientCta
+            tint={tint}
+            label={`Open ${desktopAgent === 'claude' ? 'Claude' : 'Codex'}`}
+            onClick={() => onOpenAgent(desktopAgent)}
+            busy={opening !== null}
+          />
         </div>
-
-        <p
-          className="mt-3 text-[11px] leading-relaxed @[320px]:mt-4 @[320px]:text-xs @[480px]:mt-5 @[480px]:text-[13px]"
-          style={{ color: 'var(--text-secondary)' }}
-        >
-          {terminalStatus
-            ? terminalMessage(terminalStatus, clientKind, Boolean(session))
-            : isDisconnected
-            ? `Lost connection to ${clientLabel(session.clientKind)}. The run is paused waiting for you to reconnect — Canary Lab keeps the claim, so the same session id can resume right where it left off.`
-            : !session
-            ? 'No external client has claimed this run yet. Canary Lab is waiting for an AI Agent MCP session to claim the run and send a restart or rerun signal.'
-            : `Agent output is streaming in your ${clientLabel(session.clientKind)} window. This panel tracks the run; open your conversation to follow the agent's reasoning.`}
-        </p>
-
-        {desktopAgent && (
-          <div className="mt-3 @[320px]:mt-4 @[480px]:mt-5">
-            <button
-              type="button"
-              onClick={() => onOpenAgent(desktopAgent)}
-              disabled={opening !== null}
-              className="inline-flex w-full items-center justify-center gap-2 rounded-md px-3 py-1.5 text-[10px] font-medium uppercase tracking-wider @[320px]:rounded-lg @[320px]:px-3.5 @[320px]:py-2 @[320px]:text-[11px] @[480px]:w-auto @[480px]:justify-start"
-              style={{
-                color: tint,
-                background: `color-mix(in srgb, ${tint} 14%, transparent)`,
-                border: `1px solid color-mix(in srgb, ${tint} 38%, transparent)`,
-                opacity: opening === desktopAgent ? 0.6 : 1,
-              }}
-            >
-              {opening === desktopAgent ? (
-                'Opening…'
-              ) : (
-                <>
-                  <span>Open {desktopAgent === 'claude' ? 'Claude' : 'Codex'}</span>
-                  <span aria-hidden>→</span>
-                </>
-              )}
-            </button>
-          </div>
-        )}
-        {openError && (
-          <div className="mt-3 text-[11px]" style={{ color: 'var(--danger)' }}>
-            {openError}
-          </div>
-        )}
-      </div>
-    </div>
+      )}
+      {openError && (
+        <div className="mt-3 text-[11px]" style={{ color: 'var(--danger)' }}>
+          {openError}
+        </div>
+      )}
+    </ExternalAgentCard>
   )
 }
 
 type PanelStatus = ExternalHealSessionStatus | Extract<RunStatus, 'passed' | 'failed' | 'aborted'>
-
-function StatusPill({ status }: { status: PanelStatus }) {
-  const palette = statusPalette(status)
-  return (
-    <span
-      className="rounded-full px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-wider"
-      style={{
-        color: palette.fg,
-        background: palette.bg,
-        border: `1px solid ${palette.border}`,
-      }}
-    >
-      {statusLabel(status)}
-    </span>
-  )
-}
 
 function statusLabel(status: PanelStatus): string {
   switch (status) {
@@ -281,15 +208,4 @@ function headlineFor(
 ): string {
   if (!hasSession) return 'AI Agent'
   return kind === 'other' ? 'AI Agent' : clientLabel(kind)
-}
-
-// The "Open Claude/Codex" CTA targets an interactive client the user can
-// launch. Runner-spawned PTY agents (`*-pty`) and undetected (`other`) clients
-// have no app to open, so they get no CTA.
-function clientKindToDesktopAgent(
-  kind: ExternalHealSession['clientKind'],
-): 'claude' | 'codex' | null {
-  if (kind === 'claude') return 'claude'
-  if (kind === 'codex') return 'codex'
-  return null
 }

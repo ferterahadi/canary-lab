@@ -361,7 +361,7 @@ export function App() {
               }}
             />
           : view === 'coverage' && selectedFeature
-          ? <CoverageLedgerPage feature={selectedFeature} onClose={() => setView('workspace')} />
+          ? <CoverageLedgerPage feature={selectedFeature} onClose={() => setView('workspace')} coverageRefreshKey={coverageRefreshKey} />
           : <ResizablePanels panels={panels} />}
       </div>
       {configFor && (

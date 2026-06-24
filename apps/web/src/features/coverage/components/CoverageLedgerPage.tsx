@@ -20,6 +20,10 @@ import { buildTestNumbering, stripLeadingTestOrdinal, testNumberKey } from '../.
 interface Props {
   feature: string
   onClose: () => void
+  // Bumped by App.tsx on every `coverage-changed` workspace event. Lets an OPEN
+  // ledger re-attach to a job that started after it opened — e.g. an external
+  // agent was summoned to map coverage — without a manual refresh (cl_ws-driven-state).
+  coverageRefreshKey?: number
 }
 
 // Each gap class gets a stable label + colour. Coverage is semantic (run-free):
@@ -62,7 +66,7 @@ interface Hovered {
   key: string
 }
 
-export function CoverageLedgerPage({ feature, onClose }: Props) {
+export function CoverageLedgerPage({ feature, onClose, coverageRefreshKey = 0 }: Props) {
   const [ledger, setLedger] = useState<CoverageLedger | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -85,6 +89,11 @@ export function CoverageLedgerPage({ feature, onClose }: Props) {
   // lifecycle for the whole dialog (R20) — rail + columns + takeover all read it.
   // While a job runs the view is a full-screen Generating takeover (R13).
   const [job, setJob] = useState<CoverageJobManifest | null>(null)
+  // Mirror of `job` for effect closures that must read the latest value WITHOUT
+  // re-running on every poll tick (the re-attach effect below uses it to avoid
+  // double-polling a job it's already following).
+  const jobRef = useRef<CoverageJobManifest | null>(null)
+  useEffect(() => { jobRef.current = job }, [job])
   const [actionError, setActionError] = useState<string | null>(null)
   // Bumped when a generation job completes so the Docs rail re-lists itself and
   // the generated _prd-summary.md pill shows up live (items 1+2). Driven off the
@@ -165,11 +174,18 @@ export function CoverageLedgerPage({ feature, onClose }: Props) {
   // R18: a generation job is durable server-side, so on mount (incl. after a
   // refresh) re-attach to the newest running job and resume the Generating
   // screen + chain-following. The in-memory flag alone lost this on reload.
+  //
+  // Also re-runs on every `coverage-changed` event (via coverageRefreshKey): if a
+  // job STARTS after the ledger is already open — e.g. an external agent is
+  // summoned to map coverage — this picks it up and flips to the Generating
+  // screen live, no refresh (cl_ws-driven-state). The jobRef guard makes the
+  // re-run a no-op when we're already following a job, so the running poll isn't
+  // duplicated and the completion bump doesn't re-attach a finished job.
   useEffect(() => {
     let cancelled = false
     api.listCoverageJobs(feature)
       .then((jobs) => {
-        if (cancelled) return
+        if (cancelled || jobRef.current) return
         const running = jobs
           .filter((j) => j.status === 'running')
           .sort((a, b) => (a.startedAt < b.startedAt ? 1 : -1))[0]
@@ -182,7 +198,7 @@ export function CoverageLedgerPage({ feature, onClose }: Props) {
       })
       .catch(() => {})
     return () => { cancelled = true }
-  }, [feature, pollJob])
+  }, [feature, pollJob, coverageRefreshKey])
 
   // Self-healing backstop for the Generating screen. The per-job poll above is an
   // in-memory setTimeout chain: if a single getCoverageJob fetch HANGS (a server

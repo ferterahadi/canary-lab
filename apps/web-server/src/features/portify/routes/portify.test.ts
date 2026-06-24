@@ -1,8 +1,14 @@
 import { afterEach, describe, it, expect, vi } from 'vitest'
+import fs from 'fs'
+import os from 'os'
+import path from 'path'
 import Fastify from 'fastify'
 import { portifyRoutes, type PortifyRouteDeps } from '../../portify/routes/portify'
 import type { PortifyStore } from '../../portify/logic/runtime/store'
 import type { PortifyManifest } from '../../portify/logic/runtime/types'
+import { launchEditorDir } from '../../../shared/editor-launch'
+
+vi.mock('../../../shared/editor-launch', () => ({ launchEditorDir: vi.fn(() => 'vscode') }))
 
 function manifest(over: Partial<PortifyManifest> = {}): PortifyManifest {
   return {
@@ -263,5 +269,60 @@ describe('portifyRoutes', () => {
     const app = await build({ loadAgentSession: () => null })
     const res = await app.inject({ method: 'GET', url: '/api/portify/portify-1/agent-session' })
     expect(res.statusCode).toBe(404)
+  })
+
+  describe('POST /api/portify/:id/open', () => {
+    afterEach(() => vi.mocked(launchEditorDir).mockClear())
+
+    it('404s when the workflow is unknown', async () => {
+      const app = await build({ store: fakeStore({ get: () => null }) })
+      const res = await app.inject({ method: 'POST', url: '/api/portify/nope/open' })
+      expect(res.statusCode).toBe(404)
+    })
+
+    it('opens the scratch worktree while it exists', async () => {
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-open-'))
+      const wt = path.join(tmp, 'wt'); fs.mkdirSync(wt)
+      const repo = path.join(tmp, 'repo'); fs.mkdirSync(repo)
+      const m = manifest({ repos: [{ name: 'app', path: repo, worktreePath: wt }] })
+      const app = await build({ store: fakeStore({ get: () => m }) })
+      const res = await app.inject({ method: 'POST', url: '/api/portify/portify-1/open' })
+      expect(res.statusCode).toBe(200)
+      expect(res.json()).toMatchObject({ opened: true, paths: [wt], editor: 'vscode' })
+      expect(vi.mocked(launchEditorDir)).toHaveBeenCalledWith('auto', wt)
+      fs.rmSync(tmp, { recursive: true, force: true })
+    })
+
+    it('falls back to the product repo once the worktree is gone (saved)', async () => {
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-open-'))
+      const repo = path.join(tmp, 'repo'); fs.mkdirSync(repo)
+      // worktreePath points at a now-deleted dir (post-save) → falls back to path.
+      const m = manifest({ status: 'saved', repos: [{ name: 'app', path: repo, worktreePath: path.join(tmp, 'gone') }] })
+      const app = await build({ store: fakeStore({ get: () => m }) })
+      const res = await app.inject({ method: 'POST', url: '/api/portify/portify-1/open' })
+      expect(res.statusCode).toBe(200)
+      expect(res.json()).toMatchObject({ opened: true, paths: [repo] })
+      expect(vi.mocked(launchEditorDir)).toHaveBeenCalledWith('auto', repo)
+      fs.rmSync(tmp, { recursive: true, force: true })
+    })
+
+    it('409s when no directory is available to open', async () => {
+      const m = manifest({ repos: [{ name: 'app', path: '/no/such/repo' }] })
+      const app = await build({ store: fakeStore({ get: () => m }) })
+      const res = await app.inject({ method: 'POST', url: '/api/portify/portify-1/open' })
+      expect(res.statusCode).toBe(409)
+    })
+
+    it('reports opened:false with the path when the launch throws', async () => {
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-open-'))
+      const repo = path.join(tmp, 'repo'); fs.mkdirSync(repo)
+      vi.mocked(launchEditorDir).mockImplementationOnce(() => { throw new Error('no editor') })
+      const m = manifest({ repos: [{ name: 'app', path: repo }] })
+      const app = await build({ store: fakeStore({ get: () => m }) })
+      const res = await app.inject({ method: 'POST', url: '/api/portify/portify-1/open' })
+      expect(res.statusCode).toBe(200)
+      expect(res.json()).toMatchObject({ opened: false, paths: [repo], error: 'no editor' })
+      fs.rmSync(tmp, { recursive: true, force: true })
+    })
   })
 })

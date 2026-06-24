@@ -81,6 +81,12 @@ export function startExternalCoverage(
     ...(args.sessionUrl ? { externalSessionUrl: args.sessionUrl } : {}),
   }
   deps.store.save(manifest)
+  // The job now exists and is `running` — tell every open client so the feature's
+  // coverage pill flips to "Generating" and an open ledger re-attaches to the
+  // Generating screen live, without a refresh (cl_ws-driven-state). Same event
+  // the submit path uses; the client reaction (re-list states / re-attach) is
+  // idempotent for both the start and the finish of a coverage job.
+  publishWorkspaceEvent(deps.workspaceEvents, { type: 'coverage-changed', feature: args.feature })
   return { kind: 'started', manifest, context }
 }
 
