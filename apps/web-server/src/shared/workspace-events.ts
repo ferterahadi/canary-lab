@@ -21,7 +21,10 @@ export interface WorkspaceEventPublisher {
 }
 
 export class WorkspaceEventBus implements WorkspaceEventPublisher {
-  private readonly emitter = new EventEmitter()
+  // Broadcast bus: one 'event' listener per connected client, each removed on
+  // disconnect. The fan-out is unbounded by design, so disable Node's default
+  // 10-listener cap (which otherwise warns once >10 clients connect at once).
+  private readonly emitter = new EventEmitter().setMaxListeners(0)
 
   publish(event: WorkspaceEvent): void {
     this.emitter.emit('event', event)

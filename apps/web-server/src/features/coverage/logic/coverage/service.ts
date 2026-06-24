@@ -369,7 +369,7 @@ export function buildCoverageMappingContext(args: { featuresDir: string; feature
     tests: engineInputs.map((t) => ({
       testName: t.name,
       file: t.file && featureDir ? path.join(featureDir, t.file) : t.file,
-      assertions: t.assertions ?? [],
+      assertions: t.assertions!,
     })),
     prompt,
   }

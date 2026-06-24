@@ -155,6 +155,26 @@ export class FileBackedTaskStore<T> {
     this.emit({ kind: 'removed', id })
   }
 
+  /** Drop index rows whose record file is missing or unreadable — e.g. the
+   *  per-record directory was wiped out-of-band (a cleanup, a manual rm) without
+   *  going through `remove()`, leaving a "zombie" row that lists but can't be
+   *  opened or acted on. Emits `removed` for each pruned id so live clients drop
+   *  the row. Returns the pruned ids. */
+  pruneOrphans(): string[] {
+    const entries = this.readIndex()
+    const kept: TaskIndexEntry[] = []
+    const pruned: string[] = []
+    for (const e of entries) {
+      if (e.id && this.get(e.id) == null) pruned.push(e.id)
+      else kept.push(e)
+    }
+    if (pruned.length > 0) {
+      this.writeIndex(kept)
+      for (const id of pruned) this.emit({ kind: 'removed', id })
+    }
+    return pruned
+  }
+
   reconcileInterrupted(now: () => string): void {
     const r = this.config.reconcile
     if (!r) return

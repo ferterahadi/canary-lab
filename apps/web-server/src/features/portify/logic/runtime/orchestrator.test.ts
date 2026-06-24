@@ -368,6 +368,18 @@ describe('PortifyOrchestrator', () => {
       expect(m.verification?.failureDetail).toContain('port 3007') // raw boot detail preserved
     })
 
+    it('verifyExternalEdits uses empty-string fallback when boot error has no failureDetail', async () => {
+      const { deps } = makeDeps({
+        captureDiff: async () => '   ',
+        verify: async () => ({ ok: false, instances: [] }),
+      })
+      const orch = new PortifyOrchestrator(deps)
+      const m = await orch.verifyExternalEdits(await orch.startExternal())
+      expect(m.status).toBe('editing')
+      expect(m.verification?.failureDetail).toMatch(/no edits detected/i)
+      expect(m.verification?.failureDetail).not.toContain('Boot detail:')
+    })
+
     it('startExternal aborts and cleans up when isAborted fires after setup', async () => {
       const { deps } = makeDeps({ isAborted: () => true })
       const m = await new PortifyOrchestrator(deps).startExternal()

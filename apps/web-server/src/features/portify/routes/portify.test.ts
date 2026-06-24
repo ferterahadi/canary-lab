@@ -48,6 +48,7 @@ async function buildApp(deps: Partial<PortifyRouteDeps>) {
     revisePortify: deps.revisePortify ?? (async () => manifest({ status: 'editing', feedbackRounds: 1 })),
     removePortify: deps.removePortify ?? (async (workflowId) => ({ workflowId, removed: true as const })),
     loadAgentSession: deps.loadAgentSession ?? (() => null),
+    ...(deps.projectRoot !== undefined ? { projectRoot: deps.projectRoot } : {}),
   })
   return app
 }
@@ -322,6 +323,30 @@ describe('portifyRoutes', () => {
       const res = await app.inject({ method: 'POST', url: '/api/portify/portify-1/open' })
       expect(res.statusCode).toBe(200)
       expect(res.json()).toMatchObject({ opened: false, paths: [repo], error: 'no editor' })
+      fs.rmSync(tmp, { recursive: true, force: true })
+    })
+
+    it('uses loadProjectConfig when projectRoot is set (line 86 true branch)', async () => {
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-open-root-'))
+      const repo = path.join(tmp, 'repo'); fs.mkdirSync(repo)
+      const m = manifest({ repos: [{ name: 'app', path: repo }] })
+      const app = await build({ store: fakeStore({ get: () => m }), projectRoot: tmp })
+      const res = await app.inject({ method: 'POST', url: '/api/portify/portify-1/open' })
+      expect(res.statusCode).toBe(200)
+      expect(res.json()).toMatchObject({ opened: true, paths: [repo] })
+      fs.rmSync(tmp, { recursive: true, force: true })
+    })
+
+    it('uses String(err) when the throw is not an Error instance (line 93 false branch)', async () => {
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-open-nonerr-'))
+      const repo = path.join(tmp, 'repo'); fs.mkdirSync(repo)
+      // eslint-disable-next-line @typescript-eslint/only-throw-error
+      vi.mocked(launchEditorDir).mockImplementationOnce(() => { throw 'editor not found' })
+      const m = manifest({ repos: [{ name: 'app', path: repo }] })
+      const app = await build({ store: fakeStore({ get: () => m }) })
+      const res = await app.inject({ method: 'POST', url: '/api/portify/portify-1/open' })
+      expect(res.statusCode).toBe(200)
+      expect(res.json()).toMatchObject({ opened: false, paths: [repo], error: 'editor not found' })
       fs.rmSync(tmp, { recursive: true, force: true })
     })
   })

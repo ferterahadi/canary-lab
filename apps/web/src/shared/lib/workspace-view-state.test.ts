@@ -233,4 +233,11 @@ describe('workspace-view-state — run + dialog routing (R24)', () => {
     expect(state.task).toBe('eval-task-abc')
     expect(state.feature).toBe('checkout')
   })
+
+  it('returns null task when dialog=evaluation but task param is absent (|| null branch)', () => {
+    window.history.replaceState(null, '', '/?dialog=evaluation&feature=checkout')
+    const state = readPersistedView()
+    expect(state.dialog).toBe('evaluation')
+    expect(state.task).toBeNull()
+  })
 })

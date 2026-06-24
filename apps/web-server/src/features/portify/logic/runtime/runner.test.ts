@@ -479,6 +479,19 @@ describe('createPortifyRunner (integration)', () => {
       expect(await runner.remove('w')).toEqual({ workflowId: 'w', removed: true })
       expect(store.list()).toEqual([])
     })
+
+    it('remove still clears an orphaned row whose record dir was wiped (status from the index)', async () => {
+      const logsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-rmorphan-'))
+      roots.push(logsDir)
+      const { store, runner } = makeRunner('x', logsDir)
+      store.save(readyManifest({ status: 'failed', endedAt: 'now' }))
+      // Wipe the record dir out-of-band — the index row lingers, get() now 404s.
+      fs.rmSync(path.join(logsDir, 'portify', 'w'), { recursive: true, force: true })
+      expect(store.get('w')).toBeNull()
+      expect(store.list().map((e) => e.workflowId)).toEqual(['w'])
+      expect(await runner.remove('w')).toEqual({ workflowId: 'w', removed: true })
+      expect(store.list()).toEqual([])
+    })
   })
 
 })

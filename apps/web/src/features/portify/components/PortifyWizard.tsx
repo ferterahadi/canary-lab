@@ -67,6 +67,9 @@ export function PortifyWizard({
   const [m, setM] = useState<PortifyManifest | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // The workflow's record was wiped (e.g. logs cleanup) but its history row
+  // lingered — getPortify 404s. Surface that instead of hanging on "Loading…".
+  const [notFound, setNotFound] = useState(false)
   const [confirmLeave, setConfirmLeave] = useState(false)
   const [feedbackOpen, setFeedbackOpen] = useState(false)
   // Bumped after a revise pass to restart the poller (status flips back to
@@ -89,8 +92,13 @@ export function PortifyWizard({
       try {
         const next = await api.getPortify(workflowId)
         setM(next)
+        setNotFound(false)
         if (isTerminalOrParked(next.status)) stopPolling()
-      } catch { /* transient */ }
+      } catch (e) {
+        // A 404 is terminal, not transient: the record is gone, so stop polling
+        // and show the not-found state. Any other error stays transient (retry).
+        if (e instanceof api.ApiError && e.status === 404) { setNotFound(true); stopPolling() }
+      }
     }
     void tick()
     pollRef.current = window.setInterval(tick, 1500)
@@ -233,8 +241,20 @@ export function PortifyWizard({
             />
           )}
           {!workflowId && !blockedBy && feature && <PlanScreen feature={feature} agent={agent} busy={busy} onStart={start} />}
-          {workflowId && !m && (
+          {workflowId && !m && !notFound && (
             <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>Loading…</div>
+          )}
+          {workflowId && notFound && (
+            <NotFoundScreen
+              busy={busy}
+              onRemove={async () => {
+                setBusy(true)
+                try { await api.removePortify(workflowId) } catch { /* best-effort */ }
+                setBusy(false)
+                onClose()
+              }}
+              onClose={onClose}
+            />
           )}
           {/* Live, non-navigable states render straight from status. */}
           {workflowId && m && !navigable && (status === 'planning' || status === 'editing' || status === 'verifying') && (
@@ -397,6 +417,32 @@ function BlockedScreen({ active, onOpen, onClose }: { active: PortifyIndexEntry;
         <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
           <button type="button" className="cl-button-primary" onClick={onOpen} style={{ padding: '10px 20px' }}>
             Open {active.feature} →
+          </button>
+          <button type="button" onClick={onClose} style={{ ...ghostBtn, padding: '10px 18px' }}>Close</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// The workflow's record was wiped but its history row lingered (getPortify
+// 404). Tell the truth + offer to clear the dead row, instead of hanging on
+// "Loading…". Remove tolerates the missing record server-side.
+function NotFoundScreen({ busy, onRemove, onClose }: { busy: boolean; onRemove: () => void; onClose: () => void }) {
+  return (
+    <div style={{ minHeight: 'calc(100dvh - 200px)', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+      <div style={{ width: 'min(520px, 100%)', margin: '0 auto', textAlign: 'center' }}>
+        <div style={{ fontSize: 34, marginBottom: 14, opacity: 0.9 }}>🗑️</div>
+        <h2 style={{ fontSize: 21, fontWeight: 600, letterSpacing: '-0.01em', margin: '0 0 12px' }}>
+          This run’s data is no longer available
+        </h2>
+        <p style={{ fontSize: 14, color: 'var(--text-secondary)', lineHeight: 1.65, margin: '0 0 26px' }}>
+          Its record was removed (a logs cleanup, or a manual delete), so there’s nothing left to open.
+          You can clear the leftover history row.
+        </p>
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
+          <button type="button" className="cl-button-primary" onClick={onRemove} disabled={busy} style={{ padding: '10px 20px' }}>
+            {busy ? 'Removing…' : 'Remove from history'}
           </button>
           <button type="button" onClick={onClose} style={{ ...ghostBtn, padding: '10px 18px' }}>Close</button>
         </div>

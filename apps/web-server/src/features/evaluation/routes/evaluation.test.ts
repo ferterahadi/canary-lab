@@ -506,6 +506,26 @@ test('records checkout', async ({ page }) => {
     expect(fetched.statusCode).toBe(404)
   })
 
+  it('deletes a task that was never in the active map (active === undefined branch)', async () => {
+    const { app } = await build()
+    createEvaluationExportTask(logsDir, {
+      taskId: 'eval-no-active-map',
+      runId: 'r-no-active',
+      feature: 'checkout',
+      mode: 'raw',
+      status: 'completed',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+      downloadReady: true,
+      archiveBase: 'canary-lab-evaluation-checkout-r-no-active',
+    })
+    const deleted = await app.inject({
+      method: 'DELETE',
+      url: `/api/evaluation-exports/${encodeURIComponent('eval-no-active-map')}`,
+    })
+    expect(deleted.statusCode).toBe(204)
+  })
+
   it('cancels running evaluation export tasks when dismissed', async () => {
     writeManifestForRun('r-task-cancel', 'checkout', 'passed')
     let aborted = false

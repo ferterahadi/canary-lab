@@ -195,6 +195,17 @@ describe('applyExternalCoverageMappings — null summary and edge cases', () => 
     expect(result.applied).toEqual([])
   })
 
+  it('does not add to applied when applyTagToFile returns false (file does not exist — line 412 false branch)', async () => {
+    writeFeature('checkout')
+    await regeneratePrdSummary({ featuresDir, feature: 'checkout', now: '2026-01-01T00:00:00Z' })
+    const result = applyExternalCoverageMappings({
+      featuresDir, logsDir, feature: 'checkout',
+      mappings: [{ testName: 'shared', requirements: ['R1'], file: 'does-not-exist.spec.ts' }],
+      now: '2026-01-01T00:00:00Z',
+    })
+    expect(result.applied).toEqual([])
+  })
+
   it('falls back to fileByTestName when m.file is absent but testName is known', async () => {
     // m.file is undefined → file = m.file ?? fileByTestName.get(testName) = known path
     const dir = writeFeature('checkout')
