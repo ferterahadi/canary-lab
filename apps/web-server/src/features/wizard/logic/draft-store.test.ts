@@ -7,6 +7,7 @@ import {
   canTransition,
   createDraft,
   deleteDraft,
+  draftStatusOf,
   IllegalTransitionError,
   listDrafts,
   mergeRootDevDependencies,
@@ -324,6 +325,13 @@ describe('mergeRootDevDependencies', () => {
     const r = mergeRootDevDependencies(tmp, ['react'])
     expect(r).toEqual({ ok: true, packageJsonPath: pkg, added: [] })
     expect(JSON.parse(fs.readFileSync(pkg, 'utf8')).dependencies.react).toBe('^19.0.0')
+  })
+})
+
+describe('draftStatusOf', () => {
+  it('draftStatusOf returns the record status', () => {
+    expect(draftStatusOf({ status: 'created' } as any)).toBe('created')
+    expect(draftStatusOf({ status: 'spec-ready' } as any)).toBe('spec-ready')
   })
 })
 

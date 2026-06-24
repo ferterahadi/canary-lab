@@ -128,4 +128,11 @@ describe('PortifyRunStore', () => {
     fs.rmSync(path.join(logs, 'portify', 'a', 'portify.json'))
     expect(() => store.reconcileInterrupted(() => 'x')).not.toThrow()
   })
+
+  it('statusOf config callback extracts the manifest status field', () => {
+    const store = new PortifyRunStore(tmpLogs())
+    const statusOf = (store as any).store.config.statusOf as (m: PortifyManifest) => string
+    expect(statusOf(manifest({ status: 'planning' }))).toBe('planning')
+    expect(statusOf(manifest({ status: 'saved' }))).toBe('saved')
+  })
 })

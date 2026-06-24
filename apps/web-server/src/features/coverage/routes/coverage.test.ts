@@ -6,14 +6,21 @@ import Fastify, { type FastifyInstance } from 'fastify'
 
 // Coverage generation is LLM-only; the route drives the real service, so swap the
 // agent-backed summarizer/mapper for the test fakes at the module boundary.
+//
+// The fakes are loaded via vi.hoisted (which runs BEFORE the vi.mock registrations
+// below) so the fixture's own `import { reconcileRequirementIds } from
+// '../prd-summary'` resolves to the REAL module. Importing the fixture *inside* a
+// mock factory deadlocks instead: the factory would await an import of the fixture,
+// which re-enters the very module being mocked while its factory is still running.
+const { fakeSummarize, fakePropose } = await vi.hoisted(
+  async () => import('../../coverage/logic/coverage/__fixtures__/fake-coverage-agents'),
+)
 vi.mock('../../coverage/logic/coverage/prd-summary', async (importActual) => {
   const actual = await importActual<typeof import('../../coverage/logic/coverage/prd-summary')>()
-  const { fakeSummarize } = await import('../../coverage/logic/coverage/__fixtures__/fake-coverage-agents')
   return { ...actual, summarizePrd: fakeSummarize }
 })
 vi.mock('../../coverage/logic/coverage/annotate-engine', async (importActual) => {
   const actual = await importActual<typeof import('../../coverage/logic/coverage/annotate-engine')>()
-  const { fakePropose } = await import('../../coverage/logic/coverage/__fixtures__/fake-coverage-agents')
   return { ...actual, proposeCoverageMappings: fakePropose }
 })
 

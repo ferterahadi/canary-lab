@@ -109,4 +109,11 @@ describe('BenchmarkRunStore', () => {
     expect(store.get('b1')).toBeNull()
     expect(events).toContainEqual({ kind: 'removed', benchmarkId: 'b1' })
   })
+
+  it('statusOf config callback extracts the manifest status field', () => {
+    const store = new BenchmarkRunStore(logsDir)
+    const statusOf = (store as any).store.config.statusOf as (m: BenchmarkManifest) => string
+    expect(statusOf(makeManifest({ status: 'running' }))).toBe('running')
+    expect(statusOf(makeManifest({ status: 'done', endedAt: 'e' }))).toBe('done')
+  })
 })

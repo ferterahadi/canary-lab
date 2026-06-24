@@ -744,5 +744,73 @@ describe('createPortifyRunner (branch coverage)', () => {
       } as PortifyManifest)
       await expect(runner.submitExternalPortify('w')).rejects.toMatchObject({ statusCode: 409 })
     })
+
+    it('startExternalPortify 404s when the feature is unknown', async () => {
+      const { featuresDir, logsDir } = await singleFixture()
+      const { runner } = makeRunner(featuresDir, logsDir)
+      await expect(
+        runner.startExternalPortify({ feature: 'nonexistent', clientKind: 'claude', sessionId: 's1' }),
+      ).rejects.toMatchObject({ statusCode: 404 })
+    })
+
+    it('startExternalPortify includes sessionUrl in the external session record when provided', async () => {
+      const { featuresDir, logsDir } = await singleFixture()
+      const { store, runner } = makeRunner(featuresDir, logsDir)
+      const result = await runner.startExternalPortify({
+        feature: 'myfeat',
+        clientKind: 'claude',
+        sessionId: 's1',
+        sessionUrl: 'https://claude.ai/chat/abc-123',
+      })
+      await waitForStatus(store, result.workflowId, ['editing'])
+      const m = store.get(result.workflowId)!
+      expect(m.external?.sessionUrl).toBe('https://claude.ai/chat/abc-123')
+      await runner.cancel(result.workflowId)
+    })
+
+    it('startExternalPortify 409s when orchestrator setup fails (startExternal returns non-editing)', async () => {
+      // Use an invalid git repo so worktree setup throws
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-bad-'))
+      roots.push(root)
+      const featuresDir = path.join(root, 'features')
+      const featureDir = path.join(featuresDir, 'badfeature')
+      const notAGitRepo = path.join(root, 'not-a-repo')
+      fs.mkdirSync(featureDir, { recursive: true })
+      fs.mkdirSync(notAGitRepo, { recursive: true })
+      // Write a feature config pointing to a non-git dir so worktree creation fails
+      fs.writeFileSync(
+        path.join(featureDir, 'feature.config.cjs'),
+        `const config = { name: 'badfeature', description: 'd', envs: ['local'], repos: [{ name: 'app', localPath: ${JSON.stringify(notAGitRepo)}, startCommands: [{ command: 'node x', name: 'app', healthCheck: { http: { url: 'http://localhost:3000/', timeoutMs: 30, deadlineMs: 250 } } }] }], featureDir: __dirname }; module.exports = { config }`,
+      )
+      const logsDir = path.join(root, 'logs')
+      const { runner } = makeRunner(featuresDir, logsDir)
+      await expect(
+        runner.startExternalPortify({ feature: 'badfeature', clientKind: 'claude', sessionId: 's1' }),
+      ).rejects.toMatchObject({ statusCode: 409 })
+    })
+
+    it('submitExternalPortify 409s when workflow is not in editing state', async () => {
+      const { featuresDir, logsDir } = await singleFixture()
+      const { store, runner } = makeRunner(featuresDir, logsDir)
+      const result = await runner.startExternalPortify({ feature: 'myfeat', clientKind: 'claude', sessionId: 's1' })
+      await waitForStatus(store, result.workflowId, ['editing'])
+      // Simulate verification already completed by manually patching the manifest
+      const m = store.get(result.workflowId)!
+      store.save({ ...m, status: 'ready-to-save' })
+      await expect(runner.submitExternalPortify(result.workflowId)).rejects.toMatchObject({ statusCode: 409 })
+      await runner.cancel(result.workflowId)
+    })
+
+    it('submitExternalPortify 409s when there is no active orchestrator (server restart simulation)', async () => {
+      const { featuresDir, logsDir } = await singleFixture()
+      const { store, runner: runner1 } = makeRunner(featuresDir, logsDir)
+      const result = await runner1.startExternalPortify({ feature: 'myfeat', clientKind: 'claude', sessionId: 's1' })
+      await waitForStatus(store, result.workflowId, ['editing'])
+
+      // Create a second runner instance (simulates server restart) — no active orchestrators
+      const { runner: runner2 } = makeRunner(featuresDir, logsDir)
+      await expect(runner2.submitExternalPortify(result.workflowId)).rejects.toMatchObject({ statusCode: 409 })
+      await runner1.cancel(result.workflowId)
+    })
   })
 })

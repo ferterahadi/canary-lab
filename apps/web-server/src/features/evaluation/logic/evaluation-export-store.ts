@@ -79,6 +79,8 @@ export function evaluationExportTaskPaths(logsDir: string, taskId: string): Eval
   }
 }
 
+export function evalTaskStatusOf(r: EvaluationExportTaskRecord): string { return r.status }
+
 // Record I/O delegates to the shared FileBackedTaskStore. Layout
 // (evaluation-exports/<taskId>/task.json) matches `evaluationExportTaskPaths` so
 // the per-task sidecars (export.log, export.zip) still live alongside the record.
@@ -90,7 +92,7 @@ function evalStore(logsDir: string): FileBackedTaskStore<EvaluationExportTaskRec
     dirName: 'evaluation-exports',
     recordFile: 'task.json',
     idOf: (r) => r.taskId,
-    statusOf: (r) => r.status,
+    statusOf: evalTaskStatusOf,
     validate: (raw) => normalizeTaskRecord(raw as EvaluationExportTaskRecord),
     indexEntryOf: (r) => ({
       id: r.taskId,

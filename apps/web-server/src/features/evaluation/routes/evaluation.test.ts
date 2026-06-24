@@ -669,3 +669,126 @@ test('records checkout', async ({ page }) => {
     expect(res.json().error).toContain('after the run finishes')
   })
 })
+
+describe('GET /api/evaluation-exports/:taskId/agent-session', () => {
+  it('404s with task-not-found when the task does not exist', async () => {
+    const { app } = await build()
+    const res = await app.inject({ method: 'GET', url: '/api/evaluation-exports/nonexistent-task/agent-session' })
+    expect(res.statusCode).toBe(404)
+    expect(res.json().reason).toBe('task-not-found')
+  })
+
+  it('404s with no-session-ref when the task has no sessionRef', async () => {
+    createEvaluationExportTask(logsDir, {
+      taskId: 'eval-task-nosess',
+      runId: 'r1',
+      feature: 'foo',
+      mode: 'raw',
+      status: 'running',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+      downloadReady: false,
+      archiveBase: 'archive',
+    })
+    const { app } = await build()
+    const res = await app.inject({ method: 'GET', url: '/api/evaluation-exports/eval-task-nosess/agent-session' })
+    expect(res.statusCode).toBe(404)
+    expect(res.json().reason).toBe('no-session-ref')
+  })
+
+  it('404s with no-session-ref when the task has a claude sessionRef but the log cannot be found', async () => {
+    // resolveManifestSessionRef for 'claude' calls findClaudeLogBySessionId, which returns null
+    // when the session isn't in ~/.claude/projects/ — so the route returns no-session-ref.
+    createEvaluationExportTask(logsDir, {
+      taskId: 'eval-task-nolog',
+      runId: 'r1',
+      feature: 'foo',
+      mode: 'localized',
+      status: 'running',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+      downloadReady: false,
+      archiveBase: 'archive',
+      sessionRef: { agent: 'claude', sessionId: 'sess-unknown-xyz' },
+    })
+    const { app } = await build({ projectRoot: tmpDir })
+    const res = await app.inject({ method: 'GET', url: '/api/evaluation-exports/eval-task-nolog/agent-session' })
+    expect(res.statusCode).toBe(404)
+    expect(res.json().reason).toBe('no-session-ref')
+  })
+})
+
+describe('evaluation rewrite write-helper catch blocks', () => {
+  it('swallows EISDIR on writeCachedEvaluationRewrite when evaluation-rewrite.json is a directory', async () => {
+    writeManifestForRun('r-eisdir-cached', 'checkout', 'passed')
+    const runDir = runDirFor(logsDir, 'r-eisdir-cached')
+    // Block writeCachedEvaluationRewrite: target path is a directory, so writeFileSync throws EISDIR
+    fs.mkdirSync(path.join(runDir, 'evaluation-rewrite.json'), { recursive: true })
+
+    const { app } = await build({
+      projectRoot: tmpDir,
+      generateEvaluationRewrite: async () => ({
+        featureTitle: 'Checkout',
+        summary: 'Summary.',
+        cases: [{ title: 'Case', whatWasChecked: 'Check.', whyItMatters: 'Impact.', confidence: 'High.' }],
+      }),
+    })
+
+    const started = await app.inject({
+      method: 'POST',
+      url: '/api/runs/r-eisdir-cached/evaluation-export',
+      payload: { mode: 'localized' },
+    })
+    expect(started.statusCode).toBe(202)
+    const task = await waitForEvaluationTask(app, started.json().taskId)
+    expect(task.status).toBe('completed')
+  })
+
+  it('swallows EISDIR on writeEvaluationRewriteError when evaluation-rewrite-error.txt is a directory', async () => {
+    writeManifestForRun('r-eisdir-error', 'checkout', 'passed')
+    const runDir = runDirFor(logsDir, 'r-eisdir-error')
+    // Block writeEvaluationRewriteError: target path is a directory, so writeFileSync throws EISDIR
+    fs.mkdirSync(path.join(runDir, 'evaluation-rewrite-error.txt'), { recursive: true })
+
+    const { app } = await build({
+      projectRoot: tmpDir,
+      generateEvaluationRewrite: async () => { throw new Error('forced rewrite error') },
+    })
+
+    const started = await app.inject({
+      method: 'POST',
+      url: '/api/runs/r-eisdir-error/evaluation-export',
+      payload: { mode: 'localized' },
+    })
+    expect(started.statusCode).toBe(202)
+    const task = await waitForEvaluationTask(app, started.json().taskId)
+    expect(task.status).toBe('completed')
+  })
+
+  it('swallows EISDIR on clearEvaluationRewriteError when evaluation-rewrite-error.txt is a non-empty directory', async () => {
+    writeManifestForRun('r-eisdir-clear', 'checkout', 'passed')
+    const runDir = runDirFor(logsDir, 'r-eisdir-clear')
+    // Block clearEvaluationRewriteError: rmSync on a non-empty directory (without recursive) throws EISDIR/ENOTEMPTY
+    const errorDir = path.join(runDir, 'evaluation-rewrite-error.txt')
+    fs.mkdirSync(errorDir, { recursive: true })
+    fs.writeFileSync(path.join(errorDir, 'keep'), '')
+
+    const { app } = await build({
+      projectRoot: tmpDir,
+      generateEvaluationRewrite: async () => ({
+        featureTitle: 'Checkout',
+        summary: 'Summary.',
+        cases: [{ title: 'Case', whatWasChecked: 'Check.', whyItMatters: 'Impact.', confidence: 'High.' }],
+      }),
+    })
+
+    const started = await app.inject({
+      method: 'POST',
+      url: '/api/runs/r-eisdir-clear/evaluation-export',
+      payload: { mode: 'localized' },
+    })
+    expect(started.statusCode).toBe(202)
+    const task = await waitForEvaluationTask(app, started.json().taskId)
+    expect(task.status).toBe('completed')
+  })
+})

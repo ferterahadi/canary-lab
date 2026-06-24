@@ -17,6 +17,7 @@ import {
   deleteEvaluationExportTask,
   evaluationExportTaskView,
   writeEvaluationExportFilesZip,
+  evalTaskStatusOf,
   type EvaluationExportTaskRecord,
 } from './evaluation-export-store'
 
@@ -216,5 +217,11 @@ describe('evaluation-export-store', () => {
     fs.writeFileSync(p.taskJson, JSON.stringify({ ...makeRecord({ taskId }), sessionRef: null }), 'utf8')
     // normalizeTaskRecord calls isSessionRef(null) → false → returns null
     expect(readEvaluationExportTask(tmpDir, taskId)).toBeNull()
+  })
+
+  it('evalTaskStatusOf returns the record status', () => {
+    expect(evalTaskStatusOf(makeRecord({ status: 'running' }))).toBe('running')
+    expect(evalTaskStatusOf(makeRecord({ status: 'completed' }))).toBe('completed')
+    expect(evalTaskStatusOf(makeRecord({ status: 'failed' }))).toBe('failed')
   })
 })
