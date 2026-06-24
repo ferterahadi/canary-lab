@@ -413,6 +413,17 @@ describe('MCP HTTP server (smoke)', () => {
       expect(fs.existsSync(path.join(featureDir, 'feature.config.cjs'))).toBe(true)
       expect(fs.existsSync(path.join(featureDir, 'e2e', 'checkout_flow.spec.ts'))).toBe(false)
 
+      // A fresh feature has no source doc → coverage is blocked and must steer the agent to
+      // ASK the user for the PRD (not invent one), via the `next:` field on the ledger.
+      const blockedCoverage = await client.callTool({
+        name: 'get_feature_coverage',
+        arguments: { feature: 'checkout_flow' },
+      })
+      const blockedBody = JSON.parse((blockedCoverage.content?.[0] as { text: string }).text)
+      expect(blockedBody.state.coverage).toBe('blocked')
+      expect(blockedBody.next).toMatch(/attach or paste the PRD/i)
+      expect(blockedBody.next).toContain('checkout_flow')
+
       const captured = await client.callTool({
         name: 'capture_feature_env_files',
         arguments: {

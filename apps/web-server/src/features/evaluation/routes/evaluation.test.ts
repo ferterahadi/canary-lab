@@ -1,8 +1,10 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import Fastify from 'fastify'
+import fastifyWebsocket from '@fastify/websocket'
+import WebSocket from 'ws'
 import { evaluationRoutes } from './evaluation'
 import { createRegistry, RunStore } from '../../runs/logic/run-store'
 import { createEvaluationExportTask, evaluationExportsDir } from '../logic/evaluation-export-store'
@@ -52,6 +54,31 @@ async function build(opts: {
     workspaceEvents: opts.events ? { publish: (event) => opts.events!.push(event) } : undefined,
   })
   return { app, registry, store }
+}
+
+async function buildWithWs(opts: Parameters<typeof build>[0] = {}) {
+  const registry = createRegistry()
+  const store = new RunStore(logsDir, registry)
+  const app = Fastify()
+  await app.register(fastifyWebsocket)
+  await app.register(evaluationRoutes, {
+    featuresDir,
+    projectRoot: opts.projectRoot,
+    store,
+    generateEvaluationRewrite: opts.generateEvaluationRewrite,
+    workspaceEvents: opts.events ? { publish: (event) => opts.events!.push(event) } : undefined,
+  })
+  return { app, registry, store }
+}
+
+function collectWsMessages(ws: WebSocket, timeout = 2000): Promise<unknown[]> {
+  return new Promise((resolve, reject) => {
+    const msgs: unknown[] = []
+    const timer = setTimeout(() => resolve(msgs), timeout)
+    ws.on('message', (data) => { msgs.push(JSON.parse(data.toString())) })
+    ws.on('close', () => { clearTimeout(timer); resolve(msgs) })
+    ws.on('error', (err) => { clearTimeout(timer); reject(err) })
+  })
 }
 
 async function waitForEvaluationTask(app: Awaited<ReturnType<typeof build>>['app'], taskId: string) {
@@ -715,6 +742,189 @@ describe('GET /api/evaluation-exports/:taskId/agent-session', () => {
     const res = await app.inject({ method: 'GET', url: '/api/evaluation-exports/eval-task-nolog/agent-session' })
     expect(res.statusCode).toBe(404)
     expect(res.json().reason).toBe('no-session-ref')
+  })
+})
+
+describe('loadEvaluationRewrite — onSession and cache branches', () => {
+  it('fires onSession callback when the generate function calls it (patches task sessionRef)', async () => {
+    writeManifestForRun('r-onsession', 'checkout', 'passed')
+    const events: WorkspaceEvent[] = []
+    const generateEvaluationRewrite = vi.fn(
+      async (_detail: unknown, _adapter: unknown, _projectRoot: unknown, options?: { onSession?: (s: { agent: 'claude' | 'codex'; sessionId: string }) => void }) => {
+        options?.onSession?.({ agent: 'claude', sessionId: 'sess-onession-xyz' })
+        return null
+      },
+    )
+    const { app } = await build({ projectRoot: tmpDir, generateEvaluationRewrite, events })
+
+    const started = await app.inject({
+      method: 'POST', url: '/api/runs/r-onsession/evaluation-export', payload: { mode: 'localized' },
+    })
+    await waitForEvaluationTask(app, started.json().taskId)
+
+    const task = await app.inject({ method: 'GET', url: `/api/evaluation-exports/${encodeURIComponent(started.json().taskId)}` })
+    // The onSession callback patched the task's sessionRef
+    expect(task.json().sessionRef).toEqual({ agent: 'claude', sessionId: 'sess-onession-xyz' })
+    // An evaluation-export-updated workspace event fired with the patched sessionRef
+    expect(events.some(
+      (e) => e.type === 'evaluation-export-updated' && (e as { task: { sessionRef?: { sessionId: string } } }).task.sessionRef?.sessionId === 'sess-onession-xyz',
+    )).toBe(true)
+  })
+
+  it('reuses cached localized wording on a second export for the same run (if(cached) true branch)', async () => {
+    writeManifestForRun('r-cache-reuse', 'checkout', 'passed')
+    let callCount = 0
+    const generateEvaluationRewrite = vi.fn(async () => {
+      callCount += 1
+      return {
+        featureTitle: 'Cached',
+        summary: 'Cached summary.',
+        cases: [{ title: 'C', whatWasChecked: 'W', whyItMatters: 'M', confidence: 'H' }],
+      }
+    })
+    const { app } = await build({ projectRoot: tmpDir, generateEvaluationRewrite })
+
+    // First export — generate is called and result is cached.
+    const first = await app.inject({ method: 'POST', url: '/api/runs/r-cache-reuse/evaluation-export', payload: { mode: 'localized' } })
+    await waitForEvaluationTask(app, first.json().taskId)
+    expect(callCount).toBe(1)
+
+    // Second export — readCachedEvaluationRewrite finds the file; generate is NOT called again.
+    const second = await app.inject({ method: 'POST', url: '/api/runs/r-cache-reuse/evaluation-export', payload: { mode: 'localized' } })
+    await waitForEvaluationTask(app, second.json().taskId)
+    expect(callCount).toBe(1) // generate was only called once
+  })
+
+  it('ignores a cached file whose formatVersion is wrong and regenerates (readCachedEvaluationRewrite returns undefined)', async () => {
+    writeManifestForRun('r-bad-version', 'checkout', 'passed')
+    // Pre-write an evaluation-rewrite.json with wrong formatVersion (0 ≠ current).
+    const runDir = runDirFor(logsDir, 'r-bad-version')
+    fs.mkdirSync(runDir, { recursive: true })
+    fs.writeFileSync(
+      path.join(runDir, 'evaluation-rewrite.json'),
+      JSON.stringify({ formatVersion: 0, featureTitle: 'Stale', summary: 'stale', cases: [] }),
+    )
+    let called = false
+    const generateEvaluationRewrite = vi.fn(async () => {
+      called = true
+      return null  // returning null is fine — tests the branch was reached
+    })
+    const { app } = await build({ projectRoot: tmpDir, generateEvaluationRewrite })
+
+    const started = await app.inject({ method: 'POST', url: '/api/runs/r-bad-version/evaluation-export', payload: { mode: 'localized' } })
+    const task = await waitForEvaluationTask(app, started.json().taskId)
+
+    // stale cache was ignored; generator was called (covers readCachedEvaluationRewrite returning undefined)
+    expect(called).toBe(true)
+    expect(task.status).toBe('completed')
+  })
+})
+
+describe('WS /ws/evaluation-exports/:taskId', () => {
+  let serverAddress: string
+
+  afterEach(async () => {
+    serverAddress = ''
+  })
+
+  it('sends an error and closes when the task does not exist (task-not-found branch)', async () => {
+    const { app } = await buildWithWs()
+    serverAddress = await app.listen({ port: 0, host: '127.0.0.1' })
+    try {
+      const wsUrl = `ws://127.0.0.1:${new URL(serverAddress).port}/ws/evaluation-exports/no-such-task`
+      const ws = new WebSocket(wsUrl)
+      const msgs = await collectWsMessages(ws)
+      expect(msgs).toContainEqual(expect.objectContaining({ type: 'error' }))
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('sends log data and exit(0) for a completed task (no active, log present)', async () => {
+    const { app } = await buildWithWs()
+    // Create a completed export task with an existing log.
+    createEvaluationExportTask(logsDir, {
+      taskId: 'eval-ws-completed',
+      runId: 'r-ws',
+      feature: 'checkout',
+      mode: 'raw',
+      status: 'completed',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+      downloadReady: true,
+      archiveBase: 'base',
+    })
+    // Write a log file so log.length > 0.
+    const exportDir = path.join(evaluationExportsDir(logsDir), 'eval-ws-completed')
+    fs.mkdirSync(exportDir, { recursive: true })
+    fs.writeFileSync(path.join(exportDir, 'export.log'), '[evaluation] task completed\n')
+
+    serverAddress = await app.listen({ port: 0, host: '127.0.0.1' })
+    try {
+      const wsUrl = `ws://127.0.0.1:${new URL(serverAddress).port}/ws/evaluation-exports/eval-ws-completed`
+      const ws = new WebSocket(wsUrl)
+      const msgs = await collectWsMessages(ws)
+      expect(msgs.some((m) => (m as { type: string }).type === 'data')).toBe(true)
+      expect(msgs.some((m) => (m as { type: string; code: number }).type === 'exit' && (m as { type: string; code: number }).code === 0)).toBe(true)
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('sends exit(1) for a failed task with no log (log.length = 0 false branch, exit code 1)', async () => {
+    const { app } = await buildWithWs()
+    createEvaluationExportTask(logsDir, {
+      taskId: 'eval-ws-failed',
+      runId: 'r-ws-failed',
+      feature: 'checkout',
+      mode: 'raw',
+      status: 'failed',
+      error: 'oops',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+      downloadReady: false,
+      archiveBase: 'base',
+    })
+    // No log file → log.length === 0.
+    serverAddress = await app.listen({ port: 0, host: '127.0.0.1' })
+    try {
+      const wsUrl = `ws://127.0.0.1:${new URL(serverAddress).port}/ws/evaluation-exports/eval-ws-failed`
+      const ws = new WebSocket(wsUrl)
+      const msgs = await collectWsMessages(ws)
+      expect(msgs.some((m) => (m as { type: string; code: number }).type === 'exit' && (m as { type: string; code: number }).code === 1)).toBe(true)
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('subscribes to live output when a task is still running (active broker path)', async () => {
+    writeManifestForRun('r-ws-running', 'checkout', 'passed')
+    let resolveGen: (v: null) => void
+    const generateEvaluationRewrite = vi.fn(
+      () => new Promise<null>((res) => { resolveGen = res }),
+    )
+    const { app } = await buildWithWs({ projectRoot: tmpDir, generateEvaluationRewrite })
+
+    const started = await app.inject({
+      method: 'POST', url: '/api/runs/r-ws-running/evaluation-export', payload: { mode: 'localized' },
+    })
+    const taskId = started.json().taskId
+
+    serverAddress = await app.listen({ port: 0, host: '127.0.0.1' })
+    try {
+      const wsUrl = `ws://127.0.0.1:${new URL(serverAddress).port}/ws/evaluation-exports/${encodeURIComponent(taskId)}`
+      const ws = new WebSocket(wsUrl)
+
+      // Wait for WS to open, then let the generator resolve so the task completes.
+      await new Promise<void>((res) => ws.on('open', () => res()))
+      resolveGen!(null)
+
+      const msgs = await collectWsMessages(ws)
+      // The WS receives at least one message (data or exit) from the active broker.
+      expect(msgs.length).toBeGreaterThan(0)
+    } finally {
+      await app.close()
+    }
   })
 })
 

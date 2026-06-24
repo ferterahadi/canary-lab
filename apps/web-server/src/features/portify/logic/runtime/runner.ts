@@ -11,8 +11,8 @@ import { type WorktreeHandle } from '../../../runs/logic/runtime/repo-worktree'
 import { PortifyRunStore } from './store'
 import { PortifyOrchestrator } from './orchestrator'
 import { buildPortifyPaths, portifyDir } from './paths'
-import { createBranchAndWorktree, captureDiff, changedFiles, discardWorktree, portifyBranchName } from './git-ops'
-import { writeOverlay, captureTouchedFiles, type OverlayRepoInput } from './overlay'
+import { createBranchAndWorktree, captureDiff, changedFiles, discardWorktree, portifyBranchName, applyOverlay } from './git-ops'
+import { writeOverlay, readOverlay, captureTouchedFiles, type OverlayRepoInput } from './overlay'
 import { runPortifyAgent, writePortifyClaudeRef } from './agent'
 import { buildPortifyPrompt, buildPortifyRetryPrompt, buildPortifyFeedbackPrompt, type RepoEditTarget } from './prompt'
 import { verifyDoubleBoot } from './verify'
@@ -83,12 +83,82 @@ interface ActiveWorkflow {
   /** Canonical featureDir diff baseline for the config edit. */
   configSnapshotRef: string
   abort: () => void
+  /** Sibling overlays pre-applied into the scratch worktree(s) at setup, so the
+   *  agent/client doesn't redo a rewrite the same app already received. Surfaced
+   *  in the prompt + external instructions; the borrowed lines also flow into
+   *  this feature's own captured diff/overlay (self-contained, no dependency). */
+  seededFrom: { feature: string; repos: string[] }[]
   /** Set once the orchestrator is constructed; drives user-feedback revise passes. */
   orchestrator?: PortifyOrchestrator
 }
 
 export function safeKey(s: string): string {
   return s.replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'root'
+}
+
+/** A reusable port patch another feature already saved for the same git root. */
+interface BorrowCandidate {
+  /** The sibling feature whose overlay this came from. */
+  feature: string
+  /** Unified diff content to pre-apply into the scratch worktree. */
+  patch: string
+  /** HEAD the sibling captured the patch against (prefer an exact match). */
+  baseSha: string
+  /** ISO capture time — newest wins when several siblings match. */
+  capturedAt: string
+}
+
+/**
+ * Index every OTHER feature's saved overlay by the git root its patch targets,
+ * so a new port-ification can borrow an existing rewrite for the same app
+ * instead of redoing it. Skips empty (source-native) overlays — there's nothing
+ * to apply. Resolving a sibling repo's git root requires the same path dance as
+ * setup (resolveRepoPath → getGitRoot).
+ */
+async function buildSiblingOverlayIndex(
+  features: FeatureConfig[],
+  currentFeature: string,
+): Promise<Map<string, BorrowCandidate[]>> {
+  const index = new Map<string, BorrowCandidate[]>()
+  for (const f of features) {
+    if (f.name === currentFeature) continue
+    const overlay = readOverlay(f.featureDir)
+    if (!overlay) continue
+    for (const repo of overlay.meta.repos) {
+      const patch = overlay.patches[repo.name]
+      if (!patch || !patch.trim()) continue // source-native overlay — nothing to borrow
+      const decl = (f.repos ?? []).find((r) => r.name === repo.name)
+      if (!decl) continue
+      let root: string | null = null
+      try { root = await getGitRoot(resolveRepoPath(decl.localPath)) } catch { /* unresolved repo — skip */ }
+      if (!root) continue
+      const list = index.get(root) ?? []
+      list.push({ feature: f.name, patch, baseSha: repo.baseSha, capturedAt: overlay.meta.capturedAt })
+      index.set(root, list)
+    }
+  }
+  return index
+}
+
+/**
+ * Note for the agent/client when sibling overlays were pre-applied to the
+ * worktree — so it reviews the existing edits + declares config slots instead
+ * of rewriting from scratch (and isn't surprised by a populated tree).
+ */
+export function buildSeededNote(seededFrom: { feature: string; repos: string[] }[]): string | undefined {
+  if (seededFrom.length === 0) return undefined
+  const from = seededFrom.map((s) => `"${s.feature}" (${s.repos.join(', ')})`).join('; ')
+  return `NOTE: the same app was already port-ified for another feature, so its port-injection patch from ${from} has been PRE-APPLIED to the worktree source — the listeners likely already read injected ports. Review the existing edits; you may only need to declare the matching \`ports\` slots in the feature config. A no-op source change is fine — the concurrent double-boot is what proves it.`
+}
+
+/** Pick the best sibling patch for a root: exact base-SHA match first, then newest. */
+function pickBorrowable(candidates: BorrowCandidate[] | undefined, baseSha: string): BorrowCandidate | null {
+  if (!candidates || candidates.length === 0) return null
+  return [...candidates].sort(
+    (a, b) =>
+      Number(b.baseSha === baseSha) - Number(a.baseSha === baseSha) ||
+      b.capturedAt.localeCompare(a.capturedAt),
+  )[0]
 }
 
 export function createPortifyRunner(deps: PortifyRunnerDeps) {
@@ -184,6 +254,7 @@ export function createPortifyRunner(deps: PortifyRunnerDeps) {
       configPath,
       originalConfig,
       configSnapshotRef: 'HEAD',
+      seededFrom: [],
       abort: () => {
         aborted = true
         for (const c of children) { try { c.kill('SIGTERM') } catch { /* gone */ } }
@@ -209,6 +280,10 @@ export function createPortifyRunner(deps: PortifyRunnerDeps) {
 
       setup: async () => {
         const states: PortifyRepoState[] = []
+        // Borrow: if another feature already saved a port overlay for the same
+        // app (git root), pre-apply it so this workflow starts from the existing
+        // rewrite instead of redoing it. Built once; matched per group below.
+        const siblingOverlays = await buildSiblingOverlayIndex(deps.loadFeatures(), feature.name)
         for (const group of state.groups) {
           const wt = await createBranchAndWorktree({
             repoName: group.key,
@@ -227,6 +302,23 @@ export function createPortifyRunner(deps: PortifyRunnerDeps) {
             member.editPath = rel ? path.join(wt.handle.worktreeRoot, rel) : wt.handle.worktreeRoot
             states.push({ name: member.name, path: member.path, worktreePath: wt.handle.worktreeRoot, baseSha: wt.baseSha })
           }
+          // Apply the borrowed patch AFTER snapshotRef is captured, so the
+          // borrowed lines land in this feature's own captured diff/overlay
+          // (self-contained). Borrowing is an optimization — never fatal.
+          const borrowed = pickBorrowable(siblingOverlays.get(group.sourceRoot), wt.baseSha)
+          if (borrowed) {
+            const seedPatch = path.join(dir, `seed-${group.key}.patch`)
+            try {
+              fs.writeFileSync(seedPatch, borrowed.patch)
+              const outcome = await applyOverlay(wt.handle.worktreeRoot, seedPatch)
+              if (outcome.kind === 'ok') {
+                state.seededFrom.push({ feature: borrowed.feature, repos: group.members.map((m) => m.name) })
+              }
+              // A conflict/error just means we couldn't cleanly seed (base
+              // drift, overlapping edits) — fall through to a from-scratch edit.
+            } catch { /* best-effort seed */ }
+            finally { try { fs.rmSync(seedPatch, { force: true }) } catch { /* gone */ } }
+          }
         }
         // Baseline the canonical config (edited in place) before the agent runs.
         state.configSnapshotRef = (await snapshotWorkingTree(feature.featureDir)) ?? 'HEAD'
@@ -238,7 +330,7 @@ export function createPortifyRunner(deps: PortifyRunnerDeps) {
         // member has an editPath and every group a handle.
         const targets: RepoEditTarget[] = allMembers().map((m) => ({ name: m.name, editPath: m.editPath! }))
         const prompt = attempt === 1 || !failureDetail
-          ? buildPortifyPrompt(feature, targets)
+          ? buildPortifyPrompt(feature, targets, buildSeededNote(state.seededFrom))
           : buildPortifyRetryPrompt(feature, failureDetail)
         await runAgentWithPrompt(prompt, attempt > 1)
       },
@@ -367,7 +459,7 @@ export function createPortifyRunner(deps: PortifyRunnerDeps) {
       workflowId,
       targets,
       configPath: path.join(feature.featureDir, 'feature.config.cjs'),
-      instructions: buildPortifyPrompt(feature, targets.map((t) => ({ name: t.name, editPath: t.editPath }))),
+      instructions: buildPortifyPrompt(feature, targets.map((t) => ({ name: t.name, editPath: t.editPath })), buildSeededNote(state.seededFrom)),
     }
   }
 

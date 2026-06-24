@@ -226,6 +226,33 @@ describe('stripCoverageTags', () => {
   })
 })
 
+describe('stripCoverageTags — planStripEdit edge cases', () => {
+  it('handles a string-literal tag (not an array) that contains only coverage tokens', () => {
+    // tag: '@req-R1' (string, not array) → existing = ['@req-R1'], kept = [] → drops details
+    const src = `test('t', { tag: '@req-R1' }, async () => {})`
+    const out = stripCoverageTags(src)
+    expect(out).toBe(`test('t', async () => {})`)
+    expect(out).not.toContain('@req-R1')
+  })
+
+  it('skips non-string-literal elements in tag array while stripping coverage tokens', () => {
+    // tag: [someVar, '@req-R1'] — someVar is not a StringLiteralLike, skipped;
+    // '@req-R1' is collected then filtered out → kept = [] → drops details.
+    const src = `test('t', { tag: [someVar, '@req-R1'] }, async () => {})`
+    const out = stripCoverageTags(src)
+    expect(out).not.toContain('@req-R1')
+  })
+
+  it('drops the tag property when it is the last property in the details object (next = undefined path)', () => {
+    // { timeout: 1000, tag: ['@req-R1'] } — tag is last; otherProps = [{timeout}];
+    // otherProps.find(p => p.getStart() > tagProp.getEnd()) returns undefined → end = tagProp.getEnd().
+    const src = `test('t', { timeout: 1000, tag: ['@req-R1'] }, async () => {})`
+    const out = stripCoverageTags(src)
+    expect(out).not.toContain('@req-R1')
+    expect(out).toContain('timeout: 1000')
+  })
+})
+
 describe('writeCoversTags — no-op mapping branch (line 169)', () => {
   it('skips a mapping whose test is already fully tagged (planTagEdit returns null)', () => {
     // 'a' is already tagged with @req-R1 → planTagEdit returns null → edit not pushed.

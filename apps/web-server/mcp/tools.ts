@@ -50,7 +50,7 @@ import {
 import { CoverageJobRunStore } from '../src/features/coverage/logic/coverage/jobs/store'
 import { startCoverageJob, CoverageJobConflictError } from '../src/features/coverage/logic/coverage/jobs/runner'
 import { startExternalCoverage, submitExternalCoverage } from '../src/features/coverage/logic/coverage/jobs/external'
-import type { ProposedMapping } from '../../../shared/coverage/types'
+import type { ProposedMapping, SummaryState } from '../../../shared/coverage/types'
 import {
   createDraft,
   paths as draftPaths,
@@ -444,6 +444,23 @@ export interface CanaryLabMcpToolOptions {
   defaultClientKind?: ClientKind
 }
 
+/** Recovery steering for a BLOCKED coverage ledger. The no-source-doc case is the only
+ *  one that needs the user: grounded coverage must come from a real PRD/spec, so ASK for
+ *  it — never invent one or silently pull an external file. */
+function coverageBlockedNext(feature: string, summary: SummaryState, sourceDocCount: number): string {
+  if (summary === 'generating') {
+    return `A summary job is running for "${feature}". Poll get_coverage_job(jobId); its chainedJobId runs coverage. Then get_feature_coverage("${feature}").`
+  }
+  if (summary === 'stale') {
+    return `PRD summary for "${feature}" is stale (see state.drift.changedDocs). Run start_coverage_job("${feature}", kind:"summary") to refresh it (ids preserved) — it auto-chains coverage. Poll get_coverage_job(jobId).`
+  }
+  // summary 'absent'
+  if (sourceDocCount === 0) {
+    return `No source doc on file for "${feature}", so there is nothing to ground coverage on. ASK THE USER to attach or paste the PRD/spec in the chat (do NOT invent one or pull an external file). Once they provide it, write_feature_doc("${feature}", "<name>.md", <content>) then start_coverage_job("${feature}", kind:"summary") — the summary auto-chains the coverage engine. Poll get_coverage_job(jobId).`
+  }
+  return `Source docs exist for "${feature}" but no PRD summary yet. Run start_coverage_job("${feature}", kind:"summary") — it generates the summary and auto-chains coverage. Poll get_coverage_job(jobId).`
+}
+
 export function registerCanaryLabTools(
   server: McpServer,
   deps: CanaryLabMcpDeps,
@@ -723,15 +740,23 @@ export function registerCanaryLabTools(
 
   registerTool('get_feature_coverage', {
     description:
-      'Get the Semantic Coverage Ledger: PRD requirements → mapped tests → gap type (untested / path-incomplete / covered) with a coverage % (covered ÷ total declared paths) and mapped % (requirements with ≥1 test), per-test strength (strong/solid/basic/shallow from assertion tiers), and docs-drift. DECOUPLED from test runs — measures test→requirement+path mapping, never whether a run passed. Use it to find untested/path-incomplete requirements and shallow tests.',
+      'Get the Semantic Coverage Ledger: PRD requirements → mapped tests → gap type (untested / path-incomplete / covered) with a coverage % (covered ÷ total declared paths) and mapped % (requirements with ≥1 test), per-test strength (strong/solid/basic/shallow from assertion tiers), and docs-drift. DECOUPLED from test runs — measures test→requirement+path mapping, never whether a run passed. Use it to find untested/path-incomplete requirements and shallow tests. When the ledger is BLOCKED (state.coverage:"blocked") it carries a `next:` field with the recovery step; if it says no source doc exists, ASK THE USER to attach/paste the PRD in chat (never invent or pull one) before generating.',
     inputSchema: { feature: z.string().describe('Existing feature name (from list_features).') },
   }, async ({ feature }) => {
     try {
-      return asJsonResult(computeFeatureCoverage({
+      const ledger = computeFeatureCoverage({
         featuresDir: deps.featuresDir,
         logsDir: deps.store.logsDir,
         feature,
-      }))
+      })
+      // Blocked ledger is silent on recovery — every sibling coverage tool returns a
+      // `next:`. Attach one so the agent acts instead of hedging. The no-source-doc case
+      // is the only one that needs a HUMAN step: ask for the doc, don't invent/pull one.
+      if (ledger.state?.coverage === 'blocked') {
+        const sourceDocCount = listFeatureDocs(deps.featuresDir, feature).sourceDocCount
+        return asJsonResult({ ...ledger, next: coverageBlockedNext(feature, ledger.state.summary, sourceDocCount) })
+      }
+      return asJsonResult(ledger)
     } catch (err) {
       if (err instanceof FeatureNotFoundError) return errorResult(err.message)
       throw err
