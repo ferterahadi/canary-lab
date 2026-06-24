@@ -43,12 +43,18 @@ function render(templatePath: string, vars: Record<string, string>): string {
   return applyTemplate(fs.readFileSync(templatePath, 'utf-8'), vars)
 }
 
-export function buildPortifyPrompt(feature: FeatureConfig, targets: RepoEditTarget[]): string {
-  return render(PORTIFY_TEMPLATE_PATH, {
+export function buildPortifyPrompt(
+  feature: FeatureConfig,
+  targets: RepoEditTarget[],
+  /** Prepended when a sibling feature's port patch was pre-applied to the worktree. */
+  seededNote?: string,
+): string {
+  const body = render(PORTIFY_TEMPLATE_PATH, {
     featureName: feature.name,
     reposSummary: reposSummary(feature, targets),
     featureConfigPath: featureConfigPath(feature),
   })
+  return seededNote ? `${seededNote}\n\n${body}` : body
 }
 
 export function buildPortifyRetryPrompt(feature: FeatureConfig, failureDetail: string): string {

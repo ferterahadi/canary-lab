@@ -9,7 +9,7 @@ import { loadFeatures } from '../../../config/logic/feature-loader'
 import { PortifyRunStore } from './store'
 import { createPortifyRunner, safeKey } from './runner'
 import { runPortifyAgent } from './agent'
-import { overlayExists, readOverlay, overlayDir } from './overlay'
+import { overlayExists, readOverlay, overlayDir, writeOverlay } from './overlay'
 import type { PortifyManifest } from './types'
 
 // Mock the agent so no real claude/codex spawns: simulate a source edit at the
@@ -704,9 +704,87 @@ describe('createPortifyRunner (branch coverage)', () => {
       expect(readOverlay(featureDir)!.patches['app']).toContain('external client')
     })
 
-    it('submitExternalPortify re-parks at editing with a clear message when nothing was edited', async () => {
+    it('submitExternalPortify parks at ready-to-save on an empty diff when the double-boot passes (source already env-driven)', async () => {
+      // The fixture's server.js already reads process.env.PORT (as if the repo
+      // were portified for another feature), so no in-place edit is needed — the
+      // concurrent boot still proves it and save records an empty overlay.
       const { featuresDir, logsDir } = await singleFixture()
       const { store, runner } = makeRunner(featuresDir, logsDir)
+
+      const result = await runner.startExternalPortify({ feature: 'myfeat', clientKind: 'codex', sessionId: 's1' })
+      await runner.submitExternalPortify(result.workflowId)
+
+      expect(await waitForStatus(store, result.workflowId, ['ready-to-save', 'editing', 'failed'])).toBe('ready-to-save')
+      const ready = store.get(result.workflowId)!
+      expect(ready.verification?.ok).toBe(true)
+      expect((ready.diff ?? '').trim()).toBe('') // empty overlay
+
+      const saved = await runner.save(result.workflowId)
+      expect(saved.status).toBe('saved')
+      expect(overlayExists(path.join(featuresDir, 'myfeat'))).toBe(true)
+    })
+
+    it('borrows a sibling feature\'s saved overlay for the same app and pre-applies it into the worktree', async () => {
+      // Two features target the SAME app repo. feat-a is already portified (a
+      // non-empty overlay saved against the repo's HEAD). Starting portify for
+      // feat-b should pre-apply feat-a's patch so feat-b starts from the rewrite
+      // — and the borrowed lines flow into feat-b's OWN captured overlay.
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-borrow-'))
+      roots.push(root)
+      const featuresDir = path.join(root, 'features')
+      const appRepo = path.join(root, 'app')
+      const logsDir = path.join(root, 'logs')
+      fs.mkdirSync(path.join(appRepo, 'src'), { recursive: true })
+      fs.writeFileSync(path.join(appRepo, 'src', 'server.js'), 'const PORT = process.env.PORT ?? 3007\n')
+      await gitInit(appRepo)
+
+      const cfg = (name: string) =>
+        `const config = { name: ${JSON.stringify(name)}, description: 't', envs: ['local'], repos: [ { name: 'app', localPath: ${JSON.stringify(appRepo)}, startCommands: [ { command: 'node src/server.js', name: 'app', ports: [{ name: 'api', env: 'PORT' }], healthCheck: { http: { url: 'http://localhost:\${port.api}/', timeoutMs: 30, deadlineMs: 250 } } } ] } ], featureDir: __dirname }\nmodule.exports = { config }\n`
+      const featADir = path.join(featuresDir, 'feat-a')
+      const featBDir = path.join(featuresDir, 'feat-b')
+      fs.mkdirSync(featADir, { recursive: true })
+      fs.mkdirSync(featBDir, { recursive: true })
+      fs.writeFileSync(path.join(featADir, 'feature.config.cjs'), cfg('feat-a'))
+      fs.writeFileSync(path.join(featBDir, 'feature.config.cjs'), cfg('feat-b'))
+
+      // Capture a real unified diff against appRepo HEAD, then restore the clean
+      // tree (worktrees only see committed files) and save it as feat-a's overlay.
+      const serverPath = path.join(appRepo, 'src', 'server.js')
+      const origServer = fs.readFileSync(serverPath, 'utf-8')
+      fs.appendFileSync(serverPath, '// borrowed: listener reads injected PORT\n')
+      const patch = (await runGit(appRepo, ['diff'])).stdout
+      fs.writeFileSync(serverPath, origServer)
+      const baseSha = (await runGit(appRepo, ['rev-parse', 'HEAD'])).stdout.trim()
+      writeOverlay(featADir, {
+        featureName: 'feat-a',
+        agent: 'claude',
+        capturedAt: '2026-06-07T00:00:00.000Z',
+        repos: [{ name: 'app', baseSha, patch, touchedFiles: [] }],
+      })
+
+      const { store, runner } = makeRunner(featuresDir, logsDir)
+      const result = await runner.startExternalPortify({ feature: 'feat-b', clientKind: 'codex', sessionId: 's1' })
+
+      // The borrowed patch is pre-applied into feat-b's scratch worktree...
+      const worktreeServer = fs.readFileSync(path.join(result.targets[0].editPath, 'src', 'server.js'), 'utf-8')
+      expect(worktreeServer).toContain('borrowed: listener reads injected PORT')
+      // ...and the client is told it was borrowed (so it reviews + declares slots).
+      expect(result.instructions).toContain('PRE-APPLIED')
+      expect(result.instructions).toContain('feat-a')
+
+      // Submit with no further edits: the borrowed source already reads the port,
+      // so the double-boot passes and feat-b's OWN overlay captures the patch.
+      await runner.submitExternalPortify(result.workflowId)
+      expect(await waitForStatus(store, result.workflowId, ['ready-to-save', 'editing', 'failed'])).toBe('ready-to-save')
+      await runner.save(result.workflowId)
+      expect(readOverlay(featBDir)!.patches['app']).toContain('borrowed: listener reads injected PORT')
+    })
+
+    it('submitExternalPortify re-parks at editing with a clear message when an empty diff also fails to boot', async () => {
+      // healthy=false → the double-boot fails; with no edits to point at, the
+      // message tells the client the listeners still aren't reading the port.
+      const { featuresDir, logsDir } = await singleFixture()
+      const { store, runner } = makeRunner(featuresDir, logsDir, /* healthy */ false)
 
       const result = await runner.startExternalPortify({ feature: 'myfeat', clientKind: 'codex', sessionId: 's1' })
       await runner.submitExternalPortify(result.workflowId)

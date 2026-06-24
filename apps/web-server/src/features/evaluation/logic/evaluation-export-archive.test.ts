@@ -13,6 +13,41 @@ afterEach(() => {
   tmpDir = undefined
 })
 
+function writeTmpFeature(logsDir: string, featureName: string): string {
+  const featuresDir = path.join(path.dirname(logsDir), 'features')
+  const featureDir = path.join(featuresDir, featureName.toLowerCase().replace(/ /g, '-'))
+  fs.mkdirSync(featureDir, { recursive: true })
+  fs.writeFileSync(
+    path.join(featureDir, 'feature.config.cjs'),
+    `module.exports = { config: { name: ${JSON.stringify(featureName)}, description: 'd', envs: ['local'], repos: [], featureDir: __dirname } }`,
+  )
+  return featuresDir
+}
+
+describe('buildEvaluationExportArchive — coverage attachment', () => {
+  it('skips coverage when featuresDir is absent', async () => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'canary-eval-archive-nocov-'))
+    const logsDir = path.join(tmpDir, 'logs')
+    fs.mkdirSync(logsDir, { recursive: true })
+    // No featuresDir passed → options.featuresDir is undefined → coverage block skipped
+    const built = await buildEvaluationExportArchive(detail(), { logsDir })
+    const entries = zipEntries(built.zip)
+    expect(entries.find((e) => e.filename === 'evaluation.html')).toBeTruthy()
+  })
+
+  it('skips coverage when feature has no PRD summary (0 requirements → if-false branch)', async () => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'canary-eval-archive-zeroq-'))
+    const logsDir = path.join(tmpDir, 'logs')
+    fs.mkdirSync(logsDir, { recursive: true })
+    // Feature exists (feature.config.cjs) but no _prd-summary.json → 0 requirements
+    const featuresDir = writeTmpFeature(logsDir, 'Checkout Flow')
+    const built = await buildEvaluationExportArchive(detail(), { logsDir, featuresDir })
+    // Should still produce a valid HTML archive — no throw
+    const entries = zipEntries(built.zip)
+    expect(entries.find((e) => e.filename === 'evaluation.html')).toBeTruthy()
+  })
+})
+
 describe('buildEvaluationExportArchive', () => {
   it('includes videos retained in the keep dir and skips unsafe or missing artifacts', async () => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'canary-eval-archive-'))

@@ -344,15 +344,28 @@ describe('PortifyOrchestrator', () => {
       expect(m.verification?.failureDetail).toContain('e2e/api.spec.ts')
     })
 
-    it('verifyExternalEdits parks at editing with a clear message when nothing was edited', async () => {
+    it('verifyExternalEdits parks at ready-to-save on an EMPTY diff when the double-boot passes (source already env-driven)', async () => {
+      // The repo was portified for another feature, so the listeners already
+      // read injected ports — no in-place edit, yet the concurrent boot works.
       const { deps } = makeDeps({ captureDiff: async () => '   ' })
       const orch = new PortifyOrchestrator(deps)
       const verifySpy = vi.fn(async () => ({ ok: true, instances: [] }))
       deps.verify = verifySpy
       const m = await orch.verifyExternalEdits(await orch.startExternal())
+      expect(m.status).toBe('ready-to-save')
+      expect(verifySpy).toHaveBeenCalled() // the boot IS the ground truth now
+    })
+
+    it('verifyExternalEdits re-parks at editing with a clear message on an EMPTY diff when the boot fails', async () => {
+      const { deps } = makeDeps({
+        captureDiff: async () => '   ',
+        verify: async () => ({ ok: false, instances: [], failureDetail: 'port 3007 still bound' }),
+      })
+      const orch = new PortifyOrchestrator(deps)
+      const m = await orch.verifyExternalEdits(await orch.startExternal())
       expect(m.status).toBe('editing')
       expect(m.verification?.failureDetail).toMatch(/no edits detected/i)
-      expect(verifySpy).not.toHaveBeenCalled() // don't boot an unchanged stack
+      expect(m.verification?.failureDetail).toContain('port 3007') // raw boot detail preserved
     })
 
     it('startExternal aborts and cleans up when isAborted fires after setup', async () => {

@@ -231,19 +231,15 @@ export class PortifyOrchestrator {
     d.persist(m)
 
     try {
+      // Capture the worktree diff but DON'T gate on it being non-empty: the
+      // double-boot is the ground truth. When the repo already reads injected
+      // ports (e.g. it was portified for another feature, so the listeners are
+      // already env-driven), the in-place edits ARE empty yet the stack boots
+      // concurrently fine — that's a valid source-native portify, saved as an
+      // empty overlay (a no-op `git apply` at run time). The only case an empty
+      // diff is wrong is when the source still doesn't read injected ports — and
+      // then the double-boot fails on the port clash and says so below.
       const diff = await d.captureDiff()
-      if (!diff.trim()) {
-        // No edits to verify — booting the unchanged stack would just re-fail on
-        // the port clash. Tell the client to make the rewrite first.
-        m = {
-          ...m,
-          status: 'editing',
-          diff,
-          verification: { ok: false, instances: [], failureDetail: 'No edits detected in the worktree — rewrite the listeners to read injected ports, then submit again.' },
-        }
-        d.persist(m)
-        return m
-      }
       m = { ...m, diff }
       d.persist(m)
 
@@ -258,6 +254,16 @@ export class PortifyOrchestrator {
             instances: verification.instances,
             failureDetail: `You modified test files (${tests.offending.join(', ')}). Revert them — this change must be ports-only.`,
           }
+        }
+      } else if (!diff.trim()) {
+        // Empty worktree diff AND the boot failed: the listeners don't read the
+        // injected ports yet, so there's nothing for an empty overlay to lean
+        // on. Point the client at the real fix instead of the raw boot error.
+        verification = {
+          ...verification,
+          failureDetail:
+            'No edits detected in the worktree and the stack did not boot concurrently on injected ports — rewrite the listeners to read injected ports (or, if the source already reads them, declare the matching `ports` slots in the config), then submit again.'
+            + (verification.failureDetail ? ` Boot detail: ${verification.failureDetail}` : ''),
         }
       }
 
