@@ -3,6 +3,7 @@ import {
   DIAGNOSIS_JOURNAL_PATH,
   getSummaryPath,
 } from './paths'
+import { ESCALATION_THRESHOLD, escalationTracePaths } from './heal-escalation'
 
 // Builds the state-aware addendum that gets appended to the static heal
 // prompt from apps/web-server/prompts/heal-agent.md. The static core describes the always-
@@ -99,7 +100,7 @@ export function buildHealAddendum(input: HealAddendumInput): string {
   // didn't move the needle. Surface that explicitly to the agent and steer
   // it toward a different tactic rather than another fresh hypothesis on the
   // same code path.
-  if ((input.consecutiveSameFailures ?? 0) >= 3 && slugs.length > 0) {
+  if ((input.consecutiveSameFailures ?? 0) >= ESCALATION_THRESHOLD && slugs.length > 0) {
     parts.push(renderEscalationBlock({
       cycle: input.cycle,
       slugs,
@@ -130,9 +131,10 @@ function renderEscalationBlock(input: {
   failedDir?: string
 }): string {
   const slugList = input.slugs.join(', ')
-  const traceDir = input.failedDir ? `${input.failedDir}/<slug>/trace-extract` : '<failedDir>/<slug>/trace-extract'
-  const snapshotPath = `${traceDir}/snapshot-at-failure.txt`
-  const networkPath = `${traceDir}/network-failed.txt`
+  // Shared with the external/MCP escalation so the two surfaces point at the
+  // same trace files. The prose below is PTY-specific (cycle-relative phrasing,
+  // .rerun signal file); buildHealEscalation carries the structured analog.
+  const { snapshotPath, networkPath } = escalationTracePaths(input.failedDir)
   return [
     `Escalation: this is cycle ${input.cycle} with the same failing set (${slugList}). Two previous attempts didn't reduce the failure count. Treat this as a signal to change tactic, not double down:`,
     `- Re-read \`${snapshotPath}\` and \`${networkPath}\` for the FIRST failing test before editing — the trace usually shows the real failure mode (DNS, missing element, race) more clearly than the error message.`,
