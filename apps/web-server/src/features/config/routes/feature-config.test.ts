@@ -6,6 +6,7 @@ import path from 'path'
 import Fastify, { type FastifyInstance } from 'fastify'
 import { featureConfigRoutes } from './feature-config'
 import type { WorkspaceEvent } from '../../../shared/workspace-events'
+import { writeOverlay, overlayExists } from '../../portify/logic/runtime/overlay'
 
 let tmpDir: string
 let featuresDir: string
@@ -92,6 +93,39 @@ describe('feature.config endpoints', () => {
       expect(r.statusCode).toBe(200)
       const body = r.json() as { parsed: { value: { name: string } } }
       expect(body.parsed.value.name).toBe('alpha')
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('DELETE portify-overlay removes the overlay, un-portifies, and emits features-changed', async () => {
+    const dir = buildFeature('porty')
+    writeOverlay(dir, {
+      featureName: 'porty',
+      agent: 'claude',
+      capturedAt: '2026-06-24T00:00:00.000Z',
+      repos: [{ name: 'r', baseSha: 'deadbeef', patch: 'diff --git a b\n', touchedFiles: [] }],
+    })
+    expect(overlayExists(dir)).toBe(true)
+
+    const events: WorkspaceEvent[] = []
+    const app = await makeApp({ events })
+    try {
+      const r = await app.inject({ method: 'DELETE', url: '/api/features/porty/portify-overlay' })
+      expect(r.statusCode).toBe(200)
+      expect(r.json()).toMatchObject({ name: 'porty', portified: false })
+      expect(overlayExists(dir)).toBe(false)
+      expect(events).toContainEqual({ type: 'features-changed' })
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('DELETE portify-overlay 404s for an unknown feature', async () => {
+    const app = await makeApp()
+    try {
+      const r = await app.inject({ method: 'DELETE', url: '/api/features/ghost/portify-overlay' })
+      expect(r.statusCode).toBe(404)
     } finally {
       await app.close()
     }

@@ -102,6 +102,9 @@ function evalStore(logsDir: string): FileBackedTaskStore<EvaluationExportTaskRec
       feature: r.feature,
       status: r.status,
     }),
+    // Legacy rows (pre-`id` index shape) carry only `taskId`; fall back to it so
+    // remove/prune/reconcile can address them (else they resurrect on refresh).
+    idOfEntry: (e) => (typeof e.id === 'string' ? e.id : (e as { taskId?: string }).taskId),
     sortNewestFirst: true,
   })
 }

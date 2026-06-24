@@ -101,6 +101,44 @@ describe('FileBackedTaskStore', () => {
     expect(store.list().map((e) => e.id)).toEqual(['a'])
   })
 
+  // Legacy rows written before the index carried `id` only have the feature's
+  // own key. `idOfEntry` recovers them; without it remove() can't drop them and
+  // they resurrect on refresh.
+  function makeLegacyStore(logsDir: string) {
+    return new FileBackedTaskStore<Rec>({
+      logsDir,
+      dirName: 'widgets',
+      recordFile: 'record.json',
+      idOf: (r) => r.id,
+      indexEntryOf: (r) => ({ id: r.id, status: r.status, feature: r.feature, createdAt: r.createdAt }),
+      idOfEntry: (e) => (typeof e.id === 'string' ? e.id : (e as { legacyId?: string }).legacyId),
+    })
+  }
+
+  function writeLegacyIndex(logsDir: string, rows: Record<string, unknown>[]): void {
+    const root = path.join(logsDir, 'widgets')
+    fs.mkdirSync(root, { recursive: true })
+    fs.writeFileSync(path.join(root, 'index.json'), JSON.stringify(rows))
+  }
+
+  it('remove drops a legacy id-less row from disk via idOfEntry (no resurrection on re-list)', () => {
+    const store = makeLegacyStore(dir)
+    const root = path.join(dir, 'widgets')
+    fs.mkdirSync(path.join(root, 'w1'), { recursive: true })
+    fs.writeFileSync(path.join(root, 'w1', 'record.json'), JSON.stringify({ id: 'w1', status: 'done', feature: 'f', createdAt: '2026-01-01' }))
+    writeLegacyIndex(dir, [{ legacyId: 'w1', status: 'done', feature: 'f', createdAt: '2026-01-01' }])
+    store.remove('w1')
+    expect(store.list()).toEqual([]) // persisted — not just an optimistic event
+    expect(fs.existsSync(path.join(root, 'w1'))).toBe(false)
+  })
+
+  it('pruneOrphans clears a legacy id-less row whose record was wiped', () => {
+    const store = makeLegacyStore(dir)
+    writeLegacyIndex(dir, [{ legacyId: 'gone', status: 'done', feature: 'f', createdAt: '2026-01-01' }])
+    expect(store.pruneOrphans()).toEqual(['gone'])
+    expect(store.list()).toEqual([])
+  })
+
   it('transition applies a legal move and rejects an illegal one', () => {
     const store = makeStore(dir)
     store.save({ id: 'a', status: 'created', feature: 'f', createdAt: '2026-01-01' })

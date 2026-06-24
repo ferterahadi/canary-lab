@@ -592,6 +592,22 @@ export function putFeatureConfigDoc(
   )
 }
 
+/** Fully un-portify a feature: restore the pre-Portify feature config (slots +
+ *  ${port.x} rewrites) from the overlay's snapshot, then delete the overlay.
+ *  `reverted` is false for legacy overlays with no snapshot (overlay-only
+ *  removal). Fires features-changed so the Portified badge flips live. */
+export function removePortifyOverlay(
+  name: string,
+  opts?: ClientOptions,
+): Promise<{ name: string; portified: boolean; reverted: boolean }> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<{ name: string; portified: boolean; reverted: boolean }>(
+    `${baseUrl}/api/features/${encodeURIComponent(name)}/portify-overlay`,
+    { method: 'DELETE' },
+    fetchImpl,
+  )
+}
+
 export async function deleteFeature(
   name: string,
   confirmName: string,

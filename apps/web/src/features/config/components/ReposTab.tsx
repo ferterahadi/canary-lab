@@ -958,18 +958,24 @@ function CommandCard({
   )
 }
 
-// ─── port-slot editor ──────────────────────────────────────────────────────
+// ─── port-slot table (display-only) ─────────────────────────────────────────
 
-export function PortSlotEditor({
+/**
+ * Read-only view of a start-command's injectable port slots. Slots are authored
+ * in the feature config file (well-behaved services that read a port from env)
+ * or written by Portify (hardcoded-port services it rewrites) — never hand-edited
+ * in the UI, which only confused (the env/reference relationship is expert-dense
+ * and nobody types it here). The Ports tab renders this; editing happens in the
+ * config or via Portify.
+ */
+export function PortSlotTable({
   ports,
-  onChange,
   emptyHint,
 }: {
   ports: PortSlotSlice[]
-  onChange: (next: PortSlotSlice[]) => void
   /** Overrides the default "(none — …)" line shown when there are no slots.
-   *  The Ports tab passes a Portify-aware hint here for not-yet-portified
-   *  features; ReposTab leaves it default. */
+   *  The Ports tab passes a Portify-aware nudge here for not-yet-portified
+   *  features. */
   emptyHint?: ReactNode
 }) {
   return (
@@ -983,70 +989,22 @@ export function PortSlotEditor({
       )}
       {ports.length > 0 && (
         <div className="flex items-center gap-1.5 px-0.5 text-[9px] uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
-          <span className="inline-flex flex-1 items-center gap-1">
-            Slot name
-            <HintIcon hint="Your label for one port this command listens on — not a number. Each run is assigned a fresh free port per slot, so concurrent runs never clash." />
-          </span>
-          <span className="inline-flex flex-1 items-center gap-1">
-            Env var <span className="normal-case tracking-normal opacity-70">(optional)</span>
-            <HintIcon hint="The environment variable the service reads its port from — the run injects the assigned number here when it boots this command. Optional because a slot can be consumed via ${port.<name>} instead (e.g. --port ${port.api} in the command, or a token in an envset file)." />
-          </span>
-          <span className="w-3 shrink-0" />
-          <span className="inline-flex flex-1 items-center gap-1">
-            Reference
-            <HintIcon hint="Read-only token that stands for this slot's port — it always equals the injected env var; the two can't disagree. Paste it into the start command, health-check URL, or envset files; it resolves to the assigned number at run time. Click to copy." />
-          </span>
-          <span className="w-6 shrink-0" />
+          <span className="flex-1">Slot name</span>
+          <span className="flex-1">Env var</span>
+          <span className="flex-1">Reference</span>
         </div>
       )}
       {ports.map((slot, i) => (
         <div key={i} className="flex items-center gap-1.5">
-          <div className="flex-1">
-            <TextInput
-              value={slot.name}
-              placeholder="api"
-              onChange={(name) => onChange(ports.map((s, j) => (j === i ? { ...s, name } : s)))}
-            />
-          </div>
-          <div className="flex-1">
-            <TextInput
-              value={slot.env ?? ''}
-              placeholder="PORT"
-              onChange={(env) => onChange(ports.map((s, j) => (j === i ? { ...s, env: env || undefined } : s)))}
-            />
-          </div>
-          {/* The env var and the token are two names for the same assigned
-              number — tie them visually. Hidden (but space kept, for column
-              alignment) when no env var is set and there's nothing to equate. */}
-          <span
-            aria-hidden={!slot.env}
-            className="w-3 shrink-0 text-center text-[11px]"
-            style={{ color: 'var(--text-muted)', opacity: slot.env ? 1 : 0 }}
-            title={slot.env ? `${slot.env} and \${port.${slot.name.trim() || '…'}} always carry the same assigned port` : undefined}
-          >
-            =
+          <span className="flex-1 truncate px-0.5 py-1 text-[11px]" style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }} title={slot.name}>
+            {slot.name || '—'}
+          </span>
+          <span className="flex-1 truncate px-0.5 py-1 text-[11px]" style={{ color: slot.env ? 'var(--text-primary)' : 'var(--text-muted)', fontFamily: 'var(--font-mono)' }} title={slot.env ?? ''}>
+            {slot.env || '—'}
           </span>
           <PortSlotToken name={slot.name} env={slot.env} />
-          <IconButton
-            ariaLabel={`Remove port slot ${slot.name || 'item'}`}
-            variant="danger"
-            onClick={() => onChange(ports.filter((_, j) => j !== i))}
-          >
-            <TrashIcon />
-          </IconButton>
         </div>
       ))}
-      <button
-        type="button"
-        onClick={() => onChange([...ports, { name: '' }])}
-        className="self-start inline-flex items-center gap-1 rounded-md px-2 py-1 text-[10px] uppercase tracking-wider transition-colors duration-150"
-        style={{ color: 'var(--text-muted)', border: '1px dashed var(--border-default)' }}
-        onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--text-primary)' }}
-        onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-muted)' }}
-      >
-        <PlusIcon />
-        Add port slot
-      </button>
     </div>
   )
 }
@@ -1071,17 +1029,20 @@ function PortSlotToken({ name, env }: { name: string; env?: string }) {
       })
       .catch(() => {})
   }
+  // Box-less: in an otherwise plain-text row a bordered box reads as an
+  // editable field — a false affordance now that nothing here is editable. The
+  // token is the only interactive thing; cursor + hover underline carry that.
   return (
     <button
       type="button"
       onClick={copy}
       disabled={!ready}
-      className="flex-1 truncate rounded-md px-2 py-1.5 text-left text-xs"
+      className="flex-1 truncate px-0.5 py-1 text-left text-[11px] transition-colors hover:underline"
       title={ready ? `${label} — click to copy` : label}
       aria-label={ready ? `${label} — click to copy` : label}
       style={{
-        backgroundColor: 'var(--bg-surface)',
-        border: '1px dashed var(--border-default)',
+        background: 'transparent',
+        border: 'none',
         color: ready ? 'var(--text-secondary)' : 'var(--text-muted)',
         fontFamily: 'var(--font-mono)',
         cursor: ready ? 'copy' : 'default',

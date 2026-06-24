@@ -50,6 +50,9 @@ export class BenchmarkRunStore implements BenchmarkStore {
       idOf: (m) => m.benchmarkId,
       statusOf: (m) => m.status,
       indexEntryOf: indexEntryFromManifest,
+      // Legacy rows (pre-`id` index shape) carry only `benchmarkId`; fall back to
+      // it so remove/prune/reconcile can address them (else they resurrect on refresh).
+      idOfEntry: (e) => (typeof e.id === 'string' ? e.id : (e as { benchmarkId?: string }).benchmarkId),
       reconcile: {
         // A `sabotaging`/`ready`/`running` benchmark in the index belongs to a
         // dead process (its driver was killed on restart) and can never finish.

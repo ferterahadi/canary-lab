@@ -47,6 +47,10 @@ export class PortifyRunStore implements PortifyStore {
       idOf: (m) => m.workflowId,
       statusOf: (m) => m.status,
       indexEntryOf: indexEntryFromManifest,
+      // Legacy rows (pre-`id` index shape) carry only `workflowId`; fall back to
+      // it so they stay addressable for remove/prune/reconcile — otherwise such
+      // a row can't be deleted and resurrects on refresh.
+      idOfEntry: (e) => (typeof e.id === 'string' ? e.id : (e as { workflowId?: string }).workflowId),
       reconcile: {
         // 'ready-to-save' is also non-terminal but awaits a user action; a dead
         // process can't hold that scratch worktree, so it too becomes aborted.

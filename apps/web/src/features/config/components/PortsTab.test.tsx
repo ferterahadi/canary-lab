@@ -8,7 +8,7 @@ import {
   getFeatureConfigDoc,
   getGitRemote,
   getRepoGitStatus,
-  putFeatureConfigDoc,
+  removePortifyOverlay,
   type ParsedConfigDoc,
 } from '../../../shared/api/client'
 import { PortsTab } from './PortsTab'
@@ -21,7 +21,7 @@ vi.mock('../../../shared/api/client', async () => {
     getFeatureConfigDoc: vi.fn(),
     getGitRemote: vi.fn(),
     getRepoGitStatus: vi.fn(),
-    putFeatureConfigDoc: vi.fn(),
+    removePortifyOverlay: vi.fn(),
   }
 })
 
@@ -54,7 +54,7 @@ beforeEach(() => {
     localBranches: [],
     remoteBranches: [],
   })
-  vi.mocked(putFeatureConfigDoc).mockReset()
+  vi.mocked(removePortifyOverlay).mockReset().mockResolvedValue({ name: 'cns_exactly_once_fallback', portified: false })
 })
 
 afterEach(() => {
@@ -64,9 +64,7 @@ afterEach(() => {
 
 describe('PortsTab', () => {
   it('groups slots by service → command, shows the injection token, and round-trips an edit', async () => {
-    const withPorts = docWithPorts()
-    vi.mocked(getFeatureConfigDoc).mockResolvedValue(withPorts)
-    vi.mocked(putFeatureConfigDoc).mockResolvedValue(withPorts)
+    vi.mocked(getFeatureConfigDoc).mockResolvedValue(docWithPorts())
 
     await act(async () => {
       root.render(<PortsTab feature="cns_exactly_once_fallback" />)
@@ -75,34 +73,19 @@ describe('PortsTab', () => {
     // Service name + the command the slots attach to are both shown.
     expect(container.textContent).toContain('my-backend')
     expect(container.textContent).toContain('yarn start')
-    // The read-only injection token is rendered for the slot.
+    // The slot facts render read-only: name, env var, and the injection token.
+    expect(container.textContent).toContain('api')
+    expect(container.textContent).toContain('PORT')
     expect(container.textContent).toContain('${port.api}')
 
-    // Rename the slot and save — it must round-trip through parse → serialize.
-    const slotName = slotNameInput()
-    expect(slotName.value).toBe('api')
-    await act(async () => {
-      setInputValue(slotName, 'web')
-      slotName.dispatchEvent(new Event('input', { bubbles: true }))
-    })
-
-    await act(async () => clickButton('Save'))
-
-    expect(putFeatureConfigDoc).toHaveBeenCalledWith(
-      'cns_exactly_once_fallback',
-      expect.objectContaining({
-        repos: [
-          expect.objectContaining({
-            startCommands: [
-              expect.objectContaining({
-                command: 'yarn start',
-                ports: [{ name: 'web', env: 'PORT' }],
-              }),
-            ],
-          }),
-        ],
-      }),
-    )
+    // Display-only — no editing affordances anywhere, even when not portified.
+    expect(container.querySelector('input[placeholder="api"]')).toBeNull()
+    expect(container.querySelector('input[placeholder="PORT"]')).toBeNull()
+    const buttons = [...container.querySelectorAll('button')]
+    expect(buttons.some((b) => b.textContent?.includes('Add port slot'))).toBe(false)
+    expect(buttons.some((b) => b.getAttribute('aria-label')?.startsWith('Remove port slot'))).toBe(false)
+    // No Save bar — the tab never writes config.
+    expect(buttons.some((b) => b.textContent?.trim() === 'Save')).toBe(false)
   })
 
   it('shows the portified headline (driven by overlay presence) and confirms a re-run before firing onStartPortify', async () => {
@@ -134,9 +117,8 @@ describe('PortsTab', () => {
       root.render(<PortsTab feature="np_feature" onStartPortify={onStartPortify} />)
     })
     expect(container.textContent).toContain('Not portified')
-    // The per-command empty state nudges to Portify and clarifies that a manual
-    // slot alone isn't the fix (it only sets an env var the service must read).
-    expect(container.textContent).toContain('only sets an env var')
+    // The per-command empty state nudges to Portify (no hand-authoring path).
+    expect(container.textContent).toContain('Uses its hardcoded port')
     await act(async () => clickButton('Portify'))
     expect(onStartPortify).toHaveBeenCalledWith('np_feature')
     expect(container.textContent).not.toContain('Re-run Portify?')
@@ -187,6 +169,35 @@ describe('PortsTab', () => {
     expect(container.textContent).not.toContain('${port.api}')
   })
 
+  it('strips all edit chrome when portified — no "(optional)" label, no "=" twin', async () => {
+    vi.mocked(getFeatureConfigDoc).mockResolvedValue(docWithPorts())
+    await act(async () => {
+      root.render(<PortsTab feature="cns_exactly_once_fallback" portified onStartPortify={vi.fn()} />)
+    })
+    expect(container.textContent).toContain('${port.api}')
+    // Edit-mode chrome is gone: no "(optional)" label, no "=" twin glyph.
+    expect(container.textContent).not.toContain('(optional)')
+    expect(container.textContent).not.toContain('=')
+  })
+
+  it('un-portifies behind a confirm → calls removePortifyOverlay', async () => {
+    vi.mocked(getFeatureConfigDoc).mockResolvedValue(docWithPorts())
+    await act(async () => {
+      root.render(<PortsTab feature="cns_exactly_once_fallback" portified onStartPortify={vi.fn()} />)
+    })
+    // Intro-band action opens the confirm; the call does not fire yet.
+    await act(async () => clickButton('Remove portification'))
+    expect(removePortifyOverlay).not.toHaveBeenCalled()
+    expect(container.textContent).toContain('Remove portification?')
+
+    // Confirm inside the modal → fires the delete. (The live un-portify flip is
+    // driven by the server's features-changed broadcast, not local state.)
+    const modal = container.querySelector('.cl-modal')!
+    const confirmBtn = [...modal.querySelectorAll('button')].find((b) => b.textContent?.includes('Remove portification'))!
+    await act(async () => confirmBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+    expect(removePortifyOverlay).toHaveBeenCalledWith('cns_exactly_once_fallback')
+  })
+
   it('shows an empty state when there are no services', async () => {
     vi.mocked(getFeatureConfigDoc).mockResolvedValue(emptyDoc())
     await act(async () => {
@@ -196,21 +207,10 @@ describe('PortsTab', () => {
   })
 })
 
-function slotNameInput(): HTMLInputElement {
-  const input = container.querySelector<HTMLInputElement>('input[placeholder="api"]')
-  if (!input) throw new Error('Missing slot name input')
-  return input
-}
-
 function clickButton(label: string): void {
   const btn = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes(label))
   if (!btn) throw new Error(`button not found: ${label}`)
   btn.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-}
-
-function setInputValue(input: HTMLInputElement, value: string): void {
-  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
-  setter?.call(input, value)
 }
 
 function docWithPorts(): ParsedConfigDoc {
