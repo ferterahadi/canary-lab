@@ -251,6 +251,33 @@ describe('stripCoverageTags — planStripEdit edge cases', () => {
     expect(out).not.toContain('@req-R1')
     expect(out).toContain('timeout: 1000')
   })
+
+  it('strips coverage tags when the property is named "tags" (plural) instead of "tag"', () => {
+    const src = `test('t', { tags: ['@req-R1'] }, async () => {})`
+    const out = stripCoverageTags(src)
+    expect(out).toBe(`test('t', async () => {})`)
+  })
+
+  it('strips coverage tags when the property key is a string literal named "tags"', () => {
+    // covers BRDA:197,25,2 — isIdentifier(p.name) FALSE, isStringLiteralLike TRUE, p.name.text === 'tags' TRUE
+    // eslint-disable-next-line no-useless-computed-key
+    const src = `test('t', { 'tags': ['@req-R1'] }, async () => {})`
+    const out = stripCoverageTags(src)
+    expect(out).toBe(`test('t', async () => {})`)
+  })
+
+  it('returns source unchanged when the details object has no tag or tags property', () => {
+    // covers BRDA:201,26,0 — !tagProp is TRUE → planStripEdit returns null → no edit
+    const src = `test('t', { timeout: 1000 }, async () => {})`
+    expect(stripCoverageTags(src)).toBe(src)
+  })
+
+  it('returns source unchanged when the tag value is neither a string literal nor an array literal', () => {
+    // covers BRDA:206,28,1 — else if (isArrayLiteralExpression) is FALSE for an identifier value
+    // existing stays empty → kept.length === existing.length → planStripEdit returns null
+    const src = `test('t', { tag: someVar }, async () => {})`
+    expect(stripCoverageTags(src)).toBe(src)
+  })
 })
 
 describe('writeCoversTags — no-op mapping branch (line 169)', () => {

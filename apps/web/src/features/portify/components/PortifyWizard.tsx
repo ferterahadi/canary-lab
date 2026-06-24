@@ -13,11 +13,12 @@ import { CopyButton } from '../../../shared/ui/CopyButton'
 // the overlay is applied into a per-run worktree and reverse-applied at
 // teardown. Full-screen overlay mirroring the benchmark window; auto-polls.
 
+// Review and Save are one screen (diff + proof + the overlay confirmation once
+// saved), so the stepper has one node for both — the saved ✓ lands on it.
 const STEPS: { key: string; label: string; sub: string }[] = [
   { key: 'plan', label: 'Plan', sub: 'what changes' },
   { key: 'exercise', label: 'Exercise', sub: 'agent + verify' },
-  { key: 'review', label: 'Review', sub: 'diff + proof' },
-  { key: 'save', label: 'Save', sub: 'as overlay' },
+  { key: 'review', label: 'Review', sub: 'diff + save' },
 ]
 
 function stepIndexFor(phase: 'plan' | PortifyStatus): number {
@@ -27,8 +28,8 @@ function stepIndexFor(phase: 'plan' | PortifyStatus): number {
     case 'editing':
     case 'verifying': return 1
     case 'ready-to-save':
-    case 'failed': return 2
-    case 'saved': return 3
+    case 'failed':
+    case 'saved': return 2
     default: return 1
   }
 }
@@ -123,7 +124,9 @@ export function PortifyWizard({
     try {
       const next = await api.savePortify(workflowId)
       setM(next)
-      setViewStep(3)
+      // Stay on the Review & save node (now showing the saved confirmation),
+      // even if the user had navigated back to Exercise before hitting Save.
+      setViewStep(2)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -242,6 +245,9 @@ export function PortifyWizard({
           )}
           {/* Once Review is reached, the stepper drives which screen shows. */}
           {workflowId && m && navigable && effectiveStep === 1 && <ExerciseScreen m={m} live={false} />}
+          {/* Review and Save are one screen and one stepper node: pre-save it's
+              "Review & save" (diff + proof + actions); post-save it's the same
+              diff + proof with the overlay confirmation folded in. */}
           {workflowId && m && navigable && effectiveStep === 2 && (
             <ReviewScreen
               m={m}
@@ -249,11 +255,8 @@ export function PortifyWizard({
               saved={isSaved(status)}
               onSave={save}
               onRequestChanges={() => setFeedbackOpen(true)}
-              onViewSave={() => setViewStep(3)}
+              onDone={onSaved}
             />
-          )}
-          {workflowId && m && navigable && effectiveStep === 3 && (
-            <SaveScreen m={m} onDone={onSaved} />
           )}
         </div>
       </div>
@@ -325,7 +328,7 @@ function Stepper({
   // A step is clickable once Review is reached, for any reached step except
   // Plan (the pre-start screen has no destination for an existing run).
   const isClickable = (i: number): boolean => navigable && i >= 1 && i <= reachedMax
-  const SAVE_STEP = 3
+  const SAVE_STEP = 2
   return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0, padding: '14px 20px', borderBottom: '1px solid var(--border-default)' }}>
       {STEPS.map((s, i) => {
@@ -544,36 +547,75 @@ function VerificationBadge({ m }: { m: PortifyManifest }) {
   )
 }
 
-function ReviewScreen({ m, busy, saved, onSave, onRequestChanges, onViewSave }: { m: PortifyManifest; busy: boolean; saved: boolean; onSave: () => void; onRequestChanges: () => void; onViewSave: () => void }) {
+function ReviewScreen({ m, busy, saved, onSave, onRequestChanges, onDone }: { m: PortifyManifest; busy: boolean; saved: boolean; onSave: () => void; onRequestChanges: () => void; onDone: () => void }) {
   const rounds = m.feedbackRounds ?? 0
   // At ready-to-save verification is always set; a prior revise round may have
   // left it failed — in that case the diff isn't proven and can't be saved.
   const proven = m.verification?.ok === true
+  const overlayPath = `features/${m.feature}/portify/`
+  const [openError, setOpenError] = useState<string | null>(null)
+  // Open the project in the user's editor — the scratch worktree while live,
+  // else the product repo once saved. Best-effort: surface a launch failure.
+  const openProject = async () => {
+    setOpenError(null)
+    try {
+      const res = await api.openPortifyProject(m.workflowId)
+      if (!res.opened) setOpenError(res.error ?? 'Failed to open editor')
+    } catch (e) {
+      setOpenError(e instanceof Error ? e.message : 'Failed to open editor')
+    }
+  }
   return (
     <div>
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 12 }}>
-        <div style={{ fontSize: 16, fontWeight: 600 }}>{saved ? 'Review' : 'Review & save'}</div>
-        {rounds > 0 && (
-          <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' }}>
-            revision {rounds}
-          </span>
-        )}
-      </div>
+      {saved ? (
+        <>
+          <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 8, color: 'rgb(52,211,153)' }}>✓ Saved as overlay</div>
+          <p style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6, marginBottom: 14 }}>
+            The verified port rewrite is captured as an ephemeral overlay. <b style={{ color: 'var(--text-secondary)' }}>{m.feature}</b> now boots concurrently — parallel runs and benchmark arms get distinct ports — and your product repo is never modified. On every run the overlay is applied into a per-run worktree before boot and reverse-applied at teardown.
+          </p>
+        </>
+      ) : (
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 12 }}>
+          <div style={{ fontSize: 16, fontWeight: 600 }}>Review &amp; save</div>
+          {rounds > 0 && (
+            <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' }}>
+              revision {rounds}
+            </span>
+          )}
+        </div>
+      )}
       {proven ? <VerificationBadge m={m} /> : <RevisionFailedBanner m={m} />}
       {/* The scratch worktree is gone after save — review is read-only. */}
       {!saved && <ReviewLocally m={m} />}
-      <DiffView diff={m.diff ?? ''} />
+      {/* A proven-but-empty diff isn't a missing capture — the apps already read
+          injected ports, so the rewrite was a no-op (see orchestrator). Say so
+          plainly instead of the bare "(no diff captured)". */}
+      {(m.diff ?? '').trim()
+        ? <DiffView diff={m.diff!} onOpenInEditor={openProject} />
+        : proven
+          ? <NoChangesNeeded feature={m.feature} />
+          : <DiffView diff="" onOpenInEditor={openProject} />}
+      {openError && (
+        <div style={{ fontSize: 10.5, color: 'var(--danger)', marginTop: 6 }}>{openError}</div>
+      )}
       {saved ? (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 16, flexWrap: 'wrap' }}>
-          <span style={{ fontSize: 12.5, color: 'rgb(52,211,153)', fontWeight: 600 }}>✓ Saved as overlay</span>
-          <button
-            type="button"
-            onClick={onViewSave}
-            style={{ marginLeft: 'auto', padding: '8px 14px', fontSize: 12.5, fontWeight: 600, borderRadius: 'var(--radius-md)', background: 'transparent', border: '1px solid var(--accent)', color: 'var(--accent)', cursor: 'pointer', whiteSpace: 'nowrap' }}
-          >
-            View save details →
-          </button>
-        </div>
+        <>
+          <div style={{ border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)', background: 'var(--bg-surface)', padding: '13px 15px', marginTop: 16 }}>
+            <div style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '.4px', color: 'var(--text-muted)', fontWeight: 600, marginBottom: 8 }}>
+              Overlay
+            </div>
+            <code style={{ ...mono, display: 'block', marginBottom: 10, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{overlayPath}</code>
+            {m.repos.map((r) => (
+              <div key={r.name} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)', padding: '3px 0' }}>
+                <span style={{ color: 'rgb(52,211,153)' }}>✓</span>
+                <span>{r.name}</span>
+              </div>
+            ))}
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 16 }}>
+            <button type="button" className="cl-button-primary" onClick={onDone} style={{ padding: '9px 16px' }}>Done</button>
+          </div>
+        </>
       ) : (
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 12, marginTop: 16 }}>
           <button
@@ -707,39 +749,6 @@ function FeedbackModal({ busy, onSend, onClose }: { busy: boolean; onSend: (feed
   )
 }
 
-// The wizard's last step: the overlay is saved. Nothing to merge — the feature
-// now boots concurrently on every run, applying the overlay into a per-run
-// worktree and reverse-applying it at teardown. The product repo is untouched.
-function SaveScreen({ m, onDone }: { m: PortifyManifest; onDone: () => void }) {
-  const overlayPath = `features/${m.feature}/portify/`
-  return (
-    <div>
-      <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 8, color: 'rgb(52,211,153)' }}>✓ Saved as overlay</div>
-      <p style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6, marginBottom: 14 }}>
-        The verified port rewrite is captured as an ephemeral overlay. <b style={{ color: 'var(--text-secondary)' }}>{m.feature}</b> now boots concurrently — parallel runs and benchmark arms get distinct ports — and your product repo is never modified. On every run the overlay is applied into a per-run worktree before boot and reverse-applied at teardown.
-      </p>
-      <div style={{ border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)', background: 'var(--bg-surface)', padding: '13px 15px', marginBottom: 18 }}>
-        <div style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '.4px', color: 'var(--text-muted)', fontWeight: 600, marginBottom: 8 }}>
-          Overlay
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-          <code style={{ ...mono, flex: '1 1 auto', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{overlayPath}</code>
-          <CopyButton value={overlayPath} label="Copy path" style={{ flexShrink: 0 }} />
-        </div>
-        {m.repos.map((r) => (
-          <div key={r.name} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)', padding: '3px 0' }}>
-            <span style={{ color: 'rgb(52,211,153)' }}>✓</span>
-            <span>{r.name}</span>
-          </div>
-        ))}
-      </div>
-      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-        <button type="button" className="cl-button-primary" onClick={onDone} style={{ padding: '9px 16px' }}>Done</button>
-      </div>
-    </div>
-  )
-}
-
 function FailedScreen({ m, onClose }: { m: PortifyManifest; onClose: () => void }) {
   // An environment failure (e.g. the DB is down) isn't a fault in the port
   // rewrite — title it so the user knows to fix the env and re-run, not to
@@ -767,18 +776,62 @@ function FailedScreen({ m, onClose }: { m: PortifyManifest; onClose: () => void 
   )
 }
 
-function DiffView({ diff }: { diff: string }) {
+// Shown in place of the diff when the verified rewrite produced no edits — the
+// apps already read injected ports, so portify is a no-op overlay. A reassuring
+// success state, not a "missing data" apology.
+function NoChangesNeeded({ feature }: { feature: string }) {
+  return (
+    <div style={{
+      display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', gap: 9,
+      padding: '30px 26px', background: 'var(--bg-base)',
+      border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)',
+    }}>
+      <span style={{
+        width: 36, height: 36, borderRadius: 9999, display: 'grid', placeItems: 'center',
+        background: 'rgba(52,211,153,0.12)', border: '1px solid rgba(52,211,153,0.35)',
+        color: 'rgb(52,211,153)', fontSize: 17, lineHeight: 1,
+      }}>✓</span>
+      <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--text-primary)' }}>
+        No changes needed
+      </div>
+      <div style={{ fontSize: 12.5, color: 'var(--text-muted)', lineHeight: 1.6, maxWidth: 380 }}>
+        <b style={{ color: 'var(--text-secondary)' }}>{feature}</b> already reads injected ports — nothing to rewrite. Saved as a no-op overlay.
+      </div>
+    </div>
+  )
+}
+
+function DiffView({ diff, onOpenInEditor }: { diff: string; onOpenInEditor?: () => void }) {
   if (!diff.trim()) return <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>(no diff captured)</div>
   return (
-    <pre style={{
-      fontSize: 11.5, fontFamily: 'var(--font-mono)', lineHeight: 1.5, color: 'var(--text-secondary)',
-      background: 'var(--bg-base)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)',
-      padding: '12px 14px', maxHeight: 360, overflow: 'auto', whiteSpace: 'pre', margin: 0,
-    }}>
-      {diff.split('\n').map((line, i) => (
-        <div key={i} style={{ color: lineColor(line) }}>{line || ' '}</div>
-      ))}
-    </pre>
+    <div style={{ position: 'relative' }}>
+      {onOpenInEditor && (
+        <button
+          type="button"
+          title="Open project in editor"
+          aria-label="Open project in editor"
+          onClick={onOpenInEditor}
+          className="cl-icon-button"
+          style={{
+            position: 'absolute', top: 8, right: 8, zIndex: 10, height: 26, width: 26, fontSize: 13,
+            border: '1px solid var(--border-default)',
+            background: 'color-mix(in srgb, var(--bg-surface) 92%, transparent)',
+            boxShadow: 'var(--shadow-panel)', cursor: 'pointer',
+          }}
+        >
+          ↗
+        </button>
+      )}
+      <pre style={{
+        fontSize: 11.5, fontFamily: 'var(--font-mono)', lineHeight: 1.5, color: 'var(--text-secondary)',
+        background: 'var(--bg-base)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)',
+        padding: '12px 14px', maxHeight: 360, overflow: 'auto', whiteSpace: 'pre', margin: 0,
+      }}>
+        {diff.split('\n').map((line, i) => (
+          <div key={i} style={{ color: lineColor(line) }}>{line || ' '}</div>
+        ))}
+      </pre>
+    </div>
   )
 }
 

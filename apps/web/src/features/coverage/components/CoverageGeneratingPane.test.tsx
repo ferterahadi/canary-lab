@@ -74,4 +74,21 @@ describe('CoverageGeneratingPane', () => {
     render(BASE_JOB) // no sessionRef yet
     expect(container.querySelector('[data-testid="coverage-agent-session"]')).toBeTruthy()
   })
+
+  it('for an external-producer job, shows the branded monitor (not AgentSessionView) with an open-client CTA', () => {
+    render({ ...BASE_JOB, producer: 'external', externalClientKind: 'claude', externalSessionId: 's1' })
+    // External offload has no Canary agent session — show the monitor instead.
+    expect(container.querySelector('[data-testid="coverage-external-monitor"]')).toBeTruthy()
+    expect(container.querySelector('[data-testid="coverage-agent-session"]')).toBeNull()
+    expect(container.querySelector('[data-testid="coverage-external-log"]')).toBeTruthy()
+    // The "check your external agent" affordance: a known client gets an open CTA.
+    expect(container.textContent).toContain('Open Claude')
+  })
+
+  it('external job for an unknown client shows the monitor but no open CTA', () => {
+    render({ ...BASE_JOB, producer: 'external', externalClientKind: 'other', externalSessionId: 's1' })
+    expect(container.querySelector('[data-testid="coverage-external-monitor"]')).toBeTruthy()
+    expect(container.textContent).not.toContain('Open Claude')
+    expect(container.textContent).not.toContain('Open Codex')
+  })
 })

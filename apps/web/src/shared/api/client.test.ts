@@ -22,6 +22,7 @@ import {
   cleanupRuns,
   cleanupWorktrees,
   openWorktreePath,
+  openPortifyProject,
   removeWorktree,
   openBenchmarkWorktree,
   trimRun,
@@ -887,6 +888,15 @@ describe('api client', () => {
     expect(url).toBe('/api/cleanup/worktrees/open')
     expect(init.method).toBe('POST')
     expect(JSON.parse(init.body as string)).toEqual({ path: '/wt' })
+  })
+
+  it('openPortifyProject POSTs to the workflow open endpoint', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(ok({ opened: true, paths: ['/wt'], editor: 'vscode' }))
+    const r = await openPortifyProject('w 1', { baseUrl: 'http://x', fetchImpl })
+    expect(r).toEqual({ opened: true, paths: ['/wt'], editor: 'vscode' })
+    const [url, init] = fetchImpl.mock.calls[0]
+    expect(url).toBe('http://x/api/portify/w%201/open')
+    expect(init.method).toBe('POST')
   })
 
   it('removeWorktree DELETEs /api/cleanup/worktrees with the path body', async () => {

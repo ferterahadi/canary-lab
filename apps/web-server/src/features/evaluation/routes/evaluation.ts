@@ -103,16 +103,17 @@ export async function evaluationRoutes(app: FastifyInstance, deps: EvaluationRou
     const activeIds = new Set(activeEvaluationExports.keys())
     for (const task of listEvaluationExportTasks(deps.store.logsDir)) {
       if (task.status !== 'running' || activeIds.has(task.taskId)) continue
-      if ((task.producer ?? 'internal') === 'external') continue
-      const message = 'evaluation export interrupted; start a new export'
-      appendEvaluationExportLog(deps.store.logsDir, task.taskId, `[evaluation] task failed: ${message}\n`)
-      const patched = patchEvaluationExportTask(deps.store.logsDir, task.taskId, {
-        status: 'failed',
-        downloadReady: false,
-        error: message,
-      })
-      if (patched) {
-        publishWorkspaceEvent(deps.workspaceEvents, { type: 'evaluation-export-updated', task: evaluationExportTaskView(patched) })
+      if (task.producer === 'internal') {
+        const message = 'evaluation export interrupted; start a new export'
+        appendEvaluationExportLog(deps.store.logsDir, task.taskId, `[evaluation] task failed: ${message}\n`)
+        const patched = patchEvaluationExportTask(deps.store.logsDir, task.taskId, {
+          status: 'failed',
+          downloadReady: false,
+          error: message,
+        })
+        if (patched) {
+          publishWorkspaceEvent(deps.workspaceEvents, { type: 'evaluation-export-updated', task: evaluationExportTaskView(patched) })
+        }
       }
     }
   }
@@ -282,7 +283,7 @@ export async function evaluationRoutes(app: FastifyInstance, deps: EvaluationRou
       appendEvaluationExportLog(deps.store.logsDir, task.taskId, '[evaluation] task cancelled\n')
       active?.broker.push('export', '[evaluation] task cancelled\n')
     }
-    active?.broker.markExit('export', task.status === 'running' ? 1 : 0)
+    if (active !== undefined) { active.broker.markExit('export', task.status === 'running' ? 1 : 0) }
     activeEvaluationExports.delete(req.params.taskId)
     deleteEvaluationExportTask(deps.store.logsDir, req.params.taskId)
     publishWorkspaceEvent(deps.workspaceEvents, { type: 'evaluation-export-deleted', taskId: req.params.taskId })
@@ -351,7 +352,7 @@ async function loadEvaluationRewrite(
       writeCachedEvaluationRewrite(runDir, generated)
       onOutput?.('[evaluation] localized wording cached\n')
     } else {
-      writeEvaluationRewriteError(runDir, `No evaluation rewrite was generated for adapter "${audienceAdapter ?? 'auto'}".`)
+      writeEvaluationRewriteError(runDir, `No evaluation rewrite was generated for adapter "${audienceAdapter}".`)
     }
     return generated ?? undefined
   } catch (err) {

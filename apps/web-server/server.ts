@@ -1188,6 +1188,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
     revisePortify: portifyRunner.revise,
     removePortify: portifyRunner.remove,
     workspaceEvents,
+    projectRoot: opts.projectRoot,
     loadAgentSession: (id) => {
       const ref = resolveWorkflowAgentRef(portifyDir(logsDir, id))
       if (!ref) return null

@@ -1,8 +1,11 @@
+import fs from 'fs'
 import type { FastifyInstance } from 'fastify'
 import type { PortifyStore } from '../../portify/logic/runtime/store'
 import type { PortifyManifest, StartPortifyInput, StartPortifyResult } from '../../portify/logic/runtime/types'
 import type { HealAgent } from '../../runs/logic/runtime/auto-heal'
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../shared/workspace-events'
+import { launchEditorDir } from '../../../shared/editor-launch'
+import { loadProjectConfig, type EditorChoice } from '../../runs/logic/runtime/launcher/project-config'
 
 // REST surface for the port-ification workflow, mirroring routes/benchmarks.ts.
 // Reads go through the injected store; start/save/cancel delegate to the
@@ -17,6 +20,8 @@ export interface PortifyRouteDeps {
   removePortify(workflowId: string): Promise<{ workflowId: string; removed: true }>
   loadAgentSession(workflowId: string): { agent: string; sessionId: string; model?: string; effort?: string; events: unknown[] } | null
   workspaceEvents?: WorkspaceEventPublisher
+  /** Product root — resolves the configured editor for "open in editor". */
+  projectRoot?: string
 }
 
 interface StartBody {
@@ -57,6 +62,36 @@ export async function portifyRoutes(app: FastifyInstance, deps: PortifyRouteDeps
       return { error: 'workflow not found' }
     }
     return manifest
+  })
+
+  // Open the port-ification project in the user's editor. While the workflow is
+  // live the scratch worktree(s) hold the edits; once saved they're discarded,
+  // so fall back to the product repo. Best-effort, mirroring the benchmark/run
+  // worktree openers — a failed launch reports the path so the UI can fall back.
+  app.post<{ Params: { workflowId: string } }>('/api/portify/:workflowId/open', async (req, reply) => {
+    const manifest = deps.store.get(req.params.workflowId)
+    if (!manifest) {
+      reply.code(404)
+      return { error: 'workflow not found' }
+    }
+    const dirs: string[] = []
+    for (const repo of manifest.repos) {
+      const dir = repo.worktreePath && fs.existsSync(repo.worktreePath) ? repo.worktreePath : repo.path
+      if (dir && fs.existsSync(dir) && !dirs.includes(dir)) dirs.push(dir)
+    }
+    if (dirs.length === 0) {
+      reply.code(409)
+      return { error: 'no project directory is available to open' }
+    }
+    const editor: EditorChoice = deps.projectRoot ? loadProjectConfig(deps.projectRoot).editor : 'auto'
+    try {
+      let usedEditor: EditorChoice = editor
+      for (const dir of dirs) usedEditor = launchEditorDir(editor, dir)
+      return { opened: true, paths: dirs, editor: usedEditor }
+    } catch (err) {
+      reply.code(200)
+      return { opened: false, paths: dirs, error: err instanceof Error ? err.message : String(err) }
+    }
   })
 
   app.get<{ Params: { workflowId: string } }>('/api/portify/:workflowId/agent-session', async (req, reply) => {

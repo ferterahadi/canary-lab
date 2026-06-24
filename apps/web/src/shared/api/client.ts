@@ -1440,6 +1440,20 @@ export function cleanupWorktrees(opts?: ClientOptions): Promise<{ worktrees: Cle
   return request(`${baseUrl}/api/cleanup/worktrees`, { method: 'GET' }, fetchImpl)
 }
 
+// Open the port-ification project in the user's editor — the scratch worktree
+// while the workflow is live, else the product repo once it's been saved.
+export function openPortifyProject(
+  workflowId: string,
+  opts?: ClientOptions,
+): Promise<{ opened: boolean; paths: string[]; editor?: string; error?: string }> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request(
+    `${baseUrl}/api/portify/${encodeURIComponent(workflowId)}/open`,
+    { method: 'POST' },
+    fetchImpl,
+  )
+}
+
 // Open a worktree folder in the user's editor ("visit" from the cleanup list).
 export function openWorktreePath(
   path: string,

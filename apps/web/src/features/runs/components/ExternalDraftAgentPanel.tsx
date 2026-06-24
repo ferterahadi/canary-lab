@@ -1,5 +1,6 @@
 import type { DraftRecord, ExternalDraftStage } from '../../../shared/api/types'
-import { BrandMark, clientLabel, clientTint, shortSession, type ExternalClientKind } from './external-client-branding'
+import { clientLabel, clientTint, shortSession, type ExternalClientKind } from './external-client-branding'
+import { ExternalAgentCard, ExternalClientCta, pillPalette, StatusPill } from './ExternalAgentCard'
 
 interface Props {
   draft: DraftRecord
@@ -15,120 +16,47 @@ interface Props {
 // monogram aesthetic the heal panel uses.
 export function ExternalDraftAgentPanel({ draft, stageView }: Props) {
   const clientKind = draft.externalClientKind ?? 'other'
-  const tint = clientTint(clientKind)
   const stage = draft.externalStage ?? 'scaffolding'
 
   return (
-    <div className="@container flex h-full min-h-0 flex-col overflow-y-auto p-3 @[400px]:p-4">
-      <div
-        className="relative overflow-hidden rounded-xl p-3.5 @[320px]:rounded-2xl @[320px]:p-4 @[480px]:p-6"
-        style={{
-          background: `radial-gradient(120% 90% at 0% 0%, color-mix(in srgb, ${tint} 14%, transparent) 0%, transparent 55%), var(--bg-elevated)`,
-          border: `1px solid color-mix(in srgb, ${tint} 24%, var(--border-default))`,
-        }}
-      >
-        <div className="flex items-start gap-3 @[480px]:gap-4">
-          <BrandMark clientKind={clientKind} tint={tint} />
-          <div className="min-w-0 flex-1 pt-0.5">
-            <div
-              className="text-[9px] font-medium uppercase @[320px]:text-[10px]"
-              style={{ color: 'var(--text-muted)', letterSpacing: '0.14em' }}
-            >
-              External authoring session
-            </div>
-            <h2
-              className="mt-0.5 text-sm font-semibold @[320px]:mt-1 @[320px]:text-base @[480px]:mt-1.5 @[480px]:text-xl"
-              style={{
-                color: 'var(--text-primary)',
-                letterSpacing: '-0.01em',
-                lineHeight: 1.2,
-              }}
-            >
-              {headlineFor(clientKind)}
-            </h2>
-            {draft.externalConversationName && (
-              <div
-                className="mt-1 truncate text-[11px] @[320px]:text-xs"
-                style={{ color: 'var(--text-secondary)' }}
-                title={draft.externalConversationName}
-              >
-                {draft.externalConversationName}
-              </div>
-            )}
-          </div>
-        </div>
-
-        <div className="mt-2.5 flex flex-wrap items-center gap-x-2 gap-y-1.5 text-[10px] @[320px]:mt-3 @[320px]:gap-x-2.5 @[320px]:text-[11px] @[480px]:mt-3.5">
-          <StagePill stage={stage} />
-          {draft.externalSessionId && (
-            <span
-              className="inline-flex items-center gap-1.5"
-              style={{ color: 'var(--text-muted)' }}
-            >
-              <span aria-hidden style={{ opacity: 0.55 }}>·</span>
-              <span style={{ fontFamily: 'var(--font-mono)' }} title={draft.externalSessionId}>
-                {shortSession(draft.externalSessionId)}
-              </span>
+    <ExternalAgentCard
+      clientKind={clientKind}
+      fill
+      eyebrow="External authoring session"
+      headline={headlineFor(clientKind)}
+      subtitle={draft.externalConversationName ?? undefined}
+      statusPill={<StatusPill label={stageLabel(stage)} palette={stagePalette(stage)} />}
+      meta={
+        draft.externalSessionId && (
+          <span className="inline-flex items-center gap-1.5" style={{ color: 'var(--text-muted)' }}>
+            <span aria-hidden style={{ opacity: 0.55 }}>·</span>
+            <span style={{ fontFamily: 'var(--font-mono)' }} title={draft.externalSessionId}>
+              {shortSession(draft.externalSessionId)}
             </span>
-          )}
-        </div>
-
-        <p
-          className="mt-3 text-[11px] leading-relaxed @[320px]:mt-4 @[320px]:text-xs @[480px]:mt-5 @[480px]:text-[13px]"
-          style={{ color: 'var(--text-secondary)' }}
-        >
-          {bodyCopy(stage, stageView, clientKind)}
-        </p>
-
-        {draft.externalSessionUrl && (
-          <div className="mt-3 @[320px]:mt-4 @[480px]:mt-5">
-            <a
-              href={draft.externalSessionUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex w-full items-center justify-center gap-2 rounded-md px-3 py-1.5 text-[10px] font-medium uppercase tracking-wider @[320px]:rounded-lg @[320px]:px-3.5 @[320px]:py-2 @[320px]:text-[11px] @[480px]:w-auto @[480px]:justify-start"
-              style={{
-                color: tint,
-                background: `color-mix(in srgb, ${tint} 14%, transparent)`,
-                border: `1px solid color-mix(in srgb, ${tint} 38%, transparent)`,
-              }}
-            >
-              <span>Open {clientLabel(clientKind)}</span>
-              <span aria-hidden>→</span>
-            </a>
-          </div>
-        )}
-
-        {draft.errorMessage && stage === 'error' && (
-          <div
-            className="mt-3 rounded-md px-3 py-2 text-[11px] @[320px]:mt-4"
-            style={{
-              color: 'var(--danger)',
-              background: 'color-mix(in srgb, var(--danger) 10%, transparent)',
-              border: '1px solid color-mix(in srgb, var(--danger) 30%, transparent)',
-            }}
-          >
-            {draft.errorMessage}
-          </div>
-        )}
-      </div>
-    </div>
-  )
-}
-
-function StagePill({ stage }: { stage: ExternalDraftStage }) {
-  const palette = stagePalette(stage)
-  return (
-    <span
-      className="rounded-full px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-wider"
-      style={{
-        color: palette.fg,
-        background: palette.bg,
-        border: `1px solid ${palette.border}`,
-      }}
+          </span>
+        )
+      }
+      body={bodyCopy(stage, stageView, clientKind)}
     >
-      {stageLabel(stage)}
-    </span>
+      {draft.externalSessionUrl && (
+        <div className="mt-3 @[320px]:mt-4 @[480px]:mt-5">
+          <ExternalClientCta tint={clientTint(clientKind)} label={`Open ${clientLabel(clientKind)}`} href={draft.externalSessionUrl} />
+        </div>
+      )}
+
+      {draft.errorMessage && stage === 'error' && (
+        <div
+          className="mt-3 rounded-md px-3 py-2 text-[11px] @[320px]:mt-4"
+          style={{
+            color: 'var(--danger)',
+            background: 'color-mix(in srgb, var(--danger) 10%, transparent)',
+            border: '1px solid color-mix(in srgb, var(--danger) 30%, transparent)',
+          }}
+        >
+          {draft.errorMessage}
+        </div>
+      )}
+    </ExternalAgentCard>
   )
 }
 
@@ -143,33 +71,11 @@ function stageLabel(stage: ExternalDraftStage): string {
   }
 }
 
-function stagePalette(stage: ExternalDraftStage): { fg: string; bg: string; border: string } {
-  if (stage === 'error') {
-    return {
-      fg: 'var(--danger)',
-      bg: 'color-mix(in srgb, var(--danger) 12%, transparent)',
-      border: 'color-mix(in srgb, var(--danger) 40%, transparent)',
-    }
-  }
-  if (stage === 'applied') {
-    return {
-      fg: 'var(--success)',
-      bg: 'color-mix(in srgb, var(--success) 12%, transparent)',
-      border: 'color-mix(in srgb, var(--success) 40%, transparent)',
-    }
-  }
-  if (stage === 'ready') {
-    return {
-      fg: 'var(--accent)',
-      bg: 'color-mix(in srgb, var(--accent) 12%, transparent)',
-      border: 'color-mix(in srgb, var(--accent) 40%, transparent)',
-    }
-  }
-  return {
-    fg: 'var(--border-focus)',
-    bg: 'color-mix(in srgb, var(--border-focus) 12%, transparent)',
-    border: 'color-mix(in srgb, var(--border-focus) 40%, transparent)',
-  }
+function stagePalette(stage: ExternalDraftStage) {
+  if (stage === 'error') return pillPalette('var(--danger)')
+  if (stage === 'applied') return pillPalette('var(--success)')
+  if (stage === 'ready') return pillPalette('var(--accent)')
+  return pillPalette('var(--border-focus)')
 }
 
 function bodyCopy(
