@@ -103,6 +103,19 @@ describe('runPortifyAgent — onChunk coverage', () => {
     child.emit('close', 0)
     await expect(p).rejects.toThrow(/session\/usage limit/i)
   })
+
+  it('skips sessionLimited block on a chunk after limit was already detected (if-false branch)', async () => {
+    const child = makeFakeChild()
+    mockSpawn.mockReturnValue(child)
+    const dir = tmp()
+    const p = runPortifyAgent({ agent: 'claude', prompt: 'go', cwd: dir })
+    // First chunk matches the sentinel → sessionLimited = true
+    child.stdout.emit('data', Buffer.from('you have hit your session limit'))
+    // Second chunk arrives after sessionLimited is true → if (!sessionLimited) → FALSE → skip block
+    child.stdout.emit('data', Buffer.from('trailing output after limit'))
+    child.emit('close', 0)
+    await expect(p).rejects.toThrow(/session\/usage limit/i)
+  })
 })
 
 describe('isAgentSessionLimited', () => {

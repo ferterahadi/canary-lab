@@ -49,6 +49,9 @@ export class CoverageJobRunStore implements CoverageJobStore {
       idOf: (m) => m.jobId,
       statusOf: (m) => m.status,
       indexEntryOf: indexEntryFromManifest,
+      // Legacy rows (pre-`id` index shape) carry only `jobId`; fall back to it so
+      // remove/prune/reconcile can address them (else they resurrect on refresh).
+      idOfEntry: (e) => (typeof e.id === 'string' ? e.id : (e as { jobId?: string }).jobId),
       reconcile: {
         isInterrupted: (m) => m.status === 'running',
         mark: (m, now) => ({

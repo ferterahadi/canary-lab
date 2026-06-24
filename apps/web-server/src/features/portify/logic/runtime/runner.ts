@@ -563,6 +563,9 @@ export function createPortifyRunner(deps: PortifyRunnerDeps) {
       agent: m.agent,
       capturedAt: deps.now(),
       repos: overlayRepos,
+      // The pre-edit feature config, so "Remove portification" can revert the
+      // slots + ${port.x} health-check rewrites, not just delete the overlay.
+      originalConfig: state.originalConfig,
     })
 
     // The scratch worktree + branch have served their purpose (the diff is

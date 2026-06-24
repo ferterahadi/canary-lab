@@ -16,6 +16,11 @@ import { resolveVars } from '../../runs/logic/runtime/env-switcher/switch'
 import { getProjectRoot } from '../../../../../../shared/runtime/project-root'
 import { checkoutBranch, findRepo, getGitStatus, resolveRepoPath } from '../../../shared/git-repo'
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../shared/workspace-events'
+import {
+  overlayExists as portifyOverlayExists,
+  readOverlayOriginalConfig,
+  removeOverlay,
+} from '../../portify/logic/runtime/overlay'
 
 export interface FeatureConfigRouteDeps {
   featuresDir: string
@@ -173,6 +178,37 @@ export async function featureConfigRoutes(
       return { path: cfg.path, format: cfg.format, content: next, parsed }
     },
   )
+
+  // ─── un-portify: fully revert the port-ification ──────────────────────
+  // Portify makes two kinds of change: a reversible product-code overlay, AND
+  // permanent edits to feature.config.cjs (the declared `ports` slots + the
+  // `${port.x}` health-check / inter-service URL rewrites). Removing only the
+  // overlay would leave the slots — and worse, health-check URLs pointing at a
+  // `${port.x}` token nothing defines, breaking boot. So we restore the
+  // pre-Portify config snapshot captured with the overlay, THEN delete the
+  // overlay. Legacy overlays without a snapshot fall back to overlay-only
+  // removal (the slots linger — re-run Portify to refresh + recapture).
+  // Emits features-changed so the Portified badge flips live, no refresh.
+  app.delete<{ Params: { name: string } }>('/api/features/:name/portify-overlay', async (req, reply) => {
+    const features = loadFeatures(deps.featuresDir)
+    const feature = features.find((f) => f.name === req.params.name)
+    if (!feature?.featureDir) {
+      reply.code(404)
+      return { error: 'feature not found' }
+    }
+    const snapshot = readOverlayOriginalConfig(feature.featureDir)
+    let reverted = false
+    if (snapshot != null) {
+      const cfg = findExistingConfig(feature.featureDir, FEATURE_CONFIG_NAMES)
+      if (cfg) {
+        fs.writeFileSync(cfg.path, snapshot)
+        reverted = true
+      }
+    }
+    removeOverlay(feature.featureDir)
+    publishWorkspaceEvent(deps.workspaceEvents, { type: 'features-changed' })
+    return { name: feature.name, portified: portifyOverlayExists(feature.featureDir), reverted }
+  })
 
   app.get<{ Params: { name: string; repo: string } }>(
     '/api/features/:name/repos/:repo/git',

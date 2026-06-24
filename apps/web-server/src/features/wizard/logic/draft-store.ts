@@ -147,6 +147,9 @@ function draftStore(logsDir: string): FileBackedTaskStore<DraftRecord> {
       ...(r.featureName ? { featureName: r.featureName } : {}),
       updatedAt: r.updatedAt,
     }),
+    // Legacy rows (pre-`id` index shape) carry only `draftId`; fall back to it so
+    // remove/prune/reconcile can address them (else they resurrect on refresh).
+    idOfEntry: (e) => (typeof e.id === 'string' ? e.id : (e as { draftId?: string }).draftId),
     sortNewestFirst: true,
   })
 }

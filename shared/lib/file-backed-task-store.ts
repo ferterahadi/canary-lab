@@ -34,6 +34,12 @@ export interface TaskStoreConfig<T> {
   idOf: (rec: T) => string
   /** Lightweight row written to index.json. Must include `id` and `createdAt`. */
   indexEntryOf: (rec: T) => TaskIndexEntry
+  /** Resolve a row's record id from its index entry — used by remove / prune /
+   *  reconcile / save-upsert to address a row. Defaults to `entry.id`. Override
+   *  to recover LEGACY rows written before this store added `id` (they only
+   *  carry the feature's own key, e.g. `workflowId`); without this such rows are
+   *  unaddressable — remove() can't drop them and they resurrect on refresh. */
+  idOfEntry?: (entry: TaskIndexEntry) => string | undefined
   /** Current status, used by `transition` + the default index sort tiebreak. */
   statusOf?: (rec: T) => string
   /** Validate/normalize an untrusted record read from disk; return null to drop. */
@@ -79,6 +85,14 @@ export class FileBackedTaskStore<T> {
     return path.join(this.recordDir(id), this.config.recordFile)
   }
 
+  /** The record id a row addresses — `entry.id` by default, or the feature's
+   *  fallback (e.g. `workflowId`) for legacy rows written before `id` existed.
+   *  Returns undefined only when neither is present (truly unaddressable). */
+  private entryId(entry: TaskIndexEntry): string | undefined {
+    if (this.config.idOfEntry) return this.config.idOfEntry(entry)
+    return typeof entry.id === 'string' ? entry.id : undefined
+  }
+
   get(id: string): T | null {
     const p = this.recordPath(id)
     let raw: unknown
@@ -114,7 +128,7 @@ export class FileBackedTaskStore<T> {
     atomicWrite(this.recordPath(id), JSON.stringify(rec, null, 2) + '\n')
     const entries = this.readIndex()
     const entry = this.config.indexEntryOf(rec)
-    const idx = entries.findIndex((e) => e.id === id)
+    const idx = entries.findIndex((e) => this.entryId(e) === id)
     if (idx === -1) entries.push(entry)
     else entries[idx] = { ...entries[idx], ...entry }
     this.writeIndex(entries)
@@ -145,7 +159,7 @@ export class FileBackedTaskStore<T> {
   }
 
   remove(id: string): void {
-    const entries = this.readIndex().filter((e) => e.id !== id)
+    const entries = this.readIndex().filter((e) => this.entryId(e) !== id)
     this.writeIndex(entries)
     try {
       fs.rmSync(this.recordDir(id), { recursive: true, force: true })
@@ -165,7 +179,8 @@ export class FileBackedTaskStore<T> {
     const kept: TaskIndexEntry[] = []
     const pruned: string[] = []
     for (const e of entries) {
-      if (e.id && this.get(e.id) == null) pruned.push(e.id)
+      const eid = this.entryId(e)
+      if (eid && this.get(eid) == null) pruned.push(eid)
       else kept.push(e)
     }
     if (pruned.length > 0) {
@@ -179,11 +194,13 @@ export class FileBackedTaskStore<T> {
     const r = this.config.reconcile
     if (!r) return
     for (const entry of this.list()) {
-      // Legacy/foreign rows written before this store keyed records by `id`
-      // (e.g. a feature store that only persisted its own jobId) are not
-      // addressable here; skip rather than path.join(undefined,…) on boot.
-      if (!entry.id) continue
-      const rec = this.get(entry.id)
+      // Resolve the record id via the configured fallback so legacy rows
+      // (written before this store added `id`, carrying only the feature's own
+      // key) are addressable; skip only when truly unkeyed (avoids
+      // path.join(undefined,…) on boot).
+      const eid = this.entryId(entry)
+      if (!eid) continue
+      const rec = this.get(eid)
       if (!rec || !r.isInterrupted(rec)) continue
       this.save(r.mark(rec, now()))
     }

@@ -15,10 +15,15 @@ import type { HealAgent } from '../../../runs/logic/runtime/auto-heal'
 //   meta.json            — OverlayMeta (base SHAs, captured-at, touched-file
 //                          hashes per repo, for staleness detection)
 //   <repoName>.patch     — the unified diff for that repo (includes added files)
+//   original-config.snapshot — feature.config.cjs as it was BEFORE Portify edited
+//                          it (slots + ${port.x} health-check rewrites). Lets
+//                          "Remove portification" restore the config, not just
+//                          delete the code overlay. Absent on legacy overlays.
 
 export const OVERLAY_VERSION = 1
 export const OVERLAY_DIRNAME = 'portify'
 export const OVERLAY_META_FILE = 'meta.json'
+export const OVERLAY_ORIGINAL_CONFIG_FILE = 'original-config.snapshot'
 
 /** A file the overlay's patch modifies, with its blob hash at capture time. */
 export interface OverlayTouchedFile {
@@ -61,6 +66,9 @@ export interface WriteOverlayInput {
   agent: HealAgent
   capturedAt: string
   repos: OverlayRepoInput[]
+  /** The feature config as it was BEFORE Portify edited it. Persisted so an
+   *  un-portify can restore it. Omit (or null) to skip — legacy/no-snapshot. */
+  originalConfig?: string | null
 }
 
 /** The overlay read back off disk: meta + each repo's patch content. */
@@ -82,6 +90,20 @@ export function overlayDir(featureDir: string): string {
 
 function metaPath(featureDir: string): string {
   return path.join(overlayDir(featureDir), OVERLAY_META_FILE)
+}
+
+function originalConfigPath(featureDir: string): string {
+  return path.join(overlayDir(featureDir), OVERLAY_ORIGINAL_CONFIG_FILE)
+}
+
+/** The pre-Portify feature config captured with the overlay, or null if this
+ *  overlay predates snapshot capture (legacy) or never had one. */
+export function readOverlayOriginalConfig(featureDir: string): string | null {
+  try {
+    return fs.readFileSync(originalConfigPath(featureDir), 'utf-8')
+  } catch {
+    return null
+  }
 }
 
 /** Filesystem-safe patch filename for a repo. */
@@ -135,6 +157,12 @@ export function writeOverlay(featureDir: string, input: WriteOverlayInput): Over
     repos,
   }
   atomicWrite(metaPath(featureDir), JSON.stringify(meta, null, 2) + '\n')
+  // Snapshot the pre-Portify config alongside the patches so removal can revert
+  // the feature config (slots + ${port.x} health-check rewrites), not just the
+  // code overlay.
+  if (input.originalConfig != null) {
+    atomicWrite(originalConfigPath(featureDir), input.originalConfig)
+  }
   return meta
 }
 

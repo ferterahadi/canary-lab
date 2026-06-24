@@ -1,28 +1,21 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import * as api from '../../../shared/api/client'
-import type { ConfigValue, ParsedConfigDoc } from '../../../shared/api/client'
-import { SaveBar } from './SaveBar'
+import type { ConfigValue } from '../../../shared/api/client'
+import { ConfirmModal, TrashIcon } from './atoms'
 import { PortifyHistoryList } from '../../portify/components/PortifyHistoryList'
-import { useEditableSlice } from './useEditableSlice'
 import {
   deriveRepoName,
   parseRepo,
-  serializeRepo,
-  PortSlotEditor,
-  type PortSlotSlice,
+  PortSlotTable,
   type RepoSlice,
 } from './ReposTab'
 
-interface PortsSlice {
-  repos: RepoSlice[]
-}
-
 /**
- * Dedicated home for a feature's injectable port slots — the one place to
- * declare them (the Service tab no longer edits ports inline) and to launch
- * Portify. Slots are nested per start-command per service, so this tab groups
- * by service → command and writes back into the same `repos[]` structure the
- * Service tab edits.
+ * Read-only view of a feature's injectable port slots, and the home for Portify.
+ * Slots are authored in the feature config file (services that read a port from
+ * env) or by Portify (hardcoded-port services it rewrites) — never hand-edited
+ * here. This tab shows them grouped by service → command and launches / removes
+ * Portify.
  */
 export function PortsTab({
   feature,
@@ -44,32 +37,38 @@ export function PortsTab({
   /** Reopen a past/active port-ification workflow (by id) in the wizard. */
   onOpenPortify?: (workflowId: string) => void
 }) {
-  const ed = useEditableSlice<ParsedConfigDoc, PortsSlice>({
-    load: () => api.getFeatureConfigDoc(feature),
-    extract: (doc) => {
-      const v = (doc.parsed.value ?? {}) as { [k: string]: ConfigValue }
-      const repos = Array.isArray(v.repos)
-        ? v.repos.map(parseRepo).filter((r): r is RepoSlice => r != null)
-        : []
-      return { repos }
-    },
-    merge: (doc, slice) => {
-      const current = (doc.parsed.value ?? {}) as { [k: string]: ConfigValue }
-      return { ...current, repos: slice.repos.map(serializeRepo) }
-    },
-    save: (payload) => api.putFeatureConfigDoc(feature, payload as ConfigValue),
-    deps: [feature, portsRefreshKey],
-  })
+  // Read-only: this tab no longer writes config, so a plain fetch replaces the
+  // editable-slice + SaveBar. Refetches when portsRefreshKey is bumped (a portify
+  // save / removal rewrote the slots) so the table reflects it without a remount.
+  const [repos, setRepos] = useState<RepoSlice[] | null>(null)
+  const [loadError, setLoadError] = useState<string | null>(null)
+  // Bumped after un-portify reverts the config, so the slot table refetches the
+  // reverted file in place (features-changed only refreshes the feature list).
+  const [reloadKey, setReloadKey] = useState(0)
+  useEffect(() => {
+    let cancelled = false
+    setRepos(null)
+    setLoadError(null)
+    api.getFeatureConfigDoc(feature)
+      .then((doc) => {
+        if (cancelled) return
+        const v = (doc.parsed.value ?? {}) as { [k: string]: ConfigValue }
+        setRepos(Array.isArray(v.repos) ? v.repos.map(parseRepo).filter((r): r is RepoSlice => r != null) : [])
+      })
+      .catch((err) => { if (!cancelled) setLoadError(err instanceof Error ? err.message : 'Load failed') })
+    return () => { cancelled = true }
+  }, [feature, portsRefreshKey, reloadKey])
   const [confirmRerun, setConfirmRerun] = useState(false)
+  const [confirmRemove, setConfirmRemove] = useState(false)
+  const [removing, setRemoving] = useState(false)
+  const [removeError, setRemoveError] = useState<string | null>(null)
 
-  if (ed.error && !ed.draft) {
-    return <div className="p-4 text-xs" style={{ color: 'var(--danger)' }}>{ed.error}</div>
+  if (loadError) {
+    return <div className="p-4 text-xs" style={{ color: 'var(--danger)' }}>{loadError}</div>
   }
-  if (ed.loading || !ed.draft) {
+  if (repos === null) {
     return <div className="p-4 text-xs" style={{ color: 'var(--text-muted)' }}>Loading…</div>
   }
-
-  const { repos } = ed.draft
 
   const launchPortify = (): void => {
     // An already-portified feature re-runs (refreshing its overlay) behind a
@@ -78,20 +77,22 @@ export function PortsTab({
     else onStartPortify?.(feature)
   }
 
-  const setPorts = (ri: number, ci: number, ports: PortSlotSlice[]): void => {
-    ed.setDraft((d) => ({
-      repos: d.repos.map((r, i) =>
-        i !== ri
-          ? r
-          : {
-              ...r,
-              startCommands: r.startCommands.map((c, j) =>
-                j !== ci ? c : { ...c, ports: ports.length > 0 ? ports : undefined },
-              ),
-            },
-      ),
-    }))
+  const removePortification = async (): Promise<void> => {
+    setRemoving(true)
+    setRemoveError(null)
+    try {
+      await api.removePortifyOverlay(feature)
+      // The server emits features-changed → App refetches /api/features → the
+      // `portified` prop flips to false and the status band re-renders. No local
+      // state to flip; the broadcast drives the live transition.
+      setConfirmRemove(false)
+    } catch (err) {
+      setRemoveError(err instanceof Error ? err.message : 'Remove failed')
+    } finally {
+      setRemoving(false)
+    }
   }
+
 
   return (
     <div className="flex h-full flex-col">
@@ -129,24 +130,46 @@ export function PortsTab({
               </p>
             )}
           </div>
-          {onStartPortify && (
-            <button
-              type="button"
-              onClick={launchPortify}
-              className="shrink-0 inline-flex items-center gap-1.5 self-start rounded-md px-3 py-1.5 text-[11px] font-medium transition-colors duration-150"
-              title={portified
-                ? 'Re-run Portify — re-derives the overlay from the current source.'
-                : 'Portify — rewrite every listener to an injectable port so it can boot concurrently.'}
-              style={{
-                color: 'var(--accent)',
-                border: '1px solid color-mix(in srgb, var(--accent) 45%, var(--border-default))',
-                background: 'color-mix(in srgb, var(--accent) 8%, transparent)',
-              }}
-            >
-              <span aria-hidden>🔌</span>
-              {portified ? 'Re-run Portify' : 'Portify'}
-            </button>
-          )}
+          <div className="flex shrink-0 items-center gap-2 self-start">
+            {/* The only legitimate way to undo a portify — slots can't be
+                hand-removed without desyncing from the overlay, so removal
+                deletes the overlay wholesale. */}
+            {portified && (
+              <button
+                type="button"
+                onClick={() => { setRemoveError(null); setConfirmRemove(true) }}
+                aria-label="Remove portification"
+                title="Remove portification — deletes the saved overlay; the feature reverts to its hardcoded ports."
+                className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[11px] font-medium transition-colors duration-150"
+                style={{
+                  color: 'var(--danger)',
+                  border: '1px solid color-mix(in srgb, var(--danger) 40%, var(--border-default))',
+                  background: 'transparent',
+                }}
+              >
+                <TrashIcon />
+                Remove portification
+              </button>
+            )}
+            {onStartPortify && (
+              <button
+                type="button"
+                onClick={launchPortify}
+                className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[11px] font-medium transition-colors duration-150"
+                title={portified
+                  ? 'Re-run Portify — re-derives the overlay from the current source.'
+                  : 'Portify — rewrite every listener to an injectable port so it can boot concurrently.'}
+                style={{
+                  color: 'var(--accent)',
+                  border: '1px solid color-mix(in srgb, var(--accent) 45%, var(--border-default))',
+                  background: 'color-mix(in srgb, var(--accent) 8%, transparent)',
+                }}
+              >
+                <span aria-hidden>🔌</span>
+                {portified ? 'Re-run Portify' : 'Portify'}
+              </button>
+            )}
+          </div>
         </div>
 
         <div className="flex flex-col gap-3 px-4 py-3">
@@ -187,9 +210,8 @@ export function PortsTab({
                       <span style={{ color: 'var(--text-muted)' }}>▸ </span>
                       {cmd.command || cmd.name || '(unnamed command)'}
                     </div>
-                    <PortSlotEditor
+                    <PortSlotTable
                       ports={cmd.ports ?? []}
-                      onChange={(ports) => setPorts(ri, ci, ports)}
                       emptyHint={!portified ? (
                         <div className="text-[10px] leading-relaxed" style={{ color: 'var(--text-muted)' }}>
                           Uses its hardcoded port.{' '}
@@ -203,7 +225,7 @@ export function PortsTab({
                               Run Portify
                             </button>
                           ) : 'Run Portify'}{' '}
-                          to make it injectable — adding a slot by hand only sets an env var, which helps only if the service already reads it.
+                          to rewrite it to an injectable port so it can boot concurrently.
                         </div>
                       ) : undefined}
                     />
@@ -221,15 +243,6 @@ export function PortsTab({
           <PortifyHistoryList feature={feature} onOpenPortify={onOpenPortify} />
         </div>
       </div>
-
-      <SaveBar
-        dirty={ed.dirty}
-        saving={ed.saving}
-        error={ed.error}
-        savedAt={ed.savedAt}
-        onSave={ed.doSave}
-        onDiscard={ed.discard}
-      />
 
       {confirmRerun && (
         <div
@@ -261,6 +274,27 @@ export function PortsTab({
           </div>
         </div>
       )}
+
+      <ConfirmModal
+        open={confirmRemove}
+        title="Remove portification?"
+        message={
+          <div className="space-y-2">
+            <p>
+              This deletes the saved overlay for <code style={{ fontFamily: 'var(--font-mono)' }}>{feature}</code>. The feature reverts to <b style={{ color: 'var(--text-secondary)' }}>not portified</b> — it boots on its hardcoded ports and can no longer run concurrently.
+            </p>
+            <p style={{ color: 'var(--text-muted)' }}>
+              Your repo is untouched. The declared port slots stay in the config file; re-run Portify any time to regenerate the overlay.
+            </p>
+            {removeError && <p style={{ color: 'var(--danger)' }}>{removeError}</p>}
+          </div>
+        }
+        confirmLabel="Remove portification"
+        variant="danger"
+        busy={removing}
+        onCancel={() => { if (!removing) { setConfirmRemove(false); setRemoveError(null) } }}
+        onConfirm={removePortification}
+      />
     </div>
   )
 }
