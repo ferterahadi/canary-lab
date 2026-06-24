@@ -154,6 +154,39 @@ describe('PortsTab', () => {
     expect(container.textContent).toContain('copied ✓')
   })
 
+  it('refetches the config doc when portsRefreshKey changes (re-run Portify rewrote the slots)', async () => {
+    // Before re-run: one slot named "api". After re-run the overlay rewrote the
+    // slots, but `portified` stays true, so only the bumped key signals the change.
+    const before = docWithPorts()
+    const after = docWithPorts()
+    after.parsed.value = {
+      ...(after.parsed.value as Record<string, unknown>),
+      repos: [
+        {
+          name: 'my-backend',
+          localPath: '~/Documents/my-backend',
+          startCommands: [{ command: 'yarn start', ports: [{ name: 'gateway', env: 'GATEWAY_PORT' }] }],
+        },
+      ],
+    }
+    vi.mocked(getFeatureConfigDoc).mockResolvedValueOnce(before).mockResolvedValueOnce(after)
+
+    await act(async () => {
+      root.render(<PortsTab feature="cns_exactly_once_fallback" portified portsRefreshKey={0} />)
+    })
+    expect(container.textContent).toContain('${port.api}')
+    expect(getFeatureConfigDoc).toHaveBeenCalledTimes(1)
+
+    // Same feature, same portified=true — only the key changes, as it would after
+    // an in-place re-run save. The slots must reload without a tab switch.
+    await act(async () => {
+      root.render(<PortsTab feature="cns_exactly_once_fallback" portified portsRefreshKey={1} />)
+    })
+    expect(getFeatureConfigDoc).toHaveBeenCalledTimes(2)
+    expect(container.textContent).toContain('${port.gateway}')
+    expect(container.textContent).not.toContain('${port.api}')
+  })
+
   it('shows an empty state when there are no services', async () => {
     vi.mocked(getFeatureConfigDoc).mockResolvedValue(emptyDoc())
     await act(async () => {
