@@ -18,13 +18,16 @@ interface Props {
   onDeleted?: (feature: string) => void
   onRenamed?: (oldFeature: string, nextFeature: string) => void
   initialTab?: Tab
+  /** Bumped by App when a portify overlay is saved → the Ports tab refetches its
+   *  config doc so the rewritten slots show without a tab switch / refresh. */
+  portsRefreshKey?: number
   /** Launch the port-ification wizard for this feature (from the Service tab). */
   onStartPortify?: (feature: string) => void
   /** Reopen a past/active port-ification workflow (by id) from the Ports tab. */
   onOpenPortify?: (workflowId: string) => void
 }
 
-export function FeatureConfigEditor({ feature, portified = false, onClose, onDeleted, onRenamed, initialTab = 'general', onStartPortify, onOpenPortify }: Props) {
+export function FeatureConfigEditor({ feature, portified = false, onClose, onDeleted, onRenamed, initialTab = 'general', portsRefreshKey, onStartPortify, onOpenPortify }: Props) {
   const [tab, setTab] = useState<Tab>(initialTab)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [confirmName, setConfirmName] = useState('')
@@ -113,7 +116,7 @@ export function FeatureConfigEditor({ feature, portified = false, onClose, onDel
         <div className="flex-1 min-h-0">
           {tab === 'general' && <GeneralTab feature={feature} onFeatureRenamed={(nextFeature) => onRenamed?.(feature, nextFeature)} />}
           {tab === 'repos' && <ReposTab feature={feature} />}
-          {tab === 'ports' && <PortsTab feature={feature} portified={portified} onStartPortify={onStartPortify} onOpenPortify={onOpenPortify} />}
+          {tab === 'ports' && <PortsTab feature={feature} portified={portified} portsRefreshKey={portsRefreshKey} onStartPortify={onStartPortify} onOpenPortify={onOpenPortify} />}
           {tab === 'envsets' && <EnvsetsTab feature={feature} />}
           {tab === 'playwright' && <PlaywrightTab feature={feature} />}
         </div>

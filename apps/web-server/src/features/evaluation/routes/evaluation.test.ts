@@ -526,6 +526,42 @@ test('records checkout', async ({ page }) => {
     expect(deleted.statusCode).toBe(204)
   })
 
+  it('calls markExit(0) when active task exists but disk status is not running (ternary false branch)', async () => {
+    writeManifestForRun('r-task-exitmode', 'checkout', 'passed')
+    const testAbort = new AbortController()
+    const generateEvaluationRewrite = vi.fn((_detail, _adapter, _projectRoot, options) => new Promise<null>((resolve) => {
+      options?.signal?.addEventListener('abort', () => resolve(null), { once: true })
+      testAbort.signal.addEventListener('abort', () => resolve(null), { once: true })
+    }))
+    const { app } = await build({ projectRoot: tmpDir, generateEvaluationRewrite })
+    const started = await app.inject({
+      method: 'POST',
+      url: '/api/runs/r-task-exitmode/evaluation-export',
+      payload: { mode: 'localized' },
+    })
+    const taskId = started.json().taskId
+    // Spoof readEvaluationExportTask to return status='completed' while the task is still in
+    // activeEvaluationExports — exercises: if (active !== undefined) body with ternary=false path.
+    vi.mocked(readEvaluationExportTask).mockReturnValueOnce({
+      taskId,
+      runId: 'r-task-exitmode',
+      feature: 'checkout',
+      mode: 'localized',
+      status: 'completed',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+      downloadReady: true,
+      archiveBase: 'canary-lab-evaluation-checkout-r-task-exitmode',
+    })
+    const deleted = await app.inject({
+      method: 'DELETE',
+      url: `/api/evaluation-exports/${encodeURIComponent(taskId)}`,
+    })
+    testAbort.abort()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(deleted.statusCode).toBe(204)
+  })
+
   it('cancels running evaluation export tasks when dismissed', async () => {
     writeManifestForRun('r-task-cancel', 'checkout', 'passed')
     let aborted = false

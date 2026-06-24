@@ -4,7 +4,6 @@ import type { PortifyIndexEntry, PortifyManifest, PortifyStatus } from '../../..
 import { useActivePortify } from '../state/PortifyContext'
 import { AgentSessionView } from '../../agent-sessions/components/AgentSessionView'
 import { ExternalPortifyPanel } from './ExternalPortifyPanel'
-import { CopyButton } from '../../../shared/ui/CopyButton'
 
 // Guided port-ification: an agent rewrites the feature's apps to use injectable
 // ports, proven by a concurrent double-boot, ending when the user SAVES the
@@ -632,7 +631,7 @@ function ReviewScreen({ m, busy, saved, onSave, onRequestChanges, onDone }: { m:
       )}
       {proven ? <VerificationBadge m={m} /> : <RevisionFailedBanner m={m} />}
       {/* The scratch worktree is gone after save — review is read-only. */}
-      {!saved && <ReviewLocally m={m} />}
+      {!saved && <ReviewLocally m={m} openError={openError} />}
       {/* A proven-but-empty diff isn't a missing capture — the apps already read
           injected ports, so the rewrite was a no-op (see orchestrator). Say so
           plainly instead of the bare "(no diff captured)". */}
@@ -641,7 +640,9 @@ function ReviewScreen({ m, busy, saved, onSave, onRequestChanges, onDone }: { m:
         : proven
           ? <NoChangesNeeded feature={m.feature} />
           : <DiffView diff="" onOpenInEditor={openProject} />}
-      {openError && (
+      {/* Saved state has no Review-locally row to host it, so fall back to
+          surfacing a launch failure below the diff. */}
+      {saved && openError && (
         <div style={{ fontSize: 10.5, color: 'var(--danger)', marginTop: 6 }}>{openError}</div>
       )}
       {saved ? (
@@ -697,7 +698,7 @@ function ReviewScreen({ m, busy, saved, onSave, onRequestChanges, onDone }: { m:
 // can open it in their own editor and review the full change before saving. The
 // workflow parks at ready-to-save indefinitely; hand-edits in the worktree are
 // captured into the saved overlay.
-function ReviewLocally({ m }: { m: PortifyManifest }) {
+function ReviewLocally({ m, openError }: { m: PortifyManifest; openError: string | null }) {
   const trees = m.repos.filter((r) => r.worktreePath)
   if (trees.length === 0) return null
   return (
@@ -709,11 +710,15 @@ function ReviewLocally({ m }: { m: PortifyManifest }) {
         Not ready? Open the scratch worktree in your editor to review the full change first — it stays here until you save. Hand-edits in the worktree are captured into the overlay.
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
-        {trees.map((r) => (
+        {trees.map((r, i) => (
           <div key={r.name} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span style={{ fontSize: 11.5, color: 'var(--text-secondary)', flexShrink: 0 }}>{r.name}</span>
             <code style={{ ...mono, flex: '1 1 auto', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.worktreePath}</code>
-            <CopyButton value={r.worktreePath!} label="Copy path" style={{ flexShrink: 0 }} />
+            {/* The open is project-wide; surface its launch failure once, where the
+                Copy-path button used to sit. */}
+            {i === 0 && openError && (
+              <span style={{ fontSize: 10.5, color: 'var(--danger)', flexShrink: 0 }}>{openError}</span>
+            )}
           </div>
         ))}
       </div>

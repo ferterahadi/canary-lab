@@ -22,6 +22,9 @@ interface Props {
   onFeaturesChanged?: (preferredFeature?: string | null) => void
   /** Incremented by App when a coverage job finishes → re-fetches headlines. */
   coverageRefreshKey?: number
+  /** Incremented by App when a portify overlay is saved → the open Ports tab
+   *  refetches its config doc so the rewritten slots show without a tab switch. */
+  portsRefreshKey?: number
   /** Opens the port-ification wizard for a feature (Service tab entry). */
   onStartPortify?: (feature: string) => void
   /** Reopens a past/active port-ification workflow (Ports-tab history). */
@@ -50,6 +53,7 @@ export function FeaturesColumn({
   onSelectFeature,
   onFeaturesChanged,
   coverageRefreshKey,
+  portsRefreshKey,
   onStartPortify,
   onOpenPortify,
   onOpenCoverage,
@@ -204,6 +208,7 @@ export function FeaturesColumn({
         <FeatureConfigEditor
           feature={configFor}
           portified={features.find((f) => f.name === configFor)?.portified ?? false}
+          portsRefreshKey={portsRefreshKey}
           onStartPortify={onStartPortify}
           onOpenPortify={(workflowId) => { setConfigFor(null); onOpenPortify?.(workflowId) }}
           onClose={() => setConfigFor(null)}

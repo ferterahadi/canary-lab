@@ -37,6 +37,9 @@ export function App() {
   )
   const [testsRefreshKey, setTestsRefreshKey] = useState(0)
   const [coverageRefreshKey, setCoverageRefreshKey] = useState(0)
+  // Bumped when a portify overlay is saved — forces the open Ports tab to refetch
+  // its config doc so the rewritten slots show without a tab switch / refresh.
+  const [portsRefreshKey, setPortsRefreshKey] = useState(0)
   const [specTotalTests, setSpecTotalTests] = useState(0)
   const [collisionPrompt, setCollisionPrompt] = useState<{ feature: string; env?: string; mode?: 'test' | 'boot'; info: RepoCollisionChoice; portsConfigured?: boolean } | null>(null)
   // Port-ification wizard target: 'new' starts a fresh workflow for a feature;
@@ -280,6 +283,7 @@ export function App() {
           }}
           onFeaturesChanged={refreshFeatures}
           coverageRefreshKey={coverageRefreshKey}
+          portsRefreshKey={portsRefreshKey}
           onStartPortify={(f) => setPortifyTarget({ kind: 'new', feature: f })}
           onOpenPortify={(workflowId) => setPortifyTarget({ kind: 'revisit', workflowId })}
           onOpenCoverage={(f) => { setSelectedFeature(f); setView('coverage') }}
@@ -368,6 +372,7 @@ export function App() {
         <FeatureConfigEditor
           feature={configFor}
           initialTab="playwright"
+          portsRefreshKey={portsRefreshKey}
           onStartPortify={(f) => setPortifyTarget({ kind: 'new', feature: f })}
           onOpenPortify={(workflowId) => setPortifyTarget({ kind: 'revisit', workflowId })}
           onClose={() => setConfigFor(null)}
@@ -427,6 +432,10 @@ export function App() {
             // The overlay now exists — refresh /api/features so the "Portified"
             // badge + Ports-tab indicator reflect it immediately.
             refreshFeatures(selectedFeatureRef.current)
+            // The overlay also rewrote the port slots; bump the key so the open
+            // Ports tab refetches its config doc instead of waiting for a tab
+            // switch / refresh. (features-changed alone only refreshes the list.)
+            setPortsRefreshKey((key) => key + 1)
           }}
         />
       )}
