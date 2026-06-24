@@ -113,12 +113,31 @@ describe('PortifyWizard', () => {
     expect(container.textContent).not.toContain('Failed to open editor')
   })
 
-  it('surfaces a launch failure from the open-in-editor button', async () => {
+  it('surfaces a launch failure in the Review-locally row where Copy path was', async () => {
     vi.mocked(api.startPortify).mockResolvedValue({ workflowId: 'w' })
-    vi.mocked(api.getPortify).mockResolvedValue(readyManifest())
+    // worktreePath makes the Review-locally row render — the launch error now
+    // lands there instead of below the diff.
+    vi.mocked(api.getPortify).mockResolvedValue(manifest('ready-to-save', {
+      diff: '# repo: app\n+ x',
+      repos: [{ name: 'app', path: '~/app', worktreePath: '/tmp/wt/app' }],
+      verification: { ok: true, instances: [{ ports: { api: 1 }, ok: true }, { ports: { api: 2 }, ok: true }] },
+    }))
     vi.mocked(api.openPortifyProject).mockResolvedValue({ opened: false, paths: ['/repo'], error: 'no editor' })
     await renderWizard()
     await act(async () => clickButton('Start ▶'))
+    await flush()
+    await act(async () => clickByTitle('Open project in editor'))
+    await flush()
+    expect(container.textContent).toContain('no editor')
+  })
+
+  it('falls back to surfacing a launch failure below the diff once saved', async () => {
+    // Saved state has no Review-locally row, so the error appears below the diff.
+    vi.mocked(api.getPortify).mockResolvedValue(manifest('saved', { diff: '# repo: app\n+ x' }))
+    vi.mocked(api.openPortifyProject).mockResolvedValue({ opened: false, paths: ['/repo'], error: 'no editor' })
+    await act(async () => {
+      root.render(<PortifyWizard workflowId="w" onClose={vi.fn()} onSaved={vi.fn()} />)
+    })
     await flush()
     await act(async () => clickByTitle('Open project in editor'))
     await flush()

@@ -27,6 +27,7 @@ interface PortsSlice {
 export function PortsTab({
   feature,
   portified = false,
+  portsRefreshKey,
   onStartPortify,
   onOpenPortify,
 }: {
@@ -35,6 +36,10 @@ export function PortsTab({
    *  (the `overlayExists` check, via /api/features), NOT the declared-slot
    *  count. This is what "Portified" means: a verified overlay is on disk. */
   portified?: boolean
+  /** Bumped by App when a portify overlay is saved. Added to the load deps so
+   *  the slot table refetches the rewritten config doc in place — without it the
+   *  tab kept the pre-portify slots until a remount (tab switch / refresh). */
+  portsRefreshKey?: number
   onStartPortify?: (feature: string) => void
   /** Reopen a past/active port-ification workflow (by id) in the wizard. */
   onOpenPortify?: (workflowId: string) => void
@@ -53,7 +58,7 @@ export function PortsTab({
       return { ...current, repos: slice.repos.map(serializeRepo) }
     },
     save: (payload) => api.putFeatureConfigDoc(feature, payload as ConfigValue),
-    deps: [feature],
+    deps: [feature, portsRefreshKey],
   })
   const [confirmRerun, setConfirmRerun] = useState(false)
 

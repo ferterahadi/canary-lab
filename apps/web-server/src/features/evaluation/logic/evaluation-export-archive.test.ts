@@ -47,7 +47,7 @@ describe('buildEvaluationExportArchive — coverage attachment', () => {
     fs.writeFileSync(
       path.join(docsDir, '_prd-summary.json'),
       JSON.stringify({
-        requirements: [{ id: 'R1', name: 'Create todo', description: 'A user can create a new todo item' }],
+        requirements: [{ id: 'R1', title: 'Create todo', text: 'A user can create a new todo item', pathTypes: ['happy'] }],
         requirementsHash: 'hash-abc',
         docsHash: 'hash-def',
         generatedAt: '2026-01-01T00:00:00.000Z',
