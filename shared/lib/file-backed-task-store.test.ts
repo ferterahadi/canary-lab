@@ -76,6 +76,31 @@ describe('FileBackedTaskStore', () => {
     expect(store.list()).toHaveLength(0)
   })
 
+  it('pruneOrphans drops index rows whose record dir was wiped out-of-band, and emits removed', () => {
+    const store = makeStore(dir)
+    store.save({ id: 'a', status: 'done', feature: 'f', createdAt: '2026-01-01' })
+    store.save({ id: 'b', status: 'done', feature: 'f', createdAt: '2026-01-02' })
+    store.save({ id: 'c', status: 'done', feature: 'f', createdAt: '2026-01-03' })
+    // Wipe b's record dir directly (a logs cleanup / manual rm) — the index row lingers.
+    fs.rmSync(path.join(dir, 'widgets', 'b'), { recursive: true, force: true })
+    const events: unknown[] = []
+    store.onEvent((e) => events.push(e))
+    const pruned = store.pruneOrphans()
+    expect(pruned).toEqual(['b'])
+    expect(store.list().map((e) => e.id).sort()).toEqual(['a', 'c'])
+    expect(events).toEqual([{ kind: 'removed', id: 'b' }])
+  })
+
+  it('pruneOrphans is a no-op (no events) when every row has its record', () => {
+    const store = makeStore(dir)
+    store.save({ id: 'a', status: 'done', feature: 'f', createdAt: '2026-01-01' })
+    const events: unknown[] = []
+    store.onEvent((e) => events.push(e))
+    expect(store.pruneOrphans()).toEqual([])
+    expect(events).toEqual([])
+    expect(store.list().map((e) => e.id)).toEqual(['a'])
+  })
+
   it('transition applies a legal move and rejects an illegal one', () => {
     const store = makeStore(dir)
     store.save({ id: 'a', status: 'created', feature: 'f', createdAt: '2026-01-01' })

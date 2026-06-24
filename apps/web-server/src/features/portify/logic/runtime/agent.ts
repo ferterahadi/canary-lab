@@ -13,6 +13,18 @@ import { runAgentProcess, buildClaudeAgenticArgs } from '../../../agent-sessions
 // is never punished (see agent-idle-timer.ts).
 const PORTIFY_IDLE_TIMEOUT_MS = 5 * 60 * 1000
 
+// A spawned claude/codex CLI emits this when the user's subscription quota is
+// exhausted. It then exits 0 having made NO edits — which the double-boot
+// verifier would mislabel "no port slots declared" and the orchestrator would
+// burn every remaining attempt re-running into the same wall. Detect it in the
+// streamed output so the run can fail fast with an actionable message instead.
+const SESSION_LIMIT_RE = /hit your (session|usage) limit|(session|usage) limit reached|usage limit\b/i
+
+/** True if the agent's streamed output says its session/usage quota is exhausted. */
+export function isAgentSessionLimited(output: string): boolean {
+  return SESSION_LIMIT_RE.test(output)
+}
+
 // One-shot, headless agent run for the port-ification edits (mirrors the
 // benchmark sabotage agent). Resolves on process exit; permissions auto-accept
 // (no human in this loop). For claude we pin a session id on attempt 1 and
@@ -51,12 +63,23 @@ export function runPortifyAgent(opts: {
   if (logPath) {
     try { out = fs.openSync(logPath, 'a') } catch { out = null }
   }
+  // Watch the stream for the quota sentinel. Carry a small tail across chunks so
+  // a phrase split over a stream-json boundary is still matched; latch once seen.
+  let sessionLimited = false
+  let tail = ''
   const handle = runAgentProcess({
     command: bin,
     args,
     cwd,
     captureStdout: false,
-    onChunk: (text) => { if (out !== null) { try { fs.writeSync(out, text) } catch { /* best effort */ } } },
+    onChunk: (text) => {
+      if (out !== null) { try { fs.writeSync(out, text) } catch { /* best effort */ } }
+      if (!sessionLimited) {
+        const probe = tail + text
+        if (isAgentSessionLimited(probe)) sessionLimited = true
+        tail = probe.slice(-200)
+      }
+    },
     idleMs: PORTIFY_IDLE_TIMEOUT_MS,
     activityPath: agentActivityPath(agent, cwd, sessionId, logPath ?? undefined),
   })
@@ -67,8 +90,18 @@ export function runPortifyAgent(opts: {
   }
   return handle.done.then(
     // Normal exit (any code) resolves — a non-zero agent still may have made
-    // useful edits; the double-boot verifier is the real arbiter.
-    () => { cleanup() },
+    // useful edits; the double-boot verifier is the real arbiter. The one
+    // exception: a quota exhaustion makes "exit 0, no edits" indistinguishable
+    // from a real empty result, so reject with a clear, non-burning message.
+    () => {
+      cleanup()
+      if (sessionLimited) {
+        throw new Error(
+          `the ${agent} CLI hit its session/usage limit before completing the edit — ` +
+          `re-run portify once the limit resets`,
+        )
+      }
+    },
     // A spawn failure (CLI missing / not launchable) is NOT a normal run that
     // simply made no edits — record it to the log and reject so the caller can
     // report it instead of letting verify mislabel it "no port slots declared".

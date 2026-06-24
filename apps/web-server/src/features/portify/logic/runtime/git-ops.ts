@@ -144,6 +144,21 @@ export async function reverseOverlay(worktreeRoot: string, patchPath: string): P
   return { kind: 'conflict', files, detail }
 }
 
+/**
+ * Hard-reset a scratch worktree's tracked files back to its HEAD, discarding any
+ * working-tree changes. Used to scrub a worktree after a seed `applyOverlay`
+ * returned `conflict`/`error`: a `--3way` seed leaves conflict markers in the
+ * files even when it reports failure, and the agent must start from a CLEAN
+ * checkout (the seed is a best-effort optimization, never load-bearing). Resets
+ * tracked files only — the linked `node_modules` is untracked and untouched.
+ */
+export async function resetWorktree(worktreeRoot: string): Promise<void> {
+  // The scratch branch was just cut at HEAD with no commits, so HEAD is the
+  // clean baseline. `reset --hard` restores both the index and the working tree,
+  // clearing any half-applied 3-way merge and its markers.
+  await runGit(worktreeRoot, ['reset', '--hard', 'HEAD'])
+}
+
 /** Remove the worktree and delete the (unmerged) branch from the source repo. */
 export async function discardWorktree(handle: WorktreeHandle, branch: string): Promise<void> {
   await removeWorktree(handle)

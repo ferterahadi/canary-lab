@@ -11,7 +11,7 @@ import { type WorktreeHandle } from '../../../runs/logic/runtime/repo-worktree'
 import { PortifyRunStore } from './store'
 import { PortifyOrchestrator } from './orchestrator'
 import { buildPortifyPaths, portifyDir } from './paths'
-import { createBranchAndWorktree, captureDiff, changedFiles, discardWorktree, portifyBranchName, applyOverlay } from './git-ops'
+import { createBranchAndWorktree, captureDiff, changedFiles, discardWorktree, portifyBranchName, applyOverlay, resetWorktree } from './git-ops'
 import { writeOverlay, readOverlay, captureTouchedFiles, type OverlayRepoInput } from './overlay'
 import { runPortifyAgent, writePortifyClaudeRef } from './agent'
 import { buildPortifyPrompt, buildPortifyRetryPrompt, buildPortifyFeedbackPrompt, type RepoEditTarget } from './prompt'
@@ -313,9 +313,14 @@ export function createPortifyRunner(deps: PortifyRunnerDeps) {
               const outcome = await applyOverlay(wt.handle.worktreeRoot, seedPatch)
               if (outcome.kind === 'ok') {
                 state.seededFrom.push({ feature: borrowed.feature, repos: group.members.map((m) => m.name) })
+              } else {
+                // A conflict/error means we couldn't cleanly seed (base drift,
+                // overlapping edits). `--3way` leaves conflict markers in the
+                // files even on failure, so scrub the worktree back to a clean
+                // HEAD before the agent edits from scratch — otherwise the
+                // markers poison its edits and the captured diff.
+                await resetWorktree(wt.handle.worktreeRoot)
               }
-              // A conflict/error just means we couldn't cleanly seed (base
-              // drift, overlapping edits) — fall through to a from-scratch edit.
             } catch { /* best-effort seed */ }
             finally { try { fs.rmSync(seedPatch, { force: true }) } catch { /* gone */ } }
           }
@@ -593,12 +598,17 @@ export function createPortifyRunner(deps: PortifyRunnerDeps) {
   // Remove a finished workflow from history (index + run dir). Only terminal
   // workflows can be removed — an active one must be saved or cancelled first.
   async function remove(workflowId: string): Promise<{ workflowId: string; removed: true }> {
+    // Fall back to the index row's status when the record file is gone: an
+    // orphaned row (record wiped out-of-band) must still be removable from
+    // history — otherwise a zombie row can never be cleared (store.remove is
+    // tolerant; only this guard 404'd it). The index keeps the status.
     const m = deps.store.get(workflowId)
-    if (!m) throw Object.assign(new Error('workflow not found'), { statusCode: 404 })
-    const terminal = m.status === 'saved' || m.status === 'failed' || m.status === 'aborted'
+    const status = m?.status ?? deps.store.list().find((e) => e.workflowId === workflowId)?.status
+    if (!status) throw Object.assign(new Error('workflow not found'), { statusCode: 404 })
+    const terminal = status === 'saved' || status === 'failed' || status === 'aborted'
     if (!terminal) {
       throw Object.assign(
-        new Error(`cannot remove a workflow in status "${m.status}" — save or cancel it first`),
+        new Error(`cannot remove a workflow in status "${status}" — save or cancel it first`),
         { statusCode: 409 },
       )
     }

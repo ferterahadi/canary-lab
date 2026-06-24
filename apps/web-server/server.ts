@@ -191,6 +191,10 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
   // it edited in place, then flips the manifest to 'aborted' so the UI doesn't
   // show a zombie workflow (and a stale worktree can't wedge the next run).
   await reclaimOrphanedPortify(portifyStore, logsDir, () => new Date().toISOString())
+  // Drop zombie history rows whose record dir was wiped out-of-band (logs
+  // cleanup / manual rm) — they list but 404 on open + remove. (Distinct from
+  // reclaim above, which handles live-but-dead workflows that still have a record.)
+  portifyStore.pruneOrphans()
   // Coverage background jobs (R4): a job left 'running' belongs to a dead
   // process — flip it to 'aborted' so it doesn't hold the single-flight lock or
   // show as live forever.

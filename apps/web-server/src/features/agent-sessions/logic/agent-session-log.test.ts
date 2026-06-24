@@ -1524,6 +1524,18 @@ describe('writeWorkflowAgentRef + resolveWorkflowAgentRef', () => {
     expect(result).toEqual({ agent: 'codex', sessionId: 'sess-codex-empty', logPath: '' })
   })
 
+  it('returns ref directly when logPath is set and the log file exists at that path (line 362 true branch)', () => {
+    const dir = workflowDir()
+    const logPath = path.join(dir, 'claude-session.jsonl')
+    fs.writeFileSync(logPath, '{}\n')
+    fs.writeFileSync(
+      path.join(dir, 'agent-session.json'),
+      JSON.stringify({ agent: 'claude', sessionId: 'sid-test', logPath }),
+    )
+    const result = resolveWorkflowAgentRef(dir, homeDir)
+    expect(result).toEqual({ agent: 'claude', sessionId: 'sid-test', logPath })
+  })
+
   it('returns null from readCodexDiscoveryHint when codexDiscovery.cwd is not a string', () => {
     // codexDiscovery present but cwd is a number → typeof cwd !== 'string' → returns null (line373).
     // The file also lacks the legacy agent/sessionId/logPath fields, so parseAgentSessionRefFile

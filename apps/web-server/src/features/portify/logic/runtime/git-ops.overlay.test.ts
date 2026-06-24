@@ -3,7 +3,7 @@ import os from 'os'
 import path from 'path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { runGit, diffContentSinceSnapshot } from '../../../../shared/git-repo'
-import { applyOverlay, reverseOverlay } from './git-ops'
+import { applyOverlay, reverseOverlay, resetWorktree } from './git-ops'
 
 const roots: string[] = []
 afterEach(() => {
@@ -117,6 +117,28 @@ describe('applyOverlay', () => {
     const out = await applyOverlay(repo, patch)
     expect(out.kind).toBe('conflict')
     if (out.kind === 'conflict') expect(out.files).toContain('app.js')
+  })
+})
+
+describe('resetWorktree', () => {
+  it('scrubs the conflict markers a failed --3way seed left in the worktree', async () => {
+    const repo = await tmpRepo(BASE)
+    const patch = writePatch(repo, await capturePatch(repo, PORTED))
+
+    // Change the TARGET line so --3way cannot auto-merge — it reports `conflict`
+    // but ALSO writes `<<<<<<< / ======= / >>>>>>>` markers into the file.
+    const conflicting = BASE.replace('const PORT = 3007', 'const PORT = 9000 // user change')
+    fs.writeFileSync(path.join(repo, 'app.js'), conflicting)
+    await runGit(repo, ['commit', '-aqm', 'conflict-change', '--no-verify'])
+
+    const out = await applyOverlay(repo, patch)
+    expect(out.kind).toBe('conflict')
+    expect(read(repo)).toMatch(/<<<<<<<|>>>>>>>/) // markers are present after the failed seed
+
+    await resetWorktree(repo)
+    const after = read(repo)
+    expect(after).not.toMatch(/<<<<<<<|>>>>>>>/) // markers gone
+    expect(after).toBe(conflicting)               // back to the committed HEAD state
   })
 })
 

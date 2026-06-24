@@ -89,6 +89,17 @@ export class PortifyRunStore implements PortifyStore {
   }
 
   /**
+   * Drop "zombie" history rows: index entries whose `portify.json` was wiped
+   * out-of-band (a logs cleanup, a manual rm) without going through `remove()`.
+   * Such a row lists in history but 404s on open (wizard hangs on "Loading…")
+   * and on remove. Emits `removed` for each so live clients prune it. Run on
+   * boot, alongside reconcileInterrupted.
+   */
+  pruneOrphans(): string[] {
+    return this.store.pruneOrphans()
+  }
+
+  /**
    * Flip any workflow left in a non-terminal state by a dead process to
    * `aborted`. Its in-memory driver was killed on restart, so it can never
    * finish — flip it so the UI doesn't show it as live forever. (Orphaned

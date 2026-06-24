@@ -35,6 +35,30 @@ describe('buildEvaluationExportArchive — coverage attachment', () => {
     expect(entries.find((e) => e.filename === 'evaluation.html')).toBeTruthy()
   })
 
+  it('attaches coverage when the feature has a PRD summary with requirements (if-true branch)', async () => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'canary-eval-archive-withreqs-'))
+    const logsDir = path.join(tmpDir, 'logs')
+    fs.mkdirSync(logsDir, { recursive: true })
+    const featuresDir = writeTmpFeature(logsDir, 'Checkout Flow')
+    // Use the realpath so the docs dir matches the featureDir that loadFeatures returns via __dirname.
+    const featureDir = fs.realpathSync(path.join(featuresDir, 'checkout-flow'))
+    const docsDir = path.join(featureDir, 'docs')
+    fs.mkdirSync(docsDir, { recursive: true })
+    fs.writeFileSync(
+      path.join(docsDir, '_prd-summary.json'),
+      JSON.stringify({
+        requirements: [{ id: 'R1', name: 'Create todo', description: 'A user can create a new todo item' }],
+        requirementsHash: 'hash-abc',
+        docsHash: 'hash-def',
+        generatedAt: '2026-01-01T00:00:00.000Z',
+        sourceDocs: [],
+      }),
+    )
+    const built = await buildEvaluationExportArchive(detail(), { logsDir, featuresDir })
+    const entries = zipEntries(built.zip)
+    expect(entries.find((e) => e.filename === 'evaluation.html')).toBeTruthy()
+  })
+
   it('skips coverage when feature has no PRD summary (0 requirements → if-false branch)', async () => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'canary-eval-archive-zeroq-'))
     const logsDir = path.join(tmpDir, 'logs')
