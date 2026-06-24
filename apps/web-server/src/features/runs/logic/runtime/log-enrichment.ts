@@ -394,6 +394,39 @@ function readPreviousFailingSlugsFromJournal(journalPath: string): string[] {
   }
 }
 
+// Same-failure streak for `currentSlugs`, derived from the journal: the current
+// observation (1) plus each trailing iteration whose `failingTests` matches the
+// current set. Mirrors HealCycleState.consecutiveSameFailures for surfaces that
+// only have the persisted journal (the external/MCP heal loop doesn't run the
+// in-memory state machine). Ordering-insensitive: keys off a sorted signature so
+// the runner reordering slugs can't masquerade as progress. Returns 0 when the
+// current set is empty.
+export function countConsecutiveSameFailures(
+  journalPath: string,
+  currentSlugs: readonly string[],
+): number {
+  const target = signatureFor(currentSlugs)
+  if (!target) return 0
+  let streak = 1
+  try {
+    const entries = parseJournalMarkdown(fs.readFileSync(journalPath, 'utf-8'))
+    for (let i = entries.length - 1; i >= 0; i--) {
+      const value = entries[i]?.failingTests?.trim()
+      if (!value) break
+      const sig = signatureFor(value.split(',').map((s) => s.trim()))
+      if (sig !== target) break
+      streak += 1
+    }
+  } catch {
+    return streak
+  }
+  return streak
+}
+
+function signatureFor(slugs: readonly string[]): string {
+  return slugs.map((s) => s.trim()).filter((s) => s.length > 0).slice().sort().join('|')
+}
+
 function readJournalTail(journalPath: string, limit = 3): JournalEntry[] {
   try {
     const raw = fs.readFileSync(journalPath, 'utf-8')

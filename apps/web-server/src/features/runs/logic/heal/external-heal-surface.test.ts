@@ -174,6 +174,50 @@ describe('buildExternalHealContext', () => {
   })
 })
 
+describe('stuck-cycle escalation', () => {
+  function seedJournal(runId: string, iterations: number, failing: string): void {
+    const paths = buildRunPaths(runDirFor(logsDir, runId))
+    fs.mkdirSync(path.dirname(paths.diagnosisJournalPath), { recursive: true })
+    const blocks = Array.from({ length: iterations }, (_, i) =>
+      `## Iteration ${i + 1} — 2026-05-25T08:0${i}:00Z\n\n- failingTests: ${failing}\n`)
+    fs.writeFileSync(paths.diagnosisJournalPath, blocks.join('\n'))
+  }
+
+  it('attaches an escalation block once the same failing set has survived 3 cycles', () => {
+    // Current failing set = "checkout fails"; two prior iterations failed on the
+    // same set → streak = 3 → escalation fires.
+    seedJournal('run-1', 2, 'checkout fails')
+    const context = buildExternalHealContext({ detail: detailFor('run-1'), logsDir, projectRoot: tmpDir })
+    expect(context.escalation).toBeDefined()
+    expect(context.escalation?.consecutiveSameFailures).toBe(3)
+    expect(context.escalation?.failingSet).toEqual(['checkout fails'])
+    expect(context.escalation?.readFirst.some((p) => p.includes('snapshot-at-failure.txt'))).toBe(true)
+    expect(context.escalation?.tactics.join(' ')).toContain('signal_run')
+  })
+
+  it('omits escalation when the failing set has only repeated twice (one prior attempt)', () => {
+    seedJournal('run-1', 1, 'checkout fails')
+    const context = buildExternalHealContext({ detail: detailFor('run-1'), logsDir, projectRoot: tmpDir })
+    expect(context.escalation).toBeUndefined()
+  })
+
+  it('omits escalation when the failing set changed (prior cycle was a different set)', () => {
+    seedJournal('run-1', 2, 'some other test')
+    const context = buildExternalHealContext({ detail: detailFor('run-1'), logsDir, projectRoot: tmpDir })
+    expect(context.escalation).toBeUndefined()
+  })
+
+  it('slimRepeatHealContext keeps the escalation and drops the generic breadcrumb when stuck', () => {
+    seedJournal('run-1', 2, 'checkout fails')
+    const full = buildExternalHealContext({ detail: detailFor('run-1'), logsDir, projectRoot: tmpDir })
+    const slim = slimRepeatHealContext(full)
+    expect(slim.escalation).toBeDefined()
+    expect(slim).not.toHaveProperty('guidance')
+    expect(slim).not.toHaveProperty('healPrompt')
+    expect(slim).not.toHaveProperty('nextSteps')
+  })
+})
+
 describe('slimRepeatHealContext', () => {
   it('drops the static procedure + map and leaves the failure packet plus a guidance breadcrumb', () => {
     const runId = 'run-1'

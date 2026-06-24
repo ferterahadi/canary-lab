@@ -4,6 +4,8 @@ import type { RunDetail } from '../run-store'
 import { buildHealPromptMap, type HealPromptMap } from '../runtime/auto-heal'
 import { loadProjectConfig } from '../runtime/launcher/project-config'
 import { buildRunPaths, runDirFor } from '../runtime/run-paths'
+import { countConsecutiveSameFailures } from '../runtime/log-enrichment'
+import { ESCALATION_THRESHOLD, buildHealEscalation, type HealEscalation } from '../runtime/heal-escalation'
 import type { HealSignalKind } from '../../../../../../../shared/run-state'
 
 export interface ExternalHealFailedTest {
@@ -77,6 +79,10 @@ export interface ExternalHealContext {
   // Present only on the slim repeat-cycle variant: a one-line breadcrumb that
   // recovers a forgetful/stateless client without re-sending the full procedure.
   guidance?: string
+  // Present only when the SAME failing set has survived ESCALATION_THRESHOLD
+  // heal cycles — the agent is stuck and should change tactic. The external
+  // analog of the local PTY escalation block; supersedes the slim breadcrumb.
+  escalation?: HealEscalation
 }
 
 export interface ExternalRunSnapshot {
@@ -142,9 +148,12 @@ const REPEAT_HEAL_GUIDANCE =
 
 // Strip the static guidance (nextSteps + healPrompt map) from a context for a
 // repeat heal cycle, leaving the per-cycle failure packet plus a one-line
-// breadcrumb. get_heal_context still returns the full context on demand.
+// breadcrumb. get_heal_context still returns the full context on demand. When the
+// run is stuck, the escalation block (already on the context) is the louder, more
+// specific steer — it supersedes the generic breadcrumb.
 export function slimRepeatHealContext(context: ExternalHealContext): ExternalHealContext {
   const { healPrompt: _healPrompt, nextSteps: _nextSteps, ...rest } = context
+  if (rest.escalation) return rest
   return { ...rest, guidance: REPEAT_HEAL_GUIDANCE }
 }
 
@@ -152,6 +161,17 @@ export function buildExternalHealContext(input: BuildExternalHealContextInput): 
   const snapshot = buildExternalRunSnapshot(input)
   const runDir = runDirFor(input.logsDir, snapshot.runId)
   const paths = buildRunPaths(runDir)
+
+  const failingSlugs = snapshot.counts.failedNames
+  const consecutiveSameFailures = countConsecutiveSameFailures(paths.diagnosisJournalPath, failingSlugs)
+  const escalation = consecutiveSameFailures >= ESCALATION_THRESHOLD && failingSlugs.length > 0
+    ? buildHealEscalation({
+      consecutiveSameFailures,
+      slugs: failingSlugs,
+      journalPath: paths.diagnosisJournalPath,
+      failedDir: paths.failedDir,
+    })
+    : undefined
 
   return {
     runId: snapshot.runId,
@@ -170,6 +190,7 @@ export function buildExternalHealContext(input: BuildExternalHealContextInput): 
     journal: snapshot.journalMarkdown === null ? null : { path: paths.diagnosisJournalPath },
     ...(snapshot.healPrompt ? { healPrompt: snapshot.healPrompt } : {}),
     nextSteps: [...EXTERNAL_HEAL_NEXT_STEPS],
+    ...(escalation ? { escalation } : {}),
   }
 }
 

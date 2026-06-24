@@ -6,6 +6,7 @@ import {
   appendJournalIteration,
   capSlice,
   classifyJournalOutcome,
+  countConsecutiveSameFailures,
   enrichSummaryWithLogs,
   extractAllSlices,
   extractLogsForTest,
@@ -66,6 +67,37 @@ describe('parseJournalMarkdown', () => {
 
   it('returns empty array for non-journal text', () => {
     expect(parseJournalMarkdown('not a journal')).toEqual([])
+  })
+})
+
+describe('countConsecutiveSameFailures', () => {
+  function journal(...sets: string[]): string {
+    const file = path.join(tmpDir, 'diagnosis-journal.md')
+    const blocks = sets.map((s, i) => `## Iteration ${i + 1} — 2026-04-28T10:1${i}:00Z\n\n- failingTests: ${s}\n`)
+    fs.writeFileSync(file, blocks.join('\n'))
+    return file
+  }
+
+  it('returns 0 when the current failing set is empty', () => {
+    expect(countConsecutiveSameFailures(journal('a'), [])).toBe(0)
+  })
+
+  it('returns 1 when there is no journal (no prior cycles)', () => {
+    expect(countConsecutiveSameFailures(path.join(tmpDir, 'missing.md'), ['a'])).toBe(1)
+  })
+
+  it('counts the current observation plus each trailing iteration with the same set', () => {
+    // current = a,b; two trailing iterations failed on a,b → streak 3.
+    expect(countConsecutiveSameFailures(journal('a, b', 'a, b'), ['a', 'b'])).toBe(3)
+  })
+
+  it('is order-insensitive on the failing-set signature', () => {
+    expect(countConsecutiveSameFailures(journal('b, a'), ['a', 'b'])).toBe(2)
+  })
+
+  it('stops at the first differing trailing iteration', () => {
+    // newest→oldest: a (match), then x (different) → streak = current(1) + 1 = 2.
+    expect(countConsecutiveSameFailures(journal('x', 'a'), ['a'])).toBe(2)
   })
 })
 
