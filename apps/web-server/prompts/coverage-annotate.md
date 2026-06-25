@@ -15,6 +15,16 @@ For each mapped test, also state which path(s) it exercises:
 - `sad` — the unhappy / negative / error flow (invalid input, failure, denial).
 - `edge` — a boundary or extreme case within a path.
 
+## Variants
+
+{{variantInstructions}}
+
+When a variant dimension applies, a requirement is only fully covered once EVERY
+variant it lists is exercised by some test. So your `variants` per test must
+reflect what the test ACTUALLY hits — read the endpoint / fixture / setup, don't
+infer breadth from the test name. A test that drives only one variant must claim
+only that one, even if the requirement it maps to lists several.
+
 ## How to work
 
 Work as an agent, not a one-shot. The test bodies are **not** inlined here — each
@@ -42,6 +52,7 @@ test you cannot confidently map:
       "testName": "exact test name as given",
       "requirements": ["R1"],
       "pathTypes": ["happy"],
+      "variants": ["email"],
       "rationale": "one short sentence on why this test verifies that requirement",
       "confidence": 0.0
     }

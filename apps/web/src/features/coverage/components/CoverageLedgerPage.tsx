@@ -32,6 +32,9 @@ interface Props {
 const GAP_META: Record<GapType, { label: string; color: string }> = {
   covered: { label: 'Covered', color: 'rgb(52, 211, 153)' },
   'path-incomplete': { label: 'Path-incomplete', color: 'rgb(56, 189, 248)' },
+  // A requirement that spans a variant dimension (channel/tenant/…) but is only
+  // tested on some values. Amber = the breadth warning: it claims more than it proves.
+  'variant-incomplete': { label: 'Variant-incomplete', color: 'rgb(251, 191, 36)' },
   untested: { label: 'Untested', color: 'var(--text-muted)' },
 }
 
@@ -624,7 +627,7 @@ function writeRailPref(open: boolean): void {
 
 // Bar/legend order reads good → gap: the green of `covered` leads, the work sinks
 // right. The legend doubles as the requirement filter.
-const SEG_ORDER: GapType[] = ['covered', 'path-incomplete', 'untested']
+const SEG_ORDER: GapType[] = ['covered', 'path-incomplete', 'variant-incomplete', 'untested']
 
 function CoverageHeader({ ledger, gapFilter, onToggleGap, strengthFilter, onToggleStrength }: {
   ledger: CoverageLedger
@@ -644,7 +647,7 @@ function CoverageHeader({ ledger, gapFilter, onToggleGap, strengthFilter, onTogg
       <CoverageRing pct={ledger.coveragePct} />
       <div className="clcov-breakdown">
         {/* One proportional bar makes the nesting self-evident: covered ⊂ mapped ⊂ total. */}
-        <div className="clcov-bar" data-testid="coverage-breakdown" role="img" aria-label={`${covered} covered, ${countFor(ledger, 'path-incomplete')} path-incomplete, ${untested} untested of ${total}`}>
+        <div className="clcov-bar" data-testid="coverage-breakdown" role="img" aria-label={`${covered} covered, ${countFor(ledger, 'path-incomplete')} path-incomplete, ${countFor(ledger, 'variant-incomplete')} variant-incomplete, ${untested} untested of ${total}`}>
           {total === 0
             ? <span className="clcov-bar-seg" style={{ flexGrow: 1, background: 'var(--border-default)' }} />
             : SEG_ORDER.map((g) => {
@@ -741,8 +744,9 @@ function CoverageGlossary() {
       <span className="clcov-info-pop" role="tooltip">
         <span><strong style={{ color: GAP_META.covered.color }}>Covered</strong> — every path the requirement declares (happy/sad/edge) has a mapped test.</span>
         <span><strong style={{ color: GAP_META['path-incomplete'].color }}>Path-incomplete</strong> — a test exists, but some declared path has none.</span>
+        <span><strong style={{ color: GAP_META['variant-incomplete'].color }}>Variant-incomplete</strong> — a test exists, but the requirement spans a dimension (e.g. channel) only partly exercised.</span>
         <span><strong style={{ color: 'var(--text-secondary)' }}>Untested</strong> — no test maps to the requirement.</span>
-        <span><strong>Mapped</strong> — has ≥1 test (covered + path-incomplete). Coverage is decoupled from test runs.</span>
+        <span><strong>Mapped</strong> — has ≥1 test (covered + path/variant-incomplete). Coverage is decoupled from test runs.</span>
       </span>
     </span>
   )
@@ -752,6 +756,7 @@ function countFor(ledger: CoverageLedger, g: GapType): number {
   switch (g) {
     case 'untested': return ledger.totals.untested
     case 'path-incomplete': return ledger.totals.pathIncomplete
+    case 'variant-incomplete': return ledger.totals.variantIncomplete
     case 'covered': return ledger.totals.covered
   }
 }
@@ -766,6 +771,16 @@ function RequirementCard({ rc, colors, active, focused, dimmed, onHover }: {
 }) {
   const meta = GAP_META[rc.gapType]
   const missing = rc.pathCoverage.filter((p) => !p.covered).map((p) => p.path)
+  // Distinct variant values still missing at least one cell — the gap-pill note
+  // for a variant-incomplete requirement (e.g. "· whatsapp/call/line").
+  const missingVariants = rc.variantCoverage
+    ? [...new Set(rc.variantCoverage.filter((c) => !c.covered).map((c) => c.variant))]
+    : []
+  const gapNote = rc.gapType === 'path-incomplete' && missing.length > 0
+    ? ` · ${missing.join('/')}`
+    : rc.gapType === 'variant-incomplete' && missingVariants.length > 0
+      ? ` · ${missingVariants.join('/')}`
+      : ''
   const { kind, happyPath, unhappyPath } = rc.requirement
   const happyText = meaningfulPath(happyPath)
   const unhappyText = meaningfulPath(unhappyPath)
@@ -822,7 +837,7 @@ function RequirementCard({ rc, colors, active, focused, dimmed, onHover }: {
           )}
           <span data-testid={`gap-${rc.requirement.id}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 10, fontWeight: 600, color: meta.color, background: `color-mix(in srgb, ${meta.color} 12%, transparent)`, border: `1px solid color-mix(in srgb, ${meta.color} 40%, transparent)`, borderRadius: 999, padding: '2px 8px' }}>
             <span style={{ width: 6, height: 6, borderRadius: '50%', background: meta.color }} />
-            {meta.label}{rc.gapType === 'path-incomplete' && missing.length > 0 ? ` · ${missing.join('/')}` : ''}
+            {meta.label}{gapNote}
           </span>
         </span>
       </div>
@@ -842,6 +857,9 @@ function RequirementCard({ rc, colors, active, focused, dimmed, onHover }: {
           )
         ))}
       </div>
+      {rc.variantCoverage && rc.variantCoverage.length > 0 && (
+        <VariantGrid rc={rc} />
+      )}
       {hasDetail && expanded && (
         <div className="clcov-reqdetail" data-testid={`req-detail-${rc.requirement.id}`}>
           {happyText && (
@@ -858,6 +876,67 @@ function RequirementCard({ rc, colors, active, focused, dimmed, onHover }: {
           )}
         </div>
       )}
+    </div>
+  )
+}
+
+// The `path × variant` matrix for a variant-bearing requirement. Each row is a
+// variant value (worst-first: rows with any gap on top); each column a declared
+// path. A green ✓ cell means some test claims (path, variant); a dashed-muted
+// cell is the breadth gap the 2-axis ledger was blind to. Reuses the path-pill
+// hues so the grid reads as the same language, just two-dimensional.
+function VariantGrid({ rc }: { rc: RequirementCoverage }) {
+  const cells = rc.variantCoverage ?? []
+  const paths = [...new Set(cells.map((c) => c.path))]
+  const variants = [...new Set(cells.map((c) => c.variant))]
+  const covered = (path: string, variant: string) =>
+    cells.find((c) => c.path === path && c.variant === variant)?.covered ?? false
+  // Worst-first: variants with the most uncovered cells sort to the top.
+  const gapsFor = (v: string) => paths.filter((p) => !covered(p, v)).length
+  const rows = [...variants].sort((a, b) => gapsFor(b) - gapsFor(a))
+  const ACCENT = 'rgb(52,211,153)'
+  return (
+    <div data-testid={`variant-grid-${rc.requirement.id}`} style={{ marginTop: 8, overflowX: 'auto' }}>
+      <table style={{ borderCollapse: 'collapse', fontFamily: 'var(--font-mono, monospace)', fontSize: 9.5, letterSpacing: '0.02em' }}>
+        <thead>
+          <tr>
+            <th style={{ textAlign: 'left', padding: '1px 8px 3px 0', color: 'var(--text-muted)', fontWeight: 600 }} />
+            {paths.map((p) => (
+              <th key={p} style={{ textAlign: 'center', padding: '1px 7px 3px', color: 'var(--text-muted)', fontWeight: 600 }}>{p}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((v) => (
+            <tr key={v} data-testid={`variant-row-${rc.requirement.id}-${v}`}>
+              <td style={{ padding: '2px 8px 2px 0', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>{v}</td>
+              {paths.map((p) => {
+                const on = covered(p, v)
+                return (
+                  <td key={p} style={{ textAlign: 'center', padding: '2px 4px' }}>
+                    <span
+                      data-testid={`cell-${rc.requirement.id}-${p}-${v}`}
+                      data-covered={on ? 'true' : 'false'}
+                      title={on ? `${p} · ${v} has a mapped test` : `No test maps to ${p} · ${v}`}
+                      style={{
+                        display: 'inline-block',
+                        minWidth: 16,
+                        padding: '1px 6px',
+                        borderRadius: 5,
+                        ...(on
+                          ? { background: `color-mix(in srgb, ${ACCENT} 10%, transparent)`, border: `1px solid color-mix(in srgb, ${ACCENT} 40%, var(--border-default))`, color: ACCENT }
+                          : { border: '1px dashed color-mix(in srgb, var(--text-muted) 55%, var(--border-default))', color: 'var(--text-muted)' }),
+                      }}
+                    >
+                      {on ? '✓' : '–'}
+                    </span>
+                  </td>
+                )
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   )
 }

@@ -7,6 +7,7 @@ import type {
   PrdSummary,
   ProposedMapping,
   Requirement,
+  VariantDimension,
 } from '../../../../../../../shared/coverage/types'
 import { computeCoverageLedger, type CoverageTestInput } from '../../../coverage/logic/coverage/ledger'
 import { applyTestStrength, type TestAssertions } from '../../../coverage/logic/coverage/strength'
@@ -101,6 +102,7 @@ function collectTests(featureDir: string): CollectedTests {
         // Same test name in two specs — union the linkage, concat assertions.
         existing.input.requirements = unionList(existing.input.requirements, t.requirements)
         existing.input.pathTypes = unionList(existing.input.pathTypes, t.pathTypes)
+        existing.input.variants = unionList(existing.input.variants, t.variants)
         for (const a of t.assertions ?? []) existing.assertions.add(a)
         continue
       }
@@ -109,6 +111,7 @@ function collectTests(featureDir: string): CollectedTests {
           name: t.name,
           requirements: t.requirements,
           pathTypes: t.pathTypes,
+          variants: t.variants,
           file: path.relative(featureDir, absFile),
           line: t.line,
         },
@@ -230,11 +233,12 @@ function applyTagToFile(
   testName: string,
   requirements: string[],
   pathTypes: ProposedMapping['pathTypes'],
+  variants?: ProposedMapping['variants'],
 ): boolean {
   const abs = path.join(featureDir, relFile)
   if (!fs.existsSync(abs)) return false
   const source = fs.readFileSync(abs, 'utf-8')
-  const next = writeCoversTag(source, testName, { requirements, pathTypes })
+  const next = writeCoversTag(source, testName, { requirements, pathTypes, variants })
   if (next === source) return false
   fs.writeFileSync(abs, next)
   return true
@@ -291,7 +295,7 @@ export async function runCoverageEngine(
   }
 
   const proposals = await propose(
-    { requirements: candidateRequirements, tests: engineInputs, adapter: args.adapter, featureDir, cwd: args.cwd, signal: args.signal, onOutput: args.onOutput, onSession: args.onAgentSession },
+    { requirements: candidateRequirements, variantDimension: summary?.variantDimension, tests: engineInputs, adapter: args.adapter, featureDir, cwd: args.cwd, signal: args.signal, onOutput: args.onOutput, onSession: args.onAgentSession },
   )
 
   // No review gate (R16): every inferred mapping's `covers` tag is written now.
@@ -303,7 +307,7 @@ export async function runCoverageEngine(
   for (const m of proposals) {
     const file = m.file ?? fileByTestName.get(m.testName)
     if (!file) continue
-    if (applyTagToFile(featureDir, file, m.testName, m.requirements, m.pathTypes)) applied.push({ ...m, file })
+    if (applyTagToFile(featureDir, file, m.testName, m.requirements, m.pathTypes, m.variants)) applied.push({ ...m, file })
   }
 
   // Record the requirements set the engine just ran against — coverage drops to
@@ -365,7 +369,7 @@ export function buildCoverageMappingContext(args: { featuresDir: string; feature
     file: c.input.file,
     assertions: [...c.assertions],
   }))
-  const prompt = buildAnnotatePrompt(summary?.requirements ?? [], engineInputs, featureDir)
+  const prompt = buildAnnotatePrompt(summary?.requirements ?? [], engineInputs, featureDir, summary?.variantDimension)
   return {
     feature: args.feature,
     requirements,
@@ -405,6 +409,8 @@ export function applyExternalCoverageMappings(args: ApplyExternalCoverageArgs): 
 
   const { collected } = collectTests(featureDir)
   const fileByTestName = new Map(collected.map((c) => [c.input.name, c.input.file]))
+  // Controlled vocabulary: drop variant claims outside the feature's dimension.
+  const knownVariants = new Set(summary?.variantDimension?.values ?? [])
 
   const applied: ProposedMapping[] = []
   for (const m of args.mappings) {
@@ -412,8 +418,11 @@ export function applyExternalCoverageMappings(args: ApplyExternalCoverageArgs): 
     if (!requirementsFiltered.length) continue
     const file = m.file ?? fileByTestName.get(m.testName)
     if (!file) continue // unknown test name → not a mapping
-    if (applyTagToFile(featureDir, file, m.testName, requirementsFiltered, m.pathTypes)) {
-      applied.push({ ...m, requirements: requirementsFiltered, file })
+    const variantsFiltered = (m.variants ?? [])
+      .map((v) => v.trim().toLowerCase())
+      .filter((v) => knownVariants.has(v))
+    if (applyTagToFile(featureDir, file, m.testName, requirementsFiltered, m.pathTypes, variantsFiltered)) {
+      applied.push({ ...m, requirements: requirementsFiltered, variants: variantsFiltered.length ? variantsFiltered : undefined, file })
     }
   }
 
@@ -476,7 +485,7 @@ export function buildSummaryAuthoringContext(args: { featuresDir: string; featur
       feature: args.feature,
       docs: collection.entries.map((e) => ({ relPath: e.relPath, absPath: path.join(collection.docsDir, e.relPath) })),
       previousRequirementIds: (previous?.requirements ?? []).map((r) => r.id),
-      prompt: buildPrdSummaryPrompt(collection, previous?.requirements ?? []),
+      prompt: buildPrdSummaryPrompt(collection, previous?.requirements ?? [], previous?.variantDimension),
     },
   }
 }
@@ -485,6 +494,8 @@ export interface ApplyExternalSummaryArgs {
   featuresDir: string
   feature: string
   requirements: ParsedRequirement[]
+  /** The feature's variant dimension (D1), as declared by the external agent. */
+  variantDimension?: VariantDimension
   now?: string
 }
 
@@ -505,7 +516,7 @@ export function applyExternalSummary(args: ApplyExternalSummaryArgs): ApplyExter
   const featureDir = found.featureDir
   const collection = readDocsCollection(featureDir)
   const previous = readPrdSummary(featureDir)
-  const summary = assembleSummary(collection, previous, args.requirements, args.now)
+  const summary = assembleSummary(collection, previous, args.requirements, args.variantDimension, args.now)
   const written = writePrdSummary(featureDir, found.name, summary)
   return {
     feature: args.feature,

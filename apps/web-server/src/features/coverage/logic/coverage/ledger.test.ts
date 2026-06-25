@@ -130,3 +130,83 @@ describe('computeCoverageLedger — coverageStatus roll-up', () => {
     })
   }
 })
+
+// The variant axis (D1). Coverage becomes `requirement × path × variant`: a
+// requirement that bundles N variants but is tested on one is variant-incomplete,
+// NOT covered. This is the cns-proper-auth blind spot the 2-axis model missed.
+describe('computeCoverageLedger — variant axis', () => {
+  const CHANNELS = ['email', 'whatsapp', 'call', 'line']
+
+  it('the cns-proper-auth case: "all 4 channels", only email tested → variant-incomplete, not covered', () => {
+    const requirements = [req('R6', ['happy', 'sad'], { variants: CHANNELS })]
+    const tests: CoverageTestInput[] = [
+      { name: 'sender V4 owner read', requirements: ['R6'], pathTypes: ['happy'], variants: ['email'] },
+      { name: 'sender V4 foreign read', requirements: ['R6'], pathTypes: ['sad'], variants: ['email'] },
+    ]
+    const ledger = computeCoverageLedger({ feature: 'f', requirements, tests })
+    const r = ledger.requirements[0]
+    // 2-axis math would have said covered (both happy & sad claimed) → 100%.
+    expect(r.gapType).toBe('variant-incomplete')
+    expect(r.coverageStatus).toBe('partial')
+    expect(ledger.coveragePct).toBe(0) // 0 of 1 requirement fully covered
+    expect(ledger.totals).toMatchObject({ total: 1, covered: 0, variantIncomplete: 1 })
+    // 4 channels × 2 paths = 8 cells; only the 2 email cells are claimed.
+    expect(r.variantCoverage).toHaveLength(8)
+    expect(r.variantCoverage!.filter((c) => c.covered)).toEqual([
+      { path: 'happy', variant: 'email', covered: true },
+      { path: 'sad', variant: 'email', covered: true },
+    ])
+  })
+
+  it('becomes covered once every (path × variant) cell is claimed', () => {
+    const requirements = [req('R6', ['happy'], { variants: ['email', 'whatsapp'] })]
+    const tests: CoverageTestInput[] = [
+      { name: 'email', requirements: ['R6'], pathTypes: ['happy'], variants: ['email'] },
+      { name: 'whatsapp', requirements: ['R6'], pathTypes: ['happy'], variants: ['whatsapp'] },
+    ]
+    const ledger = computeCoverageLedger({ feature: 'f', requirements, tests })
+    expect(ledger.requirements[0].gapType).toBe('covered')
+    expect(ledger.coveragePct).toBe(100)
+  })
+
+  it('one test may claim multiple variants (cross-product of its paths × variants)', () => {
+    const requirements = [req('R6', ['happy'], { variants: ['email', 'whatsapp'] })]
+    const tests: CoverageTestInput[] = [
+      { name: 'both channels', requirements: ['R6'], pathTypes: ['happy'], variants: ['email', 'whatsapp'] },
+    ]
+    const ledger = computeCoverageLedger({ feature: 'f', requirements, tests })
+    expect(ledger.requirements[0].gapType).toBe('covered')
+  })
+
+  it('a variant-agnostic test (no variants) satisfies no variant cell', () => {
+    const requirements = [req('R6', ['happy'], { variants: ['email', 'whatsapp'] })]
+    const tests: CoverageTestInput[] = [
+      { name: 'untyped', requirements: ['R6'], pathTypes: ['happy'] }, // no variants
+    ]
+    const ledger = computeCoverageLedger({ feature: 'f', requirements, tests })
+    expect(ledger.requirements[0].gapType).toBe('variant-incomplete')
+    expect(ledger.requirements[0].variantCoverage!.every((c) => !c.covered)).toBe(true)
+  })
+
+  it('claims for variants outside the requirement set are ignored (controlled vocabulary)', () => {
+    const requirements = [req('R6', ['happy'], { variants: ['email'] })]
+    const tests: CoverageTestInput[] = [
+      { name: 'email + stray', requirements: ['R6'], pathTypes: ['happy'], variants: ['email', 'sms'] },
+    ]
+    const ledger = computeCoverageLedger({ feature: 'f', requirements, tests })
+    // Only the declared `email` cell exists; the stray `sms` claim adds no cell.
+    expect(ledger.requirements[0].variantCoverage).toHaveLength(1)
+    expect(ledger.requirements[0].gapType).toBe('covered')
+  })
+
+  it('a requirement with NO variants is unchanged (2-axis path model)', () => {
+    const requirements = [req('R1', ['happy', 'sad'])] // no variants
+    const tests: CoverageTestInput[] = [
+      { name: 't', requirements: ['R1'], pathTypes: ['happy', 'sad'], variants: ['email'] },
+    ]
+    const ledger = computeCoverageLedger({ feature: 'f', requirements, tests })
+    const r = ledger.requirements[0]
+    expect(r.gapType).toBe('covered')
+    expect(r.variantCoverage).toBeUndefined()
+  })
+})

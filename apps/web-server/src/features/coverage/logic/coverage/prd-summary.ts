@@ -13,6 +13,7 @@ import type {
   Requirement,
   StrictnessLadderRung,
   StrictnessTier,
+  VariantDimension,
 } from '../../../../../../../shared/coverage/types'
 import {
   docsDirFor,
@@ -49,11 +50,49 @@ export interface ParsedRequirement {
   happyPath?: string
   unhappyPath?: string
   pathTypes: PathType[]
+  variants?: string[]
   strictnessLadder?: StrictnessLadderRung[]
 }
 
 function normalizeKind(value: unknown): 'functional' | 'non-functional' | undefined {
   return value === 'functional' || value === 'non-functional' ? value : undefined
+}
+
+/** Normalize a token to a variant value: lower-case, trimmed, single token. */
+function normalizeVariantValue(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined
+  const v = value.trim().toLowerCase()
+  return v ? v : undefined
+}
+
+/** Parse the agent's top-level `variantDimension`. Requires a non-empty name and
+ *  at least TWO values — a one-value "dimension" carries no breadth and is
+ *  dropped (it would just be a noisy variant-agnostic requirement). */
+function normalizeVariantDimension(value: unknown): VariantDimension | undefined {
+  if (!value || typeof value !== 'object') return undefined
+  const raw = value as { name?: unknown; values?: unknown }
+  const name = normalizeVariantValue(raw.name)
+  if (!name || !Array.isArray(raw.values)) return undefined
+  const values: string[] = []
+  for (const item of raw.values) {
+    const v = normalizeVariantValue(item)
+    if (v && !values.includes(v)) values.push(v)
+  }
+  return values.length >= 2 ? { name, values } : undefined
+}
+
+/** Normalize a requirement's `variants`, dropping anything outside the feature's
+ *  declared dimension (the controlled vocabulary). Returns undefined when the
+ *  requirement spans fewer than 2 declared values — there's no breadth to track. */
+function normalizeRequirementVariants(value: unknown, dimension: VariantDimension | undefined): string[] | undefined {
+  if (!dimension || !Array.isArray(value)) return undefined
+  const allowed = new Set(dimension.values)
+  const out: string[] = []
+  for (const item of value) {
+    const v = normalizeVariantValue(item)
+    if (v && allowed.has(v) && !out.includes(v)) out.push(v)
+  }
+  return out.length >= 2 ? out : undefined
 }
 
 function normalizeProse(value: unknown): string | undefined {
@@ -127,20 +166,38 @@ function normalizeLadder(value: unknown): StrictnessLadderRung[] | undefined {
   return rungs.length ? rungs : undefined
 }
 
-/** Parse raw agent stdout into requirement candidates. Returns null on garbage. */
-export function parsePrdSummaryOutput(output: string): ParsedRequirement[] | null {
+function parseTopLevelObject(output: string): Record<string, unknown> | null {
   const fenced = output.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1]
   const text = (fenced ?? output).trim()
   const start = text.indexOf('{')
   const end = text.lastIndexOf('}')
   if (start < 0 || end <= start) return null
-  let parsed: unknown
   try {
-    parsed = JSON.parse(text.slice(start, end + 1))
+    const parsed = JSON.parse(text.slice(start, end + 1))
+    return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : null
   } catch {
     return null
   }
-  const reqs = (parsed as { requirements?: unknown }).requirements
+}
+
+/** Parse the agent's top-level `variantDimension` (D1) from the output, if any.
+ *  Separate from `parsePrdSummaryOutput` so the latter keeps its array contract;
+ *  pass the result back in to validate each requirement's `variants`. */
+export function parseVariantDimension(output: string): VariantDimension | undefined {
+  const parsed = parseTopLevelObject(output)
+  return parsed ? normalizeVariantDimension(parsed.variantDimension) : undefined
+}
+
+/** Parse raw agent stdout into requirement candidates. Returns null on garbage.
+ *  `variantDimension` (when supplied) is the closed vocabulary a requirement's
+ *  `variants` is validated against. */
+export function parsePrdSummaryOutput(
+  output: string,
+  variantDimension?: VariantDimension,
+): ParsedRequirement[] | null {
+  const parsed = parseTopLevelObject(output)
+  if (!parsed) return null
+  const reqs = parsed.requirements
   if (!Array.isArray(reqs)) return null
   const out: ParsedRequirement[] = []
   for (const raw of reqs) {
@@ -156,6 +213,7 @@ export function parsePrdSummaryOutput(output: string): ParsedRequirement[] | nul
       happyPath: normalizeProse(r.happyPath),
       unhappyPath: normalizeProse(r.unhappyPath),
       pathTypes: normalizePathTypes(r.pathTypes),
+      variants: normalizeRequirementVariants(r.variants, variantDimension),
       strictnessLadder: normalizeLadder(r.strictnessLadder),
     })
   }
@@ -233,6 +291,9 @@ export function reconcileRequirementIds(
       happyPath: candidate.happyPath ?? survivedFrom?.happyPath,
       unhappyPath: candidate.unhappyPath ?? survivedFrom?.unhappyPath,
       pathTypes: candidate.pathTypes,
+      // Variants are freshly re-extracted each regen; fall back to a survivor's
+      // set only when this pass proposed none (parallels the ladder).
+      variants: candidate.variants ?? survivedFrom?.variants,
       // The strictness ladder is per-domain and stable; preserve a survivor's
       // existing ladder when the regen doesn't re-propose one (parallels id
       // preservation — agents shouldn't have to re-derive it every time).
@@ -261,11 +322,16 @@ export function assembleSummary(
   collection: DocsCollection,
   previous: PrdSummary | null,
   parsed: ParsedRequirement[],
+  variantDimension?: VariantDimension,
   now?: string,
 ): PrdSummary {
   const requirements = reconcileRequirementIds(previous?.requirements ?? [], parsed)
+  // Preserve a prior dimension when this pass didn't re-declare one (stability,
+  // like requirement ids) — but a freshly-declared dimension always wins.
+  const dimension = variantDimension ?? previous?.variantDimension
   const summary: PrdSummary = {
     requirements,
+    ...(dimension ? { variantDimension: dimension } : {}),
     docsHash: collection.docsHash,
     sourceDocs: collection.entries.map((e) => e.relPath),
     generatedAt: now ?? new Date().toISOString(),
@@ -280,6 +346,7 @@ export function assembleSummary(
 export function buildPrdSummaryPrompt(
   collection: DocsCollection,
   previous: Requirement[],
+  previousVariantDimension?: VariantDimension,
   templatePath: string = PRD_SUMMARY_TEMPLATE_PATH,
 ): string {
   const template = fs.readFileSync(templatePath, 'utf-8').trim()
@@ -297,9 +364,13 @@ export function buildPrdSummaryPrompt(
         2,
       )
     : '(none — this is the first summary)'
+  const previousDimensionJson = previousVariantDimension
+    ? JSON.stringify(previousVariantDimension, null, 2)
+    : '(none — infer the dimension from the documents, if any)'
   return template.replace(/\{\{(\w+)\}\}/g, (match, key: string) => {
     if (key === 'docs') return docs
     if (key === 'previousRequirements') return previousJson
+    if (key === 'previousVariantDimension') return previousDimensionJson
     return match
   })
 }
@@ -419,9 +490,10 @@ export async function summarizePrd(
   const runAgent = deps.runAgent ?? defaultRunAgent
   const agents = resolveAgents(args.adapter ?? 'auto')
 
-  let parsedOk: ParsedRequirement[] | null = null
+  let parsedReqs: ParsedRequirement[] | null = null
+  let parsedDimension: VariantDimension | undefined
   if (agents.length) {
-    const prompt = buildPrdSummaryPrompt(args.collection, previous)
+    const prompt = buildPrdSummaryPrompt(args.collection, previous, args.previous?.variantDimension)
     for (const agent of agents) {
       try {
         args.onOutput?.(`[agent:${agent}] summarizing PRD\n`)
@@ -431,9 +503,11 @@ export async function summarizePrd(
           onOutput: args.onOutput,
           onSession: args.onSession,
         })
-        const parsed = parsePrdSummaryOutput(output)
+        const dimension = parseVariantDimension(output)
+        const parsed = parsePrdSummaryOutput(output, dimension)
         if (parsed && parsed.length) {
-          parsedOk = parsed
+          parsedReqs = parsed
+          parsedDimension = dimension
           break
         }
         args.onOutput?.(`[agent:${agent}] unparseable output; trying next\n`)
@@ -443,7 +517,7 @@ export async function summarizePrd(
     }
   }
 
-  if (!parsedOk) {
+  if (!parsedReqs) {
     // LLM-only: no agent on PATH, or every agent failed / returned unparseable
     // output. We never fabricate requirements from headings — that produced
     // phantom requirements (goals/context/architecture) and tanked coverage.
@@ -454,7 +528,7 @@ export async function summarizePrd(
 
   // Reconcile ids + stamp fingerprints (R3) through the shared assembler so the
   // offloaded path produces a byte-identical summary shape.
-  return assembleSummary(args.collection, args.previous ?? null, parsedOk, args.now)
+  return assembleSummary(args.collection, args.previous ?? null, parsedReqs, parsedDimension, args.now)
 }
 
 // ---------------------------------------------------------------------------
@@ -498,7 +572,11 @@ export function renderPrdSummaryMarkdown(
       md += '\n\n'
       if (req.happyPath) md += `- **Happy path:** ${req.happyPath}\n`
       if (req.unhappyPath) md += `- **Unhappy path:** ${req.unhappyPath}\n`
-      md += `- _Paths: ${req.pathTypes.join(', ')}_\n\n`
+      md += `- _Paths: ${req.pathTypes.join(', ')}_\n`
+      if (req.variants && req.variants.length) {
+        md += `- _${summary.variantDimension?.name ?? 'Variants'}: ${req.variants.join(', ')}_\n`
+      }
+      md += '\n'
       requirements.push({ ...req, sourceRange: { start, end } })
     })
   }

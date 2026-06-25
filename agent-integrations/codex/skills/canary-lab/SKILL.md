@@ -67,8 +67,8 @@ Use this to answer "what's actually tested?" — coverage is decoupled from test
 
 1. After the relevant run is terminal (passed, failed, or aborted), call `start_external_evaluation_export` with the run id and requested language. If the user asks to export a failed or aborted run as-is, preserve that status in the report instead of trying to heal first.
 2. Use the returned schema to write the evaluation report or archive in this client.
-3. Call `submit_external_evaluation_export` with the generated files or archive.
-4. Use `get_evaluation_export`, `list_evaluation_exports`, or `download_evaluation_export` for status and download. Canary Lab stores the artifact, but it does not rewrite, translate, or generate the report with an internal agent for external exports.
+3. Call `submit_external_evaluation_export`. If you submit a `rewrite`, `rewrite.cases` must keep the **exact count and order** of the template's `cases[]` — one case per run entry; **never merge, dedupe, or drop** skipped or duplicate run entries (prefer editing `textSlots[]`, which keeps the count correct automatically). The result includes an `evaluation` digest (featureTitle, summary, per-case title + confidence) — **relay it to the user in chat**; don't just say it's available in the UI.
+4. Use `get_evaluation_export`, `list_evaluation_exports`, or `download_evaluation_export` for status and the full rendered `evaluation.html`. Canary Lab stores the artifact, but it does not rewrite, translate, or generate the report with an internal agent for external exports.
 
 ## Guardrails
 

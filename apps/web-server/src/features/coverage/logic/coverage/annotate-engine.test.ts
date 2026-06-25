@@ -4,7 +4,7 @@ import {
   proposeCoverageMappings,
   buildAnnotatePrompt,
 } from './annotate-engine'
-import type { Requirement } from '../../../../../../../shared/coverage/types'
+import type { Requirement, VariantDimension } from '../../../../../../../shared/coverage/types'
 
 const REQS: Requirement[] = [
   { id: 'R1', title: 'Create todo', text: 'A user can create a todo item', pathTypes: ['happy'] },
@@ -12,6 +12,8 @@ const REQS: Requirement[] = [
   { id: 'R9', title: 'Old removed', text: 'gone', pathTypes: ['happy'], deprecated: true },
 ]
 const KNOWN = new Set(['R1', 'R2'])
+const CHANNEL: VariantDimension = { name: 'channel', values: ['email', 'whatsapp', 'call', 'line'] }
+const KNOWN_VARIANTS = new Set(CHANNEL.values)
 
 describe('parseAnnotateOutput', () => {
   it('parses mappings and keeps only known requirement ids', () => {
@@ -176,7 +178,44 @@ describe('proposeCoverageMappings', () => {
   })
 })
 
+describe('parseAnnotateOutput — variants (D1)', () => {
+  it('keeps variant claims within the dimension vocabulary, lower-cased + deduped', () => {
+    const out = parseAnnotateOutput(
+      JSON.stringify({ mappings: [{ testName: 't', requirements: ['R1'], pathTypes: ['happy'], variants: ['Email', 'whatsapp', 'email'] }] }),
+      KNOWN, KNOWN_VARIANTS,
+    )
+    expect(out![0].variants).toEqual(['email', 'whatsapp'])
+  })
+
+  it('drops variant claims outside the vocabulary; omits the field when none survive', () => {
+    const out = parseAnnotateOutput(
+      JSON.stringify({ mappings: [{ testName: 't', requirements: ['R1'], pathTypes: ['happy'], variants: ['sms', 'fax'] }] }),
+      KNOWN, KNOWN_VARIANTS,
+    )
+    expect(out![0].variants).toBeUndefined()
+  })
+
+  it('ignores variants entirely when the feature has no dimension', () => {
+    const out = parseAnnotateOutput(
+      JSON.stringify({ mappings: [{ testName: 't', requirements: ['R1'], pathTypes: ['happy'], variants: ['email'] }] }),
+      KNOWN, // no knownVariants
+    )
+    expect(out![0].variants).toBeUndefined()
+  })
+})
+
 describe('buildAnnotatePrompt', () => {
+  it('injects the variant dimension + value vocabulary when one applies', () => {
+    const prompt = buildAnnotatePrompt(REQS, [{ name: 't', file: 'e2e/x.spec.ts' }], '/repo', CHANNEL)
+    expect(prompt).toContain('channel')
+    expect(prompt).toContain('email, whatsapp, call, line')
+  })
+
+  it('tells the agent NOT to emit variants when there is no dimension', () => {
+    const prompt = buildAnnotatePrompt(REQS, [{ name: 't', file: 'e2e/x.spec.ts' }], '/repo')
+    expect(prompt).toContain('no variant dimension')
+  })
+
   it('lists test names + file paths to read (no inlined body) + active requirements', () => {
     const prompt = buildAnnotatePrompt(
       REQS,
@@ -202,7 +241,7 @@ describe('buildAnnotatePrompt', () => {
     const tmpFile = path.join(os.tmpdir(), `canary-annotate-tmpl-${Date.now()}.md`)
     try {
       fs.writeFileSync(tmpFile, '{{requirements}} {{unknown}}')
-      const prompt = buildAnnotatePrompt(REQS, [], undefined, tmpFile)
+      const prompt = buildAnnotatePrompt(REQS, [], undefined, undefined, tmpFile)
       expect(prompt).toContain('{{unknown}}')
     } finally {
       fs.rmSync(tmpFile, { force: true })

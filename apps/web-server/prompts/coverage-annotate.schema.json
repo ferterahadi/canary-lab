@@ -17,6 +17,10 @@
             "type": "array",
             "items": { "enum": ["happy", "sad", "edge"] }
           },
+          "variants": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
           "rationale": { "type": "string" },
           "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
         },

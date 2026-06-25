@@ -8,6 +8,35 @@ describe('coversTagTokens', () => {
       '@req-R1', '@req-R2', '@path-happy', '@path-sad',
     ])
   })
+
+  it('renders variant tokens after req + path (D1)', () => {
+    expect(coversTagTokens({ requirements: ['R6'], pathTypes: ['happy'], variants: ['email', 'whatsapp'] })).toEqual([
+      '@req-R6', '@path-happy', '@variant-email', '@variant-whatsapp',
+    ])
+  })
+})
+
+describe('writeCoversTag / stripCoverageTags — variant tags', () => {
+  it('writes @variant-* tokens onto a test', () => {
+    const src = `test('sends on email', async () => {})`
+    const out = writeCoversTag(src, 'sends on email', { requirements: ['R6'], pathTypes: ['happy'], variants: ['email'] })
+    expect(out).toContain("{ tag: ['@req-R6', '@path-happy', '@variant-email'] }")
+  })
+
+  it('strips @variant-* along with @req/@path, keeping user tags', () => {
+    const src = `test('t', { tag: ['@req-R6', '@variant-email', '@smoke'] }, async () => {})`
+    const out = stripCoverageTags(src)
+    expect(out).toContain("['@smoke']")
+    expect(out).not.toContain('@variant-email')
+    expect(out).not.toContain('@req-R6')
+  })
+
+  it('round-trips: write variant then strip returns to original', () => {
+    const original = `test('t', async () => {})`
+    const tagged = writeCoversTag(original, 't', { requirements: ['R6'], variants: ['email'] })
+    expect(tagged).not.toBe(original)
+    expect(stripCoverageTags(tagged)).toBe(original)
+  })
 })
 
 describe('writeCoversTag', () => {

@@ -32,6 +32,11 @@ export interface ExtractedTest {
   // unioned in. Absent when the test carries no linkage at all.
   requirements?: string[]
   pathTypes?: PathType[]
+  // Variant value(s) the test exercises (`@variant-email`). The third coverage
+  // axis (D1) — a feature-specific dimension (channel/tenant/region) a requirement
+  // must hold across. Open vocabulary; validated against the feature's declared
+  // dimension upstream. Absent when the test carries no variant linkage.
+  variants?: string[]
   // Assertion / check snippets collected from the test body — `expect(...)`
   // matcher chains plus navigation/network/db/file calls. Fed to the rigor
   // tier classifier (verified-coverage depth dimension). Absent when none found.
@@ -114,11 +119,24 @@ const PATH_TYPE_VALUES: PathType[] = ['happy', 'sad', 'edge']
 export interface TestAnnotations {
   requirements?: string[]
   pathTypes?: PathType[]
+  variants?: string[]
 }
 
-// Parse `@requirement <id>` and `@path happy|sad|edge` out of a comment blob.
-// Both are repeatable; `@path` also accepts a comma/space list on one line
-// (`@path happy, sad`). Ids are deduped preserving first-seen order; path types
+// A variant token: `@variant-email` (tag form) / `@variant email` (comment form).
+// Open vocabulary — any single token; lower-cased so claims match the (lower-case)
+// dimension values. Deduped preserving first-seen order.
+function dedupeVariants(values: string[]): string[] {
+  const out: string[] = []
+  for (const raw of values) {
+    const v = raw.trim().toLowerCase()
+    if (v && !out.includes(v)) out.push(v)
+  }
+  return out
+}
+
+// Parse `@requirement <id>`, `@path happy|sad|edge` and `@variant <value>` out of
+// a comment blob. All repeatable; `@path`/`@variant` also accept a comma/space
+// list on one line. Ids/variants dedupe preserving first-seen order; path types
 // are canonically ordered (happy, sad, edge). Returns undefined fields when the
 // annotation is absent so un-annotated tests stay clean.
 export function parseTestAnnotations(commentText: string): TestAnnotations {
@@ -136,10 +154,17 @@ export function parseTestAnnotations(commentText: string): TestAnnotations {
       if ((PATH_TYPE_VALUES as string[]).includes(v)) pathSet.add(v as PathType)
     }
   }
+  const variantTokens: string[] = []
+  const variantRe = /@variant\s+([^\n\r*]+)/g
+  while ((m = variantRe.exec(commentText)) !== null) {
+    for (const token of m[1].split(/[,\s]+/)) variantTokens.push(token)
+  }
   const pathTypes = PATH_TYPE_VALUES.filter((p) => pathSet.has(p))
+  const variants = dedupeVariants(variantTokens)
   return {
     requirements: requirements.length ? requirements : undefined,
     pathTypes: pathTypes.length ? pathTypes : undefined,
+    variants: variants.length ? variants : undefined,
   }
 }
 
@@ -151,6 +176,7 @@ export function parseTestAnnotations(commentText: string): TestAnnotations {
 export function parseTestTagList(tags: string[]): TestAnnotations {
   const requirements: string[] = []
   const pathSet = new Set<PathType>()
+  const variantTokens: string[] = []
   for (const raw of tags) {
     const tag = raw.trim()
     const reqM = /^@req-(.+)$/.exec(tag)
@@ -163,12 +189,17 @@ export function parseTestTagList(tags: string[]): TestAnnotations {
     if (pathM) {
       const v = pathM[1].trim().toLowerCase()
       if ((PATH_TYPE_VALUES as string[]).includes(v)) pathSet.add(v as PathType)
+      continue
     }
+    const variantM = /^@variant-(.+)$/.exec(tag)
+    if (variantM) variantTokens.push(variantM[1])
   }
   const pathTypes = PATH_TYPE_VALUES.filter((p) => pathSet.has(p))
+  const variants = dedupeVariants(variantTokens)
   return {
     requirements: requirements.length ? requirements : undefined,
     pathTypes: pathTypes.length ? pathTypes : undefined,
+    variants: variants.length ? variants : undefined,
   }
 }
 
@@ -212,9 +243,11 @@ function mergeAnnotations(primary: TestAnnotations, fallback: TestAnnotations): 
   }
   const pathSet = new Set<PathType>([...(primary.pathTypes ?? []), ...(fallback.pathTypes ?? [])])
   const pathTypes = PATH_TYPE_VALUES.filter((p) => pathSet.has(p))
+  const variants = dedupeVariants([...(primary.variants ?? []), ...(fallback.variants ?? [])])
   return {
     requirements: requirements.length ? requirements : undefined,
     pathTypes: pathTypes.length ? pathTypes : undefined,
+    variants: variants.length ? variants : undefined,
   }
 }
 
@@ -335,6 +368,7 @@ export function extractTestsFromSource(file: string, source: string): ExtractRes
             steps: body ? extractStepsFrom(body, src) : [],
             ...(annotations.requirements ? { requirements: annotations.requirements } : {}),
             ...(annotations.pathTypes ? { pathTypes: annotations.pathTypes } : {}),
+            ...(annotations.variants ? { variants: annotations.variants } : {}),
             ...(assertions.length ? { assertions } : {}),
           })
           // Don't double-recurse into the test body — its inner test.step

@@ -1,3 +1,4 @@
+import { connectReconnectingSocket, defaultWsBase } from '../../../shared/api/reconnecting-socket'
 import type { AgentSessionEvent } from '../../../shared/api/client'
 
 // WebSocket wrapper for live structured agent-session events. Source is
@@ -39,12 +40,6 @@ export interface AgentSessionConnection {
   close(): void
 }
 
-const defaultWsBase = (): string => {
-  if (typeof location === 'undefined') return 'ws://127.0.0.1:7421'
-  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
-  return `${proto}//${location.host}`
-}
-
 function urlFor(base: string, source: AgentSessionSocketSource): string {
   if (source.kind === 'run') {
     return `${base}/ws/runs/${encodeURIComponent(source.runId)}/agent-session`
@@ -65,23 +60,15 @@ function urlFor(base: string, source: AgentSessionSocketSource): string {
 }
 
 export function connectAgentSessionStream(opts: ConnectAgentSessionOptions): AgentSessionConnection {
-  const WSImpl = opts.WebSocketImpl ?? (globalThis as { WebSocket?: typeof WebSocket }).WebSocket
-  if (!WSImpl) throw new Error('WebSocket implementation not available')
   const base = opts.wsBase ?? defaultWsBase()
-  const url = urlFor(base, opts.source)
-  const maxReconnects = opts.maxReconnects ?? 1
-
-  let closed = false
-  let done = false
-  let reconnectsLeft = maxReconnects
-  let socket: WebSocket | null = null
-
-  const open = (): void => {
-    const ws = new WSImpl(url)
-    socket = ws
-    ws.onmessage = (ev: MessageEvent): void => {
+  const conn = connectReconnectingSocket({
+    url: urlFor(base, opts.source),
+    WebSocketImpl: opts.WebSocketImpl,
+    maxReconnects: opts.maxReconnects,
+    onError: opts.onError,
+    onMessage: (data) => {
       let msg: AgentSessionSocketMessage
-      try { msg = JSON.parse(typeof ev.data === 'string' ? ev.data : '') as AgentSessionSocketMessage } catch { return }
+      try { msg = JSON.parse(data) as AgentSessionSocketMessage } catch { return }
       if (msg.type === 'session' && msg.agent && typeof msg.sessionId === 'string') {
         opts.onSession?.({ agent: msg.agent, sessionId: msg.sessionId, model: msg.model, effort: msg.effort })
       } else if (msg.type === 'event' && msg.event) {
@@ -89,32 +76,10 @@ export function connectAgentSessionStream(opts: ConnectAgentSessionOptions): Age
       } else if (msg.type === 'error') {
         opts.onError?.(msg.error ?? 'unknown error')
       } else if (msg.type === 'done') {
-        done = true
+        conn.markDone()
         opts.onDone?.()
       }
-    }
-    ws.onclose = (): void => {
-      socket = null
-      if (closed || done) return
-      if (reconnectsLeft > 0) {
-        reconnectsLeft -= 1
-        open()
-      }
-    }
-    ws.onerror = (): void => {
-      opts.onError?.('socket error')
-    }
-  }
-
-  open()
-
-  return {
-    close(): void {
-      closed = true
-      if (socket && socket.readyState <= 1) {
-        try { socket.close() } catch { /* already gone */ }
-      }
-      socket = null
     },
-  }
+  })
+  return { close: () => conn.close() }
 }

@@ -16,7 +16,7 @@ import { CoverageJobConflictError } from './runner'
 import type { CoverageJobStore } from './store'
 import type { CoverageJobManifest } from './types'
 import type { ParsedRequirement } from '../prd-summary'
-import type { ProposedMapping } from '../../../../../../../../shared/coverage/types'
+import type { ProposedMapping, VariantDimension } from '../../../../../../../../shared/coverage/types'
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../../../shared/workspace-events'
 
 // Offloaded ("external") coverage + PRD summary: the calling MCP client does the
@@ -208,6 +208,8 @@ export interface SubmitExternalSummaryArgs {
   featuresDir: string
   jobId: string
   requirements: ParsedRequirement[]
+  /** The feature's variant dimension (D1), if the client declared one. */
+  variantDimension?: VariantDimension
   now?: () => string
 }
 
@@ -232,6 +234,7 @@ export function submitExternalSummary(
     featuresDir: args.featuresDir,
     feature: job.feature,
     requirements: args.requirements,
+    ...(args.variantDimension ? { variantDimension: args.variantDimension } : {}),
     now: now(),
   })
 

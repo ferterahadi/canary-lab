@@ -260,6 +260,17 @@ export function App() {
             setVerificationRefreshKey((key) => key + 1)
           }
         },
+        // The bus has no replay, so any mutation that happened while the socket
+        // was down (e.g. across a canary-apply server restart) was never
+        // pushed. Resync the feature-derived surfaces on reconnect rather than
+        // waiting for the next live event.
+        onReconnect: () => {
+          refreshFeatures(selectedFeatureRef.current)
+          setReposRefreshKey((key) => key + 1)
+          setTestsRefreshKey((key) => key + 1)
+          setCoverageRefreshKey((key) => key + 1)
+          setVerificationRefreshKey((key) => key + 1)
+        },
       })
     } catch {
       // Initial REST load and direct UI callbacks still keep the page usable.
