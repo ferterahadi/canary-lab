@@ -1,7 +1,97 @@
+<!-- GENERATED FROM CLAUDE.md — DO NOT EDIT.
+     Run `npm run gen:agents` after editing CLAUDE.md (the build does this too). -->
+
 # Canary Lab — Agent Notes
 
-Canonical contributor notes live in [CLAUDE.md](CLAUDE.md) (commands, hard rules,
-pointers). Architecture, run lifecycle, and keep-in-sync invariants live in
-[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md); product intent in
-[docs/PRD.md](docs/PRD.md). Do not add content here — this file is a pointer so the
-two never drift.
+Canary Lab is one published CLI (`canary-lab`): the AI repair loop for Playwright.
+Internals ship compiled in `dist/`; scaffold templates in `templates/project/` are
+copied to `dist/templates/` during build.
+
+## Commands
+
+- Build: `npm run build`
+- Test: `npx vitest run` (co-located `*.test.ts`; component tests use happy-dom)
+- Typecheck: `npx tsc -p tsconfig.build.json --noEmit`
+- Tarball smoke test: `npm run smoke:pack`
+- Coverage: `npm run test:coverage` — known `coverage/.tmp` race; recover with
+  `rm -rf coverage && npx vitest run --coverage --no-file-parallelism`
+- Publish: `npm run publish:package` (use the `cl_release` skill)
+
+## Hard rules
+
+- **Never run the canary-apply rebuild/restart cycle** — the user runs it themselves
+  (see the `cl_verify-changes` skill for the hand-off).
+- **Never add `/* v8 ignore */` pragmas** — write a real test or use a config-level
+  exclude.
+- Touching `apps/web-server/mcp/tools.ts` or any run-loop semantics (collision,
+  queue, boot sessions, heal claims, pass counts) → use the `cl_add-mcp-tool` /
+  `cl_sync-agent-surfaces` skills. The sync invariants are easy to miss by hand.
+- Changes under `templates/` only ship via the build — finish with
+  `npm run smoke:pack` (see the `cl_add-sample-feature` skill).
+
+## Where things are documented
+
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — module map, run lifecycle,
+  concurrency, heal system, MCP layer, and the canonical keep-in-sync invariants
+  table.
+- [docs/PRD.md](docs/PRD.md) — product intent, non-goals, and quality bars
+  (reverse-engineered; the tie-breaker for product-questionable changes).
+- [docs/GUIDE.md](docs/GUIDE.md) / [docs/FEATURES.md](docs/FEATURES.md) /
+  [docs/COMMANDS.md](docs/COMMANDS.md) — user-facing docs (env switching incl.
+  remote-URL testing, run output, CLI reference).
+
+## Skills — `.codex/skills/cl_*` (read before you touch the matching area)
+
+These encode the project's conventions and taste. Whenever a task matches one,
+invoke the skill **before** acting — they hold invariants and design rules that
+are easy to miss by hand. (Claude: via the Skill tool. Codex: skills load
+natively.)
+
+**Process / how to work**
+- `cl_reuse-shared-logic` — about to add code/UI that resembles something already
+  here (a 2nd agent spawn, pill/dialog, store, parser, timeout): reuse or extend
+  one shared helper/component/primitive instead of copy-pasting a variant. Lists
+  the existing primitives + the agent-process-runner duplication still owed.
+- `cl_scope-the-ask` — vague "improve/fix/polish X" request: look at the target
+  first, ask one open question; never fire an options menu guessing the goal.
+- `cl_verify-changes` — which checks a change needs before claiming it works;
+  the canary-apply hand-off; coverage/template/stale-server gotchas.
+- `cl_verify-the-premise` — about to act on a claim you didn't confirm (a plan /
+  spec / "follow-up" item, a "known gap", a "doesn't update live / isn't wired /
+  X is missing" report, a "these N are identical" assumption): confirm the
+  premise is true in today's code before building — the fix is often unneeded.
+- `cl_release` — publishing the package (`npm run publish:package`).
+
+**Run loop & MCP layer**
+- `cl_add-mcp-tool` — add/remove/rename/move a tool in
+  `apps/web-server/mcp/tools.ts`, or fix tool-count / unknown-tool smoke fails.
+- `cl_sync-agent-surfaces` — after changing run-loop semantics (collision,
+  queue, boot sessions, heal claims, signal/rerun, pass counts): keep MCP
+  instructions, tool results, and shipped `SKILL.md` files in agreement.
+- `cl_add-sample-feature` — editing sample features under `templates/project/`
+  (feature.config.cjs, envsets, e2e specs); template changes ship via build.
+- `cl_async-task-ux` — adding a long-running background task (coverage,
+  portify, gen): the non-blocking · persistent · recoverable · re-openable ·
+  single-flight contract and the file-backed store pattern.
+
+**Web UI (`apps/web`) — design language & live behavior**
+- `cl_ui-design-philosophy` — building/restyling any panel, dialog, pill, card,
+  or full-screen view: reuse the token system and layout precedents; no new
+  component library; meaning carries the style.
+- `cl_design-feedback` — critiquing a UI (screenshot, live screen, Figma,
+  component): ground every finding in the component source + tokens before
+  voicing it; don't flag a shared primitive or intentional choice as a defect.
+- `cl_route-every-surface` — adding a new page/view or a dialog/modal to
+  `apps/web`: assign it a URL param so it's deep-linkable and survives refresh.
+  Covers the cold-load test (which dialogs to route), the two-tier URL schema,
+  and the hydration checklist + gotchas.
+- `cl_ws-driven-state` — adding any server-side mutation (route, background job,
+  MCP tool) that changes visible UI state: emit a `WorkspaceEvent` so the client
+  updates live. Covers the full chain + checklist + the two gaps fixed in 1.4.0
+  (portify save, coverage job completion).
+- `cl_live-state-sync` — a UI that must react in real time to a backend state
+  change, or anything that "only updates after refresh": picking
+  broadcast-push vs task-scoped stream vs refetch.
+- `cl_surfacing-agent-work` — any UI showing an agent's progress/output (live
+  or historical): know what the agent actually produces before designing the
+  viewer.

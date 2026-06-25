@@ -1,5 +1,6 @@
 import { execFileSync } from 'child_process'
 import path from 'path'
+import { DEFAULT_CANARY_LAB_MCP_PROFILE } from '../apps/web-server/mcp/tools'
 
 export type McpRegistrationTarget = 'codex' | 'claude'
 
@@ -58,11 +59,11 @@ export function resolveMcpInvocation(opts: {
   pathEnv?: string
 }): ResolvedMcpInvocation {
   if (isEphemeralNpxInstall(opts.cliPath)) {
-    return { command: 'npx', args: ['-y', `${PACKAGE_NAME}@latest`, 'mcp', '--profile', 'full'] }
+    return { command: 'npx', args: ['-y', `${PACKAGE_NAME}@latest`, 'mcp', '--profile', DEFAULT_CANARY_LAB_MCP_PROFILE] }
   }
   const invocation: ResolvedMcpInvocation = {
     command: opts.execPath,
-    args: [opts.cliPath, 'mcp', '--profile', 'full'],
+    args: [opts.cliPath, 'mcp', '--profile', DEFAULT_CANARY_LAB_MCP_PROFILE],
   }
   // GUI clients (Claude/Codex Desktop) launch servers with a minimal env that
   // often lacks the nvm/homebrew node dir, so embed an explicit PATH.

@@ -78,7 +78,7 @@ describe('analyzeFeatureConfigText', () => {
       { command: 'pnpm dev --port 3000', healthCheck: { url: 'http://localhost:5003/health' } },
       { command: 'x', healthCheck: { tcp: { port: 8080 } } },
     ] }] }`
-    const a = analyzeFeatureConfigText('mpass', src)
+    const a = analyzeFeatureConfigText('myapp', src)
     expect(a).not.toBeNull()
     expect(a!.hardcodedPorts).toEqual([3000, 5003, 8080])
     expect(a!.hasPortSlot).toBe(false)

@@ -1,0 +1,52 @@
+{
+  "requirements": [
+    {
+      "id": "R1",
+      "title": "Create a todo",
+      "text": "A POST /todos with a title creates a todo, returns its generated id, and marks it done:false. A request with no title is rejected (negative path).",
+      "pathTypes": ["happy", "sad"],
+      "strictnessLadder": [
+        { "tier": 1, "description": "the server logs the create" },
+        { "tier": 2, "description": "the todo is in the in-memory store" },
+        { "tier": 3, "description": "GET /todos returns the new todo" }
+      ]
+    },
+    {
+      "id": "R2",
+      "title": "List todos",
+      "text": "GET /todos returns every todo that has been created, in creation order.",
+      "pathTypes": ["happy"],
+      "strictnessLadder": [
+        { "tier": 1, "description": "the server logs the request" },
+        { "tier": 2, "description": "the list reads the store" },
+        { "tier": 3, "description": "GET /todos returns all created todos" }
+      ]
+    },
+    {
+      "id": "R3",
+      "title": "Delete a todo",
+      "text": "DELETE /todos/:id removes the todo so it no longer appears in the list. Removal should ultimately be confirmable from the user-facing surface (a browser viewing the list), not only from the API response.",
+      "pathTypes": ["happy"],
+      "strictnessLadder": [
+        { "tier": 1, "description": "the server logs the delete" },
+        { "tier": 2, "description": "the todo is removed from the store" },
+        { "tier": 3, "description": "GET /todos no longer returns it" },
+        { "tier": 4, "description": "a browser viewing the list confirms the item is gone" }
+      ]
+    },
+    {
+      "id": "R4",
+      "title": "Update a todo",
+      "text": "PATCH /todos/:id changes a todo's title or done state and returns the updated todo. Not yet implemented or tested.",
+      "pathTypes": ["happy"],
+      "strictnessLadder": [
+        { "tier": 1, "description": "the server logs the update" },
+        { "tier": 2, "description": "the store is updated" },
+        { "tier": 3, "description": "GET /todos/:id returns the updated todo" }
+      ]
+    }
+  ],
+  "docsHash": "dd98e9213bf88f5d7fb0049772bf93bb7542d6a76a68b22f61f44a5af67bf1f5",
+  "sourceDocs": ["prd.md"],
+  "generatedAt": "2026-06-16T00:00:00.000Z"
+}

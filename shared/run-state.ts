@@ -46,6 +46,26 @@ export interface RunLifecycleAbortReason {
   service?: string
 }
 
+/** Set on the manifest when a service failed to come up on a NORMAL run (not a
+ *  boot-only session). The Playwright suite can't run without its services, so
+ *  the run is declared `failed` and — if a heal mode is configured — routed into
+ *  the heal loop with the service log as the failure context, instead of being
+ *  silently aborted. Cleared on a successful (re)boot. */
+export interface RunBootFailure {
+  /** Service display name (matches ServiceSpec.name). */
+  service: string
+  /** On-disk safe name (matches ServiceManifestEntry.safeName). */
+  safeName: string
+  /** `health-timeout` = never answered its readiness probe within the deadline;
+   *  `process-exited` = the service process died before it became healthy. */
+  reason: 'health-timeout' | 'process-exited'
+  /** Human-readable one-liner (transport + probe target / exit info). */
+  detail: string
+  /** Path to the service's log file — the heal agent reads this to diagnose
+   *  why the service won't serve. */
+  logPath: string
+}
+
 export interface RunLifecycleSnapshot {
   phase: RunLifecyclePhase
   headline: string

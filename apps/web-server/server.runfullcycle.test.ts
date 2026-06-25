@@ -4,11 +4,11 @@ import os from 'os'
 import path from 'path'
 import { EventEmitter } from 'events'
 import { createServer } from './server'
-import { RunOrchestrator } from './lib/runtime/orchestrator'
-import { generateRunId } from './lib/runtime/run-id'
-import { runDirFor } from './lib/runtime/run-paths'
-import type { PaneMessage, PaneSubscriber } from './lib/pane-broker'
-import type { PtyFactory, PtyHandle, PtySpawnOptions } from './lib/runtime/pty-spawner'
+import { RunOrchestrator } from './src/features/runs/logic/runtime/orchestrator'
+import { generateRunId } from './src/features/runs/logic/runtime/run-id'
+import { runDirFor } from './src/features/runs/logic/runtime/run-paths'
+import type { PaneMessage, PaneSubscriber } from './src/features/runs/logic/pane-broker'
+import type { PtyFactory, PtyHandle, PtySpawnOptions } from './src/features/runs/logic/runtime/pty-spawner'
 
 // End-to-end check: POST /api/runs against the broken_todo_api fixture, drive
 // the orchestrator with a fake ptyFactory so we don't need real Playwright,

@@ -1,40 +1,106 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { FeaturesColumn } from './components/FeaturesColumn'
-import { TestCasesColumn } from './components/TestCasesColumn'
-import { RunsColumn } from './components/RunsColumn'
-import { RunDetailColumn } from './components/RunDetailColumn'
-import { FeatureConfigEditor } from './components/FeatureConfigEditor'
-import { ResizablePanels } from './components/ResizablePanels'
-import { VerticalSplit } from './components/VerticalSplit'
-import { GlobalStatusBar } from './components/GlobalStatusBar'
-import { AddTestWizard } from './components/AddTestWizard'
-import { CollisionConfirmDialog } from './components/CollisionConfirmDialog'
-import { PortifyWizard } from './components/PortifyWizard'
-import { LogCleanupPage } from './components/LogCleanupPage'
-import type { RepoCollisionChoice } from './api/client'
-import * as api from './api/client'
-import { connectWorkspaceEvents } from './api/workspace-socket'
-import { useRuns, useRun, useGlobalActiveRun } from './state/RunsContext'
-import { useWizardDrafts } from './state/WizardDraftContext'
-import type { Feature } from './api/types'
+import { FeaturesColumn } from './shared/shell/FeaturesColumn'
+import { TestCasesColumn } from './shared/shell/TestCasesColumn'
+import { RunsColumn } from './features/runs/components/RunsColumn'
+import { RunDetailColumn } from './features/runs/components/RunDetailColumn'
+import { FeatureConfigEditor } from './features/config/components/FeatureConfigEditor'
+import { ResizablePanels } from './shared/ui/ResizablePanels'
+import { VerticalSplit } from './shared/ui/VerticalSplit'
+import { GlobalStatusBar } from './shared/shell/GlobalStatusBar'
+import { AddTestWizard } from './features/wizard/components/AddTestWizard'
+import { CollisionConfirmDialog } from './features/runs/components/CollisionConfirmDialog'
+import { PortifyWizard } from './features/portify/components/PortifyWizard'
+import { LogCleanupPage } from './features/logs/components/LogCleanupPage'
+import { CoverageLedgerPage } from './features/coverage/components/CoverageLedgerPage'
+import type { RepoCollisionChoice } from './shared/api/client'
+import * as api from './shared/api/client'
+import { connectWorkspaceEvents } from './features/runs/api/workspace-socket'
+import { useRuns, useRun, useGlobalActiveRun } from './features/runs/state/RunsContext'
+import { useWizardDrafts } from './features/wizard/state/WizardDraftContext'
+import { useEvaluationExports } from './features/evaluation/state/EvaluationExportContext'
+import type { Feature } from './shared/api/types'
+import { readPersistedView, persistView, onViewChangedInOtherTab } from './shared/lib/workspace-view-state'
+
+// R12: hydrate the open view + selected feature from the URL/localStorage so a
+// refresh or a second tab restores where you were, not a blank workspace.
+const PERSISTED_VIEW = readPersistedView()
 
 export function App() {
   const [features, setFeatures] = useState<Feature[]>([])
-  const [selectedFeature, setSelectedFeature] = useState<string | null>(null)
-  const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
-  const [configFor, setConfigFor] = useState<string | null>(null)
+  const [selectedFeature, setSelectedFeature] = useState<string | null>(PERSISTED_VIEW.feature)
+  // R24: hydrate the selected run from the URL so a deep-linked / refreshed run
+  // reopens. The run loads async over the WS, so we also seed the pending ref
+  // below to stop the stale-run guard from clearing it before runs arrive.
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(PERSISTED_VIEW.run)
+  const [configFor, setConfigFor] = useState<string | null>(
+    PERSISTED_VIEW.dialog === 'config' ? PERSISTED_VIEW.feature : null,
+  )
   const [testsRefreshKey, setTestsRefreshKey] = useState(0)
+  const [coverageRefreshKey, setCoverageRefreshKey] = useState(0)
+  // Bumped when a portify overlay is saved — forces the open Ports tab to refetch
+  // its config doc so the rewritten slots show without a tab switch / refresh.
+  const [portsRefreshKey, setPortsRefreshKey] = useState(0)
+  const [reposRefreshKey, setReposRefreshKey] = useState(0)
+  const [verificationRefreshKey, setVerificationRefreshKey] = useState(0)
   const [specTotalTests, setSpecTotalTests] = useState(0)
   const [collisionPrompt, setCollisionPrompt] = useState<{ feature: string; env?: string; mode?: 'test' | 'boot'; info: RepoCollisionChoice; portsConfigured?: boolean } | null>(null)
   // Port-ification wizard target: 'new' starts a fresh workflow for a feature;
   // 'revisit' reopens an in-flight workflow (from the status bar) by id.
+  // R24: hydrate from the URL — `wf` present = revisit, absent = start-new.
   const [portifyTarget, setPortifyTarget] = useState<
     { kind: 'new'; feature: string } | { kind: 'revisit'; workflowId: string } | null
-  >(null)
-  // Top-level view: the normal workspace, or the full-screen Log Cleanup page.
-  const [view, setView] = useState<'workspace' | 'cleanup'>('workspace')
-  const pendingRunSelectionRef = useRef<string | null>(null)
+  >(() => {
+    if (PERSISTED_VIEW.dialog !== 'portify') return null
+    if (PERSISTED_VIEW.wf) return { kind: 'revisit', workflowId: PERSISTED_VIEW.wf }
+    if (PERSISTED_VIEW.feature) return { kind: 'new', feature: PERSISTED_VIEW.feature }
+    return null
+  })
+  // R24: the Verify-config dialog (in the runs column) is route-driven too.
+  const [verifyOpen, setVerifyOpen] = useState(PERSISTED_VIEW.dialog === 'verification')
+  // Top-level view: the normal workspace, or a full-screen page (cleanup /
+  // coverage). Hydrated from the URL/localStorage (R12) so it survives refresh.
+  const [view, setView] = useState<'workspace' | 'cleanup' | 'coverage'>(PERSISTED_VIEW.view)
+  const pendingRunSelectionRef = useRef<string | null>(PERSISTED_VIEW.run)
   const selectedFeatureRef = useRef<string | null>(null)
+
+  // Runs come from the WebSocket-backed RunsProvider — no polling here.
+  // `runs` is the full index across all features; the per-feature filter
+  // happens at render time. Declared here (above the persist effect) because the
+  // route serialization below reads `wizardOpen`.
+  const { runs: allRuns, startRun: startRunAction, startVerification: startVerificationAction } = useRuns()
+  const { entry: globalActiveRunEntry, detail: activeRunDetail } = useGlobalActiveRun()
+  const { wizardOpen, closeWizard, startNewWizard } = useWizardDrafts()
+  // R24: the evaluation export dialog's open-state lives in EvaluationExportContext
+  // (mounted in the status bar). Read it here — above the persist effect — so the
+  // route serializes it, and seed it from the URL on first load below.
+  const { dialogOpen: evaluationOpen, selectedTask: evaluationTask, openTask: openEvaluationTask } = useEvaluationExports()
+
+  // R12/R24: persist the full route (view + feature + selected run + open routed
+  // dialog) to the URL on every change so a refresh / deep link restores it. The
+  // durable tier (view + feature) also mirrors to localStorage for cross-tab sync.
+  // Dialog precedence follows z-order: the full-screen overlays (portify > config
+  // > wizard) sit above the in-column verify dialog, so the topmost open one owns
+  // the URL.
+  const routedDialog = portifyTarget ? 'portify' : configFor ? 'config' : wizardOpen ? 'add-test' : verifyOpen ? 'verification' : evaluationOpen ? 'evaluation' : null
+  const routedWf = portifyTarget?.kind === 'revisit' ? portifyTarget.workflowId : null
+  const routedTask = evaluationOpen ? evaluationTask?.taskId ?? null : null
+  useEffect(() => {
+    persistView({ view, feature: selectedFeature, run: selectedRunId, dialog: routedDialog, wf: routedWf, task: routedTask })
+  }, [view, selectedFeature, selectedRunId, routedDialog, routedWf, routedTask])
+
+  // R24: the Add-Test wizard and the evaluation export dialog keep their open-state
+  // in a context, not PERSISTED_VIEW-seeded local state — so reopen them from the
+  // URL on first load.
+  useEffect(() => {
+    if (PERSISTED_VIEW.dialog === 'add-test') startNewWizard()
+    if (PERSISTED_VIEW.dialog === 'evaluation') openEvaluationTask(PERSISTED_VIEW.task ?? undefined)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  useEffect(() => onViewChangedInOtherTab((s) => {
+    setView(s.view)
+    if (s.feature) setSelectedFeature(s.feature)
+  }), [])
 
   // Initial features load + auto-select first feature.
   useEffect(() => {
@@ -47,13 +113,6 @@ export function App() {
     return () => { cancelled = true }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
-
-  // Runs come from the WebSocket-backed RunsProvider — no polling here.
-  // `runs` is the full index across all features; the per-feature filter
-  // happens at render time.
-  const { runs: allRuns, startRun: startRunAction, startVerification: startVerificationAction } = useRuns()
-  const { entry: globalActiveRunEntry, detail: activeRunDetail } = useGlobalActiveRun()
-  const { wizardOpen, closeWizard } = useWizardDrafts()
 
   // Column 3 lists runs scoped to the currently-selected feature. Boot-only
   // sessions are excluded — they're not test runs and live in the global
@@ -183,6 +242,9 @@ export function App() {
         onEvent: (event) => {
           if (event.type === 'feature-created' || event.type === 'feature-deleted' || event.type === 'features-changed') {
             refreshFeatures(event.type === 'feature-created' ? event.feature : undefined)
+            // A branch checkout (and other feature mutations) emits features-changed;
+            // bump so an open Repos tab refetches its git-status row live.
+            if (event.type === 'features-changed') setReposRefreshKey((key) => key + 1)
             return
           }
           if (event.type === 'tests-changed' && selectedFeatureRef.current === event.feature) {
@@ -191,6 +253,23 @@ export function App() {
           if (event.type === 'envsets-changed') {
             refreshFeatures(selectedFeatureRef.current)
           }
+          if (event.type === 'coverage-changed') {
+            setCoverageRefreshKey((key) => key + 1)
+          }
+          if (event.type === 'verification-config-changed' && selectedFeatureRef.current === event.feature) {
+            setVerificationRefreshKey((key) => key + 1)
+          }
+        },
+        // The bus has no replay, so any mutation that happened while the socket
+        // was down (e.g. across a canary-apply server restart) was never
+        // pushed. Resync the feature-derived surfaces on reconnect rather than
+        // waiting for the next live event.
+        onReconnect: () => {
+          refreshFeatures(selectedFeatureRef.current)
+          setReposRefreshKey((key) => key + 1)
+          setTestsRefreshKey((key) => key + 1)
+          setCoverageRefreshKey((key) => key + 1)
+          setVerificationRefreshKey((key) => key + 1)
         },
       })
     } catch {
@@ -222,8 +301,11 @@ export function App() {
             setSelectedRunId(allRuns.find((r) => r.feature === name && r.executionType !== 'boot' && r.executionType !== 'benchmark')?.runId ?? null)
           }}
           onFeaturesChanged={refreshFeatures}
+          coverageRefreshKey={coverageRefreshKey}
+          portsRefreshKey={portsRefreshKey}
           onStartPortify={(f) => setPortifyTarget({ kind: 'new', feature: f })}
           onOpenPortify={(workflowId) => setPortifyTarget({ kind: 'revisit', workflowId })}
+          onOpenCoverage={(f) => { setSelectedFeature(f); setView('coverage') }}
         />
       ),
     },
@@ -264,6 +346,9 @@ export function App() {
               onStartRun={handleStartRun}
               onStartVerification={handleStartVerification}
               runDisabled={false}
+              verifyOpen={verifyOpen}
+              onVerifyOpenChange={setVerifyOpen}
+              verificationRefreshKey={verificationRefreshKey}
             />
           )}
           bottom={<RunDetailColumn runId={selectedRunId} onOpenPlaywrightSettings={setConfigFor} totalTests={specTotalTests} />}
@@ -284,18 +369,35 @@ export function App() {
           setView('workspace')
         }}
         onOpenCleanup={() => setView('cleanup')}
+        onOpenCoverage={(feature) => { setSelectedFeature(feature); setView('coverage') }}
         onStartPortify={(f) => setPortifyTarget({ kind: 'new', feature: f })}
         onOpenPortify={(workflowId) => setPortifyTarget({ kind: 'revisit', workflowId })}
       />
       <div className="min-h-0 flex-1">
         {view === 'cleanup'
-          ? <LogCleanupPage onClose={() => setView('workspace')} />
+          ? <LogCleanupPage
+              onClose={() => setView('workspace')}
+              onNavigateToRun={(feature, runId) => {
+                pendingRunSelectionRef.current = null
+                setSelectedFeature(feature)
+                setSelectedRunId(runId)
+                setView('workspace')
+              }}
+              onNavigateToPortify={(workflowId) => {
+                setView('workspace')
+                setPortifyTarget({ kind: 'revisit', workflowId })
+              }}
+            />
+          : view === 'coverage' && selectedFeature
+          ? <CoverageLedgerPage feature={selectedFeature} onClose={() => setView('workspace')} coverageRefreshKey={coverageRefreshKey} />
           : <ResizablePanels panels={panels} />}
       </div>
       {configFor && (
         <FeatureConfigEditor
           feature={configFor}
           initialTab="playwright"
+          portsRefreshKey={portsRefreshKey}
+          reposRefreshKey={reposRefreshKey}
           onStartPortify={(f) => setPortifyTarget({ kind: 'new', feature: f })}
           onOpenPortify={(workflowId) => setPortifyTarget({ kind: 'revisit', workflowId })}
           onClose={() => setConfigFor(null)}
@@ -355,6 +457,10 @@ export function App() {
             // The overlay now exists — refresh /api/features so the "Portified"
             // badge + Ports-tab indicator reflect it immediately.
             refreshFeatures(selectedFeatureRef.current)
+            // The overlay also rewrote the port slots; bump the key so the open
+            // Ports tab refetches its config doc instead of waiting for a tab
+            // switch / refresh. (features-changed alone only refreshes the list.)
+            setPortsRefreshKey((key) => key + 1)
           }}
         />
       )}

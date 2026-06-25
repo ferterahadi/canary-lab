@@ -12,10 +12,11 @@ import type { JSONRPCMessage } from '@modelcontextprotocol/sdk/types.js'
 import { runAsScript } from './run-as-script'
 import { refreshAgentIntegrationsQuietly } from './agent'
 import {
+  DEFAULT_CANARY_LAB_MCP_PROFILE,
   normalizeCanaryLabMcpProfile,
   type CanaryLabMcpProfile,
 } from '../apps/web-server/mcp/tools'
-import type { ExternalHealClientKind } from '../apps/web-server/lib/runtime/manifest'
+import { isClientKind, type ClientKind } from '../shared/run-mode'
 import { looksLikeProjectRoot } from '../shared/runtime/project-root'
 import {
   canaryLabHome,
@@ -26,7 +27,7 @@ import {
   resolveActiveServer,
   type ActiveServerEntry,
 } from '../shared/runtime/active-servers'
-import { DEFAULT_PORT, loadProjectConfig, resolveProjectPort } from '../apps/web-server/lib/runtime/launcher/project-config'
+import { DEFAULT_PORT, loadProjectConfig, resolveProjectPort } from '../apps/web-server/src/features/runs/logic/runtime/launcher/project-config'
 
 // Resolve the bridge's target /mcp URL with no explicit --url. A *live* server
 // (recorded in ~/.canary-lab/active-servers.json by `canary-lab ui`) always
@@ -49,13 +50,13 @@ export function resolveDefaultMcpUrl(opts: {
   const port = projectRoot ? resolveProjectPort(loadProjectConfig(projectRoot)) : DEFAULT_PORT
   return `http://127.0.0.1:${port}/mcp`
 }
-const DEFAULT_MCP_PROFILE: CanaryLabMcpProfile = 'full'
+const DEFAULT_MCP_PROFILE: CanaryLabMcpProfile = DEFAULT_CANARY_LAB_MCP_PROFILE
 const DEFAULT_UI_STARTUP_TIMEOUT_MS = 15_000
 const DEFAULT_UI_STARTUP_POLL_MS = 250
 
 export interface McpCommandOptions {
   profile?: CanaryLabMcpProfile
-  clientKind?: ExternalHealClientKind
+  clientKind?: ClientKind
   stdin?: Readable
   stdout?: Writable
   stderr?: Writable
@@ -460,13 +461,13 @@ function sleep(ms: number): Promise<void> {
 }
 
 function parseArgs(argv: string[]):
-  | { ok: true; command: 'bridge' | 'doctor'; url?: string; profile: CanaryLabMcpProfile; clientKind?: ExternalHealClientKind; autoStartUi: boolean }
+  | { ok: true; command: 'bridge' | 'doctor'; url?: string; profile: CanaryLabMcpProfile; clientKind?: ClientKind; autoStartUi: boolean }
   | { ok: false; error: string } {
   let command: 'bridge' | 'doctor' = 'bridge'
   // Undefined → resolve the active project's port via resolveDefaultMcpUrl.
   let url: string | undefined
   let profile: CanaryLabMcpProfile = DEFAULT_MCP_PROFILE
-  let clientKind: ExternalHealClientKind | undefined
+  let clientKind: ClientKind | undefined
   let autoStartUi = true
   const args = [...argv]
   if (args[0] === 'doctor') {
@@ -496,7 +497,7 @@ function parseArgs(argv: string[]):
     }
     if (arg === '--client-kind') {
       const value = args[i + 1]
-      if (!isExternalHealClientKind(value)) {
+      if (!isClientKind(value)) {
         return { ok: false, error: `Invalid MCP client kind: ${value ?? ''}` }
       }
       clientKind = value
@@ -533,7 +534,7 @@ function healthUrlFor(url: string): string {
 function urlWithContext(
   url: string,
   profile: CanaryLabMcpProfile,
-  clientKind: ExternalHealClientKind,
+  clientKind: ClientKind,
 ): string {
   const parsed = new URL(url)
   parsed.searchParams.set('profile', profile)
@@ -544,6 +545,8 @@ function urlWithContext(
 function requiredToolsForProfile(profile: CanaryLabMcpProfile): string[] {
   if (profile === 'author') return ['create_feature', 'start_external_draft', 'start_external_evaluation_export']
   if (profile === 'verify') return ['execute_verification']
+  if (profile === 'portify') return ['start_portify', 'submit_external_portify']
+  if (profile === 'lifecycle') return ['wait_for_heal_task', 'create_feature', 'execute_verification']
   if (profile === 'full') return ['wait_for_heal_task', 'start_external_evaluation_export', 'execute_verification']
   return ['wait_for_heal_task']
 }
@@ -573,19 +576,22 @@ function isResponseTo(message: JSONRPCMessage, id: string): boolean {
 export function inferMcpClientKind(
   env: NodeJS.ProcessEnv = process.env,
   startPid = process.ppid,
-): ExternalHealClientKind | null {
-  if (isExternalHealClientKind(env.CANARY_LAB_MCP_CLIENT_KIND)) {
+): ClientKind | null {
+  if (isClientKind(env.CANARY_LAB_MCP_CLIENT_KIND)) {
     return env.CANARY_LAB_MCP_CLIENT_KIND
   }
   return inferClientKindFromProcessLines(readProcessLineage(startPid))
 }
 
-export function inferClientKindFromProcessLines(lines: string[]): ExternalHealClientKind | null {
+// Detection only ever produces the human-driven kinds: `claude` / `codex`
+// (Desktop and CLI are no longer distinguished — both may heal) or `null`
+// (→ `other`, also allowed). The runner-spawned `*-pty` kinds are NEVER
+// sniffed: the runner sets `CANARY_LAB_MCP_CLIENT_KIND` explicitly (read first
+// in `inferMcpClientKind`), so the only blocked case is set, not guessed.
+export function inferClientKindFromProcessLines(lines: string[]): ClientKind | null {
   const haystack = lines.join('\n')
-  if (/\/Applications\/Claude\.app\b|Claude Helper|Claude\.app/i.test(haystack)) return 'claude-desktop'
-  if (/\/Applications\/Codex\.app\b|Codex Helper|Codex\.app/i.test(haystack)) return 'codex-desktop'
-  if (/(^|[\s/])claude(?:\s|$)|claude-code/i.test(haystack)) return 'claude-cli'
-  if (/(^|[\s/])codex(?:\s|$)/i.test(haystack)) return 'codex-cli'
+  if (/\/Applications\/Claude\.app\b|Claude Helper|Claude\.app|(^|[\s/])claude(?:\s|$)|claude-code/i.test(haystack)) return 'claude'
+  if (/\/Applications\/Codex\.app\b|Codex Helper|Codex\.app|(^|[\s/])codex(?:\s|$)/i.test(haystack)) return 'codex'
   return null
 }
 
@@ -616,12 +622,5 @@ function readProcessEntry(pid: number): { ppid: number; command: string } | null
   }
 }
 
-function isExternalHealClientKind(value: unknown): value is ExternalHealClientKind {
-  return value === 'claude-cli' ||
-    value === 'claude-desktop' ||
-    value === 'codex-cli' ||
-    value === 'codex-desktop' ||
-    value === 'other'
-}
 
 runAsScript(module, main)

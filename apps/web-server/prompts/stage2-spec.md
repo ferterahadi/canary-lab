@@ -162,7 +162,7 @@ Every plan item maps to exactly one top-level Playwright `test(...)`. Do not ski
 
 | Plan field | Becomes |
 |---|---|
-| `step` | The `test(...)` title, **verbatim**. Do not paraphrase, prefix, or suffix. |
+| `step` | The `test(...)` title, **verbatim**. Do not paraphrase, prefix, or suffix — in particular do not add a leading ordinal/number (`"1. "`); the UI numbers tests by source order. |
 | `actions` | Playwright statements inside the test body, in the same order. Each action becomes one or more `await page.*` or `await request.*` calls. |
 | `expectedOutcome` | An `expect(...)` assertion placed immediately after the action that produces it. The assertion target must match the outcome category named in the plan: visible copy → `toHaveText` / `toBeVisible` on the named text; URL → `toHaveURL`; API response → `toBe(<status>)` + `toMatchObject(...)`; persisted value → API/DB read + shape assertion; role/state → `toBeDisabled`/`toBeChecked`/etc. |
 | `coverageType` | Optional tag via the test options object: `test('...', { tag: '@happy-path' }, async (...) => ...)`. Add only when it improves filtering; omit otherwise. |

@@ -1,0 +1,848 @@
+import fs from 'fs'
+import path from 'path'
+import {
+  DIAGNOSIS_JOURNAL_PATH,
+  HEAL_INDEX_PATH,
+  MANIFEST_PATH,
+  ROOT,
+  getSummaryPath,
+} from './paths'
+import { compressLogByTemplate } from './log-template'
+
+// Cap each per-test slice at head + tail to keep per-failure files readable in
+// a single Read tool call. Errors are almost always near the end of the window,
+// so tail matters as much as head.
+export const SLICE_HALF_BYTES = 10_240
+const ELISION_MARKER = '\n… [eliding {n} bytes from middle — full log at {path}] …\n'
+
+export function capSlice(
+  snippet: string,
+  fullLogRelPath: string,
+): string {
+  const bytes = Buffer.byteLength(snippet, 'utf-8')
+  // Small enough to read in one call → keep it byte-for-byte (lossless).
+  if (bytes <= SLICE_HALF_BYTES * 2) return snippet
+
+  // Over budget. Collapse repeated noise by template FIRST — this keeps full
+  // temporal coverage of the slice, which beats dropping the middle. If that
+  // gets us under budget, we never truncate at all.
+  const { text: compact, collapsedLines } = compressLogByTemplate(snippet)
+  const compactBytes = Buffer.byteLength(compact, 'utf-8')
+  if (compactBytes <= SLICE_HALF_BYTES * 2) {
+    return collapsedLines > 0
+      ? `${compact}\n… [${collapsedLines} repeated line(s) collapsed by template — full log at ${fullLogRelPath}] …`
+      : compact
+  }
+
+  // Still too big even after collapsing → head+tail the compressed text. The
+  // elision marker keeps pointing at the full, uncompressed log.
+  const head = compact.slice(0, SLICE_HALF_BYTES)
+  const tail = compact.slice(-SLICE_HALF_BYTES)
+  const elided = compactBytes - Buffer.byteLength(head, 'utf-8') - Buffer.byteLength(tail, 'utf-8')
+  const marker = ELISION_MARKER
+    .replace('{n}', String(elided))
+    .replace('{path}', fullLogRelPath)
+  return head + marker + tail
+}
+
+// Read each service log once and extract per-test slices for every requested
+// slug in a single pass. With N failures × M service logs, the naive approach
+// reads each log N times; this collapses it to M reads per enrichment cycle.
+export function extractAllSlices(
+  slugs: readonly string[],
+  serviceLogs: readonly string[],
+): Map<string, Record<string, string>> {
+  const result = new Map<string, Record<string, string>>()
+  for (const slug of slugs) result.set(slug, {})
+  if (slugs.length === 0) return result
+
+  for (const logPath of serviceLogs) {
+    if (!fs.existsSync(logPath)) continue
+    // The raw svc-*.log keeps its PTY control codes for the xterm pane replay;
+    // strip them here so the heal-agent slices are plain text.
+    const content = stripAnsi(fs.readFileSync(logPath, 'utf-8'))
+    const svcName = path.basename(logPath, '.log')
+    const relFullPath = path.relative(ROOT, logPath)
+    for (const slug of slugs) {
+      const openTag = `<${slug}>`
+      const openIdx = content.indexOf(openTag)
+      if (openIdx === -1) continue
+      const closeIdx = content.indexOf(`</${slug}>`, openIdx + openTag.length)
+      if (closeIdx === -1) continue
+      const snippet = content.slice(openIdx + openTag.length, closeIdx).trim()
+      if (snippet.length === 0) continue
+      result.get(slug)![svcName] = capSlice(snippet, relFullPath)
+    }
+  }
+  return result
+}
+
+export function extractLogsForTest(
+  slug: string,
+  serviceLogs: string[],
+): Record<string, string> {
+  return extractAllSlices([slug], serviceLogs).get(slug) ?? {}
+}
+
+// Write per-failure slice files under <runDir>/failed/<slug>/<svc>.log and return
+// the list of relative paths + byte counts so callers can reference them from
+// the summary and the index.
+export interface PerFailureSlices {
+  logFiles: string[]        // repo-relative paths, e.g. "logs/runs/<run-id>/failed/foo/svc-api.log"
+  bytesByPath: Record<string, number>
+}
+
+export function writeFailureSlices(
+  slug: string,
+  serviceLogs: string[],
+  failedDir?: string,
+): PerFailureSlices {
+  return writeSlicesToDisk(slug, extractLogsForTest(slug, serviceLogs), failedDir)
+}
+
+// Write the full (untruncated) failure error — assertion message plus the
+// code-frame snippet — to `<failedDir>/<slug>/error.txt`. Returns the
+// repo-relative path, or null when there's nothing to write / a write fails.
+// The heal-index points the agent here so a large assertion diff is never lost
+// to the one-line preview.
+export function writeErrorFile(
+  slug: string,
+  error: { message?: string; snippet?: string } | undefined,
+  failedDir: string = path.join(path.dirname(getSummaryPath()), 'failed'),
+): string | null {
+  const message = error?.message?.trim() ?? ''
+  const snippet = error?.snippet?.trim() ?? ''
+  if (!message && !snippet) return null
+  const parts: string[] = []
+  if (message) parts.push(message)
+  if (snippet) parts.push('--- snippet ---', snippet)
+  const body = parts.join('\n\n')
+  try {
+    const dir = path.join(failedDir, slug)
+    fs.mkdirSync(dir, { recursive: true })
+    const filePath = path.join(dir, 'error.txt')
+    fs.writeFileSync(filePath, body.endsWith('\n') ? body : `${body}\n`)
+    return path.relative(ROOT, filePath) || filePath
+  } catch {
+    return null
+  }
+}
+
+function writeSlicesToDisk(
+  slug: string,
+  slices: Record<string, string>,
+  failedDir: string = path.join(path.dirname(getSummaryPath()), 'failed'),
+): PerFailureSlices {
+  const dir = path.join(failedDir, slug)
+  const logFiles: string[] = []
+  const bytesByPath: Record<string, number> = {}
+
+  if (Object.keys(slices).length === 0) {
+    return { logFiles, bytesByPath }
+  }
+
+  fs.mkdirSync(dir, { recursive: true })
+  for (const [svc, body] of Object.entries(slices)) {
+    const filePath = path.join(dir, `${svc}.log`)
+    fs.writeFileSync(filePath, body)
+    const rel = path.relative(ROOT, filePath)
+    logFiles.push(rel)
+    bytesByPath[rel] = Buffer.byteLength(body, 'utf-8')
+  }
+  return { logFiles, bytesByPath }
+}
+
+interface FailedEntry {
+  name: string
+  logFiles?: string[]
+  // Repo-relative path to `trace-extract/failure-summary.md` produced from
+  // the test's Playwright trace.zip. Populated by the trace-enrichment step
+  // after the test run completes; surfaced in `heal-index.md` so the agent
+  // reads the curated trace summary as its first stop for "what went wrong".
+  traceSummaryFile?: string
+  error?: { message?: string; snippet?: string }
+  // Repo-relative path to `failed/<slug>/error.txt` — the full, untruncated
+  // assertion message + code-frame snippet. The heal-index shows a one-line
+  // preview of `error.message`; this file is the complete source for the agent.
+  errorFile?: string
+  location?: string
+  durationMs?: number
+  retry?: number
+  [key: string]: unknown
+}
+
+interface EnrichedSummary {
+  total?: number
+  passed?: number
+  failed?: FailedEntry[]
+  complete?: boolean
+}
+
+interface ManifestService {
+  logPath?: string
+}
+
+function summaryPathToRunDir(summaryPath: string): string {
+  return path.dirname(summaryPath)
+}
+
+function manifestPathForSummary(summaryPath: string): string {
+  return path.join(summaryPathToRunDir(summaryPath), 'manifest.json')
+}
+
+function failedDirForSummary(summaryPath: string): string {
+  return path.join(summaryPathToRunDir(summaryPath), 'failed')
+}
+
+function healIndexPathForSummary(summaryPath: string): string {
+  return path.join(summaryPathToRunDir(summaryPath), 'heal-index.md')
+}
+
+function journalPathForSummary(summaryPath: string): string {
+  return path.join(summaryPathToRunDir(summaryPath), 'diagnosis-journal.md')
+}
+
+function serviceLogsFromManifest(manifest: Manifest): string[] {
+  const legacy = Array.isArray(manifest.serviceLogs) ? manifest.serviceLogs : []
+  const current = Array.isArray(manifest.services)
+    ? manifest.services
+        .map((s) => s.logPath)
+        .filter((p): p is string => typeof p === 'string' && p.length > 0)
+    : []
+  return [...legacy, ...current]
+}
+
+// Rewrite e2e-summary.json so each failed[] entry carries logFiles (paths)
+// instead of logs (full embedded snippets). Keeps the summary small enough to
+// Read in one call — previously it ballooned past Claude's 256KB Read cap.
+//
+// Returns the parsed manifest + summary so a follow-up writeHealIndex() in the
+// same tick can reuse them instead of re-reading + re-parsing the same files.
+export function enrichSummaryWithLogs(): { manifest: Manifest; summary: EnrichedSummary; summaryPath: string; healIndexPath: string; journalPath: string } | null {
+  const summaryPath = getSummaryPath()
+  const manifestPath = manifestPathForSummary(summaryPath)
+  if (!fs.existsSync(summaryPath) || !fs.existsSync(manifestPath)) return null
+
+  const summary = JSON.parse(fs.readFileSync(summaryPath, 'utf-8')) as EnrichedSummary
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8')) as Manifest
+
+  if (!Array.isArray(summary.failed) || summary.failed.length === 0) {
+    return {
+      manifest,
+      summary,
+      summaryPath,
+      healIndexPath: healIndexPathForSummary(summaryPath),
+      journalPath: journalPathForSummary(summaryPath),
+    }
+  }
+
+  const slugs = summary.failed
+    .map((e) => (typeof e === 'string' ? e : e.name))
+    .filter((n): n is string => typeof n === 'string' && n.length > 0)
+  const slicesBySlug = extractAllSlices(slugs, serviceLogsFromManifest(manifest))
+  const failedDir = failedDirForSummary(summaryPath)
+
+  summary.failed = summary.failed.map(
+    (entry: string | FailedEntry): FailedEntry => {
+      const base: FailedEntry = typeof entry === 'string' ? { name: entry } : { ...entry }
+      const slices = slicesBySlug.get(base.name) ?? {}
+      const { logFiles } = writeSlicesToDisk(base.name, slices, failedDir)
+      // Never carry embedded `logs` forward — the per-failure files replace it.
+      delete (base as { logs?: unknown }).logs
+      if (logFiles.length > 0) {
+        base.logFiles = logFiles
+      }
+      const errorFile = writeErrorFile(base.name, base.error, failedDir)
+      if (errorFile) {
+        base.errorFile = errorFile
+      }
+      return base
+    },
+  )
+
+  const tmpPath = `${summaryPath}.tmp`
+  fs.writeFileSync(tmpPath, JSON.stringify(summary, null, 2) + '\n')
+  fs.renameSync(tmpPath, summaryPath)
+  return {
+    manifest,
+    summary,
+    summaryPath,
+    healIndexPath: healIndexPathForSummary(summaryPath),
+    journalPath: journalPathForSummary(summaryPath),
+  }
+}
+
+// ─── Heal Index ─────────────────────────────────────────────────────────────
+
+interface JournalEntry {
+  iteration?: number
+  timestamp?: string
+  hypothesis?: string
+  outcome?: string | null
+  fix?: { description?: string; file?: string }
+  signal?: string
+  run?: string
+  feature?: string
+  failingTests?: string
+}
+
+// Hard cap on the size of the unified-diff content written per iteration.
+// Keeps `diagnosis-journal.md` readable and bounds the heal agent's context
+// when it reads prior cycles. Larger diffs get truncated with a trailing
+// marker line so the heal agent knows content is missing. Tune in one place.
+export const MAX_JOURNAL_DIFF_BYTES = 8192
+
+export function truncateDiffForJournal(text: string, max = MAX_JOURNAL_DIFF_BYTES): string {
+  const byteLen = Buffer.byteLength(text, 'utf-8')
+  if (byteLen <= max) return text
+  // Slice by bytes to avoid splitting a multibyte rune across the boundary.
+  const buf = Buffer.from(text, 'utf-8')
+  const head = buf.subarray(0, max).toString('utf-8')
+  // Trim any incomplete trailing partial line for readability.
+  const lastNewline = head.lastIndexOf('\n')
+  const safeHead = lastNewline > 0 ? head.slice(0, lastNewline) : head
+  const remaining = byteLen - Buffer.byteLength(safeHead, 'utf-8')
+  return `${safeHead}\n... (truncated, ${remaining} more bytes)`
+}
+
+// When a cycle's diff exceeds the in-journal cap, write the FULL unified diff
+// to `<runDir>/diffs/iteration-<n>.patch` so the truncated journal block can
+// point the heal agent at the complete edit. Returns the repo-relative path,
+// or null on write failure (the journal still carries the truncated head).
+export function writeFullDiffPatch(
+  journalPath: string,
+  iteration: number,
+  diff: string,
+): string | null {
+  try {
+    const dir = path.join(path.dirname(journalPath), 'diffs')
+    fs.mkdirSync(dir, { recursive: true })
+    const file = path.join(dir, `iteration-${iteration}.patch`)
+    fs.writeFileSync(file, diff.endsWith('\n') ? diff : `${diff}\n`)
+    return path.relative(ROOT, file) || file
+  } catch {
+    return null
+  }
+}
+
+// Parse the Markdown journal format:
+//
+//   ## Iteration 1 — 2026-04-22T01:20:11Z
+//
+//   - feature: shop_oauth
+//   - hypothesis: refresh_token missing from metadata
+//   - fix.file: /path/to/a.java
+//   - fix.description: Added field.
+//   - signal: .restart
+//   - outcome: no_change
+//
+// Markdown is what both Claude and Codex read most fluidly — much better than
+// the old JSON array for the agent's read-and-append workflow.
+export function parseJournalMarkdown(raw: string): JournalEntry[] {
+  const headingRe = /^##\s+Iteration\s+(\d+)\s+[—-]\s+(.+?)\s*$/
+  const fieldRe = /^\s*-\s+([\w.-]+):\s*(.*)$/
+
+  const lines = raw.split('\n')
+  const entries: JournalEntry[] = []
+  let current: JournalEntry | null = null
+
+  for (const line of lines) {
+    const heading = line.match(headingRe)
+    if (heading) {
+      if (current) entries.push(current)
+      current = {
+        iteration: parseInt(heading[1], 10),
+        timestamp: heading[2].trim(),
+      }
+      continue
+    }
+    if (!current) continue
+    const field = line.match(fieldRe)
+    if (!field) continue
+    const key = field[1]
+    const value = field[2].trim()
+    if (key === 'hypothesis') current.hypothesis = value
+    else if (key === 'outcome') {
+      current.outcome = value === 'pending' || value === 'null' || value === '' ? null : value
+    }
+    else if (key === 'signal') current.signal = value
+    else if (key === 'run') current.run = value
+    else if (key === 'feature') current.feature = value
+    else if (key === 'failingTests') current.failingTests = value
+    else if (key === 'fix.file') current.fix = { ...(current.fix ?? {}), file: value }
+    else if (key === 'fix.description') current.fix = { ...(current.fix ?? {}), description: value }
+  }
+  if (current) entries.push(current)
+  return entries
+}
+
+// Read the latest journal iteration's `failingTests` line and split it back
+// into a slug array. This is the "what was failing at the start of the
+// previous cycle" record. Returns [] when the journal is missing, has no
+// iterations, or the latest entry has no failingTests field (e.g., the
+// summary was missing when the iteration was appended).
+function readPreviousFailingSlugsFromJournal(journalPath: string): string[] {
+  try {
+    const raw = fs.readFileSync(journalPath, 'utf-8')
+    const entries = parseJournalMarkdown(raw)
+    const last = entries[entries.length - 1]
+    const value = last?.failingTests?.trim()
+    if (!value) return []
+    return value.split(',').map((s) => s.trim()).filter((s) => s.length > 0)
+  } catch {
+    return []
+  }
+}
+
+// Same-failure streak for `currentSlugs`, derived from the journal: the current
+// observation (1) plus each trailing iteration whose `failingTests` matches the
+// current set. Mirrors HealCycleState.consecutiveSameFailures for surfaces that
+// only have the persisted journal (the external/MCP heal loop doesn't run the
+// in-memory state machine). Ordering-insensitive: keys off a sorted signature so
+// the runner reordering slugs can't masquerade as progress. Returns 0 when the
+// current set is empty.
+export function countConsecutiveSameFailures(
+  journalPath: string,
+  currentSlugs: readonly string[],
+): number {
+  const target = signatureFor(currentSlugs)
+  if (!target) return 0
+  let streak = 1
+  try {
+    const entries = parseJournalMarkdown(fs.readFileSync(journalPath, 'utf-8'))
+    for (let i = entries.length - 1; i >= 0; i--) {
+      const value = entries[i]?.failingTests?.trim()
+      if (!value) break
+      const sig = signatureFor(value.split(',').map((s) => s.trim()))
+      if (sig !== target) break
+      streak += 1
+    }
+  } catch {
+    return streak
+  }
+  return streak
+}
+
+function signatureFor(slugs: readonly string[]): string {
+  return slugs.map((s) => s.trim()).filter((s) => s.length > 0).slice().sort().join('|')
+}
+
+function readJournalTail(journalPath: string, limit = 3): JournalEntry[] {
+  try {
+    const raw = fs.readFileSync(journalPath, 'utf-8')
+    return parseJournalMarkdown(raw).slice(-limit)
+  } catch {
+    return []
+  }
+}
+
+function truncateOneLine(s: string, max = 200): string {
+  const flat = s.replace(/\s+/g, ' ').trim()
+  return flat.length <= max ? flat : `${flat.slice(0, max - 1)}…`
+}
+
+interface Manifest {
+  serviceLogs?: string[]
+  services?: ManifestService[]
+  featureName?: string
+  feature?: string
+  featureDir?: string
+  repoPaths?: string[]
+  stoppedEarly?: {
+    reason: 'max-failures' | 'user-pause'
+    failuresAtStop: number
+    suiteTotal: number
+  }
+  healCycleHistory?: Array<{ cycle: number; restarted: string[]; kept: string[] }>
+}
+
+function readManifest(file: string = MANIFEST_PATH): Manifest {
+  try {
+    return JSON.parse(fs.readFileSync(file, 'utf-8')) as Manifest
+  } catch {
+    return {}
+  }
+}
+
+// Matches terminal control sequences: CSI (colors `m`, cursor moves `H`,
+// erases `J`/`K`, …), OSC (`ESC ] … BEL/ST`), charset designation (`ESC ( B`),
+// and keypad-mode toggles (`ESC =`/`ESC >`). Services run under a PTY, so their
+// captured output carries the full set, not just colors.
+// eslint-disable-next-line no-control-regex
+const TERM_ESCAPE_RE = /\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\)|[()][A-Za-z0-9]|[=>])/g
+
+// Strip ANSI/terminal control sequences from a string. Playwright emits color
+// codes in error messages; PTY-captured service logs add cursor moves and
+// erases. Some reporters also emit the bracket form without the escape prefix
+// (`[2m`, `[22m`). All of it is noise in a markdown/log slice read by an agent.
+export function stripAnsi(s: string): string {
+  return s
+    .replace(TERM_ESCAPE_RE, '')
+    .replace(/\[\d+(?:;\d+)*m/g, '')
+}
+
+function normalizeErrorKey(raw: string): string {
+  const cleaned = stripAnsi(raw).replace(/\s+/g, ' ').trim()
+  return cleaned || '(no error)'
+}
+
+// Write a compact map (not a script) for the heal agent: where the feature
+// lives, which repos to edit, what failed, and the exact slice files to read.
+// Keep this literal; inferred target-service hints can mislead when a shared
+// frontend/proxy appears in every slice but the real bug lives downstream.
+export function writeHealIndex(parsed?: {
+  manifest: Manifest
+  summary: EnrichedSummary
+  healIndexPath?: string
+  summaryPath?: string
+  journalPath?: string
+  /**
+   * Failing-slug list from the cycle BEFORE this one. When provided and
+   * non-empty, `writeHealIndex` emits a `## Failure delta vs previous cycle`
+   * section so the agent can see what its prior cycle changed (or didn't).
+   * Empty / omitted on the first cycle of a run.
+   */
+  previousFailingSlugs?: readonly string[]
+}): void {
+  let summary: EnrichedSummary
+  let manifest: Manifest
+  let healIndexPath = HEAL_INDEX_PATH
+  let journalPath = DIAGNOSIS_JOURNAL_PATH
+  if (parsed) {
+    summary = parsed.summary
+    manifest = parsed.manifest
+    healIndexPath = parsed.healIndexPath ?? healIndexPath
+    journalPath = parsed.journalPath ?? (parsed.summaryPath ? journalPathForSummary(parsed.summaryPath) : journalPath)
+  } else {
+    const summaryPath = getSummaryPath()
+    if (!fs.existsSync(summaryPath)) return
+    summary = JSON.parse(fs.readFileSync(summaryPath, 'utf-8')) as EnrichedSummary
+    manifest = readManifest(manifestPathForSummary(summaryPath))
+    healIndexPath = healIndexPathForSummary(summaryPath)
+    journalPath = journalPathForSummary(summaryPath)
+  }
+
+  const failed = Array.isArray(summary.failed) ? summary.failed : []
+  const lines: string[] = []
+
+  lines.push('# Heal Index')
+  lines.push('')
+  if (manifest.stoppedEarly) {
+    const { reason, failuresAtStop, suiteTotal } = manifest.stoppedEarly
+    lines.push(
+      `> Stopped early: ${reason} after ${failuresAtStop} failure${failuresAtStop === 1 ? '' : 's'} (suite has ${suiteTotal} test${suiteTotal === 1 ? '' : 's'}; remaining unrun)`,
+    )
+    lines.push('')
+  }
+  if (manifest.featureDir) {
+    lines.push(`Feature: ${path.relative(ROOT, manifest.featureDir) || manifest.featureDir}`)
+  } else if (manifest.feature ?? manifest.featureName) {
+    if (manifest.feature) {
+      lines.push(`Feature: ${manifest.feature}`)
+    } else if (manifest.featureName) {
+      lines.push(`Feature: ${manifest.featureName}`)
+    }
+  }
+  if (manifest.repoPaths && manifest.repoPaths.length > 0) {
+    lines.push(`Repos:   ${manifest.repoPaths.join(', ')}`)
+  }
+  lines.push('')
+
+  if (failed.length === 0) {
+    lines.push('No failures. Nothing to heal.')
+  } else {
+    lines.push('## Failures')
+    lines.push('')
+    for (const entry of failed) {
+      lines.push(`- **${entry.name}**`)
+      if (entry.error?.message) {
+        const errorMessage = normalizeErrorKey(entry.error.message)
+        lines.push(`  - error: ${truncateOneLine(errorMessage, 400)}`)
+      }
+      if (entry.errorFile) {
+        lines.push(`  - full error: ${entry.errorFile}`)
+      }
+      if (entry.logFiles && entry.logFiles.length > 0) {
+        lines.push(`  - slice: ${entry.logFiles.join(', ')}`)
+      }
+      if (entry.traceSummaryFile) {
+        lines.push(`  - trace: ${entry.traceSummaryFile} — read this for the failing action, page state, failed requests, console errors`)
+      }
+    }
+    lines.push('')
+  }
+
+  // Failure delta vs the previous cycle's failing set. Only emitted when we
+  // actually have a previous cycle to compare against — on the initial run
+  // there's no prior journal entry, so the section is suppressed.
+  // The agent uses this to attribute what its prior turn did or didn't change:
+  //   - still failing: same tests as last cycle — your previous fix didn't help
+  //   - newly failing: regressions you introduced last cycle
+  //   - newly passing: tests your previous fix actually unblocked
+  //
+  // When `previousFailingSlugs` isn't explicitly plumbed in, fall back to the
+  // latest journal iteration's `failingTests` line. The reporter calls
+  // writeHealIndex without orchestrator access, so journal-derived defaults
+  // keep the call sites simple while still giving the agent the delta.
+  const prevSlugs = parsed?.previousFailingSlugs ?? readPreviousFailingSlugsFromJournal(journalPath)
+  if (failed.length > 0 && prevSlugs.length > 0) {
+    const currentSlugs = failed
+      .map((e) => (typeof e.name === 'string' ? e.name : ''))
+      .filter((n) => n.length > 0)
+    const currentSet = new Set(currentSlugs)
+    const previousSet = new Set(prevSlugs)
+    const stillFailing = currentSlugs.filter((s) => previousSet.has(s))
+    const newlyFailing = currentSlugs.filter((s) => !previousSet.has(s))
+    const newlyPassing = prevSlugs.filter((s) => !currentSet.has(s))
+
+    lines.push('## Failure delta vs previous cycle')
+    if (stillFailing.length > 0) {
+      lines.push(`- still failing (${stillFailing.length}): ${stillFailing.join(', ')}`)
+    }
+    if (newlyFailing.length > 0) {
+      lines.push(`- newly failing (${newlyFailing.length}): ${newlyFailing.join(', ')}`)
+    }
+    if (newlyPassing.length > 0) {
+      lines.push(`- newly passing (${newlyPassing.length}): ${newlyPassing.join(', ')}`)
+    }
+    lines.push('')
+  }
+
+  const journalTail = readJournalTail(journalPath)
+  if (journalTail.length > 0) {
+    const parts = journalTail.map((e) => {
+      const iter = e.iteration !== undefined ? `#${e.iteration}` : ''
+      const outcome = e.outcome === null || e.outcome === undefined ? 'pending' : e.outcome
+      const hyp = e.hypothesis ? truncateOneLine(e.hypothesis, 100) : '(no hypothesis)'
+      return `${iter} ${hyp} → ${outcome}`.trim()
+    })
+    lines.push(`Journal: ${parts.join('; ')}.  Full history: \`${path.relative(ROOT, journalPath) || journalPath}\`.`)
+    lines.push('')
+  }
+
+  // Surface the most recent heal-cycle's selective-restart bookkeeping so the
+  // next heal agent knows which services were left warm (no restart, no log
+  // truncation) vs restarted from scratch.
+  const lastCycle = manifest.healCycleHistory?.[manifest.healCycleHistory.length - 1]
+  if (lastCycle && (lastCycle.kept.length > 0 || lastCycle.restarted.length > 0)) {
+    const restarted = lastCycle.restarted.length > 0 ? lastCycle.restarted.join(', ') : '(none)'
+    const kept = lastCycle.kept.length > 0 ? lastCycle.kept.join(', ') : '(none)'
+    lines.push(`Previous cycle #${lastCycle.cycle}: restarted ${restarted}; kept warm: ${kept}.`)
+    lines.push('')
+  }
+
+  fs.mkdirSync(path.dirname(healIndexPath), { recursive: true })
+  const tmp = `${healIndexPath}.tmp`
+  fs.writeFileSync(tmp, lines.join('\n'))
+  fs.renameSync(tmp, healIndexPath)
+}
+
+// ─── Journal append (runner-side) ───────────────────────────────────────────
+//
+// The runner pre-seeds the iteration heading and the fields it already knows
+// (feature, failingTests, timestamp, signal, fix.file, outcome: pending) so
+// the agent doesn't have to spend tokens writing ceremony boilerplate. The
+// agent normally supplies `hypothesis` (and optionally `fix.description`) in
+// the signal-body JSON it wrote to `.restart` / `.rerun`; `.none` records a
+// runner-side no-signal timeout or exit.
+
+export interface JournalAppendInput {
+  signal: '.restart' | '.rerun' | 'none'
+  hypothesis?: string
+  filesChanged?: string[]
+  fixDescription?: string
+  // Unified-diff content (concatenated across the feature's repos) for the
+  // agent's edit window. Written into a `### Diff` subsection beneath the
+  // structured fields; truncated to MAX_JOURNAL_DIFF_BYTES on write.
+  diffContent?: string
+  runId?: string
+  // When provided, overrides the global manifest/summary lookup so the
+  // orchestrator can append from a per-run dir without the runner-side
+  // singletons getting in the way.
+  manifestPath?: string
+  summaryPath?: string
+  journalPath?: string
+}
+
+export type JournalOutcome = 'all_passed' | 'partial' | 'no_change' | 'regression'
+
+export interface SummaryForJournalOutcome {
+  failed?: Array<{ name?: unknown }>
+}
+
+function failedNamesFromSummary(summary: SummaryForJournalOutcome): string[] {
+  return Array.isArray(summary.failed)
+    ? summary.failed
+        .map((f) => f.name)
+        .filter((n): n is string => typeof n === 'string' && n.length > 0)
+    : []
+}
+
+export function classifyJournalOutcome(
+  before: SummaryForJournalOutcome,
+  after: SummaryForJournalOutcome,
+): JournalOutcome {
+  const beforeNames = new Set(failedNamesFromSummary(before))
+  const afterNames = new Set(failedNamesFromSummary(after))
+  if (afterNames.size === 0) return 'all_passed'
+
+  let fixed = 0
+  for (const name of beforeNames) {
+    if (!afterNames.has(name)) fixed += 1
+  }
+  let introduced = 0
+  for (const name of afterNames) {
+    if (!beforeNames.has(name)) introduced += 1
+  }
+
+  if (introduced > 0 || afterNames.size > beforeNames.size) return 'regression'
+  if (fixed > 0) return 'partial'
+  return 'no_change'
+}
+
+export interface JournalOutcomeUpdateInput {
+  journalPath: string
+  runId?: string
+  outcome: JournalOutcome
+}
+
+export function updateLatestPendingJournalOutcome(input: JournalOutcomeUpdateInput): boolean {
+  let raw: string
+  try {
+    raw = fs.readFileSync(input.journalPath, 'utf-8')
+  } catch {
+    return false
+  }
+
+  const lines = raw.split('\n')
+  const sectionStarts: number[] = []
+  const headingRe = /^##\s+Iteration\s+\d+\s+[—-]\s+.+?\s*$/
+  for (let i = 0; i < lines.length; i++) {
+    if (headingRe.test(lines[i])) sectionStarts.push(i)
+  }
+
+  for (let s = sectionStarts.length - 1; s >= 0; s--) {
+    const start = sectionStarts[s]
+    const end = sectionStarts[s + 1] ?? lines.length
+    const section = lines.slice(start, end)
+    if (input.runId && !section.some((line) => line.trim() === `- run: ${input.runId}`)) {
+      continue
+    }
+    const outcomeOffset = section.findIndex((line) => /^\s*-\s+outcome:\s*(pending|null)?\s*$/.test(line))
+    if (outcomeOffset === -1) continue
+    lines[start + outcomeOffset] = `- outcome: ${input.outcome}`
+    const tmpPath = `${input.journalPath}.tmp`
+    fs.writeFileSync(tmpPath, lines.join('\n'))
+    fs.renameSync(tmpPath, input.journalPath)
+    return true
+  }
+  return false
+}
+
+export function nextIterationNumber(journalPath: string = DIAGNOSIS_JOURNAL_PATH): number {
+  try {
+    const raw = fs.readFileSync(journalPath, 'utf-8')
+    const entries = parseJournalMarkdown(raw)
+    const max = entries.reduce(
+      (m, e) => (typeof e.iteration === 'number' && e.iteration > m ? e.iteration : m),
+      0,
+    )
+    return max + 1
+  } catch {
+    return 1
+  }
+}
+
+interface ManifestForJournal {
+  feature?: string
+  featureName?: string
+}
+
+function readManifestFrom(file: string): ManifestForJournal {
+  try {
+    return JSON.parse(fs.readFileSync(file, 'utf-8')) as ManifestForJournal
+  } catch {
+    return {}
+  }
+}
+
+function readFeatureNameFromManifest(file: string): string | undefined {
+  const manifest = readManifestFrom(file)
+  return manifest.feature ?? manifest.featureName
+}
+
+function appendJournalSection(journalPath: string, section: string[]): void {
+  fs.mkdirSync(path.dirname(journalPath), { recursive: true })
+  const header = fs.existsSync(journalPath)
+    ? ''
+    : '# Diagnosis Journal\n\n'
+  fs.appendFileSync(journalPath, header + section.join('\n'))
+}
+
+export function appendJournalIteration(input: JournalAppendInput): void {
+  const hypothesis = input.hypothesis?.trim()
+  if (!hypothesis) return // Nothing meaningful to record — skip.
+
+  const manifestPath = input.manifestPath ?? MANIFEST_PATH
+  const summaryPath = input.summaryPath ?? getSummaryPath()
+  const journalPath = input.journalPath ?? DIAGNOSIS_JOURNAL_PATH
+
+  const featureName = readFeatureNameFromManifest(manifestPath)
+
+  let failingTests = ''
+  try {
+    const summary = JSON.parse(fs.readFileSync(summaryPath, 'utf-8')) as {
+      failed?: FailedEntry[]
+    }
+    const failed = Array.isArray(summary.failed) ? summary.failed : []
+    failingTests = failed
+      .map((f) => f.name)
+      .filter((n): n is string => typeof n === 'string' && n.length > 0)
+      .join(', ')
+  } catch {
+    /* no summary — leave failingTests empty */
+  }
+
+  const fixFile = Array.isArray(input.filesChanged)
+    ? input.filesChanged.filter((f) => typeof f === 'string').join(', ')
+    : ''
+
+  const iteration = nextIterationNumber(journalPath)
+  const section: string[] = []
+  section.push(`## Iteration ${iteration} — ${new Date().toISOString()}`)
+  section.push('')
+  if (input.runId) section.push(`- run: ${input.runId}`)
+  if (featureName) section.push(`- feature: ${featureName}`)
+  if (failingTests) section.push(`- failingTests: ${failingTests}`)
+  section.push(`- hypothesis: ${truncateOneLine(hypothesis, 400)}`)
+  if (fixFile) section.push(`- fix.file: ${fixFile}`)
+  if (input.fixDescription) {
+    section.push(`- fix.description: ${truncateOneLine(input.fixDescription, 400)}`)
+  }
+  section.push(`- signal: ${input.signal}`)
+  section.push('- outcome: pending')
+  section.push('')
+
+  // Diff content lives in its own subsection — a `- fix.diff:` field line
+  // can't carry multi-line content without breaking the per-line field
+  // parser. The fenced block is `diff`-tagged so editors and the agent both
+  // get syntax cues.
+  const diffContent = input.diffContent?.trim()
+  if (diffContent) {
+    section.push('### Diff')
+    section.push('')
+    section.push('```diff')
+    section.push(truncateDiffForJournal(diffContent))
+    section.push('```')
+    // The journal block is capped for readability; when the diff overflows it,
+    // persist the full patch and point the agent at it so no edit context is
+    // lost across cycles.
+    if (Buffer.byteLength(diffContent, 'utf-8') > MAX_JOURNAL_DIFF_BYTES) {
+      const patchPath = writeFullDiffPatch(journalPath, iteration, diffContent)
+      if (patchPath) section.push(`Full diff: ${patchPath}`)
+    }
+    section.push('')
+  }
+
+  appendJournalSection(journalPath, section)
+}

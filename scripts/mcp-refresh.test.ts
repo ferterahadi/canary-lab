@@ -56,7 +56,7 @@ describe('refreshCanaryLabMcp', () => {
     expect(mocks.execFileSync).toHaveBeenCalledWith('claude', ['mcp', 'remove', 'Canary_Lab', '-s', 'user'], { stdio: 'ignore' })
     expect(mocks.execFileSync).toHaveBeenCalledWith(
       'claude',
-      ['mcp', 'add', '--scope', 'user', 'Canary_Lab', '--', EXEC, CLI, 'mcp', '--profile', 'full'],
+      ['mcp', 'add', '--scope', 'user', 'Canary_Lab', '--', EXEC, CLI, 'mcp', '--profile', 'lifecycle'],
       { stdio: 'ignore' },
     )
     expect(JSON.parse(fs.readFileSync(desktopConfigPath, 'utf-8')).mcpServers['Canary_Lab'].command).toBe(EXEC)
@@ -86,7 +86,7 @@ describe('refreshCanaryLabMcp', () => {
     expect(mocks.execFileSync).toHaveBeenCalledWith('claude', ['mcp', 'remove', 'canary-lab', '-s', 'user'], { stdio: 'ignore' })
     expect(mocks.execFileSync).toHaveBeenCalledWith(
       'claude',
-      ['mcp', 'add', '--scope', 'user', 'Canary_Lab', '--', EXEC, CLI, 'mcp', '--profile', 'full'],
+      ['mcp', 'add', '--scope', 'user', 'Canary_Lab', '--', EXEC, CLI, 'mcp', '--profile', 'lifecycle'],
       { stdio: 'ignore' },
     )
     // Desktop: legacy key gone, new key written.

@@ -3,28 +3,30 @@ import fs from 'fs'
 import path from 'path'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
-import type { RunStore } from '../lib/run-store'
-import type { RunDetail, RunStoreEvent } from '../lib/run-store'
-import type { ExternalHealBroker } from '../lib/external-heal-broker'
-import type { ExternalHealClientKind } from '../lib/runtime/manifest'
+import type { RunStore } from '../src/features/runs/logic/run-store'
+import type { RunDetail, RunStoreEvent } from '../src/features/runs/logic/run-store'
+import type { ExternalHealBroker } from '../src/features/runs/logic/heal/external-heal-broker'
+import type { ClientKind } from '../../../shared/run-mode'
 import {
+  buildExternalFailureDetail,
   buildExternalHealContext,
-  buildExternalRunSnapshot,
+  buildExternalRunSnapshotSlim,
   normalizeRunCounts,
+  slimRepeatHealContext,
   writeHealSignal,
   type ExternalHealContext,
   type NormalizedRunCounts,
-} from '../lib/external-heal-surface'
-import { loadFeatures } from '../lib/feature-loader'
-import { isHealClaimAllowed } from '../lib/heal-claim-policy'
-import { computePortPreflight } from '../lib/runtime/port-preflight'
+} from '../src/features/runs/logic/heal/external-heal-surface'
+import { loadFeatures } from '../src/features/config/logic/feature-loader'
+import { isHealClaimAllowed } from '../src/features/runs/logic/heal/heal-claim-policy'
+import { computePortPreflight } from '../src/features/runs/logic/runtime/port-preflight'
 import {
   createVerificationConfig,
   getVerificationConfig,
   listVerificationConfigs,
   updateVerificationConfig,
   type ResolveVerificationInput,
-} from '../lib/verification'
+} from '../src/features/coverage/logic/verification'
 import {
   applyExternalDraftFiles,
   captureFeatureEnvFiles,
@@ -34,8 +36,25 @@ import {
   getFeatureEnvsetSummary,
   getFeatureRepoStatus,
   writeFeatureDoc,
+  deleteFeatureDoc,
   type EnvFileSource,
-} from '../lib/feature-authoring'
+} from '../src/features/config/logic/feature-authoring'
+import {
+  FeatureNotFoundError,
+  clearPrdSummary,
+  computeFeatureCoverage,
+  listFeatureDocs,
+} from '../src/features/coverage/logic/coverage/service'
+import { CoverageJobRunStore } from '../src/features/coverage/logic/coverage/jobs/store'
+import { CoverageJobConflictError } from '../src/features/coverage/logic/coverage/jobs/runner'
+import {
+  startExternalCoverage,
+  submitExternalCoverage,
+  startExternalSummary,
+  submitExternalSummary,
+} from '../src/features/coverage/logic/coverage/jobs/external'
+import type { ParsedRequirement } from '../src/features/coverage/logic/coverage/prd-summary'
+import type { ProposedMapping, SummaryState } from '../../../shared/coverage/types'
 import {
   createDraft,
   paths as draftPaths,
@@ -43,7 +62,7 @@ import {
   writeDraft,
   type DraftRecord,
   type ExternalDraftStage,
-} from '../lib/draft-store'
+} from '../src/features/wizard/logic/draft-store'
 import {
   appendEvaluationExportLog,
   createEvaluationExportTask,
@@ -55,8 +74,8 @@ import {
   readEvaluationExportZip,
   writeEvaluationExportZip,
   type EvaluationExportTaskRecord,
-} from '../lib/evaluation-export-store'
-import { buildEvaluationExportArchive } from '../lib/evaluation-export-archive'
+} from '../src/features/evaluation/logic/evaluation-export-store'
+import { buildEvaluationExportArchive } from '../src/features/evaluation/logic/evaluation-export-archive'
 import {
   applyEvaluationTextSlotRewrite,
   buildTestReviewPacket,
@@ -64,15 +83,19 @@ import {
   evaluationTextSlots,
   normalizeEvaluationRewrite,
   type EvaluationRewrite,
-} from '../lib/test-review-export'
+} from '../src/features/evaluation/logic/test-review-export'
 import {
   isActiveRunStatus,
   isTerminalRunStatus,
   deriveRunActionAvailability,
 } from '../../../shared/run-state'
-import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../lib/workspace-events'
-import type { PortifyManifest } from '../lib/runtime/portify/types'
-import { overlayExists as portifyOverlayExists } from '../lib/runtime/portify/overlay'
+import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../src/shared/workspace-events'
+import type {
+  PortifyManifest,
+  StartExternalPortifyInput,
+  StartExternalPortifyResult,
+} from '../src/features/portify/logic/runtime/types'
+import { overlayExists as portifyOverlayExists } from '../src/features/portify/logic/runtime/overlay'
 
 // Every Canary Lab MCP tool is a thin wrapper around an existing internal
 // helper or REST handler. The translation pattern: validate input via zod,
@@ -85,6 +108,45 @@ import { overlayExists as portifyOverlayExists } from '../lib/runtime/portify/ov
 const evaluationTextSlotInput = z.object({
   id: z.string(),
   text: z.string(),
+})
+
+// One mapping the offloaded client produces for submit_external_coverage —
+// matches the internal annotate output shape (coverage-annotate.schema.json).
+const coverageMappingInput = z.object({
+  testName: z.string().describe('Exact test name as given in the start context.'),
+  requirements: z.array(z.string()).describe('Requirement id(s) this test verifies (e.g. ["R1"]). Unknown ids are dropped.'),
+  pathTypes: z.array(z.enum(['happy', 'sad', 'edge'])).optional(),
+  variants: z.array(z.string()).optional().describe('Variant value(s) this test exercises (e.g. ["email"]), from the feature\'s variant dimension. Values outside it are dropped. Omit for a variant-agnostic test.'),
+  file: z.string().optional().describe('Relative spec path; omit and Canary resolves it by test name.'),
+  rationale: z.string().optional(),
+  confidence: z.number().optional(),
+})
+
+// One requirement an offloaded client proposes for an external PRD summary —
+// mirrors prompts/prd-summary.schema.json (the shape the returned prompt asks
+// for). Canary reconciles ids against the prior summary; never trust the agent's
+// echoed id to renumber the spine.
+const summaryRequirementInput = z.object({
+  id: z.string().optional().describe('Echo a prior requirement id to PRESERVE it; omit for a new requirement.'),
+  kind: z.enum(['functional', 'non-functional']).optional(),
+  title: z.string().describe('Short "it should …" title.'),
+  text: z.string().describe('The requirement statement.'),
+  happyPath: z.string().optional(),
+  unhappyPath: z.string().optional(),
+  pathTypes: z.array(z.enum(['happy', 'sad', 'edge'])).describe('At least one of happy/sad/edge.'),
+  variants: z.array(z.string()).optional().describe('Variant value(s) this requirement must hold across (≥2 of the feature\'s variantDimension values, e.g. ["email","whatsapp"]). Omit for a single-value / variant-agnostic requirement.'),
+  variantsNA: z.array(z.object({ variant: z.string(), reason: z.string() })).optional().describe('Variants from `variants` with NO testable surface (e.g. {variant:"line",reason:"no broadcast endpoint"}). Excluded from coverage + shown as N/A. Only when you confirmed the surface is absent — not merely untested.'),
+  strictnessLadder: z.array(z.object({
+    tier: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)]),
+    description: z.string(),
+  })).optional(),
+})
+
+// The feature-level variant dimension (D1) an offloaded client may declare on
+// submit_external_summary — mirrors prompts/prd-summary.schema.json.
+const variantDimensionInput = z.object({
+  name: z.string().describe('Lower-case single-token dimension name (e.g. "channel").'),
+  values: z.array(z.string()).describe('Closed set of values a requirement may span (≥2, e.g. ["email","whatsapp","call","line"]).'),
 })
 
 const evaluationRewriteInput = z.object({
@@ -127,7 +189,7 @@ export interface CanaryLabMcpDeps {
     healAgent?: {
       kind: 'external'
       sessionId: string
-      clientKind: 'claude-cli' | 'claude-desktop' | 'codex-cli' | 'codex-desktop' | 'other'
+      clientKind: ClientKind
       clientVersion?: string
       conversationName?: string
       claimable?: boolean
@@ -140,7 +202,7 @@ export interface CanaryLabMcpDeps {
     healAgent: {
       kind: 'external'
       sessionId: string
-      clientKind: 'claude-cli' | 'claude-desktop' | 'codex-cli' | 'codex-desktop' | 'other'
+      clientKind: ClientKind
       clientVersion?: string
       conversationName?: string
       claimable?: boolean
@@ -171,26 +233,54 @@ export interface CanaryLabMcpDeps {
   ) => Promise<{ statusCode: number; body: unknown }>
   /** Port-ification workflow (make a feature's apps use injectable ports).
    *  These reuse the in-process portify runner + store behind routes/portify.ts;
-   *  the start/save/cancel calls throw with a `statusCode` the tools surface. */
-  startPortify?: (feature: string, agent?: 'claude' | 'codex', maxAttempts?: number) => Promise<{ workflowId: string }>
+   *  the save/cancel calls throw with a `statusCode` the tools surface. The
+   *  agent-spawning start/revise are GUI-only (REST) — the MCP surface is
+   *  external-producer only (the calling client does the edits itself). */
+  /** External producer: set up the worktree, park at `editing`, and hand the
+   *  external client the edit paths + the task prompt. No local agent is spawned —
+   *  the client (running in the user's own Claude/Codex) edits the worktree in place. */
+  startExternalPortify?: (input: StartExternalPortifyInput) => Promise<StartExternalPortifyResult>
+  /** External producer: verify the client's in-place edits (double-boot) and park
+   *  at ready-to-save (pass) or back at editing (fail). */
+  submitExternalPortify?: (workflowId: string) => Promise<PortifyManifest>
   getPortify?: (workflowId: string) => PortifyManifest | null
   savePortify?: (workflowId: string) => Promise<PortifyManifest>
   cancelPortify?: (workflowId: string) => Promise<PortifyManifest>
-  revisePortify?: (workflowId: string, feedback: string) => Promise<PortifyManifest>
+  /** Un-portify a saved feature: revert its config (snapshot or legacy strip) +
+   *  delete the overlay. Mirrors DELETE /api/features/:name/portify-overlay. */
+  removePortification?: (feature: string) => { name: string; portified: boolean; reverted: boolean }
   workspaceEvents?: WorkspaceEventPublisher
 }
 
-const CLIENT_KIND = z.enum(['claude-cli', 'claude-desktop', 'codex-cli', 'codex-desktop', 'other'])
+const CLIENT_KIND = z.enum(['claude', 'codex', 'claude-pty', 'codex-pty', 'other'])
 const SIGNAL_KIND = z.enum(['rerun', 'restart', 'heal'])
 const HEAL_STATUS = z.enum(['connected', 'waiting', 'healing', 'running-tests', 'paused', 'disconnected'])
 const EXTERNAL_DRAFT_STAGE = z.enum(['scaffolding', 'authoring-tests', 'validating', 'ready', 'applied', 'error'])
 const CLAIM_SUPPRESSED_MESSAGE =
-  'Heal claiming is restricted to Claude/Codex Desktop clients, so this run was started without a heal claim. It still runs — drive heal from Desktop or the web UI.'
-const WAIT_FOR_HEAL_TASK_DEFAULT_TIMEOUT_MS = 15 * 60 * 1000
+  'Heal claiming is blocked for runner-spawned agents (the benchmark/portify PTY sessions Canary Lab launches itself), so this run was started without a heal claim. It still runs — drive heal from an interactive Claude/Codex client or the web UI.'
+// `timeout_ms` is the per-call block budget — how long ONE wait_for_heal_task
+// request may hold open. It is NOT the overall heal budget: when the window
+// elapses with the run still active, the call returns `still_waiting` and the
+// agent immediately re-calls. This keeps every request well under any client
+// JSON-RPC request timeout (the cause of the -32001 the long-poll used to hit),
+// while the logical wait stays unbounded across re-calls.
+const WAIT_FOR_HEAL_TASK_DEFAULT_TIMEOUT_MS = 90 * 1000
 const WAIT_FOR_HEAL_TASK_MAX_TIMEOUT_MS = 60 * 60 * 1000
+// Hard cap on a single block regardless of the requested timeout_ms. Large
+// requested values are clamped to this (not rejected) so older clients keep
+// working — they just get a `still_waiting` to loop on sooner.
+const WAIT_FOR_HEAL_TASK_WINDOW_MS = 120 * 1000
 
-export const CANARY_LAB_MCP_PROFILES = ['repair', 'verify', 'author', 'full'] as const
+export const CANARY_LAB_MCP_PROFILES = ['repair', 'verify', 'author', 'portify', 'lifecycle', 'full'] as const
 export type CanaryLabMcpProfile = typeof CANARY_LAB_MCP_PROFILES[number]
+
+// The default profile when a client connects without an explicit one (bare
+// `canary-lab mcp`, the registered Desktop/CLI invocation, a profile-less
+// /mcp request). `lifecycle` is the everyday end-to-end surface (repair +
+// author + verify + export) MINUS portify — the specialized, infrequent
+// port-injection workflow. Portify clients opt in with `--profile portify`
+// (or `full`), keeping the common surface leaner in tools + instructions.
+export const DEFAULT_CANARY_LAB_MCP_PROFILE: CanaryLabMcpProfile = 'lifecycle'
 
 export type CanaryLabMcpToolName =
   | 'list_features'
@@ -206,6 +296,14 @@ export type CanaryLabMcpToolName =
   | 'get_verification_result'
   | 'create_feature'
   | 'write_feature_doc'
+  | 'delete_feature_doc'
+  | 'get_feature_coverage'
+  | 'list_feature_docs'
+  | 'clear_prd_summary'
+  | 'start_external_summary'
+  | 'submit_external_summary'
+  | 'start_external_coverage'
+  | 'submit_external_coverage'
   | 'get_feature_envset_summary'
   | 'capture_feature_env_files'
   | 'write_envset'
@@ -222,6 +320,7 @@ export type CanaryLabMcpToolName =
   | 'update_external_draft_stage'
   | 'apply_external_draft'
   | 'get_heal_context'
+  | 'get_failure_detail'
   | 'start_run'
   | 'boot_services'
   | 'pause_run'
@@ -233,11 +332,12 @@ export type CanaryLabMcpToolName =
   | 'wait_for_heal_task'
   | 'signal_run'
   | 'handoff_heal'
-  | 'start_portify'
+  | 'start_external_portify'
+  | 'submit_external_portify'
   | 'get_portify'
   | 'save_portify'
   | 'cancel_portify'
-  | 'revise_portify'
+  | 'remove_portification'
   | 'list_portify_status'
 
 const REPAIR_TOOLS = [
@@ -247,6 +347,7 @@ const REPAIR_TOOLS = [
   'boot_services',
   'wait_for_heal_task',
   'get_heal_context',
+  'get_failure_detail',
   'get_run_snapshot',
   'get_run',
   'signal_run',
@@ -278,6 +379,14 @@ const AUTHOR_TOOLS = [
   'get_run_snapshot',
   'create_feature',
   'write_feature_doc',
+  'delete_feature_doc',
+  'get_feature_coverage',
+  'list_feature_docs',
+  'clear_prd_summary',
+  'start_external_summary',
+  'submit_external_summary',
+  'start_external_coverage',
+  'submit_external_coverage',
   'get_feature_envset_summary',
   'capture_feature_env_files',
   'write_envset',
@@ -293,26 +402,37 @@ const AUTHOR_TOOLS = [
   'start_external_draft',
   'update_external_draft_stage',
   'apply_external_draft',
-  'start_portify',
+] as const satisfies readonly CanaryLabMcpToolName[]
+
+// Portify is a specialized, infrequent operation (make a feature's ports
+// injectable so it can boot concurrently). It lives in its own profile so the
+// everyday authoring/lifecycle surface stays lean; clients that need it connect
+// with profile=portify (or full).
+const PORTIFY_TOOLS = [
+  'list_features',
+  'list_runs',
+  'start_external_portify',
+  'submit_external_portify',
   'get_portify',
   'save_portify',
   'cancel_portify',
-  'revise_portify',
+  'remove_portification',
   'list_portify_status',
 ] as const satisfies readonly CanaryLabMcpToolName[]
 
-// Tools that exist only in the `full` profile — everything else is composed
-// from the per-workflow profiles above.
+// Tools that exist only in the `full`/`lifecycle` profiles — everything else is
+// composed from the per-workflow profiles above.
 const FULL_ONLY_TOOLS = [
   'get_run_actions',
   'claim_heal',
   'release_heal',
 ] as const satisfies readonly CanaryLabMcpToolName[]
 
-// `full` is the deduplicated union of every profile plus the full-only tools.
-// Defining it as a union means adding a tool to any profile surfaces it in
-// `full` automatically — no second edit, no drift, no duplicate entries.
-const FULL_TOOLS: readonly CanaryLabMcpToolName[] = Array.from(
+// `lifecycle` is the end-to-end authoring → run → heal → verify → export surface
+// MINUS portify — the everyday one-session profile. `full` is `lifecycle` plus
+// portify. Both are deduplicated unions, so adding a tool to any workflow array
+// surfaces it automatically — no second edit, no drift, no duplicate entries.
+const LIFECYCLE_TOOLS: readonly CanaryLabMcpToolName[] = Array.from(
   new Set<CanaryLabMcpToolName>([
     ...REPAIR_TOOLS,
     ...VERIFY_TOOLS,
@@ -321,10 +441,19 @@ const FULL_TOOLS: readonly CanaryLabMcpToolName[] = Array.from(
   ]),
 )
 
+const FULL_TOOLS: readonly CanaryLabMcpToolName[] = Array.from(
+  new Set<CanaryLabMcpToolName>([
+    ...LIFECYCLE_TOOLS,
+    ...PORTIFY_TOOLS,
+  ]),
+)
+
 const TOOLS_BY_PROFILE: Record<CanaryLabMcpProfile, readonly CanaryLabMcpToolName[]> = {
   repair: REPAIR_TOOLS,
   verify: VERIFY_TOOLS,
   author: AUTHOR_TOOLS,
+  portify: PORTIFY_TOOLS,
+  lifecycle: LIFECYCLE_TOOLS,
   full: FULL_TOOLS,
 }
 
@@ -333,7 +462,7 @@ export function isCanaryLabMcpProfile(value: string | undefined): value is Canar
 }
 
 export function normalizeCanaryLabMcpProfile(value: string | undefined): CanaryLabMcpProfile | null {
-  if (!value) return 'full'
+  if (!value) return DEFAULT_CANARY_LAB_MCP_PROFILE
   return isCanaryLabMcpProfile(value) ? value : null
 }
 
@@ -343,7 +472,24 @@ export function toolsForCanaryLabMcpProfile(profile: CanaryLabMcpProfile): reado
 
 export interface CanaryLabMcpToolOptions {
   profile?: CanaryLabMcpProfile
-  defaultClientKind?: ExternalHealClientKind
+  defaultClientKind?: ClientKind
+}
+
+/** Recovery steering for a BLOCKED coverage ledger. The no-source-doc case is the only
+ *  one that needs the user: grounded coverage must come from a real PRD/spec, so ASK for
+ *  it — never invent one or silently pull an external file. */
+function coverageBlockedNext(feature: string, summary: SummaryState, sourceDocCount: number): string {
+  if (summary === 'generating') {
+    return `A summary/coverage job is already running for "${feature}" (single-flight). Wait for it to finish, then get_feature_coverage("${feature}").`
+  }
+  if (summary === 'stale') {
+    return `PRD summary for "${feature}" is stale (see state.drift.changedDocs). YOU refresh it: start_external_summary("${feature}"), read the source docs in the returned prompt, submit_external_summary (ids preserved), then start_external_coverage("${feature}") + submit_external_coverage to remap.`
+  }
+  // summary 'absent'
+  if (sourceDocCount === 0) {
+    return `No source doc on file for "${feature}", so there is nothing to ground coverage on. ASK THE USER to attach or paste the PRD/spec in the chat (do NOT invent one or pull an external file). Once they provide it, write_feature_doc("${feature}", "<name>.md", <content>) then start_external_summary("${feature}") — read the docs yourself and submit_external_summary.`
+  }
+  return `Source docs exist for "${feature}" but no PRD summary yet. YOU author it: start_external_summary("${feature}"), read the source docs in the returned prompt, submit_external_summary, then start_external_coverage("${feature}") + submit_external_coverage to map tests → requirements.`
 }
 
 export function registerCanaryLabTools(
@@ -351,7 +497,7 @@ export function registerCanaryLabTools(
   deps: CanaryLabMcpDeps,
   opts: CanaryLabMcpToolOptions = {},
 ): void {
-  const profile = opts.profile ?? 'full'
+  const profile = opts.profile ?? DEFAULT_CANARY_LAB_MCP_PROFILE
   const defaultClientKind = opts.defaultClientKind ?? 'other'
   const clientKindInput = CLIENT_KIND.default(defaultClientKind)
   const enabled = new Set<CanaryLabMcpToolName>(TOOLS_BY_PROFILE[profile])
@@ -383,30 +529,40 @@ export function registerCanaryLabTools(
   })
 
   registerTool('list_runs', {
-    description: 'List Canary Lab runs, newest first. Optionally filter by feature.',
+    description: 'List Canary Lab runs, newest first (default 20 — raise `limit` for more history). Optionally filter by feature. Each row is already slim (id, feature, status, timestamps); fetch one run\'s detail with get_run.',
     inputSchema: {
       feature: z.string().optional().describe('Feature name. Omit to list across all features.'),
+      limit: z.number().int().positive().max(200).default(20).describe('Max runs to return, newest first. Default 20.'),
     },
-  }, async ({ feature }) => {
-    return asJsonResult(deps.store.list(feature ? { feature } : {}))
+  }, async ({ feature, limit }) => {
+    return asJsonResult(deps.store.list(feature ? { feature } : {}).slice(0, limit))
   })
 
   registerTool('get_run', {
-    description: 'Fetch the full detail for one run: manifest, summary, lifecycle events, playwright artifacts.',
-    inputSchema: { runId: z.string() },
-  }, async ({ runId }) => {
+    description: 'Fetch one run\'s core detail: manifest + summary + artifact base URL. The bulky raw arrays (lifecycleEvents, playwrightArtifacts, playbackEvents) are OMITTED by default to protect context — pass includeRaw:true to inline them when you need them. Never poll this to wait for a result; block on wait_for_heal_task.',
+    inputSchema: {
+      runId: z.string(),
+      includeRaw: z.boolean().default(false).describe('Inline the full lifecycleEvents[] + playwrightArtifacts[] + playbackEvents[]. Off by default (they can be large); call again with includeRaw:true when you need the raw timeline/artifacts.'),
+    },
+  }, async ({ runId, includeRaw }) => {
     const detail = deps.store.get(runId)
     if (!detail) return errorResult(`run not found: ${runId}`)
-    return asJsonResult(detail)
+    if (includeRaw) return asJsonResult(detail)
+    const { lifecycleEvents: _lifecycleEvents, playwrightArtifacts: _playwrightArtifacts, playbackEvents: _playbackEvents, ...core } = detail
+    return asJsonResult({
+      ...core,
+      artifactsBase: `/api/runs/${encodeURIComponent(runId)}/artifacts/`,
+      raw: { omitted: ['lifecycleEvents', 'playwrightArtifacts', 'playbackEvents'], hint: 'call get_run with includeRaw:true to inline them' },
+    })
   })
 
   registerTool('get_run_snapshot', {
-    description: 'Fetch the verbose external-heal run snapshot: summary, full counts, failed tests, heal index, journal, artifact base, and heal prompt map.',
+    description: 'Verbose external-heal run snapshot: summary, full counts, failed tests, artifact base, heal prompt map, and the heal index + journal as on-disk PATHS (Read them for the full markdown — never inlined, so a long heal loop can\'t bloat the response). For verbose debugging only; never poll it to wait — block on wait_for_heal_task.',
     inputSchema: { runId: z.string() },
   }, async ({ runId }) => {
     const detail = deps.store.get(runId)
     if (!detail) return errorResult(`run not found: ${runId}`)
-    return asJsonResult(buildExternalRunSnapshot({
+    return asJsonResult(buildExternalRunSnapshotSlim({
       detail,
       logsDir: deps.store.logsDir,
       projectRoot: deps.projectRoot,
@@ -466,7 +622,10 @@ export function registerCanaryLabTools(
     const feature = loadFeatures(deps.featuresDir).find((candidate) => candidate.name === featureId)
     if (!feature) return errorResult(`feature not found: ${featureId}`)
     try {
-      return asJsonResult(createVerificationConfig(feature, { name, targetUrls, playwrightEnvsetId }))
+      const created = createVerificationConfig(feature, { name, targetUrls, playwrightEnvsetId })
+      // Refresh an open Verify dialog on other clients without a reopen.
+      publishWorkspaceEvent(deps.workspaceEvents, { type: 'verification-config-changed', feature: featureId })
+      return asJsonResult(created)
     } catch (err) {
       return errorResult(err instanceof Error ? err.message : String(err))
     }
@@ -487,6 +646,7 @@ export function registerCanaryLabTools(
     try {
       const config = updateVerificationConfig(feature, configId, { name, targetUrls, playwrightEnvsetId })
       if (!config) return errorResult(`verification config not found: ${configId}`)
+      publishWorkspaceEvent(deps.workspaceEvents, { type: 'verification-config-changed', feature: featureId })
       return asJsonResult(config)
     } catch (err) {
       return errorResult(err instanceof Error ? err.message : String(err))
@@ -592,7 +752,7 @@ export function registerCanaryLabTools(
 
   registerTool('write_feature_doc', {
     description:
-      'Write a prose doc (distilled session, plan, notes) into a feature\'s docs/ directory — the home for feature-scoped documentation. Create-or-replace: pick a descriptive relPath (e.g. "2026-05-28-line-integration-notes.md"); re-writing the same path overwrites. Markdown only (.md/.markdown). Use this for "add this plan/distillation to feature <name>".',
+      'Write a prose doc (session, plan, notes) into a feature\'s docs/ dir. Create-or-replace (re-writing the same relPath overwrites); markdown only (.md/.markdown). Use for "add this plan/distillation to feature <name>".',
     inputSchema: {
       feature: z.string().describe('Existing feature name (from list_features).'),
       relPath: z.string().describe('Path relative to the feature docs/ dir, e.g. "notes.md" or "sessions/2026-05-28.md". A leading "docs/" is optional. Must end in .md or .markdown.'),
@@ -604,11 +764,247 @@ export function registerCanaryLabTools(
       { feature, relPath, content },
     )
     if (!result.ok) return errorResult(result.error)
+    // Docs feed the PRD summary; refresh the Docs rail + coverage headline live.
+    publishWorkspaceEvent(deps.workspaceEvents, { type: 'coverage-changed', feature })
     return asJsonResult({ written: true, path: result.writtenPath, relativePath: result.relativePath })
   })
 
+  registerTool('delete_feature_doc', {
+    description:
+      'Delete a SOURCE doc from a feature\'s docs/ dir. Refuses generated artifacts (_prd-* / _coverage-* files canary manages). After removing docs, regenerate the PRD summary so coverage reflects the change.',
+    inputSchema: {
+      feature: z.string().describe('Existing feature name (from list_features).'),
+      relPath: z.string().describe('Path of the source doc relative to docs/, e.g. "notes.md". A leading "docs/" is optional.'),
+    },
+  }, async ({ feature, relPath }) => {
+    const result = deleteFeatureDoc(
+      { projectRoot: deps.projectRoot, featuresDir: deps.featuresDir },
+      { feature, relPath },
+    )
+    if (!result.ok) return errorResult(result.error)
+    publishWorkspaceEvent(deps.workspaceEvents, { type: 'coverage-changed', feature })
+    return asJsonResult({ deleted: true, relativePath: result.relativePath })
+  })
+
+  registerTool('get_feature_coverage', {
+    description:
+      'Get the Semantic Coverage Ledger: PRD requirements → mapped tests → gap type (untested / path-incomplete / covered) with a coverage % (covered ÷ total declared paths) and mapped % (requirements with ≥1 test), per-test strength (strong/solid/basic/shallow from assertion tiers), and docs-drift. DECOUPLED from test runs — measures test→requirement+path mapping, never whether a run passed. Use it to find untested/path-incomplete requirements and shallow tests. When the ledger is BLOCKED (state.coverage:"blocked") it carries a `next:` field with the recovery step; if it says no source doc exists, ASK THE USER to attach/paste the PRD in chat (never invent or pull one) before generating.',
+    inputSchema: { feature: z.string().describe('Existing feature name (from list_features).') },
+  }, async ({ feature }) => {
+    try {
+      const ledger = computeFeatureCoverage({
+        featuresDir: deps.featuresDir,
+        logsDir: deps.store.logsDir,
+        feature,
+      })
+      // Blocked ledger is silent on recovery — every sibling coverage tool returns a
+      // `next:`. Attach one so the agent acts instead of hedging. The no-source-doc case
+      // is the only one that needs a HUMAN step: ask for the doc, don't invent/pull one.
+      if (ledger.state?.coverage === 'blocked') {
+        const sourceDocCount = listFeatureDocs(deps.featuresDir, feature).sourceDocCount
+        return asJsonResult({ ...ledger, next: coverageBlockedNext(feature, ledger.state.summary, sourceDocCount) })
+      }
+      return asJsonResult(ledger)
+    } catch (err) {
+      if (err instanceof FeatureNotFoundError) return errorResult(err.message)
+      throw err
+    }
+  })
+
+  registerTool('list_feature_docs', {
+    description:
+      'List the docs in a feature\'s docs/ directory (source docs the user added plus generated _prd-* PRD artifacts), with the PRD summary status and docs-drift flag. The UI Docs tab shows the same list — use this to see what source material the PRD summary was built from before regenerating it.',
+    inputSchema: { feature: z.string().describe('Existing feature name (from list_features).') },
+  }, async ({ feature }) => {
+    try {
+      return asJsonResult(listFeatureDocs(deps.featuresDir, feature))
+    } catch (err) {
+      if (err instanceof FeatureNotFoundError) return errorResult(err.message)
+      throw err
+    }
+  })
+
+  registerTool('clear_prd_summary', {
+    description:
+      'Reset a feature\'s coverage to a blank slate: remove the generated PRD summary + its coverage sidecars (pending mappings, run-state) and strip the @req-*/@path-* tags from the specs (other tags kept; specs revert to pre-coverage shape). Source docs are untouched; the feature returns to the "no summary" state. Returns { removed, untagged } (untagged = specs whose tags were cleared).',
+    inputSchema: { feature: z.string().describe('Existing feature name (from list_features).') },
+  }, async ({ feature }) => {
+    try {
+      const result = clearPrdSummary({ featuresDir: deps.featuresDir, feature })
+      // Coverage badge + spec tags both change; refresh the ledger view and the
+      // tests panel (specs were un-tagged) on every client without a reload.
+      publishWorkspaceEvent(deps.workspaceEvents, { type: 'coverage-changed', feature })
+      publishWorkspaceEvent(deps.workspaceEvents, { type: 'tests-changed', feature })
+      return asJsonResult(result)
+    } catch (err) {
+      if (err instanceof FeatureNotFoundError) return errorResult(err.message)
+      throw err
+    }
+  })
+
+  registerTool('start_external_summary', {
+    description:
+      'Start a PRD-summary pass YOU drive — no local agent. Returns the source docs (paths to read), the previous requirement ids to PRESERVE, and a `prompt`: read each source doc, extract testable requirements, then call submit_external_summary with the requirements[]. Canary reconciles ids against the prior summary (the stable spine) and writes docs/_prd-summary.{json,md} — never re-derives the requirements. Single-flight (rejected if a summary/coverage job is running). No source doc yet → status:"needs-docs" (ASK THE USER for the PRD; do not invent one). This is the FIRST step of coverage — follow it with start_external_coverage. Offload to a background task or fan out across docs when the PRD is large.',
+    inputSchema: {
+      feature: z.string().describe('Existing feature name (from list_features).'),
+      session_id: z.string().describe('Stable id for your conversation — reuse it across calls.'),
+      client_kind: clientKindInput,
+      conversation_name: z.string().optional(),
+      external_session_url: z.string().optional(),
+    },
+  }, async ({ feature, session_id, client_kind, conversation_name, external_session_url }) => {
+    try {
+      const res = startExternalSummary(
+        {
+          featuresDir: deps.featuresDir,
+          logsDir: deps.store.logsDir,
+          feature,
+          sessionId: session_id,
+          clientKind: client_kind,
+          ...(conversation_name ? { conversationName: conversation_name } : {}),
+          ...(external_session_url ? { sessionUrl: external_session_url } : {}),
+        },
+        { store: new CoverageJobRunStore(deps.store.logsDir), workspaceEvents: deps.workspaceEvents },
+      )
+      if (res.kind === 'needs-docs') {
+        return asJsonResult({
+          status: 'needs-docs',
+          feature,
+          next: `No source doc on file for "${feature}". ASK THE USER to attach or paste the PRD/spec (do NOT invent one or pull an external file), then write_feature_doc("${feature}", "<name>.md", <content>) and call start_external_summary again.`,
+        })
+      }
+      return asJsonResult({
+        jobId: res.manifest.jobId,
+        status: res.manifest.status,
+        canaryLabBehavior: 'tracking-only',
+        statusMeaning: 'You read the source docs and propose requirements using context.prompt; Canary spawns no agent — submit_external_summary reconciles ids and writes the summary.',
+        context: res.context,
+        nextSteps: ['submit_external_summary'],
+        next: `Follow context.prompt: read each doc in context.docs, extract requirements (reuse a context.previousRequirementIds id to preserve it), then call submit_external_summary with jobId "${res.manifest.jobId}" and requirements[].`,
+      })
+    } catch (err) {
+      if (err instanceof FeatureNotFoundError) return errorResult(err.message)
+      if (err instanceof CoverageJobConflictError) return errorResult(`${err.message} (existing job ${err.existingJobId})`)
+      throw err
+    }
+  })
+
+  registerTool('submit_external_summary', {
+    description:
+      'Submit your extracted requirements for an external PRD-summary job. Canary reconciles ids against the prior summary (preserving surviving ids; new ones get fresh ids; dropped ones marked deprecated), writes docs/_prd-summary.{json,md}, marks the job done, and recomputes the ledger. Then call start_external_coverage to map tests → requirements.',
+    inputSchema: {
+      jobId: z.string().describe('Job id returned by start_external_summary.'),
+      requirements: z.array(summaryRequirementInput).describe('The testable requirements extracted from the source docs.'),
+      variantDimension: variantDimensionInput.optional().describe('The feature\'s single cross-cutting dimension (channel/tenant/region/...), if it has one. Omit when no dimension applies.'),
+    },
+  }, async ({ jobId, requirements, variantDimension }) => {
+    try {
+      const { manifest, result } = submitExternalSummary(
+        {
+          featuresDir: deps.featuresDir,
+          jobId,
+          requirements: requirements as ParsedRequirement[],
+          ...(variantDimension ? { variantDimension } : {}),
+        },
+        { store: new CoverageJobRunStore(deps.store.logsDir), workspaceEvents: deps.workspaceEvents },
+      )
+      return asJsonResult({
+        jobId: manifest.jobId,
+        feature: manifest.feature,
+        status: manifest.status,
+        requirementCount: result.summary.requirements.length,
+        written: result.written,
+        nextSteps: ['start_external_coverage'],
+        next: `Wrote the PRD summary (${result.summary.requirements.length} requirement(s)). Call start_external_coverage("${manifest.feature}") to map tests → requirements.`,
+      })
+    } catch (err) {
+      if (err instanceof FeatureNotFoundError) return errorResult(err.message)
+      return errorResult(err instanceof Error ? err.message : String(err))
+    }
+  })
+
+  registerTool('start_external_coverage', {
+    description:
+      'Start a coverage mapping pass YOU drive — no local agent. Returns the active requirements, the feature\'s tests (with file paths to read), and a `prompt`: read each test, decide its requirement id(s), then call submit_external_coverage with the mappings. Canary writes the @req-* tags via its canonical tag-writer and recomputes the ledger (never re-derives the mapping). Single-flight (rejected if a coverage job is running). No PRD summary yet → status:"needs-summary" (call start_external_summary first). Offload to a background task or fan out across tests when there are many.',
+    inputSchema: {
+      feature: z.string().describe('Existing feature name (from list_features).'),
+      session_id: z.string().describe('Stable id for your conversation — reuse it across calls.'),
+      client_kind: clientKindInput,
+      conversation_name: z.string().optional(),
+      external_session_url: z.string().optional(),
+    },
+  }, async ({ feature, session_id, client_kind, conversation_name, external_session_url }) => {
+    try {
+      const res = startExternalCoverage(
+        {
+          featuresDir: deps.featuresDir,
+          logsDir: deps.store.logsDir,
+          feature,
+          sessionId: session_id,
+          clientKind: client_kind,
+          ...(conversation_name ? { conversationName: conversation_name } : {}),
+          ...(external_session_url ? { sessionUrl: external_session_url } : {}),
+        },
+        { store: new CoverageJobRunStore(deps.store.logsDir), workspaceEvents: deps.workspaceEvents },
+      )
+      if (res.kind === 'needs-summary') {
+        return asJsonResult({
+          status: 'needs-summary',
+          feature,
+          next: `No PRD summary for "${feature}". Call start_external_summary first (read the docs, submit_external_summary), then start_external_coverage again.`,
+        })
+      }
+      return asJsonResult({
+        jobId: res.manifest.jobId,
+        status: res.manifest.status,
+        canaryLabBehavior: 'tracking-only',
+        statusMeaning: 'You do the mapping using context.prompt; Canary spawns no agent — submit_external_coverage writes the tags + recomputes the ledger.',
+        context: res.context,
+        nextSteps: ['submit_external_coverage'],
+        next: `Follow context.prompt: read each test\'s file, decide its requirement id(s), then call submit_external_coverage with jobId "${res.manifest.jobId}" and mappings[].`,
+      })
+    } catch (err) {
+      if (err instanceof FeatureNotFoundError) return errorResult(err.message)
+      if (err instanceof CoverageJobConflictError) return errorResult(`${err.message} (existing job ${err.existingJobId})`)
+      throw err
+    }
+  })
+
+  registerTool('submit_external_coverage', {
+    description:
+      'Submit your test→requirement mappings for an external coverage job. Canary writes each @req-* tag via its canonical tag-writer (idempotent/additive — never rewrites a test body), marks the job done, and recomputes the ledger; unknown ids/test names are dropped. Then call get_feature_coverage.',
+    inputSchema: {
+      jobId: z.string().describe('Job id returned by start_external_coverage.'),
+      mappings: z.array(coverageMappingInput).describe('One entry per test you could map. Omit tests you cannot confidently map.'),
+    },
+  }, async ({ jobId, mappings }) => {
+    try {
+      const { manifest, result } = submitExternalCoverage(
+        {
+          featuresDir: deps.featuresDir,
+          logsDir: deps.store.logsDir,
+          jobId,
+          mappings: mappings as ProposedMapping[],
+        },
+        { store: new CoverageJobRunStore(deps.store.logsDir), workspaceEvents: deps.workspaceEvents },
+      )
+      return asJsonResult({
+        jobId: manifest.jobId,
+        feature: manifest.feature,
+        status: manifest.status,
+        applied: result.applied.length,
+        coveragePct: result.ledger.coveragePct,
+        nextSteps: ['get_feature_coverage'],
+        next: `Wrote ${result.applied.length} covers tag(s). Call get_feature_coverage("${manifest.feature}") for the updated ledger.`,
+      })
+    } catch (err) {
+      if (err instanceof FeatureNotFoundError) return errorResult(err.message)
+      return errorResult(err instanceof Error ? err.message : String(err))
+    }
+  })
+
   registerTool('get_feature_envset_summary', {
-    description: 'List a feature envset layout, slot targets, and redacted key previews. Secret values are never returned.',
+    description: 'List a feature envset layout, slot targets, redacted key previews, and the feature\'s declared repos (name/localPath/branch — pass repo name to get_feature_repo_status / checkout_feature_repo_branch). Secret values are never returned.',
     inputSchema: { feature: z.string() },
   }, async ({ feature }) => {
     const summary = getFeatureEnvsetSummary({ projectRoot: deps.projectRoot, featuresDir: deps.featuresDir }, feature)
@@ -699,7 +1095,10 @@ export function registerCanaryLabTools(
       { projectRoot: deps.projectRoot, featuresDir: deps.featuresDir },
       { feature, repo, branch, confirm },
     )
-    return isToolErrorPayload(result) ? errorResult(result.error) : asJsonResult(result)
+    if (isToolErrorPayload(result)) return errorResult(result.error)
+    // Branch moved; refresh the feature list + Repos tab git-status row live.
+    publishWorkspaceEvent(deps.workspaceEvents, { type: 'features-changed' })
+    return asJsonResult(result)
   })
 
   registerTool('start_external_evaluation_export', {
@@ -741,13 +1140,9 @@ export function registerCanaryLabTools(
     publishWorkspaceEvent(deps.workspaceEvents, { type: 'evaluation-export-created', task: evaluationExportTaskView(task) })
     return asJsonResult({
       task: evaluationExportTaskView(task),
-      runContext: buildExternalRunSnapshot({
-        detail,
-        logsDir: deps.store.logsDir,
-        projectRoot: deps.projectRoot,
-      }),
       reportSchema: externalEvaluationReportSchema(detail),
-      nextSteps: ['author structured evaluation wording', 'submit_external_evaluation_export'],
+      runSnapshotVia: `get_run_snapshot("${runId}")`,
+      nextSteps: ['call get_run_snapshot(runId) if you need the run summary/failures while authoring', 'author structured evaluation wording', 'submit_external_evaluation_export'],
     })
   })
 
@@ -771,7 +1166,13 @@ export function registerCanaryLabTools(
         ? normalizeEvaluationRewrite(rewrite as EvaluationRewrite, packet)
         : applyEvaluationTextSlotRewrite(deterministicEvaluationRewrite(packet), textSlots!)
       if (!normalizedRewrite) {
-        return errorResult('rewrite must include one case for each evaluated test')
+        const expected = packet.tests.length
+        const received = Array.isArray((rewrite as EvaluationRewrite | undefined)?.cases)
+          ? (rewrite as EvaluationRewrite).cases.length
+          : 0
+        return errorResult(
+          `rewrite.cases must contain exactly ${expected} ${expected === 1 ? 'entry' : 'entries'} — one per evaluated test, in the same order as reportSchema.rewrite.cases (got ${received}). Do NOT merge, dedupe, or drop skipped or duplicate run entries; every run entry needs its own case. Each case requires title, whatWasChecked, whyItMatters, and confidence (all strings).`,
+        )
       }
       const built = await buildEvaluationExportArchive(detail, {
         logsDir: deps.store.logsDir,
@@ -790,7 +1191,19 @@ export function registerCanaryLabTools(
       }
       return asJsonResult({
         ...evaluationExportTaskView(next!),
-        nextSteps: ['download_evaluation_export'],
+        // Compact, chat-ready digest of the rendered evaluation so the agent can
+        // relay the result in the conversation instead of only pointing at the
+        // UI. Kept small (titles + verdicts, not full flow steps); the full
+        // rendered evaluation.html ships via download_evaluation_export.
+        evaluation: {
+          featureTitle: normalizedRewrite.featureTitle ?? next!.feature,
+          summary: normalizedRewrite.summary,
+          cases: normalizedRewrite.cases.map((c) => ({ title: c.title, confidence: c.confidence })),
+        },
+        nextSteps: [
+          'Present this evaluation to the user in chat — the featureTitle, the summary, and the per-case title + confidence verdicts. Do not just say it is available in the UI.',
+          'download_evaluation_export returns the full rendered evaluation.html archive if the user wants the file.',
+        ],
       })
     } catch (err) {
       return errorResult(err instanceof Error ? err.message : String(err))
@@ -864,7 +1277,7 @@ export function registerCanaryLabTools(
         ...(repo.branch ? { branch: repo.branch } : {}),
       })),
       featureName: feature,
-      source: 'external',
+      producer: 'external',
       externalStage: stage as ExternalDraftStage,
       externalClientKind: client_kind,
       externalSessionId: session_id,
@@ -896,7 +1309,7 @@ export function registerCanaryLabTools(
   }, async ({ draftId, stage, message }) => {
     const current = readDraft(deps.store.logsDir, draftId)
     if (!current) return errorResult(`draft not found: ${draftId}`)
-    if ((current.source ?? 'internal') !== 'external') return errorResult('draft is not external-owned')
+    if ((current.producer ?? 'internal') !== 'external') return errorResult('draft is not external-owned')
     const next: DraftRecord = {
       ...current,
       externalStage: stage as ExternalDraftStage,
@@ -920,7 +1333,7 @@ export function registerCanaryLabTools(
   }, async ({ draftId, files }) => {
     const current = readDraft(deps.store.logsDir, draftId)
     if (!current) return errorResult(`draft not found: ${draftId}`)
-    if ((current.source ?? 'internal') !== 'external') return errorResult('draft is not external-owned')
+    if ((current.producer ?? 'internal') !== 'external') return errorResult('draft is not external-owned')
     if (!current.featureName) return errorResult('external draft has no featureName')
     const feature = loadFeatures(deps.featuresDir).find((candidate) => candidate.name === current.featureName)
     if (!feature?.featureDir) return errorResult(`feature not found: ${current.featureName}`)
@@ -955,22 +1368,49 @@ export function registerCanaryLabTools(
   })
 
   // ── Port-ification (make a feature's apps use injectable ports) ──────────
-  registerTool('start_portify', {
-    description: "Start a port-ification workflow: an agent rewrites a feature's apps so every network listener reads an injected port, proven by booting the stack twice concurrently. The verified edits are saved as an EPHEMERAL OVERLAY (a captured patch under features/<feature>/portify/) — never committed or merged, so the product repo stays pristine; at run time the overlay is applied into a per-run worktree and reverse-applied at teardown. Async — returns a workflowId; poll get_portify, then save_portify once it is ready-to-save. One workflow at a time.",
+  registerTool('start_external_portify', {
+    description: "Start a port-ification workflow YOU drive — no local agent. Canary sets up a scratch worktree per repo and returns the edit paths + task. Edit the listeners to read injected ports IN PLACE, declare the `ports` slots in the feature config, then submit_external_portify to verify (concurrent double-boot); save_portify captures the result as the feature's overlay. Async — returns a workflowId + targets; one workflow PER FEATURE (different features can port-ify concurrently up to a resource cap, so you can fan out a subagent per feature; at capacity start_external_portify returns a 429 — wait for one to finish, or save/cancel it).",
     inputSchema: {
       feature: z.string().describe('Feature name (from list_features).'),
-      agent: z.enum(['claude', 'codex']).optional().describe('Which CLI does the rewrite. Defaults to an available local agent.'),
-      maxAttempts: z.number().int().positive().optional().describe('Edit→verify retries before giving up (default 3).'),
+      session_id: z.string().describe('Stable id for your conversation — reuse it across calls.'),
+      client_kind: clientKindInput,
+      conversation_name: z.string().optional(),
+      external_session_url: z.string().optional(),
     },
-  }, async ({ feature, agent, maxAttempts }) => {
-    if (!deps.startPortify) return errorResult('startPortify dependency is not configured')
+  }, async ({ feature, session_id, client_kind, conversation_name, external_session_url }) => {
+    if (!deps.startExternalPortify) return errorResult('startExternalPortify dependency is not configured')
     try {
-      const { workflowId } = await deps.startPortify(feature, agent, maxAttempts)
+      const result = await deps.startExternalPortify({
+        feature,
+        clientKind: client_kind,
+        sessionId: session_id,
+        ...(conversation_name ? { conversationName: conversation_name } : {}),
+        ...(external_session_url ? { sessionUrl: external_session_url } : {}),
+      })
       return asJsonResult({
-        workflowId,
-        status: 'planning',
+        ...result,
+        status: 'editing',
+        canaryLabBehavior: 'tracking-only',
+        statusMeaning: 'You edit the scratch worktrees in place; Canary Lab is not running a local agent — it verifies + saves.',
+        nextSteps: ['submit_external_portify'],
+        next: `Edit each target's source (in its worktree path) so the listener reads an injected port, declare the matching \`ports\` slots in ${result.configPath}, then call submit_external_portify with workflowId "${result.workflowId}". Poll get_portify; save_portify once status is "ready-to-save".`,
+      })
+    } catch (err) {
+      return errorResult(err instanceof Error ? err.message : String(err))
+    }
+  })
+
+  registerTool('submit_external_portify', {
+    description: 'Submit your in-place edits for an external port-ification workflow: Canary Lab captures the worktree diff and boots the stack twice concurrently on different ports to verify. Async — the workflow goes to verifying, then ready-to-save (passed) or back to editing (failed — read verification.failureDetail, fix the worktree, and submit again). Poll get_portify. Only valid while the workflow is in "editing".',
+    inputSchema: { workflowId: z.string() },
+  }, async ({ workflowId }) => {
+    if (!deps.submitExternalPortify) return errorResult('submitExternalPortify dependency is not configured')
+    try {
+      const manifest = await deps.submitExternalPortify(workflowId)
+      return asJsonResult({
+        ...manifest,
         nextSteps: ['get_portify'],
-        next: `Poll get_portify with workflowId "${workflowId}" until status is "ready-to-save", then save_portify (or cancel_portify).`,
+        next: `Poll get_portify with workflowId "${workflowId}": on "ready-to-save" call save_portify; if it returns to "editing", read verification.failureDetail, fix the worktree, and submit_external_portify again. cancel_portify discards the workflow.`,
       })
     } catch (err) {
       return errorResult(err instanceof Error ? err.message : String(err))
@@ -978,13 +1418,21 @@ export function registerCanaryLabTools(
   })
 
   registerTool('get_portify', {
-    description: 'Read a port-ification workflow: status (planning/editing/verifying/ready-to-save/saved/failed/aborted), attempt count, the diff, and the double-boot verification result.',
-    inputSchema: { workflowId: z.string() },
-  }, async ({ workflowId }) => {
+    description: 'Read a port-ification workflow: status (planning/editing/verifying/ready-to-save/saved/failed/aborted), attempt count, and the double-boot verification result. The full unified diff is OMITTED by default (it can be a large multi-file patch) — `diffStats` summarizes it; pass includeDiff:true to inline the patch text.',
+    inputSchema: {
+      workflowId: z.string(),
+      includeDiff: z.boolean().default(false).describe('Inline the full unified diff. Off by default (the patch can be large); diffStats gives files/additions/deletions. Call again with includeDiff:true for the patch text.'),
+    },
+  }, async ({ workflowId, includeDiff }) => {
     if (!deps.getPortify) return errorResult('getPortify dependency is not configured')
     const manifest = deps.getPortify(workflowId)
     if (!manifest) return errorResult(`port-ification workflow not found: ${workflowId}`)
-    return asJsonResult(manifest)
+    if (includeDiff) return asJsonResult(manifest)
+    const { diff, ...rest } = manifest
+    return asJsonResult({
+      ...rest,
+      ...(diff ? { diffStats: summarizeUnifiedDiff(diff), diffOmitted: true, diffHint: 'call get_portify with includeDiff:true to inline the patch' } : {}),
+    })
   })
 
   registerTool('list_portify_status', {
@@ -1013,29 +1461,10 @@ export function registerCanaryLabTools(
     if (!deps.savePortify) return errorResult('savePortify dependency is not configured')
     try {
       const manifest = await deps.savePortify(workflowId)
+      publishWorkspaceEvent(deps.workspaceEvents, { type: 'features-changed' })
       return asJsonResult({
         ...manifest,
         next: `Overlay saved to features/${manifest.feature}/portify/. The feature now boots with injectable ports on every run — concurrent runs and benchmark arms will not clash — without ever modifying the product repo.`,
-      })
-    } catch (err) {
-      return errorResult(err instanceof Error ? err.message : String(err))
-    }
-  })
-
-  registerTool('revise_portify', {
-    description: "Send review feedback to a ready-to-save port-ification workflow: the agent resumes its session, applies your adjustments (e.g. rename an env var, expose another port slot), and the stack is re-booted twice to re-verify. Async — the workflow returns to editing, then verifying, then ready-to-save; poll get_portify. Feedback rounds are unbounded and separate from the auto-retry budget. Only valid when status is ready-to-save.",
-    inputSchema: {
-      workflowId: z.string(),
-      feedback: z.string().min(1).describe('Plain-language adjustments for the agent to apply to its port-ification diff.'),
-    },
-  }, async ({ workflowId, feedback }) => {
-    if (!deps.revisePortify) return errorResult('revisePortify dependency is not configured')
-    try {
-      const manifest = await deps.revisePortify(workflowId, feedback)
-      return asJsonResult({
-        ...manifest,
-        nextSteps: ['get_portify'],
-        next: `Poll get_portify with workflowId "${workflowId}" until status is "ready-to-save" again, then save_portify (or revise_portify once more).`,
       })
     } catch (err) {
       return errorResult(err instanceof Error ? err.message : String(err))
@@ -1058,12 +1487,30 @@ export function registerCanaryLabTools(
     }
   })
 
+  registerTool('remove_portification', {
+    description: "Un-portify a SAVED feature: reverts its feature config (the declared `ports` slots + the `${port.x}` health-check rewrites) and deletes the port overlay, so it boots on its hardcoded ports again and is no longer portified. Always auto-cleans — overlays carry a pre-Portify config snapshot, so the revert is exact. Legacy overlays (no snapshot) best-effort strip the slots; their health-check tokens need a re-run of Portify to regenerate. Requires confirm: true.",
+    inputSchema: {
+      feature: z.string(),
+      confirm: z.literal(true).describe('Must be true. Guards against discarding a saved overlay + reverting config.'),
+    },
+    annotations: { destructiveHint: true, idempotentHint: true },
+  }, async ({ feature }) => {
+    if (!deps.removePortification) return errorResult('removePortification dependency is not configured')
+    try {
+      const result = deps.removePortification(feature)
+      publishWorkspaceEvent(deps.workspaceEvents, { type: 'features-changed' })
+      return asJsonResult(result)
+    } catch (err) {
+      return errorResult(err instanceof Error ? err.message : String(err))
+    }
+  })
+
   registerTool('get_heal_context', {
     description: 'Compact failure handoff packet an external heal agent needs first: current failures, artifact URLs, heal-index, journal, repo branches, lifecycle, and heal prompt map. Use get_run_snapshot for verbose raw summary/debugging fields.',
     inputSchema: {
       runId: z.string(),
       session_id: z.string().optional().describe('External heal session id. When provided, refreshes the session heartbeat.'),
-      client_kind: clientKindInput.describe('Which kind of client is requesting context. Defaults to the MCP client type when known.'),
+      client_kind: clientKindInput,
     },
   }, async ({ runId, session_id, client_kind }) => {
     const detail = deps.store.get(runId)
@@ -1080,19 +1527,40 @@ export function registerCanaryLabTools(
     return asJsonResult(context)
   })
 
+  registerTool('get_failure_detail', {
+    description:
+      'One failing test\'s detail: error, location, resolved pointer dirs (trace-extract, playwright-mcp), curated trace summary, and the full error text — both inlined in full (never truncated; a large file over the inline budget is swapped for a `traceSummaryPath`/`errorTextPath` to Read in chunks). Use `failureId` from a failedTests[] entry (get_heal_context / wait_for_heal_task). Built for fan-out: hand each failureId to its own read-only sub-agent to investigate in parallel.',
+    inputSchema: {
+      runId: z.string(),
+      failureId: z.string().describe('The failureId (== failed test name) from a failedTests[] entry.'),
+      session_id: z.string().optional().describe('External heal session id. When provided, refreshes the session heartbeat.'),
+      client_kind: clientKindInput,
+    },
+  }, async ({ runId, failureId, session_id, client_kind }) => {
+    const detail = deps.store.get(runId)
+    if (!detail) return errorResult(`run not found: ${runId}`)
+    if (session_id) {
+      ensureExternalClaimForMcpCall(deps, runId, session_id, client_kind)
+    }
+    const failure = buildExternalFailureDetail({ detail, logsDir: deps.store.logsDir, failureId })
+    if (!failure) return errorResult(`failure not found: ${failureId} (use a failureId from failedTests[])`)
+    if (session_id) deps.broker.touch(runId, session_id)
+    return asJsonResult(failure)
+  })
+
   // ─── run lifecycle ────────────────────────────────────────────────────
 
   registerTool('start_run', {
     description:
-      'Smart entrypoint for Canary Lab runs. If a matching run is healing, this returns that run and blocks fresh/different starts until `cancel_heal` stops it. If `runId` or `run_ref` targets a failed/aborted run and no heal is active, this restarts that same run in remaining-test mode: failed first, then skipped, then pending/not-run. Otherwise it starts a new run. To retry a failed/aborted run, prefer this rerun path (pass `run_ref`) over `abort_run` + a fresh start — a fresh start re-runs the whole suite and is only worth it when prior passes are invalidated (e.g. a global data/state change). After code changes, call `signal_run` with hypothesis and fixDescription, then `wait_for_heal_task` on the same run.',
+      'Smart entrypoint for runs. If a matching run is healing, returns it and blocks fresh/different starts until cancel_heal stops it. If runId/run_ref targets a failed/aborted run and no heal is active, restarts it in remaining-test mode (failed → skipped → pending/not-run). Otherwise starts a new run. To retry a failed/aborted run prefer this rerun path (pass run_ref) over abort_run + a fresh start — a fresh start re-runs the whole suite, only worth it when prior passes are invalidated (e.g. a global data/state change). The rerun path already re-runs skipped + pending tests (failed → skipped → pending/not-run), so it is complete — do NOT force_new just to avoid "skipped" tests; force_new on a portified feature spins a brand-new per-run worktree and resets the heal journal to Iteration 1, losing the prior cycles. After code changes call signal_run (hypothesis + fixDescription), then wait_for_heal_task on the same run.',
     inputSchema: {
       feature: z.string().describe('Feature name (from list_features).'),
       env: z.string().optional().describe('Envset name. Defaults to the feature\'s first declared env.'),
-      runId: z.string().optional().describe('Optional exact run id to resume or restart. If a different run is currently healing, the active heal blocks this request.'),
-      run_ref: z.string().optional().describe('Optional exact run id or unique suffix such as "7cvh" to resume or restart. If a different run is currently healing, the active heal blocks this request.'),
-      claim_heal: z.boolean().default(true).describe('Whether to claim this run\'s heal duty for the current MCP session.'),
-      session_id: z.string().describe('Stable id identifying this MCP/agent session. Reuse the same id across calls within one conversation to enable reconnects.'),
-      client_kind: clientKindInput.describe('Which kind of client is starting the run. Defaults to the MCP client type when known.'),
+      runId: z.string().optional().describe('Exact run id to resume/restart. A different run currently healing blocks this.'),
+      run_ref: z.string().optional().describe('Exact run id or unique suffix (e.g. "7cvh") to resume/restart. A different run currently healing blocks this.'),
+      claim_heal: z.boolean().default(true).describe('Claim this run\'s heal duty for the current MCP session.'),
+      session_id: z.string().describe('Stable id for this MCP/agent session. Reuse across calls in one conversation to enable reconnects.'),
+      client_kind: clientKindInput,
       conversation_name: z.string().optional().describe('Human label shown in the Canary Lab UI (e.g. "fix checkout").'),
       guidance: z.string().optional().describe('Optional user guidance when restarting a failed/aborted run by runId or run_ref.'),
       force_new: z.boolean().default(false).describe('Start a fresh concurrent run even if a matching run is healing (it continues independently). A same-repo collision still asks you to choose isolation.'),
@@ -1101,10 +1569,13 @@ export function registerCanaryLabTools(
   }, async ({ feature, env, runId, run_ref, claim_heal, session_id, client_kind, conversation_name, guidance, force_new, isolation }) => {
     try {
       const requestedRef = runId ?? run_ref
-      // Heal-claim policy: claiming is reserved for Desktop clients. A CLI (or
-      // undetected 'other') client may still start/verify the run, but must not
-      // own its heal loop — so we down-shift claim_heal to false and tell the
-      // caller, instead of grabbing heal duty behind their back.
+      // Heal-claim policy (see heal-claim-policy.ts): claiming is open to every
+      // human-driven interactive client — claude/codex (Desktop or CLI) and even
+      // undetected 'other'. The ONLY kinds blocked are runner-spawned PTY agents
+      // (claude-pty/codex-pty), which would otherwise claim their own run. A
+      // blocked client may still start/verify the run, but must not own its heal
+      // loop — so we down-shift claim_heal to false and tell the caller, instead
+      // of grabbing heal duty behind their back.
       const claimAllowed = claim_heal && isHealClaimAllowed(client_kind)
       const claimSuppressed = claim_heal && !claimAllowed
       const suppressionFields = claimSuppressed
@@ -1125,7 +1596,7 @@ export function registerCanaryLabTools(
           claimed: claimAllowed ? claim?.accepted === true : false,
           claim,
           ...suppressionFields,
-          ...(claimAllowed ? healWaitNext(healing.manifest.runId) : {}),
+          ...(claimAllowed ? healWaitNext() : {}),
         })
       }
       if (requestedRef) {
@@ -1154,7 +1625,7 @@ export function registerCanaryLabTools(
             claimed: claimAllowed ? claim?.accepted === true : false,
             claim,
             ...suppressionFields,
-            ...(claimAllowed ? healWaitNext(target.manifest.runId) : {}),
+            ...(claimAllowed ? healWaitNext() : {}),
           })
         }
         if (status === 'passed') {
@@ -1198,7 +1669,7 @@ export function registerCanaryLabTools(
           claimed: claimAllowed ? claim?.accepted === true : false,
           claim,
           ...suppressionFields,
-          ...(claimAllowed ? healWaitNext(restarted.runId) : {}),
+          ...(claimAllowed ? healWaitNext() : {}),
         })
       }
       // Any MCP-triggered run is external-origin: it must use External-client
@@ -1240,7 +1711,7 @@ export function registerCanaryLabTools(
           queueReason: outcome.reason,
           claimed: claimAllowed,
           ...suppressionFields,
-          ...(claimAllowed ? healWaitNext(outcome.runId) : {}),
+          ...(claimAllowed ? healWaitNext() : {}),
         })
       }
       return asJsonResult({
@@ -1248,7 +1719,7 @@ export function registerCanaryLabTools(
         reused: false,
         claimed: claimAllowed,
         ...suppressionFields,
-        ...(claimAllowed ? healWaitNext(outcome.runId) : {}),
+        ...(claimAllowed ? healWaitNext() : {}),
       })
     } catch (err) {
       return errorResult(err instanceof Error ? err.message : String(err))
@@ -1371,11 +1842,11 @@ export function registerCanaryLabTools(
   })
 
   registerTool('heartbeat', {
-    description: 'Refresh the external heal session liveness. Sessions auto-disconnect after 10 minutes without any MCP traffic; any signal_run / get_heal_context call also refreshes liveness, so you usually do not need to call this explicitly during normal healing.',
+    description: 'Refresh external heal session liveness. Sessions auto-disconnect after 10 min without MCP traffic; signal_run / get_heal_context also refresh it, so you rarely need to call this explicitly.',
     inputSchema: {
       runId: z.string(),
       session_id: z.string(),
-      client_kind: clientKindInput.describe('Which kind of client is heartbeating. Defaults to the MCP client type when known.'),
+      client_kind: clientKindInput,
       status: HEAL_STATUS.default('connected'),
     },
   }, async ({ runId, session_id, client_kind, status }) => {
@@ -1387,14 +1858,14 @@ export function registerCanaryLabTools(
 
   registerTool('wait_for_heal_task', {
     description:
-      'Wait until a claimed external run needs code fixes, reaches a terminal result, or times out. Use this after start_run/claim_heal and again after signal_run.',
+      'Wait until a claimed run needs code fixes or reaches a terminal result. Use after start_run/claim_heal and again after signal_run. Blocks for a short bounded window and heartbeats for you. If still active when the window elapses it returns type:"still_waiting" (NOT terminal) — immediately call wait_for_heal_task again with the same runId + session_id. Loop on still_waiting until needs_heal / passed / failed. Never poll get_run_snapshot or get_run to wait. A needs_heal task may be a service that failed to boot (no tests ran): context.failedTests is empty and context.bootFailure points at the service log — fix the service/app code, then signal_run kind:"restart".',
     inputSchema: {
       runId: z.string(),
       session_id: z.string().describe('External heal session id that owns this run.'),
-      client_kind: clientKindInput.describe('Which kind of client is waiting. Defaults to the MCP client type when known.'),
+      client_kind: clientKindInput,
       timeout_ms: z.number().int().positive().max(WAIT_FOR_HEAL_TASK_MAX_TIMEOUT_MS)
         .default(WAIT_FOR_HEAL_TASK_DEFAULT_TIMEOUT_MS)
-        .describe('How long to wait. Defaults to 15 minutes and is capped at 60 minutes.'),
+        .describe('Per-call block budget in ms (default 90s). A single call blocks at most ~2 minutes regardless; larger values are clamped, then you get still_waiting to loop on. This is not the overall heal budget — that is unbounded across re-calls.'),
     },
   }, async ({ runId, session_id, client_kind, timeout_ms }) => {
     const result = await waitForHealTask(deps, runId, session_id, client_kind, timeout_ms)
@@ -1408,7 +1879,7 @@ export function registerCanaryLabTools(
       runId: z.string(),
       kind: SIGNAL_KIND,
       session_id: z.string().optional().describe('Required when the run holds an external claim; must match the claim holder.'),
-      client_kind: clientKindInput.describe('Which kind of client is sending the signal. Defaults to the MCP client type when known.'),
+      client_kind: clientKindInput,
       hypothesis: z.string().optional().describe('Required for restart/rerun. Concise diagnosis of what was wrong.'),
       fixDescription: z.string().optional().describe('Required for restart/rerun. Concise summary of what the fix changed.'),
     },
@@ -1437,7 +1908,7 @@ export function registerCanaryLabTools(
       return errorResult(`could not write signal: ${(err as Error).message}`)
     }
     deps.broker.bumpCycle(runId)
-    return asJsonResult({ accepted: true, kind, path: signal.path, runId, ...healWaitNext(runId) })
+    return asJsonResult({ accepted: true, kind, path: signal.path, runId, ...healWaitNext() })
   })
 
   registerTool('handoff_heal', {
@@ -1474,12 +1945,11 @@ export function registerCanaryLabTools(
 // Emitted in start_run / signal_run results so result-driven external clients
 // (which may not carry the Canary Lab skill) block on wait_for_heal_task
 // instead of inventing a get_run_snapshot poll loop. Mirrors the create_feature
-// nextSteps convention.
-function healWaitNext(runId: string): { nextSteps: string[]; next: string } {
-  return {
-    nextSteps: ['wait_for_heal_task'],
-    next: `Call wait_for_heal_task with runId "${runId}" and the same session_id to wait for the result — it blocks and heartbeats for you. Do not poll get_run_snapshot or get_run in a loop to wait.`,
-  }
+// nextSteps convention. Machine-readable nextSteps only — the prose "how" lives
+// once in REPAIR_INSTRUCTIONS (session init) and the wait_for_heal_task tool
+// description, so re-emitting it on every start_run/signal_run was dead weight.
+function healWaitNext(): { nextSteps: string[] } {
+  return { nextSteps: ['wait_for_heal_task'] }
 }
 
 const BOOT_SESSION_MESSAGE =
@@ -1495,6 +1965,31 @@ function isActiveBootRun(detail: RunDetail | null | undefined): boolean {
     (detail.manifest.executionType ?? 'run') === 'boot' &&
     isActiveRunStatus(detail.manifest.status)
   )
+}
+
+// Emitted when a single wait_for_heal_task block elapses while the run is still
+// active. NOT terminal — the agent must re-call wait_for_heal_task (same runId +
+// session_id) to keep waiting. The cursor is informational (phase:cycles:status);
+// re-calling is stateless and safe because classifyWaitForHealTask reads durable
+// run state, so any transition during the gap is caught on the next immediate check.
+function stillWaitingValue(
+  runId: string,
+  detail: RunDetail | null,
+): Extract<WaitForHealTaskValue, { type: 'still_waiting' }> {
+  const status = detail?.manifest.status ?? null
+  const phase = detail?.manifest.lifecycle?.phase ?? 'unknown'
+  const cycles = detail?.manifest.healCycles ?? 0
+  return {
+    type: 'still_waiting',
+    runId,
+    status,
+    lifecycle: detail?.manifest.lifecycle ?? null,
+    cursor: `${phase}:${cycles}:${status ?? 'unknown'}`,
+    // nextSteps is the machine-readable contract; the "not terminal, re-call"
+    // prose lives in the wait_for_heal_task tool description, so we don't repay
+    // it on every elapsed window (a long run loops still_waiting many times).
+    nextSteps: ['wait_for_heal_task'],
+  }
 }
 
 function bootSessionValue(detail: RunDetail): Extract<WaitForHealTaskValue, { type: 'boot_session' }> {
@@ -1626,7 +2121,7 @@ function externalDraftView(record: DraftRecord): Record<string, unknown> {
     draftId: record.draftId,
     feature: record.featureName,
     featureName: record.featureName,
-    source: record.source ?? 'internal',
+    producer: record.producer ?? 'internal',
     externalStage: record.externalStage,
     status: record.status,
     clientKind: record.externalClientKind,
@@ -1671,6 +2166,7 @@ function externalEvaluationReportSchema(detail: RunDetail): Record<string, unkno
       'Submit structured wording only; Canary Lab renders the final evaluation.html.',
       'If the run failed or was aborted, preserve that status in the report instead of blocking the export.',
       'Submit textSlots[] or rewrite through submit_external_evaluation_export.',
+      `If you submit a rewrite, rewrite.cases must have EXACTLY ${rewrite.cases.length} ${rewrite.cases.length === 1 ? 'entry' : 'entries'}, in this same order — one per run entry. Do NOT merge, dedupe, or drop skipped/duplicate runs; edit the wording of the provided cases, never change their count or order. (Prefer textSlots[] to keep the count correct automatically.)`,
     ],
   }
 }
@@ -1686,7 +2182,14 @@ type WaitForHealTaskValue =
   | { type: 'needs_heal'; runId: string; cycle: number; context: ExternalHealContext }
   | { type: 'passed'; runId: string; summary: RunDetail['summary'] | null; counts: NormalizedRunCounts }
   | { type: 'failed'; runId: string; status: string; summary: RunDetail['summary'] | null; counts: NormalizedRunCounts }
-  | { type: 'timeout'; runId: string; status: string | null; lifecycle: RunDetail['manifest']['lifecycle'] | null }
+  | {
+      type: 'still_waiting'
+      runId: string
+      status: string | null
+      lifecycle: RunDetail['manifest']['lifecycle'] | null
+      cursor: string
+      nextSteps: string[]
+    }
   | {
       type: 'boot_session'
       runId: string
@@ -1754,17 +2257,22 @@ function classifyWaitForHealTask(
   ) {
     const latest = deps.store.get(runId)
     if (!latest) return { ok: false, error: `run not found: ${runId}` }
-    const context = buildExternalHealContext({
+    const full = buildExternalHealContext({
       detail: latest,
       logsDir: deps.store.logsDir,
       projectRoot: deps.projectRoot,
     })
+    // The procedure (nextSteps) and resource map (healPrompt) are static across
+    // cycles — ship them on cycle 1 only; later cycles get the slim variant
+    // (failure packet + breadcrumb). get_heal_context re-fetches the full map.
+    const cycle = detail.manifest.lifecycle.activeCycle ?? detail.manifest.healCycles
+    const context = cycle >= 2 ? slimRepeatHealContext(full) : full
     return {
       ok: true,
       value: {
         type: 'needs_heal',
         runId,
-        cycle: detail.manifest.lifecycle.activeCycle ?? detail.manifest.healCycles,
+        cycle,
         context,
       },
     }
@@ -1777,7 +2285,7 @@ async function waitForHealTask(
   deps: CanaryLabMcpDeps,
   runId: string,
   sessionId: string,
-  clientKind: ExternalHealClientKind,
+  clientKind: ClientKind,
   timeoutMs: number,
 ): Promise<WaitForHealTaskResult> {
   // A boot-only session never produces a heal task — return immediately instead
@@ -1813,18 +2321,15 @@ async function waitForHealTask(
       deps.broker.heartbeat(runId, sessionId, 'waiting')
     }
     deps.store.onEvent(onEvent)
+    // Clamp the actual block to the window cap regardless of the requested
+    // timeout_ms — bounds the request lifetime so it can't outlive a client's
+    // JSON-RPC request timeout. On elapse we return `still_waiting`, not a
+    // terminal `timeout`: the run is still going, the agent just re-calls.
+    const windowMs = Math.min(Math.max(timeoutMs, 1), WAIT_FOR_HEAL_TASK_WINDOW_MS)
     const timeout = setTimeout(() => {
       const detail = deps.store.get(runId)
-      finish({
-        ok: true,
-        value: {
-          type: 'timeout',
-          runId,
-          status: detail?.manifest.status ?? null,
-          lifecycle: detail?.manifest.lifecycle ?? null,
-        },
-      })
-    }, timeoutMs)
+      finish({ ok: true, value: stillWaitingValue(runId, detail ?? null) })
+    }, windowMs)
     const heartbeat = setInterval(beat, 5_000)
     if (typeof timeout.unref === 'function') timeout.unref()
     if (typeof heartbeat.unref === 'function') heartbeat.unref()
@@ -1837,7 +2342,7 @@ function ensureExternalClaimForMcpCall(
   deps: CanaryLabMcpDeps,
   runId: string,
   sessionId: string,
-  clientKind: ExternalHealClientKind,
+  clientKind: ClientKind,
 ): void {
   const detail = deps.store.get(runId)
   if (!detail || detail.manifest.healMode !== 'external' || isTerminalRunStatus(detail.manifest.status)) {
@@ -1858,8 +2363,25 @@ function ensureExternalClaimForMcpCall(
   deps.broker.touch(runId, sessionId)
 }
 
+// Cheap summary of a unified diff so get_portify can omit the (potentially large)
+// patch text by default while still telling the agent how big the edit is. The
+// full patch is one includeDiff:true call away.
+function summarizeUnifiedDiff(diff: string): { files: number; additions: number; deletions: number } {
+  let files = 0
+  let additions = 0
+  let deletions = 0
+  for (const line of diff.split('\n')) {
+    if (line.startsWith('diff --git ')) files += 1
+    else if (line.startsWith('+') && !line.startsWith('+++')) additions += 1
+    else if (line.startsWith('-') && !line.startsWith('---')) deletions += 1
+  }
+  return { files, additions, deletions }
+}
+
 function asJsonResult(value: unknown): CallToolResult {
-  return { content: [{ type: 'text', text: JSON.stringify(value, null, 2) }] }
+  // Compact (no indentation): the model parses JSON regardless, and the 2-space
+  // pretty-print was pure whitespace tokens on every result across all tools.
+  return { content: [{ type: 'text', text: JSON.stringify(value) }] }
 }
 
 function errorResult(message: string): CallToolResult {

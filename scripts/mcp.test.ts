@@ -4,7 +4,7 @@ import os from 'os'
 import path from 'path'
 import { Writable } from 'stream'
 import { createServer } from '../apps/web-server/server'
-import type { PtyFactory } from '../apps/web-server/lib/runtime/pty-spawner'
+import type { PtyFactory } from '../apps/web-server/src/features/runs/logic/runtime/pty-spawner'
 import {
   bridge,
   doctor,
@@ -41,7 +41,7 @@ class BufferWritable extends Writable {
 }
 
 describe('canary-lab mcp', () => {
-  it('doctor verifies a running UI MCP server and the default full profile', async () => {
+  it('doctor verifies a running UI MCP server and the default lifecycle profile', async () => {
     const projectRoot = path.resolve(__dirname, '..', 'templates', 'project')
     const { app } = await createServer({ projectRoot, ptyFactory: inertPtyFactory })
     const stdout = new BufferWritable()
@@ -50,13 +50,13 @@ describe('canary-lab mcp', () => {
       const address = await app.listen({ port: 0, host: '127.0.0.1' })
       await expect(doctor(`${address}/mcp`, { stdout, stderr })).resolves.toBe(true)
       expect(stdout.text()).toContain('Canary Lab MCP is reachable')
-      expect(stdout.text()).toContain('Profile: full')
-      expect(stdout.text()).toContain('start_external_evaluation_export')
+      expect(stdout.text()).toContain('Profile: lifecycle')
+      expect(stdout.text()).toContain('create_feature')
       expect(stdout.text()).toContain('execute_verification')
       expect(stderr.text()).toBe('')
       const health = await fetch(`${address}/mcp/health`).then((res) => res.json()) as { projectRoot?: string; profile?: string }
       expect(health.projectRoot).toBe(projectRoot)
-      expect(health.profile).toBe('full')
+      expect(health.profile).toBe('lifecycle')
     } finally {
       await app.close()
     }
@@ -323,21 +323,36 @@ describe('canary-lab mcp', () => {
     expect(stderr.text()).toContain('Invalid MCP profile: nope')
   })
 
-  it('infers desktop client kind from the launching process tree', () => {
+  it('infers the interactive client kind from the launching process tree (Desktop and CLI both collapse to claude/codex)', () => {
     expect(inferClientKindFromProcessLines([
       '/Applications/Claude.app/Contents/Frameworks/Claude Helper.app/Contents/MacOS/Claude Helper',
       '/sbin/launchd',
-    ])).toBe('claude-desktop')
+    ])).toBe('claude')
     expect(inferClientKindFromProcessLines([
       '/Applications/Codex.app/Contents/Resources/codex sandbox macos',
       '/sbin/launchd',
-    ])).toBe('codex-desktop')
+    ])).toBe('codex')
+    expect(inferClientKindFromProcessLines([
+      'node /usr/local/bin/claude-code',
+      '/bin/zsh',
+    ])).toBe('claude')
+    expect(inferClientKindFromProcessLines([
+      'codex exec --full-auto',
+      '/bin/zsh',
+    ])).toBe('codex')
+  })
+
+  it('never sniffs the runner-spawned PTY kinds — they are only ever set explicitly', () => {
+    // A bare `claude`/`codex` in the lineage must resolve to the interactive
+    // kind, NOT a -pty kind; the -pty tag comes solely from the env var the
+    // runner injects.
+    expect(inferClientKindFromProcessLines(['claude'])).toBe('claude')
   })
 
   it('prefers explicit CANARY_LAB_MCP_CLIENT_KIND over process inference', () => {
     expect(inferMcpClientKind({
-      CANARY_LAB_MCP_CLIENT_KIND: 'codex-desktop',
-    }, 1)).toBe('codex-desktop')
+      CANARY_LAB_MCP_CLIENT_KIND: 'codex-pty',
+    }, 1)).toBe('codex-pty')
   })
 })
 

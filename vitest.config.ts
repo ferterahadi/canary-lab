@@ -1,14 +1,70 @@
 import { defineConfig } from 'vitest/config'
 
+// Known, intentional test noise. Each entry collapses a class of expected
+// log lines (asserted-around or deliberately provoked by tests) into a single
+// short tag, printed once per worker instead of hundreds of full stack dumps.
+// To see the raw logs again, run with VITEST_VERBOSE=1 (e.g.
+// `VITEST_VERBOSE=1 npx vitest run`) — that disables this filter entirely.
+const EXPECTED_LOG_NOISE: { match: (log: string) => boolean; tag: string }[] = [
+  { match: (l) => l.includes('act(...)'), tag: 'React act() warning' },
+  {
+    match: (l) => l.includes('ECONNREFUSED') && l.includes(':3000'),
+    tag: 'ECONNREFUSED :3000 (HTTP-fallback path under test)',
+  },
+  {
+    match: (l) => l.includes('[playwright-list] exit 2: boom'),
+    tag: 'playwright-list fixture failure',
+  },
+]
+const announcedNoise = new Set<string>()
+
 export default defineConfig({
   test: {
-    include: [
-      'scripts/**/*.test.ts',
-      'shared/**/*.test.ts',
-      'apps/**/*.test.{ts,tsx}',
-      'tools/**/*.test.ts',
+    bail: 1,
+    onConsoleLog(log) {
+      if (process.env.VITEST_VERBOSE) return undefined // full raw logs
+      const hit = EXPECTED_LOG_NOISE.find((n) => n.match(log))
+      if (!hit) return undefined // unknown log — always print
+      if (!announcedNoise.has(hit.tag)) {
+        announcedNoise.add(hit.tag)
+        process.stdout.write(
+          `· suppressed expected noise: ${hit.tag} (VITEST_VERBOSE=1 to show)\n`,
+        )
+      }
+      return false // drop the raw line
+    },
+    projects: [
+      {
+        test: {
+          name: 'node',
+          // Filters expected stderr noise that bypasses onConsoleLog (direct
+          // process.stderr.write + unhandled-rejection dumps). See file header.
+          setupFiles: ['./vitest.setup.ts'],
+          include: [
+            'scripts/**/*.test.ts',
+            'shared/**/*.test.ts',
+            'tools/**/*.test.ts',
+            'apps/web-server/**/*.test.{ts,tsx}',
+            'apps/web/**/*.test.ts',
+          ],
+          exclude: [
+            'apps/web/src/shared/lib/workspace-view-state.test.ts',
+          ],
+          environment: 'node',
+        },
+      },
+      {
+        test: {
+          name: 'dom',
+          setupFiles: ['./vitest.setup.ts'],
+          include: [
+            'apps/web/**/*.test.tsx',
+            'apps/web/src/shared/lib/workspace-view-state.test.ts',
+          ],
+          environment: 'happy-dom',
+        },
+      },
     ],
-    environment: 'node',
     coverage: {
       provider: 'v8',
       reporter: ['text', 'html', 'lcov'],
@@ -19,74 +75,72 @@ export default defineConfig({
       // `ws/`, the formatter scripts, the node-pty wrapper) and the CLI
       // shims are excluded below.
       include: [
-        // Web-server runtime — was `shared/e2e-runner/...` until the
-        // 0.11 cleanup; now lives next to its only consumer.
-        'apps/web-server/lib/**/*.ts',
-        'apps/web-server/routes/**/*.ts',
+        // Web-server business logic + route handlers (feature `logic/` and
+        // `routes/`) plus the web-server-local shared infra.
+        'apps/web-server/src/features/**/logic/**/*.ts',
+        'apps/web-server/src/features/**/routes/**/*.ts',
+        'apps/web-server/src/shared/**/*.ts',
         // Frontend pure modules. React components are excluded — only the
-        // API client, WebSocket wrapper, and pure utilities are gated.
-        'apps/web/src/api/**/*.ts',
-        'apps/web/src/lib/**/*.ts',
-        'apps/web/src/state/**/*.ts',
+        // API client, pure utilities, and benchmark state are gated.
+        'apps/web/src/shared/api/**/*.ts',
+        'apps/web/src/shared/lib/**/*.ts',
+        'apps/web/src/features/benchmark/state/**/*.ts',
+        'apps/web/src/shared/shell/McpPromoContext.tsx',
         // 0.9.x → 0.10.x migration: pure detection + report rendering.
         'scripts/upgrade-migration.ts',
         'scripts/upgrade-known-prompts.ts',
       ],
       exclude: [
-        '**/*.test.ts',
+        '**/*.test.{ts,tsx}',
         '**/*.d.ts',
-        'shared/**',
-        'scripts/cli.ts',
-        'scripts/ui-command.ts',
+        // Test-only fixtures (e.g. fake coverage agents injected via deps seams).
+        '**/__fixtures__/**',
         'apps/web-server/server.ts',
-        'apps/web-server/ws/**',
-        // Integration-heavy orchestration + the heaviest route handlers are
+        // WebSocket transport glue (thin I/O), incl. the shared workspace stream.
+        'apps/web-server/src/features/**/ws/**',
+        'apps/web-server/src/shared/ws/**',
+        // Integration-heavy run orchestration + the heaviest route handlers are
         // covered by dedicated behavior tests, but under the strict 100% gate
         // their defensive glue has branches that can't be exercised
         // deterministically: subprocess spawn/error events, git operations,
         // SIGINT/readline handlers, and fs/disk race guards. (The lighter
-        // routes/lib modules — features, tests-draft, config-ast, ast-extractor,
-        // auto-heal — ARE gated; see them under include above.)
-        'apps/web-server/lib/runtime/orchestrator.ts',
-        'apps/web-server/lib/runtime/log-enrichment.ts',
-        'apps/web-server/lib/runtime/env-switcher/switch.ts',
-        'apps/web-server/routes/feature-config.ts',
-        'apps/web-server/routes/runs.ts',
-        'apps/web-server/lib/wizard-agent-runner.ts',
-        'apps/web-server/lib/test-review-export.ts',
-        'apps/web-server/lib/open-browser-spawner.ts',
+        // routes/logic modules — features, tests-draft, config-ast, ast-extractor,
+        // auto-heal — ARE gated.) Only the runs orchestrator is excluded; the
+        // portify/benchmark orchestrators stay gated.
+        'apps/web-server/src/features/runs/logic/runtime/orchestrator.ts',
+        'apps/web-server/src/features/runs/logic/runtime/log-enrichment.ts',
+        'apps/web-server/src/features/runs/logic/runtime/env-switcher/switch.ts',
+        'apps/web-server/src/features/config/routes/feature-config.ts',
+        'apps/web-server/src/features/runs/routes/runs.ts',
+        'apps/web-server/src/features/wizard/logic/wizard-agent-runner.ts',
+        'apps/web-server/src/features/evaluation/logic/test-review-export.ts',
+        'apps/web-server/src/shared/open-browser-spawner.ts',
         // Pure re-export shim — the underlying implementation lives in
         // shared/lib/dotenv-edit and is exercised through the routes that
         // import this module.
-        'apps/web-server/lib/dotenv-edit.ts',
+        'apps/web-server/src/features/config/logic/dotenv-edit.ts',
         // The benchmark runner is the I/O wiring behind the (separately tested)
         // BenchmarkOrchestrator/Race: it spawns the sabotage subprocess, creates
         // git worktrees, and drives real RunOrchestrators per arm. Same category
         // as runtime/orchestrator.ts above — exercised by behavior tests, not
         // unit-coverable without a real git repo + agent CLIs + TTY.
-        'apps/web-server/lib/runtime/benchmark/runner.ts',
-        'apps/web-server/lib/runtime/pty-spawner.ts',
-        'apps/web-server/lib/runtime/**/types.ts',
+        'apps/web-server/src/features/benchmark/logic/runtime/runner.ts',
+        'apps/web-server/src/features/runs/logic/runtime/pty-spawner.ts',
+        'apps/web-server/src/features/**/logic/runtime/**/types.ts',
         // Race-condition and defence-in-depth guards: the uncovered branches
         // here are intentional closed-check / path-traversal / subprocess-timer
         // guards that can't be exercised deterministically through public APIs.
-        'apps/web-server/lib/agent-session-tailer.ts',
-        'apps/web-server/lib/playwright-list.ts',
+        'apps/web-server/src/features/agent-sessions/logic/agent-session-tailer.ts',
+        'apps/web-server/src/features/runs/logic/playwright-list.ts',
         // Path-traversal hardening: the `outside-draft` return + the
         // `endsWith(sep)` branch are intentional defence-in-depth that the
         // earlier `..`/absolute-path rejection already makes unreachable.
         // Keeping the redundant guard is the point; it can't be covered
         // without removing the security check, so the file stays excluded.
-        'apps/web-server/lib/draft-file-resolver.ts',
-        'apps/web/src/components/**',
-        'apps/web/src/pages/**',
-        'apps/web/src/main.tsx',
-        'apps/web/src/App.tsx',
-        'apps/web/vite.config.ts',
-        'apps/web/dist/**',
-        'apps/web/src/api/types.ts',
+        'apps/web-server/src/features/wizard/logic/draft-file-resolver.ts',
         // Type-only module (no executable code) — v8 reports it as 0/0/0/0.
-        'apps/web/src/api/benchmark-types.ts',
+        'apps/web/src/shared/api/types.ts',
+        'apps/web/dist/**',
         'dist/**',
         'templates/**',
       ],
