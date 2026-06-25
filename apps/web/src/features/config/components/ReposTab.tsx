@@ -259,7 +259,7 @@ interface Slice {
   rootEnvs: string[] // top-level envs[] used for the per-env health-check editor
 }
 
-export function ReposTab({ feature }: { feature: string }) {
+export function ReposTab({ feature, refreshKey }: { feature: string; refreshKey?: number }) {
   const { runs } = useRuns()
   const activeRun = runs.some((run) =>
     run.feature === feature && isActiveRunStatus(run.status))
@@ -325,6 +325,7 @@ export function ReposTab({ feature }: { feature: string }) {
                 repoLookupName={persistedRepo?.name}
                 rootEnvs={rootEnvs}
                 activeRun={activeRun}
+                refreshKey={refreshKey}
                 onChange={(next) => ed.setDraft((d) => ({
                   ...d,
                   repos: d.repos.map((r, j) => j === i ? next : r),
@@ -468,6 +469,7 @@ function RepoCard({
   activeRun,
   onChange,
   onRemove,
+  refreshKey,
 }: {
   feature: string
   repo: RepoSlice
@@ -476,6 +478,7 @@ function RepoCard({
   activeRun: boolean
   onChange: (next: RepoSlice) => void
   onRemove: () => void
+  refreshKey?: number
 }) {
   const [open, setOpen] = useState(true)
   const [pathExists, setPathExists] = useState<boolean | null>(null)
@@ -618,6 +621,7 @@ function RepoCard({
               isExpr={isExpr}
               activeRun={activeRun}
               onChange={onChange}
+              refreshKey={refreshKey}
             />
 
             {pathExists === false && repo.cloneUrl && !isExpr && (
@@ -700,6 +704,7 @@ function BranchControl({
   isExpr,
   activeRun,
   onChange,
+  refreshKey,
 }: {
   feature: string
   repo: RepoSlice
@@ -708,6 +713,7 @@ function BranchControl({
   isExpr: boolean
   activeRun: boolean
   onChange: (next: RepoSlice) => void
+  refreshKey?: number
 }) {
   const [status, setStatus] = useState<api.GitRepoStatus | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -753,7 +759,9 @@ function BranchControl({
         setError(e instanceof Error ? e.message : 'Failed to load git status')
       })
     return () => { cancelled = true }
-  }, [feature, repoName, isExpr, localPathStr])
+    // refreshKey bumps on `features-changed` (e.g. an MCP/other-tab branch checkout)
+    // → re-pull git status so the displayed branch is never stale.
+  }, [feature, repoName, isExpr, localPathStr, refreshKey])
 
   const doCheckout = async (): Promise<void> => {
     const branch = target.trim()

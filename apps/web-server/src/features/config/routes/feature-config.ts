@@ -249,6 +249,8 @@ export async function featureConfigRoutes(
       }
       try {
         const status = await checkoutBranch(repo.localPath, branch.trim())
+        // Branch moved; refresh the feature list + Repos tab git-status row live.
+        publishWorkspaceEvent(deps.workspaceEvents, { type: 'features-changed' })
         return {
           ...status,
           path: resolveRepoPath(repo.localPath),

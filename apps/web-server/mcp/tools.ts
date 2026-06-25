@@ -750,6 +750,8 @@ export function registerCanaryLabTools(
       { feature, relPath, content },
     )
     if (!result.ok) return errorResult(result.error)
+    // Docs feed the PRD summary; refresh the Docs rail + coverage headline live.
+    publishWorkspaceEvent(deps.workspaceEvents, { type: 'coverage-changed', feature })
     return asJsonResult({ written: true, path: result.writtenPath, relativePath: result.relativePath })
   })
 
@@ -766,6 +768,7 @@ export function registerCanaryLabTools(
       { feature, relPath },
     )
     if (!result.ok) return errorResult(result.error)
+    publishWorkspaceEvent(deps.workspaceEvents, { type: 'coverage-changed', feature })
     return asJsonResult({ deleted: true, relativePath: result.relativePath })
   })
 
@@ -813,7 +816,12 @@ export function registerCanaryLabTools(
     inputSchema: { feature: z.string().describe('Existing feature name (from list_features).') },
   }, async ({ feature }) => {
     try {
-      return asJsonResult(clearPrdSummary({ featuresDir: deps.featuresDir, feature }))
+      const result = clearPrdSummary({ featuresDir: deps.featuresDir, feature })
+      // Coverage badge + spec tags both change; refresh the ledger view and the
+      // tests panel (specs were un-tagged) on every client without a reload.
+      publishWorkspaceEvent(deps.workspaceEvents, { type: 'coverage-changed', feature })
+      publishWorkspaceEvent(deps.workspaceEvents, { type: 'tests-changed', feature })
+      return asJsonResult(result)
     } catch (err) {
       if (err instanceof FeatureNotFoundError) return errorResult(err.message)
       throw err
@@ -1071,7 +1079,10 @@ export function registerCanaryLabTools(
       { projectRoot: deps.projectRoot, featuresDir: deps.featuresDir },
       { feature, repo, branch, confirm },
     )
-    return isToolErrorPayload(result) ? errorResult(result.error) : asJsonResult(result)
+    if (isToolErrorPayload(result)) return errorResult(result.error)
+    // Branch moved; refresh the feature list + Repos tab git-status row live.
+    publishWorkspaceEvent(deps.workspaceEvents, { type: 'features-changed' })
+    return asJsonResult(result)
   })
 
   registerTool('start_external_evaluation_export', {
@@ -1484,7 +1495,7 @@ export function registerCanaryLabTools(
 
   registerTool('get_failure_detail', {
     description:
-      'One failing test\'s bounded detail: error, location, resolved pointer dirs (trace-extract, playwright-mcp), curated trace summary, and capped full error text. Use `failureId` from a failedTests[] entry (get_heal_context / wait_for_heal_task). Built for fan-out: hand each failureId to its own read-only sub-agent to investigate in parallel.',
+      'One failing test\'s detail: error, location, resolved pointer dirs (trace-extract, playwright-mcp), curated trace summary, and the full error text — both inlined in full (never truncated; a large file over the inline budget is swapped for a `traceSummaryPath`/`errorTextPath` to Read in chunks). Use `failureId` from a failedTests[] entry (get_heal_context / wait_for_heal_task). Built for fan-out: hand each failureId to its own read-only sub-agent to investigate in parallel.',
     inputSchema: {
       runId: z.string(),
       failureId: z.string().describe('The failureId (== failed test name) from a failedTests[] entry.'),

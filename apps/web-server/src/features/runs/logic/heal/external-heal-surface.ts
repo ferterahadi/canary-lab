@@ -105,10 +105,16 @@ export interface ExternalRunSnapshot {
 
 export interface ExternalFailureDetail extends ExternalHealFailedTest {
   runId: string
-  /** Curated `trace-extract/failure-summary.md` content (capped), when present. */
+  /** Curated `trace-extract/failure-summary.md` content, inlined in full. */
   traceSummaryMarkdown?: string | null
-  /** Full `error.txt` content (capped), when present. */
+  /** Set instead of `traceSummaryMarkdown` only when the summary exceeded the
+   *  inline budget — `Read` this path (in chunks) for the full content. */
+  traceSummaryPath?: string
+  /** Full `error.txt` content, inlined in full. */
   errorText?: string | null
+  /** Set instead of `errorText` only when `error.txt` exceeded the inline
+   *  budget — `Read` this path (in chunks) for the full content. */
+  errorTextPath?: string
 }
 
 export interface BuildExternalHealContextInput {
@@ -123,9 +129,13 @@ export interface BuildExternalFailureDetailInput {
   failureId: string
 }
 
-// Keep per-failure inlined content bounded so get_failure_detail can never blow
-// up an MCP response — deeper detail stays on disk behind the pointer dirs.
-const FAILURE_DETAIL_MAX_BYTES = 24 * 1024
+// get_failure_detail never truncates. This is the inline BUDGET: content within
+// it is inlined whole (~2K tokens — covers the typical error.txt / trace
+// summary); past it we POINT to the on-disk file instead of inlining, because
+// the agent's `Read` tool pages a large file in digestible chunks (offset/limit)
+// whereas inlining 10s–100s of KB would eat a big slice of context in one tool
+// result. Text is never cut either way — over-budget just defers to Read.
+const FAILURE_DETAIL_INLINE_MAX_BYTES = 8 * 1024
 
 // The needs-heal procedure, surfaced on the context (wait_for_heal_task →
 // needs_heal and get_heal_context) so skill-less clients read it exactly when a
@@ -300,15 +310,17 @@ export function buildExternalFailureDetail(
   if (!entry) return null
   const paths = buildRunPaths(runDirFor(logsDir, detail.manifest.runId))
   const pointer = buildFailedTestPointer(entry, paths.failedDir, detail.playwrightArtifacts)
-  const traceSummaryMarkdown = pointer.traceDir
-    ? safeReadCapped(path.join(pointer.traceDir, 'failure-summary.md'))
+  const traceSummary = pointer.traceDir
+    ? inlineOrPointer(path.join(pointer.traceDir, 'failure-summary.md'))
     : null
-  const errorText = safeReadCapped(path.join(paths.failedDir, failureId, 'error.txt'))
+  const error = inlineOrPointer(path.join(paths.failedDir, failureId, 'error.txt'))
   return {
     runId: detail.manifest.runId,
     ...pointer,
-    ...(traceSummaryMarkdown !== null ? { traceSummaryMarkdown } : {}),
-    ...(errorText !== null ? { errorText } : {}),
+    ...(traceSummary && 'text' in traceSummary ? { traceSummaryMarkdown: traceSummary.text } : {}),
+    ...(traceSummary && 'path' in traceSummary ? { traceSummaryPath: traceSummary.path } : {}),
+    ...(error && 'text' in error ? { errorText: error.text } : {}),
+    ...(error && 'path' in error ? { errorTextPath: error.path } : {}),
   }
 }
 
@@ -445,9 +457,12 @@ function safeRead(file: string): string | null {
   }
 }
 
-function safeReadCapped(file: string): string | null {
+// Inline the full file content when it fits the inline budget; otherwise return
+// its path so the agent `Read`s the complete file in chunks (offset/limit).
+// Never cuts the text mid-stream.
+function inlineOrPointer(file: string): { text: string } | { path: string } | null {
   const content = safeRead(file)
   if (content === null) return null
-  if (content.length <= FAILURE_DETAIL_MAX_BYTES) return content
-  return `${content.slice(0, FAILURE_DETAIL_MAX_BYTES)}\n…[truncated — read ${file} for the full content]`
+  if (Buffer.byteLength(content, 'utf8') <= FAILURE_DETAIL_INLINE_MAX_BYTES) return { text: content }
+  return { path: file }
 }

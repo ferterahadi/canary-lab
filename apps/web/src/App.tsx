@@ -40,6 +40,7 @@ export function App() {
   // Bumped when a portify overlay is saved — forces the open Ports tab to refetch
   // its config doc so the rewritten slots show without a tab switch / refresh.
   const [portsRefreshKey, setPortsRefreshKey] = useState(0)
+  const [reposRefreshKey, setReposRefreshKey] = useState(0)
   const [specTotalTests, setSpecTotalTests] = useState(0)
   const [collisionPrompt, setCollisionPrompt] = useState<{ feature: string; env?: string; mode?: 'test' | 'boot'; info: RepoCollisionChoice; portsConfigured?: boolean } | null>(null)
   // Port-ification wizard target: 'new' starts a fresh workflow for a feature;
@@ -240,6 +241,9 @@ export function App() {
         onEvent: (event) => {
           if (event.type === 'feature-created' || event.type === 'feature-deleted' || event.type === 'features-changed') {
             refreshFeatures(event.type === 'feature-created' ? event.feature : undefined)
+            // A branch checkout (and other feature mutations) emits features-changed;
+            // bump so an open Repos tab refetches its git-status row live.
+            if (event.type === 'features-changed') setReposRefreshKey((key) => key + 1)
             return
           }
           if (event.type === 'tests-changed' && selectedFeatureRef.current === event.feature) {
@@ -377,6 +381,7 @@ export function App() {
           feature={configFor}
           initialTab="playwright"
           portsRefreshKey={portsRefreshKey}
+          reposRefreshKey={reposRefreshKey}
           onStartPortify={(f) => setPortifyTarget({ kind: 'new', feature: f })}
           onOpenPortify={(workflowId) => setPortifyTarget({ kind: 'revisit', workflowId })}
           onClose={() => setConfigFor(null)}

@@ -200,6 +200,19 @@ export function CoverageLedgerPage({ feature, onClose, coverageRefreshKey = 0 }:
     return () => { cancelled = true }
   }, [feature, pollJob, coverageRefreshKey])
 
+  // A non-job `coverage-changed` event (clear summary, doc add/delete via MCP or
+  // another tab, external coverage map) bumps coverageRefreshKey. The job-attach
+  // effect above only catches NEW jobs; here we re-pull the ledger AND re-list the
+  // Docs rail so the open page reflects the change live — no manual refresh
+  // (cl_ws-driven-state). Skip the initial mount (the refresh() effect already did
+  // the first load).
+  const coverageKeyMounted = useRef(false)
+  useEffect(() => {
+    if (!coverageKeyMounted.current) { coverageKeyMounted.current = true; return }
+    refresh()
+    setDocsReloadKey((k) => k + 1)
+  }, [coverageRefreshKey, refresh])
+
   // Self-healing backstop for the Generating screen. The per-job poll above is an
   // in-memory setTimeout chain: if a single getCoverageJob fetch HANGS (a server
   // restart from a redeploy, a suspended tab, a throttled-network stall) the chain

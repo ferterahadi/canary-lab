@@ -20,7 +20,7 @@ import {
   locateCodexSessionLog,
   type AgentSessionRef,
 } from '../../agent-sessions/logic/agent-session-log'
-import type { WorkspaceEventPublisher } from '../../../shared/workspace-events'
+import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../shared/workspace-events'
 
 export interface CoverageRouteDeps {
   featuresDir: string
@@ -86,6 +86,9 @@ export async function coverageRoutes(app: FastifyInstance, deps: CoverageRouteDe
         reply.code(result.error.includes('not found') ? 404 : 400)
         return { error: result.error }
       }
+      // Docs feed the PRD summary (drift flag) + the Docs rail listing; tell every
+      // client so the rail + coverage headline refresh without a manual reload.
+      publishWorkspaceEvent(deps.workspaceEvents, { type: 'coverage-changed', feature: req.params.name })
       return { written: true, relativePath: result.relativePath }
     },
   )
@@ -120,6 +123,7 @@ export async function coverageRoutes(app: FastifyInstance, deps: CoverageRouteDe
         reply.code(result.error.includes('not found') ? 404 : 400)
         return { error: result.error }
       }
+      publishWorkspaceEvent(deps.workspaceEvents, { type: 'coverage-changed', feature: req.params.name })
       return { written: true, relativePath: result.relativePath }
     },
   )
@@ -135,6 +139,7 @@ export async function coverageRoutes(app: FastifyInstance, deps: CoverageRouteDe
         reply.code(result.error.includes('not found') ? 404 : 400)
         return { error: result.error }
       }
+      publishWorkspaceEvent(deps.workspaceEvents, { type: 'coverage-changed', feature: req.params.name })
       return { deleted: true, relativePath: result.relativePath }
     },
   )
@@ -143,7 +148,12 @@ export async function coverageRoutes(app: FastifyInstance, deps: CoverageRouteDe
   // the feature returns to the ABSENT summary state.
   app.delete<{ Params: { name: string } }>('/api/features/:name/prd-summary', async (req, reply) => {
     try {
-      return clearPrdSummary({ featuresDir: deps.featuresDir, feature: req.params.name })
+      const result = clearPrdSummary({ featuresDir: deps.featuresDir, feature: req.params.name })
+      // Coverage badge + spec tags both change; refresh the ledger view and the
+      // tests panel (specs were un-tagged) on every client without a reload.
+      publishWorkspaceEvent(deps.workspaceEvents, { type: 'coverage-changed', feature: req.params.name })
+      publishWorkspaceEvent(deps.workspaceEvents, { type: 'tests-changed', feature: req.params.name })
+      return result
     } catch (err) {
       if (err instanceof FeatureNotFoundError) {
         reply.code(404)

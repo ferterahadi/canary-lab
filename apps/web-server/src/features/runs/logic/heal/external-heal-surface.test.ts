@@ -282,18 +282,17 @@ describe('buildExternalFailureDetail', () => {
     ).toBeNull()
   })
 
-  it('truncates errorText when the error file exceeds FAILURE_DETAIL_MAX_BYTES (line 369)', () => {
-    // safeReadCapped caps content at 24 * 1024 bytes. Write an error.txt that is
-    // larger than that limit → the truncation path at line 369 fires.
+  it('inlines an error.txt in full (no truncation) when within the inline budget', () => {
+    // No truncation cap anymore. Write just under the 8 KB inline budget → the
+    // whole file inlines, no pointer.
     const runId = 'run-1'
     const paths = buildRunPaths(runDirFor(logsDir, runId))
     const failedSlug = 'checkout fails'
     const errorDir = path.join(paths.failedDir, failedSlug)
     fs.mkdirSync(errorDir, { recursive: true })
 
-    // Write > 24 * 1024 bytes of content.
-    const oversized = 'x'.repeat(24 * 1024 + 100)
-    fs.writeFileSync(path.join(errorDir, 'error.txt'), oversized)
+    const content = 'x'.repeat(8 * 1024 - 1)
+    fs.writeFileSync(path.join(errorDir, 'error.txt'), content)
 
     const detail = buildExternalFailureDetail({
       detail: detailFor(runId),
@@ -302,11 +301,33 @@ describe('buildExternalFailureDetail', () => {
     })
 
     expect(detail).not.toBeNull()
-    expect(detail?.errorText).toContain('[truncated')
-    // The first 24 * 1024 bytes are preserved; the tail is replaced by the truncation suffix.
-    expect(detail?.errorText?.startsWith('x'.repeat(24 * 1024))).toBe(true)
-    // The oversized tail ('x'.repeat(100)) is NOT in the output (it was cut off).
-    expect(detail?.errorText?.endsWith('x'.repeat(100))).toBe(false)
+    // Inlined in full — never truncated, and no pointer fallback needed.
+    expect(detail?.errorText).toBe(content)
+    expect(detail).not.toHaveProperty('errorTextPath')
+    expect(JSON.stringify(detail)).not.toContain('[truncated')
+  })
+
+  it('points to error.txt instead of inlining when it exceeds the inline budget', () => {
+    // Over the 8 KB budget we POINT to the file so the agent Reads it in chunks,
+    // rather than swallowing it in one tool result — text is never cut.
+    const runId = 'run-1'
+    const paths = buildRunPaths(runDirFor(logsDir, runId))
+    const failedSlug = 'checkout fails'
+    const errorDir = path.join(paths.failedDir, failedSlug)
+    fs.mkdirSync(errorDir, { recursive: true })
+
+    const errorFile = path.join(errorDir, 'error.txt')
+    fs.writeFileSync(errorFile, 'x'.repeat(8 * 1024 + 1))
+
+    const detail = buildExternalFailureDetail({
+      detail: detailFor(runId),
+      logsDir,
+      failureId: failedSlug,
+    })
+
+    expect(detail).not.toBeNull()
+    expect(detail).not.toHaveProperty('errorText')
+    expect(detail?.errorTextPath).toBe(errorFile)
   })
 
   it('omits traceSummaryMarkdown when pointer.traceDir is null (line 216 FALSE branch)', () => {
@@ -376,9 +397,9 @@ describe('buildExternalFailureDetail', () => {
     expect(detail?.playwrightMcpDir).toBeUndefined()
   })
 
-  it('returns null traceSummaryMarkdown when failure-summary.md is missing (safeReadCapped null branch, line 367)', () => {
-    // traceDir EXISTS (so line 216 takes the TRUE ternary branch and calls safeReadCapped),
-    // but failure-summary.md is absent → safeRead returns null → line 367 TRUE fires.
+  it('returns null traceSummaryMarkdown when failure-summary.md is missing (inlineOrPointer null branch)', () => {
+    // traceDir EXISTS (so inlineOrPointer is called for failure-summary.md),
+    // but the file is absent → safeRead returns null → inlineOrPointer returns null.
     const runId = 'run-1'
     const paths = buildRunPaths(runDirFor(logsDir, runId))
     const failedSlug = 'checkout fails'
@@ -397,13 +418,14 @@ describe('buildExternalFailureDetail', () => {
 
     expect(detail).not.toBeNull()
     expect(detail?.traceDir).toBe(traceDir)
-    // failure-summary.md absent → safeReadCapped returns null → not inlined.
+    // failure-summary.md absent → inlineOrPointer returns null → not inlined.
     expect(detail).not.toHaveProperty('traceSummaryMarkdown')
+    expect(detail).not.toHaveProperty('traceSummaryPath')
   })
 
-  it('omits errorText when error.txt is absent (line 228 FALSE branch)', () => {
-    // safeReadCapped for error.txt returns null when the file does not exist.
-    // Line 228: `...(errorText !== null ? { errorText } : {})` → FALSE branch.
+  it('omits errorText when error.txt is absent', () => {
+    // inlineOrPointer for error.txt returns null when the file does not exist,
+    // so neither errorText nor errorTextPath is set.
     const runId = 'run-1'
     const paths = buildRunPaths(runDirFor(logsDir, runId))
     const failedSlug = 'checkout fails'
@@ -418,8 +440,9 @@ describe('buildExternalFailureDetail', () => {
     })
 
     expect(detail).not.toBeNull()
-    // error.txt absent → safeReadCapped returns null → errorText not inlined.
+    // error.txt absent → inlineOrPointer returns null → errorText not inlined.
     expect(detail).not.toHaveProperty('errorText')
+    expect(detail).not.toHaveProperty('errorTextPath')
   })
 
   it('omits errorPath and falls back to empty artifacts when entry fields are absent (lines 192/196 FALSE branches)', () => {
