@@ -41,6 +41,7 @@ export function App() {
   // its config doc so the rewritten slots show without a tab switch / refresh.
   const [portsRefreshKey, setPortsRefreshKey] = useState(0)
   const [reposRefreshKey, setReposRefreshKey] = useState(0)
+  const [verificationRefreshKey, setVerificationRefreshKey] = useState(0)
   const [specTotalTests, setSpecTotalTests] = useState(0)
   const [collisionPrompt, setCollisionPrompt] = useState<{ feature: string; env?: string; mode?: 'test' | 'boot'; info: RepoCollisionChoice; portsConfigured?: boolean } | null>(null)
   // Port-ification wizard target: 'new' starts a fresh workflow for a feature;
@@ -255,6 +256,9 @@ export function App() {
           if (event.type === 'coverage-changed') {
             setCoverageRefreshKey((key) => key + 1)
           }
+          if (event.type === 'verification-config-changed' && selectedFeatureRef.current === event.feature) {
+            setVerificationRefreshKey((key) => key + 1)
+          }
         },
       })
     } catch {
@@ -333,6 +337,7 @@ export function App() {
               runDisabled={false}
               verifyOpen={verifyOpen}
               onVerifyOpenChange={setVerifyOpen}
+              verificationRefreshKey={verificationRefreshKey}
             />
           )}
           bottom={<RunDetailColumn runId={selectedRunId} onOpenPlaywrightSettings={setConfigFor} totalTests={specTotalTests} />}

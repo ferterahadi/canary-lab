@@ -136,3 +136,19 @@ it needs an event — on *every* path that performs the write, not just the GUI 
 - [[cl_verify-changes]] — changes to `apps/web-server/**` need Tier 3 (canary-apply)
   to confirm end-to-end. Unit tests verify the event is called; live confirms it
   propagates to the browser without a refresh.
+
+## Learned corrections (/todo-learn)
+
+### 2026-06-25 — Don't value-gate live-update wiring; "rare" is not an exemption
+- **Rule:** If a mutation has *any* live UI consumer, wire its `WorkspaceEvent` — even
+  when the only stale scenario is rare (e.g. two clients editing the same thing at
+  once, like the Verify-config dialog). Do **not** recommend skipping a gap on
+  cost/value grounds ("narrow edge case", "dialog refetches on reopen", "by design").
+- **Why:** The "user must never refresh to see real state" bar is **absolute**. How
+  unlikely the concurrent-edit case is doesn't make a stale UI acceptable — rarity ≠
+  exempt. The user holds every visible mutation to live-update, full stop.
+- **How to apply:** When auditing/adding a mutation, the only valid reason to NOT emit
+  is "no visible UI consumer exists at all." If a surface shows the data live (even an
+  on-demand dialog another client could mutate underneath), wire the event + make the
+  consumer refetch — *non-destructively* (don't clobber the editing user's in-progress
+  local state; refetch the list, preserve selection/form). Present the fix, not a skip.

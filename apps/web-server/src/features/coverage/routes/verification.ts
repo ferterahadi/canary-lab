@@ -10,11 +10,13 @@ import {
   type ResolveVerificationInput,
 } from '../../coverage/logic/verification'
 import { isActiveRunStatus } from '../../../../../../shared/run-state'
+import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../shared/workspace-events'
 
 export interface VerificationRouteDeps {
   featuresDir: string
   store: RunStore
   startVerification(feature: string, input: ResolveVerificationInput): Promise<OrchestratorLike>
+  workspaceEvents?: WorkspaceEventPublisher
 }
 
 export async function verificationRoutes(app: FastifyInstance, deps: VerificationRouteDeps): Promise<void> {
@@ -73,8 +75,11 @@ export async function verificationRoutes(app: FastifyInstance, deps: Verificatio
         return { error: parsed.error }
       }
       try {
+        const created = createVerificationConfig(feature, parsed)
+        // Refresh an open Verify dialog on other clients without a reopen.
+        publishWorkspaceEvent(deps.workspaceEvents, { type: 'verification-config-changed', feature: feature.name })
         reply.code(201)
-        return createVerificationConfig(feature, parsed)
+        return created
       } catch (err) {
         reply.code(statusCodeOf(err))
         return { error: errorMessageOf(err) }
@@ -101,6 +106,7 @@ export async function verificationRoutes(app: FastifyInstance, deps: Verificatio
           reply.code(404)
           return { error: 'verification config not found' }
         }
+        publishWorkspaceEvent(deps.workspaceEvents, { type: 'verification-config-changed', feature: feature.name })
         return config
       } catch (err) {
         reply.code(statusCodeOf(err))

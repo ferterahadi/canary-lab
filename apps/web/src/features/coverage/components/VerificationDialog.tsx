@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import * as api from '../../../shared/api/client'
 import type { VerificationConfig, VerificationTarget } from '../../../shared/api/types'
@@ -15,6 +15,9 @@ interface VerificationDialogProps {
     targetUrls?: Record<string, string>
     playwrightEnvsetId?: string
   }) => Promise<void>
+  /** Bumped on a `verification-config-changed` event (MCP/other-tab edit). Re-lists
+   *  the saved configs WITHOUT touching the current selection or in-progress edits. */
+  refreshKey?: number
 }
 
 export function VerificationDialog({
@@ -24,6 +27,7 @@ export function VerificationDialog({
   disabledReason,
   onClose,
   onStart,
+  refreshKey,
 }: VerificationDialogProps) {
   const [configs, setConfigs] = useState<VerificationConfig[]>([])
   const [selectedConfigId, setSelectedConfigId] = useState<string | null>(null)
@@ -79,6 +83,23 @@ export function VerificationDialog({
   // Load once per feature. Envset changes fetch targets in the effect below.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [feature])
+
+  // A `verification-config-changed` event (this config edited via MCP or another
+  // tab) bumps refreshKey. Re-list the saved configs so a new/renamed config shows
+  // live — but DELIBERATELY do not reset selectedConfigId / name / targetUrls, so
+  // the editing user's current selection and unsaved edits survive (cl_ws-driven-
+  // state + don't clobber local state). Skip the initial mount (the loader above
+  // already fetched).
+  const refreshMounted = useRef(false)
+  useEffect(() => {
+    if (!refreshMounted.current) { refreshMounted.current = true; return }
+    let cancelled = false
+    api.listVerificationConfigs(feature)
+      .then((loaded) => { if (!cancelled) setConfigs(loaded) })
+      .catch(() => {})
+    return () => { cancelled = true }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshKey])
 
   useEffect(() => {
     if (!playwrightEnvsetId) return

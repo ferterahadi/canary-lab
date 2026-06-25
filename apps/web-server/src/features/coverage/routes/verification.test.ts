@@ -5,6 +5,7 @@ import path from 'path'
 import Fastify from 'fastify'
 import { verificationRoutes } from './verification'
 import { createRegistry, RunStore, type OrchestratorLike } from '../../runs/logic/run-store'
+import type { WorkspaceEvent } from '../../../shared/workspace-events'
 
 let tmpDir: string
 let featuresDir: string
@@ -61,11 +62,13 @@ describe('verification routes', () => {
   it('lists targets and persists saved configs', async () => {
     writeFeature()
     const store = new RunStore(logsDir, createRegistry())
+    const events: WorkspaceEvent[] = []
     const app = Fastify()
     await app.register(verificationRoutes, {
       featuresDir,
       store,
       startVerification: async () => fakeOrchestrator(),
+      workspaceEvents: { publish: (e) => events.push(e) },
     })
 
     const targets = await app.inject({
@@ -89,6 +92,8 @@ describe('verification routes', () => {
     })
     expect(created.statusCode).toBe(201)
     const createdBody = created.json() as { id: string }
+    // Create pushes a live signal so an open Verify dialog on another client refreshes.
+    expect(events).toContainEqual({ type: 'verification-config-changed', feature: 'checkout' })
 
     const updated = await app.inject({
       method: 'PUT',
@@ -105,6 +110,8 @@ describe('verification routes', () => {
       name: 'Beta',
       targetUrls: { 'api-server': 'https://beta.example.com' },
     })
+    // Update emits too (create + update = 2 signals).
+    expect(events.filter((e) => e.type === 'verification-config-changed')).toHaveLength(2)
 
     const fetched = await app.inject({
       method: 'GET',
