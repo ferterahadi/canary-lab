@@ -227,7 +227,8 @@ describe('feature.config endpoints', () => {
     buildFeature('branchy-clean', {
       config: `module.exports = { config: { name: 'branchy-clean', description: 'd', envs: [], repos: [{ name: 'app', localPath: ${JSON.stringify(repo)} }], featureDir: __dirname } }`,
     })
-    const app = await makeApp()
+    const events: WorkspaceEvent[] = []
+    const app = await makeApp({ events })
     try {
       const r = await app.inject({
         method: 'POST',
@@ -236,6 +237,8 @@ describe('feature.config endpoints', () => {
       })
       expect(r.statusCode).toBe(200)
       expect(r.json().currentBranch).toBe('feature/demo')
+      // Branch moved → push so an open Repos tab refetches its git-status row live.
+      expect(events).toContainEqual({ type: 'features-changed' })
     } finally {
       await app.close()
     }

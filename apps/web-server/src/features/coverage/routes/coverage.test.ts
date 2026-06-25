@@ -25,6 +25,7 @@ vi.mock('../../coverage/logic/coverage/annotate-engine', async (importActual) =>
 })
 
 import { coverageRoutes } from './coverage'
+import type { WorkspaceEvent } from '../../../shared/workspace-events'
 import { CoverageJobRunStore, type CoverageJobStore, type CoverageJobStoreEvent } from '../../coverage/logic/coverage/jobs/store'
 import type { CoverageLedger, PrdSummary } from '../../../../../../shared/coverage/types'
 import type { CoverageJobManifest, CoverageJobIndexEntry, CoverageJobKind } from '../../coverage/logic/coverage/jobs/types'
@@ -33,6 +34,7 @@ let tmpDir: string
 let featuresDir: string
 let logsDir: string
 let app: FastifyInstance
+let events: WorkspaceEvent[]
 
 beforeEach(async () => {
   tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-cov-route-')))
@@ -41,7 +43,8 @@ beforeEach(async () => {
   fs.mkdirSync(featuresDir, { recursive: true })
   fs.mkdirSync(logsDir, { recursive: true })
   app = Fastify()
-  await app.register(coverageRoutes, { featuresDir, logsDir, projectRoot: tmpDir })
+  events = []
+  await app.register(coverageRoutes, { featuresDir, logsDir, projectRoot: tmpDir, workspaceEvents: { publish: (e) => events.push(e) } })
   await app.ready()
 })
 
@@ -136,6 +139,9 @@ describe('coverage routes', () => {
     const docs = (await app.inject({ method: 'GET', url: '/api/features/checkout/docs' })).json() as { docs: { relPath: string }[]; sourceDocCount: number }
     expect(docs.docs.map((d) => d.relPath)).toContain('notes.md')
     expect(docs.sourceDocCount).toBe(1)
+    // Adding a doc must announce itself so the open Docs rail / coverage badge
+    // refresh live (cl_ws-driven-state).
+    expect(events).toContainEqual({ type: 'coverage-changed', feature: 'checkout' })
   })
 
   it('rejects a doc write with missing fields', async () => {
@@ -210,6 +216,7 @@ describe('coverage routes', () => {
     expect((imp.json() as { relativePath: string }).relativePath).toContain('brief.md')
     const docs = (await app.inject({ method: 'GET', url: '/api/features/checkout/docs' })).json() as { docs: { relPath: string }[] }
     expect(docs.docs.map((d) => d.relPath)).toContain('brief.md')
+    expect(events).toContainEqual({ type: 'coverage-changed', feature: 'checkout' })
   })
 
   it('deletes a source doc but refuses a generated artifact', async () => {
@@ -219,6 +226,7 @@ describe('coverage routes', () => {
     const ok = await app.inject({ method: 'DELETE', url: '/api/features/checkout/docs/spec.md' })
     expect(ok.statusCode).toBe(200)
     expect(fs.existsSync(path.join(dir, 'docs', 'spec.md'))).toBe(false)
+    expect(events).toContainEqual({ type: 'coverage-changed', feature: 'checkout' })
 
     const refused = await app.inject({ method: 'DELETE', url: '/api/features/checkout/docs/_prd-summary.md' })
     expect(refused.statusCode).toBe(400)
@@ -234,6 +242,9 @@ describe('coverage routes', () => {
     const cleared = await app.inject({ method: 'DELETE', url: '/api/features/checkout/prd-summary' })
     expect(cleared.statusCode).toBe(200)
     expect((cleared.json() as { removed: string[] }).removed).toContain('_prd-summary.json')
+    // Clearing changes the coverage badge AND un-tags the specs — both must push.
+    expect(events).toContainEqual({ type: 'coverage-changed', feature: 'checkout' })
+    expect(events).toContainEqual({ type: 'tests-changed', feature: 'checkout' })
 
     // Back to no summary; source doc untouched.
     docs = (await app.inject({ method: 'GET', url: '/api/features/checkout/docs' })).json() as { hasPrdSummary: boolean }
