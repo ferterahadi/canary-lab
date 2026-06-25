@@ -98,13 +98,16 @@ describe('feature.config endpoints', () => {
     }
   })
 
-  it('DELETE portify-overlay removes the overlay, un-portifies, and emits features-changed', async () => {
-    const dir = buildFeature('porty')
+  it('DELETE portify-overlay restores the pre-Portify config snapshot, then removes the overlay', async () => {
+    const preConfig = `module.exports = { config: { name: 'porty', description: 'd', envs: ['local'], repos: [{ name: 'r', localPath: __dirname, startCommands: [{ command: 'yarn start' }] }], featureDir: __dirname } }`
+    const portifiedConfig = `module.exports = { config: { name: 'porty', description: 'd', envs: ['local'], repos: [{ name: 'r', localPath: __dirname, startCommands: [{ command: 'yarn start', ports: [{ name: 'api', env: 'PORT' }] }] }], featureDir: __dirname } }`
+    const dir = buildFeature('porty', { config: portifiedConfig })
     writeOverlay(dir, {
       featureName: 'porty',
       agent: 'claude',
       capturedAt: '2026-06-24T00:00:00.000Z',
       repos: [{ name: 'r', baseSha: 'deadbeef', patch: 'diff --git a b\n', touchedFiles: [] }],
+      originalConfig: preConfig,
     })
     expect(overlayExists(dir)).toBe(true)
 
@@ -113,9 +116,37 @@ describe('feature.config endpoints', () => {
     try {
       const r = await app.inject({ method: 'DELETE', url: '/api/features/porty/portify-overlay' })
       expect(r.statusCode).toBe(200)
-      expect(r.json()).toMatchObject({ name: 'porty', portified: false })
+      expect(r.json()).toMatchObject({ name: 'porty', portified: false, reverted: true })
       expect(overlayExists(dir)).toBe(false)
+      // The config file is restored to the pre-Portify snapshot — slots gone.
+      const onDisk = fs.readFileSync(path.join(dir, 'feature.config.cjs'), 'utf-8')
+      expect(onDisk).toBe(preConfig)
+      expect(onDisk).not.toContain('ports:')
       expect(events).toContainEqual({ type: 'features-changed' })
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('DELETE portify-overlay strips the declared slots for a legacy overlay (no snapshot)', async () => {
+    // Legacy overlay (no snapshot) + a config that still carries the slots Portify
+    // declared → best-effort strip so they don't linger, even without a snapshot.
+    const portifiedConfig = `module.exports = { config: { name: 'porty-legacy', description: 'd', envs: ['local'], repos: [{ name: 'r', localPath: __dirname, startCommands: [{ command: 'yarn start', ports: [{ name: 'api', env: 'PORT' }] }] }], featureDir: __dirname } }`
+    const dir = buildFeature('porty-legacy', { config: portifiedConfig })
+    writeOverlay(dir, {
+      featureName: 'porty-legacy',
+      agent: 'claude',
+      capturedAt: '2026-06-24T00:00:00.000Z',
+      repos: [{ name: 'r', baseSha: 'deadbeef', patch: 'diff --git a b\n', touchedFiles: [] }],
+    })
+    const app = await makeApp()
+    try {
+      const r = await app.inject({ method: 'DELETE', url: '/api/features/porty-legacy/portify-overlay' })
+      expect(r.statusCode).toBe(200)
+      expect(r.json()).toMatchObject({ name: 'porty-legacy', portified: false, reverted: true })
+      expect(overlayExists(dir)).toBe(false)
+      // The declared slots are stripped from the config.
+      expect(fs.readFileSync(path.join(dir, 'feature.config.cjs'), 'utf-8')).not.toContain('ports:')
     } finally {
       await app.close()
     }

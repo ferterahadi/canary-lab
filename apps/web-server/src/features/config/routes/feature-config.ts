@@ -16,11 +16,8 @@ import { resolveVars } from '../../runs/logic/runtime/env-switcher/switch'
 import { getProjectRoot } from '../../../../../../shared/runtime/project-root'
 import { checkoutBranch, findRepo, getGitStatus, resolveRepoPath } from '../../../shared/git-repo'
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../shared/workspace-events'
-import {
-  overlayExists as portifyOverlayExists,
-  readOverlayOriginalConfig,
-  removeOverlay,
-} from '../../portify/logic/runtime/overlay'
+import { overlayExists as portifyOverlayExists } from '../../portify/logic/runtime/overlay'
+import { revertPortification } from '../../portify/logic/runtime/unportify'
 
 export interface FeatureConfigRouteDeps {
   featuresDir: string
@@ -179,15 +176,18 @@ export async function featureConfigRoutes(
     },
   )
 
-  // ─── un-portify: fully revert the port-ification ──────────────────────
+  // ─── un-portify: always auto-clean, never prompt ──────────────────────
   // Portify makes two kinds of change: a reversible product-code overlay, AND
   // permanent edits to feature.config.cjs (the declared `ports` slots + the
-  // `${port.x}` health-check / inter-service URL rewrites). Removing only the
-  // overlay would leave the slots — and worse, health-check URLs pointing at a
-  // `${port.x}` token nothing defines, breaking boot. So we restore the
-  // pre-Portify config snapshot captured with the overlay, THEN delete the
-  // overlay. Legacy overlays without a snapshot fall back to overlay-only
-  // removal (the slots linger — re-run Portify to refresh + recapture).
+  // `${port.x}` health-check / inter-service URL rewrites). So removal restores
+  // the pre-Portify config — every overlay written since this shipped carries a
+  // snapshot (captured at save), so the restore is exact and lossless.
+  //
+  // Legacy overlays (saved before snapshots existed) have nothing to restore;
+  // rather than leave the slots lingering we best-effort strip the declared
+  // `ports` so they don't show. Their `${port.x}` health-check tokens can't be
+  // un-rewritten without the snapshot — re-run Portify to regenerate a clean
+  // config. Either way the overlay is deleted and we never prompt the user.
   // Emits features-changed so the Portified badge flips live, no refresh.
   app.delete<{ Params: { name: string } }>('/api/features/:name/portify-overlay', async (req, reply) => {
     const features = loadFeatures(deps.featuresDir)
@@ -196,16 +196,7 @@ export async function featureConfigRoutes(
       reply.code(404)
       return { error: 'feature not found' }
     }
-    const snapshot = readOverlayOriginalConfig(feature.featureDir)
-    let reverted = false
-    if (snapshot != null) {
-      const cfg = findExistingConfig(feature.featureDir, FEATURE_CONFIG_NAMES)
-      if (cfg) {
-        fs.writeFileSync(cfg.path, snapshot)
-        reverted = true
-      }
-    }
-    removeOverlay(feature.featureDir)
+    const { reverted } = revertPortification(feature.featureDir)
     publishWorkspaceEvent(deps.workspaceEvents, { type: 'features-changed' })
     return { name: feature.name, portified: portifyOverlayExists(feature.featureDir), reverted }
   })

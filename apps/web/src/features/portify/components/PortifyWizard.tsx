@@ -124,19 +124,20 @@ export function PortifyWizard({
   }
 
   // Save captures the verified edits as the feature's ephemeral overlay (status
-  // → saved) and discards the scratch worktree. Advance to the Save step.
+  // → saved) and discards the scratch worktree, then closes the wizard outright.
+  // onSaved unmounts us and refreshes the feature list / Ports tab, so there's
+  // no in-place transition to a confirmation screen (which caused a layout shift
+  // as the "Done" button appeared). The saved Review screen is still reachable
+  // by revisiting the workflow from history.
   const save = async () => {
     if (!workflowId) return
     setBusy(true); setError(null)
     try {
-      const next = await api.savePortify(workflowId)
-      setM(next)
-      // Stay on the Review & save node (now showing the saved confirmation),
-      // even if the user had navigated back to Exercise before hitting Save.
-      setViewStep(2)
+      await api.savePortify(workflowId)
+      stopPolling()
+      onSaved()
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
-    } finally {
       setBusy(false)
     }
   }

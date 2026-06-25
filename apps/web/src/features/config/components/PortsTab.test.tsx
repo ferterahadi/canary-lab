@@ -117,8 +117,9 @@ describe('PortsTab', () => {
       root.render(<PortsTab feature="np_feature" onStartPortify={onStartPortify} />)
     })
     expect(container.textContent).toContain('Not portified')
-    // The per-command empty state nudges to Portify (no hand-authoring path).
-    expect(container.textContent).toContain('Uses its hardcoded port')
+    // The per-command empty state is a single neutral status — no repeated pitch,
+    // no per-card CTA (the band carries the one Portify action).
+    expect(container.textContent).toContain('No port slots declared')
     await act(async () => clickButton('Portify'))
     expect(onStartPortify).toHaveBeenCalledWith('np_feature')
     expect(container.textContent).not.toContain('Re-run Portify?')
@@ -180,20 +181,46 @@ describe('PortsTab', () => {
     expect(container.textContent).not.toContain('=')
   })
 
-  it('un-portifies behind a confirm → calls removePortifyOverlay', async () => {
-    vi.mocked(getFeatureConfigDoc).mockResolvedValue(docWithPorts())
+  it('un-portifies behind a confirm → calls removePortifyOverlay and refetches the reverted config', async () => {
+    // First load shows the portified slots; after removal the config is reverted,
+    // so the in-place refetch returns the pre-Portify (no-ports) doc.
+    vi.mocked(getFeatureConfigDoc).mockResolvedValueOnce(docWithPorts()).mockResolvedValue(docNoPorts())
     await act(async () => {
       root.render(<PortsTab feature="cns_exactly_once_fallback" portified onStartPortify={vi.fn()} />)
     })
+    expect(getFeatureConfigDoc).toHaveBeenCalledTimes(1)
+
     // Intro-band action opens the confirm; the call does not fire yet.
     await act(async () => clickButton('Remove portification'))
     expect(removePortifyOverlay).not.toHaveBeenCalled()
     expect(container.textContent).toContain('Remove portification?')
 
-    // Confirm inside the modal → fires the delete. (The live un-portify flip is
-    // driven by the server's features-changed broadcast, not local state.)
+    // Confirm inside the modal → fires the delete, then refetches the reverted
+    // config in place (reloadKey bump). The status-band flip is driven by the
+    // server's features-changed broadcast, not local state.
     const modal = container.querySelector('.cl-modal')!
     const confirmBtn = [...modal.querySelectorAll('button')].find((b) => b.textContent?.includes('Remove portification'))!
+    await act(async () => confirmBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+    expect(removePortifyOverlay).toHaveBeenCalledWith('cns_exactly_once_fallback')
+    expect(getFeatureConfigDoc).toHaveBeenCalledTimes(2)
+  })
+
+  it('offers "Clear port slots" for a not-portified feature with orphaned slots', async () => {
+    // Not portified, but the config still declares a slot → orphaned leftover.
+    // The danger action reads "Clear port slots" (not "Remove portification")
+    // and routes through the same un-portify endpoint.
+    vi.mocked(getFeatureConfigDoc).mockResolvedValue(docWithPorts())
+    await act(async () => {
+      root.render(<PortsTab feature="cns_exactly_once_fallback" onStartPortify={vi.fn()} />)
+    })
+    const clear = [...container.querySelectorAll('button')].find((b) => b.getAttribute('aria-label') === 'Clear port slots')
+    expect(clear).toBeTruthy()
+    expect([...container.querySelectorAll('button')].some((b) => b.getAttribute('aria-label') === 'Remove portification')).toBe(false)
+
+    await act(async () => clear!.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+    expect(container.textContent).toContain('Clear port slots?')
+    const modal = container.querySelector('.cl-modal')!
+    const confirmBtn = [...modal.querySelectorAll('button')].find((b) => b.textContent?.includes('Clear port slots'))!
     await act(async () => confirmBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })))
     expect(removePortifyOverlay).toHaveBeenCalledWith('cns_exactly_once_fallback')
   })
