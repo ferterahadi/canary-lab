@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from 'react'
 import type { Feature } from '../../../shared/api/types'
 import type { PortifyIndexEntry, PortifyStatus } from '../../../shared/api/client'
 import { StatusDot } from '../../config/components/atoms'
+import { usePortify } from '../state/PortifyContext'
+import { latestSavedWorkflowId } from '../state/portify-state'
 
 interface Props {
   features: Feature[]
@@ -10,8 +12,9 @@ interface Props {
   activePortify?: PortifyIndexEntry
   /** Start (or reopen the Plan screen of) port-ification for this feature. */
   onPick: (feature: string) => void
-  /** Reopen the in-flight workflow in the wizard (used by the active row). */
-  onOpenActive?: (workflowId: string) => void
+  /** Open a workflow (by id) in the wizard — the active row, or "View latest"
+   *  on a portified row (its most-recent saved overlay). */
+  onOpenWorkflow?: (workflowId: string) => void
   onClose: () => void
 }
 
@@ -30,8 +33,11 @@ function portifyPhaseLabel(status: PortifyStatus): string {
 // Feature picker for the always-on Portify launcher. Lists every feature with
 // its portified status so the user can pick one to make its ports injectable.
 // Selecting a feature opens the Portify wizard's Plan screen for it.
-export function PortifyPickerDialog({ features, activePortify, onPick, onOpenActive, onClose }: Props) {
+export function PortifyPickerDialog({ features, activePortify, onPick, onOpenWorkflow, onClose }: Props) {
   const [query, setQuery] = useState('')
+  // Resolve each portified feature's latest saved overlay so "View latest" opens
+  // exactly what's on disk (live-synced index from the portify stream).
+  const { workflows } = usePortify()
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => { if (e.key === 'Escape') onClose() }
@@ -95,46 +101,94 @@ export function PortifyPickerDialog({ features, activePortify, onPick, onOpenAct
             {filtered.map((f) => {
               const active = activePortify?.feature === f.name ? activePortify : undefined
               const ready = active?.status === 'ready-to-save'
+
+              // In-flight feature → single row that resumes the workflow.
+              if (active) {
+                return (
+                  <li key={f.name}>
+                    <button
+                      type="button"
+                      onClick={() => { onOpenWorkflow?.(active.workflowId); onClose() }}
+                      className="group flex w-full cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-2 text-left transition-colors hover:bg-white/[0.04]"
+                      style={{ border: '1px solid var(--border-default)' }}
+                      title={`View port-ification of ${f.name}`}
+                    >
+                      <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium">{f.name}</span>
+                      <span
+                        className="shrink-0 inline-flex items-center gap-1.5 text-[10.5px] font-medium"
+                        style={{ color: ready ? 'var(--accent)' : 'var(--text-secondary)' }}
+                      >
+                        <StatusDot state={ready ? 'success' : 'running'} halo className="shrink-0" />
+                        {portifyPhaseLabel(active.status)}
+                      </span>
+                      <span aria-hidden="true" className="shrink-0 text-[12px]" style={{ color: 'var(--text-muted)' }}>↗</span>
+                    </button>
+                  </li>
+                )
+              }
+
+              // Portified feature → two actions: view the saved overlay, or
+              // re-portify (refresh it). View is hidden when no saved record
+              // backs the overlay (legacy / pruned) — nothing to open.
+              if (f.portified) {
+                const savedId = latestSavedWorkflowId(workflows, f.name)
+                return (
+                  <li key={f.name}>
+                    <div
+                      className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-2"
+                      style={{ border: '1px solid var(--border-default)' }}
+                    >
+                      <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium">{f.name}</span>
+                      <span
+                        className="shrink-0 rounded px-1.5 py-0.5 text-[9.5px] font-semibold uppercase tracking-wide"
+                        style={{
+                          color: 'rgb(52,211,153)',
+                          background: 'color-mix(in srgb, rgb(52,211,153) 14%, transparent)',
+                          border: '1px solid color-mix(in srgb, rgb(52,211,153) 35%, transparent)',
+                        }}
+                      >
+                        ⇄ portified
+                      </span>
+                      {savedId && (
+                        <button
+                          type="button"
+                          onClick={() => { onOpenWorkflow?.(savedId); onClose() }}
+                          className="shrink-0 rounded px-2 py-0.5 text-[10.5px] font-medium transition-colors hover:bg-white/[0.06]"
+                          style={{ border: '1px solid var(--border-default)', color: 'var(--text-secondary)' }}
+                          title={`View ${f.name}'s saved overlay`}
+                        >
+                          View latest
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => { onPick(f.name); onClose() }}
+                        className="shrink-0 rounded px-2 py-0.5 text-[10.5px] font-medium transition-colors"
+                        style={{ border: '1px solid color-mix(in srgb, var(--accent) 45%, var(--border-default))', color: 'var(--accent)', background: 'color-mix(in srgb, var(--accent) 8%, transparent)' }}
+                        title={`Re-run Portify on ${f.name} — refreshes the overlay from current source`}
+                      >
+                        ↻ Re-portify
+                      </button>
+                    </div>
+                  </li>
+                )
+              }
+
+              // Not portified → single row that starts a fresh workflow.
               return (
-              <li key={f.name}>
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (active) { onOpenActive?.(active.workflowId); onClose(); return }
-                    onPick(f.name); onClose()
-                  }}
-                  className="group flex w-full cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-2 text-left transition-colors hover:bg-white/[0.04]"
-                  style={{ border: '1px solid var(--border-default)' }}
-                  title={active ? `View port-ification of ${f.name}` : f.portified ? `Re-run Portify on ${f.name}` : `Portify ${f.name}`}
-                >
-                  <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium">{f.name}</span>
-                  {active ? (
-                    <span
-                      className="shrink-0 inline-flex items-center gap-1.5 text-[10.5px] font-medium"
-                      style={{ color: ready ? 'var(--accent)' : 'var(--text-secondary)' }}
-                    >
-                      <StatusDot state={ready ? 'success' : 'running'} halo className="shrink-0" />
-                      {portifyPhaseLabel(active.status)}
-                    </span>
-                  ) : f.portified ? (
-                    <span
-                      className="shrink-0 rounded px-1.5 py-0.5 text-[9.5px] font-semibold uppercase tracking-wide"
-                      style={{
-                        color: 'rgb(52,211,153)',
-                        background: 'color-mix(in srgb, rgb(52,211,153) 14%, transparent)',
-                        border: '1px solid color-mix(in srgb, rgb(52,211,153) 35%, transparent)',
-                      }}
-                    >
-                      ⇄ portified
-                    </span>
-                  ) : (
+                <li key={f.name}>
+                  <button
+                    type="button"
+                    onClick={() => { onPick(f.name); onClose() }}
+                    className="group flex w-full cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-2 text-left transition-colors hover:bg-white/[0.04]"
+                    style={{ border: '1px solid var(--border-default)' }}
+                    title={`Portify ${f.name}`}
+                  >
+                    <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium">{f.name}</span>
                     <span className="shrink-0 text-[10.5px]" style={{ color: 'var(--text-muted)' }}>not portified</span>
-                  )}
-                  <span aria-hidden="true" className="shrink-0 text-[12px]" style={{ color: 'var(--text-muted)' }}>
-                    {active ? '↗' : f.portified ? '↻' : '→'}
-                  </span>
-                </button>
-              </li>
+                    <span aria-hidden="true" className="shrink-0 text-[12px]" style={{ color: 'var(--text-muted)' }}>→</span>
+                  </button>
+                </li>
               )
             })}
           </ul>

@@ -4,8 +4,9 @@ import {
   initialPortifyState,
   frameToAction,
   isActivePortify,
+  latestSavedWorkflowId,
 } from './portify-state'
-import type { PortifyManifest } from '../../../shared/api/client'
+import type { PortifyIndexEntry, PortifyManifest } from '../../../shared/api/client'
 
 function m(over: Partial<PortifyManifest> = {}): PortifyManifest {
   return {
@@ -99,5 +100,32 @@ describe('isActivePortify', () => {
     for (const s of ['saved', 'failed', 'aborted'] as const) {
       expect(isActivePortify(s)).toBe(false)
     }
+  })
+})
+
+describe('latestSavedWorkflowId', () => {
+  const e = (over: Partial<PortifyIndexEntry> & { workflowId: string }): PortifyIndexEntry =>
+    ({ feature: 'checkout', status: 'saved', startedAt: '2026-01-01T00:00:00.000Z', ...over })
+
+  it('returns the most-recent saved workflow for the feature', () => {
+    const wfs = [
+      e({ workflowId: 'old', startedAt: '2026-01-01T00:00:00.000Z' }),
+      e({ workflowId: 'new', startedAt: '2026-02-01T00:00:00.000Z' }),
+      e({ workflowId: 'other', feature: 'auth', startedAt: '2026-03-01T00:00:00.000Z' }),
+    ]
+    expect(latestSavedWorkflowId(wfs, 'checkout')).toBe('new')
+  })
+
+  it('ignores non-saved statuses', () => {
+    const wfs = [
+      e({ workflowId: 'failed', status: 'failed', startedAt: '2026-05-01T00:00:00.000Z' }),
+      e({ workflowId: 'saved', status: 'saved', startedAt: '2026-01-01T00:00:00.000Z' }),
+    ]
+    expect(latestSavedWorkflowId(wfs, 'checkout')).toBe('saved')
+  })
+
+  it('returns undefined when the feature has no saved record', () => {
+    expect(latestSavedWorkflowId([e({ workflowId: 'a', status: 'aborted' })], 'checkout')).toBeUndefined()
+    expect(latestSavedWorkflowId([], 'checkout')).toBeUndefined()
   })
 })

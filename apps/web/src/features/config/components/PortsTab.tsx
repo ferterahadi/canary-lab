@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react'
 import * as api from '../../../shared/api/client'
 import type { ConfigValue } from '../../../shared/api/client'
 import { ConfirmModal, TrashIcon } from './atoms'
-import { PortifyHistoryList } from '../../portify/components/PortifyHistoryList'
+import { usePortify } from '../../portify/state/PortifyContext'
+import { latestSavedWorkflowId } from '../../portify/state/portify-state'
 import {
   deriveRepoName,
   parseRepo,
@@ -62,6 +63,11 @@ export function PortsTab({
   const [confirmRemove, setConfirmRemove] = useState(false)
   const [removing, setRemoving] = useState(false)
   const [removeError, setRemoveError] = useState<string | null>(null)
+  // The latest saved overlay's workflow id — opens it read-only in the wizard.
+  // (Replaces the old inline history list: only the live overlay matters here;
+  // the full record history + pruning live in the Log Cleanup → Portify tab.)
+  const { workflows } = usePortify()
+  const savedWorkflowId = latestSavedWorkflowId(workflows, feature)
 
   if (loadError) {
     return <div className="p-4 text-xs" style={{ color: 'var(--danger)' }}>{loadError}</div>
@@ -137,6 +143,21 @@ export function PortsTab({
             )}
           </div>
           <div className="flex shrink-0 items-center gap-2 self-start">
+            {/* View the saved overlay (the verified diff) read-only in the
+                wizard — the at-a-glance "what got rewritten" the removed inline
+                history used to provide. Only when a saved record backs it. */}
+            {portified && savedWorkflowId && onOpenPortify && (
+              <button
+                type="button"
+                onClick={() => onOpenPortify(savedWorkflowId)}
+                aria-label="View saved overlay"
+                title="View saved overlay — opens the verified port-ification in the wizard."
+                className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[11px] font-medium transition-colors duration-150"
+                style={{ color: 'var(--text-secondary)', border: '1px solid var(--border-default)', background: 'transparent' }}
+              >
+                View saved overlay
+              </button>
+            )}
             {/* Portified → undo the whole port-ification (overlay + config).
                 Not portified but slots are still declared → those are orphaned
                 config (a removed portification, or hand-declared); offer to
@@ -237,12 +258,6 @@ export function PortsTab({
           ))}
         </div>
 
-        {/* This feature's Portify history. Lives here — where Portify is
-            launched — so a committed run's branch stays findable after its
-            window is closed. */}
-        <div className="px-4 py-3" style={{ borderTop: '1px solid var(--border-default)' }}>
-          <PortifyHistoryList feature={feature} onOpenPortify={onOpenPortify} />
-        </div>
       </div>
 
       {confirmRerun && (

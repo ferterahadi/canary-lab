@@ -31,9 +31,12 @@ import {
 import {
   PRD_SUMMARY_JSON,
   PRD_SUMMARY_MD,
+  assembleSummary,
+  buildPrdSummaryPrompt,
   readPrdSummary,
   summarizePrd,
   writePrdSummary,
+  type ParsedRequirement,
   type SummarizeAdapter,
 } from '../../../coverage/logic/coverage/prd-summary'
 
@@ -424,6 +427,91 @@ export function applyExternalCoverageMappings(args: ApplyExternalCoverageArgs): 
 
   const ledger = computeFeatureCoverage({ featuresDir: args.featuresDir, logsDir: args.logsDir, feature: args.feature })
   return { feature: args.feature, applied, ledger }
+}
+
+// ---------------------------------------------------------------------------
+// External (offloaded) PRD summary — the SAME summarization exercise, but the
+// calling MCP client reads the source docs and proposes the requirements itself
+// (no Canary-spawned agent). buildSummaryAuthoringContext hands the client the
+// prompt; the client returns `requirements`; applyExternalSummary reconciles ids
+// + writes the sidecar through the canonical assembler — so the offload path
+// never re-implements the prompt OR the id spine. Mirrors the external-coverage
+// pair above.
+// ---------------------------------------------------------------------------
+
+export interface SummaryAuthoringDoc {
+  relPath: string
+  /** Absolute path the client should read before proposing requirements. */
+  absPath: string
+}
+
+export interface SummaryAuthoringContext {
+  feature: string
+  /** The source docs to read (their absolute paths are embedded in the prompt). */
+  docs: SummaryAuthoringDoc[]
+  /** Previous requirement ids to PRESERVE — the stable spine inline @requirement
+   *  annotations point at. Reuse a surviving id rather than minting a new one. */
+  previousRequirementIds: string[]
+  /** The full summarization prompt (instructions + doc paths + previous ids + the
+   *  expected `{ requirements: [...] }` output shape) — hand to the client
+   *  verbatim. Reuses the internal summarizer prompt so both surfaces agree. */
+  prompt: string
+}
+
+export type BuildSummaryAuthoringResult =
+  | { kind: 'needs-docs'; feature: string }
+  | { kind: 'ok'; context: SummaryAuthoringContext }
+
+/** Assemble the read-only context an offloaded client needs to summarize the PRD.
+ *  Returns `needs-docs` (no context) when the feature has no source docs to read.
+ *  Throws FeatureNotFoundError for an unknown feature. */
+export function buildSummaryAuthoringContext(args: { featuresDir: string; feature: string }): BuildSummaryAuthoringResult {
+  const featureDir = resolveFeatureDir(args.featuresDir, args.feature)
+  const collection = readDocsCollection(featureDir)
+  if (collection.entries.length === 0) return { kind: 'needs-docs', feature: args.feature }
+  const previous = readPrdSummary(featureDir)
+  return {
+    kind: 'ok',
+    context: {
+      feature: args.feature,
+      docs: collection.entries.map((e) => ({ relPath: e.relPath, absPath: path.join(collection.docsDir, e.relPath) })),
+      previousRequirementIds: (previous?.requirements ?? []).map((r) => r.id),
+      prompt: buildPrdSummaryPrompt(collection, previous?.requirements ?? []),
+    },
+  }
+}
+
+export interface ApplyExternalSummaryArgs {
+  featuresDir: string
+  feature: string
+  requirements: ParsedRequirement[]
+  now?: string
+}
+
+export interface ApplyExternalSummaryResult {
+  feature: string
+  summary: PrdSummary
+  /** Relative paths of the written generated artifacts. */
+  written: string[]
+}
+
+/** Apply a client-supplied requirement list: reconcile ids against the prior
+ *  summary (the spine) and write the sidecar + markdown through the canonical
+ *  assembler/writer. Mirrors the write-tail of `regeneratePrdSummary` but spawns
+ *  NO agent — the summarization already happened on the client. */
+export function applyExternalSummary(args: ApplyExternalSummaryArgs): ApplyExternalSummaryResult {
+  const found = loadFeatures(args.featuresDir).find((f) => f.name === args.feature)
+  if (!found || !found.featureDir) throw new FeatureNotFoundError(args.feature)
+  const featureDir = found.featureDir
+  const collection = readDocsCollection(featureDir)
+  const previous = readPrdSummary(featureDir)
+  const summary = assembleSummary(collection, previous, args.requirements, args.now)
+  const written = writePrdSummary(featureDir, found.name, summary)
+  return {
+    feature: args.feature,
+    summary: written,
+    written: [path.join('docs', PRD_SUMMARY_JSON), path.join('docs', PRD_SUMMARY_MD)],
+  }
 }
 
 export interface FeatureDoc {

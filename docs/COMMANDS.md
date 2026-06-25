@@ -26,6 +26,7 @@ The Coverage ledger is reachable over MCP as well as the UI — both read the sa
 
 - `get_feature_coverage(feature)` — the full ledger: each requirement → its annotated tests → the last passing run + a gap type (`untested` / `unverified` / `path-incomplete` / `verified` / `shallow-verified`), the grounded coverage %, the per-requirement rigor (`tierReached` / `tierAvailable` / `strictness` / `weakestAssertion` / `suggestedStrongerCheck`), and a `docsDrift` flag.
 - `list_feature_docs(feature)` — the docs that feed the PRD (source vs generated), plus the summary status.
-- `regenerate_prd_summary(feature)` — re-summarize the source docs into requirements (preserving existing ids). Add docs first with `write_feature_doc`.
+- `start_external_summary(feature)` → `submit_external_summary(jobId, requirements)` — YOU read the source docs (returned in the prompt) and propose the requirements; canary reconciles ids (preserving existing ones) and writes the summary. No local agent — over MCP you author it. Add docs first with `write_feature_doc`.
+- `start_external_coverage(feature)` → `submit_external_coverage(jobId, mappings)` — YOU read the tests and map them to requirements; canary writes the `@req-*` tags and recomputes. Needs a summary first.
 
 Tests link to requirements via Playwright tags on each `test()` — `{ tag: ['@req-<id>', '@path-happy|sad|edge'] }` (legacy `@requirement`/`@path` comments still parse); see [FEATURES](FEATURES.md#verified-coverage). Canary attests; it never writes a requirement's test for you.

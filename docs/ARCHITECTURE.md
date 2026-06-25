@@ -313,10 +313,15 @@ a local autoHeal mid-flight); `auto`/`claude`/`codex` require a failed/aborted r
 **Portify** (`apps/web-server/src/features/portify/logic/runtime/`, ~11 files) is an agent-driven
 workflow that rewrites a feature's services so every network listener reads an
 injected port, proven by a concurrent double-boot — making the feature eligible for
-concurrent runs and benchmark arms. Lifecycle: `start_portify` →
-`get_portify` polling (`editing → verifying → ready-to-save`) →
-`save_portify`/`cancel_portify`, with unbounded `revise_portify` feedback rounds.
-One workflow at a time; `list_portify_status` shows which features have a saved overlay.
+concurrent runs and benchmark arms. Two execution models, split by who initiates
+(see "Internal vs external execution" under Verified Coverage — the same rule):
+the **GUI** spawns a local agent (`startPortify`/`revise`, REST only) that streams
+through `AgentSessionView`; **MCP clients** drive it themselves
+(`start_external_portify` → in-place edits → `submit_external_portify`, the
+re-edit+re-submit loop replacing `revise`) and the GUI shows `ExternalPortifyPanel`.
+Both converge on `get_portify` (`editing → verifying → ready-to-save`) →
+`save_portify`/`cancel_portify`. One workflow at a time; `list_portify_status`
+shows which features have a saved overlay.
 
 **Ephemeral overlay model** (the source edits never touch the product repo): the
 agent edits source in a throwaway scratch worktree and the verified diff is captured
@@ -361,23 +366,27 @@ opinion:
   `shallow-verified` gap, returned with a `suggestedStrongerCheck`.
 
 `service.ts` is the single computation layer; `routes/coverage.ts` (REST) and the
-`get_feature_coverage` / `list_feature_docs` / `regenerate_prd_summary` MCP tools both
-call it, so the UI and an agent can't diverge. The agent's role is bounded to *generate
-and map* (summarize docs, propose the ladder, resolve `unknown` assertions); canary
-*grounds and attests* (computes the %, the tier, and the evidence).
+`get_feature_coverage` / `list_feature_docs` MCP tools both call it, so the UI and an
+agent can't diverge. The agent's role is bounded to *generate and map* (summarize docs,
+propose the ladder, resolve `unknown` assertions); canary *grounds and attests*
+(computes the %, the tier, and the evidence).
 
-The annotate-pass (mapping tests → requirements) has two execution models. **Internal**
-(`start_coverage_job`, the default): canary spawns its own `claude`/`codex` CLI
-(`annotate-engine.ts`) — even when triggered by an MCP client, the agent runs on the
-server and streams through `AgentSessionView`. **External / offloaded**
-(`start_external_coverage` → `submit_external_coverage`, `jobs/external.ts`): canary
-spawns **no** LLM — it hands the calling client the mapping context
-(`buildCoverageMappingContext`, reusing the internal annotate prompt), the client does
-the inference itself, and canary writes the tags through the canonical tag-writer
-(`applyExternalCoverageMappings`) and recomputes. Such jobs carry `producer: 'external'`,
-have no `sessionRef`, and render monitor-only in the Generating pane. Both models feed the
-*same* deterministic ledger recompute, which is producer-agnostic (it only reads on-disk
-tags + run history). The single
+**Internal vs external execution.** Both PRD summarization and the annotate-pass
+(mapping tests → requirements) have two execution models, split by who *initiates* the
+work — the project-wide rule. **Internal / server-spawned** is the **GUI's REST route**
+(`POST /api/features/:name/{prd-summary/regenerate,coverage/jobs}` → `startCoverageJob`/
+`regeneratePrdSummary`): canary spawns its own `claude`/`codex` CLI
+(`prd-summary.ts` / `annotate-engine.ts`) and streams it through `AgentSessionView`.
+**External / offloaded** is the **entire MCP surface** — there is no server-spawned MCP
+tool: `start_external_summary` → `submit_external_summary` and `start_external_coverage`
+→ `submit_external_coverage` (`jobs/external.ts`) spawn **no** LLM, hand the calling
+client the prompt/context (`buildSummaryAuthoringContext` / `buildCoverageMappingContext`,
+reusing the internal prompts), and canary writes the result through the canonical writers
+(`applyExternalSummary` via the shared `assembleSummary`; `applyExternalCoverageMappings`
+via the tag-writer) and recomputes. Such jobs carry `producer: 'external'`, have no
+`sessionRef`, and render monitor-only (`ExternalAgentCard`) in the Generating pane. Both
+models feed the *same* deterministic ledger recompute, which is producer-agnostic (it
+only reads on-disk tags + run history). The single
 highest-risk invariant is **requirement-id stability across PRD regeneration** —
 `reconcileRequirementIds` (in `prd-summary.ts`) preserves a surviving requirement's id
 (by echoed id or exact title match) and carries dropped ones as `deprecated`, because a
@@ -396,6 +405,6 @@ procedure.
 | Boot-session / collision / queue / claim semantics | `start_run` + `wait_for_heal_task` result shapes (`mcp/tools.ts`) ↔ instructions ↔ skills (same five surfaces as above) | partial: tool unit tests | `cl_sync-agent-surfaces` |
 | Heal-claim policy | `apps/web-server/src/features/runs/logic/heal/heal-claim-policy.ts` ↔ `broker.claim()` backstop ↔ `start_run`/`POST /api/runs` suppression ↔ skill prose | policy + broker unit tests | `cl_sync-agent-surfaces` |
 | Templates ↔ shipped package | `templates/project/**` ↔ `dist/templates/` copy (`tools/prepare-assets.mjs`) ↔ consumer `canary-lab upgrade` | `npm run smoke:pack` | `cl_add-sample-feature` |
-| Coverage ledger single computation layer | `apps/web-server/src/features/coverage/logic/coverage/service.ts` ↔ `apps/web-server/src/features/coverage/routes/coverage.ts` (REST) ↔ `get_feature_coverage`/`list_feature_docs`/`regenerate_prd_summary` (`mcp/tools.ts`) — both surfaces call the service, never recompute | route + MCP tests; `server.smoke.test.ts` tool count | `cl_add-mcp-tool` / `cl_sync-agent-surfaces` |
+| Coverage ledger single computation layer | `apps/web-server/src/features/coverage/logic/coverage/service.ts` ↔ `apps/web-server/src/features/coverage/routes/coverage.ts` (REST, server-spawned) ↔ `get_feature_coverage`/`list_feature_docs`/`start_external_summary`/`start_external_coverage` (`mcp/tools.ts`, external-only) — both surfaces call the service, never recompute | route + MCP tests; `server.smoke.test.ts` tool count | `cl_add-mcp-tool` / `cl_sync-agent-surfaces` |
 | Requirement-id stability | `reconcileRequirementIds` (`apps/web-server/src/features/coverage/logic/coverage/prd-summary.ts`) ↔ inline `@requirement` annotations (`ast-extractor.ts`) — regen must preserve surviving ids | `prd-summary.test.ts` before/after fixture | — |
 | Contributor docs single-source | `CLAUDE.md` (commands + rules) ↔ this file (mechanisms) ↔ `docs/PRD.md` (intent) — AGENTS.md is a pointer only | grep audit (see `cl_verify-changes`) | — |

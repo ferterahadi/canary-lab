@@ -249,6 +249,30 @@ export function reconcileRequirementIds(
   return out
 }
 
+/**
+ * Assemble a `PrdSummary` from freshly-parsed requirements: reconcile ids against
+ * `previous` (the stable spine), stamp docs hash / source-doc list / timestamp,
+ * and persist per-doc + per-requirement fingerprints. The single home for turning
+ * a `ParsedRequirement[]` into a stored summary — shared by the internal
+ * agent-backed `summarizePrd` and the offloaded `applyExternalSummary`, so the
+ * id-spine invariant (R: never trust the agent to renumber) holds on both paths.
+ */
+export function assembleSummary(
+  collection: DocsCollection,
+  previous: PrdSummary | null,
+  parsed: ParsedRequirement[],
+  now?: string,
+): PrdSummary {
+  const requirements = reconcileRequirementIds(previous?.requirements ?? [], parsed)
+  const summary: PrdSummary = {
+    requirements,
+    docsHash: collection.docsHash,
+    sourceDocs: collection.entries.map((e) => e.relPath),
+    generatedAt: now ?? new Date().toISOString(),
+  }
+  return withFingerprints(summary, collection.entries)
+}
+
 // ---------------------------------------------------------------------------
 // Prompt construction
 // ---------------------------------------------------------------------------
@@ -395,7 +419,7 @@ export async function summarizePrd(
   const runAgent = deps.runAgent ?? defaultRunAgent
   const agents = resolveAgents(args.adapter ?? 'auto')
 
-  let requirements: Requirement[] | null = null
+  let parsedOk: ParsedRequirement[] | null = null
   if (agents.length) {
     const prompt = buildPrdSummaryPrompt(args.collection, previous)
     for (const agent of agents) {
@@ -409,7 +433,7 @@ export async function summarizePrd(
         })
         const parsed = parsePrdSummaryOutput(output)
         if (parsed && parsed.length) {
-          requirements = reconcileRequirementIds(previous, parsed)
+          parsedOk = parsed
           break
         }
         args.onOutput?.(`[agent:${agent}] unparseable output; trying next\n`)
@@ -419,7 +443,7 @@ export async function summarizePrd(
     }
   }
 
-  if (!requirements) {
+  if (!parsedOk) {
     // LLM-only: no agent on PATH, or every agent failed / returned unparseable
     // output. We never fabricate requirements from headings — that produced
     // phantom requirements (goals/context/architecture) and tanked coverage.
@@ -428,15 +452,9 @@ export async function summarizePrd(
     )
   }
 
-  const summary: PrdSummary = {
-    requirements,
-    docsHash: args.collection.docsHash,
-    sourceDocs: args.collection.entries.map((e) => e.relPath),
-    generatedAt: args.now ?? new Date().toISOString(),
-  }
-  // Persist per-doc + per-requirement fingerprints (R3) so drift can name which
-  // docs changed and coverage staleness can key on the requirements set.
-  return withFingerprints(summary, args.collection.entries)
+  // Reconcile ids + stamp fingerprints (R3) through the shared assembler so the
+  // offloaded path produces a byte-identical summary shape.
+  return assembleSummary(args.collection, args.previous ?? null, parsedOk, args.now)
 }
 
 // ---------------------------------------------------------------------------

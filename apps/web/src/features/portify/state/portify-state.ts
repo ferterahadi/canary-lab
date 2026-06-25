@@ -97,3 +97,18 @@ export function isActivePortify(status: PortifyIndexEntry['status']): boolean {
   return status === 'planning' || status === 'editing' || status === 'verifying'
     || status === 'ready-to-save'
 }
+
+/**
+ * The workflowId of a feature's most-recent SAVED port-ification — the one that
+ * produced the live overlay, so "View latest" opens exactly what's on disk.
+ * Returns undefined for a portified-but-record-less feature (legacy overlay, or
+ * the record was pruned), in which case there's nothing to view.
+ */
+export function latestSavedWorkflowId(
+  workflows: PortifyIndexEntry[],
+  feature: string,
+): string | undefined {
+  return workflows
+    .filter((w) => w.feature === feature && w.status === 'saved')
+    .sort(byStartedDesc)[0]?.workflowId
+}

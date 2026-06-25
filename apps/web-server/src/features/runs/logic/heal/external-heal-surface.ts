@@ -194,6 +194,30 @@ export function buildExternalHealContext(input: BuildExternalHealContextInput): 
   }
 }
 
+export interface ExternalRunSnapshotSlim
+  extends Omit<ExternalRunSnapshot, 'healIndexMarkdown' | 'journalMarkdown'> {
+  // Same verbose snapshot, but the heal-index/journal markdown is replaced by
+  // on-disk PATHS (mirrors get_heal_context). Lets get_run_snapshot stay the
+  // "verbose debug" surface without ever inlining unbounded markdown — the agent
+  // `Read`s the path when it needs the full content. The REST /run-snapshot
+  // fallback keeps the inline-markdown shape via buildExternalRunSnapshot.
+  healIndex: { path: string } | null
+  journal: { path: string } | null
+}
+
+export function buildExternalRunSnapshotSlim(
+  input: BuildExternalHealContextInput,
+): ExternalRunSnapshotSlim {
+  const full = buildExternalRunSnapshot(input)
+  const paths = buildRunPaths(runDirFor(input.logsDir, full.runId))
+  const { healIndexMarkdown, journalMarkdown, ...rest } = full
+  return {
+    ...rest,
+    healIndex: healIndexMarkdown === null ? null : { path: paths.healIndexPath },
+    journal: journalMarkdown === null ? null : { path: paths.diagnosisJournalPath },
+  }
+}
+
 export function buildExternalRunSnapshot(input: BuildExternalHealContextInput): ExternalRunSnapshot {
   const { detail, logsDir, projectRoot } = input
   const runId = detail.manifest.runId

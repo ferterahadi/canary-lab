@@ -70,14 +70,13 @@ const AUTHOR_TOOLS = uniqueSorted([
   'delete_feature_doc',
   'download_evaluation_export',
   'clear_prd_summary',
-  'get_coverage_job',
   'get_evaluation_export',
   'get_feature_coverage',
   'get_feature_envset_summary',
   'get_feature_repo_status',
   'list_feature_docs',
-  'regenerate_prd_summary',
-  'start_coverage_job',
+  'start_external_summary',
+  'submit_external_summary',
   'start_external_coverage',
   'submit_external_coverage',
   'get_run',
@@ -96,13 +95,11 @@ const AUTHOR_TOOLS = uniqueSorted([
 const PORTIFY_TOOLS = uniqueSorted([
   'list_features',
   'list_runs',
-  'start_portify',
   'start_external_portify',
   'submit_external_portify',
   'get_portify',
   'save_portify',
   'cancel_portify',
-  'revise_portify',
   'remove_portification',
   'list_portify_status',
 ])
@@ -546,6 +543,10 @@ describe('MCP HTTP server (smoke)', () => {
       })
       expect(JSON.stringify(exportBody.reportSchema)).not.toContain('evaluation.md')
       expect(exportBody.reportSchema.textSlots.length).toBeGreaterThan(0)
+      // The verbose run snapshot is no longer embedded — the agent fetches it on
+      // demand via get_run_snapshot instead of paying for it on every export start.
+      expect(exportBody).not.toHaveProperty('runContext')
+      expect(exportBody.runSnapshotVia).toContain('get_run_snapshot')
 
       const rejectedMarkdown = await client.callTool({
         name: 'submit_external_evaluation_export',
@@ -799,10 +800,69 @@ describe('MCP HTTP server (smoke)', () => {
           notRunNames: ['test-3'],
           statusLine: '1/3 passed, 1 failed, 1 not run',
         },
-        healIndexMarkdown: '# Heal Index\n',
-        journalMarkdown: '# Journal\n',
+        healIndex: { path: path.join(runDir, 'heal-index.md') },
+        journal: { path: path.join(runDir, 'diagnosis-journal.md') },
         artifactsBase: '/api/runs/context-map/artifacts/',
       })
+      // Verbose snapshot keeps the raw summary + full counts, but the heal-index/
+      // journal markdown is now a PATH (like get_heal_context) — never inlined.
+      expect(snapshot).not.toHaveProperty('healIndexMarkdown')
+      expect(snapshot).not.toHaveProperty('journalMarkdown')
+      expect(JSON.stringify(snapshot)).not.toContain('# Heal Index')
+      expect(JSON.stringify(snapshot)).not.toContain('# Journal')
+    } finally {
+      if (client) await client.close().catch(() => undefined)
+      await app.close()
+    }
+  })
+
+  it('get_run omits raw arrays by default and inlines them with includeRaw, list_runs honors limit', async () => {
+    const projectRoot = path.resolve(__dirname, '..', '..', '..', 'templates', 'project')
+    const logsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-getrun-')))
+    const { app, runStore } = await createServer({ projectRoot, logsDir, ptyFactory: inertPtyFactory })
+    let client: Client | null = null
+    try {
+      const address = await app.listen({ port: 0, host: '127.0.0.1' })
+      client = await connectClient(address)
+
+      for (let i = 0; i < 3; i += 1) {
+        runStore.bootstrap({
+          runId: `run-${i}`,
+          feature: 'broken_todo_api',
+          startedAt: `2026-05-0${i + 1}T00:00:00.000Z`,
+          status: 'passed',
+          healCycles: 0,
+          services: [],
+          healMode: 'external',
+        })
+      }
+
+      // get_run: slim by default — raw arrays are absent, the omission is announced.
+      const slim = JSON.parse(((await client.callTool({
+        name: 'get_run',
+        arguments: { runId: 'run-1' },
+      })).content?.[0] as { text: string }).text)
+      expect(slim).toMatchObject({ runId: 'run-1' })
+      expect(slim).not.toHaveProperty('lifecycleEvents')
+      expect(slim).not.toHaveProperty('playwrightArtifacts')
+      expect(slim).not.toHaveProperty('playbackEvents')
+      expect(slim.raw.omitted).toContain('lifecycleEvents')
+
+      // includeRaw:true returns the full RunDetail (no `raw` envelope marker).
+      const full = JSON.parse(((await client.callTool({
+        name: 'get_run',
+        arguments: { runId: 'run-1', includeRaw: true },
+      })).content?.[0] as { text: string }).text)
+      expect(full).toMatchObject({ runId: 'run-1' })
+      expect(full).not.toHaveProperty('raw')
+
+      // list_runs: newest-first, capped by limit.
+      const limited = JSON.parse(((await client.callTool({
+        name: 'list_runs',
+        arguments: { feature: 'broken_todo_api', limit: 2 },
+      })).content?.[0] as { text: string }).text) as Array<{ runId: string }>
+      expect(limited).toHaveLength(2)
+      expect(limited[0].runId).toBe('run-2')
     } finally {
       if (client) await client.close().catch(() => undefined)
       await app.close()

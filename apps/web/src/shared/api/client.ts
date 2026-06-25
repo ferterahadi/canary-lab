@@ -10,6 +10,7 @@ import type {
   RunIndexEntry,
   CleanupListing,
   CleanupWorktree,
+  PortifyCleanupListing,
   RunDetail,
   JournalEntry,
   CreateDraftPayload,
@@ -1454,6 +1455,13 @@ export function cleanupRuns(opts?: ClientOptions): Promise<CleanupListing> {
 export function cleanupWorktrees(opts?: ClientOptions): Promise<{ worktrees: CleanupWorktree[] }> {
   const { baseUrl, fetchImpl } = defaultOpts(opts)
   return request(`${baseUrl}/api/cleanup/worktrees`, { method: 'GET' }, fetchImpl)
+}
+
+// Every port-ification workflow record with its folder size, for the Log
+// Cleanup "Portify" tab. Pruning a record reuses removePortify(workflowId).
+export function cleanupPortify(opts?: ClientOptions): Promise<PortifyCleanupListing> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<PortifyCleanupListing>(`${baseUrl}/api/cleanup/portify`, { method: 'GET' }, fetchImpl)
 }
 
 // Open the port-ification project in the user's editor — the scratch worktree

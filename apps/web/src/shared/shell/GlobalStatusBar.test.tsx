@@ -32,8 +32,10 @@ vi.mock('../../features/benchmark/state/BenchmarkContext', () => ({
 }))
 
 const mockActivePortify = { value: undefined as undefined | { workflowId: string; feature: string; status: string; startedAt: string } }
+const mockPortifyWorkflows = { value: [] as Array<{ workflowId: string; feature: string; status: string; startedAt: string }> }
 vi.mock('../../features/portify/state/PortifyContext', () => ({
   useActivePortify: () => mockActivePortify.value,
+  usePortify: () => ({ workflows: mockPortifyWorkflows.value }),
 }))
 
 vi.mock('../../features/benchmark/components/BenchmarkWindow', () => ({
