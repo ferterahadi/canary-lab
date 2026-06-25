@@ -54,7 +54,8 @@ function defaultJobId(): string {
 
 /** Create an external coverage job and return the mapping context for the client.
  *  Returns `needs-summary` (no job created) when the feature has no PRD summary —
- *  the client must run regenerate_prd_summary first. Throws FeatureNotFoundError
+ *  the client must run start_external_summary (then submit_external_summary) first.
+ *  Throws FeatureNotFoundError
  *  for an unknown feature and CoverageJobConflictError if a coverage job (of
  *  either producer) is already running for the feature. */
 export function startExternalCoverage(

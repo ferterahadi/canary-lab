@@ -8,6 +8,7 @@ import type { PtyFactory } from '../../../runs/logic/runtime/pty-spawner'
 import type { HealAgent } from '../../../runs/logic/runtime/auto-heal'
 import { generateRunId } from '../../../runs/logic/runtime/run-id'
 import { type WorktreeHandle } from '../../../runs/logic/runtime/repo-worktree'
+import { computeSlotBudget, readSystemResources, resolveAdmissionConfig } from '../../../runs/logic/runtime/admission'
 import { PortifyRunStore } from './store'
 import { PortifyOrchestrator } from './orchestrator'
 import { buildPortifyPaths, portifyDir } from './paths'
@@ -161,9 +162,49 @@ function pickBorrowable(candidates: BorrowCandidate[] | undefined, baseSha: stri
   )[0]
 }
 
+/**
+ * Max port-ification workflows allowed to run CONCURRENTLY (across all
+ * features). The per-feature lock already prevents two workflows on one feature;
+ * this caps the global load because each `submit_external_portify` boots the
+ * whole stack TWICE concurrently to verify, so unbounded fan-out across features
+ * would exhaust the machine. Reuses the run loop's resource heuristic
+ * (`computeSlotBudget`) rather than a bespoke number; `CANARY_MAX_CONCURRENT_PORTIFY`
+ * is the optional manual ceiling (mirrors `CANARY_MAX_CONCURRENT_RUNS`).
+ */
+export function portifyConcurrencyCap(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = env.CANARY_MAX_CONCURRENT_PORTIFY
+  if (raw != null && raw.trim() !== '') {
+    const n = Number.parseInt(raw.trim(), 10)
+    if (Number.isFinite(n) && n > 0) return n
+  }
+  return computeSlotBudget(readSystemResources(), resolveAdmissionConfig(env))
+}
+
 export function createPortifyRunner(deps: PortifyRunnerDeps) {
   const active = new Map<string, ActiveWorkflow>()
   const healthDeadlineMs = deps.healthDeadlineMs ?? 60000
+
+  // Admission for a new workflow. One workflow PER FEATURE (a second on the same
+  // feature would fight over its featureDir config + overlay path); different
+  // features run concurrently up to the global resource cap (the double-boot
+  // verify is heavy). Shared by the local + external start paths so the two
+  // never drift. Throws 409 (same feature) / 429 (at capacity) with a
+  // statusCode the routes + MCP tools surface verbatim.
+  function admitNewWorkflow(featureName: string): void {
+    if ([...active.values()].some((w) => w.feature === featureName)) {
+      throw Object.assign(
+        new Error(`A port-ification workflow is already running for "${featureName}" — finish or cancel it first.`),
+        { statusCode: 409 },
+      )
+    }
+    const cap = portifyConcurrencyCap()
+    if (active.size >= cap) {
+      throw Object.assign(
+        new Error(`At port-ification capacity (${active.size}/${cap} active) — wait for one to finish, or save/cancel an active workflow before starting another feature.`),
+        { statusCode: 429 },
+      )
+    }
+  }
 
   // Validate + set up a workflow (git checks, scratch worktrees, manifest, the
   // orchestrator + its injected I/O) and register it in `active`. Shared by the
@@ -398,12 +439,7 @@ export function createPortifyRunner(deps: PortifyRunnerDeps) {
   }
 
   async function startPortify(input: StartPortifyInput): Promise<StartPortifyResult> {
-    if (active.size > 0) {
-      throw Object.assign(
-        new Error('A port-ification workflow is already running — finish or cancel it first.'),
-        { statusCode: 409 },
-      )
-    }
+    admitNewWorkflow(input.feature)
     const feature = deps.loadFeatures().find((f) => f.name === input.feature)
     if (!feature) throw Object.assign(new Error(`feature not found: ${input.feature}`), { statusCode: 404 })
     const agent = deps.pickAgent(input.agent)
@@ -428,12 +464,7 @@ export function createPortifyRunner(deps: PortifyRunnerDeps) {
   // task prompt; the app process never spawns an agent. Mirrors external
   // heal/wizard/eval. submitExternalPortify drives verification afterwards.
   async function startExternalPortify(input: StartExternalPortifyInput): Promise<StartExternalPortifyResult> {
-    if (active.size > 0) {
-      throw Object.assign(
-        new Error('A port-ification workflow is already running — finish or cancel it first.'),
-        { statusCode: 409 },
-      )
-    }
+    admitNewWorkflow(input.feature)
     const feature = deps.loadFeatures().find((f) => f.name === input.feature)
     if (!feature) throw Object.assign(new Error(`feature not found: ${input.feature}`), { statusCode: 404 })
     // The client doing the edits IS a claude or codex session — record which so
