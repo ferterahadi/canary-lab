@@ -1187,6 +1187,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
   })
   await app.register(portifyRoutes, {
     store: portifyStore,
+    logsDir,
     startPortify: portifyRunner.startPortify,
     savePortify: portifyRunner.save,
     cancelPortify: portifyRunner.cancel,
@@ -1290,15 +1291,14 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
       return { statusCode: resp.statusCode, body }
     },
     // Port-ification workflow — reuse the in-process runner + store (the same
-    // ones behind routes/portify.ts). start/save/cancel throw with a
-    // statusCode the MCP tools surface as errors.
-    startPortify: (feature, agent, maxAttempts) => portifyRunner.startPortify({ feature, agent, maxAttempts }),
+    // ones behind routes/portify.ts). save/cancel throw with a statusCode the
+    // MCP tools surface as errors. The agent-spawning start/revise are GUI-only
+    // (REST); the MCP surface is external-producer only.
     startExternalPortify: (input) => portifyRunner.startExternalPortify(input),
     submitExternalPortify: (workflowId) => portifyRunner.submitExternalPortify(workflowId),
     getPortify: (workflowId) => portifyStore.get(workflowId),
     savePortify: (workflowId) => portifyRunner.save(workflowId),
     cancelPortify: (workflowId) => portifyRunner.cancel(workflowId),
-    revisePortify: (workflowId, feedback) => portifyRunner.revise(workflowId, feedback),
     // Un-portify a saved feature: revert the config (snapshot or legacy strip) +
     // delete the overlay, then emit so live clients update. Mirrors the REST route.
     removePortification: (feature) => {

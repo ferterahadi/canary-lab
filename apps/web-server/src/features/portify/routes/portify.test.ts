@@ -42,6 +42,7 @@ async function buildApp(deps: Partial<PortifyRouteDeps>) {
   const app = Fastify()
   await app.register(portifyRoutes, {
     store: deps.store ?? fakeStore(),
+    logsDir: deps.logsDir ?? '/tmp/canary-portify-test-logs',
     startPortify: deps.startPortify ?? (async () => ({ workflowId: 'portify-1' })),
     savePortify: deps.savePortify ?? (async () => manifest({ status: 'saved' })),
     cancelPortify: deps.cancelPortify ?? (async () => manifest({ status: 'aborted' })),
@@ -111,6 +112,18 @@ describe('portifyRoutes', () => {
     const res = await app.inject({ method: 'GET', url: '/api/portify' })
     expect(res.statusCode).toBe(200)
     expect(res.json()).toHaveLength(1)
+  })
+
+  it('GET /api/cleanup/portify lists records with folder sizes + total', async () => {
+    const app = await build({ store: fakeStore({ list: () => [
+      { workflowId: 'p1', feature: 'cns', status: 'saved', startedAt: 'x' },
+      { workflowId: 'p2', feature: 'auth', status: 'failed', startedAt: 'y' },
+    ] }) })
+    const res = await app.inject({ method: 'GET', url: '/api/cleanup/portify' })
+    expect(res.statusCode).toBe(200)
+    const body = res.json() as { workflows: unknown[]; totalBytes: number }
+    expect(body.workflows).toHaveLength(2)
+    expect(body).toHaveProperty('totalBytes')
   })
 
   it('POST /api/portify/:id/save delegates to the runner', async () => {

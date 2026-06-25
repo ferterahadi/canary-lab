@@ -219,7 +219,7 @@ export function GlobalStatusBar({ activeRunDetail, features = [], onNavigateToRu
           features={features}
           activePortify={activePortify}
           onPick={(feature) => onStartPortify?.(feature)}
-          onOpenActive={(workflowId) => onOpenPortify?.(workflowId)}
+          onOpenWorkflow={(workflowId) => onOpenPortify?.(workflowId)}
           onClose={() => setPortifyPickerOpen(false)}
         />
       )}

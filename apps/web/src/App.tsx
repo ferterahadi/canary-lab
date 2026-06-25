@@ -363,6 +363,10 @@ export function App() {
                 setSelectedRunId(runId)
                 setView('workspace')
               }}
+              onNavigateToPortify={(workflowId) => {
+                setView('workspace')
+                setPortifyTarget({ kind: 'revisit', workflowId })
+              }}
             />
           : view === 'coverage' && selectedFeature
           ? <CoverageLedgerPage feature={selectedFeature} onClose={() => setView('workspace')} coverageRefreshKey={coverageRefreshKey} />

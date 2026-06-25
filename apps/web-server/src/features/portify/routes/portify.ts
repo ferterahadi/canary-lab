@@ -1,6 +1,7 @@
 import fs from 'fs'
 import type { FastifyInstance } from 'fastify'
 import type { PortifyStore } from '../../portify/logic/runtime/store'
+import { portifyCleanupListing } from '../../portify/logic/runtime/cleanup'
 import type { PortifyManifest, StartPortifyInput, StartPortifyResult } from '../../portify/logic/runtime/types'
 import type { HealAgent } from '../../runs/logic/runtime/auto-heal'
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../shared/workspace-events'
@@ -22,6 +23,8 @@ export interface PortifyRouteDeps {
   workspaceEvents?: WorkspaceEventPublisher
   /** Product root — resolves the configured editor for "open in editor". */
   projectRoot?: string
+  /** Logs dir — resolves each workflow's record folder for the cleanup listing. */
+  logsDir: string
 }
 
 interface StartBody {
@@ -36,6 +39,11 @@ interface ReviseBody {
 
 export async function portifyRoutes(app: FastifyInstance, deps: PortifyRouteDeps): Promise<void> {
   app.get('/api/portify', async () => deps.store.list())
+
+  // GET /api/cleanup/portify — disk-usage view for the Log Cleanup "Portify"
+  // tab: every workflow record with its folder size, so stale ones can be
+  // pruned. Removal reuses DELETE /api/portify/:id below.
+  app.get('/api/cleanup/portify', async () => portifyCleanupListing(deps.store, deps.logsDir))
 
   app.post<{ Body: StartBody }>('/api/portify', async (req, reply) => {
     const body = req.body ?? {}

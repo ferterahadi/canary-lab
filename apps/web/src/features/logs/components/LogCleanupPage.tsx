@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import * as api from '../../../shared/api/client'
-import type { CleanupListing, CleanupWorktree, ExecutionType, RunStatus } from '../../../shared/api/types'
+import type { CleanupListing, CleanupWorktree, ExecutionType, PortifyCleanupEntry, RunStatus } from '../../../shared/api/types'
 import { formatBytes, timeAgo } from '../../../shared/lib/format'
 
 interface Props {
@@ -8,6 +8,8 @@ interface Props {
   // Opens a run in the workspace (selects its feature + run, leaves cleanup).
   // Absent for orphans, which have no manifest/feature to open.
   onNavigateToRun?: (feature: string, runId: string) => void
+  // Opens a port-ification workflow in the wizard (leaves cleanup).
+  onNavigateToPortify?: (workflowId: string) => void
 }
 
 // A unified table row covering both indexed runs and orphan directories.
@@ -40,8 +42,29 @@ const STATUS_COLOR: Record<RunStatus, string> = {
   aborted: 'var(--text-muted)',
 }
 
-const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000
+const WORKTREE_OWNER_LABEL: Record<CleanupWorktree['ownerKind'], string> = {
+  run: 'RUN',
+  benchmark: 'BENCH',
+  portify: 'PORTIFY',
+  unknown: 'ORPHAN',
+}
+
+// Portify workflow statuses, coloured like the rest of the cleanup UI: greens
+// for the resolved overlay, rose for failures, muted for cancelled / in-flight.
+const PORTIFY_STATUS_COLOR: Record<PortifyCleanupEntry['status'], string> = {
+  planning: 'rgb(56, 189, 248)',
+  editing: 'rgb(56, 189, 248)',
+  verifying: 'rgb(56, 189, 248)',
+  'ready-to-save': 'rgb(52, 211, 153)',
+  saved: 'rgb(52, 211, 153)',
+  failed: 'rgb(251, 113, 133)',
+  aborted: 'var(--text-muted)',
+}
+
+const THREE_DAYS_MS = 3 * 24 * 60 * 60 * 1000
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000
+const FOURTEEN_DAYS_MS = 14 * 24 * 60 * 60 * 1000
+const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000
 const HUNDRED_MB = 100 * 1024 * 1024
 
 type SortKey = 'runId' | 'kind' | 'status' | 'feature' | 'age' | 'folder' | 'artifacts'
@@ -182,7 +205,14 @@ function SortHeader({
   )
 }
 
-export function LogCleanupPage({ onClose, onNavigateToRun }: Props) {
+const CLEANUP_TABS = [
+  { key: 'runs', label: 'Log Cleanup' },
+  { key: 'worktrees', label: 'Worktrees' },
+  { key: 'portify', label: 'Portify' },
+] as const
+type CleanupTab = (typeof CLEANUP_TABS)[number]['key']
+
+export function LogCleanupPage({ onClose, onNavigateToRun, onNavigateToPortify }: Props) {
   const [listing, setListing] = useState<CleanupListing | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -191,7 +221,7 @@ export function LogCleanupPage({ onClose, onNavigateToRun }: Props) {
   const [actionError, setActionError] = useState<string | null>(null)
   const [confirm, setConfirm] = useState<{ action: 'trim' | 'delete'; ids: string[]; bytes: number } | null>(null)
   const [sort, setSort] = useState<{ key: SortKey; dir: 'asc' | 'desc' }>({ key: 'folder', dir: 'desc' })
-  const [view, setView] = useState<'runs' | 'worktrees'>('runs')
+  const [view, setView] = useState<CleanupTab>('runs')
 
   const refresh = useCallback(async () => {
     setLoading(true)
@@ -251,12 +281,17 @@ export function LogCleanupPage({ onClose, onNavigateToRun }: Props) {
   }
 
   const now = Date.now()
+  const passedOlderThan = (ms: number) => (r: Row): boolean =>
+    r.status === 'passed' && !!r.startedAt && now - Date.parse(r.startedAt) > ms
   const presets: Array<{ label: string; predicate: (r: Row) => boolean }> = [
     { label: 'Orphaned folders', predicate: (r) => r.isOrphan },
-    { label: 'Aborted boots', predicate: (r) => r.kind === 'boot' && r.status === 'aborted' },
+    { label: 'All failed', predicate: (r) => r.status === 'failed' },
     { label: 'All aborted', predicate: (r) => r.status === 'aborted' },
     { label: 'All benchmark', predicate: (r) => r.kind === 'benchmark' },
-    { label: 'Passed > 30 days', predicate: (r) => r.status === 'passed' && !!r.startedAt && now - Date.parse(r.startedAt) > THIRTY_DAYS_MS },
+    { label: 'Passed > 3 days', predicate: passedOlderThan(THREE_DAYS_MS) },
+    { label: 'Passed > 7 days', predicate: passedOlderThan(SEVEN_DAYS_MS) },
+    { label: 'Passed > 14 days', predicate: passedOlderThan(FOURTEEN_DAYS_MS) },
+    { label: 'Passed > 30 days', predicate: passedOlderThan(THIRTY_DAYS_MS) },
     { label: 'Folders > 100 MB', predicate: (r) => r.folderBytes > HUNDRED_MB },
   ]
 
@@ -297,24 +332,24 @@ export function LogCleanupPage({ onClose, onNavigateToRun }: Props) {
       {/* Header — the title doubles as a toggle between the two cleanup views. */}
       <div className="flex shrink-0 items-center gap-3 border-b px-5 py-3" style={{ borderColor: 'var(--border-default)' }}>
         <div style={{ display: 'inline-flex', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)', overflow: 'hidden' }}>
-          {(['runs', 'worktrees'] as const).map((v) => (
+          {CLEANUP_TABS.map((t, i) => (
             <button
-              key={v}
+              key={t.key}
               type="button"
-              onClick={() => setView(v)}
-              aria-pressed={view === v}
+              onClick={() => setView(t.key)}
+              aria-pressed={view === t.key}
               style={{
-                background: view === v ? 'var(--bg-selected)' : 'var(--bg-surface)',
-                color: view === v ? 'var(--text-primary)' : 'var(--text-secondary)',
+                background: view === t.key ? 'var(--bg-selected)' : 'var(--bg-surface)',
+                color: view === t.key ? 'var(--text-primary)' : 'var(--text-secondary)',
                 border: 'none',
-                borderRight: v === 'runs' ? '1px solid var(--border-default)' : 'none',
+                borderRight: i < CLEANUP_TABS.length - 1 ? '1px solid var(--border-default)' : 'none',
                 padding: '6px 14px',
                 fontSize: 14,
                 fontWeight: 600,
                 cursor: 'pointer',
               }}
             >
-              {v === 'runs' ? 'Log Cleanup' : 'Worktrees'}
+              {t.label}
             </button>
           ))}
         </div>
@@ -348,7 +383,9 @@ export function LogCleanupPage({ onClose, onNavigateToRun }: Props) {
       )}
 
       {/* Body */}
-      {view === 'worktrees' ? (
+      {view === 'portify' ? (
+        <PortifySection now={now} onNavigateToPortify={onNavigateToPortify} />
+      ) : view === 'worktrees' ? (
         <WorktreesSection now={now} />
       ) : (
         <div className="min-h-0 flex-1 overflow-auto px-5 py-2">
@@ -584,6 +621,7 @@ function WorktreesSection({ now }: { now: number }) {
     { label: 'Orphans', predicate: (w) => w.ownerKind === 'unknown' },
     { label: 'Missing dirs (prunable)', predicate: (w) => !w.exists },
     { label: 'Benchmark arms', predicate: (w) => w.ownerKind === 'benchmark' },
+    { label: 'Portify worktrees', predicate: (w) => w.ownerKind === 'portify' },
     { label: 'Older than 7 days', predicate: (w) => w.ageMs != null && w.ageMs > SEVEN_DAYS_MS },
   ]
   const selectedTargets = sorted.filter((w) => selected.has(w.path) && !w.active)
@@ -669,7 +707,7 @@ function WorktreesSection({ now }: { now: number }) {
                 </td>
                 <td className="py-1 pr-3">
                   <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: 0.4, color: 'var(--text-muted)' }}>
-                    {wt.ownerKind === 'benchmark' ? 'BENCH' : wt.ownerKind === 'run' ? 'RUN' : 'ORPHAN'}
+                    {WORKTREE_OWNER_LABEL[wt.ownerKind]}
                   </span>
                   {wt.ownerId && <span style={{ marginLeft: 6, fontFamily: 'var(--font-mono, monospace)', color: 'var(--text-primary)' }}>{wt.ownerId}</span>}
                   {wt.slot && <span style={{ marginLeft: 6, color: 'var(--text-muted)' }}>{wt.slot}</span>}
@@ -747,6 +785,217 @@ function WorktreesSection({ now }: { now: number }) {
                 style={{ color: 'rgb(251, 113, 133)' }}
               >
                 {bulkBusy ? 'Working…' : 'Remove'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Self-contained port-ification record inventory: every workflow under
+// <logs>/portify/<id> with its disk size. This is the home for pruning stale
+// portify records (the × that used to live in the Ports-tab history) — Open
+// reopens a record in the wizard, Delete drops it from history. The scratch
+// worktrees these spawned are reclaimed on the Worktrees tab (PORTIFY owner).
+function PortifySection({ now, onNavigateToPortify }: {
+  now: number
+  onNavigateToPortify?: (workflowId: string) => void
+}) {
+  const [workflows, setWorkflows] = useState<PortifyCleanupEntry[] | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [err, setErr] = useState<string | null>(null)
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [bulkBusy, setBulkBusy] = useState(false)
+  const [confirmOpen, setConfirmOpen] = useState(false)
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    setErr(null)
+    try {
+      const wfs = (await api.cleanupPortify()).workflows
+      setWorkflows(wfs)
+      // Drop selections for records that no longer exist (removed elsewhere).
+      setSelected((prev) => new Set([...prev].filter((id) => wfs.some((w) => w.workflowId === id))))
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Failed to load Portify records')
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+  useEffect(() => { void load() }, [load])
+
+  const sorted = (workflows ?? []).slice().sort((a, b) => b.folderBytes - a.folderBytes)
+  const total = sorted.reduce((s, w) => s + w.folderBytes, 0)
+
+  const toggle = (id: string): void => {
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+  const selectPreset = (predicate: (w: PortifyCleanupEntry) => boolean): void => {
+    setSelected(new Set(sorted.filter(predicate).map((w) => w.workflowId)))
+  }
+  const presets: Array<{ label: string; predicate: (w: PortifyCleanupEntry) => boolean }> = [
+    { label: 'Failed', predicate: (w) => w.status === 'failed' },
+    { label: 'Cancelled', predicate: (w) => w.status === 'aborted' },
+    { label: 'Failed + cancelled', predicate: (w) => w.status === 'failed' || w.status === 'aborted' },
+    { label: 'Older than 7 days', predicate: (w) => now - Date.parse(w.startedAt) > SEVEN_DAYS_MS },
+  ]
+  const selectedTargets = sorted.filter((w) => selected.has(w.workflowId))
+  const selectedBytes = selectedTargets.reduce((s, w) => s + w.folderBytes, 0)
+
+  const removeOne = async (id: string): Promise<void> => {
+    setBulkBusy(true)
+    try { await api.removePortify(id) } catch (e) { window.alert(e instanceof Error ? e.message : String(e)) }
+    setBulkBusy(false)
+    await load()
+  }
+  const doRemoveSelected = async (): Promise<void> => {
+    if (selectedTargets.length === 0) return
+    const n = selectedTargets.length
+    setConfirmOpen(false)
+    setBulkBusy(true)
+    const results = await Promise.allSettled(selectedTargets.map((w) => api.removePortify(w.workflowId)))
+    const failures = results.filter((r) => r.status === 'rejected').length
+    setSelected(new Set())
+    setBulkBusy(false)
+    await load()
+    if (failures > 0) window.alert(`${failures} of ${n} removals failed.`)
+  }
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      {/* Toolbar mirrors the runs/worktrees views. */}
+      <div className="flex shrink-0 flex-wrap items-center gap-2 border-b px-5 py-2" style={{ borderColor: 'var(--border-default)' }}>
+        {sorted.length > 0 && <QuickSelectMenu presets={presets} onSelect={selectPreset} />}
+        {selected.size > 0 && (
+          <button type="button" onClick={() => setSelected(new Set())} className="cl-button px-2 py-0.5" style={{ fontSize: 11 }} disabled={bulkBusy}>
+            Clear selection
+          </button>
+        )}
+        <div className="ml-auto flex items-center gap-4" style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+          {sorted.length > 0 && (
+            <>
+              <span>Records: <strong style={{ color: 'var(--text-primary)' }}>{sorted.length}</strong></span>
+              <span>Total on disk: <strong style={{ color: 'var(--text-primary)' }}>{formatBytes(total)}</strong></span>
+            </>
+          )}
+          <button type="button" onClick={() => void load()} className="cl-button px-2 py-1" disabled={loading || bulkBusy}>Refresh</button>
+        </div>
+      </div>
+      <div className="min-h-0 flex-1 overflow-auto px-5 py-2">
+      {loading && <CleanupEmptyState icon={<SpinnerGlyph />} title="Loading Portify records…" />}
+      {!loading && err && (
+        <CleanupEmptyState icon={<WarnGlyph />} title="Couldn't load Portify records" hint={err} action={{ label: 'Retry', onClick: () => void load() }} />
+      )}
+      {!loading && !err && sorted.length === 0 && (
+        <CleanupEmptyState
+          icon={<FolderGlyph />}
+          title="No Portify records"
+          hint="Port-ification workflows show up here once you run Portify — prune saved/failed/cancelled records to reclaim disk. Open reopens one in the wizard."
+        />
+      )}
+      {!loading && !err && sorted.length > 0 && (
+        <table className="w-full" style={{ fontSize: 12, color: 'var(--text-secondary)', borderCollapse: 'collapse' }}>
+          <thead>
+            <tr style={{ color: 'var(--text-muted)', textAlign: 'left' }}>
+              <th className="py-1 pr-2" style={{ width: 28 }} />
+              <th className="py-1 pr-3">Feature</th>
+              <th className="py-1 pr-3">Status</th>
+              <th className="py-1 pr-3">Age</th>
+              <th className="py-1 pr-3" style={{ textAlign: 'right' }}>Folder</th>
+              <th className="py-1 pr-1" style={{ textAlign: 'right' }}>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {sorted.map((w) => (
+              <tr key={w.workflowId} style={{ borderTop: '1px solid var(--border-default)' }}>
+                <td className="py-1 pr-2">
+                  <input
+                    type="checkbox"
+                    checked={selected.has(w.workflowId)}
+                    disabled={bulkBusy}
+                    onChange={() => toggle(w.workflowId)}
+                    aria-label={`Select ${w.feature}`}
+                  />
+                </td>
+                <td className="py-1 pr-3" style={{ color: 'var(--text-primary)' }}>{w.feature}</td>
+                <td className="py-1 pr-3"><span style={{ color: PORTIFY_STATUS_COLOR[w.status] }}>{w.status}</span></td>
+                <td className="py-1 pr-3">{timeAgo(w.startedAt, now)}</td>
+                <td className="py-1 pr-3" style={{ textAlign: 'right', color: 'var(--text-primary)' }}>{formatBytes(w.folderBytes)}</td>
+                <td className="py-1 pr-1" style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                  {onNavigateToPortify && (
+                    <button type="button" onClick={() => onNavigateToPortify(w.workflowId)} disabled={bulkBusy} className="cl-button px-1.5 py-0.5" style={{ fontSize: 11 }}>Open</button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => void removeOne(w.workflowId)}
+                    disabled={bulkBusy}
+                    className="cl-button ml-1 px-1.5 py-0.5"
+                    style={{ fontSize: 11, color: 'rgb(251, 113, 133)' }}
+                  >
+                    Delete
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      </div>
+
+      {/* Bottom action bar — identical to the runs/worktrees views'. */}
+      {selected.size > 0 && (
+        <div
+          className="flex shrink-0 items-center gap-3 border-t px-5 py-3"
+          style={{ borderColor: 'var(--border-default)', background: 'var(--bg-elevated, var(--bg-base))' }}
+        >
+          <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+            <strong style={{ color: 'var(--text-primary)' }}>{selected.size}</strong> selected
+          </span>
+          <div className="ml-auto flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setConfirmOpen(true)}
+              disabled={bulkBusy || selectedTargets.length === 0}
+              className="cl-button px-3 py-1"
+              style={{ color: 'rgb(251, 113, 133)', borderColor: 'color-mix(in srgb, rgb(251,113,133) 45%, var(--border-default))' }}
+            >
+              {bulkBusy ? 'Removing…' : `Delete records (${selectedTargets.length} · ${formatBytes(selectedBytes)})`}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Confirm dialog — mirrors the runs/worktrees delete confirm. */}
+      {confirmOpen && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 p-6" onClick={() => !bulkBusy && setConfirmOpen(false)}>
+          <div
+            role="dialog"
+            aria-modal="true"
+            className="w-full max-w-md rounded-lg border p-5"
+            style={{ background: 'var(--bg-base)', borderColor: 'var(--border-default)' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)' }}>Delete Portify records</h2>
+            <p className="mt-2" style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
+              Remove <strong>{selectedTargets.length}</strong> port-ification record{selectedTargets.length === 1 ? '' : 's'} from history, reclaiming about <strong>{formatBytes(selectedBytes)}</strong>. This drops the workflow record only — a feature's saved overlay (its live port-ification) is untouched. Remove an overlay from the feature's Ports tab.
+            </p>
+            <div className="mt-4 flex justify-end gap-2">
+              <button type="button" onClick={() => setConfirmOpen(false)} disabled={bulkBusy} className="cl-button px-3 py-1">Cancel</button>
+              <button
+                type="button"
+                disabled={bulkBusy}
+                onClick={() => void doRemoveSelected()}
+                className="cl-button px-3 py-1"
+                style={{ color: 'rgb(251, 113, 133)' }}
+              >
+                {bulkBusy ? 'Working…' : 'Delete'}
               </button>
             </div>
           </div>

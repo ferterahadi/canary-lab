@@ -2,7 +2,8 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { startExternalCoverage, submitExternalCoverage } from './external'
+import { startExternalCoverage, submitExternalCoverage, startExternalSummary, submitExternalSummary } from './external'
+import { readPrdSummary } from '../prd-summary'
 import { CoverageJobConflictError } from './runner'
 import { CoverageJobRunStore } from './store'
 import { regeneratePrdSummary as regeneratePrdSummaryReal } from '../service'
@@ -238,6 +239,157 @@ describe('submitExternalCoverage', () => {
     const store = new CoverageJobRunStore(logsDir)
     expect(() =>
       submitExternalCoverage({ featuresDir, logsDir, jobId: 'nope', mappings: [] }, { store }),
+    ).toThrow(/coverage job not found/)
+  })
+})
+
+describe('startExternalSummary', () => {
+  it('throws FeatureNotFoundError for an unknown feature', () => {
+    const store = new CoverageJobRunStore(logsDir)
+    expect(() =>
+      startExternalSummary({ featuresDir, logsDir, feature: 'nonexistent', sessionId: 's1' }, { store }),
+    ).toThrow('nonexistent')
+  })
+
+  it('returns needs-docs (and creates no job) when the feature has no source doc', () => {
+    const dir = writeFeature('checkout')
+    fs.rmSync(path.join(dir, 'docs'), { recursive: true, force: true })
+    const store = new CoverageJobRunStore(logsDir)
+    const res = startExternalSummary({ featuresDir, logsDir, feature: 'checkout', sessionId: 's1' }, { store })
+    expect(res.kind).toBe('needs-docs')
+    expect(store.list()).toHaveLength(0)
+  })
+
+  it('creates an external summary job (producer external, kind summary, no sessionRef) and returns the authoring context', () => {
+    writeFeature('checkout')
+    const store = new CoverageJobRunStore(logsDir)
+    const res = startExternalSummary(
+      { featuresDir, logsDir, feature: 'checkout', sessionId: 's1', clientKind: 'claude', conversationName: 'sum chat' },
+      { store },
+    )
+    expect(res.kind).toBe('started')
+    if (res.kind !== 'started') return
+    expect(res.manifest.producer).toBe('external')
+    expect(res.manifest.kind).toBe('summary')
+    expect(res.manifest.status).toBe('running')
+    expect(res.manifest.sessionRef).toBeUndefined()
+    expect(res.manifest.externalClientKind).toBe('claude')
+    // Context lists the source docs to read + the reusable summarization prompt;
+    // no prior summary yet → empty preserve list.
+    expect(res.context.docs.map((d) => d.relPath)).toContain('spec.md')
+    expect(res.context.previousRequirementIds).toEqual([])
+    expect(res.context.prompt).toContain('spec.md')
+    expect(new CoverageJobRunStore(logsDir).get(res.manifest.jobId)?.kind).toBe('summary')
+  })
+
+  it('emits coverage-changed on start so an open UI flips to Generating live', () => {
+    writeFeature('checkout')
+    const store = new CoverageJobRunStore(logsDir)
+    const { events, publisher } = collector()
+    startExternalSummary({ featuresDir, logsDir, feature: 'checkout', sessionId: 's1' }, { store, workspaceEvents: publisher })
+    expect(events).toEqual([{ type: 'coverage-changed', feature: 'checkout' }])
+  })
+
+  it('does not emit when start is rejected for missing docs', () => {
+    const dir = writeFeature('checkout')
+    fs.rmSync(path.join(dir, 'docs'), { recursive: true, force: true })
+    const store = new CoverageJobRunStore(logsDir)
+    const { events, publisher } = collector()
+    startExternalSummary({ featuresDir, logsDir, feature: 'checkout', sessionId: 's1' }, { store, workspaceEvents: publisher })
+    expect(events).toHaveLength(0)
+  })
+
+  it('is single-flight: rejects when a summary job is already running for the feature', () => {
+    writeFeature('checkout')
+    const store = new CoverageJobRunStore(logsDir)
+    store.save({ jobId: 'cj-running', feature: 'checkout', kind: 'summary', status: 'running', startedAt: new Date().toISOString(), log: '' })
+    expect(() =>
+      startExternalSummary({ featuresDir, logsDir, feature: 'checkout', sessionId: 's1' }, { store }),
+    ).toThrow(CoverageJobConflictError)
+  })
+})
+
+describe('submitExternalSummary', () => {
+  it('writes the PRD summary, marks the job done, and emits coverage-changed', () => {
+    writeFeature('checkout')
+    const store = new CoverageJobRunStore(logsDir)
+    const started = startExternalSummary({ featuresDir, logsDir, feature: 'checkout', sessionId: 's1' }, { store })
+    if (started.kind !== 'started') throw new Error('expected started')
+
+    const { events, publisher } = collector()
+    const { manifest, result } = submitExternalSummary(
+      {
+        featuresDir,
+        jobId: started.manifest.jobId,
+        requirements: [
+          { title: 'Create todo', text: 'a user can create a new todo item', pathTypes: ['happy'] },
+        ],
+        now: () => '2026-02-02T00:00:00Z',
+      },
+      { store, workspaceEvents: publisher },
+    )
+
+    expect(manifest.status).toBe('done')
+    expect(manifest.result?.requirementCount).toBe(1)
+    expect(result.summary.requirements[0].id).toBe('R1') // canary minted the id
+    expect(result.written).toContain(path.join('docs', '_prd-summary.json'))
+    // Summary is persisted + readable.
+    const stored = readPrdSummary(path.join(featuresDir, 'checkout'))
+    expect(stored?.requirements.map((r) => r.title)).toContain('Create todo')
+    expect(events).toContainEqual({ type: 'coverage-changed', feature: 'checkout' })
+  })
+
+  it('preserves a prior requirement id when the client echoes it (id spine)', () => {
+    writeFeature('checkout')
+    const store = new CoverageJobRunStore(logsDir)
+    // First pass mints R1.
+    const s1 = startExternalSummary({ featuresDir, logsDir, feature: 'checkout', sessionId: 's1' }, { store })
+    if (s1.kind !== 'started') throw new Error('expected started')
+    submitExternalSummary(
+      { featuresDir, jobId: s1.manifest.jobId, requirements: [{ title: 'Create todo', text: 'create a todo', pathTypes: ['happy'] }] },
+      { store },
+    )
+    // Second pass echoes R1 + adds a new requirement → R1 preserved, new one gets R2.
+    const s2 = startExternalSummary({ featuresDir, logsDir, feature: 'checkout', sessionId: 's2' }, { store })
+    if (s2.kind !== 'started') throw new Error('expected started')
+    expect(s2.context.previousRequirementIds).toContain('R1')
+    const { result } = submitExternalSummary(
+      {
+        featuresDir,
+        jobId: s2.manifest.jobId,
+        requirements: [
+          { id: 'R1', title: 'Create todo', text: 'create a todo', pathTypes: ['happy'] },
+          { title: 'Delete todo', text: 'delete a todo', pathTypes: ['happy'] },
+        ],
+      },
+      { store },
+    )
+    const byTitle = new Map(result.summary.requirements.map((r) => [r.title, r.id]))
+    expect(byTitle.get('Create todo')).toBe('R1')
+    expect(byTitle.get('Delete todo')).toBe('R2')
+  })
+
+  it('rejects a non-external (internal) summary job', () => {
+    const store = new CoverageJobRunStore(logsDir)
+    store.save({ jobId: 'cj-internal', feature: 'checkout', kind: 'summary', status: 'running', startedAt: new Date().toISOString(), log: '' })
+    expect(() =>
+      submitExternalSummary({ featuresDir, jobId: 'cj-internal', requirements: [] }, { store }),
+    ).toThrow(/only external summary jobs/)
+  })
+
+  it('rejects an external job that is a coverage job, not a summary job', () => {
+    writeFeature('checkout')
+    const store = new CoverageJobRunStore(logsDir)
+    store.save({ jobId: 'cj-cov', feature: 'checkout', kind: 'coverage', status: 'running', startedAt: new Date().toISOString(), log: '', producer: 'external' })
+    expect(() =>
+      submitExternalSummary({ featuresDir, jobId: 'cj-cov', requirements: [] }, { store }),
+    ).toThrow(/not a summary job/)
+  })
+
+  it('throws for an unknown job id', () => {
+    const store = new CoverageJobRunStore(logsDir)
+    expect(() =>
+      submitExternalSummary({ featuresDir, jobId: 'nope', requirements: [] }, { store }),
     ).toThrow(/coverage job not found/)
   })
 })

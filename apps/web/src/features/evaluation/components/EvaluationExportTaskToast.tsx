@@ -3,6 +3,15 @@ import type { EvaluationExportMode, EvaluationExportTask } from '../../../shared
 import { AgentSessionView } from '../../agent-sessions/components/AgentSessionView'
 import { CloseIcon, DownloadIcon, StatusDot, type StatusDotState } from '../../config/components/atoms'
 import { StatusPill } from '../../../shared/ui/StatusPill'
+import { clientKindToDesktopAgent, clientLabel, clientTint, shortSession, type ExternalClientKind } from '../../runs/components/external-client-branding'
+import {
+  ExternalAgentCard,
+  ExternalClientCta,
+  pillPalette,
+  StatusPill as CardStatusPill,
+  useOpenAgentApp,
+  type PillPalette,
+} from '../../runs/components/ExternalAgentCard'
 
 function dotStateForExport(status: EvaluationExportTask['status']): StatusDotState {
   if (status === 'completed') return 'success'
@@ -163,10 +172,9 @@ function EvaluationExportDialog({
           </aside>
           <section className="flex min-h-0 min-w-0 flex-col">
             {task.sessionRef ? (
-              // A localized-rewrite agent ran for this task — stream its JSONL
-              // through the shared agent timeline, same as every other agent
-              // surface. Raw/external/cached runs have no sessionRef and keep
-              // the text panel below.
+              // A localized-rewrite agent ran for this task ON THE SERVER (GUI
+              // path) — stream its JSONL through the shared agent timeline, same
+              // as every other server-spawned agent surface.
               <div
                 className="min-h-[260px] flex-1 overflow-hidden rounded-md border"
                 style={{ borderColor: 'var(--border-default)', maxHeight: '52vh' }}
@@ -175,6 +183,11 @@ function EvaluationExportDialog({
                   source={{ kind: 'evaluation', taskId: task.taskId, live: task.status === 'running' }}
                 />
               </div>
+            ) : task.producer === 'external' ? (
+              // Handed-off to the calling client (Desktop/CLI): no server agent
+              // to stream, so show the shared external-agent card — matching
+              // external heal / portify / draft / coverage.
+              <ExternalEvaluationPanel task={task} log={log || logsByTaskId[task.taskId] || ''} />
             ) : (
               <>
                 <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
@@ -221,22 +234,14 @@ export function evaluationTaskMeta(task: Pick<EvaluationExportTask, 'mode' | 'st
   return `${modeLabel(task.mode)} · ${task.status} · ${task.runId}`
 }
 
+// The text panel for NON-external tasks (raw lifecycle logs, or a localized
+// rewrite that ran without a pinned session — cached or pre-sessionRef). External
+// (handed-off) tasks render ExternalEvaluationPanel instead; server-spawned ones
+// with a sessionRef stream through AgentSessionView.
 export function evaluationOutputPanel(
-  task: Pick<EvaluationExportTask, 'mode' | 'producer' | 'clientKind' | 'conversationName' | 'sessionId'>,
+  task: Pick<EvaluationExportTask, 'mode'>,
   rawLog: string,
 ): { heading: 'Agent output' | 'Export progress'; text: string } {
-  if (task.producer === 'external') {
-    const details = [
-      'Generated using external client.',
-      task.clientKind ? `Client: ${task.clientKind}` : null,
-      task.conversationName ? `Conversation: ${task.conversationName}` : null,
-      task.sessionId ? `Session: ${task.sessionId}` : null,
-    ].filter(Boolean)
-    return {
-      heading: 'Export progress',
-      text: details.join('\n'),
-    }
-  }
   const log = rawLog.trim()
   if (task.mode === 'raw') {
     return {
@@ -265,6 +270,93 @@ export function evaluationOutputPanel(
     heading: 'Agent output',
     text: displayLog || 'Waiting for agent output...',
   }
+}
+
+// Monitor view for an offloaded (external-producer) evaluation export: the
+// rewrite is authored in the user's own client, so we show who is driving it +
+// Canary's tracked log on the shared ExternalAgentCard — matching external
+// heal / portify / draft / coverage. (Server-spawned localized rewrites carry a
+// sessionRef and stream through AgentSessionView instead.)
+export function ExternalEvaluationPanel({ task, log }: { task: EvaluationExportTask; log: string }) {
+  const clientKind = (task.clientKind ?? 'other') as ExternalClientKind
+  const { opening, error: openError, open } = useOpenAgentApp()
+  // Jump-to-agent: prefer the client's own conversation deep-link; otherwise
+  // launch the desktop app for a known client. PTY/unknown → no CTA.
+  const desktopAgent = clientKindToDesktopAgent(clientKind)
+  const tint = clientTint(clientKind)
+  const { label, palette } = exportStatusPill(task.status)
+  return (
+    <div data-testid="evaluation-external-monitor" className="min-h-0 flex-1 overflow-auto">
+      <ExternalAgentCard
+        clientKind={clientKind}
+        eyebrow="External evaluation export session"
+        headline={clientKind === 'other' ? 'External Client' : clientLabel(clientKind)}
+        subtitle={task.conversationName}
+        statusPill={<CardStatusPill label={label} palette={palette} />}
+        meta={
+          task.sessionId && (
+            <span className="inline-flex items-center gap-1.5" style={{ color: 'var(--text-muted)' }}>
+              <span aria-hidden style={{ opacity: 0.55 }}>·</span>
+              <span style={{ fontFamily: 'var(--font-mono)' }} title={task.sessionId}>
+                {shortSession(task.sessionId)}
+              </span>
+            </span>
+          )
+        }
+        body={exportBodyCopy(task.status)}
+      >
+        <pre
+          data-testid="evaluation-external-log"
+          style={{
+            margin: '12px 0 0', maxHeight: 300, overflow: 'auto', fontSize: 12, lineHeight: 1.5,
+            color: 'var(--text-secondary)', whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+          }}
+        >
+          {log.trim() || 'Waiting for the client to submit the evaluation wording…'}
+        </pre>
+
+        {(task.externalSessionUrl || desktopAgent) && (
+          <div className="mt-3 @[320px]:mt-4 @[480px]:mt-5">
+            {task.externalSessionUrl ? (
+              <ExternalClientCta tint={tint} label={`Open ${clientLabel(clientKind)}`} href={task.externalSessionUrl} />
+            ) : (
+              desktopAgent && (
+                <ExternalClientCta
+                  tint={tint}
+                  label={`Open ${desktopAgent === 'claude' ? 'Claude' : 'Codex'}`}
+                  onClick={() => open(desktopAgent)}
+                  busy={opening !== null}
+                />
+              )
+            )}
+          </div>
+        )}
+        {openError && (
+          <div className="mt-3 text-[11px]" style={{ color: 'var(--danger)' }}>
+            {openError}
+          </div>
+        )}
+      </ExternalAgentCard>
+    </div>
+  )
+}
+
+// status → pill label/palette. Sky (in-progress) / green (ready) / rose (failed),
+// reusing the shared status hues.
+function exportStatusPill(status: EvaluationExportTask['status']): { label: string; palette: PillPalette } {
+  if (status === 'completed') return { label: 'Ready', palette: pillPalette('var(--success)') }
+  if (status === 'failed') return { label: 'Failed', palette: pillPalette('var(--danger)') }
+  return { label: 'Exporting', palette: pillPalette('var(--border-focus)') }
+}
+
+function exportBodyCopy(status: EvaluationExportTask['status']): string {
+  if (status === 'completed') {
+    return "The evaluation wording was authored in your connected client and submitted — Canary rendered evaluation.html. Download it from the list."
+  }
+  if (status === 'failed') {
+    return 'The external evaluation export did not complete. Reopen your client to retry, or dismiss this task.'
+  }
+  return "The evaluation wording is being authored in your connected client — open it to follow the agent. Canary renders evaluation.html when the client submits."
 }
 
 function localizedRewriteModel(log: string): string | null {

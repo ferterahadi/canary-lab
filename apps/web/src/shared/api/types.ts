@@ -131,7 +131,7 @@ export interface CleanupWorktree {
   path: string
   sourceRoot: string
   ref: string
-  ownerKind: 'run' | 'benchmark' | 'unknown'
+  ownerKind: 'run' | 'benchmark' | 'portify' | 'unknown'
   ownerId: string | null
   slot: string | null
   bytes: number
@@ -139,6 +139,22 @@ export interface CleanupWorktree {
   exists: boolean
   /** Owner run/benchmark is still running — removal is refused. */
   active: boolean
+}
+
+// A port-ification workflow record on disk, for the Log Cleanup "Portify" tab.
+// Mirrors the server PortifyCleanupEntry; status reuses the portify lifecycle.
+export interface PortifyCleanupEntry {
+  workflowId: string
+  feature: string
+  status: 'planning' | 'editing' | 'verifying' | 'ready-to-save' | 'saved' | 'failed' | 'aborted'
+  startedAt: string
+  endedAt?: string
+  folderBytes: number
+}
+
+export interface PortifyCleanupListing {
+  workflows: PortifyCleanupEntry[]
+  totalBytes: number
 }
 
 export type EvaluationExportMode = 'raw' | 'localized'
