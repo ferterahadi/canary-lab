@@ -320,8 +320,12 @@ through `AgentSessionView`; **MCP clients** drive it themselves
 (`start_external_portify` → in-place edits → `submit_external_portify`, the
 re-edit+re-submit loop replacing `revise`) and the GUI shows `ExternalPortifyPanel`.
 Both converge on `get_portify` (`editing → verifying → ready-to-save`) →
-`save_portify`/`cancel_portify`. One workflow at a time; `list_portify_status`
-shows which features have a saved overlay.
+`save_portify`/`cancel_portify`. One workflow **per feature** (a second start on the
+same feature is a 409); different features port-ify concurrently up to a global
+resource cap — `portifyConcurrencyCap()` reuses the run loop's `computeSlotBudget`
+heuristic, with an optional manual ceiling via env `CANARY_MAX_CONCURRENT_PORTIFY`
+(mirrors `CANARY_MAX_CONCURRENT_RUNS`). Over the cap, a start returns 429 (no queue —
+the caller waits/retries). `list_portify_status` shows which features have a saved overlay.
 
 **Ephemeral overlay model** (the source edits never touch the product repo): the
 agent edits source in a throwaway scratch worktree and the verified diff is captured

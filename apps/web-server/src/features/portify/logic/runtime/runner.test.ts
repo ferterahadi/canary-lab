@@ -88,7 +88,7 @@ function repoStartCommand(name: string, slot: string, env: string, withPorts: bo
   )
 }
 
-function buildConfigSource(repos: { name: string; localPath: string; slot: string; env: string }[], withPorts: boolean): string {
+function buildConfigSource(repos: { name: string; localPath: string; slot: string; env: string }[], withPorts: boolean, name = 'myfeat'): string {
   const reposSrc = repos.map((r) =>
     `  {\n` +
     `    name: ${JSON.stringify(r.name)},\n` +
@@ -98,7 +98,7 @@ function buildConfigSource(repos: { name: string; localPath: string; slot: strin
   ).join(',\n')
   return (
     `const config = {\n` +
-    `  name: 'myfeat',\n  description: 'test',\n  envs: ['local'],\n` +
+    `  name: ${JSON.stringify(name)},\n  description: 'test',\n  envs: ['local'],\n` +
     `  repos: [\n${reposSrc}\n  ],\n  featureDir: __dirname,\n}\n` +
     `module.exports = { config }\n`
   )
@@ -107,11 +107,11 @@ function buildConfigSource(repos: { name: string; localPath: string; slot: strin
 function writeConfig(
   featureDir: string,
   repos: { name: string; localPath: string; slot: string; env: string }[],
-  opts: { ext?: 'cjs' | 'js'; withPorts?: boolean } = {},
+  opts: { ext?: 'cjs' | 'js'; withPorts?: boolean; name?: string } = {},
 ): void {
   fs.writeFileSync(
     path.join(featureDir, `feature.config.${opts.ext ?? 'cjs'}`),
-    buildConfigSource(repos, opts.withPorts ?? true),
+    buildConfigSource(repos, opts.withPorts ?? true, opts.name),
   )
 }
 
@@ -163,6 +163,25 @@ async function singleFixture(): Promise<{ featuresDir: string; logsDir: string; 
   await gitInit(appRepo)
   writeConfig(featureDir, [{ name: 'app', localPath: appRepo, slot: 'api', env: 'PORT' }])
   return { featuresDir, logsDir, appRepo }
+}
+
+// Two independent features, each with its own single-repo git root. Used to
+// prove the lock is keyed per FEATURE: different features port-ify concurrently.
+async function twoFeatureFixture(): Promise<{ featuresDir: string; logsDir: string }> {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-two-'))
+  roots.push(root)
+  const featuresDir = path.join(root, 'features')
+  const logsDir = path.join(root, 'logs')
+  for (const name of ['featA', 'featB']) {
+    const featureDir = path.join(featuresDir, name)
+    const appRepo = path.join(root, `${name}-app`)
+    fs.mkdirSync(path.join(appRepo, 'src'), { recursive: true })
+    fs.mkdirSync(featureDir, { recursive: true })
+    fs.writeFileSync(path.join(appRepo, 'src', 'server.js'), 'const PORT = process.env.PORT ?? 3007\n')
+    await gitInit(appRepo)
+    writeConfig(featureDir, [{ name: 'app', localPath: appRepo, slot: 'api', env: 'PORT' }], { name })
+  }
+  return { featuresDir, logsDir }
 }
 
 describe('createPortifyRunner (integration)', () => {
@@ -814,7 +833,7 @@ describe('createPortifyRunner (branch coverage)', () => {
       await runner.cancel(result.workflowId)
     })
 
-    it('enforces one workflow at a time across local + external', async () => {
+    it('enforces one workflow PER FEATURE across local + external', async () => {
       const { featuresDir, logsDir } = await singleFixture()
       const { runner } = makeRunner(featuresDir, logsDir)
       const result = await runner.startExternalPortify({ feature: 'myfeat', clientKind: 'claude', sessionId: 's1' })
@@ -823,6 +842,40 @@ describe('createPortifyRunner (branch coverage)', () => {
       ).rejects.toMatchObject({ statusCode: 409 })
       await expect(runner.startPortify({ feature: 'myfeat' })).rejects.toMatchObject({ statusCode: 409 })
       await runner.cancel(result.workflowId)
+    })
+
+    it('allows DIFFERENT features to port-ify concurrently (lock is per-feature)', async () => {
+      const { featuresDir, logsDir } = await twoFeatureFixture()
+      const { store, runner } = makeRunner(featuresDir, logsDir)
+      const a = await runner.startExternalPortify({ feature: 'featA', clientKind: 'claude', sessionId: 'a' })
+      // featB must NOT bounce on featA's workflow — different feature, same machine.
+      const b = await runner.startExternalPortify({ feature: 'featB', clientKind: 'claude', sessionId: 'b' })
+      expect(await waitForStatus(store, a.workflowId, ['editing'])).toBe('editing')
+      expect(await waitForStatus(store, b.workflowId, ['editing'])).toBe('editing')
+      await runner.cancel(a.workflowId)
+      await runner.cancel(b.workflowId)
+    })
+
+    it('returns 429 once the concurrency cap is reached', async () => {
+      const prev = process.env.CANARY_MAX_CONCURRENT_PORTIFY
+      process.env.CANARY_MAX_CONCURRENT_PORTIFY = '1'
+      try {
+        const { featuresDir, logsDir } = await twoFeatureFixture()
+        const { runner } = makeRunner(featuresDir, logsDir)
+        const a = await runner.startExternalPortify({ feature: 'featA', clientKind: 'claude', sessionId: 'a' })
+        // Cap is 1 and featA holds the only slot → a DIFFERENT feature hits 429.
+        await expect(
+          runner.startExternalPortify({ feature: 'featB', clientKind: 'claude', sessionId: 'b' }),
+        ).rejects.toMatchObject({ statusCode: 429 })
+        await runner.cancel(a.workflowId)
+        // Slot freed → featB is admitted.
+        const b = await runner.startExternalPortify({ feature: 'featB', clientKind: 'claude', sessionId: 'b' })
+        expect(b.workflowId).toBeTruthy()
+        await runner.cancel(b.workflowId)
+      } finally {
+        if (prev === undefined) delete process.env.CANARY_MAX_CONCURRENT_PORTIFY
+        else process.env.CANARY_MAX_CONCURRENT_PORTIFY = prev
+      }
     })
 
     it('submitExternalPortify 404s for an unknown workflow and 409s for a non-external one', async () => {

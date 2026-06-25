@@ -1,8 +1,9 @@
 # example_todo_api — Product Requirements
 
 The source PRD for the Verified Coverage Ledger. Edit this file and regenerate the
-summary (Docs tab → "Regenerate PRD summary", or the `regenerate_prd_summary` MCP
-tool) — requirement ids are preserved across regeneration.
+summary — in the UI via the Coverage tab's Docs rail (the **Generate** button), or
+over MCP via `start_external_summary` → `submit_external_summary` — requirement ids
+are preserved across regeneration.
 
 ## Create a todo
 A `POST /todos` with a `title` creates a todo, returns its generated id, and marks
