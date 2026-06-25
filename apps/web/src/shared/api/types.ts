@@ -4,6 +4,7 @@
 // semantic model; feature/journal/wizard shapes remain web-local API mirrors.
 import type {
   DisplayStatus,
+  RunBootFailure,
   RunLifecycleEvent,
   RunLifecycleSnapshot,
   RunStatus,
@@ -19,6 +20,7 @@ import type {
 import type { ClientKind, RunProducer } from '../../../../../shared/run-mode'
 export type {
   DisplayStatus,
+  RunBootFailure,
   RunLifecycleAbortReason,
   RunLifecycleEvent,
   RunLifecyclePhase,
@@ -258,6 +260,9 @@ export interface RunManifest {
   healAgent?: 'claude' | 'codex'
   externalHealSession?: ExternalHealSession
   lifecycle?: RunLifecycleSnapshot
+  /** Set when a service failed to come up, so the run was declared failed and
+   *  (if heal is configured) routed into heal with the service log as context. */
+  bootFailure?: RunBootFailure
   verification?: VerificationRunMetadata
 }
 

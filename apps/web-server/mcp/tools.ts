@@ -992,7 +992,7 @@ export function registerCanaryLabTools(
   })
 
   registerTool('get_feature_envset_summary', {
-    description: 'List a feature envset layout, slot targets, and redacted key previews. Secret values are never returned.',
+    description: 'List a feature envset layout, slot targets, redacted key previews, and the feature\'s declared repos (name/localPath/branch — pass repo name to get_feature_repo_status / checkout_feature_repo_branch). Secret values are never returned.',
     inputSchema: { feature: z.string() },
   }, async ({ feature }) => {
     const summary = getFeatureEnvsetSummary({ projectRoot: deps.projectRoot, featuresDir: deps.featuresDir }, feature)
@@ -1825,7 +1825,7 @@ export function registerCanaryLabTools(
 
   registerTool('wait_for_heal_task', {
     description:
-      'Wait until a claimed run needs code fixes or reaches a terminal result. Use after start_run/claim_heal and again after signal_run. Blocks for a short bounded window and heartbeats for you. If still active when the window elapses it returns type:"still_waiting" (NOT terminal) — immediately call wait_for_heal_task again with the same runId + session_id. Loop on still_waiting until needs_heal / passed / failed. Never poll get_run_snapshot or get_run to wait.',
+      'Wait until a claimed run needs code fixes or reaches a terminal result. Use after start_run/claim_heal and again after signal_run. Blocks for a short bounded window and heartbeats for you. If still active when the window elapses it returns type:"still_waiting" (NOT terminal) — immediately call wait_for_heal_task again with the same runId + session_id. Loop on still_waiting until needs_heal / passed / failed. Never poll get_run_snapshot or get_run to wait. A needs_heal task may be a service that failed to boot (no tests ran): context.failedTests is empty and context.bootFailure points at the service log — fix the service/app code, then signal_run kind:"restart".',
     inputSchema: {
       runId: z.string(),
       session_id: z.string().describe('External heal session id that owns this run.'),

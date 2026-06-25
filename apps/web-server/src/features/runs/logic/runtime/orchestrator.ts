@@ -24,6 +24,7 @@ import {
 } from './run-paths'
 import {
   type ExternalHealSession,
+  type RunBootFailure,
   type RunLifecycleAbortReason,
   type RunLifecycleEvent,
   type RunLifecyclePhase,
@@ -527,6 +528,12 @@ export class RunOrchestrator extends EventEmitter {
   private healCancelled = false
   private stoppedEarlyReason: StoppedEarlyReason | undefined
   private pendingAbortReason: RunLifecycleAbortReason | undefined
+  // Set by waitForHealth (via pollUntilReady) when a service fails to come up on
+  // a normal run: the suite can't run, so runFullCycle / the heal loops treat
+  // the run as `failed` and route it into heal instead of aborting. Cleared at
+  // the top of every ensureServicesRunning so a stale failure from a prior
+  // cycle doesn't survive a successful reboot.
+  private bootFailure: RunBootFailure | undefined
   private lastLifecycleEvent: { phase: RunLifecyclePhase; headline: string } | null = null
 
   constructor(opts: OrchestratorOptions) {
@@ -735,6 +742,9 @@ export class RunOrchestrator extends EventEmitter {
   }
 
   private async ensureServicesRunning(): Promise<string[]> {
+    // Fresh boot attempt — drop any health failure recorded by a prior cycle so
+    // a service that comes up cleanly this time clears the failed state.
+    this.bootFailure = undefined
     const toStart = this.services.filter((svc) => !this.servicePtys.has(svc.name))
     for (const svc of toStart) {
       this.stateSink.setServiceStatus(this.runId, svc.safeName, 'starting')
@@ -906,6 +916,9 @@ export class RunOrchestrator extends EventEmitter {
       : (probe as { tcp: TcpProbe }).tcp.deadlineMs) ?? this.healthDeadlineMs
     const deadline = Date.now() + deadlineMs
 
+    // `health-timeout` unless we observe the process die first (below), in
+    // which case there's no point polling a dead port until the deadline.
+    let failureReason: RunBootFailure['reason'] = 'health-timeout'
     while (Date.now() < deadline) {
       if (this.stopped) return
       const ready = await attempt()
@@ -919,33 +932,53 @@ export class RunOrchestrator extends EventEmitter {
         })
         return
       }
+      // Fast-fail: the service process exited before it became healthy (e.g. a
+      // crash or compile error). spawnService's onExit removed it from the pty
+      // map, so a missing entry means the process is gone — fail now instead of
+      // polling a dead port for the rest of the deadline.
+      if (!this.servicePtys.has(svc.name)) {
+        failureReason = 'process-exited'
+        break
+      }
       await this.delay(this.healthPollIntervalMs)
     }
     this.stateSink.setServiceStatus(this.runId, svc.safeName, 'timeout')
     this.emit('health-check', { service: svc, healthy: false, transport })
-    const detail = transport === 'http'
+    const probeTarget = transport === 'http'
       ? `url=${(probe as { http: HttpProbe }).http.url}`
       : `port=${(probe as { tcp: TcpProbe }).tcp.port}`
+    const detail = failureReason === 'process-exited'
+      ? `Service process exited before ${transport.toUpperCase()} readiness (${probeTarget}).`
+      : `Timed out waiting for ${transport.toUpperCase()} readiness (${probeTarget}).`
     // Boot-only sessions hold whatever came up. A service that fails its
     // readiness probe is marked `timeout` (red) and surfaced as a non-fatal
     // warning, but the session is NOT aborted — the user keeps the healthy
     // services up to exercise while they debug the failed one, and only
-    // abort_run / Stop tears the session down. A normal run still aborts: a
-    // missing service makes the Playwright suite meaningless.
+    // abort_run / Stop tears the session down.
     if (this.executionType === 'boot') {
       this.recordLifecycle('starting-services', `Health failed: ${svc.name} — kept up`, {
-        detail: `Timed out waiting for ${transport.toUpperCase()} readiness (${detail}). Marked failed; boot session held — other services stay up. Stop with abort_run to tear down.`,
+        detail: `${detail} Marked failed; boot session held — other services stay up. Stop with abort_run to tear down.`,
         severity: 'warning',
       })
       return
     }
-    this.pendingAbortReason = { reason: 'service-health-failed', service: svc.name }
-    this.recordLifecycle('aborted', `Health failed: ${svc.name}`, {
-      detail: `Timed out waiting for ${transport.toUpperCase()} readiness (${detail}).`,
+    // Normal run: a missing service makes the Playwright suite meaningless, but
+    // a broken service IS app code the heal agent can fix. Record the failure
+    // (first one wins) and return — runFullCycle / the heal loops declare the
+    // run `failed` and route it into heal with this service's log as context,
+    // instead of throwing and aborting with no chance to repair.
+    this.bootFailure ??= {
+      service: svc.name,
+      safeName: svc.safeName,
+      reason: failureReason,
+      detail,
+      logPath: this.paths.serviceLog(svc.safeName),
+    }
+    this.stateSink.patchManifest(this.runId, { bootFailure: this.bootFailure })
+    this.recordLifecycle('starting-services', `Service failed to start: ${svc.name}`, {
+      detail: `${detail} The run will be marked failed; the heal agent should read the service log to fix why it won't serve.`,
       severity: 'error',
-      abortReason: this.pendingAbortReason,
     })
-    throw new Error(`Health check timed out for ${svc.name} (${transport}, ${detail})`)
   }
 
   // Polls the per-run signals dir. The future server (and externally-spawned
@@ -1949,6 +1982,10 @@ export class RunOrchestrator extends EventEmitter {
   async runFullCycle(): Promise<RunManifest['status']> {
     await this.start()
     if (this.stopped) return this.status
+    // A service never came up — the Playwright suite would be meaningless.
+    // Declare the run failed and route it into heal (the agent fixes the
+    // service) instead of running tests against a dead service.
+    if (this.bootFailure) return await this.failRunForBootFailure()
     let exitCode = await this.runPlaywright()
     // If the user clicked Abort while Playwright was running, bail out
     // immediately — don't compute a finalStatus from the killed pty's
@@ -2018,6 +2055,7 @@ export class RunOrchestrator extends EventEmitter {
   async restartTerminalRun(userGuidance?: string): Promise<RunManifest['status']> {
     await this.start()
     if (this.stopped) return this.status
+    if (this.bootFailure) return await this.failRunForBootFailure()
     if (userGuidance) {
       this.runnerLog?.info(`Terminal run restart guidance: ${userGuidance}`)
     }
@@ -2041,6 +2079,31 @@ export class RunOrchestrator extends EventEmitter {
     const finalStatus = decideRunStatus(this.feature.featureDir, this.paths.summaryPath, exitCode)
     this.setStatus(finalStatus)
     return await this.continueAfterTestRun(finalStatus)
+  }
+
+  // A service failed to come up, so the suite can't run. Declare the run
+  // `failed` and route it into heal exactly like a test failure:
+  // heal-configured runs move to 'healing' (the agent reads the failed
+  // service's log via the manifest's `bootFailure`); a run with no heal mode
+  // ends terminal 'failed' — not 'aborted', because the app is broken, the user
+  // didn't stop it.
+  private async failRunForBootFailure(): Promise<RunManifest['status']> {
+    this.setStatus('failed')
+    return await this.continueAfterTestRun('failed')
+  }
+
+  // A heal rerun restarted the services but one still failed to come up.
+  // Running Playwright against a dead service would only reproduce the same
+  // failure, so the heal loops skip the rerun and re-wait for the next fix —
+  // this records why, pointing the agent back at the service log.
+  private recordBootFailureHealWait(): void {
+    const bf = this.bootFailure
+    if (!bf) return
+    this.recordLifecycle('agent-healing', `Service still down: ${bf.service}`, {
+      detail: `${bf.detail} Skipped the test run — fix the service (log: ${bf.logPath}) and signal again.`,
+      severity: 'error',
+      activeCycle: this.healCycles,
+    })
   }
 
   private async continueAfterTestRun(finalStatus: RunManifest['status']): Promise<RunManifest['status']> {
@@ -2134,6 +2197,10 @@ export class RunOrchestrator extends EventEmitter {
           detail: `Started ${startedBecauseMissing.join(', ')} before rerun.`,
           restartPlan: { restarted: [], kept: [], startedBecauseMissing },
         })
+      }
+      if (this.bootFailure) {
+        this.recordBootFailureHealWait()
+        continue
       }
       const exitCode = await this.runPlaywright(selectionForPlan(verificationPlan))
       // Manual-heal mirror of the auto-heal abort guard: the top of the
@@ -2364,6 +2431,10 @@ export class RunOrchestrator extends EventEmitter {
           })
         }
 
+        if (this.bootFailure) {
+          this.recordBootFailureHealWait()
+          continue
+        }
         const exitCode = await this.runPlaywright(selectionForPlan(verificationPlan))
         if (this.stopped) return this.status
         // User cancelled mid-Playwright (cancelHeal SIGTERM'd the pw pty).

@@ -96,6 +96,7 @@ describe('feature-authoring', () => {
     expect(summary).toMatchObject({
       feature: 'checkout_flow',
       configPath: path.join(created.featureDir, 'envsets', 'envsets.config.json'),
+      repos: [{ name: 'app', localPath: '/repo/app', branch: 'main' }],
       envs: [
         { name: 'local', slots: [{ slot: 'checkout_flow.env', target: '$CANARY_LAB_PROJECT_ROOT/features/checkout_flow/.env' }] },
         { name: 'staging', slots: [] },

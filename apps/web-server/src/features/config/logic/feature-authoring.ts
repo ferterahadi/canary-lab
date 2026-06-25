@@ -44,6 +44,11 @@ export interface FeatureEnvsetSummary {
   feature: string
   featureDir: string
   configPath: string | null
+  // Declared repos (name + local path + expected branch), so an agent that
+  // drilled in via this summary has the repo name in hand for the repo-targeted
+  // tools (get_feature_repo_status, checkout_feature_repo_branch) without a
+  // separate list_features round-trip. Mirrors the list_features repo shape.
+  repos: Array<{ name: string; localPath: string; branch: string | null }>
   envs: Array<{
     name: string
     slots: Array<{
@@ -127,6 +132,7 @@ export function getFeatureEnvsetSummary(ctx: FeatureAuthoringContext, featureNam
     feature: feature.name,
     featureDir: feature.featureDir,
     configPath: fs.existsSync(configPath) ? configPath : null,
+    repos: (feature.repos ?? []).map((r) => ({ name: r.name, localPath: r.localPath, branch: r.branch ?? null })),
     envs: envs.map((env) => ({
       name: env,
       slots: listSlotFiles(path.join(envsetsDir, env)).map((slot) => ({
