@@ -153,8 +153,8 @@ describe('computeCoverageLedger — variant axis', () => {
     // 4 channels × 2 paths = 8 cells; only the 2 email cells are claimed.
     expect(r.variantCoverage).toHaveLength(8)
     expect(r.variantCoverage!.filter((c) => c.covered)).toEqual([
-      { path: 'happy', variant: 'email', covered: true },
-      { path: 'sad', variant: 'email', covered: true },
+      { path: 'happy', variant: 'email', covered: true, applicable: true },
+      { path: 'sad', variant: 'email', covered: true, applicable: true },
     ])
   })
 
@@ -197,6 +197,54 @@ describe('computeCoverageLedger — variant axis', () => {
     // Only the declared `email` cell exists; the stray `sms` claim adds no cell.
     expect(ledger.requirements[0].variantCoverage).toHaveLength(1)
     expect(ledger.requirements[0].gapType).toBe('covered')
+  })
+
+  it('N/A variants are excluded from the denominator: email covered + 3 channels N/A → covered', () => {
+    // The mighty-cns case: config enforcement nominally spans 4 channels, but only
+    // email exposes a V4 endpoint — whatsapp/call/line have no testable surface.
+    const requirements = [req('R6', ['happy', 'sad'], {
+      variants: CHANNELS,
+      variantsNA: [
+        { variant: 'whatsapp', reason: 'no V4 config endpoint' },
+        { variant: 'call', reason: 'no V4 config endpoint' },
+        { variant: 'line', reason: 'no V4 config endpoint' },
+      ],
+    })]
+    const tests: CoverageTestInput[] = [
+      { name: 'sender V4 owner', requirements: ['R6'], pathTypes: ['happy'], variants: ['email'] },
+      { name: 'sender V4 foreign', requirements: ['R6'], pathTypes: ['sad'], variants: ['email'] },
+    ]
+    const ledger = computeCoverageLedger({ feature: 'f', requirements, tests })
+    const r = ledger.requirements[0]
+    expect(r.gapType).toBe('covered') // every APPLICABLE (email) cell is claimed
+    expect(ledger.coveragePct).toBe(100)
+    // The grid still shows all 8 cells — 2 covered email, 6 N/A — with reasons.
+    const na = r.variantCoverage!.filter((c) => c.applicable === false)
+    expect(na).toHaveLength(6)
+    expect(na.every((c) => c.reason === 'no V4 config endpoint')).toBe(true)
+    expect(r.variantCoverage!.filter((c) => c.covered)).toHaveLength(2)
+  })
+
+  it('an unclaimed APPLICABLE cell still flags variant-incomplete despite some N/A', () => {
+    const requirements = [req('R6', ['happy'], {
+      variants: ['email', 'whatsapp', 'line'],
+      variantsNA: [{ variant: 'line', reason: 'no endpoint' }],
+    })]
+    const tests: CoverageTestInput[] = [
+      { name: 't', requirements: ['R6'], pathTypes: ['happy'], variants: ['email'] }, // whatsapp applicable but unclaimed
+    ]
+    const ledger = computeCoverageLedger({ feature: 'f', requirements, tests })
+    expect(ledger.requirements[0].gapType).toBe('variant-incomplete')
+  })
+
+  it('when every variant is N/A, coverage falls back to the path model', () => {
+    const requirements = [req('R6', ['happy'], {
+      variants: ['email', 'whatsapp'],
+      variantsNA: [{ variant: 'email', reason: 'x' }, { variant: 'whatsapp', reason: 'y' }],
+    })]
+    const tests: CoverageTestInput[] = [{ name: 't', requirements: ['R6'], pathTypes: ['happy'] }]
+    const ledger = computeCoverageLedger({ feature: 'f', requirements, tests })
+    expect(ledger.requirements[0].gapType).toBe('covered') // happy path claimed; no applicable variant cells
   })
 
   it('a requirement with NO variants is unchanged (2-axis path model)', () => {

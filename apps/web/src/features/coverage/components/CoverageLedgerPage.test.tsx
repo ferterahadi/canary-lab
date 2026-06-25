@@ -182,12 +182,13 @@ describe('CoverageLedgerPage', () => {
     expect(container.querySelector('[data-testid="tests-pane"] [data-testid="strength-filter"]')).toBeNull()
   })
 
-  it('names the missing path on a path-incomplete requirement (terse)', async () => {
+  it('shows a terse gap status and names the missing path via the chips (not the pill)', async () => {
     await mount()
-    // R1: happy claimed, sad declared but unclaimed → gap pill reads "Path-incomplete · sad".
+    // R1: happy claimed, sad declared but unclaimed. The status pill is now just the
+    // short label (no "· sad" note) — the path chips below name the exact gap.
     const gap = container.querySelector('[data-testid="gap-R1"]')
-    expect(gap?.textContent).toContain('Path-incomplete')
-    expect(gap?.textContent).toContain('· sad')
+    expect(gap?.textContent).toContain('Path gap')
+    expect(gap?.textContent).not.toContain('· sad')
     // The path chips are just the path name (the dashed/muted style carries "no test"):
     // covered shows a ✓, uncovered shows neither "✓" nor the old "· no test".
     expect(container.querySelector('[data-testid="path-R1-happy"]')?.textContent?.trim()).toBe('happy ✓')
@@ -583,26 +584,95 @@ describe('CoverageLedgerPage — variant axis (D1)', () => {
     vi.mocked(api.listFeatureDocs).mockResolvedValue({ feature: 'checkout', docs: [], hasPrdSummary: true, sourceDocCount: 1, docsDrift: false })
   })
 
-  it('renders the path × variant grid with a covered email cell and uncovered channel cells', async () => {
+  it('shows a clickable path pill per path with a covered/total variant count, cells hidden until opened', async () => {
     await mount()
     expect(container.querySelector('[data-testid="variant-grid-R6"]')).toBeTruthy()
-    expect(container.querySelector('[data-testid="cell-R6-happy-email"]')?.getAttribute('data-covered')).toBe('true')
-    expect(container.querySelector('[data-testid="cell-R6-sad-email"]')?.getAttribute('data-covered')).toBe('true')
-    expect(container.querySelector('[data-testid="cell-R6-happy-whatsapp"]')?.getAttribute('data-covered')).toBe('false')
-    expect(container.querySelector('[data-testid="cell-R6-sad-line"]')?.getAttribute('data-covered')).toBe('false')
+    const happy = container.querySelector('[data-testid="variant-path-R6-happy"]')
+    expect(happy?.textContent).toContain('happy')
+    expect(happy?.textContent).toContain('1/4') // only email of {email,whatsapp,call,line}
+    // Variant cells are collapsed — nothing is rendered until a pill is opened.
+    expect(container.querySelector('[data-testid="cell-R6-happy-email"]')).toBeNull()
   })
 
-  it('labels the gap variant-incomplete and lists the missing channels', async () => {
+  it('expands one path at a time to reveal its variant cells', async () => {
+    await mount()
+    act(() => { container.querySelector<HTMLButtonElement>('[data-testid="variant-path-R6-happy"]')?.click() })
+    expect(container.querySelector('[data-testid="cell-R6-happy-email"]')?.getAttribute('data-covered')).toBe('true')
+    expect(container.querySelector('[data-testid="cell-R6-happy-whatsapp"]')?.getAttribute('data-covered')).toBe('false')
+    // Opening sad closes happy — only one path's cells show at a time.
+    act(() => { container.querySelector<HTMLButtonElement>('[data-testid="variant-path-R6-sad"]')?.click() })
+    expect(container.querySelector('[data-testid="cell-R6-happy-email"]')).toBeNull()
+    expect(container.querySelector('[data-testid="cell-R6-sad-email"]')?.getAttribute('data-covered')).toBe('true')
+    // Clicking the open pill again collapses it.
+    act(() => { container.querySelector<HTMLButtonElement>('[data-testid="variant-path-R6-sad"]')?.click() })
+    expect(container.querySelector('[data-testid="cell-R6-sad-email"]')).toBeNull()
+  })
+
+  it('labels the gap "Variant gap" and keeps the missing channels in the pill tooltip (not the pill text)', async () => {
     await mount()
     const gap = container.querySelector('[data-testid="gap-R6"]')
-    expect(gap?.textContent).toContain('Variant-incomplete')
-    expect(gap?.textContent).toContain('whatsapp')
-    expect(gap?.textContent).toContain('line')
+    expect(gap?.textContent).toContain('Variant gap')
+    expect(gap?.textContent).not.toContain('whatsapp')
+    const happy = container.querySelector('[data-testid="variant-path-R6-happy"]')
+    expect(happy?.getAttribute('title')).toContain('whatsapp')
+    expect(happy?.getAttribute('title')).toContain('line')
   })
 
   it('counts the requirement in the variant-incomplete breakdown segment', async () => {
     await mount()
     const badge = container.querySelector('[data-testid="gap-badge-variant-incomplete"]')
     expect(badge?.textContent).toContain('1')
+  })
+
+  it('renders a single-path variant requirement as one pill that expands to its chips', async () => {
+    const single = structuredClone(VARIANT_LEDGER)
+    single.requirements[0].requirement.pathTypes = ['happy']
+    single.requirements[0].pathCoverage = [{ path: 'happy', covered: true }]
+    single.requirements[0].variantCoverage = [
+      { path: 'happy', variant: 'email', covered: true },
+      { path: 'happy', variant: 'whatsapp', covered: false },
+      { path: 'happy', variant: 'call', covered: false },
+      { path: 'happy', variant: 'line', covered: false },
+    ]
+    vi.mocked(api.getFeatureCoverage).mockResolvedValue(single)
+    await mount()
+    expect(container.querySelector('[data-testid="variant-path-R6-happy"]')?.textContent).toContain('1/4')
+    expect(container.querySelector('[data-testid="cell-R6-happy-email"]')).toBeNull()
+    act(() => { container.querySelector<HTMLButtonElement>('[data-testid="variant-path-R6-happy"]')?.click() })
+    expect(container.querySelector('[data-testid="cell-R6-happy-email"]')?.getAttribute('data-covered')).toBe('true')
+    expect(container.querySelector('[data-testid="cell-R6-happy-whatsapp"]')?.getAttribute('data-covered')).toBe('false')
+  })
+
+  it('excludes N/A variants from the count and renders them as n/a with the reason', async () => {
+    // email covered + whatsapp/call/line N/A (no surface) → 1/1 applicable, covered.
+    const na = structuredClone(VARIANT_LEDGER)
+    na.requirements[0].gapType = 'covered'
+    na.requirements[0].coverageStatus = 'covered'
+    na.requirements[0].requirement.variantsNA = [
+      { variant: 'whatsapp', reason: 'no V4 config endpoint' },
+      { variant: 'call', reason: 'no V4 config endpoint' },
+      { variant: 'line', reason: 'no V4 config endpoint' },
+    ]
+    na.requirements[0].variantCoverage = [
+      { path: 'happy', variant: 'email', covered: true, applicable: true },
+      { path: 'sad', variant: 'email', covered: true, applicable: true },
+      ...['whatsapp', 'call', 'line'].flatMap((v) => ([
+        { path: 'happy' as const, variant: v, covered: false, applicable: false, reason: 'no V4 config endpoint' },
+        { path: 'sad' as const, variant: v, covered: false, applicable: false, reason: 'no V4 config endpoint' },
+      ])),
+    ]
+    na.totals = { total: 1, covered: 1, pathIncomplete: 0, variantIncomplete: 0, untested: 0, orphanTests: 0 }
+    na.coveragePct = 100
+    vi.mocked(api.getFeatureCoverage).mockResolvedValue(na)
+    await mount()
+    // Count is over applicable variants only → 1/1, not 1/4.
+    const happy = container.querySelector('[data-testid="variant-path-R6-happy"]')
+    expect(happy?.textContent).toContain('1/1')
+    expect(happy?.getAttribute('title')).toContain('N/A')
+    act(() => { (happy as HTMLButtonElement)?.click() })
+    const cell = container.querySelector('[data-testid="cell-R6-happy-whatsapp"]')
+    expect(cell?.getAttribute('data-covered')).toBe('na')
+    expect(cell?.textContent).toContain('n/a')
+    expect(cell?.getAttribute('title')).toContain('no V4 config endpoint')
   })
 })

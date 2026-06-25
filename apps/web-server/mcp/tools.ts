@@ -135,6 +135,7 @@ const summaryRequirementInput = z.object({
   unhappyPath: z.string().optional(),
   pathTypes: z.array(z.enum(['happy', 'sad', 'edge'])).describe('At least one of happy/sad/edge.'),
   variants: z.array(z.string()).optional().describe('Variant value(s) this requirement must hold across (≥2 of the feature\'s variantDimension values, e.g. ["email","whatsapp"]). Omit for a single-value / variant-agnostic requirement.'),
+  variantsNA: z.array(z.object({ variant: z.string(), reason: z.string() })).optional().describe('Variants from `variants` with NO testable surface (e.g. {variant:"line",reason:"no broadcast endpoint"}). Excluded from coverage + shown as N/A. Only when you confirmed the surface is absent — not merely untested.'),
   strictnessLadder: z.array(z.object({
     tier: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)]),
     description: z.string(),
