@@ -1,7 +1,7 @@
 {
   "name": "canary-lab",
   "version": "1.4.0",
-  "description": "Independent local harness for AI coding agents: boots your services in dev mode, runs Playwright tests itself, keeps per-run evidence, and reruns until green.",
+  "description": "Your AI agent fixes the code; Canary Lab proves it works. The independent local harness that runs your Playwright tests itself, so green can't be faked.",
   "keywords": [
     "playwright",
     "playwright-testing",
