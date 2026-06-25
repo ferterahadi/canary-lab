@@ -29,6 +29,13 @@ export interface VariantDimension {
   values: string[]
 }
 
+/** A variant a requirement nominally spans but that has no testable surface — the
+ *  reason is shown in the ledger so the exclusion is explicit, never silent. */
+export interface VariantNA {
+  variant: string
+  reason: string
+}
+
 /**
  * Assertion strictness tiers — how close a check gets to the real,
  * user-observable effect. Tier 1 = "looks like it works"; tier 4 = "works".
@@ -72,6 +79,12 @@ export interface Requirement {
    *  requirement is variant-agnostic and coverage uses paths only (today's model).
    *  Every value must be one of `PrdSummary.variantDimension.values`. */
   variants?: string[]
+  /** Variant values from `variants` that are Not-Applicable — no testable surface
+   *  exists for them (e.g. "LINE has no broadcast endpoint"). Excluded from the
+   *  coverage denominator and rendered with their reason, so an architecturally
+   *  impossible cell is shown as N/A rather than a permanent phantom gap. Each
+   *  `variant` must appear in `variants`. */
+  variantsNA?: VariantNA[]
   /** Agent-proposed strictness ladder (per-domain: LINE vs payment vs email).
    *  Stored so rigor scoring has a stable, per-requirement ceiling. */
   strictnessLadder?: StrictnessLadderRung[]
@@ -173,6 +186,12 @@ export interface VariantCellCoverage {
   path: PathType
   variant: string
   covered: boolean
+  /** False when the requirement declares this variant Not-Applicable (no surface
+   *  exists). N/A cells are excluded from the covered denominator and rendered
+   *  with `reason` instead of counting as a gap. Absent ⇒ a normal applicable cell. */
+  applicable?: boolean
+  /** Why the cell is N/A (from `Requirement.variantsNA`) — shown in the grid. */
+  reason?: string
 }
 
 /**

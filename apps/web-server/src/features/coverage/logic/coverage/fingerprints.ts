@@ -39,6 +39,8 @@ export function fingerprintRequirement(req: Requirement): string {
     // Variants are part of the requirement's MEANING — adding/removing a channel
     // changes what coverage must prove, so it must re-invalidate the ledger.
     [...(req.variants ?? [])].sort().join(','),
+    // N/A set + reasons too — marking a channel inapplicable changes the denominator.
+    [...(req.variantsNA ?? [])].map((n) => `${n.variant}:${n.reason}`).sort().join(','),
   )
 }
 

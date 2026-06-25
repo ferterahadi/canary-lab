@@ -91,6 +91,17 @@ The litmus test: would a reviewer accept "we tested it on email" as proof a
 requirement about *all four channels* is done? If no, that requirement spans
 variants and must list them.
 
+**Not-Applicable variants.** Some variants a requirement nominally spans have **no
+testable surface** — the endpoint/feature simply does not exist for them (e.g.
+"broadcast is email-only", "LINE has no v2 read endpoint"). Listing such a variant
+as something to cover creates a permanent impossible gap. Instead:
+- Keep the variant in `variants` (the requirement conceptually spans it), AND
+- Add it to `variantsNA` with a concrete `reason` (what's missing).
+A variant in `variantsNA` is excluded from coverage and shown as N/A with its
+reason. Only mark N/A when you confirmed from the code/docs that no surface exists
+— not merely because no test happens to exist yet (that's a real gap). When in
+doubt, leave it OUT of `variantsNA` (a real gap is safer than a hidden one).
+
 ## Happy & unhappy paths
 
 For each requirement where it is meaningful, describe BOTH:
@@ -167,6 +178,7 @@ cross-cutting dimension:
       "unhappyPath": "what happens on invalid input / failure / edge cases",
       "pathTypes": ["happy", "sad"],
       "variants": ["email", "whatsapp", "call", "line"],
+      "variantsNA": [{ "variant": "whatsapp", "reason": "no v2 read endpoint exists" }],
       "strictnessLadder": [
         { "tier": 1, "description": "app log shows the action" },
         { "tier": 4, "description": "browser confirms the real effect" }

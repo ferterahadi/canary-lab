@@ -14,6 +14,7 @@ import type {
   StrictnessLadderRung,
   StrictnessTier,
   VariantDimension,
+  VariantNA,
 } from '../../../../../../../shared/coverage/types'
 import {
   docsDirFor,
@@ -51,6 +52,7 @@ export interface ParsedRequirement {
   unhappyPath?: string
   pathTypes: PathType[]
   variants?: string[]
+  variantsNA?: VariantNA[]
   strictnessLadder?: StrictnessLadderRung[]
 }
 
@@ -93,6 +95,30 @@ function normalizeRequirementVariants(value: unknown, dimension: VariantDimensio
     if (v && allowed.has(v) && !out.includes(v)) out.push(v)
   }
   return out.length >= 2 ? out : undefined
+}
+
+/** Normalize a requirement's `variantsNA` — variants it nominally spans but that
+ *  have no testable surface. Each must be one of the requirement's declared
+ *  `variants` and carry a non-empty reason; anything else is dropped. */
+function normalizeRequirementVariantsNA(
+  value: unknown,
+  declared: string[] | undefined,
+): VariantNA[] | undefined {
+  if (!Array.isArray(value) || !declared || !declared.length) return undefined
+  const allowed = new Set(declared)
+  const seen = new Set<string>()
+  const out: VariantNA[] = []
+  for (const item of value) {
+    if (!item || typeof item !== 'object') continue
+    const raw = item as { variant?: unknown; reason?: unknown }
+    const variant = normalizeVariantValue(raw.variant)
+    const reason = typeof raw.reason === 'string' ? raw.reason.trim() : ''
+    if (variant && reason && allowed.has(variant) && !seen.has(variant)) {
+      seen.add(variant)
+      out.push({ variant, reason })
+    }
+  }
+  return out.length ? out : undefined
 }
 
 function normalizeProse(value: unknown): string | undefined {
@@ -205,6 +231,7 @@ export function parsePrdSummaryOutput(
     const r = raw as Record<string, unknown>
     if (typeof r.title !== 'string' || typeof r.text !== 'string') continue
     if (!r.title.trim() || !r.text.trim()) continue
+    const variants = normalizeRequirementVariants(r.variants, variantDimension)
     out.push({
       id: typeof r.id === 'string' && r.id.trim() ? r.id.trim() : undefined,
       kind: normalizeKind(r.kind),
@@ -213,7 +240,8 @@ export function parsePrdSummaryOutput(
       happyPath: normalizeProse(r.happyPath),
       unhappyPath: normalizeProse(r.unhappyPath),
       pathTypes: normalizePathTypes(r.pathTypes),
-      variants: normalizeRequirementVariants(r.variants, variantDimension),
+      variants,
+      variantsNA: normalizeRequirementVariantsNA(r.variantsNA, variants),
       strictnessLadder: normalizeLadder(r.strictnessLadder),
     })
   }
@@ -294,6 +322,7 @@ export function reconcileRequirementIds(
       // Variants are freshly re-extracted each regen; fall back to a survivor's
       // set only when this pass proposed none (parallels the ladder).
       variants: candidate.variants ?? survivedFrom?.variants,
+      variantsNA: candidate.variantsNA ?? survivedFrom?.variantsNA,
       // The strictness ladder is per-domain and stable; preserve a survivor's
       // existing ladder when the regen doesn't re-propose one (parallels id
       // preservation — agents shouldn't have to re-derive it every time).
@@ -575,6 +604,9 @@ export function renderPrdSummaryMarkdown(
       md += `- _Paths: ${req.pathTypes.join(', ')}_\n`
       if (req.variants && req.variants.length) {
         md += `- _${summary.variantDimension?.name ?? 'Variants'}: ${req.variants.join(', ')}_\n`
+      }
+      if (req.variantsNA && req.variantsNA.length) {
+        md += `- _N/A: ${req.variantsNA.map((n) => `${n.variant} (${n.reason})`).join('; ')}_\n`
       }
       md += '\n'
       requirements.push({ ...req, sourceRange: { start, end } })

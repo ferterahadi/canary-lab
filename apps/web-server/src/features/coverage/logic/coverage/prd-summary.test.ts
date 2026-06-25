@@ -181,6 +181,32 @@ describe('parseVariantDimension + requirement variants (D1)', () => {
     const out = parsePrdSummaryOutput('{"requirements":[{"title":"x","text":"t","pathTypes":["happy"],"variants":["email","whatsapp"]}]}')
     expect(out![0].variants).toBeUndefined()
   })
+
+  it('parses variantsNA (within declared variants, non-empty reason), dropping strays', () => {
+    const dim = parseVariantDimension('{"variantDimension":{"name":"channel","values":["email","whatsapp","call","line"]}}')
+    const out = parsePrdSummaryOutput(
+      JSON.stringify({ requirements: [{
+        title: 'cfg', text: 't', pathTypes: ['happy'],
+        variants: ['email', 'whatsapp', 'call', 'line'],
+        variantsNA: [
+          { variant: 'whatsapp', reason: 'no v2 endpoint' },
+          { variant: 'call', reason: '' },          // empty reason → dropped
+          { variant: 'sms', reason: 'not declared' }, // not in variants → dropped
+        ],
+      }] }),
+      dim,
+    )
+    expect(out![0].variantsNA).toEqual([{ variant: 'whatsapp', reason: 'no v2 endpoint' }])
+  })
+
+  it('drops variantsNA entirely when the requirement declares no variants', () => {
+    const dim = parseVariantDimension('{"variantDimension":{"name":"channel","values":["email","whatsapp"]}}')
+    const out = parsePrdSummaryOutput(
+      JSON.stringify({ requirements: [{ title: 'x', text: 't', pathTypes: ['happy'], variantsNA: [{ variant: 'email', reason: 'r' }] }] }),
+      dim,
+    )
+    expect(out![0].variantsNA).toBeUndefined()
+  })
 })
 
 describe('reconcileRequirementIds — the id spine', () => {

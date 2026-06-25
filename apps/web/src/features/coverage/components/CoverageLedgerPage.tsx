@@ -29,13 +29,18 @@ interface Props {
 // Each gap class gets a stable label + colour. Coverage is semantic (run-free):
 // `untested` (no test maps to it) is the gap; `path-incomplete` (some declared
 // paths unclaimed) is partial; `covered` (every path claimed) is the good state.
-const GAP_META: Record<GapType, { label: string; color: string }> = {
-  covered: { label: 'Covered', color: 'rgb(52, 211, 153)' },
-  'path-incomplete': { label: 'Path-incomplete', color: 'rgb(56, 189, 248)' },
+// `abbr` is the single-letter form the card status chips collapse to when the card
+// is too narrow for the full label (container query); the colour dot + a hover title
+// keep it decipherable.
+const GAP_META: Record<GapType, { label: string; abbr: string; color: string }> = {
+  covered: { label: 'Covered', abbr: 'C', color: 'rgb(52, 211, 153)' },
+  // Short labels keep the legend + card status from crushing the layout at narrow
+  // widths; the glossary `i` still spells out the full meaning.
+  'path-incomplete': { label: 'Path gap', abbr: 'P', color: 'rgb(56, 189, 248)' },
   // A requirement that spans a variant dimension (channel/tenant/…) but is only
   // tested on some values. Amber = the breadth warning: it claims more than it proves.
-  'variant-incomplete': { label: 'Variant-incomplete', color: 'rgb(251, 191, 36)' },
-  untested: { label: 'Untested', color: 'var(--text-muted)' },
+  'variant-incomplete': { label: 'Variant gap', abbr: 'V', color: 'rgb(251, 191, 36)' },
+  untested: { label: 'Untested', abbr: 'U', color: 'var(--text-muted)' },
 }
 
 // Per-test coverage strength — graded off the strongest stack layer a test's
@@ -743,8 +748,8 @@ function CoverageGlossary() {
       <span aria-hidden="true" className="clcov-info-i">i</span>
       <span className="clcov-info-pop" role="tooltip">
         <span><strong style={{ color: GAP_META.covered.color }}>Covered</strong> — every path the requirement declares (happy/sad/edge) has a mapped test.</span>
-        <span><strong style={{ color: GAP_META['path-incomplete'].color }}>Path-incomplete</strong> — a test exists, but some declared path has none.</span>
-        <span><strong style={{ color: GAP_META['variant-incomplete'].color }}>Variant-incomplete</strong> — a test exists, but the requirement spans a dimension (e.g. channel) only partly exercised.</span>
+        <span><strong style={{ color: GAP_META['path-incomplete'].color }}>Path gap</strong> — a test exists, but some declared path has none.</span>
+        <span><strong style={{ color: GAP_META['variant-incomplete'].color }}>Variant gap</strong> — a test exists, but the requirement spans a dimension (e.g. channel) only partly exercised.</span>
         <span><strong style={{ color: 'var(--text-secondary)' }}>Untested</strong> — no test maps to the requirement.</span>
         <span><strong>Mapped</strong> — has ≥1 test (covered + path/variant-incomplete). Coverage is decoupled from test runs.</span>
       </span>
@@ -770,17 +775,10 @@ function RequirementCard({ rc, colors, active, focused, dimmed, onHover }: {
   onHover: (on: boolean) => void
 }) {
   const meta = GAP_META[rc.gapType]
-  const missing = rc.pathCoverage.filter((p) => !p.covered).map((p) => p.path)
-  // Distinct variant values still missing at least one cell — the gap-pill note
-  // for a variant-incomplete requirement (e.g. "· whatsapp/call/line").
-  const missingVariants = rc.variantCoverage
-    ? [...new Set(rc.variantCoverage.filter((c) => !c.covered).map((c) => c.variant))]
-    : []
-  const gapNote = rc.gapType === 'path-incomplete' && missing.length > 0
-    ? ` · ${missing.join('/')}`
-    : rc.gapType === 'variant-incomplete' && missingVariants.length > 0
-      ? ` · ${missingVariants.join('/')}`
-      : ''
+  // The which-paths / which-variants detail is no longer crammed into the gap pill —
+  // the path chips (1-axis) or the path×variant matrix below name the exact gaps,
+  // so the status reads as just a dot + short label and never crushes the title.
+  const hasVariants = Boolean(rc.variantCoverage && rc.variantCoverage.length > 0)
   const { kind, happyPath, unhappyPath } = rc.requirement
   const happyText = meaningfulPath(happyPath)
   const unhappyText = meaningfulPath(unhappyPath)
@@ -809,8 +807,12 @@ function RequirementCard({ rc, colors, active, focused, dimmed, onHover }: {
         transition: 'opacity 120ms, background 120ms, border-color 140ms, box-shadow 140ms',
       }}
     >
+      {/* Header is ONE inline-flow line: caret · id · title · kind · gap status all
+          flow and wrap together as a single run, so the tags read as part of the
+          title and tuck after its last word instead of reserving a column or
+          block-stacking below it. */}
       <div
-        className={hasDetail ? 'clcov-disclose flex items-center gap-2' : 'flex items-center gap-2'}
+        className={hasDetail ? 'clcov-disclose clcov-reqhead' : 'clcov-reqhead'}
         style={{ marginBottom: 5 }}
         {...(hasDetail
           ? {
@@ -824,41 +826,42 @@ function RequirementCard({ rc, colors, active, focused, dimmed, onHover }: {
           : {})}
       >
         {hasDetail && <span aria-hidden="true" className="clcov-caret">{expanded ? '▾' : '▸'}</span>}
-        <span style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: 10.5, fontWeight: 600, color: 'var(--text-muted)', background: 'var(--bg-base)', border: '1px solid var(--border-default)', borderRadius: 5, padding: '1px 5px' }}>{rc.requirement.id}</span>
-        <strong style={{ fontSize: 13, color: 'var(--text-primary)' }}>{rc.requirement.title}</strong>
-        {rc.requirement.deprecated && <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>(deprecated)</span>}
-        {/* Kind + gap status, grouped on the right. Kind is now visible without
-            expanding the card (it used to live only in the disclosed detail). */}
-        <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 6, flex: 'none' }}>
-          {kind && (
-            <span className="clcov-kind" data-kind={kind} data-testid={`kind-${rc.requirement.id}`} style={{ alignSelf: 'center' }}>
-              {kind === 'non-functional' ? 'Non-functional' : 'Functional'}
-            </span>
-          )}
-          <span data-testid={`gap-${rc.requirement.id}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 10, fontWeight: 600, color: meta.color, background: `color-mix(in srgb, ${meta.color} 12%, transparent)`, border: `1px solid color-mix(in srgb, ${meta.color} 40%, transparent)`, borderRadius: 999, padding: '2px 8px' }}>
-            <span style={{ width: 6, height: 6, borderRadius: '50%', background: meta.color }} />
-            {meta.label}{gapNote}
+        <span className="clcov-reqid">{rc.requirement.id}</span>
+        <strong className="clcov-req-title">{rc.requirement.title}</strong>
+        {rc.requirement.deprecated && <span style={{ fontSize: 11, color: 'var(--text-muted)' }}> (deprecated)</span>}
+        {kind && (
+          <span className="clcov-kind-tag" data-testid={`kind-${rc.requirement.id}`} title={kind === 'non-functional' ? 'Non-functional' : 'Functional'}>
+            <span className="clcov-cq-full">{kind === 'non-functional' ? 'Non-functional' : 'Functional'}</span>
+            <span className="clcov-cq-abbr" aria-hidden="true">{kind === 'non-functional' ? 'N' : 'F'}</span>
           </span>
+        )}
+        <span className="clcov-gap" data-testid={`gap-${rc.requirement.id}`} title={meta.label} style={{ color: meta.color }}>
+          <span className="clcov-gap-dot" style={{ background: meta.color }} />
+          <span className="clcov-cq-full">{meta.label}</span>
+          <span className="clcov-cq-abbr" aria-hidden="true">{meta.abbr}</span>
         </span>
       </div>
-      <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.45 }}>{rc.requirement.text}</div>
-      <div className="flex flex-wrap items-center gap-2" style={{ marginTop: 7 }}>
-        {rc.pathCoverage.map((p) => (
-          p.covered ? (
-            <span key={p.path} data-testid={`path-${rc.requirement.id}-${p.path}`} title={`${p.path} path has a mapped test`} style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: 9.5, letterSpacing: '0.02em', padding: '1px 7px', borderRadius: 5, background: 'color-mix(in srgb, rgb(52,211,153) 10%, transparent)', border: '1px solid color-mix(in srgb, rgb(52,211,153) 40%, var(--border-default))', color: 'rgb(52,211,153)' }}>
-              {p.path} ✓
-            </span>
-          ) : (
-            // No test for this path — the dashed/muted treatment carries that; the
-            // word "no test" was redundant with the pill's "· {path}" gap note.
-            <span key={p.path} data-testid={`path-${rc.requirement.id}-${p.path}`} title={`No test maps to the ${p.path} path`} style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: 9.5, letterSpacing: '0.02em', padding: '1px 7px', borderRadius: 5, border: '1px dashed color-mix(in srgb, var(--text-muted) 55%, var(--border-default))', color: 'var(--text-muted)' }}>
-              {p.path}
-            </span>
-          )
-        ))}
-      </div>
-      {rc.variantCoverage && rc.variantCoverage.length > 0 && (
-        <VariantGrid rc={rc} />
+      <div className="clcov-req-text">{rc.requirement.text}</div>
+      {hasVariants ? (
+        // Variant requirement: the path×variant matrix (or a single inline row when
+        // there's one path) is the source of truth — the 1-axis path chips would
+        // only duplicate it, so they're dropped here.
+        <VariantCoverage rc={rc} />
+      ) : (
+        <div className="flex flex-wrap items-center gap-2" style={{ marginTop: 7 }}>
+          {rc.pathCoverage.map((p) => (
+            p.covered ? (
+              <span key={p.path} data-testid={`path-${rc.requirement.id}-${p.path}`} title={`${p.path} path has a mapped test`} className="clcov-vchip clcov-vchip-on">
+                {p.path} ✓
+              </span>
+            ) : (
+              // No test for this path — the dashed/muted treatment carries that.
+              <span key={p.path} data-testid={`path-${rc.requirement.id}-${p.path}`} title={`No test maps to the ${p.path} path`} className="clcov-vchip">
+                {p.path}
+              </span>
+            )
+          ))}
+        </div>
       )}
       {hasDetail && expanded && (
         <div className="clcov-reqdetail" data-testid={`req-detail-${rc.requirement.id}`}>
@@ -880,63 +883,103 @@ function RequirementCard({ rc, colors, active, focused, dimmed, onHover }: {
   )
 }
 
-// The `path × variant` matrix for a variant-bearing requirement. Each row is a
-// variant value (worst-first: rows with any gap on top); each column a declared
-// path. A green ✓ cell means some test claims (path, variant); a dashed-muted
-// cell is the breadth gap the 2-axis ledger was blind to. Reuses the path-pill
-// hues so the grid reads as the same language, just two-dimensional.
-function VariantGrid({ rc }: { rc: RequirementCoverage }) {
+// Variant coverage for a variant-bearing requirement, as an accordion: a compact row
+// of clickable path pills (`happy 1/4` = covered/total variants, count coloured by
+// state), and — for the one pill you click — its per-variant chips below. Only one
+// path's variants show at a time, so a requirement spanning many paths/variants stays
+// scannable: you read the gap per path on demand instead of all cells at once.
+function VariantCoverage({ rc }: { rc: RequirementCoverage }) {
   const cells = rc.variantCoverage ?? []
   const paths = [...new Set(cells.map((c) => c.path))]
   const variants = [...new Set(cells.map((c) => c.variant))]
   const covered = (path: string, variant: string) =>
     cells.find((c) => c.path === path && c.variant === variant)?.covered ?? false
-  // Worst-first: variants with the most uncovered cells sort to the top.
-  const gapsFor = (v: string) => paths.filter((p) => !covered(p, v)).length
-  const rows = [...variants].sort((a, b) => gapsFor(b) - gapsFor(a))
-  const ACCENT = 'rgb(52,211,153)'
+  // A variant is Not-Applicable when it has no testable surface (ledger marked
+  // every cell applicable:false). N/A is excluded from the counts/gaps and shown
+  // with its reason — an impossible cell is N/A, never a phantom gap.
+  const isNA = (variant: string) =>
+    cells.some((c) => c.variant === variant && c.applicable === false)
+  const naReason = (variant: string) =>
+    cells.find((c) => c.variant === variant && c.applicable === false)?.reason ?? 'not applicable'
+  const applicable = (variant: string) => !isNA(variant)
+  // Worst-first: most-uncovered applicable variant leads; N/A sinks to the bottom.
+  const vGaps = (v: string) => (isNA(v) ? -1 : paths.filter((p) => !covered(p, v)).length)
+  const variantOrder = [...variants].sort((a, b) => vGaps(b) - vGaps(a))
+  const pGaps = (p: string) => variants.filter((v) => applicable(v) && !covered(p, v)).length
+  const pathOrder = [...paths].sort((a, b) => pGaps(b) - pGaps(a))
+  const naCount = variants.filter(isNA).length
+  const applicableCount = variants.length - naCount
+  const [open, setOpen] = useState<string | null>(null)
   return (
-    <div data-testid={`variant-grid-${rc.requirement.id}`} style={{ marginTop: 8, overflowX: 'auto' }}>
-      <table style={{ borderCollapse: 'collapse', fontFamily: 'var(--font-mono, monospace)', fontSize: 9.5, letterSpacing: '0.02em' }}>
-        <thead>
-          <tr>
-            <th style={{ textAlign: 'left', padding: '1px 8px 3px 0', color: 'var(--text-muted)', fontWeight: 600 }} />
-            {paths.map((p) => (
-              <th key={p} style={{ textAlign: 'center', padding: '1px 7px 3px', color: 'var(--text-muted)', fontWeight: 600 }}>{p}</th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((v) => (
-            <tr key={v} data-testid={`variant-row-${rc.requirement.id}-${v}`}>
-              <td style={{ padding: '2px 8px 2px 0', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>{v}</td>
-              {paths.map((p) => {
-                const on = covered(p, v)
-                return (
-                  <td key={p} style={{ textAlign: 'center', padding: '2px 4px' }}>
+    <div data-testid={`variant-grid-${rc.requirement.id}`} className="clcov-vgrid">
+      <div className="clcov-vpaths">
+        {pathOrder.map((path) => {
+          // Counts are over APPLICABLE variants only; N/A never adds to the denominator.
+          const missing = variantOrder.filter((v) => applicable(v) && !covered(path, v))
+          const coveredCount = applicableCount - missing.length
+          const complete = missing.length === 0
+          const active = open === path
+          const naNote = naCount ? `, ${naCount} N/A` : ''
+          return (
+            <button
+              key={path}
+              type="button"
+              data-testid={`variant-path-${rc.requirement.id}-${path}`}
+              className="clcov-vpath"
+              data-on={active ? 'true' : 'false'}
+              aria-expanded={active}
+              title={complete ? `${path}: all ${applicableCount} applicable variants covered${naNote}` : `${path}: missing ${missing.join(', ')}${naNote}`}
+              onClick={(e) => { e.stopPropagation(); setOpen(active ? null : path) }}
+            >
+              <span aria-hidden="true" className="clcov-vpath-caret">{active ? '▾' : '▸'}</span>
+              <span className="clcov-vpath-name">{path}</span>
+              <span className="clcov-vpath-n" style={{ color: complete ? 'rgb(52,211,153)' : GAP_META['variant-incomplete'].color }}>{coveredCount}/{applicableCount}</span>
+            </button>
+          )
+        })}
+      </div>
+      {open && (() => {
+        // The tray is a contained panel headed by its path, so the chips read as the
+        // detail of the pill you clicked — not as belonging to whatever pill happens
+        // to sit above-left of them in the wrapped row.
+        const openCovered = variantOrder.filter((v) => applicable(v) && covered(open, v)).length
+        return (
+          <div className="clcov-vtray" data-testid={`variant-cells-${rc.requirement.id}-${open}`}>
+            <div className="clcov-vtray-head">
+              <span className="clcov-vtray-path">{open}</span> · {openCovered}/{applicableCount} variants covered{naCount ? ` · ${naCount} N/A` : ''}
+            </div>
+            <div className="clcov-vtray-chips">
+              {variantOrder.map((v) => {
+                if (isNA(v)) {
+                  return (
                     <span
-                      data-testid={`cell-${rc.requirement.id}-${p}-${v}`}
-                      data-covered={on ? 'true' : 'false'}
-                      title={on ? `${p} · ${v} has a mapped test` : `No test maps to ${p} · ${v}`}
-                      style={{
-                        display: 'inline-block',
-                        minWidth: 16,
-                        padding: '1px 6px',
-                        borderRadius: 5,
-                        ...(on
-                          ? { background: `color-mix(in srgb, ${ACCENT} 10%, transparent)`, border: `1px solid color-mix(in srgb, ${ACCENT} 40%, var(--border-default))`, color: ACCENT }
-                          : { border: '1px dashed color-mix(in srgb, var(--text-muted) 55%, var(--border-default))', color: 'var(--text-muted)' }),
-                      }}
+                      key={v}
+                      data-testid={`cell-${rc.requirement.id}-${open}-${v}`}
+                      data-covered="na"
+                      title={`${v}: N/A — ${naReason(v)}`}
+                      className="clcov-vchip clcov-vchip-na"
                     >
-                      {on ? '✓' : '–'}
+                      {v} n/a
                     </span>
-                  </td>
+                  )
+                }
+                const on = covered(open, v)
+                return (
+                  <span
+                    key={v}
+                    data-testid={`cell-${rc.requirement.id}-${open}-${v}`}
+                    data-covered={on ? 'true' : 'false'}
+                    title={on ? `${open} · ${v} has a mapped test` : `No test maps to ${open} · ${v}`}
+                    className={on ? 'clcov-vchip clcov-vchip-on' : 'clcov-vchip'}
+                  >
+                    {v}{on ? ' ✓' : ''}
+                  </span>
                 )
               })}
-            </tr>
-          ))}
-        </tbody>
-      </table>
+            </div>
+          </div>
+        )
+      })()}
     </div>
   )
 }
@@ -983,8 +1026,10 @@ function TestCard({ test, testNumber, color, active, dimmed, onHover, onExpand, 
         transition: 'opacity 120ms, background 120ms, box-shadow 120ms, border-color 140ms',
       }}
     >
+      {/* One inline-flow header (same as the requirement card): caret · #N · name
+          flow and wrap together instead of the badge sitting in its own flex cell. */}
       <div
-        className="clcov-disclose flex items-center gap-2"
+        className="clcov-disclose clcov-reqhead"
         role="button"
         tabIndex={0}
         aria-expanded={expanded}
@@ -993,34 +1038,25 @@ function TestCard({ test, testNumber, color, active, dimmed, onHover, onExpand, 
         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle() } }}
       >
         <span aria-hidden="true" className="clcov-caret">{expanded ? '▾' : '▸'}</span>
-        <TestIdBadge n={testNumber} />
+        <span className="clcov-testid"><TestIdBadge n={testNumber} /></span>
         {/* Name is the identity; the file:line locator lives on the expanded
             source head (with Open-in-editor), so it's not repeated here. */}
-        <strong style={{ fontSize: 13, color: 'var(--text-primary)' }}>{stripLeadingTestOrdinal(test.name)}</strong>
+        <strong className="clcov-req-title">{stripLeadingTestOrdinal(test.name)}</strong>
       </div>
-      {/* Tier 1 — what this test IS: its strength + the paths it exercises. */}
-      {(test.strength || test.pathTypes.length > 0) && (
-        <div className="flex flex-wrap items-center gap-1.5" style={{ marginTop: 7 }}>
-          {test.strength && (
-            <span
-              data-testid={`strength-${test.name}`}
-              title={STRENGTH_META[test.strength].title}
-              className="flex items-center gap-1"
-              style={{ fontSize: 10, fontWeight: 600, color: STRENGTH_META[test.strength].color, background: `color-mix(in srgb, ${STRENGTH_META[test.strength].color} 14%, transparent)`, border: `1px solid color-mix(in srgb, ${STRENGTH_META[test.strength].color} 45%, transparent)`, borderRadius: 999, padding: '1px 8px' }}
-            >
-              <span aria-hidden="true" style={{ width: 6, height: 6, borderRadius: '50%', background: STRENGTH_META[test.strength].color }} />
-              {STRENGTH_META[test.strength].label}
-            </span>
-          )}
-          {test.pathTypes.map((p) => (
-            <span key={p} title={`Exercises the ${PATH_DESC[p] ?? p} path`} style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: 10, padding: '1px 6px', borderRadius: 5, border: '1px solid var(--border-default)', color: 'var(--text-muted)' }}>@path-{p}</span>
-          ))}
-        </div>
-      )}
-      {/* Tier 2 — what this test COVERS: the requirement links (click to jump).
-          Calmer chip weight + the colored tint (vs the muted @path chips above)
-          keep a long list legible without a label. */}
-      <div className="flex flex-wrap items-center gap-1.5" style={{ marginTop: 6 }}>
+      {/* One compact meta row: strength (what the test IS) + the requirement links it
+          COVERS + the @path tags. Click a @req chip to jump to that requirement. */}
+      <div className="flex flex-wrap items-center gap-1.5" style={{ marginTop: 7 }}>
+        {test.strength && (
+          <span
+            data-testid={`strength-${test.name}`}
+            title={STRENGTH_META[test.strength].title}
+            className="flex items-center gap-1"
+            style={{ fontSize: 10, fontWeight: 600, color: STRENGTH_META[test.strength].color, background: `color-mix(in srgb, ${STRENGTH_META[test.strength].color} 14%, transparent)`, border: `1px solid color-mix(in srgb, ${STRENGTH_META[test.strength].color} 45%, transparent)`, borderRadius: 999, padding: '1px 8px' }}
+          >
+            <span aria-hidden="true" style={{ width: 6, height: 6, borderRadius: '50%', background: STRENGTH_META[test.strength].color }} />
+            {STRENGTH_META[test.strength].label}
+          </span>
+        )}
         {test.requirements.length === 0 ? (
           <span data-testid={`orphan-${test.name}`} style={{ fontSize: 10, fontWeight: 600, color: 'rgb(251, 191, 36)', background: 'color-mix(in srgb, rgb(251,191,36) 12%, transparent)', border: '1px solid color-mix(in srgb, rgb(251,191,36) 40%, transparent)', borderRadius: 999, padding: '1px 8px' }}>orphan — no covers tag</span>
         ) : (
@@ -1036,6 +1072,9 @@ function TestCard({ test, testNumber, color, active, dimmed, onHover, onExpand, 
             >@req-{id}</button>
           ))
         )}
+        {test.pathTypes.map((p) => (
+          <span key={p} title={`Exercises the ${PATH_DESC[p] ?? p} path`} style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: 10, padding: '1px 6px', borderRadius: 5, border: '1px solid var(--border-default)', color: 'var(--text-muted)' }}>@path-{p}</span>
+        ))}
       </div>
       {expanded && (
         <div className="clcov-source" data-testid={`test-source-${test.name}`}>
@@ -1119,13 +1158,19 @@ const COVERAGE_CSS = `
 .clcov-feature{font-size:14px;font-weight:700;color:var(--text-primary);font-family:var(--font-mono,monospace);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:40ch}
 .clcov-close{appearance:none;cursor:pointer;font-size:12px;font-weight:600;color:var(--text-secondary);background:var(--bg-surface);border:1px solid var(--border-default);border-radius:var(--radius-md);padding:6px 12px;transition:background .14s,color .14s,border-color .14s}
 .clcov-close:hover{color:var(--text-primary);background:var(--bg-selected);border-color:color-mix(in srgb,var(--text-muted) 45%,var(--border-default))}
-.clcov-statbar{display:flex;align-items:center;gap:20px;padding:13px 18px;border-bottom:1px solid var(--border-default);background:color-mix(in srgb,var(--bg-surface) 30%,var(--bg-base))}
+.clcov-statbar{display:flex;flex-wrap:wrap;align-items:center;gap:14px 20px;padding:13px 18px;border-bottom:1px solid var(--border-default);background:color-mix(in srgb,var(--bg-surface) 30%,var(--bg-base))}
 .clcov-chips{display:flex;flex-wrap:wrap;align-items:center;gap:7px}
 /* Strength filter sits over the tests column. The breakdown's flex-grow pushes it to
    the right edge — do NOT use margin-left:auto here (it cancels that grow). A light
    full-height rule separates the two summaries (requirements coverage | test strength),
    echoing the column divider below. */
 .clcov-strength{flex:none;align-self:stretch;justify-content:flex-end;padding-left:24px;border-left:1px solid var(--border-default)}
+/* Narrow viewport (e.g. a half-width window): the strength cluster drops to its own
+   full-width row with a TOP divider instead of clipping past the right edge. The
+   left rule only makes sense while it sits beside the breakdown. */
+@media (max-width:820px){
+  .clcov-strength{flex:1 0 100%;align-self:auto;justify-content:flex-start;padding-left:0;padding-top:14px;border-left:none;border-top:1px solid var(--border-default)}
+}
 .clcov-chip{display:inline-flex;align-items:center;gap:7px;white-space:nowrap;appearance:none;cursor:pointer;font-size:11.5px;color:var(--text-primary);background:var(--bg-surface);border:1px solid var(--border-default);border-radius:999px;padding:4px 11px;transition:background .14s,border-color .14s,opacity .14s,transform .1s}
 .clcov-chip:hover{transform:translateY(-1px)}
 .clcov-chip[data-empty='true']{opacity:.5}
@@ -1157,6 +1202,9 @@ const COVERAGE_CSS = `
 .clcov-info-i{font-size:10px;font-weight:700;font-style:italic;font-family:Georgia,serif;line-height:1}
 .clcov-info-pop{position:absolute;top:calc(100% + 8px);left:0;z-index:10;width:330px;display:flex;flex-direction:column;gap:6px;padding:12px 13px;border-radius:var(--radius-md);background:var(--bg-surface);border:1px solid var(--border-default);box-shadow:var(--shadow-lg,0 8px 28px rgba(0,0,0,.4));font-size:11.5px;line-height:1.5;color:var(--text-secondary);opacity:0;visibility:hidden;transform:translateY(-3px);transition:opacity .14s,transform .14s,visibility .14s}
 .clcov-info:hover .clcov-info-pop,.clcov-info:focus-within .clcov-info-pop,.clcov-info:focus-visible .clcov-info-pop{opacity:1;visibility:visible;transform:translateY(0)}
+/* The card is a query container so its header status chips can collapse to a single
+   letter when the card itself (not the whole viewport) is too narrow. */
+.clcov-card{container-type:inline-size}
 .clcov-card:hover{border-color:color-mix(in srgb,var(--text-muted) 38%,var(--border-default))}
 /* A @req tag jumped-to from a test card: a brief accent ring locates the card. */
 .clcov-card[data-focus='true']{box-shadow:0 0 0 2px color-mix(in srgb,var(--accent,rgb(56,189,248)) 70%,transparent)}
@@ -1186,7 +1234,53 @@ const COVERAGE_CSS = `
 .clcov-source-note{font-size:11.5px;color:var(--text-muted);font-style:italic}
 /* Requirement detail disclosure: kind chip + happy / unhappy paths. */
 .clcov-reqdetail{margin-top:9px;border-top:1px solid var(--border-default);padding-top:9px;display:flex;flex-direction:column;gap:8px}
-.clcov-kind{align-self:flex-start;font-size:9.5px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--text-muted);background:var(--bg-base);border:1px solid var(--border-default);border-radius:999px;padding:2px 9px}
+/* Requirement card header: a single inline-flow run. Caret, id badge, title, kind
+   and gap chips are all inline boxes, vertical-aligned to the text, so they flow and
+   wrap together — the tags read as part of the title and tuck after its last word,
+   never reserving a right column or block-stacking below it. */
+.clcov-reqhead{display:block;line-height:1.55}
+.clcov-reqhead .clcov-caret{display:inline;margin-right:5px}
+.clcov-reqid{display:inline-flex;align-items:center;vertical-align:middle;margin-right:7px;font-family:var(--font-mono,monospace);font-size:10.5px;font-weight:600;color:var(--text-muted);background:var(--bg-base);border:1px solid var(--border-default);border-radius:5px;padding:1px 5px}
+/* Wraps the shared TestIdBadge so it flows inline in the test card's header. */
+.clcov-testid{display:inline-block;vertical-align:middle;margin-right:7px}
+.clcov-req-title{font-size:13px;color:var(--text-primary);overflow-wrap:anywhere}
+.clcov-kind-tag{display:inline-flex;align-items:center;vertical-align:middle;margin-left:6px;font-size:9.5px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--text-muted);background:var(--bg-base);border:1px solid var(--border-default);border-radius:999px;padding:1px 8px}
+/* Status chips collapse to their single-letter form when the card is too narrow for
+   the words; the full label stays available via the chip's hover title. */
+.clcov-cq-abbr{display:none}
+@container (max-width:340px){
+  .clcov-cq-full{display:none}
+  .clcov-cq-abbr{display:inline}
+}
+/* Gap status is a chip too (matches the kind chip): border + tint derived from its
+   own colour via currentColor, so only the hue is set inline. */
+.clcov-gap{display:inline-flex;align-items:center;vertical-align:middle;gap:5px;margin-left:6px;font-size:10px;font-weight:600;white-space:nowrap;border-radius:999px;padding:1px 8px;border:1px solid color-mix(in srgb,currentColor 38%,transparent);background:color-mix(in srgb,currentColor 12%,transparent)}
+.clcov-gap-dot{width:6px;height:6px;border-radius:50%;flex:none}
+.clcov-req-text{font-size:12px;color:var(--text-secondary);line-height:1.45;margin-top:5px}
+/* Variant coverage = accordion: a row of path pills (happy 1/4); clicking one
+   reveals only that path's variant chips below, so a many-path/variant requirement
+   stays compact and you inspect one path's gap at a time. */
+.clcov-vgrid{margin-top:9px;display:flex;flex-direction:column;gap:6px}
+.clcov-vpaths{display:flex;flex-wrap:wrap;gap:6px}
+.clcov-vpath{display:inline-flex;align-items:center;gap:5px;appearance:none;cursor:pointer;font-family:var(--font-mono,monospace);font-size:9.5px;color:var(--text-secondary);background:var(--bg-base);border:1px solid var(--border-default);border-radius:999px;padding:2px 10px;transition:background .12s,border-color .12s,transform .1s}
+.clcov-vpath:hover{transform:translateY(-1px);border-color:color-mix(in srgb,var(--text-muted) 40%,var(--border-default))}
+.clcov-vpath:focus-visible{outline:none;box-shadow:0 0 0 2px color-mix(in srgb,var(--accent,rgb(56,189,248)) 55%,transparent)}
+/* Active pill: accent-tinted so it clearly owns the tray below it. */
+.clcov-vpath[data-on='true']{background:color-mix(in srgb,var(--accent,rgb(56,189,248)) 13%,var(--bg-surface));border-color:color-mix(in srgb,var(--accent,rgb(56,189,248)) 45%,transparent)}
+.clcov-vpath[data-on='true'] .clcov-vpath-name{color:var(--text-primary)}
+.clcov-vpath-caret{flex:none;width:7px;font-size:8px;color:var(--text-muted)}
+.clcov-vpath[data-on='true'] .clcov-vpath-caret{color:color-mix(in srgb,var(--accent,rgb(56,189,248)) 80%,var(--text-primary))}
+.clcov-vpath-name{color:var(--text-secondary)}
+.clcov-vpath-n{font-weight:700;font-variant-numeric:tabular-nums}
+/* Expanded detail: a self-contained tray headed by its path name, so the chips
+   unambiguously belong to the pill you opened (not the pill above-left of them). */
+.clcov-vtray{display:flex;flex-direction:column;gap:7px;background:var(--bg-base);border:1px solid color-mix(in srgb,var(--accent,rgb(56,189,248)) 22%,var(--border-default));border-radius:var(--radius-md);padding:8px 10px}
+.clcov-vtray-head{font-family:var(--font-mono,monospace);font-size:9.5px;color:var(--text-muted)}
+.clcov-vtray-path{color:var(--text-primary);font-weight:700}
+.clcov-vtray-chips{display:flex;flex-wrap:wrap;gap:6px}
+.clcov-vchip{font-family:var(--font-mono,monospace);font-size:9.5px;letter-spacing:.02em;padding:1px 7px;border-radius:5px;border:1px dashed color-mix(in srgb,var(--text-muted) 55%,var(--border-default));color:var(--text-muted)}
+.clcov-vchip-on{border:1px solid color-mix(in srgb,rgb(52,211,153) 40%,var(--border-default));background:color-mix(in srgb,rgb(52,211,153) 10%,transparent);color:rgb(52,211,153)}
+.clcov-vchip-na{border:1px solid color-mix(in srgb,var(--text-muted) 28%,var(--border-default));background:color-mix(in srgb,var(--text-muted) 6%,transparent);color:var(--text-muted);opacity:.7;font-style:italic}
 .clcov-path-block{display:flex;flex-direction:column;gap:3px}
 .clcov-path-label{align-self:flex-start;font-size:9.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase}
 .clcov-path-happy{color:rgb(52,211,153)}

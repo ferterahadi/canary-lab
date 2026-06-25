@@ -34,6 +34,18 @@
             "type": "array",
             "items": { "type": "string" }
           },
+          "variantsNA": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "variant": { "type": "string" },
+                "reason": { "type": "string" }
+              },
+              "required": ["variant", "reason"]
+            }
+          },
           "strictnessLadder": {
             "type": "array",
             "items": {
