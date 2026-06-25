@@ -156,7 +156,7 @@ describe('PortifyWizard', () => {
     expect(container.textContent).toContain('Running the exercise')
   })
 
-  it('saves from the review screen and advances to the Save step (does not close)', async () => {
+  it('saves from the review screen and closes the wizard (no Done step)', async () => {
     vi.mocked(api.startPortify).mockResolvedValue({ workflowId: 'w' })
     vi.mocked(api.getPortify).mockResolvedValue(readyManifest())
     vi.mocked(api.savePortify).mockResolvedValue(manifest('saved'))
@@ -166,10 +166,10 @@ describe('PortifyWizard', () => {
     await act(async () => clickButton('Save overlay'))
     await flush()
     expect(api.savePortify).toHaveBeenCalledWith('w')
-    // Lands on the Save step — the wizard stays open instead of closing.
-    expect(container.textContent).toContain('Saved as overlay')
-    expect(container.textContent).toContain('features/cns/portify/')
-    expect(onSaved).not.toHaveBeenCalled()
+    // Save closes outright — no in-place transition to a confirmation screen
+    // (the appearing "Done" button caused a layout shift).
+    expect(onSaved).toHaveBeenCalled()
+    expect(container.textContent).not.toContain('Saved as overlay')
   })
 
   it('opens the feedback modal from Request changes and resumes the agent on submit', async () => {

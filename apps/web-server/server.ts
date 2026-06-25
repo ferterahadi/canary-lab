@@ -57,6 +57,7 @@ import { estimateRunCost, resolveAdmissionConfig, readSystemResources } from './
 import { detectRepoCollision, normalizeRepoPaths } from './src/features/runs/logic/runtime/repo-collision'
 import { addWorktree, type WorktreeHandle } from './src/features/runs/logic/runtime/repo-worktree'
 import { overlayExists as portifyOverlayExists } from './src/features/portify/logic/runtime/overlay'
+import { revertPortification } from './src/features/portify/logic/runtime/unportify'
 import type { QueueReason } from '../../shared/run-state'
 import type { FeatureConfig } from '../../shared/launcher/types'
 import {
@@ -1298,6 +1299,15 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
     savePortify: (workflowId) => portifyRunner.save(workflowId),
     cancelPortify: (workflowId) => portifyRunner.cancel(workflowId),
     revisePortify: (workflowId, feedback) => portifyRunner.revise(workflowId, feedback),
+    // Un-portify a saved feature: revert the config (snapshot or legacy strip) +
+    // delete the overlay, then emit so live clients update. Mirrors the REST route.
+    removePortification: (feature) => {
+      const f = loadFeatures(featuresDir).find((x) => x.name === feature)
+      if (!f?.featureDir) throw Object.assign(new Error('feature not found'), { statusCode: 404 })
+      const { reverted } = revertPortification(f.featureDir)
+      workspaceEvents.publish({ type: 'features-changed' })
+      return { name: f.name, portified: portifyOverlayExists(f.featureDir), reverted }
+    },
 	  })
 
   // Serve the built React frontend if it exists. In development the dist dir

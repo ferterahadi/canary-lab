@@ -77,14 +77,20 @@ export function PortsTab({
     else onStartPortify?.(feature)
   }
 
+  // Declared slots with no overlay = orphaned config (leftover from a removed
+  // portification, or hand-declared). When not portified, this is the only
+  // signal that there's port config to clear.
+  const hasSlots = repos.some((r) => r.startCommands.some((c) => (c.ports?.length ?? 0) > 0))
+
   const removePortification = async (): Promise<void> => {
     setRemoving(true)
     setRemoveError(null)
     try {
       await api.removePortifyOverlay(feature)
-      // The server emits features-changed → App refetches /api/features → the
-      // `portified` prop flips to false and the status band re-renders. No local
-      // state to flip; the broadcast drives the live transition.
+      // features-changed → App refetches /api/features → `portified` flips false
+      // (status band updates live). Bump reloadKey too: the config was reverted,
+      // so the slot table must refetch to drop the now-removed slots.
+      setReloadKey((k) => k + 1)
       setConfirmRemove(false)
     } catch (err) {
       setRemoveError(err instanceof Error ? err.message : 'Remove failed')
@@ -131,15 +137,18 @@ export function PortsTab({
             )}
           </div>
           <div className="flex shrink-0 items-center gap-2 self-start">
-            {/* The only legitimate way to undo a portify — slots can't be
-                hand-removed without desyncing from the overlay, so removal
-                deletes the overlay wholesale. */}
-            {portified && (
+            {/* Portified → undo the whole port-ification (overlay + config).
+                Not portified but slots are still declared → those are orphaned
+                config (a removed portification, or hand-declared); offer to
+                clear them. Both go through the same revert path. */}
+            {(portified || hasSlots) && (
               <button
                 type="button"
                 onClick={() => { setRemoveError(null); setConfirmRemove(true) }}
-                aria-label="Remove portification"
-                title="Remove portification — deletes the saved overlay; the feature reverts to its hardcoded ports."
+                aria-label={portified ? 'Remove portification' : 'Clear port slots'}
+                title={portified
+                  ? 'Remove portification — deletes the saved overlay; the feature reverts to its hardcoded ports.'
+                  : 'Clear port slots — removes the declared slots left in the config (e.g. from a removed portification).'}
                 className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[11px] font-medium transition-colors duration-150"
                 style={{
                   color: 'var(--danger)',
@@ -148,7 +157,7 @@ export function PortsTab({
                 }}
               >
                 <TrashIcon />
-                Remove portification
+                {portified ? 'Remove portification' : 'Clear port slots'}
               </button>
             )}
             {onStartPortify && (
@@ -212,21 +221,13 @@ export function PortsTab({
                     </div>
                     <PortSlotTable
                       ports={cmd.ports ?? []}
+                      // Not-portified empty state: a single neutral status, no
+                      // pitch and no per-card CTA — the intro band already
+                      // explains Portify and carries the one action. (Don't say
+                      // "hardcoded" — the command may already carry a ${port.x}
+                      // token; "no slots declared" is what's actually true.)
                       emptyHint={!portified ? (
-                        <div className="text-[10px] leading-relaxed" style={{ color: 'var(--text-muted)' }}>
-                          Uses its hardcoded port.{' '}
-                          {onStartPortify ? (
-                            <button
-                              type="button"
-                              onClick={launchPortify}
-                              className="underline underline-offset-2"
-                              style={{ color: 'var(--accent)' }}
-                            >
-                              Run Portify
-                            </button>
-                          ) : 'Run Portify'}{' '}
-                          to rewrite it to an injectable port so it can boot concurrently.
-                        </div>
+                        <div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>No port slots declared</div>
                       ) : undefined}
                     />
                   </div>
@@ -277,19 +278,27 @@ export function PortsTab({
 
       <ConfirmModal
         open={confirmRemove}
-        title="Remove portification?"
+        title={portified ? 'Remove portification?' : 'Clear port slots?'}
         message={
           <div className="space-y-2">
-            <p>
-              This deletes the saved overlay for <code style={{ fontFamily: 'var(--font-mono)' }}>{feature}</code>. The feature reverts to <b style={{ color: 'var(--text-secondary)' }}>not portified</b> — it boots on its hardcoded ports and can no longer run concurrently.
-            </p>
+            {portified ? (
+              <p>
+                This reverts the port-ification of <code style={{ fontFamily: 'var(--font-mono)' }}>{feature}</code>: the code overlay is deleted and its <code style={{ fontFamily: 'var(--font-mono)' }}>feature.config.cjs</code> edits (the port slots and <code style={{ fontFamily: 'var(--font-mono)' }}>{'${port.…}'}</code> health-check URLs) are restored to how they were before. It boots on its hardcoded ports again and can no longer run concurrently.
+              </p>
+            ) : (
+              <p>
+                This removes the declared <code style={{ fontFamily: 'var(--font-mono)' }}>ports</code> slots left in <code style={{ fontFamily: 'var(--font-mono)' }}>{feature}</code>'s config — orphaned leftovers from a removed portification. The feature isn't portified, so nothing else changes.
+              </p>
+            )}
             <p style={{ color: 'var(--text-muted)' }}>
-              Your repo is untouched. The declared port slots stay in the config file; re-run Portify any time to regenerate the overlay.
+              {portified
+                ? 'Your product repo is untouched. Re-run Portify any time to regenerate it.'
+                : "Your product repo is untouched. Skip this if a service genuinely reads these env vars — then the slots aren't orphaned. Re-run Portify any time to set them up properly."}
             </p>
             {removeError && <p style={{ color: 'var(--danger)' }}>{removeError}</p>}
           </div>
         }
-        confirmLabel="Remove portification"
+        confirmLabel={portified ? 'Remove portification' : 'Clear port slots'}
         variant="danger"
         busy={removing}
         onCancel={() => { if (!removing) { setConfirmRemove(false); setRemoveError(null) } }}

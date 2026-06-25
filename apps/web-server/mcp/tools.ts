@@ -214,6 +214,9 @@ export interface CanaryLabMcpDeps {
   savePortify?: (workflowId: string) => Promise<PortifyManifest>
   cancelPortify?: (workflowId: string) => Promise<PortifyManifest>
   revisePortify?: (workflowId: string, feedback: string) => Promise<PortifyManifest>
+  /** Un-portify a saved feature: revert its config (snapshot or legacy strip) +
+   *  delete the overlay. Mirrors DELETE /api/features/:name/portify-overlay. */
+  removePortification?: (feature: string) => { name: string; portified: boolean; reverted: boolean }
   workspaceEvents?: WorkspaceEventPublisher
 }
 
@@ -305,6 +308,7 @@ export type CanaryLabMcpToolName =
   | 'save_portify'
   | 'cancel_portify'
   | 'revise_portify'
+  | 'remove_portification'
   | 'list_portify_status'
 
 const REPAIR_TOOLS = [
@@ -386,6 +390,7 @@ const PORTIFY_TOOLS = [
   'save_portify',
   'cancel_portify',
   'revise_portify',
+  'remove_portification',
   'list_portify_status',
 ] as const satisfies readonly CanaryLabMcpToolName[]
 
@@ -1387,6 +1392,7 @@ export function registerCanaryLabTools(
     if (!deps.savePortify) return errorResult('savePortify dependency is not configured')
     try {
       const manifest = await deps.savePortify(workflowId)
+      publishWorkspaceEvent(deps.workspaceEvents, { type: 'features-changed' })
       return asJsonResult({
         ...manifest,
         next: `Overlay saved to features/${manifest.feature}/portify/. The feature now boots with injectable ports on every run — concurrent runs and benchmark arms will not clash — without ever modifying the product repo.`,
@@ -1427,6 +1433,24 @@ export function registerCanaryLabTools(
     if (!deps.cancelPortify) return errorResult('cancelPortify dependency is not configured')
     try {
       return asJsonResult(await deps.cancelPortify(workflowId))
+    } catch (err) {
+      return errorResult(err instanceof Error ? err.message : String(err))
+    }
+  })
+
+  registerTool('remove_portification', {
+    description: "Un-portify a SAVED feature: reverts its feature config (the declared `ports` slots + the `${port.x}` health-check rewrites) and deletes the port overlay, so it boots on its hardcoded ports again and is no longer portified. Always auto-cleans — overlays carry a pre-Portify config snapshot, so the revert is exact. Legacy overlays (no snapshot) best-effort strip the slots; their health-check tokens need a re-run of Portify to regenerate. Requires confirm: true.",
+    inputSchema: {
+      feature: z.string(),
+      confirm: z.literal(true).describe('Must be true. Guards against discarding a saved overlay + reverting config.'),
+    },
+    annotations: { destructiveHint: true, idempotentHint: true },
+  }, async ({ feature }) => {
+    if (!deps.removePortification) return errorResult('removePortification dependency is not configured')
+    try {
+      const result = deps.removePortification(feature)
+      publishWorkspaceEvent(deps.workspaceEvents, { type: 'features-changed' })
+      return asJsonResult(result)
     } catch (err) {
       return errorResult(err instanceof Error ? err.message : String(err))
     }

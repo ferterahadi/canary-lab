@@ -103,6 +103,7 @@ const PORTIFY_TOOLS = uniqueSorted([
   'save_portify',
   'cancel_portify',
   'revise_portify',
+  'remove_portification',
   'list_portify_status',
 ])
 
