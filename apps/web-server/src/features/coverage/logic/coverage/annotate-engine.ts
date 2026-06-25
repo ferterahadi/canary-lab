@@ -6,7 +6,7 @@ import { pickAvailableHealAgent, type HealAgent } from '../../../runs/logic/runt
 import { ANNOTATE_MODELS, modelArgs } from '../../../agent-sessions/logic/agent-models'
 import { recoverAgentAnswer, agentActivityPath } from '../../../agent-sessions/logic/agent-producer'
 import { runAgentProcess, buildClaudeAgenticArgs } from '../../../agent-sessions/logic/agent-process'
-import type { PathType, ProposedMapping, Requirement } from '../../../../../../../shared/coverage/types'
+import type { PathType, ProposedMapping, Requirement, VariantDimension } from '../../../../../../../shared/coverage/types'
 
 /** The agent CLI session backing a coverage/summary run — pinned at spawn so the
  *  Generating screen can stream the structured AgentSessionView (R17). */
@@ -44,6 +44,10 @@ export interface AnnotateTestInput {
 
 export interface ProposeMappingsArgs {
   requirements: Requirement[]
+  /** The feature's variant dimension (D1). When present, the agent is asked to
+   *  also claim which variant(s) each test exercises; claims are validated against
+   *  its closed vocabulary. Absent ⇒ no variant axis (paths only). */
+  variantDimension?: VariantDimension
   tests: AnnotateTestInput[]
   adapter?: AnnotateAdapter
   /** Absolute feature dir — used to show the agent resolvable spec paths to read. */
@@ -82,6 +86,19 @@ function normalizePathTypes(value: unknown): PathType[] | undefined {
   return ordered.length ? ordered : undefined
 }
 
+/** Validate the agent's variant claims against the feature's closed vocabulary
+ *  (the dimension values), lower-cased + deduped. Unknown / absent → []. */
+function normalizeVariants(value: unknown, knownVariants: Set<string>): string[] {
+  if (!Array.isArray(value) || knownVariants.size === 0) return []
+  const out: string[] = []
+  for (const item of value) {
+    if (typeof item !== 'string') continue
+    const v = item.trim().toLowerCase()
+    if (v && knownVariants.has(v) && !out.includes(v)) out.push(v)
+  }
+  return out
+}
+
 function normalizeRequirements(value: unknown, knownIds: Set<string>): string[] {
   if (!Array.isArray(value)) return []
   const out: string[] = []
@@ -98,7 +115,11 @@ function normalizeRequirements(value: unknown, knownIds: Set<string>): string[] 
 
 /** Parse raw agent stdout into proposed mappings. Returns null on garbage. Drops
  *  mappings that point at unknown requirement ids (no inventing the spine). */
-export function parseAnnotateOutput(output: string, knownIds: Set<string>): ProposedMapping[] | null {
+export function parseAnnotateOutput(
+  output: string,
+  knownIds: Set<string>,
+  knownVariants: Set<string> = new Set(),
+): ProposedMapping[] | null {
   const fenced = output.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1]
   const text = (fenced ?? output).trim()
   const start = text.indexOf('{')
@@ -120,10 +141,12 @@ export function parseAnnotateOutput(output: string, knownIds: Set<string>): Prop
     if (!testName) continue
     const requirements = normalizeRequirements(r.requirements, knownIds)
     if (!requirements.length) continue // no usable linkage → not a mapping
+    const variants = normalizeVariants(r.variants, knownVariants)
     out.push({
       testName,
       requirements,
       pathTypes: normalizePathTypes(r.pathTypes),
+      ...(variants.length ? { variants } : {}),
       rationale: typeof r.rationale === 'string' ? r.rationale.trim() || undefined : undefined,
       confidence: typeof r.confidence === 'number' ? Math.max(0, Math.min(1, r.confidence)) : undefined,
       source: 'agent',
@@ -141,15 +164,32 @@ export function buildAnnotatePrompt(
   requirements: Requirement[],
   tests: AnnotateTestInput[],
   featureDir?: string,
+  variantDimension?: VariantDimension,
   templatePath: string = ANNOTATE_TEMPLATE_PATH,
 ): string {
   const template = fs.readFileSync(templatePath, 'utf-8').trim()
   const active = requirements.filter((r) => !r.deprecated)
   const reqJson = JSON.stringify(
-    active.map((r) => ({ id: r.id, title: r.title, text: r.text, pathTypes: r.pathTypes })),
+    active.map((r) => ({
+      id: r.id,
+      title: r.title,
+      text: r.text,
+      pathTypes: r.pathTypes,
+      ...(r.variants && r.variants.length ? { variants: r.variants } : {}),
+    })),
     null,
     2,
   )
+  // The variant block tells the agent the feature's dimension + the closed value
+  // set to claim from. Absent ⇒ a clear "no variant axis" instruction so the
+  // agent doesn't invent one.
+  const variantBlock = variantDimension
+    ? `This feature has a **${variantDimension.name}** variant dimension. For each test, also report which `
+      + `${variantDimension.name}(s) it exercises in a \`variants\` array, choosing ONLY from: `
+      + `${variantDimension.values.join(', ')}. A requirement listing multiple ${variantDimension.name}s is only `
+      + `fully covered when every one is exercised by some test — so be precise about which a test actually hits `
+      + `(read the endpoint / fixture). Omit \`variants\` for a test that is not ${variantDimension.name}-specific.`
+    : 'This feature has no variant dimension — do NOT emit a `variants` field.'
   // Agentic: list each test's name + resolvable file path so the agent READS the
   // real body with its tools, instead of inlining a truncated body (which lets the
   // model shortcut to one-shot and leaves the AgentSessionView timeline empty).
@@ -165,6 +205,7 @@ export function buildAnnotatePrompt(
   return template.replace(/\{\{(\w+)\}\}/g, (match, key: string) => {
     if (key === 'requirements') return reqJson
     if (key === 'tests') return testJson
+    if (key === 'variantInstructions') return variantBlock
     return match
   })
 }
@@ -277,9 +318,10 @@ export async function proposeCoverageMappings(
   const resolveAgents = deps.resolveAgents ?? defaultResolveAgents
   const runAgent = deps.runAgent ?? defaultRunAgent
   const agents = resolveAgents(args.adapter ?? 'auto')
+  const knownVariants = new Set(args.variantDimension?.values ?? [])
 
   if (agents.length) {
-    const prompt = buildAnnotatePrompt(args.requirements, args.tests, args.featureDir)
+    const prompt = buildAnnotatePrompt(args.requirements, args.tests, args.featureDir, args.variantDimension)
     for (const agent of agents) {
       try {
         args.onOutput?.(`[agent:${agent}] inferring coverage mappings\n`)
@@ -289,7 +331,7 @@ export async function proposeCoverageMappings(
           onOutput: args.onOutput,
           onSession: args.onSession,
         })
-        const parsed = parseAnnotateOutput(output, knownIds)
+        const parsed = parseAnnotateOutput(output, knownIds, knownVariants)
         if (parsed) return parsed // [] is a valid answer (nothing maps)
         args.onOutput?.(`[agent:${agent}] unparseable output; trying next\n`)
       } catch (err) {

@@ -569,11 +569,19 @@ describe('MCP HTTP server (smoke)', () => {
           ),
         },
       })
-      expect(JSON.parse((submittedExport.content?.[0] as { text: string }).text)).toMatchObject({
+      const submittedBody = JSON.parse((submittedExport.content?.[0] as { text: string }).text)
+      expect(submittedBody).toMatchObject({
         status: 'completed',
         downloadReady: true,
-        nextSteps: expect.arrayContaining(['download_evaluation_export']),
+        // The submit result now carries a chat-ready digest the agent relays.
+        evaluation: {
+          summary: 'Externally reviewed checkout wording rendered by Canary Lab.',
+          cases: [expect.objectContaining({ title: expect.any(String), confidence: expect.any(String) })],
+        },
       })
+      // nextSteps steer the agent to surface the result, not just point at the UI.
+      expect(submittedBody.nextSteps.some((step: string) => step.includes('Present this evaluation'))).toBe(true)
+      expect(submittedBody.nextSteps.some((step: string) => step.includes('download_evaluation_export'))).toBe(true)
       const fetchedExport = await client.callTool({
         name: 'get_evaluation_export',
         arguments: { taskId: exportBody.task.taskId },

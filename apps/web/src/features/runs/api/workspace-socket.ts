@@ -1,3 +1,4 @@
+import { connectReconnectingSocket, defaultWsBase } from '../../../shared/api/reconnecting-socket'
 import type { DraftRecord, EvaluationExportTask } from '../../../shared/api/types'
 
 export type WorkspaceEvent =
@@ -21,6 +22,11 @@ export interface ConnectWorkspaceEventsOptions {
   WebSocketImpl?: typeof WebSocket
   onEvent: (event: WorkspaceEvent) => void
   onError?: (error: string) => void
+  // Fired on every RE-open after the first connect. The workspace bus is
+  // push-only with no server-side replay, so any event emitted while the
+  // socket was down is lost — consumers MUST refetch their state here to close
+  // the gap (see cl_live-state-sync). Not fired on the initial connect.
+  onReconnect?: () => void
 }
 
 export interface WorkspaceEventsConnection {
@@ -28,27 +34,28 @@ export interface WorkspaceEventsConnection {
 }
 
 export function connectWorkspaceEvents(opts: ConnectWorkspaceEventsOptions): WorkspaceEventsConnection {
-  const WSImpl = opts.WebSocketImpl ?? (globalThis as { WebSocket?: typeof WebSocket }).WebSocket
-  if (!WSImpl) throw new Error('WebSocket implementation not available')
   const base = opts.wsBase ?? defaultWsBase()
-  const socket = new WSImpl(`${base}/ws/workspace`)
-  socket.onmessage = (ev) => {
-    try {
-      opts.onEvent(JSON.parse(typeof ev.data === 'string' ? ev.data : '') as WorkspaceEvent)
-    } catch {
-      // Ignore malformed frames; the next valid workspace event can still recover state.
-    }
-  }
-  socket.onerror = () => opts.onError?.('unknown error')
-  return {
-    close: () => {
-      try { socket.close() } catch { /* already closed */ }
+  let opened = false
+  // The workspace bus is the always-on UI event channel: reconnect forever
+  // (with a delay) so a server restart or transient drop never silently
+  // freezes live updates until a manual refresh.
+  const conn = connectReconnectingSocket({
+    url: `${base}/ws/workspace`,
+    WebSocketImpl: opts.WebSocketImpl,
+    maxReconnects: Infinity,
+    reconnectDelayMs: 1500,
+    onError: opts.onError ? () => opts.onError?.('unknown error') : undefined,
+    onOpen: () => {
+      if (opened) opts.onReconnect?.()
+      opened = true
     },
-  }
-}
-
-function defaultWsBase(): string {
-  if (typeof window === 'undefined') return 'ws://127.0.0.1:7421'
-  const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-  return `${proto}//${window.location.host}`
+    onMessage: (data) => {
+      try {
+        opts.onEvent(JSON.parse(data) as WorkspaceEvent)
+      } catch {
+        // Ignore malformed frames; the next valid workspace event can still recover state.
+      }
+    },
+  })
+  return { close: () => conn.close() }
 }

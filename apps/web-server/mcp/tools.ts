@@ -116,6 +116,7 @@ const coverageMappingInput = z.object({
   testName: z.string().describe('Exact test name as given in the start context.'),
   requirements: z.array(z.string()).describe('Requirement id(s) this test verifies (e.g. ["R1"]). Unknown ids are dropped.'),
   pathTypes: z.array(z.enum(['happy', 'sad', 'edge'])).optional(),
+  variants: z.array(z.string()).optional().describe('Variant value(s) this test exercises (e.g. ["email"]), from the feature\'s variant dimension. Values outside it are dropped. Omit for a variant-agnostic test.'),
   file: z.string().optional().describe('Relative spec path; omit and Canary resolves it by test name.'),
   rationale: z.string().optional(),
   confidence: z.number().optional(),
@@ -133,10 +134,18 @@ const summaryRequirementInput = z.object({
   happyPath: z.string().optional(),
   unhappyPath: z.string().optional(),
   pathTypes: z.array(z.enum(['happy', 'sad', 'edge'])).describe('At least one of happy/sad/edge.'),
+  variants: z.array(z.string()).optional().describe('Variant value(s) this requirement must hold across (≥2 of the feature\'s variantDimension values, e.g. ["email","whatsapp"]). Omit for a single-value / variant-agnostic requirement.'),
   strictnessLadder: z.array(z.object({
     tier: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)]),
     description: z.string(),
   })).optional(),
+})
+
+// The feature-level variant dimension (D1) an offloaded client may declare on
+// submit_external_summary — mirrors prompts/prd-summary.schema.json.
+const variantDimensionInput = z.object({
+  name: z.string().describe('Lower-case single-token dimension name (e.g. "channel").'),
+  values: z.array(z.string()).describe('Closed set of values a requirement may span (≥2, e.g. ["email","whatsapp","call","line"]).'),
 })
 
 const evaluationRewriteInput = z.object({
@@ -885,14 +894,16 @@ export function registerCanaryLabTools(
     inputSchema: {
       jobId: z.string().describe('Job id returned by start_external_summary.'),
       requirements: z.array(summaryRequirementInput).describe('The testable requirements extracted from the source docs.'),
+      variantDimension: variantDimensionInput.optional().describe('The feature\'s single cross-cutting dimension (channel/tenant/region/...), if it has one. Omit when no dimension applies.'),
     },
-  }, async ({ jobId, requirements }) => {
+  }, async ({ jobId, requirements, variantDimension }) => {
     try {
       const { manifest, result } = submitExternalSummary(
         {
           featuresDir: deps.featuresDir,
           jobId,
           requirements: requirements as ParsedRequirement[],
+          ...(variantDimension ? { variantDimension } : {}),
         },
         { store: new CoverageJobRunStore(deps.store.logsDir), workspaceEvents: deps.workspaceEvents },
       )
@@ -1154,7 +1165,13 @@ export function registerCanaryLabTools(
         ? normalizeEvaluationRewrite(rewrite as EvaluationRewrite, packet)
         : applyEvaluationTextSlotRewrite(deterministicEvaluationRewrite(packet), textSlots!)
       if (!normalizedRewrite) {
-        return errorResult('rewrite must include one case for each evaluated test')
+        const expected = packet.tests.length
+        const received = Array.isArray((rewrite as EvaluationRewrite | undefined)?.cases)
+          ? (rewrite as EvaluationRewrite).cases.length
+          : 0
+        return errorResult(
+          `rewrite.cases must contain exactly ${expected} ${expected === 1 ? 'entry' : 'entries'} — one per evaluated test, in the same order as reportSchema.rewrite.cases (got ${received}). Do NOT merge, dedupe, or drop skipped or duplicate run entries; every run entry needs its own case. Each case requires title, whatWasChecked, whyItMatters, and confidence (all strings).`,
+        )
       }
       const built = await buildEvaluationExportArchive(detail, {
         logsDir: deps.store.logsDir,
@@ -1173,7 +1190,19 @@ export function registerCanaryLabTools(
       }
       return asJsonResult({
         ...evaluationExportTaskView(next!),
-        nextSteps: ['download_evaluation_export'],
+        // Compact, chat-ready digest of the rendered evaluation so the agent can
+        // relay the result in the conversation instead of only pointing at the
+        // UI. Kept small (titles + verdicts, not full flow steps); the full
+        // rendered evaluation.html ships via download_evaluation_export.
+        evaluation: {
+          featureTitle: normalizedRewrite.featureTitle ?? next!.feature,
+          summary: normalizedRewrite.summary,
+          cases: normalizedRewrite.cases.map((c) => ({ title: c.title, confidence: c.confidence })),
+        },
+        nextSteps: [
+          'Present this evaluation to the user in chat — the featureTitle, the summary, and the per-case title + confidence verdicts. Do not just say it is available in the UI.',
+          'download_evaluation_export returns the full rendered evaluation.html archive if the user wants the file.',
+        ],
       })
     } catch (err) {
       return errorResult(err instanceof Error ? err.message : String(err))
@@ -2136,6 +2165,7 @@ function externalEvaluationReportSchema(detail: RunDetail): Record<string, unkno
       'Submit structured wording only; Canary Lab renders the final evaluation.html.',
       'If the run failed or was aborted, preserve that status in the report instead of blocking the export.',
       'Submit textSlots[] or rewrite through submit_external_evaluation_export.',
+      `If you submit a rewrite, rewrite.cases must have EXACTLY ${rewrite.cases.length} ${rewrite.cases.length === 1 ? 'entry' : 'entries'}, in this same order — one per run entry. Do NOT merge, dedupe, or drop skipped/duplicate runs; edit the wording of the provided cases, never change their count or order. (Prefer textSlots[] to keep the count correct automatically.)`,
     ],
   }
 }

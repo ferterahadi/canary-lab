@@ -157,6 +157,14 @@ export function EvaluationExportProvider({ children, wsBase, WebSocketImpl }: Ev
             forgetTask(event.taskId)
           }
         },
+        // The bus has no replay: an export created/completed while the socket
+        // was down (e.g. across a server restart) never pushed. Re-list on
+        // reconnect so the dialog reflects it without a manual refresh.
+        onReconnect: () => {
+          api.listEvaluationExportTasks()
+            .then((tasks) => reconcileTasks(tasks))
+            .catch(() => { /* a later valid push can still recover state */ })
+        },
       })
     } catch {
       // Startup REST rehydration and direct mutation responses still keep the UI usable.
@@ -165,7 +173,7 @@ export function EvaluationExportProvider({ children, wsBase, WebSocketImpl }: Ev
       workspaceConnectionRef.current?.close()
       workspaceConnectionRef.current = null
     }
-  }, [WebSocketImpl, forgetTask, rememberTask, subscribeTask, wsBase])
+  }, [WebSocketImpl, forgetTask, reconcileTasks, rememberTask, subscribeTask, wsBase])
 
   useEffect(() => {
     return () => {

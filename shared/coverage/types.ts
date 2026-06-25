@@ -12,6 +12,24 @@
 export type PathType = 'happy' | 'sad' | 'edge'
 
 /**
+ * A feature-level VARIANT dimension (D1: at most one per feature). A variant is a
+ * domain value a single requirement must hold across — channel (email / whatsapp /
+ * call / line), tenant, region, role, plan-tier. It is the third coverage axis:
+ * coverage becomes `requirement × path × variant`, so a requirement that bundles
+ * N variants but is only tested on one is `variant-incomplete`, not `covered`.
+ *
+ * Declared ONCE by the PRD-summary agent; absent ⇒ the feature has no variant
+ * dimension and coverage stays the 2-axis `requirement × path` model (unchanged).
+ */
+export interface VariantDimension {
+  /** What the dimension is called (e.g. "channel"). Lower-case, single token. */
+  name: string
+  /** The closed set of values a requirement may span (e.g. ["email","whatsapp"]).
+   *  The controlled vocabulary: test `@variant-*` claims outside this set are dropped. */
+  values: string[]
+}
+
+/**
  * Assertion strictness tiers — how close a check gets to the real,
  * user-observable effect. Tier 1 = "looks like it works"; tier 4 = "works".
  *   1 — app log / self-report ("sent")
@@ -49,6 +67,11 @@ export interface Requirement {
   sourceRange?: { start: number; end: number }
   /** Path-types this requirement implies (happy / sad / edge). */
   pathTypes: PathType[]
+  /** Variant values (from the feature's `variantDimension`) this requirement must
+   *  hold across — e.g. ["email","whatsapp","call","line"]. Absent / empty ⇒ the
+   *  requirement is variant-agnostic and coverage uses paths only (today's model).
+   *  Every value must be one of `PrdSummary.variantDimension.values`. */
+  variants?: string[]
   /** Agent-proposed strictness ladder (per-domain: LINE vs payment vs email).
    *  Stored so rigor scoring has a stable, per-requirement ceiling. */
   strictnessLadder?: StrictnessLadderRung[]
@@ -67,6 +90,10 @@ export interface Requirement {
  */
 export interface PrdSummary {
   requirements: Requirement[]
+  /** The feature's single variant dimension (D1), if it has one. Declared by the
+   *  PRD-summary agent; drives the `requirement × path × variant` coverage matrix.
+   *  Absent ⇒ no variant axis (the 2-axis model). */
+  variantDimension?: VariantDimension
   /** Stable hash of the source docs collection this summary was built from. */
   docsHash: string
   /** Relative doc paths (sorted) that fed this summary. */
@@ -118,19 +145,33 @@ export interface CoverageStateView {
 export type GapType =
   | 'covered'
   | 'path-incomplete'
+  | 'variant-incomplete'
   | 'untested'
 
 /**
  * Coarse tri-state per requirement — derived from the finer `GapType`:
- *   • covered   — every declared path is claimed by a mapped test
+ *   • covered   — every declared (path × variant) cell is claimed by a mapped test
  *   • uncovered — untested (no test mapped at all)
- *   • partial   — path-incomplete (some declared paths unclaimed)
+ *   • partial   — path-incomplete OR variant-incomplete (some cells unclaimed)
  */
 export type CoverageStatus = 'covered' | 'partial' | 'uncovered'
 
 export interface PathCoverage {
   path: PathType
-  /** A mapped test claims (declares) this path. */
+  /** A mapped test claims (declares) this path (variant ignored — the 2-axis view). */
+  covered: boolean
+}
+
+/**
+ * One cell of a variant-bearing requirement's `path × variant` matrix. Present
+ * only for requirements that declare `variants`; the cell is covered when some
+ * mapped test claims BOTH this path AND this variant. This is the axis the
+ * 2-axis ledger was blind to (a "config on all 4 channels" requirement marked
+ * covered by an email-only test).
+ */
+export interface VariantCellCoverage {
+  path: PathType
+  variant: string
   covered: boolean
 }
 
@@ -150,6 +191,10 @@ export interface TestCoverage {
   line?: number
   requirements: string[]
   pathTypes: PathType[]
+  /** Variant value(s) this test exercises (from `@variant-*` tags), e.g.
+   *  ["email"]. Absent ⇒ variant-agnostic; contributes to no specific variant
+   *  cell of a variant-bearing requirement. */
+  variants?: string[]
   /** Static coverage strength, graded from the test's own assertions (strength.ts). */
   strength?: TestStrength
 }
@@ -158,6 +203,9 @@ export interface RequirementCoverage {
   requirement: Requirement
   annotatedTestNames: string[]
   pathCoverage: PathCoverage[]
+  /** The `path × variant` matrix — present only when the requirement declares
+   *  `variants`. Drives the grid in the UI and the `variant-incomplete` gap. */
+  variantCoverage?: VariantCellCoverage[]
   gapType: GapType
   /** Coarse covered/partial/uncovered roll-up of `gapType`. */
   coverageStatus: CoverageStatus
@@ -167,6 +215,8 @@ export interface CoverageTotals {
   total: number
   covered: number
   pathIncomplete: number
+  /** Requirements with a variant axis where some (path × variant) cell is unclaimed. */
+  variantIncomplete: number
   untested: number
   /** Tests carrying no requirement linkage — candidates for the annotate-pass. */
   orphanTests: number
@@ -181,6 +231,9 @@ export interface ProposedMapping {
   file?: string
   requirements: string[]
   pathTypes?: PathType[]
+  /** Variant value(s) the test exercises, validated against the feature's
+   *  `variantDimension.values` (unknowns dropped). Absent ⇒ variant-agnostic. */
+  variants?: string[]
   rationale?: string
   /** 0–1 confidence (deterministic lane = token-overlap ratio). */
   confidence?: number

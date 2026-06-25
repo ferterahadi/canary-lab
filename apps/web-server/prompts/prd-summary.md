@@ -69,6 +69,28 @@ Hard rules on framing:
   account-scoped PAT". One or two sentences, concrete and testable.
 - Keep each requirement atomic — one expectation per entry. Split compound asks.
 
+## Variant dimension (cross-cutting breadth)
+
+Some features have ONE cross-cutting dimension a requirement must hold across —
+**channel** (email / whatsapp / call / line), **tenant**, **region**, **role**,
+**plan-tier**. When a requirement says "for all channels", "every tenant", "each
+region", or names several such values, the feature has a variant dimension and a
+single requirement secretly bundles N cases. Tested on only one, it is NOT fully
+covered — so the ledger must track this as a third axis.
+
+Detect AT MOST ONE such dimension for the whole feature:
+- Emit a top-level `variantDimension` with a lower-case single-token `name` and the
+  closed set of `values` (≥ 2). Only when the documents genuinely describe one.
+- **Most features have none.** If nothing cross-cuts the requirements this way,
+  OMIT `variantDimension` entirely — do not invent one.
+- Then, on each requirement that must hold across **two or more** of those values,
+  set `variants` to exactly those values (a subset of `variantDimension.values`).
+  A requirement that concerns only one value — or none — OMITS `variants`.
+
+The litmus test: would a reviewer accept "we tested it on email" as proof a
+requirement about *all four channels* is done? If no, that requirement spans
+variants and must list them.
+
 ## Happy & unhappy paths
 
 For each requirement where it is meaningful, describe BOTH:
@@ -108,6 +130,10 @@ PREVIOUS requirements (with ids) when regenerating.
 
 {{previousRequirements}}
 
+## Previous variant dimension (keep it stable if it still applies)
+
+{{previousVariantDimension}}
+
 ## How to work
 
 Work as an agent, not a one-shot. The source documents are **not** inlined here —
@@ -125,9 +151,12 @@ Read each of these files with your tools before answering:
 
 ## Output
 
-Return ONLY a JSON object of this shape (no prose, no markdown fences):
+Return ONLY a JSON object of this shape (no prose, no markdown fences). Omit
+`variantDimension` (and every `variants`) entirely when the feature has no
+cross-cutting dimension:
 
 {
+  "variantDimension": { "name": "channel", "values": ["email", "whatsapp", "call", "line"] },
   "requirements": [
     {
       "id": "R1",
@@ -137,6 +166,7 @@ Return ONLY a JSON object of this shape (no prose, no markdown fences):
       "happyPath": "the expected flow when everything is valid",
       "unhappyPath": "what happens on invalid input / failure / edge cases",
       "pathTypes": ["happy", "sad"],
+      "variants": ["email", "whatsapp", "call", "line"],
       "strictnessLadder": [
         { "tier": 1, "description": "app log shows the action" },
         { "tier": 4, "description": "browser confirms the real effect" }

@@ -32,7 +32,14 @@ export function fingerprintDocs(entries: DocEntry[]): Record<string, string> {
 /** Stable fingerprint of one requirement's MEANING (id excluded — the id is the
  *  durable spine; this captures whether its content shifted). */
 export function fingerprintRequirement(req: Requirement): string {
-  return sha256(req.title, req.text, [...req.pathTypes].sort().join(','))
+  return sha256(
+    req.title,
+    req.text,
+    [...req.pathTypes].sort().join(','),
+    // Variants are part of the requirement's MEANING — adding/removing a channel
+    // changes what coverage must prove, so it must re-invalidate the ledger.
+    [...(req.variants ?? [])].sort().join(','),
+  )
 }
 
 /** Hash over the ACTIVE requirements set (id + content fingerprint), order-

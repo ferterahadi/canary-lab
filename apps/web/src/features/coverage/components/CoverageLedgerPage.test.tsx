@@ -71,7 +71,7 @@ const LEDGER: CoverageLedger = {
     { name: 'adds item', requirements: ['R1'], pathTypes: ['happy'], strength: 'solid', file: 'e2e/cart.spec.ts', line: 10 },
     { name: 'sends receipt', requirements: ['R2'], pathTypes: ['happy'], strength: 'shallow', file: 'e2e/receipt.spec.ts', line: 5 },
   ],
-  totals: { total: 3, covered: 1, pathIncomplete: 1, untested: 1, orphanTests: 0 },
+  totals: { total: 3, covered: 1, pathIncomplete: 1, variantIncomplete: 0, untested: 1, orphanTests: 0 },
   coveragePct: 33.3,
   mappedPct: 66.7,
   orphanRequirementIds: [],
@@ -93,7 +93,7 @@ const ABSENT_LEDGER: CoverageLedger = {
   feature: 'checkout',
   requirements: [],
   tests: [],
-  totals: { total: 0, covered: 0, pathIncomplete: 0, untested: 0, orphanTests: 0 },
+  totals: { total: 0, covered: 0, pathIncomplete: 0, variantIncomplete: 0, untested: 0, orphanTests: 0 },
   coveragePct: 0,
   mappedPct: 0,
   orphanRequirementIds: [],
@@ -510,7 +510,7 @@ const EMPTY_LEDGER: CoverageLedger = {
   feature: 'checkout',
   requirements: [],
   tests: [],
-  totals: { total: 0, covered: 0, pathIncomplete: 0, untested: 0, orphanTests: 0 },
+  totals: { total: 0, covered: 0, pathIncomplete: 0, variantIncomplete: 0, untested: 0, orphanTests: 0 },
   coveragePct: 0,
   mappedPct: 0,
   orphanRequirementIds: [],
@@ -541,5 +541,68 @@ describe('CoverageLedgerPage — empty (ABSENT summary)', () => {
     expect(gen?.disabled).toBe(false)
     await act(async () => { gen?.click(); await Promise.resolve() })
     expect(api.startCoverageJob).toHaveBeenCalledWith('checkout', 'summary')
+  })
+})
+
+// The variant axis (D1): a requirement that spans a dimension (channel) but is
+// only tested on some values renders a path × variant grid + a variant-incomplete
+// gap pill — the breadth gap the 2-axis ledger couldn't show.
+const VARIANT_LEDGER: CoverageLedger = {
+  feature: 'checkout',
+  requirements: [
+    {
+      requirement: { id: 'R6', title: 'Config scoping on all channels', text: 'enforce on every channel', pathTypes: ['happy', 'sad'], variants: ['email', 'whatsapp', 'call', 'line'] },
+      annotatedTestNames: ['sender V4'],
+      pathCoverage: [{ path: 'happy', covered: true }, { path: 'sad', covered: true }],
+      variantCoverage: [
+        { path: 'happy', variant: 'email', covered: true },
+        { path: 'sad', variant: 'email', covered: true },
+        { path: 'happy', variant: 'whatsapp', covered: false },
+        { path: 'sad', variant: 'whatsapp', covered: false },
+        { path: 'happy', variant: 'call', covered: false },
+        { path: 'sad', variant: 'call', covered: false },
+        { path: 'happy', variant: 'line', covered: false },
+        { path: 'sad', variant: 'line', covered: false },
+      ],
+      gapType: 'variant-incomplete',
+      coverageStatus: 'partial',
+    },
+  ],
+  tests: [{ name: 'sender V4', requirements: ['R6'], pathTypes: ['happy', 'sad'], variants: ['email'], strength: 'solid', file: 'e2e/sender.spec.ts', line: 3 }],
+  totals: { total: 1, covered: 0, pathIncomplete: 0, variantIncomplete: 1, untested: 0, orphanTests: 0 },
+  coveragePct: 0,
+  mappedPct: 100,
+  orphanRequirementIds: [],
+  orphanTestNames: [],
+  state: { summary: 'fresh', coverage: 'fresh', headline: 'Variant gap', drift: { drifted: false, changedDocs: [], affectedArtifacts: [] } },
+}
+
+describe('CoverageLedgerPage — variant axis (D1)', () => {
+  beforeEach(() => {
+    vi.mocked(api.getFeatureCoverage).mockResolvedValue(structuredClone(VARIANT_LEDGER))
+    vi.mocked(api.listFeatureDocs).mockResolvedValue({ feature: 'checkout', docs: [], hasPrdSummary: true, sourceDocCount: 1, docsDrift: false })
+  })
+
+  it('renders the path × variant grid with a covered email cell and uncovered channel cells', async () => {
+    await mount()
+    expect(container.querySelector('[data-testid="variant-grid-R6"]')).toBeTruthy()
+    expect(container.querySelector('[data-testid="cell-R6-happy-email"]')?.getAttribute('data-covered')).toBe('true')
+    expect(container.querySelector('[data-testid="cell-R6-sad-email"]')?.getAttribute('data-covered')).toBe('true')
+    expect(container.querySelector('[data-testid="cell-R6-happy-whatsapp"]')?.getAttribute('data-covered')).toBe('false')
+    expect(container.querySelector('[data-testid="cell-R6-sad-line"]')?.getAttribute('data-covered')).toBe('false')
+  })
+
+  it('labels the gap variant-incomplete and lists the missing channels', async () => {
+    await mount()
+    const gap = container.querySelector('[data-testid="gap-R6"]')
+    expect(gap?.textContent).toContain('Variant-incomplete')
+    expect(gap?.textContent).toContain('whatsapp')
+    expect(gap?.textContent).toContain('line')
+  })
+
+  it('counts the requirement in the variant-incomplete breakdown segment', async () => {
+    await mount()
+    const badge = container.querySelector('[data-testid="gap-badge-variant-incomplete"]')
+    expect(badge?.textContent).toContain('1')
   })
 })

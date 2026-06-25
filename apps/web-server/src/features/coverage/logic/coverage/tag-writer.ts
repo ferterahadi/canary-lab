@@ -16,13 +16,17 @@ import type { PathType } from '../../../../../../../shared/coverage/types'
 export interface CoversTag {
   requirements: string[]
   pathTypes?: PathType[]
+  /** Variant value(s) the test exercises — rendered as `@variant-*` tokens. */
+  variants?: string[]
 }
 
-/** Render requirement + path ids into the `@req-*` / `@path-*` tag tokens. */
+/** Render requirement + path + variant ids into the `@req-*` / `@path-*` /
+ *  `@variant-*` tag tokens. */
 export function coversTagTokens(tag: CoversTag): string[] {
   const tokens: string[] = []
   for (const id of tag.requirements) tokens.push(`@req-${id}`)
   for (const p of tag.pathTypes ?? []) tokens.push(`@path-${p}`)
+  for (const v of tag.variants ?? []) tokens.push(`@variant-${v}`)
   return tokens
 }
 
@@ -174,9 +178,9 @@ export function writeCoversTags(
   return out
 }
 
-// The inverse of writeCoversTag: the only tokens coverage owns are `@req-*` and
-// `@path-*`. Anything else (a user's `@smoke`, `@slow`) is theirs to keep.
-const COVERAGE_TOKEN = /^@(req|path)-/
+// The inverse of writeCoversTag: the only tokens coverage owns are `@req-*`,
+// `@path-*` and `@variant-*`. Anything else (a user's `@smoke`, `@slow`) is theirs.
+const COVERAGE_TOKEN = /^@(req|path|variant)-/
 
 /**
  * Compute the edit that removes coverage-owned tokens from one `test(...)`

@@ -334,6 +334,19 @@ describe('parseTestTagList', () => {
       pathTypes: undefined,
     })
   })
+
+  it('maps @variant-<value> tags to lower-cased, deduped variants (D1)', () => {
+    expect(parseTestTagList(['@variant-email', '@variant-WhatsApp', '@variant-email']).variants).toEqual([
+      'email', 'whatsapp',
+    ])
+  })
+
+  it('coexists with req + path tags', () => {
+    const out = parseTestTagList(['@req-R6', '@path-sad', '@variant-line'])
+    expect(out.requirements).toEqual(['R6'])
+    expect(out.pathTypes).toEqual(['sad'])
+    expect(out.variants).toEqual(['line'])
+  })
 })
 
 describe('extractTestsFromSource — Playwright tag linkage (R1)', () => {
@@ -346,6 +359,16 @@ describe('extractTestsFromSource — Playwright tag linkage (R1)', () => {
     const r = extractTestsFromSource('a.spec.ts', src)
     expect(r.tests[0].requirements).toEqual(['R3'])
     expect(r.tests[0].pathTypes).toEqual(['happy', 'edge'])
+  })
+
+  it('reads @variant tags onto the extracted test (D1)', () => {
+    const src = `
+      test('tagged', { tag: ['@req-R6', '@path-happy', '@variant-email'] }, async () => {
+        expect(1).toBe(1)
+      })
+    `
+    const r = extractTestsFromSource('a.spec.ts', src)
+    expect(r.tests[0].variants).toEqual(['email'])
   })
 
   it('reads a single string tag', () => {

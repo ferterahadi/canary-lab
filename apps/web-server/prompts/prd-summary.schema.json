@@ -2,6 +2,18 @@
   "type": "object",
   "additionalProperties": false,
   "properties": {
+    "variantDimension": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string" },
+        "values": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "required": ["name", "values"]
+    },
     "requirements": {
       "type": "array",
       "items": {
@@ -17,6 +29,10 @@
           "pathTypes": {
             "type": "array",
             "items": { "enum": ["happy", "sad", "edge"] }
+          },
+          "variants": {
+            "type": "array",
+            "items": { "type": "string" }
           },
           "strictnessLadder": {
             "type": "array",

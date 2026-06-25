@@ -3,6 +3,7 @@ import { computeDocsHash, type DocsCollection } from '../../../coverage/logic/co
 import {
   buildPrdSummaryPrompt,
   parsePrdSummaryOutput,
+  parseVariantDimension,
   reconcileRequirementIds,
   renderPrdSummaryMarkdown,
   summarizePrd,
@@ -147,6 +148,38 @@ describe('parsePrdSummaryOutput', () => {
       }),
     )
     expect(out![0].strictnessLadder).toBeUndefined()
+  })
+})
+
+describe('parseVariantDimension + requirement variants (D1)', () => {
+  it('parses a valid dimension (name + ≥2 values, lower-cased + deduped)', () => {
+    const out = parseVariantDimension('{"variantDimension":{"name":"Channel","values":["Email","whatsapp","email"]},"requirements":[]}')
+    expect(out).toEqual({ name: 'channel', values: ['email', 'whatsapp'] })
+  })
+
+  it('drops a one-value "dimension" (no breadth to track)', () => {
+    expect(parseVariantDimension('{"variantDimension":{"name":"channel","values":["email"]},"requirements":[]}')).toBeUndefined()
+  })
+
+  it('returns undefined when no dimension is declared', () => {
+    expect(parseVariantDimension('{"requirements":[]}')).toBeUndefined()
+  })
+
+  it('validates requirement variants against the dimension (drops unknowns; needs ≥2)', () => {
+    const dim = parseVariantDimension('{"variantDimension":{"name":"channel","values":["email","whatsapp","call","line"]}}')
+    const out = parsePrdSummaryOutput(
+      '{"requirements":[{"title":"all","text":"t","pathTypes":["happy"],"variants":["email","whatsapp","sms"]},{"title":"one","text":"t","pathTypes":["happy"],"variants":["email"]}]}',
+      dim,
+    )
+    // R-all: sms dropped (not in vocab) → email+whatsapp kept.
+    expect(out![0].variants).toEqual(['email', 'whatsapp'])
+    // R-one: single declared value → no breadth → variants omitted.
+    expect(out![1].variants).toBeUndefined()
+  })
+
+  it('ignores requirement variants when there is no dimension', () => {
+    const out = parsePrdSummaryOutput('{"requirements":[{"title":"x","text":"t","pathTypes":["happy"],"variants":["email","whatsapp"]}]}')
+    expect(out![0].variants).toBeUndefined()
   })
 })
 
@@ -298,7 +331,7 @@ describe('buildPrdSummaryPrompt', () => {
     try {
       fs.writeFileSync(tmpFile, '{{docs}} {{unknown}}')
       const c = collection([{ relPath: 'spec.md', content: 'content' }])
-      const prompt = buildPrdSummaryPrompt(c, [], tmpFile)
+      const prompt = buildPrdSummaryPrompt(c, [], undefined, tmpFile)
       expect(prompt).toContain('{{unknown}}')
     } finally {
       fs.rmSync(tmpFile, { force: true })
