@@ -55,7 +55,7 @@ import { resolvePortTokens } from './src/features/runs/logic/runtime/launcher/in
 import { RunScheduler, type SchedulerActiveRun } from './src/features/runs/logic/runtime/run-scheduler'
 import { estimateRunCost, resolveAdmissionConfig, readSystemResources } from './src/features/runs/logic/runtime/admission'
 import { detectRepoCollision, normalizeRepoPaths } from './src/features/runs/logic/runtime/repo-collision'
-import { addWorktree, type WorktreeHandle } from './src/features/runs/logic/runtime/repo-worktree'
+import { addWorktree, linkNodeModules, type WorktreeHandle } from './src/features/runs/logic/runtime/repo-worktree'
 import { overlayExists as portifyOverlayExists } from './src/features/portify/logic/runtime/overlay'
 import { revertPortification } from './src/features/portify/logic/runtime/unportify'
 import type { QueueReason } from '../../shared/run-state'
@@ -773,7 +773,15 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
         const repo = (feature.repos ?? []).find((r) => r.name === repoName)
         if (!repo) continue
         try {
-          worktrees.push(await addWorktree({ repoName, localPath: repo.localPath, worktreesDir: path.join(runDir, 'worktrees') }))
+          const handle = await addWorktree({ repoName, localPath: repo.localPath, worktreesDir: path.join(runDir, 'worktrees') })
+          // Git worktrees skip gitignored deps, so a fresh worktree has no
+          // node_modules — the service boot command (`yarn start`, `npx tsx …`)
+          // can't resolve its bins/deps and dies (e.g. `concurrently: command
+          // not found`, exit 127), which then reads as a health-check timeout.
+          // Symlink the source repo's node_modules in, exactly like the
+          // benchmark and portify worktree paths already do.
+          linkNodeModules(handle)
+          worktrees.push(handle)
           runnerLog.info(`Isolated repo "${repoName}" in a per-run worktree.`)
         } catch (err) {
           // A portified run MUST have a worktree for every repo — without one
