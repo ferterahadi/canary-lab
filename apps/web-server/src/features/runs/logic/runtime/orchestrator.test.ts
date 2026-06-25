@@ -416,7 +416,7 @@ describe('RunOrchestrator.start', () => {
     await orch.stop('passed')
   })
 
-  it('throws on health-check timeout', async () => {
+  it('records a boot failure (does NOT throw or abort) on health-check timeout for a normal run', async () => {
     const { factory } = makeFakeFactory()
     const orch = new RunOrchestrator({
       feature: makeFeature(),
@@ -430,13 +430,50 @@ describe('RunOrchestrator.start', () => {
     })
     const checks: boolean[] = []
     orch.on('health-check', (e) => checks.push(e.healthy))
-    await expect(orch.start()).rejects.toThrow(/Health check timed out/)
+    // start() no longer rejects — a dead service is a heal-able failure, not an
+    // abort. runFullCycle reads the recorded bootFailure and routes to heal.
+    await expect(orch.start()).resolves.toBeUndefined()
     expect(checks.at(-1)).toBe(false)
-    expect(readManifest(orch.paths.manifestPath)?.lifecycle).toMatchObject({
-      phase: 'aborted',
-      abortReason: { reason: 'service-health-failed', service: 'api' },
+    const manifest = readManifest(orch.paths.manifestPath)!
+    expect(manifest.services[0].status).toBe('timeout')
+    expect(manifest.bootFailure).toMatchObject({
+      service: 'api',
+      safeName: 'api',
+      reason: 'health-timeout',
     })
-    await orch.stop('aborted')
+    // Lifecycle is an error under starting-services — NOT an 'aborted' phase.
+    expect(manifest.lifecycle).toMatchObject({
+      phase: 'starting-services',
+      headline: 'Service failed to start: api',
+    })
+    await orch.stop('failed')
+  })
+
+  it('fast-fails the health wait when a service process exits before becoming healthy', async () => {
+    const { factory, spawned } = makeFakeFactory()
+    let calls = 0
+    const orch = new RunOrchestrator({
+      feature: makeFeature(),
+      runId: RUN_ID,
+      runDir,
+      ptyFactory: factory,
+      // Service never gets healthy; the process dies on the first probe. With a
+      // long deadline, only the process-exit fast path lets start() resolve.
+      healthCheck: async () => {
+        calls += 1
+        if (calls === 1) spawned[0].emitExit(1)
+        return false
+      },
+      delay: async () => undefined,
+      healthDeadlineMs: 60_000,
+      healthPollIntervalMs: 1,
+    })
+    await expect(orch.start()).resolves.toBeUndefined()
+    expect(readManifest(orch.paths.manifestPath)?.bootFailure).toMatchObject({
+      service: 'api',
+      reason: 'process-exited',
+    })
+    await orch.stop('failed')
   })
 
   it('skips health checks when no service exposes a healthUrl', async () => {
@@ -1194,6 +1231,32 @@ describe('RunOrchestrator.runFullCycle', () => {
     const status = await promise
     expect(status).toBe('passed')
     await orch.stop('passed')
+  })
+
+  it('declares failed (no heal) when a service never boots — Playwright never runs', async () => {
+    const f = makeFakeFactory()
+    const orch = new RunOrchestrator({
+      feature: makeFeature(),
+      runId: RUN_ID,
+      runDir,
+      ptyFactory: f.factory,
+      healthCheck: async () => false,
+      delay: async () => undefined,
+      healthDeadlineMs: 5,
+      healthPollIntervalMs: 1,
+      playwrightSpawner: () => {
+        throw new Error('Playwright must not run when a service fails to boot')
+      },
+    })
+    const status = await orch.runFullCycle()
+    expect(status).toBe('failed')
+    // Only the service pty — no Playwright pty was ever spawned.
+    expect(f.spawned).toHaveLength(1)
+    expect(readManifest(orch.paths.manifestPath)?.bootFailure).toMatchObject({
+      service: 'api',
+      reason: 'health-timeout',
+    })
+    await orch.stop('failed')
   })
 
   it('stops instead of re-running forever when only skipped tests remain (auto-heal)', async () => {

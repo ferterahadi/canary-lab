@@ -6,7 +6,7 @@ import { loadProjectConfig } from '../runtime/launcher/project-config'
 import { buildRunPaths, runDirFor } from '../runtime/run-paths'
 import { countConsecutiveSameFailures } from '../runtime/log-enrichment'
 import { ESCALATION_THRESHOLD, buildHealEscalation, type HealEscalation } from '../runtime/heal-escalation'
-import type { HealSignalKind } from '../../../../../../../shared/run-state'
+import type { HealSignalKind, RunBootFailure } from '../../../../../../../shared/run-state'
 
 export interface ExternalHealFailedTest {
   /** Stable per-failure id — equals the on-disk `failed/<failureId>/` dir name
@@ -63,6 +63,12 @@ export interface ExternalHealContext {
   externalHealSession: RunDetail['manifest']['externalHealSession'] | null
   counts: CompactRunCounts
   failedTests: ExternalHealFailedTest[]
+  // Present when the run failed because a service never came up — Playwright
+  // never ran, so `failedTests` is empty and the failure context is the service
+  // log instead. The agent should Read `bootFailure.logPath` to find why the
+  // service won't serve, fix the service/app code, then signal_run
+  // kind:"restart". Absent on ordinary test-failure heals.
+  bootFailure?: RunBootFailure
   // Slim packet: the markdown blobs are deferred to paths the agent `Read`s on
   // demand (they grow with #failures × #cycles). `get_run_snapshot` still inlines
   // them for verbose debugging.
@@ -97,6 +103,7 @@ export interface ExternalRunSnapshot {
   summary: RunDetail['summary'] | null
   counts: NormalizedRunCounts
   failedTests: ExternalHealFailedTest[]
+  bootFailure?: RunBootFailure
   healIndexMarkdown: string | null
   journalMarkdown: string | null
   artifactsBase: string
@@ -149,6 +156,20 @@ const EXTERNAL_HEAL_NEXT_STEPS: readonly string[] = [
   'To re-execute, reuse the run rather than tearing it down: signal_run re-runs the failed tests in place for an active healing run; for a failed/aborted run pass its run_ref to start_run (reruns failed → skipped → pending/not-run only). Do not abort_run then start a fresh run — a fresh start re-runs the whole suite and is only worth it when prior passes are invalidated.',
 ]
 
+// Boot-failure heal procedure: the run failed before any test ran because a
+// service wouldn't come up, so there are no failedTests to investigate — the
+// failure context is the service log. Replaces the test-failure nextSteps when
+// context.bootFailure is set. Must stay in sync with the boot-failure steps in
+// the shipped SKILL.md files.
+function bootFailureNextSteps(bf: RunBootFailure): readonly string[] {
+  return [
+    `No tests ran — service "${bf.service}" failed to start (${bf.detail}). Read its log at ${bf.logPath} (page large files with offset/limit) to find why it won't serve.`,
+    'This is an app/service problem, not a test failure — fix the service/app code so it boots and passes its readiness probe. Do NOT edit tests.',
+    'Then signal_run ONCE with kind:"restart" (the services must restart), plus hypothesis + fixDescription. Canary Lab reboots the services and runs the suite.',
+    'Then call wait_for_heal_task again on the same runId + session_id (loop on still_waiting). Repeat until passed or terminal failure.',
+  ]
+}
+
 // The breadcrumb shipped on repeat heal cycles in place of the full nextSteps +
 // healPrompt map. The procedure and resource map are STATIC across cycles, so
 // they go out once on cycle 1 (and on any explicit get_heal_context re-fetch);
@@ -194,12 +215,17 @@ export function buildExternalHealContext(input: BuildExternalHealContextInput): 
     externalHealSession: snapshot.externalHealSession,
     counts: compactCounts(snapshot.counts),
     failedTests: snapshot.failedTests,
+    ...(snapshot.bootFailure ? { bootFailure: snapshot.bootFailure } : {}),
     // Path only — the agent `Read`s the file when it needs the content. Presence
     // mirrors whether the markdown file exists on disk.
     healIndex: snapshot.healIndexMarkdown === null ? null : { path: paths.healIndexPath },
     journal: snapshot.journalMarkdown === null ? null : { path: paths.diagnosisJournalPath },
     ...(snapshot.healPrompt ? { healPrompt: snapshot.healPrompt } : {}),
-    nextSteps: [...EXTERNAL_HEAL_NEXT_STEPS],
+    // A boot failure has no failedTests — the failure is the service log, so the
+    // agent gets the boot-failure procedure instead of the test-triage one.
+    nextSteps: snapshot.bootFailure
+      ? [...bootFailureNextSteps(snapshot.bootFailure)]
+      : [...EXTERNAL_HEAL_NEXT_STEPS],
     ...(escalation ? { escalation } : {}),
   }
 }
@@ -246,6 +272,7 @@ export function buildExternalRunSnapshot(input: BuildExternalHealContextInput): 
     summary: summary ?? null,
     counts: normalizeRunCounts(summary ?? null),
     failedTests: buildFailedTests(detail, paths.failedDir),
+    ...(detail.manifest.bootFailure ? { bootFailure: detail.manifest.bootFailure } : {}),
     healIndexMarkdown: safeRead(paths.healIndexPath),
     journalMarkdown: safeRead(paths.diagnosisJournalPath),
     artifactsBase: `/api/runs/${encodeURIComponent(runId)}/artifacts/`,

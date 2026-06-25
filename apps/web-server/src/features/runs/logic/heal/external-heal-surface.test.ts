@@ -142,6 +142,54 @@ describe('buildExternalHealContext', () => {
     expect(JSON.stringify(context)).not.toContain('not run yet')
   })
 
+  it('surfaces a boot failure (service log + restart-oriented nextSteps) when no tests ran', () => {
+    const runId = 'run-boot-fail'
+    const runDir = runDirFor(logsDir, runId)
+    const paths = buildRunPaths(runDir)
+    fs.mkdirSync(runDir, { recursive: true })
+    const bootFailure = {
+      service: 'app',
+      safeName: 'app',
+      reason: 'process-exited' as const,
+      detail: 'Service process exited before HTTP readiness (url=http://localhost:3000/health).',
+      logPath: paths.serviceLog('app'),
+    }
+    const detail: RunDetail = {
+      runId,
+      manifest: {
+        runId,
+        feature: 'checkout',
+        env: 'local',
+        startedAt: '2026-05-25T08:00:00.000Z',
+        status: 'healing',
+        healCycles: 1,
+        services: [],
+        bootFailure,
+        lifecycle: {
+          phase: 'waiting-for-signal',
+          updatedAt: '2026-05-25T08:01:00.000Z',
+          message: 'Waiting for heal signal',
+          severity: 'info',
+        },
+      },
+      // A boot failure means Playwright never ran — no summary.
+      summary: null,
+      playwrightArtifacts: [],
+    }
+    fs.writeFileSync(paths.manifestPath, JSON.stringify(detail.manifest))
+
+    const context = buildExternalHealContext({ detail, logsDir, projectRoot: tmpDir })
+
+    expect(context.bootFailure).toEqual(bootFailure)
+    expect(context.failedTests).toEqual([])
+    // nextSteps must steer the agent to the service log + a restart signal,
+    // not the test-triage procedure.
+    const nextSteps = (context.nextSteps ?? []).join('\n')
+    expect(nextSteps).toContain(bootFailure.logPath)
+    expect(nextSteps).toContain('restart')
+    expect(nextSteps).not.toContain('failedTests[]')
+  })
+
   it('keeps compact counts when normalizing duplicate title names', () => {
     const context = buildExternalHealContext({
       detail: {

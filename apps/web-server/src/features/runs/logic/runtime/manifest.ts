@@ -3,6 +3,7 @@ import path from 'path'
 import { runsIndexPath, runsRoot } from './run-paths'
 import type {
   QueueReason,
+  RunBootFailure,
   RunLifecycleSnapshot,
   RunStatus,
   ServiceStatus,
@@ -15,6 +16,7 @@ import { atomicWrite } from '../../../../../../../shared/lib/atomic-write'
 import type { ClientKind, ExternalSessionMeta } from '../../../../../../../shared/run-mode'
 export type {
   QueueReason,
+  RunBootFailure,
   RunLifecycleAbortReason,
   RunLifecycleEvent,
   RunLifecyclePhase,
@@ -156,6 +158,11 @@ export interface RunManifest {
   /** Latest structured lifecycle state. This is the UI source of truth for
    *  recovery flow narration; runner.log remains the human-readable audit. */
   lifecycle?: RunLifecycleSnapshot
+  /** Set when a service failed to come up on a normal run, so the run was
+   *  declared `failed` and (if heal is configured) routed into heal with the
+   *  service log as context. Absent on healthy/boot-only runs; cleared on a
+   *  successful reboot during a heal cycle. */
+  bootFailure?: RunBootFailure
   verification?: VerificationRunMetadata
 }
 
