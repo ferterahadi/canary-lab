@@ -1522,7 +1522,7 @@ export function registerCanaryLabTools(
 
   registerTool('start_run', {
     description:
-      'Smart entrypoint for runs. If a matching run is healing, returns it and blocks fresh/different starts until cancel_heal stops it. If runId/run_ref targets a failed/aborted run and no heal is active, restarts it in remaining-test mode (failed → skipped → pending/not-run). Otherwise starts a new run. To retry a failed/aborted run prefer this rerun path (pass run_ref) over abort_run + a fresh start — a fresh start re-runs the whole suite, only worth it when prior passes are invalidated (e.g. a global data/state change). After code changes call signal_run (hypothesis + fixDescription), then wait_for_heal_task on the same run.',
+      'Smart entrypoint for runs. If a matching run is healing, returns it and blocks fresh/different starts until cancel_heal stops it. If runId/run_ref targets a failed/aborted run and no heal is active, restarts it in remaining-test mode (failed → skipped → pending/not-run). Otherwise starts a new run. To retry a failed/aborted run prefer this rerun path (pass run_ref) over abort_run + a fresh start — a fresh start re-runs the whole suite, only worth it when prior passes are invalidated (e.g. a global data/state change). The rerun path already re-runs skipped + pending tests (failed → skipped → pending/not-run), so it is complete — do NOT force_new just to avoid "skipped" tests; force_new on a portified feature spins a brand-new per-run worktree and resets the heal journal to Iteration 1, losing the prior cycles. After code changes call signal_run (hypothesis + fixDescription), then wait_for_heal_task on the same run.',
     inputSchema: {
       feature: z.string().describe('Feature name (from list_features).'),
       env: z.string().optional().describe('Envset name. Defaults to the feature\'s first declared env.'),
@@ -1539,10 +1539,13 @@ export function registerCanaryLabTools(
   }, async ({ feature, env, runId, run_ref, claim_heal, session_id, client_kind, conversation_name, guidance, force_new, isolation }) => {
     try {
       const requestedRef = runId ?? run_ref
-      // Heal-claim policy: claiming is reserved for Desktop clients. A CLI (or
-      // undetected 'other') client may still start/verify the run, but must not
-      // own its heal loop — so we down-shift claim_heal to false and tell the
-      // caller, instead of grabbing heal duty behind their back.
+      // Heal-claim policy (see heal-claim-policy.ts): claiming is open to every
+      // human-driven interactive client — claude/codex (Desktop or CLI) and even
+      // undetected 'other'. The ONLY kinds blocked are runner-spawned PTY agents
+      // (claude-pty/codex-pty), which would otherwise claim their own run. A
+      // blocked client may still start/verify the run, but must not own its heal
+      // loop — so we down-shift claim_heal to false and tell the caller, instead
+      // of grabbing heal duty behind their back.
       const claimAllowed = claim_heal && isHealClaimAllowed(client_kind)
       const claimSuppressed = claim_heal && !claimAllowed
       const suppressionFields = claimSuppressed

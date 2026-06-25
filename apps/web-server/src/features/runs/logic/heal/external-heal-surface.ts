@@ -153,7 +153,7 @@ const EXTERNAL_HEAL_NEXT_STEPS: readonly string[] = [
   'When SEVERAL tests fail, fan out: spawn one read-only sub-agent per failure, hand it the failureId, and have it call get_failure_detail(runId, failureId) to investigate just that slice in parallel and report back a hypothesis + proposed fix. The sub-agents must NOT edit code or call signal_run.',
   'Apply all the fixes YOURSELF, then signal_run ONCE per cycle: kind:"rerun" for test-only/app-code fixes, "restart" when services or env must restart, with hypothesis + fixDescription. One accountable signal per cycle.',
   'Then call wait_for_heal_task again on the same runId + session_id (loop on still_waiting). Repeat until passed or terminal failure.',
-  'To re-execute, reuse the run rather than tearing it down: signal_run re-runs the failed tests in place for an active healing run; for a failed/aborted run pass its run_ref to start_run (reruns failed → skipped → pending/not-run only). Do not abort_run then start a fresh run — a fresh start re-runs the whole suite and is only worth it when prior passes are invalidated.',
+  'To re-execute, reuse the run rather than tearing it down: signal_run re-runs the failed tests in place for an active healing run; for a failed/aborted run pass its run_ref to start_run (reruns failed → skipped → pending/not-run only). The run_ref rerun already covers skipped + pending, so it is complete — do NOT force_new just to avoid "skipped" tests; force_new on a portified feature spins a fresh per-run worktree and resets THIS journal to Iteration 1. Do not abort_run then start a fresh run — a fresh start re-runs the whole suite and is only worth it when prior passes are invalidated.',
 ]
 
 // Boot-failure heal procedure: the run failed before any test ran because a
