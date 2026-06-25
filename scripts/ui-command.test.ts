@@ -9,7 +9,7 @@ const mocks = vi.hoisted(() => ({
 }))
 
 vi.mock('../apps/web-server/server', () => ({ createServer: mocks.createServer }))
-vi.mock('../apps/web-server/lib/open-browser', () => ({ openBrowser: mocks.openBrowser }))
+vi.mock('../apps/web-server/src/shared/open-browser', () => ({ openBrowser: mocks.openBrowser }))
 
 const { parsePort, runUi } = await import('./ui-command')
 
@@ -128,9 +128,9 @@ describe('runUi signal cleanup', () => {
     expect(exit).toHaveBeenCalledExactlyOnceWith(130)
     expect(events).toEqual([
       'confirm',
+      'revert',
       'cancel-wizard',
       'abort-all',
-      'revert',
       'close',
       'exit-130',
     ])
@@ -177,6 +177,47 @@ describe('runUi signal cleanup', () => {
     expect(app.close).not.toHaveBeenCalled()
     expect(exit).not.toHaveBeenCalled()
     expect(messages).toContain('Shutdown cancelled. Canary Lab is still running.')
+  })
+
+  it('forces exit when graceful shutdown stalls past the timeout', async () => {
+    const messages: string[] = []
+    // app.close() never resolves — simulates a socket that won't drain.
+    const runStore = { abortAllActiveOrStale: vi.fn(async () => {}) }
+    const app = {
+      listen: vi.fn(async () => {}),
+      close: vi.fn(() => new Promise<void>(() => { /* never resolves */ })),
+    }
+    const revertAllEnvsets = vi.fn()
+    const exit = vi.fn()
+
+    mocks.createServer.mockResolvedValue({
+      app,
+      registry: {},
+      revertAllEnvsets,
+      cancelAllWizardAgents: vi.fn(),
+      runStore,
+      brokers: new Map(),
+      draftBrokers: new Map(),
+    })
+
+    await runUi(['--no-open'], {
+      projectRoot: wsRoot,
+      log: (msg) => { messages.push(msg) },
+      exit,
+      recordActiveServer: () => {},
+      clearActiveServer: () => {},
+      confirmShutdown: async () => true,
+      shutdownTimeoutMs: 20,
+    })
+
+    process.emit('SIGINT')
+    await new Promise((resolve) => setTimeout(resolve, 80))
+
+    // The safety-critical envset revert still ran before the stall, and the
+    // watchdog forced the process out despite app.close() hanging.
+    expect(revertAllEnvsets).toHaveBeenCalledOnce()
+    expect(exit).toHaveBeenCalledWith(130)
+    expect(messages).toContain('Shutdown is taking longer than expected; forcing exit.')
   })
 })
 

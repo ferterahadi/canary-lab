@@ -47,7 +47,7 @@ Non-goals called out in the notes: voucher creation UI, bulk-voucher imports.
 Each array item has exactly four fields:
 
 - `coverageType` — one of `"happy-path"`, `"sad-path"`, `"edge-case"`, `"validation"`, `"permission-state"`, or `"regression-risk"`.
-- `step` — a short, plain-English label readable by a non-engineer. Action-oriented, max 60 characters. Example: `"Open the login page"`, `"Submit the form with valid credentials"`. Do NOT mention selectors, URLs, or implementation details here.
+- `step` — a short, plain-English label readable by a non-engineer. Action-oriented, max 60 characters. Example: `"Open the login page"`, `"Submit the form with valid credentials"`. Do NOT mention selectors, URLs, or implementation details here. Do NOT prefix with an ordinal or number (`"1. "`, `"2) "`) — the UI numbers tests by source order, so a baked-in number would double up.
 - `actions` — 1–4 short strings describing the concrete things the test will do. May be slightly more technical (button labels, field names) but should still read as instructions, not code. Example: `["Click the 'Sign in' button", "Type the seeded customer email into the email field"]`.
 - `expectedOutcome` — a single sentence naming a durable observable result.
 

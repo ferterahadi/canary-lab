@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 const switchEnv = vi.fn(async () => {})
 
-vi.mock('../apps/web-server/lib/runtime/env-switcher/switch', () => ({ main: switchEnv }))
+vi.mock('../apps/web-server/src/features/runs/logic/runtime/env-switcher/switch', () => ({ main: switchEnv }))
 
 const { main } = await import('./env')
 

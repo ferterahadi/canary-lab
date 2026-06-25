@@ -1,23 +1,31 @@
 # Canary Lab — Product Requirements (reverse-engineered)
 
 > **Status**: reverse-engineered from the README, CHANGELOG, GUIDE, and code as of
-> v1.3.0. This captures the product intent implied by what's shipped so agents and
+> v1.4.0. This captures the product intent implied by what's shipped so agents and
 > new contributors share the same picture. Correct anything that misreads the intent —
 > this document is the tie-breaker when a change is technically possible but
 > product-questionable.
 
 ## Problem
 
-A failing Playwright test scatters its evidence: service logs in one terminal, a
-trace file somewhere, a screenshot you have to go find. Diagnosis happens cold, from
-terminal scrollback, and the fix loop ("change something, rerun everything") loses
-the context of the original failure.
+An AI agent asked to fix a failing test can report success it hasn't earned —
+declaring a pass, rounding up a count, or quietly editing the test instead of the app.
+Self-reported "it passes now" isn't really evidence. Canary Lab tries to make that
+harder by keeping the outcome grounded in things the agent doesn't author: tests are
+run by the harness rather than the agent, pass counts come from the real result lines,
+a requirement counts as covered only once a tagged test has actually passed in a run,
+and repairs are expected to change the application, not the test. The rough shape is
+**verified coverage → test run → end-to-end verification** — enough that a human can
+check the result independently, and so that the same output can feed back to the agent
+as a signal to fix against rather than just a pass/fail gate.
 
-Canary Lab keeps the whole run in one place. It runs Playwright tests locally,
-captures the context around each failure — logs, screenshots, traces, videos, which
-services were running, which env was applied — and hands that to an AI agent as a
-reproducible evidence packet to fix the app and rerun **from the same run**. Built
-for teams that use tests as the spec.
+The repair loop leans on the same evidence. A failing Playwright test usually scatters
+its context — service logs in one terminal, a trace somewhere, a screenshot you have
+to go find — so diagnosis happens cold. Canary Lab tries to keep the whole run in one
+place: it runs the tests locally, captures the context around each failure (logs,
+screenshots, traces, videos, which services ran, which env applied), and hands that to
+the agent as a reproducible evidence packet to fix the app and rerun **from the same
+run**. Built for teams that use tests as the spec.
 
 ## Users
 
@@ -33,7 +41,8 @@ for teams that use tests as the spec.
 
 ## Capabilities by area
 
-These mirror the CHANGELOG area tags.
+These broadly mirror the CHANGELOG area tags; verified coverage and verification are
+cross-cutting and not separately tagged in the CHANGELOG.
 
 ### [Test Runner]
 
@@ -60,6 +69,26 @@ These mirror the CHANGELOG area tags.
 - Portify: agent-driven rewrite of a feature's services to accept injected ports,
   verified by a concurrent double-boot and saved as an ephemeral overlay (applied
   per-run, reverse-applied at teardown) so the product repo is never modified.
+
+### [Verified coverage]
+
+- Grounded requirements traceability: a feature's `docs/` source is summarized into a
+  PRD (requirements with stable ids); tests are tagged to requirements
+  (`{ tag: ['@req-<id>', '@path-happy'] }`); a requirement is **Verified** only when a
+  tagged test has actually **passed in a run**. Coverage % is evidence
+  (verified ÷ total), never an agent's opinion.
+- Gap typing — `untested` / `unverified` / `path-incomplete` / `shallow-verified` —
+  plus a rigor score grading which layer each test really checks (app log → internal
+  state → app API → browser) and the stronger assertion to write.
+- One computation layer behind both the UI (the 🎯 Coverage view) and MCP
+  (`get_feature_coverage`), so the two can never diverge.
+
+### [Verification]
+
+- Run a feature's tests against a **deployed** environment (`execute_verification` with
+  per-target URLs and a Playwright envset) — never boots local services, never starts
+  healing — to confirm the real thing works end-to-end. Saved as reusable Verify
+  configs and scoped to the `verify` MCP profile.
 
 ### [Export evaluation]
 
@@ -93,8 +122,9 @@ These mirror the CHANGELOG area tags.
 These are the expectations that shape review decisions; several are encoded as code
 invariants (see [ARCHITECTURE.md](ARCHITECTURE.md#keep-in-sync-invariants)).
 
-1. **Heal safety.** Only Desktop client kinds may own a heal claim (allowlist that
-   fails safe on detection failure); destructive tools require an explicit
+1. **Heal safety.** Every interactive client may own a heal claim; only the
+   runner-spawned PTY agents are blocked (denylist, since the runner tags its own
+   spawns deterministically); destructive tools require an explicit
    `confirm: true`; the repair rule is "fix app/service code, not tests, unless a
    test is provably wrong"; every external command is audited per run.
 2. **Honest counts.** Pass counts come from `result.counts.statusLine` /
@@ -122,4 +152,6 @@ invariants (see [ARCHITECTURE.md](ARCHITECTURE.md#keep-in-sync-invariants)).
 | **Worktree isolation** | Running a colliding same-repo run in a per-run `git worktree` so heal edits can't corrupt the other run |
 | **Portify** | The workflow that rewrites a feature's services to read injected ports, unlocking concurrent boots |
 | **Draft** | An externally authored set of spec files tracked through staged validation before apply |
+| **Verified coverage** | A requirement counts as covered only when a tagged test has passed in a real run; the ledger maps requirements ↔ tests ↔ passing runs with a grounded coverage % |
+| **Verification (Verify)** | Running a feature's tests against a deployed environment to confirm it works end-to-end — no local boot, no heal |
 | **Evaluation export** | A rendered archive of a terminal run with client-authored report wording |

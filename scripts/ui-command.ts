@@ -7,10 +7,15 @@ import readline from 'readline'
 import { spawn } from 'child_process'
 import { createServer } from '../apps/web-server/server'
 import { getProjectRoot, isCanaryLabWorkspace } from '../shared/runtime/project-root'
-import { openBrowser } from '../apps/web-server/lib/open-browser'
-import { loadProjectConfig, resolveProjectPort } from '../apps/web-server/lib/runtime/launcher/project-config'
+import { openBrowser } from '../apps/web-server/src/shared/open-browser'
+import { loadProjectConfig, resolveProjectPort } from '../apps/web-server/src/features/runs/logic/runtime/launcher/project-config'
 import { registerActiveServer, unregisterActiveServer } from '../shared/runtime/active-servers'
 import { refreshAgentIntegrationsQuietly } from './agent'
+
+// Graceful-teardown ceiling. Long enough for an honest run abort + app.close,
+// short enough that a wedged shutdown doesn't feel hung before the watchdog
+// force-exits.
+const SHUTDOWN_TIMEOUT_MS = 5000
 
 export interface UiCommandOptions {
   projectRoot?: string
@@ -18,6 +23,10 @@ export interface UiCommandOptions {
   log?: (msg: string) => void
   exit?: (code: number) => void
   confirmShutdown?: () => Promise<boolean>
+  // Hard ceiling on graceful teardown. If cleanup + app.close haven't finished
+  // within this window, the process is forced out so Ctrl+C always exits.
+  // Injectable so tests can use a tiny value. Defaults to SHUTDOWN_TIMEOUT_MS.
+  shutdownTimeoutMs?: number
   // Records/clears the live server (projectRoot+port+pid) the MCP bridge follows.
   // Injected as spies in tests so they never touch the real ~/.canary-lab.
   recordActiveServer?: (projectRoot: string, port: number) => void
@@ -80,21 +89,51 @@ export async function runUi(argv: string[], opts: UiCommandOptions = {}): Promis
   // Stop active runs and revert any in-flight envset swaps if the user kills
   // the UI server before their runs finish. `orch.stop()` owns the process
   // cleanup path for service PTYs, Playwright, and heal agents.
+  // Step tracer for diagnosing a stuck shutdown. Off unless the user opts in,
+  // so a normal Ctrl+C stays quiet; with it on, the last line printed names the
+  // step that hung. Goes to stderr so server-stdout capture can't swallow it.
+  const traceShutdown = (step: string): void => {
+    if (process.env.CANARY_LAB_DEBUG_SHUTDOWN) process.stderr.write(`[canary-lab shutdown] ${step}\n`)
+  }
   let cleanedUp = false
   const cleanup = async (): Promise<void> => {
     if (cleanedUp) return
     cleanedUp = true
+    traceShutdown('cleanup:start')
     // Stop advertising this server to the MCP bridge before tearing down, so a
     // bridge re-resolving mid-shutdown never targets a port that's going away.
     clearActiveServer()
-    cancelAllWizardAgents()
-    await runStore.abortAllActiveOrStale()
+    // Revert envsets FIRST. It is synchronous and safety-critical — it restores
+    // the user's `.env` from a (possibly production-pointing) envset. If a later
+    // step stalls, this must already be done so a forced exit can't strand
+    // `.env` on prod.
     revertAllEnvsets()
+    traceShutdown('cleanup:reverted-envsets')
+    cancelAllWizardAgents()
+    traceShutdown('cleanup:cancelled-wizard-agents')
+    await runStore.abortAllActiveOrStale()
+    traceShutdown('cleanup:aborted-runs')
   }
   const shutdown = async (code: number): Promise<void> => {
-    await cleanup()
-    try { await app.close() } catch { /* already closed or never fully opened */ }
-    exit(code)
+    // Ctrl+C must always exit. If graceful teardown stalls — a service PTY that
+    // ignores SIGTERM, a socket that never drains in app.close() — this watchdog
+    // forces the process out anyway. The safety-critical envset revert runs at
+    // the top of cleanup(), so a forced exit can't leave `.env` on prod.
+    const watchdog = setTimeout(() => {
+      traceShutdown('watchdog:forced-exit')
+      log('Shutdown is taking longer than expected; forcing exit.')
+      exit(code)
+    }, opts.shutdownTimeoutMs ?? SHUTDOWN_TIMEOUT_MS)
+    watchdog.unref?.()
+    try {
+      await cleanup()
+      traceShutdown('shutdown:closing-app')
+      try { await app.close() } catch { /* already closed or never fully opened */ }
+      traceShutdown('shutdown:closed-app')
+    } finally {
+      clearTimeout(watchdog)
+      exit(code)
+    }
   }
 
   // A Project Settings port change persists the new port server-side, then asks

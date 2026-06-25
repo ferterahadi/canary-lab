@@ -1,0 +1,257 @@
+import { describe, it, expect } from 'vitest'
+import {
+  parseAnnotateOutput,
+  proposeCoverageMappings,
+  buildAnnotatePrompt,
+} from './annotate-engine'
+import type { Requirement, VariantDimension } from '../../../../../../../shared/coverage/types'
+
+const REQS: Requirement[] = [
+  { id: 'R1', title: 'Create todo', text: 'A user can create a todo item', pathTypes: ['happy'] },
+  { id: 'R2', title: 'Delete todo', text: 'A user can delete a todo item', pathTypes: ['happy'] },
+  { id: 'R9', title: 'Old removed', text: 'gone', pathTypes: ['happy'], deprecated: true },
+]
+const KNOWN = new Set(['R1', 'R2'])
+const CHANNEL: VariantDimension = { name: 'channel', values: ['email', 'whatsapp', 'call', 'line'] }
+const KNOWN_VARIANTS = new Set(CHANNEL.values)
+
+describe('parseAnnotateOutput', () => {
+  it('parses mappings and keeps only known requirement ids', () => {
+    const out = parseAnnotateOutput(
+      JSON.stringify({
+        mappings: [
+          { testName: 'creates', requirements: ['R1'], pathTypes: ['happy'], confidence: 0.9 },
+          { testName: 'bogus', requirements: ['R404'] },
+        ],
+      }),
+      KNOWN,
+    )
+    expect(out).toHaveLength(1)
+    expect(out![0]).toMatchObject({ testName: 'creates', requirements: ['R1'], source: 'agent' })
+  })
+
+  it('tolerates the agent echoing the @req- tag form', () => {
+    const out = parseAnnotateOutput(JSON.stringify({ mappings: [{ testName: 't', requirements: ['@req-R2'] }] }), KNOWN)
+    expect(out![0].requirements).toEqual(['R2'])
+  })
+
+  it('handles fenced JSON', () => {
+    const out = parseAnnotateOutput('```json\n{"mappings":[{"testName":"t","requirements":["R1"]}]}\n```', KNOWN)
+    expect(out![0].testName).toBe('t')
+  })
+
+  it('returns [] for a valid-but-empty mapping set', () => {
+    expect(parseAnnotateOutput(JSON.stringify({ mappings: [] }), KNOWN)).toEqual([])
+  })
+
+  it('returns null on garbage', () => {
+    expect(parseAnnotateOutput('not json at all', KNOWN)).toBeNull()
+  })
+
+  it('returns null when mappings is not an array (line 114 branch)', () => {
+    // `{ mappings: "string" }` → Array.isArray("string") is false → return null
+    expect(parseAnnotateOutput(JSON.stringify({ mappings: 'not an array' }), KNOWN)).toBeNull()
+  })
+
+  it('skips null/primitive items in the mappings array (line 117 branch)', () => {
+    // A null element in mappings → `!raw || typeof raw !== 'object'` TRUE → continue (skip)
+    const out = parseAnnotateOutput(
+      JSON.stringify({ mappings: [null, { testName: 't', requirements: ['R1'] }] }),
+      KNOWN,
+    )
+    expect(out).toHaveLength(1)
+    expect(out![0].testName).toBe('t')
+  })
+
+  it('skips a mapping with a non-string testName (line 119 false branch → empty string → line 120 continue)', () => {
+    // testName is a number → ternary FALSE → '' → !testName is true → continue (skip)
+    const out = parseAnnotateOutput(
+      JSON.stringify({ mappings: [{ testName: 42, requirements: ['R1'] }] }),
+      KNOWN,
+    )
+    expect(out).toEqual([])
+  })
+
+  it('sets rationale to undefined when it is an empty string (line 127 ||undefined branch)', () => {
+    // rationale is a string but trim() yields '' → `r.rationale.trim() || undefined` → undefined
+    const out = parseAnnotateOutput(
+      JSON.stringify({ mappings: [{ testName: 't', requirements: ['R1'], rationale: '   ' }] }),
+      KNOWN,
+    )
+    expect(out![0].rationale).toBeUndefined()
+  })
+
+  it('sets rationale to undefined when it is not a string (line 127 ternary false branch)', () => {
+    // rationale is a number → typeof !== 'string' → ternary FALSE → undefined
+    const out = parseAnnotateOutput(
+      JSON.stringify({ mappings: [{ testName: 't', requirements: ['R1'], rationale: 99 }] }),
+      KNOWN,
+    )
+    expect(out![0].rationale).toBeUndefined()
+  })
+})
+
+describe('normalizePathTypes (via parseAnnotateOutput) — edge cases', () => {
+  it('returns undefined when pathTypes is not an array (line 76 branch)', () => {
+    // pathTypes: "happy" → !Array.isArray("happy") TRUE → normalizePathTypes returns undefined
+    const out = parseAnnotateOutput(
+      JSON.stringify({ mappings: [{ testName: 't', requirements: ['R1'], pathTypes: 'happy' }] }),
+      KNOWN,
+    )
+    expect(out![0].pathTypes).toBeUndefined()
+  })
+
+  it('returns undefined when pathTypes items are all unknown strings (ordered.length=0 branch)', () => {
+    // pathTypes: ['unknown-path'] → none in PATH_TYPES → ordered = [] → return undefined
+    const out = parseAnnotateOutput(
+      JSON.stringify({ mappings: [{ testName: 't', requirements: ['R1'], pathTypes: ['unknown-path-type'] }] }),
+      KNOWN,
+    )
+    expect(out![0].pathTypes).toBeUndefined()
+  })
+
+  it('skips non-string items in pathTypes array (line 79 else branch)', () => {
+    // pathTypes: [42] → typeof 42 !== 'string' → item skipped → no valid paths → undefined
+    const out = parseAnnotateOutput(
+      JSON.stringify({ mappings: [{ testName: 't', requirements: ['R1'], pathTypes: [42] }] }),
+      KNOWN,
+    )
+    expect(out![0].pathTypes).toBeUndefined()
+  })
+})
+
+describe('normalizeRequirements (via parseAnnotateOutput) — non-string items', () => {
+  it('skips non-string entries in requirements array (line 89 else branch)', () => {
+    // requirements: [42, 'R1'] → typeof 42 !== 'string' → skipped; 'R1' is valid
+    const out = parseAnnotateOutput(
+      JSON.stringify({ mappings: [{ testName: 't', requirements: [42, 'R1'] }] }),
+      KNOWN,
+    )
+    expect(out![0].requirements).toEqual(['R1'])
+  })
+
+  it('returns [] and drops mapping when requirements is not an array (line 86 branch)', () => {
+    // requirements: "R1" (a string, not an array) → normalizeRequirements returns [] →
+    // requirements.length=0 → the mapping is skipped entirely
+    const out = parseAnnotateOutput(
+      JSON.stringify({ mappings: [{ testName: 't', requirements: 'R1' }] }),
+      KNOWN,
+    )
+    expect(out).toEqual([])
+  })
+})
+
+describe('proposeCoverageMappings', () => {
+  it('uses the injected agent runner and parses its output', async () => {
+    const out = await proposeCoverageMappings(
+      { requirements: REQS, tests: [{ name: 'creates a todo' }] },
+      {
+        resolveAgents: () => ['claude'],
+        runAgent: async () => JSON.stringify({ mappings: [{ testName: 'creates a todo', requirements: ['R1'], confidence: 0.8 }] }),
+      },
+    )
+    expect(out).toHaveLength(1)
+    expect(out[0]).toMatchObject({ testName: 'creates a todo', requirements: ['R1'], source: 'agent' })
+  })
+
+  it('throws (LLM-only) when every agent returns unparseable output', async () => {
+    await expect(
+      proposeCoverageMappings(
+        { requirements: REQS, tests: [{ name: 'delete removes the todo item' }] },
+        { resolveAgents: () => ['claude'], runAgent: async () => 'garbage' },
+      ),
+    ).rejects.toThrow(/requires the claude or codex agent/)
+  })
+
+  it('throws (LLM-only) when no agent is available', async () => {
+    await expect(
+      proposeCoverageMappings(
+        { requirements: REQS, tests: [{ name: 'create makes a new todo' }] },
+        { resolveAgents: () => [] },
+      ),
+    ).rejects.toThrow(/requires the claude or codex agent/)
+  })
+
+  it('returns [] when there are no tests or no active requirements', async () => {
+    expect(await proposeCoverageMappings({ requirements: REQS, tests: [] })).toEqual([])
+    expect(await proposeCoverageMappings({ requirements: [], tests: [{ name: 'x' }] })).toEqual([])
+  })
+})
+
+describe('parseAnnotateOutput — variants (D1)', () => {
+  it('keeps variant claims within the dimension vocabulary, lower-cased + deduped', () => {
+    const out = parseAnnotateOutput(
+      JSON.stringify({ mappings: [{ testName: 't', requirements: ['R1'], pathTypes: ['happy'], variants: ['Email', 'whatsapp', 'email'] }] }),
+      KNOWN, KNOWN_VARIANTS,
+    )
+    expect(out![0].variants).toEqual(['email', 'whatsapp'])
+  })
+
+  it('drops variant claims outside the vocabulary; omits the field when none survive', () => {
+    const out = parseAnnotateOutput(
+      JSON.stringify({ mappings: [{ testName: 't', requirements: ['R1'], pathTypes: ['happy'], variants: ['sms', 'fax'] }] }),
+      KNOWN, KNOWN_VARIANTS,
+    )
+    expect(out![0].variants).toBeUndefined()
+  })
+
+  it('ignores variants entirely when the feature has no dimension', () => {
+    const out = parseAnnotateOutput(
+      JSON.stringify({ mappings: [{ testName: 't', requirements: ['R1'], pathTypes: ['happy'], variants: ['email'] }] }),
+      KNOWN, // no knownVariants
+    )
+    expect(out![0].variants).toBeUndefined()
+  })
+})
+
+describe('buildAnnotatePrompt', () => {
+  it('injects the variant dimension + value vocabulary when one applies', () => {
+    const prompt = buildAnnotatePrompt(REQS, [{ name: 't', file: 'e2e/x.spec.ts' }], '/repo', CHANNEL)
+    expect(prompt).toContain('channel')
+    expect(prompt).toContain('email, whatsapp, call, line')
+  })
+
+  it('tells the agent NOT to emit variants when there is no dimension', () => {
+    const prompt = buildAnnotatePrompt(REQS, [{ name: 't', file: 'e2e/x.spec.ts' }], '/repo')
+    expect(prompt).toContain('no variant dimension')
+  })
+
+  it('lists test names + file paths to read (no inlined body) + active requirements', () => {
+    const prompt = buildAnnotatePrompt(
+      REQS,
+      [{ name: 'creates a todo', file: 'e2e/todo.spec.ts', bodySource: 'UNIQUE_TEST_BODY_TOKEN' }],
+      '/repo/features/todo',
+    )
+    expect(prompt).toContain('"id": "R1"')
+    expect(prompt).toContain('"id": "R2"')
+    expect(prompt).not.toContain('"id": "R9"')
+    expect(prompt).toContain('creates a todo')
+    // Agentic: the prompt lists the resolvable spec path so the agent READS the
+    // real test body with its tools — the body is NOT inlined.
+    expect(prompt).toContain('/repo/features/todo/e2e/todo.spec.ts')
+    expect(prompt).not.toContain('UNIQUE_TEST_BODY_TOKEN')
+  })
+
+  it('returns unknown {{key}} placeholders unchanged (return match branch)', () => {
+    // Pass a custom templatePath by writing a temp file with an unknown placeholder.
+    // This hits the `return match` else branch in the replace callback.
+    const os = require('os') as typeof import('os')
+    const fs = require('fs') as typeof import('fs')
+    const path = require('path') as typeof import('path')
+    const tmpFile = path.join(os.tmpdir(), `canary-annotate-tmpl-${Date.now()}.md`)
+    try {
+      fs.writeFileSync(tmpFile, '{{requirements}} {{unknown}}')
+      const prompt = buildAnnotatePrompt(REQS, [], undefined, undefined, tmpFile)
+      expect(prompt).toContain('{{unknown}}')
+    } finally {
+      fs.rmSync(tmpFile, { force: true })
+    }
+  })
+})
+
+describe('parseAnnotateOutput — invalid JSON catch branch', () => {
+  it('returns null when JSON.parse throws (invalid JSON with braces)', () => {
+    // `{invalid}` has { and } so start/end checks pass, but JSON.parse throws.
+    expect(parseAnnotateOutput('{invalid json}', KNOWN)).toBeNull()
+  })
+})

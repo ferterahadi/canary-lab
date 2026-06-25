@@ -15,7 +15,7 @@ To run a feature's tests against a deployed environment without booting the loca
 1. Add the env to `feature.config.cjs` → `envs: ['local', 'production']`.
 2. Gate each `startCommand` (or whole `repo`) with `envs: ['local']` so it only boots locally.
 3. Add a matching envset under `envsets/<env>/<feature>.env` with the remote target — e.g. `GATEWAY_URL=https://api.example.com`. Tests read this via `process.env.GATEWAY_URL` (see `e2e/helpers/api.ts`).
-4. Pick the env at the runner prompt (`canary-lab run`) or from the env dropdown in the web UI (`canary-lab ui`). Both flows apply/revert the envset and skip booting filtered services.
+4. Pick the env from the env dropdown in the web UI (`canary-lab ui`). The run flow applies/reverts the envset and skips booting filtered services.
 
 ### Environment Variable Safety
 
@@ -43,6 +43,10 @@ Each run writes to `logs/runs/<runId>/`:
 Completed runs can export an Evaluation Report from the run detail Overview tab — a `.zip` containing `evaluation.html` and captured videos. It summarizes what was tested, the result, and the evidence; each test case expands to show its flowchart, test code, helper code, videos, and checks.
 
 ![Evaluation Report sample](assets/assertion-review.png)
+
+## Verified Coverage
+
+Open the **Coverage** view (the 🎯 pill in the top bar) for a feature to see which of its PRD requirements are actually covered by *passing* runs — not just which tests exist. Requirements sit on the left, tests on the right, with synced colour highlighting between them and a grounded coverage % in the header. Gap badges (Untested, Unverified, Path-incomplete, Shallow-verified) filter the view; the **rigor** badge on each requirement shows how strict its tests are and suggests a stronger check when one is achievable. The Docs tab holds the source material the requirements are summarized from, with a "Regenerate" action that preserves requirement ids. See [Verified Coverage in FEATURES](FEATURES.md#verified-coverage) for how to annotate tests, and [COMMANDS](COMMANDS.md#verified-coverage-mcp-authorfull-profiles) for the matching MCP tools.
 
 ## Repairing a Failed Run
 

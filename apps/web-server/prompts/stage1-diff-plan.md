@@ -68,7 +68,7 @@ covering.
 Each array item has exactly four fields:
 
 - `coverageType` — one of `"happy-path"`, `"sad-path"`, `"edge-case"`, `"validation"`, `"permission-state"`, or `"regression-risk"`. Most diff-mode items will be `"regression-risk"`.
-- `step` — short, plain-English, action-oriented, max 60 characters, readable by a non-engineer. No selectors, URLs, git commands, commit hashes, or file paths.
+- `step` — short, plain-English, action-oriented, max 60 characters, readable by a non-engineer. No selectors, URLs, git commands, commit hashes, or file paths. No leading ordinal or number prefix (`"1. "`, `"2) "`) — the UI numbers tests by source order.
 - `actions` — 1–4 short strings describing what the test does. May reference button labels or field names but should still read as instructions, not code.
 - `expectedOutcome` — one sentence naming a durable observable result.
 

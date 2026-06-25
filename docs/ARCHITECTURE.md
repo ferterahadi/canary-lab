@@ -39,8 +39,9 @@ For product intent, see [PRD.md](PRD.md). For user-facing usage, see the
 | `scripts/` | CLI entry, scaffold/setup/upgrade/env commands, MCP bridge (`scripts/mcp.ts` includes `inferMcpClientKind` client-kind detection) |
 | `apps/web-server/server.ts` | Fastify app: UI assets, REST routes, WebSocket streams, the `startRun` factory, scheduler wiring |
 | `apps/web-server/mcp/` | MCP HTTP server (`server.ts`: transports, profile instructions) and tools (`tools.ts`: thin wrappers + profile arrays) |
-| `apps/web-server/lib/` | Run store, external heal broker, heal-claim policy, feature authoring, external heal surface |
-| `apps/web-server/lib/runtime/` | The run orchestrator and its ~57 modules (see [Run Lifecycle](#run-lifecycle) and below) |
+| `apps/web-server/src/features/` | Feature-based modules, each with some of `logic/`, `routes/`, `ws/` subdirs (which ones vary per feature): `runs` (run store, runtime/orchestrator, panes, journal, and `logic/heal/` external-heal broker/surface/claim-policy), `agent-sessions` (agent process, stream, session log/tailer, idle timer), `coverage` (coverage ledger, PRD extractor, verification), `wizard` (draft + wizard-agent pipeline, tests-draft route), `evaluation` (export archive/store, test-review export), `config` (feature/project config authoring, AST, dotenv), `portify`, `benchmark` |
+| `apps/web-server/src/shared/` | Web-server-local shared infra: `git-repo`, `ring-buffer`, `simple-zip`, `workspace-events`, `editor-launch`, `open-browser`, and `ws/workspace-stream` |
+| `apps/web-server/src/features/runs/logic/runtime/` | The run orchestrator and its modules (see [Run Lifecycle](#run-lifecycle) and below) |
 | `apps/web/` | React UI (Vite, Tailwind) |
 | `shared/e2e-runner/` | Playwright fixture support (`log-marker-fixture`, summary reporter) |
 | `shared/configs/` | Base Playwright config and env loader |
@@ -48,7 +49,7 @@ For product intent, see [PRD.md](PRD.md). For user-facing usage, see the
 | `templates/project/` | Scaffolded workspace files, incl. five sample features: `example_todo_api` (happy path), `broken_todo_api` (heal target), `flaky_orders_api`, `tricky_checkout_api`, `acme_cart_checkout` |
 | `tools/` | Build/publish utilities: `clean-dist`, `prepare-assets`, `smoke-pack`, `publish-package`, `generate-changelog`, `tag-release`, `fix-node-pty-permissions` |
 
-Key `apps/web-server/lib/runtime/` modules:
+Key `apps/web-server/src/features/runs/logic/runtime/` modules:
 
 | Module | Role |
 | --- | --- |
@@ -62,8 +63,9 @@ Key `apps/web-server/lib/runtime/` modules:
 | `heal-cycle.ts`, `heal-prompt-builder.ts` | Heal-cycle state machine and prompt assembly |
 | `manifest.ts`, `run-paths.ts`, `run-id.ts` | Run manifest schema and path/id conventions |
 | `summary-reporter.ts`, `log-enrichment.ts`, `trace-enrichment.ts` | Evidence capture and enrichment |
-| `portify/` | Agent-driven port-injection workflow (see [Portify](#portify-and-benchmark)) |
-| `benchmark/` | Multi-arm self-heal benchmarking (retired from the product in 1.0.0; code retained) |
+| `features/portify/logic/runtime/` | Agent-driven port-injection workflow, now its own feature (see [Portify](#portify-and-benchmark)) |
+| `features/benchmark/logic/runtime/` | Multi-arm self-heal benchmarking, its own feature (retired in 1.0.0, **revived in 1.3.0** as a preview behind `?showBenchmark=true`) |
+| `apps/web-server/src/features/coverage/logic/coverage/` | Verified Coverage Ledger: PRD summarization (`prd-summary.ts`), docs hash (`docs-collection.ts`), grounding index (`grounding.ts`), breadth computation (`ledger.ts`), rigor/strictness (`rigor.ts`), and the shared service both REST and MCP call (`service.ts`). Shared output types live in `shared/coverage/types.ts`. See [Verified Coverage](#verified-coverage). |
 
 ## Run Lifecycle
 
@@ -148,12 +150,12 @@ Multiple runs can be active at once (since 1.2.0). The top-right **Runs** dialog
 
 A `startCommand` declares `ports: [{ name: 'api', env: 'PORT' }]` (env optional). The
 orchestrator allocates a free TCP port per slot per run
-(`apps/web-server/lib/runtime/port-allocator.ts`), injects it as the service's `env`
+(`apps/web-server/src/features/runs/logic/runtime/port-allocator.ts`), injects it as the service's `env`
 var (`PORT`), exposes it to config via the reserved token `${port.api}`, and to the
 Playwright process as `CANARY_PORT_<slot>`.
 
 `${port.<slot>}` resolves in **three places** (the `port` token namespace lives in
-`apps/web-server/lib/runtime/launcher/interpolate.ts`):
+`apps/web-server/src/features/runs/logic/runtime/launcher/interpolate.ts`):
 
 1. the **command** (`--port ${port.api}`),
 2. the **`healthCheck`** URL,
@@ -174,7 +176,7 @@ each other. Starting a second run on an active repo returns
 `repo_collision_requires_choice` (REST 409 / MCP result). The user chooses
 **worktree** (isolate the run in a per-run `git worktree` under `<runDir>/worktrees/`
 and run now) or **queue** (wait until the conflicting run finishes). Different-repo
-runs never collide. See `apps/web-server/lib/runtime/repo-collision.ts` +
+runs never collide. See `apps/web-server/src/features/runs/logic/runtime/repo-collision.ts` +
 `repo-worktree.ts`.
 
 ### Admission and queue
@@ -182,7 +184,7 @@ runs never collide. See `apps/web-server/lib/runtime/repo-collision.ts` +
 Runs beyond a CPU/free-RAM heuristic are parked as `queued` (status `queued`, with
 `manifest.queueReason`) and promoted FIFO on run-end. Optional hard ceiling via env
 `CANARY_MAX_CONCURRENT_RUNS`. The scheduler is
-`apps/web-server/lib/runtime/run-scheduler.ts` (decision logic in `admission.ts`);
+`apps/web-server/src/features/runs/logic/runtime/run-scheduler.ts` (decision logic in `admission.ts`);
 it's wired into the `startRun` factory in `server.ts` and promotes on the RunStore
 `finalized` event.
 
@@ -193,7 +195,7 @@ multi-service app still can't both boot, so they queue. Apps that hardcode a por
 source (ignoring `PORT`/`--port`/config) can't be relocated — that's what
 [Portify](#portify-and-benchmark) fixes. OAuth issuer + redirect URIs are
 pre-registered with the provider for a fixed host:port, so OAuth features (e.g.
-`mpass_oauth`) run one at a time regardless of any rewiring. The `${port}` envset
+`shop_oauth`) run one at a time regardless of any rewiring. The `${port}` envset
 resolver unlocks *different* multi-service features running concurrently (each gets
 distinct ports) and cleaner single multi-service runs — not same-app concurrent
 isolation.
@@ -204,7 +206,7 @@ isolation.
 
 With `healAgent: 'claude'|'codex'|'auto'`, the orchestrator spawns a local agent CLI.
 The agent's **absolute path** is resolved by `resolveAgentBinary`
-(`apps/web-server/lib/runtime/auto-heal.ts`): explicit override
+(`apps/web-server/src/features/runs/logic/runtime/auto-heal.ts`): explicit override
 (`CANARY_LAB_CLAUDE_BIN` / `CANARY_LAB_CODEX_BIN`) → `which` (PATH) → well-known
 locations (`~/.local/bin`, homebrew, `/usr/local/bin`, npm-global, pnpm, nvm
 `node/*/bin`). The resolved path is threaded into `buildAgentSpawnCommand` as
@@ -220,18 +222,23 @@ prompt.
 When `manifest.healMode === 'external'` the orchestrator parks at
 `waiting-for-signal` and an MCP client drives `claim_heal` → `get_heal_context` →
 edit code → `signal_run`. `ExternalHealBroker`
-(`apps/web-server/lib/external-heal-broker.ts`) owns the single-claim lock + 15s
+(`apps/web-server/src/features/runs/logic/heal/external-heal-broker.ts`) owns the single-claim lock + 15s
 heartbeat staleness. Every external command is audited at
 `<runDir>/external-commands.jsonl`.
 
-### Heal-claim policy (desktop-only)
+### Heal-claim policy (block runner PTYs)
 
-Only **Desktop** client kinds (`claude-desktop`, `codex-desktop`) may *own* a heal
-claim. CLI clients (`claude-cli`, `codex-cli`) — and undetected `other` — can
-run/verify but never claim, so a stray CLI session can't silently grab a run and edit
-repo code. It's an **allowlist** (`apps/web-server/lib/heal-claim-policy.ts`,
-`isHealClaimAllowed`), so detection failures (`other`) fail safe. Override via
-`CANARY_LAB_HEAL_CLAIM_CLIENTS` (comma-separated kinds). Enforced at two layers:
+Every **interactive** client kind may *own* a heal claim: `claude`, `codex` (Desktop
+and CLI both collapse to these — we no longer distinguish), and even undetected
+`other` (assumed to be a person at a terminal). The only kinds blocked are the
+runner-spawned PTY agents — `claude-pty`, `codex-pty` — which Canary Lab itself spawns
+(benchmark sabotage, portify, …); letting one claim heal would have it claim its own
+run. It's a **denylist** (`apps/web-server/src/features/runs/logic/heal/heal-claim-policy.ts`,
+`isHealClaimAllowed`), because the dangerous case is the one we fully control: the
+runner tags its spawns `*-pty` deterministically via `CANARY_LAB_MCP_CLIENT_KIND`
+(set in `runAgentProcess`), so we never rely on heuristic detection to block it —
+everything else fails *open* so a person can always heal. Override via
+`CANARY_LAB_HEAL_CLAIM_BLOCKED_CLIENTS` (comma-separated kinds). Enforced at two layers:
 
 1. a hard backstop in `broker.claim()` (covers `claim_heal`, REST `/claim`, the
    reclaim helper → returns `client-kind-not-allowed`), and
@@ -247,11 +254,11 @@ client is *external-origin* and uses External‑client heal **regardless of the 
 `healAgent` setting** — that setting governs only **UI/REST‑triggered** runs. The
 `server.ts` `startRun` closure splits two flags: `externalOrigin`
 (`healAgentReq.kind === 'external'`) disables project auto‑heal and forces
-`externalHeal` mode; `canClaim` (`externalOrigin && claimable !== false`, i.e. a
-Desktop client) is what actually creates the `externalHealSession` + broker claim. So a
-non‑claiming MCP client (CLI / `other`) passes `claimable: false`: the run enters
-external mode with **no** session and **waits** for a Desktop/UI drive — it does *not*
-fall back to a locally‑spawned auto‑heal agent. A CLI restart of a failed run follows
+`externalHeal` mode; `canClaim` (`externalOrigin && claimable !== false`, i.e. an
+interactive client) is what actually creates the `externalHealSession` + broker claim. So a
+non‑claiming MCP client (a runner PTY agent) passes `claimable: false`: the run enters
+external mode with **no** session and **waits** for an interactive/UI drive — it does *not*
+fall back to a locally‑spawned auto‑heal agent. A PTY restart of a failed run follows
 the same path (`restartExternalRun` with `claimable: false`) rather than being refused.
 
 ### Handoff
@@ -267,14 +274,17 @@ a local autoHeal mid-flight); `auto`/`claude`/`codex` require a failed/aborted r
   dynamically rather than assuming a fixed value (default 7421 if unset).
 - **Profiles** pick the tool subset via `?profile=`: `repair` (heal loop, default),
   `verify` (verification configs), `author` (feature/envset/draft/eval authoring),
-  `full` (union). Optional `?client_kind=claude-desktop|codex-cli|...`.
+  `portify` (port-injection workflow), `lifecycle` (everyday end-to-end loop —
+  repair + author + verify, no portify), `full` (lifecycle + portify). Optional
+  `?client_kind=claude|codex|other|...` (the `*-pty` kinds are set by the runner, not passed by clients).
 - Tools live in `apps/web-server/mcp/tools.ts` — thin wrappers over existing REST
   routes/helpers. `start_run`/`write_envset`/etc. reuse handlers via `app.inject()`;
   don't duplicate orchestrator logic. Author-profile tools call
-  `apps/web-server/lib/feature-authoring.ts` directly.
-- Profile membership = the `REPAIR_TOOLS`/`VERIFY_TOOLS`/`AUTHOR_TOOLS` arrays
-  (`tools.ts:240–307`). `FULL_TOOLS` auto-dedupes their union + `FULL_ONLY_TOOLS`
-  (`get_run_actions`, `claim_heal`, `release_heal`). Adding/moving a tool also
+  `apps/web-server/src/features/config/logic/feature-authoring.ts` directly.
+- Profile membership = the `REPAIR_TOOLS`/`VERIFY_TOOLS`/`AUTHOR_TOOLS`/`PORTIFY_TOOLS`
+  arrays (`tools.ts`). `LIFECYCLE_TOOLS` auto-dedupes repair+verify+author union +
+  `FULL_ONLY_TOOLS` (`get_run_actions`, `claim_heal`, `release_heal`); `FULL_TOOLS`
+  is `LIFECYCLE_TOOLS` + `PORTIFY_TOOLS`. Adding/moving a tool also
   requires updating the mirror arrays in `mcp/server.smoke.test.ts` — see the
   [invariants table](#keep-in-sync-invariants) and the `cl_add-mcp-tool` skill.
 - Each MCP session gets its own transport (`mcp/server.ts`) — a singleton would
@@ -300,13 +310,22 @@ a local autoHeal mid-flight); `auto`/`claude`/`codex` require a failed/aborted r
 
 ## Portify and Benchmark
 
-**Portify** (`apps/web-server/lib/runtime/portify/`, ~11 files) is an agent-driven
+**Portify** (`apps/web-server/src/features/portify/logic/runtime/`, ~11 files) is an agent-driven
 workflow that rewrites a feature's services so every network listener reads an
 injected port, proven by a concurrent double-boot — making the feature eligible for
-concurrent runs and benchmark arms. Lifecycle: `start_portify` →
-`get_portify` polling (`editing → verifying → ready-to-save`) →
-`save_portify`/`cancel_portify`, with unbounded `revise_portify` feedback rounds.
-One workflow at a time; `list_portify_status` shows which features have a saved overlay.
+concurrent runs and benchmark arms. Two execution models, split by who initiates
+(see "Internal vs external execution" under Verified Coverage — the same rule):
+the **GUI** spawns a local agent (`startPortify`/`revise`, REST only) that streams
+through `AgentSessionView`; **MCP clients** drive it themselves
+(`start_external_portify` → in-place edits → `submit_external_portify`, the
+re-edit+re-submit loop replacing `revise`) and the GUI shows `ExternalPortifyPanel`.
+Both converge on `get_portify` (`editing → verifying → ready-to-save`) →
+`save_portify`/`cancel_portify`. One workflow **per feature** (a second start on the
+same feature is a 409); different features port-ify concurrently up to a global
+resource cap — `portifyConcurrencyCap()` reuses the run loop's `computeSlotBudget`
+heuristic, with an optional manual ceiling via env `CANARY_MAX_CONCURRENT_PORTIFY`
+(mirrors `CANARY_MAX_CONCURRENT_RUNS`). Over the cap, a start returns 429 (no queue —
+the caller waits/retries). `list_portify_status` shows which features have a saved overlay.
 
 **Ephemeral overlay model** (the source edits never touch the product repo): the
 agent edits source in a throwaway scratch worktree and the verified diff is captured
@@ -321,9 +340,61 @@ patch (plain `git apply`, `--3way` fallback) before boot after a staleness check
 the agent also writes are PERMANENT (Canary Lab reads the slots in `allocateRunPorts`
 before the overlay applies), so only the product-repo source is ephemeral.
 
-**Benchmark** (`apps/web-server/lib/runtime/benchmark/`, ~10 files) ran multi-arm
-self-heal benchmarking (race/sabotage verification). The product surface was retired
-in 1.0.0; the code remains for internal experiments.
+**Benchmark** (`apps/web-server/src/features/benchmark/logic/runtime/`, ~10 files) runs multi-arm
+self-heal benchmarking (race/sabotage verification) — measuring how the repair loop
+performs vs running tests without Canary Lab. The product surface was retired in 1.0.0
+and **revived in 1.3.0** as a preview (groundwork for pluggable harnesses), gated behind
+`?showBenchmark=true`. UI: `BenchmarkWindow`/`BenchmarkPill` (`apps/web/src/features/benchmark/`);
+internal-only (no MCP tools); the sabotage agent streams through `AgentSessionView`.
+
+## Verified Coverage
+
+The Verified Coverage Ledger (`apps/web-server/src/features/coverage/logic/coverage/`) attests two grounded
+facts about a feature's tests, both computed as math over evidence — never an agent's
+opinion:
+
+- **Breadth** — which PRD requirements are covered by a *passing run*. Source docs in
+  `features/<feature>/docs/` are summarized by an agent (`prd-summary.ts`, reusing the
+  evaluation-export spawn pattern; deterministic heading-extraction fallback) into a
+  `_prd-summary.json` sidecar of `Requirement`s. Tests link to requirements via
+  `@requirement <id>` / `@path happy|sad|edge` comments parsed by `ast-extractor.ts`.
+  `grounding.ts` indexes each test's most-recent passing run from `RunSummary.passedNames[]`
+  over run history (name is the durable join key — `passedIds[]` drift with line numbers).
+  `ledger.ts` joins these into per-requirement gap types (`untested` / `unverified` /
+  `path-incomplete` / `verified`) and the grounded coverage % (verified ÷ active total).
+- **Depth (rigor)** — how strict each covering test is. `rigor.ts` classifies every
+  assertion snippet (collected by `ast-extractor.ts`) into a stack-layer tier (log → 1,
+  DB/state → 2, app API/UI → 3, browser-at-real-destination → 4) by structural heuristics
+  (no agent), then scores strictness = highest tier reached by a *verified* test ÷ the
+  agent-proposed ladder ceiling. A verified-but-below-ceiling requirement is the
+  `shallow-verified` gap, returned with a `suggestedStrongerCheck`.
+
+`service.ts` is the single computation layer; `routes/coverage.ts` (REST) and the
+`get_feature_coverage` / `list_feature_docs` MCP tools both call it, so the UI and an
+agent can't diverge. The agent's role is bounded to *generate and map* (summarize docs,
+propose the ladder, resolve `unknown` assertions); canary *grounds and attests*
+(computes the %, the tier, and the evidence).
+
+**Internal vs external execution.** Both PRD summarization and the annotate-pass
+(mapping tests → requirements) have two execution models, split by who *initiates* the
+work — the project-wide rule. **Internal / server-spawned** is the **GUI's REST route**
+(`POST /api/features/:name/{prd-summary/regenerate,coverage/jobs}` → `startCoverageJob`/
+`regeneratePrdSummary`): canary spawns its own `claude`/`codex` CLI
+(`prd-summary.ts` / `annotate-engine.ts`) and streams it through `AgentSessionView`.
+**External / offloaded** is the **entire MCP surface** — there is no server-spawned MCP
+tool: `start_external_summary` → `submit_external_summary` and `start_external_coverage`
+→ `submit_external_coverage` (`jobs/external.ts`) spawn **no** LLM, hand the calling
+client the prompt/context (`buildSummaryAuthoringContext` / `buildCoverageMappingContext`,
+reusing the internal prompts), and canary writes the result through the canonical writers
+(`applyExternalSummary` via the shared `assembleSummary`; `applyExternalCoverageMappings`
+via the tag-writer) and recomputes. Such jobs carry `producer: 'external'`, have no
+`sessionRef`, and render monitor-only (`ExternalAgentCard`) in the Generating pane. Both
+models feed the *same* deterministic ledger recompute, which is producer-agnostic (it
+only reads on-disk tags + run history). The single
+highest-risk invariant is **requirement-id stability across PRD regeneration** —
+`reconcileRequirementIds` (in `prd-summary.ts`) preserves a surviving requirement's id
+(by echoed id or exact title match) and carries dropped ones as `deprecated`, because a
+renumber would silently break every inline `@requirement` annotation.
 
 ## Keep-in-Sync Invariants
 
@@ -333,9 +404,11 @@ procedure.
 
 | Invariant | Files involved | Enforced by | Owning skill |
 | --- | --- | --- | --- |
-| MCP tool ↔ profile membership | `apps/web-server/mcp/tools.ts` (`REPAIR_TOOLS`/`VERIFY_TOOLS`/`AUTHOR_TOOLS`/`FULL_ONLY_TOOLS`) ↔ mirror arrays in `apps/web-server/mcp/server.smoke.test.ts` | `npx vitest run apps/web-server/mcp/server.smoke.test.ts` | `cl_add-mcp-tool` |
+| MCP tool ↔ profile membership | `apps/web-server/mcp/tools.ts` (`REPAIR_TOOLS`/`VERIFY_TOOLS`/`AUTHOR_TOOLS`/`PORTIFY_TOOLS`/`FULL_ONLY_TOOLS`) ↔ mirror arrays in `apps/web-server/mcp/server.smoke.test.ts` | `npx vitest run apps/web-server/mcp/server.smoke.test.ts` | `cl_add-mcp-tool` |
 | Run-loop semantics across agent surfaces | `INSTRUCTIONS_BY_PROFILE` (`apps/web-server/mcp/server.ts`) ↔ result steering (`healWaitNext`, `bootSessionValue` in `mcp/tools.ts`) ↔ all three `agent-integrations/{claude,codex,plugin}/.../SKILL.md` run loops | nothing automated — discipline only | `cl_sync-agent-surfaces` |
 | Boot-session / collision / queue / claim semantics | `start_run` + `wait_for_heal_task` result shapes (`mcp/tools.ts`) ↔ instructions ↔ skills (same five surfaces as above) | partial: tool unit tests | `cl_sync-agent-surfaces` |
-| Heal-claim policy | `apps/web-server/lib/heal-claim-policy.ts` ↔ `broker.claim()` backstop ↔ `start_run`/`POST /api/runs` suppression ↔ skill prose | policy + broker unit tests | `cl_sync-agent-surfaces` |
+| Heal-claim policy | `apps/web-server/src/features/runs/logic/heal/heal-claim-policy.ts` ↔ `broker.claim()` backstop ↔ `start_run`/`POST /api/runs` suppression ↔ skill prose | policy + broker unit tests | `cl_sync-agent-surfaces` |
 | Templates ↔ shipped package | `templates/project/**` ↔ `dist/templates/` copy (`tools/prepare-assets.mjs`) ↔ consumer `canary-lab upgrade` | `npm run smoke:pack` | `cl_add-sample-feature` |
+| Coverage ledger single computation layer | `apps/web-server/src/features/coverage/logic/coverage/service.ts` ↔ `apps/web-server/src/features/coverage/routes/coverage.ts` (REST, server-spawned) ↔ `get_feature_coverage`/`list_feature_docs`/`start_external_summary`/`start_external_coverage` (`mcp/tools.ts`, external-only) — both surfaces call the service, never recompute | route + MCP tests; `server.smoke.test.ts` tool count | `cl_add-mcp-tool` / `cl_sync-agent-surfaces` |
+| Requirement-id stability | `reconcileRequirementIds` (`apps/web-server/src/features/coverage/logic/coverage/prd-summary.ts`) ↔ inline `@requirement` annotations (`ast-extractor.ts`) — regen must preserve surviving ids | `prd-summary.test.ts` before/after fixture | — |
 | Contributor docs single-source | `CLAUDE.md` (commands + rules) ↔ this file (mechanisms) ↔ `docs/PRD.md` (intent) — AGENTS.md is a pointer only | grep audit (see `cl_verify-changes`) | — |

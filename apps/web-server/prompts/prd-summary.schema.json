@@ -1,0 +1,67 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "variantDimension": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string" },
+        "values": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "required": ["name", "values"]
+    },
+    "requirements": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string" },
+          "kind": { "enum": ["functional", "non-functional"] },
+          "title": { "type": "string" },
+          "text": { "type": "string" },
+          "happyPath": { "type": "string" },
+          "unhappyPath": { "type": "string" },
+          "pathTypes": {
+            "type": "array",
+            "items": { "enum": ["happy", "sad", "edge"] }
+          },
+          "variants": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "variantsNA": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "variant": { "type": "string" },
+                "reason": { "type": "string" }
+              },
+              "required": ["variant", "reason"]
+            }
+          },
+          "strictnessLadder": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "tier": { "type": "integer", "enum": [1, 2, 3, 4] },
+                "description": { "type": "string" }
+              },
+              "required": ["tier", "description"]
+            }
+          }
+        },
+        "required": ["title", "text", "pathTypes"]
+      }
+    }
+  },
+  "required": ["requirements"]
+}

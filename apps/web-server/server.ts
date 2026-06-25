@@ -4,58 +4,60 @@ import Fastify, { type FastifyInstance } from 'fastify'
 import websocketPlugin from '@fastify/websocket'
 import fastifyStatic from '@fastify/static'
 import { isActiveRunStatus, isRestartableRunStatus } from '../../shared/run-state'
-import { featuresRoutes } from './routes/features'
-import { featureConfigRoutes } from './routes/feature-config'
-import { verificationRoutes } from './routes/verification'
-import { projectConfigRoutes } from './routes/project-config'
-import { runsRoutes, type ExternalHealAgentRequest } from './routes/runs'
-import { journalRoutes } from './routes/journal'
-import { testsDraftRoutes, type TestsDraftRouteDeps } from './routes/tests-draft'
-import { externalHealRoutes, makeExternalHealAuditLogger } from './routes/external-heal'
-import { ExternalHealBroker } from './lib/external-heal-broker'
+import type { ClientKind } from '../../shared/run-mode'
+import { featuresRoutes } from './src/features/config/routes/features'
+import { coverageRoutes } from './src/features/coverage/routes/coverage'
+import { featureConfigRoutes } from './src/features/config/routes/feature-config'
+import { verificationRoutes } from './src/features/coverage/routes/verification'
+import { projectConfigRoutes } from './src/features/config/routes/project-config'
+import { runsRoutes, type ExternalHealAgentRequest } from './src/features/runs/routes/runs'
+import { evaluationRoutes } from './src/features/evaluation/routes/evaluation'
+import { journalRoutes } from './src/features/runs/routes/journal'
+import { testsDraftRoutes, type TestsDraftRouteDeps } from './src/features/wizard/routes/tests-draft'
+import { externalHealRoutes, makeExternalHealAuditLogger } from './src/features/runs/routes/external-heal'
+import { ExternalHealBroker } from './src/features/runs/logic/heal/external-heal-broker'
 import { registerMcpRoutes } from './mcp/server'
-import { paneStreamRoutes } from './ws/pane-stream'
-import { runsStreamRoutes } from './ws/runs-stream'
-import { draftAgentStreamRoutes } from './ws/draft-agent-stream'
-import { agentSessionStreamRoutes } from './ws/agent-session-stream'
-import { workspaceStreamRoutes } from './ws/workspace-stream'
-import { createRegistry, RunStore, type OrchestratorRegistry, type OrchestratorLike, type StartRunOutcome } from './lib/run-store'
-import { benchmarkRoutes } from './routes/benchmarks'
-import { benchmarkStreamRoutes } from './ws/benchmark-stream'
-import { BenchmarkRunStore } from './lib/runtime/benchmark/store'
-import { createBenchmarkRunner } from './lib/runtime/benchmark/runner'
-import { loadBundledSabotageSkills, sabotageSkillsForFeature } from './lib/runtime/benchmark/skills'
-import { benchmarkDir } from './lib/runtime/benchmark/paths'
-import { portifyRoutes } from './routes/portify'
-import { portifyStreamRoutes } from './ws/portify-stream'
-import { PortifyRunStore } from './lib/runtime/portify/store'
-import { createPortifyRunner } from './lib/runtime/portify/runner'
-import { reclaimOrphanedPortify } from './lib/runtime/portify/reclaim'
-import { portifyDir } from './lib/runtime/portify/paths'
+import { paneStreamRoutes } from './src/features/runs/ws/pane-stream'
+import { runsStreamRoutes } from './src/features/runs/ws/runs-stream'
+import { agentSessionStreamRoutes } from './src/features/agent-sessions/ws/agent-session-stream'
+import { workspaceStreamRoutes } from './src/shared/ws/workspace-stream'
+import { createRegistry, RunStore, type OrchestratorRegistry, type OrchestratorLike, type StartRunOutcome } from './src/features/runs/logic/run-store'
+import { benchmarkRoutes } from './src/features/benchmark/routes/benchmarks'
+import { benchmarkStreamRoutes } from './src/features/benchmark/ws/benchmark-stream'
+import { BenchmarkRunStore } from './src/features/benchmark/logic/runtime/store'
+import { createBenchmarkRunner } from './src/features/benchmark/logic/runtime/runner'
+import { loadBundledSabotageSkills, sabotageSkillsForFeature } from './src/features/benchmark/logic/runtime/skills'
+import { benchmarkDir } from './src/features/benchmark/logic/runtime/paths'
+import { portifyRoutes } from './src/features/portify/routes/portify'
+import { portifyStreamRoutes } from './src/features/portify/ws/portify-stream'
+import { PortifyRunStore } from './src/features/portify/logic/runtime/store'
+import { CoverageJobRunStore } from './src/features/coverage/logic/coverage/jobs/store'
+import { createPortifyRunner } from './src/features/portify/logic/runtime/runner'
+import { reclaimOrphanedPortify } from './src/features/portify/logic/runtime/reclaim'
+import { portifyDir } from './src/features/portify/logic/runtime/paths'
 import {
-  parseAgentSessionRefFile,
-  selectAgentSessionRef,
   loadAgentSession,
-  findClaudeLogBySessionId,
-} from './lib/agent-session-log'
-import { WorkspaceEventBus } from './lib/workspace-events'
-import { PaneBroker } from './lib/pane-broker'
-import { loadFeatures } from './lib/feature-loader'
+  resolveWorkflowAgentRef,
+} from './src/features/agent-sessions/logic/agent-session-log'
+import { WorkspaceEventBus } from './src/shared/workspace-events'
+import { PaneBroker } from './src/features/runs/logic/pane-broker'
+import { loadFeatures } from './src/features/config/logic/feature-loader'
 import {
   spawnPlanAgent as makePlanAgentSpawner,
   spawnSpecAgent as makeSpecAgentSpawner,
-} from './lib/wizard-agent-runner'
-import { WizardAgentRegistry } from './lib/wizard-agent-registry'
-import { generateRunId } from './lib/runtime/run-id'
-import { runDirFor, buildRunPaths } from './lib/runtime/run-paths'
-import { RunOrchestrator, collectPortSlots, buildServiceSpecs, buildQueuedServiceEntries } from './lib/runtime/orchestrator'
-import { allocatePorts } from './lib/runtime/port-allocator'
-import { resolvePortTokens } from './lib/runtime/launcher/interpolate'
-import { RunScheduler, type SchedulerActiveRun } from './lib/runtime/run-scheduler'
-import { estimateRunCost, resolveAdmissionConfig, readSystemResources } from './lib/runtime/admission'
-import { detectRepoCollision, normalizeRepoPaths } from './lib/runtime/repo-collision'
-import { addWorktree, type WorktreeHandle } from './lib/runtime/repo-worktree'
-import { overlayExists as portifyOverlayExists } from './lib/runtime/portify/overlay'
+} from './src/features/wizard/logic/wizard-agent-runner'
+import { WizardAgentRegistry } from './src/features/wizard/logic/wizard-agent-registry'
+import { generateRunId } from './src/features/runs/logic/runtime/run-id'
+import { runDirFor, buildRunPaths } from './src/features/runs/logic/runtime/run-paths'
+import { RunOrchestrator, collectPortSlots, buildServiceSpecs, buildQueuedServiceEntries } from './src/features/runs/logic/runtime/orchestrator'
+import { allocatePorts } from './src/features/runs/logic/runtime/port-allocator'
+import { resolvePortTokens } from './src/features/runs/logic/runtime/launcher/interpolate'
+import { RunScheduler, type SchedulerActiveRun } from './src/features/runs/logic/runtime/run-scheduler'
+import { estimateRunCost, resolveAdmissionConfig, readSystemResources } from './src/features/runs/logic/runtime/admission'
+import { detectRepoCollision, normalizeRepoPaths } from './src/features/runs/logic/runtime/repo-collision'
+import { addWorktree, linkNodeModules, type WorktreeHandle } from './src/features/runs/logic/runtime/repo-worktree'
+import { overlayExists as portifyOverlayExists } from './src/features/portify/logic/runtime/overlay'
+import { revertPortification } from './src/features/portify/logic/runtime/unportify'
 import type { QueueReason } from '../../shared/run-state'
 import type { FeatureConfig } from '../../shared/launcher/types'
 import {
@@ -65,11 +67,11 @@ import {
   resolveAgentBinary,
   type BuildHealCyclePrompt,
   type HealAgent,
-} from './lib/runtime/auto-heal'
-import { loadProjectConfig } from './lib/runtime/launcher/project-config'
-import { collectRepoBranchSnapshots, validateConfiguredRepoBranches } from './lib/git-repo'
-import { RunnerLog } from './lib/runtime/runner-log'
-import { realPtyFactory, type PtyFactory } from './lib/runtime/pty-spawner'
+} from './src/features/runs/logic/runtime/auto-heal'
+import { loadProjectConfig } from './src/features/runs/logic/runtime/launcher/project-config'
+import { collectRepoBranchSnapshots, validateConfiguredRepoBranches } from './src/shared/git-repo'
+import { RunnerLog } from './src/features/runs/logic/runtime/runner-log'
+import { realPtyFactory, type PtyFactory } from './src/features/runs/logic/runtime/pty-spawner'
 import {
   applySet,
   backup,
@@ -77,15 +79,15 @@ import {
   loadConfig,
   resolveVars,
   restore,
-} from './lib/runtime/env-switcher/switch'
-import type { BackupRecord } from './lib/runtime/env-switcher/types'
+} from './src/features/runs/logic/runtime/env-switcher/switch'
+import type { BackupRecord } from './src/features/runs/logic/runtime/env-switcher/types'
 import {
   buildVerificationDiagnostics,
   resolveVerificationRun,
   type ResolveVerificationInput,
-} from './lib/verification'
-import type { HealAgentChoice } from './lib/runtime/launcher/project-config'
-import type { LocalHealAgent } from './lib/runtime/manifest'
+} from './src/features/coverage/logic/verification'
+import type { HealAgentChoice } from './src/features/runs/logic/runtime/launcher/project-config'
+import type { LocalHealAgent } from './src/features/runs/logic/runtime/manifest'
 import type { ExecutionType } from '../../shared/verification'
 
 // Allocate one free TCP port per declared port slot for this run so concurrent
@@ -166,7 +168,6 @@ export interface CreateServerResult {
   // SIGINT/SIGTERM so a crashed/killed run doesn't leave the user's `.env`
   // pointing at production.
   revertAllEnvsets: () => void
-  draftBrokers: Map<string, PaneBroker>
   cancelAllWizardAgents: () => void
 }
 
@@ -191,6 +192,15 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
   // it edited in place, then flips the manifest to 'aborted' so the UI doesn't
   // show a zombie workflow (and a stale worktree can't wedge the next run).
   await reclaimOrphanedPortify(portifyStore, logsDir, () => new Date().toISOString())
+  // Drop zombie history rows whose record dir was wiped out-of-band (logs
+  // cleanup / manual rm) — they list but 404 on open + remove. (Distinct from
+  // reclaim above, which handles live-but-dead workflows that still have a record.)
+  portifyStore.pruneOrphans()
+  // Coverage background jobs (R4): a job left 'running' belongs to a dead
+  // process — flip it to 'aborted' so it doesn't hold the single-flight lock or
+  // show as live forever.
+  const coverageJobStore = new CoverageJobRunStore(logsDir)
+  coverageJobStore.reconcileInterrupted(() => new Date().toISOString())
   const workspaceEvents = new WorkspaceEventBus()
   // One-shot cleanup: a fresh UI server starts with an empty registry, so any
   // persisted 'running'/'healing' row is from a previous server process and is
@@ -218,13 +228,13 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
   // would prevent `canary-lab ui` from exiting cleanly on SIGINT/SIGTERM.
   if (typeof externalHealWatchdog.unref === 'function') externalHealWatchdog.unref()
   const brokers = new Map<string, PaneBroker>()
-  const draftBrokers = new Map<string, PaneBroker>()
   const wizardAgents = new WizardAgentRegistry()
   // Tracks runs with an active envset so we can revert on run-complete or on
   // process termination. Cleared as runs finish.
   const activeEnvsets = new Map<string, BackupRecord[]>()
 
   await app.register(featuresRoutes, { featuresDir })
+  await app.register(coverageRoutes, { featuresDir, logsDir, projectRoot: opts.projectRoot, coverageJobStore, workspaceEvents })
   await app.register(featureConfigRoutes, {
     featuresDir,
     workspaceEvents,
@@ -308,6 +318,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
     featuresDir,
     store: runStore,
     startVerification,
+    workspaceEvents,
   })
   await app.register(projectConfigRoutes, {
     projectRoot: opts.projectRoot,
@@ -325,26 +336,13 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
   await app.register(externalHealRoutes, externalHealDeps)
 
   // Wizard route deps. Production: real claude -p via node-pty + on-demand
-  // PaneBroker per draft so the WebSocket route can stream live agent output.
   const ptyFactory = opts.ptyFactory ?? realPtyFactory()
-  const ensureDraftBroker = (draftId: string): PaneBroker => {
-    let b = draftBrokers.get(draftId)
-    if (!b) {
-      b = new PaneBroker(Number.POSITIVE_INFINITY)
-      draftBrokers.set(draftId, b)
-    }
-    return b
-  }
 
   const productionTestsDraftDeps: TestsDraftRouteDeps = {
     logsDir,
     projectRoot: opts.projectRoot,
     workspaceEvents,
-    newDraftId: () => {
-      const id = generateRunId()
-      ensureDraftBroker(id)
-      return id
-    },
+    newDraftId: () => generateRunId(),
     pickAgent: () => {
       const projectConfig = loadProjectConfig(opts.projectRoot)
       if (projectConfig.healAgent === 'manual') {
@@ -364,14 +362,8 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
       }
       return { ok: true, agent }
     },
-    spawnPlanAgent: async (input) => {
-      const broker = ensureDraftBroker(input.draftId)
-      return makePlanAgentSpawner({ ptyFactory, broker, registry: wizardAgents })(input)
-    },
-    spawnSpecAgent: async (input) => {
-      const broker = ensureDraftBroker(input.draftId)
-      return makeSpecAgentSpawner({ ptyFactory, broker, registry: wizardAgents })(input)
-    },
+    spawnPlanAgent: (input) => makePlanAgentSpawner({ registry: wizardAgents })(input),
+    spawnSpecAgent: (input) => makeSpecAgentSpawner({ registry: wizardAgents })(input),
     cancelGeneration: (draftId: string) => wizardAgents.cancel(draftId),
   }
 
@@ -435,7 +427,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
 
   const restartExternalRun = async (
     runId: string,
-    healAgentReq: { kind: 'external'; sessionId: string; clientKind: 'claude-cli' | 'claude-desktop' | 'codex-cli' | 'codex-desktop' | 'other'; clientVersion?: string; conversationName?: string; claimable?: boolean },
+    healAgentReq: { kind: 'external'; sessionId: string; clientKind: ClientKind; clientVersion?: string; conversationName?: string; claimable?: boolean },
     guidance?: string,
   ): Promise<OrchestratorLike> => {
     // `claimable === false` means an external client *triggered* the restart but
@@ -479,7 +471,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
     }
 
     const nowIso = new Date().toISOString()
-    const externalHealSession: import('./lib/runtime/manifest').ExternalHealSession | undefined = canClaim
+    const externalHealSession: import('./src/features/runs/logic/runtime/manifest').ExternalHealSession | undefined = canClaim
       ? {
           sessionId: healAgentReq.sessionId,
           clientKind: healAgentReq.clientKind,
@@ -632,7 +624,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
 	    startRun: async (
       featureName: string,
       env?: string,
-      healAgentReq?: { kind: 'external'; sessionId: string; clientKind: 'claude-cli' | 'claude-desktop' | 'codex-cli' | 'codex-desktop' | 'other'; clientVersion?: string; conversationName?: string; claimable?: boolean },
+      healAgentReq?: { kind: 'external'; sessionId: string; clientKind: ClientKind; clientVersion?: string; conversationName?: string; claimable?: boolean },
       isolation?: 'worktree' | 'queue',
       executionType: ExecutionType = 'run',
     ): Promise<StartRunOutcome> => {
@@ -705,7 +697,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
       const projectConfig = loadProjectConfig(opts.projectRoot)
       const externalOrigin = healAgentReq?.kind === 'external'
       const canClaim = externalOrigin && healAgentReq?.claimable !== false
-      let externalHealSession: import('./lib/runtime/manifest').ExternalHealSession | undefined
+      let externalHealSession: import('./src/features/runs/logic/runtime/manifest').ExternalHealSession | undefined
       if (canClaim && healAgentReq) {
         const nowIso = new Date().toISOString()
         externalHealSession = {
@@ -781,7 +773,15 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
         const repo = (feature.repos ?? []).find((r) => r.name === repoName)
         if (!repo) continue
         try {
-          worktrees.push(await addWorktree({ repoName, localPath: repo.localPath, worktreesDir: path.join(runDir, 'worktrees') }))
+          const handle = await addWorktree({ repoName, localPath: repo.localPath, worktreesDir: path.join(runDir, 'worktrees') })
+          // Git worktrees skip gitignored deps, so a fresh worktree has no
+          // node_modules — the service boot command (`yarn start`, `npx tsx …`)
+          // can't resolve its bins/deps and dies (e.g. `concurrently: command
+          // not found`, exit 127), which then reads as a health-check timeout.
+          // Symlink the source repo's node_modules in, exactly like the
+          // benchmark and portify worktree paths already do.
+          linkNodeModules(handle)
+          worktrees.push(handle)
           runnerLog.info(`Isolated repo "${repoName}" in a per-run worktree.`)
         } catch (err) {
           // A portified run MUST have a worktree for every repo — without one
@@ -1013,6 +1013,16 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
     },
     restartHeal: restartLocalHealClosure,
   })
+  // Evaluation export (HTML/zip + task lifecycle + live agent-session) — its own
+  // feature router. Reads finished runs through the shared run store; defaults to
+  // the built-in localized-rewrite agent (the `generateEvaluationRewrite` dep is a
+  // test-only seam).
+  await app.register(evaluationRoutes, {
+    featuresDir,
+    projectRoot: opts.projectRoot,
+    store: runStore,
+    workspaceEvents,
+  })
   // Re-export the local-heal restart closure to the external-heal handoff
   // route now that it's defined. The route captures `deps.restartLocalHeal`
   // by reference at request time, so this late-bind is safe.
@@ -1162,28 +1172,11 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
     projectRoot: opts.projectRoot,
     startBenchmark: benchmarkRunner.startBenchmark,
     abortBenchmark: benchmarkRunner.abort,
-    readSabotageLog: (id) => {
-      try {
-        return fs.readFileSync(path.join(benchmarkDir(logsDir, id), 'sabotage-agent.log'), 'utf-8')
-      } catch {
-        return ''
-      }
-    },
     loadAgentSession: (id) => {
-      try {
-        const raw = fs.readFileSync(path.join(benchmarkDir(logsDir, id), 'agent-session.json'), 'utf-8')
-        const parsed = parseAgentSessionRefFile(raw)
-        const ref = parsed ? selectAgentSessionRef(parsed) : null
-        if (!ref) return null
-        const logPath = fs.existsSync(ref.logPath)
-          ? ref.logPath
-          : (ref.agent === 'claude' ? findClaudeLogBySessionId(ref.sessionId) : null)
-        if (!logPath) return null
-        const { events, meta } = loadAgentSession({ ...ref, logPath })
-        return { agent: ref.agent, sessionId: ref.sessionId, model: meta.model, effort: meta.effort, events }
-      } catch {
-        return null
-      }
+      const ref = resolveWorkflowAgentRef(benchmarkDir(logsDir, id))
+      if (!ref) return null
+      const { events, meta } = loadAgentSession(ref)
+      return { agent: ref.agent, sessionId: ref.sessionId, model: meta.model, effort: meta.effort, events }
     },
     listSkills: (feature) => sabotageSkillsForFeature(loadBundledSabotageSkills(), feature),
   })
@@ -1203,37 +1196,28 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
   })
   await app.register(portifyRoutes, {
     store: portifyStore,
+    logsDir,
     startPortify: portifyRunner.startPortify,
     savePortify: portifyRunner.save,
     cancelPortify: portifyRunner.cancel,
     revisePortify: portifyRunner.revise,
     removePortify: portifyRunner.remove,
+    workspaceEvents,
+    projectRoot: opts.projectRoot,
     loadAgentSession: (id) => {
-      try {
-        const raw = fs.readFileSync(path.join(portifyDir(logsDir, id), 'agent-session.json'), 'utf-8')
-        const parsed = parseAgentSessionRefFile(raw)
-        const ref = parsed ? selectAgentSessionRef(parsed) : null
-        if (!ref) return null
-        const logPath = fs.existsSync(ref.logPath)
-          ? ref.logPath
-          : (ref.agent === 'claude' ? findClaudeLogBySessionId(ref.sessionId) : null)
-        if (!logPath) return null
-        const { events, meta } = loadAgentSession({ ...ref, logPath })
-        return { agent: ref.agent, sessionId: ref.sessionId, model: meta.model, effort: meta.effort, events }
-      } catch {
-        return null
-      }
+      const ref = resolveWorkflowAgentRef(portifyDir(logsDir, id))
+      if (!ref) return null
+      const { events, meta } = loadAgentSession(ref)
+      return { agent: ref.agent, sessionId: ref.sessionId, model: meta.model, effort: meta.effort, events }
     },
   })
   await app.register(portifyStreamRoutes, { store: portifyStore })
 
   await app.register(workspaceStreamRoutes, { events: workspaceEvents })
-  await app.register(draftAgentStreamRoutes, {
-    brokerForDraft: (draftId) => draftBrokers.get(draftId) ?? null,
-  })
   await app.register(agentSessionStreamRoutes, {
     store: runStore,
     logsDir,
+    coverageProjectRoot: opts.projectRoot,
   })
 
   // MCP HTTP server — mounts at /mcp so Claude/Codex Desktop/CLI can connect
@@ -1316,13 +1300,23 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
       return { statusCode: resp.statusCode, body }
     },
     // Port-ification workflow — reuse the in-process runner + store (the same
-    // ones behind routes/portify.ts). start/save/cancel throw with a
-    // statusCode the MCP tools surface as errors.
-    startPortify: (feature, agent, maxAttempts) => portifyRunner.startPortify({ feature, agent, maxAttempts }),
+    // ones behind routes/portify.ts). save/cancel throw with a statusCode the
+    // MCP tools surface as errors. The agent-spawning start/revise are GUI-only
+    // (REST); the MCP surface is external-producer only.
+    startExternalPortify: (input) => portifyRunner.startExternalPortify(input),
+    submitExternalPortify: (workflowId) => portifyRunner.submitExternalPortify(workflowId),
     getPortify: (workflowId) => portifyStore.get(workflowId),
     savePortify: (workflowId) => portifyRunner.save(workflowId),
     cancelPortify: (workflowId) => portifyRunner.cancel(workflowId),
-    revisePortify: (workflowId, feedback) => portifyRunner.revise(workflowId, feedback),
+    // Un-portify a saved feature: revert the config (snapshot or legacy strip) +
+    // delete the overlay, then emit so live clients update. Mirrors the REST route.
+    removePortification: (feature) => {
+      const f = loadFeatures(featuresDir).find((x) => x.name === feature)
+      if (!f?.featureDir) throw Object.assign(new Error('feature not found'), { statusCode: 404 })
+      const { reverted } = revertPortification(f.featureDir)
+      workspaceEvents.publish({ type: 'features-changed' })
+      return { name: f.name, portified: portifyOverlayExists(f.featureDir), reverted }
+    },
 	  })
 
   // Serve the built React frontend if it exists. In development the dist dir
@@ -1366,8 +1360,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
 
   const cancelAllWizardAgents = (): void => {
     wizardAgents.cancelAll()
-    for (const broker of draftBrokers.values()) broker.destroy()
   }
 
-  return { app, registry, runStore, brokers, draftBrokers, revertAllEnvsets, cancelAllWizardAgents }
+  return { app, registry, runStore, brokers, revertAllEnvsets, cancelAllWizardAgents }
 }

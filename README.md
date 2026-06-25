@@ -7,7 +7,7 @@
 
 AI agents are good at editing code and bad at proving the edit works. Canary Lab is the independent harness on your machine: it boots your real services **in dev mode** — no Dockerfiles, no image rebuilds, hot reload intact — runs your Playwright tests itself, and keeps the evidence for every run: service logs, traces, screenshots, videos, the env that was applied. Your agent reads the failure, edits the code (in an isolated git worktree if it's sharing the repo), and signals a rerun; Canary Lab continues from the same run until it's green. Because the harness — not the agent — runs the tests and writes the record, a green run means it actually passed.
 
-![Canary Lab repair loop: failing Playwright test, saved details, AI Agent fix, passing rerun](docs/assets/canary-lab-repair-loop.gif)
+![Canary Lab end-to-end: an AI agent scaffolds a Checkout test suite, checks requirement coverage (47%), authors more tests to reach 100%, runs the suite green (12/12), and exports a verified evaluation report](docs/assets/canary-lab-promo.gif)
 
 **Contents**
 
