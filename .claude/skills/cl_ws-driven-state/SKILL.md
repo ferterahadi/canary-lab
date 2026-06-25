@@ -97,17 +97,34 @@ Fix: added `coverage-changed` event type to both `WorkspaceEvent` unions, called
 `coverage-changed`; `FeaturesColumn` includes it in the `listCoverageStates`
 `useEffect` deps.
 
+## Both surfaces, or it's only half-wired
+
+A user-visible mutation almost always has **two** entry points: the GUI's REST route
+*and* an MCP tool (driven from Claude Desktop / Codex / CLI). They are separate code
+paths into the same write — wiring the event on one does **not** cover the other. The
+rule the user holds you to:
+
+> Whether triggered by an MCP tool or by the GUI, the change must show up live — the
+> user must never refresh to see the latest state.
+
+So for every mutation, ask "what are *all* the ways this gets triggered?" and emit the
+event on each. The 2026-06-25 portify regression was exactly this: the REST route
+`POST /api/portify/:id/save` emitted `features-changed`, but the MCP `save_portify` /
+`remove_portification` tools (the Desktop path) did not — so portifying from Desktop
+left the badge stale until a manual refresh.
+
 ## Audit — reviewing an existing route for completeness
 
-When reviewing a route that is NOT yours, check:
+When reviewing a mutation that is NOT yours, check **both** surfaces:
 
 ```
-grep -rn "publishWorkspaceEvent" apps/web-server/src/features/
+grep -rn "publishWorkspaceEvent" apps/web-server/src/features/   # REST routes + job runners
+grep -rn "publishWorkspaceEvent" apps/web-server/mcp/tools.ts    # MCP tools (Desktop/Codex/CLI)
 ```
 
 Anything that writes to disk but has no `publishWorkspaceEvent` call is a candidate
 for a gap. Cross-check against the UI: does this write affect a visible field? If yes,
-it needs an event.
+it needs an event — on *every* path that performs the write, not just the GUI one.
 
 ## Relationship to neighbours
 
