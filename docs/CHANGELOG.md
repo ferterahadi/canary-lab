@@ -6,6 +6,7 @@ Each entry is tagged with the area it touches:
 
 - **[Test Runner]** — running tests, run history, auto-heal, services, logs
 - **[Test Generation]** — Add Test wizard, PRD/plan/spec drafting
+- **[Coverage]** — verified coverage ledger, requirement-to-test traceability
 - **[Export evaluation]** — exported evaluation reports
 - **[Portify]** — port-ification wizard, converting features to dynamic port allocation
 - **[Cleanup]** — log and run history cleanup
@@ -14,9 +15,20 @@ Each entry is tagged with the area it touches:
 
 ---
 
-## 1.4.0 — unreleased
+## 1.4.0 — 2026-06-26
 
-- **[General]** **Healing from the CLI is back.** Heal claiming is no longer limited to Desktop clients — any interactive Claude or Codex session (Desktop *or* CLI) can own a heal loop again. The only sessions still blocked are the ones Canary Lab spawns itself for benchmarks and Portify, which must never claim the very run they're working on.
+- **[Coverage]** **New: the Verified Coverage Ledger.** Coverage answers a simple question — are your tests actually thorough? It maps every requirement in your PRD to the tests that exercise it, shows what's covered and what's missing, and points the agent at the gaps so it can add the test cases you don't have yet. Open it from the new coverage pill on any feature.
+  - The percentage is **grounded, not guessed**: a requirement only counts as covered when every declared path has a mapped test that's backed by a passing run — not because an agent judged it "looks covered."
+  - The mapping is **inline and reviewable**: generating a ledger runs background agents that read your PRD and specs, then write `@covers` tags into the tests themselves. It runs without blocking you, and survives switching away or refreshing.
+  - Coverage breaks down **by variant and path**, so a half-covered requirement shows exactly which case is missing. A strength filter and breakdown ring tell a thoroughly-tested requirement from a barely-touched one, and you can reset coverage or strip the tags to start fresh.
+- **[Portify]** **Un-portify a feature.** Changed your mind? You can now reverse a port-ification — the original config is restored and the overlay is removed, cleanly.
+- **[Portify]** **Steadier port-ification.** The wizard now runs with proper concurrency limits, handles missing or orphaned workflow records gracefully instead of getting stuck, and the picker is simpler — the redundant history list is gone.
+- **[Test Runner]** **Healing from the CLI is back.** Heal claiming is no longer limited to Desktop clients — any interactive Claude or Codex session (Desktop *or* CLI) can own a heal loop again. The only sessions still blocked are the ones Canary Lab spawns itself for benchmarks and Portify, which must never claim the very run they're working on.
+- **[Test Runner]** **Healing when services won't boot.** If an app's services fail to start, the agent now gets the boot failure spelled out with what to try next, instead of being left to infer it from raw logs.
+- **[Test Runner]** **Breaking out of stuck loops.** When the repair loop stops making progress, Canary Lab now detects the stuck cycle and escalates with extra context — including clearer guidance on re-running and on handling `node_modules` — rather than churning on the same failed approach.
+- **[Test Runner]** **Better handoff for agents without the skill installed.** External clients that don't have the Canary Lab skill loaded now get explicit next-step instructions in the heal context, so they can still drive a repair correctly.
+- **[General]** **Live updates everywhere.** Verification-config edits, coverage changes, and feature changes now push to every open browser in real time — no more refreshing to see what another client (or a background job) just did.
+- **[General]** **Clearer external-client panels.** Agent panels for connected clients now share a single card with consistent branding, so it's easier to see which client is doing what.
 
 ---
 
