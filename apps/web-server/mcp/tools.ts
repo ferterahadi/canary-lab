@@ -612,7 +612,10 @@ export function registerCanaryLabTools(
     const feature = loadFeatures(deps.featuresDir).find((candidate) => candidate.name === featureId)
     if (!feature) return errorResult(`feature not found: ${featureId}`)
     try {
-      return asJsonResult(createVerificationConfig(feature, { name, targetUrls, playwrightEnvsetId }))
+      const created = createVerificationConfig(feature, { name, targetUrls, playwrightEnvsetId })
+      // Refresh an open Verify dialog on other clients without a reopen.
+      publishWorkspaceEvent(deps.workspaceEvents, { type: 'verification-config-changed', feature: featureId })
+      return asJsonResult(created)
     } catch (err) {
       return errorResult(err instanceof Error ? err.message : String(err))
     }
@@ -633,6 +636,7 @@ export function registerCanaryLabTools(
     try {
       const config = updateVerificationConfig(feature, configId, { name, targetUrls, playwrightEnvsetId })
       if (!config) return errorResult(`verification config not found: ${configId}`)
+      publishWorkspaceEvent(deps.workspaceEvents, { type: 'verification-config-changed', feature: featureId })
       return asJsonResult(config)
     } catch (err) {
       return errorResult(err instanceof Error ? err.message : String(err))

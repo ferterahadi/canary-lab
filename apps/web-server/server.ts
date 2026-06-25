@@ -318,6 +318,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
     featuresDir,
     store: runStore,
     startVerification,
+    workspaceEvents,
   })
   await app.register(projectConfigRoutes, {
     projectRoot: opts.projectRoot,

@@ -9,6 +9,7 @@ export type WorkspaceEvent =
   | { type: 'tests-changed'; feature: string }
   | { type: 'envsets-changed'; feature: string }
   | { type: 'coverage-changed'; feature: string }
+  | { type: 'verification-config-changed'; feature: string }
   | { type: 'draft-created'; draft: DraftRecord }
   | { type: 'draft-updated'; draft: DraftRecord }
   | { type: 'draft-deleted'; draftId: string }

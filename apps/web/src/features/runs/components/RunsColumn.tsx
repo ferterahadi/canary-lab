@@ -29,6 +29,9 @@ interface Props {
   // column falls back to its own internal open-state.
   verifyOpen?: boolean
   onVerifyOpenChange?: (open: boolean) => void
+  /** Bumped by App on `verification-config-changed` → an open Verify dialog
+   *  refreshes its saved-config list live (MCP/other-tab edits). */
+  verificationRefreshKey?: number
 }
 
 // Inline SVG icons (no new dependency). Sizes are tuned to align with the
@@ -50,7 +53,7 @@ const ICON_PAUSE = (
 // pops over with the same options.
 const COMPACT_THRESHOLD_PX = 360
 
-export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRun, onStartRun, onStartVerification, runDisabled, runDisabledReason, verifyOpen, onVerifyOpenChange }: Props) {
+export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRun, onStartRun, onStartVerification, runDisabled, runDisabledReason, verifyOpen, onVerifyOpenChange, verificationRefreshKey }: Props) {
   const [pendingPause, setPendingPause] = useState<RunIndexEntry | null>(null)
   const [pendingStop, setPendingStop] = useState<RunIndexEntry | null>(null)
   const [pendingDelete, setPendingDelete] = useState<RunIndexEntry | null>(null)
@@ -519,6 +522,7 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
           disabledReason={runDisabledReason}
           onClose={() => setVerifyDialogOpen(false)}
           onStart={onStartVerification}
+          refreshKey={verificationRefreshKey}
         />
       )}
     </div>
