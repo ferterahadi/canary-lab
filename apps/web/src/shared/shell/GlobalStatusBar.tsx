@@ -28,7 +28,7 @@ interface Props {
   features?: Feature[]
   onNavigateToRun?: (feature: string, runId: string) => void
   onOpenCleanup?: () => void
-  /** Open the Verified Coverage Ledger for a feature (from the pill task menu). */
+  /** Open the Requirement Coverage Ledger for a feature (from the pill task menu). */
   onOpenCoverage?: (feature: string) => void
   /** Start port-ification for a feature (opens the wizard's Plan screen). */
   onStartPortify?: (feature: string) => void

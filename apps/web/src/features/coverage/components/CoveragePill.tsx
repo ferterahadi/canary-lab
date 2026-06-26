@@ -35,7 +35,7 @@ export function CoveragePill({
         onClick={() => setOpen(true)}
         aria-expanded={open}
         aria-label="Coverage"
-        title={running.length ? running.map((j) => `${j.feature}: ${j.kind} generating…`).join('\n') : 'Verified Coverage — open a feature ledger or watch background tasks'}
+        title={running.length ? running.map((j) => `${j.feature}: ${j.kind} generating…`).join('\n') : 'Requirement Coverage — open a feature ledger or watch background tasks'}
         className="cl-button flex items-center gap-1.5 px-2.5 py-1"
         style={running.length ? { color: 'var(--accent)', borderColor: 'color-mix(in srgb, var(--accent) 45%, var(--border-default))' } : undefined}
       >
@@ -160,7 +160,7 @@ function CoveragePickerDialog({
           <div className="min-w-0 flex-1">
             <h2 className="text-sm font-semibold">🎯 Open coverage</h2>
             <p className="mt-0.5 text-[11px]" style={{ color: 'var(--text-muted)' }}>
-              Pick a feature to open its Verified Coverage ledger — requirements traced to passing tests. Picks up where you left off.
+              Pick a feature to open its Requirement Coverage ledger — requirements traced to the tests that claim them. Picks up where you left off.
             </p>
           </div>
           <button type="button" aria-label="Close coverage picker" onClick={onClose} className="rounded px-2 py-1 text-xs" style={{ color: 'var(--text-secondary)' }}>
@@ -230,7 +230,7 @@ function CoveragePickerDialog({
         )}
 
         <footer className="border-t px-4 py-2.5 text-[10.5px]" style={{ borderColor: 'var(--border-default)', color: 'var(--text-muted)' }}>
-          Coverage is grounded — a requirement only counts as covered once a test for it passes a real run.
+          A requirement counts as covered when a mapped test claims every path and variant it implies — not when a run passes.
         </footer>
       </section>
     </div>,
