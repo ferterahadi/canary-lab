@@ -44,9 +44,9 @@ Completed runs can export an Evaluation Report from the run detail Overview tab 
 
 ![Evaluation Report sample](assets/assertion-review.png)
 
-## Verified Coverage
+## Requirement Coverage
 
-Open the **Coverage** view (the 🎯 pill in the top bar) for a feature to see which of its PRD requirements are actually covered by *passing* runs — not just which tests exist. Requirements sit on the left, tests on the right, with synced colour highlighting between them and a grounded coverage % in the header. Gap badges (Untested, Unverified, Path-incomplete, Shallow-verified) filter the view; the **rigor** badge on each requirement shows how strict its tests are and suggests a stronger check when one is achievable. The Docs tab holds the source material the requirements are summarized from, with a "Regenerate" action that preserves requirement ids. See [Verified Coverage in FEATURES](FEATURES.md#verified-coverage) for how to annotate tests, and [COMMANDS](COMMANDS.md#verified-coverage-mcp-authorlifecyclefull-profiles) for the matching MCP tools.
+Open the **Coverage** view (the 🎯 pill in the top bar) for a feature to see which of its PRD requirements have tests mapped to them — every requirement × path (× variant) cell, not just a test count. Requirements sit on the left, tests on the right, with synced colour highlighting and a coverage % that canary computes from the tags, not an agent's guess. Gap badges (Untested, Path-incomplete, Variant-incomplete) filter the view; a **strictness** badge grades how deep each covering test checks — app log → internal state → app API → real browser effect — and suggests a stronger assertion when one is achievable. The Docs tab holds the source material the PRD is summarized from, with a "Regenerate" action that preserves requirement ids. See [Requirement Coverage in FEATURES](FEATURES.md#requirement-coverage) for how to annotate tests, and [COMMANDS](COMMANDS.md#requirement-coverage-mcp-authorlifecyclefull-profiles) for the matching MCP tools.
 
 ## Repairing a Failed Run
 

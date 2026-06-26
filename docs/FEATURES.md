@@ -12,9 +12,9 @@ npx canary-lab new feature checkout-discounts --description "Validate checkout d
 
 The UI's Add Test flow can also turn a PRD or uploaded document into a generated plan and Playwright files for review. Generated tests still run through Playwright.
 
-## Verified Coverage
+## Requirement Coverage
 
-A feature can also carry a `docs/` folder of source material (specs, tickets, notes as `*.md`). Canary Lab summarizes that collection into a **PRD** — a list of requirements, each with a stable id — stored back in `docs/` as `_prd-summary.json` (+ a readable `_prd-summary.md`). Regeneration preserves existing requirement ids, so the links below never break as the docs evolve.
+A feature can also carry a `docs/` folder of source material (specs, tickets, notes as `*.md`). Canary Lab summarizes that collection into a **PRD** — a list of requirements, each with a stable id — stored back in `docs/` as `_prd-summary.json` (+ a readable `_prd-summary.md`). Regeneration preserves existing requirement ids, so the tags below never break as the docs evolve.
 
 Tie tests to requirements with Playwright tags **on** the `test()` (greppable, rename-proof):
 
@@ -24,13 +24,13 @@ test('DELETE /todos/:id removes a todo', { tag: ['@req-R3', '@path-happy'] }, as
 
 - `@req-<id>` — repeatable; a test may cover several requirements.
 - `@path-happy|sad|edge` — happy = the expected flow, sad = the negative/error flow, edge = a boundary case.
+- `@variant-<value>` — optional; for a requirement that must hold across a domain axis (channel, tenant, region…).
 - Legacy `// @requirement <id>` / `// @path happy` comments above the test still parse as a fallback.
 
-Open the **Coverage** view (the 🎯 pill in the top bar, per selected feature) for the ledger: requirements on the left, tests on the right, synced colour highlighting between them. A requirement is **Verified** only when a test annotated to it has actually passed in a run (ground truth from run history) — so the headline coverage % is evidence, not opinion. Gaps are flagged as:
+Open the **Coverage** view (the 🎯 pill in the top bar, per selected feature) for the ledger: requirements on the left, tests on the right, synced colour highlighting between them. Coverage is **semantic, not run-gated** — it asks "does a mapped test claim every path (and variant) this requirement implies?", and canary computes the % straight from the tags, so the headline number is math, not an agent's opinion. Gaps:
 
-- **Untested** — a requirement with no annotated test.
-- **Unverified** — a test exists but no passing run backs it (the dangerous one).
-- **Path-incomplete** — the happy path passed but a sad/edge path is missing.
-- **Shallow-verified** — it passes, but the test only reaches a weak assertion tier when a stronger one is achievable.
+- **Untested** — no test mapped to the requirement.
+- **Path-incomplete** — some paths are claimed, but a sad/edge path has no test.
+- **Variant-incomplete** — a variant-bearing requirement is tested on only some of its values (e.g. an "all 4 channels" rule covered by an email-only test).
 
-The **rigor / strictness** score grades each covering test by which layer it actually checks — an app log (tier 1), internal state (tier 2), the app API (tier 3), or a browser confirming the real effect (tier 4) — and surfaces the stronger check to write. The `example_todo_api` sample ships an annotated PRD demonstrating all of this.
+Depth is graded separately: a **strictness** score rates each covering test by the strongest layer its assertions touch — app log (tier 1), internal state (tier 2), app API (tier 3), or a browser confirming the real effect (tier 4) — labels it shallow/basic/solid/strong, and surfaces the stronger check to write. The `example_todo_api` sample ships an annotated PRD demonstrating all of this.

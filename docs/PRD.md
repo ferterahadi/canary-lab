@@ -11,13 +11,13 @@
 An AI agent asked to fix a failing test can report success it hasn't earned —
 declaring a pass, rounding up a count, or quietly editing the test instead of the app.
 Self-reported "it passes now" isn't really evidence. Canary Lab tries to make that
-harder by keeping the outcome grounded in things the agent doesn't author: tests are
-run by the harness rather than the agent, pass counts come from the real result lines,
-a requirement counts as covered only once a tagged test has actually passed in a run,
-and repairs are expected to change the application, not the test. The rough shape is
-**verified coverage → test run → end-to-end verification** — enough that a human can
-check the result independently, and so that the same output can feed back to the agent
-as a signal to fix against rather than just a pass/fail gate.
+harder by keeping the outcome grounded in things the agent doesn't author: the harness
+runs the tests, not the agent; pass counts come from the real result lines; the coverage
+% is computed by canary from the tags, not asserted by the agent; and repairs are
+expected to change the application, not the test. The rough shape is **requirement
+coverage → test run → end-to-end verification** — enough that a human can check the
+result independently, and so the same output can feed back to the agent as a signal to
+fix against rather than just a pass/fail gate.
 
 The repair loop leans on the same evidence. A failing Playwright test usually scatters
 its context — service logs in one terminal, a trace somewhere, a screenshot you have
@@ -41,7 +41,7 @@ run**. Built for teams that use tests as the spec.
 
 ## Capabilities by area
 
-These broadly mirror the CHANGELOG area tags; verified coverage and verification are
+These broadly mirror the CHANGELOG area tags; requirement coverage and verification are
 cross-cutting and not separately tagged in the CHANGELOG.
 
 ### [Test Runner]
@@ -70,16 +70,17 @@ cross-cutting and not separately tagged in the CHANGELOG.
   verified by a concurrent double-boot and saved as an ephemeral overlay (applied
   per-run, reverse-applied at teardown) so the product repo is never modified.
 
-### [Verified coverage]
+### [Requirement coverage]
 
-- Grounded requirements traceability: a feature's `docs/` source is summarized into a
-  PRD (requirements with stable ids); tests are tagged to requirements
-  (`{ tag: ['@req-<id>', '@path-happy'] }`); a requirement is **Verified** only when a
-  tagged test has actually **passed in a run**. Coverage % is evidence
-  (verified ÷ total), never an agent's opinion.
-- Gap typing — `untested` / `unverified` / `path-incomplete` / `shallow-verified` —
-  plus a rigor score grading which layer each test really checks (app log → internal
-  state → app API → browser) and the stronger assertion to write.
+- Requirements traceability: a feature's `docs/` source is summarized into a PRD
+  (requirements with stable ids); tests are tagged to requirements
+  (`{ tag: ['@req-<id>', '@path-happy'] }`). Coverage is **semantic** — canary computes
+  it from the tags (covered ÷ active total), math not opinion — and decoupled from runs:
+  it asks whether a mapped test claims every path (and variant) a requirement implies,
+  not whether a run passed.
+- Gap typing — `covered` / `path-incomplete` / `variant-incomplete` / `untested` — plus a
+  per-test strictness grade for *depth*: which layer each test really checks (app log →
+  internal state → app API → browser) and the stronger assertion to write.
 - One computation layer behind both the UI (the 🎯 Coverage view) and MCP
   (`get_feature_coverage`), so the two can never diverge.
 
@@ -100,8 +101,8 @@ cross-cutting and not separately tagged in the CHANGELOG.
 
 - One published CLI (`init`, `setup`, `ui`, `mcp`, `new feature`, `env`, `upgrade`),
   a local web UI, and an MCP server sharing one port.
-- Profile-scoped MCP surface (`repair`/`verify`/`author`/`full`) so each client kind
-  sees only the tools its workflow needs.
+- Profile-scoped MCP surface (`repair`/`verify`/`author`/`portify`/`lifecycle`/`full`) so
+  each client kind sees only the tools its workflow needs.
 
 ## Non-goals
 
@@ -152,6 +153,6 @@ invariants (see [ARCHITECTURE.md](ARCHITECTURE.md#keep-in-sync-invariants)).
 | **Worktree isolation** | Running a colliding same-repo run in a per-run `git worktree` so heal edits can't corrupt the other run |
 | **Portify** | The workflow that rewrites a feature's services to read injected ports, unlocking concurrent boots |
 | **Draft** | An externally authored set of spec files tracked through staged validation before apply |
-| **Verified coverage** | A requirement counts as covered only when a tagged test has passed in a real run; the ledger maps requirements ↔ tests ↔ passing runs with a grounded coverage % |
+| **Requirement coverage** | Whether a mapped test claims every path (and variant) a requirement implies; the ledger maps requirements ↔ tests with a coverage % canary computes from the tags — semantic, decoupled from run history |
 | **Verification (Verify)** | Running a feature's tests against a deployed environment to confirm it works end-to-end — no local boot, no heal |
 | **Evaluation export** | A rendered archive of a terminal run with client-authored report wording |

@@ -46,7 +46,7 @@ For product intent, see [PRD.md](PRD.md). For user-facing usage, see the
 | `shared/e2e-runner/` | Playwright fixture support (`log-marker-fixture`, summary reporter) |
 | `shared/configs/` | Base Playwright config and env loader |
 | `shared/runtime/` | Shared project-root resolver |
-| `templates/project/` | Scaffolded workspace files, incl. five sample features: `example_todo_api` (happy path), `broken_todo_api` (heal target), `flaky_orders_api`, `tricky_checkout_api`, `acme_cart_checkout` |
+| `templates/project/` | Scaffolded workspace files, incl. four sample features: `example_todo_api` (happy path), `broken_todo_api` (heal target), `flaky_orders_api`, `tricky_checkout_api` |
 | `tools/` | Build/publish utilities: `clean-dist`, `prepare-assets`, `smoke-pack`, `publish-package`, `generate-changelog`, `tag-release`, `fix-node-pty-permissions` |
 
 Key `apps/web-server/src/features/runs/logic/runtime/` modules:
@@ -65,7 +65,7 @@ Key `apps/web-server/src/features/runs/logic/runtime/` modules:
 | `summary-reporter.ts`, `log-enrichment.ts`, `trace-enrichment.ts` | Evidence capture and enrichment |
 | `features/portify/logic/runtime/` | Agent-driven port-injection workflow, now its own feature (see [Portify](#portify-and-benchmark)) |
 | `features/benchmark/logic/runtime/` | Multi-arm self-heal benchmarking, its own feature (retired in 1.0.0, **revived in 1.3.0** as a preview behind `?showBenchmark=true`) |
-| `apps/web-server/src/features/coverage/logic/coverage/` | Verified Coverage Ledger: PRD summarization (`prd-summary.ts`), docs hash (`docs-collection.ts`), grounding index (`grounding.ts`), breadth computation (`ledger.ts`), rigor/strictness (`rigor.ts`), and the shared service both REST and MCP call (`service.ts`). Shared output types live in `shared/coverage/types.ts`. See [Verified Coverage](#verified-coverage). |
+| `apps/web-server/src/features/coverage/logic/coverage/` | Coverage ledger: PRD summarization (`prd-summary.ts`), docs collection (`docs-collection.ts`), breadth computation (`ledger.ts`), strictness grading (`strength.ts`), and the shared service both REST and MCP call (`service.ts`). Shared output types live in `shared/coverage/types.ts`. See [Requirement Coverage](#requirement-coverage). |
 
 ## Run Lifecycle
 
@@ -314,7 +314,7 @@ a local autoHeal mid-flight); `auto`/`claude`/`codex` require a failed/aborted r
 workflow that rewrites a feature's services so every network listener reads an
 injected port, proven by a concurrent double-boot — making the feature eligible for
 concurrent runs and benchmark arms. Two execution models, split by who initiates
-(see "Internal vs external execution" under Verified Coverage — the same rule):
+(see "Internal vs external execution" under Requirement Coverage — the same rule):
 the **GUI** spawns a local agent (`startPortify`/`revise`, REST only) that streams
 through `AgentSessionView`; **MCP clients** drive it themselves
 (`start_external_portify` → in-place edits → `submit_external_portify`, the
@@ -347,33 +347,30 @@ and **revived in 1.3.0** as a preview (groundwork for pluggable harnesses), gate
 `?showBenchmark=true`. UI: `BenchmarkWindow`/`BenchmarkPill` (`apps/web/src/features/benchmark/`);
 internal-only (no MCP tools); the sabotage agent streams through `AgentSessionView`.
 
-## Verified Coverage
+## Requirement Coverage
 
-The Verified Coverage Ledger (`apps/web-server/src/features/coverage/logic/coverage/`) attests two grounded
-facts about a feature's tests, both computed as math over evidence — never an agent's
-opinion:
+The coverage ledger (`apps/web-server/src/features/coverage/logic/coverage/`) computes two
+facts about a feature's tests as math over the tags — never an agent's opinion:
 
-- **Breadth** — which PRD requirements are covered by a *passing run*. Source docs in
-  `features/<feature>/docs/` are summarized by an agent (`prd-summary.ts`, reusing the
-  evaluation-export spawn pattern; deterministic heading-extraction fallback) into a
-  `_prd-summary.json` sidecar of `Requirement`s. Tests link to requirements via
-  `@requirement <id>` / `@path happy|sad|edge` comments parsed by `ast-extractor.ts`.
-  `grounding.ts` indexes each test's most-recent passing run from `RunSummary.passedNames[]`
-  over run history (name is the durable join key — `passedIds[]` drift with line numbers).
-  `ledger.ts` joins these into per-requirement gap types (`untested` / `unverified` /
-  `path-incomplete` / `verified`) and the grounded coverage % (verified ÷ active total).
-- **Depth (rigor)** — how strict each covering test is. `rigor.ts` classifies every
+- **Breadth** — which PRD requirements have a mapped test. Source docs in
+  `features/<feature>/docs/` are summarized into a `_prd-summary.json` sidecar of
+  `Requirement`s (`prd-summary.ts`; agent-proposed, deterministic heading-extraction
+  fallback). Tests link to requirements via `@req-<id>` / `@path-*` / `@variant-*` tags on
+  the `test()` (legacy `@requirement` / `@path` comments parse too), extracted by
+  `ast-extractor.ts`. `ledger.ts` joins these into per-requirement gap types
+  (`covered` / `path-incomplete` / `variant-incomplete` / `untested`) and the coverage %.
+  Coverage is **decoupled from runs**: it asks "does a mapped test claim every path (and
+  variant) this requirement implies?", never "did a run pass?".
+- **Depth (strictness)** — how strict each covering test is. `strength.ts` classifies every
   assertion snippet (collected by `ast-extractor.ts`) into a stack-layer tier (log → 1,
   DB/state → 2, app API/UI → 3, browser-at-real-destination → 4) by structural heuristics
-  (no agent), then scores strictness = highest tier reached by a *verified* test ÷ the
-  agent-proposed ladder ceiling. A verified-but-below-ceiling requirement is the
-  `shallow-verified` gap, returned with a `suggestedStrongerCheck`.
+  (no agent), grades the test `shallow` / `basic` / `solid` / `strong`, and surfaces a
+  `suggestedStrongerCheck`.
 
 `service.ts` is the single computation layer; `routes/coverage.ts` (REST) and the
 `get_feature_coverage` / `list_feature_docs` MCP tools both call it, so the UI and an
 agent can't diverge. The agent's role is bounded to *generate and map* (summarize docs,
-propose the ladder, resolve `unknown` assertions); canary *grounds and attests*
-(computes the %, the tier, and the evidence).
+map tests → requirements); canary *computes* the %, the gaps, and the tiers.
 
 **Internal vs external execution.** Both PRD summarization and the annotate-pass
 (mapping tests → requirements) have two execution models, split by who *initiates* the
@@ -390,7 +387,7 @@ reusing the internal prompts), and canary writes the result through the canonica
 via the tag-writer) and recomputes. Such jobs carry `producer: 'external'`, have no
 `sessionRef`, and render monitor-only (`ExternalAgentCard`) in the Generating pane. Both
 models feed the *same* deterministic ledger recompute, which is producer-agnostic (it
-only reads on-disk tags + run history). The single
+only reads on-disk tags). The single
 highest-risk invariant is **requirement-id stability across PRD regeneration** —
 `reconcileRequirementIds` (in `prd-summary.ts`) preserves a surviving requirement's id
 (by echoed id or exact title match) and carries dropped ones as `deprecated`, because a

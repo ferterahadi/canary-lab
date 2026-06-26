@@ -152,8 +152,6 @@ Canary Lab keeps a narrow boundary. It doesn't invent a test language, an assert
 - Failure slices, summaries, diagnosis journals, and agent handoff prompts.
 - Rerun and restart signals after a fix.
 
-Plain Playwright is enough when one command gives you the whole picture. Reach for Canary Lab when a failure depends on more than a browser assertion — which services were up, which env files were active, what the backend logged, and which artifacts the run produced.
-
 ## When to Use It
 
 Canary Lab fits when you want to:
