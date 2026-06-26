@@ -199,8 +199,9 @@ function parseTopLevelObject(output: string): Record<string, unknown> | null {
   const end = text.lastIndexOf('}')
   if (start < 0 || end <= start) return null
   try {
-    const parsed = JSON.parse(text.slice(start, end + 1))
-    return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : null
+    // The slice is guaranteed to start with `{` and end with `}`, so a successful
+    // parse is always an object (an array/primitive can't begin with `{`).
+    return JSON.parse(text.slice(start, end + 1)) as Record<string, unknown>
   } catch {
     return null
   }
