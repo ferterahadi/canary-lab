@@ -1,4 +1,4 @@
-// Async background jobs for the Verified Coverage workflow (R4). Coverage +
+// Async background jobs for the Requirement Coverage workflow (R4). Coverage +
 // PRD-summary generation are non-blocking, persistent, re-openable jobs modeled
 // on the Portify subsystem (file-backed manifest + index + event emitter). A
 // server-side single-flight guard rejects a second job of the same kind for the

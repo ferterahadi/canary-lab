@@ -29,7 +29,7 @@ interface Props {
   onStartPortify?: (feature: string) => void
   /** Reopens a past/active port-ification workflow (Ports-tab history). */
   onOpenPortify?: (workflowId: string) => void
-  /** Opens the Verified Coverage ledger for a feature (R8 column entry point). */
+  /** Opens the Requirement Coverage ledger for a feature (R8 column entry point). */
   onOpenCoverage?: (feature: string) => void
 }
 

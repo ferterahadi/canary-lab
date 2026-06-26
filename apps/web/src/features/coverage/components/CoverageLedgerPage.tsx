@@ -527,7 +527,7 @@ function CoverageEmptyMain({ railOpen }: { railOpen: boolean }) {
           No coverage yet
         </div>
         <h2 style={{ fontSize: 19, fontWeight: 700, color: 'var(--text-primary)', margin: '0 0 8px' }}>
-          A grounded ledger in one exercise
+          A requirement coverage ledger in one exercise
         </h2>
         <p style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.55 }}>
           {railOpen ? '← Add source docs' : 'Open the Docs rail to add source docs'} in the rail, then <strong style={{ color: 'var(--text-primary)' }}>Generate</strong>.
@@ -538,7 +538,7 @@ function CoverageEmptyMain({ railOpen }: { railOpen: boolean }) {
   )
 }
 
-// Hero gauge: the grounded coverage %, as a donut to the left of the breakdown bar
+// Hero gauge: the requirement coverage %, as a donut to the left of the breakdown bar
 // (the donut is the headline number; the bar is the 3-way composition). Static SVG —
 // headless preview forces reduced-motion. Hue tracks the number: green high, amber
 // mid, rose low — the colour reads the health at a glance.

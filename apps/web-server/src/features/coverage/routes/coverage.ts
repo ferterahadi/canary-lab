@@ -32,7 +32,7 @@ export interface CoverageRouteDeps {
   workspaceEvents?: WorkspaceEventPublisher
 }
 
-// The Verified Coverage Ledger REST surface — the single computation layer the
+// The Requirement Coverage Ledger REST surface — the single computation layer the
 // UI and the MCP tools both consume (dual-surface parity). Pure reads except the
 // regenerate action, which re-summarizes the source docs (preserving ids).
 
