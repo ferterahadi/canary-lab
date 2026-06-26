@@ -1,12 +1,20 @@
 import { describe, it, expect } from 'vitest'
+import fs from 'fs'
+import os from 'os'
+import path from 'path'
 import { computeDocsHash, type DocsCollection } from '../../../coverage/logic/coverage/docs-collection'
 import {
+  assembleSummary,
   buildPrdSummaryPrompt,
   parsePrdSummaryOutput,
   parseVariantDimension,
   reconcileRequirementIds,
   renderPrdSummaryMarkdown,
+  readPrdSummary,
   summarizePrd,
+  writePrdSummary,
+  PRD_SUMMARY_JSON,
+  PRD_SUMMARY_MD,
   type ParsedRequirement,
 } from './prd-summary'
 import type { PrdSummary, Requirement } from '../../../../../../../shared/coverage/types'
@@ -582,5 +590,65 @@ describe('buildPrdSummaryPrompt — previousVariantDimension branches (line 396)
     const prompt = buildPrdSummaryPrompt(col, [], dim)
     expect(prompt).toContain('"name": "channel"')
     expect(prompt).not.toContain('(none — infer the dimension from the documents, if any)')
+  })
+})
+
+describe('assembleSummary', () => {
+  it('stamps the variantDimension onto the summary when one is supplied (dimension truthy branch)', () => {
+    const c = collection([{ relPath: 'spec.md', content: '# Send\nsend it' }])
+    const dim = { name: 'channel', values: ['email', 'sms'] }
+    const out = assembleSummary(
+      c,
+      null,
+      [{ title: 'Send', text: 'send it', pathTypes: ['happy'] }],
+      dim,
+      '2026-06-26T00:00:00.000Z',
+    )
+    expect(out.variantDimension).toEqual(dim)
+    expect(out.requirements[0].id).toBe('R1')
+    expect(out.generatedAt).toBe('2026-06-26T00:00:00.000Z')
+  })
+
+  it('omits variantDimension when neither this pass nor the previous summary declared one', () => {
+    const c = collection([{ relPath: 'spec.md', content: '# Send\nsend it' }])
+    const out = assembleSummary(c, null, [{ title: 'Send', text: 'send it', pathTypes: ['happy'] }], undefined, 'n')
+    expect(out.variantDimension).toBeUndefined()
+  })
+})
+
+describe('writePrdSummary', () => {
+  it('writes the JSON sidecar + markdown into docs/, returning requirements with sourceRanges', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'canary-prd-write-'))
+    try {
+      const s = summary([
+        { id: 'R1', title: 'Login', text: 'user can log in', pathTypes: ['happy'] },
+      ])
+      const written = writePrdSummary(tmpDir, 'auth', s)
+      // Returned summary carries sourceRange offsets back to the caller.
+      expect(written.requirements[0].sourceRange).toBeDefined()
+
+      const docsDir = path.join(tmpDir, 'docs')
+      const json = JSON.parse(fs.readFileSync(path.join(docsDir, PRD_SUMMARY_JSON), 'utf-8')) as PrdSummary
+      expect(json.requirements[0].sourceRange).toBeDefined()
+      const md = fs.readFileSync(path.join(docsDir, PRD_SUMMARY_MD), 'utf-8')
+      expect(md).toContain('# auth — Requirements')
+      expect(md).toContain('R1 — Login')
+
+      // Round-trips through readPrdSummary.
+      expect(readPrdSummary(tmpDir)?.requirements[0].id).toBe('R1')
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('readPrdSummary — missing file', () => {
+  it('returns null when the sidecar does not exist (!existsSync branch)', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'canary-prd-read-'))
+    try {
+      expect(readPrdSummary(tmpDir)).toBeNull()
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true })
+    }
   })
 })
