@@ -463,7 +463,7 @@ export interface JournalEntry {
   body: string
 }
 
-// Verified Coverage Ledger — the computed shapes are shared with the server.
+// Requirement Coverage Ledger — the computed shapes are shared with the server.
 export type {
   CoverageJobIndexEntry,
   CoverageJobKind,

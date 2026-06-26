@@ -92,7 +92,7 @@ export function listFeatures(opts?: ClientOptions): Promise<Feature[]> {
   return request<Feature[]>(`${baseUrl}/api/features`, { method: 'GET' }, fetchImpl)
 }
 
-// ─── Verified Coverage Ledger ────────────────────────────────────────────────
+// ─── Requirement Coverage Ledger ─────────────────────────────────────────────
 
 export function getFeatureCoverage(feature: string, opts?: ClientOptions): Promise<CoverageLedger> {
   const { baseUrl, fetchImpl } = defaultOpts(opts)
@@ -176,7 +176,7 @@ export function regeneratePrdSummary(
   )
 }
 
-// ─── Verified Coverage — async jobs (R4). Summary + Coverage are one exercise:
+// ─── Requirement Coverage — async jobs (R4). Summary + Coverage are one exercise:
 // a `summary` job auto-chains a `coverage` job server-side (R14), so there is no
 // review/accept step. ─────────────────────────────────────────────────────────
 

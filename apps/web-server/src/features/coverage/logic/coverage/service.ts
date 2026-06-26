@@ -41,7 +41,7 @@ import {
   type SummarizeAdapter,
 } from '../../../coverage/logic/coverage/prd-summary'
 
-// The single computation layer for the Verified Coverage Ledger. Both the REST
+// The single computation layer for the Requirement Coverage Ledger. Both the REST
 // route (routes/coverage.ts) and the MCP tools (mcp/tools.ts) call these — so
 // the UI and an agent always see the same numbers (dual-surface parity).
 
@@ -147,7 +147,7 @@ export interface ComputeFeatureCoverageArgs {
   feature: string
 }
 
-/** Assemble the full ledger (breadth + rigor + drift) for one feature. */
+/** Assemble the full ledger (breadth + depth + drift) for one feature. */
 export function computeFeatureCoverage(args: ComputeFeatureCoverageArgs): CoverageLedger {
   const featureDir = resolveFeatureDir(args.featuresDir, args.feature)
   const summary = readPrdSummary(featureDir)
