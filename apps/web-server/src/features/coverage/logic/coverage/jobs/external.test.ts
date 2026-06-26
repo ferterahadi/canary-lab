@@ -369,6 +369,37 @@ describe('submitExternalSummary', () => {
     expect(byTitle.get('Delete todo')).toBe('R2')
   })
 
+  it('includes sessionUrl in the manifest when provided to startExternalSummary (line 198 true branch)', () => {
+    writeFeature('checkout')
+    const store = new CoverageJobRunStore(logsDir)
+    const res = startExternalSummary(
+      { featuresDir, logsDir, feature: 'checkout', sessionId: 's1', sessionUrl: 'https://claude.ai/chat/xyz' },
+      { store },
+    )
+    expect(res.kind).toBe('started')
+    if (res.kind !== 'started') return
+    expect(res.manifest.externalSessionUrl).toBe('https://claude.ai/chat/xyz')
+  })
+
+  it('passes variantDimension through to applyExternalSummary (line 237 true branch)', () => {
+    writeFeature('checkout')
+    const store = new CoverageJobRunStore(logsDir)
+    const started = startExternalSummary({ featuresDir, logsDir, feature: 'checkout', sessionId: 's1' }, { store })
+    if (started.kind !== 'started') throw new Error('expected started')
+    const { result } = submitExternalSummary(
+      {
+        featuresDir,
+        jobId: started.manifest.jobId,
+        requirements: [
+          { title: 'Send msg', text: 'send a message', pathTypes: ['happy'], variants: ['email', 'sms'] },
+        ],
+        variantDimension: { name: 'channel', values: ['email', 'sms'] },
+      },
+      { store },
+    )
+    expect(result.summary.variantDimension).toEqual({ name: 'channel', values: ['email', 'sms'] })
+  })
+
   it('rejects a non-external (internal) summary job', () => {
     const store = new CoverageJobRunStore(logsDir)
     store.save({ jobId: 'cj-internal', feature: 'checkout', kind: 'summary', status: 'running', startedAt: new Date().toISOString(), log: '' })

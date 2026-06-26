@@ -3,7 +3,7 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import type { RunDetail } from '../run-store'
-import { buildExternalFailureDetail, buildExternalHealContext, buildExternalRunSnapshot, normalizeRunCounts, slimRepeatHealContext, writeHealSignal } from './external-heal-surface'
+import { buildExternalFailureDetail, buildExternalHealContext, buildExternalRunSnapshot, buildExternalRunSnapshotSlim, normalizeRunCounts, slimRepeatHealContext, writeHealSignal } from './external-heal-surface'
 import { buildRunPaths, runDirFor } from '../runtime/run-paths'
 
 let tmpDir: string
@@ -710,5 +710,68 @@ describe('writeHealSignal', () => {
     expect(fs.readFileSync(paths.restartSignal, 'utf-8')).toBe(JSON.stringify({ reason: 'restart' }))
     expect(fs.readFileSync(paths.rerunSignal, 'utf-8')).toBe(JSON.stringify({ reason: 'rerun' }))
     expect(fs.readFileSync(paths.healSignal, 'utf-8')).toBe(JSON.stringify({ reason: 'heal' }))
+  })
+})
+
+describe('buildExternalRunSnapshotSlim — null healIndex/journal branches (lines 252-253)', () => {
+  it('returns null healIndex and null journal when heal-index and journal files are absent', () => {
+    // healIndexMarkdown = null (no file) → healIndex: null
+    // journalMarkdown = null (no file) → journal: null
+    const runId = 'run-slim'
+    const runDir = runDirFor(logsDir, runId)
+    const paths = buildRunPaths(runDir)
+    fs.mkdirSync(runDir, { recursive: true })
+    fs.writeFileSync(paths.manifestPath, JSON.stringify(detailFor(runId).manifest))
+    // Do NOT write healIndexPath or diagnosisJournalPath → both markdown fields are null
+
+    const slim = buildExternalRunSnapshotSlim({ detail: detailFor(runId), logsDir, projectRoot: tmpDir })
+    expect(slim.healIndex).toBeNull()
+    expect(slim.journal).toBeNull()
+  })
+})
+
+describe('buildExternalFailureDetail — pointer branches (line 348)', () => {
+  it('sets errorTextPath (not errorText) when error.txt exceeds the inline threshold', () => {
+    // inlineOrPointer returns { path } when file > FAILURE_DETAIL_INLINE_MAX_BYTES (8KB).
+    const runId = 'run-1'
+    const paths = buildRunPaths(runDirFor(logsDir, runId))
+    const failedSlug = 'checkout fails'
+    const errorDir = path.join(paths.failedDir, failedSlug)
+    fs.mkdirSync(errorDir, { recursive: true })
+    // Write error.txt > 8KB to trigger the pointer branch.
+    fs.writeFileSync(path.join(errorDir, 'error.txt'), 'x'.repeat(9 * 1024))
+
+    const detail = buildExternalFailureDetail({
+      detail: detailFor(runId),
+      logsDir,
+      failureId: failedSlug,
+    })
+
+    expect(detail).not.toBeNull()
+    expect(detail).not.toHaveProperty('errorText')
+    expect(detail).toHaveProperty('errorTextPath')
+  })
+
+  it('sets traceSummaryPath (not traceSummaryMarkdown) when failure-summary.md exceeds the inline threshold', () => {
+    // inlineOrPointer returns { path } when failure-summary.md > 8KB.
+    const runId = 'run-1'
+    const paths = buildRunPaths(runDirFor(logsDir, runId))
+    const failedSlug = 'checkout fails'
+    const errorDir = path.join(paths.failedDir, failedSlug)
+    const traceDir = path.join(errorDir, 'trace-extract')
+    fs.mkdirSync(traceDir, { recursive: true })
+    // Write failure-summary.md > 8KB so inlineOrPointer returns { path }.
+    fs.writeFileSync(path.join(traceDir, 'failure-summary.md'), '# Summary\n' + 'x'.repeat(9 * 1024))
+    fs.writeFileSync(path.join(errorDir, 'error.txt'), 'err\n')
+
+    const detail = buildExternalFailureDetail({
+      detail: detailFor(runId),
+      logsDir,
+      failureId: failedSlug,
+    })
+
+    expect(detail).not.toBeNull()
+    expect(detail).not.toHaveProperty('traceSummaryMarkdown')
+    expect(detail).toHaveProperty('traceSummaryPath')
   })
 })

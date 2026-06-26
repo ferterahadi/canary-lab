@@ -14,7 +14,7 @@ vi.mock('../../../config/logic/ast-extractor', async (importOriginal) => {
   }
 })
 
-import { computeFeatureCoverage, runCoverageEngine as runCoverageEngineReal, regeneratePrdSummary as regeneratePrdSummaryReal, clearPrdSummary, buildCoverageMappingContext, applyExternalCoverageMappings } from './service'
+import { computeFeatureCoverage, runCoverageEngine as runCoverageEngineReal, regeneratePrdSummary as regeneratePrdSummaryReal, clearPrdSummary, buildCoverageMappingContext, applyExternalCoverageMappings, applyExternalSummary } from './service'
 import { extractTestsFromSource } from '../../../config/logic/ast-extractor'
 import { fakeSummarize, fakePropose } from './__fixtures__/fake-coverage-agents'
 
@@ -185,6 +185,18 @@ describe('applyExternalCoverageMappings — null summary and edge cases', () => 
     expect(result.applied).toEqual([])
   })
 
+  it('skips a mapping with no file and an unknown testName (line 422 !file continue branch)', async () => {
+    writeFeature('checkout')
+    await regeneratePrdSummary({ featuresDir, feature: 'checkout', now: '2026-01-01T00:00:00Z' })
+    // m.file absent and testName not in fileByTestName → !file → skip
+    const result = applyExternalCoverageMappings({
+      featuresDir, logsDir, feature: 'checkout',
+      mappings: [{ testName: 'no-such-test-xyz', requirements: ['R1'] }],
+      now: '2026-01-01T00:00:00Z',
+    })
+    expect(result.applied).toEqual([])
+  })
+
   it('skips a mapping where requirements is undefined (m.requirements ?? [] null branch)', () => {
     // m.requirements is undefined → (m.requirements ?? []).filter(...) → [] → skip
     writeFeature('checkout')
@@ -204,6 +216,31 @@ describe('applyExternalCoverageMappings — null summary and edge cases', () => 
       now: '2026-01-01T00:00:00Z',
     })
     expect(result.applied).toEqual([])
+  })
+
+  it('normalizes variants when a mapping carries a variant claim (lines 422-423 map/filter bodies)', async () => {
+    // m.variants is non-empty → the .map() and .filter() callbacks in variantsFiltered are executed.
+    // We seed the summary with a variantDimension so knownVariants is non-empty.
+    const dir = writeFeature('checkout')
+    // Write a PRD summary with R1 + variantDimension so the variants filter has something to allow.
+    const summaryPath = path.join(dir, 'docs', '_prd-summary.json')
+    fs.writeFileSync(summaryPath, JSON.stringify({
+      requirements: [{ id: 'R1', title: 'Create', text: 'user can create', pathTypes: ['happy'], deprecated: false }],
+      variantDimension: { name: 'channel', values: ['email', 'sms'] },
+      docsHash: 'h', sourceDocs: [], generatedAt: '2026-01-01T00:00:00Z',
+    }))
+    const result = applyExternalCoverageMappings({
+      featuresDir, logsDir, feature: 'checkout',
+      mappings: [{
+        testName: 'shared',
+        requirements: ['R1'],
+        file: path.join('e2e', 'a.spec.ts'),
+        variants: ['EMAIL', 'fax'], // 'EMAIL' normalizes to 'email' (in vocab); 'fax' dropped
+      }],
+      now: '2026-01-01T00:00:00Z',
+    })
+    // The .map() body was exercised (trim+lowercase) and .filter() body (knownVariants.has)
+    expect(result.feature).toBe('checkout')
   })
 
   it('falls back to fileByTestName when m.file is absent but testName is known', async () => {
@@ -273,5 +310,22 @@ describe('collectTests — duplicate name merge (service.ts unionList)', () => {
     const sharedTest = ledger.tests.find((t) => t.name === 'shared')
     expect(sharedTest?.requirements).toContain('R1')
     expect(sharedTest?.requirements).toContain('R2')
+  })
+})
+
+describe('applyExternalSummary — !found.featureDir branch (service.ts line 515)', () => {
+  it('throws FeatureNotFoundError when feature exists but has empty featureDir', () => {
+    // Write a feature config where featureDir is '' (empty string, falsy).
+    // loadFeatures will include it (name is a valid string), but found.featureDir = ''
+    // → `!found.featureDir` is true → throws FeatureNotFoundError (line 515 second branch).
+    const emptyFeatDir = path.join(featuresDir, 'empty_featdir')
+    fs.mkdirSync(emptyFeatDir, { recursive: true })
+    fs.writeFileSync(
+      path.join(emptyFeatDir, 'feature.config.cjs'),
+      `const config = { name: 'empty_featdir', description: 'd', envs: ['local'], repos: [], featureDir: '' }\nmodule.exports = { config }\n`,
+    )
+    expect(() =>
+      applyExternalSummary({ featuresDir, feature: 'empty_featdir', requirements: [] })
+    ).toThrow(/empty_featdir/)
   })
 })

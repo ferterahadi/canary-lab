@@ -224,4 +224,14 @@ describe('evaluation-export-store', () => {
     expect(evalTaskStatusOf(makeRecord({ status: 'completed' }))).toBe('completed')
     expect(evalTaskStatusOf(makeRecord({ status: 'failed' }))).toBe('failed')
   })
+
+  it('idOfEntry falls back to taskId for legacy index rows that lack an id field', () => {
+    createEvaluationExportTask(tmpDir, makeRecord())
+    const indexPath = path.join(tmpDir, 'evaluation-exports', 'index.json')
+    const entries = JSON.parse(fs.readFileSync(indexPath, 'utf-8'))
+    const legacy = entries.map(({ id: _id, ...rest }: Record<string, unknown>) => rest)
+    fs.writeFileSync(indexPath, JSON.stringify(legacy))
+    expect(deleteEvaluationExportTask(tmpDir, ID)).toBe(true)
+    expect(listEvaluationExportTasks(tmpDir)).toHaveLength(0)
+  })
 })

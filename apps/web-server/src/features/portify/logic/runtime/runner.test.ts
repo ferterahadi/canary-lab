@@ -8,7 +8,7 @@ import { runGit } from '../../../../shared/git-repo'
 import { loadFeatures } from '../../../config/logic/feature-loader'
 import { PortifyRunStore } from './store'
 import { PortifyOrchestrator } from './orchestrator'
-import { createPortifyRunner, safeKey } from './runner'
+import { createPortifyRunner, portifyConcurrencyCap, safeKey } from './runner'
 import { runPortifyAgent } from './agent'
 import { overlayExists, readOverlay, overlayDir, writeOverlay } from './overlay'
 import type { PortifyManifest } from './types'
@@ -522,6 +522,30 @@ function readyManifest(over: Partial<PortifyManifest> = {}): PortifyManifest {
   }
 }
 
+describe('portifyConcurrencyCap', () => {
+  it('returns the parsed env var when CANARY_MAX_CONCURRENT_PORTIFY is a positive integer', () => {
+    expect(portifyConcurrencyCap({ CANARY_MAX_CONCURRENT_PORTIFY: '3' })).toBe(3)
+  })
+
+  it('falls back to computeSlotBudget when env var is absent', () => {
+    const cap = portifyConcurrencyCap({})
+    expect(typeof cap).toBe('number')
+    expect(cap).toBeGreaterThan(0)
+  })
+
+  it('falls back to computeSlotBudget when env var is whitespace', () => {
+    const cap = portifyConcurrencyCap({ CANARY_MAX_CONCURRENT_PORTIFY: '   ' })
+    expect(typeof cap).toBe('number')
+    expect(cap).toBeGreaterThan(0)
+  })
+
+  it('falls back to computeSlotBudget when env var is not a finite positive number', () => {
+    expect(portifyConcurrencyCap({ CANARY_MAX_CONCURRENT_PORTIFY: 'abc' })).toBeGreaterThan(0)
+    expect(portifyConcurrencyCap({ CANARY_MAX_CONCURRENT_PORTIFY: '0' })).toBeGreaterThan(0)
+    expect(portifyConcurrencyCap({ CANARY_MAX_CONCURRENT_PORTIFY: '-1' })).toBeGreaterThan(0)
+  })
+})
+
 describe('createPortifyRunner (branch coverage)', () => {
   it('safeKey sanitizes and falls back to "root"', () => {
     expect(safeKey('A b!')).toBe('A-b')
@@ -845,15 +869,23 @@ describe('createPortifyRunner (branch coverage)', () => {
     })
 
     it('allows DIFFERENT features to port-ify concurrently (lock is per-feature)', async () => {
-      const { featuresDir, logsDir } = await twoFeatureFixture()
-      const { store, runner } = makeRunner(featuresDir, logsDir)
-      const a = await runner.startExternalPortify({ feature: 'featA', clientKind: 'claude', sessionId: 'a' })
-      // featB must NOT bounce on featA's workflow — different feature, same machine.
-      const b = await runner.startExternalPortify({ feature: 'featB', clientKind: 'claude', sessionId: 'b' })
-      expect(await waitForStatus(store, a.workflowId, ['editing'])).toBe('editing')
-      expect(await waitForStatus(store, b.workflowId, ['editing'])).toBe('editing')
-      await runner.cancel(a.workflowId)
-      await runner.cancel(b.workflowId)
+      // Force cap ≥ 2 so low-core CI machines don't reject the second feature.
+      const prev = process.env.CANARY_MAX_CONCURRENT_PORTIFY
+      process.env.CANARY_MAX_CONCURRENT_PORTIFY = '4'
+      try {
+        const { featuresDir, logsDir } = await twoFeatureFixture()
+        const { store, runner } = makeRunner(featuresDir, logsDir)
+        const a = await runner.startExternalPortify({ feature: 'featA', clientKind: 'claude', sessionId: 'a' })
+        // featB must NOT bounce on featA's workflow — different feature, same machine.
+        const b = await runner.startExternalPortify({ feature: 'featB', clientKind: 'claude', sessionId: 'b' })
+        expect(await waitForStatus(store, a.workflowId, ['editing'])).toBe('editing')
+        expect(await waitForStatus(store, b.workflowId, ['editing'])).toBe('editing')
+        await runner.cancel(a.workflowId)
+        await runner.cancel(b.workflowId)
+      } finally {
+        if (prev === undefined) delete process.env.CANARY_MAX_CONCURRENT_PORTIFY
+        else process.env.CANARY_MAX_CONCURRENT_PORTIFY = prev
+      }
     })
 
     it('returns 429 once the concurrency cap is reached', async () => {

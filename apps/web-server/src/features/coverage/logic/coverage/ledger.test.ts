@@ -247,6 +247,55 @@ describe('computeCoverageLedger — variant axis', () => {
     expect(ledger.requirements[0].gapType).toBe('covered') // happy path claimed; no applicable variant cells
   })
 
+  it('variantsNA entry without a variant field is silently skipped (null-guard branch)', () => {
+    // Exercises the `if (na && na.variant)` false path when na.variant is absent.
+    const requirements = [req('R6', ['happy'], {
+      variants: ['email'],
+      variantsNA: [{ variant: '', reason: 'empty' } as any],
+    })]
+    const tests: CoverageTestInput[] = [{ name: 't', requirements: ['R6'], pathTypes: ['happy'], variants: ['email'] }]
+    const ledger = computeCoverageLedger({ feature: 'f', requirements, tests })
+    expect(ledger.requirements[0].gapType).toBe('covered')
+  })
+
+  it('variantsNA entry with no reason falls back to "not applicable" (reason ?? "" then || fallback)', () => {
+    // Exercises the `na.reason ?? ''` path (line 107) when reason is absent.
+    // The stored '' then hits `|| 'not applicable'` at line 125, so the cell reason
+    // is 'not applicable' — the intermediate '' is not observable.
+    const requirements = [req('R6', ['happy'], {
+      variants: ['email', 'sms'],
+      variantsNA: [{ variant: 'sms' } as any], // no reason field
+    })]
+    const tests: CoverageTestInput[] = [{ name: 't', requirements: ['R6'], pathTypes: ['happy'], variants: ['email'] }]
+    const ledger = computeCoverageLedger({ feature: 'f', requirements, tests })
+    const na = ledger.requirements[0].variantCoverage!.find((c) => c.variant === 'sms')
+    expect(na?.applicable).toBe(false)
+    expect(na?.reason).toBe('not applicable')
+  })
+
+  it('N/A reason="" falls back to "not applicable" in the cell (|| "not applicable" branch)', () => {
+    // Exercises `naByVariant.get(variant) || 'not applicable'` when stored reason is ''.
+    const requirements = [req('R6', ['happy'], {
+      variants: ['email', 'sms'],
+      variantsNA: [{ variant: 'sms', reason: '' }],
+    })]
+    const tests: CoverageTestInput[] = [{ name: 't', requirements: ['R6'], pathTypes: ['happy'], variants: ['email'] }]
+    const ledger = computeCoverageLedger({ feature: 'f', requirements, tests })
+    const na = ledger.requirements[0].variantCoverage!.find((c) => c.variant === 'sms')
+    expect(na?.reason).toBe('not applicable')
+  })
+
+  it('all variants N/A but path incomplete → path-incomplete (fallback path model false branch)', () => {
+    // Exercises the `gapType = ... ? 'covered' : 'path-incomplete'` false branch.
+    const requirements = [req('R6', ['happy', 'sad'], {
+      variants: ['email'],
+      variantsNA: [{ variant: 'email', reason: 'x' }],
+    })]
+    const tests: CoverageTestInput[] = [{ name: 't', requirements: ['R6'], pathTypes: ['happy'] }] // sad unclaimed
+    const ledger = computeCoverageLedger({ feature: 'f', requirements, tests })
+    expect(ledger.requirements[0].gapType).toBe('path-incomplete')
+  })
+
   it('a requirement with NO variants is unchanged (2-axis path model)', () => {
     const requirements = [req('R1', ['happy', 'sad'])] // no variants
     const tests: CoverageTestInput[] = [

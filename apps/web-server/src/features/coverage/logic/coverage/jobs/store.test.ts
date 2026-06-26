@@ -154,4 +154,16 @@ describe('CoverageJobRunStore', () => {
     expect(statusOf(makeManifest('j1', { status: 'running' }))).toBe('running')
     expect(statusOf(makeManifest('j1', { status: 'done', endedAt: 'e' }))).toBe('done')
   })
+
+  it('idOfEntry falls back to jobId for legacy index rows that lack an id field', () => {
+    // Write a legacy-format index entry (pre-`id` shape: only jobId, no id field).
+    store.save(makeManifest('j1'))
+    const indexPath = coverageJobsIndexPath(tmpDir)
+    const entries = JSON.parse(fs.readFileSync(indexPath, 'utf-8'))
+    const legacy = entries.map(({ id: _id, ...rest }: Record<string, unknown>) => rest)
+    fs.writeFileSync(indexPath, JSON.stringify(legacy))
+    // remove() must still find and drop the entry via the jobId fallback.
+    store.remove('j1')
+    expect(store.list()).toHaveLength(0)
+  })
 })

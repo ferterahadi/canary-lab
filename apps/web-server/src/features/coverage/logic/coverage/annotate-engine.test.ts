@@ -202,6 +202,14 @@ describe('parseAnnotateOutput — variants (D1)', () => {
     )
     expect(out![0].variants).toBeUndefined()
   })
+
+  it('skips non-string items in the variants array (typeof !== string continue branch)', () => {
+    const out = parseAnnotateOutput(
+      JSON.stringify({ mappings: [{ testName: 't', requirements: ['R1'], pathTypes: ['happy'], variants: [null, 42, 'email'] }] }),
+      KNOWN, KNOWN_VARIANTS,
+    )
+    expect(out![0].variants).toEqual(['email'])
+  })
 })
 
 describe('buildAnnotatePrompt', () => {
@@ -214,6 +222,31 @@ describe('buildAnnotatePrompt', () => {
   it('tells the agent NOT to emit variants when there is no dimension', () => {
     const prompt = buildAnnotatePrompt(REQS, [{ name: 't', file: 'e2e/x.spec.ts' }], '/repo')
     expect(prompt).toContain('no variant dimension')
+  })
+
+  it('omits variants field from req JSON when requirement has no variants (branch 178 falsy)', () => {
+    const reqs: Requirement[] = [{ id: 'R1', title: 'T', text: 'text', pathTypes: ['happy'] }]
+    const prompt = buildAnnotatePrompt(reqs, [{ name: 't', file: 'e2e/x.spec.ts' }], '/repo')
+    // The injected requirements JSON should not contain a "variants" key.
+    // (The template output example does contain "variants" so we scope to the req block.)
+    const reqsBlock = prompt.slice(prompt.indexOf('"id": "R1"'), prompt.indexOf('"id": "R1"') + 200)
+    expect(reqsBlock).not.toContain('"variants"')
+  })
+
+  it('omits variants field from req JSON when variants array is empty (branch 178 empty array)', () => {
+    const reqs: Requirement[] = [{ id: 'R1', title: 'T', text: 'text', pathTypes: ['happy'], variants: [] }]
+    const prompt = buildAnnotatePrompt(reqs, [{ name: 't', file: 'e2e/x.spec.ts' }], '/repo')
+    const reqsBlock = prompt.slice(prompt.indexOf('"id": "R1"'), prompt.indexOf('"id": "R1"') + 200)
+    expect(reqsBlock).not.toContain('"variants"')
+  })
+
+  it('includes variants field in req JSON when requirement has non-empty variants (branch 178 true)', () => {
+    // r.variants && r.variants.length → TRUE → includes { variants: r.variants } in the JSON
+    const reqs: Requirement[] = [{ id: 'R1', title: 'T', text: 'text', pathTypes: ['happy'], variants: ['email', 'sms'] }]
+    const prompt = buildAnnotatePrompt(reqs, [{ name: 't', file: 'e2e/x.spec.ts' }], '/repo', CHANNEL)
+    const reqsBlock = prompt.slice(prompt.indexOf('"id": "R1"'), prompt.indexOf('"id": "R1"') + 300)
+    expect(reqsBlock).toContain('"variants"')
+    expect(reqsBlock).toContain('"email"')
   })
 
   it('lists test names + file paths to read (no inlined body) + active requirements', () => {
