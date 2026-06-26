@@ -1,12 +1,15 @@
-// Verified Coverage Ledger — shared data model.
+// Requirement Coverage Ledger — shared data model.
 //
-// Two grounded dimensions about a feature's tests:
-//   • breadth — which PRD requirements are covered by a passing run (coverage %)
+// Two annotation-based dimensions about a feature's tests (decoupled from test
+// RUNS — see GapType below):
+//   • breadth — whether a mapped test CLAIMS every (path × variant) cell a PRD
+//               requirement implies (coverage %); never "did a run pass?"
 //   • depth   — how strict each covering test actually is (strictness score)
 //
 // These types are consumed by the web-server (computation + MCP) and the web UI,
 // so they live in `shared/`. The headline numbers are always evidence-based math
-// computed by canary — never an agent's opinion (see docs/PRD.md).
+// computed by canary from the tags/annotations — never an agent's opinion (see
+// docs/PRD.md).
 
 /** Path types a requirement implies / a test exercises. */
 export type PathType = 'happy' | 'sad' | 'edge'
@@ -86,7 +89,7 @@ export interface Requirement {
    *  `variant` must appear in `variants`. */
   variantsNA?: VariantNA[]
   /** Agent-proposed strictness ladder (per-domain: LINE vs payment vs email).
-   *  Stored so rigor scoring has a stable, per-requirement ceiling. */
+   *  Stored so strength scoring has a stable, per-requirement ceiling. */
   strictnessLadder?: StrictnessLadderRung[]
   /** Set when a requirement present in a prior summary was dropped on regen.
    *  Kept (not deleted) so existing annotations don't dangle silently. */

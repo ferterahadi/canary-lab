@@ -230,7 +230,6 @@ describe('CoverageLedgerPage', () => {
     await mount()
     expect(container.querySelector('[data-testid="gap-badge-untested"]')?.textContent).toContain('1')
     expect(container.querySelector('[data-testid="gap-badge-path-incomplete"]')?.textContent).toContain('1')
-    expect(container.querySelector('[data-testid="gap-badge-shallow-verified"]')).toBeNull()
     expect(container.querySelector('[data-testid="docs-rail-drift"]')).toBeTruthy()
   })
 
