@@ -116,4 +116,15 @@ describe('BenchmarkRunStore', () => {
     expect(statusOf(makeManifest({ status: 'running' }))).toBe('running')
     expect(statusOf(makeManifest({ status: 'done', endedAt: 'e' }))).toBe('done')
   })
+
+  it('idOfEntry falls back to benchmarkId for legacy index rows that lack an id field', () => {
+    const store = new BenchmarkRunStore(logsDir)
+    store.save(makeManifest())
+    const indexPath = benchmarksIndexPath(logsDir)
+    const entries = JSON.parse(fs.readFileSync(indexPath, 'utf-8'))
+    const legacy = entries.map(({ id: _id, ...rest }: Record<string, unknown>) => rest)
+    fs.writeFileSync(indexPath, JSON.stringify(legacy))
+    store.remove('b1')
+    expect(store.list()).toHaveLength(0)
+  })
 })

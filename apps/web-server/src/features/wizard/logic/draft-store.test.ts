@@ -169,6 +169,15 @@ describe('deleteDraft', () => {
     expect(deleteDraft(tmp, baseInput.draftId)).toBe(true)
     expect(readDraft(tmp, baseInput.draftId)).toBeNull()
   })
+  it('idOfEntry falls back to draftId for legacy index rows that lack an id field', () => {
+    createDraft(tmp, baseInput)
+    const indexPath = path.join(tmp, 'drafts', 'index.json')
+    const entries = JSON.parse(fs.readFileSync(indexPath, 'utf-8'))
+    const legacy = entries.map(({ id: _id, ...rest }: Record<string, unknown>) => rest)
+    fs.writeFileSync(indexPath, JSON.stringify(legacy))
+    deleteDraft(tmp, baseInput.draftId)
+    expect(readDraft(tmp, baseInput.draftId)).toBeNull()
+  })
 })
 
 describe('applyToProject', () => {

@@ -15,6 +15,12 @@ const r = (id: string, extra: Partial<Requirement> = {}): Requirement =>
   ({ id, title: `${id} title`, text: `${id} text`, pathTypes: ['happy'], ...extra })
 
 describe('fingerprintRequirement', () => {
+  it('includes variantsNA in the fingerprint so N/A changes invalidate the ledger', () => {
+    const base = r('R1', { variants: ['email', 'sms'] })
+    const withNA = r('R1', { variants: ['email', 'sms'], variantsNA: [{ variant: 'sms', reason: 'no endpoint' }] })
+    expect(fingerprintRequirement(base)).not.toBe(fingerprintRequirement(withNA))
+  })
+
   it('is stable for the same content and changes when content changes', () => {
     expect(fingerprintRequirement(r('R1'))).toBe(fingerprintRequirement(r('R1')))
     expect(fingerprintRequirement(r('R1'))).not.toBe(fingerprintRequirement(r('R1', { text: 'changed' })))

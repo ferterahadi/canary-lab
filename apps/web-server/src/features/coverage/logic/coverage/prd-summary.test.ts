@@ -165,6 +165,14 @@ describe('parseVariantDimension + requirement variants (D1)', () => {
     expect(parseVariantDimension('{"requirements":[]}')).toBeUndefined()
   })
 
+  it('returns undefined when name is a whitespace-only string (normalizeVariantValue empty-string branch)', () => {
+    expect(parseVariantDimension('{"variantDimension":{"name":"   ","values":["email","sms"]}}')).toBeUndefined()
+  })
+
+  it('returns undefined when values is not an array (normalizeVariantDimension guard branch)', () => {
+    expect(parseVariantDimension('{"variantDimension":{"name":"channel","values":"email,sms"}}')).toBeUndefined()
+  })
+
   it('validates requirement variants against the dimension (drops unknowns; needs ≥2)', () => {
     const dim = parseVariantDimension('{"variantDimension":{"name":"channel","values":["email","whatsapp","call","line"]}}')
     const out = parsePrdSummaryOutput(
@@ -466,5 +474,113 @@ describe('renderPrdSummaryMarkdown', () => {
     const { markdown } = renderPrdSummaryMarkdown(s, 'legacy')
     expect(markdown).toContain('## Functional requirements')
     expect(markdown).not.toContain('## Non-functional requirements')
+  })
+
+  it('renders variantsNA list in the markdown (lines 606/609)', () => {
+    const s = summary([{
+      id: 'R1', title: 'Send', text: 'send a message', pathTypes: ['happy'],
+      variants: ['email', 'sms'],
+      variantsNA: [{ variant: 'sms', reason: 'no endpoint' }],
+    }])
+    const { markdown } = renderPrdSummaryMarkdown(s, 'notify')
+    expect(markdown).toContain('_N/A: sms (no endpoint)_')
+  })
+})
+
+describe('normalizeRequirementVariantsNA — uncovered branches', () => {
+  const DIM = parseVariantDimension('{"variantDimension":{"name":"channel","values":["email","sms","whatsapp","call"]}}')
+
+  it('treats non-string reason as empty string → item dropped (line 115 false branch)', () => {
+    // raw.reason is a number → typeof !== 'string' → reason = '' → item skipped
+    // Must pass variantDimension so that variants are normalized and normalizeRequirementVariantsNA is called.
+    const out = parsePrdSummaryOutput(
+      JSON.stringify({ requirements: [{
+        title: 'r', text: 't', pathTypes: ['happy'],
+        variants: ['email', 'sms'],
+        variantsNA: [{ variant: 'sms', reason: 99 }], // reason is a number, not a string
+      }] }),
+      DIM,
+    )
+    // item is dropped (reason is not a string) → variantsNA undefined
+    expect(out![0].variantsNA).toBeUndefined()
+  })
+
+  it('returns undefined when all variantsNA items are dropped (line 121 false branch)', () => {
+    // All items have empty reason → all dropped → out.length = 0 → returns undefined
+    const out = parsePrdSummaryOutput(
+      JSON.stringify({ requirements: [{
+        title: 'r', text: 't', pathTypes: ['happy'],
+        variants: ['email', 'sms'],
+        variantsNA: [{ variant: 'email', reason: '' }], // empty reason → dropped
+      }] }),
+      DIM,
+    )
+    expect(out![0].variantsNA).toBeUndefined()
+  })
+
+  it('skips non-object items in variantsNA array (line 112 typeof !== object branch)', () => {
+    // A STRING item in variantsNA: !item is false (string is truthy) but typeof !== 'object' → continue
+    const out = parsePrdSummaryOutput(
+      JSON.stringify({ requirements: [{
+        title: 'r', text: 't', pathTypes: ['happy'],
+        variants: ['email', 'sms'],
+        variantsNA: ['not-an-object', { variant: 'sms', reason: 'no endpoint' }],
+      }] }),
+      DIM,
+    )
+    expect(out![0].variantsNA).toEqual([{ variant: 'sms', reason: 'no endpoint' }])
+  })
+})
+
+describe('normalizeVariantValue — non-string and empty-string branches (line 65)', () => {
+  const DIM = parseVariantDimension('{"variantDimension":{"name":"channel","values":["email","sms"]}}')
+
+  it('returns undefined (line 65 true branch) when variant is a non-string (e.g. a number)', () => {
+    // normalizeVariantValue(42) → typeof 42 !== 'string' → return undefined → item dropped
+    const out = parsePrdSummaryOutput(
+      JSON.stringify({ requirements: [{
+        title: 'r', text: 't', pathTypes: ['happy'],
+        variants: ['email', 'sms'],
+        variantsNA: [{ variant: 42, reason: 'non-string variant' }], // number, not string
+      }] }),
+      DIM,
+    )
+    expect(out![0].variantsNA).toBeUndefined()
+  })
+
+  it('returns undefined (line 67 false branch) when variant whitespace-trims to empty', () => {
+    // normalizeVariantValue('   ') → v = '' → v ? v : undefined → undefined
+    const out = parsePrdSummaryOutput(
+      JSON.stringify({ requirements: [{
+        title: 'r', text: 't', pathTypes: ['happy'],
+        variants: ['email', 'sms'],
+        variantsNA: [{ variant: '   ', reason: 'whitespace-only variant name' }],
+      }] }),
+      DIM,
+    )
+    expect(out![0].variantsNA).toBeUndefined()
+  })
+})
+
+describe('parseTopLevelObject — catch branch', () => {
+  it('returns null when JSON inside {} braces is syntactically invalid', () => {
+    // `{invalid json}` passes the start/end guards but JSON.parse throws → catch → null
+    expect(parsePrdSummaryOutput('{invalid json}')).toBeNull()
+  })
+})
+
+describe('buildPrdSummaryPrompt — previousVariantDimension branches (line 396)', () => {
+  it('uses "(none — infer...)" when no previousVariantDimension is passed (false branch)', () => {
+    const col = collection([{ relPath: 'spec.md', content: '# Feature\n some text' }])
+    const prompt = buildPrdSummaryPrompt(col, [])
+    expect(prompt).toContain('(none — infer the dimension from the documents, if any)')
+  })
+
+  it('serializes previousVariantDimension as JSON when provided (true branch)', () => {
+    const col = collection([{ relPath: 'spec.md', content: '# Feature\n some text' }])
+    const dim = { name: 'channel', values: ['email', 'sms'] }
+    const prompt = buildPrdSummaryPrompt(col, [], dim)
+    expect(prompt).toContain('"name": "channel"')
+    expect(prompt).not.toContain('(none — infer the dimension from the documents, if any)')
   })
 })

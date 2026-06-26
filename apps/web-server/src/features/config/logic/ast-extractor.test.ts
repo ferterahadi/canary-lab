@@ -234,6 +234,12 @@ describe('parseTestAnnotations', () => {
       pathTypes: undefined,
     })
   })
+
+  it('parses @variant tokens (line 160 branch — the variant for-loop body)', () => {
+    // A comment with @variant exercises the `for (const token of m[1].split(...))` body.
+    const out = parseTestAnnotations('// @variant email, sms')
+    expect(out.variants).toEqual(['email', 'sms'])
+  })
 })
 
 describe('extractTestsFromSource — coverage annotations', () => {

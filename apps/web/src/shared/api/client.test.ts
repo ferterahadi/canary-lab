@@ -103,6 +103,8 @@ import {
   getCoverageAgentSession,
   getEvaluationAgentSession,
   clearPrdSummary,
+  removePortifyOverlay,
+  cleanupPortify,
 } from './client'
 
 const ok = (body: unknown, status = 200): Response =>
@@ -1420,5 +1422,20 @@ describe('api client', () => {
     const fetchImpl = vi.fn().mockResolvedValue(ok({ feature: 'a/b', removed: [] }))
     await clearPrdSummary('a/b', { baseUrl: 'http://x', fetchImpl })
     expect(fetchImpl).toHaveBeenCalledWith('http://x/api/features/a%2Fb/prd-summary', { method: 'DELETE' })
+  })
+
+  it('removePortifyOverlay DELETEs the portify-overlay endpoint', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(ok({ name: 'myfeat', portified: false, reverted: true }))
+    const result = await removePortifyOverlay('myfeat', { baseUrl: 'http://x', fetchImpl })
+    expect(result).toEqual({ name: 'myfeat', portified: false, reverted: true })
+    expect(fetchImpl).toHaveBeenCalledWith('http://x/api/features/myfeat/portify-overlay', { method: 'DELETE' })
+  })
+
+  it('cleanupPortify GETs the portify cleanup listing', async () => {
+    const listing = { workflows: [] }
+    const fetchImpl = vi.fn().mockResolvedValue(ok(listing))
+    const result = await cleanupPortify({ baseUrl: 'http://x', fetchImpl })
+    expect(result).toEqual(listing)
+    expect(fetchImpl).toHaveBeenCalledWith('http://x/api/cleanup/portify', { method: 'GET' })
   })
 })

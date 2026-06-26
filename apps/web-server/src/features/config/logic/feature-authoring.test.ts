@@ -441,6 +441,34 @@ module.exports = { config }
       { key: 'C', value: '********' },
     ])
   })
+
+  it('getFeatureEnvsetSummary returns null for branch when repo has no branch set (r.branch ?? null path)', () => {
+    // repo entry without a `branch` field → r.branch is undefined → `r.branch ?? null` → null
+    writeFeatureConfig(
+      'no_branch_repo',
+      '',
+      `[{ name: 'app', localPath: '/repo/app' }]`, // no branch field
+    )
+    const summary = getFeatureEnvsetSummary(ctx(), 'no_branch_repo')
+    expect(summary).not.toBeNull()
+    expect(summary!.repos[0].branch).toBeNull()
+  })
+
+  it('getFeatureEnvsetSummary uses [] for repos when feature has no repos field (feature.repos ?? [] path)', () => {
+    // Config with no repos field → r.repos is undefined → `feature.repos ?? []` → []
+    const featureDir = path.join(featuresDir, 'no_repos_feature')
+    fs.mkdirSync(featureDir, { recursive: true })
+    fs.writeFileSync(path.join(featureDir, 'feature.config.cjs'), `const config = {
+  name: 'no_repos_feature',
+  envs: ['local'],
+  featureDir: __dirname,
+}
+module.exports = { config }
+`, 'utf8')
+    const summary = getFeatureEnvsetSummary(ctx(), 'no_repos_feature')
+    expect(summary).not.toBeNull()
+    expect(summary!.repos).toEqual([])
+  })
 })
 
 describe('writeFeatureDoc', () => {
