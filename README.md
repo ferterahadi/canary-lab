@@ -11,7 +11,7 @@ AI agents are good at editing code and bad at proving the edit works. Canary Lab
 
 **Contents**
 
-- [What's New](#changelog)
+- [What's New](docs/CHANGELOG.md)
 - [How the Repair Loop Works](#how-the-repair-loop-works)
 - [What You Write](#what-you-write)
 - [Why a Harness? Your Agent Already Has a Terminal](#why-a-harness-your-agent-already-has-a-terminal)
