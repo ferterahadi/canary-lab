@@ -20,13 +20,13 @@ npx canary-lab upgrade
 - `new feature` and `env` are deterministic wrappers for scripts and agents.
 - `upgrade` syncs scaffolded docs and skills in an existing project (not a dependency upgrade).
 
-## Verified Coverage (MCP, `author`/`lifecycle`/`full` profiles)
+## Requirement Coverage (MCP, `author`/`lifecycle`/`full` profiles)
 
-The Coverage ledger is reachable over MCP as well as the UI — both read the same computation, so they can't diverge:
+The coverage ledger is reachable over MCP as well as the UI — both call the same computation, so they can't diverge:
 
-- `get_feature_coverage(feature)` — the full ledger: each requirement → its annotated tests → the last passing run + a gap type (`untested` / `unverified` / `path-incomplete` / `verified` / `shallow-verified`), the grounded coverage %, the per-requirement rigor (`tierReached` / `tierAvailable` / `strictness` / `weakestAssertion` / `suggestedStrongerCheck`), and a `docsDrift` flag.
+- `get_feature_coverage(feature)` — the full ledger: each requirement → its mapped tests → a gap type (`covered` / `path-incomplete` / `variant-incomplete` / `untested`), the coverage %, and the per-test strictness grade with a suggested stronger check.
 - `list_feature_docs(feature)` — the docs that feed the PRD (source vs generated), plus the summary status.
 - `start_external_summary(feature)` → `submit_external_summary(jobId, requirements)` — YOU read the source docs (returned in the prompt) and propose the requirements; canary reconciles ids (preserving existing ones) and writes the summary. No local agent — over MCP you author it. Add docs first with `write_feature_doc`.
 - `start_external_coverage(feature)` → `submit_external_coverage(jobId, mappings)` — YOU read the tests and map them to requirements; canary writes the `@req-*` tags and recomputes. Needs a summary first.
 
-Tests link to requirements via Playwright tags on each `test()` — `{ tag: ['@req-<id>', '@path-happy|sad|edge'] }` (legacy `@requirement`/`@path` comments still parse); see [FEATURES](FEATURES.md#verified-coverage). Canary attests; it never writes a requirement's test for you.
+Tests link to requirements via Playwright tags on each `test()` — `{ tag: ['@req-<id>', '@path-happy|sad|edge'] }` (legacy `@requirement`/`@path` comments still parse); see [FEATURES](FEATURES.md#requirement-coverage). Canary computes coverage from your tags; it never writes a requirement's test for you.

@@ -18,8 +18,8 @@ Each entry is tagged with the area it touches:
 ## 1.4.0 — 2026-06-26
 
 - **[Coverage]** **New: the Verified Coverage Ledger.** Coverage answers a simple question — are your tests actually thorough? It maps every requirement in your PRD to the tests that exercise it, shows what's covered and what's missing, and points the agent at the gaps so it can add the test cases you don't have yet. Open it from the new coverage pill on any feature.
-  - The percentage is **grounded, not guessed**: a requirement only counts as covered when every declared path has a mapped test that's backed by a passing run — not because an agent judged it "looks covered."
-  - The mapping is **inline and reviewable**: generating a ledger runs background agents that read your PRD and specs, then write `@covers` tags into the tests themselves. It runs without blocking you, and survives switching away or refreshing.
+  - The percentage is **computed, not guessed**: a requirement only counts as covered when every declared path (and variant) has a mapped test — math from your tags, not an agent judging it "looks covered."
+  - The mapping is **inline and reviewable**: generating a ledger runs background agents that read your PRD and specs, then write `@req-<id>` tags into the tests themselves. It runs without blocking you, and survives switching away or refreshing.
   - Coverage breaks down **by variant and path**, so a half-covered requirement shows exactly which case is missing. A strength filter and breakdown ring tell a thoroughly-tested requirement from a barely-touched one, and you can reset coverage or strip the tags to start fresh.
 - **[Portify]** **Un-portify a feature.** Changed your mind? You can now reverse a port-ification — the original config is restored and the overlay is removed, cleanly.
 - **[Portify]** **Steadier port-ification.** The wizard now runs with proper concurrency limits, handles missing or orphaned workflow records gracefully instead of getting stuck, and the picker is simpler — the redundant history list is gone.
