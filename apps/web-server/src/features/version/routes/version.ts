@@ -20,7 +20,19 @@ export interface VersionRouteDeps {
 export async function versionRoutes(app: FastifyInstance, deps: VersionRouteDeps): Promise<void> {
   // Current vs latest + the self-update job state. Polled on cold load and
   // refetched whenever a `version-changed` event arrives.
-  app.get('/api/version', async () => deps.state.status(deps.updateStore))
+  //
+  // Lazy resolve: if the boot check hasn't landed yet (latest still null), run
+  // it now and wait — otherwise a client that loads in the first second after a
+  // restart races the fire-and-forget boot check, gets null, and shows a false
+  // "couldn't reach the registry" until something else triggers a refetch. This
+  // makes the first load self-resolving (bounded by the fetch timeout); a real
+  // registry outage still falls through to null and the next load retries.
+  app.get('/api/version', async () => {
+    if (deps.state.status(deps.updateStore).latest === null) {
+      await deps.state.refresh()
+    }
+    return deps.state.status(deps.updateStore)
+  })
 
   // Kick off `npm install <pkg>@latest` in the workspace. Non-blocking: returns
   // 202 with the running manifest; the job streams into the store and flips to
