@@ -7,7 +7,7 @@
 
 AI agents are good at editing code and bad at proving the edit works. Canary Lab is the independent harness on your machine: it boots your real services **in dev mode** — no Dockerfiles, no image rebuilds, hot reload intact — runs your Playwright tests itself, and keeps the evidence for every run: service logs, traces, screenshots, videos, the env that was applied. Your agent reads the failure, edits the code (in an isolated git worktree if it's sharing the repo), and signals a rerun; Canary Lab continues from the same run until it's green. Because the harness — not the agent — runs the tests and writes the record, a green run means it actually passed.
 
-![Canary Lab end-to-end: an AI agent scaffolds a Checkout test suite, checks requirement coverage (47%), authors more tests to reach 100%, runs the suite green (12/12), and exports a verified evaluation report](docs/assets/canary-lab-promo.gif)
+![Canary Lab end-to-end: an AI agent scaffolds a Checkout test suite, checks requirement coverage (47%), authors more tests to reach 100%, runs the suite green (12/12), and exports a verified evaluation report](docs/assets/canary-lab.gif)
 
 **Contents**
 
@@ -116,13 +116,20 @@ Create a workspace and open the local UI:
 ```bash
 npx canary-lab init my-lab
 cd my-lab
-npm install
-npm run install:browsers
-npx canary-lab setup
 npx canary-lab ui
 ```
 
-This scaffolds a workspace with sample features, installs Playwright browsers, registers your AI agent's tools, and opens the UI at `http://localhost:7421`. Add `--no-open` to skip launching a browser.
+`init` scaffolds a workspace with sample features, installs dependencies, downloads the Playwright browser, and registers your AI agent's tools — so `canary-lab ui` opens the UI at `http://localhost:7421` straight away. Add `--no-open` to skip launching a browser.
+
+Prefer to install yourself (CI / offline)? Pass `--no-install` to `init`, then run the steps manually:
+
+```bash
+npx canary-lab init my-lab --no-install
+cd my-lab
+npm install
+npm run install:browsers
+npx canary-lab ui
+```
 
 The UI and MCP server share one port (default `7421`). Pin a different port with `npx canary-lab init my-lab --port 8200`, or change it later in the Project Settings dialog — Canary Lab restarts on the new port, and your MCP client may need to reconnect.
 

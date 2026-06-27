@@ -1,6 +1,6 @@
 {
   "name": "canary-lab",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "description": "Your AI agent fixes the code; Canary Lab proves it works. The independent local harness that runs your Playwright tests itself, so green can't be faked.",
   "keywords": [
     "playwright",

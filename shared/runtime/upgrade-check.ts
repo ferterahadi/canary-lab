@@ -30,6 +30,23 @@ export function getInstalledPackageVersion(
   }
 }
 
+/**
+ * Reads the installed canary-lab package name (mirrors
+ * `getInstalledPackageVersion`). Used to target the registry check and the
+ * `npm install <name>@latest` self-update at the package that's actually
+ * installed, rather than hardcoding "canary-lab".
+ */
+export function getInstalledPackageName(
+  pkgJsonPath: string = path.join(__dirname, '..', '..', '..', 'package.json'),
+): string | null {
+  try {
+    const pkg = JSON.parse(fs.readFileSync(pkgJsonPath, 'utf-8'))
+    return typeof pkg.name === 'string' ? pkg.name : null
+  } catch {
+    return null
+  }
+}
+
 export function readStamp(projectRoot: string): string | null {
   try {
     const raw = fs.readFileSync(stampPath(projectRoot), 'utf-8').trim()

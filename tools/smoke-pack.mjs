@@ -51,7 +51,9 @@ run('npm', ['init', '-y'], tempRoot)
 run('npm', ['install', '--no-audit', '--no-fund', '--prefer-offline', '--progress=false', `file:${tarballPath}`], tempRoot)
 run(
   'npx',
-  ['canary-lab', 'init', 'smoke-project', '--package-spec', `file:${tarballPath}`],
+  // --no-install: the smoke run installs deps itself below (and never needs the
+  // Playwright chromium download); let `init` just scaffold.
+  ['canary-lab', 'init', 'smoke-project', '--package-spec', `file:${tarballPath}`, '--no-install'],
   tempRoot,
 )
 

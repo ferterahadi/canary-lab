@@ -58,18 +58,23 @@ function readPackageVersion(): string {
   return JSON.parse(fs.readFileSync(pkgPath, 'utf-8')).version
 }
 
-export function parseArgs(args: string[]): { folder: string; packageSpec: string; port?: number } {
+export function parseArgs(args: string[]): { folder: string; packageSpec: string; port?: number; noInstall: boolean } {
   const folder = args[0]
   if (!folder) {
-    fail('Usage: canary-lab init <folder> [--package-spec <spec>] [--port <port>]')
+    fail('Usage: canary-lab init <folder> [--package-spec <spec>] [--port <port>] [--no-install]')
     process.exit(1)
   }
 
   let packageSpec = `^${readPackageVersion()}`
   let port: number | undefined
+  let noInstall = false
 
   for (let i = 1; i < args.length; i += 1) {
     const arg = args[i]
+    if (arg === '--no-install') {
+      noInstall = true
+      continue
+    }
     if (arg === '--package-spec') {
       packageSpec = args[i + 1]
       i += 1
@@ -92,7 +97,7 @@ export function parseArgs(args: string[]): { folder: string; packageSpec: string
     process.exit(1)
   }
 
-  return { folder, packageSpec, ...(port === undefined ? {} : { port }) }
+  return { folder, packageSpec, noInstall, ...(port === undefined ? {} : { port }) }
 }
 
 export function buildPackageJson(projectName: string, packageSpec: string): string {
@@ -128,7 +133,7 @@ export async function main(
   args = process.argv.slice(2),
   extras: InitProjectExtras = {},
 ): Promise<void> {
-  const { folder, packageSpec, port } = parseArgs(args)
+  const { folder, packageSpec, port, noInstall } = parseArgs(args)
   const targetDir = path.resolve(process.cwd(), folder)
 
   if (fs.existsSync(targetDir)) {
@@ -170,15 +175,37 @@ export async function main(
     }
   }
 
+  // Install deps + the Playwright browser so the workspace is ready to boot in
+  // one step. `--no-install` skips this (CI / offline); the manual commands are
+  // printed in "Next steps" when skipped or on failure.
+  let installed = false
+  if (!noInstall) {
+    try {
+      section('Installing dependencies')
+      execFileSync('npm', ['install'], { cwd: targetDir, stdio: 'inherit' })
+      execFileSync('npm', ['run', 'install:browsers'], { cwd: targetDir, stdio: 'inherit' })
+      installed = true
+    } catch (err) {
+      console.log(`Dependency install skipped: ${(err as Error).message}`)
+    }
+  }
+
+  // Register MCP. After a successful install, point registration at the STABLE
+  // local cli.js under node_modules rather than this process's path — which, when
+  // `init` was run via `npx`, is the GC-eligible `_npx` cache. A stable absolute
+  // path also lets GUI (Desktop) registration embed a working node-dir PATH, so
+  // a Desktop-launched server can still spawn the agent CLIs.
+  const localCli = path.join(targetDir, 'node_modules', 'canary-lab', 'dist', 'scripts', 'cli.js')
+  const setupOpts = installed && fs.existsSync(localCli)
+    ? { cliPath: localCli, execPath: process.execPath }
+    : {}
   const setupProject = extras.setupProject ?? setupCanaryLab
   let setupOk = true
   try {
-    setupProject({
-      workspace: targetDir,
-      agent: 'auto',
-      dryRun: false,
-      force: false,
-    })
+    setupProject(
+      { workspace: targetDir, agent: 'auto', dryRun: false, force: false },
+      setupOpts,
+    )
   } catch (err) {
     setupOk = false
     console.log(`Canary Lab setup skipped: ${(err as Error).message}`)
@@ -186,12 +213,15 @@ export async function main(
 
   ok(`Canary Lab project created at ${ansiPath(targetDir)}`)
   section('Next steps')
-  step(1, `cd ${folder}`)
-  step(2, 'npm install')
-  step(3, 'npm run install:browsers')
-  step(4, 'npx canary-lab ui')
+  let stepNum = 1
+  step(stepNum++, `cd ${folder}`)
+  if (!installed) {
+    step(stepNum++, 'npm install')
+    step(stepNum++, 'npm run install:browsers')
+  }
+  step(stepNum++, 'npx canary-lab ui')
   if (!setupOk) {
-    step(5, 'npx canary-lab setup')
+    step(stepNum++, 'npx canary-lab setup')
   }
   line()
 }

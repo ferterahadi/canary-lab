@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react'
 import * as api from '../api/client'
-import type { ExecutionType, Feature, RunStatus } from '../api/types'
+import type { ExecutionType, Feature, RunStatus, VersionStatus } from '../api/types'
 import { useWizardDrafts } from '../../features/wizard/state/WizardDraftContext'
 import { useMcpPromo } from './McpPromoContext'
 import { FeatureConfigEditor } from '../../features/config/components/FeatureConfigEditor'
 import { ThemeToggle } from '../ui/ThemeToggle'
+import { VersionUpdateButton } from './VersionUpdateButton'
 import { SettingsModal } from '../../features/config/components/SettingsModal'
 import { Tooltip } from '../ui/Tooltip'
 
@@ -31,6 +32,9 @@ interface Props {
   onOpenPortify?: (workflowId: string) => void
   /** Opens the Requirement Coverage ledger for a feature (R8 column entry point). */
   onOpenCoverage?: (feature: string) => void
+  /** Current-vs-latest version + self-update job state. Drives the footer
+   *  "update available" indicator; null until the registry check resolves. */
+  versionStatus?: VersionStatus | null
 }
 
 // Colour the Coverage icon by the derived headline (R8). Neutral (inherit) for
@@ -57,6 +61,7 @@ export function FeaturesColumn({
   onStartPortify,
   onOpenPortify,
   onOpenCoverage,
+  versionStatus,
 }: Props) {
   const { startNewWizard } = useWizardDrafts()
   const { gatePromo } = useMcpPromo()
@@ -189,7 +194,9 @@ export function FeaturesColumn({
       </div>
       <div className="cl-panel-footer flex items-center justify-between p-2">
         <ThemeToggle />
-        <button
+        <div className="flex items-center gap-1">
+          <VersionUpdateButton status={versionStatus ?? null} />
+          <button
           type="button"
           onClick={() => setSettingsOpen(true)}
           aria-label="Open settings"
@@ -200,7 +207,8 @@ export function FeaturesColumn({
             <circle cx="12" cy="12" r="3" />
             <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
           </svg>
-        </button>
+          </button>
+        </div>
       </div>
       {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
 

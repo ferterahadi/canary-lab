@@ -16,6 +16,7 @@ export type WorkspaceEvent =
   | { type: 'evaluation-export-created'; task: EvaluationExportTask }
   | { type: 'evaluation-export-updated'; task: EvaluationExportTask }
   | { type: 'evaluation-export-deleted'; taskId: string }
+  | { type: 'version-changed' }
 
 export interface ConnectWorkspaceEventsOptions {
   wsBase?: string
