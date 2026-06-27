@@ -70,6 +70,7 @@ describe('wizard agent runner (headless)', () => {
     const registry = new WizardAgentRegistry()
     const run = spawnPlanAgent({
       spawnImpl: spawn.impl as never,
+      resolveBinary: () => null,
       registry,
       planTemplate: writePlanTemplate(tmp),
     })({
@@ -100,6 +101,7 @@ describe('wizard agent runner (headless)', () => {
     const registry = new WizardAgentRegistry()
     const run = spawnPlanAgent({
       spawnImpl: spawn.impl as never,
+      resolveBinary: () => null,
       registry,
       planTemplate: writePlanTemplate(tmp),
     })({
@@ -126,6 +128,7 @@ describe('wizard agent runner (headless)', () => {
     const spawn = fakeSpawn(child)
     const run = spawnPlanAgent({
       spawnImpl: spawn.impl as never,
+      resolveBinary: () => null,
       planTemplate: writePlanTemplate(tmp),
     })({
       draftId: 'd3',
@@ -148,6 +151,7 @@ describe('wizard agent runner (headless)', () => {
     const spawn = fakeSpawn(child)
     const run = spawnPlanAgent({
       spawnImpl: spawn.impl as never,
+      resolveBinary: () => null,
       planTemplate: writePlanTemplate(tmp),
     })({
       draftId: 'd4',
@@ -174,6 +178,7 @@ describe('wizard agent runner (headless)', () => {
     const spawn = fakeSpawn(child)
     const run = spawnSpecAgent({
       spawnImpl: spawn.impl as never,
+      resolveBinary: () => null,
       specTemplate: writeSpecTemplate(tmp),
     })({
       draftId: 'd5-resume',

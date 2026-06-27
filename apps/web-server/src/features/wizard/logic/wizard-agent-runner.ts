@@ -43,6 +43,9 @@ export interface SpawnAgentDeps {
   specTemplate?: string
   // Override the spawn impl (tests).
   spawnImpl?: typeof nodeSpawn
+  // Override agent-kind → path resolution (tests). Production lets the runner
+  // resolve via resolveAgentBinary.
+  resolveBinary?: (agent: WizardAgentKind) => string | null
 }
 
 function runAgent(opts: {
@@ -58,6 +61,7 @@ function runAgent(opts: {
   // idle activity. undefined for codex (its piped stdout grows the log instead).
   claudeSessionId?: string
   spawnImpl: typeof nodeSpawn
+  resolveBinary?: (agent: WizardAgentKind) => string | null
 }): Promise<string> {
   const sink = createTeeSink({ logPath: opts.agentLogPath })
   sink.push(`[wizard] ${opts.label}\n`)
@@ -75,6 +79,7 @@ function runAgent(opts: {
       idleMs: WIZARD_IDLE_TIMEOUT_MS,
       activityPath,
       spawnImpl: opts.spawnImpl,
+      resolveBinary: opts.resolveBinary,
     })
   } catch (e) {
     return Promise.reject(new Error(`wizard agent spawn failed: ${(e as Error).message}`))
@@ -123,6 +128,7 @@ export function spawnPlanAgent(
       label: `${input.agent} plan agent started`,
       claudeSessionId: input.agent === 'claude' ? input.pinSessionId : undefined,
       spawnImpl: deps.spawnImpl ?? nodeSpawn,
+      resolveBinary: deps.resolveBinary,
     })
   }
 }
@@ -153,6 +159,7 @@ export function spawnSpecAgent(
       label: `${input.agent} spec agent started`,
       claudeSessionId: input.agent === 'claude' ? (input.resumeSessionId ?? input.pinSessionId) : undefined,
       spawnImpl: deps.spawnImpl ?? nodeSpawn,
+      resolveBinary: deps.resolveBinary,
     })
   }
 }
