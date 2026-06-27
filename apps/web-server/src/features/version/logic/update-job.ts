@@ -42,7 +42,6 @@ export class UpdateJobStore {
       dirName: 'version-update',
       recordFile: 'job.json',
       idOf: (m) => m.jobId,
-      statusOf: (m) => m.status,
       indexEntryOf: (m) => ({ id: m.jobId, createdAt: m.startedAt, status: m.status }),
       reconcile: {
         isInterrupted: (m) => m.status === 'running',
