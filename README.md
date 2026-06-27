@@ -5,7 +5,7 @@
 
 **Your AI agent fixes the code. Canary Lab proves it works.**
 
-AI agents are good at editing code and bad at proving the edit works. Canary Lab is the independent harness on your machine: it boots your real services **in dev mode** — no Dockerfiles, no image rebuilds, hot reload intact — runs your Playwright tests itself, and keeps the evidence for every run: service logs, traces, screenshots, videos, the env that was applied. Your agent reads the failure, edits the code (in an isolated git worktree if it's sharing the repo), and signals a rerun; Canary Lab continues from the same run until it's green. Because the harness — not the agent — runs the tests and writes the record, a green run means it actually passed.
+AI agents are good at editing code and bad at proving the edit works. Canary Lab is the independent harness on your machine: it boots your real services **in dev mode** — no Dockerfiles, no image rebuilds, hot reload intact — runs your Playwright tests itself, and keeps the evidence for every run (service logs, traces, screenshots, videos, the applied env). Your agent reads the failure, fixes the code (in an isolated git worktree if it's sharing the repo), and signals a rerun; Canary Lab continues the same run until it's green. The harness — not the agent — runs the tests and writes the record, so a green run means it actually passed.
 
 ![Canary Lab end-to-end: an AI agent scaffolds a Checkout test suite, checks requirement coverage (47%), authors more tests to reach 100%, runs the suite green (12/12), and exports a verified evaluation report](docs/assets/canary-lab.gif)
 
@@ -36,9 +36,9 @@ AI agents are good at editing code and bad at proving the edit works. Canary Lab
 
 ## What You Write
 
-A feature is a folder with two things: a config that says how to boot your services, and normal Playwright tests. There's no new test language to learn.
+A feature is a folder with two things: a config for booting your services, and normal Playwright tests — no new test language to learn.
 
-The config is where the per-run isolation comes from — you describe the dev command you already run, and Canary Lab fills in a free port for each run:
+The config is where per-run isolation comes from: you describe the dev command you already run, and Canary Lab assigns a free port per run.
 
 ```js
 // features/checkout/feature.config.cjs
@@ -62,7 +62,7 @@ const config = {
 module.exports = { config }
 ```
 
-The tests are ordinary Playwright. The only Canary Lab-specific line is the import — a thin fixture that tags each test's output in the run log so failures map back to the right test:
+The tests are ordinary Playwright. The only Canary Lab-specific line is the import — a thin fixture that tags each test's output so failures map back to the right test:
 
 ```ts
 // features/checkout/e2e/checkout.spec.ts
@@ -89,13 +89,13 @@ A good coding agent can start a dev server and run Playwright by itself. Three t
 
 ## Canary Lab and docker-compose
 
-They work together, not against each other. Compose runs your services as images — so after the agent fixes a line of code, you usually wait for a rebuild before you can test again. Compose Watch can shorten that wait, but only after you write and maintain a dev image and watch rules for every service. Canary Lab skips all of that: it runs the dev commands you already use (`npm run dev`, `./gradlew bootRun`), so a fix is picked up by hot reload and retested in seconds — no Dockerfile needed. And because each run gets its own ports, several runs can share one machine, which compose can't do out of the box.
+They work together. Compose runs your services as images, so after a one-line fix you usually wait for a rebuild before you can test again. Compose Watch shortens that wait, but only once you write and maintain a dev image and watch rules per service. Canary Lab skips that: it runs the dev commands you already use (`npm run dev`, `./gradlew bootRun`), so a fix is picked up by hot reload and retested in seconds — no Dockerfile. And because each run gets its own ports, several runs share one machine, which compose can't do out of the box.
 
-Compose is still the better tool for databases and queues (Postgres, Redis, Kafka) and for CI. Use both: put `docker compose up postgres redis` in a Canary Lab `startCommand` for the infrastructure, and let Canary Lab run your app services in dev mode.
+Compose is still the better tool for databases and queues (Postgres, Redis, Kafka) and for CI. Use both: put `docker compose up postgres redis` in a Canary Lab `startCommand` for infrastructure, and let Canary Lab run your app services in dev mode.
 
 ## How It Compares
 
-Each of these is the right tool for some jobs. The table is about where Canary Lab's particular niche — an AI agent repairing local, multi-service e2e tests — sits next to them.
+Each of these is the right tool for some jobs. The table shows where Canary Lab's niche — an AI agent repairing local, multi-service e2e tests — sits among them.
 
 | | Plain Playwright | docker-compose (watch) | Hosted test dashboard | Canary Lab |
 | --- | :---: | :---: | :---: | :---: |
@@ -119,7 +119,7 @@ cd my-lab
 npx canary-lab ui
 ```
 
-`init` scaffolds a workspace with sample features, installs dependencies, downloads the Playwright browser, and registers your AI agent's tools — so `canary-lab ui` opens the UI at `http://localhost:7421` straight away. Add `--no-open` to skip launching a browser.
+`init` scaffolds a workspace with sample features, installs dependencies, downloads the Playwright browser, and registers your AI agent's tools — so `canary-lab ui` opens the UI at `http://localhost:7421` straight away. Add `--no-open` to skip the browser.
 
 Prefer to install yourself (CI / offline)? Pass `--no-install` to `init`, then run the steps manually:
 
@@ -131,13 +131,13 @@ npm run install:browsers
 npx canary-lab ui
 ```
 
-The UI and MCP server share one port (default `7421`). Pin a different port with `npx canary-lab init my-lab --port 8200`, or change it later in the Project Settings dialog — Canary Lab restarts on the new port, and your MCP client may need to reconnect.
+The UI and MCP server share one port (default `7421`). Pin another with `--port 8200` on `init`, or change it later in Project Settings — Canary Lab restarts on the new port, and your MCP client may need to reconnect.
 
-After `canary-lab setup`, restart your AI agent so it discovers the Canary Lab tools. If they don't appear, rerun setup with `npx canary-lab setup --force` and start a fresh agent session.
+Restart your AI agent after setup so it discovers the Canary Lab tools. If they don't appear, run `npx canary-lab setup --force` and start a fresh agent session.
 
 ## Agent-First Workflow
 
-Canary Lab is built for an agent to drive: an AI agent or other MCP client writes tests, starts or claims runs, reads failure context, makes fixes, and signals the next runner action. Canary Lab stays the local run monitor and the source of truth for evidence — diagnosis and code changes happen in the agent.
+Canary Lab is built for an agent to drive: an AI agent or other MCP client writes tests, starts or claims runs, reads failure context, fixes code, and signals the next runner action. Canary Lab stays the local run monitor and source of truth for evidence — diagnosis and code changes happen in the agent.
 
 From your workspace, just ask:
 
@@ -178,7 +178,7 @@ Skip it when `npx playwright test` already tells you enough, when you want self-
 - Local UI server on `http://localhost:7421` (the default; set per project via `--port` or Project Settings), with service orchestration through `node-pty`.
 - Optional repair agents: supported AI agent CLIs (`claude`, `codex`) on `PATH`.
 
-`node-pty` is a native module — it's how Canary Lab gives each service a real terminal (PTY) so interactive dev servers behave the way they do in your own shell. It ships prebuilt binaries, so a normal install doesn't compile anything. The one postinstall step (`fix-node-pty-permissions.mjs`) only re-adds the execute bit to node-pty's `spawn-helper`, which its npm tarball drops on some platforms ([known upstream packaging bug](https://github.com/microsoft/node-pty/issues)); it's a `chmod`, touches nothing outside `node-modules/node-pty`, and is a silent no-op on Windows or if node-pty isn't installed.
+`node-pty` is a native module that gives each service a real terminal (PTY), so interactive dev servers behave as they do in your own shell. It ships prebuilt binaries — a normal install compiles nothing. The one postinstall step (`fix-node-pty-permissions.mjs`) re-adds the execute bit to node-pty's `spawn-helper`, which its tarball drops on some platforms ([upstream packaging bug](https://github.com/microsoft/node-pty/issues)): a `chmod` scoped to `node_modules/node-pty`, a silent no-op on Windows or if node-pty isn't installed.
 
 ## Limitations
 
