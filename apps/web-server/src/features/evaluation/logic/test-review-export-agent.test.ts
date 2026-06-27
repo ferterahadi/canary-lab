@@ -226,6 +226,11 @@ function mockAgentModules(onSpawn?: (ctx: { command: string; args: string[]; chi
       return availableAgents[0] ?? null
     },
   }))
+  // Prevent path resolution so spawn receives bare agent names.
+  vi.doMock('../../agent-sessions/logic/agent-binary', () => ({
+    resolveAgentBinary: (agent: string) => agent,
+    isAgentKind: (cmd: string) => cmd === 'claude' || cmd === 'codex',
+  }))
   vi.doMock('child_process', () => ({
     spawn: (command: string, args: string[]) => {
       const child = new FakeChild()

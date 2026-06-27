@@ -24,60 +24,79 @@ afterEach(() => {
 })
 
 const render = (status: VersionStatus | null) => act(() => { root.render(<VersionUpdateButton status={status} />) })
-const btn = () => container.querySelector<HTMLButtonElement>('button')
+const trigger = () => container.querySelector<HTMLButtonElement>('button')
+const popover = () => document.body.querySelector<HTMLDivElement>('[role="dialog"]')
+const openPopover = () => act(() => { trigger()!.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
 
 const base: VersionStatus = {
-  current: '1.4.0', latest: '1.4.0', updateAvailable: false, packageName: 'canary-lab', update: null,
+  current: '1.4.1', latest: '1.4.1', updateAvailable: false, packageName: 'canary-lab', update: null,
 }
 
 describe('VersionUpdateButton', () => {
   it('renders nothing until the version check resolves', () => {
     render(null)
-    expect(btn()).toBeNull()
+    expect(trigger()).toBeNull()
   })
 
-  it('on the latest version: stays visible and a click confirms it (no install call)', () => {
+  it('is a single icon with no inline copy in the footer (popover is portaled)', () => {
+    render(base)
+    // The footer only carries the icon button — no message text inline.
+    expect(container.textContent?.trim()).toBe('')
+    expect(popover()).toBeNull()
+  })
+
+  it('on the latest version: click opens a popover confirming it; no install call', () => {
     const spy = vi.spyOn(api, 'startVersionUpdate')
     render(base)
-    const b = btn()!
-    expect(b).not.toBeNull()
-    expect(b.disabled).toBe(false)
-    expect(b.getAttribute('aria-label')).toContain('latest version')
-    // No transient message before the click.
-    expect(container.textContent).not.toContain("You're on the latest")
-    act(() => { b.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
-    expect(container.textContent).toContain("You're on the latest version (v1.4.0)")
+    expect(trigger()!.getAttribute('aria-label')).toContain('up to date')
+    openPopover()
+    const pop = popover()!
+    expect(pop.textContent).toContain('Up to date')
+    expect(pop.textContent).toContain('latest version')
+    expect(pop.textContent).toContain('v1.4.1')
     expect(spy).not.toHaveBeenCalled()
   })
 
-  it('when an update is available: click starts the self-update', () => {
+  it('update available: popover shows the delta + an Update button that starts the job', () => {
     const spy = vi.spyOn(api, 'startVersionUpdate').mockResolvedValue({
-      jobId: 'current', status: 'running', targetVersion: '1.4.1', startedAt: 't', log: '',
+      jobId: 'current', status: 'running', targetVersion: '1.4.2', startedAt: 't', log: '',
     })
-    render({ ...base, latest: '1.4.1', updateAvailable: true })
-    const b = btn()!
-    expect(b.getAttribute('aria-label')).toContain('1.4.0 → v1.4.1')
-    act(() => { b.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
+    render({ ...base, latest: '1.4.2', updateAvailable: true })
+    openPopover()
+    const pop = popover()!
+    expect(pop.textContent).toContain('Update available')
+    expect(pop.textContent).toContain('Update to v1.4.2')
+    const updateBtn = [...pop.querySelectorAll('button')].find((b) => /Update to v1\.4\.2/.test(b.textContent ?? ''))!
+    act(() => { updateBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
     expect(spy).toHaveBeenCalledOnce()
   })
 
-  it('after install: shows "restart to apply" and disables the button', () => {
+  it('installed: popover says restart to apply and shows the command', () => {
     render({
       ...base,
-      latest: '1.4.1',
+      latest: '1.4.2',
       updateAvailable: true,
-      update: { jobId: 'current', status: 'done', targetVersion: '1.4.1', startedAt: 't', endedAt: 't2', log: '' },
+      update: { jobId: 'current', status: 'done', targetVersion: '1.4.2', startedAt: 't', endedAt: 't2', log: '' },
     })
-    const b = btn()!
-    expect(b.disabled).toBe(true)
-    expect(b.getAttribute('aria-label')).toContain('restart')
+    openPopover()
+    const pop = popover()!
+    expect(pop.textContent).toContain('Update installed')
+    expect(pop.textContent).toContain('Restart')
+    expect(pop.textContent).toContain('canary-lab ui')
   })
 
-  it('offline (no latest): still visible and a click says it could not check', () => {
+  it('offline: trigger still renders; popover explains the registry was unreachable', () => {
     render({ ...base, latest: null, updateAvailable: false })
-    const b = btn()!
-    expect(b).not.toBeNull()
-    act(() => { b.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
-    expect(container.textContent).toContain("couldn't reach the registry")
+    expect(trigger()).not.toBeNull()
+    openPopover()
+    expect(popover()!.textContent).toContain("Couldn't reach the npm registry")
+  })
+
+  it('Escape closes the popover', () => {
+    render(base)
+    openPopover()
+    expect(popover()).not.toBeNull()
+    act(() => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })) })
+    expect(popover()).toBeNull()
   })
 })

@@ -60,7 +60,7 @@ export async function fetchLatestVersion(
 ): Promise<string | null> {
   const fetchImpl = opts.fetchImpl ?? globalThis.fetch?.bind(globalThis)
   if (!fetchImpl) return null
-  const timeoutMs = opts.timeoutMs ?? 2000
+  const timeoutMs = opts.timeoutMs ?? 5000
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeoutMs)
   try {
