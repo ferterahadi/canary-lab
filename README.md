@@ -5,7 +5,7 @@
 
 **Your AI agent fixes the code. Canary Lab proves it works.**
 
-AI agents are good at editing code and bad at proving the edit works. Canary Lab is the independent harness on your machine: it boots your real services **in dev mode** — no Dockerfiles, no image rebuilds, hot reload intact — runs your Playwright tests itself, and keeps the evidence for every run (service logs, traces, screenshots, videos, the applied env). Your agent reads the failure, fixes the code (in an isolated git worktree if it's sharing the repo), and signals a rerun; Canary Lab continues the same run until it's green. The harness — not the agent — runs the tests and writes the record, so a green run means it actually passed.
+Canary Lab is the independent harness on your machine: it boots your real services in dev mode, runs your Playwright tests, and keeps the evidence (logs, traces, screenshots, videos). Your agent reads the failure, fixes the code, and signals a rerun — Canary Lab keeps going until it's green. The harness runs the tests and writes the record, so a green run means it actually passed.
 
 ![Canary Lab end-to-end: an AI agent scaffolds a Checkout test suite, checks requirement coverage (47%), authors more tests to reach 100%, runs the suite green (12/12), and exports a verified evaluation report](docs/assets/canary-lab.gif)
 
@@ -77,25 +77,25 @@ test('applying SAVE10 produces a 10% discount on the summary', async ({ request 
 })
 ```
 
-The scaffold ships working sample features (including some intentionally broken ones) so you can watch a full repair loop before writing your own.
+The scaffold ships sample features (some intentionally broken) so you can watch a full repair loop before writing your own.
 
 ## Why a Harness? Your Agent Already Has a Terminal
 
-A good coding agent can start a dev server and run Playwright by itself. Three things it can't do alone:
+A good coding agent can start a dev server and run Playwright itself. Three things it can't do alone:
 
-1. **Run many things at once without conflicts.** Canary Lab gives every run its own free ports and fills them into commands, health checks, and env files (`${port.api}`). If two runs need the same repo, each gets its own git worktree. If too many runs start at once, the extras wait in a queue. Several agents can share one laptop without breaking each other's runs.
-2. **Test results the agent can't fake.** Canary Lab starts the services and runs the tests itself. The agent only reads the results and asks for a rerun. So when a run is green, that's Canary Lab's word — not the agent's.
-3. **Safe env switching.** Canary Lab backs up your env files before changing them, and puts everything back when the run ends.
+1. **Concurrency without conflicts.** Every run gets its own ports (filled into commands, health checks, and env files via `${port.api}`) and a git worktree per shared repo; extras queue. Several agents share one laptop safely.
+2. **Results it can't fake.** Canary Lab runs the tests; the agent only reads results and asks for a rerun. So a green run is Canary Lab's word, not the agent's.
+3. **Safe env switching.** Env files are backed up before changes and restored when the run ends.
 
 ## Canary Lab and docker-compose
 
-They work together. Compose runs your services as images, so after a one-line fix you usually wait for a rebuild before you can test again. Compose Watch shortens that wait, but only once you write and maintain a dev image and watch rules per service. Canary Lab skips that: it runs the dev commands you already use (`npm run dev`, `./gradlew bootRun`), so a fix is picked up by hot reload and retested in seconds — no Dockerfile. And because each run gets its own ports, several runs share one machine, which compose can't do out of the box.
+They work together. Compose runs services as images, so a one-line fix waits on a rebuild — Compose Watch helps, but only once you maintain a dev image and watch rules per service. Canary Lab runs the dev commands you already use (`npm run dev`, `./gradlew bootRun`): hot reload picks up the fix in seconds, no Dockerfile, and per-run ports let several runs share one machine.
 
-Compose is still the better tool for databases and queues (Postgres, Redis, Kafka) and for CI. Use both: put `docker compose up postgres redis` in a Canary Lab `startCommand` for infrastructure, and let Canary Lab run your app services in dev mode.
+Compose is still better for databases and queues (Postgres, Redis, Kafka) and CI. Use both: `docker compose up postgres redis` in a Canary Lab `startCommand` for infrastructure, Canary Lab for your app services in dev mode.
 
 ## How It Compares
 
-Each of these is the right tool for some jobs. The table shows where Canary Lab's niche — an AI agent repairing local, multi-service e2e tests — sits among them.
+Where Canary Lab's niche — an AI agent repairing local, multi-service e2e tests — sits next to the alternatives:
 
 | | Plain Playwright | docker-compose (watch) | Hosted test dashboard | Canary Lab |
 | --- | :---: | :---: | :---: | :---: |
@@ -107,7 +107,7 @@ Each of these is the right tool for some jobs. The table shows where Canary Lab'
 | Env-file switching with backup/restore | manual | manual | — | ✓ |
 | Runs fully local / offline | ✓ | ✓ | — | ✓ |
 
-If `npx playwright test` already tells you what you need, or you'd rather a hosted service manage your tests, you don't need Canary Lab. It earns its place when a failure depends on more than a browser assertion — which services were up, which env was active, what the backend logged — and you want an agent to fix it without you babysitting the loop.
+Skip it if `npx playwright test` already tells you enough, or you'd rather a hosted service manage your tests. It earns its place when a failure depends on more than a browser assertion — which services were up, which env was active, what the backend logged — and you want an agent to fix it unattended.
 
 ## Quick Start
 
