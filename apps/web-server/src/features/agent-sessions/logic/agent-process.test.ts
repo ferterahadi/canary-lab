@@ -78,7 +78,7 @@ describe('runAgentProcess', () => {
     const chunks: string[] = []
     const h = runAgentProcess({
       command: 'claude', args: ['-p', 'x'], idleMs: 1000,
-      onChunk: (t) => chunks.push(t), spawnImpl: spawn.impl,
+      onChunk: (t) => chunks.push(t), spawnImpl: spawn.impl, resolveBinary: () => null,
     })
     child.out('hello ')
     child.err('warn')
@@ -223,10 +223,43 @@ describe('runAgentProcess', () => {
     // so opts.spawnImpl ?? nodeSpawn takes the right side (nodeSpawn = mocked spawn).
     const child = new FakeChild()
     mockNodeSpawn.mockReturnValueOnce(child as unknown as ChildProcess)
-    const h = runAgentProcess({ command: 'claude', args: ['-p', 'hi'], idleMs: 1000 })
+    const h = runAgentProcess({ command: 'claude', args: ['-p', 'hi'], idleMs: 1000, resolveBinary: () => null })
     child.close(0)
     const res = await h.done
     expect(res.code).toBe(0)
     expect(mockNodeSpawn).toHaveBeenCalledWith('claude', ['-p', 'hi'], expect.anything())
+  })
+
+  it('resolves a bare agent kind to the absolute path before spawning', async () => {
+    const child = new FakeChild()
+    const spawn = fakeSpawn(child)
+    runAgentProcess({
+      command: 'claude', args: [], idleMs: 1000,
+      spawnImpl: spawn.impl, resolveBinary: (a) => `/opt/bin/${a}`,
+    })
+    child.close(0)
+    expect(spawn.calls[0].command).toBe('/opt/bin/claude')
+    // basename still resolves the PTY tag
+    expect((spawn.calls[0].opts as { env: NodeJS.ProcessEnv }).env).toMatchObject({
+      CANARY_LAB_MCP_CLIENT_KIND: 'claude-pty',
+    })
+  })
+
+  it('falls back to the bare agent name when resolution returns null', async () => {
+    const child = new FakeChild()
+    const spawn = fakeSpawn(child)
+    runAgentProcess({ command: 'codex', args: [], idleMs: 1000, spawnImpl: spawn.impl, resolveBinary: () => null })
+    child.close(0)
+    expect(spawn.calls[0].command).toBe('codex')
+  })
+
+  it('does not resolve a non-agent-kind command (explicit path passes through)', async () => {
+    const child = new FakeChild()
+    const spawn = fakeSpawn(child)
+    const resolveBinary = vi.fn(() => '/should/not/be/used')
+    runAgentProcess({ command: '/usr/local/bin/claude', args: [], idleMs: 1000, spawnImpl: spawn.impl, resolveBinary })
+    child.close(0)
+    expect(resolveBinary).not.toHaveBeenCalled()
+    expect(spawn.calls[0].command).toBe('/usr/local/bin/claude')
   })
 })

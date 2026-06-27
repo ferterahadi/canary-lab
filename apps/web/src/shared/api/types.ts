@@ -505,3 +505,26 @@ export interface FeatureDocsListing {
   sourceDocCount: number
   docsDrift: boolean
 }
+
+export type UpdateJobStatus = 'running' | 'done' | 'failed' | 'aborted'
+
+export interface UpdateJobManifest {
+  jobId: string
+  status: UpdateJobStatus
+  targetVersion: string
+  startedAt: string
+  endedAt?: string
+  log: string
+  error?: string
+}
+
+export interface VersionStatus {
+  /** The version the running server was started with. */
+  current: string | null
+  /** Latest published on the registry, or null if the check hasn't resolved. */
+  latest: string | null
+  updateAvailable: boolean
+  packageName: string | null
+  /** The most recent self-update job, if any. */
+  update: UpdateJobManifest | null
+}

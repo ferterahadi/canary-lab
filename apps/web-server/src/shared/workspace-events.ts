@@ -16,6 +16,9 @@ export type WorkspaceEvent =
   | { type: 'evaluation-export-created'; task: EvaluationExportTaskView }
   | { type: 'evaluation-export-updated'; task: EvaluationExportTaskView }
   | { type: 'evaluation-export-deleted'; taskId: string }
+  // A newer canary-lab was found on the registry, or the self-update job changed
+  // state (installing → done/failed). The client refetches GET /api/version.
+  | { type: 'version-changed' }
 
 export interface WorkspaceEventPublisher {
   publish(event: WorkspaceEvent): void

@@ -98,6 +98,11 @@ describe('parseArgs', () => {
     expect(parseArgs(['f']).port).toBeUndefined()
   })
 
+  it('parses --no-install (default false)', () => {
+    expect(parseArgs(['f']).noInstall).toBe(false)
+    expect(parseArgs(['f', '--no-install']).noInstall).toBe(true)
+  })
+
   it('errors and exits on an invalid --port', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
     vi.spyOn(process, 'exit').mockImplementation(((c?: number) => {
@@ -164,17 +169,67 @@ describe('main (init-project orchestration)', () => {
     expect(pkg.name).toBe('my-project')
     expect(pkg.devDependencies['canary-lab']).toBe('^9.9.9')
 
-    expect(execFileSync).toHaveBeenCalledExactlyOnceWith(
+    expect(execFileSync).toHaveBeenCalledWith(
       'git',
       ['init', '-q'],
       expect.objectContaining({ cwd: target, stdio: 'ignore' }),
     )
-    expect(setupProject).toHaveBeenCalledExactlyOnceWith({
-      workspace: target,
-      agent: 'auto',
-      dryRun: false,
-      force: false,
+    expect(execFileSync).toHaveBeenCalledWith(
+      'npm',
+      ['install'],
+      expect.objectContaining({ cwd: target }),
+    )
+    expect(execFileSync).toHaveBeenCalledWith(
+      'npm',
+      ['run', 'install:browsers'],
+      expect.objectContaining({ cwd: target }),
+    )
+    // npm `install` was mocked, so node_modules/canary-lab never materialized →
+    // setup runs without a cliPath override.
+    expect(setupProject).toHaveBeenCalledExactlyOnceWith(
+      { workspace: target, agent: 'auto', dryRun: false, force: false },
+      {},
+    )
+  })
+
+  it('--no-install skips dependency install and prints the manual steps', async () => {
+    const workspace = mkTmp()
+    process.chdir(workspace)
+    const messages: string[] = []
+    vi.spyOn(console, 'log').mockImplementation((m) => { messages.push(String(m)) })
+
+    await main(['my-project', '--package-spec', '^9.9.9', '--no-install'])
+
+    expect(execFileSync.mock.calls.filter((c) => c[0] === 'npm')).toEqual([])
+    expect(setupProject).toHaveBeenCalledWith(
+      { workspace: path.join(workspace, 'my-project'), agent: 'auto', dryRun: false, force: false },
+      {},
+    )
+    expect(messages.join('\n')).toContain('npm install')
+    expect(messages.join('\n')).toContain('npm run install:browsers')
+  })
+
+  it('registers MCP with the stable local cli path after a successful install', async () => {
+    const workspace = mkTmp()
+    process.chdir(workspace)
+    vi.spyOn(console, 'log').mockImplementation(() => {})
+    const target = path.join(workspace, 'my-project')
+    const localCli = path.join(target, 'node_modules', 'canary-lab', 'dist', 'scripts', 'cli.js')
+    // Simulate `npm install` materializing the local install.
+    execFileSync.mockImplementation((cmd: string, args: string[]) => {
+      if (cmd === 'npm' && args[0] === 'install') {
+        fs.mkdirSync(path.dirname(localCli), { recursive: true })
+        fs.writeFileSync(localCli, '#!/usr/bin/env node\n')
+      }
+      return Buffer.from('')
     })
+
+    await main(['my-project', '--package-spec', '^9.9.9'])
+
+    expect(setupProject).toHaveBeenCalledWith(
+      { workspace: target, agent: 'auto', dryRun: false, force: false },
+      { cliPath: localCli, execPath: process.execPath },
+    )
   })
 
   it('writes the chosen port into canary-lab.config.json when --port is given', async () => {

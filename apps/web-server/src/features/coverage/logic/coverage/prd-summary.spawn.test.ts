@@ -21,6 +21,12 @@ vi.mock('../../../runs/logic/runtime/auto-heal', () => ({
   pickAvailableHealAgent: vi.fn(() => null),
 }))
 
+// Prevent path resolution so spawn receives bare agent names.
+vi.mock('../../../agent-sessions/logic/agent-binary', () => ({
+  resolveAgentBinary: (agent: string) => agent,
+  isAgentKind: (cmd: string) => cmd === 'claude' || cmd === 'codex',
+}))
+
 import { summarizePrd, renderPrdSummaryMarkdown, buildPrdSummaryPrompt, readPrdSummary, PRD_SUMMARY_JSON } from './prd-summary'
 import { computeDocsHash } from '../../../coverage/logic/coverage/docs-collection'
 import type { DocsCollection } from '../../../coverage/logic/coverage/docs-collection'
