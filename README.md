@@ -20,7 +20,6 @@ Canary Lab is the independent harness on your machine: it boots your real servic
 - [Quick Start](#quick-start)
 - [Agent-First Workflow](#agent-first-workflow)
 - [What Canary Lab Owns](#what-canary-lab-owns)
-- [When to Use It](#when-to-use-it)
 - [Requirements](#requirements)
 - [Limitations](#limitations)
 - [Documentation](#documentation)
@@ -84,7 +83,7 @@ The scaffold ships sample features (some intentionally broken) so you can watch 
 A good coding agent can start a dev server and run Playwright itself. Three things it can't do alone:
 
 1. **Concurrency without conflicts.** Every run gets its own ports (filled into commands, health checks, and env files via `${port.api}`) and a git worktree per shared repo; extras queue. Several agents share one laptop safely.
-2. **Results it can't fake.** Canary Lab runs the tests; the agent only reads results and asks for a rerun. So a green run is Canary Lab's word, not the agent's.
+2. **Results it can't fake.** The agent only reads results and asks for a rerun — the harness runs the tests and owns the verdict.
 3. **Safe env switching.** Env files are backed up before changes and restored when the run ends.
 
 ## Canary Lab and docker-compose
@@ -107,7 +106,7 @@ Where Canary Lab's niche — an AI agent repairing local, multi-service e2e test
 | Env-file switching with backup/restore | manual | manual | — | ✓ |
 | Runs fully local / offline | ✓ | ✓ | — | ✓ |
 
-Skip it if `npx playwright test` already tells you enough, or you'd rather a hosted service manage your tests. It earns its place when a failure depends on more than a browser assertion — which services were up, which env was active, what the backend logged — and you want an agent to fix it unattended.
+Canary Lab earns its place when a failure depends on more than a browser assertion — which services were up, which env was active, what the backend logged — and you want an agent to fix it unattended. Skip it when `npx playwright test` already tells you enough, when you want self-healing locators, when you don't need service orchestration or env switching, or when you'd rather a hosted dashboard manage your tests.
 
 ## Quick Start
 
@@ -137,7 +136,7 @@ Restart your AI agent after setup so it discovers the Canary Lab tools. If they 
 
 ## Agent-First Workflow
 
-Canary Lab is built for an agent to drive: an AI agent or other MCP client writes tests, starts or claims runs, reads failure context, fixes code, and signals the next runner action. Canary Lab stays the local run monitor and source of truth for evidence — diagnosis and code changes happen in the agent.
+Canary Lab is built for an agent to drive: an MCP client writes tests, starts or claims runs, reads failure context, fixes code, and signals the next action. Canary Lab stays the run monitor; diagnosis and edits happen in the agent.
 
 From your workspace, just ask:
 
@@ -149,27 +148,12 @@ You can also start runs by hand from the UI, and custom clients can drive the lo
 
 ## What Canary Lab Owns
 
-Canary Lab keeps a narrow boundary. It doesn't invent a test language, an assertion model, or a browser runner — you write normal Playwright tests, and Playwright still runs them. What Canary Lab owns is the run context around Playwright:
+Canary Lab keeps a narrow boundary: no test language, assertion model, or browser runner — Playwright runs the tests. Canary Lab owns the context around them:
 
-- Feature folder structure and scaffold conventions.
-- Envset application and cleanup.
-- Service startup, health checks, PTY streams, and shutdown.
-- Per-run port allocation and git-worktree isolation for concurrent runs.
-- Run manifests, lifecycle events, logs, and retained artifacts.
-- Failure slices, summaries, diagnosis journals, and agent handoff prompts.
-- Rerun and restart signals after a fix.
-
-## When to Use It
-
-Canary Lab fits when you want to:
-
-- Let an AI agent fix failing e2e tests while the harness independently reruns them and records the outcome.
-- Run several features — or several agents — concurrently, each with isolated ports and worktrees.
-- Boot a frontend, API, worker, and dependent service together, with each service's log attached to the run that used it.
-- Run one feature against `local`, `staging`, or `production` envsets without hand-editing `.env` files.
-- Keep logs, screenshots, traces, videos, summaries, and diagnosis notes per run.
-
-Skip it when `npx playwright test` already tells you enough, when you want self-healing locators, when you don't need service orchestration or env switching, or when you'd rather have a hosted dashboard manage your tests.
+- Feature scaffolding and conventions; envset apply/cleanup.
+- Service startup, health checks, PTY streams, shutdown — with per-run port and git-worktree isolation for concurrent runs.
+- Run manifests, logs, artifacts, failure slices, summaries, and diagnosis journals.
+- Rerun/restart signals after a fix.
 
 ## Requirements
 
