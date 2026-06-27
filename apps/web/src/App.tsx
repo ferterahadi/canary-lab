@@ -18,7 +18,7 @@ import { connectWorkspaceEvents } from './features/runs/api/workspace-socket'
 import { useRuns, useRun, useGlobalActiveRun } from './features/runs/state/RunsContext'
 import { useWizardDrafts } from './features/wizard/state/WizardDraftContext'
 import { useEvaluationExports } from './features/evaluation/state/EvaluationExportContext'
-import type { Feature } from './shared/api/types'
+import type { Feature, VersionStatus } from './shared/api/types'
 import { readPersistedView, persistView, onViewChangedInOtherTab } from './shared/lib/workspace-view-state'
 
 // R12: hydrate the open view + selected feature from the URL/localStorage so a
@@ -60,6 +60,10 @@ export function App() {
   // Top-level view: the normal workspace, or a full-screen page (cleanup /
   // coverage). Hydrated from the URL/localStorage (R12) so it survives refresh.
   const [view, setView] = useState<'workspace' | 'cleanup' | 'coverage'>(PERSISTED_VIEW.view)
+  // Current-vs-latest version + self-update job state. Sourced from the server,
+  // refetched on every `version-changed` event (registry check resolved, or the
+  // update job advanced) so the footer indicator updates live.
+  const [versionStatus, setVersionStatus] = useState<VersionStatus | null>(null)
   const pendingRunSelectionRef = useRef<string | null>(PERSISTED_VIEW.run)
   const selectedFeatureRef = useRef<string | null>(null)
 
@@ -231,6 +235,13 @@ export function App() {
     }).catch(() => {})
   }, [allRuns, selectedFeature])
 
+  const refreshVersion = useCallback((): void => {
+    api.getVersionStatus().then(setVersionStatus).catch(() => {})
+  }, [])
+
+  // Initial version check on mount.
+  useEffect(() => { refreshVersion() }, [refreshVersion])
+
   useEffect(() => {
     selectedFeatureRef.current = selectedFeature
   }, [selectedFeature])
@@ -259,6 +270,9 @@ export function App() {
           if (event.type === 'verification-config-changed' && selectedFeatureRef.current === event.feature) {
             setVerificationRefreshKey((key) => key + 1)
           }
+          if (event.type === 'version-changed') {
+            refreshVersion()
+          }
         },
         // The bus has no replay, so any mutation that happened while the socket
         // was down (e.g. across a canary-apply server restart) was never
@@ -270,13 +284,14 @@ export function App() {
           setTestsRefreshKey((key) => key + 1)
           setCoverageRefreshKey((key) => key + 1)
           setVerificationRefreshKey((key) => key + 1)
+          refreshVersion()
         },
       })
     } catch {
       // Initial REST load and direct UI callbacks still keep the page usable.
     }
     return () => conn?.close()
-  }, [refreshFeatures])
+  }, [refreshFeatures, refreshVersion])
 
   const selectedFeatureEnvs =
     features.find((f) => f.name === selectedFeature)?.envs ?? []
@@ -303,6 +318,7 @@ export function App() {
           onFeaturesChanged={refreshFeatures}
           coverageRefreshKey={coverageRefreshKey}
           portsRefreshKey={portsRefreshKey}
+          versionStatus={versionStatus}
           onStartPortify={(f) => setPortifyTarget({ kind: 'new', feature: f })}
           onOpenPortify={(workflowId) => setPortifyTarget({ kind: 'revisit', workflowId })}
           onOpenCoverage={(f) => { setSelectedFeature(f); setView('coverage') }}

@@ -15,6 +15,13 @@ Each entry is tagged with the area it touches:
 
 ---
 
+## 1.4.1 — 2026-06-27
+
+- **[General]** **`init` gets you running in one step.** `npx canary-lab init <folder>` now installs dependencies and the Playwright browser and registers your agent's tools as part of scaffolding, so you can go straight to `npx canary-lab ui` — no separate `npm install` / `npm run install:browsers` / `setup`. Pass `--no-install` to scaffold only (CI / offline). Because the tool registration now happens after the install, it points at the workspace's own copy of Canary Lab rather than a throwaway `npx` cache, which also makes desktop-client (Claude/Codex Desktop) registration more reliable.
+- **[General]** **Agents launch reliably under a restricted PATH.** When the UI server was started by a desktop client (e.g. Claude or Codex Desktop), a bare `claude`/`codex` couldn't always be found, so spawning an agent could silently fail. Every place Canary Lab spawns an agent now resolves the CLI the same way — checking the usual install locations (`~/.local/bin`, Homebrew, nvm, pnpm, npm-global) and the `CANARY_LAB_CLAUDE_BIN` / `CANARY_LAB_CODEX_BIN` overrides — so a detected agent always launches.
+
+---
+
 ## 1.4.0 — 2026-06-26
 
 - **[Coverage]** **New: the Verified Coverage Ledger.** Coverage answers a simple question — are your tests actually thorough? It maps every requirement in your PRD to the tests that exercise it, shows what's covered and what's missing, and points the agent at the gaps so it can add the test cases you don't have yet. Open it from the new coverage pill on any feature.

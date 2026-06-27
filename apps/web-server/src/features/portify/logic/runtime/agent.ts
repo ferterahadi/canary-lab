@@ -4,7 +4,7 @@ import path from 'path'
 import { type ChildProcess } from 'child_process'
 import { encodeClaudeProjectDir } from '../../../agent-sessions/logic/agent-session-log'
 import { agentActivityPath } from '../../../agent-sessions/logic/agent-producer'
-import { resolveAgentBinary, type HealAgent } from '../../../runs/logic/runtime/auto-heal'
+import { type HealAgent } from '../../../runs/logic/runtime/auto-heal'
 import { PORTIFY_MODELS, modelArgs } from '../../../agent-sessions/logic/agent-models'
 import { runAgentProcess, buildClaudeAgenticArgs } from '../../../agent-sessions/logic/agent-process'
 
@@ -30,14 +30,12 @@ export function isAgentSessionLimited(output: string): boolean {
 // (no human in this loop). For claude we pin a session id on attempt 1 and
 // `--resume` it on retries so the agent keeps context across attempts.
 //
-// Resolves the binary to an ABSOLUTE path (resolveAgentBinary) rather than
-// spawning the bare command name. A UI server launched by a GUI client (e.g.
-// Claude Desktop) has a minimal PATH that omits ~/.local/bin etc.; agent
-// detection already probes those well-known homes, so the spawn must use the
-// SAME resolution — otherwise a detected agent silently fails to launch and
-// the empty edit reads downstream as "no port slots declared". A launch
-// failure REJECTS so the orchestrator fails fast with a clear message instead
-// of cycling through empty retries.
+// The runner resolves the bare agent kind to an ABSOLUTE path (see
+// runAgentProcess): a UI server launched by a GUI client (e.g. Claude Desktop)
+// has a minimal PATH that omits ~/.local/bin etc., so spawning the bare name
+// would silently fail and the empty edit would read downstream as "no port
+// slots declared". A genuine launch failure REJECTS so the orchestrator fails
+// fast with a clear message instead of cycling through empty retries.
 
 export function runPortifyAgent(opts: {
   agent: HealAgent
@@ -56,9 +54,6 @@ export function runPortifyAgent(opts: {
   const args = agent === 'claude'
     ? buildClaudeAgenticArgs(prompt, { model: PORTIFY_MODELS.claude, sessionId, resume })
     : ['exec', '--full-auto', ...modelArgs(PORTIFY_MODELS.codex), prompt]
-  // Absolute path when resolvable; bare name otherwise so spawn surfaces a real
-  // ENOENT through the runner's 'error' (rejection) path.
-  const bin = resolveAgentBinary(agent) ?? agent
   let out: number | null = null
   if (logPath) {
     try { out = fs.openSync(logPath, 'a') } catch { out = null }
@@ -68,7 +63,7 @@ export function runPortifyAgent(opts: {
   let sessionLimited = false
   let tail = ''
   const handle = runAgentProcess({
-    command: bin,
+    command: agent,
     args,
     cwd,
     captureStdout: false,
@@ -106,7 +101,7 @@ export function runPortifyAgent(opts: {
     // simply made no edits — record it to the log and reject so the caller can
     // report it instead of letting verify mislabel it "no port slots declared".
     (err: Error) => {
-      const msg = `could not launch the ${agent} CLI (${bin}): ${err.message}`
+      const msg = `could not launch the ${agent} CLI: ${err.message}`
       if (out !== null) { try { fs.writeSync(out, `\n${msg}\n`) } catch { /* noop */ } }
       cleanup()
       throw new Error(msg)
