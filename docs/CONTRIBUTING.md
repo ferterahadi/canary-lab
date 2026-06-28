@@ -1,58 +1,45 @@
 # Contributing to Canary Lab
 
-Thanks for working on Canary Lab. This guide covers local development and the build
-and test workflow. For user-facing usage, see the [README](../README.md). For the
-module map, run lifecycle, and internal mechanisms, see
-[ARCHITECTURE.md](ARCHITECTURE.md).
+**Quickstart** — branch off `main` → code → `npm run build && npm test && npm run smoke:pack` → PR back into `main`.
+
+> Usage: [README](../README.md) · Internals: [ARCHITECTURE.md](ARCHITECTURE.md)
 
 ## Code Orientation
 
-Both apps are organized by feature, not by layer. `apps/web-server/src/features/` and
-`apps/web/src/features/` share one taxonomy — `runs`, `agent-sessions`, `coverage`,
-`wizard`, `evaluation`, `config`, `portify`, `benchmark` (web also has UI-only `logs`)
-— so a feature traces client↔server. Cross-feature infra lives in each app's
-`src/shared/`. Key entry points:
+Both apps are organized **by feature, not by layer**. `apps/web-server/src/features/`
+and `apps/web/src/features/` share one taxonomy — `runs`, `agent-sessions`,
+`coverage`, `wizard`, `evaluation`, `config`, `portify`, `benchmark` (web also has
+UI-only `logs`) — so a feature traces client↔server. Cross-feature infra lives in
+each app's `src/shared/`.
 
-- `apps/web-server/server.ts`: local Fastify app, UI assets, routes, and WebSocket streams
-- `apps/web-server/src/features/runs/logic/runtime/orchestrator.ts`: service startup, health checks, Playwright runs, manifests, envset cleanup, and heal-loop signals
-- `apps/web-server/src/features/runs/logic/run-store.ts`: per-run manifests, summaries, Playwright events, and artifacts for the UI
-- `apps/web-server/src/features/runs/logic/runtime/env-switcher/switch.ts`: low-level env-file apply and revert logic
-- `feature-support/`: public import surface for generated projects (`shared/` exposed via `package.json` exports)
+| Entry point | What it does |
+|---|---|
+| `apps/web-server/server.ts` | Fastify app, UI assets, routes, WebSocket streams |
+| `…/runs/logic/runtime/orchestrator.ts` | services, health checks, Playwright runs, heal signals |
+| `…/runs/logic/run-store.ts` | per-run manifests, summaries, events, artifacts |
+| `…/runs/logic/runtime/env-switcher/switch.ts` | env-file apply/revert |
+| `feature-support/` | public import surface for generated projects |
 
-Everything under `apps/`, `scripts/`, and `shared/` is internal unless exposed through `canary-lab/feature-support/...`.
-
-## Run Architecture
-
-The run code path (with diagram) lives in
-[ARCHITECTURE.md → Run Lifecycle](ARCHITECTURE.md#run-lifecycle).
-
-## Local Development
-
-```bash
-npm install
-npm run build
-```
-
-## Repository Layout
-
-The full module map lives in
-[ARCHITECTURE.md → Module Map](ARCHITECTURE.md#module-map). The package exposes
-`canary-lab/feature-support/...` through `package.json` exports; everything else is
-internal.
+Everything under `apps/`, `scripts/`, `shared/` is **internal** unless exposed via
+`canary-lab/feature-support/...`. Full map: [ARCHITECTURE.md → Module Map](ARCHITECTURE.md#module-map).
+Run path + diagram: [ARCHITECTURE.md → Run Lifecycle](ARCHITECTURE.md#run-lifecycle).
 
 ## Build and Test
 
 ```bash
-npm run build
+npm install
+npm run build          # required first
 npm test
-npm run smoke:pack
+npm run smoke:pack     # after any template/packaging change
 ```
 
-Use `npm run test:watch` during development and `npm run test:coverage` for coverage.
-Typecheck with `npx tsc -p tsconfig.build.json --noEmit`.
-
-`smoke:pack` builds, packs, scaffolds a temporary project, installs dependencies, and verifies the scaffold flow. Run it after changing templates or packaging.
+| Command | When |
+|---|---|
+| `npm run test:watch` | active development |
+| `npm run test:coverage` | coverage report |
+| `npx tsc -p tsconfig.build.json --noEmit` | typecheck |
+| `npm run smoke:pack` | packs, scaffolds, installs, verifies scaffold flow |
 
 ## Pull Requests
 
-Open a pull request against `main`.
+Branch off `main` → PR back into `main`.

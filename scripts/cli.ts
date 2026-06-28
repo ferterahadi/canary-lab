@@ -29,7 +29,7 @@ function confirmYn(orphanCount: number): Promise<boolean> {
 export function printUsage(): void {
   banner('Canary Lab')
   section('Usage')
-  console.log(`  canary-lab init <folder> ${dim('[--package-spec <spec>]')}`)
+  console.log(`  canary-lab init <folder> ${dim('[--package-spec <spec>] [--port <port>] [--no-install]')}`)
   console.log(`  canary-lab setup ${dim('[--workspace <path>] [--agent auto|codex|claude|all] [--dry-run] [--force]')}`)
   console.log(`  canary-lab ui`)
   console.log(`  canary-lab mcp ${dim('[doctor] [--url <url>] [--profile repair|verify|author|portify|lifecycle|full] [--client-kind <kind>]')}`)

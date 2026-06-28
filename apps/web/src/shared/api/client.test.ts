@@ -105,6 +105,8 @@ import {
   clearPrdSummary,
   removePortifyOverlay,
   cleanupPortify,
+  getVersionStatus,
+  startVersionUpdate,
 } from './client'
 
 const ok = (body: unknown, status = 200): Response =>
@@ -156,6 +158,31 @@ describe('api client', () => {
   it('changeProjectPort rethrows non-409 errors', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(fail(400, { error: 'port must be an integer between 1 and 65535' }))
     await expect(changeProjectPort(99999, false, { fetchImpl })).rejects.toMatchObject({ status: 400 })
+  })
+
+  it('getVersionStatus GETs /api/version', async () => {
+    const status = {
+      current: '1.4.1',
+      latest: '1.4.2',
+      updateAvailable: true,
+      packageName: 'canary-lab',
+      update: null,
+    }
+    const fetchImpl = vi.fn().mockResolvedValue(ok(status))
+    const result = await getVersionStatus({ baseUrl: 'http://x', fetchImpl })
+    expect(result).toEqual(status)
+    expect(fetchImpl).toHaveBeenCalledWith('http://x/api/version', { method: 'GET' })
+  })
+
+  it('startVersionUpdate POSTs /api/version/update', async () => {
+    const manifest = { jobId: 'current', status: 'running', targetVersion: '1.4.2', startedAt: 't0', log: '' }
+    const fetchImpl = vi.fn().mockResolvedValue(ok(manifest, 202))
+    const result = await startVersionUpdate({ baseUrl: 'http://x', fetchImpl })
+    expect(result).toEqual(manifest)
+    expect(fetchImpl).toHaveBeenCalledWith('http://x/api/version/update', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+    })
   })
 
   it('getFeatureTests URL-encodes the feature name', async () => {

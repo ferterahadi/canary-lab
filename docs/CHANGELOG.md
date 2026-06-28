@@ -15,6 +15,14 @@ Each entry is tagged with the area it touches:
 
 ---
 
+## 1.4.1 — 2026-06-27
+
+- **[General]** **`init` gets you running in one step.** `npx canary-lab init <folder>` installs deps, browsers, and registers agent tools — go straight to `npx canary-lab ui`. Pass `--no-install` to scaffold only.
+- **[General]** **Agents launch reliably under a restricted PATH.** When started by a desktop client, `claude`/`codex` could silently fail to resolve. Canary Lab now checks all the usual install locations and respects `CANARY_LAB_CLAUDE_BIN` / `CANARY_LAB_CODEX_BIN` overrides.
+- **[General]** **Know when a new version is out — and update in one click.** A small version indicator now sits in the Features-column footer, next to the theme toggle. It checks the npm registry and shows whether you're up to date or a newer Canary Lab has been published. Click it for the details: when an update is available, install it right there (`npm install canary-lab@latest` runs in your workspace), then restart `canary-lab ui` to apply. It stays quiet when you're current, confirms your version on click, and never blocks startup if the registry can't be reached.
+
+---
+
 ## 1.4.0 — 2026-06-26
 
 - **[Coverage]** **New: the Verified Coverage Ledger.** Coverage answers a simple question — are your tests actually thorough? It maps every requirement in your PRD to the tests that exercise it, shows what's covered and what's missing, and points the agent at the gaps so it can add the test cases you don't have yet. Open it from the new coverage pill on any feature.
@@ -67,6 +75,7 @@ Each entry is tagged with the area it touches:
 - **[General]** **Cleaner UI.** Run details, external repair, verification, export, and status screens have been tightened up with clearer labels, less clutter, and steadier status updates.
 
 ---
+
 ## 1.0.x — 2026-04-30 – 2026-05-17
 
 > The headline change in 1.0.0: Canary Lab is now driven from a local web UI (`canary-lab ui`) instead of a stack of iTerm tabs. Run `npx canary-lab upgrade` after upgrading to refresh managed scaffold files.

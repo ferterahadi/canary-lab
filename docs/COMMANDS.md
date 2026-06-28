@@ -3,7 +3,7 @@
 CLI reference for Canary Lab. For the overview, quick start, and core workflow, see the [README](../README.md).
 
 ```bash
-npx canary-lab init <folder> [--port <port>]
+npx canary-lab init <folder> [--port <port>] [--no-install]
 npx canary-lab setup
 npx canary-lab ui
 npx canary-lab mcp [--profile repair|verify|author|portify|lifecycle|full]
@@ -14,6 +14,7 @@ npx canary-lab env revert <feature>
 npx canary-lab upgrade
 ```
 
+- `init` scaffolds the workspace, then runs `npm install` + the Playwright browser download and registers tools — so `ui` boots immediately. Pass `--no-install` to scaffold only (CI / offline) and install manually afterward.
 - `ui` is the primary human workflow.
 - `setup` refreshes the agent/tool registration described in [Quick Start](../README.md#quick-start).
 - `mcp` bridges local AI clients into the UI server, starting it if needed. It defaults to `lifecycle` — the everyday end-to-end loop (authoring + run/heal + verify + export, no portify). Narrow it with `--profile repair` for run/heal only, `--profile verify` for deployment checks, `--profile author` for authoring; use `--profile portify` for the specialized port-injection workflow, or `--profile full` for the complete surface (lifecycle + portify).

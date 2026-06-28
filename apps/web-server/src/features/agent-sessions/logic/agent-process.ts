@@ -2,6 +2,7 @@ import fs from 'fs'
 import { spawn as nodeSpawn, type ChildProcess } from 'child_process'
 import { modelArgs } from '../../agent-sessions/logic/agent-models'
 import { startIdleTimer, type IdleTimer } from '../../agent-sessions/logic/agent-idle-timer'
+import { resolveAgentBinary, isAgentKind, type HealAgent } from '../../agent-sessions/logic/agent-binary'
 
 // One home for spawning an agent CLI (the Portify model): pipe stdout/stderr,
 // reset the idle clock on every chunk (the liveness signal), kill on a genuine
@@ -47,6 +48,13 @@ export interface AgentProcessHandle {
 }
 
 export interface RunAgentProcessOpts {
+  /**
+   * The CLI to spawn. A bare agent kind (`'claude'` / `'codex'`) is resolved to
+   * an absolute path via `resolveBinary` — so spawns survive a restricted PATH
+   * (e.g. when the server is launched by Claude/Codex Desktop), and no call site
+   * has to remember to resolve first. Any other string (an absolute path, a test
+   * stub) is spawned verbatim.
+   */
   command: string
   args: string[]
   cwd?: string
@@ -68,6 +76,8 @@ export interface RunAgentProcessOpts {
   onTick?: (idleMs: number) => void
   /** Override spawn (tests). */
   spawnImpl?: typeof nodeSpawn
+  /** Override agent-kind → path resolution (tests). Defaults to resolveAgentBinary. */
+  resolveBinary?: (agent: HealAgent) => string | null
 }
 
 // Every CLI spawned through here is a runner-spawned agent (benchmark sabotage,
@@ -86,10 +96,14 @@ function runnerPtyClientKind(command: string): 'claude-pty' | 'codex-pty' | null
 
 export function runAgentProcess(opts: RunAgentProcessOpts): AgentProcessHandle {
   const spawnImpl = opts.spawnImpl ?? nodeSpawn
+  const resolveBinary = opts.resolveBinary ?? resolveAgentBinary
   const captureStdout = opts.captureStdout ?? true
   const useStdin = opts.stdin !== undefined
-  const ptyKind = runnerPtyClientKind(opts.command)
-  const child = spawnImpl(opts.command, opts.args, {
+  // Resolve a bare agent kind to an absolute path (bare fallback so a genuine
+  // ENOENT still surfaces through the 'error' path); spawn anything else as-is.
+  const command = isAgentKind(opts.command) ? (resolveBinary(opts.command) ?? opts.command) : opts.command
+  const ptyKind = runnerPtyClientKind(command)
+  const child = spawnImpl(command, opts.args, {
     cwd: opts.cwd,
     stdio: [useStdin ? 'pipe' : 'ignore', 'pipe', 'pipe'],
     env: ptyKind
