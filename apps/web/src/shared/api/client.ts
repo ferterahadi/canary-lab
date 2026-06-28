@@ -28,6 +28,8 @@ import type {
   CoverageJobManifest,
   FeatureDocsListing,
   PrdSummary,
+  VersionStatus,
+  UpdateJobManifest,
 } from './types'
 import type {
   BenchmarkIndexEntry,
@@ -888,6 +890,24 @@ export async function changeProjectPort(
     }
     throw e
   }
+}
+
+// Current vs latest published version + the self-update job state.
+export function getVersionStatus(opts?: ClientOptions): Promise<VersionStatus> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<VersionStatus>(`${baseUrl}/api/version`, { method: 'GET' }, fetchImpl)
+}
+
+// Start `npm install <pkg>@latest` in the workspace. Returns the running job
+// manifest (202). A 409 means there's nothing newer or an install is already
+// in flight — its `{ error }` surfaces as the thrown ApiError message.
+export function startVersionUpdate(opts?: ClientOptions): Promise<UpdateJobManifest> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<UpdateJobManifest>(
+    `${baseUrl}/api/version/update`,
+    { method: 'POST', headers: { 'content-type': 'application/json' } },
+    fetchImpl,
+  )
 }
 
 export function openAgentApp(agent: 'claude' | 'codex', opts?: ClientOptions): Promise<{ opened: boolean }> {

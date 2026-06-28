@@ -19,6 +19,12 @@ vi.mock('../../../runs/logic/runtime/auto-heal', () => ({
   pickAvailableHealAgent: vi.fn(() => null),
 }))
 
+// Prevent path resolution so spawn receives bare agent names.
+vi.mock('../../../agent-sessions/logic/agent-binary', () => ({
+  resolveAgentBinary: (agent: string) => agent,
+  isAgentKind: (cmd: string) => cmd === 'claude' || cmd === 'codex',
+}))
+
 import { proposeCoverageMappings } from './annotate-engine'
 import type { Requirement } from '../../../../../../../shared/coverage/types'
 import { startIdleTimer } from '../../../agent-sessions/logic/agent-idle-timer'

@@ -40,6 +40,10 @@ import {
   resolveWorkflowAgentRef,
 } from './src/features/agent-sessions/logic/agent-session-log'
 import { WorkspaceEventBus } from './src/shared/workspace-events'
+import { UpdateJobStore } from './src/features/version/logic/update-job'
+import { VersionState } from './src/features/version/logic/version-state'
+import { versionRoutes } from './src/features/version/routes/version'
+import { getInstalledPackageName, getInstalledPackageVersion } from '../../shared/runtime/upgrade-check'
 import { PaneBroker } from './src/features/runs/logic/pane-broker'
 import { loadFeatures } from './src/features/config/logic/feature-loader'
 import {
@@ -202,6 +206,26 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
   const coverageJobStore = new CoverageJobRunStore(logsDir)
   coverageJobStore.reconcileInterrupted(() => new Date().toISOString())
   const workspaceEvents = new WorkspaceEventBus()
+  // Self-update job (npm install <pkg>@latest). A job left 'running' belongs to a
+  // dead process — flip it to 'aborted' so it doesn't hold the single-flight lock
+  // or show as installing forever.
+  const updateStore = new UpdateJobStore(logsDir)
+  updateStore.reconcileInterrupted(() => new Date().toISOString())
+  // `runningVersion` is snapshotted once here — it's the version this process is
+  // executing. A successful self-update rewrites package.json on disk, but the
+  // running code stays old until restart, so we compare the registry `latest`
+  // against this snapshot (not a fresh disk read) to keep the "restart to apply"
+  // signal alive after an install.
+  const versionState = new VersionState({
+    packageName: getInstalledPackageName(),
+    runningVersion: getInstalledPackageVersion(),
+    workspaceEvents,
+  })
+  // Fire-and-forget registry check on boot, then re-check every 6h. Fail-silent;
+  // never blocks startup. Unref so the interval can't keep the process alive.
+  void versionState.refresh()
+  const versionCheckTimer = setInterval(() => { void versionState.refresh() }, 6 * 60 * 60 * 1000)
+  if (typeof versionCheckTimer.unref === 'function') versionCheckTimer.unref()
   // One-shot cleanup: a fresh UI server starts with an empty registry, so any
   // persisted 'running'/'healing' row is from a previous server process and is
   // not controllable by this process. Finalize it immediately instead of
@@ -324,6 +348,12 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
     projectRoot: opts.projectRoot,
     countActiveRuns: () => runStore.list().filter((run) => isActiveRunStatus(run.status)).length,
     onPortChange: opts.onPortChange,
+  })
+  await app.register(versionRoutes, {
+    projectRoot: opts.projectRoot,
+    state: versionState,
+    updateStore,
+    workspaceEvents,
   })
   await app.register(journalRoutes, { logsDir, journalPath })
   // `restartLocalHeal` deferred until after the runs route declares its
