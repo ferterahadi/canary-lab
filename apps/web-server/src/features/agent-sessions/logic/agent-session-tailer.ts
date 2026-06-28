@@ -1,9 +1,9 @@
 import fs from 'fs'
-import path from 'path'
 import {
   type AgentEvent,
   type AgentKind,
   type AgentSessionRef,
+  claudeSessionLogPath,
   locateLatestSessionLogForAgent,
   parseAgentSessionLine,
 } from '../../agent-sessions/logic/agent-session-log'
@@ -200,11 +200,12 @@ export function refForAgentSpawn(opts: {
   sessionId?: string
 }): AgentSessionRef {
   if (opts.agent === 'claude' && opts.sessionId) {
-    const encoded = opts.cwd.replace(/\//g, '-')
     return {
       agent: 'claude',
       sessionId: opts.sessionId,
-      logPath: path.join(process.env.HOME ?? '', '.claude', 'projects', encoded, `${opts.sessionId}.jsonl`),
+      // Canonical resolver: honors CLAUDE_CONFIG_DIR + realpath/encoding rules
+      // instead of recomputing `~/.claude/projects/...` (and `$HOME`) by hand.
+      logPath: claudeSessionLogPath(opts.cwd, opts.sessionId),
     }
   }
   return {
