@@ -4,6 +4,8 @@ import os from 'os'
 import path from 'path'
 import {
   encodeClaudeProjectDir,
+  claudeConfigDir,
+  codexConfigDir,
   claudeSessionLogPath,
   locateClaudeSessionLog,
   findClaudeLogBySessionId,
@@ -46,6 +48,77 @@ describe('claudeSessionLogPath', () => {
     const fakeCwd = '/this/path/does/not/exist'
     const result = claudeSessionLogPath(fakeCwd, 'sess-2', homeDir)
     expect(result).toBe(path.join(homeDir, '.claude', 'projects', encodeClaudeProjectDir(fakeCwd), 'sess-2.jsonl'))
+  })
+})
+
+describe('config-dir resolution (env overrides)', () => {
+  const savedClaude = process.env.CLAUDE_CONFIG_DIR
+  const savedCodex = process.env.CODEX_HOME
+  afterEach(() => {
+    if (savedClaude === undefined) delete process.env.CLAUDE_CONFIG_DIR
+    else process.env.CLAUDE_CONFIG_DIR = savedClaude
+    if (savedCodex === undefined) delete process.env.CODEX_HOME
+    else process.env.CODEX_HOME = savedCodex
+  })
+
+  it('falls back to the home dotdir when no override is set', () => {
+    delete process.env.CLAUDE_CONFIG_DIR
+    delete process.env.CODEX_HOME
+    expect(claudeConfigDir(homeDir)).toBe(path.join(homeDir, '.claude'))
+    expect(codexConfigDir(homeDir)).toBe(path.join(homeDir, '.codex'))
+  })
+
+  it('honors CLAUDE_CONFIG_DIR / CODEX_HOME over the home dotdir', () => {
+    process.env.CLAUDE_CONFIG_DIR = '/relocated/claude'
+    process.env.CODEX_HOME = '/relocated/codex'
+    expect(claudeConfigDir(homeDir)).toBe('/relocated/claude')
+    expect(codexConfigDir(homeDir)).toBe('/relocated/codex')
+  })
+
+  it('ignores a blank/whitespace override', () => {
+    process.env.CLAUDE_CONFIG_DIR = '   '
+    process.env.CODEX_HOME = ''
+    expect(claudeConfigDir(homeDir)).toBe(path.join(homeDir, '.claude'))
+    expect(codexConfigDir(homeDir)).toBe(path.join(homeDir, '.codex'))
+  })
+
+  it('finds a claude log under CLAUDE_CONFIG_DIR when the home dotdir is empty', () => {
+    const relocated = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-asl-cfg-')))
+    process.env.CLAUDE_CONFIG_DIR = relocated
+    const sessionId = 'relocated-sid'
+    const projectDir = path.join(relocated, 'projects', '-some-proj')
+    fs.mkdirSync(projectDir, { recursive: true })
+    const jsonl = path.join(projectDir, `${sessionId}.jsonl`)
+    fs.writeFileSync(jsonl, '')
+    try {
+      // homeDir has no `.claude` at all — the only way this resolves is via the override.
+      expect(findClaudeLogBySessionId(sessionId, homeDir)).toBe(jsonl)
+    } finally {
+      fs.rmSync(relocated, { recursive: true, force: true })
+    }
+  })
+
+  it('discovers a codex log under CODEX_HOME', () => {
+    const relocated = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-asl-cdx-')))
+    process.env.CODEX_HOME = relocated
+    const runDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-asl-run-')))
+    const dir = path.join(relocated, 'sessions', '2026', '05', '11')
+    fs.mkdirSync(dir, { recursive: true })
+    const jsonl = path.join(dir, 'rollout-2026-05-11T01-23-00-abc.jsonl')
+    fs.writeFileSync(
+      jsonl,
+      JSON.stringify({ type: 'session_meta', timestamp: '2026-05-11T01:23:00.000Z', payload: { id: 'cdx-1', cwd: runDir, timestamp: '2026-05-11T01:23:00.000Z' } }) + '\n',
+    )
+    try {
+      expect(locateCodexSessionLog(runDir, '2026-05-11T01:23:00.000Z', homeDir)).toEqual({
+        agent: 'codex',
+        sessionId: 'cdx-1',
+        logPath: jsonl,
+      })
+    } finally {
+      fs.rmSync(relocated, { recursive: true, force: true })
+      fs.rmSync(runDir, { recursive: true, force: true })
+    }
   })
 })
 

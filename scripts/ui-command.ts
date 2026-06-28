@@ -10,6 +10,7 @@ import { getProjectRoot, isCanaryLabWorkspace } from '../shared/runtime/project-
 import { openBrowser } from '../apps/web-server/src/shared/open-browser'
 import { loadProjectConfig, resolveProjectPort } from '../apps/web-server/src/features/runs/logic/runtime/launcher/project-config'
 import { registerActiveServer, unregisterActiveServer } from '../shared/runtime/active-servers'
+import { hydrateAgentConfigEnvFromShell } from '../apps/web-server/src/features/agent-sessions/logic/agent-config-env'
 import { refreshAgentIntegrationsQuietly } from './agent'
 
 // Graceful-teardown ceiling. Long enough for an honest run abort + app.close,
@@ -65,6 +66,15 @@ export async function runUi(argv: string[], opts: UiCommandOptions = {}): Promis
     requestExit(1)
     return
   }
+  // Back-fill CLAUDE_CONFIG_DIR / CODEX_HOME from the user's interactive shell
+  // (rc file) before any agent is spawned. Without this, a heal agent run under
+  // `$SHELL -i -c` could write its session log to an rc-configured home the
+  // server doesn't know to read — a silently-blank AgentSessionView. Best-effort
+  // and a no-op when the launching env already carries the vars.
+  for (const [name, value] of Object.entries(hydrateAgentConfigEnvFromShell())) {
+    log(`Detected ${name}=${value} from your shell config.`)
+  }
+
   const port = resolveProjectPort(loadProjectConfig(projectRoot))
   const recordActiveServer = opts.recordActiveServer
     ?? ((root: string, p: number) => { registerActiveServer({ projectRoot: root, port: p, pid: process.pid }) })
