@@ -1105,7 +1105,10 @@ describe('RunOrchestrator.runPlaywright', () => {
     const secondRun = orch.runPlaywright()
     spawned.at(-1)!.emitExit(1)
     await secondRun
-    expect(spawned.at(-1)!.options.command).not.toContain('--max-failures=')
+    // The rewritten config omits healOnFailureThreshold, so the disk reload
+    // picks up the default (2) rather than the prior 4 — proving the refresh
+    // and the every-feature default both apply per spawn.
+    expect(spawned.at(-1)!.options.command).toContain('--max-failures=2')
   })
 
   it('mirrors per-test artifact dirs into playwright-artifacts-keep on Playwright exit', async () => {

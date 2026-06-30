@@ -1,8 +1,7 @@
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { type ChildProcess } from 'child_process'
-import { encodeClaudeProjectDir } from '../../../agent-sessions/logic/agent-session-log'
+import { claudeSessionLogPath } from '../../../agent-sessions/logic/agent-session-log'
 import { agentActivityPath } from '../../../agent-sessions/logic/agent-producer'
 import { type HealAgent } from '../../../runs/logic/runtime/auto-heal'
 import { PORTIFY_MODELS, modelArgs } from '../../../agent-sessions/logic/agent-models'
@@ -114,8 +113,9 @@ export function runPortifyAgent(opts: {
 // shape the benchmark setup view uses).
 export function writePortifyClaudeRef(workflowDir: string, cwd: string, sessionId: string): void {
   try {
-    const realCwd = fs.realpathSync(cwd)
-    const logPath = path.join(os.homedir(), '.claude', 'projects', encodeClaudeProjectDir(realCwd), `${sessionId}.jsonl`)
+    // Route through the canonical resolver so this honors CLAUDE_CONFIG_DIR and
+    // the realpath/encoding rules instead of recomputing the path by hand.
+    const logPath = claudeSessionLogPath(cwd, sessionId)
     const ref = { activeAgent: 'claude', sessions: { claude: { agent: 'claude', sessionId, logPath } } }
     fs.writeFileSync(path.join(workflowDir, 'agent-session.json'), JSON.stringify(ref, null, 2))
   } catch {

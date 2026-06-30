@@ -15,6 +15,14 @@ Each entry is tagged with the area it touches:
 
 ---
 
+## 1.4.2 — 2026-06-30
+
+- **[Test Runner]** **Every feature stops and heals after 2 failures by default.** As soon as 2 tests fail, Playwright stops and the repair loop kicks in — no waiting for the whole suite. Two is the sweet spot for log size: enough signal for the healing agent to work from, few enough that it reads the failures in one pass instead of choking on too much context at once. To run the full suite first on a feature, set "Stop & heal after" to off in its General config.
+- **[Test Runner]** **The healing agent knows how big each log is.** The failure index now shows each log slice's size up front and, when a slice was trimmed to fit, says so and points at the full log on disk — so the agent can read it in one go or grep into it for the part it needs, instead of working from a silently-clipped excerpt.
+- **[General]** **Agent views work when your CLI config lives somewhere custom.** If you've relocated `claude` or `codex` config with `CLAUDE_CONFIG_DIR` / `CODEX_HOME` (multi-account, sandboxed, or CI setups), Canary now reads session logs from the same place the CLI writes them — and probes your interactive shell at boot to pick up vars set only in your rc file. Fixes a silently-blank agent view that looked like "the agent produced nothing."
+
+---
+
 ## 1.4.1 — 2026-06-27
 
 - **[General]** **`init` gets you running in one step.** `npx canary-lab init <folder>` installs deps, browsers, and registers agent tools — go straight to `npx canary-lab ui`. Pass `--no-install` to scaffold only.

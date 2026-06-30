@@ -107,8 +107,16 @@ export interface FeatureConfig {
   tunnels?: NgrokTunnel[]              // used by the tunnel env — one ngrok tab per entry
   startScript?: Record<string, string> // optional override: env name → absolute path to tsx script
   featureDir: string                   // absolute path to feature folder
-  // Mid-Run Heal: when set, Playwright is invoked with --max-failures=<N> so
-  // the heal loop fires as soon as N tests fail rather than waiting for the
-  // whole suite to finish. Omit to let the full suite finish before healing.
+  // Mid-Run Heal: Playwright is invoked with --max-failures=<N> so the heal
+  // loop fires as soon as N tests fail rather than waiting for the whole suite
+  // to finish. When omitted, `loadFeatures` applies
+  // DEFAULT_HEAL_ON_FAILURE_THRESHOLD so every feature stops & heals after the
+  // default number of failures. Set explicitly to `0` to opt out and let the
+  // full suite finish before healing.
   healOnFailureThreshold?: number
 }
+
+// Default for `healOnFailureThreshold` applied by `loadFeatures` to any feature
+// that doesn't set it: stop & heal as soon as this many tests fail. `0` opts
+// out (run the whole suite first). Keep in sync with the GeneralTab UI default.
+export const DEFAULT_HEAL_ON_FAILURE_THRESHOLD = 2
