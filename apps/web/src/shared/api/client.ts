@@ -903,9 +903,11 @@ export function getVersionStatus(opts?: ClientOptions): Promise<VersionStatus> {
 // in flight — its `{ error }` surfaces as the thrown ApiError message.
 export function startVersionUpdate(opts?: ClientOptions): Promise<UpdateJobManifest> {
   const { baseUrl, fetchImpl } = defaultOpts(opts)
+  // No body — declaring application/json with an empty body makes Fastify
+  // reject the request (FST_ERR_CTP_EMPTY_JSON_BODY) before the handler runs.
   return request<UpdateJobManifest>(
     `${baseUrl}/api/version/update`,
-    { method: 'POST', headers: { 'content-type': 'application/json' } },
+    { method: 'POST' },
     fetchImpl,
   )
 }

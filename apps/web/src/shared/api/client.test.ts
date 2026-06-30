@@ -179,9 +179,10 @@ describe('api client', () => {
     const fetchImpl = vi.fn().mockResolvedValue(ok(manifest, 202))
     const result = await startVersionUpdate({ baseUrl: 'http://x', fetchImpl })
     expect(result).toEqual(manifest)
+    // No body and no content-type: declaring application/json with an empty
+    // body makes Fastify reject the request before the handler runs.
     expect(fetchImpl).toHaveBeenCalledWith('http://x/api/version/update', {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
     })
   })
 

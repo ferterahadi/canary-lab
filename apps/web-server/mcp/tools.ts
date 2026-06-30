@@ -90,6 +90,7 @@ import {
   deriveRunActionAvailability,
 } from '../../../shared/run-state'
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../src/shared/workspace-events'
+import { encodeToonTable } from '../src/shared/toon'
 import type {
   PortifyManifest,
   StartExternalPortifyInput,
@@ -516,26 +517,31 @@ export function registerCanaryLabTools(
   // ─── reads ────────────────────────────────────────────────────────────
 
   registerTool('list_features', {
-    description: 'List existing Canary Lab features when you need to choose or inspect one. Do not call this before random/new feature creation; call create_feature directly with a unique name and retry on collision.',
+    description: 'List existing Canary Lab features when you need to choose or inspect one. Do not call this before random/new feature creation; call create_feature directly with a unique name and retry on collision. Returned as a TOON table `[N]{name,description,envs,repos}:`. To keep one flat row per feature, the list-valued columns are packed: `envs` is `|`-joined env names; `repos` is `|`-joined repo entries, each `name@localPath@branch` (branch empty if none). Split on `|` then `@` to unpack.',
     inputSchema: {},
   }, async () => {
     const features = loadFeatures(deps.featuresDir).map((f) => ({
       name: f.name,
       description: f.description ?? '',
-      envs: f.envs ?? [],
-      repos: (f.repos ?? []).map((r) => ({ name: r.name, localPath: r.localPath, branch: r.branch ?? null })),
+      // Pack the list-valued fields into delimited scalars so the array reaches
+      // the TOON tabular form (one flat row per feature) instead of the verbose
+      // list form. Lossless for paths/branches that don't contain `@` or `|`.
+      envs: (f.envs ?? []).join('|'),
+      repos: (f.repos ?? [])
+        .map((r) => [r.name, r.localPath, r.branch ?? ''].join('@'))
+        .join('|'),
     }))
-    return asJsonResult(features)
+    return asToonResult(features)
   })
 
   registerTool('list_runs', {
-    description: 'List Canary Lab runs, newest first (default 20 — raise `limit` for more history). Optionally filter by feature. Each row is already slim (id, feature, status, timestamps); fetch one run\'s detail with get_run.',
+    description: 'List Canary Lab runs, newest first (default 20 — raise `limit` for more history). Optionally filter by feature. Each row is already slim (id, feature, status, timestamps); fetch one run\'s detail with get_run. Returned as a TOON table: a `[N]{col,...}:` header line followed by one comma-separated row per run (quoted cells are JSON-escaped strings).',
     inputSchema: {
       feature: z.string().optional().describe('Feature name. Omit to list across all features.'),
       limit: z.number().int().positive().max(200).default(20).describe('Max runs to return, newest first. Default 20.'),
     },
   }, async ({ feature, limit }) => {
-    return asJsonResult(deps.store.list(feature ? { feature } : {}).slice(0, limit))
+    return asToonResult(deps.store.list(feature ? { feature } : {}).slice(0, limit))
   })
 
   registerTool('get_run', {
@@ -1211,11 +1217,11 @@ export function registerCanaryLabTools(
   })
 
   registerTool('list_evaluation_exports', {
-    description: 'List persisted evaluation export tasks.',
+    description: 'List persisted evaluation export tasks. Returned as a TOON table: a `[N]{col,...}:` header line followed by one comma-separated row per task (quoted cells are JSON-escaped strings).',
     inputSchema: { runId: z.string().optional() },
   }, async ({ runId }) => {
     const tasks = listEvaluationExportTasks(deps.store.logsDir, runId ? { runId } : {})
-    return asJsonResult(tasks.map(evaluationExportTaskView))
+    return asToonResult(tasks.map(evaluationExportTaskView))
   })
 
   registerTool('get_evaluation_export', {
@@ -2382,6 +2388,15 @@ function asJsonResult(value: unknown): CallToolResult {
   // Compact (no indentation): the model parses JSON regardless, and the 2-space
   // pretty-print was pure whitespace tokens on every result across all tools.
   return { content: [{ type: 'text', text: JSON.stringify(value) }] }
+}
+
+// For list results: a TOON table of uniform rows costs ~half the tokens of the
+// equivalent compact JSON (the field names are emitted once as a header instead
+// of per row). encodeToonTable normalizes rows to a uniform scalar shape first
+// and falls back to compact JSON when the data isn't tabular, so this is safe to
+// point at any array-of-records result.
+function asToonResult(value: unknown): CallToolResult {
+  return { content: [{ type: 'text', text: encodeToonTable(value) }] }
 }
 
 function errorResult(message: string): CallToolResult {
