@@ -15,13 +15,25 @@ import { compressLogByTemplate } from './log-template'
 export const SLICE_HALF_BYTES = 10_240
 const ELISION_MARKER = '\n… [eliding {n} bytes from middle — full log at {path}] …\n'
 
-export function capSlice(
+// What capSlice did to a snippet, so callers can surface it up-front in the
+// heal-index instead of relying on the agent reading the buried elision marker.
+// `capped` is true ONLY for the lossy head+tail branch — template collapse is
+// lossless (every distinct line survives), so it doesn't count as "capped".
+export interface CapResult {
+  text: string
+  /** Lossy: the middle was dropped, so the on-disk slice is incomplete. */
+  capped: boolean
+  /** Byte size of the pre-cap window (the full per-test marker span). */
+  windowBytes: number
+}
+
+export function capSliceWithMeta(
   snippet: string,
   fullLogRelPath: string,
-): string {
+): CapResult {
   const bytes = Buffer.byteLength(snippet, 'utf-8')
   // Small enough to read in one call → keep it byte-for-byte (lossless).
-  if (bytes <= SLICE_HALF_BYTES * 2) return snippet
+  if (bytes <= SLICE_HALF_BYTES * 2) return { text: snippet, capped: false, windowBytes: bytes }
 
   // Over budget. Collapse repeated noise by template FIRST — this keeps full
   // temporal coverage of the slice, which beats dropping the middle. If that
@@ -29,9 +41,10 @@ export function capSlice(
   const { text: compact, collapsedLines } = compressLogByTemplate(snippet)
   const compactBytes = Buffer.byteLength(compact, 'utf-8')
   if (compactBytes <= SLICE_HALF_BYTES * 2) {
-    return collapsedLines > 0
+    const text = collapsedLines > 0
       ? `${compact}\n… [${collapsedLines} repeated line(s) collapsed by template — full log at ${fullLogRelPath}] …`
       : compact
+    return { text, capped: false, windowBytes: bytes }
   }
 
   // Still too big even after collapsing → head+tail the compressed text. The
@@ -42,17 +55,40 @@ export function capSlice(
   const marker = ELISION_MARKER
     .replace('{n}', String(elided))
     .replace('{path}', fullLogRelPath)
-  return head + marker + tail
+  return { text: head + marker + tail, capped: true, windowBytes: bytes }
+}
+
+export function capSlice(
+  snippet: string,
+  fullLogRelPath: string,
+): string {
+  return capSliceWithMeta(snippet, fullLogRelPath).text
+}
+
+// A per-test slice plus the provenance the heal-index surfaces up-front: how
+// big the source log is, where it lives, and whether the slice is lossy.
+export interface SliceRecord {
+  /** Capped slice text written to the per-failure file. */
+  text: string
+  /** Repo-relative path to the source `svc-*.log`. */
+  fullLog: string
+  /** Byte size of the source `svc-*.log` on disk. */
+  fullLogBytes: number
+  /** Byte size of the pre-cap per-test window. */
+  windowBytes: number
+  /** Lossy head+tail cap — the on-disk slice dropped its middle. */
+  capped: boolean
 }
 
 // Read each service log once and extract per-test slices for every requested
 // slug in a single pass. With N failures × M service logs, the naive approach
 // reads each log N times; this collapses it to M reads per enrichment cycle.
-export function extractAllSlices(
+// Returns the slice text plus provenance (source log path/size, cap state).
+export function extractAllSliceRecords(
   slugs: readonly string[],
   serviceLogs: readonly string[],
-): Map<string, Record<string, string>> {
-  const result = new Map<string, Record<string, string>>()
+): Map<string, Record<string, SliceRecord>> {
+  const result = new Map<string, Record<string, SliceRecord>>()
   for (const slug of slugs) result.set(slug, {})
   if (slugs.length === 0) return result
 
@@ -60,9 +96,11 @@ export function extractAllSlices(
     if (!fs.existsSync(logPath)) continue
     // The raw svc-*.log keeps its PTY control codes for the xterm pane replay;
     // strip them here so the heal-agent slices are plain text.
-    const content = stripAnsi(fs.readFileSync(logPath, 'utf-8'))
+    const raw = fs.readFileSync(logPath, 'utf-8')
+    const content = stripAnsi(raw)
     const svcName = path.basename(logPath, '.log')
     const relFullPath = path.relative(ROOT, logPath)
+    const fullLogBytes = Buffer.byteLength(raw, 'utf-8')
     for (const slug of slugs) {
       const openTag = `<${slug}>`
       const openIdx = content.indexOf(openTag)
@@ -71,8 +109,23 @@ export function extractAllSlices(
       if (closeIdx === -1) continue
       const snippet = content.slice(openIdx + openTag.length, closeIdx).trim()
       if (snippet.length === 0) continue
-      result.get(slug)![svcName] = capSlice(snippet, relFullPath)
+      const { text, capped, windowBytes } = capSliceWithMeta(snippet, relFullPath)
+      result.get(slug)![svcName] = { text, fullLog: relFullPath, fullLogBytes, windowBytes, capped }
     }
+  }
+  return result
+}
+
+export function extractAllSlices(
+  slugs: readonly string[],
+  serviceLogs: readonly string[],
+): Map<string, Record<string, string>> {
+  const records = extractAllSliceRecords(slugs, serviceLogs)
+  const result = new Map<string, Record<string, string>>()
+  for (const [slug, bySvc] of records) {
+    const texts: Record<string, string> = {}
+    for (const [svc, rec] of Object.entries(bySvc)) texts[svc] = rec.text
+    result.set(slug, texts)
   }
   return result
 }
@@ -92,12 +145,55 @@ export interface PerFailureSlices {
   bytesByPath: Record<string, number>
 }
 
+// Per-slice provenance the heal-index renders up-front so the agent doesn't
+// have to read into the slice to learn it was capped (and where the full log
+// is). One entry per written slice file.
+export interface SliceMeta {
+  path: string         // repo-relative path of the on-disk slice (matches a logFiles entry)
+  bytes: number        // byte size of the on-disk (capped) slice
+  fullLog: string      // repo-relative path to the source svc-*.log
+  fullLogBytes: number // byte size of that full log on disk
+  windowBytes: number  // byte size of the full per-test window before capping
+  capped: boolean      // slice dropped its middle (lossy) → grep the full log for more
+}
+
 export function writeFailureSlices(
   slug: string,
   serviceLogs: string[],
   failedDir?: string,
 ): PerFailureSlices {
   return writeSlicesToDisk(slug, extractLogsForTest(slug, serviceLogs), failedDir)
+}
+
+// Write slices from rich records, returning both the paths (for the summary's
+// logFiles) and the per-slice provenance (for the heal-index size/cap hints).
+function writeSliceRecordsToDisk(
+  slug: string,
+  records: Record<string, SliceRecord>,
+  failedDir: string = path.join(path.dirname(getSummaryPath()), 'failed'),
+): { logFiles: string[]; sliceMeta: SliceMeta[] } {
+  const dir = path.join(failedDir, slug)
+  const logFiles: string[] = []
+  const sliceMeta: SliceMeta[] = []
+  const entries = Object.entries(records)
+  if (entries.length === 0) return { logFiles, sliceMeta }
+
+  fs.mkdirSync(dir, { recursive: true })
+  for (const [svc, rec] of entries) {
+    const filePath = path.join(dir, `${svc}.log`)
+    fs.writeFileSync(filePath, rec.text)
+    const rel = path.relative(ROOT, filePath)
+    logFiles.push(rel)
+    sliceMeta.push({
+      path: rel,
+      bytes: Buffer.byteLength(rec.text, 'utf-8'),
+      fullLog: rec.fullLog,
+      fullLogBytes: rec.fullLogBytes,
+      windowBytes: rec.windowBytes,
+      capped: rec.capped,
+    })
+  }
+  return { logFiles, sliceMeta }
 }
 
 // Write the full (untruncated) failure error — assertion message plus the
@@ -155,6 +251,11 @@ function writeSlicesToDisk(
 interface FailedEntry {
   name: string
   logFiles?: string[]
+  // Per-slice provenance (size + source-log path + cap state) used by the
+  // heal-index to tell the agent up-front whether a slice is complete. Lives
+  // in-memory on the enriched summary; not persisted to e2e-summary.json since
+  // writeHealIndex always runs in the same tick as enrichSummaryWithLogs.
+  sliceMeta?: SliceMeta[]
   // Repo-relative path to `trace-extract/failure-summary.md` produced from
   // the test's Playwright trace.zip. Populated by the trace-enrichment step
   // after the test run completes; surfaced in `heal-index.md` so the agent
@@ -239,18 +340,21 @@ export function enrichSummaryWithLogs(): { manifest: Manifest; summary: Enriched
   const slugs = summary.failed
     .map((e) => (typeof e === 'string' ? e : e.name))
     .filter((n): n is string => typeof n === 'string' && n.length > 0)
-  const slicesBySlug = extractAllSlices(slugs, serviceLogsFromManifest(manifest))
+  const recordsBySlug = extractAllSliceRecords(slugs, serviceLogsFromManifest(manifest))
   const failedDir = failedDirForSummary(summaryPath)
 
   summary.failed = summary.failed.map(
     (entry: string | FailedEntry): FailedEntry => {
       const base: FailedEntry = typeof entry === 'string' ? { name: entry } : { ...entry }
-      const slices = slicesBySlug.get(base.name) ?? {}
-      const { logFiles } = writeSlicesToDisk(base.name, slices, failedDir)
+      const records = recordsBySlug.get(base.name) ?? {}
+      const { logFiles, sliceMeta } = writeSliceRecordsToDisk(base.name, records, failedDir)
       // Never carry embedded `logs` forward — the per-failure files replace it.
       delete (base as { logs?: unknown }).logs
       if (logFiles.length > 0) {
         base.logFiles = logFiles
+      }
+      if (sliceMeta.length > 0) {
+        base.sliceMeta = sliceMeta
       }
       const errorFile = writeErrorFile(base.name, base.error, failedDir)
       if (errorFile) {
@@ -441,6 +545,32 @@ function truncateOneLine(s: string, max = 200): string {
   return flat.length <= max ? flat : `${flat.slice(0, max - 1)}…`
 }
 
+// Human-readable byte size for the heal-index, so the agent can judge at a
+// glance whether a log fits in one Read or needs grepping.
+function fmtBytes(n: number): string {
+  if (n < 1024) return `${n} B`
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`
+}
+
+// Render the slice bullet(s) for one failed entry. Prefers the rich sliceMeta
+// (size + source-log path + cap state) so the agent knows up-front whether the
+// slice is complete; falls back to the bare path list for callers/summaries
+// without sliceMeta (e.g. a heal-index rebuilt from a persisted summary).
+function renderSliceLines(entry: FailedEntry): string[] {
+  if (entry.sliceMeta && entry.sliceMeta.length > 0) {
+    return entry.sliceMeta.map((m) =>
+      m.capped
+        ? `  - slice: ${m.path} (${fmtBytes(m.bytes)}, capped from a ${fmtBytes(m.windowBytes)} window) — middle elided; full service log ${m.fullLog} (${fmtBytes(m.fullLogBytes)}), grep \`<${entry.name}>\`…\`</${entry.name}>\` if head+tail isn't enough`
+        : `  - slice: ${m.path} (${fmtBytes(m.bytes)})`,
+    )
+  }
+  if (entry.logFiles && entry.logFiles.length > 0) {
+    return [`  - slice: ${entry.logFiles.join(', ')}`]
+  }
+  return []
+}
+
 interface Manifest {
   serviceLogs?: string[]
   services?: ManifestService[]
@@ -562,8 +692,8 @@ export function writeHealIndex(parsed?: {
       if (entry.errorFile) {
         lines.push(`  - full error: ${entry.errorFile}`)
       }
-      if (entry.logFiles && entry.logFiles.length > 0) {
-        lines.push(`  - slice: ${entry.logFiles.join(', ')}`)
+      for (const sliceLine of renderSliceLines(entry)) {
+        lines.push(sliceLine)
       }
       if (entry.traceSummaryFile) {
         lines.push(`  - trace: ${entry.traceSummaryFile} — read this for the failing action, page state, failed requests, console errors`)

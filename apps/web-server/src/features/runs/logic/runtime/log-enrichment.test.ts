@@ -5,6 +5,7 @@ import path from 'path'
 import {
   appendJournalIteration,
   capSlice,
+  capSliceWithMeta,
   classifyJournalOutcome,
   countConsecutiveSameFailures,
   enrichSummaryWithLogs,
@@ -491,6 +492,29 @@ describe('capSlice', () => {
   })
 })
 
+describe('capSliceWithMeta', () => {
+  it('reports not-capped for a small lossless snippet', () => {
+    const r = capSliceWithMeta('hello', 'logs/x.log')
+    expect(r).toEqual({ text: 'hello', capped: false, windowBytes: 5 })
+  })
+
+  it('reports capped + the pre-cap window size for a lossy head+tail elision', () => {
+    const big = 'a'.repeat(50_000)
+    const r = capSliceWithMeta(big, 'logs/x.log')
+    expect(r.capped).toBe(true)
+    expect(r.windowBytes).toBe(50_000)
+    expect(r.text).toContain('eliding')
+  })
+
+  it('reports not-capped when template collapse alone gets under budget (lossless)', () => {
+    const lines: string[] = []
+    for (let i = 1; i <= 1_000; i++) lines.push(`waiting for db (attempt ${i})`)
+    const r = capSliceWithMeta(lines.join('\n'), 'logs/x.log')
+    expect(r.capped).toBe(false)
+    expect(r.text).not.toContain('eliding')
+  })
+})
+
 describe('extractAllSlices / extractLogsForTest', () => {
   it('returns empty map when no slugs given', () => {
     expect(extractAllSlices([], ['/tmp/none.log']).size).toBe(0)
@@ -619,6 +643,57 @@ describe('writeHealIndex with journal tail and various manifest shapes', () => {
         summary: { failed: [{ name: 'orphan' }] },
       }),
     ).not.toThrow()
+  })
+
+  it('renders slice size for an uncapped slice and a full-log grep hint for a capped one', () => {
+    const healIndexPath = path.join(tmpDir, 'heal-index.md')
+    writeHealIndex({
+      manifest: { featureName: 'demo' },
+      summary: {
+        failed: [
+          {
+            name: 'big-test',
+            sliceMeta: [
+              {
+                path: 'logs/runs/X/failed/big-test/svc-api.log',
+                bytes: 20_480,
+                fullLog: 'logs/runs/X/svc-api.log',
+                fullLogBytes: 600_000,
+                windowBytes: 421_000,
+                capped: true,
+              },
+              {
+                path: 'logs/runs/X/failed/big-test/svc-web.log',
+                bytes: 1_200,
+                fullLog: 'logs/runs/X/svc-web.log',
+                fullLogBytes: 1_200,
+                windowBytes: 1_200,
+                capped: false,
+              },
+            ],
+          },
+        ],
+      },
+      healIndexPath,
+    })
+    const body = fs.readFileSync(healIndexPath, 'utf-8')
+    // Capped slice: size, pre-cap window size, full-log path + size, grep hint.
+    expect(body).toContain('logs/runs/X/failed/big-test/svc-api.log (20.0 KB, capped from a 411.1 KB window)')
+    expect(body).toContain('full service log logs/runs/X/svc-api.log (585.9 KB)')
+    expect(body).toContain('grep `<big-test>`…`</big-test>`')
+    // Uncapped slice: just the size, no grep hint.
+    expect(body).toContain('logs/runs/X/failed/big-test/svc-web.log (1.2 KB)')
+  })
+
+  it('falls back to the bare logFiles list when sliceMeta is absent', () => {
+    const healIndexPath = path.join(tmpDir, 'heal-index.md')
+    writeHealIndex({
+      manifest: { featureName: 'demo' },
+      summary: { failed: [{ name: 'a-test', logFiles: ['logs/failed/a-test/svc.log'] }] },
+      healIndexPath,
+    })
+    const body = fs.readFileSync(healIndexPath, 'utf-8')
+    expect(body).toContain('- slice: logs/failed/a-test/svc.log')
   })
 
   it('emits a trace bullet when traceSummaryFile is set on a failed entry', () => {
@@ -1092,6 +1167,17 @@ describe('enrichSummaryWithLogs', () => {
         path.join('logs', 'runs', runId, 'failed', 'a-test', 'svc-api.log'),
       ])
       expect(fs.readFileSync(path.join(runDir, 'failed', 'a-test', 'svc-api.log'), 'utf-8')).toBe('BODY')
+      // sliceMeta rides along in-memory: uncapped, pointing at the source log.
+      expect(failed[0].sliceMeta).toEqual([
+        {
+          path: path.join('logs', 'runs', runId, 'failed', 'a-test', 'svc-api.log'),
+          bytes: 4,
+          fullLog: path.join('logs', 'runs', runId, 'svc-api.log'),
+          fullLogBytes: Buffer.byteLength('<a-test>BODY</a-test>', 'utf-8'),
+          windowBytes: 4,
+          capped: false,
+        },
+      ])
 
       fs.writeFileSync(path.join(runDir, 'diagnosis-journal.md'), `# Diagnosis Journal
 
