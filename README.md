@@ -3,9 +3,9 @@
 [![npm](https://img.shields.io/npm/v/canary-lab.svg)](https://www.npmjs.com/package/canary-lab)
 [![license](https://img.shields.io/npm/l/canary-lab.svg)](LICENSE)
 
-**Your AI agent implements the code. Canary Lab catches the slop before it ships.**
+**Your AI agent implements the code. Canary Lab verifies it independently before it ships.**
 
-Coding agents declare victory constantly — *"tests pass," "done," "fixed"* — and will happily edit the test to make it green. Canary Lab is the independent harness on your machine: it boots your real services, runs your Playwright tests **itself**, and owns the verdict. Green means it actually passed.
+Coding agents optimize for the literal instruction — *"tests pass," "done," "fixed"* — which isn't always the same as the code working as intended, and an agent that both writes and grades its own run can mark it green. Canary Lab is the independent harness on your machine: it boots your real services, runs your Playwright tests **itself**, and owns the verdict. Green means it actually passed.
 
 ![Canary Lab end-to-end: an AI agent scaffolds a Checkout test suite, checks requirement coverage (47%), authors more tests to reach 100%, runs the suite green (12/12), and exports a verified evaluation report](docs/assets/canary-lab.gif)
 
@@ -17,7 +17,7 @@ Coding agents declare victory constantly — *"tests pass," "done," "fixed"* —
 
 Boots your services → runs the tests → agent reads the failure, fixes the code, signals a rerun → Canary Lab reruns until green. The agent only reads results and asks for a retry — it never writes the verdict.
 
-## Why Your Agent Can't Fake It
+## Why the Verdict Is Independent
 
 A good agent can already start a dev server and run Playwright. The gap is trust.
 
@@ -29,7 +29,7 @@ A good agent can already start a dev server and run Playwright. The gap is trust
 
 Three things a bare terminal agent can't do alone:
 
-- **Results it can't fake** — the harness runs the tests and owns the pass/fail.
+- **Results it doesn't own** — the harness runs the tests and holds the pass/fail.
 - **Concurrency without conflicts** — per-run ports (injected as `${port.api}`) + a git worktree per shared repo; extras queue. Several agents share one laptop safely.
 - **Safe env switching** — env files are backed up before changes and restored when the run ends.
 
@@ -94,7 +94,7 @@ The scaffold ships sample features (some intentionally broken) so you can watch 
 | Fix → retest in seconds, no rebuild | ✓ (one service) | after rebuild/sync | — | ✓ |
 | Boots & orchestrates several services together | you script it | ✓ | varies | ✓ |
 | Concurrent runs on one machine (ports + worktrees) | manual | not out of the box | hosted, not local | ✓ |
-| Per-run evidence the agent can't fake | — | — | ✓ (cloud) | ✓ (your machine) |
+| Per-run evidence owned by the harness, not the agent | — | — | ✓ (cloud) | ✓ (your machine) |
 | Env-file switching with backup/restore | manual | manual | — | ✓ |
 | Fully local / offline | ✓ | ✓ | — | ✓ |
 
