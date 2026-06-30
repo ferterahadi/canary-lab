@@ -95,3 +95,8 @@ natively.)
 - `cl_surfacing-agent-work` — any UI showing an agent's progress/output (live
   or historical): know what the agent actually produces before designing the
   viewer.
+- `cl_locate-agent-session-logs` — touching how Canary finds/reads/builds a path
+  to a claude/codex CLI session log, or a "blank/stuck agent view": env-aware
+  config-dir resolvers (CLAUDE_CONFIG_DIR/CODEX_HOME), the one-home rule for path
+  building, and the boot-time shell hydration that keeps PTY + headless + read
+  side in agreement.
