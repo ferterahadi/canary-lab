@@ -4,10 +4,23 @@ import { FieldRow, NumberInput, SectionHeader, TextInput, Textarea, Toggle } fro
 import { SaveBar } from './SaveBar'
 import { useEditableSlice } from './useEditableSlice'
 
+// Mirror of DEFAULT_HEAL_ON_FAILURE_THRESHOLD in shared/launcher/types.ts —
+// the server applies the same default at load time. Absent ⇒ enabled at this
+// value; `0` ⇒ disabled (full suite runs before healing).
+const DEFAULT_HEAL_THRESHOLD = 2
+
 interface Slice {
   name: string
   description: string
   healOnFailureThreshold?: number
+}
+
+// A feature stops & heals by default; only an explicit `0` opts out.
+function healEnabled(v: number | undefined): boolean {
+  return v == null ? true : v > 0
+}
+function healDisplayValue(v: number | undefined): number {
+  return v != null && v > 0 ? v : DEFAULT_HEAL_THRESHOLD
 }
 
 function asString(v: ConfigValue | undefined, fallback = ''): string {
@@ -35,11 +48,10 @@ export function GeneralTab({ feature, onFeatureRenamed }: { feature: string; onF
         name: slice.name,
         description: slice.description,
       }
-      if (slice.healOnFailureThreshold == null) {
-        delete next.healOnFailureThreshold
-      } else {
-        next.healOnFailureThreshold = slice.healOnFailureThreshold
-      }
+      // Always persist a concrete number (including `0` = opt out). An absent
+      // value materializes the default so the saved config is explicit and
+      // matches the server-side default.
+      next.healOnFailureThreshold = slice.healOnFailureThreshold ?? DEFAULT_HEAL_THRESHOLD
       return next
     },
     save: async (payload) => {
@@ -81,21 +93,21 @@ export function GeneralTab({ feature, onFeatureRenamed }: { feature: string; onF
         <div className="px-4 py-3">
           <FieldRow
             label="Stop & heal after"
-            hint="When enabled, each new Playwright spawn starts with --max-failures=N. Changes made while tests are already running apply to the next rerun or restart, not the current process."
+            hint={`On by default (${DEFAULT_HEAL_THRESHOLD} failures). Each new Playwright spawn starts with --max-failures=N; turn off to run the whole suite before healing. Changes made while tests are already running apply to the next rerun or restart, not the current process.`}
             layout="inline"
           >
             <div className="flex items-center gap-3">
               <Toggle
-                value={ed.draft.healOnFailureThreshold != null}
+                value={healEnabled(ed.draft.healOnFailureThreshold)}
                 onChange={(enabled) => ed.setDraft((d) => ({
                   ...d,
-                  healOnFailureThreshold: enabled ? (d.healOnFailureThreshold ?? 1) : undefined,
+                  healOnFailureThreshold: enabled ? healDisplayValue(d.healOnFailureThreshold) : 0,
                 }))}
               />
               <NumberInput
                 min={1}
-                value={ed.draft.healOnFailureThreshold ?? 1}
-                disabled={ed.draft.healOnFailureThreshold == null}
+                value={healDisplayValue(ed.draft.healOnFailureThreshold)}
+                disabled={!healEnabled(ed.draft.healOnFailureThreshold)}
                 onChange={(n) => ed.setDraft((d) => ({ ...d, healOnFailureThreshold: n }))}
               />
               <span className="text-xs" style={{ color: 'var(--text-muted)' }}>failure(s)</span>

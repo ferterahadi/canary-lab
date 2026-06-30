@@ -100,6 +100,29 @@ function normalizeAgentSessionRef(value: unknown): AgentSessionRef | null {
   return { agent: ref.agent, sessionId: ref.sessionId, logPath: ref.logPath }
 }
 
+// ─── Config-dir resolution ─────────────────────────────────────────────────
+//
+// Each agent CLI stores its session JSONL under a config dir that the CLI
+// itself lets you relocate via an env var — claude reads `CLAUDE_CONFIG_DIR`,
+// codex reads `CODEX_HOME`. When unset they fall back to the conventional
+// dotdir under the user's home. We resolve these EXACTLY as the CLIs do, so a
+// relocated config home (multi-account, sandboxed, or CI setups) doesn't
+// silently break session lookup — the failure mode is a blank AgentSessionView,
+// which reads as "the agent produced nothing" rather than "we looked in the
+// wrong place". `process.env` is read here (not threaded as a param) because
+// the server process that reads a log is the same process that spawned the
+// agent, so its env matches what the agent saw at spawn time.
+
+export function claudeConfigDir(homeDir: string = os.homedir()): string {
+  const override = process.env.CLAUDE_CONFIG_DIR?.trim()
+  return override ? override : path.join(homeDir, '.claude')
+}
+
+export function codexConfigDir(homeDir: string = os.homedir()): string {
+  const override = process.env.CODEX_HOME?.trim()
+  return override ? override : path.join(homeDir, '.codex')
+}
+
 // ─── Claude locator ────────────────────────────────────────────────────────
 
 // Claude encodes a project directory as the absolute path with every `/`
@@ -116,7 +139,7 @@ export function encodeClaudeProjectDir(cwd: string): string {
 export function claudeSessionLogPath(cwd: string, sessionId: string, homeDir: string = os.homedir()): string {
   let real = cwd
   try { real = fs.realpathSync(cwd) } catch { /* fall back to the raw cwd */ }
-  return path.join(homeDir, '.claude', 'projects', encodeClaudeProjectDir(real), `${sessionId}.jsonl`)
+  return path.join(claudeConfigDir(homeDir), 'projects', encodeClaudeProjectDir(real), `${sessionId}.jsonl`)
 }
 
 export function locateClaudeSessionLog(
@@ -126,7 +149,7 @@ export function locateClaudeSessionLog(
 ): string | null {
   if (!sessionId) return null
   const encoded = encodeClaudeProjectDir(runDir)
-  const candidate = path.join(homeDir, '.claude', 'projects', encoded, `${sessionId}.jsonl`)
+  const candidate = path.join(claudeConfigDir(homeDir), 'projects', encoded, `${sessionId}.jsonl`)
   return fs.existsSync(candidate) ? candidate : null
 }
 
@@ -139,7 +162,7 @@ export function findClaudeLogBySessionId(
   homeDir: string = os.homedir(),
 ): string | null {
   if (!sessionId) return null
-  const base = path.join(homeDir, '.claude', 'projects')
+  const base = path.join(claudeConfigDir(homeDir), 'projects')
   let dirs: string[]
   try { dirs = fs.readdirSync(base) } catch { return null }
   for (const dir of dirs) {
@@ -157,7 +180,7 @@ export function locateLatestClaudeSessionLog(
   homeDir: string = os.homedir(),
 ): AgentSessionRef | null {
   const encoded = encodeClaudeProjectDir(runDir)
-  const projectDir = path.join(homeDir, '.claude', 'projects', encoded)
+  const projectDir = path.join(claudeConfigDir(homeDir), 'projects', encoded)
   let best: { logPath: string; sessionId: string; mtimeMs: number } | null = null
   for (const name of readDirNames(projectDir)) {
     if (!name.endsWith('.jsonl')) continue
@@ -254,7 +277,7 @@ export function locateCodexSessionLog(
   if (!Number.isFinite(startMs)) return null
   const wantedCwd = realpathOrSelf(runDir)
 
-  const sessionsRoot = path.join(homeDir, '.codex', 'sessions')
+  const sessionsRoot = path.join(codexConfigDir(homeDir), 'sessions')
   if (!fs.existsSync(sessionsRoot)) return null
 
   const startDate = new Date(startMs)
@@ -387,7 +410,7 @@ export function locateLatestCodexSessionLog(
   homeDir: string = os.homedir(),
 ): AgentSessionRef | null {
   const wantedCwd = realpathOrSelf(runDir)
-  const sessionsRoot = path.join(homeDir, '.codex', 'sessions')
+  const sessionsRoot = path.join(codexConfigDir(homeDir), 'sessions')
 
   // Codex filenames follow `rollout-<ISO-ts>-<id>.jsonl`, so lex-descending
   // order matches chronological order. Iterate newest-first and return on the

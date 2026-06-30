@@ -1,6 +1,6 @@
 import fs from 'fs'
 import path from 'path'
-import type { FeatureConfig } from '../../../../../../shared/launcher/types'
+import { DEFAULT_HEAL_ON_FAILURE_THRESHOLD, type FeatureConfig } from '../../../../../../shared/launcher/types'
 import { normalizeStartCommand, validateHealthCheck } from '../../runs/logic/runtime/launcher/startup'
 
 // Discover features by scanning <featuresDir>/<feature>/feature.config.{cjs,js,ts}.
@@ -26,6 +26,10 @@ export function loadFeatures(featuresDir: string): FeatureConfig[] {
       const mod = require(candidate)
       const cfg = (mod.config ?? mod.default) as FeatureConfig | undefined
       if (cfg && typeof cfg === 'object' && typeof cfg.name === 'string') {
+        // Every feature stops & heals after a default number of failures unless
+        // it opts out. `??` preserves an explicit `0` (run the full suite) and
+        // any explicit N; only an absent value picks up the default.
+        cfg.healOnFailureThreshold = cfg.healOnFailureThreshold ?? DEFAULT_HEAL_ON_FAILURE_THRESHOLD
         // Validate every healthCheck shape — surface invalid configs at
         // load time with a descriptive error rather than at run time
         // when the orchestrator hits an unknown probe shape.
