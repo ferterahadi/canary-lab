@@ -1,6 +1,12 @@
 import { describe, it, expect, vi } from 'vitest'
 import { hydrateAgentConfigEnvFromShell } from './agent-config-env'
 
+vi.mock('child_process', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('child_process')>()
+  return { ...actual, spawnSync: vi.fn(actual.spawnSync) }
+})
+const childProcess = await import('child_process')
+
 // Build a fake interactive-shell probe that echoes the given values fenced by
 // the same markers the real probe emits. Captures the args it was called with.
 function fakeProbe(values: Record<string, string>) {
@@ -49,6 +55,27 @@ describe('hydrateAgentConfigEnvFromShell', () => {
     expect(calls[0].args[calls[0].args.length - 1]).not.toContain('CLAUDE_CONFIG_DIR=')
   })
 
+  it('back-fills nothing when the probe output has no start marker', () => {
+    const env: NodeJS.ProcessEnv = {}
+    const run = () => 'noise\n__CL_ENV_END__\nmore noise\n'
+    const hydrated = hydrateAgentConfigEnvFromShell({ env, run })
+    expect(hydrated).toEqual({})
+  })
+
+  it('back-fills nothing when the probe output has no end marker', () => {
+    const env: NodeJS.ProcessEnv = {}
+    const run = () => 'noise\n__CL_ENV_START__\nCLAUDE_CONFIG_DIR=/x\n'
+    const hydrated = hydrateAgentConfigEnvFromShell({ env, run })
+    expect(hydrated).toEqual({})
+  })
+
+  it('back-fills nothing when the end marker appears before the start marker', () => {
+    const env: NodeJS.ProcessEnv = {}
+    const run = () => '__CL_ENV_END__\nCLAUDE_CONFIG_DIR=/x\n__CL_ENV_START__\n'
+    const hydrated = hydrateAgentConfigEnvFromShell({ env, run })
+    expect(hydrated).toEqual({})
+  })
+
   it('does not set a var the rc file leaves empty', () => {
     const env: NodeJS.ProcessEnv = {}
     const { run } = fakeProbe({ CLAUDE_CONFIG_DIR: '', CODEX_HOME: '' })
@@ -56,6 +83,13 @@ describe('hydrateAgentConfigEnvFromShell', () => {
     expect(hydrated).toEqual({})
     expect('CLAUDE_CONFIG_DIR' in env).toBe(false)
     expect('CODEX_HOME' in env).toBe(false)
+  })
+
+  it('skips a fenced line with no "=" instead of misreading it as a var', () => {
+    const env: NodeJS.ProcessEnv = {}
+    const run = () => '__CL_ENV_START__\nsome stray line with no equals\nCLAUDE_CONFIG_DIR=/x\n__CL_ENV_END__\n'
+    const hydrated = hydrateAgentConfigEnvFromShell({ env, run })
+    expect(hydrated).toEqual({ CLAUDE_CONFIG_DIR: '/x' })
   })
 
   it('spawns the interactive shell ($SHELL) with -i -c and a timeout', () => {
@@ -79,5 +113,30 @@ describe('hydrateAgentConfigEnvFromShell', () => {
     const { run } = fakeProbe({ CLAUDE_CONFIG_DIR: '/from/rc' })
     const hydrated = hydrateAgentConfigEnvFromShell({ env, run })
     expect(hydrated).toEqual({ CLAUDE_CONFIG_DIR: '/from/rc' })
+  })
+
+  it('falls back to the default probe and swallows a spawn error (bogus shell)', () => {
+    // No `run` injected, so this exercises the real `defaultProbe`. A
+    // nonexistent shell binary makes `spawnSync` return a non-zero/errored
+    // result rather than throw, so this only covers the `res.status !== 0`
+    // branch — see the next test for the synchronous-throw branch.
+    const env: NodeJS.ProcessEnv = {}
+    const hydrated = hydrateAgentConfigEnvFromShell({
+      env,
+      shell: '/no/such/shell-binary-xyz',
+      timeoutMs: 1000,
+    })
+    expect(hydrated).toEqual({})
+    expect('CLAUDE_CONFIG_DIR' in env).toBe(false)
+    expect('CODEX_HOME' in env).toBe(false)
+  })
+
+  it('swallows a synchronous spawnSync throw from the default probe', () => {
+    vi.mocked(childProcess.spawnSync).mockImplementationOnce(() => {
+      throw new Error('spawnSync exploded')
+    })
+    const env: NodeJS.ProcessEnv = {}
+    const hydrated = hydrateAgentConfigEnvFromShell({ env, shell: '/bin/sh', timeoutMs: 1000 })
+    expect(hydrated).toEqual({})
   })
 })

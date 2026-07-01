@@ -735,6 +735,20 @@ describe('POST /api/open-workspace', () => {
       await app.close()
     }
   })
+
+  it('stringifies a non-Error throw from the launch', async () => {
+    spawnMock.mockImplementationOnce(() => { throw 'boom-string' })
+    const app = await makeApp()
+    try {
+      const r = await app.inject({ method: 'POST', url: '/api/open-workspace' })
+      expect(r.statusCode).toBe(200)
+      const body = r.json() as { opened: boolean; error?: string }
+      expect(body.opened).toBe(false)
+      expect(body.error).toBe('boom-string')
+    } finally {
+      await app.close()
+    }
+  })
 })
 
 describe('POST /api/project-config/port', () => {

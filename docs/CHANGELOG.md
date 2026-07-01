@@ -34,36 +34,24 @@ Each entry is tagged with the area it touches:
 
 ---
 
-## 1.4.2 — 2026-06-30
+## 1.4.x — 2026-06-26 to 2026-06-30
 
-- **[Test Runner]** **Every feature stops and heals after 2 failures by default.** As soon as 2 tests fail, Playwright stops and the repair loop kicks in — no waiting for the whole suite. Two is the sweet spot for log size: enough signal for the healing agent to work from, few enough that it reads the failures in one pass instead of choking on too much context at once. To run the full suite first on a feature, set "Stop & heal after" to off in its General config.
-- **[Test Runner]** **The healing agent knows how big each log is.** The failure index now shows each log slice's size up front and, when a slice was trimmed to fit, says so and points at the full log on disk — so the agent can read it in one go or grep into it for the part it needs, instead of working from a silently-clipped excerpt.
-- **[General]** **Agent views work when your CLI config lives somewhere custom.** If you've relocated `claude` or `codex` config with `CLAUDE_CONFIG_DIR` / `CODEX_HOME` (multi-account, sandboxed, or CI setups), Canary now reads session logs from the same place the CLI writes them — and probes your interactive shell at boot to pick up vars set only in your rc file. Fixes a silently-blank agent view that looked like "the agent produced nothing."
-
----
-
-## 1.4.1 — 2026-06-27
-
-- **[General]** **`init` gets you running in one step.** `npx canary-lab init <folder>` installs deps, browsers, and registers agent tools — go straight to `npx canary-lab ui`. Pass `--no-install` to scaffold only.
-- **[General]** **Agents launch reliably under a restricted PATH.** When started by a desktop client, `claude`/`codex` could silently fail to resolve. Canary Lab now checks all the usual install locations and respects `CANARY_LAB_CLAUDE_BIN` / `CANARY_LAB_CODEX_BIN` overrides.
-- **[General]** **Know when a new version is out — and update in one click.** A small version indicator now sits in the Features-column footer, next to the theme toggle. It checks the npm registry and shows whether you're up to date or a newer Canary Lab has been published. Click it for the details: when an update is available, install it right there (`npm install canary-lab@latest` runs in your workspace), then restart `canary-lab ui` to apply. It stays quiet when you're current, confirms your version on click, and never blocks startup if the registry can't be reached.
-
----
-
-## 1.4.0 — 2026-06-26
-
-- **[Coverage]** **New: the Verified Coverage Ledger.** Coverage answers a simple question — are your tests actually thorough? It maps every requirement in your PRD to the tests that exercise it, shows what's covered and what's missing, and points the agent at the gaps so it can add the test cases you don't have yet. Open it from the new coverage pill on any feature.
-  - The percentage is **computed, not guessed**: a requirement only counts as covered when every declared path (and variant) has a mapped test — math from your tags, not an agent judging it "looks covered."
-  - The mapping is **inline and reviewable**: generating a ledger runs background agents that read your PRD and specs, then write `@req-<id>` tags into the tests themselves. It runs without blocking you, and survives switching away or refreshing.
-  - Coverage breaks down **by variant and path**, so a half-covered requirement shows exactly which case is missing. A strength filter and breakdown ring tell a thoroughly-tested requirement from a barely-touched one, and you can reset coverage or strip the tags to start fresh.
-- **[Portify]** **Un-portify a feature.** Changed your mind? You can now reverse a port-ification — the original config is restored and the overlay is removed, cleanly.
-- **[Portify]** **Steadier port-ification.** The wizard now runs with proper concurrency limits, handles missing or orphaned workflow records gracefully instead of getting stuck, and the picker is simpler — the redundant history list is gone.
-- **[Test Runner]** **Healing from the CLI is back.** Heal claiming is no longer limited to Desktop clients — any interactive Claude or Codex session (Desktop *or* CLI) can own a heal loop again. The only sessions still blocked are the ones Canary Lab spawns itself for benchmarks and Portify, which must never claim the very run they're working on.
-- **[Test Runner]** **Healing when services won't boot.** If an app's services fail to start, the agent now gets the boot failure spelled out with what to try next, instead of being left to infer it from raw logs.
-- **[Test Runner]** **Breaking out of stuck loops.** When the repair loop stops making progress, Canary Lab now detects the stuck cycle and escalates with extra context — including clearer guidance on re-running and on handling `node_modules` — rather than churning on the same failed approach.
-- **[Test Runner]** **Better handoff for agents without the skill installed.** External clients that don't have the Canary Lab skill loaded now get explicit next-step instructions in the heal context, so they can still drive a repair correctly.
-- **[General]** **Live updates everywhere.** Verification-config edits, coverage changes, and feature changes now push to every open browser in real time — no more refreshing to see what another client (or a background job) just did.
-- **[General]** **Clearer external-client panels.** Agent panels for connected clients now share a single card with consistent branding, so it's easier to see which client is doing what.
+- **[Coverage]** **New: the Verified Coverage Ledger.** Maps every PRD requirement to the tests that exercise it, via the new coverage pill on any feature.
+  - Percentage is **computed, not guessed**: a requirement counts as covered only when every declared path/variant has a mapped test.
+  - Mapping is **inline and reviewable**: background agents read the PRD and specs and write `@req-<id>` tags into the tests themselves; runs non-blocking, survives switching away/refreshing.
+  - Breaks down **by variant and path** with a strength filter and breakdown ring; coverage/tags can be reset to start fresh.
+- **[Test Runner]** **Stop & heal after 2 failures by default.** Playwright stops at 2 failures and the repair loop kicks in — enough signal for the healing agent without choking on a full-suite log. Toggle off per feature in General config to run the full suite first.
+- **[Test Runner]** **Log-size awareness.** The failure index shows each log slice's size, and flags + links to the full log on disk when a slice was trimmed, instead of leaving the agent to infer from a silently-clipped excerpt.
+- **[Test Runner]** **CLI heal claiming restored.** Any interactive Claude/Codex session (Desktop *or* CLI) can claim a heal loop again; only Canary Lab's own benchmark/Portify agents stay blocked, since they must never claim the run they're working on.
+- **[Test Runner]** **Better failure guidance.** Boot failures now come with what-to-try-next instead of raw logs; stuck repair loops get detected and escalated with extra context (re-running, `node_modules` handling); external clients without the skill installed get explicit next-step instructions in heal context.
+- **[Portify]** **Un-portify.** Reverse a port-ification — original config restored, overlay removed.
+- **[Portify]** **Steadier wizard.** Proper concurrency limits, graceful handling of missing/orphaned workflow records, simplified picker (redundant history list removed).
+- **[General]** **`init` gets you running in one step.** `npx canary-lab init <folder>` installs deps, browsers, and registers agent tools; `--no-install` to scaffold only.
+- **[General]** **Reliable agent launch under restricted PATH.** `claude`/`codex` resolution now checks all usual install locations and respects `CANARY_LAB_CLAUDE_BIN`/`CANARY_LAB_CODEX_BIN` overrides.
+- **[General]** **Version indicator with one-click update.** Sits in the Features-column footer; checks the npm registry, and lets you install (`npm install canary-lab@latest`) and restart from there; quiet when current, never blocks startup if the registry is unreachable.
+- **[General]** **Live updates everywhere.** Verification-config, coverage, and feature changes push to every open browser in real time.
+- **[General]** **Clearer external-client panels.** Connected-client agent panels share one card with consistent branding.
+- **[General]** **Custom CLI config dirs respected.** Session logs are read from `CLAUDE_CONFIG_DIR`/`CODEX_HOME` when relocated, with the interactive shell probed at boot to pick up rc-file-only vars — fixes a silently-blank agent view.
 
 ---
 

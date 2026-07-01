@@ -5,12 +5,14 @@ import {
   acceptPlan,
   acceptSpec,
   addEnvsetSlot,
+  approveDirtySpecs,
   browseDir,
   cancelHealRun,
   checkPathExists,
   checkoutRepoBranch,
   checkoutWorkspaceBranch,
   cloneRepository,
+  commitDirtySpecs,
   createDraft,
   cancelDraftGeneration,
   cancelEvaluationExportTask,
@@ -34,6 +36,7 @@ import {
   getEvaluationExportTask,
   getFeatureConfig,
   getFeatureConfigDoc,
+  getFeatureDirtyDiff,
   getFeatureTests,
   getMcpHealth,
   getGitRemote,
@@ -70,6 +73,7 @@ import {
   changeProjectPort,
   openAgentApp,
 	  openEditor,
+	  openWorkspace,
 	  sendAgentInput,
 	  restartRun,
 	  extractPrdDocuments,
@@ -136,6 +140,47 @@ describe('api client', () => {
       status: 500,
       body: { error: 'boom' },
     })
+  })
+
+  it('approveDirtySpecs POSTs to the approve-dirty endpoint and returns status', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(ok({ status: 'clean' }))
+    const result = await approveDirtySpecs('feat/a', { baseUrl: 'http://x', fetchImpl })
+    expect(result).toEqual({ status: 'clean' })
+    expect(fetchImpl).toHaveBeenCalledWith('http://x/api/features/feat%2Fa/approve-dirty', { method: 'POST' })
+  })
+
+  it('commitDirtySpecs POSTs to the commit-dirty endpoint and returns the commit result', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(ok({ committed: true, status: 'clean' }))
+    const result = await commitDirtySpecs('feat/a', { baseUrl: 'http://x', fetchImpl })
+    expect(result).toEqual({ committed: true, status: 'clean' })
+    expect(fetchImpl).toHaveBeenCalledWith('http://x/api/features/feat%2Fa/commit-dirty', { method: 'POST' })
+  })
+
+  it('commitDirtySpecs surfaces a not-committed reason in the body', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(ok({ committed: false, reason: 'nothing to commit' }))
+    const result = await commitDirtySpecs('feat/a', { fetchImpl })
+    expect(result).toEqual({ committed: false, reason: 'nothing to commit' })
+  })
+
+  it('commitDirtySpecs throws ApiError on failure', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(fail(500, { error: 'git commit failed' }))
+    await expect(commitDirtySpecs('feat/a', { fetchImpl })).rejects.toMatchObject({ status: 500 })
+  })
+
+  it('getFeatureDirtyDiff GETs the dirty-diff endpoint with encoded feature and file', async () => {
+    const diff = { tests: [{ name: 'logs in', changedLines: [10, 11, 12] }] }
+    const fetchImpl = vi.fn().mockResolvedValue(ok(diff))
+    const result = await getFeatureDirtyDiff('feat/a', 'tests/login spec.ts', { baseUrl: 'http://x', fetchImpl })
+    expect(result).toEqual(diff)
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'http://x/api/features/feat%2Fa/dirty-diff?file=tests%2Flogin%20spec.ts',
+      { method: 'GET' },
+    )
+  })
+
+  it('getFeatureDirtyDiff throws ApiError on 404 when the spec is not dirty', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(fail(404, { error: 'not dirty' }))
+    await expect(getFeatureDirtyDiff('feat/a', 'tests/x.ts', { fetchImpl })).rejects.toMatchObject({ status: 404 })
   })
 
   it('changeProjectPort returns the restart payload on 200', async () => {
@@ -998,6 +1043,19 @@ describe('api client', () => {
       column: 3,
       editor: 'cursor',
     })
+  })
+
+  it('openWorkspace POSTs to /api/open-workspace with no body', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(ok({ opened: true, path: '/repo' }))
+    const result = await openWorkspace({ baseUrl: 'http://x', fetchImpl })
+    expect(result).toEqual({ opened: true, path: '/repo' })
+    expect(fetchImpl).toHaveBeenCalledWith('http://x/api/open-workspace', { method: 'POST' })
+  })
+
+  it('openWorkspace resolves opened:false with an error on a best-effort launch failure', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(ok({ opened: false, path: '/repo', error: 'no editor configured' }))
+    const result = await openWorkspace({ fetchImpl })
+    expect(result).toEqual({ opened: false, path: '/repo', error: 'no editor configured' })
   })
 
   it('sendAgentInput POSTs the data string', async () => {

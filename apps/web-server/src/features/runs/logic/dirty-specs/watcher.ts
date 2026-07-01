@@ -96,7 +96,10 @@ export function startDirtySpecWatcher(deps: WatcherDeps): DirtySpecWatcher {
       // children), enough to trigger; recompute is idempotent so over-firing on
       // `git add` is harmless. Recompute every feature under this root.
       const w = fs.watch(gitDir, { persistent: false }, () => {
-        for (const f of byGitRoot.get(gitRoot) ?? []) scheduleRecompute(f.name, f.dir)
+        // `watchGitDir` only ever runs right after `byGitRoot.set(gitRoot, ...)`
+        // with a non-empty group, and entries are never removed, so this is
+        // always populated by the time the watch callback can fire.
+        for (const f of byGitRoot.get(gitRoot)!) scheduleRecompute(f.name, f.dir)
       })
       watchers.push(w)
     } catch (err) {
