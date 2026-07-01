@@ -2,12 +2,20 @@ import { StatusDot, type StatusDotState } from '../../features/config/components
 
 // Tone of the trailing count badge. Kept small + semantic so every pill in the
 // status bar's action cluster reads as a sibling.
-export type StatusPillTone = 'neutral' | 'accent' | 'boot'
+export type StatusPillTone = 'neutral' | 'accent' | 'boot' | 'danger'
 
 const COUNT_TONE: Record<StatusPillTone, { bg: string; color: string }> = {
   neutral: { bg: 'var(--bg-selected)', color: 'var(--text-muted)' },
   accent: { bg: 'color-mix(in srgb, var(--accent) 20%, transparent)', color: 'var(--accent)' },
   boot: { bg: 'var(--boot-soft)', color: 'var(--boot)' },
+  danger: { bg: 'color-mix(in srgb, var(--danger) 20%, transparent)', color: 'var(--danger)' },
+}
+
+// Emphasis (border + name text) colour. Accent for attention (Portify
+// ready-to-commit), danger for an integrity warning (modified test files).
+const EMPHASIS_COLOR: Record<'accent' | 'danger', string> = {
+  accent: 'var(--accent)',
+  danger: 'var(--danger)',
 }
 
 // The single, standardized status-bar pill. One anatomy for every action /
@@ -25,6 +33,7 @@ export function StatusPill({
   count,
   countTone = 'neutral',
   emphasis = false,
+  emphasisTone = 'accent',
   freshPulseKey,
   onClick,
   title,
@@ -37,8 +46,10 @@ export function StatusPill({
   /** Trailing count badge. Pass `undefined` to omit it entirely. */
   count?: number
   countTone?: StatusPillTone
-  /** Accent border + accent text for an attention state. */
+  /** Coloured border + name text for an attention state. */
   emphasis?: boolean
+  /** Which colour `emphasis` uses — accent (default) or danger (integrity warning). */
+  emphasisTone?: 'accent' | 'danger'
   /** When set, renders a one-shot pulse keyed on this value (fresh-arrival cue). */
   freshPulseKey?: string | number
   onClick: () => void
@@ -58,7 +69,10 @@ export function StatusPill({
       className={className}
       style={
         emphasis
-          ? { color: 'var(--accent)', borderColor: 'color-mix(in srgb, var(--accent) 45%, var(--border-default))' }
+          ? {
+              color: EMPHASIS_COLOR[emphasisTone],
+              borderColor: `color-mix(in srgb, ${EMPHASIS_COLOR[emphasisTone]} 45%, var(--border-default))`,
+            }
           : undefined
       }
     >
@@ -66,7 +80,7 @@ export function StatusPill({
       <StatusDot state={dotState} className="shrink-0" />
       <span
         className="shrink-0"
-        style={{ fontSize: 12, fontWeight: 500, color: emphasis ? 'var(--accent)' : 'var(--text-primary)' }}
+        style={{ fontSize: 12, fontWeight: 500, color: emphasis ? EMPHASIS_COLOR[emphasisTone] : 'var(--text-primary)' }}
       >
         {name}
       </span>

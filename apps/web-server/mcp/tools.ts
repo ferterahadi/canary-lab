@@ -18,6 +18,7 @@ import {
   type NormalizedRunCounts,
 } from '../src/features/runs/logic/heal/external-heal-surface'
 import { loadFeatures } from '../src/features/config/logic/feature-loader'
+import type { DirtySpecStore } from '../src/features/runs/logic/dirty-specs/store'
 import { isHealClaimAllowed } from '../src/features/runs/logic/heal/heal-claim-policy'
 import { computePortPreflight } from '../src/features/runs/logic/runtime/port-preflight'
 import {
@@ -251,6 +252,10 @@ export interface CanaryLabMcpDeps {
    *  delete the overlay. Mirrors DELETE /api/features/:name/portify-overlay. */
   removePortification?: (feature: string) => { name: string; portified: boolean; reverted: boolean }
   workspaceEvents?: WorkspaceEventPublisher
+  /** Test-file integrity store. When present, terminal/needs_heal run results
+   *  carry a `dirtyTests` warning the agent relays verbatim. Read-only here —
+   *  the MCP surface never approves or gates on it (awareness, not enforcement). */
+  dirtySpecStore?: DirtySpecStore
 }
 
 const CLIENT_KIND = z.enum(['claude', 'codex', 'claude-pty', 'codex-pty', 'other'])
@@ -2184,10 +2189,19 @@ function isToolErrorPayload(value: unknown): value is { error: string; statusCod
     typeof (value as { error?: unknown }).error === 'string'
 }
 
+// Test-file integrity warning, present only when a spec changed since the last
+// green/run-start and wasn't approved/committed. The agent relays `message`
+// verbatim; Canary never blocks or gates on it (awareness, not enforcement).
+interface DirtyTestsWarning {
+  dirty: true
+  specs: string[]
+  message: string
+}
+
 type WaitForHealTaskValue =
-  | { type: 'needs_heal'; runId: string; cycle: number; context: ExternalHealContext }
-  | { type: 'passed'; runId: string; summary: RunDetail['summary'] | null; counts: NormalizedRunCounts }
-  | { type: 'failed'; runId: string; status: string; summary: RunDetail['summary'] | null; counts: NormalizedRunCounts }
+  | { type: 'needs_heal'; runId: string; cycle: number; context: ExternalHealContext; dirtyTests?: DirtyTestsWarning }
+  | { type: 'passed'; runId: string; summary: RunDetail['summary'] | null; counts: NormalizedRunCounts; dirtyTests?: DirtyTestsWarning }
+  | { type: 'failed'; runId: string; status: string; summary: RunDetail['summary'] | null; counts: NormalizedRunCounts; dirtyTests?: DirtyTestsWarning }
   | {
       type: 'still_waiting'
       runId: string
@@ -2211,7 +2225,16 @@ type WaitForHealTaskResult =
   | { ok: true; value: WaitForHealTaskValue }
   | { ok: false; error: string }
 
-function classifyWaitForHealTask(
+// Read the feature's current dirty status from the integrity store. Returns a
+// relay-ready warning (omitted when clean / store absent) so the agent surfaces
+// "⚠️ Tests have been modified, please review." on a passing or failing run.
+function dirtyTestsWarning(deps: CanaryLabMcpDeps, feature: string): DirtyTestsWarning | undefined {
+  const rec = deps.dirtySpecStore?.get(feature)
+  if (!rec || rec.status !== 'dirty') return undefined
+  return { dirty: true, specs: rec.dirtySpecs.map((s) => s.file), message: rec.message }
+}
+
+export function classifyWaitForHealTask(
   deps: CanaryLabMcpDeps,
   runId: string,
   sessionId: string,
@@ -2222,6 +2245,7 @@ function classifyWaitForHealTask(
   if (isActiveBootRun(detail)) return { ok: true, value: bootSessionValue(detail) }
 
   const status = detail.manifest.status
+  const dirtyTests = dirtyTestsWarning(deps, detail.manifest.feature)
   if (status === 'passed') {
     return {
       ok: true,
@@ -2230,6 +2254,7 @@ function classifyWaitForHealTask(
         runId,
         summary: detail.summary ?? null,
         counts: normalizeRunCounts(detail.summary ?? null),
+        ...(dirtyTests ? { dirtyTests } : {}),
       },
     }
   }
@@ -2242,6 +2267,7 @@ function classifyWaitForHealTask(
         status,
         summary: detail.summary ?? null,
         counts: normalizeRunCounts(detail.summary ?? null),
+        ...(dirtyTests ? { dirtyTests } : {}),
       },
     }
   }
@@ -2280,6 +2306,7 @@ function classifyWaitForHealTask(
         runId,
         cycle,
         context,
+        ...(dirtyTests ? { dirtyTests } : {}),
       },
     }
   }

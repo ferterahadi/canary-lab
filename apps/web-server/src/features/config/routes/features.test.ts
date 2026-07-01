@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest'
+import { execFileSync } from 'child_process'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -6,6 +7,10 @@ import Fastify from 'fastify'
 import { featuresRoutes } from './features'
 import type { PlaywrightListSpawner } from '../../runs/logic/playwright-list'
 import { clearPlaywrightListCache } from '../../runs/logic/playwright-list'
+
+function git(cwd: string, args: string[]): void {
+  execFileSync('git', args, { cwd, stdio: 'pipe' })
+}
 
 let tmpDir: string
 let featuresDir: string
@@ -177,6 +182,78 @@ describe('GET /api/features/:name/config', () => {
     const res = await app.inject({ method: 'GET', url: '/api/features/detached/config' })
     expect(res.statusCode).toBe(404)
     expect((res.json() as { error: string }).error).toBe('config file not found')
+  })
+})
+
+describe('GET /api/features/:name/dirty-diff', () => {
+  const COMMITTED = `test('applies voucher', async () => { expect(1).toBe(1) })\ntest('other', async () => { expect(2).toBe(2) })\n`
+  const EDITED = `test('applies voucher', async () => { expect(1).toBe(2) })\ntest('other', async () => { expect(2).toBe(2) })\n`
+
+  it('flags only the changed test, with its changed line, against the HEAD body', async () => {
+    const dir = writeFeature('alpha', { spec: COMMITTED })
+    git(dir, ['init', '-q'])
+    git(dir, ['config', 'user.email', 't@t.dev'])
+    git(dir, ['config', 'user.name', 'test'])
+    git(dir, ['add', '-A'])
+    git(dir, ['commit', '-q', '-m', 'baseline'])
+    fs.writeFileSync(path.join(dir, 'e2e', 'a.spec.ts'), EDITED)
+
+    const app = await build()
+    const res = await app.inject({ method: 'GET', url: '/api/features/alpha/dirty-diff?file=e2e/a.spec.ts' })
+    expect(res.statusCode).toBe(200)
+    const body = res.json() as { tests: { name: string; changedLines: number[] }[] }
+    expect(body.tests).toHaveLength(1)
+    expect(body.tests[0].name).toBe('applies voucher')
+    expect(body.tests[0].changedLines.length).toBeGreaterThan(0)
+  })
+
+  it('returns no tests when the feature has no git repo', async () => {
+    writeFeature('nogit', { spec: COMMITTED })
+    const app = await build()
+    const res = await app.inject({ method: 'GET', url: '/api/features/nogit/dirty-diff?file=e2e/a.spec.ts' })
+    expect(res.statusCode).toBe(200)
+    expect((res.json() as { tests: unknown[] }).tests).toEqual([])
+  })
+
+  it('returns no tests when the file has never been committed', async () => {
+    const dir = writeFeature('uncommitted', { spec: COMMITTED })
+    git(dir, ['init', '-q'])
+    const app = await build()
+    const res = await app.inject({ method: 'GET', url: '/api/features/uncommitted/dirty-diff?file=e2e/a.spec.ts' })
+    expect(res.statusCode).toBe(200)
+    expect((res.json() as { tests: unknown[] }).tests).toEqual([])
+  })
+
+  it('flags every line of a test added since the last commit', async () => {
+    const dir = writeFeature('alpha', { spec: COMMITTED })
+    git(dir, ['init', '-q'])
+    git(dir, ['config', 'user.email', 't@t.dev'])
+    git(dir, ['config', 'user.name', 'test'])
+    git(dir, ['add', '-A'])
+    git(dir, ['commit', '-q', '-m', 'baseline'])
+    fs.writeFileSync(
+      path.join(dir, 'e2e', 'a.spec.ts'),
+      `${COMMITTED}test('brand new', async () => { expect(3).toBe(3) })\n`,
+    )
+
+    const app = await build()
+    const res = await app.inject({ method: 'GET', url: '/api/features/alpha/dirty-diff?file=e2e/a.spec.ts' })
+    const body = res.json() as { tests: { name: string; changedLines: number[] }[] }
+    expect(body.tests).toHaveLength(1)
+    expect(body.tests[0].name).toBe('brand new')
+  })
+
+  it('400s without a file query param', async () => {
+    writeFeature('alpha', { spec: COMMITTED })
+    const app = await build()
+    const res = await app.inject({ method: 'GET', url: '/api/features/alpha/dirty-diff' })
+    expect(res.statusCode).toBe(400)
+  })
+
+  it('404s for an unknown feature', async () => {
+    const app = await build()
+    const res = await app.inject({ method: 'GET', url: '/api/features/missing/dirty-diff?file=e2e/a.spec.ts' })
+    expect(res.statusCode).toBe(404)
   })
 })
 

@@ -762,6 +762,29 @@ body {
     inset 0 0 12px -5px var(--boot);
 }
 
+/* Dirty (test files modified) row: danger tint with a SLOW breathing red edge
+   ring. Declared after the run/heal/boot rows so its ::after wins when a row is
+   both active and dirty — an integrity warning takes visual priority. The cue is
+   held until the user approves or commits, so the breathe is slower (4s) than a
+   running test's to avoid nagging over a long session. */
+.cl-list-row-dirty {
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+}
+.cl-list-row-dirty:hover {
+  background: color-mix(in srgb, var(--danger) 20%, transparent);
+}
+.cl-list-row-dirty::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  animation: cl-edge-breathe 4s ease-in-out infinite;
+  box-shadow:
+    inset 0 0 0 1px var(--danger),
+    inset 0 0 12px -4px var(--danger);
+}
+
 /* Subtle count chip — mono numeral on a soft fill. */
 .cl-count-chip {
   display: inline-flex;

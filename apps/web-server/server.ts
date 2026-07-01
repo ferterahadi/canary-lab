@@ -32,6 +32,8 @@ import { portifyRoutes } from './src/features/portify/routes/portify'
 import { portifyStreamRoutes } from './src/features/portify/ws/portify-stream'
 import { PortifyRunStore } from './src/features/portify/logic/runtime/store'
 import { CoverageJobRunStore } from './src/features/coverage/logic/coverage/jobs/store'
+import { DirtySpecStore } from './src/features/runs/logic/dirty-specs/store'
+import { startDirtySpecWatcher } from './src/features/runs/logic/dirty-specs/watcher'
 import { createPortifyRunner } from './src/features/portify/logic/runtime/runner'
 import { reclaimOrphanedPortify } from './src/features/portify/logic/runtime/reclaim'
 import { portifyDir } from './src/features/portify/logic/runtime/paths'
@@ -206,6 +208,25 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
   const coverageJobStore = new CoverageJobRunStore(logsDir)
   coverageJobStore.reconcileInterrupted(() => new Date().toISOString())
   const workspaceEvents = new WorkspaceEventBus()
+  // Test-file integrity ("dirty") tracking. One feature-scoped store is the
+  // single source of truth both the UI feature list and the MCP run result read.
+  // Its change events drive the live red cue; the watcher recomputes on spec
+  // edits + commits. Best-effort throughout — never blocks a run.
+  const dirtySpecStore = new DirtySpecStore(logsDir)
+  dirtySpecStore.onEvent((e) => {
+    if (e.featureId) workspaceEvents.publish({ type: 'tests-dirty-changed', feature: e.featureId })
+  })
+  const dirtySpecWatcher = startDirtySpecWatcher({
+    featuresDir,
+    store: dirtySpecStore,
+    log: (msg, err) => app.log.warn({ err }, msg),
+    // A spec's content actually changed on disk — refetch source, not just the
+    // dirty flag (tests-dirty-changed above only tells you *that* it changed).
+    onSpecFileChanged: (feature) => workspaceEvents.publish({ type: 'tests-changed', feature }),
+  })
+  app.addHook('onClose', async () => {
+    dirtySpecWatcher.close()
+  })
   // Self-update job (npm install <pkg>@latest). A job left 'running' belongs to a
   // dead process — flip it to 'aborted' so it doesn't hold the single-flight lock
   // or show as installing forever.
@@ -257,7 +278,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
   // process termination. Cleared as runs finish.
   const activeEnvsets = new Map<string, BackupRecord[]>()
 
-  await app.register(featuresRoutes, { featuresDir })
+  await app.register(featuresRoutes, { featuresDir, dirtySpecStore })
   await app.register(coverageRoutes, { featuresDir, logsDir, projectRoot: opts.projectRoot, coverageJobStore, workspaceEvents })
   await app.register(featureConfigRoutes, {
     featuresDir,
@@ -303,6 +324,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
         ptyFactory,
         runnerLog,
         runStateSink: runStore,
+        dirtySpecHooks: dirtySpecStore,
         executionType: 'verify',
         verification: resolved.metadata,
         playwrightEnv: resolved.playwrightEnv,
@@ -529,6 +551,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
         repoBranchSnapshots,
         initialHealCycles: manifest.healCycles,
         runStateSink: runStore,
+        dirtySpecHooks: dirtySpecStore,
       })
     } catch (err) {
       if (backups) restore(backups)
@@ -848,6 +871,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
           // emitter sees the mutation. Phase 2 attaches the WS endpoint to
           // these events.
           runStateSink: runStore,
+          dirtySpecHooks: dirtySpecStore,
         })
       } catch (err) {
         if (backups) restore(backups)
@@ -1018,6 +1042,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
           repoBranchSnapshots,
           initialHealCycles: manifest.healCycles,
           runStateSink: runStore,
+          dirtySpecHooks: dirtySpecStore,
         })
       } catch (err) {
         if (backups) restore(backups)
@@ -1141,6 +1166,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
           repoBranchSnapshots,
           initialHealCycles: manifest.healCycles,
           runStateSink: runStore,
+          dirtySpecHooks: dirtySpecStore,
         })
       } catch (err) {
         if (backups) restore(backups)
@@ -1260,6 +1286,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
     featuresDir,
     projectRoot: opts.projectRoot,
     workspaceEvents,
+    dirtySpecStore,
 	    startRun: async (feature, env, healAgent, isolation, executionType) => {
 	      const resp = await app.inject({
 	        method: 'POST',

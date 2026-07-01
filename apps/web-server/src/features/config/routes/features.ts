@@ -3,6 +3,9 @@ import fs from 'fs'
 import path from 'path'
 import { loadFeatures, listSpecFiles } from '../../config/logic/feature-loader'
 import { extractTestsFromSource, type ExtractedTest } from '../../config/logic/ast-extractor'
+import { getGitRoot, runGit } from '../../../shared/git-repo'
+import type { DirtySpecStore } from '../../runs/logic/dirty-specs/store'
+import { diffChangedLines } from '../../runs/logic/dirty-specs/text-diff'
 import { listPlaywrightTests, type PlaywrightListSpawner } from '../../runs/logic/playwright-list'
 import { parseDotenv } from '../../config/logic/dotenv-edit'
 import { overlayExists as portifyOverlayExists } from '../../portify/logic/runtime/overlay'
@@ -17,6 +20,23 @@ export interface FeaturesRouteDeps {
   // Optional override so tests can stub the Playwright `--list` invocation
   // without spawning a real `npx playwright test`.
   playwrightListSpawner?: PlaywrightListSpawner
+  // Test-file integrity store. Absent in tests that don't exercise dirty state;
+  // when present, the feature list carries a `dirty` summary and the approve /
+  // commit routes are live. Mutations emit store change events which the server
+  // bridges to a `tests-dirty-changed` WorkspaceEvent (no direct publish here).
+  dirtySpecStore?: DirtySpecStore
+}
+
+// Compact dirty summary folded into each feature-list row. Clean when the store
+// has no record yet (cold load before the watcher's first recompute) or the
+// feature has no modified specs.
+function dirtySummary(store: DirtySpecStore | undefined, featureName: string): {
+  status: 'clean' | 'dirty'
+  specs: { file: string; affectedTests: string[] }[]
+} {
+  const rec = store?.get(featureName)
+  if (!rec || rec.status !== 'dirty') return { status: 'clean', specs: [] }
+  return { status: 'dirty', specs: rec.dirtySpecs.map((s) => ({ file: s.file, affectedTests: s.affectedTests })) }
 }
 
 export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDeps): Promise<void> {
@@ -30,8 +50,116 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
       // A saved port overlay exists → the feature boots concurrently. Surfaced
       // as the "Portified" badge in the features column.
       portified: portifyOverlayExists(f.featureDir),
+      // Test-file integrity: 'dirty' when a spec changed since the last green
+      // (or run-start) and hasn't been approved/committed. Drives the red cue.
+      dirty: dirtySummary(deps.dirtySpecStore, f.name),
     }))
   })
+
+  // Approve the current spec content as intended (Canary-local). Records the
+  // current hashes as the accepted baseline so the cue clears without a commit.
+  app.post<{ Params: { name: string } }>('/api/features/:name/approve-dirty', async (req, reply) => {
+    const feature = loadFeatures(deps.featuresDir).find((f) => f.name === req.params.name)
+    if (!feature || !feature.featureDir) {
+      reply.code(404)
+      return { error: 'feature not found' }
+    }
+    if (!deps.dirtySpecStore) {
+      reply.code(503)
+      return { error: 'test-file integrity tracking is not available' }
+    }
+    const rec = await deps.dirtySpecStore.approve(feature.name, feature.featureDir)
+    return { status: rec.status, dirtySpecs: rec.dirtySpecs }
+  })
+
+  // Commit the modified specs to git — the durable, reviewable acknowledgment.
+  // Stages + commits exactly the dirty spec files (not the whole working tree),
+  // then recomputes; HEAD now matches the working tree so the cue clears. An
+  // external commit (user's own terminal) clears the same way via the .git watch.
+  app.post<{ Params: { name: string } }>('/api/features/:name/commit-dirty', async (req, reply) => {
+    const feature = loadFeatures(deps.featuresDir).find((f) => f.name === req.params.name)
+    if (!feature || !feature.featureDir) {
+      reply.code(404)
+      return { error: 'feature not found' }
+    }
+    if (!deps.dirtySpecStore) {
+      reply.code(503)
+      return { error: 'test-file integrity tracking is not available' }
+    }
+    const specs = deps.dirtySpecStore.get(feature.name)?.dirtySpecs ?? []
+    if (specs.length === 0) {
+      const rec = await deps.dirtySpecStore.recompute(feature.name, feature.featureDir)
+      return { committed: false, reason: 'no modified specs', status: rec.status }
+    }
+    const root = await getGitRoot(feature.featureDir)
+    if (!root) {
+      reply.code(409)
+      return { error: 'feature is not inside a git repository' }
+    }
+    const realDir = fs.realpathSync(feature.featureDir)
+    const repoRelPaths = specs.map((s) => path.relative(root, path.join(realDir, s.file)))
+    const add = await runGit(root, ['add', '--', ...repoRelPaths])
+    if (add.code !== 0) {
+      reply.code(500)
+      return { error: (add.stderr || add.stdout).trim() || 'git add failed' }
+    }
+    const message = `test: accept modified specs for "${feature.name}" via Canary Lab`
+    const commit = await runGit(root, ['commit', '-m', message, '--', ...repoRelPaths])
+    if (commit.code !== 0) {
+      reply.code(500)
+      return { error: (commit.stderr || commit.stdout).trim() || 'git commit failed' }
+    }
+    const rec = await deps.dirtySpecStore.recompute(feature.name, feature.featureDir)
+    return { committed: true, status: rec.status }
+  })
+
+  // Per-test line-diff for a dirty spec, against the committed (HEAD) version —
+  // the same comparison an editor's own git-diff view already shows. Diffing
+  // happens here (git itself, via `diffChangedLines`), not on the client — the
+  // client just renders the line numbers it's given. Empty when the feature
+  // isn't in git, the file has no HEAD entry yet (never committed), or a test
+  // has no changed lines — nothing to highlight rather than an error.
+  app.get<{ Params: { name: string }; Querystring: { file?: string } }>(
+    '/api/features/:name/dirty-diff',
+    async (req, reply) => {
+      const features = loadFeatures(deps.featuresDir)
+      const feature = features.find((f) => f.name === req.params.name)
+      if (!feature || !feature.featureDir) {
+        reply.code(404)
+        return { error: 'feature not found' }
+      }
+      const rel = req.query.file
+      if (!rel) {
+        reply.code(400)
+        return { error: 'file query param required' }
+      }
+      const root = await getGitRoot(feature.featureDir)
+      if (!root) return { tests: [] }
+      const realDir = fs.realpathSync(feature.featureDir)
+      const abs = path.join(realDir, rel)
+      let currentSource = ''
+      try { currentSource = fs.readFileSync(abs, 'utf8') } catch { /* unreadable — no tests to diff */ }
+      const { tests: currentTests } = extractTestsFromSource(rel, currentSource)
+
+      const repoRel = path.relative(root, abs)
+      const head = await runGit(root, ['show', `HEAD:${repoRel}`])
+      // The file itself has never been committed — nothing to diff against yet
+      // (mirrors the dirty-detection bootstrap rule: no baseline at all reads
+      // clean, not "everything changed"). A test missing from an otherwise
+      // tracked file is a different case, handled per-test below.
+      if (head.code !== 0) return { tests: [] }
+      const { tests: headTests } = extractTestsFromSource(rel, head.stdout)
+
+      const results = await Promise.all(currentTests.map(async (t) => {
+        const headBody = headTests.find((h) => h.name === t.name)?.bodySource
+        const changedLines = headBody === undefined
+          ? Array.from({ length: t.bodySource ? t.bodySource.split('\n').length : 0 }, (_, i) => i + 1)
+          : [...await diffChangedLines(headBody, t.bodySource)]
+        return { name: t.name, changedLines }
+      }))
+      return { tests: results.filter((r) => r.changedLines.length > 0) }
+    },
+  )
 
   app.get<{ Params: { name: string } }>('/api/features/:name/config', async (req, reply) => {
     const features = loadFeatures(deps.featuresDir)
