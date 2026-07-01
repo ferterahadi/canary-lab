@@ -3,6 +3,8 @@
 [![npm](https://img.shields.io/npm/v/canary-lab.svg)](https://www.npmjs.com/package/canary-lab)
 [![license](https://img.shields.io/npm/l/canary-lab.svg)](LICENSE)
 
+📋 **[Changelog](docs/CHANGELOG.md)** — what shipped in each release. Also tagged on [GitHub Releases](https://github.com/ferterahadi/canary-lab/releases).
+
 **Your AI agent implements the code. Canary Lab verifies it independently before it ships.**
 
 Coding agents optimize for the literal instruction — *"tests pass," "done," "fixed"* — which isn't always the same as the code working as intended, and an agent that both writes and grades its own run can mark it green. Canary Lab is the independent harness on your machine: it boots your real services, runs your Playwright tests **itself**, and owns the verdict. Green means it actually passed.
