@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import * as api from '../api/client'
-import type { FeatureSpecFile, RunStatus } from '../api/types'
+import type { DirtySpecSummary, FeatureSpecFile, RunStatus } from '../api/types'
 import { activeBodyLineForTest, colorClassForStatus, runningTestForSummaryName, statusForTest, summaryEntryName, type StepStatus } from '../../features/runs/utils/test-step-status'
 import type { RunSummary, RunSummaryRunningStep } from '../api/types'
 import { ShikiCode, StatusPill, StepBlock } from '../ui/TestCodeBlock'
@@ -8,18 +8,26 @@ import { TestIdBadge } from '../ui/TestIdBadge'
 import { buildTestNumbering, stripLeadingTestOrdinal, testNumberKey } from '../test-numbering'
 import { ChevronRightIcon, StatusDot } from '../../features/config/components/atoms'
 
+type DirtyDiff = { name: string; changedLines: number[] }[]
+
 interface Props {
   feature: string | null
   activeRunSummary: RunSummary | undefined
   activeRunStatus: RunStatus | undefined
   refreshKey?: number
   onTotalTestsChange?: (n: number) => void
+  /** Spec files flagged as modified, each with the test title(s) actually
+   *  affected — only those test cards get the red "modified" treatment. */
+  dirtySpecs?: DirtySpecSummary[]
 }
 
-export function TestCasesColumn({ feature, activeRunSummary, activeRunStatus, refreshKey = 0, onTotalTestsChange }: Props) {
+export function TestCasesColumn({ feature, activeRunSummary, activeRunStatus, refreshKey = 0, onTotalTestsChange, dirtySpecs = [] }: Props) {
   const [specs, setSpecs] = useState<FeatureSpecFile[] | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [expandedTest, setExpandedTest] = useState<string | null>(null)
+  // Per-test changed-line numbers for each dirty spec file (diffed against git
+  // HEAD server-side), keyed by that file's path. Fetched lazily, once per file.
+  const [dirtyDiffs, setDirtyDiffs] = useState<Record<string, DirtyDiff>>({})
 
   useEffect(() => {
     if (!feature) {
@@ -31,6 +39,7 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunStatus, re
     setSpecs(null)
     setLoadError(null)
     setExpandedTest(null)
+    setDirtyDiffs({})
     api.getFeatureTests(feature)
       .then((data) => {
         if (cancelled) return
@@ -42,6 +51,18 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunStatus, re
       })
     return () => { cancelled = true }
   }, [feature, refreshKey])
+
+  useEffect(() => {
+    if (!feature) return
+    for (const spec of dirtySpecs) {
+      if (spec.file in dirtyDiffs) continue
+      api.getFeatureDirtyDiff(feature, spec.file)
+        .then((res) => setDirtyDiffs((prev) => ({ ...prev, [spec.file]: res.tests })))
+        .catch(() => setDirtyDiffs((prev) => ({ ...prev, [spec.file]: [] })))
+    }
+    // dirtyDiffs is read only to skip already-fetched files, not to react to.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [feature, dirtySpecs])
 
   const totalTests = specs?.reduce((acc, s) => acc + s.tests.length, 0) ?? 0
   useEffect(() => {
@@ -102,8 +123,16 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunStatus, re
           <div className="text-xs" style={{ color: 'var(--text-muted)' }}>No spec files found.</div>
         ) : (
           <div className="space-y-1.5">
-            {displaySpecs.flatMap((spec) =>
-              spec.tests.map((t) => {
+            {displaySpecs.flatMap((spec) => {
+              // Test-level dirty: only the test(s) named in the matching dirty
+              // spec's `affectedTests` get the red treatment, not the whole file.
+              const dirtySpec = dirtySpecs.find((d) => spec.file === d.file || spec.file.endsWith(`/${d.file}`))
+              return spec.tests.map((t) => {
+                const testDirty = dirtySpec?.affectedTests.includes(t.name) ?? false
+                const diffLines = testDirty
+                  ? dirtyDiffs[dirtySpec?.file ?? '']?.find((d) => d.name === t.name)?.changedLines
+                  : undefined
+                const changedLines = diffLines ? new Set(diffLines) : undefined
                 const key = `${spec.file}:${t.line}:${t.id ?? t.name}`
                 const isExpanded = expandedTest === key
                 const entryName = summaryEntryName(t.name)
@@ -137,11 +166,13 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunStatus, re
                     activeLine={activeLine}
                     activeSourceLine={activeSourceLine}
                     expanded={isExpanded}
+                    dirty={testDirty}
+                    changedLines={changedLines}
                     onToggle={() => setExpandedTest(isExpanded ? null : key)}
                   />
                 )
-              }),
-            )}
+              })
+            })}
           </div>
         )}
       </div>
@@ -193,6 +224,8 @@ function TestCard({
   activeLine,
   activeSourceLine,
   expanded,
+  dirty = false,
+  changedLines,
   onToggle,
 }: {
   sourceFile: string
@@ -205,13 +238,22 @@ function TestCard({
   activeLine?: number | null
   activeSourceLine?: number | null
   expanded: boolean
+  dirty?: boolean
+  /** Lines in `test.bodySource` that differ from the git HEAD version — see
+   *  `changedLineNumbers`. Rendered as a danger-tinted diff highlight. */
+  changedLines?: Set<number>
   onToggle: () => void
 }) {
   return (
     <div
       className={`cl-card cl-card-hover transition-all duration-150 ${colorClassForStatus(status)}`}
       style={{
-        background: expanded || isRunningTest ? 'var(--bg-selected)' : undefined,
+        // A modified spec rings the card in danger and tints it — overriding the
+        // run-status colour, since "this test changed" outranks its last verdict.
+        background: dirty
+          ? 'color-mix(in srgb, var(--danger) 8%, transparent)'
+          : expanded || isRunningTest ? 'var(--bg-selected)' : undefined,
+        ...(dirty ? { boxShadow: 'inset 0 0 0 1px var(--danger)' } : {}),
       }}
     >
       <button
@@ -296,6 +338,7 @@ function TestCard({
                 activeLine={activeLine}
                 sourceLocation={{ file: sourceFile, startLine: test.line }}
                 runningHighlight={isRunningTest}
+                changedLines={changedLines}
               />
             </div>
           ) : (

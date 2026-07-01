@@ -14,6 +14,8 @@ import { ConnectionBadge } from './ConnectionBadge'
 import { StatusChip } from '../ui/StatusChip'
 import { ServicesPill } from '../../features/runs/components/ServicesPill'
 import { RunsPill } from '../../features/runs/components/RunsPill'
+import { DirtyTestsPill } from '../../features/runs/components/DirtyTestsPill'
+import { DirtyReviewDialog } from '../../features/runs/components/DirtyReviewDialog'
 import { PortifyLauncherPill } from '../../features/portify/components/PortifyLauncherPill'
 import { PortifyPickerDialog } from '../../features/portify/components/PortifyPickerDialog'
 import { BenchmarkPill } from '../../features/benchmark/components/BenchmarkPill'
@@ -72,6 +74,9 @@ export function GlobalStatusBar({ activeRunDetail, features = [], onNavigateToRu
   const [runsOpen, setRunsOpen] = useState(false)
   const [servicesOpen, setServicesOpen] = useState(false)
   const [benchmarkOpen, setBenchmarkOpen] = useState(false)
+  const [dirtyReviewOpen, setDirtyReviewOpen] = useState(false)
+  // Features with modified test files — drives the danger pill + review panel.
+  const dirtyFeatureCount = features.filter((f) => f.dirty?.status === 'dirty').length
   // The right-hand action cluster collapses into a single toggle. Default
   // expanded (actions stay glanceable); the choice persists across reloads.
   const [actionsExpanded, setActionsExpanded] = useState<boolean>(() => {
@@ -134,6 +139,14 @@ export function GlobalStatusBar({ activeRunDetail, features = [], onNavigateToRu
               label={`${services.length} service${services.length > 1 ? 's' : ''}`}
               state={servicesActive ? 'running' : 'idle'}
             />
+          </div>
+        </>
+      )}
+      {dirtyFeatureCount > 0 && (
+        <>
+          <span className="cl-divider shrink-0">·</span>
+          <div className="shrink-0">
+            <DirtyTestsPill count={dirtyFeatureCount} onOpen={() => setDirtyReviewOpen(true)} />
           </div>
         </>
       )}
@@ -213,6 +226,7 @@ export function GlobalStatusBar({ activeRunDetail, features = [], onNavigateToRu
         />
       )}
       {servicesOpen && <ServicesDialog onClose={() => setServicesOpen(false)} />}
+      {dirtyReviewOpen && <DirtyReviewDialog features={features} onClose={() => setDirtyReviewOpen(false)} />}
       {benchmarkOpen && <BenchmarkWindow onClose={() => setBenchmarkOpen(false)} />}
       {portifyPickerOpen && (
         <PortifyPickerDialog
