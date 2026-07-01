@@ -3,7 +3,7 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { ApiError, getFeatureTests } from '../api/client'
+import { ApiError, getFeatureDirtyDiff, getFeatureTests } from '../api/client'
 import type { FeatureTests } from '../api/types'
 import { TestCasesColumn } from './TestCasesColumn'
 
@@ -12,6 +12,7 @@ vi.mock('../api/client', async () => {
   return {
     ...actual,
     getFeatureTests: vi.fn(),
+    getFeatureDirtyDiff: vi.fn(),
   }
 })
 
@@ -38,6 +39,7 @@ beforeEach(() => {
   document.body.appendChild(container)
   root = createRoot(container)
   vi.mocked(getFeatureTests).mockReset()
+  vi.mocked(getFeatureDirtyDiff).mockReset().mockResolvedValue({ tests: [] })
 })
 
 afterEach(() => {
@@ -320,6 +322,70 @@ describe('TestCasesColumn', () => {
     const activeLine = container.querySelector<HTMLElement>('[data-active-line="true"]')
     expect(activeLine?.textContent).toContain('await send(payload)')
     expect(activeLine?.getAttribute('style')).toContain('rgb(234, 179, 8)')
+  })
+
+  it('rings only the test named in affectedTests, not every card in the spec', async () => {
+    vi.mocked(getFeatureTests).mockResolvedValue([
+      {
+        file: '/tmp/features/alpha/e2e/a.spec.ts',
+        tests: [
+          { name: 'a', line: 3, bodySource: '', steps: [] },
+          { name: 'b', line: 12, bodySource: '', steps: [] },
+        ],
+      },
+    ])
+
+    await act(async () => {
+      root.render(
+        <TestCasesColumn
+          feature="alpha"
+          activeRunSummary={undefined}
+          activeRunStatus={undefined}
+          dirtySpecs={[{ file: 'e2e/a.spec.ts', affectedTests: ['b'] }]}
+        />,
+      )
+    })
+
+    const cardFor = (name: string) => {
+      const button = Array.from(container.querySelectorAll('button')).find((el) => el.textContent?.includes(name))
+      return button?.closest('.cl-card') as HTMLElement | null
+    }
+    expect(cardFor('b')?.style.boxShadow).toContain('var(--danger)')
+    expect(cardFor('a')?.style.boxShadow ?? '').not.toContain('var(--danger)')
+  })
+
+  it('highlights only the line(s) the server reports as changed for a dirty test', async () => {
+    vi.mocked(getFeatureTests).mockResolvedValue([
+      {
+        file: '/tmp/features/alpha/e2e/a.spec.ts',
+        tests: [
+          { name: 'a', line: 3, bodySource: '{\n  const x = 1\n  expect(x).toBe(2)\n}', steps: [] },
+        ],
+      },
+    ])
+    vi.mocked(getFeatureDirtyDiff).mockResolvedValue({
+      tests: [{ name: 'a', changedLines: [3] }],
+    })
+
+    await act(async () => {
+      root.render(
+        <TestCasesColumn
+          feature="alpha"
+          activeRunSummary={undefined}
+          activeRunStatus={undefined}
+          dirtySpecs={[{ file: 'e2e/a.spec.ts', affectedTests: ['a'] }]}
+        />,
+      )
+    })
+
+    await act(async () => {
+      container.querySelector('button')?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+    await waitFor(() => Boolean(container.querySelector('[data-changed-line="true"]')))
+
+    const changedLines = container.querySelectorAll('[data-changed-line="true"]')
+    expect(changedLines).toHaveLength(1)
+    expect(changedLines[0].textContent).toContain('toBe(2)')
   })
 
   it('renders an error when feature tests fail to load', async () => {

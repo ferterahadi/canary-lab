@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import fs from 'fs'
 import path from 'path'
 import { spawn, spawnSync } from 'child_process'
+import { launchEditorDir } from '../../../shared/editor-launch'
 import {
   isValidPort,
   loadProjectConfig,
@@ -111,6 +112,20 @@ export async function projectConfigRoutes(
     } catch (err) {
       reply.code(500)
       return { error: (err as Error).message }
+    }
+  })
+
+  // ─── workspace-root launcher ──────────────────────────────────────────
+  // Opens the whole project root in the configured editor — same launcher
+  // runs.ts's worktree-open route uses for a single worktree dir.
+  app.post('/api/open-workspace', async (_req, reply) => {
+    const editor = loadProjectConfig(deps.projectRoot).editor
+    try {
+      const usedEditor = launchEditorDir(editor, deps.projectRoot)
+      return { opened: true, path: deps.projectRoot, editor: usedEditor }
+    } catch (err) {
+      reply.code(200)
+      return { opened: false, path: deps.projectRoot, error: err instanceof Error ? err.message : String(err) }
     }
   })
 

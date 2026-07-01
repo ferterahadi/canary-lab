@@ -18,6 +18,7 @@ import {
   type NormalizedRunCounts,
 } from '../src/features/runs/logic/heal/external-heal-surface'
 import { loadFeatures } from '../src/features/config/logic/feature-loader'
+import type { DirtySpecStore } from '../src/features/runs/logic/dirty-specs/store'
 import { isHealClaimAllowed } from '../src/features/runs/logic/heal/heal-claim-policy'
 import { computePortPreflight } from '../src/features/runs/logic/runtime/port-preflight'
 import {
@@ -90,6 +91,7 @@ import {
   deriveRunActionAvailability,
 } from '../../../shared/run-state'
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../src/shared/workspace-events'
+import { encodeToonTable } from '../src/shared/toon'
 import type {
   PortifyManifest,
   StartExternalPortifyInput,
@@ -250,6 +252,10 @@ export interface CanaryLabMcpDeps {
    *  delete the overlay. Mirrors DELETE /api/features/:name/portify-overlay. */
   removePortification?: (feature: string) => { name: string; portified: boolean; reverted: boolean }
   workspaceEvents?: WorkspaceEventPublisher
+  /** Test-file integrity store. When present, terminal/needs_heal run results
+   *  carry a `dirtyTests` warning the agent relays verbatim. Read-only here —
+   *  the MCP surface never approves or gates on it (awareness, not enforcement). */
+  dirtySpecStore?: DirtySpecStore
 }
 
 const CLIENT_KIND = z.enum(['claude', 'codex', 'claude-pty', 'codex-pty', 'other'])
@@ -516,26 +522,31 @@ export function registerCanaryLabTools(
   // ─── reads ────────────────────────────────────────────────────────────
 
   registerTool('list_features', {
-    description: 'List existing Canary Lab features when you need to choose or inspect one. Do not call this before random/new feature creation; call create_feature directly with a unique name and retry on collision.',
+    description: 'List existing Canary Lab features when you need to choose or inspect one. Do not call this before random/new feature creation; call create_feature directly with a unique name and retry on collision. Returned as a TOON table `[N]{name,description,envs,repos}:`. To keep one flat row per feature, the list-valued columns are packed: `envs` is `|`-joined env names; `repos` is `|`-joined repo entries, each `name@localPath@branch` (branch empty if none). Split on `|` then `@` to unpack.',
     inputSchema: {},
   }, async () => {
     const features = loadFeatures(deps.featuresDir).map((f) => ({
       name: f.name,
       description: f.description ?? '',
-      envs: f.envs ?? [],
-      repos: (f.repos ?? []).map((r) => ({ name: r.name, localPath: r.localPath, branch: r.branch ?? null })),
+      // Pack the list-valued fields into delimited scalars so the array reaches
+      // the TOON tabular form (one flat row per feature) instead of the verbose
+      // list form. Lossless for paths/branches that don't contain `@` or `|`.
+      envs: (f.envs ?? []).join('|'),
+      repos: (f.repos ?? [])
+        .map((r) => [r.name, r.localPath, r.branch ?? ''].join('@'))
+        .join('|'),
     }))
-    return asJsonResult(features)
+    return asToonResult(features)
   })
 
   registerTool('list_runs', {
-    description: 'List Canary Lab runs, newest first (default 20 — raise `limit` for more history). Optionally filter by feature. Each row is already slim (id, feature, status, timestamps); fetch one run\'s detail with get_run.',
+    description: 'List Canary Lab runs, newest first (default 20 — raise `limit` for more history). Optionally filter by feature. Each row is already slim (id, feature, status, timestamps); fetch one run\'s detail with get_run. Returned as a TOON table: a `[N]{col,...}:` header line followed by one comma-separated row per run (quoted cells are JSON-escaped strings).',
     inputSchema: {
       feature: z.string().optional().describe('Feature name. Omit to list across all features.'),
       limit: z.number().int().positive().max(200).default(20).describe('Max runs to return, newest first. Default 20.'),
     },
   }, async ({ feature, limit }) => {
-    return asJsonResult(deps.store.list(feature ? { feature } : {}).slice(0, limit))
+    return asToonResult(deps.store.list(feature ? { feature } : {}).slice(0, limit))
   })
 
   registerTool('get_run', {
@@ -1211,11 +1222,11 @@ export function registerCanaryLabTools(
   })
 
   registerTool('list_evaluation_exports', {
-    description: 'List persisted evaluation export tasks.',
+    description: 'List persisted evaluation export tasks. Returned as a TOON table: a `[N]{col,...}:` header line followed by one comma-separated row per task (quoted cells are JSON-escaped strings).',
     inputSchema: { runId: z.string().optional() },
   }, async ({ runId }) => {
     const tasks = listEvaluationExportTasks(deps.store.logsDir, runId ? { runId } : {})
-    return asJsonResult(tasks.map(evaluationExportTaskView))
+    return asToonResult(tasks.map(evaluationExportTaskView))
   })
 
   registerTool('get_evaluation_export', {
@@ -2178,10 +2189,19 @@ function isToolErrorPayload(value: unknown): value is { error: string; statusCod
     typeof (value as { error?: unknown }).error === 'string'
 }
 
+// Test-file integrity warning, present only when a spec changed since the last
+// green/run-start and wasn't approved/committed. The agent relays `message`
+// verbatim; Canary never blocks or gates on it (awareness, not enforcement).
+interface DirtyTestsWarning {
+  dirty: true
+  specs: string[]
+  message: string
+}
+
 type WaitForHealTaskValue =
-  | { type: 'needs_heal'; runId: string; cycle: number; context: ExternalHealContext }
-  | { type: 'passed'; runId: string; summary: RunDetail['summary'] | null; counts: NormalizedRunCounts }
-  | { type: 'failed'; runId: string; status: string; summary: RunDetail['summary'] | null; counts: NormalizedRunCounts }
+  | { type: 'needs_heal'; runId: string; cycle: number; context: ExternalHealContext; dirtyTests?: DirtyTestsWarning }
+  | { type: 'passed'; runId: string; summary: RunDetail['summary'] | null; counts: NormalizedRunCounts; dirtyTests?: DirtyTestsWarning }
+  | { type: 'failed'; runId: string; status: string; summary: RunDetail['summary'] | null; counts: NormalizedRunCounts; dirtyTests?: DirtyTestsWarning }
   | {
       type: 'still_waiting'
       runId: string
@@ -2205,7 +2225,16 @@ type WaitForHealTaskResult =
   | { ok: true; value: WaitForHealTaskValue }
   | { ok: false; error: string }
 
-function classifyWaitForHealTask(
+// Read the feature's current dirty status from the integrity store. Returns a
+// relay-ready warning (omitted when clean / store absent) so the agent surfaces
+// "⚠️ Tests have been modified, please review." on a passing or failing run.
+function dirtyTestsWarning(deps: CanaryLabMcpDeps, feature: string): DirtyTestsWarning | undefined {
+  const rec = deps.dirtySpecStore?.get(feature)
+  if (!rec || rec.status !== 'dirty') return undefined
+  return { dirty: true, specs: rec.dirtySpecs.map((s) => s.file), message: rec.message }
+}
+
+export function classifyWaitForHealTask(
   deps: CanaryLabMcpDeps,
   runId: string,
   sessionId: string,
@@ -2216,6 +2245,7 @@ function classifyWaitForHealTask(
   if (isActiveBootRun(detail)) return { ok: true, value: bootSessionValue(detail) }
 
   const status = detail.manifest.status
+  const dirtyTests = dirtyTestsWarning(deps, detail.manifest.feature)
   if (status === 'passed') {
     return {
       ok: true,
@@ -2224,6 +2254,7 @@ function classifyWaitForHealTask(
         runId,
         summary: detail.summary ?? null,
         counts: normalizeRunCounts(detail.summary ?? null),
+        ...(dirtyTests ? { dirtyTests } : {}),
       },
     }
   }
@@ -2236,6 +2267,7 @@ function classifyWaitForHealTask(
         status,
         summary: detail.summary ?? null,
         counts: normalizeRunCounts(detail.summary ?? null),
+        ...(dirtyTests ? { dirtyTests } : {}),
       },
     }
   }
@@ -2274,6 +2306,7 @@ function classifyWaitForHealTask(
         runId,
         cycle,
         context,
+        ...(dirtyTests ? { dirtyTests } : {}),
       },
     }
   }
@@ -2382,6 +2415,15 @@ function asJsonResult(value: unknown): CallToolResult {
   // Compact (no indentation): the model parses JSON regardless, and the 2-space
   // pretty-print was pure whitespace tokens on every result across all tools.
   return { content: [{ type: 'text', text: JSON.stringify(value) }] }
+}
+
+// For list results: a TOON table of uniform rows costs ~half the tokens of the
+// equivalent compact JSON (the field names are emitted once as a header instead
+// of per row). encodeToonTable normalizes rows to a uniform scalar shape first
+// and falls back to compact JSON when the data isn't tabular, so this is safe to
+// point at any array-of-records result.
+function asToonResult(value: unknown): CallToolResult {
+  return { content: [{ type: 'text', text: encodeToonTable(value) }] }
 }
 
 function errorResult(message: string): CallToolResult {

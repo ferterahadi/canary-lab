@@ -11,6 +11,7 @@ import type { PtyFactory } from '../src/features/runs/logic/runtime/pty-spawner'
 import { runDirFor } from '../src/features/runs/logic/runtime/run-paths'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
+import { decode } from '@toon-format/toon'
 
 // Smoke test for the MCP HTTP server. Boots Canary Lab against the
 // templates/project tree, connects a real MCP client over streamable HTTP,
@@ -290,10 +291,11 @@ describe('MCP HTTP server (smoke)', () => {
       const names = tools.tools.map((t) => t.name).sort()
       expect(names).toEqual(LIFECYCLE_TOOLS)
 
-      // tools/call list_features — should return the templates/project scaffold.
+      // tools/call list_features — returns the templates/project scaffold as a
+      // TOON table; decode it back to rows before asserting.
       const result = await client.callTool({ name: 'list_features', arguments: {} })
       const text = (result.content?.[0] as { type: string; text: string } | undefined)?.text ?? ''
-      const features = JSON.parse(text) as Array<{ name: string }>
+      const features = decode(text) as Array<{ name: string }>
       const featureNames = features.map((f) => f.name).sort()
       expect(featureNames).toContain('broken_todo_api')
       expect(featureNames).toContain('example_todo_api')
@@ -864,13 +866,16 @@ describe('MCP HTTP server (smoke)', () => {
       expect(full).toMatchObject({ runId: 'run-1' })
       expect(full).not.toHaveProperty('raw')
 
-      // list_runs: newest-first, capped by limit.
-      const limited = JSON.parse(((await client.callTool({
+      // list_runs: newest-first, capped by limit. Returned as a TOON table —
+      // a `[N]{col,...}:` header (runId is the first column) then one row each.
+      const limitedText = ((await client.callTool({
         name: 'list_runs',
         arguments: { feature: 'broken_todo_api', limit: 2 },
-      })).content?.[0] as { text: string }).text) as Array<{ runId: string }>
-      expect(limited).toHaveLength(2)
-      expect(limited[0].runId).toBe('run-2')
+      })).content?.[0] as { text: string }).text
+      const limitedLines = limitedText.trim().split('\n')
+      expect(limitedLines[0]).toMatch(/^\[2\]\{runId,/)
+      expect(limitedLines).toHaveLength(3) // header + 2 rows
+      expect(limitedLines[1].trim().startsWith('run-2,')).toBe(true)
     } finally {
       if (client) await client.close().catch(() => undefined)
       await app.close()
