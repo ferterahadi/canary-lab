@@ -103,6 +103,25 @@ describe('DirtySpecStore', () => {
     expect(store.get('checkout')?.lastGreenHashes['e2e/voucher.spec.ts']).toBeUndefined()
   })
 
+  it('finalizeRun(pass) tolerates a legacy record with no per-test hash fields on disk', async () => {
+    writeSpec(PASS)
+    const store = new DirtySpecStore(logsDir)
+    await store.captureRunStart('checkout', featureDir)
+
+    // Simulate a record persisted before per-test hashes existed: strip the
+    // fields directly from the file on disk, bypassing the store's own API
+    // (which always writes them), so `finalizeRun` sees them as undefined.
+    const recordPath = path.join(logsDir, 'dirty-specs', 'checkout', 'dirty.json')
+    const raw = JSON.parse(fs.readFileSync(recordPath, 'utf8'))
+    delete raw.runStartTestHashes
+    delete raw.lastGreenTestHashes
+    fs.writeFileSync(recordPath, JSON.stringify(raw))
+
+    const rec = await store.finalizeRun('checkout', featureDir, true)
+    expect(rec.status).toBe('clean')
+    expect(store.get('checkout')?.lastGreenHashes['e2e/voucher.spec.ts']).toBeTruthy()
+  })
+
   it('finalizeRun(fail) leaves the green baseline untouched', async () => {
     writeSpec(PASS)
     const store = new DirtySpecStore(logsDir)
@@ -131,5 +150,45 @@ describe('DirtySpecStore', () => {
     const before = store.get('checkout')?.since
     await store.recompute('checkout', featureDir)
     expect(store.get('checkout')?.since).toBe(before)
+  })
+
+  it('remove deletes the record so get() and isDirty() see nothing', async () => {
+    writeSpec(PASS)
+    const store = new DirtySpecStore(logsDir)
+    await store.captureRunStart('checkout', featureDir)
+    expect(store.get('checkout')).not.toBeNull()
+
+    store.remove('checkout')
+    expect(store.get('checkout')).toBeNull()
+    expect(store.isDirty('checkout')).toBe(false)
+    expect(fs.existsSync(path.join(logsDir, 'dirty-specs', 'checkout', 'dirty.json'))).toBe(false)
+  })
+
+  it('remove emits a removed event', async () => {
+    writeSpec(PASS)
+    const store = new DirtySpecStore(logsDir)
+    await store.captureRunStart('checkout', featureDir)
+    const events: string[] = []
+    store.onEvent((e) => events.push(e.kind))
+
+    store.remove('checkout')
+    expect(events).toContain('removed')
+  })
+
+  it('offEvent stops a listener from receiving further events', async () => {
+    writeSpec(PASS)
+    const store = new DirtySpecStore(logsDir)
+    const events: string[] = []
+    const listener = (e: { kind: string }) => events.push(e.kind)
+    store.onEvent(listener)
+
+    await store.captureRunStart('checkout', featureDir)
+    expect(events.length).toBeGreaterThan(0)
+
+    store.offEvent(listener)
+    events.length = 0
+    writeSpec(TAMPERED)
+    await store.recompute('checkout', featureDir)
+    expect(events).toEqual([])
   })
 })

@@ -52,4 +52,9 @@ describe('encodeToonTable', () => {
     expect(encodeToonTable([])).toBe('[]')
     expect(encodeToonTable({ ok: true })).toBe('{"ok":true}')
   })
+
+  it('falls back to compact JSON when a row is not a plain object', () => {
+    const rows = [{ id: 'r0001' }, 'not-an-object']
+    expect(encodeToonTable(rows)).toBe(JSON.stringify(rows))
+  })
 })
