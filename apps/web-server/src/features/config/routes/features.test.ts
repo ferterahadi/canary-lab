@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { execFileSync } from 'child_process'
 import fs from 'fs'
 import os from 'os'
@@ -7,6 +7,13 @@ import Fastify from 'fastify'
 import { featuresRoutes } from './features'
 import type { PlaywrightListSpawner } from '../../runs/logic/playwright-list'
 import { clearPlaywrightListCache } from '../../runs/logic/playwright-list'
+import { DirtySpecStore } from '../../runs/logic/dirty-specs/store'
+
+vi.mock('../../../shared/git-repo', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../shared/git-repo')>()
+  return { ...actual, runGit: vi.fn(actual.runGit) }
+})
+import { runGit } from '../../../shared/git-repo'
 
 function git(cwd: string, args: string[]): void {
   execFileSync('git', args, { cwd, stdio: 'pipe' })
@@ -66,13 +73,35 @@ const failingSpawner: PlaywrightListSpawner = (featureDir) => ({
   cwd: featureDir,
 })
 
-async function build(opts: { spawner?: PlaywrightListSpawner } = {}) {
+async function build(opts: { spawner?: PlaywrightListSpawner; dirtySpecStore?: DirtySpecStore } = {}) {
   const app = Fastify()
   await app.register(featuresRoutes, {
     featuresDir,
     playwrightListSpawner: opts.spawner ?? failingSpawner,
+    dirtySpecStore: opts.dirtySpecStore,
   })
   return app
+}
+
+// Commits the feature dir as a git repo with the given spec content as the
+// baseline, then mutates the spec on disk so the working tree diverges. Real
+// git + a real (file-backed) DirtySpecStore drive genuine dirty detection —
+// no mocking needed since git-repo.ts shells out to the real `git` binary.
+function gitInitWithBaseline(dir: string): void {
+  git(dir, ['init', '-q'])
+  git(dir, ['config', 'user.email', 't@t.dev'])
+  git(dir, ['config', 'user.name', 'test'])
+  git(dir, ['add', '-A'])
+  git(dir, ['commit', '-q', '-m', 'baseline'])
+}
+
+async function makeDirtyStore(featureName: string, dir: string): Promise<DirtySpecStore> {
+  const { DirtySpecStore } = await import('../../runs/logic/dirty-specs/store')
+  const store = new DirtySpecStore(path.join(tmpDir, 'logs'))
+  // Prime a clean baseline against the committed content, then edit the spec
+  // on disk so the next recompute finds real divergence.
+  await store.recompute(featureName, dir)
+  return store
 }
 
 describe('GET /api/features', () => {
@@ -185,6 +214,242 @@ describe('GET /api/features/:name/config', () => {
   })
 })
 
+// Real DirtySpecStore backed by a tmp logs dir — no mocking, matching this
+// file's convention of exercising real fs/git rather than stubbing collaborators.
+function makeDirtySpecStore(): DirtySpecStore {
+  const logsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-froutes-dirty-'))
+  return new DirtySpecStore(logsDir)
+}
+
+function initGitFeature(dir: string): void {
+  git(dir, ['init', '-q'])
+  git(dir, ['config', 'user.email', 't@t.dev'])
+  git(dir, ['config', 'user.name', 'test'])
+  git(dir, ['add', '-A'])
+  git(dir, ['commit', '-q', '-m', 'baseline'])
+}
+
+describe('dirty summary on GET /api/features', () => {
+  it('reports status "clean" with no specs when the store has no record for the feature', async () => {
+    writeFeature('alpha')
+    const store = makeDirtySpecStore()
+    const app = await build({ dirtySpecStore: store })
+    const res = await app.inject({ method: 'GET', url: '/api/features' })
+    const body = res.json() as Array<{ name: string; dirty: { status: string; specs: unknown[] } }>
+    expect(body[0].dirty).toEqual({ status: 'clean', specs: [] })
+  })
+
+  it('reports status "dirty" with mapped specs when the record is dirty', async () => {
+    const dir = writeFeature('alpha', { spec: "test('one', async () => { expect(1).toBe(1) })\n" })
+    initGitFeature(dir)
+    // Edit after commit so computeDirty (HEAD baseline) marks the spec dirty.
+    fs.writeFileSync(path.join(dir, 'e2e', 'a.spec.ts'), "test('one', async () => { expect(1).toBe(2) })\n")
+
+    const store = makeDirtySpecStore()
+    await store.recompute('alpha', dir)
+
+    const app = await build({ dirtySpecStore: store })
+    const res = await app.inject({ method: 'GET', url: '/api/features' })
+    const body = res.json() as Array<{
+      name: string
+      dirty: { status: string; specs: { file: string; affectedTests: string[] }[] }
+    }>
+    const alpha = body.find((f) => f.name === 'alpha')!
+    expect(alpha.dirty.status).toBe('dirty')
+    expect(alpha.dirty.specs).toHaveLength(1)
+    expect(alpha.dirty.specs[0]).toMatchObject({ file: 'e2e/a.spec.ts' })
+    expect(alpha.dirty.specs[0].affectedTests).toEqual(['one'])
+  })
+})
+
+describe('POST /api/features/:name/approve-dirty', () => {
+  it('404s for an unknown feature', async () => {
+    const store = makeDirtySpecStore()
+    const app = await build({ dirtySpecStore: store })
+    const res = await app.inject({ method: 'POST', url: '/api/features/missing/approve-dirty' })
+    expect(res.statusCode).toBe(404)
+    expect((res.json() as { error: string }).error).toBe('feature not found')
+  })
+
+  it('503s when dirtySpecStore is not configured', async () => {
+    writeFeature('alpha')
+    const app = await build()
+    const res = await app.inject({ method: 'POST', url: '/api/features/alpha/approve-dirty' })
+    expect(res.statusCode).toBe(503)
+    expect((res.json() as { error: string }).error).toBe('test-file integrity tracking is not available')
+  })
+
+  it('approves the current content as the baseline and clears the dirty status', async () => {
+    const dir = writeFeature('alpha', { spec: "test('one', async () => { expect(1).toBe(1) })\n" })
+    initGitFeature(dir)
+    fs.writeFileSync(path.join(dir, 'e2e', 'a.spec.ts'), "test('one', async () => { expect(1).toBe(2) })\n")
+
+    const store = makeDirtySpecStore()
+    await store.recompute('alpha', dir)
+    expect(store.get('alpha')?.status).toBe('dirty')
+
+    const app = await build({ dirtySpecStore: store })
+    const res = await app.inject({ method: 'POST', url: '/api/features/alpha/approve-dirty' })
+    expect(res.statusCode).toBe(200)
+    const body = res.json() as { status: string; dirtySpecs: unknown[] }
+    expect(body.status).toBe('clean')
+    expect(body.dirtySpecs).toEqual([])
+    expect(store.get('alpha')?.status).toBe('clean')
+  })
+})
+
+describe('POST /api/features/:name/commit-dirty', () => {
+  it('404s for an unknown feature', async () => {
+    const store = makeDirtySpecStore()
+    const app = await build({ dirtySpecStore: store })
+    const res = await app.inject({ method: 'POST', url: '/api/features/missing/commit-dirty' })
+    expect(res.statusCode).toBe(404)
+    expect((res.json() as { error: string }).error).toBe('feature not found')
+  })
+
+  it('503s when dirtySpecStore is not configured', async () => {
+    writeFeature('alpha')
+    const app = await build()
+    const res = await app.inject({ method: 'POST', url: '/api/features/alpha/commit-dirty' })
+    expect(res.statusCode).toBe(503)
+    expect((res.json() as { error: string }).error).toBe('test-file integrity tracking is not available')
+  })
+
+  it('reports "no modified specs" and recomputes when the store has no dirty specs for the feature', async () => {
+    const dir = writeFeature('alpha', { spec: "test('one', async () => { expect(1).toBe(1) })\n" })
+    const store = makeDirtySpecStore()
+    const app = await build({ dirtySpecStore: store })
+    const res = await app.inject({ method: 'POST', url: '/api/features/alpha/commit-dirty' })
+    expect(res.statusCode).toBe(200)
+    const body = res.json() as { committed: boolean; reason: string; status: string }
+    expect(body.committed).toBe(false)
+    expect(body.reason).toBe('no modified specs')
+    expect(body.status).toBe('clean')
+  })
+
+  it('409s when the feature is not inside a git repository', async () => {
+    const dir = writeFeature('alpha', { spec: "test('one', async () => { expect(1).toBe(1) })\n" })
+    const store = makeDirtySpecStore()
+    // No git repo at all — establish dirtiness via the run-start baseline
+    // (independent of HEAD) rather than a git commit, so removing/never
+    // having .git is what triggers the route's 409, not a missing baseline.
+    await store.captureRunStart('alpha', dir)
+    fs.writeFileSync(path.join(dir, 'e2e', 'a.spec.ts'), "test('one', async () => { expect(1).toBe(2) })\n")
+    await store.recompute('alpha', dir)
+    expect(store.get('alpha')?.status).toBe('dirty')
+
+    const app = await build({ dirtySpecStore: store })
+    const res = await app.inject({ method: 'POST', url: '/api/features/alpha/commit-dirty' })
+    expect(res.statusCode).toBe(409)
+    expect((res.json() as { error: string }).error).toBe('feature is not inside a git repository')
+  })
+
+  it('500s with the git stderr when `git add` fails', async () => {
+    const dir = writeFeature('alpha', { spec: "test('one', async () => { expect(1).toBe(1) })\n" })
+    initGitFeature(dir)
+    fs.writeFileSync(path.join(dir, 'e2e', 'a.spec.ts'), "test('one', async () => { expect(1).toBe(2) })\n")
+
+    const store = makeDirtySpecStore()
+    await store.recompute('alpha', dir)
+    expect(store.get('alpha')?.status).toBe('dirty')
+
+    // Plant a stale index.lock so the route's `git add` fails with a real
+    // git error ("Unable to create .git/index.lock: File exists").
+    fs.writeFileSync(path.join(dir, '.git', 'index.lock'), '')
+
+    const app = await build({ dirtySpecStore: store })
+    const res = await app.inject({ method: 'POST', url: '/api/features/alpha/commit-dirty' })
+    expect(res.statusCode).toBe(500)
+    expect((res.json() as { error: string }).error).toBeTruthy()
+  })
+
+  it('500s with the git stderr when `git commit` fails (nothing staged to commit)', async () => {
+    const dir = writeFeature('alpha', { spec: "test('one', async () => { expect(1).toBe(1) })\n" })
+    initGitFeature(dir)
+    fs.writeFileSync(path.join(dir, 'e2e', 'a.spec.ts'), "test('one', async () => { expect(1).toBe(2) })\n")
+
+    const store = makeDirtySpecStore()
+    await store.recompute('alpha', dir)
+    expect(store.get('alpha')?.status).toBe('dirty')
+
+    // Revert the working tree back to the committed content before the route
+    // runs. `git add` on unmodified content stages nothing, so the follow-up
+    // `git commit` for those pathspecs fails ("nothing to commit").
+    fs.writeFileSync(path.join(dir, 'e2e', 'a.spec.ts'), "test('one', async () => { expect(1).toBe(1) })\n")
+
+    const app = await build({ dirtySpecStore: store })
+    const res = await app.inject({ method: 'POST', url: '/api/features/alpha/commit-dirty' })
+    expect(res.statusCode).toBe(500)
+    expect((res.json() as { error: string }).error).toBeTruthy()
+  })
+
+  it('commits the dirty specs and clears the dirty status on success', async () => {
+    const dir = writeFeature('alpha', { spec: "test('one', async () => { expect(1).toBe(1) })\n" })
+    initGitFeature(dir)
+    fs.writeFileSync(path.join(dir, 'e2e', 'a.spec.ts'), "test('one', async () => { expect(1).toBe(2) })\n")
+
+    const store = makeDirtySpecStore()
+    await store.recompute('alpha', dir)
+    expect(store.get('alpha')?.status).toBe('dirty')
+
+    const app = await build({ dirtySpecStore: store })
+    const res = await app.inject({ method: 'POST', url: '/api/features/alpha/commit-dirty' })
+    expect(res.statusCode).toBe(200)
+    const body = res.json() as { committed: boolean; status: string }
+    expect(body.committed).toBe(true)
+    expect(body.status).toBe('clean')
+    expect(store.get('alpha')?.status).toBe('clean')
+
+    // The commit actually landed in git, with the expected message.
+    const log = execFileSync('git', ['log', '-1', '--pretty=%s'], { cwd: dir }).toString().trim()
+    expect(log).toBe('test: accept modified specs for "alpha" via Canary Lab')
+  })
+
+  it('falls back to "git add failed" when git exits nonzero with no output', async () => {
+    const dir = writeFeature('alpha', { spec: "test('one', async () => { expect(1).toBe(1) })\n" })
+    initGitFeature(dir)
+    fs.writeFileSync(path.join(dir, 'e2e', 'a.spec.ts'), "test('one', async () => { expect(1).toBe(2) })\n")
+
+    const store = makeDirtySpecStore()
+    await store.recompute('alpha', dir)
+
+    const realRunGit = vi.mocked(runGit).getMockImplementation()!
+    vi.mocked(runGit).mockImplementation(async (cwd, args) =>
+      args[0] === 'add' ? { code: 1, stdout: '', stderr: '' } : realRunGit(cwd, args),
+    )
+    try {
+      const app = await build({ dirtySpecStore: store })
+      const res = await app.inject({ method: 'POST', url: '/api/features/alpha/commit-dirty' })
+      expect(res.statusCode).toBe(500)
+      expect((res.json() as { error: string }).error).toBe('git add failed')
+    } finally {
+      vi.mocked(runGit).mockImplementation(realRunGit)
+    }
+  })
+
+  it('falls back to "git commit failed" when git exits nonzero with no output', async () => {
+    const dir = writeFeature('alpha', { spec: "test('one', async () => { expect(1).toBe(1) })\n" })
+    initGitFeature(dir)
+    fs.writeFileSync(path.join(dir, 'e2e', 'a.spec.ts'), "test('one', async () => { expect(1).toBe(2) })\n")
+
+    const store = makeDirtySpecStore()
+    await store.recompute('alpha', dir)
+
+    const realRunGit = vi.mocked(runGit).getMockImplementation()!
+    vi.mocked(runGit).mockImplementation(async (cwd, args) =>
+      args[0] === 'commit' ? { code: 1, stdout: '', stderr: '' } : realRunGit(cwd, args),
+    )
+    try {
+      const app = await build({ dirtySpecStore: store })
+      const res = await app.inject({ method: 'POST', url: '/api/features/alpha/commit-dirty' })
+      expect(res.statusCode).toBe(500)
+      expect((res.json() as { error: string }).error).toBe('git commit failed')
+    } finally {
+      vi.mocked(runGit).mockImplementation(realRunGit)
+    }
+  })
+})
+
 describe('GET /api/features/:name/dirty-diff', () => {
   const COMMITTED = `test('applies voucher', async () => { expect(1).toBe(1) })\ntest('other', async () => { expect(2).toBe(2) })\n`
   const EDITED = `test('applies voucher', async () => { expect(1).toBe(2) })\ntest('other', async () => { expect(2).toBe(2) })\n`
@@ -241,6 +506,24 @@ describe('GET /api/features/:name/dirty-diff', () => {
     const body = res.json() as { tests: { name: string; changedLines: number[] }[] }
     expect(body.tests).toHaveLength(1)
     expect(body.tests[0].name).toBe('brand new')
+  })
+
+  it('omits an empty-body test added since the last commit (no lines to flag)', async () => {
+    const dir = writeFeature('alpha', { spec: COMMITTED })
+    git(dir, ['init', '-q'])
+    git(dir, ['config', 'user.email', 't@t.dev'])
+    git(dir, ['config', 'user.name', 'test'])
+    git(dir, ['add', '-A'])
+    git(dir, ['commit', '-q', '-m', 'baseline'])
+    fs.writeFileSync(
+      path.join(dir, 'e2e', 'a.spec.ts'),
+      `${COMMITTED}test('brand new empty')\n`,
+    )
+
+    const app = await build()
+    const res = await app.inject({ method: 'GET', url: '/api/features/alpha/dirty-diff?file=e2e/a.spec.ts' })
+    const body = res.json() as { tests: { name: string; changedLines: number[] }[] }
+    expect(body.tests.find((t) => t.name === 'brand new empty')).toBeUndefined()
   })
 
   it('400s without a file query param', async () => {

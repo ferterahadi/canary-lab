@@ -71,7 +71,6 @@ export class DirtySpecStore {
       dirName: 'dirty-specs',
       recordFile: 'dirty.json',
       idOf: (r) => r.featureId,
-      statusOf: (r) => r.status,
       indexEntryOf: (r) => ({
         id: r.featureId,
         createdAt: r.createdAt,

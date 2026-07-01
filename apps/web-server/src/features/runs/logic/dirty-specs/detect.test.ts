@@ -2,7 +2,7 @@ import { execFileSync } from 'child_process'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   computeDirty,
   hashContent,
@@ -12,6 +12,7 @@ import {
   promoteGreen,
   type DirtyBaseline,
 } from './detect'
+import * as astExtractor from '../../../config/logic/ast-extractor'
 
 const EMPTY: DirtyBaseline = { lastGreenHashes: {}, runStartHashes: {}, approvedHashes: {} }
 
@@ -143,6 +144,77 @@ describe('computeDirty', () => {
     const res = await computeDirty(dir, { ...EMPTY, runStartHashes, runStartTestHashes })
     expect(res.status).toBe('dirty')
     expect(res.dirtySpecs[0].affectedTests).toEqual(['new one'])
+  })
+
+  it('skips a spec that disappears between listing and hashing (no current hash)', async () => {
+    const rel = writeSpec('voucher.spec.ts', PASS)
+    const abs = path.join(dir, rel)
+    const runStartHashes = hashFeatureSpecs(dir)
+
+    // `computeDirty` first lists specs (reading each file to extract test
+    // titles), then separately re-hashes them. Simulate the file vanishing in
+    // between: the listing read succeeds, every later read of that path fails,
+    // so `current[spec.rel]` is left undefined and the spec must be skipped
+    // rather than crash or falsely flag.
+    const realReadFileSync = fs.readFileSync
+    let calls = 0
+    const spy = vi.spyOn(fs, 'readFileSync').mockImplementation((p: any, enc?: any) => {
+      if (p === abs) {
+        calls++
+        if (calls > 1) {
+          const err = new Error('ENOENT') as NodeJS.ErrnoException
+          err.code = 'ENOENT'
+          throw err
+        }
+      }
+      return realReadFileSync(p, enc)
+    })
+    try {
+      const res = await computeDirty(dir, { ...EMPTY, runStartHashes })
+      expect(res.status).toBe('clean')
+      expect(res.dirtySpecs).toEqual([])
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  it('flags a test defensively when its body hash cannot be attributed (parse mismatch)', async () => {
+    writeSpec('voucher.spec.ts', PASS)
+    const runStartHashes = hashFeatureSpecs(dir)
+    const runStartTestHashes = hashFeatureSpecTests(dir)
+    // File-level content must diverge from the baseline too, or `computeDirty`
+    // never reaches the per-test loop at all (it short-circuits clean at the
+    // whole-file comparison first).
+    writeSpec('voucher.spec.ts', TAMPERED)
+
+    // Simulate a test that's declared (from the file-level listing) but whose
+    // body hash never lands in `currentTests` — e.g. an extractor edge case.
+    // The first `extractTestsFromSource` call (inside `listFeatureSpecs`) is
+    // given an extra phantom test name; every other call (per-test hashing)
+    // sees the real source unmodified.
+    const real = astExtractor.extractTestsFromSource
+    let calls = 0
+    const spy = vi.spyOn(astExtractor, 'extractTestsFromSource').mockImplementation((file, source) => {
+      calls++
+      const result = real(file, source)
+      if (calls === 1) {
+        return {
+          ...result,
+          tests: [
+            ...result.tests,
+            { name: 'phantom test', bodySource: 'unused', line: 0, steps: [] } as (typeof result.tests)[number],
+          ],
+        }
+      }
+      return result
+    })
+    try {
+      const res = await computeDirty(dir, { ...EMPTY, runStartHashes, runStartTestHashes })
+      expect(res.status).toBe('dirty')
+      expect(res.dirtySpecs[0].affectedTests).toContain('phantom test')
+    } finally {
+      spy.mockRestore()
+    }
   })
 })
 
