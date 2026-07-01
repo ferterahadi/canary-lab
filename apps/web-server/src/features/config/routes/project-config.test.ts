@@ -689,6 +689,52 @@ describe('POST /api/open-editor', () => {
       await app.close()
     }
   })
+
+})
+
+describe('POST /api/open-workspace', () => {
+  it('opens the project root in the configured editor', async () => {
+    const app = await makeApp()
+    try {
+      const r = await app.inject({ method: 'POST', url: '/api/open-workspace' })
+      expect(r.statusCode).toBe(200)
+      const body = r.json() as { opened: boolean; path: string; editor: string }
+      expect(body.opened).toBe(true)
+      expect(body.path).toBe(projectRoot)
+      expect(spawnMock).toHaveBeenCalled()
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('respects the configured editor choice', async () => {
+    fs.writeFileSync(
+      path.join(projectRoot, 'canary-lab.config.json'),
+      JSON.stringify({ editor: 'cursor' }),
+    )
+    const app = await makeApp()
+    try {
+      const r = await app.inject({ method: 'POST', url: '/api/open-workspace' })
+      expect(r.statusCode).toBe(200)
+      expect(spawnMock).toHaveBeenCalledWith('cursor', [projectRoot], expect.anything())
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('returns opened:false instead of erroring when the launch throws', async () => {
+    spawnMock.mockImplementationOnce(() => { throw new Error('boom') })
+    const app = await makeApp()
+    try {
+      const r = await app.inject({ method: 'POST', url: '/api/open-workspace' })
+      expect(r.statusCode).toBe(200)
+      const body = r.json() as { opened: boolean; error?: string }
+      expect(body.opened).toBe(false)
+      expect(body.error).toBe('boom')
+    } finally {
+      await app.close()
+    }
+  })
 })
 
 describe('POST /api/project-config/port', () => {

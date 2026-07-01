@@ -110,6 +110,7 @@ export function FeaturesColumn({
           <ul className="flex flex-col gap-1">
             {features.map((f) => {
               const isSelected = f.name === selectedFeature
+              const isDirty = f.dirty?.status === 'dirty'
               const isActive = Boolean(activeRunFeature) && f.name === activeRunFeature
               const runState = isActive
                 ? (activeRunExecutionType === 'boot'
@@ -119,13 +120,29 @@ export function FeaturesColumn({
               return (
                 <li
                   key={f.name}
-                  className={`feature-row group cl-list-row text-sm${isSelected ? ' cl-list-row-selected' : ''}${runState ? ` cl-list-row-${runState}` : ''}`}
+                  className={`feature-row group cl-list-row text-sm${isSelected ? ' cl-list-row-selected' : ''}${runState ? ` cl-list-row-${runState}` : ''}${isDirty ? ' cl-list-row-dirty' : ''}`}
                   style={{
                     color: isSelected ? 'var(--text-primary)' : 'var(--text-secondary)',
                     fontWeight: isSelected ? 500 : 400,
                   }}
                   title={runState ? (runState === 'healing' ? 'Healing now' : runState === 'booted' ? 'Services up (boot-only)' : 'Running now') : undefined}
                 >
+                  {isDirty && (
+                    <Tooltip label="Test files modified — review in the status bar">
+                      <span
+                        aria-label="Tests modified"
+                        data-testid={`dirty-badge-${f.name}`}
+                        className="ml-1.5 flex h-4 w-4 shrink-0 items-center justify-center self-center rounded text-[11px] font-semibold leading-none"
+                        style={{
+                          color: 'var(--danger)',
+                          background: 'color-mix(in srgb, var(--danger) 14%, transparent)',
+                          border: '1px solid color-mix(in srgb, var(--danger) 35%, transparent)',
+                        }}
+                      >
+                        !
+                      </span>
+                    </Tooltip>
+                  )}
                   {f.portified && (
                     <Tooltip label="Portified">
                       <span

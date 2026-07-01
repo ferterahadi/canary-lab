@@ -20,11 +20,17 @@ export function ShikiCode({
   activeLine,
   sourceLocation,
   runningHighlight,
+  changedLines,
 }: {
   source: string
   activeLine?: number | null
   sourceLocation?: SourceLocation
   runningHighlight?: boolean
+  /** 1-indexed body-relative line numbers (same convention as `activeLine`) to
+   *  tint as changed — the diff-against-HEAD cue for a dirty test's body. Takes
+   *  visual precedence over `activeLine`; the two aren't expected to co-occur
+   *  (one's for a live-running test, the other for a completed dirty one). */
+  changedLines?: Set<number>
 }) {
   const { resolved } = useTheme()
   const [html, setHtml] = useState<string | null>(null)
@@ -72,7 +78,7 @@ export function ShikiCode({
           if (line) void openAt(Number(line))
         }}
         // eslint-disable-next-line react/no-danger
-        dangerouslySetInnerHTML={{ __html: decorateShikiLines(html, activeLine, sourceLocation?.startLine, runningHighlight) }}
+        dangerouslySetInnerHTML={{ __html: decorateShikiLines(html, activeLine, sourceLocation?.startLine, runningHighlight, changedLines) }}
       />
     </CodeShell>
   )
@@ -118,13 +124,22 @@ function CodeShell({
   )
 }
 
-function decorateShikiLines(html: string, activeLine?: number | null, startLine?: number, runningHighlight?: boolean): string {
+function decorateShikiLines(
+  html: string,
+  activeLine?: number | null,
+  startLine?: number,
+  runningHighlight?: boolean,
+  changedLines?: Set<number>,
+): string {
   let lineNo = 0
   const bg = runningHighlight ? 'rgba(234, 179, 8, 0.22)' : 'rgba(14, 165, 233, 0.18)'
   const bar = runningHighlight ? 'rgb(234, 179, 8)' : 'rgb(14, 165, 233)'
   return html.replace(/<span class="line"/g, (match) => {
     lineNo += 1
     const attrs = startLine ? ` data-source-line="${sourceLineForBodyLine(startLine, lineNo)}"` : ''
+    if (changedLines?.has(lineNo)) {
+      return `<span class="line"${attrs} data-changed-line="true" style="display:block;margin:0 -0.5rem;padding:0 0.5rem;background:color-mix(in srgb, var(--danger) 16%, transparent);box-shadow:inset 2px 0 0 var(--danger)"`
+    }
     if (lineNo !== activeLine) return `${match}${attrs}`
     return `<span class="line"${attrs} data-active-line="true" style="display:block;margin:0 -0.5rem;padding:0 0.5rem;background:${bg};box-shadow:inset 2px 0 0 ${bar}"`
   })

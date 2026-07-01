@@ -48,6 +48,18 @@ export interface FeatureRepo {
   branch?: string
 }
 
+export interface DirtySpecSummary {
+  file: string
+  affectedTests: string[]
+}
+
+export interface FeatureDirtyState {
+  status: 'clean' | 'dirty'
+  /** Modified spec files (relative to the feature dir), with their test titles.
+   *  Only populated when status is 'dirty'. */
+  specs: DirtySpecSummary[]
+}
+
 export interface Feature {
   name: string
   description?: string
@@ -57,6 +69,10 @@ export interface Feature {
    *  concurrently. Drives the "Portified" badge. Optional: absent in older
    *  payloads. */
   portified?: boolean
+  /** Test-file integrity. 'dirty' when a spec changed since the last green (or
+   *  run-start) and wasn't approved/committed. Drives the red cue. Optional:
+   *  absent in older payloads / when integrity tracking is off. */
+  dirty?: FeatureDirtyState
 }
 
 export interface ExtractedStep {

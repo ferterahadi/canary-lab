@@ -99,6 +99,15 @@ export interface ServiceSpec {
   allocatedPorts?: Record<string, number>
 }
 
+// Test-file integrity side-channel. The orchestrator captures the pre-heal spec
+// baseline at run start and asks for promotion when a run passes; the store does
+// the hashing/diffing. Structural so `DirtySpecStore` satisfies it and tests can
+// omit it. Absent in unit tests; wired to the singleton store in server.ts.
+export interface DirtySpecHooks {
+  captureRunStart(featureId: string, featureDir: string): Promise<unknown>
+  finalizeRun(featureId: string, featureDir: string, passed: boolean): Promise<unknown>
+}
+
 export interface OrchestratorOptions {
   feature: FeatureConfig
   runId: string
@@ -187,6 +196,9 @@ export interface OrchestratorOptions {
    *  agent can signal completion without being handed a path into the run dir
    *  (where harness-only artifacts live). Omit for the default location. */
   signalsDir?: string
+  /** Test-file integrity hooks (run-start capture + green promotion). Absent in
+   *  tests; wired to the singleton DirtySpecStore in server.ts. */
+  dirtySpecHooks?: DirtySpecHooks
 }
 
 export type PauseResult =
@@ -466,6 +478,7 @@ export class RunOrchestrator extends EventEmitter {
   private lastAgentDataAt = 0
   private readonly runnerLog?: RunnerLog
   private readonly stateSink: RunStateSink
+  private readonly dirtySpecHooks?: DirtySpecHooks
   private readonly repoBranchSnapshots?: RepoBranchSnapshot[]
   private readonly executionType: ExecutionType
   private readonly verification?: VerificationRunMetadata
@@ -580,6 +593,7 @@ export class RunOrchestrator extends EventEmitter {
     this.executionType = opts.executionType ?? 'run'
     this.verification = opts.verification
     this.playwrightEnv = opts.playwrightEnv ?? {}
+    this.dirtySpecHooks = opts.dirtySpecHooks
     if (this.runnerLog) this.attachRunnerLog(this.runnerLog)
   }
 
@@ -627,6 +641,11 @@ export class RunOrchestrator extends EventEmitter {
   // server show "services up" before tests start.
   async start(): Promise<void> {
     this.prepareRun('starting')
+    // Capture the pre-heal spec baseline before any service (and therefore any
+    // heal agent) can touch a test file. This is the run-start fallback baseline
+    // and the reference the green promotion compares against. Best-effort —
+    // integrity tracking must never block a run from booting.
+    await this.captureDirtySpecBaseline()
     // Apply the ephemeral port overlay BEFORE any service spawns. A failure
     // here throws out of start() so the caller's `.catch` runs stop('aborted')
     // — we must never boot a portified feature un-portified (the second
@@ -2491,6 +2510,28 @@ export class RunOrchestrator extends EventEmitter {
       this.recordLifecycle(status, status === 'passed' ? 'Run passed' : 'Run failed', {
         severity: status === 'passed' ? 'success' : 'error',
       })
+    }
+    // On a pass, promote the run-start baseline to "last green" for specs that
+    // weren't modified during the run — binding the green verdict to the
+    // pre-heal test bytes. Specs the agent touched are left dirty (the live cue
+    // is already set by the spec watcher at edit time). Best-effort, fire-and-
+    // forget: a recompute must never gate the status write. Failed/aborted runs
+    // intentionally don't touch the baseline.
+    if (status === 'passed' && this.feature.featureDir) {
+      void this.dirtySpecHooks
+        ?.finalizeRun(this.feature.name, this.feature.featureDir, true)
+        .catch(() => {})
+    }
+  }
+
+  // Record the pre-heal spec hashes for this run. Guards a missing featureDir and
+  // swallows errors so integrity capture never blocks boot.
+  private async captureDirtySpecBaseline(): Promise<void> {
+    if (!this.dirtySpecHooks || !this.feature.featureDir) return
+    try {
+      await this.dirtySpecHooks.captureRunStart(this.feature.name, this.feature.featureDir)
+    } catch {
+      /* integrity capture is best-effort */
     }
   }
 

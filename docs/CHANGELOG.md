@@ -15,6 +15,25 @@ Each entry is tagged with the area it touches:
 
 ---
 
+## 1.5.0 — 2026-07-01
+
+> Node 20.19+ (or 22.12+) is now required — see Breaking changes.
+
+- **[Test Runner]** **Test-file integrity tracking.** Canary Lab now tracks each spec's actual content, not just whether Playwright ran it, so edits made mid-heal, by a teammate, or by accident are flagged instead of silently standing.
+  - Only the touched test(s) turn red, with the code view highlighting changed lines since the last commit.
+  - A "Tests modified" pill + review panel list affected features; **Commit changes** stages/commits just those specs (an external `git commit` also clears the flag).
+  - Green baseline is bound to the pre-heal spec version, so a test edited to force a pass isn't accepted as the new normal.
+  - Updates live, no refresh; review panel can open the workspace in your editor.
+- **[Test Runner]** MCP-connected agents (Claude, Codex, etc.) now get a modified-tests warning on run results instead of treating them as fully trustworthy.
+- **[General]** Feature/run/evaluation-export lists to MCP clients now use TOON instead of per-row field names — fewer tokens, same data.
+- **[General]** Fixed: the version-update button could fail instead of installing the new version.
+
+### Breaking changes
+
+- **[General]** **Minimum Node version raised to 20.19 (or 22.12+).** Needed for the smaller agent responses above. If you're on an older Node 20.x, upgrade before running `npx canary-lab`.
+
+---
+
 ## 1.4.2 — 2026-06-30
 
 - **[Test Runner]** **Every feature stops and heals after 2 failures by default.** As soon as 2 tests fail, Playwright stops and the repair loop kicks in — no waiting for the whole suite. Two is the sweet spot for log size: enough signal for the healing agent to work from, few enough that it reads the failures in one pass instead of choking on too much context at once. To run the full suite first on a feature, set "Stop & heal after" to off in its General config.

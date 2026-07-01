@@ -72,6 +72,14 @@ export function App() {
   // happens at render time. Declared here (above the persist effect) because the
   // route serialization below reads `wizardOpen`.
   const { runs: allRuns, startRun: startRunAction, startVerification: startVerificationAction } = useRuns()
+  // Read inside refreshFeatures via ref, not closure — allRuns changes on every
+  // run-progress tick, and closing over it directly would give refreshFeatures a
+  // new identity each time, which would tear down and reopen the /ws/workspace
+  // socket below (its connect effect depends on refreshFeatures) on every tick.
+  // The bus has no replay, so any event published during that reconnect window
+  // is lost — exactly the "only updates after a refresh" failure mode.
+  const allRunsRef = useRef(allRuns)
+  useEffect(() => { allRunsRef.current = allRuns }, [allRuns])
   const { entry: globalActiveRunEntry, detail: activeRunDetail } = useGlobalActiveRun()
   const { wizardOpen, closeWizard, startNewWizard } = useWizardDrafts()
   // R24: the evaluation export dialog's open-state lives in EvaluationExportContext
@@ -219,21 +227,26 @@ export function App() {
     setSelectedRunId(runId)
   }, [selectedFeature, startVerificationAction])
 
+  // Stable identity ([] deps) — reads the current feature/runs via refs rather
+  // than closing over the `selectedFeature`/`allRuns` state directly, so callers
+  // that depend on this function (the /ws/workspace connect effect below) don't
+  // reconnect on every unrelated run-progress tick. See the allRunsRef comment.
   const refreshFeatures = useCallback((preferredFeature?: string | null): void => {
     api.listFeatures().then((data) => {
       setFeatures(data)
+      const runs = allRunsRef.current
       if (preferredFeature && data.some((f) => f.name === preferredFeature)) {
         pendingRunSelectionRef.current = null
         setSelectedFeature(preferredFeature)
-        setSelectedRunId(allRuns.find((r) => r.feature === preferredFeature && r.executionType !== 'boot' && r.executionType !== 'benchmark')?.runId ?? null)
-      } else if (!selectedFeature || !data.some((f) => f.name === selectedFeature)) {
+        setSelectedRunId(runs.find((r) => r.feature === preferredFeature && r.executionType !== 'boot' && r.executionType !== 'benchmark')?.runId ?? null)
+      } else if (!selectedFeatureRef.current || !data.some((f) => f.name === selectedFeatureRef.current)) {
         const nextFeature = data[0]?.name ?? null
         pendingRunSelectionRef.current = null
         setSelectedFeature(nextFeature)
-        setSelectedRunId(nextFeature ? allRuns.find((r) => r.feature === nextFeature && r.executionType !== 'boot' && r.executionType !== 'benchmark')?.runId ?? null : null)
+        setSelectedRunId(nextFeature ? runs.find((r) => r.feature === nextFeature && r.executionType !== 'boot' && r.executionType !== 'benchmark')?.runId ?? null : null)
       }
     }).catch(() => {})
-  }, [allRuns, selectedFeature])
+  }, [])
 
   const refreshVersion = useCallback((): void => {
     api.getVersionStatus().then(setVersionStatus).catch(() => {})
@@ -266,6 +279,11 @@ export function App() {
           }
           if (event.type === 'coverage-changed') {
             setCoverageRefreshKey((key) => key + 1)
+          }
+          if (event.type === 'tests-dirty-changed') {
+            // Dirty status is folded into the feature-list payload — refetch it
+            // so the red cue + status pill update live (preserves selection).
+            refreshFeatures(selectedFeatureRef.current)
           }
           if (event.type === 'verification-config-changed' && selectedFeatureRef.current === event.feature) {
             setVerificationRefreshKey((key) => key + 1)
@@ -338,6 +356,7 @@ export function App() {
           activeRunStatus={statusForSelectedFeature}
           refreshKey={testsRefreshKey}
           onTotalTestsChange={setSpecTotalTests}
+          dirtySpecs={features.find((f) => f.name === selectedFeature)?.dirty?.specs ?? []}
         />
       ),
     },
