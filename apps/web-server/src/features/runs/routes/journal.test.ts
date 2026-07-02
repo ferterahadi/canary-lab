@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -50,6 +50,12 @@ async function buildWithoutLegacyJournal() {
   const app = Fastify()
   await app.register(journalRoutes, { logsDir })
   return app
+}
+
+async function buildWithWorkspaceEvents(publish = vi.fn()) {
+  const app = Fastify()
+  await app.register(journalRoutes, { logsDir, journalPath, workspaceEvents: { publish } })
+  return { app, publish }
 }
 
 describe('GET /api/journal', () => {
@@ -200,6 +206,14 @@ describe('DELETE /api/journal/:iteration', () => {
     expect(res.statusCode).toBe(204)
     expect(fs.readFileSync(runJournalPath, 'utf-8')).not.toContain('## Iteration 1')
     expect(fs.readFileSync(journalPath, 'utf-8')).toContain('## Iteration 1')
+  })
+
+  it('publishes journal-changed after a successful delete', async () => {
+    const { app, publish } = await buildWithWorkspaceEvents()
+    const res = await app.inject({ method: 'DELETE', url: '/api/journal/1?run=r-bbbb' })
+
+    expect(res.statusCode).toBe(204)
+    expect(publish).toHaveBeenCalledWith({ type: 'journal-changed', runId: 'r-bbbb' })
   })
 
   it('removes a matching legacy root section when the selected run journal is missing', async () => {

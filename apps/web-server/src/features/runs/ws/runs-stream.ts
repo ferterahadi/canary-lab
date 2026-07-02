@@ -70,6 +70,9 @@ export async function runsStreamRoutes(
         send({ type: 'list-changed', runs: deps.store.list() })
         return
       }
+      if (event.kind === 'journal-changed') {
+        return
+      }
       // bootstrap / changed / finalized — read the detail back through the
       // store so the frame carries the full latest manifest snapshot, not
       // just a partial diff. Cheap (single file read).

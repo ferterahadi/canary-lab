@@ -1123,6 +1123,18 @@ describe('RunStore', () => {
     expect(events).toEqual([{ kind: 'changed', runId: 'r-life-1' }])
   })
 
+  it('emits journal-changed without mutating run detail', () => {
+    seedRun('r-journal-1', { status: 'healing' })
+    const store = new RunStore(tmpDir, createRegistry())
+    const events: RunStoreEvent[] = []
+    store.onEvent((event) => events.push(event))
+
+    store.recordJournalChange('r-journal-1')
+
+    expect(events).toEqual([{ kind: 'journal-changed', runId: 'r-journal-1' }])
+    expect(readManifest(store.manifestPath('r-journal-1'))?.status).toBe('healing')
+  })
+
   it('emits an external-heal-task event when an external run waits for a signal', () => {
     seedRun('r-life-external', { status: 'healing', healMode: 'external' })
     const store = new RunStore(tmpDir, createRegistry())
