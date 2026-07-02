@@ -45,7 +45,7 @@ import {
   type BuildHealCyclePrompt,
   type BuildHealCyclePromptArgs,
 } from './auto-heal'
-import { appendJournalIteration } from './log-enrichment'
+import { appendJournalIteration as appendJournalIterationToFile, type JournalAppendInput } from './log-enrichment'
 import {
   locateClaudeSessionLog,
   locateCodexSessionLog,
@@ -760,6 +760,11 @@ export class RunOrchestrator extends EventEmitter {
     this.lastLifecycleEvent = { phase, headline }
   }
 
+  private appendJournalIteration(input: JournalAppendInput): void {
+    appendJournalIterationToFile(input)
+    this.stateSink.recordJournalChange(this.runId)
+  }
+
   private async ensureServicesRunning(): Promise<string[]> {
     // Fresh boot attempt — drop any health failure recorded by a prior cycle so
     // a service that comes up cleanly this time clears the failed state.
@@ -1374,7 +1379,7 @@ export class RunOrchestrator extends EventEmitter {
     // Best-effort journal note BEFORE we tear down the pty so the entry
     // lands even if the user-cancel races a fast agent exit.
     try {
-      appendJournalIteration({
+      this.appendJournalIteration({
         // Logged as a `.rerun`-shaped entry for journal-parser compatibility,
         // even though no rerun actually happens. Hypothesis text makes the
         // intent explicit for downstream readers (heal-index, future agent
@@ -1466,7 +1471,7 @@ export class RunOrchestrator extends EventEmitter {
     // Best-effort journal note so the interject is part of run history.
     try {
       const truncated = text.length > 200 ? text.slice(0, 200) + '…' : text
-      appendJournalIteration({
+      this.appendJournalIteration({
         signal: '.rerun',
         hypothesis: `User interjected mid-heal: ${truncated}`,
         fixDescription: `Sent text to live REPL stdin.`,
@@ -2189,7 +2194,7 @@ export class RunOrchestrator extends EventEmitter {
       const diffContent = await this.diffContentForFeatureRepos(snapshots)
       try {
         if (signal.kind === 'restart' || signal.kind === 'rerun') {
-          appendJournalIteration({
+          this.appendJournalIteration({
             signal: signal.kind === 'restart' ? '.restart' : '.rerun',
             hypothesis: typeof signal.body.hypothesis === 'string' ? signal.body.hypothesis : undefined,
             filesChanged,
@@ -2380,7 +2385,7 @@ export class RunOrchestrator extends EventEmitter {
 
           if (filesChanged.length === 0) {
             try {
-              appendJournalIteration({
+              this.appendJournalIteration({
                 signal: 'none',
                 hypothesis: `${reasonMessage} No code changes detected.`,
                 fixDescription: 'No fix applied.',
@@ -2407,7 +2412,7 @@ export class RunOrchestrator extends EventEmitter {
 
         try {
           if (effectiveSignal.kind === 'restart' || effectiveSignal.kind === 'rerun') {
-            appendJournalIteration({
+            this.appendJournalIteration({
               signal: effectiveSignal.kind === 'restart' ? '.restart' : '.rerun',
               hypothesis: typeof effectiveSignal.body.hypothesis === 'string' ? effectiveSignal.body.hypothesis : undefined,
               filesChanged,

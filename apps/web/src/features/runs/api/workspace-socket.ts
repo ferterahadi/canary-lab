@@ -11,6 +11,7 @@ export type WorkspaceEvent =
   | { type: 'coverage-changed'; feature: string }
   | { type: 'tests-dirty-changed'; feature: string }
   | { type: 'verification-config-changed'; feature: string }
+  | { type: 'journal-changed'; runId: string }
   | { type: 'draft-created'; draft: DraftRecord }
   | { type: 'draft-updated'; draft: DraftRecord }
   | { type: 'draft-deleted'; draftId: string }
