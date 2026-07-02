@@ -1,0 +1,9 @@
+{
+  "name": "first-flight-app",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Tiny dependency-free todo API used as the First Flight E2E fixture.",
+  "scripts": {
+    "dev": "node server.js"
+  }
+}

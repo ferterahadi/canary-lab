@@ -7,6 +7,8 @@ node_modules/
 .env.*.local
 
 !templates/**/*.env
+# The First Flight E2E fixture ships its (fake) env file — env capture needs it.
+!tools/fixtures/**/.env
 
 # Testing
 # Anchored to the repo root so it only ignores the vitest coverage-output dir —

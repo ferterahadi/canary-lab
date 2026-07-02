@@ -90,7 +90,7 @@ Example envset config shape:
   },
   "feature": {
     "slots": ["{{featureName}}.env"],
-    "testCommand": "yarn test:e2e",
+    "testCommand": "npx playwright test",
     "testCwd": "$CANARY_LAB_PROJECT_ROOT/features/{{featureName}}"
   }
 }

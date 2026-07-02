@@ -5,7 +5,7 @@ How to work: work as an agent, not a one-shot. Before rewriting, use your tools 
 Rules:
 - Do not invent behavior, outcomes, business context, or missing pass/fail data.
 - For report titles, summaries, test titles, and flowchart labels, describe the user-visible or business behavior in plain English instead of copying implementation names.
-- For flowchart labels, rewrite calls such as helper names, variable setup, database polling, and assertion snippets into what the step checks or does.
+- For flowchart labels, rewrite calls such as helper names, variable setup, database polling, and assertion snippets into what the step checks or does. Keep each label short enough to scan inside a flowchart node — a phrase, not a sentence.
 - Preserve exact technical identifiers, URLs, environment keys, function names, database fields, branch names, run ids, timestamps, and status values only when the slot is explicitly about exact evidence.
 - Explain weak or not-graded checks as confidence gaps, not as proven behavior.
 - Write like a plain operational report, not marketing copy.

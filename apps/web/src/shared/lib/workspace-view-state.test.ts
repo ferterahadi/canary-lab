@@ -7,7 +7,7 @@ const KEY = 'cl.workspace.view'
 
 /** Build a full PersistedView with sensible defaults for the fields under test. */
 function view(partial: Partial<PersistedView>): PersistedView {
-  return { view: 'workspace', feature: null, run: null, dialog: null, wf: null, task: null, ...partial }
+  return { view: 'workspace', feature: null, run: null, dialog: null, wf: null, task: null, flight: null, ...partial }
 }
 
 beforeEach(() => {
@@ -239,5 +239,22 @@ describe('workspace-view-state — run + dialog routing (R24)', () => {
     const state = readPersistedView()
     expect(state.dialog).toBe('evaluation')
     expect(state.task).toBeNull()
+  })
+
+  it('round-trips the flight id when view=flights (deep-linked flight detail)', () => {
+    persistView(view({ view: 'flights', flight: 'fl_abc123' }))
+    expect(window.location.search).toContain('view=flights')
+    expect(window.location.search).toContain('flight=fl_abc123')
+    const state = readPersistedView()
+    expect(state.view).toBe('flights')
+    expect(state.flight).toBe('fl_abc123')
+  })
+
+  it('drops the flight param outside the flights view and keeps it out of localStorage', () => {
+    persistView(view({ view: 'flights', flight: 'fl_abc123' }))
+    persistView(view({ view: 'workspace', feature: 'checkout', flight: 'fl_abc123' }))
+    expect(window.location.search).not.toContain('flight=')
+    persistView(view({ view: 'flights', flight: 'fl_abc123' }))
+    expect(JSON.parse(localStorage.getItem(KEY)!)).toEqual({ view: 'flights', feature: null })
   })
 })

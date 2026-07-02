@@ -64,6 +64,9 @@ const VERIFY_TOOLS = uniqueSorted([
 const AUTHOR_TOOLS = uniqueSorted([
   'apply_external_draft',
   'capture_feature_env_files',
+  'start_flight',
+  'get_flight',
+  'respond_flight_checkpoint',
   'checkout_feature_repo_branch',
   'create_feature',
   'delete_evaluation_export',

@@ -21,8 +21,10 @@ import { PortifyPickerDialog } from '../../features/portify/components/PortifyPi
 import { BenchmarkPill } from '../../features/benchmark/components/BenchmarkPill'
 import { CleanupPill } from '../../features/logs/components/CleanupPill'
 import { CoveragePill } from '../../features/coverage/components/CoveragePill'
+import { FlightsPill } from '../../features/flights/components/FlightsPill'
 import * as api from '../api/client'
 import type { CoverageJobIndexEntry } from '../api/types'
+import type { FlightIndexEntry } from '../api/client'
 
 interface Props {
   activeRunDetail: RunDetail | null
@@ -36,6 +38,10 @@ interface Props {
   onStartPortify?: (feature: string) => void
   /** Reopen the in-flight port-ification workflow (by id) in the wizard. */
   onOpenPortify?: (workflowId: string) => void
+  /** First Flight index (App owns it, WS-driven) — feeds the Flights pill. */
+  flights?: FlightIndexEntry[]
+  /** Open the routed flight detail view (null = the flights landing list). */
+  onOpenFlight?: (flightId: string | null) => void
 }
 
 // Always-visible top bar showing whether any run is currently active across
@@ -52,7 +58,7 @@ interface Props {
 // dialog wiring, and composes presentational pills (ServicesPill, RunsPill,
 // PortifyLauncherPill, BenchmarkPill, CleanupPill) and badges (ConnectionBadge,
 // McpHealthBadge, StatusChip) that each live in their own file.
-export function GlobalStatusBar({ activeRunDetail, features = [], onNavigateToRun, onOpenCleanup, onOpenCoverage, onStartPortify, onOpenPortify }: Props) {
+export function GlobalStatusBar({ activeRunDetail, features = [], onNavigateToRun, onOpenCleanup, onOpenCoverage, onStartPortify, onOpenPortify, flights = [], onOpenFlight }: Props) {
   const { connection } = useRuns()
   // Poll coverage background jobs so the pill can show only while one is running
   // (R7). Lightweight (an index read); 2s cadence matches the dialog's poll.
@@ -177,6 +183,7 @@ export function GlobalStatusBar({ activeRunDetail, features = [], onNavigateToRu
           {showBenchmark && <BenchmarkPill active={Boolean(activeBenchmark)} onOpen={() => setBenchmarkOpen(true)} />}
           <PortifyLauncherPill activePortify={activePortify} onOpen={() => setPortifyPickerOpen(true)} />
           <CoveragePill jobs={coverageJobs} features={features} onOpenFeature={(f) => onOpenCoverage?.(f)} />
+          <FlightsPill flights={flights} onOpenFlight={(flightId) => onOpenFlight?.(flightId)} />
           <CleanupPill onOpen={() => onOpenCleanup?.()} />
         </div>
         <button

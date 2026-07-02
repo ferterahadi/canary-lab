@@ -66,6 +66,14 @@ Select **Claude** or **Codex** in Settings and Canary Lab starts that local CLI 
 
 `.rerun` and `.restart` under `logs/runs/<runId>/signals/` are the low-level mechanism both modes use. You can write them by hand (or via the UI controls) to drive a fix from a custom client or while debugging. Legacy `manual` and `auto` project settings now migrate to external heal.
 
+## First Flight (`canary-lab fly`)
+
+The one-command onboarding pipeline: `npx canary-lab fly <repo...> "<what to test>"` conducts a bare product repo through every stage — similarity check, repo scout (an agent drafts `feature.config.cjs` + detects env files), scaffold, env capture (proven by a single dry-run boot), docs/PRD (drop a doc, or it's inferred from repo docs / the diff vs your base branch / the description), a specs↔coverage loop that authors tagged Playwright specs until the ledger hits the target (default 100%), portify (always — the double-boot verify earns the concurrency-ready mark), the run with auto-heal, and finally the evaluation export. The archive is the flight's deliverable; a stage never succeeds on the agent's say-so — canary computes every verdict (config parses + boots, ledger met, run green, zip on disk).
+
+Checkpoints pause the flight for a human: config approval before anything is written, PRD source, portify apply (only when edits are proposed), a non-green terminal run (rerun vs export-as-is), and missing env secrets — that last one is never skipped, even with `--yolo`. Answer them in the terminal, in the web UI (Flights pill → routed flight view with per-stage evidence and the agent's live timeline), or over MCP (`start_flight` / `get_flight` / `respond_flight_checkpoint`; on that path, distill the conversation's requirements with `write_feature_doc` before answering the PRD-source checkpoint — dropped docs win the source hierarchy).
+
+Flights are resumable background jobs: a crash or a failed stage parks the flight `paused`, and the next `fly` on the same repo resumes from the first open stage (`--fresh` starts over). A repo that already has a feature parks on a rerun / enhance / new choice — never a silent duplicate.
+
 ## External Authoring Workflow
 
 External clients can use the MCP `author` profile to create durable Canary Lab tasks without asking Canary Lab to author content:
