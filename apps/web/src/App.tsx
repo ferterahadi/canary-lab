@@ -42,6 +42,7 @@ export function App() {
   const [portsRefreshKey, setPortsRefreshKey] = useState(0)
   const [reposRefreshKey, setReposRefreshKey] = useState(0)
   const [verificationRefreshKey, setVerificationRefreshKey] = useState(0)
+  const [journalRefreshKeys, setJournalRefreshKeys] = useState<Record<string, number>>({})
   const [specTotalTests, setSpecTotalTests] = useState(0)
   const [collisionPrompt, setCollisionPrompt] = useState<{ feature: string; env?: string; mode?: 'test' | 'boot'; info: RepoCollisionChoice; portsConfigured?: boolean } | null>(null)
   // Port-ification wizard target: 'new' starts a fresh workflow for a feature;
@@ -66,6 +67,7 @@ export function App() {
   const [versionStatus, setVersionStatus] = useState<VersionStatus | null>(null)
   const pendingRunSelectionRef = useRef<string | null>(PERSISTED_VIEW.run)
   const selectedFeatureRef = useRef<string | null>(null)
+  const selectedRunIdRef = useRef<string | null>(PERSISTED_VIEW.run)
 
   // Runs come from the WebSocket-backed RunsProvider — no polling here.
   // `runs` is the full index across all features; the per-feature filter
@@ -260,6 +262,10 @@ export function App() {
   }, [selectedFeature])
 
   useEffect(() => {
+    selectedRunIdRef.current = selectedRunId
+  }, [selectedRunId])
+
+  useEffect(() => {
     let conn: { close(): void } | null = null
     try {
       conn = connectWorkspaceEvents({
@@ -288,6 +294,9 @@ export function App() {
           if (event.type === 'verification-config-changed' && selectedFeatureRef.current === event.feature) {
             setVerificationRefreshKey((key) => key + 1)
           }
+          if (event.type === 'journal-changed') {
+            setJournalRefreshKeys((keys) => ({ ...keys, [event.runId]: (keys[event.runId] ?? 0) + 1 }))
+          }
           if (event.type === 'version-changed') {
             refreshVersion()
           }
@@ -302,6 +311,10 @@ export function App() {
           setTestsRefreshKey((key) => key + 1)
           setCoverageRefreshKey((key) => key + 1)
           setVerificationRefreshKey((key) => key + 1)
+          const currentRunId = selectedRunIdRef.current
+          if (currentRunId) {
+            setJournalRefreshKeys((keys) => ({ ...keys, [currentRunId]: (keys[currentRunId] ?? 0) + 1 }))
+          }
           refreshVersion()
         },
       })
@@ -386,7 +399,7 @@ export function App() {
               verificationRefreshKey={verificationRefreshKey}
             />
           )}
-          bottom={<RunDetailColumn runId={selectedRunId} onOpenPlaywrightSettings={setConfigFor} totalTests={specTotalTests} />}
+          bottom={<RunDetailColumn runId={selectedRunId} onOpenPlaywrightSettings={setConfigFor} totalTests={specTotalTests} journalRefreshKey={selectedRunId ? journalRefreshKeys[selectedRunId] ?? 0 : 0} />}
         />
       ),
     },

@@ -377,7 +377,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
     updateStore,
     workspaceEvents,
   })
-  await app.register(journalRoutes, { logsDir, journalPath })
+  await app.register(journalRoutes, { logsDir, journalPath, workspaceEvents })
   // `restartLocalHeal` deferred until after the runs route declares its
   // production restartHeal closure — defined below and threaded back in via
   // a setter-style hook on the route deps.
@@ -611,6 +611,9 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
   runStore.onEvent((e) => {
     if (e.kind === 'finalized') {
       void scheduler.promote()
+    }
+    if (e.kind === 'journal-changed' && e.runId) {
+      workspaceEvents.publish({ type: 'journal-changed', runId: e.runId })
     }
   })
 

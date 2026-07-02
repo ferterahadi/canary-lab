@@ -618,6 +618,7 @@ export interface RunStoreEvent {
    *   - `bootstrap` / `changed` / `finalized` — single-run change
    *   - `removed` — single-run history removal
    *   - `index-changed` — list-level (e.g. reaper)
+   *   - `journal-changed` — per-run diagnosis journal changed
    *   - `external-heal-task` — a run held by an external client just entered
    *     `waiting-for-signal` and the client should fetch heal context.
    *   - `external-claim-changed` — claim / release / heartbeat-stale
@@ -628,6 +629,7 @@ export interface RunStoreEvent {
     | 'finalized'
     | 'removed'
     | 'index-changed'
+    | 'journal-changed'
     | 'external-heal-task'
     | 'external-claim-changed'
   runId?: string
@@ -823,6 +825,10 @@ export class RunStore extends EventEmitter implements RunStateSink {
         this.emitEvent({ kind: 'external-heal-task', runId })
       }
     }
+  }
+
+  recordJournalChange(runId: string): void {
+    this.emitEvent({ kind: 'journal-changed', runId })
   }
 
   setStatus(runId: string, status: RunManifest['status'], healCycles?: number): void {

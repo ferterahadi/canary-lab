@@ -12,9 +12,10 @@ import {
 interface Props {
   feature: string
   runId: string
+  refreshKey?: number
 }
 
-export function JournalTab({ feature, runId }: Props) {
+export function JournalTab({ feature, runId, refreshKey = 0 }: Props) {
   const [entries, setEntries] = useState<JournalEntry[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [pendingDelete, setPendingDelete] = useState<JournalEntry | null>(null)
@@ -37,7 +38,7 @@ export function JournalTab({ feature, runId }: Props) {
     let cancelled = false
     refresh(() => cancelled)
     return () => { cancelled = true }
-  }, [refresh])
+  }, [refresh, refreshKey])
 
   useEffect(() => {
     if (!entries?.some((entry) => classifyOutcome(entry.outcome) === 'pending')) return
