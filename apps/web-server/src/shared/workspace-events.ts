@@ -21,6 +21,9 @@ export type WorkspaceEvent =
   // A newer canary-lab was found on the registry, or the self-update job changed
   // state (installing → done/failed). The client refetches GET /api/version.
   | { type: 'version-changed' }
+  // A First Flight manifest changed (stage transition, checkpoint, settle).
+  // The client refetches the flight list / the open flight detail view.
+  | { type: 'flights-changed' }
 
 export interface WorkspaceEventPublisher {
   publish(event: WorkspaceEvent): void

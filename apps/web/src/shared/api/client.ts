@@ -4,6 +4,11 @@
 
 import type { ClientKind, RunProducer } from '../../../../../shared/run-mode'
 import type {
+  FlightCheckpointResponse as FlightCheckpointResponseT,
+  FlightIndexEntry as FlightIndexEntryT,
+  FlightManifest as FlightManifestT,
+} from '../../../../../shared/flights/types'
+import type {
   AuditList,
   Feature,
   FeatureTests,
@@ -1764,4 +1769,85 @@ export function listJournal(
   if (query.run) params.set('run', query.run)
   const qs = params.toString() ? `?${params.toString()}` : ''
   return request<JournalEntry[]>(`${baseUrl}/api/journal${qs}`, { method: 'GET' }, fetchImpl)
+}
+
+// ─── First Flight (`canary-lab fly` pipeline) ────────────────────────────────
+// Manifest shapes live in the repo-shared model — the server conductor and this
+// client read the same JSON.
+
+export type {
+  FlightManifest,
+  FlightIndexEntry,
+  FlightStage,
+  FlightStageKey,
+  FlightStageStatus,
+  FlightStatus,
+  FlightCheckpoint,
+  FlightCheckpointResponse,
+} from '../../../../../shared/flights/types'
+
+export function listFlights(opts?: ClientOptions): Promise<FlightIndexEntryT[]> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<{ flights: FlightIndexEntryT[] }>(`${baseUrl}/api/flights`, { method: 'GET' }, fetchImpl)
+    .then((r) => r.flights)
+}
+
+export function getFlight(flightId: string, opts?: ClientOptions): Promise<FlightManifestT> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<FlightManifestT>(
+    `${baseUrl}/api/flights/${encodeURIComponent(flightId)}`,
+    { method: 'GET' },
+    fetchImpl,
+  )
+}
+
+export function respondFlightCheckpoint(
+  flightId: string,
+  response: FlightCheckpointResponseT,
+  opts?: ClientOptions,
+): Promise<FlightManifestT> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<FlightManifestT>(
+    `${baseUrl}/api/flights/${encodeURIComponent(flightId)}/respond`,
+    { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ response }) },
+    fetchImpl,
+  )
+}
+
+export function resumeFlight(flightId: string, opts?: ClientOptions): Promise<FlightManifestT> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<FlightManifestT>(
+    `${baseUrl}/api/flights/${encodeURIComponent(flightId)}/resume`,
+    { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' },
+    fetchImpl,
+  )
+}
+
+export function abortFlight(flightId: string, opts?: ClientOptions): Promise<FlightManifestT> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<FlightManifestT>(
+    `${baseUrl}/api/flights/${encodeURIComponent(flightId)}/abort`,
+    { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' },
+    fetchImpl,
+  )
+}
+
+/** Snapshot of a flight stage's agent session (stage = sidecar dir name:
+ *  scout, prd-summary, specs-1, coverage-1). 404 → null (no agent ran). */
+export async function getFlightAgentSession(
+  flightId: string,
+  stage: string,
+  opts?: ClientOptions,
+): Promise<AgentSessionResponse | null> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  try {
+    return await request<AgentSessionResponse>(
+      `${baseUrl}/api/flights/${encodeURIComponent(flightId)}/agent-session?stage=${encodeURIComponent(stage)}`,
+      { method: 'GET' },
+      fetchImpl,
+    )
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) return null
+    throw err
+  }
 }

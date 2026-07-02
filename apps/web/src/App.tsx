@@ -12,6 +12,7 @@ import { CollisionConfirmDialog } from './features/runs/components/CollisionConf
 import { PortifyWizard } from './features/portify/components/PortifyWizard'
 import { LogCleanupPage } from './features/logs/components/LogCleanupPage'
 import { CoverageLedgerPage } from './features/coverage/components/CoverageLedgerPage'
+import { FlightPage } from './features/flights/components/FlightPage'
 import type { RepoCollisionChoice } from './shared/api/client'
 import * as api from './shared/api/client'
 import { connectWorkspaceEvents } from './features/runs/api/workspace-socket'
@@ -19,6 +20,7 @@ import { useRuns, useRun, useGlobalActiveRun } from './features/runs/state/RunsC
 import { useWizardDrafts } from './features/wizard/state/WizardDraftContext'
 import { useEvaluationExports } from './features/evaluation/state/EvaluationExportContext'
 import type { Feature, VersionStatus } from './shared/api/types'
+import type { FlightIndexEntry } from './shared/api/client'
 import { readPersistedView, persistView, onViewChangedInOtherTab } from './shared/lib/workspace-view-state'
 
 // R12: hydrate the open view + selected feature from the URL/localStorage so a
@@ -59,8 +61,15 @@ export function App() {
   // R24: the Verify-config dialog (in the runs column) is route-driven too.
   const [verifyOpen, setVerifyOpen] = useState(PERSISTED_VIEW.dialog === 'verification')
   // Top-level view: the normal workspace, or a full-screen page (cleanup /
-  // coverage). Hydrated from the URL/localStorage (R12) so it survives refresh.
-  const [view, setView] = useState<'workspace' | 'cleanup' | 'coverage'>(PERSISTED_VIEW.view)
+  // coverage / flights). Hydrated from the URL/localStorage (R12) so it
+  // survives refresh.
+  const [view, setView] = useState<'workspace' | 'cleanup' | 'coverage' | 'flights'>(PERSISTED_VIEW.view)
+  // First Flight surface: the flight list feeds the status-bar pill; the
+  // selected flight id qualifies ?view=flights so a deep link / refresh
+  // re-opens the exact flight (cl_route-every-surface).
+  const [flights, setFlights] = useState<FlightIndexEntry[]>([])
+  const [selectedFlightId, setSelectedFlightId] = useState<string | null>(PERSISTED_VIEW.flight)
+  const [flightsRefreshKey, setFlightsRefreshKey] = useState(0)
   // Current-vs-latest version + self-update job state. Sourced from the server,
   // refetched on every `version-changed` event (registry check resolved, or the
   // update job advanced) so the footer indicator updates live.
@@ -99,8 +108,8 @@ export function App() {
   const routedWf = portifyTarget?.kind === 'revisit' ? portifyTarget.workflowId : null
   const routedTask = evaluationOpen ? evaluationTask?.taskId ?? null : null
   useEffect(() => {
-    persistView({ view, feature: selectedFeature, run: selectedRunId, dialog: routedDialog, wf: routedWf, task: routedTask })
-  }, [view, selectedFeature, selectedRunId, routedDialog, routedWf, routedTask])
+    persistView({ view, feature: selectedFeature, run: selectedRunId, dialog: routedDialog, wf: routedWf, task: routedTask, flight: selectedFlightId })
+  }, [view, selectedFeature, selectedRunId, routedDialog, routedWf, routedTask, selectedFlightId])
 
   // R24: the Add-Test wizard and the evaluation export dialog keep their open-state
   // in a context, not PERSISTED_VIEW-seeded local state — so reopen them from the
@@ -254,6 +263,13 @@ export function App() {
     api.getVersionStatus().then(setVersionStatus).catch(() => {})
   }, [])
 
+  const refreshFlights = useCallback((): void => {
+    api.listFlights().then(setFlights).catch(() => {})
+  }, [])
+
+  // Initial flights load (feeds the pill + landing list before any event fires).
+  useEffect(() => { refreshFlights() }, [refreshFlights])
+
   // Initial version check on mount.
   useEffect(() => { refreshVersion() }, [refreshVersion])
 
@@ -300,6 +316,10 @@ export function App() {
           if (event.type === 'version-changed') {
             refreshVersion()
           }
+          if (event.type === 'flights-changed') {
+            refreshFlights()
+            setFlightsRefreshKey((key) => key + 1)
+          }
         },
         // The bus has no replay, so any mutation that happened while the socket
         // was down (e.g. across a canary-apply server restart) was never
@@ -316,13 +336,15 @@ export function App() {
             setJournalRefreshKeys((keys) => ({ ...keys, [currentRunId]: (keys[currentRunId] ?? 0) + 1 }))
           }
           refreshVersion()
+          refreshFlights()
+          setFlightsRefreshKey((key) => key + 1)
         },
       })
     } catch {
       // Initial REST load and direct UI callbacks still keep the page usable.
     }
     return () => conn?.close()
-  }, [refreshFeatures, refreshVersion])
+  }, [refreshFeatures, refreshVersion, refreshFlights])
 
   const selectedFeatureEnvs =
     features.find((f) => f.name === selectedFeature)?.envs ?? []
@@ -420,6 +442,8 @@ export function App() {
         onOpenCoverage={(feature) => { setSelectedFeature(feature); setView('coverage') }}
         onStartPortify={(f) => setPortifyTarget({ kind: 'new', feature: f })}
         onOpenPortify={(workflowId) => setPortifyTarget({ kind: 'revisit', workflowId })}
+        flights={flights}
+        onOpenFlight={(flightId) => { setSelectedFlightId(flightId); setView('flights') }}
       />
       <div className="min-h-0 flex-1">
         {view === 'cleanup'
@@ -438,6 +462,13 @@ export function App() {
             />
           : view === 'coverage' && selectedFeature
           ? <CoverageLedgerPage feature={selectedFeature} onClose={() => setView('workspace')} coverageRefreshKey={coverageRefreshKey} />
+          : view === 'flights'
+          ? <FlightPage
+              flightId={selectedFlightId}
+              refreshKey={flightsRefreshKey}
+              onSelectFlight={setSelectedFlightId}
+              onClose={() => { setSelectedFlightId(null); setView('workspace') }}
+            />
           : <ResizablePanels panels={panels} />}
       </div>
       {configFor && (

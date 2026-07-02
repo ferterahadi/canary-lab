@@ -200,7 +200,8 @@ export async function runUi(argv: string[], opts: UiCommandOptions = {}): Promis
 
 // Spawn a fresh, detached `canary-lab ui` for the project. It reads the new
 // port from canary-lab.config.json and binds it; this process then exits.
-function relaunchUiDetached(projectRoot: string): void {
+// Also the `fly` command's "boot the server if needed" primitive.
+export function relaunchUiDetached(projectRoot: string): void {
   const cliPath = process.argv[1] ?? path.join(__dirname, 'cli.js')
   const child = spawn(process.execPath, [cliPath, 'ui', '--no-open'], {
     cwd: projectRoot,

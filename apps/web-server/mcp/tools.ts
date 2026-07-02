@@ -256,6 +256,14 @@ export interface CanaryLabMcpDeps {
    *  carry a `dirtyTests` warning the agent relays verbatim. Read-only here —
    *  the MCP surface never approves or gates on it (awareness, not enforcement). */
   dirtySpecStore?: DirtySpecStore
+  /** First Flight (`canary-lab fly` pipeline) driven over MCP. Reuses the
+   *  flights REST routes via app.inject — same store + conductor as UI/CLI, so
+   *  a flight started here shows live in the web UI and vice versa. */
+  flightsRequest?: (opts: {
+    method: 'GET' | 'POST'
+    url: string
+    payload?: unknown
+  }) => Promise<{ statusCode: number; body: unknown }>
 }
 
 const CLIENT_KIND = z.enum(['claude', 'codex', 'claude-pty', 'codex-pty', 'other'])
@@ -325,6 +333,9 @@ export type CanaryLabMcpToolName =
   | 'start_external_draft'
   | 'update_external_draft_stage'
   | 'apply_external_draft'
+  | 'start_flight'
+  | 'get_flight'
+  | 'respond_flight_checkpoint'
   | 'get_heal_context'
   | 'get_failure_detail'
   | 'start_run'
@@ -408,6 +419,9 @@ const AUTHOR_TOOLS = [
   'start_external_draft',
   'update_external_draft_stage',
   'apply_external_draft',
+  'start_flight',
+  'get_flight',
+  'respond_flight_checkpoint',
 ] as const satisfies readonly CanaryLabMcpToolName[]
 
 // Portify is a specialized, infrequent operation (make a feature's ports
@@ -837,7 +851,7 @@ export function registerCanaryLabTools(
 
   registerTool('clear_prd_summary', {
     description:
-      'Reset a feature\'s coverage to a blank slate: remove the generated PRD summary + its coverage sidecars (pending mappings, run-state) and strip the @req-*/@path-* tags from the specs (other tags kept; specs revert to pre-coverage shape). Source docs are untouched; the feature returns to the "no summary" state. Returns { removed, untagged } (untagged = specs whose tags were cleared).',
+      'Reset a feature\'s coverage to a blank slate: remove the generated PRD summary + its coverage sidecars (pending mappings, run-state) and strip the @req-*/@path-*/@variant-* tags from the specs (other tags kept; specs revert to pre-coverage shape). Source docs are untouched; the feature returns to the "no summary" state. Returns { removed, untagged } (untagged = specs whose tags were cleared).',
     inputSchema: { feature: z.string().describe('Existing feature name (from list_features).') },
   }, async ({ feature }) => {
     try {
@@ -1376,6 +1390,143 @@ export function registerCanaryLabTools(
       status: 'applied',
       written: applied.written,
     })
+  })
+
+  // ── First Flight (`canary-lab fly` — conducted onboarding pipeline) ──────
+  const FLIGHT_DATA_INLINE_BUDGET = 8 * 1024 // ≈2K tokens — past this, review in the web UI
+  const flightView = (raw: unknown): Record<string, unknown> => {
+    const m = raw as {
+      flightId: string; feature: string; status: string; currentStage: string | null
+      runVerdict?: string; error?: string; links?: unknown
+      stages?: Array<{ key: string; status: string; error?: string; skipReason?: string; checkpoint?: unknown }>
+    }
+    const waiting = (m.stages ?? []).find((s) => s.status === 'waiting-for-approval')
+    let checkpoint = waiting?.checkpoint as { data?: unknown } | undefined
+    if (checkpoint?.data !== undefined && JSON.stringify(checkpoint.data).length > FLIGHT_DATA_INLINE_BUDGET) {
+      checkpoint = { ...checkpoint, data: { omitted: true, reason: 'payload over the inline budget — review it in the web UI flight view, then respond here' } }
+    }
+    return {
+      flightId: m.flightId,
+      feature: m.feature,
+      status: m.status,
+      currentStage: m.currentStage,
+      ...(m.runVerdict ? { runVerdict: m.runVerdict } : {}),
+      ...(m.error ? { error: m.error } : {}),
+      ...(m.links ? { links: m.links } : {}),
+      stages: (m.stages ?? []).map((s) => ({
+        key: s.key,
+        status: s.status,
+        ...(s.error ? { error: s.error } : {}),
+        ...(s.skipReason ? { skipReason: s.skipReason } : {}),
+      })),
+      ...(waiting && checkpoint ? { checkpoint: { stage: waiting.key, ...checkpoint } } : {}),
+    }
+  }
+  const flightNext = (view: Record<string, unknown>): string => {
+    if (view.status === 'waiting-for-approval') {
+      const cp = view.checkpoint as { stage?: string; kind?: string; options?: string[] } | undefined
+      const base = `Flight is parked on the ${cp?.kind ?? 'checkpoint'} checkpoint — call respond_flight_checkpoint(flightId, choice: one of ${JSON.stringify(cp?.options ?? [])}).`
+      if (cp?.kind === 'prd-source') {
+        return `${base} BEFORE responding: if this conversation carries requirements, distill them with write_feature_doc("${String(view.feature)}", "conversation-prd.md", <markdown>) — dropped docs win the source hierarchy; then respond with any choice (e.g. "retry").`
+      }
+      return base
+    }
+    if (view.status === 'running') return 'Flight is running — re-call get_flight to follow it; it parks on checkpoints and settles to done/paused/failed.'
+    if (view.status === 'paused') return 'Flight is paused (a stage failed or the server restarted). Fix the cause if needed, then start_flight on the same repos resumes it from the failed stage.'
+    if (view.status === 'done') return 'Flight is done — links.evaluationZip is the deliverable archive.'
+    return ''
+  }
+  const flightsUnavailable = () => errorResult('flightsRequest dependency is not configured')
+
+  registerTool('start_flight', {
+    description: 'Start (or resume) a First Flight: one background pipeline that takes bare product repo(s) to a green, covered, healed run ending in an evaluation export (similarity → scout → scaffold → env → docs → PRD → specs↔coverage → portify → run → heal → export). The server conducts every stage and computes every verdict; you approve checkpoints via respond_flight_checkpoint and can feed conversation-distilled docs via write_feature_doc. A paused flight for the same repos is resumed instead of duplicated; an ACTIVE one returns its id to follow.',
+    inputSchema: {
+      repoPaths: z.array(z.string()).min(1).describe('Absolute path(s) of the product repo(s); several paths become ONE feature spanning them.'),
+      description: z.string().describe('What to test, e.g. "checkout flow".'),
+      feature: z.string().optional().describe('Feature name; defaults to a slug of the first repo basename.'),
+      env: z.string().optional().describe('Envset name (default "local").'),
+      coverage_target: z.number().min(0).max(100).optional().describe('Coverage % the specs↔coverage loop must reach (default 100).'),
+      base: z.string().optional().describe('Base branch for diff-inferred requirements (auto-detected when omitted).'),
+      yolo: z.boolean().optional().describe('Skip every checkpoint except missing env secrets.'),
+      fresh: z.boolean().optional().describe('Do not resume a paused flight — start over.'),
+    },
+  }, async ({ repoPaths, description, feature, env, coverage_target, base, yolo, fresh }) => {
+    if (!deps.flightsRequest) return flightsUnavailable()
+    const list = await deps.flightsRequest({ method: 'GET', url: '/api/flights' })
+    const flights = ((list.body as { flights?: Array<{ flightId: string; status: string; repoPaths?: string[] }> }).flights ?? [])
+    const targets = new Set(repoPaths.map((p) => path.resolve(p)))
+    const latest = flights.find((f) => (f.repoPaths ?? []).some((p) => targets.has(path.resolve(p))))
+    if (latest && (latest.status === 'running' || latest.status === 'waiting-for-approval')) {
+      const current = await deps.flightsRequest({ method: 'GET', url: `/api/flights/${encodeURIComponent(latest.flightId)}` })
+      const view = flightView(current.body)
+      return asJsonResult({ ...view, note: 'a flight is already active for these repos — following it', next: flightNext(view) })
+    }
+    if (latest && latest.status === 'paused' && !fresh) {
+      const resumed = await deps.flightsRequest({ method: 'POST', url: `/api/flights/${encodeURIComponent(latest.flightId)}/resume` })
+      if (resumed.statusCode !== 200) return errorResult(`resume failed (${resumed.statusCode}): ${String((resumed.body as { error?: string }).error ?? '')}`)
+      const view = flightView(resumed.body)
+      return asJsonResult({ ...view, note: 'resumed the paused flight from its first open stage', next: flightNext(view) })
+    }
+    const started = await deps.flightsRequest({
+      method: 'POST',
+      url: '/api/flights',
+      payload: {
+        repoPaths,
+        description,
+        feature: feature ?? (path.basename(repoPaths[0]).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'first-flight'),
+        ...(env ? { env } : {}),
+        ...(coverage_target !== undefined ? { coverageTarget: coverage_target } : {}),
+        ...(base ? { base } : {}),
+        ...(yolo ? { yolo } : {}),
+      },
+    })
+    if (started.statusCode !== 201) {
+      return errorResult(`start_flight failed (${started.statusCode}): ${String((started.body as { error?: string }).error ?? '')}`)
+    }
+    const view = flightView(started.body)
+    return asJsonResult({ ...view, next: flightNext(view) })
+  })
+
+  registerTool('get_flight', {
+    description: 'Fetch one flight (stage rail + open checkpoint) by id, or list all flights when flightId is omitted. Poll this to follow a running flight; it parks on checkpoints (respond via respond_flight_checkpoint) and settles to done/paused/failed.',
+    inputSchema: {
+      flightId: z.string().optional().describe('Omit to list all flights (slim rows).'),
+    },
+  }, async ({ flightId }) => {
+    if (!deps.flightsRequest) return flightsUnavailable()
+    if (!flightId) {
+      const list = await deps.flightsRequest({ method: 'GET', url: '/api/flights' })
+      const rows = ((list.body as { flights?: Array<Record<string, unknown>> }).flights ?? []).map((f) => ({
+        flightId: f.flightId, feature: f.feature, status: f.status, currentStage: f.currentStage, repoPaths: f.repoPaths,
+      }))
+      return asJsonResult({ flights: rows })
+    }
+    const resp = await deps.flightsRequest({ method: 'GET', url: `/api/flights/${encodeURIComponent(flightId)}` })
+    if (resp.statusCode !== 200) return errorResult(`flight not found: ${flightId}`)
+    const view = flightView(resp.body)
+    return asJsonResult({ ...view, next: flightNext(view) })
+  })
+
+  registerTool('respond_flight_checkpoint', {
+    description: 'Release a flight parked waiting-for-approval: pass the choice (from the checkpoint\'s options), user-supplied env values for missing-env, or an edited configSource via data for config-approval. For the prd-source checkpoint, first write conversation-distilled requirements with write_feature_doc — dropped docs win the source hierarchy.',
+    inputSchema: {
+      flightId: z.string(),
+      choice: z.string().optional().describe('One of the checkpoint\'s options.'),
+      values: z.record(z.string(), z.string()).optional().describe('missing-env only: KEY→value map, written to the missing env file then captured.'),
+      data: z.unknown().optional().describe('config-approval only: { configSource } with the hand-edited draft.'),
+    },
+  }, async ({ flightId, choice, values, data }) => {
+    if (!deps.flightsRequest) return flightsUnavailable()
+    const resp = await deps.flightsRequest({
+      method: 'POST',
+      url: `/api/flights/${encodeURIComponent(flightId)}/respond`,
+      payload: { response: { ...(choice ? { choice } : {}), ...(values ? { values } : {}), ...(data !== undefined ? { data } : {}) } },
+    })
+    if (resp.statusCode !== 200) {
+      return errorResult(`respond failed (${resp.statusCode}): ${String((resp.body as { error?: string }).error ?? '')}`)
+    }
+    const view = flightView(resp.body)
+    return asJsonResult({ ...view, next: flightNext(view) })
   })
 
   // ── Port-ification (make a feature's apps use injectable ports) ──────────

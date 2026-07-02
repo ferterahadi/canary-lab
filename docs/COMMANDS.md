@@ -3,6 +3,7 @@
 CLI reference for Canary Lab. For the overview, quick start, and core workflow, see the [README](../README.md).
 
 ```bash
+npx canary-lab fly <repo-path...> "<what to test>" [--feature <name>] [--env <envset>] [--coverage-target <pct>] [--base <branch>] [--yolo] [--fresh]
 npx canary-lab init <folder> [--port <port>] [--no-install]
 npx canary-lab setup
 npx canary-lab ui
@@ -14,6 +15,7 @@ npx canary-lab env revert <feature>
 npx canary-lab upgrade
 ```
 
+- `fly` is the one-command onboarding: it takes bare product repo(s) to a green, covered, healed run ending in an evaluation archive (similarity check → repo scout → scaffold → env capture → docs/PRD → specs↔coverage loop → portify → run → heal → export). It locates or creates the workspace, boots the server if needed, streams stage progress to the terminal, and prompts at checkpoints (config approval, PRD source, portify apply, missing env values — the last one is never skipped, even with `--yolo`). Several repo paths become ONE feature spanning them. Re-running `fly` resumes an interrupted flight from its failed stage (`--fresh` starts over); a repo that already has a feature parks on a rerun/enhance/new choice instead of duplicating it. Exit code: `0` green, `1` done with a non-green run (archive still produced), `2` parked on a checkpoint, `3` failed. The same flight is drivable from the web UI (Flights pill) and over MCP (`start_flight` / `get_flight` / `respond_flight_checkpoint`).
 - `init` scaffolds the workspace, then runs `npm install` + the Playwright browser download and registers tools — so `ui` boots immediately. Pass `--no-install` to scaffold only (CI / offline) and install manually afterward.
 - `ui` is the primary human workflow.
 - `setup` refreshes the agent/tool registration described in [Quick Start](../README.md#quick-start).

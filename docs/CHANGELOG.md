@@ -15,6 +15,16 @@ Each entry is tagged with the area it touches:
 
 ---
 
+## Unreleased
+
+- **[General]** **First Flight — `npx canary-lab fly <repo...> "<what to test>"`.** One command takes a bare product repo to a green, covered, healed run that ends in an evaluation archive. A server-side conductor chains the existing stages — repo scout (an agent drafts `feature.config.cjs` and detects env files), scaffold, env capture proven by a dry-run boot, docs/PRD (drop a doc or infer from repo docs / diff vs base branch), a specs↔coverage loop to the coverage target, portify, run + auto-heal, evaluation export — and canary computes every stage verdict; the agent only proposes.
+  - Typed, resumable checkpoints: config approval, PRD source, portify apply, non-green run (rerun vs export-as-is), and missing env secrets (never skipped, even with `--yolo`). A crash or failed stage pauses the flight; the next `fly` resumes from the first open stage (`--fresh` starts over).
+  - Re-entry safe: a repo that already has a feature parks on a rerun / enhance / new choice — never a silent duplicate. `fly` also creates the workspace and boots the server when needed.
+  - New **Flights** pill in the top bar (live active count) and a routed flight view (`?view=flights&flight=<id>`) with a per-stage rail, harness evidence, checkpoint controls, and the stage agent's live timeline.
+  - MCP parity: `start_flight` / `get_flight` / `respond_flight_checkpoint` (author/lifecycle/full profiles) drive the same flight store; external clients can feed conversation-distilled docs via `write_feature_doc` before the PRD stage.
+
+---
+
 ## 1.5.1 — 2026-07-03
 
 - **[Test Runner]** Small run-detail UI update: journal updates refresh while a run is open, and the heal-agent terminal stays visible during active auto-heal cycles.

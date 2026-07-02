@@ -55,7 +55,7 @@ Each array item has exactly four fields:
 
 ### Optional PRD / user context
 
-If `{{prdText}}` is empty or thin, infer coverage from the repositories instead of asking for more input.
+If the PRD/context block below is empty or thin, infer coverage from the repositories instead of asking for more input.
 
 ```
 {{prdText}}

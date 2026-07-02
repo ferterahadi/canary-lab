@@ -30,7 +30,9 @@ rules; drop authoring/export detail. Do not paste the full Claude skill in.
 - Queueing: `queued: true` + `queueReason`; `wait_for_heal_task` still blocks.
 - Boot-only sessions: `type: "boot_session"` / `executionType: "boot"` → no heal
   claim, no waiting, `abort_run` (confirm) stops services.
-- Heal-claim policy: desktop-only; `claimSuppressed: true` for CLI clients.
+- Heal-claim policy: denylist — only runner-spawned PTY agents (`claude-pty`/
+  `codex-pty`) get `claimSuppressed: true`; interactive Claude/Codex clients
+  (Desktop or CLI) can claim.
 - Waiting: block on `wait_for_heal_task`; never poll `get_run_snapshot`/`get_run`.
 - Verification after a fix: `signal_run` (with `hypothesis` + `fixDescription`),
   never a fresh `start_run`.

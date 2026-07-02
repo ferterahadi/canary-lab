@@ -171,6 +171,31 @@ export async function agentSessionStreamRoutes(
     },
   )
 
+  // First Flight stage agent session — same ref-file convention as portify,
+  // under the flight's per-stage sidecar dir (logs/flights/<id>/<stage>/):
+  // `stage` is the sidecar dir name (scout, prd-summary, specs-1, coverage-1).
+  app.get<{ Params: { flightId: string }; Querystring: { stage?: string } }>(
+    '/ws/flights/:flightId/agent-session',
+    { websocket: true },
+    (socket, req) => {
+      const stage = req.query?.stage
+      if (!stage || !/^[a-z0-9-]+$/.test(stage)) {
+        sendJson(socket, { type: 'error', error: 'stage-query-required' })
+        try { socket.close() } catch { /* ignore */ }
+        return
+      }
+      const dir = path.join(deps.logsDir, 'flights', req.params.flightId, stage)
+      const handle = tailAgentSession({
+        ref: resolveWorkflowAgentRef(dir) ?? { agent: 'claude', sessionId: '', logPath: '' },
+        onReady: (readyRef) => sendJson(socket, sessionMessage(readyRef)),
+        onEvent: (event) => sendJson(socket, { type: 'event', event }),
+        onError: (err) => sendJson(socket, { type: 'error', error: err.message }),
+        discoverRef: () => resolveWorkflowAgentRef(dir),
+      })
+      socket.on('close', () => handle.close())
+    },
+  )
+
   // Port-ification agent session — same ref-file convention as the benchmark,
   // under the portify workflow dir.
   app.get<{ Params: { workflowId: string } }>(
