@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import fs from 'fs'
 import { buildRunPaths, runDirFor } from '../../runs/logic/runtime/run-paths'
+import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../shared/workspace-events'
 import {
   readJournal,
   filterSections,
@@ -13,6 +14,7 @@ export interface JournalRouteDeps {
   logsDir: string
   /** Legacy root journal fallback for callers that do not select a run. */
   journalPath?: string
+  workspaceEvents?: WorkspaceEventPublisher
 }
 
 export async function journalRoutes(app: FastifyInstance, deps: JournalRouteDeps): Promise<void> {
@@ -97,6 +99,7 @@ export async function journalRoutes(app: FastifyInstance, deps: JournalRouteDeps
         reply.code(404)
         return { error: 'iteration not found' }
       }
+      if (req.query.run) publishWorkspaceEvent(deps.workspaceEvents, { type: 'journal-changed', runId: req.query.run })
       reply.code(204)
       return ''
     },

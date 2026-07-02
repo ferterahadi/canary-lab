@@ -9,6 +9,10 @@ import { RunsColumn } from './RunsColumn'
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
+const paneTerminalState = vi.hoisted(() => ({
+  props: [] as Array<{ paneId?: string; onExit?: (code: number) => void }>,
+}))
+
 vi.mock('../state/RunsContext', () => ({
   useRun: vi.fn(),
   useRuns: vi.fn(() => ({
@@ -38,7 +42,10 @@ vi.mock('../../agent-sessions/components/AgentSessionView', () => ({
 }))
 
 vi.mock('./PaneTerminal', () => ({
-  PaneTerminal: () => <div>terminal</div>,
+  PaneTerminal: (props: { paneId?: string; onExit?: (code: number) => void }) => {
+    paneTerminalState.props.push(props)
+    return <div>terminal</div>
+  },
 }))
 
 vi.mock('../../coverage/components/VerificationDialog', () => ({
@@ -53,6 +60,7 @@ beforeEach(() => {
   document.body.appendChild(container)
   root = createRoot(container)
   gatePromo.mockImplementation((_action: string, continueAction: () => void) => continueAction())
+  paneTerminalState.props = []
 })
 
 afterEach(() => {
@@ -351,6 +359,51 @@ describe('run overview', () => {
     expect(container.textContent).toContain('AI Agent')
     expect(container.textContent).toContain('No external client has claimed this run yet')
     expect(container.textContent).not.toContain('terminal')
+  })
+
+  it('keeps the live heal terminal visible while an auto-heal run is still healing', async () => {
+    const { useRun } = await import('../state/RunsContext')
+    vi.mocked(useRun).mockReturnValue({
+      detail: runDetail({
+        status: 'healing',
+        endedAt: undefined,
+        healMode: 'auto',
+        healAgent: 'codex',
+        healCycles: 1,
+        lifecycle: {
+          phase: 'agent-healing',
+          headline: 'Heal cycle 1 started',
+          updatedAt: '2026-01-01T00:00:30.000Z',
+          activeCycle: 1,
+        },
+      }),
+      indexed: undefined,
+      transient: null,
+      status: 'healing',
+    })
+
+    await act(async () => {
+      root.render(<RunDetailColumn runId="run-1" />)
+    })
+
+    const healTab = [...container.querySelectorAll('button')]
+      .find((button) => button.textContent?.trim() === 'Heal agent')
+    expect(healTab).toBeTruthy()
+
+    await act(async () => {
+      healTab?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+    expect(container.textContent).toContain('terminal')
+
+    const agentPane = paneTerminalState.props.find((props) => props.paneId === 'agent')
+    expect(agentPane?.onExit).toBeTruthy()
+
+    await act(async () => {
+      agentPane?.onExit?.(0)
+    })
+
+    expect(container.textContent).toContain('terminal')
+    expect(container.textContent).not.toContain('agent session')
   })
 })
 

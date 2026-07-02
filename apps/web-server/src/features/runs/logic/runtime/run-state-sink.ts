@@ -61,6 +61,10 @@ export interface RunStateSink {
   /** Structured lifecycle narration for the UI. Appends the event and mirrors
    *  its snapshot fields into the manifest so list/detail views stay aligned. */
   recordLifecycleEvent(runId: string, event: RunLifecycleEvent): void
+
+  /** Notify observers that the per-run diagnosis journal changed. File-backed
+   *  sinks have nothing to persist here; event-backed sinks fan this out. */
+  recordJournalChange(runId: string): void
 }
 
 /** File-backed default. The orchestrator uses this directly when no other
@@ -140,6 +144,10 @@ export class FileRunStateSink implements RunStateSink {
     fs.appendFileSync(eventPath, JSON.stringify(stamped) + '\n')
     const previous = readManifest(manifestPath)?.lifecycle
     updateManifest(manifestPath, { lifecycle: reduceRunLifecycleSnapshot(previous, stamped) })
+  }
+
+  recordJournalChange(_runId: string): void {
+    // FileRunStateSink has no subscribers. RunStore overrides this to emit.
   }
 }
 

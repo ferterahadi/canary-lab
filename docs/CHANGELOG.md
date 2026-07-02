@@ -15,6 +15,12 @@ Each entry is tagged with the area it touches:
 
 ---
 
+## 1.5.1 — 2026-07-03
+
+- **[Test Runner]** Small run-detail UI update: journal updates refresh while a run is open, and the heal-agent terminal stays visible during active auto-heal cycles.
+
+---
+
 ## 1.5.0 — 2026-07-01
 
 > Node 20.19+ (or 22.12+) is now required — see Breaking changes.

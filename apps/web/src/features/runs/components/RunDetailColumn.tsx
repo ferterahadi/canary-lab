@@ -51,16 +51,19 @@ export function RunDetailColumn({
   runId,
   onOpenPlaywrightSettings,
   totalTests,
+  journalRefreshKey = 0,
 }: {
   runId: string | null
   onOpenPlaywrightSettings?: (feature: string) => void
   totalTests?: number
+  journalRefreshKey?: number
 }) {
   const [tab, setTab] = useState<Tab>('overview')
   const [serviceIdx, setServiceIdx] = useState(0)
   const [playwrightView, setPlaywrightView] = useState<PlaywrightView>('playback')
   const [agentPaneRestartKey, setAgentPaneRestartKey] = useState(0)
   const [agentPaneExited, setAgentPaneExited] = useState(false)
+  const currentRunStatusRef = useRef<RunStatus | undefined>(undefined)
 
   // Detail comes from the WebSocket-backed RunsContext. No polling here —
   // the same `state.details[runId]` populated for the runs list is reused,
@@ -70,12 +73,20 @@ export function RunDetailColumn({
   // `ABORTING` mid-action instead of stale `RUNNING`.
   const { detail, transient } = useRun(runId)
   const handleAgentPaneExit = useCallback(() => {
+    if (currentRunStatusRef.current === 'healing') return
     setAgentPaneExited(true)
   }, [])
 
   useEffect(() => {
     setAgentPaneExited(false)
   }, [runId, agentPaneRestartKey])
+
+  useEffect(() => {
+    currentRunStatusRef.current = detail?.manifest.status
+    if (detail?.manifest.status === 'healing') {
+      setAgentPaneExited(false)
+    }
+  }, [detail?.manifest.status])
 
   // Each new heal cycle spawns a fresh Claude/Codex PTY. Without this, after
   // the previous cycle's PTY exited (and we flipped to the transcript view),
@@ -257,7 +268,7 @@ export function RunDetailColumn({
               duplicated that affordance. */}
         </div>}
         {!isVerify && tab === 'journal' && (
-          <JournalTab feature={m.feature} runId={m.runId} />
+          <JournalTab feature={m.feature} runId={m.runId} refreshKey={journalRefreshKey} />
         )}
       </div>
     </div>
