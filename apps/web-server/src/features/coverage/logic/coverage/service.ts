@@ -10,7 +10,8 @@ import type {
   VariantDimension,
 } from '../../../../../../../shared/coverage/types'
 import { computeCoverageLedger, type CoverageTestInput } from '../../../coverage/logic/coverage/ledger'
-import { applyTestStrength, type TestAssertions } from '../../../coverage/logic/coverage/strength'
+import { lastRunOutcomeForTitle, readLatestRunOutcomes } from '../../../runs/logic/runtime/run-outcomes'
+import { applyTestStrength, hasNegativeAssertion, type TestAssertions } from '../../../coverage/logic/coverage/strength'
 import {
   buildAnnotatePrompt,
   proposeCoverageMappings,
@@ -155,7 +156,23 @@ export function computeFeatureCoverage(args: ComputeFeatureCoverageArgs): Covera
 
   const { tests, assertions } = collectTests(featureDir)
 
-  const breadth = computeCoverageLedger({ feature: args.feature, requirements, tests })
+  // Proven axis: join each test's latest-run outcome (pass/fail) so the ledger
+  // can distinguish "covered (claimed by a tag)" from "covered (proven by a
+  // passing run)". Additive — gap types and coveragePct stay claim-based.
+  const outcomes = readLatestRunOutcomes(args.logsDir, args.feature)
+  if (outcomes) {
+    for (const t of tests) {
+      const lastRun = lastRunOutcomeForTitle(outcomes, t.name)
+      if (lastRun) t.lastRun = lastRun
+    }
+  }
+
+  const breadth = computeCoverageLedger({
+    feature: args.feature,
+    requirements,
+    tests,
+    ...(outcomes ? { provenRunId: outcomes.runId } : {}),
+  })
   const ledger = applyTestStrength(breadth, assertions)
 
   // --- State model (R3): summary × coverage axes + drift detail. ---
@@ -244,6 +261,40 @@ function applyTagToFile(
   return true
 }
 
+/** The slice of a test's source the mapping validator inspects. */
+export interface MappingTestSource {
+  assertions: string[]
+  bodySource: string
+}
+
+/**
+ * Deterministic claim-validation for one proposed mapping — FLAG, never drop.
+ * Returns zero or more human-readable issue strings for suspicious claims:
+ * low confidence, a `@path-sad` claim with no negative assertion, a `@variant-*`
+ * claim whose value never appears in the test source. The tag is still written
+ * exactly as before (auto-apply has no review gate); the issues ride on the
+ * applied mapping so the concern is visible. ONE home, called by BOTH apply
+ * lanes (auto `runCoverageEngine` + external `applyExternalCoverageMappings`).
+ */
+export function flagMappingIssues(mapping: ProposedMapping, test?: MappingTestSource): string[] {
+  const issues: string[] = []
+  if (mapping.confidence !== undefined && mapping.confidence < 0.5) {
+    issues.push(`low confidence (${mapping.confidence.toFixed(2)})`)
+  }
+  if (!test) return issues // no readable source → only the confidence check
+  const snippets = [...test.assertions, test.bodySource]
+  if (mapping.pathTypes?.includes('sad') && !hasNegativeAssertion(snippets)) {
+    issues.push('@path-sad claimed but test has no negative assertion (toThrow/rejects/.not/error-status)')
+  }
+  const source = snippets.join('\n').toLowerCase()
+  for (const v of mapping.variants ?? []) {
+    if (!source.includes(v.toLowerCase())) {
+      issues.push(`@variant-${v} claimed but '${v}' not found in test source`)
+    }
+  }
+  return issues
+}
+
 /** Test seam: inject a fake mapper so unit tests don't spawn a real agent
  *  (production always uses the real, agent-backed `proposeCoverageMappings`). */
 export interface RunCoverageEngineDeps {
@@ -303,11 +354,18 @@ export async function runCoverageEngine(
   // echo its path), so backfill `file` by name from the engine's orphan inputs —
   // without this the entire agentic mapping path is a no-op at tag-writing.
   const fileByTestName = new Map(engineInputs.map((t) => [t.name, t.file]))
+  const sourceByTestName = new Map<string, MappingTestSource>(
+    engineInputs.map((t) => [t.name, { assertions: t.assertions ?? [], bodySource: t.bodySource ?? '' }]),
+  )
   const applied: ProposedMapping[] = []
   for (const m of proposals) {
     const file = m.file ?? fileByTestName.get(m.testName)
     if (!file) continue
-    if (applyTagToFile(featureDir, file, m.testName, m.requirements, m.pathTypes, m.variants)) applied.push({ ...m, file })
+    if (applyTagToFile(featureDir, file, m.testName, m.requirements, m.pathTypes, m.variants)) {
+      // FLAG, don't drop: suspicious claims still apply, but carry `issues`.
+      const issues = flagMappingIssues(m, sourceByTestName.get(m.testName))
+      applied.push({ ...m, file, ...(issues.length ? { issues } : {}) })
+    }
   }
 
   // Record the requirements set the engine just ran against — coverage drops to
@@ -409,6 +467,9 @@ export function applyExternalCoverageMappings(args: ApplyExternalCoverageArgs): 
 
   const { collected } = collectTests(featureDir)
   const fileByTestName = new Map(collected.map((c) => [c.input.name, c.input.file]))
+  const sourceByTestName = new Map<string, MappingTestSource>(
+    collected.map((c) => [c.input.name, { assertions: [...c.assertions], bodySource: c.bodySource }]),
+  )
   // Controlled vocabulary: drop variant claims outside the feature's dimension.
   const knownVariants = new Set(summary?.variantDimension?.values ?? [])
 
@@ -422,7 +483,11 @@ export function applyExternalCoverageMappings(args: ApplyExternalCoverageArgs): 
       .map((v) => v.trim().toLowerCase())
       .filter((v) => knownVariants.has(v))
     if (applyTagToFile(featureDir, file, m.testName, requirementsFiltered, m.pathTypes, variantsFiltered)) {
-      applied.push({ ...m, requirements: requirementsFiltered, variants: variantsFiltered.length ? variantsFiltered : undefined, file })
+      const appliedMapping: ProposedMapping = { ...m, requirements: requirementsFiltered, variants: variantsFiltered.length ? variantsFiltered : undefined, file }
+      // FLAG, don't drop: same shared validator as the auto lane, run against
+      // the mapping as actually applied (post vocabulary filtering).
+      const issues = flagMappingIssues(appliedMapping, sourceByTestName.get(m.testName))
+      applied.push(issues.length ? { ...appliedMapping, issues } : appliedMapping)
     }
   }
 

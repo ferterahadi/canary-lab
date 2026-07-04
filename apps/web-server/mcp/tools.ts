@@ -813,7 +813,7 @@ export function registerCanaryLabTools(
 
   registerTool('get_feature_coverage', {
     description:
-      'Get the Semantic Coverage Ledger: PRD requirements → mapped tests → gap type (untested / path-incomplete / covered) with a coverage % (covered ÷ total declared paths) and mapped % (requirements with ≥1 test), per-test strength (strong/solid/basic/shallow from assertion tiers), and docs-drift. DECOUPLED from test runs — measures test→requirement+path mapping, never whether a run passed. Use it to find untested/path-incomplete requirements and shallow tests. When the ledger is BLOCKED (state.coverage:"blocked") it carries a `next:` field with the recovery step; if it says no source doc exists, ASK THE USER to attach/paste the PRD in chat (never invent or pull one) before generating.',
+      'Get the Semantic Coverage Ledger: PRD requirements → mapped tests → gap type (untested / path-incomplete / covered) with a coverage % (covered ÷ total declared paths) and mapped % (requirements with ≥1 test), per-test strength (strong/solid/basic/shallow from assertion tiers), and docs-drift. coveragePct is claim-based — a tag claims the test→requirement+path mapping, regardless of run results. When the feature has a recorded run the ledger ALSO carries an additive proven axis (provenPct, totals.proven, per-requirement/path proven, provenRunId): covered = a tag claims it; proven = the covering test actually passed in the latest run. These fields are omitted when no run is recorded. Use it to find untested/path-incomplete requirements and shallow tests. When the ledger is BLOCKED (state.coverage:"blocked") it carries a `next:` field with the recovery step; if it says no source doc exists, ASK THE USER to attach/paste the PRD in chat (never invent or pull one) before generating.',
     inputSchema: { feature: z.string().describe('Existing feature name (from list_features).') },
   }, async ({ feature }) => {
     try {
@@ -1013,14 +1013,20 @@ export function registerCanaryLabTools(
         },
         { store: new CoverageJobRunStore(deps.store.logsDir), workspaceEvents: deps.workspaceEvents },
       )
+      // Deterministic validation flags mappings (still applied — no review gate);
+      // surface only a count here, token-cheap. Details ride on each applied
+      // mapping's `issues` (flagMappingIssues in the coverage service).
+      const flagged = result.applied.filter((m) => m.issues?.length).length
       return asJsonResult({
         jobId: manifest.jobId,
         feature: manifest.feature,
         status: manifest.status,
         applied: result.applied.length,
+        ...(flagged ? { flagged } : {}),
         coveragePct: result.ledger.coveragePct,
+        ...(result.ledger.provenPct !== undefined ? { provenPct: result.ledger.provenPct } : {}),
         nextSteps: ['get_feature_coverage'],
-        next: `Wrote ${result.applied.length} covers tag(s). Call get_feature_coverage("${manifest.feature}") for the updated ledger.`,
+        next: `Wrote ${result.applied.length} covers tag(s)${flagged ? ` (${flagged} flagged by deterministic validation — sad-path/variant claims not evidenced in the test source)` : ''}. Call get_feature_coverage("${manifest.feature}") for the updated ledger.`,
       })
     } catch (err) {
       if (err instanceof FeatureNotFoundError) return errorResult(err.message)

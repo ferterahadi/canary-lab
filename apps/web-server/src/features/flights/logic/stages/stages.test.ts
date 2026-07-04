@@ -8,7 +8,7 @@ import { scaffoldStage } from './scaffold'
 import { envCaptureStage } from './env-capture'
 import { docsStage } from './docs'
 import { prdSummaryStage } from './prd-summary'
-import { specsCoverageStage } from './specs-coverage'
+import { buildSpecsPrompt, specsCoverageStage } from './specs-coverage'
 import { portifyStage } from './portify'
 import { runStage, healStage } from './run'
 import { evaluationExportStage } from './evaluation-export'
@@ -408,11 +408,25 @@ describe('specs-coverage stage', () => {
     )
   })
 
+  // The agent edits <featureDir>/e2e/*.spec.ts in place — the mock spawn
+  // writes to disk like the real agent's Write tool would.
+  function writingSpawnAgent(prompts: string[], content = SPEC): FlightStageDeps['spawnAgent'] {
+    return async (opts) => {
+      prompts.push(opts.prompt)
+      const e2eDir = path.join(featuresDir, 'checkout', 'e2e')
+      fs.mkdirSync(e2eDir, { recursive: true })
+      fs.writeFileSync(path.join(e2eDir, 'checkout.spec.ts'), content)
+      return { text: 'rewrote e2e/checkout.spec.ts' }
+    }
+  }
+
   it('loops author→map until the harness-computed ledger meets the target', async () => {
     const ledgers = [ledger(0), ledger(100)]
     let engineRuns = 0
+    const prompts: string[] = []
     const d = deps({
-      spawnAgent: async () => ({ text: '```json\n' + JSON.stringify({ files: [{ path: 'e2e/checkout.spec.ts', content: SPEC }] }) + '\n```' }),
+      spawnAgent: writingSpawnAgent(prompts),
+      validateSpecs: async () => ({ ok: true }),
       coverage: {
         compute: (() => ledgers.shift() ?? ledger(100)) as never,
         runEngine: (async () => { engineRuns += 1; return {} as never }) as never,
@@ -422,11 +436,15 @@ describe('specs-coverage stage', () => {
     expect(outcome).toMatchObject({ kind: 'done', evidence: { coveragePct: 100 } })
     expect(engineRuns).toBe(1)
     expect(fs.readFileSync(path.join(featuresDir, 'checkout', 'e2e', 'checkout.spec.ts'), 'utf-8')).toBe(SPEC)
+    // Edit-in-place contract: absolute feature dir in the prompt, no inlined specs.
+    expect(prompts[0]).toContain(path.join(featuresDir, 'checkout'))
+    expect(prompts[0]).not.toContain('{{')
   })
 
   it('parks on coverage-stuck at the iteration bound and accept-partial settles with the ledger recorded', async () => {
     const d = deps({
-      spawnAgent: async () => ({ text: '```json\n' + JSON.stringify({ files: [{ path: 'e2e/checkout.spec.ts', content: SPEC }] }) + '\n```' }),
+      spawnAgent: writingSpawnAgent([]),
+      validateSpecs: async () => ({ ok: true }),
       coverage: {
         compute: (() => ledger(0)) as never,
         runEngine: (async () => ({}) as never) as never,
@@ -440,6 +458,82 @@ describe('specs-coverage stage', () => {
     setStage('specs-coverage', { status: 'waiting-for-approval', checkpoint: parked.checkpoint })
     const outcome = await adapter.onCheckpointResponse!(ctx, { choice: 'accept-partial' })
     expect(outcome).toMatchObject({ kind: 'done', evidence: { acceptedPartial: true, coveragePct: 0 } })
+  })
+
+  it('rejects structurally invalid on-disk specs and feeds the apply error into the next prompt', async () => {
+    const badSpec = "import { test, expect } from '@playwright/test'\n\ntest('x', async () => {})\n"
+    let engineRuns = 0
+    let validations = 0
+    const prompts: string[] = []
+    const d = deps({
+      spawnAgent: writingSpawnAgent(prompts, badSpec),
+      validateSpecs: async () => { validations += 1; return { ok: true } },
+      coverage: {
+        compute: (() => ledger(0)) as never,
+        runEngine: (async () => { engineRuns += 1; return {} as never }) as never,
+      },
+    })
+    const parked = await specsCoverageStage(d).run(ctxFor(manifest()).ctx)
+    expect(parked).toMatchObject({ kind: 'checkpoint', checkpoint: { kind: 'coverage-stuck' } })
+    expect(engineRuns).toBe(0)
+    expect(validations).toBe(0)
+    expect(prompts).toHaveLength(5)
+    expect(prompts[0]).not.toContain('failed to compile/list')
+    expect(prompts[1]).toContain('failed to compile/list')
+    expect(prompts[1]).toContain('must import')
+  })
+
+  it('feeds dry-run validation errors into the next iteration and skips mapping for broken specs', async () => {
+    const ledgers = [ledger(0), ledger(0), ledger(100)]
+    let engineRuns = 0
+    const prompts: string[] = []
+    const validations: Array<{ featureDir: string; projectRoot: string }> = []
+    const d = deps({
+      spawnAgent: writingSpawnAgent(prompts),
+      validateSpecs: async (args) => {
+        validations.push(args)
+        if (validations.length === 1) return { ok: false, errors: 'e2e/checkout.spec.ts(3,1): error TS2304: Cannot find name' }
+        return { ok: true }
+      },
+      coverage: {
+        compute: (() => ledgers.shift() ?? ledger(100)) as never,
+        runEngine: (async () => { engineRuns += 1; return {} as never }) as never,
+      },
+    })
+    const outcome = await specsCoverageStage(d).run(ctxFor(manifest()).ctx)
+    expect(outcome).toMatchObject({ kind: 'done', evidence: { coveragePct: 100 } })
+    // Iteration 1 failed the dry-run: no mapping agent spent, errors fed forward.
+    expect(engineRuns).toBe(1)
+    expect(validations).toHaveLength(2)
+    expect(validations[0]).toEqual({ featureDir: path.join(featuresDir, 'checkout'), projectRoot: tmpDir })
+    expect(prompts[0]).not.toContain('failed to compile/list')
+    expect(prompts[1]).toContain('failed to compile/list')
+    expect(prompts[1]).toContain('error TS2304')
+    // The clean second iteration cleared the carry-over: no third spawn needed.
+    expect(prompts).toHaveLength(2)
+  })
+
+  it('buildSpecsPrompt renders the edit-in-place contract and caps injected validation errors', () => {
+    const base = {
+      feature: 'checkout',
+      description: 'checkout flow',
+      configPath: '/abs/features/checkout/feature.config.cjs',
+      requirements: [{ id: 'R1' }],
+      gaps: [{ id: 'R1', title: 't', gap: 'untested' }],
+      featureDir: '/abs/features/checkout',
+      iteration: 1,
+    }
+    const clean = buildSpecsPrompt(base)
+    expect(clean).toContain('/abs/features/checkout/e2e')
+    expect(clean).toContain('Do NOT reply with JSON')
+    expect(clean).not.toContain('failed to compile/list')
+    expect(clean).not.toContain('{{')
+
+    const huge = 'x'.repeat(5000) + 'OVERFLOW-MARKER'
+    const withErrors = buildSpecsPrompt({ ...base, iteration: 2, validationErrors: huge })
+    expect(withErrors).toContain('failed to compile/list')
+    expect(withErrors).toContain('xxxx')
+    expect(withErrors).not.toContain('OVERFLOW-MARKER')
   })
 })
 

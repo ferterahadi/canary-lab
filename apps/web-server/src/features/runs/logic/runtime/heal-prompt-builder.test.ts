@@ -90,6 +90,53 @@ describe('buildHealAddendum', () => {
     expect(addendum).not.toContain('Skip hypotheses already tried')
   })
 
+  it('injects the classified prior-iteration outcome into the cycle line on cycle ≥ 2', () => {
+    fs.mkdirSync(logsDir, { recursive: true })
+    fs.writeFileSync(journalPath, [
+      '## Iteration 1 — t1',
+      '',
+      '- hypothesis: first try',
+      '- signal: .restart',
+      '- outcome: no_change',
+      '',
+    ].join('\n'))
+
+    const addendum = buildHealAddendum({ cycle: 2 })
+
+    expect(addendum).toContain('Prior fix outcome: no_change — your previous fix did not change the failing set.')
+  })
+
+  it('steers toward a revert when the prior outcome was a regression', () => {
+    fs.mkdirSync(logsDir, { recursive: true })
+    fs.writeFileSync(journalPath, [
+      '## Iteration 1 — t1',
+      '',
+      '- hypothesis: first try',
+      '- outcome: regression',
+      '',
+    ].join('\n'))
+
+    const addendum = buildHealAddendum({ cycle: 2 })
+
+    expect(addendum).toContain('Prior fix outcome: regression')
+    expect(addendum).toContain('consider reverting')
+  })
+
+  it('emits no prior-outcome line when the outcome is still pending or on cycle 1', () => {
+    fs.mkdirSync(logsDir, { recursive: true })
+    fs.writeFileSync(journalPath, [
+      '## Iteration 1 — t1',
+      '',
+      '- hypothesis: first try',
+      '- outcome: pending',
+      '',
+    ].join('\n'))
+
+    expect(buildHealAddendum({ cycle: 2 })).not.toContain('Prior fix outcome:')
+    fs.writeFileSync(journalPath, '## Iteration 1 — t1\n\n- outcome: no_change\n')
+    expect(buildHealAddendum({ cycle: 1 })).not.toContain('Prior fix outcome:')
+  })
+
   it('uses the service-mode hard rule by default (no mode supplied)', () => {
     const addendum = buildHealAddendum({ cycle: 1 })
     expect(addendum).toContain('Do NOT Read the test spec file')
@@ -182,7 +229,7 @@ describe('buildHealAddendum', () => {
         consecutiveSameFailures: 3,
         failedDir,
       })
-      expect(addendum).toContain('Escalation: this is cycle 3 with the same failing set (test-a, test-b).')
+      expect(addendum).toContain('Escalation: cycle 3 — these tests have now failed 3 times in a row despite 2 fix attempts: test-a, test-b.')
       expect(addendum).toContain('change tactic, not double down')
       // Specific tactical bullets are present.
       expect(addendum).toContain('trace usually shows the real failure mode')

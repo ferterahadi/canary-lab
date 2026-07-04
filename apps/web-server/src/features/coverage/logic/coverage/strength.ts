@@ -51,6 +51,28 @@ export function classifyAssertionTier(snippet: string): ClassifiedTier {
   return 'unknown'
 }
 
+/**
+ * True when any snippet checks a NEGATIVE outcome — a throw/rejection, a `.not.`
+ * assertion, an error type/text, a try/catch around the action, or an HTTP
+ * error-status check. Used by the coverage mapping validator to sanity-check
+ * `@path-sad` claims. A reasonable case-insensitive heuristic — deliberately
+ * not over-fit; classifies, never opines.
+ */
+export function hasNegativeAssertion(assertions: string[]): boolean {
+  return assertions.some((raw) => {
+    const s = raw.toLowerCase()
+    // Throw / rejection / falsy matchers.
+    if (/\.tothrow|\.rejects\b|\.tobefalsy/.test(s)) return true
+    // Negated assertion: expect(...).not.…
+    if (/\)\s*\.not\./.test(s)) return true
+    // try/catch around the failing action, or an Error type / error locator/text.
+    if (/\bcatch\b|\berror\b/.test(s)) return true
+    // HTTP error-status check: a 4xx/5xx literal or a >= 400 comparison near "status".
+    if (/\bstatus\b/.test(s) && (/\b[45]\d{2}\b/.test(s) || />=\s*400/.test(s))) return true
+    return false
+  })
+}
+
 export function classifyAssertions(snippets: string[]): ClassifiedAssertion[] {
   return snippets.map((snippet) => ({ snippet, tier: classifyAssertionTier(snippet) }))
 }

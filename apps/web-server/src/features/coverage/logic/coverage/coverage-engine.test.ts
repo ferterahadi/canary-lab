@@ -6,7 +6,9 @@ import {
   runCoverageEngine as runCoverageEngineReal,
   regeneratePrdSummary as regeneratePrdSummaryReal,
   computeFeatureCoverage,
+  flagMappingIssues,
 } from './service'
+import type { ProposedMapping } from '../../../../../../../shared/coverage/types'
 import { CoverageJobRunStore } from './jobs/store'
 import { fakeSummarize, fakePropose } from './__fixtures__/fake-coverage-agents'
 
@@ -75,6 +77,69 @@ describe('runCoverageEngine — auto mode', () => {
     // The recomputed ledger sees the test as annotated, no longer an orphan.
     expect(res.ledger.orphanTestNames).not.toContain('create makes a new todo item')
     expect(res.ledger.requirements[0].annotatedTestNames).toContain('create makes a new todo item')
+  })
+})
+
+describe('flagMappingIssues — deterministic claim validation (flag, never drop)', () => {
+  const mapping = (over: Partial<ProposedMapping>): ProposedMapping => ({
+    testName: 't', requirements: ['R1'], source: 'agent', ...over,
+  })
+  const src = (bodySource: string, assertions: string[] = []) => ({ assertions, bodySource })
+
+  it('flags low confidence only when confidence is set and < 0.5', () => {
+    expect(flagMappingIssues(mapping({ confidence: 0.3 }), src('await page.goto("/")'))).toEqual(['low confidence (0.30)'])
+    expect(flagMappingIssues(mapping({ confidence: 0.5 }), src('await page.goto("/")'))).toEqual([])
+    // Agent lane sets no confidence → the gate never fires.
+    expect(flagMappingIssues(mapping({}), src('await page.goto("/")'))).toEqual([])
+  })
+
+  it('flags a @path-sad claim when the test has no negative assertion', () => {
+    const issues = flagMappingIssues(mapping({ pathTypes: ['sad'] }), src('await page.goto("/")', ['expect(total).toBe(42)']))
+    expect(issues).toEqual(['@path-sad claimed but test has no negative assertion (toThrow/rejects/.not/error-status)'])
+  })
+
+  it('accepts a @path-sad claim evidenced in the assertions OR the body source', () => {
+    expect(flagMappingIssues(mapping({ pathTypes: ['sad'] }), src('await go()', ['await expect(fn()).rejects.toThrow()']))).toEqual([])
+    expect(flagMappingIssues(mapping({ pathTypes: ['sad'] }), src('try { await go() } catch (e) { caught = e }'))).toEqual([])
+  })
+
+  it('flags each variant token absent from the test source (case-insensitive)', () => {
+    const issues = flagMappingIssues(mapping({ variants: ['email', 'sms'] }), src('await sendEmail()'))
+    expect(issues).toEqual(["@variant-sms claimed but 'sms' not found in test source"])
+  })
+
+  it('returns no issues for a clean mapping', () => {
+    expect(flagMappingIssues(mapping({ pathTypes: ['happy'] }), src('await page.goto("/")'))).toEqual([])
+  })
+
+  it('runs only the confidence check when the test source is unknown', () => {
+    expect(flagMappingIssues(mapping({ confidence: 0.1, pathTypes: ['sad'], variants: ['email'] }))).toEqual(['low confidence (0.10)'])
+  })
+})
+
+describe('runCoverageEngine — flagged mappings still apply (issues channel)', () => {
+  it('writes the tag AND attaches issues when @path-sad has no negative assertion', async () => {
+    const dir = writeFeature('checkout')
+    await seedSummary('checkout')
+    const res = await runCoverageEngineReal(
+      { featuresDir, logsDir, feature: 'checkout' },
+      { propose: async () => [{ testName: 'create makes a new todo item', requirements: ['R1'], pathTypes: ['sad'], source: 'agent' }] },
+    )
+    expect(res.applied).toHaveLength(1)
+    expect(res.applied[0].issues).toEqual(['@path-sad claimed but test has no negative assertion (toThrow/rejects/.not/error-status)'])
+    // Flagged, NOT dropped — the tag is still written exactly as before.
+    const spec = fs.readFileSync(path.join(dir, 'e2e', 'a.spec.ts'), 'utf-8')
+    expect(spec).toContain('@req-R1')
+    expect(spec).toContain('@path-sad')
+  })
+
+  it('attaches no issues field for a clean mapping (fake lane: happy path, confidence ≥ 0.5)', async () => {
+    writeFeature('checkout')
+    await seedSummary('checkout')
+    const res = await runCoverageEngine({ featuresDir, logsDir, feature: 'checkout' })
+    const m = res.applied.find((m) => m.testName === 'create makes a new todo item')
+    expect(m).toBeTruthy()
+    expect(m!.issues).toBeUndefined()
   })
 })
 

@@ -1,0 +1,74 @@
+import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import fs from 'fs'
+import os from 'os'
+import path from 'path'
+import { readLatestRunOutcomes, lastRunOutcomeForTitle } from './run-outcomes'
+
+let logsDir: string
+
+beforeEach(() => {
+  logsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-ro-')))
+})
+
+afterEach(() => {
+  fs.rmSync(logsDir, { recursive: true, force: true })
+})
+
+function seedIndex(entries: Array<{ runId: string; feature: string; startedAt: string }>): void {
+  fs.mkdirSync(path.join(logsDir, 'runs'), { recursive: true })
+  fs.writeFileSync(
+    path.join(logsDir, 'runs', 'index.json'),
+    JSON.stringify(entries.map((e) => ({ ...e, status: 'failed' }))),
+  )
+}
+
+function seedSummary(runId: string, summary: unknown): void {
+  const dir = path.join(logsDir, 'runs', runId)
+  fs.mkdirSync(dir, { recursive: true })
+  fs.writeFileSync(path.join(dir, 'e2e-summary.json'), JSON.stringify(summary))
+}
+
+describe('readLatestRunOutcomes', () => {
+  it('returns null when the feature has no recorded runs', () => {
+    seedIndex([{ runId: 'r1', feature: 'other', startedAt: '2026-01-01T00:00:00Z' }])
+    expect(readLatestRunOutcomes(logsDir, 'demo')).toBeNull()
+  })
+
+  it('reads the newest run of the feature by startedAt', () => {
+    seedIndex([
+      { runId: 'r-old', feature: 'demo', startedAt: '2026-01-01T00:00:00Z' },
+      { runId: 'r-new', feature: 'demo', startedAt: '2026-01-02T00:00:00Z' },
+    ])
+    seedSummary('r-old', { passedNames: ['test-case-a'], failed: [] })
+    seedSummary('r-new', { passedNames: [], failed: [{ name: 'test-case-a' }] })
+    const outcomes = readLatestRunOutcomes(logsDir, 'demo')
+    expect(outcomes?.runId).toBe('r-new')
+    expect(outcomes?.failed.has('test-case-a')).toBe(true)
+  })
+
+  it('falls back to an older run when the newest has no readable summary', () => {
+    seedIndex([
+      { runId: 'r-old', feature: 'demo', startedAt: '2026-01-01T00:00:00Z' },
+      { runId: 'r-new', feature: 'demo', startedAt: '2026-01-02T00:00:00Z' },
+    ])
+    seedSummary('r-old', { passedNames: ['test-case-a'], failed: [] })
+    const outcomes = readLatestRunOutcomes(logsDir, 'demo')
+    expect(outcomes?.runId).toBe('r-old')
+    expect(outcomes?.passed.has('test-case-a')).toBe(true)
+  })
+})
+
+describe('lastRunOutcomeForTitle', () => {
+  it('joins a spec test title to the summary slug convention', () => {
+    const outcomes = {
+      runId: 'r1',
+      passed: new Set(['test-case-user-can-log-in']),
+      failed: new Set(['test-case-checkout-declines-invalid-card']),
+    }
+    expect(lastRunOutcomeForTitle(outcomes, 'User can log in!'))
+      .toEqual({ runId: 'r1', passed: true })
+    expect(lastRunOutcomeForTitle(outcomes, 'Checkout declines invalid card'))
+      .toEqual({ runId: 'r1', passed: false })
+    expect(lastRunOutcomeForTitle(outcomes, 'Brand new test')).toBeUndefined()
+  })
+})

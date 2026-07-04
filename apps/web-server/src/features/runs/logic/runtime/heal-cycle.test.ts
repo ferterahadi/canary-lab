@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { HealCycleState, AUTO_HEAL_MAX_CYCLES } from './heal-cycle'
+import { HealCycleState, AUTO_HEAL_MAX_CYCLES, DEFAULT_NO_PROGRESS_LIMIT } from './heal-cycle'
 
 describe('HealCycleState.observeFailures', () => {
   it('returns shouldHeal=false when slug list is empty', () => {
@@ -21,25 +21,55 @@ describe('HealCycleState.observeFailures', () => {
     expect(s.observeFailures(['c'])).toEqual({ shouldHeal: false, reason: 'max-cycles' })
   })
 
-  it('does not cap cycles by default', () => {
-    expect(AUTO_HEAL_MAX_CYCLES).toBe(Number.POSITIVE_INFINITY)
+  it('caps cycles at a finite default', () => {
+    expect(AUTO_HEAL_MAX_CYCLES).toBe(10)
     const s = new HealCycleState()
-    for (let i = 0; i < 20; i++) {
+    // Distinct failure sets each cycle so the no-progress guard never trips —
+    // only the cycle cap should end the loop.
+    for (let i = 0; i < AUTO_HEAL_MAX_CYCLES; i++) {
       expect(s.observeFailures([`sig-${i}`]).shouldHeal).toBe(true)
       s.beginCycle()
     }
-    expect(s.observeFailures(['again']).shouldHeal).toBe(true)
+    expect(s.observeFailures(['again'])).toEqual({ shouldHeal: false, reason: 'max-cycles' })
   })
 
-  it('detects no-progress when same signature repeats past the cap', () => {
-    // maxCycles is high so the cycle counter doesn't trip first; we simulate
-    // the consecutive-failure check directly by NOT incrementing the cycle
-    // between observations (i.e. multiple observations within one cycle).
+  it('detects no-progress when the same signature repeats past the limit', () => {
+    // maxCycles is high so the cycle counter doesn't trip first. The default
+    // no-progress limit is min(maxCycles, DEFAULT_NO_PROGRESS_LIMIT): that
+    // many consecutive identical observations still heal; the next gives up.
     const s = new HealCycleState({ maxCycles: 100 })
-    for (let i = 0; i < 100; i++) {
+    for (let i = 0; i < DEFAULT_NO_PROGRESS_LIMIT; i++) {
       expect(s.observeFailures(['same']).shouldHeal).toBe(true)
     }
     expect(s.observeFailures(['same'])).toEqual({ shouldHeal: false, reason: 'no-progress' })
+  })
+
+  it('honors an explicit noProgressLimit', () => {
+    const s = new HealCycleState({ maxCycles: 100, noProgressLimit: 2 })
+    expect(s.observeFailures(['same']).shouldHeal).toBe(true)
+    expect(s.observeFailures(['same']).shouldHeal).toBe(true)
+    expect(s.observeFailures(['same'])).toEqual({ shouldHeal: false, reason: 'no-progress' })
+  })
+
+  it('tracks per-slug streaks that survive set churn', () => {
+    const s = new HealCycleState({ maxCycles: 100 })
+    s.observeFailures(['a', 'b', 'flaky'])
+    s.observeFailures(['a', 'b'])          // flaky recovered — set signature changed
+    s.observeFailures(['a', 'b', 'other']) // a new test joined — signature changed again
+    // Set-identity streak reset each time…
+    expect(s.snapshot().consecutiveSameFailures).toBe(1)
+    // …but a and b have failed 3 observations in a row: stuck.
+    expect(s.stuckSlugs(3)).toEqual(['a', 'b'])
+    expect(s.snapshot().maxSlugStreak).toBe(3)
+  })
+
+  it('resets a per-slug streak when the test recovers and later fails again', () => {
+    const s = new HealCycleState({ maxCycles: 100 })
+    s.observeFailures(['a', 'b'])
+    s.observeFailures(['b'])       // a recovered
+    s.observeFailures(['a', 'b'])  // a is back — streak restarts at 1
+    expect(s.stuckSlugs(3)).toEqual(['b'])
+    expect(s.snapshot().maxSlugStreak).toBe(3)
   })
 
   it('resets streak when failure set changes', () => {

@@ -307,3 +307,79 @@ describe('computeCoverageLedger — variant axis', () => {
     expect(r.variantCoverage).toBeUndefined()
   })
 })
+
+describe('computeCoverageLedger — proven axis (latest-run join)', () => {
+  it('omits every proven field when no provenRunId is supplied (claim-only view)', () => {
+    const requirements = [req('R1', ['happy'])]
+    const tests: CoverageTestInput[] = [{ name: 't', requirements: ['R1'], pathTypes: ['happy'] }]
+    const ledger = computeCoverageLedger({ feature: 'f', requirements, tests })
+    expect(ledger.provenPct).toBeUndefined()
+    expect(ledger.provenRunId).toBeUndefined()
+    expect(ledger.totals.proven).toBeUndefined()
+    expect(ledger.requirements[0].proven).toBeUndefined()
+    expect(ledger.requirements[0].pathCoverage[0].proven).toBeUndefined()
+  })
+
+  it('marks a covered requirement proven when every path is claimed by a passing test', () => {
+    const requirements = [req('R1', ['happy', 'sad'])]
+    const tests: CoverageTestInput[] = [
+      { name: 'ok', requirements: ['R1'], pathTypes: ['happy', 'sad'], lastRun: { runId: 'r9', passed: true } },
+    ]
+    const ledger = computeCoverageLedger({ feature: 'f', requirements, tests, provenRunId: 'r9' })
+    const r = ledger.requirements[0]
+    expect(r.gapType).toBe('covered')
+    expect(r.proven).toBe(true)
+    expect(r.pathCoverage.every((p) => p.proven)).toBe(true)
+    expect(ledger.totals.proven).toBe(1)
+    expect(ledger.provenPct).toBe(100)
+    expect(ledger.provenRunId).toBe('r9')
+  })
+
+  it('a covered requirement backed only by a FAILING test stays covered but unproven', () => {
+    const requirements = [req('R1', ['happy'])]
+    const tests: CoverageTestInput[] = [
+      { name: 'fails', requirements: ['R1'], pathTypes: ['happy'], lastRun: { runId: 'r9', passed: false } },
+    ]
+    const ledger = computeCoverageLedger({ feature: 'f', requirements, tests, provenRunId: 'r9' })
+    const r = ledger.requirements[0]
+    expect(r.gapType).toBe('covered')      // claim math untouched
+    expect(ledger.coveragePct).toBe(100)   // headline untouched
+    expect(r.proven).toBe(false)
+    expect(ledger.provenPct).toBe(0)
+  })
+
+  it('a test that never ran (no lastRun) claims but never proves', () => {
+    const requirements = [req('R1', ['happy'])]
+    const tests: CoverageTestInput[] = [{ name: 'new-test', requirements: ['R1'], pathTypes: ['happy'] }]
+    const ledger = computeCoverageLedger({ feature: 'f', requirements, tests, provenRunId: 'r9' })
+    expect(ledger.requirements[0].proven).toBe(false)
+    expect(ledger.requirements[0].pathCoverage[0].proven).toBe(false)
+  })
+
+  it('variant cells are proven per (path × variant) claim by a passing test', () => {
+    const requirements = [req('R1', ['happy'], { variants: ['email', 'sms'] })]
+    const tests: CoverageTestInput[] = [
+      { name: 'email-ok', requirements: ['R1'], pathTypes: ['happy'], variants: ['email'], lastRun: { runId: 'r9', passed: true } },
+      { name: 'sms-flaky', requirements: ['R1'], pathTypes: ['happy'], variants: ['sms'], lastRun: { runId: 'r9', passed: false } },
+    ]
+    const ledger = computeCoverageLedger({ feature: 'f', requirements, tests, provenRunId: 'r9' })
+    const r = ledger.requirements[0]
+    expect(r.gapType).toBe('covered')
+    const cells = r.variantCoverage ?? []
+    expect(cells.find((c) => c.variant === 'email')?.proven).toBe(true)
+    expect(cells.find((c) => c.variant === 'sms')?.proven).toBe(false)
+    expect(r.proven).toBe(false) // one applicable cell unproven
+  })
+
+  it('an unproven requirement never counts toward totals.proven even when covered', () => {
+    const requirements = [req('R1', ['happy']), req('R2', ['happy'])]
+    const tests: CoverageTestInput[] = [
+      { name: 'a', requirements: ['R1'], pathTypes: ['happy'], lastRun: { runId: 'r9', passed: true } },
+      { name: 'b', requirements: ['R2'], pathTypes: ['happy'], lastRun: { runId: 'r9', passed: false } },
+    ]
+    const ledger = computeCoverageLedger({ feature: 'f', requirements, tests, provenRunId: 'r9' })
+    expect(ledger.coveragePct).toBe(100)
+    expect(ledger.totals.proven).toBe(1)
+    expect(ledger.provenPct).toBe(50)
+  })
+})

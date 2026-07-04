@@ -263,6 +263,55 @@ describe('applyExternalCoverageMappings — null summary and edge cases', () => 
   })
 })
 
+describe('applyExternalCoverageMappings — deterministic validation flags (issues channel)', () => {
+  it('still applies a flagged @path-sad mapping, attaching issues (flag, never drop)', async () => {
+    const dir = writeFeature('checkout')
+    await regeneratePrdSummary({ featuresDir, feature: 'checkout', now: '2026-01-01T00:00:00Z' })
+    const result = applyExternalCoverageMappings({
+      featuresDir, logsDir, feature: 'checkout',
+      // 'shared' has no negative assertion → the sad claim is suspicious.
+      mappings: [{ testName: 'shared', requirements: ['R1'], pathTypes: ['sad'], source: 'agent' }],
+      now: '2026-01-01T00:00:00Z',
+    })
+    expect(result.applied).toHaveLength(1)
+    expect(result.applied[0].issues).toEqual(['@path-sad claimed but test has no negative assertion (toThrow/rejects/.not/error-status)'])
+    // The tag is still written exactly as before — flagging changes nothing else.
+    const spec = fs.readFileSync(path.join(dir, 'e2e', 'a.spec.ts'), 'utf-8')
+    expect(spec).toContain('@req-R1')
+    expect(spec).toContain('@path-sad')
+  })
+
+  it('flags a variant claim whose value never appears in the test source', async () => {
+    const dir = writeFeature('checkout')
+    fs.writeFileSync(path.join(dir, 'docs', '_prd-summary.json'), JSON.stringify({
+      requirements: [{ id: 'R1', title: 'Create', text: 'user can create', pathTypes: ['happy'] }],
+      variantDimension: { name: 'channel', values: ['email', 'sms'] },
+      docsHash: 'h', sourceDocs: [], generatedAt: '2026-01-01T00:00:00Z',
+    }))
+    const result = applyExternalCoverageMappings({
+      featuresDir, logsDir, feature: 'checkout',
+      // Body is `async () => {}` — 'email' appears nowhere in it.
+      mappings: [{ testName: 'shared', requirements: ['R1'], variants: ['email'], source: 'agent' }],
+      now: '2026-01-01T00:00:00Z',
+    })
+    expect(result.applied).toHaveLength(1)
+    expect(result.applied[0].issues).toEqual(["@variant-email claimed but 'email' not found in test source"])
+    expect(fs.readFileSync(path.join(dir, 'e2e', 'a.spec.ts'), 'utf-8')).toContain('@variant-email')
+  })
+
+  it('attaches no issues field for a clean mapping', async () => {
+    writeFeature('checkout')
+    await regeneratePrdSummary({ featuresDir, feature: 'checkout', now: '2026-01-01T00:00:00Z' })
+    const result = applyExternalCoverageMappings({
+      featuresDir, logsDir, feature: 'checkout',
+      mappings: [{ testName: 'shared', requirements: ['R1'], pathTypes: ['happy'], source: 'agent' }],
+      now: '2026-01-01T00:00:00Z',
+    })
+    expect(result.applied).toHaveLength(1)
+    expect(result.applied[0].issues).toBeUndefined()
+  })
+})
+
 describe('collectTests — duplicate name merge (service.ts unionList)', () => {
   it('keeps existing requirements unchanged when duplicate has none (unionList b=undefined path)', async () => {
     // a.spec.ts returns requirements=['R1']; b.spec.ts returns no requirements.
