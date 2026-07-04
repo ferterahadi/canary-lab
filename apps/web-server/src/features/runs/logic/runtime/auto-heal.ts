@@ -4,6 +4,7 @@ import { buildHealAddendum, type HealMode } from './heal-prompt-builder'
 import { readManifest } from './manifest'
 import { buildRunPaths } from './run-paths'
 import { renderPersonalWikiMap } from '../../../../../../../shared/runtime/personal-wiki'
+import { promptPath, loadPromptTemplate, renderPromptTemplate } from '../../../../shared/prompts'
 import { HEAL_MODELS } from '../../../agent-sessions/logic/agent-models'
 import {
   resolveAgentBinary,
@@ -50,7 +51,7 @@ export function readPriorSessionId(sessionIdPath: string): string | null {
   return readPriorSessionIdFromValue(raw)
 }
 
-const HEAL_PROMPT_TEMPLATE_PATH = path.join(__dirname, '../../../../../prompts/heal-agent.md')
+const HEAL_PROMPT_TEMPLATE_PATH = promptPath('heal-agent.md')
 
 // Per-mode copy for the four placeholders in `prompts/heal-agent.md`.
 //
@@ -92,30 +93,6 @@ export function detectHealMode(manifestPath: string): HealMode {
   return repoPaths.length > 0 ? 'service' : 'test'
 }
 
-function loadPromptTemplate(promptPath: string = HEAL_PROMPT_TEMPLATE_PATH): string {
-  if (!fs.existsSync(promptPath)) {
-    throw new Error(
-      `Heal prompt template not found at ${promptPath}. Rebuild or reinstall canary-lab.`,
-    )
-  }
-  return fs.readFileSync(promptPath, 'utf-8').trim()
-}
-
-function renderPromptTemplate(template: string, values: Record<string, string>): string {
-  // Drop any line that holds nothing but a single placeholder that resolves
-  // to empty — otherwise the empty bullet sits between live bullets and
-  // breaks the markdown list. Lines that mix a placeholder with other text
-  // (e.g. `- {{failedDir}}/<slug>/foo`) are left alone.
-  const placeholderOnlyLine = /^[ \t]*\{\{(\w+)\}\}[ \t]*$/
-  const lines = template.split('\n')
-  const kept: string[] = []
-  for (const line of lines) {
-    const m = line.match(placeholderOnlyLine)
-    if (m && (values[m[1]] ?? '').length === 0) continue
-    kept.push(line.replace(/\{\{(\w+)\}\}/g, (match, key: string) => values[key] ?? match))
-  }
-  return kept.join('\n')
-}
 
 // Build a transient `--mcp-config` argument for `claude`. Writes the MCP
 // servers JSON (registering `@playwright/mcp` with `--output-dir <outputDir>`
@@ -455,7 +432,7 @@ export function buildOrchestratorHealPrompt(
 ): BuildHealCyclePrompt {
   // Eagerly load the packaged template so a missing asset surfaces at config
   // time, not on the first heal cycle.
-  const promptTemplate = loadPromptTemplate(opts.promptPath)
+  const promptTemplate = loadPromptTemplate(opts.promptPath ?? HEAL_PROMPT_TEMPLATE_PATH)
   const promptFile = path.join(opts.runDir, 'heal-prompt.md')
   const paths = buildRunPaths(opts.runDir)
   const runDirRel = path.relative(opts.projectRoot, opts.runDir) || opts.runDir
