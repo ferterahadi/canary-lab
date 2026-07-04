@@ -124,6 +124,10 @@ export interface ListPlaywrightTestsOpts {
   spawner?: PlaywrightListSpawner
   timeoutMs?: number
   env?: NodeJS.ProcessEnv
+  /** Called with whatever stderr/stdout the run produced when discovery fails
+   *  (non-zero exit, spawn error, timeout, unparseable JSON) — lets callers
+   *  surface the compile/list errors instead of just seeing `null`. */
+  onDiagnostics?: (text: string) => void
 }
 
 export async function listPlaywrightTests(
@@ -150,14 +154,16 @@ export async function listPlaywrightTests(
       if (settled) return
       settled = true
       try { child.kill('SIGKILL') } catch { /* ignore */ }
+      opts.onDiagnostics?.(`playwright test --list timed out after ${timeoutMs}ms\n${err}`.trim())
       resolve(null)
     }, timeoutMs)
     child.stdout.on('data', (b) => { out += b.toString() })
     child.stderr.on('data', (b) => { err += b.toString() })
-    child.on('error', () => {
+    child.on('error', (e) => {
       if (settled) return
       settled = true
       clearTimeout(timer)
+      opts.onDiagnostics?.(`playwright test --list failed to spawn: ${String(e)}`)
       resolve(null)
     })
     child.on('close', (code) => {
@@ -169,6 +175,7 @@ export async function listPlaywrightTests(
       if (code !== 0) {
         // Attach stderr to help debugging; consumers ignore the value but logs help.
         if (err) process.stderr.write(`[playwright-list] exit ${code}: ${err.slice(0, 500)}\n`)
+        opts.onDiagnostics?.(`playwright test --list exited with code ${code}\n${err}\n${out}`.trim())
         resolve(null)
         return
       }
@@ -182,6 +189,7 @@ export async function listPlaywrightTests(
   try {
     report = JSON.parse(stdout) as PwListReport
   } catch {
+    opts.onDiagnostics?.(`playwright test --list produced unparseable JSON output:\n${stdout.slice(0, 2000)}`)
     return null
   }
 

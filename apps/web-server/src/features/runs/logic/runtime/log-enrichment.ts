@@ -531,7 +531,41 @@ function signatureFor(slugs: readonly string[]): string {
   return slugs.map((s) => s.trim()).filter((s) => s.length > 0).slice().sort().join('|')
 }
 
-function readJournalTail(journalPath: string, limit = 3): JournalEntry[] {
+// Flake-tolerant per-test streaks derived from the journal — the external/MCP
+// mirror of `HealCycleState.stuckSlugs`. For each currently-failing slug,
+// counts the current observation (1) plus each trailing journal iteration
+// whose `failingTests` includes that slug, stopping at the first iteration
+// where it was absent. A slug at `threshold`+ observations is stuck even when
+// flaky siblings churned the exact-set signature between cycles.
+export function stuckSlugsFromJournal(
+  journalPath: string,
+  currentSlugs: readonly string[],
+  threshold: number,
+): { stuck: string[]; maxStreak: number } {
+  const current = currentSlugs.map((s) => s.trim()).filter((s) => s.length > 0)
+  if (current.length === 0) return { stuck: [], maxStreak: 0 }
+  let priorSets: Array<Set<string>> = []
+  try {
+    const entries = parseJournalMarkdown(fs.readFileSync(journalPath, 'utf-8'))
+    priorSets = entries.map(
+      (e) => new Set((e.failingTests ?? '').split(',').map((s) => s.trim()).filter((s) => s.length > 0)),
+    )
+  } catch { /* no journal → every streak is 1 */ }
+  let maxStreak = 0
+  const stuck: string[] = []
+  for (const slug of current) {
+    let streak = 1
+    for (let i = priorSets.length - 1; i >= 0; i--) {
+      if (!priorSets[i].has(slug)) break
+      streak += 1
+    }
+    if (streak > maxStreak) maxStreak = streak
+    if (streak >= threshold) stuck.push(slug)
+  }
+  return { stuck, maxStreak }
+}
+
+export function readJournalTail(journalPath: string, limit = 3): JournalEntry[] {
   try {
     const raw = fs.readFileSync(journalPath, 'utf-8')
     return parseJournalMarkdown(raw).slice(-limit)
@@ -616,6 +650,79 @@ function normalizeErrorKey(raw: string): string {
   return cleaned || '(no error)'
 }
 
+// How many prior runs of the same feature to consult for the per-test
+// cross-run failure history. Small on purpose: recent runs are the signal.
+const FLAKE_HISTORY_RUN_LIMIT = 5
+
+// Cross-run failure history for the currently failing tests: how many of the
+// last N prior runs of this feature each test ALSO failed in. This is the
+// flaky-vs-real discriminator the heal agent can't derive from a single run —
+// "failed in 4 of the last 5 runs" reads persistent; "failed in 0 of 5" reads
+// new (introduced by the change under test) or a fresh flake.
+//
+// Prior runs are sibling directories of the current run dir (run ids are
+// timestamp-prefixed, so lexicographic order is chronological). Only runs
+// whose manifest names the same feature count. Returns null when there are no
+// comparable prior runs (fresh workspace, legacy global-logs layout).
+function readCrossRunFailureHistory(opts: {
+  healIndexPath: string
+  feature?: string
+  slugs: readonly string[]
+}): Map<string, { failed: number; total: number }> | null {
+  if (!opts.feature || opts.slugs.length === 0) return null
+  const runDir = path.dirname(opts.healIndexPath)
+  const root = path.dirname(runDir)
+  let entries: fs.Dirent[]
+  try { entries = fs.readdirSync(root, { withFileTypes: true }) } catch { return null }
+  const priorDirs = entries
+    .filter((e) => e.isDirectory() && path.join(root, e.name) !== runDir)
+    .map((e) => e.name)
+    .sort()
+    .reverse()
+  const counts = new Map<string, { failed: number; total: number }>(
+    opts.slugs.map((s) => [s, { failed: 0, total: 0 }]),
+  )
+  let inspected = 0
+  for (const name of priorDirs) {
+    if (inspected >= FLAKE_HISTORY_RUN_LIMIT) break
+    const dir = path.join(root, name)
+    const manifest = readManifest(path.join(dir, 'manifest.json'))
+    const feature = manifest.feature ?? manifest.featureName
+    if (!feature || feature !== opts.feature) continue
+    let failedNames: Set<string>
+    try {
+      const summary = JSON.parse(
+        fs.readFileSync(path.join(dir, 'e2e-summary.json'), 'utf-8'),
+      ) as { failed?: Array<{ name?: unknown }> }
+      failedNames = new Set(
+        (Array.isArray(summary.failed) ? summary.failed : [])
+          .map((f) => (typeof f?.name === 'string' ? f.name : ''))
+          .filter((n) => n.length > 0),
+      )
+    } catch { continue }
+    inspected += 1
+    for (const slug of opts.slugs) {
+      const c = counts.get(slug)
+      if (!c) continue
+      c.total += 1
+      if (failedNames.has(slug)) c.failed += 1
+    }
+  }
+  return inspected === 0 ? null : counts
+}
+
+// One-word interpretation so the agent doesn't have to re-derive what the
+// ratio means. End-of-run summaries are the source, so "failed" means the
+// test was still failing when that run finished (post-heal).
+function flakeHistoryLine(h: { failed: number; total: number }): string {
+  const reading = h.failed === h.total
+    ? 'persistent'
+    : h.failed === 0
+      ? 'new — first failure in recent runs'
+      : 'intermittent — possible flake'
+  return `  - history: failed in ${h.failed} of the last ${h.total} run${h.total === 1 ? '' : 's'} of this feature (${reading})`
+}
+
 // Write a compact map (not a script) for the heal agent: where the feature
 // lives, which repos to edit, what failed, and the exact slice files to read.
 // Keep this literal; inferred target-service hints can mislead when a shared
@@ -681,6 +788,11 @@ export function writeHealIndex(parsed?: {
   if (failed.length === 0) {
     lines.push('No failures. Nothing to heal.')
   } else {
+    const flakeHistory = readCrossRunFailureHistory({
+      healIndexPath,
+      feature: manifest.feature ?? manifest.featureName,
+      slugs: failed.map((e) => (typeof e.name === 'string' ? e.name : '')).filter((n) => n.length > 0),
+    })
     lines.push('## Failures')
     lines.push('')
     for (const entry of failed) {
@@ -688,6 +800,10 @@ export function writeHealIndex(parsed?: {
       if (entry.error?.message) {
         const errorMessage = normalizeErrorKey(entry.error.message)
         lines.push(`  - error: ${truncateOneLine(errorMessage, 400)}`)
+      }
+      const history = flakeHistory?.get(entry.name)
+      if (history && history.total > 0) {
+        lines.push(flakeHistoryLine(history))
       }
       if (entry.errorFile) {
         lines.push(`  - full error: ${entry.errorFile}`)

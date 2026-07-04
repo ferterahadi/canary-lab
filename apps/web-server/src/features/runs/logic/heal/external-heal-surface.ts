@@ -4,7 +4,7 @@ import type { RunDetail } from '../run-store'
 import { buildHealPromptMap, type HealPromptMap } from '../runtime/auto-heal'
 import { loadProjectConfig } from '../runtime/launcher/project-config'
 import { buildRunPaths, runDirFor } from '../runtime/run-paths'
-import { countConsecutiveSameFailures } from '../runtime/log-enrichment'
+import { stuckSlugsFromJournal } from '../runtime/log-enrichment'
 import { ESCALATION_THRESHOLD, buildHealEscalation, type HealEscalation } from '../runtime/heal-escalation'
 import type { HealSignalKind, RunBootFailure } from '../../../../../../../shared/run-state'
 
@@ -85,9 +85,11 @@ export interface ExternalHealContext {
   // Present only on the slim repeat-cycle variant: a one-line breadcrumb that
   // recovers a forgetful/stateless client without re-sending the full procedure.
   guidance?: string
-  // Present only when the SAME failing set has survived ESCALATION_THRESHOLD
-  // heal cycles — the agent is stuck and should change tactic. The external
-  // analog of the local PTY escalation block; supersedes the slim breadcrumb.
+  // Present only when at least one failing test has survived
+  // ESCALATION_THRESHOLD consecutive heal cycles (per-test streak, tolerant
+  // of flaky siblings churning the set) — the agent is stuck and should
+  // change tactic. The external analog of the local PTY escalation block;
+  // supersedes the slim breadcrumb.
   escalation?: HealEscalation
 }
 
@@ -194,11 +196,18 @@ export function buildExternalHealContext(input: BuildExternalHealContextInput): 
   const paths = buildRunPaths(runDir)
 
   const failingSlugs = snapshot.counts.failedNames
-  const consecutiveSameFailures = countConsecutiveSameFailures(paths.diagnosisJournalPath, failingSlugs)
-  const escalation = consecutiveSameFailures >= ESCALATION_THRESHOLD && failingSlugs.length > 0
+  // Flake-tolerant stuck detection: per-test streaks from the journal, so a
+  // flaky sibling entering/leaving the failing set can't reset the "you're
+  // stuck on these" signal (the old exact-set streak did exactly that).
+  const { stuck, maxStreak } = stuckSlugsFromJournal(
+    paths.diagnosisJournalPath,
+    failingSlugs,
+    ESCALATION_THRESHOLD,
+  )
+  const escalation = stuck.length > 0
     ? buildHealEscalation({
-      consecutiveSameFailures,
-      slugs: failingSlugs,
+      consecutiveSameFailures: maxStreak,
+      slugs: stuck,
       journalPath: paths.diagnosisJournalPath,
       failedDir: paths.failedDir,
     })

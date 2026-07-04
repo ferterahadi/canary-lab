@@ -158,6 +158,9 @@ export interface CoverageStateView {
 
 // Semantic coverage is decoupled from test RUNS (R: 1.4.0): it asks "does a test
 // exist that claims to exercise this requirement's paths?", never "did a run pass?".
+// The additive `proven` axis (1.6.0) joins the LATEST run's per-test pass/fail on
+// top — "covered (claimed)" vs "covered (proven by a passing run)" — without
+// changing gap types or the headline %: a claim stays a claim.
 export type GapType =
   | 'covered'
   | 'path-incomplete'
@@ -176,6 +179,9 @@ export interface PathCoverage {
   path: PathType
   /** A mapped test claims (declares) this path (variant ignored — the 2-axis view). */
   covered: boolean
+  /** Some claiming test also PASSED in the feature's latest run. Absent when no
+   *  run has been recorded for the feature (claim-only view). */
+  proven?: boolean
 }
 
 /**
@@ -195,6 +201,8 @@ export interface VariantCellCoverage {
   applicable?: boolean
   /** Why the cell is N/A (from `Requirement.variantsNA`) — shown in the grid. */
   reason?: string
+  /** Some test claiming this cell also PASSED in the feature's latest run. */
+  proven?: boolean
 }
 
 /**
@@ -219,6 +227,9 @@ export interface TestCoverage {
   variants?: string[]
   /** Static coverage strength, graded from the test's own assertions (strength.ts). */
   strength?: TestStrength
+  /** Outcome of this test in the feature's LATEST recorded run. Absent when the
+   *  feature has no run yet or the test didn't run (new/renamed/skipped). */
+  lastRun?: { runId: string; passed: boolean }
 }
 
 export interface RequirementCoverage {
@@ -231,6 +242,10 @@ export interface RequirementCoverage {
   gapType: GapType
   /** Coarse covered/partial/uncovered roll-up of `gapType`. */
   coverageStatus: CoverageStatus
+  /** `covered` AND every applicable path/cell is claimed by a test that passed
+   *  in the latest run — coverage proven, not just claimed. Absent when the
+   *  feature has no recorded run. */
+  proven?: boolean
 }
 
 export interface CoverageTotals {
@@ -242,6 +257,9 @@ export interface CoverageTotals {
   untested: number
   /** Tests carrying no requirement linkage — candidates for the annotate-pass. */
   orphanTests: number
+  /** Covered requirements whose coverage is also proven by the latest run.
+   *  Absent when the feature has no recorded run. */
+  proven?: number
 }
 
 /** One coverage-engine test→requirement mapping (the annotate-pass output).
@@ -261,6 +279,11 @@ export interface ProposedMapping {
   confidence?: number
   /** Which lane produced it. */
   source: 'agent' | 'deterministic'
+  /** Deterministic claim-validation flags attached at apply time
+   *  (flagMappingIssues). Advisory only — a flagged mapping's tag is STILL
+   *  written (auto-apply has no review gate); the issues surface the concern.
+   *  Absent ⇒ no check fired. */
+  issues?: string[]
 }
 
 export interface CoverageLedger {
@@ -275,6 +298,11 @@ export interface CoverageLedger {
    *  decimal. "How many requirements have a corresponding test case" — answers
    *  coverage existence independent of whether the test passes. */
   mappedPct: number
+  /** proven ÷ total active requirements, 0–100, one decimal — the run-grounded
+   *  sibling of `coveragePct`. Absent when the feature has no recorded run. */
+  provenPct?: number
+  /** The run the `proven` axis was joined against. Absent when none exists. */
+  provenRunId?: string
   /** Requirement ids annotated on tests but absent from the PRD (drift signal). */
   orphanRequirementIds: string[]
   /** Test names with no requirement linkage — the annotate-pass works this set. */

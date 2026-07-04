@@ -23,6 +23,13 @@ const SUMMARY_SNAPSHOT_MAX_LINES = 150
 const SUMMARY_TIMELINE_MAX_ACTIONS = 15
 const SUMMARY_TOP_REQUESTS = 10
 const SUMMARY_TOP_CONSOLE = 10
+// How many failed requests get a full `trace request <id>` drill-down
+// (headers + request/response bodies) appended to network-failed.txt, and
+// the per-request byte cap on that detail. The failing API call's response
+// body is often the actual root cause — worth the extra CLI calls — but a
+// multi-megabyte payload isn't.
+const MAX_REQUEST_DETAILS = 5
+const REQUEST_DETAIL_MAX_BYTES = 16_384
 // Table-output convention: 2 lines of header (column titles + box-drawing
 // separator) above the first data row. Used when slicing top-N / last-N
 // rows from `trace actions`, `trace requests`, etc.
@@ -119,6 +126,31 @@ export function parseFirstFailedActionId(errorsOnlyStdout: string): string | nul
   return ids[0] ?? null
 }
 
+// Parse `trace requests --failed` output for request ordinals. Same table
+// convention as actions: data rows start with `  <n>.` after the two header
+// lines. Ordered, deduped.
+export function parseRequestIds(requestsStdout: string): string[] {
+  const ids: string[] = []
+  const seen = new Set<string>()
+  for (const line of requestsStdout.split('\n')) {
+    const m = line.match(/^\s*(\d+)\.\s+\S+/)
+    if (!m) continue
+    if (seen.has(m[1])) continue
+    seen.add(m[1])
+    ids.push(m[1])
+  }
+  return ids
+}
+
+// Byte-cap a request detail block so one large response body can't balloon
+// network-failed.txt past what a single `Read` call handles.
+function capRequestDetail(text: string, max = REQUEST_DETAIL_MAX_BYTES): string {
+  const byteLen = Buffer.byteLength(text, 'utf-8')
+  if (byteLen <= max) return text
+  const head = Buffer.from(text, 'utf-8').subarray(0, max).toString('utf-8')
+  return `${head}\n… (truncated, ${byteLen - Buffer.byteLength(head, 'utf-8')} more bytes)`
+}
+
 export interface ExtractTraceSummaryArgs {
   /** Absolute path to the Playwright trace.zip for a failed test. */
   traceZipPath: string
@@ -209,6 +241,20 @@ export async function extractTraceSummary(
       ])
     : [null, null]
 
+  // 4b. Drill into the first few failed requests (headers + bodies) — the
+  //     failing API call's response body is often the real root cause, and
+  //     the requests table alone carries only method/status/URL. Must run
+  //     before `trace close`.
+  const requestIds = failedRequests.ok ? parseRequestIds(failedRequests.stdout).slice(0, MAX_REQUEST_DETAILS) : []
+  const requestDetails: Array<{ id: string; result: RunCliResult }> = requestIds.length === 0
+    ? []
+    : await Promise.all(
+        requestIds.map(async (id) => ({
+          id,
+          result: await runPlaywrightCli(['trace', 'request', id], outputDir),
+        })),
+      )
+
   // 5. Best-effort close, then remove the `.playwright-cli/` scratch dir
   //    that the CLI leaves behind. `trace close` only removes the inner
   //    `trace/` subdirectory; we own the outer dir cleanup ourselves so the
@@ -228,6 +274,7 @@ export async function extractTraceSummary(
     snapshot,
     snapshotBefore,
     failedRequests,
+    requestDetails,
     consoleErrors,
   })
 
@@ -270,6 +317,7 @@ interface WriteDrillDownArgs {
   snapshot: RunCliResult | null
   snapshotBefore: RunCliResult | null
   failedRequests: RunCliResult
+  requestDetails: Array<{ id: string; result: RunCliResult }>
   consoleErrors: RunCliResult
 }
 
@@ -324,11 +372,16 @@ function writeDrillDownFiles(args: WriteDrillDownArgs): string[] {
     )
   }
 
-  // Cross-cutting views (full).
-  writeIfMeaningful(
-    'network-failed.txt',
-    resultBodyOrError(args.failedRequests, 'trace requests --failed'),
-  )
+  // Cross-cutting views (full). The failed-requests table is followed by a
+  // per-request detail section (headers + request/response bodies, capped
+  // per request) for the first MAX_REQUEST_DETAILS failures.
+  const networkParts = [resultBodyOrError(args.failedRequests, 'trace requests --failed')]
+  for (const { id, result } of args.requestDetails) {
+    networkParts.push('')
+    networkParts.push(`# Request ${id} (headers + bodies)`)
+    networkParts.push(capRequestDetail(resultBodyOrError(result, `trace request ${id}`)))
+  }
+  writeIfMeaningful('network-failed.txt', networkParts.join('\n').trimEnd() + '\n')
   writeIfMeaningful(
     'console-errors.txt',
     resultBodyOrError(args.consoleErrors, 'trace console --errors-only'),
@@ -463,6 +516,7 @@ function renderFailureSummary(r: RenderArgs): string {
       lines.push('```')
       lines.push(sliced)
       lines.push('```')
+      lines.push('Full request/response details (headers + bodies): trace-extract/network-failed.txt')
       if (dataRows > SUMMARY_TOP_REQUESTS) {
         lines.push(`Full list (${dataRows} failed requests): trace-extract/network-failed.txt`)
       }

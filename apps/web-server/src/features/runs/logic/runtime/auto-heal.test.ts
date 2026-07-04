@@ -671,17 +671,27 @@ describe('buildOrchestratorHealPrompt', () => {
     const build = buildOrchestratorHealPrompt({ agent: 'claude', projectRoot, runDir })
     const prompt = build({ cycle: 0, outputDir: path.join(runDir, 'out') })
     expect(prompt).not.toContain('playwright-mcp/')
-    expect(prompt).not.toContain('console logs / DOM snapshots / network captures the Playwright MCP server')
+    expect(prompt).not.toContain('browser captures (console / DOM snapshots / network)')
   })
 
-  it('emits the playwright-mcp bullet when at least one failure dir has MCP artifacts', () => {
+  it('emits the playwright-mcp bullet when a legacy per-failure dir has MCP artifacts', () => {
     const mcpDir = path.join(runDir, 'failed', 'test-case-broken', 'playwright-mcp')
     fs.mkdirSync(mcpDir, { recursive: true })
     fs.writeFileSync(path.join(mcpDir, 'snapshot.png'), 'fake')
     const build = buildOrchestratorHealPrompt({ agent: 'claude', projectRoot, runDir })
     const prompt = build({ cycle: 0, outputDir: path.join(runDir, 'out') })
     expect(prompt).toContain('playwright-mcp/')
-    expect(prompt).toContain('console logs / DOM snapshots / network captures the Playwright MCP server')
+    expect(prompt).toContain('browser captures (console / DOM snapshots / network)')
+  })
+
+  it('prefers the run-level playwright-mcp dir when it has artifacts', () => {
+    const mcpDir = path.join(runDir, 'playwright-mcp')
+    fs.mkdirSync(mcpDir, { recursive: true })
+    fs.writeFileSync(path.join(mcpDir, 'snapshot.png'), 'fake')
+    const build = buildOrchestratorHealPrompt({ agent: 'claude', projectRoot, runDir })
+    const prompt = build({ cycle: 0, outputDir: path.join(runDir, 'out') })
+    expect(prompt).toContain(`${mcpDir}/`)
+    expect(prompt).toContain('new MCP captures land here too')
   })
 
   it('treats playwright-mcp dirs containing only `_attribution.json` as empty', () => {
@@ -706,7 +716,7 @@ describe('buildOrchestratorHealPrompt', () => {
     const build = buildOrchestratorHealPrompt({ agent: 'claude', projectRoot, runDir })
     const prompt = build({ cycle: 0, outputDir: path.join(runDir, 'out') })
     expect(prompt).toContain('trace-extract/failure-summary.md')
-    expect(prompt).toContain('curated extract of the failing Playwright run')
+    expect(prompt).toContain('curated trace extract')
   })
 
   it('agent-agnostic: rendered prompt body is the same for claude and codex', () => {
@@ -745,7 +755,7 @@ describe('buildOrchestratorHealPrompt', () => {
       outputDir: path.join(runDir, 'out'),
       consecutiveSameFailures: 3,
     })
-    expect(prompt).toContain('Escalation: this is cycle 3 with the same failing set (test-a, test-b).')
+    expect(prompt).toContain('Escalation: cycle 3 — these tests have now failed 3 times in a row despite 2 fix attempts: test-a, test-b.')
     // The failedDir path the addendum embeds is the same one the static
     // template uses — confirms threading through buildHealAddendum.
     expect(prompt).toContain(`${path.join(runDir, 'failed')}/<slug>/trace-extract/snapshot-at-failure.txt`)

@@ -44,6 +44,13 @@ export interface FlightAgentSpawnOpts {
 
 export type FlightAgentSpawner = (opts: FlightAgentSpawnOpts) => Promise<{ text: string }>
 
+/** Deterministic dry-run over a feature's specs (playwright --list + tsc) —
+ *  errors feed the next specs-coverage iteration's prompt. */
+export type FlightSpecsValidator = (args: {
+  featureDir: string
+  projectRoot: string
+}) => Promise<{ ok: true } | { ok: false; errors: string }>
+
 export interface FlightStageDeps {
   featuresDir: string
   logsDir: string
@@ -52,6 +59,8 @@ export interface FlightStageDeps {
   inject: FlightInject
   /** Injected in tests; defaults to a claude spawn via runAgentProcess. */
   spawnAgent?: FlightAgentSpawner
+  /** Injected in tests; defaults to playwright --list + tsc --noEmit. */
+  validateSpecs?: FlightSpecsValidator
   /** Test seams over the coverage engines (production uses the real ones —
    *  same injection shape as the coverage job runner's deps). */
   coverage?: {

@@ -1,7 +1,39 @@
 import { describe, it, expect } from 'vitest'
 import type { Requirement } from '../../../../../../../shared/coverage/types'
 import { computeCoverageLedger, type CoverageTestInput } from './ledger'
-import { applyTestStrength, classifyAssertionTier, testStrengthFor, type TestAssertions } from './strength'
+import { applyTestStrength, classifyAssertionTier, hasNegativeAssertion, testStrengthFor, type TestAssertions } from './strength'
+
+describe('hasNegativeAssertion — negative-outcome detector', () => {
+  it('detects throw / rejection / falsy matchers', () => {
+    expect(hasNegativeAssertion(['await expect(fn()).toThrow()'])).toBe(true)
+    expect(hasNegativeAssertion(["await expect(promise).rejects.toThrow('boom')"])).toBe(true)
+    expect(hasNegativeAssertion(['expect(ok).toBeFalsy()'])).toBe(true)
+  })
+
+  it('detects negated assertions, try/catch, and error signals', () => {
+    expect(hasNegativeAssertion(["await expect(page.getByText('saved')).not.toBeVisible()"])).toBe(true)
+    expect(hasNegativeAssertion(['try { await submit() } catch (e) { caught = true }'])).toBe(true)
+    expect(hasNegativeAssertion(["await expect(page.getByRole('alert')).toContainText('Error: invalid email')"])).toBe(true)
+  })
+
+  it('detects HTTP error-status checks (4xx/5xx literal or >= 400 near "status")', () => {
+    expect(hasNegativeAssertion(['expect(response.status()).toBe(404)'])).toBe(true)
+    expect(hasNegativeAssertion(['expect(res.status).toBe(500)'])).toBe(true)
+    expect(hasNegativeAssertion(['expect(response.status() >= 400).toBe(true)'])).toBe(true)
+  })
+
+  it('is case-insensitive', () => {
+    expect(hasNegativeAssertion(['await expect(fn()).toThrow()'.toUpperCase()])).toBe(true)
+  })
+
+  it('returns false for positive-only assertions', () => {
+    expect(hasNegativeAssertion(['expect(total).toBe(42)'])).toBe(false)
+    expect(hasNegativeAssertion(['expect(response.status()).toBe(200)'])).toBe(false)
+    expect(hasNegativeAssertion(['expect(total).toBe(500)'])).toBe(false) // bare number, no "status"
+    expect(hasNegativeAssertion(["await page.goto('https://line.com/inbox')"])).toBe(false)
+    expect(hasNegativeAssertion([])).toBe(false)
+  })
+})
 
 describe('classifyAssertionTier', () => {
   it('tier 4 — browser drives the real external destination', () => {

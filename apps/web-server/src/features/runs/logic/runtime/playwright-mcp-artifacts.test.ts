@@ -25,23 +25,9 @@ afterEach(() => {
 })
 
 describe('resolveMcpOutputDir', () => {
-  it('uses per-failure dir when exactly one failure', () => {
-    const r = resolveMcpOutputDir({ runDir: '/run', failedSlugs: ['test-case-one'] })
-    expect(r.perFailure).toBe(true)
-    expect(r.dir).toBe('/run/failed/test-case-one/playwright-mcp')
-    expect(r.slug).toBe('test-case-one')
-  })
-
-  it('uses shared run dir when multiple failures', () => {
-    const r = resolveMcpOutputDir({ runDir: '/run', failedSlugs: ['a', 'b'] })
-    expect(r.perFailure).toBe(false)
+  it('always uses the run-level dir — the REPL reads --mcp-config once, so a per-failure dir would misattribute cycle 2+ captures', () => {
+    const r = resolveMcpOutputDir({ runDir: '/run' })
     expect(r.dir).toBe('/run/playwright-mcp')
-    expect(r.slug).toBeUndefined()
-  })
-
-  it('uses shared run dir when no failures', () => {
-    const r = resolveMcpOutputDir({ runDir: '/run', failedSlugs: [] })
-    expect(r.perFailure).toBe(false)
   })
 })
 

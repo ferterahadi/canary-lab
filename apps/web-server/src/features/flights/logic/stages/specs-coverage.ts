@@ -1,24 +1,33 @@
 import fs from 'fs'
 import path from 'path'
+import { spawn } from 'child_process'
 import { computeFeatureCoverage, runCoverageEngine } from '../../../coverage/logic/coverage/service'
 import { readPrdSummary } from '../../../coverage/logic/coverage/prd-summary'
 import { applyExternalDraftFiles } from '../../../config/logic/feature-authoring'
+import { listPlaywrightTests } from '../../../runs/logic/playwright-list'
 import { writeWorkflowAgentRef } from '../../../agent-sessions/logic/agent-session-log'
 import { publishWorkspaceEvent } from '../../../../shared/workspace-events'
 import { renderPrompt } from '../../../../shared/prompts'
 import type { CoverageLedger } from '../../../../../../../shared/coverage/types'
 import type { StageAdapter, StageContext, StageOutcome } from '../conductor'
-import { defaultSpawnAgent, extractJson, featureDirFor, type FlightStageDeps } from './context'
+import { defaultSpawnAgent, featureDirFor, type FlightSpecsValidator, type FlightStageDeps } from './context'
 
-// The specs↔coverage loop: author Playwright specs (agent proposes, the
-// existing draft-apply validation gates the write), map them with the
-// existing coverage engine, recompute the ledger, and repeat until the
-// harness-computed coverage meets the target (default 100% — no untested /
-// path-incomplete / variant-incomplete). Bounded: when the loop can't close
-// the remaining gaps it parks on coverage-stuck instead of spinning.
+// The specs↔coverage loop: the agent edits <featureDir>/e2e/*.spec.ts in place
+// (Read/Write/Edit tools — no JSON proposal), the existing draft-apply
+// validation re-reads and gates what landed on disk, a deterministic dry-run
+// (playwright --list + tsc --noEmit) catches specs that don't compile, then
+// the coverage engine maps them and the ledger is recomputed — repeating until
+// the harness-computed coverage meets the target (default 100% — no untested /
+// path-incomplete / variant-incomplete). Validation errors feed the NEXT
+// iteration's prompt so the agent repairs broken specs instead of the loop
+// silently burning rounds. Bounded: when the loop can't close the remaining
+// gaps it parks on coverage-stuck instead of spinning.
 
 const MAX_ITERATIONS = 5
-const MAX_EXISTING_SPEC_BYTES = 120 * 1024
+/** Cap on validation-error text injected into the next prompt. */
+const MAX_VALIDATION_ERROR_CHARS = 4 * 1024
+const PLAYWRIGHT_LIST_TIMEOUT_MS = 60_000
+const TSC_TIMEOUT_MS = 120_000
 
 interface GapRow {
   id: string
@@ -40,24 +49,6 @@ function ledgerEvidence(ledger: CoverageLedger): unknown {
   return { coveragePct: ledger.coveragePct, totals: ledger.totals, gaps: gapRows(ledger) }
 }
 
-function existingSpecs(featureDir: string): Array<{ path: string; content: string }> {
-  const e2eDir = path.join(featureDir, 'e2e')
-  const specs: Array<{ path: string; content: string }> = []
-  let budget = MAX_EXISTING_SPEC_BYTES
-  try {
-    for (const f of fs.readdirSync(e2eDir)) {
-      if (!f.endsWith('.spec.ts')) continue
-      const content = fs.readFileSync(path.join(e2eDir, f), 'utf-8')
-      if (content.length > budget) continue
-      budget -= content.length
-      specs.push({ path: `e2e/${f}`, content })
-    }
-  } catch {
-    /* no e2e dir yet */
-  }
-  return specs
-}
-
 export function buildSpecsPrompt(args: {
   feature: string
   description: string
@@ -65,9 +56,13 @@ export function buildSpecsPrompt(args: {
   configPath: string
   requirements: unknown
   gaps: GapRow[]
-  specs: Array<{ path: string; content: string }>
+  /** Absolute feature dir — the agent edits <featureDir>/e2e/*.spec.ts in place. */
+  featureDir: string
   iteration: number
+  /** Compile/list errors from the previous iteration; '' when it validated clean. */
+  validationErrors?: string
 }): string {
+  const errors = (args.validationErrors ?? '').trim()
   return renderPrompt('specs-coverage.md', {
     feature: args.feature,
     description: args.description,
@@ -75,15 +70,81 @@ export function buildSpecsPrompt(args: {
     requirements: JSON.stringify(args.requirements, null, 1),
     iterationNote: args.iteration > 1 ? ` (iteration ${args.iteration} — previous specs did not close these)` : '',
     gaps: JSON.stringify(args.gaps, null, 1),
-    specsIntro: args.specs.length > 0
-      ? `Existing spec files (rewrite freely — a returned file replaces the one at its path):`
-      : `No spec files exist yet.`,
-    specsBody: args.specs.flatMap((s) => [`--- ${s.path}`, '```ts', s.content, '```']).join('\n'),
+    featureDir: args.featureDir,
+    validationErrors: errors
+      ? [
+          'The previous iteration\'s specs failed to compile/list — fix these errors before adding coverage:',
+          '```',
+          errors.slice(0, MAX_VALIDATION_ERROR_CHARS),
+          '```',
+        ].join('\n')
+      : '',
   })
+}
+
+/** Run `tsc --noEmit` at the workspace root (where the scaffolded tsconfig
+ *  lives) and keep only errors whose file paths fall under `featureDir` — a
+ *  user's pre-existing project errors must not fail spec validation. Returns
+ *  null when clean, when no tsconfig exists, or when tsc isn't installed —
+ *  a missing tool is not a spec failure. */
+function tscErrorsForFeature(projectRoot: string, featureDir: string): Promise<string | null> {
+  if (!fs.existsSync(path.join(projectRoot, 'tsconfig.json'))) return Promise.resolve(null)
+  return new Promise((resolve) => {
+    let out = ''
+    let settled = false
+    const child = spawn('npx', ['--no-install', 'tsc', '--noEmit', '--pretty', 'false'], { cwd: projectRoot })
+    const timer = setTimeout(() => {
+      if (settled) return
+      settled = true
+      try { child.kill('SIGKILL') } catch { /* ignore */ }
+      resolve(null)
+    }, TSC_TIMEOUT_MS)
+    child.stdout.on('data', (b) => { out += b.toString() })
+    child.stderr.on('data', (b) => { out += b.toString() })
+    child.on('error', () => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      resolve(null)
+    })
+    child.on('close', (code) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      if (code === 0) return resolve(null)
+      const lines = out.split('\n').filter((line) => {
+        const m = line.match(/^(.+?)\(\d+,\d+\): error TS/)
+        if (!m) return false
+        const abs = path.resolve(projectRoot, m[1])
+        return abs === featureDir || abs.startsWith(featureDir + path.sep)
+      })
+      resolve(lines.length > 0 ? `tsc --noEmit:\n${lines.join('\n')}` : null)
+    })
+  })
+}
+
+/** Deterministic dry-run over the authored specs: `playwright test --list`
+ *  (the existing runs helper — compiles the spec modules, surfacing syntax /
+ *  import errors fast) plus feature-scoped `tsc --noEmit`. */
+export const defaultValidateSpecs: FlightSpecsValidator = async ({ featureDir, projectRoot }) => {
+  const problems: string[] = []
+  let listDiagnostics = ''
+  const entries = await listPlaywrightTests(featureDir, {
+    timeoutMs: PLAYWRIGHT_LIST_TIMEOUT_MS,
+    onDiagnostics: (text) => { listDiagnostics += text },
+  })
+  if (entries === null) {
+    problems.push(listDiagnostics.trim() || 'playwright test --list failed with no diagnostic output')
+  }
+  const tscErrors = await tscErrorsForFeature(projectRoot, featureDir)
+  if (tscErrors) problems.push(tscErrors)
+  if (problems.length > 0) return { ok: false, errors: problems.join('\n\n') }
+  return { ok: true }
 }
 
 export function specsCoverageStage(deps: FlightStageDeps): StageAdapter {
   const spawnAgent = deps.spawnAgent ?? defaultSpawnAgent
+  const validateSpecs = deps.validateSpecs ?? defaultValidateSpecs
 
   const computeImpl = deps.coverage?.compute ?? computeFeatureCoverage
   const runEngine = deps.coverage?.runEngine ?? runCoverageEngine
@@ -101,21 +162,23 @@ export function specsCoverageStage(deps: FlightStageDeps): StageAdapter {
       .map((r) => ({ id: r.id, title: r.title, text: r.text, pathTypes: r.pathTypes, variants: r.variants }))
 
     let ledger = compute(m.feature)
+    let validationErrors = ''
     for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration += 1) {
       if (targetMet(ledger, target)) {
         return { kind: 'done', evidence: ledgerEvidence(ledger) }
       }
       ctx.appendLog(`[specs] iteration ${iteration}: ${ledger.coveragePct}% / ${target}% — ${gapRows(ledger).length} gap(s)\n`)
 
-      const { text } = await spawnAgent({
+      await spawnAgent({
         prompt: buildSpecsPrompt({
           feature: m.feature,
           description: m.description,
           configPath: path.join(featureDir, 'feature.config.cjs'),
           requirements,
           gaps: gapRows(ledger),
-          specs: existingSpecs(featureDir),
+          featureDir,
           iteration,
+          validationErrors,
         }),
         cwd: deps.projectRoot,
         // One stable sidecar dir per stage — each iteration re-pins the ref so
@@ -123,15 +186,29 @@ export function specsCoverageStage(deps: FlightStageDeps): StageAdapter {
         stageDir: path.join(ctx.flightDir, 'specs-coverage'),
         onChunk: ctx.appendLog,
       })
-      const proposal = extractJson<{ files?: Array<{ path: string; content: string }> }>(text)
-      const files = Array.isArray(proposal.files) ? proposal.files : []
-      const applied = applyExternalDraftFiles({ featureDir, files })
+      // The agent edited <featureDir>/e2e/*.spec.ts in place; re-read what
+      // landed on disk and gate it through the same draft validation as the
+      // old JSON-proposal path (fixture import, e2e/ placement, no traversal).
+      const applied = applyExternalDraftFiles({ featureDir })
       if (!applied.ok) {
-        ctx.appendLog(`[specs] proposal rejected: ${applied.error}\n`)
+        ctx.appendLog(`[specs] spec files rejected: ${applied.error}\n`)
+        validationErrors = applied.error
         continue // burns an iteration; the bound keeps this finite
       }
-      ctx.appendLog(`[specs] wrote ${applied.written.length} file(s)\n`)
+      ctx.appendLog(`[specs] validated ${applied.written.length} file(s)\n`)
       publishWorkspaceEvent(deps.workspaceEvents, { type: 'tests-changed', feature: m.feature })
+
+      // Deterministic dry-run: specs that don't compile/list can't raise
+      // coverage — skip the mapping agent, keep the ledger current, and feed
+      // the errors into the next iteration's prompt instead of hard-aborting.
+      const dryRun = await validateSpecs({ featureDir, projectRoot: deps.projectRoot })
+      if (!dryRun.ok) {
+        validationErrors = dryRun.errors
+        ctx.appendLog(`[specs] dry-run validation failed:\n${dryRun.errors.slice(0, MAX_VALIDATION_ERROR_CHARS)}\n`)
+        ledger = compute(m.feature)
+        continue
+      }
+      validationErrors = ''
 
       await runEngine({
         featuresDir: deps.featuresDir,

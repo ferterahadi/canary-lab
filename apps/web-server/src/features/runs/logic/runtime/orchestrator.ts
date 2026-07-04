@@ -39,6 +39,7 @@ import {
 import { FileRunStateSink, type RunStateSink } from './run-state-sink'
 import type { PtyFactory, PtyHandle } from './pty-spawner'
 import { HealCycleState, AUTO_HEAL_MAX_CYCLES } from './heal-cycle'
+import { ESCALATION_THRESHOLD } from './heal-escalation'
 import {
   readPriorSessionId,
   readPriorSessionIdFromValue,
@@ -278,9 +279,10 @@ export type AutoHealAgent = 'claude' | 'codex'
 
 export interface AutoHealConfig {
   agent: AutoHealAgent
-  // Optional 1-based cap on heal cycles. Omit for the production default:
-  // keep healing until all tests pass, the human stops it, or a cycle cannot
-  // produce a signal/change to apply.
+  // Optional 1-based cap on heal cycles. Omit for the production default
+  // (AUTO_HEAL_MAX_CYCLES = 10). The loop also gives up earlier when the
+  // exact failing set stays identical past the no-progress limit
+  // (heal-cycle.ts DEFAULT_NO_PROGRESS_LIMIT).
   maxCycles?: number
   // Returns the spawn command for the long-lived REPL — just the binary +
   // flags. Production wires `buildAgentSpawnCommand` from auto-heal.ts; tests
@@ -1022,7 +1024,14 @@ export class RunOrchestrator extends EventEmitter {
         try {
           const raw = fs.readFileSync(t.file, 'utf-8').trim()
           if (raw) body = JSON.parse(raw) as Record<string, unknown>
-        } catch { /* tolerate empty/non-JSON */ }
+        } catch {
+          // Tolerate empty/non-JSON — the signal still applies — but say so:
+          // a silent parse failure means hypothesis/fixDescription silently
+          // vanish from the audit journal.
+          this.emitAgentSystemMessage(
+            `.${t.kind} signal body was not valid JSON — hypothesis/fixDescription will be missing from the journal.`,
+          )
+        }
         try { fs.unlinkSync(t.file) } catch { /* race with caller is fine */ }
         const result = this.signalGate.observe(t.kind, body)
         if (!result.accepted) {
@@ -1636,6 +1645,10 @@ export class RunOrchestrator extends EventEmitter {
      * fire when the agent has had two failed attempts on the same set.
      */
     consecutiveSameFailures?: number
+    /** Flake-tolerant stuck set from `HealCycleState.stuckSlugs(ESCALATION_THRESHOLD)`. */
+    stuckSlugs?: string[]
+    /** Longest per-test failure streak, from `HealCycleState.snapshot().maxSlugStreak`. */
+    maxSlugStreak?: number
   }): Promise<{
     exitCode: number
     signal: { kind: 'restart' | 'rerun' | 'heal'; body: Record<string, unknown> } | null
@@ -1654,6 +1667,8 @@ export class RunOrchestrator extends EventEmitter {
       outputDir: this.healAgentMcpOutputDir ?? this.runDir,
       userGuidance: args.userGuidance,
       consecutiveSameFailures: args.consecutiveSameFailures,
+      stuckSlugs: args.stuckSlugs,
+      maxSlugStreak: args.maxSlugStreak,
       priorAgentSessionContext: !this.healAgentPty
         ? this.readCrossAgentSessionContext(cfg.agent)
         : undefined,
@@ -1661,7 +1676,7 @@ export class RunOrchestrator extends EventEmitter {
 
     const isFirstSpawn = !this.healAgentPty
     if (isFirstSpawn) {
-      this.spawnHealAgentRepl(args.failedSlugs)
+      this.spawnHealAgentRepl()
     }
     const pty = this.healAgentPty
     if (!pty) {
@@ -1714,19 +1729,17 @@ export class RunOrchestrator extends EventEmitter {
 
   /**
    * Spawn the long-lived heal-agent REPL. Idempotent-ish — if a pty is
-   * already attached, no-ops. The MCP output dir is pinned at this call
-   * (from cycle-1's failed slugs) since claude reads `--mcp-config` once at
-   * boot and we don't recompose it across cycles.
+   * already attached, no-ops. The MCP output dir is the run-level
+   * `<runDir>/playwright-mcp` — claude reads `--mcp-config` once at boot and
+   * the failing set changes across cycles, so a per-failure dir would
+   * misattribute cycle 2+ captures.
    */
-  private spawnHealAgentRepl(failedSlugs: readonly string[]): void {
+  private spawnHealAgentRepl(): void {
     if (this.healAgentPty) return
     const cfg = this.autoHeal
     if (!cfg) throw new Error('autoHeal not configured')
 
-    const target = resolveMcpOutputDir({
-      runDir: this.runDir,
-      failedSlugs,
-    })
+    const target = resolveMcpOutputDir({ runDir: this.runDir })
     ensureMcpOutputDir(target.dir)
     this.healAgentMcpOutputDir = target.dir
 
@@ -2330,11 +2343,15 @@ export class RunOrchestrator extends EventEmitter {
         const decision = heal.observeFailures(failedSlugs)
         if (!decision.shouldHeal) break
 
-        // Capture the same-failure streak AFTER `observeFailures` has updated
-        // it for this cycle. The threshold-based escalation block in the cycle
-        // prompt keys off this value (>= 3 = two prior fix attempts failed on
-        // the same failing set).
-        const consecutiveSameFailures = heal.snapshot().consecutiveSameFailures
+        // Capture the failure streaks AFTER `observeFailures` has updated
+        // them for this cycle. The escalation block in the cycle prompt keys
+        // off the flake-tolerant per-test streaks (`stuckSlugs`) — a test that
+        // failed ESCALATION_THRESHOLD observations in a row is stuck even when
+        // a flaky sibling churned the exact-set signature.
+        const healSnapshot = heal.snapshot()
+        const consecutiveSameFailures = healSnapshot.consecutiveSameFailures
+        const maxSlugStreak = healSnapshot.maxSlugStreak
+        const stuckSlugs = heal.stuckSlugs(ESCALATION_THRESHOLD)
 
         const cycleNum = heal.beginCycle() + 1
         this.emit('heal-cycle-started', { cycle: cycleNum, failureSignature: signature })
@@ -2351,7 +2368,7 @@ export class RunOrchestrator extends EventEmitter {
         // pre-existing dirty state in the workspace doesn't leak in.
         const snapshots = await this.snapshotFeatureRepos()
 
-        const { signal, reason } = await this.runHealAgent({ cycle: cycleNum, failedSlugs, userGuidance, consecutiveSameFailures })
+        const { signal, reason } = await this.runHealAgent({ cycle: cycleNum, failedSlugs, userGuidance, consecutiveSameFailures, stuckSlugs, maxSlugStreak })
         userGuidance = undefined
 
         if (this.stopped) return this.status
@@ -2410,6 +2427,17 @@ export class RunOrchestrator extends EventEmitter {
           }
         }
 
+        // A present-but-non-string field means the agent wrote a malformed
+        // body (e.g. `{"hypothesis": 123}`); it would otherwise be dropped
+        // without a trace. Warn so the transcript explains the journal gap.
+        for (const field of ['hypothesis', 'fixDescription'] as const) {
+          const value = effectiveSignal.body[field]
+          if (value !== undefined && typeof value !== 'string') {
+            this.emitAgentSystemMessage(
+              `Signal body field \`${field}\` was not a string — dropping it from the journal entry.`,
+            )
+          }
+        }
         try {
           if (effectiveSignal.kind === 'restart' || effectiveSignal.kind === 'rerun') {
             this.appendJournalIteration({
