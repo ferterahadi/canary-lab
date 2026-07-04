@@ -1,6 +1,6 @@
 ---
 name: cl_manage-prompts
-description: Use when adding, editing, or moving an LLM prompt an agent spawn sends (heal, wizard, portify, coverage/PRD, flights) — every prompt is a template file under apps/web-server/prompts/, never an inline string in a .ts file.
+description: Use when adding, editing, or moving an LLM prompt an agent spawn sends (heal, wizard, portify, coverage/PRD, flights) — every prompt is a template file under apps/web-server/prompts/, never an inline string in a .ts file. NOT for MCP initialize instructions (REPAIR_INSTRUCTIONS etc. in apps/web-server/mcp/server.ts) or tool description fields in apps/web-server/mcp/tools.ts — those belong to cl_sync-agent-surfaces / cl_add-mcp-tool.
 ---
 
 # Managing Canary Lab's LLM Prompts
@@ -82,7 +82,7 @@ with the package).
 
 | Mistake | Consequence |
 | --- | --- |
-| Inlining a new agent prompt as a template literal in a `.ts` file | Works, but breaks the one-home rule — the next contributor won't think to look in `prompts/`, and it silently escapes the build's asset-copy step review |
+| Inlining a new agent prompt as a template literal in a `.ts` file | Works, but breaks the one-home rule — the next contributor won't think to look in `prompts/`, and it silently escapes the build's asset-copy step |
 | Hand-rolling a new `{{key}}` substitution regex | Recreates the exact duplication this module consolidated; extend `renderPromptTemplate` instead if it's missing a capability |
 | Assuming a solo-placeholder line is *always* droppable when empty | Only true for a **known** key; an unrecognized placeholder is deliberately kept (verified via `apps/web-server/src/shared/prompts.test.ts`) |
 | Forgetting `npm run smoke:pack` after adding/renaming a `.md`/`.schema.json` file | `prepare-assets.mjs`'s copy step is only proven by the tarball smoke test, same as `templates/` |

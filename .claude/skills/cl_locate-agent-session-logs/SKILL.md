@@ -1,6 +1,6 @@
 ---
 name: cl_locate-agent-session-logs
-description: Use whenever you touch how Canary finds, reads, or builds a path to a claude/codex CLI session log (the JSONL transcript that feeds AgentSessionView), or when a user reports an agent view is "blank", "stuck", "shows nothing", or "only works on my machine". Covers where each CLI stores its logs, the env-aware config-dir resolvers (CLAUDE_CONFIG_DIR / CODEX_HOME), the one-home rule for path-building, and the boot-time shell hydration that keeps PTY + headless + read-side in agreement. Consult before recomputing any `~/.claude/projects/...` or `~/.codex/sessions/...` path by hand.
+description: Use whenever you touch how Canary finds, reads, or builds a path to a claude/codex CLI session log (the JSONL transcript that feeds AgentSessionView), or when a user reports an agent view is "blank", "stuck", "shows nothing", or "only works on my machine". Covers where each CLI stores its logs, the env-aware config-dir resolvers (CLAUDE_CONFIG_DIR / CODEX_HOME), the one-home rule for path-building, and the boot-time shell hydration that keeps PTY + headless + read-side in agreement. Consult before recomputing any `~/.claude/projects/...` or `~/.codex/sessions/...` path by hand. NOT for designing what an agent viewer shows (that's cl_surfacing-agent-work), and note MCP external runs have no session log at all — a "blank" ExternalXXXPanel is not a path bug.
 ---
 
 # Canary Lab — Locating Agent Session Logs
@@ -38,6 +38,11 @@ default dotdir silently breaks lookup when a user relocates it.
 Both live in `agent-session-log.ts` and return the override (trimmed, non-empty)
 else `path.join(homeDir, '.claude' | '.codex')`.
 
+(All basenames in this skill — `agent-session-log.ts`, `agent-config-env.ts`,
+`agent-session-tailer.ts`, their tests — live under
+`apps/web-server/src/features/agent-sessions/logic/` unless a path prefix says
+otherwise.)
+
 ## Rules
 
 - **Never recompute a session-log path by hand.** Building
@@ -48,10 +53,17 @@ else `path.join(homeDir, '.claude' | '.codex')`.
   - `claudeConfigDir()` / `codexConfigDir()` — the config-dir base
   - the existing locators (`findClaudeLogBySessionId`, `locateCodexSessionLog`,
     `locateLatest*`, `resolveManifestSessionRef`, `resolveWorkflowAgentRef`)
-- **The `.claude` / `.codex` string literals belong in exactly two places** — the
-  fallback inside the two resolvers. If a literal appears anywhere else, it's a
-  stray; fold it into the resolver. (Two such strays existed: `portify/agent.ts`
-  and `agent-session-tailer.ts`.)
+- **In session-log / config-dir path code, the `.claude` / `.codex` string
+  literals belong in exactly two places** — the fallback inside the two
+  resolvers. If a literal appears anywhere else on a path that will be *read
+  back* to find a log, it's a stray; fold it into the resolver. (Two such
+  strays existed: `portify/agent.ts` and `agent-session-tailer.ts`.)
+  Known occurrences *outside* this rule's scope: `scripts/agent.ts:177,184`
+  (skill-install destinations) and `scripts/setup.ts:208,211` (CLI-presence
+  detection). These are install-time paths, not session-log lookups — but note
+  they currently ignore `CLAUDE_CONFIG_DIR` / `CODEX_HOME`, so a relocated
+  config home gets skills installed under the default dotdir. If you touch
+  them, route through the resolvers rather than adding more literals.
 
 ## Why lookup stays correct: everything keys off `process.env`
 

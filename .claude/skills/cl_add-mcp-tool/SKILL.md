@@ -1,6 +1,6 @@
 ---
 name: cl_add-mcp-tool
-description: Use when adding, removing, renaming, or moving an MCP tool between profiles in apps/web-server/mcp/tools.ts, or when the MCP smoke test fails with a tool-count or unknown-tool mismatch.
+description: Use when adding, removing, renaming, or moving an MCP tool between profiles in apps/web-server/mcp/tools.ts, or when the MCP smoke test fails with a tool-count or unknown-tool mismatch. Not for sizing/reshaping a tool's RESULT payload (→ cl_mcp-output-design) or for run-loop semantic changes like collision/queue/heal-claim rules (→ cl_sync-agent-surfaces).
 ---
 
 # Adding or Moving a Canary Lab MCP Tool
@@ -16,11 +16,13 @@ Keep-in-Sync Invariants](../../../docs/ARCHITECTURE.md#keep-in-sync-invariants).
    route via `app.inject()` — never duplicate orchestrator logic. Author-profile
    tools call `apps/web-server/src/features/config/logic/feature-authoring.ts` directly.
 2. **Add the name to the `CanaryLabMcpToolName` union** (top of `tools.ts`).
-3. **Add to exactly one profile array** — `REPAIR_TOOLS`, `VERIFY_TOOLS`,
-   `AUTHOR_TOOLS`, or `FULL_ONLY_TOOLS` (`tools.ts:240–307`). A tool may appear in
-   several workflow arrays if it genuinely belongs to several workflows
-   (e.g. `list_features`). `FULL_TOOLS` auto-dedupes the union — never edit it.
-   `registerCanaryLabTools` throws at registration if a tool is in no profile.
+3. **Add to every workflow array the tool genuinely belongs to (usually one)** —
+   `REPAIR_TOOLS`, `VERIFY_TOOLS`, `AUTHOR_TOOLS`, `PORTIFY_TOOLS`, or
+   `FULL_ONLY_TOOLS` (all in `tools.ts`). Cross-workflow tools appear in several
+   arrays (e.g. `list_features`). `LIFECYCLE_TOOLS` and `FULL_TOOLS` are both
+   computed deduped unions — never edit either (lifecycle = all workflows minus
+   portify; full = lifecycle + portify). `registerCanaryLabTools` throws at
+   registration if a tool is in no profile.
 4. **Mirror the name in `apps/web-server/mcp/server.smoke.test.ts`** — the test
    keeps its own copies of the profile arrays so SDK shape changes are caught.
    Update every array you touched in step 3.
@@ -40,6 +42,6 @@ Keep-in-Sync Invariants](../../../docs/ARCHITECTURE.md#keep-in-sync-invariants).
 | Mistake | Consequence |
 | --- | --- |
 | Skipping the smoke-test mirror arrays | Smoke test fails with a tool-count mismatch — or silently passes with stale coverage if you also "fixed" the count |
-| Editing `FULL_TOOLS` directly | It's computed; the edit is dead code and the next reader is misled |
+| Editing `FULL_TOOLS` or `LIFECYCLE_TOOLS` directly | Both are computed; the edit is dead code and the next reader is misled |
 | Duplicating route logic inside the tool | Drifts from the REST behavior (admission, collision, envset apply all live in the route) |
 | New result shape without updating instructions/skills | External agents invent their own loop — that's the bug `INSTRUCTIONS_BY_PROFILE` exists to prevent |

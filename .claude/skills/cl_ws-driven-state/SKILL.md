@@ -1,6 +1,6 @@
 ---
 name: cl_ws-driven-state
-description: Use whenever you add or modify a server-side mutation (new route, background job completion, MCP tool write) that changes something visible in the UI — feature list, badges, coverage icons, run states, anything. Also use when a user says "I had to refresh to see X" or "the badge didn't update until I reloaded". The rule: every mutation that affects UI state must emit a WorkspaceEvent so the client updates live. No broadcast event → stale UI, always.
+description: Use whenever you add or modify a server-side mutation (new route, background job completion, MCP tool write) that changes something visible in the UI — feature list, badges, coverage icons, run states, anything. Also use when a user says "I had to refresh to see X" or "the badge didn't update until I reloaded". The rule: every mutation that affects UI state must emit a WorkspaceEvent so the client updates live. No broadcast event → stale UI, always. If the server already emits the event and only the client fails to react to it, use cl_live-state-sync instead.
 ---
 
 # WS-Driven State — Every Mutation Emits an Event
@@ -18,7 +18,7 @@ Forgetting this is the primary cause of "I had to refresh to see X."
 Server mutation (route / job runner / MCP tool)
   → publishWorkspaceEvent(deps.workspaceEvents, { type: '...' })
   → WorkspaceEventBus  (apps/web-server/src/shared/workspace-events.ts)
-  → ws/workspace-stream.ts  broadcasts JSON to every open client socket
+  → apps/web-server/src/shared/ws/workspace-stream.ts  broadcasts JSON to every open client socket
   → apps/web/src/features/runs/api/workspace-socket.ts  parses the frame
   → App.tsx  onEvent handler  dispatches to state setter
   → component re-renders with fresh REST data
@@ -36,7 +36,10 @@ Nothing in this chain polls. Nothing auto-retries. If you don't call
 | `features-changed` | Any `Feature` field changed (config, envs, portified) | `refreshFeatures()` |
 | `tests-changed` | Test files for a feature changed | `setTestsRefreshKey(k+1)` |
 | `envsets-changed` | Envset added/removed for a feature | `refreshFeatures()` |
-| `coverage-changed` | A coverage job finished (done or failed) | `setCoverageRefreshKey(k+1)` |
+| `coverage-changed` (carries `feature`) | A coverage job finished (done or failed) | `setCoverageRefreshKey(k+1)` |
+| `tests-dirty-changed` (carries `feature`) | A feature's tests-dirty status flipped | `refreshFeatures(selected)` |
+| `verification-config-changed` (carries `feature`) | Verify config saved (route or MCP tool) | `setVerificationRefreshKey(k+1)` if feature selected |
+| `journal-changed` (carries `runId`) | A run's journal file changed | bump `journalRefreshKeys[runId]` |
 | `draft-created/updated/deleted` | Wizard draft mutations | draft context reducer |
 | `evaluation-export-*` | Eval export task lifecycle | export task context |
 
@@ -87,7 +90,7 @@ after `savePortify` returns in `routes/portify.ts`, added `workspaceEvents` to
 `PortifyRouteDeps`, and passed it from `server.ts`.
 
 **Coverage job completion** — `finishOk` / `finishErr` in
-`lib/coverage/jobs/runner.ts` wrote the manifest to disk but never told the client.
+`apps/web-server/src/features/coverage/logic/coverage/jobs/runner.ts` wrote the manifest to disk but never told the client.
 The coverage icon color stayed "Generating" (sky) forever.
 
 Fix: added `coverage-changed` event type to both `WorkspaceEvent` unions, called
@@ -131,7 +134,7 @@ it needs an event — on *every* path that performs the write, not just the GUI 
 - [[cl_live-state-sync]] — the **client** side: once the event arrives, don't gate a
   must-happen UI transition on a single push. This skill is the **server** side: make
   sure the push exists in the first place.
-- [[cl_async-task-ux]] — background jobs (coverage, portify, portify) complete async;
+- [[cl_async-task-ux]] — background jobs (coverage, portify) complete async;
   their runner is where `finishOk`/`finishErr` live — both must emit events.
 - [[cl_verify-changes]] — changes to `apps/web-server/**` need Tier 3 (canary-apply)
   to confirm end-to-end. Unit tests verify the event is called; live confirms it
