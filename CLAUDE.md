@@ -25,6 +25,9 @@ copied to `dist/templates/` during build.
   `cl_sync-agent-surfaces` skills. The sync invariants are easy to miss by hand.
 - Changes under `templates/` only ship via the build — finish with
   `npm run smoke:pack` (see the `cl_add-sample-feature` skill).
+- All LLM prompts live under `apps/web-server/prompts/` as `.md` templates,
+  loaded via `shared/prompts.ts` — never inline a prompt string in a `.ts` file
+  (see the `cl_manage-prompts` skill). Also ships via the build.
 
 ## Where things are documented
 
@@ -49,6 +52,10 @@ natively.)
   here (a 2nd agent spawn, pill/dialog, store, parser, timeout): reuse or extend
   one shared helper/component/primitive instead of copy-pasting a variant. Lists
   the existing primitives + the agent-process-runner duplication still owed.
+- `cl_manage-prompts` — adding/editing/moving an LLM prompt an agent spawn sends
+  (heal, wizard, portify, coverage/PRD, flights): every prompt is a template file
+  under `apps/web-server/prompts/`, loaded via `shared/prompts.ts` — never an
+  inline string in a `.ts` file.
 - `cl_scope-the-ask` — vague "improve/fix/polish X" request: look at the target
   first, ask one open question; never fire an options menu guessing the goal.
 - `cl_verify-changes` — which checks a change needs before claiming it works;

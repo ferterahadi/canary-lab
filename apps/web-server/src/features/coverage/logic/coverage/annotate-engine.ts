@@ -6,6 +6,7 @@ import { pickAvailableHealAgent, type HealAgent } from '../../../runs/logic/runt
 import { ANNOTATE_MODELS, modelArgs } from '../../../agent-sessions/logic/agent-models'
 import { recoverAgentAnswer, agentActivityPath } from '../../../agent-sessions/logic/agent-producer'
 import { runAgentProcess, buildClaudeAgenticArgs } from '../../../agent-sessions/logic/agent-process'
+import { promptPath, loadPromptTemplate, renderPromptTemplate } from '../../../../shared/prompts'
 import type { PathType, ProposedMapping, Requirement, VariantDimension } from '../../../../../../../shared/coverage/types'
 
 /** The agent CLI session backing a coverage/summary run — pinned at spawn so the
@@ -24,8 +25,8 @@ export type { ProposedMapping }
 // a MAPPING; canary writes the tag (tag-writer.ts) and compiles the ledger. The
 // agent never edits a test body (plan.md: mapping, not spec-authoring).
 
-const ANNOTATE_TEMPLATE_PATH = path.join(__dirname, '../../../../../prompts/coverage-annotate.md')
-const ANNOTATE_SCHEMA_PATH = path.join(__dirname, '../../../../../prompts/coverage-annotate.schema.json')
+const ANNOTATE_TEMPLATE_PATH = promptPath('coverage-annotate.md')
+const ANNOTATE_SCHEMA_PATH = promptPath('coverage-annotate.schema.json')
 // Idle (inactivity) window: the annotate agent is killed only after this long
 // with NO activity, not on a fixed wall-clock deadline (see agent-idle-timer.ts).
 const ANNOTATE_IDLE_TIMEOUT_MS = 5 * 60 * 1000
@@ -167,7 +168,6 @@ export function buildAnnotatePrompt(
   variantDimension?: VariantDimension,
   templatePath: string = ANNOTATE_TEMPLATE_PATH,
 ): string {
-  const template = fs.readFileSync(templatePath, 'utf-8').trim()
   const active = requirements.filter((r) => !r.deprecated)
   const reqJson = JSON.stringify(
     active.map((r) => ({
@@ -202,11 +202,10 @@ export function buildAnnotatePrompt(
     null,
     2,
   )
-  return template.replace(/\{\{(\w+)\}\}/g, (match, key: string) => {
-    if (key === 'requirements') return reqJson
-    if (key === 'tests') return testJson
-    if (key === 'variantInstructions') return variantBlock
-    return match
+  return renderPromptTemplate(loadPromptTemplate(templatePath), {
+    requirements: reqJson,
+    tests: testJson,
+    variantInstructions: variantBlock,
   })
 }
 

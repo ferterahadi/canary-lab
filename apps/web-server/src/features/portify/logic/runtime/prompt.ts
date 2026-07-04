@@ -1,11 +1,9 @@
-import fs from 'fs'
-import path from 'path'
 import type { FeatureConfig } from '../../../../../../../shared/launcher/types'
+import { promptPath, loadPromptTemplate, renderPromptTemplate } from '../../../../shared/prompts'
 
-const PROMPTS_DIR = path.join(__dirname, '../../../../../prompts')
-const PORTIFY_TEMPLATE_PATH = path.join(PROMPTS_DIR, 'portify.md')
-const PORTIFY_RETRY_TEMPLATE_PATH = path.join(PROMPTS_DIR, 'portify-retry.md')
-const PORTIFY_FEEDBACK_TEMPLATE_PATH = path.join(PROMPTS_DIR, 'portify-feedback.md')
+const PORTIFY_TEMPLATE_PATH = promptPath('portify.md')
+const PORTIFY_RETRY_TEMPLATE_PATH = promptPath('portify-retry.md')
+const PORTIFY_FEEDBACK_TEMPLATE_PATH = promptPath('portify-feedback.md')
 
 export interface RepoEditTarget {
   name: string
@@ -30,17 +28,8 @@ function reposSummary(feature: FeatureConfig, targets: RepoEditTarget[]): string
     .join('\n')
 }
 
-// Substitute `{{key}}` placeholders. An unknown placeholder (no matching var)
-// is left intact so an out-of-sync template degrades visibly rather than
-// silently dropping text. Exported for direct unit testing.
-export function applyTemplate(template: string, vars: Record<string, string>): string {
-  return template.replace(/\{\{(\w+)\}\}/g, (match, key: string) =>
-    Object.prototype.hasOwnProperty.call(vars, key) ? vars[key] : match,
-  )
-}
-
 function render(templatePath: string, vars: Record<string, string>): string {
-  return applyTemplate(fs.readFileSync(templatePath, 'utf-8'), vars)
+  return renderPromptTemplate(loadPromptTemplate(templatePath), vars)
 }
 
 export function buildPortifyPrompt(

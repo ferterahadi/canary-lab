@@ -545,7 +545,7 @@ describe('buildOrchestratorHealPrompt', () => {
       projectRoot,
       runDir,
       promptPath: path.join(tmp, 'missing.md'),
-    })).toThrow(/Heal prompt template not found/)
+    })).toThrow(/Prompt template not found/)
   })
 
   it('returns a buildCyclePrompt that writes the rendered run-scoped prompt', () => {
@@ -865,11 +865,12 @@ describe('auto-heal branch edge cases', () => {
     expect(map.resources.map((r) => r.id)).not.toContain('feature-docs')
   })
 
-  it('renderPromptTemplate drops a placeholder-only line whose key is absent from values', () => {
+  it('renderPromptTemplate keeps a placeholder-only line whose key is absent from values', () => {
     // Custom template with a placeholder-only line referencing a key that is
-    // NOT in the values map buildOrchestratorHealPrompt passes. The
-    // `values[m[1]] ?? ''` nullish fallback makes its length 0, so the line
-    // is dropped (covers the `?? ''` RHS branch).
+    // NOT in the values map buildOrchestratorHealPrompt passes. Only a KNOWN
+    // key resolving to '' drops its solo line; an unrecognized placeholder is
+    // left verbatim (line included) so an out-of-sync template degrades
+    // visibly instead of silently losing text.
     const runDir = path.join(tmp, 'run')
     fs.mkdirSync(runDir, { recursive: true })
     const templatePath = path.join(tmp, 'tmpl.md')
@@ -879,8 +880,7 @@ describe('auto-heal branch edge cases', () => {
         'Run dir: {{runDir}}',
         '{{notAKnownKey}}',
         // Mixed line (not placeholder-only) referencing an unknown key — kept,
-        // and the replace callback returns `match` for the missing key (the
-        // `?? match` RHS branch).
+        // and the replace callback returns `match` for the missing key.
         'mixed prefix {{alsoUnknown}} suffix',
         'tail line',
       ].join('\n'),
@@ -895,8 +895,8 @@ describe('auto-heal branch edge cases', () => {
     const prompt = build({ cycle: 0, outputDir: path.join(runDir, 'out') })
     expect(prompt).toContain(`Run dir: ${runDir}`)
     expect(prompt).toContain('tail line')
-    // The unknown-key placeholder line was dropped entirely.
-    expect(prompt).not.toContain('{{notAKnownKey}}')
+    // The unknown-key placeholder line is kept, left verbatim.
+    expect(prompt).toContain('{{notAKnownKey}}')
     // The mixed line is kept; the unknown placeholder is left verbatim.
     expect(prompt).toContain('mixed prefix {{alsoUnknown}} suffix')
   })

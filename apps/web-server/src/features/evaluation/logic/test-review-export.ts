@@ -11,6 +11,7 @@ import { recoverAgentAnswer, agentActivityPath } from '../../agent-sessions/logi
 import { runAgentProcess, buildClaudeAgenticArgs } from '../../agent-sessions/logic/agent-process'
 import { formatCodeForDisplay } from '../../../../../../shared/code-display-format'
 import type { CoverageLedger, TestCoverage, TestStrength } from '../../../../../../shared/coverage/types'
+import { promptPath, loadPromptTemplate, renderPromptTemplate } from '../../../shared/prompts'
 
 export type AssertionQuality = 'strict' | 'moderate' | 'shallow' | 'unknown'
 
@@ -209,7 +210,7 @@ export function buildEvaluationLlmPrompt(input: EvaluationLlmPromptInput): strin
       failureMessages: test.status === 'passed' ? [] : test.assertions.map((assertion) => assertion.rationale),
     })),
   }
-  return renderPromptTemplate(loadEvaluationRewriteTemplate(input.templatePath), {
+  return renderPromptTemplate(loadPromptTemplate(input.templatePath ?? EVALUATION_REWRITE_TEMPLATE_PATH), {
     evidence: JSON.stringify(evidence, null, 2),
     textSlots: JSON.stringify(input.textSlots ?? evaluationTextSlots(deterministicEvaluationRewrite(input.packet)), null, 2),
     sourceHtmlSection: input.sourceHtml
@@ -271,15 +272,8 @@ export async function generateEvaluationRewriteWithAgent(
   throw new Error(`evaluation rewrite failed with all available agents: ${failures.join(' | ')}`)
 }
 
-const EVALUATION_REWRITE_TEMPLATE_PATH = path.join(__dirname, '../../../../prompts/evaluation-rewrite.md')
-const EVALUATION_REWRITE_SCHEMA_PATH = path.join(__dirname, '../../../../prompts/evaluation-rewrite.schema.json')
-function loadEvaluationRewriteTemplate(templatePath: string = EVALUATION_REWRITE_TEMPLATE_PATH): string {
-  return fs.readFileSync(templatePath, 'utf-8').trim()
-}
-
-function renderPromptTemplate(template: string, values: Record<string, string>): string {
-  return template.replace(/\{\{(\w+)\}\}/g, (match, key: string) => values[key] ?? match)
-}
+const EVALUATION_REWRITE_TEMPLATE_PATH = promptPath('evaluation-rewrite.md')
+const EVALUATION_REWRITE_SCHEMA_PATH = promptPath('evaluation-rewrite.schema.json')
 
 function resolveEvaluationAgents(adapter: AssertionHtmlOptions['audienceAdapter']): HealAgent[] {
   if (adapter === 'deterministic') return []

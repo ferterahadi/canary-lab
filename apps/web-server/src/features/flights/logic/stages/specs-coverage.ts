@@ -5,6 +5,7 @@ import { readPrdSummary } from '../../../coverage/logic/coverage/prd-summary'
 import { applyExternalDraftFiles } from '../../../config/logic/feature-authoring'
 import { writeWorkflowAgentRef } from '../../../agent-sessions/logic/agent-session-log'
 import { publishWorkspaceEvent } from '../../../../shared/workspace-events'
+import { renderPrompt } from '../../../../shared/prompts'
 import type { CoverageLedger } from '../../../../../../../shared/coverage/types'
 import type { StageAdapter, StageContext, StageOutcome } from '../conductor'
 import { defaultSpawnAgent, extractJson, featureDirFor, type FlightStageDeps } from './context'
@@ -67,32 +68,18 @@ export function buildSpecsPrompt(args: {
   specs: Array<{ path: string; content: string }>
   iteration: number
 }): string {
-  return [
-    `You are authoring Playwright E2E specs for the Canary Lab feature "${args.feature}" (${args.description}).`,
-    `Close every coverage gap below by writing/rewriting spec files.`,
-    `Read the feature config at ${args.configPath} first — it declares the services, port slots, and health-check URLs the booted app exposes; target those.`,
-    ``,
-    `Requirements (from the PRD summary):`,
-    '```json',
-    JSON.stringify(args.requirements, null, 1),
-    '```',
-    ``,
-    `Open gaps to close${args.iteration > 1 ? ` (iteration ${args.iteration} — previous specs did not close these)` : ''}:`,
-    '```json',
-    JSON.stringify(args.gaps, null, 1),
-    '```',
-    args.specs.length > 0 ? `Existing spec files (rewrite freely — a returned file replaces the one at its path):` : `No spec files exist yet.`,
-    ...args.specs.flatMap((s) => [`--- ${s.path}`, '```ts', s.content, '```']),
-    ``,
-    `Hard rules:`,
-    `- Files live directly under e2e/ and end in .spec.ts.`,
-    `- Every spec imports: import { test, expect } from 'canary-lab/feature-support/log-marker-fixture'`,
-    `- Tag each test title with the requirement + path it covers: "@req-<id> @path-<happy|sad|edge>" (and "@variant-<value>" when the requirement spans variants). One test may carry several tags.`,
-    `- Tests hit the app through the URLs/ports the feature config boots — use process.env like the existing specs do; never hardcode a port.`,
-    `- Assert real user-observable effects, not merely 200s.`,
-    ``,
-    `Reply with ONLY a JSON object in a \`\`\`json fence: { "files": [{ "path": "e2e/<name>.spec.ts", "content": "<full file>" }] }`,
-  ].join('\n')
+  return renderPrompt('specs-coverage.md', {
+    feature: args.feature,
+    description: args.description,
+    configPath: args.configPath,
+    requirements: JSON.stringify(args.requirements, null, 1),
+    iterationNote: args.iteration > 1 ? ` (iteration ${args.iteration} — previous specs did not close these)` : '',
+    gaps: JSON.stringify(args.gaps, null, 1),
+    specsIntro: args.specs.length > 0
+      ? `Existing spec files (rewrite freely — a returned file replaces the one at its path):`
+      : `No spec files exist yet.`,
+    specsBody: args.specs.flatMap((s) => [`--- ${s.path}`, '```ts', s.content, '```']).join('\n'),
+  })
 }
 
 export function specsCoverageStage(deps: FlightStageDeps): StageAdapter {

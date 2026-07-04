@@ -3,6 +3,7 @@ import path from 'path'
 import { modelArgs } from '../../agent-sessions/logic/agent-models'
 import { locateCodexSessionLog } from '../../agent-sessions/logic/agent-session-log'
 import { buildClaudeAgenticArgs } from '../../agent-sessions/logic/agent-process'
+import { promptPath, loadPromptTemplate, renderPromptTemplate } from '../../../shared/prompts'
 
 // Pure helpers for the Add Test wizard's plan / spec agents:
 //
@@ -17,29 +18,12 @@ import { buildClaudeAgenticArgs } from '../../agent-sessions/logic/agent-process
 // itself lives in `wizard-agent-runner.ts` (excluded from coverage) and
 // composes these helpers.
 
-export const PROMPTS_DIR = path.resolve(__dirname, '..', '..', '..', '..', 'prompts')
-
-export const STAGE1_TEMPLATE = path.join(PROMPTS_DIR, 'stage1-plan.md')
-export const STAGE1_DIFF_TEMPLATE = path.join(PROMPTS_DIR, 'stage1-diff-plan.md')
-export const STAGE2_TEMPLATE = path.join(PROMPTS_DIR, 'stage2-spec.md')
+export const STAGE1_TEMPLATE = promptPath('stage1-plan.md')
+export const STAGE1_DIFF_TEMPLATE = promptPath('stage1-diff-plan.md')
+export const STAGE2_TEMPLATE = promptPath('stage2-spec.md')
 
 export type WizardAgentStage = 'planning' | 'generating'
 export type WizardAgentKind = 'claude' | 'codex'
-
-export function loadTemplate(file: string): string {
-  return fs.readFileSync(file, 'utf8')
-}
-
-// Substitute `{{name}}` placeholders. Unknown placeholders are left as-is
-// (the agent will see them as `{{whatever}}` in the prompt — harmless).
-export function substitute(
-  template: string,
-  vars: Record<string, string>,
-): string {
-  return template.replace(/\{\{(\w+)\}\}/g, (match, key: string) => {
-    return Object.prototype.hasOwnProperty.call(vars, key) ? vars[key] : match
-  })
-}
 
 export interface RepoSummary {
   name: string
@@ -63,8 +47,8 @@ export function buildPlanPrompt(input: {
   repos: RepoSummary[]
   template?: string
 }): string {
-  const template = input.template ?? loadTemplate(STAGE1_TEMPLATE)
-  return substitute(template, {
+  const template = input.template ?? loadPromptTemplate(STAGE1_TEMPLATE)
+  return renderPromptTemplate(template, {
     prdText: input.prdText,
     repos: formatRepos(input.repos),
   })
@@ -76,8 +60,8 @@ export function buildSpecPrompt(input: {
   repos: RepoSummary[]
   template?: string
 }): string {
-  const template = input.template ?? loadTemplate(STAGE2_TEMPLATE)
-  return substitute(template, {
+  const template = input.template ?? loadPromptTemplate(STAGE2_TEMPLATE)
+  return renderPromptTemplate(template, {
     featureName: input.featureName,
     plan: formatPlan(input.plan),
     repos: formatRepos(input.repos),
