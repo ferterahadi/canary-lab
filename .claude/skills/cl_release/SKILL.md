@@ -12,8 +12,9 @@ and changelog with the user before `publish:package`.
 ## Checklist
 
 1. **Changelog**: `npm run changelog:preview` (dry run), then `npm run changelog`.
-   Entries are plain-language and area-tagged per the `docs/CHANGELOG.md` header:
-   `[Test Runner]`, `[Test Generation]`, `[Export evaluation]`, `[General]`.
+   Entries are plain-language and area-tagged using the area tags defined in the
+   `docs/CHANGELOG.md` header (that header is the source of truth — don't rely on
+   a memorized list).
    If consumers should refresh their workspace (template/sample changes, MCP
    re-registration), say so in the release's header line
    (e.g. "Run `npx canary-lab upgrade` …" / "run `npx canary-lab setup`").

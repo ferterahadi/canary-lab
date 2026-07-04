@@ -19,7 +19,7 @@ linked to.
 
 | Route it | Don't route it |
 |---|---|
-| Pages/views (coverage, cleanup) | Collision-confirm (fires off a live run event) |
+| Pages/views (coverage, cleanup, flights) | Collision-confirm (fires off a live run event) |
 | Selected run | Services / Runs-list / Portify-picker (transient pickers) |
 | Config / settings panels | Any modal that reacts to a momentary event you can't reconstruct |
 | Wizards (open-state, not per-step) | Confirmation prompts |
@@ -47,7 +47,7 @@ needed for new routes.
 | Tier | Params | Channels | Use for |
 |---|---|---|---|
 | **Durable nav** | `view`, `feature` | URL + localStorage + cross-tab `storage` | top-level location shared across tabs |
-| **URL-only** | `run`, `dialog`, `wf` | URL only | run selection (two tabs may compare runs) + dialog open-state (a dialog open in one tab must NOT pop open in another) |
+| **URL-only** | `run`, `dialog`, `wf`, `task`, `flight` | URL only | run selection (two tabs may compare runs) + dialog open-state (a dialog open in one tab must NOT pop open in another) + qualifiers (`wf`, `task`, `flight`) |
 
 A new dialog is almost always **URL-only** (the `dialog` param). Do not mirror
 dialog open-state to localStorage or broadcast it cross-tab.
@@ -61,11 +61,16 @@ dialog open-state to localStorage or broadcast it cross-tab.
 ?dialog=add-test                                    → Add-Test wizard
 ?feature=checkout&dialog=portify&wf=wf_abc          → portify revisit (omit wf = start-new)
 ?feature=checkout&dialog=verification               → Verify-config dialog
+?dialog=evaluation&task=task_abc                    → evaluation-export progress dialog
+?view=flights&flight=fl_abc                         → flight detail (omit flight = flights list)
 ```
 
-`RouteDialog = 'config' | 'portify' | 'add-test' | 'verification'`. `wf` only
-qualifies `dialog=portify` (present = revisit, absent = start-new); it is dropped
-for any other dialog. Unknown dialog values are ignored on read.
+`RouteDialog = 'config' | 'portify' | 'add-test' | 'verification' | 'evaluation'`.
+Dialog-id qualifiers: `wf` only qualifies `dialog=portify` (present = revisit,
+absent = start-new); `task` only qualifies `dialog=evaluation` (which export task
+to re-open). Each is dropped unless its dialog is active. `flight` follows the
+same pattern for a *view*: it only qualifies `view=flights` (absent = the flights
+landing list). Unknown dialog values are ignored on read.
 
 ## Checklist — adding a new page
 
@@ -80,8 +85,10 @@ for any other dialog. Unknown dialog values are ignored on read.
 ## Checklist — adding a new routed dialog
 
 1. **Add it to the enum** — `RouteDialog` + `DIALOGS` array in
-   `workspace-view-state.ts`. If it needs an id qualifier (like portify's `wf`),
-   reuse `wf` or add a param and gate it the same way.
+   `workspace-view-state.ts`. If it needs an id qualifier, follow the existing
+   precedents — portify's `wf` and evaluation's `task` — add a param and gate it
+   in `persistView`/`readPersistedView` so it's dropped unless your dialog is
+   active.
 2. **Hydrate on mount in `App.tsx`** — seed the dialog's open-state from
    `PERSISTED_VIEW.dialog` in the relevant `useState` initializer.
 3. **Derive it into the route** — add it to the `routedDialog` ternary
@@ -112,8 +119,11 @@ for any other dialog. Unknown dialog values are ignored on read.
   until its run loads.
 - **Cross-tab scope** — `onViewChangedInOtherTab` emits the **durable tier only**
   (view/feature). Never push run/dialog through it.
-- **`wf` belongs to portify only** — `persistView` drops `wf` unless
-  `dialog === 'portify'`. If your dialog needs its own id, don't piggyback on `wf`.
+- **Qualifiers belong to their dialog only** — `persistView` drops `wf` unless
+  `dialog === 'portify'` and drops `task` unless `dialog === 'evaluation'` (the
+  better precedent to copy — same drop-unless-matching-dialog gate). If your
+  dialog needs its own id, add a new param with the same gate; don't piggyback
+  on `wf` or `task`.
 
 ## Deliberately NOT done (don't "fix" these without a reason)
 
