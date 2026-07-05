@@ -11,6 +11,8 @@ import type {
   TestCoverage,
   TestStrength,
 } from '../../../shared/api/types'
+import type { FlightStageKey, FlightStageStatus } from '../../../shared/api/client'
+import { StageStatusChip, stageLabel } from '../../flights/components/stage-meta'
 import { CoverageDocsRail } from './CoverageDocsRail'
 import { CoverageGeneratingPane } from './CoverageGeneratingPane'
 import { ShikiCode } from '../../../shared/ui/TestCodeBlock'
@@ -24,6 +26,13 @@ interface Props {
   // ledger re-attach to a job that started after it opened — e.g. an external
   // agent was summoned to map coverage — without a manual refresh (cl_ws-driven-state).
   coverageRefreshKey?: number
+  // R14 (canary-first-flight): a flight's docs/prd-summary/specs-coverage stage
+  // is generating THIS ledger right now (derived in App from the WS-driven
+  // flights index) — render it as an explicit generating state, never a
+  // silently empty page. Flight stages bypass the coverage-job store, so the
+  // `job` takeover below can't know about them.
+  generatingFlight?: { flightId: string; stage: FlightStageKey; stageStatus: FlightStageStatus } | null
+  onOpenFlight?: (flightId: string) => void
 }
 
 // Each gap class gets a stable label + colour. Coverage is semantic (run-free):
@@ -74,7 +83,7 @@ interface Hovered {
   key: string
 }
 
-export function CoverageLedgerPage({ feature, onClose, coverageRefreshKey = 0 }: Props) {
+export function CoverageLedgerPage({ feature, onClose, coverageRefreshKey = 0, generatingFlight = null, onOpenFlight }: Props) {
   const [ledger, setLedger] = useState<CoverageLedger | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -438,6 +447,31 @@ export function CoverageLedgerPage({ feature, onClose, coverageRefreshKey = 0 }:
           Close <span aria-hidden="true">✕</span>
         </button>
       </header>
+
+      {/* R14: a flight (not a coverage job) is generating this ledger — say so
+          with the shared stage-status treatment instead of sitting silently
+          empty. The coverage-job takeover keeps priority when it owns the view. */}
+      {generatingFlight && !job && (
+        <div data-testid="coverage-flight-generating" className="flex shrink-0 items-center gap-2.5 border-b px-5 py-2" style={{ borderColor: 'var(--border-default)' }}>
+          <StageStatusChip status={generatingFlight.stageStatus} />
+          <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+            {generatingFlight.stageStatus === 'waiting-for-approval'
+              ? `Flight paused at ${stageLabel(generatingFlight.stage)} — a checkpoint needs your answer.`
+              : `A flight is generating this — ${stageLabel(generatingFlight.stage)} is running; the ledger fills in live.`}
+          </span>
+          {onOpenFlight && (
+            <button
+              type="button"
+              data-testid="coverage-open-flight"
+              onClick={() => onOpenFlight(generatingFlight.flightId)}
+              className="cl-button ml-auto px-2 py-0.5 text-[11px]"
+              style={{ color: 'rgb(56, 189, 248)' }}
+            >
+              Open flight →
+            </button>
+          )}
+        </div>
+      )}
 
       {loading && !ledger && <div className="p-6" style={{ color: 'var(--text-secondary)' }}>Loading coverage…</div>}
       {error && <div className="p-6" style={{ color: 'rgb(251, 113, 133)' }}>Failed to load coverage: {error}</div>}

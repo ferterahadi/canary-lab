@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import * as api from '../../../shared/api/client'
 import type {
   FlightCheckpoint,
@@ -7,17 +7,22 @@ import type {
   FlightStage,
   FlightStageKey,
 } from '../../../shared/api/client'
+import type { RunDetail } from '../../../shared/api/types'
 import { AgentSessionView } from '../../agent-sessions/components/AgentSessionView'
 import { StatusDot } from '../../config/components/atoms'
-import { FLIGHT_STATUS_TONE, StageMiniRail, flightStatusLabel } from './FlightsPill'
+import { useEvaluationExports } from '../../evaluation/state/EvaluationExportContext'
+import { ExternalHealPanel } from '../../runs/components/ExternalHealPanel'
+import { FLIGHT_STATUS_TONE, FlightStatusChip, StageMiniRail, flightStatusLabel } from './FlightsPill'
+import { STAGE_ICON, StageStatusChip, stageLabel, stageStateLine, stageStatusTone } from './stage-meta'
 
 // Flight detail — the routed full-screen view (?view=flights&flight=<id>)
 // that owns a flight's lifecycle: a stage rail on the left (harness-computed
-// verdict per stage), the selected stage's detail on the right (checkpoint
-// controls when the flight is parked, the stage's agent timeline via
-// AgentSessionView where an agent ran, log + evidence otherwise). Without a
-// flight id it renders the landing list. Live via `flights-changed` events
-// (refreshKey) + a gentle poll while the flight is active.
+// verdict per stage), the selected stage's "trailer" on the right (R16): one
+// state line, the agent's identity + live output where an agent acts, and a
+// view-details affordance — the raw evidence/log stay behind the disclosure,
+// the real surfaces behind the drill-through. Without a flight id it renders
+// the landing list. Live via `flights-changed` events (refreshKey) + a gentle
+// poll while the flight is active.
 
 /** Stage key → the sidecar dir its adapter pins an agent-session ref into.
  *  Stages without an agent (similarity, scaffold, run…) have no entry. */
@@ -25,24 +30,6 @@ const AGENT_STAGE_DIRS: Partial<Record<FlightStageKey, string>> = {
   'scout': 'scout',
   'prd-summary': 'prd-summary',
   'specs-coverage': 'specs-coverage',
-}
-
-const STAGE_ICON: Record<FlightStage['status'], string> = {
-  'pending': '·',
-  'running': '▸',
-  'waiting-for-approval': '?',
-  'done': '✓',
-  'failed': '✕',
-  'skipped': '↷',
-}
-
-function stageTone(status: FlightStage['status']): string {
-  if (status === 'done') return 'rgb(52, 211, 153)'
-  if (status === 'running') return 'rgb(56, 189, 248)'
-  if (status === 'waiting-for-approval') return 'rgb(251, 191, 36)'
-  if (status === 'failed') return 'var(--danger)'
-  if (status === 'skipped') return 'var(--text-muted)'
-  return 'var(--text-muted)'
 }
 
 /** Drill-through targets: each stage view is a LENS onto the real underlying
@@ -123,12 +110,7 @@ function FlightsLanding({
                   {(f.repoPaths ?? []).join(', ')}
                 </span>
                 <StageMiniRail stages={f.stages ?? []} />
-                <span
-                  className="shrink-0 rounded px-1.5 py-0.5 text-[10.5px] font-medium"
-                  style={{ color: FLIGHT_STATUS_TONE[f.status], border: `1px solid color-mix(in srgb, ${FLIGHT_STATUS_TONE[f.status]} 35%, transparent)` }}
-                >
-                  {flightStatusLabel(f.status)}
-                </span>
+                <FlightStatusChip status={f.status} />
               </button>
             </li>
           ))}
@@ -202,26 +184,25 @@ function FlightDetail({
     <>
       <header className="flex items-center gap-3 border-b px-4 py-2.5" style={{ borderColor: 'var(--border-default)' }}>
         <button type="button" onClick={onBackToList} aria-label="All flights" className="cl-button px-2 py-1 text-xs">←</button>
-        <div className="min-w-0">
+        {/* R17: the title answers "what is this?" alone on its own line; the
+            status chip gets its own slot on the line below so "is it done?"
+            never competes with the name. */}
+        <div className="min-w-0 flex-1">
           <h1 className="truncate text-sm font-semibold">🕊️ {flight.feature}</h1>
-          <div className="truncate text-[10.5px]" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
-            {flight.repoPaths.join(', ')} · "{flight.description}"
+          <div className="mt-0.5 flex min-w-0 items-center gap-2">
+            <span
+              data-testid="flight-status"
+              className="inline-flex shrink-0 items-center gap-1.5 rounded px-1.5 py-0.5 text-[10.5px] font-medium"
+              style={{ color: tone, border: `1px solid color-mix(in srgb, ${tone} 35%, transparent)` }}
+            >
+              {flight.status === 'running' && <StatusDot state="running" className="shrink-0" />}
+              {flightStatusLabel(flight.status)}
+            </span>
+            <span className="truncate text-[10.5px]" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+              {flight.repoPaths.join(', ')} · "{flight.description}"
+            </span>
           </div>
         </div>
-        <span
-          data-testid="flight-status"
-          className="ml-1 shrink-0 rounded px-1.5 py-0.5 text-[10.5px] font-medium"
-          style={{ color: tone, border: `1px solid color-mix(in srgb, ${tone} 35%, transparent)` }}
-        >
-          {flightStatusLabel(flight.status)}
-        </span>
-        {flight.status === 'running' && <StatusDot state="running" className="shrink-0" />}
-        <div className="flex-1" />
-        {flight.links?.evaluationZip && (
-          <span className="truncate text-[10.5px]" title={flight.links.evaluationZip} style={{ color: 'rgb(52, 211, 153)', fontFamily: 'var(--font-mono)' }}>
-            📦 {flight.links.evaluationZip.split('/').pop()}
-          </span>
-        )}
         {flight.status === 'paused' && (
           <button
             type="button"
@@ -255,7 +236,7 @@ function FlightDetail({
         >
           {flight.stages.map((s) => {
             const selected = s.key === stageKey
-            const t = stageTone(s.status)
+            const t = stageStatusTone(s.status)
             return (
               <button
                 key={s.key}
@@ -263,6 +244,7 @@ function FlightDetail({
                 data-testid={`stage-rail-${s.key}`}
                 aria-current={selected ? 'true' : undefined}
                 onClick={() => setSelectedStage(s.key)}
+                title={s.key}
                 className="flex items-center gap-2 rounded px-2 py-1.5 text-left text-[12px] transition-colors hover:bg-white/[0.04]"
                 style={{ background: selected ? 'var(--bg-selected)' : undefined }}
               >
@@ -270,7 +252,7 @@ function FlightDetail({
                   {STAGE_ICON[s.status]}
                 </span>
                 <span className="min-w-0 flex-1 truncate" style={{ color: s.status === 'pending' ? 'var(--text-muted)' : undefined }}>
-                  {s.key}
+                  {stageLabel(s.key)}
                 </span>
                 {s.status === 'running' && <StatusDot state="running" className="shrink-0" />}
               </button>
@@ -282,33 +264,12 @@ function FlightDetail({
           {!stage ? (
             <div className="text-xs" style={{ color: 'var(--text-muted)' }}>Pick a stage.</div>
           ) : (
-            <StageDetail flightId={flightId} flight={flight} stage={stage} onResponded={refetch} drill={drill} />
+            <StageDetail key={stage.key} flightId={flightId} flight={flight} stage={stage} onResponded={refetch} drill={drill} />
           )}
         </main>
       </div>
     </>
   )
-}
-
-/** One human-readable line per settled stage — the harness evidence distilled
- *  (the full JSON stays in the Evidence section below). */
-function stageSummary(stage: FlightStage, flight: FlightManifest): string | null {
-  const ev = (stage.evidence ?? {}) as Record<string, unknown>
-  if (stage.key === 'run' || stage.key === 'heal') {
-    const runId = typeof ev.runId === 'string' ? ev.runId : flight.links?.runId
-    if (!runId) return null
-    const status = typeof ev.status === 'string' ? ev.status : flight.runVerdict
-    const cycles = typeof ev.healCycles === 'number' ? ` · ${ev.healCycles} heal cycle${ev.healCycles === 1 ? '' : 's'}` : ''
-    return `run ${runId}${status ? ` · ${status}` : ''}${cycles}`
-  }
-  if (stage.key === 'portify') {
-    if (typeof ev.workflowId !== 'string') return null
-    return `workflow ${ev.workflowId} · ${ev.edits ? 'edits applied' : 'no edits needed (already injectable)'}`
-  }
-  if (stage.key === 'evaluation-export' && flight.links?.evaluationZip) {
-    return flight.links.evaluationZip.split('/').pop() ?? null
-  }
-  return null
 }
 
 /** The stage's drill-through: a lens button into the real underlying surface. */
@@ -337,6 +298,11 @@ function stageDrillThrough(
   return null
 }
 
+// The trailer (R16): each stage answers exactly three questions — where are we
+// (the state line), what is the agent doing (origin + live output), can I see
+// more (drill-through to the real surface, plus a collapsed details disclosure
+// holding the raw evidence/log audit trail). Anything deeper belongs to the
+// stage's own page, not here.
 function StageDetail({
   flightId,
   flight,
@@ -351,17 +317,20 @@ function StageDetail({
   drill: FlightDrillThroughs
 }) {
   const agentDir = AGENT_STAGE_DIRS[stage.key]
-  const showAgent = Boolean(agentDir) && stage.status !== 'pending' && stage.status !== 'skipped'
-  const summary = stageSummary(stage, flight)
+  const settledOrLive = stage.status !== 'pending' && stage.status !== 'skipped'
+  const showFlightAgent = Boolean(agentDir) && settledOrLive
+  const runId = stage.key === 'run' || stage.key === 'heal'
+    ? ((stage.evidence as Record<string, unknown> | undefined)?.runId as string | undefined) ?? flight.links?.runId
+    : undefined
   const drillThrough = stageDrillThrough(stage, flight, drill)
+  const [detailsOpen, setDetailsOpen] = useState(false)
+  const hasDetails = stage.evidence !== undefined || Boolean(stage.log)
+
   return (
     <>
       <div className="flex items-center gap-2">
-        <h2 className="text-[13px] font-semibold">{stage.key}</h2>
-        <span className="rounded px-1.5 py-0.5 text-[10px] font-medium" style={{ color: stageTone(stage.status), border: `1px solid color-mix(in srgb, ${stageTone(stage.status)} 35%, transparent)` }}>
-          {stage.status}
-        </span>
-        {stage.skipReason && <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>{stage.skipReason}</span>}
+        <h2 className="text-[13px] font-semibold" title={stage.key}>{stageLabel(stage.key)}</h2>
+        <StageStatusChip status={stage.status} />
         <div className="flex-1" />
         {drillThrough && (
           <button
@@ -376,11 +345,10 @@ function StageDetail({
         )}
       </div>
 
-      {summary && (
-        <div data-testid="stage-summary" className="text-[11.5px]" style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>
-          {summary}
-        </div>
-      )}
+      {/* Q1 — where are we. One plain sentence, always present. */}
+      <div data-testid="stage-state-line" className="text-[12px]" style={{ color: 'var(--text-secondary)' }}>
+        {stageStateLine(stage, flight)}
+      </div>
 
       {stage.status === 'failed' && stage.error && (
         <div className="rounded border px-2.5 py-2 text-[11.5px]" style={{ borderColor: 'color-mix(in srgb, var(--danger) 40%, var(--border-default))', color: 'var(--danger)' }}>
@@ -392,28 +360,143 @@ function StageDetail({
         <CheckpointControls flightId={flightId} flight={flight} checkpoint={stage.checkpoint} onResponded={onResponded} />
       )}
 
-      {showAgent && agentDir && (
-        <section className="flex min-h-[240px] flex-1 flex-col rounded border" style={{ borderColor: 'var(--border-default)' }}>
+      {/* Q2 — what is the agent doing. Origin is explicit: flight stages run
+          canary-spawned agents; run/heal branches on the run's heal mode
+          (external MCP client vs canary-spawned) like the run detail does. */}
+      {showFlightAgent && agentDir && (
+        <AgentBlock origin="canary">
           <AgentSessionView source={{ kind: 'flight', flightId, stage: agentDir, live: stage.status === 'running' }} />
-        </section>
+        </AgentBlock>
+      )}
+      {(stage.key === 'run' || stage.key === 'heal') && settledOrLive && runId && (
+        <RunHealAgentBlock runId={runId} live={stage.status === 'running'} />
+      )}
+      {stage.key === 'evaluation-export' && settledOrLive && (
+        <EvaluationExportBlock flight={flight} stage={stage} />
       )}
 
-      {stage.evidence !== undefined && (
+      {/* Q3 — can I see more. The raw evidence/log audit trail, collapsed. */}
+      {hasDetails && (
         <section>
-          <h3 className="mb-1 text-[10.5px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>Evidence</h3>
-          <pre className="overflow-auto rounded border p-2 text-[10.5px]" style={{ borderColor: 'var(--border-default)', fontFamily: 'var(--font-mono)', maxHeight: 220 }}>
-            {JSON.stringify(stage.evidence, null, 2)}
-          </pre>
+          <button
+            type="button"
+            data-testid="stage-details-toggle"
+            aria-expanded={detailsOpen}
+            onClick={() => setDetailsOpen((open) => !open)}
+            className="cl-button px-2 py-0.5 text-[11px]"
+          >
+            {detailsOpen ? '▾ Hide details' : '▸ View details'}
+          </button>
+          {detailsOpen && (
+            <div className="mt-2 flex flex-col gap-2">
+              {stage.evidence !== undefined && (
+                <div>
+                  <h3 className="mb-1 text-[10.5px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>Evidence</h3>
+                  <pre className="overflow-auto rounded border p-2 text-[10.5px]" style={{ borderColor: 'var(--border-default)', fontFamily: 'var(--font-mono)', maxHeight: 220 }}>
+                    {JSON.stringify(stage.evidence, null, 2)}
+                  </pre>
+                </div>
+              )}
+              {stage.log && (
+                <div>
+                  <h3 className="mb-1 text-[10.5px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>Log</h3>
+                  <pre className="overflow-auto whitespace-pre-wrap rounded border p-2 text-[10.5px]" style={{ borderColor: 'var(--border-default)', fontFamily: 'var(--font-mono)', maxHeight: 260 }}>
+                    {stage.log}
+                  </pre>
+                </div>
+              )}
+            </div>
+          )}
         </section>
       )}
+    </>
+  )
+}
 
-      {stage.log && (
-        <section>
-          <h3 className="mb-1 text-[10.5px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>Log</h3>
-          <pre className="overflow-auto whitespace-pre-wrap rounded border p-2 text-[10.5px]" style={{ borderColor: 'var(--border-default)', fontFamily: 'var(--font-mono)', maxHeight: 260 }}>
-            {stage.log}
-          </pre>
-        </section>
+/** Shared frame for the Q2 agent slot: names who is acting before showing what
+ *  they're doing. External surfaces (ExternalHealPanel) brand themselves. */
+function AgentBlock({ origin, children }: { origin: 'canary'; children: ReactNode }) {
+  return (
+    <section className="flex min-h-[240px] flex-1 flex-col gap-1">
+      <span data-testid="agent-origin" className="text-[10.5px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>
+        {origin === 'canary' ? 'Agent · canary-spawned on this server' : origin}
+      </span>
+      <div className="flex min-h-0 flex-1 flex-col rounded border" style={{ borderColor: 'var(--border-default)' }}>
+        {children}
+      </div>
+    </section>
+  )
+}
+
+/** Run/heal Q2: the repair agent's identity + output. External heal claim →
+ *  the branded ExternalAgentCard surface (who is driving, in their own
+ *  window); otherwise the canary-spawned heal agent's session timeline.
+ *  Refetches on a gentle poll while live (the manifest's healMode /
+ *  externalHealSession can appear mid-run). */
+function RunHealAgentBlock({ runId, live }: { runId: string; live: boolean }) {
+  const [detail, setDetail] = useState<RunDetail | null>(null)
+  useEffect(() => {
+    let alive = true
+    const fetchDetail = (): void => {
+      api.getRunDetail(runId).then((d) => { if (alive) setDetail(d) }).catch(() => {})
+    }
+    fetchDetail()
+    if (!live) return () => { alive = false }
+    const id = setInterval(fetchDetail, 5000)
+    return () => { alive = false; clearInterval(id) }
+  }, [runId, live])
+
+  if (!detail) return null
+  const manifest = detail.manifest
+  if (manifest.healMode === 'external') {
+    return (
+      <section data-testid="run-heal-external" className="flex flex-col">
+        <ExternalHealPanel runId={runId} runStatus={manifest.status} session={manifest.externalHealSession} />
+      </section>
+    )
+  }
+  return (
+    <AgentBlock origin="canary">
+      <AgentSessionView source={{ kind: 'run', runId, live }} />
+    </AgentBlock>
+  )
+}
+
+/** Evaluation-export Q2 + the R15 consolidation: the export agent's output and
+ *  an explicit download action live here — no standalone pill anywhere. */
+function EvaluationExportBlock({ flight, stage }: { flight: FlightManifest; stage: FlightStage }) {
+  const { downloadTask } = useEvaluationExports()
+  const [downloadError, setDownloadError] = useState<string | null>(null)
+  const ev = (stage.evidence ?? {}) as Record<string, unknown>
+  const taskId = (typeof ev.taskId === 'string' ? ev.taskId : undefined) ?? flight.links?.evaluationTaskId
+  const zip = (typeof ev.evaluationZip === 'string' ? ev.evaluationZip : undefined) ?? flight.links?.evaluationZip
+
+  return (
+    <>
+      {taskId && zip && (
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            data-testid="flight-download-evaluation"
+            onClick={() => {
+              setDownloadError(null)
+              downloadTask(taskId).catch((err: unknown) => setDownloadError(err instanceof Error ? err.message : String(err)))
+            }}
+            className="cl-button px-2.5 py-1 text-xs"
+            style={{ color: 'rgb(52, 211, 153)' }}
+          >
+            ⬇ Download evaluation (.zip)
+          </button>
+          <span className="truncate text-[10.5px]" title={zip} style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+            {zip.split('/').pop()}
+          </span>
+          {downloadError && <span className="text-[11px]" style={{ color: 'var(--danger)' }}>{downloadError}</span>}
+        </div>
+      )}
+      {taskId && (
+        <AgentBlock origin="canary">
+          <AgentSessionView source={{ kind: 'evaluation', taskId, live: stage.status === 'running' }} />
+        </AgentBlock>
       )}
     </>
   )

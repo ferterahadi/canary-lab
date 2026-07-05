@@ -312,15 +312,19 @@ function RunOverviewTab({
   const duration = durationBetween(manifest.startedAt, manifest.endedAt)
   const [exportMenuOpen, setExportMenuOpen] = useState(false)
   const [exportError, setExportError] = useState(false)
-  const { startExport } = useEvaluationExports()
+  const { startExport, openTask } = useEvaluationExports()
   const { gatePromo } = useMcpPromo()
   const handleExportEvaluation = useCallback(async (mode: EvaluationExportMode) => {
     setExportMenuOpen(false)
     setExportError(false)
     gatePromo('export-evaluation', () => {
-      void Promise.resolve(startExport(manifest.runId, mode)).catch(() => setExportError(true))
+      // R15: the status-bar Exports pill is gone, so surface the task
+      // immediately — starting an export opens the routed export dialog.
+      void Promise.resolve(startExport(manifest.runId, mode))
+        .then((task) => openTask(task.taskId))
+        .catch(() => setExportError(true))
     })
-  }, [gatePromo, manifest.runId, startExport])
+  }, [gatePromo, manifest.runId, openTask, startExport])
 
   return (
     <div className="h-full overflow-y-auto scrollbar-thin p-4 text-sm">

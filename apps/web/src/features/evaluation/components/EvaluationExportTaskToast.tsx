@@ -2,7 +2,6 @@ import { useEvaluationExports } from '../state/EvaluationExportContext'
 import type { EvaluationExportMode, EvaluationExportTask } from '../../../shared/api/types'
 import { AgentSessionView } from '../../agent-sessions/components/AgentSessionView'
 import { CloseIcon, DownloadIcon, StatusDot, type StatusDotState } from '../../config/components/atoms'
-import { StatusPill } from '../../../shared/ui/StatusPill'
 import { clientKindToDesktopAgent, clientLabel, clientTint, shortSession, type ExternalClientKind } from '../../runs/components/external-client-branding'
 import {
   ExternalAgentCard,
@@ -19,7 +18,12 @@ function dotStateForExport(status: EvaluationExportTask['status']): StatusDotSta
   return 'running'
 }
 
-export function EvaluationExportTaskStatus() {
+// R15 (canary-first-flight): the standalone "Exports" status-bar pill is gone —
+// export state lives where the export happens (the flight's Export results
+// stage, the run detail's Review Evaluation action; both open this routed
+// dialog). This host mounts ONLY the dialog; its open-state stays in
+// EvaluationExportContext so the URL routing (R24) is unchanged.
+export function EvaluationExportDialogHost() {
   const {
     tasks,
     latestTask,
@@ -35,18 +39,9 @@ export function EvaluationExportTaskStatus() {
   if (!latestTask) return null
 
   const task = selectedTask ?? latestTask
-  const latestRunLabel = evaluationTaskRunLabel(latestTask)
 
   return (
     <>
-      <StatusPill
-        dotState={dotStateForExport(latestTask.status)}
-        name="Exports"
-        detail={compactStatusLabel(latestTask)}
-        count={tasks.length > 1 ? tasks.length : undefined}
-        onClick={() => openTask(latestTask.taskId)}
-        title={`${statusLabel(latestTask)} · ${latestRunLabel}`}
-      />
       {dialogOpen && task && (
         <EvaluationExportDialog
           tasks={tasks}
@@ -206,20 +201,6 @@ function EvaluationExportDialog({
       </section>
     </div>
   )
-}
-
-function statusLabel(task: EvaluationExportTask): string {
-  if (task.status === 'completed') return 'Evaluation export ready'
-  if (task.status === 'failed') return 'Evaluation export failed'
-  return `Exporting ${modeLabel(task.mode).toLowerCase()}`
-}
-
-// Short status word shown as the pill's muted detail. The pill name already
-// says "Exports", so this drops the redundant "Export" prefix.
-function compactStatusLabel(task: EvaluationExportTask): string {
-  if (task.status === 'completed') return 'Ready'
-  if (task.status === 'failed') return 'Failed'
-  return 'Exporting'
 }
 
 function modeLabel(mode: EvaluationExportMode): string {

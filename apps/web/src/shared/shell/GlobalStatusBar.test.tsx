@@ -40,7 +40,7 @@ vi.mock('../../features/wizard/components/WizardTaskStatus', () => ({
 }))
 
 vi.mock('../../features/evaluation/components/EvaluationExportTaskToast', () => ({
-  EvaluationExportTaskStatus: () => null,
+  EvaluationExportDialogHost: () => null,
 }))
 
 let container: HTMLDivElement
