@@ -1,4 +1,4 @@
-// First Flight fixture app: a dependency-free todo API.
+// Flight fixture app: a dependency-free todo API.
 //
 // Contracts the flight exercises:
 //   - Reads PORT from the environment (native port injection — portify's

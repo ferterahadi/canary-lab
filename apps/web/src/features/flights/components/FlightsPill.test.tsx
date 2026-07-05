@@ -69,10 +69,10 @@ describe('FlightsPill', () => {
     expect(onOpen).toHaveBeenCalledWith('fl_wait')
   })
 
-  it('offers the fly command as the empty state (never dead-end)', () => {
+  it('offers the flight command as the empty state (never dead-end)', () => {
     render([])
     act(() => { container.querySelector<HTMLButtonElement>('[data-testid="flights-pill"] button')?.click() })
-    expect(document.body.querySelector('[data-testid="flights-task-menu"]')?.textContent).toContain('npx canary-lab fly')
+    expect(document.body.querySelector('[data-testid="flights-task-menu"]')?.textContent).toContain('npx canary-lab flight')
   })
 
   it('renders one mini-rail cell per stage', () => {

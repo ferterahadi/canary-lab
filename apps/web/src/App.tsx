@@ -64,7 +64,7 @@ export function App() {
   // coverage / flights). Hydrated from the URL/localStorage (R12) so it
   // survives refresh.
   const [view, setView] = useState<'workspace' | 'cleanup' | 'coverage' | 'flights'>(PERSISTED_VIEW.view)
-  // First Flight surface: the flight list feeds the status-bar pill; the
+  // Flight surface: the flight list feeds the status-bar pill; the
   // selected flight id qualifies ?view=flights so a deep link / refresh
   // re-opens the exact flight (cl_route-every-surface).
   const [flights, setFlights] = useState<FlightIndexEntry[]>([])
@@ -439,9 +439,6 @@ export function App() {
           setView('workspace')
         }}
         onOpenCleanup={() => setView('cleanup')}
-        onOpenCoverage={(feature) => { setSelectedFeature(feature); setView('coverage') }}
-        onStartPortify={(f) => setPortifyTarget({ kind: 'new', feature: f })}
-        onOpenPortify={(workflowId) => setPortifyTarget({ kind: 'revisit', workflowId })}
         flights={flights}
         onOpenFlight={(flightId) => { setSelectedFlightId(flightId); setView('flights') }}
       />
@@ -468,6 +465,14 @@ export function App() {
               refreshKey={flightsRefreshKey}
               onSelectFlight={setSelectedFlightId}
               onClose={() => { setSelectedFlightId(null); setView('workspace') }}
+              onOpenRun={(feature, runId) => {
+                pendingRunSelectionRef.current = null
+                setSelectedFeature(feature)
+                setSelectedRunId(runId)
+                setView('workspace')
+              }}
+              onOpenCoverage={(feature) => { setSelectedFeature(feature); setView('coverage') }}
+              onOpenPortify={(workflowId) => setPortifyTarget({ kind: 'revisit', workflowId })}
             />
           : <ResizablePanels panels={panels} />}
       </div>

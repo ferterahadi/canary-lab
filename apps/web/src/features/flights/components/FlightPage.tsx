@@ -11,7 +11,7 @@ import { AgentSessionView } from '../../agent-sessions/components/AgentSessionVi
 import { StatusDot } from '../../config/components/atoms'
 import { FLIGHT_STATUS_TONE, StageMiniRail, flightStatusLabel } from './FlightsPill'
 
-// First Flight detail — the routed full-screen view (?view=flights&flight=<id>)
+// Flight detail — the routed full-screen view (?view=flights&flight=<id>)
 // that owns a flight's lifecycle: a stage rail on the left (harness-computed
 // verdict per stage), the selected stage's detail on the right (checkpoint
 // controls when the flight is parked, the stage's agent timeline via
@@ -45,21 +45,33 @@ function stageTone(status: FlightStage['status']): string {
   return 'var(--text-muted)'
 }
 
+/** Drill-through targets: each stage view is a LENS onto the real underlying
+ *  surface — the actual run detail, coverage ledger, portify workflow — never
+ *  a re-implementation of them (R6). */
+export interface FlightDrillThroughs {
+  onOpenRun?: (feature: string, runId: string) => void
+  onOpenCoverage?: (feature: string) => void
+  onOpenPortify?: (workflowId: string) => void
+}
+
 export function FlightPage({
   flightId,
   refreshKey,
   onSelectFlight,
   onClose,
+  onOpenRun,
+  onOpenCoverage,
+  onOpenPortify,
 }: {
   flightId: string | null
   refreshKey: number
   onSelectFlight: (flightId: string | null) => void
   onClose: () => void
-}) {
+} & FlightDrillThroughs) {
   return (
     <div className="flex h-full w-full flex-col" style={{ background: 'var(--bg-base)', color: 'var(--text-primary)' }}>
       {flightId
-        ? <FlightDetail flightId={flightId} refreshKey={refreshKey} onClose={onClose} onBackToList={() => onSelectFlight(null)} />
+        ? <FlightDetail flightId={flightId} refreshKey={refreshKey} onClose={onClose} onBackToList={() => onSelectFlight(null)} drill={{ onOpenRun, onOpenCoverage, onOpenPortify }} />
         : <FlightsLanding refreshKey={refreshKey} onSelectFlight={onSelectFlight} onClose={onClose} />}
     </div>
   )
@@ -84,9 +96,9 @@ function FlightsLanding({
   return (
     <>
       <header className="flex items-center gap-3 border-b px-4 py-2.5" style={{ borderColor: 'var(--border-default)' }}>
-        <h1 className="text-sm font-semibold">🕊️ First Flights</h1>
+        <h1 className="text-sm font-semibold">🕊️ Flights</h1>
         <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
-          npx canary-lab fly &lt;repo&gt; "what to test"
+          npx canary-lab flight &lt;repo&gt; "what to test"
         </span>
         <div className="flex-1" />
         <button type="button" onClick={onClose} className="cl-button px-2.5 py-1 text-xs">Close</button>
@@ -131,11 +143,13 @@ function FlightDetail({
   refreshKey,
   onBackToList,
   onClose,
+  drill,
 }: {
   flightId: string
   refreshKey: number
   onBackToList: () => void
   onClose: () => void
+  drill: FlightDrillThroughs
 }) {
   const [flight, setFlight] = useState<FlightManifest | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -268,7 +282,7 @@ function FlightDetail({
           {!stage ? (
             <div className="text-xs" style={{ color: 'var(--text-muted)' }}>Pick a stage.</div>
           ) : (
-            <StageDetail flightId={flightId} flight={flight} stage={stage} onResponded={refetch} />
+            <StageDetail flightId={flightId} flight={flight} stage={stage} onResponded={refetch} drill={drill} />
           )}
         </main>
       </div>
@@ -276,19 +290,70 @@ function FlightDetail({
   )
 }
 
+/** One human-readable line per settled stage — the harness evidence distilled
+ *  (the full JSON stays in the Evidence section below). */
+function stageSummary(stage: FlightStage, flight: FlightManifest): string | null {
+  const ev = (stage.evidence ?? {}) as Record<string, unknown>
+  if (stage.key === 'run' || stage.key === 'heal') {
+    const runId = typeof ev.runId === 'string' ? ev.runId : flight.links?.runId
+    if (!runId) return null
+    const status = typeof ev.status === 'string' ? ev.status : flight.runVerdict
+    const cycles = typeof ev.healCycles === 'number' ? ` · ${ev.healCycles} heal cycle${ev.healCycles === 1 ? '' : 's'}` : ''
+    return `run ${runId}${status ? ` · ${status}` : ''}${cycles}`
+  }
+  if (stage.key === 'portify') {
+    if (typeof ev.workflowId !== 'string') return null
+    return `workflow ${ev.workflowId} · ${ev.edits ? 'edits applied' : 'no edits needed (already injectable)'}`
+  }
+  if (stage.key === 'evaluation-export' && flight.links?.evaluationZip) {
+    return flight.links.evaluationZip.split('/').pop() ?? null
+  }
+  return null
+}
+
+/** The stage's drill-through: a lens button into the real underlying surface. */
+function stageDrillThrough(
+  stage: FlightStage,
+  flight: FlightManifest,
+  drill: FlightDrillThroughs,
+): { label: string; onClick: () => void } | null {
+  const ev = (stage.evidence ?? {}) as Record<string, unknown>
+  if (stage.key === 'run' || stage.key === 'heal') {
+    const runId = typeof ev.runId === 'string' ? ev.runId : flight.links?.runId
+    if (runId && drill.onOpenRun) {
+      const open = drill.onOpenRun
+      return { label: 'Open run detail →', onClick: () => open(flight.feature, runId) }
+    }
+  }
+  if ((stage.key === 'specs-coverage' || stage.key === 'prd-summary') && drill.onOpenCoverage && stage.status !== 'pending') {
+    const open = drill.onOpenCoverage
+    return { label: 'Open coverage ledger →', onClick: () => open(flight.feature) }
+  }
+  if (stage.key === 'portify' && drill.onOpenPortify && typeof ev.workflowId === 'string') {
+    const open = drill.onOpenPortify
+    const workflowId = ev.workflowId
+    return { label: 'Open portify workflow →', onClick: () => open(workflowId) }
+  }
+  return null
+}
+
 function StageDetail({
   flightId,
   flight,
   stage,
   onResponded,
+  drill,
 }: {
   flightId: string
   flight: FlightManifest
   stage: FlightStage
   onResponded: () => void
+  drill: FlightDrillThroughs
 }) {
   const agentDir = AGENT_STAGE_DIRS[stage.key]
   const showAgent = Boolean(agentDir) && stage.status !== 'pending' && stage.status !== 'skipped'
+  const summary = stageSummary(stage, flight)
+  const drillThrough = stageDrillThrough(stage, flight, drill)
   return (
     <>
       <div className="flex items-center gap-2">
@@ -297,7 +362,25 @@ function StageDetail({
           {stage.status}
         </span>
         {stage.skipReason && <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>{stage.skipReason}</span>}
+        <div className="flex-1" />
+        {drillThrough && (
+          <button
+            type="button"
+            data-testid={`stage-drill-${stage.key}`}
+            onClick={drillThrough.onClick}
+            className="cl-button shrink-0 px-2 py-0.5 text-[11px]"
+            style={{ color: 'rgb(56, 189, 248)' }}
+          >
+            {drillThrough.label}
+          </button>
+        )}
       </div>
+
+      {summary && (
+        <div data-testid="stage-summary" className="text-[11.5px]" style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>
+          {summary}
+        </div>
+      )}
 
       {stage.status === 'failed' && stage.error && (
         <div className="rounded border px-2.5 py-2 text-[11.5px]" style={{ borderColor: 'color-mix(in srgb, var(--danger) 40%, var(--border-default))', color: 'var(--danger)' }}>

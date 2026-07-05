@@ -2,14 +2,14 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { parseFlyArgs, deriveFeatureName, findWorkspaceRoot } from './fly'
+import { parseFlightArgs, deriveFeatureName, findWorkspaceRoot } from './flight'
 
-describe('parseFlyArgs', () => {
+describe('parseFlightArgs', () => {
   const dirs = new Set(['/repo/shop', '/repo/api'])
   const isDir = (p: string) => dirs.has(p)
 
   it('splits positionals into repo paths + trailing description', () => {
-    const parsed = parseFlyArgs(['/repo/shop', '/repo/api', 'checkout flow'], isDir)
+    const parsed = parseFlightArgs(['/repo/shop', '/repo/api', 'checkout flow'], isDir)
     expect(parsed.ok).toBe(true)
     if (!parsed.ok) return
     expect(parsed.args.repoPaths).toEqual([path.resolve('/repo/shop'), path.resolve('/repo/api')])
@@ -22,7 +22,7 @@ describe('parseFlyArgs', () => {
   })
 
   it('parses every flag', () => {
-    const parsed = parseFlyArgs(
+    const parsed = parseFlightArgs(
       ['/repo/shop', 'desc', '--feature', 'checkout', '--env', 'staging', '--coverage-target', '80', '--base', 'develop', '--yolo', '--fresh'],
       isDir,
     )
@@ -39,21 +39,21 @@ describe('parseFlyArgs', () => {
   })
 
   it('rejects a missing description (last positional is a directory)', () => {
-    const parsed = parseFlyArgs(['/repo/shop', '/repo/api'], isDir)
+    const parsed = parseFlightArgs(['/repo/shop', '/repo/api'], isDir)
     expect(parsed).toMatchObject({ ok: false, error: expect.stringContaining('is a directory') })
   })
 
   it('rejects a repo path that does not exist', () => {
-    const parsed = parseFlyArgs(['/repo/shop', '/repo/nope', 'desc'], isDir)
+    const parsed = parseFlightArgs(['/repo/shop', '/repo/nope', 'desc'], isDir)
     expect(parsed).toMatchObject({ ok: false, error: expect.stringContaining('/repo/nope') })
   })
 
   it('rejects too few positionals, unknown flags, bad coverage targets, and missing flag values', () => {
-    expect(parseFlyArgs(['desc'], isDir).ok).toBe(false)
-    expect(parseFlyArgs(['/repo/shop', 'desc', '--wat'], isDir).ok).toBe(false)
-    expect(parseFlyArgs(['/repo/shop', 'desc', '--coverage-target', '150'], isDir).ok).toBe(false)
-    expect(parseFlyArgs(['/repo/shop', 'desc', '--feature'], isDir).ok).toBe(false)
-    expect(parseFlyArgs(['/repo/shop', 'desc', '--feature', '--yolo'], isDir).ok).toBe(false)
+    expect(parseFlightArgs(['desc'], isDir).ok).toBe(false)
+    expect(parseFlightArgs(['/repo/shop', 'desc', '--wat'], isDir).ok).toBe(false)
+    expect(parseFlightArgs(['/repo/shop', 'desc', '--coverage-target', '150'], isDir).ok).toBe(false)
+    expect(parseFlightArgs(['/repo/shop', 'desc', '--feature'], isDir).ok).toBe(false)
+    expect(parseFlightArgs(['/repo/shop', 'desc', '--feature', '--yolo'], isDir).ok).toBe(false)
   })
 })
 
@@ -70,7 +70,7 @@ describe('deriveFeatureName', () => {
 describe('findWorkspaceRoot', () => {
   let tmpDir: string
   beforeEach(() => {
-    tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-fly-ws-')))
+    tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-flight-ws-')))
   })
   afterEach(() => fs.rmSync(tmpDir, { recursive: true, force: true }))
 

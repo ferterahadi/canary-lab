@@ -8,14 +8,22 @@ import {
 import { FlightRunStore, type FlightStore } from '../logic/store'
 import {
   FlightConflictError,
+  FlightExistsError,
+  FlightStageEntryError,
   startFlight,
   resumeFlight,
   respondToFlightCheckpoint,
   abortFlight,
   type FlightConductorDeps,
+  type FlightEntryMode,
   type StageAdapters,
 } from '../logic/conductor'
-import type { FlightCheckpointResponse, FlightOptions } from '../logic/types'
+import {
+  FLIGHT_STAGE_KEYS,
+  type FlightCheckpointResponse,
+  type FlightOptions,
+  type FlightStageKey,
+} from '../logic/types'
 import type { WorkspaceEventPublisher } from '../../../shared/workspace-events'
 
 export interface FlightRouteDeps {
@@ -31,11 +39,58 @@ export interface FlightRouteDeps {
   workspaceEvents?: WorkspaceEventPublisher
 }
 
-// First Flight REST surface — the same store/conductor the MCP flight tools
+// Flight REST surface — the same store/conductor the MCP flight tools
 // drive (dual-surface parity). Start is non-blocking: it validates input,
 // creates the running manifest, kicks the conductor off detached, and returns
 // 201 with the manifest; progress is read back via GET (UI/CLI poll or ride
 // the `flights-changed` WorkspaceEvent).
+
+/** Harness-side prerequisite check for a `fromStage` entry. Each stage that
+ *  would be skipped must already have its on-disk artifact — the same evidence
+ *  the stage itself would have produced. Returns the FIRST missing
+ *  prerequisite as a human-readable reason, or null when the jump is OK. */
+export function buildStageEntryValidator(featuresDir: string) {
+  return (args: {
+    feature: string
+    fromStage: FlightStageKey
+    env: string
+    existing?: { links?: { runId?: string } } | null
+  }): string | null => {
+    const { feature, fromStage, env } = args
+    const featureDir = path.join(featuresDir, feature)
+    const after = (stage: FlightStageKey) =>
+      FLIGHT_STAGE_KEYS.indexOf(fromStage) > FLIGHT_STAGE_KEYS.indexOf(stage)
+
+    if (fromStage === 'heal') {
+      return 'cannot start at "heal" — heal is driven by the run stage; use --from-stage run'
+    }
+    if (after('scaffold') && !fs.existsSync(path.join(featureDir, 'feature.config.cjs'))) {
+      return `cannot start at "${fromStage}": feature "${feature}" has no feature.config.cjs (scaffold prerequisite) — start from scout/scaffold instead`
+    }
+    if (after('env-capture')) {
+      const envsetDir = path.join(featureDir, 'envsets', env)
+      const hasEnvset = fs.existsSync(envsetDir) && fs.readdirSync(envsetDir).length > 0
+      if (!hasEnvset) {
+        return `cannot start at "${fromStage}": no captured envset at envsets/${env}/ (env-capture prerequisite) — start from env-capture instead`
+      }
+    }
+    if (after('prd-summary') && !fs.existsSync(path.join(featureDir, 'docs', '_prd-summary.json'))) {
+      return `cannot start at "${fromStage}": no PRD summary at docs/_prd-summary.json (prd-summary prerequisite) — start from docs instead`
+    }
+    if (after('specs-coverage')) {
+      const e2eDir = path.join(featureDir, 'e2e')
+      const hasSpecs =
+        fs.existsSync(e2eDir) && fs.readdirSync(e2eDir).some((f) => /\.spec\.[cm]?[jt]sx?$/.test(f))
+      if (!hasSpecs) {
+        return `cannot start at "${fromStage}": no specs under e2e/ (specs-coverage prerequisite) — start from specs-coverage instead`
+      }
+    }
+    if (fromStage === 'evaluation-export' && !args.existing?.links?.runId) {
+      return 'cannot start at "evaluation-export": the flight record has no run yet (run prerequisite) — start from run instead'
+    }
+    return null
+  }
+}
 
 export async function flightsRoutes(app: FastifyInstance, deps: FlightRouteDeps): Promise<void> {
   const store = deps.flightStore ?? new FlightRunStore(deps.logsDir)
@@ -43,6 +98,7 @@ export async function flightsRoutes(app: FastifyInstance, deps: FlightRouteDeps)
     store,
     adapters: deps.adapters,
     workspaceEvents: deps.workspaceEvents,
+    validateStageEntry: buildStageEntryValidator(deps.featuresDir),
   }
 
   app.get('/api/flights', async () => ({ flights: store.list() }))
@@ -66,10 +122,26 @@ export async function flightsRoutes(app: FastifyInstance, deps: FlightRouteDeps)
           coverageTarget?: number
           base?: string
           yolo?: boolean
+          /** continue | redo | jump — required when the feature already has a
+           *  flight record (409 flight_exists_requires_choice otherwise). */
+          mode?: string
+          /** Stage to start at (jump / fresh stage entry), prereq-validated. */
+          fromStage?: string
         }
       | undefined
   }>('/api/flights', async (req, reply) => {
     const body = req.body ?? {}
+    if (body.mode !== undefined && !['continue', 'redo', 'jump'].includes(body.mode)) {
+      reply.code(400)
+      return { error: `invalid mode: ${body.mode} (expected continue | redo | jump)` }
+    }
+    if (
+      body.fromStage !== undefined &&
+      !(FLIGHT_STAGE_KEYS as readonly string[]).includes(body.fromStage)
+    ) {
+      reply.code(400)
+      return { error: `invalid fromStage: ${body.fromStage} (expected one of ${FLIGHT_STAGE_KEYS.join(', ')})` }
+    }
     const repoPaths = Array.isArray(body.repoPaths) ? body.repoPaths : []
     if (repoPaths.length === 0 || repoPaths.some((p) => typeof p !== 'string')) {
       reply.code(400)
@@ -110,7 +182,14 @@ export async function flightsRoutes(app: FastifyInstance, deps: FlightRouteDeps)
 
     try {
       const { manifest } = startFlight(
-        { feature: body.feature.trim(), repoPaths: resolved, description: body.description.trim(), opts },
+        {
+          feature: body.feature.trim(),
+          repoPaths: resolved,
+          description: body.description.trim(),
+          opts,
+          ...(body.mode ? { mode: body.mode as FlightEntryMode } : {}),
+          ...(body.fromStage ? { fromStage: body.fromStage as FlightStageKey } : {}),
+        },
         conductorDeps,
       )
       reply.code(201)
@@ -119,6 +198,20 @@ export async function flightsRoutes(app: FastifyInstance, deps: FlightRouteDeps)
       if (err instanceof FlightConflictError) {
         reply.code(409)
         return { error: err.message, type: 'flight_conflict', existingFlightId: err.existingFlightId }
+      }
+      if (err instanceof FlightExistsError) {
+        reply.code(409)
+        return {
+          error: err.message,
+          type: 'flight_exists_requires_choice',
+          existingFlightId: err.existingFlightId,
+          existingStatus: err.existingStatus,
+          options: err.options,
+        }
+      }
+      if (err instanceof FlightStageEntryError) {
+        reply.code(400)
+        return { error: err.message, type: 'stage_entry_rejected' }
       }
       throw err
     }

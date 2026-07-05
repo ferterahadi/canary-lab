@@ -162,3 +162,78 @@ describe('FlightPage', () => {
     expect(asv?.getAttribute('data-stage')).toBe('scout')
   })
 })
+
+describe('stage summary + drill-through (R6)', () => {
+  async function renderWithDrill(m: FlightManifest, drill: { onOpenRun?: ReturnType<typeof vi.fn>; onOpenCoverage?: ReturnType<typeof vi.fn>; onOpenPortify?: ReturnType<typeof vi.fn> }) {
+    mocks.getFlight.mockResolvedValue(m)
+    await act(async () => {
+      root.render(
+        <FlightPage flightId="fl_1" refreshKey={0} onSelectFlight={vi.fn()} onClose={vi.fn()} {...drill} />,
+      )
+    })
+  }
+
+  it('run stage shows the harness summary and drills through to the run detail', async () => {
+    const onOpenRun = vi.fn()
+    await renderWithDrill(manifest({
+      status: 'done',
+      currentStage: null,
+      links: { runId: 'run-9' },
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({
+        key,
+        status: 'done' as const,
+        ...(key === 'run' ? { evidence: { runId: 'run-9', status: 'passed', healCycles: 2 } } : {}),
+      })),
+    }), { onOpenRun })
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-run"]')?.click()
+    })
+    expect(container.querySelector('[data-testid="stage-summary"]')?.textContent).toBe('run run-9 · passed · 2 heal cycles')
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="stage-drill-run"]')?.click()
+    })
+    expect(onOpenRun).toHaveBeenCalledWith('checkout', 'run-9')
+  })
+
+  it('specs-coverage drills through to the coverage ledger; portify to its workflow', async () => {
+    const onOpenCoverage = vi.fn()
+    const onOpenPortify = vi.fn()
+    await renderWithDrill(manifest({
+      status: 'done',
+      currentStage: null,
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({
+        key,
+        status: 'done' as const,
+        ...(key === 'portify' ? { evidence: { workflowId: 'wf-3', edits: false } } : {}),
+      })),
+    }), { onOpenCoverage, onOpenPortify })
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-specs-coverage"]')?.click()
+    })
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="stage-drill-specs-coverage"]')?.click()
+    })
+    expect(onOpenCoverage).toHaveBeenCalledWith('checkout')
+
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-portify"]')?.click()
+    })
+    expect(container.querySelector('[data-testid="stage-summary"]')?.textContent).toContain('no edits needed')
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="stage-drill-portify"]')?.click()
+    })
+    expect(onOpenPortify).toHaveBeenCalledWith('wf-3')
+  })
+
+  it('renders no drill-through when no handler is wired (lens is optional)', async () => {
+    await renderWithDrill(manifest({
+      status: 'done',
+      currentStage: null,
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({ key, status: 'done' as const })),
+    }), {})
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-run"]')?.click()
+    })
+    expect(container.querySelector('[data-testid="stage-drill-run"]')).toBeNull()
+  })
+})

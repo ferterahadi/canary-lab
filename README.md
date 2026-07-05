@@ -9,6 +9,8 @@
 
 Coding agents optimize for the literal instruction — *"tests pass," "done," "fixed"* — which isn't always the same as the code working as intended, and an agent that both writes and grades its own run can mark it green. Canary Lab is the independent harness on your machine: it boots your real services, runs your Playwright tests **itself**, and owns the verdict. Green means it actually passed.
 
+Canary Lab doesn't replace Playwright or your agent — it gives both of them steroids. Playwright still runs the tests; the LLM still writes the code and the fixes. Canary Lab owns everything around them: booting real services, isolating ports and worktrees, grounding coverage in requirements, driving the repair loop on evidence, and rendering the proof. The intended loop is simple: **implement a feature with your agent → invoke Canary Lab as the eval → review the evaluation export** (per-test reasoning + verdicts, with video playback where the tests drive a browser). The evaluation report is the deliverable, not the green checkmark.
+
 ![Canary Lab end-to-end: an AI agent scaffolds a Checkout test suite, checks requirement coverage (47%), authors more tests to reach 100%, runs the suite green (12/12), and exports a verified evaluation report](docs/assets/canary-lab.gif)
 
 **One command, from your workspace:**
@@ -106,21 +108,21 @@ Canary Lab earns its place when a failure depends on more than a browser asserti
 
 Compose runs services as images, so a one-line fix waits on a rebuild. Canary Lab runs the dev commands you already use (`npm run dev`, `./gradlew bootRun`): hot reload picks up the fix in seconds, no Dockerfile. Use both — `docker compose up postgres redis` in a Canary Lab `startCommand` for infra, Canary Lab for your app services in dev mode.
 
-## Quick Start — one command: `fly`
+## Quick Start — one command: `flight`
 
 Point Canary Lab at a bare product repo and say what to test:
 
 ```bash
-npx canary-lab fly ../your-app "checkout flow"
+npx canary-lab flight ../your-app "checkout flow"
 ```
 
-`fly` conducts the whole onboarding as one background flight — an agent does every stage, the harness computes every verdict, and you only answer a few checkpoints:
+`flight` conducts the whole onboarding as one background flight — an agent does every stage, the harness computes every verdict, and you only answer a few checkpoints:
 
 scout the repo → draft `feature.config.cjs` (you approve) → capture env files → gather/infer the PRD → author specs until requirement coverage hits 100% → port-ify → run → heal to green → **export the evaluation archive** (the flight's deliverable).
 
-| | Before (manual) | After (`fly`) |
+| | Before (manual) | After (`flight`) |
 |---|---|---|
-| Entry | `init`, learn UI/MCP, then per-feature setup | `npx canary-lab fly ../shop "checkout flow"` |
+| Entry | `init`, learn UI/MCP, then per-feature setup | `npx canary-lab flight ../shop "checkout flow"` |
 | feature.config.cjs | hand-written: repos, startCommands, `${port.api}`, healthCheck | agent scouts the repo and drafts it; a dry-run boot verifies it |
 | Env → envsets | know + call the capture tool yourself | automatic; missing secrets are the one checkpoint never skipped |
 | Docs/PRD | copy files into `docs/`, trigger the summary | drop a PRD at the checkpoint — else inferred from repo docs / the diff vs your base branch |
@@ -128,9 +130,9 @@ scout the repo → draft `feature.config.cjs` (you approve) → capture env file
 | Run + heal + proof | drive the loop, export manually | stages; the flight ends with the evaluation archive on disk |
 | Human steps | ~10, expert knowledge required | 1 command + approve checkpoints (`--yolo` skips all but missing secrets) |
 
-Re-running `fly` on the same repo never duplicates work: an interrupted flight resumes from its failed stage, and a finished one parks on a rerun / enhance / new choice. Watch it live in the web UI's **Flights** pill, or drive the same flight from Claude/Codex over MCP (`start_flight`).
+Re-running `flight` on the same repo never duplicates work: an interrupted flight resumes from its failed stage, and a finished one parks on a rerun / enhance / new choice. Watch it live in the web UI's **Flights** pill, or drive the same flight from Claude/Codex over MCP (`start_flight`).
 
-`fly` creates the workspace if none exists. To set one up yourself (sample features included):
+`flight` creates the workspace if none exists. To set one up yourself (sample features included):
 
 ```bash
 npx canary-lab init my-lab

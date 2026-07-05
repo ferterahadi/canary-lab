@@ -3,7 +3,7 @@ import type { FlightIndexEntry, FlightManifest, FlightStageKey } from './types'
 import { isActiveFlightStatus } from './types'
 import { FileBackedTaskStore, type TaskStoreEvent } from '../../../../../../shared/lib/file-backed-task-store'
 
-// File-backed, event-emitting store for First Flight background jobs. A thin
+// File-backed, event-emitting store for Flight background jobs. A thin
 // wrapper over the shared FileBackedTaskStore: it owns the flight-specific
 // index shape, the repo-keyed single-flight lookup, and the reconcile policy;
 // the generic store owns the layout (<logs>/flights/<id>/flight.json +
@@ -11,7 +11,7 @@ import { FileBackedTaskStore, type TaskStoreEvent } from '../../../../../../shar
 //
 // Reconcile marks a dead process's `running` flight `paused` — NOT `aborted` —
 // because flights are resumable by design: the stage array records exactly
-// where to pick up, and `fly` on the same repo resumes from the first open
+// where to pick up, and `flight` on the same repo resumes from the first open
 // stage. The mid-flight `running` stage flips back to `pending` so resume
 // re-runs it from its own postcondition check.
 
@@ -27,8 +27,12 @@ export interface FlightStore {
    *  single-flight key — two flights must never conduct the same product repo). */
   activeForRepos(repoPaths: string[]): FlightIndexEntry | null
   /** The most recent flight (any status) whose repo set intersects `repoPaths`
-   *  — the resume/similarity entry point for a repeated `fly`. */
+   *  — the resume/similarity entry point for a repeated `flight`. */
   latestForRepos(repoPaths: string[]): FlightIndexEntry | null
+  /** The feature's flight record, if any. A feature has at most one flight —
+   *  the conductor continues/redoes/jumps this record instead of minting a
+   *  second manifest (newest-first fallback covers pre-invariant history). */
+  latestForFeature(feature: string): FlightIndexEntry | null
   save(manifest: FlightManifest): void
   remove(flightId: string): void
   /** Per-flight sidecar dir (agent-session refs, stage artifacts). */
@@ -80,7 +84,7 @@ export class FlightRunStore implements FlightStore {
           stages: m.stages.map((s) =>
             s.status === 'running' ? { ...s, status: 'pending' as const } : s,
           ),
-          error: m.error ?? 'Interrupted by server restart — resume with `canary-lab fly`',
+          error: m.error ?? 'Interrupted by server restart — resume with `canary-lab flight`',
         }),
       },
     })
@@ -106,6 +110,10 @@ export class FlightRunStore implements FlightStore {
   latestForRepos(repoPaths: string[]): FlightIndexEntry | null {
     // list() is newest-first (sortNewestFirst), so the first hit is the latest.
     return this.list().find((e) => repoSetsIntersect(e.repoPaths ?? [], repoPaths)) ?? null
+  }
+
+  latestForFeature(feature: string): FlightIndexEntry | null {
+    return this.list().find((e) => e.feature === feature) ?? null
   }
 
   save(manifest: FlightManifest): void {

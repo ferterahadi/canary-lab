@@ -1,6 +1,6 @@
 # first-flight-app
 
-Tiny todo API used as the Canary Lab **First Flight** E2E fixture.
+Tiny todo API used as the Canary Lab **Flight** E2E fixture.
 
 ## Requirements
 

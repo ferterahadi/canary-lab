@@ -20,7 +20,7 @@ import {
   type FlightStageStatus,
 } from '../shared/flights/types'
 
-// `canary-lab fly <repo...> "<what to test>"` — the one-command entry that
+// `canary-lab flight <repo...> "<what to test>"` — the one-command entry that
 // takes a bare product repo to a green, covered, healed run ending in an
 // evaluation export. This command is a thin client: it locates (or inits) the
 // workspace, makes sure the UI server is up, starts/resumes the flight over
@@ -28,7 +28,7 @@ import {
 // terminal and answers checkpoints interactively. The conductor — and every
 // stage verdict — lives server-side.
 
-export interface FlyArgs {
+export interface FlightArgs {
   repoPaths: string[]
   description: string
   feature?: string
@@ -37,9 +37,14 @@ export interface FlyArgs {
   base?: string
   yolo: boolean
   fresh: boolean
+  /** Restart the feature's existing flight from stage 1 (discards its stage
+   *  evidence). Distinct from --fresh, which is for a brand-new feature. */
+  redo: boolean
+  /** Start at a chosen stage instead of stage 1 (prereq-validated server-side). */
+  fromStage?: string
 }
 
-export type FlyParseResult = { ok: true; args: FlyArgs } | { ok: false; error: string }
+export type FlightParseResult = { ok: true; args: FlightArgs } | { ok: false; error: string }
 
 function defaultIsDir(p: string): boolean {
   try {
@@ -49,7 +54,7 @@ function defaultIsDir(p: string): boolean {
   }
 }
 
-export function parseFlyArgs(argv: string[], isDir: (p: string) => boolean = defaultIsDir): FlyParseResult {
+export function parseFlightArgs(argv: string[], isDir: (p: string) => boolean = defaultIsDir): FlightParseResult {
   const positionals: string[] = []
   let feature: string | undefined
   let env = 'local'
@@ -57,18 +62,22 @@ export function parseFlyArgs(argv: string[], isDir: (p: string) => boolean = def
   let base: string | undefined
   let yolo = false
   let fresh = false
+  let redo = false
+  let fromStage: string | undefined
 
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i]
     if (arg === '--yolo') { yolo = true; continue }
     if (arg === '--fresh') { fresh = true; continue }
-    if (arg === '--feature' || arg === '--env' || arg === '--base' || arg === '--coverage-target') {
+    if (arg === '--redo') { redo = true; continue }
+    if (arg === '--feature' || arg === '--env' || arg === '--base' || arg === '--coverage-target' || arg === '--from-stage') {
       const value = argv[i + 1]
       if (value === undefined || value.startsWith('--')) return { ok: false, error: `Missing value for ${arg}` }
       i += 1
       if (arg === '--feature') feature = value
       else if (arg === '--env') env = value
       else if (arg === '--base') base = value
+      else if (arg === '--from-stage') fromStage = value
       else {
         const pct = Number(value)
         if (!Number.isFinite(pct) || pct < 0 || pct > 100) {
@@ -83,7 +92,7 @@ export function parseFlyArgs(argv: string[], isDir: (p: string) => boolean = def
   }
 
   if (positionals.length < 2) {
-    return { ok: false, error: 'Usage: canary-lab fly <repo-path...> "<what to test>" — needs at least one repo path and a description' }
+    return { ok: false, error: 'Usage: canary-lab flight <repo-path...> "<what to test>" — needs at least one repo path and a description' }
   }
   const description = positionals[positionals.length - 1]
   const repos = positionals.slice(0, -1)
@@ -105,6 +114,8 @@ export function parseFlyArgs(argv: string[], isDir: (p: string) => boolean = def
       ...(base ? { base } : {}),
       yolo,
       fresh,
+      redo,
+      ...(fromStage ? { fromStage } : {}),
     },
   }
 }
@@ -172,7 +183,7 @@ async function requestJson(
         : {}),
     })
   } catch {
-    fail(`Lost the Canary Lab server mid-flight (${url}). Restart it with \`npx canary-lab ui\`, then \`fly\` again — the flight resumes where it stopped.`)
+    fail(`Lost the Canary Lab server mid-flight (${url}). Restart it with \`npx canary-lab ui\`, then \`flight\` again — the flight resumes where it stopped.`)
     process.exit(1)
   }
   const json = (await resp.json().catch(() => ({}))) as Record<string, unknown>
@@ -269,7 +280,7 @@ async function watchFlight(base: string, flightId: string): Promise<number> {
       if (stage?.checkpoint) {
         if (!process.stdin.isTTY) {
           info(`Waiting for approval: ${stage.checkpoint.message}`)
-          info(`Answer from the web UI at ${dim(base)} (or \`fly\` again from a terminal).`)
+          info(`Answer from the web UI at ${dim(base)} (or \`flight\` again from a terminal).`)
           return 2
         }
         const response = await promptCheckpoint(stage.checkpoint)
@@ -285,10 +296,13 @@ async function watchFlight(base: string, flightId: string): Promise<number> {
       line()
       if (manifest.status === 'done') {
         ok(`Flight ${flightId} complete — run ${manifest.runVerdict ?? 'n/a'}.`)
-        if (manifest.links?.evaluationZip) info(`Evaluation archive: ${dim(manifest.links.evaluationZip)}`)
+        if (manifest.links?.evaluationZip) {
+          info(`Next: review the evaluation — unzip ${dim(manifest.links.evaluationZip)}`)
+          info('and open evaluation.html (per-test reasoning + verdicts; video playback where the tests drive a browser).')
+        }
       } else if (manifest.status === 'paused') {
         fail(`Flight ${flightId} paused: ${manifest.error ?? 'a stage failed'}.`)
-        info('Fix the cause if needed, then `canary-lab fly` the same repo again to resume from the failed stage (`--fresh` starts over).')
+        info('Fix the cause if needed, then `canary-lab flight` the same repo again to resume from the failed stage (`--fresh` starts over).')
       } else {
         fail(`Flight ${flightId} ${manifest.status}${manifest.error ? `: ${manifest.error}` : ''}.`)
       }
@@ -300,13 +314,13 @@ async function watchFlight(base: string, flightId: string): Promise<number> {
 }
 
 function usage(): void {
-  banner('Canary Lab — fly')
+  banner('Canary Lab — flight')
   section('Usage')
-  console.log(`  canary-lab fly <repo-path...> "<what to test>" ${dim('[--feature <name>] [--env <envset>]')}`)
-  console.log(`                 ${dim('[--coverage-target <pct>] [--base <branch>] [--yolo] [--fresh]')}`)
+  console.log(`  canary-lab flight <repo-path...> "<what to test>" ${dim('[--feature <name>] [--env <envset>]')}`)
+  console.log(`                 ${dim('[--coverage-target <pct>] [--base <branch>] [--from-stage <key>] [--redo] [--yolo] [--fresh]')}`)
   line()
   info('One command: repo → scaffold → env → PRD → specs↔coverage → portify → run → heal → evaluation export.')
-  info('Re-running `fly` resumes an interrupted flight; `--fresh` starts over; `--yolo` skips all checkpoints except missing secrets.')
+  info('Re-running `flight` resumes an interrupted flight; `--redo` restarts the feature\'s flight from stage 1; `--from-stage <key>` starts at a chosen stage (prerequisites checked); `--fresh` is for a brand-new feature; `--yolo` skips all checkpoints except missing secrets.')
 }
 
 export async function main(args = process.argv.slice(2)): Promise<void> {
@@ -314,17 +328,17 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
     usage()
     return
   }
-  const parsed = parseFlyArgs(args)
+  const parsed = parseFlightArgs(args)
   if (!parsed.ok) {
     fail(parsed.error)
     usage()
     process.exit(1)
     return
   }
-  const fly = parsed.args
-  const feature = deriveFeatureName(fly.repoPaths, fly.feature)
+  const flight = parsed.args
+  const feature = deriveFeatureName(flight.repoPaths, flight.feature)
 
-  banner('Canary Lab — first flight')
+  banner('Canary Lab — flight')
 
   // Locate or create the workspace, then make sure its server is up.
   let workspaceRoot = findWorkspaceRoot(process.cwd())
@@ -340,13 +354,25 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
   // its first open stage; `--fresh` always starts a new flight (the server
   // still 409s while one is genuinely active).
   const listed = await requestJson('GET', `${base}/api/flights`)
-  const latest = latestForRepos(((listed.json.flights ?? []) as FlightIndexEntry[]), fly.repoPaths)
+  const latest = latestForRepos(((listed.json.flights ?? []) as FlightIndexEntry[]), flight.repoPaths)
+
+  const startBody = (mode?: string, fromStage?: string) => ({
+    feature,
+    repoPaths: flight.repoPaths,
+    description: flight.description,
+    env: flight.env,
+    coverageTarget: flight.coverageTarget,
+    ...(flight.base ? { base: flight.base } : {}),
+    yolo: flight.yolo,
+    ...(mode ? { mode } : {}),
+    ...(fromStage ? { fromStage } : {}),
+  })
 
   let flightId: string
-  if (latest && isActiveFlightStatus(latest.status)) {
+  if (latest && isActiveFlightStatus(latest.status) && !flight.redo && !flight.fromStage) {
     info(`Flight ${dim(latest.flightId)} is already active for this repo — attaching.`)
     flightId = latest.flightId
-  } else if (latest && latest.status === 'paused' && !fly.fresh) {
+  } else if (latest && latest.status === 'paused' && !flight.fresh && !flight.redo && !flight.fromStage) {
     info(`Resuming flight ${dim(latest.flightId)} from stage ${dim(String(latest.currentStage ?? '?'))}.`)
     const resumed = await requestJson('POST', `${base}/api/flights/${encodeURIComponent(latest.flightId)}/resume`)
     if (resumed.status !== 200) {
@@ -355,15 +381,46 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
     }
     flightId = latest.flightId
   } else {
-    const started = await requestJson('POST', `${base}/api/flights`, {
-      feature,
-      repoPaths: fly.repoPaths,
-      description: fly.description,
-      env: fly.env,
-      coverageTarget: fly.coverageTarget,
-      ...(fly.base ? { base: fly.base } : {}),
-      yolo: fly.yolo,
-    })
+    const initialMode = flight.redo ? 'redo' : flight.fromStage ? 'jump' : undefined
+    let started = await requestJson('POST', `${base}/api/flights`, startBody(initialMode, flight.fromStage))
+
+    // One flight per feature: the server never mints a second record. When it
+    // asks, offer the same three-way choice interactively (or explain, no TTY).
+    if (started.status === 409 && started.json.type === 'flight_exists_requires_choice') {
+      const existingId = String(started.json.existingFlightId)
+      const existingStatus = String(started.json.existingStatus ?? '')
+      if (!process.stdin.isTTY) {
+        info(`Feature "${feature}" already has a flight (${existingId}, ${existingStatus}).`)
+        info('Re-run with `--redo` (restart from stage 1) or `--from-stage <key>` (jump), or resume it from the web UI.')
+        process.exit(2)
+      }
+      section(`Feature "${feature}" already has a flight (${existingStatus})`)
+      console.log('  1) continue — resume where it left off')
+      console.log('  2) redo — restart from stage 1 (discards its stage evidence)')
+      console.log('  3) jump — start at a chosen stage (prerequisites checked)')
+      let choice = ''
+      for (;;) {
+        const answer = await ask('Choose [1-3]: ')
+        choice = ({ '1': 'continue', '2': 'redo', '3': 'jump' } as Record<string, string>)[answer] ?? answer
+        if (choice === 'continue' || choice === 'redo' || choice === 'jump') break
+      }
+      if (choice === 'continue' && existingStatus === 'paused') {
+        const resumed = await requestJson('POST', `${base}/api/flights/${encodeURIComponent(existingId)}/resume`)
+        if (resumed.status !== 200) {
+          fail(`Resume failed (${resumed.status}): ${String(resumed.json.error ?? '')}`)
+          process.exit(1)
+        }
+        line()
+        const code = await watchFlight(base, existingId)
+        process.exit(code)
+      }
+      const fromStage =
+        choice === 'jump'
+          ? flight.fromStage ?? (await ask('Stage to start at (e.g. specs-coverage, run): '))
+          : undefined
+      started = await requestJson('POST', `${base}/api/flights`, startBody(choice, fromStage))
+    }
+
     if (started.status === 409 && started.json.type === 'flight_conflict') {
       info(`A flight is already active for this repo — attaching to ${dim(String(started.json.existingFlightId))}.`)
       flightId = String(started.json.existingFlightId)
@@ -373,7 +430,7 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
       return
     } else {
       flightId = String((started.json as { flightId?: string }).flightId)
-      ok(`Flight ${dim(flightId)} started for ${dim(fly.repoPaths.join(', '))} → feature "${feature}".`)
+      ok(`Flight ${dim(flightId)} started for ${dim(flight.repoPaths.join(', '))} → feature "${feature}".`)
       info(`Watch it live in the web UI: ${dim(base)}`)
     }
   }

@@ -340,10 +340,11 @@ function RunOverviewTab({
                 onClick={() => setExportMenuOpen((open) => !open)}
                 aria-haspopup="menu"
                 aria-expanded={exportMenuOpen}
+                title="Produce the evaluation report and review it — per-test reasoning + verdicts, with video playback where the tests drive a browser. This is the run's deliverable."
                 className="inline-flex items-center gap-1.5 rounded px-2.5 py-1 text-[11px] font-medium disabled:cursor-wait disabled:opacity-80"
                 style={{ background: 'var(--bg-selected)', color: 'var(--accent)' }}
               >
-                {exportError ? 'Export failed' : 'Export Evaluation'}
+                {exportError ? 'Export failed' : '📊 Review Evaluation'}
                 <span aria-hidden="true" style={{ color: 'var(--text-muted)' }}>▾</span>
               </button>
               {exportMenuOpen && (

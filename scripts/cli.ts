@@ -9,7 +9,7 @@ import { main as runSetup } from './setup'
 import { main as createFeature } from './new-feature'
 import { main as runEnv } from './env'
 import { main as runBoot } from './boot'
-import { main as runFly } from './fly'
+import { main as runFlight } from './flight'
 import { banner, section, dim, fail, line } from '../shared/cli-ui/ui'
 import { runAsScript } from './run-as-script'
 import readline from 'readline'
@@ -30,11 +30,11 @@ function confirmYn(orphanCount: number): Promise<boolean> {
 export function printUsage(): void {
   banner('Canary Lab')
   section('Usage')
-  console.log(`  canary-lab fly <repo-path...> "<what to test>" ${dim('[--feature <name>] [--env <envset>] [--coverage-target <pct>] [--base <branch>] [--yolo] [--fresh]')}`)
+  console.log(`  canary-lab flight <repo-path...> "<what to test>" ${dim('[--feature <name>] [--env <envset>] [--coverage-target <pct>] [--base <branch>] [--from-stage <key>] [--redo] [--yolo] [--fresh]')}`)
   console.log(`  canary-lab init <folder> ${dim('[--package-spec <spec>] [--port <port>] [--no-install]')}`)
   console.log(`  canary-lab setup ${dim('[--workspace <path>] [--agent auto|codex|claude|all] [--dry-run] [--force]')}`)
   console.log(`  canary-lab ui`)
-  console.log(`  canary-lab mcp ${dim('[doctor] [--url <url>] [--profile repair|verify|author|portify|lifecycle|full] [--client-kind <kind>]')}`)
+  console.log(`  canary-lab mcp ${dim('[doctor] [--url <url>] [--profile repair|verify|author|coverage|export|flight|portify|lifecycle|full] [--client-kind <kind>]')}`)
   console.log(`  canary-lab new feature <name> ${dim('[--description "..."]')}`)
   console.log(`  canary-lab env apply <feature> <set>`)
   console.log(`  canary-lab env revert <feature>`)
@@ -77,8 +77,13 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
     case 'boot':
       await runBoot(args)
       return
+    case 'flight':
+      await runFlight(args)
+      return
+    // Deprecated alias — renamed to `flight`.
     case 'fly':
-      await runFly(args)
+      console.log(dim('`canary-lab fly` was renamed to `canary-lab flight` — forwarding.'))
+      await runFlight(args)
       return
     case 'upgrade':
       await upgradeProject(args, { confirm: confirmYn })

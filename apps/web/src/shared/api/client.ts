@@ -1771,7 +1771,7 @@ export function listJournal(
   return request<JournalEntry[]>(`${baseUrl}/api/journal${qs}`, { method: 'GET' }, fetchImpl)
 }
 
-// ─── First Flight (`canary-lab fly` pipeline) ────────────────────────────────
+// ─── Flight (`canary-lab flight` pipeline) ────────────────────────────────
 // Manifest shapes live in the repo-shared model — the server conductor and this
 // client read the same JSON.
 

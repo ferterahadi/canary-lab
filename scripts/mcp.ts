@@ -543,7 +543,10 @@ function urlWithContext(
 }
 
 function requiredToolsForProfile(profile: CanaryLabMcpProfile): string[] {
-  if (profile === 'author') return ['create_feature', 'start_external_draft', 'start_external_evaluation_export']
+  if (profile === 'author') return ['create_feature', 'start_external_draft']
+  if (profile === 'coverage') return ['start_external_summary', 'start_external_coverage', 'get_feature_coverage']
+  if (profile === 'export') return ['start_external_evaluation_export']
+  if (profile === 'flight') return ['start_flight', 'respond_flight_checkpoint']
   if (profile === 'verify') return ['execute_verification']
   if (profile === 'portify') return ['start_portify', 'submit_external_portify']
   if (profile === 'lifecycle') return ['wait_for_heal_task', 'create_feature', 'execute_verification']

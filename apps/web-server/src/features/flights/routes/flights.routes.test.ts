@@ -47,6 +47,9 @@ function throwingStore(thrown: unknown): FlightStore {
     latestForRepos(): FlightIndexEntry | null {
       return null
     },
+    latestForFeature(): FlightIndexEntry | null {
+      return null
+    },
     save(): void {},
     remove(): void {},
     flightDir(flightId: string): string {
@@ -72,6 +75,9 @@ function saveThrowsStore(thrown: unknown): FlightStore {
       return null
     },
     latestForRepos(): FlightIndexEntry | null {
+      return null
+    },
+    latestForFeature(): FlightIndexEntry | null {
       return null
     },
     save(): void {
@@ -334,5 +340,81 @@ describe('flights routes', () => {
       expect(body.sessionId).toBe('sess-1')
       expect(body.model).toBe('claude-x')
     })
+  })
+})
+
+describe('flight entry modes (continue / redo / jump)', () => {
+  it('400s an invalid mode and an invalid fromStage', async () => {
+    app = await buildApp(allDone())
+    const badMode = await app.inject({ method: 'POST', url: '/api/flights', body: startBody({ mode: 'sideways' }) })
+    expect(badMode.statusCode).toBe(400)
+    expect((badMode.json() as { error: string }).error).toMatch(/invalid mode/)
+
+    const badStage = await app.inject({ method: 'POST', url: '/api/flights', body: startBody({ fromStage: 'warp' }) })
+    expect(badStage.statusCode).toBe(400)
+    expect((badStage.json() as { error: string }).error).toMatch(/invalid fromStage/)
+  })
+
+  it('409s flight_exists_requires_choice on a modeless re-start, and redo reuses the record', async () => {
+    app = await buildApp(allDone())
+    const first = await app.inject({ method: 'POST', url: '/api/flights', body: startBody() })
+    const flightId = (first.json() as { flightId: string }).flightId
+    await waitForStatus(flightId, ['done'])
+
+    const again = await app.inject({ method: 'POST', url: '/api/flights', body: startBody() })
+    expect(again.statusCode).toBe(409)
+    const body = again.json() as { type: string; options: string[]; existingFlightId: string }
+    expect(body.type).toBe('flight_exists_requires_choice')
+    expect(body.options).toEqual(['continue', 'redo', 'jump'])
+    expect(body.existingFlightId).toBe(flightId)
+
+    const redo = await app.inject({ method: 'POST', url: '/api/flights', body: startBody({ mode: 'redo' }) })
+    expect(redo.statusCode).toBe(201)
+    expect((redo.json() as { flightId: string }).flightId).toBe(flightId)
+    const listed = await app.inject({ method: 'GET', url: '/api/flights' })
+    expect((listed.json() as { flights: unknown[] }).flights).toHaveLength(1)
+    await waitForStatus(flightId, ['done'])
+  })
+
+  it('rejects a jump whose prerequisites are missing, naming the first missing artifact', async () => {
+    app = await buildApp(allDone())
+    const jump = await app.inject({
+      method: 'POST',
+      url: '/api/flights',
+      body: startBody({ fromStage: 'specs-coverage' }),
+    })
+    expect(jump.statusCode).toBe(400)
+    const body = jump.json() as { type: string; error: string }
+    expect(body.type).toBe('stage_entry_rejected')
+    expect(body.error).toMatch(/feature\.config\.cjs/)
+  })
+
+  it('accepts a jump whose on-disk prerequisites exist (fresh feature, stage-entry skips recorded)', async () => {
+    const featureDir = path.join(tmpDir, 'features', 'checkout_flow')
+    fs.mkdirSync(path.join(featureDir, 'envsets', 'local'), { recursive: true })
+    fs.writeFileSync(path.join(featureDir, 'feature.config.cjs'), 'module.exports = {}\n')
+    fs.writeFileSync(path.join(featureDir, 'envsets', 'local', 'api.env'), 'PORT=0\n')
+    fs.mkdirSync(path.join(featureDir, 'docs'), { recursive: true })
+    fs.writeFileSync(path.join(featureDir, 'docs', '_prd-summary.json'), '{}')
+
+    app = await buildApp(allDone())
+    const jump = await app.inject({
+      method: 'POST',
+      url: '/api/flights',
+      body: startBody({ feature: 'checkout_flow', fromStage: 'specs-coverage' }),
+    })
+    expect(jump.statusCode).toBe(201)
+    const manifest = jump.json() as { flightId: string; stages: Array<{ key: string; status: string; skipReason?: string }> }
+    const scout = manifest.stages.find((s) => s.key === 'scout')!
+    expect(scout.status).toBe('skipped')
+    expect(scout.skipReason).toBe('stage-entry')
+    await waitForStatus(manifest.flightId, ['done'])
+  })
+
+  it('rejects a heal entry point outright', async () => {
+    app = await buildApp(allDone())
+    const jump = await app.inject({ method: 'POST', url: '/api/flights', body: startBody({ fromStage: 'heal' }) })
+    expect(jump.statusCode).toBe(400)
+    expect((jump.json() as { error: string }).error).toMatch(/use --from-stage run/)
   })
 })
